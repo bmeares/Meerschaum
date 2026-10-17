@@ -1,0 +1,20 @@
+{
+  "description": "The same cycle under a flat selection (sync pipes without --parents/--children). Flat selections keep v4 semantics, so the cycle is a warning, every node is root, and the order falls back to registration order.",
+  "records": [
+    {"instance": "sql:main", "connector": "sql:main", "metric": "a",
+     "parameters": {"parents": ["Pipe('sql:main', 'c')"]}},
+    {"instance": "sql:main", "connector": "sql:main", "metric": "b",
+     "parameters": {"parents": ["Pipe('sql:main', 'a')"]}},
+    {"instance": "sql:main", "connector": "sql:main", "metric": "c",
+     "parameters": {"sql": "SELECT * FROM {{ Pipe('sql:main', 'b') }}"}}
+  ],
+  "selection": {"targets": {"filter": {"connector_keys": ["sql:main"]}}},
+  "expected": {
+    "warnings": ["cycle in the pipe graph: sql:main/a → sql:main/b → sql:main/c → sql:main/a; syncing in registration order"],
+    "nodes": [
+      {"node": "sql:main|sql:main|a|None", "action": "root", "bounds": {"begin": "", "end": null}, "reason_contains": ["flat selection"]},
+      {"node": "sql:main|sql:main|b|None", "action": "root", "bounds": {"begin": "", "end": null}},
+      {"node": "sql:main|sql:main|c|None", "action": "root", "bounds": {"begin": "", "end": null}}
+    ]
+  }
+}

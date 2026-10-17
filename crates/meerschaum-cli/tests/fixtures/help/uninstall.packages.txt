@@ -1,0 +1,6 @@
+
+Uninstall PyPI packages from the Meerschaum virtual environment.
+
+Example:
+    `uninstall packages pandas numpy`
+

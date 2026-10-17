@@ -1,0 +1,34 @@
+[package]
+name = "meerschaum-web"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "Meerschaum v5: web crate (see docs/design/v5.0.0.md)"
+
+[dependencies]
+meerschaum-server = { workspace = true }
+meerschaum-valkey = { workspace = true }
+meerschaum-connector = { workspace = true }
+meerschaum-core = { workspace = true }
+meerschaum-kernel = { workspace = true }
+meerschaum-engine = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+tokio = { workspace = true }
+axum = "0.8"
+askama = "0.14"
+async-trait = "0.1"
+tower = { version = "0.5", features = ["util"] }
+percent-encoding = "2"
+futures-util = "0.3"
+
+[dev-dependencies]
+tempfile = "3"
+indexmap = { workspace = true }
+bytes = "1"
+meerschaum-sql = { workspace = true }

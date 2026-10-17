@@ -1,0 +1,172 @@
+# Rust CI for the v5 Cargo workspace (docs/design/v5-build.md).
+#
+# Every `run:` step calls scripts/rust/ci.sh, so `scripts/rust/ci.sh <step>` reproduces a job locally.
+#
+# Self-hosted runner and disk: the runner is persistent, so the workspace's `target/` (shared by every
+# crate via .cargo/config.toml) *is* the build cache. Nothing here uses actions/cache or a second
+# target dir on the self-hosted legs. Checkout runs with `clean: false` and a targeted `git clean`
+# that keeps `target/` and `.venv-ref/`; a `disk-guard` step runs `cargo clean` when free space drops
+# below 10 GB. Expect target/ to hold debug + clippy + release artifacts (several GB once Polars and
+# Arrow are in the graph). pytest.yaml preserves the same target/ and .venv-ref/ caches and builds
+# the native Python extension before running its integration suite.
+name: rust
+
+on:
+  push:
+    branches: [ v5 ]
+    paths:
+      - 'crates/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'rust-toolchain.toml'
+      - '.cargo/**'
+      - 'scripts/rust/**'
+      - 'scripts/parity/**'
+      - '.github/workflows/rust.yaml'
+  pull_request:
+    paths:
+      - 'crates/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'rust-toolchain.toml'
+      - '.cargo/**'
+      - 'scripts/rust/**'
+      - 'scripts/parity/**'
+      - '.github/workflows/rust.yaml'
+  workflow_dispatch:
+    inputs:
+      parity:
+        description: 'Run the reference-harness parity job (regenerate fixtures with meerschaum 4.1.4).'
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rust-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: '0'
+  RUST_BACKTRACE: '1'
+  MRSM_CI_MIN_FREE_GB: '10'
+
+jobs:
+  # ---------------------------------------------------------------- self-hosted (full checks)
+  # Self-hosted jobs never run for pull requests from forks: they would execute untrusted code on
+  # the maintainer's host. Fork PRs still get the hosted `check` legs below.
+
+  fmt:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+        with: { clean: false, persist-credentials: false }
+      - name: Clean the workspace (keep target/ and .venv-ref/)
+        run: git clean -ffdx -e /target/ -e /.venv-ref/
+      - name: Toolchain
+        run: scripts/rust/ci.sh setup
+      - name: cargo fmt --all --check
+        run: scripts/rust/ci.sh fmt
+
+  clippy:
+    needs: fmt
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+        with: { clean: false, persist-credentials: false }
+      - name: Clean the workspace (keep target/ and .venv-ref/)
+        run: git clean -ffdx -e /target/ -e /.venv-ref/
+      - name: Toolchain
+        run: scripts/rust/ci.sh setup
+      - name: Disk guard (cargo clean below 10 GB free)
+        run: scripts/rust/ci.sh disk-guard
+      - name: cargo clippy --all-targets -- -D warnings
+        run: scripts/rust/ci.sh clippy
+
+  test:
+    needs: fmt
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+        with: { clean: false, persist-credentials: false }
+      - name: Clean the workspace (keep target/ and .venv-ref/)
+        run: git clean -ffdx -e /target/ -e /.venv-ref/
+      - name: Toolchain
+        run: scripts/rust/ci.sh setup
+      - name: Disk guard (cargo clean below 10 GB free)
+        run: scripts/rust/ci.sh disk-guard
+      - name: cargo test --workspace
+        run: scripts/rust/ci.sh test
+
+  build:
+    needs: fmt
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+        with: { clean: false, persist-credentials: false }
+      - name: Clean the workspace (keep target/ and .venv-ref/)
+        run: git clean -ffdx -e /target/ -e /.venv-ref/
+      - name: Toolchain
+        run: scripts/rust/ci.sh setup
+      - name: Disk guard (cargo clean below 10 GB free)
+        run: scripts/rust/ci.sh disk-guard
+      - name: cargo build --release -p meerschaum-cli
+        run: scripts/rust/ci.sh build
+      - name: Upload mrsm
+        uses: actions/upload-artifact@v4
+        with:
+          name: mrsm-linux-x86_64
+          path: target/release/mrsm
+          retention-days: 7
+
+  # Optional parity job (docs/design/v5.0.0.md §10.2): regenerate every
+  # crates/*/tests/fixtures/gen_*.py with the released meerschaum 4.1.4 in .venv-ref and fail if
+  # the committed fixtures change. Skip it with the repository variable MRSM_SKIP_PARITY=true or by
+  # unticking `parity` on a manual run. .venv-ref/ persists on the runner between runs.
+  parity:
+    if: >-
+      (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+      && vars.MRSM_SKIP_PARITY != 'true'
+      && (github.event_name != 'workflow_dispatch' || inputs.parity)
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+        with: { clean: false, persist-credentials: false }
+      - name: Clean the workspace (keep target/ and .venv-ref/)
+        run: git clean -ffdx -e /target/ -e /.venv-ref/
+      - name: Regenerate fixtures with the v4.1.4 reference and diff
+        run: scripts/rust/ci.sh parity
+
+  # ---------------------------------------------------------------- hosted (compile only)
+  # ubuntu-latest keeps compile errors visible when the self-hosted runner is down.
+  # windows/macos are allowed to fail until the §15 Windows/macOS work lands.
+  check:
+    name: check (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.os != 'ubuntu-latest' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest, windows-latest, macos-latest ]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with: { persist-credentials: false }
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Toolchain
+        run: scripts/rust/ci.sh setup
+      # Hosted runners are ephemeral, so this cache lives in GitHub's cache storage, not on the
+      # self-hosted disk.
+      - uses: Swatinem/rust-cache@v2
+      - name: cargo check --workspace
+        run: scripts/rust/ci.sh check

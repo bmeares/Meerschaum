@@ -1,0 +1,630 @@
+{
+  "config": {
+    "fixture": {
+      "name": "configured",
+      "number": 17,
+      "columns": {
+        "id": "station"
+      }
+    }
+  },
+  "registered": [
+    {
+      "connector_keys": "plugin:source",
+      "metric_key": "base",
+      "instance_keys": "sql:fixture",
+      "parameters": {
+        "target": "source_table",
+        "columns": {
+          "datetime": "ts"
+        },
+        "dtypes": {
+          "ts": "int"
+        },
+        "indices": {
+          "time": "ts"
+        },
+        "tags": [
+          "one",
+          "two"
+        ]
+      }
+    },
+    {
+      "connector_keys": "plugin:source",
+      "metric_key": "base",
+      "instance_keys": "sql:other",
+      "parameters": {
+        "target": "other_table",
+        "columns": {
+          "id": "other_id"
+        }
+      }
+    },
+    {
+      "connector_keys": "plugin:source",
+      "metric_key": "base",
+      "instance_keys": "sql:fixture_sqlite",
+      "parameters": {
+        "target": "source table"
+      }
+    }
+  ],
+  "cases": [
+    {
+      "state": {
+        "connector_keys": "plugin:fixture",
+        "metric_key": "metric_target",
+        "location_key": "north",
+        "instance_keys": "sql:fixture",
+        "parameters": {
+          "target": "{{ self.metric }}"
+        }
+      },
+      "parameters": {
+        "target": "metric_target"
+      },
+      "target": "metric_target"
+    },
+    {
+      "state": {
+        "connector_keys": "plugin:fixture",
+        "metric_key": "key_aliases",
+        "location_key": "north",
+        "instance_keys": "sql:fixture",
+        "parameters": {
+          "target": "{{ self.metric_key }}_{{ self.location_key }}",
+          "connector": "{{ self.connector_keys }}",
+          "instance": "{{ self.instance_keys }}"
+        }
+      },
+      "parameters": {
+        "target": "key_aliases_north",
+        "connector": "plugin:fixture",
+        "instance": "sql:fixture"
+      },
+      "target": "key_aliases_north"
+    },
+    {
+      "state": {
+        "connector_keys": "plugin:fixture",
+        "metric_key": "raw_chain",
+        "location_key": "north",
+        "instance_keys": "sql:fixture",
+        "parameters": {
+          "a": {
+            "b": [
+              3,
+              true,
+              null
+            ]
+          },
+          "value": "{{ self.parameters['a']['b'][1] }}"
+        }
+      },
+      "parameters": {
+        "a": {
+          "b": [
+            3,
+            true,
+            null
+          ]
+        },
+        "value": true
+      },
+      "target": "plugin_fixture_raw_chain_north"
+    },
+    {
+      "state": {
+        "connector_keys": "plugin:fixture",
+        "metric_key": "self_columns",
+        "location_key": "north",
+        "instance_keys": "sql:fixture",
+        "parameters": {
+          "columns": {
+            "datetime": "ts"
+          },
+          "value": "{{ self.columns['datetime'] }}"
+        }
+      },
+      "parameters": {
+        "columns": {
+          "datetime": "ts"
+        },
+        "value": "ts"
+      },
+      "target": "plugin_fixture_self_columns_north"
+    },
+    {
+      "state": {
+        "connector_keys": "plugin:fixture",
+        "metric_key": "self_dtypes",
+        "location_key": "north",
+        "instance_keys": "sql:fixture",
+        "parameters": {
+          "dtypes": {
+            "ts": "int"
+          },
+          "value": "{{ self.dtypes['ts'] }}"
+        }
+      },
+      "parameters": {
+        "dtypes": {
+          "ts": "int"
+        },
+        "value": "int"
+      },
+      "target": "plugin_fixture_self_dtypes_north"
+    },
+    {
+      "state": {
+        "connector_keys": "plugin:fixture",
+        "metric_key": "self_tags",
+        "location_key": "north",
+        "instance_keys": "sql:fixture",
+        "parameters": {
+          "tags": [
+            "first",
+            "second"
+          ],
+          "value": "{{ self.tags[1] }}"
+        }
+      },
+      "parameters": {
+        "tags": [
+          "first",
+          "second"
+        ],
+        "value": "second"
+      },
+      "target": "plugin_fixture_self_tags_north"
+    },
+    {
+      "state": {
+        "connector_keys": "plugin:fixture",
+        "metric_key": "columns",
+        "location_key": "north",
+        "instance_keys": "sql:fixture",
+        "parameters": {
+          "name": "event_time",
+          "columns": {
+            "datetime": "{{ self.parameters['name'] }}"
+          }
+        }
+      },
+      "parameters": {
+        "name": "event_time",
+        "columns": {
+          "datetime": "event_time"
+        }
+      },
+      "target": "plugin_fixture_columns_north"
+    },
+    {
+      "state": {
+        "connector_keys": "plugin:fixture",
+        "metric_key": "dtypes",
+        "location_key": "north",
+        "instance_keys": "sql:fixture",
+        "parameters": {
+          "kind": "int",
+          "dtypes": {
+            "ts": "{{ self.parameters['kind'] }}"
+          }
+        }
+      },
+      "parameters": {
+        "kind": "int",
+        "dtypes": {
+          "ts": "int"
+        }
+      },
+      "target": "plugin_fixture_dtypes_north"
+    },
+    {
+      "state": {
+        "connector_keys": "plugin:fixture",
+        "metric_key": "indices",
+        "location_key": "north",
+        "instance_keys": "sql:fixture",
+        "parameters": {
+          "name": "ts",
+          "indices": {
+            "lookup": [
+              "{{ self.parameters['name'] }}"
+            ]
+          }
+        }
+      },
+      "parameters": {
+        "name": "ts",
+        "indices": {
+          "lookup": [
+            "ts"
+          ]
+        }
+      },
+      "target": "plugin_fixture_indices_north"
+    },
+    {
+      "state": {
+        "connector_keys": "plugin:fixture",
+        "metric_key": "nested",
+        "location_key": "north",
+        "instance_keys": "sql:fixture",
+        "parameters": {
+          "nested": [
+            {
+              "metric": "{{ self.metric }}"
+            },
+            [
+              "{{ self.location }}",
+              "{{ self.metric }}"
+            ]
+          ]
+        }
+      },
+      "parameters": {
+        "nested": [
+          {
+            "metric": "nested"
+          },
+          [
+            "north",
+            "nested"
+          ]
+        ]
+      },
+      "target": "plugin_fixture_nested_north"
+    },
+    {
+      "state": {
+        "connector_keys": "plugin:fixture",
+        "metric_key": "whole_map",
+        "location_key": "north",
+        "instance_keys": "sql:fixture",
+        "parameters": {
+          "value": "{{ Pipe('plugin:source', 'base').columns }}"
+        }
+      },
+      "parameters": {
+        "value": {
+          "datetime": "ts"
+        }
+      },
+      "target": "plugin_fixture_whole_map_north"
+    },
+    {
+      "state": {
+        "connector_keys": "plugin:fixture",
+        "metric_key": "whole_list",
+        "location_key": "north",
+        "instance_keys": "sql:fixture",
+        "parameters": {
+          "value": "{{ Pipe('plugin:source', 'base').tags }}"
+        }
+      },
+      "parameters": {
+        "value": [
+          "one",
+          "two"
+        ]
+      },
+      "target": "plugin_fixture_whole_list_north"
+    },
+    {
+      "state": {
+        "connector_keys": "plugin:fixture",
+        "metric_key": "reference_columns",
+        "location_key": "north",
+        "instance_keys": "sql:fixture",
+        "parameters": {
+          "columns": "{{ Pipe('plugin:source', 'base').columns }}",
+          "dtypes": "{{ Pipe('plugin:source', 'base').dtypes }}",
+          "indices": "{{ Pipe('plugin:source', 'base').indices }}"
+        }
+      },
+      "parameters": {
+        "columns": {
+          "datetime": "ts"
+        },
+        "dtypes": {
+          "ts": "int"
+        },
+        "indices": {
+          "datetime": "ts",
+          "time": "ts"
+        }
+      },
+      "target": "plugin_fixture_reference_columns_north"
+    },
+    {
+      "state": {
+        "connector_keys": "plugin:fixture",
+        "metric_key": "sql_definition",
+        "location_key": "north",
+        "instance_keys": "sql:fixture",
+        "parameters": {
+          "sql": "SELECT * FROM {{ Pipe('plugin:source', 'base') }} WHERE {{ Pipe('plugin:source', 'base').columns['datetime'] }} > 0"
+        }
+      },
+      "parameters": {
+        "sql": "SELECT * FROM source_table WHERE ts > 0"
+      },
+      "target": "plugin_fixture_sql_definition_north"
+    },
+    {
+      "state": {
+        "connector_keys": "plugin:fixture",
+        "metric_key": "fetch_definition",
+        "location_key": "north",
+        "instance_keys": "sql:fixture",
+        "parameters": {
+          "fetch": {
+            "definition": "SELECT * FROM {{ Pipe('plugin:source', 'base') }}"
+          }
+        }
+      },
+      "parameters": {
+        "fetch": {
+          "definition": "SELECT * FROM source_table"
+        }
+      },
+      "target": "plugin_fixture_fetch_definition_north"
+    },
+    {
+      "state": {
+        "connector_keys": "plugin:fixture",
+        "metric_key": "cross_instance",
+        "location_key": "north",
+        "instance_keys": "sql:fixture",
+        "parameters": {
+          "target": "{{ Pipe('plugin:source', 'base', instance='sql:other').target }}"
+        }
+      },
+      "parameters": {
+        "target": "other_table"
+      },
+      "target": "other_table"
+    },
+    {
+      "state": {
+        "connector_keys": "plugin:fixture",
+        "metric_key": "missing_pipe",
+        "location_key": "north",
+        "instance_keys": "sql:fixture",
+        "parameters": {
+          "target": "{{ Pipe('plugin:missing', 'absent') }}",
+          "columns": "{{ Pipe('plugin:missing', 'absent').columns }}"
+        }
+      },
+      "parameters": {
+        "target": "plugin_missing_absent",
+        "columns": {}
+      },
+      "target": "plugin_missing_absent"
+    },
+    {
+      "state": {
+        "connector_keys": "plugin:fixture",
+        "metric_key": "missing_attr",
+        "location_key": "north",
+        "instance_keys": "sql:fixture",
+        "parameters": {
+          "value": "{{ self.parameters['absent'] }}",
+          "other": "{{ self.nonexistent }}"
+        }
+      },
+      "parameters": {
+        "value": "{{ self.parameters['absent'] }}",
+        "other": "{{ self.nonexistent }}"
+      },
+      "target": "plugin_fixture_missing_attr_north"
+    },
+    {
+      "state": {
+        "connector_keys": "plugin:fixture",
+        "metric_key": "symlink_string",
+        "location_key": "north",
+        "instance_keys": "sql:fixture",
+        "parameters": {
+          "target": "MRSM{fixture:name}"
+        }
+      },
+      "parameters": {
+        "target": "configured",
+        "_symlinks": {
+          "target": "MRSM{fixture:name}"
+        }
+      },
+      "target": "configured"
+    },
+    {
+      "state": {
+        "connector_keys": "plugin:fixture",
+        "metric_key": "symlink_values",
+        "location_key": "north",
+        "instance_keys": "sql:fixture",
+        "parameters": {
+          "n": "MRSM{fixture:number}",
+          "columns": "MRSM{fixture:columns}"
+        }
+      },
+      "parameters": {
+        "n": 17,
+        "columns": {
+          "id": "station"
+        },
+        "_symlinks": {
+          "n": "MRSM{fixture:number}",
+          "columns": "MRSM{fixture:columns}"
+        }
+      },
+      "target": "plugin_fixture_symlink_values_north"
+    },
+    {
+      "state": {
+        "connector_keys": "plugin:fixture",
+        "metric_key": "symlink_embedded",
+        "location_key": "north",
+        "instance_keys": "sql:fixture",
+        "parameters": {
+          "value": "prefix_MRSM{fixture:name}_suffix"
+        }
+      },
+      "parameters": {
+        "value": "prefix_configured_suffix",
+        "_symlinks": {
+          "value": "prefix_MRSM{fixture:name}_suffix"
+        }
+      },
+      "target": "plugin_fixture_symlink_embedded_north"
+    },
+    {
+      "state": {
+        "connector_keys": "plugin:fixture",
+        "metric_key": "symlink_nested",
+        "location_key": "north",
+        "instance_keys": "sql:fixture",
+        "parameters": {
+          "nested": [
+            "MRSM{fixture:number}",
+            {
+              "value": "MRSM{fixture:name}"
+            }
+          ]
+        }
+      },
+      "parameters": {
+        "nested": [
+          17,
+          {
+            "value": "configured"
+          }
+        ]
+      },
+      "target": "plugin_fixture_symlink_nested_north"
+    },
+    {
+      "state": {
+        "connector_keys": "plugin:fixture",
+        "metric_key": "symlink_missing",
+        "location_key": "north",
+        "instance_keys": "sql:fixture",
+        "parameters": {
+          "value": "MRSM{fixture:missing}"
+        }
+      },
+      "parameters": {
+        "value": "MRSM{fixture:missing}",
+        "_symlinks": {
+          "value": "MRSM{fixture:missing}"
+        }
+      },
+      "target": "plugin_fixture_symlink_missing_north"
+    },
+    {
+      "state": {
+        "connector_keys": "plugin:fixture",
+        "metric_key": "escaped_braces",
+        "location_key": "north",
+        "instance_keys": "sql:fixture",
+        "parameters": {
+          "value": "\\{{ self.metric }}",
+          "extra": "{{{ self.metric }}}",
+          "literal": "{ self.metric }"
+        }
+      },
+      "parameters": {
+        "value": "\\escaped_braces",
+        "extra": "{escaped_braces}",
+        "literal": "{ self.metric }"
+      },
+      "target": "plugin_fixture_escaped_braces_north"
+    },
+    {
+      "state": {
+        "connector_keys": "plugin:fixture",
+        "metric_key": "whitespace",
+        "location_key": "north",
+        "instance_keys": "sql:fixture",
+        "parameters": {
+          "target": "  {{ self.metric }}\n"
+        }
+      },
+      "parameters": {
+        "target": "whitespace"
+      },
+      "target": "whitespace"
+    },
+    {
+      "state": {
+        "connector_keys": "plugin:fixture",
+        "metric_key": "embedded_values",
+        "location_key": "north",
+        "instance_keys": "sql:fixture",
+        "parameters": {
+          "a": [
+            1,
+            true,
+            null
+          ],
+          "value": "values={{ self.parameters['a'] }}"
+        }
+      },
+      "parameters": {
+        "a": [
+          1,
+          true,
+          null
+        ],
+        "value": "values=[1, true, null]"
+      },
+      "target": "plugin_fixture_embedded_values_north"
+    },
+    {
+      "state": {
+        "connector_keys": "plugin:fixture",
+        "metric_key": "reference_merge",
+        "location_key": "north",
+        "instance_keys": "sql:fixture",
+        "parameters": {
+          "reference": "Pipe('plugin:source', 'base')",
+          "target": "{{ self.metric }}"
+        }
+      },
+      "parameters": {
+        "target": "reference_merge",
+        "columns": {
+          "datetime": "ts"
+        },
+        "dtypes": {
+          "ts": "int"
+        },
+        "indices": {
+          "time": "ts"
+        },
+        "tags": [
+          "one",
+          "two"
+        ],
+        "reference": "Pipe('plugin:source', 'base')"
+      },
+      "target": "reference_merge"
+    },
+    {
+      "state": {
+        "connector_keys": "plugin:fixture",
+        "metric_key": "sql_quoted",
+        "instance_keys": "sql:fixture_sqlite",
+        "parameters": {
+          "sql": "SELECT * FROM {{ Pipe('plugin:source', 'base') }}"
+        }
+      },
+      "parameters": {
+        "sql": "SELECT * FROM \"source table\""
+      },
+      "target": "plugin_fixture_sql_quoted"
+    }
+  ]
+}

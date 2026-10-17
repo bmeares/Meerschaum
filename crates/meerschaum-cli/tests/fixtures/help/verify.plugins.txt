@@ -1,0 +1,3 @@
+
+Verify that all of the available plugins are able to be imported as expected.
+

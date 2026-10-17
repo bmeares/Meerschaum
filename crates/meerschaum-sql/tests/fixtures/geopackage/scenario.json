@@ -1,0 +1,59 @@
+{
+  "comment": "Synthetic geometry pipes synced into a GeoPackage instance by v4 (gpkg_parity.py) and by Rust (tests/instance_geopackage.rs). Tagged values: $dt (ISO datetime), $wkt (geometry).",
+  "pipes": [
+    {
+      "connector_keys": "geo",
+      "metric_key": "parcels",
+      "location_key": null,
+      "parameters": {
+        "columns": {"datetime": "dt", "id": "id"},
+        "dtypes": {"geometry": "geometry[MultiPolygon, 2263]"}
+      },
+      "docs": [
+        {"dt": {"$dt": "2024-01-01T00:00:00+00:00"}, "id": 1, "name": "a", "area": 1.5,
+         "geometry": {"$wkt": "MULTIPOLYGON (((0 0, 1 0, 1 1, 0 1, 0 0)))"}},
+        {"dt": {"$dt": "2024-01-02T00:00:00+00:00"}, "id": 2, "name": "b", "area": 2.5,
+         "geometry": {"$wkt": "MULTIPOLYGON (((10 10, 12 10, 12 13, 10 13, 10 10)), ((20 20, 21 20, 21 21, 20 21, 20 20)))"}}
+      ]
+    },
+    {
+      "connector_keys": "geo",
+      "metric_key": "points",
+      "location_key": null,
+      "parameters": {
+        "columns": {"datetime": "dt", "id": "id"},
+        "dtypes": {"geom": "geometry[Point, 4326]"}
+      },
+      "docs": [
+        {"dt": {"$dt": "2024-01-01T00:00:00+00:00"}, "id": 1, "v": 1, "geom": {"$wkt": "POINT (-82.4 34.85)"}},
+        {"dt": {"$dt": "2024-01-02T00:00:00+00:00"}, "id": 2, "v": 2, "geom": {"$wkt": "POINT (-82.39 34.86)"}},
+        {"dt": {"$dt": "2024-01-03T00:00:00+00:00"}, "id": 3, "v": 3, "geom": null}
+      ]
+    },
+    {
+      "connector_keys": "geo",
+      "metric_key": "albers",
+      "location_key": null,
+      "parameters": {
+        "columns": {"id": "id"},
+        "dtypes": {"g": "geometry[ESRI:102003]"}
+      },
+      "docs": [
+        {"id": 1, "g": {"$wkt": "LINESTRING (100 200, 300 400.5)"}}
+      ]
+    },
+    {
+      "connector_keys": "geo",
+      "metric_key": "nosrid",
+      "location_key": null,
+      "parameters": {
+        "columns": {"id": "id"},
+        "dtypes": {"shape": "geometry"}
+      },
+      "docs": [
+        {"id": 1, "shape": {"$wkt": "POINT (1 1)"}},
+        {"id": 2, "shape": {"$wkt": "POLYGON ((0 0, 2 0, 2 2, 0 0))"}}
+      ]
+    }
+  ]
+}

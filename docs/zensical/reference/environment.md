@@ -21,7 +21,7 @@ All Meerschaum environment variables begin with the prefix `MRSM_`. The most com
 | `MRSM_PATCH` | A second patch applied *after* `MRSM_CONFIG` (may reference its keys). | _(unset)_ |
 | `MRSM_<TYPE>_<LABEL>` | Define a connector by URI (e.g. `MRSM_SQL_MAIN`, `MRSM_API_MAIN`). | _(unset)_ |
 | `MRSM_RUNTIME` | Marks a special runtime (e.g. `portable`, `docker`). | _(unset)_ |
-| `MRSM_NO_AUTO_INSTALL` | Disable package installation triggered by `attempt_import()`. | _(unset)_ |
+| `MRSM_NO_AUTO_INSTALL` | Disable every implicit package installation (imports, dependency checks, `uv`/`pip` bootstraps). | _(unset)_ |
 | `MRSM_NOASK` / `MRSM_NONINTERACTIVE` | Disable interactive prompts (assume defaults). | _(unset)_ |
 
 !!! tip "Inspecting your environment"
@@ -153,6 +153,11 @@ Meerschaum normally installs a missing optional dependency when a feature first 
 `MRSM_NO_AUTO_INSTALL=1` for locked-down, offline, or reproducible environments. Missing packages
 will be reported instead of downloaded; otherwise Meerschaum warns before the first automatic download
 in each process. Install the dependency group before starting Meerschaum.
+
+The variable covers every implicit installation: `attempt_import()`, the dependency version checks
+(which never install a version parser), creating a virtual environment (no `uv venv --seed`) and
+the API host. Installs you ask for, such as `mrsm install packages` or `pip_install()` from your
+own code, still run, but never bootstrap `uv`, `pip` or `wheel` for themselves.
 
 ```bash
 MRSM_NO_AUTO_INSTALL=1 mrsm show pipes

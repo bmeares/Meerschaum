@@ -1,0 +1,48 @@
+[package]
+name = "meerschaum-server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "Meerschaum v5: the axum HTTP API server, OAuth2/JWT, tokens, websockets and the extension-host proxy (see docs/design/v5.0.0.md §7)"
+
+[dependencies]
+meerschaum-core = { workspace = true }
+meerschaum-kernel = { workspace = true }
+meerschaum-connector = { workspace = true }
+# Only the shared route/auth models (`models`, `routes`, `wire`); no HTTP client.
+meerschaum-api = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+indexmap = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tokio = { workspace = true }
+async-trait = "0.1"
+# Crate-private: the HTTP stack.
+axum = { version = "0.8", features = ["ws", "multipart"] }
+tower = { version = "0.5", features = ["util"] }
+tower-http = { version = "0.6", features = ["fs"] }
+hyper = { version = "1", features = ["client", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+http-body-util = "0.1"
+bytes = "1"
+futures-util = { version = "0.3", default-features = false, features = ["std", "sink"] }
+# Crate-private: OpenAPI (`/openapi.json`, `/docs`).
+utoipa = "5"
+# Crate-private: HS256 JWTs (byte-identical to PyJWT) and the API-key base64.
+hmac = { workspace = true }
+sha2 = { workspace = true }
+base64 = "0.22"
+# Crate-private: the web terminal PTY bridge (`webterm`).
+portable-pty = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
+tempfile = "3"
+regex = { workspace = true }
+tokio-tungstenite = "0.28"

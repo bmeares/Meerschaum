@@ -18,10 +18,34 @@ on:
 jobs:
   tests:
     runs-on: self-hosted
+    env:
+      CARGO_INCREMENTAL: '0'
+      PYTHONPATH: ${{ github.workspace }}
     steps:
 
       - name: Checkout Repository
         uses: actions/checkout@v4
+        with: { clean: false, persist-credentials: false }
+
+      - name: Clean the workspace (keep shared Cargo target and reference environment)
+        run: git clean -ffdx -e /target/ -e /.venv-ref/
+
+      - name: Rust toolchain
+        run: scripts/rust/ci.sh setup
+
+      - name: Build the native Python extension
+        run: |
+          PYTHON="$(command -v "${PYTHON_BIN:-python}")"
+          export PYTHON
+          build_scratch="$(mktemp -d "$RUNNER_TEMP/mrsm-pytest-build.XXXXXX")"
+          trap 'rm -rf "$build_scratch"' EXIT
+          export MRSM_ROOT_DIR="$build_scratch/root" MRSM_PLUGINS_DIR="$build_scratch/plugins"
+          export PYTHONPATH="$GITHUB_WORKSPACE"
+          mkdir -p "$MRSM_ROOT_DIR" "$MRSM_PLUGINS_DIR"
+          "$PYTHON" -m venv "$build_scratch/tools"
+          "$build_scratch/tools/bin/python" -m pip install 'maturin>=1.9,<2.0'
+          export MATURIN_BIN="$build_scratch/tools/bin/maturin"
+          scripts/rust/build_py.sh
 
       - name: Integration Tests
         run: ./scripts/test.sh db

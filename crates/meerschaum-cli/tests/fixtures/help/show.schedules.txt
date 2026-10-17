@@ -1,0 +1,7 @@
+
+Print the upcoming timestamps according to the given schedule.
+
+Examples:
+    show schedule 'daily starting 00:00'
+    show schedule 'every 12 hours and mon-fri starting 2024-01-01'
+

@@ -13,6 +13,42 @@ import meerschaum as mrsm
 from meerschaum.utils.typing import SuccessTuple, Any, Optional, Union, Tuple, Dict
 from meerschaum.utils.warnings import warn, info
 from meerschaum._internal.static import STATIC_CONFIG
+from meerschaum._core._gate import rust_impl as _rust_impl
+
+### `Pipe.sync()` keywords `Pipe.verify()` passes as explicit arguments to `_core.verify_pipe`
+### (every other keyword is forwarded to each chunk's sync: `force`, `retries`, plugin arguments).
+_RUST_VERIFY_SYNC_KWARGS = frozenset({'chunksize', 'check_existing'})
+
+
+def _rust_sql_connector(conn: Any) -> Any:
+    """
+    Return the `meerschaum._core.SqlConnector` behind a façade `SQLConnector`, or `None`.
+    """
+    if conn is None or getattr(conn, 'type', None) != 'sql':
+        return None
+    getter = getattr(conn, '_rust_method', None)
+    if getter is None or getter('register_pipe') is None:
+        return None
+    return conn.__dict__.get('_rust_connector', None) or None
+
+
+def _rust_verify_context(
+    pipe: 'mrsm.Pipe',
+    debug: bool = False,
+) -> Tuple[Optional[Dict[str, Any]], str]:
+    """
+    Return `(context, '')` with the connectors `_core.verify_pipe` needs (the pipe's instance
+    and source, as the Rust SQL connectors this process holds, and the attributes of the
+    connectors it defined ad hoc), or `(None, reason)` when a connector has no native driver.
+    """
+    from meerschaum.core.Pipe._sync import _native_context
+    context, reason = _native_context(pipe, debug=debug)
+    if context is None:
+        return None, reason
+    connectors = dict(context['connectors'])
+    if context['connector'] is not None:
+        connectors[str(pipe.instance_keys)] = context['connector']
+    return {'connectors': connectors, 'attributes': context['attributes']}, ''
 
 
 def verify(
@@ -79,6 +115,40 @@ def verify(
     -------
     A SuccessTuple indicating whether the pipe was successfully resynced.
     """
+    if (_rust := _rust_impl('verify_pipe')) is not None:
+        _context, _reason = _rust_verify_context(self, debug=debug)
+        if _context is None and getattr(_reason, 'kind', None) != 'oracle_client':
+            ### No silent fallback: only a missing Oracle client keeps the Python orchestration.
+            return False, f"Cannot verify {self}: {_reason}."
+        if _context is not None:
+            _result = _rust(
+                self,
+                _context['connectors'],
+                begin=begin,
+                end=end,
+                params=params,
+                chunk_interval=chunk_interval,
+                bounded=bounded,
+                deduplicate=deduplicate,
+                workers=workers,
+                batchsize=batchsize,
+                skip_chunks_with_greater_rowcounts=skip_chunks_with_greater_rowcounts,
+                check_rowcounts_only=check_rowcounts_only,
+                chunksize=kwargs.get('chunksize', -1),
+                check_existing=kwargs.get('check_existing', True),
+                kwargs={
+                    key: value
+                    for key, value in kwargs.items()
+                    if key not in _RUST_VERIFY_SYNC_KWARGS
+                },
+                attributes=_context['attributes'],
+                debug=debug,
+            )
+            ### The chunk syncs ran in Rust: drop what this object cached about the table.
+            self._invalidate_cache(hard=True, debug=debug)
+            self._clear_cache_key('_attributes_sync_time', debug=debug)
+            return _result
+
     from meerschaum.utils.pool import get_pool
     from meerschaum.utils.formatting import make_header
     from meerschaum.utils.misc import interval_str

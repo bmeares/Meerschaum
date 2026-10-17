@@ -2,7 +2,7 @@
 
 > This page introduces the different types of Meerschaum plugins. For technical information, consult the [Writing Your Own Plugins tutorial](/reference/plugins/writing-plugins/).
 
-There are three main kinds of Meerschaum plugin: those which **provide data**, **perform actions**, or **extend the API**, and you may choose to use any or all of the three purposes. You may also create [library plugins](#library-plugins) to contain utilities for other plugins.
+Plugins are Python modules, and in v5 they may also be native [Rust plugins](/reference/plugins/rust-plugins/), which provide the same capabilities. There are three main kinds of Meerschaum plugin: those which **provide data**, **perform actions**, or **extend the API**, and you may choose to use any or all of the three purposes. You may also create [library plugins](#library-plugins) to contain utilities for other plugins.
 
 ## 📈 Data Plugins
 

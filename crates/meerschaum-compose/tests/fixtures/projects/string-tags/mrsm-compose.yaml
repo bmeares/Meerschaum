@@ -1,0 +1,6 @@
+project_name: string-tags
+pipes:
+  - connector: plugin:tags
+    metric: crash
+    instance: sql:local
+    tags: single-string-tag

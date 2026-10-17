@@ -8,6 +8,7 @@ Functions for managing plugins registration via the SQL connector
 
 from __future__ import annotations
 
+from meerschaum._core._gate import rust_method as _rust_method
 import json
 
 import meerschaum as mrsm
@@ -50,6 +51,8 @@ def register_plugin(
     **kw: Any
 ) -> SuccessTuple:
     """Register a new plugin to the plugins table."""
+    if (_rust := _rust_method(self, 'register_plugin')) is not None:
+        return _rust(plugin, force=force)
     from meerschaum.utils.packages import attempt_import
     sqlalchemy = attempt_import('sqlalchemy', lazy=False)
     from meerschaum.utils.sql import json_flavors
@@ -109,6 +112,8 @@ def get_plugin_id(
     """
     Return a plugin's ID.
     """
+    if (_rust := _rust_method(self, 'get_plugin_id')) is not None:
+        return _rust(plugin)
     ### ensure plugins table exists
     from meerschaum.connectors.sql.tables import get_tables
     plugins_tbl = get_tables(mrsm_instance=self, debug=debug)['plugins']
@@ -135,6 +140,8 @@ def get_plugin_version(
     """
     Return a plugin's version.
     """
+    if (_rust := _rust_method(self, 'get_plugin_version')) is not None:
+        return _rust(plugin)
     ### ensure plugins table exists
     from meerschaum.connectors.sql.tables import get_tables
     plugins_tbl = get_tables(mrsm_instance=self, debug=debug)['plugins']
@@ -151,6 +158,8 @@ def get_plugin_user_id(
     """
     Return a plugin's user ID.
     """
+    if (_rust := _rust_method(self, 'get_plugin_user_id')) is not None:
+        return _rust(plugin)
     ### ensure plugins table exists
     from meerschaum.connectors.sql.tables import get_tables
     plugins_tbl = get_tables(mrsm_instance=self, debug=debug)['plugins']
@@ -176,6 +185,8 @@ def get_plugin_username(
     """
     Return the username of a plugin's owner.
     """
+    if (_rust := _rust_method(self, 'get_plugin_username')) is not None:
+        return _rust(plugin)
     ### ensure plugins table exists
     from meerschaum.connectors.sql.tables import get_tables
     plugins_tbl = get_tables(mrsm_instance=self, debug=debug)['plugins']
@@ -202,6 +213,8 @@ def get_plugin_attributes(
     """
     Return the attributes of a plugin.
     """
+    if (_rust := _rust_method(self, 'get_plugin_attributes')) is not None:
+        return _rust(plugin)
     ### ensure plugins table exists
     from meerschaum.connectors.sql.tables import get_tables
     plugins_tbl = get_tables(mrsm_instance=self, debug=debug)['plugins']
@@ -244,6 +257,8 @@ def get_plugins(
     -------
     A list of plugin names.
     """
+    if (_rust := _rust_method(self, 'get_plugins')) is not None:
+        return _rust(user_id=user_id, search_term=search_term)
     ### ensure plugins table exists
     from meerschaum.connectors.sql.tables import get_tables
     plugins_tbl = get_tables(mrsm_instance=self, debug=debug)['plugins']
@@ -275,6 +290,8 @@ def delete_plugin(
     **kw: Any
 ) -> SuccessTuple:
     """Delete a plugin from the plugins table."""
+    if (_rust := _rust_method(self, 'delete_plugin')) is not None:
+        return _rust(plugin)
     from meerschaum.utils.packages import attempt_import
     sqlalchemy = attempt_import('sqlalchemy', lazy=False)
     from meerschaum.connectors.sql.tables import get_tables

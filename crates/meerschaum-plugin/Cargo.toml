@@ -1,0 +1,40 @@
+[package]
+name = "meerschaum-plugin"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "Versioned C ABI, native plugin SDK and connector adapters for Meerschaum"
+
+[dependencies]
+meerschaum-core = { workspace = true }
+meerschaum-kernel = { workspace = true }
+meerschaum-connector = { workspace = true }
+arrow = { workspace = true, features = ["ffi"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+indexmap = { workspace = true }
+libloading = "0.9"
+sha2 = { workspace = true }
+hex = { workspace = true }
+toml = { workspace = true }
+thiserror = { workspace = true }
+jsonschema = { version = "0.58", default-features = false }
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { workspace = true }
+
+[[example]]
+name = "native_demo"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "bad_abi"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "native_probe"
+crate-type = ["cdylib"]

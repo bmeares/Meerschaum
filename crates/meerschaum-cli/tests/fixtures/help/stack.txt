@@ -1,0 +1,7 @@
+
+Control the Meerschaum stack with Docker Compose.
+Usage: `stack {command}`
+
+Command: action[0]: default 'up'
+    Docker Compose command to run. E.g. 'config' will print Docker Compose configuration
+

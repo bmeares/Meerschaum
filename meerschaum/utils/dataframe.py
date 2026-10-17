@@ -16,6 +16,7 @@ from meerschaum.utils.typing import (
     Optional, Dict, Any, List, Hashable, Generator,
     Iterator, Iterable, Union, TYPE_CHECKING, Tuple,
 )
+from meerschaum._core._gate import rust_impl as _rust_impl
 
 if TYPE_CHECKING:
     pd, dask = mrsm.attempt_import('pandas', 'dask')
@@ -114,9 +115,17 @@ def to_polars(
             if geometry_cols:
                 from meerschaum.utils.dtypes import attempt_cast_to_geometry
                 shapely = mrsm.attempt_import('shapely', lazy=False)
+                ### Import inside the `mrsm` venv context: callers (e.g. `mrsm.entry()`)
+                ### may have deactivated it, and a bare import would then silently
+                ### skip registration so Arrow exports plain binary storage.
                 try:
-                    from geoarrow.types.type_pyarrow import register_extension_types
-                    register_extension_types()
+                    geoarrow_pyarrow = mrsm.attempt_import(
+                        'geoarrow.types.type_pyarrow',
+                        lazy=False,
+                        warn=False,
+                        install=False,
+                    )
+                    geoarrow_pyarrow.register_extension_types()
                 except Exception:
                     pass
             for col, (_, srid) in geometry_cols_types_srids.items():
@@ -286,6 +295,12 @@ def filter_unseen_df(
     ```
 
     """
+    if (_rust := _rust_impl('filter_unseen_df')) is not None:
+        return _rust(
+            old_df, new_df=new_df, safe_copy=safe_copy, dtypes=dtypes,
+            include_unchanged_columns=include_unchanged_columns,
+            coerce_mixed_numerics=coerce_mixed_numerics, debug=debug,
+        )
     if old_df is None:
         return new_df
 
@@ -871,6 +886,8 @@ def get_json_cols(df: 'pd.DataFrame') -> List[str]:
     -------
     A list of columns to be encoded as JSON.
     """
+    if (_rust := _rust_impl('get_json_cols')) is not None:
+        return _rust(df)
     if df is None:
         return []
 
@@ -908,6 +925,8 @@ def get_numeric_cols(df: 'pd.DataFrame') -> List[str]:
     -------
     A list of columns to treat as numerics.
     """
+    if (_rust := _rust_impl('get_numeric_cols')) is not None:
+        return _rust(df)
     if df is None:
         return []
     from decimal import Decimal
@@ -978,6 +997,8 @@ def get_uuid_cols(df: 'pd.DataFrame') -> List[str]:
     -------
     A list of columns to treat as UUIDs.
     """
+    if (_rust := _rust_impl('get_uuid_cols')) is not None:
+        return _rust(df)
     if df is None:
         return []
     from uuid import UUID
@@ -1032,6 +1053,11 @@ def get_datetime_cols(
     A list of columns to treat as datetimes, or a dictionary of columns to tz+precision tuples
     (if `with_tz_precision` is `True`).
     """
+    if (_rust := _rust_impl('get_datetime_cols')) is not None:
+        return _rust(
+            df, timezone_aware=timezone_aware, timezone_naive=timezone_naive,
+            with_tz_precision=with_tz_precision,
+        )
     if not timezone_aware and not timezone_naive:
         raise ValueError("`timezone_aware` and `timezone_naive` cannot both be `False`.")
 
@@ -1266,6 +1292,8 @@ def get_bytes_cols(df: 'pd.DataFrame') -> List[str]:
     -------
     A list of columns to treat as bytes.
     """
+    if (_rust := _rust_impl('get_bytes_cols')) is not None:
+        return _rust(df)
     if df is None:
         return []
 
@@ -1325,6 +1353,8 @@ def get_geometry_cols(
     A list of columns to treat as `geometry`.
     If `with_types_srids`, return a dictionary mapping columns to tuples in the form (type, SRID).
     """
+    if (_rust := _rust_impl('get_geometry_cols')) is not None:
+        return _rust(df, with_types_srids=with_types_srids)
     if df is None:
         return [] if not with_types_srids else {}
 
@@ -1585,6 +1615,12 @@ def enforce_dtypes(
     -------
     The Pandas DataFrame with the types enforced.
     """
+    if (_rust := _rust_impl('enforce_dtypes')) is not None:
+        return _rust(
+            df, dtypes=dtypes, explicit_dtypes=explicit_dtypes, safe_copy=safe_copy,
+            coerce_numeric=coerce_numeric, coerce_timezone=coerce_timezone,
+            strip_timezone=strip_timezone, as_polars=as_polars, debug=debug,
+        )
     import json
     import functools
     from meerschaum.utils.debug import dprint
@@ -2245,6 +2281,12 @@ def query_df(
     -------
     A Pandas DataFrame query result.
     """
+    if (_rust := _rust_impl('query_df')) is not None:
+        return _rust(
+            df, params=params, begin=begin, end=end, datetime_column=datetime_column,
+            select_columns=select_columns, omit_columns=omit_columns, inplace=inplace,
+            reset_index=reset_index, coerce_types=coerce_types, debug=debug,
+        )
 
     def _process_select_columns(_df):
         if not select_columns:

@@ -83,7 +83,8 @@ done
 for os in "${systems[@]}"; do
   cp -r "$PARENT/scripts/portable/${os}/"* "${os}"
   mkdir -p "${os}/scripts/install"
-  cp -r "$PARENT/meerschaum" "$PARENT/setup.py" "$PARENT/README.md" "${os}/scripts/install"
+  # v5: setup.py is gone (maturin build); the portable bundle still ships the v4 Python sources.
+  cp -r "$PARENT/meerschaum" "$PARENT/pyproject.toml" "$PARENT/README.md" "${os}/scripts/install"
   cp -r "$PARENT/meerschaum" "${os}/python/${sites[$os]}"
 done
 

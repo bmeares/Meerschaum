@@ -1,0 +1,11 @@
+
+Upgrade Meerschaum, plugins, or packages.
+
+Command:
+    `upgrade {option}`
+
+Example:
+    `upgrade meerschaum`
+
+    Options:
+        `upgrade [meerschaum, packages, plugins]`

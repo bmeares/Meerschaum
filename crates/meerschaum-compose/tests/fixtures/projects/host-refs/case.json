@@ -1,0 +1,5 @@
+{
+  "description": "Compose host references: valid, missing, invalid, null; root `instance` vs `config.instance`.",
+  "width": 100,
+  "runs": [{"name": "show-connectors", "action": ["show", "connectors"]}]
+}

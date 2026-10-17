@@ -1,0 +1,53 @@
+{
+  "description": "A one-shot `sync pipes --parents` above a stream source. The stream is observe (never run); its flushes left ledger entries, including backloaded late data, which the child backfills, capped at the stream's watermark.",
+  "records": [
+    {"instance": "sql:main", "connector": "mqtt:broker", "metric": "telemetry", "streaming": true,
+     "parameters": {"columns": {"datetime": "ts", "id": "device"}, "verify": {"chunk_hours": 1},
+                    "stream": {"idle_ms": "auto", "max_latency_ms": 2000}}},
+    {"instance": "sql:main", "connector": "sql:main", "metric": "telemetry_15min",
+     "parameters": {"columns": {"datetime": "bucket", "id": "device"}, "verify": {"chunk_days": 1},
+                    "fetch": {"backtrack_minutes": 15},
+                    "sql": "SELECT date_bin('15 minutes', ts, TIMESTAMP '2000-01-01') AS bucket, device, avg(value) FROM {{ Pipe('mqtt:broker', 'telemetry') }} GROUP BY 1, 2"}}
+  ],
+  "selection": {"targets": {"refs": ["sql:main|sql:main|telemetry_15min|None"]}, "parents": "all"},
+  "state": {
+    "watermarks": {
+      "sql:main|mqtt:broker|telemetry|None": "2026-10-12T09:59:30Z",
+      "sql:main|sql:main|telemetry_15min|None": "2026-10-12T09:30:00Z"
+    },
+    "definition_hashes": {
+      "sql:main|mqtt:broker|telemetry|None": "@current",
+      "sql:main|sql:main|telemetry_15min|None": "@current"
+    },
+    "ledger": {
+      "sql:main": [
+        {"pipe_ref": "sql:main|mqtt:broker|telemetry|None", "seq": 101, "begin": "2026-10-12T08:00:00Z", "end": "2026-10-12T09:00:00Z"},
+        {"pipe_ref": "sql:main|mqtt:broker|telemetry|None", "seq": 102, "begin": "2026-10-12T09:00:00Z", "end": "2026-10-12T10:00:00Z"},
+        {"pipe_ref": "sql:main|mqtt:broker|telemetry|None", "seq": 103, "begin": "2026-10-10T14:00:00Z", "end": "2026-10-10T15:00:00Z"}
+      ]
+    },
+    "cursors": {
+      "sql:main": [
+        {"parent_ref": "sql:main|mqtt:broker|telemetry|None", "child_ref": "sql:main|sql:main|telemetry_15min|None", "seq": 101, "parent_watermark_at_cursor": "2026-10-12T09:40:00Z"}
+      ]
+    }
+  },
+  "expected": {
+    "nodes": [
+      {"node": "sql:main|mqtt:broker|telemetry|None", "action": "observe", "bounds": null,
+       "reason_contains": ["stream source"]},
+      {"node": "sql:main|sql:main|telemetry_15min|None", "action": "backfill",
+       "bounds": {"begin": "2026-10-10T00:00:00Z", "end": "2026-10-12T09:59:30Z"},
+       "ranges": [
+         {"begin": "2026-10-10T00:00:00Z", "end": "2026-10-11T00:00:00Z"},
+         {"begin": "2026-10-12T00:00:00Z", "end": "2026-10-12T09:59:30Z"}
+       ],
+       "chunks": [
+         {"begin": "2026-10-10T00:00:00Z", "end": "2026-10-11T00:00:00Z"},
+         {"begin": "2026-10-12T00:00:00Z", "end": "2026-10-12T09:59:30Z"}
+       ],
+       "consumes": [{"parent_ref": "sql:main|mqtt:broker|telemetry|None", "state_instance": "sql:main", "seq": 103}],
+       "reason_contains": ["2 unconsumed ledger entries from mqtt:broker/telemetry (seq 102–103)", "before the tail (2026-10-12 09:15)"]}
+    ]
+  }
+}

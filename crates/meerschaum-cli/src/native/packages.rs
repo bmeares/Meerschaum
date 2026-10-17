@@ -1,0 +1,512 @@
+//! The package actions: `show packages`, `verify packages`, `uninstall packages`,
+//! `upgrade packages` and `upgrade meerschaum`, ported from `meerschaum/actions/{show,verify,
+//! uninstall,upgrade}.py` and the helpers they call in `meerschaum/utils/packages/__init__.py`
+//! (`pip_uninstall`, `get_prerelease_dependencies`, `need_update`, `manually_import_module`).
+//!
+//! The installers run through [`super::pip`] (`uv pip` / `pip`); the dependency groups are the
+//! generated [`super::packages_table`].
+//!
+//! # Differences from v4
+//!
+//! - `verify packages` never imports a module (v4 executes every package to find its version).
+//!   The version of a package in the `mrsm` environment is read from its `*.dist-info` and an
+//!   unmet minimum is repaired with an installer run, as v4's `check_update` does, unless
+//!   `MRSM_NO_AUTO_INSTALL` is set (then only a warning). A package found in the host
+//!   interpreter (one `importlib.util.find_spec` probe, nothing imported) is counted but never
+//!   changed: v5 does not modify the host interpreter outside `upgrade meerschaum`.
+//! - `--debug` prints the installer's command line (as v4) but not v4's `dprint` traces.
+//! - `upgrade meerschaum` ends with the native `reload` instead of v4's `reload_meerschaum`.
+
+use std::path::Path;
+use std::process::{Command, Stdio};
+
+use meerschaum_core::SuccessTuple;
+
+use crate::builtin::ActionResult;
+use crate::dispatch::Runtime;
+use crate::format::rich::pretty::PyObj;
+use crate::value::{ArgsMap, PyValue};
+
+use super::packages_table::{self, ALL_PACKAGES, GROUPS};
+use super::pip::{PipEnv, PipInstall, install_name_no_version, pip_install};
+use super::venvs::normalize;
+use super::{flag, items_str, pprint, string, warn, words, yes_no};
+
+/// `packages[group]` as the dictionary `pprint` shows.
+fn group_object(group: packages_table::Group) -> PyObj {
+    PyObj::Dict(
+        group
+            .iter()
+            .map(|(import_name, install_name)| {
+                (
+                    PyObj::Str((*import_name).to_string()),
+                    PyObj::Str((*install_name).to_string()),
+                )
+            })
+            .collect(),
+    )
+}
+
+// ---------------------------------------------------------------------------------------------
+// show packages
+// ---------------------------------------------------------------------------------------------
+
+/// `show packages [group]`: the packages of a dependency group (`full` by default), pretty
+/// printed, or one install name per line with `--nopretty`.
+pub fn show_packages(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
+    let action = words(args, "action");
+    let nopretty = flag(args, "nopretty");
+    let key = action.first().cloned().unwrap_or_else(|| "full".into());
+    match packages_table::group(&key) {
+        Some(group) if nopretty => {
+            for (_, install_name) in group {
+                rt.print(&format!("{install_name}\n"));
+            }
+        }
+        Some(group) => pprint(rt, &group_object(group), false),
+        None => warn(rt, &format!("'{key}' is not a valid group.")),
+    }
+    Ok(SuccessTuple::success())
+}
+
+// ---------------------------------------------------------------------------------------------
+// uninstall packages
+// ---------------------------------------------------------------------------------------------
+
+/// `uninstall packages <names> [--venv name]`: `pip_uninstall` from a virtual environment.
+pub fn uninstall_packages(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
+    let action = words(args, "action");
+    if action.is_empty() {
+        return Ok(SuccessTuple::fail("No packages to uninstall."));
+    }
+    let yes = flag(args, "yes") || flag(args, "force");
+    if !yes && flag(args, "noask") {
+        return Ok(SuccessTuple::fail(
+            "Skipping uninstallation. Add `-y` or `-f` to agree to the uninstall prompt.",
+        ));
+    }
+    let venv = string(args, "venv").unwrap_or_else(|| "mrsm".into());
+    let mut installer_args = words(args, "sub_args");
+    if yes {
+        installer_args.push("-y".into());
+    }
+    let env = PipEnv::new(rt);
+    let removed = pip_install(
+        &env,
+        rt,
+        &PipInstall {
+            names: action.clone(),
+            args: Some(installer_args),
+            venv: venv.clone(),
+            uninstall: true,
+            debug: flag(args, "debug"),
+            ..PipInstall::default()
+        },
+    );
+    if removed {
+        return Ok(SuccessTuple::ok(format!(
+            "Successfully removed packages from virtual environment '{venv}':\n{}",
+            items_str(&action)
+        )));
+    }
+    Ok(SuccessTuple::fail(format!(
+        "Failed to uninstall packages:\n{}",
+        action.join(", ")
+    )))
+}
+
+// ---------------------------------------------------------------------------------------------
+// upgrade packages
+// ---------------------------------------------------------------------------------------------
+
+/// The reverse of `all_packages` (`get_install_names()`): the name without its version to the
+/// import name, a later entry replacing an earlier one.
+fn install_to_import_name(install_name: &str) -> String {
+    let no_version = install_name_no_version(install_name);
+    ALL_PACKAGES
+        .iter()
+        .rev()
+        .find(|(_, install)| install_name_no_version(install) == no_version)
+        .map(|(import, _)| (*import).to_string())
+        .unwrap_or_else(|| no_version.to_string())
+}
+
+/// `get_prerelease_dependencies(packages)`: the packages whose pinned version text contains
+/// `dev`, `rc` or `a`.
+pub fn prerelease_dependencies(packages: &[String]) -> Vec<String> {
+    packages
+        .iter()
+        .filter(|install_name| {
+            let no_version = install_name_no_version(install_name).to_lowercase();
+            let import_name = install_to_import_name(install_name);
+            let with_version = ALL_PACKAGES
+                .iter()
+                .rev()
+                .find(|(import, _)| *import == import_name)
+                .map(|(_, install)| (*install).to_string())
+                .unwrap_or(import_name);
+            let version_only = with_version
+                .to_lowercase()
+                .replace(&no_version, "")
+                .rsplit(']')
+                .next()
+                .unwrap_or_default()
+                .to_string();
+            ["dev", "rc", "a"].iter().any(|p| version_only.contains(p))
+        })
+        .cloned()
+        .collect()
+}
+
+/// `upgrade packages [group]`: reinstall a dependency group (`api` by default) into `mrsm`.
+pub fn upgrade_packages(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
+    let action = words(args, "action");
+    // PARITY: `venv` is accepted but never passed on; v4 always installs into `mrsm`
+    // (`pip_install(*to_install, debug=debug)`, actions/upgrade.py).
+    let group_name = action.first().cloned().unwrap_or_else(|| "api".into());
+    let Some(group) = packages_table::group(&group_name) else {
+        let invalid = format!("Invalid dependency group '{group_name}'.");
+        let mut available = rt.with_formatter(|f| f.make_header("Available groups:"));
+        for (name, _) in GROUPS {
+            available.push_str(&format!("\n  - {name}"));
+        }
+        warn(rt, &format!("{invalid}\n\n{available}"));
+        return Ok(SuccessTuple::fail(invalid));
+    };
+    let header = rt.with_formatter(|f| f.make_header("Packages to Upgrade:"));
+    rt.print(&format!("{header}\n"));
+    pprint(rt, &group_object(group), false);
+
+    let force = flag(args, "force");
+    let question = format!(
+        "Are you sure you want to upgrade {} packages (dependency group '{group_name}')?",
+        group.len()
+    );
+    let all: Vec<String> = group
+        .iter()
+        .map(|(_, install)| (*install).to_string())
+        .collect();
+    let prereleases = prerelease_dependencies(&all);
+    let to_install: Vec<String> = all
+        .iter()
+        .filter(|name| !prereleases.contains(name) || group_name == "_internal")
+        .cloned()
+        .collect();
+
+    let (mut success, mut message) = (false, "Nothing installed.".to_string());
+    if force || yes_no(rt, &question, "y", flag(args, "yes"), flag(args, "noask"))? {
+        let env = PipEnv::new(rt);
+        let debug = flag(args, "debug");
+        let install = |rt: &mut Runtime<'_>, names: Vec<String>| {
+            pip_install(
+                &env,
+                rt,
+                &PipInstall {
+                    names,
+                    venv: "mrsm".into(),
+                    debug,
+                    ..PipInstall::default()
+                },
+            )
+        };
+        success = install(rt, to_install);
+        if success && !prereleases.is_empty() {
+            success = install(rt, prereleases);
+        }
+        message = if success {
+            format!("Successfully installed {} packages.", group.len())
+        } else {
+            format!("Failed to install packages in dependency group '{group_name}'.")
+        };
+    }
+    if !success {
+        return Ok(SuccessTuple::fail(message));
+    }
+    let reloaded = crate::builtin::reload(args, rt)?;
+    if !reloaded.success {
+        return Ok(reloaded);
+    }
+    Ok(SuccessTuple::ok(message))
+}
+
+// ---------------------------------------------------------------------------------------------
+// upgrade meerschaum
+// ---------------------------------------------------------------------------------------------
+
+/// `is_docker_available()`: `docker ps` succeeds.
+fn docker_available() -> bool {
+    Command::new("docker")
+        .arg("ps")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok_and(|s| s.success())
+}
+
+/// `upgrade meerschaum [groups]` (alias `mrsm`): upgrade the wheels in the interpreter that runs
+/// plugins (`pip_install('meerschaum[groups]', venv=None)`), pull the Docker images when Docker
+/// answers, optionally bring the stack up, then reload.
+pub fn upgrade_meerschaum(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
+    let action = words(args, "action");
+    let (force, yes, noask) = (flag(args, "force"), flag(args, "yes"), flag(args, "noask"));
+    let debug = flag(args, "debug");
+    let restart_stack = force
+        || (docker_available()
+            && yes_no(rt, "Bring up the stack after upgrading?", "n", yes, noask)?);
+    let dependencies = (action != [String::new()])
+        .then(|| action.first().cloned())
+        .flatten()
+        .filter(|d| !d.is_empty());
+    let install_name = format!(
+        "meerschaum{}",
+        dependencies
+            .as_ref()
+            .map(|d| format!("[{}]", d.split(',').collect::<Vec<_>>().join(",")))
+            .unwrap_or_default()
+    );
+    let mut env = PipEnv::new(rt);
+    match upgrade_interpreter(rt) {
+        Ok(python) => env.python = python,
+        Err(message) => return Ok(SuccessTuple::fail(message)),
+    }
+    // The user's installer arguments (`--break-system-packages`, `--pre`, ...) follow
+    // `--upgrade`; nothing is added implicitly.
+    let mut installer_args = vec!["--upgrade".to_string()];
+    installer_args.extend(words(args, "sub_args"));
+    // The `meerschaum-cli` wheel is pinned to the same version by `meerschaum` itself.
+    if !pip_install(
+        &env,
+        rt,
+        &PipInstall {
+            names: vec![install_name],
+            args: Some(installer_args),
+            host: true,
+            debug,
+            ..PipInstall::default()
+        },
+    ) {
+        return Ok(SuccessTuple::fail("Failed to upgrade Meerschaum via pip."));
+    }
+    if docker_available() {
+        run_stack(rt, &["pull"], debug);
+        if restart_stack {
+            run_stack(rt, &["up", "-d"], debug);
+        }
+    }
+    crate::builtin::reload(args, rt)
+}
+
+/// The interpreter `upgrade meerschaum` installs into: `MRSM_PYTHON`, else the one that sits next
+/// to this binary (`<prefix>/bin/python3` for `<prefix>/bin/mrsm`: a `pipx`, `uv tool` or `pip`
+/// environment), which must have the `meerschaum` distribution installed. Anything else is
+/// refused: v5 never upgrades whatever `python3` happens to be on `PATH`.
+pub fn upgrade_interpreter(rt: &mut Runtime<'_>) -> Result<String, String> {
+    let explicit = (rt.env)("MRSM_PYTHON").filter(|p| !p.trim().is_empty());
+    let python = match explicit {
+        Some(python) => python,
+        None => sibling_interpreter().ok_or_else(|| {
+            "Cannot tell which Python environment Meerschaum is installed in: no interpreter \
+             sits next to this `mrsm` binary. Set `MRSM_PYTHON` to the interpreter that has \
+             `meerschaum` installed and run `upgrade meerschaum` again."
+                .to_string()
+        })?,
+    };
+    const CHECK: &str = "\
+import importlib.metadata, sys
+try:
+    importlib.metadata.version('meerschaum')
+except Exception:
+    sys.exit(3)
+";
+    let installed = Command::new(&python)
+        // `-E`: `PYTHON*` variables (a `PYTHONPATH` pointing at a source tree) must not make a
+        // distribution look installed.
+        .args(["-E", "-c", CHECK])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+    match installed {
+        Ok(status) if status.success() => Ok(python),
+        Ok(_) => Err(format!(
+            "Meerschaum is not installed in the Python environment '{python}', so it will not \
+             be upgraded there. Set `MRSM_PYTHON` to the interpreter that has `meerschaum` \
+             installed."
+        )),
+        Err(e) => Err(format!(
+            "Unable to run the Python interpreter '{python}': {e}"
+        )),
+    }
+}
+
+/// `<dir>/python3` (`python`, `python.exe`) next to the running binary, after resolving
+/// symlinks (`pipx` exposes `mrsm` through a link into the environment).
+fn sibling_interpreter() -> Option<String> {
+    let exe = std::env::current_exe().ok()?.canonicalize().ok()?;
+    let dir = exe.parent()?;
+    ["python3", "python", "python3.exe", "python.exe"]
+        .iter()
+        .map(|name| dir.join(name))
+        .find(|candidate| candidate.is_file())
+        .map(|candidate| candidate.to_string_lossy().into_owned())
+}
+
+/// `actions['stack'](words, debug=debug)`; the result is ignored, as in v4.
+fn run_stack(rt: &mut Runtime<'_>, words: &[&str], debug: bool) {
+    let mut stack_args = ArgsMap::new();
+    let mut action = vec!["stack".to_string()];
+    action.extend(words.iter().map(|w| (*w).to_string()));
+    stack_args.insert("action".into(), PyValue::str_list(&action));
+    stack_args.insert("debug".into(), PyValue::Bool(debug));
+    let _ = crate::dispatch::entry_with_args(stack_args, rt, 1);
+}
+
+// ---------------------------------------------------------------------------------------------
+// verify packages
+// ---------------------------------------------------------------------------------------------
+
+/// The minimum a requirement asks for: `psycopg[binary]>=3.2.9` gives `>=3.2.9`.
+fn required_version(install_name: &str) -> String {
+    let no_version = install_name_no_version(install_name);
+    let rest = install_name.replacen(no_version, "", 1);
+    rest.rsplit(']')
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .to_string()
+}
+
+/// Import names the host interpreter can find (`importlib.util.find_spec`, nothing imported).
+fn host_packages(env: &PipEnv, import_names: &[&str]) -> Vec<String> {
+    let Ok(interpreter) = env.interpreter() else {
+        return Vec::new();
+    };
+    const PROBE: &str = "\
+import importlib.util, sys
+for name in sys.argv[1:]:
+    try:
+        if importlib.util.find_spec(name) is not None:
+            print(name)
+    except Exception:
+        pass
+";
+    let output = Command::new(&interpreter.executable)
+        .args(["-c", PROBE])
+        .args(import_names)
+        .env("PYTHONSAFEPATH", "1")
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output();
+    output
+        .map(|o| {
+            String::from_utf8_lossy(&o.stdout)
+                .lines()
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// The version of an installed distribution in a venv's `site-packages`.
+fn installed_version(venv_dir: &Path, install_name: &str) -> Option<String> {
+    let wanted = normalize(install_name);
+    super::venvs::scan_venv(venv_dir)?
+        .dists
+        .into_iter()
+        .find(|d| d.name == wanted)
+        .map(|d| d.version)
+}
+
+/// `verify packages [--venv name]`: check every known package against its minimum version.
+pub fn verify_packages(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
+    let venv = string(args, "venv").unwrap_or_else(|| "mrsm".into());
+    let debug = flag(args, "debug");
+    let env = PipEnv::new(rt);
+    let mut in_venv: Vec<(&str, &str)> = Vec::new();
+    let mut elsewhere: Vec<&str> = Vec::new();
+    for (import_name, install_name) in ALL_PACKAGES {
+        if env.venv_contains_package(import_name, &venv) {
+            in_venv.push((import_name, install_name));
+        } else {
+            elsewhere.push(import_name);
+        }
+    }
+    let on_host = host_packages(&env, &elsewhere);
+
+    let venv_dir = env.venv_root(&venv);
+    let mut verified = on_host.len();
+    for (import_name, install_name) in in_venv {
+        verified += 1;
+        let minimum = required_version(install_name);
+        if minimum.is_empty() {
+            continue;
+        }
+        // PARITY: v4 drops `.dev...` from both versions before comparing.
+        let minimum = minimum.split(".dev").next().unwrap_or_default().to_string();
+        let Some(version) = installed_version(&venv_dir, install_name) else {
+            continue;
+        };
+        let version = version.split(".dev").next().unwrap_or_default().to_string();
+        if meerschaum_core::version::version_satisfies(&version, &minimum) != Some(false) {
+            continue;
+        }
+        if !env.auto_install {
+            warn(
+                rt,
+                &format!("There's an update available for '{import_name}'."),
+            );
+            continue;
+        }
+        let installed = pip_install(
+            &env,
+            rt,
+            &PipInstall {
+                names: vec![install_name.to_string()],
+                venv: venv.clone(),
+                debug,
+                ..PipInstall::default()
+            },
+        );
+        if !installed {
+            warn(
+                rt,
+                &format!(
+                    "There's an update available for '{}', but it failed to install. Try installig via Meerschaum with `install packages '{{install_name}}'`.",
+                    install_name_no_version(install_name)
+                ),
+            );
+        }
+    }
+    Ok(SuccessTuple::ok(format!("Verified {verified} packages.")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn prereleases_are_pins_with_dev_rc_or_a() {
+        let names = vec![
+            "pandas[parquet]>=3.0.0".to_string(),
+            "foo>=1.0.0rc1".to_string(),
+        ];
+        // `foo` is not a known package: its pin is looked up as itself and has no version text.
+        assert!(prerelease_dependencies(&names).is_empty());
+    }
+
+    #[test]
+    fn required_versions_follow_the_extras() {
+        assert_eq!(required_version("psycopg[binary]>=3.2.9"), ">=3.2.9");
+        assert_eq!(required_version("pytz"), "");
+        assert_eq!(required_version("pyinstaller>6.6.0"), ">6.6.0");
+    }
+
+    #[test]
+    fn show_packages_groups_exist() {
+        for group in ["full", "api", "sql", "polars", "formatting", "cli-tools"] {
+            assert!(packages_table::group(group).is_some(), "{group}");
+        }
+        assert!(packages_table::group("bogus").is_none());
+    }
+}

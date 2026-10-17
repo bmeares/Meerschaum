@@ -1,0 +1,10 @@
+
+Show connectors configuration and, if requested, specific connector attributes.
+
+Examples:
+    `show connectors`
+        Display the connectors configuration.
+
+    `show connectors sql:main`
+        Show the connectors configuration and the attributes for the connector 'sql:main'.
+

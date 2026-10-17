@@ -1,0 +1,38 @@
+Start the API server.
+
+Parameters
+----------
+port: Optional[int], default None
+    Port to bind the API server to.
+    If `None`, use 8000.
+
+host: Optional[str], defailt None
+    The address to bind to.
+    If `None`, use '0.0.0.0'.
+
+webterm_port: Optional[int], default None
+    Port to bind the webterm server to.
+    If `None`, use 8765.
+
+workers: Optional[int], default None
+    How many worker threads to run.
+    If `None`, defaults to the number of CPU cores or 1 on Android.
+
+production: bool, default False
+    Start the API server with Gunicorn instead of Uvicorn.
+    Useful for production deployments.
+
+private: bool, default False
+    Require authentication for all endpoints.
+
+secure: bool, default False
+    Only allow `admin` users to execute actions.
+
+keyfile: str, default None
+    If provided, serve over HTTPS with this key file.
+    Requires `--certfile`.
+
+certfile: str, default None
+    If provided, serve over HTTPS with this certfile.
+    Requires `--keyfile`.
+

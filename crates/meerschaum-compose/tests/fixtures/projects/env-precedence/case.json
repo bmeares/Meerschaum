@@ -1,0 +1,12 @@
+{
+  "description": "Environment substitution precedence: process env, .env through python-dotenv (no override), envyaml's own .env parsing, ${VAR|default}, $$ escapes, undefined variables, keys leaking from the environment.",
+  "width": 120,
+  "process_env": {"FROM_PROCESS": "process-value", "FROM_BOTH": "process-both", "DOTTED.VALUE": "dotted"},
+  "runs": [
+    {"name": "explain", "action": ["explain"]},
+    {"name": "explain-env-file", "action": ["explain"], "env_file": "alt.env"},
+    {"name": "explain-dotenv-file", "action": ["explain"], "env_file": ".env"},
+    {"name": "explain-other-cwd", "action": ["explain"], "cwd": "..", "file": "env-precedence/mrsm-compose.yaml"},
+    {"name": "show-environment", "action": ["show", "environment"]}
+  ]
+}

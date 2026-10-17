@@ -1,0 +1,3 @@
+
+Verify the contents of pipes, syncing across their entire datetime intervals.
+

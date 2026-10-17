@@ -1,0 +1,11 @@
+{
+  "description": "Temporary pipes, legacy mrsm_instance, the project default instance, non-ASCII and long parameter values.",
+  "width": 120,
+  "runs": [
+    {"name": "explain", "action": ["explain"]},
+    {"name": "explain-60", "action": ["explain"], "width": 60},
+    {"name": "up-dry", "action": ["up"], "flags": {"dry": true}},
+    {"name": "run", "action": ["run"]},
+    {"name": "up-no-jobs", "action": ["up"], "flags": {"no_jobs": true}}
+  ]
+}

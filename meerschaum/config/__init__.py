@@ -16,10 +16,12 @@ import copy
 import contextlib
 
 import meerschaum.config.paths as paths
+import types
 from meerschaum.utils.typing import Any, Dict, Optional, Union
 from meerschaum.utils.threading import RLock
 
 from meerschaum.config._version import __version__
+from meerschaum.config._store import get_store, set_store, reset_store
 from meerschaum.config._edit import edit_config, write_config
 from meerschaum.config._read_config import (
     search_and_substitute_config,
@@ -33,6 +35,8 @@ from meerschaum._internal.static import STATIC_CONFIG
 from meerschaum.config._patch import (
     apply_patch_to_config,
 )
+from meerschaum._core._gate import rust_impl as _rust_impl
+
 __all__ = (
     'get_plugin_config',
     'write_plugin_config',
@@ -54,8 +58,10 @@ __all__ = (
 __pdoc__ = {'static': False, 'resources': False, 'stack': False, }
 _locks = {'config': RLock()}
 
-### apply config preprocessing (e.g. main to meta)
-config = {}
+### The live config dictionary is `meerschaum.config.config` (see `_store.py`): the config registry
+### owns the object, so it is resolved on access (`from meerschaum.config import config` gives the
+### current dictionary, as v4's module global did), and reloading this module starts it over.
+reset_store()
 _backup_config = None
 _allow_write_missing: bool = True
 
@@ -71,12 +77,11 @@ def _config(
     """
     Read and process the configuration file.
     """
-    global config, _backup_config
-
-    if config is None or reload:
+    if reload:
         with _locks['config']:
-            config = {}
+            reset_store()
 
+    config = get_store()
     if keys and keys[0] not in config:
         from meerschaum.config._sync import sync_files as _sync_files
         key_config = read_config(
@@ -99,13 +104,12 @@ def set_config(cf: Dict[str, Any]) -> Dict[str, Any]:
     """
     Set the configuration dictionary.
     """
-    global config
     if not isinstance(cf, dict):
         from meerschaum.utils.warnings import error
         error(f"Invalid value for config: {cf}")
     with _locks['config']:
-        config = cf
-    return config
+        set_store(cf)
+    return cf
 
 
 def get_config(
@@ -159,6 +163,11 @@ def get_config(
     >>> get_config('does', 'not', 'exist')
     UserWarning: Invalid keys in config: ('does', 'not', 'exist')
     """
+    if (_rust := _rust_impl('get_config')) is not None:
+        return _rust(
+            *keys, patch=patch, substitute=substitute, sync_files=sync_files,
+            write_missing=write_missing, as_tuple=as_tuple, warn=warn, debug=debug,
+        )
     import json
 
     symlinks_key = STATIC_CONFIG['config']['symlinks_key']
@@ -176,6 +185,8 @@ def get_config(
             return True, _rc 
         return _rc
     
+    config = get_store()
+
     ### Weird threading issues, only import if substitute is True.
     if substitute:
         from meerschaum.config._read_config import search_and_substitute_config
@@ -279,7 +290,7 @@ def get_config(
                 from meerschaum.config._read_config import get_keyfile_path
                 keyfile_exists = get_keyfile_path(keys[0], create_new=False) is not None
                 if not keyfile_exists:
-                    write_config(config, debug=debug)
+                    write_config(get_store(), debug=debug)
 
     if as_tuple:
         return (not invalid_keys), c
@@ -304,6 +315,9 @@ def get_plugin_config(
             "from within a Meerschaum plugin."
         )
 
+    if (_rust := _rust_impl('get_plugin_config')) is not None:
+        return _rust(parent_plugin_name, *keys, warn=warn, **kw)
+
     return get_config(
         *(['plugins', parent_plugin_name] + list(keys)),
         warn=warn,
@@ -323,6 +337,8 @@ def write_plugin_config(
     parent_plugin_name = _get_parent_plugin(2)
     if parent_plugin_name is None:
         error("You may only call `get_plugin_config()` from within a Meerschaum plugin.")
+    if (_rust := _rust_impl('write_plugin_config')) is not None:
+        return _rust(parent_plugin_name, config_dict, **kw)
     plugins_cf = get_config('plugins', warn=False)
     if plugins_cf is None:
         plugins_cf = {}
@@ -429,3 +445,22 @@ except AttributeError:
 if interactive:
     msg = __doc__
     print(msg, file=sys.stderr)
+
+
+class _ConfigModule(types.ModuleType):
+    """
+    The `meerschaum.config` module type: `config` is the live dictionary of the registry, so
+    `meerschaum.config.config = {...}` replaces it (as `set_config()` does) instead of creating
+    a second attribute that `get_config()` never sees.
+    """
+
+    @property
+    def config(self) -> Dict[str, Any]:
+        return get_store()
+
+    @config.setter
+    def config(self, cf: Dict[str, Any]) -> None:
+        set_config(cf)
+
+
+sys.modules[__name__].__class__ = _ConfigModule

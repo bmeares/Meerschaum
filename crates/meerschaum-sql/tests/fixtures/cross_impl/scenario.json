@@ -1,0 +1,346 @@
+{
+  "comment": "Synthetic pipes synced by both implementations (see cross_impl.py and tests/instance_cross_impl.rs). Tagged values: $dt (ISO datetime), $date, $dec (Decimal), $uuid, $bytes (hex). Pipes with \"inplace\": true are synced from their SQL definition on the same instance (Python: pipe.sync(); Rust: sync_pipe_inplace).",
+  "pipes": [
+    {
+      "connector_keys": "xi",
+      "metric_key": "basic",
+      "location_key": null,
+      "parameters": {
+        "columns": {
+          "datetime": "dt",
+          "id": "id"
+        }
+      },
+      "phases": [
+        [
+          {
+            "dt": {
+              "$dt": "2024-01-01T00:00:00+00:00"
+            },
+            "id": 1,
+            "val": 1.5
+          },
+          {
+            "dt": {
+              "$dt": "2024-01-02T00:00:00+00:00"
+            },
+            "id": 2,
+            "val": 2.5
+          }
+        ],
+        [
+          {
+            "dt": {
+              "$dt": "2024-01-02T00:00:00+00:00"
+            },
+            "id": 2,
+            "val": 3.5
+          },
+          {
+            "dt": {
+              "$dt": "2024-01-03T00:00:00+00:00"
+            },
+            "id": 3,
+            "val": 4.0
+          }
+        ]
+      ]
+    },
+    {
+      "connector_keys": "xi",
+      "metric_key": "types",
+      "location_key": "loc",
+      "parameters": {
+        "columns": {
+          "datetime": "dt",
+          "id": "id"
+        },
+        "dtypes": {
+          "j": "json",
+          "n": "numeric",
+          "u": "uuid",
+          "by": "bytes",
+          "b": "bool",
+          "i": "int",
+          "f": "float",
+          "s": "string",
+          "d": "date",
+          "n2": "numeric[10,2]"
+        }
+      },
+      "phases": [
+        [
+          {
+            "dt": {
+              "$dt": "2024-01-01T00:00:00+00:00"
+            },
+            "id": 1,
+            "j": {
+              "b": 1,
+              "a": [
+                1,
+                2
+              ]
+            },
+            "n": {
+              "$dec": "1.23"
+            },
+            "u": {
+              "$uuid": "00000000-0000-0000-0000-000000000005"
+            },
+            "by": {
+              "$bytes": "616263"
+            },
+            "b": true,
+            "i": 3,
+            "f": 1.5,
+            "s": "hi",
+            "d": {
+              "$date": "2024-01-02"
+            },
+            "n2": {
+              "$dec": "3.14159"
+            }
+          }
+        ],
+        [
+          {
+            "dt": {
+              "$dt": "2024-01-01T00:00:00+00:00"
+            },
+            "id": 1,
+            "j": {
+              "b": 1,
+              "a": [
+                1,
+                2
+              ]
+            },
+            "n": {
+              "$dec": "1.23"
+            },
+            "u": {
+              "$uuid": "00000000-0000-0000-0000-000000000005"
+            },
+            "by": {
+              "$bytes": "616263"
+            },
+            "b": true,
+            "i": 3,
+            "f": 2.5,
+            "s": "updated",
+            "d": {
+              "$date": "2024-01-02"
+            },
+            "n2": {
+              "$dec": "3.14159"
+            }
+          },
+          {
+            "dt": {
+              "$dt": "2024-01-05T12:30:00+00:00"
+            },
+            "id": 2,
+            "j": {
+              "z": [
+                1,
+                "two"
+              ],
+              "a": null
+            },
+            "n": {
+              "$dec": "-10.5"
+            },
+            "u": {
+              "$uuid": "deadbeef-abba-babe-cafe-decafc0ffee5"
+            },
+            "by": {
+              "$bytes": "00ff"
+            },
+            "b": false,
+            "i": -7,
+            "f": -0.25,
+            "s": "x",
+            "d": {
+              "$date": "2023-12-31"
+            },
+            "n2": {
+              "$dec": "2"
+            }
+          }
+        ]
+      ]
+    },
+    {
+      "connector_keys": "xi",
+      "metric_key": "intaxis",
+      "location_key": null,
+      "parameters": {
+        "columns": {
+          "datetime": "ts"
+        },
+        "dtypes": {
+          "ts": "int"
+        }
+      },
+      "phases": [
+        [
+          {
+            "ts": 1,
+            "v": 10
+          },
+          {
+            "ts": 2,
+            "v": 20
+          }
+        ],
+        [
+          {
+            "ts": 2,
+            "v": 21
+          },
+          {
+            "ts": 3,
+            "v": 30
+          }
+        ]
+      ]
+    },
+    {
+      "connector_keys": "xi",
+      "metric_key": "upsert",
+      "location_key": null,
+      "parameters": {
+        "columns": {
+          "datetime": "dt",
+          "primary": "pk"
+        },
+        "upsert": true
+      },
+      "phases": [
+        [
+          {
+            "dt": {
+              "$dt": "2024-02-01T00:00:00+00:00"
+            },
+            "pk": 1,
+            "v": "a"
+          }
+        ],
+        [
+          {
+            "dt": {
+              "$dt": "2024-02-01T00:00:00+00:00"
+            },
+            "pk": 1,
+            "v": "b"
+          },
+          {
+            "dt": {
+              "$dt": "2024-02-02T00:00:00+00:00"
+            },
+            "pk": 2,
+            "v": "c"
+          }
+        ]
+      ]
+    },
+    {
+      "connector_keys": "xi",
+      "metric_key": "nodt",
+      "location_key": null,
+      "parameters": {
+        "columns": {
+          "id": "id"
+        }
+      },
+      "phases": [
+        [
+          {
+            "id": 1,
+            "a": 1
+          }
+        ],
+        [
+          {
+            "id": 1,
+            "a": 2
+          },
+          {
+            "id": 2,
+            "a": 3
+          }
+        ]
+      ]
+    },
+    {
+      "connector_keys": "xi",
+      "metric_key": "newcols",
+      "location_key": null,
+      "parameters": {
+        "columns": {
+          "datetime": "dt",
+          "id": "id"
+        }
+      },
+      "phases": [
+        [
+          {
+            "dt": {
+              "$dt": "2024-03-01T00:00:00+00:00"
+            },
+            "id": 1,
+            "a": 1
+          }
+        ],
+        [
+          {
+            "dt": {
+              "$dt": "2024-03-01T00:00:00+00:00"
+            },
+            "id": 1,
+            "b": "new"
+          }
+        ]
+      ]
+    },
+    {
+      "connector_keys": "sql:xi",
+      "metric_key": "inplace",
+      "location_key": null,
+      "inplace": true,
+      "parameters": {
+        "columns": {
+          "datetime": "dt",
+          "id": "id"
+        },
+        "fetch": {
+          "definition": "SELECT * FROM \"xi_basic\"",
+          "backtrack_minutes": 1440
+        }
+      },
+      "phases": [
+        null,
+        null
+      ]
+    },
+    {
+      "connector_keys": "sql:xi",
+      "metric_key": "templated",
+      "location_key": null,
+      "inplace": true,
+      "parameters": {
+        "columns": {
+          "datetime": "dt",
+          "id": "id"
+        },
+        "target": "xi_{{ self.metric }}_out",
+        "sql": "SELECT {{ Pipe('xi', 'basic').columns['datetime'] }} AS dt, id, val * 2 AS val2 FROM {{ Pipe('xi', 'basic') }}"
+      },
+      "phases": [
+        null,
+        null
+      ]
+    }
+  ]
+}

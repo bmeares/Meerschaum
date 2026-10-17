@@ -1,0 +1,6 @@
+{
+  "description": "The superseded `compose` plugin is installed in the host plugins directory: warn once.",
+  "width": 100,
+  "host_plugins": {"compose.py": "\"\"\"The legacy compose plugin.\"\"\"\n__version__ = '1.0.0'\n"},
+  "runs": [{"name": "ps", "action": ["ps"]}, {"name": "logs", "action": ["logs"], "flags": {"nopretty": true}}]
+}

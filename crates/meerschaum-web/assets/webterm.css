@@ -1,0 +1,19 @@
+/* The web terminal: embedded in the console (`/dash/webterm`) and standalone (`/webterm/<session>`). */
+.mrsm-webterm-screen{height:min(72vh,46rem);min-height:15rem;padding:5px;box-sizing:border-box;overflow:hidden;background:#000;border:1px solid #8491a2;border-radius:.3rem}
+html.mrsm-theme-light .mrsm-webterm-screen{background:#fff}
+.mrsm-webterm-bar{display:flex;align-items:flex-end;gap:.5rem;margin-bottom:.4rem}
+.mrsm-webterm-keys{display:flex;align-items:flex-end;gap:12px}
+.mrsm-webterm-mods{display:grid;grid-template-columns:repeat(2,3.6em);gap:3px;align-content:flex-end}
+.mrsm-webterm-arrows{display:grid;grid-template-columns:repeat(3,1.4em);grid-template-areas:". up ." "left down right";gap:3px}
+.mrsm-webterm-key{width:100%;min-width:0;margin:0;padding:2px 0;font-size:.7rem;line-height:1.1;cursor:pointer}
+.mrsm-webterm-key.active{background:var(--link);color:var(--bg)}
+.mrsm-webterm-controls{margin-left:auto;text-align:right;white-space:nowrap}
+.mrsm-webterm-control{cursor:pointer}
+/* Termux-style keys are for touch screens: hidden once there is room for a physical keyboard (v4: `d-md-none`). */
+@media (min-width:768px){.mrsm-webterm-keys{display:none}}
+.mrsm-webterm-fullscreen{position:fixed;inset:0;z-index:1000;padding:.5rem;background:var(--bg);display:flex;flex-direction:column}
+.mrsm-webterm-fullscreen .mrsm-webterm-screen{flex:1;height:auto}
+.mrsm-webterm-fullscreen .mrsm-webterm-note{display:none}
+/* The standalone page has no console chrome around it. */
+body.mrsm-webterm-standalone{margin:0;height:100vh;overflow:hidden;background:#000}
+body.mrsm-webterm-standalone .mrsm-webterm-screen{height:100%;border:0;border-radius:0;min-height:0}

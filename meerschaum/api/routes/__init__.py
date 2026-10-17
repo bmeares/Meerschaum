@@ -9,7 +9,7 @@ Import the routes submodules to register them to the FastAPI app.
 from fnmatch import fnmatch
 from importlib import import_module
 
-from meerschaum.api import _include_dash, mcp_enabled, permissions_config
+from meerschaum.api import _include_dash, _include_webterm, mcp_enabled, permissions_config
 
 ### An explicitly empty allowlist means "register no core route groups";
 ### only a MISSING (or null) allowlist falls back to serving everything.
@@ -59,7 +59,8 @@ for _route_group in _core_route_groups:
 if mcp_enabled and route_group_is_allowed('mcp'):
     import meerschaum.api.routes._mcp
 
-if _include_dash and route_group_is_allowed('webterm'):
+### The v5 API host never sets this: the Rust server serves the terminal itself.
+if _include_webterm and route_group_is_allowed('webterm'):
     import meerschaum.api.routes._webterm
 
 ### The web console's own pages are gated by the `dash` route group

@@ -6,6 +6,8 @@ Define caching functions for session management.
 """
 
 import json
+import time
+import threading
 
 from meerschaum.utils.typing import Union, Dict, Any, Optional
 from meerschaum.api import debug, no_auth
@@ -18,6 +20,84 @@ SESSION_KEY_TEMPLATE: str = 'mrsm_session_id:{session_id}'
 SESSION_COOKIE_NAME: str = 'mrsm-session-id'
 EXPIRES_SECONDS: int = get_config('api', 'cache', 'session_expires_minutes') * 60
 _active_sessions: Dict[str, Dict[str, Any]] = {}
+
+### Without a cache connector, the v5 API host shares the Rust console's durable instance store
+### (`crates/meerschaum-web/src/sessions.rs`, `InstanceSessions`): rows of
+### `session_id` (primary key), `data` (compact JSON string) and `expires` (Unix seconds)
+### in the temporary pipe `mrsm_sessions`. The v4 console (not the host) keeps its in-process dict.
+INSTANCE_SESSIONS_TARGET: str = 'mrsm_sessions'
+_instance_pipe: Any = None
+_instance_write_lock = threading.Lock()
+
+
+def _use_instance_store() -> bool:
+    """
+    Return whether sessions live in the instance (API host without a cache connector).
+    """
+    import meerschaum.api as _api
+    return bool(getattr(_api, '_host_mode', False))
+
+
+def get_instance_sessions_pipe():
+    """
+    Return the temporary pipe holding sessions, with the Rust console's parameters.
+    """
+    global _instance_pipe
+    if _instance_pipe is None:
+        from meerschaum import Pipe
+        _instance_pipe = Pipe(
+            'mrsm', 'sessions',
+            instance=get_api_connector(),
+            temporary=True,
+            parameters={
+                'target': INSTANCE_SESSIONS_TARGET,
+                'columns': {'primary': 'session_id'},
+                'dtypes': {'session_id': 'str', 'data': 'str', 'expires': 'int'},
+                'upsert': True,
+                'hypertable': False,
+            },
+        )
+    return _instance_pipe
+
+
+def _instance_get(session_id: str) -> Union[Dict[str, Any], None]:
+    pipe = get_instance_sessions_pipe()
+    if not pipe.exists():
+        return None
+    doc = pipe.get_doc(params={'session_id': session_id})
+    if not doc:
+        return None
+    try:
+        expires = int(doc.get('expires', 0) or 0)
+    except (TypeError, ValueError):
+        expires = 0
+    if expires <= int(time.time()):
+        return None
+    try:
+        return json.loads(doc.get('data', None))
+    except Exception:
+        return None
+
+
+def _instance_set(session_id: str, data_str: str) -> None:
+    pipe = get_instance_sessions_pipe()
+    doc = {
+        'session_id': session_id,
+        'data': data_str,
+        'expires': int(time.time()) + EXPIRES_SECONDS,
+    }
+    with _instance_write_lock:
+        success, message = pipe.sync([doc], check_existing=False, debug=debug)
+    if not success:
+        raise RuntimeError(f"Failed to write session: {message}")
+
+
+def _instance_delete(session_id: str) -> None:
+    pipe = get_instance_sessions_pipe()
+    if not pipe.exists():
+        return
+    with _instance_write_lock:
+        pipe.clear(params={'session_id': session_id}, debug=debug)
 
 
 def set_session_cookie(response, session_id: str, secure: bool = False) -> None:
@@ -84,6 +164,9 @@ def set_session(session_id: str, session_data: Dict[str, Any]):
     Set a `session_id` to a dictionary.
     """
     conn = get_cache_connector()
+    if conn is None and _use_instance_store():
+        _instance_set(str(session_id), json.dumps(session_data, separators=(',', ':')))
+        return
     if conn is None:
         _active_sessions[session_id] = session_data
         if debug:
@@ -114,6 +197,8 @@ def get_session_data(session_id: Optional[str]) -> Union[Dict[str, Any], None]:
     if debug:
         dprint(f"Getting session data for {session_id=}")
     conn = get_cache_connector()
+    if conn is None and _use_instance_store():
+        return _instance_get(str(session_id))
     if conn is None:
         return _active_sessions.get(str(session_id), None)
 
@@ -166,6 +251,9 @@ def delete_session(session_id: str):
     if debug:
         dprint(f"Deleting {session_id=}")
     conn = get_cache_connector()
+    if conn is None and _use_instance_store():
+        _instance_delete(str(session_id))
+        return
     if conn is None:
         _ = _active_sessions.pop(session_id, None)
         return

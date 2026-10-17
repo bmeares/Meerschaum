@@ -15,6 +15,10 @@ Run `bootstrap plugin` to get started:
 mrsm bootstrap plugin
 ```
 
+!!! tip "New in v5: Rust plugins"
+
+    Prefer a native library over a Python module? [Rust plugins](/reference/plugins/rust-plugins/) can do everything Python plugins can, load in-process without a Python interpreter, and sit side by side with Python plugins in the same directory.
+
 !!! question "What can I do with plugins?"
 
     Plugins are just Python modules, so the sky is the limit as to what's possible. The main idea behind plugins is to connect to any arbitrary data source: read more about the [types of plugins](/reference/plugins/types-of-plugins/) to get into the specifics.

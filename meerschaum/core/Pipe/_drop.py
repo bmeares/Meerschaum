@@ -48,6 +48,10 @@ def drop(
     self._clear_cache_key('_exists', debug=debug)
     self._clear_cache_key('_exists_timestamp', debug=debug)
 
+    if isinstance(result, tuple) and result and result[0]:
+        from meerschaum.core.Pipeline._engine import forget_engine_state
+        forget_engine_state(self, 'drop_pipe')
+
     return result
 
 

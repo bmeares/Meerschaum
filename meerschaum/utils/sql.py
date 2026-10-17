@@ -21,6 +21,7 @@ from meerschaum.utils.dtypes.sql import (
 )
 from meerschaum.utils.warnings import warn
 from meerschaum.utils.debug import dprint
+from meerschaum._core._gate import rust_impl as _rust_impl
 
 test_queries = {
     'default'    : 'SELECT 1',
@@ -979,6 +980,9 @@ def sql_item_name(item: str, flavor: str, schema: Optional[str] = None) -> str:
     '"abc"."table"'
 
     """
+    if (_rust := _rust_impl('sql_item_name')) is not None:
+        return _rust(item, flavor, schema)
+
     truncated_item = truncate_item_name(str(item), flavor)
     if flavor == 'oracle':
         truncated_item = pg_capital(truncated_item, quote_capitals=True)
@@ -1122,6 +1126,12 @@ def build_where(
         "foo" IN ('1', '2', '3')
     ```
     """
+    if (_rust := _rust_impl('build_where')) is not None:
+        _query_flavor = (
+            getattr(connector, 'flavor', flavor) if connector is not None else flavor
+        )
+        return _rust(params, _query_flavor, with_where)
+
     import json
     from meerschaum._internal.static import STATIC_CONFIG
     from meerschaum.utils.warnings import warn

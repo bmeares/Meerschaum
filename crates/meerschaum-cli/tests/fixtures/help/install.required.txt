@@ -1,0 +1,7 @@
+
+Install the required packages for Meerschaum plugins.
+Each plugin's packages will be installed into its virtual environment.
+
+Example:
+    `install required noaa covid`
+

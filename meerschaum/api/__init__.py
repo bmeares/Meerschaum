@@ -36,7 +36,6 @@ CHECK_UPDATE = os.environ.get(STATIC_CONFIG['environment']['runtime'], None) != 
 
 endpoints = STATIC_CONFIG['api']['endpoints']
 
-uv = attempt_import('uv', lazy=False, check_update=CHECK_UPDATE)
 (
     fastapi,
     aiofiles,
@@ -69,6 +68,38 @@ from meerschaum.api._exceptions import APIPermissionError
 uvicorn_config_path = paths.API_UVICORN_RESOURCES_PATH / SERVER_ID / 'config.json'
 
 uvicorn_config = None
+
+### The Python API host (`python -m meerschaum.api.host`, v5 §7.3) serves only what plugins add:
+### the Rust server serves the core routes, the console and `/mcp`. In host mode the server's
+### options come from `MRSM_API_HOST_CONFIG` instead of the uvicorn config file, and the core
+### routes, events, websockets and Dash console below are not imported.
+def _is_host_process() -> bool:
+    """
+    Return whether this process is the API host: `MRSM_API_HOST` is set, or the interpreter was
+    started as `python -m meerschaum.api.host` (which imports this package before the host's
+    `__main__` runs, so the environment cannot be set in time).
+    """
+    import sys
+    if os.environ.get('MRSM_API_HOST', '').lower() not in ('', '0', 'false'):
+        return True
+    argv = list(getattr(sys, 'orig_argv', None) or [])
+    for i, arg in enumerate(argv[:-1]):
+        if arg == '-m' and argv[i + 1] == 'meerschaum.api.host':
+            os.environ['MRSM_API_HOST'] = '1'
+            return True
+    return False
+
+
+_host_mode = _is_host_process()
+if _host_mode:
+    import json as _json
+    uvicorn_config = {
+        'no_dash': True,
+        'no_webterm': True,
+        'mrsm_instance': get_config('meerschaum', 'api_instance'),
+        **_json.loads(os.environ.get('MRSM_API_HOST_CONFIG', None) or '{}'),
+    }
+
 sys_config = get_config('api')
 permissions_config = get_config('api', 'permissions')
 
@@ -374,20 +405,22 @@ def __getattr__(name: str):
     raise AttributeError(f"Could not import '{name}'.")
 
 ### Import everything else within the API.
-from meerschaum.api._oauth2 import manager, ScopedAuth
-import meerschaum.api.routes as routes
-import meerschaum.api._events
-import meerschaum.api._websockets
+from meerschaum.api._oauth2 import manager, ScopedAuth, CurrentScopes
+
+if not _host_mode:
+    import meerschaum.api.routes as routes
+    import meerschaum.api._events
+    import meerschaum.api._websockets
 
 ### Skip importing the dash if `--no-dash` is provided.
-if _include_dash:
+if _include_dash and not _host_mode:
     import meerschaum.api.dash
 
 ### The `mcp` plugin predates the built-in `/mcp` endpoint and registers a route
 ### at the same path. Routes registered above win, so the plugin's route is
 ### unreachable rather than conflicting — but say so plainly instead of leaving
 ### two implementations installed.
-if mcp_enabled:
+if mcp_enabled and not _host_mode:
     from meerschaum.mcp import has_mcp_plugin
     if has_mcp_plugin():
         warn(
@@ -397,8 +430,8 @@ if mcp_enabled:
             stack=False,
         )
 
-### Execute the API plugins functions.
-for module_name, functions_list in _api_plugins.items():
+### Execute the API plugins functions (the API host runs them itself, in plugin order).
+for module_name, functions_list in ({} if _host_mode else _api_plugins).items():
     plugin_name = (
         module_name.split('.')[1]
         if module_name and module_name.startswith('plugins.')

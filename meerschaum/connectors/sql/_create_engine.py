@@ -18,8 +18,6 @@ from meerschaum._internal.static import STATIC_CONFIG
 
 flavor_configs = STATIC_CONFIG['sql']['create_engine_flavors']
 install_flavor_drivers = {
-    'sqlite': ['aiosqlite'],
-    'geopackage': ['aiosqlite'],
     'duckdb': ['duckdb', 'duckdb_engine'],
     'mysql': ['pymysql'],
     'mariadb': ['pymysql'],
@@ -94,6 +92,15 @@ def create_engine(
     ### self._sys_config was deepcopied and can be updated safely
     if self.flavor in ("sqlite", "duckdb", "geopackage"):
         engine_str = f"{_engine}:///{_database}" if not _uri else _uri
+        _shared_memory_getter = getattr(self, '_shared_memory_database', None)
+        if (
+            self.flavor == 'sqlite'
+            and not _uri
+            and _shared_memory_getter is not None
+            and (_shared_memory := _shared_memory_getter()) is not None
+        ):
+            ### One database file for SQLAlchemy and the Rust pool (see `_shared_memory_database`).
+            engine_str = f"{_engine}:///{_shared_memory}"
         if 'create_engine' not in self._sys_config:
             self._sys_config['create_engine'] = {}
         if 'connect_args' not in self._sys_config['create_engine']:
@@ -130,7 +137,11 @@ def create_engine(
     ###       2. System configuration
     ###       3. Connector configuration
     ###       4. Keyword arguments
-    _create_engine_args = flavor_configs.get(self.flavor, {}).get('create_engine', {})
+    # Flavor defaults may share nested dictionaries across SQL dialects. Per-connector
+    # overrides must not mutate STATIC_CONFIG or affect engines created afterwards.
+    _create_engine_args = copy.deepcopy(
+        flavor_configs.get(self.flavor, {}).get('create_engine', {})
+    )
     def _apply_create_engine_args(update):
         if 'ALL' not in flavor_configs[self.flavor].get('omit_create_engine', {}):
             _create_engine_args.update(

@@ -12,6 +12,7 @@ from datetime import datetime, timedelta, timezone
 
 import meerschaum as mrsm
 from meerschaum.utils.typing import Optional, Union, Any, List, Dict
+from meerschaum._core._gate import rust_impl as _rust_impl, rust_method as _rust_method
 
 
 def fetch(
@@ -120,6 +121,45 @@ def get_pipe_metadef(
     -------
     A pipe's meta definition fetch query string.
     """
+    if (
+        (_rust := _rust_impl('get_pipe_metadef')) is not None
+        and _rust_method(self, 'flavor') is not None
+        and _use_rust_metadef(pipe)
+    ):
+        parent = pipe.parent
+        _parent_spec = None
+        if parent is not None:
+            _parent_dt_col = parent.columns.get('datetime', None)
+            _parent_instance = parent.instance_connector
+            _parent_spec = {
+                'target': parent.target,
+                'schema': (
+                    _parent_instance.get_pipe_schema(parent)
+                    if _parent_instance.type == 'sql'
+                    else None
+                ),
+                'dt_col': _parent_dt_col,
+                'dt_typ': (
+                    parent.dtypes.get(_parent_dt_col, 'datetime')
+                    if _parent_dt_col
+                    else None
+                ),
+                'precision_unit': (parent.precision or {}).get('unit', 'second'),
+            }
+        _meta_def = _rust(
+            self.__dict__['_rust_connector'],
+            pipe,
+            params,
+            begin,
+            end,
+            check_existing,
+            pipe.get_sync_time(debug=debug) if begin == '' else None,
+            _parent_spec,
+        )
+        if _meta_def is None:
+            raise ValueError(f"No SQL definition could be found for {pipe}.")
+        return _meta_def
+
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.sql import (
         sql_item_name,
@@ -367,6 +407,18 @@ def get_pipe_metadef(
         meta_def += params_where
 
     return meta_def.rstrip()
+
+
+def _use_rust_metadef(pipe: mrsm.Pipe) -> bool:
+    """
+    The Rust metadefinition covers every query shape except the experimental `join_fetch`
+    (an `id` column with `system:experimental:join_fetch` set), which stays Python.
+    """
+    from meerschaum.config import get_config
+    return (
+        not (pipe.columns or {}).get('id', None)
+        or not get_config('system', 'experimental', 'join_fetch')
+    )
 
 
 def get_pipe_query(

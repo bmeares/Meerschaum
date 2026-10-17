@@ -1,0 +1,33 @@
+project_name: lint
+root_dir: ./root
+plugins_dir:
+  - ./plugins
+  - ./does-not-exist
+piped:
+  - connector: plugin:typo
+    metric: unknown-top-level-key
+pipes:
+  - connector: sql:local
+    metric: source
+    instance: sql:local
+    parameters:
+      columns:
+        datetime: ts
+      dtype:
+        value: float64
+      tag: legacy
+      index:
+        station: station
+
+  - connector: sql:local
+    metric: derived
+    instance: sql:local
+    parameters:
+      sql: |-
+        SELECT *
+        FROM {{ Pipe('sql:local', 'source', instance='sql:local') }}
+        JOIN {{ Pipe('sql:local', 'stale', instance='sql:local') }}
+      columns: "{{ Pipe('sql:local', 'source', instance='sql:local').columns }}"
+      indexes:
+        id: id
+      tags: "string-tags-in-parameters"

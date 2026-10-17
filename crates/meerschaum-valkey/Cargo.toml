@@ -1,0 +1,37 @@
+[package]
+name = "meerschaum-valkey"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "Meerschaum v5: valkey crate (see docs/design/v5.0.0.md)"
+
+[dependencies]
+meerschaum-core = { workspace = true }
+meerschaum-kernel = { workspace = true }
+meerschaum-connector = { workspace = true }
+# `wire::to_json` (pandas' `to_json`, for `push_df`); no HTTP client.
+meerschaum-api = { path = "../meerschaum-api", default-features = false }
+serde_json = { workspace = true }
+indexmap = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tokio = { workspace = true }
+# Crate-private: the Valkey client.
+fred = { version = "10", default-features = false, features = [
+    "i-keys",
+    "i-sorted-sets",
+    "i-sets",
+    "i-lists",
+    "i-hashes",
+    "i-scripts",
+    "i-server",
+] }
+
+[dev-dependencies]
+tokio = { workspace = true }
+serde_json = { workspace = true }

@@ -61,7 +61,7 @@ def clear(
     begin, end = self.parse_date_bounds(begin, end)
 
     with Venv(get_connector_plugin(self.instance_connector)):
-        return self.instance_connector.clear_pipe(
+        result = self.instance_connector.clear_pipe(
             self,
             begin=begin,
             end=end,
@@ -69,3 +69,7 @@ def clear(
             debug=debug,
             **kwargs
         )
+    if begin is None and end is None and not params and isinstance(result, tuple) and result[0]:
+        from meerschaum.core.Pipeline._engine import forget_engine_state
+        forget_engine_state(self, 'clear_pipe')
+    return result

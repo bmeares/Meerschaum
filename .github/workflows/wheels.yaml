@@ -1,0 +1,216 @@
+name: wheels
+
+# Builds the two Meerschaum 5 distributions (docs/design/v5.0.0.md D8, D9, §12) on GitHub-hosted
+# runners and smoke-tests them in fresh virtual environments:
+#   - `meerschaum`      the maturin mixed project at the repository root (pyproject.toml): the
+#                       Python package plus the `meerschaum._core` extension, one `cp311-abi3`
+#                       wheel per platform;
+#   - `meerschaum-cli`  the `mrsm` binary wheel (crates/meerschaum-cli/pyproject.toml).
+# Plus one EXPERIMENTAL free-threaded wheel (R8, §12): `cp314t` on Linux, built from the same
+# source as a version-specific (non-abi3) wheel with `continue-on-error`, and smoke-tested by a
+# non-blocking job. It never gates a release: pyo3 0.25 ignores the `abi3` feature on a
+# free-threaded interpreter, and `_core` declares `gil_used = false`.
+# Nothing here publishes anything: the wheels are workflow artifacts. Never `self-hosted`: the
+# self-hosted runner is reserved for rust.yaml / pytest.yaml (docs/design/v5-build.md).
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v5*'
+  pull_request:
+    paths:
+      - 'pyproject.toml'
+      - 'crates/**/pyproject.toml'
+      - '.github/workflows/wheels.yaml'
+      - 'scripts/check_packaging.py'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: wheels-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  metadata:
+    name: packaging metadata
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { persist-credentials: false }
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Cargo version, pyproject pins and extras agree
+        run: python scripts/check_packaging.py
+
+  build:
+    name: build (${{ matrix.os }}${{ matrix.freethreaded && ', cp314t, experimental' || '' }})
+    needs: metadata
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            manylinux: '2_28'
+          - os: macos-latest
+            manylinux: 'off'
+          - os: windows-latest
+            manylinux: 'off'
+          # EXPERIMENTAL (R8): the free-threaded `cp314t` wheel. Non-blocking; only the
+          # `meerschaum` wheel is rebuilt (the `meerschaum-cli` wheel is `py3-none`).
+          - os: ubuntu-latest
+            manylinux: '2_28'
+            freethreaded: true
+    # A failed experimental entry must not fail the workflow (or the jobs that need `build`).
+    continue-on-error: ${{ matrix.freethreaded == true }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { persist-credentials: false }
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Build the meerschaum wheel
+        uses: PyO3/maturin-action@v1
+        with:
+          command: build
+          manylinux: ${{ matrix.manylinux }}
+          # Free-threaded: an explicit interpreter, so maturin builds `cp314-cp314t` (the
+          # manylinux container ships /opt/python/cp314-cp314t). The default entries build the
+          # `cp311-abi3` wheel.
+          args: --release --locked --out dist ${{ matrix.freethreaded && '--interpreter python3.14t' || '' }}
+
+      - name: Build the meerschaum-cli wheel
+        if: ${{ !matrix.freethreaded }}
+        uses: PyO3/maturin-action@v1
+        with:
+          command: build
+          manylinux: ${{ matrix.manylinux }}
+          args: --release --locked --out dist -m crates/meerschaum-cli/Cargo.toml
+
+      # Wheel metadata, `_version.py` inside the wheel and `mrsm --version` agree with Cargo.
+      - name: Check the wheels agree on the version
+        if: ${{ !matrix.freethreaded }}
+        shell: bash
+        run: python scripts/check_packaging.py --wheels dist --require-cli-run
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.os }}${{ matrix.freethreaded && '-cp314t' || '' }}
+          path: dist/*.whl
+          if-no-files-found: error
+
+  sdist:
+    name: build (sdist)
+    needs: metadata
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { persist-credentials: false }
+      - name: Build the meerschaum sdist
+        uses: PyO3/maturin-action@v1
+        with:
+          command: sdist
+          args: --out dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sdist
+          path: dist/*.tar.gz
+          if-no-files-found: error
+
+  smoke:
+    name: smoke (${{ matrix.os }}, py${{ matrix.python }})
+    needs: build
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest, macos-latest, windows-latest ]
+        python: [ '3.11', '3.14' ]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      # No checkout: the wheels are tested in isolation, not against the source tree.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: wheels-${{ matrix.os }}
+          path: dist
+      - name: Install both wheels into a fresh venv
+        run: |
+          ls -l dist
+          python -m venv "$RUNNER_TEMP/venv"
+          if [ -d "$RUNNER_TEMP/venv/Scripts" ]; then bindir=Scripts; else bindir=bin; fi
+          echo "VENV_BIN=$RUNNER_TEMP/venv/$bindir" >> "$GITHUB_ENV"
+          # `meerschaum` depends on `meerschaum-cli` at the same version: resolve it from dist/.
+          "$RUNNER_TEMP/venv/$bindir/python" -m pip install --no-index --find-links dist meerschaum
+          "$RUNNER_TEMP/venv/$bindir/python" -m pip list
+      - name: Import the package and the extension
+        run: |
+          export MRSM_ROOT_DIR="$RUNNER_TEMP/mrsm-root" MRSM_PLUGINS_DIR="$RUNNER_TEMP/mrsm-plugins"
+          mkdir -p "$MRSM_ROOT_DIR" "$MRSM_PLUGINS_DIR"
+          cd "$RUNNER_TEMP"
+          "$VENV_BIN/python" -c "
+          import meerschaum, meerschaum._core as core
+          assert core.AVAILABLE, core.LOAD_ERROR
+          print('meerschaum', meerschaum.__version__, 'core', core.__version__, core.EXTENSION_PATH)
+          "
+      - name: mrsm show version
+        run: |
+          export MRSM_ROOT_DIR="$RUNNER_TEMP/mrsm-root" MRSM_PLUGINS_DIR="$RUNNER_TEMP/mrsm-plugins"
+          cd "$RUNNER_TEMP"
+          "$VENV_BIN/mrsm" --version
+          "$VENV_BIN/mrsm" show version
+      - name: Base wheel has no Python dependencies
+        run: |
+          "$VENV_BIN/python" -m pip list --format=freeze | sed 's/==.*//' | sort > "$RUNNER_TEMP/installed.txt"
+          cat "$RUNNER_TEMP/installed.txt"
+          # pip/setuptools/wheel (ensurepip) are not Meerschaum's; anything else is a leak.
+          extra="$(grep -viE '^(pip|setuptools|wheel|meerschaum|meerschaum-cli)$' "$RUNNER_TEMP/installed.txt" || true)"
+          if [ -n "$extra" ]; then echo "unexpected dependencies: $extra" >&2; exit 1; fi
+
+  # EXPERIMENTAL (R8): install the free-threaded wheel next to the stable `meerschaum-cli` wheel
+  # on a free-threaded interpreter and check that importing `_core` keeps the GIL disabled.
+  smoke-freethreaded:
+    name: smoke (free-threaded, py3.14t)
+    needs: build
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14t'
+      - uses: actions/download-artifact@v4
+        with:
+          name: wheels-ubuntu-latest
+          path: dist
+      - uses: actions/download-artifact@v4
+        with:
+          name: wheels-ubuntu-latest-cp314t
+          path: dist-ft
+      - name: Install the free-threaded wheel (cp314t) and the CLI wheel
+        run: |
+          ls -l dist dist-ft
+          python -m venv "$RUNNER_TEMP/venv"
+          # The abi3 `meerschaum` wheel is deliberately not on the path: it would shadow cp314t.
+          rm -f dist/meerschaum-*.whl
+          "$RUNNER_TEMP/venv/bin/python" -m pip install --no-index --find-links dist --find-links dist-ft meerschaum
+      - name: _core imports without re-enabling the GIL
+        run: |
+          export MRSM_ROOT_DIR="$RUNNER_TEMP/mrsm-root" MRSM_PLUGINS_DIR="$RUNNER_TEMP/mrsm-plugins"
+          mkdir -p "$MRSM_ROOT_DIR" "$MRSM_PLUGINS_DIR"
+          cd "$RUNNER_TEMP"
+          "$RUNNER_TEMP/venv/bin/python" -X gil=0 -c "
+          import sys, meerschaum._core as core
+          assert core.AVAILABLE, core.LOAD_ERROR
+          assert not sys._is_gil_enabled(), 'importing _core re-enabled the GIL'
+          print('free-threaded OK', core.__version__, core.EXTENSION_PATH)
+          "

@@ -1,0 +1,20 @@
+isolated: MRSM{meerschaum:instance}
+embedded: prefix MRSM{meerschaum:connectors:sql:main:port} suffix
+dict_isolated: MRSM{meerschaum:connectors:api:remote}
+dict_embedded: 'conn: MRSM{meerschaum:connectors:api:remote}'
+literal: 'x MRSM{!custom2:items} y'
+missing: MRSM{does:not:exist}
+default_link: MRSM{pipes:parameters:verify:chunk_minutes}
+nested:
+  deeper:
+    value: MRSM{meerschaum:connectors:sql:main:host}
+  list:
+  - MRSM{meerschaum:instance}
+  - 2
+  - true
+on_off: off
+octal: 017
+sexagesimal: 1:30
+float_exp: 1e3
+float_dot: 1.0e+3
+nothing: ~

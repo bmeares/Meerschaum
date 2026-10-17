@@ -9,6 +9,7 @@ Delete duplicate rows within a pipe's table.
 from __future__ import annotations
 from datetime import datetime, timedelta
 from meerschaum.utils.typing import SuccessTuple, Any, Optional, Dict, Tuple, Union
+from meerschaum._core._gate import rust_impl as _rust_impl
 
 
 def deduplicate(
@@ -59,6 +60,25 @@ def deduplicate(
     -------
     A `SuccessTuple` corresponding to whether all of the chunks were successfully deduplicated.
     """
+    if (_rust := _rust_impl('pipe_deduplicate')) is not None:
+        from meerschaum.core.Pipe._data import _rust_context
+        _context = _rust_context(self, debug=debug)
+        if _context is not None:
+            _begin, _end = self.parse_date_bounds(begin, end)
+            return _rust(
+                self,
+                _context,
+                begin=_begin,
+                end=_end,
+                params=params,
+                chunk_interval=chunk_interval,
+                bounded=bounded,
+                use_instance_method=_use_instance_method,
+                workers=self.get_num_workers(workers=workers),
+                kwargs=kwargs,
+                debug=debug,
+            )
+
     from meerschaum.utils.warnings import warn, info
     from meerschaum.utils.misc import interval_str, items_str
     from meerschaum.utils.venv import Venv

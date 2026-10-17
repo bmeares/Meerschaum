@@ -1,0 +1,6 @@
+instance: sql:main
+connectors:
+  sql:
+    main:
+      flavor: sqlite
+      database: /tmp/does-not-matter.db

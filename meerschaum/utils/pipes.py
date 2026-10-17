@@ -16,6 +16,7 @@ import uuid
 
 from meerschaum.utils.typing import PipesDict, Optional
 import meerschaum as mrsm
+from meerschaum._core._gate import rust_impl as _rust_impl
 
 
 def get_pipe_from_value(
@@ -218,6 +219,8 @@ def replace_pipes_syntax(text: str, _pipe=None) -> Any:
     """
     Parse a string containing the `{{ Pipe() }}` syntax.
     """
+    if (_rust := _rust_impl('replace_pipes_syntax')) is not None:
+        return _rust(text, _pipe=_pipe)
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.dtypes import json_serialize_value
     pattern = r'\{\{\s*(?:mrsm\.)?Pipe\((.*?)\)((?:\.[\w]+|\[[^\]]+\])*)\s*\}\}'

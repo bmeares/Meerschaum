@@ -1,0 +1,860 @@
+{
+  "meerschaum": {
+    "instance": "sql:main",
+    "api_instance": "MRSM{meerschaum:instance}",
+    "repository": "api:mrsm",
+    "connectors": {
+      "sql": {
+        "default": {},
+        "main": {
+          "username": "mrsm",
+          "password": "mrsm",
+          "flavor": "timescaledb-ha",
+          "host": "localhost",
+          "database": "meerschaum",
+          "port": 5432
+        },
+        "local": {
+          "flavor": "sqlite",
+          "database": "{SQLITE_DB_PATH}"
+        },
+        "memory": {
+          "flavor": "sqlite",
+          "database": ":memory:"
+        }
+      },
+      "api": {
+        "default": {
+          "protocol": "http"
+        },
+        "main": {
+          "host": "localhost",
+          "port": 8000
+        },
+        "local": {
+          "host": "localhost",
+          "port": 8000
+        },
+        "mrsm": {
+          "host": "api.mrsm.io",
+          "port": 443,
+          "protocol": "https"
+        }
+      },
+      "valkey": {
+        "main": {
+          "host": "localhost",
+          "username": "default",
+          "password": "mrsm",
+          "port": 6379
+        }
+      }
+    }
+  },
+  "system": {
+    "connectors": {
+      "all": {
+        "pandas": "pandas"
+      },
+      "sql": {
+        "bulk_insert": {
+          "postgresql": true,
+          "postgis": true,
+          "citus": true,
+          "timescaledb": true,
+          "timescaledb-ha": true,
+          "mssql": true
+        },
+        "instance": {
+          "create_metadata_cache_minutes": 14400,
+          "stale_temporary_tables_minutes": 1440,
+          "temporary_target": {
+            "prefix": "_",
+            "transaction_id_length": 4,
+            "separator": "_"
+          },
+          "max_partitions_per_sync": 10000
+        },
+        "chunksize": 100000,
+        "poolclass": "sqlalchemy.pool.QueuePool",
+        "create_engine": {
+          "method": "multi",
+          "pool_size": 8,
+          "max_overflow": 12,
+          "pool_recycle": 3600,
+          "connect_args": {}
+        }
+      },
+      "api": {}
+    },
+    "cli": {
+      "max_daemons": {
+        "__mrsm_dynamic__": "cpu_count*3"
+      },
+      "refresh_seconds": 0.1,
+      "allowed_prefixes": [
+        "*"
+      ],
+      "disallowed_prefixes": [
+        "edit",
+        "start daemon",
+        "start job",
+        "stop job",
+        "delete job",
+        "stop daemon",
+        "show daemon",
+        "restart daemon",
+        "install",
+        "upgrade",
+        "reload",
+        "start worker",
+        "show log",
+        "python",
+        "login",
+        "executor",
+        "os ",
+        "sh ",
+        "start api",
+        "start webterm",
+        "stack",
+        "instance",
+        "debug",
+        "bootstrap",
+        "daemon",
+        "sql",
+        "register plugin",
+        "copy "
+      ]
+    },
+    "experimental": {
+      "fetch": false,
+      "cache": true,
+      "space": false,
+      "join_fetch": false,
+      "inplace_sync": true,
+      "uv_pip": true,
+      "systemd_healthcheck": false,
+      "valkey_session_cache": true,
+      "cli_daemon": false
+    }
+  },
+  "api": {
+    "uvicorn": {
+      "app": "meerschaum.api:app",
+      "port": 8000,
+      "host": "0.0.0.0",
+      "workers": {
+        "__mrsm_dynamic__": "max(cpu_count/2,1)"
+      },
+      "proxy_headers": true,
+      "forwarded_allow_ips": "*"
+    },
+    "cache": {
+      "connector": "valkey:main",
+      "session_expires_minutes": 43200,
+      "pipes": false
+    },
+    "data": {
+      "max_response_row_limit": 100000,
+      "chunks": {
+        "ttl_seconds": 1800
+      }
+    },
+    "endpoints": {
+      "docs_in_production": true
+    },
+    "mcp": {
+      "enabled": true,
+      "read_only": false,
+      "actions": {
+        "denylist": [
+          "sh",
+          "os",
+          "python",
+          "stack",
+          "sql",
+          "install"
+        ],
+        "allowlist": []
+      }
+    },
+    "dash": {
+      "mcp": {
+        "enabled": false
+      }
+    },
+    "tokens": {
+      "valid_refresh_minutes": 60,
+      "default_expiration_days": 366
+    },
+    "permissions": {
+      "registration": {
+        "users": true,
+        "pipes": true,
+        "plugins": true
+      },
+      "actions": {
+        "non_admin": true
+      },
+      "chaining": {
+        "insecure_parent_instance": false,
+        "child_apis": false
+      },
+      "instances": {
+        "allow_multiple_instances": true,
+        "allowed_instance_keys": [
+          "*"
+        ]
+      },
+      "routes": {
+        "allowlist": [
+          "*"
+        ]
+      }
+    },
+    "protocol": "http",
+    "webterm": {
+      "tmux": {
+        "enabled": true,
+        "session_suffix": "_mrsm"
+      },
+      "host": "127.0.0.1",
+      "port": 8765
+    }
+  },
+  "formatting": {
+    "unicode": {
+      "__mrsm_dynamic__": "not_windows"
+    },
+    "ansi": true,
+    "emoji": {
+      "hand": "👋",
+      "error": "🛑",
+      "failure": "💢",
+      "failure_calm": "❌",
+      "success": "🎉",
+      "success_calm": "✅",
+      "warning": "🔔",
+      "info": "💬",
+      "debug": "🐞",
+      "question": "❓",
+      "connector": "🔌",
+      "metric": "📊",
+      "location": "📍",
+      "locked": "🔒",
+      "unlocked": "🔓",
+      "key": "🔑",
+      "idea": "💡",
+      "connected": "🟢",
+      "disconnected": "🔴",
+      "running": "🟢",
+      "paused": "🟡",
+      "stopped": "🔴",
+      "tag": "🔖",
+      "announcement": "📢"
+    },
+    "pipes": {
+      "unicode": {
+        "icons": {
+          "connector": "MRSM{formatting:emoji:connector} ",
+          "metric": "MRSM{formatting:emoji:metric} ",
+          "location": "MRSM{formatting:emoji:location} ",
+          "key": "MRSM{formatting:emoji:key} ",
+          "tag": "MRSM{formatting:emoji:tag} "
+        }
+      },
+      "ascii": {
+        "icons": {
+          "connector": "",
+          "metric": "",
+          "location": "",
+          "key": "",
+          "tag": ""
+        }
+      },
+      "ansi": {
+        "styles": {
+          "connector": "green",
+          "metric": "bright_blue",
+          "location": "magenta",
+          "key": "",
+          "guide": "dim",
+          "none": "black on magenta",
+          "tags": "bold yellow underline"
+        }
+      },
+      "__repr__": {
+        "ansi": {
+          "styles": {
+            "Pipe": "bold white",
+            "punctuation": "white",
+            "connector": "MRSM{formatting:pipes:ansi:styles:connector}",
+            "metric": "MRSM{formatting:pipes:ansi:styles:metric}",
+            "location": "MRSM{formatting:pipes:ansi:styles:location}",
+            "instance": "#d177a4"
+          }
+        }
+      }
+    },
+    "warnings": {
+      "unicode": {
+        "icon": "MRSM{formatting:emoji:warning}"
+      },
+      "ascii": {
+        "icon": "WARNING"
+      },
+      "ansi": {
+        "rich": {
+          "style": "bold yellow"
+        }
+      }
+    },
+    "success": {
+      "unicode": {
+        "icon": "MRSM{formatting:emoji:success}"
+      },
+      "ascii": {
+        "icon": "+"
+      },
+      "ansi": {
+        "rich": {
+          "style": "bold bright_green"
+        }
+      }
+    },
+    "failure": {
+      "unicode": {
+        "icon": "MRSM{formatting:emoji:failure}"
+      },
+      "ascii": {
+        "icon": "-"
+      },
+      "ansi": {
+        "rich": {
+          "style": "bold red"
+        }
+      }
+    },
+    "success_calm": {
+      "unicode": {
+        "icon": "MRSM{formatting:emoji:success_calm}"
+      },
+      "ascii": {
+        "icon": "+"
+      },
+      "ansi": {
+        "rich": {
+          "style": "pale_green3"
+        }
+      }
+    },
+    "failure_calm": {
+      "unicode": {
+        "icon": "MRSM{formatting:emoji:failure_calm}"
+      },
+      "ascii": {
+        "icon": "x"
+      },
+      "ansi": {
+        "rich": {
+          "style": "indian red"
+        }
+      }
+    },
+    "errors": {
+      "unicode": {
+        "icon": "MRSM{formatting:emoji:error}"
+      },
+      "ascii": {
+        "icon": "ERROR"
+      },
+      "ansi": {
+        "rich": {
+          "style": "bold red"
+        }
+      }
+    },
+    "info": {
+      "unicode": {
+        "icon": "MRSM{formatting:emoji:info}"
+      },
+      "ascii": {
+        "icon": "INFO"
+      },
+      "ansi": {
+        "rich": {
+          "style": "bright_magenta"
+        }
+      }
+    },
+    "question": {
+      "unicode": {
+        "icon": "MRSM{formatting:emoji:question}"
+      },
+      "ascii": {
+        "icon": ""
+      },
+      "ansi": {
+        "rich": {
+          "style": "green"
+        }
+      }
+    },
+    "debug": {
+      "unicode": {
+        "icon": "MRSM{formatting:emoji:debug}"
+      },
+      "ascii": {
+        "icon": "DEBUG"
+      },
+      "ansi": {
+        "rich": {
+          "style": "cyan"
+        }
+      }
+    },
+    "connected": {
+      "unicode": {
+        "icon": "MRSM{formatting:emoji:connected}"
+      },
+      "ascii": {
+        "icon": ""
+      },
+      "ansi": {
+        "rich": {
+          "style": "green"
+        }
+      }
+    },
+    "disconnected": {
+      "unicode": {
+        "icon": "MRSM{formatting:emoji:disconnected}"
+      },
+      "ascii": {
+        "icon": ""
+      },
+      "ansi": {
+        "rich": {
+          "style": "red"
+        }
+      }
+    }
+  },
+  "shell": {
+    "ansi": {
+      "intro": {
+        "rich": {
+          "style": "bold bright_blue"
+        },
+        "color": [
+          "bold",
+          "bright blue"
+        ]
+      },
+      "close_message": {
+        "rich": {
+          "style": "bright_blue"
+        },
+        "color": [
+          "bright blue"
+        ]
+      },
+      "doc_header": {
+        "rich": {
+          "style": "bright_blue"
+        },
+        "color": [
+          "bright blue"
+        ]
+      },
+      "undoc_header": {
+        "rich": {
+          "style": "bright_blue"
+        },
+        "color": [
+          "bright blue"
+        ]
+      },
+      "ruler": {
+        "rich": {
+          "style": "bold bright_blue"
+        },
+        "color": [
+          "bold",
+          "bright blue"
+        ]
+      },
+      "prompt": {
+        "rich": {
+          "style": "green"
+        },
+        "color": [
+          "green"
+        ]
+      },
+      "compose": {
+        "rich": {
+          "style": "bright_magenta"
+        },
+        "color": [
+          "bright magenta"
+        ]
+      },
+      "instance": {
+        "rich": {
+          "style": "cyan"
+        },
+        "color": [
+          "cyan"
+        ]
+      },
+      "repo": {
+        "rich": {
+          "style": "magenta"
+        },
+        "color": [
+          "magenta"
+        ]
+      },
+      "executor": {
+        "rich": {
+          "style": "yellow"
+        }
+      },
+      "username": {
+        "rich": {
+          "style": "white"
+        },
+        "color": [
+          "white"
+        ]
+      },
+      "connected": {
+        "rich": {
+          "style": "green"
+        },
+        "color": [
+          "green"
+        ]
+      },
+      "disconnected": {
+        "rich": {
+          "style": "red"
+        },
+        "color": [
+          "red"
+        ]
+      },
+      "update_message": {
+        "rich": {
+          "style": "red"
+        },
+        "color": [
+          "red"
+        ]
+      }
+    },
+    "ascii": {
+      "intro": "       ___  ___  __   __   __\n |\\/| |__  |__  |__) /__` /  ` |__|  /\\  |  |  |\\/|\n |  | |___ |___ |  \\ .__/ \\__, |  | /~~\\ \\__/  |  |\n",
+      "prompt": "\n [ {username}@{instance}{compose} ] > ",
+      "ruler": "-",
+      "close_message": "Thank you for using Meerschaum!",
+      "doc_header": "Meerschaum actions (`help <action>` for usage):",
+      "undoc_header": "Unimplemented actions:",
+      "update_message": "Update available!"
+    },
+    "unicode": {
+      "intro": "\n █▄ ▄█ ██▀ ██▀ █▀▄ ▄▀▀ ▄▀▀ █▄█ ▄▀▄ █ █ █▄ ▄█\n █ ▀ █ █▄▄ █▄▄ █▀▄ ▄██ ▀▄▄ █ █ █▀█ ▀▄█ █ ▀ █\n",
+      "prompt": "\n [ {username}@{instance}{compose} ] ➤ ",
+      "ruler": "─",
+      "close_message": " MRSM{formatting:emoji:hand} Thank you for using Meerschaum! ",
+      "doc_header": "Meerschaum actions (`help <action>` for usage):",
+      "undoc_header": "Unimplemented actions:",
+      "update_message": "MRSM{formatting:emoji:announcement} Update available!"
+    },
+    "timeout": 60,
+    "max_history": 1000,
+    "clear_screen": true,
+    "bottom_toolbar": {
+      "enabled": true
+    },
+    "updates": {
+      "check_remote": true,
+      "refresh_minutes": 180
+    }
+  },
+  "pipes": {
+    "parameters": {
+      "columns": {
+        "datetime": null
+      },
+      "fetch": {
+        "backtrack_minutes": 1440
+      },
+      "verify": {
+        "bound_days": 366,
+        "chunk_minutes": 43200
+      }
+    },
+    "attributes": {
+      "local_cache_timeout_seconds": 600.0
+    },
+    "sync": {
+      "filter_params_index_limit": 250,
+      "exists_cache_seconds": 60.0
+    },
+    "verify": {
+      "max_chunks_syncs": 3
+    },
+    "autotime": {
+      "column_name_if_datetime_missing": "ts"
+    },
+    "dtypes": {
+      "min_ratio_columns_changed_for_full_astype": 0.5,
+      "columns_types_cache_seconds": 60.0
+    },
+    "static": {
+      "static_schema_cache_seconds": 3600.0
+    },
+    "cache": {
+      "enabled": true
+    }
+  },
+  "plugins": {},
+  "jobs": {
+    "timeout_seconds": 4,
+    "check_timeout_interval_seconds": 0.1,
+    "terminal": {
+      "lines": 40,
+      "columns": 70
+    },
+    "logs": {
+      "timestamps": {
+        "enabled": true,
+        "format": "%Y-%m-%d %H:%M",
+        "follow_format": "%H:%M"
+      },
+      "num_files_to_keep": 5,
+      "max_file_size": 100000,
+      "lines_to_show": 30,
+      "refresh_files_seconds": 5,
+      "min_buffer_len": 5,
+      "colors": [
+        "cyan",
+        "magenta",
+        "orange3",
+        "green",
+        "blue",
+        "red",
+        "spring_green3",
+        "medium_purple3",
+        "medium_violet_red",
+        "slate_blue1",
+        "bright_red",
+        "steel_blue3",
+        "aquamarine1",
+        "dark_khaki",
+        "pink3",
+        "gold3",
+        "pale_green1",
+        "light coral",
+        "light_goldenrod2",
+        "cornsilk1",
+        "orange_red1",
+        "deep_pink1",
+        "aquamarine3",
+        "sky_blue2",
+        "tan",
+        "honeydew2"
+      ]
+    }
+  },
+  "stack": {
+    "project_name": "mrsm",
+    "docker-compose.yaml": {
+      "services": {
+        "db": {
+          "environment": {
+            "TIMESCALEDB_TELEMETRY": "off",
+            "POSTGRES_USER": "<DOLLAR>POSTGRES_USER",
+            "POSTGRES_DB": "<DOLLAR>POSTGRES_DB",
+            "POSTGRES_PASSWORD": "<DOLLAR>POSTGRES_PASSWORD",
+            "ALLOW_IP_RANGE": "0.0.0.0/0"
+          },
+          "command": "postgres -c max_connections=1000 -c shared_buffers=1024MB -c max_prepared_transactions=100",
+          "healthcheck": {
+            "test": [
+              "CMD-SHELL",
+              "pg_isready -d <DOLLAR>POSTGRES_DB -U <DOLLAR>POSTGRES_USER"
+            ],
+            "interval": "5s",
+            "timeout": "3s",
+            "retries": 5
+          },
+          "restart": "always",
+          "image": "timescale/timescaledb-ha:pg18",
+          "ports": [
+            "MRSM{meerschaum:connectors:sql:main:port}:5432"
+          ],
+          "hostname": "db",
+          "volumes": [
+            "meerschaum_db_data:/home/postgres/pgdata",
+            "{__MRSM_ROOT_DIR__}/db/initdb:/docker-entrypoint-initdb.d:z,ro"
+          ],
+          "shm_size": "1024m",
+          "networks": [
+            "backend"
+          ]
+        },
+        "api": {
+          "image": "bmeares/meerschaum:api",
+          "ports": [
+            "MRSM{meerschaum:connectors:api:main:port}:MRSM{meerschaum:connectors:api:main:port}"
+          ],
+          "hostname": "api",
+          "networks": [
+            "frontend",
+            "backend"
+          ],
+          "command": "start api --production --port MRSM{meerschaum:connectors:api:main:port}",
+          "healthcheck": {
+            "test": [
+              "CMD",
+              "curl",
+              "--fail",
+              "http://localhost:MRSM{meerschaum:connectors:api:main:port}/healthcheck"
+            ],
+            "interval": "5s",
+            "timeout": "3s",
+            "retries": 3
+          },
+          "environment": {
+            "MRSM_CONFIG": "{\n    \"meerschaum\": MRSM{!meerschaum},\n    \"system\": MRSM{!system},\n    \"api\": MRSM{!api}\n}",
+            "MRSM_PATCH": "{\n    \"meerschaum\": {\n        \"connectors\": {\n            \"sql\": {\n                \"main\": {\n                    \"host\": \"MRSM{stack:docker-compose.yaml:services:db:hostname}\",\n                    \"port\": 5432\n                },\n                \"local\": {\n                    \"database\": \"/meerschaum/sqlite/mrsm_local.db\"\n                }\n            },\n            \"valkey\": {\n                \"main\": {\n                    \"host\": \"MRSM{stack:docker-compose.yaml:services:valkey:hostname}\",\n                    \"port\": 6379\n                }\n            }\n        }\n    }\n}"
+          },
+          "restart": "always",
+          "init": true,
+          "depends_on": {
+            "db": {
+              "condition": "service_healthy"
+            },
+            "valkey": {
+              "condition": "service_healthy"
+            }
+          },
+          "volumes": [
+            "api_root:/meerschaum"
+          ]
+        },
+        "valkey": {
+          "image": "valkey/valkey-bundle:latest",
+          "restart": "always",
+          "environment": {
+            "VALKEY_PASSWORD": "<DOLLAR>VALKEY_PASSWORD",
+            "VALKEY_RDB_POLICY_DISABLED": "no",
+            "VALKEY_RDB_POLICY": "900#1 600#5 300#10 120#50 60#1000 30#10000"
+          },
+          "hostname": "valkey",
+          "ports": [
+            "MRSM{meerschaum:connectors:valkey:main:port}:6379"
+          ],
+          "volumes": [
+            "valkey_data:/data"
+          ],
+          "healthcheck": {
+            "test": [
+              "CMD",
+              "valkey-cli",
+              "ping"
+            ],
+            "interval": "5s",
+            "timeout": "3s",
+            "retries": 5
+          },
+          "networks": [
+            "backend"
+          ]
+        },
+        "grafana": {
+          "image": "grafana/grafana:latest",
+          "ports": [
+            "3000:3000"
+          ],
+          "networks": [
+            "frontend",
+            "backend"
+          ],
+          "restart": "always",
+          "depends_on": {
+            "db": {
+              "condition": "service_healthy"
+            }
+          },
+          "volumes": [
+            "grafana_storage:/var/lib/grafana",
+            "{__MRSM_ROOT_DIR__}/stack/grafana/resources/provisioning/datasources:/etc/grafana/provisioning/datasources:z,ro",
+            "{__MRSM_ROOT_DIR__}/stack/grafana/resources/provisioning/dashboards:/etc/grafana/provisioning/dashboards:z,ro"
+          ],
+          "environment": {
+            "GF_SECURITY_ALLOW_EMBEDDING": "true",
+            "GF_ANALYTICS_REPORTING_ENABLED": "false",
+            "GF_AUTH_ANONYMOUS_ENABLED": "true",
+            "GF_AUTH_ANONYMOUS_ORG_NAME": "Main Org.",
+            "GF_AUTH_ANONYMOUS_ORG_ROLE": "Viewer",
+            "GF_AUTH_ANONYMOUS_HIDE_VERSION": "true"
+          }
+        }
+      },
+      "networks": {
+        "frontend": null,
+        "backend": null
+      },
+      "volumes": {
+        "api_root": null,
+        "meerschaum_db_data": null,
+        "grafana_storage": null,
+        "valkey_data": null
+      }
+    },
+    "grafana": {
+      "dashboard": {
+        "apiVersion": 1,
+        "providers": [
+          {
+            "name": "Default",
+            "folder": "Meerschaum Dashboards",
+            "options": {
+              "path": "/etc/grafana/provisioning/dashboards"
+            }
+          }
+        ]
+      },
+      "datasource": {
+        "apiVersion": 1,
+        "datasources": [
+          {
+            "name": "Meerschaum Main",
+            "type": "postgres",
+            "jsonData": {
+              "sslmode": "disable",
+              "postgresVersion": 1500,
+              "timescaledb": true,
+              "database": "MRSM{meerschaum:connectors:sql:main:database}"
+            },
+            "user": "MRSM{meerschaum:connectors:sql:main:username}",
+            "secureJsonData": {
+              "password": "MRSM{meerschaum:connectors:sql:main:password}"
+            },
+            "url": "MRSM{stack:docker-compose.yaml:services:db:hostname}:5432",
+            "isDefault": true,
+            "editable": true
+          }
+        ]
+      }
+    },
+    "filetype": "yaml"
+  },
+  "dash": {
+    "max_num_pipes_cards": 20
+  }
+}

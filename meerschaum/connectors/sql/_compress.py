@@ -10,6 +10,7 @@ These methods are mixed into `SQLConnector` (see `meerschaum/connectors/sql/_SQL
 
 from __future__ import annotations
 
+from meerschaum._core._gate import rust_method as _rust_method
 import meerschaum as mrsm
 from meerschaum.utils.typing import Union, Any, Optional, List, Dict, SuccessTuple
 from meerschaum.utils.debug import dprint
@@ -208,6 +209,8 @@ def get_pipe_size(
     An `int` of the number of bytes occupied by the target table,
     or `None` if the size could not be determined.
     """
+    if (_rust := _rust_method(self, 'get_pipe_size')) is not None:
+        return _rust(pipe)
     from meerschaum.utils.sql import sql_item_name, hypertable_queries
 
     if not pipe.exists(debug=debug):
@@ -515,6 +518,8 @@ def apply_compression_policy(
     -------
     A `SuccessTuple` indicating success.
     """
+    if (_rust := _rust_method(self, 'apply_compression_policy')) is not None:
+        return _rust(pipe)
     if self.flavor not in ('timescaledb', 'timescaledb-ha'):
         return True, "Compression policies are only supported for TimescaleDB."
 
@@ -601,6 +606,8 @@ def compress_pipe(
     -------
     A `SuccessTuple` indicating success, including the amount of disk reclaimed.
     """
+    if (_rust := _rust_method(self, 'compress_pipe')) is not None:
+        return _rust(pipe, no_policy=no_policy)
     from meerschaum.utils.sql import sql_item_name
     from meerschaum.utils.formatting import format_bytes
 
@@ -723,6 +730,8 @@ def decompress_pipe(
     -------
     A `SuccessTuple` indicating success, including the change in disk size.
     """
+    if (_rust := _rust_method(self, 'decompress_pipe')) is not None:
+        return _rust(pipe, no_policy=no_policy)
     from meerschaum.utils.sql import sql_item_name
     from meerschaum.utils.formatting import format_bytes
 

@@ -1,0 +1,355 @@
+{
+  "meta": {
+    "label": "w10-hardening-cli",
+    "date": "2026-10-15",
+    "backends": [
+      "sqlite",
+      "postgis"
+    ],
+    "repeats": 3,
+    "sizes": [
+      "10k",
+      "100k",
+      "1M"
+    ],
+    "python": "3.14.8",
+    "pg_schema": "w10_bench",
+    "os": "Linux x86_64",
+    "cpus": 40,
+    "notes": [],
+    "v4_version": "4.1.4",
+    "v5_version": "`mrsm` release build (Meerschaum v5.0.0-a1), fa\u00e7ade at cd9c340f + working tree"
+  },
+  "results": [
+    {
+      "backend": "sqlite",
+      "case": "sync_10k",
+      "impl": "v4cli",
+      "seconds": [
+        3.853393,
+        3.883508,
+        4.005733
+      ],
+      "median": 3.883508,
+      "min": 3.853393,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "sync_100k",
+      "impl": "v4cli",
+      "seconds": [
+        28.006725,
+        28.510095,
+        27.312045
+      ],
+      "median": 28.006725,
+      "min": 27.312045,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "sync_1M",
+      "impl": "v4cli",
+      "seconds": [
+        360.744564,
+        361.991965
+      ],
+      "median": 361.368264,
+      "min": 360.744564,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "inc_100k",
+      "impl": "v4cli",
+      "seconds": [
+        19.153359,
+        20.20317,
+        19.800463
+      ],
+      "median": 19.800463,
+      "min": 19.153359,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "inc_1M",
+      "impl": "v4cli",
+      "seconds": [
+        19.874141,
+        19.653746
+      ],
+      "median": 19.763944,
+      "min": 19.653746,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "chain_3",
+      "impl": "v4cli",
+      "seconds": [
+        16.014445,
+        16.113466,
+        16.151864
+      ],
+      "median": 16.113466,
+      "min": 16.014445,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "sync_10k",
+      "impl": "v5cli",
+      "seconds": [
+        0.377149,
+        0.343786,
+        0.409933
+      ],
+      "median": 0.377149,
+      "min": 0.343786,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "sync_100k",
+      "impl": "v5cli",
+      "seconds": [
+        1.343236,
+        1.388585,
+        1.267281
+      ],
+      "median": 1.343236,
+      "min": 1.267281,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "sync_1M",
+      "impl": "v5cli",
+      "seconds": [
+        10.370593,
+        10.325929
+      ],
+      "median": 10.348261,
+      "min": 10.325929,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "inc_100k",
+      "impl": "v5cli",
+      "seconds": [
+        1.142542,
+        1.146062,
+        1.179535
+      ],
+      "median": 1.146062,
+      "min": 1.142542,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "inc_1M",
+      "impl": "v5cli",
+      "seconds": [
+        1.315354,
+        1.309287
+      ],
+      "median": 1.312321,
+      "min": 1.309287,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "chain_3",
+      "impl": "v5cli",
+      "seconds": [
+        2.241512,
+        2.179973,
+        2.092544
+      ],
+      "median": 2.179973,
+      "min": 2.092544,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "chain_3_engine",
+      "impl": "v5cli",
+      "seconds": [
+        2.254877,
+        2.320137,
+        2.154461
+      ],
+      "median": 2.254877,
+      "min": 2.154461,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "sync_10k",
+      "impl": "v4cli",
+      "seconds": [
+        2.214606,
+        2.003409,
+        2.154648
+      ],
+      "median": 2.154648,
+      "min": 2.003409,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "sync_100k",
+      "impl": "v4cli",
+      "seconds": [
+        4.219752,
+        4.261687,
+        4.300701
+      ],
+      "median": 4.261687,
+      "min": 4.219752,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "sync_1M",
+      "impl": "v4cli",
+      "seconds": [
+        44.195045,
+        44.108017
+      ],
+      "median": 44.151531,
+      "min": 44.108017,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "inc_100k",
+      "impl": "v4cli",
+      "seconds": [
+        3.3134,
+        3.225931,
+        3.322067
+      ],
+      "median": 3.3134,
+      "min": 3.225931,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "inc_1M",
+      "impl": "v4cli",
+      "seconds": [
+        3.645065,
+        3.67971
+      ],
+      "median": 3.662388,
+      "min": 3.645065,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "chain_3",
+      "impl": "v4cli",
+      "seconds": [
+        5.06595,
+        4.963287,
+        5.21308
+      ],
+      "median": 5.06595,
+      "min": 4.963287,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "sync_10k",
+      "impl": "v5cli",
+      "seconds": [
+        0.623339,
+        0.448934,
+        0.600619
+      ],
+      "median": 0.600619,
+      "min": 0.448934,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "sync_100k",
+      "impl": "v5cli",
+      "seconds": [
+        1.249424,
+        1.217373,
+        1.174267
+      ],
+      "median": 1.217373,
+      "min": 1.174267,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "sync_1M",
+      "impl": "v5cli",
+      "seconds": [
+        10.589206,
+        10.396675
+      ],
+      "median": 10.492941,
+      "min": 10.396675,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "inc_100k",
+      "impl": "v5cli",
+      "seconds": [
+        0.817934,
+        0.783335,
+        0.808209
+      ],
+      "median": 0.808209,
+      "min": 0.783335,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "inc_1M",
+      "impl": "v5cli",
+      "seconds": [
+        0.979567,
+        0.97595
+      ],
+      "median": 0.977758,
+      "min": 0.97595,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "chain_3",
+      "impl": "v5cli",
+      "seconds": [
+        2.419825,
+        2.505182,
+        2.542066
+      ],
+      "median": 2.505182,
+      "min": 2.419825,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "chain_3_engine",
+      "impl": "v5cli",
+      "seconds": [
+        2.497883,
+        2.674646,
+        2.510143
+      ],
+      "median": 2.510143,
+      "min": 2.497883,
+      "failed": 0
+    }
+  ]
+}

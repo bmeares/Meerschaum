@@ -1,0 +1,3504 @@
+{
+  "username": "fixture_admin",
+  "password": "fixture_pass",
+  "instance": "sql:fixture",
+  "connectors": {
+    "sql": [
+      "main",
+      "local",
+      "memory",
+      "fixture"
+    ],
+    "api": [
+      "main",
+      "local",
+      "mrsm"
+    ],
+    "valkey": [
+      "main"
+    ]
+  },
+  "jwt_vectors": [
+    {
+      "secret": "fixture-secret-0123456789abcdef",
+      "claims": {
+        "sub": "fixture_admin",
+        "scopes": [
+          "*"
+        ],
+        "type": "admin",
+        "exp": 4102444800
+      },
+      "pyjwt": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJmaXh0dXJlX2FkbWluIiwic2NvcGVzIjpbIioiXSwidHlwZSI6ImFkbWluIiwiZXhwIjo0MTAyNDQ0ODAwfQ.Tm9gaFpCz4mad4MdTUT8dmT6lxTB5wh2s3o5YcwK1Dk",
+      "jose": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJmaXh0dXJlX2FkbWluIiwic2NvcGVzIjpbIioiXSwidHlwZSI6ImFkbWluIiwiZXhwIjo0MTAyNDQ0ODAwfQ.Tm9gaFpCz4mad4MdTUT8dmT6lxTB5wh2s3o5YcwK1Dk"
+    },
+    {
+      "secret": "fixture-secret-0123456789abcdef",
+      "claims": {
+        "sub": "00000000-0000-4000-8000-000000000001",
+        "scopes": [
+          "pipes:read"
+        ],
+        "type": null,
+        "exp": 4102444800
+      },
+      "pyjwt": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIwMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwMDEiLCJzY29wZXMiOlsicGlwZXM6cmVhZCJdLCJ0eXBlIjpudWxsLCJleHAiOjQxMDI0NDQ4MDB9.TMgCxG4VDRaUpCcwwGyMv99EkzEm6OQZe_4XElJOW_c",
+      "jose": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIwMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwMDEiLCJzY29wZXMiOlsicGlwZXM6cmVhZCJdLCJ0eXBlIjpudWxsLCJleHAiOjQxMDI0NDQ4MDB9.TMgCxG4VDRaUpCcwwGyMv99EkzEm6OQZe_4XElJOW_c"
+    },
+    {
+      "secret": "fixture-secret-0123456789abcdef",
+      "claims": {
+        "sub": "utilisateur_é",
+        "scopes": [],
+        "type": "basic",
+        "exp": 4102444800
+      },
+      "pyjwt": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1dGlsaXNhdGV1cl9cdTAwZTkiLCJzY29wZXMiOltdLCJ0eXBlIjoiYmFzaWMiLCJleHAiOjQxMDI0NDQ4MDB9.0OSWak7v1rK3qcT6mfo7McVOkFr6xQHIkqoJcFQfIH0",
+      "jose": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1dGlsaXNhdGV1cl9cdTAwZTkiLCJzY29wZXMiOltdLCJ0eXBlIjoiYmFzaWMiLCJleHAiOjQxMDI0NDQ4MDB9.0OSWak7v1rK3qcT6mfo7McVOkFr6xQHIkqoJcFQfIH0"
+    }
+  ],
+  "exchanges": [
+    {
+      "step": "version",
+      "method": "GET",
+      "path": "/version",
+      "query": "",
+      "headers": {},
+      "auth": null,
+      "body": null,
+      "status": 200,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": "<version>"
+      }
+    },
+    {
+      "step": "version_mrsm",
+      "method": "GET",
+      "path": "/version/mrsm",
+      "query": "",
+      "headers": {},
+      "auth": null,
+      "body": null,
+      "status": 200,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": "<version>"
+      }
+    },
+    {
+      "step": "healthcheck",
+      "method": "GET",
+      "path": "/healthcheck",
+      "query": "",
+      "headers": {},
+      "auth": null,
+      "body": null,
+      "status": 200,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": {
+          "success": true,
+          "message": "Success"
+        }
+      }
+    },
+    {
+      "step": "chaining",
+      "method": "GET",
+      "path": "/chaining",
+      "query": "",
+      "headers": {},
+      "auth": null,
+      "body": null,
+      "status": 200,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": false
+      }
+    },
+    {
+      "step": "info",
+      "method": "GET",
+      "path": "/info",
+      "query": "",
+      "headers": {},
+      "auth": null,
+      "body": null,
+      "status": 200,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": {
+          "version": "<version>",
+          "num_plugins": 0,
+          "num_users": 1,
+          "num_pipes": 0
+        }
+      }
+    },
+    {
+      "step": "not_found",
+      "method": "GET",
+      "path": "/no/such/route",
+      "query": "",
+      "headers": {},
+      "auth": null,
+      "body": null,
+      "status": 404,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": {
+          "detail": "Not Found"
+        }
+      }
+    },
+    {
+      "step": "keys_no_auth",
+      "method": "GET",
+      "path": "/pipes/keys",
+      "query": "",
+      "headers": {},
+      "auth": null,
+      "body": null,
+      "status": 401,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": {
+          "detail": "Not authenticated."
+        }
+      }
+    },
+    {
+      "step": "keys_bad_jwt",
+      "method": "GET",
+      "path": "/pipes/keys",
+      "query": "",
+      "headers": {},
+      "auth": {
+        "raw": "Bearer garbage"
+      },
+      "body": null,
+      "status": 401,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": {
+          "detail": "Invalid credentials"
+        }
+      }
+    },
+    {
+      "step": "keys_basic_scheme",
+      "method": "GET",
+      "path": "/pipes/keys",
+      "query": "",
+      "headers": {},
+      "auth": {
+        "raw": "Basic abc"
+      },
+      "body": null,
+      "status": 401,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": {
+          "detail": "Invalid credentials"
+        }
+      }
+    },
+    {
+      "step": "users_me_no_auth",
+      "method": "GET",
+      "path": "/users/me",
+      "query": "",
+      "headers": {},
+      "auth": null,
+      "body": null,
+      "status": 401,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": {
+          "detail": "Not authenticated."
+        }
+      }
+    },
+    {
+      "step": "login_wrong_password",
+      "method": "POST",
+      "path": "/login",
+      "query": "",
+      "headers": {
+        "content-type": "application/x-www-form-urlencoded"
+      },
+      "auth": null,
+      "body": {
+        "text": "username=fixture_admin&password=wrong"
+      },
+      "status": 401,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": {
+          "detail": "Invalid credentials"
+        }
+      }
+    },
+    {
+      "step": "login_unknown_user",
+      "method": "POST",
+      "path": "/login",
+      "query": "",
+      "headers": {
+        "content-type": "application/x-www-form-urlencoded"
+      },
+      "auth": null,
+      "body": {
+        "text": "username=nobody&password=x"
+      },
+      "status": 401,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": {
+          "detail": "Invalid credentials"
+        }
+      }
+    },
+    {
+      "step": "login_bad_grant_type",
+      "method": "POST",
+      "path": "/login",
+      "query": "",
+      "headers": {
+        "content-type": "application/x-www-form-urlencoded"
+      },
+      "auth": null,
+      "body": {
+        "text": "grant_type=bogus&username=a&password=b"
+      },
+      "status": 422,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": {
+          "detail": [
+            {
+              "type": "string_pattern_mismatch",
+              "loc": [
+                "body",
+                "grant_type"
+              ],
+              "msg": "String should match pattern 'password|client_credentials'",
+              "input": "bogus",
+              "ctx": {
+                "pattern": "password|client_credentials"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "login",
+      "method": "POST",
+      "path": "/login",
+      "query": "",
+      "headers": {
+        "content-type": "application/x-www-form-urlencoded"
+      },
+      "auth": null,
+      "body": {
+        "text": "username=fixture_admin&password=fixture_pass"
+      },
+      "status": 200,
+      "content_type": "application/json",
+      "compare": "exact",
+      "capture": {
+        "jwt.admin": "access_token"
+      },
+      "response": {
+        "json": {
+          "access_token": "<volatile>",
+          "token_type": "bearer",
+          "expires": "<volatile>"
+        }
+      }
+    },
+    {
+      "step": "login_scoped",
+      "method": "POST",
+      "path": "/login",
+      "query": "",
+      "headers": {
+        "content-type": "application/x-www-form-urlencoded"
+      },
+      "auth": null,
+      "body": {
+        "text": "username=fixture_admin&password=fixture_pass&scope=pipes%3Aread"
+      },
+      "status": 200,
+      "content_type": "application/json",
+      "compare": "exact",
+      "capture": {
+        "jwt.reader": "access_token"
+      },
+      "response": {
+        "json": {
+          "access_token": "<volatile>",
+          "token_type": "bearer",
+          "expires": "<volatile>"
+        }
+      }
+    },
+    {
+      "step": "users_me",
+      "method": "GET",
+      "path": "/users/me",
+      "query": "",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": null,
+      "status": 200,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": {
+          "username": "fixture_admin",
+          "user_id": 1,
+          "user_type": "admin",
+          "attributes": {}
+        }
+      }
+    },
+    {
+      "step": "connectors",
+      "method": "GET",
+      "path": "/connectors",
+      "query": "",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": null,
+      "status": 200,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": {
+          "sql": [
+            "main",
+            "local",
+            "memory",
+            "fixture"
+          ],
+          "api": [
+            "main",
+            "local",
+            "mrsm"
+          ],
+          "valkey": [
+            "main"
+          ]
+        }
+      }
+    },
+    {
+      "step": "connectors_sql",
+      "method": "GET",
+      "path": "/connectors/sql",
+      "query": "",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": null,
+      "status": 200,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": [
+          "main",
+          "local",
+          "memory",
+          "fixture"
+        ]
+      }
+    },
+    {
+      "step": "connectors_missing",
+      "method": "GET",
+      "path": "/connectors",
+      "query": "type=nope",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": null,
+      "status": 404,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": {
+          "detail": "No connectors of type 'nope'."
+        }
+      }
+    },
+    {
+      "step": "metadata",
+      "method": "POST",
+      "path": "/metadata",
+      "query": "",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": null,
+      "status": 200,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": true
+      }
+    },
+    {
+      "step": "register_pipe",
+      "method": "POST",
+      "path": "/pipes/demo/temperature/garden/register",
+      "query": "",
+      "headers": {
+        "content-type": "application/json"
+      },
+      "auth": {
+        "slot": "admin"
+      },
+      "body": {
+        "text": "{\"columns\": {\"datetime\": \"ts\", \"id\": \"station\"}, \"tags\": [\"outdoor\"]}"
+      },
+      "status": 200,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": [
+          true,
+          "Successfully registered Pipe('demo', 'temperature', 'garden', instance='sql:fixture')."
+        ]
+      }
+    },
+    {
+      "step": "register_pipe_again",
+      "method": "POST",
+      "path": "/pipes/demo/temperature/garden/register",
+      "query": "",
+      "headers": {
+        "content-type": "application/json"
+      },
+      "auth": {
+        "slot": "admin"
+      },
+      "body": {
+        "text": "{\"columns\": {\"datetime\": \"ts\", \"id\": \"station\"}, \"tags\": [\"outdoor\"]}"
+      },
+      "status": 409,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": {
+          "detail": "Pipe('demo', 'temperature', 'garden', instance='sql:fixture') already registered."
+        }
+      }
+    },
+    {
+      "step": "register_pipe_null_location",
+      "method": "POST",
+      "path": "/pipes/demo/humidity/%5BNone%5D/register",
+      "query": "",
+      "headers": {
+        "content-type": "application/json"
+      },
+      "auth": {
+        "slot": "admin"
+      },
+      "body": {
+        "text": "{\"columns\": {\"id\": \"room\"}}"
+      },
+      "status": 200,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": [
+          true,
+          "Successfully registered Pipe('demo', 'humidity', instance='sql:fixture')."
+        ]
+      }
+    },
+    {
+      "step": "register_pipe_reader_403",
+      "method": "POST",
+      "path": "/pipes/demo/other/%5BNone%5D/register",
+      "query": "",
+      "headers": {
+        "content-type": "application/json"
+      },
+      "auth": {
+        "slot": "reader"
+      },
+      "body": {
+        "text": "{\"columns\": {\"id\": \"x\"}}"
+      },
+      "status": 403,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": {
+          "detail": "Missing required scope: 'pipes:write'"
+        }
+      }
+    },
+    {
+      "step": "register_pipe_bad_body",
+      "method": "POST",
+      "path": "/pipes/demo/other/%5BNone%5D/register",
+      "query": "",
+      "headers": {
+        "content-type": "application/json"
+      },
+      "auth": {
+        "slot": "admin"
+      },
+      "body": {
+        "text": "[1, 2]"
+      },
+      "status": 422,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": {
+          "detail": [
+            {
+              "type": "dict_type",
+              "loc": [
+                "body"
+              ],
+              "msg": "Input should be a valid dictionary",
+              "input": [
+                1,
+                2
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "mrsm_connector_403",
+      "method": "POST",
+      "path": "/pipes/mrsm/secrets/%5BNone%5D/register",
+      "query": "",
+      "headers": {
+        "content-type": "application/json"
+      },
+      "auth": {
+        "slot": "admin"
+      },
+      "body": {
+        "text": "{}"
+      },
+      "status": 403,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": {
+          "detail": "Unable to serve any pipes with connector keys `mrsm` over the API."
+        }
+      }
+    },
+    {
+      "step": "mrsm_connector_403_data",
+      "method": "GET",
+      "path": "/pipes/mrsm/users/%5BNone%5D/data",
+      "query": "",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": null,
+      "status": 403,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": {
+          "detail": "Unable to serve any pipes with connector keys `mrsm` over the API."
+        }
+      }
+    },
+    {
+      "step": "fetch_pipes_keys",
+      "method": "GET",
+      "path": "/pipes/keys",
+      "query": "connector_keys=%5B%5D&metric_keys=%5B%5D&location_keys=%5B%5D&tags=%5B%5D&params=null&as_dict=True",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": null,
+      "status": 200,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": {
+          "2": [
+            "demo",
+            "humidity",
+            null,
+            "{\"columns\": {\"id\": \"room\"}}"
+          ],
+          "1": [
+            "demo",
+            "temperature",
+            "garden",
+            "{\"columns\": {\"datetime\": \"ts\", \"id\": \"station\"}, \"tags\": [\"outdoor\"]}"
+          ]
+        }
+      }
+    },
+    {
+      "step": "fetch_pipes_keys_filtered",
+      "method": "GET",
+      "path": "/pipes/keys",
+      "query": "connector_keys=%5B%22demo%22%5D&metric_keys=%5B%22temperature%22%5D&location_keys=%5B%22garden%22%5D&tags=%5B%22outdoor%22%5D&params=%7B%22connector_keys%22%3A+%22demo%22%7D&as_dict=True",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": null,
+      "status": 200,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": {
+          "1": [
+            "demo",
+            "temperature",
+            "garden",
+            "{\"columns\": {\"datetime\": \"ts\", \"id\": \"station\"}, \"tags\": [\"outdoor\"]}"
+          ]
+        }
+      }
+    },
+    {
+      "step": "fetch_pipes_keys_list",
+      "method": "GET",
+      "path": "/pipes/keys",
+      "query": "",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": null,
+      "status": 200,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": [
+          [
+            "demo",
+            "humidity",
+            null
+          ],
+          [
+            "demo",
+            "temperature",
+            "garden"
+          ]
+        ]
+      }
+    },
+    {
+      "step": "get_pipes",
+      "method": "GET",
+      "path": "/pipes",
+      "query": "",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": null,
+      "status": 200,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": {
+          "demo": {
+            "humidity": {
+              "None": {
+                "connector_keys": "demo",
+                "metric_key": "humidity",
+                "location_key": null,
+                "instance_keys": null,
+                "parameters": {
+                  "columns": {
+                    "id": "room"
+                  }
+                }
+              }
+            },
+            "temperature": {
+              "garden": {
+                "connector_keys": "demo",
+                "metric_key": "temperature",
+                "location_key": "garden",
+                "instance_keys": null,
+                "parameters": {
+                  "columns": {
+                    "datetime": "ts",
+                    "id": "station"
+                  },
+                  "tags": [
+                    "outdoor"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "step": "get_pipes_by_connector",
+      "method": "GET",
+      "path": "/pipes/demo",
+      "query": "",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": null,
+      "status": 200,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": {
+          "humidity": {
+            "None": {
+              "pipe_id": 2,
+              "connector_keys": "demo",
+              "metric_key": "humidity",
+              "location_key": null,
+              "parameters": {
+                "columns": {
+                  "id": "room"
+                }
+              }
+            }
+          },
+          "temperature": {
+            "garden": {
+              "pipe_id": 1,
+              "connector_keys": "demo",
+              "metric_key": "temperature",
+              "location_key": "garden",
+              "parameters": {
+                "columns": {
+                  "datetime": "ts",
+                  "id": "station"
+                },
+                "tags": [
+                  "outdoor"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "step": "get_pipes_by_metric",
+      "method": "GET",
+      "path": "/pipes/demo/temperature",
+      "query": "",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": null,
+      "status": 200,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": {
+          "garden": {
+            "pipe_id": 1,
+            "connector_keys": "demo",
+            "metric_key": "temperature",
+            "location_key": "garden",
+            "parameters": {
+              "columns": {
+                "datetime": "ts",
+                "id": "station"
+              },
+              "tags": [
+                "outdoor"
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "step": "get_pipe_by_keys",
+      "method": "GET",
+      "path": "/pipes/demo/temperature/garden",
+      "query": "",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": null,
+      "status": 200,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": {
+          "connector_keys": "demo",
+          "metric_key": "temperature",
+          "location_key": "garden",
+          "parameters": {
+            "columns": {
+              "datetime": "ts",
+              "id": "station"
+            },
+            "tags": [
+              "outdoor"
+            ]
+          },
+          "pipe_id": 1
+        }
+      }
+    },
+    {
+      "step": "get_pipe_null_location",
+      "method": "GET",
+      "path": "/pipes/demo/humidity/None",
+      "query": "",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": null,
+      "status": 200,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": {
+          "connector_keys": "demo",
+          "metric_key": "humidity",
+          "location_key": null,
+          "parameters": {
+            "columns": {
+              "id": "room"
+            }
+          },
+          "pipe_id": 2
+        }
+      }
+    },
+    {
+      "step": "get_pipes_missing_connector",
+      "method": "GET",
+      "path": "/pipes/nope",
+      "query": "",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": null,
+      "status": 404,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": {
+          "detail": "Connector 'nope' not found."
+        }
+      }
+    },
+    {
+      "step": "get_pipes_missing_metric",
+      "method": "GET",
+      "path": "/pipes/demo/nope",
+      "query": "",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": null,
+      "status": 404,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": {
+          "detail": "Metric 'nope' not found."
+        }
+      }
+    },
+    {
+      "step": "get_pipes_missing_location",
+      "method": "GET",
+      "path": "/pipes/demo/temperature/nope",
+      "query": "",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": null,
+      "status": 404,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": {
+          "detail": "location_key 'nope' not found."
+        }
+      }
+    },
+    {
+      "step": "get_pipe_id",
+      "method": "GET",
+      "path": "/pipes/demo/temperature/garden/id",
+      "query": "",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": null,
+      "status": 200,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": 1
+      }
+    },
+    {
+      "step": "get_pipe_id_missing",
+      "method": "GET",
+      "path": "/pipes/demo/nope/%5BNone%5D/id",
+      "query": "",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": null,
+      "status": 404,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": {
+          "detail": "Pipe is not registered."
+        }
+      }
+    },
+    {
+      "step": "get_pipe_attributes",
+      "method": "GET",
+      "path": "/pipes/demo/temperature/garden/attributes",
+      "query": "",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": null,
+      "status": 200,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": {
+          "pipe_id": 1,
+          "connector_keys": "demo",
+          "metric_key": "temperature",
+          "location_key": "garden",
+          "parameters": {
+            "columns": {
+              "datetime": "ts",
+              "id": "station"
+            },
+            "tags": [
+              "outdoor"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "step": "pipe_exists_before",
+      "method": "GET",
+      "path": "/pipes/demo/temperature/garden/exists",
+      "query": "",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": null,
+      "status": 200,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": false
+      }
+    },
+    {
+      "step": "sync_pipe_chunked",
+      "method": "GET",
+      "path": "/pipes/demo/temperature/garden/attributes",
+      "query": "",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": null,
+      "status": 200,
+      "content_type": "application/json",
+      "compare": "exact",
+      "reason": "The client's final `DELETE .../cache` is compared; the client-side timing message is not.",
+      "response": {
+        "json": {
+          "pipe_id": 1,
+          "connector_keys": "demo",
+          "metric_key": "temperature",
+          "location_key": "garden",
+          "parameters": {
+            "columns": {
+              "datetime": "ts",
+              "id": "station"
+            },
+            "tags": [
+              "outdoor"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "step": "sync_pipe_chunked",
+      "method": "POST",
+      "path": "/pipes/demo/temperature/garden/data",
+      "query": "columns=%7B%22datetime%22%3A+%22ts%22%2C+%22id%22%3A+%22station%22%7D",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": {
+        "text": "{\"ts\":{\"0\":\"2024-01-01T00:00:00+00:00\",\"1\":\"2024-01-01T00:00:00+00:00\"},\"station\":{\"0\":\"a\",\"1\":\"b\\/c\"},\"val\":{\"0\":10,\"1\":20}}"
+      },
+      "status": 200,
+      "content_type": "application/json",
+      "compare": "exact",
+      "reason": "The client's final `DELETE .../cache` is compared; the client-side timing message is not.",
+      "response": {
+        "json": [
+          true,
+          "Inserted 2, updated 0 rows."
+        ]
+      }
+    },
+    {
+      "step": "sync_pipe_chunked",
+      "method": "POST",
+      "path": "/pipes/demo/temperature/garden/data",
+      "query": "columns=%7B%22datetime%22%3A+%22ts%22%2C+%22id%22%3A+%22station%22%7D",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": {
+        "text": "{\"ts\":{\"2\":\"2024-01-02T12:30:00+00:00\"},\"station\":{\"2\":\"\\u00e9\"},\"val\":{\"2\":30}}"
+      },
+      "status": 200,
+      "content_type": "application/json",
+      "compare": "exact",
+      "reason": "The client's final `DELETE .../cache` is compared; the client-side timing message is not.",
+      "response": {
+        "json": [
+          true,
+          "Inserted 1, updated 0 rows."
+        ]
+      }
+    },
+    {
+      "step": "sync_pipe_chunked",
+      "method": "DELETE",
+      "path": "/pipes/demo/temperature/garden/cache",
+      "query": "",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": null,
+      "status": 200,
+      "content_type": "application/json",
+      "compare": "exact",
+      "reason": "The client's final `DELETE .../cache` is compared; the client-side timing message is not.",
+      "response": {
+        "json": [
+          true,
+          "Success"
+        ]
+      }
+    },
+    {
+      "step": "sync_pipe_update",
+      "method": "POST",
+      "path": "/pipes/demo/temperature/garden/data",
+      "query": "columns=%7B%22datetime%22%3A+%22ts%22%2C+%22id%22%3A+%22station%22%7D",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": {
+        "text": "{\"ts\":{\"0\":\"2024-01-02T12:30:00+00:00\",\"1\":\"2024-01-03T00:00:00+00:00\"},\"station\":{\"0\":\"\\u00e9\",\"1\":\"a\"},\"val\":{\"0\":31,\"1\":40}}"
+      },
+      "status": 200,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": [
+          true,
+          "Inserted 1, updated 1 rows."
+        ]
+      }
+    },
+    {
+      "step": "sync_pipe_update",
+      "method": "DELETE",
+      "path": "/pipes/demo/temperature/garden/cache",
+      "query": "",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": null,
+      "status": 200,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": [
+          true,
+          "Success"
+        ]
+      }
+    },
+    {
+      "step": "sync_empty",
+      "method": "POST",
+      "path": "/pipes/demo/temperature/garden/data",
+      "query": "",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": {
+        "text": "[]"
+      },
+      "status": 200,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": [
+          true,
+          "No data to sync."
+        ]
+      }
+    },
+    {
+      "step": "register_protected_target",
+      "method": "POST",
+      "path": "/pipes/demo/evil/%5BNone%5D/register",
+      "query": "",
+      "headers": {
+        "content-type": "application/json"
+      },
+      "auth": {
+        "slot": "admin"
+      },
+      "body": {
+        "text": "{\"target\": \"mrsm_users\"}"
+      },
+      "status": 200,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": [
+          true,
+          "Successfully registered Pipe('demo', 'evil', instance='sql:fixture')."
+        ]
+      }
+    },
+    {
+      "step": "sync_protected",
+      "method": "POST",
+      "path": "/pipes/demo/evil/%5BNone%5D/data",
+      "query": "",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": {
+        "text": "{\"a\": [1]}"
+      },
+      "status": 409,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": {
+          "detail": "Cannot sync data to protected table 'mrsm_users'."
+        }
+      }
+    },
+    {
+      "step": "get_data_protected",
+      "method": "GET",
+      "path": "/pipes/demo/evil/%5BNone%5D/data",
+      "query": "",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": null,
+      "status": 409,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": {
+          "detail": "Cannot retrieve data from protected table 'mrsm_users'."
+        }
+      }
+    },
+    {
+      "step": "vacuum_protected",
+      "method": "POST",
+      "path": "/pipes/demo/evil/%5BNone%5D/vacuum",
+      "query": "",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": null,
+      "status": 409,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": {
+          "detail": "Cannot vacuum protected table 'mrsm_users'."
+        }
+      }
+    },
+    {
+      "step": "delete_protected_target",
+      "method": "DELETE",
+      "path": "/pipes/demo/evil/%5BNone%5D/delete",
+      "query": "",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": null,
+      "status": 200,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": [
+          true,
+          "Success"
+        ]
+      }
+    },
+    {
+      "step": "pipe_exists_after",
+      "method": "GET",
+      "path": "/pipes/demo/temperature/garden/exists",
+      "query": "",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": null,
+      "status": 200,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": true
+      }
+    },
+    {
+      "step": "get_sync_time_newest",
+      "method": "GET",
+      "path": "/pipes/demo/temperature/garden/sync_time",
+      "query": "newest=True&debug=False",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": null,
+      "status": 200,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": "2024-01-03T00:00:00.000000+00:00"
+      }
+    },
+    {
+      "step": "get_sync_time_oldest",
+      "method": "GET",
+      "path": "/pipes/demo/temperature/garden/sync_time",
+      "query": "newest=False&debug=False",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": null,
+      "status": 200,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": "2024-01-01T00:00:00.000000+00:00"
+      }
+    },
+    {
+      "step": "get_sync_time_params",
+      "method": "GET",
+      "path": "/pipes/demo/temperature/garden/sync_time",
+      "query": "newest=True&debug=False",
+      "headers": {
+        "content-type": "application/json"
+      },
+      "auth": {
+        "slot": "admin"
+      },
+      "body": {
+        "text": "{\"station\": \"b/c\"}"
+      },
+      "status": 200,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": "2024-01-01T00:00:00.000000+00:00"
+      }
+    },
+    {
+      "step": "get_sync_time_bad_bool",
+      "method": "GET",
+      "path": "/pipes/demo/temperature/garden/sync_time",
+      "query": "newest=maybe",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": null,
+      "status": 422,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": {
+          "detail": [
+            {
+              "type": "bool_parsing",
+              "loc": [
+                "query",
+                "newest"
+              ],
+              "msg": "Input should be a valid boolean, unable to interpret input",
+              "input": "maybe"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "get_sync_time_no_dt",
+      "method": "GET",
+      "path": "/pipes/demo/humidity/%5BNone%5D/sync_time",
+      "query": "",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": null,
+      "status": 200,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": null
+      }
+    },
+    {
+      "step": "get_pipe_rowcount",
+      "method": "GET",
+      "path": "/pipes/demo/temperature/garden/rowcount",
+      "query": "remote=False",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": null,
+      "status": 200,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": 4
+      }
+    },
+    {
+      "step": "get_pipe_rowcount_filtered",
+      "method": "GET",
+      "path": "/pipes/demo/temperature/garden/rowcount",
+      "query": "begin=2024-01-02",
+      "headers": {
+        "content-type": "application/json"
+      },
+      "auth": {
+        "slot": "admin"
+      },
+      "body": {
+        "text": "{\"station\": [\"a\", \"\\u00e9\"]}"
+      },
+      "status": 200,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": 2
+      }
+    },
+    {
+      "step": "get_pipe_data",
+      "method": "GET",
+      "path": "/pipes/demo/temperature/garden/data",
+      "query": "",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": null,
+      "status": 200,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": [
+          {
+            "ts": "2024-01-01T00:00:00.000000+00:00",
+            "station": "a",
+            "val": 10
+          },
+          {
+            "ts": "2024-01-01T00:00:00.000000+00:00",
+            "station": "b/c",
+            "val": 20
+          },
+          {
+            "ts": "2024-01-02T12:30:00.000000+00:00",
+            "station": "é",
+            "val": 31
+          },
+          {
+            "ts": "2024-01-03T00:00:00.000000+00:00",
+            "station": "a",
+            "val": 40
+          }
+        ]
+      }
+    },
+    {
+      "step": "get_pipe_data_filtered",
+      "method": "GET",
+      "path": "/pipes/demo/temperature/garden/data",
+      "query": "select_columns=%5B%22ts%22%2C+%22station%22%2C+%22val%22%5D&begin=2024-01-01&end=2024-01-03&params=%7B%22station%22%3A+%22_b%2Fc%22%7D&order=desc",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": null,
+      "status": 200,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": [
+          {
+            "ts": "2024-01-02T12:30:00.000000+00:00",
+            "station": "é",
+            "val": 31
+          },
+          {
+            "ts": "2024-01-01T00:00:00.000000+00:00",
+            "station": "a",
+            "val": 10
+          }
+        ]
+      }
+    },
+    {
+      "step": "get_pipe_data_limit",
+      "method": "GET",
+      "path": "/pipes/demo/temperature/garden/data",
+      "query": "limit=2&order=desc",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": null,
+      "status": 200,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": [
+          {
+            "ts": "2024-01-03T00:00:00.000000+00:00",
+            "station": "a",
+            "val": 40
+          },
+          {
+            "ts": "2024-01-02T12:30:00.000000+00:00",
+            "station": "é",
+            "val": 31
+          }
+        ]
+      }
+    },
+    {
+      "step": "get_pipe_data_too_many",
+      "method": "GET",
+      "path": "/pipes/demo/temperature/garden/data",
+      "query": "limit=100001",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": null,
+      "status": 413,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": {
+          "detail": "Requested limit 100001 exceeds the maximum response size of 100000 rows."
+        }
+      }
+    },
+    {
+      "step": "get_pipe_data_bad_params",
+      "method": "GET",
+      "path": "/pipes/demo/temperature/garden/data",
+      "query": "params=%5B1%5D",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": null,
+      "status": 409,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": {
+          "detail": "Params must be a valid JSON-encoded dictionary."
+        }
+      }
+    },
+    {
+      "step": "get_pipe_data_bad_select",
+      "method": "GET",
+      "path": "/pipes/demo/temperature/garden/data",
+      "query": "select_columns=%7B%7D",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": null,
+      "status": 409,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": {
+          "detail": "Selected columns must be a JSON-encoded list."
+        }
+      }
+    },
+    {
+      "step": "get_pipe_data_unregistered",
+      "method": "GET",
+      "path": "/pipes/demo/nope/%5BNone%5D/data",
+      "query": "",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": null,
+      "status": 409,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": {
+          "detail": "Pipe must be registered with the datetime column specified."
+        }
+      }
+    },
+    {
+      "step": "get_pipe_docs",
+      "method": "GET",
+      "path": "/pipes/demo/temperature/garden/docs",
+      "query": "select_columns=%5B%22station%22%2C+%22val%22%5D&params=%7B%22station%22%3A+%22a%22%7D",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": null,
+      "status": 200,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": [
+          {
+            "station": "a",
+            "val": 10
+          },
+          {
+            "station": "a",
+            "val": 40
+          }
+        ]
+      }
+    },
+    {
+      "step": "get_chunk_bounds",
+      "method": "GET",
+      "path": "/pipes/demo/temperature/garden/chunk_bounds",
+      "query": "begin=2024-01-01&end=2024-01-03&chunk_interval_minutes=1440",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": null,
+      "status": 200,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": [
+          [
+            "2024-01-01T00:00:00.000000+00:00",
+            "2024-01-02T00:00:00.000000+00:00"
+          ],
+          [
+            "2024-01-02T00:00:00.000000+00:00",
+            "2024-01-03T00:00:00.000000+00:00"
+          ]
+        ]
+      }
+    },
+    {
+      "step": "get_chunk_bounds_unbounded",
+      "method": "GET",
+      "path": "/pipes/demo/temperature/garden/chunk_bounds",
+      "query": "chunk_interval_minutes=2880&bounded=false",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": null,
+      "status": 200,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": [
+          [
+            null,
+            "2024-01-01T00:00:00.000000+00:00"
+          ],
+          [
+            "2024-01-01T00:00:00.000000+00:00",
+            "2024-01-03T00:01:00.000000+00:00"
+          ],
+          [
+            "2024-01-03T00:01:00.000000+00:00",
+            null
+          ]
+        ]
+      }
+    },
+    {
+      "step": "get_csv",
+      "method": "GET",
+      "path": "/pipes/demo/temperature/garden/csv",
+      "query": "",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": null,
+      "status": 200,
+      "content_type": "text/csv",
+      "compare": "exact",
+      "response": {
+        "text": "ts,station,val\n2024-01-01 00:00:00+00:00,a,10\n2024-01-01 00:00:00+00:00,b/c,20\n2024-01-02 12:30:00+00:00,é,31\n2024-01-03 00:00:00+00:00,a,40\n"
+      },
+      "content_disposition": "attachment; filename=demo_temperature_garden-2024-01-01 00:00:00+00:00-2024-01-03 00:01:00+00:00.csv"
+    },
+    {
+      "step": "get_columns_types",
+      "method": "GET",
+      "path": "/pipes/demo/temperature/garden/columns/types",
+      "query": "",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": null,
+      "status": 200,
+      "content_type": "application/json",
+      "compare": "shape",
+      "reason": "Column types are the instance's own (sqlite affinities vs. pandas dtypes).",
+      "response": {
+        "json": {
+          "ts": "TIMESTAMP",
+          "station": "TEXT",
+          "val": "BIGINT"
+        }
+      }
+    },
+    {
+      "step": "get_columns_indices",
+      "method": "GET",
+      "path": "/pipes/demo/temperature/garden/columns/indices",
+      "query": "",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": null,
+      "status": 200,
+      "content_type": "application/json",
+      "compare": "shape",
+      "reason": "Index metadata is the instance's own.",
+      "response": {
+        "json": {
+          "ts": [
+            {
+              "name": "IX_demo_temperature_garden_ts",
+              "type": "INDEX"
+            },
+            {
+              "name": "IX_demo_temperature_garden_station_ts",
+              "type": "INDEX"
+            }
+          ],
+          "station": [
+            {
+              "name": "IX_demo_temperature_garden_station",
+              "type": "INDEX"
+            },
+            {
+              "name": "IX_demo_temperature_garden_station_ts",
+              "type": "INDEX"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "get_index_names",
+      "method": "GET",
+      "path": "/pipes/demo/temperature/garden/indices/names",
+      "query": "",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": null,
+      "status": 200,
+      "content_type": "application/json",
+      "compare": "status",
+      "reason": "Index names are the instance's own (SQL naming).",
+      "response": {
+        "json": {
+          "unique": "IX_demo_temperature_garden_station_ts",
+          "datetime": "IX_demo_temperature_garden_ts",
+          "id": "IX_demo_temperature_garden_station"
+        }
+      }
+    },
+    {
+      "step": "get_size",
+      "method": "GET",
+      "path": "/pipes/demo/temperature/garden/size",
+      "query": "",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": null,
+      "status": 200,
+      "content_type": "application/json",
+      "compare": "status",
+      "reason": "Maintenance results are the instance's own (sqlite page sizes).",
+      "response": {
+        "json": 4096
+      }
+    },
+    {
+      "step": "vacuum",
+      "method": "POST",
+      "path": "/pipes/demo/temperature/garden/vacuum",
+      "query": "full=False",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": null,
+      "status": 200,
+      "content_type": "application/json",
+      "compare": "status",
+      "reason": "Maintenance results are the instance's own (sqlite page sizes).",
+      "response": {
+        "json": [
+          true,
+          "Size unchanged (4.1 kB)."
+        ]
+      }
+    },
+    {
+      "step": "analyze",
+      "method": "POST",
+      "path": "/pipes/demo/temperature/garden/analyze",
+      "query": "",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": null,
+      "status": 200,
+      "content_type": "application/json",
+      "compare": "status",
+      "reason": "Maintenance results are the instance's own (sqlite page sizes).",
+      "response": {
+        "json": [
+          true,
+          "Analyzed Pipe('demo', 'temperature', 'garden', instance='sql:fixture')."
+        ]
+      }
+    },
+    {
+      "step": "compress",
+      "method": "POST",
+      "path": "/pipes/demo/temperature/garden/compress",
+      "query": "",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": null,
+      "status": 200,
+      "content_type": "application/json",
+      "compare": "status",
+      "reason": "Maintenance results are the instance's own (sqlite page sizes).",
+      "response": {
+        "json": [
+          false,
+          "Compression is not supported for flavor 'sqlite'."
+        ]
+      }
+    },
+    {
+      "step": "decompress",
+      "method": "POST",
+      "path": "/pipes/demo/temperature/garden/decompress",
+      "query": "no_policy=True",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": null,
+      "status": 200,
+      "content_type": "application/json",
+      "compare": "status",
+      "reason": "Maintenance results are the instance's own (sqlite page sizes).",
+      "response": {
+        "json": [
+          false,
+          "Decompression is not supported for flavor 'sqlite'."
+        ]
+      }
+    },
+    {
+      "step": "partition",
+      "method": "POST",
+      "path": "/pipes/demo/temperature/garden/partition",
+      "query": "chunk_minutes=1440",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": null,
+      "status": 200,
+      "content_type": "application/json",
+      "compare": "status",
+      "reason": "Maintenance results are the instance's own (sqlite page sizes).",
+      "response": {
+        "json": [
+          false,
+          "Repartitioning is not supported for flavor 'sqlite'."
+        ]
+      }
+    },
+    {
+      "step": "maintenance_protected",
+      "method": "POST",
+      "path": "/pipes/mrsm/users/%5BNone%5D/vacuum",
+      "query": "",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": null,
+      "status": 403,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": {
+          "detail": "Unable to serve any pipes with connector keys `mrsm` over the API."
+        }
+      }
+    },
+    {
+      "step": "edit_pipe",
+      "method": "PATCH",
+      "path": "/pipes/demo/temperature/garden/edit",
+      "query": "patch=False",
+      "headers": {
+        "content-type": "application/json"
+      },
+      "auth": {
+        "slot": "admin"
+      },
+      "body": {
+        "text": "{\"columns\": {\"datetime\": \"ts\", \"id\": \"station\"}, \"tags\": [\"outdoor\"]}"
+      },
+      "status": 200,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": [
+          true,
+          "Successfully edited Pipe('demo', 'temperature', 'garden', instance='sql:fixture')."
+        ]
+      }
+    },
+    {
+      "step": "edit_pipe_patch",
+      "method": "PATCH",
+      "path": "/pipes/demo/temperature/garden/edit",
+      "query": "patch=True",
+      "headers": {
+        "content-type": "application/json"
+      },
+      "auth": {
+        "slot": "admin"
+      },
+      "body": {
+        "text": "{\"columns\": {\"datetime\": \"ts\", \"id\": \"station\"}, \"tags\": [\"outdoor\"]}"
+      },
+      "status": 200,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": [
+          true,
+          "Successfully edited Pipe('demo', 'temperature', 'garden', instance='sql:fixture')."
+        ]
+      }
+    },
+    {
+      "step": "edit_pipe_missing_body",
+      "method": "PATCH",
+      "path": "/pipes/demo/temperature/garden/edit",
+      "query": "",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": null,
+      "status": 422,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": {
+          "detail": [
+            {
+              "type": "missing",
+              "loc": [
+                "body"
+              ],
+              "msg": "Field required",
+              "input": null
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "edit_pipe_unregistered",
+      "method": "PATCH",
+      "path": "/pipes/demo/nope/%5BNone%5D/edit",
+      "query": "",
+      "headers": {
+        "content-type": "application/json"
+      },
+      "auth": {
+        "slot": "admin"
+      },
+      "body": {
+        "text": "{\"columns\": {}}"
+      },
+      "status": 409,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": {
+          "detail": "Pipe('demo', 'nope', instance='sql:fixture') is not registered."
+        }
+      }
+    },
+    {
+      "step": "get_pipe_attributes_after_edit",
+      "method": "GET",
+      "path": "/pipes/demo/temperature/garden/attributes",
+      "query": "",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": null,
+      "status": 200,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": {
+          "pipe_id": 1,
+          "connector_keys": "demo",
+          "metric_key": "temperature",
+          "location_key": "garden",
+          "parameters": {
+            "columns": {
+              "datetime": "ts",
+              "id": "station"
+            },
+            "tags": [
+              "outdoor"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "step": "delete_pipe_cache",
+      "method": "DELETE",
+      "path": "/pipes/demo/temperature/garden/cache",
+      "query": "",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": null,
+      "status": 200,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": [
+          true,
+          "Success"
+        ]
+      }
+    },
+    {
+      "step": "clear_pipe",
+      "method": "DELETE",
+      "path": "/pipes/demo/temperature/garden/clear",
+      "query": "begin=2024-01-02&params=%7B%22station%22%3A+%22a%22%7D",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": null,
+      "status": 200,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": [
+          true,
+          "Success"
+        ]
+      }
+    },
+    {
+      "step": "rowcount_after_clear",
+      "method": "GET",
+      "path": "/pipes/demo/temperature/garden/rowcount",
+      "query": "remote=False",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": null,
+      "status": 200,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": 3
+      }
+    },
+    {
+      "step": "clear_bad_params",
+      "method": "DELETE",
+      "path": "/pipes/demo/temperature/garden/clear",
+      "query": "params=nope",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": null,
+      "status": 409,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": {
+          "detail": "Params must be a valid JSON-encoded dictionary."
+        }
+      }
+    },
+    {
+      "step": "drop_pipe",
+      "method": "DELETE",
+      "path": "/pipes/demo/temperature/garden/drop",
+      "query": "",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": null,
+      "status": 200,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": [
+          true,
+          "Success"
+        ]
+      }
+    },
+    {
+      "step": "exists_after_drop",
+      "method": "GET",
+      "path": "/pipes/demo/temperature/garden/exists",
+      "query": "",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": null,
+      "status": 200,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": false
+      }
+    },
+    {
+      "step": "delete_pipe",
+      "method": "DELETE",
+      "path": "/pipes/demo/temperature/garden/delete",
+      "query": "",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": null,
+      "status": 200,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": [
+          true,
+          "Success"
+        ]
+      }
+    },
+    {
+      "step": "delete_pipe_again",
+      "method": "DELETE",
+      "path": "/pipes/demo/temperature/garden/delete",
+      "query": "",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": null,
+      "status": 409,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": {
+          "detail": "Pipe('demo', 'temperature', 'garden', instance='sql:fixture') is not registered."
+        }
+      }
+    },
+    {
+      "step": "delete_pipe_null_location",
+      "method": "DELETE",
+      "path": "/pipes/demo/humidity/%5BNone%5D/delete",
+      "query": "",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": null,
+      "status": 200,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": [
+          true,
+          "Success"
+        ]
+      }
+    },
+    {
+      "step": "register_user",
+      "method": "POST",
+      "path": "/users/register",
+      "query": "",
+      "headers": {
+        "content-type": "application/x-www-form-urlencoded"
+      },
+      "auth": {
+        "slot": "admin"
+      },
+      "body": {
+        "text": "username=fixture_user&password=fixture_user_pass&attributes=%7B%22a%22%3A+1%7D&email=u%40example.com"
+      },
+      "status": 200,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": [
+          true,
+          "Successfully registered user 'fixture_user'."
+        ]
+      }
+    },
+    {
+      "step": "register_user_again",
+      "method": "POST",
+      "path": "/users/register",
+      "query": "",
+      "headers": {
+        "content-type": "application/x-www-form-urlencoded"
+      },
+      "auth": {
+        "slot": "admin"
+      },
+      "body": {
+        "text": "username=fixture_user&password=fixture_user_pass&attributes=%7B%22a%22%3A+1%7D&email=u%40example.com"
+      },
+      "status": 200,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": [
+          false,
+          "User 'fixture_user' already exists."
+        ]
+      }
+    },
+    {
+      "step": "register_user_admin",
+      "method": "POST",
+      "path": "/users/register",
+      "query": "",
+      "headers": {
+        "content-type": "application/x-www-form-urlencoded"
+      },
+      "auth": null,
+      "body": {
+        "text": "username=x_admin&password=p&type=admin"
+      },
+      "status": 200,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": [
+          false,
+          "New users cannot be of type 'admin' when using the API connector. Register a normal user first, then edit the user from an authorized account, or use a SQL connector instead."
+        ]
+      }
+    },
+    {
+      "step": "register_user_missing",
+      "method": "POST",
+      "path": "/users/register",
+      "query": "",
+      "headers": {
+        "content-type": "application/x-www-form-urlencoded"
+      },
+      "auth": null,
+      "body": {
+        "text": "username=x"
+      },
+      "status": 406,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": {
+          "detail": "A username and password must be submitted."
+        }
+      }
+    },
+    {
+      "step": "register_user_bad_attributes",
+      "method": "POST",
+      "path": "/users/register",
+      "query": "",
+      "headers": {
+        "content-type": "application/x-www-form-urlencoded"
+      },
+      "auth": null,
+      "body": {
+        "text": "username=y&password=p&attributes=%7Bbad"
+      },
+      "status": 200,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": [
+          false,
+          "Invalid dictionary string received for attributes."
+        ]
+      }
+    },
+    {
+      "step": "get_users",
+      "method": "GET",
+      "path": "/users",
+      "query": "",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": null,
+      "status": 200,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": [
+          "fixture_admin",
+          "fixture_user"
+        ]
+      }
+    },
+    {
+      "step": "get_user_id",
+      "method": "GET",
+      "path": "/users/fixture_user/id",
+      "query": "",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": null,
+      "status": 200,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": 2
+      }
+    },
+    {
+      "step": "get_user_attributes",
+      "method": "GET",
+      "path": "/users/fixture_user/attributes",
+      "query": "",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": null,
+      "status": 200,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": {
+          "a": 1
+        }
+      }
+    },
+    {
+      "step": "get_user_attributes_missing",
+      "method": "GET",
+      "path": "/users/nobody/attributes",
+      "query": "",
+      "headers": {},
+      "auth": null,
+      "body": null,
+      "status": 200,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": {}
+      }
+    },
+    {
+      "step": "get_user_type_chaining",
+      "method": "GET",
+      "path": "/users/fixture_user/type",
+      "query": "",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": null,
+      "status": 403,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": {
+          "detail": "API chaining is not enabled on this Meerschaum instance!\n\nIf you manage this server and want to allow this API instance be a parent instance for other API instances,\nrun `edit config api` and search for `permissions`.\nUnder 'api:permissions:chaining', change the value of `child_apis` to `true`, and restart the API.\n\nIt is highly encouraged that you serve this API over HTTPS! Sensitive data like pipe data and salted\npassword hashes will be shared between APIs."
+        }
+      }
+    },
+    {
+      "step": "get_user_password_hash_chaining",
+      "method": "GET",
+      "path": "/users/fixture_user/password_hash",
+      "query": "",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": null,
+      "status": 403,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": {
+          "detail": "API chaining is not enabled on this Meerschaum instance!\n\nIf you manage this server and want to allow this API instance be a parent instance for other API instances,\nrun `edit config api` and search for `permissions`.\nUnder 'api:permissions:chaining', change the value of `child_apis` to `true`, and restart the API.\n\nIt is highly encouraged that you serve this API over HTTPS! Sensitive data like pipe data and salted\npassword hashes will be shared between APIs."
+        }
+      }
+    },
+    {
+      "step": "edit_user",
+      "method": "POST",
+      "path": "/users/edit",
+      "query": "",
+      "headers": {
+        "content-type": "application/x-www-form-urlencoded"
+      },
+      "auth": {
+        "slot": "admin"
+      },
+      "body": {
+        "text": "username=fixture_user&password=fixture_user_pass&type=basic&email=new%40example.com&attributes=%7B%22a%22%3A+1%7D"
+      },
+      "status": 200,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": [
+          true,
+          "Successfully edited user 'fixture_user'."
+        ]
+      }
+    },
+    {
+      "step": "user_login",
+      "method": "POST",
+      "path": "/login",
+      "query": "",
+      "headers": {
+        "content-type": "application/x-www-form-urlencoded"
+      },
+      "auth": null,
+      "body": {
+        "text": "username=fixture_user&password=fixture_user_pass"
+      },
+      "status": 200,
+      "content_type": "application/json",
+      "compare": "exact",
+      "capture": {
+        "jwt.user": "access_token"
+      },
+      "response": {
+        "json": {
+          "access_token": "<volatile>",
+          "token_type": "bearer",
+          "expires": "<volatile>"
+        }
+      }
+    },
+    {
+      "step": "user_me",
+      "method": "GET",
+      "path": "/users/me",
+      "query": "",
+      "headers": {},
+      "auth": {
+        "slot": "user"
+      },
+      "body": null,
+      "status": 200,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": {
+          "username": "fixture_user",
+          "user_id": 2,
+          "user_type": "basic",
+          "attributes": {
+            "a": 1
+          }
+        }
+      }
+    },
+    {
+      "step": "user_create_job_denied",
+      "method": "POST",
+      "path": "/jobs/x",
+      "query": "",
+      "headers": {
+        "content-type": "application/json"
+      },
+      "auth": {
+        "slot": "user"
+      },
+      "body": {
+        "text": "[\"show\", \"version\"]"
+      },
+      "status": 200,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": [
+          false,
+          "The administrator for this server has not allowed users to perform actions."
+        ]
+      }
+    },
+    {
+      "step": "user_delete_other",
+      "method": "DELETE",
+      "path": "/users/fixture_admin",
+      "query": "",
+      "headers": {},
+      "auth": {
+        "slot": "user"
+      },
+      "body": null,
+      "status": 200,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": [
+          false,
+          "Cannot delete user 'fixture_admin': Permission denied"
+        ]
+      }
+    },
+    {
+      "step": "delete_user",
+      "method": "DELETE",
+      "path": "/users/fixture_user",
+      "query": "",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": null,
+      "status": 200,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": [
+          true,
+          "Successfully deleted user 'fixture_user'"
+        ]
+      }
+    },
+    {
+      "step": "delete_user_missing",
+      "method": "DELETE",
+      "path": "/users/nobody",
+      "query": "",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": null,
+      "status": 200,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": [
+          false,
+          "User 'nobody' is not registered and cannot be deleted."
+        ]
+      }
+    },
+    {
+      "step": "register_token",
+      "method": "POST",
+      "path": "/tokens/register",
+      "query": "",
+      "headers": {
+        "content-type": "application/json"
+      },
+      "auth": {
+        "slot": "admin"
+      },
+      "body": {
+        "text": "{\"label\": \"fixture-token\", \"scopes\": [\"pipes:read\"], \"expiration\": \"2100-01-01T00:00:00+00:00\"}"
+      },
+      "status": 200,
+      "content_type": "application/json",
+      "compare": "exact",
+      "capture": {
+        "token_id": "id",
+        "token_secret": "secret",
+        "api_key": "api_key"
+      },
+      "response": {
+        "json": {
+          "label": "fixture-token",
+          "secret": "<volatile>",
+          "id": "{token_id}",
+          "api_key": "<volatile>",
+          "expiration": "2100-01-01T00:00:00.000000+00:00"
+        }
+      }
+    },
+    {
+      "step": "register_token_no_body",
+      "method": "POST",
+      "path": "/tokens/register",
+      "query": "",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": null,
+      "status": 422,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": {
+          "detail": [
+            {
+              "type": "missing",
+              "loc": [
+                "body"
+              ],
+              "msg": "Field required",
+              "input": null
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "get_tokens",
+      "method": "GET",
+      "path": "/tokens",
+      "query": "",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": null,
+      "status": 200,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": [
+          {
+            "id": "{token_id}",
+            "creation": "<volatile>",
+            "expiration": "2100-01-01T00:00:00.000000+00:00",
+            "label": "fixture-token",
+            "user_id": 1,
+            "scopes": [
+              "pipes:read"
+            ],
+            "is_valid": true
+          }
+        ]
+      }
+    },
+    {
+      "step": "get_tokens_labels",
+      "method": "GET",
+      "path": "/tokens",
+      "query": "labels=fixture-token",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": null,
+      "status": 200,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": [
+          {
+            "id": "{token_id}",
+            "creation": "<volatile>",
+            "expiration": "2100-01-01T00:00:00.000000+00:00",
+            "label": "fixture-token",
+            "user_id": 1,
+            "scopes": [
+              "pipes:read"
+            ],
+            "is_valid": true
+          }
+        ]
+      }
+    },
+    {
+      "step": "get_tokens_no_auth",
+      "method": "GET",
+      "path": "/tokens",
+      "query": "",
+      "headers": {},
+      "auth": null,
+      "body": null,
+      "status": 401,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": {
+          "detail": "Invalid credentials"
+        }
+      }
+    },
+    {
+      "step": "get_token_invalid_id",
+      "method": "GET",
+      "path": "/tokens/not-a-uuid",
+      "query": "",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": null,
+      "status": 400,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": {
+          "detail": "Invalid token ID."
+        }
+      }
+    },
+    {
+      "step": "get_token_missing",
+      "method": "GET",
+      "path": "/tokens/00000000-0000-4000-8000-000000000000",
+      "query": "",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": null,
+      "status": 404,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": {
+          "detail": "Token does not exist."
+        }
+      }
+    },
+    {
+      "step": "get_token",
+      "method": "GET",
+      "path": "/tokens/{token_id}",
+      "query": "",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": null,
+      "status": 500,
+      "content_type": "text/plain",
+      "compare": "skip",
+      "reason": "The sqlite instance returns token scopes as a JSON string (`instance/_tokens.py:304`), so `TokenModel(**doc)` fails (a 500) where the in-memory instance returns a list.",
+      "response": {
+        "text": "Internal Server Error"
+      }
+    },
+    {
+      "step": "edit_token_null_creation",
+      "method": "POST",
+      "path": "/tokens/{token_id}/edit",
+      "query": "",
+      "headers": {
+        "content-type": "application/json"
+      },
+      "auth": {
+        "slot": "admin"
+      },
+      "body": {
+        "text": "{\"creation\": null, \"expiration\": null, \"label\": \"x\"}"
+      },
+      "status": 422,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": {
+          "detail": [
+            {
+              "type": "datetime_type",
+              "loc": [
+                "body",
+                "creation"
+              ],
+              "msg": "Input should be a valid datetime",
+              "input": null
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "edit_token_missing_fields",
+      "method": "POST",
+      "path": "/tokens/{token_id}/edit",
+      "query": "",
+      "headers": {
+        "content-type": "application/json"
+      },
+      "auth": {
+        "slot": "admin"
+      },
+      "body": {
+        "text": "{\"label\": \"x\"}"
+      },
+      "status": 422,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": {
+          "detail": [
+            {
+              "type": "missing",
+              "loc": [
+                "body",
+                "creation"
+              ],
+              "msg": "Field required",
+              "input": {
+                "label": "x"
+              }
+            },
+            {
+              "type": "missing",
+              "loc": [
+                "body",
+                "expiration"
+              ],
+              "msg": "Field required",
+              "input": {
+                "label": "x"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "invalidate_token_bad_id",
+      "method": "POST",
+      "path": "/tokens/nope/invalidate",
+      "query": "",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": null,
+      "status": 400,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": {
+          "detail": "Token ID must be a UUID."
+        }
+      }
+    },
+    {
+      "step": "delete_token_bad_id",
+      "method": "DELETE",
+      "path": "/tokens/nope",
+      "query": "",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": null,
+      "status": 400,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": {
+          "detail": "Token ID must be a UUID."
+        }
+      }
+    },
+    {
+      "step": "validate_bad_key",
+      "method": "POST",
+      "path": "/tokens/validate",
+      "query": "",
+      "headers": {},
+      "auth": {
+        "raw": "Bearer mrsm-key:aW52YWxpZA=="
+      },
+      "body": null,
+      "status": 401,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": {
+          "detail": "Invalid token format. Expected Base64-encoded 'token_id:secret'."
+        }
+      }
+    },
+    {
+      "step": "validate_no_key",
+      "method": "POST",
+      "path": "/tokens/validate",
+      "query": "",
+      "headers": {},
+      "auth": null,
+      "body": null,
+      "status": 401,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": {
+          "detail": "Not authenticated."
+        }
+      }
+    },
+    {
+      "step": "validate_key",
+      "method": "POST",
+      "path": "/tokens/validate",
+      "query": "",
+      "headers": {},
+      "auth": {
+        "raw": "Bearer {api_key}"
+      },
+      "body": null,
+      "status": 500,
+      "content_type": "text/plain",
+      "compare": "skip",
+      "reason": "The sqlite instance returns token scopes as a JSON string (`instance/_tokens.py:304`), so `TokenModel(**doc)` fails (a 500) where the in-memory instance returns a list.",
+      "response": {
+        "text": "Internal Server Error"
+      }
+    },
+    {
+      "step": "login_client_credentials",
+      "method": "POST",
+      "path": "/login",
+      "query": "",
+      "headers": {
+        "content-type": "application/x-www-form-urlencoded"
+      },
+      "auth": null,
+      "body": {
+        "text": "client_id={token_id}&client_secret={token_secret}"
+      },
+      "status": 200,
+      "content_type": "application/json",
+      "compare": "exact",
+      "capture": {
+        "jwt.client": "access_token"
+      },
+      "response": {
+        "json": {
+          "access_token": "<volatile>",
+          "token_type": "bearer",
+          "expires": "<volatile>"
+        }
+      }
+    },
+    {
+      "step": "login_client_credentials_bad_secret",
+      "method": "POST",
+      "path": "/login",
+      "query": "",
+      "headers": {
+        "content-type": "application/x-www-form-urlencoded"
+      },
+      "auth": null,
+      "body": {
+        "text": "client_id={token_id}&client_secret=wrong"
+      },
+      "status": 401,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": {
+          "detail": "Invalid credentials"
+        }
+      }
+    },
+    {
+      "step": "login_client_credentials_not_uuid",
+      "method": "POST",
+      "path": "/login",
+      "query": "",
+      "headers": {
+        "content-type": "application/x-www-form-urlencoded"
+      },
+      "auth": null,
+      "body": {
+        "text": "client_id=nope&client_secret=x"
+      },
+      "status": 401,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": {
+          "detail": "Invalid credentials"
+        }
+      }
+    },
+    {
+      "step": "client_credentials_request",
+      "method": "GET",
+      "path": "/pipes/keys",
+      "query": "",
+      "headers": {},
+      "auth": {
+        "slot": "client"
+      },
+      "body": null,
+      "status": 500,
+      "content_type": "text/plain",
+      "compare": "skip",
+      "reason": "The sqlite instance returns token scopes as a JSON string (`instance/_tokens.py:304`), so `TokenModel(**doc)` fails (a 500) where the in-memory instance returns a list.",
+      "response": {
+        "text": "Internal Server Error"
+      }
+    },
+    {
+      "step": "delete_token",
+      "method": "DELETE",
+      "path": "/tokens/{token_id}",
+      "query": "",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": null,
+      "status": 500,
+      "content_type": "text/plain",
+      "compare": "skip",
+      "reason": "The sqlite instance returns token scopes as a JSON string (`instance/_tokens.py:304`), so `TokenModel(**doc)` fails (a 500) where the in-memory instance returns a list.",
+      "response": {
+        "text": "Internal Server Error"
+      }
+    },
+    {
+      "step": "register_plugin",
+      "method": "POST",
+      "path": "/plugins/fixture_plugin",
+      "query": "version=0.1.0&attributes=%7B%7D",
+      "headers": {
+        "content-type": "multipart/form-data; boundary=mrsmcontractboundary"
+      },
+      "auth": {
+        "slot": "admin"
+      },
+      "body": {
+        "base64": "LS1tcnNtY29udHJhY3Rib3VuZGFyeQ0KQ29udGVudC1EaXNwb3NpdGlvbjogZm9ybS1kYXRhOyBuYW1lPSJhcmNoaXZlIjsgZmlsZW5hbWU9ImZpeHR1cmVfcGx1Z2luLnRhci5neiINCkNvbnRlbnQtVHlwZTogYXBwbGljYXRpb24vZ3ppcA0KDQofiwgAAAAAAAL/7c2xCsIwFIXhO/sU2brFm1q6+SwXhyoBiSVNRN/e1EVwFhH8v+UcznKO8VZqnmw+11NMW7OYYjHz810+RptxGJ7ZvKdqP776uodd6FWcyhfUpRxyu5f/ZHad8hIvycztXac+eO02AgAAAAAAAAAAAAAAAAD4cQ+pw11+ACgAAA0KLS1tcnNtY29udHJhY3Rib3VuZGFyeS0tDQo="
+      },
+      "status": 200,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": [
+          true,
+          "Successfully registered plugin 'fixture_plugin'."
+        ]
+      }
+    },
+    {
+      "step": "register_plugin_no_archive",
+      "method": "POST",
+      "path": "/plugins/other_plugin",
+      "query": "",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": null,
+      "status": 422,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": {
+          "detail": [
+            {
+              "type": "missing",
+              "loc": [
+                "body",
+                "archive"
+              ],
+              "msg": "Field required",
+              "input": null
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "get_plugins",
+      "method": "GET",
+      "path": "/plugins",
+      "query": "",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": null,
+      "status": 200,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": [
+          "fixture_plugin"
+        ]
+      }
+    },
+    {
+      "step": "get_plugins_search",
+      "method": "GET",
+      "path": "/plugins",
+      "query": "search_term=fix",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": null,
+      "status": 200,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": [
+          "fixture_plugin"
+        ]
+      }
+    },
+    {
+      "step": "get_plugins_search_none",
+      "method": "GET",
+      "path": "/plugins",
+      "query": "search_term=zzz",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": null,
+      "status": 200,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": []
+      }
+    },
+    {
+      "step": "get_plugin_attributes",
+      "method": "GET",
+      "path": "/plugins/fixture_plugin/attributes",
+      "query": "",
+      "headers": {},
+      "auth": null,
+      "body": null,
+      "status": 200,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": {}
+      }
+    },
+    {
+      "step": "get_plugin_version",
+      "method": "GET",
+      "path": "/plugins/fixture_plugin/version",
+      "query": "",
+      "headers": {},
+      "auth": null,
+      "body": null,
+      "status": 200,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": "0.1.0"
+      }
+    },
+    {
+      "step": "download_plugin",
+      "method": "GET",
+      "path": "/plugins/fixture_plugin",
+      "query": "",
+      "headers": {},
+      "auth": null,
+      "body": null,
+      "status": 200,
+      "content_type": "application/x-tar",
+      "compare": "exact",
+      "response": {
+        "base64": "H4sIAAAAAAAC/+3NsQrCMBSF4Tv7FNm6xZtauvksF4cqAYklTUTf3tRFcBYR/L/lHM5yjvFWap5sPtdTTFuzmGIx8/NdPkabcRie2bynaj+++rqHXehVnMoX1KUccruX/2R2nfISL8nM7V2nPnjtNgIAAAAAAAAAAAAAAAAA+HEPqcNdfgAoAAA="
+      },
+      "content_disposition": "attachment; filename=\"fixture_plugin.tar.gz\""
+    },
+    {
+      "step": "download_plugin_missing",
+      "method": "GET",
+      "path": "/plugins/nope",
+      "query": "",
+      "headers": {},
+      "auth": null,
+      "body": null,
+      "status": 200,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": [
+          false,
+          "Archive for plugin 'nope' could not be found."
+        ]
+      }
+    },
+    {
+      "step": "delete_plugin_missing",
+      "method": "DELETE",
+      "path": "/plugins/nope",
+      "query": "",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": null,
+      "status": 200,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": [
+          false,
+          "Plugin 'nope' is not registered."
+        ]
+      }
+    },
+    {
+      "step": "delete_plugin",
+      "method": "DELETE",
+      "path": "/plugins/fixture_plugin",
+      "query": "",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": null,
+      "status": 200,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": [
+          true,
+          "Successfully deleted plugin 'fixture_plugin'."
+        ]
+      }
+    },
+    {
+      "step": "delete_plugin_no_auth",
+      "method": "DELETE",
+      "path": "/plugins/fixture_plugin",
+      "query": "",
+      "headers": {},
+      "auth": null,
+      "body": null,
+      "status": 401,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": {
+          "detail": "Invalid credentials"
+        }
+      }
+    },
+    {
+      "step": "get_jobs",
+      "method": "GET",
+      "path": "/jobs",
+      "query": "",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": null,
+      "status": 200,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": {}
+      }
+    },
+    {
+      "step": "get_job_missing",
+      "method": "GET",
+      "path": "/jobs/missing-job",
+      "query": "",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": null,
+      "status": 404,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": {
+          "detail": "Job(\"missing-job\") doesn't exist."
+        }
+      }
+    },
+    {
+      "step": "job_exists_missing",
+      "method": "GET",
+      "path": "/jobs/missing-job/exists",
+      "query": "",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": null,
+      "status": 200,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": false
+      }
+    },
+    {
+      "step": "start_job_missing",
+      "method": "POST",
+      "path": "/jobs/missing-job/start",
+      "query": "",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": null,
+      "status": 404,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": {
+          "detail": "Job(\"missing-job\") does not exist."
+        }
+      }
+    },
+    {
+      "step": "logs_missing",
+      "method": "GET",
+      "path": "/logs/missing-job",
+      "query": "",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": null,
+      "status": 404,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": {
+          "detail": "Job(\"missing-job\") does not exist."
+        }
+      }
+    },
+    {
+      "step": "jobs_reader_403",
+      "method": "GET",
+      "path": "/jobs",
+      "query": "",
+      "headers": {},
+      "auth": {
+        "slot": "reader"
+      },
+      "body": null,
+      "status": 403,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": {
+          "detail": "Missing required scope: 'jobs:read'"
+        }
+      }
+    },
+    {
+      "step": "create_job_no_body",
+      "method": "POST",
+      "path": "/jobs/x",
+      "query": "",
+      "headers": {},
+      "auth": {
+        "slot": "admin"
+      },
+      "body": null,
+      "status": 422,
+      "content_type": "application/json",
+      "compare": "exact",
+      "response": {
+        "json": {
+          "detail": [
+            {
+              "type": "missing",
+              "loc": [
+                "body"
+              ],
+              "msg": "Field required",
+              "input": null
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "index",
+      "method": "GET",
+      "path": "/",
+      "query": "",
+      "headers": {},
+      "auth": null,
+      "body": null,
+      "status": 307,
+      "content_type": "",
+      "compare": "exact",
+      "response": {
+        "base64": ""
+      }
+    }
+  ]
+}

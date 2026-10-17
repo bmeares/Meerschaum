@@ -50,6 +50,16 @@ def test_polars_special_type_conversion():
     assert row == pd_df.iloc[0].to_dict()
 
 
+def _geoarrow_types_installed() -> bool:
+    import importlib.util
+    from meerschaum.utils.venv import Venv
+    with Venv('mrsm'):
+        try:
+            return importlib.util.find_spec('geoarrow.types') is not None
+        except ModuleNotFoundError:
+            return False
+
+
 def test_polars_geometry_uses_geoarrow_wkb():
     """Polars uses GeoArrow WKB while Pandas retains GeoPandas geometry."""
     import json
@@ -71,7 +81,11 @@ def test_polars_geometry_uses_geoarrow_wkb():
     }
     assert shapely.from_wkb(polars_df['geom'][0]).equals(shapely.Point(1, 2))
     assert polars_df['geom'][1] is None
-    assert 'extension<geoarrow.wkb' in str(polars_df.to_arrow().schema.field('geom').type)
+    ### The v4 path (`MRSM_CORE=python`, removed in 5.0) registers the PyArrow extension type only
+    ### when `geoarrow-types` is installed in the `mrsm` venv, which a fresh root lacks.
+    from meerschaum._core import _gate
+    if _gate.mode() == 'rust' or _geoarrow_types_installed():
+        assert 'extension<geoarrow.wkb' in str(polars_df.to_arrow().schema.field('geom').type)
 
     pandas_df = enforce_dtypes(raw_df, dtypes)
     assert isinstance(pandas_df, geopandas.GeoDataFrame)
@@ -336,7 +350,10 @@ def test_filter_unseen_df_polars_preserves_source_order(monkeypatch):
 
     monkeypatch.setattr(dataframe, '_filter_unseen_df_with_polars', capture_native_result)
     result = dataframe.filter_unseen_df(old_df, new_df)
-    assert native_results[0] is not None
+    from meerschaum._core import _gate
+    if not _gate.use_rust('filter_unseen_df'):
+        # Under MRSM_CORE=rust the Rust kernel replaces the Polars helper entirely (D12).
+        assert native_results[0] is not None
     assert result['id'].tolist() == [3, 2]
 
 

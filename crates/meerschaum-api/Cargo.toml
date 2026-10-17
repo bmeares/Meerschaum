@@ -1,0 +1,35 @@
+[package]
+name = "meerschaum-api"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "Meerschaum v5: api crate (see docs/design/v5.0.0.md)"
+
+[features]
+default = ["client"]
+# The `APIConnector` HTTP client. Without it the crate only provides the route/auth models
+# (`models`, `routes`, `wire`), so the server can depend on it without pulling in `reqwest`.
+client = ["dep:reqwest", "dep:tokio", "dep:tokio-tungstenite", "dep:futures-util"]
+
+[dependencies]
+meerschaum-connector = { workspace = true }
+meerschaum-core = { workspace = true }
+meerschaum-kernel = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+indexmap = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+reqwest = { workspace = true, optional = true, features = ["multipart"] }
+tokio = { workspace = true, optional = true }
+tokio-tungstenite = { version = "0.28", optional = true }
+futures-util = { version = "0.3", optional = true, default-features = false, features = ["std", "sink"] }
+
+[dev-dependencies]
+tokio = { workspace = true }
+base64 = "0.22"

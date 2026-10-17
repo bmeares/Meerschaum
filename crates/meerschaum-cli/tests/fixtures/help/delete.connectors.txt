@@ -1,0 +1,6 @@
+
+Delete configured connectors.
+
+Example:
+    `delete connectors sql:test`
+

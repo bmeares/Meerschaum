@@ -1,0 +1,70 @@
+[package]
+name = "meerschaum-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "Meerschaum v5: the `mrsm` binary (clap CLI, shell, worker pool, Gantt TUI)"
+
+[lib]
+name = "meerschaum_cli"
+path = "src/lib.rs"
+
+[[bin]]
+name = "mrsm"
+path = "src/main.rs"
+
+[dependencies]
+meerschaum-core = { workspace = true }
+meerschaum-compose = { workspace = true }
+meerschaum-kernel = { workspace = true }
+meerschaum-connector = { workspace = true }
+meerschaum-sql = { workspace = true }
+meerschaum-valkey = { workspace = true }
+meerschaum-api = { workspace = true, features = ["client"] }
+meerschaum-jobs = { workspace = true }
+meerschaum-worker = { workspace = true }
+meerschaum-engine = { workspace = true }
+meerschaum-server = { workspace = true }
+meerschaum-plugin = { workspace = true }
+meerschaum-web = { workspace = true }
+axum = "0.8"
+async-trait = "0.1"
+rmpv = "1"
+tokio = { workspace = true }
+tracing-subscriber = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+clap = { workspace = true }
+indexmap = { workspace = true }
+regex = { workspace = true }
+rust_decimal = { workspace = true }
+serde_json = { workspace = true }
+fancy-regex = "0.14"
+terminal_size = "0.4"
+unicode-width = "0.2"
+reedline = "0.52"
+# The versions reedline 0.52 uses (already in the lock file): key events, styles, graphemes.
+crossterm = "0.29"
+nu-ansi-term = "0.50"
+unicode-segmentation = "1"
+# `install plugins`: plugin archives are gzip-compressed tarballs.
+tar = { version = "0.4", default-features = false }
+flate2 = "1"
+sha2 = { workspace = true }
+hex = { workspace = true }
+fs4 = "0.13"
+
+[target.'cfg(unix)'.dependencies]
+# `timed_input`: poll stdin with a timeout (no reader thread that outlives the call);
+# `setsid` for the timed pipeline step.
+rustix = { version = "1", default-features = false, features = ["std", "event", "process"] }
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
+tempfile = "3"
+# The pty harness of tests/shell_screens.rs: drive `mrsm` in a pseudo-terminal and render it.
+portable-pty = "0.9"
+vt100 = "0.16"

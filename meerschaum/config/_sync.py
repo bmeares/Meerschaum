@@ -9,6 +9,7 @@ Synchronize across config files
 from __future__ import annotations
 import pathlib
 from meerschaum.utils.typing import Optional, List, Tuple
+from meerschaum._core._gate import rust_impl as _rust_impl
 
 
 def sync_yaml_configs(
@@ -104,6 +105,8 @@ def sync_yaml_configs(
 
 
 def sync_files(keys: Optional[List[str]] = None):
+    if (_rust := _rust_impl('sync_files')) is not None:
+        return _rust(keys)
     if keys is None:
         keys = []
 

@@ -1,0 +1,9 @@
+
+Delete an element.
+
+Command:
+    `delete {config, pipes, plugins, users, connectors, jobs, venvs}`
+
+
+    Options:
+        `delete [cache, config, connectors, jobs, pipes, plugins, users, venvs]`

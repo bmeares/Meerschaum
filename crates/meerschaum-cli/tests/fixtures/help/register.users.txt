@@ -1,0 +1,3 @@
+
+Register a new user to a Meerschaum instance.
+

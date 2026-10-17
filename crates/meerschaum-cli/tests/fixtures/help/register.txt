@@ -1,0 +1,7 @@
+
+Register new items (pipes, plugins, users).
+
+Pipes and users reside on instances (`-i`), and plugins reside on repositories (`-r`).
+
+    Options:
+        `register [connectors, pipes, plugins, tokens, users]`

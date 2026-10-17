@@ -1,0 +1,3 @@
+
+Clear pipes' data without dropping any tables.
+

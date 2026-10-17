@@ -1,0 +1,28 @@
+
+Run a Meerschaum action as a background job.
+
+To create a new job, pass the command arguments after `start job`.
+To start a stopped job, pass the job name after `start job`.
+
+You may also run a background job with the `-d` or `--daemon` flags.
+
+Examples:
+
+    Create new jobs:
+
+      - `start job sync pipes --loop`
+            Run the action `sync pipes --loop` as a background job.
+            Generates a random name; e.g. 'happy_seal'.
+
+      - `start api --daemon --name api-server`
+            Run the action `start api` as a background job, and assign the job
+            the name 'api-server'.
+
+    Start stopped jobs:
+
+      - `start job happy_seal`
+            Start the job 'happy_seal'.
+
+      - `start job --name happy_seal`
+            Start the job 'happy_seal' but via the `--name` flag.
+

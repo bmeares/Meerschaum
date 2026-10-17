@@ -707,6 +707,16 @@ def test_sync_dask_dataframe(flavor: str):
         {'dt': '2023-01-02', 'id': 2},
         {'dt': '2023-01-03', 'id': 3},
     ])
+    from meerschaum._core import _gate
+    if _gate.mode() == 'rust':
+        ### D20: Dask is removed in 5.0; reading and syncing Dask name the migration guide.
+        with pytest.raises(TypeError, match='migrating-to-v5'):
+            pipe.get_data(as_dask=True, debug=debug)
+        dd = mrsm.attempt_import('dask.dataframe')
+        pd = mrsm.attempt_import('pandas')
+        with pytest.raises(TypeError, match='migrating-to-v5'):
+            pipe.sync(dd.from_pandas(pd.DataFrame([{'dt': '2023-01-01', 'id': 1}]), npartitions=1))
+        return
     ddf = pipe.get_data(as_dask=True, debug=debug)
 
     pipe2 = mrsm.Pipe('dask', 'insert', instance=conn)

@@ -1,0 +1,199 @@
+{
+  "meta": {
+    "label": "w8-perf-postgis",
+    "date": "2026-10-13",
+    "backends": [
+      "postgis"
+    ],
+    "repeats": 3,
+    "sizes": [
+      "10k",
+      "100k",
+      "1M"
+    ],
+    "python": "3.14.8",
+    "os": "Linux x86_64",
+    "cpus": 40,
+    "notes": [],
+    "v4_version": "4.1.4",
+    "v5_version": "`mrsm` release build (Meerschaum v5.0.0-a1), fa\u00e7ade at dac87ac1 + working tree"
+  },
+  "results": [
+    {
+      "backend": "postgis",
+      "case": "sync_10k",
+      "impl": "v4py",
+      "seconds": [
+        1.5051,
+        1.4566,
+        1.4705
+      ],
+      "median": 1.4705,
+      "min": 1.4566,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "sync_100k",
+      "impl": "v4py",
+      "seconds": [
+        3.6589,
+        3.6603,
+        3.6824
+      ],
+      "median": 3.6603,
+      "min": 3.6589,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "sync_1M",
+      "impl": "v4py",
+      "seconds": [
+        46.8411,
+        46.0223
+      ],
+      "median": 46.4317,
+      "min": 46.0223,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "inc_100k",
+      "impl": "v4py",
+      "seconds": [
+        2.6826,
+        2.6766,
+        2.6855
+      ],
+      "median": 2.6826,
+      "min": 2.6766,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "inc_1M",
+      "impl": "v4py",
+      "seconds": [
+        2.8892,
+        2.8369
+      ],
+      "median": 2.863,
+      "min": 2.8369,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "filter_existing_100k",
+      "impl": "v4py",
+      "seconds": [
+        1.7963,
+        1.8123,
+        1.7956
+      ],
+      "median": 1.7963,
+      "min": 1.7956,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "get_data_1M",
+      "impl": "v4py",
+      "seconds": [
+        6.0837,
+        6.1471
+      ],
+      "median": 6.1154,
+      "min": 6.0837,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "sync_10k",
+      "impl": "v5py",
+      "seconds": [
+        1.13,
+        1.0494,
+        1.1328
+      ],
+      "median": 1.13,
+      "min": 1.0494,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "sync_100k",
+      "impl": "v5py",
+      "seconds": [
+        2.4572,
+        2.3405,
+        2.3384
+      ],
+      "median": 2.3405,
+      "min": 2.3384,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "sync_1M",
+      "impl": "v5py",
+      "seconds": [
+        11.8236,
+        12.0786
+      ],
+      "median": 11.9511,
+      "min": 11.8236,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "inc_100k",
+      "impl": "v5py",
+      "seconds": [
+        1.9549,
+        1.9977,
+        2.0069
+      ],
+      "median": 1.9977,
+      "min": 1.9549,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "inc_1M",
+      "impl": "v5py",
+      "seconds": [
+        2.2004,
+        2.2104
+      ],
+      "median": 2.2054,
+      "min": 2.2004,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "filter_existing_100k",
+      "impl": "v5py",
+      "seconds": [
+        0.6357,
+        0.6196,
+        0.6342
+      ],
+      "median": 0.6342,
+      "min": 0.6196,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "get_data_1M",
+      "impl": "v5py",
+      "seconds": [
+        1.6468,
+        1.7258
+      ],
+      "median": 1.6863,
+      "min": 1.6468,
+      "failed": 0
+    }
+  ]
+}

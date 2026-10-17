@@ -1,0 +1,29 @@
+# Comment lines at column zero are stripped before substitution: $NOT_SUBSTITUTED
+root_dir: ./root
+plugins_dir: ./plugins
+
+connectors:
+  sql:
+    db:
+      flavor: sqlite
+      database: "${DB_DIR}/env.db"
+      username: "$FROM_PROCESS"
+      password: "${FROM_BOTH}"
+      host: ${WITH_DEFAULT|fallback-host}
+      port: $UNDEFINED_PORT
+      schema: "${ALSO_UNDEFINED}"
+      options: "price is $$5"
+      dotted: $DOTTED.VALUE
+
+environment:
+  INTERPOLATED: "${FROM_DOTENV}-suffix"
+  QUOTED_VALUE: $QUOTED
+  EXPORTED: "$EXPORTED_VAR"
+  MRSM_PLUGINS_DIR: "./plugins"
+
+pipes:
+  - connector: sql:db
+    metric: env
+    instance: sql:db
+    parameters:
+      note: "trailing comment $FROM_DOTENV"  # $FROM_PROCESS in an inline comment

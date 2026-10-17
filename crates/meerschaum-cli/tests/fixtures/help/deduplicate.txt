@@ -1,0 +1,5 @@
+
+Deduplicate pipes' tables, chunking across their datetime axes.
+
+    Options:
+        `deduplicate [pipes]`

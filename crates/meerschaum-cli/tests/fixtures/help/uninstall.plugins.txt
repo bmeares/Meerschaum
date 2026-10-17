@@ -1,0 +1,3 @@
+
+Remove installed plugins. Does not affect repository registrations.
+

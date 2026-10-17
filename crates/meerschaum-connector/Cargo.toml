@@ -1,0 +1,23 @@
+[package]
+name = "meerschaum-connector"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "Meerschaum v5: the Connector and InstanceConnector traits shared by every instance connector and the engine"
+
+[dependencies]
+meerschaum-core = { workspace = true }
+meerschaum-kernel = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+indexmap = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+# Object-safe async traits (`Arc<dyn InstanceConnector>`); re-exported as
+# `meerschaum_connector::async_trait` so implementors need no direct dependency.
+async-trait = "0.1"

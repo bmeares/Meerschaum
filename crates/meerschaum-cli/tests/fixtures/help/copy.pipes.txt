@@ -1,0 +1,3 @@
+
+Copy pipes' attributes and make new pipes.
+

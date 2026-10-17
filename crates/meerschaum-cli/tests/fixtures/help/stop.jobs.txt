@@ -1,0 +1,5 @@
+
+Stop running jobs that were started with `-d` or `start job`.
+
+To see running processes, run `show jobs`.
+

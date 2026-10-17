@@ -1,0 +1,6 @@
+
+Analyze pipes' target tables to refresh the database planner's statistics.
+
+This does not reclaim disk space; it helps the query planner choose better plans
+after large syncs.
+

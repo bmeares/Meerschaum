@@ -6,6 +6,7 @@
 Interact with Pipes metadata via SQLConnector.
 """
 from __future__ import annotations
+from meerschaum._core._gate import rust_method as _rust_method, rust_impl as _rust_impl
 import traceback
 from datetime import datetime, date, timedelta
 
@@ -31,6 +32,8 @@ def register_pipe(
     Register a new pipe.
     A pipe's attributes must be set before registering.
     """
+    if (_rust := _rust_method(self, 'register_pipe')) is not None:
+        return _rust(pipe)
     from meerschaum.utils.packages import attempt_import
     from meerschaum.utils.sql import json_flavors
 
@@ -99,6 +102,8 @@ def edit_pipe(
     debug: bool, default False
         Verbosity toggle.
     """
+    if (_rust := _rust_method(self, 'edit_pipe')) is not None:
+        return _rust(pipe, patch=patch)
 
     if pipe.id is None:
         return False, f"{pipe} is not registered and cannot be edited."
@@ -184,6 +189,14 @@ def fetch_pipes_keys(
     -------
     A list of tuples of pipes' keys and parameters (connector_keys, metric_key, location_key, parameters).
     """
+    if (_rust := _rust_method(self, 'fetch_pipes_keys')) is not None:
+        return _rust(
+            connector_keys=connector_keys,
+            metric_keys=metric_keys,
+            location_keys=location_keys,
+            tags=tags,
+            params=params,
+        )
     from meerschaum.utils.packages import attempt_import
     from meerschaum.utils.misc import separate_negation_values
     from meerschaum.utils.sql import (
@@ -371,6 +384,8 @@ def create_pipe_indices(
     """
     Create a pipe's indices.
     """
+    if (_rust := _rust_method(self, 'create_pipe_indices')) is not None:
+        return _rust(pipe, columns=columns)
     success = self.create_indices(pipe, columns=columns, debug=debug)
     msg = (
         "Success"
@@ -392,6 +407,8 @@ def create_indices(
     """
     if pipe.__dict__.get('_skip_check_indices', False):
         return True
+    if (_rust := _rust_method(self, 'create_indices')) is not None:
+        return _rust(pipe, columns=columns, indices=indices)
 
     if debug:
         dprint(f"Creating indices for {pipe}...")
@@ -427,6 +444,8 @@ def drop_pipe_indices(
     """
     Drop a pipe's indices.
     """
+    if (_rust := _rust_method(self, 'drop_pipe_indices')) is not None:
+        return _rust(pipe, columns=columns)
     success = self.drop_indices(pipe, columns=columns, debug=debug)
     msg = (
         "Success"
@@ -446,6 +465,8 @@ def drop_indices(
     """
     Drop a pipe's indices.
     """
+    if (_rust := _rust_method(self, 'drop_indices')) is not None:
+        return _rust(pipe, columns=columns, indices=indices)
     if debug:
         dprint(f"Dropping indices for {pipe}...")
 
@@ -478,6 +499,8 @@ def get_pipe_index_names(self, pipe: mrsm.Pipe) -> Dict[str, str]:
     -------
     A dictionary of index keys to column names.
     """
+    if (_rust := _rust_method(self, 'get_pipe_index_names')) is not None:
+        return _rust(pipe)
     from meerschaum.utils.sql import DEFAULT_SCHEMA_FLAVORS, truncate_item_name
     _parameters = pipe.parameters
     _index_template = _parameters.get('index_template', "IX_{schema_str}{target}_{column_names}")
@@ -550,6 +573,8 @@ def get_create_index_queries(
     -------
     A dictionary of index names mapping to lists of queries.
     """
+    if (_rust := _rust_method(self, 'get_create_index_queries')) is not None:
+        return _rust(pipe)
     ### NOTE: Due to recent breaking changes in DuckDB, indices don't behave properly.
     if self.flavor == 'duckdb':
         return {}
@@ -967,6 +992,8 @@ def get_drop_index_queries(
     -------
     A dictionary of column names mapping to lists of queries.
     """
+    if (_rust := _rust_method(self, 'get_drop_index_queries')) is not None:
+        return _rust(pipe)
     ### NOTE: Due to breaking changes within DuckDB, indices must be skipped.
     if self.flavor == 'duckdb':
         return {}
@@ -1089,6 +1116,8 @@ def delete_pipe(
     """
     Delete a Pipe's registration.
     """
+    if (_rust := _rust_method(self, 'delete_pipe')) is not None:
+        return _rust(pipe)
     from meerschaum.utils.packages import attempt_import
     sqlalchemy = attempt_import('sqlalchemy', lazy=False)
 
@@ -1179,6 +1208,24 @@ def get_pipe_data(
     A Pandas DataFrame, or a Polars DataFrame when an Arrow-native read is available.
 
     """
+    if (
+        not begin_add_minutes
+        and not end_add_minutes
+        and (_rust := _rust_method(self, 'get_pipe_data')) is not None
+    ):
+        return _rust(
+            pipe,
+            select_columns=select_columns,
+            omit_columns=omit_columns,
+            begin=begin,
+            end=end,
+            params=params,
+            order=order,
+            limit=limit,
+            chunksize=chunksize,
+            as_iterator=as_iterator,
+            as_polars=as_polars,
+        )
     from meerschaum.utils.packages import import_pandas
     from meerschaum.utils.dtypes import to_pandas_dtype, are_dtypes_equal
     from meerschaum.utils.dtypes.sql import get_pd_type_from_db_type
@@ -1372,6 +1419,17 @@ def get_pipe_docs(
     """
     Return a pipe's data as a list of dictionaries, bypassing pandas overhead.
     """
+    if (_rust := _rust_method(self, 'get_pipe_docs')) is not None:
+        return _rust(
+            pipe,
+            select_columns=select_columns,
+            omit_columns=omit_columns,
+            begin=begin,
+            end=end,
+            params=params,
+            order=order,
+            limit=limit,
+        )
     query = self.get_pipe_data_query(
         pipe=pipe,
         select_columns=select_columns,
@@ -1466,6 +1524,22 @@ def get_pipe_data_query(
     -------
     A `SELECT` query to retrieve a pipe's data.
     """
+    if (_rust := _rust_method(self, 'get_pipe_data_query')) is not None:
+        return _rust(
+            pipe,
+            select_columns=select_columns,
+            omit_columns=omit_columns,
+            begin=begin,
+            end=end,
+            params=params,
+            order=order,
+            sort_datetimes=sort_datetimes,
+            limit=limit,
+            begin_add_minutes=begin_add_minutes,
+            end_add_minutes=end_add_minutes,
+            replace_nulls=replace_nulls,
+            skip_existing_cols_check=skip_existing_cols_check,
+        )
     from meerschaum.utils.misc import items_str
     from meerschaum.utils.sql import sql_item_name, dateadd_str
     from meerschaum.utils.dtypes import coerce_timezone
@@ -1661,6 +1735,8 @@ def get_pipe_id(
     """
     Get a Pipe's ID from the pipes table.
     """
+    if (_rust := _rust_method(self, 'get_pipe_id')) is not None:
+        return _rust(pipe)
     if pipe.temporary:
         return None
     from meerschaum.utils.packages import attempt_import
@@ -1690,6 +1766,8 @@ def get_pipe_attributes(
     """
     Get a Pipe's attributes dictionary.
     """
+    if (_rust := _rust_method(self, 'get_pipe_attributes')) is not None:
+        return _rust(pipe)
     from meerschaum.connectors.sql.tables import get_tables
     from meerschaum.utils.packages import attempt_import
     sqlalchemy = attempt_import('sqlalchemy', lazy=False)
@@ -1956,6 +2034,32 @@ def sync_pipe(
     -------
     A `SuccessTuple` of success (`bool`) and message (`str`).
     """
+    if (_rust := _rust_method(self, 'sync_pipe')) is not None:
+        from meerschaum.utils.packages import import_pandas
+        _pd = import_pandas()
+        if df is not None and not isinstance(df, _pd.DataFrame):
+            df = pipe.enforce_dtypes(
+                df,
+                chunksize=chunksize,
+                safe_copy=kw.get('safe_copy', False),
+                dtypes=pipe.get_dtypes(debug=debug),
+                debug=debug,
+            )
+        _rust_result = _rust(
+            pipe,
+            df,
+            begin=begin,
+            end=end,
+            chunksize=chunksize,
+            check_existing=check_existing,
+        )
+        if hasattr(pipe, '_clear_cache_key'):
+            for _cache_key in (
+                '_exists', '_columns_types', '_columns_types_timestamp',
+                '_columns_indices', '_columns_indices_timestamp',
+            ):
+                pipe._clear_cache_key(_cache_key, debug=debug)
+        return _rust_result
     from meerschaum.utils.packages import import_pandas
     from meerschaum.utils.sql import (
         get_update_queries,
@@ -2380,6 +2484,22 @@ def sync_pipe_inplace(
             _inplace=False,
             **kw
         )
+    if (
+        (_rust := _rust_impl('sync_pipe_inplace')) is not None
+        and _rust_method(self, 'flavor') is not None
+    ):
+        _result = _rust(
+            self.__dict__['_rust_connector'],
+            pipe,
+            params,
+            begin,
+            end,
+            check_existing,
+        )
+        ### The in-place sync may have added or retyped columns behind the pipe's cache.
+        pipe._clear_cache_key('_columns_types', debug=debug)
+        pipe._clear_cache_key('_columns_indices', debug=debug)
+        return _result
     from meerschaum.utils.sql import (
         sql_item_name,
         get_update_queries,
@@ -2946,6 +3066,8 @@ def get_sync_time(
     -------
     A `datetime` object (or `int` if using an integer axis) if the pipe exists, otherwise `None`.
     """
+    if (_rust := _rust_method(self, 'get_sync_time')) is not None:
+        return _rust(pipe, params=params, newest=newest, remote=remote)
     from meerschaum.utils.sql import sql_item_name, build_where, wrap_query_with_cte
     src_name = sql_item_name('src', self.flavor)
     table_name = sql_item_name(pipe.target, self.flavor, self.get_pipe_schema(pipe))
@@ -3070,6 +3192,8 @@ def pipe_exists(
     A `bool` corresponding to whether a pipe's table exists.
 
     """
+    if (_rust := _rust_method(self, 'pipe_exists')) is not None:
+        return _rust(pipe)
     from meerschaum.utils.sql import table_exists
     exists = table_exists(
         pipe.target,
@@ -3119,6 +3243,8 @@ def get_pipe_rowcount(
     An `int` for the number of rows if the `pipe` exists, otherwise `None`.
 
     """
+    if (_rust := _rust_method(self, 'get_pipe_rowcount')) is not None:
+        return _rust(pipe, begin=begin, end=end, params=params, remote=remote)
     from meerschaum.utils.sql import dateadd_str, sql_item_name, wrap_query_with_cte, build_where
     from meerschaum.connectors.sql._fetch import get_pipe_query
     from meerschaum.utils.dtypes.sql import get_db_type_from_pd_type
@@ -3239,6 +3365,8 @@ def drop_pipe(
     -------
     A `SuccessTuple` indicated success.
     """
+    if (_rust := _rust_method(self, 'drop_pipe')) is not None:
+        return _rust(pipe)
     from meerschaum.utils.sql import table_exists, sql_item_name, DROP_IF_EXISTS_FLAVORS
     success = True
     target = pipe.target
@@ -3289,6 +3417,8 @@ def clear_pipe(
          See `meerschaum.utils.sql.build_where`.
 
     """
+    if (_rust := _rust_method(self, 'clear_pipe')) is not None:
+        return _rust(pipe, begin=begin, end=end, params=params)
     if not pipe.exists(debug=debug):
         return True, f"{pipe} does not exist, so nothing was cleared."
 
@@ -3410,6 +3540,8 @@ def get_pipe_columns_types(
     }
     >>> 
     """
+    if (_rust := _rust_method(self, 'get_pipe_columns_types')) is not None:
+        return _rust(pipe)
     from meerschaum.utils.sql import get_table_cols_types
     if not pipe.exists(debug=debug):
         return {}
@@ -3464,6 +3596,11 @@ def get_pipe_columns_indices(
     A dictionary mapping columns names to lists of dictionaries.
     The dictionaries in the lists contain the name and type of the indices.
     """
+    if (
+        not pipe.__dict__.get('_skip_check_indices', False)
+        and (_rust := _rust_method(self, 'get_pipe_columns_indices')) is not None
+    ):
+        return _rust(pipe)
     if pipe.__dict__.get('_skip_check_indices', False):
         return {}
 
@@ -4025,6 +4162,8 @@ def deduplicate_pipe(
     -------
     A `SuccessTuple` indicating success.
     """
+    if (_rust := _rust_method(self, 'deduplicate_pipe')) is not None:
+        return _rust(pipe, begin=begin, end=end, params=params)
     from meerschaum.utils.sql import (
         sql_item_name,
         get_rename_table_queries,

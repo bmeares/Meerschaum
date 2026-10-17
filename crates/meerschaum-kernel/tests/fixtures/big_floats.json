@@ -1,0 +1,38 @@
+[
+  {
+    "input": 1e+20,
+    "converted_dtype": "Float64",
+    "converted_value": 1e+20,
+    "enforced_value": 1e+20
+  },
+  {
+    "input": -1e+20,
+    "converted_dtype": "Float64",
+    "converted_value": -1e+20,
+    "enforced_value": -1e+20
+  },
+  {
+    "input": 9.223372036854776e+18,
+    "converted_dtype": "Float64",
+    "converted_value": 9.223372036854776e+18,
+    "enforced_value": 9.223372036854776e+18
+  },
+  {
+    "input": 1.8446744073709552e+19,
+    "converted_dtype": "Float64",
+    "converted_value": 1.8446744073709552e+19,
+    "enforced_value": 1.8446744073709552e+19
+  },
+  {
+    "input": -9.223372036854776e+18,
+    "converted_dtype": "Int64",
+    "converted_value": -9.223372036854776e+18,
+    "enforced_value": -9.223372036854776e+18
+  },
+  {
+    "input": 1.0,
+    "converted_dtype": "Int64",
+    "converted_value": 1.0,
+    "enforced_value": 1.0
+  }
+]

@@ -1,0 +1,3209 @@
+{
+ "case": {
+  "description": "sync.pipes nested by mistake (loaded before the top-level pipes), a .yml file found by default, the project name from the directory, two instances.",
+  "width": 100,
+  "runs": "all"
+ },
+ "base_env": {
+  "PATH": "/usr/bin:/bin",
+  "HOME": "{TMP}/home",
+  "LANG": "C.UTF-8",
+  "MRSM_ROOT_DIR": "{TMP}/host-root",
+  "MRSM_PLUGINS_DIR": "{TMP}/host-plugins",
+  "MRSM_VENVS_DIR": "{TMP}/venvs",
+  "MRSM_NO_AUTO_INSTALL": "1",
+  "MRSM_CORE": "python",
+  "PYTHONHASHSEED": "0"
+ },
+ "runs": [
+  {
+   "name": "explain",
+   "action": [
+    "explain"
+   ],
+   "flags": {},
+   "file": null,
+   "env_file": null,
+   "cwd": "{PROJECT}",
+   "sysargs": [
+    "compose",
+    "explain"
+   ],
+   "width": 100,
+   "result": [
+    true,
+    "Success"
+   ],
+   "commands": [
+    {
+     "sysargs": [
+      "show",
+      "version",
+      "--no-daemon",
+      "--tags",
+      "nested-pipes"
+     ],
+     "subprocess": true,
+     "capture_output": true,
+     "replace": true
+    }
+   ],
+   "events": [],
+   "warnings": [],
+   "messages": [
+    [
+     "info",
+     "Initializing Meerschaum root directory:\n    {PROJECT}/root\n    This should only take a few seconds..."
+    ]
+   ],
+   "config": {
+    "sync": {
+     "schedule": "daily starting 00:00",
+     "args": [
+      "--begin",
+      "2024-01-01"
+     ],
+     "pipes": [
+      {
+       "connector": "plugin:nested",
+       "metric": "one",
+       "instance": "sql:local"
+      },
+      {
+       "connector": "plugin:nested",
+       "metric": "two",
+       "location": "east",
+       "instance": "sql:memory"
+      }
+     ]
+    },
+    "pipes": [
+     {
+      "connector": "plugin:nested",
+      "metric": "three",
+      "instance": "sql:local"
+     }
+    ],
+    "config": {
+     "meerschaum": {
+      "connectors": {}
+     },
+     "stack": {
+      "project_name": "nested-pipes"
+     }
+    },
+    "isolation": "config",
+    "daemon": true,
+    "__file__": "{PROJECT}/mrsm-compose.yml",
+    "root_dir": "{PROJECT}/root",
+    "plugins_dir": [
+     "{PROJECT}/plugins"
+    ],
+    "project_name": "nested-pipes"
+   },
+   "env": {
+    "PATH": "/usr/bin:/bin",
+    "HOME": "{TMP}/home",
+    "LANG": "C.UTF-8",
+    "MRSM_ROOT_DIR": "{PROJECT}/root",
+    "MRSM_PLUGINS_DIR": "[\"{PROJECT}/plugins\"]",
+    "MRSM_VENVS_DIR": "{TMP}/venvs",
+    "MRSM_NO_AUTO_INSTALL": "1",
+    "MRSM_CORE": "python",
+    "PYTHONHASHSEED": "0",
+    "MRSM__COMPOSE_CONFIG": "{\"sync\":{\"schedule\":\"daily starting 00:00\",\"args\":[\"--begin\",\"2024-01-01\"],\"pipes\":[{\"connector\":\"plugin:nested\",\"metric\":\"one\",\"instance\":\"sql:local\"},{\"connector\":\"plugin:nested\",\"metric\":\"two\",\"location\":\"east\",\"instance\":\"sql:memory\"}]},\"pipes\":[{\"connector\":\"plugin:nested\",\"metric\":\"three\",\"instance\":\"sql:local\"}],\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"nested-pipes\"}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yml\",\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\"],\"project_name\":\"nested-pipes\"}",
+    "MRSM__COMPOSE_PROJECT": "nested-pipes",
+    "MRSM_CONFIG": "{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"nested-pipes\"}}"
+   },
+   "pipes_meta": [
+    {
+     "connector": "plugin:nested",
+     "metric": "one",
+     "instance": "sql:local",
+     "tags": [
+      "nested-pipes"
+     ],
+     "cache": true
+    },
+    {
+     "connector": "plugin:nested",
+     "metric": "two",
+     "location": "east",
+     "instance": "sql:memory",
+     "tags": [
+      "nested-pipes"
+     ],
+     "cache": true
+    },
+    {
+     "connector": "plugin:nested",
+     "metric": "three",
+     "instance": "sql:local",
+     "tags": [
+      "nested-pipes"
+     ],
+     "cache": true
+    }
+   ],
+   "pipes": [
+    {
+     "str": "Pipe('plugin:nested', 'one', instance='sql:local')",
+     "connector_keys": "plugin:nested",
+     "metric_key": "one",
+     "location_key": null,
+     "instance_keys": "sql:local",
+     "temporary": false,
+     "parameters": {
+      "tags": [
+       "nested-pipes"
+      ]
+     }
+    },
+    {
+     "str": "Pipe('plugin:nested', 'two', 'east', instance='sql:memory')",
+     "connector_keys": "plugin:nested",
+     "metric_key": "two",
+     "location_key": "east",
+     "instance_keys": "sql:memory",
+     "temporary": false,
+     "parameters": {
+      "tags": [
+       "nested-pipes"
+      ]
+     }
+    },
+    {
+     "str": "Pipe('plugin:nested', 'three', instance='sql:local')",
+     "connector_keys": "plugin:nested",
+     "metric_key": "three",
+     "location_key": null,
+     "instance_keys": "sql:local",
+     "temporary": false,
+     "parameters": {
+      "tags": [
+       "nested-pipes"
+      ]
+     }
+    }
+   ],
+   "explain": "                                      Pipes in 'nested-pipes'                                       \n                                                            ╷                   ╷                   \n  Defined Pipes                                             │Compose Parameters │Remote Parameters  \n╶───────────────────────────────────────────────────────────┼───────────────────┼──────────────────╴\n  ╭────────────────────── Instance ───────────────────────╮ │                   │                   \n  │ sql:local                                             │ │                   │                   \n  ╰───────────────────────────────────────────────────────╯ │                   │                   \n                                                            │                   │                   \n  Pipe('plugin:nested', 'one', instance='sql:local')        │{                  │                   \n                                                            │  \"tags\": [        │                   \n  ⭕ Not registered                                         │    \"nested-pipes\" │                   \n                                                            │  ]                │                   \n                                                            │}                  │                   \n                                                            │                   │                   \n  Pipe('plugin:nested', 'three', instance='sql:local')      │{                  │                   \n                                                            │  \"tags\": [        │                   \n  ⭕ Not registered                                         │    \"nested-pipes\" │                   \n                                                            │  ]                │                   \n                                                            │}                  │                   \n╶───────────────────────────────────────────────────────────┼───────────────────┼──────────────────╴\n  ╭────────────────────── Instance ───────────────────────╮ │                   │                   \n  │ sql:memory                                            │ │                   │                   \n  ╰───────────────────────────────────────────────────────╯ │                   │                   \n                                                            │                   │                   \n  Pipe('plugin:nested', 'two', 'east',                      │{                  │                   \n  instance='sql:memory')                                    │  \"tags\": [        │                   \n                                                            │    \"nested-pipes\" │                   \n  ⭕ Not registered                                         │  ]                │                   \n                                                            │}                  │                   \n                                                            ╵                   ╵                   \n",
+   "written_files": {},
+   "config_hash_normalized": "c343c875369ec87f2f08f65bf9e9325dbd2b53e46c1e4c63a090f2d83ef69763"
+  },
+  {
+   "name": "up-dry",
+   "action": [
+    "up"
+   ],
+   "flags": {
+    "dry": true
+   },
+   "file": null,
+   "env_file": null,
+   "cwd": "{PROJECT}",
+   "sysargs": [
+    "compose",
+    "up",
+    "--dry"
+   ],
+   "width": 100,
+   "result": [
+    true,
+    "Updated parameters for 3 pipes across 2 instances."
+   ],
+   "commands": [
+    {
+     "sysargs": [
+      "show",
+      "version",
+      "--no-daemon",
+      "--tags",
+      "nested-pipes"
+     ],
+     "subprocess": true,
+     "capture_output": true,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "register",
+      "pipes",
+      "-c",
+      "plugin:nested",
+      "-m",
+      "one",
+      "-l",
+      "None",
+      "-i",
+      "sql:local",
+      "--params",
+      "{\"tags\":[\"nested-pipes\"]}",
+      "--noask",
+      "--tags",
+      "nested-pipes"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    },
+    {
+     "sysargs": [
+      "register",
+      "pipes",
+      "-c",
+      "plugin:nested",
+      "-m",
+      "two",
+      "-l",
+      "east",
+      "-i",
+      "sql:memory",
+      "--params",
+      "{\"tags\":[\"nested-pipes\"]}",
+      "--noask",
+      "--tags",
+      "nested-pipes"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    },
+    {
+     "sysargs": [
+      "register",
+      "pipes",
+      "-c",
+      "plugin:nested",
+      "-m",
+      "three",
+      "-l",
+      "None",
+      "-i",
+      "sql:local",
+      "--params",
+      "{\"tags\":[\"nested-pipes\"]}",
+      "--noask",
+      "--tags",
+      "nested-pipes"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    }
+   ],
+   "events": [],
+   "warnings": [],
+   "messages": [
+    [
+     "info",
+     "Initializing Meerschaum root directory:\n    {PROJECT}/root\n    This should only take a few seconds..."
+    ],
+    [
+     "info",
+     "Registering Pipe('plugin:nested', 'one', instance='sql:local')..."
+    ],
+    [
+     "info",
+     "Registering Pipe('plugin:nested', 'two', 'east', instance='sql:memory')..."
+    ],
+    [
+     "info",
+     "Registering Pipe('plugin:nested', 'three', instance='sql:local')..."
+    ]
+   ],
+   "config": {
+    "sync": {
+     "schedule": "daily starting 00:00",
+     "args": [
+      "--begin",
+      "2024-01-01"
+     ],
+     "pipes": [
+      {
+       "connector": "plugin:nested",
+       "metric": "one",
+       "instance": "sql:local"
+      },
+      {
+       "connector": "plugin:nested",
+       "metric": "two",
+       "location": "east",
+       "instance": "sql:memory"
+      }
+     ]
+    },
+    "pipes": [
+     {
+      "connector": "plugin:nested",
+      "metric": "three",
+      "instance": "sql:local"
+     }
+    ],
+    "config": {
+     "meerschaum": {
+      "connectors": {}
+     },
+     "stack": {
+      "project_name": "nested-pipes"
+     }
+    },
+    "isolation": "config",
+    "daemon": true,
+    "__file__": "{PROJECT}/mrsm-compose.yml",
+    "root_dir": "{PROJECT}/root",
+    "plugins_dir": [
+     "{PROJECT}/plugins"
+    ],
+    "project_name": "nested-pipes"
+   },
+   "env": {
+    "PATH": "/usr/bin:/bin",
+    "HOME": "{TMP}/home",
+    "LANG": "C.UTF-8",
+    "MRSM_ROOT_DIR": "{PROJECT}/root",
+    "MRSM_PLUGINS_DIR": "[\"{PROJECT}/plugins\"]",
+    "MRSM_VENVS_DIR": "{TMP}/venvs",
+    "MRSM_NO_AUTO_INSTALL": "1",
+    "MRSM_CORE": "python",
+    "PYTHONHASHSEED": "0",
+    "MRSM__COMPOSE_CONFIG": "{\"sync\":{\"schedule\":\"daily starting 00:00\",\"args\":[\"--begin\",\"2024-01-01\"],\"pipes\":[{\"connector\":\"plugin:nested\",\"metric\":\"one\",\"instance\":\"sql:local\"},{\"connector\":\"plugin:nested\",\"metric\":\"two\",\"location\":\"east\",\"instance\":\"sql:memory\"}]},\"pipes\":[{\"connector\":\"plugin:nested\",\"metric\":\"three\",\"instance\":\"sql:local\"}],\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"nested-pipes\"}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yml\",\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\"],\"project_name\":\"nested-pipes\"}",
+    "MRSM__COMPOSE_PROJECT": "nested-pipes",
+    "MRSM_CONFIG": "{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"nested-pipes\"}}"
+   },
+   "pipes_meta": [
+    {
+     "connector": "plugin:nested",
+     "metric": "one",
+     "instance": "sql:local",
+     "tags": [
+      "nested-pipes"
+     ],
+     "cache": true
+    },
+    {
+     "connector": "plugin:nested",
+     "metric": "two",
+     "location": "east",
+     "instance": "sql:memory",
+     "tags": [
+      "nested-pipes"
+     ],
+     "cache": true
+    },
+    {
+     "connector": "plugin:nested",
+     "metric": "three",
+     "instance": "sql:local",
+     "tags": [
+      "nested-pipes"
+     ],
+     "cache": true
+    }
+   ],
+   "pipes": [
+    {
+     "str": "Pipe('plugin:nested', 'one', instance='sql:local')",
+     "connector_keys": "plugin:nested",
+     "metric_key": "one",
+     "location_key": null,
+     "instance_keys": "sql:local",
+     "temporary": false,
+     "parameters": {
+      "tags": [
+       "nested-pipes"
+      ]
+     }
+    },
+    {
+     "str": "Pipe('plugin:nested', 'two', 'east', instance='sql:memory')",
+     "connector_keys": "plugin:nested",
+     "metric_key": "two",
+     "location_key": "east",
+     "instance_keys": "sql:memory",
+     "temporary": false,
+     "parameters": {
+      "tags": [
+       "nested-pipes"
+      ]
+     }
+    },
+    {
+     "str": "Pipe('plugin:nested', 'three', instance='sql:local')",
+     "connector_keys": "plugin:nested",
+     "metric_key": "three",
+     "location_key": null,
+     "instance_keys": "sql:local",
+     "temporary": false,
+     "parameters": {
+      "tags": [
+       "nested-pipes"
+      ]
+     }
+    }
+   ],
+   "explain": null,
+   "written_files": {},
+   "config_hash_normalized": "c343c875369ec87f2f08f65bf9e9325dbd2b53e46c1e4c63a090f2d83ef69763"
+  },
+  {
+   "name": "up",
+   "action": [
+    "up"
+   ],
+   "flags": {},
+   "file": null,
+   "env_file": null,
+   "cwd": "{PROJECT}",
+   "sysargs": [
+    "compose",
+    "up"
+   ],
+   "width": 100,
+   "result": [
+    true,
+    "Syncing 3 pipes across 2 instances.\nRun `mrsm compose logs` or pass `-f` to follow logs output."
+   ],
+   "commands": [
+    {
+     "sysargs": [
+      "show",
+      "version",
+      "--no-daemon",
+      "--tags",
+      "nested-pipes"
+     ],
+     "subprocess": true,
+     "capture_output": true,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "register",
+      "pipes",
+      "-c",
+      "plugin:nested",
+      "-m",
+      "one",
+      "-l",
+      "None",
+      "-i",
+      "sql:local",
+      "--params",
+      "{\"tags\":[\"nested-pipes\"]}",
+      "--noask",
+      "--tags",
+      "nested-pipes"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    },
+    {
+     "sysargs": [
+      "register",
+      "pipes",
+      "-c",
+      "plugin:nested",
+      "-m",
+      "two",
+      "-l",
+      "east",
+      "-i",
+      "sql:memory",
+      "--params",
+      "{\"tags\":[\"nested-pipes\"]}",
+      "--noask",
+      "--tags",
+      "nested-pipes"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    },
+    {
+     "sysargs": [
+      "register",
+      "pipes",
+      "-c",
+      "plugin:nested",
+      "-m",
+      "three",
+      "-l",
+      "None",
+      "-i",
+      "sql:local",
+      "--params",
+      "{\"tags\":[\"nested-pipes\"]}",
+      "--noask",
+      "--tags",
+      "nested-pipes"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    },
+    {
+     "sysargs": [
+      "sync",
+      "pipes",
+      "-c",
+      "plugin:nested",
+      "-m",
+      "one",
+      "-l",
+      "None",
+      "-i",
+      "sql:local",
+      "compose",
+      "up",
+      "--no-daemon",
+      "--tags",
+      "nested-pipes"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    },
+    {
+     "sysargs": [
+      "sync",
+      "pipes",
+      "-c",
+      "plugin:nested",
+      "-m",
+      "two",
+      "-l",
+      "east",
+      "-i",
+      "sql:memory",
+      "compose",
+      "up",
+      "--no-daemon",
+      "--tags",
+      "nested-pipes"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    },
+    {
+     "sysargs": [
+      "sync",
+      "pipes",
+      "-c",
+      "plugin:nested",
+      "-m",
+      "three",
+      "-l",
+      "None",
+      "-i",
+      "sql:local",
+      "compose",
+      "up",
+      "--no-daemon",
+      "--tags",
+      "nested-pipes"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    },
+    {
+     "sysargs": [
+      "sync",
+      "pipes",
+      "-i",
+      "sql:local",
+      "-t",
+      "nested-pipes",
+      "--name",
+      "nested-pipes sync (sql:local)",
+      "-f",
+      "-d",
+      "--begin",
+      "2024-01-01",
+      "--schedule",
+      "daily starting 00:00"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    },
+    {
+     "sysargs": [
+      "sync",
+      "pipes",
+      "-i",
+      "sql:memory",
+      "-t",
+      "nested-pipes",
+      "--name",
+      "nested-pipes sync (sql:memory)",
+      "-f",
+      "-d",
+      "--begin",
+      "2024-01-01",
+      "--schedule",
+      "daily starting 00:00"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    }
+   ],
+   "events": [],
+   "warnings": [],
+   "messages": [
+    [
+     "info",
+     "Initializing Meerschaum root directory:\n    {PROJECT}/root\n    This should only take a few seconds..."
+    ],
+    [
+     "info",
+     "Registering Pipe('plugin:nested', 'one', instance='sql:local')..."
+    ],
+    [
+     "info",
+     "Registering Pipe('plugin:nested', 'two', 'east', instance='sql:memory')..."
+    ],
+    [
+     "info",
+     "Registering Pipe('plugin:nested', 'three', instance='sql:local')..."
+    ],
+    [
+     "info",
+     "Syncing Pipe('plugin:nested', 'one', instance='sql:local')..."
+    ],
+    [
+     "info",
+     "Syncing Pipe('plugin:nested', 'two', 'east', instance='sql:memory')..."
+    ],
+    [
+     "info",
+     "Syncing Pipe('plugin:nested', 'three', instance='sql:local')..."
+    ],
+    [
+     "info",
+     "Starting job 'nested-pipes sync (sql:local)'..."
+    ],
+    [
+     "info",
+     "Starting job 'nested-pipes sync (sql:memory)'..."
+    ]
+   ],
+   "config": {
+    "sync": {
+     "schedule": "daily starting 00:00",
+     "args": [
+      "--begin",
+      "2024-01-01"
+     ],
+     "pipes": [
+      {
+       "connector": "plugin:nested",
+       "metric": "one",
+       "instance": "sql:local"
+      },
+      {
+       "connector": "plugin:nested",
+       "metric": "two",
+       "location": "east",
+       "instance": "sql:memory"
+      }
+     ]
+    },
+    "pipes": [
+     {
+      "connector": "plugin:nested",
+      "metric": "three",
+      "instance": "sql:local"
+     }
+    ],
+    "config": {
+     "meerschaum": {
+      "connectors": {}
+     },
+     "stack": {
+      "project_name": "nested-pipes"
+     }
+    },
+    "isolation": "config",
+    "daemon": true,
+    "__file__": "{PROJECT}/mrsm-compose.yml",
+    "root_dir": "{PROJECT}/root",
+    "plugins_dir": [
+     "{PROJECT}/plugins"
+    ],
+    "project_name": "nested-pipes"
+   },
+   "env": {
+    "PATH": "/usr/bin:/bin",
+    "HOME": "{TMP}/home",
+    "LANG": "C.UTF-8",
+    "MRSM_ROOT_DIR": "{PROJECT}/root",
+    "MRSM_PLUGINS_DIR": "[\"{PROJECT}/plugins\"]",
+    "MRSM_VENVS_DIR": "{TMP}/venvs",
+    "MRSM_NO_AUTO_INSTALL": "1",
+    "MRSM_CORE": "python",
+    "PYTHONHASHSEED": "0",
+    "MRSM__COMPOSE_CONFIG": "{\"sync\":{\"schedule\":\"daily starting 00:00\",\"args\":[\"--begin\",\"2024-01-01\"],\"pipes\":[{\"connector\":\"plugin:nested\",\"metric\":\"one\",\"instance\":\"sql:local\"},{\"connector\":\"plugin:nested\",\"metric\":\"two\",\"location\":\"east\",\"instance\":\"sql:memory\"}]},\"pipes\":[{\"connector\":\"plugin:nested\",\"metric\":\"three\",\"instance\":\"sql:local\"}],\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"nested-pipes\"}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yml\",\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\"],\"project_name\":\"nested-pipes\"}",
+    "MRSM__COMPOSE_PROJECT": "nested-pipes",
+    "MRSM_CONFIG": "{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"nested-pipes\"}}"
+   },
+   "pipes_meta": [
+    {
+     "connector": "plugin:nested",
+     "metric": "one",
+     "instance": "sql:local",
+     "tags": [
+      "nested-pipes"
+     ],
+     "cache": true
+    },
+    {
+     "connector": "plugin:nested",
+     "metric": "two",
+     "location": "east",
+     "instance": "sql:memory",
+     "tags": [
+      "nested-pipes"
+     ],
+     "cache": true
+    },
+    {
+     "connector": "plugin:nested",
+     "metric": "three",
+     "instance": "sql:local",
+     "tags": [
+      "nested-pipes"
+     ],
+     "cache": true
+    }
+   ],
+   "pipes": [
+    {
+     "str": "Pipe('plugin:nested', 'one', instance='sql:local')",
+     "connector_keys": "plugin:nested",
+     "metric_key": "one",
+     "location_key": null,
+     "instance_keys": "sql:local",
+     "temporary": false,
+     "parameters": {
+      "tags": [
+       "nested-pipes"
+      ]
+     }
+    },
+    {
+     "str": "Pipe('plugin:nested', 'two', 'east', instance='sql:memory')",
+     "connector_keys": "plugin:nested",
+     "metric_key": "two",
+     "location_key": "east",
+     "instance_keys": "sql:memory",
+     "temporary": false,
+     "parameters": {
+      "tags": [
+       "nested-pipes"
+      ]
+     }
+    },
+    {
+     "str": "Pipe('plugin:nested', 'three', instance='sql:local')",
+     "connector_keys": "plugin:nested",
+     "metric_key": "three",
+     "location_key": null,
+     "instance_keys": "sql:local",
+     "temporary": false,
+     "parameters": {
+      "tags": [
+       "nested-pipes"
+      ]
+     }
+    }
+   ],
+   "explain": null,
+   "written_files": {},
+   "config_hash_normalized": "c343c875369ec87f2f08f65bf9e9325dbd2b53e46c1e4c63a090f2d83ef69763"
+  },
+  {
+   "name": "up-follow",
+   "action": [
+    "up"
+   ],
+   "flags": {
+    "force": true
+   },
+   "file": null,
+   "env_file": null,
+   "cwd": "{PROJECT}",
+   "sysargs": [
+    "compose",
+    "up",
+    "-f"
+   ],
+   "width": 100,
+   "result": [
+    true,
+    "Syncing 3 pipes across 2 instances."
+   ],
+   "commands": [
+    {
+     "sysargs": [
+      "show",
+      "version",
+      "--no-daemon",
+      "--tags",
+      "nested-pipes"
+     ],
+     "subprocess": true,
+     "capture_output": true,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "register",
+      "pipes",
+      "-c",
+      "plugin:nested",
+      "-m",
+      "one",
+      "-l",
+      "None",
+      "-i",
+      "sql:local",
+      "--params",
+      "{\"tags\":[\"nested-pipes\"]}",
+      "--noask",
+      "--tags",
+      "nested-pipes"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    },
+    {
+     "sysargs": [
+      "register",
+      "pipes",
+      "-c",
+      "plugin:nested",
+      "-m",
+      "two",
+      "-l",
+      "east",
+      "-i",
+      "sql:memory",
+      "--params",
+      "{\"tags\":[\"nested-pipes\"]}",
+      "--noask",
+      "--tags",
+      "nested-pipes"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    },
+    {
+     "sysargs": [
+      "register",
+      "pipes",
+      "-c",
+      "plugin:nested",
+      "-m",
+      "three",
+      "-l",
+      "None",
+      "-i",
+      "sql:local",
+      "--params",
+      "{\"tags\":[\"nested-pipes\"]}",
+      "--noask",
+      "--tags",
+      "nested-pipes"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    },
+    {
+     "sysargs": [
+      "sync",
+      "pipes",
+      "-c",
+      "plugin:nested",
+      "-m",
+      "one",
+      "-l",
+      "None",
+      "-i",
+      "sql:local",
+      "compose",
+      "up",
+      "-f",
+      "--no-daemon",
+      "--tags",
+      "nested-pipes"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    },
+    {
+     "sysargs": [
+      "sync",
+      "pipes",
+      "-c",
+      "plugin:nested",
+      "-m",
+      "two",
+      "-l",
+      "east",
+      "-i",
+      "sql:memory",
+      "compose",
+      "up",
+      "-f",
+      "--no-daemon",
+      "--tags",
+      "nested-pipes"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    },
+    {
+     "sysargs": [
+      "sync",
+      "pipes",
+      "-c",
+      "plugin:nested",
+      "-m",
+      "three",
+      "-l",
+      "None",
+      "-i",
+      "sql:local",
+      "compose",
+      "up",
+      "-f",
+      "--no-daemon",
+      "--tags",
+      "nested-pipes"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    },
+    {
+     "sysargs": [
+      "sync",
+      "pipes",
+      "-i",
+      "sql:local",
+      "-t",
+      "nested-pipes",
+      "--name",
+      "nested-pipes sync (sql:local)",
+      "-f",
+      "-d",
+      "--begin",
+      "2024-01-01",
+      "--schedule",
+      "daily starting 00:00"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    },
+    {
+     "sysargs": [
+      "sync",
+      "pipes",
+      "-i",
+      "sql:memory",
+      "-t",
+      "nested-pipes",
+      "--name",
+      "nested-pipes sync (sql:memory)",
+      "-f",
+      "-d",
+      "--begin",
+      "2024-01-01",
+      "--schedule",
+      "daily starting 00:00"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    },
+    {
+     "sysargs": [
+      "show",
+      "logs",
+      "nested-pipes sync (sql:local)",
+      "nested-pipes sync (sql:memory)",
+      "--tags",
+      "nested-pipes"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    }
+   ],
+   "events": [],
+   "warnings": [],
+   "messages": [
+    [
+     "info",
+     "Initializing Meerschaum root directory:\n    {PROJECT}/root\n    This should only take a few seconds..."
+    ],
+    [
+     "info",
+     "Registering Pipe('plugin:nested', 'one', instance='sql:local')..."
+    ],
+    [
+     "info",
+     "Registering Pipe('plugin:nested', 'two', 'east', instance='sql:memory')..."
+    ],
+    [
+     "info",
+     "Registering Pipe('plugin:nested', 'three', instance='sql:local')..."
+    ],
+    [
+     "info",
+     "Syncing Pipe('plugin:nested', 'one', instance='sql:local')..."
+    ],
+    [
+     "info",
+     "Syncing Pipe('plugin:nested', 'two', 'east', instance='sql:memory')..."
+    ],
+    [
+     "info",
+     "Syncing Pipe('plugin:nested', 'three', instance='sql:local')..."
+    ],
+    [
+     "info",
+     "Starting job 'nested-pipes sync (sql:local)'..."
+    ],
+    [
+     "info",
+     "Starting job 'nested-pipes sync (sql:memory)'..."
+    ]
+   ],
+   "config": {
+    "sync": {
+     "schedule": "daily starting 00:00",
+     "args": [
+      "--begin",
+      "2024-01-01"
+     ],
+     "pipes": [
+      {
+       "connector": "plugin:nested",
+       "metric": "one",
+       "instance": "sql:local"
+      },
+      {
+       "connector": "plugin:nested",
+       "metric": "two",
+       "location": "east",
+       "instance": "sql:memory"
+      }
+     ]
+    },
+    "pipes": [
+     {
+      "connector": "plugin:nested",
+      "metric": "three",
+      "instance": "sql:local"
+     }
+    ],
+    "config": {
+     "meerschaum": {
+      "connectors": {}
+     },
+     "stack": {
+      "project_name": "nested-pipes"
+     }
+    },
+    "isolation": "config",
+    "daemon": true,
+    "__file__": "{PROJECT}/mrsm-compose.yml",
+    "root_dir": "{PROJECT}/root",
+    "plugins_dir": [
+     "{PROJECT}/plugins"
+    ],
+    "project_name": "nested-pipes"
+   },
+   "env": {
+    "PATH": "/usr/bin:/bin",
+    "HOME": "{TMP}/home",
+    "LANG": "C.UTF-8",
+    "MRSM_ROOT_DIR": "{PROJECT}/root",
+    "MRSM_PLUGINS_DIR": "[\"{PROJECT}/plugins\"]",
+    "MRSM_VENVS_DIR": "{TMP}/venvs",
+    "MRSM_NO_AUTO_INSTALL": "1",
+    "MRSM_CORE": "python",
+    "PYTHONHASHSEED": "0",
+    "MRSM__COMPOSE_CONFIG": "{\"sync\":{\"schedule\":\"daily starting 00:00\",\"args\":[\"--begin\",\"2024-01-01\"],\"pipes\":[{\"connector\":\"plugin:nested\",\"metric\":\"one\",\"instance\":\"sql:local\"},{\"connector\":\"plugin:nested\",\"metric\":\"two\",\"location\":\"east\",\"instance\":\"sql:memory\"}]},\"pipes\":[{\"connector\":\"plugin:nested\",\"metric\":\"three\",\"instance\":\"sql:local\"}],\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"nested-pipes\"}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yml\",\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\"],\"project_name\":\"nested-pipes\"}",
+    "MRSM__COMPOSE_PROJECT": "nested-pipes",
+    "MRSM_CONFIG": "{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"nested-pipes\"}}"
+   },
+   "pipes_meta": [
+    {
+     "connector": "plugin:nested",
+     "metric": "one",
+     "instance": "sql:local",
+     "tags": [
+      "nested-pipes"
+     ],
+     "cache": true
+    },
+    {
+     "connector": "plugin:nested",
+     "metric": "two",
+     "location": "east",
+     "instance": "sql:memory",
+     "tags": [
+      "nested-pipes"
+     ],
+     "cache": true
+    },
+    {
+     "connector": "plugin:nested",
+     "metric": "three",
+     "instance": "sql:local",
+     "tags": [
+      "nested-pipes"
+     ],
+     "cache": true
+    }
+   ],
+   "pipes": [
+    {
+     "str": "Pipe('plugin:nested', 'one', instance='sql:local')",
+     "connector_keys": "plugin:nested",
+     "metric_key": "one",
+     "location_key": null,
+     "instance_keys": "sql:local",
+     "temporary": false,
+     "parameters": {
+      "tags": [
+       "nested-pipes"
+      ]
+     }
+    },
+    {
+     "str": "Pipe('plugin:nested', 'two', 'east', instance='sql:memory')",
+     "connector_keys": "plugin:nested",
+     "metric_key": "two",
+     "location_key": "east",
+     "instance_keys": "sql:memory",
+     "temporary": false,
+     "parameters": {
+      "tags": [
+       "nested-pipes"
+      ]
+     }
+    },
+    {
+     "str": "Pipe('plugin:nested', 'three', instance='sql:local')",
+     "connector_keys": "plugin:nested",
+     "metric_key": "three",
+     "location_key": null,
+     "instance_keys": "sql:local",
+     "temporary": false,
+     "parameters": {
+      "tags": [
+       "nested-pipes"
+      ]
+     }
+    }
+   ],
+   "explain": null,
+   "written_files": {},
+   "config_hash_normalized": "c343c875369ec87f2f08f65bf9e9325dbd2b53e46c1e4c63a090f2d83ef69763"
+  },
+  {
+   "name": "up-presync-no-jobs",
+   "action": [
+    "up"
+   ],
+   "flags": {
+    "presync": true,
+    "no_jobs": true
+   },
+   "file": null,
+   "env_file": null,
+   "cwd": "{PROJECT}",
+   "sysargs": [
+    "compose",
+    "up",
+    "--presync",
+    "--no-jobs"
+   ],
+   "width": 100,
+   "result": [
+    true,
+    "Synced 3 pipes across 2 instances."
+   ],
+   "commands": [
+    {
+     "sysargs": [
+      "show",
+      "version",
+      "--no-daemon",
+      "--tags",
+      "nested-pipes"
+     ],
+     "subprocess": true,
+     "capture_output": true,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "register",
+      "pipes",
+      "-c",
+      "plugin:nested",
+      "-m",
+      "one",
+      "-l",
+      "None",
+      "-i",
+      "sql:local",
+      "--params",
+      "{\"tags\":[\"nested-pipes\"]}",
+      "--noask",
+      "--tags",
+      "nested-pipes"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    },
+    {
+     "sysargs": [
+      "register",
+      "pipes",
+      "-c",
+      "plugin:nested",
+      "-m",
+      "two",
+      "-l",
+      "east",
+      "-i",
+      "sql:memory",
+      "--params",
+      "{\"tags\":[\"nested-pipes\"]}",
+      "--noask",
+      "--tags",
+      "nested-pipes"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    },
+    {
+     "sysargs": [
+      "register",
+      "pipes",
+      "-c",
+      "plugin:nested",
+      "-m",
+      "three",
+      "-l",
+      "None",
+      "-i",
+      "sql:local",
+      "--params",
+      "{\"tags\":[\"nested-pipes\"]}",
+      "--noask",
+      "--tags",
+      "nested-pipes"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    },
+    {
+     "sysargs": [
+      "sync",
+      "pipes",
+      "-c",
+      "plugin:nested",
+      "-m",
+      "one",
+      "-l",
+      "None",
+      "-i",
+      "sql:local",
+      "compose",
+      "up",
+      "--presync",
+      "--no-jobs",
+      "--no-daemon",
+      "--tags",
+      "nested-pipes"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    },
+    {
+     "sysargs": [
+      "sync",
+      "pipes",
+      "-c",
+      "plugin:nested",
+      "-m",
+      "two",
+      "-l",
+      "east",
+      "-i",
+      "sql:memory",
+      "compose",
+      "up",
+      "--presync",
+      "--no-jobs",
+      "--no-daemon",
+      "--tags",
+      "nested-pipes"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    },
+    {
+     "sysargs": [
+      "sync",
+      "pipes",
+      "-c",
+      "plugin:nested",
+      "-m",
+      "three",
+      "-l",
+      "None",
+      "-i",
+      "sql:local",
+      "compose",
+      "up",
+      "--presync",
+      "--no-jobs",
+      "--no-daemon",
+      "--tags",
+      "nested-pipes"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    }
+   ],
+   "events": [],
+   "warnings": [],
+   "messages": [
+    [
+     "info",
+     "Initializing Meerschaum root directory:\n    {PROJECT}/root\n    This should only take a few seconds..."
+    ],
+    [
+     "info",
+     "Registering Pipe('plugin:nested', 'one', instance='sql:local')..."
+    ],
+    [
+     "info",
+     "Registering Pipe('plugin:nested', 'two', 'east', instance='sql:memory')..."
+    ],
+    [
+     "info",
+     "Registering Pipe('plugin:nested', 'three', instance='sql:local')..."
+    ],
+    [
+     "info",
+     "Syncing Pipe('plugin:nested', 'one', instance='sql:local')..."
+    ],
+    [
+     "info",
+     "Syncing Pipe('plugin:nested', 'two', 'east', instance='sql:memory')..."
+    ],
+    [
+     "info",
+     "Syncing Pipe('plugin:nested', 'three', instance='sql:local')..."
+    ]
+   ],
+   "config": {
+    "sync": {
+     "schedule": "daily starting 00:00",
+     "args": [
+      "--begin",
+      "2024-01-01"
+     ],
+     "pipes": [
+      {
+       "connector": "plugin:nested",
+       "metric": "one",
+       "instance": "sql:local"
+      },
+      {
+       "connector": "plugin:nested",
+       "metric": "two",
+       "location": "east",
+       "instance": "sql:memory"
+      }
+     ]
+    },
+    "pipes": [
+     {
+      "connector": "plugin:nested",
+      "metric": "three",
+      "instance": "sql:local"
+     }
+    ],
+    "config": {
+     "meerschaum": {
+      "connectors": {}
+     },
+     "stack": {
+      "project_name": "nested-pipes"
+     }
+    },
+    "isolation": "config",
+    "daemon": true,
+    "__file__": "{PROJECT}/mrsm-compose.yml",
+    "root_dir": "{PROJECT}/root",
+    "plugins_dir": [
+     "{PROJECT}/plugins"
+    ],
+    "project_name": "nested-pipes"
+   },
+   "env": {
+    "PATH": "/usr/bin:/bin",
+    "HOME": "{TMP}/home",
+    "LANG": "C.UTF-8",
+    "MRSM_ROOT_DIR": "{PROJECT}/root",
+    "MRSM_PLUGINS_DIR": "[\"{PROJECT}/plugins\"]",
+    "MRSM_VENVS_DIR": "{TMP}/venvs",
+    "MRSM_NO_AUTO_INSTALL": "1",
+    "MRSM_CORE": "python",
+    "PYTHONHASHSEED": "0",
+    "MRSM__COMPOSE_CONFIG": "{\"sync\":{\"schedule\":\"daily starting 00:00\",\"args\":[\"--begin\",\"2024-01-01\"],\"pipes\":[{\"connector\":\"plugin:nested\",\"metric\":\"one\",\"instance\":\"sql:local\"},{\"connector\":\"plugin:nested\",\"metric\":\"two\",\"location\":\"east\",\"instance\":\"sql:memory\"}]},\"pipes\":[{\"connector\":\"plugin:nested\",\"metric\":\"three\",\"instance\":\"sql:local\"}],\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"nested-pipes\"}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yml\",\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\"],\"project_name\":\"nested-pipes\"}",
+    "MRSM__COMPOSE_PROJECT": "nested-pipes",
+    "MRSM_CONFIG": "{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"nested-pipes\"}}"
+   },
+   "pipes_meta": [
+    {
+     "connector": "plugin:nested",
+     "metric": "one",
+     "instance": "sql:local",
+     "tags": [
+      "nested-pipes"
+     ],
+     "cache": true
+    },
+    {
+     "connector": "plugin:nested",
+     "metric": "two",
+     "location": "east",
+     "instance": "sql:memory",
+     "tags": [
+      "nested-pipes"
+     ],
+     "cache": true
+    },
+    {
+     "connector": "plugin:nested",
+     "metric": "three",
+     "instance": "sql:local",
+     "tags": [
+      "nested-pipes"
+     ],
+     "cache": true
+    }
+   ],
+   "pipes": [
+    {
+     "str": "Pipe('plugin:nested', 'one', instance='sql:local')",
+     "connector_keys": "plugin:nested",
+     "metric_key": "one",
+     "location_key": null,
+     "instance_keys": "sql:local",
+     "temporary": false,
+     "parameters": {
+      "tags": [
+       "nested-pipes"
+      ]
+     }
+    },
+    {
+     "str": "Pipe('plugin:nested', 'two', 'east', instance='sql:memory')",
+     "connector_keys": "plugin:nested",
+     "metric_key": "two",
+     "location_key": "east",
+     "instance_keys": "sql:memory",
+     "temporary": false,
+     "parameters": {
+      "tags": [
+       "nested-pipes"
+      ]
+     }
+    },
+    {
+     "str": "Pipe('plugin:nested', 'three', instance='sql:local')",
+     "connector_keys": "plugin:nested",
+     "metric_key": "three",
+     "location_key": null,
+     "instance_keys": "sql:local",
+     "temporary": false,
+     "parameters": {
+      "tags": [
+       "nested-pipes"
+      ]
+     }
+    }
+   ],
+   "explain": null,
+   "written_files": {},
+   "config_hash_normalized": "c343c875369ec87f2f08f65bf9e9325dbd2b53e46c1e4c63a090f2d83ef69763"
+  },
+  {
+   "name": "run",
+   "action": [
+    "run"
+   ],
+   "flags": {},
+   "file": null,
+   "env_file": null,
+   "cwd": "{PROJECT}",
+   "sysargs": [
+    "compose",
+    "run"
+   ],
+   "width": 100,
+   "result": [
+    true,
+    "Synced 3 pipes across 2 instances."
+   ],
+   "commands": [
+    {
+     "sysargs": [
+      "show",
+      "version",
+      "--no-daemon",
+      "--tags",
+      "nested-pipes"
+     ],
+     "subprocess": true,
+     "capture_output": true,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "register",
+      "pipes",
+      "-c",
+      "plugin:nested",
+      "-m",
+      "one",
+      "-l",
+      "None",
+      "-i",
+      "sql:local",
+      "--params",
+      "{\"tags\":[\"nested-pipes\"]}",
+      "--noask",
+      "--tags",
+      "nested-pipes"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    },
+    {
+     "sysargs": [
+      "register",
+      "pipes",
+      "-c",
+      "plugin:nested",
+      "-m",
+      "two",
+      "-l",
+      "east",
+      "-i",
+      "sql:memory",
+      "--params",
+      "{\"tags\":[\"nested-pipes\"]}",
+      "--noask",
+      "--tags",
+      "nested-pipes"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    },
+    {
+     "sysargs": [
+      "register",
+      "pipes",
+      "-c",
+      "plugin:nested",
+      "-m",
+      "three",
+      "-l",
+      "None",
+      "-i",
+      "sql:local",
+      "--params",
+      "{\"tags\":[\"nested-pipes\"]}",
+      "--noask",
+      "--tags",
+      "nested-pipes"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    },
+    {
+     "sysargs": [
+      "sync",
+      "pipes",
+      "-c",
+      "plugin:nested",
+      "-m",
+      "one",
+      "-l",
+      "None",
+      "-i",
+      "sql:local",
+      "compose",
+      "run",
+      "--no-daemon",
+      "--tags",
+      "nested-pipes"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    },
+    {
+     "sysargs": [
+      "sync",
+      "pipes",
+      "-c",
+      "plugin:nested",
+      "-m",
+      "two",
+      "-l",
+      "east",
+      "-i",
+      "sql:memory",
+      "compose",
+      "run",
+      "--no-daemon",
+      "--tags",
+      "nested-pipes"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    },
+    {
+     "sysargs": [
+      "sync",
+      "pipes",
+      "-c",
+      "plugin:nested",
+      "-m",
+      "three",
+      "-l",
+      "None",
+      "-i",
+      "sql:local",
+      "compose",
+      "run",
+      "--no-daemon",
+      "--tags",
+      "nested-pipes"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    }
+   ],
+   "events": [],
+   "warnings": [],
+   "messages": [
+    [
+     "info",
+     "Initializing Meerschaum root directory:\n    {PROJECT}/root\n    This should only take a few seconds..."
+    ],
+    [
+     "info",
+     "Registering Pipe('plugin:nested', 'one', instance='sql:local')..."
+    ],
+    [
+     "info",
+     "Registering Pipe('plugin:nested', 'two', 'east', instance='sql:memory')..."
+    ],
+    [
+     "info",
+     "Registering Pipe('plugin:nested', 'three', instance='sql:local')..."
+    ],
+    [
+     "info",
+     "Syncing Pipe('plugin:nested', 'one', instance='sql:local')..."
+    ],
+    [
+     "info",
+     "Syncing Pipe('plugin:nested', 'two', 'east', instance='sql:memory')..."
+    ],
+    [
+     "info",
+     "Syncing Pipe('plugin:nested', 'three', instance='sql:local')..."
+    ]
+   ],
+   "config": {
+    "sync": {
+     "schedule": "daily starting 00:00",
+     "args": [
+      "--begin",
+      "2024-01-01"
+     ],
+     "pipes": [
+      {
+       "connector": "plugin:nested",
+       "metric": "one",
+       "instance": "sql:local"
+      },
+      {
+       "connector": "plugin:nested",
+       "metric": "two",
+       "location": "east",
+       "instance": "sql:memory"
+      }
+     ]
+    },
+    "pipes": [
+     {
+      "connector": "plugin:nested",
+      "metric": "three",
+      "instance": "sql:local"
+     }
+    ],
+    "config": {
+     "meerschaum": {
+      "connectors": {}
+     },
+     "stack": {
+      "project_name": "nested-pipes"
+     }
+    },
+    "isolation": "config",
+    "daemon": true,
+    "__file__": "{PROJECT}/mrsm-compose.yml",
+    "root_dir": "{PROJECT}/root",
+    "plugins_dir": [
+     "{PROJECT}/plugins"
+    ],
+    "project_name": "nested-pipes"
+   },
+   "env": {
+    "PATH": "/usr/bin:/bin",
+    "HOME": "{TMP}/home",
+    "LANG": "C.UTF-8",
+    "MRSM_ROOT_DIR": "{PROJECT}/root",
+    "MRSM_PLUGINS_DIR": "[\"{PROJECT}/plugins\"]",
+    "MRSM_VENVS_DIR": "{TMP}/venvs",
+    "MRSM_NO_AUTO_INSTALL": "1",
+    "MRSM_CORE": "python",
+    "PYTHONHASHSEED": "0",
+    "MRSM__COMPOSE_CONFIG": "{\"sync\":{\"schedule\":\"daily starting 00:00\",\"args\":[\"--begin\",\"2024-01-01\"],\"pipes\":[{\"connector\":\"plugin:nested\",\"metric\":\"one\",\"instance\":\"sql:local\"},{\"connector\":\"plugin:nested\",\"metric\":\"two\",\"location\":\"east\",\"instance\":\"sql:memory\"}]},\"pipes\":[{\"connector\":\"plugin:nested\",\"metric\":\"three\",\"instance\":\"sql:local\"}],\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"nested-pipes\"}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yml\",\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\"],\"project_name\":\"nested-pipes\"}",
+    "MRSM__COMPOSE_PROJECT": "nested-pipes",
+    "MRSM_CONFIG": "{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"nested-pipes\"}}"
+   },
+   "pipes_meta": [
+    {
+     "connector": "plugin:nested",
+     "metric": "one",
+     "instance": "sql:local",
+     "tags": [
+      "nested-pipes"
+     ],
+     "cache": true
+    },
+    {
+     "connector": "plugin:nested",
+     "metric": "two",
+     "location": "east",
+     "instance": "sql:memory",
+     "tags": [
+      "nested-pipes"
+     ],
+     "cache": true
+    },
+    {
+     "connector": "plugin:nested",
+     "metric": "three",
+     "instance": "sql:local",
+     "tags": [
+      "nested-pipes"
+     ],
+     "cache": true
+    }
+   ],
+   "pipes": [
+    {
+     "str": "Pipe('plugin:nested', 'one', instance='sql:local')",
+     "connector_keys": "plugin:nested",
+     "metric_key": "one",
+     "location_key": null,
+     "instance_keys": "sql:local",
+     "temporary": false,
+     "parameters": {
+      "tags": [
+       "nested-pipes"
+      ]
+     }
+    },
+    {
+     "str": "Pipe('plugin:nested', 'two', 'east', instance='sql:memory')",
+     "connector_keys": "plugin:nested",
+     "metric_key": "two",
+     "location_key": "east",
+     "instance_keys": "sql:memory",
+     "temporary": false,
+     "parameters": {
+      "tags": [
+       "nested-pipes"
+      ]
+     }
+    },
+    {
+     "str": "Pipe('plugin:nested', 'three', instance='sql:local')",
+     "connector_keys": "plugin:nested",
+     "metric_key": "three",
+     "location_key": null,
+     "instance_keys": "sql:local",
+     "temporary": false,
+     "parameters": {
+      "tags": [
+       "nested-pipes"
+      ]
+     }
+    }
+   ],
+   "explain": null,
+   "written_files": {},
+   "config_hash_normalized": "c343c875369ec87f2f08f65bf9e9325dbd2b53e46c1e4c63a090f2d83ef69763"
+  },
+  {
+   "name": "down",
+   "action": [
+    "down"
+   ],
+   "flags": {},
+   "file": null,
+   "env_file": null,
+   "cwd": "{PROJECT}",
+   "sysargs": [
+    "compose",
+    "down"
+   ],
+   "width": 100,
+   "result": [
+    true,
+    "Success"
+   ],
+   "commands": [
+    {
+     "sysargs": [
+      "show",
+      "version",
+      "--no-daemon",
+      "--tags",
+      "nested-pipes"
+     ],
+     "subprocess": true,
+     "capture_output": true,
+     "replace": true
+    }
+   ],
+   "events": [],
+   "warnings": [],
+   "messages": [
+    [
+     "info",
+     "Initializing Meerschaum root directory:\n    {PROJECT}/root\n    This should only take a few seconds..."
+    ]
+   ],
+   "config": {
+    "sync": {
+     "schedule": "daily starting 00:00",
+     "args": [
+      "--begin",
+      "2024-01-01"
+     ],
+     "pipes": [
+      {
+       "connector": "plugin:nested",
+       "metric": "one",
+       "instance": "sql:local"
+      },
+      {
+       "connector": "plugin:nested",
+       "metric": "two",
+       "location": "east",
+       "instance": "sql:memory"
+      }
+     ]
+    },
+    "pipes": [
+     {
+      "connector": "plugin:nested",
+      "metric": "three",
+      "instance": "sql:local"
+     }
+    ],
+    "config": {
+     "meerschaum": {
+      "connectors": {}
+     },
+     "stack": {
+      "project_name": "nested-pipes"
+     }
+    },
+    "isolation": "config",
+    "daemon": true,
+    "__file__": "{PROJECT}/mrsm-compose.yml",
+    "root_dir": "{PROJECT}/root",
+    "plugins_dir": [
+     "{PROJECT}/plugins"
+    ],
+    "project_name": "nested-pipes"
+   },
+   "env": {
+    "PATH": "/usr/bin:/bin",
+    "HOME": "{TMP}/home",
+    "LANG": "C.UTF-8",
+    "MRSM_ROOT_DIR": "{PROJECT}/root",
+    "MRSM_PLUGINS_DIR": "[\"{PROJECT}/plugins\"]",
+    "MRSM_VENVS_DIR": "{TMP}/venvs",
+    "MRSM_NO_AUTO_INSTALL": "1",
+    "MRSM_CORE": "python",
+    "PYTHONHASHSEED": "0",
+    "MRSM__COMPOSE_CONFIG": "{\"sync\":{\"schedule\":\"daily starting 00:00\",\"args\":[\"--begin\",\"2024-01-01\"],\"pipes\":[{\"connector\":\"plugin:nested\",\"metric\":\"one\",\"instance\":\"sql:local\"},{\"connector\":\"plugin:nested\",\"metric\":\"two\",\"location\":\"east\",\"instance\":\"sql:memory\"}]},\"pipes\":[{\"connector\":\"plugin:nested\",\"metric\":\"three\",\"instance\":\"sql:local\"}],\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"nested-pipes\"}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yml\",\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\"],\"project_name\":\"nested-pipes\"}",
+    "MRSM__COMPOSE_PROJECT": "nested-pipes",
+    "MRSM_CONFIG": "{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"nested-pipes\"}}"
+   },
+   "pipes_meta": null,
+   "pipes": null,
+   "explain": null,
+   "written_files": {},
+   "config_hash_normalized": "c343c875369ec87f2f08f65bf9e9325dbd2b53e46c1e4c63a090f2d83ef69763"
+  },
+  {
+   "name": "down-volumes",
+   "action": [
+    "down"
+   ],
+   "flags": {
+    "drop": true,
+    "yes": true
+   },
+   "file": null,
+   "env_file": null,
+   "cwd": "{PROJECT}",
+   "sysargs": [
+    "compose",
+    "down",
+    "-v",
+    "-y"
+   ],
+   "width": 100,
+   "result": [
+    false,
+    "No pipes to delete."
+   ],
+   "commands": [
+    {
+     "sysargs": [
+      "show",
+      "version",
+      "--no-daemon",
+      "--tags",
+      "nested-pipes"
+     ],
+     "subprocess": true,
+     "capture_output": true,
+     "replace": true
+    }
+   ],
+   "events": [],
+   "warnings": [],
+   "messages": [
+    [
+     "info",
+     "Initializing Meerschaum root directory:\n    {PROJECT}/root\n    This should only take a few seconds..."
+    ]
+   ],
+   "config": {
+    "sync": {
+     "schedule": "daily starting 00:00",
+     "args": [
+      "--begin",
+      "2024-01-01"
+     ],
+     "pipes": [
+      {
+       "connector": "plugin:nested",
+       "metric": "one",
+       "instance": "sql:local"
+      },
+      {
+       "connector": "plugin:nested",
+       "metric": "two",
+       "location": "east",
+       "instance": "sql:memory"
+      }
+     ]
+    },
+    "pipes": [
+     {
+      "connector": "plugin:nested",
+      "metric": "three",
+      "instance": "sql:local"
+     }
+    ],
+    "config": {
+     "meerschaum": {
+      "connectors": {}
+     },
+     "stack": {
+      "project_name": "nested-pipes"
+     }
+    },
+    "isolation": "config",
+    "daemon": true,
+    "__file__": "{PROJECT}/mrsm-compose.yml",
+    "root_dir": "{PROJECT}/root",
+    "plugins_dir": [
+     "{PROJECT}/plugins"
+    ],
+    "project_name": "nested-pipes"
+   },
+   "env": {
+    "PATH": "/usr/bin:/bin",
+    "HOME": "{TMP}/home",
+    "LANG": "C.UTF-8",
+    "MRSM_ROOT_DIR": "{PROJECT}/root",
+    "MRSM_PLUGINS_DIR": "[\"{PROJECT}/plugins\"]",
+    "MRSM_VENVS_DIR": "{TMP}/venvs",
+    "MRSM_NO_AUTO_INSTALL": "1",
+    "MRSM_CORE": "python",
+    "PYTHONHASHSEED": "0",
+    "MRSM__COMPOSE_CONFIG": "{\"sync\":{\"schedule\":\"daily starting 00:00\",\"args\":[\"--begin\",\"2024-01-01\"],\"pipes\":[{\"connector\":\"plugin:nested\",\"metric\":\"one\",\"instance\":\"sql:local\"},{\"connector\":\"plugin:nested\",\"metric\":\"two\",\"location\":\"east\",\"instance\":\"sql:memory\"}]},\"pipes\":[{\"connector\":\"plugin:nested\",\"metric\":\"three\",\"instance\":\"sql:local\"}],\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"nested-pipes\"}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yml\",\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\"],\"project_name\":\"nested-pipes\"}",
+    "MRSM__COMPOSE_PROJECT": "nested-pipes",
+    "MRSM_CONFIG": "{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"nested-pipes\"}}"
+   },
+   "pipes_meta": [
+    {
+     "connector": "plugin:nested",
+     "metric": "one",
+     "instance": "sql:local",
+     "tags": [
+      "nested-pipes"
+     ],
+     "cache": true
+    },
+    {
+     "connector": "plugin:nested",
+     "metric": "two",
+     "location": "east",
+     "instance": "sql:memory",
+     "tags": [
+      "nested-pipes"
+     ],
+     "cache": true
+    },
+    {
+     "connector": "plugin:nested",
+     "metric": "three",
+     "instance": "sql:local",
+     "tags": [
+      "nested-pipes"
+     ],
+     "cache": true
+    }
+   ],
+   "pipes": [
+    {
+     "str": "Pipe('plugin:nested', 'one', instance='sql:local')",
+     "connector_keys": "plugin:nested",
+     "metric_key": "one",
+     "location_key": null,
+     "instance_keys": "sql:local",
+     "temporary": false,
+     "parameters": {
+      "tags": [
+       "nested-pipes"
+      ]
+     }
+    },
+    {
+     "str": "Pipe('plugin:nested', 'two', 'east', instance='sql:memory')",
+     "connector_keys": "plugin:nested",
+     "metric_key": "two",
+     "location_key": "east",
+     "instance_keys": "sql:memory",
+     "temporary": false,
+     "parameters": {
+      "tags": [
+       "nested-pipes"
+      ]
+     }
+    },
+    {
+     "str": "Pipe('plugin:nested', 'three', instance='sql:local')",
+     "connector_keys": "plugin:nested",
+     "metric_key": "three",
+     "location_key": null,
+     "instance_keys": "sql:local",
+     "temporary": false,
+     "parameters": {
+      "tags": [
+       "nested-pipes"
+      ]
+     }
+    }
+   ],
+   "explain": null,
+   "written_files": {},
+   "config_hash_normalized": "c343c875369ec87f2f08f65bf9e9325dbd2b53e46c1e4c63a090f2d83ef69763"
+  },
+  {
+   "name": "ps",
+   "action": [
+    "ps"
+   ],
+   "flags": {},
+   "file": null,
+   "env_file": null,
+   "cwd": "{PROJECT}",
+   "sysargs": [
+    "compose",
+    "ps"
+   ],
+   "width": 100,
+   "result": [
+    true,
+    "Success"
+   ],
+   "commands": [
+    {
+     "sysargs": [
+      "show",
+      "version",
+      "--no-daemon",
+      "--tags",
+      "nested-pipes"
+     ],
+     "subprocess": true,
+     "capture_output": true,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "show",
+      "jobs",
+      "--tags",
+      "nested-pipes"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    }
+   ],
+   "events": [],
+   "warnings": [],
+   "messages": [
+    [
+     "info",
+     "Initializing Meerschaum root directory:\n    {PROJECT}/root\n    This should only take a few seconds..."
+    ]
+   ],
+   "config": {
+    "sync": {
+     "schedule": "daily starting 00:00",
+     "args": [
+      "--begin",
+      "2024-01-01"
+     ],
+     "pipes": [
+      {
+       "connector": "plugin:nested",
+       "metric": "one",
+       "instance": "sql:local"
+      },
+      {
+       "connector": "plugin:nested",
+       "metric": "two",
+       "location": "east",
+       "instance": "sql:memory"
+      }
+     ]
+    },
+    "pipes": [
+     {
+      "connector": "plugin:nested",
+      "metric": "three",
+      "instance": "sql:local"
+     }
+    ],
+    "config": {
+     "meerschaum": {
+      "connectors": {}
+     },
+     "stack": {
+      "project_name": "nested-pipes"
+     }
+    },
+    "isolation": "config",
+    "daemon": true,
+    "__file__": "{PROJECT}/mrsm-compose.yml",
+    "root_dir": "{PROJECT}/root",
+    "plugins_dir": [
+     "{PROJECT}/plugins"
+    ],
+    "project_name": "nested-pipes"
+   },
+   "env": {
+    "PATH": "/usr/bin:/bin",
+    "HOME": "{TMP}/home",
+    "LANG": "C.UTF-8",
+    "MRSM_ROOT_DIR": "{PROJECT}/root",
+    "MRSM_PLUGINS_DIR": "[\"{PROJECT}/plugins\"]",
+    "MRSM_VENVS_DIR": "{TMP}/venvs",
+    "MRSM_NO_AUTO_INSTALL": "1",
+    "MRSM_CORE": "python",
+    "PYTHONHASHSEED": "0",
+    "MRSM__COMPOSE_CONFIG": "{\"sync\":{\"schedule\":\"daily starting 00:00\",\"args\":[\"--begin\",\"2024-01-01\"],\"pipes\":[{\"connector\":\"plugin:nested\",\"metric\":\"one\",\"instance\":\"sql:local\"},{\"connector\":\"plugin:nested\",\"metric\":\"two\",\"location\":\"east\",\"instance\":\"sql:memory\"}]},\"pipes\":[{\"connector\":\"plugin:nested\",\"metric\":\"three\",\"instance\":\"sql:local\"}],\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"nested-pipes\"}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yml\",\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\"],\"project_name\":\"nested-pipes\"}",
+    "MRSM__COMPOSE_PROJECT": "nested-pipes",
+    "MRSM_CONFIG": "{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"nested-pipes\"}}"
+   },
+   "pipes_meta": null,
+   "pipes": null,
+   "explain": null,
+   "written_files": {},
+   "config_hash_normalized": "c343c875369ec87f2f08f65bf9e9325dbd2b53e46c1e4c63a090f2d83ef69763"
+  },
+  {
+   "name": "logs",
+   "action": [
+    "logs"
+   ],
+   "flags": {},
+   "file": null,
+   "env_file": null,
+   "cwd": "{PROJECT}",
+   "sysargs": [
+    "compose",
+    "logs"
+   ],
+   "width": 100,
+   "result": [
+    true,
+    "Success"
+   ],
+   "commands": [
+    {
+     "sysargs": [
+      "show",
+      "version",
+      "--no-daemon",
+      "--tags",
+      "nested-pipes"
+     ],
+     "subprocess": true,
+     "capture_output": true,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "show",
+      "logs",
+      "--tags",
+      "nested-pipes"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": true
+    }
+   ],
+   "events": [],
+   "warnings": [],
+   "messages": [
+    [
+     "info",
+     "Initializing Meerschaum root directory:\n    {PROJECT}/root\n    This should only take a few seconds..."
+    ]
+   ],
+   "config": {
+    "sync": {
+     "schedule": "daily starting 00:00",
+     "args": [
+      "--begin",
+      "2024-01-01"
+     ],
+     "pipes": [
+      {
+       "connector": "plugin:nested",
+       "metric": "one",
+       "instance": "sql:local"
+      },
+      {
+       "connector": "plugin:nested",
+       "metric": "two",
+       "location": "east",
+       "instance": "sql:memory"
+      }
+     ]
+    },
+    "pipes": [
+     {
+      "connector": "plugin:nested",
+      "metric": "three",
+      "instance": "sql:local"
+     }
+    ],
+    "config": {
+     "meerschaum": {
+      "connectors": {}
+     },
+     "stack": {
+      "project_name": "nested-pipes"
+     }
+    },
+    "isolation": "config",
+    "daemon": true,
+    "__file__": "{PROJECT}/mrsm-compose.yml",
+    "root_dir": "{PROJECT}/root",
+    "plugins_dir": [
+     "{PROJECT}/plugins"
+    ],
+    "project_name": "nested-pipes"
+   },
+   "env": {
+    "PATH": "/usr/bin:/bin",
+    "HOME": "{TMP}/home",
+    "LANG": "C.UTF-8",
+    "MRSM_ROOT_DIR": "{PROJECT}/root",
+    "MRSM_PLUGINS_DIR": "[\"{PROJECT}/plugins\"]",
+    "MRSM_VENVS_DIR": "{TMP}/venvs",
+    "MRSM_NO_AUTO_INSTALL": "1",
+    "MRSM_CORE": "python",
+    "PYTHONHASHSEED": "0",
+    "MRSM__COMPOSE_CONFIG": "{\"sync\":{\"schedule\":\"daily starting 00:00\",\"args\":[\"--begin\",\"2024-01-01\"],\"pipes\":[{\"connector\":\"plugin:nested\",\"metric\":\"one\",\"instance\":\"sql:local\"},{\"connector\":\"plugin:nested\",\"metric\":\"two\",\"location\":\"east\",\"instance\":\"sql:memory\"}]},\"pipes\":[{\"connector\":\"plugin:nested\",\"metric\":\"three\",\"instance\":\"sql:local\"}],\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"nested-pipes\"}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yml\",\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\"],\"project_name\":\"nested-pipes\"}",
+    "MRSM__COMPOSE_PROJECT": "nested-pipes",
+    "MRSM_CONFIG": "{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"nested-pipes\"}}"
+   },
+   "pipes_meta": null,
+   "pipes": null,
+   "explain": null,
+   "written_files": {},
+   "config_hash_normalized": "c343c875369ec87f2f08f65bf9e9325dbd2b53e46c1e4c63a090f2d83ef69763"
+  },
+  {
+   "name": "sync-pipes",
+   "action": [
+    "sync",
+    "pipes"
+   ],
+   "flags": {},
+   "file": null,
+   "env_file": null,
+   "cwd": "{PROJECT}",
+   "sysargs": [
+    "compose",
+    "sync",
+    "pipes"
+   ],
+   "width": 100,
+   "result": [
+    true,
+    "Success"
+   ],
+   "commands": [
+    {
+     "sysargs": [
+      "show",
+      "version",
+      "--no-daemon",
+      "--tags",
+      "nested-pipes"
+     ],
+     "subprocess": true,
+     "capture_output": true,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "sync",
+      "pipes",
+      "--tags",
+      "nested-pipes"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    }
+   ],
+   "events": [],
+   "warnings": [],
+   "messages": [
+    [
+     "info",
+     "Initializing Meerschaum root directory:\n    {PROJECT}/root\n    This should only take a few seconds..."
+    ],
+    [
+     "info",
+     "Running 'sync pipes' in compose project 'nested-pipes'..."
+    ]
+   ],
+   "config": {
+    "sync": {
+     "schedule": "daily starting 00:00",
+     "args": [
+      "--begin",
+      "2024-01-01"
+     ],
+     "pipes": [
+      {
+       "connector": "plugin:nested",
+       "metric": "one",
+       "instance": "sql:local"
+      },
+      {
+       "connector": "plugin:nested",
+       "metric": "two",
+       "location": "east",
+       "instance": "sql:memory"
+      }
+     ]
+    },
+    "pipes": [
+     {
+      "connector": "plugin:nested",
+      "metric": "three",
+      "instance": "sql:local"
+     }
+    ],
+    "config": {
+     "meerschaum": {
+      "connectors": {}
+     },
+     "stack": {
+      "project_name": "nested-pipes"
+     }
+    },
+    "isolation": "config",
+    "daemon": true,
+    "__file__": "{PROJECT}/mrsm-compose.yml",
+    "root_dir": "{PROJECT}/root",
+    "plugins_dir": [
+     "{PROJECT}/plugins"
+    ],
+    "project_name": "nested-pipes"
+   },
+   "env": {
+    "PATH": "/usr/bin:/bin",
+    "HOME": "{TMP}/home",
+    "LANG": "C.UTF-8",
+    "MRSM_ROOT_DIR": "{PROJECT}/root",
+    "MRSM_PLUGINS_DIR": "[\"{PROJECT}/plugins\"]",
+    "MRSM_VENVS_DIR": "{TMP}/venvs",
+    "MRSM_NO_AUTO_INSTALL": "1",
+    "MRSM_CORE": "python",
+    "PYTHONHASHSEED": "0",
+    "MRSM__COMPOSE_CONFIG": "{\"sync\":{\"schedule\":\"daily starting 00:00\",\"args\":[\"--begin\",\"2024-01-01\"],\"pipes\":[{\"connector\":\"plugin:nested\",\"metric\":\"one\",\"instance\":\"sql:local\"},{\"connector\":\"plugin:nested\",\"metric\":\"two\",\"location\":\"east\",\"instance\":\"sql:memory\"}]},\"pipes\":[{\"connector\":\"plugin:nested\",\"metric\":\"three\",\"instance\":\"sql:local\"}],\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"nested-pipes\"}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yml\",\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\"],\"project_name\":\"nested-pipes\"}",
+    "MRSM__COMPOSE_PROJECT": "nested-pipes",
+    "MRSM_CONFIG": "{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"nested-pipes\"}}"
+   },
+   "pipes_meta": null,
+   "pipes": null,
+   "explain": null,
+   "written_files": {},
+   "config_hash_normalized": "c343c875369ec87f2f08f65bf9e9325dbd2b53e46c1e4c63a090f2d83ef69763"
+  },
+  {
+   "name": "start-jobs",
+   "action": [
+    "start",
+    "jobs"
+   ],
+   "flags": {
+    "yes": true
+   },
+   "file": null,
+   "env_file": null,
+   "cwd": "{PROJECT}",
+   "sysargs": [
+    "compose",
+    "start",
+    "jobs",
+    "-y"
+   ],
+   "width": 100,
+   "result": [
+    true,
+    "No jobs in compose project 'nested-pipes'."
+   ],
+   "commands": [
+    {
+     "sysargs": [
+      "show",
+      "version",
+      "--no-daemon",
+      "--tags",
+      "nested-pipes"
+     ],
+     "subprocess": true,
+     "capture_output": true,
+     "replace": true
+    }
+   ],
+   "events": [],
+   "warnings": [],
+   "messages": [
+    [
+     "info",
+     "Initializing Meerschaum root directory:\n    {PROJECT}/root\n    This should only take a few seconds..."
+    ]
+   ],
+   "config": {
+    "sync": {
+     "schedule": "daily starting 00:00",
+     "args": [
+      "--begin",
+      "2024-01-01"
+     ],
+     "pipes": [
+      {
+       "connector": "plugin:nested",
+       "metric": "one",
+       "instance": "sql:local"
+      },
+      {
+       "connector": "plugin:nested",
+       "metric": "two",
+       "location": "east",
+       "instance": "sql:memory"
+      }
+     ]
+    },
+    "pipes": [
+     {
+      "connector": "plugin:nested",
+      "metric": "three",
+      "instance": "sql:local"
+     }
+    ],
+    "config": {
+     "meerschaum": {
+      "connectors": {}
+     },
+     "stack": {
+      "project_name": "nested-pipes"
+     }
+    },
+    "isolation": "config",
+    "daemon": true,
+    "__file__": "{PROJECT}/mrsm-compose.yml",
+    "root_dir": "{PROJECT}/root",
+    "plugins_dir": [
+     "{PROJECT}/plugins"
+    ],
+    "project_name": "nested-pipes"
+   },
+   "env": {
+    "PATH": "/usr/bin:/bin",
+    "HOME": "{TMP}/home",
+    "LANG": "C.UTF-8",
+    "MRSM_ROOT_DIR": "{PROJECT}/root",
+    "MRSM_PLUGINS_DIR": "[\"{PROJECT}/plugins\"]",
+    "MRSM_VENVS_DIR": "{TMP}/venvs",
+    "MRSM_NO_AUTO_INSTALL": "1",
+    "MRSM_CORE": "python",
+    "PYTHONHASHSEED": "0",
+    "MRSM__COMPOSE_CONFIG": "{\"sync\":{\"schedule\":\"daily starting 00:00\",\"args\":[\"--begin\",\"2024-01-01\"],\"pipes\":[{\"connector\":\"plugin:nested\",\"metric\":\"one\",\"instance\":\"sql:local\"},{\"connector\":\"plugin:nested\",\"metric\":\"two\",\"location\":\"east\",\"instance\":\"sql:memory\"}]},\"pipes\":[{\"connector\":\"plugin:nested\",\"metric\":\"three\",\"instance\":\"sql:local\"}],\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"nested-pipes\"}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yml\",\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\"],\"project_name\":\"nested-pipes\"}",
+    "MRSM__COMPOSE_PROJECT": "nested-pipes",
+    "MRSM_CONFIG": "{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"nested-pipes\"}}"
+   },
+   "pipes_meta": null,
+   "pipes": null,
+   "explain": null,
+   "written_files": {},
+   "config_hash_normalized": "c343c875369ec87f2f08f65bf9e9325dbd2b53e46c1e4c63a090f2d83ef69763"
+  },
+  {
+   "name": "stop-jobs",
+   "action": [
+    "stop",
+    "jobs"
+   ],
+   "flags": {
+    "yes": true
+   },
+   "file": null,
+   "env_file": null,
+   "cwd": "{PROJECT}",
+   "sysargs": [
+    "compose",
+    "stop",
+    "jobs",
+    "-y"
+   ],
+   "width": 100,
+   "result": [
+    true,
+    "No jobs in compose project 'nested-pipes'."
+   ],
+   "commands": [
+    {
+     "sysargs": [
+      "show",
+      "version",
+      "--no-daemon",
+      "--tags",
+      "nested-pipes"
+     ],
+     "subprocess": true,
+     "capture_output": true,
+     "replace": true
+    }
+   ],
+   "events": [],
+   "warnings": [],
+   "messages": [
+    [
+     "info",
+     "Initializing Meerschaum root directory:\n    {PROJECT}/root\n    This should only take a few seconds..."
+    ]
+   ],
+   "config": {
+    "sync": {
+     "schedule": "daily starting 00:00",
+     "args": [
+      "--begin",
+      "2024-01-01"
+     ],
+     "pipes": [
+      {
+       "connector": "plugin:nested",
+       "metric": "one",
+       "instance": "sql:local"
+      },
+      {
+       "connector": "plugin:nested",
+       "metric": "two",
+       "location": "east",
+       "instance": "sql:memory"
+      }
+     ]
+    },
+    "pipes": [
+     {
+      "connector": "plugin:nested",
+      "metric": "three",
+      "instance": "sql:local"
+     }
+    ],
+    "config": {
+     "meerschaum": {
+      "connectors": {}
+     },
+     "stack": {
+      "project_name": "nested-pipes"
+     }
+    },
+    "isolation": "config",
+    "daemon": true,
+    "__file__": "{PROJECT}/mrsm-compose.yml",
+    "root_dir": "{PROJECT}/root",
+    "plugins_dir": [
+     "{PROJECT}/plugins"
+    ],
+    "project_name": "nested-pipes"
+   },
+   "env": {
+    "PATH": "/usr/bin:/bin",
+    "HOME": "{TMP}/home",
+    "LANG": "C.UTF-8",
+    "MRSM_ROOT_DIR": "{PROJECT}/root",
+    "MRSM_PLUGINS_DIR": "[\"{PROJECT}/plugins\"]",
+    "MRSM_VENVS_DIR": "{TMP}/venvs",
+    "MRSM_NO_AUTO_INSTALL": "1",
+    "MRSM_CORE": "python",
+    "PYTHONHASHSEED": "0",
+    "MRSM__COMPOSE_CONFIG": "{\"sync\":{\"schedule\":\"daily starting 00:00\",\"args\":[\"--begin\",\"2024-01-01\"],\"pipes\":[{\"connector\":\"plugin:nested\",\"metric\":\"one\",\"instance\":\"sql:local\"},{\"connector\":\"plugin:nested\",\"metric\":\"two\",\"location\":\"east\",\"instance\":\"sql:memory\"}]},\"pipes\":[{\"connector\":\"plugin:nested\",\"metric\":\"three\",\"instance\":\"sql:local\"}],\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"nested-pipes\"}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yml\",\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\"],\"project_name\":\"nested-pipes\"}",
+    "MRSM__COMPOSE_PROJECT": "nested-pipes",
+    "MRSM_CONFIG": "{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"nested-pipes\"}}"
+   },
+   "pipes_meta": null,
+   "pipes": null,
+   "explain": null,
+   "written_files": {},
+   "config_hash_normalized": "c343c875369ec87f2f08f65bf9e9325dbd2b53e46c1e4c63a090f2d83ef69763"
+  },
+  {
+   "name": "delete-jobs",
+   "action": [
+    "delete",
+    "jobs"
+   ],
+   "flags": {
+    "yes": true
+   },
+   "file": null,
+   "env_file": null,
+   "cwd": "{PROJECT}",
+   "sysargs": [
+    "compose",
+    "delete",
+    "jobs",
+    "-y"
+   ],
+   "width": 100,
+   "result": [
+    true,
+    "No jobs in compose project 'nested-pipes'."
+   ],
+   "commands": [
+    {
+     "sysargs": [
+      "show",
+      "version",
+      "--no-daemon",
+      "--tags",
+      "nested-pipes"
+     ],
+     "subprocess": true,
+     "capture_output": true,
+     "replace": true
+    }
+   ],
+   "events": [],
+   "warnings": [],
+   "messages": [
+    [
+     "info",
+     "Initializing Meerschaum root directory:\n    {PROJECT}/root\n    This should only take a few seconds..."
+    ]
+   ],
+   "config": {
+    "sync": {
+     "schedule": "daily starting 00:00",
+     "args": [
+      "--begin",
+      "2024-01-01"
+     ],
+     "pipes": [
+      {
+       "connector": "plugin:nested",
+       "metric": "one",
+       "instance": "sql:local"
+      },
+      {
+       "connector": "plugin:nested",
+       "metric": "two",
+       "location": "east",
+       "instance": "sql:memory"
+      }
+     ]
+    },
+    "pipes": [
+     {
+      "connector": "plugin:nested",
+      "metric": "three",
+      "instance": "sql:local"
+     }
+    ],
+    "config": {
+     "meerschaum": {
+      "connectors": {}
+     },
+     "stack": {
+      "project_name": "nested-pipes"
+     }
+    },
+    "isolation": "config",
+    "daemon": true,
+    "__file__": "{PROJECT}/mrsm-compose.yml",
+    "root_dir": "{PROJECT}/root",
+    "plugins_dir": [
+     "{PROJECT}/plugins"
+    ],
+    "project_name": "nested-pipes"
+   },
+   "env": {
+    "PATH": "/usr/bin:/bin",
+    "HOME": "{TMP}/home",
+    "LANG": "C.UTF-8",
+    "MRSM_ROOT_DIR": "{PROJECT}/root",
+    "MRSM_PLUGINS_DIR": "[\"{PROJECT}/plugins\"]",
+    "MRSM_VENVS_DIR": "{TMP}/venvs",
+    "MRSM_NO_AUTO_INSTALL": "1",
+    "MRSM_CORE": "python",
+    "PYTHONHASHSEED": "0",
+    "MRSM__COMPOSE_CONFIG": "{\"sync\":{\"schedule\":\"daily starting 00:00\",\"args\":[\"--begin\",\"2024-01-01\"],\"pipes\":[{\"connector\":\"plugin:nested\",\"metric\":\"one\",\"instance\":\"sql:local\"},{\"connector\":\"plugin:nested\",\"metric\":\"two\",\"location\":\"east\",\"instance\":\"sql:memory\"}]},\"pipes\":[{\"connector\":\"plugin:nested\",\"metric\":\"three\",\"instance\":\"sql:local\"}],\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"nested-pipes\"}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yml\",\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\"],\"project_name\":\"nested-pipes\"}",
+    "MRSM__COMPOSE_PROJECT": "nested-pipes",
+    "MRSM_CONFIG": "{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"nested-pipes\"}}"
+   },
+   "pipes_meta": null,
+   "pipes": null,
+   "explain": null,
+   "written_files": {},
+   "config_hash_normalized": "c343c875369ec87f2f08f65bf9e9325dbd2b53e46c1e4c63a090f2d83ef69763"
+  },
+  {
+   "name": "start-api",
+   "action": [
+    "start",
+    "api"
+   ],
+   "flags": {},
+   "file": null,
+   "env_file": null,
+   "cwd": "{PROJECT}",
+   "sysargs": [
+    "compose",
+    "start",
+    "api"
+   ],
+   "width": 100,
+   "result": [
+    true,
+    "Success"
+   ],
+   "commands": [
+    {
+     "sysargs": [
+      "show",
+      "version",
+      "--no-daemon",
+      "--tags",
+      "nested-pipes"
+     ],
+     "subprocess": true,
+     "capture_output": true,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "start",
+      "api",
+      "--tags",
+      "nested-pipes"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    }
+   ],
+   "events": [],
+   "warnings": [],
+   "messages": [
+    [
+     "info",
+     "Initializing Meerschaum root directory:\n    {PROJECT}/root\n    This should only take a few seconds..."
+    ],
+    [
+     "info",
+     "Running 'start api' in compose project 'nested-pipes'..."
+    ]
+   ],
+   "config": {
+    "sync": {
+     "schedule": "daily starting 00:00",
+     "args": [
+      "--begin",
+      "2024-01-01"
+     ],
+     "pipes": [
+      {
+       "connector": "plugin:nested",
+       "metric": "one",
+       "instance": "sql:local"
+      },
+      {
+       "connector": "plugin:nested",
+       "metric": "two",
+       "location": "east",
+       "instance": "sql:memory"
+      }
+     ]
+    },
+    "pipes": [
+     {
+      "connector": "plugin:nested",
+      "metric": "three",
+      "instance": "sql:local"
+     }
+    ],
+    "config": {
+     "meerschaum": {
+      "connectors": {}
+     },
+     "stack": {
+      "project_name": "nested-pipes"
+     }
+    },
+    "isolation": "config",
+    "daemon": true,
+    "__file__": "{PROJECT}/mrsm-compose.yml",
+    "root_dir": "{PROJECT}/root",
+    "plugins_dir": [
+     "{PROJECT}/plugins"
+    ],
+    "project_name": "nested-pipes"
+   },
+   "env": {
+    "PATH": "/usr/bin:/bin",
+    "HOME": "{TMP}/home",
+    "LANG": "C.UTF-8",
+    "MRSM_ROOT_DIR": "{PROJECT}/root",
+    "MRSM_PLUGINS_DIR": "[\"{PROJECT}/plugins\"]",
+    "MRSM_VENVS_DIR": "{TMP}/venvs",
+    "MRSM_NO_AUTO_INSTALL": "1",
+    "MRSM_CORE": "python",
+    "PYTHONHASHSEED": "0",
+    "MRSM__COMPOSE_CONFIG": "{\"sync\":{\"schedule\":\"daily starting 00:00\",\"args\":[\"--begin\",\"2024-01-01\"],\"pipes\":[{\"connector\":\"plugin:nested\",\"metric\":\"one\",\"instance\":\"sql:local\"},{\"connector\":\"plugin:nested\",\"metric\":\"two\",\"location\":\"east\",\"instance\":\"sql:memory\"}]},\"pipes\":[{\"connector\":\"plugin:nested\",\"metric\":\"three\",\"instance\":\"sql:local\"}],\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"nested-pipes\"}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yml\",\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\"],\"project_name\":\"nested-pipes\"}",
+    "MRSM__COMPOSE_PROJECT": "nested-pipes",
+    "MRSM_CONFIG": "{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"nested-pipes\"}}"
+   },
+   "pipes_meta": null,
+   "pipes": null,
+   "explain": null,
+   "written_files": {},
+   "config_hash_normalized": "c343c875369ec87f2f08f65bf9e9325dbd2b53e46c1e4c63a090f2d83ef69763"
+  },
+  {
+   "name": "shell",
+   "action": [],
+   "flags": {},
+   "file": null,
+   "env_file": null,
+   "cwd": "{PROJECT}",
+   "sysargs": [
+    "compose"
+   ],
+   "width": 100,
+   "result": [
+    true,
+    "Success"
+   ],
+   "commands": [
+    {
+     "sysargs": [
+      "show",
+      "version",
+      "--no-daemon",
+      "--tags",
+      "nested-pipes"
+     ],
+     "subprocess": true,
+     "capture_output": true,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "--tags",
+      "nested-pipes"
+     ],
+     "subprocess": true,
+     "capture_output": false,
+     "replace": true
+    }
+   ],
+   "events": [],
+   "warnings": [],
+   "messages": [
+    [
+     "info",
+     "Initializing Meerschaum root directory:\n    {PROJECT}/root\n    This should only take a few seconds..."
+    ],
+    [
+     "info",
+     "Starting a shell in compose project 'nested-pipes'..."
+    ]
+   ],
+   "config": {
+    "sync": {
+     "schedule": "daily starting 00:00",
+     "args": [
+      "--begin",
+      "2024-01-01"
+     ],
+     "pipes": [
+      {
+       "connector": "plugin:nested",
+       "metric": "one",
+       "instance": "sql:local"
+      },
+      {
+       "connector": "plugin:nested",
+       "metric": "two",
+       "location": "east",
+       "instance": "sql:memory"
+      }
+     ]
+    },
+    "pipes": [
+     {
+      "connector": "plugin:nested",
+      "metric": "three",
+      "instance": "sql:local"
+     }
+    ],
+    "config": {
+     "meerschaum": {
+      "connectors": {}
+     },
+     "stack": {
+      "project_name": "nested-pipes"
+     }
+    },
+    "isolation": "config",
+    "daemon": true,
+    "__file__": "{PROJECT}/mrsm-compose.yml",
+    "root_dir": "{PROJECT}/root",
+    "plugins_dir": [
+     "{PROJECT}/plugins"
+    ],
+    "project_name": "nested-pipes"
+   },
+   "env": {
+    "PATH": "/usr/bin:/bin",
+    "HOME": "{TMP}/home",
+    "LANG": "C.UTF-8",
+    "MRSM_ROOT_DIR": "{PROJECT}/root",
+    "MRSM_PLUGINS_DIR": "[\"{PROJECT}/plugins\"]",
+    "MRSM_VENVS_DIR": "{TMP}/venvs",
+    "MRSM_NO_AUTO_INSTALL": "1",
+    "MRSM_CORE": "python",
+    "PYTHONHASHSEED": "0",
+    "MRSM__COMPOSE_CONFIG": "{\"sync\":{\"schedule\":\"daily starting 00:00\",\"args\":[\"--begin\",\"2024-01-01\"],\"pipes\":[{\"connector\":\"plugin:nested\",\"metric\":\"one\",\"instance\":\"sql:local\"},{\"connector\":\"plugin:nested\",\"metric\":\"two\",\"location\":\"east\",\"instance\":\"sql:memory\"}]},\"pipes\":[{\"connector\":\"plugin:nested\",\"metric\":\"three\",\"instance\":\"sql:local\"}],\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"nested-pipes\"}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yml\",\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\"],\"project_name\":\"nested-pipes\"}",
+    "MRSM__COMPOSE_PROJECT": "nested-pipes",
+    "MRSM_CONFIG": "{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"nested-pipes\"}}"
+   },
+   "pipes_meta": null,
+   "pipes": null,
+   "explain": null,
+   "written_files": {},
+   "config_hash_normalized": "c343c875369ec87f2f08f65bf9e9325dbd2b53e46c1e4c63a090f2d83ef69763"
+  },
+  {
+   "name": "init",
+   "action": [
+    "init"
+   ],
+   "flags": {},
+   "file": null,
+   "env_file": null,
+   "cwd": "{PROJECT}",
+   "sysargs": [
+    "compose",
+    "init"
+   ],
+   "width": 100,
+   "result": [
+    true,
+    "Finished initializing project 'nested-pipes'."
+   ],
+   "commands": [
+    {
+     "sysargs": [
+      "show",
+      "version",
+      "--no-daemon",
+      "--tags",
+      "nested-pipes"
+     ],
+     "subprocess": true,
+     "capture_output": true,
+     "replace": true
+    }
+   ],
+   "events": [],
+   "warnings": [],
+   "messages": [
+    [
+     "info",
+     "Initializing Meerschaum root directory:\n    {PROJECT}/root\n    This should only take a few seconds..."
+    ]
+   ],
+   "config": {
+    "sync": {
+     "schedule": "daily starting 00:00",
+     "args": [
+      "--begin",
+      "2024-01-01"
+     ],
+     "pipes": [
+      {
+       "connector": "plugin:nested",
+       "metric": "one",
+       "instance": "sql:local"
+      },
+      {
+       "connector": "plugin:nested",
+       "metric": "two",
+       "location": "east",
+       "instance": "sql:memory"
+      }
+     ]
+    },
+    "pipes": [
+     {
+      "connector": "plugin:nested",
+      "metric": "three",
+      "instance": "sql:local"
+     }
+    ],
+    "config": {
+     "meerschaum": {
+      "connectors": {}
+     },
+     "stack": {
+      "project_name": "nested-pipes"
+     }
+    },
+    "isolation": "config",
+    "daemon": true,
+    "__file__": "{PROJECT}/mrsm-compose.yml",
+    "root_dir": "{PROJECT}/root",
+    "plugins_dir": [
+     "{PROJECT}/plugins"
+    ],
+    "project_name": "nested-pipes"
+   },
+   "env": {
+    "PATH": "/usr/bin:/bin",
+    "HOME": "{TMP}/home",
+    "LANG": "C.UTF-8",
+    "MRSM_ROOT_DIR": "{PROJECT}/root",
+    "MRSM_PLUGINS_DIR": "[\"{PROJECT}/plugins\"]",
+    "MRSM_VENVS_DIR": "{TMP}/venvs",
+    "MRSM_NO_AUTO_INSTALL": "1",
+    "MRSM_CORE": "python",
+    "PYTHONHASHSEED": "0",
+    "MRSM__COMPOSE_CONFIG": "{\"sync\":{\"schedule\":\"daily starting 00:00\",\"args\":[\"--begin\",\"2024-01-01\"],\"pipes\":[{\"connector\":\"plugin:nested\",\"metric\":\"one\",\"instance\":\"sql:local\"},{\"connector\":\"plugin:nested\",\"metric\":\"two\",\"location\":\"east\",\"instance\":\"sql:memory\"}]},\"pipes\":[{\"connector\":\"plugin:nested\",\"metric\":\"three\",\"instance\":\"sql:local\"}],\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"nested-pipes\"}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yml\",\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\"],\"project_name\":\"nested-pipes\"}",
+    "MRSM__COMPOSE_PROJECT": "nested-pipes",
+    "MRSM_CONFIG": "{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"nested-pipes\"}}"
+   },
+   "pipes_meta": null,
+   "pipes": null,
+   "explain": null,
+   "written_files": {},
+   "config_hash_normalized": "c343c875369ec87f2f08f65bf9e9325dbd2b53e46c1e4c63a090f2d83ef69763"
+  }
+ ]
+}

@@ -1,0 +1,4 @@
+
+Edit pipes' definitions.
+Alias for `edit pipes definition`.
+
