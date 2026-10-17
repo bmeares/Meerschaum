@@ -3,7 +3,7 @@
 # vim:fenc=utf-8
 
 """
-Manage plugins via the API connector
+Manage plugins via the API connector (the Rust client, `meerschaum._core.ApiConnector`).
 """
 
 from __future__ import annotations
@@ -27,28 +27,18 @@ def register_plugin(
     debug: bool = False,
 ) -> SuccessTuple:
     """Register a plugin and upload its archive."""
-    import json
+    import os
     archive_path = plugin.make_tar(debug=debug) if make_archive else plugin.archive_path
-    file_pointer = open(archive_path, 'rb')
-    files = {'archive': file_pointer}
-    metadata = {
-        'version': plugin.version,
-        'attributes': json.dumps(plugin.attributes),
-    }
-    r_url = plugin_r_url(plugin)
     try:
-        response = self.post(r_url, files=files, params=metadata, debug=debug)
+        with open(archive_path, 'rb') as f:
+            archive = f.read()
     except Exception:
         return False, f"Failed to register plugin '{plugin}'."
-    finally:
-        file_pointer.close()
-
-    try:
-        success, msg = json.loads(response.text)
-    except Exception:
-        return False, response.text
-
-    return success, msg
+    return self._rust_client().register_plugin(
+        plugin,
+        archive,
+        os.path.basename(str(archive_path)),
+    )
 
 
 def install_plugin(
@@ -61,31 +51,17 @@ def install_plugin(
     """Download and attempt to install a plugin from the API."""
     import os
     import pathlib
-    import json
     from meerschaum.core import Plugin
     import meerschaum.config.paths as paths
-    from meerschaum.utils.debug import dprint
-    from meerschaum.utils.packages import attempt_import
-    binaryornot_check = attempt_import('binaryornot.check', lazy=False)
-    r_url = plugin_r_url(name)
+
     dest = pathlib.Path(os.path.join(paths.PLUGINS_TEMP_RESOURCES_PATH, name + '.tar.gz'))
-    if debug:
-        dprint(f"Fetching from '{self.url + r_url}' to '{dest}'...")
-    archive_path = self.wget(r_url, dest, debug=debug) 
-    is_binary = binaryornot_check.is_binary(str(archive_path))
-    if not is_binary:
-        fail_msg = f"Failed to download binary for plugin '{name}'."
-        try:
-            with open(archive_path, 'r') as f:
-                j = json.load(f)
-            if isinstance(j, list):
-                success, msg = tuple(j)
-            elif isinstance(j, dict) and 'detail' in j:
-                success, msg = False, fail_msg
-        except Exception:
-            success, msg = False, fail_msg
-        return success, msg
-    plugin = Plugin(name, archive_path=archive_path, repo_connector=self)
+    try:
+        archive = self._rust_client().download_plugin(name)
+    except ValueError as e:
+        return False, str(e)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_bytes(archive)
+    plugin = Plugin(name, archive_path=dest, repo_connector=self)
     return plugin.install(skip_deps=skip_deps, force=force, debug=debug)
 
 
@@ -109,21 +85,7 @@ def get_plugins(
     -------
     A list of plugin names.
     """
-    import json
-    from meerschaum.utils.warnings import error
-    from meerschaum._internal.static import STATIC_CONFIG
-    response = self.get(
-        STATIC_CONFIG['api']['endpoints']['plugins'],
-        params = {'user_id': user_id, 'search_term': search_term},
-        use_token = True,
-        debug = debug
-    )
-    if not response:
-        return []
-    plugins = json.loads(response.text)
-    if not isinstance(plugins, list):
-        error(response.text)
-    return plugins
+    return self._rust_client().get_plugins(user_id=user_id, search_term=search_term)
 
 
 def get_plugin_attributes(
@@ -131,25 +93,8 @@ def get_plugin_attributes(
     plugin: mrsm.core.Plugin,
     debug: bool = False
 ) -> Dict[str, Any]:
-    """
-    Return a plugin's attributes.
-    """
-    import json
-    from meerschaum.utils.warnings import warn, error
-    r_url = plugin_r_url(plugin) + '/attributes'
-    response = self.get(r_url, use_token=True, debug=debug)
-    attributes = response.json()
-    if isinstance(attributes, str) and attributes and attributes[0] == '{':
-        try:
-            attributes = json.loads(attributes)
-        except Exception:
-            pass
-    if not isinstance(attributes, dict):
-        error(response.text)
-    elif not response and 'detail' in attributes:
-        warn(attributes['detail'])
-        return {}
-    return attributes
+    """Return a plugin's attributes."""
+    return self._rust_client().get_plugin_attributes(plugin)
 
 
 def get_plugin_version(
@@ -157,20 +102,8 @@ def get_plugin_version(
     plugin: mrsm.core.Plugin,
     debug: bool = False
 ) -> Union[str, None]:
-    """
-    Return a plugin's version.
-    """
-    from meerschaum.utils.warnings import warn
-    r_url = plugin_r_url(plugin) + '/version'
-    response = self.get(r_url, use_token=(self.label != 'mrsm'), debug=debug)
-    if not response:
-        return None
-    try:
-        version = response.json()
-    except Exception as e:
-        warn(f"Cannot parse version for {plugin}:\n{e}")
-        version = None
-    return version or None
+    """Return a plugin's version."""
+    return self._rust_client().get_plugin_version(plugin)
 
 
 def delete_plugin(
@@ -179,16 +112,4 @@ def delete_plugin(
     debug: bool = False
 ) -> SuccessTuple:
     """Delete a plugin from an API repository."""
-    import json
-    r_url = plugin_r_url(plugin)
-    try:
-        response = self.delete(r_url, debug=debug)
-    except Exception:
-        return False, f"Failed to delete plugin '{plugin}'."
-
-    try:
-        success, msg = json.loads(response.text)
-    except Exception:
-        return False, response.text
-
-    return success, msg
+    return self._rust_client().delete_plugin(plugin)

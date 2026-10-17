@@ -508,4 +508,72 @@ mod tests {
             )
         );
     }
+
+    /// The stale scan is throttled to one per minute: with the throttle window open it flags
+    /// (and drops) stale bookkeeping rows, inside it it leaves them alone, and it scans again
+    /// once the window has lapsed.
+    #[tokio::test]
+    async fn stale_scan_throttle_window() {
+        let path = std::env::temp_dir().join(format!(
+            "_mrsm_rs_stale_scan_{}.db",
+            uuid::Uuid::new_v4().simple()
+        ));
+        let conn =
+            SqlConnector::from_uri("rs_stale_scan", &format!("sqlite:///{}", path.display()))
+                .await
+                .expect("sqlite connects");
+        assert!(conn.ensure_instance_tables(true).await);
+        let table = conn.instance_table_name("mrsm_temp_tables");
+        let stale = utc_now_naive() - chrono::Duration::days(30);
+        let count = |name: &'static str| {
+            let conn = &conn;
+            let table = table.clone();
+            async move {
+                conn.value(&format!(
+                    "SELECT COUNT(*) FROM {table} WHERE \"table\" = '{name}' AND ready_to_drop IS NULL"
+                ))
+                .await
+                .and_then(|v| v.as_i64())
+                .unwrap_or(0)
+            }
+        };
+        let seed = |name: &'static str| {
+            let conn = &conn;
+            let table = table.clone();
+            let created = conn.timestamp_param(stale);
+            async move {
+                conn.driver()
+                    .exec_with(
+                        &format!(
+                            "INSERT INTO {table} (date_created, \"table\", ready_to_drop) VALUES (?, ?, NULL)"
+                        ),
+                        &[created, SqlParam::Text(name.to_string())],
+                    )
+                    .await
+                    .expect("seed");
+            }
+        };
+
+        seed("_stale_a").await;
+        assert!(conn.stale_check().is_none());
+        assert!(conn.drop_old_temporary_tables(false).await.0);
+        let scanned_at = conn.stale_check().expect("the first call records its scan");
+        assert_eq!(count("_stale_a").await, 0, "the first call scans");
+
+        seed("_stale_b").await;
+        for _ in 0..4 {
+            assert!(conn.drop_old_temporary_tables(false).await.0);
+        }
+        assert_eq!(count("_stale_b").await, 1, "throttled calls never scan");
+        assert_eq!(conn.stale_check(), Some(scanned_at));
+
+        let lapsed = std::time::Instant::now()
+            .checked_sub(std::time::Duration::from_secs(61))
+            .expect("a monotonic clock older than a minute");
+        conn.set_stale_check(lapsed);
+        assert!(conn.drop_old_temporary_tables(false).await.0);
+        assert_eq!(count("_stale_b").await, 0, "the window lapsed: scan again");
+        drop(conn);
+        let _ = std::fs::remove_file(&path);
+    }
 }

@@ -9,7 +9,7 @@ Utility functions for working with SQL data types.
 from __future__ import annotations
 from meerschaum.utils.typing import Dict, Union, Tuple, Optional
 from meerschaum._internal.static import STATIC_CONFIG as _STATIC_CONFIG
-from meerschaum._core._gate import rust_impl as _rust_impl
+from meerschaum import _core
 from meerschaum.utils.dtypes import MRSM_PRECISION_UNITS_ABBREVIATIONS as _MRSM_PRECISION_UNITS_ABBREVIATIONS
 
 NUMERIC_PRECISION_FLAVORS: Dict[str, Tuple[int, int]] = {
@@ -17,7 +17,6 @@ NUMERIC_PRECISION_FLAVORS: Dict[str, Tuple[int, int]] = {
     'mysql': (38, 20),
     'mssql': (28, 10),
 }
-NUMERIC_AS_TEXT_FLAVORS = {'sqlite', 'duckdb', 'geopackage'}
 TIMEZONE_NAIVE_FLAVORS = {'oracle', 'mysql', 'mariadb'}
 
 ### MySQL doesn't allow for casting as BIGINT, so this is a workaround.
@@ -1176,40 +1175,8 @@ def get_pd_type_from_db_type(db_type: str, allow_custom_dtypes: bool = True) -> 
     -------
     The equivalent datatype for a pandas DataFrame.
     """
-    if (_rust := _rust_impl('get_pd_type_from_db_type')) is not None:
-        return _rust(db_type, allow_custom_dtypes=allow_custom_dtypes)
-    from meerschaum.utils.dtypes import are_dtypes_equal, get_geometry_type_srid
-    def parse_custom(_pd_type: str, _db_type: str) -> str:
-        if 'json' in _db_type.lower():
-            return 'json'
-        if are_dtypes_equal(_pd_type, 'numeric') and _pd_type != 'object':
-            precision, scale = get_numeric_precision_scale(None, dtype=_db_type.upper())
-            if precision and scale:
-                return f"numeric[{precision},{scale}]"
-        if are_dtypes_equal(_pd_type, 'geometry') and _pd_type != 'object':
-            geometry_type, srid = get_geometry_type_srid(_db_type.upper())
-            modifiers = [str(modifier) for modifier in (geometry_type, srid) if modifier]
-            typ = "geometry" if 'geography' not in _pd_type.lower() else 'geography'
-            if not modifiers:
-                return typ
-            return f"{typ}[{', '.join(modifiers)}]"
-        return _pd_type
-
-    pd_type = DB_TO_PD_DTYPES.get(db_type.upper().split('(', maxsplit=1)[0].strip(), None)
-    if pd_type is not None:
-        return (
-            parse_custom(pd_type, db_type)
-            if allow_custom_dtypes
-            else pd_type
-        )
-    for db_t, pd_t in DB_TO_PD_DTYPES['substrings'].items():
-        if db_t in db_type.upper():
-            return (
-                parse_custom(pd_t, db_t)
-                if allow_custom_dtypes
-                else pd_t
-            )
-    return DB_TO_PD_DTYPES['default']
+    _rust = _core.get_pd_type_from_db_type
+    return _rust(db_type, allow_custom_dtypes=allow_custom_dtypes)
 
 
 def get_db_type_from_pd_type(
@@ -1399,3 +1366,7 @@ def get_numeric_precision_scale(
             pass
 
     return NUMERIC_PRECISION_FLAVORS.get(flavor, (None, None))
+
+
+NUMERIC_AS_TEXT_FLAVORS = {'sqlite', 'duckdb', 'geopackage'}
+

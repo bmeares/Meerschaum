@@ -1,10 +1,11 @@
 """
 Wave 9 (task Q): the `_core.get_config` read-only fast path (PARITY row 12).
 
-Every scenario runs in `python` mode and in `rust` mode in one process (the gate is re-read with
-`set_mode`) against the same live `meerschaum.config.config` dictionary, and the observed values
-must match. The scenarios are the mutation paths a cache could miss: callers editing returned
-dicts, `set_config`, `replace_config`, `MRSM{}` symlinks added after a key was loaded, and
+Every scenario runs against the live `meerschaum.config.config` dictionary, and the observed
+values must match what the parity-phase Python mode returned (`tests/oracle/test_w9_get_config.json`,
+a recording of that mode, not v4.1.4 output). The
+scenarios are the mutation paths a cache could miss: callers editing returned dicts,
+`set_config`, `replace_config`, `MRSM{}` symlinks added after a key was loaded, and
 `write_config` followed by a reload.
 """
 
@@ -13,36 +14,25 @@ import copy
 import pytest
 
 import meerschaum.config as mrsm_config
-from meerschaum._core import _gate
-
-try:
-    from meerschaum import _core
-    HAS_CORE = _core.load() is not None
-except Exception:
-    HAS_CORE = False
-
-pytestmark = pytest.mark.skipif(not HAS_CORE, reason="the Rust extension is not built")
+from tests import _oracle as oracle
 
 
 @pytest.fixture(autouse=True)
 def isolated_config():
-    """Restore the gate and the in-memory config dictionary after each test."""
-    original_mode = (_gate._MODE, _gate._FEATURES)
+    """Restore the in-memory config dictionary after each test."""
     mrsm_config.get_config('system')
     mrsm_config.get_config('meerschaum')
     original = copy.deepcopy(mrsm_config.config)
     yield
-    _gate._MODE, _gate._FEATURES = original_mode
     mrsm_config.set_config(original)
 
 
 def run_both(scenario):
-    """Run `scenario()` in python mode then rust mode, restoring the config in between."""
+    """Return the recorded Python-mode result of `scenario()` and its result now, restoring the config
+    in between."""
     start = copy.deepcopy(mrsm_config.config)
-    _gate.set_mode('python')
-    expected = scenario()
+    expected = oracle.expected()
     mrsm_config.set_config(copy.deepcopy(start))
-    _gate.set_mode('rust')
     actual = scenario()
     return expected, actual
 

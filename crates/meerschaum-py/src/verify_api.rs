@@ -62,7 +62,7 @@ pub fn unregister_connector(keys: &str) -> bool {
 }
 
 /// Writes to `sys.<name>` (taking the GIL for each write).
-struct PyStream(&'static str);
+pub(crate) struct PyStream(pub(crate) &'static str);
 
 impl Write for PyStream {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
@@ -209,7 +209,7 @@ pub fn verify_pipe<'py>(
             meerschaum_cli::env::process_env,
         );
         rt.err = Box::new(PyStream("stderr"));
-        rt.vars = || std::env::vars().collect();
+        rt.vars = meerschaum_cli::dispatch::process_vars;
         rt.config = Some(config);
         rt.native = Some(session.clone());
         let mut sp = SelectedPipe {

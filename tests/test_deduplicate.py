@@ -16,6 +16,9 @@ import meerschaum as mrsm
 from tests import debug
 from tests.connectors import conns, get_flavors
 
+### These tests read the instance with `conn.read()` (SQLAlchemy, the `sql` extra).
+pytest.importorskip('sqlalchemy')
+
 
 @pytest.mark.parametrize("flavor", get_flavors())
 def test_deduplicate_default(flavor: str):

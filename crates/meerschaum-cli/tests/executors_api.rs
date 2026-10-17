@@ -138,7 +138,21 @@ struct Server {
 }
 
 impl Server {
+    /// A started server which answers HTTP. Under load a port which was free a moment ago can be
+    /// taken by another test binary before this server binds it (then the server exits, or a
+    /// foreign listener answers for it), so a failed attempt is retried on a new port.
     fn start(no_auth: bool) -> Server {
+        let mut last = String::new();
+        for _ in 0..5 {
+            match Server::try_start(no_auth) {
+                Ok(server) => return server,
+                Err(why) => last = why,
+            }
+        }
+        panic!("the server did not start in 5 attempts: {last}");
+    }
+
+    fn try_start(no_auth: bool) -> Result<Server, String> {
         let home = Home::new();
         let port = free_port();
         let mut command = home.command(&[]);
@@ -164,25 +178,37 @@ impl Server {
             command.arg("--no-auth");
         }
         let log = std::fs::File::create(home.root.path().join("server.log")).unwrap();
-        let mut child = command
+        let child = command
             .stdin(Stdio::null())
             .stdout(log.try_clone().unwrap())
             .stderr(log)
             .spawn()
             .unwrap();
+        let mut server = Server { home, child, port };
+        // Ready = a whole HTTP answer, not merely an accepted connection: under load a listener
+        // can accept before the app serves, and the early connection is reset.
         let deadline = Instant::now() + Duration::from_secs(60);
         loop {
-            assert!(
-                child.try_wait().unwrap().is_none(),
-                "the server exited before it listened"
-            );
-            if TcpStream::connect(("127.0.0.1", port)).is_ok() {
+            if let Some(status) = server.child.try_wait().unwrap() {
+                return Err(format!("the server exited ({status}) before it served"));
+            }
+            if try_raw_request(port, "GET", "/healthcheck")
+                .is_ok_and(|status| status.starts_with("HTTP/1.1 200"))
+            {
                 break;
             }
-            assert!(Instant::now() < deadline, "the server did not listen");
+            if Instant::now() >= deadline {
+                return Err("the server did not serve in 60 s".into());
+            }
             std::thread::sleep(Duration::from_millis(50));
         }
-        Server { home, child, port }
+        // The answer must be ours: had another process taken the port, our server would have
+        // failed to bind and be gone by now.
+        std::thread::sleep(Duration::from_millis(300));
+        if let Some(status) = server.child.try_wait().unwrap() {
+            return Err(format!("the server exited ({status}): its port was taken"));
+        }
+        Ok(server)
     }
 
     /// The PIDs of the job workers recorded under the server's root.
@@ -508,19 +534,20 @@ fn compose_fails_when_the_shared_executor_is_unreachable() {
 
 /// One raw HTTP/1.1 request (the path is sent as is, so `%2E%2E` stays encoded); the status line.
 fn raw_request(port: u16, method: &str, path: &str) -> String {
+    try_raw_request(port, method, path).unwrap()
+}
+
+fn try_raw_request(port: u16, method: &str, path: &str) -> std::io::Result<String> {
     use std::io::{Read, Write};
-    let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
-    stream
-        .set_read_timeout(Some(Duration::from_secs(20)))
-        .unwrap();
+    let mut stream = TcpStream::connect(("127.0.0.1", port))?;
+    stream.set_read_timeout(Some(Duration::from_secs(20)))?;
     write!(
         stream,
         "{method} {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
-    )
-    .unwrap();
+    )?;
     let mut out = String::new();
     let _ = stream.read_to_string(&mut out);
-    out.lines().next().unwrap_or_default().to_string()
+    Ok(out.lines().next().unwrap_or_default().to_string())
 }
 
 #[test]

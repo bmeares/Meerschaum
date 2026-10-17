@@ -18,15 +18,10 @@ import pytest
 
 from meerschaum import _core
 
-HAS_CORE = _core.load() is not None
 REPO = pathlib.Path(__file__).resolve().parent.parent
 
-pytestmark = pytest.mark.skipif(not HAS_CORE, reason="the Rust extension is not built")
 
-MODES = ['rust', 'python']
-
-
-def run_python(code: str, root: pathlib.Path, mode: str = 'rust', env=None):
+def run_python(code: str, root: pathlib.Path, env=None):
     """Run `code` in a fresh interpreter; return `(returncode, last stdout line parsed, stderr)`."""
     full_env = {
         k: v for k, v in os.environ.items()
@@ -36,7 +31,6 @@ def run_python(code: str, root: pathlib.Path, mode: str = 'rust', env=None):
         'PYTHONPATH': str(REPO),
         'MRSM_ROOT_DIR': str(root),
         'MRSM_PLUGINS_DIR': str(root / 'plugins'),
-        'MRSM_CORE': mode,
         'MRSM_NO_AUTO_INSTALL': '1',
     })
     full_env.update(env or {})
@@ -61,7 +55,7 @@ def config_dir(root: pathlib.Path) -> pathlib.Path:
 
 
 def test_dates_bytes_and_big_ints_survive_get_config_and_write_config(tmp_path):
-    """W15O-1: values JSON cannot hold are not projected or lost (rust mode)."""
+    """W15O-1: values JSON cannot hold are not projected or lost."""
     (config_dir(tmp_path) / 'custom.yaml').write_text(
         "when: 2024-01-01\n"
         "stamp: 2024-01-01 10:00:00\n"
@@ -107,8 +101,7 @@ print(json.dumps(result))
     assert [p.name for p in target.parent.iterdir() if p.name.startswith('.')] == []
 
 
-@pytest.mark.parametrize('mode', MODES)
-def test_a_read_only_file_raises_permission_error_and_stays_intact(tmp_path, mode):
+def test_a_read_only_file_raises_permission_error_and_stays_intact(tmp_path):
     if hasattr(os, 'geteuid') and os.geteuid() == 0:
         pytest.skip("root ignores file modes")
     target = config_dir(tmp_path) / 'custom.json'
@@ -125,7 +118,7 @@ except PermissionError:
 else:
     print(json.dumps('no error'))
 """
-    rc, out, err = run_python(code, tmp_path, mode=mode)
+    rc, out, err = run_python(code, tmp_path)
     assert rc == 0, err
     assert out == 'PermissionError'
     assert target.read_text() == original
@@ -149,8 +142,7 @@ print(json.dumps(write_config({'custom': {'new': 2}})))
     assert [p.name for p in target.parent.iterdir() if p.name.startswith('.')] == []
 
 
-@pytest.mark.parametrize('mode', MODES)
-def test_environment_patches_and_connector_uris(tmp_path, mode):
+def test_environment_patches_and_connector_uris(tmp_path):
     code = """
 import json
 from meerschaum.config import get_config
@@ -167,13 +159,12 @@ print(json.dumps([
         'MRSM_SQL_FOO': 'sqlite:////tmp/mrsm_w15o_foo.db',
         'MRSM_API_BAR': 'http://api.example.invalid:8000',
     }
-    rc, out, err = run_python(code, tmp_path, mode=mode, env=env)
+    rc, out, err = run_python(code, tmp_path, env=env)
     assert rc == 0, err
     assert out == [1, 2, 'sqlite:////tmp/mrsm_w15o_foo.db', 'http://api.example.invalid:8000'], out
 
 
-@pytest.mark.parametrize('mode', MODES)
-def test_the_module_attribute_is_the_dict_get_config_mutates(tmp_path, mode):
+def test_the_module_attribute_is_the_dict_get_config_mutates(tmp_path):
     code = """
 import json
 import meerschaum.config as c
@@ -189,13 +180,12 @@ checks = [
 ]
 print(json.dumps(checks))
 """
-    rc, out, err = run_python(code, tmp_path, mode=mode)
+    rc, out, err = run_python(code, tmp_path)
     assert rc == 0, err
     assert out == [True, True, True, True]
 
 
-@pytest.mark.parametrize('mode', MODES)
-def test_assigning_the_module_attribute_replaces_the_live_config(tmp_path, mode):
+def test_assigning_the_module_attribute_replaces_the_live_config(tmp_path):
     code = """
 import json
 import meerschaum.config as c
@@ -216,7 +206,7 @@ else:
     checks.append(False)
 print(json.dumps(checks))
 """
-    rc, out, err = run_python(code, tmp_path, mode=mode)
+    rc, out, err = run_python(code, tmp_path)
     assert rc == 0, err
     assert out == [True, True, True, True, True]
 
@@ -240,8 +230,7 @@ def test_a_stale_extension_is_reported_as_not_built(monkeypatch):
     assert 'scripts/rust/build_py.sh' in str(_core.LOAD_ERROR)
 
 
-@pytest.mark.parametrize('mode', MODES)
-def test_importing_the_config_does_not_load_the_extension(tmp_path, mode):
+def test_importing_the_config_does_not_load_the_extension(tmp_path):
     code = """
 import json, sys
 import meerschaum, meerschaum.config
@@ -249,13 +238,12 @@ import meerschaum.config as c
 assert c.config == {}
 print(json.dumps('meerschaum._core._core' in sys.modules))
 """
-    rc, out, err = run_python(code, tmp_path, mode=mode)
+    rc, out, err = run_python(code, tmp_path)
     assert rc == 0, err
     assert out is False
 
 
-@pytest.mark.parametrize('mode', MODES)
-def test_environment_connectors_apply_at_import_and_may_load_the_extension(tmp_path, mode):
+def test_environment_connectors_apply_at_import_and_may_load_the_extension(tmp_path):
     """With `MRSM_SQL_*` set the import applies them (loading the extension is legitimate)."""
     code = """
 import json
@@ -263,13 +251,12 @@ import meerschaum.config as c
 print(json.dumps(c.config['meerschaum']['connectors']['sql']['foo']['uri']))
 """
     env = {'MRSM_SQL_FOO': 'sqlite:////tmp/mrsm_w15o_import.db'}
-    rc, out, err = run_python(code, tmp_path, mode=mode, env=env)
+    rc, out, err = run_python(code, tmp_path, env=env)
     assert rc == 0, err
     assert out == 'sqlite:////tmp/mrsm_w15o_import.db'
 
 
-@pytest.mark.parametrize('mode', MODES)
-def test_the_extension_adopts_the_dict_created_before_it_loaded(tmp_path, mode):
+def test_the_extension_adopts_the_dict_created_before_it_loaded(tmp_path):
     code = """
 import json, sys
 import meerschaum.config as c
@@ -286,13 +273,12 @@ checks.append(_core.config_dict() is c.config)
 checks.append(_core.get_config('meerschaum', 'instance') == 'sql:adopted')
 print(json.dumps(checks))
 """
-    rc, out, err = run_python(code, tmp_path, mode=mode)
+    rc, out, err = run_python(code, tmp_path)
     assert rc == 0, err
     assert out == [True, True, True, True]
 
 
-@pytest.mark.parametrize('mode', MODES)
-def test_debug_prints_the_lines_v4_prints(tmp_path, mode):
+def test_debug_prints_the_lines_v4_prints(tmp_path):
     (config_dir(tmp_path) / 'custom.yaml').write_text("a: 1\n")
     code = """
 from meerschaum.config import get_config
@@ -303,7 +289,7 @@ backup_config_key('custom', debug=True)
 backup_config_key('custom', debug=True)
 backup_config_key('custom')
 """
-    out = subprocess_output(code, tmp_path, mode)
+    out = subprocess_output(code, tmp_path)
     assert 'Traceback' not in out, out
     assert "Indexing keys: ('meerschaum', 'instance')" in out
     assert "No config file to back up for 'absent'." in out
@@ -312,12 +298,12 @@ backup_config_key('custom')
     assert out.count("unchanged since last backup") == 1
 
 
-def subprocess_output(code, root, mode):
+def subprocess_output(code, root):
     """The combined stdout and stderr of `code` (debug lines go to either)."""
     env = {k: v for k, v in os.environ.items() if not k.startswith('MRSM_')}
     env.update({
         'PYTHONPATH': str(REPO), 'MRSM_ROOT_DIR': str(root),
-        'MRSM_PLUGINS_DIR': str(root / 'plugins'), 'MRSM_CORE': mode,
+        'MRSM_PLUGINS_DIR': str(root / 'plugins'),
         'MRSM_NO_AUTO_INSTALL': '1',
     })
     proc = subprocess.run(
@@ -378,3 +364,43 @@ print(json.dumps(_core.live_config_paths()))
     root = str(tmp_path.resolve())
     assert out['plugins_dirs'] == [f'{root}/plugins'], out
     assert out['venvs_dir'] is None, out
+
+
+@pytest.mark.parametrize('use_xdg', [True, False])
+def test_the_native_config_resolves_the_user_config_dir(tmp_path, use_xdg):
+    """`SYSTEMD_USER_RESOURCES_PATH` is a real directory, never a literal `~` under the cwd."""
+    cwd = tmp_path / 'cwd'
+    cwd.mkdir()
+    home = tmp_path / 'home'
+    xdg = tmp_path / 'xdg'
+    code = """
+import json
+from meerschaum import _core
+assert _core.load() is not None
+print(json.dumps(_core.live_config_paths()))
+"""
+    env = {'HOME': str(home)}
+    if use_xdg:
+        env['XDG_CONFIG_HOME'] = str(xdg)
+    full_env = {
+        k: v for k, v in os.environ.items()
+        if not k.startswith('MRSM_') and k not in ('XDG_CONFIG_HOME', 'HOME')
+    }
+    full_env.update({
+        'PYTHONPATH': str(REPO), 'MRSM_ROOT_DIR': str(tmp_path / 'root'),
+        'MRSM_PLUGINS_DIR': str(tmp_path / 'root' / 'plugins'), 'MRSM_NO_AUTO_INSTALL': '1',
+    })
+    full_env.update(env)
+    (tmp_path / 'root').mkdir()
+    proc = subprocess.run(
+        [sys.executable, '-c', code], env=full_env, capture_output=True, text=True,
+        timeout=120, cwd=str(cwd),
+    )
+    assert proc.returncode == 0, proc.stderr
+    paths = json.loads(proc.stdout.strip().splitlines()[-1])
+    expected = (xdg if use_xdg else home / '.config').resolve()
+    assert paths['dot_config_dir'] == str(expected), paths
+    assert paths['systemd_user_dir'] == str(expected / 'systemd' / 'user'), paths
+    assert os.path.isabs(paths['systemd_user_dir'])
+    assert list(cwd.iterdir()) == [], "nothing may be created under the working directory"
+    assert not (cwd / '~').exists()

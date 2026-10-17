@@ -746,3 +746,34 @@ fn the_unit_pins_the_workers_interpreter() {
         Some(format!("Environment=MRSM_PYTHON={}", other.display()))
     );
 }
+
+#[test]
+fn starting_a_systemd_job_hands_the_unpinned_interpreter_warning_to_the_caller() {
+    let f = Fixture::new();
+    let sysargs = || Some(vec!["show".to_string(), "version".to_string()]);
+    let options = || JobOptions {
+        executor_keys: Some("systemd".into()),
+        ..Default::default()
+    };
+    // Nothing resolves: the unit pins no interpreter, and `Job::start` says so.
+    let bare = f
+        .ctx
+        .clone()
+        .with_process_env(vec![("PATH".into(), "/nonexistent".into())]);
+    let mut job = Job::new("unpinned", sysargs(), options(), &bare).unwrap();
+    let started = job.start();
+    assert!(started.success, "{started}");
+    assert_eq!(job.warnings.len(), 1, "{:?}", job.warnings);
+    assert!(job.warnings[0].contains("'unpinned'"), "{:?}", job.warnings);
+    // An interpreter which resolves: no warning.
+    let bin = Path::new(&f.tmp).join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    std::fs::write(bin.join("python3"), "#!/bin/sh\n").unwrap();
+    let pinned = f
+        .ctx
+        .clone()
+        .with_process_env(vec![("PATH".into(), bin.display().to_string())]);
+    let mut job = Job::new("pinned-job", sysargs(), options(), &pinned).unwrap();
+    assert!(job.start().success);
+    assert!(job.warnings.is_empty(), "{:?}", job.warnings);
+}

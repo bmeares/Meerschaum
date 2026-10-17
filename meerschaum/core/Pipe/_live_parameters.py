@@ -6,14 +6,13 @@
 Live views over a pipe's parameters (design §4.4, "What the façade must preserve").
 
 v4's `Pipe.parameters` returns a resolved *copy*, so `pipe.parameters['x'] = 1` followed by
-`pipe.edit()` silently loses the change. Under `MRSM_CORE=rust` the property returns a `LiveDict`
-instead: a real `dict` subclass (so `isinstance`, `json.dumps`, `**` unpacking and equality keep
+`pipe.edit()` silently loses the change. The property returns a `LiveDict` instead: a real `dict` subclass (so `isinstance`, `json.dumps`, `**` unpacking and equality keep
 working) whose values are the *resolved* parameters (references, `{{ Pipe() }}` and `MRSM{}`
 substituted, as v4 reads them) and whose mutating methods write through to the pipe's *raw*
 (unresolved) parameters, the ones `Pipe.edit()` persists. Nested dicts and lists are live too, so
 `pipe.parameters['fetch']['backtrack_minutes'] = 5` persists.
 
-Under `MRSM_CORE=rust` the raw parameters themselves are owned by the pipe's `_core.Pipe`
+The raw parameters themselves are owned by the pipe's `_core.Pipe`
 (`RawDict` / `RawList` / `Attrs` below): every mutation of `pipe._attributes['parameters']`, nested
 or not, is pushed into the Rust raw map, so what `edit()` persists is what Rust holds.
 
@@ -596,7 +595,7 @@ class RawList(_RawNode, list):
 
 class Attrs(_Plainable, dict):
     """
-    `Pipe._attributes` under `MRSM_CORE=rust`. The `'parameters'` entry is always the pipe's one
+    `Pipe._attributes`. The `'parameters'` entry is always the pipe's one
     root `RawDict`; assigning it stores the value in `_core.Pipe` (the root, a read-through
     view of the Rust map, keeps its identity).
     """

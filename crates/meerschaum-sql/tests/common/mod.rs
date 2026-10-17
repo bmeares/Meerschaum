@@ -193,6 +193,17 @@ pub fn params(json: &str) -> Map {
 }
 
 impl Ctx {
+    /// A context over a connector the test built itself.
+    pub fn with_conn(flavor: &'static str, conn: SqlConnector, test: &str) -> Ctx {
+        let short = uuid::Uuid::new_v4().simple().to_string()[..8].to_string();
+        Ctx {
+            flavor,
+            conn,
+            prefix: format!("w5sql_{short}{}", &test[..test.len().min(12)]),
+            sqlite_path: None,
+        }
+    }
+
     /// `mrsm.Pipe(ck, mk, lk, instance=conn, **parameters)` with this test's unique prefix on
     /// the connector keys.
     pub fn pipe(&self, ck: &str, mk: &str, lk: Option<&str>, parameters: &str) -> Pipe {

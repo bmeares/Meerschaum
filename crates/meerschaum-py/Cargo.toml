@@ -41,12 +41,16 @@ meerschaum-engine = { workspace = true }
 meerschaum-api = { workspace = true, features = ["client"] }
 meerschaum-valkey = { workspace = true }
 meerschaum-worker = { workspace = true }
+# `meerschaum.jobs.Job` and the executors (`jobs_api.rs`).
+meerschaum-jobs = { workspace = true }
 # The extension's `tracing` sink (`logging.rs`): engine warnings reach Python's `warn()`.
 tracing = { workspace = true }
 # The runtime the instance methods run on (owned by the extension, design §4.2).
 tokio = { workspace = true }
 # Only this crate depends on the CLI library (top layer, see crates/README.md "Crate layering").
 meerschaum-cli = { path = "../meerschaum-cli" }
+# `meerschaum.compose.utils` delegates its configuration helpers (`compose_api.rs`).
+meerschaum-compose = { workspace = true }
 # VERSION SKEW (see README "Dependency pins"): the workspace pins `pyo3 = 0.26`, but
 # `pyo3-polars` for the workspace's `polars = 0.51` (0.24.x) requires pyo3 0.25, and
 # `pyo3-arrow` for `arrow = 56` exists for pyo3 0.25 (0.11) and 0.26 (0.12). pyo3 0.25 is the

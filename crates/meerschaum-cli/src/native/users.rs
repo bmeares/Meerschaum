@@ -224,15 +224,16 @@ pub fn edit_users(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
             .unwrap_or_default();
         let answer = prompt(
             rt,
-            &format!("Scopes for user '{username}' (`*` to grant all scopes):"),
+            &format!(
+                "Scopes for user '{username}' (`*` grants all scopes, including custom and future scopes):"
+            ),
             true,
             noask,
         )
         .unwrap_or_else(|| existing_scopes.join(" "));
-        let mut scopes: Vec<String> = answer.split_whitespace().map(str::to_string).collect();
-        if scopes == ["*"] {
-            scopes = default_scopes();
-        }
+        // FIX (intentional v4 change): `*` is stored literally, not expanded to the built-in
+        // scope list, so it also grants custom (plugin) scopes and scopes added later.
+        let scopes: Vec<String> = answer.split_whitespace().map(str::to_string).collect();
         let mut attrs = Map::new();
         attrs.insert(
             "scopes".into(),

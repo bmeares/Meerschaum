@@ -180,7 +180,6 @@ import_plugins()
 "#,
         ])
         .envs(process_env.clone())
-        .env_remove("MRSM_CORE")
         .output()
         .unwrap();
     assert!(
@@ -194,7 +193,6 @@ import_plugins()
         worker: WorkerOptions {
             python,
             env: process_env,
-            env_remove: vec!["MRSM_CORE".into()],
             current_dir: Some(repo),
             ..Default::default()
         },

@@ -22,8 +22,6 @@ def main() -> int:
     if not root.is_dir() or not plugins.is_dir():
         raise RuntimeError('The smoke test requires existing scratch root and plugins directories.')
     os.environ['MRSM_NO_AUTO_INSTALL'] = '1'
-    ### The native `Pipe.sync()` (`_core.sync_pipe`) is selected through the parity-phase gate.
-    os.environ.setdefault('MRSM_CORE', 'rust')
     os.environ['MRSM_SQL_SMOKE'] = 'sqlite:///' + str(root / 'smoke.db')
 
     import meerschaum as mrsm

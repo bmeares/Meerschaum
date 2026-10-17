@@ -101,6 +101,24 @@ conns = {
     ),
 }
 
+### Flavors whose tables support reclaiming disk space (VACUUM / OPTIMIZE / REBUILD).
+VACUUMABLE_FLAVORS = {
+    'timescaledb', 'timescaledb-ha', 'postgresql', 'postgis', 'citus', 'mysql', 'mariadb',
+    'mssql', 'sqlite', 'geopackage',
+}
+### `VACUUM FULL` rewrites the table and reclaims space to the OS (PostgreSQL family only).
+FULL_VACUUM_FLAVORS = {'postgresql', 'postgis', 'citus'}
+### Flavors whose tables support refreshing planner statistics.
+ANALYZABLE_FLAVORS = VACUUMABLE_FLAVORS | {'cockroachdb', 'duckdb'}
+### Flavors whose tables support some form of compression.
+COMPRESSIBLE_FLAVORS = {'timescaledb', 'timescaledb-ha', 'mysql', 'mariadb', 'mssql'}
+### Flavors with declarative range partitioning on a datetime column (TimescaleDB uses chunks).
+PG_PARTITION_FLAVORS = {'postgresql', 'postgis'}
+MYSQL_PARTITION_FLAVORS = {'mysql', 'mariadb'}
+MSSQL_PARTITION_FLAVORS = {'mssql'}
+PARTITIONABLE_FLAVORS = PG_PARTITION_FLAVORS | MYSQL_PARTITION_FLAVORS | MSSQL_PARTITION_FLAVORS
+
+
 def get_dtypes(debug: bool = False) -> Dict[str, Dict[str, 'sqlalchemy.types.Type']]:
     """
     Print every pandas dtype and database dtype.

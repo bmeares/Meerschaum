@@ -407,3 +407,85 @@ def wiring_echo(**kw):
     );
     assert_ne!(responses[1]["result"]["isError"], true, "{stdout}");
 }
+
+/// Start `mrsm start api` with `extra` flags and return what it wrote to stderr once it serves.
+/// A port another test grabbed between choosing it and binding it is retried.
+fn startup_stderr(extra: &[&str]) -> String {
+    let mut last = String::new();
+    for _attempt in 0..3 {
+        let sandbox = Sandbox::new();
+        let socket = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = socket.local_addr().unwrap().port();
+        assert_ne!(port, 8989);
+        drop(socket);
+        let log = sandbox.root.path().join("stderr.log");
+        let mut child = ChildGuard(
+            sandbox
+                .command()
+                .args([
+                    "start",
+                    "api",
+                    "-i",
+                    "sql:local",
+                    "-p",
+                    &port.to_string(),
+                    "-w",
+                    "2",
+                ])
+                .args(extra)
+                .stderr(std::fs::File::create(&log).unwrap())
+                .spawn()
+                .unwrap(),
+        );
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            if child.0.try_wait().unwrap().is_some() {
+                last = std::fs::read_to_string(&log).unwrap_or_default();
+                break;
+            }
+            if serves_http(port) {
+                return std::fs::read_to_string(&log).unwrap_or_default();
+            }
+            assert!(
+                Instant::now() < deadline,
+                "server did not listen before timeout"
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+    panic!("the server exited before listening, three times: {last}");
+}
+
+#[test]
+fn start_api_warns_once_when_anyone_who_can_connect_could_get_a_shell() {
+    const WARNING: &str = "can register an account and open a shell";
+    // The defaults (open registration, terminals for non-admins) on a non-loopback address.
+    let text = startup_stderr(&["--host", "0.0.0.0"]);
+    assert_eq!(text.matches(WARNING).count(), 1, "{text}");
+    assert!(
+        text.contains("--secure") && text.contains("--private"),
+        "{text}"
+    );
+    // Quiet on loopback, with `--secure` or `--private`, and without a terminal.
+    for extra in [
+        vec!["--host", "127.0.0.1"],
+        vec!["--host", "0.0.0.0", "--secure"],
+        vec!["--host", "0.0.0.0", "--private"],
+        vec!["--host", "0.0.0.0", "--no-webterm"],
+    ] {
+        let text = startup_stderr(&extra);
+        assert!(!text.contains(WARNING), "{extra:?}: {text}");
+    }
+}
+
+#[test]
+fn start_api_warns_once_for_no_auth_off_loopback() {
+    const WARNING: &str = "authentication is off";
+    let text = startup_stderr(&["--host", "0.0.0.0", "--no-auth", "--no-dash"]);
+    assert_eq!(text.matches(WARNING).count(), 1, "{text}");
+    let text = startup_stderr(&["--host", "127.0.0.1", "--no-auth", "--no-dash"]);
+    assert!(!text.contains(WARNING), "{text}");
+    // With authentication on there is nothing to warn about here.
+    let text = startup_stderr(&["--host", "0.0.0.0", "--no-dash"]);
+    assert!(!text.contains(WARNING), "{text}");
+}

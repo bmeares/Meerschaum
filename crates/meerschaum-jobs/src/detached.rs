@@ -142,6 +142,38 @@ impl Timestamps {
     }
 }
 
+/// What a supervisor found by its command line stands for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Resolved {
+    /// Its worker: the job's PID.
+    Worker(i32),
+    /// The supervisor is finishing after its worker exited: the job is stopping, which reads as
+    /// stopped.
+    Stopping,
+    /// The supervisor stands in for the job (the worker is not up yet, or the kernel does not
+    /// say which process is the worker): nothing is written down.
+    Supervisor(i32),
+}
+
+/// Resolve a supervisor to the job's process from its `children` (`None`: unreadable).
+///
+/// Without `children` files (kernels built without `CONFIG_PROC_CHILDREN`) nothing is known
+/// about the worker, so the supervisor reads as running, as before workers were resolved: a
+/// restart check must not launch a job a second time.
+pub fn resolve_supervisor(
+    supervisor: i32,
+    children: Option<&[i32]>,
+    began_recorded: bool,
+) -> Resolved {
+    match children {
+        None => Resolved::Supervisor(supervisor),
+        Some([worker]) => Resolved::Worker(*worker),
+        // No worker: not up yet before `began`; after it the job is stopping.
+        Some(_) if began_recorded => Resolved::Stopping,
+        Some(_) => Resolved::Supervisor(supervisor),
+    }
+}
+
 /// A process whose command line carries `daemon_id='<id>'`.
 #[derive(Debug, Clone)]
 struct Entry {
@@ -381,6 +413,20 @@ mod tests {
         );
         assert!(!t(None, Some("2025-12-31T00:00:05")).in_launch_window(now, grace));
         assert!(!t(None, None).in_launch_window(now, grace));
+    }
+
+    #[test]
+    fn a_supervisor_resolves_to_its_worker_or_stands_in() {
+        use Resolved::*;
+        // The worker is the supervisor's only child.
+        assert_eq!(resolve_supervisor(10, Some(&[11]), true), Worker(11));
+        // Without a worker: not up yet before `began`, stopping after it.
+        assert_eq!(resolve_supervisor(10, Some(&[]), false), Supervisor(10));
+        assert_eq!(resolve_supervisor(10, Some(&[]), true), Stopping);
+        // `children` unreadable (no `CONFIG_PROC_CHILDREN`): nothing is known, so the supervisor
+        // stands in as running, whether or not `began` is recorded.
+        assert_eq!(resolve_supervisor(10, None, true), Supervisor(10));
+        assert_eq!(resolve_supervisor(10, None, false), Supervisor(10));
     }
 
     #[test]

@@ -5,48 +5,70 @@
 
 """
 The entry point for launching Meerschaum actions.
+
+`entry()` runs a command line in the native dispatcher (`_core.entry`), the same one the `mrsm`
+binary uses. The only Python left is `_do_action_wrapper()`, which the plugin worker calls to run
+the actions of Python plugins.
 """
 
 from __future__ import annotations
 
 import os
-import sys
-import pathlib
 import shlex
-import json
-import time
-from datetime import timedelta
 
 import meerschaum as mrsm
 from meerschaum.utils.typing import SuccessTuple, List, Optional, Dict, Callable, Any, Union
-from meerschaum._internal.static import STATIC_CONFIG as _STATIC_CONFIG
 
-_systemd_result_path = None
-if (_STATIC_CONFIG['environment']['systemd_log_path']) in os.environ:
-    from meerschaum.utils.daemon import RotatingFile as _RotatingFile, StdinFile as _StdinFile
-    from meerschaum.config import get_config as _get_config
 
-    _systemd_result_path = pathlib.Path(
-        os.environ[_STATIC_CONFIG['environment']['systemd_result_path']]
-    )
-    _systemd_log_path = pathlib.Path(
-        os.environ[_STATIC_CONFIG['environment']['systemd_log_path']]
-    )
-    _systemd_delete_job = (
-        (os.environ.get(_STATIC_CONFIG['environment']['systemd_delete_job'], None) or '0')
-        not in (None, '0', 'false')
-    )
-    _job_name = os.environ[_STATIC_CONFIG['environment']['daemon_id']]
-    _systemd_log = _RotatingFile(
-        _systemd_log_path,
-        write_timestamps=True,
-        timestamp_format=_get_config('jobs', 'logs', 'timestamps', 'format'),
-    )
-    sys.stdout = _systemd_log
-    sys.stderr = _systemd_log
-    _systemd_stdin_path = os.environ.get(_STATIC_CONFIG['environment']['systemd_stdin_path'], None)
-    if _systemd_stdin_path:
-        sys.stdin = _StdinFile(_systemd_stdin_path)
+def _plain_value(value: Any) -> bool:
+    """Whether a connector attribute is data that can cross to Rust and to a worker."""
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return True
+    if isinstance(value, (list, tuple)):
+        return all(_plain_value(item) for item in value)
+    if isinstance(value, dict):
+        return all(isinstance(k, str) and _plain_value(v) for k, v in value.items())
+    return False
+
+
+def _is_configured(connector_type: str, label: str) -> bool:
+    """Whether the config registry or the environment (`MRSM_SQL_MAIN`) defines the connector."""
+    if mrsm.get_config('meerschaum', 'connectors', connector_type, label, warn=False) is not None:
+        return True
+    env_key = f'MRSM_{connector_type}_{label}'.upper()
+    return any(key.upper() == env_key for key in os.environ)
+
+
+def adhoc_context() -> Optional[Dict[str, Any]]:
+    """
+    Return the connectors this process defined itself (`mrsm.get_connector('sql', 'x', **attrs)`)
+    that the native dispatcher cannot find in the config registry, for `_core.entry()`.
+
+    The context holds `connectors` (the `_core.SqlConnector` of each SQL connector with a Rust
+    driver) and `attributes` (what rebuilds every such connector, native or in a worker).
+    """
+    import meerschaum.connectors as connectors_module
+    context: Dict[str, Any] = {'connectors': {}, 'attributes': {}}
+    for connector_type, by_label in list(connectors_module.connectors.items()):
+        if connector_type == 'plugin':
+            continue
+        for label, connector in list(by_label.items()):
+            if connector is None or _is_configured(connector_type, label):
+                continue
+            keys = f'{connector_type}:{label}'
+            meta = dict(getattr(connector, 'meta', None) or {})
+            meta.pop('type', None)
+            meta.pop('label', None)
+            context['attributes'][keys] = {
+                key: value for key, value in meta.items() if _plain_value(value)
+            }
+            if connector_type == 'sql':
+                try:
+                    context['connectors'][keys] = connector._core_connector()
+                except Exception:
+                    ### No Rust driver (in-memory SQLite, ...): the native side reports it.
+                    pass
+    return context if context['attributes'] else None
 
 
 def entry(
@@ -58,34 +80,16 @@ def entry(
     """
     Parse arguments and launch a Meerschaum action.
 
+    The action runs natively, in this process. Ctrl-C asks a looping action to stop and the call
+    then raises `KeyboardInterrupt`; Python delivers signals to the main thread only, so a call
+    made from another thread cannot be interrupted. Inside a plugin worker, a call made while a plugin module is being imported (at the top
+    level of the module) runs without plugins, so the import cannot recurse.
+
     Returns
     -------
     A `SuccessTuple` indicating success.
     """
-    start = time.perf_counter()
-    from meerschaum.config.environment import get_daemon_env_vars
-    sysargs_list = shlex.split(sysargs) if isinstance(sysargs, str) else sysargs
-    if (
-        not _use_cli_daemon
-        or (not sysargs or (sysargs[0] and sysargs[0].startswith('-')))
-        or '--no-daemon' in sysargs_list
-        or '--daemon' in sysargs_list
-        or '-d' in sysargs_list
-        or get_daemon_env_vars()
-        or not mrsm.get_config('system', 'experimental', 'cli_daemon')
-    ):
-        success, msg = entry_without_daemon(sysargs, _patch_args=_patch_args)
-        end = time.perf_counter()
-        if '--debug' in sysargs_list:
-            print(f"Duration without daemon: {round(end - start, 3)}")
-        return success, msg
-
-    from meerschaum._internal.cli.entry import entry_with_daemon
-    success, msg = entry_with_daemon(sysargs, _patch_args=_patch_args)
-    end = time.perf_counter()
-    if '--debug' in sysargs_list:
-        print(f"Duration with daemon: {round(end - start, 3)}")
-    return success, msg
+    return entry_without_daemon(sysargs, _patch_args=_patch_args)
 
 
 def entry_without_daemon(
@@ -99,197 +103,12 @@ def entry_without_daemon(
     -------
     A `SuccessTuple` indicating success.
     """
-    from meerschaum.utils.formatting import make_header
-    from meerschaum._internal.arguments import (
-        parse_arguments,
-        split_chained_sysargs,
-        split_pipeline_sysargs,
-        sysargs_has_api_executor_keys,
-        get_pipeline_sysargs,
-    )
-    from meerschaum._internal.static import STATIC_CONFIG
-    from meerschaum.utils.misc import remove_ansi, interval_str
+    from meerschaum import _core
     if sysargs is None:
         sysargs = []
     if not isinstance(sysargs, list):
         sysargs = shlex.split(sysargs)
-
-    pipeline_key = STATIC_CONFIG['system']['arguments']['pipeline_key']
-    escaped_pipeline_key = STATIC_CONFIG['system']['arguments']['escaped_pipeline_key']
-    sysargs, pipeline_args = split_pipeline_sysargs(sysargs)
-
-    has_daemon = '-d' in sysargs or '--daemon' in sysargs
-    has_start_job = sysargs[:2] == ['start', 'job']
-    pipeline_has_api_executor_keys = sysargs_has_api_executor_keys(pipeline_args)
-
-    chained_sysargs = (
-        [sysargs]
-        if (
-            has_daemon
-            or has_start_job
-            or pipeline_has_api_executor_keys
-        )
-        else split_chained_sysargs(sysargs)
-    )
-    if pipeline_args:
-        chained_sysargs = [get_pipeline_sysargs(sysargs, pipeline_args, _patch_args=_patch_args)]
-
-    shell_executor_keys = None
-    if _shells:
-        from meerschaum._internal.shell.Shell import shell_attrs
-        shell_executor_keys = remove_ansi(shell_attrs.get('executor_keys') or '')
-
-        if (
-            shell_attrs.get('executor_keys')
-            and '-e' not in pipeline_args
-            and '--executor-keys' not in pipeline_args
-        ):
-            pipeline_args.extend(['-e', shell_attrs['executor_keys']])
-
-    results: List[SuccessTuple] = []
-    steps_times: list[tuple[int, int]] = []
-
-    for _sysargs in chained_sysargs:
-        if escaped_pipeline_key in _sysargs:
-            _sysargs = [
-                pipeline_key
-                if _arg == escaped_pipeline_key
-                else _arg
-                for _arg in _sysargs
-            ]
-
-        args = parse_arguments(_sysargs)
-        if 'executor_keys' not in args and shell_executor_keys:
-            args['executor_keys'] = shell_executor_keys
-        if _patch_args:
-            args.update(_patch_args)
-        argparse_exception = args.get(
-            STATIC_CONFIG['system']['arguments']['failure_key'],
-            None,
-        )
-        if argparse_exception is not None:
-            args_text = args.get('text', '')
-            if not args_text.startswith('show arguments'):
-                return (
-                    False,
-                    (
-                        "Invalid arguments:"
-                        + (f"\n{args_text}" if args_text else '')
-                        + f"\n    {argparse_exception}"
-                    )
-                )
-
-        step_start = time.perf_counter()
-        entry_success, entry_msg = entry_with_args(_patch_args=_patch_args, **args)
-        step_end = time.perf_counter()
-
-        results.append((entry_success, entry_msg))
-        steps_times.append((step_start, step_end))
-
-        if not entry_success:
-            break
-
-    success = all(_success for _success, _ in results)
-    any_success = any(_success for _success, _ in results)
-    success_messages = [_msg for _success, _msg in results if _success]
-    total_time_delta = (
-        timedelta(seconds=(steps_times[-1][1] - steps_times[0][0]))
-        if steps_times
-        else None
-    )
-
-    successes_msg = (
-        success_messages[0]
-        if len(success_messages) and len(results) == 1
-        else (
-            (
-                'Successfully c'
-                if success
-                else (
-                    'Failed pipeline after '
-                    + f"{len(success_messages)} step"
-                    + ('s' if len(success_messages) != 1 else '')
-                    + '.\n\nC'
-                )
-            ) + f'ompleted {len(success_messages)} step'
-                + ('s' if len(success_messages) != 1 else '') 
-            + (
-                f" in {interval_str(total_time_delta)}"
-                if total_time_delta is not None
-                else ""
-            )
-            + ':\n\n'
-            + '\n'.join(
-                [
-                    (
-                        make_header(
-                            (
-                                shlex.join(_sysargs)
-                                + "\n  ("
-                                + interval_str(
-                                    timedelta(seconds=(steps_times[i][1] - steps_times[i][0]))
-                                )
-                                + ")"
-                            ),
-                            left_pad=4,
-                            top=False,
-                        )
-                        + '\n    ' + _msg + '\n'
-                    )
-                    for i, (_msg, _sysargs) in enumerate(zip(success_messages, chained_sysargs))
-                ]
-            )
-        )
-    ).rstrip('\n')
-    has_fail = results[-1][0] is False
-    fail_ix = len(results) - 1
-    fail_sysargs = chained_sysargs[fail_ix] if has_fail else None
-    fail_msg = results[-1][1] if has_fail else ''
-    fails_msg = (
-        'Failed to complete step:\n\n'
-        + make_header(shlex.join(fail_sysargs), left_pad=4, top=False)
-        + '\n    '
-        + fail_msg
-
-    ) if not results[-1][0] else ''
-
-    duration_summary_msg = make_header(
-        (
-            f"| {len(success_messages)} step"
-            + ('s' if len(success_messages) != 1 else '') 
-            + f" in {interval_str(total_time_delta)} |"
-        ),
-        top=True,
-        top_pad=3,
-        left_pad=4,
-        ruler='-'
-    ) if total_time_delta is not None else ""
-
-    msg = (
-        successes_msg
-        + ('\n\n' if fails_msg else '')
-        + fails_msg
-        + duration_summary_msg
-
-    ).rstrip() if len(chained_sysargs) > 1 else results[0][1]
-
-    if _systemd_result_path:
-        from meerschaum.utils.warnings import warn
-        import meerschaum as mrsm
-
-        job = mrsm.Job(_job_name, executor_keys='systemd')
-        if job.delete_after_completion:
-            delete_success, delete_msg = job.delete()
-            mrsm.pprint((delete_success, delete_msg))
-        else:
-            try:
-                if _systemd_result_path.parent.exists():
-                    with open(_systemd_result_path, 'w+', encoding='utf-8') as f:
-                        json.dump((success, msg), f)
-            except Exception as e:
-                warn(f"Failed to write job result:\n{e}")
-
-    return success, msg
+    return _core.entry([str(arg) for arg in sysargs], _patch_args or None, adhoc_context())
 
 
 def entry_with_args(
@@ -298,110 +117,13 @@ def entry_with_args(
     **kw
 ) -> SuccessTuple:
     """Execute a Meerschaum action with keyword arguments.
-    Use `_entry()` for parsing sysargs before executing.
+    Use `entry()` for parsing sysargs before executing.
     """
-    import functools
-    import inspect
-    from meerschaum.actions import get_action
-    from meerschaum._internal.arguments import remove_leading_action
-    from meerschaum.utils.venv import active_venvs, deactivate_venv
-    from meerschaum._internal.static import STATIC_CONFIG
-    from meerschaum.utils.typing import is_success_tuple
-
+    from meerschaum import _core
     if _patch_args:
         kw.update(_patch_args)
-
-    and_key = STATIC_CONFIG['system']['arguments']['and_key']
-    escaped_and_key = STATIC_CONFIG['system']['arguments']['escaped_and_key']
-    if and_key in (sysargs := kw.get('sysargs', [])):
-        if '-d' in sysargs or '--daemon' in sysargs:
-            sysargs = [(arg if arg != and_key else escaped_and_key) for arg in sysargs]
-        return entry(sysargs, _patch_args=_patch_args, _use_cli_daemon=False)
-
-    if kw.get('trace', None):
-        from meerschaum.utils.misc import debug_trace
-        debug_trace()
-    if (
-        len(kw.get('action', [])) == 0
-        or
-        (kw['action'][0] == 'mrsm' and len(kw['action'][1:]) == 0)
-    ):
-        _ = get_shell(**kw).cmdloop()
-        return True, "Success"
-
-    _skip_schedule = False
-
-    executor_keys = kw.get('executor_keys', None)
-    if executor_keys is None:
-        executor_keys = 'local'
-
-    if executor_keys.startswith('api:'):
-        intended_action_function = get_action(kw['action'], _actions=_actions)
-        function_accepts_executor_keys = (
-            'executor_keys' in inspect.signature(intended_action_function).parameters
-            if intended_action_function is not None
-            else False
-        )
-        if not function_accepts_executor_keys:
-            api_label = executor_keys.split(':')[-1]
-            kw['action'].insert(0, 'api')
-            kw['action'].insert(1, api_label)
-            _skip_schedule = True
-
-    ### If the `--daemon` flag is present, prepend 'start job'.
-    if kw.get('daemon', False) and kw['action'][0] != 'stack':
-        kw['action'] = ['start', 'jobs'] + kw['action']
-
-    action_function = get_action(kw['action'], _actions=_actions)
-
-    ### If action does not exist, execute in a subshell.
-    if action_function is None:
-        kw['action'].insert(0, 'sh')
-        action_function = get_action(['sh'], _actions=_actions)
-
-    ### Check if the action is a plugin, and if so, activate virtual environment.
-    plugin_name = (
-        action_function.__module__.split('.')[1] if (
-            action_function.__module__.startswith('plugins.')
-        ) else None
-    )
-
-    if (
-        kw['action']
-        and kw['action'][0] == 'start'
-        and kw['action'][1] in ('job', 'jobs')
-    ):
-        _skip_schedule = True
-
-    kw['action'] = remove_leading_action(kw['action'], _actions=_actions)
-
-    do_action = functools.partial(
-        _do_action_wrapper,
-        action_function,
-        plugin_name,
-        _skip_schedule=_skip_schedule,
-        **kw
-    )
-
-    if kw.get('schedule', None) and not _skip_schedule:
-        from meerschaum.utils.schedule import schedule_function
-        from meerschaum.utils.misc import interval_str
-        from datetime import timedelta
-        start_time = time.perf_counter()
-        schedule_function(do_action, **kw)
-        delta = timedelta(seconds=(time.perf_counter() - start_time))
-        result = True, f"Exited scheduler after {interval_str(delta)}."
-    else:
-        result = do_action()
-
-    ### Clean up stray virtual environments.
-    for venv in [venv for venv in active_venvs]:
-        deactivate_venv(venv, debug=kw.get('debug', False), force=True)
-
-    if not is_success_tuple(result):
-        return True, str(result)
-
-    return result
+    action = list(kw.pop('action', None) or [])
+    return _core.run_action(action, kw, adhoc_context())
 
 
 def _do_action_wrapper(
@@ -441,7 +163,7 @@ def _do_action_wrapper(
 
     return result
 
-_shells = []
+
 _shell = None
 def get_shell(
     sysargs: Optional[List[str]] = None,
@@ -450,23 +172,11 @@ def get_shell(
     mrsm_instance: Optional[str] = None,
     **kwargs: Any
 ):
-    """Initialize and return the Meerschaum shell object."""
+    """
+    Return the shell object: `get_shell().cmdloop()` runs the native `mrsm` shell.
+    """
     global _shell
-    from meerschaum.utils.debug import dprint
-    import meerschaum._internal.shell as shell_pkg
-    from meerschaum.actions import actions
-    if sysargs is None:
-        sysargs = []
-
+    from meerschaum._internal.shell import Shell
     if _shell is None or reload:
-        if debug:
-            dprint("Loading the shell...")
-
-        if _shell is None:
-            shell_pkg._insert_shell_actions()
-            _shell = shell_pkg.Shell(actions, sysargs=sysargs, instance_keys=mrsm_instance)
-        elif reload:
-            _shell.__init__(instance_keys=mrsm_instance)
-
-        _shells.append(_shell)
+        _shell = Shell(sysargs=sysargs, instance_keys=mrsm_instance)
     return _shell

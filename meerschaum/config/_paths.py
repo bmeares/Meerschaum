@@ -276,26 +276,6 @@ def replace_root_dir(root_dir_path: Union[str, Path, None]):
         set_root(old_root)
 
 @contextlib.contextmanager
-def replace_plugins_dir_paths(plugins_dir_paths: Union[List[Path], None]):
-    """
-    Temporarily replace the plugins directory paths.
-    """
-    if plugins_dir_paths is None:
-        try:
-            yield
-        except Exception:
-            pass
-        return
-
-    old_plugins_dir_paths = PLUGINS_DIR_PATHS
-    set_plugins_dir_paths(plugins_dir_paths)
-
-    try:
-        yield
-    finally:
-        set_plugins_dir_paths(old_plugins_dir_paths)
-
-@contextlib.contextmanager
 def replace_venvs_dir_path(venvs_dir_path: Union[Path, None]):
     """
     Temporarily replace the virtual environments directory path.
@@ -317,27 +297,6 @@ def replace_venvs_dir_path(venvs_dir_path: Union[Path, None]):
         ### template, which `set_venvs_dir_path` would mangle via `Path()`.
         paths['VIRTENV_RESOURCES_PATH'] = old_venvs_dir_path
         globals().pop('VIRTENV_RESOURCES_PATH', None)
-
-@contextlib.contextmanager
-def replace_config_dir_path(config_dir_path: Union[Path, None]):
-    """
-    Temporarily replace the config directory path.
-    """
-    if config_dir_path is None:
-        try:
-            yield
-        except Exception:
-            pass
-        return
-
-    old_config_dir_path = paths.get('CONFIG_DIR_PATH', _CONFIG_DIR_PATH)
-    set_config_dir_path(config_dir_path)
-
-    try:
-        yield
-    finally:
-        set_config_dir_path(old_config_dir_path)
-
 
 def __getattr__(name: str) -> Path:
     if name not in paths:

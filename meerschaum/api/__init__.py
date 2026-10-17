@@ -4,6 +4,11 @@
 
 """
 Meerschaum API backend. Start an API instance with `start api`.
+
+The API server is the native `mrsm` server (Rust). This package is the Python side of it: the
+helpers `@api_plugin` functions import (`app`, `get_api_connector`, `get_pipe`, `ScopedAuth`, ...)
+and the API host (`meerschaum.api.host`), which serves what only Python can: `@api_plugin` routes,
+plugin MCP tools and plugin-owned Dash apps.
 """
 from __future__ import annotations
 
@@ -31,44 +36,6 @@ __doc__ = """The Meerschaum Web API lets you manage your pipes over the Internet
 
 _locks = defaultdict(lambda: RLock())
 
-### Skip verifying packages in the docker image.
-CHECK_UPDATE = os.environ.get(STATIC_CONFIG['environment']['runtime'], None) != 'docker'
-
-endpoints = STATIC_CONFIG['api']['endpoints']
-
-(
-    fastapi,
-    aiofiles,
-    starlette_responses,
-    multipart,
-    packaging_version,
-    importlib_metadata,
-) = attempt_import(
-    'fastapi',
-    'aiofiles',
-    'starlette.responses',
-    'multipart',
-    'packaging.version',
-    'importlib_metadata',
-    lazy=False,
-    check_update=CHECK_UPDATE,
-)
-(
-    typing_extensions,
-    uvicorn_workers,
-) = attempt_import(
-    'typing_extensions',
-    'uvicorn.workers',
-    lazy=False,
-    check_update=CHECK_UPDATE,
-    venv=None,
-)
-from meerschaum.api._chain import check_allow_chaining, DISALLOW_CHAINING_MESSAGE
-from meerschaum.api._exceptions import APIPermissionError
-uvicorn_config_path = paths.API_UVICORN_RESOURCES_PATH / SERVER_ID / 'config.json'
-
-uvicorn_config = None
-
 ### The Python API host (`python -m meerschaum.api.host`, v5 §7.3) serves only what plugins add:
 ### the Rust server serves the core routes, the console and `/mcp`. In host mode the server's
 ### options come from `MRSM_API_HOST_CONFIG` instead of the uvicorn config file, and the core
@@ -91,6 +58,56 @@ def _is_host_process() -> bool:
 
 
 _host_mode = _is_host_process()
+
+### Skip verifying packages in the docker image. Outside the API host (an `@api_plugin` helper
+### imported elsewhere) nothing is checked, installed or reported: the packages are the host's.
+CHECK_UPDATE = (
+    _host_mode and os.environ.get(STATIC_CONFIG['environment']['runtime'], None) != 'docker'
+)
+_IMPORT_KW = {} if _host_mode else {'install': False, 'warn': False}
+
+endpoints = STATIC_CONFIG['api']['endpoints']
+
+(
+    fastapi,
+    aiofiles,
+    starlette_responses,
+    multipart,
+    packaging_version,
+    importlib_metadata,
+) = attempt_import(
+    'fastapi',
+    'aiofiles',
+    'starlette.responses',
+    'multipart',
+    'packaging.version',
+    'importlib_metadata',
+    lazy=False,
+    check_update=CHECK_UPDATE,
+    **_IMPORT_KW,
+)
+if fastapi is None:
+    raise ImportError(
+        "`meerschaum.api` needs FastAPI: install the `api` extra "
+        "(`pip install \"meerschaum[api]\"`). The API server itself is the native `mrsm start api`."
+    )
+(
+    typing_extensions,
+    uvicorn_workers,
+) = attempt_import(
+    'typing_extensions',
+    'uvicorn.workers',
+    lazy=False,
+    check_update=CHECK_UPDATE,
+    venv=None,
+    **_IMPORT_KW,
+)
+from meerschaum.api._chain import check_allow_chaining, DISALLOW_CHAINING_MESSAGE
+from meerschaum.api._exceptions import APIPermissionError
+uvicorn_config_path = paths.API_UVICORN_RESOURCES_PATH / SERVER_ID / 'config.json'
+
+uvicorn_config = None
+
 if _host_mode:
     import json as _json
     uvicorn_config = {
@@ -114,6 +131,9 @@ def get_uvicorn_config() -> Dict[str, Any]:
                 with open(uvicorn_config_path, 'r', encoding='utf-8') as f:
                     uvicorn_config = json.load(f)
                 _uvicorn_config = uvicorn_config
+            except FileNotFoundError:
+                ### No server wrote a config: outside a running server this is the normal case.
+                _uvicorn_config = sys_config.get('uvicorn', None)
             except Exception:
                 import traceback
                 traceback.print_exc()
@@ -123,6 +143,7 @@ def get_uvicorn_config() -> Dict[str, Any]:
                 _uvicorn_config = {}
             if 'mrsm_instance' not in _uvicorn_config:
                 _uvicorn_config['mrsm_instance'] = get_config('meerschaum', 'api_instance')
+            uvicorn_config = _uvicorn_config
     return _uvicorn_config
 
 debug = get_uvicorn_config().get('debug', False)
@@ -406,29 +427,6 @@ def __getattr__(name: str):
 
 ### Import everything else within the API.
 from meerschaum.api._oauth2 import manager, ScopedAuth, CurrentScopes
-
-if not _host_mode:
-    import meerschaum.api.routes as routes
-    import meerschaum.api._events
-    import meerschaum.api._websockets
-
-### Skip importing the dash if `--no-dash` is provided.
-if _include_dash and not _host_mode:
-    import meerschaum.api.dash
-
-### The `mcp` plugin predates the built-in `/mcp` endpoint and registers a route
-### at the same path. Routes registered above win, so the plugin's route is
-### unreachable rather than conflicting — but say so plainly instead of leaving
-### two implementations installed.
-if mcp_enabled and not _host_mode:
-    from meerschaum.mcp import has_mcp_plugin
-    if has_mcp_plugin():
-        warn(
-            "The 'mcp' plugin is superseded by Meerschaum's built-in MCP endpoint, "
-            "which is now serving '/mcp'. The plugin's route is unreachable; "
-            "uninstall it with `mrsm uninstall plugin mcp`.",
-            stack=False,
-        )
 
 ### Execute the API plugins functions (the API host runs them itself, in plugin order).
 for module_name, functions_list in ({} if _host_mode else _api_plugins).items():

@@ -1,18 +1,18 @@
 """
-Wave 15 (task L2): the `Pipe` methods that wrap an instance connector run in Rust under
-`MRSM_CORE=rust` (`_core.pipe_get_data`, `pipe_get_backtrack_data`, `pipe_get_sync_time`,
-`pipe_get_rowcount`, `pipe_infer_dtypes`, `pipe_enforce_dtypes`, `pipe_filter_existing`,
-`pipe_deduplicate`, `pipe_fetch`, `pipe_get_backtrack_interval`).
+Wave 15 (task L2): the `Pipe` methods that wrap an instance connector run in Rust
+(`_core.pipe_get_data`, `pipe_get_backtrack_data`, `pipe_get_sync_time`, `pipe_get_rowcount`,
+`pipe_infer_dtypes`, `pipe_enforce_dtypes`, `pipe_filter_existing`, `pipe_deduplicate`,
+`pipe_fetch`, `pipe_get_backtrack_interval`).
 
-Each scenario runs the same call in `python` mode (the v4 bodies, the oracle) and in `rust` mode in
-one process (`_gate.set_mode`), on the same pipe, and compares the results: the rows, the column
-order and the pandas dtype of every column. The `rust` calls assert that the binding handled the
-call (a silent fall-through to the Python body cannot pass).
+Each scenario runs a call and compares the result with the one the parity-phase Python mode produced,
+recorded in `tests/oracle/test_pipe_methods_native.json` (not v4.1.4 output; see `tests/_oracle.py`): the rows, the column order and the
+pandas dtype of every column. The calls assert that the binding handled them (a silent
+fall-through to a Python body cannot pass).
 
 Instances: SQLite (always), PostgreSQL (`MRSM_TEST_FLAVORS` has `postgis`, schema `w15l2`), a custom
 `@make_connector` instance (`w15lmem`, driven by the Python worker) and Valkey (`MRSM_TEST_FLAVORS`
-has `valkey`). The Python `valkey` package is not installed, so a Valkey pipe has no `python` mode:
-it is compared with the same data on SQLite.
+has `valkey`). The Python `valkey` package is not installed for v4, so a Valkey pipe is compared
+with the same data on SQLite (recorded on SQLite).
 """
 
 import copy
@@ -24,15 +24,13 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 import meerschaum as mrsm
-from meerschaum._core import _gate
+from meerschaum import _core
+from meerschaum.utils.packages import attempt_import
+from tests import _oracle as oracle
 
-try:
-    from meerschaum import _core
-    HAS_CORE = _core.load() is not None
-except Exception:
-    HAS_CORE = False
-
-pytestmark = pytest.mark.skipif(not HAS_CORE, reason="the Rust extension is not built")
+### The data libraries come from the `mrsm` venv, as for the façade: the recorded dtypes
+### depend on the pandas version (3.x), so the replay has to load the same libraries.
+attempt_import('pandas', 'pyarrow', 'shapely', 'geopandas', lazy=False)
 
 SCHEMA = 'w15l2'
 START = datetime(2026, 1, 1, tzinfo=timezone.utc)
@@ -64,13 +62,6 @@ def _rows(n, offset=0):
         }
         for i in range(offset, offset + n)
     ]
-
-
-@pytest.fixture(autouse=True)
-def restore_mode():
-    original = (_gate._MODE, _gate._FEATURES)
-    yield
-    _gate._MODE, _gate._FEATURES = original
 
 
 @pytest.fixture(scope='module')
@@ -296,8 +287,7 @@ def _pipe(instance, label=None, parameters=None, columns=None, **kwargs):
 
 
 def _loaded(instance, n=12, label=None, **kwargs):
-    """A pipe with `n` rows, synced in `rust` mode."""
-    _gate.set_mode('rust')
+    """A pipe with `n` rows."""
     pipe = _pipe(instance, label, **kwargs)
     pipe.delete()
     pipe = _pipe(instance, pipe.metric_key, **kwargs)
@@ -306,38 +296,36 @@ def _loaded(instance, n=12, label=None, **kwargs):
     return pipe
 
 
-def _modes(kind):
-    return ('rust',) if kind == 'valkey' else ('python', 'rust')
+def _without_dtypes(result):
+    """Drop the `dtypes` of a snapshot, or of every snapshot of a list of chunks (in place)."""
+    for item in (result if isinstance(result, list) else [result]):
+        if isinstance(item, dict):
+            item.pop('dtypes', None)
 
 
-def _compare(
-    kind, instance, reference_instance, op, native_calls, binding, n=12, normalize=None, **kwargs
-):
+def _compare(kind, instance, op, native_calls, binding, n=12, normalize=None, **kwargs):
     """
-    `op(pipe)` in `python` mode (on the pipe itself, or on SQLite for Valkey) and in `rust` mode.
-    Returns the rust snapshot after asserting the equality and that `binding` handled a call.
+    `op(pipe)` compared with the recorded Python-mode result (on the pipe itself, or on SQLite for Valkey).
+    Returns the snapshot after asserting the equality and that `binding` handled a call.
     """
     pipe = _loaded(instance, n=n, **kwargs)
     try:
-        if kind == 'valkey':
-            ref = _loaded(reference_instance, n=n, **kwargs)
-            _gate.set_mode('python')
-            expected = snapshot(op(ref))
-        else:
-            _gate.set_mode('python')
-            expected = snapshot(op(pipe))
+        expected = oracle.expected()
         before = native_calls.handled.get(binding, 0)
-        _gate.set_mode('rust')
         actual = snapshot(op(pipe))
         assert native_calls.handled.get(binding, 0) > before, native_calls.declined
         if kind == 'valkey':
             actual, expected = by_column(actual), by_column(expected)
+            ### A Valkey frame has v4's JSON-built nullable dtypes (`Int64`, `Float64`, ...), not
+            ### SQLite's: those are compared with the released v4 connector in
+            ### `tests/test_valkey_connector.py::test_pipe_get_data_dtypes_match_the_v4_connector`.
+            _without_dtypes(actual)
+            _without_dtypes(expected)
         if normalize is not None:
             actual, expected = normalize(actual), normalize(expected)
         assert actual == expected
         return actual
     finally:
-        _gate.set_mode('rust')
         pipe.delete()
 
 
@@ -369,7 +357,7 @@ GET_DATA_CASES = {
 
 
 @pytest.mark.parametrize('case', sorted(GET_DATA_CASES))
-def test_get_data(case, kind, instance, reference_instance, native_calls):
+def test_get_data(case, kind, instance, native_calls):
     kwargs = GET_DATA_CASES[case]
     if kind == 'valkey' and (
         'end' in kwargs
@@ -380,27 +368,26 @@ def test_get_data(case, kind, instance, reference_instance, native_calls):
             "and unlimited, as in v4: not comparable with SQLite"
         )
     _compare(
-        kind, instance, reference_instance,
+        kind, instance,
         lambda pipe: pipe.get_data(**copy.deepcopy(kwargs)),
         native_calls, 'pipe_get_data',
     )
 
 
 def test_get_data_without_an_order_keeps_every_row(
-    kind, instance, reference_instance, native_calls,
+    kind, instance, native_calls,
 ):
     if kind == 'valkey':
         pytest.skip("Valkey's documents are raw: see `test_get_data`")
     """`order=None` does not sort: the same rows come back (in the instance's order)."""
     _compare(
-        kind, instance, reference_instance,
+        kind, instance,
         lambda pipe: sorted(pipe.get_data(order=None, as_docs=True), key=lambda d: d['dt']),
         native_calls, 'pipe_get_data',
     )
 
 
 def test_get_data_of_a_missing_pipe(kind, instance, native_calls):
-    _gate.set_mode('rust')
     pipe = _pipe(instance)
     assert pipe.get_data() is None
     assert pipe.get_data(as_docs=True) == []
@@ -408,17 +395,17 @@ def test_get_data_of_a_missing_pipe(kind, instance, native_calls):
     assert native_calls.handled['pipe_get_data'] >= 2
 
 
-def test_get_data_as_polars(kind, instance, reference_instance, native_calls):
+def test_get_data_as_polars(kind, instance, native_calls):
     polars = pytest.importorskip('polars')
     _compare(
-        kind, instance, reference_instance,
+        kind, instance,
         lambda pipe: pipe.get_data(as_polars=True, select_columns=['dt', 'id', 'val']),
         native_calls, 'pipe_get_data',
     )
 
 
 @pytest.mark.parametrize('case', ['small_chunks', 'one_chunk', 'bounded'])
-def test_get_data_as_iterator(case, kind, instance, reference_instance, native_calls):
+def test_get_data_as_iterator(case, kind, instance, native_calls):
     if kind == 'valkey' and case == 'bounded':
         pytest.skip("Valkey's `end` is inclusive")
     kwargs = {
@@ -433,31 +420,26 @@ def test_get_data_as_iterator(case, kind, instance, reference_instance, native_c
     ### The iterator's chunks (the binding returns the iterator itself).
     pipe = _loaded(instance)
     try:
+        expected = oracle.expected()
         if kind == 'valkey':
-            ref = _loaded(reference_instance)
-            _gate.set_mode('python')
-            expected = by_column(snapshot(list(ref.get_data(as_iterator=True, **kwargs))))
-        else:
-            _gate.set_mode('python')
-            expected = snapshot(list(pipe.get_data(as_iterator=True, **kwargs)))
-        _gate.set_mode('rust')
+            expected = by_column(expected)
         before = native_calls.handled.get('pipe_get_data_chunks', 0)
         actual = snapshot(list(pipe.get_data(as_iterator=True, **kwargs)))
         if kind == 'valkey':
             actual = by_column(actual)
+            _without_dtypes(actual)
+            _without_dtypes(expected)
         assert native_calls.handled.get('pipe_get_data_chunks', 0) > before
         assert actual == expected
         if case == 'small_chunks':
             assert len(actual) > 1
     finally:
-        _gate.set_mode('rust')
         pipe.delete()
 
 
-def test_get_data_as_docs_iterator(kind, instance, reference_instance, native_calls):
+def test_get_data_as_docs_iterator(kind, instance, native_calls):
     pipe = _loaded(instance)
     try:
-        _gate.set_mode('rust')
         chunks = list(pipe.get_data(as_iterator=True, as_docs=True, chunk_interval=timedelta(hours=5)))
         assert all(isinstance(chunk, list) for chunk in chunks)
         assert sum(len(chunk) for chunk in chunks) == 12
@@ -469,7 +451,7 @@ def test_get_data_as_docs_iterator(kind, instance, reference_instance, native_ca
 # get_backtrack_data, get_sync_time, get_rowcount
 
 @pytest.mark.parametrize('case', ['default', 'minutes', 'begin', 'limit', 'params'])
-def test_get_backtrack_data(case, kind, instance, reference_instance, native_calls):
+def test_get_backtrack_data(case, kind, instance, native_calls):
     kwargs = {
         'default': {},
         'minutes': {'backtrack_minutes': 180},
@@ -478,7 +460,7 @@ def test_get_backtrack_data(case, kind, instance, reference_instance, native_cal
         'params': {'backtrack_minutes': 600, 'params': {'id': 1}},
     }[case]
     _compare(
-        kind, instance, reference_instance,
+        kind, instance,
         lambda pipe: pipe.get_backtrack_data(**kwargs),
         native_calls, 'pipe_get_backtrack_data',
     )
@@ -496,18 +478,17 @@ def test_get_backtrack_data(case, kind, instance, reference_instance, native_cal
     ],
     ids=lambda k: ','.join(f'{a}={b}' for a, b in k.items()) or 'default',
 )
-def test_get_sync_time(kwargs, kind, instance, reference_instance, native_calls):
+def test_get_sync_time(kwargs, kind, instance, native_calls):
     if kind == 'valkey' and 'params' in kwargs:
         pytest.skip("Valkey's `get_sync_time` ignores `params`, as in v4")
     _compare(
-        kind, instance, reference_instance,
+        kind, instance,
         lambda pipe: pipe.get_sync_time(**kwargs),
         native_calls, 'pipe_get_sync_time',
     )
 
 
 def test_get_sync_time_without_a_datetime_axis(kind, instance, native_calls):
-    _gate.set_mode('rust')
     pipe = _pipe(instance, columns={'id': 'id'})
     pipe.delete()
     pipe = _pipe(instance, pipe.metric_key, columns={'id': 'id'})
@@ -529,41 +510,42 @@ def test_get_sync_time_without_a_datetime_axis(kind, instance, native_calls):
     ],
     ids=lambda k: ','.join(k) or 'all',
 )
-def test_get_rowcount(kwargs, kind, instance, reference_instance, native_calls):
+def test_get_rowcount(kwargs, kind, instance, native_calls):
     if kind == 'valkey' and 'end' in kwargs:
         pytest.skip("Valkey's `end` is inclusive")
     _compare(
-        kind, instance, reference_instance,
+        kind, instance,
         lambda pipe: pipe.get_rowcount(**kwargs),
         native_calls, 'pipe_get_rowcount',
     )
 
 
 def test_get_rowcount_of_a_missing_pipe(kind, instance, native_calls):
-    _gate.set_mode('rust')
     assert _pipe(instance).get_rowcount() == 0
 
 
 def test_get_backtrack_interval(kind, instance, native_calls):
     pipe = _pipe(instance, parameters={'fetch': {'backtrack_minutes': 90}})
-    outcomes = {}
-    for mode in ('python', 'rust'):
-        _gate.set_mode(mode)
-        outcomes[mode] = (
+
+    def run():
+        return (
             pipe.get_backtrack_interval(),
             pipe.get_backtrack_interval(check_existing=False),
         )
-    assert outcomes['rust'] == outcomes['python']
-    assert outcomes['rust'][0] == timedelta(minutes=90)
+
+    v4 = oracle.expected()
+    actual = run()
+    assert actual == v4
+    assert actual[0] == timedelta(minutes=90)
     assert native_calls.handled['pipe_get_backtrack_interval'] >= 2
 
 
 # ---------------------------------------------------------------------------------------------
 # dtypes
 
-def test_infer_dtypes(kind, instance, reference_instance, native_calls):
+def test_infer_dtypes(kind, instance, native_calls):
     _compare(
-        kind, instance, reference_instance,
+        kind, instance,
         lambda pipe: pipe.infer_dtypes(refresh=True),
         native_calls, 'pipe_infer_dtypes',
         normalize=lambda d: {c: families({'dtypes': [t]})['dtypes'][0] for c, t in d.items()},
@@ -571,7 +553,6 @@ def test_infer_dtypes(kind, instance, reference_instance, native_calls):
 
 
 def test_infer_dtypes_of_a_missing_pipe(kind, instance, native_calls):
-    _gate.set_mode('rust')
     assert _pipe(instance).infer_dtypes() == {}
     assert native_calls.handled['pipe_infer_dtypes'] == 1
 
@@ -579,7 +560,6 @@ def test_infer_dtypes_of_a_missing_pipe(kind, instance, native_calls):
 def test_infer_dtypes_persists(kind, instance, native_calls):
     if kind in ('valkey', 'custom'):
         pytest.skip("these instances report no columns types to persist")
-    _gate.set_mode('rust')
     pipe = _pipe(instance)
     pipe.delete()
     pipe = mrsm.Pipe('w15l2', pipe.metric_key, instance=instance, columns=COLUMNS)
@@ -603,15 +583,15 @@ ENFORCE_INPUTS = {
 
 
 @pytest.mark.parametrize('case', sorted(ENFORCE_INPUTS))
-def test_enforce_dtypes_of_raw_data(case, kind, instance, reference_instance, native_calls):
+def test_enforce_dtypes_of_raw_data(case, kind, instance, native_calls):
     _compare(
-        kind, instance, reference_instance,
+        kind, instance,
         lambda pipe: pipe.enforce_dtypes(ENFORCE_INPUTS[case]()),
         native_calls, 'pipe_enforce_dtypes', normalize=families,
     )
 
 
-def test_enforce_dtypes_of_frames(kind, instance, reference_instance, native_calls):
+def test_enforce_dtypes_of_frames(kind, instance, native_calls):
     pd = pytest.importorskip('pandas')
 
     def op(pipe):
@@ -621,28 +601,27 @@ def test_enforce_dtypes_of_frames(kind, instance, reference_instance, native_cal
         frame['extra'] = ['a', 'b', 'c', 'd', 'e']
         return pipe.enforce_dtypes(frame)
 
-    _compare(kind, instance, reference_instance, op, native_calls, 'pipe_enforce_dtypes')
+    _compare(kind, instance, op, native_calls, 'pipe_enforce_dtypes')
 
 
-def test_enforce_dtypes_to_polars(kind, instance, reference_instance, native_calls):
+def test_enforce_dtypes_to_polars(kind, instance, native_calls):
     pytest.importorskip('polars')
     _compare(
-        kind, instance, reference_instance,
+        kind, instance,
         lambda pipe: pipe.enforce_dtypes(_rows(4), as_polars=True),
         native_calls, 'pipe_enforce_dtypes',
     )
 
 
-def test_enforce_dtypes_with_explicit_dtypes(kind, instance, reference_instance, native_calls):
+def test_enforce_dtypes_with_explicit_dtypes(kind, instance, native_calls):
     _compare(
-        kind, instance, reference_instance,
+        kind, instance,
         lambda pipe: pipe.enforce_dtypes(_rows(3), dtypes={'id': 'str', 'val': 'int'}),
         native_calls, 'pipe_enforce_dtypes', normalize=families,
     )
 
 
 def test_enforce_dtypes_of_nothing(kind, instance, native_calls):
-    _gate.set_mode('rust')
     assert _pipe(instance).enforce_dtypes(None) is None
 
 
@@ -669,28 +648,28 @@ def _incoming(pipe):
 
 
 @pytest.mark.parametrize('flags', [{}, {'include_unchanged_columns': True}, {'date_bound_only': True}])
-def test_filter_existing(flags, kind, instance, reference_instance, native_calls):
+def test_filter_existing(flags, kind, instance, native_calls):
     pd = pytest.importorskip('pandas')
     _compare(
-        kind, instance, reference_instance,
+        kind, instance,
         lambda pipe: pipe.filter_existing(pd.DataFrame(_incoming(pipe)), **flags),
         native_calls, 'pipe_filter_existing', normalize=_by_family(kind),
     )
 
 
-def test_filter_existing_of_documents(kind, instance, reference_instance, native_calls):
+def test_filter_existing_of_documents(kind, instance, native_calls):
     pytest.importorskip('pandas')
     _compare(
-        kind, instance, reference_instance,
+        kind, instance,
         lambda pipe: pipe.filter_existing(_incoming(pipe)),
         native_calls, 'pipe_filter_existing', normalize=_by_family(kind),
     )
 
 
-def test_filter_existing_with_polars(kind, instance, reference_instance, native_calls):
+def test_filter_existing_with_polars(kind, instance, native_calls):
     pl = pytest.importorskip('polars')
     _compare(
-        kind, instance, reference_instance,
+        kind, instance,
         lambda pipe: pipe.filter_existing(pl.DataFrame(_incoming(pipe))),
         native_calls, 'pipe_filter_existing',
     )
@@ -698,16 +677,38 @@ def test_filter_existing_with_polars(kind, instance, reference_instance, native_
 
 def test_filter_existing_of_a_missing_pipe(kind, instance, native_calls):
     pd = pytest.importorskip('pandas')
-    _gate.set_mode('rust')
     pipe = _pipe(instance)
     unseen, update, delta = pipe.filter_existing(pd.DataFrame(_rows(3)))
     assert len(unseen) == 3 and len(update) == 0 and len(delta) == 3
 
 
 def test_filter_existing_of_nothing(kind, instance, native_calls):
-    _gate.set_mode('rust')
     unseen, update, delta = _pipe(instance).filter_existing(None)
     assert len(unseen) == len(update) == len(delta) == 0
+
+
+def test_filter_existing_does_not_report_an_unchanged_null_as_changed(
+    kind, instance, native_calls,
+):
+    """
+    W15L2-013 (pinned): v4 on PostgreSQL reported a stored row whose nullable `int` is `NULL`
+    as changed (the `NULL` read back compared unequal with the incoming `NaN`); the native
+    `filter_existing` reports nothing for rows that did not change.
+    """
+    if kind not in ('sqlite', 'postgis'):
+        pytest.skip("a SQL instance: SQLite and PostgreSQL")
+    rows = [
+        {'dt': START + timedelta(hours=i), 'id': i, 'n': None if i % 2 else i}
+        for i in range(6)
+    ]
+    pipe = _pipe(instance, parameters={'dtypes': {'n': 'int'}})
+    pipe.delete()
+    pipe = _pipe(instance, pipe.metric_key, parameters={'dtypes': {'n': 'int'}})
+    success, message = pipe.sync(rows)
+    assert success, message
+    unseen, update, delta = pipe.filter_existing(rows)
+    assert (len(unseen), len(update), len(delta)) == (0, 0, 0)
+    pipe.delete()
 
 
 # ---------------------------------------------------------------------------------------------
@@ -744,31 +745,34 @@ def test_deduplicate(use_instance_method, kind, instance, native_calls):
     loop (any instance, or `_use_instance_method=False`; the custom connector's `sync_pipe`
     appends every row it is given).
     """
+    pytest.importorskip('sqlalchemy')
     if kind == 'valkey':
         pytest.skip("Valkey keys rows by index, so it holds no duplicates")
-    outcomes = {}
-    for mode in ('python', 'rust'):
-        _gate.set_mode(mode)
+
+    def run():
         pipe = _duplicated_pipe(instance, kind)
         before = pipe.get_rowcount()
         success, message = pipe.deduplicate(_use_instance_method=use_instance_method)
-        outcomes[mode] = (
+        outcome = (
             success,
             before,
             pipe.get_rowcount(),
             snapshot(pipe.get_data()),
         )
         pipe.delete()
-    assert outcomes['rust'] == outcomes['python']
-    assert outcomes['rust'][0] is True
-    assert outcomes['rust'][2] == len({json.dumps(doc) for doc in DUPLICATED})
+        return outcome
+
+    v4 = oracle.expected()
+    actual = run()
+    assert actual == v4
+    assert actual[0] is True
+    assert actual[2] == len({json.dumps(doc) for doc in DUPLICATED})
     assert native_calls.handled['pipe_deduplicate'] >= 1
 
 
 def test_deduplicate_without_index_columns(kind, instance, native_calls):
     if kind == 'valkey':
         pytest.skip("Valkey keys rows by index")
-    _gate.set_mode('rust')
     pipe = mrsm.Pipe('w15l2', 'x' + uuid.uuid4().hex[:8], instance=instance)
     success, message = pipe.deduplicate(_use_instance_method=False)
     assert not success
@@ -800,60 +804,38 @@ def test_fetch_from_a_sql_source(kind, instance, reference_instance, native_call
     """`Pipe.fetch()` reads the source's newest rows through the source's definition."""
     pytest.importorskip('pandas')
     if kind == 'valkey':
-        pytest.skip("no `python` mode for Valkey; the fetch does not depend on the instance")
+        pytest.skip("the fetch does not depend on the instance")
     source = reference_instance
     source_pipe = _loaded(source, n=8, label='fetch_source')
     try:
         definition = f'SELECT * FROM {source_pipe.target}'
-        outcomes = {}
-        for mode in ('python', 'rust'):
-            _gate.set_mode(mode)
 
-            def make():
-                return mrsm.Pipe(
-                    str(source), 'w15l2_fetch', instance=instance, columns=COLUMNS,
-                    dtypes=DTYPES, parameters={'fetch': {'definition': definition}},
-                )
+        def make():
+            return mrsm.Pipe(
+                str(source), 'w15l2_fetch', instance=instance, columns=COLUMNS,
+                dtypes=DTYPES, parameters={'fetch': {'definition': definition}},
+            )
 
+        def run():
             make().delete()
             pipe = make()
             first = _fetched(pipe.fetch())
-            if kind != 'valkey':
-                assert pipe.sync()[0]
-                second = _fetched(pipe.fetch())
-                pipe.delete()
-            else:
-                second = None
-            outcomes[mode] = (first, second)
-        assert outcomes['rust'] == outcomes['python']
+            assert pipe.sync()[0]
+            second = _fetched(pipe.fetch())
+            pipe.delete()
+            return (first, second)
+
+        v4 = oracle.expected()
+        actual = run()
+        assert actual == v4
         assert native_calls.handled.get('pipe_fetch', 0) >= 1
     finally:
-        _gate.set_mode('rust')
         source_pipe.delete()
 
 
 def test_fetch_of_a_connector_without_fetch(kind, instance, native_calls):
-    _gate.set_mode('rust')
     pipe = _pipe(instance)
     assert pipe.fetch() is None
-
-
-# ---------------------------------------------------------------------------------------------
-# Python-mode oracle is untouched
-
-def test_python_mode_does_not_call_the_bindings(kind, instance, native_calls):
-    if kind == 'valkey':
-        pytest.skip("no `python` mode for Valkey")
-    pipe = _loaded(instance, n=4)
-    try:
-        _gate.set_mode('python')
-        pipe.get_data()
-        pipe.get_sync_time()
-        pipe.get_rowcount()
-        assert not native_calls.handled and not native_calls.declined
-    finally:
-        _gate.set_mode('rust')
-        pipe.delete()
 
 
 def test_valkey_cleanup(kind):
@@ -894,18 +876,17 @@ def test_a_custom_connectors_own_get_backtrack_data_is_called(
     instance = _back_instance()
     pipe = _loaded(instance)
     try:
-        counts = {}
-        results = {}
-        for mode in ('python', 'rust'):
-            _gate.set_mode(mode)
+        def run():
             before = len(_calls(instance))
-            results[mode] = snapshot(pipe.get_backtrack_data(**kwargs))
-            counts[mode] = len(_calls(instance)) - before
-        assert counts == {'python': 1, 'rust': 1}
+            result = snapshot(pipe.get_backtrack_data(**kwargs))
+            return len(_calls(instance)) - before, result
+
+        v4_count, v4_result = oracle.expected()
+        actual_count, actual_result = run()
+        assert (v4_count, actual_count) == (1, 1)
         assert native_calls.handled['pipe_get_backtrack_data'] >= 1
-        assert families(results['rust']) == families(results['python'])
+        assert families(actual_result) == families(v4_result)
     finally:
-        _gate.set_mode('rust')
         pipe.delete()
 
 
@@ -920,19 +901,21 @@ def _src_pipe(instance, source='w15l2src:a', label=None):
 def test_remote_sync_time_and_rowcount_of_a_plugin_source(
     newest, w15l2_plugin, reference_instance, native_calls,
 ):
-    outcomes = {}
-    for mode in ('python', 'rust'):
-        _gate.set_mode(mode)
+
+    def run():
         pipe = _src_pipe(reference_instance, label='remote')
-        outcomes[mode] = (
+        return (
             _norm(pipe.get_sync_time(remote=True, newest=newest)),
             _norm(pipe.get_sync_time(newest=newest)),
             pipe.get_rowcount(remote=True),
             pipe.get_rowcount(),
         )
-    assert outcomes['rust'] == outcomes['python']
-    assert outcomes['rust'][2] == 12 and outcomes['rust'][3] == 0
-    assert outcomes['rust'][0] is not None and outcomes['rust'][1] is None
+
+    v4 = oracle.expected()
+    actual = run()
+    assert actual == v4
+    assert actual[2] == 12 and actual[3] == 0
+    assert actual[0] is not None and actual[1] is None
     assert native_calls.handled['pipe_get_sync_time'] >= 2
     assert native_calls.handled['pipe_get_rowcount'] >= 2
 
@@ -941,18 +924,19 @@ def test_remote_reads_of_a_source_that_cannot_answer(
     w15l2_plugin, reference_instance, native_calls,
 ):
     """No `get_sync_time()` is `None` and a rowcount without a `remote` keyword is `0`."""
-    outcomes = {}
-    for mode in ('python', 'rust'):
-        _gate.set_mode(mode)
+
+    def run():
         pipe = _src_pipe(reference_instance, source='w15l2nosrc:a', label='noremote')
-        outcomes[mode] = (pipe.get_sync_time(remote=True), pipe.get_rowcount(remote=True))
-    assert outcomes['rust'] == outcomes['python'] == (None, 0)
+        return (pipe.get_sync_time(remote=True), pipe.get_rowcount(remote=True))
+
+    v4 = oracle.expected()
+    actual = run()
+    assert actual == v4 == (None, 0)
 
 
 def test_remote_sync_time_of_a_valkey_source(reference_instance, native_calls):
     if 'valkey' not in os.environ.get('MRSM_TEST_FLAVORS', 'sqlite').split(','):
         pytest.skip("set MRSM_TEST_FLAVORS to include valkey")
-    _gate.set_mode('rust')
     valkey = mrsm.get_connector('valkey', 'w15l2_valkey', host='localhost', port=6399)
     label = 'rv' + uuid.uuid4().hex[:6]
     remote = mrsm.Pipe(str(valkey), label, instance=valkey, columns=COLUMNS, dtypes=DTYPES)
@@ -972,24 +956,26 @@ def _fetch_outcome(result):
 
 
 def test_fetch_sync_chunks_from_a_plugin_source(w15l2_plugin, reference_instance, native_calls):
-    outcomes = {}
-    for mode in ('python', 'rust'):
-        _gate.set_mode(mode)
+
+    def run():
         pipe = _src_pipe(reference_instance, label='chunks')
         pipe.delete()
         pipe = _src_pipe(reference_instance, label='chunks')
         results = pipe.fetch(sync_chunks=True)
-        outcomes[mode] = (_fetch_outcome(results), pipe.get_rowcount())
+        outcome = (_fetch_outcome(results), pipe.get_rowcount())
         pipe.delete()
-    assert outcomes['rust'] == outcomes['python']
-    assert len(outcomes['rust'][0]) == 3 and outcomes['rust'][1] == 12
+        return outcome
+
+    v4 = oracle.expected()
+    actual = run()
+    assert actual == v4
+    assert len(actual[0]) == 3 and actual[1] == 12
     assert native_calls.handled['pipe_fetch'] >= 1
 
 
 def test_fetch_with_a_chunk_hook(w15l2_plugin, reference_instance, native_calls):
-    outcomes = {}
-    for mode in ('python', 'rust'):
-        _gate.set_mode(mode)
+
+    def run():
         seen = []
 
         def hook(chunk, **kw):
@@ -997,9 +983,12 @@ def test_fetch_with_a_chunk_hook(w15l2_plugin, reference_instance, native_calls)
             return True, f'seen {len(chunk)}'
 
         pipe = _src_pipe(reference_instance, label='hook')
-        outcomes[mode] = (_fetch_outcome(pipe.fetch(chunk_hook=hook)), seen)
-    assert outcomes['rust'] == outcomes['python']
-    assert outcomes['rust'][1] == [4, 4, 4]
+        return (_fetch_outcome(pipe.fetch(chunk_hook=hook)), seen)
+
+    v4 = oracle.expected()
+    actual = run()
+    assert actual == v4
+    assert actual[1] == [4, 4, 4]
 
 
 def test_fetch_sync_chunks_from_a_sql_source_returns_the_chunks(
@@ -1012,24 +1001,23 @@ def test_fetch_sync_chunks_from_a_sql_source_returns_the_chunks(
     )
     source_pipe = _loaded(source, n=8, label='hooksource')
     definition = f'SELECT * FROM {source_pipe.target}'
-    outcomes = {}
     try:
-        for mode in ('python', 'rust'):
-            _gate.set_mode(mode)
+        def make():
+            return mrsm.Pipe(
+                str(source), 'w15l2_hooked', instance=reference_instance, columns=COLUMNS,
+                dtypes=DTYPES, parameters={'fetch': {'definition': definition}},
+            )
 
-            def make():
-                return mrsm.Pipe(
-                    str(source), 'w15l2_hooked', instance=reference_instance, columns=COLUMNS,
-                    dtypes=DTYPES, parameters={'fetch': {'definition': definition}},
-                )
-
+        def run():
             make().delete()
             pipe = make()
-            outcomes[mode] = (_fetched(pipe.fetch(sync_chunks=True)), pipe.get_rowcount())
-        assert outcomes['rust'] == outcomes['python']
-        assert outcomes['rust'][1] == 0 and len(outcomes['rust'][0][0][1]) == 8
+            return (_fetched(pipe.fetch(sync_chunks=True)), pipe.get_rowcount())
+
+        v4 = oracle.expected()
+        actual = run()
+        assert actual == v4
+        assert actual[1] == 0 and len(actual[0][0][1]) == 8
     finally:
-        _gate.set_mode('rust')
         source_pipe.delete()
 
 
@@ -1038,14 +1026,13 @@ def test_unsupported_input_is_a_type_error_naming_the_accepted_types(
 ):
     if kind == 'valkey':
         pytest.skip("same boundary on every instance")
-    _gate.set_mode('rust')
     pipe = _pipe(instance)
     for call in (pipe.enforce_dtypes, pipe.filter_existing):
         with pytest.raises(TypeError, match='Accepted types'):
             call(object())
 
 
-def test_arrow_tables_are_accepted(kind, instance, reference_instance, native_calls):
+def test_arrow_tables_are_accepted(kind, instance, native_calls):
     pa = pytest.importorskip('pyarrow')
     pytest.importorskip('pandas')
     if kind == 'valkey':
@@ -1098,7 +1085,6 @@ def test_deduplicate_honors_workers(case, w15l2_plugin, native_calls):
     expected_rows = len({json.dumps(doc) for doc in docs})
     observed = {}
     for workers in (1, 64):
-        _gate.set_mode('rust')
         instance = _back_instance(delay=0.2)
         pipe = mrsm.Pipe('w15l2', 'x' + uuid.uuid4().hex[:8], instance=instance, columns=COLUMNS)
         assert pipe.register()[0]
@@ -1123,7 +1109,6 @@ def test_numeric_specials_survive_get_data(kind, instance, native_calls):
     if kind != 'postgis':
         pytest.skip("PostgreSQL only")
     from decimal import Decimal
-    _gate.set_mode('rust')
     values = [Decimal('1.5'), Decimal('NaN'), Decimal('Infinity'), Decimal('-Infinity')]
     pipe = _pipe(instance, parameters={'dtypes': {'n': 'numeric'}})
     pipe.delete()
@@ -1187,14 +1172,14 @@ def test_special_dtypes_match_python_mode(operation, kind, instance, native_call
     """
     Geometry (with and without an SRID, as shapely objects and as WKT text), nullable `int`,
     `numeric`, `json`, `uuid`, `bytes` and timezone-aware datetime columns come back with the same
-    values and pandas dtypes (and, for documents, the same objects) on SQLite and PostgreSQL.
+    values and pandas dtypes the recorded Python mode returned (and, for documents, the same objects) on SQLite and
+    PostgreSQL.
     """
     if kind not in ('sqlite', 'postgis'):
         pytest.skip("SQL instances with geometry support")
     pd = pytest.importorskip('pandas')
     pytest.importorskip('shapely')
     gpd = pytest.importorskip('geopandas') if operation == 'filter_geo' else None
-    _gate.set_mode('rust')
     pipe = mrsm.Pipe(
         'w15l2', 'special' + uuid.uuid4().hex[:6], instance=instance,
         columns=COLUMNS, dtypes=SPECIAL_DTYPES,
@@ -1222,25 +1207,32 @@ def test_special_dtypes_match_python_mode(operation, kind, instance, native_call
             )
             return pipe.filter_existing(frame)
 
-        outcomes = {}
-        for mode in ('python', 'rust'):
-            _gate.set_mode(mode)
-            outcomes[mode] = call()
+        def describe():
+            result = call()
+            if operation == 'docs':
+                return [
+                    (
+                        {k: type(v).__name__ for k, v in doc.items() if k != 'dt'},
+                        snapshot(doc),
+                    )
+                    for doc in result
+                ]
+            return snapshot(result)
+
+        v4 = oracle.expected()
+        actual = describe()
         if operation == 'docs':
             ### The same Python objects, type for type (a hex EWKB string stays text).
-            for rust, python in zip(outcomes['rust'], outcomes['python']):
-                assert {k: type(v).__name__ for k, v in rust.items() if k != 'dt'} == {
-                    k: type(v).__name__ for k, v in python.items() if k != 'dt'
-                }
-                assert snapshot(rust) == snapshot(python)
+            assert len(actual) == len(v4)
+            for (actual_types, actual_doc), (v4_types, v4_doc) in zip(actual, v4):
+                assert actual_types == v4_types
+                assert actual_doc == v4_doc
         else:
-            outcomes = {mode: snapshot(result) for mode, result in outcomes.items()}
-            assert outcomes['rust'] == outcomes['python']
-            ### A frame of WKT text is a GeoDataFrame with a `geometry` column in both modes.
+            assert actual == v4
+            ### A frame of WKT text is a GeoDataFrame with a `geometry` column, as in v4.
             if operation == 'filter_wkt':
                 assert snapshot(call())[0]['dtypes'][2] == 'geometry'
     finally:
-        _gate.set_mode('rust')
         pipe.delete()
 
 
@@ -1249,23 +1241,24 @@ def test_enforce_dtypes_of_a_timezone_aware_frame(
 ):
     pd = pytest.importorskip('pandas')
     pipe = _pipe(reference_instance)
-    outcomes = {}
-    for mode in ('python', 'rust'):
-        _gate.set_mode(mode)
+
+    def run():
         frame = pd.DataFrame({
             'dt': pd.to_datetime(['2026-01-01', '2026-01-02'], utc=True).astype('datetime64[ns, UTC]'),
             'id': [1, 2],
         })
-        outcomes[mode] = snapshot(pipe.enforce_dtypes(frame))
-    assert outcomes['rust'] == outcomes['python']
+        return snapshot(pipe.enforce_dtypes(frame))
+
+    v4 = oracle.expected()
+    assert run() == v4
 
 
-def test_get_data_forwards_its_keywords(kind, instance, reference_instance, native_calls):
+def test_get_data_forwards_its_keywords(kind, instance, native_calls):
     """`begin_add_minutes` and `end_add_minutes` move the bounds of a SQL read, as in v4."""
     if kind not in ('sqlite', 'postgis'):
         pytest.skip("SQL instances read these keywords")
     _compare(
-        kind, instance, reference_instance,
+        kind, instance,
         lambda pipe: pipe.get_data(
             begin=START + timedelta(hours=4), begin_add_minutes=-120,
             end=START + timedelta(hours=8), end_add_minutes=60,
@@ -1279,18 +1272,21 @@ def test_a_custom_instance_receives_the_keywords_of_get_data(w15l2_plugin, nativ
     instance = _back_instance()
     pipe = _loaded(instance)
     try:
-        for mode in ('python', 'rust'):
-            _gate.set_mode(mode)
-            assert len(pipe.get_data(w15l2_marker='x')) == 12
-        calls = _kwargs_seen(instance)
-        assert calls.count('x') >= 2, calls
-        ### `get_backtrack_data` and `deduplicate` forward theirs too, with no fallback.
-        for mode in ('python', 'rust'):
-            _gate.set_mode(mode)
-            assert pipe.get_backtrack_data(backtrack_minutes=60, w15l2_marker='y') is not None
-        assert _kwargs_seen(instance).count('y') >= 2
+        def run():
+            before = _kwargs_seen(instance).count('x')
+            rows = len(pipe.get_data(w15l2_marker='x'))
+            forwarded_x = _kwargs_seen(instance).count('x') - before
+            ### `get_backtrack_data` and `deduplicate` forward theirs too, with no fallback.
+            before = _kwargs_seen(instance).count('y')
+            found = pipe.get_backtrack_data(backtrack_minutes=60, w15l2_marker='y') is not None
+            forwarded_y = _kwargs_seen(instance).count('y') - before
+            return rows, forwarded_x, found, forwarded_y
+
+        v4 = oracle.expected()
+        actual = run()
+        assert actual == v4
+        assert actual[0] == 12 and actual[1] >= 1 and actual[2] and actual[3] >= 1, actual
     finally:
-        _gate.set_mode('rust')
         pipe.delete()
 
 
@@ -1316,7 +1312,6 @@ def test_a_failed_rust_build_is_an_error_not_a_silent_python_fallback(tmp_path, 
     conn.__dict__['_rust_connector'] = False
     conn.__dict__['_rust_error'] = 'forced failure'
     pipe = _pipe(conn, pipe.metric_key)
-    _gate.set_mode('rust')
     calls = {
         'get_data': lambda: pipe.get_data(),
         'get_data_as_docs': lambda: pipe.get_data(as_docs=True),

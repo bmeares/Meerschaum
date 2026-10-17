@@ -121,7 +121,7 @@ fn a_same_named_supervisor_of_another_root_is_not_found() {
         std::thread::sleep(std::time::Duration::from_millis(20));
     }
     // The marker is on the supervisor's command line; the job is its worker (the `sleep`).
-    let worker = meerschaum_jobs::process::children(child.id() as i32)[0];
+    let worker = meerschaum_jobs::process::children(child.id() as i32).unwrap()[0];
     assert_eq!(seen(&other_ctx), Some(worker));
     assert_eq!(seen(&ctx), None);
     let daemon = Daemon::new("dupe", vec![], None, Default::default(), &ctx);

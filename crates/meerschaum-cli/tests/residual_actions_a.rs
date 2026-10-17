@@ -943,6 +943,215 @@ fn tokens_register_show_and_edit() {
     );
 }
 
+/// The output with its line wrapping undone.
+fn one_line(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// The `scopes` of the token with `label` in `show tokens --nopretty`.
+fn token_scopes(home: &Home, label: &str) -> String {
+    let raw = home.run(&["show", "tokens", "--nopretty"]);
+    let line = raw
+        .text
+        .lines()
+        .find(|l| l.contains(&format!("\"label\": \"{label}\"")))
+        .unwrap_or_else(|| panic!("no token {label}: {}", raw.text));
+    let start = line.find("\"scopes\": [").expect("scopes") + "\"scopes\": ".len();
+    let end = start + line[start..].find(']').expect("end of scopes") + 1;
+    line[start..end].to_string()
+}
+
+#[test]
+fn a_star_scope_is_stored_literally_for_tokens_and_users() {
+    let home = Home::new();
+    // The owner holds `*`: a token carries at most its owner's scopes.
+    let user = home.ask(
+        &["register", "users", "bob", "--scopes", "*"],
+        "password1\npassword1\n\n",
+    );
+    assert_eq!(user.code, 0, "{}", user.text);
+
+    // `register tokens --scopes '*'` keeps the wildcard; custom (plugin) scope names are
+    // accepted as given.
+    let star = home.ask(
+        &[
+            "register",
+            "tokens",
+            "--name",
+            "everything",
+            "--scopes",
+            "*",
+        ],
+        "1\n",
+    );
+    assert_eq!(star.code, 0, "{}", star.text);
+    let custom = home.ask(
+        &[
+            "register",
+            "tokens",
+            "--name",
+            "custom",
+            "--scopes",
+            "myplugin:read",
+            "myplugin:write",
+        ],
+        "1\n",
+    );
+    assert_eq!(custom.code, 0, "{}", custom.text);
+    assert_eq!(token_scopes(&home, "everything"), r#"["*"]"#);
+    assert_eq!(
+        token_scopes(&home, "custom"),
+        r#"["myplugin:read", "myplugin:write"]"#
+    );
+
+    // `edit tokens` prefills the stored scopes: keeping them keeps `*` (v4 expanded it to the
+    // built-in list), and typing `*` over a custom list stores `*`. The prompt names the
+    // semantics.
+    let kept = home.ask(&["edit", "tokens", "everything"], "\n\n\nn\n");
+    assert_eq!(kept.code, 0, "{}", kept.text);
+    assert!(
+        one_line(&kept.text).contains("`*` grants all scopes, including custom and future scopes"),
+        "{}",
+        kept.text
+    );
+    assert_eq!(token_scopes(&home, "everything"), r#"["*"]"#);
+    let kept = home.ask(&["edit", "tokens", "custom"], "\n\n\nn\n");
+    assert_eq!(kept.code, 0, "{}", kept.text);
+    assert_eq!(
+        token_scopes(&home, "custom"),
+        r#"["myplugin:read", "myplugin:write"]"#
+    );
+
+    // `register users --scopes '*'` and `edit users` keep the wildcard in the user's attributes.
+    let scoped = home.ask(
+        &["register", "users", "carol", "--scopes", "*"],
+        "password1\npassword1\n\n",
+    );
+    assert_eq!(scoped.code, 0, "{}", scoped.text);
+    let edited = home.ask(&["edit", "users", "bob"], "n\nn\nn\n*\n");
+    assert_eq!(edited.code, 0, "{}", edited.text);
+    assert!(
+        one_line(&edited.text)
+            .contains("`*` grants all scopes, including custom and future scopes"),
+        "{}",
+        edited.text
+    );
+    for user in ["bob", "carol"] {
+        let row = home.run(&[
+            "sql",
+            "local",
+            &format!("SELECT attributes FROM mrsm_users WHERE username = '{user}'"),
+            "--nopretty",
+        ]);
+        assert!(
+            row.text.replace('\\', "").contains(r#""scopes": ["*"]"#),
+            "{user}: {}",
+            row.text
+        );
+    }
+}
+
+#[test]
+fn a_token_carries_at_most_its_owners_scopes() {
+    let home = Home::new();
+    // `ron` holds three scopes (one custom); `ada` is an administrator: `edit users` makes her one.
+    let ron = home.ask(
+        &[
+            "register",
+            "users",
+            "ron",
+            "--scopes",
+            "pipes:read",
+            "jobs:read",
+            "myplugin:read",
+        ],
+        "password1\npassword1\n\n",
+    );
+    assert_eq!(ron.code, 0, "{}", ron.text);
+    let ada = home.ask(&["register", "users", "ada"], "password1\npassword1\n\n");
+    assert_eq!(ada.code, 0, "{}", ada.text);
+    let admin = home.ask(&["edit", "users", "ada"], "n\ny\ny\nn\n\n");
+    assert_eq!(admin.code, 0, "{}", admin.text);
+
+    // The owner is the user chosen at the prompt: `1` is `ada`, `2` is `ron` (sorted).
+    // A scope the owner holds, or none at all (the owner's own), is fine.
+    let ok = home.ask(
+        &[
+            "register",
+            "tokens",
+            "--name",
+            "own",
+            "--scopes",
+            "pipes:read",
+            "myplugin:read",
+        ],
+        "2\n",
+    );
+    assert_eq!(ok.code, 0, "{}", ok.text);
+    let default = home.ask(&["register", "tokens", "--name", "default"], "2\n");
+    assert_eq!(default.code, 0, "{}", default.text);
+    assert_eq!(
+        token_scopes(&home, "default"),
+        r#"["pipes:read", "jobs:read", "myplugin:read"]"#
+    );
+
+    // Anything beyond them is refused, naming every disallowed scope, and nothing is registered.
+    for (scopes, named) in [
+        (vec!["pipes:write"], vec!["pipes:write"]),
+        (vec!["*"], vec!["*"]),
+        (
+            vec!["jobs:read", "other:read", "pipes:drop"],
+            vec!["other:read", "pipes:drop"],
+        ),
+    ] {
+        let mut args = vec!["register", "tokens", "--name", "denied", "--scopes"];
+        args.extend(scopes.iter().copied());
+        let refused = home.ask(&args, "2\n");
+        assert_eq!(refused.code, 1, "{}", refused.text);
+        let text = one_line(&refused.text);
+        assert!(
+            text.contains("Cannot grant scopes that user 'ron' does not hold"),
+            "{text}"
+        );
+        for scope in named {
+            assert!(text.contains(&format!("'{scope}'")), "{text}");
+        }
+    }
+    assert!(
+        !home
+            .run(&["show", "tokens", "--nopretty"])
+            .text
+            .contains("\"denied\""),
+    );
+
+    // `edit tokens` applies the cap to the token's owner: keeping scopes works, adding one fails.
+    let kept = home.ask(&["edit", "tokens", "own"], "\n\n\nn\n");
+    assert_eq!(kept.code, 0, "{}", kept.text);
+    let widened = home.ask(&["edit", "tokens", "own"], "\n\n pipes:write\nn\n");
+    assert_eq!(widened.code, 1, "{}", widened.text);
+    assert!(
+        one_line(&widened.text).contains("'pipes:write'"),
+        "{}",
+        widened.text
+    );
+    assert_eq!(
+        token_scopes(&home, "own"),
+        r#"["pipes:read", "myplugin:read"]"#
+    );
+
+    // An administrator, and the holder of `*` (see the test above), may grant anything.
+    for (name, scopes) in [
+        ("grand-star", vec!["*"]),
+        ("grand-custom", vec!["brand:new", "pipes:write"]),
+    ] {
+        let mut args = vec!["register", "tokens", "--name", name, "--scopes"];
+        args.extend(scopes.iter().copied());
+        let granted = home.ask(&args, "1\n");
+        assert_eq!(granted.code, 0, "{scopes:?}: {}", granted.text);
+    }
+    assert_eq!(token_scopes(&home, "grand-star"), r#"["*"]"#);
+}
+
 #[test]
 fn bootstrap_connectors_wizard_registers_the_connector() {
     let home = Home::new();

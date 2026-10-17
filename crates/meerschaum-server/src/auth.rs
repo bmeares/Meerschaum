@@ -436,12 +436,70 @@ pub async fn granted_scopes(
     Ok(Scopes::from_claim(payload.get("scopes")))
 }
 
+/// The scopes a principal may hand to a token it registers or edits: `None` when it may grant
+/// anything (an administrator, a holder of `*`, or `--no-auth`), else the scopes it holds.
+///
+/// FIX (intentional v4 change): v4 let any user register a token with any scopes, `*` included.
+pub async fn grantable_scopes(
+    state: &AppState,
+    principal: Option<&Principal>,
+) -> Option<Vec<String>> {
+    let principal = principal?;
+    if let Principal::User(user) = principal {
+        let user_type = state.instance().get_user_type(user).await.ok().flatten();
+        if user_type.as_deref() == Some("admin") {
+            return None;
+        }
+    }
+    let held = principal_scopes(state, principal).await;
+    if held.iter().any(|s| s == "*") {
+        return None;
+    }
+    Some(held)
+}
+
+/// The requested scopes outside `cap` and `already` (scopes a token being edited already holds
+/// stay), in request order.
+pub fn disallowed_scopes(requested: &[String], cap: &[String], already: &[String]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for scope in requested {
+        if !cap.contains(scope) && !already.contains(scope) && !out.contains(scope) {
+            out.push(scope.clone());
+        }
+    }
+    out
+}
+
+/// The 403 for scopes a caller may not grant.
+pub fn scope_cap_error(disallowed: &[String]) -> ApiError {
+    let names: Vec<String> = disallowed.iter().map(|s| format!("'{s}'")).collect();
+    ApiError::new(
+        403,
+        format!(
+            "Cannot grant scopes you do not hold: {}. A token may only carry the scopes of its owner (`*` only for administrators and holders of `*`).",
+            names.join(", ")
+        ),
+    )
+}
+
 /// `ScopedAuth(scopes)`: authenticate a user session or a scoped token and require every scope.
 /// Returns `None` under `--no-auth`.
 pub async fn scoped_auth(
     state: &AppState,
     headers: &HeaderMap,
     scopes: &[&str],
+) -> Result<Option<Principal>, ApiError> {
+    scoped_auth_with_aliases(state, headers, scopes, &[]).await
+}
+
+/// [`scoped_auth`] where a required scope may also be satisfied by a legacy spelling: each
+/// `(scope, legacy)` pair of `aliases` accepts a token that explicitly holds `legacy` in place
+/// of `scope`. The 403 still names the current scope.
+pub async fn scoped_auth_with_aliases(
+    state: &AppState,
+    headers: &HeaderMap,
+    scopes: &[&str],
+    aliases: &[(&str, &str)],
 ) -> Result<Option<Principal>, ApiError> {
     if state.config.no_auth {
         return Ok(None);
@@ -453,7 +511,11 @@ pub async fn scoped_auth(
     }
     let auth = meerschaum_api::models::ScopedAuth::new(scopes);
     for scope in &auth.scopes {
-        if !granted.has(scope) {
+        let legacy = aliases
+            .iter()
+            .find(|(current, _)| current == scope)
+            .map(|(_, legacy)| *legacy);
+        if !granted.has(scope) && !legacy.is_some_and(|l| granted.has(l)) {
             return Err(ApiError::new(
                 403,
                 format!("Missing required scope: '{scope}'"),
@@ -527,6 +589,11 @@ pub async fn is_user_allowed_to_execute(
         );
     }
     let scopes = principal_scopes(state, principal).await;
+    // FIX (intentional v4 change): a literal `*` grants every scope, so it satisfies the
+    // necessary scopes too (v4 compared `scope not in scopes`, which refused a `*` holder).
+    if scopes.iter().any(|s| s == "*") {
+        return SuccessTuple::success();
+    }
     for scope in NECESSARY_SCOPES {
         if !scopes.iter().any(|s| s == scope) {
             return SuccessTuple::fail(format!("Missing scope '{scope}'."));

@@ -445,7 +445,7 @@ _CONFIG_RUNNER = textwrap.dedent('''
 ''')
 
 
-def _run_config_cases(tmp_path, mode):
+def _run_config_cases(tmp_path):
     root = tmp_path / 'root'
     plugins = tmp_path / 'plugins'
     root.mkdir()
@@ -454,7 +454,6 @@ def _run_config_cases(tmp_path, mode):
     env.update({
         'MRSM_ROOT_DIR': str(root),
         'MRSM_PLUGINS_DIR': str(plugins),
-        'MRSM_CORE': mode,
         'MRSM_NO_AUTO_INSTALL': '1',
         'PYTHONPATH': str(ROOT),
         'HOME': str(tmp_path),
@@ -500,9 +499,8 @@ def _without_v5_defaults(spec):
     return {k: _without_v5_defaults(v) for k, v in spec.items()}
 
 
-@pytest.mark.parametrize('mode', ['python', 'rust'])
-def test_config_cases_match_released_reference(parity, tmp_path, mode):
-    actual = _run_config_cases(tmp_path, mode)
+def test_config_cases_match_released_reference(parity, tmp_path):
+    actual = _run_config_cases(tmp_path)
     failures = []
     for case in parity['config_cases']:
         expected = case['outcome']
@@ -510,9 +508,8 @@ def test_config_cases_match_released_reference(parity, tmp_path, mode):
         ### `warn()` wraps long lines at the terminal width, and the temporary root's path length
         ### decides where: compare the warnings without whitespace.
         expected, got = _unwrapped(expected), _unwrapped(got, tmp_path / 'root')
-        if mode == 'rust':
-            ### PARITY (wave 13, PARITY.md): the Rust default config carries `system:engine`.
-            expected, got = _without_v5_defaults(expected), _without_v5_defaults(got)
+        ### PARITY (wave 13, PARITY.md): the Rust default config carries `system:engine`.
+        expected, got = _without_v5_defaults(expected), _without_v5_defaults(got)
         if got != expected:
             failures.append((case['name'], {
                 key: (expected[key], got[key]) for key in expected if expected[key] != got[key]
@@ -557,8 +554,7 @@ _NO_PYYAML = textwrap.dedent('''
 ''')
 
 
-@pytest.mark.parametrize('mode', ['python', 'rust'])
-def test_config_round_trip_without_pyyaml_or_installs(tmp_path, mode):
+def test_config_round_trip_without_pyyaml_or_installs(tmp_path):
     root = tmp_path / 'root'
     plugins = tmp_path / 'plugins'
     root.mkdir()
@@ -567,7 +563,6 @@ def test_config_round_trip_without_pyyaml_or_installs(tmp_path, mode):
     env.update({
         'MRSM_ROOT_DIR': str(root),
         'MRSM_PLUGINS_DIR': str(plugins),
-        'MRSM_CORE': mode,
         'MRSM_NO_AUTO_INSTALL': '1',
         'PIP_NO_INDEX': '1',
         'PYTHONPATH': str(ROOT),

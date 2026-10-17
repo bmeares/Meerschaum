@@ -293,20 +293,163 @@ async fn users(state: &WebState, data: &Json) -> WebResult<String> {
     }
     Ok(content)
 }
+/// The label of the "grant all scopes" switch (the wording of Meerschaum 4.1.6's console).
+const GRANT_ALL_SCOPES: &str = "Grant all scopes (`*`, including custom and future scopes)";
+
+/// The scope controls of a token form: the "Grant all scopes" switch (on when `held` has `*`, and
+/// by default for a new token; it hides the rest through CSS), the built-in scopes as a checklist
+/// and a field for custom (plugin-defined) scopes. `id` makes the switch's `for` unique per form.
+fn scope_fields(id: &str, held: &[String]) -> String {
+    let builtin = meerschaum_core::static_config().scope_names();
+    let grants_all = held.is_empty() || held.iter().any(|s| s == "*");
+    let custom: Vec<&str> = held
+        .iter()
+        .filter(|s| *s != "*" && !builtin.contains(s))
+        .map(String::as_str)
+        .collect();
+    let switch_id = format!("all-scopes-{}", escape(id));
+    let mut out = format!(
+        "<input type=\"checkbox\" class=\"grant-all-scopes\" id=\"{switch_id}\" name=\"all_scopes\" value=\"1\"{}><label for=\"{switch_id}\">{}</label><div class=\"scopes-fields\"><button type=\"button\" data-scopes-toggle>Deselect all</button><fieldset><legend>Scopes</legend>",
+        if grants_all { " checked" } else { "" },
+        escape(GRANT_ALL_SCOPES)
+    );
+    for scope in &builtin {
+        let checked = grants_all || held.contains(scope);
+        out.push_str(&format!(
+            "<label><input type=\"checkbox\" name=\"scopes\" value=\"{0}\"{1}> {0}</label>",
+            escape(scope),
+            if checked { " checked" } else { "" }
+        ));
+    }
+    out.push_str(&format!(
+        "</fieldset><label>Custom scopes<input name=\"custom_scopes\" value=\"{}\" placeholder=\"myplugin:read myplugin:write\"></label></div>",
+        escape(&custom.join(" "))
+    ));
+    out
+}
+
+/// The label and expiration fields of a token form.
+fn token_fields(label: &str, expiration: &str) -> String {
+    format!(
+        "{}<label>Label<input name=\"label\" value=\"{}\"></label><label>Expiration<input type=\"date\" name=\"expiration\" value=\"{}\"></label>",
+        hidden("token_form", "1"),
+        escape(label),
+        escape(expiration.get(..10).unwrap_or(""))
+    )
+}
+
 async fn tokens(state: &WebState, data: &Json) -> WebResult<String> {
     let tokens = get_json(state, data, "/tokens").await?;
     let mut content = table(&tokens);
-    content.push_str(&form(data, "token-register", "", "<label>Token properties (JSON)<textarea name=\"payload\">{\"label\":\"console\",\"scopes\":[]}</textarea></label>", "Create token"));
+    // A token carries at most its owner's scopes: the form starts from the signed-in user's own
+    // scopes ("Grant all scopes" is off unless they may grant everything: an administrator, or a
+    // holder of `*`).
+    let cap = match auth::load_from_subject(&state.server, data["username"].as_str().unwrap_or(""))
+        .await
+    {
+        Some(principal) => auth::grantable_scopes(&state.server, Some(&principal)).await,
+        None => None,
+    };
+    let hint = match &cap {
+        Some(held) => format!(
+            "<p>A token carries at most your scopes ({}); asking for more is refused, and `*` is for administrators and holders of `*`.</p>",
+            escape(&held.join(" "))
+        ),
+        None => String::new(),
+    };
+    content.push_str(&form(
+        data,
+        "token-register",
+        "",
+        &format!(
+            "{hint}{}{}",
+            token_fields("console", ""),
+            scope_fields("register", &cap.clone().unwrap_or_default())
+        ),
+        "Create token",
+    ));
     if let Some(tokens) = tokens.as_array() {
         for token in tokens {
             if let Some(id) = token["id"].as_str().or(token.as_str()) {
-                content.push_str(&form(data, "token-edit", id, &format!("<label>Token properties (JSON)<textarea name=\"payload\">{}</textarea></label>", pretty(token)), "Save token"));
+                let held: Vec<String> = token["scopes"]
+                    .as_array()
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(|s| s.as_str().map(String::from))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                let fields = format!(
+                    "{}{}{}",
+                    hidden("payload", &token.to_string()),
+                    token_fields(
+                        token["label"].as_str().unwrap_or(""),
+                        token["expiration"].as_str().unwrap_or("")
+                    ),
+                    scope_fields(id, &held)
+                );
+                content.push_str(&form(data, "token-edit", id, &fields, "Save token"));
                 content.push_str(&form(data, "token-invalidate", id, "", "Invalidate token"));
                 content.push_str(&form(data, "token-delete", id, "", "Delete token"));
             }
         }
     }
     Ok(content)
+}
+
+/// The token model a token form submits: the form's JSON `payload` (the token itself when
+/// editing) with the structured fields applied. `*` is kept literally when the "Grant all scopes"
+/// switch is on; otherwise the checked built-in scopes plus the custom ones, and at least one
+/// scope is required (Meerschaum 4.1.6's "Select at least one scope.").
+fn token_payload(base: &str, fields: &[(String, String)]) -> Result<String, &'static str> {
+    if form_get(fields, "token_form").is_none() {
+        return Ok(base.to_string());
+    }
+    let mut model = match serde_json::from_str::<Json>(base) {
+        Ok(Json::Object(map)) => map,
+        _ => serde_json::Map::new(),
+    };
+    if let Some(label) = form_get(fields, "label") {
+        model.insert(
+            "label".into(),
+            if label.is_empty() {
+                Json::Null
+            } else {
+                json!(label)
+            },
+        );
+    }
+    if let Some(date) = form_get(fields, "expiration") {
+        model.insert(
+            "expiration".into(),
+            if date.is_empty() {
+                Json::Null
+            } else {
+                json!(format!("{date}T00:00:00+00:00"))
+            },
+        );
+    }
+    let scopes: Vec<String> = if form_get(fields, "all_scopes").is_some() {
+        vec!["*".into()]
+    } else {
+        let mut scopes: Vec<String> = Vec::new();
+        let custom = form_get(fields, "custom_scopes").unwrap_or("");
+        let checked = fields
+            .iter()
+            .filter(|(k, _)| k == "scopes")
+            .map(|(_, v)| v.as_str());
+        for scope in checked.chain(custom.split(|c: char| c.is_whitespace() || c == ',')) {
+            if !scope.is_empty() && !scopes.iter().any(|s| s == scope) {
+                scopes.push(scope.to_string());
+            }
+        }
+        scopes
+    };
+    if scopes.is_empty() {
+        return Err("Select at least one scope.");
+    }
+    model.insert("scopes".into(), json!(scopes));
+    Ok(Json::Object(model).to_string())
 }
 pub(crate) async fn action(
     State(state): State<WebState>,
@@ -389,11 +532,14 @@ pub(crate) async fn action(
             }
             (Method::POST, "/users/edit".into(), body)
         }
-        "token-edit" => (
-            Method::POST,
-            format!("/tokens/{}/edit", encode(target)),
-            payload.into(),
-        ),
+        "token-edit" => match token_payload(payload, &fields) {
+            Ok(payload) => (
+                Method::POST,
+                format!("/tokens/{}/edit", encode(target)),
+                payload,
+            ),
+            Err(message) => return (StatusCode::BAD_REQUEST, message).into_response(),
+        },
         "plugin-delete" => (
             Method::DELETE,
             format!("/plugins/{}", encode(target)),
@@ -404,7 +550,10 @@ pub(crate) async fn action(
             "/actions/install".into(),
             json!({"action":["plugins",target]}).to_string(),
         ),
-        "token-register" => (Method::POST, "/tokens/register".into(), payload.into()),
+        "token-register" => match token_payload(payload, &fields) {
+            Ok(payload) => (Method::POST, "/tokens/register".into(), payload),
+            Err(message) => return (StatusCode::BAD_REQUEST, message).into_response(),
+        },
         "token-invalidate" => (
             Method::POST,
             format!("/tokens/{}/invalidate", encode(target)),

@@ -26,7 +26,6 @@ def test_native_config_without_site_packages(tmp_path):
     env.update({
         'MRSM_ROOT_DIR': str(root),
         'MRSM_PLUGINS_DIR': str(plugins),
-        'MRSM_CORE': 'rust',
         'MRSM_NO_AUTO_INSTALL': '1',
         'PYTHONPATH': str(ROOT),
     })

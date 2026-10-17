@@ -49,6 +49,7 @@ def test_dtype_enforcement(flavor: str):
     """
     Test that incoming rows are enforced to the correct data type.
     """
+    pytest.importorskip('geopandas')
     conn = conns[flavor]
     pipe = mrsm.Pipe('dtype', 'enforcement', instance=conn)
     pipe.delete(debug=debug)
@@ -1143,6 +1144,7 @@ def test_geometry_dtype(flavor: str):
     """
     Test syncing the `geometry` dtype.
     """
+    pytest.importorskip('geopandas')
     conn = conns[flavor]
     shapely = mrsm.attempt_import('shapely')
     pipe = mrsm.Pipe(
@@ -1186,6 +1188,7 @@ def test_geography_dtype(flavor: str):
     """
     Test syncing the `geography` dtype.
     """
+    pytest.importorskip('geopandas')
     conn = conns[flavor]
     shapely = mrsm.attempt_import('shapely')
     pipe = mrsm.Pipe(
@@ -1229,6 +1232,7 @@ def test_geometry_custom_srid(flavor: str):
     """
     Test syncing the `geometry` dtype with a custom SRID.
     """
+    pytest.importorskip('geopandas')
     conn = conns[flavor]
     shapely = mrsm.attempt_import('shapely')
     pipe = mrsm.Pipe(
@@ -1271,6 +1275,7 @@ def test_geometry_esri_srid(flavor: str):
     """
     Test support for ESRI CRS.
     """
+    pytest.importorskip('geopandas')
     conn = conns[flavor]
     pipe = mrsm.Pipe('test', 'geometry', 'esri', instance=conn)
     pipe.delete()

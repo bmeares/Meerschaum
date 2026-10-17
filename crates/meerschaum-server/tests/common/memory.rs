@@ -61,6 +61,7 @@ struct Data {
 pub struct MemoryInstance {
     label: String,
     data: Mutex<Data>,
+    raw_docs: Mutex<Option<Vec<Doc>>>,
 }
 
 fn keys_of(pipe: &Pipe) -> (String, String, Option<String>) {
@@ -172,12 +173,19 @@ impl MemoryInstance {
     pub fn new(label: &str) -> MemoryInstance {
         MemoryInstance {
             label: label.to_string(),
+            raw_docs: Mutex::new(None),
             data: Mutex::new(Data {
                 next_pipe_id: 1,
                 next_user_id: 1,
                 ..Default::default()
             }),
         }
+    }
+
+    /// The documents `get_pipe_docs` returns instead of the stored rows (what a SQL instance's
+    /// own `get_pipe_docs` hands back: raw rows, no dtype enforcement).
+    pub fn set_raw_docs(&self, docs: Vec<Doc>) {
+        *self.raw_docs.lock().unwrap_or_else(|e| e.into_inner()) = Some(docs);
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, Data> {
@@ -199,6 +207,21 @@ impl MemoryInstance {
             attributes: Map::new(),
         });
         id
+    }
+
+    /// Restrict a seeded user's `attributes['scopes']` (`User::get_scopes` falls back to every
+    /// scope when the list is missing or empty).
+    pub fn seed_user_scopes(&self, username: &str, scopes: &[&str]) {
+        let mut d = self.lock();
+        let user = d
+            .users
+            .iter_mut()
+            .find(|u| u.username == username)
+            .expect("a seeded user");
+        user.attributes.insert(
+            "scopes".into(),
+            Value::List(scopes.iter().map(|s| Value::Str((*s).into())).collect()),
+        );
     }
 
     fn user_row(&self, username: &str) -> Option<UserRow> {
@@ -475,6 +498,21 @@ impl InstanceConnector for MemoryInstance {
             }
         }
         Ok(Some(pipe_ops::pipe_postprocess(pipe, df, query)))
+    }
+
+    async fn get_pipe_docs(&self, pipe: &Pipe, query: &DataQuery) -> ConnectorResult<Vec<Doc>> {
+        let raw = self
+            .raw_docs
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
+        if let Some(docs) = raw {
+            return Ok(docs);
+        }
+        Ok(match self.get_pipe_data(pipe, query).await? {
+            Some(df) => pipe_ops::frame_to_docs(&df),
+            None => Vec::new(),
+        })
     }
 
     async fn get_sync_time(

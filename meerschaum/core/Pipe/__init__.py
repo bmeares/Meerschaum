@@ -52,7 +52,6 @@ with correct credentials, as well as a network connection and valid permissions.
 from __future__ import annotations
 
 import sys
-import copy
 import threading
 import collections
 
@@ -60,7 +59,6 @@ import meerschaum as mrsm
 from meerschaum.utils.typing import Optional, Dict, Any, Union, List, InstanceConnector
 from meerschaum.utils.formatting._pipes import pipe_repr
 from meerschaum.config import get_config
-from meerschaum._core import _gate as _core_gate
 
 
 class Pipe:
@@ -97,13 +95,10 @@ class Pipe:
         get_backtrack_data,
         get_rowcount,
         get_size,
-        get_data,
         get_doc,
         get_docs,
         get_value,
-        _get_data_as_iterator,
         get_chunk_interval,
-        _scale_delta_to_int_axis,
         get_chunk_bounds,
         get_chunk_bounds_batches,
         parse_date_bounds,
@@ -177,10 +172,8 @@ class Pipe:
         get_sync_time,
         exists,
         filter_existing,
-        _filter_existing_polars,
         _get_chunk_label,
         get_num_workers,
-        _persist_new_special_columns,
     )
     from ._verify import (
         verify,
@@ -370,7 +363,7 @@ class Pipe:
                 error(f"A pipe's keys and tags cannot start with the prefix '{negation_prefix}'.")
 
         self._connector_keys = str(connector)
-        self._connector_key = self.connector_keys ### Alias
+        self._connector_key = self._connector_keys ### Alias
         self._metric_key = metric
         self._location_key = location
         self.temporary = temporary
@@ -399,29 +392,28 @@ class Pipe:
         if self._instance_keys == 'sql:memory':
             self.cache = False
 
-        _rust_pipe = _core_gate.use_rust('pipe')
-        _initial_attributes: Dict[str, Any] = {
-            'connector_keys': self._connector_keys,
-            'metric_key': self._metric_key,
-            'location_key': self._location_key,
-            'parameters': {},
-        }
-        if _rust_pipe:
-            from meerschaum import _core
-            from ._live_parameters import Attrs, new_raw_root
-            ### Keys and raw parameters live in a `_core.Pipe`; `_raw_root` is a read-through
-            ### view of its raw map. Constructing never touches the instance.
-            self._core_pipe = _core.Pipe(
-                self._connector_keys,
-                self._metric_key,
-                self._location_key,
-                self._instance_keys,
-                None,
-            )
-            self._raw_root = new_raw_root(self._core_pipe)
-            self._attributes = Attrs(self, _initial_attributes, self._raw_root)
-        else:
-            self._attributes: Dict[str, Any] = _initial_attributes
+        from meerschaum import _core
+        from ._live_parameters import Attrs, new_raw_root
+        ### Keys and raw parameters live in a `_core.Pipe`; `_raw_root` is a read-through
+        ### view of its raw map. Constructing never touches the instance.
+        self._core_pipe = _core.Pipe(
+            self._connector_keys,
+            self._metric_key,
+            self._location_key,
+            self._instance_keys,
+            None,
+        )
+        self._raw_root = new_raw_root(self._core_pipe)
+        self._attributes = Attrs(
+            self,
+            {
+                'connector_keys': self._connector_keys,
+                'metric_key': self._metric_key,
+                'location_key': self._location_key,
+                'parameters': {},
+            },
+            self._raw_root,
+        )
 
         ### only set parameters if values are provided
         if isinstance(parameters, dict):
@@ -520,8 +512,7 @@ class Pipe:
         """
         Return the pipe's metric key.
         """
-        core = self.__dict__.get('_core_pipe', None)
-        return self._metric_key if core is None else core.metric_key
+        return self._core_pipe.metric_key
 
     @property
     def metric(self) -> str:
@@ -535,8 +526,7 @@ class Pipe:
         """
         Return the pipe's location key.
         """
-        core = self.__dict__.get('_core_pipe', None)
-        return self._location_key if core is None else core.location_key
+        return self._core_pipe.location_key
 
     @property
     def location(self) -> Union[str, None]:
@@ -572,8 +562,7 @@ class Pipe:
         """
         Return the pipe's instance keys.
         """
-        core = self.__dict__.get('_core_pipe', None)
-        return self._instance_keys if core is None else core.instance_keys
+        return self._core_pipe.instance_keys
 
     @property
     def instance(self) -> Union[InstanceConnector, str]:
@@ -604,8 +593,7 @@ class Pipe:
         """
         Return the pipe's connector keys.
         """
-        core = self.__dict__.get('_core_pipe', None)
-        return self._connector_keys if core is None else core.connector_keys
+        return self._core_pipe.connector_keys
 
     @property
     def connector_key(self) -> str:
@@ -635,18 +623,15 @@ class Pipe:
         return self._connector
 
     def __str__(self, ansi: bool=False):
-        core = self.__dict__.get('_core_pipe', None)
-        if core is not None and not ansi:
-            return core.__str__()
+        if not ansi:
+            return self._core_pipe.__str__()
         return pipe_repr(self, ansi=ansi)
 
     def __eq__(self, other):
-        core = self.__dict__.get('_core_pipe', None)
-        if core is not None:
-            ### Duck typed: only another façade pipe backed by `_core.Pipe` compares in Rust.
-            other_core = getattr(other, '__dict__', {}).get('_core_pipe', None)
-            if other_core is not None:
-                return isinstance(self, type(other)) and core == other_core
+        ### Duck typed: only another façade pipe backed by `_core.Pipe` compares in Rust.
+        other_core = getattr(other, '__dict__', {}).get('_core_pipe', None)
+        if other_core is not None:
+            return isinstance(self, type(other)) and self._core_pipe == other_core
         try:
             return (
                 isinstance(self, type(other))
@@ -659,25 +644,14 @@ class Pipe:
             return False
 
     def __hash__(self):
-        core = self.__dict__.get('_core_pipe', None)
-        if core is not None:
-            return hash(core)
-        ### Using an esoteric separator to avoid collisions.
-        sep = "[\"']"
-        return hash(
-            str(self.connector_keys) + sep
-            + str(self.metric_key) + sep
-            + str(self.location_key) + sep
-            + str(self.instance_keys) + sep
-        )
+        return hash(self._core_pipe)
 
     def __repr__(self, ansi: bool=True, **kw) -> str:
         if not hasattr(sys, 'ps1'):
             ansi = False
 
-        core = self.__dict__.get('_core_pipe', None)
-        if core is not None and not ansi and not kw:
-            return core.__str__()
+        if not ansi and not kw:
+            return self._core_pipe.__str__()
         return pipe_repr(self, ansi=ansi, **kw)
 
     def __pt_repr__(self):

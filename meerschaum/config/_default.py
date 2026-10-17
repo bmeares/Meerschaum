@@ -316,25 +316,8 @@ default_config['plugins'] = default_plugins_config
 from meerschaum.config._jobs import default_jobs_config
 default_config['jobs'] = default_jobs_config
 ### add configs from other packages
-try:
-    import meerschaum.config.stack
-except ImportError:
-    pass
-finally:
-    from meerschaum.config.stack import default_stack_config
+from meerschaum.config.stack import default_stack_config
 default_config['stack'] = default_stack_config
 from meerschaum.config._dash import default_dash_config
 default_config['dash'] = default_dash_config
 
-default_header_comment = """
-#####################################################################
-#                                                                   #
-#  Edit or add credentials for connectors.                          #
-#  You can read more about connectors at https://meerschaum.io.     #
-#                                                                   #
-#  Connectors inherit from `default`, and flavor-dependent defaults #
-#  are defined for SQL connectors (e.g. port 5432 for PostgreSQL).  #
-#                                                                   #
-#####################################################################
-
-"""

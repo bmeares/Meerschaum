@@ -16,7 +16,7 @@ import threading
 
 from meerschaum.utils.typing import List, Union, Dict, Any, Optional
 from meerschaum._internal.static import STATIC_CONFIG
-from meerschaum._core._gate import rust_impl as _rust_impl
+from meerschaum import _core
 
 ### Serialize the process-global swap of `os.environ` and `meerschaum.config.paths`
 ### globals performed by `replace_env`. A daemon process runs several threads
@@ -37,10 +37,7 @@ def apply_environment_patches(env: Optional[Dict[str, Any]] = None) -> None:
     _env = env if env is not None else os.environ
     if config_var not in _env and patch_var not in _env:
         return
-    if (_rust := _rust_impl('apply_environment_patches')) is not None:
-        return _rust(env)
-    apply_environment_config(config_var, env=env)
-    apply_environment_config(patch_var, env=env)
+    return _core.apply_environment_patches(env)
 
 
 def apply_environment_config(env_var: str, env: Optional[Dict[str, Any]] = None) -> None:
@@ -105,10 +102,7 @@ def apply_environment_uris(env: Optional[Dict[str, Any]] = None) -> None:
     env_vars = get_connector_env_vars(env=env)
     if not env_vars:
         return
-    if (_rust := _rust_impl('apply_environment_uris')) is not None:
-        return _rust(env)
-    for env_var in env_vars:
-        apply_connector_uri(env_var, env=env)
+    return _core.apply_environment_uris(env)
 
 
 def get_connector_env_regex() -> str:

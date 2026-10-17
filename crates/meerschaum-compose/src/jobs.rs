@@ -357,9 +357,9 @@ mod tests {
     #[test]
     fn compound_pipeline_jobs_are_adopted() {
         let cfg = config(
-            r#"{"project_name": "maps", "jobs": {"maps": "sync pipes -c plugin:osm -t maps + sync pipes -c sql:sra -m segments -t maps : --loop --min-seconds 604800 -w 1"}}"#,
+            r#"{"project_name": "maps", "jobs": {"maps": "sync pipes -c plugin:osm -t maps + sync pipes -c sql:acme -m segments -t maps : --loop --min-seconds 604800 -w 1"}}"#,
         );
-        let params = r#"{"sub_args_line":"sync pipes -c plugin:osm -t maps + sync pipes -c sql:sra -m segments -t maps","patch_args":null}"#;
+        let params = r#"{"sub_args_line":"sync pipes -c plugin:osm -t maps + sync pipes -c sql:acme -m segments -t maps","patch_args":null}"#;
         let running = [
             "start",
             "pipeline",

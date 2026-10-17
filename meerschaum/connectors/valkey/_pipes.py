@@ -2,22 +2,17 @@
 # vim:fenc=utf-8
 
 """
-Define pipes methods for `ValkeyConnector`.
+Define pipes methods for `ValkeyConnector` (the Rust client, `meerschaum._core.ValkeyConnector`).
 """
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime
 
 import meerschaum as mrsm
 from meerschaum.utils.typing import SuccessTuple, Any, Union, Optional, Dict, List, Tuple
-from meerschaum.utils.misc import string_to_dict
-from meerschaum.utils.dtypes import json_serialize_value
-from meerschaum.utils.warnings import warn, dprint
-from meerschaum._internal.static import STATIC_CONFIG
 
 PIPES_TABLE: str = 'mrsm_pipes'
 PIPES_COUNTER: str = 'mrsm_pipes:counter'
-COLON: str = STATIC_CONFIG['valkey']['colon']
 
 
 def get_pipe_key(pipe: mrsm.Pipe) -> str:
@@ -47,6 +42,7 @@ def serialize_document(doc: Dict[str, Any]) -> str:
     -------
     A serialized string for the document.
     """
+    from meerschaum.utils.dtypes import json_serialize_value
     return json.dumps(
         doc,
         default=json_serialize_value,
@@ -79,37 +75,8 @@ def get_document_key(
     -------
     A serialized string of the document's indices.
     """
-    from meerschaum.utils.dtypes import coerce_timezone
-    index_vals = {
-        key: (
-            str(val).replace(':', COLON)
-            if not isinstance(val, datetime)
-            else str(int(coerce_timezone(val).replace(tzinfo=timezone.utc).timestamp()))
-        )
-        for key, val in doc.items()
-        if ((key in indices) if indices else True)
-    }
-    indices_str = (
-        (
-            (
-                (
-                    table_name
-                    + ':'
-                    + ('indices:' if True else '')
-                )
-            )
-            if table_name
-            else ''
-        ) + ','.join(
-            sorted(
-                [
-                    f'{key}{COLON}{val}'
-                    for key, val in index_vals.items()
-                ]
-            )
-        )
-    )
-    return indices_str
+    from meerschaum import _core
+    return _core.ValkeyConnector.get_document_key(doc, indices, table_name)
 
 
 @classmethod
@@ -123,6 +90,7 @@ def get_table_quoted_doc_key(
     """
     Return the document string as stored in the underling set.
     """
+    from meerschaum.utils.dtypes import json_serialize_value
     return json.dumps(
         {
             cls.get_document_key(doc, indices, table_name): serialize_document(doc),
@@ -145,49 +113,9 @@ def register_pipe(
     **kwargs: Any
 ) -> SuccessTuple:
     """
-    Insert the pipe's attributes into the internal `pipes` table.
-
-    Parameters
-    ----------
-    pipe: mrsm.Pipe
-        The pipe to be registered.
-
-    Returns
-    -------
-    A `SuccessTuple` of the result.
+    Register a pipe's parameters and assign it an ID.
     """
-    attributes = {
-        'connector_keys': str(pipe.connector_keys),
-        'metric_key': str(pipe.metric_key),
-        'location_key': str(pipe.location_key),
-    }
-    parameters_str = json.dumps(
-        pipe._attributes.get('parameters', {}),
-        separators=(',', ':'),
-    )
-
-    pipe_key = get_pipe_key(pipe)
-    parameters_key = get_pipe_parameters_key(pipe)
-
-    try:
-        existing_pipe_id = self.get(pipe_key)
-        if existing_pipe_id is not None:
-            return False, f"{pipe} is already registered."
-
-        pipe_id = self.client.incr(PIPES_COUNTER)
-        _ = self.push_docs(
-            [{'pipe_id': pipe_id, **attributes}],
-            PIPES_TABLE,
-            datetime_column='pipe_id',
-            debug=debug,
-        )
-        self.set(pipe_key, pipe_id)
-        self.set(parameters_key, parameters_str)
-
-    except Exception as e:
-        return False, f"Failed to register {pipe}:\n{e}"
-
-    return True, "Success"
+    return self._rust_client().register_pipe(pipe)
 
 
 def get_pipe_id(
@@ -197,23 +125,9 @@ def get_pipe_id(
     **kwargs: Any
 ) -> Union[str, int, None]:
     """
-    Return the `_id` for the pipe if it exists.
-
-    Parameters
-    ----------
-    pipe: mrsm.Pipe
-        The pipe whose `_id` to fetch.
-
-    Returns
-    -------
-    The `_id` for the pipe's document or `None`.
+    Return the pipe's ID.
     """
-    pipe_key = get_pipe_key(pipe)
-    try:
-        return int(self.get(pipe_key))
-    except Exception:
-        pass
-    return None
+    return self._rust_client().get_pipe_id(pipe)
 
 
 def get_pipe_attributes(
@@ -223,34 +137,9 @@ def get_pipe_attributes(
     **kwargs: Any
 ) -> Dict[str, Any]:
     """
-    Return the pipe's document from the internal `pipes` collection.
-
-    Parameters
-    ----------
-    pipe: mrsm.Pipe
-        The pipe whose attributes should be retrieved.
-
-    Returns
-    -------
-    The document that matches the keys of the pipe.
+    Return the pipe's document from the pipes table.
     """
-    pipe_id = pipe.id
-    if pipe_id is None:
-        return {}
-
-    parameters_key = get_pipe_parameters_key(pipe)
-    parameters_str = self.get(parameters_key)
-
-    parameters = json.loads(parameters_str) if parameters_str else {}
-
-    attributes = {
-        'connector_keys': pipe.connector_keys,
-        'metric_key': pipe.metric_key,
-        'location_key': pipe.location_key,
-        'parameters': parameters,
-        'pipe_id': pipe_id,
-    }
-    return attributes
+    return self._rust_client().get_pipe_attributes(pipe)
 
 
 def edit_pipe(
@@ -261,24 +150,8 @@ def edit_pipe(
 ) -> mrsm.SuccessTuple:
     """
     Edit the attributes of the pipe.
-
-    Parameters
-    ----------
-    pipe: mrsm.Pipe
-        The pipe whose in-memory parameters must be persisted.
-
-    Returns
-    -------
-    A `SuccessTuple` indicating success.
     """
-    pipe_id = pipe.id
-    if pipe_id is None:
-        return False, f"{pipe} is not registered."
-
-    parameters_key = get_pipe_parameters_key(pipe)
-    parameters_str = json.dumps(pipe.get_parameters(apply_symlinks=False), separators=(',', ':'))
-    self.set(parameters_key, parameters_str)
-    return True, "Success"
+    return self._rust_client().edit_pipe(pipe)
 
 
 def pipe_exists(
@@ -289,18 +162,8 @@ def pipe_exists(
 ) -> bool:
     """
     Check whether a pipe's target table exists.
-
-    Parameters
-    ----------
-    pipe: mrsm.Pipe
-        The pipe to check whether its table exists.
-
-    Returns
-    -------
-    A `bool` indicating the table exists.
     """
-    table_name = self.quote_table(pipe.target)
-    return self.client.exists(table_name) != 0
+    return self._rust_client().pipe_exists(pipe)
 
 
 def drop_pipe(
@@ -310,66 +173,9 @@ def drop_pipe(
     **kwargs: Any
 ) -> mrsm.SuccessTuple:
     """
-    Drop a pipe's collection if it exists.
-
-    Parameters
-    ----------
-    pipe: mrsm.Pipe
-        The pipe to be dropped.
-
-    Returns
-    -------
-    A `SuccessTuple` indicating success.
+    Drop a pipe's collection but maintain its registration.
     """
-    if not pipe.exists(debug=debug):
-        return True, f"{pipe} does not exist, so it was not dropped."
-
-    table_name = self.quote_table(pipe.target)
-    dt_col = pipe.columns.get('datetime', None)
-
-    try:
-        members = (
-            self.client.zrange(table_name, 0, -1)
-            if dt_col
-            else self.client.smembers(table_name)
-        )
-        
-        keys_to_delete = []
-        for member_bytes in members:
-            member_str = member_bytes.decode('utf-8')
-            member_doc = json.loads(member_str)
-            ix_str = member_doc.get('ix')
-            if not ix_str:
-                continue
-            
-            ix_doc = string_to_dict(ix_str.replace(COLON, ':'))
-            doc_key = self.get_document_key(ix_doc, list(ix_doc.keys()), table_name)
-            keys_to_delete.append(doc_key)
-
-        if keys_to_delete:
-            batch_size = 1000
-            for i in range(0, len(keys_to_delete), batch_size):
-                batch = keys_to_delete[i:i+batch_size]
-                self.client.delete(*batch)
-
-    except Exception as e:
-        return False, f"Failed to delete documents for {pipe}:\n{e}"
-
-    try:
-        self.drop_table(pipe.target, debug=debug)
-    except Exception as e:
-        return False, f"Failed to drop {pipe}:\n{e}"
-
-    if 'valkey' not in pipe.parameters:
-        return True, "Success"
-
-    pipe._attributes['parameters']['valkey']['dtypes'] = {}
-    if not pipe.temporary:
-        edit_success, edit_msg = pipe.edit(debug=debug)
-        if not edit_success:
-            return edit_success, edit_msg
-
-    return True, "Success"
+    return self._rust_client().drop_pipe(pipe)
 
 
 def delete_pipe(
@@ -379,41 +185,9 @@ def delete_pipe(
     **kwargs: Any
 ) -> mrsm.SuccessTuple:
     """
-    Delete a pipe's registration from the `pipes` collection.
-
-    Parameters
-    ----------
-    pipe: mrsm.Pipe
-        The pipe to be deleted.
-
-    Returns
-    -------
-    A `SuccessTuple` indicating success.
+    Delete a pipe's registration from the `mrsm_pipes` collection.
     """
-    drop_success, drop_message = pipe.drop(debug=debug)
-    if not drop_success:
-        return drop_success, drop_message
-
-    pipe_id = self.get_pipe_id(pipe, debug=debug)
-    if pipe_id is None:
-        return False, f"{pipe} is not registered."
-
-    pipe_key = get_pipe_key(pipe)
-    parameters_key = get_pipe_parameters_key(pipe)
-    self.client.delete(pipe_key)
-    self.client.delete(parameters_key)
-    df = self.read(PIPES_TABLE, params={'pipe_id': pipe_id})
-    docs = df.to_dict(orient='records')
-    if docs:
-        doc = docs[0]
-        doc_str = json.dumps(
-            doc,
-            default=json_serialize_value,
-            separators=(',', ':'),
-            sort_keys=True,
-        )
-        self.client.zrem(PIPES_TABLE, doc_str)
-    return True, "Success"
+    return self._rust_client().delete_pipe(pipe)
 
 
 def get_pipe_data(
@@ -437,7 +211,6 @@ def get_pipe_data(
 
     select_columns: Optional[List[str]], default None
         If provided, only select these given columns.
-        Otherwise select all available columns (i.e. `SELECT *`).
 
     omit_columns: Optional[List[str]], default None
         If provided, remove these columns from the selection.
@@ -446,88 +219,22 @@ def get_pipe_data(
         The earliest `datetime` value to search from (inclusive).
 
     end: Union[datetime, int, None], default None
-        The lastest `datetime` value to search from (exclusive).
+        The lastest `datetime` value to search from (inclusive: `ZRANGEBYSCORE` is).
 
-    params: Optional[Dict[str, str]], default None
+    params: Optional[Dict[str, Any]], default None
         Additional filters to apply to the query.
 
     Returns
     -------
-    The target table's data as a DataFrame.
+    The target table's data as a DataFrame, or `None` if the table does not exist.
     """
-    if not pipe.exists(debug=debug):
-        return None
-
-    from meerschaum.utils.dataframe import query_df, parse_df_datetimes
-    from meerschaum.utils.dtypes import are_dtypes_equal
-
-    valkey_dtypes = pipe.parameters.get('valkey', {}).get('dtypes', {})
-    dt_col = pipe.columns.get('datetime', None)
-    table_name = self.quote_table(pipe.target)
-    indices = [col for col in pipe.columns.values() if col]
-    ix_docs = [
-        string_to_dict(doc.get('ix', '').replace(COLON, ':'))
-        for doc in self.read_docs(
-            pipe.target,
-            begin=begin,
-            end=end,
-            debug=debug,
-        )
-    ]
-    try:
-        docs_strings = [
-            self.get(
-                self.get_document_key(
-                    doc,
-                    indices,
-                    table_name,
-                )
-            )
-            for doc in ix_docs
-        ]
-    except Exception as e:
-        warn(f"Failed to fetch documents for {pipe}:\n{e}")
-        docs_strings = []
-
-    docs = [
-        json.loads(doc_str)
-        for doc_str in docs_strings
-        if doc_str
-    ]
-    ignore_dt_cols = [
-        col
-        for col, dtype in pipe.dtypes.items()
-        if not are_dtypes_equal(str(dtype), 'datetime')
-    ]
-
-    df = parse_df_datetimes(
-        docs,
-        ignore_cols=ignore_dt_cols,
-        chunksize=kwargs.get('chunksize', None),
-        strip_timezone=(pipe.tzinfo is None),
-        debug=debug,
-    )
-    for col, typ in valkey_dtypes.items():
-        try:
-            df[col] = df[col].astype(typ)
-        except Exception:
-            pass
-
-    df = pipe.enforce_dtypes(df, debug=debug)
-
-    if len(df) == 0:
-        return query_df(df, select_columns=select_columns, omit_columns=omit_columns)
-
-    return query_df(
-        df,
+    return self._rust_client().get_pipe_data(
+        pipe,
         select_columns=select_columns,
         omit_columns=omit_columns,
-        params=params,
         begin=begin,
         end=end,
-        datetime_column=dt_col,
-        inplace=True,
-        reset_index=True,
+        params=params,
     )
 
 
@@ -540,14 +247,14 @@ def sync_pipe(
     **kwargs: Any
 ) -> mrsm.SuccessTuple:
     """
-    Upsert new documents into the pipe's collection.
+    Add new documents to the pipe's target table.
 
     Parameters
     ----------
     pipe: mrsm.Pipe
-        The pipe whose collection should receive the new documents.
+        The pipe whose target table to receive the new documents.
 
-    df: Union['pd.DataFrame', Iterator['pd.DataFrame']], default None
+    df: 'pd.DataFrame', default None
         The data to be synced.
 
     check_existing: bool, default True
@@ -557,153 +264,7 @@ def sync_pipe(
     -------
     A `SuccessTuple` indicating success.
     """
-    from meerschaum.utils.dtypes import are_dtypes_equal
-    dt_col = pipe.columns.get('datetime', None)
-    indices = [col for col in pipe.columns.values() if col]
-    table_name = self.quote_table(pipe.target)
-    is_dask = 'dask' in df.__module__
-    if is_dask:
-        df = df.compute()
-    upsert = pipe.parameters.get('upsert', False)
-    static = pipe.parameters.get('static', False)
-
-    def _serialize_indices_docs(_docs):
-        return [
-            {
-                'ix': self.get_document_key(doc, indices),
-                **(
-                    {
-                        dt_col: doc.get(dt_col, 0)
-                    }
-                    if dt_col
-                    else {}
-                )
-            }
-            for doc in _docs
-        ]
-
-    pipe._clear_cache_key('_columns_types', debug=debug)
-    pipe._clear_cache_key('_columns_indices', debug=debug)
-    valkey_dtypes = pipe.get_parameters(
-        refresh=True,
-        debug=debug,
-    ).get('valkey', {}).get('dtypes', {})
-    new_dtypes = {
-        str(key): str(val)
-        for key, val in df.dtypes.items()
-        if str(key) not in valkey_dtypes
-    }
-    for col, typ in {c: v for c, v in valkey_dtypes.items()}.items():
-        if col in df.columns:
-            try:
-                df[col] = df[col].astype(typ)
-            except Exception:
-                valkey_dtypes[col] = 'string'
-                new_dtypes[col] = 'string'
-                df[col] = df[col].astype('string')
-
-    if new_dtypes and (not static or not valkey_dtypes):
-        valkey_dtypes.update(new_dtypes)
-        update_success, update_msg = pipe.update_parameters(
-            {'valkey': {'dtypes': valkey_dtypes}},
-            debug=debug,
-        )
-        if not update_success:
-            return False, update_msg
-
-    unseen_df, update_df, delta_df = (
-        pipe.filter_existing(df, include_unchanged_columns=True, debug=debug)
-        if check_existing and not upsert
-        else (None, df, df)
-    )
-    num_insert = len(unseen_df) if unseen_df is not None else 0
-    num_update = len(update_df) if update_df is not None else 0
-    msg = (
-        f"Inserted {num_insert}, updated {num_update} rows."
-        if not upsert
-        else f"Upserted {num_update} rows."
-    )
-    if len(delta_df) == 0:
-        return True, msg
-
-    unseen_docs = unseen_df.to_dict(orient='records') if unseen_df is not None else []
-    unseen_indices_docs = _serialize_indices_docs(unseen_docs)
-    unseen_ix_vals = {
-        self.get_document_key(doc, indices, table_name): serialize_document(doc)
-        for doc in unseen_docs
-    }
-    for key, val in unseen_ix_vals.items():
-        try:
-            self.set(key, val)
-        except Exception as e:
-            return False, f"Failed to set keys for {pipe}:\n{e}"
-
-    try:
-        self.push_docs(
-            unseen_indices_docs,
-            pipe.target,
-            datetime_column=dt_col,
-            debug=debug,
-        )
-    except Exception as e:
-        return False, f"Failed to push docs to '{pipe.target}':\n{e}"
-
-    update_docs = update_df.to_dict(orient='records') if update_df is not None else []
-    update_ix_docs = {
-        self.get_document_key(doc, indices, table_name): doc
-        for doc in update_docs
-    }
-    existing_docs_data = {
-        key: self.get(key)
-        for key in update_ix_docs
-    } if pipe.exists(debug=debug) else {}
-    existing_docs = {
-        key: json.loads(data)
-        for key, data in existing_docs_data.items()
-        if data
-    }
-    new_update_docs = {
-        key: doc
-        for key, doc in update_ix_docs.items()
-        if key not in existing_docs
-    }
-    new_ix_vals = {
-        self.get_document_key(doc, indices, table_name): serialize_document(doc)
-        for doc in new_update_docs.values()
-    }
-    for key, val in new_ix_vals.items():
-        try:
-            self.set(key, val)
-        except Exception as e:
-            return False, f"Failed to set keys for {pipe}:\n{e}"
-
-    old_update_docs = {
-        key: {
-            **existing_docs[key],
-            **doc
-        }
-        for key, doc in update_ix_docs.items()
-        if key in existing_docs
-    }
-    new_indices_docs = _serialize_indices_docs([doc for doc in new_update_docs.values()])
-    try:
-        if new_indices_docs:
-            self.push_docs(
-                new_indices_docs,
-                pipe.target,
-                datetime_column=dt_col,
-                debug=debug,
-            )
-    except Exception as e:
-        return False, f"Failed to upsert '{pipe.target}':\n{e}"
-
-    for key, doc in old_update_docs.items():
-        try:
-            self.set(key, serialize_document(doc))
-        except Exception as e:
-            return False, f"Failed to set keys for {pipe}:\n{e}"
-
-    return True, msg
+    return self._rust_client().sync_pipe(pipe, df, check_existing=check_existing)
 
 
 def get_pipe_columns_types(
@@ -724,14 +285,7 @@ def get_pipe_columns_types(
     -------
     A dictionary mapping columns to data types.
     """
-    if not pipe.exists(debug=debug):
-        return {}
-
-    from meerschaum.utils.dtypes.sql import get_db_type_from_pd_type
-    return {
-        col: get_db_type_from_pd_type(typ, flavor='postgresql')
-        for col, typ in pipe.parameters.get('valkey', {}).get('dtypes', {}).items()
-    }
+    return self._rust_client().get_pipe_columns_types(pipe)
 
 
 def clear_pipe(
@@ -763,37 +317,7 @@ def clear_pipe(
     -------
     A `SuccessTuple` indicating success.
     """
-    dt_col = pipe.columns.get('datetime', None)
-
-    existing_df = pipe.get_data(
-        begin=begin,
-        end=end,
-        params=params,
-        debug=debug,
-    )
-    if existing_df is None or len(existing_df) == 0:
-        return True, "Deleted 0 rows."
-
-    docs = existing_df.to_dict(orient='records')
-    table_name = self.quote_table(pipe.target)
-    indices = [col for col in pipe.columns.values() if col]
-    for doc in docs:
-        set_doc_key = self.get_document_key(doc, indices)
-        table_doc_key = self.get_document_key(doc, indices, table_name)
-        try:
-            if dt_col:
-                self.client.zrem(table_name, set_doc_key)
-            else:
-                self.client.srem(table_name, set_doc_key)
-            self.client.delete(table_doc_key)
-        except Exception as e:
-            return False, f"Failed to delete documents:\n{e}"
-    msg = (
-        f"Deleted {len(docs)} row"
-        + ('s' if len(docs) != 1 else '')
-        + '.'
-    )
-    return True, msg
+    return self._rust_client().clear_pipe(pipe, begin=begin, end=end, params=params)
 
 
 def get_sync_time(
@@ -803,47 +327,22 @@ def get_sync_time(
     **kwargs: Any
 ) -> Union[datetime, int, None]:
     """
-    Return the newest (or oldest) timestamp in a pipe.
+    Return the most recent datetime value in the pipe's target table
+    (`params` is not supported by Valkey instances).
+
+    Parameters
+    ----------
+    pipe: mrsm.Pipe
+        The pipe whose target table contains the datetime column.
+
+    newest: bool, default True
+        If `True`, get the newest value, otherwise the oldest.
+
+    Returns
+    -------
+    A `datetime` or `int`, if the pipe exists, otherwise `None`.
     """
-    from meerschaum.utils.dtypes import are_dtypes_equal
-    dt_col = pipe.columns.get('datetime', None)
-    dt_typ = pipe.dtypes.get(dt_col, 'datetime')
-    if not dt_col:
-        return None
-
-    dateutil_parser = mrsm.attempt_import('dateutil.parser')
-    table_name = self.quote_table(pipe.target)
-    try:
-        vals = (
-            self.client.zrevrange(table_name, 0, 0, withscores=True)
-            if newest
-            else self.client.zrange(table_name, 0, 0, withscores=True)
-        )
-        if not vals:
-            return None
-        val = vals[0][0]
-        if isinstance(val, bytes):
-            val = val.decode('utf-8')
-    except Exception:
-        import traceback
-        traceback.print_exc()
-        return None
-
-    doc = json.loads(val)
-    dt_val = doc.get(dt_col, None)
-    if dt_val is None:
-        return None
-
-    try:
-        return (
-            int(dt_val)
-            if are_dtypes_equal(dt_typ, 'int')
-            else dateutil_parser.parse(str(dt_val))
-        )
-    except Exception as e:
-        warn(f"Failed to parse sync time for {pipe}:\n{e}")
-
-    return None
+    return self._rust_client().get_sync_time(pipe, newest)
 
 
 def get_pipe_rowcount(
@@ -857,30 +356,26 @@ def get_pipe_rowcount(
 ) -> Union[int, None]:
     """
     Return the number of documents in the pipe's set.
+
+    Parameters
+    ----------
+    pipe: mrsm.Pipe
+        The pipe whose target table to count.
+
+    begin: Union[datetime, int, None], default None
+        If provided, only count rows >= `begin`.
+
+    end: Union[datetime, int, None], default None
+        If provided, only count rows < `end`.
+
+    params: Optional[Dict[str, Any]], default None
+        If provided, only count rows which match the `params` filter.
+
+    Returns
+    -------
+    The number of matching documents, or `None` if the pipe does not exist.
     """
-    dt_col = pipe.columns.get('datetime', None)
-    table_name = self.quote_table(pipe.target)
-
-    if not pipe.exists():
-        return 0
-
-    try:
-        if begin is None and end is None and not params:
-            return (
-                self.client.zcard(table_name)
-                if dt_col
-                else self.client.scard(table_name)
-            )
-    except Exception as e:
-        if debug:
-            dprint(f"Failed to get rowcount for {pipe}:\n{e}")
-        return None
-
-    df = pipe.get_data(begin=begin, end=end, params=params, debug=debug)
-    if df is None:
-        return 0
-
-    return len(df)
+    return self._rust_client().get_pipe_rowcount(pipe, begin=begin, end=end, params=params)
 
 
 def fetch_pipes_keys(
@@ -891,63 +386,35 @@ def fetch_pipes_keys(
     tags: Optional[List[str]] = None,
     params: Optional[Dict[str, Any]] = None,
     debug: bool = False
-) -> List[
-        Tuple[str, str, Union[str, None], Dict[str, Any]]
-    ]:
+) -> List[Tuple[str, str, Union[str, None], Dict[str, Any]]]:
     """
-    Return the keys for the registered pipes.
+    Return the keys (and parameters) of the registered pipes which match the filters.
+
+    Parameters
+    ----------
+    connector_keys: Optional[List[str]], default None
+        The connector keys (`_` negates).
+
+    metric_keys: Optional[List[str]], default None
+        The metric keys.
+
+    location_keys: Optional[List[str]], default None
+        The location keys (`None` matches a pipe without a location).
+
+    tags: Optional[List[str]], default None
+        The tags (comma-separated groups are ANDed, groups are ORed).
+
+    params: Optional[Dict[str, Any]], default None
+        Additional filters against the pipes' parameters.
+
+    Returns
+    -------
+    A list of tuples of `(connector_keys, metric_key, location_key, parameters)`.
     """
-    from meerschaum.utils.dataframe import query_df
-    from meerschaum.utils.misc import separate_negation_values
-    try:
-        df = self.read(PIPES_TABLE, debug=debug)
-    except Exception:
-        return []
-
-    if df is None or len(df) == 0:
-        return []
-
-    query = {}
-    if connector_keys:
-        query['connector_keys'] = [str(k) for k in connector_keys]
-    if metric_keys:
-        query['metric_key'] = [str(k) for k in metric_keys]
-    if location_keys:
-        query['location_key'] = [str(k) for k in location_keys]
-    if params:
-        query.update(params)
-
-    df = query_df(df, query, inplace=True)
-
-    keys = [
-        (
-            doc['connector_keys'],
-            doc['metric_key'],
-            doc['location_key'],
-            doc.get('parameters', {})
-        )
-        for doc in df.to_dict(orient='records')
-    ]
-    if not tags:
-        return keys
-
-    tag_groups = [tag.split(',') for tag in tags]
-    in_ex_tag_groups = [separate_negation_values(tag_group) for tag_group in tag_groups]
-
-    filtered_keys = []
-    for ck, mk, lk, parameters in keys:
-        pipe_tags = set(parameters.get('tags', []))
-        
-        include_pipe = True
-        for in_tags, ex_tags in in_ex_tag_groups:
-            all_in = all(tag in pipe_tags for tag in in_tags)
-            any_ex = any(tag in pipe_tags for tag in ex_tags)
-
-            if (not all_in) or any_ex:
-                include_pipe = False
-                continue
-
-        if include_pipe:
-            filtered_keys.append((ck, mk, lk, parameters))
-
-    return filtered_keys
+    return self._rust_client().fetch_pipes_keys(
+        connector_keys,
+        metric_keys,
+        location_keys,
+        tags,
+        params,
+    )

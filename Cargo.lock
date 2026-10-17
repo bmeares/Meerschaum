@@ -2882,9 +2882,11 @@ dependencies = [
  "indexmap",
  "meerschaum-api",
  "meerschaum-cli",
+ "meerschaum-compose",
  "meerschaum-connector",
  "meerschaum-core",
  "meerschaum-engine",
+ "meerschaum-jobs",
  "meerschaum-kernel",
  "meerschaum-sql",
  "meerschaum-valkey",
@@ -2965,6 +2967,7 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
+ "tracing-subscriber",
  "uuid",
 ]
 

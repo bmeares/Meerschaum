@@ -382,3 +382,571 @@ fn a_failed_executor_read_stops_down_instead_of_reading_as_no_jobs() {
         out.commands
     );
 }
+
+// ---- Compose job safety (ported from the v4 `tests/test_compose.py`): ownership, scoping and
+// failure propagation, over a fake jobs supervisor, instance and command runner.
+
+/// A project directory written from `yaml` (the project is named `alpha`).
+fn env_from_yaml(yaml: &str) -> Env {
+    let tmp = tempfile::tempdir().unwrap();
+    let base = std::fs::canonicalize(tmp.path()).unwrap();
+    for sub in ["host-root", "host-plugins", "home"] {
+        std::fs::create_dir_all(base.join(sub)).unwrap();
+    }
+    let project = base.join("alpha");
+    std::fs::create_dir_all(&project).unwrap();
+    std::fs::write(project.join("mrsm-compose.yaml"), yaml).unwrap();
+    Env {
+        _tmp: tmp,
+        base,
+        project,
+    }
+}
+
+const ALPHA: &str =
+    "project_name: alpha\nroot_dir: ./root\njobs:\n  api: start api\n  worker: sync pipes --loop\n";
+
+struct Outcome {
+    out: ComposeOutput,
+    /// The sysargs of every command compose ran.
+    commands: Vec<Vec<String>>,
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_with(
+    env: &Env,
+    action: &[&str],
+    jobs: &mut dyn meerschaum_compose::ops::JobOps,
+    instance: &mut InMemoryInstance,
+    runner: &mut RecordingRunner,
+    prompter: &mut dyn meerschaum_compose::ops::Prompter,
+    yes: bool,
+    drop: bool,
+    tweak: impl FnOnce(&mut ComposeArgs),
+) -> ComposeOutput {
+    let host = host(env);
+    let mut sysargs = vec!["compose".to_string()];
+    sysargs.extend(action.iter().map(|s| s.to_string()));
+    let mut args = ComposeArgs {
+        action: action.iter().map(|s| s.to_string()).collect(),
+        sysargs,
+        yes,
+        drop,
+        width: Some(100),
+        ..ComposeArgs::default()
+    };
+    tweak(&mut args);
+    compose(
+        &host,
+        &mut Session::default(),
+        &args,
+        Services {
+            runner,
+            instance,
+            jobs,
+            prompter,
+        },
+    )
+}
+
+fn scoped(env: &Env, action: &[&str], jobs: &mut InMemoryJobs, yes: bool) -> Outcome {
+    let mut runner = RecordingRunner::default();
+    let out = run_with(
+        env,
+        action,
+        jobs,
+        &mut InMemoryInstance::default(),
+        &mut runner,
+        &mut NoInput,
+        yes,
+        false,
+        |_| {},
+    );
+    Outcome {
+        out,
+        commands: runner.commands.into_iter().map(|c| c.sysargs).collect(),
+    }
+}
+
+fn job(sysargs: &[&str], project: Option<&str>, status: &str, restart: bool) -> JobInfo {
+    let mut env = indexmap::IndexMap::new();
+    if let Some(project) = project {
+        env.insert("MRSM__COMPOSE_PROJECT".to_string(), project.to_string());
+    }
+    JobInfo {
+        sysargs: sysargs.iter().map(|s| s.to_string()).collect(),
+        env,
+        status: status.into(),
+        restart,
+    }
+}
+
+fn jobs_of(entries: Vec<(&str, JobInfo)>) -> InMemoryJobs {
+    InMemoryJobs {
+        jobs: entries
+            .into_iter()
+            .map(|(n, j)| (n.to_string(), j))
+            .collect(),
+    }
+}
+
+/// The commands which are not the `show version` the project init runs first.
+fn acting(commands: &[Vec<String>]) -> Vec<Vec<String>> {
+    commands
+        .iter()
+        .filter(|c| {
+            !(c.len() >= 2
+                && c[0] == "show"
+                && c[1] == "version"
+                && !c.iter().any(|a| a == "--name"))
+        })
+        .cloned()
+        .collect()
+}
+
+fn message(outcome: &Outcome) -> String {
+    outcome.out.result.as_ref().unwrap().message.clone()
+}
+
+fn succeeded(outcome: &Outcome) -> bool {
+    outcome.out.result.as_ref().unwrap().success
+}
+
+#[test]
+fn job_actions_without_names_are_scoped_to_the_project() {
+    let env = env_from_yaml(ALPHA);
+    let mut jobs = jobs_of(vec![
+        (
+            "api",
+            job(&["start", "api"], Some("alpha"), "running", true),
+        ),
+        (
+            "worker",
+            job(
+                &[
+                    "sync", "pipes", "--loop", "-t", "alpha", "--name", "worker", "-f",
+                ],
+                None,
+                "stopped",
+                false,
+            ),
+        ),
+        (
+            "other",
+            job(
+                &["sync", "pipes", "-c", "acme:one"],
+                Some("beta"),
+                "stopped",
+                false,
+            ),
+        ),
+        ("manual", job(&["show", "version"], None, "stopped", false)),
+    ]);
+    // Each bare command expands to the project jobs it would have acted on: `start` never
+    // restarts the running `api`, and `restart` only checks `--restart` jobs.
+    let expected: [(&str, &[&str]); 5] = [
+        ("start", &["worker"]),
+        ("stop", &["api"]),
+        ("pause", &["api"]),
+        ("restart", &["api"]),
+        ("delete", &["api", "worker"]),
+    ];
+    for (verb, names) in expected {
+        let o = scoped(&env, &[verb, "jobs"], &mut jobs, true);
+        assert!(succeeded(&o), "{verb}: {}", message(&o));
+        let mut command = vec![verb.to_string(), "jobs".to_string()];
+        command.extend(names.iter().map(|n| n.to_string()));
+        command.extend(["--tags".to_string(), "alpha".to_string()]);
+        assert_eq!(acting(&o.commands), vec![command], "{verb}");
+    }
+}
+
+#[test]
+fn start_jobs_leaves_running_jobs_alone() {
+    let env = env_from_yaml(ALPHA);
+    let mut jobs = jobs_of(vec![
+        (
+            "api",
+            job(&["start", "api"], Some("alpha"), "running", false),
+        ),
+        (
+            "worker",
+            job(
+                &[
+                    "sync", "pipes", "--loop", "-t", "alpha", "--name", "worker", "-f",
+                ],
+                None,
+                "running",
+                false,
+            ),
+        ),
+    ]);
+    let o = scoped(&env, &["start", "jobs"], &mut jobs, true);
+    assert!(succeeded(&o));
+    assert_eq!(message(&o), "All jobs are running.");
+    assert!(acting(&o.commands).is_empty(), "{:?}", o.commands);
+}
+
+#[test]
+fn job_actions_refuse_other_projects_jobs() {
+    let env = env_from_yaml(ALPHA);
+    let mut jobs = jobs_of(vec![
+        (
+            "api",
+            job(&["start", "api"], Some("alpha"), "stopped", false),
+        ),
+        (
+            "other",
+            job(
+                &["sync", "pipes", "-c", "acme:one"],
+                Some("beta"),
+                "stopped",
+                false,
+            ),
+        ),
+        ("manual", job(&["show", "version"], None, "stopped", false)),
+    ]);
+    let o = scoped(&env, &["start", "jobs", "api", "other"], &mut jobs, true);
+    assert!(!succeeded(&o));
+    let msg = message(&o);
+    assert!(
+        msg.contains("other") && !msg.rsplit(':').next().unwrap().contains("api"),
+        "{msg}"
+    );
+    assert!(acting(&o.commands).is_empty(), "{:?}", o.commands);
+
+    // This project's jobs and unstamped jobs may still be named explicitly.
+    let o = scoped(&env, &["start", "job", "api", "manual"], &mut jobs, true);
+    assert!(succeeded(&o), "{}", message(&o));
+    assert_eq!(
+        acting(&o.commands),
+        vec![vec!["start", "job", "api", "manual", "--tags", "alpha"]]
+    );
+}
+
+#[test]
+fn job_actions_with_no_project_jobs_do_nothing() {
+    let env = env_from_yaml(ALPHA);
+    let mut jobs = jobs_of(vec![(
+        "other",
+        job(
+            &["sync", "pipes", "-c", "acme:one"],
+            Some("beta"),
+            "stopped",
+            false,
+        ),
+    )]);
+    let o = scoped(&env, &["stop", "jobs"], &mut jobs, true);
+    assert!(succeeded(&o));
+    assert!(message(&o).contains("No jobs"), "{}", message(&o));
+    assert!(acting(&o.commands).is_empty(), "{:?}", o.commands);
+}
+
+#[test]
+fn other_actions_pass_through_unscoped() {
+    let env = env_from_yaml(ALPHA);
+    let mut jobs = jobs_of(vec![(
+        "other",
+        job(&["sync", "pipes"], Some("beta"), "stopped", false),
+    )]);
+    for action in [["show", "jobs"], ["show", "pipes"], ["sync", "pipes"]] {
+        let o = scoped(&env, &action, &mut jobs, true);
+        assert!(succeeded(&o), "{action:?}: {}", message(&o));
+        let ran = acting(&o.commands);
+        assert_eq!(ran.len(), 1, "{action:?}: {ran:?}");
+        assert!(ran[0].starts_with(&[action[0].to_string(), action[1].to_string()]));
+        // (no job names were inserted)
+        assert!(!ran[0].iter().any(|a| a == "other"), "{ran:?}");
+    }
+}
+
+#[test]
+fn down_deletes_only_exact_owned_job_names() {
+    let env = env_from_yaml("project_name: alpha\nroot_dir: ./root\njobs:\n  api: start api\n");
+    let mut jobs = jobs_of(vec![
+        (
+            "api",
+            job(&["start", "api", "-t", "alpha"], None, "running", false),
+        ),
+        (
+            "foreign",
+            job(&["start", "api", "-t", "beta"], None, "running", false),
+        ),
+    ]);
+    let o = scoped(&env, &["down"], &mut jobs, true);
+    assert!(succeeded(&o), "{}", message(&o));
+    let deletes: Vec<_> = o
+        .commands
+        .iter()
+        .filter(|c| c.first().map(String::as_str) == Some("delete"))
+        .collect();
+    assert_eq!(deletes.len(), 1, "{:?}", o.commands);
+    assert_eq!(deletes[0][..4], ["delete", "job", "api", "-f"]);
+}
+
+#[test]
+fn down_propagates_delete_failures() {
+    let env = env_from_yaml("project_name: alpha\nroot_dir: ./root\njobs:\n  api: start api\n");
+    let mut jobs = jobs_of(vec![(
+        "api",
+        job(&["start", "api", "-t", "alpha"], None, "running", false),
+    )]);
+    let mut runner = RecordingRunner::default();
+    runner.results.push((
+        vec!["delete".to_string()],
+        meerschaum_core::SuccessTuple::fail("delete failed"),
+    ));
+    let out = run_with(
+        &env,
+        &["down"],
+        &mut jobs,
+        &mut InMemoryInstance::default(),
+        &mut runner,
+        &mut NoInput,
+        true,
+        false,
+        |_| {},
+    );
+    let result = out.result.unwrap();
+    assert!(!result.success);
+    assert!(
+        result.message.contains("delete failed"),
+        "{}",
+        result.message
+    );
+}
+
+#[test]
+fn down_untags_shared_pipes_and_deletes_only_unshared() {
+    use meerschaum_compose::ops::{InstanceEvent, RegisteredPipe};
+    use meerschaum_core::value::{Map, Value};
+    let env = env_from_yaml(
+        "project_name: alpha\nroot_dir: ./root\npipes:\n  - connector: plugin:foo\n    metric: shared\n    instance: sql:local\n  - connector: plugin:foo\n    metric: owned\n    instance: sql:local\n",
+    );
+    let registered = |metric: &str, id: i64, tags: &[&str]| {
+        let mut parameters = Map::new();
+        parameters.insert(
+            "tags".into(),
+            Value::List(tags.iter().map(|t| Value::Str(t.to_string())).collect()),
+        );
+        RegisteredPipe {
+            connector_keys: "plugin:foo".into(),
+            metric_key: metric.into(),
+            location_key: None,
+            instance_keys: "sql:local".into(),
+            id,
+            parameters,
+        }
+    };
+    let mut instance = InMemoryInstance {
+        pipes: vec![
+            registered("shared", 1, &["alpha", "beta"]),
+            registered("owned", 2, &["alpha"]),
+        ],
+        ..InMemoryInstance::default()
+    };
+    let out = run_with(
+        &env,
+        &["down"],
+        &mut InMemoryJobs::default(),
+        &mut instance,
+        &mut RecordingRunner::default(),
+        &mut NoInput,
+        true,
+        true,
+        |_| {},
+    );
+    let result = out.result.unwrap();
+    assert!(result.success, "{}", result.message);
+    let edits: Vec<_> = instance
+        .events
+        .iter()
+        .filter_map(|e| match e {
+            InstanceEvent::Edit(pipe, params) => Some((pipe.clone(), params.clone())),
+            _ => None,
+        })
+        .collect();
+    let deletes: Vec<_> = instance
+        .events
+        .iter()
+        .filter_map(|e| match e {
+            InstanceEvent::Delete(pipe) => Some(pipe.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(edits.len(), 1, "{:?}", instance.events);
+    assert!(edits[0].0.contains("shared"), "{:?}", edits);
+    assert_eq!(
+        edits[0].1.get("tags"),
+        Some(&Value::List(vec![Value::Str("beta".into())]))
+    );
+    assert_eq!(deletes.len(), 1, "{:?}", instance.events);
+    assert!(deletes[0].contains("owned"), "{deletes:?}");
+}
+
+#[test]
+fn up_refuses_foreign_collisions_and_propagates_job_start_failures() {
+    let env = env_from_yaml("project_name: alpha\nroot_dir: ./root\njobs:\n  api: start api\n");
+    // A job of another project already has the name: refuse, and start nothing.
+    let mut jobs = jobs_of(vec![(
+        "api",
+        job(
+            &["start", "api", "--name", "api", "-t", "beta"],
+            None,
+            "running",
+            false,
+        ),
+    )]);
+    let o = scoped(&env, &["up"], &mut jobs, true);
+    assert!(!succeeded(&o));
+    assert!(message(&o).contains("not owned"), "{}", message(&o));
+    assert!(
+        !o.commands
+            .iter()
+            .any(|c| c.first().map(String::as_str) == Some("start")),
+        "{:?}",
+        o.commands
+    );
+
+    // No collision: the job is started, and a failing start fails `up`.
+    let mut runner = RecordingRunner::default();
+    runner.results.push((
+        vec!["start".to_string()],
+        meerschaum_core::SuccessTuple::fail("start failed"),
+    ));
+    let out = run_with(
+        &env,
+        &["up"],
+        &mut InMemoryJobs::default(),
+        &mut InMemoryInstance::default(),
+        &mut runner,
+        &mut NoInput,
+        true,
+        false,
+        |_| {},
+    );
+    let result = out.result.unwrap();
+    assert!(!result.success);
+    assert!(
+        result.message.contains("start failed"),
+        "{}",
+        result.message
+    );
+}
+
+#[test]
+fn up_starts_jobs_instead_of_syncing_pipes() {
+    let env = env_from_yaml(
+        "project_name: alpha\nroot_dir: ./root\npipes:\n  - connector: plugin:foo\n    metric: bar\n    instance: sql:local\njobs:\n  hello: show version\n",
+    );
+    let o = scoped(&env, &["up"], &mut InMemoryJobs::default(), true);
+    assert!(succeeded(&o), "{}", message(&o));
+    assert!(
+        message(&o).contains("Running 1 background job"),
+        "{}",
+        message(&o)
+    );
+    let ran = acting(&o.commands);
+    assert!(
+        ran.iter()
+            .any(|c| c.contains(&"hello".to_string()) && c.contains(&"-d".to_string())),
+        "the job was started: {ran:?}"
+    );
+    assert!(
+        !ran.iter()
+            .any(|c| c.starts_with(&["sync".to_string(), "pipes".to_string()])),
+        "`up` must not sync the pipes when jobs are configured: {ran:?}"
+    );
+
+    // `--presync` (with `--no-jobs`) still runs a sync pass.
+    let out = run_with(
+        &env,
+        &["up"],
+        &mut InMemoryJobs::default(),
+        &mut InMemoryInstance::default(),
+        &mut RecordingRunner::default(),
+        &mut NoInput,
+        true,
+        false,
+        |args| {
+            args.presync = true;
+            args.no_jobs = true;
+        },
+    );
+    let result = out.result.unwrap();
+    assert!(result.success, "{}", result.message);
+}
+
+/// A runner which makes `install plugins <name>` do what it does: put the plugin where the
+/// project's plugins directory shows it.
+struct InstallingRunner {
+    plugins_dir: PathBuf,
+    commands: Vec<Vec<String>>,
+}
+
+impl meerschaum_compose::command::CommandRunner for InstallingRunner {
+    fn run(
+        &mut self,
+        command: &meerschaum_compose::command::MrsmCommand,
+    ) -> meerschaum_core::SuccessTuple {
+        self.commands.push(command.sysargs.clone());
+        if command
+            .sysargs
+            .starts_with(&["install".to_string(), "plugins".to_string()])
+        {
+            for name in command.sysargs[2..]
+                .iter()
+                .take_while(|a| !a.starts_with('-'))
+            {
+                std::fs::create_dir_all(&self.plugins_dir).unwrap();
+                std::fs::write(self.plugins_dir.join(format!("{name}.py")), "").unwrap();
+            }
+        }
+        meerschaum_core::SuccessTuple::success()
+    }
+}
+
+/// v4's `test_compose_init_provisions_plugins_on_first_run` (a fixed regression): a fresh
+/// project, with no plugins visible yet, still runs `install required` and `setup plugins` on
+/// the FIRST `compose init`, once installing its plugins has made them visible.
+#[test]
+fn init_provisions_plugins_on_the_first_run() {
+    let env = env_from_yaml(
+        "project_name: fresh-project\nroot_dir: ./root\nplugins_dir: [./plugins]\nplugins: [proj_plugin]\n",
+    );
+    assert!(!env.project.join("plugins").exists());
+    let mut runner = InstallingRunner {
+        plugins_dir: env.project.join("plugins"),
+        commands: Vec::new(),
+    };
+    let host = host(&env);
+    let args = ComposeArgs {
+        action: vec!["init".into()],
+        sysargs: vec!["compose".into(), "init".into(), "-y".into()],
+        yes: true,
+        width: Some(100),
+        ..ComposeArgs::default()
+    };
+    let out = compose(
+        &host,
+        &mut Session::default(),
+        &args,
+        Services {
+            runner: &mut runner,
+            instance: &mut InMemoryInstance::default(),
+            jobs: &mut InMemoryJobs::default(),
+            prompter: &mut NoInput,
+        },
+    );
+    let result = out.result.unwrap();
+    assert!(result.success, "{}", result.message);
+    let ran = acting(&runner.commands);
+    let position = |words: [&str; 2]| {
+        ran.iter()
+            .position(|c| c.starts_with(&[words[0].to_string(), words[1].to_string()]))
+    };
+    let installed = position(["install", "plugins"]).expect("the plugin was installed");
+    let required = position(["install", "required"]).expect("`install required` ran");
+    let setup = position(["setup", "plugins"]).expect("`setup plugins` ran");
+    assert!(installed < required && required < setup, "{ran:?}");
+}

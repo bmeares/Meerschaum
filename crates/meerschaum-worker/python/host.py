@@ -14,6 +14,16 @@ sys.stdout = sys.stderr
 from meerschaum.worker import main
 from meerschaum.worker import _ops
 
+# This interpreter is a worker: while it imports a plugin, no worker is started (a plugin whose
+# import syncs a `plugin:` pipe or calls `mrsm.entry()` would recurse without end).
+try:
+    import meerschaum.plugins as _plugins
+    from meerschaum import _core
+    _plugins._IN_WORKER = True
+    _core.set_in_worker(True)
+except Exception:
+    pass
+
 
 class Console(io.TextIOBase):
     def __init__(self, conn, call_id, stream):
@@ -53,13 +63,6 @@ def plugin_action(conn, call_id, args, frames):
         return _ops.op_action(conn, call_id, args, frames)
     finally:
         Pipe.sync = original
-
-
-def core_action(conn, call_id, args, frames):
-    from meerschaum._internal.entry import entry_with_args
-    # The host selects this operation only for actions without a native implementation.
-    result = entry_with_args(_patch_args=args.get('kwargs') or {})
-    return list(result), []
 
 
 def complete(conn, call_id, args, frames):
@@ -104,7 +107,6 @@ def manifest(conn, call_id, args, frames):
 
 _ops.HANDLERS.update({
     'host_action': captured(plugin_action),
-    'core_action': captured(core_action),
     'complete': captured(complete),
     'parse_plugin_args': parse_plugin_args,
     'build_manifest': manifest,

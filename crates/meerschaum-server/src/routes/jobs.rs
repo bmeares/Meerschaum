@@ -12,7 +12,10 @@ use meerschaum_core::{Map, SuccessTuple};
 use serde_json::{Value as Json, json};
 
 use super::{Ctx, body_bytes};
-use crate::auth::{is_user_allowed_to_execute, jwt_decode, load_from_subject, scoped_auth};
+use crate::auth::{
+    is_user_allowed_to_execute, jwt_decode, load_from_subject, scoped_auth,
+    scoped_auth_with_aliases,
+};
 use crate::backends::{CreateJob, LogEvent};
 use crate::config::ServerConfig;
 use crate::error::{ApiError, ApiResult};
@@ -151,7 +154,22 @@ where
     F: FnOnce(AppState, String) -> Fut,
     Fut: std::future::Future<Output = SuccessTuple>,
 {
-    let principal = scoped_auth(&ctx.state, &ctx.headers, scopes).await?;
+    guarded_with_aliases(ctx, scopes, &[], name, check_exists, op).await
+}
+
+async fn guarded_with_aliases<F, Fut>(
+    ctx: Ctx,
+    scopes: &[&str],
+    aliases: &[(&str, &str)],
+    name: String,
+    check_exists: bool,
+    op: F,
+) -> ApiResult
+where
+    F: FnOnce(AppState, String) -> Fut,
+    Fut: std::future::Future<Output = SuccessTuple>,
+{
+    let principal = scoped_auth_with_aliases(&ctx.state, &ctx.headers, scopes, aliases).await?;
     let allowed = is_user_allowed_to_execute(&ctx.state, principal.as_ref()).await;
     if !allowed.success {
         return Ok(tuple_response(&allowed));
@@ -180,10 +198,14 @@ async fn start_job(ctx: Ctx, Path(name): Path<String>) -> ApiResult {
 }
 
 async fn stop_job(ctx: Ctx, Path(name): Path<String>) -> ApiResult {
-    // PARITY: the scope typo `josb:stop` is v4's (`api/routes/_jobs.py:213`).
-    guarded(
+    // FIX (intentional v4 change): v4 required the misspelled scope `josb:stop`
+    // (`api/routes/_jobs.py:213`), which no token can hold, so only `*` could stop a job over
+    // the API. The route requires `jobs:stop`; a token that explicitly holds the legacy
+    // `josb:stop` is still accepted in its place.
+    guarded_with_aliases(
         ctx,
-        &["jobs:execute", "josb:stop"],
+        &["jobs:execute", "jobs:stop"],
+        &[("jobs:stop", "josb:stop")],
         name,
         true,
         |s, n| async move { s.jobs.stop(&n).await },

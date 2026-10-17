@@ -23,15 +23,19 @@
 
 use pyo3::prelude::*;
 
+pub mod api_client_api;
 pub mod arrow_bridge;
 pub mod build_info;
+pub mod compose_api;
 pub mod config_api;
 pub mod convert;
 pub mod core_api;
 pub mod d14_api;
 pub mod engine_api;
+pub mod entry_api;
 pub mod facade;
 pub mod ffi_import;
+pub mod jobs_api;
 pub mod kernel_api;
 pub mod logging;
 pub mod pandas_bridge;
@@ -46,6 +50,7 @@ pub mod sql_api;
 pub mod static_config;
 pub mod sync_api;
 pub mod trace;
+pub mod valkey_api;
 pub mod verify_api;
 pub mod version_api;
 pub mod yaml_api;
@@ -57,6 +62,8 @@ pub mod yaml_api;
 #[pymodule(gil_used = false)]
 fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     logging::install();
+    // Python owns this process's signals: no `mrsm` stop handler that could end the interpreter.
+    meerschaum_cli::native::jobs::set_embedded(true);
     m.add("__version__", build_info::VERSION)?;
     m.add("HAS_STATIC_CONFIG", static_config::STATIC_TOML.is_some())?;
     m.add("HAS_POLARS", cfg!(feature = "polars"))?;
@@ -117,6 +124,19 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(verify_api::register_connector, m)?)?;
     m.add_function(wrap_pyfunction!(verify_api::unregister_connector, m)?)?;
 
+    // The native action dispatcher from Python (wave 16, P2)
+    m.add_function(wrap_pyfunction!(entry_api::entry, m)?)?;
+    m.add_function(wrap_pyfunction!(entry_api::run_action, m)?)?;
+    m.add_function(wrap_pyfunction!(entry_api::core_actions, m)?)?;
+    m.add_function(wrap_pyfunction!(entry_api::set_in_worker, m)?)?;
+    m.add_function(wrap_pyfunction!(entry_api::plugin_import_begin, m)?)?;
+    m.add_function(wrap_pyfunction!(entry_api::plugin_import_end, m)?)?;
+    m.add_function(wrap_pyfunction!(compose_api::compose_init_env, m)?)?;
+    m.add_function(wrap_pyfunction!(compose_api::compose_read_config, m)?)?;
+    m.add_function(wrap_pyfunction!(compose_api::compose_env_dict, m)?)?;
+    m.add_function(wrap_pyfunction!(compose_api::compose_dir_paths, m)?)?;
+    m.add_function(wrap_pyfunction!(compose_api::compose_installed_plugins, m)?)?;
+
     // `Pipe.sync()` for explicit data (wave 13)
     m.add_function(wrap_pyfunction!(sync_api::sync_pipe, m)?)?;
     m.add_function(wrap_pyfunction!(sync_api::parse_sql_uri, m)?)?;
@@ -126,8 +146,15 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // `Pipe` methods over an instance: get_data, filter_existing, deduplicate, ... (wave 15, L2)
     pipe_methods_api::register(m)?;
 
+    // `meerschaum.jobs.Job`, the executors and `utils.daemon.Daemon` over `meerschaum-jobs` (wave 16, S)
+    jobs_api::register(m)?;
+
     // PyYAML-compatible YAML codec with a lossless Python boundary (wave 13)
     yaml_api::register(m)?;
+
+    // The `APIConnector` client and the `ValkeyConnector` (wave 16, S)
+    api_client_api::register(m)?;
+    valkey_api::register(m)?;
 
     // meerschaum-sql (instance connector)
     m.add_class::<sql_api::PySqlConnector>()?;

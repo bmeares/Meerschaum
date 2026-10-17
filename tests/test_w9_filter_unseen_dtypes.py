@@ -1,7 +1,9 @@
 """
 `filter_unseen_df` result dtypes through the façade (PARITY.md rows 17 and 18): the Rust kernel
-returns the dtype v4 gets from `merge(new, old)` after `infer_objects()`. Each case runs in
-`python` mode, then `rust` mode, and the dtypes and rows must agree.
+returns the dtype v4 gets from `merge(new, old)` after `infer_objects()`. The dtypes and rows the
+parity-phase Python mode produced for each case are recorded in
+`tests/oracle/test_w9_filter_unseen_dtypes.json` (not v4.1.4 output) and must agree with the Rust
+result.
 """
 
 import datetime
@@ -10,22 +12,7 @@ from decimal import Decimal
 import pandas as pd
 import pytest
 
-from meerschaum._core import _gate
-
-try:
-    from meerschaum import _core
-    HAS_CORE = _core.load() is not None
-except Exception:
-    HAS_CORE = False
-
-pytestmark = pytest.mark.skipif(not HAS_CORE, reason="the Rust extension is not built")
-
-
-@pytest.fixture(autouse=True)
-def restore_mode():
-    original = (_gate._MODE, _gate._FEATURES)
-    yield
-    _gate._MODE, _gate._FEATURES = original
+from tests import _oracle as oracle
 
 
 def _frames(column, old_values, new_values, dtype=object):
@@ -58,10 +45,9 @@ def test_result_dtype_matches_v4(name):
     column, old_values, new_values, dtypes, expected_dtype = CASES[name]
     old, new = _frames(column, old_values, new_values)
     from meerschaum.utils.dataframe import filter_unseen_df
-    results = {}
-    for mode in ('python', 'rust'):
-        _gate.set_mode(mode)
-        results[mode] = filter_unseen_df(old, new, dtypes=dtypes)
-    assert str(results['python'][column].dtype) == expected_dtype
-    assert str(results['rust'][column].dtype) == str(results['python'][column].dtype)
-    assert results['rust'].to_dict('records') == results['python'].to_dict('records')
+
+    v4 = oracle.expected()
+    result = filter_unseen_df(old, new, dtypes=dtypes)
+    assert v4['dtype'] == expected_dtype
+    assert str(result[column].dtype) == v4['dtype']
+    assert result.to_dict('records') == v4['records']

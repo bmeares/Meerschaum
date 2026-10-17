@@ -117,6 +117,9 @@ struct Host {
     /// `VIRTENV_RESOURCES_PATH` when it is not the default `<root>/venvs` (`MRSM_VENVS_DIR`,
     /// `set_venvs_dir`): what `Paths::venvs_dir` carries.
     venvs_dir: Option<PathBuf>,
+    /// `DOT_CONFIG_DIR_PATH` (`$XDG_CONFIG_HOME`, else `~/.config`): the systemd user unit
+    /// directory derives from it.
+    dot_config_dir: PathBuf,
     allow_writes: bool,
 }
 
@@ -147,6 +150,12 @@ fn host(py: Python<'_>) -> PyResult<Host> {
         root,
         config_dir: path_text(&paths.getattr("CONFIG_DIR_PATH")?)?,
         venvs_dir,
+        dot_config_dir: paths
+            .getattr("DOT_CONFIG_DIR_PATH")
+            .ok()
+            .and_then(|p| path_text(&p).ok())
+            .map(|p| meerschaum_core::config::paths::resolve_path(&p))
+            .unwrap_or_else(Paths::process_dot_config_dir),
         allow_writes,
     })
 }
@@ -194,6 +203,7 @@ pub(crate) fn live_config(py: Python<'_>) -> PyResult<Config> {
     let mut paths = Paths::for_root(host.root.clone());
     paths.config_dir = host.config_dir.clone();
     paths.venvs_dir = host.venvs_dir.clone();
+    paths.dot_config_dir = host.dot_config_dir.clone();
     // The plugins directories the Python process uses (`MRSM_PLUGINS_DIR` may name several): the
     // worker manifest is built from them.
     if let Ok(dirs) = py
@@ -257,6 +267,17 @@ pub fn live_config_paths(py: Python<'_>) -> PyResult<Bound<'_, PyDict>> {
             .collect::<Vec<_>>(),
     )?;
     out.set_item(
+        "dot_config_dir",
+        paths.dot_config_dir.to_string_lossy().to_string(),
+    )?;
+    out.set_item(
+        "systemd_user_dir",
+        paths
+            .path("SYSTEMD_USER_RESOURCES_PATH")
+            .to_string_lossy()
+            .to_string(),
+    )?;
+    out.set_item(
         "venvs_dir",
         paths.venvs_dir.map(|p| p.to_string_lossy().to_string()),
     )?;
@@ -276,6 +297,7 @@ fn run<R>(
             paths.root_dir = host.root.clone();
             paths.config_dir = host.config_dir.clone();
             paths.venvs_dir = host.venvs_dir.clone();
+            paths.dot_config_dir = host.dot_config_dir.clone();
         }
         s.set_allow_writes(host.allow_writes);
         s.set_config_lossless(before);
@@ -1363,7 +1385,14 @@ fn env_pairs(py: Python<'_>, env: Option<&Bound<'_, PyAny>>) -> PyResult<Vec<(St
     let mut out = Vec::new();
     for pair in source.call_method0("items")?.try_iter()? {
         let pair = pair?;
-        out.push((pair.get_item(0)?.extract()?, pair.get_item(1)?.extract()?));
+        // A variable that is not valid UTF-8 reaches Python as surrogate escapes, which cannot
+        // become a `String`; it cannot name or hold anything Meerschaum reads, so it is skipped.
+        if let (Ok(name), Ok(value)) = (
+            pair.get_item(0)?.extract::<String>(),
+            pair.get_item(1)?.extract::<String>(),
+        ) {
+            out.push((name, value));
+        }
     }
     Ok(out)
 }

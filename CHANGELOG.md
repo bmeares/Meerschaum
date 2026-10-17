@@ -1,8 +1,131 @@
 # 🪵 Changelog
 
+## 5.0.0 Releases
+
+Meerschaum 5 is a rewrite of the core in Rust: the data kernel, the `sql:` / `valkey:` / `api:` connectors, the Syncing Engine, jobs, compose, the HTTP API, the MCP server, the web console and the `mrsm` CLI and shell. The `meerschaum` Python package stays as the plugin SDK and a façade, so pipes, parameters, configuration, compose files, jobs, the HTTP API and the Python public API keep working. Read the [migration guide](/reference/migrating-to-v5/) before upgrading; v4.1.x stays installable and receives security fixes until 5.1.0.
+
+### v5.0.0
+
+*Unreleased: the entry is complete for the current pre-release series (`5.0.0-a1`), and the release date goes here.*
+
+#### Added
+
+- **The Syncing Engine and `mrsm.Pipeline`.**  
+  The pipe graph (`parents`, `children` and `{{ Pipe() }}` references) is understood by the engine: `mrsm sync pipes --parents [N] --children [N] --resume <run_id>` and `pipe.sync(parents=, children=)` run ancestors and descendants in dependency order, cap a child at the minimum of its parents' watermarks, replay late data as exact backfills from a dirty-range ledger, and rebuild a pipe whose definition changed. `mrsm plan pipes` is a dry run, `mrsm show graph` draws the selection, `mrsm show runs` / `show run <id>` read the run history (with a Gantt chart), and every run is stored on your instance in `mrsm_engine_*` tables. A bare `sync pipes` keeps v4 semantics. See [Pipelines](/reference/pipelines/).
+
+- **Continuous mode: `--loop` and `--listen`.**  
+  `--loop --min-seconds N` behaves as v4's laps did (and `--engine laps` is gone), and becomes an engine run when the selection has edges. `--listen` supervises streaming sources: connectors with `IS_STREAMING = True` and `subscribe(pipe, sink)` get micro-batching (`parameters['stream']`), acknowledgement after commit, restarts with backoff and children triggered on flush; the v4 pattern (a `sync()` that subscribes and returns) keeps working. Per-pipe `schedule`, `retry` and `min_seconds` parameters and the `system.engine.*` settings are documented in the [parameters reference](/reference/pipes/parameters/).
+
+- **`mrsm.SyncResult`.**  
+  `pipe.sync()` returns a `tuple` subclass equal to `(success, message)` with `inserted`, `updated`, `upserted`, `deleted`, `changed_intervals`, `duration`, `begin` and `end`, so `success, msg = pipe.sync()` still unpacks. Every kind of input syncs in Rust: no data (a `sql:`, `api:` or `valkey:` source, a plugin, a `@make_connector` connector), documents, dictionaries of lists, DataFrames, Arrow tables, strings, generators of chunks, temporary pipes, and pipes with `reference`s, `{{ }}` templates or `MRSM{}` symlinks, on every SQL flavor (`mssql`, `oracle`, `duckdb` and in-memory SQLite included), `api:`, `valkey:` and custom instances.
+
+- **Rust plugins.**  
+  A plugin can be a native library (`plugin.toml` plus `lib<name>.so`) built with the new `meerschaum-plugin` crate, or a Cargo crate that Meerschaum builds itself into `MRSM_ROOT_DIR/cache/native_build/` when `cargo` is on `PATH`. It can provide `fetch`, `sync`, actions, hooks, a connector or instance, HTTP routes and console pages, exchanging Arrow record batches. A Rust plugin replaces a Python plugin of the same name entirely. See [Rust plugins](/reference/plugins/rust-plugins/).
+
+- **A new console and the page contract.**  
+  `/dash` is rendered by the Rust server (HTMX, vendored Plotly.js, MapLibre GL JS, Cytoscape and xterm.js; no CDN), with a new `pipelines` page. Plugin pages return an HTML fragment and Plotly figure JSON (`meerschaum.plugins.figure()`, `data-mrsm-figure`, `data-mrsm-map`); `@dash_plugin` apps keep working at `/dash/<plugin>/`.
+
+- **The web terminal in Rust.**  
+  `/webterm/<session id>` and `/dash/webterm` are served by the API server itself (a PTY bridge with the tmux session model and terminado's message format, xterm.js 6.0.0), with no Tornado process and no separate `start webterm`.
+
+- **A zero-dependency base wheel, extras and a binary wheel.**  
+  `pip install meerschaum` pulls in only the `meerschaum-cli` binary wheel. Heavier libraries are extras (`pandas`, `polars`, `geo`, `sql`, `sql-mssql`, `sql-oracle`, `sql-duckdb`, `sql-cockroachdb`, `api`, `dash`, `shell`, `gui`, `cli-tools`, `full`), imported only when used. `cargo install meerschaum-cli`, release binaries and a `bmeares/meerschaum:slim` image run without an interpreter until a Python plugin is installed.
+
+- **Venv accounting.**  
+  `attempt_import` attributes every install to its requester in `venvs/<name>/.mrsm_requests.json`. `mrsm show venvs` lists venvs with sizes and requesters and `mrsm prune venvs` removes packages nothing needs; packages with no recorded requester are never removed.
+
+- **Rate limits and pipe leases.**  
+  `api.permissions.rate_limits` throttles route groups such as `/login` without middleware. Two jobs never sync the same pipe at once (`mrsm_pipe_leases` on SQL, `SET NX PX` on Valkey, `/engine/leases` on API instances; custom connectors may implement `acquire_pipe_lease` / `release_pipe_lease`).
+
+- **Job executors in Rust.**  
+  The `api:<label>` and `systemd` executors, executor-aware compose, and `mrsm api <label> <action>` run natively, with a golden-tested systemd unit text.
+
+#### Changed
+
+- **The core is Rust.**  
+  Pipe parameters and templating, configuration (`get_config` and `MRSM{}` over a lossless registry), the data kernel (`enforce_dtypes`, `filter_existing`, special-column handling), `SQLConnector` instance methods, jobs, compose, the CLI and shell, the HTTP API and MCP server are Rust crates under `crates/`. `SQLConnector.read/exec/value/to_sql/.engine/get_tables()` stay SQLAlchemy (extra `meerschaum[sql]`). Public surfaces are unchanged: pipe keys and every `parameters` key, the YAML config layout, `MRSM_SQL_<LABEL>` connectors, instance tables, the `jobs/` layout, compose files, every HTTP route and the Python public API.
+
+- **Config files are written atomically.**  
+  `write_config` writes a temporary file next to the target and renames it, keeping the mode and owner (a new file is `0600`), so a failed write no longer truncates or deletes a file that holds connector passwords. A single bind-mounted file falls back to an in-place rewrite. YAML values that JSON cannot hold (dates, bytes, very large integers) now load, substitute and write back unchanged.
+
+- **`MRSM_NO_AUTO_INSTALL=1` disables every implicit install.**  
+  v4 still downloaded `semver` for the version check and the API imported `uv` at startup. `attempt_import`, `is_installed`, the version checks, the `uv`/`pip`/`wheel` bootstraps and the API host now install nothing; `install packages`, `pip_install(...)` and `install required` still run.
+
+- **Plugin, package and venv actions run in `mrsm`.**  
+  The `install`, `uninstall`, `upgrade`, `verify`, `setup`, `bootstrap`, `register`, `edit` and `delete` actions for plugins, packages and venvs, plus `login`, `sql`, `os`, `stack`, `bootstrap`, the connector, token and cache actions and `edit config --rollback`, no longer need a Python interpreter, with v4's prompts, messages and exit codes. `edit` actions open `$VISUAL`, else `$EDITOR`, else `vi`. `upgrade meerschaum` upgrades the environment `mrsm` was installed into (or `MRSM_PYTHON`).
+
+- **Systemd job units pin the interpreter.**  
+  The unit runs the `mrsm` binary with `Environment=MRSM_PYTHON=<absolute path>`, and `systemctl --user stop` asks the job to stop once.
+
+- **Plugins run in a worker process.**  
+  Python plugins, custom connectors, hooks, `@api_plugin` routes and MCP tools run in a supervised worker (`python -m meerschaum.worker`) or the API host (`python -m meerschaum.api.host`, started only when an installed plugin needs it), driven by a cached plugin manifest so `--help`, tab completion and the server start without importing Python.
+
+- **Dependencies.**  
+  `sqlx` moves from 0.8 to 0.9, which also drops the duplicate RustCrypto 0.10 crates it carried, and the vendored xterm.js is 6.0.0 with its fit and unicode11 add-ons.
+
+- **`*` grants all scopes, and is stored as `*`.**  
+  `edit tokens` and `edit users` expanded a typed `*` to the list of built-in scopes, so a "grant everything" token or user lacked custom (plugin-defined) scopes and every scope added later. `*` is now stored literally by `edit tokens`, `edit users`, `register tokens --scopes '*'`, `POST /tokens/register` and the console's token forms, and the checks already honored it. The console's register and edit forms have a "Grant all scopes (`*`, including custom and future scopes)" switch (on by default, and on for a token holding `*`, with the checklist hidden); with it off they list the built-in scopes and take custom scopes in a field, and saving a `*` token with the switch on keeps `*`. Scope names are never validated, so custom scopes such as `myplugin:read` can be granted explicitly and required by `@api_plugin` routes. The actions gate (`actions:execute` and `jobs:execute` for non-administrators) now also accepts `*`. A token or user created with no scopes still gets the built-in list. See [Scopes](/reference/api-instance/tokens/#scopes). (v4.1.6 has the same change.)
+
+- **A token carries at most its owner's scopes.**  
+  v4 let any user register or edit a token with any scopes, `*` included, so a user with `pipes:read` could mint an all-powerful token. `POST /tokens/register`, `POST /tokens/{id}/edit`, `register tokens`, `edit tokens` and the console's token forms now refuse (never trim) scopes the owner does not hold, answering `403` or a failure that names each disallowed scope. `*` and custom scopes need an administrator or a user who holds them. A token registered without scopes gets its owner's own (the built-in list for an administrator or a holder of `*`, as before), and editing a token keeps the scopes it already holds, so renaming never fails. The console's register form starts from the signed-in user's scopes, with "Grant all scopes" on only for an administrator or a holder of `*`. Tokens created through the Python API (`Token.register()`) talk to the instance directly and are not capped.
+
+- **Only a token's owner or an administrator may edit, invalidate or delete it.**  
+  v4's `POST /tokens/{id}/edit`, `POST /tokens/{id}/invalidate` and `DELETE /tokens/{id}` never checked who owned the token, so any user could relabel or re-scope another user's token (an administrator's `*` token included), delete it, or make an invalidated token valid again. They now answer `403 Cannot edit|invalidate|delete another user's token.` to anyone else (`404` for a missing token; a token without an owner is an administrator's), only an administrator may set `is_valid` back to true, an edit that leaves out `is_valid` or `scopes` keeps them, and the route no longer stamps the caller as the token's user. `edit tokens` and the other token actions run against the instance directly with the operator's own access and stay trusted (the rule applies to an `api:` instance, where the server enforces it).
+
+- **A startup warning for a server that gives a shell to anyone who can connect.**  
+  With the defaults, anyone can register an account (`api:permissions:registration:users`) and open the web terminal as a logged-in non-admin (`api:permissions:actions:non_admin`), exactly as in v4. `mrsm start api` now prints a warning once when both are on and the server binds a non-loopback address (the default `0.0.0.0` included) without `--secure` or `--private`, and the migration guide, the API deployment page and the web console page carry a prominent warning. Use `--secure` or `--private`, or set either setting to false. `--no-auth` on a non-loopback address prints its own warning (every route, `/actions` included, is open to anyone who can connect, as in v4), and the warnings cannot see a reverse proxy: a loopback bind behind a proxy exposes the same terminal without one.
+
+#### Removed
+
+- **The Python core.**  
+  `connectors/sql/_*.py`, `core/Pipe/_*.py`, the action modules, `api/routes/*`, `api/dash/*` callbacks and pages, `utils/daemon` and the other v4 implementation modules are deleted, and importing one raises an `ImportError` naming the replacement. The public API, SDK and façades stay; the exact list is in the migration guide under "Removed in 5.0".
+
+- **Dask, and dozens of packages from the dependency set.**  
+  `get_data(as_dask=True)` and syncing a Dask DataFrame raise a `TypeError` naming the migration guide. `dask`, `partd`, `joblib`, `psycopg2-binary`, `asyncpg`, `databases`, `GeoAlchemy2`, `rich`, `prompt-toolkit`, `pygments`, `tabulate`, `python-daemon`, `dill`, `psutil`, `gunicorn`, `httpx`, `valkey`, `python-jose`, `terminado`, `tornado`, `ruamel.yaml` and the other libraries that served code now in Rust are no longer installed by any extra; declare what your plugin imports in `required`.
+
+- **`--engine laps`, the CLI daemons, `pyoxidizer` builds and Python 3.10.**  
+  `--loop` replaces laps, `start|stop|restart daemons` and `start worker` report that actions run natively, `cargo install meerschaum-cli` and the binary wheel replace the portable archive, and the wheels require Python 3.11 or newer.
+
+- **Meerschaum's own Dash console and middleware over core routes.**  
+  The console is Rust; plugin Dash apps move under `/dash/<plugin>/`. Plugin middleware no longer sees core routes (use `api.permissions.rate_limits`, `api.permissions.routes.allowlist` or a reverse proxy), and a plugin cannot patch console pages.
+
+#### Fixed
+
+- **Stopping a job over the API needs `jobs:stop`.**  
+  `POST /jobs/{name}/stop` required a scope spelled `josb:stop` (a typo carried over from v4's route) that no token could hold, so only `*` tokens and administrators could stop jobs. It now requires `jobs:execute` and `jobs:stop`, and still accepts a token that explicitly holds the legacy `josb:stop` in place of `jobs:stop`. The same fix ships in v4.1.6.
+
+- **Plugin archives can no longer write outside their directory.**  
+  v4's extraction compared path strings, so a member `../<name>.txt` escaped a directory named `<name>`, and symlink and hard-link members were extracted. v5 compares path components, checks each destination on disk, refuses links and caps member size. Plugin and venv names are single path components (`../..` and `mrsm` are rejected).
+
+- **Job names can no longer address the whole root.**  
+  `DELETE /jobs/..` resolved to `<root>/jobs/..` and removed the root. Names must be one path component, and a job directory is only removed when it is `<jobs dir>/<one component>`.
+
+- **YAML in a config file or pipe parameters can no longer run code.**  
+  The `!!python/object`, `/apply`, `/name`, `/module` tags are refused like `safe_load` does; `!!python/tuple` is still read.
+
+- **The web terminal checks `Origin`, and a second login works.**  
+  Cross-origin terminal websockets are refused, and a second login on one server no longer fails with a `500`. Who may open a terminal is unchanged: any logged-in user, unless `api.permissions.actions.non_admin` is false or the server runs with `--secure`, which leave it to administrators.
+
+- **A systemd job stop no longer delivers a second `SIGINT`.**  
+  The job treated the second signal as a force quit. Remote `api:` executor reads that fail now fail the action instead of reading as "no jobs", so a failed `compose down` cannot silently leave jobs running.
+
+- **Job status no longer scans the process table.**  
+  Listings, status and restart checks read the PID file first and consult metadata for completed jobs, with one shared, cached `/proc` scan for the rest. One idle supervisor pass over 50 retained completed jobs dropped from 1773 ms to 5 ms of CPU (the same fix ships as v4.1.5).
+
+- **`edit tokens` and `register tokens` work on SQLite.**  
+  v4 failed with a pydantic `ValidationError` because `scopes` came back as JSON text.
+
+- **`Pipe.sync()` of integers beyond 64 bits.**  
+  Values such as `2**70` sync as a `numeric` column instead of failing with `DataFrame is None`.
+
+- **`bootstrap plugins` with `MRSM_NOASK` no longer loops forever,** and `delete venvs` and `uninstall plugins` refuse names that point outside `venvs/`.
+
+- **Unconstrained PostgreSQL `NUMERIC` keeps its exact scale.**  
+  Values read back as `Decimal('3')`, `Decimal('2.5')` and `Decimal('-0.10')`, as with psycopg, and a 40-digit value no longer loses precision.
+
 ## 4.1.0 Releases
 
-This is the current release cycle, so stay tuned for future releases!
+The 4.1 series receives security fixes until 5.1.0 ships.
 
 ### v4.1.4
 
@@ -407,7 +530,7 @@ This is the current release cycle, so stay tuned for future releases!
 
   ```bash
   # The datetime is translated to an epoch (e.g. milliseconds) for the integer 'ts' axis.
-  mrsm show data --begin 2026-05-30 -c mqtt:sra -m test -l backup -i sql:main
+  mrsm show data --begin 2026-05-30 -c mqtt:acme -m test -l backup -i sql:main
   ```
 
   Integer bounds (`--begin 1780099200000`) still pass through unchanged. A datetime bound on a non-epoch integer axis (no `precision` set) now raises a clear error instead of producing an invalid query.

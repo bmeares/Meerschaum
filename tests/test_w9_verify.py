@@ -1,11 +1,11 @@
 """
-Wave 9 (task Q): `Pipe.verify()` routed to Rust under `MRSM_CORE=rust` (`_core.verify_pipe`).
+Wave 9 (task Q): `Pipe.verify()` runs in Rust (`_core.verify_pipe`).
 
-Each scenario runs the same sequence of verification calls in `python` mode and in `rust` mode in
-one process (the gate is re-read with `set_mode`), on pipes with the same keys (dropped in
-between), and compares the `SuccessTuple`s (messages included: they carry the chunk bounds and
-the per-chunk statistics), the chunk bounds, and the rows each verification leaves in the
-target table.
+Each scenario runs a sequence of verification calls on pipes and compares what it observes with
+the results recorded from the parity-phase Python mode (`tests/oracle/test_w9_verify.json`, not
+v4.1.4 output): the `SuccessTuple`s (messages
+included: they carry the chunk bounds and the per-chunk statistics), the chunk bounds, and the
+rows each verification leaves in the target table.
 
 The connectors are built ad hoc from Python (`mrsm.get_connector(...)` with attributes that are
 in no config file): the Rust session must use them instead of reading the config registry.
@@ -18,15 +18,8 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 import meerschaum as mrsm
-from meerschaum._core import _gate
-
-try:
-    from meerschaum import _core
-    HAS_CORE = _core.load() is not None
-except Exception:
-    HAS_CORE = False
-
-pytestmark = pytest.mark.skipif(not HAS_CORE, reason="the Rust extension is not built")
+from meerschaum import _core
+from tests import _oracle as oracle
 
 SCHEMA = 'w9q'
 
@@ -41,13 +34,6 @@ def _flavors():
     if 'postgis' in selected:
         flavors.append('postgis')
     return flavors
-
-
-@pytest.fixture(autouse=True)
-def restore_mode():
-    original = (_gate._MODE, _gate._FEATURES)
-    yield
-    _gate._MODE, _gate._FEATURES = original
 
 
 def _connector(flavor: str, label: str, tmp_path):
@@ -174,9 +160,7 @@ def _scenario(instance, source_conn, suffix):
 
 
 def _both(func, *args):
-    _gate.set_mode('python')
-    expected = func(*args)
-    _gate.set_mode('rust')
+    expected = oracle.expected()
     actual = func(*args)
     return expected, actual
 
@@ -241,7 +225,6 @@ def test_every_call_gets_a_native_context(tmp_path):
     """Wave 15 (L): `debug`, forwarded keywords, plugin sources, references and templates all
     run natively; only an instance without a native driver would keep the Python orchestration."""
     from meerschaum.core.Pipe._verify import _rust_verify_context
-    _gate.set_mode('rust')
     suffix = uuid.uuid4().hex[:6]
     instance = _connector('sqlite', f'w9q_fb_{suffix}', tmp_path)
     _, target = _build_pipes(instance, instance, 'fallback')
@@ -268,8 +251,6 @@ def test_every_call_gets_a_native_context(tmp_path):
     )
     assert _rust_verify_context(template_pipe)[0] is not None
 
-    _gate.set_mode('python')
-    assert _gate.rust_impl('verify_pipe') is None
     target.delete()
 
 
@@ -351,7 +332,6 @@ def test_verify_variants_match_python(flavor, tmp_path, monkeypatch):
 
 def test_register_connector_binding(tmp_path):
     """`_core.register_connector` puts a Python-built connector into the façade session."""
-    _gate.set_mode('rust')
     suffix = uuid.uuid4().hex[:6]
     conn = _connector('sqlite', f'w9q_reg_{suffix}', tmp_path)
     rust = conn._rust_method('register_pipe').__self__

@@ -169,7 +169,6 @@ impl TestEnv {
     pub fn python_command(&self, code: &str) -> Command {
         let mut cmd = Command::new(python());
         cmd.arg("-c").arg(code).current_dir(repo_root());
-        cmd.env_remove("MRSM_CORE");
         for (k, v) in self.env() {
             cmd.env(k, v);
         }
@@ -193,7 +192,6 @@ impl TestEnv {
         WorkerOptions {
             python: python(),
             env: self.env(),
-            env_remove: vec!["MRSM_CORE".into()],
             current_dir: Some(repo_root()),
             startup_timeout: Duration::from_secs(120),
             quiet: std::env::var("MRSM_WORKER_TEST_VERBOSE").is_err(),

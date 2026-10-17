@@ -1,27 +1,20 @@
 """
-D14 runway parity (wave 8): the remaining Python-core paths routed to Rust under `MRSM_CORE=rust`.
+D14 runway parity (wave 8): the Rust implementations of the formerly Python-core paths.
 
-Each test runs the same call in `python` mode and in `rust` mode in one process (the gate is
-re-read with `set_mode`) and compares the results. The SQL text of `sql_item_name`,
-`build_where` and `get_pipe_metadef` must match v4 exactly, per flavor.
+Each test runs a call in Rust and compares the result with what the parity-phase Python mode
+returned (`tests/oracle/test_d14_bindings.json`: a recording of that mode, not v4.1.4 output, see
+`tests/_oracle.py`). The SQL text of `sql_item_name`, `build_where` and
+`get_pipe_metadef` must match v4 exactly, per flavor.
 """
 
+import builtins
 import uuid
 from datetime import datetime, timezone, timedelta
 
 import pytest
 
 import meerschaum as mrsm
-from meerschaum._core import _gate
-
-try:
-    from meerschaum import _core
-    ### NOTE: `load()` returns `None` (it does not raise) when the extension is not built.
-    HAS_CORE = _core.load() is not None
-except Exception:
-    HAS_CORE = False
-
-pytestmark = pytest.mark.skipif(not HAS_CORE, reason="the Rust extension is not built")
+from tests import _oracle as oracle
 
 FLAVORS = [
     'sqlite', 'postgresql', 'postgis', 'timescaledb', 'mysql', 'mariadb', 'mssql', 'oracle',
@@ -29,20 +22,24 @@ FLAVORS = [
 ]
 
 
-@pytest.fixture(autouse=True)
-def restore_mode():
-    original = (_gate._MODE, _gate._FEATURES)
-    yield
-    _gate._MODE, _gate._FEATURES = original
-
-
 def both(func, *args, **kwargs):
-    """Run `func` in python mode, then rust mode; return `(python_result, rust_result)`."""
-    _gate.set_mode('python')
-    expected = func(*args, **kwargs)
-    _gate.set_mode('rust')
+    """Return `(recorded_v4_result, result_now)` of `func(*args, **kwargs)`."""
+    expected = oracle.expected()
     actual = func(*args, **kwargs)
     return expected, actual
+
+
+def scrub(value, *labels):
+    """Replace connector labels (random per run) by a fixed token, recursively."""
+    if isinstance(value, str):
+        for label in labels:
+            value = value.replace(label, '<conn>')
+        return value
+    if isinstance(value, dict):
+        return {scrub(k, *labels): scrub(v, *labels) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return type(value)(scrub(v, *labels) for v in value)
+    return value
 
 
 ITEMS = [
@@ -54,10 +51,15 @@ ITEMS = [
 @pytest.mark.parametrize('flavor', FLAVORS + ['nonsense'])
 def test_sql_item_name_matches_python(flavor):
     from meerschaum.utils.sql import sql_item_name
-    for item in ITEMS:
-        for schema in (None, 'my_schema', 'Schema'):
-            expected, actual = both(sql_item_name, item, flavor, schema)
-            assert actual == expected, (flavor, item, schema)
+    cases = [(item, schema) for item in ITEMS for schema in (None, 'my_schema', 'Schema')]
+
+    def render():
+        return [sql_item_name(item, flavor, schema) for item, schema in cases]
+
+    expected, actual = both(render)
+    assert len(actual) == len(expected) == len(cases)
+    for (item, schema), want, got in zip(cases, expected, actual):
+        assert got == want, (flavor, item, schema)
 
 
 PARAMS = [
@@ -88,9 +90,14 @@ PARAMS = [
 @pytest.mark.parametrize('with_where', [True, False])
 def test_build_where_matches_python(flavor, with_where):
     from meerschaum.utils.sql import build_where
-    for params in PARAMS:
-        expected, actual = both(build_where, params, with_where=with_where, flavor=flavor)
-        assert actual == expected, (flavor, params)
+
+    def render():
+        return [build_where(params, with_where=with_where, flavor=flavor) for params in PARAMS]
+
+    expected, actual = both(render)
+    assert len(actual) == len(expected) == len(PARAMS)
+    for params, want, got in zip(PARAMS, expected, actual):
+        assert got == want, (flavor, params)
 
 
 def test_build_where_takes_the_connector_flavor(tmp_path):
@@ -102,15 +109,13 @@ def test_build_where_takes_the_connector_flavor(tmp_path):
     assert actual == expected
 
 
-def test_build_where_injection_warns_in_both_modes():
+def test_build_where_injection_warns():
     from meerschaum.utils.sql import build_where
     import warnings
-    for mode in ('python', 'rust'):
-        _gate.set_mode(mode)
-        with warnings.catch_warnings(record=True) as caught:
-            warnings.simplefilter('always')
-            assert build_where({'a': 'x; drop table y'}) == ''
-        assert any('SQL injection' in str(w.message) for w in caught), mode
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter('always')
+        assert build_where({'a': 'x; drop table y'}) == ''
+    assert any('SQL injection' in str(w.message) for w in caught)
 
 
 def _server_connector(name: str):
@@ -164,15 +169,17 @@ def test_get_pipe_metadef_matches_python(flavor, tmp_path):
             for check_existing in (True, False):
                 for params in (None, {'id': 'a', 'v': ['1', '_2']}):
                     # PARITY: v4 raises `TypeError` comparing a naive `begin` with an aware
-                    # `end`, or a string with a datetime; those combinations are not compared.
-                    try:
-                        expected, actual = both(
-                            conn.get_pipe_metadef, pipe,
-                            params=params, begin=begin, end=end, check_existing=check_existing,
-                        )
-                    except TypeError:
+                    # `end`, or a string with a datetime: v5 raises the same exception type.
+                    kwargs = dict(
+                        params=params, begin=begin, end=end, check_existing=check_existing,
+                    )
+                    expected = oracle.expected()
+                    if expected[0] == 'raised':
+                        with pytest.raises(getattr(builtins, expected[1])):
+                            conn.get_pipe_metadef(pipe, **kwargs)
                         continue
-                    assert actual == expected, (flavor, begin, end, check_existing, params)
+                    actual = conn.get_pipe_metadef(pipe, **kwargs)
+                    assert actual == expected[1], (flavor, begin, end, check_existing, params)
 
 
 def test_get_pipe_metadef_default_begin_uses_sync_time(tmp_path):
@@ -222,24 +229,20 @@ def test_get_pipe_metadef_parent_pushdown(tmp_path):
         assert actual == expected, begin
 
 
-def test_get_pipe_metadef_without_definition_raises_in_both_modes(tmp_path):
+def test_get_pipe_metadef_without_definition_raises(tmp_path):
     conn = mrsm.get_connector(
         'sql', 'd14_nd_' + uuid.uuid4().hex, flavor='sqlite', database=str(tmp_path / 'n.db'),
     )
     pipe = mrsm.Pipe(str(conn), 'nodef', instance=conn, columns={'datetime': 'dt'})
-    for mode in ('python', 'rust'):
-        _gate.set_mode(mode)
-        with pytest.raises(ValueError):
-            conn.get_pipe_metadef(pipe)
+    with pytest.raises(ValueError):
+        conn.get_pipe_metadef(pipe)
 
 
 def test_sync_pipe_inplace_matches_python(tmp_path):
-    results = {}
-    for mode in ('python', 'rust'):
-        _gate.set_mode(mode)
+    def run():
         conn = mrsm.get_connector(
-            'sql', f'd14_ip_{mode}_' + uuid.uuid4().hex, flavor='sqlite',
-            database=str(tmp_path / f'ip_{mode}.db'),
+            'sql', 'd14_ip_' + uuid.uuid4().hex, flavor='sqlite',
+            database=str(tmp_path / 'ip.db'),
         )
         src = mrsm.Pipe('d14', 'inplace_src', instance=conn, columns={'datetime': 'dt', 'id': 'id'})
         docs = [
@@ -257,11 +260,12 @@ def test_sync_pipe_inplace_matches_python(tmp_path):
         second = conn.sync_pipe_inplace(dest, check_existing=True)
         assert second[0], second
         df = dest.get_data(order='asc')
-        results[mode] = (
-            len(df), sorted(df.columns), df['val'].tolist(), dest.get_rowcount(),
-        )
-    assert results['rust'] == results['python']
-    assert results['rust'][0] == 6
+        return len(df), sorted(df.columns), df['val'].tolist(), dest.get_rowcount()
+
+    expected = oracle.expected()
+    actual = run()
+    assert actual == expected
+    assert actual[0] == 6
 
 
 def _sqlite(tmp_path, name='d14'):
@@ -283,11 +287,10 @@ def test_get_parameters_resolves_references_and_symlinks(tmp_path):
     conn = _sqlite(tmp_path)
     base = _make_pipe(conn, 'base', columns={'datetime': 'dt', 'id': 'id'}, tags=['a'])
     base.register()
-    results = {}
-    for mode in ('python', 'rust'):
-        _gate.set_mode(mode)
+
+    def run():
         child = _fresh(
-            conn, 'child_' + mode,
+            conn, 'child',
             parameters={
                 'reference': base.keys(),
                 'tags': ['b'],
@@ -296,18 +299,20 @@ def test_get_parameters_resolves_references_and_symlinks(tmp_path):
             },
         )
         params = child.get_parameters()
-        results[mode] = (params, dict(child._symlinks))
-    assert results['rust'][0] == results['python'][0]
-    assert results['rust'][1] == results['python'][1]
-    assert results['rust'][1], "expected `_symlinks` entries"
-    assert results['rust'][0]['columns'] == {'datetime': 'dt', 'id': 'id'}
+        return scrub((params, dict(child._symlinks)), str(conn), conn.label)
+
+    expected = oracle.expected()
+    actual = run()
+    assert actual[0] == expected[0]
+    assert actual[1] == expected[1]
+    assert actual[1], "expected `_symlinks` entries"
+    assert actual[0]['columns'] == {'datetime': 'dt', 'id': 'id'}
 
 
 def test_get_parameters_symlinks_with_config_symlink(tmp_path):
     conn = _sqlite(tmp_path)
-    results = {}
-    for mode in ('python', 'rust'):
-        _gate.set_mode(mode)
+
+    def run():
         pipe = _fresh(
             conn, 'cfg',
             parameters={
@@ -315,27 +320,26 @@ def test_get_parameters_symlinks_with_config_symlink(tmp_path):
                 'sql': "SELECT '{{ self.metric }}'",
             },
         )
-        results[mode] = (pipe.get_parameters(), dict(pipe._symlinks))
-    assert results['rust'] == results['python']
+        return scrub((pipe.get_parameters(), dict(pipe._symlinks)), str(conn), conn.label)
+
+    expected = oracle.expected()
+    assert run() == expected
 
 
 def test_get_parameters_circular_reference_warns(tmp_path):
     import warnings
     conn = _sqlite(tmp_path)
-    for mode in ('python', 'rust'):
-        _gate.set_mode(mode)
-        a = _fresh(conn, 'cir_a', parameters={'reference': f"Pipe('d14', 'cir_b', instance='{conn}')"})
-        b = _fresh(conn, 'cir_b', parameters={'reference': f"Pipe('d14', 'cir_a', instance='{conn}')"})
-        a.register()
-        b.register()
-        with warnings.catch_warnings(record=True) as caught:
-            warnings.simplefilter('always')
-            a_params = _fresh(conn, 'cir_a').get_parameters()
-        # PARITY: v4 memoizes reference parameters process-wide, so only the first resolution
-        # in a process warns in python mode; the Rust path warns on every resolution.
-        if mode == 'rust':
-            assert any('Circular reference' in str(w.message) for w in caught)
-        assert isinstance(a_params, dict)
+    a = _fresh(conn, 'cir_a', parameters={'reference': f"Pipe('d14', 'cir_b', instance='{conn}')"})
+    b = _fresh(conn, 'cir_b', parameters={'reference': f"Pipe('d14', 'cir_a', instance='{conn}')"})
+    a.register()
+    b.register()
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter('always')
+        a_params = _fresh(conn, 'cir_a').get_parameters()
+    # PARITY: v4 memoizes reference parameters process-wide, so only its first resolution in a
+    # process warns; the Rust path warns on every resolution.
+    assert any('Circular reference' in str(w.message) for w in caught)
+    assert isinstance(a_params, dict)
 
 
 CHUNK_CASES = [
@@ -364,18 +368,19 @@ CHUNK_CASES = [
 def test_get_chunk_bounds_matches_python_on_datetime_axis(case, tmp_path):
     conn = _sqlite(tmp_path)
     pipe = _make_pipe(conn, 'chunks', columns={'datetime': 'dt'})
-    _gate.set_mode('python')
     success, msg = pipe.sync([
         {'dt': datetime(2024, 1, 10, 12, 30), 'v': 1},
         {'dt': datetime(2024, 2, 20, 6, 15), 'v': 2},
     ])
     assert success, msg
     kwargs = CHUNK_CASES[case]
-    try:
-        expected, actual = both(pipe.get_chunk_bounds, **kwargs)
-    except (TypeError, ValueError) as e:
-        pytest.skip(f"v4 raises for this combination: {e}")
-    assert actual == expected
+    expected = oracle.expected()
+    if expected[0] == 'raised':
+        with pytest.raises(getattr(builtins, expected[1])):
+            pipe.get_chunk_bounds(**kwargs)
+        return
+    actual = pipe.get_chunk_bounds(**kwargs)
+    assert actual == expected[1]
 
 
 @pytest.mark.parametrize('parameters', [

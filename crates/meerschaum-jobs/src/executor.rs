@@ -112,7 +112,13 @@ pub trait JobExecutor {
 pub fn make_executor(executor_keys: &str, ctx: &JobsContext) -> Box<dyn JobExecutor> {
     let typ = executor_keys.split(':').next().unwrap_or("");
     match typ {
-        "systemd" => Box::new(crate::systemd::SystemdExecutor::new(ctx.clone())),
+        "systemd" => {
+            let executor = crate::systemd::SystemdExecutor::new(ctx.clone());
+            Box::new(match &ctx.process_env {
+                Some(env) => executor.with_process_env(env.clone()),
+                None => executor,
+            })
+        }
         "local" | "None" | "" => Box::new(LocalExecutor::new(ctx.clone())),
         _ => Box::new(ApiExecutor::new(executor_keys, ctx.remote.clone())),
     }

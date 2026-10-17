@@ -6,7 +6,7 @@
 //! runtime is therefore keyed by the process ID: a child builds its own on first use, and the
 //! parent's copy is leaked (dropping it would try to join threads that do not exist in the child).
 //! Connection pools have the same problem, so the Python façade rebuilds its `_core.SqlConnector`
-//! after a fork (see `SQLConnector._rust_method`).
+//! after a fork (see `SQLConnector._core_connector`).
 
 use std::future::Future;
 use std::sync::Mutex;

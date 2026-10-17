@@ -36,5 +36,6 @@
     document.querySelectorAll('[data-mrsm-events]:not([data-rendered])').forEach(el=>{el.dataset.rendered='true';const source=new EventSource(el.dataset.mrsmEvents);let timer=null;source.onmessage=e=>{try{const r=JSON.parse(e.data);el.textContent+=r.ts+' '+r.event+(r.pipe_ref?' '+r.pipe_ref:'')+describeEvent(r)+'\n';}catch(_){el.textContent+=e.data+'\n';}clearTimeout(timer);timer=setTimeout(()=>document.body.dispatchEvent(new Event('mrsm-pipelines')),250);};source.addEventListener('end',()=>{source.close();document.body.dispatchEvent(new Event('mrsm-pipelines'));});});
     document.querySelectorAll('[data-logs]:not([data-rendered])').forEach(el=>{el.dataset.rendered='true';const source=new EventSource(el.dataset.logs);source.onmessage=e=>{el.textContent+=e.data+'\n';};source.addEventListener('stopped',()=>source.close());});
   }
+  document.addEventListener('click', e => { const b = e.target.closest('[data-scopes-toggle]'); if (!b) return; const boxes = b.closest('.scopes-fields').querySelectorAll('input[name=scopes]'); const select = b.textContent === 'Select all'; boxes.forEach(c => { c.checked = select; }); b.textContent = select ? 'Deselect all' : 'Select all'; });
   render(); document.body.addEventListener('htmx:afterSwap', render);
 })();

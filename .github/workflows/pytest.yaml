@@ -27,8 +27,8 @@ jobs:
         uses: actions/checkout@v4
         with: { clean: false, persist-credentials: false }
 
-      - name: Clean the workspace (keep shared Cargo target and reference environment)
-        run: git clean -ffdx -e /target/ -e /.venv-ref/
+      - name: Clean the workspace (keep shared Cargo target, reference and test environments)
+        run: git clean -ffdx -e /target/ -e /.venv-ref/ -e /.venv-test/
 
       - name: Rust toolchain
         run: scripts/rust/ci.sh setup
@@ -47,10 +47,40 @@ jobs:
           export MATURIN_BIN="$build_scratch/tools/bin/maturin"
           scripts/rust/build_py.sh
 
+      - name: Test environment
+        ### A dedicated venv (kept across runs like `.venv-ref`): the tests never install anything
+        ### themselves and the runner's own interpreter is never modified. It uses the Python the
+        ### extension was built with, and is recreated when that Python changes.
+        run: |
+          PYTHON="$(command -v "${PYTHON_BIN:-python}")"
+          VENV="$GITHUB_WORKSPACE/.venv-test"
+          ### The venv is rebuilt when the Python changes or when the requirements do (the hash of
+          ### the requirement files, `pyproject.toml` and the extras installed is stored in it).
+          wanted="$("$PYTHON" -c 'import sys; print(sys.version_info[:2])')"
+          deps_hash="$({ cat requirements/*.txt pyproject.toml; \
+            echo "$MRSM_INSTALL_PACKAGES pytest pytest-xdist httpx $wanted"; } | sha256sum | cut -d' ' -f1)"
+          if [ ! -x "$VENV/bin/python" ] || \
+             [ "$("$VENV/bin/python" -c 'import sys; print(sys.version_info[:2])')" != "$wanted" ] || \
+             [ "$(cat "$VENV/.deps-hash" 2>/dev/null)" != "$deps_hash" ]; then
+            "$PYTHON" -m venv --clear "$VENV"
+            rm -f "$VENV/.deps-hash"
+          fi
+          requirement_args=""
+          for extra in $MRSM_INSTALL_PACKAGES; do
+            requirement_args="$requirement_args -r requirements/$extra.txt"
+          done
+          "$VENV/bin/python" -m pip install --quiet --upgrade pip
+          "$VENV/bin/python" -m pip install --quiet $requirement_args pytest pytest-xdist httpx
+          echo "$deps_hash" > "$VENV/.deps-hash"
+        env:
+          MRSM_INSTALL_PACKAGES: "full sql-mssql sql-oracle sql-duckdb"
+
       - name: Integration Tests
         run: ./scripts/test.sh db
         env:
           COMPOSE_INTERACTIVE_NO_CLI: 1
           MRSM_TEST_FLAVORS: "all"
           MRSM_DEBUG: "false"
-          MRSM_INSTALL_PACKAGES: "api"
+          PYTHON_BIN: ${{ github.workspace }}/.venv-test/bin/python
+          ### The venv above already holds the extras; `test.sh` must not install again.
+          MRSM_TEST_SKIP_INSTALL: "1"

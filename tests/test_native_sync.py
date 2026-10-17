@@ -1,13 +1,14 @@
 """
-Wave 13 (task H): `Pipe.sync()` of explicit data routed to Rust under `MRSM_CORE=rust`
+`Pipe.sync()` of explicit data and of a pipe's own source, run by the Rust core
 (`_core.sync_pipe`, the engine's ordinary one-pipe flow).
 
-Each scenario runs the same sequence of syncs in `python` mode and in `rust` mode in one process
-(the gate is re-read with `set_mode`), on pipes with the same keys (dropped in between), and
+Each scenario runs a sequence of syncs on pipes with fixed keys (dropped in between) and
 compares the `SuccessTuple`s (messages included), the rows `get_data(as_docs=True)` returns, the
 columns' database types, the registered `dtypes` / `columns` after each sync, and that the
-caller's data was not modified. The rust runs also assert that `_core.sync_pipe` handled the
-call (so a silent fall-through to the Python body cannot pass).
+caller's data was not modified, with what the parity-phase Python mode produced for the same scenario. Those results are
+recordings of that mode (`tests/oracle/test_native_sync.json`, see `tests/_oracle.py`), not v4.1.4
+output. The runs also
+assert that `_core.sync_pipe` handled the call (so a silent fall-through cannot pass).
 
 Rows are compared as documents: no scenario needs pandas, and pandas, Polars and
 GeoPandas frames are covered separately when those packages are installed.
@@ -25,15 +26,8 @@ from decimal import Decimal
 import pytest
 
 import meerschaum as mrsm
-from meerschaum._core import _gate
-
-try:
-    from meerschaum import _core
-    HAS_CORE = _core.load() is not None
-except Exception:
-    HAS_CORE = False
-
-pytestmark = pytest.mark.skipif(not HAS_CORE, reason="the Rust extension is not built")
+from meerschaum import _core
+from tests import _oracle as oracle
 
 SCHEMA = 'w13h'
 START = datetime(2026, 1, 1, tzinfo=timezone.utc)
@@ -61,17 +55,18 @@ def plugin_venvs():
     `install plugin` / `setup plugins` does: importing a plugin activates its venv without
     creating it, so on a fresh `MRSM_ROOT_DIR` the first import would fail.
     """
-    from meerschaum.utils.venv import init_venv
+    from meerschaum.plugins import _plugins_import_errors, reload_plugins
+    from meerschaum.utils.venv import init_venv, venv_exists
     for name in W15L_PLUGINS:
         init_venv(name, verify=False)
+    missing = [name for name in W15L_PLUGINS if not venv_exists(name)]
+    assert not missing, f"Could not create the virtual environments of {missing}."
+    ### An earlier test of the run may have imported the plugins before their venvs existed
+    ### (the failure is remembered per process): import them again now.
+    for name in W15L_PLUGINS:
+        _plugins_import_errors.pop(name, None)
+    reload_plugins(list(W15L_PLUGINS))
     yield
-
-
-@pytest.fixture(autouse=True)
-def restore_mode():
-    original = (_gate._MODE, _gate._FEATURES)
-    yield
-    _gate._MODE, _gate._FEATURES = original
 
 
 @pytest.fixture(scope='module')
@@ -159,12 +154,11 @@ def _fresh_pipe(instance, name, **params):
     return mrsm.Pipe('w13h', name, instance=instance, **params)
 
 
-def _run(mode, instance, name, params, steps, native_calls=None):
+def _run(instance, name, params, steps, native_calls=None):
     """
-    Run `steps` (a list of `(data, sync_kwargs)`) on a fresh pipe in `mode`.
+    Run `steps` (a list of `(data, sync_kwargs)`) on a fresh pipe.
     Return the `(tuple, snapshot)` after each step.
     """
-    _gate.set_mode(mode)
     pipe = _fresh_pipe(instance, name, **copy.deepcopy(params))
     observed = []
     for data, kwargs in steps:
@@ -179,15 +173,17 @@ def _run(mode, instance, name, params, steps, native_calls=None):
 def _untimed(message):
     import re
     message = re.sub(r'in \d+(\.\d+)? seconds\.', 'in N seconds.', message)
+    ### The labels of the throwaway instances end in a random suffix.
+    message = re.sub(r'\b(w13h|w15l_source)_[0-9a-f]{6,8}\b', r'\1_X', message)
     ### A SQLite source hands v4 its datetimes as text, so v4's chunk label carries the stored
     ### microseconds; the native flow labels the parsed datetimes (PARITY.md, wave 15 L).
     return re.sub(r'(\d\d:\d\d:\d\d)\.000000', r'\1', message)
 
 
 def _compare(instance, name, params, steps, native_calls, same_messages=True):
-    expected = _run('python', instance, name, params, steps)
+    expected = oracle.expected()
     handled_before = native_calls.handled
-    actual = _run('rust', instance, name, params, steps)
+    actual = _run(instance, name, params, steps)
     assert native_calls.handled - handled_before == len(steps), native_calls.declined
     assert len(actual) == len(expected)
     for step, ((exp_tuple, exp_state), (act_tuple, act_state)) in enumerate(zip(expected, actual)):
@@ -376,31 +372,32 @@ def test_autoincrement_primary_key_is_registered(instance, native_calls):
 def test_autotime_adds_the_timestamp_column(instance, native_calls):
     params = {'columns': {'id': 'id'}, 'autotime': True}
     rows = [{'id': 1, 'v': 1}, {'id': 2, 'v': 2}]
-    expected = _run('python', instance, 'autotime', params, [(rows, {})])
-    actual = _run('rust', instance, 'autotime', params, [(rows, {})])
+    expected = oracle.expected()
+    actual = _run(instance, 'autotime', params, [(rows, {})])
     assert native_calls.handled == 1
     assert actual[0][0] == expected[0][0]
+    ### Compare without the timestamps (and without editing the recorded value).
+    stripped = []
     for state in (expected[0][1], actual[0][1]):
-        assert all(doc.pop('ts', None) is not None for doc in state['docs'])
-    assert actual[0][1] == expected[0][1]
+        assert all(doc.get('ts') is not None for doc in state['docs'])
+        docs = [{k: v for k, v in doc.items() if k != 'ts'} for doc in state['docs']]
+        stripped.append({**state, 'docs': docs})
+    assert stripped[1] == stripped[0]
 
 
 def test_unequal_columns_fail_like_pandas(instance, native_calls):
     params = {'columns': COLUMNS}
     data = {'dt': [START, START + timedelta(hours=1)], 'id': [1]}
-    _gate.set_mode('python')
-    expected = tuple(_fresh_pipe(instance, 'unequal', **params).sync(copy.deepcopy(data)))
-    _gate.set_mode('rust')
+    expected = oracle.expected()
     before = native_calls.handled
     actual = tuple(_fresh_pipe(instance, 'unequal', **params).sync(copy.deepcopy(data)))
-    assert actual == expected
+    assert (actual[0], _untimed(actual[1])) == (expected[0], _untimed(expected[1]))
     assert actual[0] is False
     ### The data pandas rejects is answered by the binding (it is not a decline).
     assert native_calls.handled == before + 1 and not native_calls.declined
 
 
 def test_the_native_result_carries_the_sync_fields(instance, native_calls):
-    _gate.set_mode('rust')
     pipe = _fresh_pipe(instance, 'fields', columns=COLUMNS)
     result = pipe.sync(_rows(4), begin=START, end=START + timedelta(days=2))
     success, message = result
@@ -423,18 +420,6 @@ def test_the_native_result_carries_the_sync_fields(instance, native_calls):
     assert changed.updated == 1
 
 
-def test_python_mode_returns_the_same_class_with_empty_fields(instance):
-    _gate.set_mode('python')
-    pipe = _fresh_pipe(instance, 'py_fields', columns=COLUMNS)
-    result = pipe.sync(_rows(2))
-    assert isinstance(result, tuple)
-    assert type(result).__name__ == 'SyncResult'
-    assert result.success is True
-    assert result.inserted is None and result.duration is None
-    success, message = result
-    assert success is True and isinstance(message, str)
-
-
 def test_sync_result_is_a_picklable_json_friendly_tuple():
     import json
     from meerschaum.core.Pipe._sync import SyncResult
@@ -452,7 +437,6 @@ def test_sync_result_is_a_picklable_json_friendly_tuple():
 
 
 def test_registration_and_indices_validation_stay_in_the_facade(instance, native_calls):
-    _gate.set_mode('rust')
     pipe = _fresh_pipe(
         instance, 'json_index', columns={'datetime': 'dt', 'id': 'doc'}, dtypes={'doc': 'json'},
     )
@@ -468,7 +452,6 @@ def test_registration_and_indices_validation_stay_in_the_facade(instance, native
 
 
 def test_the_python_pipe_sees_the_parameters_the_sync_changed(instance, native_calls):
-    _gate.set_mode('rust')
     pipe = _fresh_pipe(instance, 'patched', columns={'primary': 'pk', 'datetime': 'dt'})
     assert pipe.sync([{'dt': START, 'v': 1}])[0] is True
     assert pipe.parameters.get('autoincrement') is True
@@ -507,7 +490,6 @@ def test_non_blocking_syncs_spawn_a_thread_and_call_back(instance, native_calls)
         results.append(result)
         done.set()
 
-    _gate.set_mode('rust')
     pipe = _fresh_pipe(instance, 'nonblocking', **params)
     spawned = pipe.sync(_rows(3), blocking=False, callback=callback)
     assert tuple(spawned) == (True, f"Spawned asyncronous sync for {pipe}.")
@@ -516,9 +498,8 @@ def test_non_blocking_syncs_spawn_a_thread_and_call_back(instance, native_calls)
     assert native_calls.handled == 1
 
 
-def _outcomes(mode, instance, name, params, steps):
-    """The `(tuple | exception)` of each step and the final rows, for either mode."""
-    _gate.set_mode(mode)
+def _outcomes(instance, name, params, steps):
+    """The `(tuple | exception)` of each step and the final rows."""
     pipe = _fresh_pipe(instance, name, **copy.deepcopy(params))
     out = []
     for data, kwargs in steps:
@@ -547,7 +528,6 @@ def test_pipes_that_do_not_enforce_are_synced_natively(instance, native_calls, c
     """
     `enforce: False` pipes and `enforce_dtypes=False` syncs are no longer declined (PARITY H9).
     """
-    _gate.set_mode('rust')
     params = {'columns': columns, 'enforce': False}
     pipe = _fresh_pipe(instance, 'no_enforce_native', **params)
     for data, kwargs in _no_enforce_steps(key):
@@ -564,8 +544,8 @@ def test_pipes_that_do_not_enforce_are_synced_natively(instance, native_calls, c
 def test_pipes_that_do_not_enforce_match_v4(instance, columns, key):
     params = {'columns': columns, 'enforce': False}
     steps = _no_enforce_steps(key)
-    expected = _outcomes('python', instance, 'no_enforce', params, steps)
-    actual = _outcomes('rust', instance, 'no_enforce', params, steps)
+    expected = oracle.expected()
+    actual = _outcomes(instance, 'no_enforce', params, steps)
     assert actual == expected
 
 
@@ -575,112 +555,128 @@ def test_syncs_with_enforce_dtypes_false_match_v4(instance, columns, key):
     params = {'columns': columns}
     first, *rest = _no_enforce_steps(key)
     steps = [first] + [(data, {'enforce_dtypes': False}) for data, _ in rest]
-    expected = _outcomes('python', instance, 'no_enforce_kw', params, steps)
-    actual = _outcomes('rust', instance, 'no_enforce_kw', params, steps)
+    expected = oracle.expected()
+    actual = _outcomes(instance, 'no_enforce_kw', params, steps)
     assert actual == expected
 
 
-def test_a_naive_axis_raises_the_pandas_merge_error_in_both_modes(instance):
+def _naive_axis_error(instance):
+    """The message of the pandas merge error the second sync raises."""
     columns, key = NO_ENFORCE_CASES[3]
     params = {'columns': columns, 'enforce': False}
     steps = _no_enforce_steps(key)
-    for mode in ('python', 'rust'):
-        _gate.set_mode(mode)
-        pipe = _fresh_pipe(instance, 'no_enforce_naive_error', **copy.deepcopy(params))
-        assert pipe.sync(copy.deepcopy(steps[0][0]))[0] is True
-        with pytest.raises(ValueError, match=r"merge on datetime64\[us\] and datetime64\[us, UTC\]"):
-            pipe.sync(copy.deepcopy(steps[1][0]))
+    pipe = _fresh_pipe(instance, 'no_enforce_naive_error', **copy.deepcopy(params))
+    assert pipe.sync(copy.deepcopy(steps[0][0]))[0] is True
+    with pytest.raises(
+        ValueError, match=r"merge on datetime64\[us\] and datetime64\[us, UTC\]",
+    ) as raised:
+        pipe.sync(copy.deepcopy(steps[1][0]))
+    return str(raised.value)
+
+
+def test_a_naive_axis_raises_the_pandas_merge_error(instance):
+    expected = oracle.expected()
+    assert _naive_axis_error(instance) == expected
+
+
+def _no_columns_error(instance):
+    pipe = _fresh_pipe(instance, 'no_columns')
+    with pytest.raises(ValueError, match="Expecting columns for table") as raised:
+        pipe.sync([{}, {}])
+    return str(raised.value)
 
 
 def test_documents_without_any_column_raise_like_v4(instance, native_calls):
-    for mode in ('python', 'rust'):
-        _gate.set_mode(mode)
-        pipe = _fresh_pipe(instance, 'no_columns')
-        with pytest.raises(ValueError, match="Expecting columns for table"):
-            pipe.sync([{}, {}])
+    expected = oracle.expected()
+    assert _no_columns_error(instance) == expected
 
 
 def test_integers_beyond_64_bits_sync_as_numeric_only_natively(instance, native_calls):
     """PARITY H8: v4 cannot build the DataFrame (`DataFrame is None`); the native path can."""
-    _gate.set_mode('python')
-    pipe = _fresh_pipe(instance, 'bigint')
-    assert pipe.sync([{'a': 2 ** 70}])[0] is False
-    _gate.set_mode('rust')
+    v4_success = oracle.expected()
+    assert v4_success is False
     pipe = _fresh_pipe(instance, 'bigint')
     assert pipe.sync([{'a': 2 ** 70}])[0] is True
     assert pipe.get_parameters(refresh=True)['dtypes']['a'] == 'numeric'
 
 
-def test_a_static_pipe_refuses_new_columns_in_both_modes(instance, native_calls):
+def _static_rows(instance, params, steps):
+    pipe = _fresh_pipe(instance, 'static_new', **params)
+    assert pipe.sync(steps[0][0])[0] is True
+    ### Only the failure and the unchanged rows are shared: v4's message is a traceback text.
+    assert pipe.sync(steps[1][0])[0] is False
+    return _docs(pipe)
+
+
+def test_a_static_pipe_refuses_new_columns(instance, native_calls):
     params = {'columns': {'datetime': 'dt'}, 'static': True}
     steps = [
         ([{'dt': START, 'v': 1}], {}),
         ([{'dt': START + timedelta(days=1), 'v': 2, 'w': 'new'}], {}),
     ]
-    expected = _run('python', instance, 'static_new', params, steps[:1])
-    actual = _run('rust', instance, 'static_new', params, steps[:1])
+    expected = oracle.expected()
+    actual = _run(instance, 'static_new', params, steps[:1])
     assert actual[0][0] == expected[0][0]
-    rows = {}
-    for mode in ('python', 'rust'):
-        _gate.set_mode(mode)
-        pipe = _fresh_pipe(instance, 'static_new', **params)
-        assert pipe.sync(steps[0][0])[0] is True
-        ### Only the failure and the unchanged rows are shared: v4's message is a traceback text.
-        assert pipe.sync(steps[1][0])[0] is False
-        rows[mode] = _docs(pipe)
-    assert rows['python'] == rows['rust']
+    expected_rows = oracle.expected()
+    assert _static_rows(instance, params, steps) == expected_rows
+
+
+def _sync_none(instance):
+    pipe = _fresh_pipe(instance, 'none_data', columns=COLUMNS)
+    return tuple(pipe.sync(None))
 
 
 def test_none_instead_of_data_is_refused_like_v4(instance, native_calls):
-    results = {}
-    for mode in ('python', 'rust'):
-        _gate.set_mode(mode)
-        pipe = _fresh_pipe(instance, 'none_data', columns=COLUMNS)
-        results[mode] = tuple(pipe.sync(None))
-    assert results['python'] == results['rust']
-    assert results['rust'][0] is False
+    expected = oracle.expected()
+    actual = _sync_none(instance)
+    assert (actual[0], _untimed(actual[1])) == (expected[0], _untimed(expected[1]))
+    assert actual[0] is False
+
+
+def _temporary_outcome(instance):
+    pipe = mrsm.Pipe(
+        'w13h', 'temporary_pipe', instance=instance, temporary=True, columns=COLUMNS,
+    )
+    pipe.drop()
+    result = pipe.sync(_rows(3))
+    again = pipe.sync(_rows(3))
+    outcome = (
+        tuple(result)[0],
+        tuple(again),
+        _docs(pipe),
+        mrsm.Pipe('w13h', 'temporary_pipe', instance=instance).id,
+    )
+    pipe.drop()
+    return outcome
 
 
 def test_temporary_pipes_are_never_registered(instance, native_calls):
-    outcomes = {}
-    for mode in ('python', 'rust'):
-        _gate.set_mode(mode)
-        pipe = mrsm.Pipe(
-            'w13h', 'temporary_pipe', instance=instance, temporary=True, columns=COLUMNS,
-        )
-        pipe.drop()
-        result = pipe.sync(_rows(3))
-        again = pipe.sync(_rows(3))
-        outcomes[mode] = (
-            tuple(result)[0],
-            tuple(again),
-            _docs(pipe),
-            mrsm.Pipe('w13h', 'temporary_pipe', instance=instance).id,
-        )
-        pipe.drop()
-    assert outcomes['python'] == outcomes['rust']
-    assert outcomes['rust'][3] is None
+    expected = oracle.expected()
+    actual = _temporary_outcome(instance)
+    assert actual == expected
+    assert actual[3] is None
+
+
+def _references_outcome(instance):
+    base_params = {'columns': COLUMNS, 'dtypes': {'val': 'float', 'name': 'str'}}
+    base = _fresh_pipe(instance, 'ref_base', **copy.deepcopy(base_params))
+    assert base.register()[0]
+    referenced = _fresh_pipe(instance, 'ref_child', reference='w13h:ref_base')
+    assert referenced.register()[0]
+    first = tuple(referenced.sync(_rows(4)))
+    second = tuple(referenced.sync(_rows(6, offset=2)))
+    templated = _fresh_pipe(
+        instance, 'ref_templated',
+        columns=COLUMNS,
+        tags=["{{ self.parameters['columns']['id'] }}"],
+    )
+    third = tuple(templated.sync(_rows(3)))
+    return (first, second, _docs(referenced), third, _docs(templated))
 
 
 def test_references_and_templates_resolve_in_the_native_flow(instance, native_calls):
-    base_params = {'columns': COLUMNS, 'dtypes': {'val': 'float', 'name': 'str'}}
-    outcomes = {}
-    for mode in ('python', 'rust'):
-        _gate.set_mode(mode)
-        base = _fresh_pipe(instance, 'ref_base', **copy.deepcopy(base_params))
-        assert base.register()[0]
-        referenced = _fresh_pipe(instance, 'ref_child', reference='w13h:ref_base')
-        assert referenced.register()[0]
-        first = tuple(referenced.sync(_rows(4)))
-        second = tuple(referenced.sync(_rows(6, offset=2)))
-        templated = _fresh_pipe(
-            instance, 'ref_templated',
-            columns=COLUMNS,
-            tags=["{{ self.parameters['columns']['id'] }}"],
-        )
-        third = tuple(templated.sync(_rows(3)))
-        outcomes[mode] = (first, second, _docs(referenced), third, _docs(templated))
-    assert outcomes['python'] == outcomes['rust']
+    expected = oracle.expected()
+    assert _references_outcome(instance) == expected
 
 
 SHAPES = {
@@ -695,9 +691,9 @@ SHAPES = {
 @pytest.mark.parametrize('shape', sorted(SHAPES), ids=sorted(SHAPES))
 def test_other_data_shapes_match_v4(instance, native_calls, shape):
     steps = [(SHAPES[shape], {})]
-    expected = _run('python', instance, f'shape_{shape}', {}, steps)
+    expected = oracle.expected()
     handled = native_calls.handled
-    actual = _run('rust', instance, f'shape_{shape}', {}, steps)
+    actual = _run(instance, f'shape_{shape}', {}, steps)
     assert native_calls.handled - handled == 1, native_calls.declined
     assert actual[0][0][0] == expected[0][0][0]
     assert actual[0][1]['docs'] == expected[0][1]['docs']
@@ -706,7 +702,6 @@ def test_other_data_shapes_match_v4(instance, native_calls, shape):
 def test_a_tuple_of_documents_is_rows_like_pandas(instance, native_calls):
     # PARITY: v4 takes a tuple for a chunk generator and raises `TypeError: 'tuple' object is not an
     # iterator`; pandas (and the native path) read it as rows.
-    _gate.set_mode('rust')
     as_tuple = _fresh_pipe(instance, 'tuple_docs', columns=COLUMNS)
     as_list = _fresh_pipe(instance, 'list_docs', columns=COLUMNS)
     assert tuple(as_tuple.sync(tuple(_rows(3))))[0] is True
@@ -721,32 +716,32 @@ def test_generators_sync_chunk_by_chunk_like_v4(instance, native_calls):
         for offset in (0, 3, 6):
             yield _rows(3, offset=offset)
 
-    outcomes = {}
-    for mode in ('python', 'rust'):
-        _gate.set_mode(mode)
+    def outcome():
         pipe = _fresh_pipe(instance, 'generator', **copy.deepcopy(params))
         result = pipe.sync(chunks())
         empty = pipe.sync(iter(()))
-        outcomes[mode] = (result[0], empty, _docs(pipe))
-    assert outcomes['python'][0] == outcomes['rust'][0]
-    assert tuple(outcomes['python'][1]) == tuple(outcomes['rust'][1])
-    assert outcomes['python'][2] == outcomes['rust'][2]
+        return (result[0], tuple(empty), _docs(pipe))
+
+    expected = oracle.expected()
+    actual = outcome()
+    assert actual[0] == expected[0]
+    assert actual[1] == expected[1]
+    assert actual[2] == expected[2]
 
 
 def test_dask_data_is_refused_with_the_migration_guide(instance):
+    pipe = _fresh_pipe(instance, 'dask', columns=COLUMNS)
+
+    ### The refusal is by type name, so it needs no Dask installed (no extra provides it).
+    class _DaskLikeFrame:
+        __module__ = 'dask.dataframe.dask_expr._collection'
+
+    with pytest.raises(TypeError, match='migrating-to-v5'):
+        pipe.sync(_DaskLikeFrame())
     dd = pytest.importorskip('dask.dataframe')
     pd = pytest.importorskip('pandas')
-    _gate.set_mode('rust')
-    pipe = _fresh_pipe(instance, 'dask', columns=COLUMNS)
     with pytest.raises(TypeError, match='migrating-to-v5'):
         pipe.sync(dd.from_pandas(pd.DataFrame(_rows(3)), npartitions=1))
-
-
-def test_python_mode_never_calls_the_binding(instance, native_calls):
-    _gate.set_mode('python')
-    pipe = _fresh_pipe(instance, 'python_mode', columns=COLUMNS)
-    assert pipe.sync(_rows(2))[0] is True
-    assert native_calls.handled == 0 and native_calls.declined == []
 
 
 def test_pandas_and_polars_frames(instance, native_calls):
@@ -754,12 +749,7 @@ def test_pandas_and_polars_frames(instance, native_calls):
     params = {'columns': COLUMNS, 'dtypes': {'val': 'float'}}
     frame = pd.DataFrame(_rows(5))
     frame2 = pd.DataFrame(_rows(5, offset=3))
-    _gate.set_mode('python')
-    expected = []
-    pipe = _fresh_pipe(instance, 'pandas_frames', **params)
-    for df in (frame, frame2):
-        expected.append((tuple(pipe.sync(df.copy())), _docs(pipe)))
-    _gate.set_mode('rust')
+    expected = oracle.expected()
     pipe = _fresh_pipe(instance, 'pandas_frames', **params)
     before = native_calls.handled
     for df, (exp_tuple, exp_docs) in zip((frame, frame2), expected):
@@ -771,10 +761,7 @@ def test_pandas_and_polars_frames(instance, native_calls):
     assert native_calls.handled - before == 2
 
     pl = pytest.importorskip('polars')
-    _gate.set_mode('python')
-    pipe = _fresh_pipe(instance, 'polars_frames', **params)
-    exp = (tuple(pipe.sync(pl.DataFrame(_rows(5)))), _docs(pipe))
-    _gate.set_mode('rust')
+    exp = oracle.expected()
     pipe = _fresh_pipe(instance, 'polars_frames', **params)
     got = (tuple(pipe.sync(pl.DataFrame(_rows(5)))), _docs(pipe))
     assert got == exp
@@ -782,7 +769,7 @@ def test_pandas_and_polars_frames(instance, native_calls):
 
 def test_construct_register_sync_and_read_docs_need_no_sqlalchemy_or_dataframes(tmp_path):
     """
-    A fresh interpreter in `rust` mode constructs the pipe, registers it, syncs documents and
+    A fresh interpreter constructs the pipe, registers it, syncs documents and
     reads them back without importing SQLAlchemy, pandas or Polars.
     """
     code = '''
@@ -811,7 +798,6 @@ print('LEAN_OK')
         key: value for key, value in os.environ.items() if not key.startswith('MRSM_')
     }
     env.update({
-        'MRSM_CORE': 'rust',
         'MRSM_ROOT_DIR': str(tmp_path / 'root'),
         'MRSM_PLUGINS_DIR': str(tmp_path / 'plugins'),
         'MRSM_NO_AUTO_INSTALL': '1',
@@ -838,9 +824,8 @@ def _source_pipe(instance, connector_keys, metric, **params):
     return mrsm.Pipe(connector_keys, metric, instance=instance, **params)
 
 
-def _source_outcomes(mode, instance, connector_keys, metric, params, steps):
-    """Run `steps` (sync keyword arguments, no data) on a fresh pipe in `mode`."""
-    _gate.set_mode(mode)
+def _source_outcomes(instance, connector_keys, metric, params, steps):
+    """Run `steps` (sync keyword arguments, no data) on a fresh pipe."""
     pipe = _source_pipe(instance, connector_keys, metric, **copy.deepcopy(params))
     observed = []
     for kwargs in steps:
@@ -853,9 +838,9 @@ def _source_outcomes(mode, instance, connector_keys, metric, params, steps):
 def _compare_sources(
     instance, native_calls, connector_keys, metric, params, steps, messages=True,
 ):
-    expected = _source_outcomes('python', instance, connector_keys, metric, params, steps)
+    expected = oracle.expected()
     handled = native_calls.handled
-    actual = _source_outcomes('rust', instance, connector_keys, metric, params, steps)
+    actual = _source_outcomes(instance, connector_keys, metric, params, steps)
     assert native_calls.handled - handled == len(steps), native_calls.declined
     for step, ((exp_tuple, exp_state), (act_tuple, act_state)) in enumerate(
         zip(expected, actual)
@@ -936,7 +921,6 @@ def test_a_sql_source_with_a_definition_syncs_natively(instance, native_calls, t
 
 
 def test_plugin_keyword_arguments_reach_the_plugin(instance, native_calls):
-    _gate.set_mode('rust')
     pipe = _source_pipe(instance, 'plugin:w15l_plugsync', 'w15l_kwargs')
     assert pipe.sync(flag=11)[0]
     assert sorted(d['val'] for d in _docs(pipe)) == [1, 11]
@@ -951,7 +935,6 @@ def test_non_blocking_source_syncs_call_back(instance, native_calls):
         results.append(result)
         done.set()
 
-    _gate.set_mode('rust')
     pipe = _source_pipe(instance, PLUGIN_SOURCE, 'w15l_nonblocking')
     spawned = pipe.sync(blocking=False, callback=callback)
     assert tuple(spawned) == (True, f"Spawned asyncronous sync for {pipe}.")
@@ -961,7 +944,6 @@ def test_non_blocking_source_syncs_call_back(instance, native_calls):
 
 
 def test_changed_intervals_are_filled(instance, native_calls):
-    _gate.set_mode('rust')
     pipe = _source_pipe(instance, 'w13h', 'w15l_intervals', columns=COLUMNS)
     first = pipe.sync(_rows(4))
     assert first.changed_intervals, first.to_dict()
@@ -1031,8 +1013,7 @@ def _server_instance(flavor, tmp_path=None):
 def test_duckdb_mssql_and_oracle_instances_sync_natively(flavor, native_calls, tmp_path):
     """
     The Rust drivers of `duckdb`, `mssql` and `oracle` run the whole flow (their Python drivers
-    are not needed): the rows and the counts equal what the SQLite instance gives in `python`
-    mode.
+    are not needed): the rows and the counts equal what the recorded Python mode gave on a SQLite instance.
     """
     if flavor != 'duckdb' and flavor not in os.environ.get('MRSM_TEST_FLAVORS', 'sqlite').split(','):
         pytest.skip(f"set MRSM_TEST_FLAVORS to include {flavor}")
@@ -1042,14 +1023,10 @@ def test_duckdb_mssql_and_oracle_instances_sync_natively(flavor, native_calls, t
             pytest.skip("the Oracle client library (libclntsh) is not installed")
     params = {'columns': COLUMNS, 'dtypes': {'val': 'float', 'name': 'str'}}
     steps = [(_rows(6), {}), (_rows(6), {}), (_rows(8, offset=2), {})]
-    reference = mrsm.get_connector(
-        'sql', 'w15l_ref_' + uuid.uuid4().hex[:6],
-        flavor='sqlite', database=str(tmp_path / 'ref.db'),
-    )
-    expected = _run('python', reference, f'w15l_{flavor}', params, steps)
+    expected = oracle.expected()
     instance = _server_instance(flavor, tmp_path)
     handled = native_calls.handled
-    actual = _run('rust', instance, f'w15l_{flavor}', params, steps)
+    actual = _run(instance, f'w15l_{flavor}', params, steps)
     assert native_calls.handled - handled == len(steps), native_calls.declined
     for (exp_tuple, exp_state), (act_tuple, act_state) in zip(expected, actual):
         assert act_tuple[0] == exp_tuple[0] is True
@@ -1064,16 +1041,17 @@ def test_duckdb_mssql_and_oracle_instances_sync_natively(flavor, native_calls, t
 
 def test_a_custom_instance_connector_syncs_through_the_worker(native_calls):
     """`@make_connector` instances (`IS_INSTANCE = True`) are driven by the worker adapter."""
-    outcomes = {}
-    for mode in ('python', 'rust'):
-        _gate.set_mode(mode)
+    def outcome():
         instance = mrsm.get_connector('w15lmem', f'w15l_{uuid.uuid4().hex[:6]}')
         pipe = mrsm.Pipe('w13h', 'w15l_custom_instance', instance=instance, columns=COLUMNS)
         first = tuple(pipe.sync(_rows(4)))
-        outcomes[mode] = (first, len(pipe.get_data(as_docs=True) or []))
+        return (first, len(pipe.get_data(as_docs=True) or []))
+
+    expected = oracle.expected()
+    actual = outcome()
     assert native_calls.handled == 1, native_calls.declined
-    assert outcomes['rust'][0][0] is True
-    assert outcomes['rust'] == outcomes['python']
+    assert actual[0][0] is True
+    assert actual == expected
 
 
 def _resp_keys(pattern, port=6399):
@@ -1117,7 +1095,6 @@ def test_a_valkey_instance_syncs_natively(native_calls):
     """The Rust `ValkeyConnector` is the instance: rows land under the pipe's index keys."""
     if 'valkey' not in os.environ.get('MRSM_TEST_FLAVORS', 'sqlite').split(','):
         pytest.skip("set MRSM_TEST_FLAVORS to include valkey")
-    _gate.set_mode('rust')
     instance = mrsm.get_connector('valkey', 'w15l_valkey', host='localhost', port=6399)
     pipe = mrsm.Pipe(
         'w13h', 'w15l_valkey_' + uuid.uuid4().hex[:6], instance=instance, columns=COLUMNS,
@@ -1152,32 +1129,35 @@ def api_server():
 
 
 def test_an_api_instance_syncs_natively(api_server, native_calls):
-    """The Rust `APIConnector` is the instance; both modes leave the same rows on the server."""
+    """The Rust `APIConnector` is the instance and leaves the rows v4 leaves on the server."""
     from tests.console.conftest import USERNAME, PASSWORD
-    outcomes = {}
-    for mode in ('python', 'rust'):
-        _gate.set_mode(mode)
+
+    def outcome():
         instance = mrsm.get_connector(
-            'api', f'w15l_api_{mode}',
+            'api', 'w15l_api',
             host='127.0.0.1', port=api_server.port, username=USERNAME, password=PASSWORD,
             protocol='http',
         )
         pipe = mrsm.Pipe(
-            'w13h', f'w15l_api_{mode}', instance=instance, columns=COLUMNS,
+            'w13h', 'w15l_api', instance=instance, columns=COLUMNS,
             dtypes={'val': 'float', 'name': 'str'},
         )
         pipe.delete()
         pipe = mrsm.Pipe(
-            'w13h', f'w15l_api_{mode}', instance=instance, columns=COLUMNS,
+            'w13h', 'w15l_api', instance=instance, columns=COLUMNS,
             dtypes={'val': 'float', 'name': 'str'},
         )
         first = tuple(pipe.sync(_rows(4)))
         second = tuple(pipe.sync(_rows(6, offset=2)))
-        outcomes[mode] = (first[0], second[0], sorted(d['id'] for d in _docs(pipe)))
+        result = (first[0], second[0], sorted(d['id'] for d in _docs(pipe)))
         pipe.delete()
+        return result
+
+    expected = oracle.expected()
+    actual = outcome()
     assert native_calls.handled == 2, native_calls.declined
-    assert outcomes['rust'][:2] == (True, True)
-    assert outcomes['rust'] == outcomes['python']
+    assert actual[:2] == (True, True)
+    assert actual == expected
 
 
 def _sync_with_deadline(pipe, seconds=90, **kwargs):
@@ -1200,7 +1180,6 @@ def _sync_with_deadline(pipe, seconds=90, **kwargs):
 
 def test_a_crashing_worker_is_an_error_not_a_hang(instance, native_calls):
     """The plugin kills its worker process mid-`fetch` (after calling back into the host)."""
-    _gate.set_mode('rust')
     pipe = _source_pipe(instance, 'plugin:w15l_plugdie', 'w15l_die')
     for _ in range(2):
         box = _sync_with_deadline(pipe)
@@ -1214,7 +1193,6 @@ def test_a_crashing_worker_is_an_error_not_a_hang(instance, native_calls):
 def test_a_worker_killed_while_idle_is_replaced(instance, native_calls):
     import signal
     import subprocess
-    _gate.set_mode('rust')
     pipe = _source_pipe(instance, PLUGIN_SOURCE, 'w15l_idle_kill')
     assert _sync_with_deadline(pipe)['result'][0] is True
     children = subprocess.run(
@@ -1284,9 +1262,7 @@ def test_numeric_values_read_back_like_v4(flavor, tmp_path, native_calls):
         {'dt': START + timedelta(hours=i), 'id': i, 'n': value}
         for i, value in enumerate(values)
     ]
-    outcomes = {}
-    for mode in ('python', 'rust'):
-        _gate.set_mode(mode)
+    def outcome():
         pipe = mrsm.Pipe(
             'w15l', 'numeric', flavor, instance=instance,
             columns=COLUMNS, dtypes={'n': 'numeric'},
@@ -1298,15 +1274,19 @@ def test_numeric_values_read_back_like_v4(flavor, tmp_path, native_calls):
         )
         assert pipe.sync(copy.deepcopy(docs))[0]
         frame = pipe.get_data()
-        outcomes[mode] = (
+        result = (
             [repr(d['n']) for d in sorted(_docs(pipe), key=lambda d: d['id'])],
             sorted(repr(v) for v in frame['n'].tolist()),
         )
         pipe.delete()
-    assert outcomes['rust'] == outcomes['python']
+        return result
+
+    expected = oracle.expected()
+    actual = outcome()
+    assert actual == expected
     if flavor == 'postgis':
-        assert "Decimal('2.5')" in outcomes['rust'][0]
-        assert f"Decimal('{FORTY_DIGITS}')" in outcomes['rust'][0]
+        assert "Decimal('2.5')" in actual[0]
+        assert f"Decimal('{FORTY_DIGITS}')" in actual[0]
 
 
 def test_mrsm_symlinks_follow_the_live_config(instance, native_calls):
@@ -1321,9 +1301,7 @@ def test_mrsm_symlinks_follow_the_live_config(instance, native_calls):
         {'dt': START, 'id': 1, 'tag': 'a'},
         {'dt': START, 'id': 2, 'tag': 'a'},
     ]
-    outcomes = {}
-    for mode in ('python', 'rust'):
-        _gate.set_mode(mode)
+    def outcome():
         seen = []
         for column in ('id', 'tag'):
             mrsm_config.config['w15l_live'] = {'idcol': column}
@@ -1333,11 +1311,14 @@ def test_mrsm_symlinks_follow_the_live_config(instance, native_calls):
             )
             results = tuple(tuple(pipe.sync([copy.deepcopy(row)])) for row in rows)
             seen.append((results, len(_docs(pipe))))
-        outcomes[mode] = seen
-    mrsm_config.config.pop('w15l_live', None)
-    assert outcomes['rust'] == outcomes['python']
+        mrsm_config.config.pop('w15l_live', None)
+        return seen
+
+    expected = oracle.expected()
+    actual = outcome()
+    assert actual == expected
     ### Matched on `id` the two rows are two rows; matched on `tag` they are one.
-    assert [count for _, count in outcomes['rust']] == [2, 1]
+    assert [count for _, count in actual] == [2, 1]
 
 
 def test_arrow_tables_sync_natively_and_other_types_are_refused(instance, native_calls):
@@ -1346,7 +1327,6 @@ def test_arrow_tables_sync_natively_and_other_types_are_refused(instance, native
     table = pa.Table.from_pylist(rows)
     batch = pa.RecordBatch.from_pylist(rows)
     params = {'columns': COLUMNS, 'dtypes': {'val': 'float', 'name': 'str'}}
-    _gate.set_mode('rust')
     expected = _fresh_pipe(instance, 'arrow_list', **params)
     assert expected.sync(copy.deepcopy(rows))[0]
     for name, data in (('arrow_table', table), ('arrow_batch', batch)):
@@ -1367,8 +1347,8 @@ def test_in_memory_sqlite_is_one_database_for_pipes_and_sqlalchemy(native_calls)
     `Pipe` methods (the Rust pool) and `read()` / `exec()` / `.engine` (SQLAlchemy) open one
     database, so they see the same tables (W15L-007 is gone).
     """
+    pytest.importorskip('sqlalchemy')
     from meerschaum.utils.sql import sql_item_name
-    _gate.set_mode('rust')
     conn = mrsm.get_connector(
         'sql', 'w15l_shared_' + uuid.uuid4().hex[:6], flavor='sqlite', database=':memory:',
     )
@@ -1393,9 +1373,7 @@ def test_postgres_numeric_special_values_read_back_like_v4(tmp_path):
     """`NaN` / `Infinity` / `-Infinity` read from a `NUMERIC` column are `Decimal` objects."""
     instance = _numeric_instance('postgis', tmp_path)
     instance.exec('CREATE SCHEMA IF NOT EXISTS "w15l_num"')
-    outcomes = {}
-    for mode in ('python', 'rust'):
-        _gate.set_mode(mode)
+    def outcome():
         pipe = mrsm.Pipe(
             'w15l', 'numeric_special', instance=instance,
             columns=COLUMNS, dtypes={'n': 'numeric'},
@@ -1416,13 +1394,17 @@ def test_postgres_numeric_special_values_read_back_like_v4(tmp_path):
             )
         pipe._invalidate_cache(hard=True)
         ### The instance's documents (`Pipe.get_data(as_docs=True)` adds nothing to them).
-        outcomes[mode] = [
+        result = [
             repr(d['n'])
             for d in sorted(pipe.instance_connector.get_pipe_docs(pipe), key=lambda d: d['id'])
         ]
         pipe.delete()
-    assert outcomes['rust'] == outcomes['python']
-    assert outcomes['rust'][1:] == [
+        return result
+
+    expected = oracle.expected()
+    actual = outcome()
+    assert actual == expected
+    assert actual[1:] == [
         "Decimal('NaN')", "Decimal('Infinity')", "Decimal('-Infinity')", 'None',
     ]
 
@@ -1446,6 +1428,7 @@ def test_nan_and_infinity_numerics_are_stored_like_v4(flavor, tmp_path, native_c
     value where the column can hold it (PostgreSQL `NUMERIC`, SQLite text); the MySQL family
     cannot store an infinity and the sync fails in both implementations (PARITY.md, W15L-012).
     """
+    pytest.importorskip('sqlalchemy')
     from meerschaum.utils.sql import sql_item_name
     instance = _numeric_instance(flavor, tmp_path)
     if flavor == 'postgis':
@@ -1457,9 +1440,7 @@ def test_nan_and_infinity_numerics_are_stored_like_v4(flavor, tmp_path, native_c
         {'dt': START + timedelta(hours=i), 'id': i, 'n': value}
         for i, value in enumerate(specials, start=1)
     ]
-    outcomes = {}
-    for mode in ('python', 'rust'):
-        _gate.set_mode(mode)
+    def outcome():
         make = lambda: mrsm.Pipe(  # noqa: E731
             'w15l', 'nan_inf', flavor, instance=instance,
             columns=COLUMNS, dtypes={'n': 'numeric'},
@@ -1474,14 +1455,18 @@ def test_nan_and_infinity_numerics_are_stored_like_v4(flavor, tmp_path, native_c
             f'SELECT id, CAST(n AS {cast}) AS txt, '
             f'CASE WHEN n IS NULL THEN 1 ELSE 0 END AS nullflag FROM {table} ORDER BY id'
         )
-        outcomes[mode] = (
+        result = (
             [(r['id'], r['txt'] if r['txt'] == r['txt'] else None, r['nullflag'])
              for r in rows.to_dict(orient='records')],
             [repr(d.get('n')) for d in pipe.instance_connector.get_pipe_docs(pipe)],
         )
         pipe.delete()
-    assert outcomes['rust'] == outcomes['python']
-    stored = outcomes['rust'][0]
+        return result
+
+    expected = oracle.expected()
+    actual = outcome()
+    assert actual == expected
+    stored = actual[0]
     assert stored[1][2] == 1 and stored[2][2] == 1  # NaN and None are NULL
     if flavor in ('sqlite', 'postgis'):
         assert [row[1] for row in stored[3:]] == ['Infinity', '-Infinity']
@@ -1539,7 +1524,6 @@ print('FRESH_OK', result.inserted)
     env.update({
         'MRSM_ROOT_DIR': str(root),
         'MRSM_PLUGINS_DIR': os.path.abspath('tests/plugins'),
-        'MRSM_CORE': 'rust',
         'W15L_DB': str(tmp_path / 'fresh.db'),
         'PYTHONPATH': os.getcwd(),
     })

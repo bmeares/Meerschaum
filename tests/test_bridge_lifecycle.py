@@ -24,12 +24,10 @@ def _subprocess_env(root, plugins):
         'MRSM_ROOT_DIR': str(root),
         'MRSM_PLUGINS_DIR': str(plugins),
         'MRSM_VENVS_DIR': str(root / 'venvs'),
-        'MRSM_CORE': os.environ.get('MRSM_CORE', 'python'),
     }
 
 
-@pytest.mark.parametrize('mode', ['python', 'rust'])
-def test_external_uv_installs_without_pip_or_uv_module(tmp_path, mode):
+def test_external_uv_installs_without_pip_or_uv_module(tmp_path):
     uv_bin = shutil.which('uv')
     if uv_bin is None:
         pytest.skip('uv executable required')
@@ -65,7 +63,7 @@ assert importlib.util.find_spec('uv') is None
     result = subprocess.run(
         [str(interpreter), '-c', code, str(wheels)],
         env={**_subprocess_env(tmp_path, plugins), 'PYTHONNOUSERSITE': '1', 'UV_OFFLINE': '1',
-             'MRSM_CORE': mode, 'MRSM_NO_AUTO_INSTALL': '1'},
+             'MRSM_NO_AUTO_INSTALL': '1'},
         capture_output=True, text=True, timeout=30,
     )
     assert result.returncode == 0, result.stdout + result.stderr
@@ -73,7 +71,7 @@ assert importlib.util.find_spec('uv') is None
 
     # Exercise the native host with legacy plugin discovery in the same bare interpreter.
     binary = Path(__file__).resolve().parents[1] / 'target' / 'debug' / ('mrsm.exe' if os.name == 'nt' else 'mrsm')
-    if mode == 'rust' and binary.exists():
+    if binary.exists():
         (plugins / 'bridge_demo.py').write_text(
             "from meerschaum.plugins import make_action\n"
             "@make_action\ndef bridge_demo(**kw):\n    return True, 'bridge ready'\n"
@@ -85,7 +83,7 @@ assert importlib.util.find_spec('uv') is None
             native = subprocess.run(
                 [str(binary), *command],
                 env={**_subprocess_env(tmp_path, plugins), 'PYTHONNOUSERSITE': '1', 'UV_OFFLINE': '1',
-                     'MRSM_PYTHON': str(interpreter), 'MRSM_CORE': 'rust', 'MRSM_NO_AUTO_INSTALL': '1'},
+                     'MRSM_PYTHON': str(interpreter), 'MRSM_NO_AUTO_INSTALL': '1'},
                 capture_output=True, text=True, timeout=30,
             )
             assert native.returncode == 0, native.stdout + native.stderr
@@ -118,6 +116,7 @@ def test_package_install_rechecks_uv_after_bootstrap(monkeypatch):
     from contextlib import nullcontext
     from meerschaum.utils import packages
 
+    monkeypatch.delenv('MRSM_NO_AUTO_INSTALL', raising=False)
     calls = []
     monkeypatch.setattr(packages, '_get_uv_bin', lambda: '/external/uv' if calls else None)
     monkeypatch.setattr(packages, 'is_uv_enabled', lambda: True)

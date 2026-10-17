@@ -99,7 +99,7 @@ def root():
 @pytest.fixture(scope='module')
 def host(root):
     """Serve the host on a Unix socket and yield an `httpx` client over it."""
-    import httpx
+    httpx = pytest.importorskip('httpx')
     sock_dir = pathlib.Path(tempfile.mkdtemp(prefix='mh'))
     if len(str(sock_dir)) > 90:
         shutil.rmtree(sock_dir, ignore_errors=True)

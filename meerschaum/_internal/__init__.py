@@ -7,3 +7,6 @@ Modules, classes, and variables declared in _internal are not intended for gener
 """
 
 from meerschaum._internal.static import STATIC_CONFIG
+
+from meerschaum._internal import _removed
+_removed.install()

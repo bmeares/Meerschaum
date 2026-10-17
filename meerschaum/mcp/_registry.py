@@ -6,7 +6,7 @@
 Define the transport-agnostic MCP registry: tools, resources, and prompts.
 
 Everything the MCP server exposes is declared here as data so that the HTTP
-transport (`meerschaum.api.routes._mcp`), the stdio transport
+transport (`/mcp`, served by the Rust server), the stdio transport
 (`meerschaum.mcp._stdio`), and the generated documentation all read from one
 source. Adding a tool means adding one `@tool(...)` decorator — no transport,
 route, or docs changes required.

@@ -3,16 +3,12 @@
 # vim:fenc=utf-8
 
 """
-Log into the API instance or refresh the token.
+Log into the API instance or refresh the token (the Rust client).
 """
 
 from __future__ import annotations
 
-import json
-import datetime
 from meerschaum.utils.typing import SuccessTuple, Any, Union
-from meerschaum._internal.static import STATIC_CONFIG
-from meerschaum.utils.warnings import warn as _warn
 
 
 def login(
@@ -24,78 +20,59 @@ def login(
     """Log in and set the session token."""
     if warn and self.__dict__.get('_warn', None) is False:
         warn = False
-    if self.login_scheme == 'api_key':
-        validate_response = self.post(
-            STATIC_CONFIG['api']['endpoints']['tokens'] + '/validate',
-            headers={'Authorization': f'Bearer {self.api_key}'},
-            use_token=False,
-            debug=debug,
-        )
-        if not validate_response:
-            return False, "API key is not valid."
-        return True, "API key is valid."
-
-    try:
-        if self.login_scheme == 'password':
-            login_data = {
-                'username': self.username,
-                'password': self.password,
-            }
-        elif self.login_scheme == 'client_credentials':
-            login_data = {
-                'client_id': self.client_id,
-                'client_secret': self.client_secret,
-            }
-    except AttributeError:
-        login_data = {}
-
-    if not login_data:
-        return False, f"Please login with the command `login {self}`."
-
-    login_scheme_msg = (
-        f" as user '{login_data['username']}'"
-        if self.login_scheme == 'username'
-        else ''
-    )
-
-    response = self.post(
-        STATIC_CONFIG['api']['endpoints']['login'],
-        data=login_data,
-        use_token=False,
-        debug=debug,
-    )
-    if response:
-        msg = f"Successfully logged into '{self}'{login_scheme_msg}'."
-        self._token = json.loads(response.text)['access_token']
-        self._expires = datetime.datetime.strptime(
-            json.loads(response.text)['expires'], 
-            '%Y-%m-%dT%H:%M:%S.%f'
-        )
-    else:
-        msg = (
-            f"Failed to log into '{self}'{login_scheme_msg}.\n" +
-            f"    Please verify login details for connector '{self}'."
-        )
-        if warn and not self.__dict__.get('_emitted_warning', False):
-            _warn(msg, stack=False)
-            self._emitted_warning = True
-
-    return response.__bool__(), msg
+    return self._rust_client().login(warn=warn)
 
 
 def test_connection(
     self,
     **kw: Any
 ) -> Union[bool, None]:
-    """Test if a successful connection to the API may be made."""
-    from meerschaum.connectors.poll import retry_connect
-    _default_kw = {
-        'max_retries': 1, 'retry_wait': 0, 'warn': False,
-        'connector': self, 'enforce_chaining': False,
-        'enforce_login': False,
-    }
-    _default_kw.update(kw)
+    """
+    Test if a successful connection to the API may be made.
+
+    The API instance must answer `/chaining`; keyword arguments are those of `retry_connect()`:
+    `max_retries` (default 1), `retry_wait` (default 0), `warn` (default `False`),
+    `enforce_chaining` and `enforce_login` (default `False`).
+    """
+    import time
+    from meerschaum.utils.warnings import warn as _warn
+    max_retries = kw.get('max_retries', 1)
+    retry_wait = kw.get('retry_wait', 0)
+    warn = kw.get('warn', False)
+    enforce_chaining = kw.get('enforce_chaining', False)
+    enforce_login = kw.get('enforce_login', False)
+
     try:
-        return retry_connect(**_default_kw)
+        retries = 0
+        chaining_status = None
+        while retries < max_retries:
+            connected = None
+            if not isinstance(chaining_status, bool):
+                chaining_status = self.get_chaining_status()
+                if chaining_status is False:
+                    if enforce_chaining:
+                        if warn:
+                            _warn(
+                                f"Meerschaum instance '{self}' does not allow chaining "
+                                + "and cannot be used as the parent for this instance.",
+                                stack=False,
+                            )
+                        return False
+                    chaining_status = True
+
+            if chaining_status:
+                connected = self.login(warn=warn)[0] if enforce_login else True
+                if not connected and warn:
+                    _warn(f"Unable to login to '{self}'!", stack=False)
+
+            if connected:
+                return True
+
+            if warn:
+                _warn(f"Connection to '{self}' failed.", stack=False)
+            if retry_wait > 0:
+                time.sleep(retry_wait)
+            retries += 1
+        return False
     except Exception:
         return False

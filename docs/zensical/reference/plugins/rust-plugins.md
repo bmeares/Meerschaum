@@ -121,7 +121,7 @@ Bounds (`begin`, `end`) are integers, ISO timestamp strings or `null`. Results a
 
 ## 📜 The manifest
 
-`manifest()` returns the same JSON document the Python plugin manifest uses (schema version 4). The host validates it at load time, so `--help`, tab completion and the server can learn what your plugin offers **without loading the library**: it is cached by a fingerprint of the plugin directory and rebuilt when a file changes.
+`manifest()` returns the same JSON document the Python plugin manifest uses, as a whole: the top-level keys `schema_version` (use the SDK constant `meerschaum_plugin::MANIFEST_SCHEMA_VERSION`; it is `3`, the native manifest's own schema, not the Python worker's), `meerschaum_version`, `python_version` (`""`), `fingerprint` (`null`) and `plugins`, plus `connector_types`, `pre_sync_hooks` and `post_sync_hooks` when you provide them (the shipped example is the reference). The host validates it against the bundled JSON schema (`crates/meerschaum-plugin/schema/manifest.schema.json`) at load time, so `--help`, tab completion and the server can learn what your plugin offers **without loading the library**: it is cached by a fingerprint of the plugin directory and rebuilt when a file changes.
 
 The part for your plugin lives under `plugins.<name>`:
 
@@ -160,7 +160,7 @@ Hooks run around every sync that goes through the sync engine (`sync pipes`, job
 
 ## 🏗️ Build, install, load
 
-Or build the shipped example yourself from a checkout (the prebuilt route, which needs no toolchain at runtime):
+Build the shipped example from a checkout (the prebuilt route, which needs no toolchain at runtime):
 
 ```bash
 cargo build --release -p meerschaum-plugin --example native_demo
@@ -301,7 +301,7 @@ The ABI version is checked at load. A breaking change would ship as a new `mrsm_
 
 ## 📦 Distribution
 
-The plugin repository stores **per-target-triple artifacts** plus a source tarball. On install, the matching triple is downloaded; if none matches and a Rust toolchain is available, the plugin is built with `cargo build --release` (the same build described under [Source plugins](#source-plugins)). Python plugins keep using `required`, `plugin:name@api:repo` entries and `.mrsm_origins.json` unchanged, and a Python plugin may depend on a Rust plugin and vice versa.
+Today a native plugin is distributed as a directory you copy into `MRSM_PLUGINS_DIR` (a prebuilt `plugin.toml` + `lib<name>.<ext>` for the target OS and CPU, or a source crate that Meerschaum builds, see [Source plugins](#source-plugins)). Python plugins keep using `required`, `plugin:name@api:repo` entries and `.mrsm_origins.json` unchanged, and a Python plugin may depend on a Rust plugin and vice versa. Planned: a plugin repository that stores per-target-triple artifacts plus a source tarball, with `install plugin` choosing the matching triple and falling back to `cargo build --release` when none matches.
 
 !!! note "Status in this pre-release"
 

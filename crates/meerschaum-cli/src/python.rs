@@ -39,42 +39,6 @@ pub fn action_name(words: &[String], manifest: &Manifest) -> Option<String> {
         .map(|a| a.name.clone())
 }
 
-/// Execute an action not implemented by native dispatch, keeping v4's kwargs and console output.
-pub fn core_action(name: &str, args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
-    let mut kwargs = Msg(args
-        .iter()
-        .map(|(key, value)| (Wire::from(key.as_str()), argument_value(value)))
-        .collect());
-    // The native dispatcher owns the core action's schedule. Re-entering Python with
-    // that flag would start a second scheduler inside the first scheduled invocation.
-    kwargs.0.retain(|(key, _)| key.as_str() != Some("schedule"));
-    let mut action: Vec<String> = name.split_whitespace().map(str::to_owned).collect();
-    action.extend(native::words(args, "action"));
-    kwargs.insert(
-        "action",
-        Wire::Array(action.into_iter().map(Wire::from).collect()),
-    );
-    let result = call(
-        "core_action",
-        Msg::new().set("kwargs", Wire::Map(kwargs.0)),
-        None,
-        rt,
-    )?;
-    if result.success
-        && matches!(
-            name.split_whitespace().next(),
-            Some("install" | "uninstall" | "setup" | "upgrade")
-        )
-        && let Err(error) = refresh_manifest(rt)
-    {
-        rt.eprint(&format!(
-            "Unable to refresh plugin manifest: {}\n",
-            error.message
-        ));
-    }
-    Ok(result)
-}
-
 /// Plugin sysargs are parsed by the worker so `add_plugin_argument` retains Python semantics.
 pub fn plugin_action(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     let sysargs = native::words(args, "sysargs");

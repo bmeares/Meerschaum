@@ -253,6 +253,66 @@ fn prompt_and_banner_without_ansi() {
     );
 }
 
+/// v4's `test_compose_shell_prompt_shows_the_active_project`: the prompt names the Compose
+/// project of the environment (`MRSM__COMPOSE_CONFIG`), even under a pre-4.0 prompt template
+/// which has no `{compose}` slot, and shows nothing outside a project.
+#[test]
+fn the_prompt_names_the_active_compose_project() {
+    fn in_project(key: &str) -> Option<String> {
+        (key == "MRSM__COMPOSE_CONFIG")
+            .then(|| r#"{"__file__": "/tmp/awesome/mrsm-compose.yaml"}"#.to_string())
+    }
+    fn named(key: &str) -> Option<String> {
+        (key == "MRSM__COMPOSE_CONFIG").then(|| r#"{"project_name": "explicit"}"#.to_string())
+    }
+    let h = Harness::new();
+    let prompt = |env: fn(&str) -> Option<String>| {
+        let mut out = Vec::new();
+        let mut rt = h.runtime(&mut out, env);
+        let state = ShellState::new(&mut rt, Some("sql:local"));
+        shell::current_prompt(&state, &mut rt)
+    };
+    // The project is the directory of the compose file, or its `project_name`.
+    assert!(
+        prompt(in_project).contains(" | awesome "),
+        "{}",
+        prompt(in_project)
+    );
+    assert!(prompt(named).contains(" | explicit "), "{}", prompt(named));
+    assert!(!prompt(no_env).contains("awesome"), "{}", prompt(no_env));
+    assert!(!prompt(no_env).contains(" | "), "{}", prompt(no_env));
+
+    // A prompt written before 4.0 (`... | {executor_keys}`) gets the project in that slot.
+    let mut opts = ConfigOptions::with_env(vec![
+        (
+            "MRSM_ROOT_DIR".into(),
+            h.root.to_string_lossy().into_owned(),
+        ),
+        (
+            "MRSM_PLUGINS_DIR".into(),
+            h.root.join("plugins").to_string_lossy().into_owned(),
+        ),
+        (
+            "MRSM_CONFIG".into(),
+            r#"{"shell": {"unicode": {"prompt": "\n [ {username}@{instance} | {executor_keys} ] ➤ "}}}"#
+                .into(),
+        ),
+    ]);
+    opts.allow_writes = false;
+    opts.home = h.root.clone();
+    let cfg = Config::new(opts).unwrap();
+    let f = meerschaum_cli::format::Formatter::new(settings(false), &cfg);
+    let template = shell::prompt_template(&f);
+    assert!(
+        template.contains("{compose}") && !template.contains("{executor_keys}"),
+        "{template}"
+    );
+    assert_eq!(
+        shell::render_prompt(&f, &PromptState::new(&f, "sql:local", Some("awesome"))),
+        "\n [ (no username)@sql:local | awesome ] ➤ "
+    );
+}
+
 #[test]
 fn completion_candidates() {
     let h = Harness::new();

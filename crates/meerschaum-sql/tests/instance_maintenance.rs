@@ -392,5 +392,231 @@ flavor_tests!(test_integer_axis_hypertable_compress, |c: Ctx| async move {
     assert!(c.conn.is_hypertable(&sp).await);
     ok(c.conn.compress_pipe(&pipe, false).await);
     assert_eq!(rows(&c, &pipe).await, Some(10));
+
+    // `set_integer_now_func` registers `mrsm_integer_now_millisecond` on the hypertable, and
+    // re-running it is a successful no-op.
+    let target = sp
+        .target
+        .rsplit('.')
+        .next()
+        .unwrap()
+        .trim_matches('"')
+        .to_string();
+    let registered = format!(
+        "SELECT integer_now_func FROM timescaledb_information.dimensions WHERE hypertable_name = '{target}'"
+    );
+    for _ in 0..2 {
+        assert!(c.conn.set_integer_now_func(&sp).await);
+        let func = c
+            .conn
+            .value(&registered)
+            .await
+            .expect("a registered function");
+        assert!(
+            format!("{func:?}").contains("mrsm_integer_now_millisecond"),
+            "unexpected integer_now_func: {func:?}"
+        );
+    }
     c.delete(&pipe).await;
 });
+
+// Live: `set_integer_now_func` is a successful no-op where no function is needed (a datetime
+// axis, any other flavor), and on TimescaleDB it (re-)registers `mrsm_integer_now_millisecond`
+// on an integer-axis hypertable, idempotently.
+flavor_tests!(test_set_integer_now_func, |c: Ctx| async move {
+    let datetime_pipe = c.pipe(
+        "test",
+        "integer_now",
+        Some("datetime_axis"),
+        r#"{"columns": {"datetime": "ts"}, "compress": true}"#,
+    );
+    let sp = c.conn.sql_pipe(&datetime_pipe).unwrap();
+    assert!(
+        c.conn.set_integer_now_func(&sp).await,
+        "a datetime axis needs no integer_now function"
+    );
+    // The integer-axis TimescaleDB case registers a database-wide function by name, so it runs
+    // inside `test_integer_axis_hypertable_compress`: two tests replacing it concurrently race
+    // ("tuple concurrently updated").
+    if c.flavor != "timescaledb" {
+        let int_pipe = c.pipe(
+            "test",
+            "integer_now",
+            Some("int_axis"),
+            r#"{"columns": {"datetime": "ts"}, "dtypes": {"ts": "int"}, "compress": true}"#,
+        );
+        let sp = c.conn.sql_pipe(&int_pipe).unwrap();
+        assert!(c.conn.set_integer_now_func(&sp).await);
+    }
+});
+
+/// The `mrsm_temp_tables` column holding the table name, quoted for the flavor.
+fn temp_table_column(flavor: &str) -> &'static str {
+    match flavor {
+        "mysql" | "mariadb" => "`table`",
+        "mssql" => "[table]",
+        _ => "\"table\"",
+    }
+}
+
+/// Count the bookkeeping rows for `name`, optionally only the unflagged ones.
+async fn temp_table_rows(c: &Ctx, name: &str, unflagged_only: bool) -> i64 {
+    let table = c.conn.instance_table_name("mrsm_temp_tables");
+    let col = temp_table_column(c.flavor);
+    let flag = if unflagged_only {
+        " AND ready_to_drop IS NULL"
+    } else {
+        ""
+    };
+    let query = format!("SELECT COUNT(*) FROM {table} WHERE {col} = '{name}'{flag}");
+    c.conn
+        .value(&query)
+        .await
+        .and_then(|v| v.as_i64())
+        .unwrap_or(0)
+}
+
+/// Seed one stale (30 days old, unflagged) bookkeeping row.
+async fn seed_stale_temp_table(c: &Ctx, name: &str) {
+    use meerschaum_sql::driver::params::{SqlParam, placeholders};
+    let table = c.conn.instance_table_name("mrsm_temp_tables");
+    let col = temp_table_column(c.flavor);
+    let created = chrono::Utc::now().naive_utc() - chrono::Duration::days(30);
+    let created = if c.flavor == "sqlite" || c.flavor == "geopackage" {
+        SqlParam::Text(created.format("%Y-%m-%d %H:%M:%S%.6f").to_string())
+    } else {
+        SqlParam::Timestamp(created)
+    };
+    c.conn
+        .driver()
+        .exec_with(
+            &format!(
+                "INSERT INTO {table} (date_created, {col}, ready_to_drop) VALUES ({})",
+                placeholders(c.conn.flavor(), 1, 3)
+            ),
+            &[created, SqlParam::Text(name.to_string()), SqlParam::Null],
+        )
+        .await
+        .expect("seed a stale temporary table row");
+}
+
+// `test_stale_temporary_tables_scan_is_throttled`: the stale-table scan runs at most once a
+// minute and never duplicates bookkeeping rows. The first call flags (and drops) the stale
+// row; on a private database a row seeded afterwards is untouched by the next four calls and by a `refresh=True`
+// call, which only drops what is already flagged.
+flavor_tests!(
+    test_stale_temporary_tables_scan_is_throttled,
+    |c: Ctx| async move {
+        assert!(c.conn.ensure_instance_tables(true).await);
+        let first = format!("_mrsm_test_stale_a_{}", &c.prefix[6..14]);
+        let second = format!("_mrsm_test_stale_b_{}", &c.prefix[6..14]);
+        seed_stale_temp_table(&c, &first).await;
+
+        let (success, msg) = c.conn.drop_old_temporary_tables(false).await;
+        assert!(success, "{msg}");
+        assert_eq!(
+            temp_table_rows(&c, &first, true).await,
+            0,
+            "the first call scans and flags the stale table"
+        );
+        assert!(temp_table_rows(&c, &first, false).await <= 1);
+
+        seed_stale_temp_table(&c, &second).await;
+        for _ in 0..4 {
+            let (success, msg) = c.conn.drop_old_temporary_tables(false).await;
+            assert!(success, "{msg}");
+        }
+        let (success, msg) = c.conn.drop_old_temporary_tables(true).await;
+        assert!(success, "{msg}");
+        // Server flavors share the bookkeeping table with every concurrently running test,
+        // whose own syncs scan (and flag) any 30-day-old row; only a private database can
+        // assert that the row stays unflagged. `stale_scan_throttle_window` (lib tests) pins
+        // the exact timing on SQLite.
+        if matches!(c.flavor, "sqlite" | "geopackage" | "duckdb") {
+            assert_eq!(
+                temp_table_rows(&c, &second, true).await,
+                1,
+                "throttled calls neither scan nor flag nor re-insert"
+            );
+        }
+        assert!(
+            temp_table_rows(&c, &second, false).await <= 1,
+            "the bookkeeping row is never duplicated"
+        );
+
+        let table = c.conn.instance_table_name("mrsm_temp_tables");
+        let col = temp_table_column(c.flavor);
+        c.conn
+            .exec(&format!(
+                "DELETE FROM {table} WHERE {col} IN ('{first}', '{second}')"
+            ))
+            .await;
+    }
+);
+
+/// A `tracing` writer collecting everything logged on the current thread.
+#[derive(Clone, Default)]
+struct Captured(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+
+impl std::io::Write for Captured {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().unwrap().extend_from_slice(buf);
+        Ok(buf.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for Captured {
+    type Writer = Captured;
+    fn make_writer(&'a self) -> Captured {
+        self.clone()
+    }
+}
+
+// `test_compress_with_upsert_warns_once`: declaring both `upsert` and `compress` warns once per
+// pipe per connector (the message names the `ON CONFLICT` failure); a pipe without `upsert`
+// never warns, and a second pipe warns on its own. The warning precedes any table lookup, so
+// the pipes need not exist. A current-thread runtime keeps the thread-local subscriber on the
+// thread running the calls.
+#[tokio::test]
+async fn test_compress_with_upsert_warns_once() {
+    let Some(c) = ctx("timescaledb", "compress_upsert_warn").await else {
+        return;
+    };
+    let captured = Captured::default();
+    let subscriber = tracing_subscriber::fmt()
+        .with_writer(captured.clone())
+        .with_ansi(false)
+        .with_max_level(tracing::Level::WARN)
+        .finish();
+    let _guard = tracing::subscriber::set_default(subscriber);
+    let warnings = || {
+        let text = String::from_utf8(captured.0.lock().unwrap().clone()).unwrap();
+        text.matches("ON CONFLICT").count()
+    };
+    let upsert = |location: &str, upsert: bool| {
+        c.pipe(
+            "plugin:timeline",
+            "activities",
+            Some(location),
+            &format!(
+                r#"{{"columns": {{"datetime": "time", "id": "id"}}, "upsert": {upsert}, "compress": {{"after": "30 days"}}}}"#
+            ),
+        )
+    };
+
+    let pipe = upsert("compress_upsert_warn", true);
+    ok(c.conn.apply_compression_policy(&pipe).await);
+    ok(c.conn.apply_compression_policy(&pipe).await);
+    assert_eq!(warnings(), 1, "warned once for two applications");
+
+    let plain = upsert("compress_plain", false);
+    ok(c.conn.apply_compression_policy(&plain).await);
+    assert_eq!(warnings(), 1, "no warning without `upsert`");
+
+    let other = upsert("compress_upsert_other", true);
+    ok(c.conn.apply_compression_policy(&other).await);
+    assert_eq!(warnings(), 2, "a second pipe warns on its own");
+}

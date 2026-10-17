@@ -44,12 +44,33 @@ if [ -n "$start_db" ]; then
   cd ../
 fi
 
-$mrsm stop daemon
-
-if [ ! -z "$MRSM_INSTALL_PACKAGES" ]; then
-  $mrsm install packages setuptools wheel -y
-  $mrsm upgrade packages $MRSM_INSTALL_PACKAGES -y
+### The tests never download packages mid-run (`MRSM_NO_AUTO_INSTALL`): install the extras they
+### need into the test interpreter up front. `MRSM_INSTALL_PACKAGES` names the extras (the
+### `requirements/<extra>.txt` files); `MRSM_TEST_PIP_ARGS` adds `pip install` flags and
+### `MRSM_TEST_SKIP_INSTALL=1` skips the step when the interpreter is already provisioned
+### (the CI workflow provisions a dedicated venv). It only installs into a virtual environment:
+### set `MRSM_TEST_ALLOW_SYSTEM_INSTALL=1` to install into the interpreter itself.
+[ -z "$MRSM_INSTALL_PACKAGES" ] && export MRSM_INSTALL_PACKAGES='full sql-mssql sql-oracle sql-duckdb'
+if [ -z "$MRSM_TEST_SKIP_INSTALL" ]; then
+  if [ -z "$MRSM_TEST_ALLOW_SYSTEM_INSTALL" ] && \
+     ! $PYTHON_BIN -c 'import sys; sys.exit(0 if sys.prefix != sys.base_prefix else 1)'; then
+    echo "test.sh: '$PYTHON_BIN' is not a virtual environment, so the test dependencies are not" >&2
+    echo "  installed into it. Create one (python -m venv .venv-test) and set" >&2
+    echo "  PYTHON_BIN=.venv-test/bin/python, provision the interpreter yourself and set" >&2
+    echo "  MRSM_TEST_SKIP_INSTALL=1, or set MRSM_TEST_ALLOW_SYSTEM_INSTALL=1." >&2
+    exit 2
+  fi
+  requirement_args=""
+  for extra in $MRSM_INSTALL_PACKAGES; do
+    requirement_args="$requirement_args -r $PARENT/requirements/$extra.txt"
+  done
+  ### `httpx` is the client of the API host tests (not a Meerschaum dependency).
+  $PYTHON_BIN -m pip install --quiet $MRSM_TEST_PIP_ARGS $requirement_args httpx; rc="$?"
+  [ "$rc" != '0' ] && exit "$rc"
 fi
+export MRSM_NO_AUTO_INSTALL=1
+
+$mrsm stop daemon
 
 rm -rf "$test_root/data"
 rm -f "$test_root/sqlite/mrsm_local.db"

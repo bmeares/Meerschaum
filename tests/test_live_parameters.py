@@ -1,7 +1,6 @@
 """
-Live `Pipe.parameters` (design §4.4): under `MRSM_CORE=rust` the property is a write-through view,
-so nested mutation followed by `pipe.edit()` persists. Under `python` v4 returns a copy
-(`PARITY.md` row 29); both behaviors are pinned here.
+Live `Pipe.parameters` (design §4.4): the property is a write-through view,
+so nested mutation followed by `pipe.edit()` persists.
 """
 
 import copy
@@ -13,7 +12,6 @@ from types import SimpleNamespace
 import pytest
 
 import meerschaum as mrsm
-from meerschaum._core import _gate
 
 
 @pytest.fixture
@@ -23,8 +21,6 @@ def conn(tmp_path):
         flavor='sqlite', database=str(tmp_path / 'live.db'),
     )
 
-
-rust_only = pytest.mark.skipif(_gate.mode() != _gate.RUST, reason="live view is a rust-mode feature")
 
 
 def _stored(conn, pipe):
@@ -42,7 +38,6 @@ def test_construction_never_touches_the_instance():
     assert '_connector' not in pipe.__dict__ and '_instance_connector' not in pipe.__dict__
 
 
-@rust_only
 def test_nested_mutation_persists(conn):
     pipe = mrsm.Pipe('live', 'nested', instance=conn, columns={'id': 'id'})
     success, msg = pipe.register()
@@ -62,7 +57,6 @@ def test_nested_mutation_persists(conn):
     pipe.delete()
 
 
-@rust_only
 def test_deletion_and_update_methods(conn):
     pipe = mrsm.Pipe('live', 'delete', instance=conn, parameters={'x': 1, 'y': {'z': 2}, 'l': [3, 1, 2]})
     pipe.register()
@@ -81,7 +75,6 @@ def test_deletion_and_update_methods(conn):
     pipe.delete()
 
 
-@rust_only
 def test_raw_templates_survive_when_only_read(conn):
     """Reading a resolved value keeps the raw template; only touched keys are written."""
     pipe = mrsm.Pipe(
@@ -99,7 +92,6 @@ def test_raw_templates_survive_when_only_read(conn):
     pipe.delete()
 
 
-@rust_only
 def test_live_view_is_a_real_dict_and_serializes():
     pipe = mrsm.Pipe('live', 'dict', parameters={'a': {'b': [1, {'c': 2}]}})
     params = pipe.parameters
@@ -113,7 +105,6 @@ def test_live_view_is_a_real_dict_and_serializes():
     assert pipe._attributes['parameters']['a']['b'][1]['c'] == 3
 
 
-@rust_only
 def test_inherited_value_is_created_in_raw_on_write(conn):
     base = mrsm.Pipe('live', 'base', instance=conn, parameters={'fetch': {'p': 1}})
     base.register()
@@ -124,7 +115,6 @@ def test_inherited_value_is_created_in_raw_on_write(conn):
     assert child.parameters['fetch'] == {'p': 1, 'q': 2}
 
 
-@rust_only
 def test_setter_accepts_a_live_view():
     pipe = mrsm.Pipe('live', 'setter', parameters={'a': {'b': 1}})
     pipe.parameters = pipe.parameters
@@ -159,14 +149,6 @@ def test_pickle_roundtrip_and_equality():
     assert clone == pipe and hash(clone) == hash(pipe)
     assert clone.parameters['x'] == {'y': 1}
     assert str(clone) == str(pipe)
-
-
-def test_python_mode_parameters_are_a_copy():
-    if _gate.mode() == _gate.RUST:
-        pytest.skip("python-mode parity")
-    pipe = mrsm.Pipe('live', 'copy', parameters={'a': {'b': 1}})
-    pipe.parameters['a']['b'] = 2
-    assert pipe.parameters['a']['b'] == 1
 
 
 def test_duck_typed_stub_is_not_type_checked():

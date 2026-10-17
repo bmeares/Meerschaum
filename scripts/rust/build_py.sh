@@ -125,7 +125,7 @@ if [ "$check" -eq 1 ]; then
   scratch="$(mktemp -d)"
   trap 'rm -rf "$scratch"' EXIT
   mkdir -p "$scratch/root" "$scratch/plugins"
-  PYTHONPATH="$REPO" MRSM_CORE=python MRSM_ROOT_DIR="$scratch/root" \
+  PYTHONPATH="$REPO" MRSM_ROOT_DIR="$scratch/root" \
     MRSM_PLUGINS_DIR="$scratch/plugins" "$PYTHON" - <<'EOF'
 import importlib, sys
 core = importlib.import_module('meerschaum._core')

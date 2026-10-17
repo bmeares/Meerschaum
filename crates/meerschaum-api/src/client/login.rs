@@ -19,6 +19,12 @@ pub fn parse_expires(s: &str) -> Option<NaiveDateTime> {
 impl APIConnector {
     /// `login()`: request a JWT (password or client-credentials grant), or validate the API key.
     pub async fn login(&self) -> SuccessTuple {
+        self.login_with(true).await
+    }
+
+    /// `login(warn=...)`: with `warn` false a failed login does not warn and leaves the
+    /// connector's one-warning flag alone (v4 sets `_emitted_warning` only when it warns).
+    pub async fn login_with(&self, warn: bool) -> SuccessTuple {
         let scheme = self.login_scheme();
         if scheme == "api_key" {
             let api_key = self.attr("api_key").unwrap_or_default();
@@ -72,7 +78,7 @@ impl APIConnector {
         };
         if !response.ok() {
             let mut auth = self.auth.lock().await;
-            if !auth.emitted_warning {
+            if warn && !auth.emitted_warning {
                 super::warnings::warn(&failure);
                 auth.emitted_warning = true;
             }

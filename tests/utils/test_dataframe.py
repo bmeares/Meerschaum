@@ -50,18 +50,9 @@ def test_polars_special_type_conversion():
     assert row == pd_df.iloc[0].to_dict()
 
 
-def _geoarrow_types_installed() -> bool:
-    import importlib.util
-    from meerschaum.utils.venv import Venv
-    with Venv('mrsm'):
-        try:
-            return importlib.util.find_spec('geoarrow.types') is not None
-        except ModuleNotFoundError:
-            return False
-
-
 def test_polars_geometry_uses_geoarrow_wkb():
     """Polars uses GeoArrow WKB while Pandas retains GeoPandas geometry."""
+    pytest.importorskip('geoarrow.types')
     import json
     pl = pytest.importorskip('polars')
     shapely = attempt_import('shapely')
@@ -81,11 +72,7 @@ def test_polars_geometry_uses_geoarrow_wkb():
     }
     assert shapely.from_wkb(polars_df['geom'][0]).equals(shapely.Point(1, 2))
     assert polars_df['geom'][1] is None
-    ### The v4 path (`MRSM_CORE=python`, removed in 5.0) registers the PyArrow extension type only
-    ### when `geoarrow-types` is installed in the `mrsm` venv, which a fresh root lacks.
-    from meerschaum._core import _gate
-    if _gate.mode() == 'rust' or _geoarrow_types_installed():
-        assert 'extension<geoarrow.wkb' in str(polars_df.to_arrow().schema.field('geom').type)
+    assert 'extension<geoarrow.wkb' in str(polars_df.to_arrow().schema.field('geom').type)
 
     pandas_df = enforce_dtypes(raw_df, dtypes)
     assert isinstance(pandas_df, geopandas.GeoDataFrame)
@@ -316,45 +303,48 @@ def test_filter_unseen_df(old_docs, new_docs, expected_docs):
         ),
     ],
 )
-def test_filter_unseen_df_polars_parity(monkeypatch, old_df, new_df):
-    """The Polars anti-join matches the Pandas path, including its safe fallback."""
-    pl = pytest.importorskip('polars')
-    import meerschaum.utils.dataframe as dataframe
+def test_filter_unseen_df_matches_a_row_set_reference(old_df, new_df):
+    """The unseen rows are exactly the new rows no old row equals, in source order."""
+    import json
+    from meerschaum.utils.dataframe import filter_unseen_df
 
-    monkeypatch.setattr(dataframe, '_POLARS_FILTER_MIN_ROWS', 10 ** 9)
-    expected = dataframe.filter_unseen_df(old_df, new_df)
-    monkeypatch.setattr(dataframe, '_POLARS_FILTER_MIN_ROWS', 0)
-    actual = dataframe.filter_unseen_df(old_df, new_df)
+    def _norm(value):
+        if isinstance(value, (dict, list)):
+            return json.dumps(value, sort_keys=True, default=str)
+        if value is None or (not isinstance(value, (str, bytes)) and pd.isna(value)):
+            return None
+        return value if not hasattr(value, 'isoformat') else value.isoformat()
 
-    pd.testing.assert_frame_equal(actual, expected)
+    def _rows(df):
+        return [tuple(_norm(v) for v in row) for row in df.itertuples(index=False)]
+
+    old_rows = set(_rows(old_df))
+    expected = [row for row in _rows(new_df) if row not in old_rows]
+    assert _rows(filter_unseen_df(old_df, new_df)) == expected
 
 
-def test_filter_unseen_df_polars_preserves_source_order(monkeypatch):
+def test_filter_unseen_df_preserves_source_order_around_duplicate_null_rows():
     """The anti-join retains source order, including around duplicate null rows."""
-    pytest.importorskip('polars')
-    import meerschaum.utils.dataframe as dataframe
+    from meerschaum.utils.dataframe import filter_unseen_df
 
-    monkeypatch.setattr(dataframe, '_POLARS_FILTER_MIN_ROWS', 0)
     old_df = pd.DataFrame({'id': [1, 1, 9], 'value': [None, None, 'same']})
     new_df = pd.DataFrame({
         'id': [3, 1, 1, 2, 9],
         'value': ['new-3', None, None, 'new-2', 'same'],
     })
-    original_filter = dataframe._filter_unseen_df_with_polars
-    native_results = []
+    assert filter_unseen_df(old_df, new_df)['id'].tolist() == [3, 2]
 
-    def capture_native_result(*args, **kwargs):
-        native_result = original_filter(*args, **kwargs)
-        native_results.append(native_result)
-        return native_result
 
-    monkeypatch.setattr(dataframe, '_filter_unseen_df_with_polars', capture_native_result)
-    result = dataframe.filter_unseen_df(old_df, new_df)
-    from meerschaum._core import _gate
-    if not _gate.use_rust('filter_unseen_df'):
-        # Under MRSM_CORE=rust the Rust kernel replaces the Polars helper entirely (D12).
-        assert native_results[0] is not None
-    assert result['id'].tolist() == [3, 2]
+def test_filter_unseen_df_keeps_boolean_columns():
+    """Boolean columns come back as booleans."""
+    from meerschaum.utils.dataframe import filter_unseen_df
+
+    old_df = pd.DataFrame({'id': [1], 'value': ['NA'], 'flag': [False]})
+    new_df = pd.DataFrame({'id': [1, 2], 'value': ['NA', 'new'], 'flag': [False, True]})
+    result = filter_unseen_df(old_df, new_df)
+    assert result['id'].tolist() == [2]
+    assert result['flag'].tolist() == [True]
+    assert str(result['flag'].dtype).startswith('bool')
 
 
 def test_filter_unseen_df_mixed_datetime_backends():
@@ -368,38 +358,6 @@ def test_filter_unseen_df_mixed_datetime_backends():
         pd.DataFrame({'dt': native_dt}),
         dtypes={'dt': 'datetime64[us, UTC]'},
     ).empty
-
-
-def test_filter_unseen_df_polars_matches_boolean_dtype(monkeypatch):
-    """The accelerated path preserves Pandas' mixed-backend dtype resolution."""
-    pytest.importorskip('polars')
-    import meerschaum.utils.dataframe as dataframe
-
-    old_df = pd.DataFrame({'id': [1], 'value': ['NA'], 'flag': [False]})
-    new_df = pd.DataFrame({'id': [1, 2], 'value': ['NA', 'new'], 'flag': [False, True]})
-
-    monkeypatch.setattr(dataframe, '_POLARS_FILTER_MIN_ROWS', 10 ** 9)
-    expected = dataframe.filter_unseen_df(old_df, new_df)
-    monkeypatch.setattr(dataframe, '_POLARS_FILTER_MIN_ROWS', 0)
-    actual = dataframe.filter_unseen_df(old_df, new_df)
-
-    pd.testing.assert_frame_equal(actual, expected)
-
-
-def test_filter_unseen_df_polars_falls_back(monkeypatch):
-    """A Polars conversion error cleanly selects the established Pandas path."""
-    pl = pytest.importorskip('polars')
-    import meerschaum.utils.dataframe as dataframe
-
-    def fail_conversion(*args, **kwargs):
-        raise TypeError("unsupported value")
-
-    monkeypatch.setattr(dataframe, '_POLARS_FILTER_MIN_ROWS', 0)
-    monkeypatch.setattr(pl, 'from_pandas', fail_conversion)
-    old_df = pd.DataFrame({'id': [1]})
-    new_df = pd.DataFrame({'id': [1, 2]})
-    assert dataframe._filter_unseen_df_with_polars(new_df, old_df) is None
-    assert dataframe.filter_unseen_df(old_df, new_df)['id'].tolist() == [2]
 
 
 def test_filter_unseen_df_numeric_precision_scale():
@@ -452,6 +410,8 @@ def test_get_datetime_cols_types(df, expected_types, expected_tuples):
     Test that datetime columns are correctly identified along with their types.
     """
     from meerschaum.utils.dataframe import get_datetime_cols, get_datetime_cols_types
+    if int(pd.__version__.split('.')[0]) < 3:
+        pytest.skip(f"datetime units are those of pandas 3 (pandas {pd.__version__} is installed)")
     dt_cols_types = get_datetime_cols_types(df)
     assert dt_cols_types == expected_types
 

@@ -197,24 +197,28 @@ pub fn process_cmdlines() -> Vec<(i32, Vec<String>)> {
     imp::process_cmdlines()
 }
 
-/// The direct children of a process (Linux: `/proc/<pid>/task/*/children`; empty elsewhere or
-/// when the kernel does not expose them).
-pub fn children(pid: i32) -> Vec<i32> {
-    let Ok(tasks) = std::fs::read_dir(format!("/proc/{pid}/task")) else {
-        return Vec::new();
-    };
+/// The direct children of a process (Linux: `/proc/<pid>/task/*/children`). `None` when the
+/// kernel does not expose them (`CONFIG_PROC_CHILDREN` is off, or this is not Linux), which is
+/// not the same as having no children.
+pub fn children(pid: i32) -> Option<Vec<i32>> {
+    let tasks = std::fs::read_dir(format!("/proc/{pid}/task")).ok()?;
     let mut out = Vec::new();
+    let mut readable = false;
     for task in tasks.flatten() {
         if let Ok(text) = std::fs::read_to_string(task.path().join("children")) {
+            readable = true;
             out.extend(
                 text.split_whitespace()
                     .filter_map(|p| p.parse::<i32>().ok()),
             );
         }
     }
+    if !readable {
+        return None;
+    }
     out.sort_unstable();
     out.dedup();
-    out
+    Some(out)
 }
 
 /// When the process started (naive UTC), from `/proc/<pid>/stat` and the boot time: with the PID

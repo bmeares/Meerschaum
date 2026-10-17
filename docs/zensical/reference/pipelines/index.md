@@ -8,6 +8,8 @@ A plain `mrsm sync pipes` still works exactly as it did in v4: every selected pi
 
     A *pipeline* here is a slice of the pipe graph. The `start pipeline` action, which chains several actions with `:`, is unrelated and unchanged.
 
+The pipe parameters that configure the engine are `parents` / `children` (the edges), `retry`, `schedule`, `min_seconds` and `stream`; each is documented in the [Parameters reference](/reference/pipes/parameters/) and used on the pages below. The CLI surface is `sync pipes --parents / --children / --resume / --loop / --listen`, `plan pipes`, `show graph`, `show runs` and `show run <id>`; the Python surface is `pipe.sync(parents=, children=)` and `mrsm.Pipeline`. Moving from v4? See the [migration guide](/reference/migrating-to-v5/#the-syncing-engine).
+
 | Page | What it covers |
 |---|---|
 | **This page** | The pipe graph, selecting a slice of it, the plan, failures and resuming |
@@ -157,7 +159,7 @@ pipeline.pipes                   # every pipe the selection resolves to, in depe
 
 !!! note "How the Python API reaches the engine"
 
-    The engine is written in Rust only (there is no Python copy of it), so `parents=`, `children=` and `Pipeline` use the compiled `meerschaum._core` extension in every mode, including the `MRSM_CORE=python` parity mode, and raise an `ImportError` naming `scripts/rust/build_py.sh` if the extension is not built. The engine reads the graph from the **instance**, so the pipes it traverses must be registered there (a `Pipeline` registers its target pipes if they are not), and it uses their stored definitions rather than unsaved in-memory edits. `pipe.sync(df, children=True)` is rejected: the engine fetches each node itself, so sync a DataFrame with a bare `pipe.sync(df)`. Plugin sources run in the engine's own Python worker pool, not in your interpreter, and `begin=None` means "the planner's default" rather than v4's "no lower bound".
+    The engine is written in Rust only (there is no Python copy of it), so `parents=`, `children=` and `Pipeline` use the compiled `meerschaum._core` extension that ships in the `meerschaum` wheel (when you build from a checkout, `scripts/rust/build_py.sh` builds it; without it they raise an `ImportError` naming that script). The engine reads the graph from the **instance**, so the pipes it traverses must be registered there (a `Pipeline` registers its target pipes if they are not), and it uses their stored definitions rather than unsaved in-memory edits. `pipe.sync(df, children=True)` is rejected: the engine fetches each node itself, so sync a DataFrame with a bare `pipe.sync(df)`. Plugin sources run in the engine's own Python worker pool, not in your interpreter, and `begin=None` means "the planner's default" rather than v4's "no lower bound".
 
 ### Dry run, graph and history
 
@@ -166,6 +168,33 @@ mrsm plan pipes -m daily --parents      # the plan table, nothing is synced
 mrsm show graph -m daily --parents      # the selection as an ASCII DAG
 mrsm show runs --last 5                 # recorded runs, newest first
 mrsm show run <run_id>                  # one run's Gantt chart
+```
+
+For the three pipes above on one SQLite instance (`raw` reads a `readings` table), `plan pipes` before the first run, and the graph:
+
+```text
+$ mrsm plan pipes -i sql:local -m daily --parents
+node             action  bounds      chunks  reason
+sql:local/raw    root    ['', None)  -       no parents in the selection: v4 sync (begin = sync time − backtrack)
+sql:local/clean  skip*   -           -       no cursor on the edge from sql:local/raw; its watermark None is not ahead; definition unchanged
+sql:local/daily  skip*   -           -       no cursor on the edge from sql:local/clean; its watermark None is not ahead; definition unchanged
+* re-planned after its parents finish
+ 💬 Planned 3 nodes (1 would sync, 2 re-planned after their parents finish).
+Nothing was synced.
+
+$ mrsm show graph -i sql:local -m daily --parents
+sql:local/raw
+  sql:local/clean  ← sql:local/raw
+    sql:local/daily*  ← sql:local/clean
+```
+
+In the plan, a `*` after the action marks a provisional row: a child cannot know what its parent will change, so the executor plans it again when the parent finishes. In the graph, `*` marks the targets you selected (the others were pulled in by `--parents`). After a run, `show runs` lists it:
+
+```text
+$ mrsm show runs --last 5
+run                         started (UTC)        status     wall  ok/nodes  targets
+01M53RS5VZ8NRBQTDJBHMJAV5J  2026-10-17 01:49:18  succeeded  0s    3/3       sql:local/daily
+ 💬 Run `show run <run>` for a run's Gantt chart.
 ```
 
 `plan pipes` takes the same selection and bound flags as `sync pipes` (`--parents [N]`, `--children [N]`, `--begin`, `--end`, `--resume`) and prints one row per node: the action, the sync bounds, the number of chunks and the reason. A `*` marks a node planned against the current state that the executor re-plans when its parents finish. `--nopretty` prints the plan as JSON.

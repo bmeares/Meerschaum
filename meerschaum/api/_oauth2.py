@@ -12,16 +12,29 @@ import functools
 import inspect
 from typing import List, Optional, Union
 
-from meerschaum.api import endpoints, CHECK_UPDATE, no_auth, debug
+from meerschaum.api import endpoints, CHECK_UPDATE, _IMPORT_KW, no_auth, debug
 from meerschaum.api._tokens import optional_token, get_token_from_authorization
 from meerschaum._internal.static import STATIC_CONFIG
 from meerschaum.utils.packages import attempt_import
 from meerschaum.core import User, Token
 
-fastapi, starlette = attempt_import('fastapi', 'starlette', lazy=False, check_update=CHECK_UPDATE)
-fastapi_responses = attempt_import('fastapi.responses', lazy=False, check_update=CHECK_UPDATE)
-fastapi_login = attempt_import('fastapi_login', check_update=CHECK_UPDATE)
-jose_jwt, jose_exceptions = attempt_import('jose.jwt', 'jose.exceptions', lazy=False, check_update=CHECK_UPDATE)
+fastapi, starlette = attempt_import(
+    'fastapi', 'starlette', lazy=False, check_update=CHECK_UPDATE, **_IMPORT_KW,
+)
+fastapi_responses = attempt_import(
+    'fastapi.responses', lazy=False, check_update=CHECK_UPDATE, **_IMPORT_KW,
+)
+fastapi_login = attempt_import(
+    'fastapi_login', lazy=False, check_update=CHECK_UPDATE, **_IMPORT_KW,
+)
+jose_jwt, jose_exceptions = attempt_import(
+    'jose.jwt', 'jose.exceptions', lazy=False, check_update=CHECK_UPDATE, **_IMPORT_KW,
+)
+if fastapi_login is None or jose_jwt is None or jose_exceptions is None:
+    raise ImportError(
+        "`meerschaum.api` needs `fastapi-login` and `python-jose`: install the `api` extra "
+        "(`pip install \"meerschaum[api]\"`)."
+    )
 from fastapi import Depends, HTTPException, Request
 from starlette import status
 

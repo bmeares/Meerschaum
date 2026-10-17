@@ -970,6 +970,8 @@ pub fn bootstrap_jobs(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
             warn(rt, &w);
         }
         let started = job.start();
+        // What creating the job warned about (a systemd unit without a pinned interpreter).
+        super::jobs::emit_job_warnings(rt, &mut job);
         if !started.success {
             return Ok(started);
         }

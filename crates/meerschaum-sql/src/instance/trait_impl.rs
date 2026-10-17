@@ -71,6 +71,7 @@ impl Connector for SqlConnector {
     }
 
     async fn fetch(&self, pipe: &Pipe, query: &DataQuery) -> ConnectorResult<Option<Frame>> {
+        self.require_schema().await?;
         let args = FetchArgs {
             begin: metadef_bound(query.begin.as_ref()),
             end: metadef_bound(query.end.as_ref()),
@@ -87,64 +88,96 @@ impl Connector for SqlConnector {
 #[async_trait]
 impl InstanceConnector for SqlConnector {
     async fn register_pipe(&self, pipe: &Pipe) -> SuccessTuple {
+        if let Err(e) = self.require_schema().await {
+            return SuccessTuple::fail(e.to_string());
+        }
         SqlConnector::register_pipe(self, pipe).await
     }
 
     async fn get_pipe_attributes(&self, pipe: &Pipe) -> ConnectorResult<Map> {
+        self.require_schema().await?;
         SqlConnector::get_pipe_attributes(self, pipe).await
     }
 
     async fn get_pipe_id(&self, pipe: &Pipe) -> ConnectorResult<Option<PipeId>> {
+        self.require_schema().await?;
         Ok(SqlConnector::get_pipe_id(self, pipe)
             .await?
             .map(PipeId::Int))
     }
 
     async fn edit_pipe(&self, pipe: &Pipe, patch: bool) -> SuccessTuple {
+        if let Err(e) = self.require_schema().await {
+            return SuccessTuple::fail(e.to_string());
+        }
         SqlConnector::edit_pipe(self, pipe, patch).await
     }
 
     async fn delete_pipe(&self, pipe: &Pipe) -> SuccessTuple {
+        if let Err(e) = self.require_schema().await {
+            return SuccessTuple::fail(e.to_string());
+        }
         let res = SqlConnector::delete_pipe(self, pipe).await;
         forget_engine_state_after(self, pipe, res).await
     }
 
     async fn fetch_pipes_keys(&self, query: &PipesKeysQuery) -> ConnectorResult<PipesKeys> {
+        self.require_schema().await?;
         SqlConnector::fetch_pipes_keys(self, query).await
     }
 
     fn pipe_table_reference(&self, pipe: &Pipe) -> Option<String> {
+        // An undiscovered default schema would name the wrong table: no reference at all.
+        if !self.schema_known() {
+            return None;
+        }
         let loaded = self.with_registered_parameters(pipe);
         let sp = self.sql_pipe(&loaded).ok()?;
         Some(self.pipe_table_name(&sp))
     }
 
     async fn pipe_exists(&self, pipe: &Pipe) -> ConnectorResult<bool> {
+        self.require_schema().await?;
         let pipe = &self.prepare_pipe(pipe).await;
         SqlConnector::pipe_exists(self, pipe).await
     }
 
     async fn drop_pipe(&self, pipe: &Pipe) -> SuccessTuple {
+        if let Err(e) = self.require_schema().await {
+            return SuccessTuple::fail(e.to_string());
+        }
         let pipe = &self.prepare_pipe(pipe).await;
         let res = SqlConnector::drop_pipe(self, pipe).await;
         forget_engine_state_after(self, pipe, res).await
     }
 
     async fn drop_pipe_indices(&self, pipe: &Pipe) -> SuccessTuple {
+        if let Err(e) = self.require_schema().await {
+            return SuccessTuple::fail(e.to_string());
+        }
         let pipe = &self.prepare_pipe(pipe).await;
         SqlConnector::drop_pipe_indices(self, pipe, None).await
     }
 
     async fn create_pipe_indices(&self, pipe: &Pipe) -> SuccessTuple {
+        if let Err(e) = self.require_schema().await {
+            return SuccessTuple::fail(e.to_string());
+        }
         let pipe = &self.prepare_pipe(pipe).await;
         SqlConnector::create_pipe_indices(self, pipe, None).await
     }
 
     async fn sync_pipe(&self, pipe: &Pipe, df: Frame, opts: &SyncOptions) -> SuccessTuple {
+        if let Err(e) = self.require_schema().await {
+            return SuccessTuple::fail(e.to_string());
+        }
         SqlConnector::sync_pipe(self, pipe, df, opts).await
     }
 
     async fn clear_pipe(&self, pipe: &Pipe, query: &DataQuery) -> SuccessTuple {
+        if let Err(e) = self.require_schema().await {
+            return SuccessTuple::fail(e.to_string());
+        }
         let pipe = &self.prepare_pipe(pipe).await;
         let res = SqlConnector::clear_pipe(self, pipe, query).await;
         if !meerschaum_connector::pipe_ops::is_full_clear(query) {
@@ -158,6 +191,7 @@ impl InstanceConnector for SqlConnector {
         pipe: &Pipe,
         query: &DataQuery,
     ) -> ConnectorResult<Option<Frame>> {
+        self.require_schema().await?;
         let pipe = &self.prepare_pipe(pipe).await;
         SqlConnector::get_pipe_data(self, pipe, query).await
     }
@@ -167,6 +201,7 @@ impl InstanceConnector for SqlConnector {
         pipe: &Pipe,
         query: &DataQuery,
     ) -> ConnectorResult<Vec<IndexMap<String, meerschaum_kernel::Value>>> {
+        self.require_schema().await?;
         let pipe = &self.prepare_pipe(pipe).await;
         SqlConnector::get_pipe_docs(self, pipe, query).await
     }
@@ -177,6 +212,7 @@ impl InstanceConnector for SqlConnector {
         backtrack_minutes: i64,
         query: &DataQuery,
     ) -> ConnectorResult<Option<Frame>> {
+        self.require_schema().await?;
         let pipe = &self.prepare_pipe(pipe).await;
         SqlConnector::get_backtrack_data(self, pipe, Some(backtrack_minutes), query).await
     }
@@ -187,6 +223,7 @@ impl InstanceConnector for SqlConnector {
         params: Option<&Map>,
         newest: bool,
     ) -> ConnectorResult<Option<DateBound>> {
+        self.require_schema().await?;
         let pipe = &self.prepare_pipe(pipe).await;
         SqlConnector::get_sync_time(self, pipe, params, newest, false).await
     }
@@ -196,6 +233,7 @@ impl InstanceConnector for SqlConnector {
         pipe: &Pipe,
         query: &DataQuery,
     ) -> ConnectorResult<Option<i64>> {
+        self.require_schema().await?;
         let pipe = &self.prepare_pipe(pipe).await;
         SqlConnector::get_pipe_rowcount(self, pipe, query).await
     }
@@ -204,6 +242,7 @@ impl InstanceConnector for SqlConnector {
         &self,
         pipe: &Pipe,
     ) -> ConnectorResult<IndexMap<String, String>> {
+        self.require_schema().await?;
         let pipe = &self.prepare_pipe(pipe).await;
         SqlConnector::get_pipe_columns_types(self, pipe).await
     }
@@ -212,6 +251,7 @@ impl InstanceConnector for SqlConnector {
         &self,
         pipe: &Pipe,
     ) -> ConnectorResult<IndexMap<String, Vec<ColumnIndexInfo>>> {
+        self.require_schema().await?;
         let pipe = &self.prepare_pipe(pipe).await;
         Ok(SqlConnector::get_pipe_columns_indices(self, pipe)
             .await?
@@ -231,6 +271,7 @@ impl InstanceConnector for SqlConnector {
     }
 
     async fn get_pipe_index_names(&self, pipe: &Pipe) -> ConnectorResult<Map> {
+        self.require_schema().await?;
         let pipe = &self.prepare_pipe(pipe).await;
         Ok(SqlConnector::get_pipe_index_names(self, pipe)?
             .into_iter()
@@ -239,31 +280,47 @@ impl InstanceConnector for SqlConnector {
     }
 
     async fn deduplicate_pipe(&self, pipe: &Pipe, query: &DataQuery) -> SuccessTuple {
+        if let Err(e) = self.require_schema().await {
+            return SuccessTuple::fail(e.to_string());
+        }
         let pipe = &self.prepare_pipe(pipe).await;
         SqlConnector::deduplicate_pipe(self, pipe, query).await
     }
 
     async fn get_pipe_size(&self, pipe: &Pipe) -> ConnectorResult<Option<i64>> {
+        self.require_schema().await?;
         let pipe = &self.prepare_pipe(pipe).await;
         Ok(SqlConnector::get_pipe_size(self, pipe).await)
     }
 
     async fn compress_pipe(&self, pipe: &Pipe) -> SuccessTuple {
+        if let Err(e) = self.require_schema().await {
+            return SuccessTuple::fail(e.to_string());
+        }
         let pipe = &self.prepare_pipe(pipe).await;
         SqlConnector::compress_pipe(self, pipe, false).await
     }
 
     async fn decompress_pipe(&self, pipe: &Pipe, no_policy: bool) -> SuccessTuple {
+        if let Err(e) = self.require_schema().await {
+            return SuccessTuple::fail(e.to_string());
+        }
         let pipe = &self.prepare_pipe(pipe).await;
         SqlConnector::decompress_pipe(self, pipe, no_policy).await
     }
 
     async fn vacuum_pipe(&self, pipe: &Pipe, full: bool) -> SuccessTuple {
+        if let Err(e) = self.require_schema().await {
+            return SuccessTuple::fail(e.to_string());
+        }
         let pipe = &self.prepare_pipe(pipe).await;
         SqlConnector::vacuum_pipe(self, pipe, full).await
     }
 
     async fn analyze_pipe(&self, pipe: &Pipe) -> SuccessTuple {
+        if let Err(e) = self.require_schema().await {
+            return SuccessTuple::fail(e.to_string());
+        }
         let pipe = &self.prepare_pipe(pipe).await;
         SqlConnector::analyze_pipe(self, pipe).await
     }
@@ -274,14 +331,19 @@ impl InstanceConnector for SqlConnector {
         holder: &str,
         ttl: std::time::Duration,
     ) -> ConnectorResult<bool> {
+        self.require_schema().await?;
         SqlConnector::acquire_pipe_lease(self, pipe, holder, ttl).await
     }
 
     async fn release_pipe_lease(&self, pipe: &Pipe, holder: &str) -> ConnectorResult<bool> {
+        self.require_schema().await?;
         SqlConnector::release_pipe_lease(self, pipe, holder).await
     }
 
     async fn partition_pipe(&self, pipe: &Pipe, chunk_minutes: Option<i64>) -> SuccessTuple {
+        if let Err(e) = self.require_schema().await {
+            return SuccessTuple::fail(e.to_string());
+        }
         let pipe = &self.prepare_pipe(pipe).await;
         SqlConnector::partition_pipe(self, pipe, chunk_minutes).await
     }
@@ -293,38 +355,53 @@ impl InstanceConnector for SqlConnector {
     }
 
     async fn register_user(&self, user: &mut User) -> SuccessTuple {
+        if let Err(e) = self.require_schema().await {
+            return SuccessTuple::fail(e.to_string());
+        }
         SqlConnector::register_user(self, user).await
     }
 
     async fn get_user_id(&self, user: &User) -> ConnectorResult<Option<Value>> {
+        self.require_schema().await?;
         SqlConnector::get_user_id(self, user).await
     }
 
     async fn get_username(&self, user_id: &Value) -> ConnectorResult<Option<Value>> {
+        self.require_schema().await?;
         SqlConnector::get_username(self, user_id).await
     }
 
     async fn get_users(&self) -> ConnectorResult<Vec<String>> {
+        self.require_schema().await?;
         SqlConnector::get_users(self).await
     }
 
     async fn edit_user(&self, user: &User) -> SuccessTuple {
+        if let Err(e) = self.require_schema().await {
+            return SuccessTuple::fail(e.to_string());
+        }
         SqlConnector::edit_user(self, user).await
     }
 
     async fn delete_user(&self, user: &User) -> SuccessTuple {
+        if let Err(e) = self.require_schema().await {
+            return SuccessTuple::fail(e.to_string());
+        }
         SqlConnector::delete_user(self, user).await
     }
 
     async fn get_user_password_hash(&self, user: &User) -> ConnectorResult<Option<String>> {
+        self.require_schema().await?;
         SqlConnector::get_user_password_hash(self, user).await
     }
 
     async fn get_user_type(&self, user: &User) -> ConnectorResult<Option<String>> {
+        self.require_schema().await?;
         SqlConnector::get_user_type(self, user).await
     }
 
     async fn get_user_attributes(&self, user: &User) -> ConnectorResult<Option<Map>> {
+        self.require_schema().await?;
         SqlConnector::get_user_attributes(self, user).await
     }
 
@@ -335,30 +412,38 @@ impl InstanceConnector for SqlConnector {
     }
 
     async fn register_plugin(&self, plugin: &PluginRecord, force: bool) -> SuccessTuple {
+        if let Err(e) = self.require_schema().await {
+            return SuccessTuple::fail(e.to_string());
+        }
         SqlConnector::register_plugin(self, plugin, force).await
     }
 
     async fn get_plugin_id(&self, plugin: &PluginRecord) -> ConnectorResult<Option<String>> {
+        self.require_schema().await?;
         Ok(SqlConnector::get_plugin_id(self, plugin)
             .await?
             .map(|i| i.to_string()))
     }
 
     async fn get_plugin_version(&self, plugin: &PluginRecord) -> ConnectorResult<Option<String>> {
+        self.require_schema().await?;
         SqlConnector::get_plugin_version(self, plugin).await
     }
 
     async fn get_plugin_user_id(&self, plugin: &PluginRecord) -> ConnectorResult<Option<Value>> {
+        self.require_schema().await?;
         Ok(SqlConnector::get_plugin_user_id(self, plugin)
             .await?
             .map(Value::Int))
     }
 
     async fn get_plugin_username(&self, plugin: &PluginRecord) -> ConnectorResult<Option<String>> {
+        self.require_schema().await?;
         SqlConnector::get_plugin_username(self, plugin).await
     }
 
     async fn get_plugin_attributes(&self, plugin: &PluginRecord) -> ConnectorResult<Map> {
+        self.require_schema().await?;
         SqlConnector::get_plugin_attributes(self, plugin).await
     }
 
@@ -367,10 +452,14 @@ impl InstanceConnector for SqlConnector {
         user_id: Option<&Value>,
         search_term: Option<&str>,
     ) -> ConnectorResult<Vec<String>> {
+        self.require_schema().await?;
         SqlConnector::get_plugins(self, user_id, search_term).await
     }
 
     async fn delete_plugin(&self, plugin: &PluginRecord) -> SuccessTuple {
+        if let Err(e) = self.require_schema().await {
+            return SuccessTuple::fail(e.to_string());
+        }
         SqlConnector::delete_plugin(self, plugin).await
     }
 

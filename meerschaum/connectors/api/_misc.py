@@ -3,44 +3,23 @@
 # vim:fenc=utf-8
 
 """
-Misc API routes
+Misc API routes (the Rust client).
 """
 
 from __future__ import annotations
+
 from meerschaum.utils.typing import Optional
+
 
 def get_mrsm_version(self, **kw) -> Optional[str]:
     """
     Return the Meerschaum version of the API instance.
     """
-    from meerschaum._internal.static import STATIC_CONFIG
-    try:
-        j = self.get(
-            STATIC_CONFIG['api']['endpoints']['version'] + '/mrsm',
-            use_token=False,
-            **kw
-        ).json()
-    except Exception:
-        return None
-    if isinstance(j, dict) and 'detail' in j:
-        return None
-    return j
+    return self._rust_client().get_mrsm_version()
 
 
 def get_chaining_status(self, **kw) -> Optional[bool]:
     """
     Fetch the chaining status of the API instance.
     """
-    from meerschaum._internal.static import STATIC_CONFIG
-    try:
-        response = self.get(
-            STATIC_CONFIG['api']['endpoints']['chaining'],
-            use_token = True,
-            **kw
-        )
-        if not response:
-            return None
-    except Exception:
-        return None
-
-    return response.json()
+    return self._rust_client().get_chaining_status()

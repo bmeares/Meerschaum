@@ -1,27 +1,20 @@
-#! /usr/bin/env python3
+#! /usr/bin/env python
 # -*- coding: utf-8 -*-
 # vim:fenc=utf-8
 
 """
-Entrypoint for making requests.
+Make requests to the API (the Rust client; no `requests` import).
 """
 
-import copy
-import urllib.parse
-import pathlib
-from meerschaum.utils.typing import Any, Optional, Dict, Union
-from meerschaum.utils.debug import dprint
-from meerschaum._internal.static import STATIC_CONFIG
+from __future__ import annotations
 
-METHODS = {
-    'GET',
-    'OPTIONS',
-    'HEAD',
-    'POST',
-    'PUT',
-    'PATCH',
-    'DELETE',
-}
+import pathlib
+import urllib.parse
+
+from meerschaum.utils.typing import Optional, Dict, Any, Union
+from meerschaum.utils.debug import dprint
+
+METHODS = {'GET', 'OPTIONS', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE'}
 
 
 def make_request(
@@ -32,29 +25,21 @@ def make_request(
     use_token: bool = True,
     debug: bool = False,
     **kwargs: Any
-) -> 'requests.Response':
+) -> 'meerschaum._core.ApiResponse':
     """
-    Make a request to this APIConnector's endpoint using the in-memory session.
+    Make a request to the API and return a response object
+    (`status_code`, `ok`, `text`, `content`, `headers`, `json()`, `raise_for_status()`).
 
     Parameters
     ----------
     method: str
-        The kind of request to make.
-        Accepted values:
-        - `'GET'`
-        - `'OPTIONS'`
-        - `'HEAD'`
-        - `'POST'`
-        - `'PUT'`
-        - `'PATCH'`
-        - `'DELETE'`
+        The name of the request method (e.g. `'GET'`, `'POST'`).
 
     r_url: str
-        The relative URL for the endpoint (e.g. `'/pipes'`).
+        The relative URL for the request (e.g. `'/pipes'`).
 
     headers: Optional[Dict[str, Any]], default None
-        The headers to use for the request.
-        If `use_token` is `True`, the authorization token will be added to a copy of these headers.
+        Headers to override the default headers.
 
     use_token: bool, default True
         If `True`, add the authorization token to the headers.
@@ -63,186 +48,54 @@ def make_request(
         Verbosity toggle.
 
     kwargs: Any
-        All other keyword arguments are passed to `requests.request`.
-
-    Returns
-    -------
-    A `requests.Reponse` object.
+        `params` (the query), `json`, `data`, `files` and `timeout` are sent as `requests` would.
     """
     if method.upper() not in METHODS:
         raise ValueError(f"Method '{method}' is not supported.")
 
-    verify = self.__dict__.get('verify', None)
-    if 'verify' not in kwargs and isinstance(verify, bool):
-        kwargs['verify'] = verify
-
-    headers = (
-        copy.deepcopy(headers)
-        if isinstance(headers, dict)
-        else {}
-    )
-
-    if use_token:
-        headers.update({'Authorization': f'Bearer {self.token}'})
-
-    if 'timeout' not in kwargs:
-        kwargs['timeout'] = STATIC_CONFIG['api']['default_timeout']
-
-    request_url = urllib.parse.urljoin(self.url, r_url)
     if debug:
-        dprint(f"[{self}] Sending a '{method.upper()}' request to {request_url}")
+        dprint(f"[{self}] Sending a '{method.upper()}' request to {self.url}{r_url}")
 
-    return self.session.request(
-        method.upper(),
-        request_url,
+    return self._rust_client().make_request(
+        method,
+        r_url,
         headers=headers,
+        use_token=use_token,
         **kwargs
     )
 
 
-def get(self, r_url: str, **kwargs: Any) -> 'requests.Response':
+def get(self, r_url: str, **kwargs: Any) -> 'meerschaum._core.ApiResponse':
     """
-    Wrapper for `requests.get`.
-
-    Parameters
-    ----------
-    r_url: str
-        The relative URL for the endpoint (e.g. `'/pipes'`).
-
-    headers: Optional[Dict[str, Any]], default None
-        The headers to use for the request.
-        If `use_token` is `True`, the authorization token will be added to a copy of these headers.
-
-    use_token: bool, default True
-        If `True`, add the authorization token to the headers.
-
-    debug: bool, default False
-        Verbosity toggle.
-
-    kwargs: Any
-        All other keyword arguments are passed to `requests.request`.
-
-    Returns
-    -------
-    A `requests.Reponse` object.
-
+    Send a `GET` request (see `make_request()`).
     """
     return self.make_request('GET', r_url, **kwargs)
 
 
-def post(self, r_url: str, **kwargs: Any) -> 'requests.Response':
+def post(self, r_url: str, **kwargs: Any) -> 'meerschaum._core.ApiResponse':
     """
-    Wrapper for `requests.post`.
-
-    Parameters
-    ----------
-    r_url: str
-        The relative URL for the endpoint (e.g. `'/pipes'`).
-
-    headers: Optional[Dict[str, Any]], default None
-        The headers to use for the request.
-        If `use_token` is `True`, the authorization token will be added to a copy of these headers.
-
-    use_token: bool, default True
-        If `True`, add the authorization token to the headers.
-
-    debug: bool, default False
-        Verbosity toggle.
-
-    kwargs: Any
-        All other keyword arguments are passed to `requests.request`.
-
-    Returns
-    -------
-    A `requests.Reponse` object.
-
+    Send a `POST` request (see `make_request()`).
     """
     return self.make_request('POST', r_url, **kwargs)
 
 
-def patch(self, r_url: str, **kwargs: Any) -> 'requests.Response':
+def patch(self, r_url: str, **kwargs: Any) -> 'meerschaum._core.ApiResponse':
     """
-    Wrapper for `requests.patch`.
-
-    Parameters
-    ----------
-    r_url: str
-        The relative URL for the endpoint (e.g. `'/pipes'`).
-
-    headers: Optional[Dict[str, Any]], default None
-        The headers to use for the request.
-        If `use_token` is `True`, the authorization token will be added to a copy of these headers.
-
-    use_token: bool, default True
-        If `True`, add the authorization token to the headers.
-
-    debug: bool, default False
-        Verbosity toggle.
-
-    kwargs: Any
-        All other keyword arguments are passed to `requests.request`.
-
-    Returns
-    -------
-    A `requests.Reponse` object.
+    Send a `PATCH` request (see `make_request()`).
     """
     return self.make_request('PATCH', r_url, **kwargs)
 
 
-def put(self, r_url: str, **kwargs: Any) -> 'requests.Response':
+def put(self, r_url: str, **kwargs: Any) -> 'meerschaum._core.ApiResponse':
     """
-    Wrapper for `requests.put`.
-
-    Parameters
-    ----------
-    r_url: str
-        The relative URL for the endpoint (e.g. `'/pipes'`).
-
-    headers: Optional[Dict[str, Any]], default None
-        The headers to use for the request.
-        If `use_token` is `True`, the authorization token will be added to a copy of these headers.
-
-    use_token: bool, default True
-        If `True`, add the authorization token to the headers.
-
-    debug: bool, default False
-        Verbosity toggle.
-
-    kwargs: Any
-        All other keyword arguments are passed to `requests.request`.
-
-    Returns
-    -------
-    A `requests.Reponse` object.
+    Send a `PUT` request (see `make_request()`).
     """
     return self.make_request('PUT', r_url, **kwargs)
 
 
-def delete(self, r_url: str, **kwargs: Any) -> 'requests.Response':
+def delete(self, r_url: str, **kwargs: Any) -> 'meerschaum._core.ApiResponse':
     """
-    Wrapper for `requests.delete`.
-
-    Parameters
-    ----------
-    r_url: str
-        The relative URL for the endpoint (e.g. `'/pipes'`).
-
-    headers: Optional[Dict[str, Any]], default None
-        The headers to use for the request.
-        If `use_token` is `True`, the authorization token will be added to a copy of these headers.
-
-    use_token: bool, default True
-        If `True`, add the authorization token to the headers.
-
-    debug: bool, default False
-        Verbosity toggle.
-
-    kwargs: Any
-        All other keyword arguments are passed to `requests.request`.
-
-    Returns
-    -------
-    A `requests.Reponse` object.
+    Send a `DELETE` request (see `make_request()`).
     """
     return self.make_request('DELETE', r_url, **kwargs)
 
@@ -256,7 +109,7 @@ def wget(
     debug: bool = False,
     **kw: Any
 ) -> pathlib.Path:
-    """Mimic wget with requests."""
+    """Mimic wget: download a resource of the API (with the token) to `dest`."""
     from meerschaum.utils.misc import wget
     if headers is None:
         headers = {}

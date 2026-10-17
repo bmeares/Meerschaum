@@ -1,6 +1,6 @@
 """
 Runs one benchmark operation inside an implementation's interpreter (v4.1.4 from `.venv-ref`, or
-the repository's `meerschaum` with `MRSM_CORE=rust`). Prints one `RESULT {json}` line.
+the repository's `meerschaum`). Prints one `RESULT {json}` line.
 
     worker.py setup   '<json list of pipe definitions>'
     worker.py sync    <connector> <metric> <instance>
@@ -25,7 +25,6 @@ def main() -> int:
 
     info = {
         'version': mrsm.__version__,
-        'core': os.environ.get('MRSM_CORE', 'python'),
         'package': 'repo' if '.venv-ref' not in mrsm.__file__ else 'reference',
     }
     if op == 'setup':

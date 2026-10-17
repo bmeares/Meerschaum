@@ -25,7 +25,7 @@
 //! process's in-memory `meerschaum.config.config` ([`merged_config`]), never written back.
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
 
 use meerschaum_cli::native::{Instance, Session};
 use meerschaum_connector::{Connector, InstanceConnector};
@@ -111,6 +111,99 @@ pub struct RegistryInput {
     pub inplace: bool,
 }
 
+/// The attributes which identify an `api:` / `valkey:` connector (the ones its client reads).
+fn identity(typ: &str, attributes: &Map) -> String {
+    let names: &[&str] = match typ {
+        "api" => &[
+            "host",
+            "port",
+            "protocol",
+            "uri",
+            "username",
+            "password",
+            "client_id",
+            "client_secret",
+            "api_key",
+            "verify",
+            "instance_keys",
+        ],
+        _ => &[
+            "host",
+            "port",
+            "username",
+            "password",
+            "db",
+            "socket_timeout",
+            "uri",
+        ],
+    };
+    let mut out = format!("{}|", std::process::id());
+    for name in names {
+        if let Some(v) = attributes.get(*name).filter(|v| !v.is_null()) {
+            out.push_str(&format!("{name}={};", meerschaum_core::pyfmt::py_str(v)));
+        }
+    }
+    out
+}
+
+type Held<T> = Mutex<HashMap<String, Weak<T>>>;
+
+fn held<T>(slot: &'static std::sync::OnceLock<Held<T>>) -> &'static Held<T> {
+    slot.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+static API_CLIENTS: std::sync::OnceLock<Held<meerschaum_api::APIConnector>> =
+    std::sync::OnceLock::new();
+static VALKEY_CLIENTS: std::sync::OnceLock<Held<crate::valkey_api::ValkeyShared>> =
+    std::sync::OnceLock::new();
+
+/// Let native calls on `api:{label}` with these attributes use the Python connector's client
+/// (one login, one token, one warning per process, as v4's one `APIConnector` had). The client
+/// is held weakly: it lives as long as the Python connector.
+pub fn hold_api(label: &str, attributes: &Map, client: &Arc<meerschaum_api::APIConnector>) {
+    let key = format!("api:{label}|{}", identity("api", attributes));
+    let mut map = held(&API_CLIENTS).lock().unwrap_or_else(|e| e.into_inner());
+    map.retain(|_, weak| weak.strong_count() > 0);
+    map.insert(key, Arc::downgrade(client));
+}
+
+/// The Python connector's client for `api:{label}` with these attributes, if it is alive.
+pub fn held_api(label: &str, attributes: &Map) -> Option<Arc<meerschaum_api::APIConnector>> {
+    let key = format!("api:{label}|{}", identity("api", attributes));
+    held(&API_CLIENTS)
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(&key)
+        .and_then(Weak::upgrade)
+}
+
+/// [`hold_api`] for `valkey:`.
+pub(crate) fn hold_valkey(
+    label: &str,
+    attributes: &Map,
+    shared: &Arc<crate::valkey_api::ValkeyShared>,
+) {
+    let key = format!("valkey:{label}|{}", identity("valkey", attributes));
+    let mut map = held(&VALKEY_CLIENTS)
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    map.retain(|_, weak| weak.strong_count() > 0);
+    map.insert(key, Arc::downgrade(shared));
+}
+
+/// [`held_api`] for `valkey:`.
+pub(crate) fn held_valkey(
+    label: &str,
+    attributes: &Map,
+) -> Option<Arc<crate::valkey_api::ValkeyShared>> {
+    let key = format!("valkey:{label}|{}", identity("valkey", attributes));
+    held(&VALKEY_CLIENTS)
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(&key)
+        .and_then(Weak::upgrade)
+}
+
 /// The native registry: the connectors of one call, built on demand.
 struct FacadeNative {
     session: Session,
@@ -162,33 +255,51 @@ impl FacadeNative {
                 }
             }
             "api" => {
-                let connector = match self.attributes.get(&full) {
-                    Some(attributes) => {
-                        meerschaum_api::APIConnector::new(Some(&label), attributes.clone())
+                let ad_hoc = self.attributes.get(&full);
+                match ad_hoc.and_then(|attrs| held_api(&label, attrs)) {
+                    Some(client) => client,
+                    None => {
+                        let connector = match ad_hoc {
+                            Some(attributes) => {
+                                meerschaum_api::APIConnector::new(Some(&label), attributes.clone())
+                            }
+                            None => {
+                                meerschaum_api::APIConnector::from_config(self.config()?, &label)
+                            }
+                        }
+                        .map_err(|e| e.to_string())?;
+                        Arc::new(connector)
                     }
-                    None => meerschaum_api::APIConnector::from_config(self.config()?, &label),
                 }
-                .map_err(|e| e.to_string())?;
-                Arc::new(connector)
             }
             "valkey" => {
-                let attributes = match self.attributes.get(&full) {
-                    Some(attributes) => attributes.clone(),
-                    None => meerschaum_valkey::ValkeyConnector::attributes_from_config(
-                        self.config()?,
-                        &label,
-                    ),
-                };
-                let connector = self
-                    .in_blocking(|| {
-                        self.session
-                            .block_on(meerschaum_valkey::ValkeyConnector::connect(
-                                &label, attributes,
-                            ))
-                            .map_err(|e| e.to_string())
-                    })
-                    .map_err(|e| e.to_string())?;
-                Arc::new(connector)
+                let ad_hoc = self.attributes.get(&full);
+                let shared = ad_hoc.and_then(|attrs| held_valkey(&label, attrs));
+                if let Some(live) = shared.as_ref().and_then(|s| s.live()) {
+                    live
+                } else {
+                    let attributes = match ad_hoc {
+                        Some(attributes) => attributes.clone(),
+                        None => meerschaum_valkey::ValkeyConnector::attributes_from_config(
+                            self.config()?,
+                            &label,
+                        ),
+                    };
+                    let connector = self
+                        .in_blocking(|| {
+                            self.session
+                                .block_on(meerschaum_valkey::ValkeyConnector::connect(
+                                    &label, attributes,
+                                ))
+                                .map_err(|e| e.to_string())
+                        })
+                        .map_err(|e| e.to_string())?;
+                    let connector = Arc::new(connector);
+                    match shared {
+                        Some(shared) => shared.set_live(connector),
+                        None => connector,
+                    }
+                }
             }
             _ => {
                 return Err(format!("No instance connector is registered for '{full}'."));
@@ -471,20 +582,36 @@ pub fn register_adhoc(
         let (typ, label) = meerschaum_cli::native::session::split_keys(&full);
         match typ.as_str() {
             "api" => {
-                let connector = meerschaum_api::APIConnector::new(Some(&label), attrs.clone())
-                    .map_err(|e| e.to_string())?;
-                session.register_instance(&full, Instance::Other(Arc::new(connector)));
+                let connector: Arc<meerschaum_api::APIConnector> = match held_api(&label, attrs) {
+                    Some(client) => client,
+                    None => Arc::new(
+                        meerschaum_api::APIConnector::new(Some(&label), attrs.clone())
+                            .map_err(|e| e.to_string())?,
+                    ),
+                };
+                session.register_instance(&full, Instance::Other(connector));
             }
             "valkey" => {
-                let connector = py
-                    .allow_threads(|| {
-                        session.block_on(meerschaum_valkey::ValkeyConnector::connect(
-                            &label,
-                            attrs.clone(),
-                        ))
-                    })
-                    .map_err(|e| e.to_string())?;
-                session.register_instance(&full, Instance::Other(Arc::new(connector)));
+                let shared = held_valkey(&label, attrs);
+                let connector = match shared.as_ref().and_then(|s| s.live()) {
+                    Some(live) => live,
+                    None => {
+                        let built = Arc::new(
+                            py.allow_threads(|| {
+                                session.block_on(meerschaum_valkey::ValkeyConnector::connect(
+                                    &label,
+                                    attrs.clone(),
+                                ))
+                            })
+                            .map_err(|e| e.to_string())?,
+                        );
+                        match shared {
+                            Some(shared) => shared.set_live(built),
+                            None => built,
+                        }
+                    }
+                };
+                session.register_instance(&full, Instance::Other(connector));
             }
             _ => {}
         }

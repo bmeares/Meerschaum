@@ -4,14 +4,19 @@
 """
 Tests for the `meerschaum._core` bridge (crates/meerschaum-py).
 
+Results the parity-phase Python mode produced are recorded in `tests/oracle/test_core.json` (see
+`tests/_oracle.py`) and replayed, so the Rust bindings are still compared with what that mode returned (recordings of the
+parity-phase mode, not v4.1.4 output; they cannot be re-recorded).
+
 Run from the repository root (PYTHONPATH matters: a stale `meerschaum` may shadow the tree):
 
     scripts/rust/build_py.sh
     PYTHONPATH=$(pwd) MRSM_ROOT_DIR=./test_root MRSM_PLUGINS_DIR=./tests/plugins \\
         python -m pytest crates/meerschaum-py/tests/test_core.py -q
 
-Tests that need the built extension are skipped (with the build command as the reason) when it is
-missing. pyarrow, polars and pandas are test-only requirements; the extension itself needs none.
+The extension is required: without it `import meerschaum` raises `CoreNotBuiltError`, so this
+module cannot even be collected on an unbuilt tree. pyarrow, polars and pandas are test-only
+requirements; the extension itself needs none.
 """
 
 from __future__ import annotations
@@ -31,14 +36,14 @@ import pytest
 REPO = Path(__file__).resolve().parents[3]
 
 import meerschaum._core as core  # noqa: E402
-from meerschaum._core import _gate  # noqa: E402
+from meerschaum.utils.packages import attempt_import  # noqa: E402
+from tests import _oracle as oracle  # noqa: E402
 
-requires_core = pytest.mark.skipif(
-    not core.AVAILABLE,
-    reason="meerschaum._core is not built (run scripts/rust/build_py.sh)",
-)
-# Probe `AVAILABLE` first: on an unbuilt tree every other name raises CoreNotBuiltError.
-HAS_POLARS = core.AVAILABLE and core.HAS_POLARS
+### The data libraries come from the `mrsm` venv, as for the façade: the recorded dtypes
+### depend on the pandas version (3.x), so the replay has to load the same libraries.
+attempt_import('pandas', 'pyarrow', 'shapely', 'geopandas', lazy=False)
+
+HAS_POLARS = core.HAS_POLARS
 
 
 def run_python(code: str, **env_overrides: str) -> subprocess.CompletedProcess:
@@ -49,7 +54,6 @@ def run_python(code: str, **env_overrides: str) -> subprocess.CompletedProcess:
         'MRSM_ROOT_DIR': os.environ.get('MRSM_ROOT_DIR', str(REPO / 'test_root')),
         'MRSM_PLUGINS_DIR': os.environ.get('MRSM_PLUGINS_DIR', str(REPO / 'tests' / 'plugins')),
     }
-    env.pop('MRSM_CORE', None)
     env.update(env_overrides)
     return subprocess.run(
         [sys.executable, '-c', textwrap.dedent(code)],
@@ -66,13 +70,6 @@ def run_python(code: str, **env_overrides: str) -> subprocess.CompletedProcess:
 BLOCK_EXTENSION = "import sys; sys.modules['meerschaum._core._core'] = None\n"
 
 
-@pytest.fixture
-def gate():
-    """Restore the gate mode after a test changes it."""
-    yield _gate
-    _gate.reload()
-
-
 # ---------------------------------------------------------------------------------------------
 # Loader: with and without the extension
 # ---------------------------------------------------------------------------------------------
@@ -86,7 +83,7 @@ def test_tree_is_imported_from_the_repo():
 
 def test_import_is_lazy(monkeypatch):
     """
-    Importing `meerschaum` or the loader must not load the extension.
+    Importing `meerschaum`, its config or the loader must not load the extension.
 
     `MRSM_<TYPE>_<LABEL>` connector variables (which `scripts/test.sh` exports) make the import
     apply them over `meerschaum.yaml`, as v4 does, and reading that file legitimately loads the
@@ -101,57 +98,34 @@ def test_import_is_lazy(monkeypatch):
         import meerschaum
         import meerschaum.config
         import meerschaum._core
-        from meerschaum.utils.dtypes import are_dtypes_equal
-        assert are_dtypes_equal('int', 'Int64')
         print('meerschaum._core._core' in sys.modules)
     """)
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout.strip() == 'False'
 
 
-def test_import_without_extension():
-    proc = run_python(BLOCK_EXTENSION + textwrap.dedent("""
-        import meerschaum._core as core
-        assert core.AVAILABLE is False, core.AVAILABLE
-        assert isinstance(core.LOAD_ERROR, ImportError)
-        assert core.EXTENSION_PATH is None
+@pytest.mark.parametrize('statement', ['import meerschaum', 'import meerschaum._core'])
+def test_import_without_extension_fails(statement):
+    """
+    The extension is required: with the file missing, importing the package raises
+    `CoreNotBuiltError` (an `ImportError`) whose message names the build script and the wheel.
+    """
+    proc = run_python(BLOCK_EXTENSION + textwrap.dedent(f"""
         try:
-            core.build_info()
-        except core.CoreNotBuiltError as e:
-            assert isinstance(e, ImportError)
-            assert 'scripts/rust/build_py.sh' in str(e), str(e)
-            print('ok')
+            {statement}
+        except ImportError as e:
+            print(type(e).__name__)
+            print(str(e))
         else:
-            raise AssertionError('expected CoreNotBuiltError')
+            raise AssertionError('`{statement}` must fail without the extension')
     """))
     assert proc.returncode == 0, proc.stderr
-    assert proc.stdout.strip() == 'ok'
+    name, _, message = proc.stdout.partition('\n')
+    assert name == 'CoreNotBuiltError', proc.stdout
+    assert 'scripts/rust/build_py.sh' in message, message
+    assert 'wheel' in message, message
 
 
-def test_python_mode_without_extension_runs_python():
-    """The default gate never touches the (missing) extension."""
-    proc = run_python(BLOCK_EXTENSION + textwrap.dedent("""
-        import meerschaum as mrsm
-        from meerschaum.utils.dtypes import to_pandas_dtype
-        assert isinstance(to_pandas_dtype('int'), str)
-        print(mrsm.get_config('meerschaum', 'instance') is not None)
-    """))
-    assert proc.returncode == 0, proc.stderr
-    assert proc.stdout.strip().endswith('True')
-
-
-def test_rust_mode_without_extension_raises_clearly():
-    """`MRSM_CORE=rust` with no build fails loudly, naming the build script."""
-    proc = run_python(BLOCK_EXTENSION + textwrap.dedent("""
-        from meerschaum._core._gate import rust_impl
-        rust_impl('to_pandas_dtype')
-    """), MRSM_CORE='rust')
-    assert proc.returncode != 0
-    assert 'CoreNotBuiltError' in proc.stderr
-    assert 'scripts/rust/build_py.sh' in proc.stderr
-
-
-@requires_core
 def test_import_with_extension():
     assert core.AVAILABLE is True
     assert core.LOAD_ERROR is None
@@ -169,7 +143,6 @@ def test_import_with_extension():
     assert ('polars' in info['features']) is core.HAS_POLARS
 
 
-@requires_core
 def test_extension_has_no_pyarrow_import_dependency():
     """Loading `_core` and round-tripping a polars frame must not import pyarrow."""
     proc = run_python("""
@@ -211,27 +184,26 @@ def _diff(left, right, path=''):
     if isinstance(left, dict) and isinstance(right, dict):
         for key in sorted(set(left) | set(right)):
             if key not in left or key not in right:
-                yield f"{path}.{key}: only in {'TOML' if key in left else 'Python'}"
+                yield f"{path}.{key}: only in {'TOML' if key in left else 'v4'}"
             else:
                 yield from _diff(left[key], right[key], f"{path}.{key}")
     elif left != right:
         yield f"{path}: {left!r} != {right!r}"
 
 
-@requires_core
-def test_static_config_matches_python():
+def test_static_config_matches_v4():
+    """`static_config()` equals the v4 `STATIC_CONFIG` dictionary (recorded, normalized)."""
     if not core.HAS_STATIC_CONFIG:
         assert core.static_config() is None
         pytest.skip('crates/meerschaum-core/static.toml did not exist when _core was built')
 
-    from meerschaum._internal.static import STATIC_CONFIG
+    expected = oracle.expected()
     rust = core.static_config()
     assert isinstance(rust, dict)
-    differences = list(_diff(_normalize(rust), _normalize(STATIC_CONFIG)))
+    differences = list(_diff(_normalize(rust), expected))
     assert not differences, '\n'.join(differences)
 
 
-@requires_core
 def test_static_config_returns_fresh_dicts():
     if not core.HAS_STATIC_CONFIG:
         pytest.skip('static.toml not embedded')
@@ -342,7 +314,6 @@ PYARROW_COLUMN_NAMES = [
 ]
 
 
-@requires_core
 @pytest.mark.parametrize('column', PYARROW_COLUMN_NAMES)
 def test_roundtrip_pyarrow_column(column):
     pa = pytest.importorskip('pyarrow')
@@ -352,7 +323,6 @@ def test_roundtrip_pyarrow_column(column):
     assert_tables_equal(pa.table(stream), table)
 
 
-@requires_core
 def test_roundtrip_pyarrow_table_all_columns():
     pa = pytest.importorskip('pyarrow')
     table = _pyarrow_table()
@@ -370,7 +340,6 @@ def test_roundtrip_pyarrow_table_all_columns():
     assert pa.schema(stream).equals(table.schema, check_metadata=True)
 
 
-@requires_core
 def test_roundtrip_is_zero_copy():
     pa = pytest.importorskip('pyarrow')
     table = pa.table({'a': pa.array(range(1_000), pa.int64())})
@@ -380,7 +349,6 @@ def test_roundtrip_is_zero_copy():
     assert src.address == dst.address
 
 
-@requires_core
 def test_roundtrip_preserves_batches_and_accepts_readers_and_batches():
     pa = pytest.importorskip('pyarrow')
     table = _pyarrow_table()
@@ -400,7 +368,6 @@ def test_roundtrip_preserves_batches_and_accepts_readers_and_batches():
     assert pa.table(empty).schema.equals(table.schema, check_metadata=True)
 
 
-@requires_core
 def test_roundtrip_honors_requested_schema():
     pa = pytest.importorskip('pyarrow')
     stream = core.roundtrip_arrow(pa.table({'a': pa.array([1, 2], pa.int32())}))
@@ -409,7 +376,6 @@ def test_roundtrip_honors_requested_schema():
     assert out.schema.field('a').type == pa.int64()
 
 
-@requires_core
 def test_roundtrip_rejects_non_arrow_objects():
     with pytest.raises((TypeError, ValueError)):
         core.roundtrip_arrow({'a': [1, 2, 3]})
@@ -462,7 +428,6 @@ POLARS_COLUMN_NAMES = [
 ]
 
 
-@requires_core
 @pytest.mark.parametrize('column', POLARS_COLUMN_NAMES)
 def test_roundtrip_arrow_from_polars(column):
     pl = pytest.importorskip('polars')
@@ -480,7 +445,6 @@ PYO3_POLARS_XFAIL = {
 }
 
 
-@requires_core
 @pytest.mark.skipif(not HAS_POLARS, reason='built without pyo3-polars')
 @pytest.mark.parametrize('column', [
     pytest.param(name, marks=pytest.mark.xfail(reason=PYO3_POLARS_XFAIL[name], strict=True))
@@ -497,7 +461,6 @@ def test_polars_roundtrip(column):
     assert_frame_equal(out, df, categorical_as_str=True)
 
 
-@requires_core
 @pytest.mark.skipif(not HAS_POLARS, reason='built without pyo3-polars')
 def test_polars_roundtrip_multi_chunk_frame():
     pl = pytest.importorskip('polars')
@@ -543,7 +506,6 @@ PANDAS_COLUMN_NAMES = [
 ]
 
 
-@requires_core
 @pytest.mark.parametrize('column', PANDAS_COLUMN_NAMES)
 def test_roundtrip_arrow_from_pandas(column):
     """pandas -> `pa.Table.from_pandas` -> Rust -> pyarrow -> pandas restores the frame."""
@@ -557,7 +519,6 @@ def test_roundtrip_arrow_from_pandas(column):
     pd.testing.assert_frame_equal(out_table.to_pandas(), table.to_pandas())
 
 
-@requires_core
 def test_roundtrip_arrow_from_pandas_dataframe_directly():
     """pandas >= 2.2 implements `__arrow_c_stream__` itself."""
     pa = pytest.importorskip('pyarrow')
@@ -572,125 +533,72 @@ def test_roundtrip_arrow_from_pandas_dataframe_directly():
 
 
 # ---------------------------------------------------------------------------------------------
-# MRSM_CORE gate and dispatch points
+# SqlConnector routing
 # ---------------------------------------------------------------------------------------------
 
-def test_gate_parsing():
-    assert _gate.parse_mode(None) == ('python', None)
-    assert _gate.parse_mode('') == ('python', None)
-    assert _gate.parse_mode('PYTHON') == ('python', None)
-    assert _gate.parse_mode('rust') == ('rust', None)
-    assert _gate.parse_mode('rust:query_df, get_config') == (
-        'rust', frozenset({'query_df', 'get_config'})
-    )
-    assert _gate.parse_mode('rust:') == ('python', None)
-    with pytest.warns(UserWarning, match='MRSM_CORE'):
-        assert _gate.parse_mode('cython') == ('python', None)
-
-
-def test_gate_default_is_python(gate):
-    gate.set_mode(None)
-    assert gate.mode() == 'python'
-    for feature in gate.GATED_FEATURES:
-        assert gate.use_rust(feature) is False
-        assert gate.rust_impl(feature) is None
-
-
-def test_gate_feature_list(gate):
-    gate.set_mode('rust:query_df')
-    assert gate.use_rust('query_df')
-    assert not gate.use_rust('get_config')
-
-
-def test_every_gated_function_has_a_guard():
-    import importlib
-    import inspect
-    for feature, module_name in _gate.GATED_FEATURES.items():
-        func_name = _gate.GATED_FUNCTION_NAMES.get(feature, feature)
-        func = getattr(importlib.import_module(module_name), func_name)
-        source = inspect.getsource(func)
-        assert f"_rust_impl('{feature}')" in source, f"{module_name}.{feature} has no guard"
-
-
-@requires_core
-def test_rust_mode_falls_through_when_symbol_missing(gate, monkeypatch):
-    """With `MRSM_CORE=rust`, a gated feature whose symbol is not bound runs Python unchanged."""
-    from meerschaum.utils.dtypes import to_pandas_dtype
-
-    gate.set_mode('python')
-    expected = to_pandas_dtype('int')
-    monkeypatch.delattr(core, 'to_pandas_dtype', raising=False)
-    gate.set_mode('rust')
-    assert gate.rust_impl('to_pandas_dtype') is None
-    assert to_pandas_dtype('int') == expected
-
-
-@requires_core
-def test_every_gated_feature_is_bound():
-    unbound = [f for f in _gate.GATED_FEATURES if not hasattr(core.load(), f)]
-    assert not unbound, unbound
-
-
-@requires_core
-def test_every_gated_class_is_bound():
-    unbound = [c for c in _gate.GATED_CLASSES if not hasattr(core.load(), c)]
-    assert not unbound, unbound
-
-
-def test_rust_method_runs_python_for_stubs_and_python_mode(gate):
-    """`rust_method` never asks objects without `_rust_method` (duck typing) or in `python` mode."""
-    from types import SimpleNamespace
-    calls = []
-    obj = SimpleNamespace(_rust_method=lambda name: calls.append(name) or (lambda: name))
-    gate.set_mode('python')
-    assert gate.rust_method(obj, 'sync_pipe') is None
-    assert gate.rust_method(SimpleNamespace(), 'sync_pipe') is None
-    assert calls == []
-    gate.set_mode('rust')
-    assert gate.rust_method(SimpleNamespace(), 'sync_pipe') is None
-    assert gate.rust_method(obj, 'sync_pipe')() == 'sync_pipe'
-    assert calls == ['sync_pipe']
-
-
-def test_class_features_are_case_insensitive(gate):
-    gate.set_mode('rust:sqlconnector')
-    assert gate.use_rust('SqlConnector')
-    assert not gate.use_rust('enforce_dtypes')
-
-
-@requires_core
-def test_sql_connector_routing(gate, tmp_path):
-    """`SQLConnector._rust_method` builds one `_core.SqlConnector` per connector and process."""
+def test_sql_connector_routing(tmp_path, monkeypatch):
+    """`SQLConnector._core_connector` builds one `_core.SqlConnector` per connector and process."""
     import meerschaum as mrsm
-    gate.set_mode('rust')
     conn = mrsm.get_connector(
-        'sql', 'gate_' + uuid.uuid4().hex, flavor='sqlite', database=str(tmp_path / 'g.db'),
+        'sql', 'route_' + uuid.uuid4().hex, flavor='sqlite', database=str(tmp_path / 'g.db'),
     )
+    core_connector = conn._core_connector()
+    assert core_connector is conn._core_connector()
     method = conn._rust_method('pipe_exists')
     assert method is not None
-    assert conn.__dict__['_rust_connector'] is method.__self__
-    assert conn._rust_method('read') is None  # D16: user SQL stays SQLAlchemy
+    assert conn.__dict__['_rust_connector'] is core_connector
+    assert method.__self__ is core_connector
+    for name in ('read', 'no_such_method'):  # D16: user SQL stays SQLAlchemy
+        with pytest.raises(AttributeError, match=f"no method '{name}'"):
+            conn._rust_method(name)
     assert '_rust_connector' not in conn.__getstate__()
-    memory = mrsm.get_connector('sql', 'gate_mem_' + uuid.uuid4().hex, flavor='sqlite',
+
+    memory = mrsm.get_connector('sql', 'route_mem_' + uuid.uuid4().hex, flavor='sqlite',
                                 database=':memory:')
-    ### Wave 15 (L): an in-memory SQLite connector is routed too. The Rust pool and SQLAlchemy
+    ### An in-memory SQLite connector is routed too. The Rust pool and SQLAlchemy
     ### open one database file (`_shared_memory_database`), so both see the same tables.
     assert memory._rust_method('pipe_exists') is not None
     path = memory._shared_memory_database()
     assert path and memory.URI == f'sqlite:///{path}'
-    memory.exec('CREATE TABLE gate_shared (a INTEGER)')
-    memory.exec('INSERT INTO gate_shared VALUES (5)')
+    memory.exec('CREATE TABLE route_shared (a INTEGER)')
+    memory.exec('INSERT INTO route_shared VALUES (5)')
     pipe = mrsm.Pipe(
-        'gate', 'shared', instance=memory, parameters={'target': 'gate_shared'},
+        'route', 'shared', instance=memory, parameters={'target': 'route_shared'},
     )
     assert pipe.get_rowcount() == 1
-    assert int(memory.value('SELECT COUNT(*) FROM gate_shared')) == 1
-    gate.set_mode('python')
-    from meerschaum._core._gate import rust_method
-    assert rust_method(conn, 'pipe_exists') is None
+    assert int(memory.value('SELECT COUNT(*) FROM route_shared')) == 1
+
+    ### A connector with no usable driver raises `RuntimeError` naming the cause.
+    import meerschaum.connectors.sql._SQLConnector  # noqa: F401
+    monkeypatch.setattr(
+        sys.modules['meerschaum.connectors.sql._SQLConnector'],
+        '_oracle_client_available',
+        lambda: False,
+    )
+    oracle_conn = mrsm.get_connector(
+        'sql', 'route_ora_' + uuid.uuid4().hex, flavor='oracle',
+        host='localhost', port=1521, username='u', password='p', database='x',
+    )
+    for call in (oracle_conn._core_connector, lambda: oracle_conn._rust_method('pipe_exists')):
+        with pytest.raises(RuntimeError, match='libclntsh'):
+            call()
 
 
-@requires_core
+# ---------------------------------------------------------------------------------------------
+# Results recorded from v4
+# ---------------------------------------------------------------------------------------------
+
+def _snapshot(df):
+    """Plain, comparable data of a pandas frame: labels, dtypes, index and every typed cell."""
+    return {
+        'columns': [str(c) for c in df.columns],
+        'dtypes': [str(t) for t in df.dtypes],
+        'index_dtype': str(df.index.dtype),
+        'index': [repr(i) for i in df.index.tolist()],
+        'cells': [[(type(v).__name__, repr(v)) for v in df[c].tolist()] for c in df.columns],
+    }
+
+
 @pytest.mark.parametrize('infer_string', [False, True])
 @pytest.mark.parametrize('old_dtype,new_dtype', [
     (None, None),
@@ -702,7 +610,7 @@ def test_sql_connector_routing(gate, tmp_path):
     ('string[pyarrow]', 'string[pyarrow]'),
 ])
 @pytest.mark.parametrize('values', [(None,), ('b',), (None, 'b'), ('a',)])
-def test_filter_unseen_string_merge_dtypes(gate, infer_string, old_dtype, new_dtype, values):
+def test_filter_unseen_string_merge_dtypes(infer_string, old_dtype, new_dtype, values):
     """NaN-backed strings merge differently from nullable strings, even for null deltas."""
     pd = pytest.importorskip('pandas')
     pytest.importorskip('pyarrow')
@@ -715,42 +623,38 @@ def test_filter_unseen_string_merge_dtypes(gate, infer_string, old_dtype, new_dt
         new = pd.DataFrame({'s': pd.Series(values, dtype=new_dtype)})
         old.index = [42]
         new.index = range(100, 100 + len(new))
-        gate.set_mode('python')
-        expected = filter_unseen_df(old, new)
-        gate.set_mode('rust')
-        actual = filter_unseen_df(old, new)
+        expected = oracle.expected()
+        result = filter_unseen_df(old, new)
+        actual = _snapshot(result)
 
-    pd.testing.assert_frame_equal(actual, expected)
-    if expected['s'].dtype == object:
-        for actual_value, expected_value in zip(actual['s'], expected['s']):
-            if expected_value is pd.NA:
+    assert actual == expected
+    if expected['dtypes'] == ['object']:
+        for actual_value, (type_name, _) in zip(result['s'], expected['cells'][0]):
+            if type_name == 'NAType':
                 assert actual_value is pd.NA
     if old_dtype == new_dtype == 'string':
-        assert str(actual['s'].dtype) == 'string'
+        assert str(result['s'].dtype) == 'string'
 
 
-@requires_core
 @pytest.mark.parametrize('infer_string', [False, True])
-def test_filter_unseen_mixed_object_string_nulls(gate, infer_string):
+def test_filter_unseen_mixed_object_string_nulls(infer_string):
     pd = pytest.importorskip('pandas')
     from meerschaum.utils.dataframe import filter_unseen_df
 
     with pd.option_context('future.infer_string', infer_string):
         old = pd.DataFrame({'s': pd.Series(['a', 1], dtype=object)})
         new = pd.DataFrame({'s': pd.Series([None, 'b', 2], dtype=object)})
-        gate.set_mode('python')
-        expected = filter_unseen_df(old, new)
-        gate.set_mode('rust')
-        actual = filter_unseen_df(old, new)
+        expected = oracle.expected()
+        result = filter_unseen_df(old, new)
+        actual = _snapshot(result)
 
-    pd.testing.assert_frame_equal(actual, expected)
-    assert actual['s'].iloc[0] is pd.NA
-    assert actual['s'].tolist()[1:] == ['b', 2]
+    assert actual == expected
+    assert result['s'].iloc[0] is pd.NA
+    assert result['s'].tolist()[1:] == ['b', 2]
 
 
-@requires_core
 @pytest.mark.parametrize('declare_json', [False, True])
-def test_filter_unseen_object_string_keeps_special_nulls(gate, declare_json):
+def test_filter_unseen_object_string_keeps_special_nulls(declare_json):
     pd = pytest.importorskip('pandas')
     from meerschaum.utils.dataframe import filter_unseen_df
 
@@ -766,19 +670,17 @@ def test_filter_unseen_object_string_keeps_special_nulls(gate, declare_json):
             'n': pd.Series([None, decimal.Decimal('2.2')], dtype=object),
         })
         options = {'dtypes': {'s': 'object', 'j': 'json', 'n': 'object'}} if declare_json else {}
-        gate.set_mode('python')
-        expected = filter_unseen_df(old, new, **options)
-        gate.set_mode('rust')
-        actual = filter_unseen_df(old, new, **options)
+        expected = oracle.expected()
+        result = filter_unseen_df(old, new, **options)
+        actual = _snapshot(result)
 
-    pd.testing.assert_frame_equal(actual, expected)
-    assert actual['s'].iloc[0] is pd.NA
-    assert actual['j'].iloc[0] is None
-    assert actual['n'].iloc[0].is_nan()
+    assert actual == expected
+    assert result['s'].iloc[0] is pd.NA
+    assert result['j'].iloc[0] is None
+    assert result['n'].iloc[0].is_nan()
 
 
-@requires_core
-def test_filter_unseen_declared_json_encoded_strings(gate):
+def test_filter_unseen_declared_json_encoded_strings():
     pd = pytest.importorskip('pandas')
     from meerschaum.utils.dataframe import filter_unseen_df
 
@@ -792,18 +694,16 @@ def test_filter_unseen_declared_json_encoded_strings(gate):
             'j': pd.Series([None, '{"x":2}'], dtype=object),
         })
         options = {'dtypes': {'s': 'object', 'j': 'json'}}
-        gate.set_mode('python')
-        expected = filter_unseen_df(old, new, **options)
-        gate.set_mode('rust')
-        actual = filter_unseen_df(old, new, **options)
+        expected = oracle.expected()
+        result = filter_unseen_df(old, new, **options)
+        actual = _snapshot(result)
 
-    pd.testing.assert_frame_equal(actual, expected)
-    assert actual['s'].iloc[0] is pd.NA
-    assert actual['j'].iloc[0] is pd.NA
-    assert actual['j'].iloc[1] == '{"x":2}'
+    assert actual == expected
+    assert result['s'].iloc[0] is pd.NA
+    assert result['j'].iloc[0] is pd.NA
+    assert result['j'].iloc[1] == '{"x":2}'
 
 
-@requires_core
 def test_filter_unseen_polars_object_null_stays_none():
     pl = pytest.importorskip('polars')
     old = pl.DataFrame({'s': pl.Series(['a'], dtype=pl.Object)})
@@ -815,9 +715,8 @@ def test_filter_unseen_polars_object_null_stays_none():
     assert actual['s'][0] is None
 
 
-@requires_core
-def test_rust_mode_matches_python(gate):
-    """Every gated feature returns the same values and pandas dtypes in both modes."""
+def test_core_matches_v4_results():
+    """Every bound function returns the values and pandas dtypes the recorded Python mode returned."""
     pd = pytest.importorskip('pandas')
     from meerschaum.utils import dataframe as dfu
     from meerschaum.utils.dtypes import (
@@ -872,16 +771,14 @@ def test_rust_mode_matches_python(gate):
             verify_password('pw', hash_password('pw', rounds=1000)),
         )
 
-    gate.set_mode('python')
-    expected = run_all()
-    gate.set_mode('rust')
+    expected = oracle.expected()
     actual = run_all()
+    assert len(expected) == len(actual)
     for i, (e, a) in enumerate(zip(expected, actual)):
-        assert e == a, f"item {i}: python={e!r} rust={a!r}"
+        assert e == a, f"item {i}: v4={e!r} rust={a!r}"
 
 
-@requires_core
-def test_out_of_range_floats_do_not_saturate(gate):
+def test_out_of_range_floats_do_not_saturate():
     """
     Integral floats outside int64 (`1e20`, `-1e20`, `2**63`, `2**64`) keep their values in float,
     numeric and untyped columns, and a failed int cast leaves them alone, as in v4 (they used to
@@ -917,59 +814,9 @@ def test_out_of_range_floats_do_not_saturate(gate):
     import warnings
     with warnings.catch_warnings():
         warnings.simplefilter('ignore')
-        gate.set_mode('python')
-        expected = run_all()
-        gate.set_mode('rust')
+        expected = oracle.expected()
         actual = run_all()
+    assert len(expected) == len(actual)
     for i, (e, a) in enumerate(zip(expected, actual)):
-        assert e == a, f"item {i}: python={e!r} rust={a!r}"
+        assert e == a, f"item {i}: v4={e!r} rust={a!r}"
     assert "'9223372036854775807'" not in repr(actual)
-
-
-@requires_core
-def test_rust_mode_dispatches_to_bound_symbol(gate, monkeypatch):
-    """A bound `_core` symbol is called with the original arguments."""
-    from meerschaum.utils.dtypes import to_pandas_dtype, are_dtypes_equal
-    calls = []
-
-    def fake_to_pandas_dtype(dtype):
-        calls.append(dtype)
-        return 'from-rust'
-
-    monkeypatch.setattr(core, 'to_pandas_dtype', fake_to_pandas_dtype, raising=False)
-    gate.set_mode('rust:to_pandas_dtype')
-    assert to_pandas_dtype('int') == 'from-rust'
-    assert calls == ['int']
-    # Features outside the list keep running Python.
-    assert are_dtypes_equal('int', 'Int64') is True
-
-    gate.set_mode('python')
-    assert to_pandas_dtype('int') != 'from-rust'
-
-
-@requires_core
-def test_errors_inside_bound_symbols_propagate(gate, monkeypatch):
-    """Only a *missing* symbol falls through; an AttributeError raised by Rust code does not."""
-    from meerschaum.utils.dtypes import to_pandas_dtype
-
-    def broken(dtype):
-        raise AttributeError('raised inside the binding')
-
-    monkeypatch.setattr(core, 'to_pandas_dtype', broken, raising=False)
-    gate.set_mode('rust')
-    with pytest.raises(AttributeError, match='inside the binding'):
-        to_pandas_dtype('int')
-
-
-@requires_core
-def test_rust_mode_env_var_in_fresh_process():
-    """`MRSM_CORE=rust` read at import time: the package imports and get_config falls through."""
-    proc = run_python("""
-        import json
-        import meerschaum as mrsm
-        from meerschaum._core import _gate
-        assert _gate.mode() == 'rust', _gate.mode()
-        print(json.dumps(mrsm.get_config('meerschaum', 'instance') is not None))
-    """, MRSM_CORE='rust')
-    assert proc.returncode == 0, proc.stderr
-    assert json.loads(proc.stdout.strip().splitlines()[-1]) is True

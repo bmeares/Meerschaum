@@ -1,19 +1,57 @@
-"""Strict dataframe boundary regression tests; all data is synthetic."""
+"""
+Strict dataframe boundary regression tests; all data is synthetic.
+
+The results the v4 Python implementation produced for `filter_unseen_df` are recorded in
+`tests/oracle/test_boundary.json` (see `tests/_oracle.py`) as frame snapshots (column order, pandas
+dtypes, the type and value of every cell, nulls included) and compared with the Rust results.
+"""
 import decimal
 import uuid
 
 import pytest
 
+from meerschaum.utils.packages import attempt_import
+from tests import _oracle as oracle
 import meerschaum._core as core
-from meerschaum._core import _gate
 
-pytestmark = pytest.mark.skipif(not core.AVAILABLE, reason='Rust extension is required')
+### The recorded dtypes depend on the pandas version (3.x from the `mrsm` venv), so the
+### replay has to load the same libraries as the recording.
+attempt_import('pandas', 'pyarrow', 'shapely', 'geopandas', lazy=False)
 
 
-@pytest.fixture(autouse=True)
-def restore_gate():
-    yield
-    _gate.reload()
+def _cell(value):
+    """A picklable, comparable description of one cell that tells every null sentinel apart."""
+    import pandas as pd
+    if value is pd.NA:
+        return ('NA',)
+    if value is None:
+        return ('None',)
+    if value is pd.NaT:
+        return ('NaT',)
+    if isinstance(value, float) and value != value:
+        return ('nan',)
+    if isinstance(value, decimal.Decimal) and value.is_nan():
+        return ('Decimal', 'NaN')
+    if isinstance(value, (str, bytes, uuid.UUID, decimal.Decimal, dict, list, bool, int, float)):
+        return (type(value).__name__, value)
+    if hasattr(value, 'item'):
+        return (type(value).__name__, value.item())
+    return (type(value).__name__, repr(value))
+
+
+def _snapshot(frame):
+    """Columns, dtypes, index and every cell of a pandas frame as plain data."""
+    return {
+        'columns': [str(c) for c in frame.columns],
+        'dtypes': [str(t) for t in frame.dtypes],
+        'index': [_cell(v) for v in frame.index],
+        'rows': [[_cell(v) for v in row] for row in frame.itertuples(index=False, name=None)],
+    }
+
+
+def _filter(old, new, options):
+    from meerschaum.utils.dataframe import filter_unseen_df
+    return filter_unseen_df(old, new, **options)
 
 
 @pytest.mark.parametrize('infer_string', [False, True])
@@ -32,20 +70,14 @@ def restore_gate():
 def test_explicit_object_string_inference(infer_string, partial_dtypes, old_values, new_values):
     """Infer using both complete merge inputs, including null-only and empty deltas."""
     pd = pytest.importorskip('pandas')
-    from meerschaum.utils.dataframe import filter_unseen_df
     with pd.option_context('future.infer_string', infer_string):
         old = pd.DataFrame({'s': pd.Series(old_values, dtype=object)})
         new = pd.DataFrame({'s': pd.Series(new_values, dtype=object)})
         old_before, new_before = old.copy(deep=True), new.copy(deep=True)
         options = {'dtypes': {'unrelated': 'object'}} if partial_dtypes else {}
-        _gate.set_mode('python')
-        expected = filter_unseen_df(old, new, **options)
-        _gate.set_mode('rust')
-        actual = filter_unseen_df(old, new, **options)
-    pd.testing.assert_frame_equal(actual, expected)
-    for got, want in zip(actual.s, expected.s):
-        if want is pd.NA:
-            assert got is pd.NA
+        expected = oracle.expected()
+        actual = _filter(old, new, options)
+    assert _snapshot(actual) == expected
     pd.testing.assert_frame_equal(old, old_before)
     pd.testing.assert_frame_equal(new, new_before)
 
@@ -57,7 +89,6 @@ def test_explicit_object_string_inference(infer_string, partial_dtypes, old_valu
 def test_special_object_null_identity(infer_string, declared, kind, new_has_value):
     """UUID/bytes nulls use pd.NA; serialized JSON and Decimal keep their sentinels."""
     pd = pytest.importorskip('pandas')
-    from meerschaum.utils.dataframe import filter_unseen_df
     old_value = uuid.UUID(int=1) if kind == 'uuid' else b'a'
     new_value = uuid.UUID(int=2) if kind == 'uuid' else b'b'
     with pd.option_context('future.infer_string', infer_string):
@@ -77,16 +108,15 @@ def test_special_object_null_identity(infer_string, declared, kind, new_has_valu
             else {'dtypes': {'n': 'numeric'}} if declared == 'partial'
             else {}
         )
-        _gate.set_mode('python')
-        expected = filter_unseen_df(old, new, **options)
-        _gate.set_mode('rust')
-        actual = filter_unseen_df(old, new, **options)
-    pd.testing.assert_frame_equal(actual, expected)
-    sentinel = pd.NA if new_has_value else None
-    assert expected.s.iloc[0] is sentinel
-    assert actual.s.iloc[0] is sentinel
-    json_sentinel = None if new_has_value else pd.NA
-    assert actual.j.iloc[0] is expected.j.iloc[0] is json_sentinel
+        expected = oracle.expected()
+        actual = _filter(old, new, options)
+    assert _snapshot(actual) == expected
+    sentinel = ('NA',) if new_has_value else ('None',)
+    assert expected['rows'][0][0] == sentinel
+    assert actual.s.iloc[0] is (pd.NA if new_has_value else None)
+    json_sentinel = ('None',) if new_has_value else ('NA',)
+    assert expected['rows'][0][1] == json_sentinel
+    assert actual.j.iloc[0] is (None if new_has_value else pd.NA)
     assert actual.n.iloc[0].is_nan()
 
 
@@ -95,18 +125,16 @@ def test_special_object_null_identity(infer_string, declared, kind, new_has_valu
 @pytest.mark.parametrize('declared', [False, True])
 def test_special_object_detector_uses_first_value_in_mixed_delta(kind, infer_string, declared):
     pd = pytest.importorskip('pandas')
-    from meerschaum.utils.dataframe import filter_unseen_df
     old_value, new_value = (uuid.UUID(int=1), uuid.UUID(int=2)) if kind == 'uuid' else (b'a', b'b')
     with pd.option_context('future.infer_string', infer_string):
         old = pd.DataFrame({'s': pd.Series([old_value], dtype=object)})
         new = pd.DataFrame({'s': pd.Series([new_value, None, 'text'], dtype=object)})
         options = {'dtypes': {'s': 'object'}} if declared else {}
-        _gate.set_mode('python')
-        expected = filter_unseen_df(old, new, **options)
-        _gate.set_mode('rust')
-        actual = filter_unseen_df(old, new, **options)
-    pd.testing.assert_frame_equal(actual, expected)
-    assert actual.s.iloc[1] is expected.s.iloc[1] is pd.NA
+        expected = oracle.expected()
+        actual = _filter(old, new, options)
+    assert _snapshot(actual) == expected
+    assert expected['rows'][1][0] == ('NA',)
+    assert actual.s.iloc[1] is pd.NA
     assert actual.s.iloc[0] == new_value
     assert type(actual.s.iloc[0]) is type(new_value)
     assert actual.s.iloc[2] == 'text'
@@ -116,33 +144,28 @@ def test_special_object_detector_uses_first_value_in_mixed_delta(kind, infer_str
 def test_special_serialization_null_only_delta_from_nonnull_input(kind):
     """JSON serialization depends on the full new input; UUID/bytes parsing uses the delta."""
     pd = pytest.importorskip('pandas')
-    from meerschaum.utils.dataframe import filter_unseen_df
     value = {'uuid': uuid.UUID(int=1), 'bytes': b'a', 'json': {'x': 1}}[kind]
     old = pd.DataFrame({'s': pd.Series([value], dtype=object)})
     new = pd.DataFrame({'s': pd.Series([None, value], dtype=object)})
-    _gate.set_mode('python')
-    expected = filter_unseen_df(old, new)
-    _gate.set_mode('rust')
-    actual = filter_unseen_df(old, new)
-    pd.testing.assert_frame_equal(actual, expected)
+    expected = oracle.expected()
+    actual = _filter(old, new, {})
+    assert _snapshot(actual) == expected
     assert actual.s.tolist() == [None]
-    assert actual.s.iloc[0] is expected.s.iloc[0] is None
+    assert expected['rows'][0][0] == ('None',)
+    assert actual.s.iloc[0] is None
 
 
 @pytest.mark.parametrize('kind', ['uuid', 'bytes'])
 @pytest.mark.parametrize('declared', [False, True])
 def test_special_object_empty_delta_dtype(kind, declared):
     pd = pytest.importorskip('pandas')
-    from meerschaum.utils.dataframe import filter_unseen_df
     value = uuid.UUID(int=1) if kind == 'uuid' else b'a'
     old = pd.DataFrame({'s': pd.Series([value], dtype=object)})
     new = pd.DataFrame({'s': pd.Series([], dtype=object)})
     options = {'dtypes': {'s': kind}} if declared else {}
-    _gate.set_mode('python')
-    expected = filter_unseen_df(old, new, **options)
-    _gate.set_mode('rust')
-    actual = filter_unseen_df(old, new, **options)
-    pd.testing.assert_frame_equal(actual, expected)
+    expected = oracle.expected()
+    actual = _filter(old, new, options)
+    assert _snapshot(actual) == expected
 
 
 @pytest.mark.parametrize('lazy', [False, True])

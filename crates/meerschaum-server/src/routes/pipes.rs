@@ -779,23 +779,31 @@ async fn get_pipe_docs(ctx: Ctx, Path((ck, mk, lk)): Keys3) -> ApiResult {
         order: Some(args.order),
         ..Default::default()
     };
-    let docs = meerschaum_connector::pipe_ops::get_docs(conn.as_ref(), &h.pipe, &query)
+    // v4's route calls `pipe.get_docs()`, i.e. the instance's own `get_pipe_docs()`: the raw
+    // rows, not the dtype-enforced frame (SQLite keeps its stored datetime text
+    // `2024-01-02 03:04:05.000000`, MySQL-family naive datetimes serialize as `...Z`, the
+    // PostgreSQL family as `...+00:00`).
+    let docs = conn
+        .get_pipe_docs(&h.pipe, &query)
         .await
         .map_err(|e| ApiError::exception("get_pipe_docs", e))?;
     let value = Value::List(
         docs.iter()
-            .map(|d| {
-                Value::Map(
-                    d.iter()
-                        .map(|(k, v)| {
-                            (k.clone(), meerschaum_connector::pipe_ops::kernel_to_core(v))
-                        })
-                        .collect(),
-                )
-            })
+            .map(|d| Value::Map(d.iter().map(|(k, v)| (k.clone(), doc_value(v))).collect()))
             .collect(),
     );
     Ok(raw_json(StatusCode::OK, python_json(&value)))
+}
+
+/// A document cell as v4 serializes it: a SQL `NULL` is `null`, also in a float column, where the
+/// frame holds `NaN` (v4's rows carry `None`).
+// PARITY: a stored float `NaN` also becomes `null` (v4 would write the invalid-JSON `NaN`);
+// the frame cannot tell the two apart.
+fn doc_value(v: &meerschaum_kernel::Value) -> Value {
+    match meerschaum_connector::pipe_ops::kernel_to_core(v) {
+        Value::Float(f) if f.is_nan() => Value::Null,
+        other => other,
+    }
 }
 
 fn refuse_protected_read(pipe: &Pipe) -> Result<(), ApiError> {

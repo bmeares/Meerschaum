@@ -1,5 +1,5 @@
 //! `meerschaum._core.Pipe`: a Pipe's identity (keys) and parameter storage in Rust
-//! (design §4.4). The Python `Pipe` keeps one of these under `MRSM_CORE=rust` as its source of
+//! (design §4.4). The Python `Pipe` keeps one of these as its source of
 //! truth for the keys and the **raw** (unresolved) parameters; resolution of `{{ Pipe() }}`
 //! templates against the instance goes through a Python-side resolver (`PyResolver`).
 //!

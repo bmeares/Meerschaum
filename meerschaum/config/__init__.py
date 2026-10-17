@@ -35,7 +35,7 @@ from meerschaum._internal.static import STATIC_CONFIG
 from meerschaum.config._patch import (
     apply_patch_to_config,
 )
-from meerschaum._core._gate import rust_impl as _rust_impl
+from meerschaum import _core
 
 __all__ = (
     'get_plugin_config',
@@ -163,138 +163,10 @@ def get_config(
     >>> get_config('does', 'not', 'exist')
     UserWarning: Invalid keys in config: ('does', 'not', 'exist')
     """
-    if (_rust := _rust_impl('get_config')) is not None:
-        return _rust(
-            *keys, patch=patch, substitute=substitute, sync_files=sync_files,
-            write_missing=write_missing, as_tuple=as_tuple, warn=warn, debug=debug,
-        )
-    import json
-
-    symlinks_key = STATIC_CONFIG['config']['symlinks_key']
-    if debug:
-        from meerschaum.utils.debug import dprint
-        dprint(f"Indexing keys: {keys}", color=False)
-
-    if len(keys) == 0:
-        _rc = _config(
-            substitute=substitute,
-            sync_files=sync_files,
-            write_missing=(write_missing and _allow_write_missing),
-        )
-        if as_tuple:
-            return True, _rc 
-        return _rc
-    
-    config = get_store()
-
-    ### Weird threading issues, only import if substitute is True.
-    if substitute:
-        from meerschaum.config._read_config import search_and_substitute_config
-    ### Invalidate the cache if it was read before with substitute=False
-    ### but there still exist substitutions.
-    if (
-        config is not None and substitute and keys[0] != symlinks_key
-        and 'MRSM{' in json.dumps(config.get(keys[0]))
-    ):
-        try:
-            _subbed = search_and_substitute_config({keys[0]: config[keys[0]]})
-        except Exception:
-            import traceback
-            traceback.print_exc()
-            _subbed = {keys[0]: config[keys[0]]}
-
-        config[keys[0]] = _subbed[keys[0]]
-        if symlinks_key in _subbed:
-            if symlinks_key not in config:
-                config[symlinks_key] = {}
-            config[symlinks_key] = apply_patch_to_config(
-                _subbed.get(symlinks_key, {}),
-                config.get(symlinks_key, {}),
-            )
-
-    from meerschaum.config._sync import sync_files as _sync_files
-    if config is None:
-        _config(*keys, sync_files=sync_files)
-
-    invalid_keys = False
-    if keys[0] not in config and keys[0] != symlinks_key:
-        single_key_config = read_config(
-            keys=[keys[0]], substitute=substitute, write_missing=write_missing
-        )
-        if keys[0] not in single_key_config:
-            invalid_keys = True
-        else:
-            config[keys[0]] = single_key_config.get(keys[0], None)
-            if symlinks_key in single_key_config and keys[0] in single_key_config[symlinks_key]:
-                if symlinks_key not in config:
-                    config[symlinks_key] = {}
-                config[symlinks_key][keys[0]] = single_key_config[symlinks_key][keys[0]]
-
-            if sync_files:
-                _sync_files(keys=[keys[0]])
-
-    c = config
-    if len(keys) > 0:
-        for k in keys:
-            try:
-                c = c[k]
-            except Exception:
-                invalid_keys = True
-                break
-        if invalid_keys:
-            ### Check if the keys are in the default configuration.
-            from meerschaum.config._default import default_config
-            in_default = True
-            patched_default_config = (
-                search_and_substitute_config(default_config)
-                if substitute else copy.deepcopy(default_config)
-            )
-            _c = patched_default_config
-            for k in keys:
-                try:
-                    _c = _c[k]
-                except Exception:
-                    in_default = False
-            if in_default:
-                c = _c
-                invalid_keys = False
-            warning_msg = f"Invalid keys in config: {keys}"
-            if not in_default:
-                try:
-                    if warn:
-                        from meerschaum.utils.warnings import warn as _warn
-                        _warn(warning_msg, stacklevel=3, color=False)
-                except Exception:
-                    if warn:
-                        print(warning_msg)
-                if as_tuple:
-                    return False, None
-                return None
-
-            ### Don't write keys that we haven't yet loaded into memory.
-            not_loaded_keys = [k for k in patched_default_config if k not in config]
-            for k in not_loaded_keys:
-                patched_default_config.pop(k, None)
-
-            set_config(
-                apply_patch_to_config(
-                    patched_default_config,
-                    config,
-                )
-            )
-            if patch and keys[0] != symlinks_key and write_missing:
-                ### Only persist defaults when the key's file is genuinely absent.
-                ### Never overwrite an existing file (e.g. one that failed to parse) ─
-                ### doing so would clobber the user's config with default values.
-                ### Brand-new config files are still created by `read_config()`.
-                from meerschaum.config._read_config import get_keyfile_path
-                keyfile_exists = get_keyfile_path(keys[0], create_new=False) is not None
-                if not keyfile_exists:
-                    write_config(get_store(), debug=debug)
-
-    if as_tuple:
-        return (not invalid_keys), c
-    return c
+    return _core.get_config(
+        *keys, patch=patch, substitute=substitute, sync_files=sync_files,
+        write_missing=write_missing, as_tuple=as_tuple, warn=warn, debug=debug,
+    )
 
 
 def get_plugin_config(
@@ -315,14 +187,7 @@ def get_plugin_config(
             "from within a Meerschaum plugin."
         )
 
-    if (_rust := _rust_impl('get_plugin_config')) is not None:
-        return _rust(parent_plugin_name, *keys, warn=warn, **kw)
-
-    return get_config(
-        *(['plugins', parent_plugin_name] + list(keys)),
-        warn=warn,
-        **kw
-    )
+    return _core.get_plugin_config(parent_plugin_name, *keys, warn=warn, **kw)
 
 
 def write_plugin_config(
@@ -337,14 +202,7 @@ def write_plugin_config(
     parent_plugin_name = _get_parent_plugin(2)
     if parent_plugin_name is None:
         error("You may only call `get_plugin_config()` from within a Meerschaum plugin.")
-    if (_rust := _rust_impl('write_plugin_config')) is not None:
-        return _rust(parent_plugin_name, config_dict, **kw)
-    plugins_cf = get_config('plugins', warn=False)
-    if plugins_cf is None:
-        plugins_cf = {}
-    plugins_cf.update({parent_plugin_name: config_dict})
-    cf = {'plugins' : plugins_cf}
-    return write_config(cf, **kw)
+    return _core.write_plugin_config(parent_plugin_name, config_dict, **kw)
 
 
 @contextlib.contextmanager

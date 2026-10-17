@@ -53,7 +53,61 @@ fn username(rt: &mut Runtime<'_>, inst: &Instance, model: &TokenModel) -> Option
         .map(|v| v.py_str())
 }
 
+/// The scopes `username` may hand to a token, or `None` when they may grant anything (an
+/// administrator, or a holder of `*`).
+///
+/// FIX (intentional v4 change): a token carries at most its owner's scopes.
+fn grant_cap(rt: &mut Runtime<'_>, inst: &Instance, username: &str) -> Option<Vec<String>> {
+    let sess = session(rt);
+    let mut user = User::new(username, None);
+    let user_type = sess
+        .block_on(inst.conn().get_user_type(&user))
+        .ok()
+        .flatten();
+    if user_type.as_deref() == Some("admin") {
+        return None;
+    }
+    user.attributes = sess
+        .block_on(inst.conn().get_user_attributes(&user))
+        .ok()
+        .flatten();
+    let held = user.get_scopes();
+    if held.iter().any(|s| s == "*") {
+        None
+    } else {
+        Some(held)
+    }
+}
+
+/// The failure for scopes `owner` may not grant, naming each of them (nothing is trimmed).
+fn cap_failure(
+    owner: &str,
+    requested: &[String],
+    cap: &[String],
+    already: &[String],
+) -> Option<SuccessTuple> {
+    let mut refused: Vec<String> = Vec::new();
+    for scope in requested {
+        if !cap.contains(scope) && !already.contains(scope) && !refused.contains(scope) {
+            refused.push(scope.clone());
+        }
+    }
+    if refused.is_empty() {
+        return None;
+    }
+    let names: Vec<String> = refused.iter().map(|s| format!("'{s}'")).collect();
+    Some(SuccessTuple::fail(format!(
+        "Cannot grant scopes that user '{owner}' does not hold: {}. A token may only carry the scopes of its owner (`*` only for administrators and holders of `*`).",
+        names.join(", ")
+    )))
+}
+
 /// `show tokens [labels / IDs ...]`.
+///
+/// The token actions here act on the instance directly with the operator's own access (the
+/// database credentials in the connector), not as a logged-in Meerschaum user, so they are
+/// trusted: the owner-or-administrator rule of the HTTP routes (`routes/tokens.rs`) applies only
+/// to an `api:` instance, where the server enforces it.
 pub fn show_tokens(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     let inst = super::get_instance(args, rt)?;
     let nopretty = flag(args, "nopretty");
@@ -231,6 +285,20 @@ pub fn register_tokens(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
             &meerschaum_jobs::config::JobPaths::from_config(rt.config()),
         )
     });
+    // An `api` instance enforces the cap itself (a refused request comes back as the failure).
+    let mut scopes = scopes;
+    if inst.type_name() != "api" {
+        if let Some(cap) = grant_cap(rt, &inst, &username) {
+            match &scopes {
+                Some(asked) => {
+                    if let Some(failure) = cap_failure(&username, asked, &cap, &[]) {
+                        return Ok(failure);
+                    }
+                }
+                None => scopes = Some(cap),
+            }
+        }
+    }
     let mut token = Token::new(Some(&label), expiration, scopes, default_days, Utc::now());
     token.instance_keys = Some(inst.keys());
     token.user = Some(user);
@@ -382,14 +450,20 @@ pub fn edit_tokens(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
         };
         let scopes_text = ask(
             rt,
-            "Scope (`*` to grant all permissions):",
+            "Scope (`*` grants all scopes, including custom and future scopes):",
             &Ask::new().editable(model.scopes.join(" ")),
         )?;
-        let scopes: Vec<String> = if scopes_text != "*" {
-            scopes_text.split(' ').map(str::to_string).collect()
-        } else {
-            meerschaum_core::static_config().scope_names()
-        };
+        // FIX (intentional v4 change): `*` is stored literally. v4 expanded it to the built-in
+        // scope list (`edit tokens`), which left out custom (plugin) scopes and any scope added
+        // later; the checks honor a literal `*`.
+        let scopes: Vec<String> = scopes_text.split(' ').map(str::to_string).collect();
+        if inst.type_name() != "api"
+            && let Some(owner) = username(rt, &inst, &model)
+            && let Some(cap) = grant_cap(rt, &inst, &owner)
+            && let Some(failure) = cap_failure(&owner, &scopes, &cap, &model.scopes)
+        {
+            return Ok(failure);
+        }
         let invalidate = if model.is_valid {
             yes_no(
                 rt,

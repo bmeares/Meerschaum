@@ -13,8 +13,6 @@ import meerschaum as mrsm
 from meerschaum.utils.typing import (
     Optional, Dict, Any, Union, List, Tuple, Iterator, TYPE_CHECKING,
 )
-from meerschaum.config import get_config
-from meerschaum._core._gate import rust_impl as _rust_impl
 
 if TYPE_CHECKING:
     pd = mrsm.attempt_import('pandas')
@@ -32,30 +30,20 @@ def _rust_context(
     self,
     debug: bool = False,
     refresh: bool = False,
-) -> Optional[Dict[str, Any]]:
+) -> Dict[str, Any]:
     """
     Return the `context` the `_core.pipe_*` bindings take (the instance's Rust SQL connector, the
     other Rust connectors of the call, the attributes of the connectors this process defined ad
-    hoc, and the SQL pipe's cached columns types), or `None` when the pipe's instance cannot run
-    natively (the caller keeps the Python body, see `PARITY.md`, Wave 15 task L2).
+    hoc, and the SQL pipe's cached columns types).
+
+    An instance that cannot be parsed raises as in v4 (`Unable to parse connector keys ...`); a
+    SQL connector with no usable Rust driver (an unknown flavor, a missing Oracle client library)
+    raises `RuntimeError`.
     """
     from meerschaum.core.Pipe._sync import _native_context
     context, reason = _native_context(self, debug=debug)
     if context is None:
-        kind = getattr(reason, 'kind', None)
-        if kind == 'oracle_client':
-            ### Oracle without `libclntsh` (PARITY W15L-006): the v4 body, as `Pipe.sync` does,
-            ### with the same once-per-process warning, until wave 16 replaces it with an error.
-            from meerschaum.core.Pipe._sync import _warn_oracle_fallback
-            _warn_oracle_fallback(self, reason, 'Using')
-        elif kind == 'no_driver':
-            raise RuntimeError(f"Cannot use the instance of {self}: {reason}.")
-        ### v4 treated an instance it could not build as "no data": the methods below keep
-        ### their v4 result for that case (`None`, `0`, ...) until wave 16 removes the bodies.
-        if debug:
-            from meerschaum.utils.warnings import dprint
-            dprint(f"Using the Python implementation for {self}: {reason}.")
-        return None
+        raise RuntimeError(f"Cannot use the instance of {self}: {reason}.")
     ### A SQL pipe's columns types are cached on the Python pipe (`get_columns_types()`), which
     ### saves the native read from asking the database's catalog on every call.
     context['columns_types'] = (
@@ -168,378 +156,49 @@ def get_data(
     A `polars.DataFrame` if `as_polars=True`.
 
     """
+    from meerschaum import _core
     if as_polars and (as_docs or as_dask):
         raise ValueError("`as_polars` may not be combined with `as_docs` or `as_dask`.")
-
-    if (_rust := _rust_impl('pipe_get_data')) is not None:
-        if as_dask:
-            raise TypeError(
-                "Dask is not supported in Meerschaum 5. Use `as_iterator=True` for chunks "
-                "or `as_polars=True`. See the migration guide: reference/migrating-to-v5."
-            )
-        _context = _rust_context(self, debug=debug)
-        if _context is not None:
-            begin, end = self.parse_date_bounds(begin, end, debug=debug)
-            if as_iterator or as_chunks:
-                return _iterate_chunks(_rust_impl('pipe_get_data_chunks')(
-                    self,
-                    _context,
-                    select_columns=select_columns,
-                    omit_columns=omit_columns,
-                    begin=begin,
-                    end=end,
-                    params=params,
-                    as_docs=as_docs,
-                    as_polars=as_polars,
-                    chunk_interval=chunk_interval,
-                    order=order,
-                    limit=limit,
-                    kwargs=kw,
-                    debug=debug,
-                ))
-            return _rust(
-                self,
-                _context,
-                select_columns=select_columns,
-                omit_columns=omit_columns,
-                begin=begin,
-                end=end,
-                params=params,
-                as_docs=as_docs,
-                as_polars=as_polars,
-                add_missing_columns=add_missing_columns,
-                order=order,
-                limit=limit,
-                kwargs=kw,
-                debug=debug,
-            )
-
-    from meerschaum.utils.warnings import warn
-    from meerschaum.utils.venv import Venv
-    from meerschaum.connectors import get_connector_plugin
-    from meerschaum.utils.dtypes import to_pandas_dtype
-    from meerschaum.utils.dataframe import add_missing_cols_to_df, df_is_chunk_generator
-    from meerschaum.utils.packages import attempt_import
-    from meerschaum.utils.warnings import dprint
-    dd = attempt_import('dask.dataframe') if as_dask else None
-    dask = attempt_import('dask') if as_dask else None
-    _ = attempt_import('partd', lazy=False) if as_dask else None
-
-    if as_polars and (as_docs or as_dask):
-        raise ValueError("`as_polars` may not be combined with `as_docs` or `as_dask`.")
-
-    if select_columns == '*':
-        select_columns = None
-    elif isinstance(select_columns, str):
-        select_columns = [select_columns]
-
-    if isinstance(omit_columns, str):
-        omit_columns = [omit_columns]
-
-    begin, end = self.parse_date_bounds(begin, end, debug=debug)
-    as_iterator = as_iterator or as_chunks
-    dt_col = self.columns.get('datetime', None)
-
-    def _sort_df(_df):
-        if df_is_chunk_generator(_df):
-            return _df
-        indices = [] if dt_col not in _df.columns else [dt_col]
-        non_dt_cols = [
-            col
-            for col_ix, col in self.columns.items()
-            if col_ix != 'datetime' and col in _df.columns
-        ]
-        indices.extend(non_dt_cols)
-        if _df.__module__.split('.')[0] == 'polars':
-            _df = _df.sort(
-                indices,
-                descending=(str(order).lower() != 'asc'),
-            )
-        elif 'dask' not in _df.__module__:
-            ascending = str(order).lower() == 'asc'
-            dt_series = _df[dt_col] if indices and indices[0] == dt_col else None
-            ### Unique, non-null, ordered datetimes (e.g. from the SQL `ORDER BY`) are already sorted.
-            already_sorted = (
-                dt_series is not None
-                and not dt_series.hasnans
-                and (
-                    dt_series.is_monotonic_increasing
-                    if ascending
-                    else dt_series.is_monotonic_decreasing
-                )
-                and dt_series.is_unique
-            )
-            if not already_sorted:
-                _df.sort_values(
-                    by=indices,
-                    inplace=True,
-                    ascending=ascending,
-                )
-            _df.reset_index(drop=True, inplace=True)
-        else:
-            _df = _df.sort_values(
-                by=indices,
-                ascending=(str(order).lower() == 'asc'),
-            )
-            _df = _df.reset_index(drop=True)
-        if limit is not None and len(_df) > limit:
-            return _df.head(limit)
-        return _df
-
-    if as_iterator or as_chunks:
-        df = self._get_data_as_iterator(
-            select_columns=select_columns,
-            omit_columns=omit_columns,
-            begin=begin,
-            end=end,
-            params=params,
-            chunk_interval=chunk_interval,
-            limit=limit,
-            order=order,
-            as_docs=as_docs,
-            as_polars=as_polars,
-            fresh=fresh,
-            debug=debug,
-        )
-        if as_docs:
-            return df
-        df = _sort_df(df)
-        return df
-
     if as_dask:
-        from multiprocessing.pool import ThreadPool
-        dask_pool = ThreadPool(self.get_num_workers())
-        dask.config.set(pool=dask_pool)
-        chunk_interval = self.get_chunk_interval(chunk_interval, debug=debug)
-        bounds = self.get_chunk_bounds(
-            begin=begin,
-            end=end,
-            bounded=False,
-            chunk_interval=chunk_interval,
-            debug=debug,
+        raise TypeError(
+            "Dask is not supported in Meerschaum 5. Use `as_iterator=True` for chunks "
+            "or `as_polars=True`. See the migration guide: reference/migrating-to-v5."
         )
-        dask_chunks = [
-            dask.delayed(self.get_data)(
-                select_columns=select_columns,
-                omit_columns=omit_columns,
-                begin=chunk_begin,
-                end=chunk_end,
-                params=params,
-                chunk_interval=chunk_interval,
-                order=order,
-                limit=limit,
-                fresh=fresh,
-                add_missing_columns=True,
-                debug=debug,
-            )
-            for (chunk_begin, chunk_end) in bounds
-        ]
-        dask_meta = {
-            col: to_pandas_dtype(typ)
-            for col, typ in self.get_dtypes(refresh=True, infer=True, debug=debug).items()
-        }
-        if debug:
-            dprint(f"Dask meta:\n{dask_meta}")
-        dask_df = dd.from_delayed(dask_chunks, meta=dask_meta, verify_meta=False)
-        return _sort_df(dask_df.astype(dask_meta))
-
-    if not self.exists(debug=debug):
-        return [] if as_docs else None
-
-    if as_docs:
-        with Venv(get_connector_plugin(self.instance_connector)):
-            docs = self.instance_connector.get_pipe_docs(
-                pipe=self,
-                select_columns=select_columns,
-                omit_columns=omit_columns,
-                begin=begin,
-                end=end,
-                params=params,
-                limit=limit,
-                order=order,
-                debug=debug,
-                **kw
-            )
-        return docs if docs is not None else []
-
-    with Venv(get_connector_plugin(self.instance_connector)):
-        df = self.instance_connector.get_pipe_data(
-            pipe=self,
-            select_columns=select_columns,
-            omit_columns=omit_columns,
-            begin=begin,
-            end=end,
-            params=params,
-            limit=limit,
-            order=order,
-            debug=debug,
-            **(
-                {'as_polars': True}
-                if as_polars and self.instance_connector.type == 'sql'
-                else {}
-            ),
-            **kw
-        )
-        if df is None:
-            return df
-
-        if not select_columns:
-            select_columns = [col for col in df.columns]
-
-        pipe_dtypes = self.get_dtypes(refresh=False, debug=debug)
-        cols_to_omit = [
-            col
-            for col in df.columns
-            if (
-                col in (omit_columns or [])
-                or
-                col not in (select_columns or [])
-            )
-        ]
-        cols_to_add = [
-            col
-            for col in select_columns
-            if col not in df.columns
-        ] + ([
-            col
-            for col in pipe_dtypes
-            if col not in df.columns
-        ] if add_missing_columns else [])
-        if cols_to_omit:
-            warn(
-                (
-                    f"Received {len(cols_to_omit)} omitted column"
-                    + ('s' if len(cols_to_omit) != 1 else '')
-                    + f" for {self}. "
-                    + "Consider adding `select_columns` and `omit_columns` support to "
-                    + f"'{self.instance_connector.type}' connectors to improve performance."
-                ),
-                stack=False,
-            )
-            _cols_to_select = [col for col in df.columns if col not in cols_to_omit]
-            df = df[_cols_to_select]
-
-        if cols_to_add:
-            if not add_missing_columns:
-                from meerschaum.utils.misc import items_str
-                warn(
-                    f"Will add columns {items_str(cols_to_add)} as nulls to dataframe.",
-                    stack=False,
-                )
-
-            df = add_missing_cols_to_df(
-                df,
-                {
-                    col: pipe_dtypes.get(col, 'string')
-                    for col in cols_to_add
-                },
-            )
-
-        enforced_df = self.enforce_dtypes(
-            df,
-            dtypes=pipe_dtypes,
-            as_polars=as_polars,
-            debug=debug,
-        )
-
-        if order:
-            enforced_df = _sort_df(enforced_df)
-        return enforced_df
-
-
-def _get_data_as_iterator(
-    self,
-    select_columns: Optional[List[str]] = None,
-    omit_columns: Optional[List[str]] = None,
-    begin: Optional[datetime] = None,
-    end: Optional[datetime] = None,
-    params: Optional[Dict[str, Any]] = None,
-    chunk_interval: Union[timedelta, int, None] = None,
-    limit: Optional[int] = None,
-    order: Optional[str] = 'asc',
-    as_docs: bool = False,
-    as_polars: bool = False,
-    fresh: bool = False,
-    debug: bool = False,
-    **kw: Any
-) -> Iterator['pd.DataFrame']:
-    """
-    Return a pipe's data as a generator.
-    """
-    from meerschaum.utils.dtypes import round_time
+    context = _rust_context(self, debug=debug)
     begin, end = self.parse_date_bounds(begin, end, debug=debug)
-    if not self.exists(debug=debug):
-        return
-
-    _ = kw.pop('as_chunks', None)
-    _ = kw.pop('as_iterator', None)
-    dt_col = self.columns.get('datetime', None)
-    min_dt = (
-        begin
-        if begin is not None
-        else self.get_sync_time(round_down=False, newest=False, params=params, debug=debug)
-    ) if dt_col else None
-    max_dt = (
-        end
-        if end is not None
-        else self.get_sync_time(round_down=False, newest=True, params=params, debug=debug)
-    ) if dt_col else None
-
-    ### We want to search just past the maximum value.
-    if end is None:
-        if isinstance(max_dt, int):
-            max_dt += 1
-        elif isinstance(max_dt, datetime):
-            max_dt = round_time(max_dt + timedelta(minutes=1))
-
-    chunk_interval = self.get_chunk_interval(chunk_interval, debug=debug)
-
-    ### If we can't determine bounds
-    ### or if chunk_interval exceeds the max,
-    ### return a single chunk.
-    if (
-        (min_dt is None and max_dt is None)
-        or
-        (min_dt + chunk_interval) > max_dt
-    ):
-        yield self.get_data(
+    if as_iterator or as_chunks:
+        return _iterate_chunks(_core.pipe_get_data_chunks(
+            self,
+            context,
             select_columns=select_columns,
             omit_columns=omit_columns,
             begin=begin,
             end=end,
             params=params,
-            limit=limit,
-            order=order,
             as_docs=as_docs,
             as_polars=as_polars,
-            fresh=fresh,
+            chunk_interval=chunk_interval,
+            order=order,
+            limit=limit,
+            kwargs=kw,
             debug=debug,
-        )
-        return
-
-    chunk_bounds = self.get_chunk_bounds(
-        begin=min_dt,
-        end=max_dt,
-        chunk_interval=chunk_interval,
+        ))
+    return _core.pipe_get_data(
+        self,
+        context,
+        select_columns=select_columns,
+        omit_columns=omit_columns,
+        begin=begin,
+        end=end,
+        params=params,
+        as_docs=as_docs,
+        as_polars=as_polars,
+        add_missing_columns=add_missing_columns,
+        order=order,
+        limit=limit,
+        kwargs=kw,
         debug=debug,
     )
-
-    for chunk_begin, chunk_end in chunk_bounds:
-        chunk = self.get_data(
-            select_columns=select_columns,
-            omit_columns=omit_columns,
-            begin=chunk_begin,
-            end=chunk_end,
-            params=params,
-            limit=limit,
-            order=order,
-            as_docs=as_docs,
-            as_polars=as_polars,
-            fresh=fresh,
-            debug=debug,
-        )
-        if chunk is not None and len(chunk) > 0:
-            yield chunk
 
 
 def get_backtrack_data(
@@ -594,81 +253,29 @@ def get_backtrack_data(
     A `pd.DataFrame` for the pipe's data corresponding to the provided parameters. Backtrack data
     is a convenient way to get a pipe's data "backtracked" from the most recent datetime.
     """
-    if (_rust := _rust_impl('pipe_get_backtrack_data')) is not None:
-        _context = _rust_context(self, debug=debug)
-        _named = (
-            'select_columns', 'omit_columns', 'end', 'as_docs', 'as_polars',
-            'add_missing_columns', 'order',
-        )
-        if _context is not None:
-            _end = kw.get('end', None)
-            return _rust(
-                self,
-                _context,
-                backtrack_minutes=backtrack_minutes,
-                begin=self.parse_date_bounds(begin, debug=debug),
-                params=params,
-                limit=limit,
-                order=kw.get('order', 'desc') or 'desc',
-                select_columns=kw.get('select_columns', None),
-                omit_columns=kw.get('omit_columns', None),
-                end=self.parse_date_bounds(_end, debug=debug) if _end is not None else None,
-                as_docs=kw.get('as_docs', False),
-                as_polars=kw.get('as_polars', False),
-                add_missing_columns=kw.get('add_missing_columns', False),
-                kwargs={key: val for key, val in kw.items() if key not in _named},
-                debug=debug,
-            )
-
-    from meerschaum.utils.venv import Venv
-    from meerschaum.connectors import get_connector_plugin
-
-    if not self.exists(debug=debug):
-        return None
-
-    begin = self.parse_date_bounds(begin, debug=debug)
-
-    backtrack_interval = self.get_backtrack_interval(debug=debug)
-    if backtrack_minutes is None:
-        backtrack_minutes = (
-            (backtrack_interval.total_seconds() / 60)
-            if isinstance(backtrack_interval, timedelta)
-            else backtrack_interval
-        )
-
-    if hasattr(self.instance_connector, 'get_backtrack_data'):
-        with Venv(get_connector_plugin(self.instance_connector)):
-            return self.enforce_dtypes(
-                self.instance_connector.get_backtrack_data(
-                    pipe=self,
-                    begin=begin,
-                    backtrack_minutes=backtrack_minutes,
-                    params=params,
-                    limit=limit,
-                    debug=debug,
-                    **kw
-                ),
-                debug=debug,
-            )
-
-    if begin is None:
-        begin = self.get_sync_time(params=params, debug=debug)
-
-    backtrack_interval = (
-        timedelta(minutes=backtrack_minutes)
-        if isinstance(begin, datetime)
-        else backtrack_minutes
+    from meerschaum import _core
+    context = _rust_context(self, debug=debug)
+    named = (
+        'select_columns', 'omit_columns', 'end', 'as_docs', 'as_polars',
+        'add_missing_columns', 'order',
     )
-    if begin is not None:
-        begin = begin - backtrack_interval
-
-    kw['order'] = kw.get('order', 'desc') or 'desc'
-    return self.get_data(
-        begin=begin,
+    end = kw.get('end', None)
+    return _core.pipe_get_backtrack_data(
+        self,
+        context,
+        backtrack_minutes=backtrack_minutes,
+        begin=self.parse_date_bounds(begin, debug=debug),
         params=params,
-        debug=debug,
         limit=limit,
-        **kw
+        order=kw.get('order', 'desc') or 'desc',
+        select_columns=kw.get('select_columns', None),
+        omit_columns=kw.get('omit_columns', None),
+        end=self.parse_date_bounds(end, debug=debug) if end is not None else None,
+        as_docs=kw.get('as_docs', False),
+        as_polars=kw.get('as_polars', False),
+        add_missing_columns=kw.get('add_missing_columns', False),
+        kwargs={key: val for key, val in kw.items() if key not in named},
+        debug=debug,
     )
 
 
@@ -703,67 +310,18 @@ def get_rowcount(
     An `int` of the number of rows in the pipe corresponding to the provided parameters.
     Returned 0 if the pipe does not exist.
     """
-    if (_rust := _rust_impl('pipe_get_rowcount')) is not None:
-        _context = _rust_context(self, debug=debug)
-        if _context is not None:
-            _begin, _end = self.parse_date_bounds(begin, end, debug=debug)
-            return _rust(
-                self,
-                _context,
-                begin=_begin,
-                end=_end,
-                params=params,
-                remote=remote,
-                debug=debug,
-            )
-
-    from meerschaum.utils.warnings import warn
-    from meerschaum.utils.venv import Venv
-    from meerschaum.connectors import get_connector_plugin
-    from meerschaum.utils.misc import filter_keywords
-
+    from meerschaum import _core
+    context = _rust_context(self, debug=debug)
     begin, end = self.parse_date_bounds(begin, end, debug=debug)
-    connector = self.instance_connector if not remote else self.connector
-    try:
-        with Venv(get_connector_plugin(connector)):
-            if not hasattr(connector, 'get_pipe_rowcount'):
-                warn(
-                    f"Connectors of type '{connector.type}' "
-                    "do not implement `get_pipe_rowcount()`.",
-                    stack=False,
-                )
-                return 0
-            kwargs = filter_keywords(
-                connector.get_pipe_rowcount,
-                begin=begin,
-                end=end,
-                params=params,
-                remote=remote,
-                debug=debug,
-            )
-            if remote and 'remote' not in kwargs:
-                warn(
-                    f"Connectors of type '{connector.type}' do not support remote rowcounts.",
-                    stack=False,
-                )
-                return 0
-            rowcount = connector.get_pipe_rowcount(
-                self,
-                begin=begin,
-                end=end,
-                params=params,
-                remote=remote,
-                debug=debug,
-            )
-            if rowcount is None:
-                return 0
-            return rowcount
-    except AttributeError as e:
-        warn(e)
-        if remote:
-            return 0
-    warn(f"Failed to get a rowcount for {self}.")
-    return 0
+    return _core.pipe_get_rowcount(
+        self,
+        context,
+        begin=begin,
+        end=end,
+        params=params,
+        remote=remote,
+        debug=debug,
+    )
 
 
 def get_size(
@@ -843,78 +401,8 @@ def get_chunk_interval(
     -------
     The chunk interval (`timedelta` or `int`) to use with this pipe's `datetime` axis.
     """
-    if (_rust := _rust_impl('get_chunk_interval')) is not None:
-        return _rust(self, chunk_interval, self.dtypes)
-
-    dt_col = self.columns.get('datetime', None)
-    dt_dtype = self.dtypes.get(dt_col, 'datetime') if dt_col is not None else 'datetime'
-    is_int_axis = 'int' in str(dt_dtype).lower()
-    verify_params = self.parameters.get('verify', {})
-
-    ### An explicit `chunk_interval` argument overrides the `verify` keys.
-    if chunk_interval is not None:
-        if dt_col is not None and is_int_axis:
-            ### An `int` is already in epoch units; a duration must be scaled like the
-            ### no-argument path below.
-            if isinstance(chunk_interval, int):
-                return chunk_interval
-            return self._scale_delta_to_int_axis(chunk_interval)
-
-        chunk_minutes = (
-            chunk_interval
-            if isinstance(chunk_interval, int)
-            else int(chunk_interval.total_seconds() / 60)
-        )
-        return timedelta(minutes=chunk_minutes)
-
-    ### Integer axis: an explicit `verify.chunk_range` is the chunk size in epoch units, verbatim.
-    if dt_col is not None and is_int_axis:
-        chunk_range = verify_params.get('chunk_range', None)
-        if chunk_range is not None:
-            return int(chunk_range)
-
-    ### Resolve the time-based chunk size from the aliased `verify.chunk_*` keys (priority order
-    ### matches the `bound_*` aliases). Falls back to the configured `chunk_minutes` default.
-    chunk_delta = None
-    for suffix in ('minutes', 'hours', 'days', 'weeks', 'years', 'seconds'):
-        val = verify_params.get('chunk_' + suffix, None)
-        if val is None:
-            continue
-        ### `timedelta` has no `years` kwarg; approximate a year as 365 days.
-        chunk_delta = timedelta(days=(val * 365)) if suffix == 'years' else timedelta(**{suffix: val})
-        break
-    if chunk_delta is None:
-        default_chunk_minutes = get_config('pipes', 'parameters', 'verify', 'chunk_minutes')
-        chunk_delta = timedelta(minutes=default_chunk_minutes)
-
-    if dt_col is None:
-        return chunk_delta
-
-    if is_int_axis:
-        return self._scale_delta_to_int_axis(chunk_delta)
-
-    return chunk_delta
-
-
-def _scale_delta_to_int_axis(self, chunk_delta: timedelta) -> int:
-    """
-    Convert a duration into the epoch units of an integer datetime axis via the pipe's
-    `precision`. Legacy: without a `precision`, the duration's minutes are used verbatim.
-    """
-    from meerschaum.utils.dtypes import MRSM_PRECISION_UNITS_SCALARS, MRSM_PRECISION_UNITS_ALIASES
-
-    if not self.parameters.get('precision', None):
-        return max(int(chunk_delta.total_seconds() / 60), 1)
-
-    precision_unit = self.precision.get('unit', None)
-    true_unit = MRSM_PRECISION_UNITS_ALIASES.get(precision_unit, precision_unit)
-    scalar = MRSM_PRECISION_UNITS_SCALARS.get(true_unit, None)
-    if scalar is None:
-        return max(int(chunk_delta.total_seconds() / 60), 1)
-
-    ### A coarse precision (e.g. minutes) can scale a short duration below one epoch unit,
-    ### which would make for a zero-width chunk.
-    return max(int(chunk_delta.total_seconds() * scalar), 1)
+    from meerschaum import _core
+    return _core.get_chunk_interval(self, chunk_interval, self.dtypes)
 
 
 def get_chunk_bounds(
@@ -967,126 +455,19 @@ def get_chunk_bounds(
     A list of chunk bounds (datetimes or integers).
     If unbounded, the first and last chunks will include `None`.
     """
-    if (_rust := _rust_impl('get_chunk_bounds')) is not None:
-        ### The sync times stand in for an unset `begin` / `end` (v4 queries them the same way).
-        _oldest = self.get_sync_time(newest=False, debug=debug) if begin is None else None
-        _newest = self.get_sync_time(newest=True, debug=debug) if end is None else None
-        return _rust(
-            self.parse_date_bounds(begin, debug=debug),
-            self.parse_date_bounds(end, debug=debug),
-            bounded,
-            self.get_chunk_interval(chunk_interval, debug=debug),
-            align,
-            self.parse_date_bounds(_oldest, debug=debug),
-            self.parse_date_bounds(_newest, debug=debug),
-        )
-
-    from datetime import timedelta
-    from meerschaum.utils.dtypes import are_dtypes_equal
-    from meerschaum.utils.misc import interval_str
-    include_less_than_begin = not bounded and begin is None
-    include_greater_than_end = not bounded and end is None
-    if begin is None:
-        begin = self.get_sync_time(newest=False, debug=debug)
-    consolidate_end_chunk = False
-    if end is None:
-        end = self.get_sync_time(newest=True, debug=debug)
-        if end is not None and hasattr(end, 'tzinfo'):
-            end += timedelta(minutes=1)
-            consolidate_end_chunk = True
-        elif are_dtypes_equal(str(type(end)), 'int'):
-            end += 1
-            consolidate_end_chunk = True
-
-    if begin is None and end is None:
-        return [(None, None)]
-
-    begin, end = self.parse_date_bounds(begin, end, debug=debug)
-
-    if begin and end:
-        if begin >= end:
-            return (
-                [(begin, begin)]
-                if bounded
-                else [(begin, None)]
-            )
-        if end <= begin:
-            return (
-                [(end, end)]
-                if bounded
-                else [(None, begin)]
-            )
-
-    ### Set the chunk interval under `pipe.parameters['verify']['chunk_minutes']`.
-    chunk_interval = self.get_chunk_interval(chunk_interval, debug=debug)
-
-    ### Anchor the interior boundaries to a fixed Unix-epoch grid (matching native range
-    ### partitioning, see `SQLConnector._partition_bounds`) so chunk edges line up with partition
-    ### edges and stay deterministic regardless of `begin`. The first chunk is clamped back to
-    ### `begin` below.
-    begin_cursor = begin
-    if align and begin is not None:
-        if isinstance(chunk_interval, int):
-            begin_cursor = (int(begin) // chunk_interval) * chunk_interval
-        else:
-            epoch = (
-                datetime(1970, 1, 1, tzinfo=begin.tzinfo)
-                if getattr(begin, 'tzinfo', None) is not None
-                else datetime(1970, 1, 1)
-            )
-            n = (begin - epoch) // chunk_interval
-            begin_cursor = epoch + (n * chunk_interval)
-
-    ### Build a list of tuples containing the chunk boundaries
-    ### so that we can sync multiple chunks in parallel.
-    ### Run `verify pipes --workers 1` to sync chunks in series.
-    chunk_bounds = []
-    num_chunks = 0
-    max_chunks = 1_000_000
-    while begin_cursor < end:
-        end_cursor = begin_cursor + chunk_interval
-        chunk_bounds.append((begin_cursor, end_cursor))
-        begin_cursor = end_cursor
-        num_chunks += 1
-        if num_chunks >= max_chunks:
-            raise ValueError(
-                f"Too many chunks of size '{interval_str(chunk_interval)}' "
-                f"between '{begin}' and '{end}'."
-            )
-
-    if num_chunks > 1 and consolidate_end_chunk:
-        last_bounds, second_last_bounds = chunk_bounds[-1], chunk_bounds[-2]
-        chunk_bounds = chunk_bounds[:-2]
-        chunk_bounds.append((second_last_bounds[0], last_bounds[1]))
-
-    ### The chunk interval might be too large.
-    if not chunk_bounds and end >= begin:
-        chunk_bounds = [(begin, end)]
-
-    ### Truncate the last chunk to the end timestamp.
-    if chunk_bounds[-1][1] > end:
-        chunk_bounds[-1] = (chunk_bounds[-1][0], end)
-
-    ### Pop the last chunk if its bounds are equal.
-    if chunk_bounds[-1][0] == chunk_bounds[-1][1]:
-        chunk_bounds = chunk_bounds[:-1]
-
-    ### Clamp the epoch-aligned first chunk's lower bound back to the requested `begin` so the
-    ### returned range still starts exactly at `begin` (only the interior edges are grid-aligned).
-    if (
-        align
-        and chunk_bounds
-        and chunk_bounds[0][0] is not None
-        and chunk_bounds[0][0] < begin
-    ):
-        chunk_bounds[0] = (begin, chunk_bounds[0][1])
-
-    if include_less_than_begin:
-        chunk_bounds = [(None, begin)] + chunk_bounds
-    if include_greater_than_end:
-        chunk_bounds = chunk_bounds + [(end, None)]
-
-    return chunk_bounds
+    from meerschaum import _core
+    ### The sync times stand in for an unset `begin` / `end` (v4 queries them the same way).
+    oldest = self.get_sync_time(newest=False, debug=debug) if begin is None else None
+    newest = self.get_sync_time(newest=True, debug=debug) if end is None else None
+    return _core.get_chunk_bounds(
+        self.parse_date_bounds(begin, debug=debug),
+        self.parse_date_bounds(end, debug=debug),
+        bounded,
+        self.get_chunk_interval(chunk_interval, debug=debug),
+        align,
+        self.parse_date_bounds(oldest, debug=debug),
+        self.parse_date_bounds(newest, debug=debug),
+    )
 
 
 def get_chunk_bounds_batches(

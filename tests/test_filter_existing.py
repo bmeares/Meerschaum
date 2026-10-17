@@ -195,37 +195,6 @@ def test_filter_existing_no_pipe_data(flavor: str):
     assert len(delta) == 2
 
 
-def test_filter_existing_polars_parity(monkeypatch):
-    """The accelerated anti-join preserves unseen, update, and unchanged-row semantics."""
-    pd = mrsm.attempt_import('pandas')
-    import meerschaum.utils.dataframe as dataframe
-
-    pipe = mrsm.Pipe(
-        'test', 'filter_existing', 'polars_parity',
-        instance=conns['sqlite'],
-        columns={'datetime': 'dt', 'id': 'id'},
-    )
-    pipe.delete()
-    success, msg = pipe.sync([
-        {'dt': datetime(2021, 1, 1, tzinfo=timezone.utc), 'id': 1, 'val': 10},
-        {'dt': datetime(2021, 1, 2, tzinfo=timezone.utc), 'id': 2, 'val': 20},
-    ])
-    assert success, msg
-    incoming_df = pd.DataFrame([
-        {'dt': datetime(2021, 1, 1, tzinfo=timezone.utc), 'id': 1, 'val': 99},
-        {'dt': datetime(2021, 1, 2, tzinfo=timezone.utc), 'id': 2, 'val': 20},
-        {'dt': datetime(2021, 1, 3, tzinfo=timezone.utc), 'id': 3, 'val': 30},
-    ])
-
-    monkeypatch.setattr(dataframe, '_POLARS_FILTER_MIN_ROWS', 10 ** 9)
-    expected = pipe.filter_existing(incoming_df)
-    monkeypatch.setattr(dataframe, '_POLARS_FILTER_MIN_ROWS', 0)
-    actual = pipe.filter_existing(incoming_df)
-
-    for actual_df, expected_df in zip(actual, expected):
-        pd.testing.assert_frame_equal(actual_df, expected_df)
-
-
 def test_filter_existing_polars_df():
     """`filter_existing()` accepts a Polars DataFrame and returns Pandas DataFrames."""
     pl = mrsm.attempt_import('polars')
@@ -323,8 +292,8 @@ def _normalize_records(df):
     ]
 
 
-def _assert_parity(pipe, docs, native_expected=True):
-    """Assert the Polars path returns the same rows as the Pandas path."""
+def _assert_parity(pipe, docs):
+    """Assert Polars input returns the same rows as Pandas input."""
     pd = mrsm.attempt_import('pandas')
     pl = mrsm.attempt_import('polars')
     from meerschaum.utils.dataframe import to_polars
@@ -339,11 +308,6 @@ def _assert_parity(pipe, docs, native_expected=True):
             for col, typ in pipe.dtypes.items()
             if str(typ) == 'json' and col in pandas_df.columns
         ],
-    )
-
-    native = pipe._filter_existing_polars(polars_df)
-    assert (native is not None) == native_expected, (
-        f"Expected native Polars path to be {'taken' if native_expected else 'skipped'}."
     )
 
     pandas_dfs = pipe.filter_existing(pandas_df, debug=debug)
@@ -498,8 +462,8 @@ def test_filter_existing_polars_include_unchanged_columns():
     }]
 
 
-def test_filter_existing_polars_uuid_falls_back():
-    """UUID columns cannot be joined natively, but Polars is still returned."""
+def test_filter_existing_polars_uuid_columns():
+    """A UUID column given as text matches the stored UUIDs, and Polars is returned."""
     from uuid import UUID
     pl = mrsm.attempt_import('polars')
     pipe = mrsm.Pipe('test', 'filter_existing', 'pl_uuid', instance=conns['sqlite'],
@@ -516,8 +480,6 @@ def test_filter_existing_polars_uuid_falls_back():
     incoming = pl.DataFrame([
         {'dt': datetime(2021, 1, 1, tzinfo=timezone.utc), 'uid': str(uid), 'val': 99},
     ])
-    assert pipe._filter_existing_polars(incoming) is None, "Expected the Pandas fallback."
-
     unseen, update, delta = pipe.filter_existing(incoming, debug=debug)
     for _df in (unseen, update, delta):
         assert isinstance(_df, pl.DataFrame), f"Expected Polars, got {type(_df)}."
@@ -543,44 +505,3 @@ def test_filter_existing_polars_no_pipe_data():
     assert (len(unseen), len(update), len(delta)) == (2, 0, 2)
 
 
-def test_polars_dtypes_reconcilable():
-    """Only same-family dtype differences may be widened to a common dtype."""
-    pl = mrsm.attempt_import('polars')
-    from meerschaum.core.Pipe._sync import _polars_dtypes_reconcilable
-
-    reconcilable = [
-        (pl.Int64, pl.Int64),
-        ### Pandas does not downcast, so Oracle's `int32` meets an incoming `int64`.
-        (pl.Int64, pl.Int32),
-        (pl.Int32, pl.Int64),
-        (pl.Float32, pl.Float64),
-        (pl.Datetime('us', 'UTC'), pl.Datetime('us', 'UTC')),
-    ]
-    irreconcilable = [
-        ### Mixed numerics are coerced to `numeric` by the Pandas path.
-        (pl.Int64, pl.Float64),
-        (pl.String, pl.Int64),
-        (pl.Int64, pl.String),
-        (pl.Boolean, pl.Int64),
-        ### Timezone-awareness and precision must match exactly.
-        (pl.Datetime('us', 'UTC'), pl.Datetime('us', None)),
-        (pl.Datetime('us', 'UTC'), pl.Datetime('ns', 'UTC')),
-        (pl.Date, pl.Datetime('us', None)),
-    ]
-    for left, right in reconcilable:
-        assert _polars_dtypes_reconcilable(left, right), f"{left} vs {right} should widen."
-    for left, right in irreconcilable:
-        assert not _polars_dtypes_reconcilable(left, right), f"{left} vs {right} should not widen."
-
-    ### Widening must never narrow a value.
-    for left, right in reconcilable:
-        common = dict(pl.concat(
-            [pl.DataFrame(schema={'c': left}), pl.DataFrame(schema={'c': right})],
-            how='vertical_relaxed',
-        ).schema)
-        assert common['c'] in (left, right)
-
-    big = pl.DataFrame({'c': [3_000_000_000]}, schema={'c': pl.Int64})
-    small = pl.DataFrame({'c': [1]}, schema={'c': pl.Int32})
-    common = dict(pl.concat([big.clear(), small.clear()], how='vertical_relaxed').schema)
-    assert big.cast(common)['c'].to_list() == [3_000_000_000]

@@ -10,13 +10,11 @@ from __future__ import annotations
 from datetime import timedelta, datetime
 
 import meerschaum as mrsm
-from meerschaum.utils.typing import Any, Union, SuccessTuple, Iterator, TYPE_CHECKING
-from meerschaum.config import get_config
-from meerschaum.utils.warnings import warn
-from meerschaum._core._gate import rust_impl as _rust_impl
+from meerschaum.utils.typing import Any, Union, Iterator, TYPE_CHECKING
 
 if TYPE_CHECKING:
     pd = mrsm.attempt_import('pandas')
+
 
 def fetch(
     self,
@@ -53,73 +51,37 @@ def fetch(
     A `pd.DataFrame` of the newest unseen data.
 
     """
-    if (_rust := _rust_impl('pipe_fetch')) is not None:
-        from meerschaum.core.Pipe._data import _rust_context
-        _context = _rust_context(self, debug=debug)
-        if _context is not None:
-            _begin, _end = self.parse_date_bounds(begin, end)
-            _fetched = _rust(
-                self,
-                _context,
-                begin=_begin,
-                end=_end,
-                check_existing=check_existing,
-                params=kw.get('params', None),
-                kwargs={
-                    key: val
-                    for key, val in kw.items()
-                    if key not in ('params', 'chunk_hook')
-                },
-                sync_chunks=sync_chunks,
-                chunk_hook=kw.get('chunk_hook', None),
-                debug=debug,
-            )
-            ### A SQL source's rows come in chunks, as a generator.
-            return (chunk for chunk in _fetched) if hasattr(_fetched, '__next__') else _fetched
-
-    if 'fetch' not in dir(self.connector):
-        warn(f"No `fetch()` function defined for connector '{self.connector}'")
-        return None
-
-    from meerschaum.connectors import get_connector_plugin
-    from meerschaum.utils.misc import filter_arguments
-
-    _chunk_hook = kw.pop('chunk_hook', None)
-    kw['workers'] = self.get_num_workers(kw.get('workers', None))
-    if sync_chunks and _chunk_hook is None:
-
-        def _chunk_hook(chunk, **_kw) -> SuccessTuple:
-            """
-            Wrap `Pipe.sync()` with a custom chunk label prepended to the message.
-            """
-            from meerschaum.config._patch import apply_patch_to_config
-            kwargs = apply_patch_to_config(kw, _kw)
-            chunk_success, chunk_message = self.sync(chunk, **kwargs)
-            chunk_label = self._get_chunk_label(chunk, self.columns.get('datetime', None))
-            if chunk_label:
-                chunk_message = '\n' + chunk_label + '\n' + chunk_message
-            return chunk_success, chunk_message
-
+    from meerschaum import _core
+    from meerschaum.core.Pipe._data import _rust_context
+    try:
+        context = _rust_context(self, debug=debug)
+    except Exception as e:
+        ### v4 checked the source before it touched the instance: a source without `fetch()`
+        ### answers `None` with a warning even when the instance cannot be parsed.
+        if type(e) is Exception and 'fetch' not in dir(self.connector):
+            from meerschaum.utils.warnings import warn
+            warn(f"No `fetch()` function defined for connector '{self.connector}'")
+            return None
+        raise
     begin, end = self.parse_date_bounds(begin, end)
-
-    with mrsm.Venv(get_connector_plugin(self.connector)):
-        _args, _kwargs = filter_arguments(
-            self.connector.fetch,
-            self,
-            begin=_determine_begin(
-                self,
-                begin,
-                end,
-                check_existing=check_existing,
-                debug=debug,
-            ),
-            end=end,
-            chunk_hook=_chunk_hook,
-            debug=debug,
-            **kw
-        )
-        df = self.connector.fetch(*_args, **_kwargs)
-    return df
+    fetched = _core.pipe_fetch(
+        self,
+        context,
+        begin=begin,
+        end=end,
+        check_existing=check_existing,
+        params=kw.get('params', None),
+        kwargs={
+            key: val
+            for key, val in kw.items()
+            if key not in ('params', 'chunk_hook')
+        },
+        sync_chunks=sync_chunks,
+        chunk_hook=kw.get('chunk_hook', None),
+        debug=debug,
+    )
+    ### A SQL source's rows come in chunks, as a generator.
+    return (chunk for chunk in fetched) if hasattr(fetched, '__next__') else fetched
 
 
 def get_backtrack_interval(
@@ -139,71 +101,7 @@ def get_backtrack_interval(
     -------
     The backtrack interval (`timedelta` or `int`) to use with this pipe's `datetime` axis.
     """
-    if (_rust := _rust_impl('pipe_get_backtrack_interval')) is not None:
-        return _rust(self, check_existing, self.dtypes)
-
-    from meerschaum.utils.dtypes import MRSM_PRECISION_UNITS_SCALARS, MRSM_PRECISION_UNITS_ALIASES
-    default_backtrack_minutes = get_config('pipes', 'parameters', 'fetch', 'backtrack_minutes')
-    configured_backtrack_minutes = self.parameters.get('fetch', {}).get('backtrack_minutes', None)
-    backtrack_minutes = (
-        configured_backtrack_minutes
-        if configured_backtrack_minutes is not None
-        else default_backtrack_minutes
-    ) if check_existing else 0
-
-    dt_col = self.columns.get('datetime', None)
-    if dt_col is None:
-        return timedelta(minutes=backtrack_minutes)
-
-    dt_dtype = self.dtypes.get(dt_col, 'datetime')
-    if 'int' in dt_dtype.lower():
-        if not self.parameters.get('precision', None):
-            return backtrack_minutes
-        precision_unit = self.precision.get('unit', None)
-        true_unit = MRSM_PRECISION_UNITS_ALIASES.get(precision_unit, precision_unit)
-        scalar = MRSM_PRECISION_UNITS_SCALARS.get(true_unit, None)
-        if scalar is not None:
-            return int(backtrack_minutes * 60 * scalar)
-        return backtrack_minutes
-
-    return timedelta(minutes=backtrack_minutes)
+    from meerschaum import _core
+    return _core.pipe_get_backtrack_interval(self, check_existing, self.dtypes)
 
 
-def _determine_begin(
-    pipe: mrsm.Pipe,
-    begin: Union[datetime, int, str, None] = '',
-    end: Union[datetime, int, None] = None,
-    check_existing: bool = True,
-    debug: bool = False,
-) -> Union[datetime, int, None]:
-    """
-    Apply the backtrack interval if `--begin` is not provided.
-
-    Parameters
-    ----------
-    begin: Union[datetime, int, str, None], default ''
-        The provided begin timestamp.
-
-    check_existing: bool, default True
-        If `False`, do not apply the backtrack interval.
-
-    Returns
-    -------
-    A datetime (or int) value from which to fetch.
-    Returns `None` if no begin may be determined.
-    """
-    if begin != '':
-        return begin
-    if end is not None:
-        return None
-    sync_time = pipe.get_sync_time(debug=debug)
-    if sync_time is None:
-        return sync_time
-    backtrack_interval = pipe.get_backtrack_interval(check_existing=check_existing, debug=debug)
-    if isinstance(sync_time, datetime) and isinstance(backtrack_interval, int):
-        backtrack_interval = timedelta(minutes=backtrack_interval)
-    try:
-        return sync_time - backtrack_interval
-    except Exception:
-        warn(f"Unable to substract backtrack interval {backtrack_interval} from {sync_time}.")
-    return sync_time

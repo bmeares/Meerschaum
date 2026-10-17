@@ -13,7 +13,10 @@ use serde_json::{Value as Json, json};
 use uuid::Uuid;
 
 use super::{Ctx, body_bytes};
-use crate::auth::{Principal, is_uuid, manager_unless_no_auth, token_from_authorization};
+use crate::auth::{
+    Principal, disallowed_scopes, grantable_scopes, is_uuid, manager_unless_no_auth,
+    scope_cap_error, token_from_authorization,
+};
 use crate::config::ServerConfig;
 use crate::error::{ApiError, ApiResult};
 use crate::json::{
@@ -159,7 +162,23 @@ async fn register_token(ctx: Ctx, body: Body) -> ApiResult {
         .map(String::from)
         .unwrap_or_else(new_label);
     let expiration = parse_dt(model.get("expiration").unwrap_or(&Json::Null), "expiration")?;
-    let scopes = scopes_of(model.get("scopes"))?;
+    let mut scopes = scopes_of(model.get("scopes"))?;
+    // A token carries at most its owner's scopes: no scopes asked for means the owner's own, and
+    // anything beyond them is refused, never trimmed.
+    if let Some(cap) = grantable_scopes(&ctx.state, principal.as_ref()).await {
+        let asked = model
+            .get("scopes")
+            .and_then(Json::as_array)
+            .is_some_and(|a| !a.is_empty());
+        if asked {
+            let refused = disallowed_scopes(&scopes, &cap, &[]);
+            if !refused.is_empty() {
+                return Err(scope_cap_error(&refused));
+            }
+        } else {
+            scopes = cap;
+        }
+    }
     let conn = ctx.state.instance();
     let mut token = Token::new(
         Some(&label),
@@ -293,6 +312,52 @@ async fn get_token_static(ctx: Ctx, uri: axum::http::Uri) -> ApiResult {
     token_model_named(ctx, name).await
 }
 
+/// Load a token for a change and require the caller to own it or be an administrator; returns the
+/// model and whether the caller is an administrator. An unowned token is an administrator's.
+///
+/// FIX (intentional v4 change): v4's `edit`, `invalidate` and `delete` routes never checked who
+/// owned the token, so any user could relabel, re-scope, delete or re-validate another user's.
+/// Under `--no-auth` there is no identity, so nothing is checked.
+async fn owned_token(
+    ctx: &Ctx,
+    principal: &Option<Principal>,
+    token_id: &str,
+    action: &str,
+) -> Result<(TokenModel, bool), ApiError> {
+    if !is_uuid(token_id) {
+        return Err(ApiError::new(400, "Token ID must be a UUID."));
+    }
+    let id = Uuid::parse_str(token_id.trim())
+        .map_err(|_| ApiError::new(400, "Token ID must be a UUID."))?;
+    let conn = ctx.state.instance();
+    let model = conn
+        .get_token_model(&id)
+        .await
+        .map_err(|e| ApiError::exception("get_token_model", e))?
+        .ok_or_else(|| ApiError::new(404, "Token does not exist."))?;
+    let Some(principal) = principal else {
+        return Ok((model, true));
+    };
+    let user = match principal {
+        Principal::User(u) => u,
+        Principal::Token(_) => return Err(ApiError::internal()),
+    };
+    let is_admin = conn.get_user_type(user).await.ok().flatten().as_deref() == Some("admin");
+    let user_id = conn.get_user_id(user).await.ok().flatten();
+    let owns = model
+        .user_id
+        .as_ref()
+        .filter(|v| v.truthy())
+        .is_some_and(|owner| Some(owner) == user_id.as_ref());
+    if !is_admin && !owns {
+        return Err(ApiError::new(
+            403,
+            format!("Cannot {action} another user's token."),
+        ));
+    }
+    Ok((model, is_admin))
+}
+
 async fn edit_token(ctx: Ctx, Path(token_id): Path<String>, body: Body) -> ApiResult {
     let body = parse_json_body(&body_bytes(body).await?)?;
     let principal = manager_unless_no_auth(&ctx.state, &ctx.headers).await?;
@@ -326,17 +391,39 @@ async fn edit_token(ctx: Ctx, Path(token_id): Path<String>, body: Body) -> ApiRe
     let creation = parse_dt(&model["creation"], "creation")?;
     let expiration = parse_dt(&model["expiration"], "expiration")?;
     let label = model.get("label").and_then(Json::as_str).map(String::from);
-    let scopes = scopes_of(model.get("scopes"))?;
+    let mut scopes = scopes_of(model.get("scopes"))?;
+    let (existing, is_admin) = owned_token(&ctx, &principal, &token_id, "edit").await?;
+    // An edit that does not say `is_valid` keeps it, and only an administrator may make an
+    // invalidated token valid again.
     let is_valid = model
         .get("is_valid")
         .and_then(Json::as_bool)
-        .unwrap_or(true);
-    if !is_uuid(&token_id) {
-        return Err(ApiError::new(400, "Token ID must be a UUID."));
+        .unwrap_or(existing.is_valid);
+    if is_valid && !existing.is_valid && !is_admin {
+        return Err(ApiError::new(
+            403,
+            "Only an administrator may make an invalidated token valid again.",
+        ));
     }
     let id = Uuid::parse_str(token_id.trim())
         .map_err(|_| ApiError::new(400, "Token ID must be a UUID."))?;
     let conn = ctx.state.instance();
+    // An edit that omits `scopes` (or sends none) keeps the token's own; the cap applies to the
+    // rest, and scopes the token already holds stay, so renaming never fails.
+    let asked = model
+        .get("scopes")
+        .and_then(Json::as_array)
+        .is_some_and(|a| !a.is_empty());
+    if asked {
+        if let Some(cap) = grantable_scopes(&ctx.state, principal.as_ref()).await {
+            let refused = disallowed_scopes(&scopes, &cap, &existing.scopes);
+            if !refused.is_empty() {
+                return Err(scope_cap_error(&refused));
+            }
+        }
+    } else {
+        scopes = existing.scopes.clone();
+    }
     let mut token = Token::new(
         label.as_deref(),
         match expiration {
@@ -351,10 +438,6 @@ async fn edit_token(ctx: Ctx, Path(token_id): Path<String>, body: Body) -> ApiRe
     token.creation = creation;
     token.is_valid = is_valid;
     token.instance_keys = Some(conn.connector_keys());
-    if let Some(Principal::User(u)) = &principal {
-        token.user = Some(u.clone());
-        token.user_id = u.user_id.clone();
-    }
     Ok(tuple_response(&conn.edit_token(&token).await))
 }
 
@@ -365,7 +448,8 @@ fn bare_token(id: Uuid) -> Token {
 }
 
 async fn invalidate_token(ctx: Ctx, Path(token_id): Path<String>) -> ApiResult {
-    manager_unless_no_auth(&ctx.state, &ctx.headers).await?;
+    let principal = manager_unless_no_auth(&ctx.state, &ctx.headers).await?;
+    owned_token(&ctx, &principal, &token_id, "invalidate").await?;
     let id = Uuid::parse_str(token_id.trim())
         .ok()
         .filter(|_| is_uuid(&token_id))
@@ -376,7 +460,8 @@ async fn invalidate_token(ctx: Ctx, Path(token_id): Path<String>) -> ApiResult {
 }
 
 async fn delete_named(ctx: Ctx, token_id: String) -> ApiResult {
-    manager_unless_no_auth(&ctx.state, &ctx.headers).await?;
+    let principal = manager_unless_no_auth(&ctx.state, &ctx.headers).await?;
+    owned_token(&ctx, &principal, &token_id, "delete").await?;
     let id = Uuid::parse_str(token_id.trim())
         .ok()
         .filter(|_| is_uuid(&token_id))

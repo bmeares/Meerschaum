@@ -8,6 +8,7 @@ Expose plugin management APIs from the `meerschaum.plugins` module.
 
 from __future__ import annotations
 
+import contextlib
 import pathlib
 import functools
 from collections import defaultdict
@@ -85,6 +86,29 @@ def _get_plugins_package_name() -> str:
     path_parts = paths['PLUGINS_RESOURCES_PATH']
     last_part = path_parts[-1] if isinstance(path_parts, (list, tuple)) else path_parts
     return pathlib.Path(last_part).stem
+
+
+### Set by the worker program (`crates/meerschaum-worker/python/host.py`).
+_IN_WORKER: bool = False
+
+
+@contextlib.contextmanager
+def plugin_import_guard():
+    """
+    Hold while plugin modules are imported. In a worker's interpreter no worker is started
+    meanwhile (`_core.plugin_import_begin()`): a plugin whose import syncs a `plugin:` pipe or
+    calls `mrsm.entry()` would otherwise start workers without end, each importing it again.
+    Anywhere else this does nothing.
+    """
+    if not _IN_WORKER:
+        yield
+        return
+    from meerschaum import _core
+    _core.plugin_import_begin()
+    try:
+        yield
+    finally:
+        _core.plugin_import_end()
 
 
 def _get_loaded_module(module_name: str) -> Union['ModuleType', None]:
@@ -587,7 +611,8 @@ def import_plugins(
             for plugin_name in plugins_names:
                 activate_venv(plugin_name)
             try:
-                imported_plugins = importlib.import_module(paths.PLUGINS_RESOURCES_PATH.stem)
+                with plugin_import_guard():
+                    imported_plugins = importlib.import_module(paths.PLUGINS_RESOURCES_PATH.stem)
             except ImportError as e:
                 _warn(f"Failed to import the plugins module:\n    {e}")
                 import traceback
@@ -603,7 +628,7 @@ def import_plugins(
             for plugin_name in flatten_list(plugins_to_import):
                 plugin = Plugin(plugin_name)
                 try:
-                    with Venv(plugin, init_if_not_exists=False):
+                    with Venv(plugin, init_if_not_exists=False), plugin_import_guard():
                         imported_plugins.append(
                             importlib.import_module(
                                 f'{paths.PLUGINS_RESOURCES_PATH.stem}.{plugin_name}'
@@ -617,8 +642,8 @@ def import_plugins(
                         + f"{e}\n\nHere's a stacktrace:",
                         stack = False,
                     )
-                    from meerschaum.utils.formatting import get_console
-                    get_console().print_exception(
+                    from meerschaum.utils.formatting import print_exception
+                    print_exception(
                         suppress = [
                             'meerschaum/plugins/__init__.py',
                             importlib,
@@ -710,15 +735,16 @@ def from_plugin_import(plugin_import_name: str, *attrs: str) -> Any:
             raise ImportError(f"Unable to import plugin '{plugin}'.")
 
         try:
-            submodule = importlib.import_module(submodule_import_name)
+            with plugin_import_guard():
+                submodule = importlib.import_module(submodule_import_name)
         except ImportError as e:
             _warn(
                 f"Failed to import plugin '{submodule_import_name}':\n    "
                 + f"{e}\n\nHere's a stacktrace:",
                 stack=False,
             )
-            from meerschaum.utils.formatting import get_console
-            get_console().print_exception(
+            from meerschaum.utils.formatting import print_exception
+            print_exception(
                 suppress=[
                     'meerschaum/plugins/__init__.py',
                     importlib,
@@ -753,12 +779,13 @@ def load_plugins(
     from meerschaum.actions import __all__ as _all, modules
     from meerschaum.utils.packages import get_modules_from_package
 
-    _plugins_names, plugins_modules = get_modules_from_package(
-        import_plugins(),
-        names = True,
-        recursive = True,
-        modules_venvs = True
-    )
+    with plugin_import_guard():
+        _plugins_names, plugins_modules = get_modules_from_package(
+            import_plugins(),
+            names = True,
+            recursive = True,
+            modules_venvs = True
+        )
 
     ### I'm appending here to keep from redefining the modules list.
     new_modules = (
@@ -799,27 +826,17 @@ def unload_custom_actions(plugins: Optional[List[str]] = None, debug: bool = Fal
         _custom_actions_plugins,
         _plugins_actions,
     )
-    from meerschaum._internal.entry import _shell
-    import meerschaum._internal.shell as shell_pkg
 
     plugins = plugins if plugins is not None else list(_plugins_actions)
 
     for plugin in plugins:
         action_names = _plugins_actions.get(plugin, [])
-        actions_to_remove = {
-            action_name: actions.get(action_name, None)
-            for action_name in action_names
-        }
         for action_name in action_names:
             _ = actions.pop(action_name, None)
             _ = _custom_actions_plugins.pop(action_name, None)
             _ = _actions_daemon_enabled.pop(action_name, None)
 
         _ = _plugins_actions.pop(plugin, None)
-        shell_pkg._remove_shell_actions(
-            _shell=_shell,
-            actions=actions_to_remove,
-        )
     
 
 def unload_plugins(

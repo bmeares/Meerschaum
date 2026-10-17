@@ -5,8 +5,9 @@
 Loader for `meerschaum._core`, the Rust extension module of Meerschaum v5 (design §4.2, D3).
 
 The compiled module lives next to this file as `_core.abi3.so` (`_core.pyd` on Windows) and is
-built by `scripts/rust/build_py.sh` (see `crates/meerschaum-py/README.md`). It is **not** built
-by the root `pyproject.toml` during the v5 parity phase.
+built by `scripts/rust/build_py.sh` (see `crates/meerschaum-py/README.md`); the `meerschaum`
+wheel ships it. It is **required**: importing this package raises `CoreNotBuiltError` (an
+`ImportError`) naming the build script when the file is missing.
 
 Importing this package is cheap: the extension is loaded lazily on first attribute access
 (PEP 562), so `import meerschaum` never pays for it unless something asks for it.
@@ -19,16 +20,14 @@ Attributes
 - Every public name of the extension (`__version__`, `build_info`, `static_config`,
   `roundtrip_arrow`, `polars_roundtrip`, `ArrowStream`, ...).
 
-Using a symbol of the extension when it is not built raises `CoreNotBuiltError` (an
-`ImportError`) naming the build script. That includes `hasattr()` / `getattr(..., default)`,
-which only swallow `AttributeError`: probe `AVAILABLE` first. A name the built extension does not define raises
-`AttributeError`, which the parity-phase dispatch guards (`meerschaum._core._gate.rust_impl`)
-treat as "not bound yet" and fall through to Python.
+Using a symbol of the extension when it cannot be loaded raises `CoreNotBuiltError`. That includes
+`hasattr()` / `getattr(..., default)`, which only swallow `AttributeError`: probe `AVAILABLE`
+first. A name the loaded extension does not define raises `AttributeError`.
 
-`import meerschaum`, `import meerschaum.config` and the pure helpers (`meerschaum.utils.dtypes`)
-never load the extension: the live config dictionary is created in Python
-(`meerschaum/config/_store.py`) and the extension adopts it on first use. Anything that routes to
-Rust (the `MRSM_CORE` gate, a `get_config` in rust mode, the CLI) loads it then.
+`import meerschaum` and `import meerschaum.config` never load the extension: the live config
+dictionary is created in Python (`meerschaum/config/_store.py`) and the extension adopts it on
+first use. Anything that routes to Rust (`get_config` through the registry, a `Pipe`, the CLI)
+loads it then.
 
 An extension built before the config registry moved to Rust (it lacks `REQUIRED_SYMBOLS`) is
 reported as not built, with the build script in the error.
@@ -51,6 +50,10 @@ __all__ = (
 )
 
 BUILD_SCRIPT = 'scripts/rust/build_py.sh'
+_BUILD_HELP = (
+    f"Install the `meerschaum` wheel (`pip install meerschaum`) or, from a source checkout, "
+    f"build the extension from the repository root with `{BUILD_SCRIPT}`."
+)
 
 ### Symbols a current build must define; an older build is reported as not built.
 REQUIRED_SYMBOLS = ('config_dict', 'config_set', 'config_reset')
@@ -130,8 +133,7 @@ def __getattr__(name: str) -> Any:
         raise CoreNotBuiltError(
             f"meerschaum._core.{name} requires the Rust extension, which is not built "
             f"({LOAD_ERROR}).\n"
-            f"Build it from the repository root with `{BUILD_SCRIPT}` "
-            f"(or unset MRSM_CORE to use the Python implementations)."
+            f"{_BUILD_HELP}"
         )
 
     raise AttributeError(f"module 'meerschaum._core' has no attribute '{name}'")
@@ -140,3 +142,20 @@ def __getattr__(name: str) -> Any:
 def __dir__():
     load()
     return sorted(set(globals()) | set(__all__))
+
+
+def _require_extension() -> None:
+    """Fail `import meerschaum` early, with the build instructions, if the file is missing."""
+    import importlib.util
+    try:
+        found = importlib.util.find_spec(__name__ + '._core') is not None
+    except (ImportError, ValueError):
+        found = False
+    if not found:
+        raise CoreNotBuiltError(
+            "The Meerschaum native extension (`meerschaum._core`) is not installed. "
+            + _BUILD_HELP
+        )
+
+
+_require_extension()

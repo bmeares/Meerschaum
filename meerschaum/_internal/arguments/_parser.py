@@ -124,56 +124,6 @@ def parse_executor_keys(executor_keys_str: str) -> Union[str, None]:
     return executor_keys_str
 
 
-def parse_help(sysargs: Union[List[str], Dict[str, Any]]) -> None:
-    """Parse the `--help` flag to determine which help message to print."""
-    from meerschaum._internal.arguments._parse_arguments import parse_arguments, parse_line
-    from meerschaum.actions import actions, get_subactions
-    import textwrap
-    from copy import deepcopy
-    if isinstance(sysargs, list):
-        args = parse_arguments(sysargs)
-    elif isinstance(sysargs, dict):
-        args = sysargs
-    elif isinstance(sysargs, str):
-        args = parse_line(sysargs)
-    _args = deepcopy(args)
-    del _args['action']
-    if len(args['action']) == 0:
-        return actions['show'](['help'], **_args)
-    if args['action'][0] not in actions:
-        return actions['show'](['actions'], **_args)
-
-    ### Check for subactions.
-    if len(args['action']) > 1:
-        try:
-            subactions = get_subactions(args['action'][0])
-            subaction_name = args['action'][1]
-            if subaction_name not in subactions:
-                subaction_name = subaction_name + 's'
-            subaction = subactions[subaction_name]
-        except Exception:
-            subaction = None
-        if subaction is not None:
-            return print(textwrap.dedent(subaction.__doc__))
-
-    try:
-        doc = actions[args['action'][0]].__doc__
-    except Exception:
-        doc = None
-    if doc is None:
-        doc = "No help available for '" + f"{args['action'][0]}" + "'."
-    return print(textwrap.dedent(doc))
-
-
-def parse_version(sysargs: List[str]):
-    """Print the Meerschaum version."""
-    from meerschaum.config import __version__ as version
-    from meerschaum.config import __doc__ as doc
-    if '--nopretty' in sysargs:
-        return print(version)
-    return print(doc)
-
-
 def parse_name(name_str: str) -> Union[str, None]:
     """
     Ensure that `--name` is not an empty string.

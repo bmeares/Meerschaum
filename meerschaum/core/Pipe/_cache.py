@@ -20,7 +20,7 @@ from meerschaum.utils.warnings import warn, dprint
 
 
 #: Bumped by every hard `_invalidate_cache()` (edit, delete, verify, `refresh=True`) and by
-#: `register()` in this process. Under `MRSM_CORE=rust` it keys the memo of parameters holding a
+#: `register()` in this process. It keys the memo of parameters holding a
 #: cross-pipe `{{ Pipe() }}` template (see `get_parameters`, which also keys it on the Rust
 #: instance's metadata writes): a metadata write to any pipe here makes them re-resolve on the
 #: next access. A sync's soft invalidations do not count (data never changes a template).
@@ -130,7 +130,7 @@ def _cache_value(
 
     with self._cache_locks[cache_key]:
         in_memory_key = _get_in_memory_key(cache_key)
-        if cache_key == 'attributes' and '_core_pipe' in self.__dict__:
+        if cache_key == 'attributes':
             from ._live_parameters import adopt_attributes
             value = adopt_attributes(self, value)
         self.__dict__[in_memory_key] = value
@@ -164,7 +164,7 @@ def _get_cached_value(
 
         value = self._read_cache_key(cache_key, debug=debug)
         if value is not None:
-            if cache_key == 'attributes' and '_core_pipe' in self.__dict__:
+            if cache_key == 'attributes':
                 from ._live_parameters import adopt_attributes
                 value = adopt_attributes(self, value)
             self.__dict__[in_memory_key] = value

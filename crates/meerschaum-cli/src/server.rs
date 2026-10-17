@@ -134,6 +134,17 @@ fn start(args: &ArgsMap, rt: &mut Runtime<'_>, stdio: bool) -> ActionResult {
     for notice in &config.notices {
         rt.eprint(&format!("{notice}\n"));
     }
+    if !stdio {
+        for warning in [
+            config.open_terminal_warning(),
+            config.open_no_auth_warning(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            native::warn(rt, &warning);
+        }
+    }
     let jobs = Arc::new(crate::jobs_backend::LocalJobsBackend::new(
         crate::native::jobs::jobs_context(rt),
     ));

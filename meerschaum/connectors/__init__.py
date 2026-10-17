@@ -218,10 +218,8 @@ def get_connector(
                 )
                 conn = None
             except Exception as e:
-                from meerschaum.utils.formatting import get_console
-                console = get_console()
-                if console:
-                    console.print_exception()
+                from meerschaum.utils.formatting import print_exception
+                print_exception()
                 warn(
                     f"Exception when creating connector '{type}:{label}'.\n" + str(e),
                     stack = False,

@@ -10,7 +10,7 @@ import pathlib
 
 from meerschaum.utils.typing import Optional, Dict, Any, List, Tuple, Union
 from meerschaum._internal.static import STATIC_CONFIG
-from meerschaum._core._gate import rust_impl as _rust_impl
+from meerschaum import _core
 
 
 def read_config(
@@ -50,187 +50,15 @@ def read_config(
     >>> read_config(keys=['meerschaum'], with_filename=True)
     >>> ({...}, ['meerschaum.yaml'])
     """
-    if (_rust := _rust_impl('read_config')) is not None:
-        return _rust(
-            directory=directory,
-            keys=keys,
-            write_missing=write_missing,
-            substitute=substitute,
-            with_filenames=with_filenames,
-            raise_parsing_errors=raise_parsing_errors,
-        )
-    import os
-    import json
-    import itertools
-    import meerschaum.config.paths as paths
-    from meerschaum.utils.yaml import yaml, _yaml
-    from meerschaum.config._patch import apply_patch_to_config
-    if directory is None:
-        directory = paths.CONFIG_DIR_PATH
-
-    if _yaml is None:
-        print('Could not import YAML! Reverting to default configuration.')
-        from meerschaum.config._default import default_config
-        return default_config
-
-    ### Each key corresponds to a YAML or JSON file.
-    symlinks_key = STATIC_CONFIG['config']['symlinks_key']
-    config = {}
-    config_to_write = {}
-
-    default_filetype = STATIC_CONFIG['config']['default_filetype']
-    filetype_loaders = {
-        'yml': yaml.load,
-        'yaml': yaml.load,
-        'json': json.load,
-    }
-
-    ### Construct filekeys (files to parse).
-    filekeys = []
-    filenames = os.listdir(directory)
-    missing_keys, found_keys = set(), set()
-    if keys is None:
-        _filekeys = filenames
-    else:
-        _filekeys = []
-        for k in keys:
-            for ft in filetype_loaders:
-                if str(k) + '.' + str(ft) in filenames:
-                    _filekeys.append(str(k) + '.' + str(ft))
-                    found_keys.add(k)
-                    if k in missing_keys:
-                        missing_keys.remove(k)
-                elif k not in found_keys:
-                    missing_keys.add(k)
-
-    ### Check for missing files with default keys.
-    if len(missing_keys) > 0:
-        from meerschaum.config._default import default_config
-        for mk in missing_keys:
-            if mk not in default_config:
-                continue
-            _default_dict = (
-                search_and_substitute_config(default_config) if substitute
-                else default_config
-            )
-            ### If default config contains symlinks, add them to the config to write.
-            try:
-                _default_symlinks = _default_dict[symlinks_key][mk]
-            except KeyError:
-                _default_symlinks = {}
-
-            config[mk] = _default_dict[mk]
-            if _default_symlinks:
-                if symlinks_key not in config:
-                    config[symlinks_key] = {}
-                if symlinks_key not in config_to_write:
-                    config_to_write[symlinks_key] = {}
-
-                if mk not in config[symlinks_key]:
-                    config[symlinks_key][mk] = {}
-                if mk not in config_to_write[symlinks_key]:
-                    config_to_write[symlinks_key][mk] = {}
-
-                config[symlinks_key][mk] = apply_patch_to_config(
-                    config[symlinks_key][mk], 
-                    _default_symlinks
-                )
-                config_to_write[symlinks_key][mk] = config[symlinks_key][mk]
-
-            ### Write the default key.
-            config_to_write[mk] = config[mk]
-
-    ### Write missing keys if necessary.
-    if len(config_to_write) > 0 and write_missing:
-        from meerschaum.config._edit import write_config
-        write_config(config_to_write, directory)
-
-    ### Check for duplicate files.
-    ### Found help on StackOverflow:
-    ### https://stackoverflow.com/questions/26618688/python-iterate-over-a-list-
-    ### of-files-finding-same-filenames-but-different-exten
-    keygroups = {
-        key: list(value)
-        for key, value in itertools.groupby(
-            sorted(_filekeys, key = lambda e: os.path.splitext(e)[0]),
-            key = lambda e: os.path.splitext(e)[0]
-        )
-    }
-    for k, v in keygroups.items():
-        fn = v[0]
-        if len(v) > 1:
-            if k + '.' + default_filetype in v:
-                fn = k + '.' + default_filetype
-            print(
-                f"Found multiple config files named '{k}'. " +
-                f"Will attempt to parse '{fn}' for key '{k}'."
-            )
-        filekeys.append(fn)
-
-    _seen_keys = []
-    for filename in filekeys:
-        filepath = os.path.join(directory, filename)
-        _parts = filename.split('.')
-        _type = _parts[-1]
-        key = '.'.join(_parts[:-1])
-        ### Check if we've seen this key before (e.g. test.yaml, test.yml, test.json).
-        if key in _seen_keys:
-            print(
-                f"Multiple files with the name '{key}' found in '{str(directory)}'. " +
-                f"Reading from '{filename}'."
-            )
-        if len(_parts) < 2 or _type not in filetype_loaders:
-            print(f"Unknown file '{filename}' in '{str(directory)}'. Skipping...")
-
-        while True:
-            try:
-                with open(filepath, 'r', encoding='utf-8') as f:
-                    try:
-                        _config_key = filetype_loaders[_type](f)
-                    except Exception as e:
-                        if raise_parsing_errors:
-                            raise e
-                        ### The file exists but is malformed (e.g. a bad manual edit).
-                        ### Fall back to default values in memory so the app keeps
-                        ### working, but leave the file on disk untouched so it is
-                        ### never overwritten and can be fixed or rolled back.
-                        import copy
-                        from meerschaum.config._default import default_config
-                        from meerschaum.utils.warnings import warn as _warn
-                        _warn(
-                            f"Could not parse '{filename}':\n    {e}\n"
-                            "Using default values in memory; the file on disk is unchanged.\n"
-                            f"Fix it manually or run `edit config {key} --rollback` "
-                            "to restore a backup.",
-                            stack=False,
-                        )
-                        _config_key = copy.deepcopy(default_config.get(key, {}))
-                _single_key_config = (
-                    search_and_substitute_config({key: _config_key}) if substitute
-                    else {key: _config_key}
-                )
-                config[key] = _single_key_config[key]
-                if (
-                    symlinks_key in _single_key_config
-                    and key in _single_key_config[symlinks_key]
-                ):
-                    if symlinks_key not in config:
-                        config[symlinks_key] = {}
-                    config[symlinks_key][key] = _single_key_config[symlinks_key][key]
-                break
-            except Exception as e:
-                if raise_parsing_errors:
-                    raise e
-                print(f"Unable to parse {filename}!")
-                import traceback
-                traceback.print_exc()
-                input(f"Press [Enter] to open '{filename}' and fix formatting errors.")
-                from meerschaum.utils.misc import edit_file
-                edit_file(filepath)
-
-    if with_filenames:
-        return config, filekeys
-    return config
+    _rust = _core.read_config
+    return _rust(
+        directory=directory,
+        keys=keys,
+        write_missing=write_missing,
+        substitute=substitute,
+        with_filenames=with_filenames,
+        raise_parsing_errors=raise_parsing_errors,
+    )
 
 
 def search_and_substitute_config(
@@ -284,132 +112,16 @@ def search_and_substitute_config(
     The configuration dictionary with `MRSM{}` symlinks replaced with
     the values from the current configuration.
     """
-    if (_rust := _rust_impl('search_and_substitute_config')) is not None:
-        return _rust(
-            config,
-            leading_key=leading_key,
-            delimiter=delimiter,
-            begin_key=begin_key,
-            end_key=end_key,
-            literal_key=literal_key,
-            keep_symlinks=keep_symlinks,
-        )
-    import re
-    import json
-    from meerschaum.config import get_config
-    needle = leading_key + begin_key
-
-    _links = []
-    if keep_symlinks:
-        def _find_symlinks(d, _keys: Optional[List[str]] = None):
-            if _keys is None:
-                _keys = []
-            if not isinstance(d, dict):
-                return
-            for k, v in d.items():
-                if isinstance(v, dict):
-                    _find_symlinks(v, _keys + [k])
-                elif isinstance(v, str) and needle in v:
-                    _links.append((_keys + [k], v))
-        _find_symlinks(config)
-
-    haystack = json.dumps(config, separators=(',', ':'))
-    if needle not in haystack:
-        parsed_config = config
-    else:
-        patterns = {}
-        isolated_patterns = {}
-        literal_patterns = {}
-        memo = {}
-
-        pattern_re = re.compile(
-            re.escape(needle) + r'(?P<pattern_keys>.*?)' + re.escape(end_key)
-        )
-
-        for match in pattern_re.finditer(haystack):
-            pattern = match.group(0)
-            pattern_keys_raw = match.group('pattern_keys')
-            pattern_keys = pattern_keys_raw.split(delimiter)
-
-            start, end = match.span()
-            prior = haystack[start - 1] if start > 0 else None
-            after = haystack[end] if end < len(haystack) else None
-
-            force_literal = False
-            keys = [k for k in pattern_keys]
-            if keys and str(keys[0]).startswith(literal_key):
-                keys[0] = str(keys[0])[len(literal_key):]
-                force_literal = True
-            if len(keys) == 1 and keys[0] == '':
-                keys = []
-
-            cache_key = tuple(keys)
-            if cache_key in memo:
-                valid, value = memo[cache_key]
-            else:
-                try:
-                    valid, value = get_config(
-                        *keys,
-                        substitute=False,
-                        as_tuple=True,
-                        write_missing=False,
-                        sync_files=False,
-                    )
-                except Exception:
-                    valid, value = False, None
-                memo[cache_key] = (valid, value)
-
-            if not valid:
-                continue
-
-            patterns[pattern] = value
-            isolated_patterns[pattern] = (prior == '"' and after == '"')
-            literal_patterns[pattern] = force_literal
-
-        for pattern, value in patterns.items():
-            if isolated_patterns[pattern]:
-                haystack = haystack.replace(
-                    json.dumps(pattern),
-                    json.dumps(value),
-                )
-            elif literal_patterns[pattern]:
-                haystack = haystack.replace(
-                    pattern,
-                    (
-                        json.dumps(value)
-                        .replace("\\", "\\\\")
-                        .replace('"', '\\"')
-                        .replace("'", "\\'")
-                    )
-                )
-            else:
-                haystack = haystack.replace(pattern, str(value))
-
-        parsed_config = json.loads(haystack) or {}
-
-    symlinks = {}
-    if keep_symlinks:
-        for _keys, _pattern in _links:
-            s = symlinks
-            for k in _keys[:-1]:
-                if k not in s:
-                    s[k] = {}
-                s = s[k]
-            s[_keys[-1]] = _pattern
-
-        from meerschaum.config._patch import apply_patch_to_config
-        symlinks_key = STATIC_CONFIG['config']['symlinks_key']
-        if symlinks:
-            if symlinks_key not in parsed_config:
-                parsed_config[symlinks_key] = symlinks
-            else:
-                parsed_config[symlinks_key] = apply_patch_to_config(
-                    parsed_config[symlinks_key],
-                    symlinks,
-                    warn=False,
-                )
-
-    return parsed_config
+    _rust = _core.search_and_substitute_config
+    return _rust(
+        config,
+        leading_key=leading_key,
+        delimiter=delimiter,
+        begin_key=begin_key,
+        end_key=end_key,
+        literal_key=literal_key,
+        keep_symlinks=keep_symlinks,
+    )
 
 
 def revert_symlinks_config(config: Dict[str, Any]) -> Dict[str, Any]:
@@ -426,27 +138,8 @@ def revert_symlinks_config(config: Dict[str, Any]) -> Dict[str, Any]:
     -------
     A configuration dictionary with `_symlinks` re-applied.
     """
-    if (_rust := _rust_impl('revert_symlinks_config')) is not None:
-        return _rust(config)
-    import copy
-    from meerschaum._internal.static import STATIC_CONFIG
-
-    symlinks_key = STATIC_CONFIG['config']['symlinks_key']
-    if symlinks_key not in config:
-        return config
-
-    reverted_config = copy.deepcopy(config)
-    symlinks_config = reverted_config.pop(symlinks_key)
-
-    def deep_patch(target_dict, patch_dict):
-        for key, value in patch_dict.items():
-            if isinstance(value, dict) and key in target_dict and isinstance(target_dict[key], dict):
-                deep_patch(target_dict[key], value)
-            else:
-                target_dict[key] = value
-
-    deep_patch(reverted_config, symlinks_config)
-    return reverted_config
+    _rust = _core.revert_symlinks_config
+    return _rust(config)
 
 
 def get_possible_keys() -> List[str]:
@@ -470,28 +163,5 @@ def get_keyfile_path(
     directory: Union[pathlib.Path, str, None] = None,
 ) -> Union[pathlib.Path, None]:
     """Determine a key's file path."""
-    if (_rust := _rust_impl('get_keyfile_path')) is not None:
-        return _rust(key, create_new=create_new, directory=directory)
-    import os
-    import pathlib
-    if directory is None:
-        import meerschaum.config.paths as paths
-        directory = paths.CONFIG_DIR_PATH
-
-    try:
-        return pathlib.Path(
-            os.path.join(
-                directory,
-                read_config(
-                    keys=[key],
-                    with_filenames=True,
-                    write_missing=False,
-                    substitute=False,
-                )[1][0]
-            )
-        )
-    except IndexError:
-        if create_new:
-            default_filetype = STATIC_CONFIG['config']['default_filetype']
-            return pathlib.Path(os.path.join(directory, key + '.' + default_filetype))
-        return None
+    _rust = _core.get_keyfile_path
+    return _rust(key, create_new=create_new, directory=directory)

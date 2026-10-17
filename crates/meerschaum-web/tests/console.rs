@@ -14,11 +14,15 @@ use serde_json::json;
 use std::sync::Arc;
 
 async fn login(app: &axum::Router) -> (String, String) {
+    login_as(app, "admin").await
+}
+
+async fn login_as(app: &axum::Router, username: &str) -> (String, String) {
     let response = send(
         app,
         Request::post("/dash/login")
             .header("content-type", "application/x-www-form-urlencoded")
-            .body(Body::from("username=admin&password=pass"))
+            .body(Body::from(format!("username={username}&password=pass")))
             .unwrap(),
     )
     .await;
@@ -467,6 +471,337 @@ async fn pipe_filters_escaping_and_mutations_use_api() {
     )
     .await;
     assert_eq!(response.status, StatusCode::BAD_REQUEST);
+}
+
+/// `application/x-www-form-urlencoded` pairs, percent-encoding everything but unreserved bytes.
+fn encoded(pairs: &[(&str, &str)]) -> String {
+    let enc = |s: &str| {
+        s.bytes()
+            .map(|b| match b {
+                b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                    (b as char).to_string()
+                }
+                _ => format!("%{b:02X}"),
+            })
+            .collect::<String>()
+    };
+    pairs
+        .iter()
+        .map(|(k, v)| format!("{}={}", enc(k), enc(v)))
+        .collect::<Vec<_>>()
+        .join("&")
+}
+
+async fn post_action(app: &axum::Router, cookie: &str, pairs: &[(&str, &str)]) -> common::Resp {
+    send(
+        app,
+        Request::post("/dash/action")
+            .header("cookie", cookie)
+            .body(Body::from(encoded(pairs)))
+            .unwrap(),
+    )
+    .await
+}
+
+async fn tokens_page(app: &axum::Router, cookie: &str) -> String {
+    let page = send(
+        app,
+        Request::get("/dash/tokens")
+            .header("cookie", cookie)
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(page.status, StatusCode::OK, "{}", page.text());
+    page.text()
+}
+
+/// The token ID in a registration response (the first UUID after `"id":`; the page's CSRF token,
+/// also a UUID, comes earlier).
+fn first_uuid(text: &str) -> String {
+    let at = text.find("id&quot;:&quot;").expect("an id field");
+    text.as_bytes()[at..]
+        .windows(36)
+        .find(|w| {
+            w.iter().enumerate().all(|(i, b)| match i {
+                8 | 13 | 18 | 23 => *b == b'-',
+                _ => b.is_ascii_hexdigit(),
+            })
+        })
+        .map(|w| String::from_utf8_lossy(w).into_owned())
+        .expect("a uuid")
+}
+
+#[tokio::test]
+async fn the_token_forms_grant_all_scopes_with_a_star_kept_literally() {
+    let root = tempfile::tempdir().unwrap();
+    let (state, _instance) = state_with(config(root.path()));
+    let app = meerschaum_web::app(state.clone(), WebConfig::for_state(&state)).unwrap();
+    let (cookie, csrf) = login(&app).await;
+
+    // The registration form: the switch is on by default, the checklist and a custom field
+    // follow it, and the wording is 4.1.6's.
+    let html = tokens_page(&app, &cookie).await;
+    assert!(
+        html.contains("Grant all scopes (`*`, including custom and future scopes)"),
+        "{html}"
+    );
+    assert!(
+        html.contains(r#"name="all_scopes" value="1" checked"#),
+        "the switch is on for a new token: {html}"
+    );
+    assert!(
+        html.contains(r#"name="scopes" value="pipes:read" checked"#),
+        "{html}"
+    );
+    assert!(html.contains(r#"name="custom_scopes""#), "{html}");
+    assert!(html.contains("Deselect all"), "{html}");
+
+    fn register_pairs<'a>(csrf: &'a str, extra: &[(&'a str, &'a str)]) -> Vec<(&'a str, &'a str)> {
+        let mut pairs = vec![
+            ("csrf", csrf),
+            ("op", "token-register"),
+            ("target", ""),
+            ("payload", "{}"),
+            ("token_form", "1"),
+            ("expiration", ""),
+        ];
+        pairs.extend_from_slice(extra);
+        pairs
+    }
+
+    // Switch on: `["*"]` is stored, whatever the checklist says.
+    let response = post_action(
+        &app,
+        &cookie,
+        &register_pairs(
+            &csrf,
+            &[
+                ("label", "everything"),
+                ("all_scopes", "1"),
+                ("scopes", "pipes:read"),
+            ],
+        ),
+    )
+    .await;
+    assert_eq!(response.status, StatusCode::OK, "{}", response.text());
+    let star_id = first_uuid(&response.text());
+
+    // Switch off: the checked built-in scopes plus the custom ones (space or comma separated).
+    let response = post_action(
+        &app,
+        &cookie,
+        &register_pairs(
+            &csrf,
+            &[
+                ("label", "plug"),
+                ("scopes", "pipes:read"),
+                ("custom_scopes", "myplugin:read, myplugin:write"),
+            ],
+        ),
+    )
+    .await;
+    assert_eq!(response.status, StatusCode::OK, "{}", response.text());
+    let text = response.text();
+    let plug_id = first_uuid(&text);
+
+    // Nothing selected: refused, as 4.1.6 does ("Select at least one scope.").
+    let response = post_action(&app, &cookie, &register_pairs(&csrf, &[("label", "none")])).await;
+    assert_eq!(response.status, StatusCode::BAD_REQUEST);
+    assert!(response.text().contains("Select at least one scope."));
+
+    // The edit forms: the token holding `*` shows the switch on, the other off with its own scopes
+    // and the custom ones in the field.
+    let html = tokens_page(&app, &cookie).await;
+    assert!(
+        html.contains(&format!(
+            r#"id="all-scopes-{star_id}" name="all_scopes" value="1" checked"#
+        )),
+        "{html}"
+    );
+    assert!(
+        html.contains(&format!(
+            r#"id="all-scopes-{plug_id}" name="all_scopes" value="1">"#
+        )),
+        "{html}"
+    );
+    assert!(
+        html.contains(r#"value="myplugin:read myplugin:write""#),
+        "{html}"
+    );
+    let plug_form = {
+        let at = html
+            .find(&format!(r#"name="target" value="{plug_id}""#))
+            .unwrap();
+        let start = html[..at].rfind("<form").unwrap();
+        &html[start..start + html[start..].find("</form>").unwrap()]
+    };
+    assert!(
+        plug_form.contains(r#"name="scopes" value="pipes:read" checked"#),
+        "{plug_form}"
+    );
+    assert!(
+        plug_form.contains(r#"name="scopes" value="pipes:write">"#),
+        "{plug_form}"
+    );
+
+    // Saving the `*` token with the switch still on keeps `["*"]`; turning it off with a custom
+    // scope stores exactly that.
+    let base = |id: &str| {
+        let marker = format!(r#"name="target" value="{id}""#);
+        let at = html.find(&marker).expect("edit form");
+        let form = &html[html[..at].rfind("<form").unwrap()..];
+        form.split(r#"name="payload" value=""#)
+            .nth(1)
+            .unwrap()
+            .split('"')
+            .next()
+            .unwrap()
+            .replace("&quot;", "\"")
+            .replace("&amp;", "&")
+    };
+    let edit = |id: &str, extra: &[(&str, &str)]| {
+        let payload = base(id);
+        let mut pairs = vec![
+            ("csrf".to_string(), csrf.clone()),
+            ("op".to_string(), "token-edit".to_string()),
+            ("target".to_string(), id.to_string()),
+            ("payload".to_string(), payload),
+            ("token_form".to_string(), "1".to_string()),
+            ("label".to_string(), "edited".to_string()),
+            ("expiration".to_string(), String::new()),
+        ];
+        pairs.extend(extra.iter().map(|(k, v)| (k.to_string(), v.to_string())));
+        pairs
+    };
+    let post_edit = |pairs: Vec<(String, String)>| {
+        let borrowed: Vec<(&str, &str)> = pairs
+            .iter()
+            .map(|(k, v)| (k.as_str(), v.as_str()))
+            .collect();
+        encoded(&borrowed)
+    };
+    let response = send(
+        &app,
+        Request::post("/dash/action")
+            .header("cookie", &cookie)
+            .body(Body::from(post_edit(edit(
+                &star_id,
+                &[("all_scopes", "1")],
+            ))))
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(response.status, StatusCode::OK, "{}", response.text());
+    let html = tokens_page(&app, &cookie).await;
+    assert!(
+        html.contains(&format!(
+            r#"id="all-scopes-{star_id}" name="all_scopes" value="1" checked"#
+        )),
+        "`*` survived an edit with the switch on: {html}"
+    );
+    assert!(html.contains(r#"value="edited""#), "{html}");
+    let response = send(
+        &app,
+        Request::post("/dash/action")
+            .header("cookie", &cookie)
+            .body(Body::from(post_edit(edit(
+                &star_id,
+                &[("custom_scopes", "myplugin:admin")],
+            ))))
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(response.status, StatusCode::OK, "{}", response.text());
+    let html = tokens_page(&app, &cookie).await;
+    assert!(
+        html.contains(&format!(
+            r#"id="all-scopes-{star_id}" name="all_scopes" value="1">"#
+        )),
+        "the switch is off after saving without it: {html}"
+    );
+    assert!(html.contains(r#"value="myplugin:admin""#), "{html}");
+}
+
+#[tokio::test]
+async fn the_token_form_starts_from_the_owners_scopes_and_refuses_more() {
+    let root = tempfile::tempdir().unwrap();
+    let (state, instance) = state_with(config(root.path()));
+    instance.seed_user("ron", "pass", None);
+    instance.seed_user_scopes("ron", &["pipes:read", "jobs:read", "myplugin:read"]);
+    instance.seed_user("star", "pass", None);
+    instance.seed_user_scopes("star", &["*"]);
+    let app = meerschaum_web::app(state.clone(), WebConfig::for_state(&state)).unwrap();
+
+    // A restricted owner: the switch is off, their scopes are checked, their custom scope is in
+    // the field, and the form says what the limit is.
+    let (cookie, csrf) = login_as(&app, "ron").await;
+    let html = tokens_page(&app, &cookie).await;
+    let register = &html[html.find(r#"id="all-scopes-register""#).unwrap()..];
+    assert!(
+        register.starts_with(r#"id="all-scopes-register" name="all_scopes" value="1">"#),
+        "{register}"
+    );
+    assert!(register.contains(r#"name="scopes" value="pipes:read" checked"#));
+    assert!(register.contains(r#"name="scopes" value="pipes:write">"#));
+    assert!(register.contains(r#"value="myplugin:read""#));
+    assert!(
+        html.contains("A token carries at most your scopes"),
+        "{html}"
+    );
+
+    let ask = |extra: &[(&str, &str)]| {
+        let mut pairs = vec![
+            ("csrf", csrf.as_str()),
+            ("op", "token-register"),
+            ("target", ""),
+            ("payload", "{}"),
+            ("token_form", "1"),
+            ("label", "t"),
+            ("expiration", ""),
+        ];
+        pairs.extend_from_slice(extra);
+        encoded(&pairs)
+    };
+    let post = |body: String| {
+        send(
+            &app,
+            Request::post("/dash/action")
+                .header("cookie", &cookie)
+                .body(Body::from(body))
+                .unwrap(),
+        )
+    };
+    // Their own scopes work; `*` and a scope they lack are refused, naming what is disallowed.
+    let ok = post(ask(&[
+        ("scopes", "pipes:read"),
+        ("custom_scopes", "myplugin:read"),
+    ]))
+    .await;
+    assert_eq!(ok.status, StatusCode::OK, "{}", ok.text());
+    let star = post(ask(&[("all_scopes", "1")])).await;
+    assert_eq!(star.status, StatusCode::FORBIDDEN, "{}", star.text());
+    assert!(
+        star.text().contains("&#39;*&#39;") || star.text().contains("'*'"),
+        "{}",
+        star.text()
+    );
+    let more = post(ask(&[("scopes", "pipes:read"), ("scopes", "pipes:write")])).await;
+    assert_eq!(more.status, StatusCode::FORBIDDEN, "{}", more.text());
+    let text = more.text();
+    assert!(
+        text.contains("pipes:write") && text.contains("Cannot grant scopes"),
+        "{text}"
+    );
+
+    // A holder of `*` starts with the switch on.
+    let (cookie, _) = login_as(&app, "star").await;
+    let html = tokens_page(&app, &cookie).await;
+    assert!(
+        html.contains(r#"id="all-scopes-register" name="all_scopes" value="1" checked"#),
+        "{html}"
+    );
+    assert!(!html.contains("A token carries at most your scopes"));
 }
 
 #[cfg(unix)]

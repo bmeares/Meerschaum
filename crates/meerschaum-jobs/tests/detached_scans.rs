@@ -200,7 +200,7 @@ fn a_lost_pid_file_costs_one_scan_per_pass_and_then_none() {
     assert_eq!(job.status(), Status::Running);
     // The marker is on the supervisor's command line; the job is its worker (here: the `sleep`
     // the stand-in shell runs).
-    let worker = meerschaum_jobs::process::children(lost.pid())[0];
+    let worker = meerschaum_jobs::process::children(lost.pid()).unwrap()[0];
     assert_eq!(job.pid(), Some(worker));
     // The PID file was written again, so later reads are cheap.
     assert_eq!(
@@ -535,4 +535,91 @@ fn a_handle_with_a_remembered_miss_sees_a_relaunch_by_another_handle() {
     // The first handle's next read sees it: `launched` changed what was remembered.
     assert!(common::wait_for(20.0, || first.status() == Status::Running));
     assert!(second.stop(Some(meerschaum_jobs::Seconds::Int(10))).success);
+}
+
+#[test]
+fn a_job_can_be_started_again_right_after_it_was_stopped() {
+    let _guard = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    meerschaum_jobs::detached::reset();
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = common::sh_context(dir.path());
+    let _stop = StopOnDrop(ctx.clone(), "again");
+    let mut job = Job::new(
+        "again",
+        // A background child keeps the supervisor's output pipes open after the
+        // worker is gone, so the supervisor outlives its worker by a while (`mrsm sh sleep`
+        // behaves like this).
+        Some(vec!["-c".into(), "sleep 5 & wait".into()]),
+        JobOptions::default(),
+        &ctx,
+    )
+    .unwrap();
+    for round in 0..2 {
+        let started = job.start();
+        assert!(started.success, "round {round}: {started}");
+        assert!(
+            started.message.starts_with("Started"),
+            "round {round}: {started}"
+        );
+        assert!(common::wait_for(20.0, || job.status() == Status::Running));
+        let first = pid_file(dir.path(), "again");
+        let stopped = job.stop(Some(meerschaum_jobs::Seconds::Int(10)));
+        assert!(stopped.success, "round {round}: {stopped}");
+        // `Stopped` means stopped: it reads so at once, and no supervisor lingers.
+        assert_eq!(job.status(), Status::Stopped, "round {round}");
+        assert!(
+            meerschaum_jobs::detached::find_pids(
+                "again",
+                &ctx.paths.jobs_dir,
+                &Default::default(),
+                None,
+                true
+            )
+            .is_empty(),
+            "round {round}: a supervisor is left"
+        );
+        assert!(first.is_some());
+    }
+    // Immediately started again, it really runs again.
+    let started = job.start();
+    assert!(started.message.starts_with("Started"), "{started}");
+    assert!(common::wait_for(20.0, || job.status() == Status::Running));
+}
+
+#[test]
+fn without_children_files_a_job_which_lost_its_pid_file_still_reads_running() {
+    let _guard = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    meerschaum_jobs::detached::reset();
+    let dir = tempfile::tempdir().unwrap();
+    let jobs_dir = dir.path().join("jobs");
+    let supervisor = StandIn::spawn("nokids", &jobs_dir);
+    write_job(
+        dir.path(),
+        "nokids",
+        &["sleep", "--restart"],
+        Some(ago(0)),
+        None,
+        None,
+    );
+    assert!(common::wait_for(10.0, || {
+        std::fs::read(format!("/proc/{}/cmdline", supervisor.pid()))
+            .map(|c| String::from_utf8_lossy(&c).contains("daemon_id='nokids'"))
+            .unwrap_or(false)
+    }));
+
+    // A kernel which does not expose `children`: the supervisor stands in as running (so the
+    // restart check does not launch the job a second time), and no PID file is invented.
+    let blind = common::sh_context(dir.path()).with_children_reader(|_| None);
+    let mut job = Job::open("nokids", &blind).unwrap();
+    assert_eq!(job.status(), Status::Running);
+    assert_eq!(job.pid(), Some(supervisor.pid()));
+    let checked = job.check_restart();
+    assert!(checked.message.contains("is running"), "{checked}");
+    assert!(!dir.path().join("jobs/nokids/process.pid").exists());
+
+    // A readable, empty list is a supervisor without a worker: finishing, so stopped.
+    meerschaum_jobs::detached::reset();
+    let finishing = common::sh_context(dir.path()).with_children_reader(|_| Some(Vec::new()));
+    let mut job = Job::open("nokids", &finishing).unwrap();
+    assert_eq!(job.status(), Status::Stopped);
 }

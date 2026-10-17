@@ -39,8 +39,8 @@ fn backend_err(e: impl std::fmt::Display) -> PyErr {
     PyRuntimeError::new_err(e.to_string())
 }
 
-/// `get_config(*keys)` through the Python façade (which serves the Rust registry under
-/// `MRSM_CORE=rust`), as a core value.
+/// `get_config(*keys)` through the Python façade (which serves the Rust registry), as a core
+/// value.
 fn py_config(py: Python<'_>, keys: &[&str]) -> Option<Value> {
     let get_config = py
         .import("meerschaum.config")
@@ -317,6 +317,26 @@ impl PySqlConnector {
     #[getter]
     fn schema(&self) -> Option<String> {
         self.inner.schema().map(str::to_string)
+    }
+
+    /// Ask the database for its default schema when none is configured (`current_schema()` /
+    /// `SCHEMA_NAME()`, once, cached): a role's `search_path` or a login's default schema is
+    /// what v4's `sqlalchemy.inspect(engine).default_schema_name` reports. Returns the schema
+    /// in effect; raises when the database is unreachable (the flavor default stays until a
+    /// later call succeeds).
+    fn discover_schema(&self, py: Python<'_>) -> PyResult<Option<String>> {
+        let c = self.conn();
+        block_on(py, async move { c.discover_default_schema().await }).map_err(backend_err)
+    }
+
+    /// `test_connection()`: whether a trivial query (`SELECT 1`) succeeds. One attempt;
+    /// the façade retries.
+    #[pyo3(signature = (**_kw))]
+    fn test_connection(&self, py: Python<'_>, _kw: Option<&Bound<'_, PyDict>>) -> PyResult<bool> {
+        let c = self.conn();
+        Ok(block_on(py, async move {
+            c.value(c.flavor().test_query()).await.is_some()
+        }))
     }
 
     /// `self.internal_schema`.
@@ -628,7 +648,8 @@ impl PySqlConnector {
     #[pyo3(signature = (
         pipe, select_columns=None, omit_columns=None, begin=None, end=None, params=None,
         order=Some("asc".to_string()), limit=None, chunksize=Some(-1), as_iterator=false,
-        as_polars=false, **_kw
+        as_polars=false, begin_add_minutes=0, end_add_minutes=0, replace_nulls=None,
+        skip_existing_cols_check=false, **_kw
     ))]
     #[allow(clippy::too_many_arguments)]
     fn get_pipe_data<'py>(
@@ -645,12 +666,20 @@ impl PySqlConnector {
         chunksize: Option<i64>,
         as_iterator: bool,
         as_polars: bool,
+        begin_add_minutes: i64,
+        end_add_minutes: i64,
+        replace_nulls: Option<String>,
+        skip_existing_cols_check: bool,
         _kw: Option<&Bound<'py, PyDict>>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let ctx = PyCtx::new(py)?;
         let p = core_pipe(pipe, ParamsView::Resolved)?;
         // v4: `order=None` omits the `ORDER BY` (and `Pipe.get_data` does not sort).
         let no_order = order.is_none();
+        // v4: `begin=''` reads from the sync time minus the backtrack interval.
+        let begin_default = begin
+            .and_then(|b| b.downcast::<pyo3::types::PyString>().ok())
+            .is_some_and(|s| s.to_str().map(|s| s.is_empty()).unwrap_or(false));
         let q = data_query(
             &ctx,
             select_columns,
@@ -661,13 +690,21 @@ impl PySqlConnector {
             limit,
             order,
         )?;
+        let opts = DataQueryOptions {
+            begin_default,
+            begin_add_minutes,
+            end_add_minutes,
+            replace_nulls,
+            skip_existing_cols_check,
+            no_order,
+        };
         let cached = cached_columns_types(pipe);
         let c = self.conn();
         let default_chunksize = c.settings.chunksize;
         let (df, state) = {
             let _t = crate::trace::Stage::new("sql: get_pipe_data");
             block_on(py, async move {
-                c.get_pipe_data_and_state(&p, &q, no_order, cached).await
+                c.get_pipe_data_and_state_with(&p, &q, &opts, cached).await
             })
             .map_err(backend_err)?
         };
@@ -1062,6 +1099,24 @@ impl PySqlConnector {
         let c = self.conn();
         let res = block_on(py, async move { c.apply_compression_policy(&p).await });
         success_to_py(py, &res)
+    }
+
+    /// `set_integer_now_func(pipe)`: register an `integer_now` function on an integer-axis
+    /// TimescaleDB hypertable (`True` when nothing needed doing or it was registered).
+    #[pyo3(signature = (pipe, **_kw))]
+    fn set_integer_now_func(
+        &self,
+        py: Python<'_>,
+        pipe: &Bound<'_, PyAny>,
+        _kw: Option<&Bound<'_, PyDict>>,
+    ) -> PyResult<bool> {
+        let p = core_pipe(pipe, ParamsView::Resolved)?;
+        let c = self.conn();
+        let sp = c.sql_pipe(&p).map_err(backend_err)?;
+        Ok(block_on(
+            py,
+            async move { c.set_integer_now_func(&sp).await },
+        ))
     }
 
     #[pyo3(signature = (pipe, full=false, **_kw))]

@@ -1,5 +1,5 @@
 """
-Wave 9 (task U): under `MRSM_CORE=rust`, parameters holding a cross-pipe `{{ Pipe() }}`
+Wave 9 (task U): parameters holding a cross-pipe `{{ Pipe() }}`
 template are memoized (PARITY.md row 39) instead of re-resolving on every access.
 
 The memo is keyed on the pipe's `_core.Pipe` generation and on this process's metadata writes
@@ -12,9 +12,6 @@ import uuid
 import pytest
 
 import meerschaum as mrsm
-from meerschaum._core import _gate
-
-pytestmark = pytest.mark.skipif(_gate.mode() != _gate.RUST, reason="rust-mode façade")
 
 
 @pytest.fixture

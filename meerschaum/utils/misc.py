@@ -1113,6 +1113,52 @@ def items_str(
     return output
 
 
+_TIMESPAN_UNITS = (
+    (1, 'second', 'seconds'),
+    (60, 'minute', 'minutes'),
+    (60 * 60, 'hour', 'hours'),
+    (60 * 60 * 24, 'day', 'days'),
+    (60 * 60 * 24 * 7, 'week', 'weeks'),
+    (60 * 60 * 24 * 7 * 52, 'year', 'years'),
+)
+
+
+def _format_timespan(num_seconds: Union[int, float], max_units: int = 3) -> str:
+    """
+    Format a number of seconds as English text (`1 year, 2 days and 3 hours`): the output of
+    `humanfriendly.format_timespan()` (10.0) without the package, which is not a dependency.
+    """
+    import re
+    import decimal
+
+    def _number(count: Any) -> str:
+        text = '%.2f' % float(count)
+        text = re.sub('0+$', '', text)
+        return re.sub(r'\.$', '', text)
+
+    def _unit(count: Any, singular: str, plural: str) -> str:
+        return f"{count} {singular if float(count) == 1.0 else plural}"
+
+    if num_seconds < 60:
+        return _unit(_number(num_seconds), 'second', 'seconds')
+
+    remaining = decimal.Decimal(str(num_seconds))
+    result = []
+    for divider, singular, plural in reversed(_TIMESPAN_UNITS):
+        divider = decimal.Decimal(str(divider))
+        count = remaining / divider
+        remaining %= divider
+        count = int(count) if divider != 1 else _number(count)
+        if count not in (0, '0'):
+            result.append(_unit(count, singular, plural))
+    if len(result) == 1:
+        return result[0]
+    result = result[:max_units]
+    if len(result) > 1:
+        return ', '.join(result[:-1]) + ' and ' + result[-1]
+    return result[0] if result else ''
+
+
 def interval_str(delta: Union[timedelta, int], round_unit: bool = False) -> str:
     """
     Return a human-readable string for a `timedelta` (or `int` minutes).
@@ -1133,7 +1179,6 @@ def interval_str(delta: Union[timedelta, int], round_unit: bool = False) -> str:
     if is_int(str(delta)) and not round_unit:
         return str(delta)
 
-    humanfriendly = attempt_import('humanfriendly', lazy=False)
     delta_seconds = (
         delta.total_seconds()
         if hasattr(delta, 'total_seconds')
@@ -1163,7 +1208,7 @@ def interval_str(delta: Union[timedelta, int], round_unit: bool = False) -> str:
         else:
             delta_seconds = int(delta_seconds / (86400 * 364)) * (86400 * 364)
 
-    delta_str = humanfriendly.format_timespan(delta_seconds)
+    delta_str = _format_timespan(delta_seconds)
     if ',' in delta_str and round_unit:
         delta_str = delta_str.split(',')[0]
     elif ' and ' in delta_str and round_unit:

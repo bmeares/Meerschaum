@@ -319,8 +319,15 @@ impl ServerConfig {
                 &["api", "permissions", "registration", "plugins"],
                 true,
             ),
+            // PARITY: v4 has two keys. `api:permissions:actions:non_admin` (default true;
+            // `start api --secure` sets it to false) gates `edit_pipe` (`api/routes/_pipes.py`) and
+            // the terminal (`is_session_authenticated`, `api/dash/sessions.py`).
             actions_non_admin: !flags.secure
                 && bool_at(cfg, &["api", "permissions", "actions", "non_admin"], true),
+            // PARITY: `is_user_allowed_to_execute` (`core/User/__init__.py:44`, the `/actions` and
+            // job routes) reads `system:api:permissions:actions:non_admin`, which v4's default
+            // config does not define (`get_config` warns "Invalid keys" and returns `None`), so
+            // non-admins are refused unless the key is set by hand. Same default here.
             system_actions_non_admin: bool_at(
                 cfg,
                 &["system", "api", "permissions", "actions", "non_admin"],
@@ -415,6 +422,42 @@ impl ServerConfig {
         sc
     }
 
+    /// The startup warning for an API that gives a shell to anyone who can reach it, or `None`.
+    ///
+    /// With `api:permissions:registration:users` on (the default) anyone can register an account,
+    /// and with `api:permissions:actions:non_admin` on (the default) every logged-in user may open
+    /// the web terminal (v4's behavior, kept). On an address other than loopback that is a shell
+    /// for whoever can connect. `--secure` and `--private` close it, as do the two settings; with
+    /// no console (`--no-dash`), `--no-webterm` or `--no-auth` there is no terminal at all.
+    pub fn open_terminal_warning(&self) -> Option<String> {
+        let terminal = !self.no_dash && !self.no_webterm && !self.no_auth;
+        if !(terminal && self.registration_users && self.actions_non_admin && !self.private)
+            || self.is_loopback()
+        {
+            return None;
+        }
+        Some(format!(
+            "Anyone who can reach {}:{} can register an account and open a shell: user registration (`api:permissions:registration:users`) and terminals for non-admins (`api:permissions:actions:non_admin`) are both on. Start with `--secure` or `--private`, or set `api:permissions:registration:users` or `api:permissions:actions:non_admin` to false.",
+            self.host, self.port
+        ))
+    }
+
+    /// The startup warning for `--no-auth` on an address other than loopback, or `None`: every
+    /// route, `/actions` included, is then open to anyone who can connect (v4 behaves the same).
+    pub fn open_no_auth_warning(&self) -> Option<String> {
+        if !self.no_auth || self.is_loopback() {
+            return None;
+        }
+        Some(format!(
+            "`--no-auth` on {}:{}: authentication is off, so anyone who can reach this address can run actions and read and change data. Bind to 127.0.0.1 or drop `--no-auth`.",
+            self.host, self.port
+        ))
+    }
+
+    fn is_loopback(&self) -> bool {
+        matches!(self.host.as_str(), "localhost" | "::1" | "[::1]") || self.host.starts_with("127.")
+    }
+
     /// Whether a core route group is served (`route_group_is_allowed`).
     pub fn route_group_is_allowed(&self, group: &str) -> bool {
         self.routes_allowlist.iter().any(|p| fnmatch(group, p))
@@ -479,6 +522,63 @@ pub fn fnmatch(name: &str, pattern: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn open_registration_with_non_admin_terminals_warns_off_loopback() {
+        let warn = |host: &str, secure: bool, private: bool, patch: &str| {
+            let Value::Map(map) = Value::from_json_str(patch).unwrap() else {
+                panic!("a map")
+            };
+            ServerConfig::from_map(
+                &map,
+                &ServerFlags {
+                    host: Some(host.into()),
+                    secure,
+                    private,
+                    ..Default::default()
+                },
+            )
+            .open_terminal_warning()
+        };
+        // The defaults: open registration, terminals for everyone.
+        for host in ["0.0.0.0", "::", "192.168.1.10", "example.test"] {
+            let text = warn(host, false, false, "{}").unwrap_or_else(|| panic!("{host}"));
+            assert!(text.contains(host) && text.contains("--secure"), "{text}");
+        }
+        // Loopback binds, `--secure`, `--private` and either setting turned off are quiet.
+        for host in ["127.0.0.1", "127.0.1.1", "localhost", "::1"] {
+            assert!(warn(host, false, false, "{}").is_none(), "{host}");
+        }
+        assert!(warn("0.0.0.0", true, false, "{}").is_none());
+        assert!(warn("0.0.0.0", false, true, "{}").is_none());
+        let registration = r#"{"api": {"permissions": {"registration": {"users": false}}}}"#;
+        assert!(warn("0.0.0.0", false, false, registration).is_none());
+        let terminals = r#"{"api": {"permissions": {"actions": {"non_admin": false}}}}"#;
+        assert!(warn("0.0.0.0", false, false, terminals).is_none());
+    }
+
+    #[test]
+    fn no_auth_off_loopback_warns() {
+        let warn = |host: &str, no_auth: bool| {
+            ServerConfig::from_map(
+                &Map::new(),
+                &ServerFlags {
+                    host: Some(host.into()),
+                    no_auth,
+                    ..Default::default()
+                },
+            )
+            .open_no_auth_warning()
+        };
+        let text = warn("0.0.0.0", true).unwrap();
+        assert!(
+            text.contains("--no-auth") && text.contains("0.0.0.0"),
+            "{text}"
+        );
+        assert!(warn("127.0.0.1", true).is_none());
+        assert!(warn("localhost", true).is_none());
+        assert!(warn("0.0.0.0", false).is_none());
+    }
 
     #[test]
     fn fnmatch_semantics() {

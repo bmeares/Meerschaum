@@ -14,7 +14,6 @@ from datetime import timezone
 import meerschaum as mrsm
 from meerschaum.utils.typing import Tuple, Dict, Any, Union, Optional, List
 from meerschaum.utils.warnings import warn, dprint
-from meerschaum._core._gate import rust_impl as _rust_impl
 
 
 @property
@@ -74,9 +73,6 @@ def attributes(self) -> Dict[str, Any]:
         return self._attributes
 
 
-_cached_base_params = {}
-
-
 def _has_cross_pipe_template(self, core, raw_parameters) -> bool:
     """
     Whether the raw parameters hold a cross-pipe `{{ Pipe() }}` template (memoized per
@@ -111,7 +107,6 @@ def get_parameters(
     apply_symlinks: bool = True,
     refresh: bool = False,
     debug: bool = False,
-    _visited: 'Optional[set[mrsm.Pipe]]' = None,
 ) -> Dict[str, Any]:
     """
     Return the `parameters` dictionary of the pipe.
@@ -129,12 +124,7 @@ def get_parameters(
     The pipe's parameters dictionary.
     """
     from copy import deepcopy
-    from meerschaum.config._patch import apply_patch_to_config
-    from meerschaum.config._read_config import search_and_substitute_config
-
-    is_top_level = _visited is None
-    if _visited is None:
-        _visited = {self}
+    from meerschaum import _core
 
     if refresh:
         _ = self._invalidate_cache(hard=True)
@@ -150,48 +140,35 @@ def get_parameters(
     if not apply_symlinks:
         return raw_parameters
 
-    ### Resolving references + `{{ Pipe() }}` / `MRSM{}` symlinks is pure-Python but expensive
-    ### (it walks reference pipes and may build connectors), and `get_parameters` is a hot path
-    ### hit by `.dtypes`, `.columns`, `.precision`, etc. Memoize the resolved result, keyed on the
-    ### identity of the raw parameters dict: every mutation path (`update_parameters`, the setter,
-    ### `edit`) reassigns `_attributes['parameters']` to a new object, so identity changing is a
-    ### reliable invalidation signal. Schema is *not* part of this — dynamic-schema freshness is
-    ### handled separately by `get_columns_types`' TTL cache, so this is safe for dynamic pipes.
-    ### Only memoize the top-level entry (not nested reference resolution, which threads `_visited`
-    ### for cycle detection) and only the default symlink-resolving, non-refreshing call.
-    can_memoize = is_top_level and not refresh
-    ### Under `MRSM_CORE=rust` the raw parameters live in `_core.Pipe`, whose mutation counter is
-    ### the memo key (the Python view objects keep their identity across mutations).
-    core = self.__dict__.get('_core_pipe', None)
+    ### Resolving references + `{{ Pipe() }}` / `MRSM{}` symlinks (in Rust) is expensive (it walks
+    ### reference pipes and may build connectors), and `get_parameters` is a hot path hit by
+    ### `.dtypes`, `.columns`, `.precision`, etc. Memoize the resolved result, keyed on the
+    ### mutation counter of the pipe's `_core.Pipe` (the Python view objects keep their identity
+    ### across mutations). Schema is *not* part of this: dynamic-schema freshness is handled
+    ### separately by `get_columns_types`' TTL cache, so this is safe for dynamic pipes.
+    can_memoize = not refresh
+    core = self._core_pipe
     ### Cross-pipe `{{ Pipe() }}` templates read other pipes' state. v4 keeps them memoized
-    ### forever; under `rust` the memo is also keyed on this process's metadata writes (a hard
+    ### forever; here the memo is also keyed on this process's metadata writes (a hard
     ### `_invalidate_cache()`, `register()`, or any `_core.SqlConnector` register / edit / delete,
     ### including a sync's dtype edits) and expires after
     ### `pipes:attributes:local_cache_timeout_seconds`, v4's own staleness window for attributes
     ### (another process's edit of a referenced pipe shows up within it). Re-resolving on every
     ### access cost one instance round trip per reference per access (wave 9 U).
-    cross_pipe = core is not None and _has_cross_pipe_template(self, core, raw_parameters)
-    if core is None:
-        memo_key = raw_parameters
-    elif cross_pipe:
+    cross_pipe = _has_cross_pipe_template(self, core, raw_parameters)
+    if cross_pipe:
         from meerschaum.core.Pipe._cache import _INVALIDATION_EPOCH
-        from meerschaum import _core
-        rust_epoch = getattr(_core, 'pipe_metadata_epoch', None)
         memo_key = (
             core.generation,
             _INVALIDATION_EPOCH[0],
-            rust_epoch() if rust_epoch is not None else None,
+            _core.pipe_metadata_epoch(),
         )
     else:
         memo_key = core.generation
     memo_hit = (
-        self.__dict__.get('_resolved_parameters_raw', None) is raw_parameters
-        if core is None
-        else (
-            '_resolved_parameters' in self.__dict__
-            and self.__dict__.get('_resolved_parameters_raw', None) == memo_key
-            and (not cross_pipe or _cross_pipe_memo_is_fresh(self))
-        )
+        '_resolved_parameters' in self.__dict__
+        and self.__dict__.get('_resolved_parameters_raw', None) == memo_key
+        and (not cross_pipe or _cross_pipe_memo_is_fresh(self))
     )
     if can_memoize and memo_hit:
         self._symlinks = self.__dict__.get('_resolved_parameters_symlinks', {})
@@ -199,66 +176,12 @@ def get_parameters(
         ### don't corrupt the memo.
         return deepcopy(self.__dict__['_resolved_parameters'])
 
-    if is_top_level and core is not None and (_rust := _rust_impl('get_parameters')) is not None:
-        ### References, `{{ Pipe() }}` and `MRSM{}` (against the live config registry) resolve in
-        ### `meerschaum_core`; the Rust call also returns the `_symlinks` v4 records on the pipe.
-        resolved_parameters, self._symlinks = _rust(self)
-    else:
-        parameters = {}
-        for ref_pipe in self.references:
-            try:
-                if ref_pipe in _visited:
-                    warn(f"Circular reference detected in {self}: chain involves {ref_pipe}.")
-                    return search_and_substitute_config(raw_parameters)
-
-                _visited.add(ref_pipe)
-                if refresh:
-                    _ = _cached_base_params.pop(ref_pipe, None)
-                base_params = _cached_base_params.get(ref_pipe, None)
-                if base_params is None:
-                    base_params = ref_pipe.get_parameters(
-                        apply_symlinks=apply_symlinks,
-                        _visited=_visited,
-                        debug=debug,
-                    )
-                    _cached_base_params[ref_pipe] = base_params
-                    if debug:
-                        dprint(f"base_params from {ref_pipe} for {self}:")
-                        mrsm.pprint(base_params)
-                else:
-                    if debug:
-                        dprint(f"Using cached base_params from {ref_pipe} for {self}")
-            except Exception as e:
-                warn(f"Failed to resolve reference pipe for {self}: {e}")
-                base_params = {}
-
-            parameters = apply_patch_to_config(parameters, base_params)
-
-        parameters = apply_patch_to_config(parameters, raw_parameters)
-
-        from meerschaum.utils.pipes import replace_pipes_syntax
-        self._symlinks = {}
-
-        def recursive_replace(obj: Any, path: tuple) -> Any:
-            if isinstance(obj, dict):
-                return {k: recursive_replace(v, path + (k,)) for k, v in obj.items()}
-            if isinstance(obj, list):
-                return [recursive_replace(elem, path + (i,)) for i, elem in enumerate(obj)]
-            if isinstance(obj, str):
-                substituted_val = replace_pipes_syntax(obj, _pipe=self)
-                if substituted_val != obj:
-                    self._symlinks[path] = {
-                        'original': obj,
-                        'substituted': substituted_val,
-                    }
-                return substituted_val
-            return obj
-
-        resolved_parameters = search_and_substitute_config(recursive_replace(parameters, tuple()))
+    ### References, `{{ Pipe() }}` and `MRSM{}` (against the live config registry) resolve in
+    ### `meerschaum_core`; the Rust call also returns the `_symlinks` v4 records on the pipe.
+    resolved_parameters, self._symlinks = _core.get_parameters(self)
 
     if can_memoize:
-        ### Hold a reference to the raw dict so its identity can't be reused by a freed object,
-        ### and stash the symlinks captured above alongside the resolved result.
+        ### Stash the symlinks captured above alongside the resolved result.
         if cross_pipe:
             import time
             self.__dict__['_resolved_parameters_ts'] = time.monotonic()
@@ -275,14 +198,11 @@ def parameters(self) -> Optional[Dict[str, Any]]:
     """
     Return the parameters dictionary of the pipe.
 
-    Under `MRSM_CORE=rust` the dictionary is a live view (design §4.4): reads are resolved
-    as before, and mutations (including nested ones) write through to the raw parameters,
-    so `pipe.parameters['fetch']['backtrack_minutes'] = 5` followed by `pipe.edit()` persists.
+    The dictionary is a live view (design §4.4): reads are resolved, and mutations (including
+    nested ones) write through to the raw parameters, so
+    `pipe.parameters['fetch']['backtrack_minutes'] = 5` followed by `pipe.edit()` persists.
     """
     resolved = self.get_parameters(debug=self.debug)
-    from meerschaum._core import _gate
-    if not _gate.use_rust('pipe'):
-        return resolved
     from ._live_parameters import live_view
     return live_view(self, resolved)
 
@@ -1164,29 +1084,15 @@ def target(self) -> str:
         self.__dict__['_target'] = target_val
         return target_val
 
-    core = self.__dict__.get('_core_pipe', None)
+    core = self._core_pipe
     default_target = self._target_legacy()
     default_targets = {default_target}
-    if core is not None:
-        ### The Rust name rules (`target_name` / `target_table` / ... keys, the legacy default),
-        ### over the parameters resolved here (so cross-pipe templates are honored).
-        _target = core.target(None, dict(params))
-    else:
-        potential_keys = ('target_name', 'target_table', 'target_table_name')
-        _target = None
-        for k in potential_keys:
-            if k in params:
-                _target = params[k]
-                break
-
-        _target = _target or default_target
+    ### The Rust name rules (`target_name` / `target_table` / ... keys, the legacy default),
+    ### over the parameters resolved here (so cross-pipe templates are honored).
+    _target = core.target(None, dict(params))
 
     if self.instance_connector.type == 'sql':
-        if core is not None:
-            truncated_target = core.target(self.instance_connector.flavor, dict(params))
-        else:
-            from meerschaum.utils.sql import truncate_item_name
-            truncated_target = truncate_item_name(_target, self.instance_connector.flavor)
+        truncated_target = core.target(self.instance_connector.flavor, dict(params))
         default_targets.add(truncated_target)
         warned_target = self.__dict__.get('_warned_target', False)
         if truncated_target != _target and not warned_target:
@@ -1213,13 +1119,7 @@ def _target_legacy(self) -> str:
     The old method of determining a pipe's table name by joining the keys with underscores.
     **NOTE:** Converts the `':'` in the `connector_keys` to an `'_'`.
     """
-    core = self.__dict__.get('_core_pipe', None)
-    if core is not None:
-        return core.target_legacy()
-    name = f"{self.connector_keys.replace(':', '_')}_{self.metric_key}"
-    if self.location_key is not None:
-        name += f"_{self.location_key}"
-    return name
+    return self._core_pipe.target_legacy()
 
 
 @target.setter

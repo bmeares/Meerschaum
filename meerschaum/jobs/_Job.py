@@ -4,31 +4,32 @@
 
 """
 Define the Meerschaum abstraction atop daemons.
+
+`Job` is a façade over the native jobs (crate `meerschaum-jobs`, bound as
+`meerschaum._core.Job`): the on-disk layout, the supervision and the status rules are Rust.
 """
 
 from __future__ import annotations
 
-import shlex
 import asyncio
+import functools
+import inspect
 import pathlib
+import shlex
 import sys
-import json
-import traceback
-from datetime import datetime, timezone
+from datetime import datetime
 
 import meerschaum as mrsm
-import meerschaum.config.paths as paths
 from meerschaum.utils.typing import (
     List, Optional, Union, SuccessTuple, Any, Dict, Callable, TYPE_CHECKING,
 )
-from meerschaum._internal.entry import entry
 from meerschaum.utils.warnings import warn
-from meerschaum.config import get_config
 from meerschaum._internal.static import STATIC_CONFIG
-from meerschaum.utils.formatting._shell import clear_screen, flush_stdout
+from meerschaum.jobs import _native
 
 if TYPE_CHECKING:
     from meerschaum.jobs._Executor import Executor
+    from meerschaum.utils.daemon import Daemon
 
 BANNED_CHARS: List[str] = [
     ',', ';', "'", '"', '$', '#', '=', '*', '&', '!', '`', '~',
@@ -51,13 +52,28 @@ class StopMonitoringLogs(Exception):
     """
 
 
+def _clear_screen() -> None:
+    """Clear the terminal (v4 `clear_screen()`)."""
+    try:
+        from meerschaum.utils.formatting._shell import clear_screen
+        clear_screen()
+        return
+    except Exception:
+        pass
+    print('\033[2J\033[H', end='', flush=True)
+
+
+def _flush_stdout() -> None:
+    print('', end='', flush=True)
+
+
 def _default_stdout_callback(line: str):
     if line == '\n' or line.startswith(FLUSH_TOKEN):
-        flush_stdout()
+        _flush_stdout()
         return
 
     if CLEAR_TOKEN in line:
-        clear_screen()
+        _clear_screen()
         return
 
     if STOP_TOKEN in line:
@@ -66,9 +82,13 @@ def _default_stdout_callback(line: str):
     print(line, end='', flush=True)
 
 
+def _parse_dt(text: Optional[str]) -> Union[datetime, None]:
+    return datetime.fromisoformat(text) if text else None
+
+
 class Job:
     """
-    Manage a `meerschaum.utils.daemon.Daemon`, locally or remotely via the API.
+    Manage a job, locally, with `systemd`, or remotely via the API.
     """
 
     def __init__(
@@ -80,14 +100,12 @@ class Job:
         delete_after_completion: bool = False,
         refresh_seconds: Union[int, float, None] = None,
         _properties: Optional[Dict[str, Any]] = None,
-        _rotating_log=None,
-        _stdin_file=None,
         _status_hook: Optional[Callable[[], str]] = None,
         _result_hook: Optional[Callable[[], SuccessTuple]] = None,
         _externally_managed: bool = False,
     ):
         """
-        Create a new job to manage a `meerschaum.utils.daemon.Daemon`.
+        Create a new job.
 
         Parameters
         ----------
@@ -102,7 +120,8 @@ class Job:
             If provided, set these environment variables in the job's process.
 
         executor_keys: Optional[str], default None
-            If provided, execute the job remotely on an API instance, e.g. 'api:main'.
+            If provided, execute the job remotely on an API instance, e.g. 'api:main'
+            (or with `'systemd'`). Defaults to `'local'`, or the context's executor.
 
         delete_after_completion: bool, default False
             If `True`, delete this job when it has finished executing.
@@ -114,55 +133,26 @@ class Job:
         _properties: Optional[Dict[str, Any]], default None
             If provided, use this to patch the daemon's properties.
         """
-        from meerschaum.utils.daemon import Daemon
-        for char in BANNED_CHARS:
-            if char in name:
-                raise ValueError(f"Invalid name: ({char}) is not allowed.")
-
-        if isinstance(sysargs, str):
-            sysargs = shlex.split(sysargs)
-
-        and_key = STATIC_CONFIG['system']['arguments']['and_key']
-        escaped_and_key = STATIC_CONFIG['system']['arguments']['escaped_and_key']
-        if sysargs:
-            sysargs = [
-                (arg if arg != escaped_and_key else and_key)
-                for arg in sysargs
-            ]
-
-        ### NOTE: 'local' and 'systemd' executors are being coalesced.
-        if executor_keys is None:
-            from meerschaum.jobs import get_executor_keys_from_context
-            executor_keys = get_executor_keys_from_context()
-
-        self.executor_keys = executor_keys
+        native = _native.core()
+        self._core = native.Job(
+            name,
+            sysargs,
+            env=env,
+            executor_keys=executor_keys,
+            delete_after_completion=delete_after_completion,
+            refresh_seconds=refresh_seconds,
+            properties=_properties,
+            externally_managed=_externally_managed,
+            api_attributes=_native.api_attributes(executor_keys),
+        )
+        _native.emit_warnings(self._core.take_warnings())
         self.name = name
+        self.executor_keys = self._core.executor_keys
         self.refresh_seconds = (
             refresh_seconds
             if refresh_seconds is not None
             else mrsm.get_config('system', 'cli', 'refresh_seconds')
         )
-        try:
-            self._daemon = (
-                Daemon(daemon_id=name)
-                if executor_keys == 'local'
-                else None
-            )
-        except Exception:
-            self._daemon = None
-
-        ### Handle any injected dependencies.
-        if _rotating_log is not None:
-            self._rotating_log = _rotating_log
-            if self._daemon is not None:
-                self._daemon._rotating_log = _rotating_log
-
-        if _stdin_file is not None:
-            self._stdin_file = _stdin_file
-            if self._daemon is not None:
-                self._daemon._stdin_file = _stdin_file
-                self._daemon._blocking_stdin_file_path = _stdin_file.blocking_file_path
-
         if _status_hook is not None:
             self._status_hook = _status_hook
 
@@ -170,34 +160,10 @@ class Job:
             self._result_hook = _result_hook
 
         self._externally_managed = _externally_managed
-        self._properties_patch = _properties or {}
-        if _externally_managed:
-            self._properties_patch.update({'externally_managed': _externally_managed})
 
-        if env:
-            self._properties_patch.update({'env': env})
-
-        if delete_after_completion:
-            self._properties_patch.update({'delete_after_completion': delete_after_completion})
-
-        daemon_sysargs = (
-            self._daemon.properties.get('target', {}).get('args', [None])[0]
-            if self._daemon is not None
-            else None
-        )
-
-        if daemon_sysargs and sysargs and daemon_sysargs != sysargs:
-            warn("Given sysargs differ from existing sysargs.")
-
-        self._sysargs = [
-            arg
-            for arg in (daemon_sysargs or sysargs or [])
-            if arg not in ('-d', '--daemon')
-        ]
-        for restart_flag in RESTART_FLAGS:
-            if restart_flag in self._sysargs:
-                self._properties_patch.update({'restart': True})
-                break
+    def _warn(self) -> None:
+        """Show the warnings the last native operation produced."""
+        _native.emit_warnings(self._core.take_warnings())
 
     @staticmethod
     def from_pid(pid: int, executor_keys: Optional[str] = None) -> Job:
@@ -212,40 +178,32 @@ class Job:
         executor_keys: Optional[str], default None
             The executor keys to assign to the job.
         """
-        psutil = mrsm.attempt_import('psutil')
+        import os
         try:
-            process = psutil.Process(pid)
-        except psutil.NoSuchProcess as e:
+            os.kill(pid, 0)
+        except ProcessLookupError as e:
             warn(f"Process with PID {pid} does not exist.", stack=False)
             raise e
+        except PermissionError:
+            pass
 
-        command_args = process.cmdline()
-        is_daemon = command_args[1] == '-c'
+        native = _native.core()
+        for daemon_id in native.jobs_daemon_ids():
+            job = Job(daemon_id, executor_keys=executor_keys)
+            if job.pid == pid:
+                return job
 
-        if is_daemon:
-            daemon_id = command_args[-1].split('daemon_id=')[-1].split(')')[0].replace("'", '')
-            root_dir = process.environ().get(STATIC_CONFIG['environment']['root'], None)
-            if root_dir is None:
-                root_dir = paths.ROOT_DIR_PATH
-            else:
-                root_dir = pathlib.Path(root_dir)
-            jobs_dir = root_dir / paths.DAEMON_RESOURCES_PATH.name
-            daemon_dir = jobs_dir / daemon_id
-            pid_file = daemon_dir / 'process.pid'
+        cmdline_path = pathlib.Path('/proc') / str(pid) / 'cmdline'
+        if not cmdline_path.exists():
+            raise EnvironmentError(f"Is process {pid} a Meerschaum job?")
 
-            if pid_file.exists():
-                with open(pid_file, 'r', encoding='utf-8') as f:
-                    daemon_pid = int(f.read())
-
-                if pid != daemon_pid:
-                    raise EnvironmentError(f"Differing PIDs: {pid=}, {daemon_pid=}")
-            else:
-                raise EnvironmentError(f"Is job '{daemon_id}' running?")
-
-            return Job(daemon_id, executor_keys=executor_keys)
-
-        from meerschaum._internal.arguments._parse_arguments import parse_arguments
-        from meerschaum.utils.daemon import get_new_daemon_name
+        command_args = [
+            arg
+            for arg in cmdline_path.read_bytes().decode('utf-8', errors='replace').split('\0')
+            if arg
+        ]
+        if len(command_args) > 1 and command_args[1] == '-c':
+            raise EnvironmentError(f"Is process {pid} a running job?")
 
         mrsm_ix = 0
         for i, arg in enumerate(command_args):
@@ -253,36 +211,23 @@ class Job:
                 mrsm_ix = i
                 break
 
-        sysargs = command_args[mrsm_ix+1:]
-        kwargs = parse_arguments(sysargs)
-        name = kwargs.get('name', get_new_daemon_name())
+        sysargs = command_args[mrsm_ix + 1:]
+        name = None
+        for flag in ('--name', '--job-name'):
+            if flag in sysargs and sysargs.index(flag) + 1 < len(sysargs):
+                name = sysargs[sysargs.index(flag) + 1]
+                break
+        if name is None:
+            name = native.jobs_new_daemon_name()
         return Job(name, sysargs, executor_keys=executor_keys)
 
     def start(self, debug: bool = False) -> SuccessTuple:
         """
         Start the job's daemon.
         """
-        if self.executor is not None:
-            if not self.exists(debug=debug):
-                return self.executor.create_job(
-                    self.name,
-                    self.sysargs,
-                    properties=self.daemon.properties,
-                    debug=debug,
-                )
-            return self.executor.start_job(self.name, debug=debug)
-
-        if self.is_running():
-            return True, f"{self} is already running."
-
-        success, msg = self.daemon.run(
-            keep_daemon_output=(not self.delete_after_completion),
-            allow_dirty_run=True,
-        )
-        if not success:
-            return success, msg
-
-        return success, f"Started {self}."
+        result = self._core.start()
+        self._warn()
+        return result
 
     def stop(
         self,
@@ -292,28 +237,9 @@ class Job:
         """
         Stop the job's daemon.
         """
-        if self.executor is not None:
-            return self.executor.stop_job(self.name, debug=debug)
-
-        if self.daemon.status == 'stopped':
-            if not self.restart:
-                return True, f"{self} is not running."
-            elif self.stop_time is not None:
-                return True, f"{self} will not restart until manually started."
-
-        quit_success, quit_msg = self.daemon.quit(timeout=timeout_seconds)
-        if quit_success:
-            return quit_success, f"Stopped {self}."
-
-        warn(
-            f"Failed to gracefully quit {self}: {quit_msg}",
-            stack=False,
-        )
-        kill_success, kill_msg = self.daemon.kill(timeout=timeout_seconds)
-        if not kill_success:
-            return kill_success, kill_msg
-
-        return kill_success, f"Killed {self}."
+        result = self._core.stop(timeout_seconds)
+        self._warn()
+        return result
 
     def pause(
         self,
@@ -323,33 +249,29 @@ class Job:
         """
         Pause the job's daemon.
         """
-        if self.executor is not None:
-            return self.executor.pause_job(self.name, debug=debug)
+        result = self._core.pause(timeout_seconds)
+        self._warn()
+        return result
 
-        pause_success, pause_msg = self.daemon.pause(timeout=timeout_seconds)
-        if not pause_success:
-            return pause_success, pause_msg
-
-        return pause_success, f"Paused {self}."
+    def resume(
+        self,
+        timeout_seconds: Union[int, float, None] = None,
+        debug: bool = False,
+    ) -> SuccessTuple:
+        """
+        Resume a paused job.
+        """
+        result = self._core.resume(timeout_seconds)
+        self._warn()
+        return result
 
     def delete(self, debug: bool = False) -> SuccessTuple:
         """
         Delete the job and its daemon.
         """
-        if self.executor is not None:
-            return self.executor.delete_job(self.name, debug=debug)
-
-        if self.is_running():
-            stop_success, stop_msg = self.stop()
-            if not stop_success:
-                return stop_success, stop_msg
-
-        cleanup_success, cleanup_msg = self.daemon.cleanup()
-        if not cleanup_success:
-            return cleanup_success, cleanup_msg
-
-        _ = self.daemon._properties.pop('result', None)
-        return cleanup_success, f"Deleted {self}."
+        result = self._core.delete()
+        self._warn()
+        return result
 
     def is_running(self) -> bool:
         """
@@ -361,19 +283,13 @@ class Job:
         """
         Determine whether the job exists.
         """
-        if self.executor is not None:
-            return self.executor.get_job_exists(self.name, debug=debug)
-
-        return self.daemon.path.exists()
+        return self._core.exists()
 
     def get_logs(self) -> Union[str, None]:
         """
         Return the output text of the job's daemon.
         """
-        if self.executor is not None:
-            return self.executor.get_logs(self.name)
-
-        return self.daemon.log_text
+        return self._core.get_logs()
 
     def monitor_logs(
         self,
@@ -385,9 +301,6 @@ class Job:
         strip_timestamps: bool = False,
         accept_input: bool = True,
         debug: bool = False,
-        _logs_path: Optional[pathlib.Path] = None,
-        _log=None,
-        _stdin_file=None,
         _wait_if_stopped: bool = True,
     ):
         """
@@ -421,34 +334,18 @@ class Job:
         accept_input: bool, default True
             If `True`, accept input when the daemon blocks on stdin.
         """
-        if self.executor is not None:
-            self.executor.monitor_logs(
-                self.name,
-                callback_function,
-                input_callback_function=input_callback_function,
-                stop_callback_function=stop_callback_function,
-                stop_on_exit=stop_on_exit,
-                accept_input=accept_input,
-                strip_timestamps=strip_timestamps,
-                debug=debug,
-            )
-            return
-
-        monitor_logs_coroutine = self.monitor_logs_async(
-            callback_function=callback_function,
-            input_callback_function=input_callback_function,
-            stop_callback_function=stop_callback_function,
-            stop_event=stop_event,
-            stop_on_exit=stop_on_exit,
-            strip_timestamps=strip_timestamps,
-            accept_input=accept_input,
-            debug=debug,
-            _logs_path=_logs_path,
-            _log=_log,
-            _stdin_file=_stdin_file,
-            _wait_if_stopped=_wait_if_stopped,
+        return self._monitor(
+            callback_function,
+            input_callback_function,
+            stop_callback_function,
+            stop_event,
+            stop_on_exit,
+            strip_timestamps,
+            accept_input,
+            _wait_if_stopped,
+            loop=None,
+            stop_flag=None,
         )
-        return asyncio.run(monitor_logs_coroutine)
 
     async def monitor_logs_async(
         self,
@@ -460,9 +357,6 @@ class Job:
         strip_timestamps: bool = False,
         accept_input: bool = True,
         debug: bool = False,
-        _logs_path: Optional[pathlib.Path] = None,
-        _log=None,
-        _stdin_file=None,
         _wait_if_stopped: bool = True,
     ):
         """
@@ -496,253 +390,105 @@ class Job:
         accept_input: bool, default True
             If `True`, accept input when the daemon blocks on stdin.
         """
-        from meerschaum.utils.prompt import prompt
+        loop = asyncio.get_running_loop()
+        stop_flag = _native.core().StopFlag()
+        run = functools.partial(
+            self._monitor,
+            callback_function,
+            input_callback_function,
+            stop_callback_function,
+            stop_event,
+            stop_on_exit,
+            strip_timestamps,
+            accept_input,
+            _wait_if_stopped,
+            loop=loop,
+            stop_flag=stop_flag,
+        )
+        try:
+            await loop.run_in_executor(None, run)
+        except asyncio.CancelledError:
+            stop_flag.set()
+            raise
+        finally:
+            stop_flag.set()
+
+    def _monitor(
+        self,
+        callback_function,
+        input_callback_function,
+        stop_callback_function,
+        stop_event,
+        stop_on_exit,
+        strip_timestamps,
+        accept_input,
+        wait_if_stopped,
+        loop,
+        stop_flag,
+    ):
+        """
+        Follow the logs with the native monitor, running the callbacks on this thread's helper
+        (coroutine functions are awaited on `loop`, or on a private loop when there is none).
+        """
+        def sync(function):
+            if function is None or not inspect.iscoroutinefunction(function):
+                return function
+
+            def call(*args):
+                coroutine = function(*args)
+                if loop is not None:
+                    return asyncio.run_coroutine_threadsafe(coroutine, loop).result()
+                return asyncio.run(coroutine)
+
+            return call
 
         def default_input_callback_function():
-            prompt_kwargs = self.get_prompt_kwargs(debug=debug)
+            from meerschaum.utils.prompt import prompt
+            prompt_kwargs = self.get_prompt_kwargs()
             if prompt_kwargs:
                 answer = prompt(**prompt_kwargs)
                 return answer + '\n'
             return sys.stdin.readline()
 
-        if input_callback_function is None:
-            input_callback_function = default_input_callback_function
-
-        if self.executor is not None:
-            await self.executor.monitor_logs_async(
-                self.name,
-                callback_function,
-                input_callback_function=input_callback_function,
-                stop_callback_function=stop_callback_function,
-                stop_on_exit=stop_on_exit,
-                strip_timestamps=strip_timestamps,
-                accept_input=accept_input,
-                debug=debug,
-            )
-            return
-
-        from meerschaum.utils.formatting._jobs import strip_timestamp_from_line
-
-        events = {
-            'user': stop_event,
-            'stopped': asyncio.Event(),
-            'stop_token': asyncio.Event(),
-            'stop_exception': asyncio.Event(),
-            'stopped_timeout': asyncio.Event(),
-        }
-        combined_event = asyncio.Event()
-        emitted_text = False
-        stdin_file = _stdin_file if _stdin_file is not None else self.daemon.stdin_file
-
-        async def check_job_status():
-            if not stop_on_exit:
-                return
-
-            nonlocal emitted_text
-
-            sleep_time = 0.1
-            while sleep_time < 0.2:
-                if self.status == 'stopped':
-                    if not emitted_text and _wait_if_stopped:
-                        await asyncio.sleep(sleep_time)
-                        sleep_time = round(sleep_time * 1.1, 3)
-                        continue
-
-                    if stop_callback_function is not None:
-                        try:
-                            if asyncio.iscoroutinefunction(stop_callback_function):
-                                await stop_callback_function(self.result)
-                            else:
-                                stop_callback_function(self.result)
-                        except asyncio.exceptions.CancelledError:
-                            break
-                        except Exception:
-                            warn(traceback.format_exc())
-
-                    if stop_on_exit:
-                        events['stopped'].set()
-
-                    break
-                await asyncio.sleep(0.1)
-
-            events['stopped_timeout'].set()
-
-        async def check_blocking_on_input():
-            while True:
-                if not emitted_text or not self.is_blocking_on_stdin():
-                    try:
-                        await asyncio.sleep(self.refresh_seconds)
-                    except asyncio.exceptions.CancelledError:
-                        break
-                    continue
-
-                if not self.is_running():
-                    break
-
-                await emit_latest_lines()
-
-                try:
-                    print('', end='', flush=True)
-                    if asyncio.iscoroutinefunction(input_callback_function):
-                        data = await input_callback_function()
-                    else:
-                        loop = asyncio.get_running_loop()
-                        data = await loop.run_in_executor(None, input_callback_function)
-                except KeyboardInterrupt:
-                    break
-                #  if not data.endswith('\n'):
-                    #  data += '\n'
-
-                stdin_file.write(data)
-                await asyncio.sleep(self.refresh_seconds)
-
-        async def combine_events():
-            event_tasks = [
-                asyncio.create_task(event.wait())
-                for event in events.values()
-                if event is not None
-            ]
-            if not event_tasks:
-                return
-
-            try:
-                done, pending = await asyncio.wait(
-                    event_tasks,
-                    return_when=asyncio.FIRST_COMPLETED,
-                )
-                for task in pending:
-                    task.cancel()
-            except asyncio.exceptions.CancelledError:
-                pass
-            finally:
-                combined_event.set()
-
-        check_job_status_task = asyncio.create_task(check_job_status())
-        check_blocking_on_input_task = asyncio.create_task(check_blocking_on_input())
-        combine_events_task = asyncio.create_task(combine_events())
-
-        log = _log if _log is not None else self.daemon.rotating_log
-        lines_to_show = (
-            self.daemon.properties.get(
-                'logs', {}
-            ).get(
-                'lines_to_show', get_config('jobs', 'logs', 'lines_to_show')
-            )
+        input_callback = sync(input_callback_function) or default_input_callback_function
+        self._core.monitor_logs(
+            sync(callback_function),
+            input_callback=input_callback if accept_input else None,
+            stop_callback=sync(stop_callback_function),
+            stop_event=stop_event,
+            stop_flag=stop_flag,
+            stop_on_exit=stop_on_exit,
+            strip_timestamps=strip_timestamps,
+            accept_input=accept_input,
+            wait_if_stopped=wait_if_stopped,
+            stop_exception=StopMonitoringLogs,
+            clear_callback=_clear_screen,
+            warn=lambda message: warn(message),
         )
-
-        async def emit_latest_lines():
-            nonlocal emitted_text
-            nonlocal stop_event
-            lines = log.readlines()
-            for line in lines[(-1 * lines_to_show):]:
-                if stop_event is not None and stop_event.is_set():
-                    return
-
-                line_stripped_extra = strip_timestamp_from_line(line.strip())
-                line_stripped = strip_timestamp_from_line(line)
-
-                if line_stripped_extra == STOP_TOKEN:
-                    events['stop_token'].set()
-                    return
-
-                if line_stripped_extra == CLEAR_TOKEN:
-                    clear_screen(debug=debug)
-                    continue
-
-                if line_stripped_extra == FLUSH_TOKEN.strip():
-                    line_stripped = ''
-                    line = ''
-
-                if strip_timestamps:
-                    line = line_stripped
-
-                try:
-                    if asyncio.iscoroutinefunction(callback_function):
-                        await callback_function(line)
-                    else:
-                        callback_function(line)
-                    emitted_text = True
-                except StopMonitoringLogs:
-                    events['stop_exception'].set()
-                    return
-                except Exception:
-                    warn(f"Error in logs callback:\n{traceback.format_exc()}")
-
-        await emit_latest_lines()
-
-        tasks = (
-            [check_job_status_task]
-            + ([check_blocking_on_input_task] if accept_input else [])
-            + [combine_events_task]
-        )
-        try:
-            _ = asyncio.gather(*tasks, return_exceptions=True)
-        except asyncio.exceptions.CancelledError:
-            raise
-        except Exception:
-            warn(f"Failed to run async checks:\n{traceback.format_exc()}")
-
-        watchfiles = mrsm.attempt_import('watchfiles', lazy=False)
-        dir_path_to_monitor = (
-            _logs_path
-            or (log.file_path.parent if log else None)
-            or paths.LOGS_RESOURCES_PATH
-        )
-        async for changes in watchfiles.awatch(
-            dir_path_to_monitor,
-            stop_event=combined_event,
-        ):
-            for change in changes:
-                file_path_str = change[1]
-                file_path = pathlib.Path(file_path_str)
-                latest_subfile_path = log.get_latest_subfile_path()
-                if latest_subfile_path != file_path:
-                    continue
-
-                await emit_latest_lines()
-
-        await emit_latest_lines()
 
     def is_blocking_on_stdin(self, debug: bool = False) -> bool:
         """
         Return whether a job's daemon is blocking on stdin.
         """
-        if self.executor is not None:
-            return self.executor.get_job_is_blocking_on_stdin(self.name, debug=debug)
-
-        return self.is_running() and self.daemon.blocking_stdin_file_path.exists()
+        return self._core.is_blocking_on_stdin()
 
     def get_prompt_kwargs(self, debug: bool = False) -> Dict[str, Any]:
         """
         Return the kwargs to the blocking `prompt()`, if available.
         """
-        if self.executor is not None:
-            return self.executor.get_job_prompt_kwargs(self.name, debug=debug)
-
-        if not self.daemon.prompt_kwargs_file_path.exists():
-            return {}
-
-        try:
-            with open(self.daemon.prompt_kwargs_file_path, 'r', encoding='utf-8') as f:
-                prompt_kwargs = json.load(f)
-
-            return prompt_kwargs
-        
-        except Exception:
-            import traceback
-            traceback.print_exc()
-            return {}
+        return self._core.get_prompt_kwargs()
 
     def write_stdin(self, data):
         """
         Write to a job's daemon's `stdin`.
         """
-        self.daemon.stdin_file.write(data)
+        self._core.write_stdin(data)
 
     @property
     def executor(self) -> Union[Executor, None]:
         """
-        If the job is remote, return the connector to the remote API instance.
+        If the job is not local, return the connector to its executor
+        (the remote API instance or `systemd`).
         """
         return (
             mrsm.get_connector(self.executor_keys)
@@ -758,85 +504,46 @@ class Job:
         if '_status_hook' in self.__dict__:
             return self._status_hook()
 
-        if self.executor is not None:
-            return self.executor.get_job_status(self.name)
-
-        return self.daemon.status
+        return self._core.status
 
     @property
     def pid(self) -> Union[int, None]:
         """
         Return the PID of the job's dameon.
         """
-        if self.executor is not None:
-            return self.executor.get_job_metadata(self.name).get('daemon', {}).get('pid', None)
-
-        return self.daemon.pid
+        return self._core.pid
 
     @property
     def restart(self) -> bool:
         """
         Return whether to restart a stopped job.
         """
-        if self.executor is not None:
-            return self.executor.get_job_metadata(self.name).get('restart', False)
-
-        return self.daemon.properties.get('restart', False)
+        return self._core.restarts
 
     @property
     def result(self) -> SuccessTuple:
         """
         Return the `SuccessTuple` when the job has terminated.
         """
-        if self.is_running():
-            return True, f"{self} is running."
-
         if '_result_hook' in self.__dict__:
+            if self.is_running():
+                return True, f"{self} is running."
             return self._result_hook()
 
-        if self.executor is not None:
-            return (
-                self.executor.get_job_metadata(self.name)
-                .get('result', (False, "No result available."))
-            )
-
-        _result = self.daemon.properties.get('result', None)
-        if _result is None:
-            from meerschaum.utils.daemon.Daemon import _results
-            return _results.get(self.daemon.daemon_id, (False, "No result available."))
-
-        return tuple(_result)
+        return self._core.result
 
     @property
     def sysargs(self) -> List[str]:
         """
         Return the sysargs to use for the Daemon.
         """
-        if self._sysargs:
-            return self._sysargs
-
-        if self.executor is not None:
-            return self.executor.get_job_metadata(self.name).get('sysargs', [])
-
-        target_args = self.daemon.target_args
-        if target_args is None:
-            return []
-        self._sysargs = target_args[0] if len(target_args) > 0 else []
-        return self._sysargs
+        return self._core.sysargs
 
     def get_daemon_properties(self) -> Dict[str, Any]:
         """
         Return the `properties` dictionary for the job's daemon.
         """
-        remote_properties = (
-            {}
-            if self.executor is None
-            else self.executor.get_job_properties(self.name)
-        )
-        return {
-            **remote_properties,
-            **self._properties_patch
-        }
+        return self._core.get_daemon_properties()
 
     @property
     def daemon(self) -> 'Daemon':
@@ -844,121 +551,50 @@ class Job:
         Return the daemon which this job manages.
         """
         from meerschaum.utils.daemon import Daemon
-        if self._daemon is not None and self.executor is None and self._sysargs:
-            return self._daemon
+        if self.executor_keys == 'local' and self.exists():
+            return Daemon(daemon_id=self.name)
 
-        self._daemon = Daemon(
-            target=entry,
-            target_args=[self._sysargs],
-            target_kw={},
+        return Daemon(
             daemon_id=self.name,
-            label=shlex.join(self._sysargs),
+            sysargs=self.sysargs,
+            label=shlex.join(self.sysargs),
             properties=self.get_daemon_properties(),
         )
-        if '_rotating_log' in self.__dict__:
-            self._daemon._rotating_log = self._rotating_log
-
-        if '_stdin_file' in self.__dict__:
-            self._daemon._stdin_file = self._stdin_file
-            self._daemon._blocking_stdin_file_path = self._stdin_file.blocking_file_path
-
-        return self._daemon
 
     @property
     def began(self) -> Union[datetime, None]:
         """
         The datetime when the job began running.
         """
-        if self.executor is not None:
-            began_str = self.executor.get_job_began(self.name)
-            if began_str is None:
-                return None
-            return (
-                datetime.fromisoformat(began_str)
-                .astimezone(timezone.utc)
-                .replace(tzinfo=None)
-            )
-
-        began_str = self.daemon.properties.get('process', {}).get('began', None)
-        if began_str is None:
-            return None
-
-        return datetime.fromisoformat(began_str)
+        return _parse_dt(self._core.began)
 
     @property
     def ended(self) -> Union[datetime, None]:
         """
         The datetime when the job stopped running.
         """
-        if self.executor is not None:
-            ended_str = self.executor.get_job_ended(self.name)
-            if ended_str is None:
-                return None
-            return (
-                datetime.fromisoformat(ended_str)
-                .astimezone(timezone.utc)
-                .replace(tzinfo=None)
-            )
-
-        ended_str = self.daemon.properties.get('process', {}).get('ended', None)
-        if ended_str is None:
-            return None
-
-        return datetime.fromisoformat(ended_str)
+        return _parse_dt(self._core.ended)
 
     @property
     def paused(self) -> Union[datetime, None]:
         """
         The datetime when the job was suspended while running.
         """
-        if self.executor is not None:
-            paused_str = self.executor.get_job_paused(self.name)
-            if paused_str is None:
-                return None
-            return (
-                datetime.fromisoformat(paused_str)
-                .astimezone(timezone.utc)
-                .replace(tzinfo=None)
-            )
-
-        paused_str = self.daemon.properties.get('process', {}).get('paused', None)
-        if paused_str is None:
-            return None
-
-        return datetime.fromisoformat(paused_str)
+        return _parse_dt(self._core.paused)
 
     @property
     def stop_time(self) -> Union[datetime, None]:
         """
         Return the timestamp when the job was manually stopped.
         """
-        if self.executor is not None:
-            return self.executor.get_job_stop_time(self.name)
-
-        if not self.daemon.stop_path.exists():
-            return None
-
-        stop_data = self.daemon._read_stop_file()
-        if not stop_data:
-            return None
-
-        stop_time_str = stop_data.get('stop_time', None)
-        if not stop_time_str:
-            warn(f"Could not read stop time for {self}.")
-            return None
-
-        return datetime.fromisoformat(stop_time_str)
+        return _parse_dt(self._core.stop_time)
 
     @property
     def hidden(self) -> bool:
         """
         Return a bool indicating whether this job should be displayed.
         """
-        return (
-            self.name.startswith('_')
-            or self.name.startswith('.')
-            or self._is_externally_managed
-        )
+        return self._core.hidden
 
     def check_restart(self) -> SuccessTuple:
         """
@@ -966,91 +602,54 @@ class Job:
         restart the job.
         Do not restart if the job was manually stopped.
         """
-        if self.is_running():
-            return True, f"{self} is running."
-
-        if not self.restart:
-            return True, f"{self} does not need to be restarted."
-
-        if self.stop_time is not None:
-            return True, f"{self} was manually stopped."
-
-        return self.start()
+        result = self._core.check_restart()
+        self._warn()
+        return result
 
     @property
     def label(self) -> str:
         """
         Return the job's Daemon label (joined sysargs).
         """
-        from meerschaum._internal.arguments import compress_pipeline_sysargs
-        sysargs = compress_pipeline_sysargs(self.sysargs)
-        return shlex.join(sysargs).replace(' + ', '\n+ ').replace(' : ', '\n: ').lstrip().rstrip()
+        return self._core.label
 
     @property
     def _externally_managed_file(self) -> pathlib.Path:
         """
         Return the path to the externally managed file.
         """
-        return self.daemon.path / '.externally-managed'
+        return pathlib.Path(self._core.paths()['externally_managed'])
 
     def _set_externally_managed(self):
         """
         Set this job as externally managed.
         """
         self._externally_managed = True
-        try:
-            self._externally_managed_file.parent.mkdir(exist_ok=True, parents=True)
-            self._externally_managed_file.touch()
-        except Exception as e:
-            warn(e)
+        self._core.set_externally_managed()
 
     @property
     def _is_externally_managed(self) -> bool:
         """
         Return whether this job is externally managed.
         """
-        return self.executor_keys in (None, 'local') and (
-            self._externally_managed or self._externally_managed_file.exists()
-        )
+        return self._core.is_externally_managed
 
     @property
     def env(self) -> Dict[str, str]:
         """
         Return the environment variables to set for the job's process.
         """
-        if '_env' in self.__dict__:
-            return self.__dict__['_env']
-
-        _env = self.daemon.properties.get('env', {})
-        default_env = {
-            'PYTHONUNBUFFERED': '1',
-            'LINES': str(get_config('jobs', 'terminal', 'lines')),
-            'COLUMNS': str(get_config('jobs', 'terminal', 'columns')),
-            STATIC_CONFIG['environment']['noninteractive']: 'true',
-        }
-        self._env = {**default_env, **_env}
-        return self._env
+        return self._core.env
 
     @property
     def delete_after_completion(self) -> bool:
         """
         Return whether this job is configured to delete itself after completion.
         """
-        if '_delete_after_completion' in self.__dict__:
-            return self.__dict__.get('_delete_after_completion', False)
-
-        self._delete_after_completion = self.daemon.properties.get('delete_after_completion', False)
-        return self._delete_after_completion
+        return self._core.delete_after_completion
 
     def __str__(self) -> str:
-        sysargs = self.sysargs
-        sysargs_str = shlex.join(sysargs) if sysargs else ''
-        job_str = f'Job("{self.name}"'
-        if sysargs_str:
-            job_str += f', "{sysargs_str}"'
-
-        job_str += ')'
-        return job_str
+        return self._core.describe()
 
     def __repr__(self) -> str:
         return str(self)

@@ -69,8 +69,7 @@ impl Py {
             .env("PYTHONPATH", repo_root())
             .env("MRSM_ROOT_DIR", &self.root_dir)
             .env("MRSM_PLUGINS_DIR", &self.plugins_dir)
-            .env("PYTHONHASHSEED", "0")
-            .env("MRSM_CORE", "python");
+            .env("PYTHONHASHSEED", "0");
         // Database drivers (pyodbc, ...) live in the reference interpreter's own venv.
         if let Some(venvs) = self
             .exe

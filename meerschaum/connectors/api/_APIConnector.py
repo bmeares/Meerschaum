@@ -8,19 +8,24 @@ Interact with Meerschaum APIs. May be chained together (see 'meerschaum:api_inst
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
 from meerschaum.utils.typing import Optional, List, Union
 from meerschaum.connectors import InstanceConnector
-from meerschaum.utils.warnings import warn, error
-from meerschaum.utils.packages import attempt_import
 
 required_attributes = {
     'host',
 }
 
+#: Attributes of the Python connector which the Rust client does not use.
+_PRIVATE_STATE = ('_rust_client', '_rust_client_pid', '_session')
+
+
 class APIConnector(InstanceConnector):
     """
     Connect to a Meerschaum API instance.
+
+    The requests are made by the Rust client (`meerschaum._core.ApiConnector`, one per connector
+    and process): the same routes, query parameters and bodies as v4. Nothing here imports
+    `requests` or `httpx`.
     """
 
     IS_THREAD_SAFE: bool = False
@@ -61,6 +66,7 @@ class APIConnector(InstanceConnector):
         clear_pipe,
         get_pipe_columns_types,
         get_pipe_columns_indices,
+        get_pipe_index_names,
         get_pipe_docs,
         get_pipe_size,
         compress_pipe,
@@ -116,6 +122,7 @@ class APIConnector(InstanceConnector):
         monitor_logs,
         monitor_logs_async,
         get_job_is_blocking_on_stdin,
+        get_job_prompt_kwargs,
         get_job_began,
         get_job_ended,
         get_job_paused,
@@ -145,11 +152,12 @@ class APIConnector(InstanceConnector):
         if 'uri' not in self.__dict__:
             self.verify_attributes(required_attributes)
         else:
-            from meerschaum.connectors.sql import SQLConnector
-            conn_attrs = SQLConnector.parse_uri(self.__dict__['uri'])
-            if 'host' not in conn_attrs:
-                raise Exception(f"Invalid URI for '{self}'.")
-            self.__dict__.update(conn_attrs)
+            conn_attrs = self.from_uri(self.__dict__['uri'], as_dict=True)
+            self.__dict__.update({
+                key: val
+                for key, val in conn_attrs.items()
+                if key not in ('label', 'protocol')
+            })
 
         self.url = (
             self.protocol + '://' +
@@ -160,71 +168,87 @@ class APIConnector(InstanceConnector):
                 else ''
             )
         )
-        self._token = None
-        self._expires = None
-        self._session = None
+        self._rust_client_obj = None
         self._instance_keys = self.__dict__.get('instance_keys', None)
 
+    def _rust_client(self):
+        """
+        Return the `meerschaum._core.ApiConnector` of this connector (built once per process:
+        a forked child builds its own, which holds its own HTTP connections and token).
+        """
+        import os
+        attributes = {
+            key: value
+            for key, value in self.__dict__.items()
+            if not str(key).startswith('_')
+            and isinstance(value, (str, int, float, bool))
+        }
+        client = self.__dict__.get('_rust_client_obj', None)
+        if (
+            client is not None
+            and self.__dict__.get('_rust_client_pid', None) == os.getpid()
+            and self.__dict__.get('_rust_client_attributes', None) == attributes
+        ):
+            return client
+
+        ### A new process, or credentials / address changed (`conn.password = ...`): build a client
+        ### with the current attributes (it logs in again; the native flows find it by them).
+        from meerschaum import _core
+        client = _core.ApiConnector(self.label, attributes)
+        self.__dict__['_rust_client_obj'] = client
+        self.__dict__['_rust_client_pid'] = os.getpid()
+        self.__dict__['_rust_client_attributes'] = attributes
+        return client
+
+        from meerschaum import _core
+        attributes = {
+            key: value
+            for key, value in self.__dict__.items()
+            if not str(key).startswith('_')
+            and isinstance(value, (str, int, float, bool))
+        }
+        client = _core.ApiConnector(self.label, attributes)
+        self.__dict__['_rust_client_obj'] = client
+        self.__dict__['_rust_client_pid'] = os.getpid()
+        return client
+
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        for key in ('_rust_client_obj', '_rust_client_pid', '_rust_client_attributes', '_session'):
+            state.pop(key, None)
+        state['_rust_client_obj'] = None
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
 
     @property
     def URI(self) -> str:
         """
         Return the fully qualified URI.
         """
-        import urllib.parse
-        username = self.__dict__.get('username', None)
-        password = self.__dict__.get('password', None)
-        client_id = self.__dict__.get('client_id', None)
-        client_secret = self.__dict__.get('client_secret', None)
-        api_key = self.__dict__.get('api_key', None)
-        creds = (username + ':' + password + '@') if username and password else ''
-        params = {}
-        params_str = ('?' + urllib.parse.urlencode(params)) if params else ''
-        return (
-            self.protocol
-            + '://'
-            + creds
-            + self.host
-            + (
-                (':' + str(self.port))
-                if self.__dict__.get('port', None)
-                else ''
-            )
-            + params_str
-        )
+        return self._rust_client().uri
 
     @property
     def session(self):
-        if self._session is None:
-            _ = attempt_import('certifi', lazy=False)
+        """
+        A `requests.Session` (not used by the connector, which makes its requests in Rust).
+        It exists for plugins which still reach for it and needs `requests` installed.
+        """
+        if self.__dict__.get('_session', None) is None:
+            from meerschaum.utils.packages import attempt_import
             requests = attempt_import('requests', lazy=False)
-            if requests:
-                self._session = requests.Session()
-            if self._session is None:
-                error("Failed to import requests. Is requests installed?")
+            if requests is None:
+                raise ImportError("Failed to import requests. Is requests installed?")
+            self._session = requests.Session()
         return self._session
 
     @property
     def token(self):
-        if self.login_scheme == 'api_key':
-            return self.api_key
-
-        expired = (
-            True if self._expires is None else (
-                (
-                    self._expires
-                    <
-                    datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(minutes=1)
-                )
-            )
-        )
-
-        if self._token is None or expired:
-            success, msg = self.login()
-            if not success and not self.__dict__.get('_emitted_warning'):
-                warn(msg, stack=False)
-                self._emitted_warning = True
-        return self._token
+        """
+        Return the API key, or the session token (logging in when it is missing or expiring).
+        """
+        return self._rust_client().token
 
     @property
     def instance_keys(self) -> Union[str, None]:

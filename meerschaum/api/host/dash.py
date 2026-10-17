@@ -94,6 +94,17 @@ def install_dash_surface() -> types.ModuleType:
     module.make_dash_app = make_dash_app
     module.get_dash_app = get_dash_app
     module.dash_app = None
+    ### The names the light `meerschaum.api.dash` package re-exports, which the helper modules
+    ### (`pipes`, `keys`, ...) import from it.
+    for name, source in (
+        ('debug', 'debug'),
+        ('_get_pipes', '_get_pipes'),
+        ('get_api_pipe', 'get_pipe'),
+        ('api_pipes', 'pipes'),
+        ('get_api_connector', 'get_api_connector'),
+        ('endpoints', 'endpoints'),
+    ):
+        setattr(module, name, getattr(api_pkg, source))
     sys.modules['meerschaum.api.dash'] = module
     setattr(api_pkg, 'dash', module)
     return module

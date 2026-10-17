@@ -5,8 +5,8 @@
 """
 The bridge to the Rust Syncing Engine (`meerschaum._core`).
 
-The engine is Rust-only by design (design §5, D14), so it is used in every `MRSM_CORE` mode: a
-bare `pipe.sync()` never reaches it (R1), but `parents=` / `children=` and `mrsm.Pipeline` do.
+The engine is Rust-only (design §5): a bare `pipe.sync()` never reaches it (R1), but
+`parents=` / `children=` and `mrsm.Pipeline` do.
 Requests and results cross as JSON text.
 """
 

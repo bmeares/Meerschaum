@@ -202,7 +202,10 @@ pub struct SqlConnector {
     flavor: Flavor,
     spec: ConnectionSpec,
     driver: SqlDriver,
-    schema: Option<String>,
+    /// `self.schema`. Unset on a lazily built connector with no configured schema until
+    /// `discover_default_schema` asks the database; `fallback_schema` answers meanwhile.
+    schema: std::sync::OnceLock<Option<String>>,
+    fallback_schema: Option<String>,
     internal_schema: Option<String>,
     /// The configuration the instance methods read.
     pub settings: InstanceSettings,
@@ -254,13 +257,9 @@ impl SqlConnector {
         } else if let Some(s) = spec.schema.clone().filter(|s| !s.is_empty()) {
             Some(s)
         } else {
-            let query = match flavor {
-                Flavor::Mssql => "SELECT SCHEMA_NAME()",
-                _ => "SELECT current_schema()",
-            };
-            match driver.value(query).await {
-                Ok(Some(SqlValue::Text(s))) => Some(s),
-                _ => flavor.default_schema().map(str::to_string),
+            match query_default_schema(&driver, flavor).await {
+                Some(s) => Some(s),
+                None => flavor.default_schema().map(str::to_string),
             }
         };
         // `SQLConnector.internal_schema`.
@@ -274,7 +273,8 @@ impl SqlConnector {
             flavor,
             spec,
             driver,
-            schema,
+            schema: std::sync::OnceLock::from(schema.clone()),
+            fallback_schema: schema,
             internal_schema,
             settings,
             state: Mutex::new(State::default()),
@@ -282,10 +282,11 @@ impl SqlConnector {
         })
     }
 
-    /// A connector whose pool connects lazily and which resolves `self.schema` without a
-    /// round trip (the configured schema, else the flavor's default). Query building works
-    /// offline; the first database call opens a connection. Must be called within a Tokio
-    /// runtime.
+    /// A connector whose pool connects lazily. `self.schema` is the configured schema; with
+    /// none, it is the flavor's default until `discover_default_schema` asks the database
+    /// (`current_schema()` / `SCHEMA_NAME()`: a role's `search_path` or a login's default
+    /// schema differs from `public` / `dbo`). Query building works offline; the first
+    /// database call opens a connection. Must be called within a Tokio runtime.
     pub fn connect_lazy(
         label: &str,
         spec: ConnectionSpec,
@@ -293,16 +294,21 @@ impl SqlConnector {
     ) -> Result<Self> {
         let driver = SqlDriver::connect_lazy(&spec)?;
         let flavor = spec.flavor;
-        let schema = if flavor.no_schema() {
+        let configured = spec.schema.clone().filter(|s| !s.is_empty());
+        let fallback_schema = if flavor.no_schema() {
             None
         } else {
-            spec.schema
+            configured
                 .clone()
-                .filter(|s| !s.is_empty())
                 .or_else(|| flavor.default_schema().map(str::to_string))
         };
+        // Known now: schema-less flavors and a configured schema. Otherwise discovered later.
+        let schema = std::sync::OnceLock::new();
+        if flavor.no_schema() || configured.is_some() {
+            let _ = schema.set(fallback_schema.clone());
+        }
         let internal_schema = if flavor.no_schema() {
-            schema.clone()
+            fallback_schema.clone()
         } else {
             Some(static_config().sql.internal_schema.clone())
         };
@@ -312,11 +318,55 @@ impl SqlConnector {
             spec,
             driver,
             schema,
+            fallback_schema,
             internal_schema,
             settings,
             state: Mutex::new(State::default()),
             provider: Mutex::new(None),
         })
+    }
+
+    /// Whether `self.schema` is settled (configured, schema-less, or discovered), not the flavor
+    /// default standing in for a schema not asked of the database yet.
+    pub fn schema_known(&self) -> bool {
+        self.schema.get().is_some()
+    }
+
+    /// The gate of the `InstanceConnector` methods: a lazily built connector with no configured
+    /// schema asks the database for it before any table name is built, and refuses to run
+    /// (rather than use the flavor default, which a non-default `search_path` or default schema
+    /// would make the wrong schema) while the database cannot be asked.
+    pub async fn require_schema(&self) -> ConnectorResult<()> {
+        if self.schema.get().is_some() {
+            return Ok(());
+        }
+        self.discover_default_schema()
+            .await
+            .map(|_| ())
+            .map_err(|e| {
+                ConnectorError::Backend(format!(
+                    "Could not determine the default schema of '{}': {e}",
+                    self.label
+                ))
+            })
+    }
+
+    /// Ask the database for its default schema when none is configured (one query, cached
+    /// like v4's `SQLConnector.schema`). Returns the schema now in effect. An unreachable
+    /// database is an error and leaves the flavor default in place, so a later call retries.
+    pub async fn discover_default_schema(&self) -> Result<Option<String>> {
+        if let Some(known) = self.schema.get() {
+            return Ok(known.clone());
+        }
+        let Some(query) = default_schema_query(self.flavor) else {
+            return Ok(self.fallback_schema.clone());
+        };
+        let found = match self.driver.value(query).await? {
+            Some(SqlValue::Text(s)) => Some(s),
+            // `current_schema()` is `NULL` with an empty `search_path`.
+            _ => self.fallback_schema.clone(),
+        };
+        Ok(self.schema.get_or_init(|| found).clone())
     }
 
     /// `SQLConnector(label, uri=uri)`.
@@ -342,12 +392,15 @@ impl SqlConnector {
 
     /// `self.schema`.
     pub fn schema(&self) -> Option<&str> {
-        self.schema.as_deref()
+        self.schema
+            .get()
+            .unwrap_or(&self.fallback_schema)
+            .as_deref()
     }
 
     /// `self.instance_schema` (the schema of the `mrsm_*` tables).
     pub fn instance_schema(&self) -> Option<&str> {
-        self.schema.as_deref()
+        self.schema()
     }
 
     /// `self.internal_schema` (`_mrsm_internal` on schema flavors).
@@ -372,7 +425,7 @@ impl SqlConnector {
 
     /// The query-builder context (`self.flavor`, `self.schema`).
     pub fn ctx(&self) -> ConnectorCtx {
-        ConnectorCtx::with_schema(self.flavor, self.schema.as_deref())
+        ConnectorCtx::with_schema(self.flavor, self.schema())
     }
 
     /// Bind a pipe to this instance (its flavor-truncated `target` and the configured defaults).
@@ -784,5 +837,24 @@ pub(crate) fn kv_int(v: Option<&KValue>) -> Option<i64> {
 impl From<SqlError> for ConnectorError {
     fn from(e: SqlError) -> Self {
         ConnectorError::Backend(e.to_string())
+    }
+}
+
+/// The query `sqlalchemy.inspect(engine).default_schema_name` runs on a server flavor.
+fn default_schema_query(flavor: Flavor) -> Option<&'static str> {
+    if flavor.no_schema() {
+        return None;
+    }
+    Some(match flavor {
+        Flavor::Mssql => "SELECT SCHEMA_NAME()",
+        _ => "SELECT current_schema()",
+    })
+}
+
+/// The database's default schema, or `None` when it cannot be read.
+async fn query_default_schema(driver: &SqlDriver, flavor: Flavor) -> Option<String> {
+    match driver.value(default_schema_query(flavor)?).await {
+        Ok(Some(SqlValue::Text(s))) => Some(s),
+        _ => None,
     }
 }

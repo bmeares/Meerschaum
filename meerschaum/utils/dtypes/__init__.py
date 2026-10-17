@@ -18,7 +18,7 @@ import meerschaum as mrsm
 from meerschaum.utils.typing import Dict, Union, Any, Optional, Tuple
 from meerschaum.utils.warnings import warn
 from meerschaum._internal.static import STATIC_CONFIG as _STATIC_CONFIG
-from meerschaum._core._gate import rust_impl as _rust_impl
+from meerschaum import _core
 
 MRSM_ALIAS_DTYPES: Dict[str, str] = {
     'decimal': 'numeric',
@@ -94,44 +94,8 @@ def to_pandas_dtype(dtype: str) -> str:
     """
     Cast a supported Meerschaum dtype to a Pandas dtype.
     """
-    if (_rust := _rust_impl('to_pandas_dtype')) is not None:
-        return _rust(dtype)
-    known_dtype = MRSM_PD_DTYPES.get(dtype, None)
-    if known_dtype is not None:
-        return known_dtype
-
-    alias_dtype = MRSM_ALIAS_DTYPES.get(dtype, None)
-    if alias_dtype is not None:
-        return MRSM_PD_DTYPES[alias_dtype]
-
-    if dtype.startswith('numeric'):
-        return MRSM_PD_DTYPES['numeric']
-
-    if dtype.startswith('geometry'):
-        return MRSM_PD_DTYPES['geometry']
-
-    if dtype.startswith('geography'):
-        return MRSM_PD_DTYPES['geography']
-
-    ### NOTE: Kind of a hack, but if the first word of the given dtype is in all caps,
-    ### treat it as a SQL db type.
-    if dtype.split(' ')[0].isupper():
-        from meerschaum.utils.dtypes.sql import get_pd_type_from_db_type
-        return get_pd_type_from_db_type(dtype)
-
-    from meerschaum.utils.packages import attempt_import
-    _ = attempt_import('pyarrow', lazy=False)
-    pandas = attempt_import('pandas', lazy=False)
-
-    try:
-        return str(pandas.api.types.pandas_dtype(dtype))
-    except Exception:
-        warn(
-            f"Invalid dtype '{dtype}', will use 'object' instead:\n"
-            + f"{traceback.format_exc()}",
-            stack=False,
-        )
-    return 'object'
+    _rust = _core.to_pandas_dtype
+    return _rust(dtype)
 
 
 def are_dtypes_equal(
@@ -156,104 +120,8 @@ def are_dtypes_equal(
     -------
     A `bool` indicating whether the two dtypes are to be considered equivalent.
     """
-    if (_rust := _rust_impl('are_dtypes_equal')) is not None:
-        return _rust(ldtype, rdtype=rdtype)
-    if isinstance(ldtype, dict) and isinstance(rdtype, dict):
-        lkeys = sorted([str(k) for k in ldtype.keys()])
-        rkeys = sorted([str(k) for k in rdtype.keys()])
-        for lkey, rkey in zip(lkeys, rkeys):
-            if lkey != rkey:
-                return False
-            ltype = ldtype[lkey]
-            rtype = rdtype[rkey]
-            if not are_dtypes_equal(ltype, rtype):
-                return False
-        return True
-
-    try:
-        if ldtype == rdtype:
-            return True
-    except Exception:
-        warn(f"Exception when comparing dtypes, returning False:\n{traceback.format_exc()}")
-        return False
-
-    ### Sometimes pandas dtype objects are passed.
-    ldtype = str(ldtype).split('[', maxsplit=1)[0]
-    rdtype = str(rdtype).split('[', maxsplit=1)[0]
-
-    if ldtype in MRSM_ALIAS_DTYPES:
-        ldtype = MRSM_ALIAS_DTYPES[ldtype]
-
-    if rdtype in MRSM_ALIAS_DTYPES:
-        rdtype = MRSM_ALIAS_DTYPES[rdtype]
-
-    json_dtypes = ('json', 'object')
-    if ldtype in json_dtypes and rdtype in json_dtypes:
-        return True
-
-    numeric_dtypes = ('numeric', 'decimal', 'object')
-    if (
-        ldtype in numeric_dtypes or ldtype.startswith('decimal')
-    ) and (
-        rdtype in numeric_dtypes or rdtype.startswith('decimal')
-    ):
-        return True
-
-    uuid_dtypes = ('uuid', 'object')
-    if ldtype in uuid_dtypes and rdtype in uuid_dtypes:
-        return True
-
-    bytes_dtypes = ('bytes', 'object', 'binary', 'large_binary')
-    if ldtype in bytes_dtypes and rdtype in bytes_dtypes:
-        return True
-
-    geometry_dtypes = ('geometry', 'object', 'geography')
-    if ldtype in geometry_dtypes and rdtype in geometry_dtypes:
-        return True
-
-    if ldtype.lower() == rdtype.lower():
-        return True
-
-    datetime_dtypes = ('datetime', 'timestamp')
-    ldtype_found_dt_prefix = False
-    rdtype_found_dt_prefix = False
-    for dt_prefix in datetime_dtypes:
-        ldtype_found_dt_prefix = (dt_prefix in ldtype.lower()) or ldtype_found_dt_prefix
-        rdtype_found_dt_prefix = (dt_prefix in rdtype.lower()) or rdtype_found_dt_prefix
-    if ldtype_found_dt_prefix and rdtype_found_dt_prefix:
-        return True
-
-    string_dtypes = ('str', 'string', 'large_string', 'string_view', 'object')
-    if ldtype in string_dtypes and rdtype in string_dtypes:
-        return True
-
-    int_dtypes = (
-        'int', 'int64', 'int32', 'int16', 'int8',
-        'uint', 'uint64', 'uint32', 'uint16', 'uint8',
-    )
-    int_substrings = ('int',)
-    if ldtype.lower() in int_dtypes and rdtype.lower() in int_dtypes:
-        return True
-    for substring in int_substrings:
-        if substring in ldtype.lower() and substring in rdtype.lower():
-            return True
-
-    float_dtypes = ('float', 'float64', 'float32', 'float16', 'float128', 'double')
-    if ldtype.lower() in float_dtypes and rdtype.lower() in float_dtypes:
-        return True
-
-    bool_dtypes = ('bool', 'boolean')
-    if ldtype in bool_dtypes and rdtype in bool_dtypes:
-        return True
-
-    date_dtypes = (
-        'date', 'date32', 'date32[pyarrow]', 'date32[day][pyarrow]',
-        'date64', 'date64[pyarrow]', 'date64[ms][pyarrow]',
-    )
-    if ldtype in date_dtypes and rdtype in date_dtypes:
-        return True
-
-    return False
+    _rust = _core.are_dtypes_equal
+    return _rust(ldtype, rdtype=rdtype)
 
 
 def is_dtype_numeric(dtype: str) -> bool:
@@ -270,16 +138,8 @@ def is_dtype_numeric(dtype: str) -> bool:
     -------
     A bool indicating the dtype is compatible with `numeric`.
     """
-    if (_rust := _rust_impl('is_dtype_numeric')) is not None:
-        return _rust(dtype)
-    dtype_lower = dtype.lower()
-
-    acceptable_substrings = ('numeric', 'float', 'double', 'int')
-    for substring in acceptable_substrings:
-        if substring in dtype_lower:
-            return True
-
-    return False
+    _rust = _core.is_dtype_numeric
+    return _rust(dtype)
 
 
 def attempt_cast_to_numeric(
@@ -1065,43 +925,8 @@ def get_geometry_type_srid(
     >>> get_geometry_type_srid('geometry[POINT, ESRI:102003]')
     ('Point', 'ESRI:102003')
     """
-    if (_rust := _rust_impl('get_geometry_type_srid')) is not None:
-        return _rust(dtype, default_type=default_type, default_srid=default_srid)
-    from meerschaum.utils.misc import is_int
-    ### NOTE: PostGIS syntax must also be parsed.
-    dtype = dtype.replace('(', '[').replace(')', ']')
-    bare_dtype = dtype.split('[', maxsplit=1)[0]
-    modifier = dtype.split(bare_dtype, maxsplit=1)[-1].lstrip('[').rstrip(']')
-    if not modifier:
-        return default_type, default_srid
-
-    parts = [
-        part.split('=')[-1].strip()
-        for part in modifier.split(',')
-    ]
-    parts_casted = [
-        (
-            int(part)
-            if is_int(part)
-            else part
-        )
-        for part in parts
-    ]
-
-    srid = default_srid
-    geometry_type = default_type
-
-    for part in parts_casted:
-        if isinstance(part, int) or ':' in str(part):
-            srid = part
-            break
-
-    for part in parts_casted:
-        if isinstance(part, str) and part != srid:
-            geometry_type = part
-            break
-
-    return geometry_type, srid
+    _rust = _core.get_geometry_type_srid
+    return _rust(dtype, default_type=default_type, default_srid=default_srid)
 
 
 def datetime_to_int(

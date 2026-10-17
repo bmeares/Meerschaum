@@ -8,10 +8,12 @@
 //! - **Authentication** is the console session store. The session id is the path segment
 //!   (`is_session_authenticated(session_id)`); the user name behind it names the terminal.
 //!   An unknown session gets v4's `401` "Unauthorized / Please log in" page (and a websocket
-//!   that is accepted and closed straight away). v4 let any logged-in user through when
-//!   `api:permissions:actions:non_admin` is true (its default), which hands every registered
-//!   user a shell on the server; v5 requires an administrator unless the same gate the actions
-//!   routes use (`system:api:permissions:actions:non_admin`) is open.
+//!   that is accepted and closed straight away). The gate is v4's `is_session_authenticated`
+//!   (`api/dash/sessions.py`): when `api:permissions:actions:non_admin` is true (its default;
+//!   `start api --secure` sets it to false) any logged-in user gets a shell, otherwise only an
+//!   administrator does. No scopes are consulted. This is **not** the gate of `POST /actions`
+//!   (`is_user_allowed_to_execute`), which reads `system:api:permissions:actions:non_admin`, a key
+//!   v4's default config does not define (so it refuses non-admins unless it is set).
 //! - **tmux.** With `api:webterm:tmux:enabled` (default) and a `tmux` binary, the shell runs in
 //!   `tmux new-session -A -s <user><session_suffix>`, so a reconnect (or a second tab) attaches
 //!   to the same session. Closing the socket kills the PTY and with it the tmux client, never the
@@ -228,15 +230,21 @@ async fn authorize(inner: &Inner, session_id: &str) -> Access {
             return Access::Unavailable;
         }
     };
-    // The same gate as the actions routes: administrators, or non-admin users when
-    // `system:api:permissions:actions:non_admin` allows them to execute.
-    let principal =
-        crate::auth::Principal::User(meerschaum_core::users::User::new(&username, None));
-    if !crate::auth::is_user_allowed_to_execute(&inner.state, Some(&principal))
-        .await
-        .success
-    {
-        return Access::Denied;
+    // PARITY: v4's `is_session_authenticated`: `api:permissions:actions:non_admin` (default true,
+    // false under `--secure`) lets every logged-in user in, else only administrators
+    // (`session_is_admin`).
+    if !inner.state.config.actions_non_admin {
+        let user = meerschaum_core::users::User::new(&username, None);
+        let user_type = inner
+            .state
+            .instance()
+            .get_user_type(&user)
+            .await
+            .ok()
+            .flatten();
+        if user_type.as_deref() != Some("admin") {
+            return Access::Denied;
+        }
     }
     Access::Granted(username)
 }

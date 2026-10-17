@@ -15,6 +15,7 @@ from meerschaum.utils.typing import (
 
 from meerschaum.utils.debug import dprint
 from meerschaum.utils.warnings import warn
+from meerschaum.connectors.sql._create_engine import import_sqlalchemy, import_pandas_for_sql
 
 ### database flavors that can use bulk insert
 _bulk_flavors = {
@@ -143,7 +144,8 @@ def read(
     import traceback
     from decimal import Decimal
 
-    pd = import_pandas()
+    sqlalchemy = import_sqlalchemy()
+    pd = import_pandas_for_sql()
     is_dask = 'dask' in pd.__name__
     dd = pd if is_dask else None
     pandas = attempt_import('pandas')
@@ -164,7 +166,6 @@ def read(
             dtype[col] = 'datetime64[us]'
 
     pool = get_pool(workers=workers)
-    sqlalchemy = attempt_import("sqlalchemy", lazy=False)
     default_chunksize = self._sys_config.get('chunksize', None)
     chunksize = chunksize if chunksize != -1 else default_chunksize
     if chunksize is None and as_iterator:
@@ -255,9 +256,9 @@ def read(
             result = chunk_hook(*chunk_args, **chunk_kwargs)
         except Exception:
             result = False, traceback.format_exc()
-            from meerschaum.utils.formatting import get_console
+            from meerschaum.utils.formatting import print_exception
             if not silent:
-                get_console().print_exception()
+                print_exception()
 
         ### If the chunk fails to process, try it again one more time.
         if isinstance(result, tuple) and result[0] is False:
@@ -336,9 +337,9 @@ def read(
             dprint(f"[{self}] Failed to execute query:\n\n{query_or_table}\n\n")
         if not silent:
             warn(str(e), stacklevel=3)
-        from meerschaum.utils.formatting import get_console
+        from meerschaum.utils.formatting import print_exception
         if not silent:
-            get_console().print_exception()
+            print_exception()
 
         return None
 
@@ -365,9 +366,9 @@ def read(
                     break
         except Exception as e:
             warn(f"[{self}] Failed to retrieve query results:\n" + str(e), stacklevel=3)
-            from meerschaum.utils.formatting import get_console
+            from meerschaum.utils.formatting import print_exception
             if not silent:
-                get_console().print_exception()
+                print_exception()
 
     ### If no chunks returned, read without chunks
     ### to get columns
@@ -446,10 +447,12 @@ def value(
     Any value returned from the query.
 
     """
-    from meerschaum.utils.packages import attempt_import
+    ### A missing `sql` extra is an `ImportError`, not a swallowed failure.
+    import_sqlalchemy()
     if self.flavor == 'duckdb':
         use_pandas = True
     if use_pandas:
+        import_pandas_for_sql()
         try:
             return self.read(query, *args, **kw).iloc[0, 0]
         except Exception:
@@ -556,7 +559,7 @@ def exec(
         )
 
     from meerschaum.utils.packages import attempt_import
-    sqlalchemy = attempt_import("sqlalchemy", lazy=False)
+    sqlalchemy = import_sqlalchemy()
     if debug:
         dprint(f"[{self}] Executing query:\n{query}")
 
@@ -664,7 +667,7 @@ def exec_queries(
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.packages import attempt_import
-    sqlalchemy, sqlalchemy_orm = attempt_import('sqlalchemy', 'sqlalchemy.orm', lazy=False)
+    sqlalchemy, sqlalchemy_orm = import_sqlalchemy('sqlalchemy', 'sqlalchemy.orm')
     session = sqlalchemy_orm.Session(self.engine)
 
     result = None
@@ -836,8 +839,8 @@ def to_sql(
     from meerschaum.utils.misc import interval_str
     from meerschaum.connectors.sql._create_engine import flavor_configs
     from meerschaum.utils.packages import attempt_import, import_pandas
-    sqlalchemy = attempt_import('sqlalchemy', debug=debug, lazy=False)
-    pd = import_pandas()
+    sqlalchemy = import_sqlalchemy()
+    pd = import_pandas_for_sql()
     is_dask = 'dask' in df.__module__
 
     bytes_cols = get_bytes_cols(df)

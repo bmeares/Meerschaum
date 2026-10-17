@@ -272,8 +272,13 @@ fn no_vars() -> Vec<(String, String)> {
     Vec::new()
 }
 
-fn process_vars() -> Vec<(String, String)> {
-    std::env::vars().collect()
+/// The process environment as strings, in order. A variable that is not valid UTF-8 is skipped
+/// (`std::env::vars()` panics on it).
+pub fn process_vars() -> Vec<(String, String)> {
+    // `std::env::vars()` panics on a variable that is not valid UTF-8; skip those.
+    std::env::vars_os()
+        .filter_map(|(k, v)| Some((k.into_string().ok()?, v.into_string().ok()?)))
+        .collect()
 }
 
 impl<'a> Runtime<'a> {
@@ -824,7 +829,13 @@ fn run_action(
             .unwrap_or_else(|| Ok(SuccessTuple::fail("Unhandled action."))),
         other => match crate::native::run(other, args, rt) {
             Some(r) => r,
-            None => crate::python::core_action(&resolved.display_name(), args, rt),
+            None => Err(ActionError::new(
+                "NotImplementedError",
+                format!(
+                    "The action `{}` has no native implementation.",
+                    resolved.display_name()
+                ),
+            )),
         },
     };
     match result {
@@ -1033,12 +1044,16 @@ fn timed_pipeline_step(
             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
                 if std::time::Instant::now() >= deadline {
-                    // The step leads its own process group: SIGKILL the whole group.
-                    let _ = Command::new("kill")
-                        .args(["-KILL", "--", &format!("-{}", child.id())])
-                        .stdout(Stdio::null())
-                        .stderr(Stdio::null())
-                        .status();
+                    // The step leads its own process group (`setsid`, unix only): SIGKILL the
+                    // whole group. Elsewhere only the direct child is killed (below), and
+                    // processes it started may outlive the timeout.
+                    #[cfg(unix)]
+                    if let Some(pgid) = rustix::process::Pid::from_raw(child.id() as i32) {
+                        let _ = rustix::process::kill_process_group(
+                            pgid,
+                            rustix::process::Signal::KILL,
+                        );
+                    }
                     let _ = child.kill();
                     let _ = child.wait();
                     result = Some(SuccessTuple::fail(format!(

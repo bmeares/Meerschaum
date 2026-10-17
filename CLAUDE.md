@@ -23,14 +23,22 @@ and layering are in `crates/README.md`; the user-facing story is `docs/zensical/
   route, and the Python public API. `SQLConnector.read/exec/value/to_sql/.engine/get_tables()` stay
   SQLAlchemy (D16, extra `meerschaum[sql]`). The base wheel has **no runtime dependencies** (D20); pandas,
   polars, geo, sql, api, dash, shell, cli-tools, gui and full are extras.
-- **Where the branch is now.** The parity phase: the v4 Python core is still in the tree and a
-  development-only gate (`MRSM_CORE`, below) routes guarded functions to Rust. D14 deletes the Python
-  core and the gate before 5.0.0. Never document `MRSM_CORE` for users.
+- **Where the branch is now.** After D14 (wave 16): the v4 Python core and the development gate that
+  routed it to Rust are gone, so there is one implementation and tests run once. `meerschaum._core`
+  is **required** (an unbuilt tree raises `CoreNotBuiltError`, naming `scripts/rust/build_py.sh`).
+  A removed v4 module raises a `ModuleNotFoundError` naming its replacement
+  (`meerschaum/_internal/_removed.py`: add an entry when you delete a module). The CLI is the `mrsm`
+  binary (`meerschaum/_internal/binary.py`; `MRSM_BIN` overrides the lookup): `python -m meerschaum`,
+  the console script and the shell (`Shell.cmdloop()`) run it. `meerschaum.entry([...])` does not
+  start a process: it runs the same native dispatcher in-process (`_core.entry`). There is no Python CLI. v4 stays the oracle only through the
+  `.venv-ref` parity fixtures and the recordings in `tests/oracle/` (`tests/_oracle.py`).
 
 ## Isolation rules (read before running anything)
 
-- **Always set a scratch root and plugins dir**: `MRSM_ROOT_DIR=./test_root` (or `$(mktemp -d)`) and
+- **Always set a scratch root and plugins dir**: `MRSM_ROOT_DIR=./test_root` (or a fresh `mktemp -d`
+  under `~/.cache/mrsm-<you>/`, **not** `/tmp`: it is a tmpfs near its inode limit) and
   `MRSM_PLUGINS_DIR=./tests/plugins` (or an empty temp dir). Never touch the real `~/.config/meerschaum`.
+  Delete scratch roots by literal path when done.
   `cargo` processes get the tracked throwaway root `.mrsm-cargo-root` from `.cargo/config.toml` unless
   `MRSM_ROOT_DIR` is already set.
 - **Debug builds refuse the default root.** `target/debug/mrsm` (and `maturin develop` builds) exit
@@ -45,6 +53,11 @@ and layering are in `crates/README.md`; the user-facing story is `docs/zensical/
   must itself have `meerschaum` installed (`scripts/parity/setup_reference.sh` builds it).
 - **Never set `CARGO_TARGET_DIR`.** Every crate shares `target/` (Polars/Arrow compile once; disk on
   the self-hosted runner is limited). Concurrent builds block on the directory lock; batch them.
+  Several agents may share the tree: take the extension build lock too (`flock /tmp/mrsm-build-py.lock
+  scripts/rust/build_py.sh`), and never `git stash` / `checkout` / `restore` / `clean` / `reset`.
+- **Verify on a fresh root, like CI.** CI starts from `git clean -ffdx`: a test that passes only
+  because `./test_root` already holds a plugin venv or cache is broken. Tests that need plugin venvs
+  create them in fixtures. Leave no processes behind (`pgrep -af 'target/debug/mrsm|meerschaum'`).
 - **Never run two `scripts/test.sh` invocations (or `test.sh` + an `api`-flavor pytest) at once**:
   they share `test_root` and the test API on port 8989, and the contention looks like real bugs
   (`Connection refused`, pool exhaustion).
@@ -62,10 +75,10 @@ export CARGO_INCREMENTAL=0                 # what CI uses; optional locally
 |---|---|
 | `cargo build -p meerschaum-cli` | the debug `mrsm` binary at `target/debug/mrsm` (what `tests/console` runs) |
 | `cargo build --release -p meerschaum-cli` | the release binary (`scripts/bench/run.py` and Docker use it) |
-| `scripts/rust/build_py.sh [--debug] [--no-polars]` | builds `crates/meerschaum-py` with maturin and drops `meerschaum/_core/_core.abi3.so` into the working tree (release by default; the only way the façade's Rust paths and the engine work from Python). Needs `maturin` (`uv tool install maturin`) and a Python >= 3.11 (`PYTHON=...`). Keep `PYTHON` stable between runs or Polars rebuilds. |
+| `flock /tmp/mrsm-build-py.lock scripts/rust/build_py.sh [--debug] [--no-polars]` | builds `crates/meerschaum-py` with maturin and drops `meerschaum/_core/_core.abi3.so` into the working tree (release by default, ~10 min, atomic swap; the `meerschaum` package does not work without it). Needs `maturin` (`uv tool install maturin`) and a Python >= 3.11 (`PYTHON=...`). Keep `PYTHON` stable between runs or Polars rebuilds. Always under the `flock`: concurrent builds corrupt each other. |
 | `scripts/rust/clean_py.sh [--cargo]` | removes the built extension |
 | `cargo build -p meerschaum-plugin --example native_demo` | the example C-ABI plugin |
-| `scripts/mrsm.sh <args>` | `python -m meerschaum` against `./test_root` + `./tests/plugins` (the Python façade, not the binary) |
+| `scripts/mrsm.sh <args>` | `python -m meerschaum` against `./test_root` + `./tests/plugins` (the façade launcher: it runs the `mrsm` binary, `MRSM_BIN` or `target/{release,debug}/mrsm`) |
 
 ### Checks (what CI runs; `scripts/rust/ci.sh <step>` reproduces each job)
 
@@ -97,12 +110,11 @@ their host ports are in `tests/connectors.py` and `crates/meerschaum-sql/README.
 ### Python tests (pytest)
 
 ```bash
-# sqlite, one MRSM_CORE mode. Run each mode SERIALLY: never pass `-n` in python mode.
-MRSM_CORE=rust MRSM_TEST_FLAVORS=sqlite PYTHONPATH=$(pwd) MRSM_ROOT_DIR=./test_root MRSM_PLUGINS_DIR=./tests/plugins \
+# sqlite; the suite runs once. Needs the built extension and the `mrsm` binary (target/debug/mrsm or MRSM_BIN).
+MRSM_TEST_FLAVORS=sqlite PYTHONPATH=$(pwd) MRSM_ROOT_DIR=./test_root MRSM_PLUGINS_DIR=./tests/plugins \
   python -m pytest tests/ -q -p no:cacheprovider \
     --ignore=tests/test_jobs.py --ignore=tests/test_mcp.py --ignore=tests/test_listen_shutdown.py \
-    --ignore=tests/test_api_config.py --ignore=tests/api_host --ignore=tests/console
-MRSM_CORE=python ... python -m pytest tests/ ...            # the same, python mode (3 tests are rust-only / python-only; see PARITY.md)
+    --ignore=tests/api_host --ignore=tests/console
 
 # a single file / test
 MRSM_TEST_FLAVORS=sqlite PYTHONPATH=$(pwd) MRSM_ROOT_DIR=./test_root MRSM_PLUGINS_DIR=./tests/plugins \
@@ -113,10 +125,13 @@ MRSM_TEST_FLAVORS=sqlite PYTHONPATH=$(pwd) MRSM_ROOT_DIR=./test_root MRSM_PLUGIN
 MRSM_TEST_FLAVORS=sqlite ./scripts/test.sh db ""
 ```
 
-- `MRSM_CORE` is read once at import (`meerschaum/_core/_gate.py`): `python` (default), `rust`, or
-  `rust:feature_a,feature_b`. Tests that compare modes flip it with `_gate.set_mode()` in one process.
+- Tests that used to compare the Python and Rust implementations replay recordings of the
+  parity-phase Python mode (`tests/_oracle.py`, type-tagged JSON `tests/oracle/<module>.json`, keyed
+  by node id, read without `pickle`). They are not v4.1.4 output and cannot be re-recorded (the code
+  that produced them is deleted); a test whose data depends on the pandas major lists itself in
+  `pandas_dependent` and skips under another major.
 - Tests needing the extension (`test_pipeline.py`, `test_core_pipe.py`, `test_d14_bindings.py`, ...)
-  skip themselves when `_core.load()` is `None`; build it first or you are testing nothing.
+  fail when it is not built (a broken build must not skip); build it first.
 - `MRSM_PLUGINS_DIR` must be `./tests/plugins`: `test_maintenance.py`, `test_verify.py`, `test_worker.py`
   and the engine tests need the synthetic `stress` plugin there (an empty plugins dir makes them fail
   for harness reasons, not façade bugs); `test_page_figure.py` and `tests/console` use the `w7_*` plugins.
@@ -180,31 +195,28 @@ depends on. Verify with `cargo tree -p <crate> -e normal --depth 1`.
 
 | Path | Role |
 |---|---|
-| `_core/` | loader package (`__init__.py`, stdlib only, lazy PEP 562 load of `_core.abi3.so`; `AVAILABLE`, `LOAD_ERROR`, `CoreNotBuiltError`) and the dev-only gate `_gate.py` (`GATED_FEATURES`, `GATED_CLASSES`, `rust_impl()`, `rust_method()`) |
-| `core/Pipe/` | the façade `Pipe`; under `MRSM_CORE=rust` the parameter store is `_core.Pipe` and `_live_parameters.py` provides the live `pipe.parameters` views (`LiveDict`/`RawDict`) |
+| `_core/` | loader package (`__init__.py`, stdlib only, lazy PEP 562 load of `_core.abi3.so`; `AVAILABLE`, `LOAD_ERROR`, `CoreNotBuiltError`); the extension is required |
+| `_internal/` | `binary.py` (finds and runs the `mrsm` binary: `MRSM_BIN`, the interpreter's scripts dir, `PATH`, a checkout's `target/`), `entry.py` (`entry()` calls `_core.entry`, the in-process dispatcher), `_removed.py` (the `ModuleNotFoundError` finder naming replacements of deleted modules), `arguments/`, `shell/` |
+| `core/Pipe/` | the façade `Pipe`; the parameter store is `_core.Pipe` and `_live_parameters.py` provides the live `pipe.parameters` views (`LiveDict`/`RawDict`); methods call the `_core.pipe_*` bindings |
 | `core/Pipeline/` | `mrsm.Pipeline`, `Plan`, `RunResult`, `pipe.sync(parents=, children=)`, event decoding (`_events.py`), calls into `_core` (`_engine.py`). Rust-only: needs the built extension |
 | `connectors/` | façades; `SQLConnector._rust_method()` builds one `_core.SqlConnector` per Python connector (rebuilt when the PID changes); `read/exec/value/to_sql/.engine` stay SQLAlchemy |
 | `plugins/` | the SDK decorators, `_page.py` (`figure()` / `figure_json()` for the page contract) |
 | `worker/` | `python -m meerschaum.worker`: the v4 plugin machinery driven over the worker protocol |
 | `api/host/` | `python -m meerschaum.api.host`: the FastAPI host for `@api_plugin`, plugin MCP tools, and `host/dash.py` (the Dash shim mounting plugin apps at `/dash/<plugin>/`) |
-| `api/`, `actions/`, `utils/`, `config/` | still the v4 code during the parity phase; functions listed in `_gate.GATED_FEATURES` carry a `rust_impl` guard at the top. The D14 removal plan (what goes, what stays as SDK) is the last table in `crates/meerschaum-py/PARITY.md` |
+| `api/`, `actions/`, `utils/`, `config/` | what is left of the v4 packages: SDK helpers and façades over `_core` (`config` is the live dict plus `_core.get_config`; `utils.daemon.Daemon` and `jobs.Job` read and control the Rust supervisor; `actions.actions[<name>]` dispatches to the binary; `api/` keeps `host/` and the helpers the host uses). Everything else was deleted: see the D14 table at the end of `crates/meerschaum-py/PARITY.md` and "Removed in 5.0" in the migration guide |
 
-### D14 bindings and the gate
+### Façade pattern
 
-A guarded function looks like
-
-```python
-if (_rust := _rust_impl('filter_unseen_df')) is not None:
-    return _rust(old_df, new_df, ...)
-```
-
-`rust_impl()` returns `None` (run Python) unless the gate selects the feature and `_core` binds the
-name; errors inside a bound function propagate. Class methods use `_gate.rust_method(self, name)`,
-which also returns `None` for stub objects without `_rust_method` (tests and plugins call connector
-functions with `SimpleNamespace` stand-ins, so guards must never touch `self` first). Routed SQL
-flavors are those with a Rust driver; `mssql`, `oracle`, `duckdb` and in-memory SQLite stay on the v4
-path from Python. A Rust-mode result that differs from python mode is a parity bug: fix it at the
-boundary (`src/pandas_bridge.rs` dtype hints) or in the kernel, and add a row to `PARITY.md`.
+Façade methods call one `_core` binding each (`_core.pipe_get_data(...)`, `_core.sync_pipe(...)`,
+`SQLConnector._rust_method(name)` over one `_core.SqlConnector` per Python connector), and keep only
+argument adaptation, caches and the pandas/Polars boundary in Python. There is no Python fallback:
+an instance without a usable Rust driver is an error naming the cause (`oracle` needs `libclntsh`),
+never a silent v4 read. `SQLConnector._rust_method` raises `AttributeError` for a name the extension
+does not bind (`read`, `exec`, ... stay SQLAlchemy and raise an `ImportError` naming `meerschaum[sql]`
+when the extra is missing). A result that differs from v4 is a parity
+bug: fix it at the boundary (`src/pandas_bridge.rs` dtype hints) or in the kernel, and add a row to
+`PARITY.md` (the `.venv-ref` fixtures are the reference for v4.1.4; `tests/oracle/` holds recordings of the
+parity-phase Python mode).
 
 ### Parity fixtures
 
@@ -308,8 +320,8 @@ interpreter the binary runs workers with (`tests/console` sets it to `sys.execut
 
 ### Python
 
-- The public API is frozen (§11.1); internal modules are being deleted (D14). New Python code goes in
-  the SDK/façade/host surfaces, never into the v4 core paths slated for removal.
+- The public API is frozen (§11.1); the v4 internal modules are deleted (D14). New Python code goes in
+  the SDK/façade/host surfaces, never back into a v4 core path.
 - `SuccessTuple` returns, `warn`/`error`/`info`/`dprint`, `attempt_import` for anything heavy (never a
   module-level import of pandas/polars/SQLAlchemy/Dash), `filter_arguments` / `filter_keywords` when
   calling plugin code, duck typing for pipes and users (no `isinstance` checks on user objects).
@@ -367,4 +379,4 @@ organizations, home directories, hostnames or credentials.
 - **`test.sh` and `pytest.yaml` wipe `target/`** on the shared self-hosted runner (default
   `clean: true`), so the next Rust CI run is a cold build; `rust.yaml` keeps `target/` and `.venv-ref/`.
 - **Read pytest summaries carefully**: "N passed, 2 warnings" is not "2 failed"; the two
-  `test_worker.py` codec tests are order-dependent (pass alone, fail after the suite) in both modes.
+  `test_worker.py` codec tests are order-dependent (pass alone, fail after the suite).

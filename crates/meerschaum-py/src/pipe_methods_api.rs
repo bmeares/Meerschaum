@@ -262,11 +262,38 @@ fn frame_out<'py>(
     dtypes: &IndexMap<String, String>,
     as_polars: bool,
 ) -> PyResult<Bound<'py, PyAny>> {
+    frame_out_with(py, frame, dtypes, as_polars, true)
+}
+
+/// [`frame_out`]; `hinted` false builds the pandas frame the way v4 built one from JSON documents
+/// (nullable dtypes, [`crate::api_client_api::nullable_hints`]): what an instance whose reads are
+/// not typed by the pipe's dtypes hands back, see [`hinted_reads`].
+fn frame_out_with<'py>(
+    py: Python<'py>,
+    frame: &Frame,
+    dtypes: &IndexMap<String, String>,
+    as_polars: bool,
+    hinted: bool,
+) -> PyResult<Bound<'py, PyAny>> {
     if as_polars {
         return frame_to_polars(py, frame, dtypes);
     }
     let ctx = PyCtx::new(py)?;
-    frame_to_pandas(&ctx, frame, &out_spec(read_hints(dtypes)))
+    let hints = if hinted {
+        read_hints(dtypes)
+    } else {
+        crate::api_client_api::nullable_hints(frame)
+    };
+    frame_to_pandas(&ctx, frame, &out_spec(hints))
+}
+
+/// Whether the instance's reads carry the pipe's dtypes before `Pipe.enforce_dtypes` (a SQL
+/// instance reads with `dtype=`, custom instances are as the worker returned them). An `api:` /
+/// `valkey:` instance's v4 frame is built from JSON documents (`parse_df_datetimes`: the nullable
+/// `Int64`, `Float64`, `boolean`, `string`), and the enforcement then casts what the pipe's
+/// dtypes declare.
+fn hinted_reads(core: &Pipe) -> bool {
+    !core.instance_keys().starts_with("api:") && !core.instance_keys().starts_with("valkey:")
 }
 
 /// Documents as dictionaries (database `NULL`s are `None`).
@@ -308,6 +335,7 @@ fn enforced_frame<'py>(
     dtypes: &IndexMap<String, String>,
     ctx: Option<&PipeDtypesContext>,
     as_polars: bool,
+    hinted: bool,
 ) -> PyResult<Bound<'py, PyAny>> {
     // A column `select_columns` named that the table does not have comes back as nulls of the
     // `string` dtype (`add_missing_cols_to_df`); it is not one of the pipe's dtypes.
@@ -319,7 +347,7 @@ fn enforced_frame<'py>(
             }
         }
     }
-    let df = frame_out(py, frame, &hint_dtypes, as_polars)?;
+    let df = frame_out_with(py, frame, &hint_dtypes, as_polars, hinted)?;
     let Some(ctx) = ctx.filter(|c| !c.dtypes.is_empty() && !as_polars) else {
         return Ok(df);
     };
@@ -348,12 +376,13 @@ fn data_out<'py>(
     ctx: Option<&PipeDtypesContext>,
     as_docs: bool,
     as_polars: bool,
+    hinted: bool,
 ) -> PyResult<Bound<'py, PyAny>> {
     match data {
         Data::Missing if as_docs => Ok(PyList::empty(py).into_any()),
         Data::Missing => Ok(py.None().into_bound(py)),
         Data::Docs(docs) => Ok(docs_out(py, &docs)?.into_any()),
-        Data::Frame(frame, dtypes) => enforced_frame(py, &frame, &dtypes, ctx, as_polars),
+        Data::Frame(frame, dtypes) => enforced_frame(py, &frame, &dtypes, ctx, as_polars, hinted),
     }
 }
 
@@ -467,12 +496,13 @@ pub fn pipe_get_data<'py>(
     let args = with_kwargs(args, begin, kwargs)?;
     let opened = open(py, pipe, context, false)?;
     let core = opened.core.clone();
+    let hinted = hinted_reads(&core);
     let (data, ctx) = facade::spawn_block_on(py, async move {
         let reader = opened.reader()?;
         read_with_context(&reader, &core, &args).await
     })
     .map_err(run_err)?;
-    data_out(py, data, ctx.as_ref(), as_docs, as_polars)
+    data_out(py, data, ctx.as_ref(), as_docs, as_polars, hinted)
 }
 
 /// The chunks of `Pipe.get_data(as_iterator=True)`: one read per `get_chunk_bounds` chunk
@@ -550,6 +580,7 @@ impl PipeChunks {
                 ..self.args.clone()
             };
             let as_docs = args.as_docs;
+            let hinted = hinted_reads(&self.opened.core);
             let (data, ctx) = facade::spawn_block_on(py, async move {
                 let reader = opened.reader()?;
                 read_with_context(&reader, &opened.core, &args).await
@@ -560,7 +591,7 @@ impl PipeChunks {
             if !single && data_len(&data) == 0 {
                 continue;
             }
-            return data_out(py, data, ctx.as_ref(), as_docs, self.as_polars).map(Some);
+            return data_out(py, data, ctx.as_ref(), as_docs, self.as_polars, hinted).map(Some);
         }
     }
 }
@@ -687,6 +718,7 @@ pub fn pipe_get_backtrack_data<'py>(
     let args = with_kwargs(args, begin, kwargs)?;
     let opened = open(py, pipe, context, false)?;
     let core = opened.core.clone();
+    let hinted = hinted_reads(&core);
     let (data, ctx) = facade::spawn_block_on(py, async move {
         let reader = opened.reader()?;
         let data = reader
@@ -695,7 +727,7 @@ pub fn pipe_get_backtrack_data<'py>(
         with_context(&reader, &core, data).await
     })
     .map_err(run_err)?;
-    data_out(py, data, ctx.as_ref(), as_docs, as_polars)
+    data_out(py, data, ctx.as_ref(), as_docs, as_polars, hinted)
 }
 
 /// `_core.pipe_get_sync_time(pipe, context, params=None, newest=True,

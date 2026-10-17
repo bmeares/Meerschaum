@@ -136,6 +136,7 @@ See [`columns`](#columns) for the available index roles and [dtypes](/reference/
 | `fetch` | Source-specific fetch config (e.g. `backtrack_minutes`) | [`fetch`](#fetch) |
 | `sql` / `query` | SQL definition for SQL-connector pipes | [`sql`, `query`](#sql-query) |
 | `reference` / `references` / `parents` / `children` | Inherit or relate other pipes' parameters | [`reference`](#reference), [`parents`](#parents) |
+| `schedule` / `min_seconds` / `retry` / `stream` | Syncing Engine: per-pipe cadence, rate limit, retries and micro-batching | [`schedule`](#schedule), [`min_seconds`](#min_seconds), [`retry`](#retry), [`stream`](#stream) |
 | `verify` | Verification-sync config (e.g. `chunk_minutes`) | [`verify`](#verify) |
 
 For more, see the full reference below or [docs.meerschaum.io](https://docs.meerschaum.io).
@@ -443,6 +444,15 @@ The keys specified in `columns` are included in `indices` by default, as well as
     ```
 ---------------
 
+## `min_seconds`
+
+*New in v5.* The shortest time between two runs of this pipe when the Syncing Engine triggers it from a parent in [continuous mode](/reference/pipelines/continuous/#children-of-a-stream). When a streaming parent flushes more often than this, the flushes are coalesced into one run of the child. Falls back to `system.engine.debounce_seconds`, then to the loop's `--min-seconds`.
+
+```yaml
+parameters:
+  min_seconds: 30
+```
+
 ## `mixed_numerics`
 
 Toggle whether a pipe will coerce mixed integer and float values into the `numeric` dtype (default `True`). Set this to `False` to disable this behavior, preventing potential schema changes on the target table (akin to `static=True`).
@@ -460,6 +470,8 @@ Toggle whether a pipe will allow null indices (default `True`). Set this to `Fal
 Associate a pipe with its upstream pipes via the `parents` (or `parent`) key. For example, syncing a SQL pipe with a defined `parent` allows for changing the data type of the `datetime` column between integer and timestamp values. The complement to `parents` is `children` (`child`).
 
 Set `parents` to a list of keys (`connector`, `metric`, `location`, etc.) or a string for the `Pipe` constructor.
+
+`parents` and `children` are the **graph edges** of the [Syncing Engine](/reference/pipelines/): with `sync pipes --parents` / `--children` (or `pipe.sync(parents=True)`, or `mrsm.Pipeline`) the engine syncs a pipe's ancestors or descendants in dependency order and never syncs a child past its parents' watermark. `{{ Pipe() }}` references in a pipe's `sql` are edges too, without declaring anything. An entry may carry `lookback_<unit>` / `lookahead_<unit>` (`seconds`, `minutes`, `hours`, `days`, `weeks`) and an `axis` to say how far a parent change reaches into the child, see [Windows for edges](/reference/pipelines/#windows-for-edges-lookback-and-lookahead). `reference` / `references` are **not** edges.
 
 ??? example
     The `parent` key corresponds to the constructor for the parent pipe.
@@ -596,6 +608,24 @@ A pipe may inherit the base parameters from another reference pipe. Set `referen
 
 ---------------
 
+## `retry`
+
+*New in v5.* Retry policy of a node in an engine run: `max` retries after the first attempt, waiting `backoff_seconds` (fixed) between attempts. Losing the pipe's lease counts as a failed attempt. See [Failures and Resuming](/reference/pipelines/#failures-and-resuming).
+
+```yaml
+parameters:
+  retry: {max: 3, backoff_seconds: 30}
+```
+
+## `schedule`
+
+*New in v5.* The cadence of a root pipe under `sync pipes --loop`, in the grammar of `--schedule` / `-s` (`every 6 hours`, `daily starting 03:00`). A pipe with a schedule only syncs when it is due; the others keep syncing every lap. A schedule that does not parse is ignored with a warning. See [Continuous Mode](/reference/pipelines/continuous/#-loop).
+
+```yaml
+parameters:
+  schedule: daily starting 03:00
+```
+
 ## `schema`
 
 When syncing a pipe via a `SQLConnector` (ignored on SQLite), you may override the connector's configured schema for the given pipe. This is useful when syncing against multiple schemas on the same database with a single `SQLConnector`.
@@ -617,6 +647,19 @@ Aliases for `fetch:definition`.
 Setting `static` will prevent new columns from being added and existing columns from changing types. This is useful for critical production situations where schemata are externally managed.
 
 ---------------
+
+## `stream`
+
+*New in v5.* Micro-batching triggers for a streaming source (`IS_STREAMING` connector) under `sync pipes --listen`. The sink flushes on whichever trigger fires first: `idle_ms` (default `250`, or `auto`), `max_latency_ms` (`2000`), `max_rows` (`5000`) and `max_bytes` (8 MB). See [Micro-batching](/reference/pipelines/continuous/#micro-batching).
+
+```yaml
+parameters:
+  stream:
+    idle_ms: 250
+    max_latency_ms: 2000
+    max_rows: 5000
+    max_bytes: 8388608
+```
 
 ## `tags`
 

@@ -17,6 +17,40 @@ from meerschaum._internal.static import STATIC_CONFIG
 ### will all be overwritten if applicable.
 
 flavor_configs = STATIC_CONFIG['sql']['create_engine_flavors']
+
+
+def import_sqlalchemy(*names: str):
+    """
+    Import SQLAlchemy modules (`sqlalchemy` by default) for the methods that stay SQLAlchemy
+    (`read`, `exec`, `value`, `to_sql`, `.engine`, D16).
+
+    Raises
+    ------
+    An `ImportError` naming the `meerschaum[sql]` extra when the package is not installed (and
+    could not be installed: `MRSM_NO_AUTO_INSTALL`).
+    """
+    from meerschaum.utils.packages import attempt_import
+    names = names or ('sqlalchemy',)
+    modules = attempt_import(*names, lazy=False, warn=False)
+    imported = modules if len(names) > 1 else (modules,)
+    if any(module is None for module in imported):
+        raise ImportError(
+            "Raw SQL (`read`, `exec`, `value`, `to_sql` and `.engine`) needs SQLAlchemy: "
+            "install the `sql` extra with `pip install 'meerschaum[sql]'`."
+        )
+    return modules
+
+
+def import_pandas_for_sql():
+    """Import pandas for `read` / `to_sql`, or raise an `ImportError` naming the extra."""
+    from meerschaum.utils.packages import import_pandas
+    pd = import_pandas()
+    if pd is None:
+        raise ImportError(
+            "`read()` and `to_sql()` use pandas: "
+            "install the `pandas` extra with `pip install 'meerschaum[pandas]'`."
+        )
+    return pd
 install_flavor_drivers = {
     'duckdb': ['duckdb', 'duckdb_engine'],
     'mysql': ['pymysql'],
@@ -39,37 +73,20 @@ flavor_dialects = {
 }
 
 
-def create_engine(
-    self,
-    include_uri: bool = False,
-    debug: bool = False,
-    **kw
-) -> 'sqlalchemy.engine.Engine':
-    """Create a sqlalchemy engine by building the engine string."""
-    from meerschaum.utils.packages import attempt_import
-    from meerschaum.utils.warnings import error, warn
-    sqlalchemy = attempt_import('sqlalchemy', lazy=False)
-    import urllib
-    import copy
-    ### Install and patch required drivers.
-    if self.flavor in install_flavor_drivers:
-        _ = attempt_import(
-            *install_flavor_drivers[self.flavor],
-            debug=debug,
-            lazy=False,
-            warn=False,
-        )
-        if self.flavor == 'mssql':
-            _init_mssql_sqlalchemy()
+def get_engine_str(self) -> str:
+    """
+    Return the SQLAlchemy URI of the connector, built from its attributes (no SQLAlchemy needed:
+    `SQLConnector.URI`, `DATABASE_URL` and `IS_THREAD_SAFE` read it).
+    """
+    import urllib.parse
+    from meerschaum.utils.warnings import error
 
     ### supplement missing values with defaults (e.g. port number)
+    if self.flavor not in flavor_configs:
+        error(f"Cannot create a connector with the flavor '{self.flavor}'.")
     for a, value in flavor_configs[self.flavor]['defaults'].items():
         if a not in self.__dict__:
             self.__dict__[a] = value
-
-    ### Verify that everything is in order.
-    if self.flavor not in flavor_configs:
-        error(f"Cannot create a connector with the flavor '{self.flavor}'.")
 
     _engine = flavor_configs[self.flavor].get('engine', None)
     _username = self.__dict__.get('username', None)
@@ -85,11 +102,6 @@ def create_engine(
         _options = dict(urllib.parse.parse_qsl(_options))
     _uri = self.__dict__.get('uri', None)
 
-    ### Handle registering specific dialects (due to installing in virtual environments).
-    if self.flavor in flavor_dialects:
-        sqlalchemy.dialects.registry.register(*flavor_dialects[self.flavor])
-
-    ### self._sys_config was deepcopied and can be updated safely
     if self.flavor in ("sqlite", "duckdb", "geopackage"):
         engine_str = f"{_engine}:///{_database}" if not _uri else _uri
         _shared_memory_getter = getattr(self, '_shared_memory_database', None)
@@ -101,11 +113,6 @@ def create_engine(
         ):
             ### One database file for SQLAlchemy and the Rust pool (see `_shared_memory_database`).
             engine_str = f"{_engine}:///{_shared_memory}"
-        if 'create_engine' not in self._sys_config:
-            self._sys_config['create_engine'] = {}
-        if 'connect_args' not in self._sys_config['create_engine']:
-            self._sys_config['create_engine']['connect_args'] = {}
-        self._sys_config['create_engine']['connect_args'].update({"check_same_thread": False})
     else:
         engine_str = (
             _engine + "://" + (_username if _username is not None else '') +
@@ -121,6 +128,45 @@ def create_engine(
                 engine_str = engine_str.replace(self.flavor, 'postgresql', 1)
             elif _uri.startswith('postgresql://'):
                 engine_str = engine_str.replace('postgresql://', 'postgresql+psycopg2://')
+    return engine_str
+
+
+def create_engine(
+    self,
+    include_uri: bool = False,
+    debug: bool = False,
+    **kw
+) -> 'sqlalchemy.engine.Engine':
+    """Create a sqlalchemy engine by building the engine string."""
+    from meerschaum.utils.packages import attempt_import
+    from meerschaum.utils.warnings import error, warn
+    sqlalchemy = import_sqlalchemy()
+    import urllib
+    import copy
+    ### Install and patch required drivers.
+    if self.flavor in install_flavor_drivers:
+        _ = attempt_import(
+            *install_flavor_drivers[self.flavor],
+            debug=debug,
+            lazy=False,
+            warn=False,
+        )
+        if self.flavor == 'mssql':
+            _init_mssql_sqlalchemy()
+
+    engine_str = get_engine_str(self)
+    _password = self.__dict__.get('password', None)
+
+    ### Handle registering specific dialects (due to installing in virtual environments).
+    if self.flavor in flavor_dialects:
+        sqlalchemy.dialects.registry.register(*flavor_dialects[self.flavor])
+
+    if self.flavor in ("sqlite", "duckdb", "geopackage"):
+        if 'create_engine' not in self._sys_config:
+            self._sys_config['create_engine'] = {}
+        if 'connect_args' not in self._sys_config['create_engine']:
+            self._sys_config['create_engine']['connect_args'] = {}
+        self._sys_config['create_engine']['connect_args'].update({"check_same_thread": False})
 
     if debug:
         dprint(

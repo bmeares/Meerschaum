@@ -42,17 +42,31 @@ cs_patterns=(            # case-sensitive (paths, handles, token shapes)
   'sk-[A-Za-z0-9_-]{20,}'
 )
 
+# Allowed by maintainer decision, scoped to one pattern and one file each (never a whole file or
+# pattern): the maintainer's original asciinema recordings under docs/zensical/assets/casts, kept
+# verbatim (jobs.cast names the private city, demo.cast a home path), and the public docs example
+# "Greenville weather" in docs/zensical/reference/pipes/tags.md (Markdown is never scanned), which
+# the generated docs/zensical/llms-full.txt copies.
+allowed_for() {
+  case "$1" in
+    greenville) printf '%s\n' --exclude=jobs.cast --exclude=llms-full.txt ;;
+    /home/bmeares) printf '%s\n' --exclude=demo.cast ;;
+  esac
+}
+
 status=0
 scan() {
   local flags=$1 pattern=$2 hits
-  if hits=$(grep -rIl $flags -E --exclude='*.py' --exclude='*.md' -- "$pattern" "${paths[@]}" 2>/dev/null) && [ -n "$hits" ]; then
+  local allowed=()
+  mapfile -t allowed < <(allowed_for "$pattern")
+  if hits=$(grep -rIl $flags -E --exclude='*.py' --exclude='*.md' ${allowed[@]+"${allowed[@]}"} -- "$pattern" "${paths[@]}" 2>/dev/null) && [ -n "$hits" ]; then
     echo "check_fixture_hygiene: pattern '$pattern' found in:"
     echo "$hits" | sed 's/^/  /'
     # For path patterns, show where they occur (line number and up to 80 characters BEFORE the
     # match, never the match or anything after it) so CI logs can locate the leaking field.
     case "$pattern" in
       /*)
-        grep -rIn $flags -o -E --exclude='*.py' --exclude='*.md' -- ".{0,80}$pattern" "${paths[@]}" 2>/dev/null \
+        grep -rIn $flags -o -E --exclude='*.py' --exclude='*.md' ${allowed[@]+"${allowed[@]}"} -- ".{0,80}$pattern" "${paths[@]}" 2>/dev/null \
           | sed -E "s#$pattern\$#<REDACTED>#" | head -n 20 | sed 's/^/    /' || true
         ;;
     esac

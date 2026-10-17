@@ -1,8 +1,8 @@
 //! The Syncing Engine from Python (design §5.2, D4, D5, R1): `pipe.sync(parents=, children=)`,
 //! `mrsm.Pipeline` and the run history.
 //!
-//! The engine is Rust-only by design (D14), so these functions are bound in every `MRSM_CORE`
-//! mode: the Python façade calls them whenever a graph traversal is asked for, and a bare
+//! The engine is Rust-only by design (D14): the Python façade calls these functions whenever a
+//! graph traversal is asked for, and a bare
 //! `pipe.sync()` never reaches this module (R1). Requests and results cross as JSON text, which
 //! keeps the boundary one function per operation and the result shapes documented in one place
 //! (`meerschaum/core/Pipeline/`).

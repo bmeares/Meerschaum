@@ -36,6 +36,7 @@ __all__ = sorted([
     'colored',
     'translate_rich_to_termcolor',
     'get_console',
+    'print_exception',
     'format_success_tuple',
     'print_tuple',
     'print_options',
@@ -220,8 +221,11 @@ def colored(text: str, *colors, as_rich_text: bool=False, **kw) -> Union[str, 'r
             _colorama_init = _init()
 
     if 'style' in kw:
-        rich = import_rich()
-        rich_text = attempt_import('rich.text')
+        import_rich(lazy=False)
+        rich_text = attempt_import('rich.text', lazy=False)
+        if rich_text is None:
+            ### `rich` is not a dependency of the base wheel: without it, text stays unstyled.
+            return text
         text_obj = rich_text.Text(text, **kw)
         if as_rich_text:
             return text_obj
@@ -255,8 +259,11 @@ def get_console():
     if console is not None:
         return console
     from meerschaum.utils.packages import import_rich, attempt_import
-    rich = import_rich()
-    rich_console = attempt_import('rich.console')
+    import_rich(lazy=False)
+    rich_console = attempt_import('rich.console', lazy=False)
+    if rich_console is None:
+        ### `rich` is not a dependency of the base wheel.
+        return None
     try:
         console = rich_console.Console(force_terminal=True, color_system='truecolor')
     except Exception:
@@ -264,6 +271,18 @@ def get_console():
         traceback.print_exc()
         console = None
     return console
+
+
+def print_exception(**kw: Any) -> None:
+    """
+    Print the exception being handled: with `rich` when it is installed, else as plain text.
+    """
+    console = get_console()
+    if console is None:
+        import traceback
+        traceback.print_exc()
+        return
+    console.print_exception(**kw)
 
 
 def print_tuple(
@@ -451,8 +470,9 @@ def print_options(
         if not nopretty:
             print()
 
-    rich = import_rich()
-    if rich is None or nopretty or no_rich:
+    ### `rich` is not a dependency of the base wheel: without it, options print as plain text.
+    rich = import_rich(lazy=False)
+    if rich is None or nopretty or no_rich or get_console() is None:
         _print_options_no_rich()
         return None
 
@@ -534,8 +554,11 @@ def fill_ansi(string: str, style: str = '') -> str:
     """
     from meerschaum.utils.packages import import_rich, attempt_import
     from meerschaum.utils.misc import iterate_chunks
-    _ = import_rich()
-    rich_ansi, rich_text = attempt_import('rich.ansi', 'rich.text')
+    _ = import_rich(lazy=False)
+    rich_ansi, rich_text = attempt_import('rich.ansi', 'rich.text', lazy=False)
+    if rich_ansi is None or rich_text is None:
+        ### `rich` is not a dependency of the base wheel: without it, text stays unstyled.
+        return string
     Text = rich_text.Text
     try:
         msg = Text.from_ansi(string)

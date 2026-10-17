@@ -637,10 +637,11 @@ impl JobExecutor for SystemdExecutor {
         {
             return SuccessTuple::fail(e.to_string());
         }
-        let process_env: Vec<(String, String)> = self
-            .process_env
-            .clone()
-            .unwrap_or_else(|| std::env::vars().collect());
+        let process_env: Vec<(String, String)> = self.process_env.clone().unwrap_or_else(|| {
+            std::env::vars_os()
+                .filter_map(|(k, v)| Some((k.into_string().ok()?, v.into_string().ok()?)))
+                .collect()
+        });
         if resolve_python(&process_env).is_none() {
             if let Ok(mut warnings) = self.warnings.lock() {
                 warnings.push(unpinned_python_warning(name));

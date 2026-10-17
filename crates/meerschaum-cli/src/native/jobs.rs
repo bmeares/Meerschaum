@@ -37,27 +37,62 @@ static STOP: OnceLock<Arc<AtomicBool>> = OnceLock::new();
 static SIGNALS: AtomicUsize = AtomicUsize::new(0);
 static HANDLER: OnceLock<()> = OnceLock::new();
 
+static EMBEDDED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Mark this process as embedding the dispatcher (the Python extension). The process-wide
+/// SIGINT / SIGTERM handler of [`install_stop_handler`], which ends the process on a second
+/// signal, belongs to the `mrsm` binary: an embedding host is never given one, and sets
+/// [`stop_requested_flag`] for the call it runs instead.
+pub fn set_embedded(embedded: bool) {
+    EMBEDDED.store(embedded, Ordering::SeqCst);
+}
+
 /// `stop_requested()`: set when the process receives SIGINT / SIGTERM (see
 /// [`install_stop_handler`]).
+///
+/// An embedding host runs each call under [`with_call_stop`]: the loops of that call (which read
+/// this on the thread that runs it) then see the call's own flag, so stopping one call neither
+/// reaches nor is reset by another. Without one (the `mrsm` binary) it is the process-wide flag.
 pub fn stop_requested_flag() -> Arc<AtomicBool> {
+    CALL_STOP
+        .with(|slot| slot.borrow().clone())
+        .unwrap_or_else(process_stop_flag)
+}
+
+fn process_stop_flag() -> Arc<AtomicBool> {
     STOP.get_or_init(|| Arc::new(AtomicBool::new(false)))
         .clone()
+}
+
+thread_local! {
+    static CALL_STOP: std::cell::RefCell<Option<Arc<AtomicBool>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Run `f` with `flag` as this thread's stop flag (see [`stop_requested_flag`]).
+pub fn with_call_stop<R>(flag: Arc<AtomicBool>, f: impl FnOnce() -> R) -> R {
+    let previous = CALL_STOP.with(|slot| slot.borrow_mut().replace(flag));
+    let result = f();
+    CALL_STOP.with(|slot| *slot.borrow_mut() = previous);
+    result
 }
 
 /// Begin a new interactive command after any previous command has finished stopping.
 pub fn reset_stop_request() {
     SIGNALS.store(0, Ordering::SeqCst);
-    stop_requested_flag().store(false, Ordering::SeqCst);
+    process_stop_flag().store(false, Ordering::SeqCst);
 }
 
 /// Turn the first SIGINT / SIGTERM into a stop request for long-running actions (laps,
 /// schedules, following logs); a second signal exits immediately (v4 raises `KeyboardInterrupt`
 /// at the next checkpoint).
 pub fn install_stop_handler(session: &super::Session) {
-    if HANDLER.set(()).is_err() {
+    // An embedding host (the Python extension) owns the process's signals: it polls them
+    // itself and sets the stop flag for the call it runs (see [`set_embedded`]).
+    if EMBEDDED.load(Ordering::SeqCst) || HANDLER.set(()).is_err() {
         return;
     }
-    let flag = stop_requested_flag();
+    let flag = process_stop_flag();
     session.spawn(async move {
         #[cfg(unix)]
         {
@@ -711,11 +746,16 @@ fn run_new_job(
         }
     }
     let started = job.start();
-    // Warnings of creating the job (a systemd unit without a pinned interpreter).
+    emit_job_warnings(rt, &mut job);
+    started
+}
+
+/// Show the warnings a job collected (while it was built, and while its executor created it: a
+/// `systemd` unit without a pinned interpreter) through the formatter.
+pub fn emit_job_warnings(rt: &mut Runtime<'_>, job: &mut Job) {
     for w in std::mem::take(&mut job.warnings) {
         warn(rt, &w);
     }
-    started
 }
 
 /// `stop jobs`.
@@ -1483,4 +1523,54 @@ pub fn run_schedule(
         "Exited scheduler after {}.",
         super::sync::interval_str(start.elapsed().as_secs_f64())
     ))
+}
+
+#[cfg(test)]
+mod warning_tests {
+    use super::*;
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    #[derive(Clone, Default)]
+    struct Sink(Rc<RefCell<Vec<u8>>>);
+
+    impl std::io::Write for Sink {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.borrow_mut().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn the_warnings_of_a_started_job_are_printed_once_through_the_formatter() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = JobsContext::for_root(dir.path());
+        let mut job = Job::new("w", None, Default::default(), &ctx).unwrap();
+        job.warnings
+            .push("No Python interpreter is pinned in the unit of job 'w'.".into());
+        let (mut out, err) = (Vec::new(), Sink::default());
+        {
+            let mut rt = Runtime::new(
+                crate::types::DateContext::system(),
+                80,
+                &mut out,
+                |_: &str| None,
+            );
+            rt.err = Box::new(err.clone());
+            emit_job_warnings(&mut rt, &mut job);
+            emit_job_warnings(&mut rt, &mut job);
+        }
+        let text = String::from_utf8(err.0.borrow().clone()).unwrap();
+        assert_eq!(
+            text.matches("No Python interpreter is pinned").count(),
+            1,
+            "{text}"
+        );
+        assert!(text.contains("🔔"), "{text}");
+        assert!(job.warnings.is_empty());
+    }
 }

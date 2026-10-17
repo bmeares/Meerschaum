@@ -506,13 +506,35 @@ impl Paths {
         })
     }
 
+    /// `DOT_CONFIG_DIR_PATH` of the current process, computed like [`Paths::from_env`]:
+    /// `$XDG_CONFIG_HOME`, else `$HOME/.config` (`%AppData%`, else `<home>/AppData/Roaming` on
+    /// Windows). `SYSTEMD_USER_RESOURCES_PATH` and the default root derive from it, so it must
+    /// be a real, absolute directory (never an unexpanded `~`).
+    pub fn process_dot_config_dir() -> PathBuf {
+        let env = |name: &str| std::env::var(name).ok().filter(|v| !v.is_empty());
+        let home = env("HOME")
+            .or_else(|| env("USERPROFILE"))
+            .map(PathBuf::from)
+            .or_else(std::env::home_dir)
+            .unwrap_or_else(|| PathBuf::from("/"));
+        if cfg!(windows) {
+            env("AppData")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| home.join("AppData").join("Roaming"))
+        } else {
+            env("XDG_CONFIG_HOME")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| home.join(".config"))
+        }
+    }
+
     /// Paths for a root directory with no other overrides (as if only `MRSM_ROOT_DIR` were set,
     /// without resolving or validating it).
     pub fn for_root(root: impl Into<PathBuf>) -> Paths {
         let root_dir = root.into();
         Paths {
             package_root: None,
-            dot_config_dir: PathBuf::from("~/.config"),
+            dot_config_dir: Paths::process_dot_config_dir(),
             config_dir: root_dir.join("config"),
             plugins_dirs: vec![root_dir.join("plugins")],
             root_dir,
@@ -595,6 +617,32 @@ impl Paths {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `for_root` must expand the user's config directory like `from_env` does: a literal `~`
+    /// would make the systemd user unit directory relative to the working directory.
+    #[test]
+    fn for_root_resolves_the_user_config_dir_to_a_real_absolute_path() {
+        let paths = Paths::for_root("/r");
+        let user_units = paths.path("SYSTEMD_USER_RESOURCES_PATH");
+        assert!(user_units.is_absolute(), "{}", user_units.display());
+        assert!(
+            !user_units.components().any(|c| c.as_os_str() == "~"),
+            "{}",
+            user_units.display()
+        );
+        assert!(user_units.ends_with("systemd/user"));
+        let base = match std::env::var("XDG_CONFIG_HOME")
+            .ok()
+            .filter(|v| !v.is_empty())
+        {
+            Some(xdg) if !cfg!(windows) => PathBuf::from(xdg),
+            _ => PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".config"),
+        };
+        if !cfg!(windows) && std::env::var("HOME").is_ok_and(|h| !h.is_empty()) {
+            assert!(user_units.starts_with(&base), "{}", user_units.display());
+        }
+        assert_eq!(paths.dot_config_dir, Paths::process_dot_config_dir());
+    }
 
     #[test]
     fn derived_paths() {

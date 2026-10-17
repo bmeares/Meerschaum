@@ -40,7 +40,7 @@ The easiest way to can manage tokens is on the [Web Console](/reference/api-inst
 -   Create new tokens using the `+` button.
 -   Edit, invalidate, or delete existing tokens from the context menu (`⠇`).
 
-When you create a new token, a dialog will appear prompting you for a label, expiration date, and scopes. After registration, you **must** copy the generated credentials, as the secret will not be shown again.
+When you create a new token, a form prompts you for a label, expiration date, and scopes. The **Grant all scopes (`*`, including custom and future scopes)** switch is on by default for an administrator or a holder of `*` (for anyone else the form starts from your own scopes and the switch is off); turn it off to pick built-in scopes from a checklist and to type custom (plugin) scopes. The edit form of a token that holds `*` shows the switch on, and saving it keeps `*`. After registration, you **must** copy the generated credentials, as the secret will not be shown again.
 
 <img src="/assets/screenshots/web-console-tokens.png" alt="Web Console tokens page">
 
@@ -151,3 +151,21 @@ There are two ways to use a token to authenticate with the API:
     curl -X GET http://localhost:8000/pipes \
       -H "Authorization: $API_KEY"
     ```
+
+---
+
+## 🎯 Scopes
+
+A token (and a user, through the `scopes` attribute of their account) holds a list of scope strings, and every API route requires the scopes it names (`pipes:read`, `jobs:execute`, `jobs:stop`, ...). A request missing one is refused with `403` and `Missing required scope: '<scope>'`.
+
+- **`*` grants all scopes, including custom and future scopes.** It is stored literally and checked on every request, so a `*` token keeps working when a plugin defines a new scope or a later release adds one. Use it for trusted automation. `edit tokens` and `edit users` keep a `*` you type as `*` (v4 replaced it with the list of built-in scopes), and so do `register tokens --scopes '*'`, `POST /tokens/register` with `"scopes": ["*"]` and the console's token form. When no scopes are given, a token or user gets the built-in scopes as before.
+- **A token carries at most its owner's scopes.** Registering or editing a token with a scope the owner does not hold, or with `*` when the owner is neither an administrator nor a holder of `*`, is refused with `403` (or a failure in `register tokens` / `edit tokens` and the console) naming each disallowed scope; nothing is trimmed. A token registered without scopes gets its owner's own, and editing a token keeps the scopes it already holds. The console's register form starts from your own scopes, and "Grant all scopes" is on by default only for an administrator or a holder of `*`.
+- **Only the owner or an administrator may change a token.** Editing, invalidating or deleting another user's token answers `403`; only an administrator may make an invalidated token valid again; an edit that omits `scopes` or `is_valid` keeps them. `mrsm edit tokens` and the other token actions work on the instance directly with the operator's own access and are trusted; the rule is enforced by an `api:` instance's server.
+- **Custom scopes are plain strings.** A plugin's `@api_plugin` routes may require any scope, for example `ScopedAuth(['myplugin:read'])`, and a token is granted it by listing it explicitly (`--scopes myplugin:read pipes:read`). Meerschaum does not validate scope names, so a typo grants nothing.
+- **Stopping a job needs `jobs:execute` and `jobs:stop`.** v4 required a misspelled `josb:stop` that no one could hold, so only `*` tokens and administrators could stop jobs over the API. v5 requires `jobs:stop`, and still accepts a token that explicitly holds the legacy `josb:stop` in its place.
+- **Running actions.** Over the API, non-administrators can run actions and jobs only when `system.api.permissions.actions.non_admin` is true. The default configuration does not define that key (as in v4, which logs an `Invalid keys` warning when it is read), so by default only administrators can; add it to your `system` configuration to allow others. They then also need the `actions:execute` and `jobs:execute` scopes, which a `*` holder has. The web terminal and `edit pipe` are governed by a different key, `api.permissions.actions.non_admin` (default true; `start api --secure` sets it to false).
+
+```bash
+mrsm register tokens --name automation --scopes '*'
+mrsm register tokens --name plugin-reader --scopes myplugin:read pipes:read
+```

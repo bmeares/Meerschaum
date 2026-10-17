@@ -1,26 +1,20 @@
-# Performance of the pandas boundary (`MRSM_CORE=rust` vs `python`)
+# Performance of the pandas boundary (Rust bindings vs the v4 Python bodies)
 
 The kernel bindings (`enforce_dtypes`, `filter_unseen_df`) were slower than v4 on large frames
 after the first parity wave. This file records the measurements, where the time went, what was
 changed, and what is left.
 
-## How to measure
+## How the numbers were measured
 
-```bash
-scripts/rust/build_py.sh                      # release build (required: debug is ~10x slower)
-PYTHONPATH=$(pwd) MRSM_ROOT_DIR=./test_root MRSM_PLUGINS_DIR=./tests/plugins \
-    python3 crates/meerschaum-py/bench/bench_boundary.py            # the table below
-# One scenario in a loop, for a profiler:
-PYTHONPATH=$(pwd) MRSM_ROOT_DIR=./test_root MRSM_PLUGINS_DIR=./tests/plugins \
-    python3 crates/meerschaum-py/bench/bench_boundary.py --profile enforce_mixed --loops 20
-# Per-stage timings of the boundary (stderr), see src/trace.rs:
-MRSM_CORE_TRACE=1 ... bench_boundary.py --profile filter_unseen_df --loops 1
-```
+The tables below are a record of the parity phase. `bench/bench_boundary.py` and
+`bench/bench_sync.py` timed the v4 Python bodies (`MRSM_CORE=python`) against the Rust bindings in
+one process; both scripts were removed in 5.0 with the Python core, so the "python" columns cannot
+be reproduced from this tree. The benchmark that remains is `scripts/bench/run.py` (the released
+v4.1.4 in `.venv-ref` against this tree's release extension and `mrsm` binary, results in
+`scripts/bench/results/`). Per-stage timings of the boundary go to stderr with
+`MRSM_CORE_TRACE=1` (see `src/trace.rs`).
 
-`bench_boundary.py` runs both modes in one process (it flips the gate with `_gate.set_mode()`,
-so the Rust path goes through the same guard as the test suite), times each call best of three
-after a warm-up call, and compares the two results (values with `assert_frame_equal(check_exact=
-True)`, dtypes, index, class). Scenarios:
+Scenarios of the boundary benchmark:
 
 | Scenario | Call | Rows |
 |---|---|---|

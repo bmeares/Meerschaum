@@ -1,4 +1,4 @@
-# maturin build definition for the `meerschaum._core` extension (v5 parity phase).
+# maturin build definition for the `meerschaum._core` extension (v5).
 #
 # A maturin *mixed* project whose Python source is the repository root (`python-source = "../.."`),
 # so `maturin develop --skip-install` drops `_core.abi3.so` straight into `meerschaum/_core/`.

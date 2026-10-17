@@ -4,11 +4,11 @@ Wave 9 (task U): the instance façade reuses one connection pool per connector.
 Repeated reads (`exists`, `get_rowcount`, `get_sync_time`, `get_data`, `get_columns_types`)
 on one pipe, and on fresh `Pipe` objects with the same keys, must not open new database
 connections once the pools are warm. The connector's URI carries a unique `application_name`, so
-`pg_stat_activity` lists exactly this test's backends (SQLAlchemy's and, under `MRSM_CORE=rust`,
+`pg_stat_activity` lists exactly this test's backends (SQLAlchemy's and
 the Rust pool's). A pool rebuilt per call (or per `Pipe`) shows up as new backend PIDs.
 
-Runs against PostgreSQL (the `postgis` test container) when `postgis` is in `MRSM_TEST_FLAVORS`,
-in whichever `MRSM_CORE` mode the session uses. Schema `w9u`.
+Runs against PostgreSQL (the `postgis` test container) when `postgis` is in `MRSM_TEST_FLAVORS`.
+Schema `w9u`.
 """
 
 import os
@@ -85,7 +85,7 @@ def test_repeated_reads_open_no_new_connections():
             f"new connections were opened by repeated reads: "
             f"warm={sorted(warm_pids)}, after={sorted(after_pids)}"
         )
-        ### One SQLAlchemy pool and (rust mode) one Rust pool, used sequentially.
+        ### One SQLAlchemy pool and one Rust pool, used sequentially.
         assert len(after_pids) <= 4, sorted(after_pids)
     finally:
         pipe.delete()

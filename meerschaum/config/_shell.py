@@ -6,8 +6,6 @@
 Default configuration for the Meerschaum shell.
 """
 
-default_cmd = 'cmd'
-
 default_shell_config = {
     'ansi'               : {
         'intro'          : {

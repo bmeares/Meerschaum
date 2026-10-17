@@ -272,3 +272,46 @@ flavor_tests!(test_epoch_int_axis_datetime_begin, |c: Ctx| async move {
     assert_eq!(ids(remaining), vec![30, 31]);
     c.delete(&pipe).await;
 });
+
+// The text a document's datetime serializes to (the `/pipes/.../docs` route body, v4's
+// `json.dumps(pipe.get_docs(), default=json_serialize_value)`), per flavor, as the released
+// v4.1.4 returns it: SQLite keeps its stored text, MySQL-family naive datetimes end in `Z`,
+// the PostgreSQL family's aware ones in `+00:00`.
+flavor_tests!(test_docs_datetime_text_matches_v4, |c: Ctx| async move {
+    let expected = match c.flavor {
+        "sqlite" => ["2024-01-02 00:00:00.000000", "2024-01-02 03:04:05.000000"],
+        "mysql" | "mariadb" => ["2024-01-02T00:00:00Z", "2024-01-02T03:04:05Z"],
+        "postgresql" | "postgis" | "timescaledb" => {
+            ["2024-01-02T00:00:00+00:00", "2024-01-02T03:04:05+00:00"]
+        }
+        _ => return,
+    };
+    let pipe = c.pipe(
+        "test",
+        "docs_text",
+        None,
+        r#"{"columns": {"datetime": "dt", "id": "id"}, "dtypes": {"dt": "datetime"}}"#,
+    );
+    ok(c.sync(
+        &pipe,
+        vec![
+            doc(vec![("dt", s("2024-01-02 03:04:05")), ("id", i(1))]),
+            doc(vec![("dt", s("2024-01-02 00:00:00")), ("id", i(2))]),
+        ],
+    )
+    .await);
+    let docs = InstanceConnector::get_pipe_docs(&c.conn, &pipe, &DataQuery::default())
+        .await
+        .unwrap();
+    let text: Vec<String> = docs
+        .iter()
+        .map(
+            |d| match meerschaum_connector::pipe_ops::kernel_to_core(&d["dt"]) {
+                meerschaum_core::Value::Str(t) => t,
+                other => panic!("unexpected datetime document value {other:?}"),
+            },
+        )
+        .collect();
+    assert_eq!(text, expected);
+    c.delete(&pipe).await;
+});

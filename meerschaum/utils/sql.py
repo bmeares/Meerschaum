@@ -4,13 +4,18 @@
 
 """
 Flavor-specific SQL tools.
+
+Only `sql_item_name` and `build_where` are used by the Rust engine (they delegate to it). The rest
+(`get_update_queries`, `get_create_table_queries`, `dateadd_str`, `table_exists`, ...) are SDK helpers
+for plugin and custom-connector authors: they keep their v4 implementations, work on the
+SQLAlchemy side (D16, the `sql` extra) and are not used by `Pipe` syncs.
 """
 
 from __future__ import annotations
 
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 import meerschaum as mrsm
-from meerschaum.utils.typing import Optional, Dict, Any, Union, List, Iterable, Tuple
+from meerschaum.utils.typing import Optional, Dict, Any, Union, List, Tuple, Iterable
 ### Preserve legacy imports.
 from meerschaum.utils.dtypes.sql import (
     DB_TO_PD_DTYPES,
@@ -21,18 +26,13 @@ from meerschaum.utils.dtypes.sql import (
 )
 from meerschaum.utils.warnings import warn
 from meerschaum.utils.debug import dprint
-from meerschaum._core._gate import rust_impl as _rust_impl
+from meerschaum import _core
 
 test_queries = {
     'default'    : 'SELECT 1',
     'oracle'     : 'SELECT 1 FROM DUAL',
     'informix'   : 'SELECT COUNT(*) FROM systables',
     'hsqldb'     : 'SELECT 1 FROM INFORMATION_SCHEMA.SYSTEM_USERS',
-}
-### `table_name` is the escaped name of the table.
-### `table` is the unescaped name of the table.
-exists_queries = {
-    'default': "SELECT COUNT(*) FROM {table_name} WHERE 1 = 0",
 }
 version_queries = {
     'default': "SELECT VERSION() AS {version_name}",
@@ -54,187 +54,7 @@ DROP_IF_EXISTS_FLAVORS = {
     'sqlite',
     'geopackage',
 }
-DROP_INDEX_IF_EXISTS_FLAVORS = {
-    'mssql',
-    'timescaledb',
-    'timescaledb-ha',
-    'postgresql',
-    'postgis',
-    'sqlite',
-    'geopackage',
-    'citus',
-}
 SKIP_AUTO_INCREMENT_FLAVORS = {'citus', 'duckdb'}
-COALESCE_UNIQUE_INDEX_FLAVORS = {
-    'timescaledb',
-    'timescaledb-ha',
-    'postgresql',
-    'postgis',
-    'citus',
-}
-UPDATE_QUERIES = {
-    'default': """
-        UPDATE {target_table_name} AS f
-        {sets_subquery_none}
-        FROM {target_table_name} AS t
-        INNER JOIN (SELECT {patch_cols_str} FROM {patch_table_name}) AS p
-            ON
-                {and_subquery_t}
-        WHERE
-            {and_subquery_f}
-            AND
-            {date_bounds_subquery}
-    """,
-    'timescaledb-upsert': """
-        INSERT INTO {target_table_name} ({patch_cols_str})
-        SELECT {patch_cols_str}
-        FROM {patch_table_name}
-        ON CONFLICT ({join_cols_str}) DO {update_or_nothing} {sets_subquery_none_excluded}
-    """,
-    'timescaledb-ha-upsert': """
-        INSERT INTO {target_table_name} ({patch_cols_str})
-        SELECT {patch_cols_str}
-        FROM {patch_table_name}
-        ON CONFLICT ({join_cols_str}) DO {update_or_nothing} {sets_subquery_none_excluded}
-    """,
-    'postgresql-upsert': """
-        INSERT INTO {target_table_name} ({patch_cols_str})
-        SELECT {patch_cols_str}
-        FROM {patch_table_name}
-        ON CONFLICT ({join_cols_str}) DO {update_or_nothing} {sets_subquery_none_excluded}
-    """,
-    'postgis-upsert': """
-        INSERT INTO {target_table_name} ({patch_cols_str})
-        SELECT {patch_cols_str}
-        FROM {patch_table_name}
-        ON CONFLICT ({join_cols_str}) DO {update_or_nothing} {sets_subquery_none_excluded}
-    """,
-    'citus-upsert': """
-        INSERT INTO {target_table_name} ({patch_cols_str})
-        SELECT {patch_cols_str}
-        FROM {patch_table_name}
-        ON CONFLICT ({join_cols_str}) DO {update_or_nothing} {sets_subquery_none_excluded}
-    """,
-    'cockroachdb-upsert': """
-        INSERT INTO {target_table_name} ({patch_cols_str})
-        SELECT {patch_cols_str}
-        FROM {patch_table_name}
-        ON CONFLICT ({join_cols_str}) DO {update_or_nothing} {sets_subquery_none_excluded}
-    """,
-    'mysql': """
-        UPDATE {target_table_name} AS f
-        JOIN (SELECT {patch_cols_str} FROM {patch_table_name}) AS p
-        ON
-            {and_subquery_f}
-        {sets_subquery_f}
-        WHERE
-            {date_bounds_subquery}
-    """,
-    'mysql-upsert': """
-        INSERT {ignore}INTO {target_table_name} ({patch_cols_str})
-        SELECT {patch_cols_str}
-        FROM {patch_table_name}
-        {on_duplicate_key_update}
-            {cols_equal_values}
-    """,
-    'mariadb': """
-        UPDATE {target_table_name} AS f
-        JOIN (SELECT {patch_cols_str} FROM {patch_table_name}) AS p
-        ON
-            {and_subquery_f}
-        {sets_subquery_f}
-        WHERE
-            {date_bounds_subquery}
-    """,
-    'mariadb-upsert': """
-        INSERT {ignore}INTO {target_table_name} ({patch_cols_str})
-        SELECT {patch_cols_str}
-        FROM {patch_table_name}
-        {on_duplicate_key_update}
-            {cols_equal_values}
-    """,
-    'mssql': """
-        {with_temp_date_bounds}
-        MERGE {target_table_name} f
-            USING (SELECT {patch_cols_str} FROM {patch_table_name}) p
-            ON
-                {and_subquery_f}
-            AND
-                {date_bounds_subquery}
-        WHEN MATCHED THEN
-            UPDATE
-            {sets_subquery_none};
-    """,
-    'mssql-upsert': [
-        "{identity_insert_on}",
-        """
-        {with_temp_date_bounds}
-        MERGE {target_table_name} f
-            USING (SELECT {patch_cols_str} FROM {patch_table_name}) p
-            ON
-                {and_subquery_f}
-            AND
-                {date_bounds_subquery}{when_matched_update_sets_subquery_none}
-        WHEN NOT MATCHED THEN
-            INSERT ({patch_cols_str})
-            VALUES ({patch_cols_prefixed_str});
-        """,
-        "{identity_insert_off}",
-    ],
-    'oracle': """
-        MERGE INTO {target_table_name} f
-            USING (SELECT {patch_cols_str} FROM {patch_table_name}) p
-            ON (
-                {and_subquery_f}
-                AND
-                {date_bounds_subquery}
-            )
-            WHEN MATCHED THEN
-                UPDATE
-                {sets_subquery_none}
-    """,
-    'oracle-upsert': """
-        MERGE INTO {target_table_name} f
-            USING (SELECT {patch_cols_str} FROM {patch_table_name}) p
-            ON (
-                {and_subquery_f}
-                AND
-                {date_bounds_subquery}
-            ){when_matched_update_sets_subquery_none}
-            WHEN NOT MATCHED THEN
-                INSERT ({patch_cols_str})
-                VALUES ({patch_cols_prefixed_str})
-    """,
-    'sqlite-upsert': """
-        INSERT INTO {target_table_name} ({patch_cols_str})
-        SELECT {patch_cols_str}
-        FROM {patch_table_name}
-        WHERE true
-        ON CONFLICT ({join_cols_str}) DO {update_or_nothing} {sets_subquery_none_excluded}
-    """,
-    'sqlite_delete_insert': [
-        """
-        DELETE FROM {target_table_name} AS f
-        WHERE ROWID IN (
-            SELECT t.ROWID
-            FROM {target_table_name} AS t
-            INNER JOIN (SELECT * FROM {patch_table_name}) AS p
-                ON {and_subquery_t}
-        );
-        """,
-        """
-        INSERT INTO {target_table_name} AS f
-        SELECT {patch_cols_str} FROM {patch_table_name} AS p
-        """,
-    ],
-    'geopackage-upsert': """
-        INSERT INTO {target_table_name} ({patch_cols_str})
-        SELECT {patch_cols_str}
-        FROM {patch_table_name}
-        WHERE true
-        ON CONFLICT ({join_cols_str}) DO {update_or_nothing} {sets_subquery_none_excluded}
-    """,
-}
 columns_types_queries = {
     'default': """
         SELECT
@@ -333,11 +153,6 @@ columns_types_queries = {
             '{table_upper_trunc}'
         )
     """,
-}
-hypertable_queries = {
-    'timescaledb': 'SELECT hypertable_size(\'{table_name}\')',
-    'timescaledb-ha': 'SELECT hypertable_size(\'{table_name}\')',
-    'citus': 'SELECT citus_table_size(\'{table_name}\')',
 }
 columns_indices_queries = {
     'default': """
@@ -581,22 +396,6 @@ reset_autoincrement_queries: Dict[str, Union[str, List[str]]] = {
         "GENERATED BY DEFAULT ON NULL AS IDENTITY (START WITH {val_plus_1})"
     ),
 }
-table_wrappers = {
-    'default'       : ('"', '"'),
-    'timescaledb'   : ('"', '"'),
-    'timescaledb-ha': ('"', '"'),
-    'citus'         : ('"', '"'),
-    'duckdb'        : ('"', '"'),
-    'postgresql'    : ('"', '"'),
-    'postgis'       : ('"', '"'),
-    'sqlite'        : ('"', '"'),
-    'geopackage'    : ('"', '"'),
-    'mysql'         : ('`', '`'),
-    'mariadb'       : ('`', '`'),
-    'mssql'         : ('[', ']'),
-    'cockroachdb'   : ('"', '"'),
-    'oracle'        : ('"', '"'),
-}
 max_name_lens = {
     'default'       : 64,
     'mssql'         : 128,
@@ -639,33 +438,10 @@ DEFAULT_SCHEMA_FLAVORS = {
     'mariadb': 'mysql',
     'mssql': 'dbo',
 }
-OMIT_NULLSFIRST_FLAVORS = {
-    'mariadb',
-    'mysql',
-    'mssql',
-}
-
-SINGLE_ALTER_TABLE_FLAVORS = {
-    'duckdb',
-    'sqlite',
-    'geopackage',
-    'mssql',
-    'oracle',
-}
 NO_CTE_FLAVORS = {
     'mysql',
     'mariadb',
 }
-NO_SELECT_INTO_FLAVORS = {
-    'sqlite',
-    'geopackage',
-    'oracle',
-    'mysql',
-    'mariadb',
-    'duckdb',
-}
-
-
 def clean(substring: str) -> None:
     """
     Ensure a substring is clean enough to be inserted into a SQL query.
@@ -878,23 +654,30 @@ def test_connection(
     Parameters
     ----------
     **kw:
-        The keyword arguments are passed to `meerschaum.connectors.poll.retry_connect`.
+        `max_retries` (default `1`), `retry_wait` seconds between attempts (default `0`)
+        and `warn` (print the error of a failed attempt, default `False`).
 
     Returns
     -------
-    `True` if a connection is made, otherwise `False` or `None` in case of failure.
+    `True` if a connection is made, otherwise `False`.
 
     """
-    import warnings
-    from meerschaum.connectors.poll import retry_connect
-    _default_kw = {'max_retries': 1, 'retry_wait': 0, 'warn': False, 'connector': self}
-    _default_kw.update(kw)
-    with warnings.catch_warnings():
-        warnings.filterwarnings('ignore', 'Could not')
+    import time
+    max_retries = max(int(kw.get('max_retries', 1)), 1)
+    retry_wait = kw.get('retry_wait', 0)
+    warn = kw.get('warn', False)
+    for attempt in range(max_retries):
         try:
-            return retry_connect(**_default_kw)
-        except Exception:
-            return False
+            ### The Rust connector's `SELECT 1`: no SQLAlchemy engine, so the base wheel
+            ### can check a reachable database.
+            if self._core_connector().test_connection():
+                return True
+        except Exception as e:
+            if warn:
+                print(e)
+        if attempt + 1 < max_retries and retry_wait:
+            time.sleep(retry_wait)
+    return False
 
 
 def get_distinct_col_count(
@@ -980,36 +763,8 @@ def sql_item_name(item: str, flavor: str, schema: Optional[str] = None) -> str:
     '"abc"."table"'
 
     """
-    if (_rust := _rust_impl('sql_item_name')) is not None:
-        return _rust(item, flavor, schema)
-
-    truncated_item = truncate_item_name(str(item), flavor)
-    if flavor == 'oracle':
-        truncated_item = pg_capital(truncated_item, quote_capitals=True)
-        ### NOTE: System-reserved words must be quoted.
-        if truncated_item.lower() in (
-            'float', 'varchar', 'nvarchar', 'clob',
-            'boolean', 'integer', 'table', 'row', 'date', 'time',
-        ):
-            wrappers = ('"', '"')
-        else:
-            wrappers = ('', '')
-    else:
-        wrappers = table_wrappers.get(flavor, table_wrappers['default'])
-
-    ### NOTE: SQLite does not support schemas.
-    if flavor in ('sqlite', 'geopackage'):
-        schema = None
-    elif flavor == 'mssql' and str(item).startswith('#'):
-        schema = None
-
-    schema_prefix = (
-        (wrappers[0] + schema + wrappers[1] + '.')
-        if schema is not None
-        else ''
-    )
-
-    return schema_prefix + wrappers[0] + truncated_item + wrappers[1]
+    _rust = _core.sql_item_name
+    return _rust(item, flavor, schema)
 
 
 def pg_capital(s: str, quote_capitals: bool = True) -> str:
@@ -1126,106 +881,11 @@ def build_where(
         "foo" IN ('1', '2', '3')
     ```
     """
-    if (_rust := _rust_impl('build_where')) is not None:
-        _query_flavor = (
-            getattr(connector, 'flavor', flavor) if connector is not None else flavor
-        )
-        return _rust(params, _query_flavor, with_where)
-
-    import json
-    from meerschaum._internal.static import STATIC_CONFIG
-    from meerschaum.utils.warnings import warn
-    from meerschaum.utils.dtypes import value_is_null, none_if_null
-    negation_prefix = STATIC_CONFIG['system']['fetch_pipes_keys']['negation_prefix']
-    try:
-        params_json = json.dumps(params)
-    except Exception:
-        params_json = str(params)
-    bad_words = ['drop ', '--', ';']
-    for word in bad_words:
-        if word in params_json.lower():
-            warn("Aborting build_where() due to possible SQL injection.")
-            return ''
-
-    query_flavor = getattr(connector, 'flavor', flavor) if connector is not None else flavor
-    where = ""
-    leading_and = "\n    AND "
-    for key, value in params.items():
-        _key = sql_item_name(key, query_flavor, None)
-        ### search across a list (i.e. IN syntax)
-        if isinstance(value, Iterable) and not isinstance(value, (dict, str)):
-            includes = [
-                none_if_null(item)
-                for item in value
-                if not str(item).startswith(negation_prefix)
-            ]
-            null_includes = [item for item in includes if item is None]
-            not_null_includes = [item for item in includes if item is not None]
-            excludes = [
-                none_if_null(str(item)[len(negation_prefix):])
-                for item in value
-                if str(item).startswith(negation_prefix)
-            ]
-            null_excludes = [item for item in excludes if item is None]
-            not_null_excludes = [item for item in excludes if item is not None]
-
-            if includes:
-                where += f"{leading_and}("
-            if not_null_includes:
-                where += f"{_key} IN ("
-                for item in not_null_includes:
-                    quoted_item = str(item).replace("'", "''")
-                    where += f"'{quoted_item}', "
-                where = where[:-2] + ")"
-            if null_includes:
-                where += ("\n    OR " if not_null_includes else "") + f"{_key} IS NULL"
-            if includes:
-                where += ")"
-
-            if excludes:
-                where += f"{leading_and}("
-            if not_null_excludes:
-                where += f"{_key} NOT IN ("
-                for item in not_null_excludes:
-                    quoted_item = str(item).replace("'", "''")
-                    where += f"'{quoted_item}', "
-                where = where[:-2] + ")"
-            if null_excludes:
-                where += ("\n    AND " if not_null_excludes else "") + f"{_key} IS NOT NULL"
-            if excludes:
-                where += ")"
-
-            continue
-
-        ### search a dictionary
-        elif isinstance(value, dict):
-            import json
-            where += (f"{leading_and}CAST({_key} AS TEXT) = '" + json.dumps(value) + "'")
-            continue
-
-        eq_sign = '='
-        is_null = 'IS NULL'
-        if value_is_null(str(value).lstrip(negation_prefix)):
-            value = (
-                (negation_prefix + 'None')
-                if str(value).startswith(negation_prefix)
-                else None
-            )
-        if str(value).startswith(negation_prefix):
-            value = str(value)[len(negation_prefix):]
-            eq_sign = '!='
-            if value_is_null(value):
-                value = None
-                is_null = 'IS NOT NULL'
-        quoted_value = str(value).replace("'", "''")
-        where += (
-            f"{leading_and}{_key} "
-            + (is_null if value is None else f"{eq_sign} '{quoted_value}'")
-        )
-
-    if len(where) > 1:
-        where = ("\nWHERE\n    " if with_where else '') + where[len(leading_and):]
-    return where
+    _rust = _core.build_where
+    _query_flavor = (
+        getattr(connector, 'flavor', flavor) if connector is not None else flavor
+    )
+    return _rust(params, _query_flavor, with_where)
 
 
 def table_exists(
@@ -1255,7 +915,8 @@ def table_exists(
     -------
     A `bool` indicating whether or not the table exists on the database.
     """
-    sqlalchemy = mrsm.attempt_import('sqlalchemy', lazy=False)
+    from meerschaum.connectors.sql._create_engine import import_sqlalchemy
+    sqlalchemy = import_sqlalchemy()
     schema = schema or connector.schema
     insp = sqlalchemy.inspect(connector.engine)
     truncated_table_name = truncate_item_name(str(table), connector.flavor)
@@ -1308,7 +969,8 @@ def get_sqlalchemy_table(
     if refresh:
         connector.metadata.clear()
     tables = get_tables(mrsm_instance=connector, debug=debug, create=False)
-    sqlalchemy = attempt_import('sqlalchemy', lazy=False)
+    from meerschaum.connectors.sql._create_engine import import_sqlalchemy
+    sqlalchemy = import_sqlalchemy()
     truncated_table_name = truncate_item_name(str(table), connector.flavor)
     table_kwargs = {
         'autoload_with': connector.engine,
@@ -1378,7 +1040,8 @@ def get_table_cols_types(
     """
     import textwrap
     from meerschaum.connectors import SQLConnector
-    sqlalchemy = mrsm.attempt_import('sqlalchemy', lazy=False)
+    from meerschaum.connectors.sql._create_engine import import_sqlalchemy
+    sqlalchemy = import_sqlalchemy()
     flavor = flavor or getattr(connectable, 'flavor', None)
     if not flavor:
         raise ValueError("Please provide a database flavor.")
@@ -1560,7 +1223,8 @@ def get_table_cols_indices(
     import textwrap
     from collections import defaultdict
     from meerschaum.connectors import SQLConnector
-    sqlalchemy = mrsm.attempt_import('sqlalchemy', lazy=False)
+    from meerschaum.connectors.sql._create_engine import import_sqlalchemy
+    sqlalchemy = import_sqlalchemy()
     flavor = flavor or getattr(connectable, 'flavor', None)
     if not flavor:
         raise ValueError("Please provide a database flavor.")
@@ -1672,6 +1336,590 @@ def get_table_cols_indices(
     except Exception as e:
         warn(f"Failed to fetch columns for table '{table}':\n{e}")
         return {}
+
+
+def get_db_version(conn: 'SQLConnector', debug: bool = False) -> Union[str, None]:
+    """
+    Fetch the database version if possible.
+    """
+    version_name = sql_item_name('version', conn.flavor, None)
+    version_query = version_queries.get(
+        conn.flavor,
+        version_queries['default']
+    ).format(version_name=version_name)
+    return conn.value(version_query, debug=debug)
+
+
+### Non-TimescaleDB flavors that support declarative range partitioning on a datetime column.
+### PostgreSQL-style declares an empty parent (`PARTITION BY RANGE`) with children added
+### separately; MySQL-style requires the initial partitions inline at `CREATE TABLE`.
+PG_PARTITION_FLAVORS = {'postgresql', 'postgis'}
+MYSQL_PARTITION_FLAVORS = {'mysql', 'mariadb'}
+def find_top_level_select_index(query: str, last: bool = False) -> int:
+    """
+    Return the index of the first (or last) top-level `SELECT` keyword in a query.
+
+    The scan skips `--` line comments, `/* */` block comments, string literals,
+    quoted identifiers, and parenthesized subqueries, so a definition may safely
+    contain comments (including comments mentioning "select").
+
+    Parameters
+    ----------
+    query: str
+        The SQL query to scan.
+
+    last: bool, default False
+        If `True`, return the index of the last top-level `SELECT`
+        (e.g. the final statement of a CTE query) instead of the first.
+
+    Returns
+    -------
+    The character index of the `SELECT` keyword, or `-1` if none exists
+    at the top level.
+    """
+    q_lower = query.lower()
+    n = len(q_lower)
+    depth = 0
+    found_ix = -1
+    i = 0
+    while i < n:
+        ch = q_lower[i]
+        nxt = q_lower[i + 1] if (i + 1) < n else ''
+        if ch == '-' and nxt == '-':
+            eol = q_lower.find('\n', i)
+            i = n if eol == -1 else (eol + 1)
+            continue
+        if ch == '/' and nxt == '*':
+            end = q_lower.find('*/', i + 2)
+            i = n if end == -1 else (end + 2)
+            continue
+        if ch == "'":
+            i += 1
+            while i < n:
+                if q_lower[i] == "'":
+                    if (i + 1) < n and q_lower[i + 1] == "'":
+                        i += 2
+                        continue
+                    break
+                i += 1
+            i += 1
+            continue
+        if ch in ('"', '`'):
+            end = q_lower.find(ch, i + 1)
+            i = n if end == -1 else (end + 1)
+            continue
+        if ch == '[':
+            end = q_lower.find(']', i + 1)
+            i = n if end == -1 else (end + 1)
+            continue
+        if ch == '(':
+            depth += 1
+            i += 1
+            continue
+        if ch == ')':
+            depth -= 1
+            i += 1
+            continue
+        if depth == 0 and ch == 's' and q_lower[i:i + 6] == 'select':
+            before_ok = i == 0 or not (q_lower[i - 1].isalnum() or q_lower[i - 1] == '_')
+            after_ok = (i + 6) == n or not (q_lower[i + 6].isalnum() or q_lower[i + 6] == '_')
+            if before_ok and after_ok:
+                if not last:
+                    return i
+                found_ix = i
+                i += 6
+                continue
+        i += 1
+    return found_ix
+
+
+def get_leading_with_index(query: str) -> int:
+    """
+    Return the index of a query's leading `WITH` keyword,
+    skipping whitespace and comments, or `-1` if the query
+    does not begin with `WITH`.
+    """
+    q_lower = query.lower()
+    n = len(q_lower)
+    i = 0
+    while i < n:
+        ch = q_lower[i]
+        nxt = q_lower[i + 1] if (i + 1) < n else ''
+        if ch in (' ', '\t', '\r', '\n'):
+            i += 1
+            continue
+        if ch == '-' and nxt == '-':
+            eol = q_lower.find('\n', i)
+            i = n if eol == -1 else (eol + 1)
+            continue
+        if ch == '/' and nxt == '*':
+            end = q_lower.find('*/', i + 2)
+            i = n if end == -1 else (end + 2)
+            continue
+        break
+    if q_lower[i:i + 4] == 'with' and (
+        (i + 4) == n or not (q_lower[i + 4].isalnum() or q_lower[i + 4] == '_')
+    ):
+        return i
+    return -1
+
+
+def wrap_query_with_cte(
+    sub_query: str,
+    parent_query: str,
+    flavor: str,
+    cte_name: str = "src",
+) -> str:
+    """
+    Wrap a subquery in a CTE and append an encapsulating query.
+
+    Parameters
+    ----------
+    sub_query: str
+        The query to be referenced. This may itself contain CTEs and comments.
+        Unless `cte_name` is provided, this will be aliased as `src`.
+
+    parent_query: str
+        The larger query to append which references the subquery.
+        If it contains CTEs of its own, they are hoisted into the
+        enclosing `WITH` list.
+
+    flavor: str
+        The database flavor, e.g. `'mssql'`.
+
+    cte_name: str, default 'src'
+        The CTE alias, defaults to `src`.
+
+    Returns
+    -------
+    An encapsulating query which allows you to treat `sub_query` as a temporary table.
+    Raises an exception when a query's top-level `SELECT` cannot be located
+    (e.g. an incomplete definition), rather than emitting invalid SQL.
+
+    Examples
+    --------
+
+    >>> from meerschaum.utils.sql import wrap_query_with_cte
+    >>> sub_query = "WITH foo AS (SELECT 1 AS val) SELECT (val * 2) AS newval FROM foo"
+    >>> parent_query = "SELECT newval * 3 FROM src"
+    >>> query = wrap_query_with_cte(sub_query, parent_query, 'mssql')
+    >>> print(query)
+    >>> # WITH foo AS (SELECT 1 AS val)
+    >>> # , [src] AS (
+    >>> #     SELECT (val * 2) AS newval FROM foo
+    >>> # )
+    >>> # SELECT newval * 3 FROM src
+
+    """
+    import textwrap
+    from meerschaum.utils.warnings import error
+    sub_query = sub_query.lstrip()
+    parent_query = parent_query.lstrip()
+    cte_name_quoted = sql_item_name(cte_name, flavor, None)
+
+    if flavor in NO_CTE_FLAVORS:
+        return (
+            parent_query
+            .replace(cte_name_quoted, '--MRSM_SUBQUERY--')
+            .replace(cte_name, '--MRSM_SUBQUERY--')
+            .replace('--MRSM_SUBQUERY--', f"(\n{sub_query}\n) AS {cte_name_quoted}")
+        )
+
+    if get_leading_with_index(sub_query) != -1:
+        select_index = find_top_level_select_index(sub_query)
+        if select_index == -1:
+            error(
+                "Could not locate the top-level SELECT of the following query:\n"
+                + sub_query
+            )
+
+        ### Flatten: the definitions part keeps the sub-query's own CTEs
+        ### (`WITH a AS (...) -- trailing comments included`), and the body
+        ### (`SELECT ...`) becomes the new CTE. The joining comma goes on its
+        ### own line so a trailing `--` comment cannot swallow it.
+        definitions = sub_query[:select_index].rstrip()
+        if definitions.endswith(','):
+            definitions = definitions[:-1].rstrip()
+        body = sub_query[select_index:].strip()
+
+        lead = (
+            f"{definitions}\n"
+            f", {cte_name_quoted} AS (\n"
+            f"{textwrap.indent(body, '    ')}\n"
+            f")"
+        )
+    else:
+        lead = (
+            f"WITH {cte_name_quoted} AS (\n"
+            f"{textwrap.indent(sub_query, '    ')}\n"
+            f")"
+        )
+
+    parent_with_index = get_leading_with_index(parent_query)
+    if parent_with_index == -1:
+        return f"{lead}\n{parent_query}"
+
+    ### The parent query declares CTEs of its own: hoist them after the new
+    ### definition instead of emitting an invalid second `WITH`.
+    parent_prefix = parent_query[:parent_with_index].rstrip()
+    parent_rest = parent_query[parent_with_index + len('with'):].lstrip()
+    return (
+        (f"{parent_prefix}\n" if parent_prefix else "")
+        + f"{lead}\n, {parent_rest}"
+    )
+
+
+def format_cte_subquery(
+    sub_query: str,
+    flavor: str,
+    sub_name: str = 'src',
+    cols_to_select: Union[List[str], str] = '*',
+) -> str:
+    """
+    Given a subquery, build a wrapper query that selects from the CTE subquery.
+
+    Parameters
+    ----------
+    sub_query: str
+        The subquery to wrap.
+
+    flavor: str
+        The database flavor to use for the query (e.g. `'mssql'`, `'postgresql'`.
+
+    sub_name: str, default 'src'
+        If possible, give this name to the CTE (must be unquoted).
+
+    cols_to_select: Union[List[str], str], default ''
+        If specified, choose which columns to select from the CTE.
+        If a list of strings is provided, each item will be quoted and joined with commas.
+        If a string is given, assume it is quoted and insert it into the query.
+
+    Returns
+    -------
+    A wrapper query that selects from the CTE.
+    """
+    quoted_sub_name = sql_item_name(sub_name, flavor, None)
+    cols_str = (
+        cols_to_select
+        if isinstance(cols_to_select, str)
+        else ', '.join([sql_item_name(col, flavor, None) for col in cols_to_select])
+    )
+    parent_query = (
+        f"SELECT {cols_str}\n"
+        f"FROM {quoted_sub_name}"
+    )
+    return wrap_query_with_cte(sub_query, parent_query, flavor, cte_name=sub_name)
+
+
+def session_execute(
+    session: 'sqlalchemy.orm.session.Session',
+    queries: Union[List[str], str],
+    with_results: bool = False,
+    debug: bool = False,
+) -> Union[mrsm.SuccessTuple, Tuple[mrsm.SuccessTuple, List['sqlalchemy.sql.ResultProxy']]]:
+    """
+    Similar to `SQLConnector.exec_queries()`, execute a list of queries
+    and roll back when one fails.
+
+    Parameters
+    ----------
+    session: sqlalchemy.orm.session.Session
+        A SQLAlchemy session representing a transaction.
+
+    queries: Union[List[str], str]
+        A query or list of queries to be executed.
+        If a query fails, roll back the session.
+
+    with_results: bool, default False
+        If `True`, return a list of result objects.
+
+    Returns
+    -------
+    A `SuccessTuple` indicating the queries were successfully executed.
+    If `with_results`, return the `SuccessTuple` and a list of results.
+    """
+    from meerschaum.connectors.sql._create_engine import import_sqlalchemy
+    sqlalchemy = import_sqlalchemy()
+    if not isinstance(queries, list):
+        queries = [queries]
+    successes, msgs, results = [], [], []
+    for query in queries:
+        if debug:
+            dprint(query)
+        query_text = sqlalchemy.text(query)
+        fail_msg = "Failed to execute queries."
+        try:
+            result = session.execute(query_text)
+            query_success = result is not None
+            query_msg = "Success" if query_success else fail_msg
+        except Exception as e:
+            query_success = False
+            query_msg = f"{fail_msg}\n{e}"
+            result = None
+        successes.append(query_success)
+        msgs.append(query_msg)
+        results.append(result)
+        if not query_success:
+            if debug:
+                dprint("Rolling back session.")
+            session.rollback()
+            break
+    success, msg = all(successes), '\n'.join(msgs)
+    if with_results:
+        return (success, msg), results
+    return success, msg
+
+
+def get_postgis_geo_columns_types(
+    connectable: Union[
+        'mrsm.connectors.sql.SQLConnector',
+        'sqlalchemy.orm.session.Session',
+        'sqlalchemy.engine.base.Engine'
+    ],
+    table: str,
+    schema: Optional[str] = 'public',
+    debug: bool = False,
+) -> Dict[str, str]:
+    """
+    Return a dictionary mapping PostGIS geometry column names to geometry types.
+
+    Parameters
+    ----------
+    connectable: Union[SQLConnector, sqlalchemy.orm.session.Session, sqlalchemy.engine.base.Engine]
+        The SQLConnector, Session, or Engine.
+
+    table: str
+        The table's name.
+
+    schema: Optional[str], default 'public'
+        The schema to use for the fully qualified table name.
+
+    Returns
+    -------
+    A dictionary mapping column names to geometry types.
+    """
+    from meerschaum.utils.dtypes import get_geometry_type_srid
+    from meerschaum.connectors.sql._create_engine import import_sqlalchemy
+    sqlalchemy = import_sqlalchemy()
+    default_type, default_srid = get_geometry_type_srid()
+    default_type = default_type.upper()
+
+    clean(table)
+    clean(str(schema))
+    schema = schema or 'public'
+    truncated_schema_name = truncate_item_name(schema, flavor='postgis')
+    truncated_table_name = truncate_item_name(table, flavor='postgis')
+    query = sqlalchemy.text(
+        "SELECT \"f_geometry_column\" AS \"column\", 'GEOMETRY' AS \"func\", \"type\", geom.\"srid\"\n"
+        "FROM \"geometry_columns\" AS geom\n"
+        f"WHERE \"f_table_schema\" = '{truncated_schema_name}'\n"
+        f"    AND \"f_table_name\" = '{truncated_table_name}'\n"
+        "UNION ALL\n"
+        "SELECT \"f_geography_column\" AS \"column\", 'GEOGRAPHY' AS \"func\", \"type\", geog.\"srid\"\n"
+        "FROM \"geography_columns\" AS geog\n"
+        f"WHERE \"f_table_schema\" = '{truncated_schema_name}'\n"
+        f"    AND \"f_table_name\" = '{truncated_table_name}'\n"
+    )
+    debug_kwargs = {'debug': debug} if isinstance(connectable, mrsm.connectors.SQLConnector) else {}
+    result_rows = [
+        row
+        for row in connectable.execute(query, **debug_kwargs).fetchall()
+    ]
+    cols_type_tuples = {
+        row[0]: (
+            row[1], # func
+            row[2], # type
+            (
+                row[3]
+                if row[3]
+                else 0
+            ) # srid
+        )
+        for row in result_rows
+    }
+
+    geometry_cols_types = {
+        col: (
+            f"{func}({typ.upper()}, {srid})"
+            if srid
+            else (
+                func
+                + (
+                    f'({typ.upper()})'
+                    if typ.upper() not in ('GEOMETRY', 'GEOGRAPHY')
+                    else ''
+                )
+            )
+        )
+        for col, (func, typ, srid) in cols_type_tuples.items()
+    }
+    return geometry_cols_types
+
+
+UPDATE_QUERIES = {
+    'default': """
+        UPDATE {target_table_name} AS f
+        {sets_subquery_none}
+        FROM {target_table_name} AS t
+        INNER JOIN (SELECT {patch_cols_str} FROM {patch_table_name}) AS p
+            ON
+                {and_subquery_t}
+        WHERE
+            {and_subquery_f}
+            AND
+            {date_bounds_subquery}
+    """,
+    'timescaledb-upsert': """
+        INSERT INTO {target_table_name} ({patch_cols_str})
+        SELECT {patch_cols_str}
+        FROM {patch_table_name}
+        ON CONFLICT ({join_cols_str}) DO {update_or_nothing} {sets_subquery_none_excluded}
+    """,
+    'timescaledb-ha-upsert': """
+        INSERT INTO {target_table_name} ({patch_cols_str})
+        SELECT {patch_cols_str}
+        FROM {patch_table_name}
+        ON CONFLICT ({join_cols_str}) DO {update_or_nothing} {sets_subquery_none_excluded}
+    """,
+    'postgresql-upsert': """
+        INSERT INTO {target_table_name} ({patch_cols_str})
+        SELECT {patch_cols_str}
+        FROM {patch_table_name}
+        ON CONFLICT ({join_cols_str}) DO {update_or_nothing} {sets_subquery_none_excluded}
+    """,
+    'postgis-upsert': """
+        INSERT INTO {target_table_name} ({patch_cols_str})
+        SELECT {patch_cols_str}
+        FROM {patch_table_name}
+        ON CONFLICT ({join_cols_str}) DO {update_or_nothing} {sets_subquery_none_excluded}
+    """,
+    'citus-upsert': """
+        INSERT INTO {target_table_name} ({patch_cols_str})
+        SELECT {patch_cols_str}
+        FROM {patch_table_name}
+        ON CONFLICT ({join_cols_str}) DO {update_or_nothing} {sets_subquery_none_excluded}
+    """,
+    'cockroachdb-upsert': """
+        INSERT INTO {target_table_name} ({patch_cols_str})
+        SELECT {patch_cols_str}
+        FROM {patch_table_name}
+        ON CONFLICT ({join_cols_str}) DO {update_or_nothing} {sets_subquery_none_excluded}
+    """,
+    'mysql': """
+        UPDATE {target_table_name} AS f
+        JOIN (SELECT {patch_cols_str} FROM {patch_table_name}) AS p
+        ON
+            {and_subquery_f}
+        {sets_subquery_f}
+        WHERE
+            {date_bounds_subquery}
+    """,
+    'mysql-upsert': """
+        INSERT {ignore}INTO {target_table_name} ({patch_cols_str})
+        SELECT {patch_cols_str}
+        FROM {patch_table_name}
+        {on_duplicate_key_update}
+            {cols_equal_values}
+    """,
+    'mariadb': """
+        UPDATE {target_table_name} AS f
+        JOIN (SELECT {patch_cols_str} FROM {patch_table_name}) AS p
+        ON
+            {and_subquery_f}
+        {sets_subquery_f}
+        WHERE
+            {date_bounds_subquery}
+    """,
+    'mariadb-upsert': """
+        INSERT {ignore}INTO {target_table_name} ({patch_cols_str})
+        SELECT {patch_cols_str}
+        FROM {patch_table_name}
+        {on_duplicate_key_update}
+            {cols_equal_values}
+    """,
+    'mssql': """
+        {with_temp_date_bounds}
+        MERGE {target_table_name} f
+            USING (SELECT {patch_cols_str} FROM {patch_table_name}) p
+            ON
+                {and_subquery_f}
+            AND
+                {date_bounds_subquery}
+        WHEN MATCHED THEN
+            UPDATE
+            {sets_subquery_none};
+    """,
+    'mssql-upsert': [
+        "{identity_insert_on}",
+        """
+        {with_temp_date_bounds}
+        MERGE {target_table_name} f
+            USING (SELECT {patch_cols_str} FROM {patch_table_name}) p
+            ON
+                {and_subquery_f}
+            AND
+                {date_bounds_subquery}{when_matched_update_sets_subquery_none}
+        WHEN NOT MATCHED THEN
+            INSERT ({patch_cols_str})
+            VALUES ({patch_cols_prefixed_str});
+        """,
+        "{identity_insert_off}",
+    ],
+    'oracle': """
+        MERGE INTO {target_table_name} f
+            USING (SELECT {patch_cols_str} FROM {patch_table_name}) p
+            ON (
+                {and_subquery_f}
+                AND
+                {date_bounds_subquery}
+            )
+            WHEN MATCHED THEN
+                UPDATE
+                {sets_subquery_none}
+    """,
+    'oracle-upsert': """
+        MERGE INTO {target_table_name} f
+            USING (SELECT {patch_cols_str} FROM {patch_table_name}) p
+            ON (
+                {and_subquery_f}
+                AND
+                {date_bounds_subquery}
+            ){when_matched_update_sets_subquery_none}
+            WHEN NOT MATCHED THEN
+                INSERT ({patch_cols_str})
+                VALUES ({patch_cols_prefixed_str})
+    """,
+    'sqlite-upsert': """
+        INSERT INTO {target_table_name} ({patch_cols_str})
+        SELECT {patch_cols_str}
+        FROM {patch_table_name}
+        WHERE true
+        ON CONFLICT ({join_cols_str}) DO {update_or_nothing} {sets_subquery_none_excluded}
+    """,
+    'sqlite_delete_insert': [
+        """
+        DELETE FROM {target_table_name} AS f
+        WHERE ROWID IN (
+            SELECT t.ROWID
+            FROM {target_table_name} AS t
+            INNER JOIN (SELECT * FROM {patch_table_name}) AS p
+                ON {and_subquery_t}
+        );
+        """,
+        """
+        INSERT INTO {target_table_name} AS f
+        SELECT {patch_cols_str} FROM {patch_table_name} AS p
+        """,
+    ],
+    'geopackage-upsert': """
+        INSERT INTO {target_table_name} ({patch_cols_str})
+        SELECT {patch_cols_str}
+        FROM {patch_table_name}
+        WHERE true
+        ON CONFLICT ({join_cols_str}) DO {update_or_nothing} {sets_subquery_none_excluded}
+    """,
+}
+
 
 
 def get_update_queries(
@@ -2001,6 +2249,7 @@ def get_update_queries(
     return [query for query in formatted_queries if query]
 
 
+
 def get_null_replacement(typ: str, flavor: str) -> str:
     """
     Return a value that may temporarily be used in place of NULL for this type.
@@ -2053,17 +2302,6 @@ def get_null_replacement(typ: str, flavor: str) -> str:
         return f"'{magic_val}'"
     return ('n' if flavor == 'oracle' else '') + "'-987654321'"
 
-
-def get_db_version(conn: 'SQLConnector', debug: bool = False) -> Union[str, None]:
-    """
-    Fetch the database version if possible.
-    """
-    version_name = sql_item_name('version', conn.flavor, None)
-    version_query = version_queries.get(
-        conn.flavor,
-        version_queries['default']
-    ).format(version_name=version_name)
-    return conn.value(version_query, debug=debug)
 
 
 def get_rename_table_queries(
@@ -2156,6 +2394,7 @@ def get_rename_table_queries(
     return queries
 
 
+
 def get_create_table_query(
     query_or_dtypes: Union[str, Dict[str, str]],
     new_table: str,
@@ -2193,6 +2432,7 @@ def get_create_table_query(
         schema=schema,
         primary_key=None,
     )[0]
+
 
 
 def get_create_table_queries(
@@ -2295,13 +2535,6 @@ def get_create_table_queries(
         _parse_dtypes=_parse_dtypes,
     )
 
-
-### Non-TimescaleDB flavors that support declarative range partitioning on a datetime column.
-### PostgreSQL-style declares an empty parent (`PARTITION BY RANGE`) with children added
-### separately; MySQL-style requires the initial partitions inline at `CREATE TABLE`.
-PG_PARTITION_FLAVORS = {'postgresql', 'postgis'}
-MYSQL_PARTITION_FLAVORS = {'mysql', 'mariadb'}
-NATIVE_PARTITION_FLAVORS = PG_PARTITION_FLAVORS | MYSQL_PARTITION_FLAVORS
 
 
 def _get_create_table_query_from_dtypes(
@@ -2509,6 +2742,7 @@ def _get_create_table_query_from_dtypes(
     return queries
 
 
+
 def _get_create_table_query_from_cte(
     query: str,
     new_table: str,
@@ -2694,319 +2928,6 @@ def _get_create_table_query_from_cte(
     return create_table_queries + alter_type_queries
 
 
-def find_top_level_select_index(query: str, last: bool = False) -> int:
-    """
-    Return the index of the first (or last) top-level `SELECT` keyword in a query.
-
-    The scan skips `--` line comments, `/* */` block comments, string literals,
-    quoted identifiers, and parenthesized subqueries, so a definition may safely
-    contain comments (including comments mentioning "select").
-
-    Parameters
-    ----------
-    query: str
-        The SQL query to scan.
-
-    last: bool, default False
-        If `True`, return the index of the last top-level `SELECT`
-        (e.g. the final statement of a CTE query) instead of the first.
-
-    Returns
-    -------
-    The character index of the `SELECT` keyword, or `-1` if none exists
-    at the top level.
-    """
-    q_lower = query.lower()
-    n = len(q_lower)
-    depth = 0
-    found_ix = -1
-    i = 0
-    while i < n:
-        ch = q_lower[i]
-        nxt = q_lower[i + 1] if (i + 1) < n else ''
-        if ch == '-' and nxt == '-':
-            eol = q_lower.find('\n', i)
-            i = n if eol == -1 else (eol + 1)
-            continue
-        if ch == '/' and nxt == '*':
-            end = q_lower.find('*/', i + 2)
-            i = n if end == -1 else (end + 2)
-            continue
-        if ch == "'":
-            i += 1
-            while i < n:
-                if q_lower[i] == "'":
-                    if (i + 1) < n and q_lower[i + 1] == "'":
-                        i += 2
-                        continue
-                    break
-                i += 1
-            i += 1
-            continue
-        if ch in ('"', '`'):
-            end = q_lower.find(ch, i + 1)
-            i = n if end == -1 else (end + 1)
-            continue
-        if ch == '[':
-            end = q_lower.find(']', i + 1)
-            i = n if end == -1 else (end + 1)
-            continue
-        if ch == '(':
-            depth += 1
-            i += 1
-            continue
-        if ch == ')':
-            depth -= 1
-            i += 1
-            continue
-        if depth == 0 and ch == 's' and q_lower[i:i + 6] == 'select':
-            before_ok = i == 0 or not (q_lower[i - 1].isalnum() or q_lower[i - 1] == '_')
-            after_ok = (i + 6) == n or not (q_lower[i + 6].isalnum() or q_lower[i + 6] == '_')
-            if before_ok and after_ok:
-                if not last:
-                    return i
-                found_ix = i
-                i += 6
-                continue
-        i += 1
-    return found_ix
-
-
-def get_leading_with_index(query: str) -> int:
-    """
-    Return the index of a query's leading `WITH` keyword,
-    skipping whitespace and comments, or `-1` if the query
-    does not begin with `WITH`.
-    """
-    q_lower = query.lower()
-    n = len(q_lower)
-    i = 0
-    while i < n:
-        ch = q_lower[i]
-        nxt = q_lower[i + 1] if (i + 1) < n else ''
-        if ch in (' ', '\t', '\r', '\n'):
-            i += 1
-            continue
-        if ch == '-' and nxt == '-':
-            eol = q_lower.find('\n', i)
-            i = n if eol == -1 else (eol + 1)
-            continue
-        if ch == '/' and nxt == '*':
-            end = q_lower.find('*/', i + 2)
-            i = n if end == -1 else (end + 2)
-            continue
-        break
-    if q_lower[i:i + 4] == 'with' and (
-        (i + 4) == n or not (q_lower[i + 4].isalnum() or q_lower[i + 4] == '_')
-    ):
-        return i
-    return -1
-
-
-def wrap_query_with_cte(
-    sub_query: str,
-    parent_query: str,
-    flavor: str,
-    cte_name: str = "src",
-) -> str:
-    """
-    Wrap a subquery in a CTE and append an encapsulating query.
-
-    Parameters
-    ----------
-    sub_query: str
-        The query to be referenced. This may itself contain CTEs and comments.
-        Unless `cte_name` is provided, this will be aliased as `src`.
-
-    parent_query: str
-        The larger query to append which references the subquery.
-        If it contains CTEs of its own, they are hoisted into the
-        enclosing `WITH` list.
-
-    flavor: str
-        The database flavor, e.g. `'mssql'`.
-
-    cte_name: str, default 'src'
-        The CTE alias, defaults to `src`.
-
-    Returns
-    -------
-    An encapsulating query which allows you to treat `sub_query` as a temporary table.
-    Raises an exception when a query's top-level `SELECT` cannot be located
-    (e.g. an incomplete definition), rather than emitting invalid SQL.
-
-    Examples
-    --------
-
-    >>> from meerschaum.utils.sql import wrap_query_with_cte
-    >>> sub_query = "WITH foo AS (SELECT 1 AS val) SELECT (val * 2) AS newval FROM foo"
-    >>> parent_query = "SELECT newval * 3 FROM src"
-    >>> query = wrap_query_with_cte(sub_query, parent_query, 'mssql')
-    >>> print(query)
-    >>> # WITH foo AS (SELECT 1 AS val)
-    >>> # , [src] AS (
-    >>> #     SELECT (val * 2) AS newval FROM foo
-    >>> # )
-    >>> # SELECT newval * 3 FROM src
-
-    """
-    import textwrap
-    from meerschaum.utils.warnings import error
-    sub_query = sub_query.lstrip()
-    parent_query = parent_query.lstrip()
-    cte_name_quoted = sql_item_name(cte_name, flavor, None)
-
-    if flavor in NO_CTE_FLAVORS:
-        return (
-            parent_query
-            .replace(cte_name_quoted, '--MRSM_SUBQUERY--')
-            .replace(cte_name, '--MRSM_SUBQUERY--')
-            .replace('--MRSM_SUBQUERY--', f"(\n{sub_query}\n) AS {cte_name_quoted}")
-        )
-
-    if get_leading_with_index(sub_query) != -1:
-        select_index = find_top_level_select_index(sub_query)
-        if select_index == -1:
-            error(
-                "Could not locate the top-level SELECT of the following query:\n"
-                + sub_query
-            )
-
-        ### Flatten: the definitions part keeps the sub-query's own CTEs
-        ### (`WITH a AS (...) -- trailing comments included`), and the body
-        ### (`SELECT ...`) becomes the new CTE. The joining comma goes on its
-        ### own line so a trailing `--` comment cannot swallow it.
-        definitions = sub_query[:select_index].rstrip()
-        if definitions.endswith(','):
-            definitions = definitions[:-1].rstrip()
-        body = sub_query[select_index:].strip()
-
-        lead = (
-            f"{definitions}\n"
-            f", {cte_name_quoted} AS (\n"
-            f"{textwrap.indent(body, '    ')}\n"
-            f")"
-        )
-    else:
-        lead = (
-            f"WITH {cte_name_quoted} AS (\n"
-            f"{textwrap.indent(sub_query, '    ')}\n"
-            f")"
-        )
-
-    parent_with_index = get_leading_with_index(parent_query)
-    if parent_with_index == -1:
-        return f"{lead}\n{parent_query}"
-
-    ### The parent query declares CTEs of its own: hoist them after the new
-    ### definition instead of emitting an invalid second `WITH`.
-    parent_prefix = parent_query[:parent_with_index].rstrip()
-    parent_rest = parent_query[parent_with_index + len('with'):].lstrip()
-    return (
-        (f"{parent_prefix}\n" if parent_prefix else "")
-        + f"{lead}\n, {parent_rest}"
-    )
-
-
-def format_cte_subquery(
-    sub_query: str,
-    flavor: str,
-    sub_name: str = 'src',
-    cols_to_select: Union[List[str], str] = '*',
-) -> str:
-    """
-    Given a subquery, build a wrapper query that selects from the CTE subquery.
-
-    Parameters
-    ----------
-    sub_query: str
-        The subquery to wrap.
-
-    flavor: str
-        The database flavor to use for the query (e.g. `'mssql'`, `'postgresql'`.
-
-    sub_name: str, default 'src'
-        If possible, give this name to the CTE (must be unquoted).
-
-    cols_to_select: Union[List[str], str], default ''
-        If specified, choose which columns to select from the CTE.
-        If a list of strings is provided, each item will be quoted and joined with commas.
-        If a string is given, assume it is quoted and insert it into the query.
-
-    Returns
-    -------
-    A wrapper query that selects from the CTE.
-    """
-    quoted_sub_name = sql_item_name(sub_name, flavor, None)
-    cols_str = (
-        cols_to_select
-        if isinstance(cols_to_select, str)
-        else ', '.join([sql_item_name(col, flavor, None) for col in cols_to_select])
-    )
-    parent_query = (
-        f"SELECT {cols_str}\n"
-        f"FROM {quoted_sub_name}"
-    )
-    return wrap_query_with_cte(sub_query, parent_query, flavor, cte_name=sub_name)
-
-
-def session_execute(
-    session: 'sqlalchemy.orm.session.Session',
-    queries: Union[List[str], str],
-    with_results: bool = False,
-    debug: bool = False,
-) -> Union[mrsm.SuccessTuple, Tuple[mrsm.SuccessTuple, List['sqlalchemy.sql.ResultProxy']]]:
-    """
-    Similar to `SQLConnector.exec_queries()`, execute a list of queries
-    and roll back when one fails.
-
-    Parameters
-    ----------
-    session: sqlalchemy.orm.session.Session
-        A SQLAlchemy session representing a transaction.
-
-    queries: Union[List[str], str]
-        A query or list of queries to be executed.
-        If a query fails, roll back the session.
-
-    with_results: bool, default False
-        If `True`, return a list of result objects.
-
-    Returns
-    -------
-    A `SuccessTuple` indicating the queries were successfully executed.
-    If `with_results`, return the `SuccessTuple` and a list of results.
-    """
-    sqlalchemy = mrsm.attempt_import('sqlalchemy', lazy=False)
-    if not isinstance(queries, list):
-        queries = [queries]
-    successes, msgs, results = [], [], []
-    for query in queries:
-        if debug:
-            dprint(query)
-        query_text = sqlalchemy.text(query)
-        fail_msg = "Failed to execute queries."
-        try:
-            result = session.execute(query_text)
-            query_success = result is not None
-            query_msg = "Success" if query_success else fail_msg
-        except Exception as e:
-            query_success = False
-            query_msg = f"{fail_msg}\n{e}"
-            result = None
-        successes.append(query_success)
-        msgs.append(query_msg)
-        results.append(result)
-        if not query_success:
-            if debug:
-                dprint("Rolling back session.")
-            session.rollback()
-            break
-    success, msg = all(successes), '\n'.join(msgs)
-    if with_results:
-        return (success, msg), results
-    return success, msg
-
 
 def get_reset_autoincrement_queries(
     table: str,
@@ -3075,90 +2996,6 @@ def get_reset_autoincrement_queries(
     ]
 
 
-def get_postgis_geo_columns_types(
-    connectable: Union[
-        'mrsm.connectors.sql.SQLConnector',
-        'sqlalchemy.orm.session.Session',
-        'sqlalchemy.engine.base.Engine'
-    ],
-    table: str,
-    schema: Optional[str] = 'public',
-    debug: bool = False,
-) -> Dict[str, str]:
-    """
-    Return a dictionary mapping PostGIS geometry column names to geometry types.
-
-    Parameters
-    ----------
-    connectable: Union[SQLConnector, sqlalchemy.orm.session.Session, sqlalchemy.engine.base.Engine]
-        The SQLConnector, Session, or Engine.
-
-    table: str
-        The table's name.
-
-    schema: Optional[str], default 'public'
-        The schema to use for the fully qualified table name.
-
-    Returns
-    -------
-    A dictionary mapping column names to geometry types.
-    """
-    from meerschaum.utils.dtypes import get_geometry_type_srid
-    sqlalchemy = mrsm.attempt_import('sqlalchemy', lazy=False)
-    default_type, default_srid = get_geometry_type_srid()
-    default_type = default_type.upper()
-
-    clean(table)
-    clean(str(schema))
-    schema = schema or 'public'
-    truncated_schema_name = truncate_item_name(schema, flavor='postgis')
-    truncated_table_name = truncate_item_name(table, flavor='postgis')
-    query = sqlalchemy.text(
-        "SELECT \"f_geometry_column\" AS \"column\", 'GEOMETRY' AS \"func\", \"type\", geom.\"srid\"\n"
-        "FROM \"geometry_columns\" AS geom\n"
-        f"WHERE \"f_table_schema\" = '{truncated_schema_name}'\n"
-        f"    AND \"f_table_name\" = '{truncated_table_name}'\n"
-        "UNION ALL\n"
-        "SELECT \"f_geography_column\" AS \"column\", 'GEOGRAPHY' AS \"func\", \"type\", geog.\"srid\"\n"
-        "FROM \"geography_columns\" AS geog\n"
-        f"WHERE \"f_table_schema\" = '{truncated_schema_name}'\n"
-        f"    AND \"f_table_name\" = '{truncated_table_name}'\n"
-    )
-    debug_kwargs = {'debug': debug} if isinstance(connectable, mrsm.connectors.SQLConnector) else {}
-    result_rows = [
-        row
-        for row in connectable.execute(query, **debug_kwargs).fetchall()
-    ]
-    cols_type_tuples = {
-        row[0]: (
-            row[1], # func
-            row[2], # type
-            (
-                row[3]
-                if row[3]
-                else 0
-            ) # srid
-        )
-        for row in result_rows
-    }
-
-    geometry_cols_types = {
-        col: (
-            f"{func}({typ.upper()}, {srid})"
-            if srid
-            else (
-                func
-                + (
-                    f'({typ.upper()})'
-                    if typ.upper() not in ('GEOMETRY', 'GEOGRAPHY')
-                    else ''
-                )
-            )
-        )
-        for col, (func, typ, srid) in cols_type_tuples.items()
-    }
-    return geometry_cols_types
-
 
 def get_create_schema_if_not_exists_queries(
     schema: str,
@@ -3195,3 +3032,93 @@ def get_create_schema_if_not_exists_queries(
     return [
         f"CREATE SCHEMA IF NOT EXISTS {sql_item_name(schema, flavor)};"
     ]
+
+
+NATIVE_PARTITION_FLAVORS = PG_PARTITION_FLAVORS | MYSQL_PARTITION_FLAVORS
+
+
+### `table_name` is the escaped name of the table.
+### `table` is the unescaped name of the table.
+exists_queries = {
+    'default': "SELECT COUNT(*) FROM {table_name} WHERE 1 = 0",
+}
+
+
+
+DROP_INDEX_IF_EXISTS_FLAVORS = {
+    'mssql',
+    'timescaledb',
+    'timescaledb-ha',
+    'postgresql',
+    'postgis',
+    'sqlite',
+    'geopackage',
+    'citus',
+}
+
+
+
+COALESCE_UNIQUE_INDEX_FLAVORS = {
+    'timescaledb',
+    'timescaledb-ha',
+    'postgresql',
+    'postgis',
+    'citus',
+}
+
+
+
+hypertable_queries = {
+    'timescaledb': 'SELECT hypertable_size(\'{table_name}\')',
+    'timescaledb-ha': 'SELECT hypertable_size(\'{table_name}\')',
+    'citus': 'SELECT citus_table_size(\'{table_name}\')',
+}
+
+
+
+table_wrappers = {
+    'default'       : ('"', '"'),
+    'timescaledb'   : ('"', '"'),
+    'timescaledb-ha': ('"', '"'),
+    'citus'         : ('"', '"'),
+    'duckdb'        : ('"', '"'),
+    'postgresql'    : ('"', '"'),
+    'postgis'       : ('"', '"'),
+    'sqlite'        : ('"', '"'),
+    'geopackage'    : ('"', '"'),
+    'mysql'         : ('`', '`'),
+    'mariadb'       : ('`', '`'),
+    'mssql'         : ('[', ']'),
+    'cockroachdb'   : ('"', '"'),
+    'oracle'        : ('"', '"'),
+}
+
+
+
+OMIT_NULLSFIRST_FLAVORS = {
+    'mariadb',
+    'mysql',
+    'mssql',
+}
+
+
+
+SINGLE_ALTER_TABLE_FLAVORS = {
+    'duckdb',
+    'sqlite',
+    'geopackage',
+    'mssql',
+    'oracle',
+}
+
+
+
+NO_SELECT_INTO_FLAVORS = {
+    'sqlite',
+    'geopackage',
+    'oracle',
+    'mysql',
+    'mariadb',
+    'duckdb',
+}
+

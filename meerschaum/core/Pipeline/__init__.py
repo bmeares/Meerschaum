@@ -22,9 +22,8 @@ run = pipeline.sync(workers=4)    # a SuccessTuple with `run.run_id`, `run.outco
 run = pipeline.sync(on_event=print)   # every event live, as a dict (see `_events.py`)
 ```
 
-The engine is Rust-only (D14): `parents=`, `children=` and `Pipeline` work in every `MRSM_CORE`
-mode, but need the extension built (`scripts/rust/build_py.sh`). A bare `pipe.sync()` never uses
-the engine.
+The engine is Rust-only: `parents=`, `children=` and `Pipeline` run in the Rust core. A bare
+`pipe.sync()` never uses the engine.
 
 The engine reads the graph from the instance, so every pipe in the selection (and the pipes it
 reads) must be registered; `Pipeline` registers its target pipes if they are not.

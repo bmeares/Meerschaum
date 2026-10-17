@@ -21,11 +21,24 @@ def pprint_pipes(pipes: PipesDict) -> None:
     from meerschaum.utils.misc import sorted_dict, replace_pipes_in_dict
     from meerschaum.utils.formatting import UNICODE, ANSI, CHARSET, pprint, colored, get_console
     import copy
-    rich = import_rich('rich', warn=False)
+    rich = import_rich(lazy=False, warn=False)
     Text = None
     if rich is not None:
         rich_text = attempt_import('rich.text', lazy=False)
-        Text = rich_text.Text
+        Text = rich_text.Text if rich_text is not None else None
+        if Text is None:
+            rich = None
+
+    def plain_print_pipes():
+        """Print an indented list: `rich` (and `asciitree`) are not dependencies of the base wheel."""
+        lines = []
+        for conn_keys, metrics in pipes.items():
+            lines.append(conn_keys)
+            for metric, locations in metrics.items():
+                lines.append('  ' + metric)
+                for location, pipe in locations.items():
+                    lines.append('    ' + str(location) + ': ' + str(pipe))
+        print('\n'.join(lines))
 
     icons = get_config('formatting', 'pipes', CHARSET, 'icons')
     styles = get_config('formatting', 'pipes', 'ansi', 'styles')
@@ -33,10 +46,15 @@ def pprint_pipes(pipes: PipesDict) -> None:
         styles = {k: '' for k in styles}
     print()
 
+    if rich is None or get_console() is None:
+        return plain_print_pipes()
+
     def ascii_print_pipes():
         """Print the dictionary with no unicode allowed. Also works in case rich fails to import
         (though rich should auto-install when `attempt_import()` is called)."""
-        asciitree = attempt_import('asciitree')
+        asciitree = attempt_import('asciitree', lazy=False)
+        if asciitree is None:
+            return plain_print_pipes()
         ascii_dict, replace_dict = {}, {'connector': {}, 'metric': {}, 'location': {}}
         for conn_keys, metrics in pipes.items():
             _colored_conn_key = colored(icons['connector'] + conn_keys, style=styles['connector'])
@@ -226,12 +244,28 @@ def pprint_pipe_columns(
         print(json.dumps(pipe.dtypes))
 
     def _pretty_print():
-        rich = import_rich()
-        rich_table, rich_text, rich_box = attempt_import(
-            'rich.table',
-            'rich.text',
-            'rich.box',
+        rich = import_rich(lazy=False, warn=False)
+        rich_table, rich_text, rich_box = (
+            attempt_import('rich.table', 'rich.text', 'rich.box', lazy=False)
+            if rich is not None and get_console() is not None
+            else (None, None, None)
         )
+        if rich_table is None or rich_text is None or rich_box is None:
+            ### `rich` is not a dependency of the base wheel: plain output.
+            info(make_header(f"\nIndex Columns for {pipe}:"), icon=False)
+            if _cols:
+                pprint(_cols, nopretty=nopretty)
+                print()
+            else:
+                print_tuple((False, f"No registered columns for {pipe}."), calm=True)
+            if pipe.dtypes:
+                for c, t in pipe.dtypes.items():
+                    print(f"{c}\t{_cols_types.get(c, 'None')}\t{t}")
+            else:
+                print_tuple(
+                    (False, f"No table columns for {pipe}. Does the pipe exist?"), calm=True,
+                )
+            return
 
         table = rich_table.Table(box=(rich_box.MINIMAL if UNICODE else rich_box.ASCII))
         styles = {
@@ -288,8 +322,8 @@ def pipe_repr(
     from meerschaum.utils.packages import import_rich, attempt_import
     import meerschaum as mrsm
 
-    _ = import_rich()
-    Text = attempt_import('rich.text').Text
+    _ = import_rich(lazy=False)
+    rich_text = attempt_import('rich.text', lazy=False)
 
     if isinstance(pipe, mrsm.Pipe):
         connector_keys = pipe.connector_keys
@@ -301,6 +335,16 @@ def pipe_repr(
         metric_key = pipe.get('metric_key')
         location_key = pipe.get('location_key')
         instance_keys = pipe.get('instance_keys', get_config('meerschaum', 'instance'))
+
+    if rich_text is None:
+        ### `rich` is not a dependency of the base wheel: the plain representation.
+        plain = f"Pipe('{connector_keys}', '{metric_key}'"
+        if location_key is not None:
+            plain += f", '{location_key}'"
+        if instance_keys != get_config('meerschaum', 'instance'):
+            plain += f", instance='{instance_keys}'"
+        return plain + ')'
+    Text = rich_text.Text
 
     styles = get_config('formatting', 'pipes', '__repr__', 'ansi', 'styles')
     if not ANSI or (ansi is False):

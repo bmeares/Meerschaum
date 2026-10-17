@@ -111,6 +111,8 @@ def test_get_requester_from_plugin_and_core():
 
 
 def test_attempt_import_records_install_by_plugin(temp_root, monkeypatch):
+    ### The ledger records implicit installs: they are off under `MRSM_NO_AUTO_INSTALL`.
+    monkeypatch.delenv('MRSM_NO_AUTO_INSTALL', raising=False)
     installed = set()
 
     def fake_pip_install(*names, venv='mrsm', **kw):

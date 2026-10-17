@@ -77,6 +77,7 @@ def test_attempt_import_warns_once_before_auto_install(monkeypatch):
     import warnings
     import meerschaum.utils.packages as packages
 
+    monkeypatch.delenv('MRSM_NO_AUTO_INSTALL', raising=False)
     monkeypatch.setattr(packages, 'Venv', lambda *args, **kw: nullcontext())
     monkeypatch.setattr(packages, 'is_installed', lambda *args, **kw: False)
     monkeypatch.setattr(packages, 'pip_install', lambda *args, **kw: True)
@@ -296,26 +297,6 @@ def deny_installs(monkeypatch):
     return attempts
 
 
-def _hide_semver(monkeypatch):
-    """Make `semver` look uninstalled, whatever the test environment has."""
-    import meerschaum.utils.packages as packages
-
-    get_module_path = packages.get_module_path
-    attempt_import = packages.attempt_import
-    monkeypatch.setattr(
-        packages,
-        'get_module_path',
-        lambda name, *a, **kw: None if name == 'semver' else get_module_path(name, *a, **kw),
-    )
-    monkeypatch.setattr(
-        packages,
-        'attempt_import',
-        lambda *names, **kw: (
-            None if names == ('semver',) else attempt_import(*names, **kw)
-        ),
-    )
-
-
 @pytest.mark.parametrize('value', _NO_AUTO_INSTALL_VALUES)
 def test_auto_install_guard_truthy_values(monkeypatch, value):
     """One helper parses the variable for every caller."""
@@ -343,14 +324,13 @@ def test_no_auto_install_precheck_chain_never_installs(monkeypatch, deny_install
     import meerschaum.utils.packages as packages
 
     monkeypatch.setenv('MRSM_NO_AUTO_INSTALL', '1')
-    _hide_semver(monkeypatch)
 
     assert mrsm.Pipe('a', 'b').metric_key == 'b'
     assert packages.attempt_import(
         'nonexistent_pkg_xyz', lazy=False, warn=False,
     ) is None
     assert packages.is_installed('nonexistent_pkg_xyz') is False
-    ### A declared package with a minimum version: this is the `need_update()` -> `semver` path.
+    ### A declared package with a minimum version: the `need_update()` path.
     assert isinstance(packages.is_installed('pandas'), bool)
     assert deny_installs == []
 
@@ -463,12 +443,11 @@ def test_init_venv_does_not_seed_when_auto_install_is_disabled(monkeypatch, tmp_
         assert ('--seed' in seen[0][1]) is expect_seed
 
 
-def test_need_update_without_a_version_parser_compares_pep440(monkeypatch, deny_installs):
-    """No semver and no installs: the Rust (or `packaging`) comparison answers."""
+def test_need_update_compares_pep440(monkeypatch, deny_installs):
+    """No installs: the Rust (or `packaging`) comparison answers, `semver` is never involved."""
     import meerschaum.utils.packages as packages
 
     monkeypatch.setenv('MRSM_NO_AUTO_INSTALL', '1')
-    _hide_semver(monkeypatch)
 
     def _need_update(name, installed):
         packages._checked_for_updates.clear()
@@ -487,46 +466,12 @@ def test_need_update_without_a_version_parser_compares_pep440(monkeypatch, deny_
     assert deny_installs == []
 
 
-def test_need_update_with_a_version_parser_uses_it(monkeypatch, deny_installs):
-    """An already-installed semver keeps answering, with no install either."""
-    import meerschaum.utils.packages as packages
-
-    class _Version:
-        def __init__(self, parts):
-            self.parts = parts
-
-        @classmethod
-        def parse(cls, value):
-            return cls(tuple(int(p) for p in value.split('.')))
-
-        def match(self, requirement):
-            return self.parts >= tuple(int(p) for p in requirement.lstrip('>=').split('.'))
-
-    attempt_import = packages.attempt_import
-    monkeypatch.setenv('MRSM_NO_AUTO_INSTALL', '1')
-    monkeypatch.setattr(packages, 'get_module_path', lambda name, *a, **kw: Path('semver.py'))
-    monkeypatch.setattr(
-        packages,
-        'attempt_import',
-        lambda *names, **kw: (
-            SimpleNamespace(Version=_Version) if names == ('semver',)
-            else attempt_import(*names, **kw)
-        ),
-    )
-    kwargs = dict(install_name='_mrsm_fake_e>=2.0.0', import_name='_mrsm_fake_e')
-    assert packages.need_update(None, version='1.0.0', **kwargs) is True
-    packages._checked_for_updates.clear()
-    assert packages.need_update(None, version='2.1.0', **kwargs) is False
-    assert deny_installs == []
-
-
 def test_need_update_without_any_parser_assumes_satisfied(monkeypatch, deny_installs):
-    """With no semver, no Rust binding and no `packaging`, the answer is 'no update needed'."""
+    """With no Rust binding and no `packaging`, the answer is 'no update needed'."""
     import meerschaum
     import meerschaum.utils.packages as packages
 
     monkeypatch.setenv('MRSM_NO_AUTO_INSTALL', '1')
-    _hide_semver(monkeypatch)
     monkeypatch.setattr(meerschaum, '_core', SimpleNamespace())
     attempt_import = packages.attempt_import
     monkeypatch.setattr(
@@ -534,11 +479,11 @@ def test_need_update_without_any_parser_assumes_satisfied(monkeypatch, deny_inst
         'attempt_import',
         lambda *names, **kw: (
             (None,) * len(names) if len(names) > 1 else None
-        ) if names[0] in ('semver', 'packaging.specifiers', 'packaging.version') else (
+        ) if names[0] in ('packaging.specifiers', 'packaging.version') else (
             attempt_import(*names, **kw)
         ),
     )
-    assert packages._version_satisfies_without_semver('1.0.0', '>=2.0.0') is None
+    assert packages._version_satisfies('1.0.0', '>=2.0.0') is None
     assert packages.need_update(
         None, install_name='_mrsm_fake_f>=2.0.0', import_name='_mrsm_fake_f', version='1.0.0',
     ) is False
@@ -552,9 +497,9 @@ def test_version_matching_falls_back_to_packaging(monkeypatch):
 
     pytest.importorskip('packaging')
     monkeypatch.setattr(meerschaum, '_core', SimpleNamespace())
-    assert packages._version_satisfies_without_semver('2.1.0', '>=2.0.0') is True
-    assert packages._version_satisfies_without_semver('1.1.0', '>=2.0.0,<3') is False
-    assert packages._version_satisfies_without_semver('1.0.0', '') is True
+    assert packages._version_satisfies('2.1.0', '>=2.0.0') is True
+    assert packages._version_satisfies('1.1.0', '>=2.0.0,<3') is False
+    assert packages._version_satisfies('1.0.0', '') is True
 
 
 def test_rust_version_binding_agrees_with_packaging():
@@ -582,22 +527,53 @@ def test_rust_version_binding_agrees_with_packaging():
     assert _core.version_satisfies('1.0', 'not a specifier') is None
 
 
-def test_unset_variable_keeps_the_v4_install_attempts(monkeypatch, deny_installs):
-    """Without the opt-out the semver bootstrap and import installs still happen."""
+def test_unset_variable_keeps_the_import_installs_but_never_installs_semver(
+    monkeypatch, deny_installs,
+):
+    """
+    Without the opt-out a missing package is still installed on import, but a version
+    check never installs anything: PEP 440 is compared by the extension.
+    """
     import meerschaum.utils.packages as packages
 
     monkeypatch.delenv('MRSM_NO_AUTO_INSTALL', raising=False)
-    _hide_semver(monkeypatch)
-    ### A failed semver install is the v4 outcome: no update is reported.
     assert packages.need_update(
         None, install_name='_mrsm_fake_g>=2.0.0', import_name='_mrsm_fake_g', version='1.0.0',
-    ) is False
-    semver_attempts = [a for a in deny_installs if a[0] == 'pip_install']
-    assert semver_attempts and semver_attempts[0][1] == ('semver>=3.0.2',)
+    ) is True
+    assert deny_installs == []
 
-    deny_installs.clear()
     packages.attempt_import('_mrsm_missing_pkg_', lazy=False, warn=False)
     assert [a[1] for a in deny_installs if a[0] == 'pip_install'] == [('_mrsm_missing_pkg_',)]
+
+
+def test_a_too_old_pandas_is_reported_not_installed(monkeypatch, deny_installs, capsys):
+    """An installed pandas below the extra's minimum (`>=3`) warns once; nothing is installed."""
+    import meerschaum.utils.packages as packages
+
+    monkeypatch.delenv('MRSM_NO_AUTO_INSTALL', raising=False)
+    monkeypatch.setattr(packages, '_emitted_old_pandas_warning', False)
+    old = SimpleNamespace(__version__='2.3.3')
+    packages._warn_if_pandas_is_too_old(old)
+    packages._warn_if_pandas_is_too_old(old)
+    packages._warn_if_pandas_is_too_old(SimpleNamespace(__version__='3.0.6'))
+    import re
+    output = ' '.join(re.sub(r'\x1b\[[0-9;]*m', '', capsys.readouterr().err).split())
+    assert output.count('older than') == 1
+    assert 'mrsm upgrade packages pandas' in output
+    assert deny_installs == []
+
+
+def test_a_package_below_its_minimum_counts_as_installed(monkeypatch, deny_installs):
+    """`is_installed` and `need_update` never turn an old package into an install."""
+    import meerschaum.utils.packages as packages
+
+    monkeypatch.delenv('MRSM_NO_AUTO_INSTALL', raising=False)
+    monkeypatch.setattr(packages, 'determine_version', lambda *a, **kw: '2.3.3')
+    assert packages.is_installed('json') is True
+    assert packages.need_update(
+        None, install_name='_mrsm_old>=3.0.0', import_name='_mrsm_old', version='2.3.3',
+    ) is True
+    assert deny_installs == []
 
 
 _PROBE_PRELUDE = textwrap.dedent('''
@@ -672,6 +648,38 @@ def test_facade_startup_makes_no_install_attempt(tmp_path):
     assert 'semver' not in result.stderr
 
 
+def test_sync_and_get_data_make_no_install_attempt_without_the_opt_out(tmp_path):
+    """
+    With `MRSM_NO_AUTO_INSTALL` unset, a sync and a `get_data()` of an installed environment
+    attempt no installation at all (v4 installed `semver` once per version-pinned package).
+    """
+    pytest.importorskip('pandas')
+    code = _PROBE_PRELUDE + textwrap.dedent('''
+        import meerschaum as mrsm
+        conn = mrsm.get_connector(
+            'sql', 'noinstall', flavor='sqlite', database=os.environ['MRSM_TEST_DB'],
+        )
+        pipe = mrsm.Pipe('noinstall', 'probe', instance=conn, columns={'id': 'id'})
+        assert pipe.sync([{'id': 1, 'v': 'a'}])[0]
+        assert len(pipe.get_data()) == 1
+        assert pipe.get_data(as_docs=True) == [{'id': 1, 'v': 'a'}]
+        print('probe ok')
+    ''')
+    ### Keep the real `HOME`: the interpreter's user site holds the installed packages.
+    env = _clean_env(
+        tmp_path, MRSM_TEST_DB=str(tmp_path / 'noinstall.db'), HOME=os.environ.get('HOME', ''),
+    )
+    env.pop('MRSM_NO_AUTO_INSTALL')
+    result = subprocess.run(
+        [sys.executable, '-c', code],
+        env=env, capture_output=True, text=True, timeout=300, cwd=str(tmp_path),
+    )
+    assert result.returncode == 0, result.stderr
+    assert 'probe ok' in result.stdout
+    attempts = tmp_path / 'attempts.txt'
+    assert not attempts.exists(), attempts.read_text()
+
+
 def test_api_host_help_makes_no_install_attempt(tmp_path):
     """The API host imports without installing or warning about `uv` or `semver`."""
     env = _clean_env(tmp_path)
@@ -724,10 +732,9 @@ def test_offline_fresh_environment_imports_without_pip_or_uv(tmp_path):
     import re
     import venv
 
-    if os.environ.get('MRSM_CORE', 'python').split(':')[0] == 'rust':
-        from meerschaum import _core
-        if not _core.load():
-            pytest.skip("MRSM_CORE=rust needs the built extension")
+    from meerschaum import _core
+    if not _core.load():
+        pytest.skip("needs the built extension")
     env_dir = tmp_path / 'bare'
     venv.EnvBuilder(with_pip=False, clear=True).create(env_dir)
     python = env_dir / ('Scripts' if os.name == 'nt' else 'bin') / (

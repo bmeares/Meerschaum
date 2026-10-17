@@ -291,6 +291,77 @@ async fn shared_pipe_cache_and_delete_cache() {
     assert_eq!(fresh.json()["y"], "string");
 }
 
+// v4's `/docs` route is `json.dumps(pipe.get_docs(), default=json_serialize_value)`: the
+// instance's own raw documents. A SQLite row keeps its stored datetime text
+// (`2024-01-02 03:04:05.000000`, no `T`, no offset), MySQL-family naive datetimes are `...Z`,
+// the PostgreSQL family's aware ones `...+00:00`, and a SQL `NULL` (a `NaN` in a float column
+// of the frame) is `null`. Verified against the released v4.1.4 on SQLite, PostgreSQL,
+// TimescaleDB, MySQL and MariaDB.
+#[tokio::test]
+async fn pipe_docs_are_the_instances_raw_documents() {
+    use meerschaum_kernel::value::{DateTimeValue, Value as KValue};
+    let dir = tempfile::tempdir().unwrap();
+    let (state, instance) = common::state_with(common::config(dir.path()));
+    let app = meerschaum_server::app(state);
+    let admin = login(&app, "admin", "pass", None).await;
+    let body = br#"{"columns": {"datetime": "ts", "id": "id"}}"#.to_vec();
+    send(
+        &app,
+        req(
+            "POST",
+            "/pipes/a/b/[None]/register",
+            Some(&admin),
+            Some(("application/json", body)),
+        ),
+    )
+    .await;
+    let r = send(
+        &app,
+        req(
+            "POST",
+            "/pipes/a/b/[None]/data",
+            Some(&admin),
+            Some((
+                "text/plain",
+                b"ts:'2024-01-01 00:00:00',id:1,v:1.5".to_vec(),
+            )),
+        ),
+    )
+    .await;
+    assert_eq!(r.json()[0], json!(true), "{}", r.text());
+    let day = chrono::NaiveDate::from_ymd_opt(2024, 1, 2).unwrap();
+    let stamp = day.and_hms_opt(3, 4, 5).unwrap();
+    let row = |ts: KValue, v: KValue| -> indexmap::IndexMap<String, KValue> {
+        [("ts".to_string(), ts), ("v".to_string(), v)]
+            .into_iter()
+            .collect()
+    };
+    instance.set_raw_docs(vec![
+        row(
+            KValue::Str("2024-01-02 03:04:05.000000".into()),
+            KValue::Float(f64::NAN),
+        ),
+        row(
+            KValue::Datetime(DateTimeValue::naive(stamp)),
+            KValue::Float(1.5),
+        ),
+        row(KValue::Datetime(DateTimeValue::utc(stamp)), KValue::Null),
+    ]);
+    let r = send(
+        &app,
+        req("GET", "/pipes/a/b/[None]/docs", Some(&admin), None),
+    )
+    .await;
+    assert_eq!(
+        r.text(),
+        concat!(
+            r#"[{"ts": "2024-01-02 03:04:05.000000", "v": null}, "#,
+            r#"{"ts": "2024-01-02T03:04:05Z", "v": 1.5}, "#,
+            r#"{"ts": "2024-01-02T03:04:05+00:00", "v": null}]"#
+        )
+    );
+}
+
 #[tokio::test]
 async fn data_formats_and_csv() {
     let (app, _dir) = default_app();
@@ -726,4 +797,530 @@ async fn every_documented_operation_is_routed() {
     let r = send(&app, req("GET", "/", None, None)).await;
     assert_eq!(r.status, StatusCode::TEMPORARY_REDIRECT);
     assert_eq!(r.headers["location"], "/dash");
+}
+
+/// A server over [`FakeJobs`] (job `j`) whose non-admins may run actions
+/// (`system:api:permissions:actions:non_admin`), with an admin and a plain user `eve` whose
+/// stored scopes are `["*"]`.
+fn jobs_scope_app() -> (axum::Router, Arc<common::MemoryInstance>, tempfile::TempDir) {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = Arc::new(common::MemoryInstance::new("fixture"));
+    instance.seed_user("admin", "pass", Some("admin"));
+    instance.seed_user("eve", "pass", None);
+    instance.seed_user_scopes("eve", &["*"]);
+    let mut cfg = common::config(dir.path());
+    cfg.system_actions_non_admin = true;
+    let state = AppState::builder(cfg, instance.clone())
+        .secret(SECRET.to_vec())
+        .jobs(Arc::new(FakeJobs))
+        .build()
+        .unwrap();
+    (meerschaum_server::app(state), instance, dir)
+}
+
+/// Register a token with `scopes` (JSON text) as the admin; returns its API key header and the
+/// registered response.
+async fn register_token_with(
+    app: &axum::Router,
+    admin: &str,
+    label: &str,
+    scopes: &str,
+) -> (String, Json) {
+    let body = format!(r#"{{"label": "{label}", "scopes": {scopes}}}"#);
+    let r = send(
+        app,
+        req(
+            "POST",
+            "/tokens/register",
+            Some(admin),
+            Some(("application/json", body.into_bytes())),
+        ),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+    let j = r.json();
+    (format!("Bearer {}", j["api_key"].as_str().unwrap()), j)
+}
+
+#[tokio::test]
+async fn stopping_a_job_needs_jobs_stop_and_still_accepts_the_legacy_spelling() {
+    let (app, _instance, _dir) = jobs_scope_app();
+    let admin = login(&app, "admin", "pass", None).await;
+    let stop = |key: &str| req("POST", "/jobs/j/stop", Some(key), None);
+
+    // `jobs:execute` + `jobs:stop` (plus `actions:execute`, which the non-admin actions gate
+    // asks of every non-admin).
+    let (key, _) = register_token_with(
+        &app,
+        &admin,
+        "stopper",
+        r#"["actions:execute", "jobs:execute", "jobs:stop"]"#,
+    )
+    .await;
+    let r = send(&app, stop(&key)).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+    assert_eq!(r.json()[0], json!(true));
+
+    // Without `jobs:stop`: 403 naming the real scope (v4's text, with the typo fixed).
+    let (key, _) = register_token_with(
+        &app,
+        &admin,
+        "runner",
+        r#"["actions:execute", "jobs:execute"]"#,
+    )
+    .await;
+    let r = send(&app, stop(&key)).await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN);
+    assert_eq!(r.json()["detail"], "Missing required scope: 'jobs:stop'");
+
+    // A token that explicitly holds the legacy `josb:stop` still works.
+    let (key, _) = register_token_with(
+        &app,
+        &admin,
+        "legacy",
+        r#"["actions:execute", "jobs:execute", "josb:stop"]"#,
+    )
+    .await;
+    let r = send(&app, stop(&key)).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+    assert_eq!(r.json()[0], json!(true));
+
+    // The legacy name does not stand in for `jobs:execute`.
+    let (key, _) = register_token_with(
+        &app,
+        &admin,
+        "only-legacy",
+        r#"["actions:execute", "josb:stop"]"#,
+    )
+    .await;
+    let r = send(&app, stop(&key)).await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN);
+    assert_eq!(r.json()["detail"], "Missing required scope: 'jobs:execute'");
+}
+
+#[tokio::test]
+async fn a_star_scope_is_stored_literally_and_grants_every_scope() {
+    let (app, _instance, _dir) = jobs_scope_app();
+    let admin = login(&app, "admin", "pass", None).await;
+
+    // `*` and custom (plugin-defined) scopes are stored exactly as given, never expanded to the
+    // built-in list, and nothing rejects a scope name it does not know.
+    let (star_key, star) = register_token_with(&app, &admin, "everything", r#"["*"]"#).await;
+    let (custom_key, custom) = register_token_with(
+        &app,
+        &admin,
+        "custom",
+        r#"["myplugin:read", "myplugin:write", "pipes:read"]"#,
+    )
+    .await;
+    let listed = send(&app, req("GET", "/tokens", Some(&admin), None)).await;
+    assert_eq!(listed.status, StatusCode::OK, "{}", listed.text());
+    let listed = listed.json();
+    let scopes_of = |id: &Json| {
+        listed
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|t| t["id"] == *id)
+            .unwrap_or_else(|| panic!("{id} is not listed in {listed}"))["scopes"]
+            .clone()
+    };
+    assert_eq!(scopes_of(&star["id"]), json!(["*"]));
+    assert_eq!(
+        scopes_of(&custom["id"]),
+        json!(["myplugin:read", "myplugin:write", "pipes:read"])
+    );
+
+    // A `*` token passes every scope check, built-in or not; the custom token only its own.
+    let register = |key: &str| req("POST", "/pipes/a/b/c/register", Some(key), None);
+    let r = send(&app, register(&star_key)).await;
+    assert_ne!(r.status, StatusCode::FORBIDDEN, "{}", r.text());
+    let r = send(&app, register(&custom_key)).await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN);
+    assert_eq!(r.json()["detail"], "Missing required scope: 'pipes:write'");
+
+    // Client credentials: the JWT carries `*`, or exactly the scopes asked for (a custom one
+    // included) when the token holds `*`; a token without `*` is filtered to what it holds.
+    let login_with = |id: &Json, secret: &Json, scope: &str| {
+        let form = format!(
+            "grant_type=client_credentials&client_id={}&client_secret={}&scope={scope}",
+            id.as_str().unwrap(),
+            secret.as_str().unwrap()
+        );
+        req(
+            "POST",
+            "/login",
+            None,
+            Some(("application/x-www-form-urlencoded", form.into_bytes())),
+        )
+    };
+    let claims = |resp: common::Resp| {
+        let jwt = resp.json()["access_token"].as_str().unwrap().to_string();
+        Json::Object(jwt_decode(&jwt, SECRET, Utc::now()).unwrap())["scopes"].clone()
+    };
+    let r = send(&app, login_with(&star["id"], &star["secret"], "")).await;
+    assert_eq!(claims(r), json!(["*"]));
+    let r = send(
+        &app,
+        login_with(&star["id"], &star["secret"], "myplugin:admin"),
+    )
+    .await;
+    assert_eq!(claims(r), json!(["myplugin:admin"]));
+    let r = send(
+        &app,
+        login_with(
+            &custom["id"],
+            &custom["secret"],
+            "myplugin:read%20myplugin:admin",
+        ),
+    )
+    .await;
+    assert_eq!(claims(r), json!(["myplugin:read"]));
+
+    // A user whose stored scopes are `["*"]` holds the necessary scopes of the actions gate.
+    let eve = login(&app, "eve", "pass", None).await;
+    let r = send(&app, req("POST", "/jobs/j/start", Some(&eve), None)).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+    assert_eq!(r.json()[0], json!(true));
+}
+
+#[tokio::test]
+async fn a_token_carries_at_most_its_owners_scopes() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = Arc::new(common::MemoryInstance::new("fixture"));
+    instance.seed_user("admin", "pass", Some("admin"));
+    instance.seed_user("star", "pass", None);
+    instance.seed_user_scopes("star", &["*"]);
+    instance.seed_user("ron", "pass", None);
+    instance.seed_user_scopes("ron", &["pipes:read", "jobs:read", "myplugin:read"]);
+    let state = AppState::builder(common::config(dir.path()), instance.clone())
+        .secret(SECRET.to_vec())
+        .build()
+        .unwrap();
+    let app = meerschaum_server::app(state);
+    let register = |auth: &str, scopes: &str| {
+        let body = format!(r#"{{"label": "t", "scopes": {scopes}}}"#);
+        req(
+            "POST",
+            "/tokens/register",
+            Some(auth),
+            Some(("application/json", body.into_bytes())),
+        )
+    };
+
+    // A restricted user may grant what they hold, custom scopes included.
+    let ron = login(&app, "ron", "pass", None).await;
+    let r = send(&app, register(&ron, r#"["pipes:read", "myplugin:read"]"#)).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+    let own_id = r.json()["id"].as_str().unwrap().to_string();
+
+    // ... but not a scope they lack, `*`, or a custom scope of their own invention: refused
+    // (never trimmed), naming every disallowed scope.
+    for (scopes, named) in [
+        (r#"["pipes:read", "pipes:write"]"#, vec!["pipes:write"]),
+        (r#"["*"]"#, vec!["*"]),
+        (
+            r#"["jobs:read", "other:read", "pipes:drop"]"#,
+            vec!["other:read", "pipes:drop"],
+        ),
+    ] {
+        let r = send(&app, register(&ron, scopes)).await;
+        assert_eq!(r.status, StatusCode::FORBIDDEN, "{scopes}: {}", r.text());
+        let detail = r.json()["detail"].as_str().unwrap().to_string();
+        for scope in named {
+            assert!(detail.contains(&format!("'{scope}'")), "{detail}");
+        }
+        assert!(!detail.contains("'pipes:read'"), "{detail}");
+    }
+
+    // No scopes asked for: the owner's own, not the built-in list.
+    let r = send(&app, register(&ron, "[]")).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+    let id = r.json()["id"].as_str().unwrap().to_string();
+    let listed = send(&app, req("GET", "/tokens", Some(&ron), None))
+        .await
+        .json();
+    let scopes_of = |id: &str| {
+        listed
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|t| t["id"] == id)
+            .unwrap()["scopes"]
+            .clone()
+    };
+    assert_eq!(
+        scopes_of(&id),
+        json!(["pipes:read", "jobs:read", "myplugin:read"])
+    );
+
+    // Editing is capped the same way; scopes the token already holds stay.
+    let edit = |auth: &str, id: &str, scopes: &str| {
+        let body = format!(
+            r#"{{"creation": "2024-01-01T00:00:00Z", "expiration": null, "label": "renamed", "scopes": {scopes}}}"#
+        );
+        req(
+            "POST",
+            &format!("/tokens/{id}/edit"),
+            Some(auth),
+            Some(("application/json", body.into_bytes())),
+        )
+    };
+    let r = send(
+        &app,
+        edit(&ron, &own_id, r#"["pipes:read", "myplugin:read"]"#),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+    let r = send(
+        &app,
+        edit(&ron, &own_id, r#"["pipes:read", "pipes:write"]"#),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN, "{}", r.text());
+    assert!(
+        r.json()["detail"]
+            .as_str()
+            .unwrap()
+            .contains("'pipes:write'")
+    );
+    let r = send(&app, edit(&ron, &own_id, r#"["*"]"#)).await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN, "{}", r.text());
+
+    // Administrators and holders of `*` may grant anything, `*` and custom scopes included.
+    for (user, label) in [("admin", "admin"), ("star", "star")] {
+        let auth = login(&app, user, "pass", None).await;
+        for scopes in [r#"["*"]"#, r#"["brand:new", "pipes:write"]"#] {
+            let r = send(&app, register(&auth, scopes)).await;
+            assert_eq!(r.status, StatusCode::OK, "{label} {scopes}: {}", r.text());
+        }
+        let r = send(&app, register(&auth, "[]")).await;
+        assert_eq!(r.status, StatusCode::OK, "{label}: {}", r.text());
+        let id = r.json()["id"].as_str().unwrap().to_string();
+        let r = send(&app, edit(&auth, &id, r#"["*"]"#)).await;
+        assert_eq!(r.status, StatusCode::OK, "{label}: {}", r.text());
+    }
+}
+
+#[tokio::test]
+async fn tokens_can_only_be_changed_by_their_owner_or_an_administrator() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = Arc::new(common::MemoryInstance::new("fixture"));
+    instance.seed_user("admin", "pass", Some("admin"));
+    instance.seed_user("ann", "pass", None);
+    instance.seed_user("bob", "pass", None);
+    let state = AppState::builder(common::config(dir.path()), instance)
+        .secret(SECRET.to_vec())
+        .build()
+        .unwrap();
+    let app = meerschaum_server::app(state);
+    let admin = login(&app, "admin", "pass", None).await;
+    let ann = login(&app, "ann", "pass", None).await;
+    let bob = login(&app, "bob", "pass", None).await;
+
+    let register = |auth: &str, label: &str, scopes: &str| {
+        let body = format!(r#"{{"label": "{label}", "scopes": {scopes}}}"#);
+        req(
+            "POST",
+            "/tokens/register",
+            Some(auth),
+            Some(("application/json", body.into_bytes())),
+        )
+    };
+    let admins = send(&app, register(&admin, "admins", r#"["*"]"#))
+        .await
+        .json()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let anns = send(&app, register(&ann, "anns", r#"["pipes:read"]"#))
+        .await
+        .json()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let bobs = send(&app, register(&bob, "bobs", r#"["jobs:read"]"#))
+        .await
+        .json()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let model = |id: &str| {
+        let app = app.clone();
+        let admin = admin.clone();
+        let id = id.to_string();
+        async move {
+            let r = send(
+                &app,
+                req("GET", &format!("/tokens/{id}"), Some(&admin), None),
+            )
+            .await;
+            assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+            r.json()
+        }
+    };
+    let edit = |auth: &str, id: &str, body: &str| {
+        req(
+            "POST",
+            &format!("/tokens/{id}/edit"),
+            Some(auth),
+            Some(("application/json", body.as_bytes().to_vec())),
+        )
+    };
+    const BASE: &str = r#""creation": "2024-01-01T00:00:00Z", "expiration": null"#;
+
+    // Another user's token (an ordinary user's or an administrator's `*` token) cannot be
+    // relabelled, re-scoped, invalidated or deleted; nothing changes.
+    for victim in [&anns, &admins] {
+        let relabel = format!(r#"{{{BASE}, "label": "mine now", "scopes": ["jobs:read"]}}"#);
+        let r = send(&app, edit(&bob, victim, &relabel)).await;
+        assert_eq!(r.status, StatusCode::FORBIDDEN, "{}", r.text());
+        assert_eq!(r.json()["detail"], "Cannot edit another user's token.");
+        let r = send(
+            &app,
+            req(
+                "POST",
+                &format!("/tokens/{victim}/invalidate"),
+                Some(&bob),
+                None,
+            ),
+        )
+        .await;
+        assert_eq!(r.status, StatusCode::FORBIDDEN, "{}", r.text());
+        let r = send(
+            &app,
+            req("DELETE", &format!("/tokens/{victim}"), Some(&bob), None),
+        )
+        .await;
+        assert_eq!(r.status, StatusCode::FORBIDDEN, "{}", r.text());
+    }
+    let m = model(&admins).await;
+    assert_eq!(
+        (
+            m["label"].clone(),
+            m["scopes"].clone(),
+            m["is_valid"].clone()
+        ),
+        (json!("admins"), json!(["*"]), json!(true))
+    );
+    let m = model(&anns).await;
+    assert_eq!(
+        (m["label"].clone(), m["scopes"].clone()),
+        (json!("anns"), json!(["pipes:read"]))
+    );
+
+    // The owner edits their own; leaving `scopes` out keeps the token's scopes (never the
+    // owner's, never the built-in list).
+    let r = send(
+        &app,
+        edit(&ann, &anns, &format!(r#"{{{BASE}, "label": "renamed"}}"#)),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+    let m = model(&anns).await;
+    assert_eq!(
+        (
+            m["label"].clone(),
+            m["scopes"].clone(),
+            m["is_valid"].clone()
+        ),
+        (json!("renamed"), json!(["pipes:read"]), json!(true))
+    );
+    // An administrator edits anyone's, and may widen a token to `*`.
+    let r = send(
+        &app,
+        edit(
+            &admin,
+            &bobs,
+            &format!(r#"{{{BASE}, "label": "bobs", "scopes": ["*"]}}"#),
+        ),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+    assert_eq!(model(&bobs).await["scopes"], json!(["*"]));
+    // The owner still may not go beyond their own scopes (an ordinary user holds the built-in
+    // list: no custom scope, no `*`).
+    let r = send(
+        &app,
+        edit(
+            &ann,
+            &anns,
+            &format!(r#"{{{BASE}, "label": "x", "scopes": ["brand:new"]}}"#),
+        ),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN, "{}", r.text());
+
+    // Invalidating: the owner or an administrator. Only an administrator makes it valid again.
+    let r = send(
+        &app,
+        req(
+            "POST",
+            &format!("/tokens/{anns}/invalidate"),
+            Some(&ann),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+    assert_eq!(model(&anns).await["is_valid"], json!(false));
+    let revalidate = format!(r#"{{{BASE}, "label": "renamed", "is_valid": true}}"#);
+    let r = send(&app, edit(&ann, &anns, &revalidate)).await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN, "{}", r.text());
+    assert!(
+        r.json()["detail"]
+            .as_str()
+            .unwrap()
+            .contains("administrator")
+    );
+    assert_eq!(model(&anns).await["is_valid"], json!(false));
+    // An edit that does not mention `is_valid` leaves an invalidated token invalid.
+    let r = send(
+        &app,
+        edit(&ann, &anns, &format!(r#"{{{BASE}, "label": "still off"}}"#)),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+    assert_eq!(model(&anns).await["is_valid"], json!(false));
+    let r = send(&app, edit(&admin, &anns, &revalidate)).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+    assert_eq!(model(&anns).await["is_valid"], json!(true));
+    let r = send(
+        &app,
+        req(
+            "POST",
+            &format!("/tokens/{bobs}/invalidate"),
+            Some(&admin),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+
+    // Deleting: the owner or an administrator; a missing token is a 404.
+    let r = send(
+        &app,
+        req("DELETE", &format!("/tokens/{anns}"), Some(&ann), None),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+    let r = send(
+        &app,
+        req("DELETE", &format!("/tokens/{bobs}"), Some(&admin), None),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+    let r = send(
+        &app,
+        req("DELETE", &format!("/tokens/{bobs}"), Some(&admin), None),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::NOT_FOUND, "{}", r.text());
+    let r = send(
+        &app,
+        req("GET", &format!("/tokens/{anns}"), Some(&admin), None),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::NOT_FOUND, "{}", r.text());
 }

@@ -151,20 +151,20 @@ def test_uninstall_removes_the_package_and_forgets_only_its_entry(throwaway):
 
 
 def test_uninstall_action_with_yes_flag(throwaway):
-    from meerschaum.actions.uninstall import _uninstall_packages
+    from meerschaum.actions import actions
     root, wheels = throwaway
     assert _install(wheels, 'w9t-stale')
-    success, message = _uninstall_packages(['w9t-stale'], venv=VENV, yes=True, sub_args=[])
+    success, message = actions['uninstall'](['packages', 'w9t-stale'], venv=VENV, yes=True, sub_args=[])
     assert success, message
     assert _installed(root) == []
     assert _ledger(root)['packages'] == {}
 
 
 def test_uninstall_action_without_consent_flags(throwaway):
-    from meerschaum.actions.uninstall import _uninstall_packages
+    from meerschaum.actions import actions
     root, wheels = throwaway
     assert _install(wheels, 'w9t-stale')
-    success, message = _uninstall_packages(['w9t-stale'], venv=VENV, sub_args=[])
+    success, message = actions['uninstall'](['packages', 'w9t-stale'], venv=VENV, sub_args=[])
     assert success, message
     assert _installed(root) == []
     assert _ledger(root)['packages'] == {}

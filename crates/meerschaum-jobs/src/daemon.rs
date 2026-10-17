@@ -37,6 +37,10 @@ pub struct JobsContext {
     /// Resolves `api:<label>` executor keys to a jobs client (`None`: remote executors report an
     /// error). Installed by the host; see [`crate::remote`].
     pub remote: Option<Arc<dyn RemoteJobsResolver>>,
+    /// The environment a `systemd` unit is written from (`None`: this process's). Tests pin it.
+    pub process_env: Option<Vec<(String, String)>>,
+    /// Reads the children of a process ([`process::children`]); tests inject a reader.
+    pub children: fn(i32) -> Option<Vec<i32>>,
 }
 
 impl JobsContext {
@@ -48,6 +52,8 @@ impl JobsContext {
             launcher,
             process: Arc::new(SystemRunner),
             remote: None,
+            process_env: None,
+            children: process::children,
         }
     }
 
@@ -79,6 +85,18 @@ impl JobsContext {
     /// Replace the process runner (tests pass [`crate::runner::FakeSystemctl`]).
     pub fn with_process_runner(mut self, runner: Arc<dyn ProcessRunner>) -> JobsContext {
         self.process = runner;
+        self
+    }
+
+    /// Write `systemd` units from this environment instead of the process's.
+    pub fn with_process_env(mut self, env: Vec<(String, String)>) -> JobsContext {
+        self.process_env = Some(env);
+        self
+    }
+
+    /// Read the children of a process with `reader` (tests simulate a kernel without them).
+    pub fn with_children_reader(mut self, reader: fn(i32) -> Option<Vec<i32>>) -> JobsContext {
+        self.children = reader;
         self
     }
 
@@ -433,6 +451,22 @@ impl Daemon {
         let _ = properties::write_properties(&self.paths.properties, &props);
     }
 
+    /// Wait (up to the timeout) until no supervisor of this job is left, by fresh scans. A worker
+    /// which exited leaves its supervisor a moment longer (it records `ended` and closes the
+    /// logs); starting the job again meanwhile would find it "already running" or have the
+    /// old supervisor's `ended` land after the new launch.
+    fn wait_supervisor_gone(&self, timeout: Option<Seconds>) {
+        let limits = self.ctx.config.detached;
+        let timeout = self.get_timeout_seconds(timeout);
+        let interval = self.get_check_timeout_interval_seconds(None);
+        let _ = self.wait_until(timeout, interval, |d| {
+            !detached::find_pids(&d.daemon_id, &d.ctx.paths.jobs_dir, &limits, None, true)
+                .iter()
+                .any(|f| f.supervisor)
+        });
+        self.forget_detached();
+    }
+
     /// The PID file is older than the recorded end of the last run.
     fn pid_file_is_stale(&self) -> bool {
         let timestamps = self.timestamps();
@@ -514,14 +548,21 @@ impl Daemon {
         }
         // The command line names the supervisor; `process.pid` and every signal belong to its
         // worker (stopping the supervisor alone would report `paused` while the job runs).
-        match process::children(first.pid).as_slice() {
-            [worker] => {
-                self.restore_pid_file(*worker, &timestamps);
-                Some(*worker)
+        let children = (self.ctx.children)(first.pid);
+        match detached::resolve_supervisor(
+            first.pid,
+            children.as_deref(),
+            timestamps.current_began().is_some(),
+        ) {
+            detached::Resolved::Worker(worker) => {
+                self.restore_pid_file(worker, &timestamps);
+                Some(worker)
             }
-            // The worker is not up yet (or already exiting): the supervisor stands for the
-            // job, and nothing is written down.
-            _ => Some(first.pid),
+            // The supervisor stands for the job, and nothing is written down.
+            detached::Resolved::Supervisor(pid) => Some(pid),
+            // The worker exited and the supervisor is only recording `ended` and closing the
+            // logs: stopped, not running.
+            detached::Resolved::Stopping => None,
         }
     }
 
@@ -637,6 +678,9 @@ impl Daemon {
         target.insert("kw".into(), Value::new_map());
         let _ = self.properties();
         self.mem.insert("target".into(), Value::Map(target));
+        // A worker which exited (killed from outside, or stopped) leaves its supervisor a moment
+        // longer: let it finish before launching again.
+        self.wait_supervisor_gone(None);
         let made = self.mkdir_if_not_exists(allow_dirty_run);
         if !made.success {
             return made;
@@ -870,6 +914,7 @@ impl Daemon {
             if sent.success {
                 self.kill_detached_processes(timeout);
                 self.sweep_stop("kill");
+                self.wait_supervisor_gone(timeout);
                 return sent;
             }
         }
@@ -908,6 +953,7 @@ impl Daemon {
         }
         self.unlink_pid();
         self.sweep_stop("kill");
+        self.wait_supervisor_gone(timeout);
         SuccessTuple::success()
     }
 
@@ -925,6 +971,7 @@ impl Daemon {
         let sent = self.send_signal(Sig::Int, timeout, None);
         if sent.success {
             self.sweep_stop("quit");
+            self.wait_supervisor_gone(timeout);
         }
         sent
     }

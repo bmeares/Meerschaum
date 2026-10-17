@@ -2,14 +2,12 @@
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from threading import Barrier, Lock
-from types import SimpleNamespace
 import time
 import uuid
 import json
 
 import pytest
 import meerschaum as mrsm
-from meerschaum._core import _gate
 
 
 def test_import_uses_working_tree():
@@ -103,25 +101,6 @@ def test_refresh_discards_target_and_freshness(registered_pipe, monkeypatch):
     assert pipe.target == 'registered_target'
 
 
-# These fake SQLAlchemy's `exec`, which the Rust metadata read never calls; the Rust path is
-# covered with a real failure by `tests/test_facade_sql.py::test_attribute_read_errors_propagate`.
-python_sql_only = pytest.mark.skipif(
-    _gate.mode() == _gate.RUST,
-    reason="mocks SQLAlchemy exec; see test_facade_sql.py for the Rust path",
-)
-
-
-@python_sql_only
-def test_sql_attribute_errors_are_not_unregistered(registered_pipe, monkeypatch):
-    pipe = registered_pipe
-    assert pipe.id is not None
-    def fail(*args, **kwargs):
-        raise RuntimeError('metadata read failed')
-    monkeypatch.setattr(pipe.instance_connector, 'exec', fail)
-    with pytest.raises(RuntimeError, match='metadata read failed'):
-        pipe.instance_connector.get_pipe_attributes(pipe)
-
-
 def test_connector_can_read_parameters_during_metadata_load(registered_pipe, monkeypatch):
     pipe = registered_pipe
     read = pipe.instance_connector.get_pipe_attributes
@@ -149,39 +128,64 @@ def test_failed_refresh_preserves_cached_attributes(registered_pipe, monkeypatch
     assert not pipe._attributes_loading
 
 
+@pytest.fixture
+def attributes_server():
+    """
+    A loopback HTTP server answering `GET /pipes/<keys>/attributes`: the first answer is the
+    failure the test asks for, every later one is valid. Records each request's query.
+    """
+    import threading
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+    from urllib.parse import urlparse, parse_qs
+
+    state = {'failure': None, 'queries': []}
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def do_GET(self):
+            parsed = urlparse(self.path)
+            if not parsed.path.endswith('/attributes'):
+                self.send_response(404)
+                self.end_headers()
+                return
+            state['queries'].append({k: v[0] for k, v in parse_qs(parsed.query).items()})
+            status, body = 200, json.dumps({'parameters': {'target': 'api_target'}})
+            if len(state['queries']) == 1:
+                if state['failure'] == 'http':
+                    status, body = 503, 'unavailable'
+                elif state['failure'] == 'invalid_json':
+                    body = 'not json'
+                elif state['failure'] == 'error_object':
+                    body = json.dumps({'detail': 'unavailable'})
+            self.send_response(status)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            self.wfile.write(body.encode())
+
+    server = HTTPServer(('127.0.0.1', 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    state['port'] = server.server_address[1]
+    yield state
+    server.shutdown()
+    server.server_close()
+
+
 @pytest.mark.parametrize('failure', ['http', 'invalid_json', 'error_object'])
-def test_api_metadata_failure_retries(monkeypatch, failure):
-    conn = mrsm.get_connector('api', 'attrs_' + uuid.uuid4().hex, host='localhost',
-                              port=8989, instance_keys='sql:server_default')
+def test_api_metadata_failure_retries(attributes_server, failure):
+    attributes_server['failure'] = failure
+    conn = mrsm.get_connector('api', 'attrs_' + uuid.uuid4().hex, host='127.0.0.1',
+                              port=attributes_server['port'], protocol='http',
+                              instance_keys='sql:server_default')
     pipe = mrsm.Pipe('test', 'api_attributes', instance=conn, cache=False,
                      parameters={'instance_keys': 'sql:explicit'})
-    calls = []
-    def get(*args, **kwargs):
-        calls.append(kwargs['params'])
-        def check_status():
-            if len(calls) == 1 and failure == 'http':
-                raise RuntimeError('HTTP 503')
-        text = json.dumps({'parameters': {'target': 'api_target'}})
-        if len(calls) == 1 and failure == 'invalid_json':
-            text = 'not json'
-        elif len(calls) == 1 and failure == 'error_object':
-            text = json.dumps({'detail': 'unavailable'})
-        return SimpleNamespace(text=text, raise_for_status=check_status)
-    monkeypatch.setattr(conn, 'get', get)
     with pytest.warns(UserWarning, match='Failed to load attributes'):
         assert pipe.attributes['parameters'] == {'instance_keys': 'sql:explicit'}
     assert pipe.__dict__.get('_attributes_sync_time') is None
     assert pipe.target == 'api_target'
-    assert calls == [{'instance': 'sql:explicit'}] * 2
-
-
-@python_sql_only
-def test_sql_no_row_is_still_empty(registered_pipe, monkeypatch):
-    pipe = registered_pipe
-    assert pipe.id is not None
-    monkeypatch.setattr(pipe.instance_connector, 'exec', lambda *a, **k:
-                        SimpleNamespace(mappings=lambda: SimpleNamespace(all=lambda: [])))
-    assert pipe.instance_connector.get_pipe_attributes(pipe) == {}
+    assert attributes_server['queries'] == [{'instance': 'sql:explicit'}] * 2
 
 
 @pytest.mark.parametrize('recover_during_resolution', [False, True])

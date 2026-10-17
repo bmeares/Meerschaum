@@ -44,6 +44,10 @@ You can visit your API instance's Swagger documentation by navigating to `/docs`
 
 It's common in production deployments to stand up a public-facing API instance. See below for deployment tips:
 
+!!! danger "⚠️ Open registration plus terminals for non-admins is a shell for anyone"
+
+    With the defaults, anyone who can reach the API can register an account (`api:permissions:registration:users`) and, as a logged-in user, open the web terminal (`api:permissions:actions:non_admin`): **a shell on the server for anyone who can reach the port**. Meerschaum 4 behaves the same, and v5 keeps it. Before exposing an API, start it with `--secure` (terminals and actions for administrators only) or `--private` (authentication on every endpoint), or set `api:permissions:registration:users: false` (no self-registration) or `api:permissions:actions:non_admin: false` (administrators only). `mrsm start api` prints a warning at startup when it binds a non-loopback address with both settings on; it cannot see a reverse proxy, so a loopback bind behind a proxy exposes the same terminal **without** the warning. (`--no-auth` on a non-loopback address also prints a warning: every route, `/actions` included, is then open to anyone who can connect.)
+
 
 ### Meerschaum Stack (easiest)
 

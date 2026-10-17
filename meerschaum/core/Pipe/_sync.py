@@ -8,12 +8,11 @@ Synchronize a pipe's data with its source via its connector.
 
 from __future__ import annotations
 
-import json
+import os
 import time
 import threading
 import multiprocessing
-import functools
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import TYPE_CHECKING
 
 import meerschaum as mrsm
@@ -27,9 +26,7 @@ from meerschaum.utils.typing import (
     Dict,
     List,
 )
-from meerschaum.utils.warnings import warn, error
-from meerschaum._internal.static import STATIC_CONFIG
-from meerschaum._core._gate import rust_impl as _rust_impl
+from meerschaum.utils.warnings import warn
 
 if TYPE_CHECKING:
     pd = mrsm.attempt_import('pandas')
@@ -165,66 +162,9 @@ def _is_dask(df: Any) -> bool:
     return type(df).__module__.split('.', maxsplit=1)[0] == 'dask'
 
 
-class NativeUnavailable(str):
-    """
-    Why a pipe's connectors cannot run natively: the message, plus a `kind` callers branch on
-    (never on the text): `'oracle_client'` (Oracle without `libclntsh`, W15L-006: the one case
-    that keeps the v4 body, with a warning once per process, until wave 16), `'no_driver'` (a SQL
-    connector whose Rust build failed, or a flavor that is not routed: an error) or
-    `'unbuildable'` (the instance connector cannot be built at all).
-    """
-
-    kind: str = 'unbuildable'
-
-    def __new__(cls, message: str, kind: str = 'unbuildable'):
-        obj = super().__new__(cls, message)
-        obj.kind = kind
-        return obj
-
-
-_ORACLE_FALLBACK_WARNED = False
-
-
-def _warn_oracle_fallback(self, reason: str, what: str) -> None:
-    """Warn, once per process, that the Python Oracle driver is used (`NativeUnavailable.kind`)."""
-    global _ORACLE_FALLBACK_WARNED
-    if _ORACLE_FALLBACK_WARNED:
-        return
-    _ORACLE_FALLBACK_WARNED = True
-    warn(
-        f"{what} {self} with the Python Oracle driver: " + str(reason).split(':', 1)[-1].strip(),
-        stack=False,
-    )
-
-
-def _native_unavailable(self, reason: str, debug: bool = False) -> Optional[SyncResult]:
-    """
-    The native sync cannot run for this pipe's connectors. There is no silent fallback: the only
-    case that keeps the v4 body (with a warning, once per process) is an `oracle` instance whose
-    client library (`libclntsh`) is missing, which `python-oracledb`'s thin mode does not need;
-    wave 16 replaces it with an error. Anything else is a failed result.
-    """
-    if getattr(reason, 'kind', None) == 'oracle_client':
-        _warn_oracle_fallback(self, reason, 'Syncing')
-        return None
-    self._invalidate_cache(debug=debug)
-    return SyncResult(False, f"Cannot sync {self}: {reason}.")
-
-
-def _no_rust_driver(role: str, connector: Any) -> 'NativeUnavailable':
-    cause = (getattr(connector, '__dict__', {}) or {}).get('_rust_error', None)
-    if getattr(connector, 'flavor', None) == 'oracle' and not cause:
-        return NativeUnavailable(
-            "oracle: the Oracle client library (libclntsh) is not installed, so the Rust Oracle "
-            "driver is unavailable",
-            'oracle_client',
-        )
-    flavor = getattr(connector, 'flavor', None)
-    return NativeUnavailable(
-        f"{role} is a SQL connector ('{flavor}') with no usable Rust driver"
-        + (f": {cause}" if cause else " (its flavor is not routed to Rust)"),
-        'no_driver',
-    )
+def _no_rust_driver(role: str, error: Any = None) -> str:
+    """The reason for a SQL connector with no Rust driver (`SQLConnector._core_connector`)."""
+    return str(error).rstrip('.') if error else f"{role} has no usable Rust driver"
 
 
 def _native_context(self, debug: bool = False) -> Tuple[Optional[Dict[str, Any]], str]:
@@ -237,23 +177,29 @@ def _native_context(self, debug: bool = False) -> Tuple[Optional[Dict[str, Any]]
     Python process holds) and the attributes of the connectors this process defined ad hoc
     (`attributes`), which the Rust side rebuilds and the Python workers learn about.
     """
-    from meerschaum.core.Pipe._verify import _rust_sql_connector
-    try:
-        instance_connector = self.instance_connector
-    except Exception:
-        return None, NativeUnavailable("the instance connector cannot be built")
+    ### As in v4, an instance that cannot be parsed or built raises here
+    ### (`Unable to parse connector keys '...'`).
+    instance_connector = self.instance_connector
     if isinstance(instance_connector, str) or instance_connector is None:
-        return None, NativeUnavailable("the instance connector cannot be built")
+        from meerschaum.utils.warnings import error
+        error(f"Unable to parse connector keys '{self.instance_keys}'", stack=False)
 
     context: Dict[str, Any] = {'connector': None, 'connectors': {}, 'attributes': {}}
     instance_type = getattr(instance_connector, 'type', None)
     if instance_type == 'sql':
-        rust_connector = _rust_sql_connector(instance_connector)
-        if rust_connector is None:
-            return None, _no_rust_driver('the instance', instance_connector)
-        context['connector'] = rust_connector
+        try:
+            context['connector'] = instance_connector._core_connector()
+        except RuntimeError as e:
+            return None, _no_rust_driver('the instance', e)
     ### Any other instance (`api:`, `valkey:`, a `@make_connector` type) is built by the native
     ### flow from its keys: the Rust clients for `api:` and `valkey:`, the worker for the rest.
+    ### The native flow finds an `api:` / `valkey:` connector's client by its attributes: make the
+    ### connector (re)build it for the current ones first (changed credentials, a forked child).
+    if instance_type in ('api', 'valkey') and hasattr(instance_connector, '_rust_client'):
+        try:
+            instance_connector._rust_client()
+        except Exception:
+            pass
     context['attributes'][str(instance_connector)] = _connector_attributes(instance_connector)
 
     ### The source: connectors this process already holds are shared with the native flow
@@ -265,19 +211,12 @@ def _native_context(self, debug: bool = False) -> Tuple[Optional[Dict[str, Any]]
         held = mrsm.connectors.connectors.get(source_type, {}).get(source_label, None)
         if held is not None and source_type != 'plugin':
             if source_type == 'sql':
-                rust_source = _rust_sql_connector(held)
-                if rust_source is None:
-                    return None, _no_rust_driver('the source', held)
-                context['connectors'][connector_keys] = rust_source
+                try:
+                    context['connectors'][connector_keys] = held._core_connector()
+                except RuntimeError as e:
+                    return None, _no_rust_driver('the source', e)
             context['attributes'][connector_keys] = _connector_attributes(held)
     return context, ''
-
-
-def _native_python_interpreter() -> None:
-    """
-    A no-op kept for callers: the extension passes this process's `sys.executable` to the worker
-    session itself (`MRSM_PYTHON` still wins), and the environment is never modified.
-    """
 
 
 def _native_pipe_result(
@@ -370,12 +309,8 @@ def _sync_native(
     debug: bool,
     inplace: bool,
     kw: Dict[str, Any],
-) -> Optional[SyncResult]:
-    """
-    Run `Pipe.sync()` through `_core.sync_pipe`, or return `None` to keep the Python
-    implementation (the instance has no native driver yet, see `PARITY.md`, Wave 15 task L).
-    """
-    import os
+) -> SyncResult:
+    """Run `Pipe.sync()` through `_core.sync_pipe`."""
     if df is None:
         self._invalidate_cache(debug=debug)
         return SyncResult(
@@ -392,7 +327,8 @@ def _sync_native(
 
     context, reason = _native_context(self, debug=debug)
     if context is None:
-        return _native_unavailable(self, reason, debug=debug)
+        self._invalidate_cache(debug=debug)
+        return SyncResult(False, f"Cannot sync {self}: {reason}.")
 
     infer = df is InferFetch or hasattr(df, 'MRSM_INFER_FETCH')
     if (callback is not None or error_callback is not None) and blocking:
@@ -833,441 +769,31 @@ def sync(
             **kw
         )
 
-    if (_rust := _rust_impl('sync_pipe')) is not None:
-        _native_result = _sync_native(
-            self,
-            _rust,
-            df,
-            begin=begin,
-            end=end,
-            check_existing=check_existing,
-            enforce_dtypes=enforce_dtypes,
-            chunksize=chunksize,
-            sync_chunks=sync_chunks,
-            force=force,
-            retries=retries,
-            min_seconds=min_seconds,
-            blocking=blocking,
-            workers=workers,
-            callback=callback,
-            error_callback=error_callback,
-            debug=debug,
-            inplace=(
-                _inplace
-                and bool(mrsm.get_config('system', 'experimental', 'inplace_sync'))
-            ),
-            kw=kw,
-        )
-        if _native_result is not None:
-            return _native_result
-
-    from meerschaum.utils.debug import dprint, _checkpoint
-    from meerschaum.utils.formatting import get_console
-    from meerschaum.utils.venv import Venv
-    from meerschaum.connectors import get_connector_plugin
-    from meerschaum.utils.misc import df_is_chunk_generator, filter_keywords, filter_arguments
-    from meerschaum.utils.pool import get_pool
-    from meerschaum.config import get_config
-    from meerschaum.utils.dtypes import are_dtypes_equal, get_current_timestamp
-
-    if (callback is not None or error_callback is not None) and blocking:
-        warn("Callback functions are only executed when blocking = False. Ignoring...")
-
-    _checkpoint(_total=2, **kw)
-
-    if chunksize == 0:
-        chunksize = None
-        sync_chunks = False
-
-    begin, end = self.parse_date_bounds(begin, end)
-    kw.update({
-        'begin': begin,
-        'end': end,
-        'force': force,
-        'retries': retries,
-        'min_seconds': min_seconds,
-        'check_existing': check_existing,
-        'blocking': blocking,
-        'workers': workers,
-        'callback': callback,
-        'error_callback': error_callback,
-        'sync_chunks': sync_chunks,
-        'chunksize': chunksize,
-        'safe_copy': True,
-    })
-
-    self._invalidate_cache(debug=debug)
-    self._cache_value('sync_ts', get_current_timestamp('ms'), debug=debug)
-
-    def _sync(
-        p: mrsm.Pipe,
-        df: Union[
-            'pd.DataFrame',
-            Dict[str, List[Any]],
-            List[Dict[str, Any]],
-            str,
-            InferFetch
-        ] = InferFetch,
-    ) -> SuccessTuple:
-        if df is None:
-            p._invalidate_cache(debug=debug)
-            return (
-                False,
-                f"You passed `None` instead of data into `sync()` for {p}.\n"
-                + "Omit the DataFrame to infer fetching.",
-            )
-        ### Ensure that Pipe is registered.
-        if not p.temporary and p.id is None:
-            ### NOTE: This may trigger an interactive session for plugins!
-            register_success, register_msg = p.register(debug=debug)
-            if not register_success:
-                if 'already' not in register_msg:
-                    p._invalidate_cache(debug=debug)
-                    return register_success, register_msg
-
-        ### Checked here as well as in `register()` so that a pipe registered before
-        ### this validation existed reports the reason rather than failing deep in
-        ### Pandas with `unhashable type: 'dict'`.
-        indices_success, indices_msg = p.validate_indices(debug=debug)
-        if not indices_success:
-            p._invalidate_cache(debug=debug)
-            return indices_success, indices_msg
-
-        if isinstance(df, str):
-            from meerschaum.utils.dataframe import parse_simple_lines
-            df = parse_simple_lines(df)
-
-        ### If connector is a plugin with a `sync()` method, return that instead.
-        ### If the plugin does not have a `sync()` method but does have a `fetch()` method,
-        ### use that instead.
-        ### NOTE: The DataFrame must be omitted for the plugin sync method to apply.
-        ### If a DataFrame is provided, continue as expected.
-        if hasattr(df, 'MRSM_INFER_FETCH'):
-            try:
-                if isinstance(p.connector, str):
-                    if ':' not in p.connector_keys:
-                        return True, f"{p} does not support fetching; nothing to do."
-
-                    msg = f"{p} does not have a valid connector."
-                    if p.connector_keys.startswith('plugin:'):
-                        msg += f"\n    Perhaps {p.connector_keys} has a syntax error?"
-                    p._invalidate_cache(debug=debug)
-                    return False, msg
-            except Exception:
-                p._invalidate_cache(debug=debug)
-                return False, f"Unable to create the connector for {p}."
-
-            ### Sync in place if possible.
-            if (
-                str(self.connector) == str(self.instance_connector)
-                and 
-                hasattr(self.instance_connector, 'sync_pipe_inplace')
-                and
-                _inplace
-                and
-                get_config('system', 'experimental', 'inplace_sync')
-            ):
-                with Venv(get_connector_plugin(self.instance_connector)):
-                    p._invalidate_cache(debug=debug)
-                    _args, _kwargs = filter_arguments(
-                        p.instance_connector.sync_pipe_inplace,
-                        p,
-                        debug=debug,
-                        **kw
-                    )
-                    return self.instance_connector.sync_pipe_inplace(
-                        *_args,
-                        **_kwargs
-                    )
-
-            ### Activate and invoke `sync(pipe)` for plugin connectors with `sync` methods.
-            try:
-                if getattr(p.connector, 'sync', None) is not None:
-                    with Venv(get_connector_plugin(p.connector), debug=debug):
-                        _args, _kwargs = filter_arguments(
-                            p.connector.sync,
-                            p,
-                            debug=debug,
-                            **kw
-                        )
-                        return_tuple = p.connector.sync(*_args, **_kwargs)
-                    p._invalidate_cache(debug=debug)
-                    if not isinstance(return_tuple, tuple):
-                        return_tuple = (
-                            False,
-                            f"Plugin '{p.connector.label}' returned non-tuple value: {return_tuple}"
-                        )
-                    return return_tuple
-
-            except Exception as e:
-                get_console().print_exception()
-                msg = f"Failed to sync {p} with exception: '" + str(e) + "'"
-                if debug:
-                    error(msg, silent=False)
-                p._invalidate_cache(debug=debug)
-                return False, msg
-
-            ### Fetch the dataframe from the connector's `fetch()` method.
-            try:
-                with Venv(get_connector_plugin(p.connector), debug=debug):
-                    df = p.fetch(
-                        **filter_keywords(
-                            p.fetch,
-                            debug=debug,
-                            **kw
-                        )
-                    )
-                    kw['safe_copy'] = False
-            except Exception as e:
-                get_console().print_exception(
-                    suppress=[
-                        'meerschaum/core/Pipe/_sync.py',
-                        'meerschaum/core/Pipe/_fetch.py',
-                    ]
-                )
-                msg = f"Failed to fetch data from {p.connector}:\n    {e}"
-                df = None
-
-            if df is None:
-                p._invalidate_cache(debug=debug)
-                return False, f"No data were fetched for {p}."
-
-            if isinstance(df, list):
-                if len(df) == 0:
-                    return True, f"No new rows were returned for {p}."
-
-                ### May be a chunk hook results list.
-                if isinstance(df[0], tuple):
-                    success = all([_success for _success, _ in df])
-                    message = '\n'.join([_message for _, _message in df])
-                    return success, message
-
-            if df is True:
-                p._invalidate_cache(debug=debug)
-                return True, f"{p} is being synced in parallel."
-
-        ### CHECKPOINT: Retrieved the DataFrame.
-        _checkpoint(**kw)
-
-        ### Allow for dataframe generators or iterables.
-        if df_is_chunk_generator(df):
-            kw['workers'] = p.get_num_workers(kw.get('workers', None))
-            dt_col = p.columns.get('datetime', None)
-            pool = get_pool(workers=kw.get('workers', 1))
-            if debug:
-                dprint(f"Received {type(df)}. Attempting to sync first chunk...")
-
-            try:
-                chunk = next(df)
-            except StopIteration:
-                return True, "Received an empty generator; nothing to do."
-
-            chunk_success, chunk_msg = _sync(p, chunk)
-            chunk_msg = '\n' + self._get_chunk_label(chunk, dt_col) + '\n' + chunk_msg
-            if not chunk_success:
-                return chunk_success, f"Unable to sync initial chunk for {p}:\n{chunk_msg}"
-            if debug:
-                dprint("Successfully synced the first chunk, attemping the rest...")
-
-            def _process_chunk(_chunk):
-                _chunk_attempts = 0
-                _max_chunk_attempts = 3
-                while _chunk_attempts < _max_chunk_attempts:
-                    try:
-                        _chunk_success, _chunk_msg = _sync(p, _chunk)
-                    except Exception as e:
-                        _chunk_success, _chunk_msg = False, str(e)
-                    if _chunk_success:
-                        break
-                    _chunk_attempts += 1
-                    _sleep_seconds = _chunk_attempts ** 2
-                    warn(
-                        (
-                            f"Failed to sync chunk to {self} "
-                            + f"(attempt {_chunk_attempts} / {_max_chunk_attempts}).\n"
-                            + f"Sleeping for {_sleep_seconds} second"
-                            + ('s' if _sleep_seconds != 1 else '')
-                            + f":\n{_chunk_msg}"
-                        ),
-                        stack=False,
-                    )
-                    time.sleep(_sleep_seconds)
-
-                num_rows_str = (
-                    f"{num_rows:,} rows"
-                    if (num_rows := len(_chunk)) != 1
-                    else f"{num_rows} row"
-                )
-                _chunk_msg = (
-                    (
-                        "Synced"
-                        if _chunk_success
-                        else "Failed to sync"
-                    ) + f" a chunk ({num_rows_str}) to {p}:\n"
-                    + self._get_chunk_label(_chunk, dt_col)
-                    + '\n'
-                    + _chunk_msg
-                )
-
-                mrsm.pprint((_chunk_success, _chunk_msg), calm=True)
-                return _chunk_success, _chunk_msg
-
-            results = sorted(
-                [(chunk_success, chunk_msg)] + (
-                    list(pool.imap(_process_chunk, df))
-                    if (
-                        not df_is_chunk_generator(chunk)  # Handle nested generators.
-                        and kw.get('workers', 1) != 1
-                    )
-                    else list(
-                        _process_chunk(_child_chunks)
-                        for _child_chunks in df
-                    )
-                )
-            )
-            chunk_messages = [chunk_msg for _, chunk_msg in results]
-            success_bools = [chunk_success for chunk_success, _ in results]
-            num_successes = len([chunk_success for chunk_success, _ in results if chunk_success])
-            num_failures = len([chunk_success for chunk_success, _ in results if not chunk_success])
-            success = all(success_bools)
-            msg = (
-                'Synced '
-                + f'{len(chunk_messages):,} chunk'
-                + ('s' if len(chunk_messages) != 1 else '')
-                + f' to {p}\n({num_successes} succeeded, {num_failures} failed):\n\n'
-                + '\n\n'.join(chunk_messages).lstrip().rstrip()
-            ).lstrip().rstrip()
-            return success, msg
-
-        ### Cast to a dataframe and ensure datatypes are what we expect.
-        dtypes = p.get_dtypes(debug=debug)
-        df = p.enforce_dtypes(
-            df,
-            chunksize=chunksize,
-            enforce=enforce_dtypes,
-            dtypes=dtypes,
-            debug=debug,
-        )
-        if p.autotime:
-            dt_col = p.columns.get('datetime', None)
-            ts_col = dt_col or mrsm.get_config(
-                'pipes', 'autotime', 'column_name_if_datetime_missing'
-            )
-            ts_typ = dtypes.get(ts_col, 'datetime') if ts_col else 'datetime'
-            if ts_col and hasattr(df, 'columns') and ts_col not in df.columns:
-                precision = p.get_precision(debug=debug)
-                now = get_current_timestamp(
-                    precision_unit=precision.get(
-                        'unit',
-                        STATIC_CONFIG['dtypes']['datetime']['default_precision_unit']
-                    ),
-                    precision_interval=precision.get('interval', 1),
-                    round_to=(precision.get('round_to', 'down')),
-                    as_int=(are_dtypes_equal(ts_typ, 'int')),
-                )
-                if debug:
-                    dprint(f"Adding current timestamp to dataframe synced to {p}: {now}")
-
-                df[ts_col] = now
-                kw['check_existing'] = dt_col is not None
-
-        ### Capture special columns.
-        capture_success, capture_msg = self._persist_new_special_columns(
-            df,
-            dtypes=dtypes,
-            debug=debug,
-        )
-        if not capture_success:
-            warn(f"Failed to capture new special columns for {self}:\n{capture_msg}")
-
-        if debug:
-            dprint(
-                "DataFrame to sync:\n"
-                + (
-                    str(df)[:255]
-                    + '...'
-                    if len(str(df)) >= 256
-                    else str(df)
-                ),
-                **kw
-            )
-
-        ### if force, continue to sync until success
-        return_tuple = False, f"Did not sync {p}."
-        run = True
-        _retries = 1
-        while run:
-            with Venv(get_connector_plugin(self.instance_connector)):
-                return_tuple = p.instance_connector.sync_pipe(
-                    pipe=p,
-                    df=df,
-                    debug=debug,
-                    **kw
-                )
-            _retries += 1
-            run = (not return_tuple[0]) and force and _retries <= retries
-            if run and debug:
-                dprint(f"Syncing failed for {p}. Attempt ( {_retries} / {retries} )", **kw)
-                dprint(f"Sleeping for {min_seconds} seconds...", **kw)
-                time.sleep(min_seconds)
-            if _retries > retries:
-                warn(
-                    f"Unable to sync {p} within {retries} attempt" +
-                        ("s" if retries != 1 else "") + "!"
-                )
-
-        ### CHECKPOINT: Finished syncing.
-        _checkpoint(**kw)
-        p._invalidate_cache(debug=debug)
-
-        ### Automatically apply a compression policy if the pipe is configured for compression.
-        if return_tuple[0] and p.parameters.get('compress', False):
-            if hasattr(p.instance_connector, 'apply_compression_policy'):
-                try:
-                    with Venv(get_connector_plugin(p.instance_connector)):
-                        compress_success, compress_msg = (
-                            p.instance_connector.apply_compression_policy(p, debug=debug)
-                        )
-                    if not compress_success and debug:
-                        dprint(f"Could not apply compression policy to {p}:\n{compress_msg}")
-                except Exception as compress_e:
-                    warn(
-                        f"Failed to apply compression policy to {p}:\n{compress_e}",
-                        stack=False,
-                    )
-
-        return return_tuple
-
-    if blocking:
-        return SyncResult.from_tuple(_sync(self, df=df))
-
-    from meerschaum.utils.threading import Thread
-    def default_callback(result_tuple: SuccessTuple):
-        dprint(f"Asynchronous result from {self}: {result_tuple}", **kw)
-
-    def default_error_callback(x: Exception):
-        dprint(f"Error received for {self}: {x}", **kw)
-
-    if callback is None and debug:
-        callback = default_callback
-    if error_callback is None and debug:
-        error_callback = default_error_callback
-    try:
-        thread = Thread(
-            target=_sync,
-            args=(self,),
-            kwargs={'df': df},
-            daemon=False,
-            callback=callback,
-            error_callback=error_callback,
-        )
-        thread.start()
-    except Exception as e:
-        self._invalidate_cache(debug=debug)
-        return SyncResult(False, str(e))
-
-    self._invalidate_cache(debug=debug)
-    return SyncResult(True, f"Spawned asyncronous sync for {self}.")
+    from meerschaum import _core
+    return _sync_native(
+        self,
+        _core.sync_pipe,
+        df,
+        begin=begin,
+        end=end,
+        check_existing=check_existing,
+        enforce_dtypes=enforce_dtypes,
+        chunksize=chunksize,
+        sync_chunks=sync_chunks,
+        force=force,
+        retries=retries,
+        min_seconds=min_seconds,
+        blocking=blocking,
+        workers=workers,
+        callback=callback,
+        error_callback=error_callback,
+        debug=debug,
+        inplace=(
+            _inplace
+            and bool(mrsm.get_config('system', 'experimental', 'inplace_sync'))
+        ),
+        kw=kw,
+    )
 
 
 def get_sync_time(
@@ -1310,64 +836,19 @@ def get_sync_time(
     A `datetime` or int, if the pipe exists, otherwise `None`.
 
     """
-    if (_rust := _rust_impl('pipe_get_sync_time')) is not None:
-        from meerschaum.core.Pipe._data import _rust_context
-        _context = _rust_context(self, debug=debug)
-        if _context is not None:
-            return _rust(
-                self,
-                _context,
-                params=params,
-                newest=newest,
-                apply_backtrack_interval=apply_backtrack_interval,
-                remote=remote,
-                round_down=round_down,
-                debug=debug,
-            )
-
-    from meerschaum.utils.venv import Venv
-    from meerschaum.connectors import get_connector_plugin
-    from meerschaum.utils.misc import filter_keywords
-    from meerschaum.utils.dtypes import round_time
-    from meerschaum.utils.warnings import warn
-
-    if not self.columns.get('datetime', None):
-        return None
-
-    connector = self.instance_connector if not remote else self.connector
-    if isinstance(connector, str) or connector is None:
-        return None
-
-    with Venv(get_connector_plugin(connector)):
-        if not hasattr(connector, 'get_sync_time'):
-            warn(
-                f"Connectors of type '{connector.type}' "
-                "do not implement `get_sync_time().",
-                stack=False,
-            )
-            return None
-        sync_time = connector.get_sync_time(
-            self,
-            **filter_keywords(
-                connector.get_sync_time,
-                params=params,
-                newest=newest,
-                remote=remote,
-                debug=debug,
-            )
-        )
-
-    if round_down and isinstance(sync_time, datetime):
-        sync_time = round_time(sync_time, timedelta(minutes=1))
-
-    if apply_backtrack_interval and sync_time is not None:
-        backtrack_interval = self.get_backtrack_interval(debug=debug)
-        try:
-            sync_time -= backtrack_interval
-        except Exception as e:
-            warn(f"Failed to apply backtrack interval:\n{e}")
-
-    return self.parse_date_bounds(sync_time)
+    from meerschaum import _core
+    from meerschaum.core.Pipe._data import _rust_context
+    context = _rust_context(self, debug=debug)
+    return _core.pipe_get_sync_time(
+        self,
+        context,
+        params=params,
+        newest=newest,
+        apply_backtrack_interval=apply_backtrack_interval,
+        remote=remote,
+        round_down=round_down,
+        debug=debug,
+    )
 
 
 def exists(
@@ -1464,658 +945,21 @@ def filter_existing(
     A tuple of three DataFrames: unseen, update, and delta.
     These are Polars DataFrames if `df` is a Polars DataFrame or LazyFrame, else Pandas.
     """
-    if (_rust := _rust_impl('pipe_filter_existing')) is not None:
-        from meerschaum.core.Pipe._data import _rust_context
-        _context = _rust_context(self, debug=debug)
-        if _context is not None:
-            if df is not None and not is_accepted_data(df):
-                raise unsupported_data_error(df, f"filter the existing rows of {self}")
-            return _rust(
-                self,
-                _context,
-                df,
-                date_bound_only=date_bound_only,
-                include_unchanged_columns=include_unchanged_columns,
-                enforce_dtypes=enforce_dtypes,
-                debug=debug,
-            )
-
-    from meerschaum.utils.warnings import warn
-    from meerschaum.utils.debug import dprint
-    from meerschaum.utils.packages import attempt_import, import_pandas
-    from meerschaum.utils.dataframe import (
-        filter_unseen_df,
-        add_missing_cols_to_df,
-        get_unhashable_cols,
-        get_json_cols,
-        to_pandas,
-        to_polars,
-    )
-    from meerschaum.utils.dtypes import (
-        to_pandas_dtype,
-        none_if_null,
-    )
-    from meerschaum.config import get_config
-    pd = import_pandas()
-    pandas = attempt_import('pandas')
-    ### Polars frames are filtered natively when possible;
-    ### otherwise they are converted up-front and converted back on the way out.
-    input_is_polars = df is not None and df.__class__.__module__.split('.')[0] == 'polars'
-    if input_is_polars:
-        polars_dfs = self._filter_existing_polars(
-            df,
-            safe_copy=safe_copy,
-            date_bound_only=date_bound_only,
-            include_unchanged_columns=include_unchanged_columns,
-            enforce_dtypes=enforce_dtypes,
-            chunksize=chunksize,
-            debug=debug,
-            **kw
-        )
-        if polars_dfs is not None:
-            return polars_dfs
-
-    df = to_pandas(df)
-
-    def _return_dfs(unseen, update, delta):
-        if not input_is_polars:
-            return unseen, update, delta
-        return tuple(
-            to_polars(_df, json_cols=get_json_cols(_df))
-            for _df in (unseen, update, delta)
-        )
-
-    if enforce_dtypes or 'dataframe' not in str(type(df)).lower():
-        df = self.enforce_dtypes(df, chunksize=chunksize, debug=debug)
-    is_dask = hasattr(df, '__module__') and 'dask' in df.__module__
-    if is_dask:
-        dd = attempt_import('dask.dataframe')
-        merge = dd.merge
-        NA = pandas.NA
-    else:
-        merge = pd.merge
-        NA = pd.NA
-
-    parameters = self.parameters
-    pipe_columns = self.columns
-    primary_key = pipe_columns.get('primary', None)
-    dt_col = pipe_columns.get('datetime', None)
-    dt_type = parameters.get('dtypes', {}).get(dt_col, 'datetime') if dt_col else None
-    autoincrement = parameters.get('autoincrement', False)
-    autotime = parameters.get('autotime', False)
-
-    if primary_key and autoincrement and df is not None and primary_key in df.columns:
-        if safe_copy:
-            df = df.copy()
-            safe_copy = False
-        if df[primary_key].isnull().all():
-            del df[primary_key]
-            _ = self.columns.pop(primary_key, None)
-
-    if dt_col and autotime and df is not None and dt_col in df.columns:
-        if safe_copy:
-            df = df.copy()
-            safe_copy = False
-        if df[dt_col].isnull().all():
-            del df[dt_col]
-            _ = self.columns.pop(dt_col, None)
-
-    def get_empty_df():
-        empty_df = pd.DataFrame([])
-        dtypes = dict(df.dtypes) if df is not None else {}
-        dtypes.update(self.dtypes) if self.enforce else {}
-        pd_dtypes = {
-            col: to_pandas_dtype(str(typ))
-            for col, typ in dtypes.items()
-        }
-        return add_missing_cols_to_df(empty_df, pd_dtypes)
-
-    if df is None:
-        empty_df = get_empty_df()
-        return _return_dfs(empty_df, empty_df, empty_df)
-
-    if (df.empty if not is_dask else len(df) == 0):
-        return _return_dfs(df, df, df)
-
-    if autoincrement and primary_key == dt_col and dt_col not in df.columns:
-        if enforce_dtypes:
-            df = self.enforce_dtypes(df, chunksize=chunksize, debug=debug)
-        return _return_dfs(df, get_empty_df(), df)
-
-    if autotime and dt_col and dt_col not in df.columns:
-        if enforce_dtypes:
-            df = self.enforce_dtypes(df, chunksize=chunksize, debug=debug)
-        return _return_dfs(df, get_empty_df(), df)
-
-    try:
-        min_dt_val = df[dt_col].min(skipna=True) if dt_col and dt_col in df.columns else None
-        max_dt_val = df[dt_col].max(skipna=True) if dt_col and dt_col in df.columns else None
-        if is_dask:
-            min_dt_val = min_dt_val.compute() if min_dt_val is not None else None
-            max_dt_val = max_dt_val.compute() if max_dt_val is not None else None
-    except Exception:
-        min_dt_val, max_dt_val = None, None
-
-    ### `begin` is the oldest data in the new dataframe, `end` is the newest.
-    begin, end = _get_delta_bounds(min_dt_val, max_dt_val, dt_type, dt_col)
-
-    unique_index_vals = {
-        col: df[col].unique()
-        for col in (pipe_columns.values() if not primary_key else [primary_key])
-        if col in df.columns and col != dt_col
-    } if not date_bound_only else {}
-    unique_index_lens = {
-        col: len(unique_vals)
-        for col, unique_vals in unique_index_vals.items()
-    } if not date_bound_only else {}
-    filter_params_index_limit = get_config('pipes', 'sync', 'filter_params_index_limit')
-    _ = kw.pop('params', None)
-    params = {
-        col: [
-            none_if_null(val)
-            for val in unique_vals
-        ]
-        for col, unique_vals in unique_index_vals.items()
-        if unique_index_lens[col] <= filter_params_index_limit
-    } if not date_bound_only else {}
-
-    if debug:
-        dprint(
-            (
-                f"Looking at data between '{begin}' and '{end}' with index value lengths:\n"
-                f"{json.dumps(unique_index_lens, indent=4)}\n"
-            ),
-            **kw
-        )
-
-    backtrack_df = self.get_data(
-        begin=begin,
-        end=end,
-        chunksize=chunksize,
-        params=params,
+    from meerschaum import _core
+    from meerschaum.core.Pipe._data import _rust_context
+    context = _rust_context(self, debug=debug)
+    if df is not None and not is_accepted_data(df):
+        raise unsupported_data_error(df, f"filter the existing rows of {self}")
+    return _core.pipe_filter_existing(
+        self,
+        context,
+        df,
+        date_bound_only=date_bound_only,
+        include_unchanged_columns=include_unchanged_columns,
+        enforce_dtypes=enforce_dtypes,
         debug=debug,
-        **kw
-    )
-    if backtrack_df is None:
-        if debug:
-            dprint(f"No backtrack data was found for {self}.")
-        return _return_dfs(df, get_empty_df(), df)
-
-    if enforce_dtypes:
-        backtrack_df = self.enforce_dtypes(backtrack_df, chunksize=chunksize, debug=debug)
-
-    if debug:
-        dprint(f"Existing data for {self}:\n" + str(backtrack_df), **kw)
-        dprint(f"Existing dtypes for {self}:\n" + str(backtrack_df.dtypes))
-
-    ### Separate new rows from changed ones.
-    on_cols = [
-        col
-        for col_key, col in pipe_columns.items()
-        if (
-            col
-            and
-            col_key != 'value'
-            and col in backtrack_df.columns
-        )
-    ] if not primary_key else [primary_key]
-
-    self_dtypes = self.get_dtypes(debug=debug) if self.enforce else {}
-    on_cols_dtypes = {
-        col: to_pandas_dtype(typ)
-        for col, typ in self_dtypes.items()
-        if col in on_cols
-    }
-
-    ### Detect changes between the old target and new source dataframes.
-    delta_df = add_missing_cols_to_df(
-        filter_unseen_df(
-            backtrack_df,
-            df,
-            dtypes={
-                col: to_pandas_dtype(typ)
-                for col, typ in self_dtypes.items()
-            },
-            safe_copy=safe_copy,
-            coerce_mixed_numerics=(not self.static),
-            debug=debug
-        ),
-        on_cols_dtypes,
-    )
-    if enforce_dtypes:
-        delta_df = self.enforce_dtypes(delta_df, chunksize=chunksize, debug=debug)
-
-    for col, typ in on_cols_dtypes.items():
-        delta_df[col] = delta_df[col].astype(typ)
-        backtrack_df[col] = backtrack_df[col].astype(typ)
-
-    ### Cast dicts or lists to strings so we can merge.
-    serializer = functools.partial(json.dumps, sort_keys=True, separators=(',', ':'), default=str)
-
-    def deserializer(x):
-        return json.loads(x) if isinstance(x, str) else x
-
-    unhashable_delta_cols = get_unhashable_cols(delta_df)
-    unhashable_backtrack_cols = get_unhashable_cols(backtrack_df)
-    for col in unhashable_delta_cols:
-        delta_df[col] = delta_df[col].apply(serializer)
-    for col in unhashable_backtrack_cols:
-        backtrack_df[col] = backtrack_df[col].apply(serializer)
-    casted_cols = set(unhashable_delta_cols + unhashable_backtrack_cols)
-
-    joined_df = merge(
-        delta_df.infer_objects().fillna(NA),
-        backtrack_df.infer_objects().fillna(NA),
-        how='left',
-        on=on_cols,
-        indicator=True,
-        suffixes=('', '_old'),
-    ) if on_cols else delta_df
-    for col in casted_cols:
-        if col in joined_df.columns:
-            joined_df[col] = joined_df[col].apply(deserializer)
-        if col in delta_df.columns:
-            delta_df[col] = delta_df[col].apply(deserializer)
-
-    ### Determine which rows are completely new.
-    new_rows_mask = (joined_df['_merge'] == 'left_only') if on_cols else None
-    cols = list(delta_df.columns)
-
-    unseen_df = (
-        joined_df[new_rows_mask][cols].reset_index(drop=True)
-    ) if on_cols else delta_df
-
-    ### Rows that have already been inserted but values have changed.
-    update_df = (
-        joined_df[~new_rows_mask][cols].reset_index(drop=True)
-    ) if on_cols else get_empty_df()
-
-    if include_unchanged_columns and on_cols:
-        unchanged_backtrack_cols = [
-            col
-            for col in backtrack_df.columns
-            if col in on_cols or col not in update_df.columns
-        ]
-        if enforce_dtypes:
-            update_df = self.enforce_dtypes(update_df, chunksize=chunksize, debug=debug)
-        update_df = merge(
-            backtrack_df[unchanged_backtrack_cols],
-            update_df,
-            how='inner',
-            on=on_cols,
-        )
-
-    return _return_dfs(unseen_df, update_df, delta_df)
-
-
-def _get_delta_bounds(
-    min_dt_val: Any,
-    max_dt_val: Any,
-    dt_type: Optional[str],
-    dt_col: Optional[str],
-) -> Tuple[Any, Any]:
-    """
-    Return the `begin` and `end` bounds used to fetch the existing rows to compare against.
-
-    Parameters
-    ----------
-    min_dt_val: Any
-        The minimum value of the incoming datetime axis (`None` if there is no datetime axis).
-
-    max_dt_val: Any
-        The maximum value of the incoming datetime axis (`None` if there is no datetime axis).
-
-    dt_type: Optional[str]
-        The registered dtype of the datetime axis (e.g. `'datetime'` or `'int'`).
-
-    dt_col: Optional[str]
-        The name of the datetime axis column.
-
-    Returns
-    -------
-    A tuple of the `begin` and `end` bounds (either may be `None`).
-    """
-    from meerschaum.utils.dtypes import (
-        to_datetime,
-        are_dtypes_equal,
-        value_is_null,
-        round_time,
     )
 
-    def _coerce(val: Any) -> Any:
-        try:
-            return (
-                to_datetime(val, as_pydatetime=True)
-                if val is not None and are_dtypes_equal(dt_type, 'datetime')
-                else val
-            )
-        except Exception:
-            return None
-
-    min_dt, max_dt = _coerce(min_dt_val), _coerce(max_dt_val)
-
-    if not are_dtypes_equal('datetime', str(type(min_dt))) or value_is_null(min_dt):
-        if not are_dtypes_equal('int', str(type(min_dt))):
-            min_dt = None
-
-    if not are_dtypes_equal('datetime', str(type(max_dt))) or value_is_null(max_dt):
-        if not are_dtypes_equal('int', str(type(max_dt))):
-            max_dt = None
-
-    begin, end = None, None
-
-    if isinstance(min_dt, datetime):
-        rounded_min_dt = round_time(min_dt, to='down')
-        try:
-            begin = rounded_min_dt - timedelta(minutes=1)
-        except OverflowError:
-            begin = rounded_min_dt
-    elif dt_type and 'int' in dt_type.lower():
-        begin = min_dt
-    elif dt_col is None:
-        begin = None
-
-    if isinstance(max_dt, datetime):
-        end = round_time(max_dt, to='down') + timedelta(minutes=1)
-    elif dt_type and 'int' in dt_type.lower() and max_dt is not None:
-        end = max_dt + 1
-
-    if max_dt is not None and min_dt is not None and min_dt > max_dt:
-        warn("Detected minimum datetime greater than maximum datetime.")
-
-    if begin is not None and end is not None and begin > end:
-        if isinstance(begin, datetime):
-            begin = end - timedelta(minutes=1)
-        ### We might be using integers for the datetime axis.
-        else:
-            begin = end - 1
-
-    return begin, end
-
-
-def _is_polars_fallback_dtype(typ: Any) -> bool:
-    """Return `True` if a registered dtype cannot be compared natively by Polars."""
-    typ_str = str(typ).lower()
-    return (
-        typ_str in ('uuid', 'object')
-        or typ_str.startswith(('geometry', 'geography'))
-    )
-
-
-def _polars_dtypes_reconcilable(left: Any, right: Any) -> bool:
-    """
-    Return `True` if two Polars dtypes may be safely widened to a common dtype.
-
-    Pandas treats integers of different widths as equal and does not downcast,
-    so the incoming and stored frames may disagree on width (e.g. Oracle's `int32`).
-    Only same-family differences are reconcilable; anything else
-    (an `int` against a `float`, for example) is left to the Pandas path,
-    which coerces mixed numerics into `numeric` values.
-    """
-    if left == right:
-        return True
-
-    for check in ('is_integer', 'is_float', 'is_temporal'):
-        if not getattr(left, check, lambda: False)():
-            continue
-        if not getattr(right, check, lambda: False)():
-            return False
-        if check == 'is_temporal':
-            ### Naive and timezone-aware columns are not comparable,
-            ### and Polars widens to the coarser time unit,
-            ### which would round away a real difference.
-            return (
-                (getattr(left, 'time_zone', None) is None)
-                == (getattr(right, 'time_zone', None) is None)
-                and getattr(left, 'time_unit', None) == getattr(right, 'time_unit', None)
-            )
-        return True
-
-    return False
-
-
-def _has_polars_object_cols(df: Any, polars: Any) -> bool:
-    """Return `True` if a Polars frame contains columns which cannot be joined."""
-    return any(
-        typ == polars.Object or str(typ).lower() in ('object', 'unknown')
-        for typ in df.schema.values()
-    )
-
-
-def _filter_existing_polars(
-    self,
-    df: Any,
-    safe_copy: bool = True,
-    date_bound_only: bool = False,
-    include_unchanged_columns: bool = False,
-    enforce_dtypes: bool = False,
-    chunksize: Optional[int] = -1,
-    debug: bool = False,
-    **kw
-) -> Union[Tuple[Any, Any, Any], None]:
-    """
-    Filter a Polars DataFrame against the pipe's existing rows without converting to Pandas.
-
-    The existing rows are fetched as Polars (`Pipe.get_data(as_polars=True)`),
-    and both the delta anti-join and the unseen / update split are performed by Polars.
-
-    Parameters
-    ----------
-    df: Any
-        A `polars.DataFrame` or `polars.LazyFrame` to inspect and filter.
-
-    See `meerschaum.Pipe.filter_existing` for the remaining parameters.
-
-    Returns
-    -------
-    A tuple of three `polars.DataFrame` (unseen, update, delta),
-    or `None` if the frames cannot be compared natively,
-    in which case the caller falls back to the Pandas implementation.
-    """
-    from meerschaum.utils.debug import dprint
-    from meerschaum.utils.packages import attempt_import
-    from meerschaum.utils.dtypes import none_if_null
-    from meerschaum.config import get_config
-
-    polars = attempt_import('polars', install=False, lazy=False, warn=False)
-    if polars is None:
-        return None
-
-    ### NOTE: Polars frames are immutable, so `safe_copy` is a no-op on this path.
-    ### Dtypes are always enforced here (regardless of `enforce_dtypes`)
-    ### because Polars can only join frames which share a schema.
-    _ = safe_copy, enforce_dtypes
-
-    parameters = self.parameters
-    pipe_columns = self.columns
-    primary_key = pipe_columns.get('primary', None)
-    dt_col = pipe_columns.get('datetime', None)
-    dt_type = parameters.get('dtypes', {}).get(dt_col, 'datetime') if dt_col else None
-
-    ### These paths drop columns and mutate `self.columns`; leave them to Pandas.
-    if parameters.get('autoincrement', False) or parameters.get('autotime', False):
-        return None
-
-    pipe_dtypes = self.get_dtypes(debug=debug) if self.enforce else {}
-    if any(_is_polars_fallback_dtype(typ) for typ in pipe_dtypes.values()):
-        return None
-
-    try:
-        if df.__class__.__name__ == 'LazyFrame':
-            df = df.collect()
-
-        if df.is_empty():
-            return None
-
-        df = self.enforce_dtypes(df, chunksize=chunksize, as_polars=True, debug=debug)
-        if df is None or df.__class__.__module__.split('.')[0] != 'polars':
-            return None
-        if _has_polars_object_cols(df, polars):
-            return None
-
-        min_dt_val = df[dt_col].min() if dt_col and dt_col in df.columns else None
-        max_dt_val = df[dt_col].max() if dt_col and dt_col in df.columns else None
-        begin, end = _get_delta_bounds(min_dt_val, max_dt_val, dt_type, dt_col)
-
-        unique_index_vals = {
-            col: df[col].unique().to_list()
-            for col in (pipe_columns.values() if not primary_key else [primary_key])
-            if col in df.columns and col != dt_col
-        } if not date_bound_only else {}
-        filter_params_index_limit = get_config('pipes', 'sync', 'filter_params_index_limit')
-        _ = kw.pop('params', None)
-        params = {
-            col: [
-                none_if_null(val)
-                for val in unique_vals
-            ]
-            for col, unique_vals in unique_index_vals.items()
-            if len(unique_vals) <= filter_params_index_limit
-        } if not date_bound_only else {}
-
-        if debug:
-            dprint(
-                f"Looking at Polars data between '{begin}' and '{end}' "
-                f"with index value lengths:\n"
-                + json.dumps(
-                    {col: len(vals) for col, vals in unique_index_vals.items()},
-                    indent=4,
-                )
-            )
-
-        backtrack_df = self.get_data(
-            begin=begin,
-            end=end,
-            chunksize=chunksize,
-            params=params,
-            as_polars=True,
-            debug=debug,
-            **kw
-        )
-    except Exception as e:
-        if debug:
-            dprint(f"Failed to filter {self} natively with Polars:\n{e}")
-        return None
-
-    if backtrack_df is None:
-        if debug:
-            dprint(f"No backtrack data was found for {self}.")
-        return df, df.clear(), df
-
-    try:
-        if backtrack_df.__class__.__name__ == 'LazyFrame':
-            backtrack_df = backtrack_df.collect()
-        if backtrack_df.__class__.__module__.split('.')[0] != 'polars':
-            return None
-        if _has_polars_object_cols(backtrack_df, polars):
-            return None
-
-        if primary_key and primary_key not in backtrack_df.columns:
-            return None
-
-        ### Align both frames on the union of their columns.
-        new_cols = list(df.columns)
-        for col, typ in backtrack_df.schema.items():
-            if col not in df.columns:
-                df = df.with_columns(polars.lit(None, dtype=typ).alias(col))
-        for col, typ in df.schema.items():
-            if col not in backtrack_df.columns:
-                backtrack_df = backtrack_df.with_columns(polars.lit(None, dtype=typ).alias(col))
-        backtrack_df = backtrack_df.select(list(df.columns))
-
-        ### Widen same-family dtype differences to their common dtype.
-        ### Anything else is left to the Pandas path, which reconciles them.
-        mismatched_cols = [
-            col
-            for col in df.columns
-            if df.schema[col] != backtrack_df.schema[col]
-        ]
-        if mismatched_cols:
-            if any(
-                not _polars_dtypes_reconcilable(df.schema[col], backtrack_df.schema[col])
-                for col in mismatched_cols
-            ):
-                if debug:
-                    dprint(
-                        "Irreconcilable Polars dtypes for "
-                        + f"{mismatched_cols}; falling back to Pandas."
-                    )
-                return None
-            common_schema = dict(
-                polars.concat(
-                    [df.clear(), backtrack_df.clear()],
-                    how='vertical_relaxed',
-                ).schema
-            )
-            df = df.cast(common_schema)
-            backtrack_df = backtrack_df.cast(common_schema)
-
-        on_cols = [
-            col
-            for col_key, col in pipe_columns.items()
-            if (
-                col
-                and col_key != 'value'
-                and col in backtrack_df.columns
-            )
-        ] if not primary_key else [primary_key]
-        out_cols = new_cols + [col for col in on_cols if col not in new_cols]
-
-        ### Preserve the incoming row order across the joins.
-        row_col = '__mrsm_row_id'
-        while row_col in df.columns:
-            row_col = '_' + row_col
-
-        join_cols = list(df.columns)
-        delta_df = df.with_row_index(row_col).join(
-            backtrack_df,
-            on=join_cols,
-            how='anti',
-            nulls_equal=True,
-        )
-
-        if not on_cols:
-            unseen_df, update_df = delta_df, delta_df.clear()
-        else:
-            backtrack_index_df = backtrack_df.select(on_cols).unique()
-            unseen_df = delta_df.join(
-                backtrack_index_df,
-                on=on_cols,
-                how='anti',
-                nulls_equal=True,
-            )
-            update_df = delta_df.join(
-                backtrack_index_df,
-                on=on_cols,
-                how='semi',
-                nulls_equal=True,
-            )
-
-        def _finalize(_df):
-            return _df.sort(row_col).drop(row_col).select(out_cols)
-
-        unseen_df = _finalize(unseen_df)
-        update_df = _finalize(update_df)
-        delta_df = _finalize(delta_df)
-
-        if include_unchanged_columns and on_cols:
-            unchanged_backtrack_cols = [
-                col
-                for col in backtrack_df.columns
-                if col in on_cols or col not in update_df.columns
-            ]
-            update_df = backtrack_df.select(unchanged_backtrack_cols).join(
-                update_df,
-                on=on_cols,
-                how='inner',
-                nulls_equal=True,
-            )
-    except Exception as e:
-        if debug:
-            dprint(f"Failed to filter {self} natively with Polars:\n{e}")
-        return None
-
-    return unseen_df, update_df, delta_df
 
 @staticmethod
 def _get_chunk_label(
@@ -2155,17 +999,25 @@ def get_num_workers(self, workers: Optional[int] = None) -> int:
     if not is_thread_safe:
         return 1
 
-    engine_pool_size = (
-        self.instance_connector.engine.pool.size()
-        if self.instance_connector.type == 'sql'
-        else None
-    )
-    current_num_threads = threading.active_count()
-    current_num_connections = (
-        self.instance_connector.engine.pool.checkedout()
-        if engine_pool_size is not None
-        else current_num_threads
-    )
+    engine_pool_size = None
+    current_num_connections = threading.active_count()
+    if self.instance_connector.type == 'sql':
+        try:
+            engine = self.instance_connector.engine
+        except AttributeError:
+            ### The base wheel has no SQLAlchemy engine (the `sql` extra): the Rust driver owns
+            ### the pool, sized by the flavor's `pool_size`.
+            engine = None
+            try:
+                engine_pool_size = int(
+                    self.instance_connector._sys_config.get('create_engine', {}).get('pool_size')
+                    or (os.cpu_count() or 5)
+                )
+            except (TypeError, ValueError):
+                engine_pool_size = os.cpu_count() or 5
+        if engine is not None:
+            engine_pool_size = engine.pool.size()
+            current_num_connections = engine.pool.checkedout()
     desired_workers = (
         min(workers or engine_pool_size, engine_pool_size)
         if engine_pool_size is not None
@@ -2180,37 +1032,3 @@ def get_num_workers(self, workers: Optional[int] = None) -> int:
     )
 
 
-def _persist_new_special_columns(
-    self,
-    df: 'pd.DataFrame',
-    dtypes: Optional[Dict[str, str]] = None,
-    debug: bool = False,
-) -> mrsm.SuccessTuple:
-    """
-    Check for new special columns and update the parameters accordingly.
-    """
-    from meerschaum.utils.dataframe import get_special_cols
-    from meerschaum.utils.dtypes import is_dtype_special
-    from meerschaum.utils.warnings import dprint
-
-    special_cols = get_special_cols(df)
-    dtypes = dtypes or self.get_dtypes(debug=debug)
-    existing_special_cols = {
-        col: typ
-        for col, typ in dtypes.items()
-        if is_dtype_special(typ)
-    }
-    new_special_cols = {
-        col: typ
-        for col, typ in special_cols.items()
-        if col not in existing_special_cols
-    }
-    self._cache_value('new_special_cols', new_special_cols, memory_only=True, debug=debug)
-    if not new_special_cols:
-        return True, "Success"
-
-    if debug:
-        dprint(f"New special columns:\n{new_special_cols}")
-
-    self._clear_cache_key('_attributes_sync_time', debug=debug)
-    return self.update_parameters({'dtypes': new_special_cols}, debug=debug)

@@ -212,8 +212,9 @@ They skip when `python3` lacks `pyarrow` and `pandas`.
 ## Rust-host protocol extensions
 
 The Rust binary embeds `python/host.py` and starts it with the selected SDK interpreter. It
-registers `host_action` (plugin dispatch with native Pipe.sync callbacks), `core_action`
-(transitional Python-only CLI operations), `parse_plugin_args`, and `complete`. Captured action
+registers `host_action` (plugin dispatch with native Pipe.sync callbacks), `parse_plugin_args`,
+`complete` and an extended `build_manifest`. Every standard action runs natively in the binary, so there is no
+Python-side operation for them (the former `core_action` is gone). Captured action
 and completion replies contain `result`, `stdout`, and `stderr`; other worker diagnostics go to
 stderr so MCP stdio stays clean. Interactive `python` is launched by the CLI directly.
 

@@ -24,10 +24,9 @@ DEST_INSTANCE = 'sql:b_dest'
 #: Implementations: how a case is executed. `py` runs `worker.py` inside the implementation's
 #: interpreter (timed around the call); `cli` times the whole process, startup included.
 IMPLS = ('v4py', 'v4cli', 'v5py', 'v5cli')
-PY_IMPLS = ('v4py', 'v5py', 'v5pyp')
-#: Every implementation `--impls` accepts: `v5pyp` is the repository's façade with
-#: `MRSM_CORE=python` (the parity-phase Python core), not part of the default set.
-ALL_IMPLS = IMPLS + ('v5pyp',)
+PY_IMPLS = ('v4py', 'v5py')
+#: Every implementation `--impls` accepts.
+ALL_IMPLS = IMPLS
 CLI_IMPLS = ('v4cli', 'v5cli')
 
 DTYPES = {'dt': 'datetime', 'id': 'int', 'value': 'float'}

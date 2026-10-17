@@ -9,7 +9,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Stdio;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -177,9 +177,57 @@ fn hello_from(msg: &Msg) -> WorkerResult<Hello> {
     })
 }
 
+static IN_WORKER: AtomicBool = AtomicBool::new(false);
+static PLUGIN_IMPORTS: AtomicUsize = AtomicUsize::new(0);
+
+/// Mark this process as a Python worker's own interpreter (the worker program does it at
+/// startup, through the extension).
+pub fn set_in_worker(in_worker: bool) {
+    IN_WORKER.store(in_worker, Ordering::SeqCst);
+}
+
+/// A plugin module starts importing in this process (the code that imports plugins calls this,
+/// and [`plugin_import_end`] when done; imports nest and overlap, hence a counter).
+pub fn plugin_import_begin() {
+    PLUGIN_IMPORTS.fetch_add(1, Ordering::SeqCst);
+}
+
+/// A plugin import started with [`plugin_import_begin`] ended.
+pub fn plugin_import_end() {
+    let mut current = PLUGIN_IMPORTS.load(Ordering::SeqCst);
+    while current > 0 {
+        match PLUGIN_IMPORTS.compare_exchange_weak(
+            current,
+            current - 1,
+            Ordering::SeqCst,
+            Ordering::SeqCst,
+        ) {
+            Ok(_) => break,
+            Err(actual) => current = actual,
+        }
+    }
+}
+
+/// Whether starting a worker is refused: in a worker's own interpreter, while a plugin is being
+/// imported. A plugin whose import syncs a `plugin:` pipe (or calls `mrsm.entry()`) would
+/// otherwise start workers without end, each importing the plugin again. Nothing else is
+/// refused: a plugin action may run other plugins' actions and sync plugin pipes, and the
+/// processes that are not workers start workers freely.
+pub fn spawn_refused() -> bool {
+    IN_WORKER.load(Ordering::SeqCst) && PLUGIN_IMPORTS.load(Ordering::SeqCst) > 0
+}
+
 impl Worker {
-    /// Start a worker and complete the handshake.
+    /// Start a worker and complete the handshake. Refused (`WorkerError::Spawn`) while
+    /// [`spawn_refused`].
     pub async fn spawn(opts: &WorkerOptions) -> WorkerResult<Worker> {
+        if spawn_refused() {
+            return Err(WorkerError::Spawn(
+                "not starting a Python worker while a plugin is being imported (a plugin whose \
+                 import syncs a plugin pipe or calls `mrsm.entry()` would recurse)"
+                    .into(),
+            ));
+        }
         let listener = Listener::bind(opts.socket_dir.as_deref())?;
         let mut cmd = Command::new(&opts.python);
         if opts.module == "meerschaum.worker" {

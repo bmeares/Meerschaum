@@ -342,3 +342,49 @@ def test_webterm_is_served_by_the_rust_server(webterm_server, context):
     ### No separate terminal process listens anywhere any more (`tests/console/test_webterm.py`
     ### drives the terminal itself).
     assert not webterm_server.port_is_open(webterm_server.webterm_port)
+
+
+def test_token_forms_grant_all_scopes_switch(server, tab):
+    tab.login()
+    tab.page.goto(f"{server.base_url}/dash/tokens")
+    page = tab.page
+    switch = page.locator('#all-scopes-register')
+    fields = page.locator('form:has(#all-scopes-register) .scopes-fields')
+
+    ### The registration form starts with "Grant all scopes" on and the checklist hidden.
+    assert page.locator('label[for=all-scopes-register]').inner_text() == (
+        'Grant all scopes (`*`, including custom and future scopes)'
+    )
+    assert switch.is_checked()
+    assert not fields.is_visible()
+
+    ### Off: the built-in scopes are selectable, "Deselect all" clears them, and a custom scope
+    ### has its own field.
+    switch.uncheck()
+    assert fields.is_visible()
+    boxes = fields.locator('input[name=scopes]')
+    assert boxes.count() > 10 and boxes.first.is_checked()
+    fields.locator('[data-scopes-toggle]').click()
+    assert fields.locator('input[name=scopes]:checked').count() == 0
+    assert fields.locator('[data-scopes-toggle]').inner_text() == 'Select all'
+    fields.locator('input[name=custom_scopes]').fill('myplugin:read')
+    page.fill('form:has(#all-scopes-register) input[name=label]', 'ui-custom')
+    page.click('form:has(#all-scopes-register) button:has-text("Create token")')
+    page.wait_for_selector('h1:has-text("Action result")')
+    page.goto(f"{server.base_url}/dash/tokens")
+
+    ### The saved token is listed with its custom scope, and its edit form has the switch off.
+    assert 'myplugin:read' in page.inner_text('main')
+    form = page.locator('form:has(input[name=label][value=ui-custom])')
+    assert not form.locator('input.grant-all-scopes').is_checked()
+    assert form.locator('input[name=custom_scopes]').input_value() == 'myplugin:read'
+
+    ### Registering with the switch on stores `*`, and its edit form shows the switch on.
+    page.fill('form:has(#all-scopes-register) input[name=label]', 'ui-all')
+    page.click('form:has(#all-scopes-register) button:has-text("Create token")')
+    page.wait_for_selector('h1:has-text("Action result")')
+    page.goto(f"{server.base_url}/dash/tokens")
+    form = page.locator('form:has(input[name=label][value=ui-all])')
+    assert form.locator('input.grant-all-scopes').is_checked()
+    assert not form.locator('.scopes-fields').is_visible()
+    assert _errors(tab) == [], _errors(tab)

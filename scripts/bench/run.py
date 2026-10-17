@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Fixed sync benchmark set: Meerschaum v4.1.4 (the reference venv, `scripts/parity/setup_reference.sh`)
-against v5 (the release `mrsm` binary and the Python façade under `MRSM_CORE=rust`).
+against v5 (the release `mrsm` binary and the Python façade).
 Not part of CI. Spec §14 "Benchmarks": regressions block the RC.
 
     cargo build --release -p meerschaum-cli          # target/release/mrsm
@@ -11,8 +11,7 @@ Implementations (columns of the report):
 
     v4py   v4.1.4, `pipe.sync()` etc. from Python, timed around the call (no interpreter startup)
     v4cli  v4.1.4, `python -m meerschaum sync pipes ...`, timed as a whole process
-    v5py   this repository's `meerschaum` with MRSM_CORE=rust (release extension in meerschaum/_core)
-    v5pyp  this repository's `meerschaum` with MRSM_CORE=python (opt-in: `--impls ...,v5pyp`)
+    v5py   this repository's `meerschaum` (release extension in meerschaum/_core)
     v5cli  target/release/mrsm, timed as a whole process
 
 Cases (per backend: sqlite -> sqlite files, and postgis(5449) -> postgis, schema `w7_bench`
@@ -192,8 +191,7 @@ class Impl:
             'PYTHONHASHSEED': '0',
         })
         env.update(defs.connector_env(self.backend, str(self.workdir)))
-        if self.name in ('v5py', 'v5pyp'):
-            env['MRSM_CORE'] = 'rust' if self.name == 'v5py' else 'python'
+        if self.name == 'v5py':
             env['PYTHONPATH'] = str(self.snapshot / 'py' if self.snapshot else REPO)
         env['MRSM_BENCH_PG_SCHEMA'] = defs.SCHEMA
         return env
@@ -207,8 +205,6 @@ class Impl:
     def cli_cmd(self, *args: str) -> List[str]:
         if self.name == 'v4cli':
             return [str(REF_PY), '-s', '-E', '-m', 'meerschaum', *args]
-        if self.name == 'v5pyp':
-            raise ValueError('v5pyp has no CLI cases')
         return [str(self.mrsm_bin()), *args]
 
     def clear_cache(self) -> None:
@@ -530,7 +526,6 @@ def render_markdown(meta: Dict[str, Any], results: List[Dict[str, Any]]) -> str:
         'wall time (startup included)',
         '- `x` columns: v5 time / v4 time for the same style (`py`, `cli`). Below 1.00 is faster; '
         f'**bold** marks a regression (> {int((REGRESSION_THRESHOLD - 1) * 100)}% slower)',
-        '- `v5pyp` (when run): the façade with `MRSM_CORE=python`, for reference only (no `x`); '
         '`lat_*` cases are per call, in milliseconds',
         '',
     ]
@@ -538,8 +533,8 @@ def render_markdown(meta: Dict[str, Any], results: List[Dict[str, Any]]) -> str:
     for backend in meta['backends']:
         lines += [f'## {backend}', '']
         lines += [
-            '| case | v4py | v5pyp | v5py | x | v4cli | v5cli | x |',
-            '|---|---|---|---|---|---|---|---|',
+            '| case | v4py | v5py | x | v4cli | v5cli | x |',
+            '|---|---|---|---|---|---|---|',
         ]
         by = {(r['case'], r['impl']): r for r in results if r['backend'] == backend}
         for case in CASE_ORDER:
@@ -567,7 +562,7 @@ def render_markdown(meta: Dict[str, Any], results: List[Dict[str, Any]]) -> str:
                 return f'{x:.2f}'
 
             lines.append(
-                f'| {case} | {cell("v4py")} | {cell("v5pyp")} | {cell("v5py")} '
+                f'| {case} | {cell("v4py")} | {cell("v5py")} '
                 f'| {ratio("v5py", "v4py")} '
                 f'| {cell("v4cli")} | {cell("v5cli")} | {ratio("v5cli", "v4cli")} |'
             )

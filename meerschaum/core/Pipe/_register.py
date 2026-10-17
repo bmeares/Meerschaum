@@ -31,7 +31,7 @@ def register(
     if self.temporary:
         return False, "Cannot register pipes created with `temporary=True` (read-only)."
 
-    from meerschaum.utils.formatting import get_console
+    from meerschaum.utils.formatting import print_exception
     from meerschaum.utils.venv import Venv
     from meerschaum.connectors import get_connector_plugin, custom_types
     from meerschaum.config._patch import apply_patch_to_config
@@ -58,7 +58,7 @@ def register(
             with Venv(get_connector_plugin(_conn), debug=debug):
                 params = self.connector.register(self)
         except Exception:
-            get_console().print_exception()
+            print_exception()
             params = None
         params = {} if params is None else params
         if not isinstance(params, dict):

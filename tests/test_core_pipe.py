@@ -1,5 +1,5 @@
 """
-`meerschaum._core.Pipe` (design §4.4): under `MRSM_CORE=rust` the Python `Pipe` keeps its keys and
+`meerschaum._core.Pipe` (design §4.4): the Python `Pipe` keeps its keys and
 raw parameters in a Rust object; every change of `pipe._attributes['parameters']` (direct, nested,
 through `pipe.parameters`, `update_parameters`, the setter or a metadata load) reaches it.
 """
@@ -10,9 +10,6 @@ import uuid
 import pytest
 
 import meerschaum as mrsm
-from meerschaum._core import _gate
-
-pytestmark = pytest.mark.skipif(_gate.mode() != _gate.RUST, reason="rust-mode façade")
 
 
 @pytest.fixture
@@ -202,6 +199,7 @@ def test_resolved_memo_follows_rust_generation():
 
 
 def test_target_str_eq_hash_use_rust():
+    pytest.importorskip('sqlalchemy')
     from meerschaum.utils.formatting._pipes import pipe_repr
     pipe = mrsm.Pipe('plugin:x', 'tg', 'loc', instance='sql:main', parameters={'target_name': 'custom_t'})
     assert pipe.target == 'custom_t'

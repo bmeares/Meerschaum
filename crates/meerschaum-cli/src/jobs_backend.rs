@@ -155,7 +155,10 @@ impl JobsBackend for LocalJobsBackend {
                     .clone(),
                 "1".to_string(),
             );
-            env.extend(std::env::vars());
+            env.extend(
+                std::env::vars_os()
+                    .filter_map(|(k, v)| Some((k.into_string().ok()?, v.into_string().ok()?))),
+            );
             let stamp = &meerschaum_core::static_config::static_config()
                 .environment
                 .compose_project;

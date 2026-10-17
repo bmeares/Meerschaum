@@ -1,8 +1,9 @@
 # meerschaum-py: the `meerschaum._core` extension
 
 PyO3 bindings that expose the Rust crates to Python as `meerschaum._core` (design §4.2, D3, D12).
-Wave 3 binds the kernel and the core behind the parity-phase `MRSM_CORE` gate; every discrepancy
-the sqlite suite found under `MRSM_CORE=rust` is tracked in [`PARITY.md`](PARITY.md).
+The Python façade calls these bindings directly (the v4 Python core was removed in wave 16, D14);
+every discrepancy found while the two implementations ran side by side is tracked in
+[`PARITY.md`](PARITY.md).
 
 | Symbol | What it does |
 |---|---|
@@ -73,8 +74,7 @@ frames computed first. On the way out the boundary restores the pandas dtypes v4
 GeoDataFrames with their CRS); `PARITY.md` explains the rules. Columns the kernel returns
 unchanged are copies of the input Series, and `enforce_dtypes` passes untyped pandas columns as
 placeholders (checked after the call, redone with full conversion if one changed).
-[`PERF.md`](PERF.md) has the benchmark (`bench/bench_boundary.py`), the profile and the
-optimizations; `MRSM_CORE_TRACE=1` prints per-stage timings of each call to stderr.
+[`PERF.md`](PERF.md) has the benchmark record, the profile and the optimizations; `MRSM_CORE_TRACE=1` prints per-stage timings of each call to stderr.
 
 ## Layout
 
@@ -87,11 +87,11 @@ crates/meerschaum-py/
                     convert.rs (Python <-> Value), pandas_bridge.rs (frames), kernel_api.rs,
                     core_api.rs, trace.rs (MRSM_CORE_TRACE stage timers), runtime.rs (Tokio),
                     pipe_bridge.rs (duck-typed pipes/users/plugins), sql_api.rs (SqlConnector)
-  tests/            arrow_ffi.rs (cargo test), test_core.py (pytest)
-  bench/            bench_boundary.py, bench_sync.py (python vs rust timings, see PERF.md)
+  tests/            arrow_ffi.rs (cargo test), test_core.py (pytest; v4 results recorded in
+                    ../../tests/oracle/test_core.json)
 meerschaum/_core/
-  __init__.py       lazy loader (stdlib only)
-  _gate.py          MRSM_CORE parity gate (development only, see below)
+  __init__.py       lazy loader (stdlib only); `import meerschaum` fails with the build
+                    instructions when the extension file is missing
   _core.abi3.so     the built extension (git-ignored)
 scripts/rust/
   build_py.sh       build and place the extension
@@ -105,7 +105,7 @@ pure-Python package, `meerschaum/_core/`, so that:
   `EXTENSION_PATH`, and raises a clear `CoreNotBuiltError` (an `ImportError`) only when a symbol is
   actually used;
 - the extension loads lazily on first attribute access (PEP 562). `import meerschaum` never pays
-  for it: the loader and gate add about 0.4 ms, and loading the 42 MB release `.so` takes about 2 ms;
+  for it: the loader adds about 0.4 ms, and loading the 42 MB release `.so` takes about 2 ms;
 - the same dotted name works unchanged at 5.0, when the extension ships inside the `meerschaum`
   wheel.
 
@@ -158,7 +158,7 @@ PYTHONPATH=$(pwd) MRSM_ROOT_DIR=./test_root MRSM_PLUGINS_DIR=./tests/plugins \
 
 `cargo test` and `cargo clippy` build without the `extension-module` feature, so the test binaries
 link libpython. Add `--features polars` to lint and test `polars_bridge.rs`. maturin turns the feature on through `pyproject.toml`. `test_core.py` needs pyarrow,
-polars and pandas (test-only). Without a built extension it runs only the loader and gate tests and
+polars and pandas (test-only). Without a built extension it runs only the loader tests and
 skips the rest.
 
 ## Dependency pins
@@ -213,44 +213,19 @@ Polars. The kernel bindings already take streams.
 - **Zero copy.** Imported buffers are the producer's allocations, kept alive by the C Data Interface
   release callbacks. The tests assert that buffer addresses are unchanged.
 
-## The `MRSM_CORE` gate (parity phase only)
+## How the façade calls the extension
 
-`meerschaum/_core/_gate.py` reads `MRSM_CORE` once at import: `python` (default), `rust`, or
-`rust:feature_a,feature_b`. The functions the kernel and core crates replace first start with a
-guard:
-
-```python
-if (_rust := _rust_impl('filter_unseen_df')) is not None:
-    return _rust(old_df, new_df=new_df, ...)
-```
-
-`rust_impl()` returns `None` (run Python) unless the gate selects the feature and `_core` binds a
-symbol of that name. An unbound symbol falls through to Python. An error raised inside a bound
-function propagates. With `MRSM_CORE=rust` and no build at all, `CoreNotBuiltError` is raised.
-Gated today, listed in `_gate.GATED_FEATURES`: `meerschaum.utils.dataframe.filter_unseen_df`,
-`enforce_dtypes`, `query_df` and the six detectors; `meerschaum.utils.dtypes.are_dtypes_equal`,
-`to_pandas_dtype`, `is_dtype_numeric` and `get_geometry_type_srid`;
-`meerschaum.utils.dtypes.sql.get_pd_type_from_db_type`; `meerschaum.utils.pipes.replace_pipes_syntax`;
-`meerschaum.config.get_config`; `meerschaum.core.User._User.hash_password` and `verify_password`.
-Every gated feature is bound.
-
-Classes are gated too (`_gate.GATED_CLASSES`): the v4 `SQLConnector` methods listed above start
-with
-
-```python
-if (_rust := _rust_method(self, 'sync_pipe')) is not None:
-    return _rust(pipe, df, begin=begin, end=end, chunksize=chunksize, ...)
-```
-
-where `_rust_method` is `_gate.rust_method(obj, name)`: `None` in `python` mode, for objects
-without a `_rust_method` (tests and plugins call these functions with stub objects as `self`), for
-unrouted flavors and for unbound names. The feature name for `MRSM_CORE=rust:...` is
-`sqlconnector`.
-
-**This gate is development-only.** D14 removes the Python core in 5.0, and the shipped package has
-no `MRSM_CORE` switch. The parity oracle is v4.1.x in a separate venv (§10.2). The gate, its guards
-and `GATED_FEATURES` are deleted when each façade function switches to `_core` for good. Never
-document `MRSM_CORE` for users.
+Façade functions call the bound symbol directly (`_core.filter_unseen_df(...)`,
+`_core.pipe_get_data(...)`, ...) and the `SQLConnector` methods delegate to the
+`_core.SqlConnector` built for the connector (`SQLConnector._core_connector()`, one per process:
+a forked child builds its own). `SQLConnector._rust_method(name)` returns the bound method (an
+`AttributeError` names a method the extension does not define, such as `read`: user SQL stays
+SQLAlchemy, D16) and raises `RuntimeError` when no Rust driver can be built (an unknown flavor, the Oracle client
+library `libclntsh` missing, a failed pool). The extension is loaded lazily, on the first
+attribute read of `meerschaum._core`; a missing file is an `ImportError` (`CoreNotBuiltError`) at
+`import meerschaum`. The results the parity tests compare against are recorded in
+`tests/oracle/*.json` (`tests/_oracle.py`; recordings of the parity-phase Python mode, not v4.1.4
+output, not re-recordable); the parity oracle itself is v4.1.x in a separate venv (§10.2).
 
 ## The 5.0 wheels
 
@@ -292,7 +267,7 @@ exclude = ["**/__pycache__/**", "**/*.pyc", "meerschaum/_core/_core*.so"]
 - The `[project.scripts] mrsm` / `meerschaum` entry points are **removed** from this wheel: the
   `mrsm` command comes from `meerschaum-cli`, and two packages must not install the same script.
   `python -m meerschaum` stays.
-- `_gate.py`, the `rust_impl` guards and the replaced Python bodies are gone (D14).
+- The `rust_impl` guards and the replaced Python bodies are gone (D14).
 - The sdist must carry `Cargo.toml`, `Cargo.lock`, `.cargo/config.toml`, `rust-toolchain.toml`
   and the `crates/` the extension depends on (maturin's sdist collects the path dependencies of
   `manifest-path`).

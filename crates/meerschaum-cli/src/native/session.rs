@@ -270,8 +270,9 @@ impl Session {
                 if let Some(env) = &*self.worker_environment.lock().expect("worker environment") {
                     // Workers normally inherit the host. A compose session instead supplies
                     // a complete project view, including removal of host-only variables.
-                    settings.worker.env_remove = std::env::vars()
-                        .filter_map(|(key, _)| (!env.iter().any(|(k, _)| k == &key)).then_some(key))
+                    settings.worker.env_remove = std::env::vars_os()
+                        .filter_map(|(key, _)| key.into_string().ok())
+                        .filter_map(|key| (!env.iter().any(|(k, _)| k == &key)).then_some(key))
                         .collect();
                     settings.worker.python = env
                         .iter()

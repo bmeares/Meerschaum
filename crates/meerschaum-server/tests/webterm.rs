@@ -18,8 +18,10 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use common::{MemoryInstance, SECRET, send};
 use futures_util::{SinkExt, StreamExt};
+use meerschaum_core::Value as CoreValue;
+use meerschaum_core::config::default_config;
 use meerschaum_server::webterm::{self, SessionLookup, ShellCommand, TmuxSettings, WebtermConfig};
-use meerschaum_server::{AppState, ServerConfig};
+use meerschaum_server::{AppState, ServerConfig, ServerFlags};
 use serde_json::{Value, json};
 use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::Message;
@@ -31,7 +33,10 @@ const ADMIN_SESSION: &str = "11111111-1111-4111-8111-111111111111";
 const ADMIN_TAB_TWO: &str = "11111111-1111-4111-8111-222222222222";
 const OTHER_ADMIN_SESSION: &str = "22222222-2222-4222-8222-222222222222";
 const USER_SESSION: &str = "33333333-3333-4333-8333-333333333333";
+/// A session of a user name the instance does not have: v4 only asks the session store, so a
+/// session with a user name is enough while `api:permissions:actions:non_admin` is true.
 const GHOST_SESSION: &str = "44444444-4444-4444-8444-444444444444";
+const UNKNOWN_SESSION: &str = "88888888-8888-4888-8888-888888888888";
 
 struct Sessions(HashMap<String, String>);
 
@@ -57,12 +62,48 @@ fn sessions() -> Arc<dyn SessionLookup> {
     ))
 }
 
+/// The default server configuration (`default_config()`, as `start api` reads it), with the
+/// `start api` flags and an optional override of `api:permissions:actions:non_admin`.
+fn server_config(root: &Path, flags: ServerFlags, non_admin: Option<bool>) -> ServerConfig {
+    let mut map = default_config(root.to_str().unwrap(), 4, false);
+    if let Some(value) = non_admin {
+        let Some(CoreValue::Map(api)) = map.get_mut("api") else {
+            panic!("the default config has an `api` section");
+        };
+        let Some(CoreValue::Map(permissions)) = api.get_mut("permissions") else {
+            panic!("`api:permissions`");
+        };
+        let Some(CoreValue::Map(actions)) = permissions.get_mut("actions") else {
+            panic!("`api:permissions:actions`");
+        };
+        actions.insert("non_admin".into(), CoreValue::Bool(value));
+    }
+    let mut config = ServerConfig::from_map(
+        &map,
+        &ServerFlags {
+            instance: Some("sql:fixture".into()),
+            ..flags
+        },
+    );
+    let paths = ServerConfig::for_root("sql:fixture", root);
+    config.secret_key_path = paths.secret_key_path;
+    config.plugins_archives_path = paths.plugins_archives_path;
+    config.webterm_resources_path = paths.webterm_resources_path;
+    config.root_dir = paths.root_dir;
+    config
+}
+
+/// A state over the default configuration, with two administrators and an ordinary user (`bob`).
 fn state(root: &Path) -> AppState {
+    state_from(server_config(root, ServerFlags::default(), None))
+}
+
+fn state_from(cfg: ServerConfig) -> AppState {
     let instance = Arc::new(MemoryInstance::new("fixture"));
     instance.seed_user("admin", "pass", Some("admin"));
     instance.seed_user("root2", "pass", Some("admin"));
     instance.seed_user("bob", "pass", None);
-    AppState::builder(ServerConfig::for_root("sql:fixture", root), instance)
+    AppState::builder(cfg, instance)
         .secret(SECRET.to_vec())
         .build()
         .expect("state")
@@ -236,12 +277,13 @@ async fn the_page_requires_an_authorized_session() {
     assert!(unknown.text().contains("<h2>Unauthorized</h2>"));
     assert!(unknown.text().contains("href=\"/dash/login\""));
 
-    // A logged-in user who is not an administrator gets no shell by default.
+    // v4's default (`api:permissions:actions:non_admin` is true): a logged-in user who is not an
+    // administrator gets a shell too.
     let user = send(&app, get(USER_SESSION)).await;
-    assert_eq!(user.status, StatusCode::UNAUTHORIZED);
-    // A session of a user the instance does not have gets none either.
+    assert_eq!(user.status, StatusCode::OK);
+    // v4 asks only the session store, not the instance, about the user name.
     let ghost = send(&app, get(GHOST_SESSION)).await;
-    assert_eq!(ghost.status, StatusCode::UNAUTHORIZED);
+    assert_eq!(ghost.status, StatusCode::OK);
 
     // The trailing slash v4's `/webterm/(.+)/?` accepted.
     let slash = send(
@@ -254,31 +296,86 @@ async fn the_page_requires_an_authorized_session() {
     assert_eq!(slash.status, StatusCode::OK);
 }
 
-#[tokio::test]
-async fn non_admin_users_follow_the_actions_gate() {
-    let root = tempfile::tempdir().unwrap();
-    let mut cfg = ServerConfig::for_root("sql:fixture", root.path());
-    cfg.system_actions_non_admin = true;
-    let instance = Arc::new(MemoryInstance::new("fixture"));
-    instance.seed_user("bob", "pass", None);
-    let state = AppState::builder(cfg, instance)
-        .secret(SECRET.to_vec())
-        .build()
-        .unwrap();
-    let app = webterm::routes(state.clone(), config(&state, sh(), None));
-    let response = send(
-        &app,
-        Request::get(format!("/webterm/{USER_SESSION}"))
+/// The page status and whether the websocket gets a shell (a `setup` message) or is accepted
+/// and closed (code 1000, v4's behavior for an unauthorized socket).
+async fn access(app: &Router, addr: std::net::SocketAddr, session: &str) -> (StatusCode, bool) {
+    let page = send(
+        app,
+        Request::get(format!("/webterm/{session}"))
             .body(Body::empty())
             .unwrap(),
     )
-    .await;
-    // The gate also asks for the actions scopes a plain user lacks: still refused, never a shell.
+    .await
+    .status;
+    let mut socket = connect(addr, session).await;
+    let shell = match next_message(&mut socket).await {
+        Some(message) => {
+            assert_eq!(message, json!(["setup", {}]));
+            true
+        }
+        None => false,
+    };
+    (page, shell)
+}
+
+#[tokio::test]
+async fn non_admin_users_follow_api_permissions_actions_non_admin() {
+    // The terminal's gate is v4's `is_session_authenticated`: `api:permissions:actions:non_admin`
+    // (true in the default config; `start api --secure` and `false` close it) lets every logged-in
+    // user in, otherwise only administrators. The key the actions routes read
+    // (`system:api:permissions:actions:non_admin`, undefined by default, as in v4) is not consulted.
+    let root = tempfile::tempdir().unwrap();
+    let cfg = server_config(root.path(), ServerFlags::default(), None);
     assert!(
-        response.status == StatusCode::OK || response.status == StatusCode::UNAUTHORIZED,
-        "{}",
-        response.status
+        cfg.actions_non_admin,
+        "the default config allows non-admins"
     );
+    assert!(
+        !cfg.system_actions_non_admin,
+        "the actions routes' key is undefined by default"
+    );
+    let state = state_from(cfg);
+    let app = webterm::routes(state.clone(), config(&state, sh(), None));
+    let addr = serve(app.clone()).await;
+    assert_eq!(
+        access(&app, addr, USER_SESSION).await,
+        (StatusCode::OK, true)
+    );
+    assert_eq!(
+        access(&app, addr, ADMIN_SESSION).await,
+        (StatusCode::OK, true)
+    );
+    assert_eq!(
+        access(&app, addr, UNKNOWN_SESSION).await,
+        (StatusCode::UNAUTHORIZED, false)
+    );
+
+    // `api:permissions:actions:non_admin: false`, and `--secure`: administrators only.
+    for (flags, key) in [
+        (ServerFlags::default(), Some(false)),
+        (
+            ServerFlags {
+                secure: true,
+                ..Default::default()
+            },
+            None,
+        ),
+    ] {
+        let root = tempfile::tempdir().unwrap();
+        let cfg = server_config(root.path(), flags, key);
+        assert!(!cfg.actions_non_admin);
+        let state = state_from(cfg);
+        let app = webterm::routes(state.clone(), config(&state, sh(), None));
+        let addr = serve(app.clone()).await;
+        assert_eq!(
+            access(&app, addr, USER_SESSION).await,
+            (StatusCode::UNAUTHORIZED, false)
+        );
+        assert_eq!(
+            access(&app, addr, ADMIN_SESSION).await,
+            (StatusCode::OK, true)
+        );
+    }
 }
 
 #[tokio::test]
@@ -295,7 +392,8 @@ async fn a_websocket_without_a_session_is_accepted_and_closed() {
         }
         other => panic!("expected a close frame, got {other:?}"),
     }
-    let mut socket = connect(addr, USER_SESSION).await;
+    // So does a session id the store does not know.
+    let mut socket = connect(addr, UNKNOWN_SESSION).await;
     assert!(matches!(socket.next().await, Some(Ok(Message::Close(_)))));
 }
 

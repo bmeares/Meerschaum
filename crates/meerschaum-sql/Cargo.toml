@@ -48,3 +48,4 @@ oracle = { version = "0.6", features = ["chrono"], optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true }
+tracing-subscriber = { workspace = true }

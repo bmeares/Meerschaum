@@ -99,8 +99,8 @@ v4's in-place output and writes the engine's delta ledger around the commit.
 
 `server.rs` hosts `start api` and `start mcp`: native HTTP/MCP backends, a shared worker session,
 and a supervised Python API host selected by the manifest. MCP stdout contains protocol messages
-only. Unported core actions use the worker's `core_action` compatibility operation; this is a
-transitional deviation from the all-native b1 target. `python` keeps its native interpreter launch.
+only. Every standard action is native (`src/native/`); Python runs only a plugin's own code,
+through the worker. `python` keeps its native interpreter launch.
 
 ### Tests and fixtures
 
