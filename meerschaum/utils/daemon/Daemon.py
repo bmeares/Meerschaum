@@ -29,6 +29,7 @@ from meerschaum.config._patch import apply_patch_to_config
 from meerschaum.utils.warnings import warn, error
 from meerschaum.utils.packages import attempt_import
 from meerschaum.utils.venv import venv_exec
+from meerschaum.utils.daemon import _detached
 from meerschaum.utils.daemon._names import get_new_daemon_name
 from meerschaum.utils.daemon.RotatingFile import RotatingFile
 from meerschaum.utils.daemon.StdinFile import StdinFile
@@ -242,8 +243,11 @@ class Daemon:
         if env:
             self._properties.update({'env': env})
 
-        ### Instantiate the process and if it doesn't exist, make sure the PID is removed.
-        _ = self.process
+        ### Instantiate the process and if it doesn't exist, make sure the stale PID file
+        ### is removed. Without a PID file there is nothing to clean up,
+        ### so don't go looking for a detached process while constructing.
+        if self.pid_path.exists():
+            _ = self.process
 
 
     def _run_exit(
@@ -418,7 +422,7 @@ class Daemon:
         if 'process' not in self.properties:
             self.properties['process'] = {}
 
-        if process_key not in ('began', 'ended', 'paused', 'stopped'):
+        if process_key not in ('began', 'ended', 'paused', 'stopped', 'launched'):
             raise ValueError(f"Invalid key '{process_key}'.")
 
         self.properties['process'][process_key] = (
@@ -475,6 +479,12 @@ class Daemon:
         if not _write_pickle_success_tuple[0]:
             return _write_pickle_success_tuple
 
+        ### The PID file does not exist until the new process has started up. Record the launch
+        ### so that a job which completed earlier is not mistaken for a finished one meanwhile.
+        _detached.invalidate(self.daemon_id)
+        if self.properties_path.exists():
+            self._capture_process_timestamp('launched')
+
         _launch_daemon_code = (
             "from meerschaum.utils.daemon import Daemon, _daemons; "
             f"daemon = Daemon(daemon_id='{self.daemon_id}'); "
@@ -484,6 +494,7 @@ class Daemon:
         )
         env = dict(os.environ)
         _launch_success_bool = venv_exec(_launch_daemon_code, debug=debug, venv=None, env=env)
+        _detached.invalidate(self.daemon_id)
         msg = (
             "Success"
             if _launch_success_bool
@@ -529,6 +540,8 @@ class Daemon:
         -------
         A SuccessTuple indicating success.
         """
+        _detached.invalidate(self.daemon_id)
+
         ### A lost PID file means a detached/orphaned daemon — possibly SEVERAL processes
         ### sharing this daemon_id (e.g. accumulated across crashed restarts). Reap them
         ### ALL by daemon_id rather than reporting a false "stopped" and stranding them
@@ -593,6 +606,7 @@ class Daemon:
 
     def quit(self, timeout: Union[int, float, None] = None) -> SuccessTuple:
         """Gracefully quit a running daemon."""
+        _detached.invalidate(self.daemon_id)
         if self.status == 'paused':
             return self.kill(timeout)
 
@@ -638,6 +652,7 @@ class Daemon:
         A `SuccessTuple` indicating whether the `Daemon` process was successfully suspended.
         """
         self._remove_blocking_stdin_file()
+        _detached.invalidate(self.daemon_id)
 
         if self.process is None:
             return False, f"Daemon '{self.daemon_id}' is not running and cannot be paused."
@@ -705,6 +720,7 @@ class Daemon:
         -------
         A `SuccessTuple` indicating whether the `Daemon` process was successfully resumed.
         """
+        _detached.invalidate(self.daemon_id)
         if self.status == 'running':
             return True, f"Daemon '{self.daemon_id}' is already running."
 
@@ -881,7 +897,44 @@ class Daemon:
             + ('s' if timeout != 1 else '') + '.'
         )
 
-    def _find_detached_pids(self) -> List[int]:
+    def _get_process_timestamps(self) -> Dict[str, Optional[datetime]]:
+        """
+        Return the `began`, `ended`, and `launched` timestamps recorded for this daemon,
+        read from the properties file (so no process is inspected).
+        """
+        try:
+            properties = self.read_properties()
+        except Exception:
+            properties = None
+        if not properties:
+            properties = self.__dict__.get('_properties', None) or {}
+        process_properties = properties.get('process', None) or {}
+        return {
+            key: _detached.parse_timestamp(process_properties.get(key, None))
+            for key in ('began', 'ended', 'launched')
+        }
+
+    @staticmethod
+    def _is_completed(timestamps: Dict[str, Optional[datetime]]) -> bool:
+        """
+        Return whether the timestamps show that the last run has ended.
+        A job which was restarted has `began` or `launched` later than its stale `ended`.
+        """
+        ended = timestamps.get('ended', None)
+        if ended is None:
+            return False
+        started = [
+            moment
+            for moment in (timestamps.get('began', None), timestamps.get('launched', None))
+            if moment is not None
+        ]
+        return not started or ended >= max(started)
+
+    def _find_detached_pids(
+        self,
+        force: bool = False,
+        verify_began: bool = False,
+    ) -> List[int]:
         """
         Return the PIDs of any processes whose command line references this daemon_id.
 
@@ -891,21 +944,84 @@ class Daemon:
         orphaned/detached daemon), this is the only reliable way to find the process —
         otherwise stopping the job reports a false "already stopped" and the user must
         resort to `pkill meerschaum` or hunting the daemon_id in `htop`.
+
+        Scanning the process table is expensive, so unless `force` is `True`
+        no scan happens for a daemon which does not exist or whose last run has ended,
+        one scan is shared by all daemons for a couple of seconds,
+        and a daemon which was not found is not searched for again for a minute.
+
+        Parameters
+        ----------
+        force: bool, default False
+            If `True`, search even if the daemon is recorded as completed or was not found
+            recently (e.g. to stop it).
+
+        verify_began: bool, default False
+            If `True`, ignore processes which started after the daemon recorded
+            that it began (a reused PID).
         """
-        psutil = attempt_import('psutil')
-        marker = f"daemon_id='{self.daemon_id}'"
-        my_pid = os.getpid()
-        pids = []
-        for proc in psutil.process_iter(['pid', 'cmdline']):
-            try:
-                if proc.info['pid'] == my_pid:
-                    continue
-                cmdline = proc.info.get('cmdline') or []
-                if any(marker in (part or '') for part in cmdline):
-                    pids.append(int(proc.info['pid']))
-            except Exception:
-                continue
+        timestamps = self._get_process_timestamps()
+        fingerprint = tuple(
+            moment.isoformat() if moment is not None else None
+            for moment in (timestamps['began'], timestamps['ended'], timestamps['launched'])
+        )
+        began = timestamps['began']
+        launched = timestamps['launched']
+        in_launch_window = (
+            launched is not None
+            and (began is None or began < launched)
+            and (
+                (datetime.now(timezone.utc).replace(tzinfo=None) - launched).total_seconds()
+                < _detached.LAUNCH_GRACE_SECONDS
+            )
+        )
+        if not force:
+            if not self.path.exists() or self._is_completed(timestamps):
+                return []
+
+            if not in_launch_window and _detached.is_known_missing(
+                self.daemon_id,
+                fingerprint,
+            ):
+                return []
+
+        pids = _detached.find_pids(
+            self.daemon_id,
+            not_older_than=(launched if in_launch_window else None),
+        )
+
+        if verify_began and pids:
+            if began is not None and (launched is None or began >= launched):
+                pids = [
+                    pid
+                    for pid in pids
+                    if not _detached.is_stale_process(
+                        pid,
+                        began,
+                        _detached.CREATE_TIME_SLACK_SECONDS,
+                    )
+                ]
+
+        if not pids and not force and not in_launch_window:
+            _detached.remember_missing(self.daemon_id, fingerprint)
         return pids
+
+    def _restore_pid_file(self, pid: int) -> None:
+        """
+        Write the PID file again for a running daemon which lost it, so that later reads
+        do not have to search for the process. This is only done once the daemon has
+        recorded that it began, because before that the process found may be the launcher.
+        """
+        timestamps = self._get_process_timestamps()
+        began, launched = timestamps['began'], timestamps['launched']
+        if began is None or (launched is not None and began < launched):
+            return
+        try:
+            if not self.pid_path.exists():
+                with open(self.pid_path, 'w+', encoding='utf-8') as f:
+                    f.write(str(pid))
+        except Exception:
+            pass
 
     def _kill_detached_processes(self, timeout: Union[int, float, None] = None) -> int:
         """
@@ -915,7 +1031,7 @@ class Daemon:
         alive. Returns the number of processes that were targeted.
         """
         psutil = attempt_import('psutil')
-        pids = self._find_detached_pids()
+        pids = self._find_detached_pids(force=True)
         if not pids:
             return 0
 
@@ -941,6 +1057,7 @@ class Daemon:
                 proc.kill()
             except Exception:
                 pass
+        _detached.invalidate(self.daemon_id)
         return len(procs)
 
     def mkdir_if_not_exists(self, allow_dirty_run: bool = False):
@@ -994,15 +1111,17 @@ class Daemon:
         """
         Return the running status of this Daemon.
         """
-        if self.process is None:
+        process = self.process
+        if process is None:
             return 'stopped'
 
         psutil = attempt_import('psutil', lazy=False)
         try:
-            if self.process.status() == 'stopped':
+            process_status = process.status()
+            if process_status == 'stopped':
                 return 'paused'
-            if self.process.status() == 'zombie':
-                raise psutil.NoSuchProcess(self.process.pid)
+            if process_status == 'zombie':
+                raise psutil.NoSuchProcess(process.pid)
         except (psutil.NoSuchProcess, AttributeError):
             if self.pid_path.exists():
                 try:
@@ -1241,8 +1360,11 @@ class Daemon:
             ### whose command line embeds this daemon_id, so `status`/`stop`/`kill` see the
             ### live process instead of reporting a false "stopped" (which would strand the
             ### orphan, forcing a manual `pkill meerschaum`).
-            detached_pids = self._find_detached_pids()
-            return detached_pids[0] if detached_pids else None
+            detached_pids = self._find_detached_pids(verify_began=True)
+            if not detached_pids:
+                return None
+            self._restore_pid_file(detached_pids[0])
+            return detached_pids[0]
         try:
             with open(self.pid_path, 'r', encoding='utf-8') as f:
                 text = f.read()
@@ -1462,6 +1584,7 @@ class Daemon:
         -------
         A `SuccessTuple` indicating success.
         """
+        _detached.invalidate(self.daemon_id)
         if self.path.exists():
             try:
                 shutil.rmtree(self.path)
