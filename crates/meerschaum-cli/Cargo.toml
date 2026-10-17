@@ -57,6 +57,11 @@ sha2 = { workspace = true }
 hex = { workspace = true }
 fs4 = "0.13"
 
+[target.'cfg(unix)'.dependencies]
+# `timed_input`: poll stdin with a timeout (no reader thread that outlives the call);
+# `setsid` for the timed pipeline step.
+rustix = { version = "1", default-features = false, features = ["std", "event", "process"] }
+
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }
 tempfile = "3"

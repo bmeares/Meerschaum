@@ -100,6 +100,8 @@ pub fn start_mcp(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
 }
 
 fn start(args: &ArgsMap, rt: &mut Runtime<'_>, stdio: bool) -> ActionResult {
+    // A server prints nothing between requests: the API client's warnings go to `tracing`.
+    crate::native::api_warnings::uninstall();
     let config = ServerConfig::from_config(rt.config(), &flags(args)?);
     let session = native::session(rt);
     let plugin_manifest = session.manifest(rt.config())?;
@@ -132,8 +134,12 @@ fn start(args: &ArgsMap, rt: &mut Runtime<'_>, stdio: bool) -> ActionResult {
     for notice in &config.notices {
         rt.eprint(&format!("{notice}\n"));
     }
+    let jobs = Arc::new(crate::jobs_backend::LocalJobsBackend::new(
+        crate::native::jobs::jobs_context(rt),
+    ));
     let state = AppState::builder(config, instance.conn())
         .actions(backend.clone())
+        .jobs(jobs)
         .host(Arc::new(meerschaum_server::proxy::HostProxy::supervised(
             supervisor.clone(),
         )))

@@ -587,7 +587,7 @@ pub fn prune_venvs(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
         uninstall_args.insert("yes".into(), PyValue::Bool(false));
         uninstall_args.insert("force".into(), PyValue::Bool(false));
         uninstall_args.insert("noask".into(), PyValue::Bool(false));
-        match crate::python::core_action("uninstall packages", &uninstall_args, rt) {
+        match super::packages::uninstall_packages(&uninstall_args, rt) {
             Ok(result) if result.success => {
                 removed += names.len();
                 if let Err(e) = forget_packages(&plan.path, &names) {
@@ -615,8 +615,11 @@ pub fn prune_venvs(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
 /// `upgrade {meerschaum,packages,plugins}`: run the upgrade, then print what
 /// `prune venvs --dry` would remove (v5 deletes nothing on upgrade, §12.1).
 pub fn upgrade(function: &str, args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
-    let name = function.trim_start_matches('_').replacen('_', " ", 1);
-    let result = crate::python::core_action(&name, args, rt)?;
+    let result = match function {
+        "_upgrade_meerschaum" => super::packages::upgrade_meerschaum(args, rt)?,
+        "_upgrade_packages" => super::packages::upgrade_packages(args, rt)?,
+        _ => super::plugin_admin::upgrade_plugins(args, rt)?,
+    };
     if result.success
         && let Ok(needs) = plugin_needs(rt)
     {

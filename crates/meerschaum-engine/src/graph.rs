@@ -403,7 +403,7 @@ fn backtrack_minutes(params: &Map, default: f64) -> f64 {
 }
 
 /// Compute a node's axis. TODO(core-merge): `get_backtrack_interval` belongs in core.
-fn node_axis(pipe: &Pipe, options: &GraphOptions) -> Result<Axis, String> {
+pub(crate) fn node_axis(pipe: &Pipe, options: &GraphOptions) -> Result<Axis, String> {
     let Some(dt_col) = pipe.column("datetime") else {
         return Ok(Axis::none());
     };

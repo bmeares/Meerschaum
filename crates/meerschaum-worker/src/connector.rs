@@ -13,8 +13,9 @@ use std::sync::Arc;
 
 use indexmap::IndexMap;
 use meerschaum_connector::{
-    ColumnIndexInfo, Connector, ConnectorError, ConnectorResult, DataQuery, DateBound,
-    InstanceConnector, PipeId, PipeKeysEntry, PipesKeys, PipesKeysQuery, SyncOptions, async_trait,
+    ChunkStream, ChunkedFetch, ColumnIndexInfo, Connector, ConnectorError, ConnectorResult,
+    DataQuery, DateBound, FetchedKind, InstanceConnector, PipeId, PipeKeysEntry, PipesKeys,
+    PipesKeysQuery, SyncOptions, async_trait,
 };
 use meerschaum_core::{Map, Pipe, SuccessTuple, Value as CValue};
 use meerschaum_kernel::Frame;
@@ -161,6 +162,8 @@ pub struct PythonConnector {
     info: ConnectorInfo,
     callbacks: Arc<dyn CallbackHandler>,
     fetch_kwargs: Map,
+    /// Extra keywords every instance-method call carries (`InstanceConnector::with_call_kwargs`).
+    call_kwargs: Map,
 }
 
 impl std::fmt::Debug for PythonConnector {
@@ -262,6 +265,7 @@ impl PythonConnector {
             info,
             callbacks: Arc::new(NoCallbacks),
             fetch_kwargs: Map::new(),
+            call_kwargs: Map::new(),
         }
     }
 
@@ -442,6 +446,12 @@ impl PythonConnector {
         kwargs: Msg,
         frame: Option<(&str, &Frame)>,
     ) -> WorkerResult<Reply> {
+        let mut kwargs = kwargs;
+        for (key, value) in &self.call_kwargs {
+            if kwargs.get(key).is_none() {
+                kwargs.insert(key, core_to_wire(value));
+            }
+        }
         let mut msg = Msg::new()
             .set("connector", self.keys.as_str())
             .set("method", method)
@@ -456,6 +466,33 @@ impl PythonConnector {
             frames.push(frame_to_ipc(df)?);
         }
         self.call("instance", msg, frames).await
+    }
+
+    /// [`PythonConnector::call_method`] that fails with `NotImplementedError` when
+    /// `filter_arguments` drops one of `required` (the method does not take it).
+    async fn call_method_requiring(
+        &self,
+        method: &str,
+        pipe: &Pipe,
+        kwargs: Msg,
+        required: &[&str],
+        unsupported: &str,
+    ) -> WorkerResult<Reply> {
+        let msg = Msg::new()
+            .set("connector", self.keys.as_str())
+            .set("method", method)
+            .set("args", Wire::Array(Vec::new()))
+            .set("kwargs", Wire::from(kwargs))
+            .set("pipe", pipe_wire(pipe))
+            .set(
+                "require_kwargs",
+                Wire::Array(required.iter().map(|r| Wire::from(*r)).collect()),
+            )
+            .set(
+                "unsupported_message",
+                format!("Connectors of type '{}' {unsupported}", self.connector_type),
+            );
+        self.call("instance", msg, Vec::new()).await
     }
 
     async fn method_value(&self, method: &str, pipe: &Pipe, kwargs: Msg) -> ConnectorResult<Wire> {
@@ -526,6 +563,54 @@ impl Connector for PythonConnector {
         Ok(reply.value.as_bool().unwrap_or(false))
     }
 
+    async fn get_sync_time_remote(
+        &self,
+        pipe: &Pipe,
+        params: Option<&Map>,
+        newest: bool,
+    ) -> ConnectorResult<Option<DateBound>> {
+        if !self.info.has_method("get_sync_time") {
+            return Err(ConnectorError::NotImplemented(format!(
+                "Connectors of type '{}' do not implement `get_sync_time().",
+                self.connector_type
+            )));
+        }
+        // `filter_keywords(connector.get_sync_time, params=, newest=, remote=True)`: the worker
+        // drops the keywords the method does not take.
+        let mut kw = Msg::new().set("newest", newest).set("remote", true);
+        if let Some(p) = params {
+            kw.insert("params", map_to_wire(p));
+        }
+        let v = self.method_value("get_sync_time", pipe, kw).await?;
+        Ok(wire_to_bound(&v))
+    }
+
+    async fn get_rowcount_remote(
+        &self,
+        pipe: &Pipe,
+        query: &DataQuery,
+    ) -> ConnectorResult<Option<i64>> {
+        if !self.info.has_method("get_pipe_rowcount") {
+            return Err(ConnectorError::NotImplemented(format!(
+                "Connectors of type '{}' do not implement `get_pipe_rowcount()`.",
+                self.connector_type
+            )));
+        }
+        let kw = data_query_kwargs(query).set("remote", true);
+        // The worker raises `NotImplementedError` ("do not support remote rowcounts") when the
+        // method takes no `remote` keyword, as v4 warns and counts 0.
+        let reply = self
+            .call_method_requiring(
+                "get_pipe_rowcount",
+                pipe,
+                kw,
+                &["remote"],
+                "do not support remote rowcounts.",
+            )
+            .await?;
+        Ok(reply.value.as_i64())
+    }
+
     /// Collect every chunk and build one frame. Docs and columns go through the kernel's
     /// `convert_dtypes` only; callers that sync should prefer [`PythonConnector::fetch_chunks`]
     /// and pass each chunk's [`FetchChunk::into_pipe_input`] to `pipe_enforce_dtypes`, which
@@ -572,6 +657,89 @@ impl Connector for PythonConnector {
             meerschaum_kernel::docs::frame_from_docs(&docs)
                 .map_err(|e| ConnectorError::Invalid(e.to_string()))?,
         ))
+    }
+
+    /// `fetch()` with its generator consumed lazily (one chunk per item), as v4's `_sync` does.
+    async fn fetch_chunked(
+        &self,
+        pipe: &Pipe,
+        query: &DataQuery,
+        sync_chunks: bool,
+    ) -> ConnectorResult<Option<ChunkedFetch>> {
+        let (rx, task) = self.fetch_stream(
+            pipe,
+            &FetchOptions {
+                begin: query.begin.clone(),
+                end: query.end.clone(),
+                params: query.params.clone(),
+                kwargs: self.fetch_kwargs.clone(),
+                sync_chunks,
+            },
+            4,
+        );
+        Ok(Some(ChunkedFetch {
+            chunks: Box::new(PythonChunkStream {
+                rx,
+                task: Some(task),
+                outcome: None,
+            }),
+        }))
+    }
+}
+
+/// A fetch whose chunks are produced lazily by the worker (a generator), then its outcome.
+struct PythonChunkStream {
+    rx: mpsc::Receiver<FetchChunk>,
+    task: Option<tokio::task::JoinHandle<WorkerResult<FetchOutcome>>>,
+    outcome: Option<FetchOutcome>,
+}
+
+impl PythonChunkStream {
+    async fn settle(&mut self) -> ConnectorResult<()> {
+        if let Some(task) = self.task.take() {
+            let outcome = task
+                .await
+                .map_err(|e| ConnectorError::Backend(format!("The fetch task failed: {e}")))?
+                .map_err(|e| ConnectorError::Backend(e.to_string()))?;
+            self.outcome = Some(outcome);
+        }
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl ChunkStream for PythonChunkStream {
+    async fn next_chunk(
+        &mut self,
+    ) -> ConnectorResult<Option<meerschaum_kernel::enforce::PipeInput>> {
+        match self.rx.recv().await {
+            Some(chunk) => chunk
+                .into_pipe_input()
+                .map(Some)
+                .map_err(|e| ConnectorError::Invalid(e.to_string())),
+            None => {
+                // The worker finished (or failed): surface a Python exception from `fetch()`.
+                self.settle().await?;
+                Ok(None)
+            }
+        }
+    }
+
+    async fn finish(&mut self) -> ConnectorResult<FetchedKind> {
+        while self.rx.recv().await.is_some() {}
+        self.settle().await?;
+        let outcome = self.outcome.take().unwrap_or_default();
+        Ok(if let Some(results) = outcome.hook_results {
+            FetchedKind::HookResults(results)
+        } else if outcome.in_parallel {
+            FetchedKind::InParallel
+        } else if outcome.returned_none {
+            FetchedKind::Nothing
+        } else {
+            FetchedKind::Data {
+                generator: outcome.generator,
+            }
+        })
     }
 }
 
@@ -746,6 +914,19 @@ impl InstanceConnector for PythonConnector {
     ) -> ConnectorResult<Option<Frame>> {
         self.method_frame("get_pipe_data", pipe, data_query_kwargs(query))
             .await
+    }
+
+    fn with_call_kwargs(&self, extra: &Map) -> Option<Arc<dyn InstanceConnector>> {
+        if extra.is_empty() {
+            return None;
+        }
+        let mut with = self.clone();
+        with.call_kwargs = extra.clone();
+        Some(Arc::new(with))
+    }
+
+    fn has_backtrack_data(&self) -> bool {
+        self.info.has_method("get_backtrack_data")
     }
 
     async fn get_backtrack_data(

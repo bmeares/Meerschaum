@@ -42,7 +42,7 @@ use super::plugin_files::{self, Rollback};
 use super::{flag, info, items_str, plural, print_tuple, session, string, warn, words};
 
 /// `error(msg)`: the exception v4 raises (`Exception` with the icon-prefixed text).
-fn exception(message: impl AsRef<str>) -> ActionError {
+pub(super) fn exception(message: impl AsRef<str>) -> ActionError {
     ActionError::new("Exception", format!("\n 🛑 {}", message.as_ref()))
 }
 
@@ -100,7 +100,7 @@ impl Context {
 
 /// `parse_repo_keys(repository)` followed by the connector's construction (which fails for a
 /// label nobody configured).
-fn repo_connector(
+pub(super) fn repo_connector(
     rt: &mut Runtime<'_>,
     args: &ArgsMap,
 ) -> Result<(String, APIConnector), ActionError> {
@@ -108,7 +108,7 @@ fn repo_connector(
     connector_for(rt, &keys).map(|c| (keys, c))
 }
 
-fn connector_for(rt: &mut Runtime<'_>, keys: &str) -> Result<APIConnector, ActionError> {
+pub(super) fn connector_for(rt: &mut Runtime<'_>, keys: &str) -> Result<APIConnector, ActionError> {
     let label = keys.split(':').nth(1).unwrap_or("mrsm");
     APIConnector::from_config(rt.config(), label)
         .map_err(|_| exception(format!("Unable to parse connector keys '{keys}'")))
@@ -122,6 +122,25 @@ fn valid_connector_keys(rt: &mut Runtime<'_>, keys: &str) -> bool {
     rt.config()
         .get(&["meerschaum", "connectors", kind, label])
         .is_some()
+}
+
+/// `Plugin(name).is_installed()` for a name the caller already split from its repository.
+pub(super) fn plugin_installed(rt: &mut Runtime<'_>, args: &ArgsMap, name: &str) -> bool {
+    let ctx = Context::new(rt, args);
+    is_installed(rt, &ctx, name)
+}
+
+/// The names `Plugin` actions work on when none are given (`get_plugins_names()`).
+pub(super) fn all_plugin_names(rt: &mut Runtime<'_>, args: &ArgsMap) -> Vec<String> {
+    let ctx = Context::new(rt, args);
+    let mut no_names = args.clone();
+    no_names.shift_remove("action");
+    selected_plugins(rt, &ctx, &no_names)
+}
+
+/// Whether a plugin is a native (C-ABI) one.
+pub(super) fn plugin_is_native(rt: &mut Runtime<'_>, name: &str) -> bool {
+    is_native(rt, name)
 }
 
 /// The installed plugin names and which of them are native.
@@ -156,7 +175,7 @@ fn selected_plugins(rt: &mut Runtime<'_>, ctx: &Context, args: &ArgsMap) -> Vec<
 }
 
 /// Validate the plugin trees now (what `reload` does in v4 after an install).
-fn refresh(rt: &mut Runtime<'_>) -> Option<std::sync::Arc<Manifest>> {
+pub(super) fn refresh(rt: &mut Runtime<'_>) -> Option<std::sync::Arc<Manifest>> {
     match crate::python::refresh_manifest(rt) {
         Ok(manifest) => Some(manifest),
         Err(error) => {
@@ -367,6 +386,10 @@ fn required_plugins(
         } else {
             (spec.to_string(), default_keys.clone())
         };
+        if plugin_files::validate_plugin_name(&name).is_err() {
+            warn(rt, &format!("Invalid plugin name: '{name}'. Skipping..."));
+            continue;
+        }
         if !valid_connector_keys(rt, &keys) {
             warn(
                 rt,
@@ -1043,6 +1066,11 @@ pub fn install_plugins(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
         info(rt, notice);
     }
     let skip_deps = flag(args, "skip_deps");
+    // Names become paths (`<plugins>/<name>.py`, `venvs/<name>`) and URLs: refuse them all before
+    // anything is requested.
+    for name in &names {
+        plugin_files::split_repo(name, &ctx.separator).map_err(exception)?;
+    }
 
     for name in names {
         info(

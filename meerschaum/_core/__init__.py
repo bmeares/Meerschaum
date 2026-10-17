@@ -25,6 +25,14 @@ which only swallow `AttributeError`: probe `AVAILABLE` first. A name the built e
 `AttributeError`, which the parity-phase dispatch guards (`meerschaum._core._gate.rust_impl`)
 treat as "not bound yet" and fall through to Python.
 
+`import meerschaum`, `import meerschaum.config` and the pure helpers (`meerschaum.utils.dtypes`)
+never load the extension: the live config dictionary is created in Python
+(`meerschaum/config/_store.py`) and the extension adopts it on first use. Anything that routes to
+Rust (the `MRSM_CORE` gate, a `get_config` in rust mode, the CLI) loads it then.
+
+An extension built before the config registry moved to Rust (it lacks `REQUIRED_SYMBOLS`) is
+reported as not built, with the build script in the error.
+
 Only the standard library may be imported here: `meerschaum.config` imports this package.
 """
 
@@ -43,6 +51,9 @@ __all__ = (
 )
 
 BUILD_SCRIPT = 'scripts/rust/build_py.sh'
+
+### Symbols a current build must define; an older build is reported as not built.
+REQUIRED_SYMBOLS = ('config_dict', 'config_set', 'config_reset')
 
 _lock = threading.RLock()
 _loaded = False
@@ -79,6 +90,19 @@ def load() -> Optional[Any]:
             namespace['EXTENSION_PATH'] = None
             extension = None
         else:
+            missing = [name for name in REQUIRED_SYMBOLS if not hasattr(extension, name)]
+            if missing:
+                # Built before the config registry moved to Rust: unusable, and an
+                # `AttributeError` from the middle of `meerschaum.config` helps nobody.
+                namespace['AVAILABLE'] = False
+                namespace['LOAD_ERROR'] = CoreNotBuiltError(
+                    "the built extension predates the Rust config registry "
+                    f"(missing: {', '.join(missing)}); rebuild it with `{BUILD_SCRIPT}`"
+                )
+                namespace['EXTENSION_PATH'] = None
+                _extension = None
+                _loaded = True
+                return None
             for name in dir(extension):
                 if name.startswith('_') and name != '__version__':
                     continue

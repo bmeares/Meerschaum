@@ -78,8 +78,14 @@ pub enum ColumnKind {
     UInt64,
     Float32,
     Float64,
-    /// `Decimal128(38, scale)`.
+    /// `Decimal128(38, scale)`: one scale per column, so values with different scales read back
+    /// padded to the largest one. Drivers use it where every value of a column has the same
+    /// scale by construction (`DECIMAL(p, s)`).
     Decimal,
+    /// `NUMERIC` of unconstrained precision and scale: decimal text (`Utf8` tagged
+    /// `meerschaum:dtype=numeric`), so every value keeps the exact digits and scale the database
+    /// stored (`3`, `2.5`, `-0.10`, a 40-digit value), as `psycopg2` returns them.
+    NumericText,
     Utf8,
     /// JSON text (`Utf8` with `meerschaum:dtype=json`).
     Json,
@@ -136,7 +142,7 @@ impl ColumnPlan {
             ColumnKind::Float32 => DataType::Float32,
             ColumnKind::Float64 => DataType::Float64,
             ColumnKind::Decimal => DataType::Decimal128(DECIMAL_PRECISION, self.scale as i8),
-            ColumnKind::Utf8 | ColumnKind::Json => DataType::Utf8,
+            ColumnKind::Utf8 | ColumnKind::Json | ColumnKind::NumericText => DataType::Utf8,
             ColumnKind::Bytes | ColumnKind::Geometry(_) | ColumnKind::Raw => DataType::Binary,
             ColumnKind::Uuid => DataType::FixedSizeBinary(16),
             ColumnKind::Date => DataType::Date32,
@@ -167,7 +173,7 @@ impl ColumnPlan {
                 meta.insert(META_DTYPE.to_string(), "geometry".to_string());
                 meta.insert(META_ENCODING.to_string(), enc.as_str().to_string());
             }
-            ColumnKind::Decimal => {
+            ColumnKind::Decimal | ColumnKind::NumericText => {
                 meta.insert(META_DTYPE.to_string(), "numeric".to_string());
             }
             _ => {}
@@ -290,7 +296,7 @@ pub fn build_array(plan: &ColumnPlan, cells: &[SqlValue]) -> Result<ArrayRef> {
                     .with_precision_and_scale(DECIMAL_PRECISION, scale as i8)?,
             )
         }
-        ColumnKind::Utf8 | ColumnKind::Json => {
+        ColumnKind::Utf8 | ColumnKind::Json | ColumnKind::NumericText => {
             Arc::new(StringArray::from(collect(plan, cells, "text", to_text)?))
         }
         ColumnKind::Bytes | ColumnKind::Geometry(_) | ColumnKind::Raw => {

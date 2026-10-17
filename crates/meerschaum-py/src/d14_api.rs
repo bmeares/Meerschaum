@@ -309,7 +309,8 @@ impl meerschaum_core::template::TemplateResolver for SelfLiveResolver<'_> {
 /// `Pipe.get_parameters(apply_symlinks=True)`: the resolved parameters of a Python pipe
 /// (reference pipes merged, `{{ Pipe() }}` substituted, by `meerschaum_core`) and the
 /// `_symlinks` map v4 records on the pipe: `{path_tuple: {'original', 'substituted'}}` for every
-/// string the `{{ }}` templating changed. `MRSM{}` symlinks are substituted by the caller.
+/// string the `{{ }}` templating changed. `MRSM{}` symlinks are substituted too, against the live
+/// config (`search_and_substitute_config`).
 #[pyfunction]
 pub fn get_parameters<'py>(
     py: Python<'py>,
@@ -340,7 +341,8 @@ pub fn get_parameters<'py>(
         .map_err(|e| PyValueError::new_err(e.to_string()))?;
     crate::core_api::emit_warnings(py, warnings, 2)?;
     let resolved_map = me.parameters().clone();
-    let resolved = core_to_py(py, &Value::Map(resolved_map.clone()))?;
+    // `MRSM{}` symlinks resolve against the live config in the registry (wave 15, O).
+    let resolved = crate::config_api::substitute_parameters(py, &resolved_map)?;
     let symlinks = PyDict::new(py);
     let mut templates = Vec::new();
     for (k, v) in &raw {

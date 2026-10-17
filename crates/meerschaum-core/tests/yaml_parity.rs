@@ -4,15 +4,18 @@
 //! - `load` / `safe_load` build the same typed tree (or fail with the same exception class and
 //!   message) for every YAML text.
 //! - `dump` writes the same bytes for every typed value and `yaml.dump` keyword set.
-//! - The config registry's `read_config` / `write_config` agree on the config cases that do not
-//!   involve typed (non-JSON) values, which the registry's JSON-like `Value` cannot hold.
+//! - The config registry's lossless `read_config` / `write_config` / `get_keyfile_path` agree on
+//!   all the recorded config cases, typed values included: results, the files left behind, what
+//!   v4 printed and what it warned.
 
 mod common;
 
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use meerschaum_core::config::{Config, ConfigOptions};
+use meerschaum_core::config::{
+    Config, ConfigError, ConfigMap, ConfigOptions, ConfigValue, LoadError, Notice,
+};
 use meerschaum_core::yaml::dumper::{DumpOptions, dump_node};
 use meerschaum_core::yaml::loader::{LoadOptions, load_text};
 use meerschaum_core::yaml::node::{
@@ -318,30 +321,68 @@ fn dump_then_load_round_trips_typed_values() {
 // The config registry on the config cases
 // ---------------------------------------------------------------------------------------------
 
-fn value_to_tagged(v: &meerschaum_core::Value) -> J {
-    tagged_json(&meerschaum_core::yaml::dumper::node_from_value(v))
+fn config_tagged(v: &ConfigValue) -> J {
+    tagged_json(&v.to_node())
 }
 
-/// The cases the registry's JSON-like `Value` can express (no dates, bytes, tuples, big ints).
-const REGISTRY_CASES: &[&str] = &[
-    "preference_yaml_over_yml_json",
-    "preference_yml_over_json",
-    "preference_all_keys",
-    "json_only",
-    "substitute_false",
-    "malformed_preserved",
-    "malformed_json_preserved",
-    "write_header_and_order",
-    "write_key_order_kept",
-    "write_multiline_string",
-    "write_filetype_json",
-    "write_keeps_existing_yml",
-    "write_keeps_existing_json",
-    "write_leaves_other_keys",
-    "write_symlinks_restored",
-    "write_nested_symlinks_restored",
-    "write_not_allowed",
-];
+/// The exception class and `str()` of a `read_config` failure, as the fixture records them.
+fn load_error_outcome(error: &LoadError) -> J {
+    let class = match error {
+        LoadError::Yaml(e) => class_name(e.kind),
+        LoadError::Json(_) => "JSONDecodeError",
+        LoadError::Key(_) => "KeyError",
+        LoadError::Decode(_) => "UnicodeDecodeError",
+    };
+    serde_json::json!({"error": class, "message": error.message()})
+}
+
+/// A tagged value in which the JSON text of the stack's `MRSM_CONFIG` default is parsed and
+/// stripped of the keys v5 adds to the default config (`system:engine`), which v4.1.4 lacks
+/// (PARITY.md, G5).
+fn without_v5_defaults(spec: J) -> J {
+    match spec {
+        J::Array(items) => J::Array(items.into_iter().map(without_v5_defaults).collect()),
+        J::Object(map) => {
+            if map.get("t").and_then(J::as_str) == Some("str") {
+                if let Some(text) = map.get("v").and_then(J::as_str) {
+                    if text.trim_start().starts_with("{\n    \"meerschaum\"") {
+                        if let Ok(mut parsed) = serde_json::from_str::<J>(text) {
+                            // The v5-only engine defaults, and the two CPU-count-derived numbers
+                            // (the fixture was recorded on another machine).
+                            if let Some(system) =
+                                parsed.get_mut("system").and_then(J::as_object_mut)
+                            {
+                                system.remove("engine");
+                                if let Some(cli) = system.get_mut("cli").and_then(J::as_object_mut)
+                                {
+                                    cli.remove("max_daemons");
+                                }
+                            }
+                            if let Some(uvicorn) = parsed
+                                .get_mut("api")
+                                .and_then(|a| a.get_mut("uvicorn"))
+                                .and_then(J::as_object_mut)
+                            {
+                                uvicorn.remove("workers");
+                            }
+                            return serde_json::json!({"t": "str", "json": parsed});
+                        }
+                    }
+                }
+            }
+            J::Object(
+                map.into_iter()
+                    .map(|(k, v)| (k, without_v5_defaults(v)))
+                    .collect(),
+            )
+        }
+        other => other,
+    }
+}
+
+fn no_space(text: &str) -> String {
+    text.split_whitespace().collect()
+}
 
 #[test]
 fn registry_config_cases_match_python() {
@@ -352,18 +393,10 @@ fn registry_config_cases_match_python() {
         .get("config_cases")
         .and_then(|c| c.as_list())
         .unwrap();
-    let mut ran = 0;
-    for (case_index, case) in fixture["config_cases"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .enumerate()
-    {
+    let cases = fixture["config_cases"].as_array().unwrap();
+    assert!(cases.len() >= 29, "{} recorded config cases", cases.len());
+    for (case_index, case) in cases.iter().enumerate() {
         let name = case["name"].as_str().unwrap();
-        if !REGISTRY_CASES.contains(&name) {
-            continue;
-        }
-        ran += 1;
         let tmp = tempfile::tempdir().unwrap();
         let tmp_path = tmp.path().canonicalize().unwrap();
         let root = tmp_path.join("root");
@@ -405,6 +438,7 @@ fn registry_config_cases_match_python() {
             .get("steps")
             .and_then(|c| c.as_list())
             .unwrap();
+        let mut notices: Vec<Notice> = Vec::new();
         for ((step, ordered_step), expected) in case["steps"]
             .as_array()
             .unwrap()
@@ -412,45 +446,82 @@ fn registry_config_cases_match_python() {
             .zip(ordered_steps)
             .zip(expected_results)
         {
-            match step["op"].as_str().unwrap() {
+            let got = match step["op"].as_str().unwrap() {
                 "read" => {
                     let kw = &step["kw"];
                     let keys: Option<Vec<String>> = step["keys"]
                         .as_array()
                         .map(|a| a.iter().map(|k| k.as_str().unwrap().to_string()).collect());
-                    let (read, names) = config.with_state(|s| {
-                        s.read_config(
+                    let result = config.with_state(|s| {
+                        s.read_config_lossless(
                             Some(&dir),
                             keys.as_deref(),
                             kw["write_missing"].as_bool().unwrap_or(true),
                             kw["substitute"].as_bool().unwrap_or(true),
                             kw["raise_parsing_errors"].as_bool().unwrap_or(false),
                         )
-                        .unwrap()
                     });
-                    let mut got = serde_json::json!({
-                        "config": value_to_tagged(&meerschaum_core::Value::Map(read)),
-                    });
-                    if kw["with_filenames"].as_bool().unwrap_or(false) {
-                        got["filenames"] = serde_json::json!(names);
+                    match result {
+                        Ok((read, names)) => {
+                            let mut got = serde_json::json!({
+                                "config": config_tagged(&ConfigValue::Map(read)),
+                            });
+                            if kw["with_filenames"].as_bool().unwrap_or(false) {
+                                got["filenames"] = serde_json::json!(names);
+                            }
+                            got
+                        }
+                        Err(ConfigError::Load { error, .. }) => load_error_outcome(&error),
+                        Err(other) => panic!("case {name}: {other}"),
                     }
-                    assert_eq!(&got, expected, "case {name} read");
                 }
                 "write" => {
-                    let Some(meerschaum_core::Value::Map(map)) =
-                        ordered_step.get("config").cloned()
-                    else {
-                        panic!("write config is a map")
+                    let typed = step["kw"]["typed"].as_bool().unwrap_or(false);
+                    let map: ConfigMap = if typed {
+                        match ConfigValue::from_node(&from_tagged(
+                            &step["config"],
+                            &mut HashMap::new(),
+                        )) {
+                            ConfigValue::Map(m) => m,
+                            other => panic!("typed write config is a map, got {other:?}"),
+                        }
+                    } else {
+                        let Some(meerschaum_core::Value::Map(map)) =
+                            ordered_step.get("config").cloned()
+                        else {
+                            panic!("write config is a map")
+                        };
+                        ConfigValue::map_from_value(&map)
                     };
-                    let ok = config.with_state(|s| s.write_config(Some(&map), Some(&dir)));
-                    assert_eq!(
-                        serde_json::json!({"ok": ok}),
-                        *expected,
-                        "case {name} write"
-                    );
+                    let ok = config.with_state(|s| s.write_config_lossless(Some(&map), Some(&dir)));
+                    serde_json::json!({"ok": ok})
+                }
+                "keyfile" => {
+                    let path = config.with_state(|s| {
+                        s.get_keyfile_path(
+                            step["key"].as_str().unwrap(),
+                            step["create_new"].as_bool().unwrap_or(false),
+                            Some(&dir),
+                        )
+                    });
+                    serde_json::json!({
+                        "path": path.map(|p| p.file_name().unwrap().to_string_lossy().to_string())
+                    })
                 }
                 other => panic!("unhandled step {other}"),
+            };
+            let root_text = meerschaum_core::config::paths::posix(&root);
+            let got: J =
+                serde_json::from_str(&got.to_string().replace(&root_text, "{ROOT}")).unwrap();
+            let got = without_v5_defaults(got);
+            let expected = &without_v5_defaults(expected.clone());
+            if let (Ok(dump), true) = (std::env::var("MRSM_TEST_DUMP_DIR"), &got != expected) {
+                // Debug aid: write the two sides for `diff`.
+                let _ = std::fs::write(format!("{dump}/{name}.got.json"), got.to_string());
+                let _ = std::fs::write(format!("{dump}/{name}.want.json"), expected.to_string());
             }
+            assert_eq!(&got, expected, "case {name} step {}", step["op"]);
+            notices.extend(config.take_notices());
         }
         // The files on disk match byte for byte.
         let expected_files = outcome["files"].as_object().unwrap();
@@ -463,9 +534,38 @@ fn registry_config_cases_match_python() {
         expected_names.sort();
         assert_eq!(actual_files, expected_names, "case {name} files");
         for (file, text) in expected_files {
-            let actual = std::fs::read_to_string(dir.join(file)).unwrap();
-            assert_eq!(actual, text.as_str().unwrap(), "case {name} file {file}");
+            let actual = std::fs::read_to_string(dir.join(file))
+                .unwrap()
+                .replace(&meerschaum_core::config::paths::posix(&root), "{ROOT}");
+            let want = text.as_str().unwrap();
+            assert_eq!(actual, want, "case {name} file {file}");
         }
+        // What v4 printed and warned.
+        let scrub =
+            |text: &str| text.replace(&meerschaum_core::config::paths::posix(&root), "{ROOT}");
+        let stdout: String = notices
+            .iter()
+            .filter_map(|n| match n {
+                Notice::Print(t) | Notice::PrintOnly(t) => Some(format!("{}\n", scrub(t))),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            stdout,
+            outcome["stdout"].as_str().unwrap(),
+            "case {name} stdout"
+        );
+        let stderr: String = notices
+            .iter()
+            .filter_map(|n| match n {
+                Notice::Warn(t) | Notice::WarnPlain(t) => Some(scrub(t)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            no_space(&stderr),
+            no_space(&outcome["stderr"].as_str().unwrap().replace('\u{1f514}', "")),
+            "case {name} stderr"
+        );
     }
-    assert!(ran >= 15, "ran {ran} registry config cases");
 }

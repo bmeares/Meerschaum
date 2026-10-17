@@ -3,8 +3,7 @@
 //! Set `MRSM_TEST_POSTGIS_URI` as well to exercise geometry columns.
 
 use arrow::array::{
-    Array, BinaryArray, Decimal128Array, FixedSizeBinaryArray, Int32Array, StringArray,
-    TimestampMicrosecondArray,
+    Array, BinaryArray, FixedSizeBinaryArray, Int32Array, StringArray, TimestampMicrosecondArray,
 };
 use arrow::datatypes::{DataType, TimeUnit};
 use std::panic::AssertUnwindSafe;
@@ -61,6 +60,34 @@ async fn postgres_types_and_exec_queries() {
             .unwrap();
         assert_eq!(inserted, vec![Some(1), Some(1)]);
 
+        // `NUMERIC` specials and a 40-digit value travel as exact text too.
+        let specials = driver
+            .read(
+                "SELECT 'NaN'::numeric AS a, 'Infinity'::numeric AS b, '-Infinity'::numeric AS c, \
+                 3::numeric AS d, 1234567890123456789012345678901234567890::numeric AS e, \
+                 -0.10::numeric AS f, NULL::numeric AS g",
+            )
+            .await
+            .unwrap();
+        let text = |ix: usize| {
+            let col = specials[0]
+                .column(ix)
+                .as_any()
+                .downcast_ref::<StringArray>()
+                .unwrap();
+            (!col.is_null(0)).then(|| col.value(0).to_string())
+        };
+        assert_eq!(text(0).as_deref(), Some("NaN"));
+        assert_eq!(text(1).as_deref(), Some("Infinity"));
+        assert_eq!(text(2).as_deref(), Some("-Infinity"));
+        assert_eq!(text(3).as_deref(), Some("3"));
+        assert_eq!(
+            text(4).as_deref(),
+            Some("1234567890123456789012345678901234567890")
+        );
+        assert_eq!(text(5).as_deref(), Some("-0.10"));
+        assert_eq!(text(6), None);
+
         let batches = driver
             .read(&format!("SELECT * FROM \"{table}\" ORDER BY \"id\""))
             .await
@@ -76,7 +103,17 @@ async fn postgres_types_and_exec_queries() {
             schema.field(2).data_type(),
             &DataType::Timestamp(TimeUnit::Microsecond, None)
         );
-        assert_eq!(schema.field(3).data_type(), &DataType::Decimal128(38, 2));
+        // `NUMERIC` travels as decimal text tagged `numeric` (Wave 15 L, W15L-005): every value
+        // keeps the scale the database stored, which one `Decimal128` scale per column could not.
+        assert_eq!(schema.field(3).data_type(), &DataType::Utf8);
+        assert_eq!(
+            schema
+                .field(3)
+                .metadata()
+                .get(META_DTYPE)
+                .map(String::as_str),
+            Some("numeric")
+        );
         assert_eq!(schema.field(4).data_type(), &DataType::Utf8);
         assert_eq!(
             schema
@@ -121,10 +158,11 @@ async fn postgres_types_and_exec_queries() {
         let nums = batch
             .column(3)
             .as_any()
-            .downcast_ref::<Decimal128Array>()
+            .downcast_ref::<StringArray>()
             .unwrap();
-        assert_eq!(nums.value_as_string(0), "1.25");
-        assert_eq!(nums.value_as_string(1), "-10.50");
+        assert_eq!(nums.value(0), "1.25");
+        // v4 (`psycopg2`) returns `Decimal('-10.5')`; the old `Decimal128` padded it to `-10.50`.
+        assert_eq!(nums.value(1), "-10.5");
         let docs = batch
             .column(4)
             .as_any()

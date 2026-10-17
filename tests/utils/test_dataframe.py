@@ -50,6 +50,16 @@ def test_polars_special_type_conversion():
     assert row == pd_df.iloc[0].to_dict()
 
 
+def _geoarrow_types_installed() -> bool:
+    import importlib.util
+    from meerschaum.utils.venv import Venv
+    with Venv('mrsm'):
+        try:
+            return importlib.util.find_spec('geoarrow.types') is not None
+        except ModuleNotFoundError:
+            return False
+
+
 def test_polars_geometry_uses_geoarrow_wkb():
     """Polars uses GeoArrow WKB while Pandas retains GeoPandas geometry."""
     import json
@@ -71,7 +81,11 @@ def test_polars_geometry_uses_geoarrow_wkb():
     }
     assert shapely.from_wkb(polars_df['geom'][0]).equals(shapely.Point(1, 2))
     assert polars_df['geom'][1] is None
-    assert 'extension<geoarrow.wkb' in str(polars_df.to_arrow().schema.field('geom').type)
+    ### The v4 path (`MRSM_CORE=python`, removed in 5.0) registers the PyArrow extension type only
+    ### when `geoarrow-types` is installed in the `mrsm` venv, which a fresh root lacks.
+    from meerschaum._core import _gate
+    if _gate.mode() == 'rust' or _geoarrow_types_installed():
+        assert 'extension<geoarrow.wkb' in str(polars_df.to_arrow().schema.field('geom').type)
 
     pandas_df = enforce_dtypes(raw_df, dtypes)
     assert isinstance(pandas_df, geopandas.GeoDataFrame)

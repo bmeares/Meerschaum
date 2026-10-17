@@ -167,18 +167,32 @@ impl SqlConnector {
         no_order: bool,
         cached: Option<IndexMap<String, String>>,
     ) -> ConnectorResult<(Option<Frame>, PipeState)> {
+        let opts = DataQueryOptions {
+            no_order,
+            ..Default::default()
+        };
+        self.get_pipe_data_and_state_with(pipe, query, &opts, cached)
+            .await
+    }
+
+    /// [`get_pipe_data_and_state`](SqlConnector::get_pipe_data_and_state) with the keywords
+    /// `SQLConnector.get_pipe_data()` passes on to `get_pipe_data_query` (`begin=''`,
+    /// `begin_add_minutes`, `end_add_minutes`, `replace_nulls`, `skip_existing_cols_check`).
+    pub async fn get_pipe_data_and_state_with(
+        &self,
+        pipe: &Pipe,
+        query: &DataQuery,
+        opts: &DataQueryOptions,
+        cached: Option<IndexMap<String, String>>,
+    ) -> ConnectorResult<(Option<Frame>, PipeState)> {
         let pipe = &self.prepare_pipe(pipe).await;
         let sp = self.sql_pipe(pipe)?;
         let state = self.pipe_state_cached(&sp, cached).await;
         if !state.exists {
             return Ok((None, state));
         }
-        let opts = DataQueryOptions {
-            no_order,
-            ..Default::default()
-        };
         let df = self
-            .get_pipe_data_with_state(&sp, &state, query, &opts)
+            .get_pipe_data_with_state(&sp, &state, query, opts)
             .await?;
         Ok((df, state))
     }

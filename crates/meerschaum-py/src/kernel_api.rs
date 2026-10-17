@@ -165,6 +165,25 @@ fn placeholders_unchanged(input: &PyFrame<'_>, out: &meerschaum_kernel::Frame) -
     })
 }
 
+/// A datetime column keeps the time unit of the input pandas column (`coerce_timezone` and
+/// `astimezone` never change a Series' unit: a `datetime64[ns, UTC]` input stays `ns`, which the
+/// kernel's unit-less values cannot tell).
+fn keep_datetime_unit(hint: String, input: Option<&String>) -> String {
+    const PREFIX: &str = "datetime64[";
+    let Some(current) = input.filter(|c| c.starts_with(PREFIX)) else {
+        return hint;
+    };
+    let unit_end = |text: &str| {
+        text[PREFIX.len()..]
+            .find([',', ']'])
+            .map(|i| i + PREFIX.len())
+    };
+    match (unit_end(current), unit_end(&hint)) {
+        (Some(c), Some(h)) => format!("{PREFIX}{}{}", &current[PREFIX.len()..c], &hint[h..]),
+        _ => hint,
+    }
+}
+
 /// The pandas frame `enforce_dtypes` returns for `out` (also used by `query_df`).
 fn enforce_output<'py>(
     ctx: &PyCtx<'py>,
@@ -200,6 +219,11 @@ fn enforce_output<'py>(
                 }
                 _ => target,
             }
+        };
+        let hint = if hint.starts_with("datetime64[") {
+            keep_datetime_unit(hint, input.dtypes.get(col))
+        } else {
+            hint
         };
         hints.insert(col.clone(), hint);
     }

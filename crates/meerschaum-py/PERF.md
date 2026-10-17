@@ -497,3 +497,17 @@ everywhere. MSSQL has no Rust driver in the façade (`_RUST_FLAVORS`), so both c
 (`MRSM_CORE=python`) and the `latency` case (`lat_*`). Results are in
 `scripts/bench/results/2026-10-14-w9u-pg.{md,json}`. There are no regressions against v4.1.4 on
 postgis (sync, inc, filter_existing and latency) or on SQLite (latency).
+
+## Wave 15 (task O): `get_config` over the Rust-owned registry
+
+The config registry moved into `config_api.rs` (PARITY "Wave 15 (task O)"); the read-only fast path is the same walk over
+the live dict, which is now the extension's own object. Same microbenchmark as wave 9 (`get_config(*keys)` 20,000 times
+after one warm-up call, release extension, fresh root, best of 3; shared host):
+
+| keys | v4 path (`MRSM_CORE=python`) | rust (w9) | rust (w15) |
+|---|---|---|---|
+| `system:connectors:sql:chunksize` | 17.2 µs | 8.1 µs | 5.3 µs |
+| `pipes:attributes:local_cache_timeout_seconds` | 10.8 µs | 5.2 µs | 3.0 µs |
+| `meerschaum:instance` | 13.1 µs | 7.5 µs | 3.7 µs |
+| `system:experimental:inplace_sync` | 17.0 µs | 8.7 µs | 5.3 µs |
+| `pipes:dtypes:columns_types_cache_seconds` | 10.9 µs | 5.4 µs | 3.0 µs |

@@ -237,42 +237,116 @@ def test_empty_target_cannot_determine_bounds(tmp_path):
     assert actual == expected
 
 
-def test_fallback_cases_stay_python(tmp_path):
-    """The cases the Rust verification does not take run the Python orchestration."""
-    from meerschaum.core.Pipe._verify import _rust_verify_connectors
+def test_every_call_gets_a_native_context(tmp_path):
+    """Wave 15 (L): `debug`, forwarded keywords, plugin sources, references and templates all
+    run natively; only an instance without a native driver would keep the Python orchestration."""
+    from meerschaum.core.Pipe._verify import _rust_verify_context
     _gate.set_mode('rust')
     suffix = uuid.uuid4().hex[:6]
     instance = _connector('sqlite', f'w9q_fb_{suffix}', tmp_path)
     _, target = _build_pipes(instance, instance, 'fallback')
 
-    connectors = _rust_verify_connectors(target)
-    assert connectors is not None
-    assert set(connectors) == {str(instance)}
-
-    assert _rust_verify_connectors(target, debug=True) is None
-    assert _rust_verify_connectors(target, kwargs={'force': True}) is None
-    assert _rust_verify_connectors(target, kwargs={'chunksize': 10}) is not None
+    context, _ = _rust_verify_context(target)
+    assert context is not None
+    assert set(context['connectors']) == {str(instance)}
+    assert _rust_verify_context(target, debug=True)[0] is not None
 
     plugin_pipe = mrsm.Pipe('plugin:stress', 'w9q', instance=instance)
-    assert _rust_verify_connectors(plugin_pipe) is None
+    assert _rust_verify_context(plugin_pipe)[0] is not None
 
     ref_pipe = mrsm.Pipe(
         str(instance), 'w9q_ref',
         instance=instance,
         parameters={'reference': {'connector': 'w9q', 'metric': 'src_fallback'}},
     )
-    assert _rust_verify_connectors(ref_pipe) is None
+    assert _rust_verify_context(ref_pipe)[0] is not None
 
-    symlink_pipe = mrsm.Pipe(
+    template_pipe = mrsm.Pipe(
         str(instance), 'w9q_link',
         instance=instance,
         parameters={'columns': {'datetime': 'dt'}, 'verify': {'chunk_minutes': '{{ self.x }}'}},
     )
-    assert _rust_verify_connectors(symlink_pipe) is None
+    assert _rust_verify_context(template_pipe)[0] is not None
 
     _gate.set_mode('python')
     assert _gate.rust_impl('verify_pipe') is None
     target.delete()
+
+
+def _variants_scenario(instance, source_conn, suffix):
+    """Verifications that used to keep the Python orchestration."""
+    source, target = _build_pipes(instance, source_conn, suffix)
+    observed = {}
+    newest = datetime(2024, 1, 1, tzinfo=timezone.utc) + timedelta(days=90)
+    success, msg = target.sync(begin=newest, debug=False)
+    assert success, msg
+
+    ### A pipe that inherits the definition (and columns) of the target through `reference`.
+    reference = mrsm.Pipe(
+        str(source_conn), f'ref_{suffix}',
+        instance=instance,
+        parameters={
+            'reference': {
+                'connector': str(source_conn),
+                'metric': f'tgt_{suffix}',
+                'instance': str(instance),
+            },
+        },
+    )
+    reference.delete()
+    reference = mrsm.Pipe(
+        str(source_conn), f'ref_{suffix}',
+        instance=instance,
+        parameters={
+            'reference': {
+                'connector': str(source_conn),
+                'metric': f'tgt_{suffix}',
+                'instance': str(instance),
+            },
+        },
+    )
+    reference.register()
+
+    for name, pipe, kwargs in (
+        ('debug', target, {'debug': True}),
+        ('force', target, {'force': True, 'retries': 2, 'min_seconds': 0}),
+        ('plugin_kwarg', target, {'some_plugin_flag': 1}),
+        ('reference', reference, {}),
+        ('reference_rowcounts', reference, {'check_rowcounts_only': True}),
+    ):
+        result = pipe.verify(**kwargs)
+        assert isinstance(result, tuple) and len(result) == 2
+        ### The debug run names tables and timings; only the outcome is compared for it.
+        observed[name] = (
+            (result[0], '' if name == 'debug' else result[1]),
+            len(_rows(pipe)),
+        )
+    observed['rows'] = _rows(target)
+    observed['source_rows'] = _rows(source)
+    reference.delete()
+    source.delete()
+    target.delete()
+    return observed
+
+
+@pytest.mark.parametrize('flavor', _flavors())
+def test_verify_variants_match_python(flavor, tmp_path, monkeypatch):
+    """`debug`, forwarded keywords and references verify natively with the same outcomes."""
+    calls = []
+    real = _core.verify_pipe
+
+    def counting(*args, **kwargs):
+        calls.append(args[0])
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(_core, 'verify_pipe', counting)
+    suffix = uuid.uuid4().hex[:6]
+    instance = _connector(flavor, f'w9q_inst_{suffix}', tmp_path)
+    source_conn = _connector(flavor, f'w9q_src_{suffix}', tmp_path)
+    expected, actual = _both(_variants_scenario, instance, source_conn, 'variants')
+    assert len(calls) == 5, "every variant must run natively"
+    assert actual == expected
+    assert expected['rows'] == expected['source_rows']
 
 
 def test_register_connector_binding(tmp_path):

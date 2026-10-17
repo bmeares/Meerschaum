@@ -13,6 +13,7 @@ import meerschaum as mrsm
 from meerschaum.utils.typing import Any, Union, SuccessTuple, Iterator, TYPE_CHECKING
 from meerschaum.config import get_config
 from meerschaum.utils.warnings import warn
+from meerschaum._core._gate import rust_impl as _rust_impl
 
 if TYPE_CHECKING:
     pd = mrsm.attempt_import('pandas')
@@ -52,6 +53,30 @@ def fetch(
     A `pd.DataFrame` of the newest unseen data.
 
     """
+    if (_rust := _rust_impl('pipe_fetch')) is not None:
+        from meerschaum.core.Pipe._data import _rust_context
+        _context = _rust_context(self, debug=debug)
+        if _context is not None:
+            _begin, _end = self.parse_date_bounds(begin, end)
+            _fetched = _rust(
+                self,
+                _context,
+                begin=_begin,
+                end=_end,
+                check_existing=check_existing,
+                params=kw.get('params', None),
+                kwargs={
+                    key: val
+                    for key, val in kw.items()
+                    if key not in ('params', 'chunk_hook')
+                },
+                sync_chunks=sync_chunks,
+                chunk_hook=kw.get('chunk_hook', None),
+                debug=debug,
+            )
+            ### A SQL source's rows come in chunks, as a generator.
+            return (chunk for chunk in _fetched) if hasattr(_fetched, '__next__') else _fetched
+
     if 'fetch' not in dir(self.connector):
         warn(f"No `fetch()` function defined for connector '{self.connector}'")
         return None
@@ -114,6 +139,9 @@ def get_backtrack_interval(
     -------
     The backtrack interval (`timedelta` or `int`) to use with this pipe's `datetime` axis.
     """
+    if (_rust := _rust_impl('pipe_get_backtrack_interval')) is not None:
+        return _rust(self, check_existing, self.dtypes)
+
     from meerschaum.utils.dtypes import MRSM_PRECISION_UNITS_SCALARS, MRSM_PRECISION_UNITS_ALIASES
     default_backtrack_minutes = get_config('pipes', 'parameters', 'fetch', 'backtrack_minutes')
     configured_backtrack_minutes = self.parameters.get('fetch', {}).get('backtrack_minutes', None)

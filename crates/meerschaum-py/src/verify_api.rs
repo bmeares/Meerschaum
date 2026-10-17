@@ -1,23 +1,23 @@
 //! `Pipe.verify()` in Rust (design §4.4, D14): `_core.verify_pipe` runs the CLI's
 //! `meerschaum_cli::native::verify::verify_pipe_with` on connectors the Python process built.
 //!
-//! **The façade session.** [`facade_session`] is one [`Session`] per process (v4 job daemons
-//! fork; a child builds its own) on the extension's Tokio runtime ([`crate::runtime::runtime`]),
-//! which the `_core.SqlConnector` pools were created on. It is *registered-only* and has *no
-//! Python worker*: lookups return only the connectors the façade registered
-//! ([`Session::register_sql`]) and never read the config registry, connect to configured
-//! connectors, or start a worker process. The engine registry built for each chunk sync
-//! therefore sees exactly the instance and source connectors the caller passed.
+//! **The façade session.** [`facade_session`] is [`crate::facade::worker_session`]: one
+//! [`Session`] per process (v4 job daemons fork; a child builds its own) on the extension's Tokio
+//! runtime ([`crate::runtime::runtime`]), which the `_core.SqlConnector` pools were created on.
+//! The `_core.SqlConnector`s the façade registers ([`Session::register_sql`]) and the ad hoc
+//! `api:` / `valkey:` connectors of the call ([`crate::facade::register_adhoc`]) are used as
+//! given; every other connector is built from the config registry (the files under
+//! `MRSM_ROOT_DIR` overlaid with the Python process's in-memory config), and a Python source or
+//! instance (`plugin:`, `@make_connector`) runs in the Python worker the session starts on first
+//! use (`MRSM_PYTHON`, the façade defaults it to its own interpreter).
 //!
 //! Output (`info`, the per-chunk `pprint`, warnings) goes to Python's `sys.stdout` /
 //! `sys.stderr` as it is produced (the GIL is taken per write), so `capsys` and redirected
-//! streams see it like v4's prints.
+//! streams see it like v4's prints. `debug=True` turns on the `tracing` sink's `debug` events
+//! ([`crate::logging`]).
 //!
-//! The Python side (`meerschaum/core/Pipe/_verify.py`) decides which calls may come here and
-//! falls back to the Python orchestration for the rest (see `PARITY.md`, the `_verify.py` row).
-
-use std::io::Write;
-use std::sync::Mutex;
+//! The Python side (`meerschaum/core/Pipe/_verify.py`) hands over the connectors; there is no
+//! Python orchestration left for the cases of the earlier waves (see `PARITY.md`, Wave 15, L).
 
 use chrono::Duration;
 use meerschaum_cli::dispatch::Runtime;
@@ -26,33 +26,21 @@ use meerschaum_cli::native::pipes::SelectedPipe;
 use meerschaum_cli::native::sync::SyncArgs;
 use meerschaum_cli::native::verify::{VerifyArgs, verify_pipe_with};
 use meerschaum_cli::types::DateContext;
-use meerschaum_core::config::{Config, ConfigOptions};
+use meerschaum_core::SuccessTuple;
+use meerschaum_core::config::Config;
 use meerschaum_core::pipe::ChunkIntervalArg;
-use meerschaum_core::{Map, SuccessTuple, Value};
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyInt, PyString, PyTuple};
+use std::io::Write;
 
-use crate::convert::{PyCtx, py_to_core};
+use crate::convert::PyCtx;
 use crate::pipe_bridge::{ParamsView, core_pipe, date_bound, params_map, success_to_py};
 use crate::sql_api::PySqlConnector;
 
-/// The façade's process session: registered connectors only, no Python worker, on the
-/// extension's runtime. Rebuilt in a forked child.
+/// The façade's process session (see the module docs). Rebuilt in a forked child.
 pub fn facade_session() -> Session {
-    static SESSION: Mutex<Option<(u32, Session)>> = Mutex::new(None);
-    let pid = std::process::id();
-    let mut slot = SESSION.lock().unwrap_or_else(|e| e.into_inner());
-    if let Some((owner, session)) = slot.as_ref()
-        && *owner == pid
-    {
-        return session.clone();
-    }
-    let session = Session::with_runtime(crate::runtime::runtime().handle().clone());
-    session.set_registered_only(true);
-    session.set_python_worker(false);
-    *slot = Some((pid, session.clone()));
-    session
+    crate::facade::worker_session()
 }
 
 /// `_core.register_connector(keys, connector)`: make `connector` (a `_core.SqlConnector`) the
@@ -125,36 +113,27 @@ fn chunk_interval_arg(obj: Option<&Bound<'_, PyAny>>) -> PyResult<Option<ChunkIn
 }
 
 /// The config the verify runtime reads (`pipes:verify:max_chunks_syncs`, the engine settings,
-/// formatting): the files under `MRSM_ROOT_DIR` overlaid with the Python process's in-memory
-/// `meerschaum.config.config` (so runtime patches are honored). Never writes files.
-fn verify_config(py: Python<'_>) -> PyResult<Config> {
-    let mut options = ConfigOptions::from_process();
-    options.allow_writes = false;
-    let config = Config::new(options).map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
-    let py_config = py.import("meerschaum.config")?.getattr("config")?;
-    if let Ok(Value::Map(map)) = py_to_core(&py_config) {
-        let mut merged = config.snapshot();
-        for (k, v) in map {
-            merged.insert(k, v);
-        }
-        config.set_config(merged);
-    }
-    Ok(config)
+/// formatting): a snapshot of the live config dictionary, taken now ([`crate::config_api::live_config`]).
+pub(crate) fn verify_config(py: Python<'_>) -> PyResult<Config> {
+    crate::config_api::live_config(py)
 }
 
 /// `_core.verify_pipe(pipe, connectors, begin=None, end=None, params=None, chunk_interval=None,
 /// bounded=None, deduplicate=False, workers=None, batchsize=None,
 /// skip_chunks_with_greater_rowcounts=False, check_rowcounts_only=False, chunksize=-1,
-/// check_existing=True)`.
+/// check_existing=True, kwargs=None, attributes=None, debug=False)`.
 ///
 /// `connectors` maps connector keys to the `_core.SqlConnector`s to use (the pipe's instance
 /// and, for SQL sources, its source); they are registered in the façade session first.
-/// Returns the `SuccessTuple`.
+/// `attributes` maps the keys of connectors the Python process defined ad hoc to their
+/// attributes, and `kwargs` holds the keyword arguments `Pipe.verify()` forwards to every chunk's
+/// `pipe.sync()` (`force`, `retries`, plugin arguments). Returns the `SuccessTuple`.
 #[pyfunction]
 #[pyo3(signature = (
     pipe, connectors, begin=None, end=None, params=None, chunk_interval=None, bounded=None,
     deduplicate=false, workers=None, batchsize=None, skip_chunks_with_greater_rowcounts=false,
-    check_rowcounts_only=false, chunksize=-1, check_existing=true
+    check_rowcounts_only=false, chunksize=-1, check_existing=true, kwargs=None, attributes=None,
+    debug=false
 ))]
 #[allow(clippy::too_many_arguments)]
 pub fn verify_pipe<'py>(
@@ -173,22 +152,33 @@ pub fn verify_pipe<'py>(
     check_rowcounts_only: bool,
     chunksize: Option<i64>,
     check_existing: bool,
+    kwargs: Option<&Bound<'py, PyDict>>,
+    attributes: Option<&Bound<'py, PyDict>>,
+    debug: bool,
 ) -> PyResult<Bound<'py, PyTuple>> {
+    let _debug = crate::sync_api::DebugGuard::new(debug);
     let session = facade_session();
+    crate::facade::suggest_worker_python(py, &session);
+    let mut held = Vec::new();
     for (keys, conn) in connectors.iter() {
         let keys = keys.downcast::<PyString>()?.to_str()?.to_string();
         let conn = conn
             .downcast::<PySqlConnector>()
             .map_err(|_| PyValueError::new_err("Expected a `_core.SqlConnector`."))?;
         session.register_sql(&keys, conn.get().inner.clone());
+        held.push((keys, conn.get().inner.clone()));
     }
+    crate::facade::install_instance_provider(&held);
     let core = core_pipe(pipe, ParamsView::Raw)?;
     let instance_keys = core.instance_keys().to_string();
-    if !session.is_registered(&instance_keys) {
-        return Err(PyValueError::new_err(format!(
-            "No connector was passed for the instance '{instance_keys}'."
-        )));
-    }
+    let connector_keys = core.connector_keys().to_string();
+    crate::facade::publish_live_config(py)?;
+    let config = verify_config(py)?;
+    let attribute_maps = crate::sync_api::attribute_maps(attributes)?;
+    let need_python = !crate::facade::is_native(&instance_keys)
+        || (connector_keys.contains(':') && !crate::facade::is_native(&connector_keys));
+    crate::facade::register_adhoc(py, &session, &config, &attribute_maps, need_python)
+        .map_err(PyRuntimeError::new_err)?;
     let ctx = PyCtx::new(py)?;
     let va = VerifyArgs {
         bounded,
@@ -205,9 +195,8 @@ pub fn verify_pipe<'py>(
         params: params_map(params)?,
         check_existing,
         chunksize,
-        extra: Map::new(),
+        extra: crate::sync_api::kwargs_map(kwargs)?,
     };
-    let config = verify_config(py)?;
     let result: Result<SuccessTuple, String> = py.allow_threads(move || {
         let inst = session
             .instance(&instance_keys, &config)
@@ -228,6 +217,25 @@ pub fn verify_pipe<'py>(
             id: None,
             hydrated: false,
         };
+        // The verification reads `columns`, `dtypes` and `verify` of the pipe before the engine
+        // resolves anything: resolve `reference`s, `{{ }}` templates and `MRSM{}` symlinks against
+        // the instance first (the raw, persisted parameters keep their templates).
+        meerschaum_cli::native::pipes::hydrate(&mut rt, &inst, &mut sp);
+        let provider = meerschaum_cli::native::session::ConfiguredSqlProvider::new(
+            rt.config.as_ref().expect("config"),
+        );
+        let defaults =
+            meerschaum_core::pipe::PipeDefaults::from_config(rt.config.as_ref().expect("config"));
+        let (resolved, warnings) = session.block_on(meerschaum_connector::resolve_pipe(
+            &sp.pipe,
+            inst.conn().as_ref(),
+            Some(&provider),
+            &defaults,
+        ));
+        for warning in warnings {
+            tracing::warn!("{warning}");
+        }
+        sp.pipe = resolved;
         Ok(verify_pipe_with(
             &mut rt, &session, &inst, &mut sp, &va, &sync_args,
         ))

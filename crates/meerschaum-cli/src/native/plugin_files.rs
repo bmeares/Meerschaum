@@ -107,17 +107,37 @@ pub fn installed_plugin_names(dirs: &[PathBuf]) -> Vec<String> {
     names
 }
 
-/// `Plugin.__init__`'s split of `name@repo` on the repository separator: `(name, repo)`.
-/// More than one separator is v4's `error(f"Invalid plugin name: '{name}'")`.
-pub fn split_repo(name: &str, separator: &str) -> Result<(String, Option<String>), String> {
-    if !name.contains(separator) {
-        return Ok((name.to_string(), None));
-    }
-    let parts: Vec<&str> = name.split(separator).collect();
-    if parts.len() != 2 {
+/// A plugin name every action may turn into a path (`<plugins>/<name>.py`, `venvs/<name>`,
+/// `.archives/<name>.tar.gz`): not empty, no path separators or NUL, no `..`, no leading `.`,
+/// and not `mrsm` (the shared core virtual environment). One check for every action; v4 trusts
+/// the name and `uninstall plugins ../.. --force` would remove a directory outside `venvs/`.
+pub fn validate_plugin_name(name: &str) -> Result<(), String> {
+    let invalid = name.is_empty()
+        || name.contains(['/', '\\', '\0'])
+        || name.contains("..")
+        || name.starts_with('.')
+        || name == "mrsm";
+    if invalid {
         return Err(format!("Invalid plugin name: '{name}'"));
     }
-    Ok((parts[0].to_string(), Some(parts[1].to_string())))
+    Ok(())
+}
+
+/// `Plugin.__init__`'s split of `name@repo` on the repository separator: `(name, repo)`.
+/// More than one separator is v4's `error(f"Invalid plugin name: '{name}'")`; so is a name
+/// [`validate_plugin_name`] refuses.
+pub fn split_repo(name: &str, separator: &str) -> Result<(String, Option<String>), String> {
+    let (plugin, repository) = if !name.contains(separator) {
+        (name.to_string(), None)
+    } else {
+        let parts: Vec<&str> = name.split(separator).collect();
+        if parts.len() != 2 {
+            return Err(format!("Invalid plugin name: '{name}'"));
+        }
+        (parts[0].to_string(), Some(parts[1].to_string()))
+    };
+    validate_plugin_name(&plugin).map_err(|_| format!("Invalid plugin name: '{name}'"))?;
+    Ok((plugin, repository))
 }
 
 /// The `required` list declared in a plugin's source text, for plugins whose import fails (the
@@ -371,6 +391,22 @@ pub fn write_origin(dir: &Path, filename: &str, name: &str, repo_keys: &str) -> 
         .is_ok()
 }
 
+/// `remove_plugin_origin(name, dir)`: drop a plugin's entry from one plugins directory's
+/// `.mrsm_origins.json` (a directory that does not name it is left alone).
+pub fn remove_origin(dir: &Path, filename: &str, name: &str) -> bool {
+    let mut origins = read_origins(dir, filename);
+    if origins.remove(name).is_none() {
+        return true;
+    }
+    let value: Json = origins
+        .into_iter()
+        .map(|(k, v)| (k, Json::String(v)))
+        .collect::<serde_json::Map<String, Json>>()
+        .into();
+    let text = super::pip::sorted_pretty(&value, 4);
+    std::fs::write(dir.join(filename), text).is_ok()
+}
+
 /// `_copy_path`: copy a file, directory or symlink without following symlinks.
 pub fn copy_path(source: &Path, destination: &Path) -> std::io::Result<()> {
     let meta = std::fs::symlink_metadata(source)?;
@@ -540,6 +576,28 @@ mod tests {
             split_repo("a@b@c", "@").unwrap_err(),
             "Invalid plugin name: 'a@b@c'"
         );
+    }
+
+    #[test]
+    fn plugin_names_cannot_name_a_path() {
+        for bad in [
+            "",
+            "..",
+            "../x",
+            "a/b",
+            "a\\b",
+            ".hidden",
+            "a..b",
+            "mrsm",
+            "a\0b",
+            "/abs",
+            "../..@api:x",
+        ] {
+            assert!(split_repo(bad, "@").is_err(), "{bad:?}");
+        }
+        for good in ["noaa", "my-plugin", "w7_pyfig", "a.b", "plugin@api:mrsm"] {
+            assert!(split_repo(good, "@").is_ok(), "{good:?}");
+        }
     }
 
     #[test]

@@ -285,6 +285,9 @@ pub fn show_data(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     let (inst, pipes) = selected_pipes(rt, args)?;
     let session = session(rt);
     let conn = inst.conn();
+    // PARITY: `float(action[0])` is a float (`show data 60` prints `Last 60.0 minutes`), while the
+    // default is the int `1440` (`Last 1440 minutes`) (`actions/show.py::_show_data`).
+    let mut default_backtrack = false;
     let backtrack_minutes: Option<f64> =
         match action.first().and_then(|a| a.trim().parse::<f64>().ok()) {
             Some(m) => Some(m),
@@ -293,6 +296,7 @@ pub fn show_data(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
                     && end.is_none()
                     && (action.is_empty() || action.first().is_some_and(|a| a != "all"))
                 {
+                    default_backtrack = true;
                     Some(1440.0)
                 } else {
                     None
@@ -330,7 +334,11 @@ pub fn show_data(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
         let info_msg = match backtrack_minutes {
             Some(m) => format!(
                 "Last {} minute{} of data for {}:",
-                py_float(m),
+                if default_backtrack {
+                    (m as i64).to_string()
+                } else {
+                    py_float(m)
+                },
                 if m != 1.0 { "s" } else { "" },
                 p.pipe
             ),

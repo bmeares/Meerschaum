@@ -145,7 +145,7 @@ fn run(
     host: &Host,
     session: &mut Session,
     action: &[&str],
-    jobs: &mut InMemoryJobs,
+    jobs: &mut dyn meerschaum_compose::ops::JobOps,
     prompter: &mut dyn meerschaum_compose::ops::Prompter,
     yes: bool,
 ) -> ComposeOutput {
@@ -326,4 +326,59 @@ fn bare_stop_jobs_asks_for_confirmation() {
     assert_eq!(result.message, "No jobs were stopped.");
     assert_eq!(prompter.questions, vec!["Stop the above jobs?".to_string()]);
     assert_eq!(out.commands.len(), 1, "only `show version` ran");
+}
+
+/// An executor whose reads fail (an unreachable API, a broken `systemctl`).
+struct FailingJobs;
+
+impl meerschaum_compose::ops::JobOps for FailingJobs {
+    fn get_jobs(&mut self) -> indexmap::IndexMap<String, JobInfo> {
+        indexmap::IndexMap::new()
+    }
+
+    fn try_get_jobs(&mut self) -> Result<indexmap::IndexMap<String, JobInfo>, String> {
+        Err("connection refused".into())
+    }
+
+    fn take_warnings(&mut self) -> Vec<String> {
+        vec!["Job 'x' exists in both `local` and `systemd`.".into()]
+    }
+}
+
+#[test]
+fn a_failed_executor_read_stops_down_instead_of_reading_as_no_jobs() {
+    let env = env_for("registered");
+    let host = host(&env);
+    let out = run(
+        &host,
+        &mut Session::default(),
+        &["down"],
+        &mut FailingJobs,
+        &mut NoInput,
+        true,
+    );
+    let result = out.result.unwrap();
+    assert!(!result.success, "{result:?}");
+    assert!(
+        result
+            .message
+            .contains("Could not read the jobs of this project's executor")
+            && result.message.contains("connection refused"),
+        "{}",
+        result.message
+    );
+    assert!(
+        out.messages
+            .warnings()
+            .iter()
+            .any(|w| w.contains("exists in both `local` and `systemd`")),
+        "listing warnings are surfaced"
+    );
+    assert!(
+        out.commands
+            .iter()
+            .all(|c| !c.sysargs.iter().any(|a| a == "delete")),
+        "nothing was deleted: {:?}",
+        out.commands
+    );
 }

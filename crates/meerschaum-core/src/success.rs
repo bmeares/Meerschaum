@@ -133,7 +133,8 @@ pub struct SyncResult {
     pub upserted: u64,
     /// Rows deleted.
     pub deleted: u64,
-    /// The intervals of the datetime axis that changed.
+    /// The intervals of the datetime axis that changed. In a graph run, the ledger's exact
+    /// delta; in a one-pipe sync, a *superset*: the grid cells of the rows handed to the instance.
     pub changed_intervals: Vec<ChangedInterval>,
     /// Wall-clock duration of the sync.
     pub duration: Option<Duration>,

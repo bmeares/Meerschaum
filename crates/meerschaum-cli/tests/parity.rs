@@ -690,22 +690,23 @@ fn dispatch_skeleton() {
     );
     // Verify compatibility delegation with an absent interpreter; never install packages
     // or contact an API while checking dispatch.
-    // (`install plugins` is native now; `show packages` still reaches `core_action`.)
-    for args in [
-        vec!["show", "packages"],
-        vec!["show", "pipes", "-e", "api:synthetic_wiring_test"],
-    ] {
-        let output = std::process::Command::new(env!("CARGO_BIN_EXE_mrsm"))
-            .args(args)
-            .env("MRSM_ROOT_DIR", tmp.path())
-            .env("MRSM_PLUGINS_DIR", tmp.path().join("plugins"))
-            .env("MRSM_PYTHON", tmp.path().join("absent-python"))
-            .output()
-            .unwrap();
-        assert!(!output.status.success());
-        let text = String::from_utf8_lossy(&output.stdout);
-        assert!(text.contains("failed to start the Python worker"), "{text}");
-    }
+    // (`install plugins` and `show packages` are native now; importing a Python plugin needs the worker.)
+    std::fs::create_dir_all(tmp.path().join("plugins")).unwrap();
+    std::fs::write(
+        tmp.path().join("plugins/synthetic_wiring_test.py"),
+        "x = 1\n",
+    )
+    .unwrap();
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_mrsm"))
+        .args(["verify", "plugins"])
+        .env("MRSM_ROOT_DIR", tmp.path())
+        .env("MRSM_PLUGINS_DIR", tmp.path().join("plugins"))
+        .env("MRSM_PYTHON", tmp.path().join("absent-python"))
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let text = String::from_utf8_lossy(&output.stdout);
+    assert!(text.contains("failed to start the Python worker"), "{text}");
     assert_eq!(
         dispatch::entry(&s(&["show", "pipe", "-i", "sql:memory"]), &mut rt),
         SuccessTuple::ok("No pipes to show.")

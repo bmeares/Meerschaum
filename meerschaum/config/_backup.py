@@ -16,6 +16,7 @@ import pathlib
 from datetime import datetime, timezone
 
 from meerschaum.utils.typing import Optional, List, SuccessTuple
+from meerschaum._core._gate import rust_impl as _rust_impl
 
 ### Timestamps are UTC and lexically sortable so filename order == chronological order.
 _TIMESTAMP_FORMAT: str = '%Y%m%d-%H%M%S-%f'
@@ -29,6 +30,8 @@ def get_max_backups_per_key() -> int:
 
 def get_key_backups_dir(key: str, create: bool = False) -> pathlib.Path:
     """Return the directory holding backups for a config `key`."""
+    if (_rust := _rust_impl('get_key_backups_dir')) is not None:
+        return _rust(key, create=create)
     import meerschaum.config.paths as paths
     backups_dir = pathlib.Path(paths.CONFIG_BACKUPS_RESOURCES_PATH) / key
     if create:
@@ -38,6 +41,8 @@ def get_key_backups_dir(key: str, create: bool = False) -> pathlib.Path:
 
 def list_config_backups(key: str) -> List[pathlib.Path]:
     """Return existing backups for `key`, newest first."""
+    if (_rust := _rust_impl('list_config_backups')) is not None:
+        return _rust(key)
     backups_dir = get_key_backups_dir(key)
     if not backups_dir.exists():
         return []
@@ -59,6 +64,8 @@ def backup_config_key(key: str, debug: bool = False) -> Optional[pathlib.Path]:
     The path to the new backup, the most recent backup if the file is unchanged,
     or `None` if there was nothing to back up.
     """
+    if (_rust := _rust_impl('backup_config_key')) is not None:
+        return _rust(key, debug=debug)
     import shutil
     from meerschaum.config._read_config import get_keyfile_path
     from meerschaum.utils.debug import dprint
@@ -139,6 +146,12 @@ def restore_config_backup(
     -------
     A `SuccessTuple` indicating success.
     """
+    if (_rust := _rust_impl('restore_config_backup')) is not None:
+        success, message = _rust(key, backup_path=backup_path, index=index, debug=debug)
+        if success and reload:
+            from meerschaum.utils.packages import reload_meerschaum
+            reload_meerschaum(debug=debug)
+        return success, message
     import shutil
     from meerschaum.config._read_config import get_keyfile_path
     from meerschaum.utils.packages import reload_meerschaum

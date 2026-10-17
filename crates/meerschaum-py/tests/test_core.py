@@ -673,7 +673,18 @@ def test_sql_connector_routing(gate, tmp_path):
     assert '_rust_connector' not in conn.__getstate__()
     memory = mrsm.get_connector('sql', 'gate_mem_' + uuid.uuid4().hex, flavor='sqlite',
                                 database=':memory:')
-    assert memory._rust_method('pipe_exists') is None
+    ### Wave 15 (L): an in-memory SQLite connector is routed too. The Rust pool and SQLAlchemy
+    ### open one database file (`_shared_memory_database`), so both see the same tables.
+    assert memory._rust_method('pipe_exists') is not None
+    path = memory._shared_memory_database()
+    assert path and memory.URI == f'sqlite:///{path}'
+    memory.exec('CREATE TABLE gate_shared (a INTEGER)')
+    memory.exec('INSERT INTO gate_shared VALUES (5)')
+    pipe = mrsm.Pipe(
+        'gate', 'shared', instance=memory, parameters={'target': 'gate_shared'},
+    )
+    assert pipe.get_rowcount() == 1
+    assert int(memory.value('SELECT COUNT(*) FROM gate_shared')) == 1
     gate.set_mode('python')
     from meerschaum._core._gate import rust_method
     assert rust_method(conn, 'pipe_exists') is None

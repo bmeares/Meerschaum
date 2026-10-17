@@ -94,7 +94,7 @@ python-source = "."
 python-packages = ["meerschaum"]
 # `extension-module` is a crate feature (not a default) so `cargo test` can link libpython;
 # `polars` is the pyo3-polars zero-copy path (same feature set as scripts/rust/build_py.sh).
-features = ["pyo3/abi3-py311", "extension-module", "polars"]
+features = ["pyo3/abi3-py311", "extension-module", "polars", "duckdb", "oracle"]
 exclude = [
     "**/__pycache__/**",
     "**/*.pyc",

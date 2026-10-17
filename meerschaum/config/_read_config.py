@@ -10,6 +10,7 @@ import pathlib
 
 from meerschaum.utils.typing import Optional, Dict, Any, List, Tuple, Union
 from meerschaum._internal.static import STATIC_CONFIG
+from meerschaum._core._gate import rust_impl as _rust_impl
 
 
 def read_config(
@@ -49,6 +50,15 @@ def read_config(
     >>> read_config(keys=['meerschaum'], with_filename=True)
     >>> ({...}, ['meerschaum.yaml'])
     """
+    if (_rust := _rust_impl('read_config')) is not None:
+        return _rust(
+            directory=directory,
+            keys=keys,
+            write_missing=write_missing,
+            substitute=substitute,
+            with_filenames=with_filenames,
+            raise_parsing_errors=raise_parsing_errors,
+        )
     import os
     import json
     import itertools
@@ -274,6 +284,16 @@ def search_and_substitute_config(
     The configuration dictionary with `MRSM{}` symlinks replaced with
     the values from the current configuration.
     """
+    if (_rust := _rust_impl('search_and_substitute_config')) is not None:
+        return _rust(
+            config,
+            leading_key=leading_key,
+            delimiter=delimiter,
+            begin_key=begin_key,
+            end_key=end_key,
+            literal_key=literal_key,
+            keep_symlinks=keep_symlinks,
+        )
     import re
     import json
     from meerschaum.config import get_config
@@ -406,6 +426,8 @@ def revert_symlinks_config(config: Dict[str, Any]) -> Dict[str, Any]:
     -------
     A configuration dictionary with `_symlinks` re-applied.
     """
+    if (_rust := _rust_impl('revert_symlinks_config')) is not None:
+        return _rust(config)
     import copy
     from meerschaum._internal.static import STATIC_CONFIG
 
@@ -448,6 +470,8 @@ def get_keyfile_path(
     directory: Union[pathlib.Path, str, None] = None,
 ) -> Union[pathlib.Path, None]:
     """Determine a key's file path."""
+    if (_rust := _rust_impl('get_keyfile_path')) is not None:
+        return _rust(key, create_new=create_new, directory=directory)
     import os
     import pathlib
     if directory is None:

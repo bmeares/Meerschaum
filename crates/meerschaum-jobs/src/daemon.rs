@@ -2,6 +2,7 @@
 
 use std::fs;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use meerschaum_core::success::SuccessTuple;
@@ -10,7 +11,9 @@ use meerschaum_core::value::{Map, Value};
 use crate::config::{DaemonPaths, JobPaths, JobsConfig, Seconds};
 use crate::process::{self, ProcState, Sig};
 use crate::properties::{self, merge_properties};
+use crate::remote::RemoteJobsResolver;
 use crate::rotating::{RotatingFile, RotatingFileOptions};
+use crate::runner::{ProcessRunner, SystemRunner};
 use crate::stdin::StdinFile;
 use crate::supervisor::{Launcher, SupervisorOptions};
 
@@ -28,31 +31,59 @@ pub struct JobsContext {
     pub config: JobsConfig,
     /// How the supervisor and the worker are started.
     pub launcher: Launcher,
+    /// Runs `systemctl --user` for the `systemd` executor ([`SystemRunner`] unless replaced).
+    pub process: Arc<dyn ProcessRunner>,
+    /// Resolves `api:<label>` executor keys to a jobs client (`None`: remote executors report an
+    /// error). Installed by the host; see [`crate::remote`].
+    pub remote: Option<Arc<dyn RemoteJobsResolver>>,
 }
 
 impl JobsContext {
+    /// A context from its parts, with the real process runner and no remote client.
+    pub fn new(paths: JobPaths, config: JobsConfig, launcher: Launcher) -> JobsContext {
+        JobsContext {
+            paths,
+            config,
+            launcher,
+            process: Arc::new(SystemRunner),
+            remote: None,
+        }
+    }
+
     /// From the process environment (`MRSM_ROOT_DIR`, config files, `MRSM_JOB_*`).
     pub fn from_env() -> Result<JobsContext, String> {
         let config = meerschaum_core::config::Config::from_env().map_err(|e| e.to_string())?;
-        Ok(JobsContext {
-            paths: JobPaths::from_config(&config),
-            config: JobsConfig::from_config(&config),
-            launcher: Launcher::from_env(),
-        })
+        Ok(JobsContext::new(
+            JobPaths::from_config(&config),
+            JobsConfig::from_config(&config),
+            Launcher::from_env(),
+        ))
     }
 
     /// For a root directory with the default configuration.
     pub fn for_root(root: impl Into<PathBuf>) -> JobsContext {
-        JobsContext {
-            paths: JobPaths::for_root(root, crate::config::default_dot_config_dir()),
-            config: JobsConfig::default(),
-            launcher: Launcher::from_env(),
-        }
+        JobsContext::new(
+            JobPaths::for_root(root, crate::config::default_dot_config_dir()),
+            JobsConfig::default(),
+            Launcher::from_env(),
+        )
     }
 
     /// Replace the launcher.
     pub fn with_launcher(mut self, launcher: Launcher) -> JobsContext {
         self.launcher = launcher;
+        self
+    }
+
+    /// Replace the process runner (tests pass [`crate::runner::FakeSystemctl`]).
+    pub fn with_process_runner(mut self, runner: Arc<dyn ProcessRunner>) -> JobsContext {
+        self.process = runner;
+        self
+    }
+
+    /// Install the resolver for `api:<label>` executors.
+    pub fn with_remote(mut self, resolver: Arc<dyn RemoteJobsResolver>) -> JobsContext {
+        self.remote = Some(resolver);
         self
     }
 }
@@ -202,6 +233,12 @@ impl Daemon {
     pub fn properties(&mut self) -> Map {
         let file = self.read_properties();
         self.mem = merge_properties(&self.mem, file.as_ref());
+        self.mem.clone()
+    }
+
+    /// The in-memory properties only (no `properties.json` merge): what a job which does not
+    /// live in this root's `jobs/` directory (an `api:` or `systemd` job) sends to its executor.
+    pub fn memory_properties(&self) -> Map {
         self.mem.clone()
     }
 
@@ -356,7 +393,7 @@ impl Daemon {
     /// `pid`: the PID file's contents, or a detached process found by its command line.
     pub fn pid(&self) -> Option<i32> {
         if !self.paths.pid.exists() {
-            return process::find_detached_pids(&self.daemon_id)
+            return process::find_detached_pids(&self.daemon_id, &self.ctx.paths.jobs_dir)
                 .first()
                 .copied();
         }
@@ -634,7 +671,7 @@ impl Daemon {
     /// `_kill_detached_processes(timeout)`: SIGTERM, then SIGKILL, every process whose command
     /// line carries this daemon's marker. Returns how many were targeted.
     pub fn kill_detached_processes(&self, timeout: Option<Seconds>) -> usize {
-        let pids = process::find_detached_pids(&self.daemon_id);
+        let pids = process::find_detached_pids(&self.daemon_id, &self.ctx.paths.jobs_dir);
         if pids.is_empty() {
             return 0;
         }
@@ -847,6 +884,21 @@ impl Daemon {
 
     /// `cleanup(keep_logs)`: remove the daemon's directory (and its logs and log offset).
     pub fn cleanup(&mut self, keep_logs: bool) -> SuccessTuple {
+        // Never remove anything which is not `<jobs dir>/<one component>`: the daemon id may
+        // come straight from an HTTP path or a command line.
+        if crate::names::invalid_job_name_reason(&self.daemon_id).is_some()
+            || (self.paths.dir.exists()
+                && !crate::names::is_direct_child(
+                    &self.ctx.paths.jobs_dir,
+                    &self.paths.dir,
+                    &self.daemon_id,
+                ))
+        {
+            return SuccessTuple::fail(format!(
+                "Refusing to clean up '{}': it is not a job directory.",
+                self.daemon_id
+            ));
+        }
         if self.paths.dir.exists() {
             if let Err(e) = fs::remove_dir_all(&self.paths.dir) {
                 return SuccessTuple::fail(format!(

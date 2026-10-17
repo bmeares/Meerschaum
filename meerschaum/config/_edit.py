@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import pathlib
 from meerschaum.utils.typing import Optional, Any, SuccessTuple, Dict, List, Union
+from meerschaum._core._gate import rust_impl as _rust_impl
 
 
 def edit_config(
@@ -20,7 +21,7 @@ def edit_config(
 ) -> SuccessTuple:
     """Edit the configuration files."""
     import meerschaum.config.paths as paths
-    from meerschaum.config import get_config, config
+    from meerschaum.config import get_config, _config
     from meerschaum.config._read_config import get_keyfile_path, read_config, revert_symlinks_config
     from meerschaum.config._backup import backup_config_key, restore_config_backup
     from meerschaum._internal.static import STATIC_CONFIG
@@ -40,6 +41,7 @@ def edit_config(
         backup_path = backup_config_key(key, debug=debug)
         while True:
             ### If defined in default, create the config file.
+            config = _config()
             symlinks_key_config = config.get(symlinks_key, {}).get(key, {})
             key_config = revert_symlinks_config({
                 key: config.pop(key, {}),
@@ -60,7 +62,7 @@ def edit_config(
                 )
             except Exception:
                 if key_config:
-                    config[key] = key_config
+                    _config()[key] = key_config
                 warn(f"Could not parse key '{key}'.", stack=False)
                 if backup_path is not None and yes_no(
                     f"Restore '{key}' from the backup taken before editing?",
@@ -121,6 +123,8 @@ def write_config(
     A bool indicating success.
 
     """
+    if (_rust := _rust_impl('write_config')) is not None:
+        return _rust(config_dict, directory=directory, debug=debug)
     if directory is None:
         import meerschaum.config.paths as paths
         directory = paths.CONFIG_DIR_PATH

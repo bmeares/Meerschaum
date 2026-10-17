@@ -126,11 +126,11 @@ pub async fn prepare_resolver(
     home: &dyn InstanceConnector,
     provider: Option<&dyn InstanceProvider>,
     defaults: &PipeDefaults,
-    config: Option<Config>,
+    config: Option<Arc<Config>>,
 ) -> SnapshotResolver {
     let mut resolver = SnapshotResolver {
         defaults: defaults.clone(),
-        config: config.map(Arc::new),
+        config,
         ..Default::default()
     };
     let mut queue: Vec<Pipe> = direct_dependencies(root, root.raw_parameters(), defaults);
@@ -201,7 +201,7 @@ pub async fn resolve_pipe(
     let wants_config = Value::Map(pipe.raw_parameters().clone())
         .to_json_string()
         .contains("MRSM{");
-    let config = wants_config.then(|| Config::from_env().ok()).flatten();
+    let config = wants_config.then(|| Config::current().ok()).flatten();
     let resolver = prepare_resolver(pipe, home, provider, defaults, config).await;
     let mut out = pipe.clone();
     let mut warnings = resolver.warnings.clone();

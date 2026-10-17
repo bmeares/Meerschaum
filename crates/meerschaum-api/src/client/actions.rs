@@ -10,6 +10,9 @@ use crate::traits::ConnectorResult;
 use super::pipes::py_json;
 use super::{APIConnector, Body, LogsMonitor, RequestOptions};
 
+/// How many times `do_action` reads a job's result from its metadata (100 ms apart).
+const RESULT_READ_ATTEMPTS: usize = 10;
+
 impl APIConnector {
     /// `get_actions()`: `GET /actions`, the available action names.
     pub async fn get_actions(&self) -> ConnectorResult<Vec<String>> {
@@ -115,11 +118,40 @@ impl APIConnector {
             let _ = self.delete_job(&name).await;
             return SuccessTuple::fail(e.to_string());
         }
+        // The websocket reports the result when the job produced output; a job which finished
+        // without any (or before the monitor connected) closes it silently, so read the result
+        // from the job like v4 does (`job.result`).
+        let streamed = result.lock().ok().and_then(|r| r.clone());
+        let fetched = match streamed {
+            Some(r) => Some(r),
+            None => {
+                // The supervisor saves the result a moment after the job's last output, so a
+                // missing result is read again a few times (about a second in all) before giving
+                // up.
+                let mut found = None;
+                for attempt in 0..RESULT_READ_ATTEMPTS {
+                    if attempt > 0 {
+                        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                    }
+                    self.clear_job_metadata_cache();
+                    found = self.get_job_metadata(&name).await.ok().and_then(|meta| {
+                        match meta.get("result")?.as_list()?.as_slice() {
+                            [success, message, ..] => Some(SuccessTuple {
+                                success: success.truthy(),
+                                message: message.py_str(),
+                            }),
+                            _ => None,
+                        }
+                    });
+                    if found.is_some() {
+                        break;
+                    }
+                }
+                found
+            }
+        };
         let _ = self.delete_job(&name).await;
-        result
-            .lock()
-            .ok()
-            .and_then(|r| r.clone())
+        fetched
             .unwrap_or_else(|| SuccessTuple::fail(format!("Job '{name}' did not report a result.")))
     }
 }

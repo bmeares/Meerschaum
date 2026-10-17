@@ -119,6 +119,33 @@ class Connection:
         return slot.value, slot.frames
 
 
+_DEFINED_CONNECTORS: Dict[str, Any] = {}
+
+
+def _define_connectors(defined: Optional[Dict[str, Dict[str, Any]]]) -> None:
+    """
+    Build the connectors the host defined (`mrsm.get_connector('sql', 'x', flavor='sqlite', ...)`
+    in the host process: attributes that are in no config file) so that the keys the host sends
+    (`sql:x`, a pipe's `instance_keys`) resolve in this worker too. Idempotent: a connector is
+    built again only when its attributes changed.
+    """
+    if not defined or not isinstance(defined, dict):
+        return
+    import meerschaum as mrsm
+    for keys, attributes in defined.items():
+        if not isinstance(attributes, dict) or ':' not in str(keys):
+            continue
+        if _DEFINED_CONNECTORS.get(keys, None) == attributes:
+            continue
+        typ, label = str(keys).split(':', maxsplit=1)
+        try:
+            mrsm.get_connector(typ, label, **{str(k): v for k, v in attributes.items()})
+        except Exception:
+            traceback.print_exc()
+            continue
+        _DEFINED_CONNECTORS[keys] = attributes
+
+
 def _connect(address: str):
     if address.startswith('\\\\.\\pipe\\'):
         ### Windows named pipe: the host created it; open it like a file.
@@ -185,6 +212,7 @@ def serve(address: str) -> int:
         try:
             try:
                 interruptible = True
+                _define_connectors(args.get('connector_attributes', None))
                 value, out_frames = handler(conn, call_id, args, frames)
             finally:
                 interruptible = False

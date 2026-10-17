@@ -570,6 +570,14 @@ def op_instance(conn, call_id, args, frames) -> Result:
         positional.insert(0, pipe)
     with Venv(get_connector_plugin(connector)):
         call_args, call_kwargs = filter_arguments(method, *positional, **kw)
+        ### A method that does not take a keyword the host requires (`remote` for a remote
+        ### rowcount) cannot answer the call.
+        for required in (args.get('require_kwargs', None) or []):
+            if required not in call_kwargs:
+                raise NotImplementedError(
+                    args.get('unsupported_message', None)
+                    or f"`{method_name}()` does not take `{required}`."
+                )
         value = method(*call_args, **call_kwargs)
     return _encode_value(value)
 

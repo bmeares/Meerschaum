@@ -230,6 +230,20 @@ pub trait JobOps {
 
     /// `meerschaum.jobs.get_jobs()`.
     fn get_jobs(&mut self) -> IndexMap<String, JobInfo>;
+
+    /// [`JobOps::get_jobs`] on an executor which can fail (an unreachable or unauthorized API,
+    /// a broken `systemctl`). Compose decides what to replace, stop and delete from this list,
+    /// so a failed read must stop the action instead of reading as "no jobs". The message is
+    /// the cause. The default never fails.
+    fn try_get_jobs(&mut self) -> Result<IndexMap<String, JobInfo>, String> {
+        Ok(self.get_jobs())
+    }
+
+    /// Warnings the executor emitted while listing (`Job 'x' exists in both local and systemd`),
+    /// drained after each listing.
+    fn take_warnings(&mut self) -> Vec<String> {
+        Vec::new()
+    }
 }
 
 /// A fixed set of jobs.

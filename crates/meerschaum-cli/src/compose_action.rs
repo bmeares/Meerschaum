@@ -21,9 +21,36 @@ use crate::dispatch::{CommandSpec, Runtime};
 use crate::native::compose_instance::ComposeInstance;
 use crate::value::{ArgsMap, PyValue};
 
+/// Compose's view of the job executors, through `meerschaum-jobs`.
+///
+/// Job discovery, ownership, `ps`, `logs`, replacement and `down` all list jobs on the
+/// *project's* executor: `meerschaum:executor` of the project's `config:` block or environment
+/// (an `api:<label>` shared by several projects), else `systemd` on a systemd host running the
+/// default root, else `local` (`get_jobs()` with no executor keys). The commands compose then
+/// runs (`delete job`, `start job`, ...) are child `mrsm` processes under the same project
+/// environment, so they select the same executor.
 #[derive(Default)]
-struct ComposeJobs {
+pub struct ComposeJobs {
     context: Option<meerschaum_jobs::JobsContext>,
+    session: Option<crate::native::Session>,
+    process: Option<std::sync::Arc<dyn meerschaum_jobs::ProcessRunner>>,
+    warnings: Vec<String>,
+}
+
+impl ComposeJobs {
+    /// Use this process runner for `systemd` jobs (tests pass a fake `systemctl`).
+    pub fn with_process_runner(
+        mut self,
+        runner: std::sync::Arc<dyn meerschaum_jobs::ProcessRunner>,
+    ) -> ComposeJobs {
+        self.process = Some(runner);
+        self
+    }
+
+    /// The project's jobs context (`None` before [`JobOps::configure`]).
+    pub fn context(&self) -> Option<&meerschaum_jobs::JobsContext> {
+        self.context.as_ref()
+    }
 }
 
 impl JobOps for ComposeJobs {
@@ -35,19 +62,41 @@ impl JobOps for ComposeJobs {
         self.context = None;
         let project = ProjectConfig::new(host, project).map_err(|e| e.message)?;
         let config = project.registry();
-        self.context = Some(meerschaum_jobs::JobsContext {
-            paths: meerschaum_jobs::config::JobPaths::from_config(config),
-            config: meerschaum_jobs::config::JobsConfig::from_config(config),
-            launcher: meerschaum_jobs::Launcher::from_env(),
-        });
+        let session = self
+            .session
+            .get_or_insert_with(crate::native::Session::new)
+            .clone();
+        let resolver = crate::native::remote_jobs::CliRemoteResolver::new(
+            session,
+            crate::native::remote_jobs::CliRemoteResolver::section(config),
+        );
+        let mut context = meerschaum_jobs::JobsContext::new(
+            meerschaum_jobs::config::JobPaths::from_config(config),
+            meerschaum_jobs::config::JobsConfig::from_config(config),
+            meerschaum_jobs::Launcher::from_env(),
+        )
+        .with_remote(std::sync::Arc::new(resolver));
+        if let Some(runner) = &self.process {
+            context = context.with_process_runner(runner.clone());
+        }
+        self.context = Some(context);
         Ok(())
     }
 
     fn get_jobs(&mut self) -> indexmap::IndexMap<String, JobInfo> {
+        self.try_get_jobs().unwrap_or_default()
+    }
+
+    fn try_get_jobs(&mut self) -> Result<indexmap::IndexMap<String, JobInfo>, String> {
         let Some(context) = &self.context else {
-            return indexmap::IndexMap::new();
+            return Ok(indexmap::IndexMap::new());
         };
-        meerschaum_jobs::executor::get_jobs(context, false)
+        // `get_jobs()` with no executor keys: the project's executor, combining `local` and
+        // `systemd` on a systemd host; hidden jobs excluded.
+        let listing = meerschaum_jobs::executor::get_jobs_for(context, None, false, true)?;
+        self.warnings.extend(listing.warnings);
+        Ok(listing
+            .jobs
             .into_iter()
             .map(|(name, mut job)| {
                 let info = JobInfo {
@@ -58,7 +107,11 @@ impl JobOps for ComposeJobs {
                 };
                 (name, info)
             })
-            .collect()
+            .collect())
+    }
+
+    fn take_warnings(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.warnings)
     }
 }
 
@@ -135,9 +188,20 @@ pub fn compose_native(
     runner: &mut dyn CommandRunner,
     prompter: &mut dyn Prompter,
 ) -> ComposeOutput {
+    compose_native_with_jobs(host, args, runner, prompter, &mut ComposeJobs::default())
+}
+
+/// [`compose_native`] over a caller-built [`ComposeJobs`] (tests substitute the `systemctl`
+/// runner of `systemd` jobs).
+pub fn compose_native_with_jobs(
+    host: &Host,
+    args: &ComposeArgs,
+    runner: &mut dyn CommandRunner,
+    prompter: &mut dyn Prompter,
+    jobs: &mut ComposeJobs,
+) -> ComposeOutput {
     let mut session = Session::default();
     let mut instance = ComposeInstance::new();
-    let mut jobs = ComposeJobs::default();
     compose(
         host,
         &mut session,
@@ -145,7 +209,7 @@ pub fn compose_native(
         Services {
             runner,
             instance: &mut instance,
-            jobs: &mut jobs,
+            jobs,
             prompter,
         },
     )

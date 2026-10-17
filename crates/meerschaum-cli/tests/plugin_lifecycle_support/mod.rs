@@ -124,6 +124,38 @@ impl Home {
         run_binary(args, &env, None)
     }
 
+    /// Run `mrsm <args>` with `input` on its standard input (answers to prompts), without
+    /// `MRSM_NOASK` unless `extra` sets it.
+    pub fn run_input(&self, args: &[&str], input: &str, extra: &[(&str, &str)]) -> Run {
+        let mut env = self.env();
+        env.retain(|(k, _)| k != "MRSM_NOASK");
+        for (key, value) in extra {
+            env.retain(|(k, _)| k != key);
+            env.push((key.to_string(), value.to_string()));
+        }
+        let mut command = Command::new(env!("CARGO_BIN_EXE_mrsm"));
+        command
+            .args(args)
+            .env_clear()
+            .envs(env.iter().map(|(k, v)| (k, v)))
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        let mut child = command.spawn().unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(input.as_bytes())
+            .unwrap();
+        let output = child.wait_with_output().unwrap();
+        Run {
+            stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+            success: output.status.success(),
+        }
+    }
+
     /// `venvs/<name>/lib/python*/site-packages` of an installed venv.
     pub fn site_packages(&self, venv: &str) -> Option<PathBuf> {
         let lib = self.root.join("venvs").join(venv).join("lib");
@@ -179,7 +211,14 @@ pub fn write_wheel(dir: &Path, name: &str, version: &str) -> PathBuf {
             b"Wheel-Version: 1.0\nGenerator: synthetic\nRoot-Is-Purelib: true\nTag: py3-none-any\n"
                 .to_vec(),
         ),
-        (format!("{dist_info}/RECORD"), Vec::new()),
+        (
+            // The file list uninstallers follow (hashes and sizes may be empty).
+            format!("{dist_info}/RECORD"),
+            format!(
+                "{name}/__init__.py,,\n{dist_info}/METADATA,,\n{dist_info}/WHEEL,,\n{dist_info}/RECORD,,\n"
+            )
+            .into_bytes(),
+        ),
     ];
     let path = dir.join(format!("{name}-{version}-py3-none-any.whl"));
     std::fs::write(&path, zip_stored(&files)).unwrap();
@@ -281,6 +320,18 @@ pub struct Repo {
     archives: Arc<Mutex<HashMap<String, Vec<u8>>>>,
     requests: Arc<Mutex<Vec<String>>>,
     stop: Arc<AtomicBool>,
+    state: Arc<Mutex<WriteState>>,
+}
+
+/// What the repository received through `POST` and `DELETE` (and the attributes it serves).
+#[derive(Default)]
+pub struct WriteState {
+    /// `POST /plugins/<name>?...`: the raw request (head and body) per plugin.
+    pub uploads: HashMap<String, Vec<u8>>,
+    /// Plugin names removed with `DELETE /plugins/<name>`.
+    pub deleted: Vec<String>,
+    /// The JSON text `GET /plugins/<name>/attributes` answers per plugin (`{}` otherwise).
+    pub attributes: HashMap<String, String>,
 }
 
 impl Repo {
@@ -293,11 +344,13 @@ impl Repo {
             archives: Arc::default(),
             requests: Arc::default(),
             stop: Arc::default(),
+            state: Arc::default(),
         };
-        let (archives, requests, stop) = (
+        let (archives, requests, stop, state) = (
             repo.archives.clone(),
             repo.requests.clone(),
             repo.stop.clone(),
+            repo.state.clone(),
         );
         std::thread::spawn(move || {
             for stream in listener.incoming() {
@@ -305,7 +358,7 @@ impl Repo {
                     return;
                 }
                 let Ok(stream) = stream else { continue };
-                serve(stream, &archives, &requests);
+                serve(stream, &archives, &requests, &state);
             }
         });
         repo
@@ -325,6 +378,25 @@ impl Repo {
             format!("MRSM_API_{}", label.to_uppercase()),
             format!("http://127.0.0.1:{}", self.port),
         )
+    }
+
+    /// The raw `POST` request (head and body) a plugin was registered with.
+    pub fn upload(&self, name: &str) -> Option<Vec<u8>> {
+        self.state.lock().unwrap().uploads.get(name).cloned()
+    }
+
+    /// Plugins deleted with `DELETE`.
+    pub fn deleted(&self) -> Vec<String> {
+        self.state.lock().unwrap().deleted.clone()
+    }
+
+    /// Set the attributes `GET /plugins/<name>/attributes` serves (JSON text).
+    pub fn set_attributes(&self, name: &str, json: &str) {
+        self.state
+            .lock()
+            .unwrap()
+            .attributes
+            .insert(name.to_string(), json.to_string());
     }
 
     /// The request paths received so far.
@@ -348,35 +420,75 @@ fn serve(
     mut stream: TcpStream,
     archives: &Mutex<HashMap<String, Vec<u8>>>,
     requests: &Mutex<Vec<String>>,
+    state: &Mutex<WriteState>,
 ) {
     let mut buffer = Vec::new();
-    let mut chunk = [0u8; 1024];
-    while !buffer.windows(4).any(|w| w == b"\r\n\r\n") {
+    let mut chunk = [0u8; 4096];
+    let head_end = loop {
+        if let Some(i) = buffer.windows(4).position(|w| w == b"\r\n\r\n") {
+            break i + 4;
+        }
         match stream.read(&mut chunk) {
             Ok(0) | Err(_) => return,
             Ok(n) => buffer.extend_from_slice(&chunk[..n]),
         }
-    }
-    let head = String::from_utf8_lossy(&buffer).into_owned();
-    let path = head
+    };
+    let head = String::from_utf8_lossy(&buffer[..head_end]).into_owned();
+    let mut first = head.lines().next().unwrap_or_default().split_whitespace();
+    let method = first.next().unwrap_or("GET").to_string();
+    let target = first.next().unwrap_or("/").to_string();
+    // The recorded path has no query (existing tests count plain paths).
+    let path = target.split('?').next().unwrap_or("/").to_string();
+    let content_length: usize = head
         .lines()
-        .next()
-        .and_then(|line| line.split_whitespace().nth(1))
-        .unwrap_or("/")
-        .to_string();
+        .find_map(|l| {
+            l.to_ascii_lowercase()
+                .strip_prefix("content-length:")
+                .and_then(|v| v.trim().parse().ok())
+        })
+        .unwrap_or(0);
+    while buffer.len() < head_end + content_length {
+        match stream.read(&mut chunk) {
+            Ok(0) | Err(_) => break,
+            Ok(n) => buffer.extend_from_slice(&chunk[..n]),
+        }
+    }
     requests.lock().unwrap().push(path.clone());
-    let name = path.rsplit('/').next().unwrap_or_default().to_string();
-    let (content_type, body) = match archives.lock().unwrap().get(&name) {
-        Some(bytes) => ("application/x-tar", bytes.clone()),
-        None => (
-            "application/json",
-            serde_json::json!([
-                false,
-                format!("Archive for plugin '{name}' could not be found.")
-            ])
-            .to_string()
-            .into_bytes(),
-        ),
+    let segments: Vec<&str> = path.trim_matches('/').split('/').collect();
+    let json = |value: serde_json::Value| ("application/json", value.to_string().into_bytes());
+    let (content_type, body) = match (method.as_str(), segments.as_slice()) {
+        ("POST", ["plugins", name]) => {
+            state
+                .lock()
+                .unwrap()
+                .uploads
+                .insert((*name).to_string(), buffer.clone());
+            json(serde_json::json!([true, "Success"]))
+        }
+        ("DELETE", ["plugins", name]) => {
+            state.lock().unwrap().deleted.push((*name).to_string());
+            json(serde_json::json!([true, "Success"]))
+        }
+        ("GET", ["plugins", name, "attributes"]) => {
+            let text = state
+                .lock()
+                .unwrap()
+                .attributes
+                .get(*name)
+                .cloned()
+                .unwrap_or_else(|| "{}".to_string());
+            ("application/json", text.into_bytes())
+        }
+        _ => {
+            let name = segments.last().copied().unwrap_or_default().to_string();
+            match archives.lock().unwrap().get(&name) {
+                Some(bytes) => ("application/x-tar", bytes.clone()),
+                None => json(serde_json::json!([
+                    false,
+                    format!("Archive for plugin '{name}' could not be found.")
+                ])),
+            }
+        }
     };
     let header = format!(
         "HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",

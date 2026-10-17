@@ -15,10 +15,9 @@ from meerschaum.utils.warnings import warn, info
 from meerschaum._internal.static import STATIC_CONFIG
 from meerschaum._core._gate import rust_impl as _rust_impl
 
-### `Pipe.sync()` keywords the Rust verification honors (`_core.verify_pipe`).
+### `Pipe.sync()` keywords `Pipe.verify()` passes as explicit arguments to `_core.verify_pipe`
+### (every other keyword is forwarded to each chunk's sync: `force`, `retries`, plugin arguments).
 _RUST_VERIFY_SYNC_KWARGS = frozenset({'chunksize', 'check_existing'})
-### Parameters the verification itself reads (the chunk syncs resolve the rest in Rust).
-_RUST_VERIFY_READ_KEYS = ('columns', 'dtypes', 'verify', 'precision')
 
 
 def _rust_sql_connector(conn: Any) -> Any:
@@ -33,61 +32,23 @@ def _rust_sql_connector(conn: Any) -> Any:
     return conn.__dict__.get('_rust_connector', None) or None
 
 
-def _rust_verify_connectors(
+def _rust_verify_context(
     pipe: 'mrsm.Pipe',
     debug: bool = False,
-    kwargs: Optional[Dict[str, Any]] = None,
-) -> Optional[Dict[str, Any]]:
+) -> Tuple[Optional[Dict[str, Any]], str]:
     """
-    Return the Rust connectors `_core.verify_pipe` needs (instance and SQL source by keys),
-    or `None` to run the Python verification. Development-only (`MRSM_CORE`, see
-    `meerschaum/_core/_gate.py`); the cases kept on Python are listed in
-    `crates/meerschaum-py/PARITY.md` (the `_verify.py` row).
+    Return `(context, '')` with the connectors `_core.verify_pipe` needs (the pipe's instance
+    and source, as the Rust SQL connectors this process holds, and the attributes of the
+    connectors it defined ad hoc), or `(None, reason)` when a connector has no native driver.
     """
-    import json
-    if debug:
-        return None
-    if any(key not in _RUST_VERIFY_SYNC_KWARGS for key in (kwargs or {})):
-        return None
-    connector_keys = str(pipe.connector_keys)
-    if connector_keys.split(':', maxsplit=1)[0] != 'sql':
-        return None
-    rust_instance = _rust_sql_connector(pipe.instance_connector)
-    if rust_instance is None:
-        return None
-    try:
-        rust_source = _rust_sql_connector(pipe.connector)
-    except Exception:
-        return None
-    if rust_source is None:
-        return None
-
-    raw_parameters = pipe.get_parameters(apply_symlinks=False, debug=debug) or {}
-    if not isinstance(raw_parameters, dict):
-        return None
-    if 'reference' in raw_parameters or 'references' in raw_parameters:
-        return None
-    try:
-        raw_text = json.dumps(raw_parameters, default=str)
-        read_text = json.dumps(
-            {key: raw_parameters.get(key, None) for key in _RUST_VERIFY_READ_KEYS},
-            default=str,
-        )
-    except Exception:
-        return None
-    if 'MRSM{' in raw_text or '{{' in read_text:
-        return None
-    ### Cross-instance `{{ Pipe(..., instance=...) }}` references need connectors the Rust
-    ### session was not given.
-    if '{{' in raw_text:
-        import re
-        if any('instance' in template for template in re.findall(r'\{\{.*?\}\}', raw_text)):
-            return None
-
-    return {
-        str(pipe.instance_keys): rust_instance,
-        connector_keys: rust_source,
-    }
+    from meerschaum.core.Pipe._sync import _native_context
+    context, reason = _native_context(pipe, debug=debug)
+    if context is None:
+        return None, reason
+    connectors = dict(context['connectors'])
+    if context['connector'] is not None:
+        connectors[str(pipe.instance_keys)] = context['connector']
+    return {'connectors': connectors, 'attributes': context['attributes']}, ''
 
 
 def verify(
@@ -155,11 +116,14 @@ def verify(
     A SuccessTuple indicating whether the pipe was successfully resynced.
     """
     if (_rust := _rust_impl('verify_pipe')) is not None:
-        _connectors = _rust_verify_connectors(self, debug=debug, kwargs=kwargs)
-        if _connectors is not None:
+        _context, _reason = _rust_verify_context(self, debug=debug)
+        if _context is None and getattr(_reason, 'kind', None) != 'oracle_client':
+            ### No silent fallback: only a missing Oracle client keeps the Python orchestration.
+            return False, f"Cannot verify {self}: {_reason}."
+        if _context is not None:
             _result = _rust(
                 self,
-                _connectors,
+                _context['connectors'],
                 begin=begin,
                 end=end,
                 params=params,
@@ -172,6 +136,13 @@ def verify(
                 check_rowcounts_only=check_rowcounts_only,
                 chunksize=kwargs.get('chunksize', -1),
                 check_existing=kwargs.get('check_existing', True),
+                kwargs={
+                    key: value
+                    for key, value in kwargs.items()
+                    if key not in _RUST_VERIFY_SYNC_KWARGS
+                },
+                attributes=_context['attributes'],
+                debug=debug,
             )
             ### The chunk syncs ran in Rust: drop what this object cached about the table.
             self._invalidate_cache(hard=True, debug=debug)

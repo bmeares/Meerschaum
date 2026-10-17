@@ -375,6 +375,94 @@ pub trait Connector: Send + Sync {
             self.connector_type()
         )))
     }
+
+    /// The source's own `get_sync_time(pipe, params, newest, remote=True)`
+    /// (`Pipe.get_sync_time(remote=True)`): the newest (oldest) datetime-axis value of the
+    /// remote table. The default is `NotImplemented` with v4's warning text.
+    async fn get_sync_time_remote(
+        &self,
+        pipe: &Pipe,
+        params: Option<&Map>,
+        newest: bool,
+    ) -> ConnectorResult<Option<DateBound>> {
+        let _ = (pipe, params, newest);
+        Err(ConnectorError::NotImplemented(format!(
+            "Connectors of type '{}' do not implement `get_sync_time().",
+            self.connector_type()
+        )))
+    }
+
+    /// The source's own `get_pipe_rowcount(pipe, begin, end, params, remote=True)`
+    /// (`Pipe.get_rowcount(remote=True)`). The default is `NotImplemented` with v4's warning
+    /// text.
+    async fn get_rowcount_remote(
+        &self,
+        pipe: &Pipe,
+        query: &DataQuery,
+    ) -> ConnectorResult<Option<i64>> {
+        let _ = (pipe, query);
+        Err(ConnectorError::NotImplemented(format!(
+            "Connectors of type '{}' do not implement `get_pipe_rowcount()`.",
+            self.connector_type()
+        )))
+    }
+
+    /// [`Connector::fetch`] for sources whose result is not always one frame: Python plugins
+    /// and custom connectors, whose `fetch()` may return a generator of chunks, the results of
+    /// the `chunk_hook` calls it made, `True` or `None`. The default returns `Ok(None)`: the
+    /// native flow then calls [`Connector::fetch`] and syncs its frame.
+    ///
+    /// `sync_chunks` is `Pipe.sync(sync_chunks=...)`: whether the source is given a
+    /// `chunk_hook` that syncs a chunk as soon as the source has produced it.
+    async fn fetch_chunked(
+        &self,
+        pipe: &Pipe,
+        query: &DataQuery,
+        sync_chunks: bool,
+    ) -> ConnectorResult<Option<ChunkedFetch>> {
+        let _ = (pipe, query, sync_chunks);
+        Ok(None)
+    }
+}
+
+/// A lazily produced sequence of fetched chunks (a Python generator, consumed as the source
+/// produces it).
+#[async_trait]
+pub trait ChunkStream: Send {
+    /// The next chunk, or `None` when the sequence has ended. A source that fails while
+    /// producing chunks returns `Err` (v4: the exception propagates out of the generator).
+    async fn next_chunk(
+        &mut self,
+    ) -> ConnectorResult<Option<meerschaum_kernel::enforce::PipeInput>>;
+
+    /// What `fetch()` returned besides chunks, once the sequence has ended:
+    /// the source's own [`FetchedKind`] (hook results, "synced in parallel", `None`).
+    async fn finish(&mut self) -> ConnectorResult<FetchedKind>;
+}
+
+/// How a source's `fetch()` result is shaped when it is consumed in pieces (v4's `_sync`
+/// branches on exactly these).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FetchedKind {
+    /// Data: a DataFrame, a list of documents, a dictionary of lists or a generator of those.
+    Data {
+        /// `fetch()` returned a generator (v4: `df_is_chunk_generator`), so every chunk is
+        /// synced on its own and the messages are combined.
+        generator: bool,
+    },
+    /// `fetch()` returned the `(success, message)` results of the `chunk_hook` calls it made
+    /// itself (a list of tuples).
+    HookResults(Vec<SuccessTuple>),
+    /// `fetch()` returned `True`: the source syncs in parallel itself.
+    InParallel,
+    /// `fetch()` returned `None`.
+    Nothing,
+}
+
+/// The result of [`Connector::fetch_chunked`].
+pub struct ChunkedFetch {
+    /// The chunks, in order (possibly none).
+    pub chunks: Box<dyn ChunkStream>,
 }
 
 /// Instance connectors manage pipes and provide users, plugins, tokens and engine state built
@@ -492,6 +580,23 @@ pub trait InstanceConnector: Connector {
             Some(df) => pipe_ops::frame_to_docs(&df),
             None => Vec::new(),
         })
+    }
+
+    /// The connector as the `Pipe` methods call it with extra keyword arguments
+    /// (`Pipe.get_data(**kw)`, `deduplicate(**kwargs)`: v4 forwards them to the instance's
+    /// methods, which a custom connector may read). `None` (the default): the connector takes
+    /// no extra keywords.
+    fn with_call_kwargs(&self, extra: &Map) -> Option<std::sync::Arc<dyn InstanceConnector>> {
+        let _ = extra;
+        None
+    }
+
+    /// Whether the connector defines its own `get_backtrack_data` (v4's
+    /// `hasattr(instance_connector, 'get_backtrack_data')` in `Pipe.get_backtrack_data`): the
+    /// `Pipe` calls it instead of reading the window itself. Only Python connectors that
+    /// define the method say `true`.
+    fn has_backtrack_data(&self) -> bool {
+        false
     }
 
     /// Return the backtrack window: rows newer than the sync time minus `backtrack_minutes`

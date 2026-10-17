@@ -123,15 +123,27 @@ fn mcp_stdio_stdout_contains_only_protocol_messages() {
     assert!(response.get("result").is_some(), "{response}");
 }
 
-fn request(port: u16, method: &str, path: &str, body: &str) -> String {
-    let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
-    stream
-        .set_read_timeout(Some(Duration::from_secs(5)))
-        .unwrap();
-    write!(stream, "{method} {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\nContent-Type: application/json\r\nAccept: application/json, text/event-stream\r\nContent-Length: {}\r\n\r\n{body}", body.len()).unwrap();
+fn try_request(port: u16, method: &str, path: &str, body: &str) -> std::io::Result<String> {
+    let mut stream = TcpStream::connect(("127.0.0.1", port))?;
+    stream.set_read_timeout(Some(Duration::from_secs(5)))?;
+    write!(
+        stream,
+        "{method} {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\nContent-Type: application/json\r\nAccept: application/json, text/event-stream\r\nContent-Length: {}\r\n\r\n{body}",
+        body.len()
+    )?;
     let mut response = String::new();
-    stream.read_to_string(&mut response).unwrap();
-    response
+    stream.read_to_string(&mut response)?;
+    Ok(response)
+}
+
+fn request(port: u16, method: &str, path: &str, body: &str) -> String {
+    try_request(port, method, path, body).unwrap()
+}
+
+/// Ready = the server answers a whole HTTP request, not merely accepts a connection: under load a
+/// listener can accept before the app serves, and the early connection is reset.
+fn serves_http(port: u16) -> bool {
+    try_request(port, "GET", "/healthcheck", "").is_ok_and(|r| r.starts_with("HTTP/1.1 "))
 }
 
 #[test]
@@ -167,7 +179,7 @@ fn api_serves_health_and_mcp_on_an_isolated_sqlite_instance() {
             child.0.try_wait().unwrap().is_none(),
             "server exited before listening"
         );
-        if TcpStream::connect(("127.0.0.1", port)).is_ok() {
+        if serves_http(port) {
             break;
         }
         assert!(
@@ -218,7 +230,7 @@ fn api_serves_the_dash_console_unless_no_dash() {
                 child.0.try_wait().unwrap().is_none(),
                 "server exited before listening"
             );
-            if TcpStream::connect(("127.0.0.1", port)).is_ok() {
+            if serves_http(port) {
                 break;
             }
             assert!(Instant::now() < deadline, "server did not listen");
@@ -316,7 +328,7 @@ def wiring_echo(**kw):
             child.0.try_wait().unwrap().is_none(),
             "server exited before listening"
         );
-        if TcpStream::connect(("127.0.0.1", port)).is_ok() {
+        if serves_http(port) {
             let response = request(port, "GET", "/wiring-host-check", "");
             if response.starts_with("HTTP/1.1 200") {
                 assert!(response.contains("wiring"), "{response}");

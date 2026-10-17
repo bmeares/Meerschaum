@@ -24,6 +24,11 @@ extension-module = ["pyo3/extension-module"]
 # kernel's Polars build. Without it, this crate reuses the kernel's Polars build (it depends on
 # `meerschaum-kernel`, see crates/README.md "Crate layering").
 polars = ["dep:pyo3-polars"]
+# The `duckdb` and `oracle` flavors of `meerschaum-sql` (D13): the wheels ship them
+# (`scripts/rust/build_py.sh` and the root `pyproject.toml` enable both), so `Pipe.sync()` and the
+# instance methods reach those databases natively. `mssql` is a default feature of the SQL crate.
+duckdb = ["meerschaum-sql/duckdb"]
+oracle = ["meerschaum-sql/oracle"]
 
 [dependencies]
 meerschaum-core = { workspace = true }
@@ -31,6 +36,13 @@ meerschaum-kernel = { workspace = true }
 meerschaum-sql = { workspace = true }
 meerschaum-connector = { workspace = true }
 meerschaum-engine = { workspace = true }
+# The connectors a one-pipe sync builds from the Python process's attributes (`facade.rs`) and
+# the worker pool it tells about ad hoc connectors.
+meerschaum-api = { workspace = true, features = ["client"] }
+meerschaum-valkey = { workspace = true }
+meerschaum-worker = { workspace = true }
+# The extension's `tracing` sink (`logging.rs`): engine warnings reach Python's `warn()`.
+tracing = { workspace = true }
 # The runtime the instance methods run on (owned by the extension, design §4.2).
 tokio = { workspace = true }
 # Only this crate depends on the CLI library (top layer, see crates/README.md "Crate layering").

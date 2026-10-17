@@ -121,7 +121,7 @@ impl APIConnector {
             )
             .await?;
         if !r.ok() {
-            tracing::warn!("Could not get tokens from '{self}':\n{}", r.text());
+            super::warnings::warn_fmt!("Could not get tokens from '{self}':\n{}", r.text());
             return Ok(Vec::new());
         }
         let models: Vec<GetTokenResponse> = serde_json::from_value(r.json()?)?;

@@ -119,6 +119,9 @@ pub struct Session {
     python_worker: Arc<AtomicBool>,
     pool: Arc<Mutex<Option<WorkerPool>>>,
     worker_environment: Arc<Mutex<Option<WorkerEnvironment>>>,
+    /// The interpreter the host suggests for its workers (the Python extension passes its own
+    /// `sys.executable`); `MRSM_PYTHON` in the environment still wins.
+    worker_python: Arc<Mutex<Option<String>>>,
     hook_results: Arc<Mutex<Vec<meerschaum_core::SuccessTuple>>>,
     manifests: Arc<Mutex<ManifestState>>,
 }
@@ -169,6 +172,7 @@ impl Session {
             python_worker: Arc::new(AtomicBool::new(true)),
             pool: Arc::new(Mutex::new(None)),
             worker_environment: Arc::new(Mutex::new(None)),
+            worker_python: Arc::new(Mutex::new(None)),
             hook_results: Arc::new(Mutex::new(Vec::new())),
             manifests: Arc::new(Mutex::new(ManifestState::default())),
         }
@@ -240,6 +244,12 @@ impl Session {
         Ok(())
     }
 
+    /// Suggest the interpreter the workers run with when `MRSM_PYTHON` is not set (the host
+    /// process's environment is never changed). Takes effect when the pool is created.
+    pub fn set_worker_python(&self, python: &str) {
+        *self.worker_python.lock().expect("worker python") = Some(python.to_string());
+    }
+
     /// Queue a hook result from an engine task for the host's output thread.
     pub fn report_hook_result(&self, result: meerschaum_core::SuccessTuple) {
         self.hook_results.lock().expect("hook results").push(result);
@@ -269,6 +279,16 @@ impl Session {
                         .map(|(_, python)| python.into())
                         .unwrap_or_else(|| if cfg!(windows) { "python" } else { "python3" }.into());
                     settings.worker.env.extend(env.iter().cloned());
+                }
+                if self
+                    .worker_environment
+                    .lock()
+                    .expect("worker environment")
+                    .is_none()
+                    && !std::env::var("MRSM_PYTHON").is_ok_and(|v| !v.trim().is_empty())
+                    && let Some(python) = &*self.worker_python.lock().expect("worker python")
+                {
+                    settings.worker.python = python.into();
                 }
                 settings.worker.inherit_stdin = std::io::stdin().is_terminal();
                 WorkerPool::new(settings)

@@ -190,6 +190,19 @@ impl Ctx<'_, '_> {
         )
     }
 
+    /// `get_jobs()` on the project's executor; a failed read is the failed result to return.
+    fn project_jobs(&mut self) -> Result<IndexMap<String, JobInfo>, SuccessTuple> {
+        let jobs = self.jobs.try_get_jobs();
+        for warning in self.jobs.take_warnings() {
+            self.out.messages.warn(warning);
+        }
+        jobs.map_err(|e| {
+            SuccessTuple::fail(format!(
+                "Could not read the jobs of this project's executor: {e}"
+            ))
+        })
+    }
+
     fn yes_no(
         &mut self,
         question: &str,
@@ -742,7 +755,10 @@ fn compose_up(
     }
 
     let jobs_commands = get_jobs_commands(&project.config, &pipes, &mut ctx.out.messages)?;
-    let existing = ctx.jobs.get_jobs();
+    let existing = match ctx.project_jobs() {
+        Ok(jobs) => jobs,
+        Err(failed) => return Ok(failed),
+    };
     let to_delete =
         get_project_job_names(&project.config, &pipes, &existing, &mut ctx.out.messages)?;
     let unsafe_collisions: Vec<&String> = jobs_commands
@@ -944,7 +960,10 @@ fn compose_down(
     pc: &ProjectConfig,
 ) -> Result<SuccessTuple, ComposeError> {
     let project_name = project.project_name();
-    let jobs = ctx.jobs.get_jobs();
+    let jobs = match ctx.project_jobs() {
+        Ok(jobs) => jobs,
+        Err(failed) => return Ok(failed),
+    };
     for job_name in get_project_job_names(&project.config, &[], &jobs, &mut ctx.out.messages)? {
         let r = ctx.run(
             &["delete".into(), "job".into(), job_name.clone(), "-f".into()],
@@ -1274,7 +1293,10 @@ fn scope_job_action(
     }
     let verb = action[0].as_str();
     let project_name = project.project_name();
-    let jobs = ctx.jobs.get_jobs();
+    let jobs = match ctx.project_jobs() {
+        Ok(jobs) => jobs,
+        Err(failed) => return Ok(Scoped::Done(failed)),
+    };
     let job_names = &action[2..];
     if !job_names.is_empty() {
         let foreign: Vec<&String> = job_names

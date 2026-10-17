@@ -519,7 +519,7 @@ pub fn frame_from_py_with<'py>(
 
 /// Import an Arrow PyCapsule producer into a kernel [`Frame`]. A zero-row stream may carry no
 /// batches at all; an empty batch with the stream's schema keeps the columns.
-fn frame_from_arrow(obj: &Bound<'_, PyAny>) -> PyResult<Frame> {
+pub(crate) fn frame_from_arrow(obj: &Bound<'_, PyAny>) -> PyResult<Frame> {
     let (schema, mut batches) = import_from_python(obj)?;
     if batches.is_empty() {
         batches.push(arrow::array::RecordBatch::new_empty(schema));

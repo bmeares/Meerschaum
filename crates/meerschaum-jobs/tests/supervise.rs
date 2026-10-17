@@ -345,12 +345,23 @@ fn executors() {
         &ctx,
     )
     .unwrap();
+    // No jobs client is injected into this context: an explicit error, never a silent success.
     let r = api_job.start();
     assert!(!r.success);
     assert_eq!(
         r.message,
-        "The 'api:main' executor does not implement `create_job` yet."
+        "No jobs client is available for the 'api:main' executor."
     );
+    // The systemd executor runs `systemctl` through the context's runner; this context uses a
+    // fake, so the host's services are never touched.
+    let fake = std::sync::Arc::new(meerschaum_jobs::FakeSystemctl::new());
+    let ctx = ctx.with_process_runner(fake.clone());
     let systemd = meerschaum_jobs::executor::make_executor("systemd", &ctx);
-    assert!(!systemd.stop_job("x").success);
+    let stopped = systemd.stop_job("x");
+    // The unit was never loaded, so it is already stopped (v4 reports success then).
+    assert!(stopped.success);
+    assert_eq!(
+        fake.rendered_calls().first().map(String::as_str),
+        Some("kill -s SIGINT mrsm-x.service")
+    );
 }

@@ -275,7 +275,11 @@ pub fn format_dataframe(frame: &Frame, max_rows: Option<usize>) -> String {
             .zip(&aligns)
             .map(|(w, a)| {
                 let w = w + 2;
-                if *a == "left" {
+                // PARITY: tabulate sees no columns for a zero-row frame and draws the separator
+                // without alignment colons (`|-----|`).
+                if render_rows == 0 {
+                    "-".repeat(w)
+                } else if *a == "left" {
                     format!(":{}", "-".repeat(w - 1))
                 } else {
                     format!("{}:", "-".repeat(w - 1))

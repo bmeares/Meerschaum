@@ -11,6 +11,7 @@ from io import StringIO
 import meerschaum as mrsm
 from meerschaum.utils.typing import Dict, Any, Optional
 from typing import TYPE_CHECKING
+from meerschaum._core._gate import rust_impl as _rust_impl
 
 if TYPE_CHECKING:
     pd = mrsm.attempt_import('pandas')
@@ -30,6 +31,24 @@ def enforce_dtypes(
     Cast the input dataframe to the pipe's registered data types.
     If the pipe does not exist and dtypes are not set, return the dataframe.
     """
+    if (_rust := _rust_impl('pipe_enforce_dtypes')) is not None:
+        from meerschaum.core.Pipe._data import _rust_context
+        from meerschaum.core.Pipe._sync import is_accepted_data, unsupported_data_error
+        _context = _rust_context(self, debug=debug)
+        if _context is not None:
+            if df is not None and not is_accepted_data(df):
+                raise unsupported_data_error(df, f"enforce the dtypes of {self}")
+            return _rust(
+                self,
+                _context,
+                df,
+                enforce=enforce,
+                safe_copy=safe_copy,
+                dtypes=dtypes,
+                as_polars=as_polars,
+                debug=debug,
+            )
+
     import traceback
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.debug import dprint
@@ -142,6 +161,25 @@ def infer_dtypes(
     -------
     A dictionary of strings containing the pandas data types for this Pipe.
     """
+    if (_rust := _rust_impl('pipe_infer_dtypes')) is not None:
+        from meerschaum.core.Pipe._data import _rust_context
+        _context = _rust_context(self, debug=debug, refresh=refresh)
+        if _context is not None:
+            remote_pd_dtypes = _rust(self, _context, refresh=refresh, debug=debug)
+            ### A table that does not exist has no dtypes to persist.
+            if not persist or not remote_pd_dtypes:
+                return remote_pd_dtypes
+            parameters = self.get_parameters(refresh=refresh, debug=debug)
+            dtypes = parameters.get('dtypes', {})
+            dtypes.update({
+                col: typ
+                for col, typ in remote_pd_dtypes.items()
+                if col not in dtypes
+            })
+            self.dtypes = dtypes
+            self.edit(interactive=False, debug=debug)
+            return remote_pd_dtypes
+
     if not self.exists(debug=debug):
         return {}
 

@@ -170,7 +170,11 @@ async fn supervise(
                 let mut stop_requested = false;
                 let mut error = String::new();
                 {
-                    let call = worker.call(op, args.clone(), Vec::new(), CallOptions::default());
+                    let mut call_args = args.clone();
+                    if let Some(defined) = pool.connector_attributes_wire() {
+                        call_args.insert("connector_attributes", defined);
+                    }
+                    let call = worker.call(op, call_args, Vec::new(), CallOptions::default());
                     tokio::select! {
                         res = call => match res {
                             Ok(reply) => {

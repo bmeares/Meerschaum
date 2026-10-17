@@ -619,7 +619,9 @@ mod imp {
                 props.capture("ended");
             } else {
                 // `cleanup()`: remove the job's directory and its logs.
-                let _ = fs::remove_dir_all(&dpaths.dir);
+                if crate::names::is_direct_child(&paths.jobs_dir, &dpaths.dir, &opts.daemon_id) {
+                    let _ = fs::remove_dir_all(&dpaths.dir);
+                }
                 if let Ok(mut l) = log.lock() {
                     l.delete(false);
                 }

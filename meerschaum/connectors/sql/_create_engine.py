@@ -92,6 +92,15 @@ def create_engine(
     ### self._sys_config was deepcopied and can be updated safely
     if self.flavor in ("sqlite", "duckdb", "geopackage"):
         engine_str = f"{_engine}:///{_database}" if not _uri else _uri
+        _shared_memory_getter = getattr(self, '_shared_memory_database', None)
+        if (
+            self.flavor == 'sqlite'
+            and not _uri
+            and _shared_memory_getter is not None
+            and (_shared_memory := _shared_memory_getter()) is not None
+        ):
+            ### One database file for SQLAlchemy and the Rust pool (see `_shared_memory_database`).
+            engine_str = f"{_engine}:///{_shared_memory}"
         if 'create_engine' not in self._sys_config:
             self._sys_config['create_engine'] = {}
         if 'connect_args' not in self._sys_config['create_engine']:

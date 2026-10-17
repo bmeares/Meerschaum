@@ -23,6 +23,7 @@ pub use async_trait::async_trait;
 pub use models::TokenModel;
 pub use template::{InstanceProvider, SnapshotResolver, resolve_pipe};
 pub use traits::{
-    ColumnIndexInfo, Connector, ConnectorError, ConnectorResult, DataQuery, DateBound,
-    InstanceConnector, PipeId, PipeKeysEntry, PipesKeys, PipesKeysQuery, PluginRecord, SyncOptions,
+    ChunkStream, ChunkedFetch, ColumnIndexInfo, Connector, ConnectorError, ConnectorResult,
+    DataQuery, DateBound, FetchedKind, InstanceConnector, PipeId, PipeKeysEntry, PipesKeys,
+    PipesKeysQuery, PluginRecord, SyncOptions,
 };

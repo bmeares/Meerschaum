@@ -51,6 +51,22 @@ def _flavors():
     return flavors
 
 
+W15L_PLUGINS = ('w15l_custom', 'w15l_plugsrc', 'w15l_plugsync', 'w15l_plugdie')
+
+
+@pytest.fixture(scope='module', autouse=True)
+def plugin_venvs():
+    """
+    The virtual environments of the test plugins, created the way a v4 user's first
+    `install plugin` / `setup plugins` does: importing a plugin activates its venv without
+    creating it, so on a fresh `MRSM_ROOT_DIR` the first import would fail.
+    """
+    from meerschaum.utils.venv import init_venv
+    for name in W15L_PLUGINS:
+        init_venv(name, verify=False)
+    yield
+
+
 @pytest.fixture(autouse=True)
 def restore_mode():
     original = (_gate._MODE, _gate._FEATURES)
@@ -160,6 +176,14 @@ def _run(mode, instance, name, params, steps, native_calls=None):
     return observed
 
 
+def _untimed(message):
+    import re
+    message = re.sub(r'in \d+(\.\d+)? seconds\.', 'in N seconds.', message)
+    ### A SQLite source hands v4 its datetimes as text, so v4's chunk label carries the stored
+    ### microseconds; the native flow labels the parsed datetimes (PARITY.md, wave 15 L).
+    return re.sub(r'(\d\d:\d\d:\d\d)\.000000', r'\1', message)
+
+
 def _compare(instance, name, params, steps, native_calls, same_messages=True):
     expected = _run('python', instance, name, params, steps)
     handled_before = native_calls.handled
@@ -169,7 +193,8 @@ def _compare(instance, name, params, steps, native_calls, same_messages=True):
     for step, ((exp_tuple, exp_state), (act_tuple, act_state)) in enumerate(zip(expected, actual)):
         assert act_tuple[0] == exp_tuple[0], f"step {step}: {act_tuple} vs {exp_tuple}"
         if same_messages:
-            assert act_tuple[1] == exp_tuple[1], f"step {step}"
+            ### `debug` names the table and the time the sync took (`in 0.39 seconds.`).
+            assert _untimed(act_tuple[1]) == _untimed(exp_tuple[1]), f"step {step}"
         for key in exp_state:
             assert act_state[key] == exp_state[key], f"step {step}: {key}"
     return actual
@@ -455,29 +480,40 @@ def test_the_python_pipe_sees_the_parameters_the_sync_changed(instance, native_c
 
 
 @pytest.mark.parametrize(
-    'kwargs, reason',
+    'kwargs',
     [
-        ({'force': True}, 'force'),
-        ({'blocking': False}, 'non-blocking'),
-        ({'workers': 2}, 'workers'),
-        ({'debug': True}, 'debug'),
-        ({'callback': print}, 'callbacks'),
-        ({'plugin_flag': 1}, 'keyword'),
+        {'force': True, 'retries': 2, 'min_seconds': 0},
+        {'workers': 2},
+        {'debug': True},
+        {'plugin_flag': 1},
+        {'callback': print},
+        {'sync_chunks': False},
     ],
+    ids=['force', 'workers', 'debug', 'plugin_flag', 'callback', 'sync_chunks'],
 )
-def test_declined_paths_name_their_reason(instance, kwargs, reason):
-    from meerschaum.core.Pipe._sync import _rust_sync_eligible
+def test_keyword_arguments_run_natively(instance, native_calls, kwargs, capsys):
+    params = {'columns': COLUMNS, 'dtypes': {'val': 'float', 'name': 'str'}}
+    steps = [(_rows(4), kwargs), (_rows(6, offset=2), kwargs)]
+    _compare(instance, 'kwargs', params, steps, native_calls)
+
+
+def test_non_blocking_syncs_spawn_a_thread_and_call_back(instance, native_calls):
+    import threading
+    params = {'columns': COLUMNS}
+    results = []
+    done = threading.Event()
+
+    def callback(result):
+        results.append(result)
+        done.set()
+
     _gate.set_mode('rust')
-    pipe = _fresh_pipe(instance, 'declines', columns=COLUMNS)
-    kwargs = dict(kwargs)
-    explicit = {
-        name: kwargs.pop(name)
-        for name in ('force', 'blocking', 'workers', 'debug', 'callback')
-        if name in kwargs
-    }
-    connector, message = _rust_sync_eligible(pipe, _rows(1), kw=kwargs, **explicit)
-    assert connector is None
-    assert reason in message
+    pipe = _fresh_pipe(instance, 'nonblocking', **params)
+    spawned = pipe.sync(_rows(3), blocking=False, callback=callback)
+    assert tuple(spawned) == (True, f"Spawned asyncronous sync for {pipe}.")
+    assert done.wait(30)
+    assert results[0][0] is True
+    assert native_calls.handled == 1
 
 
 def _outcomes(mode, instance, name, params, steps):
@@ -595,34 +631,115 @@ def test_a_static_pipe_refuses_new_columns_in_both_modes(instance, native_calls)
     assert rows['python'] == rows['rust']
 
 
-def test_other_declines(instance):
-    from meerschaum.core.Pipe._sync import InferFetch, _rust_sync_eligible
+def test_none_instead_of_data_is_refused_like_v4(instance, native_calls):
+    results = {}
+    for mode in ('python', 'rust'):
+        _gate.set_mode(mode)
+        pipe = _fresh_pipe(instance, 'none_data', columns=COLUMNS)
+        results[mode] = tuple(pipe.sync(None))
+    assert results['python'] == results['rust']
+    assert results['rust'][0] is False
+
+
+def test_temporary_pipes_are_never_registered(instance, native_calls):
+    outcomes = {}
+    for mode in ('python', 'rust'):
+        _gate.set_mode(mode)
+        pipe = mrsm.Pipe(
+            'w13h', 'temporary_pipe', instance=instance, temporary=True, columns=COLUMNS,
+        )
+        pipe.drop()
+        result = pipe.sync(_rows(3))
+        again = pipe.sync(_rows(3))
+        outcomes[mode] = (
+            tuple(result)[0],
+            tuple(again),
+            _docs(pipe),
+            mrsm.Pipe('w13h', 'temporary_pipe', instance=instance).id,
+        )
+        pipe.drop()
+    assert outcomes['python'] == outcomes['rust']
+    assert outcomes['rust'][3] is None
+
+
+def test_references_and_templates_resolve_in_the_native_flow(instance, native_calls):
+    base_params = {'columns': COLUMNS, 'dtypes': {'val': 'float', 'name': 'str'}}
+    outcomes = {}
+    for mode in ('python', 'rust'):
+        _gate.set_mode(mode)
+        base = _fresh_pipe(instance, 'ref_base', **copy.deepcopy(base_params))
+        assert base.register()[0]
+        referenced = _fresh_pipe(instance, 'ref_child', reference='w13h:ref_base')
+        assert referenced.register()[0]
+        first = tuple(referenced.sync(_rows(4)))
+        second = tuple(referenced.sync(_rows(6, offset=2)))
+        templated = _fresh_pipe(
+            instance, 'ref_templated',
+            columns=COLUMNS,
+            tags=["{{ self.parameters['columns']['id'] }}"],
+        )
+        third = tuple(templated.sync(_rows(3)))
+        outcomes[mode] = (first, second, _docs(referenced), third, _docs(templated))
+    assert outcomes['python'] == outcomes['rust']
+
+
+SHAPES = {
+    'text': 'id:1,val:2.5\nid:2,val:3.5\n',
+    'list_of_rows': [[1, 'a'], [2, 'b']],
+    'list_of_scalars': [1, 2, 3],
+    'scalar_broadcast': {'id': [1, 2, 3], 'tag': 'x'},
+    'integer_keys': {1: [1, 2], 2: ['a', 'b']},
+}
+
+
+@pytest.mark.parametrize('shape', sorted(SHAPES), ids=sorted(SHAPES))
+def test_other_data_shapes_match_v4(instance, native_calls, shape):
+    steps = [(SHAPES[shape], {})]
+    expected = _run('python', instance, f'shape_{shape}', {}, steps)
+    handled = native_calls.handled
+    actual = _run('rust', instance, f'shape_{shape}', {}, steps)
+    assert native_calls.handled - handled == 1, native_calls.declined
+    assert actual[0][0][0] == expected[0][0][0]
+    assert actual[0][1]['docs'] == expected[0][1]['docs']
+
+
+def test_a_tuple_of_documents_is_rows_like_pandas(instance, native_calls):
+    # PARITY: v4 takes a tuple for a chunk generator and raises `TypeError: 'tuple' object is not an
+    # iterator`; pandas (and the native path) read it as rows.
     _gate.set_mode('rust')
-    pipe = _fresh_pipe(instance, 'declines2', columns=COLUMNS)
-    connector, _ = _rust_sync_eligible(pipe, _rows(1))
-    assert connector is not None
-    assert _rust_sync_eligible(pipe, InferFetch)[0] is None
-    assert _rust_sync_eligible(pipe, None)[0] is None
-
-    referenced = _fresh_pipe(instance, 'declines3', reference='w13h:declines2')
-    assert 'reference' in _rust_sync_eligible(referenced, _rows(1))[1]
-
-    templated = _fresh_pipe(
-        instance, 'declines4', columns=COLUMNS, parameters={'x': "{{ self.parameters['columns'] }}"},
-    )
-    assert 'templates' in _rust_sync_eligible(templated, _rows(1))[1]
-
-    temporary = mrsm.Pipe('w13h', 'declines5', instance=instance, temporary=True)
-    assert 'temporary' in _rust_sync_eligible(temporary, _rows(1))[1]
+    as_tuple = _fresh_pipe(instance, 'tuple_docs', columns=COLUMNS)
+    as_list = _fresh_pipe(instance, 'list_docs', columns=COLUMNS)
+    assert tuple(as_tuple.sync(tuple(_rows(3))))[0] is True
+    assert tuple(as_list.sync(list(_rows(3))))[0] is True
+    assert _docs(as_tuple) == _docs(as_list)
 
 
-def test_unsupported_data_shapes_keep_the_python_path(instance, native_calls):
+def test_generators_sync_chunk_by_chunk_like_v4(instance, native_calls):
+    params = {'columns': COLUMNS, 'dtypes': {'val': 'float', 'name': 'str'}}
+
+    def chunks():
+        for offset in (0, 3, 6):
+            yield _rows(3, offset=offset)
+
+    outcomes = {}
+    for mode in ('python', 'rust'):
+        _gate.set_mode(mode)
+        pipe = _fresh_pipe(instance, 'generator', **copy.deepcopy(params))
+        result = pipe.sync(chunks())
+        empty = pipe.sync(iter(()))
+        outcomes[mode] = (result[0], empty, _docs(pipe))
+    assert outcomes['python'][0] == outcomes['rust'][0]
+    assert tuple(outcomes['python'][1]) == tuple(outcomes['rust'][1])
+    assert outcomes['python'][2] == outcomes['rust'][2]
+
+
+def test_dask_data_is_refused_with_the_migration_guide(instance):
+    dd = pytest.importorskip('dask.dataframe')
+    pd = pytest.importorskip('pandas')
     _gate.set_mode('rust')
-    pipe = _fresh_pipe(instance, 'shapes', columns={'id': 'id'})
-    csv = 'id,v\n1,2\n'
-    assert pipe.sync(csv)[0] is True
-    assert native_calls.declined and 'str' in native_calls.declined[-1]
-    assert native_calls.handled == 0
+    pipe = _fresh_pipe(instance, 'dask', columns=COLUMNS)
+    with pytest.raises(TypeError, match='migrating-to-v5'):
+        pipe.sync(dd.from_pandas(pd.DataFrame(_rows(3)), npartitions=1))
 
 
 def test_python_mode_never_calls_the_binding(instance, native_calls):
@@ -707,3 +824,729 @@ print('LEAN_OK')
         [sys.executable, '-c', code], env=env, capture_output=True, text=True, timeout=180,
     )
     assert 'LEAN_OK' in completed.stdout, completed.stdout + completed.stderr
+
+
+###########################################################################################
+### Wave 15 (task L): `Pipe.sync()` with no data runs the pipe's source natively.
+###########################################################################################
+
+def _source_pipe(instance, connector_keys, metric, **params):
+    pipe = mrsm.Pipe(connector_keys, metric, instance=instance, **params)
+    pipe.delete()
+    pipe.drop()
+    pipe._invalidate_cache(hard=True)
+    return mrsm.Pipe(connector_keys, metric, instance=instance, **params)
+
+
+def _source_outcomes(mode, instance, connector_keys, metric, params, steps):
+    """Run `steps` (sync keyword arguments, no data) on a fresh pipe in `mode`."""
+    _gate.set_mode(mode)
+    pipe = _source_pipe(instance, connector_keys, metric, **copy.deepcopy(params))
+    observed = []
+    for kwargs in steps:
+        result = pipe.sync(**kwargs)
+        assert isinstance(result, tuple)
+        observed.append((tuple(result), _snapshot(pipe)))
+    return observed
+
+
+def _compare_sources(
+    instance, native_calls, connector_keys, metric, params, steps, messages=True,
+):
+    expected = _source_outcomes('python', instance, connector_keys, metric, params, steps)
+    handled = native_calls.handled
+    actual = _source_outcomes('rust', instance, connector_keys, metric, params, steps)
+    assert native_calls.handled - handled == len(steps), native_calls.declined
+    for step, ((exp_tuple, exp_state), (act_tuple, act_state)) in enumerate(
+        zip(expected, actual)
+    ):
+        assert act_tuple[0] == exp_tuple[0], f"step {step}: {act_tuple} vs {exp_tuple}"
+        if messages:
+            assert _untimed(act_tuple[1]) == _untimed(exp_tuple[1]), f"step {step}"
+        for key in exp_state:
+            assert act_state[key] == exp_state[key], f"step {step}: {key}"
+    return actual
+
+
+PLUGIN_SOURCE = 'plugin:w15l_plugsrc'
+
+
+def test_a_plugin_source_syncs_natively(instance, native_calls):
+    steps = [
+        {},
+        {},
+        {'begin': START + timedelta(hours=3), 'end': START + timedelta(hours=8)},
+    ]
+    actual = _compare_sources(instance, native_calls, PLUGIN_SOURCE, 'w15l_frame', {}, steps)
+    assert len(actual[0][1]['docs']) == 12
+
+
+@pytest.mark.parametrize('mode', ['generator', 'hook', 'none', 'true'])
+def test_plugin_fetch_results_other_than_a_frame(instance, native_calls, mode):
+    ### `generator`: every chunk is a sync of its own; `hook`: the plugin syncs through
+    ### `chunk_hook` and returns the results; `none` / `true`: v4's special return values.
+    params = {'parameters': {'fetch': {'mode': mode}}}
+    actual = _compare_sources(
+        instance, native_calls, PLUGIN_SOURCE, f'w15l_{mode}', params, [{}, {}], messages=False,
+    )
+    expected_rows = {'generator': 12, 'hook': 12, 'none': 0, 'true': 0}[mode]
+    assert len(actual[0][1]['docs']) == expected_rows
+
+
+def test_a_plugins_own_sync_function_runs_natively(instance, native_calls):
+    ### `sync()` of the plugin calls `pipe.sync(df)` itself, which re-enters the native flow.
+    steps = [{}, {'flag': 7}]
+    actual = _compare_sources(
+        instance, native_calls, 'plugin:w15l_plugsync', 'w15l_sync', {}, steps,
+    )
+    assert len(actual[0][1]['docs']) == 2
+
+
+def test_a_custom_connector_source_syncs_natively(instance, native_calls):
+    params = {'columns': {'datetime': 'ts', 'id': 'sensor'}}
+    actual = _compare_sources(
+        instance, native_calls, 'w15lfeed:main', 'w15l_feed', params, [{}, {}],
+    )
+    assert len(actual[0][1]['docs']) == 4
+
+
+def test_a_sql_source_with_a_definition_syncs_natively(instance, native_calls, tmp_path):
+    source_conn = mrsm.get_connector(
+        'sql', 'w15l_source_' + uuid.uuid4().hex[:6],
+        flavor='sqlite',
+        database=str(tmp_path / 'w15l_source.db'),
+    )
+    source = mrsm.Pipe('w15l', 'source', instance=source_conn, columns=COLUMNS)
+    source.delete()
+    source = mrsm.Pipe(
+        'w15l', 'source', instance=source_conn, columns=COLUMNS,
+        dtypes={'val': 'float', 'name': 'str'},
+    )
+    assert source.sync(_rows(10))[0]
+    from meerschaum.utils.sql import sql_item_name
+    table = sql_item_name(source.target, source_conn.flavor, None)
+    params = {
+        'columns': COLUMNS,
+        'dtypes': {'val': 'float', 'name': 'str'},
+        'parameters': {'fetch': {'definition': f'SELECT * FROM {table}'}},
+    }
+    steps = [{}, {}, {'begin': START + timedelta(hours=4)}]
+    actual = _compare_sources(instance, native_calls, str(source_conn), 'w15l_sql', params, steps)
+    assert len(actual[0][1]['docs']) == 10
+
+
+def test_plugin_keyword_arguments_reach_the_plugin(instance, native_calls):
+    _gate.set_mode('rust')
+    pipe = _source_pipe(instance, 'plugin:w15l_plugsync', 'w15l_kwargs')
+    assert pipe.sync(flag=11)[0]
+    assert sorted(d['val'] for d in _docs(pipe)) == [1, 11]
+
+
+def test_non_blocking_source_syncs_call_back(instance, native_calls):
+    import threading
+    results = []
+    done = threading.Event()
+
+    def callback(result):
+        results.append(result)
+        done.set()
+
+    _gate.set_mode('rust')
+    pipe = _source_pipe(instance, PLUGIN_SOURCE, 'w15l_nonblocking')
+    spawned = pipe.sync(blocking=False, callback=callback)
+    assert tuple(spawned) == (True, f"Spawned asyncronous sync for {pipe}.")
+    assert done.wait(60)
+    assert results[0][0] is True
+    assert len(_docs(pipe)) == 12
+
+
+def test_changed_intervals_are_filled(instance, native_calls):
+    _gate.set_mode('rust')
+    pipe = _source_pipe(instance, 'w13h', 'w15l_intervals', columns=COLUMNS)
+    first = pipe.sync(_rows(4))
+    assert first.changed_intervals, first.to_dict()
+    ((begin, end),) = first.changed_intervals
+    assert begin <= START < end
+    again = pipe.sync(_rows(4))
+    assert again.changed_intervals == []
+    nothing = pipe.sync([])
+    assert not nothing.changed_intervals
+    ### Rows spread over several chunk intervals report one interval per run of cells.
+    wide = _source_pipe(
+        instance, 'w13h', 'w15l_intervals_wide',
+        columns=COLUMNS, parameters={'verify': {'chunk_minutes': 60}},
+    )
+    result = wide.sync(_rows(3, offset=0) + _rows(3, offset=10))
+    assert len(result.changed_intervals) == 2
+    assert result.changed_intervals[0][1] <= result.changed_intervals[1][0]
+
+
+def test_syncresult_is_public():
+    assert mrsm.SyncResult.__name__ == 'SyncResult'
+    result = mrsm.SyncResult(True, 'ok', inserted=1)
+    assert tuple(result) == (True, 'ok')
+    assert result.inserted == 1
+
+
+EXTRA_INSTANCES = ['memory']
+
+
+@pytest.fixture(params=EXTRA_INSTANCES)
+def other_instance(request, tmp_path):
+    if request.param == 'memory':
+        yield mrsm.get_connector(
+            'sql', 'w15l_mem_' + uuid.uuid4().hex[:8], flavor='sqlite', database=':memory:',
+        )
+        return
+
+
+def test_in_memory_instances_sync_natively(other_instance, native_calls):
+    params = {'columns': COLUMNS, 'dtypes': {'val': 'float', 'name': 'str'}}
+    steps = [(_rows(6), {}), (_rows(6), {}), (_rows(8, offset=2), {})]
+    _compare(other_instance, 'other_docs', params, steps, native_calls)
+
+
+def _server_instance(flavor, tmp_path=None):
+    if flavor == 'duckdb':
+        return mrsm.get_connector(
+            'sql', 'w15l_duck_' + uuid.uuid4().hex[:6],
+            flavor='duckdb', database=str(tmp_path / 'w15l.duckdb'),
+        )
+    if flavor == 'mssql':
+        return mrsm.get_connector(
+            'sql', 'w15l_mssql',
+            flavor='mssql', username='sa', password='supersecureSECRETPASSWORD123!',
+            database='master', port=1439, host='localhost', schema='dbo',
+        )
+    if flavor == 'oracle':
+        return mrsm.get_connector(
+            'sql', 'w15l_oracle',
+            flavor='oracle', host='localhost', database='xe', username='system',
+            password='oracle', port=1529,
+        )
+    raise ValueError(flavor)
+
+
+@pytest.mark.parametrize('flavor', ['duckdb', 'mssql', 'oracle'])
+def test_duckdb_mssql_and_oracle_instances_sync_natively(flavor, native_calls, tmp_path):
+    """
+    The Rust drivers of `duckdb`, `mssql` and `oracle` run the whole flow (their Python drivers
+    are not needed): the rows and the counts equal what the SQLite instance gives in `python`
+    mode.
+    """
+    if flavor != 'duckdb' and flavor not in os.environ.get('MRSM_TEST_FLAVORS', 'sqlite').split(','):
+        pytest.skip(f"set MRSM_TEST_FLAVORS to include {flavor}")
+    if flavor == 'oracle':
+        from meerschaum.connectors.sql._SQLConnector import _oracle_client_available
+        if not _oracle_client_available():
+            pytest.skip("the Oracle client library (libclntsh) is not installed")
+    params = {'columns': COLUMNS, 'dtypes': {'val': 'float', 'name': 'str'}}
+    steps = [(_rows(6), {}), (_rows(6), {}), (_rows(8, offset=2), {})]
+    reference = mrsm.get_connector(
+        'sql', 'w15l_ref_' + uuid.uuid4().hex[:6],
+        flavor='sqlite', database=str(tmp_path / 'ref.db'),
+    )
+    expected = _run('python', reference, f'w15l_{flavor}', params, steps)
+    instance = _server_instance(flavor, tmp_path)
+    handled = native_calls.handled
+    actual = _run('rust', instance, f'w15l_{flavor}', params, steps)
+    assert native_calls.handled - handled == len(steps), native_calls.declined
+    for (exp_tuple, exp_state), (act_tuple, act_state) in zip(expected, actual):
+        assert act_tuple[0] == exp_tuple[0] is True
+        assert act_tuple[1] == exp_tuple[1]
+        key = lambda doc: (doc['id'], doc['name'])  # noqa: E731
+        strip = lambda docs: sorted(  # noqa: E731
+            ({k: v for k, v in doc.items() if k != 'dt'} for doc in docs), key=key,
+        )
+        assert strip(act_state['docs']) == strip(exp_state['docs'])
+    _fresh_pipe(instance, f'w15l_{flavor}', **params)
+
+
+def test_a_custom_instance_connector_syncs_through_the_worker(native_calls):
+    """`@make_connector` instances (`IS_INSTANCE = True`) are driven by the worker adapter."""
+    outcomes = {}
+    for mode in ('python', 'rust'):
+        _gate.set_mode(mode)
+        instance = mrsm.get_connector('w15lmem', f'w15l_{uuid.uuid4().hex[:6]}')
+        pipe = mrsm.Pipe('w13h', 'w15l_custom_instance', instance=instance, columns=COLUMNS)
+        first = tuple(pipe.sync(_rows(4)))
+        outcomes[mode] = (first, len(pipe.get_data(as_docs=True) or []))
+    assert native_calls.handled == 1, native_calls.declined
+    assert outcomes['rust'][0][0] is True
+    assert outcomes['rust'] == outcomes['python']
+
+
+def _resp_keys(pattern, port=6399):
+    """`KEYS pattern` over a raw RESP socket (no valkey package needed)."""
+    import socket
+    command = f'*2\r\n$4\r\nKEYS\r\n${len(pattern)}\r\n{pattern}\r\n'.encode()
+    with socket.create_connection(('localhost', port), timeout=10) as sock:
+        sock.sendall(command)
+        data = b''
+        while not data.endswith(b'\r\n') or data.startswith(b'*') and data.count(b'\r\n') < 1:
+            chunk = sock.recv(65536)
+            if not chunk:
+                break
+            data += chunk
+            if data.startswith(b'*0\r\n'):
+                break
+            header, _, rest = data.partition(b'\r\n')
+            expected = int(header[1:])
+            if rest.count(b'\r\n') >= 2 * expected:
+                break
+    lines = data.split(b'\r\n')
+    return [line.decode() for line in lines[1:] if line and not line.startswith(b'$')]
+
+
+def _resp_delete(patterns, port=6399):
+    import socket
+    for pattern in patterns:
+        keys = _resp_keys(pattern, port=port)
+        if not keys:
+            continue
+        parts = [b'DEL'] + [key.encode() for key in keys]
+        command = f'*{len(parts)}\r\n'.encode() + b''.join(
+            f'${len(part)}\r\n'.encode() + part + b'\r\n' for part in parts
+        )
+        with socket.create_connection(('localhost', port), timeout=10) as sock:
+            sock.sendall(command)
+            sock.recv(1024)
+
+
+def test_a_valkey_instance_syncs_natively(native_calls):
+    """The Rust `ValkeyConnector` is the instance: rows land under the pipe's index keys."""
+    if 'valkey' not in os.environ.get('MRSM_TEST_FLAVORS', 'sqlite').split(','):
+        pytest.skip("set MRSM_TEST_FLAVORS to include valkey")
+    _gate.set_mode('rust')
+    instance = mrsm.get_connector('valkey', 'w15l_valkey', host='localhost', port=6399)
+    pipe = mrsm.Pipe(
+        'w13h', 'w15l_valkey_' + uuid.uuid4().hex[:6], instance=instance, columns=COLUMNS,
+    )
+    pattern = f'{pipe.target}:indices:*'
+    result = pipe.sync(_rows(5))
+    assert result[0] is True, result
+    assert native_calls.handled == 1, native_calls.declined
+    assert len(_resp_keys(pattern)) == 5
+    again = pipe.sync(_rows(5))
+    assert again[0] is True
+    assert len(_resp_keys(pattern)) == 5
+    _resp_delete([f'{pipe.target}*', f'mrsm_pipe:w13h:{pipe.metric_key}:*'])
+
+
+@pytest.fixture(scope='module')
+def api_server():
+    """A loopback `mrsm start api` (random port, temporary root; never 8989)."""
+    import pathlib
+    binary = pathlib.Path(os.environ.get('MRSM_BIN') or 'target/debug/mrsm')
+    if not binary.exists():
+        pytest.skip("build the CLI first: cargo build -p meerschaum-cli --bin mrsm")
+    from tests.console.conftest import Server
+    server = Server('w15l-sync', native=False)
+    try:
+        server.start()
+    except Exception as e:
+        server.stop()
+        pytest.skip(f"cannot start a loopback API server: {e}")
+    yield server
+    server.stop()
+
+
+def test_an_api_instance_syncs_natively(api_server, native_calls):
+    """The Rust `APIConnector` is the instance; both modes leave the same rows on the server."""
+    from tests.console.conftest import USERNAME, PASSWORD
+    outcomes = {}
+    for mode in ('python', 'rust'):
+        _gate.set_mode(mode)
+        instance = mrsm.get_connector(
+            'api', f'w15l_api_{mode}',
+            host='127.0.0.1', port=api_server.port, username=USERNAME, password=PASSWORD,
+            protocol='http',
+        )
+        pipe = mrsm.Pipe(
+            'w13h', f'w15l_api_{mode}', instance=instance, columns=COLUMNS,
+            dtypes={'val': 'float', 'name': 'str'},
+        )
+        pipe.delete()
+        pipe = mrsm.Pipe(
+            'w13h', f'w15l_api_{mode}', instance=instance, columns=COLUMNS,
+            dtypes={'val': 'float', 'name': 'str'},
+        )
+        first = tuple(pipe.sync(_rows(4)))
+        second = tuple(pipe.sync(_rows(6, offset=2)))
+        outcomes[mode] = (first[0], second[0], sorted(d['id'] for d in _docs(pipe)))
+        pipe.delete()
+    assert native_calls.handled == 2, native_calls.declined
+    assert outcomes['rust'][:2] == (True, True)
+    assert outcomes['rust'] == outcomes['python']
+
+
+def _sync_with_deadline(pipe, seconds=90, **kwargs):
+    """`pipe.sync()` on a thread: a hang fails the test instead of the whole run."""
+    import threading
+    box = {}
+
+    def run():
+        try:
+            box['result'] = pipe.sync(**kwargs)
+        except Exception as e:  # noqa: BLE001
+            box['error'] = e
+
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+    thread.join(seconds)
+    assert not thread.is_alive(), f"{pipe}.sync() hung for {seconds} seconds"
+    return box
+
+
+def test_a_crashing_worker_is_an_error_not_a_hang(instance, native_calls):
+    """The plugin kills its worker process mid-`fetch` (after calling back into the host)."""
+    _gate.set_mode('rust')
+    pipe = _source_pipe(instance, 'plugin:w15l_plugdie', 'w15l_die')
+    for _ in range(2):
+        box = _sync_with_deadline(pipe)
+        assert 'error' in box or box['result'][0] is False, box
+    ### The pool replaced the dead worker: a healthy plugin syncs right after.
+    healthy = _source_pipe(instance, PLUGIN_SOURCE, 'w15l_after_death')
+    box = _sync_with_deadline(healthy)
+    assert box['result'][0] is True, box
+
+
+def test_a_worker_killed_while_idle_is_replaced(instance, native_calls):
+    import signal
+    import subprocess
+    _gate.set_mode('rust')
+    pipe = _source_pipe(instance, PLUGIN_SOURCE, 'w15l_idle_kill')
+    assert _sync_with_deadline(pipe)['result'][0] is True
+    children = subprocess.run(
+        ['pgrep', '-P', str(os.getpid()), '-f', 'meerschaum.worker'],
+        capture_output=True, text=True,
+    ).stdout.split()
+    for pid in children:
+        os.kill(int(pid), signal.SIGKILL)
+    import time
+    time.sleep(0.5)
+    again = _sync_with_deadline(pipe)
+    assert again['result'][0] is True, again
+
+
+###########################################################################################
+### Wave 15 (L) follow-up: exact `numeric` read-back and the live config in a native sync.
+###########################################################################################
+
+def _numeric_instance(flavor, tmp_path):
+    if flavor == 'sqlite':
+        return mrsm.get_connector(
+            'sql', 'w15l_num_' + uuid.uuid4().hex[:8],
+            flavor='sqlite', database=str(tmp_path / 'num.db'),
+        )
+    selected = os.environ.get('MRSM_TEST_FLAVORS', 'sqlite').split(',')
+    if flavor not in selected:
+        pytest.skip(f"set MRSM_TEST_FLAVORS to include {flavor}")
+    if flavor == 'postgis':
+        return mrsm.get_connector(
+            'sql', 'w15l_num_postgis',
+            flavor='postgis', username='test', password='test1234', database='testdb',
+            port=5449, host='localhost', schema='w15l_num',
+        )
+    if flavor == 'mariadb':
+        return mrsm.get_connector(
+            'sql', 'w15l_num_mariadb',
+            flavor='mariadb', username='test', password='test1234', database='testdb',
+            port=3309, host='localhost',
+        )
+    if flavor == 'mysql':
+        return mrsm.get_connector(
+            'sql', 'w15l_num_mysql',
+            flavor='mysql', username='root', password='my-secret-pw', database='mysql',
+            port=3310, host='localhost',
+        )
+    raise ValueError(flavor)
+
+
+NUMERIC_VALUES = [
+    Decimal('3'), Decimal('2.5'), Decimal('-0.10'),
+]
+FORTY_DIGITS = Decimal('1234567890123456789012345678901234567890')
+
+
+@pytest.mark.parametrize('flavor', ['sqlite', 'postgis', 'mariadb', 'mysql'])
+def test_numeric_values_read_back_like_v4(flavor, tmp_path, native_calls):
+    """
+    Each `numeric` value keeps the scale the database stored (`3`, `2.5`, `-0.10`), as v4
+    reads them: a PostgreSQL `NUMERIC` of unconstrained scale used to come back padded to the
+    widest scale of the result (`Decimal('3.0')`). A 40-digit value only fits PostgreSQL.
+    """
+    instance = _numeric_instance(flavor, tmp_path)
+    if flavor == 'postgis':
+        instance.exec('CREATE SCHEMA IF NOT EXISTS "w15l_num"')
+    values = list(NUMERIC_VALUES) + ([FORTY_DIGITS] if flavor == 'postgis' else [])
+    docs = [
+        {'dt': START + timedelta(hours=i), 'id': i, 'n': value}
+        for i, value in enumerate(values)
+    ]
+    outcomes = {}
+    for mode in ('python', 'rust'):
+        _gate.set_mode(mode)
+        pipe = mrsm.Pipe(
+            'w15l', 'numeric', flavor, instance=instance,
+            columns=COLUMNS, dtypes={'n': 'numeric'},
+        )
+        pipe.delete()
+        pipe = mrsm.Pipe(
+            'w15l', 'numeric', flavor, instance=instance,
+            columns=COLUMNS, dtypes={'n': 'numeric'},
+        )
+        assert pipe.sync(copy.deepcopy(docs))[0]
+        frame = pipe.get_data()
+        outcomes[mode] = (
+            [repr(d['n']) for d in sorted(_docs(pipe), key=lambda d: d['id'])],
+            sorted(repr(v) for v in frame['n'].tolist()),
+        )
+        pipe.delete()
+    assert outcomes['rust'] == outcomes['python']
+    if flavor == 'postgis':
+        assert "Decimal('2.5')" in outcomes['rust'][0]
+        assert f"Decimal('{FORTY_DIGITS}')" in outcomes['rust'][0]
+
+
+def test_mrsm_symlinks_follow_the_live_config(instance, native_calls):
+    """
+    A change to the live config dictionary (what `set_config()` / `get_config()` edit) is seen
+    by the native sync: the `id` column of the pipe is
+    `MRSM{w15l_live:idcol}`, and changing the configured column between two syncs changes the
+    key the rows are matched on (v4 resolves the symlink on every `pipe.parameters` read).
+    """
+    import meerschaum.config as mrsm_config
+    rows = [
+        {'dt': START, 'id': 1, 'tag': 'a'},
+        {'dt': START, 'id': 2, 'tag': 'a'},
+    ]
+    outcomes = {}
+    for mode in ('python', 'rust'):
+        _gate.set_mode(mode)
+        seen = []
+        for column in ('id', 'tag'):
+            mrsm_config.config['w15l_live'] = {'idcol': column}
+            pipe = _fresh_pipe(
+                instance, f'live_{column}',
+                columns={'datetime': 'dt', 'id': 'MRSM{w15l_live:idcol}'},
+            )
+            results = tuple(tuple(pipe.sync([copy.deepcopy(row)])) for row in rows)
+            seen.append((results, len(_docs(pipe))))
+        outcomes[mode] = seen
+    mrsm_config.config.pop('w15l_live', None)
+    assert outcomes['rust'] == outcomes['python']
+    ### Matched on `id` the two rows are two rows; matched on `tag` they are one.
+    assert [count for _, count in outcomes['rust']] == [2, 1]
+
+
+def test_arrow_tables_sync_natively_and_other_types_are_refused(instance, native_calls):
+    pa = pytest.importorskip('pyarrow')
+    rows = _rows(5)
+    table = pa.Table.from_pylist(rows)
+    batch = pa.RecordBatch.from_pylist(rows)
+    params = {'columns': COLUMNS, 'dtypes': {'val': 'float', 'name': 'str'}}
+    _gate.set_mode('rust')
+    expected = _fresh_pipe(instance, 'arrow_list', **params)
+    assert expected.sync(copy.deepcopy(rows))[0]
+    for name, data in (('arrow_table', table), ('arrow_batch', batch)):
+        pipe = _fresh_pipe(instance, name, **params)
+        assert pipe.sync(data)[0], name
+        assert [d['id'] for d in _docs(pipe)] == [d['id'] for d in _docs(expected)]
+        assert [d['val'] for d in _docs(pipe)] == [d['val'] for d in _docs(expected)]
+    assert native_calls.handled >= 3
+    pipe = _fresh_pipe(instance, 'bad_type', **params)
+    with pytest.raises(TypeError, match='list of dictionaries'):
+        pipe.sync(object())
+    with pytest.raises(TypeError, match='list of dictionaries'):
+        pipe.sync(iter([object()]))
+
+
+def test_in_memory_sqlite_is_one_database_for_pipes_and_sqlalchemy(native_calls):
+    """
+    `Pipe` methods (the Rust pool) and `read()` / `exec()` / `.engine` (SQLAlchemy) open one
+    database, so they see the same tables (W15L-007 is gone).
+    """
+    from meerschaum.utils.sql import sql_item_name
+    _gate.set_mode('rust')
+    conn = mrsm.get_connector(
+        'sql', 'w15l_shared_' + uuid.uuid4().hex[:6], flavor='sqlite', database=':memory:',
+    )
+    assert conn.URI.startswith('sqlite:///') and 'mrsm_mem_' in conn.URI
+    pipe = mrsm.Pipe('w13h', 'w15l_shared', instance=conn, columns=COLUMNS)
+    assert pipe.sync(_rows(4))[0]
+    assert native_calls.handled == 1, native_calls.declined
+    table = sql_item_name(pipe.target, 'sqlite', None)
+    assert int(conn.value(f'SELECT COUNT(*) FROM {table}')) == 4
+    ### A table SQLAlchemy creates is visible to the Pipe methods' pool.
+    conn.exec('CREATE TABLE w15l_made_by_sqlalchemy (a INTEGER)')
+    conn.exec('INSERT INTO w15l_made_by_sqlalchemy VALUES (7)')
+    other = mrsm.Pipe(
+        'w13h', 'w15l_shared_other', instance=conn, columns=COLUMNS,
+        parameters={'target': 'w15l_made_by_sqlalchemy'},
+    )
+    assert other.get_rowcount() == 1
+    assert _docs(pipe) and len(_docs(pipe)) == 4
+
+
+def test_postgres_numeric_special_values_read_back_like_v4(tmp_path):
+    """`NaN` / `Infinity` / `-Infinity` read from a `NUMERIC` column are `Decimal` objects."""
+    instance = _numeric_instance('postgis', tmp_path)
+    instance.exec('CREATE SCHEMA IF NOT EXISTS "w15l_num"')
+    outcomes = {}
+    for mode in ('python', 'rust'):
+        _gate.set_mode(mode)
+        pipe = mrsm.Pipe(
+            'w15l', 'numeric_special', instance=instance,
+            columns=COLUMNS, dtypes={'n': 'numeric'},
+        )
+        pipe.delete()
+        pipe = mrsm.Pipe(
+            'w15l', 'numeric_special', instance=instance,
+            columns=COLUMNS, dtypes={'n': 'numeric'},
+        )
+        assert pipe.sync([{'dt': START, 'id': 0, 'n': Decimal('1.5')}])[0]
+        from meerschaum.utils.sql import sql_item_name
+        table = sql_item_name(pipe.target, 'postgis', 'w15l_num')
+        specials = ("'NaN'::numeric", "'Infinity'::numeric", "'-Infinity'::numeric", 'NULL')
+        for i, special in enumerate(specials, start=1):
+            instance.exec(
+                f"INSERT INTO {table} (dt, id, n) VALUES "
+                f"('2026-01-01 0{i}:00:00+00', {i}, {special})"
+            )
+        pipe._invalidate_cache(hard=True)
+        ### The instance's documents (`Pipe.get_data(as_docs=True)` adds nothing to them).
+        outcomes[mode] = [
+            repr(d['n'])
+            for d in sorted(pipe.instance_connector.get_pipe_docs(pipe), key=lambda d: d['id'])
+        ]
+        pipe.delete()
+    assert outcomes['rust'] == outcomes['python']
+    assert outcomes['rust'][1:] == [
+        "Decimal('NaN')", "Decimal('Infinity')", "Decimal('-Infinity')", 'None',
+    ]
+
+
+def test_the_accepted_data_helper_is_shared():
+    from meerschaum.core.Pipe._sync import (
+        ACCEPTED_DATA_TYPES, is_accepted_data, unsupported_data_error,
+    )
+    for value in ([], (), {}, 'a:1', iter([{'a': 1}])):
+        assert is_accepted_data(value)
+    assert not is_accepted_data(object())
+    error = unsupported_data_error(object(), 'enforce dtypes')
+    assert isinstance(error, TypeError)
+    assert ACCEPTED_DATA_TYPES in str(error) and 'enforce dtypes' in str(error)
+
+
+@pytest.mark.parametrize('flavor', ['sqlite', 'postgis', 'mariadb', 'mysql'])
+def test_nan_and_infinity_numerics_are_stored_like_v4(flavor, tmp_path, native_calls):
+    """
+    v4.1.4 stores `Decimal('NaN')` (and `None`) as SQL NULL and `Decimal('±Infinity')` as the
+    value where the column can hold it (PostgreSQL `NUMERIC`, SQLite text); the MySQL family
+    cannot store an infinity and the sync fails in both implementations (PARITY.md, W15L-012).
+    """
+    from meerschaum.utils.sql import sql_item_name
+    instance = _numeric_instance(flavor, tmp_path)
+    if flavor == 'postgis':
+        instance.exec('CREATE SCHEMA IF NOT EXISTS "w15l_num"')
+    specials = [Decimal('NaN'), None]
+    if flavor in ('sqlite', 'postgis'):
+        specials += [Decimal('Infinity'), Decimal('-Infinity')]
+    docs = [{'dt': START, 'id': 0, 'n': Decimal('1.5')}] + [
+        {'dt': START + timedelta(hours=i), 'id': i, 'n': value}
+        for i, value in enumerate(specials, start=1)
+    ]
+    outcomes = {}
+    for mode in ('python', 'rust'):
+        _gate.set_mode(mode)
+        make = lambda: mrsm.Pipe(  # noqa: E731
+            'w15l', 'nan_inf', flavor, instance=instance,
+            columns=COLUMNS, dtypes={'n': 'numeric'},
+        )
+        pipe = make()
+        pipe.delete()
+        pipe = make()
+        assert pipe.sync(copy.deepcopy(docs))[0]
+        table = sql_item_name(pipe.target, instance.flavor, instance.get_pipe_schema(pipe))
+        cast = 'CHAR' if flavor in ('mariadb', 'mysql') else 'TEXT'
+        rows = instance.read(
+            f'SELECT id, CAST(n AS {cast}) AS txt, '
+            f'CASE WHEN n IS NULL THEN 1 ELSE 0 END AS nullflag FROM {table} ORDER BY id'
+        )
+        outcomes[mode] = (
+            [(r['id'], r['txt'] if r['txt'] == r['txt'] else None, r['nullflag'])
+             for r in rows.to_dict(orient='records')],
+            [repr(d.get('n')) for d in pipe.instance_connector.get_pipe_docs(pipe)],
+        )
+        pipe.delete()
+    assert outcomes['rust'] == outcomes['python']
+    stored = outcomes['rust'][0]
+    assert stored[1][2] == 1 and stored[2][2] == 1  # NaN and None are NULL
+    if flavor in ('sqlite', 'postgis'):
+        assert [row[1] for row in stored[3:]] == ['Infinity', '-Infinity']
+
+
+def test_a_forked_child_does_not_delete_the_memory_database(tmp_path):
+    """The `sql:memory` file is removed by the process that created it only."""
+    code = '''
+import os, sys
+import meerschaum as mrsm
+conn = mrsm.get_connector('sql', 'w15l_fork', flavor='sqlite', database=':memory:')
+path = conn._shared_memory_database()
+conn.exec('CREATE TABLE forked (a INTEGER)')
+pid = os.fork()
+if pid == 0:
+    sys.exit(0)   # a normal exit runs the child's finalizers
+os.waitpid(pid, 0)
+assert os.path.exists(path), 'the forked child deleted the parent database'
+assert int(conn.value('SELECT COUNT(*) FROM sqlite_master')) == 1
+print('FORK_OK', path)
+'''
+    env = {k: v for k, v in os.environ.items() if not k.startswith('MRSM_')}
+    env.update({
+        'MRSM_ROOT_DIR': os.environ['MRSM_ROOT_DIR'],
+        'MRSM_PLUGINS_DIR': str(tmp_path),
+        'PYTHONPATH': os.getcwd(),
+    })
+    done = subprocess.run(
+        [sys.executable, '-c', code], env=env, capture_output=True, text=True, timeout=180,
+    )
+    assert 'FORK_OK' in done.stdout, done.stdout + done.stderr
+    path = done.stdout.split('FORK_OK', 1)[1].strip()
+    assert not os.path.exists(path), 'the creating process left its database behind'
+
+
+def test_a_fresh_root_plugin_sync_with_debug_does_not_deadlock(tmp_path):
+    """
+    The first plugin sync of a root builds the plugin manifest with a Python worker whose
+    messages (debug output) reach the extension's `tracing` sink, which takes the interpreter
+    lock on a runtime thread: the façade must not wait for the runtime while holding the lock
+    (a fresh root used to hang forever, with a defunct worker).
+    """
+    code = '''
+import os
+import meerschaum as mrsm
+conn = mrsm.get_connector('sql', 'w15l_fresh', flavor='sqlite', database=os.environ['W15L_DB'])
+pipe = mrsm.Pipe('plugin:w15l_plugsrc', 'fresh', instance=conn)
+result = pipe.sync(debug=True)
+assert result[0], result
+print('FRESH_OK', result.inserted)
+'''
+    root = tmp_path / 'root'
+    root.mkdir()
+    env = {k: v for k, v in os.environ.items() if not k.startswith('MRSM_')}
+    env.update({
+        'MRSM_ROOT_DIR': str(root),
+        'MRSM_PLUGINS_DIR': os.path.abspath('tests/plugins'),
+        'MRSM_CORE': 'rust',
+        'W15L_DB': str(tmp_path / 'fresh.db'),
+        'PYTHONPATH': os.getcwd(),
+    })
+    venvs = os.path.abspath(os.path.join('test_root', 'venvs'))
+    if os.path.isdir(os.path.join(venvs, 'mrsm')):
+        env['MRSM_VENVS_DIR'] = venvs
+    done = subprocess.run(
+        [sys.executable, '-c', code], env=env, capture_output=True, text=True, timeout=240,
+    )
+    assert 'FRESH_OK' in done.stdout, done.stdout[-1500:] + done.stderr[-1500:]

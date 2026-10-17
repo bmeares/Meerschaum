@@ -241,7 +241,10 @@ impl APIConnector {
                     params
                 }
                 Err(e) => {
-                    tracing::warn!("Failed to load attributes for {pipe}: {e}");
+                    super::warnings::warn_pipe_fmt!(
+                        pipe,
+                        "Failed to load attributes for {pipe}: {e}"
+                    );
                     return pipe.raw_parameters().clone();
                 }
             },
@@ -478,7 +481,7 @@ impl APIConnector {
                 Ok(r) => r,
                 Err(e) => {
                     let msg = format!("Failed to post a chunk to {pipe}:\n{e}");
-                    tracing::warn!("{msg}");
+                    super::warnings::warn_pipe_fmt!(pipe, "{msg}");
                     return SuccessTuple::fail(msg);
                 }
             };
@@ -606,7 +609,7 @@ impl APIConnector {
         let response = match self.get(&r_url, opts).await {
             Ok(r) => r,
             Err(e) => {
-                tracing::warn!("Failed to get data for {pipe}:\n{e}");
+                super::warnings::warn_pipe_fmt!(pipe, "Failed to get data for {pipe}:\n{e}");
                 return Ok(None);
             }
         };
@@ -616,7 +619,7 @@ impl APIConnector {
         let j = match response.json() {
             Ok(j) => j,
             Err(e) => {
-                tracing::warn!("Failed to get data for {pipe}:\n{e}");
+                super::warnings::warn_pipe_fmt!(pipe, "Failed to get data for {pipe}:\n{e}");
                 return Ok(None);
             }
         };
@@ -686,12 +689,16 @@ impl APIConnector {
         let response = match self.get(&r_url, opts).await {
             Ok(r) => r,
             Err(e) => {
-                tracing::warn!("Failed to get docs for {pipe}:\n{e}");
+                super::warnings::warn_pipe_fmt!(pipe, "Failed to get docs for {pipe}:\n{e}");
                 return Ok(Vec::new());
             }
         };
         if !response.ok() {
-            tracing::warn!("Failed to get docs for {pipe}:\n{}", response.text());
+            super::warnings::warn_pipe_fmt!(
+                pipe,
+                "Failed to get docs for {pipe}:\n{}",
+                response.text()
+            );
             return Ok(Vec::new());
         }
         Ok(match response.json() {
@@ -778,7 +785,8 @@ impl APIConnector {
         };
         let response = self.get(&r_url, opts).await?;
         if !response.ok() {
-            tracing::warn!(
+            super::warnings::warn_pipe_fmt!(
+                pipe,
                 "Failed to get the sync time for {pipe}:\n{}",
                 response.text()
             );
@@ -794,7 +802,11 @@ impl APIConnector {
                     match meerschaum_kernel::value::parse_datetime_value(&s) {
                         Some(d) => Some(DateBound::Datetime(d)),
                         None => {
-                            tracing::warn!("Failed to parse the sync time '{s}' for {pipe}.");
+                            // `datetime.fromisoformat` raises `Invalid isoformat string: '...'`.
+                            super::warnings::warn_pipe_fmt!(
+                                pipe,
+                                "Failed to parse the sync time '{s}' for {pipe}:\nInvalid isoformat string: '{s}'"
+                            );
                             None
                         }
                     }
@@ -817,7 +829,11 @@ impl APIConnector {
             )
             .await?;
         if !response.ok() {
-            tracing::warn!("Failed to check if {pipe} exists:\n{}", response.text());
+            super::warnings::warn_pipe_fmt!(
+                pipe,
+                "Failed to check if {pipe} exists:\n{}",
+                response.text()
+            );
             return Ok(false);
         }
         Ok(match response.json()? {
@@ -825,7 +841,7 @@ impl APIConnector {
             // PARITY: v4 returns the `{"detail": ...}` dict itself (truthy).
             serde_json::Value::Object(o) => {
                 if let Some(d) = o.get("detail") {
-                    tracing::warn!("{d}");
+                    super::warnings::warn_pipe(pipe, &super::warnings::detail_text(d));
                 }
                 !o.is_empty()
             }
@@ -839,7 +855,7 @@ impl APIConnector {
     pub async fn create_metadata(&self) -> bool {
         if let Ok(r) = self.post(routes::METADATA, RequestOptions::default()).await {
             if let Err(e) = r.json() {
-                tracing::warn!("Failed to create metadata on {self}:\n{e}");
+                super::warnings::warn_fmt!("Failed to create metadata on {self}:\n{e}");
             }
         }
         false
@@ -864,7 +880,8 @@ impl APIConnector {
         };
         let response = self.get(&r_url, opts).await?;
         if !response.ok() {
-            tracing::warn!(
+            super::warnings::warn_pipe_fmt!(
+                pipe,
                 "Failed to get the rowcount for {pipe}:\n{}",
                 response.text()
             );
@@ -946,12 +963,12 @@ impl APIConnector {
         let j = response.json()?;
         match j {
             serde_json::Value::Object(o) if o.len() == 1 && o.contains_key("detail") => {
-                tracing::warn!("{}", o["detail"]);
+                super::warnings::warn_pipe(pipe, &super::warnings::detail_text(&o["detail"]));
                 Ok(None)
             }
             serde_json::Value::Object(o) => Ok(Some(o)),
             _ => {
-                tracing::warn!("{}", response.text());
+                super::warnings::warn_pipe_fmt!(pipe, "{}", response.text());
                 Ok(None)
             }
         }
@@ -1018,7 +1035,11 @@ impl APIConnector {
             )
             .await?;
         if !response.ok() {
-            tracing::warn!("Failed to get the size for {pipe}:\n{}", response.text());
+            super::warnings::warn_pipe_fmt!(
+                pipe,
+                "Failed to get the size for {pipe}:\n{}",
+                response.text()
+            );
             return Ok(None);
         }
         Ok(match response.json() {
@@ -1026,7 +1047,7 @@ impl APIConnector {
             Ok(serde_json::Value::String(s)) => s.trim().parse().ok(),
             Ok(serde_json::Value::Object(o)) => {
                 if let Some(d) = o.get("detail") {
-                    tracing::warn!("{d}");
+                    super::warnings::warn_pipe(pipe, &super::warnings::detail_text(d));
                 }
                 None
             }

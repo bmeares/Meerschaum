@@ -20,6 +20,52 @@ if TYPE_CHECKING:
     pd = mrsm.attempt_import('pandas')
 
 
+def _iterate_chunks(chunks: Iterator[Any]) -> Iterator[Any]:
+    """
+    The chunks `_core.pipe_get_data_chunks` reads one at a time, as a generator
+    (what `Pipe.get_data(as_iterator=True)` returns).
+    """
+    yield from chunks
+
+
+def _rust_context(
+    self,
+    debug: bool = False,
+    refresh: bool = False,
+) -> Optional[Dict[str, Any]]:
+    """
+    Return the `context` the `_core.pipe_*` bindings take (the instance's Rust SQL connector, the
+    other Rust connectors of the call, the attributes of the connectors this process defined ad
+    hoc, and the SQL pipe's cached columns types), or `None` when the pipe's instance cannot run
+    natively (the caller keeps the Python body, see `PARITY.md`, Wave 15 task L2).
+    """
+    from meerschaum.core.Pipe._sync import _native_context
+    context, reason = _native_context(self, debug=debug)
+    if context is None:
+        kind = getattr(reason, 'kind', None)
+        if kind == 'oracle_client':
+            ### Oracle without `libclntsh` (PARITY W15L-006): the v4 body, as `Pipe.sync` does,
+            ### with the same once-per-process warning, until wave 16 replaces it with an error.
+            from meerschaum.core.Pipe._sync import _warn_oracle_fallback
+            _warn_oracle_fallback(self, reason, 'Using')
+        elif kind == 'no_driver':
+            raise RuntimeError(f"Cannot use the instance of {self}: {reason}.")
+        ### v4 treated an instance it could not build as "no data": the methods below keep
+        ### their v4 result for that case (`None`, `0`, ...) until wave 16 removes the bodies.
+        if debug:
+            from meerschaum.utils.warnings import dprint
+            dprint(f"Using the Python implementation for {self}: {reason}.")
+        return None
+    ### A SQL pipe's columns types are cached on the Python pipe (`get_columns_types()`), which
+    ### saves the native read from asking the database's catalog on every call.
+    context['columns_types'] = (
+        (self.get_columns_types(refresh=refresh, debug=debug) or None)
+        if context['connector'] is not None
+        else None
+    )
+    return context
+
+
 def get_data(
     self,
     select_columns: Optional[List[str]] = None,
@@ -122,6 +168,52 @@ def get_data(
     A `polars.DataFrame` if `as_polars=True`.
 
     """
+    if as_polars and (as_docs or as_dask):
+        raise ValueError("`as_polars` may not be combined with `as_docs` or `as_dask`.")
+
+    if (_rust := _rust_impl('pipe_get_data')) is not None:
+        if as_dask:
+            raise TypeError(
+                "Dask is not supported in Meerschaum 5. Use `as_iterator=True` for chunks "
+                "or `as_polars=True`. See the migration guide: reference/migrating-to-v5."
+            )
+        _context = _rust_context(self, debug=debug)
+        if _context is not None:
+            begin, end = self.parse_date_bounds(begin, end, debug=debug)
+            if as_iterator or as_chunks:
+                return _iterate_chunks(_rust_impl('pipe_get_data_chunks')(
+                    self,
+                    _context,
+                    select_columns=select_columns,
+                    omit_columns=omit_columns,
+                    begin=begin,
+                    end=end,
+                    params=params,
+                    as_docs=as_docs,
+                    as_polars=as_polars,
+                    chunk_interval=chunk_interval,
+                    order=order,
+                    limit=limit,
+                    kwargs=kw,
+                    debug=debug,
+                ))
+            return _rust(
+                self,
+                _context,
+                select_columns=select_columns,
+                omit_columns=omit_columns,
+                begin=begin,
+                end=end,
+                params=params,
+                as_docs=as_docs,
+                as_polars=as_polars,
+                add_missing_columns=add_missing_columns,
+                order=order,
+                limit=limit,
+                kwargs=kw,
+                debug=debug,
+            )
+
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.venv import Venv
     from meerschaum.connectors import get_connector_plugin
@@ -502,6 +594,32 @@ def get_backtrack_data(
     A `pd.DataFrame` for the pipe's data corresponding to the provided parameters. Backtrack data
     is a convenient way to get a pipe's data "backtracked" from the most recent datetime.
     """
+    if (_rust := _rust_impl('pipe_get_backtrack_data')) is not None:
+        _context = _rust_context(self, debug=debug)
+        _named = (
+            'select_columns', 'omit_columns', 'end', 'as_docs', 'as_polars',
+            'add_missing_columns', 'order',
+        )
+        if _context is not None:
+            _end = kw.get('end', None)
+            return _rust(
+                self,
+                _context,
+                backtrack_minutes=backtrack_minutes,
+                begin=self.parse_date_bounds(begin, debug=debug),
+                params=params,
+                limit=limit,
+                order=kw.get('order', 'desc') or 'desc',
+                select_columns=kw.get('select_columns', None),
+                omit_columns=kw.get('omit_columns', None),
+                end=self.parse_date_bounds(_end, debug=debug) if _end is not None else None,
+                as_docs=kw.get('as_docs', False),
+                as_polars=kw.get('as_polars', False),
+                add_missing_columns=kw.get('add_missing_columns', False),
+                kwargs={key: val for key, val in kw.items() if key not in _named},
+                debug=debug,
+            )
+
     from meerschaum.utils.venv import Venv
     from meerschaum.connectors import get_connector_plugin
 
@@ -585,6 +703,20 @@ def get_rowcount(
     An `int` of the number of rows in the pipe corresponding to the provided parameters.
     Returned 0 if the pipe does not exist.
     """
+    if (_rust := _rust_impl('pipe_get_rowcount')) is not None:
+        _context = _rust_context(self, debug=debug)
+        if _context is not None:
+            _begin, _end = self.parse_date_bounds(begin, end, debug=debug)
+            return _rust(
+                self,
+                _context,
+                begin=_begin,
+                end=_end,
+                params=params,
+                remote=remote,
+                debug=debug,
+            )
+
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.venv import Venv
     from meerschaum.connectors import get_connector_plugin

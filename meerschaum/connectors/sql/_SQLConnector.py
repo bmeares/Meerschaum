@@ -18,8 +18,49 @@ from meerschaum.utils.warnings import error, warn
 #: Flavors with a Rust driver (`meerschaum-sql`), routed through `_core` under `MRSM_CORE=rust`.
 _RUST_FLAVORS = {
     'postgresql', 'postgis', 'timescaledb', 'timescaledb-ha', 'citus', 'cockroachdb',
-    'mysql', 'mariadb', 'sqlite', 'geopackage',
+    'mysql', 'mariadb', 'sqlite', 'geopackage', 'mssql', 'oracle', 'duckdb',
 }
+
+
+def _remove_memory_directory(directory: str, owner_pid: int) -> None:
+    """
+    Remove the database directory of an in-memory SQLite connector, in the process that created
+    it only: a forked child (a v4 job daemon) that exits normally must not delete its parent's
+    database.
+    """
+    import os
+    import shutil
+    if os.getpid() == owner_pid:
+        shutil.rmtree(directory, ignore_errors=True)
+
+
+_ORACLE_CLIENT: Optional[bool] = None
+
+
+def _oracle_client_available() -> bool:
+    """
+    Whether the Oracle client library (`libclntsh`) the Rust `oracle` driver loads is present.
+    `python-oracledb`'s thin mode needs no client, so without it the Oracle flavor keeps the
+    SQLAlchemy implementation (see `crates/meerschaum-py/PARITY.md`, Wave 15, L).
+    """
+    global _ORACLE_CLIENT
+    if _ORACLE_CLIENT is None:
+        import ctypes
+        import sys
+        names = {
+            'win32': ('oci.dll',),
+            'darwin': ('libclntsh.dylib',),
+        }.get(sys.platform, ('libclntsh.so',))
+        for name in names:
+            try:
+                ctypes.CDLL(name)
+                _ORACLE_CLIENT = True
+                break
+            except OSError:
+                continue
+        else:
+            _ORACLE_CLIENT = False
+    return _ORACLE_CLIENT
 
 
 class SQLConnector(InstanceConnector):
@@ -348,7 +389,10 @@ class SQLConnector(InstanceConnector):
         if self.flavor in ('duckdb', 'oracle'):
             return False
         if self.flavor in ('sqlite', 'geopackage'):
-            return ':memory:' not in self.URI
+            return (
+                ':memory:' not in self.URI
+                and self.__dict__.get('_memory_path', None) is None
+            )
         return True
 
     @property
@@ -455,14 +499,44 @@ class SQLConnector(InstanceConnector):
             if k not in ('_rust_connector', '_rust_connector_pid')
         }
 
+    def _shared_memory_database(self) -> Optional[str]:
+        """
+        For an in-memory SQLite connector (`database=':memory:'`), the path of the one database
+        file that SQLAlchemy and the Rust pool both open, so `Pipe` methods and `read()` /
+        `exec()` / `.engine` see the same tables. `None` for any other connector.
+
+        The Python `sqlite3` module and the extension each carry their own SQLite library, which
+        cannot share a `cache=shared` memory database, so the "memory" database is a file in a
+        private temporary directory (a RAM disk where the system has one) that is removed when
+        the connector is collected or the process exits.
+        """
+        if self.__dict__.get('flavor', None) != 'sqlite' or self.__dict__.get('uri', None):
+            return None
+        if self.__dict__.get('database', None) != ':memory:':
+            return None
+        path = self.__dict__.get('_memory_path', None)
+        if path is None:
+            import os
+            import tempfile
+            import weakref
+            shm = '/dev/shm'
+            base = shm if os.path.isdir(shm) and os.access(shm, os.W_OK) else None
+            directory = tempfile.mkdtemp(prefix='mrsm_mem_', dir=base)
+            path = os.path.join(directory, 'memory.db')
+            self.__dict__['_memory_path'] = path
+            weakref.finalize(self, _remove_memory_directory, directory, os.getpid())
+        return path
+
     def _rust_method(self, name: str):
         """
         Return the `meerschaum._core.SqlConnector` method `name` when the parity-phase
         `MRSM_CORE` gate routes this connector's pipe, user and plugin methods to Rust, else `None`
         (run the Python implementation). Development-only (see `meerschaum/_core/_gate.py`).
 
-        Flavors without a Rust driver (`mssql`, `oracle`, `duckdb`, ...) and in-memory databases
-        (whose SQLAlchemy and Rust pools would see different databases) stay on Python.
+        Every flavor has a Rust driver (`mssql`, `oracle` and `duckdb` are compiled into the
+        wheels). An in-memory SQLite database (`sql:memory`) is one database file that the Rust
+        pool and SQLAlchemy both open (`_shared_memory_database`), so `Pipe` methods and
+        `read()` / `exec()` / `.engine` see the same tables.
         `read`, `exec`, `value`, `to_sql` and `.engine` always stay SQLAlchemy (D16).
 
         The Rust connector (and its pool) is built once per process: a forked child (v4 job
@@ -479,15 +553,17 @@ class SQLConnector(InstanceConnector):
             rust_cls = rust_impl('SqlConnector')
             if rust_cls is None:
                 return None
-            database = str(self.__dict__.get('database', None) or '')
-            uri = str(self.__dict__.get('uri', None) or '')
-            if self.flavor not in _RUST_FLAVORS or ':memory:' in database or ':memory:' in uri:
+            if self.flavor not in _RUST_FLAVORS or (
+                self.flavor == 'oracle' and not _oracle_client_available()
+            ):
                 self.__dict__['_rust_connector'] = False
                 return None
             attributes = {
                 key: self.__dict__.get(key, None)
                 for key in ('flavor', 'uri', 'host', 'port', 'username', 'password', 'database')
             }
+            if (shared := self._shared_memory_database()) is not None:
+                attributes['database'] = shared
             attributes['schema'] = self.schema
             try:
                 rust = rust_cls(self.label, attributes)
@@ -498,6 +574,7 @@ class SQLConnector(InstanceConnector):
                     stack=False,
                 )
                 self.__dict__['_rust_connector'] = False
+                self.__dict__['_rust_error'] = str(e)
                 return None
             self.__dict__['_rust_connector'] = rust
             self.__dict__['_rust_connector_pid'] = os.getpid()

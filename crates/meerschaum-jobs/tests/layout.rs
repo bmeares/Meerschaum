@@ -392,7 +392,13 @@ fn systemd_units_match() {
         );
         assert_eq!(posix(executor.get_socket_path(name)), expect("socket_path"));
         assert_eq!(posix(executor.get_result_path(name)), expect("result_path"));
-        let unit = norm(executor.get_service_file_text(name, &sysargs, "{PYTHON}", &process_env));
+        // v5 pins the workers' interpreter with `Environment=MRSM_PYTHON=...` (tested in
+        // `systemd_executor.rs`); v4 has no such line.
+        let unit = norm(executor.get_service_file_text(name, &sysargs, "{PYTHON}", &process_env))
+            .split('\n')
+            .filter(|l| !l.starts_with("Environment=MRSM_PYTHON="))
+            .collect::<Vec<_>>()
+            .join("\n");
         assert_eq!(unit, expect("unit"), "{name}");
         assert_eq!(norm(executor.get_socket_file_text(name)), expect("socket"));
         let parsed: Vec<Value> = meerschaum_jobs::systemd::parse_exec_start_sysargs(&unit)

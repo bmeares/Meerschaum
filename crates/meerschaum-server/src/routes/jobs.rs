@@ -298,9 +298,15 @@ async fn monitor_socket(state: AppState, name: String, mut socket: WebSocket) {
                         .await;
                     let body = crate::json::fastapi_json(&json!([result.success, result.message]));
                     let _ = socket.send(Message::Text(body.into())).await;
+                    let _ = socket.send(Message::Close(None)).await;
                     return;
                 }
-                None => return,
+                // The follower ended without a result (a finished job with no output): close
+                // the socket so that the client stops waiting.
+                None => {
+                    let _ = socket.send(Message::Close(None)).await;
+                    return;
+                }
             },
             msg = socket.recv() => match msg {
                 Some(Ok(Message::Text(t))) => {

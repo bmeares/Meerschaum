@@ -23,7 +23,8 @@ use chrono::{DateTime, Utc};
 use indexmap::IndexMap;
 use meerschaum_connector::pipe_ops::{self, columns_map};
 use meerschaum_connector::{
-    ConnectorError, DataQuery, DateBound, InstanceConnector, SyncOptions, async_trait,
+    ChunkedFetch, ConnectorError, DataQuery, DateBound, FetchedKind, InstanceConnector,
+    SyncOptions, async_trait,
 };
 use meerschaum_core::pipe::{ChunkInterval, PipeDefaults};
 use meerschaum_core::success::SyncResult;
@@ -174,6 +175,15 @@ impl std::fmt::Debug for SyncEnv<'_> {
     }
 }
 
+/// The registry's instances as the provider of cross-instance references.
+struct RegistryProvider<'a>(&'a dyn ConnectorRegistry);
+
+impl meerschaum_connector::InstanceProvider for RegistryProvider<'_> {
+    fn instance(&self, keys: &str) -> Option<std::sync::Arc<dyn InstanceConnector>> {
+        self.0.instance(keys).ok()
+    }
+}
+
 /// Resolves `{{ Pipe(...) }}` from the engine's known pipes and the registry.
 struct EngineResolver<'a> {
     env: &'a SyncEnv<'a>,
@@ -228,9 +238,9 @@ pub fn resolve_parameters(env: &SyncEnv<'_>, pipe: &Pipe) -> (Pipe, Vec<String>)
     }
     let resolver = EngineResolver { env };
     let mut out = pipe.clone();
-    let config = meerschaum_core::config::Config::from_env().ok();
+    let config = meerschaum_core::config::Config::current().ok();
     let warnings = out
-        .resolve_parameters_with(&resolver, config.as_ref())
+        .resolve_parameters_with(&resolver, config.as_deref())
         .unwrap_or_else(|e| vec![e.to_string()]);
     (out, warnings)
 }
@@ -490,7 +500,22 @@ async fn sync_inner(
             }
         }
     }
-    let (mut pipe, warnings) = resolve_parameters(env, &pipe);
+    let (mut pipe, warnings) = if env.known.is_none()
+        && meerschaum_connector::template::needs_instance_resolution(&pipe)
+    {
+        // A one-pipe sync (no graph snapshot): `reference`s and `{{ Pipe() }}` templates are
+        // resolved against the registered state of the pipes they name, fetched from their
+        // instances (what `Pipe.parameters` does lazily in v4).
+        meerschaum_connector::resolve_pipe(
+            &pipe,
+            instance,
+            Some(&RegistryProvider(env.registry)),
+            env.defaults,
+        )
+        .await
+    } else {
+        resolve_parameters(env, &pipe)
+    };
     for w in warnings {
         tracing::warn!("{w}");
     }
@@ -579,6 +604,22 @@ async fn sync_inner(
                 params: args.params.clone(),
                 ..Default::default()
             };
+            // Sources whose `fetch()` may return a generator, hook results, `True` or `None`
+            // (Python plugins and custom connectors) are consumed the way v4's `_sync` does.
+            let sync_chunks = args.extra.get("sync_chunks").is_none_or(|v| v.truthy());
+            match source.fetch_chunked(&pipe, &query, sync_chunks).await {
+                Ok(Some(chunked)) => {
+                    return sync_chunked_source(env, &pipe, chunked, args, observer).await;
+                }
+                Ok(None) => {}
+                Err(e) => {
+                    tracing::warn!(
+                        "Failed to fetch data from {}:\n    {e}",
+                        source.connector_keys()
+                    );
+                    return fail(format!("No data were fetched for {pipe}."));
+                }
+            }
             match source.fetch(&pipe, &query).await {
                 Ok(Some(df)) if source.connector_type() == "sql" && args.chunksize.is_some() => {
                     let size = args
@@ -716,6 +757,14 @@ async fn sync_inner(
         end: None,
         extra,
     };
+    // Without a ledger observer the changed intervals are the grid cells of the rows handed to
+    // the instance (a superset of the rows that changed; the ledger's exact delta needs the
+    // observer's second `filter_existing`, which a bare `Pipe.sync()` does not pay for).
+    let written_cells = if observer.is_none() {
+        change_cells(env, &pipe, &df)
+    } else {
+        None
+    };
     let mut attempt = 1;
     let result = loop {
         let res = instance.sync_pipe(&pipe, df.clone(), &opts).await;
@@ -744,7 +793,39 @@ async fn sync_inner(
     if let SyncBegin::At(b) = &args.begin {
         result.begin = date_bound_to_bound(b);
     }
+    if result.success
+        && result.rows_written() + result.deleted > 0
+        && let Some((axis, positions)) = written_cells
+    {
+        result.changed_intervals = crate::ledger::ledger_intervals(positions, &axis)
+            .iter()
+            .map(|iv| meerschaum_core::success::ChangedInterval {
+                begin: iv.begin.and_then(|b| axis.bound(b)),
+                end: iv.end.and_then(|e| axis.bound(e)),
+            })
+            .collect();
+    }
     result
+}
+
+/// The datetime-axis positions of a frame about to be synced and the pipe's axis (grid width =
+/// the chunk interval), for [`SyncResult::changed_intervals`]. `None` when the frame is empty.
+fn change_cells(
+    env: &SyncEnv<'_>,
+    pipe: &Pipe,
+    df: &Frame,
+) -> Option<(crate::axis::Axis, Vec<i64>)> {
+    if df.height() == 0 {
+        return None;
+    }
+    let options = crate::graph::GraphOptions {
+        defaults: env.defaults.clone(),
+        implicit_edges: false,
+        default_backtrack_minutes: env.default_backtrack_minutes as f64,
+    };
+    let axis = crate::graph::node_axis(pipe, &options).ok()?;
+    let positions = crate::native::frame_positions(df, &axis);
+    Some((axis, positions))
 }
 
 /// The keyword arguments a plugin receives for a sync, exactly as `Pipe.sync(**kw)` passes them
@@ -877,6 +958,227 @@ async fn sync_fetched_chunks(
         results.push((result.success, message));
     }
     // PARITY: v4 sorts the `(success, message)` tuples, putting failed chunks first.
+    summarize_chunk_results(pipe, results, aggregate)
+}
+
+/// A raw chunk as a frame, for its label and progress bounds only (never synced from this).
+fn input_frame(input: &PipeInput) -> Option<Frame> {
+    match input {
+        PipeInput::Frame(f) => Some(f.clone()),
+        PipeInput::Docs(d) => meerschaum_kernel::docs::frame_from_docs(d).ok(),
+        PipeInput::Columns(c) => meerschaum_kernel::docs::frame_from_columns(c).ok(),
+    }
+}
+
+fn input_rows(input: &PipeInput) -> usize {
+    match input {
+        PipeInput::Frame(f) => f.height(),
+        PipeInput::Docs(d) => d.len(),
+        PipeInput::Columns(c) => c.values().map(Vec::len).max().unwrap_or(0),
+    }
+}
+
+/// v4's `_sync` for a `fetch()` result that is not one DataFrame (`core/Pipe/_sync.py`, "If
+/// connector is a plugin with a `sync()` method ... Fetch the dataframe from the connector's
+/// `fetch()` method"): `None`, `True`, the results of the `chunk_hook` calls, a list that came
+/// back empty, a generator (every chunk synced on its own), or a single frame.
+async fn sync_chunked_source(
+    env: &SyncEnv<'_>,
+    pipe: &Pipe,
+    chunked: ChunkedFetch,
+    args: &SyncArgs,
+    observer: Option<&dyn DeltaObserver>,
+) -> SyncResult {
+    let mut chunks = chunked.chunks;
+    let fetch_failed = |e: ConnectorError| {
+        tracing::warn!(
+            "Failed to fetch data from {}:\n    {e}",
+            pipe.connector_keys()
+        );
+        fail(format!("No data were fetched for {pipe}."))
+    };
+    let first = match chunks.next_chunk().await {
+        Ok(first) => first,
+        Err(e) => return fetch_failed(e),
+    };
+    let Some(first) = first else {
+        return match chunks.finish().await {
+            Err(e) => fetch_failed(e),
+            Ok(FetchedKind::HookResults(results)) => hook_results_summary(&results),
+            Ok(FetchedKind::InParallel) => {
+                SyncResult::new(true, format!("{pipe} is being synced in parallel."))
+            }
+            Ok(FetchedKind::Data { generator: true }) => {
+                SyncResult::new(true, "Received an empty generator; nothing to do.")
+            }
+            Ok(_) => fail(format!("No data were fetched for {pipe}.")),
+        };
+    };
+    let second = match chunks.next_chunk().await {
+        Ok(second) => second,
+        Err(e) => return fetch_failed(e),
+    };
+    if second.is_none() {
+        match chunks.finish().await {
+            Err(e) => return fetch_failed(e),
+            Ok(FetchedKind::Data { generator: false }) => {
+                // One DataFrame (or one list of documents): the ordinary flow.
+                if matches!(&first, PipeInput::Docs(docs) if docs.is_empty()) {
+                    return SyncResult::new(true, format!("No new rows were returned for {pipe}."));
+                }
+                return Box::pin(sync_inner(env, pipe, Some(first), args, observer)).await;
+            }
+            Ok(_) => {}
+        }
+    }
+    sync_generator_chunks(env, pipe, first, second, chunks, args, observer).await
+}
+
+/// The `(success, message)` results a plugin's `chunk_hook` calls returned: all must have
+/// succeeded, the messages are joined (`'\n'.join(...)`).
+fn hook_results_summary(results: &[meerschaum_core::SuccessTuple]) -> SyncResult {
+    if results.is_empty() {
+        return SyncResult::new(true, "No new rows were returned.");
+    }
+    SyncResult::new(
+        results.iter().all(|r| r.success),
+        results
+            .iter()
+            .map(|r| r.message.as_str())
+            .collect::<Vec<_>>()
+            .join("\n"),
+    )
+}
+
+/// v4's chunk-generator branch of `_sync`: the first chunk is synced alone (a failure ends the
+/// sync), every other chunk gets three attempts with `attempt ** 2` seconds of sleep after each
+/// failure, and the messages are sorted and summarized.
+async fn sync_generator_chunks(
+    env: &SyncEnv<'_>,
+    pipe: &Pipe,
+    first: PipeInput,
+    second: Option<PipeInput>,
+    mut chunks: Box<dyn meerschaum_connector::ChunkStream>,
+    args: &SyncArgs,
+    observer: Option<&dyn DeltaObserver>,
+) -> SyncResult {
+    const MAX_CHUNK_ATTEMPTS: u32 = 3;
+    let dt = pipe.column("datetime");
+    let mut results: Vec<(bool, String)> = Vec::new();
+    let mut aggregate = SyncResult::new(true, String::new());
+    let mut upcoming = second;
+    let mut current = Some(first);
+    while let Some(input) = current.take() {
+        let index = results.len();
+        let rows = input_rows(&input);
+        let (label, info) = match input_frame(&input) {
+            Some(frame) => {
+                let (begin, end) = fetched_chunk_bounds(&frame, dt.as_deref());
+                (
+                    fetched_chunk_label(&frame, dt.as_deref()),
+                    FetchChunk {
+                        index,
+                        rows: rows as u64,
+                        begin,
+                        end,
+                    },
+                )
+            }
+            None => (
+                String::new(),
+                FetchChunk {
+                    index,
+                    rows: rows as u64,
+                    begin: None,
+                    end: None,
+                },
+            ),
+        };
+        if let Some(o) = observer {
+            o.chunk_started(&info);
+        }
+        let started = Instant::now();
+        let result = if index == 0 {
+            Box::pin(sync_inner(env, pipe, Some(input), args, observer)).await
+        } else {
+            let mut attempts = 0u32;
+            loop {
+                let result =
+                    Box::pin(sync_inner(env, pipe, Some(input.clone()), args, observer)).await;
+                if result.success {
+                    break result;
+                }
+                attempts += 1;
+                let sleep_seconds = u64::from(attempts * attempts);
+                tracing::warn!(
+                    "Failed to sync chunk to {pipe} (attempt {attempts} / {MAX_CHUNK_ATTEMPTS}).\n\
+                     Sleeping for {sleep_seconds} second{}:\n{}",
+                    if sleep_seconds == 1 { "" } else { "s" },
+                    result.message
+                );
+                tokio::time::sleep(Duration::from_secs(sleep_seconds)).await;
+                if attempts >= MAX_CHUNK_ATTEMPTS {
+                    break result;
+                }
+            }
+        };
+        if let Some(o) = observer {
+            o.chunk_finished(&info, &result, started.elapsed());
+        }
+        let message = if index == 0 {
+            let msg = format!("\n{label}\n{}", result.message);
+            if !result.success {
+                return fail(format!("Unable to sync initial chunk for {pipe}:\n{msg}"));
+            }
+            msg
+        } else {
+            format!(
+                "{} a chunk ({} row{}) to {pipe}:\n{label}\n{}",
+                if result.success {
+                    "Synced"
+                } else {
+                    "Failed to sync"
+                },
+                comma_count(rows),
+                if rows == 1 { "" } else { "s" },
+                result.message
+            )
+        };
+        aggregate.success &= result.success;
+        aggregate.inserted += result.inserted;
+        aggregate.updated += result.updated;
+        aggregate.upserted += result.upserted;
+        aggregate.deleted += result.deleted;
+        aggregate.begin = aggregate.begin.or(result.begin);
+        aggregate.end = result.end;
+        aggregate.changed_intervals.extend(result.changed_intervals);
+        results.push((result.success, message));
+        current = match upcoming.take() {
+            Some(next) => Some(next),
+            None => match chunks.next_chunk().await {
+                Ok(next) => next,
+                Err(e) => {
+                    tracing::warn!(
+                        "Failed to fetch data from {}:\n    {e}",
+                        pipe.connector_keys()
+                    );
+                    aggregate.success = false;
+                    results.push((false, format!("Failed to fetch the next chunk:\n{e}")));
+                    None
+                }
+            },
+        };
+    }
+    summarize_chunk_results(pipe, results, aggregate)
+}
+
+/// `Synced N chunks to <pipe> ...`: v4 sorts the `(success, message)` tuples, which puts failed
+/// chunks first.
+fn summarize_chunk_results(
+    pipe: &Pipe,
+    mut results: Vec<(bool, String)>,
+    mut aggregate: SyncResult,
+) -> SyncResult {
     results.sort();
     let succeeded = results.iter().filter(|r| r.0).count();
     let failed = results.len() - succeeded;

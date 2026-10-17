@@ -14,6 +14,7 @@ use crate::config::Seconds;
 use crate::daemon::{Daemon, JobsContext, Status};
 use crate::executor::{JobExecutor, make_executor};
 use crate::pytime;
+use crate::rotating::RotatingFile;
 
 /// `BANNED_CHARS`: characters a job name may not contain.
 pub const BANNED_CHARS: [char; 12] = [',', ';', '\'', '"', '$', '#', '=', '*', '&', '!', '`', '~'];
@@ -27,6 +28,9 @@ pub enum JobError {
     /// The name contains a banned character.
     #[error("Invalid name: ({0}) is not allowed.")]
     InvalidName(char),
+    /// The name is not one ordinary path component (`..`, `a/b`, ...).
+    #[error("Invalid name: {0}.")]
+    InvalidPathName(String),
     /// The sysargs string could not be split.
     #[error("{0}")]
     Sysargs(String),
@@ -132,6 +136,9 @@ impl Job {
     ) -> Result<Job, JobError> {
         if let Some(c) = BANNED_CHARS.iter().find(|c| name.contains(**c)) {
             return Err(JobError::InvalidName(*c));
+        }
+        if let Some(reason) = crate::names::invalid_job_name_reason(name) {
+            return Err(JobError::InvalidPathName(reason));
         }
         let sc = meerschaum_core::static_config::static_config();
         let and_key = &sc.system.arguments.and_key;
@@ -261,11 +268,18 @@ impl Job {
     /// `start()`: start (or resume) the job.
     pub fn start(&mut self) -> SuccessTuple {
         if let Some(ex) = self.executor() {
-            if !ex.get_job_exists(&self.name) {
-                let props = self.daemon().properties();
-                return ex.create_job(&self.name, &self.sysargs.clone(), Some(&props));
+            // A failed read is an error, never "the job does not exist": creating over an
+            // unreachable endpoint must not look like success.
+            match ex.try_get_job_exists(&self.name) {
+                Err(e) => return SuccessTuple::fail(e),
+                Ok(false) => {
+                    let props = self.daemon().memory_properties();
+                    let created = ex.create_job(&self.name, &self.sysargs.clone(), Some(&props));
+                    self.warnings.extend(ex.take_warnings());
+                    return created;
+                }
+                Ok(true) => return ex.start_job(&self.name),
             }
-            return ex.start_job(&self.name);
         }
         if self.is_running() {
             return SuccessTuple::ok(format!("{self} is already running."));
@@ -369,18 +383,28 @@ impl Job {
 
     /// `exists()`.
     pub fn exists(&mut self) -> bool {
+        self.try_exists().unwrap_or(false)
+    }
+
+    /// `exists()` which reports a failed remote read instead of answering `false`.
+    pub fn try_exists(&mut self) -> Result<bool, String> {
         if let Some(ex) = self.executor() {
-            return ex.get_job_exists(&self.name);
+            return ex.try_get_job_exists(&self.name);
         }
-        self.daemon().paths().dir.exists()
+        Ok(self.daemon().paths().dir.exists())
     }
 
     /// `get_logs()`.
     pub fn get_logs(&mut self) -> Option<String> {
+        self.try_get_logs().ok().flatten()
+    }
+
+    /// `get_logs()` which reports a failed remote read.
+    pub fn try_get_logs(&mut self) -> Result<Option<String>, String> {
         if let Some(ex) = self.executor() {
-            return ex.get_logs(&self.name);
+            return ex.try_get_logs(&self.name);
         }
-        self.daemon().log_text()
+        Ok(self.daemon().log_text())
     }
 
     /// `status`.
@@ -398,12 +422,7 @@ impl Job {
     /// `pid`.
     pub fn pid(&mut self) -> Option<i32> {
         if let Some(ex) = self.executor() {
-            return ex
-                .get_job_metadata(&self.name)
-                .get("daemon")
-                .and_then(|d| d.get("pid"))
-                .and_then(Value::as_i64)
-                .map(|p| p as i32);
+            return ex.get_job_pid(&self.name);
         }
         self.daemon().pid()
     }
@@ -578,7 +597,7 @@ impl Job {
             self.ctx.config.terminal_columns.to_string(),
         );
         env.insert(sc.environment.noninteractive.clone(), "true".to_string());
-        if let Some(Value::Map(user)) = self.daemon().properties().get("env") {
+        if let Some(Value::Map(user)) = self.properties().get("env") {
             for (k, v) in user {
                 env.insert(k.clone(), v.py_str());
             }
@@ -586,10 +605,23 @@ impl Job {
         env
     }
 
+    /// The job's properties: the daemon's for a local job, the executor's (patched with this
+    /// job's own) for a `systemd` or `api:` job (`Job.daemon.properties` builds its daemon from
+    /// `get_daemon_properties()` for those).
+    pub fn properties(&mut self) -> Map {
+        if self.executor_keys == "local" {
+            return self.daemon().properties();
+        }
+        let mut props = self.get_daemon_properties();
+        props
+            .entry("label".to_string())
+            .or_insert_with(|| Value::Str(crate::shlex::join(&self.sysargs)));
+        props
+    }
+
     /// `delete_after_completion`.
     pub fn delete_after_completion(&mut self) -> bool {
-        self.daemon()
-            .properties()
+        self.properties()
             .get("delete_after_completion")
             .is_some_and(Value::truthy)
     }
@@ -626,138 +658,217 @@ impl Job {
     pub fn monitor_logs(
         &mut self,
         mut callback: impl FnMut(&str) -> MonitorControl,
-        mut opts: MonitorOptions<'_>,
+        opts: MonitorOptions<'_>,
     ) -> SuccessTuple {
         if let Some(ex) = self.executor() {
             return ex.monitor_logs(&self.name, &mut callback, opts);
         }
-        let sc = meerschaum_core::static_config::static_config();
-        let stop_token = sc.jobs.stop_token.clone();
-        let clear_token = sc.jobs.clear_token.clone();
-        let flush_token = py_strip(&sc.jobs.flush_token).to_string();
-        let fmt = self.ctx.config.timestamp_format.clone();
-        let lines_to_show = self
-            .daemon()
+        monitor_log_stream(self, callback, opts)
+    }
+}
+
+impl MonitorSource for Job {
+    fn rotating_log(&mut self) -> Option<RotatingFile> {
+        self.daemon().rotating_log()
+    }
+
+    fn lines_to_show(&mut self) -> i64 {
+        self.daemon()
             .properties()
             .get("logs")
             .and_then(|l| l.get("lines_to_show"))
             .and_then(Value::as_i64)
             .unwrap_or(self.ctx.config.lines_to_show)
-            .max(0) as usize;
-        let Some(mut log) = self.daemon().rotating_log() else {
-            return SuccessTuple::fail("Could not open the job's logs.");
-        };
-        let poll = opts
-            .poll_interval
-            .unwrap_or_else(|| self.refresh_seconds.duration())
-            .max(Duration::from_millis(10));
+    }
 
-        let mut emitted_text = false;
-        // Returns true to stop monitoring.
-        let mut emit = |log: &mut crate::rotating::RotatingFile,
-                        emitted_text: &mut bool,
-                        opts: &mut MonitorOptions<'_>|
-         -> bool {
-            let lines = log.readlines();
-            let start = lines.len().saturating_sub(lines_to_show);
-            for line in &lines[start..] {
-                if opts
-                    .stop
-                    .as_ref()
-                    .is_some_and(|s| s.load(Ordering::Relaxed))
-                {
-                    return true;
-                }
-                let stripped_extra = pytime::strip_timestamp_from_line(py_strip(line), &fmt);
-                let mut out = line.clone();
-                if stripped_extra == stop_token {
-                    return true;
-                }
-                if stripped_extra == clear_token {
-                    if let Some(on_clear) = opts.on_clear.as_mut() {
-                        on_clear();
-                    }
-                    continue;
-                }
-                if stripped_extra == flush_token {
-                    out = String::new();
-                }
-                if opts.strip_timestamps && !out.is_empty() {
-                    out = pytime::strip_timestamp_from_line(&out, &fmt);
-                }
-                *emitted_text = true;
-                if callback(&out) == MonitorControl::Stop {
-                    return true;
-                }
-            }
-            false
-        };
+    fn timestamp_format(&self) -> String {
+        self.ctx.config.timestamp_format.clone()
+    }
 
-        if emit(&mut log, &mut emitted_text, &mut opts) {
-            return SuccessTuple::success();
-        }
-        let signature = |log: &crate::rotating::RotatingFile| {
-            let path = log.get_latest_subfile_path();
-            let len = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
-            (path, len)
-        };
-        let mut last_sig = signature(&log);
-        let mut stopped_sleep = 0.1_f64;
-        loop {
+    fn refresh_seconds(&self) -> Seconds {
+        self.refresh_seconds
+    }
+
+    fn status(&mut self) -> Status {
+        Job::status(self)
+    }
+
+    fn result(&mut self) -> SuccessTuple {
+        Job::result(self)
+    }
+
+    fn is_blocking_on_stdin(&mut self) -> bool {
+        Job::is_blocking_on_stdin(self)
+    }
+
+    fn write_stdin(&mut self, data: &str) -> std::io::Result<()> {
+        Job::write_stdin(self, data)
+    }
+}
+
+/// What [`monitor_log_stream`] needs from a job: its rotating log, status, result and stdin.
+///
+/// [`Job`] implements it for local jobs; the `systemd` executor implements it over the service's
+/// log file and `systemctl` status (v4 passes `_rotating_log`, `_status_hook` and `_stdin_file`
+/// to the hidden sister job instead).
+pub trait MonitorSource {
+    /// A fresh rotating log over the job's output.
+    fn rotating_log(&mut self) -> Option<RotatingFile>;
+    /// `logs.lines_to_show`.
+    fn lines_to_show(&mut self) -> i64;
+    /// The timestamp format of log lines.
+    fn timestamp_format(&self) -> String;
+    /// The poll interval (`system.cli.refresh_seconds`).
+    fn refresh_seconds(&self) -> Seconds;
+    /// The job's status.
+    fn status(&mut self) -> Status;
+    /// The job's result.
+    fn result(&mut self) -> SuccessTuple;
+    /// Whether the job waits for input.
+    fn is_blocking_on_stdin(&mut self) -> bool;
+    /// Send input to the job.
+    fn write_stdin(&mut self, data: &str) -> std::io::Result<()>;
+}
+
+/// The first index of `lines[(-1 * lines_to_show):]`.
+///
+/// PARITY: Python slicing. A positive count is the last `n` lines; `0` is `lines[-0:]`, the whole
+/// list (`do_action_async` relies on it to emit everything); a negative `n` is `lines[|n|:]`,
+/// which skips the first `|n|` lines.
+pub fn slice_start(len: usize, lines_to_show: i64) -> usize {
+    match lines_to_show {
+        0 => 0,
+        n if n > 0 => len.saturating_sub(usize::try_from(n).unwrap_or(usize::MAX)),
+        n => usize::try_from(n.unsigned_abs())
+            .unwrap_or(usize::MAX)
+            .min(len),
+    }
+}
+
+/// `Job.monitor_logs_async` over a [`MonitorSource`].
+pub fn monitor_log_stream(
+    src: &mut dyn MonitorSource,
+    mut callback: impl FnMut(&str) -> MonitorControl,
+    mut opts: MonitorOptions<'_>,
+) -> SuccessTuple {
+    let sc = meerschaum_core::static_config::static_config();
+    let stop_token = sc.jobs.stop_token.clone();
+    let clear_token = sc.jobs.clear_token.clone();
+    let flush_token = py_strip(&sc.jobs.flush_token).to_string();
+    let fmt = src.timestamp_format();
+    let lines_to_show = src.lines_to_show();
+    let Some(mut log) = src.rotating_log() else {
+        return SuccessTuple::fail("Could not open the job's logs.");
+    };
+    let poll = opts
+        .poll_interval
+        .unwrap_or_else(|| src.refresh_seconds().duration())
+        .max(Duration::from_millis(10));
+    let mut emitted_text = false;
+    // Returns true to stop monitoring.
+    let mut emit = |log: &mut crate::rotating::RotatingFile,
+                    emitted_text: &mut bool,
+                    opts: &mut MonitorOptions<'_>|
+     -> bool {
+        let lines = log.readlines();
+        let start = slice_start(lines.len(), lines_to_show);
+        for line in &lines[start..] {
             if opts
                 .stop
                 .as_ref()
                 .is_some_and(|s| s.load(Ordering::Relaxed))
             {
-                break;
+                return true;
             }
-            if opts.stop_on_exit && self.status() == Status::Stopped {
-                if !emitted_text && opts.wait_if_stopped && stopped_sleep < 0.2 {
-                    std::thread::sleep(Duration::from_secs_f64(stopped_sleep));
-                    stopped_sleep = (stopped_sleep * 1.1 * 1000.0).round() / 1000.0;
-                    if emit(&mut log, &mut emitted_text, &mut opts) {
-                        return SuccessTuple::success();
-                    }
-                    continue;
-                }
-                if emitted_text || !opts.wait_if_stopped {
-                    let result = self.result();
-                    if let Some(on_stop) = opts.on_stop.as_mut() {
-                        on_stop(&result);
-                    }
-                }
-                break;
+            let stripped_extra = pytime::strip_timestamp_from_line(py_strip(line), &fmt);
+            let mut out = line.clone();
+            if stripped_extra == stop_token {
+                return true;
             }
-            if opts.accept_input && emitted_text && self.is_blocking_on_stdin() {
-                if emit(&mut log, &mut emitted_text, &mut opts) {
-                    return SuccessTuple::success();
+            if stripped_extra == clear_token {
+                if let Some(on_clear) = opts.on_clear.as_mut() {
+                    on_clear();
                 }
-                let data = match opts.input.as_mut() {
-                    Some(input) => input(),
-                    None => {
-                        let mut line = String::new();
-                        std::io::stdin().read_line(&mut line).ok().map(|_| line)
-                    }
-                };
-                if let Some(data) = data {
-                    let _ = self.write_stdin(&data);
-                }
+                continue;
             }
-            let sig = signature(&log);
-            if sig != last_sig {
-                last_sig = sig;
-                if emit(&mut log, &mut emitted_text, &mut opts) {
-                    return SuccessTuple::success();
-                }
+            if stripped_extra == flush_token {
+                out = String::new();
             }
-            let begin = Instant::now();
-            while begin.elapsed() < poll {
-                std::thread::sleep(Duration::from_millis(10).min(poll));
+            if opts.strip_timestamps && !out.is_empty() {
+                out = pytime::strip_timestamp_from_line(&out, &fmt);
+            }
+            *emitted_text = true;
+            if callback(&out) == MonitorControl::Stop {
+                return true;
             }
         }
-        emit(&mut log, &mut emitted_text, &mut opts);
-        SuccessTuple::success()
+        false
+    };
+
+    if emit(&mut log, &mut emitted_text, &mut opts) {
+        return SuccessTuple::success();
     }
+    let signature = |log: &crate::rotating::RotatingFile| {
+        let path = log.get_latest_subfile_path();
+        let len = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+        (path, len)
+    };
+    let mut last_sig = signature(&log);
+    let mut stopped_sleep = 0.1_f64;
+    loop {
+        if opts
+            .stop
+            .as_ref()
+            .is_some_and(|s| s.load(Ordering::Relaxed))
+        {
+            break;
+        }
+        if opts.stop_on_exit && src.status() == Status::Stopped {
+            if !emitted_text && opts.wait_if_stopped && stopped_sleep < 0.2 {
+                std::thread::sleep(Duration::from_secs_f64(stopped_sleep));
+                stopped_sleep = (stopped_sleep * 1.1 * 1000.0).round() / 1000.0;
+                if emit(&mut log, &mut emitted_text, &mut opts) {
+                    return SuccessTuple::success();
+                }
+                continue;
+            }
+            if emitted_text || !opts.wait_if_stopped {
+                let result = src.result();
+                if let Some(on_stop) = opts.on_stop.as_mut() {
+                    on_stop(&result);
+                }
+            }
+            break;
+        }
+        if opts.accept_input && emitted_text && src.is_blocking_on_stdin() {
+            if emit(&mut log, &mut emitted_text, &mut opts) {
+                return SuccessTuple::success();
+            }
+            let data = match opts.input.as_mut() {
+                Some(input) => input(),
+                None => {
+                    let mut line = String::new();
+                    std::io::stdin().read_line(&mut line).ok().map(|_| line)
+                }
+            };
+            if let Some(data) = data {
+                let _ = src.write_stdin(&data);
+            }
+        }
+        let sig = signature(&log);
+        if sig != last_sig {
+            last_sig = sig;
+            if emit(&mut log, &mut emitted_text, &mut opts) {
+                return SuccessTuple::success();
+            }
+        }
+        let begin = Instant::now();
+        while begin.elapsed() < poll {
+            std::thread::sleep(Duration::from_millis(10).min(poll));
+        }
+    }
+    emit(&mut log, &mut emitted_text, &mut opts);
+    SuccessTuple::success()
 }
 
 impl std::fmt::Display for Job {
@@ -820,20 +931,68 @@ pub fn compress_pipeline_sysargs(sysargs: &[String]) -> Vec<String> {
     out
 }
 
-/// `get_executor_keys_from_context()`: the configured `meerschaum.executor`, else `local`.
+/// `is_systemd_available()`: `/run/systemd/system` is a directory.
+pub fn is_systemd_available() -> bool {
+    std::path::Path::new("/run/systemd/system").is_dir()
+}
+
+/// The default root directory for a context (`DEFAULT_ROOT_DIR_PATH`: `<dot config>/meerschaum`),
+/// derived from the systemd user directory (`<dot config>/systemd/user`).
+pub fn default_root_dir(ctx: &JobsContext) -> Option<std::path::PathBuf> {
+    let dot_config = ctx.paths.systemd_user_dir.parent()?.parent()?;
+    Some(dot_config.join(if cfg!(windows) {
+        "Meerschaum"
+    } else {
+        "meerschaum"
+    }))
+}
+
+/// The rule of `get_executor_keys_from_context()` without its inputs: the configured executor,
+/// else `systemd` when systemd is available and the root is the default root, else `local`.
+pub fn choose_executor_keys(
+    configured: Option<&str>,
+    systemd_available: bool,
+    root_is_default: bool,
+) -> String {
+    if let Some(configured) = configured {
+        return configured.to_string();
+    }
+    if systemd_available && root_is_default {
+        "systemd".to_string()
+    } else {
+        "local".to_string()
+    }
+}
+
+/// `get_executor_keys_from_context()`: the configured `meerschaum.executor`; else `systemd` on a
+/// systemd host running with the default root; else `local`.
 ///
-/// Python picks `systemd` on hosts with systemd and the default root; the Rust systemd executor
-/// is a stub in this wave, so `local` is the default.
+/// PARITY: v4 also requires `is_installed('meerschaum', venv=None, allow_outside_venv=False)`
+/// (`jobs/__init__.py:430`) so that a source checkout never installs units pointing at itself;
+/// the `mrsm` binary is always "installed", so that condition is true here. Debug builds refuse
+/// the default root, so they never choose `systemd`.
 pub fn get_executor_keys_from_context(ctx: &JobsContext) -> String {
-    ctx.config
-        .executor
-        .clone()
-        .unwrap_or_else(|| "local".to_string())
+    let root_is_default = default_root_dir(ctx).is_some_and(|d| d == ctx.paths.root);
+    choose_executor_keys(
+        ctx.config.executor.as_deref(),
+        is_systemd_available(),
+        root_is_default,
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lines_to_show_slices_like_python() {
+        // lines[(-1 * n):] over 5 lines
+        assert_eq!(slice_start(5, 2), 3);
+        assert_eq!(slice_start(5, 30), 0);
+        assert_eq!(slice_start(5, 0), 0);
+        assert_eq!(slice_start(5, -2), 2);
+        assert_eq!(slice_start(5, -9), 5);
+    }
 
     #[test]
     fn banned_names_and_label() {
@@ -856,5 +1015,31 @@ mod tests {
         );
         assert_eq!(job.status(), Status::Stopped);
         assert_eq!(job.result().message, "No result available.");
+    }
+
+    #[test]
+    fn executor_selection_rule() {
+        assert_eq!(choose_executor_keys(Some("api:x"), true, true), "api:x");
+        assert_eq!(choose_executor_keys(None, true, true), "systemd");
+        assert_eq!(choose_executor_keys(None, true, false), "local");
+        assert_eq!(choose_executor_keys(None, false, true), "local");
+        let dir = tempfile::tempdir().unwrap();
+        let mut ctx = JobsContext::for_root(dir.path().join("root"));
+        ctx.paths.systemd_user_dir = dir.path().join("home/.config/systemd/user");
+        assert_eq!(
+            default_root_dir(&ctx).unwrap(),
+            dir.path().join("home/.config/meerschaum")
+        );
+        // A scratch root is never the default root, whatever the host runs.
+        assert_eq!(get_executor_keys_from_context(&ctx), "local");
+        ctx.paths.root = dir.path().join("home/.config/meerschaum");
+        let expected = if is_systemd_available() {
+            "systemd"
+        } else {
+            "local"
+        };
+        assert_eq!(get_executor_keys_from_context(&ctx), expected);
+        ctx.config.executor = Some("api:other".into());
+        assert_eq!(get_executor_keys_from_context(&ctx), "api:other");
     }
 }

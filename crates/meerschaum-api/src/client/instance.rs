@@ -39,7 +39,7 @@ impl Connector for APIConnector {
         let fetch = match pipe.parameters().get("fetch") {
             Some(Value::Map(m)) if !m.is_empty() => m.clone(),
             _ => {
-                tracing::warn!("Missing 'fetch' parameters for {pipe}.");
+                super::warnings::warn_fmt!("Missing 'fetch' parameters for {pipe}.");
                 return Ok(None);
             }
         };
@@ -63,7 +63,7 @@ impl Connector for APIConnector {
             )
         };
         let (Some(ck), Some(mk)) = (ck, mk) else {
-            tracing::warn!("Missing `fetch:pipe` keys for {pipe}.");
+            super::warnings::warn_fmt!("Missing `fetch:pipe` keys for {pipe}.");
             return Ok(None);
         };
         let source = Pipe::builder(&ck, &mk)

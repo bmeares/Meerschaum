@@ -14,7 +14,7 @@
 //! overrides, used in place of the configured ones.
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex};
 
 use chrono::{DateTime, Utc};
 use meerschaum_cli::native::session::ConfiguredSqlProvider;
@@ -34,12 +34,11 @@ use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use serde_json::{Value as Json, json};
 
-fn config() -> PyResult<&'static Config> {
-    static CONFIG: OnceLock<Result<Config, String>> = OnceLock::new();
-    CONFIG
-        .get_or_init(|| Config::from_env().map_err(|e| e.to_string()))
-        .as_ref()
-        .map_err(|e| PyRuntimeError::new_err(e.clone()))
+/// The config of this call: a snapshot of the process's live config tree, taken with the
+/// interpreter lock held (see [`crate::facade::publish_live_config`]), so `set_config()` and
+/// patches made in the process are seen by every `Pipeline` run and `sync(parents=...)`.
+fn config(py: Python<'_>) -> PyResult<Arc<Config>> {
+    crate::facade::publish_live_config(py)
 }
 
 /// One session (runtime, connectors, worker pool) per process: v4 job daemons fork, and a
@@ -157,8 +156,9 @@ struct Built {
 /// (`meerschaum_cli::native::registry_with`): the instance, every source
 /// connector the instance's pipes name, the Python worker pool and native plugins, with the
 /// `sql:` connectors the Python process built itself in place of configured ones.
-fn build(session: &Session, request: &Json) -> PyResult<Built> {
-    let config = config()?;
+fn build(py: Python<'_>, session: &Session, request: &Json) -> PyResult<Built> {
+    let config_arc = config(py)?;
+    let config: &Config = &config_arc;
     let instance_keys = str_field(request, "instance")
         .ok_or_else(|| value_err("An engine request needs an `instance`."))?
         .to_string();
@@ -173,8 +173,12 @@ fn build(session: &Session, request: &Json) -> PyResult<Built> {
             let spec =
                 ConnectionSpec::from_attributes(&ca).map_err(|e| value_err(e.to_string()))?;
             let settings = InstanceSettings::from_config(spec.flavor, config);
-            let conn = session
-                .block_on(SqlConnector::connect_with(label, spec, settings))
+            // Never block on the runtime while holding the interpreter lock: the runtime's
+            // `tracing` sink takes the lock on its own threads.
+            let conn = py
+                .allow_threads(|| {
+                    session.block_on(SqlConnector::connect_with(label, spec, settings))
+                })
                 .map_err(|e| runtime_err(format!("Cannot connect to '{keys}': {e}")))?;
             conn.set_instance_provider(Arc::new(ConfiguredSqlProvider::new(config)));
             overrides.insert(keys.clone(), Instance::Sql(Arc::new(conn)));
@@ -182,12 +186,14 @@ fn build(session: &Session, request: &Json) -> PyResult<Built> {
     }
     let home = match overrides.get(&instance_keys) {
         Some(inst) => inst.clone(),
-        None => session.instance(&instance_keys, config).map_err(|e| {
-            runtime_err(format!(
-                "Cannot resolve the instance connector '{instance_keys}': {}",
-                e.message
-            ))
-        })?,
+        None => py
+            .allow_threads(|| session.instance(&instance_keys, config))
+            .map_err(|e| {
+                runtime_err(format!(
+                    "Cannot resolve the instance connector '{instance_keys}': {}",
+                    e.message
+                ))
+            })?,
     };
     // Only the pipes this request can reach have their connectors built. `--resume` re-plans a
     // stored selection, so every ancestor and descendant of the targets is in reach.
@@ -202,19 +208,22 @@ fn build(session: &Session, request: &Json) -> PyResult<Built> {
         registry,
         mut config,
         ..
-    } = registry_with(
-        config,
-        session,
-        &home,
-        RegistryOptions {
-            selection: reach,
-            // PARITY: same-instance `sql:` pipes sync in place, as v4's `pipe.sync()` does,
-            // so a graph run keeps the definition's column types (see `registry`).
-            inplace: true,
-            overrides,
-        },
-    )
-    .map_err(|e| runtime_err(e.message))?;
+    } = py
+        .allow_threads(|| {
+            registry_with(
+                config,
+                session,
+                &home,
+                RegistryOptions {
+                    selection: reach,
+                    // PARITY: same-instance `sql:` pipes sync in place, as v4's `pipe.sync()`
+                    // does, so a graph run keeps the definition's column types (see `registry`).
+                    inplace: true,
+                    overrides,
+                },
+            )
+        })
+        .map_err(|e| runtime_err(e.message))?;
     config.home_instance = home.keys();
     Ok(Built {
         engine: Engine::new(registry.clone(), config.clone()),
@@ -322,7 +331,7 @@ fn to_json_string<T: serde::Serialize>(value: &T) -> PyResult<String> {
 pub fn engine_plan(py: Python<'_>, request: &str) -> PyResult<String> {
     let request = parse_request(request)?;
     let session = session();
-    let built = build(&session, &request)?;
+    let built = build(py, &session, &request)?;
     let opts = run_options(&request, &built.instance_keys)?;
     let planned = py
         .allow_threads(|| session.block_on(built.engine.plan(&opts)))
@@ -426,7 +435,7 @@ fn run_with_events(
 pub fn engine_run(py: Python<'_>, request: &str, on_event: Option<PyObject>) -> PyResult<String> {
     let request = parse_request(request)?;
     let session = session();
-    let built = build(&session, &request)?;
+    let built = build(py, &session, &request)?;
     let opts = run_options(&request, &built.instance_keys)?;
     let result = match on_event {
         Some(callback) => run_with_events(py, &session, built.engine, opts, callback)?,
@@ -457,9 +466,9 @@ pub fn engine_run(py: Python<'_>, request: &str, on_event: Option<PyObject>) -> 
     }))
 }
 
-fn reader(request: &Json) -> PyResult<(Session, EngineReader)> {
+fn reader(py: Python<'_>, request: &Json) -> PyResult<(Session, EngineReader)> {
     let session = session();
-    let built = build(&session, request)?;
+    let built = build(py, &session, request)?;
     Ok((session, EngineReader::new(built.registry, built.config)))
 }
 
@@ -467,7 +476,7 @@ fn reader(request: &Json) -> PyResult<(Session, EngineReader)> {
 #[pyfunction]
 pub fn engine_runs(py: Python<'_>, request: &str) -> PyResult<String> {
     let request = parse_request(request)?;
-    let (session, reader) = reader(&request)?;
+    let (session, reader) = reader(py, &request)?;
     let status = match str_field(&request, "status") {
         Some("running") => Some(RunStatus::Running),
         Some("succeeded") => Some(RunStatus::Succeeded),
@@ -496,7 +505,7 @@ pub fn engine_runs(py: Python<'_>, request: &str) -> PyResult<String> {
 #[pyfunction]
 pub fn engine_run_detail(py: Python<'_>, request: &str) -> PyResult<String> {
     let request = parse_request(request)?;
-    let (session, reader) = reader(&request)?;
+    let (session, reader) = reader(py, &request)?;
     let run_id = str_field(&request, "run_id").ok_or_else(|| value_err("`run_id` is required."))?;
     let detail = py
         .allow_threads(|| session.block_on(reader.run_detail(run_id)))
@@ -508,7 +517,7 @@ pub fn engine_run_detail(py: Python<'_>, request: &str) -> PyResult<String> {
 #[pyfunction]
 pub fn engine_run_events(py: Python<'_>, request: &str) -> PyResult<String> {
     let request = parse_request(request)?;
-    let (session, reader) = reader(&request)?;
+    let (session, reader) = reader(py, &request)?;
     let run_id = str_field(&request, "run_id").ok_or_else(|| value_err("`run_id` is required."))?;
     let after = request.get("after_seq").and_then(Json::as_u64);
     let rows = py

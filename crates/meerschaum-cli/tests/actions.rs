@@ -349,6 +349,56 @@ fn edit_config_opens_the_editor_then_reloads() {
     assert!(out.contains("Nothing to reload"), "{out}");
 }
 
+/// v4 pops the key from the in-memory config before `get_config(key, write_missing=True)`, so a
+/// key an `MRSM_CONFIG` patch already put in memory still gets its file created from the
+/// defaults (and the edit does not report an unparseable, empty file).
+#[test]
+fn edit_config_creates_the_key_file_when_mrsm_config_patched_the_key() {
+    fn env(k: &str) -> Option<String> {
+        (k == "EDITOR").then(|| "my-editor".into())
+    }
+    use_repo_python();
+    let tmp = tempfile::tempdir().unwrap();
+    let host = SharedHost::default();
+    let mut opts = ConfigOptions::with_env(vec![
+        (
+            "MRSM_ROOT_DIR".into(),
+            tmp.path().to_string_lossy().into_owned(),
+        ),
+        (
+            "MRSM_PLUGINS_DIR".into(),
+            tmp.path().join("plugins").to_string_lossy().into_owned(),
+        ),
+        (
+            "MRSM_CONFIG".into(),
+            r#"{"meerschaum": {"instance": "sql:local"}}"#.into(),
+        ),
+    ]);
+    opts.allow_writes = true;
+    opts.home = tmp.path().to_path_buf();
+    let mut out = Vec::new();
+    let result = {
+        let mut rt = Runtime::new(DateContext::system(), 80, &mut out, env);
+        rt.config = Some(Config::new(opts).unwrap());
+        rt.host = Box::new(host.clone());
+        rt.cwd = Some(tmp.path().to_path_buf());
+        let sysargs: Vec<String> = ["edit", "config", "system"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        dispatch::entry(&sysargs, &mut rt)
+    };
+    let out = String::from_utf8(out).unwrap();
+    assert_eq!(result, SuccessTuple::success(), "{out}");
+    assert!(!out.contains("Could not parse"), "{out}");
+    let commands = host.0.borrow().commands.clone();
+    assert_eq!(commands.len(), 1, "one editor session, no re-edit loop");
+    let path = std::path::PathBuf::from(&commands[0].args[0]);
+    assert!(path.exists(), "the key's file is created before editing");
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(!text.trim().is_empty(), "the file holds the key's config");
+}
+
 #[test]
 fn python_writes_an_init_script_and_starts_the_interpreter() {
     fn env(k: &str) -> Option<String> {
@@ -461,8 +511,15 @@ fn compose_explain_and_native_down() {
 fn python_only_actions_dispatch_to_worker() {
     let tmp = tempfile::tempdir().unwrap();
     let host = SharedHost::default();
-    // `install plugins` is native now; `show packages` still reaches the worker `core_action`.
-    assert_worker_dispatch(tmp.path(), &["show", "packages"]);
+    // `install plugins`, `show packages` and the rest of the registry are native now; checking
+    // that a Python plugin imports still needs the worker.
+    std::fs::create_dir_all(tmp.path().join("plugins")).unwrap();
+    std::fs::write(
+        tmp.path().join("plugins/synthetic_wiring_test.py"),
+        "x = 1\n",
+    )
+    .unwrap();
+    assert_worker_dispatch(tmp.path(), &["verify", "plugins"]);
     let (r, _) = run(tmp.path(), &["reload"], no_env, &host);
     assert_eq!(r, SuccessTuple::success());
 }

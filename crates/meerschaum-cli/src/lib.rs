@@ -28,6 +28,7 @@ pub mod env;
 pub mod extras;
 pub mod format;
 pub mod help;
+pub mod jobs_backend;
 pub mod native;
 pub mod native_plugins;
 pub mod parse;

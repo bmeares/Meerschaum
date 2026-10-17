@@ -1,6 +1,46 @@
 //! Port of `meerschaum/utils/daemon/_names.py`: random `adjective-noun` job names.
 
+use std::path::Path;
+
 use crate::config::JobPaths;
+
+/// Why `name` cannot be a job name, if it cannot: a job name becomes a directory under `jobs/`
+/// (and a unit and log name), so it must be exactly one ordinary path component. `/`, `\\`,
+/// NUL, the empty name, `.` and `..` would let a name (which arrives unfiltered from `DELETE
+/// /jobs/{name}`) address a path outside `jobs/`, e.g. the whole root.
+///
+/// v4 has no such check (`BANNED_CHARS` is only `,;'"$#=*&!`~`); this is a v5 hardening.
+pub fn invalid_job_name_reason(name: &str) -> Option<String> {
+    if name.is_empty() {
+        return Some("the name is empty".into());
+    }
+    if name == "." || name == ".." {
+        return Some(format!("'{name}' is a reserved path name"));
+    }
+    if let Some(c) = name.chars().find(|c| matches!(c, '/' | '\\' | '\0')) {
+        let shown = if c == '\0' {
+            "NUL".to_string()
+        } else {
+            c.to_string()
+        };
+        return Some(format!("({shown}) is not allowed"));
+    }
+    None
+}
+
+/// Whether `dir` is `base/<name>` for the one-component job `name`, resolving symlinks in the
+/// parent: the check before any recursive removal.
+pub fn is_direct_child(base: &Path, dir: &Path, name: &str) -> bool {
+    if invalid_job_name_reason(name).is_some()
+        || dir.file_name().and_then(|n| n.to_str()) != Some(name)
+    {
+        return false;
+    }
+    match (dir.parent().map(Path::canonicalize), base.canonicalize()) {
+        (Some(Ok(parent)), Ok(base)) => parent == base,
+        _ => false,
+    }
+}
 
 /// The adjective categories, in Python's dict order.
 pub const ADJECTIVES: &[(&str, &[&str])] = &[

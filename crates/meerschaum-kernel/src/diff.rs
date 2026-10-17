@@ -443,14 +443,27 @@ impl Default for FilterUnseenOptions {
 fn cast_column(data: &ColumnData, spec: &CastSpec, name: &str) -> Result<ColumnData, String> {
     match spec {
         CastSpec::Pandas(t) => pandas_astype(name, data, t),
-        CastSpec::Numeric => Ok(ColumnData::Object(
-            data.values()
-                .iter()
-                .map(|v| {
-                    attempt_cast_to_numeric(v, false, None, None).unwrap_or_else(|_| v.clone())
-                })
-                .collect(),
-        )),
+        CastSpec::Numeric => {
+            // PARITY: v4 runs `Series.apply(attempt_cast_to_numeric)`; for an integer column
+            // with nulls (pandas' Arrow or masked integer dtypes) pandas hands `apply` floats,
+            // so `3` becomes `Decimal('3.0')`. A column without nulls keeps its integers.
+            let int_with_nulls = matches!(
+                data,
+                ColumnData::Native(s) if s.dtype().is_integer() && s.null_count() > 0
+            );
+            Ok(ColumnData::Object(
+                data.values()
+                    .iter()
+                    .map(|v| {
+                        let v = match v {
+                            Value::Int(i) if int_with_nulls => Value::Float(*i as f64),
+                            other => other.clone(),
+                        };
+                        attempt_cast_to_numeric(&v, false, None, None).unwrap_or(v)
+                    })
+                    .collect(),
+            ))
+        }
     }
 }
 

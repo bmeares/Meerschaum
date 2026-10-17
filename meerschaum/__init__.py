@@ -23,6 +23,7 @@ import atexit
 from meerschaum.utils.typing import SuccessTuple
 from meerschaum.utils.packages import attempt_import
 from meerschaum.core.Pipe import Pipe
+from meerschaum.core.Pipe._sync import SyncResult
 from meerschaum.core.Pipeline import Pipeline
 from meerschaum.plugins import Plugin
 from meerschaum.utils.venv import Venv
@@ -44,6 +45,7 @@ __all__ = (
     "get_config",
     "Pipe",
     "Pipeline",
+    "SyncResult",
     "Plugin",
     "SuccessTuple",
     "Venv",

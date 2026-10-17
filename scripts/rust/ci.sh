@@ -12,6 +12,8 @@
 #   fmt          cargo fmt --all --check
 #   clippy       cargo clippy --all-targets -- -D warnings
 #   test         cargo test --workspace
+#   generated    Fail when native/packages_table.rs or native/bootstrap_templates.json differ from
+#                their generators (scripts/rust/gen_*.py; reads the Python sources as text).
 #   build        cargo build --release -p meerschaum-cli
 #   check        cargo check --workspace            (the hosted ubuntu/windows/macos legs)
 #   parity       Regenerate every crates/*/tests/fixtures/gen_*.py with the v4.1.4 reference
@@ -72,6 +74,7 @@ step_fmt()    { log "cargo fmt --all --check"; cargo fmt --all --check; }
 step_clippy() { log "cargo clippy --all-targets -- -D warnings"; cargo clippy --all-targets -- -D warnings; }
 step_test()   { log "cargo test --workspace"; cargo test --workspace; }
 step_build()  { log "cargo build --release -p meerschaum-cli"; cargo build --release -p meerschaum-cli; }
+step_generated() { log "generated tables match their generators"; cargo test -p meerschaum-cli --test generated_tables; }
 step_check()  { log "cargo check --workspace"; cargo check --workspace; }
 
 step_parity() {
@@ -127,6 +130,7 @@ for s in "${steps[@]}"; do
     clippy)     step_clippy ;;
     test)       step_test ;;
     build)      step_build ;;
+    generated)  step_generated ;;
     check)      step_check ;;
     parity)     step_parity ;;
     -h|--help)  sed -n '2,22p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;

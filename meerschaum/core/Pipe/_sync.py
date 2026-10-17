@@ -67,7 +67,10 @@ class SyncResult(tuple):
         Rows deleted.
 
     changed_intervals: Optional[List[Tuple[Any, Any]]]
-        The `(begin, end)` intervals of the datetime axis that changed.
+        The `(begin, end)` intervals of the datetime axis that changed: the epoch-aligned grid
+        cells (one chunk interval wide) that hold the rows the sync handed to the instance,
+        merged into runs. This is a superset of the rows that actually changed (rows that
+        turned out to be unchanged duplicates are inside it too). An open end is `None`.
 
     duration: Optional[float]
         Seconds the sync took.
@@ -125,9 +128,6 @@ def _rebuild_sync_result(fields: Dict[str, Any]) -> SyncResult:
     return SyncResult(fields.pop('success'), fields.pop('message'), **fields)
 
 
-### Pipe attributes the native sync cannot honor: another pipe's parameters would be inherited
-### (`reference`), or templates and symlinks would be resolved by Python.
-_NATIVE_SYNC_PARAMETER_MARKERS = ('MRSM{', '{{')
 ### Caches of the table's layout the Python pipe drops after a sync (as `SQLConnector.sync_pipe`).
 _NATIVE_SYNC_CACHE_KEYS = (
     '_exists',
@@ -138,146 +138,157 @@ _NATIVE_SYNC_CACHE_KEYS = (
 )
 
 
-def _rust_sync_eligible(
-    self,
-    df: Any,
-    force: bool = False,
-    blocking: bool = True,
-    workers: Optional[int] = None,
-    callback: Optional[Callable[..., Any]] = None,
-    error_callback: Optional[Callable[..., Any]] = None,
-    debug: bool = False,
-    kw: Optional[Dict[str, Any]] = None,
-    enforce_dtypes: bool = True,
-) -> Tuple[Any, str]:
+def _plain_value(value: Any) -> bool:
     """
-    Return `(connector, '')` when `Pipe.sync()` may run natively (`_core.sync_pipe`),
-    otherwise `(None, reason)`. The reason is logged under `debug`.
-
-    The native path covers explicit data (`df` given) into a SQL instance that has a Rust driver,
-    with the default keyword arguments plus `begin`, `end`, `check_existing`,
-    `enforce_dtypes` and `chunksize`. Everything else keeps its current implementation
-    until the engine and the worker adapters take it over (see `PARITY.md`, "Wave 13"):
-
-    - no data (the connector's `sync()` or `fetch()`), `None`, a string, generators and other
-      iterables (the shape check of the data itself is `_core.sync_pipe`'s);
-    - `force` / `retries`, `workers`, non-blocking syncs and their callbacks, `debug`,
-      plugin keyword arguments (any other `**kwargs`);
-    - temporary pipes and pipes with `reference`s, `{{ }}` templates or `MRSM{}` symlinks;
-    - instances that are not SQL, or have no Rust connector (`mssql`, `oracle`, `duckdb`,
-      in-memory SQLite).
-
-    The connector is the `meerschaum._core.SqlConnector` of the pipe's instance.
+    Whether a connector attribute can cross to Rust and to a worker (data, not objects).
     """
-    if df is InferFetch or hasattr(df, 'MRSM_INFER_FETCH'):
-        return None, "no data was given (the connector's `sync()` or `fetch()` runs)"
-    if df is None:
-        return None, "`None` was given as the data"
-    if force:
-        return None, "`force` retries in Python"
-    if not blocking or callback is not None or error_callback is not None:
-        return None, "non-blocking syncs and callbacks run in Python"
-    if workers is not None:
-        return None, "`workers` is not supported yet"
-    if debug:
-        return None, "`debug` output comes from Python"
-    if kw:
-        return None, "extra keyword arguments (" + ', '.join(sorted(map(str, kw))) + ")"
-    if self.temporary:
-        return None, "the pipe is temporary"
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return True
+    if isinstance(value, (list, tuple)):
+        return all(_plain_value(item) for item in value)
+    if isinstance(value, dict):
+        return all(isinstance(k, str) and _plain_value(v) for k, v in value.items())
+    return False
 
+
+def _connector_attributes(connector: Any) -> Dict[str, Any]:
+    """
+    The attributes that rebuild `connector` elsewhere (`get_connector(type, label, **attributes)`).
+    """
+    meta = dict(getattr(connector, 'meta', None) or {})
+    meta.pop('type', None)
+    meta.pop('label', None)
+    return {key: value for key, value in meta.items() if _plain_value(value)}
+
+
+def _is_dask(df: Any) -> bool:
+    return type(df).__module__.split('.', maxsplit=1)[0] == 'dask'
+
+
+class NativeUnavailable(str):
+    """
+    Why a pipe's connectors cannot run natively: the message, plus a `kind` callers branch on
+    (never on the text): `'oracle_client'` (Oracle without `libclntsh`, W15L-006: the one case
+    that keeps the v4 body, with a warning once per process, until wave 16), `'no_driver'` (a SQL
+    connector whose Rust build failed, or a flavor that is not routed: an error) or
+    `'unbuildable'` (the instance connector cannot be built at all).
+    """
+
+    kind: str = 'unbuildable'
+
+    def __new__(cls, message: str, kind: str = 'unbuildable'):
+        obj = super().__new__(cls, message)
+        obj.kind = kind
+        return obj
+
+
+_ORACLE_FALLBACK_WARNED = False
+
+
+def _warn_oracle_fallback(self, reason: str, what: str) -> None:
+    """Warn, once per process, that the Python Oracle driver is used (`NativeUnavailable.kind`)."""
+    global _ORACLE_FALLBACK_WARNED
+    if _ORACLE_FALLBACK_WARNED:
+        return
+    _ORACLE_FALLBACK_WARNED = True
+    warn(
+        f"{what} {self} with the Python Oracle driver: " + str(reason).split(':', 1)[-1].strip(),
+        stack=False,
+    )
+
+
+def _native_unavailable(self, reason: str, debug: bool = False) -> Optional[SyncResult]:
+    """
+    The native sync cannot run for this pipe's connectors. There is no silent fallback: the only
+    case that keeps the v4 body (with a warning, once per process) is an `oracle` instance whose
+    client library (`libclntsh`) is missing, which `python-oracledb`'s thin mode does not need;
+    wave 16 replaces it with an error. Anything else is a failed result.
+    """
+    if getattr(reason, 'kind', None) == 'oracle_client':
+        _warn_oracle_fallback(self, reason, 'Syncing')
+        return None
+    self._invalidate_cache(debug=debug)
+    return SyncResult(False, f"Cannot sync {self}: {reason}.")
+
+
+def _no_rust_driver(role: str, connector: Any) -> 'NativeUnavailable':
+    cause = (getattr(connector, '__dict__', {}) or {}).get('_rust_error', None)
+    if getattr(connector, 'flavor', None) == 'oracle' and not cause:
+        return NativeUnavailable(
+            "oracle: the Oracle client library (libclntsh) is not installed, so the Rust Oracle "
+            "driver is unavailable",
+            'oracle_client',
+        )
+    flavor = getattr(connector, 'flavor', None)
+    return NativeUnavailable(
+        f"{role} is a SQL connector ('{flavor}') with no usable Rust driver"
+        + (f": {cause}" if cause else " (its flavor is not routed to Rust)"),
+        'no_driver',
+    )
+
+
+def _native_context(self, debug: bool = False) -> Tuple[Optional[Dict[str, Any]], str]:
+    """
+    Return `(context, '')` with the connectors `_core.sync_pipe` needs, or `(None, reason)` when
+    the pipe's instance cannot run natively. The reason is logged under `debug`.
+
+    The context holds the instance's `meerschaum._core.SqlConnector` (`connector`, `None` for a
+    non-SQL instance), the other Rust SQL connectors of the call (`connectors`, a SQL source the
+    Python process holds) and the attributes of the connectors this process defined ad hoc
+    (`attributes`), which the Rust side rebuilds and the Python workers learn about.
+    """
     from meerschaum.core.Pipe._verify import _rust_sql_connector
     try:
         instance_connector = self.instance_connector
     except Exception:
-        return None, "the instance connector cannot be built"
-    rust_connector = _rust_sql_connector(instance_connector)
-    if rust_connector is None:
-        return None, "the instance is not a SQL connector with a Rust driver"
+        return None, NativeUnavailable("the instance connector cannot be built")
+    if isinstance(instance_connector, str) or instance_connector is None:
+        return None, NativeUnavailable("the instance connector cannot be built")
 
-    raw_parameters = self.get_parameters(apply_symlinks=False, debug=debug) or {}
-    if not isinstance(raw_parameters, dict):
-        return None, "the parameters are not a dictionary"
-    if 'reference' in raw_parameters or 'references' in raw_parameters:
-        return None, "the pipe inherits the parameters of a reference"
-    parameters_text = repr(raw_parameters)
-    if any(marker in parameters_text for marker in _NATIVE_SYNC_PARAMETER_MARKERS):
-        return None, "the parameters contain templates or symlinks"
-    return rust_connector, ''
+    context: Dict[str, Any] = {'connector': None, 'connectors': {}, 'attributes': {}}
+    instance_type = getattr(instance_connector, 'type', None)
+    if instance_type == 'sql':
+        rust_connector = _rust_sql_connector(instance_connector)
+        if rust_connector is None:
+            return None, _no_rust_driver('the instance', instance_connector)
+        context['connector'] = rust_connector
+    ### Any other instance (`api:`, `valkey:`, a `@make_connector` type) is built by the native
+    ### flow from its keys: the Rust clients for `api:` and `valkey:`, the worker for the rest.
+    context['attributes'][str(instance_connector)] = _connector_attributes(instance_connector)
+
+    ### The source: connectors this process already holds are shared with the native flow
+    ### (a SQL source keeps its pool); every other source is built by keys, from the
+    ### config registry or a worker.
+    connector_keys = str(self.connector_keys)
+    if ':' in connector_keys and connector_keys != str(instance_connector):
+        source_type, source_label = connector_keys.split(':', maxsplit=1)
+        held = mrsm.connectors.connectors.get(source_type, {}).get(source_label, None)
+        if held is not None and source_type != 'plugin':
+            if source_type == 'sql':
+                rust_source = _rust_sql_connector(held)
+                if rust_source is None:
+                    return None, _no_rust_driver('the source', held)
+                context['connectors'][connector_keys] = rust_source
+            context['attributes'][connector_keys] = _connector_attributes(held)
+    return context, ''
 
 
-def _sync_native(
+def _native_python_interpreter() -> None:
+    """
+    A no-op kept for callers: the extension passes this process's `sys.executable` to the worker
+    session itself (`MRSM_PYTHON` still wins), and the environment is never modified.
+    """
+
+
+def _native_pipe_result(
     self,
-    rust_sync: Callable[..., Dict[str, Any]],
-    df: Any,
-    begin: Union[datetime, int, str, None],
-    end: Union[datetime, int, None],
-    check_existing: bool,
-    enforce_dtypes: bool,
-    chunksize: Optional[int],
-    force: bool,
-    blocking: bool,
-    workers: Optional[int],
-    callback: Optional[Callable[..., Any]],
-    error_callback: Optional[Callable[..., Any]],
-    debug: bool,
-    kw: Dict[str, Any],
-) -> Optional[SyncResult]:
+    out: Dict[str, Any],
+    debug: bool = False,
+) -> SyncResult:
     """
-    Run `Pipe.sync(df)` through `_core.sync_pipe`, or return `None` to keep the current
-    implementation (`_rust_sync_eligible()` and the data's shape decide).
+    Turn the dictionary `_core.sync_pipe` returned into the `SyncResult` of `Pipe.sync()`
+    (and apply what the sync changed to this pipe).
     """
-    rust_connector, reason = _rust_sync_eligible(
-        self,
-        df,
-        force=force,
-        blocking=blocking,
-        workers=workers,
-        callback=callback,
-        error_callback=error_callback,
-        debug=debug,
-        kw=kw,
-        enforce_dtypes=enforce_dtypes,
-    )
-    if rust_connector is None:
-        if debug:
-            from meerschaum.utils.debug import dprint
-            dprint(f"Syncing {self} without the native sync: {reason}.")
-        return None
-
-    if chunksize == 0:
-        chunksize = None
-    begin, end = self.parse_date_bounds(begin, end, debug=debug)
-    self._invalidate_cache(debug=debug)
-
-    ### Ensure that the pipe is registered (a plugin connector's `register()` is Python).
-    if self.id is None:
-        register_success, register_msg = self.register(debug=debug)
-        if not register_success and 'already' not in register_msg:
-            self._invalidate_cache(debug=debug)
-            return SyncResult(register_success, register_msg)
-
-    indices_success, indices_msg = self.validate_indices(debug=debug)
-    if not indices_success:
-        self._invalidate_cache(debug=debug)
-        return SyncResult(indices_success, indices_msg)
-
-    out = rust_sync(
-        self,
-        rust_connector,
-        df,
-        begin=begin,
-        end=end,
-        check_existing=check_existing,
-        enforce_dtypes=enforce_dtypes,
-        chunksize=chunksize,
-    )
-    if 'declined' in out:
-        if debug:
-            from meerschaum.utils.debug import dprint
-            dprint(f"Syncing {self} without the native sync: {out['declined']}.")
-        return None
-
     for cache_key in _NATIVE_SYNC_CACHE_KEYS:
         self._clear_cache_key(cache_key, debug=debug)
     self._invalidate_cache(debug=debug)
@@ -303,17 +314,384 @@ def _sync_native(
     if out['parameters']:
         self.update_parameters(out['parameters'], persist=False, debug=debug)
 
+    message = out['message']
+    if (
+        debug
+        and out['success']
+        and message.endswith('.')
+        and message.startswith(('Inserted ', 'Upserted '))
+        and getattr(self.instance_connector, 'type', None) == 'sql'
+    ):
+        ### `SQLConnector.sync_pipe` names the table and the time under `debug`.
+        from meerschaum.utils.sql import sql_item_name
+        instance_connector = self.instance_connector
+        table_name = sql_item_name(
+            self.target,
+            instance_connector.flavor,
+            instance_connector.get_pipe_schema(self),
+        )
+        message = (
+            message[:-1]
+            + f"\non table {table_name}\n"
+            + f"in {round(out['duration'] or 0.0, 2)} seconds."
+        )
+
     return SyncResult(
         out['success'],
-        out['message'],
+        message,
         inserted=out['inserted'],
         updated=out['updated'],
         upserted=out['upserted'],
         deleted=out['deleted'],
+        changed_intervals=out['changed_intervals'],
         duration=out['duration'],
         begin=out['begin'],
         end=out['end'],
     )
+
+
+def _sync_native(
+    self,
+    rust_sync: Callable[..., Dict[str, Any]],
+    df: Any,
+    begin: Union[datetime, int, str, None],
+    end: Union[datetime, int, None],
+    check_existing: bool,
+    enforce_dtypes: bool,
+    chunksize: Optional[int],
+    sync_chunks: bool,
+    force: bool,
+    retries: int,
+    min_seconds: Union[int, float],
+    blocking: bool,
+    workers: Optional[int],
+    callback: Optional[Callable[..., Any]],
+    error_callback: Optional[Callable[..., Any]],
+    debug: bool,
+    inplace: bool,
+    kw: Dict[str, Any],
+) -> Optional[SyncResult]:
+    """
+    Run `Pipe.sync()` through `_core.sync_pipe`, or return `None` to keep the Python
+    implementation (the instance has no native driver yet, see `PARITY.md`, Wave 15 task L).
+    """
+    import os
+    if df is None:
+        self._invalidate_cache(debug=debug)
+        return SyncResult(
+            False,
+            f"You passed `None` instead of data into `sync()` for {self}.\n"
+            + "Omit the DataFrame to infer fetching.",
+        )
+    if _is_dask(df):
+        raise TypeError(
+            "Dask DataFrames are not supported in Meerschaum 5. Convert the data to pandas or "
+            "Polars (`ddf.compute()`) or pass a generator of chunks. "
+            "See the migration guide: reference/migrating-to-v5."
+        )
+
+    context, reason = _native_context(self, debug=debug)
+    if context is None:
+        return _native_unavailable(self, reason, debug=debug)
+
+    infer = df is InferFetch or hasattr(df, 'MRSM_INFER_FETCH')
+    if (callback is not None or error_callback is not None) and blocking:
+        warn("Callback functions are only executed when blocking = False. Ignoring...")
+
+    if chunksize == 0:
+        chunksize = None
+        sync_chunks = False
+
+    params = kw.get('params', None)
+    plugin_kwargs = {
+        key: value
+        for key, value in kw.items()
+        if key not in ('params', 'begin', 'end')
+    }
+    plugin_kwargs.update({
+        'sync_chunks': sync_chunks,
+        'blocking': blocking,
+        'safe_copy': True,
+    })
+    if debug:
+        plugin_kwargs['debug'] = True
+
+    def _call(data: Any, infer_fetch: bool = False) -> SyncResult:
+        out = rust_sync(
+            self,
+            context['connector'],
+            None if infer_fetch else data,
+            begin=parsed_begin,
+            end=parsed_end,
+            check_existing=check_existing,
+            enforce_dtypes=enforce_dtypes,
+            chunksize=chunksize,
+            infer=infer_fetch,
+            params=params,
+            force=force,
+            retries=retries,
+            min_seconds=min_seconds,
+            workers=workers,
+            kwargs=plugin_kwargs,
+            connectors=context['connectors'],
+            attributes=context['attributes'],
+            inplace=inplace,
+            debug=debug,
+        )
+        if 'declined' in out:
+            raise _Declined(out['declined'])
+        return _native_pipe_result(self, out, debug=debug)
+
+    def _prepare() -> Optional[SyncResult]:
+        nonlocal parsed_begin, parsed_end
+        parsed_begin, parsed_end = self.parse_date_bounds(begin, end, debug=debug)
+        self._invalidate_cache(debug=debug)
+        ### Ensure that the pipe is registered (a plugin connector's `register()` is Python).
+        if not self.temporary and self.id is None:
+            register_success, register_msg = self.register(debug=debug)
+            if not register_success and 'already' not in register_msg:
+                self._invalidate_cache(debug=debug)
+                return SyncResult(register_success, register_msg)
+        indices_success, indices_msg = self.validate_indices(debug=debug)
+        if not indices_success:
+            self._invalidate_cache(debug=debug)
+            return SyncResult(indices_success, indices_msg)
+        return None
+
+    parsed_begin, parsed_end = None, None
+
+    def _sync_blocking() -> SyncResult:
+        failed = _prepare()
+        if failed is not None:
+            return failed
+        if infer:
+            return _call(None, infer_fetch=True)
+        from meerschaum.utils.dataframe import df_is_chunk_generator
+        ### PARITY: v4 treats a tuple as a chunk generator and raises `TypeError` (`next(tuple)`);
+        ### pandas accepts it as rows, so it is data here.
+        if df_is_chunk_generator(df) and not isinstance(df, tuple):
+            return _sync_generator_native(
+                self,
+                df,
+                _call,
+                workers=workers,
+                debug=debug,
+            )
+        return _call(df)
+
+    def _run() -> SyncResult:
+        try:
+            return _sync_blocking()
+        except _Declined as declined:
+            raise TypeError(f"Cannot sync data into {self}: {declined}.") from declined
+
+    if blocking:
+        return _run()
+
+    from meerschaum.utils.threading import Thread
+    from meerschaum.utils.debug import dprint
+
+    def default_callback(result_tuple: SuccessTuple):
+        dprint(f"Asynchronous result from {self}: {result_tuple}")
+
+    def default_error_callback(x: Exception):
+        dprint(f"Error received for {self}: {x}")
+
+    if callback is None and debug:
+        callback = default_callback
+    if error_callback is None and debug:
+        error_callback = default_error_callback
+    try:
+        thread = Thread(
+            target=_run,
+            daemon=False,
+            callback=callback,
+            error_callback=error_callback,
+        )
+        thread.start()
+    except Exception as e:
+        self._invalidate_cache(debug=debug)
+        return SyncResult(False, str(e))
+
+    self._invalidate_cache(debug=debug)
+    return SyncResult(True, f"Spawned asyncronous sync for {self}.")
+
+
+class _Declined(Exception):
+    """The binding did not handle the data's shape."""
+
+
+#: What the native data boundary accepts (the text `TypeError`s name; the Rust side,
+#: `sync_api.rs::input_from_py`, has the same list).
+ACCEPTED_DATA_TYPES = (
+    "a list of dictionaries, a dictionary of lists, text of simple lines, a pandas, GeoPandas "
+    "or Polars DataFrame, a pyarrow Table or RecordBatch, a NumPy array, or an iterator of "
+    "those chunks"
+)
+
+
+def is_accepted_data(data: Any) -> bool:
+    """
+    Whether the native data boundary takes `data` (`Pipe.sync()`, `enforce_dtypes()`,
+    `filter_existing()`): documents, rows, columns, text, DataFrames of pandas, GeoPandas and
+    Polars, pyarrow tables and batches, NumPy arrays, or an iterator of any of those.
+    """
+    if isinstance(data, (list, tuple, dict, str)):
+        return True
+    module = type(data).__module__.split('.', maxsplit=1)[0]
+    if module in ('pandas', 'geopandas', 'polars', 'numpy'):
+        return True
+    if module == 'pyarrow':
+        return type(data).__name__ in ('Table', 'RecordBatch')
+    from meerschaum.utils.dataframe import df_is_chunk_generator
+    return df_is_chunk_generator(data) and module != 'dask'
+
+
+def unsupported_data_error(data: Any, action: str = 'use this data') -> TypeError:
+    """
+    The `TypeError` for data the native boundary does not accept: one message, naming the
+    accepted types (`ACCEPTED_DATA_TYPES`). Callers: `raise unsupported_data_error(data, ...)`
+    when `not is_accepted_data(data)`.
+    """
+    return TypeError(
+        f"Cannot {action}: the data is a '{type(data).__module__}.{type(data).__qualname__}'. "
+        f"Accepted types: {ACCEPTED_DATA_TYPES}."
+    )
+
+
+def _sync_generator_native(
+    self,
+    df: Any,
+    call: Callable[..., SyncResult],
+    workers: Optional[int] = None,
+    debug: bool = False,
+) -> SyncResult:
+    """
+    The chunk-generator branch of v4's `_sync`: the first chunk is synced alone, the others get
+    three attempts each, and the messages are sorted and combined. Every chunk is one native sync.
+    """
+    from meerschaum.utils.dataframe import df_is_chunk_generator
+    from meerschaum.utils.debug import dprint
+
+    dt_col = self.columns.get('datetime', None)
+    num_workers = max(int(workers or 1), 1)
+    if debug:
+        dprint(f"Received {type(df)}. Attempting to sync first chunk...")
+
+    df = iter(df)
+    try:
+        chunk = next(df)
+    except StopIteration:
+        return SyncResult(True, "Received an empty generator; nothing to do.")
+
+    first = call(chunk)
+    chunk_success, chunk_msg = first.success, first.message
+    chunk_msg = '\n' + self._get_chunk_label(chunk, dt_col) + '\n' + chunk_msg
+    if not chunk_success:
+        return SyncResult(
+            chunk_success,
+            f"Unable to sync initial chunk for {self}:\n{chunk_msg}",
+        )
+    if debug:
+        dprint("Successfully synced the first chunk, attemping the rest...")
+
+    totals = [first]
+
+    def _process_chunk(_chunk):
+        _chunk_attempts = 0
+        _max_chunk_attempts = 3
+        _result = None
+        while _chunk_attempts < _max_chunk_attempts:
+            try:
+                _result = call(_chunk)
+                _chunk_success, _chunk_msg = _result.success, _result.message
+            except Exception as e:
+                _result = None
+                _chunk_success, _chunk_msg = False, str(e)
+            if _chunk_success:
+                break
+            _chunk_attempts += 1
+            _sleep_seconds = _chunk_attempts ** 2
+            warn(
+                (
+                    f"Failed to sync chunk to {self} "
+                    + f"(attempt {_chunk_attempts} / {_max_chunk_attempts}).\n"
+                    + f"Sleeping for {_sleep_seconds} second"
+                    + ('s' if _sleep_seconds != 1 else '')
+                    + f":\n{_chunk_msg}"
+                ),
+                stack=False,
+            )
+            time.sleep(_sleep_seconds)
+
+        num_rows_str = (
+            f"{num_rows:,} rows"
+            if (num_rows := len(_chunk)) != 1
+            else f"{num_rows} row"
+        )
+        _chunk_msg = (
+            (
+                "Synced"
+                if _chunk_success
+                else "Failed to sync"
+            ) + f" a chunk ({num_rows_str}) to {self}:\n"
+            + self._get_chunk_label(_chunk, dt_col)
+            + '\n'
+            + _chunk_msg
+        )
+        mrsm.pprint((_chunk_success, _chunk_msg), calm=True)
+        if _result is not None:
+            totals.append(_result)
+        return _chunk_success, _chunk_msg
+
+    if not df_is_chunk_generator(chunk) and num_workers != 1:
+        from multiprocessing.pool import ThreadPool
+        with ThreadPool(num_workers) as pool:
+            rest = list(pool.imap(_process_chunk, df))
+    else:
+        rest = list(_process_chunk(_child_chunks) for _child_chunks in df)
+
+    results = sorted([(chunk_success, chunk_msg)] + rest)
+    chunk_messages = [chunk_msg for _, chunk_msg in results]
+    success_bools = [chunk_success for chunk_success, _ in results]
+    num_successes = len([chunk_success for chunk_success, _ in results if chunk_success])
+    num_failures = len([chunk_success for chunk_success, _ in results if not chunk_success])
+    success = all(success_bools)
+    msg = (
+        'Synced '
+        + f'{len(chunk_messages):,} chunk'
+        + ('s' if len(chunk_messages) != 1 else '')
+        + f' to {self}\n({num_successes} succeeded, {num_failures} failed):\n\n'
+        + '\n\n'.join(chunk_messages).lstrip().rstrip()
+    ).lstrip().rstrip()
+
+    def _sum(name: str) -> Optional[int]:
+        values = [getattr(r, name) for r in totals if getattr(r, name) is not None]
+        return sum(values) if values else None
+
+    return SyncResult(
+        success,
+        msg,
+        inserted=_sum('inserted'),
+        updated=_sum('updated'),
+        upserted=_sum('upserted'),
+        deleted=_sum('deleted'),
+        changed_intervals=_union_intervals(totals),
+        begin=first.begin,
+        end=totals[-1].end,
+    )
+
+
+def _union_intervals(results: List[SyncResult]) -> List[Tuple[Any, Any]]:
+    """
+    The distinct changed intervals of several sync results, in order of first appearance.
+    """
+    seen = []
+    for result in results:
+        for interval in (result.changed_intervals or []):
+            if interval not in seen:
+                seen.append(interval)
+    return seen
 
 
 def sync(
@@ -465,12 +843,19 @@ def sync(
             check_existing=check_existing,
             enforce_dtypes=enforce_dtypes,
             chunksize=chunksize,
+            sync_chunks=sync_chunks,
             force=force,
+            retries=retries,
+            min_seconds=min_seconds,
             blocking=blocking,
             workers=workers,
             callback=callback,
             error_callback=error_callback,
             debug=debug,
+            inplace=(
+                _inplace
+                and bool(mrsm.get_config('system', 'experimental', 'inplace_sync'))
+            ),
             kw=kw,
         )
         if _native_result is not None:
@@ -925,6 +1310,21 @@ def get_sync_time(
     A `datetime` or int, if the pipe exists, otherwise `None`.
 
     """
+    if (_rust := _rust_impl('pipe_get_sync_time')) is not None:
+        from meerschaum.core.Pipe._data import _rust_context
+        _context = _rust_context(self, debug=debug)
+        if _context is not None:
+            return _rust(
+                self,
+                _context,
+                params=params,
+                newest=newest,
+                apply_backtrack_interval=apply_backtrack_interval,
+                remote=remote,
+                round_down=round_down,
+                debug=debug,
+            )
+
     from meerschaum.utils.venv import Venv
     from meerschaum.connectors import get_connector_plugin
     from meerschaum.utils.misc import filter_keywords
@@ -1064,6 +1464,22 @@ def filter_existing(
     A tuple of three DataFrames: unseen, update, and delta.
     These are Polars DataFrames if `df` is a Polars DataFrame or LazyFrame, else Pandas.
     """
+    if (_rust := _rust_impl('pipe_filter_existing')) is not None:
+        from meerschaum.core.Pipe._data import _rust_context
+        _context = _rust_context(self, debug=debug)
+        if _context is not None:
+            if df is not None and not is_accepted_data(df):
+                raise unsupported_data_error(df, f"filter the existing rows of {self}")
+            return _rust(
+                self,
+                _context,
+                df,
+                date_bound_only=date_bound_only,
+                include_unchanged_columns=include_unchanged_columns,
+                enforce_dtypes=enforce_dtypes,
+                debug=debug,
+            )
+
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.packages import attempt_import, import_pandas

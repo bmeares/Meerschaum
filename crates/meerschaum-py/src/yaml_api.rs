@@ -41,7 +41,7 @@ pyo3::create_exception!(yaml, EmitterError, YAMLError);
 
 const MAX_DEPTH: usize = 400;
 
-fn to_py_err(e: PyYamlError) -> PyErr {
+pub(crate) fn to_py_err(e: PyYamlError) -> PyErr {
     match e.kind {
         ErrorKind::Reader => ReaderError::new_err(e.message),
         ErrorKind::Scanner => ScannerError::new_err(e.message),
@@ -62,7 +62,7 @@ fn to_py_err(e: PyYamlError) -> PyErr {
 // Node -> Python
 // ---------------------------------------------------------------------------------------------
 
-struct ToPy<'py> {
+pub(crate) struct ToPy<'py> {
     py: Python<'py>,
     date_cls: Bound<'py, PyAny>,
     datetime_cls: Bound<'py, PyAny>,
@@ -72,7 +72,7 @@ struct ToPy<'py> {
 }
 
 impl<'py> ToPy<'py> {
-    fn new(py: Python<'py>) -> PyResult<Self> {
+    pub(crate) fn new(py: Python<'py>) -> PyResult<Self> {
         let datetime = py.import("datetime")?;
         Ok(ToPy {
             py,
@@ -84,18 +84,18 @@ impl<'py> ToPy<'py> {
         })
     }
 
-    fn big_int(&self, i: &BigInt) -> PyResult<Bound<'py, PyAny>> {
+    pub(crate) fn big_int(&self, i: &BigInt) -> PyResult<Bound<'py, PyAny>> {
         if let Ok(small) = i64::try_from(i) {
             return Ok(small.into_pyobject(self.py)?.into_any());
         }
         self.py.get_type::<PyInt>().call1((i.to_string(),))
     }
 
-    fn date(&self, d: &Date) -> PyResult<Bound<'py, PyAny>> {
+    pub(crate) fn date(&self, d: &Date) -> PyResult<Bound<'py, PyAny>> {
         self.date_cls.call1((d.year, d.month, d.day))
     }
 
-    fn datetime(&self, dt: &DateTime) -> PyResult<Bound<'py, PyAny>> {
+    pub(crate) fn datetime(&self, dt: &DateTime) -> PyResult<Bound<'py, PyAny>> {
         let tz: Bound<'py, PyAny> = match dt.utc_offset_us {
             None => self.py.None().into_bound(self.py),
             Some(0) => {
@@ -203,7 +203,7 @@ struct FromPy<'py> {
     in_progress: HashSet<usize>,
 }
 
-fn representer_error(py: Python<'_>, obj: &Bound<'_, PyAny>) -> PyErr {
+pub(crate) fn representer_error(py: Python<'_>, obj: &Bound<'_, PyAny>) -> PyErr {
     let repr = obj
         .repr()
         .map(|r| r.to_string())

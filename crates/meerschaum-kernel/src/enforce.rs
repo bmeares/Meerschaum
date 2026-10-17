@@ -1145,6 +1145,9 @@ pub fn pandas_astype(name: &str, data: &ColumnData, target: &str) -> Result<Colu
         }
     }
     let from_object = matches!(data, ColumnData::Object(_));
+    // pandas' masked integer dtypes (`Int64`, `UInt8`, ...) refuse a fractional float or decimal
+    // (`cannot safely cast non-equivalent object to int64`), unlike the Arrow-backed ones.
+    let masked_int = target.starts_with(['I', 'U']) && !target.contains("pyarrow");
     let values = data.values();
     let err = |v: &Value| format!("Cannot cast {} '{}' to {target}", v.type_name(), v.py_str());
     let mut out = Vec::with_capacity(values.len());
@@ -1162,15 +1165,20 @@ pub fn pandas_astype(name: &str, data: &ColumnData, target: &str) -> Result<Colu
             // converted value by value and truncates toward zero (`Series([2.5], dtype=object)
             // .astype('int64[pyarrow]')` is `[2]`), while a NumPy float64 column raises.
             (d, Value::Float(f)) if d.is_integer() => {
-                let f = if from_object { f.trunc() } else { *f };
-                if !crate::cast::float_fits_i64(f) {
+                let f = if from_object && !masked_int {
+                    f.trunc()
+                } else {
+                    *f
+                };
+                if (masked_int && f.fract() != 0.0) || !crate::cast::float_fits_i64(f) {
                     return Err(err(v));
                 }
                 Value::Int(f as i64)
             }
             (d, Value::Decimal(dec)) if d.is_integer() => {
-                let f = dec.to_f64().trunc();
-                if !crate::cast::float_fits_i64(f) {
+                let f = dec.to_f64();
+                let f = if masked_int { f } else { f.trunc() };
+                if (masked_int && f.fract() != 0.0) || !crate::cast::float_fits_i64(f) {
                     return Err(err(v));
                 }
                 Value::Int(f as i64)

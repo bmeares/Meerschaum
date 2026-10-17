@@ -461,7 +461,7 @@ pub fn possible_config_keys(rt: &mut Runtime<'_>) -> Vec<String> {
 /// `edit config [keys...]`: open each key's file in `$EDITOR`, re-read it, then `reload`.
 pub fn edit_config(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     if flag(args, "rollback") {
-        return crate::python::core_action("edit config", args, rt);
+        return crate::native::residual::rollback_config(args, rt);
     }
     let mut action = words(args, "action");
     if action.is_empty() {
@@ -495,7 +495,18 @@ pub fn edit_config(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
         action = vec![choice];
     }
     for key in &action {
-        // `get_config(key, write_missing=True)` creates the file from the defaults.
+        // Snapshot the pristine file before any edits so `edit config --rollback` can restore it.
+        let backup_path = rt.config().with_state(|s| s.backup_config_key(key));
+        // `get_config(key, write_missing=True)` creates the file from the defaults. v4 pops the key
+        // from the in-memory config first (`config.pop(key, {})`): a key an `MRSM_CONFIG` patch
+        // or an earlier read already loaded would otherwise never reach the lookup that writes
+        // the missing file.
+        let popped = rt.config().with_state(|s| {
+            let mut config = s.config_lossless().clone();
+            let popped = config.shift_remove(key);
+            s.set_config_lossless(config);
+            popped
+        });
         let path = {
             let config = rt.config();
             let _ = config.get_with(
@@ -512,20 +523,8 @@ pub fn edit_config(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
             continue;
         };
         loop {
-            let editor = (rt.env)("EDITOR").unwrap_or_else(|| {
-                // PARITY: v4 falls back to installing and running `pyvim`.
-                "vi".into()
-            });
-            let spec = CommandSpec {
-                program: editor.clone(),
-                args: vec![path.to_string_lossy().into_owned()],
-                ..CommandSpec::default()
-            };
-            if let Err(e) = rt.host.run(&spec) {
-                return Ok(SuccessTuple::fail(format!(
-                    "Failed to open '{}' with editor '{editor}':\n{e}",
-                    path.display()
-                )));
+            if let Err(message) = crate::native::editor::edit_file(rt, &path) {
+                return Ok(SuccessTuple::fail(message));
             }
             let text = std::fs::read_to_string(&path).unwrap_or_default();
             let parsed = if path.extension().is_some_and(|e| e == "json") {
@@ -537,9 +536,36 @@ pub fn edit_config(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
                 Ok(v) if v.truthy() => break,
                 Ok(_) => break,
                 Err(_) => {
+                    // v4 puts the popped config back (`_config()[key] = key_config`).
+                    if let Some(previous) = popped.clone().filter(|v| v.truthy()) {
+                        rt.config().with_state(|s| {
+                            let mut config = s.config_lossless().clone();
+                            config.insert(key.clone(), previous);
+                            s.set_config_lossless(config);
+                        });
+                    }
                     let warning =
                         rt.with_formatter(|f| f.warn(&format!("Could not parse key '{key}'.")));
                     rt.eprint(&warning);
+                    if let Some(backup) = &backup_path
+                        && crate::native::yes_no(
+                            rt,
+                            &format!("Restore '{key}' from the backup taken before editing?"),
+                            "n",
+                            false,
+                            false,
+                        )
+                        .unwrap_or(false)
+                    {
+                        let (ok, message) = rt
+                            .config()
+                            .with_state(|s| s.restore_config_backup(key, Some(backup), 0));
+                        if ok {
+                            crate::native::info(rt, &message);
+                            break;
+                        }
+                        crate::native::warn(rt, &message);
+                    }
                     if rt
                         .host
                         .read_line(&format!(
@@ -560,7 +586,7 @@ pub fn edit_config(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
 /// `clear` without a subaction: clear the screen (`clear pipes` needs an instance).
 pub fn clear(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     if !words(args, "action").is_empty() {
-        return crate::python::core_action("clear", args, rt);
+        return crate::native::residual::choose_subaction("clear", args, rt);
     }
     crate::shell::clear_screen(rt, flag(args, "debug"));
     Ok(SuccessTuple::ok(""))

@@ -149,10 +149,12 @@ pub fn edit_pipes(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     let force = flag(args, "force");
     let noask = flag(args, "noask");
     let params = super::params(args);
+    // The editor paths (`edit pipes`, `edit pipes definition`, `edit definition`).
     if action.first().is_some_and(|a| a == "definition") {
-        return Ok(SuccessTuple::fail(
-            "Editing definitions (`edit pipes definition`) opens an editor and is not available in the Rust CLI yet.",
-        ));
+        return super::definition::edit_pipes(args, rt, true);
+    }
+    if params.as_ref().is_none_or(|p| p.is_empty()) {
+        return super::definition::edit_pipes(args, rt, false);
     }
     let (inst, mut pipes) = selected_pipes(rt, args)?;
     if pipes.is_empty() {
@@ -191,9 +193,7 @@ pub fn edit_pipes(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
         }
         hydrate(rt, &inst, sp);
         let Some(params) = &params else {
-            return Ok(SuccessTuple::fail(
-                "Editing pipes interactively opens an editor and is not available in the Rust CLI yet; pass `--params`.",
-            ));
+            continue;
         };
         info(
             rt,
@@ -722,8 +722,8 @@ pub fn copy_pipes(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     })
 }
 
-/// `register plugins [plugins]`: the checks before the upload. Packaging and uploading a
-/// plugin needs its Python module (the worker path), so the upload itself returns a failure.
+/// `register plugins [plugins]`: the checks before the upload, then the archive build and
+/// upload (`plugin_admin::register_uploads`).
 pub fn register_plugins(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     let _repo = super::show::repo_keys(args, rt)?;
     let action = words(args, "action");
@@ -749,5 +749,5 @@ pub fn register_plugins(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
             "Finished registering 0 plugins\n    (0 succeeded, 0 failed).",
         ));
     }
-    crate::python::core_action("register plugins", args, rt)
+    super::plugin_admin::register_uploads(args, rt, &to_register)
 }

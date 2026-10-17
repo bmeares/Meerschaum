@@ -11,21 +11,41 @@
 //! - [`lifecycle`], [`pip`], [`plugin_files`]: `setup plugins`, `install plugins|required|packages`.
 //! - [`rich_json`]: `rich.json.JSON` (pipe attributes in `show pipes`).
 
+pub mod api_warnings;
+pub mod ask;
+pub mod bootstrap;
+pub mod bootstrap_plugins;
+pub mod cache;
 pub mod compose_instance;
+pub mod connectors;
+pub mod definition;
+pub mod editor;
 pub mod engine_views;
+pub mod gui;
 pub mod jobs;
 pub mod lifecycle;
+pub mod login;
 pub mod maintenance;
 pub mod manage;
 mod metadata;
+pub mod os_sql_stack;
+pub mod packages;
+mod packages_table;
 pub mod pip;
 pub mod pipes;
+pub mod plugin_admin;
 pub mod plugin_files;
+pub mod remote_jobs;
+pub mod residual;
 pub mod rich_json;
 pub mod session;
 pub mod show;
+pub mod subactions;
 pub mod sync;
+pub mod terminal;
+pub mod tokens;
 pub mod users;
+pub mod venv_admin;
 pub mod venvs;
 pub mod verify;
 
@@ -71,6 +91,19 @@ pub fn run(function: &str, args: &ArgsMap, rt: &mut Runtime<'_>) -> Option<Actio
         "_upgrade_meerschaum" | "_upgrade_packages" | "_upgrade_plugins" => {
             venvs::upgrade(function, args, rt)
         }
+        // Wave 15 (N2): plugins, packages and venvs.
+        "_bootstrap_plugins" => bootstrap_plugins::bootstrap_plugins(args, rt),
+        "_uninstall_plugins" => plugin_admin::uninstall_plugins(args, rt),
+        "_uninstall_packages" => packages::uninstall_packages(args, rt),
+        "_delete_plugins" => plugin_admin::delete_plugins(args, rt),
+        "_delete_venvs" => venv_admin::delete_venvs(args, rt),
+        "_edit_plugins" => plugin_admin::edit_plugins(args, rt),
+        "_show_packages" => packages::show_packages(args, rt),
+        "_verify_packages" => packages::verify_packages(args, rt),
+        "_verify_plugins" => plugin_admin::verify_plugins(args, rt),
+        "_verify_venvs" => venv_admin::verify_venvs(args, rt),
+        "_start_worker" => subactions::start_worker(args, rt),
+        "uninstall" | "verify" | "upgrade" => subactions::choose_subaction(function, args, rt),
         "_show_jobs" => jobs::show_jobs(args, rt),
         "_show_logs" | "_attach_logs" => jobs::show_logs(args, rt),
         "_register_pipes" => manage::register_pipes(args, rt),
@@ -107,6 +140,7 @@ pub fn run(function: &str, args: &ArgsMap, rt: &mut Runtime<'_>) -> Option<Actio
         "_pause_jobs" => jobs::pause_jobs(args, rt),
         "_restart_jobs" => jobs::restart_jobs(args, rt),
         "_attach_jobs" => jobs::attach_jobs(args, rt),
+        "_edit_jobs" => jobs::edit_jobs(args, rt),
         _ => return None,
     })
 }
@@ -237,12 +271,9 @@ pub fn check_noask(rt: &Runtime<'_>, noask: bool) -> bool {
     (rt.env)(var).is_some_and(|v| matches!(v.to_lowercase().as_str(), "1" | "true"))
 }
 
-/// `prompt(question, icon=..., noask=...)`: v4 prints nothing and returns `''` when `noask`.
-pub fn prompt(rt: &mut Runtime<'_>, question: &str, icon: bool, noask: bool) -> Option<String> {
-    if check_noask(rt, noask) {
-        return Some(String::new());
-    }
-    let q = rt.with_formatter(|f| {
+/// The text `prompt()` prints for `question`: the icon, the first line styled, a trailing space.
+pub fn question_text(rt: &mut Runtime<'_>, question: &str, icon: bool) -> String {
+    rt.with_formatter(|f| {
         let mut lines = question.splitn(2, '\n');
         let first = lines.next().unwrap_or_default().to_string();
         let other = lines.next().unwrap_or_default().to_string();
@@ -270,7 +301,15 @@ pub fn prompt(rt: &mut Runtime<'_>, question: &str, icon: bool, noask: bool) -> 
             q.push(' ');
         }
         q
-    });
+    })
+}
+
+/// `prompt(question, icon=..., noask=...)`: v4 prints nothing and returns `''` when `noask`.
+pub fn prompt(rt: &mut Runtime<'_>, question: &str, icon: bool, noask: bool) -> Option<String> {
+    if check_noask(rt, noask) {
+        return Some(String::new());
+    }
+    let q = question_text(rt, question, icon);
     rt.host.read_line(&q)
 }
 

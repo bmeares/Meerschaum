@@ -30,22 +30,22 @@
 //! turn into a DataFrame (the façade reports it as v4 does).
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use indexmap::IndexMap;
 use meerschaum_connector::{DateBound, InstanceConnector};
 use meerschaum_core::{Map, Value};
-use meerschaum_engine::StaticRegistry;
 use meerschaum_engine::sync::{SyncArgs, SyncBegin, SyncEnv, sync_pipe as engine_sync_pipe};
 use meerschaum_kernel::Value as Cell;
 use meerschaum_kernel::enforce::PipeInput;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
-use pyo3::types::{PyDict, PyList, PyString, PyTuple};
+use pyo3::types::{PyBool, PyBytes, PyDict, PyFloat, PyInt, PyList, PyString, PyTuple, PyType};
 
-use crate::convert::{PyCtx, core_to_py, py_to_cell, qualname};
+use crate::convert::{PyCtx, core_to_py, py_to_cell, py_to_core, qualname};
+use crate::facade::{self, RegistryInput};
 use crate::pandas_bridge::{ColumnMode, frame_from_py};
-use crate::pipe_bridge::{ParamsView, bound_to_py, core_pipe, date_bound};
-use crate::runtime::block_on;
+use crate::pipe_bridge::{ParamsView, bound_to_py, core_pipe, date_bound, params_map};
 use crate::sql_api::PySqlConnector;
 
 /// What [`input_from_py`] made of the caller's data.
@@ -59,107 +59,320 @@ pub enum NativeInput {
     Invalid(String),
 }
 
-/// Whether the object is a `dict` with `str` keys; the keys in order.
-fn string_keys(dict: &Bound<'_, PyDict>) -> PyResult<Option<Vec<String>>> {
-    let mut keys = Vec::with_capacity(dict.len());
-    for key in dict.keys() {
-        match key.downcast::<PyString>() {
-            Ok(s) => keys.push(s.to_str()?.to_string()),
-            Err(_) => return Ok(None),
+/// How many `debug=True` syncs are running: while one is, the `tracing` sink prints the
+/// engine's `debug` events (see [`crate::logging`]).
+pub static DEBUG_SYNCS: AtomicUsize = AtomicUsize::new(0);
+
+pub(crate) struct DebugGuard(bool);
+
+impl DebugGuard {
+    pub(crate) fn new(on: bool) -> Self {
+        if on {
+            DEBUG_SYNCS.fetch_add(1, Ordering::SeqCst);
         }
+        DebugGuard(on)
     }
-    Ok(Some(keys))
 }
 
-/// A list of documents as `PipeInput::Docs` (`pd.DataFrame(docs)`): the columns appear in
-/// order of first appearance, a missing key is a null, every value converts as a DataFrame
-/// cell ([`py_to_cell`]).
-fn docs_from_list(ctx: &PyCtx<'_>, list: &Bound<'_, PyList>) -> PyResult<NativeInput> {
-    let mut docs: Vec<IndexMap<String, Cell>> = Vec::with_capacity(list.len());
-    for item in list.iter() {
-        let Ok(dict) = item.downcast::<PyDict>() else {
-            return Ok(NativeInput::Declined(
-                "the list holds items that are not dictionaries".into(),
-            ));
-        };
-        let mut doc = IndexMap::with_capacity(dict.len());
-        for (key, value) in dict.iter() {
-            let Ok(key) = key.downcast::<PyString>() else {
-                return Ok(NativeInput::Declined(
-                    "a document has a key that is not a string".into(),
-                ));
-            };
-            doc.insert(key.to_str()?.to_string(), py_to_cell(ctx, &value)?);
+impl Drop for DebugGuard {
+    fn drop(&mut self) {
+        if self.0 {
+            DEBUG_SYNCS.fetch_sub(1, Ordering::SeqCst);
         }
-        docs.push(doc);
+    }
+}
+
+/// The name of a document key: a string as it is, anything else (`pd.DataFrame` accepts
+/// integer labels, which the table then names by their text) through `str()`.
+fn key_name(key: &Bound<'_, PyAny>) -> PyResult<String> {
+    Ok(match key.downcast::<PyString>() {
+        Ok(s) => s.to_str()?.to_string(),
+        Err(_) => key.str()?.to_str()?.to_string(),
+    })
+}
+
+/// `type(obj).__name__`.
+fn type_name(obj: &Bound<'_, PyAny>) -> String {
+    obj.get_type()
+        .name()
+        .map(|n| n.to_string())
+        .unwrap_or_else(|_| "object".into())
+}
+
+/// A non-text sequence the way `pd.DataFrame` takes one as a column or a row: lists, tuples,
+/// ranges, NumPy arrays and pandas / Polars Series (their index is not used).
+fn sequence_items<'py>(obj: &Bound<'py, PyAny>) -> PyResult<Option<Vec<Bound<'py, PyAny>>>> {
+    if obj.is_instance_of::<PyString>()
+        || obj.is_instance_of::<PyBytes>()
+        || obj.is_instance_of::<PyDict>()
+    {
+        return Ok(None);
+    }
+    if let Ok(list) = obj.downcast::<PyList>() {
+        return Ok(Some(list.iter().collect()));
+    }
+    if let Ok(tuple) = obj.downcast::<PyTuple>() {
+        return Ok(Some(tuple.iter().collect()));
+    }
+    let name = qualname(obj)?;
+    let is_array_like = name == "range"
+        || name.starts_with("numpy.")
+        || name.starts_with("pandas.")
+        || name.starts_with("polars.");
+    if is_array_like && !name.ends_with("DataFrame") && obj.hasattr("__iter__")? {
+        let mut out = Vec::new();
+        for item in obj.try_iter()? {
+            out.push(item?);
+        }
+        return Ok(Some(out));
+    }
+    Ok(None)
+}
+
+/// The documents `pd.DataFrame(items)` builds from a list or tuple: dictionaries are the rows;
+/// rows given as sequences name their columns `0`, `1`, ...; scalars are one column `0`.
+fn docs_from_items(ctx: &PyCtx<'_>, items: &[Bound<'_, PyAny>]) -> PyResult<NativeInput> {
+    let mut docs: Vec<IndexMap<String, Cell>> = Vec::with_capacity(items.len());
+    let first_is_dict = items.first().is_some_and(|i| i.is_instance_of::<PyDict>());
+    let first_is_row = items
+        .first()
+        .is_some_and(|i| !first_is_dict && sequence_items(i).ok().flatten().is_some());
+    for item in items {
+        if first_is_dict {
+            let Ok(dict) = item.downcast::<PyDict>() else {
+                return Ok(NativeInput::Invalid(format!(
+                    "'{}' object has no attribute 'keys'",
+                    type_name(item)
+                )));
+            };
+            let mut doc = IndexMap::with_capacity(dict.len());
+            for (key, value) in dict.iter() {
+                doc.insert(key_name(&key)?, py_to_cell(ctx, &value)?);
+            }
+            docs.push(doc);
+        } else if first_is_row {
+            let Some(row) = sequence_items(item)? else {
+                return Ok(NativeInput::Invalid(format!(
+                    "Expected a sequence for every row, got a '{}'.",
+                    type_name(item)
+                )));
+            };
+            let mut doc = IndexMap::with_capacity(row.len());
+            for (index, value) in row.iter().enumerate() {
+                doc.insert(index.to_string(), py_to_cell(ctx, value)?);
+            }
+            docs.push(doc);
+        } else {
+            let mut doc = IndexMap::with_capacity(1);
+            doc.insert("0".to_string(), py_to_cell(ctx, item)?);
+            docs.push(doc);
+        }
     }
     Ok(NativeInput::Data(PipeInput::Docs(docs)))
 }
 
-/// A dictionary of lists as `PipeInput::Columns` (`pd.DataFrame(columns)`).
+/// A dictionary as `PipeInput::Columns` (`pd.DataFrame(columns)`): sequences are columns,
+/// scalars repeat down the column when another column has a length, and mappings are columns
+/// aligned on their keys (the index).
 fn columns_from_dict(ctx: &PyCtx<'_>, dict: &Bound<'_, PyDict>) -> PyResult<NativeInput> {
-    if string_keys(dict)?.is_none() {
-        return Ok(NativeInput::Declined(
-            "a column name is not a string".into(),
-        ));
+    enum Raw<'py> {
+        Seq(Vec<Bound<'py, PyAny>>),
+        Mapping(Vec<(Bound<'py, PyAny>, Bound<'py, PyAny>)>),
+        Scalar(Bound<'py, PyAny>),
     }
-    let mut columns: IndexMap<String, Vec<Cell>> = IndexMap::with_capacity(dict.len());
-    let mut length: Option<usize> = None;
+    let mut raws: Vec<(String, Raw<'_>)> = Vec::with_capacity(dict.len());
     for (key, values) in dict.iter() {
-        let name = key.downcast::<PyString>()?.to_str()?.to_string();
-        let cells = if let Ok(list) = values.downcast::<PyList>() {
-            list.iter()
-                .map(|v| py_to_cell(ctx, &v))
-                .collect::<PyResult<Vec<_>>>()?
-        } else if let Ok(tuple) = values.downcast::<PyTuple>() {
-            tuple
-                .iter()
-                .map(|v| py_to_cell(ctx, &v))
-                .collect::<PyResult<Vec<_>>>()?
+        let name = key_name(&key)?;
+        let raw = if let Some(items) = sequence_items(&values)? {
+            Raw::Seq(items)
+        } else if let Ok(mapping) = values.downcast::<PyDict>() {
+            Raw::Mapping(mapping.iter().collect())
+        } else if values.is_instance_of::<PyBytes>()
+            || values.is_instance_of::<PyString>()
+            || values.is_instance_of::<PyBool>()
+            || values.is_instance_of::<PyInt>()
+            || values.is_instance_of::<PyFloat>()
+            || values.is_none()
+            || !values.hasattr("__iter__")?
+        {
+            Raw::Scalar(values)
         } else {
-            // Scalars broadcast, Series and arrays carry an index: pandas decides.
             return Ok(NativeInput::Declined(format!(
-                "column '{name}' is not a list"
+                "column '{name}' is a '{}'",
+                type_name(&values)
             )));
         };
-        match length {
-            None => length = Some(cells.len()),
-            Some(n) if n != cells.len() => {
+        raws.push((name, raw));
+    }
+    // The index of mapping columns: the union of their keys, in order of first appearance.
+    let mut index: Vec<String> = Vec::new();
+    for (_, raw) in &raws {
+        if let Raw::Mapping(pairs) = raw {
+            for (k, _) in pairs {
+                let k = k.str()?.to_str()?.to_string();
+                if !index.contains(&k) {
+                    index.push(k);
+                }
+            }
+        }
+    }
+    let mut length: Option<usize> = None;
+    for (_, raw) in &raws {
+        let n = match raw {
+            Raw::Seq(items) => Some(items.len()),
+            Raw::Mapping(_) => Some(index.len()),
+            Raw::Scalar(_) => None,
+        };
+        match (length, n) {
+            (Some(a), Some(b)) if a != b => {
                 return Ok(NativeInput::Invalid(
                     "All arrays must be of the same length".into(),
                 ));
             }
-            Some(_) => {}
+            (None, Some(b)) => length = Some(b),
+            _ => {}
         }
+    }
+    let Some(length) = length else {
+        if raws.is_empty() {
+            return Ok(NativeInput::Data(PipeInput::Columns(IndexMap::new())));
+        }
+        return Ok(NativeInput::Invalid(
+            "If using all scalar values, you must pass an index".into(),
+        ));
+    };
+    let mut columns: IndexMap<String, Vec<Cell>> = IndexMap::with_capacity(raws.len());
+    for (name, raw) in raws {
+        let cells = match raw {
+            Raw::Seq(items) => items
+                .iter()
+                .map(|v| py_to_cell(ctx, v))
+                .collect::<PyResult<Vec<_>>>()?,
+            Raw::Scalar(value) => {
+                let cell = py_to_cell(ctx, &value)?;
+                vec![cell; length]
+            }
+            Raw::Mapping(pairs) => {
+                let mut by_key: IndexMap<String, Cell> = IndexMap::with_capacity(pairs.len());
+                for (k, v) in pairs {
+                    by_key.insert(k.str()?.to_str()?.to_string(), py_to_cell(ctx, &v)?);
+                }
+                index
+                    .iter()
+                    .map(|k| by_key.get(k).cloned().unwrap_or(Cell::Null))
+                    .collect()
+            }
+        };
         columns.insert(name, cells);
     }
     Ok(NativeInput::Data(PipeInput::Columns(columns)))
 }
 
-/// Convert the data `Pipe.sync()` was given. Documents and dictionaries of lists never touch
-/// pandas or Polars; a DataFrame object needs its own package (which created it).
+/// Python's `str.splitlines()` line boundaries.
+fn py_splitlines(text: &str) -> Vec<&str> {
+    let mut lines = Vec::new();
+    let mut start = 0;
+    let mut chars = text.char_indices().peekable();
+    while let Some((i, c)) = chars.next() {
+        let is_break = matches!(
+            c,
+            '\n' | '\r'
+                | '\u{0b}'
+                | '\u{0c}'
+                | '\u{1c}'
+                | '\u{1d}'
+                | '\u{1e}'
+                | '\u{85}'
+                | '\u{2028}'
+                | '\u{2029}'
+        );
+        if !is_break {
+            continue;
+        }
+        lines.push(&text[start..i]);
+        let mut end = i + c.len_utf8();
+        if c == '\r' && chars.peek().is_some_and(|(_, n)| *n == '\n') {
+            chars.next();
+            end += 1;
+        }
+        start = end;
+    }
+    if start < text.len() {
+        lines.push(&text[start..]);
+    }
+    lines
+}
+
+/// `parse_simple_lines(text)`: one `string_to_dict` document per line.
+fn docs_from_text(text: &str) -> NativeInput {
+    let mut docs: Vec<IndexMap<String, Cell>> = Vec::new();
+    for line in py_splitlines(text) {
+        match meerschaum_core::pyfmt::string_to_dict(line) {
+            Ok(map) => docs.push(
+                map.iter()
+                    .map(|(k, v)| (k.clone(), Cell::from(v)))
+                    .collect(),
+            ),
+            Err(_) => {
+                return NativeInput::Invalid("Cannot parse simple lines into a dataframe.".into());
+            }
+        }
+    }
+    NativeInput::Data(PipeInput::Docs(docs))
+}
+
+/// Convert the data `Pipe.sync()` was given. Documents, dictionaries of lists and text never
+/// touch pandas or Polars; a DataFrame object needs its own package (which created it).
 pub fn input_from_py<'py>(py: Python<'py>, df: &Bound<'py, PyAny>) -> PyResult<NativeInput> {
+    if let Ok(text) = df.downcast::<PyString>() {
+        return Ok(docs_from_text(text.to_str()?));
+    }
     if let Ok(list) = df.downcast::<PyList>() {
         let ctx = PyCtx::scalars(py)?;
-        return docs_from_list(&ctx, list);
+        let items: Vec<_> = list.iter().collect();
+        return docs_from_items(&ctx, &items);
+    }
+    if let Ok(tuple) = df.downcast::<PyTuple>() {
+        let ctx = PyCtx::scalars(py)?;
+        let items: Vec<_> = tuple.iter().collect();
+        return docs_from_items(&ctx, &items);
     }
     if let Ok(dict) = df.downcast::<PyDict>() {
         let ctx = PyCtx::scalars(py)?;
         return columns_from_dict(&ctx, dict);
     }
     let name = qualname(df)?;
-    if name.starts_with("pandas.") || name.starts_with("geopandas.") {
+    if name.starts_with("pandas.") && name.ends_with("DataFrame") || name.starts_with("geopandas.")
+    {
         let ctx = PyCtx::new(py)?;
         let frame = frame_from_py(&ctx, df, ColumnMode::Full)?.frame;
         return Ok(NativeInput::Data(PipeInput::Frame(frame)));
     }
-    if name.starts_with("polars.") && !name.ends_with("LazyFrame") {
+    if name.starts_with("polars.") && (name.ends_with("DataFrame") || name.ends_with("LazyFrame")) {
         let ctx = PyCtx::new(py)?;
         let frame = frame_from_py(&ctx, df, ColumnMode::Full)?.frame;
         return Ok(NativeInput::Data(PipeInput::Frame(frame)));
+    }
+    if name.starts_with("pyarrow.") && (name.ends_with("Table") || name.ends_with("RecordBatch")) {
+        // Arrow tables and record batches cross through the C stream interface.
+        let table = if name.ends_with("RecordBatch") {
+            py.import("pyarrow")?
+                .getattr("Table")?
+                .call_method1("from_batches", (vec![df.clone()],))?
+        } else {
+            df.clone()
+        };
+        let frame = crate::pandas_bridge::frame_from_arrow(&table)?;
+        return Ok(NativeInput::Data(PipeInput::Frame(frame)));
+    }
+    if name == "numpy.ndarray" {
+        // `pd.DataFrame(array)`: the rows of a 2-D array, or the one column of a 1-D array.
+        return input_from_py(py, &df.call_method0("tolist")?);
     }
     Ok(NativeInput::Declined(format!(
-        "the data is a '{name}', not a list of dictionaries, a dictionary of lists or a DataFrame"
+        "the data is a '{name}'; `Pipe.sync()` takes a list of dictionaries, a dictionary of lists, \
+         text of simple lines, a pandas, GeoPandas or Polars DataFrame, a pyarrow Table or \
+         RecordBatch, a NumPy array, or an iterator of those chunks"
     )))
 }
 
@@ -198,73 +411,205 @@ async fn registered_parameters(
     }
 }
 
-/// `_core.sync_pipe(pipe, connector, df, begin='', end=None, check_existing=True,
-/// enforce_dtypes=True, chunksize=-1)`: sync the data into the pipe's table through the
-/// engine's ordinary flow (module docs). `connector` is the pipe instance's
-/// `_core.SqlConnector`; the façade has already registered the pipe (a plugin connector's
-/// `register()` is Python) and validated its indices.
+/// Plugin keyword arguments as a core map: callables and objects that are not data cannot
+/// cross to a worker and are dropped (a worker rebuilds the rest with `filter_keywords`).
+pub(crate) fn kwargs_map(kwargs: Option<&Bound<'_, PyDict>>) -> PyResult<Map> {
+    let mut out = Map::new();
+    let Some(kwargs) = kwargs else {
+        return Ok(out);
+    };
+    for (key, value) in kwargs.iter() {
+        if value.is_callable() && !value.is_instance_of::<PyType>() {
+            continue;
+        }
+        let converted = py_to_core(&value)?;
+        if facade::is_forwardable(&converted) {
+            out.insert(key.str()?.to_str()?.to_string(), converted);
+        }
+    }
+    Ok(out)
+}
+
+/// `{keys: attributes}` of connectors the Python process defined ad hoc.
+pub(crate) fn attribute_maps(
+    attributes: Option<&Bound<'_, PyDict>>,
+) -> PyResult<Vec<(String, Map)>> {
+    let mut out = Vec::new();
+    let Some(attributes) = attributes else {
+        return Ok(out);
+    };
+    for (keys, attrs) in attributes.iter() {
+        out.push((
+            key_name(&keys)?,
+            params_map(Some(&attrs))?.unwrap_or_default(),
+        ));
+    }
+    Ok(out)
+}
+
+/// `_core.sync_pipe(pipe, connector, df, begin=None, end=None, check_existing=True,
+/// enforce_dtypes=True, chunksize=-1, infer=False, params=None, force=False, retries=10,
+/// min_seconds=1.0, workers=None, kwargs=None, connectors=None, attributes=None, inplace=True,
+/// debug=False)`: sync the data into the pipe's table through the engine's ordinary flow
+/// (module docs). `connector` is the pipe instance's `_core.SqlConnector` (`None` for an
+/// instance that is not SQL: `api:`, `valkey:`, custom); `infer` syncs from the pipe's source
+/// instead of `df` (v4's `pipe.sync()` without data); `connectors` maps keys to the other
+/// `_core.SqlConnector`s of the call (a SQL source) and `attributes` the keys of connectors the
+/// Python process defined ad hoc to their attributes. The façade has already registered the
+/// pipe (a plugin connector's `register()` is Python) and validated its indices.
 #[pyfunction]
 #[pyo3(signature = (
-    pipe, connector, df, begin=None, end=None, check_existing=true, enforce_dtypes=true,
-    chunksize=Some(-1)
+    pipe, connector, df=None, begin=None, end=None, check_existing=true, enforce_dtypes=true,
+    chunksize=Some(-1), infer=false, params=None, force=false, retries=10, min_seconds=1.0,
+    workers=None, kwargs=None, connectors=None, attributes=None, inplace=true, debug=false
 ))]
 #[allow(clippy::too_many_arguments)]
 pub fn sync_pipe<'py>(
     py: Python<'py>,
     pipe: &Bound<'py, PyAny>,
-    connector: &Bound<'py, PyAny>,
-    df: &Bound<'py, PyAny>,
+    connector: Option<&Bound<'py, PyAny>>,
+    df: Option<&Bound<'py, PyAny>>,
     begin: Option<&Bound<'py, PyAny>>,
     end: Option<&Bound<'py, PyAny>>,
     check_existing: bool,
     enforce_dtypes: bool,
     chunksize: Option<i64>,
+    infer: bool,
+    params: Option<&Bound<'py, PyAny>>,
+    force: bool,
+    retries: u32,
+    min_seconds: f64,
+    workers: Option<i64>,
+    kwargs: Option<&Bound<'py, PyDict>>,
+    connectors: Option<&Bound<'py, PyDict>>,
+    attributes: Option<&Bound<'py, PyDict>>,
+    inplace: bool,
+    debug: bool,
 ) -> PyResult<Bound<'py, PyDict>> {
     let out = PyDict::new(py);
-    let conn = connector
-        .downcast::<PySqlConnector>()
-        .map_err(|_| PyValueError::new_err("Expected a `_core.SqlConnector`."))?
-        .get()
-        .inner
-        .clone();
-    let input = match input_from_py(py, df)? {
-        NativeInput::Data(input) => input,
-        NativeInput::Declined(reason) => {
-            out.set_item("declined", reason)?;
-            return Ok(out);
-        }
-        NativeInput::Invalid(message) => {
-            out.set_item("invalid", message)?;
-            return Ok(out);
+    let _debug = DebugGuard::new(debug);
+    let rust_connector = |obj: &Bound<'py, PyAny>| -> PyResult<Arc<meerschaum_sql::SqlConnector>> {
+        Ok(obj
+            .downcast::<PySqlConnector>()
+            .map_err(|_| PyValueError::new_err("Expected a `_core.SqlConnector`."))?
+            .get()
+            .inner
+            .clone())
+    };
+    let input = if infer {
+        None
+    } else {
+        let Some(df) = df else {
+            return Err(PyValueError::new_err(
+                "`df` is required unless `infer=True`.",
+            ));
+        };
+        match input_from_py(py, df)? {
+            NativeInput::Data(input) => Some(input),
+            NativeInput::Declined(reason) => {
+                out.set_item("declined", reason)?;
+                return Ok(out);
+            }
+            NativeInput::Invalid(message) => {
+                out.set_item("invalid", message)?;
+                return Ok(out);
+            }
         }
     };
 
     let ctx = PyCtx::scalars(py)?;
+    let extra = kwargs_map(kwargs)?;
     let args = SyncArgs {
         begin: sync_begin(&ctx, begin)?,
         end: date_bound(&ctx, end)?,
+        params: params_map(params)?,
         check_existing,
         enforce_dtypes,
         chunksize,
+        force,
+        retries,
+        min_seconds,
+        workers,
+        extra,
         ..Default::default()
     };
     // The raw parameters: the engine resolves them against the registered ones.
     let core = core_pipe(pipe, ParamsView::Raw)?;
     let instance_keys = core.instance_keys().to_string();
     let raw_before = core.raw_parameters().clone();
-    let settings = conn.settings.clone();
-    let registry = StaticRegistry::new().with_instance(&instance_keys, conn.clone());
-    let instance: Arc<dyn InstanceConnector> = conn.clone();
+
+    let mut sql: Vec<(String, Arc<meerschaum_sql::SqlConnector>)> = Vec::new();
+    let home_sql = match connector.filter(|c| !c.is_none()) {
+        Some(c) => {
+            let conn = rust_connector(c)?;
+            sql.push((instance_keys.clone(), conn.clone()));
+            Some(conn)
+        }
+        None => None,
+    };
+    if let Some(connectors) = connectors {
+        for (keys, conn) in connectors.iter() {
+            sql.push((key_name(&keys)?, rust_connector(&conn)?));
+        }
+    }
+    facade::install_instance_provider(&sql);
+    let connector_keys = core.connector_keys().to_string();
+    let need_python = !facade::is_native(&instance_keys)
+        || (infer && connector_keys.contains(':') && !facade::is_native(&connector_keys));
+    let built = facade::build_registry(
+        py,
+        RegistryInput {
+            sql,
+            attributes: attribute_maps(attributes)?,
+            instance_keys: instance_keys.clone(),
+            connector_keys,
+            inplace,
+        },
+        need_python,
+    )
+    .map_err(pyo3::exceptions::PyRuntimeError::new_err)?;
+    let registry = built.registry;
+    let engine_config = built.config;
+    let settings = home_sql.as_ref().map(|c| c.settings.clone());
 
     let (result, patch) = {
         let _t = crate::trace::Stage::new("sync_pipe: engine");
         let core = core.clone();
-        block_on(py, async move {
+        facade::spawn_block_on(py, async move {
+            let instance: Arc<dyn InstanceConnector> = match registry.instance(&instance_keys) {
+                Ok(i) => i,
+                Err(e) => {
+                    return (
+                        meerschaum_core::success::SyncResult::new(false, e),
+                        Map::new(),
+                    );
+                }
+            };
+            let (defaults, backtrack, limit) = match (&engine_config, &settings) {
+                (Some(c), _) => (
+                    c.defaults.clone(),
+                    c.default_backtrack_minutes,
+                    c.filter_params_index_limit,
+                ),
+                (None, Some(s)) => (
+                    s.pipe_defaults.clone(),
+                    s.backtrack_minutes,
+                    s.filter_params_index_limit,
+                ),
+                (None, None) => {
+                    let d = meerschaum_engine::EngineConfig::default();
+                    (
+                        d.defaults,
+                        d.default_backtrack_minutes,
+                        d.filter_params_index_limit,
+                    )
+                }
+            };
             let env = SyncEnv {
-                registry: &registry,
-                defaults: &settings.pipe_defaults,
-                default_backtrack_minutes: settings.backtrack_minutes,
-                filter_params_index_limit: settings.filter_params_index_limit,
+                registry: registry.as_ref(),
+                defaults: &defaults,
+                default_backtrack_minutes: backtrack,
+                filter_params_index_limit: limit,
                 known: None,
             };
             let registered_before = if core.temporary {
@@ -272,7 +617,7 @@ pub fn sync_pipe<'py>(
             } else {
                 registered_parameters(&instance, &core).await
             };
-            let result = engine_sync_pipe(&env, &core, Some(input), &args, None).await;
+            let result = engine_sync_pipe(&env, &core, input, &args, None).await;
             let mut patch = Map::new();
             if result.success && !core.temporary {
                 if let Some(after) = registered_parameters(&instance, &core).await {
@@ -285,11 +630,13 @@ pub fn sync_pipe<'py>(
                     };
                 }
             }
-            if result.success && core.param("compress").is_some_and(|v| v.truthy()) {
+            if result.success
+                && core.param("compress").is_some_and(|v| v.truthy())
+                && let Some(sql) = &home_sql
+            {
                 // `Pipe.sync` applies the compression policy of a `compress` pipe afterwards.
-                let res = conn.apply_compression_policy(&core).await;
                 // A failed policy is not a failed sync (v4 only prints it under `debug`).
-                let _ = res;
+                let _ = sql.apply_compression_policy(&core).await;
             }
             (result, patch)
         })
@@ -313,6 +660,16 @@ pub fn sync_pipe<'py>(
     };
     out.set_item("begin", bound(&result.begin)?)?;
     out.set_item("end", bound(&result.end)?)?;
+    let intervals = PyList::empty(py);
+    for interval in &result.changed_intervals {
+        // A grid cell edge outside Python's datetime range (a row at year 1: its cell starts
+        // before year 1) is an open end.
+        let edge = |b: &Option<meerschaum_core::success::Bound>| -> Bound<'py, PyAny> {
+            bound(b).unwrap_or_else(|_| py.None().into_bound(py))
+        };
+        intervals.append((edge(&interval.begin), edge(&interval.end)))?;
+    }
+    out.set_item("changed_intervals", intervals)?;
     out.set_item("parameters", core_to_py(py, &Value::Map(patch))?)?;
     Ok(out)
 }
@@ -484,19 +841,41 @@ mod tests {
     }
 
     #[test]
-    fn other_shapes_are_declined_with_a_reason() {
+    fn other_shapes_follow_pandas() {
         with_py(|py| {
+            // Shapes `pd.DataFrame(...)` takes: documents, rows, scalars, broadcast columns.
             for code in [
-                "'a,b\\n1,2'",
-                "(x for x in [{'a': 1}])",
                 "({'a': 1},)",
                 "[[1, 2], [3, 4]]",
-                "[{'a': 1}, 5]",
-                "{'a': 1}",
+                "[1, 2, 3]",
                 "{'a': [1], 'b': 2}",
                 "{1: [1]}",
                 "[{1: 'a'}]",
-                "None",
+                "'id:1,val:2.5\\nid:2,val:3.5'",
+            ] {
+                assert!(
+                    matches!(
+                        input_from_py(py, &eval(py, code)).unwrap(),
+                        NativeInput::Data(_)
+                    ),
+                    "{code}"
+                );
+            }
+            // Shapes pandas rejects (the message is v4's; the façade reports it).
+            for code in ["[{'a': 1}, 5]", "{'a': 1}"] {
+                assert!(
+                    matches!(
+                        input_from_py(py, &eval(py, code)).unwrap(),
+                        NativeInput::Invalid(_)
+                    ),
+                    "{code}"
+                );
+            }
+            // Objects with no DataFrame meaning are declined with a reason.
+            for code in [
+                "object()",
+                "(x for x in [{'a': 1}])",
+                "{'a': [1], 'b': (x for x in [1])}",
             ] {
                 match input_from_py(py, &eval(py, code)).unwrap() {
                     NativeInput::Declined(reason) => assert!(!reason.is_empty(), "{code}"),

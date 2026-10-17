@@ -17,8 +17,10 @@ use tokio::sync::Semaphore;
 
 use crate::callback::{CallbackHandler, CallbackRequest};
 use crate::error::{WorkerError, WorkerResult};
-use crate::protocol::Msg;
+use crate::protocol::{Msg, map_to_wire};
 use crate::worker::{CallOptions, Reply, Worker, WorkerOptions};
+use meerschaum_core::Map;
+use rmpv::Value as Wire;
 
 tokio::task_local! {
     static CALLBACK_DEPTH: usize;
@@ -148,6 +150,10 @@ pub struct PoolStats {
 
 struct Inner {
     config: PoolConfig,
+    /// Attributes of connectors the host built itself (`mrsm.get_connector('sql', 'x',
+    /// flavor='sqlite', ...)`: in no config file), by `type:label`. Sent with every call so the
+    /// worker can build the same connectors.
+    connector_attributes: Mutex<Vec<(String, Wire)>>,
     permits: Arc<Semaphore>,
     callback_permits: Arc<Semaphore>,
     idle: Mutex<Vec<(u64, Worker)>>,
@@ -180,6 +186,7 @@ impl WorkerPool {
         let size = config.size.max(1);
         WorkerPool {
             inner: Arc::new(Inner {
+                connector_attributes: Mutex::new(Vec::new()),
                 permits: Arc::new(Semaphore::new(size)),
                 callback_permits: Arc::new(Semaphore::new(size.saturating_mul(8))),
                 config,
@@ -197,6 +204,41 @@ impl WorkerPool {
     /// The pool settings.
     pub fn config(&self) -> &PoolConfig {
         &self.inner.config
+    }
+
+    /// Define a connector the host built itself (attributes that are in no config file) for the
+    /// workers: every later call carries `connector_attributes` and the worker builds
+    /// `mrsm.get_connector(type, label, **attributes)` before running the operation. Defining
+    /// the same keys again replaces the attributes.
+    pub fn define_connector(&self, keys: &str, attributes: &Map) {
+        let wire = map_to_wire(attributes);
+        let mut defined = self
+            .inner
+            .connector_attributes
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        match defined.iter_mut().find(|(k, _)| k == keys) {
+            Some(slot) => slot.1 = wire,
+            None => defined.push((keys.to_string(), wire)),
+        }
+    }
+
+    /// The `connector_attributes` message value (`None` when nothing was defined).
+    pub fn connector_attributes_wire(&self) -> Option<Wire> {
+        let defined = self
+            .inner
+            .connector_attributes
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        if defined.is_empty() {
+            return None;
+        }
+        Some(Wire::Map(
+            defined
+                .iter()
+                .map(|(k, v)| (Wire::from(k.as_str()), v.clone()))
+                .collect(),
+        ))
     }
 
     /// The pool's counters.
@@ -320,6 +362,10 @@ impl WorkerPool {
         mut opts: CallOptions,
         handler: Option<Arc<dyn CallbackHandler>>,
     ) -> WorkerResult<Reply> {
+        let mut args = args;
+        if let Some(defined) = self.connector_attributes_wire() {
+            args.insert("connector_attributes", defined);
+        }
         if self.inner.closed.load(Ordering::SeqCst) {
             return Err(WorkerError::ShuttingDown);
         }

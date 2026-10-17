@@ -15,7 +15,7 @@ use meerschaum_core::SuccessTuple;
 use meerschaum_core::static_config;
 use meerschaum_core::value::Value;
 use meerschaum_jobs::config::{JobPaths, JobsConfig};
-use meerschaum_jobs::executor::get_filtered_jobs;
+use meerschaum_jobs::executor::get_filtered_jobs_for;
 use meerschaum_jobs::scheduler::RootScheduler;
 use meerschaum_jobs::{
     Job, JobOptions, JobsContext, Launcher, MonitorControl, MonitorOptions, Status,
@@ -108,34 +108,83 @@ pub fn sleep_unless_stopped(seconds: f64) -> bool {
 }
 
 /// The jobs context for the runtime's config registry.
+///
+/// Besides the paths and configuration it installs the resolver for `api:<label>` executors
+/// ([`super::remote_jobs::CliRemoteResolver`], over the session's runtime): the jobs crate owns
+/// the client trait and the CLI injects the `APIConnector` implementation.
 pub fn jobs_context(rt: &mut Runtime<'_>) -> JobsContext {
+    let session = super::session(rt);
     let config = rt.config();
-    JobsContext {
-        paths: JobPaths::from_config(config),
-        config: JobsConfig::from_config(config),
-        launcher: Launcher::from_env(),
-    }
+    let resolver = super::remote_jobs::CliRemoteResolver::new(
+        session,
+        super::remote_jobs::CliRemoteResolver::section(config),
+    );
+    JobsContext::new(
+        JobPaths::from_config(config),
+        JobsConfig::from_config(config),
+        Launcher::from_env(),
+    )
+    .with_remote(Arc::new(resolver))
 }
 
 fn executor_keys(args: &ArgsMap) -> Option<String> {
     string(args, "executor_keys")
 }
 
-/// `get_filtered_jobs(executor_keys, action, warn=...)`.
+/// `get_filtered_jobs(executor_keys, action, warn=..., include_hidden=...)`: the named jobs of
+/// the executor (`None`: the context's, combining `local` and `systemd` on a systemd host).
+///
+/// A failed listing (an unreachable or unauthorized API, a broken `systemctl`) is an `Err` with
+/// the failed `SuccessTuple` for the action to return: it is never read as "no jobs".
 fn filtered_jobs(
     rt: &mut Runtime<'_>,
     ctx: &JobsContext,
+    exec_keys: Option<&str>,
     filter: &[String],
     warn_missing: bool,
     include_hidden: bool,
-) -> IndexMap<String, Job> {
-    let (jobs, warnings) = get_filtered_jobs(ctx, filter, include_hidden);
+) -> Result<IndexMap<String, Job>, SuccessTuple> {
+    filtered_jobs_with(
+        rt,
+        ctx,
+        exec_keys,
+        filter,
+        warn_missing,
+        include_hidden,
+        true,
+    )
+}
+
+fn filtered_jobs_with(
+    rt: &mut Runtime<'_>,
+    ctx: &JobsContext,
+    exec_keys: Option<&str>,
+    filter: &[String],
+    warn_missing: bool,
+    include_hidden: bool,
+    combine_local_and_systemd: bool,
+) -> Result<IndexMap<String, Job>, SuccessTuple> {
+    let filtered = get_filtered_jobs_for(
+        ctx,
+        exec_keys,
+        filter,
+        include_hidden,
+        combine_local_and_systemd,
+    )
+    .map_err(|e| {
+        let keys = meerschaum_jobs::executor::normalize_executor_keys(exec_keys)
+            .unwrap_or_else(|| meerschaum_jobs::job::get_executor_keys_from_context(ctx));
+        SuccessTuple::fail(format!("Could not get the jobs of executor '{keys}': {e}"))
+    })?;
+    for w in &filtered.listing_warnings {
+        warn(rt, w);
+    }
     if warn_missing {
-        for w in warnings {
-            warn(rt, &w);
+        for w in &filtered.missing {
+            warn(rt, w);
         }
     }
-    jobs
+    Ok(filtered.jobs)
 }
 
 fn with_status(jobs: &mut IndexMap<String, Job>, status: Status) -> Vec<String> {
@@ -144,10 +193,29 @@ fn with_status(jobs: &mut IndexMap<String, Job>, status: Status) -> Vec<String> 
         .collect()
 }
 
-fn subset(ctx: &JobsContext, names: &[String]) -> IndexMap<String, Job> {
+/// Jobs of the same executors as `jobs`, freshly opened by name (a `Job` is not `Clone`): for
+/// printing a subset and for re-reading statuses after an action.
+fn subset(
+    ctx: &JobsContext,
+    jobs: &IndexMap<String, Job>,
+    names: &[String],
+) -> IndexMap<String, Job> {
     names
         .iter()
-        .filter_map(|n| Job::open(n, ctx).ok().map(|j| (n.clone(), j)))
+        .filter_map(|n| {
+            let keys = jobs.get(n).map(|j| j.executor_keys.clone())?;
+            Job::new(
+                n,
+                None,
+                JobOptions {
+                    executor_keys: Some(keys),
+                    ..Default::default()
+                },
+                ctx,
+            )
+            .ok()
+            .map(|j| (n.clone(), j))
+        })
         .collect()
 }
 
@@ -338,7 +406,11 @@ pub fn show_jobs(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     let nopretty = flag(args, "nopretty");
     let action = words(args, "action");
     let ctx = jobs_context(rt);
-    let mut jobs = filtered_jobs(rt, &ctx, &action, false, false);
+    let exec_keys = executor_keys(args);
+    let mut jobs = match filtered_jobs(rt, &ctx, exec_keys.as_deref(), &action, false, false) {
+        Ok(jobs) => jobs,
+        Err(failed) => return Ok(failed),
+    };
     if jobs.is_empty() {
         if action.is_empty() && !nopretty {
             info(rt, "No running or stopped jobs.");
@@ -370,7 +442,10 @@ pub fn start_jobs(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     let nopretty = flag(args, "nopretty");
     let exec_keys = executor_keys(args);
     let ctx = jobs_context(rt);
-    let mut jobs = filtered_jobs(rt, &ctx, &action, false, false);
+    let mut jobs = match filtered_jobs(rt, &ctx, exec_keys.as_deref(), &action, false, false) {
+        Ok(jobs) => jobs,
+        Err(failed) => return Ok(failed),
+    };
 
     let mut names: Vec<String>;
     let mut new_job = !action.is_empty();
@@ -439,11 +514,15 @@ pub fn start_jobs(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
 
     let mut skipped: Vec<String> = Vec::new();
     if !force {
-        let mut filtered = filtered_jobs(rt, &ctx, &names, false, false);
+        let mut filtered = match filtered_jobs(rt, &ctx, exec_keys.as_deref(), &names, false, false)
+        {
+            Ok(jobs) => jobs,
+            Err(failed) => return Ok(failed),
+        };
         if !filtered.is_empty() {
             let running = with_status(&mut filtered, Status::Running);
             if !running.is_empty() {
-                let mut running_jobs = subset(&ctx, &running);
+                let mut running_jobs = subset(&ctx, &filtered, &running);
                 pprint_jobs(rt, &mut running_jobs, false);
                 if yes_no(rt, "Do you want to first stop these jobs?", "n", yes, noask)? {
                     let mut stop_args = ArgsMap::new();
@@ -631,7 +710,12 @@ fn run_new_job(
             return SuccessTuple::fail("Nothing changed.");
         }
     }
-    job.start()
+    let started = job.start();
+    // Warnings of creating the job (a systemd unit without a pinned interpreter).
+    for w in std::mem::take(&mut job.warnings) {
+        warn(rt, &w);
+    }
+    started
 }
 
 /// `stop jobs`.
@@ -641,7 +725,11 @@ pub fn stop_jobs(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     let (force, yes, noask) = (flag(args, "force"), flag(args, "yes"), flag(args, "noask"));
     let timeout = timeout_seconds(args);
     let ctx = jobs_context(rt);
-    let mut jobs = filtered_jobs(rt, &ctx, &action, !nopretty, false);
+    let exec_keys = executor_keys(args);
+    let mut jobs = match filtered_jobs(rt, &ctx, exec_keys.as_deref(), &action, !nopretty, false) {
+        Ok(jobs) => jobs,
+        Err(failed) => return Ok(failed),
+    };
     let running = with_status(&mut jobs, Status::Running);
     let paused = with_status(&mut jobs, Status::Paused);
     let restart: Vec<String> = jobs
@@ -677,7 +765,7 @@ pub fn stop_jobs(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
         ));
     }
     if action.is_empty() && !force {
-        let mut sub = subset(&ctx, &to_stop);
+        let mut sub = subset(&ctx, &jobs, &to_stop);
         pprint_jobs(rt, &mut sub, false);
         if !yes_no(rt, "Stop the above jobs?", "n", yes, noask)? {
             return Ok(SuccessTuple::fail("No jobs were stopped."));
@@ -720,7 +808,11 @@ pub fn pause_jobs(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     let nopretty = flag(args, "nopretty");
     let (force, yes, noask) = (flag(args, "force"), flag(args, "yes"), flag(args, "noask"));
     let ctx = jobs_context(rt);
-    let mut jobs = filtered_jobs(rt, &ctx, &action, !nopretty, false);
+    let exec_keys = executor_keys(args);
+    let mut jobs = match filtered_jobs(rt, &ctx, exec_keys.as_deref(), &action, !nopretty, false) {
+        Ok(jobs) => jobs,
+        Err(failed) => return Ok(failed),
+    };
     let running = with_status(&mut jobs, Status::Running);
     let paused = with_status(&mut jobs, Status::Paused);
     let stopped = with_status(&mut jobs, Status::Stopped);
@@ -741,7 +833,7 @@ pub fn pause_jobs(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
         ));
     }
     if action.is_empty() && !force {
-        let mut sub = subset(&ctx, &running);
+        let mut sub = subset(&ctx, &jobs, &running);
         pprint_jobs(rt, &mut sub, false);
         if !yes_no(rt, "Pause all running jobs?", "n", yes, noask)? {
             return Ok(SuccessTuple::fail("No jobs were paused."));
@@ -788,11 +880,18 @@ pub fn restart_jobs(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
         _ => "1.0".to_string(),
     };
     let ctx = jobs_context(rt);
+    // PARITY: `get_filtered_jobs(executor_keys or 'local', ..., combine_local_and_systemd=False)`
+    // (`actions/restart.py:84`): restarting defaults to the local executor, not the context's.
+    let exec_keys = executor_keys(args).unwrap_or_else(|| "local".to_string());
     if do_loop {
         install_stop_handler(&super::session(rt));
     }
     loop {
-        let jobs = filtered_jobs(rt, &ctx, &action, false, true);
+        let jobs = match filtered_jobs_with(rt, &ctx, Some(&exec_keys), &action, false, true, false)
+        {
+            Ok(jobs) => jobs,
+            Err(failed) => return Ok(failed),
+        };
         let mut restart_jobs: IndexMap<String, Job> = if action.is_empty() {
             jobs.into_iter()
                 .filter_map(|(n, mut j)| j.restarts().then_some((n, j)))
@@ -834,7 +933,11 @@ pub fn delete_jobs(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     let nopretty = flag(args, "nopretty");
     let (force, yes, noask) = (flag(args, "force"), flag(args, "yes"), flag(args, "noask"));
     let ctx = jobs_context(rt);
-    let mut jobs = filtered_jobs(rt, &ctx, &action, false, false);
+    let exec_keys = executor_keys(args);
+    let mut jobs = match filtered_jobs(rt, &ctx, exec_keys.as_deref(), &action, false, false) {
+        Ok(jobs) => jobs,
+        Err(failed) => return Ok(failed),
+    };
     if jobs.is_empty() {
         return Ok(SuccessTuple::ok("No jobs to delete; nothing to do."));
     }
@@ -859,14 +962,14 @@ pub fn delete_jobs(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     if !to_stop.is_empty() {
         crate::shell::clear_screen(rt, flag(args, "debug"));
         if !force {
-            let mut sub = subset(&ctx, &to_stop);
+            let mut sub = subset(&ctx, &jobs, &to_stop);
             pprint_jobs(rt, &mut sub, nopretty);
         }
         if force || yes_no(rt, "Stop these jobs?", "n", yes, noask)? {
             let mut stop_args = args.clone();
             stop_args.insert("action".into(), PyValue::str_list(&to_stop));
             let _ = stop_jobs(&stop_args, rt)?;
-            let mut check = subset(&ctx, &to_stop);
+            let mut check = subset(&ctx, &jobs, &to_stop);
             if !with_status(&mut check, Status::Running).is_empty() {
                 return Ok(SuccessTuple::fail(
                     "Failed to kill running jobs. Please stop these jobs before deleting.",
@@ -879,7 +982,7 @@ pub fn delete_jobs(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
         return Ok(SuccessTuple::fail("No jobs to delete."));
     }
     if !force && !delete_all {
-        let mut sub = subset(&ctx, &to_delete);
+        let mut sub = subset(&ctx, &jobs, &to_delete);
         pprint_jobs(rt, &mut sub, nopretty);
         if !yes_no(
             rt,
@@ -893,9 +996,9 @@ pub fn delete_jobs(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     }
     let mut deleted = Vec::new();
     for n in &to_delete {
-        let res = match Job::open(n, &ctx) {
-            Ok(mut j) => j.delete(),
-            Err(e) => SuccessTuple::fail(e.to_string()),
+        let res = match jobs.get_mut(n) {
+            Some(j) => j.delete(),
+            None => SuccessTuple::fail(format!("Job '{n}' does not exist.")),
         };
         if !res.success {
             warn(rt, &format!("Failed to delete job '{n}'."));
@@ -934,11 +1037,15 @@ pub fn attach_jobs(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
         &ctx,
     )
     .map_err(|e| ActionError::new("ValueError", e.to_string()))?;
-    if !job.exists() {
-        return Ok(SuccessTuple::fail(format!(
-            "Job '{}' does not exist.",
-            job.name
-        )));
+    match job.try_exists() {
+        Err(e) => return Ok(SuccessTuple::fail(e)),
+        Ok(false) => {
+            return Ok(SuccessTuple::fail(format!(
+                "Job '{}' does not exist.",
+                job.name
+            )));
+        }
+        Ok(true) => {}
     }
     install_stop_handler(&super::session(rt));
     let result = std::cell::RefCell::new(SuccessTuple::ok("Success"));
@@ -973,6 +1080,155 @@ pub fn attach_jobs(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     Ok(result.into_inner())
 }
 
+/// `edit jobs`: show each job's arguments, read the edited text, and recreate the job.
+///
+/// The native prompt reads one line (v4 opens a multi-line `prompt_toolkit` editor seeded with
+/// the job's label, submitted with Esc + Enter): an empty line keeps the current arguments, and
+/// end of input or an interrupt ends the action with "Nothing was changed."
+pub fn edit_jobs(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
+    let action = words(args, "action");
+    let exec_keys = executor_keys(args);
+    let (yes, noask) = (flag(args, "yes"), flag(args, "noask"));
+    let debug = flag(args, "debug");
+    let ctx = jobs_context(rt);
+    let mut jobs = match filtered_jobs(rt, &ctx, exec_keys.as_deref(), &action, false, false) {
+        Ok(jobs) => jobs,
+        Err(failed) => return Ok(failed),
+    };
+    if jobs.is_empty() {
+        return Ok(SuccessTuple::fail("No jobs to edit."));
+    }
+    let names: Vec<String> = jobs.keys().cloned().collect();
+    let mut num_edited = 0usize;
+    for name in &names {
+        let Some(job) = jobs.get_mut(name) else {
+            continue;
+        };
+        let sysargs = job.sysargs();
+        // `start pipeline ... -P '{"sub_args_line": ...}'` is shown in its `a + b : --loop` form.
+        let pipeline_lines = pipeline_lines(&sysargs);
+        let sysargs_str = match &pipeline_lines {
+            Some((sub, pipeline)) => format!("{sub} : {pipeline}"),
+            None => crate::shlex::join(&sysargs),
+        };
+        crate::shell::clear_screen(rt, debug);
+        info(
+            rt,
+            &format!(
+                "Editing arguments for job '{name}'.\n    Press [Esc + Enter] to submit, [CTRL + C] to exit.\n\n    Tip: join actions with `+`, manage pipeline with `:`.\n    https://meerschaum.io/reference/actions/#chaining-actions\n"
+            ),
+        );
+        let label = job.label();
+        rt.print(&format!("{label}\n"));
+        let Some(answer) = super::prompt(rt, "", false, noask) else {
+            rt.print("\n");
+            return Ok(SuccessTuple::ok("Nothing was changed."));
+        };
+        let new_str = if answer.trim().is_empty() {
+            label
+        } else {
+            answer
+        };
+        if new_str.trim() == sysargs_str.trim() {
+            continue;
+        }
+        let new_sysargs = match crate::shlex::split(&new_str) {
+            Ok(s) => s,
+            Err(e) => return Err(ActionError::new("ValueError", e.to_string())),
+        };
+        let (new_sysargs, pipeline_args) = crate::sysargs::split_pipeline_sysargs(&new_sysargs);
+        let chained = crate::sysargs::split_chained_sysargs(&new_sysargs)
+            .map_err(|e| ActionError::new(&e.class, e.message.clone()))?;
+        crate::shell::clear_screen(rt, debug);
+        if chained.len() > 1 {
+            let options: Vec<String> = chained.iter().map(|s| crate::shlex::join(s)).collect();
+            let text = rt.with_formatter(|f| {
+                f.print_options(
+                    &options,
+                    &crate::format::OptionsArgs {
+                        header: Some(format!("\nSteps in Job '{name}':")),
+                        number_options: true,
+                        ..Default::default()
+                    },
+                )
+            });
+            rt.print(&text);
+        } else {
+            let header = rt.with_formatter(|f| f.make_header(&format!("Action for Job '{name}':")));
+            rt.print(&format!(
+                "\n{header}\n{}\n",
+                crate::shlex::join(&new_sysargs)
+            ));
+        }
+        if !pipeline_args.is_empty() {
+            let header = rt.with_formatter(|f| f.make_header("Pipeline Arguments:"));
+            rt.print(&format!(
+                "\n{header}\n{}\n\n",
+                crate::shlex::join(&pipeline_args)
+            ));
+        }
+        if !yes_no(
+            rt,
+            &format!(
+                "Are you sure you want to recreate job '{name}' with the above arguments?\n    The job will be started if you continue."
+            ),
+            "n",
+            yes,
+            noask,
+        )? {
+            return Ok(SuccessTuple::ok("Nothing was changed."));
+        }
+        let deleted = job.delete();
+        if !deleted.success {
+            return Ok(deleted);
+        }
+        let mut new_job = Job::from_sysargs_str(
+            name,
+            &new_str,
+            JobOptions {
+                executor_keys: exec_keys.clone(),
+                ..Default::default()
+            },
+            &ctx,
+        )
+        .map_err(|e| ActionError::new("ValueError", e.to_string()))?;
+        let started = new_job.start();
+        if !started.success {
+            return Ok(started);
+        }
+        num_edited += 1;
+    }
+    let msg = if num_edited > 0 {
+        format!(
+            "Successfully edited job{} {}.",
+            plural(names.len()),
+            items_str(&names)
+        )
+    } else {
+        "Nothing was edited.".to_string()
+    };
+    Ok(SuccessTuple::ok(msg))
+}
+
+/// `(sub_args_line, pipeline_args_line)` of a `start pipeline ... -P '{...}'` job.
+fn pipeline_lines(sysargs: &[String]) -> Option<(String, String)> {
+    if sysargs.len() < 2 || sysargs[0] != "start" || sysargs[1] != "pipeline" {
+        return None;
+    }
+    let rest = &sysargs[2..];
+    let params_index = rest.iter().position(|a| a == "-P")?;
+    let params = rest.get(params_index + 1)?;
+    let parsed = Value::from_json_str(params).ok()?;
+    let sub_args_line = parsed.get("sub_args_line").map(Value::py_str)?;
+    let kept: Vec<String> = rest
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| *i != params_index && *i != params_index + 1)
+        .map(|(_, a)| a.clone())
+        .collect();
+    Some((sub_args_line, crate::shlex::join(&kept)))
+}
+
 /// `datetime.strptime(prefix, format)` for the log timestamp formats (`%Y-%m-%d %H:%M` etc.).
 fn parse_line_timestamp(prefix: &str, fmt: &str) -> Option<chrono::NaiveDateTime> {
     chrono::NaiveDateTime::parse_from_str(prefix, fmt)
@@ -989,10 +1245,17 @@ pub fn show_logs(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     let action = words(args, "action");
     let nopretty = flag(args, "nopretty");
     let ctx = jobs_context(rt);
-    let mut jobs = filtered_jobs(rt, &ctx, &action, false, false);
+    let exec_keys = executor_keys(args);
+    let mut jobs = match filtered_jobs(rt, &ctx, exec_keys.as_deref(), &action, false, false) {
+        Ok(jobs) => jobs,
+        Err(failed) => return Ok(failed),
+    };
     if nopretty {
         for (name, job) in jobs.iter_mut() {
-            let logs = job.get_logs().unwrap_or_else(|| "None".into());
+            let logs = match job.try_get_logs() {
+                Ok(logs) => logs.unwrap_or_else(|| "None".into()),
+                Err(e) => return Ok(SuccessTuple::fail(e)),
+            };
             rt.print(&format!("\n-*-\nMRSM_JOB: {name}\n-*-\n{logs}\n"));
         }
         return Ok(SuccessTuple::ok("Success"));
@@ -1023,6 +1286,7 @@ pub fn show_logs(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     let (tx, rx) = std::sync::mpsc::channel::<(String, String)>();
     let mut tasks: IndexMap<String, (Arc<AtomicBool>, std::thread::JoinHandle<()>)> =
         IndexMap::new();
+    let mut job_keys: IndexMap<String, String> = IndexMap::new();
     let now_len = chrono::Utc::now()
         .format(&ts_fmt)
         .to_string()
@@ -1037,16 +1301,39 @@ pub fn show_logs(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
         }
         if last_refresh.elapsed() >= Duration::from_secs(1) {
             last_refresh = Instant::now();
-            let current = filtered_jobs(rt, &ctx, &action, false, false);
+            let current = match filtered_jobs(rt, &ctx, exec_keys.as_deref(), &action, false, false)
+            {
+                Ok(jobs) => jobs,
+                // An unreachable endpoint ends the follower with its error.
+                Err(failed) => {
+                    for (_, (s, h)) in tasks {
+                        s.store(true, Ordering::SeqCst);
+                        let _ = h.join();
+                    }
+                    return Ok(failed);
+                }
+            };
             names = current.keys().cloned().collect();
+            for (n, j) in &current {
+                job_keys.insert(n.clone(), j.executor_keys.clone());
+            }
             for name in &names {
                 if tasks.contains_key(name) {
                     continue;
                 }
                 let job_stop = Arc::new(AtomicBool::new(false));
+                let keys = job_keys.get(name).cloned();
                 let (tx, ctx, n, js) = (tx.clone(), ctx.clone(), name.clone(), job_stop.clone());
                 let handle = std::thread::spawn(move || {
-                    let Ok(mut job) = Job::open(&n, &ctx) else {
+                    let Ok(mut job) = Job::new(
+                        &n,
+                        None,
+                        JobOptions {
+                            executor_keys: keys,
+                            ..Default::default()
+                        },
+                        &ctx,
+                    ) else {
                         return;
                     };
                     let _ = job.monitor_logs(

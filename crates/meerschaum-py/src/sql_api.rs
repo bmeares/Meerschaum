@@ -245,7 +245,9 @@ fn frame_docs_py<'py>(ctx: &PyCtx<'py>, frame: &Frame) -> PyResult<Bound<'py, Py
     for i in 0..frame.height() {
         let d = PyDict::new(py);
         for (n, (vals, nulls)) in names.iter().zip(&columns) {
-            if nulls[i] {
+            // A `Decimal('NaN')` read from a `NUMERIC` column is a value, not a null (v4 keeps it
+            // in the documents; a database NULL is `None`).
+            if nulls[i] && !matches!(vals[i], meerschaum_kernel::Value::Decimal(_)) {
                 d.set_item(n, py.None())?;
             } else {
                 d.set_item(n, cell_to_py(ctx, &vals[i])?)?;

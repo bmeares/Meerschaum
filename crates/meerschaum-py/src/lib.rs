@@ -25,15 +25,20 @@ use pyo3::prelude::*;
 
 pub mod arrow_bridge;
 pub mod build_info;
+pub mod config_api;
 pub mod convert;
 pub mod core_api;
 pub mod d14_api;
 pub mod engine_api;
+pub mod facade;
 pub mod ffi_import;
 pub mod kernel_api;
+pub mod logging;
 pub mod pandas_bridge;
 pub mod pipe_api;
 pub mod pipe_bridge;
+pub mod pipe_methods;
+pub mod pipe_methods_api;
 #[cfg(feature = "polars")]
 pub mod polars_bridge;
 pub mod runtime;
@@ -51,6 +56,7 @@ pub mod yaml_api;
 /// immutable (`frozen` pyclasses) and no function keeps unsynchronized global state.
 #[pymodule(gil_used = false)]
 fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    logging::install();
     m.add("__version__", build_info::VERSION)?;
     m.add("HAS_STATIC_CONFIG", static_config::STATIC_TOML.is_some())?;
     m.add("HAS_POLARS", cfg!(feature = "polars"))?;
@@ -81,7 +87,8 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(kernel_api::get_pd_type_from_db_type, m)?)?;
 
     // meerschaum-core
-    m.add_function(wrap_pyfunction!(core_api::get_config, m)?)?;
+    // The config registry: `get_config`, `read_config`, `write_config`, backups, ... (wave 15, O)
+    config_api::register(m)?;
     m.add_function(wrap_pyfunction!(core_api::replace_pipes_syntax, m)?)?;
     m.add_function(wrap_pyfunction!(core_api::hash_password, m)?)?;
     m.add_function(wrap_pyfunction!(core_api::verify_password, m)?)?;
@@ -115,6 +122,9 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(sync_api::parse_sql_uri, m)?)?;
 
     m.add_class::<pipe_api::PyPipe>()?;
+
+    // `Pipe` methods over an instance: get_data, filter_existing, deduplicate, ... (wave 15, L2)
+    pipe_methods_api::register(m)?;
 
     // PyYAML-compatible YAML codec with a lossless Python boundary (wave 13)
     yaml_api::register(m)?;

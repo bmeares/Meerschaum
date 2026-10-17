@@ -73,7 +73,7 @@ impl APIConnector {
         if !response.ok() {
             let mut auth = self.auth.lock().await;
             if !auth.emitted_warning {
-                tracing::warn!("{failure}");
+                super::warnings::warn(&failure);
                 auth.emitted_warning = true;
             }
             return SuccessTuple::fail(failure);
@@ -116,7 +116,7 @@ impl APIConnector {
         let res = self.login().await;
         let mut auth = self.auth.lock().await;
         if !res.success && !auth.emitted_warning {
-            tracing::warn!("{}", res.message);
+            super::warnings::warn(&res.message);
             auth.emitted_warning = true;
         }
         auth.token.clone()

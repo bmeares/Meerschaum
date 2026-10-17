@@ -135,7 +135,7 @@ impl APIConnector {
         match pipe_ops::json_to_core(&attributes) {
             Value::Map(m) => {
                 if !r.ok() && m.contains_key("detail") {
-                    tracing::warn!("{}", meerschaum_core::pyfmt::py_str(&m["detail"]));
+                    super::warnings::warn(&meerschaum_core::pyfmt::py_str(&m["detail"]));
                     return Ok(Map::new());
                 }
                 Ok(m)
@@ -165,7 +165,7 @@ impl APIConnector {
             Ok(serde_json::Value::Null) | Ok(serde_json::Value::String(_)) => None,
             Ok(other) => Some(other.to_string()),
             Err(e) => {
-                tracing::warn!("Cannot parse version for {plugin}:\n{e}");
+                super::warnings::warn_fmt!("Cannot parse version for {plugin}:\n{e}");
                 None
             }
         })

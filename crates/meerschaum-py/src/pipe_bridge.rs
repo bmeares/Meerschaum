@@ -50,6 +50,19 @@ fn map_of(obj: &Bound<'_, PyAny>) -> PyResult<Map> {
     })
 }
 
+/// Whether any string of the parameters holds an `MRSM{}` symlink.
+fn holds_symlink(parameters: &Map) -> bool {
+    fn walk(value: &meerschaum_core::Value) -> bool {
+        match value {
+            meerschaum_core::Value::Str(s) => s.contains("MRSM{"),
+            meerschaum_core::Value::List(items) => items.iter().any(walk),
+            meerschaum_core::Value::Map(map) => map.values().any(walk),
+            _ => false,
+        }
+    }
+    parameters.values().any(walk)
+}
+
 /// A core [`Pipe`] for a Python pipe (or any object with the same attributes).
 pub fn core_pipe(obj: &Bound<'_, PyAny>, view: ParamsView) -> PyResult<Pipe> {
     let py = obj.py();
@@ -82,6 +95,11 @@ pub fn core_pipe(obj: &Bound<'_, PyAny>, view: ParamsView) -> PyResult<Pipe> {
             Err(_) => map_of(&obj.getattr(intern!(py, "parameters"))?)?,
         },
     };
+    // A `_core.SqlConnector` method resolves the pipe's templates (`MRSM{}` symlinks) against
+    // the config: publish the live one, as of this call, for the engine's `Config::current()`.
+    if holds_symlink(&parameters) {
+        crate::facade::publish_live_config(py)?;
+    }
     let mut builder = Pipe::builder(&ck, &mk)
         .location(lk.as_deref())
         .parameters(parameters)

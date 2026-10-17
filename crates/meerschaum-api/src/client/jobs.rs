@@ -68,6 +68,26 @@ fn job_tuple(r: &ApiResponse) -> SuccessTuple {
     }
 }
 
+/// The error for a failed jobs request: authentication and authorization failures say so, a
+/// `{"detail": ...}` body is quoted, otherwise the status and body.
+fn jobs_error(r: &ApiResponse, what: &str) -> ConnectorError {
+    let detail = match r.json() {
+        Ok(serde_json::Value::Object(o)) => o.get("detail").map(|d| match d {
+            serde_json::Value::String(s) => s.clone(),
+            other => crate::models::detail_repr(other),
+        }),
+        _ => None,
+    };
+    let body = detail.unwrap_or_else(|| r.text());
+    match r.status {
+        401 => ConnectorError::Detail(format!(
+            "Authentication failed trying to {what} (HTTP 401): {body}"
+        )),
+        403 => ConnectorError::Detail(format!("Not authorized to {what} (HTTP 403): {body}")),
+        status => ConnectorError::Detail(format!("Failed to {what} (HTTP {status}): {body}")),
+    }
+}
+
 impl APIConnector {
     /// `get_jobs()`: `GET /jobs`, the remote jobs' metadata by name (`{}` on errors).
     pub async fn get_jobs(&self) -> ConnectorResult<IndexMap<String, JobMetadata>> {
@@ -320,6 +340,134 @@ impl APIConnector {
         Ok(pipe_ops::json_to_core(&r.json()?).to_map())
     }
 
+    // ---------------------------------------------------------------------------------------
+    // Strict reads (additive; used by the `api:<label>` job executor).
+    //
+    // The v4 methods above turn every failed request into an empty answer (`{}`, `False`, no
+    // logs). That is the right port for `APIConnector`, but an executor which reads "the job
+    // does not exist" from an unreachable or unauthorized endpoint would create, replace or
+    // delete jobs on the strength of a transport failure. These variants separate a missing job
+    // (`404`) from a failed request.
+    // ---------------------------------------------------------------------------------------
+
+    /// `GET /jobs`: every visible job's metadata by name; any failure is an error.
+    pub async fn try_get_jobs(&self) -> ConnectorResult<IndexMap<String, Map>> {
+        let r = self.get(routes::JOBS, RequestOptions::default()).await?;
+        if !r.ok() {
+            return Err(jobs_error(&r, "list jobs"));
+        }
+        let json = r.json()?;
+        let serde_json::Value::Object(jobs) = json else {
+            return Err(ConnectorError::Invalid(format!(
+                "Unexpected response listing jobs: {}",
+                r.text()
+            )));
+        };
+        Ok(jobs
+            .iter()
+            .map(|(name, meta)| (name.clone(), pipe_ops::json_to_core(meta).to_map()))
+            .collect())
+    }
+
+    /// `GET /jobs/{name}`: the metadata, `None` when the job does not exist (`404`); other
+    /// failures are errors. Cached for 5 seconds like [`APIConnector::get_job_metadata`]; every
+    /// mutation through this client clears the cache.
+    pub async fn try_get_job_metadata(&self, name: &str) -> ConnectorResult<Option<Map>> {
+        if let Ok(cache) = self.job_metadata_cache.lock() {
+            if let Some((at, meta)) = cache.get(name) {
+                if at.elapsed().as_secs() < JOB_METADATA_CACHE_SECONDS {
+                    return Ok(Some(meta.clone()));
+                }
+            }
+        }
+        let r = self
+            .get(
+                &format!("{}/{name}", routes::JOBS),
+                RequestOptions::default(),
+            )
+            .await?;
+        if r.status == 404 {
+            return Ok(None);
+        }
+        if !r.ok() {
+            return Err(jobs_error(&r, &format!("get job '{name}'")));
+        }
+        let meta = pipe_ops::json_to_core(&r.json()?).to_map();
+        if let Ok(mut cache) = self.job_metadata_cache.lock() {
+            cache.insert(name.to_string(), (Instant::now(), meta.clone()));
+        }
+        Ok(Some(meta))
+    }
+
+    /// `GET /jobs/{name}/exists`; a failed request is an error.
+    pub async fn try_get_job_exists(&self, name: &str) -> ConnectorResult<bool> {
+        let r = self
+            .get(
+                &format!("{}/{name}/exists", routes::JOBS),
+                RequestOptions::default(),
+            )
+            .await?;
+        if !r.ok() {
+            return Err(jobs_error(
+                &r,
+                &format!("check whether job '{name}' exists"),
+            ));
+        }
+        Ok(r.json()?.as_bool().unwrap_or(false))
+    }
+
+    /// `GET /jobs/{name}/stop_time`; a failed request is an error.
+    pub async fn try_get_job_stop_time(&self, name: &str) -> ConnectorResult<Option<String>> {
+        let r = self
+            .get(
+                &format!("{}/{name}/stop_time", routes::JOBS),
+                RequestOptions::default(),
+            )
+            .await?;
+        if !r.ok() {
+            return Err(jobs_error(
+                &r,
+                &format!("get the stop time of job '{name}'"),
+            ));
+        }
+        Ok(r.json()?.as_str().map(String::from))
+    }
+
+    /// `GET /jobs/{name}/is_blocking_on_stdin`; a failed request is an error.
+    pub async fn try_get_job_is_blocking_on_stdin(&self, name: &str) -> ConnectorResult<bool> {
+        let r = self
+            .get(
+                &format!("{}/{name}/is_blocking_on_stdin", routes::JOBS),
+                RequestOptions::default(),
+            )
+            .await?;
+        if !r.ok() {
+            return Err(jobs_error(
+                &r,
+                &format!("check whether job '{name}' blocks on stdin"),
+            ));
+        }
+        Ok(r.json()?.as_bool().unwrap_or(false))
+    }
+
+    /// `GET /jobs/{name}/prompt_kwargs`. A `404` is `{}` (the v4 route is registered without
+    /// the slash, see [`APIConnector::get_job_prompt_kwargs`]); other failures are errors.
+    pub async fn try_get_job_prompt_kwargs(&self, name: &str) -> ConnectorResult<Map> {
+        let r = self
+            .get(
+                &format!("{}/{name}/prompt_kwargs", routes::JOBS),
+                RequestOptions::default(),
+            )
+            .await?;
+        if r.status == 404 {
+            return Ok(Map::new());
+        }
+        if !r.ok() {
+            return Err(jobs_error(&r, &format!("get the prompt of job '{name}'")));
+        }
+        Ok(pipe_ops::json_to_core(&r.json()?).to_map())
+    }
+
     /// The logs websocket URL: `ws[s]://{host}:{port}/logs/{name}/ws`.
     ///
     /// PARITY: without a configured port the URL keeps the empty port (`host:/logs/...`).
@@ -367,6 +515,15 @@ impl APIConnector {
                     }
                     Ok(Message::Close(_)) => return None,
                     Ok(_) => continue,
+                    // A server which drops the socket after its last message is the end of the
+                    // stream, not a failure.
+                    Err(
+                        tokio_tungstenite::tungstenite::Error::ConnectionClosed
+                        | tokio_tungstenite::tungstenite::Error::AlreadyClosed
+                        | tokio_tungstenite::tungstenite::Error::Protocol(
+                            tokio_tungstenite::tungstenite::error::ProtocolError::ResetWithoutClosingHandshake,
+                        ),
+                    ) => return None,
                     Err(e) => return Some(Err(ConnectorError::Backend(e.to_string()))),
                 }
             }
@@ -412,6 +569,31 @@ impl APIConnector {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn failed_requests_are_errors_with_the_cause() {
+        let resp = |status: u16, body: &str| ApiResponse {
+            status,
+            content_type: "application/json".into(),
+            bytes: body.as_bytes().to_vec(),
+        };
+        assert_eq!(
+            jobs_error(
+                &resp(401, r#"{"detail": "Could not validate credentials"}"#),
+                "list jobs"
+            )
+            .to_string(),
+            "Authentication failed trying to list jobs (HTTP 401): Could not validate credentials"
+        );
+        assert_eq!(
+            jobs_error(&resp(403, r#"{"detail": "nope"}"#), "stop job 'a'").to_string(),
+            "Not authorized to stop job 'a' (HTTP 403): nope"
+        );
+        assert_eq!(
+            jobs_error(&resp(500, "boom"), "list jobs").to_string(),
+            "Failed to list jobs (HTTP 500): boom"
+        );
+    }
 
     #[test]
     fn strip_timestamps() {

@@ -69,6 +69,33 @@ Dependencies point down only. No cycles; `meerschaum-core` is a leaf. Verify wit
 Shared Python-behavior helpers (`pyfmt`, `Value`, dtype vocabulary, `shlex`) belong in `meerschaum-core`;
 a copy in another crate is a bug to file, not a pattern to follow.
 
+### Job executors: client injection (`jobs -> api` is not an edge)
+
+`meerschaum-jobs` stays on `meerschaum-core` only, yet it has three executors. The `api:<label>` and
+`systemd` executors reach the outside world through traits the jobs crate owns, and the host injects the
+implementations through `JobsContext`:
+
+| Executor | Trait (in `meerschaum-jobs`) | Implemented by | Installed with |
+|---|---|---|---|
+| `api:<label>` | `remote::RemoteJobs` (a *blocking* client of one endpoint, every read fallible) and `remote::RemoteJobsResolver` (keys -> shared client) | `meerschaum-cli` (`native/remote_jobs.rs`) over `meerschaum_api::APIConnector`, blocking on the `Session`'s one Tokio runtime | `JobsContext::with_remote` |
+| `systemd` | `runner::ProcessRunner` (`systemctl --user`, process state) | `runner::SystemRunner` (real); `runner::FakeSystemctl` (tests) | `JobsContext::with_process_runner` |
+
+A context without a resolver answers every remote operation with an explicit error, and a failed remote
+read is never "no jobs": decisions (listing, ownership, replacement) use the executor's `try_*` methods.
+The wire protocol lives only in `meerschaum-api` (`client/jobs.rs`, including the strict `try_*` reads);
+the server side of the same routes is `meerschaum-server`'s `JobsBackend`, implemented over the local
+executors in `meerschaum-cli` (`jobs_backend.rs`). Hosts other than the CLI (the Python extension) install
+their own resolver or none.
+
+### The config registry (`meerschaum_core::config`)
+
+`ConfigState` owns every config rule (file selection, YAML/JSON read and write, defaults, `MRSM{}` substitution and
+restoration, `MRSM_CONFIG` / `MRSM_PATCH` / `MRSM_<TYPE>_<LABEL>`, backups, `sync_files`) over the lossless
+`ConfigValue`; `Config` is the lock-wrapped registry the binary and the server use (JSON-like `get`/`get_with`). The
+Python extension (`meerschaum-py/src/config_api.rs`) owns the one live `dict` (`meerschaum.config.config`) because
+Python code mutates the dictionaries `get_config` returns; each call loads the keys it needs into a throwaway
+`ConfigState`, runs the rule, and writes back only the changed top-level keys. Never add a second config store.
+
 ## Building
 
 ```bash

@@ -3,6 +3,7 @@
 """Focused parity tests for the built-in Compose action."""
 
 import json
+import time
 import pathlib
 
 
@@ -280,24 +281,42 @@ def test_compose_owns_jobs_it_stamped_after_a_command_edit():
 
 def test_compose_stamps_the_project_name_onto_started_jobs(tmp_path, monkeypatch):
     """A job started inside a Compose environment records its project's name."""
+    import uuid
     import meerschaum as mrsm
     from meerschaum._internal.static import STATIC_CONFIG
     from meerschaum.compose.utils.config import get_env_dict
 
+    ### Unique per run: under xdist several workers share one root, and a fixed job name
+    ### lets one worker delete (or reuse) another's job.
+    suffix = uuid.uuid4().hex[:12]
+    project_name = f'alpha-{suffix}'
     compose_project_var = STATIC_CONFIG['environment']['compose_project']
-    env = get_env_dict({'project_name': 'alpha', '__file__': tmp_path / 'mrsm-compose.yaml'})
-    assert env[compose_project_var] == 'alpha'
+    env = get_env_dict({'project_name': project_name, '__file__': tmp_path / 'mrsm-compose.yaml'})
+    assert env[compose_project_var] == project_name
 
     ### The project's config carries credentials and must not reach the job.
-    monkeypatch.setenv(compose_project_var, 'alpha')
-    monkeypatch.setenv('MRSM__COMPOSE_CONFIG', json.dumps({'project_name': 'alpha'}))
+    monkeypatch.setenv(compose_project_var, project_name)
+    monkeypatch.setenv('MRSM__COMPOSE_CONFIG', json.dumps({'project_name': project_name}))
 
-    job_name = 'test-compose-stamp'
+    job_name = f'test-compose-stamp-{suffix}'
     success, _ = mrsm.entry(['show', 'version', '-d', '--name', job_name, '-f', '-y'])
     try:
         assert success
-        job = mrsm.Job(job_name)
-        assert job.env.get(compose_project_var, None) == 'alpha'
+        ### In python mode `start` returns once the daemon process is launched; the daemon writes
+        ### its `properties.json` (with the `env`) a moment later, once its interpreter is up.
+        ### Wait for that file instead of racing the daemon's start-up: a job which is never
+        ### stamped still fails after the deadline.
+        deadline = time.time() + 60
+        while True:
+            job = mrsm.Job(job_name)
+            if job.env.get(compose_project_var, None) is not None or time.time() > deadline:
+                break
+            time.sleep(0.1)
+        assert job.env.get(compose_project_var, None) == project_name, (
+            f"exists={job.exists()}, executor={job.executor_keys!r}, "
+            f"properties_path={job.daemon.properties_path}, "
+            f"properties={job.daemon.properties}"
+        )
         assert 'MRSM__COMPOSE_CONFIG' not in job.env
     finally:
         mrsm.entry(['delete', 'job', job_name, '-f', '-y'])

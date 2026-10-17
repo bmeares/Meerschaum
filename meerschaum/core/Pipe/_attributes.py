@@ -200,10 +200,9 @@ def get_parameters(
         return deepcopy(self.__dict__['_resolved_parameters'])
 
     if is_top_level and core is not None and (_rust := _rust_impl('get_parameters')) is not None:
-        ### References, `{{ Pipe() }}` and `MRSM{}` resolve in `meerschaum_core`; the Rust call also
-        ### returns the `_symlinks` v4 records on the pipe.
+        ### References, `{{ Pipe() }}` and `MRSM{}` (against the live config registry) resolve in
+        ### `meerschaum_core`; the Rust call also returns the `_symlinks` v4 records on the pipe.
         resolved_parameters, self._symlinks = _rust(self)
-        resolved_parameters = search_and_substitute_config(resolved_parameters)
     else:
         parameters = {}
         for ref_pipe in self.references:

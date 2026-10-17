@@ -30,7 +30,7 @@ bindings = "pyo3"
 # `extension-module` is a crate feature (not a default) so `cargo test` can link libpython.
 # NOTE: `maturin ... --features X` replaces this list; build_py.sh passes the full set plus
 # `polars` (the opt-in pyo3-polars path).
-features = ["pyo3/abi3-py311", "extension-module"]
+features = ["pyo3/abi3-py311", "extension-module", "duckdb", "oracle"]
 module-name = "meerschaum._core._core"
 python-source = "../.."
 python-packages = ["meerschaum"]

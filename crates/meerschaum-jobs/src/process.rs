@@ -184,12 +184,29 @@ pub use imp::{proc_state, process_cmdlines, send_signal};
 /// Port of `Daemon._find_detached_pids`: the PIDs (other than ours) whose command line contains
 /// `daemon_id='<id>'`. Python daemons embed it in their `python -c` code; the Rust supervisor
 /// passes it as an argument for the same reason.
-pub fn find_detached_pids(daemon_id: &str) -> Vec<i32> {
+///
+/// A Rust supervisor also carries `--jobs-dir <dir>`: it only counts when that is `jobs_dir`,
+/// so a job named `alpha` under one root is never "found" (and then reported as running, or
+/// killed by `stop`) because a job of the same name runs under another root. A command line
+/// without `--jobs-dir` (a Python daemon) matches by name only, like v4.
+pub fn find_detached_pids(daemon_id: &str, jobs_dir: &std::path::Path) -> Vec<i32> {
     let marker = daemon_marker(daemon_id);
     let me = std::process::id() as i32;
+    let same_dir = |a: &str| {
+        let (a, b) = (std::path::Path::new(a), jobs_dir);
+        a == b || matches!((a.canonicalize(), b.canonicalize()), (Ok(x), Ok(y)) if x == y)
+    };
     process_cmdlines()
         .into_iter()
-        .filter(|(pid, args)| *pid != me && args.iter().any(|a| a.contains(&marker)))
+        .filter(|(pid, args)| {
+            *pid != me
+                && args.iter().any(|a| a.contains(&marker))
+                && args
+                    .iter()
+                    .position(|a| a == "--jobs-dir")
+                    .and_then(|i| args.get(i + 1))
+                    .is_none_or(|dir| same_dir(dir))
+        })
         .map(|(pid, _)| pid)
         .collect()
 }

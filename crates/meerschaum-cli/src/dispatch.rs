@@ -61,6 +61,65 @@ pub trait Host {
 
     /// Print a prompt and read a line from stdin (`None` at end of input).
     fn read_line(&mut self, prompt: &str) -> Option<String>;
+
+    /// Run a process with its output captured (`subprocess.Popen(..., stdout=PIPE,
+    /// stderr=PIPE).communicate(timeout=...)`). The default runs it attached and captures
+    /// nothing.
+    fn output(
+        &mut self,
+        spec: &CommandSpec,
+        _timeout: Option<std::time::Duration>,
+    ) -> std::io::Result<CommandOutput> {
+        let code = self.run(spec)?;
+        Ok(CommandOutput {
+            code,
+            ..CommandOutput::default()
+        })
+    }
+
+    /// A multi-line answer (`prompt(multiline=True)`: `[Esc + Enter]` submits). `None` at the end
+    /// of input.
+    fn read_multiline(&mut self, prompt: &str) -> Option<String> {
+        self.read_line(prompt)
+    }
+
+    /// `timed_input(seconds)`: a line typed within `timeout`, else `None`.
+    fn read_line_timeout(&mut self, _timeout: std::time::Duration) -> Option<String> {
+        None
+    }
+
+    /// Like [`Host::read_line`], but a terminal host reports Ctrl-C through
+    /// `native::terminal::take_interrupt` (`KeyboardInterrupt` in v4) instead of ending the
+    /// process.
+    fn read_line_interruptible(&mut self, prompt: &str) -> Option<String> {
+        self.read_line(prompt)
+    }
+
+    /// Like [`Host::read_line`] without echoing the input (passwords).
+    fn read_secret(&mut self, prompt: &str) -> Option<String> {
+        self.read_line(prompt)
+    }
+
+    /// Like [`Host::read_line`] with `prefill` already typed into the editable buffer
+    /// (`prompt_toolkit.prompt(default=...)`). Without a terminal the typed line is appended to
+    /// the prefill like `prompt_toolkit` does for piped input.
+    fn read_line_prefilled(&mut self, prompt: &str, prefill: &str) -> Option<String> {
+        self.read_line(prompt)
+            .map(|line| format!("{prefill}{line}"))
+    }
+}
+
+/// What a captured process produced.
+#[derive(Debug, Clone, Default)]
+pub struct CommandOutput {
+    /// Standard output.
+    pub stdout: Vec<u8>,
+    /// Standard error.
+    pub stderr: Vec<u8>,
+    /// The exit code (`-N` after signal N, like `Popen.returncode`).
+    pub code: i32,
+    /// Set when the timeout elapsed (the process was killed): `str(TimeoutExpired)`.
+    pub timed_out: bool,
 }
 
 /// The real host.
@@ -95,6 +154,51 @@ impl Host for SystemHost {
             Ok(_) => Some(line.trim_end_matches(['\n', '\r']).to_string()),
         }
     }
+
+    fn output(
+        &mut self,
+        spec: &CommandSpec,
+        timeout: Option<std::time::Duration>,
+    ) -> std::io::Result<CommandOutput> {
+        crate::native::terminal::capture(spec, timeout)
+    }
+
+    fn read_line_timeout(&mut self, timeout: std::time::Duration) -> Option<String> {
+        crate::native::terminal::timed_input(timeout)
+    }
+
+    fn read_multiline(&mut self, prompt: &str) -> Option<String> {
+        // PARITY: `prompt_toolkit` cannot submit a multiline prompt from piped input and ends
+        // with `EOFError`.
+        if !std::io::IsTerminal::is_terminal(&std::io::stdin()) {
+            return None;
+        }
+        crate::native::terminal::read_multiline(prompt)
+    }
+
+    fn read_line_interruptible(&mut self, prompt: &str) -> Option<String> {
+        if std::io::IsTerminal::is_terminal(&std::io::stdin()) {
+            return crate::native::terminal::read_prefilled(prompt, "");
+        }
+        self.read_line(prompt)
+    }
+
+    fn read_secret(&mut self, prompt: &str) -> Option<String> {
+        if std::io::IsTerminal::is_terminal(&std::io::stdin()) {
+            crate::native::terminal::read_secret(prompt)
+        } else {
+            self.read_line(prompt)
+        }
+    }
+
+    fn read_line_prefilled(&mut self, prompt: &str, prefill: &str) -> Option<String> {
+        if prefill.is_empty() || !std::io::IsTerminal::is_terminal(&std::io::stdin()) {
+            return self
+                .read_line(prompt)
+                .map(|line| format!("{prefill}{line}"));
+        }
+        crate::native::terminal::read_prefilled(prompt, prefill)
+    }
 }
 
 /// A host that runs nothing: every process "exits" with a fixed code and input is closed.
@@ -116,6 +220,14 @@ impl Host for RecordingHost {
     }
 
     fn read_line(&mut self, _prompt: &str) -> Option<String> {
+        if self.input.is_empty() {
+            None
+        } else {
+            Some(self.input.remove(0))
+        }
+    }
+
+    fn read_line_timeout(&mut self, _timeout: std::time::Duration) -> Option<String> {
         if self.input.is_empty() {
             None
         } else {
@@ -263,12 +375,14 @@ impl<'a> Runtime<'a> {
 
     /// Write to stdout.
     pub fn print(&mut self, text: &str) {
+        crate::native::api_warnings::flush(self);
         let _ = self.out.write_all(text.as_bytes());
         let _ = self.out.flush();
     }
 
     /// Write to stderr.
     pub fn eprint(&mut self, text: &str) {
+        crate::native::api_warnings::flush(self);
         let _ = self.err.write_all(text.as_bytes());
         let _ = self.err.flush();
     }
@@ -297,7 +411,8 @@ pub fn main(sysargs: &[String], rt: &mut Runtime<'_>) -> i32 {
         return 0;
     }
     let nopretty = contains(sysargs, "--nopretty");
-    if sysargs.is_empty() || contains(sysargs, "--shell") {
+    let in_job = (rt.env)(meerschaum_jobs::supervisor::RESULT_PATH_ENV).is_some();
+    if (sysargs.is_empty() || contains(sysargs, "--shell")) && !in_job {
         let sysargs: Vec<String> = sysargs
             .iter()
             .filter(|a| *a != "--shell")
@@ -324,6 +439,11 @@ pub fn main(sysargs: &[String], rt: &mut Runtime<'_>) -> i32 {
     if let Some(path) = (rt.env)(meerschaum_jobs::supervisor::RESULT_PATH_ENV) {
         let json = serde_json::json!([result.success, result.message]).to_string();
         let _ = std::fs::write(path, json);
+        // PARITY: `Daemon._run_exit` ends the job's log with `mrsm.pprint(result)` (a tuple is
+        // printed by `print_tuple` with its default arguments, no padding).
+        let text = rt.with_formatter(|f| f.print_tuple(&result, TupleArgs::default()));
+        rt.print(&text);
+        return if result.success { 0 } else { 1 };
     }
     // PARITY: v4 only sets a failing exit code when the tuple is printed, so `--nopretty`
     // always exits 0 (`meerschaum/__main__.py` `main`).
@@ -585,6 +705,13 @@ pub fn entry_with_args(mut args: ArgsMap, rt: &mut Runtime<'_>, depth: usize) ->
         if rt.in_shell {
             return SuccessTuple::success();
         }
+        // A job has no terminal: a worker whose sysargs hold no action (`mrsm -y`) fails
+        // instead of opening a shell that would wait on stdin forever.
+        if (rt.env)(meerschaum_jobs::supervisor::RESULT_PATH_ENV).is_some() {
+            return SuccessTuple::fail(
+                "The job has no action to run (an interactive shell cannot start in a job).",
+            );
+        }
         let instance = match args.get("mrsm_instance") {
             Some(PyValue::Str(s)) => Some(s.clone()),
             _ => None,
@@ -676,9 +803,7 @@ fn run_action(
     depth: usize,
 ) -> SuccessTuple {
     let result: ActionResult = match resolved.function_name() {
-        "_start_pipeline" if native::float(args, "timeout_seconds").is_none() => {
-            run_pipeline(args, rt, depth)
-        }
+        "_start_pipeline" => run_pipeline(args, rt, depth),
         "_show_version" => builtin::show_version(args, rt),
         "_show_arguments" => builtin::show_arguments(args, rt),
         "_show_help" => builtin::show_help(args, rt),
@@ -695,6 +820,8 @@ fn run_action(
         "_start_webterm" => crate::server::start_webterm(args, rt),
         "sh" => builtin::sh(args, rt),
         "clear" => builtin::clear(args, rt),
+        other if native::residual::handles(other) => native::residual::run(other, args, rt)
+            .unwrap_or_else(|| Ok(SuccessTuple::fail("Unhandled action."))),
         other => match crate::native::run(other, args, rt) {
             Some(r) => r,
             None => crate::python::core_action(&resolved.display_name(), args, rt),
@@ -735,6 +862,17 @@ fn run_pipeline(args: &ArgsMap, rt: &mut Runtime<'_>, depth: usize) -> ActionRes
             .collect(),
         _ => ArgsMap::new(),
     };
+    let timeout = native::float(args, "timeout_seconds");
+    let timeout_text = args
+        .get("timeout_seconds")
+        .map(PyValue::py_str)
+        .unwrap_or_default();
+    let patch_json = match get_param("patch_args") {
+        Some(value @ PyValue::Dict(_)) => value
+            .json_dumps_compact()
+            .map_err(|e| ActionError::new(&e.class, e.message))?,
+        _ => "null".to_string(),
+    };
     let looping = native::flag(args, "loop");
     let count = native::words(args, "action")
         .first()
@@ -754,11 +892,25 @@ fn run_pipeline(args: &ArgsMap, rt: &mut Runtime<'_>, depth: usize) -> ActionRes
             break;
         }
         let dates = rt.dates.clone();
-        result = match run_chain(&sysargs, &dates, Some(&patch), |args| {
-            entry_with_args(args, rt, depth + 1)
-        }) {
-            Ok(result) => result,
-            Err(error) => SuccessTuple::fail(format!("{}: {}", error.class, error.message)),
+        result = match timeout {
+            None => match run_chain(&sysargs, &dates, Some(&patch), |args| {
+                entry_with_args(args, rt, depth + 1)
+            }) {
+                Ok(result) => result,
+                Err(error) => SuccessTuple::fail(format!("{}: {}", error.class, error.message)),
+            },
+            // PARITY: with `--timeout-seconds` v4 runs each step in a child interpreter and
+            // kills it when the time is up; here the child is this binary.
+            Some(seconds) => {
+                match timed_pipeline_step(rt, line, &patch_json, seconds, &timeout_text) {
+                    Ok(Some(done)) => done,
+                    Ok(None) => result.clone(),
+                    Err(error) => {
+                        native::warn(rt, &error.message);
+                        result.clone()
+                    }
+                }
+            }
         };
         ran += 1;
         // PARITY: v4 sleeps between attempts, including after failures, and `--loop`
@@ -792,6 +944,162 @@ fn run_pipeline(args: &ArgsMap, rt: &mut Runtime<'_>, depth: usize) -> ActionRes
         );
     }
     Ok(result)
+}
+
+/// The first argument of the child `start pipeline --timeout-seconds` runs each step in.
+pub const PIPELINE_CHILD_ARG: &str = "__mrsm_pipeline_child__";
+const FENCE_BEGIN: &str = "<MRSM_RESULT>";
+const FENCE_END: &str = "</MRSM_RESULT>";
+
+/// One `start pipeline` step in a child process, killed after `seconds` (`poll_process` in
+/// v4): its output is printed as it arrives and its result is read from the fenced JSON line.
+/// `Ok(None)`: the child ended without a result (v4 keeps the previous one).
+fn timed_pipeline_step(
+    rt: &mut Runtime<'_>,
+    line: &str,
+    patch_json: &str,
+    seconds: f64,
+    seconds_text: &str,
+) -> Result<Option<SuccessTuple>, ActionError> {
+    use std::io::{BufRead, BufReader};
+    use std::process::{Command, Stdio};
+    let exe = std::env::current_exe()
+        .map_err(|e| ActionError::new("OSError", format!("Cannot locate the executable: {e}")))?;
+    let mut command = Command::new(exe);
+    command
+        .arg(PIPELINE_CHILD_ARG)
+        .arg(line)
+        .arg(patch_json)
+        .stdin(Stdio::inherit())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit());
+    // v4 starts the step with `os.setsid` and stops it with `os.killpg`: the step leads its own
+    // session (and process group), so its children die with it and, having no controlling
+    // terminal, a step that prompts is not stopped by SIGTTIN.
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        // SAFETY: the closure runs between `fork` and `exec` and only calls `setsid(2)`, which
+        // is async-signal-safe; it allocates nothing and takes no locks.
+        #[allow(unsafe_code)]
+        unsafe {
+            command.pre_exec(|| {
+                rustix::process::setsid()
+                    .map(|_| ())
+                    .map_err(std::io::Error::from)
+            });
+        }
+    }
+    for (key, value) in (rt.vars)() {
+        command.env(key, value);
+    }
+    let mut child = command
+        .spawn()
+        .map_err(|e| ActionError::new("OSError", format!("Failed to start the pipeline: {e}")))?;
+    let stdout = child.stdout.take().expect("piped stdout");
+    let (sender, receiver) = std::sync::mpsc::channel::<String>();
+    std::thread::spawn(move || {
+        for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+            if sender.send(line).is_err() {
+                break;
+            }
+        }
+    });
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs_f64(seconds.max(0.0));
+    let mut result: Option<SuccessTuple> = None;
+    let handle = |text: String, rt: &mut Runtime<'_>, result: &mut Option<SuccessTuple>| {
+        if let Some(begin) = text.find(FENCE_BEGIN) {
+            let from = begin + FENCE_BEGIN.len();
+            let end = text.find(FENCE_END).unwrap_or(text.len());
+            if let Ok(serde_json::Value::Array(items)) = serde_json::from_str(&text[from..end])
+                && let (Some(success), Some(message)) = (
+                    items.first().and_then(serde_json::Value::as_bool),
+                    items.get(1).and_then(serde_json::Value::as_str),
+                )
+            {
+                *result = Some(SuccessTuple {
+                    success,
+                    message: message.to_string(),
+                });
+            }
+            return;
+        }
+        rt.print(&format!("{text}\n"));
+    };
+    loop {
+        let wait = deadline.saturating_duration_since(std::time::Instant::now());
+        match receiver.recv_timeout(wait.min(std::time::Duration::from_millis(100))) {
+            Ok(text) => handle(text, rt, &mut result),
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                if std::time::Instant::now() >= deadline {
+                    // The step leads its own process group: SIGKILL the whole group.
+                    let _ = Command::new("kill")
+                        .args(["-KILL", "--", &format!("-{}", child.id())])
+                        .stdout(Stdio::null())
+                        .stderr(Stdio::null())
+                        .status();
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    result = Some(SuccessTuple::fail(format!(
+                        "Failed to execute pipeline within {seconds_text} second{}.",
+                        if seconds != 1.0 { "s" } else { "" }
+                    )));
+                    return Ok(result);
+                }
+            }
+        }
+    }
+    let _ = child.wait();
+    Ok(result)
+}
+
+/// The child of [`timed_pipeline_step`]: run `line` with the patch arguments and print the result
+/// between the fences.
+pub fn pipeline_child(args: &[String], rt: &mut Runtime<'_>) -> i32 {
+    let line = args.first().cloned().unwrap_or_default();
+    let patch_json = args.get(1).cloned().unwrap_or_default();
+    let sysargs = match shlex::split(&line) {
+        Ok(sysargs) => sysargs,
+        Err(e) => {
+            println!(
+                "{FENCE_BEGIN}{}{FENCE_END}",
+                fence_json(&SuccessTuple::fail(e))
+            );
+            return 0;
+        }
+    };
+    let patch: ArgsMap = match serde_json::from_str::<serde_json::Value>(&patch_json) {
+        Ok(serde_json::Value::Object(map)) => {
+            map.into_iter().map(|(k, v)| (k, json_to_py(&v))).collect()
+        }
+        _ => ArgsMap::new(),
+    };
+    let result = entry_with_patch(&sysargs, &patch, rt);
+    println!("{FENCE_BEGIN}{}{FENCE_END}", fence_json(&result));
+    0
+}
+
+fn fence_json(result: &SuccessTuple) -> String {
+    serde_json::json!([result.success, result.message]).to_string()
+}
+
+fn json_to_py(value: &serde_json::Value) -> PyValue {
+    match value {
+        serde_json::Value::Null => PyValue::None,
+        serde_json::Value::Bool(b) => PyValue::Bool(*b),
+        serde_json::Value::Number(n) => match n.as_i64() {
+            Some(i) => PyValue::Int(i128::from(i)),
+            None => PyValue::Float(n.as_f64().unwrap_or(0.0)),
+        },
+        serde_json::Value::String(s) => PyValue::Str(s.clone()),
+        serde_json::Value::Array(items) => PyValue::List(items.iter().map(json_to_py).collect()),
+        serde_json::Value::Object(map) => PyValue::Dict(
+            map.iter()
+                .map(|(k, v)| (PyValue::Str(k.clone()), json_to_py(v)))
+                .collect(),
+        ),
+    }
 }
 
 /// `_do_action_wrapper`'s message when the action raises.

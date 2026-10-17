@@ -2,7 +2,6 @@
 //! `cockroachdb`) over `sqlx::postgres`.
 
 use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, Utc};
-use rust_decimal::Decimal;
 use sqlx::postgres::{PgColumn, PgConnectOptions, PgPool, PgPoolOptions, PgRow, PgSslMode};
 use sqlx::{Column, Postgres, Row, TypeInfo, ValueRef};
 
@@ -87,7 +86,7 @@ pub(crate) fn kind_for(type_name: &str) -> ColumnKind {
         "OID" => ColumnKind::UInt32,
         "FLOAT4" => ColumnKind::Float32,
         "FLOAT8" => ColumnKind::Float64,
-        "NUMERIC" => ColumnKind::Decimal,
+        "NUMERIC" => ColumnKind::NumericText,
         "TEXT" | "VARCHAR" | "BPCHAR" | "NAME" | "CITEXT" | "UNKNOWN" => ColumnKind::Utf8,
         "JSON" | "JSONB" => ColumnKind::Json,
         "BYTEA" => ColumnKind::Bytes,
@@ -102,8 +101,7 @@ pub(crate) fn kind_for(type_name: &str) -> ColumnKind {
 }
 
 /// Decode PostgreSQL's binary `NUMERIC` (`ndigits`, `weight`, `sign`, `dscale`, base-10000
-/// digits) into decimal text. `None` for `NaN` / infinities (Python reads `Decimal('NaN')`, a
-/// null to pandas).
+/// digits) into decimal text: `NaN`, `Infinity` and `-Infinity` as `Decimal(str)` reads them.
 pub(crate) fn pg_numeric_text(bytes: &[u8]) -> Option<String> {
     let rd = |i: usize| -> Option<i16> {
         Some(i16::from_be_bytes([*bytes.get(i)?, *bytes.get(i + 1)?]))
@@ -112,8 +110,12 @@ pub(crate) fn pg_numeric_text(bytes: &[u8]) -> Option<String> {
     let weight = rd(2)? as i32;
     let sign = rd(4)? as u16;
     let dscale = rd(6)?.max(0) as usize;
-    if sign != 0x0000 && sign != 0x4000 {
-        return None;
+    match sign {
+        0x0000 | 0x4000 => {}
+        0xC000 => return Some("NaN".to_string()),
+        0xD000 => return Some("Infinity".to_string()),
+        0xF000 => return Some("-Infinity".to_string()),
+        _ => return None,
     }
     let digits: Vec<u16> = (0..ndigits)
         .map(|k| rd(8 + 2 * k).map(|d| d as u16))
@@ -194,22 +196,19 @@ impl Backend for PgBackend {
             ),
             ColumnKind::Float32 => SqlValue::Float(row.try_get::<f32, _>(idx).map_err(err)? as f64),
             ColumnKind::Float64 => SqlValue::Float(row.try_get::<f64, _>(idx).map_err(err)?),
-            // `rust_decimal` keeps 28 digits; wider values are decoded from the binary format
-            // as text and parsed into the 38-digit `Decimal128` by the batch builder.
-            ColumnKind::Decimal => match row.try_get::<Decimal, _>(idx) {
-                Ok(d) if d.mantissa().unsigned_abs() < 10u128.pow(27) => SqlValue::Decimal(d),
-                _ => {
-                    let raw = row.try_get_raw(idx)?;
-                    let bytes = raw.as_bytes().map_err(|e| SqlError::Conversion {
-                        column: plan.name.clone(),
-                        reason: e.to_string(),
-                    })?;
-                    match pg_numeric_text(bytes) {
-                        Some(text) => SqlValue::Text(text),
-                        None => SqlValue::Null,
-                    }
+            // The binary `NUMERIC` as text: exact digits and the stored scale per value (no
+            // `rust_decimal` 28-digit limit, no per-column scale).
+            ColumnKind::NumericText => {
+                let raw = row.try_get_raw(idx)?;
+                let bytes = raw.as_bytes().map_err(|e| SqlError::Conversion {
+                    column: plan.name.clone(),
+                    reason: e.to_string(),
+                })?;
+                match pg_numeric_text(bytes) {
+                    Some(text) => SqlValue::Text(text),
+                    None => SqlValue::Null,
                 }
-            },
+            }
             ColumnKind::Utf8 => {
                 SqlValue::Text(row.try_get_unchecked::<String, _>(idx).map_err(err)?)
             }
@@ -349,6 +348,33 @@ mod tests {
             b.extend_from_slice(&v.to_be_bytes());
         }
         assert_eq!(pg_numeric_text(&b).as_deref(), Some("-0.05"));
+        // `3` keeps scale 0 and `2.50` keeps scale 2; a 40-digit value is exact.
+        let mut b = Vec::new();
+        for v in [1i16, 0, 0, 0, 3] {
+            b.extend_from_slice(&v.to_be_bytes());
+        }
+        assert_eq!(pg_numeric_text(&b).as_deref(), Some("3"));
+        let mut b = Vec::new();
+        for v in [2i16, 0, 0, 2, 2, 5000] {
+            b.extend_from_slice(&v.to_be_bytes());
+        }
+        assert_eq!(pg_numeric_text(&b).as_deref(), Some("2.50"));
+        let mut b = Vec::new();
+        for v in [
+            10i16, 9, 0, 0, 1234, 5678, 9012, 3456, 7890, 1234, 5678, 9012, 3456, 7890,
+        ] {
+            b.extend_from_slice(&v.to_be_bytes());
+        }
+        assert_eq!(
+            pg_numeric_text(&b).as_deref(),
+            Some("1234567890123456789012345678901234567890")
+        );
+        // NaN
+        let mut b = Vec::new();
+        for v in [0i16, 0, 0xC000u16 as i16, 0] {
+            b.extend_from_slice(&v.to_be_bytes());
+        }
+        assert_eq!(pg_numeric_text(&b).as_deref(), Some("NaN"));
     }
 
     #[test]

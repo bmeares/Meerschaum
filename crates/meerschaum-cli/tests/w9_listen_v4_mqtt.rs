@@ -224,6 +224,10 @@ fn listen_runs_a_v4_pattern_connector_and_lands_every_message() {
         .env("MRSM_PLUGINS_DIR", &plugins)
         .env("MRSM_NOASK", "true")
         .env("MRSM_PYTHON", "python3")
+        // The worker's `pipe.sync(docs)` takes the native path (the 5.0 default once the gate
+        // goes), and a missing package fails loudly instead of installing inside the deadline.
+        .env("MRSM_CORE", "rust")
+        .env("MRSM_NO_AUTO_INSTALL", "1")
         .env("PYTHONPATH", repo())
         .env("W9_HOOK_LOG", &hook_log)
         .env(

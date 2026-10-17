@@ -440,6 +440,11 @@ pub struct PipInstall {
     pub debug: bool,
     /// Skip the wheel/setuptools bootstrap (the recursive call sets it).
     pub skip_wheel_check: bool,
+    /// `_uninstall=True` (`pip_uninstall`): remove the packages instead.
+    pub uninstall: bool,
+    /// `venv=None`: the host interpreter instead of a virtual environment (`upgrade meerschaum`).
+    /// Nothing is created, no `--target` is passed, the request ledger is not touched.
+    pub host: bool,
 }
 
 /// `get_pip_install_lock_path(venv)`: the cross-process lock of an environment.
@@ -525,7 +530,7 @@ pub fn install_plan(env: &PipEnv, opts: &PipInstall, rt: &Runtime<'_>) -> Json {
         .names
         .iter()
         .map(|name| {
-            if name.starts_with(PACKAGE_ARCHIVES_PREFIX) {
+            if opts.uninstall || name.starts_with(PACKAGE_ARCHIVES_PREFIX) {
                 install_name_no_version(name)
             } else {
                 name.as_str()
@@ -539,14 +544,16 @@ pub fn install_plan(env: &PipEnv, opts: &PipInstall, rt: &Runtime<'_>) -> Json {
         .map(|p| p.to_string_lossy().into_owned())
         .unwrap_or_default();
     json!({
-        "operation": "install",
-        "environment": opts.venv,
+        "operation": if opts.uninstall { "uninstall" } else { "install" },
+        "environment": if opts.host { Json::Null } else { json!(opts.venv) },
         "target": target,
         "packages": packages,
         "requirements_file": opts.requirements_file.as_ref().map(|p| {
             meerschaum_core::config::paths::resolve_path(p).to_string_lossy().into_owned()
         }),
-        "args": opts.args.clone().unwrap_or_else(|| vec!["--upgrade".to_string()]),
+        "args": opts.args.clone().unwrap_or_else(|| {
+            if opts.uninstall { Vec::new() } else { vec!["--upgrade".to_string()] }
+        }),
         "installer": if use_uv { "uv" } else { "pip" },
         "installer_available": use_uv || have_pip,
         "pip_fallback": use_uv && have_pip,
@@ -561,7 +568,9 @@ fn dump_plan(plan: &Json) -> String {
     serde_json::to_string_pretty(plan).unwrap_or_default()
 }
 
-/// `pip_install(*names, ...)`: install into `opts.venv`. Returns success.
+/// `pip_install(*names, ...)` and `pip_uninstall(*names, ...)` (`opts.uninstall`): install into
+/// (or remove from) `opts.venv`, or the host interpreter with `opts.host` (`venv=None`).
+/// Returns success.
 pub fn pip_install(env: &PipEnv, rt: &mut Runtime<'_>, opts: &PipInstall) -> bool {
     let silent = env.inside_daemon;
     if opts.dry_run {
@@ -571,7 +580,8 @@ pub fn pip_install(env: &PipEnv, rt: &mut Runtime<'_>, opts: &PipInstall) -> boo
         }
         return true;
     }
-    let _lock = InstallLock::acquire(env, &opts.venv);
+    // The host interpreter is not an environment this process locks.
+    let _lock = (!opts.host).then(|| InstallLock::acquire(env, &opts.venv));
     let interpreter = match env.interpreter() {
         Ok(interpreter) => interpreter.clone(),
         Err(message) => {
@@ -584,6 +594,11 @@ pub fn pip_install(env: &PipEnv, rt: &mut Runtime<'_>, opts: &PipInstall) -> boo
     let uv_bin = env.uv_bin();
     let use_uv = uv_bin.is_some() && env.uv_enabled;
     let have_pip = interpreter.has_pip;
+    let verb = if opts.uninstall {
+        "uninstall"
+    } else {
+        "install"
+    };
 
     // The interpreter that runs `pip`: the host's, else the one in the `mrsm` environment.
     let mut pip_venv: Option<&str> = None;
@@ -606,44 +621,53 @@ pub fn pip_install(env: &PipEnv, rt: &mut Runtime<'_>, opts: &PipInstall) -> boo
     }
 
     // `with Venv(venv)`: create the environment on first use.
-    if !env.init_venv(rt, &opts.venv, false, opts.debug) {
-        return false;
-    }
-    let target = match env.target_path(&opts.venv) {
-        Ok(target) => target,
-        Err(message) => {
-            warn(rt, &message);
+    let target = if opts.host {
+        None
+    } else {
+        if !env.init_venv(rt, &opts.venv, false, opts.debug) {
             return false;
+        }
+        match env.target_path(&opts.venv) {
+            Ok(target) => Some(target),
+            Err(message) => {
+                warn(rt, &message);
+                return false;
+            }
         }
     };
 
-    let given: Vec<String> = opts
-        .args
-        .clone()
-        .unwrap_or_else(|| vec!["--upgrade".into()]);
+    let given: Vec<String> = opts.args.clone().unwrap_or_else(|| {
+        if opts.uninstall {
+            Vec::new()
+        } else {
+            vec!["--upgrade".into()]
+        }
+    });
     let mut args = given.clone();
-    let joined = given.join(" ");
-    if !given.iter().any(|a| a == "--ignore-installed")
-        && !given.iter().any(|a| a == "-I")
-        && !use_uv
-    {
-        args.push("--ignore-installed".into());
+    if !opts.host && !opts.uninstall {
+        if !given.iter().any(|a| a == "--ignore-installed")
+            && !given.iter().any(|a| a == "-I")
+            && !use_uv
+        {
+            args.push("--ignore-installed".into());
+        }
+        if !given.iter().any(|a| a == "--cache-dir") {
+            args.push("--cache-dir".into());
+            args.push(
+                env.venv_root(&opts.venv)
+                    .join("cache")
+                    .to_string_lossy()
+                    .into_owned(),
+            );
+        }
     }
-    if !given.iter().any(|a| a == "--cache-dir") {
-        args.push("--cache-dir".into());
-        args.push(
-            env.venv_root(&opts.venv)
-                .join("cache")
-                .to_string_lossy()
-                .into_owned(),
-        );
-    }
-    let _ = joined;
-    let mut full: Vec<String> = vec!["install".into()];
+    let mut full: Vec<String> = vec![verb.into()];
     full.extend(args);
 
     // `pip` (not `uv`) needs `wheel` and `setuptools` to build; install them first.
-    if !use_uv
+    if !opts.uninstall
+        && !opts.host
+        && !use_uv
         && env.auto_install
         && !opts.skip_wheel_check
         && !env.venv_contains_package("wheel", &opts.venv)
@@ -655,12 +679,10 @@ pub fn pip_install(env: &PipEnv, rt: &mut Runtime<'_>, opts: &PipInstall) -> boo
             .collect();
         let bootstrap = PipInstall {
             names: setup_packages.clone(),
-            args: None,
-            requirements_file: None,
             venv: opts.venv.clone(),
-            dry_run: false,
             debug: opts.debug,
             skip_wheel_check: true,
+            ..PipInstall::default()
         };
         if !pip_install(env, rt, &bootstrap) && !silent {
             warn(
@@ -683,19 +705,36 @@ pub fn pip_install(env: &PipEnv, rt: &mut Runtime<'_>, opts: &PipInstall) -> boo
         );
     }
     if !use_uv {
-        for flag in [
-            "--no-input",
-            "--no-warn-conflicts",
-            "--disable-pip-version-check",
-        ] {
-            if !full.iter().any(|a| a == flag) {
-                full.push(flag.into());
-            }
+        if !full.iter().any(|a| a == "--no-input") {
+            full.push("--no-input".into());
         }
+        if opts.uninstall && !full.iter().any(|a| a == "-y") {
+            full.push("-y".into());
+        }
+        if !opts.uninstall && !full.iter().any(|a| a == "--no-warn-conflicts") {
+            full.push("--no-warn-conflicts".into());
+        }
+        if !full.iter().any(|a| a == "--disable-pip-version-check") {
+            full.push("--disable-pip-version-check".into());
+        }
+    } else if opts.uninstall {
+        // `uv pip uninstall` has no `-y` (it never prompts) and rejects it.
+        full.retain(|a| a != "-y" && a != "--yes");
     }
-    if !full.iter().any(|a| a == "--target" || a == "-t") {
+    let has_target = full.iter().any(|a| a == "--target" || a == "-t");
+    if !has_target
+        && !(!use_uv && opts.uninstall)
+        && let Some(target) = &target
+    {
         full.push("--target".into());
         full.push(target.to_string_lossy().replace('\\', "/"));
+    }
+    // A host install goes to the interpreter chosen for it. `uv` would otherwise look for
+    // an environment of its own (`VIRTUAL_ENV`, `.venv`, the first `python` on `PATH`).
+    // `--break-system-packages` is never added here: pass it explicitly when it is wanted.
+    if opts.host && use_uv && !full.iter().any(|a| a == "--python" || a == "-p") {
+        full.push("--python".into());
+        full.push(interpreter.executable.to_string_lossy().into_owned());
     }
     if opts.debug && use_uv {
         full.push("--verbose".into());
@@ -705,7 +744,7 @@ pub fn pip_install(env: &PipEnv, rt: &mut Runtime<'_>, opts: &PipInstall) -> boo
         .names
         .iter()
         .map(|name| {
-            if name.starts_with(PACKAGE_ARCHIVES_PREFIX) {
+            if opts.uninstall || name.starts_with(PACKAGE_ARCHIVES_PREFIX) {
                 install_name_no_version(name).to_string()
             } else {
                 name.clone()
@@ -713,50 +752,137 @@ pub fn pip_install(env: &PipEnv, rt: &mut Runtime<'_>, opts: &PipInstall) -> boo
         })
         .collect();
     if !silent {
-        let mut message = "Installing packages:".to_string();
+        let mut message = if opts.uninstall {
+            "Uninstalling packages:"
+        } else {
+            "Installing packages:"
+        }
+        .to_string();
         for package in &packages {
             message.push_str(&format!("\n  - {package}"));
         }
         rt.print(&format!("{message}\n"));
     }
 
-    let (program, mut command_args): (String, Vec<String>) = match (&uv_bin, use_uv) {
-        (Some(uv), true) => (uv.to_string_lossy().into_owned(), vec!["pip".to_string()]),
-        _ => {
-            let executable = match pip_venv {
-                Some(venv) => venv_python(env, venv, &interpreter),
-                None => interpreter.executable.clone(),
-            };
-            (
-                executable.to_string_lossy().into_owned(),
-                vec!["-m".to_string(), "pip".to_string()],
-            )
+    let rc = if opts.uninstall
+        && !use_uv
+        && let Some(target) = &target
+    {
+        // PARITY: v4 runs `pip uninstall` from the host interpreter, which does not see the
+        // virtual environment's `--target` directory: nothing is removed and
+        // `completely_uninstall_package` warns "Failed to clean up package". The distribution
+        // files are removed directly here (the `uv` path is unchanged).
+        let mut failed = false;
+        for package in &packages {
+            if matches!(package.as_str(), "pip" | "wheel" | "uv") {
+                continue;
+            }
+            if !remove_distribution(target, package) && !silent {
+                warn(rt, &format!("Failed to clean up package '{package}'."));
+                failed = true;
+            }
         }
+        i32::from(failed)
+    } else {
+        let (program, mut command_args): (String, Vec<String>) = match (&uv_bin, use_uv) {
+            (Some(uv), true) => (uv.to_string_lossy().into_owned(), vec!["pip".to_string()]),
+            _ => {
+                let executable = match pip_venv {
+                    Some(venv) => venv_python(env, venv, &interpreter),
+                    None => interpreter.executable.clone(),
+                };
+                (
+                    executable.to_string_lossy().into_owned(),
+                    vec!["-m".to_string(), "pip".to_string()],
+                )
+            }
+        };
+        command_args.extend(full);
+        command_args.extend(packages.iter().cloned());
+        env.run(rt, &program, &command_args, false, opts.debug)
     };
-    command_args.extend(full);
-    command_args.extend(packages.iter().cloned());
-    let rc = env.run(rt, &program, &command_args, false, opts.debug);
     if opts.debug {
         rt.print(&format!("rc={rc}\n"));
     }
     let success = rc == 0;
-    if success {
-        record_requests(&env.venv_root(&opts.venv), &packages, CORE_REQUESTER);
+    if success && !opts.host {
+        let root = env.venv_root(&opts.venv);
+        if opts.uninstall {
+            let _ = super::venvs::forget_packages(&root, &packages);
+        } else {
+            record_requests(&root, &packages, CORE_REQUESTER);
+        }
     }
+    let past = if opts.uninstall {
+        "uninstalled"
+    } else {
+        "installed"
+    };
     if !silent {
         rt.print(&format!(
             "{}\n",
             if success {
-                "Successfully installed packages."
+                format!("Successfully {past} packages.")
             } else {
-                "Failed to install packages."
+                format!("Failed to {verb} packages.")
             }
         ));
         if opts.debug {
-            rt.print(&format!("pip install returned: {}\n", py_bool(success)));
+            rt.print(&format!("pip {verb} returned: {}\n", py_bool(success)));
         }
     }
     success
+}
+
+/// Remove an installed distribution from a `--target` directory: every file its `RECORD` lists,
+/// the emptied directories, then the `*.dist-info` itself. A package that is not installed
+/// counts as removed (as `pip uninstall` does, with a warning of its own).
+pub fn remove_distribution(target: &Path, install_name: &str) -> bool {
+    let wanted = normalize(install_name);
+    let Ok(entries) = std::fs::read_dir(target) else {
+        return true;
+    };
+    let mut ok = true;
+    for entry in entries.flatten() {
+        let file_name = entry.file_name().to_string_lossy().into_owned();
+        let Some(stem) = file_name.strip_suffix(".dist-info") else {
+            continue;
+        };
+        let dist_name = stem.rsplit_once('-').map_or(stem, |(name, _)| name);
+        if normalize(dist_name) != wanted {
+            continue;
+        }
+        let dist_info = entry.path();
+        let record = std::fs::read_to_string(dist_info.join("RECORD")).unwrap_or_default();
+        let mut directories: Vec<PathBuf> = Vec::new();
+        for line in record.lines() {
+            let relative = line.split(',').next().unwrap_or_default();
+            if relative.is_empty() || relative.starts_with("..") || relative.starts_with('/') {
+                continue;
+            }
+            let path = target.join(relative);
+            if std::fs::symlink_metadata(&path).is_ok_and(|m| !m.is_dir()) {
+                ok &= std::fs::remove_file(&path).is_ok();
+            }
+            let mut parent = path.parent().map(Path::to_path_buf);
+            while let Some(dir) = parent {
+                if dir == target || !dir.starts_with(target) {
+                    break;
+                }
+                if !directories.contains(&dir) {
+                    directories.push(dir.clone());
+                }
+                parent = dir.parent().map(Path::to_path_buf);
+            }
+        }
+        // Deepest first; `remove_dir` only removes empty directories.
+        directories.sort_by_key(|d| std::cmp::Reverse(d.components().count()));
+        for dir in directories {
+            let _ = std::fs::remove_dir(&dir);
+        }
+        ok &= std::fs::remove_dir_all(&dist_info).is_ok();
+    }
+    ok
 }
 
 fn py_bool(value: bool) -> &'static str {

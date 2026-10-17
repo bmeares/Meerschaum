@@ -17,7 +17,9 @@
 //! - [`daemon`]: `Daemon` (properties, status, signals, `run` / `kill` / `quit` / `pause` / `resume`);
 //! - [`supervisor`]: the detached process which runs a job (double fork, stdio into the log);
 //! - [`job`]: `Job` and `monitor_logs`;
-//! - [`executor`] / [`systemd`]: the executor interface (`local`, `systemd`, `api:` stubs);
+//! - [`executor`] / [`systemd`] / [`remote`]: the executor interface (`local`, `systemd` over a
+//!   replaceable [`runner::ProcessRunner`], `api:<label>` over an injected [`remote::RemoteJobs`]
+//!   client); [`systemd_job`] is what runs inside a unit;
 //! - [`rotating`], [`stdin`], [`properties`]: the file formats;
 //! - [`schedule`]: the `-s` grammar; [`laps`]: the lap loop; [`scheduler`]: per-root schedule
 //!   and debounce state.
@@ -35,20 +37,25 @@ pub mod names;
 pub mod process;
 pub mod properties;
 pub mod pytime;
+pub mod remote;
 pub mod rotating;
+pub mod runner;
 pub mod schedule;
 pub mod scheduler;
 pub mod shlex;
 pub mod stdin;
 pub mod supervisor;
 pub mod systemd;
+pub mod systemd_job;
 
 pub use config::{JobPaths, JobsConfig, Seconds};
 pub use daemon::{Daemon, JobsContext, Status};
 pub use executor::{JobExecutor, LocalExecutor, get_jobs};
 pub use job::{Job, JobOptions, MonitorControl, MonitorOptions};
 pub use laps::{LoopControl, LoopRunner, SleepFrom};
+pub use remote::{RemoteJobs, RemoteJobsResolver};
 pub use rotating::RotatingFile;
+pub use runner::{FakeSystemctl, ProcessRunner, SystemRunner};
 pub use schedule::{Trigger, parse_schedule};
 pub use scheduler::{RootScheduler, ScheduleState};
 pub use supervisor::Launcher;

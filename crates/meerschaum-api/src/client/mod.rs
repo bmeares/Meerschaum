@@ -23,6 +23,7 @@ mod request;
 mod tokens;
 pub mod uri;
 mod users;
+pub mod warnings;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
