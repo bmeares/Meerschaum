@@ -4,6 +4,11 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v4.1.5
+
+- **Stop scanning the process table for completed jobs.**  
+  When a job has no `process.pid` file, reading its PID searched every running process's command line for the job's name, in case a detached job had lost its PID file. Completed jobs never have a PID file, and a single supervisor pass read the PID of every job many times (while building jobs, checking status and restarts, and formatting), so a production API with retained completed jobs spent most of a CPU core walking the process table every second. A job which recorded that its last run ended is now known to be stopped without any search, constructing a job and formatting it never search the process table, and a search that is needed (a job which began but never recorded an end) is shared by all jobs for two seconds and not repeated for a job which was not found for a minute. Starting, stopping, pausing, resuming, or deleting a job (or recording a new launch from another process) discards the remembered results. A running job which lost its PID file is still found, reported as running, and stoppable: its PID file is written again so later reads are cheap, and processes which started after the job recorded that it began (a reused PID) are ignored. With 20 completed jobs, five supervisor passes with status reads dropped from 3000 process-table scans (108 seconds) to none (under 1 second).
+
 ### v4.1.4
 
 - **Don't restart running jobs with a bare `compose start jobs`.**  
