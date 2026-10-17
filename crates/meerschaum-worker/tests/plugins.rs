@@ -5,8 +5,8 @@ mod common;
 use std::sync::Arc;
 
 use meerschaum_connector::InstanceConnector;
+use meerschaum_connector_sql::SqlConnector;
 use meerschaum_core::{Map, Pipe, SuccessTuple, Value as CValue};
-use meerschaum_sql::SqlConnector;
 use meerschaum_worker::manifest::{ManifestSource, ensure_manifest, manifest_path, stale_plugins};
 use meerschaum_worker::plugins::{
     ActionRequest, HookPhase, SyncHookContext, run_action, run_sync_hooks, setup_plugin,

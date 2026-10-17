@@ -1,3 +1,6 @@
+//! **Internal crate** of [Meerschaum](https://meerschaum.io): its API may change in any minor
+//! release. Depend on the [`meerschaum`](https://docs.rs/meerschaum) crate instead.
+//!
 //! `meerschaum-server`: the Meerschaum HTTP API as an `axum` application
 //! (`docs/design/v5.0.0.md` §7.1, §7.3, §5.8, D7, D17).
 //!

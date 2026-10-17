@@ -1,4 +1,4 @@
-//! `meerschaum-sql` bound into `meerschaum._core`: the `SqlConnector` instance methods behind
+//! `meerschaum-connector-sql` bound into `meerschaum._core`: the `SqlConnector` instance methods behind
 //! the v4 `SQLConnector` façade (design §4.4, D12, D16).
 //!
 //! `_core.SqlConnector(label, attributes)` is built from the same attributes the Python
@@ -14,13 +14,13 @@ use std::sync::Arc;
 
 use indexmap::IndexMap;
 use meerschaum_connector::{PipesKeys, PipesKeysQuery, SyncOptions};
+use meerschaum_connector_sql::instance::InstanceSettings;
+use meerschaum_connector_sql::instance::data::DataQueryOptions;
+use meerschaum_connector_sql::pipe::ChunkInterval;
+use meerschaum_connector_sql::uri::{ConnectionSpec, ConnectorAttributes};
+use meerschaum_connector_sql::{Flavor, SqlConnector as RsSqlConnector};
 use meerschaum_core::{Map, Value};
 use meerschaum_kernel::Frame;
-use meerschaum_sql::instance::InstanceSettings;
-use meerschaum_sql::instance::data::DataQueryOptions;
-use meerschaum_sql::pipe::ChunkInterval;
-use meerschaum_sql::uri::{ConnectionSpec, ConnectorAttributes};
-use meerschaum_sql::{Flavor, SqlConnector as RsSqlConnector};
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList, PyTuple};
@@ -272,7 +272,7 @@ fn changed_keys(before: &Map, after: &Map) -> Map {
 /// `Pipe.get_parameters` keys its memo of cross-pipe `{{ Pipe() }}` templates on it.
 #[pyfunction]
 pub fn pipe_metadata_epoch() -> u64 {
-    meerschaum_sql::instance::pipes::pipe_metadata_epoch()
+    meerschaum_connector_sql::instance::pipes::pipe_metadata_epoch()
 }
 
 /// The `sql:<label>` instance connector.

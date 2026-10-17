@@ -1,4 +1,4 @@
-//! `meerschaum-valkey` bound into `meerschaum._core`: the `ValkeyConnector` behind the v4
+//! `meerschaum-connector-valkey` bound into `meerschaum._core`: the `ValkeyConnector` behind the v4
 //! `meerschaum.connectors.valkey.ValkeyConnector` façade (design §4.4, D12, D20).
 //!
 //! `_core.ValkeyConnector(label, attributes)` is built from the attributes the Python connector
@@ -13,9 +13,9 @@ use std::sync::{Arc, Mutex};
 
 use meerschaum_connector::pipe_ops::Doc;
 use meerschaum_connector::{ConnectorError, InstanceConnector, SyncOptions};
+use meerschaum_connector_valkey::ValkeyConnector as RsValkeyConnector;
+use meerschaum_connector_valkey::keys;
 use meerschaum_core::{Map, SuccessTuple, Value};
-use meerschaum_valkey::ValkeyConnector as RsValkeyConnector;
-use meerschaum_valkey::keys;
 use pyo3::exceptions::{PyConnectionError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict, PyList, PyTuple};
@@ -126,7 +126,7 @@ impl PyValkeyConnector {
         let probe = RsValkeyConnector::with_backend(
             label,
             attrs.clone(),
-            Arc::new(meerschaum_valkey::MemoryBackend::new()),
+            Arc::new(meerschaum_connector_valkey::MemoryBackend::new()),
         );
         let shared = Arc::new(ValkeyShared {
             attributes: attrs.clone(),
@@ -342,11 +342,11 @@ impl PyValkeyConnector {
                 Ok(())
             }
         };
-        let bounds = |text: &str| -> PyResult<meerschaum_valkey::ScoreBound> {
+        let bounds = |text: &str| -> PyResult<meerschaum_connector_valkey::ScoreBound> {
             Ok(match text {
-                "-inf" => meerschaum_valkey::ScoreBound::NegInf,
-                "+inf" | "inf" => meerschaum_valkey::ScoreBound::PosInf,
-                other => meerschaum_valkey::ScoreBound::Value(
+                "-inf" => meerschaum_connector_valkey::ScoreBound::NegInf,
+                "+inf" | "inf" => meerschaum_connector_valkey::ScoreBound::PosInf,
+                other => meerschaum_connector_valkey::ScoreBound::Value(
                     other
                         .trim_start_matches('(')
                         .parse::<f64>()
@@ -358,7 +358,7 @@ impl PyValkeyConnector {
             text.parse::<i64>()
                 .map_err(|_| PyValueError::new_err(format!("Invalid integer '{text}'.")))
         };
-        let be = |e: meerschaum_valkey::BackendError| PyConnectionError::new_err(e.0);
+        let be = |e: meerschaum_connector_valkey::BackendError| PyConnectionError::new_err(e.0);
         let bytes_list = |py: Python<'py>, items: Vec<String>| -> PyResult<Bound<'py, PyAny>> {
             let out = PyList::empty(py);
             for item in items {
@@ -445,7 +445,7 @@ impl PyValkeyConnector {
                     for k in &keys {
                         total += backend.exists(k).await?;
                     }
-                    Ok::<_, meerschaum_valkey::BackendError>(total)
+                    Ok::<_, meerschaum_connector_valkey::BackendError>(total)
                 })
                 .map_err(be)?;
                 Ok(n.into_pyobject(py)?.into_any())
@@ -487,7 +487,7 @@ impl PyValkeyConnector {
                     for (member, score) in &pairs {
                         backend.zadd(&key, member, *score).await?;
                     }
-                    Ok::<_, meerschaum_valkey::BackendError>(())
+                    Ok::<_, meerschaum_connector_valkey::BackendError>(())
                 })
                 .map_err(be)?;
                 Ok(n.into_pyobject(py)?.into_any())
@@ -506,7 +506,7 @@ impl PyValkeyConnector {
                             backend.srem(&key, m).await?
                         };
                     }
-                    Ok::<_, meerschaum_valkey::BackendError>(total)
+                    Ok::<_, meerschaum_connector_valkey::BackendError>(total)
                 })
                 .map_err(be)?;
                 Ok(n.into_pyobject(py)?.into_any())
@@ -520,7 +520,7 @@ impl PyValkeyConnector {
                     for m in &members {
                         backend.sadd(&key, m).await?;
                     }
-                    Ok::<_, meerschaum_valkey::BackendError>(())
+                    Ok::<_, meerschaum_connector_valkey::BackendError>(())
                 })
                 .map_err(be)?;
                 Ok(n.into_pyobject(py)?.into_any())

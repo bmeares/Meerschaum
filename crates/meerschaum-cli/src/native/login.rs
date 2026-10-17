@@ -1,7 +1,7 @@
 //! `login` (`meerschaum/actions/login.py`): log into API connectors, prompting for credentials
 //! and optionally saving them to the connector's configuration.
 
-use meerschaum_api::APIConnector;
+use meerschaum_connector_api::APIConnector;
 use meerschaum_core::SuccessTuple;
 use meerschaum_core::value::{Map, Value};
 

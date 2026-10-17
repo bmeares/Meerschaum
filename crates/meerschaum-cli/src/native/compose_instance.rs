@@ -30,14 +30,14 @@ use meerschaum_compose::ops::InstanceOps;
 use meerschaum_compose::pipes::ProjectConfig;
 use meerschaum_compose::project::{Host, Project};
 use meerschaum_connector::{InstanceConnector, PipeId, PipesKeys, PipesKeysQuery};
+use meerschaum_connector_sql::SqlConnector;
+use meerschaum_connector_sql::flavor::Flavor;
+use meerschaum_connector_sql::instance::InstanceSettings;
+use meerschaum_connector_sql::uri::{ConnectionSpec, ConnectorAttributes};
 use meerschaum_core::config::Config;
 use meerschaum_core::pipe::{Pipe, PipeDefaults};
 use meerschaum_core::value::{Map, Value, apply_patch_maps};
 use meerschaum_core::{SuccessTuple, pyfmt};
-use meerschaum_sql::SqlConnector;
-use meerschaum_sql::flavor::Flavor;
-use meerschaum_sql::instance::InstanceSettings;
-use meerschaum_sql::uri::{ConnectionSpec, ConnectorAttributes};
 
 use super::pipes::{SelectedPipe, build_pipe, group_pipes};
 use super::session::{Instance, Session, connector_attributes, split_keys};

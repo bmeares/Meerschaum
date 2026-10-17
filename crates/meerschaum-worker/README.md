@@ -1,5 +1,9 @@
 # meerschaum-worker
 
+> **Internal crate.** `meerschaum-worker` is an implementation detail of [Meerschaum](https://meerschaum.io)
+> and may change in any minor release. Depend on the [`meerschaum`](https://crates.io/crates/meerschaum)
+> crate instead.
+
 How the Rust host runs Python (design `docs/design/v5.0.0.md` §4.2, D2, §4.3 "Plugin action
 manifests", §4.4 "Adapter", §5.6 "Compatibility"):
 

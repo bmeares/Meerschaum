@@ -10,6 +10,7 @@ use meerschaum_core::{Pipe, SuccessTuple};
 
 use crate::builtin::ActionResult;
 use crate::dispatch::Runtime;
+use crate::format::progress::Progress;
 use crate::format::rich::pretty::PyObj;
 use crate::format::{OptionsArgs, TupleArgs};
 use crate::value::ArgsMap;
@@ -98,11 +99,14 @@ pub fn register_pipes(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
         return Ok(SuccessTuple::fail("Missing connector keys or metrics"));
     }
     sel.params = (!params.is_empty()).then(|| params.clone());
+    let progress = Progress::start(rt, args, "Registering pipes");
     let inst = super::get_instance(args, rt)?;
     let pipes = explicit_pipes(rt, &inst, &sel)?;
+    progress.set_total(pipes.len());
     let mut success_pipes = 0usize;
     let mut failed_pipes = 0usize;
     for sp in pipes {
+        progress.inc();
         let mut pipe = sp.pipe;
         if !params.is_empty() {
             let existing = pipe.raw_parameters().clone();
@@ -248,8 +252,11 @@ pub fn drop_pipes(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     }
     let mut question = "Are you sure you want to drop these tables?\n    Data will be lost and will need to be resynced.\n\n".to_string();
     let mut seen: Vec<String> = Vec::new();
+    let progress = Progress::start(rt, args, "Reading pipe registrations");
+    progress.set_total(pipes.len());
     for sp in pipes.iter_mut() {
         hydrate(rt, &inst, sp);
+        progress.inc();
         let target = drop_target(&inst, &sp.pipe);
         if seen.contains(&target) {
             continue;
@@ -258,14 +265,18 @@ pub fn drop_pipes(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
         seen.push(target);
     }
     question.push('\n');
+    drop(progress);
     let answer = force || yes_no(rt, &question, "n", yes, noask)?;
     if !answer {
         return Ok(SuccessTuple::fail("No pipes were dropped."));
     }
     let session = session(rt);
     let (mut successes, mut fails) = (0usize, 0usize);
+    let progress = Progress::start(rt, args, "Dropping tables");
+    progress.set_total(pipes.len());
     for sp in &pipes {
         let res = session.block_on(inst.conn().drop_pipe(&sp.pipe));
+        progress.inc();
         if res.success {
             successes += 1;
         } else {
@@ -308,7 +319,10 @@ pub fn delete_pipes(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     }
     let session = session(rt);
     let (mut successes, mut fails) = (0usize, 0usize);
+    let progress = Progress::start(rt, args, "Deleting pipes");
+    progress.set_total(pipes.len());
     for sp in &pipes {
+        progress.inc();
         // `pipe.delete(drop=False)`: delete the registration only.
         let res = if sp.pipe.temporary {
             SuccessTuple::fail("Cannot delete pipes created with `temporary=True` (read-only).")
@@ -341,8 +355,11 @@ fn ask_with_rowcounts(
     let begin = bound(args, "begin");
     let end = bound(args, "end");
     let session = session(rt);
+    let progress = Progress::start(rt, args, "Reading pipe registrations");
+    progress.set_total(pipes.len());
     for sp in pipes.iter_mut() {
         hydrate(rt, inst, sp);
+        progress.inc();
         let cols = sp.pipe.columns();
         let has_dt = cols.get("datetime").is_some_and(|v| !v.is_null());
         if (begin.is_some() || end.is_some()) && !has_dt {
@@ -371,15 +388,20 @@ fn ask_with_rowcounts(
     };
     let mut total: i64 = 0;
     let mut options = Vec::new();
+    progress.set_message("Counting the rows to delete");
+    progress.set_total(pipes.len());
+    progress.set_done(0);
     for sp in pipes.iter() {
         let rc = session
             .block_on(inst.conn().get_pipe_rowcount(&sp.pipe, &query))
             .ok()
             .flatten()
             .unwrap_or(0);
+        progress.inc();
         total += rc;
         options.push(format!("{}\n{}\n", sp.pipe, thousands(rc)));
     }
+    drop(progress);
     let opts = OptionsArgs {
         header: Some("Number of Rows to be Deleted".into()),
         ..OptionsArgs::default()
@@ -428,7 +450,10 @@ pub fn clear_pipes(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
         ..Default::default()
     };
     let (mut successes, mut fails) = (0usize, 0usize);
-    for sp in &pipes {
+    let progress = Progress::start(rt, args, "Clearing pipes");
+    progress.set_total(pipes.len());
+    for (index, sp) in pipes.iter().enumerate() {
+        progress.set_done(index);
         let res = session.block_on(inst.conn().clear_pipe(&sp.pipe, &query));
         print_tuple(rt, &res, TupleArgs::default());
         if res.success {
@@ -671,7 +696,7 @@ pub fn copy_pipes(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
             let df = match batch_sync.as_str() {
                 "backtrack" => session.block_on(src_inst.conn().get_backtrack_data(
                     &sp.pipe,
-                    meerschaum_sql::pipe::DEFAULT_BACKTRACK_MINUTES,
+                    meerschaum_connector_sql::pipe::DEFAULT_BACKTRACK_MINUTES,
                     &DataQuery::default(),
                 )),
                 "filter" => session.block_on(src_inst.conn().get_pipe_data(&sp.pipe, &query)),

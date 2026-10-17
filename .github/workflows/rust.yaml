@@ -22,6 +22,7 @@ on:
       - '.cargo/**'
       - 'scripts/rust/**'
       - 'scripts/parity/**'
+      - 'scripts/check_packaging.py'
       - '.github/workflows/rust.yaml'
   pull_request:
     paths:
@@ -32,6 +33,7 @@ on:
       - '.cargo/**'
       - 'scripts/rust/**'
       - 'scripts/parity/**'
+      - 'scripts/check_packaging.py'
       - '.github/workflows/rust.yaml'
   workflow_dispatch:
     inputs:
@@ -100,12 +102,60 @@ jobs:
         run: scripts/rust/ci.sh setup
       - name: Disk guard (cargo clean below 10 GB free)
         run: scripts/rust/ci.sh disk-guard
+      - name: Build the native Python extension
+        # Since D14 several cargo tests start real Python workers that import `meerschaum`, which
+        # requires the extension. A debug build, so it reuses the dependencies `cargo test --workspace`
+        # compiles. MRSM_PYTHON, exported by the step, makes the workers use the interpreter the
+        # extension was built with.
+        run: scripts/rust/ci.sh extension
       - name: cargo test --workspace
-        # This job does not build the `_core` extension, so Python workers cannot start here;
-        # pytest.yaml covers them with it.
+        # `MRSM_TEST_NO_CORE=1` still skips the extension-dependent tests locally, where it is not built.
         env:
-          MRSM_TEST_NO_CORE: '1'
+          MRSM_NO_AUTO_INSTALL: '1'
         run: scripts/rust/ci.sh test
+
+  # The `meerschaum` front crate's features are only ever built together by the workspace: compile it with
+  # no default features, with each feature alone and run its tests with `full`, so a missing `cfg` or
+  # feature edge (`server` without `api`, ...) fails here and not for the first user.
+  frontcrate:
+    needs: fmt
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+        with: { clean: false, persist-credentials: false }
+      - name: Clean the workspace (keep target/ and .venv-ref/)
+        run: git clean -ffdx -e /target/ -e /.venv-ref/
+      - name: Toolchain
+        run: scripts/rust/ci.sh setup
+      - name: Disk guard (cargo clean below 10 GB free)
+        run: scripts/rust/ci.sh disk-guard
+      - name: meerschaum feature matrix
+        run: scripts/rust/ci.sh frontcrate
+
+  # crates.io packaging dry-run (docs/design/v5-build.md "Publishing to crates.io"): `cargo package
+  # --workspace --no-verify` writes every tarball (explicit `include` lists, lockstep `=<ver>` internal
+  # dependencies, publish metadata) and scripts/rust/check_packages.py rejects an archive of 10 MB or
+  # more (`meerschaum-web` vendors the JS libraries) or one that ships tests, fixtures or benches.
+  # Nothing is compiled or uploaded, so it takes seconds. `--no-verify` skips compiling the tarballs:
+  # the full build-from-tarball check is `scripts/rust/ci.sh publish-dry-run` (slow; it builds them
+  # without the root `[patch.crates-io]`, which crates.io ignores, so with plain sqlx). Run it before
+  # a release.
+  package:
+    needs: fmt
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+        with: { clean: false, persist-credentials: false }
+      - name: Clean the workspace (keep target/ and .venv-ref/)
+        run: git clean -ffdx -e /target/ -e /.venv-ref/
+      - name: Toolchain
+        run: scripts/rust/ci.sh setup
+      - name: Packaging metadata (versions, extras, crates.io metadata)
+        run: python3 scripts/check_packaging.py
+      - name: cargo package --workspace --no-verify, then size and contents checks
+        run: scripts/rust/ci.sh package
 
   build:
     needs: fmt

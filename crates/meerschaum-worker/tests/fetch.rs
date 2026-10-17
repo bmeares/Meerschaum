@@ -6,8 +6,8 @@ mod common;
 use std::sync::Arc;
 
 use meerschaum_connector::{DataQuery, InstanceConnector};
+use meerschaum_connector_sql::SqlConnector;
 use meerschaum_core::{Pipe, Value as CValue};
-use meerschaum_sql::SqlConnector;
 use meerschaum_worker::chunk::FetchChunk;
 use meerschaum_worker::connector::FetchOptions;
 use meerschaum_worker::sync::{PythonSyncOptions, sync_python_pipe};

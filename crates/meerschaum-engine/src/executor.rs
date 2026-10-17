@@ -899,7 +899,7 @@ fn spawn_sync<E: SyncExecutor, L: LeaseSource>(
                     // One error is retried after a poll: an instance's acquire can race a
                     // lease expiring between its statements (a crashed holder's lease running
                     // out, §14). Defense in depth only: the primary fix is in the instance
-                    // (`meerschaum-sql`'s acquire retries that window itself); a custom
+                    // (`meerschaum-connector-sql`'s acquire retries that window itself); a custom
                     // instance may not. A persistent error still fails the node at once.
                     Err(_) if !errored && tokio::time::Instant::now() < deadline => {
                         errored = true;

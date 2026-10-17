@@ -1,3 +1,6 @@
+//! **Internal crate** of [Meerschaum](https://meerschaum.io): its API may change in any minor
+//! release. Depend on the [`meerschaum`](https://docs.rs/meerschaum) crate instead.
+//!
 //! `meerschaum-compose`: Meerschaum Compose (§6.3 of `docs/design/v5.0.0.md`), a port of
 //! `meerschaum/compose/` and `meerschaum/actions/compose.py`.
 //!

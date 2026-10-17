@@ -25,8 +25,8 @@
 
 use std::path::PathBuf;
 
-use meerschaum_api::APIConnector;
-use meerschaum_api::client::RequestOptions;
+use meerschaum_connector_api::APIConnector;
+use meerschaum_connector_api::client::RequestOptions;
 use meerschaum_core::SuccessTuple;
 use meerschaum_core::static_config::static_config;
 use meerschaum_worker::manifest::Manifest;
@@ -662,7 +662,7 @@ fn download_plugin(
     connector: &APIConnector,
     name: &str,
 ) -> Result<Download, ActionError> {
-    let r_url = meerschaum_api::routes::plugin_r_url(name);
+    let r_url = meerschaum_connector_api::routes::plugin_r_url(name);
     let attributes = connector.attributes();
     let attr = |key: &str| {
         attributes

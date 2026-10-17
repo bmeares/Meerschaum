@@ -218,6 +218,11 @@ def test_a_stale_extension_is_reported_as_not_built(monkeypatch):
     class Stale:
         """An extension built before the config registry moved to Rust."""
 
+    # Load the real extension first: `monkeypatch.setattr` reads each old value, and reading a name
+    # that is not in the package namespace yet would lazily load the extension in the middle of the
+    # patching (and undo the patched state), so the test would only pass after another test loaded it.
+    _core.load()
+
     for name, value in (
         ('_loaded', False), ('_extension', None), ('AVAILABLE', True),
         ('LOAD_ERROR', None), ('EXTENSION_PATH', None),
@@ -236,7 +241,7 @@ import json, sys
 import meerschaum, meerschaum.config
 import meerschaum.config as c
 assert c.config == {}
-print(json.dumps('meerschaum._core._core' in sys.modules))
+print(json.dumps('meerschaum._core._native' in sys.modules))
 """
     rc, out, err = run_python(code, tmp_path)
     assert rc == 0, err

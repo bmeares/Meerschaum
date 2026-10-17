@@ -4,7 +4,7 @@
 """
 Loader for `meerschaum._core`, the Rust extension module of Meerschaum v5 (design §4.2, D3).
 
-The compiled module lives next to this file as `_core.abi3.so` (`_core.pyd` on Windows) and is
+The compiled module lives next to this file as `_native.abi3.so` (`_native.pyd` on Windows) and is
 built by `scripts/rust/build_py.sh` (see `crates/meerschaum-py/README.md`); the `meerschaum`
 wheel ships it. It is **required**: importing this package raises `CoreNotBuiltError` (an
 `ImportError`) naming the build script when the file is missing.
@@ -84,9 +84,9 @@ def load() -> Optional[Any]:
 
         namespace = globals()
         try:
-            # `import_module` (not `from meerschaum._core import _core`) so the lookup never
+            # `import_module` (not `from meerschaum._core import _native`) so the lookup never
             # re-enters this package's `__getattr__`.
-            extension = importlib.import_module(__name__ + '._core')
+            extension = importlib.import_module(__name__ + '._native')
         except ImportError as e:
             namespace['AVAILABLE'] = False
             namespace['LOAD_ERROR'] = e
@@ -121,7 +121,7 @@ def load() -> Optional[Any]:
 
 def __getattr__(name: str) -> Any:
     """Load the extension on first access and resolve `name` (PEP 562)."""
-    if (name.startswith('__') and name != '__version__') or name == '_core':
+    if (name.startswith('__') and name != '__version__') or name == '_native':
         raise AttributeError(f"module 'meerschaum._core' has no attribute '{name}'")
 
     extension = load()
@@ -148,7 +148,7 @@ def _require_extension() -> None:
     """Fail `import meerschaum` early, with the build instructions, if the file is missing."""
     import importlib.util
     try:
-        found = importlib.util.find_spec(__name__ + '._core') is not None
+        found = importlib.util.find_spec(__name__ + '._native') is not None
     except (ImportError, ValueError):
         found = False
     if not found:

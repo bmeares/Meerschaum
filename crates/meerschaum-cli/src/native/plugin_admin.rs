@@ -20,7 +20,7 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
-use meerschaum_api::traits::PluginRecord;
+use meerschaum_connector_api::traits::PluginRecord;
 use meerschaum_core::static_config::static_config;
 use meerschaum_core::value::{Map, Value};
 use meerschaum_core::{SuccessTuple, pyfmt};

@@ -17,8 +17,8 @@ if [ "${1:-}" = "--markdown" ]; then markdown=1; shift; fi
 names=("$@")
 if [ "${#names[@]}" -eq 0 ]; then
   names=(
-    meerschaum meerschaum-core meerschaum-kernel meerschaum-sql meerschaum-valkey meerschaum-api
-    meerschaum-engine meerschaum-jobs meerschaum-compose meerschaum-server meerschaum-web
+    meerschaum meerschaum-core meerschaum-kernel meerschaum-connector meerschaum-connector-sql
+    meerschaum-connector-valkey meerschaum-connector-api meerschaum-worker meerschaum-engine meerschaum-jobs meerschaum-compose meerschaum-server meerschaum-web
     meerschaum-plugin meerschaum-cli mrsm
   )
 fi

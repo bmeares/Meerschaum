@@ -1,9 +1,9 @@
 //! Raw-vs-resolved parameters: a forwarded `pipe.sync()` registers the pipe with its template
 //! text intact, and edits keep it too (Python-free; sqlite in a temporary directory).
 
+use meerschaum_connector_sql::SqlConnector;
 use meerschaum_core::{Map, Pipe, Value as CValue};
 use meerschaum_kernel::value::Value as KValue;
-use meerschaum_sql::SqlConnector;
 use meerschaum_worker::FetchChunk;
 use meerschaum_worker::callback::sync_chunk_native;
 

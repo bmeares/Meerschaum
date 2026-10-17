@@ -1,5 +1,5 @@
 //! `register tokens`, `edit tokens` and `show tokens` (`meerschaum/actions/{register,edit,show}.py`)
-//! over the instance connector's token methods (`meerschaum-connector`, `meerschaum-api`).
+//! over the instance connector's token methods (`meerschaum-connector`, `meerschaum-connector-api`).
 
 use chrono::{DateTime, Duration, Utc};
 use meerschaum_connector::TokenModel;

@@ -339,7 +339,7 @@ impl AppState {
         let location_key = normalize_location(location_key);
         let conn = self.get_api_connector(instance_keys)?;
         if let Some((status, detail)) =
-            meerschaum_api::routes::refuse_mrsm_connector(connector_keys)
+            meerschaum_connector_api::routes::refuse_mrsm_connector(connector_keys)
         {
             // PARITY: `api/__init__.py:270`.
             return Err(ApiError::new(status, detail));

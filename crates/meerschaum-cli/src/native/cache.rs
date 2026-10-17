@@ -173,7 +173,7 @@ pub fn delete_cache(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
 
 fn clean_sql(
     rt: &mut Runtime<'_>,
-    sql: &std::sync::Arc<meerschaum_sql::SqlConnector>,
+    sql: &std::sync::Arc<meerschaum_connector_sql::SqlConnector>,
     paths: &meerschaum_core::config::paths::Paths,
 ) -> SuccessTuple {
     let dir = paths.path("SQL_CONN_CACHE_RESOURCES_PATH");
@@ -200,8 +200,11 @@ fn clean_valkey(rt: &mut Runtime<'_>, keys: &str, chunksize: usize) -> SuccessTu
     };
     let (typ, label) = super::session::split_keys(keys);
     debug_assert_eq!(typ, "valkey");
-    let attrs = meerschaum_valkey::ValkeyConnector::attributes_from_config(rt.config(), &label);
-    let conn = match sess.block_on(meerschaum_valkey::ValkeyConnector::connect(&label, attrs)) {
+    let attrs =
+        meerschaum_connector_valkey::ValkeyConnector::attributes_from_config(rt.config(), &label);
+    let conn = match sess.block_on(meerschaum_connector_valkey::ValkeyConnector::connect(
+        &label, attrs,
+    )) {
         Ok(c) => c,
         Err(e) => return SuccessTuple::fail(e.to_string()),
     };

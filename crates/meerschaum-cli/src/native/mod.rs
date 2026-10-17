@@ -310,7 +310,10 @@ pub fn prompt(rt: &mut Runtime<'_>, question: &str, icon: bool, noask: bool) -> 
         return Some(String::new());
     }
     let q = question_text(rt, question, icon);
-    rt.host.read_line(&q)
+    crate::format::progress::suspend();
+    let answer = rt.host.read_line(&q);
+    crate::format::progress::resume(true);
+    answer
 }
 
 /// `yes_no(question, default=..., yes=..., noask=...)`: closed input raises `EOFError` like

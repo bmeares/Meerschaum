@@ -1,3 +1,6 @@
+//! **Internal crate** of [Meerschaum](https://meerschaum.io): its API may change in any minor
+//! release. Depend on the [`meerschaum`](https://docs.rs/meerschaum) crate instead.
+//!
 //! `meerschaum-jobs`: job supervision for Meerschaum v5 (`docs/design/v5.0.0.md` §6.4).
 //!
 //! Jobs keep v4's on-disk layout under `$MRSM_ROOT_DIR`, so jobs created by Python 4.1 are read by

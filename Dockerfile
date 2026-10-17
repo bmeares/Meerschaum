@@ -55,7 +55,7 @@ COPY crates ./crates
 COPY pyproject.toml README.md LICENSE NOTICE ./
 COPY meerschaum ./meerschaum
 ### `target/` and the registry live in BuildKit cache mounts, so this layer only holds /out/wheels.
-### `meerschaum/_core/_core*.so` from a developer's tree is excluded by the pyproject (and by
+### `meerschaum/_core/_native*.so` from a developer's tree is excluded by the pyproject (and by
 ### .dockerignore), so the wheel always carries the freshly compiled extension.
 RUN --mount=type=cache,id=mrsm-v5-cargo-registry,target=/usr/local/cargo/registry \
     --mount=type=cache,id=mrsm-v5-cargo-target,target=/src/target,sharing=locked \

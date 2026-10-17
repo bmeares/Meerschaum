@@ -1,3 +1,6 @@
+//! **Internal crate** of [Meerschaum](https://meerschaum.io): its API may change in any minor
+//! release. Depend on the [`meerschaum`](https://docs.rs/meerschaum) crate instead.
+//!
 //! `meerschaum-worker`: how Rust runs Python (design §4.2, D2; §4.3 manifests; §4.4 adapter;
 //! §5.6 v4-pattern streams).
 //!

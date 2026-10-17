@@ -31,7 +31,7 @@ Python signature is the v4 one):
 
 ### The SQL instance connector (`_core.SqlConnector`, wave 4)
 
-`SqlConnector(label, attributes)` wraps `meerschaum_sql::SqlConnector` (the instance layer). It is
+`SqlConnector(label, attributes)` wraps `meerschaum_connector_sql::SqlConnector` (the instance layer). It is
 built lazily, once per Python `SQLConnector`, by `SQLConnector._rust_method()` from the attributes
 v4 already resolved (`flavor`, `uri`, `host`, `port`, `username`, `password`, `database` and
 `self.schema`), so `connectors.yaml`, keyword arguments and `MRSM_SQL_<LABEL>` URIs all work
@@ -63,7 +63,7 @@ Routed flavors are those with a Rust driver (`postgresql`, `postgis`, `timescale
 `timescaledb-ha`, `citus`, `cockroachdb`, `mysql`, `mariadb`, `sqlite`, `geopackage`); `mssql`,
 `oracle`, `duckdb` and in-memory SQLite databases (where SQLAlchemy and the Rust pool would see
 different databases) stay on the v4 path. `src/pipe_bridge.rs` converts the duck-typed objects;
-`meerschaum_sql::facade` (`crates/meerschaum-sql/src/facade.rs`) holds the two additive helpers
+`meerschaum_connector_sql::facade` (`crates/meerschaum-connector-sql/src/facade.rs`) holds the two additive helpers
 the bindings need (`sync_pipe_mut`, `get_pipe_data_and_state`).
 
 DataFrames cross as Arrow (`src/pandas_bridge.rs`): typed pandas columns through
@@ -80,10 +80,10 @@ placeholders (checked after the call, redone with full conversion if one changed
 
 ```
 crates/meerschaum-py/
-  Cargo.toml        [lib] name = "_core", crate-type = ["cdylib", "rlib"]
+  Cargo.toml        [lib] name = "_native", crate-type = ["cdylib", "rlib"]
   build.rs          records build_info
-  pyproject.toml    maturin config: module-name = "meerschaum._core._core", python-source = "../.."
-  src/              lib.rs (#[pymodule] _core), arrow_bridge.rs, ffi_import.rs, polars_bridge.rs,
+  pyproject.toml    maturin config: module-name = "meerschaum._core._native", python-source = "../.."
+  src/              lib.rs (#[pymodule] _native), arrow_bridge.rs, ffi_import.rs, polars_bridge.rs,
                     convert.rs (Python <-> Value), pandas_bridge.rs (frames), kernel_api.rs,
                     core_api.rs, trace.rs (MRSM_CORE_TRACE stage timers), runtime.rs (Tokio),
                     pipe_bridge.rs (duck-typed pipes/users/plugins), sql_api.rs (SqlConnector)
@@ -92,13 +92,13 @@ crates/meerschaum-py/
 meerschaum/_core/
   __init__.py       lazy loader (stdlib only); `import meerschaum` fails with the build
                     instructions when the extension file is missing
-  _core.abi3.so     the built extension (git-ignored)
+  _native.abi3.so     the built extension (git-ignored)
 scripts/rust/
   build_py.sh       build and place the extension
   clean_py.sh       remove it
 ```
 
-**Why `meerschaum._core._core` with a loader package:** the compiled module sits inside a
+**Why `meerschaum._core._native` with a loader package:** the compiled module sits inside a
 pure-Python package, `meerschaum/_core/`, so that:
 
 - the package always imports, built or not. Its `__init__.py` reports `AVAILABLE`, `LOAD_ERROR` and
@@ -112,9 +112,9 @@ pure-Python package, `meerschaum/_core/`, so that:
 **Why the maturin project lives in the crate and points `python-source` at the repo root:** the
 root `pyproject.toml` stays setuptools this wave, so the v4 pytest suite and `scripts/test.sh` keep
 working. Because the crate's pyproject is a mixed project rooted at the repository,
-`maturin develop --skip-install` copies `_core.abi3.so` straight into `meerschaum/_core/` in the
+`maturin develop --skip-install` copies `_native.abi3.so` straight into `meerschaum/_core/` in the
 working tree. Nothing is installed into any environment, and `PYTHONPATH=$(pwd)` picks it up.
-`maturin build` from here produces an extension-only wheel (`meerschaum/_core/_core.abi3.so`,
+`maturin build` from here produces an extension-only wheel (`meerschaum/_core/_native.abi3.so`,
 distribution `meerschaum-core-dev`), because maturin does not package Python sources outside the
 project root. The distribution is deliberately not called `meerschaum`, so installing it can never
 replace an installed v4 package. Do not upload it.
@@ -251,11 +251,11 @@ polars = ["polars"]
 [tool.maturin]
 bindings = "pyo3"
 manifest-path = "crates/meerschaum-py/Cargo.toml"
-module-name = "meerschaum._core._core"
+module-name = "meerschaum._core._native"
 python-source = "."
 python-packages = ["meerschaum"]
 features = ["pyo3/abi3-py311", "extension-module"]
-exclude = ["**/__pycache__/**", "**/*.pyc", "meerschaum/_core/_core*.so"]
+exclude = ["**/__pycache__/**", "**/*.pyc", "meerschaum/_core/_native*.so"]
 ```
 
 - One `cp311-abi3` wheel per platform (manylinux x86_64/aarch64, musllinux, macOS x86_64/arm64,

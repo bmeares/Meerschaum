@@ -249,7 +249,7 @@ pub async fn body_bytes(body: Body) -> Result<bytes::Bytes, ApiError> {
 
 /// Parse an `application/x-www-form-urlencoded` body into ordered pairs.
 pub fn parse_form(body: &[u8]) -> Vec<(String, String)> {
-    meerschaum_api::wire::parse_query(&String::from_utf8_lossy(body))
+    meerschaum_connector_api::wire::parse_query(&String::from_utf8_lossy(body))
 }
 
 /// The last value of a form field.

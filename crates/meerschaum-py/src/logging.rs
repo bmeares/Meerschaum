@@ -50,7 +50,7 @@ impl Subscriber for PythonSink {
         }
         // Probes of the engine's own state pipes (`mrsm:` keys) on an API instance have no v4
         // counterpart; like in the CLI, Python users never see their failures.
-        if metadata.target() == meerschaum_api::client::warnings::STATE_PIPE_TARGET {
+        if metadata.target() == meerschaum_connector_api::client::warnings::STATE_PIPE_TARGET {
             return false;
         }
         match *metadata.level() {

@@ -55,12 +55,12 @@ pub mod verify_api;
 pub mod version_api;
 pub mod yaml_api;
 
-/// The `meerschaum._core._core` extension module.
+/// The `meerschaum._core._native` extension module.
 ///
 /// `gil_used = false` declares free-threading support (§12, R8): every exposed object is
 /// immutable (`frozen` pyclasses) and no function keeps unsynchronized global state.
 #[pymodule(gil_used = false)]
-fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
+fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     logging::install();
     // Python owns this process's signals: no `mrsm` stop handler that could end the interpreter.
     meerschaum_cli::native::jobs::set_embedded(true);
@@ -156,7 +156,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     api_client_api::register(m)?;
     valkey_api::register(m)?;
 
-    // meerschaum-sql (instance connector)
+    // meerschaum-connector-sql (instance connector)
     m.add_class::<sql_api::PySqlConnector>()?;
     m.add_function(wrap_pyfunction!(sql_api::pipe_metadata_epoch, m)?)?;
 

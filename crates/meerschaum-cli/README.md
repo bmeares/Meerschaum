@@ -1,5 +1,14 @@
 # meerschaum-cli
 
+> The `mrsm` binary of [Meerschaum](https://meerschaum.io): install it with `pip install meerschaum` or
+> `cargo install meerschaum-cli`. The library target is **internal** and may change in any minor release;
+> depend on the [`meerschaum`](https://crates.io/crates/meerschaum) crate for the Rust API.
+
+**Features.** `duckdb` and `oracle` (both default, D13) forward to the same features of `meerschaum-connector-sql`, so the binary
+can use DuckDB and Oracle instances like the `meerschaum._core` extension. DuckDB compiles its bundled C++ library
+(several minutes on a cold build); Oracle needs Oracle Instant Client at runtime only. `--no-default-features` gives the
+lean binary.
+
 The `mrsm` binary: the argument parser (`spec`, `argparse`, `parse`), action dispatch, the native
 actions, the formatting toolkit, and the interactive shell. Design: `docs/design/v5.0.0.md` §4.3.
 
@@ -56,7 +65,8 @@ contents for the parity fixtures.
 ### Engine surfaces (`src/native/engine_views.rs`, `src/native/sync.rs`)
 
 - `plan pipes` prints the engine's plan (spec 5.3) without syncing; `show graph` draws the
-  selection as a DAG; `show runs [--last N]` lists recorded runs and `show run <id>` (or
+  selection as a styled box-drawing tree (`src/format/graph.rs`: the engine keeps the
+  `Subgraph`, the CLI owns the look; `--full` / `--debug` list collapsed fan-outs); `show runs [--last N]` lists recorded runs and `show run <id>` (or
   `show runs <id>`) draws a run's Gantt chart. All take the `sync pipes` selection and bound
   flags; `--nopretty` prints JSON.
 - A graph `sync pipes` run (`--parents`, `--children`, `--resume`) with more than one node ends
@@ -66,6 +76,25 @@ contents for the parity fixtures.
   `parse::engine_arguments` like `--parents`. `parameters['schedule']` reaches the engine through
   a `Cadence` built on `meerschaum-jobs` (`native/engine.rs`).
 - `show plugins` lists native (C-ABI) plugins as `name (native)` (bare names with `--nopretty`).
+
+### Waiting feedback (`src/format/progress.rs`)
+
+One process-wide spinner / progress line on **stderr** for actions that wait on I/O (`Progress::start(rt,
+args, "Counting rows")`, then `set_total` / `counter().inc()` for `12/40` and a bar). A thread of its own
+redraws it every 100 ms, so a blocked `block_on` still animates; nothing is drawn for the first 250 ms.
+It is off unless `Runtime::progress` says otherwise: `Runtime::system` turns it on only when stderr is a
+terminal, `Runtime::new` (tests) never does, `--nopretty` disables it, `--debug` prints one
+`message...` line per slow stage instead of redrawing, `formatting:unicode` off gives `|/-\` frames and
+`NO_COLOR` / `formatting:ansi` off drops the colors. `Runtime::print` / `eprint` and the prompts erase
+the line while they write. Once a Python worker is spawned (`meerschaum_worker::worker::set_spawn_hook`:
+its output reaches the terminal directly) spinners stop redrawing and print plain `message...` lines.
+The Python entry draws through `sys.stderr` and takes `live` (colors) from `sys.stdout`, each only when
+it is a TTY; a call given up on after a second Ctrl-C erases and disables its spinner. The `start api` /
+MCP backends build their runtimes with progress off and `live = false`.
+Covered: `show rowcounts|sizes|partitions|columns|data|graph|runs|plugins <repo>|jobs`, `plan pipes`,
+the pipe lookup every pipes action starts with, `register|drop|delete|clear pipes`, the plugin manifest
+load at startup and the `sync`/`verify` graph build. Not covered on purpose: the run phase of
+`sync|verify|deduplicate pipes` (plugin code prints straight to the terminal there).
 
 ### v5-only actions, subactions and flags
 

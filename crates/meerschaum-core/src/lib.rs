@@ -1,3 +1,6 @@
+//! **Internal crate** of [Meerschaum](https://meerschaum.io): its API may change in any minor
+//! release. Depend on the [`meerschaum`](https://docs.rs/meerschaum) crate instead.
+//!
 //! `meerschaum-core`: see `docs/design/v5.0.0.md` §4.1 for this crate's responsibilities.
 //!
 //! This crate owns the pure-data core of Meerschaum:

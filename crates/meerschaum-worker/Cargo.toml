@@ -6,7 +6,13 @@ license.workspace = true
 repository.workspace = true
 authors.workspace = true
 rust-version.workspace = true
-description = "Meerschaum v5: the Python worker pool, its RPC protocol, the PythonConnector adapter and plugin manifests"
+description = "Internal crate of Meerschaum: the Python worker pool, its RPC protocol, the PythonConnector adapter and plugin manifests"
+readme = "README.md"
+homepage.workspace = true
+documentation = "https://docs.rs/meerschaum-worker"
+keywords = ["meerschaum", "python", "plugins", "rpc", "etl"]
+categories = ["asynchronous", "external-ffi-bindings"]
+include = ["src/**/*", "python/**/*", "schema/**/*", "/LICENSE", "/NOTICE"]
 
 [dependencies]
 meerschaum-core = { workspace = true }
@@ -27,5 +33,5 @@ sha2 = { workspace = true }
 hex = { workspace = true }
 
 [dev-dependencies]
-meerschaum-sql = { workspace = true }
+meerschaum-connector-sql = { workspace = true }
 tempfile = "3"

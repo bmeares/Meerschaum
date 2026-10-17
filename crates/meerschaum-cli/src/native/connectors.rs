@@ -3,9 +3,9 @@
 //! `start connectors`, plus `parse_connector_keys` over the config registry (a connector is
 //! validated from its attributes; nothing connects until `start connectors`).
 
+use meerschaum_connector_sql::uri::{ConnectionOptions, ConnectionSpec, ConnectorAttributes};
 use meerschaum_core::SuccessTuple;
 use meerschaum_core::value::{Map, Value};
-use meerschaum_sql::uri::{ConnectionOptions, ConnectionSpec, ConnectorAttributes};
 
 use crate::builtin::{ActionError, ActionResult};
 use crate::dispatch::Runtime;
@@ -76,7 +76,7 @@ pub(super) fn sql_spec(label: &str, attrs: &Map) -> Result<ConnectionSpec, Strin
         match k.as_str() {
             "flavor" => {
                 ca.flavor = Some(
-                    s.parse::<meerschaum_sql::flavor::Flavor>()
+                    s.parse::<meerschaum_connector_sql::flavor::Flavor>()
                         .map_err(|e| e.to_string())?,
                 )
             }

@@ -442,7 +442,10 @@ pub fn show_jobs(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     let action = words(args, "action");
     let ctx = jobs_context(rt);
     let exec_keys = executor_keys(args);
-    let mut jobs = match filtered_jobs(rt, &ctx, exec_keys.as_deref(), &action, false, false) {
+    let progress = crate::format::progress::Progress::start(rt, args, "Reading jobs");
+    let jobs = filtered_jobs(rt, &ctx, exec_keys.as_deref(), &action, false, false);
+    drop(progress);
+    let mut jobs = match jobs {
         Ok(jobs) => jobs,
         Err(failed) => return Ok(failed),
     };

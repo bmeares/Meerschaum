@@ -144,7 +144,7 @@ pub fn routes(app: Router<AppState>, cfg: &ServerConfig) -> Router<AppState> {
     );
     let app =
         app.route(
-            meerschaum_api::routes::OPENAPI,
+            meerschaum_connector_api::routes::OPENAPI,
             get(move || {
                 let doc = doc.clone();
                 async move {
@@ -156,7 +156,7 @@ pub fn routes(app: Router<AppState>, cfg: &ServerConfig) -> Router<AppState> {
         return app;
     }
     app.route(
-        meerschaum_api::routes::DOCS,
+        meerschaum_connector_api::routes::DOCS,
         get(|| async { Html(SWAGGER_HTML) }),
     )
     .route(
@@ -164,7 +164,7 @@ pub fn routes(app: Router<AppState>, cfg: &ServerConfig) -> Router<AppState> {
         get(|| async { Html(OAUTH2_REDIRECT_HTML) }),
     )
     .route(
-        meerschaum_api::routes::REDOC,
+        meerschaum_connector_api::routes::REDOC,
         get(|| async { Html(REDOC_HTML) }),
     )
 }

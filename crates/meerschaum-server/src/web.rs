@@ -18,7 +18,7 @@ fn session_target(target: &str) -> bool {
 }
 fn decode(segment: &str) -> String {
     // URI path '+' is literal, unlike form/query '+'.
-    meerschaum_api::wire::parse_query(&format!("key={}", segment.replace('+', "%2B")))
+    meerschaum_connector_api::wire::parse_query(&format!("key={}", segment.replace('+', "%2B")))
         .into_iter()
         .next()
         .map(|(_, value)| value)

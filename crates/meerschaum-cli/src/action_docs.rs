@@ -508,9 +508,17 @@ signal for tuning the width.
             r##"
 Print the selected pipes and their dependencies as a DAG (v5).
 
-Each node is indented under its deepest parent and lists its in-selection parents after `←`;
-`*` marks the pipes that were selected directly (the rest were pulled in by `--parents` or
-`--children`). Edges come from `parents` / `children` and from `{{ Pipe() }}` references.
+The graph is a top-down tree with box-drawing connectors (`├──`, `└──`, `│`), children under
+their parents. A pipe with several parents is drawn once, in full, and as a dimmed
+`↗ ... (shown above)` back-reference under its other parents. `●` marks a root, `◆` a pipe
+with children, `○` a leaf; `★` marks the pipes that were selected directly (the rest were pulled
+in by `--parents` or `--children`). `┄┄` in place of `──` marks an edge that exists only because
+of a `{{ Pipe() }}` reference; `lookback`, `lookahead` and `axis` of an edge follow the pipe.
+Pipes with no edge in the selection are listed together at the end, and a pipe with more than
+12 children collapses to `… and N more children` (`--full` or `--debug` list everything).
+Lines are cut to the terminal width; without Unicode (`formatting:unicode`) the tree is ASCII,
+and without ANSI the same layout is printed without colors. Edges come from `parents` /
+`children` and from `{{ Pipe() }}` references.
 
 Examples:
     - `show graph -t demo`

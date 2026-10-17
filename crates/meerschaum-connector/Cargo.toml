@@ -6,7 +6,13 @@ license.workspace = true
 repository.workspace = true
 authors.workspace = true
 rust-version.workspace = true
-description = "Meerschaum v5: the Connector and InstanceConnector traits shared by every instance connector and the engine"
+description = "Internal crate of Meerschaum: the Connector and InstanceConnector traits shared by every instance connector and the engine"
+readme = "README.md"
+homepage.workspace = true
+documentation = "https://docs.rs/meerschaum-connector"
+keywords = ["meerschaum", "etl", "pipelines", "connector", "database"]
+categories = ["database", "asynchronous"]
+include = ["src/**/*", "/LICENSE", "/NOTICE"]
 
 [dependencies]
 meerschaum-core = { workspace = true }

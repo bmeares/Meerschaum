@@ -264,7 +264,50 @@ fn with_runtime<R>(prepared: Prepared, f: impl FnOnce(&mut Runtime<'_>) -> R) ->
     rt.host = Box::new(PyHost::default());
     rt.config = Some(prepared.config);
     rt.native = Some(prepared.session);
+    // Colors and live progress follow Python's streams, not the process's file descriptors:
+    // `sys.stdout` may be redirected while fd 1 is a terminal.
+    rt.live = py_isatty("stdout");
+    rt.progress = python_progress_sink();
     f(&mut rt)
+}
+
+thread_local! {
+    /// Set on a call's thread by `run_interruptible`: raised when the call was abandoned (a
+    /// second Ctrl-C), which turns that call's spinner off.
+    static ABANDONED: std::cell::RefCell<Option<Arc<AtomicBool>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// `sys.<name>.isatty()`; false when the stream is missing, closed or has no `isatty`.
+fn py_isatty(name: &str) -> bool {
+    Python::with_gil(|py| -> PyResult<bool> {
+        let stream = py.import("sys")?.getattr(name)?;
+        if stream.is_none() || !stream.hasattr("isatty")? {
+            return Ok(false);
+        }
+        stream.call_method0("isatty")?.extract()
+    })
+    .unwrap_or(false)
+}
+
+/// Waiting feedback (spinners) is drawn through Python's `sys.stderr`, and only when it is a
+/// terminal: a notebook, a pipe or a captured stream gets none.
+fn python_progress_sink() -> meerschaum_cli::format::progress::ProgressSink {
+    use meerschaum_cli::format::progress::ProgressSink;
+    if !py_isatty("stderr") {
+        return ProgressSink::Off;
+    }
+    let disabled = ABANDONED
+        .with(|slot| slot.borrow().clone())
+        .unwrap_or_default();
+    ProgressSink::custom(
+        Arc::new(|text: &str| {
+            use std::io::Write as _;
+            let mut stream = PyStream("stderr");
+            let _ = stream.write_all(text.as_bytes());
+        }),
+        disabled,
+    )
 }
 
 /// Printed (stderr) by a call made while a plugin module is being imported.
@@ -291,11 +334,15 @@ fn run_interruptible(
 ) -> PyResult<SuccessTuple> {
     let stop = Arc::new(AtomicBool::new(false));
     let call_stop = stop.clone();
+    // Raised when this call is given up on: its spinner must not outlive the call.
+    let abandoned = Arc::new(AtomicBool::new(false));
+    let call_abandoned = abandoned.clone();
     let (tx, rx) = std::sync::mpsc::channel();
     let rx = std::sync::Mutex::new(rx);
     std::thread::Builder::new()
         .name("mrsm-action".into())
         .spawn(move || {
+            ABANDONED.with(|slot| *slot.borrow_mut() = Some(call_abandoned));
             let _ = tx.send(meerschaum_cli::native::jobs::with_call_stop(call_stop, f));
         })
         .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
@@ -316,12 +363,14 @@ fn run_interruptible(
                 if let Err(e) = py.check_signals() {
                     stop.store(true, Ordering::SeqCst);
                     if interrupted.is_some() {
+                        abandon_progress(py, &abandoned);
                         return Err(e);
                     }
                     interrupted = Some((e, Instant::now()));
                 } else if let Some((_, at)) = &interrupted
                     && at.elapsed() > INTERRUPT_GRACE
                 {
+                    abandon_progress(py, &abandoned);
                     return Err(interrupted.take().map(|(e, _)| e).expect("interrupted"));
                 }
             }
@@ -332,6 +381,16 @@ fn run_interruptible(
             }
         }
     }
+}
+
+/// Erase the abandoned call's spinner and keep it off. Done without the GIL: the spinner writes
+/// through Python's `sys.stderr`, which its thread may be waiting for while it holds the
+/// progress lock this takes.
+fn abandon_progress(py: Python<'_>, abandoned: &Arc<AtomicBool>) {
+    py.allow_threads(|| {
+        meerschaum_cli::format::progress::abandon();
+        abandoned.store(true, Ordering::SeqCst);
+    });
 }
 
 /// `_core.entry(sysargs, patch=None, context=None)`: run a (possibly chained) command line like

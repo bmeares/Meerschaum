@@ -1,5 +1,9 @@
 # Native Rust plugins
 
+> The native plugin SDK of [Meerschaum](https://meerschaum.io). Its C ABI (`mrsm_plugin_v1`) is versioned
+> and stable independently of the Rust types; also re-exported by the [`meerschaum`](https://crates.io/crates/meerschaum)
+> crate behind the `plugin` feature.
+
 `meerschaum-plugin` implements the native plugin boundary from design §9. It depends on
 core, kernel and connector; it does not depend on the engine, CLI, worker or an instance
 backend. `examples/native_demo.rs` is a complete source connector and in-memory instance,

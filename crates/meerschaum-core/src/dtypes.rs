@@ -863,7 +863,7 @@ pub const DB_TO_PD_DEFAULT: &str = "object";
 
 /// `get_numeric_precision_scale(None, dtype)` (`utils/dtypes/sql.py:1366`): the explicit
 /// precision and scale of `numeric[p,s]` / `NUMERIC(p, s)`, else `(None, None)`. The flavor
-/// defaults of the full function live in `meerschaum-sql`.
+/// defaults of the full function live in `meerschaum-connector-sql`.
 pub fn get_numeric_precision_scale(dtype: Option<&str>) -> (Option<i64>, Option<i64>) {
     match dtype.and_then(parse_numeric_precision_scale) {
         Some((p, s)) => (Some(p), Some(s)),

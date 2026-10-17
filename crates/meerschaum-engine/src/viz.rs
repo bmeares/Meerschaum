@@ -1,13 +1,13 @@
-//! Visualization (§5.9): the static ASCII Gantt summary printed after a run off a TTY, and the
-//! ASCII DAG of a selection (`mrsm show graph`). The live `ratatui` view and the console's
-//! Plotly timeline render from the same [`RunRecord`] and event stream in later waves.
+//! Visualization (§5.9): the static ASCII Gantt summary printed after a run off a TTY. The
+//! DAG of a selection (`mrsm show graph`) is drawn by the CLI (`meerschaum-cli`'s
+//! `format::graph`): the engine keeps the data ([`crate::selection::Subgraph`]), the CLI owns
+//! the styling. The live `ratatui` view and the console's Plotly timeline render from the same
+//! [`RunRecord`] and event stream in later waves.
 
-use std::collections::HashMap;
 use std::fmt::Write as _;
 
 use crate::node::PipeRef;
 use crate::runs::{NodeStatus, RunRecord};
-use crate::selection::Subgraph;
 
 /// `48s`, `2m14s`, `1h02m`.
 pub fn fmt_duration(seconds: f64) -> String {
@@ -188,32 +188,6 @@ pub fn render_gantt(run: &RunRecord, critical_path: &[PipeRef], width: usize) ->
     }
     if planned_makespan.is_some() {
         out.push_str("█ actual  ▒ planned\n");
-    }
-    out
-}
-
-/// Render a selection as an indented DAG: each node at the depth of its longest path from a
-/// root, with its in-selection parents listed when it has more than one or is not directly
-/// below the previous line.
-pub fn render_graph(sub: &Subgraph) -> String {
-    let mut depth: HashMap<&PipeRef, usize> = HashMap::new();
-    for r in &sub.order {
-        let d = sub
-            .parent_edges(r)
-            .filter_map(|e| depth.get(&e.parent))
-            .max()
-            .map_or(0, |d| d + 1);
-        depth.insert(r, d);
-    }
-    let mut out = String::new();
-    for r in &sub.order {
-        let parents: Vec<String> = sub.parent_edges(r).map(|e| e.parent.label()).collect();
-        let marker = if sub.targets.contains(r) { "*" } else { "" };
-        let _ = write!(out, "{}{}{marker}", "  ".repeat(depth[r]), r.label());
-        if !parents.is_empty() {
-            let _ = write!(out, "  ← {}", parents.join(", "));
-        }
-        out.push('\n');
     }
     out
 }

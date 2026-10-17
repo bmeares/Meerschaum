@@ -22,6 +22,8 @@ use std::sync::{Arc, Mutex};
 
 use indexmap::IndexMap;
 use meerschaum_connector::InstanceConnector;
+use meerschaum_connector_sql::SqlConnector;
+use meerschaum_connector_sql::instance::data::ChunkBounds;
 use meerschaum_core::pipe::{ChunkInterval, ChunkIntervalArg, PipeDefaults};
 use meerschaum_core::{Map, Pipe, Value};
 use meerschaum_engine::ConnectorRegistry;
@@ -29,8 +31,6 @@ use meerschaum_engine::registry::StaticRegistry;
 use meerschaum_engine::sync::SyncBegin;
 use meerschaum_kernel::Frame;
 use meerschaum_kernel::enforce::{PipeDtypesContext, PipeInput};
-use meerschaum_sql::SqlConnector;
-use meerschaum_sql::instance::data::ChunkBounds;
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyBool, PyDict, PyList, PyTuple};

@@ -1,10 +1,10 @@
 //! End-to-end plugin actions and native callback writes against the released v4 fixture.
-use meerschaum_core::{Pipe, Value};
-use meerschaum_sql::{
+use meerschaum_connector_sql::{
     SqlConnector,
     flavor::Flavor,
     uri::{ConnectionSpec, ConnectorAttributes},
 };
+use meerschaum_core::{Pipe, Value};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 

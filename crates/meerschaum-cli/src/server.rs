@@ -332,6 +332,9 @@ impl NativeBackend {
         tokio::task::spawn_blocking(move || {
             let mut stderr = std::io::stderr();
             let mut runtime = Runtime::system(&mut stderr);
+            // A server console is not a terminal session: no spinners, no colored graphs.
+            runtime.progress = crate::format::progress::ProgressSink::Off;
+            runtime.live = false;
             runtime.native = Some(backend.session.clone());
             runtime.config = match backend.config() {
                 Ok(config) => Some(config),
@@ -418,6 +421,9 @@ impl meerschaum_server::backends::ActionsBackend for NativeBackend {
         tokio::task::spawn_blocking(move || {
             let mut stderr = std::io::stderr();
             let mut runtime = Runtime::system(&mut stderr);
+            // A server console is not a terminal session: no spinners, no colored graphs.
+            runtime.progress = crate::format::progress::ProgressSink::Off;
+            runtime.live = false;
             runtime.native = Some(backend.session.clone());
             runtime.config = match backend.config() {
                 Ok(config) => Some(config),

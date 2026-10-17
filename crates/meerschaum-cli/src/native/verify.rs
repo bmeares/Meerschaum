@@ -7,11 +7,11 @@
 
 use chrono::Duration;
 use meerschaum_connector::{DataQuery, DateBound};
+use meerschaum_connector_sql::instance::data::{ChunkBounds, get_chunk_bounds, subtract_interval};
 use meerschaum_core::pipe::{ChunkInterval, ChunkIntervalArg};
 use meerschaum_core::value::{Map, Value};
 use meerschaum_core::{SuccessTuple, pyfmt, static_config};
 use meerschaum_kernel::value::DateTimeValue;
-use meerschaum_sql::instance::data::{ChunkBounds, get_chunk_bounds, subtract_interval};
 
 use crate::dispatch::Runtime;
 use crate::format::TupleArgs;

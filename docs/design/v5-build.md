@@ -87,7 +87,7 @@ There is no `setup.py`, `setup.cfg` or `MANIFEST.in` any more. Two distributions
 
 | Distribution | Source | Contents |
 |---|---|---|
-| `meerschaum` | root `pyproject.toml` (maturin mixed project, `abi3-py311`, module `meerschaum._core._core`) | The Python SDK and façade plus the Rust extension. `dependencies` is only `meerschaum-cli` (same version); every heavier package is an extra (`pandas`, `polars`, `geo`, `sql`, `sql-mssql`, `sql-oracle`, `sql-duckdb`, `sql-cockroachdb`, `api`, `dash`, `shell`, `cli-tools`, `gui`, `full`). |
+| `meerschaum` | root `pyproject.toml` (maturin mixed project, `abi3-py311`, module `meerschaum._core._native`) | The Python SDK and façade plus the Rust extension. `dependencies` is only `meerschaum-cli` (same version); every heavier package is an extra (`pandas`, `polars`, `geo`, `sql`, `sql-mssql`, `sql-oracle`, `sql-duckdb`, `sql-cockroachdb`, `api`, `dash`, `shell`, `cli-tools`, `gui`, `full`). |
 | `meerschaum-cli` | `crates/meerschaum-cli/pyproject.toml` (`bindings = "bin"`) | The native `mrsm` binary, no Python dependencies. |
 
 `scripts/check_packaging.py` verifies that the Cargo workspace version, the `meerschaum-cli==X` pin and the extras in `pyproject.toml` agree with `meerschaum/utils/packages/_packages.py`. `.github/workflows/wheels.yaml` builds both wheels on GitHub-hosted runners only (Linux, macOS, Windows) and smoke-tests them in a fresh venv. `scripts/rust/build_py.sh` still builds the in-tree extension for development. The Docker `slim` image installs the base wheels only; the default image installs `meerschaum[full]`. Current size and functional gates are recorded below, rather than inferred from the scaffold measurements.
@@ -147,9 +147,9 @@ so `-` and `_` count as the same name. Results on 2026-10-12:
 | `meerschaum` | free |
 | `meerschaum-core` | free |
 | `meerschaum-kernel` | free |
-| `meerschaum-sql` | free |
-| `meerschaum-valkey` | free |
-| `meerschaum-api` | free |
+| `meerschaum-connector-sql` | free |
+| `meerschaum-connector-valkey` | free |
+| `meerschaum-connector-api` | free |
 | `meerschaum-engine` | free |
 | `meerschaum-jobs` | free |
 | `meerschaum-compose` | free |
@@ -159,7 +159,7 @@ so `-` and `_` count as the same name. Results on 2026-10-12:
 | `meerschaum-cli` | free |
 | `mrsm` | free |
 
-`meerschaum-py` is also free. crates.io has no reservation mechanism. Claiming a name means
+`meerschaum-py` is also free (it is `publish = false`: the extension ships in the PyPI wheel). `meerschaum-connector` and `meerschaum-worker` are free too (checked 2026-10-17). `meerschaum` is the front crate (`crates/meerschaum`, thin re-exports behind cargo features); the other crates are internal. crates.io has no reservation mechanism. Claiming a name means
 publishing a version from the owner's account. The workspace is still at `5.0.0-a1`, so publish
 placeholders soon (§15).
 

@@ -9,8 +9,8 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use _core::arrow_bridge::{ArrowStream, collect_reader};
-use _core::ffi_import::{StreamImporter, import_record_batch, repair_null_buffers};
+use _native::arrow_bridge::{ArrowStream, collect_reader};
+use _native::ffi_import::{StreamImporter, import_record_batch, repair_null_buffers};
 use arrow::array::NullArray;
 use arrow::array::{
     Array, ArrayRef, BinaryArray, BooleanArray, Date32Array, Decimal128Array, DictionaryArray,

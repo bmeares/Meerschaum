@@ -108,6 +108,7 @@ pub fn ask(rt: &mut Runtime<'_>, question: &str, options: &Ask) -> Result<String
         String::new()
     } else {
         let text = question_text(rt, &question, !options.no_icon);
+        crate::format::progress::suspend();
         let read = if is_password {
             rt.host.read_secret(&text)
         } else if let Some(prefill) = &options.editable {
@@ -115,6 +116,7 @@ pub fn ask(rt: &mut Runtime<'_>, question: &str, options: &Ask) -> Result<String
         } else {
             rt.host.read_line_interruptible(&text)
         };
+        crate::format::progress::resume(true);
         match read {
             Some(line) => line,
             None if super::terminal::take_interrupt() => return Err(interrupt()),

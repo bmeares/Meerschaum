@@ -14,12 +14,12 @@ use std::time::Duration;
 
 use common::{json_map, temp_dir};
 use meerschaum_connector::{DataQuery, InstanceConnector};
+use meerschaum_connector_sql::SqlConnector;
 use meerschaum_core::Pipe;
 use meerschaum_engine::{
     Action, Depth, Engine, EngineConfig, NodeStatus, PipeRef, RunOptions, RunResult, Selection,
     StateSource, StaticRegistry,
 };
-use meerschaum_sql::SqlConnector;
 
 const KEYS: &str = "sql:w9state";
 const SCHEMA: &str = "w9s_state";

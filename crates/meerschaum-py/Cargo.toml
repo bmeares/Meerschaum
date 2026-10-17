@@ -6,11 +6,12 @@ license.workspace = true
 repository.workspace = true
 authors.workspace = true
 rust-version.workspace = true
+publish = false
 description = "Meerschaum v5: PyO3 bindings exposed to Python as `meerschaum._core`"
 build = "build.rs"
 
 [lib]
-name = "_core"
+name = "_native"
 crate-type = ["cdylib", "rlib"]
 
 [features]
@@ -24,22 +25,22 @@ extension-module = ["pyo3/extension-module"]
 # kernel's Polars build. Without it, this crate reuses the kernel's Polars build (it depends on
 # `meerschaum-kernel`, see crates/README.md "Crate layering").
 polars = ["dep:pyo3-polars"]
-# The `duckdb` and `oracle` flavors of `meerschaum-sql` (D13): the wheels ship them
+# The `duckdb` and `oracle` flavors of `meerschaum-connector-sql` (D13): the wheels ship them
 # (`scripts/rust/build_py.sh` and the root `pyproject.toml` enable both), so `Pipe.sync()` and the
 # instance methods reach those databases natively. `mssql` is a default feature of the SQL crate.
-duckdb = ["meerschaum-sql/duckdb"]
-oracle = ["meerschaum-sql/oracle"]
+duckdb = ["meerschaum-connector-sql/duckdb", "meerschaum-cli/duckdb"]
+oracle = ["meerschaum-connector-sql/oracle", "meerschaum-cli/oracle"]
 
 [dependencies]
 meerschaum-core = { workspace = true }
 meerschaum-kernel = { workspace = true }
-meerschaum-sql = { workspace = true }
+meerschaum-connector-sql = { workspace = true }
 meerschaum-connector = { workspace = true }
 meerschaum-engine = { workspace = true }
 # The connectors a one-pipe sync builds from the Python process's attributes (`facade.rs`) and
 # the worker pool it tells about ad hoc connectors.
-meerschaum-api = { workspace = true, features = ["client"] }
-meerschaum-valkey = { workspace = true }
+meerschaum-connector-api = { workspace = true, features = ["client"] }
+meerschaum-connector-valkey = { workspace = true }
 meerschaum-worker = { workspace = true }
 # `meerschaum.jobs.Job` and the executors (`jobs_api.rs`).
 meerschaum-jobs = { workspace = true }
@@ -48,7 +49,7 @@ tracing = { workspace = true }
 # The runtime the instance methods run on (owned by the extension, design §4.2).
 tokio = { workspace = true }
 # Only this crate depends on the CLI library (top layer, see crates/README.md "Crate layering").
-meerschaum-cli = { path = "../meerschaum-cli" }
+meerschaum-cli = { path = "../meerschaum-cli", default-features = false }
 # `meerschaum.compose.utils` delegates its configuration helpers (`compose_api.rs`).
 meerschaum-compose = { workspace = true }
 # VERSION SKEW (see README "Dependency pins"): the workspace pins `pyo3 = 0.26`, but

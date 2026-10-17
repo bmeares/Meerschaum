@@ -7,8 +7,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use meerschaum_connector::{DataQuery, InstanceConnector, async_trait};
+use meerschaum_connector_sql::SqlConnector;
 use meerschaum_core::{Map, Pipe, SuccessTuple};
-use meerschaum_sql::SqlConnector;
 use meerschaum_worker::callback::{CallbackHandler, CallbackRequest, InstanceSyncHandler};
 use meerschaum_worker::{PythonStream, StreamEvent, StreamMode, StreamOptions};
 use tokio::sync::mpsc::UnboundedReceiver;

@@ -1,3 +1,6 @@
+//! **Internal crate** of [Meerschaum](https://meerschaum.io): its API may change in any minor
+//! release. Depend on the [`meerschaum`](https://docs.rs/meerschaum) crate instead.
+//!
 //! `meerschaum-engine`: the dependency-aware Syncing Engine (`docs/design/v5.0.0.md` §5).
 //!
 //! The engine understands the pipe graph, decides which syncs need to run and how wide their

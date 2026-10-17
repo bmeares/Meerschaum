@@ -10,12 +10,12 @@
 
 use chrono::{FixedOffset, NaiveDate};
 use indexmap::IndexMap;
+use meerschaum_connector_sql::Flavor;
+use meerschaum_connector_sql::instance::fetch::FetchArgs;
+use meerschaum_connector_sql::queries::metadef::{Bound as MBound, ParentSpec};
 use meerschaum_core::pipe::{ChunkInterval, ChunkIntervalArg};
 use meerschaum_core::pyfmt::PyDateTime;
 use meerschaum_core::{Map, Value};
-use meerschaum_sql::Flavor;
-use meerschaum_sql::instance::fetch::FetchArgs;
-use meerschaum_sql::queries::metadef::{Bound as MBound, ParentSpec};
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::intern;
 use pyo3::prelude::*;
@@ -44,7 +44,7 @@ pub fn sql_item_name(
         Some(s) => Some(s.str()?.to_string()),
         None => None,
     };
-    Ok(meerschaum_sql::ident::sql_item_name_opt(
+    Ok(meerschaum_connector_sql::ident::sql_item_name_opt(
         &item,
         flavor_opt(flavor),
         schema.as_deref(),
@@ -76,7 +76,7 @@ pub fn build_where(
     }
     // PARITY: an unknown flavor key falls back to the `default` quoting like Python does.
     let flavor = flavor_opt(flavor).unwrap_or(Flavor::Postgresql);
-    Ok(meerschaum_sql::where_clause::build_where(
+    Ok(meerschaum_connector_sql::where_clause::build_where(
         &map, flavor, with_where,
     ))
 }
@@ -166,7 +166,9 @@ fn params_of(params: Option<&Bound<'_, PyAny>>) -> PyResult<Option<IndexMap<Stri
     }
 }
 
-fn rust_conn(conn: &Bound<'_, PyAny>) -> PyResult<std::sync::Arc<meerschaum_sql::SqlConnector>> {
+fn rust_conn(
+    conn: &Bound<'_, PyAny>,
+) -> PyResult<std::sync::Arc<meerschaum_connector_sql::SqlConnector>> {
     let c = conn
         .downcast::<PySqlConnector>()
         .map_err(|_| PyValueError::new_err("Expected a `_core.SqlConnector`."))?;
@@ -459,7 +461,7 @@ pub fn get_chunk_bounds<'py>(
     } else {
         ChunkInterval::Int(chunk_interval.extract::<i64>()?)
     };
-    let bounds = meerschaum_sql::instance::data::get_chunk_bounds(
+    let bounds = meerschaum_connector_sql::instance::data::get_chunk_bounds(
         date_bound(&ctx, begin)?,
         date_bound(&ctx, end)?,
         bounded,

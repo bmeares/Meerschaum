@@ -21,9 +21,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use meerschaum_connector::InstanceConnector;
+use meerschaum_connector_sql::SqlConnector;
 use meerschaum_engine::executor::LeaseSource;
 use meerschaum_engine::{InstanceLeases, InstanceState, PipeRef, StaticRegistry};
-use meerschaum_sql::SqlConnector;
 
 const KEYS: &str = "sql:w7";
 const SCHEMA: &str = "w7_engine";
@@ -79,7 +79,7 @@ async fn connect(backend: &Backend) -> Arc<dyn InstanceConnector> {
                 .expect("connect to PostgreSQL"),
         ),
         "valkey" => Arc::new(
-            meerschaum_valkey::ValkeyConnector::from_uri("w7", &backend.target)
+            meerschaum_connector_valkey::ValkeyConnector::from_uri("w7", &backend.target)
                 .await
                 .expect("connect to Valkey"),
         ),

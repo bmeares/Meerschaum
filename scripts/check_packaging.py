@@ -24,6 +24,18 @@ Source-tree checks (exit 1 on any failure):
 6. `crates/meerschaum-cli/src/extras.rs` (the extras the CLI's `show venvs` / `prune venvs` treat
    as wanted packages) equals the extras in the root pyproject.toml. Regenerate with `--write`.
 
+Version scheme (checks 1 and 3 use it): Cargo and PEP 440 spell a pre-release differently, so the
+Cargo version `X.Y.Z-aN` / `-bN` / `-rc.N` / `-dev.N` maps to `X.Y.ZaN` / `bN` / `rcN` / `.devN`
+(`cargo_to_pep440`, and the inverse `pep440_to_cargo`, which always emits the dot form). Cargo
+compares pre-release identifiers piece by piece, so `rc10` sorts below `rc2` while `rc.10` sorts
+above `rc.2`: a Cargo `rc`/`beta` pre-release must use the dot form (`5.0.0-rc.1`, never
+`5.0.0-rc1`); the legacy `5.0.0-a1` spelling of the alpha is accepted with a note.
+
+Crates.io publishing (checks 9 and 10): every `[workspace.dependencies]` entry for a workspace
+crate carries `version = "=<Cargo version>"` (lockstep; cargo cannot inherit the version there),
+and every published crate (`publish` not `false`) has the metadata crates.io requires
+(`description`, `license`, `repository`, `readme` + the file, `keywords`, `categories`, `include`).
+
 Wheel checks (`--wheels DIST`, for the wheels `maturin build` wrote into DIST; used by
 .github/workflows/wheels.yaml right after the build):
 
@@ -70,6 +82,37 @@ def cargo_to_pep440(version: str) -> str:
     if tag == 'dev':
         return f"{base}.dev{num}"
     return f"{base}{ {'alpha': 'a', 'beta': 'b'}.get(tag, tag) }{num}"
+
+
+def pep440_to_cargo(version: str) -> str:
+    """`5.0.0a1` -> `5.0.0-alpha.1`, `5.0.0rc1` -> `5.0.0-rc.1`, `5.0.0.dev2` -> `5.0.0-dev.2`."""
+    m = re.fullmatch(r'(\d+\.\d+\.\d+)(?:(a|b|rc)(\d+)|\.dev(\d+))?', version)
+    if not m:
+        raise ValueError(f"unsupported PEP 440 version: {version!r}")
+    base, tag, num, dev = m.groups()
+    if dev is not None:
+        return f"{base}-dev.{dev}"
+    if tag is None:
+        return base
+    return f"{base}-{ {'a': 'alpha', 'b': 'beta'}.get(tag, tag) }.{num}"
+
+
+def cargo_prerelease_problem(version: str) -> tuple[str, str] | None:
+    """
+    `('fail' | 'note', message)` if the Cargo pre-release spelling sorts wrongly, else `None`.
+
+    Cargo orders `rc10` before `rc2` (alphanumeric identifiers compare as text) but `rc.10`
+    after `rc.2` (numeric identifiers compare as numbers).
+    """
+    m = re.fullmatch(r'\d+\.\d+\.\d+-(a|alpha|b|beta|rc|dev)(\.?)(\d+)', version)
+    if not m or m.group(2):
+        return None
+    tag = m.group(1)
+    message = (
+        f"Cargo version {version} sorts {tag}10 before {tag}2; "
+        f"use the dot form {version.replace(tag, tag + '.', 1)}"
+    )
+    return ('note', message) if tag in ('a', 'alpha') else ('fail', message)
 
 
 def normalize(requirement: str) -> str:
@@ -362,6 +405,50 @@ def main() -> int:
         failures.append("meerschaum-cli pyproject.toml: bindings must be 'bin'")
     if cli['project'].get('dependencies'):
         failures.append("meerschaum-cli pyproject.toml: must have no Python dependencies")
+
+    ### Version spelling (see the module docstring).
+    problem = cargo_prerelease_problem(cargo_version)
+    if problem:
+        (failures if problem[0] == 'fail' else notes).append(problem[1])
+    if cargo_to_pep440(pep440_to_cargo(pep440)) != pep440:
+        failures.append(f"version mapping is not reversible for {cargo_version} <-> {pep440}")
+
+    ### 9. Lockstep workspace dependency versions.
+    for name, spec in cargo['workspace'].get('dependencies', {}).items():
+        if not name.startswith('meerschaum') or not isinstance(spec, dict) or 'path' not in spec:
+            continue
+        if spec.get('version') != f"={cargo_version}":
+            failures.append(
+                f"Cargo.toml [workspace.dependencies] {name}: version is {spec.get('version')!r}, "
+                f"expected '={cargo_version}' (lockstep; update it with [workspace.package] version)"
+            )
+
+    ### 10. crates.io metadata of every published crate.
+    required = ('description', 'readme', 'keywords', 'categories', 'include')
+    members = cargo['workspace']['members']
+    for member in members:
+        manifest = tomllib.loads((ROOT / member / 'Cargo.toml').read_text(encoding='utf-8'))
+        pkg = manifest['package']
+        label = f"{member}/Cargo.toml"
+        if pkg.get('publish', True) is False:
+            continue
+        for key in required:
+            if not pkg.get(key):
+                failures.append(f"{label}: published crate lacks `{key}`")
+        for key in ('license', 'repository', 'version'):
+            ### A value, or `key.workspace = true` (which parses as `{'workspace': True}`).
+            if not pkg.get(key):
+                failures.append(f"{label}: published crate lacks `{key}`")
+        readme = pkg.get('readme')
+        if isinstance(readme, str) and not (ROOT / member / readme).is_file():
+            failures.append(f"{label}: readme {readme!r} does not exist")
+        if len(pkg.get('keywords', [])) > 5:
+            failures.append(f"{label}: more than 5 keywords")
+        for dep_table in ('dependencies', 'build-dependencies'):
+            for dep, spec in manifest.get(dep_table, {}).items():
+                if dep.startswith('meerschaum') and isinstance(spec, dict) and 'path' in spec \
+                        and 'version' not in spec:
+                    failures.append(f"{label}: path dependency {dep} has no `version`")
 
     ### 1 + 2a. The cli pin.
     expected_deps = [f"meerschaum-cli=={pep440}"]

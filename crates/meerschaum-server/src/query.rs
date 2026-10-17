@@ -35,7 +35,7 @@ impl Query {
     pub fn parse(raw: Option<&str>) -> Query {
         Query {
             pairs: raw
-                .map(meerschaum_api::wire::parse_query)
+                .map(meerschaum_connector_api::wire::parse_query)
                 .unwrap_or_default(),
         }
     }

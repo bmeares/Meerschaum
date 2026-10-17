@@ -226,7 +226,7 @@ async fn session_expiry_and_shared_instances() {
 
 #[tokio::test]
 async fn python_host_reads_and_writes_sqlite_sessions() {
-    use meerschaum_sql::{instance::SqlConnector, uri::ConnectionSpec};
+    use meerschaum_connector_sql::{instance::SqlConnector, uri::ConnectionSpec};
     let root = tempfile::tempdir().unwrap();
     let plugins = tempfile::tempdir().unwrap();
     let path = root.path().join("web_sessions.sqlite");
@@ -365,7 +365,7 @@ async fn installed_browser_renders_page_contract() {
 
 #[tokio::test]
 async fn cache_protocol_matches_python_sessions() {
-    use meerschaum_valkey::{MemoryBackend, backend::ValkeyBackend};
+    use meerschaum_connector_valkey::{MemoryBackend, backend::ValkeyBackend};
     use meerschaum_web::sessions::ValkeySessions;
     let cache = Arc::new(MemoryBackend::default());
     let store = ValkeySessions(cache.clone());
@@ -807,8 +807,8 @@ async fn the_token_form_starts_from_the_owners_scopes_and_refuses_more() {
 #[cfg(unix)]
 #[tokio::test]
 async fn rust_login_is_seen_by_python_dash_host() {
+    use meerschaum_connector_sql::{instance::SqlConnector, uri::ConnectionSpec};
     use meerschaum_server::{AppState, proxy::HostProxy};
-    use meerschaum_sql::{instance::SqlConnector, uri::ConnectionSpec};
     use tokio::io::{AsyncBufReadExt, BufReader};
     let root = tempfile::tempdir().unwrap();
     let plugins = tempfile::tempdir().unwrap();
@@ -985,7 +985,7 @@ async fn sessions_cannot_be_exposed_through_pipe_aliases() {
 /// A temporary SQLite instance (`sql:eng`) with a three-pipe chain that has run once.
 async fn engine_fixture() -> (
     tempfile::TempDir,
-    Arc<meerschaum_sql::SqlConnector>,
+    Arc<meerschaum_connector_sql::SqlConnector>,
     Arc<meerschaum_engine::StaticRegistry>,
     meerschaum_engine::EngineConfig,
 ) {
@@ -996,7 +996,7 @@ async fn engine_fixture() -> (
     let dir = tempfile::tempdir().unwrap();
     let uri = format!("sqlite:///{}", dir.path().join("eng.db").display());
     let conn = Arc::new(
-        meerschaum_sql::SqlConnector::from_uri("eng", &uri)
+        meerschaum_connector_sql::SqlConnector::from_uri("eng", &uri)
             .await
             .unwrap(),
     );
@@ -1008,9 +1008,9 @@ async fn engine_fixture() -> (
             .with_source("sql:eng", source)
             .with_table_reference(|pipe: &meerschaum_core::Pipe| {
                 let target = pipe.target(None).map_err(|e| e.to_string())?;
-                Ok(meerschaum_sql::ident::sql_item_name(
+                Ok(meerschaum_connector_sql::ident::sql_item_name(
                     &target,
-                    meerschaum_sql::Flavor::Sqlite,
+                    meerschaum_connector_sql::Flavor::Sqlite,
                     None,
                 ))
             }),

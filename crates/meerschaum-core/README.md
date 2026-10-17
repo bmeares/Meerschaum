@@ -1,5 +1,9 @@
 # meerschaum-core
 
+> **Internal crate.** `meerschaum-core` is an implementation detail of [Meerschaum](https://meerschaum.io)
+> and may change in any minor release. Depend on the [`meerschaum`](https://crates.io/crates/meerschaum)
+> crate instead.
+
 Leaf crate for pipe metadata, config, templates, dtype vocabulary, and shared Python behavior.
 See `../README.md` for layering and `../../docs/design/v5.0.0.md` for the compatibility contract.
 

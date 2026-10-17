@@ -19,6 +19,9 @@ use std::sync::{Arc, Mutex};
 use chrono::{DateTime, Utc};
 use meerschaum_cli::native::session::ConfiguredSqlProvider;
 use meerschaum_cli::native::{EngineRegistry, Instance, RegistryOptions, Session, registry_with};
+use meerschaum_connector_sql::SqlConnector;
+use meerschaum_connector_sql::instance::InstanceSettings;
+use meerschaum_connector_sql::uri::{ConnectionSpec, ConnectorAttributes};
 use meerschaum_core::config::Config;
 use meerschaum_core::success::Bound;
 use meerschaum_engine::read::{EngineReader, RunFilter, RunStatus};
@@ -27,9 +30,6 @@ use meerschaum_engine::{
     ConnectorRegistry, Depth, Engine, EngineConfig, Event, EventSink, NodeSyncOptions, PipeRef,
     RunOptions, RunResult, Selection,
 };
-use meerschaum_sql::SqlConnector;
-use meerschaum_sql::instance::InstanceSettings;
-use meerschaum_sql::uri::{ConnectionSpec, ConnectorAttributes};
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use serde_json::{Value as Json, json};

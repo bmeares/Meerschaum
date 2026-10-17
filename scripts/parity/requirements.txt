@@ -5,6 +5,7 @@
 numpy==2.4.2
 pandas==3.0.0
 pyarrow==23.0.0
+pyodbc==5.3.0
 shapely==2.1.2
 pyproj==3.7.2
 geopandas==1.1.1
@@ -41,7 +42,7 @@ prompt-toolkit==3.0.53
 
 # v4 `api` group plus SQLAlchemy. v4 auto-installs these into its `mrsm` venv at the newest
 # versions when they are missing, and a newer stack (FastAPI 0.143 / Starlette 1.7 / PyJWT 2.15 /
-# SQLAlchemy 2.1) changes crates/meerschaum-api/tests/fixtures/gen_api.py's recording (the job-log
+# SQLAlchemy 2.1) changes crates/meerschaum-connector-api/tests/fixtures/gen_api.py's recording (the job-log
 # request fails with "Invalid credentials"). Installed here, v4 finds them (`allow_outside_venv`)
 # and never installs its own.
 aiosqlite==0.22.1

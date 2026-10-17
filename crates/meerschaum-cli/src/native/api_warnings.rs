@@ -1,4 +1,4 @@
-//! The API client's warnings (`meerschaum_api::client::warnings`), printed through the CLI's
+//! The API client's warnings (`meerschaum_connector_api::client::warnings`), printed through the CLI's
 //! formatter on stderr like v4's `warn(msg, stack=False)`.
 //!
 //! The client may run on another thread of the session's runtime, so its sink only queues the
@@ -21,7 +21,7 @@ const MAX_PENDING: usize = 256;
 /// have no one to print the queue, so there the client's warnings stay on `tracing`.
 pub fn install() {
     INSTALL.call_once(|| {
-        meerschaum_api::client::warnings::set_warning_sink(Some(Arc::new(enqueue)));
+        meerschaum_connector_api::client::warnings::set_warning_sink(Some(Arc::new(enqueue)));
     });
 }
 
@@ -42,7 +42,7 @@ fn enqueue_into(queue: &Mutex<Vec<String>>, message: &str) {
 /// Remove the queuing sink (the server calls this: nothing would drain the queue) and drop what
 /// is queued.
 pub fn uninstall() {
-    meerschaum_api::client::warnings::set_warning_sink(None);
+    meerschaum_connector_api::client::warnings::set_warning_sink(None);
     if let Ok(mut pending) = PENDING.lock() {
         pending.clear();
     }

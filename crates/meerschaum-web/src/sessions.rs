@@ -111,7 +111,7 @@ impl SessionStore for InstanceSessions {
 }
 
 /// Exact v4 cache protocol, for deployments configuring a Valkey cache connector.
-pub struct ValkeySessions(pub Arc<dyn meerschaum_valkey::backend::ValkeyBackend>);
+pub struct ValkeySessions(pub Arc<dyn meerschaum_connector_valkey::backend::ValkeyBackend>);
 #[async_trait]
 impl SessionStore for ValkeySessions {
     async fn get(&self, id: &str) -> Result<Option<Json>, String> {

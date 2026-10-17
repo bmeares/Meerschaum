@@ -6,7 +6,13 @@ license.workspace = true
 repository.workspace = true
 authors.workspace = true
 rust-version.workspace = true
-description = "Versioned C ABI, native plugin SDK and connector adapters for Meerschaum"
+description = "The native plugin SDK for Meerschaum: a versioned C ABI, a safe Plugin trait and connector adapters"
+readme = "README.md"
+homepage.workspace = true
+documentation = "https://docs.rs/meerschaum-plugin"
+keywords = ["meerschaum", "plugin", "sdk", "ffi", "etl"]
+categories = ["api-bindings", "external-ffi-bindings"]
+include = ["src/**/*", "examples/**/*", "schema/**/*", "wit/**/*", "/LICENSE", "/NOTICE"]
 
 [dependencies]
 meerschaum-core = { workspace = true }

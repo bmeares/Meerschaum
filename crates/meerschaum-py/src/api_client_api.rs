@@ -1,4 +1,4 @@
-//! `meerschaum-api` bound into `meerschaum._core`: the `APIConnector` client behind the v4
+//! `meerschaum-connector-api` bound into `meerschaum._core`: the `APIConnector` client behind the v4
 //! `meerschaum.connectors.api.APIConnector` façade (design §4.4, D12, D20).
 //!
 //! `_core.ApiConnector(label, attributes)` is built from the attributes the Python connector
@@ -19,12 +19,12 @@ use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use indexmap::IndexMap;
-use meerschaum_api::APIConnector as RsApiConnector;
-use meerschaum_api::client::{ApiResponse, Body, LogsMonitor, Method, RequestOptions};
-use meerschaum_api::wire::QueryValue;
 use meerschaum_connector::{
     ConnectorError, DataQuery, DateBound, PipeId, PipesKeys, PipesKeysQuery, SyncOptions,
 };
+use meerschaum_connector_api::APIConnector as RsApiConnector;
+use meerschaum_connector_api::client::{ApiResponse, Body, LogsMonitor, Method, RequestOptions};
+use meerschaum_connector_api::wire::QueryValue;
 use meerschaum_core::users::Token;
 use meerschaum_core::{Map, SuccessTuple, Value};
 use meerschaum_kernel::Frame;
@@ -416,17 +416,19 @@ fn utc_datetime(ctx: &PyCtx<'_>, obj: &Bound<'_, PyAny>) -> PyResult<Option<Date
 /// The client's `warn(msg, stack=False)` calls (called from whichever runtime thread made the
 /// request) reach `meerschaum.utils.warnings.warn`, with v4's text.
 fn install_warning_sink() {
-    meerschaum_api::client::warnings::set_warning_sink(Some(Arc::new(|message: &str| {
-        Python::with_gil(|py| {
-            let _ = (|| -> PyResult<()> {
-                let warn = py.import("meerschaum.utils.warnings")?.getattr("warn")?;
-                let kwargs = PyDict::new(py);
-                kwargs.set_item("stack", false)?;
-                warn.call((message,), Some(&kwargs))?;
-                Ok(())
-            })();
-        });
-    })));
+    meerschaum_connector_api::client::warnings::set_warning_sink(Some(Arc::new(
+        |message: &str| {
+            Python::with_gil(|py| {
+                let _ = (|| -> PyResult<()> {
+                    let warn = py.import("meerschaum.utils.warnings")?.getattr("warn")?;
+                    let kwargs = PyDict::new(py);
+                    kwargs.set_item("stack", false)?;
+                    warn.call((message,), Some(&kwargs))?;
+                    Ok(())
+                })();
+            });
+        },
+    )));
 }
 
 fn opt_attr<'py>(obj: &Bound<'py, PyAny>, name: &str) -> Option<Bound<'py, PyAny>> {
@@ -1980,7 +1982,8 @@ pub fn api_uri_params<'py>(
     uri: &str,
     label: Option<&str>,
 ) -> PyResult<Bound<'py, PyAny>> {
-    let params = meerschaum_api::client::uri::from_uri_params(uri, label).map_err(conn_err)?;
+    let params =
+        meerschaum_connector_api::client::uri::from_uri_params(uri, label).map_err(conn_err)?;
     core_to_py(py, &Value::Map(params))
 }
 

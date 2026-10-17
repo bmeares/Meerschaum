@@ -13,7 +13,7 @@
 //!
 //! **SQL instances** run the reads that already carry the whole `Pipe.get_data()` post-processing
 //! (column selection, null-filled missing columns, dtype enforcement, sorting, `limit`) in
-//! `meerschaum-sql` (`get_pipe_data_and_state`); every other instance goes through the generic
+//! `meerschaum-connector-sql` (`get_pipe_data_and_state`); every other instance goes through the generic
 //! port of the v4 body here, which does that post-processing over the `InstanceConnector`
 //! trait.
 
@@ -24,6 +24,8 @@ use chrono::{Duration, TimeDelta};
 use indexmap::IndexMap;
 use meerschaum_connector::pipe_ops::{self, Doc};
 use meerschaum_connector::{ConnectorError, DataQuery, DateBound, FetchedKind, InstanceConnector};
+use meerschaum_connector_sql::SqlConnector;
+use meerschaum_connector_sql::instance::data::{ChunkBounds, DataQueryOptions, get_chunk_bounds};
 use meerschaum_core::pipe::{ChunkInterval, ChunkIntervalArg, PipeDefaults};
 use meerschaum_core::{Map, Pipe, SuccessTuple, Value};
 use meerschaum_engine::ConnectorRegistry;
@@ -35,8 +37,6 @@ use meerschaum_kernel::enforce::{
 };
 use meerschaum_kernel::value::DateTimeValue;
 use meerschaum_kernel::{Frame, Value as Cell};
-use meerschaum_sql::SqlConnector;
-use meerschaum_sql::instance::data::{ChunkBounds, DataQueryOptions, get_chunk_bounds};
 
 /// What a call needs of the Python process (module docs).
 #[derive(Clone)]
@@ -615,7 +615,7 @@ impl Reader {
     /// A PostgreSQL-family instance's documents hold a geometry the way psycopg returns the
     /// column, the hex EWKB text (`result.mappings()`), not a shapely object.
     fn raw_geometries(&self, docs: Vec<Doc>) -> Vec<Doc> {
-        use meerschaum_sql::Flavor::*;
+        use meerschaum_connector_sql::Flavor::*;
         let Some(sql) = &self.sql else {
             return docs;
         };
@@ -777,7 +777,7 @@ impl Reader {
                 let items: Vec<String> = cols_to_add.keys().cloned().collect();
                 tracing::warn!(
                     "Will add columns {} as nulls to dataframe.",
-                    meerschaum_sql::instance::values::items_str(&items)
+                    meerschaum_connector_sql::instance::values::items_str(&items)
                 );
             }
             let mut all = df.dtypes();
@@ -1320,7 +1320,7 @@ impl Reader {
         if chunk_indices.is_empty() {
             return Ok(SuccessTuple::fail(format!(
                 "None of {} were present in chunk.",
-                meerschaum_sql::instance::values::items_str(indices)
+                meerschaum_connector_sql::instance::values::items_str(indices)
             )));
         }
         let deduped = drop_duplicates_last(&full_chunk, &chunk_indices);

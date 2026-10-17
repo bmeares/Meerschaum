@@ -217,7 +217,7 @@ pub fn registry_with(
 }
 
 /// PARITY: v4 returns the SQL in-place sync message directly (without a chunk envelope).
-struct Inplace(Arc<meerschaum_sql::SqlConnector>);
+struct Inplace(Arc<meerschaum_connector_sql::SqlConnector>);
 #[meerschaum_connector::async_trait]
 impl meerschaum_engine::PluginSync for Inplace {
     async fn sync_native(
@@ -227,9 +227,9 @@ impl meerschaum_engine::PluginSync for Inplace {
         _env: &meerschaum_engine::sync::SyncEnv<'_>,
         observer: Option<&dyn meerschaum_engine::sync::DeltaObserver>,
     ) -> meerschaum_core::success::SyncResult {
+        use meerschaum_connector_sql::instance::fetch::metadef_bound;
+        use meerschaum_connector_sql::queries::metadef::Bound;
         use meerschaum_engine::SyncBegin;
-        use meerschaum_sql::instance::fetch::metadef_bound;
-        use meerschaum_sql::queries::metadef::Bound;
         // A progress-only observer (chunk events) must not divert the direct in-place sync.
         let Some(observer) = observer.filter(|o| o.records_deltas()) else {
             return self.sync(pipe, args).await;
@@ -245,7 +245,7 @@ impl meerschaum_engine::PluginSync for Inplace {
             dtypes: Option<meerschaum_kernel::enforce::PipeDtypesContext>,
         }
         #[meerschaum_connector::async_trait]
-        impl meerschaum_sql::instance::inplace::InplaceObserver for Ledger<'_> {
+        impl meerschaum_connector_sql::instance::inplace::InplaceObserver for Ledger<'_> {
             async fn before_merge(&self, delta: &meerschaum_kernel::Frame) -> Result<(), String> {
                 // The staged rows come back with the database's types (SQLite returns
                 // timestamps as text): enforce the pipe's dtypes so the ledger sees datetimes
@@ -303,9 +303,9 @@ impl meerschaum_engine::PluginSync for Inplace {
         pipe: &meerschaum_core::Pipe,
         args: &meerschaum_engine::SyncArgs,
     ) -> meerschaum_core::success::SyncResult {
+        use meerschaum_connector_sql::instance::fetch::metadef_bound;
+        use meerschaum_connector_sql::queries::metadef::Bound;
         use meerschaum_engine::SyncBegin;
-        use meerschaum_sql::instance::fetch::metadef_bound;
-        use meerschaum_sql::queries::metadef::Bound;
         let begin = match &args.begin {
             SyncBegin::Default => Bound::Default,
             SyncBegin::At(b) => metadef_bound(Some(b)),
@@ -392,7 +392,7 @@ mod tests {
     use meerschaum_engine::sync::{DeltaObserver, SyncEnv};
     use meerschaum_kernel::Frame;
 
-    struct AppendAfterSnapshot(Arc<meerschaum_sql::SqlConnector>);
+    struct AppendAfterSnapshot(Arc<meerschaum_connector_sql::SqlConnector>);
     #[async_trait]
     impl DeltaObserver for AppendAfterSnapshot {
         async fn before_commit(&self, _pipe: &Pipe, delta: &Frame) -> Result<(), String> {
@@ -423,7 +423,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let uri = format!("sqlite:///{}", root.path().join("wiring.db").display());
         let sql = Arc::new(
-            meerschaum_sql::SqlConnector::from_uri("wiring", &uri)
+            meerschaum_connector_sql::SqlConnector::from_uri("wiring", &uri)
                 .await
                 .unwrap(),
         );
@@ -496,7 +496,7 @@ mod tests {
         let uri = format!("{base}{sep}schema={schema}");
         let keys = "sql:w9num";
         let sql = Arc::new(
-            meerschaum_sql::SqlConnector::from_uri("w9num", &uri)
+            meerschaum_connector_sql::SqlConnector::from_uri("w9num", &uri)
                 .await
                 .unwrap(),
         );
@@ -652,7 +652,7 @@ mod tests {
         let uri = format!("sqlite:///{}", root.path().join("w9inpl.db").display());
         let keys = "sql:w9inpl";
         let sql = Arc::new(
-            meerschaum_sql::SqlConnector::from_uri("w9inpl", &uri)
+            meerschaum_connector_sql::SqlConnector::from_uri("w9inpl", &uri)
                 .await
                 .unwrap(),
         );

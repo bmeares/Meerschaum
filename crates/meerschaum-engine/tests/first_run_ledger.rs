@@ -16,12 +16,12 @@ use std::time::Duration;
 use common::{json_map, norm_kvalue, temp_dir};
 use meerschaum_connector::pipe_ops::frame_to_docs;
 use meerschaum_connector::{DataQuery, InstanceConnector};
+use meerschaum_connector_sql::SqlConnector;
 use meerschaum_core::Pipe;
 use meerschaum_engine::{
     Action, Depth, Engine, EngineConfig, PipeRef, RunOptions, Selection, StaticRegistry, SyncArgs,
 };
 use meerschaum_kernel::value::Value as KValue;
-use meerschaum_sql::SqlConnector;
 
 const KEYS: &str = "sql:w9first";
 const SCHEMA: &str = "w9s_first_run";

@@ -8,6 +8,7 @@ use meerschaum_core::value::{Map, Value};
 use crate::builtin::ActionError;
 use crate::dispatch::Runtime;
 use crate::format::PipeKeys;
+use crate::format::progress::Progress;
 use crate::value::{ArgsMap, PyValue};
 
 use super::{Instance, params, session, string, words};
@@ -228,6 +229,7 @@ pub fn selected_pipes(
     rt: &mut Runtime<'_>,
     args: &ArgsMap,
 ) -> Result<(Instance, Vec<SelectedPipe>), ActionError> {
+    let _progress = Progress::start(rt, args, "Looking up pipes");
     let inst = super::get_instance(args, rt)?;
     let sel = Selection::from_args(args);
     let pipes = get_pipes(rt, &inst, &sel)?;

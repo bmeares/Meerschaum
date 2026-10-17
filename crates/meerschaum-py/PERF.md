@@ -239,12 +239,12 @@ Explained regressions:
 
 - **SQLite reads.** `MRSM_CORE_TRACE=1` splits a Rust `get_pipe_data` into `pipe_state`,
   `build_data_query`, `read`, `select + enforce_dtypes` and `sort + limit`
-  (`meerschaum_sql::facade`). On 150k rows the driver's `read` is 972 ms of the 1,007 ms
+  (`meerschaum_connector_sql::facade`). On 150k rows the driver's `read` is 972 ms of the 1,007 ms
   (enforce < 1 ms, sort 34 ms, frame → pandas 25 ms), about 6.5 µs per row, where v4's
   `pandas.read_sql` through `sqlite3` takes about 630 ms in total: `sqlx`'s SQLite driver decodes
   row by row into `SqlValue` cells (one `String` per text cell) on its worker thread. At 1M rows
   the rest of the pipeline makes up for it (`get_data` 0.89x), but the `sync (update)` step, whose
-  backtrack read covers all 1.5M rows, is 21% slower. Request filed with `meerschaum-sql`: decode
+  backtrack read covers all 1.5M rows, is 21% slower. Request filed with `meerschaum-connector-sql`: decode
   SQLite results straight into Arrow builders (e.g. `rusqlite` column access).
 - **SQLite updates are slow in both modes.** v4's `sqlite_delete_insert` update
   (`DELETE ... WHERE ROWID IN (SELECT ... INNER JOIN patch ON <COALESCE'd join>)`) cannot use the
@@ -258,10 +258,10 @@ Explained regressions:
   `get_sync_time` reads too) to `facade::pipe_state_cached`, and the numbers are at parity
   (6.1 vs 6.0 ms, 2.9 vs 3.0 ms, 9.1 vs 10.4 ms). `sync_pipe` still reads the table state itself
   (a 1-row sync is 89 ms vs 80 ms on PostGIS, 26 ms vs 62 ms on SQLite); passing the cached state
-  into `sync_pipe_impl` needs a change in `meerschaum-sql` (requested).
+  into `sync_pipe_impl` needs a change in `meerschaum-connector-sql` (requested).
 - `get_pipe_columns_types()` called directly (uncached in both modes) is slower on PostgreSQL
   (8.5 ms vs 3.2 ms): the Rust connector runs `table_exists` before the columns query and its
-  catalog query is heavier. Reported to `meerschaum-sql`.
+  catalog query is heavier. Reported to `meerschaum-connector-sql`.
 
 The sqlite pytest suite takes 87 s under `rust` and 271 s under `python`; postgis 116 s vs 267 s.
 
@@ -346,7 +346,7 @@ binary syncs 100k-row chunks (few queries) and PostgreSQL has statistics, so nei
 v4 builds the same SQL (it was 479 s at 1M); v5 was slower than v4 on top because its Rust
 `sync_pipe` also runs the same query.
 
-**Fix.** `build_where_with(.., WhereStyle { sqlite_no_index_on_lists })` (crate `meerschaum-sql`,
+**Fix.** `build_where_with(.., WhereStyle { sqlite_no_index_on_lists })` (crate `meerschaum-connector-sql`,
 `where_clause.rs`), applied by `build_data_query` when the query has a datetime bound on SQLite:
 each `IN` / `NOT IN` list is written `("id" IN (...)) = 1`, which the planner cannot drive an
 index with. The first attempt, a unary `+"id" IN (..)`, also stopped using the index but dropped
@@ -461,14 +461,14 @@ now asserts this through `pg_stat_activity`.
    (`PyCtx::scalars` now). The first `get_rowcount()` of a process went from 420 ms to 105 ms
    (v4: 370 ms).
 
-**Correctness fixes found on the way (meerschaum-sql).**
+**Correctness fixes found on the way (meerschaum-connector-sql).**
 
 - PostgreSQL parameter binding: `NULL` is bound untyped, datetimes and dates are bound natively,
   and other text cells are cast to the column type (`typed_placeholder`). This fixes the small
   internal upsert ("expression is of type text").
 - Stale prepared statements (SQLSTATE 0A000, "cached plan must not change result type") are
   retried on a connection with a cleared statement cache. Describes of empty reads use their own
-  statement text. Tests: `crates/meerschaum-sql/tests/w9u_pg_params.rs`.
+  statement text. Tests: `crates/meerschaum-connector-sql/tests/w9u_pg_params.rs`.
 
 **Per-flavor microbenchmark** (one pipe, 36 rows, fresh process, median of 15 calls, best of 3
 rounds, ms; python / rust):

@@ -40,14 +40,14 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use meerschaum_connector::InstanceConnector;
+use meerschaum_connector_sql::SqlConnector;
+use meerschaum_connector_sql::flavor::Flavor;
+use meerschaum_connector_sql::instance::InstanceSettings;
+use meerschaum_connector_sql::uri::{ConnectionOptions, ConnectionSpec, ConnectorAttributes};
 use meerschaum_core::config::Config;
 use meerschaum_core::value::{Map, Value, apply_patch_maps};
 use meerschaum_core::{pyfmt, static_config};
 use meerschaum_plugin::NativePlugins;
-use meerschaum_sql::SqlConnector;
-use meerschaum_sql::flavor::Flavor;
-use meerschaum_sql::instance::InstanceSettings;
-use meerschaum_sql::uri::{ConnectionOptions, ConnectionSpec, ConnectorAttributes};
 
 use crate::builtin::ActionError;
 
@@ -487,15 +487,18 @@ impl Session {
         let inst = match typ.as_str() {
             "sql" => Instance::Sql(Arc::new(self.sql_connector(&label, config)?)),
             "api" => {
-                let c = meerschaum_api::APIConnector::from_config(config, &label)
+                let c = meerschaum_connector_api::APIConnector::from_config(config, &label)
                     .map_err(|e| ActionError::new("InvalidAttributesError", e.to_string()))?;
                 Instance::Other(Arc::new(c))
             }
             "valkey" => {
-                let attrs =
-                    meerschaum_valkey::ValkeyConnector::attributes_from_config(config, &label);
+                let attrs = meerschaum_connector_valkey::ValkeyConnector::attributes_from_config(
+                    config, &label,
+                );
                 let c = self
-                    .block_on(meerschaum_valkey::ValkeyConnector::connect(&label, attrs))
+                    .block_on(meerschaum_connector_valkey::ValkeyConnector::connect(
+                        &label, attrs,
+                    ))
                     .map_err(|e| ActionError::new("ConnectionError", e.to_string()))?;
                 Instance::Other(Arc::new(c))
             }
@@ -739,7 +742,8 @@ impl meerschaum_connector::InstanceProvider for ConfiguredSqlProvider {
                     .insert(label.to_string(), conn.clone());
                 Some(conn as Arc<dyn InstanceConnector>)
             }
-            None => meerschaum_sql::instance::env_provider::EnvSqlProvider::shared().instance(keys),
+            None => meerschaum_connector_sql::instance::env_provider::EnvSqlProvider::shared()
+                .instance(keys),
         }
     }
 }

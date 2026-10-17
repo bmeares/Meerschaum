@@ -1,5 +1,9 @@
 # meerschaum-kernel
 
+> **Internal crate.** `meerschaum-kernel` is an implementation detail of [Meerschaum](https://meerschaum.io)
+> and may change in any minor release. Depend on the [`meerschaum`](https://crates.io/crates/meerschaum)
+> crate instead.
+
 Dataframe coercion, filtering, serialization, Arrow transport, and geometry operations.
 Depends only on core among workspace crates; Polars features come from the workspace definition.
 See `../README.md` and `../../docs/design/v5.0.0.md` for the compatibility contract.

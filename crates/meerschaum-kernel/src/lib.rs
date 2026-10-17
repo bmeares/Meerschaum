@@ -1,3 +1,6 @@
+//! **Internal crate** of [Meerschaum](https://meerschaum.io): its API may change in any minor
+//! release. Depend on the [`meerschaum`](https://docs.rs/meerschaum) crate instead.
+//!
 //! `meerschaum-kernel`: the Arrow/Polars data kernel of Meerschaum v5 (design §4.1, §10.1).
 //!
 //! Ports v4's dataframe semantics to Rust with observable parity:

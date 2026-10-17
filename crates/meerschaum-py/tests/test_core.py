@@ -65,9 +65,9 @@ def run_python(code: str, **env_overrides: str) -> subprocess.CompletedProcess:
     )
 
 
-# A prelude that makes `import meerschaum._core._core` fail, simulating an unbuilt tree without
+# A prelude that makes `import meerschaum._core._native` fail, simulating an unbuilt tree without
 # touching the real build artifact.
-BLOCK_EXTENSION = "import sys; sys.modules['meerschaum._core._core'] = None\n"
+BLOCK_EXTENSION = "import sys; sys.modules['meerschaum._core._native'] = None\n"
 
 
 # ---------------------------------------------------------------------------------------------
@@ -98,7 +98,7 @@ def test_import_is_lazy(monkeypatch):
         import meerschaum
         import meerschaum.config
         import meerschaum._core
-        print('meerschaum._core._core' in sys.modules)
+        print('meerschaum._core._native' in sys.modules)
     """)
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout.strip() == 'False'
@@ -129,7 +129,7 @@ def test_import_without_extension_fails(statement):
 def test_import_with_extension():
     assert core.AVAILABLE is True
     assert core.LOAD_ERROR is None
-    assert Path(core.EXTENSION_PATH).name.startswith('_core')
+    assert Path(core.EXTENSION_PATH).name.startswith('_native')
     assert core.__version__.startswith('5.')
 
     info = core.build_info()

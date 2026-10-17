@@ -7,7 +7,7 @@ use std::time::Duration;
 use axum::Router;
 use axum::body::Body;
 use axum::routing::{get, post};
-use meerschaum_api::models::{
+use meerschaum_connector_api::models::{
     EdgeCursor, EngineEvent, EngineState, LeaseRequest, LedgerEntry, RunRecord,
 };
 use serde::de::DeserializeOwned;

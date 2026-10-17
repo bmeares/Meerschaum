@@ -135,8 +135,8 @@ mod tests {
     #[tokio::test]
     async fn respects_sql_capacity_explicit_serial_and_unsupported_connectors() {
         use crate::value::PyValue;
-        use meerschaum_sql::uri::{ConnectionSpec, ConnectorAttributes};
-        use meerschaum_sql::{SqlConnector, flavor::Flavor};
+        use meerschaum_connector_sql::uri::{ConnectionSpec, ConnectorAttributes};
+        use meerschaum_connector_sql::{SqlConnector, flavor::Flavor};
 
         let root = tempfile::tempdir().unwrap();
         let attrs = ConnectorAttributes {

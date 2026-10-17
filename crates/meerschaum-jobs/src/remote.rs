@@ -1,14 +1,14 @@
 //! The `api:<label>` executor over an injected client.
 //!
 //! `meerschaum-jobs` sits on `meerschaum-core` only (`crates/README.md`), so it cannot depend on
-//! the HTTP client in `meerschaum-api`. Instead it owns the boundary:
+//! the HTTP client in `meerschaum-connector-api`. Instead it owns the boundary:
 //!
 //! - [`RemoteJobs`]: a *blocking* client of one remote jobs endpoint, every read fallible;
 //! - [`RemoteJobsResolver`]: turns executor keys (`api:main`) into a shared [`RemoteJobs`];
 //! - [`crate::JobsContext::with_remote`] installs a resolver, and
 //!   [`crate::executor::make_executor`] builds an [`ApiExecutor`] over what it resolves.
 //!
-//! The host (`meerschaum-cli`) implements both over `meerschaum_api::APIConnector` and owns the
+//! The host (`meerschaum-cli`) implements both over `meerschaum_connector_api::APIConnector` and owns the
 //! Tokio runtime the client blocks on, so there is one runtime per session and none per method
 //! call. A context without a resolver answers every operation with an explicit error.
 //!

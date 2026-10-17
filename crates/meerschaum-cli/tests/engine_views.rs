@@ -6,12 +6,12 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
-use meerschaum_core::{Pipe, Value};
-use meerschaum_sql::{
+use meerschaum_connector_sql::{
     SqlConnector,
     flavor::Flavor,
     uri::{ConnectionSpec, ConnectorAttributes},
 };
+use meerschaum_core::{Pipe, Value};
 
 struct Env {
     _tmp: tempfile::TempDir,
@@ -208,19 +208,72 @@ fn show_graph_draws_the_dag() {
     let env = chain();
     let out = env.ok(&["show", "graph", "-m", "daily", "--parents"]);
     eprintln!("{out}");
+    // A piped stdout gets the plain layout: a header, then the tree, then the legend.
+    assert!(!out.contains('\u{1b}'), "no colors off a terminal: {out}");
     let lines: Vec<&str> = out.lines().collect();
-    assert_eq!(lines.len(), 3, "{out}");
-    assert!(lines[0].starts_with("sql:local/raw"), "{out}");
-    assert!(lines[1].starts_with("  sql:local/clean"), "{out}");
-    assert!(
-        lines[1].contains("<-") || lines[1].contains('\u{2190}'),
+    assert_eq!(
+        lines[0], "Pipe graph on sql:local: 3 pipes, 2 edges, 1 root, depth 3",
         "{out}"
     );
-    assert!(lines[2].starts_with("    sql:local/daily*"), "{out}");
+    let tree: Vec<&str> = lines[2..5].to_vec();
+    assert!(tree[0].ends_with("sql:local/raw"), "{out}");
+    assert!(tree[1].ends_with("sql:local/clean"), "{out}");
+    // The chain is built from `{{ Pipe() }}` references, so the edges are drawn dashed.
+    assert!(
+        ["\u{2514}\u{2504}\u{2504} ", "`~~ "]
+            .iter()
+            .any(|branch| tree[1].starts_with(branch)),
+        "{out}"
+    );
+    assert!(out.contains("implicit {{ Pipe() }} edge"), "{out}");
+    assert!(tree[2].contains("sql:local/daily"), "{out}");
+    assert!(
+        tree[2].contains('\u{2605}') || tree[2].contains('*'),
+        "the selected pipe is marked: {out}"
+    );
+    assert!(
+        lines[2..].iter().any(|l| l.contains("root")),
+        "legend: {out}"
+    );
     let json = env.ok(&["show", "graph", "-t", "demo", "--nopretty"]);
     let graph: serde_json::Value = serde_json::from_str(json.trim()).unwrap();
     assert_eq!(graph["nodes"].as_array().unwrap().len(), 3, "{json}");
     assert_eq!(graph["edges"].as_array().unwrap().len(), 2, "{json}");
+}
+
+#[test]
+fn show_graph_draws_a_cycle_instead_of_flattening_it() {
+    let env = chain();
+    for (metric, parent) in [("e", "f"), ("f", "e")] {
+        let params = format!(r#"{{"parents":[{{"connector":"sql:local","metric":"{parent}"}}]}}"#);
+        env.ok(&[
+            "register",
+            "pipes",
+            "-c",
+            "sql:local",
+            "-m",
+            metric,
+            "-t",
+            "loop",
+            "--params",
+            &params,
+        ]);
+    }
+    let out = env.ok(&["show", "graph", "-t", "loop"]);
+    assert!(out.contains("2 pipes, 2 edges"), "the real edges: {out}");
+    assert!(out.contains("cycle: sql:local/"), "{out}");
+    assert!(!out.contains("Not connected"), "{out}");
+    let json = env.ok(&["show", "graph", "-t", "loop", "--nopretty"]);
+    let graph: serde_json::Value = serde_json::from_str(json.trim()).unwrap();
+    assert_eq!(graph["edges"].as_array().unwrap().len(), 2, "{json}");
+    assert_eq!(graph["cycles"].as_array().unwrap().len(), 1, "{json}");
+    for node in graph["nodes"].as_array().unwrap() {
+        assert_eq!(node["parents"].as_array().unwrap().len(), 1, "{json}");
+    }
+    // A graph without a cycle reports none.
+    let json = env.ok(&["show", "graph", "-t", "demo", "--nopretty"]);
+    let graph: serde_json::Value = serde_json::from_str(json.trim()).unwrap();
+    assert!(graph["cycles"].as_array().unwrap().is_empty(), "{json}");
 }
 
 #[test]

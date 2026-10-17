@@ -6,7 +6,13 @@ license.workspace = true
 repository.workspace = true
 authors.workspace = true
 rust-version.workspace = true
-description = "Meerschaum v5: engine crate (see docs/design/v5.0.0.md)"
+description = "Internal crate of Meerschaum: the dependency-aware Syncing Engine (graph, planner, executor, dirty-range ledger)"
+readme = "README.md"
+homepage.workspace = true
+documentation = "https://docs.rs/meerschaum-engine"
+keywords = ["meerschaum", "etl", "pipelines", "scheduler", "dag"]
+categories = ["asynchronous", "database"]
+include = ["src/**/*", "/LICENSE", "/NOTICE"]
 
 [dependencies]
 meerschaum-core = { workspace = true }
@@ -29,7 +35,7 @@ fs4 = "0.13"
 [dev-dependencies]
 proptest = "1"
 # SQLite-backed end-to-end tests (dev-only: the engine runs against the connector traits).
-meerschaum-sql = { workspace = true }
+meerschaum-connector-sql = { workspace = true }
 # Lease and stream tests against a disposable Valkey (`MRSM_TEST_VALKEY_URI`).
-meerschaum-valkey = { workspace = true }
+meerschaum-connector-valkey = { workspace = true }
 tokio = { workspace = true, features = ["test-util"] }

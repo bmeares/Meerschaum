@@ -2665,24 +2665,18 @@ dependencies = [
 ]
 
 [[package]]
-name = "meerschaum-api"
+name = "meerschaum"
 version = "5.0.0-a1"
 dependencies = [
- "base64 0.22.1",
- "chrono",
- "futures-util",
- "indexmap",
  "meerschaum-connector",
+ "meerschaum-connector-api",
+ "meerschaum-connector-sql",
+ "meerschaum-connector-valkey",
  "meerschaum-core",
+ "meerschaum-engine",
  "meerschaum-kernel",
- "reqwest",
- "serde",
- "serde_json",
- "thiserror 2.0.21",
- "tokio",
- "tokio-tungstenite 0.28.0",
- "tracing",
- "uuid",
+ "meerschaum-plugin",
+ "meerschaum-server",
 ]
 
 [[package]]
@@ -2699,17 +2693,17 @@ dependencies = [
  "fs4",
  "hex",
  "indexmap",
- "meerschaum-api",
  "meerschaum-compose",
  "meerschaum-connector",
+ "meerschaum-connector-api",
+ "meerschaum-connector-sql",
+ "meerschaum-connector-valkey",
  "meerschaum-core",
  "meerschaum-engine",
  "meerschaum-jobs",
  "meerschaum-kernel",
  "meerschaum-plugin",
  "meerschaum-server",
- "meerschaum-sql",
- "meerschaum-valkey",
  "meerschaum-web",
  "meerschaum-worker",
  "nu-ansi-term",
@@ -2765,6 +2759,76 @@ dependencies = [
 ]
 
 [[package]]
+name = "meerschaum-connector-api"
+version = "5.0.0-a1"
+dependencies = [
+ "base64 0.22.1",
+ "chrono",
+ "futures-util",
+ "indexmap",
+ "meerschaum-connector",
+ "meerschaum-core",
+ "meerschaum-kernel",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "tokio",
+ "tokio-tungstenite 0.28.0",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "meerschaum-connector-sql"
+version = "5.0.0-a1"
+dependencies = [
+ "arrow",
+ "async-trait",
+ "chrono",
+ "duckdb",
+ "futures-util",
+ "hex",
+ "indexmap",
+ "libsqlite3-sys",
+ "meerschaum-connector",
+ "meerschaum-core",
+ "meerschaum-kernel",
+ "oracle",
+ "regex",
+ "rust_decimal",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "sqlx",
+ "thiserror 2.0.21",
+ "tiberius",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
+name = "meerschaum-connector-valkey"
+version = "5.0.0-a1"
+dependencies = [
+ "chrono",
+ "fred",
+ "indexmap",
+ "meerschaum-connector",
+ "meerschaum-connector-api",
+ "meerschaum-core",
+ "meerschaum-kernel",
+ "serde_json",
+ "thiserror 2.0.21",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "meerschaum-core"
 version = "5.0.0-a1"
 dependencies = [
@@ -2800,10 +2864,10 @@ dependencies = [
  "fs4",
  "indexmap",
  "meerschaum-connector",
+ "meerschaum-connector-sql",
+ "meerschaum-connector-valkey",
  "meerschaum-core",
  "meerschaum-kernel",
- "meerschaum-sql",
- "meerschaum-valkey",
  "meerschaum-worker",
  "proptest",
  "serde",
@@ -2880,16 +2944,16 @@ dependencies = [
  "arrow",
  "chrono",
  "indexmap",
- "meerschaum-api",
  "meerschaum-cli",
  "meerschaum-compose",
  "meerschaum-connector",
+ "meerschaum-connector-api",
+ "meerschaum-connector-sql",
+ "meerschaum-connector-valkey",
  "meerschaum-core",
  "meerschaum-engine",
  "meerschaum-jobs",
  "meerschaum-kernel",
- "meerschaum-sql",
- "meerschaum-valkey",
  "meerschaum-worker",
  "num-bigint",
  "polars",
@@ -2920,8 +2984,8 @@ dependencies = [
  "hyper",
  "hyper-util",
  "indexmap",
- "meerschaum-api",
  "meerschaum-connector",
+ "meerschaum-connector-api",
  "meerschaum-core",
  "meerschaum-kernel",
  "portable-pty",
@@ -2941,55 +3005,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "meerschaum-sql"
-version = "5.0.0-a1"
-dependencies = [
- "arrow",
- "async-trait",
- "chrono",
- "duckdb",
- "futures-util",
- "hex",
- "indexmap",
- "libsqlite3-sys",
- "meerschaum-connector",
- "meerschaum-core",
- "meerschaum-kernel",
- "oracle",
- "regex",
- "rust_decimal",
- "serde",
- "serde_json",
- "sha2 0.11.0",
- "sqlx",
- "thiserror 2.0.21",
- "tiberius",
- "tokio",
- "tokio-util",
- "tracing",
- "tracing-subscriber",
- "uuid",
-]
-
-[[package]]
-name = "meerschaum-valkey"
-version = "5.0.0-a1"
-dependencies = [
- "chrono",
- "fred",
- "indexmap",
- "meerschaum-api",
- "meerschaum-connector",
- "meerschaum-core",
- "meerschaum-kernel",
- "serde_json",
- "thiserror 2.0.21",
- "tokio",
- "tracing",
- "uuid",
-]
-
-[[package]]
 name = "meerschaum-web"
 version = "5.0.0-a1"
 dependencies = [
@@ -3001,12 +3016,12 @@ dependencies = [
  "futures-util",
  "indexmap",
  "meerschaum-connector",
+ "meerschaum-connector-sql",
+ "meerschaum-connector-valkey",
  "meerschaum-core",
  "meerschaum-engine",
  "meerschaum-kernel",
  "meerschaum-server",
- "meerschaum-sql",
- "meerschaum-valkey",
  "percent-encoding",
  "serde",
  "serde_json",
@@ -3025,9 +3040,9 @@ dependencies = [
  "hex",
  "indexmap",
  "meerschaum-connector",
+ "meerschaum-connector-sql",
  "meerschaum-core",
  "meerschaum-kernel",
- "meerschaum-sql",
  "rmpv",
  "serde",
  "serde_json",

@@ -14,12 +14,12 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
-use meerschaum_core::{Pipe, Value};
-use meerschaum_sql::{
+use meerschaum_connector_sql::{
     SqlConnector,
     flavor::Flavor,
     uri::{ConnectionSpec, ConnectorAttributes},
 };
+use meerschaum_core::{Pipe, Value};
 
 /// A listener that counts connection attempts (and closes them at once).
 struct Tripwire {

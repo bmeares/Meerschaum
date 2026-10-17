@@ -208,6 +208,15 @@ pub fn plugin_import_end() {
     }
 }
 
+static SPAWN_HOOK: std::sync::OnceLock<fn()> = std::sync::OnceLock::new();
+
+/// Register a function that runs just before every non-quiet worker starts (once per process;
+/// later calls are ignored). A worker's output goes straight to the inherited terminal, so the
+/// CLI uses this to stop its spinner from redrawing over it.
+pub fn set_spawn_hook(hook: fn()) {
+    let _ = SPAWN_HOOK.set(hook);
+}
+
 /// Whether starting a worker is refused: in a worker's own interpreter, while a plugin is being
 /// imported. A plugin whose import syncs a `plugin:` pipe (or calls `mrsm.entry()`) would
 /// otherwise start workers without end, each importing the plugin again. Nothing else is
@@ -227,6 +236,11 @@ impl Worker {
                  import syncs a plugin pipe or calls `mrsm.entry()` would recurse)"
                     .into(),
             ));
+        }
+        if !opts.quiet
+            && let Some(hook) = SPAWN_HOOK.get()
+        {
+            hook();
         }
         let listener = Listener::bind(opts.socket_dir.as_deref())?;
         let mut cmd = Command::new(&opts.python);

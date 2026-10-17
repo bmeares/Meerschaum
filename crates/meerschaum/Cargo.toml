@@ -1,0 +1,53 @@
+[package]
+name = "meerschaum"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "Meerschaum: sync pipes of data between databases, APIs and files (the stable Rust API; the `mrsm` CLI is the `meerschaum-cli` crate)"
+readme = "README.md"
+homepage.workspace = true
+documentation = "https://docs.rs/meerschaum"
+keywords = ["meerschaum", "etl", "pipelines", "sync", "timeseries"]
+categories = ["database", "data-structures"]
+include = ["src/**/*", "/LICENSE", "/NOTICE"]
+
+[package.metadata.docs.rs]
+# docs.rs builds with `full` so the feature-gated items are documented (not `duckdb` / `oracle`: the DuckDB
+# bundle is slow to compile and neither belongs in the front crate's documentation).
+features = ["full"]
+
+[features]
+# The SQL connector is what most programs want; everything else is opt-in (the Polars model:
+# one crate to depend on, features choose what is compiled).
+default = ["sql"]
+# `SqlConnector` (PostgreSQL, MySQL, SQLite, MSSQL families).
+sql = ["dep:meerschaum-connector-sql"]
+# DuckDB (bundled C++ library, slow to compile) and Oracle (needs Instant Client at runtime) flavors.
+duckdb = ["sql", "meerschaum-connector-sql?/duckdb"]
+oracle = ["sql", "meerschaum-connector-sql?/oracle"]
+# `ValkeyConnector` (Redis-compatible instances).
+valkey = ["dep:meerschaum-connector-valkey"]
+# `APIConnector`, the client of a Meerschaum API server, and the shared route/auth models.
+api = ["dep:meerschaum-connector-api"]
+# The dependency-aware Syncing Engine (`Pipeline`, `Plan`, `Engine`).
+engine = ["dep:meerschaum-engine"]
+# The `axum` HTTP API server.
+server = ["api", "dep:meerschaum-server"]
+# The native (Rust) plugin SDK.
+plugin = ["dep:meerschaum-plugin"]
+# Everything above except the opt-in `duckdb` / `oracle` flavors.
+full = ["sql", "valkey", "api", "engine", "server", "plugin"]
+
+[dependencies]
+meerschaum-core = { workspace = true }
+meerschaum-kernel = { workspace = true }
+meerschaum-connector = { workspace = true }
+meerschaum-connector-sql = { workspace = true, optional = true }
+meerschaum-connector-valkey = { workspace = true, optional = true }
+meerschaum-connector-api = { workspace = true, features = ["client"], optional = true }
+meerschaum-engine = { workspace = true, optional = true }
+meerschaum-server = { workspace = true, optional = true }
+meerschaum-plugin = { workspace = true, optional = true }

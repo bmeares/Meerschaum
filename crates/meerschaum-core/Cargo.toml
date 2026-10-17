@@ -6,7 +6,13 @@ license.workspace = true
 repository.workspace = true
 authors.workspace = true
 rust-version.workspace = true
-description = "Meerschaum v5: core crate (see docs/design/v5.0.0.md)"
+description = "Internal crate of Meerschaum: pipes, parameters, the config registry, the dtype vocabulary and Python-compatible helpers"
+readme = "README.md"
+homepage.workspace = true
+documentation = "https://docs.rs/meerschaum-core"
+keywords = ["meerschaum", "etl", "pipelines", "config", "timeseries"]
+categories = ["data-structures", "config"]
+include = ["src/**/*", "static.toml", "/LICENSE", "/NOTICE"]
 
 [dependencies]
 indexmap = { workspace = true }

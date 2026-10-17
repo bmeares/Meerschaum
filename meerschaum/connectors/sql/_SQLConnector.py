@@ -15,7 +15,7 @@ from meerschaum.utils.typing import Optional, Any, Union
 from meerschaum.connectors import InstanceConnector
 from meerschaum.utils.warnings import error, warn
 
-#: Flavors with a Rust driver (`meerschaum-sql`).
+#: Flavors with a Rust driver (`meerschaum-connector-sql`).
 _RUST_FLAVORS = {
     'postgresql', 'postgis', 'timescaledb', 'timescaledb-ha', 'citus', 'cockroachdb',
     'mysql', 'mariadb', 'sqlite', 'geopackage', 'mssql', 'oracle', 'duckdb',
@@ -499,7 +499,7 @@ class SQLConnector(InstanceConnector):
     def _core_connector(self):
         """
         Return the `meerschaum._core.SqlConnector` behind this connector (built once per process,
-        see `crates/meerschaum-sql`), which implements every pipe, user and plugin method.
+        see `crates/meerschaum-connector-sql`), which implements every pipe, user and plugin method.
 
         Every flavor has a Rust driver (`mssql`, `oracle` and `duckdb` are compiled into the
         wheels). An in-memory SQLite database (`sql:memory`) is one database file that the Rust

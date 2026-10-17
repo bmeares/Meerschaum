@@ -1,8 +1,8 @@
 //! The `Connector` and `InstanceConnector` traits (port of `meerschaum/connectors/_Connector.py`
 //! and `meerschaum/connectors/instance/_InstanceConnector.py`).
 //!
-//! These traits are shared by every instance connector (`meerschaum-sql`, `meerschaum-valkey`,
-//! the `APIConnector` in `meerschaum-api`), the engine and the server. They need
+//! These traits are shared by every instance connector (`meerschaum-connector-sql`, `meerschaum-connector-valkey`,
+//! the `APIConnector` in `meerschaum-connector-api`), the engine and the server. They need
 //! `meerschaum-core` (keys, parameters, users, tokens, `SuccessTuple`) and `meerschaum-kernel`
 //! (`Frame`).
 //!

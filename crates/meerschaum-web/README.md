@@ -1,5 +1,9 @@
 # meerschaum-web
 
+> **Internal crate.** `meerschaum-web` is an implementation detail of [Meerschaum](https://meerschaum.io)
+> and may change in any minor release. Depend on the [`meerschaum`](https://crates.io/crates/meerschaum)
+> crate instead.
+
 The server-rendered `/dash` console (design §8). Askama renders the chrome; ordinary GET/POST
 forms work without JavaScript. HTMX updates pipe filters. Plotly figure JSON, MapLibre map
 specifications, sortable tables, and Cytoscape run nodes render on load and after HTMX swaps.

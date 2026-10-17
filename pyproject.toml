@@ -1,7 +1,7 @@
 # Meerschaum 5: a maturin *mixed* project (docs/design/v5.0.0.md D9, §12).
 #
 # One wheel per platform: the `meerschaum` Python package (the root `meerschaum/` directory) plus
-# the PyO3 extension `meerschaum._core._core` (crates/meerschaum-py) as a `cp311-abi3` module.
+# the PyO3 extension `meerschaum._core._native` (crates/meerschaum-py) as a `cp311-abi3` module.
 # The `mrsm` binary ships in the separate `meerschaum-cli` wheel (crates/meerschaum-cli/pyproject.toml,
 # D8), which `meerschaum` depends on. The base wheel depends on nothing else (D20, §12.1); data,
 # SQL, GIS, API and Dash libraries are extras.
@@ -14,7 +14,7 @@
 # with `--wheels DIST` checks the built wheels and the binary's `--version` (see that script).
 #
 # In-tree development builds do not use this file's build: `scripts/rust/build_py.sh` drops
-# `meerschaum/_core/_core.abi3.so` into the working tree (crates/meerschaum-py/pyproject.toml).
+# `meerschaum/_core/_native.abi3.so` into the working tree (crates/meerschaum-py/pyproject.toml).
 
 [build-system]
 requires = ["maturin>=1.9,<2.0"]
@@ -89,7 +89,7 @@ meerschaum = "meerschaum.__main__:main"
 bindings = "pyo3"
 strip = true
 manifest-path = "crates/meerschaum-py/Cargo.toml"
-module-name = "meerschaum._core._core"
+module-name = "meerschaum._core._native"
 python-source = "."
 python-packages = ["meerschaum"]
 # `extension-module` is a crate feature (not a default) so `cargo test` can link libpython;
@@ -98,6 +98,8 @@ features = ["pyo3/abi3-py311", "extension-module", "polars", "duckdb", "oracle"]
 exclude = [
     "**/__pycache__/**",
     "**/*.pyc",
+    "meerschaum/_core/_native*.so",
+    "meerschaum/_core/_native*.pyd",
     "meerschaum/_core/_core*.so",
     "meerschaum/_core/_core*.pyd",
 ]

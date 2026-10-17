@@ -6,10 +6,10 @@ mod common;
 use std::sync::Arc;
 
 use meerschaum_connector::{DataQuery, DateBound, InstanceConnector, PipesKeysQuery, SyncOptions};
+use meerschaum_connector_sql::SqlConnector;
 use meerschaum_core::{Pipe, Value as CValue};
 use meerschaum_kernel::docs::frame_from_docs;
 use meerschaum_kernel::value::{Value as KValue, parse_datetime_value};
-use meerschaum_sql::SqlConnector;
 use meerschaum_worker::PythonConnector;
 use meerschaum_worker::sync::{PythonSyncOptions, sync_python_pipe};
 

@@ -11,10 +11,10 @@ use std::time::Duration;
 
 use meerschaum_connector::pipe_ops::frame_to_docs;
 use meerschaum_connector::{DataQuery, InstanceConnector};
+use meerschaum_connector_sql::{Flavor, SqlConnector};
 use meerschaum_core::{Map, Pipe, Value};
 use meerschaum_engine::{Engine, EngineConfig, PipeRef, StaticRegistry};
 use meerschaum_kernel::value::Value as KValue;
-use meerschaum_sql::{Flavor, SqlConnector};
 
 /// The instance (and source) keys used by every test.
 pub const INSTANCE: &str = "sql:eng";
@@ -69,7 +69,7 @@ pub fn registry(conn: &Arc<SqlConnector>) -> Arc<StaticRegistry> {
             .with_source(INSTANCE, source)
             .with_table_reference(|pipe: &Pipe| {
                 let target = pipe.target(None).map_err(|e| e.to_string())?;
-                Ok(meerschaum_sql::ident::sql_item_name(
+                Ok(meerschaum_connector_sql::ident::sql_item_name(
                     &target,
                     Flavor::Sqlite,
                     None,

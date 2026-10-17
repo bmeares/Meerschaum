@@ -488,14 +488,15 @@ pub fn sync_pipe<'py>(
 ) -> PyResult<Bound<'py, PyDict>> {
     let out = PyDict::new(py);
     let _debug = DebugGuard::new(debug);
-    let rust_connector = |obj: &Bound<'py, PyAny>| -> PyResult<Arc<meerschaum_sql::SqlConnector>> {
-        Ok(obj
-            .downcast::<PySqlConnector>()
-            .map_err(|_| PyValueError::new_err("Expected a `_core.SqlConnector`."))?
-            .get()
-            .inner
-            .clone())
-    };
+    let rust_connector =
+        |obj: &Bound<'py, PyAny>| -> PyResult<Arc<meerschaum_connector_sql::SqlConnector>> {
+            Ok(obj
+                .downcast::<PySqlConnector>()
+                .map_err(|_| PyValueError::new_err("Expected a `_core.SqlConnector`."))?
+                .get()
+                .inner
+                .clone())
+        };
     let input = if infer {
         None
     } else {
@@ -538,7 +539,7 @@ pub fn sync_pipe<'py>(
     let instance_keys = core.instance_keys().to_string();
     let raw_before = core.raw_parameters().clone();
 
-    let mut sql: Vec<(String, Arc<meerschaum_sql::SqlConnector>)> = Vec::new();
+    let mut sql: Vec<(String, Arc<meerschaum_connector_sql::SqlConnector>)> = Vec::new();
     let home_sql = match connector.filter(|c| !c.is_none()) {
         Some(c) => {
             let conn = rust_connector(c)?;
@@ -709,13 +710,13 @@ fn failed_sync<'py>(
 /// parameters. A malformed URI raises `ValueError`.
 #[pyfunction]
 pub fn parse_sql_uri<'py>(py: Python<'py>, uri: &str) -> PyResult<Bound<'py, PyDict>> {
-    let params =
-        meerschaum_sql::uri::parse_uri(uri).map_err(|e| PyValueError::new_err(e.to_string()))?;
+    let params = meerschaum_connector_sql::uri::parse_uri(uri)
+        .map_err(|e| PyValueError::new_err(e.to_string()))?;
     let out = PyDict::new(py);
     for (key, value) in params {
         match value {
-            meerschaum_sql::uri::UriValue::Str(s) => out.set_item(key, s)?,
-            meerschaum_sql::uri::UriValue::Int(i) => out.set_item(key, i)?,
+            meerschaum_connector_sql::uri::UriValue::Str(s) => out.set_item(key, s)?,
+            meerschaum_connector_sql::uri::UriValue::Int(i) => out.set_item(key, i)?,
         }
     }
     Ok(out)

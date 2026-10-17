@@ -339,7 +339,12 @@ pub fn sync_pipes_with(args: &ArgsMap, rt: &mut Runtime<'_>, method: LapMethod) 
         let (inst, pipes) = super::pipes::selected_pipes(rt, args)?;
         let engine_results = if method == LapMethod::Sync {
             let traversal = flag(args, "parents") || flag(args, "children");
-            let engine = engine::build(rt, &session, &inst, &pipes, !traversal, false, None)?;
+            // The graph build reads every registration: cover the silence before the first line.
+            let progress =
+                crate::format::progress::Progress::start(rt, args, "Building the sync graph");
+            let engine = engine::build(rt, &session, &inst, &pipes, !traversal, false, None);
+            drop(progress);
+            let engine = engine?;
             let opts = run_options(args, &inst, &pipes, &sync_args);
             let graph_run = traversal || args.contains_key("resume");
             let result = if graph_run && !nopretty && rt.live {

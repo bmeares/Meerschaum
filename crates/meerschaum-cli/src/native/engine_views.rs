@@ -14,6 +14,8 @@ use meerschaum_engine::{Action, EngineReader, NodeStatus, PipeRef, RunFilter, Ru
 
 use crate::builtin::{ActionError, ActionResult};
 use crate::dispatch::Runtime;
+use crate::format::graph::{GraphModel, GraphOptions, GraphTheme};
+use crate::format::progress::Progress;
 use crate::value::ArgsMap;
 
 use super::pipes::selected_pipes;
@@ -28,17 +30,21 @@ fn json(rt: &mut Runtime<'_>, value: &serde_json::Value) {
 pub fn plan_pipes(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     let nopretty = flag(args, "nopretty");
     let session = session(rt);
+    let progress = Progress::start(rt, args, "Selecting pipes");
     let (inst, pipes) = selected_pipes(rt, args)?;
     if pipes.is_empty() && !args.contains_key("resume") {
         return Ok(SuccessTuple::fail("No pipes selected."));
     }
+    progress.set_message(format!("Reading {} pipe registrations", pipes.len()));
     let engine = engine::build(rt, &session, &inst, &pipes, true, false, None)?;
     let sync_args = SyncArgs::from_args(args);
     let opts = run_options(args, &inst, &pipes, &sync_args);
+    progress.set_message("Planning the run");
     let planned = match session.block_on(engine.plan(&opts)) {
         Ok(planned) => planned,
         Err(error) => return Ok(SuccessTuple::fail(error)),
     };
+    drop(progress);
     if nopretty {
         match serde_json::to_value(&planned.plan) {
             Ok(value) => json(rt, &value),
@@ -76,18 +82,23 @@ pub fn plan_pipes(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
 pub fn show_graph(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     let nopretty = flag(args, "nopretty");
     let session = session(rt);
+    let progress = Progress::start(rt, args, "Selecting pipes");
     let (inst, pipes) = selected_pipes(rt, args)?;
     if pipes.is_empty() {
         return Ok(SuccessTuple::fail("No pipes selected."));
     }
+    progress.set_message(format!("Reading {} pipe registrations", pipes.len()));
     let engine = engine::build(rt, &session, &inst, &pipes, true, false, None)?;
     let sync_args = SyncArgs::from_args(args);
     let opts = run_options(args, &inst, &pipes, &sync_args);
+    progress.set_message("Resolving the pipe graph");
     let (_graph, sub, _selection) = match session.block_on(engine.resolve(&opts)) {
         Ok(resolved) => resolved,
         Err(error) => return Ok(SuccessTuple::fail(error)),
     };
+    drop(progress);
     if nopretty {
+        // The real edges, cycles included (a cycle makes the planner's `sub.edges` empty).
         let nodes: Vec<serde_json::Value> = sub
             .order
             .iter()
@@ -96,17 +107,26 @@ pub fn show_graph(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
                     "pipe_ref": r,
                     "label": r.label(),
                     "target": sub.targets.contains(r),
-                    "parents": sub.parent_edges(r).map(|e| &e.parent).collect::<Vec<_>>(),
+                    "parents": sub
+                        .display_edges()
+                        .iter()
+                        .filter(|e| &e.child == r)
+                        .map(|e| &e.parent)
+                        .collect::<Vec<_>>(),
                 })
             })
             .collect();
-        let edges: Vec<(&PipeRef, &PipeRef)> =
-            sub.edges.iter().map(|e| (&e.parent, &e.child)).collect();
+        let edges: Vec<(&PipeRef, &PipeRef)> = sub
+            .display_edges()
+            .iter()
+            .map(|e| (&e.parent, &e.child))
+            .collect();
         json(
             rt,
             &serde_json::json!({
                 "nodes": nodes,
                 "edges": edges,
+                "cycles": sub.cycles,
                 "warnings": sub.warnings,
             }),
         );
@@ -115,7 +135,28 @@ pub fn show_graph(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     for warning in &sub.warnings {
         warn(rt, warning);
     }
-    rt.print(&viz::render_graph(&sub));
+    // `--full` (or `--debug`) lists every child instead of collapsing wide fan-outs.
+    let full = flag(args, "full") || flag(args, "debug");
+    let instance = inst.keys().to_string();
+    // Colors only on a terminal (`rt.live`: stdout is a TTY) and when `formatting:ansi` allows.
+    let color = rt.live;
+    let text = rt.with_formatter(|f| {
+        crate::format::graph::render(
+            &GraphModel::from_subgraph(&sub),
+            &if color {
+                GraphTheme::from_formatter(f)
+            } else {
+                GraphTheme::plain()
+            },
+            &GraphOptions {
+                unicode: f.settings.unicode,
+                width: f.settings.width,
+                full,
+                default_instance: instance,
+            },
+        )
+    });
+    rt.print(&text);
     Ok(SuccessTuple::success())
 }
 
@@ -160,10 +201,14 @@ fn reader(
 /// `show runs` (the run history) or `show run <id>` (one run's Gantt chart).
 pub fn show_runs(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     let nopretty = flag(args, "nopretty");
+    let progress = Progress::start(rt, args, "Reading the run history");
     let (_inst, session, reader) = reader(rt, args)?;
     let ids = words(args, "action");
     if let Some(run_id) = ids.iter().find(|w| !w.is_empty()) {
-        return show_run(rt, &session, &reader, run_id, nopretty);
+        progress.set_message(format!("Reading run {run_id}"));
+        let result = show_run(rt, &session, &reader, run_id, nopretty);
+        drop(progress);
+        return result;
     }
     let filter = RunFilter {
         limit: Some(
@@ -173,7 +218,9 @@ pub fn show_runs(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
         ),
         ..Default::default()
     };
-    let runs = match session.block_on(reader.runs(&filter)) {
+    let runs = session.block_on(reader.runs(&filter));
+    drop(progress);
+    let runs = match runs {
         Ok(runs) => runs,
         Err(error) => {
             return Ok(SuccessTuple::fail(format!(

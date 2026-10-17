@@ -73,7 +73,10 @@ pub fn routes(app: Router<AppState>, _cfg: &ServerConfig) -> Router<AppState> {
         .route(&format!("{p}/vacuum"), post(vacuum_pipe))
         .route(&format!("{p}/analyze"), post(analyze_pipe))
         .route(&format!("{p}/partition"), post(partition_pipe))
-        .route(meerschaum_api::routes::METADATA, post(create_metadata))
+        .route(
+            meerschaum_connector_api::routes::METADATA,
+            post(create_metadata),
+        )
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -179,7 +182,7 @@ fn target(pipe: &Pipe) -> String {
 
 fn refuse_protected(pipe: &Pipe, verb: &str) -> Result<(), ApiError> {
     let t = target(pipe);
-    if meerschaum_api::routes::PROTECTED_TARGETS.contains(&t.as_str()) {
+    if meerschaum_connector_api::routes::PROTECTED_TARGETS.contains(&t.as_str()) {
         return Err(ApiError::new(
             409,
             format!("Cannot {verb} protected table '{t}'."),
@@ -635,7 +638,7 @@ async fn sync_pipe(ctx: Ctx, Path((ck, mk, lk)): Keys3, body: Body) -> ApiResult
     };
     let (conn, h) = handle(&ctx, &ck, &mk, &lk, true).await?;
     let t = target(&h.pipe);
-    if meerschaum_api::routes::PROTECTED_TARGETS.contains(&t.as_str()) {
+    if meerschaum_connector_api::routes::PROTECTED_TARGETS.contains(&t.as_str()) {
         return Err(ApiError::new(
             409,
             format!("Cannot sync data to protected table '{t}'."),
@@ -808,7 +811,7 @@ fn doc_value(v: &meerschaum_kernel::Value) -> Value {
 
 fn refuse_protected_read(pipe: &Pipe) -> Result<(), ApiError> {
     let t = target(pipe);
-    if meerschaum_api::routes::PROTECTED_TARGETS.contains(&t.as_str()) {
+    if meerschaum_connector_api::routes::PROTECTED_TARGETS.contains(&t.as_str()) {
         return Err(ApiError::new(
             409,
             format!("Cannot retrieve data from protected table '{t}'."),

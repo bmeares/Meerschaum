@@ -1,5 +1,5 @@
 //! The host side of the `api:<label>` job executor: [`RemoteJobsResolver`] over
-//! `meerschaum_api::APIConnector`.
+//! `meerschaum_connector_api::APIConnector`.
 //!
 //! `meerschaum-jobs` owns the trait boundary (`crates/README.md`, "Executor / client injection");
 //! this module implements it for the CLI. The [`Session`]'s Tokio runtime is the one the
@@ -14,8 +14,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use indexmap::IndexMap;
-use meerschaum_api::APIConnector;
-use meerschaum_api::client::LogsMonitor;
+use meerschaum_connector_api::APIConnector;
+use meerschaum_connector_api::client::LogsMonitor;
 use meerschaum_core::SuccessTuple;
 use meerschaum_core::value::{Map, Value, apply_patch_maps};
 use meerschaum_jobs::remote::{RemoteJobs, RemoteJobsResolver, RemoteLogSink, RemoteMonitor};

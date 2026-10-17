@@ -311,7 +311,8 @@ pub fn v5_additions(function: &str) -> Option<&'static str> {
         "show" => {
             r##"    - `show graph`
         - Print the selected pipes and their dependencies as a DAG
-          (accepts `--parents` and `--children`).
+          (accepts `--parents` and `--children`; `--full` lists every child of a
+          wide fan-out instead of collapsing it).
     - `show runs [--last N]`
         - List the recorded engine runs, newest first.
     - `show run RUN_ID`

@@ -249,6 +249,14 @@ pub struct Subgraph {
     pub flat: bool,
     /// Graph warnings about selected nodes, plus selection warnings.
     pub warnings: Vec<String>,
+    /// Cycles among the selected nodes (disjoint paths, the first node repeated at the end).
+    /// Only a flat selection can carry one: any other selection fails to resolve. The planner
+    /// never sees the edges of a cycle (see [`Subgraph::raw_edges`]).
+    pub cycles: Vec<Vec<PipeRef>>,
+    /// The edges between the selected nodes when a cycle made [`Subgraph::edges`] empty (the
+    /// planner's registration-order fallback). Empty otherwise; read through
+    /// [`Subgraph::display_edges`].
+    pub raw_edges: Vec<Edge>,
     parents: HashMap<PipeRef, Vec<usize>>,
     children: HashMap<PipeRef, Vec<usize>>,
 }
@@ -272,6 +280,16 @@ impl Subgraph {
         }
         sub.order = order;
         sub
+    }
+
+    /// The edges to draw: every edge between the selected nodes, cycles included. This is
+    /// [`Subgraph::edges`] unless a cycle made the planner drop them.
+    pub fn display_edges(&self) -> &[Edge] {
+        if self.raw_edges.is_empty() {
+            &self.edges
+        } else {
+            &self.raw_edges
+        }
     }
 
     /// Whether a node is selected.
@@ -412,6 +430,14 @@ impl Pipeline {
         if flat {
             // Flat selections never order on a cycle: drop edges so the order above holds.
             if graph.find_cycle(&selected).is_some() {
+                let mut remaining = selected.clone();
+                while let Some(path) = graph.find_cycle(&remaining) {
+                    for node in &path {
+                        remaining.remove(node);
+                    }
+                    sub.cycles.push(path);
+                }
+                sub.raw_edges = std::mem::take(&mut sub.edges);
                 sub.edges.clear();
                 sub.parents.clear();
                 sub.children.clear();
@@ -462,6 +488,34 @@ mod tests {
             ],
             &GraphOptions::default(),
         )
+    }
+
+    #[test]
+    fn a_flat_cycle_keeps_its_edges_for_display_only() {
+        let g = Graph::build(
+            [
+                rec("e", &["f"], &[]),
+                rec("f", &["e"], &[]),
+                rec("z", &[], &[]),
+            ],
+            &GraphOptions::default(),
+        );
+        let sub = Pipeline::new(Selection::refs([r("e"), r("f"), r("z")]))
+            .resolve(&g)
+            .unwrap();
+        // The planner's view is unchanged: no edges, registration order.
+        assert!(sub.edges.is_empty());
+        assert_eq!(sub.parent_edges(&r("e")).count(), 0);
+        // The display view has the real edges and names the cycle.
+        assert_eq!(sub.display_edges().len(), 2);
+        assert_eq!(sub.cycles.len(), 1);
+        assert_eq!(sub.cycles[0].first(), sub.cycles[0].last());
+        assert_eq!(sub.cycles[0].len(), 3);
+        // Without a cycle both views agree and there is nothing to report.
+        let sub = Pipeline::new(Selection::refs([r("z")]))
+            .resolve(&g)
+            .unwrap();
+        assert!(sub.cycles.is_empty() && sub.raw_edges.is_empty());
     }
 
     #[test]

@@ -27,15 +27,23 @@ Each node has two lanes on one time axis (which spans the longer of the run's wa
 
 The header adds the planned makespan (`planned 1m15s`) next to the actual wall time. A first run has no history, so every planned bar is 30 seconds long. For a run read back from the instance (`show run <id>`, the console), the planned duration is recomputed from the history before that run (the run's own rows store the planned start and slack, not the duration).
 
-The engine also renders a selection as an indented DAG, each node under its deepest parent, targets marked with `*`:
+`mrsm show graph` draws a selection as a top-down tree (a pipe with several parents is drawn once, under the first parent the walk reaches, and referred to elsewhere):
 
 ```text
-sql:src/raw
-  sql:local/clean  ← sql:src/raw
-    sql:local/daily*  ← sql:local/clean
+Pipe graph on sql:local: 4 pipes, 4 edges, 1 root, depth 3
+
+● sql:local/a
+├── ◆ sql:local/b
+│   └── ○ sql:local/d  (2 parents)
+└── ◆ sql:local/c
+    └── ↗ sql:local/d (shown above)
+
+● root   ◆ has children   ○ leaf   ↗ shown above
 ```
 
-`mrsm show graph` prints the DAG of a selection (it accepts the usual filters plus `--parents` and `--children`), and `mrsm show runs [--last N]` lists the recorded runs, newest first:
+Pipes use the colors `Pipe(...)` has in `show pipes` (connector, metric, location, instance); the guides and notes are dim. `★` marks the pipes you selected, `┄┄` in place of `──` an edge that exists only because of a `{{ Pipe() }}` reference, and `lookback`, `lookahead` and `axis` of an edge follow the pipe. A cycle (flat selections only; a `--parents` / `--children` selection that contains one fails with the cycle path) is drawn with its real edges, its members marked `⟲`, and a `⟲ cycle: a → b → a` note; the JSON gains a `cycles` key. Unconnected pipes are listed together at the end, and a pipe with more than 12 children collapses to `… and N more children` (`--full` lists them all; the line says how many hidden children have descendants of their own). Lines are cut to the terminal width, `formatting:unicode: false` gives an ASCII tree, and colors appear only on a terminal.
+
+`show graph` accepts the usual filters plus `--parents` and `--children`. `mrsm show runs [--last N]` lists the recorded runs, newest first:
 
 ```text
 run                         started (UTC)        status     wall  ok/nodes  targets

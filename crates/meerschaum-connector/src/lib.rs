@@ -1,3 +1,6 @@
+//! **Internal crate** of [Meerschaum](https://meerschaum.io): its API may change in any minor
+//! release. Depend on the [`meerschaum`](https://docs.rs/meerschaum) crate instead.
+//!
 //! `meerschaum-connector`: the `Connector` / `InstanceConnector` traits (port of
 //! `meerschaum/connectors/_Connector.py` and `instance/_InstanceConnector.py`) and the pipe-level
 //! helpers their default implementations need.
@@ -10,8 +13,8 @@
 //! - [`models`]: the stored token model (`TokenModel`).
 //!
 //! Layering: depends on `meerschaum-core` (keys, parameters, users, tokens, `SuccessTuple`) and
-//! `meerschaum-kernel` (`Frame`); every instance connector crate (`meerschaum-sql`,
-//! `meerschaum-valkey`, `meerschaum-api`), the engine and the server depend on this crate.
+//! `meerschaum-kernel` (`Frame`); every instance connector crate (`meerschaum-connector-sql`,
+//! `meerschaum-connector-valkey`, `meerschaum-connector-api`), the engine and the server depend on this crate.
 #![deny(unsafe_code)]
 
 pub mod models;

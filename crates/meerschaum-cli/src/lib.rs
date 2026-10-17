@@ -1,3 +1,6 @@
+//! **Internal library** of the `mrsm` binary: its API may change in any minor release. Depend on the
+//! [`meerschaum`](https://docs.rs/meerschaum) crate for the Rust API.
+//!
 //! `meerschaum-cli`: the `mrsm` binary's argument parser and dispatch (Meerschaum v5).
 //!
 //! See `docs/design/v5.0.0.md` §4.3. The argument surface is ported from v4's

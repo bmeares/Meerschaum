@@ -20,12 +20,12 @@ use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
 use meerschaum_connector::DataQuery;
-use meerschaum_core::{Pipe, Value};
-use meerschaum_sql::{
+use meerschaum_connector_sql::{
     SqlConnector,
     flavor::Flavor,
     uri::{ConnectionSpec, ConnectorAttributes},
 };
+use meerschaum_core::{Pipe, Value};
 
 const MESSAGES: usize = 6;
 

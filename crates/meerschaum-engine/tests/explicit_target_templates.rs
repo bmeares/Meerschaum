@@ -146,9 +146,9 @@ async fn reference_to_a_pipe_on_another_instance_renders_its_registered_target()
             .with_instance("sql:other", other_instance)
             .with_table_reference(|pipe: &Pipe| {
                 let target = pipe.target(None).map_err(|e| e.to_string())?;
-                Ok(meerschaum_sql::ident::sql_item_name(
+                Ok(meerschaum_connector_sql::ident::sql_item_name(
                     &target,
-                    meerschaum_sql::Flavor::Sqlite,
+                    meerschaum_connector_sql::Flavor::Sqlite,
                     None,
                 ))
             }),

@@ -2,12 +2,12 @@
 //! geometry_format)` (`GET .../data`), `df.to_csv(index=False)` (`GET .../csv`), documents
 //! (`GET .../docs`) and `json_serialize_value` bounds.
 //!
-//! Cells go through `meerschaum_api::wire::to_json_value` (the pandas `to_json` port) except
+//! Cells go through `meerschaum_connector_api::wire::to_json_value` (the pandas `to_json` port) except
 //! native datetime columns, which pandas renders itself: ISO 8601 with the `date_unit`'s
 //! fractional digits and a `Z` suffix for tz-aware columns, or epoch integers in `date_unit`.
 
-use meerschaum_api::wire::{ToJsonOptions, to_json_value, ujson_string};
 use meerschaum_connector::DateBound;
+use meerschaum_connector_api::wire::{ToJsonOptions, to_json_value, ujson_string};
 use meerschaum_kernel::Frame;
 use meerschaum_kernel::frame::ColumnData;
 use meerschaum_kernel::serialize::GeometryFormat;

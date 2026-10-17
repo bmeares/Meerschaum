@@ -266,6 +266,9 @@ pub struct Runtime<'a> {
     /// Stdout is a terminal: graph runs print live progress lines before the Gantt chart. Only
     /// the process runtime sets it, so tests and piped output never see progress lines.
     pub live: bool,
+    /// Where waiting feedback (spinners, [`crate::format::progress`]) is drawn. Only the process
+    /// runtime turns it on (stderr is a terminal); tests and piped output never see it.
+    pub progress: crate::format::progress::ProgressSink,
 }
 
 fn no_vars() -> Vec<(String, String)> {
@@ -295,6 +298,7 @@ impl<'a> Runtime<'a> {
             in_shell: false,
             native: None,
             live: std::io::IsTerminal::is_terminal(&std::io::stdout()),
+            progress: crate::format::progress::ProgressSink::stderr_if_tty(),
         }
     }
 
@@ -320,6 +324,7 @@ impl<'a> Runtime<'a> {
             in_shell: false,
             native: None,
             live: false,
+            progress: crate::format::progress::ProgressSink::Off,
         }
     }
 
@@ -377,16 +382,20 @@ impl<'a> Runtime<'a> {
 
     /// Write to stdout.
     pub fn print(&mut self, text: &str) {
+        crate::format::progress::suspend();
         crate::native::api_warnings::flush(self);
         let _ = self.out.write_all(text.as_bytes());
         let _ = self.out.flush();
+        crate::format::progress::resume(text.is_empty() || text.ends_with('\n'));
     }
 
     /// Write to stderr.
     pub fn eprint(&mut self, text: &str) {
+        crate::format::progress::suspend();
         crate::native::api_warnings::flush(self);
         let _ = self.err.write_all(text.as_bytes());
         let _ = self.err.flush();
+        crate::format::progress::resume(text.is_empty() || text.ends_with('\n'));
     }
 }
 
@@ -396,7 +405,15 @@ fn contains(sysargs: &[String], flag: &str) -> bool {
 
 /// `meerschaum.__main__.main`: returns the process exit code.
 pub fn main(sysargs: &[String], rt: &mut Runtime<'_>) -> i32 {
-    if let Err(e) = crate::python::manifest(rt) {
+    let progress = crate::format::progress::Progress::start_flags(
+        rt,
+        contains(sysargs, "--nopretty"),
+        contains(sysargs, "--debug"),
+        "Loading plugins",
+    );
+    let manifest = crate::python::manifest(rt);
+    drop(progress);
+    if let Err(e) = manifest {
         rt.eprint(&format!("Unable to load plugin manifest: {}\n", e.message));
     }
     if contains(sysargs, PRINT_ARG_SCHEMA_FLAG) {

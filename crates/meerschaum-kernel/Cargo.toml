@@ -6,7 +6,13 @@ license.workspace = true
 repository.workspace = true
 authors.workspace = true
 rust-version.workspace = true
-description = "Meerschaum v5: kernel crate (see docs/design/v5.0.0.md)"
+description = "Internal crate of Meerschaum: the Arrow/Polars data kernel (dtype enforcement, unseen-row diffs, special columns)"
+readme = "README.md"
+homepage.workspace = true
+documentation = "https://docs.rs/meerschaum-kernel"
+keywords = ["meerschaum", "etl", "arrow", "polars", "dataframe"]
+categories = ["data-structures", "database"]
+include = ["src/**/*", "/LICENSE", "/NOTICE"]
 
 [dependencies]
 meerschaum-core = { workspace = true }

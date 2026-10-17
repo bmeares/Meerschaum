@@ -40,9 +40,9 @@ fn normalize(text: &str, root: &str) -> String {
 }
 
 fn run_sql(root: &Path, queries: &[String]) {
-    use meerschaum_sql::SqlConnector;
-    use meerschaum_sql::flavor::Flavor;
-    use meerschaum_sql::uri::{ConnectionSpec, ConnectorAttributes};
+    use meerschaum_connector_sql::SqlConnector;
+    use meerschaum_connector_sql::flavor::Flavor;
+    use meerschaum_connector_sql::uri::{ConnectionSpec, ConnectorAttributes};
     let db = root.join("sqlite").join("mrsm_local.db");
     std::fs::create_dir_all(db.parent().unwrap()).unwrap();
     let attrs = ConnectorAttributes {

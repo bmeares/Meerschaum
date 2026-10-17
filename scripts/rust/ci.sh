@@ -16,6 +16,19 @@
 #                their generators (scripts/rust/gen_*.py; reads the Python sources as text).
 #   build        cargo build --release -p meerschaum-cli
 #   check        cargo check --workspace            (the hosted ubuntu/windows/macos legs)
+#   extension    Build the `meerschaum._core._native` extension into the working tree (debug profile; maturin in
+#                a scratch venv, scripts/rust/build_py.sh, which takes the tree's build lock) for the cargo tests that start
+#                real Python workers (they import `meerschaum`, which requires it). PYTHON_BIN picks the
+#                interpreter (default python3); on GitHub it also exports MRSM_PYTHON to later steps.
+#   frontcrate   Compile the `meerschaum` front crate with `--no-default-features`, with each of
+#                `sql valkey api engine server plugin` alone, and `cargo test -p meerschaum --features full`
+#                (the `meerschaum` features are otherwise only built together by the workspace).
+#   package      cargo package --workspace --no-verify (the crates.io tarballs: manifests, `include` lists,
+#                lockstep versions) then scripts/rust/check_packages.py (size < 10 MB, no tests/fixtures/
+#                benches). Fast: nothing is compiled. MRSM_PACKAGE_ALLOW_DIRTY=1 allows a dirty tree.
+#   publish-dry-run  cargo publish --workspace --dry-run: also builds every tarball against crates.io
+#                (without the root `[patch]`, so plain sqlx) in target/package/. Slow; no credentials
+#                needed, nothing is uploaded. The real `cargo publish` is never run by CI.
 #   parity       Regenerate every crates/*/tests/fixtures/gen_*.py with the v4.1.4 reference
 #                interpreter (scripts/parity/) and fail if the fixtures differ from git.
 #
@@ -75,6 +88,87 @@ step_clippy() { log "cargo clippy --all-targets -- -D warnings"; cargo clippy --
 step_test()   { log "cargo test --workspace"; cargo test --workspace; }
 step_build()  { log "cargo build --release -p meerschaum-cli"; cargo build --release -p meerschaum-cli; }
 step_generated() { log "generated tables match their generators"; cargo test -p meerschaum-cli --test generated_tables; }
+step_extension() {
+  local python scratch
+  python="$(command -v "${PYTHON_BIN:-python3}")"
+  scratch="$(mktemp -d "${RUNNER_TEMP:-$HOME/.cache}/mrsm-ext-build.XXXXXX")"
+  trap "rm -rf '$scratch'" EXIT
+  log "Building the native extension (debug) with $python"
+  "$python" -m venv "$scratch/tools"
+  "$scratch/tools/bin/python" -m pip install --quiet 'maturin>=1.9,<2.0'
+  # Scratch root and plugins for build_py.sh's import check (never the runner's config).
+  mkdir -p "$scratch/root" "$scratch/plugins"
+  # `build_py.sh` takes the tree's build lock (target/.build-py.lock) itself. `--debug`: the same
+  # profile `cargo test --workspace` compiles, so most dependencies are shared (the release build
+  # would add a second, optimized copy of every one); the debug extension keeps duckdb and oracle.
+  PYTHON="$python" MATURIN_BIN="$scratch/tools/bin/maturin" PYTHONPATH="$REPO" \
+    MRSM_ROOT_DIR="$scratch/root" MRSM_PLUGINS_DIR="$scratch/plugins" \
+    scripts/rust/build_py.sh --debug
+  if [ -n "${GITHUB_ENV:-}" ]; then
+    echo "MRSM_PYTHON=$python" >> "$GITHUB_ENV"
+  fi
+}
+step_frontcrate() {
+  log "cargo check -p meerschaum --no-default-features --all-targets"
+  cargo check -p meerschaum --no-default-features --all-targets
+  local feature
+  for feature in sql valkey api engine server plugin; do
+    log "cargo check -p meerschaum --no-default-features --all-targets --features $feature"
+    cargo check -p meerschaum --no-default-features --all-targets --features "$feature"
+  done
+  log "cargo test -p meerschaum --features full"
+  cargo test -p meerschaum --features full
+}
+step_package() {
+  log "cargo package --workspace --no-verify"
+  local flags=(--workspace --exclude meerschaum-py --no-verify --locked)
+  [ -n "${MRSM_PACKAGE_ALLOW_DIRTY:-}" ] && flags+=(--allow-dirty)
+  find "$REPO/target/package" -maxdepth 1 -name "*.crate" -delete 2>/dev/null || true
+  cargo package "${flags[@]}"
+  python3 "$REPO/scripts/rust/check_packages.py"
+}
+step_publish_dry_run() {
+  log "cargo publish --workspace --dry-run (builds the tarballs; never uploads)"
+  # Registry crates are fingerprinted by name and version only: a previous run's temporary registry or
+  # its compiled `tmp-crate` artifacts would be reused for the same version, so a later crate would
+  # verify against a stale build of its workspace dependencies. Start both from scratch.
+  find "$REPO/target/package" -maxdepth 1 -name "*.crate" -delete 2>/dev/null || true
+  # Cargo also extracts the overlay registry's crates into `$CARGO_HOME/registry/src/-<hash>/` (the hash
+  # of the unchanged tmp-registry path) and never re-extracts them: remove those sources too.
+  find "$CARGO_HOME/registry/src" -mindepth 2 -maxdepth 2 -path "$CARGO_HOME/registry/src/-*" \
+    -name "meerschaum*" -exec rm -rf {} + 2>/dev/null || true
+  # The overlay crates' compiled units are cached in the shared `target/debug` under the same name and
+  # version (a registry source is fingerprinted by version only): drop every unit whose dep-info
+  # points into the extracted overlay sources.
+  python3 - "$REPO/target" <<'PY'
+import pathlib, sys
+target = pathlib.Path(sys.argv[1])
+for profile in ("debug", "release"):
+    deps = target / profile / "deps"
+    if not deps.is_dir():
+        continue
+    for info in deps.glob("*.d"):
+        try:
+            if "/registry/src/-" not in info.read_text(errors="ignore"):
+                continue
+        except OSError:
+            continue
+        unit_hash = info.stem.rsplit("-", 1)[-1]
+        for path in deps.glob(f"*-{unit_hash}.*"):
+            path.unlink(missing_ok=True)
+        fingerprints = target / profile / ".fingerprint"
+        for path in fingerprints.glob(f"*-{unit_hash}"):
+            for child in path.iterdir():
+                child.unlink(missing_ok=True)
+            path.rmdir()
+PY
+  for d in tmp-registry tmp-crate; do
+    [ -d "$REPO/target/package/$d" ] && find "$REPO/target/package/$d" -delete
+  done
+  local flags=(--workspace --exclude meerschaum-py --dry-run --locked)
+  [ -n "${MRSM_PACKAGE_ALLOW_DIRTY:-}" ] && flags+=(--allow-dirty)
+  cargo publish "${flags[@]}"
+}
 step_check()  { log "cargo check --workspace"; cargo check --workspace; }
 
 step_parity() {
@@ -132,8 +226,12 @@ for s in "${steps[@]}"; do
     build)      step_build ;;
     generated)  step_generated ;;
     check)      step_check ;;
+    extension)  step_extension ;;
+    frontcrate) step_frontcrate ;;
+    package)    step_package ;;
+    publish-dry-run) step_publish_dry_run ;;
     parity)     step_parity ;;
-    -h|--help)  sed -n '2,22p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help)  sed -n '2,34p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "ci.sh: unknown step '$s' (see --help)" >&2; exit 2 ;;
   esac
 done

@@ -121,7 +121,7 @@ fn parse_dt(v: &Json, field: &str) -> Result<Option<DateTime<Utc>>, ApiError> {
 
 fn scopes_of(v: Option<&Json>) -> Result<Vec<String>, ApiError> {
     match v {
-        None => Ok(meerschaum_api::models::scopes::all_scopes()),
+        None => Ok(meerschaum_connector_api::models::scopes::all_scopes()),
         Some(Json::Array(items)) => Ok(items
             .iter()
             .map(|i| {

@@ -509,7 +509,7 @@ pub async fn scoped_auth_with_aliases(
     if granted.has("*") {
         return Ok(Some(principal));
     }
-    let auth = meerschaum_api::models::ScopedAuth::new(scopes);
+    let auth = meerschaum_connector_api::models::ScopedAuth::new(scopes);
     for scope in &auth.scopes {
         let legacy = aliases
             .iter()

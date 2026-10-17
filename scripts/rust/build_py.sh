@@ -2,7 +2,7 @@
 # Usage: scripts/rust/build_py.sh [--release | --debug] [--no-polars] [--no-check] [-- MATURIN_ARGS...]
 #
 # Builds the PyO3 extension (crates/meerschaum-py) with maturin and places it in the working
-# tree at meerschaum/_core/_core.abi3.so, where `meerschaum._core` loads it from. Nothing is
+# tree at meerschaum/_core/_native.abi3.so, where `meerschaum._core` loads it from. Nothing is
 # installed into any environment; the root pyproject.toml (the release maturin project) is not
 # involved: this builds from crates/meerschaum-py/pyproject.toml.
 #
@@ -17,6 +17,10 @@
 # Requires maturin (`uv tool install maturin`) and a Python >= 3.11 (`PYTHON`, default python3).
 # MATURIN_BIN may select a specific maturin executable; otherwise use the current PATH lookup.
 # Never set CARGO_TARGET_DIR: builds share the workspace `target/` (see crates/README.md).
+#
+# Concurrent builds corrupt each other (they swap the same file), so the script takes the tree's lock,
+# `target/.build-py.lock`, itself and waits for it: callers must NOT wrap it in `flock`. The lock is
+# per working tree (two checkouts build in parallel) and is released when the script exits.
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -37,7 +41,7 @@ while [ $# -gt 0 ]; do
     --no-polars) polars=0 ;;
     --no-check) check=0 ;;
     --) shift; extra+=("$@"); break ;;
-    -h|--help) sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "build_py.sh: unknown argument: $1" >&2; exit 2 ;;
   esac
   shift
@@ -54,6 +58,16 @@ fi
 if ! command -v "$PYTHON" >/dev/null 2>&1; then
   echo "build_py.sh: Python interpreter '$PYTHON' not found (set PYTHON=...)." >&2
   exit 1
+fi
+
+# One build per tree at a time. `flock` is absent on macOS: there the lock is skipped.
+mkdir -p "$REPO/target"
+if command -v flock >/dev/null 2>&1; then
+  exec 9>"$REPO/target/.build-py.lock"
+  if ! flock -n 9; then
+    echo "==> Waiting for another extension build in this tree (target/.build-py.lock)"
+    flock 9
+  fi
 fi
 
 # Build a wheel into a scratch directory first, so the extension already in the tree keeps
@@ -91,7 +105,7 @@ import sys, zipfile
 wheel, dest = sys.argv[1:]
 with zipfile.ZipFile(wheel) as zf:
     names = [n for n in zf.namelist()
-             if n.startswith("meerschaum/_core/_core") and n.endswith((".so", ".pyd"))]
+             if n.startswith("meerschaum/_core/_native") and n.endswith((".so", ".pyd"))]
     if len(names) != 1:
         sys.exit(f"build_py.sh: expected one extension in {wheel}, found {names}")
     zf.extract(names[0], dest)
@@ -100,11 +114,11 @@ with zipfile.ZipFile(wheel) as zf:
 # Remove stale builds (e.g. a non-abi3 `_core.cpython-3XX-*.so`) so only the new one can load,
 # then move the new one in (same filesystem, so the swap is a rename).
 "$REPO/scripts/rust/clean_py.sh" --quiet
-mv "$wheel_dir"/x/meerschaum/_core/_core* meerschaum/_core/
+mv "$wheel_dir"/x/meerschaum/_core/_native* meerschaum/_core/
 rm -rf "$wheel_dir"
 
 shopt -s nullglob
-built=(meerschaum/_core/_core*.so meerschaum/_core/_core*.pyd)
+built=(meerschaum/_core/_native*.so meerschaum/_core/_native*.pyd)
 shopt -u nullglob
 if [ "${#built[@]}" -gt 0 ] && command -v readelf >/dev/null 2>&1 \
   && readelf -d "${built[0]}" | grep -q 'NEEDED.*libpython'; then

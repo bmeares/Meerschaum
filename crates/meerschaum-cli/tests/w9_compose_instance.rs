@@ -647,7 +647,9 @@ fn explain_and_up_dry_match_v4_on_postgresql_schema_w9v() {
     // A clean schema of our own.
     let rt = tokio::runtime::Runtime::new().unwrap();
     let admin = rt
-        .block_on(meerschaum_sql::SqlConnector::from_uri("w9admin", &base_uri))
+        .block_on(meerschaum_connector_sql::SqlConnector::from_uri(
+            "w9admin", &base_uri,
+        ))
         .expect("connect to the PostgreSQL test container");
     let reset = |sql: &str| rt.block_on(admin.driver().exec(sql)).expect(sql);
     reset("DROP SCHEMA IF EXISTS w9v CASCADE");

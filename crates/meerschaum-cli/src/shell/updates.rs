@@ -54,7 +54,7 @@ pub struct UpdateCheck {
     /// The origins manifest file name (`STATIC_CONFIG['plugins']['origins_filename']`).
     pub origins_filename: String,
     /// The API connectors by label (`api:mrsm` and the plugins' origin repositories).
-    pub repositories: Vec<(String, meerschaum_api::client::APIConnector)>,
+    pub repositories: Vec<(String, meerschaum_connector_api::client::APIConnector)>,
 }
 
 /// `shell:updates:check_remote`.
@@ -139,7 +139,8 @@ impl UpdateCheck {
             .into_iter()
             .filter_map(|label| {
                 let mut conn =
-                    meerschaum_api::client::APIConnector::from_config(config, &label).ok()?;
+                    meerschaum_connector_api::client::APIConnector::from_config(config, &label)
+                        .ok()?;
                 conn.set_timeout(Duration::from_secs(3));
                 Some((label, conn))
             })
@@ -154,7 +155,7 @@ impl UpdateCheck {
         })
     }
 
-    fn repository(&self, keys: &str) -> Option<&meerschaum_api::client::APIConnector> {
+    fn repository(&self, keys: &str) -> Option<&meerschaum_connector_api::client::APIConnector> {
         let label = keys.strip_prefix("api:").unwrap_or(keys);
         self.repositories
             .iter()

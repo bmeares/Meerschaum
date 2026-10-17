@@ -307,7 +307,7 @@ async fn monitor_socket(state: AppState, name: String, mut socket: WebSocket) {
                 }
                 Some(LogEvent::StdinRequested) => {
                     if socket
-                        .send(Message::Text(meerschaum_api::routes::JOBS_STDIN_MESSAGE.into()))
+                        .send(Message::Text(meerschaum_connector_api::routes::JOBS_STDIN_MESSAGE.into()))
                         .await
                         .is_err()
                     {
@@ -316,7 +316,7 @@ async fn monitor_socket(state: AppState, name: String, mut socket: WebSocket) {
                 }
                 Some(LogEvent::Stopped(result)) => {
                     let _ = socket
-                        .send(Message::Text(meerschaum_api::routes::JOBS_STOP_MESSAGE.into()))
+                        .send(Message::Text(meerschaum_connector_api::routes::JOBS_STOP_MESSAGE.into()))
                         .await;
                     let body = crate::json::fastapi_json(&json!([result.success, result.message]));
                     let _ = socket.send(Message::Text(body.into())).await;

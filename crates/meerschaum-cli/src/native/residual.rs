@@ -330,7 +330,7 @@ pub fn api(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     let keys = format!("api:{api_label}");
     let (typ, label) = super::session::split_keys(&keys);
     let attrs = super::session::connector_attributes(rt.config(), &typ, &label);
-    let connector = meerschaum_api::APIConnector::new(Some(&label), attrs)
+    let connector = meerschaum_connector_api::APIConnector::new(Some(&label), attrs)
         .map_err(|e| ActionError::new("InvalidAttributesError", e.to_string()))?;
     let connector_keys = format!("api:{label}");
     match args.get("mrsm_instance") {

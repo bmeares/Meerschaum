@@ -279,7 +279,7 @@ fn strip_driver(url: &str) -> String {
     }
 }
 
-fn mysql_args(spec: &meerschaum_sql::uri::ConnectionSpec) -> Vec<String> {
+fn mysql_args(spec: &meerschaum_connector_sql::uri::ConnectionSpec) -> Vec<String> {
     let mut args = Vec::new();
     if let Some(h) = &spec.host {
         args.push(format!("--host={h}"));
@@ -296,7 +296,7 @@ fn mysql_args(spec: &meerschaum_sql::uri::ConnectionSpec) -> Vec<String> {
     args
 }
 
-fn mssql_args(spec: &meerschaum_sql::uri::ConnectionSpec) -> Vec<String> {
+fn mssql_args(spec: &meerschaum_connector_sql::uri::ConnectionSpec) -> Vec<String> {
     let mut args = Vec::new();
     if let (Some(h), Some(p)) = (&spec.host, spec.port) {
         args.extend(["-S".into(), format!("tcp:{h},{p}")]);
@@ -383,7 +383,11 @@ pub fn sql(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
         } else {
             format!(
                 "SELECT * FROM {}",
-                meerschaum_sql::ident::sql_item_name(&query, conn.flavor(), conn.schema())
+                meerschaum_connector_sql::ident::sql_item_name(
+                    &query,
+                    conn.flavor(),
+                    conn.schema()
+                )
             )
         };
         match sess.block_on(conn.driver().read_frame(&text)) {
@@ -424,12 +428,12 @@ pub fn sql(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
 
 /// `to_json(df, orient='split', index=False)`.
 fn split_json(frame: &meerschaum_kernel::Frame) -> String {
-    let opts = meerschaum_api::wire::ToJsonOptions::default();
+    let opts = meerschaum_connector_api::wire::ToJsonOptions::default();
     let columns: Vec<String> = frame
         .columns()
         .iter()
         .map(|c| {
-            meerschaum_api::wire::to_json_value(
+            meerschaum_connector_api::wire::to_json_value(
                 &meerschaum_kernel::value::Value::Str(c.name.clone()),
                 &opts,
             )
@@ -441,7 +445,7 @@ fn split_json(frame: &meerschaum_kernel::Frame) -> String {
         .map(|i| {
             let cells: Vec<String> = values
                 .iter()
-                .map(|col| meerschaum_api::wire::to_json_value(&col[i], &opts))
+                .map(|col| meerschaum_connector_api::wire::to_json_value(&col[i], &opts))
                 .collect();
             format!("[{}]", cells.join(","))
         })

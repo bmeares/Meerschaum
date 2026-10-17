@@ -2,7 +2,7 @@
 # Usage: scripts/rust/clean_py.sh [--cargo] [--quiet]
 #
 # Removes the built `meerschaum._core` extension from the working tree
-# (meerschaum/_core/_core*.so / .pyd), after which `meerschaum._core.AVAILABLE` is False.
+# (meerschaum/_core/_native*.so / .pyd), after which `meerschaum._core.AVAILABLE` is False.
 #
 #   --cargo   Also run `cargo clean -p meerschaum-py` (this crate's artifacts only; the shared
 #             Arrow/Polars builds in target/ are kept for the other crates).
@@ -26,7 +26,9 @@ done
 say() { [ "$quiet" -eq 1 ] || echo "$@"; }
 
 shopt -s nullglob
-built=(meerschaum/_core/_core*.so meerschaum/_core/_core*.pyd meerschaum/_core/_core*.dylib)
+# `_core*` is the pre-rename name (`meerschaum._core._core`): a stale one must not linger.
+built=(meerschaum/_core/_native*.so meerschaum/_core/_native*.pyd meerschaum/_core/_native*.dylib
+  meerschaum/_core/_core*.so meerschaum/_core/_core*.pyd meerschaum/_core/_core*.dylib)
 shopt -u nullglob
 if [ "${#built[@]}" -gt 0 ]; then
   rm -f -- "${built[@]}"

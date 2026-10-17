@@ -10,6 +10,7 @@ use meerschaum_kernel::value::Value as KValue;
 
 use crate::builtin::{ActionError, ActionResult};
 use crate::dispatch::Runtime;
+use crate::format::progress::Progress;
 use crate::format::rich::console::{Justify, Renderable};
 use crate::format::rich::pretty::PyObj;
 use crate::format::rich::table::{ASCII, Column, MINIMAL, Table};
@@ -207,6 +208,18 @@ pub fn show_rowcounts(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     query.remote = remote;
     let conn = &conn;
     let query = &query;
+    let progress = Progress::start(
+        rt,
+        args,
+        if remote {
+            "Counting remote rows"
+        } else {
+            "Counting rows"
+        },
+    );
+    progress.set_total(pipes.len());
+    let counter = progress.counter();
+    let counter = &counter;
     let mut rcs = session.block_on(super::metadata::ordered(
         pipes.iter().collect(),
         super::metadata::concurrency(&inst, args),
@@ -217,9 +230,11 @@ pub fn show_rowcounts(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
                 .await
                 .ok()
                 .map(|rc| rc.unwrap_or(0));
+            counter.inc();
             (p.pipe.to_string(), rc)
         },
     ));
+    drop(progress);
     // Sort descending (largest pipes first); `None` is the smallest. Python's sort is stable.
     rcs.sort_by(|a, b| {
         let ka = (a.1.is_some(), a.1.unwrap_or(0));
@@ -304,7 +319,10 @@ pub fn show_data(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
             }
         };
     let params = super::params(args);
-    for p in &pipes {
+    let progress = Progress::start(rt, args, "Reading data");
+    progress.set_total(pipes.len());
+    for (index, p) in pipes.iter().enumerate() {
+        progress.set_done(index);
         let df = match backtrack_minutes {
             Some(m) => session.block_on(conn.get_backtrack_data(
                 &p.pipe,
@@ -359,10 +377,10 @@ pub fn show_data(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
             rt.print(&format!("{text}\n"));
         } else {
             rt.print(&format!("{}\n", dumps(&Value::Map(pipe_state(&p.pipe)))));
-            let json = meerschaum_api::wire::to_json(
+            let json = meerschaum_connector_api::wire::to_json(
                 &df,
                 None,
-                &meerschaum_api::wire::ToJsonOptions {
+                &meerschaum_connector_api::wire::ToJsonOptions {
                     columns_orient: true,
                     ..Default::default()
                 },
@@ -482,9 +500,13 @@ pub fn pprint_pipe_columns(
 pub fn show_columns(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     let nopretty = flag(args, "nopretty");
     let (inst, mut pipes) = selected_pipes(rt, args)?;
+    let progress = Progress::start(rt, args, "Reading columns");
+    progress.set_total(pipes.len());
     for sp in pipes.iter_mut() {
         pprint_pipe_columns(rt, &inst, sp, nopretty);
+        progress.inc();
     }
+    drop(progress);
     Ok(SuccessTuple::success())
 }
 
@@ -512,7 +534,7 @@ pub fn show_users(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
 
 /// `format_bytes(num_bytes)`.
 pub fn format_bytes(n: Option<i64>) -> String {
-    meerschaum_sql::instance::values::format_bytes(n)
+    meerschaum_connector_sql::instance::values::format_bytes(n)
 }
 
 /// `show sizes`.
@@ -527,16 +549,27 @@ pub fn show_sizes(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     let mut sizes: Vec<(SelectedPipe, Option<i64>)> = Vec::new();
     let conn = &conn;
     let concurrency = super::metadata::concurrency(&inst, args);
+    let progress = Progress::start(rt, args, "Measuring pipe sizes");
+    progress.set_total(pipes.len());
+    let counter = progress.counter();
+    let counter = &counter;
     let mut fetched = (concurrency > 1).then(|| {
         session
             .block_on(super::metadata::ordered(
                 pipes.iter().collect(),
                 concurrency,
-                |p| async move { conn.get_pipe_size(&p.pipe).await.unwrap_or(None) },
+                |p| async move {
+                    let size = conn.get_pipe_size(&p.pipe).await.unwrap_or(None);
+                    counter.inc();
+                    size
+                },
             ))
             .into_iter()
     });
-    for p in pipes {
+    for (index, p) in pipes.into_iter().enumerate() {
+        if fetched.is_none() {
+            progress.set_done(index);
+        }
         if !nopretty {
             info(rt, &format!("Calculating size for {}...", p.pipe));
         }
@@ -551,6 +584,7 @@ pub fn show_sizes(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
         }
         sizes.push((p, size));
     }
+    drop(progress);
     sizes.sort_by(|a, b| {
         let ka = (a.1.is_some(), a.1.unwrap_or(0));
         let kb = (b.1.is_some(), b.1.unwrap_or(0));
@@ -661,16 +695,28 @@ pub fn show_partitions(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     }
     let mut records: Vec<Rec> = Vec::new();
     let concurrency = super::metadata::concurrency(&inst, args);
+    let progress = Progress::start(rt, args, "Inspecting partitions");
+    progress.set_total(pipes.len());
+    let counter = progress.counter();
+    let counter = &counter;
+    let inst_ref = &inst;
     let mut fetched = (concurrency > 1).then(|| {
         session
             .block_on(super::metadata::ordered(
                 pipes.iter().collect(),
                 concurrency,
-                |p| partition_metadata(&inst, &p.pipe),
+                |p| async move {
+                    let result = partition_metadata(inst_ref, &p.pipe).await;
+                    counter.inc();
+                    result
+                },
             ))
             .into_iter()
     });
-    for p in pipes {
+    for (index, p) in pipes.into_iter().enumerate() {
+        if fetched.is_none() {
+            progress.set_done(index);
+        }
         if !nopretty {
             info(rt, &format!("Inspecting partitions for {}...", p.pipe));
         }
@@ -696,6 +742,7 @@ pub fn show_partitions(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
             rpp,
         });
     }
+    drop(progress);
     records.sort_by(|a, b| {
         (b.partitioned, b.count.unwrap_or(0)).cmp(&(a.partitioned, a.count.unwrap_or(0)))
     });
@@ -930,6 +977,7 @@ pub fn show_plugins_repo(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     let action = words(args, "action");
     let keys = repo_keys(args, rt)?;
     let session = session(rt);
+    let progress = Progress::start(rt, args, format!("Fetching plugins from '{keys}'"));
     let repo = session.instance(&keys, rt.config())?;
     let conn = repo.conn();
     let (names, header) = if action[0] == "all" {
@@ -954,6 +1002,7 @@ pub fn show_plugins_repo(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
             format!("Plugins from user '{username}' at Meerschaum repository '{keys}':"),
         )
     };
+    drop(progress);
     let opts = OptionsArgs {
         header: Some(header),
         nopretty: flag(args, "nopretty"),

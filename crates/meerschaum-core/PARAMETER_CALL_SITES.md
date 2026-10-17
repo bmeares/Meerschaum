@@ -37,27 +37,27 @@ crates/meerschaum-worker/src/callback.rs:109:        // `Pipe.parameters` reads 
 crates/meerschaum-worker/src/callback.rs:111:            if let Some(CValue::Map(params)) = attrs.get("parameters") {
 crates/meerschaum-worker/src/callback.rs:116:    let params = pipe.parameters().clone();
 crates/meerschaum-worker/src/callback.rs:145:            .param("dtypes")
-crates/meerschaum-valkey/src/instance.rs:24:        let source_key = match pipe.parameters().get("valkey").and_then(|v| v.get("key")) {
+crates/meerschaum-connector-valkey/src/instance.rs:24:        let source_key = match pipe.parameters().get("valkey").and_then(|v| v.get("key")) {
 crates/meerschaum-jobs/src/systemd.rs:151:            "[Unit]\nDescription=Run the job '{name}'\n\n[Service]\nExecStart={python} -m meerschaum {sysargs}\nKillSignal=SIGTERM\nRestart=always\nRestartPreventExitStatus=0\nSyslogIdentifier={service_name}\n{environment}\n\n[Install]\nWantedBy=default.target\n",
 crates/meerschaum-connector/src/pipe_ops.rs:212:    let ctx = match dtypes_context(conn, pipe, pipe.parameters()).await {
-crates/meerschaum-valkey/src/pipes.rs:24:/// `pipe.target` on a Valkey instance (no per-flavor truncation).
-crates/meerschaum-valkey/src/pipes.rs:26:    pipe.target(None).unwrap_or_else(|_| pipe.target_legacy())
-crates/meerschaum-valkey/src/pipes.rs:38:/// `pipe.parameters.get('valkey', {}).get('dtypes', {})`.
-crates/meerschaum-valkey/src/pipes.rs:87:        return Ok(pipe.parameters().clone());
-crates/meerschaum-valkey/src/pipes.rs:92:        .unwrap_or_else(|| pipe.parameters().clone()))
-crates/meerschaum-valkey/src/pipes.rs:146:        let parameters_str = dumps_parameters(pipe.parameters());
-crates/meerschaum-valkey/src/pipes.rs:235:        match self.set(&key, &dumps_parameters(pipe.parameters())).await {
-crates/meerschaum-valkey/src/pipes.rs:299:        let mut parameters = pipe.parameters().clone();
-crates/meerschaum-valkey/src/pipes.rs:380:        let parameters = pipe.parameters();
-crates/meerschaum-valkey/src/pipes.rs:480:        let upsert = pipe.parameters().get("upsert").is_some_and(|v| v.truthy());
-crates/meerschaum-valkey/src/pipes.rs:481:        let static_ = pipe.parameters().get("static").is_some_and(|v| v.truthy());
-crates/meerschaum-valkey/src/pipes.rs:485:        let configured = pipe_ops::configured_dtypes(pipe.parameters());
-crates/meerschaum-valkey/src/pipes.rs:486:        let mut vk_dtypes = valkey_dtypes(pipe.parameters());
-crates/meerschaum-valkey/src/pipes.rs:545:            let ctx = pipe_ops::dtypes_context(self, &pipe, pipe.parameters()).await?;
-crates/meerschaum-valkey/src/pipes.rs:550:                autoincrement: pipe_ops::bool_param(pipe.parameters(), "autoincrement", false),
-crates/meerschaum-valkey/src/pipes.rs:551:                autotime: pipe_ops::bool_param(pipe.parameters(), "autotime", false),
-crates/meerschaum-valkey/src/pipes.rs:712:        Ok(valkey_dtypes(pipe.parameters())
-crates/meerschaum-valkey/src/pipes.rs:774:        let dt_typ = pipe_ops::configured_dtypes(pipe.parameters())
+crates/meerschaum-connector-valkey/src/pipes.rs:24:/// `pipe.target` on a Valkey instance (no per-flavor truncation).
+crates/meerschaum-connector-valkey/src/pipes.rs:26:    pipe.target(None).unwrap_or_else(|_| pipe.target_legacy())
+crates/meerschaum-connector-valkey/src/pipes.rs:38:/// `pipe.parameters.get('valkey', {}).get('dtypes', {})`.
+crates/meerschaum-connector-valkey/src/pipes.rs:87:        return Ok(pipe.parameters().clone());
+crates/meerschaum-connector-valkey/src/pipes.rs:92:        .unwrap_or_else(|| pipe.parameters().clone()))
+crates/meerschaum-connector-valkey/src/pipes.rs:146:        let parameters_str = dumps_parameters(pipe.parameters());
+crates/meerschaum-connector-valkey/src/pipes.rs:235:        match self.set(&key, &dumps_parameters(pipe.parameters())).await {
+crates/meerschaum-connector-valkey/src/pipes.rs:299:        let mut parameters = pipe.parameters().clone();
+crates/meerschaum-connector-valkey/src/pipes.rs:380:        let parameters = pipe.parameters();
+crates/meerschaum-connector-valkey/src/pipes.rs:480:        let upsert = pipe.parameters().get("upsert").is_some_and(|v| v.truthy());
+crates/meerschaum-connector-valkey/src/pipes.rs:481:        let static_ = pipe.parameters().get("static").is_some_and(|v| v.truthy());
+crates/meerschaum-connector-valkey/src/pipes.rs:485:        let configured = pipe_ops::configured_dtypes(pipe.parameters());
+crates/meerschaum-connector-valkey/src/pipes.rs:486:        let mut vk_dtypes = valkey_dtypes(pipe.parameters());
+crates/meerschaum-connector-valkey/src/pipes.rs:545:            let ctx = pipe_ops::dtypes_context(self, &pipe, pipe.parameters()).await?;
+crates/meerschaum-connector-valkey/src/pipes.rs:550:                autoincrement: pipe_ops::bool_param(pipe.parameters(), "autoincrement", false),
+crates/meerschaum-connector-valkey/src/pipes.rs:551:                autotime: pipe_ops::bool_param(pipe.parameters(), "autotime", false),
+crates/meerschaum-connector-valkey/src/pipes.rs:712:        Ok(valkey_dtypes(pipe.parameters())
+crates/meerschaum-connector-valkey/src/pipes.rs:774:        let dt_typ = pipe_ops::configured_dtypes(pipe.parameters())
 crates/meerschaum-jobs/src/daemon.rs:883:    let args = props.get("target")?.get("args")?.as_list()?;
 crates/meerschaum-core/src/template.rs:10://! - `{{ Pipe(...).columns['datetime'] }}`, `.columns`, `.dtypes`, `.target`, `.indices`: an
 crates/meerschaum-core/src/template.rs:12://! - `{{ self.metric }}`, `{{ self.parameters['x']['y'] }}` when resolving a pipe's own
@@ -161,10 +161,10 @@ crates/meerschaum-compose/src/lint.rs:253:                        location: form
 crates/meerschaum-compose/src/lint.rs:264:                        location: format!("{label}.parameters.tags"),
 crates/meerschaum-compose/src/lint.rs:284:                if let TemplateTarget::Pipe { call: Err(e), .. } = &t.target {
 crates/meerschaum-engine/src/selection.rs:148:        let pipe_tags: Vec<String> = match record.parameters.get("tags") {
-crates/meerschaum-sql/src/instance/mod.rs:386:    /// `sql_item_name(pipe.target, self.flavor, self.get_pipe_schema(pipe))`.
-crates/meerschaum-sql/src/instance/mod.rs:389:            &pipe.target,
-crates/meerschaum-sql/src/instance/geopackage.rs:367:        let table = sp.target.clone();
-crates/meerschaum-sql/src/instance/geopackage.rs:452:        let Some(geom_col) = self.geopackage_geometry_column(&sp.target).await else {
+crates/meerschaum-connector-sql/src/instance/mod.rs:386:    /// `sql_item_name(pipe.target, self.flavor, self.get_pipe_schema(pipe))`.
+crates/meerschaum-connector-sql/src/instance/mod.rs:389:            &pipe.target,
+crates/meerschaum-connector-sql/src/instance/geopackage.rs:367:        let table = sp.target.clone();
+crates/meerschaum-connector-sql/src/instance/geopackage.rs:452:        let Some(geom_col) = self.geopackage_geometry_column(&sp.target).await else {
 crates/meerschaum-engine/src/sync.rs:168:            out.set_parameters(apply_patch_maps(params, pipe.parameters()));
 crates/meerschaum-engine/src/sync.rs:188:/// `pipe.parameters` (the property): `{{ Pipe(...) }}` templates resolved.
 crates/meerschaum-engine/src/sync.rs:191:    if !has_templates(&Value::Map(pipe.parameters().clone())) {
@@ -195,7 +195,7 @@ crates/meerschaum-engine/src/registry.rs:113:    /// schema-qualified name (`sql
 crates/meerschaum-engine/src/registry.rs:116:        pipe.target(None).map_err(|e| e.to_string())
 crates/meerschaum-engine/src/registry.rs:233:            None => pipe.target(None).map_err(|e| e.to_string()),
 crates/meerschaum-cli/src/native/sync.rs:137:            let ctx = match pipe_ops::dtypes_context(conn.as_ref(), &sp.pipe, sp.pipe.parameters())
-crates/meerschaum-sql/src/instance/inplace.rs:146:        let target = sp.target.clone();
+crates/meerschaum-connector-sql/src/instance/inplace.rs:146:        let target = sp.target.clone();
 crates/meerschaum-compose/src/ops.rs:129:                let rec_tags: Vec<String> = match r.parameters.get("tags") {
 crates/meerschaum-compose/src/ops.rs:139:                    .parameters(r.parameters.clone())
 crates/meerschaum-compose/src/ops.rs:150:            .map(|r| r.parameters.clone())
@@ -209,79 +209,79 @@ crates/meerschaum-engine/src/node.rs:236:                Some(Value::Map(params)
 crates/meerschaum-engine/src/node.rs:239:                        .parameters
 crates/meerschaum-engine/src/node.rs:283:            recs[1].parameters.get("tags"),
 crates/meerschaum-engine/src/node.rs:293:        assert!(recs[0].parameters.contains_key("columns"));
-crates/meerschaum-sql/src/pipe.rs:81:    /// `pipe.target` as the instance resolves it (truncated to the flavor's identifier limit).
-crates/meerschaum-sql/src/pipe.rs:98:    /// Bind a pipe to a SQL flavor: `pipe.target` with the flavor's truncation.
-crates/meerschaum-sql/src/pipe.rs:100:        let target = pipe.target(Some(flavor.as_str()))?;
-crates/meerschaum-sql/src/pipe.rs:126:    /// `pipe.parameters.get('hypertable', True)`.
-crates/meerschaum-sql/src/pipe.rs:128:        self.param("hypertable").is_none_or(Value::truthy)
-crates/meerschaum-sql/src/pipe.rs:131:    /// `pipe.parameters.get('hypercore', True)`.
-crates/meerschaum-sql/src/pipe.rs:133:        self.param("hypercore").is_none_or(Value::truthy)
-crates/meerschaum-sql/src/pipe.rs:186:            .parameters(parameters)
-crates/meerschaum-sql/src/pipe.rs:202:        assert_eq!(p.target, "plugin_x_m");
-crates/meerschaum-sql/src/instance/fetch.rs:78:                "Could not determine a SQL definition for {pipe}.\n    Set the key `query` in `pipe.parameters` to a valid SQL query."
-crates/meerschaum-sql/src/queries/update.rs:281:    let target_table_name = sql_item_name_opt(args.target, flavor, schema);
+crates/meerschaum-connector-sql/src/pipe.rs:81:    /// `pipe.target` as the instance resolves it (truncated to the flavor's identifier limit).
+crates/meerschaum-connector-sql/src/pipe.rs:98:    /// Bind a pipe to a SQL flavor: `pipe.target` with the flavor's truncation.
+crates/meerschaum-connector-sql/src/pipe.rs:100:        let target = pipe.target(Some(flavor.as_str()))?;
+crates/meerschaum-connector-sql/src/pipe.rs:126:    /// `pipe.parameters.get('hypertable', True)`.
+crates/meerschaum-connector-sql/src/pipe.rs:128:        self.param("hypertable").is_none_or(Value::truthy)
+crates/meerschaum-connector-sql/src/pipe.rs:131:    /// `pipe.parameters.get('hypercore', True)`.
+crates/meerschaum-connector-sql/src/pipe.rs:133:        self.param("hypercore").is_none_or(Value::truthy)
+crates/meerschaum-connector-sql/src/pipe.rs:186:            .parameters(parameters)
+crates/meerschaum-connector-sql/src/pipe.rs:202:        assert_eq!(p.target, "plugin_x_m");
+crates/meerschaum-connector-sql/src/instance/fetch.rs:78:                "Could not determine a SQL definition for {pipe}.\n    Set the key `query` in `pipe.parameters` to a valid SQL query."
+crates/meerschaum-connector-sql/src/queries/update.rs:281:    let target_table_name = sql_item_name_opt(args.target, flavor, schema);
 crates/meerschaum-engine/src/executor.rs:860:                        .map(|n| RetryPolicy::from_parameters(&n.record.parameters))
-crates/meerschaum-sql/src/queries/metadef.rs:23:    let definition = truthy_str(pipe.param("fetch").and_then(|f| f.get("definition")))
-crates/meerschaum-sql/src/queries/metadef.rs:24:        .or_else(|| truthy_str(pipe.param("definition")))
-crates/meerschaum-sql/src/queries/metadef.rs:25:        .or_else(|| truthy_str(pipe.param("query")))
-crates/meerschaum-sql/src/queries/metadef.rs:26:        .or_else(|| truthy_str(pipe.param("sql")))?;
-crates/meerschaum-sql/src/queries/metadef.rs:75:    /// `parent.target`.
-crates/meerschaum-sql/src/queries/metadef.rs:369:            let parent_target = parent.target.as_str();
-crates/meerschaum-sql/src/instance/pipes.rs:79:            self.json_param(pipe.parameters()),
-crates/meerschaum-sql/src/instance/pipes.rs:124:            "SELECT {table}.pipe_id, {table}.connector_keys, {table}.metric_key, {table}.location_key, {table}.parameters \nFROM {table} \nWHERE {table}.pipe_id = {}",
-crates/meerschaum-sql/src/instance/pipes.rs:151:            Value::Map(parse_parameters(doc.get("parameters"))),
-crates/meerschaum-sql/src/instance/pipes.rs:162:        Ok(attrs.get("parameters").map(|v| v.to_map()))
-crates/meerschaum-sql/src/instance/pipes.rs:177:            pipe.parameters().clone()
-crates/meerschaum-sql/src/instance/pipes.rs:183:            apply_patch_maps(&original, pipe.parameters())
-crates/meerschaum-sql/src/instance/pipes.rs:329:                    format!("CAST(CAST({table}.parameters AS JSONB) -> 'tags' AS JSONB)");
-crates/meerschaum-sql/src/instance/pipes.rs:351:                        format!("CAST({table}.parameters AS CHAR)")
-crates/meerschaum-sql/src/instance/pipes.rs:353:                    _ => format!("CAST({table}.parameters AS VARCHAR)"),
-crates/meerschaum-sql/src/instance/pipes.rs:398:            "SELECT {table}.pipe_id, {table}.connector_keys, {table}.metric_key, {table}.location_key, {table}.parameters \nFROM {table} \nWHERE {where_str} ORDER BY {table}.connector_keys ASC, {table}.metric_key ASC, {loc_order}"
-crates/meerschaum-sql/src/instance/pipes.rs:412:                    extra: Some(Value::Map(parse_parameters(doc.get("parameters")))),
+crates/meerschaum-connector-sql/src/queries/metadef.rs:23:    let definition = truthy_str(pipe.param("fetch").and_then(|f| f.get("definition")))
+crates/meerschaum-connector-sql/src/queries/metadef.rs:24:        .or_else(|| truthy_str(pipe.param("definition")))
+crates/meerschaum-connector-sql/src/queries/metadef.rs:25:        .or_else(|| truthy_str(pipe.param("query")))
+crates/meerschaum-connector-sql/src/queries/metadef.rs:26:        .or_else(|| truthy_str(pipe.param("sql")))?;
+crates/meerschaum-connector-sql/src/queries/metadef.rs:75:    /// `parent.target`.
+crates/meerschaum-connector-sql/src/queries/metadef.rs:369:            let parent_target = parent.target.as_str();
+crates/meerschaum-connector-sql/src/instance/pipes.rs:79:            self.json_param(pipe.parameters()),
+crates/meerschaum-connector-sql/src/instance/pipes.rs:124:            "SELECT {table}.pipe_id, {table}.connector_keys, {table}.metric_key, {table}.location_key, {table}.parameters \nFROM {table} \nWHERE {table}.pipe_id = {}",
+crates/meerschaum-connector-sql/src/instance/pipes.rs:151:            Value::Map(parse_parameters(doc.get("parameters"))),
+crates/meerschaum-connector-sql/src/instance/pipes.rs:162:        Ok(attrs.get("parameters").map(|v| v.to_map()))
+crates/meerschaum-connector-sql/src/instance/pipes.rs:177:            pipe.parameters().clone()
+crates/meerschaum-connector-sql/src/instance/pipes.rs:183:            apply_patch_maps(&original, pipe.parameters())
+crates/meerschaum-connector-sql/src/instance/pipes.rs:329:                    format!("CAST(CAST({table}.parameters AS JSONB) -> 'tags' AS JSONB)");
+crates/meerschaum-connector-sql/src/instance/pipes.rs:351:                        format!("CAST({table}.parameters AS CHAR)")
+crates/meerschaum-connector-sql/src/instance/pipes.rs:353:                    _ => format!("CAST({table}.parameters AS VARCHAR)"),
+crates/meerschaum-connector-sql/src/instance/pipes.rs:398:            "SELECT {table}.pipe_id, {table}.connector_keys, {table}.metric_key, {table}.location_key, {table}.parameters \nFROM {table} \nWHERE {where_str} ORDER BY {table}.connector_keys ASC, {table}.metric_key ASC, {loc_order}"
+crates/meerschaum-connector-sql/src/instance/pipes.rs:412:                    extra: Some(Value::Map(parse_parameters(doc.get("parameters")))),
 crates/meerschaum-engine/src/runs.rs:283:        params.insert("target".into(), Value::Str(self.target()));
 crates/meerschaum-engine/src/runs.rs:309:            let params = p.parameters();
 crates/meerschaum-engine/src/runs.rs:310:            assert_eq!(params["target"], Value::Str(p.target()));
 crates/meerschaum-engine/src/runs.rs:322:        let dtypes = EnginePipe::Ledger.parameters()["dtypes"].clone();
 crates/meerschaum-engine/src/runs.rs:333:        let dtypes = EnginePipe::Nodes.parameters()["dtypes"].clone();
-crates/meerschaum-sql/src/instance/indices.rs:46:            .get_table_cols_indices(&sp.target, self.get_pipe_schema(sp).as_deref())
-crates/meerschaum-sql/src/instance/indices.rs:62:                        .sqlite_master_has(&geopackage::rtree_name(&sp.target, &col))
-crates/meerschaum-sql/src/instance/indices.rs:65:                    queries.insert(key, geopackage::get_rtree_create_queries(&sp.target, &col));
-crates/meerschaum-sql/src/instance/indices.rs:90:        let exists = self.table_exists(&sp.target, schema.as_deref()).await;
-crates/meerschaum-sql/src/instance/indices.rs:95:            .get_table_cols_indices(&sp.target, schema.as_deref())
-crates/meerschaum-sql/src/instance/indices.rs:106:        let temp_table = format!("_{}_temp_migration", sp.target);
-crates/meerschaum-sql/src/instance/indices.rs:120:                    .sqlite_master_has(&geopackage::rtree_name(&sp.target, &col))
-crates/meerschaum-sql/src/instance/indices.rs:125:                        geopackage::get_rtree_drop_queries(&sp.target, &col, extensions),
-crates/meerschaum-sql/src/queries/compress.rs:80:    let settings = match pipe.param("compress") {
-crates/meerschaum-sql/src/queries/compress.rs:134:    // Reads `pipe.parameters['dtypes']` directly (no alias resolution, no inference).
-crates/meerschaum-sql/src/queries/compress.rs:135:    let dt_typ = match pipe.param("dtypes").and_then(|d| d.get(&dt_col)) {
-crates/meerschaum-sql/src/queries/compress.rs:293:        &pipe.target,
-crates/meerschaum-sql/src/queries/compress.rs:311:        pipe.target.replace('\'', "''")
-crates/meerschaum-sql/src/queries/compress.rs:514:                    pipe.target.replace('\'', "''")
-crates/meerschaum-sql/src/queries/compress.rs:524:            pipe.target.replace('\'', "''")
-crates/meerschaum-sql/src/instance/partition.rs:148:            partition_scheme_name(self.flavor, &sp.target),
-crates/meerschaum-sql/src/instance/partition.rs:318:            .table_exists(&sp.target, self.get_pipe_schema(&sp).as_deref())
-crates/meerschaum-sql/src/instance/partition.rs:403:            .table_exists(&sp.target, self.get_pipe_schema(&sp).as_deref())
-crates/meerschaum-sql/src/instance/partition.rs:409:            .param("verify")
-crates/meerschaum-sql/src/instance/partition.rs:527:        crate::queries::partition::get_initial_partition_bounds(self.flavor, &sp.target, &ranges)
+crates/meerschaum-connector-sql/src/instance/indices.rs:46:            .get_table_cols_indices(&sp.target, self.get_pipe_schema(sp).as_deref())
+crates/meerschaum-connector-sql/src/instance/indices.rs:62:                        .sqlite_master_has(&geopackage::rtree_name(&sp.target, &col))
+crates/meerschaum-connector-sql/src/instance/indices.rs:65:                    queries.insert(key, geopackage::get_rtree_create_queries(&sp.target, &col));
+crates/meerschaum-connector-sql/src/instance/indices.rs:90:        let exists = self.table_exists(&sp.target, schema.as_deref()).await;
+crates/meerschaum-connector-sql/src/instance/indices.rs:95:            .get_table_cols_indices(&sp.target, schema.as_deref())
+crates/meerschaum-connector-sql/src/instance/indices.rs:106:        let temp_table = format!("_{}_temp_migration", sp.target);
+crates/meerschaum-connector-sql/src/instance/indices.rs:120:                    .sqlite_master_has(&geopackage::rtree_name(&sp.target, &col))
+crates/meerschaum-connector-sql/src/instance/indices.rs:125:                        geopackage::get_rtree_drop_queries(&sp.target, &col, extensions),
+crates/meerschaum-connector-sql/src/queries/compress.rs:80:    let settings = match pipe.param("compress") {
+crates/meerschaum-connector-sql/src/queries/compress.rs:134:    // Reads `pipe.parameters['dtypes']` directly (no alias resolution, no inference).
+crates/meerschaum-connector-sql/src/queries/compress.rs:135:    let dt_typ = match pipe.param("dtypes").and_then(|d| d.get(&dt_col)) {
+crates/meerschaum-connector-sql/src/queries/compress.rs:293:        &pipe.target,
+crates/meerschaum-connector-sql/src/queries/compress.rs:311:        pipe.target.replace('\'', "''")
+crates/meerschaum-connector-sql/src/queries/compress.rs:514:                    pipe.target.replace('\'', "''")
+crates/meerschaum-connector-sql/src/queries/compress.rs:524:            pipe.target.replace('\'', "''")
+crates/meerschaum-connector-sql/src/instance/partition.rs:148:            partition_scheme_name(self.flavor, &sp.target),
+crates/meerschaum-connector-sql/src/instance/partition.rs:318:            .table_exists(&sp.target, self.get_pipe_schema(&sp).as_deref())
+crates/meerschaum-connector-sql/src/instance/partition.rs:403:            .table_exists(&sp.target, self.get_pipe_schema(&sp).as_deref())
+crates/meerschaum-connector-sql/src/instance/partition.rs:409:            .param("verify")
+crates/meerschaum-connector-sql/src/instance/partition.rs:527:        crate::queries::partition::get_initial_partition_bounds(self.flavor, &sp.target, &ranges)
 crates/meerschaum-server/src/pipe_methods.rs:24:    let dtypes = pipe_ops::get_dtypes(conn.as_ref(), pipe, pipe.parameters(), true)
 crates/meerschaum-server/src/pipe_methods.rs:57:        if pipe.param("precision").is_some_and(|p| p.truthy()) {
 crates/meerschaum-server/src/pipe_methods.rs:400:    let ctx = match pipe_ops::dtypes_context(conn.as_ref(), pipe, pipe.parameters()).await {
-crates/meerschaum-sql/src/instance/sync.rs:160:            // `Pipe.parameters` reads the registered parameters unless set in memory.
-crates/meerschaum-sql/src/instance/sync.rs:161:            if pipe.parameters().is_empty() {
-crates/meerschaum-sql/src/instance/sync.rs:204:                .param("dtypes")
-crates/meerschaum-sql/src/instance/sync.rs:228:        if result.success && pipe.param("compress").is_some_and(|v| v.truthy()) {
-crates/meerschaum-sql/src/instance/sync.rs:381:        // PARITY: `autoincrement not in pipe.parameters` tests the boolean against the keys, so
-crates/meerschaum-sql/src/instance/sync.rs:463:                    &sp.target,
-crates/meerschaum-sql/src/instance/sync.rs:485:                let max_id_query = get_max_id_query(&sp.target, pk, flavor, schema.as_deref());
-crates/meerschaum-sql/src/instance/sync.rs:488:                    &sp.target,
-crates/meerschaum-sql/src/instance/sync.rs:776:            &sp.target,
-crates/meerschaum-sql/src/instance/sync.rs:831:        .parameters(parameters)
-crates/meerschaum-sql/src/instance/sync.rs:909:        let mut args = UpdateQueriesArgs::new(&sp.target, &temp_target, join_cols, flavor);
-crates/meerschaum-sql/src/instance/sync.rs:1048:                &sp.target,
-crates/meerschaum-sql/src/instance/sync.rs:1116:        if !self.table_exists(&sp.target, schema.as_deref()).await || sp.is_static() {
-crates/meerschaum-sql/src/instance/sync.rs:1121:            .get_table_cols_types(&sp.target, schema.as_deref())
-crates/meerschaum-sql/src/instance/sync.rs:1175:        if !self.table_exists(&sp.target, schema.as_deref()).await || sp.is_static() {
-crates/meerschaum-sql/src/instance/sync.rs:1240:        let target = sp.target.clone();
+crates/meerschaum-connector-sql/src/instance/sync.rs:160:            // `Pipe.parameters` reads the registered parameters unless set in memory.
+crates/meerschaum-connector-sql/src/instance/sync.rs:161:            if pipe.parameters().is_empty() {
+crates/meerschaum-connector-sql/src/instance/sync.rs:204:                .param("dtypes")
+crates/meerschaum-connector-sql/src/instance/sync.rs:228:        if result.success && pipe.param("compress").is_some_and(|v| v.truthy()) {
+crates/meerschaum-connector-sql/src/instance/sync.rs:381:        // PARITY: `autoincrement not in pipe.parameters` tests the boolean against the keys, so
+crates/meerschaum-connector-sql/src/instance/sync.rs:463:                    &sp.target,
+crates/meerschaum-connector-sql/src/instance/sync.rs:485:                let max_id_query = get_max_id_query(&sp.target, pk, flavor, schema.as_deref());
+crates/meerschaum-connector-sql/src/instance/sync.rs:488:                    &sp.target,
+crates/meerschaum-connector-sql/src/instance/sync.rs:776:            &sp.target,
+crates/meerschaum-connector-sql/src/instance/sync.rs:831:        .parameters(parameters)
+crates/meerschaum-connector-sql/src/instance/sync.rs:909:        let mut args = UpdateQueriesArgs::new(&sp.target, &temp_target, join_cols, flavor);
+crates/meerschaum-connector-sql/src/instance/sync.rs:1048:                &sp.target,
+crates/meerschaum-connector-sql/src/instance/sync.rs:1116:        if !self.table_exists(&sp.target, schema.as_deref()).await || sp.is_static() {
+crates/meerschaum-connector-sql/src/instance/sync.rs:1121:            .get_table_cols_types(&sp.target, schema.as_deref())
+crates/meerschaum-connector-sql/src/instance/sync.rs:1175:        if !self.table_exists(&sp.target, schema.as_deref()).await || sp.is_static() {
+crates/meerschaum-connector-sql/src/instance/sync.rs:1240:        let target = sp.target.clone();
 crates/meerschaum-server/src/mcp/tools.rs:115:/// `pipe.target`.
 crates/meerschaum-server/src/mcp/tools.rs:117:    pipe.target(None).unwrap_or_else(|_| pipe.target_legacy())
 crates/meerschaum-server/src/mcp/tools.rs:163:        b = b.parameters(p);
@@ -290,74 +290,74 @@ crates/meerschaum-server/src/mcp/tools.rs:522:        .parameters()
 crates/meerschaum-server/src/mcp/tools.rs:547:        meerschaum_connector::pipe_ops::get_dtypes(conn.as_ref(), pipe, pipe.parameters(), true)
 crates/meerschaum-server/src/mcp/tools.rs:772:    if pipe.parameters().is_empty() {
 crates/meerschaum-server/src/mcp/tools.rs:804:        let merged = meerschaum_core::value::apply_patch_maps(pipe.parameters(), &parameters);
-crates/meerschaum-sql/src/queries/mod.rs:58:        // `pipe.parameters.get('schema', self.schema)`: an explicit `None` wins.
-crates/meerschaum-sql/src/queries/mod.rs:59:        match pipe.param("schema") {
-crates/meerschaum-sql/src/instance/data.rs:271:        if !self.table_exists(&sp.target, schema.as_deref()).await {
-crates/meerschaum-sql/src/instance/data.rs:275:            self.get_reflected_columns_types(&sp.target, schema.as_deref())
-crates/meerschaum-sql/src/instance/data.rs:278:            self.get_table_cols_types(&sp.target, schema.as_deref())
-crates/meerschaum-sql/src/instance/data.rs:288:                .table_exists(&sp.target, self.get_pipe_schema(sp).as_deref())
-crates/meerschaum-sql/src/instance/data.rs:321:            .get_table_cols_indices(&sp.target, self.get_pipe_schema(&sp).as_deref())
-crates/meerschaum-sql/src/instance/data.rs:329:            .table_exists(&sp.target, self.get_pipe_schema(&sp).as_deref())
-crates/meerschaum-sql/src/instance/data.rs:353:            if sp.param("precision").is_some_and(|p| p.truthy()) {
-crates/meerschaum-sql/src/instance/data.rs:1011:                .param("fetch")
-crates/meerschaum-sql/src/instance/data.rs:1177:        if self.table_exists(&sp.target, schema.as_deref()).await {
-crates/meerschaum-sql/src/instance/data.rs:1190:            let _ = self.drop_geopackage_metadata(&sp.target).await;
-crates/meerschaum-sql/src/instance/data.rs:1426:        let dedup_table = self.get_temporary_target(&sp.target, Some(&session_id), Some("dedup"));
-crates/meerschaum-sql/src/instance/data.rs:1427:        let temp_old_table = self.get_temporary_target(&sp.target, Some(&session_id), Some("old"));
-crates/meerschaum-sql/src/instance/data.rs:1445:            get_rename_table_queries(&sp.target, &temp_old_table, flavor, schema.as_deref(), None)
-crates/meerschaum-sql/src/instance/data.rs:1449:            get_rename_table_queries(&dedup_table, &sp.target, flavor, None, schema.as_deref())
-crates/meerschaum-sql/src/queries/partition.rs:251:        let full = sql_item_name(&pipe.target, flavor, schema.as_deref()).replace('\'', "''");
-crates/meerschaum-sql/src/queries/partition.rs:259:        let clean_target = pipe.target.replace('\'', "''");
-crates/meerschaum-sql/src/queries/partition.rs:265:        let func_name = partition_function_name(flavor, &pipe.target).replace('\'', "''");
-crates/meerschaum-sql/src/queries/partition.rs:276:    let clean_target = pipe.target.replace('\'', "''");
-crates/meerschaum-sql/src/queries/partition.rs:289:    let parent_name = sql_item_name(&pipe.target, ctx.flavor, schema.as_deref());
-crates/meerschaum-sql/src/queries/partition.rs:304:    let parent_name = sql_item_name(&pipe.target, flavor, schema.as_deref());
-crates/meerschaum-sql/src/queries/partition.rs:309:                &partition_name(flavor, &pipe.target, *lo),
-crates/meerschaum-sql/src/queries/partition.rs:333:    let clean_target = pipe.target.replace('\'', "''");
-crates/meerschaum-sql/src/queries/partition.rs:408:    let parent_name = sql_item_name(&pipe.target, flavor, ctx.get_pipe_schema(pipe).as_deref());
-crates/meerschaum-sql/src/queries/partition.rs:414:        let part_name = sql_item_name(&partition_name(flavor, &pipe.target, lo), flavor, None);
-crates/meerschaum-sql/src/queries/partition.rs:441:    let func_name = partition_function_name(flavor, &pipe.target);
-crates/meerschaum-sql/src/queries/partition.rs:442:    let scheme_name = partition_scheme_name(flavor, &pipe.target);
-crates/meerschaum-sql/src/queries/partition.rs:468:    let func_name = partition_function_name(Flavor::Mssql, &pipe.target).replace('\'', "''");
-crates/meerschaum-sql/src/queries/partition.rs:512:    let func_item = sql_item_name(&partition_function_name(flavor, &pipe.target), flavor, None);
-crates/meerschaum-sql/src/queries/partition.rs:513:    let scheme_item = sql_item_name(&partition_scheme_name(flavor, &pipe.target), flavor, None);
-crates/meerschaum-sql/src/queries/partition.rs:543:    let func_name = partition_function_name(flavor, &pipe.target);
-crates/meerschaum-sql/src/queries/partition.rs:544:    let scheme_name = partition_scheme_name(flavor, &pipe.target);
-crates/meerschaum-sql/src/queries/partition.rs:568:        &pipe.target,
+crates/meerschaum-connector-sql/src/queries/mod.rs:58:        // `pipe.parameters.get('schema', self.schema)`: an explicit `None` wins.
+crates/meerschaum-connector-sql/src/queries/mod.rs:59:        match pipe.param("schema") {
+crates/meerschaum-connector-sql/src/instance/data.rs:271:        if !self.table_exists(&sp.target, schema.as_deref()).await {
+crates/meerschaum-connector-sql/src/instance/data.rs:275:            self.get_reflected_columns_types(&sp.target, schema.as_deref())
+crates/meerschaum-connector-sql/src/instance/data.rs:278:            self.get_table_cols_types(&sp.target, schema.as_deref())
+crates/meerschaum-connector-sql/src/instance/data.rs:288:                .table_exists(&sp.target, self.get_pipe_schema(sp).as_deref())
+crates/meerschaum-connector-sql/src/instance/data.rs:321:            .get_table_cols_indices(&sp.target, self.get_pipe_schema(&sp).as_deref())
+crates/meerschaum-connector-sql/src/instance/data.rs:329:            .table_exists(&sp.target, self.get_pipe_schema(&sp).as_deref())
+crates/meerschaum-connector-sql/src/instance/data.rs:353:            if sp.param("precision").is_some_and(|p| p.truthy()) {
+crates/meerschaum-connector-sql/src/instance/data.rs:1011:                .param("fetch")
+crates/meerschaum-connector-sql/src/instance/data.rs:1177:        if self.table_exists(&sp.target, schema.as_deref()).await {
+crates/meerschaum-connector-sql/src/instance/data.rs:1190:            let _ = self.drop_geopackage_metadata(&sp.target).await;
+crates/meerschaum-connector-sql/src/instance/data.rs:1426:        let dedup_table = self.get_temporary_target(&sp.target, Some(&session_id), Some("dedup"));
+crates/meerschaum-connector-sql/src/instance/data.rs:1427:        let temp_old_table = self.get_temporary_target(&sp.target, Some(&session_id), Some("old"));
+crates/meerschaum-connector-sql/src/instance/data.rs:1445:            get_rename_table_queries(&sp.target, &temp_old_table, flavor, schema.as_deref(), None)
+crates/meerschaum-connector-sql/src/instance/data.rs:1449:            get_rename_table_queries(&dedup_table, &sp.target, flavor, None, schema.as_deref())
+crates/meerschaum-connector-sql/src/queries/partition.rs:251:        let full = sql_item_name(&pipe.target, flavor, schema.as_deref()).replace('\'', "''");
+crates/meerschaum-connector-sql/src/queries/partition.rs:259:        let clean_target = pipe.target.replace('\'', "''");
+crates/meerschaum-connector-sql/src/queries/partition.rs:265:        let func_name = partition_function_name(flavor, &pipe.target).replace('\'', "''");
+crates/meerschaum-connector-sql/src/queries/partition.rs:276:    let clean_target = pipe.target.replace('\'', "''");
+crates/meerschaum-connector-sql/src/queries/partition.rs:289:    let parent_name = sql_item_name(&pipe.target, ctx.flavor, schema.as_deref());
+crates/meerschaum-connector-sql/src/queries/partition.rs:304:    let parent_name = sql_item_name(&pipe.target, flavor, schema.as_deref());
+crates/meerschaum-connector-sql/src/queries/partition.rs:309:                &partition_name(flavor, &pipe.target, *lo),
+crates/meerschaum-connector-sql/src/queries/partition.rs:333:    let clean_target = pipe.target.replace('\'', "''");
+crates/meerschaum-connector-sql/src/queries/partition.rs:408:    let parent_name = sql_item_name(&pipe.target, flavor, ctx.get_pipe_schema(pipe).as_deref());
+crates/meerschaum-connector-sql/src/queries/partition.rs:414:        let part_name = sql_item_name(&partition_name(flavor, &pipe.target, lo), flavor, None);
+crates/meerschaum-connector-sql/src/queries/partition.rs:441:    let func_name = partition_function_name(flavor, &pipe.target);
+crates/meerschaum-connector-sql/src/queries/partition.rs:442:    let scheme_name = partition_scheme_name(flavor, &pipe.target);
+crates/meerschaum-connector-sql/src/queries/partition.rs:468:    let func_name = partition_function_name(Flavor::Mssql, &pipe.target).replace('\'', "''");
+crates/meerschaum-connector-sql/src/queries/partition.rs:512:    let func_item = sql_item_name(&partition_function_name(flavor, &pipe.target), flavor, None);
+crates/meerschaum-connector-sql/src/queries/partition.rs:513:    let scheme_item = sql_item_name(&partition_scheme_name(flavor, &pipe.target), flavor, None);
+crates/meerschaum-connector-sql/src/queries/partition.rs:543:    let func_name = partition_function_name(flavor, &pipe.target);
+crates/meerschaum-connector-sql/src/queries/partition.rs:544:    let scheme_name = partition_scheme_name(flavor, &pipe.target);
+crates/meerschaum-connector-sql/src/queries/partition.rs:568:        &pipe.target,
 crates/meerschaum-server/src/openapi.rs:1080:        assert!(j["paths"]["/pipes/keys"]["get"]["parameters"].is_array());
 crates/meerschaum-server/src/openapi.rs:1081:        assert!(j["paths"]["/version"]["get"]["parameters"][0]["name"] == "curr_user");
 crates/meerschaum-server/src/state.rs:274:            b = b.parameters(p);
 crates/meerschaum-server/src/state.rs:393:        let merged = meerschaum_core::value::apply_patch_maps(&params, pipe.parameters());
 crates/meerschaum-server/src/state.rs:401:    match attrs.get("parameters")? {
 crates/meerschaum-server/src/state.rs:430:    local.insert("parameters".into(), Value::Map(pipe.parameters().clone()));
-crates/meerschaum-sql/src/queries/index.rs:25:        .param("index_template")
-crates/meerschaum-sql/src/queries/index.rs:37:                ("target", &pipe.target),
-crates/meerschaum-sql/src/queries/index.rs:122:        .unwrap_or_else(|| format!("IX_{}_unique", pipe.target));
-crates/meerschaum-sql/src/queries/index.rs:172:    let primary_key_constraint_name = q(&format!("PK_{}", pipe.target));
-crates/meerschaum-sql/src/queries/index.rs:202:    let pipe_name = sql_item_name(&pipe.target, flavor, pipe_schema.as_deref());
-crates/meerschaum-sql/src/queries/index.rs:263:                        let new_table = format!("_new_{}", pipe.target);
-crates/meerschaum-sql/src/queries/index.rs:290:                                &pipe.target,
-crates/meerschaum-sql/src/queries/index.rs:528:    let pipe_name = sql_item_name(&pipe.target, flavor, schema.as_deref());
-crates/meerschaum-sql/src/queries/index.rs:529:    let pipe_name_no_schema = sql_item_name(&pipe.target, flavor, None);
-crates/meerschaum-sql/src/queries/index.rs:540:        let temp_table = format!("_{}_temp_migration", pipe.target);
-crates/meerschaum-api/src/client/instance.rs:39:        let fetch = match pipe.parameters().get("fetch") {
+crates/meerschaum-connector-sql/src/queries/index.rs:25:        .param("index_template")
+crates/meerschaum-connector-sql/src/queries/index.rs:37:                ("target", &pipe.target),
+crates/meerschaum-connector-sql/src/queries/index.rs:122:        .unwrap_or_else(|| format!("IX_{}_unique", pipe.target));
+crates/meerschaum-connector-sql/src/queries/index.rs:172:    let primary_key_constraint_name = q(&format!("PK_{}", pipe.target));
+crates/meerschaum-connector-sql/src/queries/index.rs:202:    let pipe_name = sql_item_name(&pipe.target, flavor, pipe_schema.as_deref());
+crates/meerschaum-connector-sql/src/queries/index.rs:263:                        let new_table = format!("_new_{}", pipe.target);
+crates/meerschaum-connector-sql/src/queries/index.rs:290:                                &pipe.target,
+crates/meerschaum-connector-sql/src/queries/index.rs:528:    let pipe_name = sql_item_name(&pipe.target, flavor, schema.as_deref());
+crates/meerschaum-connector-sql/src/queries/index.rs:529:    let pipe_name_no_schema = sql_item_name(&pipe.target, flavor, None);
+crates/meerschaum-connector-sql/src/queries/index.rs:540:        let temp_table = format!("_{}_temp_migration", pipe.target);
+crates/meerschaum-connector-api/src/client/instance.rs:39:        let fetch = match pipe.parameters().get("fetch") {
 crates/meerschaum-server/src/routes/pipes.rs:177:    pipe.target(None).unwrap_or_else(|_| pipe.target_legacy())
 crates/meerschaum-server/src/routes/pipes.rs:423:                Value::Map(h.pipe.parameters().clone())
 crates/meerschaum-server/src/routes/pipes.rs:988:            h.pipe.parameters(),
-crates/meerschaum-sql/src/instance/maintenance.rs:79:            .table_exists(&sp.target, self.get_pipe_schema(sp).as_deref())
-crates/meerschaum-sql/src/instance/maintenance.rs:116:        if !pipe.param("compress").is_some_and(|v| v.truthy()) {
-crates/meerschaum-sql/src/instance/maintenance.rs:128:            .table_exists(&sp.target, self.get_pipe_schema(&sp).as_deref())
-crates/meerschaum-sql/src/instance/maintenance.rs:184:            .table_exists(&sp.target, self.get_pipe_schema(&sp).as_deref())
-crates/meerschaum-sql/src/instance/maintenance.rs:259:            .table_exists(&sp.target, self.get_pipe_schema(&sp).as_deref())
-crates/meerschaum-sql/src/instance/maintenance.rs:296:            if let Some(col) = self.geopackage_geometry_column(&sp.target).await {
-crates/meerschaum-sql/src/instance/maintenance.rs:297:                let rtree = crate::instance::geopackage::rtree_name(&sp.target, &col);
-crates/meerschaum-sql/src/instance/maintenance.rs:300:                        crate::instance::geopackage::get_rtree_create_queries(&sp.target, &col);
-crates/meerschaum-sql/src/instance/maintenance.rs:326:            .table_exists(&sp.target, self.get_pipe_schema(&sp).as_deref())
-crates/meerschaum-api/src/client/pipes.rs:190:        match pipe.parameters().get("instance_keys") {
-crates/meerschaum-api/src/client/pipes.rs:225:            return pipe.parameters().clone();
-crates/meerschaum-api/src/client/pipes.rs:233:                        .get("parameters")
-crates/meerschaum-api/src/client/pipes.rs:242:                    return pipe.parameters().clone();
-crates/meerschaum-api/src/client/pipes.rs:246:        meerschaum_core::value::apply_patch_maps(&remote, pipe.parameters())
-crates/meerschaum-api/src/client/pipes.rs:327:            body: Body::Json(py_json(&Value::Map(pipe.parameters().clone()))),
-crates/meerschaum-api/src/client/pipes.rs:737:            Value::Map(m) if m.is_empty() || matches!(m.get("parameters"), Some(Value::Map(_))) => {
+crates/meerschaum-connector-sql/src/instance/maintenance.rs:79:            .table_exists(&sp.target, self.get_pipe_schema(sp).as_deref())
+crates/meerschaum-connector-sql/src/instance/maintenance.rs:116:        if !pipe.param("compress").is_some_and(|v| v.truthy()) {
+crates/meerschaum-connector-sql/src/instance/maintenance.rs:128:            .table_exists(&sp.target, self.get_pipe_schema(&sp).as_deref())
+crates/meerschaum-connector-sql/src/instance/maintenance.rs:184:            .table_exists(&sp.target, self.get_pipe_schema(&sp).as_deref())
+crates/meerschaum-connector-sql/src/instance/maintenance.rs:259:            .table_exists(&sp.target, self.get_pipe_schema(&sp).as_deref())
+crates/meerschaum-connector-sql/src/instance/maintenance.rs:296:            if let Some(col) = self.geopackage_geometry_column(&sp.target).await {
+crates/meerschaum-connector-sql/src/instance/maintenance.rs:297:                let rtree = crate::instance::geopackage::rtree_name(&sp.target, &col);
+crates/meerschaum-connector-sql/src/instance/maintenance.rs:300:                        crate::instance::geopackage::get_rtree_create_queries(&sp.target, &col);
+crates/meerschaum-connector-sql/src/instance/maintenance.rs:326:            .table_exists(&sp.target, self.get_pipe_schema(&sp).as_deref())
+crates/meerschaum-connector-api/src/client/pipes.rs:190:        match pipe.parameters().get("instance_keys") {
+crates/meerschaum-connector-api/src/client/pipes.rs:225:            return pipe.parameters().clone();
+crates/meerschaum-connector-api/src/client/pipes.rs:233:                        .get("parameters")
+crates/meerschaum-connector-api/src/client/pipes.rs:242:                    return pipe.parameters().clone();
+crates/meerschaum-connector-api/src/client/pipes.rs:246:        meerschaum_core::value::apply_patch_maps(&remote, pipe.parameters())
+crates/meerschaum-connector-api/src/client/pipes.rs:327:            body: Body::Json(py_json(&Value::Map(pipe.parameters().clone()))),
+crates/meerschaum-connector-api/src/client/pipes.rs:737:            Value::Map(m) if m.is_empty() || matches!(m.get("parameters"), Some(Value::Map(_))) => {
 ```

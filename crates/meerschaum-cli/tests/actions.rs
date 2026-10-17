@@ -187,12 +187,12 @@ fn pipelines_dispatch_core_steps_natively() {
 
 #[test]
 fn sql_metadata_workers_preserve_exact_action_output() {
-    use meerschaum_core::{Pipe, Value};
-    use meerschaum_sql::{
+    use meerschaum_connector_sql::{
         SqlConnector,
         flavor::Flavor,
         uri::{ConnectionSpec, ConnectorAttributes},
     };
+    use meerschaum_core::{Pipe, Value};
 
     let tmp = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(tmp.path().join("sqlite")).unwrap();

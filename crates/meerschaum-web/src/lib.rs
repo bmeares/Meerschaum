@@ -1,3 +1,6 @@
+//! **Internal crate** of [Meerschaum](https://meerschaum.io): its API may change in any minor
+//! release. Depend on the [`meerschaum`](https://docs.rs/meerschaum) crate instead.
+//!
 //! Server-rendered `/dash` console. Compose with `app`; plugin Dash apps remain unmatched.
 #![deny(unsafe_code)]
 mod pages;
@@ -122,7 +125,7 @@ impl WebConfig {
     }
 
     /// Prefer the configured cache connector over the instance fallback.
-    pub fn with_cache(mut self, cache: &meerschaum_valkey::ValkeyConnector) -> Self {
+    pub fn with_cache(mut self, cache: &meerschaum_connector_valkey::ValkeyConnector) -> Self {
         self.sessions = Arc::new(sessions::ValkeySessions(cache.backend().clone()));
         self
     }

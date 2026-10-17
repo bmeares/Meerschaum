@@ -19,7 +19,7 @@ use crate::state::AppState;
 
 /// Register `/login`.
 pub fn routes(app: Router<AppState>) -> Router<AppState> {
-    app.route(meerschaum_api::routes::LOGIN, post(login))
+    app.route(meerschaum_connector_api::routes::LOGIN, post(login))
 }
 
 /// `datetime.isoformat()` of a naive timestamp (microseconds omitted when zero).
@@ -182,7 +182,7 @@ async fn login(ctx: Ctx, body: Body) -> ApiResult {
                 .collect()
         };
 
-    let expires_minutes = meerschaum_api::routes::TOKEN_EXPIRES_MINUTES;
+    let expires_minutes = meerschaum_connector_api::routes::TOKEN_EXPIRES_MINUTES;
     let now = Utc::now();
     let expires_dt = (now + Duration::minutes(expires_minutes)).naive_utc();
     let mut claims = Map::new();

@@ -6,14 +6,20 @@ license.workspace = true
 repository.workspace = true
 authors.workspace = true
 rust-version.workspace = true
-description = "Meerschaum v5: the axum HTTP API server, OAuth2/JWT, tokens, websockets and the extension-host proxy (see docs/design/v5.0.0.md §7)"
+description = "Internal crate of Meerschaum: the axum HTTP API server (OAuth2/JWT, tokens, websockets, MCP, extension-host proxy)"
+readme = "README.md"
+homepage.workspace = true
+documentation = "https://docs.rs/meerschaum-server"
+keywords = ["meerschaum", "api", "axum", "mcp", "etl"]
+categories = ["web-programming::http-server", "database"]
+include = ["src/**/*", "/LICENSE", "/NOTICE"]
 
 [dependencies]
 meerschaum-core = { workspace = true }
 meerschaum-kernel = { workspace = true }
 meerschaum-connector = { workspace = true }
 # Only the shared route/auth models (`models`, `routes`, `wire`); no HTTP client.
-meerschaum-api = { workspace = true }
+meerschaum-connector-api = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 indexmap = { workspace = true }

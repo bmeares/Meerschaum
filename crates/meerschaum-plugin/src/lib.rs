@@ -1,3 +1,6 @@
+//! The native plugin SDK of [Meerschaum](https://meerschaum.io). The C ABI (`mrsm_plugin_v1`) is versioned
+//! and stable independently of the Rust types around it.
+//!
 //! Versioned native plugin ABI, safe author SDK, discovery and connector adapters.
 //! See the crate README for ownership, threading and wire contracts.
 #![deny(unsafe_op_in_unsafe_fn)]

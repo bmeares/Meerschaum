@@ -23,7 +23,7 @@ from typing import Any, Dict, Optional
 _dict: Dict[str, Any] = {}
 
 ### The name under which the loader imports the compiled module (`meerschaum/_core/__init__.py`).
-_EXTENSION_MODULE = 'meerschaum._core._core'
+_EXTENSION_MODULE = 'meerschaum._core._native'
 
 
 def _loaded_extension() -> Optional[Any]:

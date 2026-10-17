@@ -165,7 +165,7 @@ pipeline.pipes                   # every pipe the selection resolves to, in depe
 
 ```bash
 mrsm plan pipes -m daily --parents      # the plan table, nothing is synced
-mrsm show graph -m daily --parents      # the selection as an ASCII DAG
+mrsm show graph -m daily --parents      # the selection as a box-drawing tree
 mrsm show runs --last 5                 # recorded runs, newest first
 mrsm show run <run_id>                  # one run's Gantt chart
 ```
@@ -183,12 +183,16 @@ sql:local/daily  skip*   -           -       no cursor on the edge from sql:loca
 Nothing was synced.
 
 $ mrsm show graph -i sql:local -m daily --parents
-sql:local/raw
-  sql:local/clean  ← sql:local/raw
-    sql:local/daily*  ← sql:local/clean
+Pipe graph on sql:local: 3 pipes, 2 edges, 1 root, depth 3
+
+● sql:local/raw
+└── ◆ sql:local/clean
+    └── ○ sql:local/daily ★
+
+● root   ◆ has children   ○ leaf   ★ selected
 ```
 
-In the plan, a `*` after the action marks a provisional row: a child cannot know what its parent will change, so the executor plans it again when the parent finishes. In the graph, `*` marks the targets you selected (the others were pulled in by `--parents`). After a run, `show runs` lists it:
+In the plan, a `*` after the action marks a provisional row: a child cannot know what its parent will change, so the executor plans it again when the parent finishes. In the graph, `★` marks the targets you selected (the others were pulled in by `--parents`), `●` a root and `○` a leaf; see [Visualization](/reference/pipelines/visualization/) for back-references, collapsed fan-outs and edge details. After a run, `show runs` lists it:
 
 ```text
 $ mrsm show runs --last 5

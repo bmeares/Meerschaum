@@ -1,5 +1,9 @@
 # meerschaum-engine
 
+> **Internal crate.** `meerschaum-engine` is an implementation detail of [Meerschaum](https://meerschaum.io)
+> and may change in any minor release. Depend on the [`meerschaum`](https://crates.io/crates/meerschaum)
+> crate instead.
+
 The dependency-aware Syncing Engine (`docs/design/v5.0.0.md` §5). It plans and runs syncs over
 the implicit pipe graph against the `InstanceConnector` / `Connector` traits of
 `meerschaum-connector`, so SQL, Valkey, API and Python-adapter connectors all plug in.

@@ -6,7 +6,13 @@ license.workspace = true
 repository.workspace = true
 authors.workspace = true
 rust-version.workspace = true
-description = "Meerschaum v5: jobs crate (see docs/design/v5.0.0.md)"
+description = "Internal crate of Meerschaum: job supervision (daemons, schedules, laps, local, systemd and remote executors)"
+readme = "README.md"
+homepage.workspace = true
+documentation = "https://docs.rs/meerschaum-jobs"
+keywords = ["meerschaum", "jobs", "daemon", "scheduler", "supervisor"]
+categories = ["os", "asynchronous"]
+include = ["src/**/*", "/LICENSE", "/NOTICE"]
 
 [[bin]]
 # The detached job supervisor. Hosts (the `mrsm` binary) may instead call

@@ -14,8 +14,10 @@ use std::time::{Duration, Instant};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use indexmap::IndexMap;
-use meerschaum_api::models::{EdgeCursor, EngineEvent, EngineState, LedgerEntry, RunRecord};
 use meerschaum_connector::InstanceConnector;
+use meerschaum_connector_api::models::{
+    EdgeCursor, EngineEvent, EngineState, LedgerEntry, RunRecord,
+};
 use meerschaum_core::{Map, SuccessTuple};
 use serde_json::Value as Json;
 use tokio::sync::mpsc;
@@ -186,7 +188,7 @@ impl JobsBackend for NoJobs {
 // Engine state (§5.8)
 // ------------------------------------------------------------------------------------------------
 
-/// Engine state for the `/engine/*` routes. The shapes are `meerschaum_api::models`.
+/// Engine state for the `/engine/*` routes. The shapes are `meerschaum_connector_api::models`.
 #[async_trait]
 pub trait EngineBackend: Send + Sync {
     /// `POST /engine/ledger`.

@@ -196,7 +196,7 @@ def test_unsafe_python_tags_are_refused_by_load(text):
 
 
 def test_exception_hierarchy():
-    from meerschaum._core import _core as extension
+    from meerschaum._core import _native as extension
     native = extension.yaml
     assert issubclass(native.ScannerError, native.MarkedYAMLError)
     assert issubclass(native.ParserError, native.MarkedYAMLError)
@@ -339,7 +339,7 @@ def test_load_without_data_returns_none():
 @pytest.mark.skipif(not HAS_PYYAML, reason='PyYAML is not installed')
 def test_native_matches_pyyaml_on_the_load_corpus():
     import yaml as pyyaml
-    from meerschaum._core import _core as extension
+    from meerschaum._core import _native as extension
     native = extension.yaml
     mismatches = []
     for name, text in corpus.LOAD_CASES:
@@ -359,7 +359,7 @@ def test_native_matches_pyyaml_on_the_load_corpus():
 @pytest.mark.skipif(not HAS_PYYAML, reason='PyYAML is not installed')
 def test_native_dump_matches_pyyaml_dumper_with_meerschaum_customizations():
     import yaml as pyyaml
-    from meerschaum._core import _core as extension
+    from meerschaum._core import _native as extension
     native = extension.yaml
 
     def presenter(dumper, data):

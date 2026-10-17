@@ -6,12 +6,12 @@ use std::path::PathBuf;
 use std::process::Command;
 
 use meerschaum_connector::DataQuery;
-use meerschaum_core::{Pipe, Value};
-use meerschaum_sql::{
+use meerschaum_connector_sql::{
     SqlConnector,
     flavor::Flavor,
     uri::{ConnectionSpec, ConnectorAttributes},
 };
+use meerschaum_core::{Pipe, Value};
 
 fn pipe(metric: &str, sql: &str, target: &str) -> Pipe {
     let mut pipe = Pipe::builder("sql:local", metric)

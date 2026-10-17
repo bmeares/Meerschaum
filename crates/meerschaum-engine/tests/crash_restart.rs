@@ -31,13 +31,13 @@ use std::time::Duration;
 use common::{json_map, norm_kvalue, temp_dir};
 use meerschaum_connector::pipe_ops::frame_to_docs;
 use meerschaum_connector::{DataQuery, InstanceConnector};
+use meerschaum_connector_sql::SqlConnector;
 use meerschaum_core::Pipe;
 use meerschaum_engine::{
     Depth, Engine, EngineConfig, FaultInjector, NodeStatus, PipeRef, RunOptions, RunResult,
     Selection, StateSource, StaticRegistry,
 };
 use meerschaum_kernel::value::{DateTimeValue, Value as KValue};
-use meerschaum_sql::SqlConnector;
 
 const KEYS: &str = "sql:w9crash";
 const LABEL: &str = "w9crash";

@@ -1,12 +1,13 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/meerschaum",
     "crates/meerschaum-core",
     "crates/meerschaum-kernel",
     "crates/meerschaum-connector",
-    "crates/meerschaum-sql",
-    "crates/meerschaum-valkey",
-    "crates/meerschaum-api",
+    "crates/meerschaum-connector-sql",
+    "crates/meerschaum-connector-valkey",
+    "crates/meerschaum-connector-api",
     "crates/meerschaum-engine",
     "crates/meerschaum-jobs",
     "crates/meerschaum-compose",
@@ -23,6 +24,7 @@ version = "5.0.0-a1"
 edition = "2024"
 license = "Apache-2.0"
 repository = "https://github.com/bmeares/Meerschaum"
+homepage = "https://meerschaum.io"
 authors = ["Bennett Meares <bennett.meares@gmail.com>"]
 rust-version = "1.85"
 
@@ -30,19 +32,21 @@ rust-version = "1.85"
 # Add new shared entries here only when two or more crates need the same dependency;
 # crate-private dependencies go in the crate's own Cargo.toml with an explicit version.
 [workspace.dependencies]
-meerschaum-core = { path = "crates/meerschaum-core" }
-meerschaum-kernel = { path = "crates/meerschaum-kernel" }
-meerschaum-connector = { path = "crates/meerschaum-connector" }
-meerschaum-sql = { path = "crates/meerschaum-sql" }
-meerschaum-valkey = { path = "crates/meerschaum-valkey" }
-meerschaum-api = { path = "crates/meerschaum-api", default-features = false }
-meerschaum-engine = { path = "crates/meerschaum-engine" }
-meerschaum-jobs = { path = "crates/meerschaum-jobs" }
-meerschaum-compose = { path = "crates/meerschaum-compose" }
-meerschaum-server = { path = "crates/meerschaum-server" }
-meerschaum-web = { path = "crates/meerschaum-web" }
-meerschaum-plugin = { path = "crates/meerschaum-plugin" }
-meerschaum-worker = { path = "crates/meerschaum-worker" }
+# Workspace crates are versioned in lockstep: every `version = "=X"` below must equal
+# `[workspace.package] version` (scripts/check_packaging.py checks it; cargo cannot inherit it here).
+meerschaum-core = { path = "crates/meerschaum-core", version = "=5.0.0-a1" }
+meerschaum-kernel = { path = "crates/meerschaum-kernel", version = "=5.0.0-a1" }
+meerschaum-connector = { path = "crates/meerschaum-connector", version = "=5.0.0-a1" }
+meerschaum-connector-sql = { path = "crates/meerschaum-connector-sql", version = "=5.0.0-a1" }
+meerschaum-connector-valkey = { path = "crates/meerschaum-connector-valkey", version = "=5.0.0-a1" }
+meerschaum-connector-api = { path = "crates/meerschaum-connector-api", version = "=5.0.0-a1", default-features = false }
+meerschaum-engine = { path = "crates/meerschaum-engine", version = "=5.0.0-a1" }
+meerschaum-jobs = { path = "crates/meerschaum-jobs", version = "=5.0.0-a1" }
+meerschaum-compose = { path = "crates/meerschaum-compose", version = "=5.0.0-a1" }
+meerschaum-server = { path = "crates/meerschaum-server", version = "=5.0.0-a1" }
+meerschaum-web = { path = "crates/meerschaum-web", version = "=5.0.0-a1" }
+meerschaum-plugin = { path = "crates/meerschaum-plugin", version = "=5.0.0-a1" }
+meerschaum-worker = { path = "crates/meerschaum-worker", version = "=5.0.0-a1" }
 
 anyhow = "1"
 thiserror = "2"
