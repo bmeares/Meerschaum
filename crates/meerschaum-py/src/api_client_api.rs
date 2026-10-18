@@ -645,6 +645,40 @@ impl PyApiConnector {
         block_on(py, async move { c.token().await })
     }
 
+    /// v4's `self._token`: the stored session token, `None` before a login (never logs in).
+    #[getter]
+    fn stored_token(&self, py: Python<'_>) -> Option<String> {
+        let c = self.conn();
+        block_on(py, async move { c.stored_token().await.0 })
+    }
+
+    #[setter]
+    fn set_stored_token(&self, py: Python<'_>, token: Option<String>) {
+        let c = self.conn();
+        block_on(py, async move { c.set_stored_token(token).await });
+    }
+
+    /// v4's `self._expires`: the stored expiration as an ISO naive timestamp, or `None`.
+    #[getter]
+    fn stored_expires(&self, py: Python<'_>) -> Option<String> {
+        let c = self.conn();
+        block_on(py, async move {
+            c.stored_token()
+                .await
+                .1
+                .map(|e| e.format("%Y-%m-%dT%H:%M:%S%.6f").to_string())
+        })
+    }
+
+    #[setter]
+    fn set_stored_expires(&self, py: Python<'_>, expires: Option<String>) {
+        let c = self.conn();
+        let parsed = expires
+            .as_deref()
+            .and_then(meerschaum_connector_api::client::parse_expires);
+        block_on(py, async move { c.set_stored_expires(parsed).await });
+    }
+
     /// `get_pipe_instance_keys(pipe)`.
     fn get_pipe_instance_keys(&self, pipe: &Bound<'_, PyAny>) -> PyResult<Option<String>> {
         let p = raw_pipe(pipe)?;

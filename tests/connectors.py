@@ -89,7 +89,7 @@ conns = {
     #  ),
     'api': get_connector(
         'api', 'test_api',
-        port=8989,
+        port=int(os.environ.get('MRSM_TEST_API_PORT') or 8989),
         username='test',
         password='test1234',
         host='localhost',

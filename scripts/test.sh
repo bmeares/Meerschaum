@@ -8,7 +8,8 @@ test_root="$PARENT/test_root"
 test_plugins="$PARENT/tests/plugins"
 mrsm="$PARENT/scripts/mrsm.sh"
 mkdir -p "$test_root"
-test_port="8989"
+test_port="${MRSM_TEST_API_PORT:-8989}"
+export MRSM_TEST_API_PORT="$test_port"
 export MRSM_ROOT_DIR=$test_root
 export MRSM_PLUGINS_DIR=$test_plugins
 export MRSM_API_TEST=http://user:pass@localhost:$test_port

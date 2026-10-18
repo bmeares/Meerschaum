@@ -37,6 +37,7 @@ use meerschaum_core::{Map, Value};
 use crate::traits::{ConnectorError, ConnectorResult};
 
 pub use jobs::LogsMonitor;
+pub use login::parse_expires;
 pub use request::{ApiResponse, Body, Method, RequestOptions};
 
 /// `pipes:attributes:local_cache_timeout_seconds`.

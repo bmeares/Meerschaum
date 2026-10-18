@@ -200,18 +200,6 @@ class APIConnector(InstanceConnector):
         self.__dict__['_rust_client_attributes'] = attributes
         return client
 
-        from meerschaum import _core
-        attributes = {
-            key: value
-            for key, value in self.__dict__.items()
-            if not str(key).startswith('_')
-            and isinstance(value, (str, int, float, bool))
-        }
-        client = _core.ApiConnector(self.label, attributes)
-        self.__dict__['_rust_client_obj'] = client
-        self.__dict__['_rust_client_pid'] = os.getpid()
-        return client
-
     def __getstate__(self):
         state = self.__dict__.copy()
         for key in ('_rust_client_obj', '_rust_client_pid', '_rust_client_attributes', '_session'):
@@ -249,6 +237,43 @@ class APIConnector(InstanceConnector):
         Return the API key, or the session token (logging in when it is missing or expiring).
         """
         return self._rust_client().token
+
+    @property
+    def _token(self) -> Union[str, None]:
+        """
+        The stored session token (v4's attribute): `None` before a login, and it never logs in.
+        Assign `None` to force a new login.
+        """
+        return self._rust_client().stored_token
+
+    @_token.setter
+    def _token(self, value: Union[str, None]) -> None:
+        self._rust_client().stored_token = value
+
+    @property
+    def _expires(self):
+        """
+        When the stored session token expires (v4's attribute, a naive `datetime`), or `None`.
+        """
+        import datetime
+        value = self._rust_client().stored_expires
+        return None if value is None else datetime.datetime.fromisoformat(value)
+
+    @_expires.setter
+    def _expires(self, value) -> None:
+        import datetime
+        if value is not None:
+            if isinstance(value, str):
+                value = datetime.datetime.fromisoformat(value)
+            if not isinstance(value, datetime.datetime):
+                raise TypeError(
+                    f"`_expires` must be a datetime, an ISO string or None, not {type(value).__name__}."
+                )
+            ### Stored as naive UTC, like v4's: an aware value is converted, not just stripped.
+            if value.tzinfo is not None:
+                value = value.astimezone(datetime.timezone.utc).replace(tzinfo=None)
+            value = value.isoformat()
+        self._rust_client().stored_expires = value
 
     @property
     def instance_keys(self) -> Union[str, None]:

@@ -128,6 +128,23 @@ impl APIConnector {
         auth.token.clone()
     }
 
+    /// The stored session token and its expiration, without logging in (v4's `_token` and
+    /// `_expires` attributes: `None` before a login).
+    pub async fn stored_token(&self) -> (Option<String>, Option<NaiveDateTime>) {
+        let auth = self.auth.lock().await;
+        (auth.token.clone(), auth.expires)
+    }
+
+    /// Replace only the stored token (v4 assigns `self._token = None` to force a new login).
+    pub async fn set_stored_token(&self, token: Option<String>) {
+        self.auth.lock().await.token = token;
+    }
+
+    /// Replace only the stored expiration (v4's `self._expires`).
+    pub async fn set_stored_expires(&self, expires: Option<NaiveDateTime>) {
+        self.auth.lock().await.expires = expires;
+    }
+
     /// Set the session token directly (e.g. a token obtained elsewhere).
     pub async fn set_token(&self, token: Option<String>, expires: Option<NaiveDateTime>) {
         let mut auth = self.auth.lock().await;
@@ -152,6 +169,28 @@ impl APIConnector {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn stored_token_is_v4_private_state_and_never_logs_in() {
+        let mut attrs = meerschaum_core::Map::new();
+        attrs.insert(
+            "host".into(),
+            meerschaum_core::Value::Str("127.0.0.1".into()),
+        );
+        attrs.insert("port".into(), meerschaum_core::Value::Int(1));
+        let conn = APIConnector::new(Some("stored"), attrs).unwrap();
+        assert_eq!(conn.stored_token().await, (None, None));
+
+        let expires = parse_expires("2099-01-01T00:00:00.500000");
+        conn.set_stored_token(Some("jwt".into())).await;
+        conn.set_stored_expires(expires).await;
+        assert_eq!(conn.stored_token().await, (Some("jwt".into()), expires));
+        // A valid stored token is returned without a request (nothing listens on port 1).
+        assert_eq!(conn.token().await.as_deref(), Some("jwt"));
+
+        conn.set_stored_token(None).await;
+        assert_eq!(conn.stored_token().await, (None, expires));
+    }
 
     #[test]
     fn expires_formats() {

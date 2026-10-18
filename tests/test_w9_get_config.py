@@ -10,6 +10,7 @@ scenarios are the mutation paths a cache could miss: callers editing returned di
 """
 
 import copy
+import os
 
 import pytest
 
@@ -160,7 +161,19 @@ def test_fast_path_values_match_python_for_loaded_keys():
 
     def scenario():
         from meerschaum.config import get_config
-        return [copy.deepcopy(get_config(*keys)) for keys in keys_list]
+        values = [copy.deepcopy(get_config(*keys)) for keys in keys_list]
+        ### The connectors the harness defines through `MRSM_SQL_<LABEL>` (`scripts/test.sh` sets
+        ### some) are merged into the config on top of the recorded defaults: they are not what
+        ### this test compares.
+        env_labels = {
+            key[len('MRSM_SQL_'):].lower()
+            for key in os.environ
+            if key.startswith('MRSM_SQL_')
+        }
+        values[-1] = {
+            label: params for label, params in values[-1].items() if label not in env_labels
+        }
+        return values
 
     expected, actual = run_both(scenario)
     assert actual == expected

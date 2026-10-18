@@ -251,9 +251,9 @@ parity-phase Python mode).
 **`SuccessTuple`** (`Tuple[bool, str]`) is still the universal return type for actions, pipe methods
 and connector methods: return `(True, "...")` / `(False, "reason")`, never raise from action-level code.
 The Rust side returns `SyncResult` (`meerschaum-core/src/success.rs`): `(success, message)`-compatible
-plus `inserted` / `updated` / `upserted` / `duration` / `begin` / `end`; the spec makes the Python
-`pipe.sync()` return a `tuple` subclass of the same shape (not yet in the façade, which still returns a
-plain tuple), so `success, msg = pipe.sync()` must keep unpacking. Use `warn` / `error` / `info` /
+plus `inserted` / `updated` / `upserted` / `duration` / `begin` / `end`; the Python `pipe.sync()`
+returns `mrsm.SyncResult` (`meerschaum/core/Pipe/_sync.py`), a `tuple` subclass of the same shape, so
+`success, msg = pipe.sync()` keeps unpacking. Use `warn` / `error` / `info` /
 `dprint(msg, debug=debug)` from `meerschaum.utils.warnings`, not `print()`.
 
 **Identity.** `Pipe(connector_keys, metric_key, location_key=None, instance=...)`. `pipe.target` defaults
@@ -390,6 +390,9 @@ organizations, home directories, hostnames or credentials.
   use bound parameters for user values and `clean()` only for internal names. `dateadd_str`
   validates `datepart` against a whitelist after the `isinstance(begin, int)` early return. Queries
   built with `.format()` escape names with `s.replace("'", "''")`.
+- **A connector patch in `MRSM_CONFIG` / `MRSM_PATCH` sits under `meerschaum.connectors.<type>.<label>`**:
+  a top-level `connectors` key is silently ignored, so `sql:main` keeps pointing at `localhost:5432`
+  (on a developer machine that may be a real database). Check the resolved port before mutating anything.
 - **v4 reads every `MRSM_<TYPE>_<LABEL>` variable as a connector**: an inherited `MRSM_CI_MIN_FREE_GB`
   once became a `ci:min_free_gb` connector in a recorded fixture. Drop unrelated `MRSM_*` variables
   when spawning reference or test processes.
