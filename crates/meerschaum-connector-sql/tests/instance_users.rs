@@ -208,6 +208,13 @@ flavor_tests!(test_tokens_roundtrip, |c: Ctx| async move {
         model.scopes,
         vec!["pipes:read".to_string(), "pipes:write".to_string()]
     );
+    // W17T-001: a list on every flavor (SQLite stores the `json` column as text).
+    assert_eq!(
+        InstanceConnector::get_token_scopes(&c.conn, &id)
+            .await
+            .unwrap(),
+        vec!["pipes:read".to_string(), "pipes:write".to_string()]
+    );
     assert!(model.is_valid);
     let hash = InstanceConnector::get_token_secret_hash(&c.conn, &id)
         .await

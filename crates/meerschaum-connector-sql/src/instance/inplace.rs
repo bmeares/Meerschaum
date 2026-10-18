@@ -114,24 +114,21 @@ impl SqlConnector {
             if let Ok(q) = crate::queries::table::get_postgis_geo_columns_types_query(
                 table,
                 ischema.as_deref(),
-            ) {
-                if let Some(t) = tx.as_mut() {
-                    if let Ok(gdf) = t.read_frame(&q).await {
-                        let geo_rows: Vec<(String, String, String, Option<i64>)> = frame_docs(&gdf)
-                            .iter()
-                            .filter_map(|d| {
-                                Some((
-                                    kv_str(d.get("column"))?,
-                                    kv_str(d.get("func"))?,
-                                    kv_str(d.get("type")).unwrap_or_default(),
-                                    kv_int(d.get("srid")),
-                                ))
-                            })
-                            .collect();
-                        geometry =
-                            crate::queries::table::postgis_geo_columns_types_from_rows(&geo_rows);
-                    }
-                }
+            ) && let Some(t) = tx.as_mut()
+                && let Ok(gdf) = t.read_frame(&q).await
+            {
+                let geo_rows: Vec<(String, String, String, Option<i64>)> = frame_docs(&gdf)
+                    .iter()
+                    .filter_map(|d| {
+                        Some((
+                            kv_str(d.get("column"))?,
+                            kv_str(d.get("func"))?,
+                            kv_str(d.get("type")).unwrap_or_default(),
+                            kv_int(d.get("srid")),
+                        ))
+                    })
+                    .collect();
+                geometry = crate::queries::table::postgis_geo_columns_types_from_rows(&geo_rows);
             }
         }
         cols_types_from_rows(&rows, self.flavor, schema, database, &geometry)
@@ -304,11 +301,11 @@ impl SqlConnector {
                 Ok(q) => q,
                 Err(e) => return SuccessTuple::fail(e.to_string()),
             };
-            if let Some(s) = schema.as_deref().filter(|s| !s.is_empty()) {
-                if let Ok(mut q) = get_create_schema_if_not_exists_queries(Some(s), flavor) {
-                    q.extend(queries);
-                    queries = q;
-                }
+            if let Some(s) = schema.as_deref().filter(|s| !s.is_empty())
+                && let Ok(mut q) = get_create_schema_if_not_exists_queries(Some(s), flavor)
+            {
+                q.extend(queries);
+                queries = q;
             }
             if let Some(o) = observer {
                 // Stage the definition's rows once, so the table is created from exactly the
@@ -352,11 +349,11 @@ impl SqlConnector {
                     Ok(q) => q,
                     Err(e) => return SuccessTuple::fail(e.to_string()),
                 };
-                if let Some(s) = schema.as_deref().filter(|s| !s.is_empty()) {
-                    if let Ok(mut q) = get_create_schema_if_not_exists_queries(Some(s), flavor) {
-                        q.extend(queries);
-                        queries = q;
-                    }
+                if let Some(s) = schema.as_deref().filter(|s| !s.is_empty())
+                    && let Ok(mut q) = get_create_schema_if_not_exists_queries(Some(s), flavor)
+                {
+                    q.extend(queries);
+                    queries = q;
                 }
             }
             if !self.exec_queries_all(&queries, false, true).await {
@@ -507,12 +504,11 @@ impl SqlConnector {
             flavor.driver_family(),
             DriverFamily::Sqlite | DriverFamily::Duckdb
         );
-        if sqlite {
-            if let Some(t) = tx.take() {
-                if let Err(e) = t.commit().await {
-                    fail!(e.to_string());
-                }
-            }
+        if sqlite
+            && let Some(t) = tx.take()
+            && let Err(e) = t.commit().await
+        {
+            fail!(e.to_string());
         }
         let pipe_schema = self.get_pipe_schema(&sp);
         let table_cols_types = self
@@ -580,10 +576,10 @@ impl SqlConnector {
             }
         }
         if !check_existing {
-            if let Some(t) = tx.take() {
-                if let Err(e) = t.commit().await {
-                    fail!(e.to_string());
-                }
+            if let Some(t) = tx.take()
+                && let Err(e) = t.commit().await
+            {
+                fail!(e.to_string());
             }
             clean_up(false).await;
             return SuccessTuple::ok(format!("Inserted {new_count}, updated 0 rows."));
@@ -933,11 +929,11 @@ impl SqlConnector {
                 Err(e) => fail!(e),
             }
         }
-        if let Some(t) = tx.take() {
-            if let Err(e) = t.commit().await {
-                clean_up(false).await;
-                return SuccessTuple::fail(e.to_string());
-            }
+        if let Some(t) = tx.take()
+            && let Err(e) = t.commit().await
+        {
+            clean_up(false).await;
+            return SuccessTuple::fail(e.to_string());
         }
         let msg = if !upsert {
             format!(

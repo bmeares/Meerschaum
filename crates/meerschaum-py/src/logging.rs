@@ -43,20 +43,24 @@ impl Visit for MessageVisitor {
 
 struct PythonSink {
     next_span: AtomicU64,
+    /// The CLI subscriber when `RUST_LOG` asked for one (see [`CLI_SINK`]). **Span routing rule:**
+    /// when it exists it owns *every* span of the process (`new_span`, `enter`, `exit`,
+    /// `clone_span`, `try_close` ... all go to it, in Python mode too), so an id is only ever
+    /// seen by the subscriber which made it; without it the sink makes counter ids and no span
+    /// call goes anywhere. It exists from [`install`] on, before any span can be created, so the
+    /// rule cannot change during the process's life (no mode, no bit of the id decides anything).
+    /// No Meerschaum crate opens spans in Python mode; this keeps the ones in `RUST_LOG` runs
+    /// (`start api`) balanced.
+    spans: Option<&'static (dyn Subscriber + Send + Sync)>,
 }
 
-/// Span ids this sink hands out itself carry this bit; the CLI subscriber's (a `tracing`
-/// registry's slab indexes) never do. A span's later calls (`enter`, `exit`, `clone_span`,
-/// `try_close`, ...) are routed by its id, not by the current mode, so a span opened while the CLI
-/// sink was in charge still closes there after `_native.main` returned to a Python caller.
-const OWN_SPAN: u64 = 1 << 63;
-
-/// The CLI subscriber of a span id which came from it, if there is one.
-fn cli_span(id: &Id) -> Option<&'static (dyn Subscriber + Send + Sync)> {
-    if id.into_u64() & OWN_SPAN != 0 {
-        return None;
+impl PythonSink {
+    fn new(spans: Option<&'static (dyn Subscriber + Send + Sync)>) -> PythonSink {
+        PythonSink {
+            next_span: AtomicU64::new(1),
+            spans,
+        }
     }
-    CLI_SINK.get()?.as_deref()
 }
 
 /// What `_native.main` (the `mrsm` console script) runs on instead of Python's `warn()`: the
@@ -75,9 +79,8 @@ fn cli_mode() -> Option<&'static CliSink> {
         .flatten()
 }
 
-/// Switch the sink to the standalone binary's behavior (`_native.main`, the `mrsm` console
-/// script) until [`leave_cli_mode`]. Idempotent.
-pub fn enter_cli_mode() {
+/// The CLI sink (built once, from `RUST_LOG` as it is when the sink is installed or first needed).
+fn cli_sink() -> &'static CliSink {
     CLI_SINK.get_or_init(|| {
         std::env::var_os("RUST_LOG").map(|_| {
             Box::new(
@@ -87,7 +90,13 @@ pub fn enter_cli_mode() {
                     .finish(),
             ) as Box<dyn Subscriber + Send + Sync>
         })
-    });
+    })
+}
+
+/// Switch the sink to the standalone binary's behavior (`_native.main`, the `mrsm` console
+/// script) until [`leave_cli_mode`]. Idempotent.
+pub fn enter_cli_mode() {
+    cli_sink();
     CLI_ACTIVE.store(true, Ordering::SeqCst);
 }
 
@@ -125,21 +134,21 @@ impl Subscriber for PythonSink {
     }
 
     fn new_span(&self, attributes: &Attributes<'_>) -> Id {
-        if let Some(Some(cli)) = cli_mode() {
-            return cli.new_span(attributes);
+        match self.spans {
+            Some(spans) => spans.new_span(attributes),
+            None => Id::from_u64(self.next_span.fetch_add(1, Ordering::Relaxed)),
         }
-        Id::from_u64(OWN_SPAN | self.next_span.fetch_add(1, Ordering::Relaxed))
     }
 
     fn record(&self, span: &Id, values: &Record<'_>) {
-        if let Some(cli) = cli_span(span) {
-            cli.record(span, values);
+        if let Some(spans) = self.spans {
+            spans.record(span, values);
         }
     }
 
     fn record_follows_from(&self, span: &Id, follows: &Id) {
-        if let Some(cli) = cli_span(span) {
-            cli.record_follows_from(span, follows);
+        if let Some(spans) = self.spans {
+            spans.record_follows_from(span, follows);
         }
     }
 
@@ -156,7 +165,9 @@ impl Subscriber for PythonSink {
         event.record(&mut visitor);
         let level = *event.metadata().level();
         let message = visitor.message;
-        let _ = Python::with_gil(|py| -> PyResult<()> {
+        // `try_attach`: an event from a runtime thread while the interpreter shuts down is
+        // dropped (pyo3 0.30's `attach` panics during finalization on Python 3.13+).
+        let _ = Python::try_attach(|py| -> PyResult<()> {
             if level <= Level::WARN {
                 let warn = py.import("meerschaum.utils.warnings")?.getattr("warn")?;
                 let kwargs = pyo3::types::PyDict::new(py);
@@ -171,30 +182,29 @@ impl Subscriber for PythonSink {
     }
 
     fn enter(&self, span: &Id) {
-        if let Some(cli) = cli_span(span) {
-            cli.enter(span);
+        if let Some(spans) = self.spans {
+            spans.enter(span);
         }
     }
 
     fn exit(&self, span: &Id) {
-        if let Some(cli) = cli_span(span) {
-            cli.exit(span);
+        if let Some(spans) = self.spans {
+            spans.exit(span);
         }
     }
 
     fn clone_span(&self, id: &Id) -> Id {
-        match cli_span(id) {
-            Some(cli) => cli.clone_span(id),
+        match self.spans {
+            Some(spans) => spans.clone_span(id),
             None => id.clone(),
         }
     }
 
     /// Forwarded, so the CLI subscriber's registry releases the spans of `start api` with
-    /// `RUST_LOG` set. The sink's own spans are not tracked: they are closed as soon as the last
-    /// handle is dropped.
+    /// `RUST_LOG` set.
     fn try_close(&self, id: Id) -> bool {
-        match cli_span(&id) {
-            Some(cli) => cli.try_close(id),
+        match self.spans {
+            Some(spans) => spans.try_close(id),
             None => true,
         }
     }
@@ -203,9 +213,7 @@ impl Subscriber for PythonSink {
 /// Install the sink as the global `tracing` subscriber (once; a failure means another
 /// subscriber is installed and is left alone).
 pub fn install() {
-    let _ = tracing::subscriber::set_global_default(PythonSink {
-        next_span: AtomicU64::new(1),
-    });
+    let _ = tracing::subscriber::set_global_default(PythonSink::new(cli_sink().as_deref()));
 }
 
 #[cfg(test)]
@@ -227,25 +235,72 @@ mod tests {
                 tracing::field::FieldSet::new(&[], tracing::callsite::Identifier(&CALLSITE)),
                 tracing::metadata::Kind::EVENT,
             ));
-        let sink = PythonSink {
-            next_span: AtomicU64::new(1),
-        };
+        let sink = PythonSink::new(None);
         assert!(sink.register_callsite(CALLSITE.metadata()).is_sometimes());
     }
 
+    use std::sync::atomic::AtomicUsize;
+
+    /// A subscriber which hands out ids with every bit pattern (the top one included) and counts
+    /// the calls it gets.
+    struct Recorder {
+        calls: AtomicUsize,
+    }
+
+    const PACKED: u64 = (1 << 63) | 42;
+
+    impl Subscriber for Recorder {
+        fn enabled(&self, _: &Metadata<'_>) -> bool {
+            true
+        }
+        fn new_span(&self, _: &Attributes<'_>) -> Id {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            Id::from_u64(PACKED)
+        }
+        fn record(&self, _: &Id, _: &Record<'_>) {}
+        fn record_follows_from(&self, _: &Id, _: &Id) {}
+        fn event(&self, _: &Event<'_>) {}
+        fn enter(&self, id: &Id) {
+            assert_eq!(id.into_u64(), PACKED);
+            self.calls.fetch_add(1, Ordering::SeqCst);
+        }
+        fn exit(&self, id: &Id) {
+            assert_eq!(id.into_u64(), PACKED);
+            self.calls.fetch_add(1, Ordering::SeqCst);
+        }
+        fn clone_span(&self, id: &Id) -> Id {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            id.clone()
+        }
+        fn try_close(&self, id: Id) -> bool {
+            assert_eq!(id.into_u64(), PACKED);
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            true
+        }
+    }
+
     #[test]
-    fn the_sinks_own_spans_never_reach_the_cli_subscriber() {
-        let sink = PythonSink {
-            next_span: AtomicU64::new(1),
-        };
-        let own = Id::from_u64(OWN_SPAN | 7);
-        assert!(cli_span(&own).is_none());
-        assert_eq!(sink.clone_span(&own), own);
-        assert!(sink.try_close(own.clone()));
-        // Without a CLI sink installed there is nothing to forward a registry id to either.
-        let theirs = Id::from_u64(3);
-        assert_eq!(sink.clone_span(&theirs), theirs);
-        sink.enter(&theirs);
-        sink.exit(&theirs);
+    fn without_a_cli_subscriber_no_span_call_goes_anywhere() {
+        let sink = PythonSink::new(None);
+        let id = Id::from_u64(7);
+        assert_eq!(sink.clone_span(&id), id);
+        assert!(sink.try_close(id.clone()));
+        sink.enter(&id);
+        sink.exit(&id);
+    }
+
+    #[test]
+    fn a_cli_subscriber_owns_every_span_whatever_the_bits_of_its_ids() {
+        // The CLI subscriber's ids may use any bit: nothing here decides by the id.
+        let recorder: &'static Recorder = Box::leak(Box::new(Recorder {
+            calls: AtomicUsize::new(0),
+        }));
+        let sink = PythonSink::new(Some(recorder));
+        let id = Id::from_u64(PACKED);
+        let id = sink.clone_span(&id);
+        sink.enter(&id);
+        sink.exit(&id);
+        assert!(sink.try_close(id));
+        assert_eq!(recorder.calls.load(Ordering::SeqCst), 4);
     }
 }

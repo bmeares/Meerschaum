@@ -9,7 +9,7 @@ use arrow::array::{
 };
 use arrow::datatypes::{DataType, TimeUnit};
 use futures_util::FutureExt;
-use meerschaum_connector_sql::driver::{SqlDriver, SqlValue};
+use meerschaum_connector_sql::driver::{SqlDriver, SqlParam, SqlValue};
 use meerschaum_connector_sql::uri::ConnectionSpec;
 
 #[tokio::test]
@@ -180,5 +180,68 @@ async fn mysql_types_and_exec_queries() {
         .unwrap();
     if let Err(panic) = result {
         std::panic::resume_unwind(panic);
+    }
+}
+
+/// The session's `Com_stmt_prepare` and `Com_stmt_close` counters, read on the pool's only
+/// connection (the status statement itself is prepared once and then cached).
+async fn stmt_counters(driver: &SqlDriver) -> (i64, i64) {
+    let batches = driver
+        .read("SHOW SESSION STATUS WHERE Variable_name IN ('Com_stmt_prepare', 'Com_stmt_close')")
+        .await
+        .unwrap();
+    let batch = &batches[0];
+    let names = batch
+        .column(0)
+        .as_any()
+        .downcast_ref::<StringArray>()
+        .unwrap();
+    let values = batch
+        .column(1)
+        .as_any()
+        .downcast_ref::<StringArray>()
+        .unwrap();
+    let get = |name: &str| {
+        (0..batch.num_rows())
+            .find(|i| names.value(*i) == name)
+            .map(|i| values.value(i).parse::<i64>().unwrap())
+            .unwrap()
+    };
+    (get("Com_stmt_prepare"), get("Com_stmt_close"))
+}
+
+/// Small statements are prepared once per connection and never closed: `sqlx` 0.9.0 does not set
+/// `TCP_NODELAY`, so a `COM_STMT_CLOSE` (no reply) followed by the pool's ping on release stalls
+/// ~40 ms and keeps the connection busy (wave 17b, `Backend::PERSISTENT_STATEMENTS`).
+#[tokio::test]
+async fn mysql_small_statements_are_prepared_once() {
+    for var in ["MRSM_TEST_MYSQL_URI", "MRSM_TEST_MARIADB_URI"] {
+        let Ok(uri) = std::env::var(var) else {
+            eprintln!("Skipping: set {var} to run this test.");
+            continue;
+        };
+        let mut spec = ConnectionSpec::from_uri(&uri, None, None).unwrap();
+        // One connection, so every statement and the counters share one session.
+        spec.pool_size = 1;
+        spec.max_overflow = 0;
+        let driver = SqlDriver::connect(&spec).await.unwrap();
+        let (prepared0, closed0) = stmt_counters(&driver).await;
+        for i in 0..50 {
+            let value = driver
+                .value_with("SELECT ? + 1 AS x", &[SqlParam::Int(i)])
+                .await
+                .unwrap();
+            assert_eq!(value.and_then(|v| v.as_i64()), Some(i + 1), "{var}");
+            driver.value("SELECT 1 AS x").await.unwrap();
+        }
+        let (prepared1, closed1) = stmt_counters(&driver).await;
+        // Two distinct statements, each prepared once.
+        assert!(
+            prepared1 - prepared0 <= 3,
+            "{var}: {} prepares for 100 statements",
+            prepared1 - prepared0
+        );
+        assert_eq!(closed1 - closed0, 0, "{var}: statements were closed");
+        driver.close().await;
     }
 }

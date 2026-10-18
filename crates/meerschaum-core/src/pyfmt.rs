@@ -928,11 +928,11 @@ pub fn py_splitlines(s: &str, keepends: bool) -> Vec<&str> {
             continue;
         }
         let mut end = i + c.len_utf8();
-        if c == '\r' {
-            if let Some(&(_, '\n')) = iter.peek() {
-                iter.next();
-                end += 1;
-            }
+        if c == '\r'
+            && let Some(&(_, '\n')) = iter.peek()
+        {
+            iter.next();
+            end += 1;
         }
         out.push(if keepends {
             &s[start..end]

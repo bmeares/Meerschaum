@@ -150,6 +150,8 @@ pub struct RegisterOutcome {
     pub valid: bool,
     /// Whether the connector defines `register()`.
     pub defined: bool,
+    /// `str()` of a return value that was not a dict (for v4's warning).
+    pub repr: String,
 }
 
 /// A connector implemented in Python.
@@ -433,6 +435,7 @@ impl PythonConnector {
             },
             valid: m.get("valid").and_then(Wire::as_bool).unwrap_or(false),
             defined: m.get("defined").and_then(Wire::as_bool).unwrap_or(false),
+            repr: m.str("repr").unwrap_or_default().to_owned(),
         })
     }
 

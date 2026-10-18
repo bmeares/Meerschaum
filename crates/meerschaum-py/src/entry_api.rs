@@ -34,7 +34,7 @@ fn to_py_value(obj: &Bound<'_, PyAny>) -> PyResult<PyValue> {
     if obj.is_none() {
         return Ok(PyValue::None);
     }
-    if let Ok(b) = obj.downcast::<PyBool>() {
+    if let Ok(b) = obj.cast::<PyBool>() {
         return Ok(PyValue::Bool(b.is_true()));
     }
     if obj.is_instance_of::<PyInt>() {
@@ -43,23 +43,23 @@ fn to_py_value(obj: &Bound<'_, PyAny>) -> PyResult<PyValue> {
             Err(_) => PyValue::BigInt(obj.str()?.to_string()),
         });
     }
-    if let Ok(f) = obj.downcast::<PyFloat>() {
+    if let Ok(f) = obj.cast::<PyFloat>() {
         return Ok(PyValue::Float(f.value()));
     }
-    if let Ok(s) = obj.downcast::<PyString>() {
+    if let Ok(s) = obj.cast::<PyString>() {
         return Ok(PyValue::Str(s.to_string_lossy().into_owned()));
     }
-    if let Ok(b) = obj.downcast::<PyBytes>() {
+    if let Ok(b) = obj.cast::<PyBytes>() {
         return Ok(PyValue::Bytes(b.as_bytes().to_vec()));
     }
-    if let Ok(list) = obj.downcast::<PyList>() {
+    if let Ok(list) = obj.cast::<PyList>() {
         return Ok(PyValue::List(
             list.iter()
                 .map(|item| to_py_value(&item))
                 .collect::<PyResult<_>>()?,
         ));
     }
-    if let Ok(tuple) = obj.downcast::<PyTuple>() {
+    if let Ok(tuple) = obj.cast::<PyTuple>() {
         return Ok(PyValue::Tuple(
             tuple
                 .iter()
@@ -74,7 +74,7 @@ fn to_py_value(obj: &Bound<'_, PyAny>) -> PyResult<PyValue> {
                 .collect::<PyResult<_>>()?,
         ));
     }
-    if let Ok(dict) = obj.downcast::<PyDict>() {
+    if let Ok(dict) = obj.cast::<PyDict>() {
         return Ok(PyValue::Dict(
             dict.iter()
                 .map(|(k, v)| Ok((to_py_value(&k)?, to_py_value(&v)?)))
@@ -144,10 +144,10 @@ fn prepare(py: Python<'_>, context: Option<&Bound<'_, PyDict>>) -> PyResult<Prep
     if let Some(context) = context {
         let mut held = Vec::new();
         if let Some(connectors) = context.get_item("connectors")? {
-            for (keys, conn) in connectors.downcast::<PyDict>()?.iter() {
+            for (keys, conn) in connectors.cast::<PyDict>()?.iter() {
                 let keys: String = keys.extract()?;
                 let conn = conn
-                    .downcast::<PySqlConnector>()
+                    .cast::<PySqlConnector>()
                     .map_err(|_| PyValueError::new_err("Expected a `_core.SqlConnector`."))?;
                 session.register_sql(&keys, conn.get().inner.clone());
                 held.push((keys, conn.get().inner.clone()));
@@ -156,7 +156,7 @@ fn prepare(py: Python<'_>, context: Option<&Bound<'_, PyDict>>) -> PyResult<Prep
         crate::facade::install_instance_provider(&held);
         let attributes = context
             .get_item("attributes")?
-            .map(|a| a.downcast_into::<PyDict>())
+            .map(|a| a.cast_into::<PyDict>())
             .transpose()?;
         let attribute_maps = crate::sync_api::attribute_maps(attributes.as_ref())?;
         // The pool is created lazily and workers start on first use: telling it about the
@@ -188,7 +188,7 @@ fn py_input(prompt: &str) -> Option<String> {
     if meerschaum_cli::native::jobs::stop_requested_flag().load(Ordering::SeqCst) {
         return None;
     }
-    Python::with_gil(|py| -> PyResult<Option<String>> {
+    Python::attach(|py| -> PyResult<Option<String>> {
         let input = py.import("builtins")?.getattr("input")?;
         match input.call1((prompt,)) {
             Ok(line) => Ok(Some(line.extract::<String>()?)),
@@ -234,7 +234,7 @@ impl Host for PyHost {
     }
 
     fn read_secret(&mut self, prompt: &str) -> Option<String> {
-        Python::with_gil(|py| -> PyResult<Option<String>> {
+        Python::attach(|py| -> PyResult<Option<String>> {
             let getpass = py.import("getpass")?.getattr("getpass")?;
             match getpass.call1((prompt,)) {
                 Ok(line) => Ok(Some(line.extract::<String>()?)),
@@ -282,7 +282,7 @@ thread_local! {
 
 /// `sys.<name>.isatty()`; false when the stream is missing, closed or has no `isatty`.
 fn py_isatty(name: &str) -> bool {
-    Python::with_gil(|py| -> PyResult<bool> {
+    Python::attach(|py| -> PyResult<bool> {
         let stream = py.import("sys")?.getattr(name)?;
         if stream.is_none() || !stream.hasattr("isatty")? {
             return Ok(false);
@@ -350,7 +350,7 @@ fn run_interruptible(
         .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
     let mut interrupted: Option<(PyErr, Instant)> = None;
     loop {
-        match py.allow_threads(|| {
+        match py.detach(|| {
             rx.lock()
                 .unwrap_or_else(|e| e.into_inner())
                 .recv_timeout(Duration::from_millis(50))
@@ -389,7 +389,7 @@ fn run_interruptible(
 /// through Python's `sys.stderr`, which its thread may be waiting for while it holds the
 /// progress lock this takes.
 fn abandon_progress(py: Python<'_>, abandoned: &Arc<AtomicBool>) {
-    py.allow_threads(|| {
+    py.detach(|| {
         meerschaum_cli::format::progress::abandon();
         abandoned.store(true, Ordering::SeqCst);
     });

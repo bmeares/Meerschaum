@@ -109,10 +109,10 @@ impl<'py> PyResolver<'py> {
     /// its metadata from the instance a second time. PARITY: v4 reads the attribute from the
     /// one `Pipe(...)` the template built.
     fn py_pipe_as(&self, pipe: &Pipe, by_keys: bool) -> PyResult<Bound<'py, PyAny>> {
-        if let Some((core, obj)) = &self.self_pipe {
-            if core == pipe {
-                return Ok(obj.clone());
-            }
+        if let Some((core, obj)) = &self.self_pipe
+            && core == pipe
+        {
+            return Ok(obj.clone());
         }
         {
             let built = self.built.built.borrow();
@@ -323,7 +323,7 @@ pub fn hash_password(
 ) -> PyResult<String> {
     let password = password.unwrap_or_default();
     let rounds = rounds.map(|value| password_rounds(py, value)).transpose()?;
-    py.allow_threads(|| meerschaum_core::users::hash_password(&password, salt.as_deref(), rounds))
+    py.detach(|| meerschaum_core::users::hash_password(&password, salt.as_deref(), rounds))
         .map_err(|e| PyValueError::new_err(e.to_string()))
 }
 
@@ -375,14 +375,14 @@ pub fn verify_password(
         _ => None,
     };
     let rounds = checked_password_rounds(rounds)?;
-    if let Some(digest) = digest {
-        if digest.getattr("digest_size")?.extract::<usize>()? == 0 {
-            // PARITY: CPython 3.11-3.15 validates the derived key length after iterations.
-            // SHAKE has no fixed digest size and cannot be used for PBKDF2.
-            return Err(PyValueError::new_err("key length must be greater than 0."));
-        }
+    if let Some(digest) = digest
+        && digest.getattr("digest_size")?.extract::<usize>()? == 0
+    {
+        // PARITY: CPython 3.11-3.15 validates the derived key length after iterations.
+        // SHAKE has no fixed digest size and cannot be used for PBKDF2.
+        return Err(PyValueError::new_err("key length must be greater than 0."));
     }
     let normalized = format!("${}${rounds}${}${}", parts[1], parts[3], parts[4]);
-    py.allow_threads(|| meerschaum_core::users::verify_password(&password, &normalized))
+    py.detach(|| meerschaum_core::users::verify_password(&password, &normalized))
         .map_err(|e| PyValueError::new_err(e.to_string()))
 }

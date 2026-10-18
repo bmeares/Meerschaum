@@ -2,7 +2,8 @@
 //!
 //! [`InstanceState`] implements [`StateSource`] and [`StateWriter`] over any
 //! [`InstanceConnector`]: every row lives in a `temporary`, `static` pipe
-//! `Pipe('mrsm', 'engine_<name>', instance=..., target='mrsm_engine_<name>')`, keyed on
+//! `Pipe('mrsm', 'engine_<name>', instance=..., target='mrsm_engine_<name>')` (on SQL schema
+//! flavors in `_mrsm_internal`, namespaced by the instance schema: [`engine_pipe_on`]), keyed on
 //! `pipe_ref` (never `pipe_id`). Writes go through `sync_pipe(check_existing=False,
 //! enforce=False, _check_temporary_tables=False)` with rows built in memory, so no dtype
 //! inference query precedes them.
@@ -42,7 +43,9 @@ use crate::runs::{EnginePipe, NodeRow, NodeStatus, RunRecord, RunRow, StateRow};
 use crate::state::{StateError, StateSource, StateWriter};
 use crate::sync::date_bound_to_bound;
 
-/// The internal pipe for one kind of engine state on an instance.
+/// The internal pipe for one kind of engine state on an instance, at the default placement
+/// (target `mrsm_engine_<name>` beside the instance's tables). Readers and writers use
+/// [`engine_pipe_on`], which asks the instance connector where its state lives.
 pub fn engine_pipe(instance_keys: &str, kind: EnginePipe) -> Pipe {
     Pipe::builder("mrsm", kind.metric_key())
         .instance(instance_keys)
@@ -52,6 +55,20 @@ pub fn engine_pipe(instance_keys: &str, kind: EnginePipe) -> Pipe {
         .kwarg("cache", false)
         .build()
         .expect("static engine pipe keys are valid")
+}
+
+/// The internal pipe for one kind of engine state on the instance `conn` (registered as
+/// `instance_keys`): [`InstanceConnector::engine_state_pipe`], so a SQL instance places it in
+/// its internal schema, namespaced by the instance schema (§5.8).
+pub async fn engine_pipe_on(
+    conn: &dyn InstanceConnector,
+    instance_keys: &str,
+    kind: EnginePipe,
+) -> Result<Pipe, ConnectorError> {
+    Ok(conn
+        .engine_state_pipe(instance_keys, kind.metric_key())
+        .await?
+        .unwrap_or_else(|| engine_pipe(instance_keys, kind)))
 }
 
 /// A bound as stored in a `json` column: `{"datetime": "<ISO>"}` or `{"int": n}`. Explicitly
@@ -424,7 +441,9 @@ impl InstanceState {
         select: Option<&[&str]>,
     ) -> Result<Vec<Doc>, StateError> {
         let conn = self.conn(instance)?;
-        let pipe = engine_pipe(instance, kind);
+        let pipe = engine_pipe_on(conn.as_ref(), instance, kind)
+            .await
+            .map_err(|e| unreachable(instance, e))?;
         let q = DataQuery {
             params: Some(params),
             select_columns: select.map(|s| s.iter().map(|c| c.to_string()).collect()),
@@ -449,7 +468,9 @@ impl InstanceState {
             return Ok(());
         }
         let conn = self.conn(instance)?;
-        let pipe = engine_pipe(instance, kind);
+        let pipe = engine_pipe_on(conn.as_ref(), instance, kind)
+            .await
+            .map_err(|e| unreachable(instance, e))?;
         let df = engine_frame(kind, docs)?;
         let upsert = pipe.upsert();
         let mut extra = Map::new();
@@ -486,7 +507,9 @@ impl InstanceState {
         end: Option<DateTime<Utc>>,
     ) -> Result<(), StateError> {
         let conn = self.conn(instance)?;
-        let pipe = engine_pipe(instance, kind);
+        let pipe = engine_pipe_on(conn.as_ref(), instance, kind)
+            .await
+            .map_err(|e| unreachable(instance, e))?;
         if !conn.pipe_exists(&pipe).await.unwrap_or(false) {
             return Ok(());
         }
@@ -565,7 +588,9 @@ impl InstanceState {
         since: Option<DateTime<Utc>>,
     ) -> Result<Vec<NodeRow>, StateError> {
         let conn = self.conn(&self.home)?;
-        let pipe = engine_pipe(&self.home, EnginePipe::Nodes);
+        let pipe = engine_pipe_on(conn.as_ref(), &self.home, EnginePipe::Nodes)
+            .await
+            .map_err(|e| unreachable(&self.home, e))?;
         let q = DataQuery {
             params: Some(str_map(&[("status", Value::Str("succeeded".into()))])),
             select_columns: Some(

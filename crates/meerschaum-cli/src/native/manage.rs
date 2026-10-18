@@ -22,42 +22,70 @@ use super::{
     yes_no,
 };
 
-/// `Pipe.validate_indices()`: index roles may not be `json` columns.
+/// `Pipe.validate_indices()` (the implementation is `meerschaum_core::Pipe::validate_indices`).
 pub fn validate_indices(pipe: &Pipe) -> SuccessTuple {
-    let columns = pipe.columns();
-    if columns.is_empty() {
-        return SuccessTuple::success();
-    }
-    let dtypes = pipe.dtypes();
-    let mut offenders: Vec<(String, String)> = columns
-        .iter()
-        .filter_map(|(ix, col)| {
-            let col = col.as_str()?;
-            let dt = dtypes.get(col).map(Value::py_str).unwrap_or_default();
-            (dt.to_lowercase() == "json").then(|| (ix.clone(), col.to_string()))
-        })
-        .collect();
-    if offenders.is_empty() {
-        return SuccessTuple::success();
-    }
-    offenders.sort();
-    let listing = offenders
-        .iter()
-        .map(|(ix, col)| format!("'{col}' (as the '{ix}' index)"))
-        .collect::<Vec<_>>()
-        .join(", ");
-    SuccessTuple::fail(format!(
-        "Cannot use a 'json' column as an index column: {listing}.\n    JSON values are dictionaries or lists, which cannot be sorted or deduplicated when syncing.\n    Either give the column a scalar dtype (e.g. 'str'), or move it out of `columns` and\n    declare it under `indices` if you only need a database index on it."
-    ))
+    pipe.validate_indices()
 }
 
-/// `Pipe.register()` for non-plugin connectors.
+/// The connector half of `Pipe.register()`: a `plugin:` or custom connector's `register(pipe)`
+/// returns parameters, which become the base the pipe's own parameters are patched onto
+/// (`self.parameters = apply_patch_to_config(params, self.parameters)`), so what was given on the
+/// command line or already set on the pipe wins. A connector without `register()` changes
+/// nothing; one that raises is reported by the worker and treated as `None`; a return value
+/// that is not a dict is a warning and changes nothing. The hook needs the Python worker: a
+/// connector the worker cannot build is skipped (v4 swallows the error of `Pipe.connector`).
+fn apply_connector_register(rt: &mut Runtime<'_>, pipe: &mut Pipe) {
+    let keys = pipe.connector_keys().to_string();
+    let session = session(rt);
+    match ask_connector_register(&session, rt.config(), pipe) {
+        None => {}
+        Some(Ok(outcome)) if outcome.valid => {
+            let merged = apply_patch_maps(&outcome.parameters, pipe.raw_parameters());
+            pipe.set_parameters(merged);
+        }
+        Some(Ok(outcome)) => warn(
+            rt,
+            &format!(
+                "Invalid parameters returned from `register()` in connector {keys}:\n{}",
+                outcome.repr
+            ),
+        ),
+        Some(Err(e)) => warn(rt, &format!("`register()` failed for {pipe}: {e}")),
+    }
+}
+
+/// Ask the `plugin:` or custom connector of `pipe` for its `register(pipe)` parameters through
+/// the Python worker. `None`: nothing was asked (an SQL, API or Valkey connector, no worker, a
+/// connector the worker cannot build, or one without `register()`).
+pub(crate) fn ask_connector_register(
+    session: &super::Session,
+    config: &meerschaum_core::config::Config,
+    pipe: &Pipe,
+) -> Option<Result<meerschaum_worker::connector::RegisterOutcome, meerschaum_worker::WorkerError>> {
+    if !super::pipes::is_python_connector(pipe.connector_keys()) || !session.worker_enabled() {
+        return None;
+    }
+    let pool = session.pool(config);
+    let connector = session
+        .block_on(meerschaum_worker::PythonConnector::connect(
+            pipe.connector_keys(),
+            pool,
+        ))
+        .ok()?;
+    if !connector.info().has_register {
+        return None;
+    }
+    Some(session.block_on(connector.register(pipe)))
+}
+
+/// `Pipe.register()`.
 pub fn register_pipe(rt: &mut Runtime<'_>, inst: &Instance, pipe: &mut Pipe) -> SuccessTuple {
     if pipe.temporary {
         return SuccessTuple::fail(
             "Cannot register pipes created with `temporary=True` (read-only).",
         );
     }
+    apply_connector_register(rt, pipe);
     if pipe.raw_parameters().is_empty() {
         let cols = pipe.columns();
         let cols = if cols.is_empty() {

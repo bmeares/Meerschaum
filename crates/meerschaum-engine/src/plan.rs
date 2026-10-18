@@ -957,13 +957,13 @@ pub async fn plan_node<S: StateSource>(
         options.end.as_ref().and_then(|b| axis.pos(b)),
     );
     for (name, b) in [("begin", &options.begin), ("end", &options.end)] {
-        if let Some(b) = b {
-            if axis.pos(b).is_none() {
-                out.warnings.push(format!(
-                    "the requested {name} {} does not match this pipe's axis; ignored",
-                    fmt_bound(b)
-                ));
-            }
+        if let Some(b) = b
+            && axis.pos(b).is_none()
+        {
+            out.warnings.push(format!(
+                "the requested {name} {} does not match this pipe's axis; ignored",
+                fmt_bound(b)
+            ));
         }
     }
     let cap_iv = Interval::new(None, cap);

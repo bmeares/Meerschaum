@@ -350,16 +350,15 @@ pub(crate) fn evaluate_at_depth(
         (TemplateTarget::SelfPipe, Some(sp)) => (sp.clone(), template.chain.clone()?),
         (TemplateTarget::Pipe { call, .. }, _) => {
             let (args, mut kwargs) = call.clone()?;
-            if let Some(sp) = self_pipe {
-                if !["instance", "mrsm_instance", "instance_keys"]
+            if let Some(sp) = self_pipe
+                && !["instance", "mrsm_instance", "instance_keys"]
                     .iter()
                     .any(|k| kwargs.contains_key(*k))
-                {
-                    kwargs.insert(
-                        "instance".into(),
-                        Value::Str(sp.instance_keys().to_string()),
-                    );
-                }
+            {
+                kwargs.insert(
+                    "instance".into(),
+                    Value::Str(sp.instance_keys().to_string()),
+                );
             }
             let pipe =
                 Pipe::from_call(&args, &kwargs, &resolver.defaults()).map_err(|e| e.to_string())?;
@@ -534,16 +533,15 @@ pub fn referenced_pipes(
         else {
             continue;
         };
-        if let Some(sp) = self_pipe {
-            if !["instance", "mrsm_instance", "instance_keys"]
+        if let Some(sp) = self_pipe
+            && !["instance", "mrsm_instance", "instance_keys"]
                 .iter()
                 .any(|k| kwargs.contains_key(*k))
-            {
-                kwargs.insert(
-                    "instance".into(),
-                    Value::Str(sp.instance_keys().to_string()),
-                );
-            }
+        {
+            kwargs.insert(
+                "instance".into(),
+                Value::Str(sp.instance_keys().to_string()),
+            );
         }
         if let Ok(pipe) = Pipe::from_call(&args, &kwargs, defaults) {
             out.push(PipeReference {

@@ -8,7 +8,7 @@
 //! - `roundtrip_arrow(obj)`: the Arrow PyCapsule stream boundary. Accepts any object implementing
 //!   `__arrow_c_stream__` (or `__arrow_c_array__`) and returns an [`ArrowStream`] that exports the
 //!   same data back through `__arrow_c_stream__`, without importing pyarrow.
-//! - `polars_roundtrip(df)`: the `pyo3-polars` path (feature `polars`).
+//! - `polars_roundtrip(df)`: `polars.DataFrame` -> `polars::DataFrame` -> `polars.DataFrame` over the Arrow C Stream.
 //!
 //! The kernel ([`kernel_api`]): `enforce_dtypes`, `filter_unseen_df`, `query_df`, the detectors
 //! (`get_json_cols`, `get_numeric_cols`, `get_uuid_cols`, `get_datetime_cols`, `get_bytes_cols`,
@@ -34,6 +34,7 @@ pub mod d14_api;
 pub mod engine_api;
 pub mod entry_api;
 pub mod facade;
+pub mod ffi_export;
 pub mod ffi_import;
 pub mod jobs_api;
 pub mod kernel_api;
@@ -44,7 +45,6 @@ pub mod pipe_api;
 pub mod pipe_bridge;
 pub mod pipe_methods;
 pub mod pipe_methods_api;
-#[cfg(feature = "polars")]
 pub mod polars_bridge;
 pub mod runtime;
 pub mod sql_api;
@@ -67,7 +67,6 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     meerschaum_cli::native::jobs::set_embedded(true);
     m.add("__version__", build_info::VERSION)?;
     m.add("HAS_STATIC_CONFIG", static_config::STATIC_TOML.is_some())?;
-    m.add("HAS_POLARS", cfg!(feature = "polars"))?;
 
     m.add_function(wrap_pyfunction!(build_info::py_build_info, m)?)?;
     m.add_function(wrap_pyfunction!(static_config::py_static_config, m)?)?;
@@ -75,7 +74,6 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<arrow_bridge::ArrowStream>()?;
     m.add_function(wrap_pyfunction!(arrow_bridge::roundtrip_arrow, m)?)?;
 
-    #[cfg(feature = "polars")]
     m.add_function(wrap_pyfunction!(polars_bridge::polars_roundtrip, m)?)?;
 
     // meerschaum-kernel

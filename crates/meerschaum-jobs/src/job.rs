@@ -189,10 +189,11 @@ impl Job {
             .as_ref()
             .and_then(|d| d.target_sysargs().map(<[String]>::to_vec))
             .filter(|s| !s.is_empty());
-        if let (Some(ds), Some(s)) = (&daemon_sysargs, &sysargs) {
-            if !s.is_empty() && ds != s {
-                warnings.push("Given sysargs differ from existing sysargs.".to_string());
-            }
+        if let (Some(ds), Some(s)) = (&daemon_sysargs, &sysargs)
+            && !s.is_empty()
+            && ds != s
+        {
+            warnings.push("Given sysargs differ from existing sysargs.".to_string());
         }
         let sysargs: Vec<String> = daemon_sysargs
             .or(sysargs.filter(|s| !s.is_empty()))

@@ -89,14 +89,14 @@ impl EwmaDurations {
     ) -> EwmaDurations {
         let mut out = EwmaDurations::new(alpha, default);
         for row in rows {
-            if row.status == NodeStatus::Succeeded {
-                if let Some(secs) = row.duration_seconds {
-                    out.observe(
-                        &row.pipe_ref,
-                        row.action,
-                        Duration::from_secs_f64(secs.max(0.0)),
-                    );
-                }
+            if row.status == NodeStatus::Succeeded
+                && let Some(secs) = row.duration_seconds
+            {
+                out.observe(
+                    &row.pipe_ref,
+                    row.action,
+                    Duration::from_secs_f64(secs.max(0.0)),
+                );
             }
         }
         out

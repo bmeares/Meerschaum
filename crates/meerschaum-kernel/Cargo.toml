@@ -27,7 +27,7 @@ chrono = { workspace = true }
 chrono-tz = { workspace = true }
 uuid = { workspace = true }
 thiserror = { workspace = true }
-base64 = "0.22"
+base64 = "0.23"
 hex = { workspace = true }
 
 [dev-dependencies]

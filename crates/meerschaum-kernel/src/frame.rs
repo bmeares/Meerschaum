@@ -118,13 +118,11 @@ impl ColumnData {
                     if s.null_count() == 0 {
                         return Some(0);
                     }
-                    return s.is_not_null().into_iter().position(|v| v == Some(true));
+                    return s.is_not_null().iter().position(|v| v == Some(true));
                 }
                 let floats = s.cast(&DataType::Float64).ok()?;
                 let floats = floats.f64().ok()?;
-                floats
-                    .into_iter()
-                    .position(|v| v.is_some_and(|f| !f.is_nan()))
+                floats.iter().position(|v| v.is_some_and(|f| !f.is_nan()))
             }
             ColumnData::Object(v) => v.iter().position(|v| !v.is_na()),
         }
@@ -452,7 +450,7 @@ impl Frame {
     /// Wrap a Polars `DataFrame` (all columns native).
     pub fn from_polars(df: &DataFrame) -> Frame {
         let columns = df
-            .get_columns()
+            .columns()
             .iter()
             .map(|c| Column::native(c.as_materialized_series().clone()))
             .collect();
@@ -473,25 +471,22 @@ impl Frame {
                 ColumnData::Object(v) => object_values_to_series(&c.name, v).into(),
             })
             .collect();
-        Ok(DataFrame::new(cols)?)
+        Ok(DataFrame::new_infer_height(cols)?)
     }
 
     /// Describe the special (extension) type of each column, used for Arrow metadata.
     pub fn special_kinds(&self) -> IndexMap<String, SpecialKind> {
         let mut out = IndexMap::new();
         for c in &self.columns {
-            if let ColumnData::Object(values) = &c.data {
-                if let Some(kind) =
+            if let ColumnData::Object(values) = &c.data
+                && let Some(kind) =
                     special_kind_of_tags(&c.tags).or_else(|| special_kind_of(values))
-                {
-                    let kind = match kind {
-                        SpecialKind::Geometry { .. } => {
-                            SpecialKind::Geometry { crs: c.crs.clone() }
-                        }
-                        k => k,
-                    };
-                    out.insert(c.name.clone(), kind);
-                }
+            {
+                let kind = match kind {
+                    SpecialKind::Geometry { .. } => SpecialKind::Geometry { crs: c.crs.clone() },
+                    k => k,
+                };
+                out.insert(c.name.clone(), kind);
             }
         }
         out
@@ -914,7 +909,9 @@ pub fn any_value_to_value(av: &AnyValue, dtype: &DataType) -> Value {
         }
         AnyValue::Binary(b) => Value::Bytes(b.to_vec()),
         AnyValue::BinaryOwned(b) => Value::Bytes(b.clone()),
-        AnyValue::Decimal(v, scale) => Value::Decimal(Decimal::from_i128_scale(*v, *scale as i64)),
+        AnyValue::Decimal(v, _precision, scale) => {
+            Value::Decimal(Decimal::from_i128_scale(*v, *scale as i64))
+        }
         other => {
             // Nested values (lists / structs) are JSON containers.
             let s = format!("{other}");
@@ -1032,7 +1029,7 @@ pub fn values_to_series(name: &str, values: &[Value], dtype: &DataType) -> Optio
                 .into_series()
         }
         DataType::Decimal(p, s) => {
-            let scale = s.unwrap_or(0);
+            let scale = *s;
             let mut out = Vec::with_capacity(values.len());
             for v in values {
                 out.push(match v {
@@ -1092,16 +1089,22 @@ pub fn object_values_to_series(name: &str, values: &[Value]) -> Series {
                 })
                 .collect();
             if let Some(decimals) = decimals {
+                // PARITY: Polars' inference from Python `Decimal`s (v4's `pl.from_pandas` of an
+                // object column): precision = the most integer digits + the largest scale, where a
+                // value below 1 has no integer digit (`0.000012345` is `Decimal(9, 9)`, `0.5` is
+                // `Decimal(1, 1)`); never below 1 (a column of zeros is `Decimal(1, 0)`).
                 let mut max_scale = 0i64;
-                let mut max_int = 1i64;
+                let mut max_int = 0i64;
                 let mut finite = true;
                 for d in decimals.iter().flatten() {
-                    match d.precision_scale() {
-                        Some((p, s)) => {
+                    match (d.precision_scale(), d) {
+                        (Some((_, s)), Decimal::Finite { coeff, exp, .. }) => {
                             max_scale = max_scale.max(s);
-                            max_int = max_int.max(p - s);
+                            // Integer digits as Polars counts them: none below 1 (`precision_scale`
+                            // counts one, as a database column needs).
+                            max_int = max_int.max((coeff.len() as i64 + exp).max(0));
                         }
-                        None => finite = false,
+                        _ => finite = false,
                     }
                 }
                 if finite && max_int + max_scale <= 38 {
@@ -1111,7 +1114,7 @@ pub fn object_values_to_series(name: &str, values: &[Value]) -> Series {
                         .collect();
                     return Int128Chunked::from_iter_options(pname, ints.into_iter())
                         .into_decimal_unchecked(
-                            Some((max_int + max_scale) as usize),
+                            ((max_int + max_scale) as usize).max(1),
                             max_scale as usize,
                         )
                         .into_series();

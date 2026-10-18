@@ -255,16 +255,16 @@ async fn token_model_named(ctx: Ctx, token_id: String) -> ApiResult {
         Some(u) => conn.get_user_id(u).await.ok().flatten(),
         None => None,
     };
-    if let Some(owner) = model.user_id.as_ref().filter(|v| v.truthy()) {
-        if Some(owner) != curr_user_id.as_ref() {
-            let curr_type = match curr_user {
-                Some(u) => conn.get_user_type(u).await.ok().flatten(),
-                // PARITY: `get_user_type(None)` fails in Python; treat as not an admin.
-                None => None,
-            };
-            if curr_type.as_deref() != Some("admin") {
-                return Err(ApiError::new(403, "Cannot edit another user's token."));
-            }
+    if let Some(owner) = model.user_id.as_ref().filter(|v| v.truthy())
+        && Some(owner) != curr_user_id.as_ref()
+    {
+        let curr_type = match curr_user {
+            Some(u) => conn.get_user_type(u).await.ok().flatten(),
+            // PARITY: `get_user_type(None)` fails in Python; treat as not an admin.
+            None => None,
+        };
+        if curr_type.as_deref() != Some("admin") {
+            return Err(ApiError::new(403, "Cannot edit another user's token."));
         }
     }
     // `json.dumps(payload, default=json_serialize_value)`, nulls via `value_is_null`.

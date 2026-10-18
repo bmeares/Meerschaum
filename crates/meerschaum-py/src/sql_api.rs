@@ -316,7 +316,7 @@ impl PySqlConnector {
         let settings = settings_from_py(py, spec.flavor);
         follow_python_root(py);
         let label = label.to_string();
-        let conn = py.allow_threads(|| {
+        let conn = py.detach(|| {
             let _guard = crate::runtime::runtime().enter();
             RsSqlConnector::connect_lazy(&label, spec, settings)
         });
@@ -625,6 +625,24 @@ impl PySqlConnector {
         success_to_py(py, &res)
     }
 
+    /// `pipe_ops::forget_engine_state(self, pipe)`: forget the Syncing Engine's state of `pipe`
+    /// (ledger entries, edge cursors, definition hash) where this instance keeps it
+    /// (`_mrsm_internal` on schema flavors, namespaced by the instance schema). The façade
+    /// calls it after a successful drop, delete or full clear.
+    #[pyo3(signature = (pipe))]
+    fn forget_engine_state<'py>(
+        &self,
+        py: Python<'py>,
+        pipe: &Bound<'py, PyAny>,
+    ) -> PyResult<Bound<'py, PyTuple>> {
+        let p = core_pipe(pipe, ParamsView::Resolved)?;
+        let c = self.conn();
+        let res = block_on(py, async move {
+            meerschaum_connector::pipe_ops::forget_engine_state(c.as_ref(), &p).await
+        });
+        success_to_py(py, &res)
+    }
+
     #[pyo3(signature = (pipe, begin=None, end=None, params=None, **_kw))]
     fn clear_pipe<'py>(
         &self,
@@ -696,7 +714,7 @@ impl PySqlConnector {
         let no_order = order.is_none();
         // v4: `begin=''` reads from the sync time minus the backtrack interval.
         let begin_default = begin
-            .and_then(|b| b.downcast::<pyo3::types::PyString>().ok())
+            .and_then(|b| b.cast::<pyo3::types::PyString>().ok())
             .is_some_and(|s| s.to_str().map(|s| s.is_empty()).unwrap_or(false));
         let q = data_query(
             &ctx,
@@ -839,7 +857,7 @@ impl PySqlConnector {
         let _ = sort_datetimes;
         let ctx = PyCtx::scalars(py)?;
         let begin_default = begin
-            .and_then(|b| b.downcast::<pyo3::types::PyString>().ok())
+            .and_then(|b| b.cast::<pyo3::types::PyString>().ok())
             .is_some_and(|s| s.to_str().map(|s| s.is_empty()).unwrap_or(false));
         let p = core_pipe(pipe, ParamsView::Resolved)?;
         let no_order = order.is_none();
@@ -900,10 +918,10 @@ impl PySqlConnector {
             frame_from_py(&ctx, df, ColumnMode::Full)?.frame
         };
         let mut extra = Map::new();
-        if let Ok(cached) = pipe.call_method1("_get_cached_value", ("new_special_cols",)) {
-            if !cached.is_none() {
-                extra.insert("new_special_cols".into(), py_to_core(&cached)?);
-            }
+        if let Ok(cached) = pipe.call_method1("_get_cached_value", ("new_special_cols",))
+            && !cached.is_none()
+        {
+            extra.insert("new_special_cols".into(), py_to_core(&cached)?);
         }
         let opts = SyncOptions {
             check_existing,
@@ -1201,15 +1219,15 @@ impl PySqlConnector {
         let c = self.conn();
         let interval = c.sql_pipe(&p).ok().and_then(|sp| sp.chunk_interval().ok());
         let info = block_on(py, async move { c.get_partition_info(&p).await });
-        let out = core_to_py(py, &Value::Map(info))?.downcast_into::<PyDict>()?;
-        if out.get_item("interval")?.is_some_and(|v| !v.is_none()) {
-            if let Some(ChunkInterval::Delta(d)) = interval {
-                let td = py
-                    .import("datetime")?
-                    .getattr("timedelta")?
-                    .call1((0, d.num_seconds()))?;
-                out.set_item("interval", td)?;
-            }
+        let out = core_to_py(py, &Value::Map(info))?.cast_into::<PyDict>()?;
+        if out.get_item("interval")?.is_some_and(|v| !v.is_none())
+            && let Some(ChunkInterval::Delta(d)) = interval
+        {
+            let td = py
+                .import("datetime")?
+                .getattr("timedelta")?
+                .call1((0, d.num_seconds()))?;
+            out.set_item("interval", td)?;
         }
         Ok(out)
     }

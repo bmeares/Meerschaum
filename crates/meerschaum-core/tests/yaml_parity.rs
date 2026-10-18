@@ -343,32 +343,27 @@ fn without_v5_defaults(spec: J) -> J {
     match spec {
         J::Array(items) => J::Array(items.into_iter().map(without_v5_defaults).collect()),
         J::Object(map) => {
-            if map.get("t").and_then(J::as_str) == Some("str") {
-                if let Some(text) = map.get("v").and_then(J::as_str) {
-                    if text.trim_start().starts_with("{\n    \"meerschaum\"") {
-                        if let Ok(mut parsed) = serde_json::from_str::<J>(text) {
-                            // The v5-only engine defaults, and the two CPU-count-derived numbers
-                            // (the fixture was recorded on another machine).
-                            if let Some(system) =
-                                parsed.get_mut("system").and_then(J::as_object_mut)
-                            {
-                                system.remove("engine");
-                                if let Some(cli) = system.get_mut("cli").and_then(J::as_object_mut)
-                                {
-                                    cli.remove("max_daemons");
-                                }
-                            }
-                            if let Some(uvicorn) = parsed
-                                .get_mut("api")
-                                .and_then(|a| a.get_mut("uvicorn"))
-                                .and_then(J::as_object_mut)
-                            {
-                                uvicorn.remove("workers");
-                            }
-                            return serde_json::json!({"t": "str", "json": parsed});
-                        }
+            if map.get("t").and_then(J::as_str) == Some("str")
+                && let Some(text) = map.get("v").and_then(J::as_str)
+                && text.trim_start().starts_with("{\n    \"meerschaum\"")
+                && let Ok(mut parsed) = serde_json::from_str::<J>(text)
+            {
+                // The v5-only engine defaults, and the two CPU-count-derived numbers
+                // (the fixture was recorded on another machine).
+                if let Some(system) = parsed.get_mut("system").and_then(J::as_object_mut) {
+                    system.remove("engine");
+                    if let Some(cli) = system.get_mut("cli").and_then(J::as_object_mut) {
+                        cli.remove("max_daemons");
                     }
                 }
+                if let Some(uvicorn) = parsed
+                    .get_mut("api")
+                    .and_then(|a| a.get_mut("uvicorn"))
+                    .and_then(J::as_object_mut)
+                {
+                    uvicorn.remove("workers");
+                }
+                return serde_json::json!({"t": "str", "json": parsed});
             }
             J::Object(
                 map.into_iter()

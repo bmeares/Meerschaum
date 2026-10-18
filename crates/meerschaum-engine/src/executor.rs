@@ -835,10 +835,10 @@ fn try_permits(
     if let Some(s) = connectors.get(&record.connector_keys) {
         permits.push(s.clone().try_acquire_owned().ok()?);
     }
-    if record.python {
-        if let Some(s) = python {
-            permits.push(s.clone().try_acquire_owned().ok()?);
-        }
+    if record.python
+        && let Some(s) = python
+    {
+        permits.push(s.clone().try_acquire_owned().ok()?);
     }
     Some(permits)
 }
@@ -1557,16 +1557,16 @@ impl SyncExecutor for FakeExecutor {
                 duration_ms: Some(step.delay.as_millis() as u64),
             });
         }
-        if step.result.success {
-            if let Some(state) = &self.state {
-                for (instance, begin, end) in &step.ledger {
-                    let _ = state
-                        .append_ledger(instance, &pipe_ref, vec![(*begin, *end)])
-                        .await;
-                }
-                if let Some(wm) = step.watermark {
-                    state.set_watermark(&pipe_ref, wm);
-                }
+        if step.result.success
+            && let Some(state) = &self.state
+        {
+            for (instance, begin, end) in &step.ledger {
+                let _ = state
+                    .append_ledger(instance, &pipe_ref, vec![(*begin, *end)])
+                    .await;
+            }
+            if let Some(wm) = step.watermark {
+                state.set_watermark(&pipe_ref, wm);
             }
         }
         step.result

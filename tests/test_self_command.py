@@ -236,3 +236,44 @@ def test_a_job_started_in_a_shadowing_directory_runs_the_real_package(tmp_path):
         mrsm('stop', 'job', 'shadow-job', '-y')
         time.sleep(1)
         mrsm('delete', 'job', 'shadow-job', '-y')
+
+
+PROBE_PLUGIN = '''
+__version__ = '0.1.0'
+
+from meerschaum.plugins import make_action
+
+
+@make_action
+def f1probe(**kw):
+    """Report the hand-over guard this worker process inherited."""
+    import os
+    print('GUARD=' + repr(os.environ.get('MRSM_BIN_EXEC')))
+    return True, 'ok'
+'''
+
+
+def test_a_standalone_binary_does_not_pass_the_hand_over_guard_to_its_children(tmp_path):
+    """
+    `MRSM_BIN_EXEC` only blocks the immediate re-entry of a launcher: the real binary a Python
+    process handed over to drops it, so its Python worker (and everything else it starts) does not
+    think it was "started again" and keeps honoring `MRSM_BIN`.
+    """
+    from tests._binary import binary_or_skip
+
+    binary = binary_or_skip()
+    plugins = tmp_path / 'plugins'
+    plugins.mkdir()
+    (plugins / 'f1probe.py').write_text(PROBE_PLUGIN)
+    env = _env(
+        tmp_path,
+        MRSM_PLUGINS_DIR=str(plugins),
+        MRSM_PYTHON=sys.executable,
+        MRSM_BIN=binary,
+        MRSM_BIN_EXEC=binary,
+    )
+    result = subprocess.run(
+        [binary, 'f1probe'], capture_output=True, text=True, env=env, timeout=120, cwd=str(tmp_path),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert 'GUARD=None' in result.stdout, result.stdout + result.stderr

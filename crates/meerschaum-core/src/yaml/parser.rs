@@ -340,18 +340,18 @@ impl Parser {
                         }
                         yaml_version = Some((major, minor));
                     }
-                } else if name == "TAG" {
-                    if let DirectiveValue::Tag(handle, prefix) = value {
-                        if self.tag_handles.contains_key(&handle) {
-                            return Err(self.perr(
-                                None,
-                                None,
-                                &format!("duplicate tag handle {}", str_repr(&handle)),
-                                token.start,
-                            ));
-                        }
-                        self.tag_handles.insert(handle, prefix);
+                } else if name == "TAG"
+                    && let DirectiveValue::Tag(handle, prefix) = value
+                {
+                    if self.tag_handles.contains_key(&handle) {
+                        return Err(self.perr(
+                            None,
+                            None,
+                            &format!("duplicate tag handle {}", str_repr(&handle)),
+                            token.start,
+                        ));
                     }
+                    self.tag_handles.insert(handle, prefix);
                 }
             }
         }

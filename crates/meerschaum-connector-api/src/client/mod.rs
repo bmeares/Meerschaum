@@ -24,6 +24,7 @@ mod tokens;
 pub mod uri;
 mod users;
 pub mod warnings;
+mod wss;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -74,6 +75,8 @@ pub struct APIConnector {
     /// `protocol://host[:port]`.
     pub url: String,
     pub(crate) http: reqwest::Client,
+    /// `false` when the `verify` attribute is `false` (HTTP and websocket TLS accept any certificate).
+    pub(crate) verify: bool,
     pub(crate) auth: Arc<tokio::sync::Mutex<AuthState>>,
     pub(crate) pipe_cache: Arc<Mutex<HashMap<String, PipeCacheEntry>>>,
     pub(crate) job_metadata_cache: Arc<Mutex<HashMap<String, (Instant, Map)>>>,
@@ -157,8 +160,9 @@ impl APIConnector {
             .unwrap_or_default();
         let url = format!("{protocol}://{host}{port}");
 
+        let verify = !matches!(attributes.get("verify"), Some(Value::Bool(false)));
         let mut builder = reqwest::Client::builder();
-        if let Some(Value::Bool(false)) = attributes.get("verify") {
+        if !verify {
             builder = builder.danger_accept_invalid_certs(true);
         }
         let http = builder
@@ -169,6 +173,7 @@ impl APIConnector {
             attributes,
             url,
             http,
+            verify,
             auth: Arc::new(tokio::sync::Mutex::new(AuthState::default())),
             pipe_cache: Arc::new(Mutex::new(HashMap::new())),
             job_metadata_cache: Arc::new(Mutex::new(HashMap::new())),

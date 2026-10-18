@@ -273,7 +273,8 @@ async fn assets_are_local_and_no_dash_is_respected() {
     for path in [
         "htmx.min.js",
         "plotly.min.js",
-        "maplibre-gl.js",
+        "maplibre-gl.mjs",
+        "maplibre-gl-worker.mjs",
         "cytoscape.min.js",
         "xterm.js",
     ] {
@@ -294,6 +295,93 @@ async fn assets_are_local_and_no_dash_is_respected() {
     let app = meerschaum_web::app(state.clone(), WebConfig::for_state(&state)).unwrap();
     let response = send(&app, Request::get("/dash").body(Body::empty()).unwrap()).await;
     assert!(response.unmatched);
+}
+
+fn asset_on_disk(name: &str) -> Vec<u8> {
+    std::fs::read(format!("{}/assets/{name}", env!("CARGO_MANIFEST_DIR"))).unwrap()
+}
+
+fn gunzip(bytes: &[u8]) -> Vec<u8> {
+    use std::io::Read;
+    let mut out = Vec::new();
+    flate2::read::GzDecoder::new(bytes)
+        .read_to_end(&mut out)
+        .unwrap();
+    out
+}
+
+#[tokio::test]
+async fn assets_are_embedded_compressed_and_negotiated() {
+    let root = tempfile::tempdir().unwrap();
+    let (state, _) = state_with(config(root.path()));
+    let app = meerschaum_web::app(state.clone(), WebConfig::for_state(&state)).unwrap();
+    let get = |name: &str, accept: Option<&str>, none_match: Option<&str>| {
+        let mut request = Request::get(format!("/dash/assets/{name}"));
+        if let Some(accept) = accept {
+            request = request.header("accept-encoding", accept);
+        }
+        if let Some(tag) = none_match {
+            request = request.header("if-none-match", tag);
+        }
+        request.body(Body::empty()).unwrap()
+    };
+    let raw = asset_on_disk("plotly.min.js");
+
+    // A client that accepts gzip gets the embedded bytes untouched.
+    let gz = send(&app, get("plotly.min.js", Some("br, gzip;q=0.8"), None)).await;
+    assert_eq!(gz.status, StatusCode::OK);
+    assert_eq!(gz.headers["content-encoding"], "gzip");
+    assert_eq!(gz.headers["content-type"], "text/javascript");
+    assert_eq!(gz.headers["vary"], "Accept-Encoding");
+    assert_eq!(gz.headers["cache-control"], "no-cache");
+    assert_eq!(gz.headers["content-length"], gz.body.len().to_string());
+    assert!(gz.body.len() * 2 < raw.len(), "{} bytes", gz.body.len());
+    assert_eq!(gunzip(&gz.body), raw);
+    let gz_tag = gz.headers["etag"].to_str().unwrap().to_string();
+    assert!(
+        gz_tag.starts_with('"') && gz_tag.ends_with("-gzip\""),
+        "{gz_tag}"
+    );
+
+    // Everyone else gets the file itself, with its own validator.
+    for accept in [None, Some("identity"), Some("gzip;q=0"), Some("br")] {
+        let plain = send(&app, get("plotly.min.js", accept, None)).await;
+        assert_eq!(plain.status, StatusCode::OK, "{accept:?}");
+        assert!(
+            plain.headers.get("content-encoding").is_none(),
+            "{accept:?}"
+        );
+        assert_eq!(plain.headers["vary"], "Accept-Encoding");
+        assert_eq!(plain.headers["content-length"], raw.len().to_string());
+        assert_eq!(plain.body, raw, "{accept:?}");
+        assert_ne!(plain.headers["etag"].to_str().unwrap(), gz_tag);
+    }
+
+    // Revalidation: a matching tag is a 304 with no body, a tag of the other encoding is not.
+    let cached = send(&app, get("plotly.min.js", Some("gzip"), Some(&gz_tag))).await;
+    assert_eq!(cached.status, StatusCode::NOT_MODIFIED);
+    assert!(cached.body.is_empty());
+    assert_eq!(cached.headers["etag"], gz_tag.as_str());
+    assert_eq!(cached.headers["vary"], "Accept-Encoding");
+    let listed = format!("\"stale\", W/{gz_tag}");
+    let weak = send(&app, get("plotly.min.js", Some("gzip"), Some(&listed))).await;
+    assert_eq!(weak.status, StatusCode::NOT_MODIFIED);
+    let other = send(&app, get("plotly.min.js", None, Some(&gz_tag))).await;
+    assert_eq!(other.status, StatusCode::OK);
+
+    // The MapLibre module and its worker are separate files, both served as JavaScript.
+    for name in ["maplibre-gl.mjs", "maplibre-gl-worker.mjs"] {
+        let module = send(&app, get(name, Some("gzip"), None)).await;
+        assert_eq!(module.status, StatusCode::OK, "{name}");
+        assert_eq!(module.headers["content-type"], "text/javascript", "{name}");
+        assert_eq!(gunzip(&module.body), asset_on_disk(name), "{name}");
+    }
+    let css = send(&app, get("maplibre-gl.css", Some("gzip"), None)).await;
+    assert_eq!(css.headers["content-type"], "text/css");
+
+    // The old UMD name is gone.
+    let old = send(&app, get("maplibre-gl.js", Some("gzip"), None)).await;
+    assert_ne!(old.status, StatusCode::OK);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

@@ -1245,6 +1245,36 @@ impl Pipe {
             self.location_key.as_deref().unwrap_or("None")
         )
     }
+
+    /// `Pipe.validate_indices()`: index roles may not be `json` columns (`UNHASHABLE_DTYPES`).
+    pub fn validate_indices(&self) -> crate::success::SuccessTuple {
+        use crate::success::SuccessTuple;
+        let columns = self.columns();
+        if columns.is_empty() {
+            return SuccessTuple::success();
+        }
+        let dtypes = self.dtypes();
+        let mut offenders: Vec<(String, String)> = columns
+            .iter()
+            .filter_map(|(ix, col)| {
+                let col = col.as_str().filter(|c| !c.is_empty())?;
+                let dt = dtypes.get(col).map(Value::py_str).unwrap_or_default();
+                (dt.to_lowercase() == "json").then(|| (ix.clone(), col.to_string()))
+            })
+            .collect();
+        if offenders.is_empty() {
+            return SuccessTuple::success();
+        }
+        offenders.sort();
+        let listing = offenders
+            .iter()
+            .map(|(ix, col)| format!("'{col}' (as the '{ix}' index)"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        SuccessTuple::fail(format!(
+            "Cannot use a 'json' column as an index column: {listing}.\n    JSON values are dictionaries or lists, which cannot be sorted or deduplicated when syncing.\n    Either give the column a scalar dtype (e.g. 'str'), or move it out of `columns` and\n    declare it under `indices` if you only need a database index on it."
+        ))
+    }
 }
 
 #[cfg(test)]
@@ -1308,5 +1338,33 @@ mod tests {
         assert!(p.enforce() && p.null_indices() && !p.upsert());
         let prec = p.precision(&PipeDefaults::default()).unwrap();
         assert_eq!(prec.unit, PrecisionUnit::Microsecond);
+    }
+
+    #[test]
+    fn validate_indices_refuses_json_index_roles() {
+        let build = |params: &str| {
+            Pipe::builder("plugin:x", "m")
+                .parameters(json(params).as_map().unwrap().clone())
+                .build()
+                .unwrap()
+        };
+        assert!(build(r#"{}"#).validate_indices().success);
+        assert!(
+            build(r#"{"columns": {"id": "id"}, "dtypes": {"j": "json"}}"#)
+                .validate_indices()
+                .success
+        );
+        let res = build(
+            r#"{"columns": {"id": "j", "datetime": "k"}, "dtypes": {"j": "JSON", "k": "json"}}"#,
+        )
+        .validate_indices();
+        assert!(!res.success);
+        assert!(
+            res.message.starts_with(
+                "Cannot use a 'json' column as an index column: 'k' (as the 'datetime' index), 'j' (as the 'id' index)."
+            ),
+            "{}",
+            res.message
+        );
     }
 }

@@ -107,10 +107,10 @@ pub async fn sync_chunk_native(
     };
     if pipe.raw_parameters().is_empty() {
         // `Pipe.parameters` reads the registered parameters unless set in memory.
-        if let Ok(attrs) = instance.get_pipe_attributes(&pipe).await {
-            if let Some(CValue::Map(params)) = attrs.get("parameters") {
-                pipe.set_parameters(params.clone());
-            }
+        if let Ok(attrs) = instance.get_pipe_attributes(&pipe).await
+            && let Some(CValue::Map(params)) = attrs.get("parameters")
+        {
+            pipe.set_parameters(params.clone());
         }
     }
     let params = pipe.parameters().clone();

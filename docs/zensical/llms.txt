@@ -22,7 +22,7 @@
 - [🔤 Data Types](https://meerschaum.io/reference/pipes/dtypes/): This page explains what Meerschaum data types (dtypes) are, when to use each one, and how dtype coercion behaves during syncs. For the dtype table in context with the rest of the metadata, see paramet
 - [🧹 Maintenance](https://meerschaum.io/reference/pipes/maintenance/): Over time a pipe's target table accumulates dead rows, stale planner statistics, and uncompressed history. Meerschaum provides a family of maintenance actions to keep tables lean and queries fast. Eac
 - [🕸️ Pipelines](https://meerschaum.io/reference/pipelines/): > New in v5. The Syncing Engine understands how your pipes depend on one another. It decides which pipes need to run, how wide each sync must be, runs independent branches in parallel, and records wha
-- [🗃️ Engine State](https://meerschaum.io/reference/pipelines/state/): The engine adds no database files to your root directory. Everything it remembers lives on your instance, as internal pipes alongside Meerschaum's own tables (in the internal schema on flavors that ha
+- [🗃️ Engine State](https://meerschaum.io/reference/pipelines/state/): The engine adds no database files to your root directory. Everything it remembers lives on your instance, as internal pipes alongside Meerschaum's own tables (on flavors that have schemas, PostgreSQL 
 - [♾️ Continuous Mode](https://meerschaum.io/reference/pipelines/continuous/): mrsm sync pipes --loop keeps the engine running. On a flat selection it behaves exactly as v4's laps did: every selected pipe syncs, then the process sleeps --min-seconds N after the lap ends, then th
 - [📊 Visualization](https://meerschaum.io/reference/pipelines/visualization/): The engine emits one typed event per transition, and everything you see is drawn from that stream or from the recorded run:
 - [🔌 Connectors](https://meerschaum.io/reference/connectors/): Meerschaum coordinates everything via connectors. Use cases for Connectors include fetching and inserting data when syncing pipes.
@@ -52,7 +52,7 @@
 - [🩺 Troubleshooting](https://meerschaum.io/reference/troubleshooting/): A symptom-driven guide to the most common Meerschaum issues. Each entry follows Symptom → Cause → Fix.
 - [⬆️ Migrating to v5](https://meerschaum.io/reference/migrating-to-v5/): This guide follows the v5.0.0 design spec and has been checked against the pre-release builds (the console, plugin-owned Dash apps, the native plugin loader, venv accounting and the Syncing Engine are
 - [📖 Glossary](https://meerschaum.io/reference/glossary/): This page defines the core Meerschaum domain terms in one place. Each entry links to its reference documentation where one exists. Other pages can deep-link to any term by its heading anchor, e.g. #up
-- [💼 Portable](https://meerschaum.io/reference/meerschaum-portable/): Sometimes, it's not worth the hassle setting up a complete Python environment. If you're using a non-administrative account or just want to test out Meerschaum, Meerschaum Portable might be right for 
+- [💼 Portable](https://meerschaum.io/reference/meerschaum-portable/): The standalone "portable" archive (mrsm-full- / mrsm-minimal-, built with pyoxidizer) is no longer produced. This page remains so old links keep working.
 
 ## Tutorials
 - [📚 Tutorials](https://meerschaum.io/tutorials/): Want to learn Meerschaum hands-on? Follow the written, end-to-end walkthrough below, or scroll down to the video tutorials if you're more of a visual learner.

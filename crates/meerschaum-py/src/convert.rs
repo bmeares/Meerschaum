@@ -118,15 +118,13 @@ impl<'py> PyCtx<'py> {
             .and_then(|sys| sys.getattr("modules"))
             .and_then(|m| m.call_method1("get", ("pandas",)))
             .map(|pd| (!pd.is_none()).then_some(pd))
-        {
-            if let (Ok(na), Ok(nat), Ok(ts)) =
+            && let (Ok(na), Ok(nat), Ok(ts)) =
                 (pd.getattr("NA"), pd.getattr("NaT"), pd.getattr("Timestamp"))
-            {
-                ctx.na = Some(na);
-                ctx.nat = Some(nat);
-                ctx.timestamp_cls = Some(ts);
-                ctx.pandas = Some(pd);
-            }
+        {
+            ctx.na = Some(na);
+            ctx.nat = Some(nat);
+            ctx.timestamp_cls = Some(ts);
+            ctx.pandas = Some(pd);
         }
         Ok(ctx)
     }
@@ -162,7 +160,7 @@ pub fn py_to_core(obj: &Bound<'_, PyAny>) -> PyResult<CoreValue> {
     if obj.is_none() {
         return Ok(CoreValue::Null);
     }
-    if let Ok(b) = obj.downcast::<PyBool>() {
+    if let Ok(b) = obj.cast::<PyBool>() {
         return Ok(CoreValue::Bool(b.is_true()));
     }
     if obj.is_instance_of::<PyInt>() {
@@ -171,16 +169,16 @@ pub fn py_to_core(obj: &Bound<'_, PyAny>) -> PyResult<CoreValue> {
             Err(_) => CoreValue::Float(obj.extract::<f64>()?),
         });
     }
-    if let Ok(f) = obj.downcast::<PyFloat>() {
+    if let Ok(f) = obj.cast::<PyFloat>() {
         return Ok(CoreValue::Float(f.value()));
     }
-    if let Ok(s) = obj.downcast::<PyString>() {
+    if let Ok(s) = obj.cast::<PyString>() {
         return Ok(CoreValue::Str(s.to_str()?.to_string()));
     }
-    if let Ok(d) = obj.downcast::<PyDict>() {
+    if let Ok(d) = obj.cast::<PyDict>() {
         let mut m = meerschaum_core::Map::new();
         for (k, v) in d.iter() {
-            let key = match k.downcast::<PyString>() {
+            let key = match k.cast::<PyString>() {
                 Ok(s) => s.to_str()?.to_string(),
                 Err(_) => k.str()?.to_str()?.to_string(),
             };
@@ -257,7 +255,7 @@ pub fn py_to_json(obj: &Bound<'_, PyAny>) -> PyResult<serde_json::Value> {
     if obj.is_none() {
         return Ok(J::Null);
     }
-    if let Ok(b) = obj.downcast::<PyBool>() {
+    if let Ok(b) = obj.cast::<PyBool>() {
         return Ok(J::Bool(b.is_true()));
     }
     if obj.is_instance_of::<PyInt>() {
@@ -269,16 +267,16 @@ pub fn py_to_json(obj: &Bound<'_, PyAny>) -> PyResult<serde_json::Value> {
         }
         return Ok(J::String(obj.str()?.to_str()?.to_string()));
     }
-    if let Ok(f) = obj.downcast::<PyFloat>() {
+    if let Ok(f) = obj.cast::<PyFloat>() {
         return Ok(serde_json::Number::from_f64(f.value()).map_or(J::Null, J::Number));
     }
-    if let Ok(s) = obj.downcast::<PyString>() {
+    if let Ok(s) = obj.cast::<PyString>() {
         return Ok(J::String(s.to_str()?.to_string()));
     }
-    if let Ok(d) = obj.downcast::<PyDict>() {
+    if let Ok(d) = obj.cast::<PyDict>() {
         let mut m = serde_json::Map::new();
         for (k, v) in d.iter() {
-            let key = match k.downcast::<PyString>() {
+            let key = match k.cast::<PyString>() {
                 Ok(s) => s.to_str()?.to_string(),
                 Err(_) => k.str()?.to_str()?.to_string(),
             };
@@ -347,18 +345,17 @@ fn tzinfo_from_py(
         return Ok(None);
     }
     for attr in ["key", "zone"] {
-        if let Ok(name) = tz.getattr(attr) {
-            if let Ok(name) = name.extract::<String>() {
-                if let Some(parsed) = TzInfo::parse(&name) {
-                    return Ok(Some(parsed));
-                }
-            }
-        }
-    }
-    if let Ok(name) = tz.str().and_then(|s| s.extract::<String>()) {
-        if let Some(parsed) = TzInfo::parse(&name) {
+        if let Ok(name) = tz.getattr(attr)
+            && let Ok(name) = name.extract::<String>()
+            && let Some(parsed) = TzInfo::parse(&name)
+        {
             return Ok(Some(parsed));
         }
+    }
+    if let Ok(name) = tz.str().and_then(|s| s.extract::<String>())
+        && let Some(parsed) = TzInfo::parse(&name)
+    {
+        return Ok(Some(parsed));
     }
     let offset = tz.call_method1(intern!(py, "utcoffset"), (dt.cloned(),))?;
     if offset.is_none() {
@@ -383,15 +380,13 @@ fn datetime_from_py(ctx: &PyCtx<'_>, obj: &Bound<'_, PyAny>) -> PyResult<DateTim
         .timestamp_cls
         .as_ref()
         .is_some_and(|cls| obj.is_instance(cls).unwrap_or(false))
-    {
-        if let Ok(ns) = obj
+        && let Ok(ns) = obj
             .getattr(intern!(py, "value"))
             .and_then(|v| v.extract::<i64>())
-        {
-            // `value` is in the timestamp's unit-independent nanoseconds.
-            let utc = chrono::DateTime::from_timestamp_nanos(ns).naive_utc();
-            return Ok(DateTimeValue { utc, tz });
-        }
+    {
+        // `value` is in the timestamp's unit-independent nanoseconds.
+        let utc = chrono::DateTime::from_timestamp_nanos(ns).naive_utc();
+        return Ok(DateTimeValue { utc, tz });
     }
     let get = |name: &str| -> PyResult<u32> { obj.getattr(name)?.extract::<u32>() };
     let year: i32 = obj.getattr(intern!(py, "year"))?.extract()?;
@@ -427,13 +422,13 @@ pub fn py_to_cell(ctx: &PyCtx<'_>, obj: &Bound<'_, PyAny>) -> PyResult<Cell> {
         return Ok(Cell::Null);
     }
     // Exact builtins first (the common case).
-    if let Ok(s) = obj.downcast_exact::<PyString>() {
+    if let Ok(s) = obj.cast_exact::<PyString>() {
         return Ok(Cell::Str(s.to_str()?.to_string()));
     }
-    if let Ok(f) = obj.downcast_exact::<PyFloat>() {
+    if let Ok(f) = obj.cast_exact::<PyFloat>() {
         return Ok(Cell::Float(f.value()));
     }
-    if let Ok(b) = obj.downcast::<PyBool>() {
+    if let Ok(b) = obj.cast::<PyBool>() {
         return Ok(Cell::Bool(b.is_true()));
     }
     if obj.is_exact_instance_of::<PyInt>() {
@@ -454,10 +449,10 @@ pub fn py_to_cell(ctx: &PyCtx<'_>, obj: &Bound<'_, PyAny>) -> PyResult<Cell> {
     if obj.is_instance_of::<PyDict>() || obj.is_instance_of::<PyList>() {
         return Ok(Cell::Json(py_to_json(obj)?));
     }
-    if let Ok(b) = obj.downcast::<PyBytes>() {
+    if let Ok(b) = obj.cast::<PyBytes>() {
         return Ok(Cell::Bytes(b.as_bytes().to_vec()));
     }
-    if let Ok(b) = obj.downcast::<PyByteArray>() {
+    if let Ok(b) = obj.cast::<PyByteArray>() {
         return Ok(Cell::Bytes(b.to_vec()));
     }
     if obj.is_instance(&ctx.decimal_cls)? {
@@ -512,13 +507,13 @@ pub fn py_to_cell(ctx: &PyCtx<'_>, obj: &Bound<'_, PyAny>) -> PyResult<Cell> {
     }
     if module == "numpy" {
         // `np.datetime64` and friends: go through pandas.
-        if let Some(cls) = &ctx.timestamp_cls {
-            if let Ok(ts) = cls.call1((obj,)) {
-                if ctx.is(&ts, &ctx.nat) {
-                    return Ok(Cell::NaT);
-                }
-                return Ok(Cell::Datetime(datetime_from_py(ctx, &ts)?));
+        if let Some(cls) = &ctx.timestamp_cls
+            && let Ok(ts) = cls.call1((obj,))
+        {
+            if ctx.is(&ts, &ctx.nat) {
+                return Ok(Cell::NaT);
             }
+            return Ok(Cell::Datetime(datetime_from_py(ctx, &ts)?));
         }
     }
     Ok(Cell::Str(obj.str()?.to_str()?.to_string()))
@@ -541,16 +536,16 @@ fn tzinfo_to_py<'py>(ctx: &PyCtx<'py>, tz: &TzInfo) -> PyResult<Bound<'py, PyAny
 pub fn datetime_to_py<'py>(ctx: &PyCtx<'py>, dt: &DateTimeValue) -> PyResult<Bound<'py, PyAny>> {
     let py = ctx.py;
     let nanos = dt.utc.nanosecond() % 1_000_000_000;
-    if nanos % 1000 != 0 {
-        if let (Some(cls), Some(ns)) = (&ctx.timestamp_cls, dt.timestamp_nanos()) {
-            let ts = cls.call1((ns,))?;
-            return match &dt.tz {
-                None => Ok(ts),
-                Some(tz) => ts
-                    .call_method1("tz_localize", ("UTC",))?
-                    .call_method1("tz_convert", (tzinfo_to_py(ctx, tz)?,)),
-            };
-        }
+    if !nanos.is_multiple_of(1000)
+        && let (Some(cls), Some(ns)) = (&ctx.timestamp_cls, dt.timestamp_nanos())
+    {
+        let ts = cls.call1((ns,))?;
+        return match &dt.tz {
+            None => Ok(ts),
+            Some(tz) => ts
+                .call_method1("tz_localize", ("UTC",))?
+                .call_method1("tz_convert", (tzinfo_to_py(ctx, tz)?,)),
+        };
     }
     let build = |n: &NaiveDateTime, tz: Option<Bound<'py, PyAny>>| -> PyResult<Bound<'py, PyAny>> {
         let args = (
@@ -684,7 +679,7 @@ pub fn pylist_to_cells(ctx: &PyCtx<'_>, list: &Bound<'_, PyList>) -> PyResult<Ve
             .call_method0(intern!(py, "tolist"))?;
         for (ix, wkb) in geometry_ixs.into_iter().zip(wkbs.try_iter()?) {
             let wkb = wkb?;
-            let bytes = wkb.downcast::<PyBytes>()?.as_bytes();
+            let bytes = wkb.cast::<PyBytes>()?.as_bytes();
             cells[ix] = Geometry::from_wkb(bytes)
                 .map(Cell::Geometry)
                 .map_err(|e| PyValueError::new_err(e.to_string()))?;

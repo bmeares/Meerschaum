@@ -104,10 +104,11 @@ impl FromRequestParts<AppState> for Ctx {
 pub struct Unmatched;
 
 async fn fallback(State(state): State<AppState>, req: Request) -> Response {
-    if let Some(host) = state.host.clone() {
-        if host.is_active() && is_proxyable(&state.config, req.uri().path()) {
-            return host.forward(req).await;
-        }
+    if let Some(host) = state.host.clone()
+        && host.is_active()
+        && is_proxyable(&state.config, req.uri().path())
+    {
+        return host.forward(req).await;
     }
     let mut resp = ApiError::not_found().into_response();
     resp.extensions_mut().insert(Unmatched);
@@ -133,20 +134,20 @@ pub fn client_key(state: &AppState, req: &Request) -> String {
             .any(|p| p == "*" || p == ip)
     };
     let peer_trusted = peer.as_deref().is_none_or(trusted);
-    if state.config.proxy_headers && peer_trusted {
-        if let Some(fwd) = req
+    if state.config.proxy_headers
+        && peer_trusted
+        && let Some(fwd) = req
             .headers()
             .get("x-forwarded-for")
             .and_then(|v| v.to_str().ok())
-        {
-            let hops: Vec<&str> = fwd
-                .split(',')
-                .map(str::trim)
-                .filter(|h| !h.is_empty())
-                .collect();
-            if let Some(h) = hops.iter().rev().find(|h| !trusted(h)).or(hops.first()) {
-                return (*h).to_string();
-            }
+    {
+        let hops: Vec<&str> = fwd
+            .split(',')
+            .map(str::trim)
+            .filter(|h| !h.is_empty())
+            .collect();
+        if let Some(h) = hops.iter().rev().find(|h| !trusted(h)).or(hops.first()) {
+            return (*h).to_string();
         }
     }
     peer.unwrap_or_else(|| "unknown".into())
@@ -266,10 +267,10 @@ pub async fn read_form(headers: &HeaderMap, body: bytes::Bytes) -> Vec<(String, 
         .get(header::CONTENT_TYPE)
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
-    if ct.starts_with("multipart/form-data") {
-        if let Some(boundary) = ct.split("boundary=").nth(1) {
-            return parse_multipart_text(&body, boundary.trim_matches('"'));
-        }
+    if ct.starts_with("multipart/form-data")
+        && let Some(boundary) = ct.split("boundary=").nth(1)
+    {
+        return parse_multipart_text(&body, boundary.trim_matches('"'));
     }
     parse_form(&body)
 }

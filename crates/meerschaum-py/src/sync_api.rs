@@ -85,7 +85,7 @@ impl Drop for DebugGuard {
 /// The name of a document key: a string as it is, anything else (`pd.DataFrame` accepts
 /// integer labels, which the table then names by their text) through `str()`.
 fn key_name(key: &Bound<'_, PyAny>) -> PyResult<String> {
-    Ok(match key.downcast::<PyString>() {
+    Ok(match key.cast::<PyString>() {
         Ok(s) => s.to_str()?.to_string(),
         Err(_) => key.str()?.to_str()?.to_string(),
     })
@@ -108,10 +108,10 @@ fn sequence_items<'py>(obj: &Bound<'py, PyAny>) -> PyResult<Option<Vec<Bound<'py
     {
         return Ok(None);
     }
-    if let Ok(list) = obj.downcast::<PyList>() {
+    if let Ok(list) = obj.cast::<PyList>() {
         return Ok(Some(list.iter().collect()));
     }
-    if let Ok(tuple) = obj.downcast::<PyTuple>() {
+    if let Ok(tuple) = obj.cast::<PyTuple>() {
         return Ok(Some(tuple.iter().collect()));
     }
     let name = qualname(obj)?;
@@ -139,7 +139,7 @@ fn docs_from_items(ctx: &PyCtx<'_>, items: &[Bound<'_, PyAny>]) -> PyResult<Nati
         .is_some_and(|i| !first_is_dict && sequence_items(i).ok().flatten().is_some());
     for item in items {
         if first_is_dict {
-            let Ok(dict) = item.downcast::<PyDict>() else {
+            let Ok(dict) = item.cast::<PyDict>() else {
                 return Ok(NativeInput::Invalid(format!(
                     "'{}' object has no attribute 'keys'",
                     type_name(item)
@@ -185,7 +185,7 @@ fn columns_from_dict(ctx: &PyCtx<'_>, dict: &Bound<'_, PyDict>) -> PyResult<Nati
         let name = key_name(&key)?;
         let raw = if let Some(items) = sequence_items(&values)? {
             Raw::Seq(items)
-        } else if let Ok(mapping) = values.downcast::<PyDict>() {
+        } else if let Ok(mapping) = values.cast::<PyDict>() {
             Raw::Mapping(mapping.iter().collect())
         } else if values.is_instance_of::<PyBytes>()
             || values.is_instance_of::<PyString>()
@@ -324,20 +324,20 @@ fn docs_from_text(text: &str) -> NativeInput {
 /// Convert the data `Pipe.sync()` was given. Documents, dictionaries of lists and text never
 /// touch pandas or Polars; a DataFrame object needs its own package (which created it).
 pub fn input_from_py<'py>(py: Python<'py>, df: &Bound<'py, PyAny>) -> PyResult<NativeInput> {
-    if let Ok(text) = df.downcast::<PyString>() {
+    if let Ok(text) = df.cast::<PyString>() {
         return Ok(docs_from_text(text.to_str()?));
     }
-    if let Ok(list) = df.downcast::<PyList>() {
+    if let Ok(list) = df.cast::<PyList>() {
         let ctx = PyCtx::scalars(py)?;
         let items: Vec<_> = list.iter().collect();
         return docs_from_items(&ctx, &items);
     }
-    if let Ok(tuple) = df.downcast::<PyTuple>() {
+    if let Ok(tuple) = df.cast::<PyTuple>() {
         let ctx = PyCtx::scalars(py)?;
         let items: Vec<_> = tuple.iter().collect();
         return docs_from_items(&ctx, &items);
     }
-    if let Ok(dict) = df.downcast::<PyDict>() {
+    if let Ok(dict) = df.cast::<PyDict>() {
         let ctx = PyCtx::scalars(py)?;
         return columns_from_dict(&ctx, dict);
     }
@@ -491,7 +491,7 @@ pub fn sync_pipe<'py>(
     let rust_connector =
         |obj: &Bound<'py, PyAny>| -> PyResult<Arc<meerschaum_connector_sql::SqlConnector>> {
             Ok(obj
-                .downcast::<PySqlConnector>()
+                .cast::<PySqlConnector>()
                 .map_err(|_| PyValueError::new_err("Expected a `_core.SqlConnector`."))?
                 .get()
                 .inner
@@ -629,16 +629,17 @@ pub fn sync_pipe<'py>(
             };
             let result = engine_sync_pipe(&env, &core, input, &args, None).await;
             let mut patch = Map::new();
-            if result.success && !core.temporary {
-                if let Some(after) = registered_parameters(&instance, &core).await {
-                    // What the sync wrote to the registered parameters (`autoincrement`,
-                    // numeric and special `dtypes`): v4 mutates the Python pipe the same way.
-                    // Unsaved in-memory edits are not in either side of the comparison.
-                    patch = match registered_before {
-                        Some(before) => changed_keys(&before, &after),
-                        None => changed_keys(&raw_before, &after),
-                    };
-                }
+            if result.success
+                && !core.temporary
+                && let Some(after) = registered_parameters(&instance, &core).await
+            {
+                // What the sync wrote to the registered parameters (`autoincrement`,
+                // numeric and special `dtypes`): v4 mutates the Python pipe the same way.
+                // Unsaved in-memory edits are not in either side of the comparison.
+                patch = match registered_before {
+                    Some(before) => changed_keys(&before, &after),
+                    None => changed_keys(&raw_before, &after),
+                };
             }
             if result.success
                 && core.param("compress").is_some_and(|v| v.truthy())
@@ -771,8 +772,8 @@ mod tests {
     }
 
     fn with_py<R>(f: impl FnOnce(Python<'_>) -> R) -> R {
-        pyo3::prepare_freethreaded_python();
-        Python::with_gil(f)
+        pyo3::Python::initialize();
+        Python::attach(f)
     }
 
     fn eval<'py>(py: Python<'py>, code: &str) -> Bound<'py, PyAny> {

@@ -538,11 +538,10 @@ pub async fn run_sink(
                         buf.tokens.push(t);
                     }
                     buf.redelivered |= m.redelivered;
-                    if let Some(t) = batcher.push(now_ms(), n, m.bytes) {
-                        if retry_at.is_none_or(|r| now_ms() >= r) {
+                    if let Some(t) = batcher.push(now_ms(), n, m.bytes)
+                        && retry_at.is_none_or(|r| now_ms() >= r) {
                             trigger = Some(t);
                         }
-                    }
                 }
                 None => {
                     closed = true;

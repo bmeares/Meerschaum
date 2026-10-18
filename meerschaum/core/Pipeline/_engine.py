@@ -229,13 +229,21 @@ def forget_engine_state(pipe: Any, operation: str) -> None:
     method call from Python, whichever implementation serves the instance (`operation` names the
     method that succeeded). It is best effort and never raises, and does nothing on an instance
     where the engine never ran (no `mrsm_engine_runs` table). Run history is kept.
+
+    On SQL instances the Rust connector forgets it where it keeps it (`_mrsm_internal` on
+    schema flavors, namespaced by the instance schema), so the placement rule lives in one place.
     """
     try:
         if str(pipe.connector_keys) == 'mrsm':
             return
         connector = pipe.instance_connector
-        if connector is None or getattr(connector, 'type', None) == 'api':
-            ### The API server's instance connector forgets it.
+        if connector is None:
+            return
+        ### On an API instance the rows are keyed on this client's `api:<label>` pipe refs and
+        ### live on the server's instance; the client clears them over `/engine/pipes/*`
+        ### (the generic path below: the API connector routes `mrsm:engine_*` pipes there).
+        if getattr(connector, 'type', None) == 'sql' and hasattr(connector, '_rust_method'):
+            connector._rust_method('forget_engine_state')(pipe)
             return
 
         def state_pipe(metric: str):

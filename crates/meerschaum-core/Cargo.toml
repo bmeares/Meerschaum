@@ -23,7 +23,7 @@ regex = { workspace = true }
 thiserror = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
-num-bigint = "0.4"
+num-bigint = "0.5"
 num-traits = "0.2"
 pep440_rs = "0.7"
 pbkdf2 = { workspace = true, features = ["hmac"] }
@@ -35,7 +35,7 @@ md-5 = { workspace = true }
 blake2 = { workspace = true }
 ripemd = { workspace = true }
 sm3 = { workspace = true }
-getrandom = "0.3"
+getrandom = "0.4"
 
 [dev-dependencies]
 tempfile = "3"

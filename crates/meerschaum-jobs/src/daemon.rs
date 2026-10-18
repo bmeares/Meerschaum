@@ -1103,25 +1103,22 @@ impl Daemon {
                 self.daemon_id
             ));
         }
-        if self.paths.dir.exists() {
-            if let Err(e) = fs::remove_dir_all(&self.paths.dir) {
-                return SuccessTuple::fail(format!(
-                    "Failed to clean up '{}':\n{e}",
-                    self.daemon_id
-                ));
-            }
+        if self.paths.dir.exists()
+            && let Err(e) = fs::remove_dir_all(&self.paths.dir)
+        {
+            return SuccessTuple::fail(format!("Failed to clean up '{}':\n{e}", self.daemon_id));
         }
         if !keep_logs {
             if let Some(mut log) = self.rotating_log() {
                 log.delete(false);
             }
-            if self.paths.log_offset.exists() {
-                if let Err(e) = fs::remove_file(&self.paths.log_offset) {
-                    return SuccessTuple::fail(format!(
-                        "Failed to remove offset file for '{}':\n{e}",
-                        self.daemon_id
-                    ));
-                }
+            if self.paths.log_offset.exists()
+                && let Err(e) = fs::remove_file(&self.paths.log_offset)
+            {
+                return SuccessTuple::fail(format!(
+                    "Failed to remove offset file for '{}':\n{e}",
+                    self.daemon_id
+                ));
             }
         }
         SuccessTuple::success()

@@ -47,15 +47,14 @@ pub fn strip_timestamp_from_line(line: &str) -> String {
 fn job_tuple(r: &ApiResponse) -> SuccessTuple {
     if !r.ok() {
         let text = r.text();
-        if text.contains("detail") {
-            if let Ok(serde_json::Value::Object(o)) = r.json() {
-                if let Some(d) = o.get("detail") {
-                    return SuccessTuple::fail(match d {
-                        serde_json::Value::String(s) => s.clone(),
-                        other => crate::models::detail_repr(other),
-                    });
-                }
-            }
+        if text.contains("detail")
+            && let Ok(serde_json::Value::Object(o)) = r.json()
+            && let Some(d) = o.get("detail")
+        {
+            return SuccessTuple::fail(match d {
+                serde_json::Value::String(s) => s.clone(),
+                other => crate::models::detail_repr(other),
+            });
         }
         return SuccessTuple::fail(text);
     }
@@ -101,12 +100,11 @@ impl APIConnector {
 
     /// `get_job_metadata(name)`: `GET /jobs/{name}`, cached for 5 seconds (`{}` if missing).
     pub async fn get_job_metadata(&self, name: &str) -> ConnectorResult<Map> {
-        if let Ok(cache) = self.job_metadata_cache.lock() {
-            if let Some((at, meta)) = cache.get(name) {
-                if at.elapsed().as_secs() < JOB_METADATA_CACHE_SECONDS {
-                    return Ok(meta.clone());
-                }
-            }
+        if let Ok(cache) = self.job_metadata_cache.lock()
+            && let Some((at, meta)) = cache.get(name)
+            && at.elapsed().as_secs() < JOB_METADATA_CACHE_SECONDS
+        {
+            return Ok(meta.clone());
         }
         let r = self
             .get(
@@ -373,12 +371,11 @@ impl APIConnector {
     /// failures are errors. Cached for 5 seconds like [`APIConnector::get_job_metadata`]; every
     /// mutation through this client clears the cache.
     pub async fn try_get_job_metadata(&self, name: &str) -> ConnectorResult<Option<Map>> {
-        if let Ok(cache) = self.job_metadata_cache.lock() {
-            if let Some((at, meta)) = cache.get(name) {
-                if at.elapsed().as_secs() < JOB_METADATA_CACHE_SECONDS {
-                    return Ok(Some(meta.clone()));
-                }
-            }
+        if let Ok(cache) = self.job_metadata_cache.lock()
+            && let Some((at, meta)) = cache.get(name)
+            && at.elapsed().as_secs() < JOB_METADATA_CACHE_SECONDS
+        {
+            return Ok(Some(meta.clone()));
         }
         let r = self
             .get(
@@ -485,6 +482,24 @@ impl APIConnector {
         )
     }
 
+    /// Open a websocket: plain TCP for `ws://`, rustls (the platform verifier, or no verification
+    /// under `verify: false`) for `wss://`.
+    pub(crate) async fn connect_websocket(
+        &self,
+        url: &str,
+    ) -> ConnectorResult<(
+        tokio_tungstenite::WebSocketStream<
+            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+        >,
+        tokio_tungstenite::tungstenite::handshake::client::Response,
+    )> {
+        let connector =
+            super::wss::connector_for(url, self.verify).map_err(ConnectorError::Backend)?;
+        tokio_tungstenite::connect_async_tls_with_config(url, None, false, connector)
+            .await
+            .map_err(|e| ConnectorError::Backend(e.to_string()))
+    }
+
     /// `monitor_logs_async(name, ...)`: stream a job's logs over the websocket. The token (or
     /// `no-login`) is sent first; `MRSM_STDIN` asks for input, `MRSM_STOP` is followed by the
     /// job's result as JSON.
@@ -494,9 +509,7 @@ impl APIConnector {
         mut monitor: LogsMonitor<'_>,
     ) -> ConnectorResult<()> {
         let url = self.logs_websocket_url(name);
-        let (ws, _) = tokio_tungstenite::connect_async(url.as_str())
-            .await
-            .map_err(|e| ConnectorError::Backend(e.to_string()))?;
+        let (ws, _) = self.connect_websocket(&url).await?;
         let (mut tx, mut rx) = ws.split();
         let token = self.token().await.unwrap_or_else(|| "no-login".into());
         let _ = tx.send(Message::text(token)).await;

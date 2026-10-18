@@ -10,8 +10,8 @@ temporary root with the synthetic plugin `crates/meerschaum-server/tests/host_pl
 and is reached over its Unix socket. JWTs are minted the way the Rust server mints them (HS256
 over the shared secret file), so a token from either side validates on the other.
 
-Skipped when the host's dependencies (`fastapi`, `uvicorn`, `dash`, `a2wsgi`, `python-jose`,
-`fastapi-login`) are not importable. The end-to-end test through the Rust server is
+Skipped when the host's dependencies (`fastapi`, `uvicorn`, `dash`, `a2wsgi`, `PyJWT`) are not
+importable. The end-to-end test through the Rust server is
 `crates/meerschaum-server/tests/host_e2e.rs`.
 """
 
@@ -48,9 +48,6 @@ def _env(root: pathlib.Path) -> dict:
         'PYTHONDONTWRITEBYTECODE': '1',
         'MRSM_API_HOST_CONFIG': json.dumps({'mrsm_instance': 'sql:local'}),
     })
-    venvs = REPO / 'test_root' / 'venvs'
-    if (venvs / 'mrsm').is_dir():
-        env['MRSM_VENVS_DIR'] = str(venvs)
     return env
 
 
@@ -87,7 +84,7 @@ def root():
     check = _python(
         path,
         "import meerschaum.utils.venv as v; v.activate_venv('mrsm'); "
-        "import fastapi, uvicorn, dash, a2wsgi, jose, fastapi_login",
+        "import fastapi, uvicorn, dash, a2wsgi, jwt",
     )
     if check.returncode != 0:
         shutil.rmtree(path, ignore_errors=True)
@@ -357,13 +354,20 @@ def test_mcp_calls_run_with_the_forwarded_scopes(host):
 
 
 def _route(client, pathname):
+    """
+    Fire the page-router callback. It is found through `_dash-dependencies`, because the output
+    id differs with the app class: `dash_extensions` (the `dash` extra) multiplexes the stores,
+    plain Dash marks them `allow_duplicate`.
+    """
+    dependencies = client.get('/dash/hostdemo/_dash-dependencies').json()
+    dependency = next(d for d in dependencies if 'page-layout-div' in d['output'])
+    outputs = []
+    for part in dependency['output'].strip('.').split('...'):
+        component_id, _, prop = part.partition('.')
+        outputs.append({'id': component_id, 'property': prop})
     payload = {
-        'output': '..page-layout-div.children...session-store.data...dbc-dark-store.data..',
-        'outputs': [
-            {'id': 'page-layout-div', 'property': 'children'},
-            {'id': 'session-store', 'property': 'data'},
-            {'id': 'dbc-dark-store', 'property': 'data'},
-        ],
+        'output': dependency['output'],
+        'outputs': outputs,
         'inputs': [{'id': 'mrsm-location', 'property': 'pathname', 'value': pathname}],
         'changedPropIds': ['mrsm-location.pathname'],
         'state': [],

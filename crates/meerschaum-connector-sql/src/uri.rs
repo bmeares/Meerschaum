@@ -367,6 +367,16 @@ impl ConnectionSpec {
                 label = parsed.get("label").map(UriValue::as_string);
             }
             let mut parsed_flavor = None;
+            // PARITY: v4 builds its engine from the `uri` attribute whenever one is set
+            // (`_create_engine.py:88-115`) and never reads `host` / `port` / `username` /
+            // `password` / `database` then, although a label's default config keeps them as
+            // attributes (`MRSM_SQL_MAIN=sqlite:///x.db` leaves `host='localhost'` on
+            // `sql:main`). Every connection parameter therefore comes from the URI alone.
+            host = None;
+            port = None;
+            username = None;
+            password = None;
+            database = None;
             for (key, value) in parsed {
                 let text = value.as_string();
                 match key.as_str() {
@@ -389,9 +399,21 @@ impl ConnectionSpec {
                     }
                 }
             }
-            if flavor.is_none() {
-                flavor = parsed_flavor.and_then(|f| f.parse().ok());
-            }
+            let uri_flavor = parsed_flavor.and_then(|f| f.parse::<Flavor>().ok());
+            flavor = match (flavor, uri_flavor) {
+                // PARITY: a flavor of the same driver family stays as configured
+                // (`timescaledb-ha` for a `postgresql://` URI on `sql:main`,
+                // `_SQLConnector.py:221-223`).
+                (Some(configured), Some(from_uri))
+                    if configured.driver_family() != from_uri.driver_family() =>
+                {
+                    // Intentional fix (PARITY.md, wave 17b): v4 keeps the label's flavor here,
+                    // then generates SQL for the wrong dialect on the URI's database.
+                    Some(from_uri)
+                }
+                (Some(configured), _) => Some(configured),
+                (None, from_uri) => from_uri,
+            };
         }
 
         let flavor = flavor.ok_or_else(|| {

@@ -119,12 +119,12 @@ impl ValkeyConnector {
         }
         let mut result = SuccessTuple::success();
         for (key, val) in &keys_vals {
-            if let Some(val) = val {
-                if let Err(e) = self.set(key, val).await {
-                    result =
-                        SuccessTuple::fail(format!("Failed to register '{}':\n{e}", user.username));
-                    break;
-                }
+            if let Some(val) = val
+                && let Err(e) = self.set(key, val).await
+            {
+                result =
+                    SuccessTuple::fail(format!("Failed to register '{}':\n{e}", user.username));
+                break;
             }
         }
         if !result.success {
@@ -357,14 +357,14 @@ impl ValkeyConnector {
         }
         let mut result = SuccessTuple::success();
         for (key, val) in &keys_vals {
-            if let Some(val) = val {
-                if let Err(e) = self.set(key, val).await {
-                    result = SuccessTuple::fail(format!(
-                        "Failed to register plugin '{}':\n{e}",
-                        plugin.name
-                    ));
-                    break;
-                }
+            if let Some(val) = val
+                && let Err(e) = self.set(key, val).await
+            {
+                result = SuccessTuple::fail(format!(
+                    "Failed to register plugin '{}':\n{e}",
+                    plugin.name
+                ));
+                break;
             }
         }
         if !result.success {

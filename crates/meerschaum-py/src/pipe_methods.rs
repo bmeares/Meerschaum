@@ -127,10 +127,10 @@ impl HookOutcome {
         use pyo3::prelude::*;
         match self {
             HookOutcome::Tuple(t) => !t.success,
-            HookOutcome::Python(object) => Python::with_gil(|py| {
+            HookOutcome::Python(object) => Python::attach(|py| {
                 object
                     .bind(py)
-                    .downcast::<pyo3::types::PyTuple>()
+                    .cast::<pyo3::types::PyTuple>()
                     .ok()
                     .and_then(|t| t.get_item(0).ok())
                     .is_some_and(|first| {
@@ -1430,10 +1430,11 @@ impl Reader {
         // A Python source gets the chunk hook (`sync_chunks`: synced on the host as the worker
         // produces each chunk); `SQLConnector.fetch()`, `APIConnector.fetch()` and
         // `ValkeyConnector.fetch()` take no `chunk_hook`, so v4 returns their data as it is.
-        if !matches!(mode, FetchMode::Plain) && !crate::facade::is_native(pipe.connector_keys()) {
-            if let Some(out) = self.fetch_streamed(pipe, &source, &query, &mode).await? {
-                return Ok(out);
-            }
+        if !matches!(mode, FetchMode::Plain)
+            && !crate::facade::is_native(pipe.connector_keys())
+            && let Some(out) = self.fetch_streamed(pipe, &source, &query, &mode).await?
+        {
+            return Ok(out);
         }
         match source.fetch(pipe, &query).await {
             Ok(Some(frame)) if is_sql => Ok(Fetched::Chunks(self.sql_chunks(pipe, frame))),
@@ -1589,7 +1590,8 @@ pub fn interval_str(interval: &ChunkInterval) -> String {
 /// `info(message)` through the Python process's `meerschaum.utils.warnings.info`.
 pub fn py_info(message: &str) {
     use pyo3::prelude::*;
-    let _ = Python::with_gil(|py| -> PyResult<()> {
+    // Dropped once the interpreter is finalizing (`attach` would panic there).
+    let _ = Python::try_attach(|py| -> PyResult<()> {
         py.import("meerschaum.utils.warnings")?
             .getattr("info")?
             .call1((message,))?;
@@ -1935,7 +1937,7 @@ mod tests {
 
     #[test]
     fn the_generic_deduplicate_removes_duplicates() {
-        pyo3::prepare_freethreaded_python();
+        pyo3::Python::initialize();
         let (fx, pipe) = fixture("dedup", 6);
         // Duplicates around the sync's diff: write the rows again straight to the table.
         let conn = fx.sql.sql.clone().unwrap();

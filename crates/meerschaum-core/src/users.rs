@@ -443,10 +443,10 @@ impl Token {
     /// PARITY: `randint(min_len, max_len + 1)` is inclusive, so secrets can be one character
     /// longer than `maximum_length` (`core/Token/_Token.py:76`).
     pub fn generate_credentials(&mut self) -> Result<(Uuid, String), PasswordError> {
-        if let (Some(id), Some(secret)) = (self.id, &self.secret) {
-            if !secret.is_empty() {
-                return Ok((id, secret.clone()));
-            }
+        if let (Some(id), Some(secret)) = (self.id, &self.secret)
+            && !secret.is_empty()
+        {
+            return Ok((id, secret.clone()));
         }
         let tokens = &static_config().tokens;
         let span = (tokens.maximum_length + 1 - tokens.minimum_length + 1) as u64;

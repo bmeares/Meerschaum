@@ -901,10 +901,10 @@ pub fn write_config_cache(project: &Project) -> std::io::Result<()> {
 pub fn config_has_changed(project: &Project, session: &mut Session) -> bool {
     let key = posix(&resolve_path(&config_cache_path(project)));
     let hashed = hash_config(&project.config);
-    if let Some((h, changed)) = session.config_metadata.get(&key) {
-        if *h == hashed {
-            return *changed;
-        }
+    if let Some((h, changed)) = session.config_metadata.get(&key)
+        && *h == hashed
+    {
+        return *changed;
     }
     let changed = read_config_cache(project).as_deref() != Some(hashed.as_str());
     session.config_metadata.insert(key, (hashed, changed));

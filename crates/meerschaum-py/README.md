@@ -10,9 +10,9 @@ every discrepancy found while the two implementations ran side by side is tracke
 | `__version__` | Cargo version (`5.0.0-a1`); `build_info()['version_pep440']` is the wheel form (`5.0.0a1`) |
 | `build_info()` | rustc version, profile, opt level, target/host, enabled features, Python ABI (`abi3-py311`) |
 | `static_config()` | `crates/meerschaum-core/static.toml` (D15) as a dict, parsed by `meerschaum_core::static_config` (which embeds it at build time). The file's `{ __null__ = true }` and `{ __cpu_count_or__ = N }` markers are resolved the way `STATIC_CONFIG` does, with Python's own `os.cpu_count()` |
-| `roundtrip_arrow(obj)` | Imports anything with `__arrow_c_stream__` / `__arrow_c_array__` into Rust `RecordBatch`es and returns an `ArrowStream`, a pyarrow-free object that exports the data back through `__arrow_c_stream__` / `__arrow_c_schema__` |
-| `polars_roundtrip(df)` | `polars.DataFrame` → `polars::DataFrame` → `polars.DataFrame` through `pyo3-polars` (crate feature `polars`: off for plain cargo builds, on by default in `build_py.sh`) |
-| `HAS_STATIC_CONFIG`, `HAS_POLARS` | Build-time flags |
+| `roundtrip_arrow(obj)` | Imports anything with `__arrow_c_stream__` / `__arrow_c_array__` into Rust `RecordBatch`es and returns an `ArrowStream`, a pyarrow-free object that exports the data back through `__arrow_c_stream__` / `__arrow_c_schema__` (`ffi_export.rs`, honoring `requested_schema`) |
+| `polars_roundtrip(df)` | `polars.DataFrame` → `polars::DataFrame` → `polars.DataFrame` over the Arrow C stream, read and written with Polars' own Arrow FFI (`polars_bridge.rs`; no pyarrow, every Polars type including `Enum`) |
+| `HAS_STATIC_CONFIG` | Build-time flag |
 
 Kernel and core functions (each takes exactly the arguments its dispatch guard passes, so the
 Python signature is the v4 one):
@@ -83,7 +83,8 @@ crates/meerschaum-py/
   Cargo.toml        [lib] name = "_native", crate-type = ["cdylib", "rlib"]
   build.rs          records build_info
   pyproject.toml    maturin config: module-name = "meerschaum._core._native", python-source = "../.."
-  src/              lib.rs (#[pymodule] _native), arrow_bridge.rs, ffi_import.rs, polars_bridge.rs,
+  src/              lib.rs (#[pymodule] _native), arrow_bridge.rs, ffi_import.rs, ffi_export.rs,
+                    polars_bridge.rs,
                     convert.rs (Python <-> Value), pandas_bridge.rs (frames), kernel_api.rs,
                     core_api.rs, trace.rs (MRSM_CORE_TRACE stage timers), runtime.rs (Tokio),
                     pipe_bridge.rs (duck-typed pipes/users/plugins), sql_api.rs (SqlConnector)
@@ -105,7 +106,7 @@ pure-Python package, `meerschaum/_core/`, so that:
   `EXTENSION_PATH`, and raises a clear `CoreNotBuiltError` (an `ImportError`) only when a symbol is
   actually used;
 - the extension loads lazily on first attribute access (PEP 562). `import meerschaum` never pays
-  for it: the loader adds about 0.4 ms, and loading the 42 MB release `.so` takes about 2 ms;
+  for it: the loader adds about 0.4 ms, and loading the release `.so` (about 100 MB, 85 MB stripped) takes about 3 ms;
 - the same dotted name works unchanged at 5.0, when the extension ships inside the `meerschaum`
   wheel.
 
@@ -125,7 +126,6 @@ replace an installed v4 package. Do not upload it.
 uv tool install maturin                  # once (maturin 1.15 tested)
 scripts/rust/build_py.sh                 # release (default): ~42 MB .so
 scripts/rust/build_py.sh --debug         # unoptimized, stripped (~34 MB; ~1 GB unstripped)
-scripts/rust/build_py.sh --no-polars     # skip pyo3-polars and Polars (~12 MB)
 scripts/rust/clean_py.sh [--cargo]       # remove the .so (and this crate's cargo artifacts)
 
 PYTHONPATH=$(pwd) python -c 'import meerschaum._core as c; print(c.AVAILABLE, c.build_info())'
@@ -133,7 +133,7 @@ PYTHONPATH=$(pwd) python -c 'import meerschaum._core as c; print(c.AVAILABLE, c.
 
 `build_py.sh` runs
 `maturin develop --skip-install --manifest-path crates/meerschaum-py/Cargo.toml [--release | --strip]
---features pyo3/abi3-py311,extension-module[,polars]` with `PYO3_PYTHON` set to `$PYTHON`. A
+--features pyo3/abi3-py311,extension-module,oracle` with `PYO3_PYTHON` set to `$PYTHON`. A
 command-line `--features` *replaces* the pyproject `features` list, so the script always passes the
 full set. Without `extension-module`, the module links whichever libpython pyo3 found, and the
 script refuses a `.so` that has a `NEEDED libpython` entry. The script runs (default `python3`, any version 3.11 or newer works because
@@ -157,35 +157,29 @@ PYTHONPATH=$(pwd) MRSM_ROOT_DIR=./test_root MRSM_PLUGINS_DIR=./tests/plugins \
 ```
 
 `cargo test` and `cargo clippy` build without the `extension-module` feature, so the test binaries
-link libpython. Add `--features polars` to lint and test `polars_bridge.rs`. maturin turns the feature on through `pyproject.toml`. `test_core.py` needs pyarrow,
+link libpython. `test_core.py` needs pyarrow,
 polars and pandas (test-only). Without a built extension it runs only the loader tests and
 skips the rest.
 
 ## Dependency pins
 
-pyo3 is declared here as **0.25**, not through the workspace's `pyo3 = 0.26`. `pyo3-polars` for the
-workspace's `polars = 0.51` (which the kernel uses) is 0.24, and 0.24 requires pyo3 0.25. Both
-`pyo3-arrow` 0.11 (pyo3 0.25) and 0.12 (pyo3 0.26) target `arrow = 56`, so pyo3 0.25 is the only
-version consistent with both workspace data pins. Moving to pyo3 0.26 needs polars 0.52
-(`pyo3-polars` 0.25). The latest consistent set is pyo3 0.29, arrow 59, polars 0.55,
-`pyo3-arrow` 0.19 and `pyo3-polars` 0.28. Upgrade all three together. pyo3's `links = "python"` means
-only one pyo3 version can exist in the workspace lockfile, so the workspace entry should be set to
-match whichever version this crate uses before a second crate depends on pyo3.
+`pyo3`, `arrow` and `polars` are workspace dependencies (`pyo3 = { workspace = true }`), upgraded
+together: RecordBatches cross between the kernel, the plugin C ABI and this crate, and pyo3's
+`links = "python"` allows only one pyo3 in the lockfile. Since 17b the crate depends on no binding
+crate that pins that triple: the Python <-> Arrow boundary is our own PyCapsule code
+(`ffi_import.rs` imports, `ffi_export.rs` exports, both over arrow-rs FFI), and
+`polars_roundtrip` uses Polars' own Arrow FFI (`polars-arrow`, kept on the `polars` version).
+So pyo3, arrow-rs and Polars can each move to their latest release independently (pyo3 0.30,
+arrow 60, polars 0.55 today; arrow 60 needs Rust 1.88).
+
+`num-bigint` (0.5, shared with arrow-buffer) never crosses into pyo3: Python ints beyond `i64`
+travel as decimal text (`config_api.rs`, `yaml_api.rs`), so pyo3's `num-bigint` feature is off.
 
 ## Sharing the Polars build with the kernel
 
 The crate depends on `polars = { workspace = true }` (the kernel's features, used for column
-types at the pandas boundary), so `cargo build/test/clippy -p meerschaum-py` reuses the kernel's
-Polars build. `pyo3-polars` 0.24, however, enables `polars-error/python`, which pulls pyo3 into
-`polars-error`, and `polars-core/allow_unused`. Every Polars crate depends on `polars-error`, so
-whenever the `polars` feature (which now only adds `pyo3-polars`) is on, the whole Polars stack is
-compiled with a different fingerprint from the kernel's. For this reason the `polars` feature is
-**opt-in**: `build_py.sh` turns it on (release by default, so it does not duplicate the kernel's
-dev build) and `--no-polars` leaves it off.
-
-`polars_roundtrip` should move to the stream path (Arrow C stream → `polars::DataFrame` via
-polars-arrow FFI), so `pyo3-polars` can be dropped and the extension links exactly the kernel's
-Polars. The kernel bindings already take streams.
+types at the pandas boundary) and nothing that changes Polars' features, so
+`cargo build/test/clippy -p meerschaum-py` and the extension reuse the kernel's Polars build.
 
 ## Findings at the Arrow boundary
 
@@ -194,11 +188,10 @@ Polars. The kernel bindings already take streams.
   them. `ffi_import.rs` repairs this at import by setting `n_buffers = 0` on `Null` nodes before
   `from_ffi`. Producers that follow the spec are untouched. Any other Rust code that imports
   polars-produced streams with arrow-rs needs the same repair.
-- **pyo3-polars needs pyarrow at call time.** `pyo3-polars` 0.24 extracts each column through
-  `Series.to_arrow()`, which returns a pyarrow array. It also drops field metadata, so an `Enum`
-  comes back as `Categorical`. The `__arrow_c_stream__` path (`roundtrip_arrow`) needs no pyarrow
-  and keeps `Enum`, so kernel bindings should take streams unless they truly need a
-  `polars::DataFrame`.
+- **Polars frames into Rust Polars.** `polars_bridge.rs` reads the capsule with `polars-arrow`'s
+  `ArrowArrayStreamReader` (not arrow-rs), so Polars' own layouts and field metadata (`Enum`
+  categories, `Categorical`, extension types) come through without the `Null` repair or pyarrow,
+  and writes back with `export_iterator` at `CompatLevel::newest()`.
 - **Metadata survives.** Schema-level metadata (pandas' `b"pandas"` block, so `to_pandas()`
   restores `Int64`, `category` and tz-aware dtypes) and field-level metadata
   (`ARROW:extension:name`, for example GeoArrow WKB) round-trip. Every imported batch carries the
@@ -206,10 +199,16 @@ Polars. The kernel bindings already take streams.
 - **Empty streams have no batches.** A zero-row pandas or Polars frame exports a stream with no
   batches at all; `pandas_bridge::frame_from_arrow` imports an empty batch carrying the stream's
   schema so the columns survive.
-- **Polars `Extension` string columns.** Polars 1.36 exports them as `Utf8View` with a buffer
-  layout arrow-rs 56 panics on (`byte_view_array.rs`). The kernel bindings import Polars frames
-  through `DataFrame.to_arrow()` (non-view layout, extension metadata kept) when pyarrow is
-  available, and fall back to the capsule otherwise.
+- **Polars `Extension` string columns.** Polars 1.36 exported them as `Utf8View` with a buffer
+  layout arrow-rs 56 panicked on (`byte_view_array.rs`). With Polars 2.0 and arrow-rs 59/60 the
+  capsule imports and validates (`validate_full`), but the kernel bindings still import Polars
+  frames through `DataFrame.to_arrow()` (non-view layout, extension metadata kept) when pyarrow is
+  available, for the older Polars releases the `polars` extra allows, and fall back to the
+  capsule otherwise.
+- **Arrow 60 hides the stream callbacks.** `FFI_ArrowArrayStream`'s fields became private in
+  arrow 60; `ffi_import.rs` calls `get_schema` / `get_next` / `get_last_error` through a
+  `#[repr(C)]` mirror of the C struct (layout asserted at compile time), the same pattern as its
+  `RawArrowArray` mirror.
 - **Zero copy.** Imported buffers are the producer's allocations, kept alive by the C Data Interface
   release callbacks. The tests assert that buffer addresses are unchanged.
 

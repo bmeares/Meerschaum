@@ -559,10 +559,10 @@ async fn scenario(backend: Backend, point: Point) {
     }
     if std::env::var_os("MRSM_KEEP_TEST_DB").is_none() {
         let _ = std::fs::remove_dir_all(&dir);
-        if backend.kind == "sqlite" {
-            if let Some(db_dir) = Path::new(&backend.target).parent() {
-                let _ = std::fs::remove_dir_all(db_dir);
-            }
+        if backend.kind == "sqlite"
+            && let Some(db_dir) = Path::new(&backend.target).parent()
+        {
+            let _ = std::fs::remove_dir_all(db_dir);
         }
     }
 }

@@ -143,7 +143,9 @@ pub(crate) fn kind_for(ty: &OracleType) -> (ColumnKind, String, u32) {
         OracleType::Number(p, s) if *p > 0 && *s > 0 => {
             (ColumnKind::Decimal, format!("NUMBER({p},{s})"), *s as u32)
         }
-        OracleType::Number(_, _) => (ColumnKind::Decimal, "NUMBER".into(), 10),
+        // Unconstrained `NUMBER` (precision 0: `COUNT(*)`, expressions, a column declared without
+        // precision): python-oracledb returns an `int` or a `float` per value; resolved per chunk.
+        OracleType::Number(_, _) => (ColumnKind::NumberAuto, "NUMBER".into(), 10),
         OracleType::Float(_) | OracleType::BinaryDouble => {
             (ColumnKind::Float64, "BINARY_DOUBLE".into(), 0)
         }
@@ -186,7 +188,7 @@ fn cell(v: &oracle::SqlValue, plan: &ColumnPlan) -> Result<SqlValue> {
             Ok(i) => SqlValue::Int(i),
             Err(_) => SqlValue::Text(v.get::<String>().map_err(conv)?),
         },
-        ColumnKind::Decimal => {
+        ColumnKind::Decimal | ColumnKind::NumberAuto => {
             let s = v.get::<String>().map_err(conv)?;
             match s
                 .parse::<Decimal>()
@@ -227,6 +229,7 @@ fn query_blocking(
     sql: &str,
     params: &[SqlParam],
     chunksize: usize,
+    commit: bool,
     sink: &mpsc::Sender<NativeEvent>,
 ) -> Result<()> {
     let boxed: Vec<Box<dyn ToSql + Send>> = params.iter().map(to_sql_param).collect();
@@ -236,6 +239,18 @@ fn query_blocking(
         .fetch_array_size(chunksize.clamp(1, 10_000) as u32)
         .build()
         .map_err(db_err)?;
+    // PARITY: python-oracledb's `cursor.execute(text)` runs any statement, so `read()` of a
+    // `CREATE VIEW ...` (`sql <label> "CREATE VIEW ... AS SELECT ..."`, which v4 routes to `read`
+    // because the text contains `select`) executes it; ODPI-C's query call refuses a non-query
+    // statement ("could not use the `query` method for non-select statements"). It returns no rows.
+    if !stmt.is_query() {
+        stmt.execute(&refs).map_err(db_err)?;
+        if commit {
+            conn.commit().map_err(db_err)?;
+        }
+        let _ = sink.blocking_send(NativeEvent::Columns(Vec::new()));
+        return Ok(());
+    }
     let rows = stmt.query(&refs).map_err(db_err)?;
     let plans: Vec<ColumnPlan> = rows
         .column_info()
@@ -302,8 +317,16 @@ impl NativeConn for OracleConn {
         sink: mpsc::Sender<NativeEvent>,
     ) -> Result<()> {
         let (conn, sql, params) = (self.conn.clone(), sql.to_string(), params.to_vec());
+        let commit = !self.in_tx;
         tokio::task::spawn_blocking(move || {
-            query_blocking(&*lock(&conn)?, &sql, &params, chunksize.max(1), &sink)
+            query_blocking(
+                &*lock(&conn)?,
+                &sql,
+                &params,
+                chunksize.max(1),
+                commit,
+                &sink,
+            )
         })
         .await
         .map_err(task_err)?
@@ -341,8 +364,13 @@ mod tests {
         assert_eq!(kind_for(&OracleType::Number(38, 0)).0, ColumnKind::Int64);
         assert_eq!(
             kind_for(&OracleType::Number(0, -127)).0,
-            ColumnKind::Decimal
+            ColumnKind::NumberAuto
         );
+        assert_eq!(
+            kind_for(&OracleType::Number(0, 0)).0,
+            ColumnKind::NumberAuto
+        );
+        assert_eq!(kind_for(&OracleType::Number(10, 2)).0, ColumnKind::Decimal);
         assert_eq!(kind_for(&OracleType::NVarchar2(2000)).0, ColumnKind::Utf8);
         assert_eq!(
             kind_for(&OracleType::TimestampTZ(6)).0,

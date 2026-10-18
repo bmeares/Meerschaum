@@ -76,10 +76,9 @@ impl Py {
             .parent()
             .and_then(Path::parent)
             .and_then(Path::parent)
+            && venvs.ends_with("venvs")
         {
-            if venvs.ends_with("venvs") {
-                cmd.env("MRSM_VENVS_DIR", venvs);
-            }
+            cmd.env("MRSM_VENVS_DIR", venvs);
         }
         // Use the reference harness's already prepared dependency environment. A fresh
         // secondary v4 venv recursively reads config during bootstrap on Python 3.14.

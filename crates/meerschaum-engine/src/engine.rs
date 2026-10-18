@@ -479,12 +479,12 @@ struct RunSink {
 
 impl EventSink for RunSink {
     fn emit(&self, event: Event) {
-        if let Some(buf) = &self.persist {
-            if self.granularity.keeps(&event.kind) {
-                buf.lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .push(event.to_row());
-            }
+        if let Some(buf) = &self.persist
+            && self.granularity.keeps(&event.kind)
+        {
+            buf.lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .push(event.to_row());
         }
         let outcome = match (&event.kind, &event.pipe_ref) {
             (EventKind::NodeFinished { result }, Some(r)) => Some((r, result.clone())),
@@ -585,12 +585,11 @@ pub async fn fetch_records(
         let mut rec = record_from_entry(instance, e, registry);
         if !matches!(e.extra, Some(Value::Map(_))) {
             // The list form carries no parameters: read them per pipe.
-            if let Ok(pipe) = rec.to_pipe(defaults) {
-                if let Ok(attrs) = conn.get_pipe_attributes(&pipe).await {
-                    if let Some(Value::Map(p)) = attrs.get("parameters") {
-                        rec.parameters = p.clone();
-                    }
-                }
+            if let Ok(pipe) = rec.to_pipe(defaults)
+                && let Ok(attrs) = conn.get_pipe_attributes(&pipe).await
+                && let Some(Value::Map(p)) = attrs.get("parameters")
+            {
+                rec.parameters = p.clone();
             }
         }
         out.push(rec);
@@ -696,19 +695,16 @@ impl Engine {
             .selection
             .clone()
             .unwrap_or_else(|| Selection::filter(Default::default()));
-        if let Some(run_id) = &opts.resume {
-            if opts.selection.is_none() {
-                if let Ok(Some(rec)) = self.state.load_run(run_id).await {
-                    if let Some(s) = rec
-                        .run
-                        .selection
-                        .as_deref()
-                        .and_then(|s| serde_json::from_str(s).ok())
-                    {
-                        selection = s;
-                    }
-                }
-            }
+        if let Some(run_id) = &opts.resume
+            && opts.selection.is_none()
+            && let Ok(Some(rec)) = self.state.load_run(run_id).await
+            && let Some(s) = rec
+                .run
+                .selection
+                .as_deref()
+                .and_then(|s| serde_json::from_str(s).ok())
+        {
+            selection = s;
         }
         let flat = selection.is_flat();
         let mut records = Vec::new();
@@ -716,33 +712,33 @@ impl Engine {
             records.extend(self.fetch_records(i, &PipesKeysQuery::default()).await?);
         }
         // Flat filters select exactly what v4's `get_pipes` would: ask the instance.
-        if let (true, Targets::Filter(f)) = (flat, &selection.targets) {
-            if !f.is_empty() {
-                let query = PipesKeysQuery {
-                    connector_keys: f.connector_keys.clone(),
-                    metric_keys: f.metric_keys.clone(),
-                    location_keys: f.location_keys.iter().map(|l| Some(l.clone())).collect(),
-                    tags: f.tags.clone(),
-                    params: None,
-                };
-                let mut refs = Vec::new();
-                for i in &instances {
-                    if f.instance_keys.as_ref().is_some_and(|k| k != i) {
-                        continue;
-                    }
-                    refs.extend(
-                        self.fetch_records(i, &query)
-                            .await?
-                            .iter()
-                            .map(PipeRecord::pipe_ref),
-                    );
+        if let (true, Targets::Filter(f)) = (flat, &selection.targets)
+            && !f.is_empty()
+        {
+            let query = PipesKeysQuery {
+                connector_keys: f.connector_keys.clone(),
+                metric_keys: f.metric_keys.clone(),
+                location_keys: f.location_keys.iter().map(|l| Some(l.clone())).collect(),
+                tags: f.tags.clone(),
+                params: None,
+            };
+            let mut refs = Vec::new();
+            for i in &instances {
+                if f.instance_keys.as_ref().is_some_and(|k| k != i) {
+                    continue;
                 }
-                selection = Selection {
-                    targets: Targets::Refs(refs),
-                    parents: selection.parents,
-                    children: selection.children,
-                };
+                refs.extend(
+                    self.fetch_records(i, &query)
+                        .await?
+                        .iter()
+                        .map(PipeRecord::pipe_ref),
+                );
             }
+            selection = Selection {
+                targets: Targets::Refs(refs),
+                parents: selection.parents,
+                children: selection.children,
+            };
         }
         if !opts.exclude.is_empty() && flat {
             let base: Vec<PipeRef> = match &selection.targets {
@@ -927,10 +923,10 @@ impl Engine {
                     let stopped = stop.sleep(every).await;
                     let rows: Vec<EventRow> =
                         std::mem::take(&mut *buf.lock().unwrap_or_else(|e| e.into_inner()));
-                    if !rows.is_empty() {
-                        if let Err(e) = state.write_events(&rows).await {
-                            tracing::debug!("Cannot persist engine events: {e}");
-                        }
+                    if !rows.is_empty()
+                        && let Err(e) = state.write_events(&rows).await
+                    {
+                        tracing::debug!("Cannot persist engine events: {e}");
                     }
                     if stopped {
                         return;
@@ -1035,10 +1031,10 @@ impl Engine {
                 .push(seq);
         }
         for (instance, seqs) in by_instance {
-            if let Some(floor) = compaction_floor(seqs) {
-                if let Err(e) = self.state.prune_ledger(&instance, parent, floor).await {
-                    tracing::debug!("Cannot compact the ledger of {}: {e}", parent.label());
-                }
+            if let Some(floor) = compaction_floor(seqs)
+                && let Err(e) = self.state.prune_ledger(&instance, parent, floor).await
+            {
+                tracing::debug!("Cannot compact the ledger of {}: {e}", parent.label());
             }
         }
     }
@@ -1092,48 +1088,49 @@ impl Engine {
         // `parameters['schedule']` (§5.5): root nodes with a schedule only sync when due.
         let mut schedules = crate::cadence::PipeSchedules::default();
         let mut schedules_flat = true;
-        if let (true, Some(cadence)) = (loop_opts.run_loop, self.cadence.as_ref()) {
-            if let Ok((graph, sub, _)) = self.resolve(&opts).await {
-                let roots = sub
-                    .order
-                    .iter()
-                    .filter(|r| sub.parent_edges(r).next().is_none())
-                    .filter_map(|r| graph.node(r).map(|n| (&n.pipe_ref, &n.record.parameters)));
-                let (parsed, warnings) =
-                    crate::cadence::PipeSchedules::parse(cadence.as_ref(), roots, Utc::now());
-                for w in warnings {
-                    tracing::warn!("{w}");
-                }
-                schedules = parsed;
-                schedules_flat = sub.flat;
+        if let (true, Some(cadence)) = (loop_opts.run_loop, self.cadence.as_ref())
+            && let Ok((graph, sub, _)) = self.resolve(&opts).await
+        {
+            let roots = sub
+                .order
+                .iter()
+                .filter(|r| sub.parent_edges(r).next().is_none())
+                .filter_map(|r| graph.node(r).map(|n| (&n.pipe_ref, &n.record.parameters)));
+            let (parsed, warnings) =
+                crate::cadence::PipeSchedules::parse(cadence.as_ref(), roots, Utc::now());
+            for w in warnings {
+                tracing::warn!("{w}");
             }
+            schedules = parsed;
+            schedules_flat = sub.flat;
         }
         loop {
             if stop.is_stopped() {
                 break;
             }
-            if streams.is_none() && (loop_opts.listen || loop_opts.run_loop) {
-                if let Ok((graph, sub, _)) = self.resolve(&opts).await {
-                    let hub = triggers::TriggerHub::new();
-                    let (set, excluded, emitter, starts) =
-                        self.spawn_streams(&graph, &sub, &stop, &opts.sync, &hub);
-                    // PARITY: v4's `--listen` lap called each v4-pattern connector's `sync()`
-                    // (which subscribes and returns) and reported it like any pipe; the first
-                    // lap reports those returns the same way.
-                    legacy_outcomes = starts.collect(&stop, &on_lap).await;
-                    if !excluded.is_empty() {
-                        opts.exclude.extend(excluded.clone());
-                        triggers = Some(triggers::Triggers::new(
-                            hub,
-                            graph.clone(),
-                            sub,
-                            opts.clone(),
-                            min_seconds,
-                            emitter,
-                        ));
-                    }
-                    streams = Some(set);
+            if streams.is_none()
+                && (loop_opts.listen || loop_opts.run_loop)
+                && let Ok((graph, sub, _)) = self.resolve(&opts).await
+            {
+                let hub = triggers::TriggerHub::new();
+                let (set, excluded, emitter, starts) =
+                    self.spawn_streams(&graph, &sub, &stop, &opts.sync, &hub);
+                // PARITY: v4's `--listen` lap called each v4-pattern connector's `sync()`
+                // (which subscribes and returns) and reported it like any pipe; the first
+                // lap reports those returns the same way.
+                legacy_outcomes = starts.collect(&stop, &on_lap).await;
+                if !excluded.is_empty() {
+                    opts.exclude.extend(excluded.clone());
+                    triggers = Some(triggers::Triggers::new(
+                        hub,
+                        graph.clone(),
+                        sub,
+                        opts.clone(),
+                        min_seconds,
+                        emitter,
+                    ));
                 }
+                streams = Some(set);
             }
             if let Some(t) = triggers.as_mut() {
                 self.run_triggers(t).await;

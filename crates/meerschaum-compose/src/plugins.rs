@@ -122,13 +122,13 @@ pub fn check_and_install_plugins(
         .unwrap_or_default();
 
     for path in project.plugins_dirs() {
-        if !path.exists() {
-            if let Err(e) = std::fs::create_dir_all(&path) {
-                return Ok(SuccessTuple::fail(format!(
-                    "Failed to create plugins path '{}': {e}",
-                    path.display()
-                )));
-            }
+        if !path.exists()
+            && let Err(e) = std::fs::create_dir_all(&path)
+        {
+            return Ok(SuccessTuple::fail(format!(
+                "Failed to create plugins path '{}': {e}",
+                path.display()
+            )));
         }
     }
 

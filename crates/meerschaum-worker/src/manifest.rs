@@ -20,6 +20,11 @@
 //! invalidate the cache, and the fingerprint is taken after the worker imported the plugins,
 //! so a plugin that writes into its tree on import does not either.
 //!
+//! **Entry-point plugins** reach the manifest through [`crate::entry_points`]: the probe's answer
+//! is recorded in [`Manifest::entry_point_plugins`], a manifest built with another set is stale
+//! ([`stale_plugins_for`]), and an empty plugin tree still starts Python when an entry-point
+//! plugin exists (v4 discovers them whatever the plugins directory holds).
+//!
 //! The JSON schema is `schema/manifest.schema.json` in this crate. The top-level
 //! `api_plugins` / `dash_plugins` / `web_pages` / `mcp_tools` lists are the plugin names the
 //! server's `HostManifest` reads to decide whether the API host is needed.
@@ -323,6 +328,11 @@ pub struct Manifest {
     /// Errors raised while importing all plugins at once.
     #[serde(default)]
     pub load_errors: IndexMap<String, String>,
+    /// The entry-point plugins (`meerschaum.plugins` group) the interpreter had when this was
+    /// built ([`crate::entry_points`]). A different set makes the manifest stale, whatever the
+    /// plugin trees hold.
+    #[serde(default)]
+    pub entry_point_plugins: Vec<String>,
 }
 
 impl Manifest {
@@ -535,8 +545,38 @@ fn tracked_sources(
 }
 
 /// Whether a cached manifest is stale for `plugins_dirs`, and the plugins that changed
-/// (added, removed or modified). See the module documentation for what is tracked.
+/// (added, removed or modified). See the module documentation for what is tracked. The
+/// entry-point plugins are taken to be the ones the manifest was built with; see
+/// [`stale_plugins_for`].
 pub fn stale_plugins(manifest: &Manifest, plugins_dirs: &[PathBuf]) -> (bool, Vec<String>) {
+    stale_plugins_for(manifest, plugins_dirs, &manifest.entry_point_plugins)
+}
+
+/// [`stale_plugins`] for the entry-point plugins `entry_points` the interpreter has now
+/// ([`crate::entry_points::plugins`]): a manifest built with another set is stale, and the
+/// plugins that appeared or disappeared are reported as changed.
+pub fn stale_plugins_for(
+    manifest: &Manifest,
+    plugins_dirs: &[PathBuf],
+    entry_points: &[String],
+) -> (bool, Vec<String>) {
+    let (mut stale, mut changed) = tracked_staleness(manifest, plugins_dirs);
+    let mut built = manifest.entry_point_plugins.clone();
+    built.sort();
+    let mut now = entry_points.to_vec();
+    now.sort();
+    if built != now {
+        stale = true;
+        for name in built.iter().chain(&now) {
+            if built.contains(name) != now.contains(name) && !changed.contains(name) {
+                changed.push(name.clone());
+            }
+        }
+    }
+    (stale, changed)
+}
+
+fn tracked_staleness(manifest: &Manifest, plugins_dirs: &[PathBuf]) -> (bool, Vec<String>) {
     let sources = tracked_sources(plugins_dirs, &manifest.plugins);
     let (combined, per_plugin) = fingerprint_sources(&sources);
     let mut changed = Vec::new();
@@ -573,9 +613,17 @@ pub fn stale_plugins(manifest: &Manifest, plugins_dirs: &[PathBuf]) -> (bool, Ve
 /// The manifest is built in a dedicated, freshly started worker (shut down afterwards): pooled
 /// workers may hold modules imported before a plugin changed, and importing every plugin must
 /// not leak into them.
-pub async fn build_manifest(pool: &WorkerPool, plugins_dirs: &[PathBuf]) -> WorkerResult<Manifest> {
+///
+/// `entry_points` are the entry-point plugins the interpreter has ([`crate::entry_points`]):
+/// with neither a discovered plugin nor an entry point the manifest is empty and no Python
+/// starts.
+pub async fn build_manifest(
+    pool: &WorkerPool,
+    plugins_dirs: &[PathBuf],
+    entry_points: &[String],
+) -> WorkerResult<Manifest> {
     let (combined, per_plugin) = fingerprint(plugins_dirs);
-    if per_plugin.is_empty() {
+    if per_plugin.is_empty() && entry_points.is_empty() {
         return Ok(Manifest {
             schema_version: MANIFEST_SCHEMA_VERSION,
             fingerprint: Some(combined),
@@ -600,6 +648,7 @@ pub async fn build_manifest(pool: &WorkerPool, plugins_dirs: &[PathBuf]) -> Work
     let mut manifest: Manifest = serde_json::from_value(json)
         .map_err(|e| WorkerError::Protocol(format!("invalid manifest from the worker: {e}")))?;
     manifest.schema_version = MANIFEST_SCHEMA_VERSION;
+    manifest.entry_point_plugins = entry_points.to_vec();
     // Fingerprint after the import: a plugin that writes into its own tree while it is
     // imported must not make the fresh manifest stale (the check is idempotent).
     let sources = tracked_sources(plugins_dirs, &manifest.plugins);
@@ -628,15 +677,36 @@ pub async fn ensure_manifest(
     path: &Path,
     plugins_dirs: &[PathBuf],
 ) -> WorkerResult<(Manifest, ManifestSource)> {
+    let entry_points = probe_entry_points(pool, path, false);
+    ensure_manifest_for(pool, path, plugins_dirs, &entry_points).await
+}
+
+/// [`ensure_manifest`] for entry-point plugins the caller already asked for.
+pub async fn ensure_manifest_for(
+    pool: &WorkerPool,
+    path: &Path,
+    plugins_dirs: &[PathBuf],
+    entry_points: &[String],
+) -> WorkerResult<(Manifest, ManifestSource)> {
     if let Some(cached) = Manifest::read(path)? {
-        let (stale, _) = stale_plugins(&cached, plugins_dirs);
+        let (stale, _) = stale_plugins_for(&cached, plugins_dirs, entry_points);
         if !stale {
             return Ok((cached, ManifestSource::Cache));
         }
     }
-    rebuild_manifest(pool, path, plugins_dirs)
+    rebuild_manifest_for(pool, path, plugins_dirs, entry_points)
         .await
         .map(|manifest| (manifest, ManifestSource::Built))
+}
+
+/// The entry-point plugins of the pool's interpreter ([`crate::entry_points::plugins`]); the
+/// cache sits next to the manifest at `manifest`.
+pub fn probe_entry_points(pool: &WorkerPool, manifest: &Path, force: bool) -> Vec<String> {
+    crate::entry_points::plugins(
+        &pool.config().worker,
+        &crate::entry_points::cache_path(manifest),
+        force,
+    )
 }
 
 /// Rebuild the manifest unconditionally, rewrite the cache at `path` and recycle the pool's idle
@@ -646,7 +716,18 @@ pub async fn rebuild_manifest(
     path: &Path,
     plugins_dirs: &[PathBuf],
 ) -> WorkerResult<Manifest> {
-    let manifest = build_manifest(pool, plugins_dirs).await?;
+    let entry_points = probe_entry_points(pool, path, true);
+    rebuild_manifest_for(pool, path, plugins_dirs, &entry_points).await
+}
+
+/// [`rebuild_manifest`] for entry-point plugins the caller already asked for.
+pub async fn rebuild_manifest_for(
+    pool: &WorkerPool,
+    path: &Path,
+    plugins_dirs: &[PathBuf],
+    entry_points: &[String],
+) -> WorkerResult<Manifest> {
+    let manifest = build_manifest(pool, plugins_dirs, entry_points).await?;
     manifest.write(path)?;
     pool.recycle().await;
     Ok(manifest)
@@ -673,6 +754,58 @@ mod tests {
             ManifestSource::Cache
         );
         assert_eq!(pool.stats().spawned, 0);
+    }
+
+    #[tokio::test]
+    async fn an_entry_point_plugin_starts_python_for_an_empty_tree() {
+        let root = tempfile::tempdir().unwrap();
+        let plugins = tempfile::tempdir().unwrap();
+        let mut config = crate::PoolConfig::default();
+        config.worker.python = root.path().join("python-does-not-exist");
+        let pool = WorkerPool::new(config);
+        let dirs = vec![plugins.path().to_path_buf()];
+        // No plugin of either kind: empty, no process. An entry point: a worker is wanted.
+        assert!(
+            build_manifest(&pool, &dirs, &[])
+                .await
+                .unwrap()
+                .plugins
+                .is_empty()
+        );
+        let wanted = vec!["w17bhello".to_string()];
+        assert!(build_manifest(&pool, &dirs, &wanted).await.is_err());
+    }
+
+    #[test]
+    fn a_different_entry_point_set_is_stale() {
+        let plugins = tempfile::tempdir().unwrap();
+        let dirs = vec![plugins.path().to_path_buf()];
+        let (combined, _) = fingerprint(&dirs);
+        let mut manifest = Manifest {
+            schema_version: MANIFEST_SCHEMA_VERSION,
+            fingerprint: Some(combined),
+            ..Default::default()
+        };
+        let none: Vec<String> = Vec::new();
+        let one = vec!["w17bhello".to_string()];
+        assert_eq!(stale_plugins_for(&manifest, &dirs, &none), (false, vec![]));
+        // Installed after the manifest was built.
+        assert_eq!(
+            stale_plugins_for(&manifest, &dirs, &one),
+            (true, vec!["w17bhello".to_string()])
+        );
+        // Built with it: fresh, whatever order the probe lists them in.
+        manifest.entry_point_plugins = vec!["w17bhello".into(), "w17bzed".into()];
+        let two = vec!["w17bzed".to_string(), "w17bhello".to_string()];
+        assert_eq!(stale_plugins_for(&manifest, &dirs, &two), (false, vec![]));
+        // Uninstalled since.
+        assert_eq!(
+            stale_plugins_for(&manifest, &dirs, &one),
+            (true, vec!["w17bzed".to_string()])
+        );
+        assert!(stale_plugins_for(&manifest, &dirs, &none).0);
+        // `stale_plugins` judges against what the manifest was built with.
+        assert_eq!(stale_plugins(&manifest, &dirs), (false, vec![]));
     }
 
     #[test]

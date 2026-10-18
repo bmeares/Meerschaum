@@ -116,11 +116,11 @@ impl PipeSchedules {
 
     /// A node ran in a lap at `now`: move its next fire time past `now`.
     pub fn ran(&mut self, node: &PipeRef, now: DateTime<Utc>) {
-        if let Some(e) = self.entries.get_mut(node) {
-            if e.next.is_some_and(|n| n <= now) {
-                e.next = e.timer.after(now);
-                e.exhausted = e.next.is_none();
-            }
+        if let Some(e) = self.entries.get_mut(node)
+            && e.next.is_some_and(|n| n <= now)
+        {
+            e.next = e.timer.after(now);
+            e.exhausted = e.next.is_none();
         }
     }
 

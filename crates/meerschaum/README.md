@@ -18,7 +18,7 @@ A library takes `default-features = false`: the default `cli` feature compiles t
 ## The `mrsm` command line
 
 ```bash
-cargo install meerschaum        # builds the standalone `mrsm` (default `cli` feature)
+cargo install meerschaum --locked   # builds the standalone `mrsm` (default `cli` feature); needs Rust 1.95 or newer
 pip install meerschaum          # the same CLI, run from the Python wheel's extension (`mrsm`, `python -m meerschaum`)
 ```
 
@@ -37,6 +37,20 @@ extension first (see the migration guide for numbers).
 | `server` | the `axum` HTTP API server (implies `api`) |
 | `plugin` | the native plugin SDK |
 | `full` | all of the above except `oracle` |
+
+## Known issue in 5.0.0-rc.1: sqlx 0.9.0 and TCP latency (crates.io builds)
+
+Meerschaum's workspace pins a fixed sqlx, but crates.io ignores a `[patch]`, so `cargo install meerschaum`
+and library users build against sqlx 0.9.0, which does not set `TCP_NODELAY` (sqlx #4335). The PyPI wheel and
+the Docker images use the pinned build and are not affected. Over a network connection to MySQL or MariaDB,
+the unanswered statement-close message followed by the next small write waited about 40 ms for the server's
+delayed ACK and kept the pooled connection busy, so the pool opened extra connections (up to `Too many
+connections`). The SQL connector now prepares small statements once per connection, which brings the
+connection counts back to those of the fixed build (instance suites on MySQL: 493 connections down to 67;
+the fixed build opens 67). What remains: each empty read (zero rows) on MySQL/MariaDB still waits ~40 ms once,
+as do statements over 8 KiB or 128 parameters, so a read-heavy sync of mostly empty ranges is slower than on
+the fixed build (about 1.5x on small test suites). PostgreSQL shows no extra connections and only small
+latency differences. 5.0.0 final waits for sqlx 0.9.1.
 
 The `lib.rs` documentation lists exactly which items are semver-stable. Every other
 `meerschaum-*` crate is **internal and may change in any minor release**; depend on `meerschaum`

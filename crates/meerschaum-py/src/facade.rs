@@ -85,7 +85,7 @@ where
     F: std::future::Future + Send + 'static,
     F::Output: Send + 'static,
 {
-    py.allow_threads(|| {
+    py.detach(|| {
         let handle = crate::runtime::runtime().handle().clone();
         let task = handle.spawn(fut);
         match handle.block_on(task) {
@@ -487,11 +487,11 @@ pub fn build_registry(
     // sink (`logging.rs`), which takes the interpreter lock on a runtime thread: never block on
     // the runtime while holding the lock (a fresh root deadlocked here).
     let manifest = py
-        .allow_threads(|| session.python_manifest(&config))
+        .detach(|| session.python_manifest(&config))
         .map_err(|e| e.message.clone())?;
     let python = PythonRegistry::new(native, pool, manifest, engine_config.clone());
     let natives = py
-        .allow_threads(|| session.native_plugins(&config))
+        .detach(|| session.native_plugins(&config))
         .map_err(|e| e.message)?;
     let registry = meerschaum_cli::native_plugins::NativeRegistry::new(natives, &config, python);
     Ok(Built {
@@ -613,7 +613,7 @@ pub fn register_adhoc(
                     Some(live) => live,
                     None => {
                         let built = Arc::new(
-                            py.allow_threads(|| {
+                            py.detach(|| {
                                 session.block_on(
                                     meerschaum_connector_valkey::ValkeyConnector::connect(
                                         &label,

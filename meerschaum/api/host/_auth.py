@@ -5,7 +5,7 @@
 """
 Authentication in the API host.
 
-`ScopedAuth`, `CurrentScopes` and the `fastapi_login` manager are `meerschaum.api._oauth2`'s,
+`ScopedAuth`, `CurrentScopes` and the login `manager` (`meerschaum.api._login`) are `meerschaum.api._oauth2`'s,
 with the same secret file as the Rust server, so a JWT issued by either side validates on the
 other. v4 registers the manager's user loader next to the `/login` route, which the host does
 not serve, so the host installs the same loader here.
@@ -83,11 +83,9 @@ def decode_internal_token(token: Optional[str]) -> Union[Dict[str, Any], None]:
     if not token:
         return None
     from meerschaum.api.host import TOKEN_CLAIM
-    from meerschaum.api._oauth2 import SECRET
-    from meerschaum.utils.packages import attempt_import
-    jose_jwt = attempt_import('jose.jwt', lazy=False, check_update=False)
+    from meerschaum.api._oauth2 import decode_jwt
     try:
-        claims = jose_jwt.decode(token, SECRET, algorithms=['HS256'])
+        claims = decode_jwt(token)
     except Exception:
         return None
     if not isinstance(claims, dict) or claims.get(TOKEN_CLAIM) != 'mcp':

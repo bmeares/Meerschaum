@@ -3,7 +3,7 @@
 //! This is `arrow::ffi_stream::ArrowArrayStreamReader` plus one repair. Polars (Python 1.36,
 //! Rust polars-arrow 0.51) exports `Null`-typed arrays (`format = "n"`, what an all-`None` column
 //! becomes) with `n_buffers = 1`, but the C Data Interface specifies **zero** buffers for that
-//! layout, and arrow-rs (56 through 60) rejects the array ("The datatype Null doesn't expect
+//! layout, and arrow-rs (56 through at least 60) rejects the array ("The datatype Null doesn't expect
 //! buffer at index 0"). All-`None` columns are routine in Meerschaum frames, so before handing an
 //! imported array to `arrow::ffi::from_ffi`, [`repair_null_buffers`] sets `n_buffers = 0` on every
 //! `Null`-typed node. Producers that follow the spec (pyarrow, arrow-rs) are untouched.
@@ -15,7 +15,7 @@
 //! A side benefit over `ArrowArrayStreamReader`: every imported batch carries the stream's full
 //! schema, including schema-level metadata (e.g. pandas' `b"pandas"` block).
 
-use std::ffi::{CStr, c_void};
+use std::ffi::{CStr, c_char, c_void};
 use std::sync::Arc;
 
 use arrow::array::{Array, RecordBatch, RecordBatchOptions, RecordBatchReader, StructArray};
@@ -44,6 +44,23 @@ struct RawArrowArray {
 
 const _: () = assert!(size_of::<RawArrowArray>() == size_of::<FFI_ArrowArray>());
 const _: () = assert!(align_of::<RawArrowArray>() == align_of::<FFI_ArrowArray>());
+
+/// The `struct ArrowArrayStream` layout from the Arrow C Stream Interface specification.
+///
+/// `arrow::ffi_stream::FFI_ArrowArrayStream` has the same `#[repr(C)]` layout, but since arrow 60
+/// its callbacks are private; this mirror lets [`StreamImporter`] call them directly (it imports
+/// each array itself so it can apply [`repair_null_buffers`] first).
+#[repr(C)]
+struct RawArrowArrayStream {
+    get_schema: Option<unsafe extern "C" fn(*mut RawArrowArrayStream, *mut FFI_ArrowSchema) -> i32>,
+    get_next: Option<unsafe extern "C" fn(*mut RawArrowArrayStream, *mut FFI_ArrowArray) -> i32>,
+    get_last_error: Option<unsafe extern "C" fn(*mut RawArrowArrayStream) -> *const c_char>,
+    release: Option<unsafe extern "C" fn(*mut RawArrowArrayStream)>,
+    private_data: *mut c_void,
+}
+
+const _: () = assert!(size_of::<RawArrowArrayStream>() == size_of::<FFI_ArrowArrayStream>());
+const _: () = assert!(align_of::<RawArrowArrayStream>() == align_of::<FFI_ArrowArrayStream>());
 
 /// Set `n_buffers = 0` on every `Null`-typed node of `array` (recursing through children and
 /// dictionaries alongside `schema`). Returns the number of nodes repaired.
@@ -128,26 +145,34 @@ fn import_batch(
 
 /// A [`RecordBatchReader`] over an imported Arrow C Stream (`arrow_array_stream` capsule).
 pub struct StreamImporter {
+    /// Owns the stream: its `Drop` calls the producer's `release`.
     stream: FFI_ArrowArrayStream,
     ffi_schema: FFI_ArrowSchema,
     schema: SchemaRef,
 }
 
+/// The C view of `stream` (see [`RawArrowArrayStream`]).
+fn raw_stream(stream: &mut FFI_ArrowArrayStream) -> *mut RawArrowArrayStream {
+    (stream as *mut FFI_ArrowArrayStream).cast::<RawArrowArrayStream>()
+}
+
 impl StreamImporter {
     /// Take ownership of `stream` and read its schema.
     pub fn try_new(mut stream: FFI_ArrowArrayStream) -> Result<Self, ArrowError> {
-        if stream.release.is_none() {
+        if stream.release().is_none() {
             return Err(ArrowError::CDataInterface(
                 "The Arrow C stream has already been released.".to_string(),
             ));
         }
-        let get_schema = stream.get_schema.ok_or_else(|| {
+        let raw = raw_stream(&mut stream);
+        // SAFETY: `raw` views `stream` (same layout, asserted above), which we own and is unreleased.
+        let get_schema = unsafe { (*raw).get_schema }.ok_or_else(|| {
             ArrowError::CDataInterface("The Arrow C stream has no get_schema.".to_string())
         })?;
         let mut ffi_schema = FFI_ArrowSchema::empty();
         // SAFETY: the stream is unreleased and `get_schema` is its producer's callback; the C
         // Stream Interface lets the consumer call it with a pointer to an empty schema to fill.
-        let code = unsafe { get_schema(&mut stream, &mut ffi_schema) };
+        let code = unsafe { get_schema(raw, &mut ffi_schema) };
         if code != 0 {
             return Err(stream_error(&mut stream, code));
         }
@@ -162,10 +187,13 @@ impl StreamImporter {
 
 /// Build an error from the stream's `get_last_error`.
 fn stream_error(stream: &mut FFI_ArrowArrayStream, code: i32) -> ArrowError {
-    let message = stream.get_last_error.and_then(|get_last_error| {
+    let raw = raw_stream(stream);
+    // SAFETY: `raw` views the unreleased stream the caller owns (same layout, asserted above).
+    let get_last_error = unsafe { (*raw).get_last_error };
+    let message = get_last_error.and_then(|get_last_error| {
         // SAFETY: `get_last_error` is the producer's callback on an unreleased stream; it returns
         // null or a NUL-terminated string valid until the next call on the stream.
-        let ptr = unsafe { get_last_error(stream) };
+        let ptr = unsafe { get_last_error(raw) };
         // SAFETY: non-null per the check, NUL-terminated per the C Stream Interface.
         (!ptr.is_null()).then(|| {
             unsafe { CStr::from_ptr(ptr) }
@@ -183,7 +211,9 @@ impl Iterator for StreamImporter {
     type Item = Result<RecordBatch, ArrowError>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let Some(get_next) = self.stream.get_next else {
+        let raw = raw_stream(&mut self.stream);
+        // SAFETY: `raw` views the stream we own, unreleased until drop (same layout, asserted above).
+        let Some(get_next) = (unsafe { (*raw).get_next }) else {
             return Some(Err(ArrowError::CDataInterface(
                 "The Arrow C stream has no get_next.".to_string(),
             )));
@@ -191,7 +221,7 @@ impl Iterator for StreamImporter {
         let mut array = FFI_ArrowArray::empty();
         // SAFETY: the stream is unreleased (we own it and release it only on drop) and `get_next`
         // is its producer's callback, called with a pointer to an empty array to fill.
-        let code = unsafe { get_next(&mut self.stream, &mut array) };
+        let code = unsafe { get_next(raw, &mut array) };
         if code != 0 {
             return Some(Err(stream_error(&mut self.stream, code)));
         }

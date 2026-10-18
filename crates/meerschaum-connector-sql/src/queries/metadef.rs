@@ -308,102 +308,100 @@ fn metadef_impl(flavor: Flavor, args: &MetadefArgs<'_>, execution: bool) -> Resu
     let mut handled_bounding = false;
     if let (Some(parent), Some(parent_dt_col), Some(parent_dt_typ)) =
         (parent, parent_dt_col.as_ref(), parent_dt_typ.as_ref())
+        && (!begin.is_unset() || end != Bound::None)
     {
-        if !begin.is_unset() || end != Bound::None {
-            let parent_dt_name = sql_item_name(parent_dt_col, flavor, None);
-            let parent_db_dt_typ = get_db_type_from_pd_type(parent_dt_typ, Some(flavor));
-            let (mut p_begin, mut p_end, mut p_btm) = (begin.clone(), end.clone(), btm);
-            if parent_dt_typ.to_lowercase().contains("int") {
-                let p_precision_unit = parent.precision_unit.clone();
-                let scalar_for = |unit: &str| {
-                    precision_unit_scalar(precision_unit_alias(unit).unwrap_or(unit))
-                        .map(|s| s.as_f64())
-                        .unwrap_or(1.0)
-                };
-                let to_dt = |b: &Bound| -> Option<PyDateTime> {
-                    match b {
-                        Bound::DateTime(d) => Some(*d),
-                        Bound::Int(i) => {
-                            let secs = *i as f64 / scalar_for(&precision_unit);
-                            let us = (secs * 1e6).round() as i64;
-                            DateTime::<Utc>::from_timestamp_micros(us).map(PyDateTime::utc)
-                        }
-                        _ => None,
+        let parent_dt_name = sql_item_name(parent_dt_col, flavor, None);
+        let parent_db_dt_typ = get_db_type_from_pd_type(parent_dt_typ, Some(flavor));
+        let (mut p_begin, mut p_end, mut p_btm) = (begin.clone(), end.clone(), btm);
+        if parent_dt_typ.to_lowercase().contains("int") {
+            let p_precision_unit = parent.precision_unit.clone();
+            let scalar_for = |unit: &str| {
+                precision_unit_scalar(precision_unit_alias(unit).unwrap_or(unit))
+                    .map(|s| s.as_f64())
+                    .unwrap_or(1.0)
+            };
+            let to_dt = |b: &Bound| -> Option<PyDateTime> {
+                match b {
+                    Bound::DateTime(d) => Some(*d),
+                    Bound::Int(i) => {
+                        let secs = *i as f64 / scalar_for(&precision_unit);
+                        let us = (secs * 1e6).round() as i64;
+                        DateTime::<Utc>::from_timestamp_micros(us).map(PyDateTime::utc)
                     }
-                };
-                if let Some(d) = to_dt(&begin) {
-                    p_begin = Bound::Int(datetime_to_epoch_int(&d, &p_precision_unit));
+                    _ => None,
                 }
-                if let Some(d) = to_dt(&end) {
-                    p_end = Bound::Int(datetime_to_epoch_int(&d, &p_precision_unit));
-                }
-                if let ChunkInterval::Delta(d) = backtrack_interval {
-                    p_btm = (total_seconds(d) * scalar_for(&p_precision_unit)) as i64;
+            };
+            if let Some(d) = to_dt(&begin) {
+                p_begin = Bound::Int(datetime_to_epoch_int(&d, &p_precision_unit));
+            }
+            if let Some(d) = to_dt(&end) {
+                p_end = Bound::Int(datetime_to_epoch_int(&d, &p_precision_unit));
+            }
+            if let ChunkInterval::Delta(d) = backtrack_interval {
+                p_btm = (total_seconds(d) * scalar_for(&p_precision_unit)) as i64;
+            }
+        }
+
+        // PARITY: Python always passes `datepart='minute'` here, even for integer bounds.
+        let parent_begin_da = if p_begin.is_unset() {
+            None
+        } else {
+            Some(dateadd_str(
+                Some(flavor),
+                Some("minute"),
+                Number::Int(if apply_backtrack { -p_btm } else { 0 }),
+                &p_begin.to_date_arg(),
+                Some(&parent_db_dt_typ),
+            )?)
+        };
+        let parent_end_da = if p_end == Bound::None {
+            None
+        } else {
+            Some(dateadd_str(
+                Some(flavor),
+                Some("minute"),
+                Number::Int(0),
+                &p_end.to_date_arg(),
+                Some(&parent_db_dt_typ),
+            )?)
+        };
+
+        let parent_target = parent.target.as_str();
+        let parent_item_name = sql_item_name(parent_target, flavor, None);
+        let parent_item_name_full = sql_item_name(parent_target, flavor, parent.schema.as_deref());
+        if definition.contains(&parent_item_name)
+            || definition.contains(&parent_item_name_full)
+            || definition.contains(parent_target)
+        {
+            let pushdown_cte_name = sql_item_name("_mrsm_pushdown", flavor, None);
+            let mut pushdown_where = String::new();
+            if let Some(b) = &parent_begin_da {
+                pushdown_where.push_str(&format!("\n    {parent_dt_name} >= {b}"));
+            }
+            if parent_begin_da.is_some() && parent_end_da.is_some() {
+                pushdown_where.push_str("\n    AND");
+            }
+            if let Some(e) = &parent_end_da {
+                pushdown_where.push_str(&format!("\n    {parent_dt_name} < {e}"));
+            }
+            let pushdown_query =
+                format!("SELECT *\nFROM {parent_item_name_full}\nWHERE {pushdown_where}");
+            let mut new_body = definition.clone();
+            let mut parent_found = false;
+            for pattern in [
+                parent_item_name_full.as_str(),
+                parent_item_name.as_str(),
+                parent_target,
+            ] {
+                if new_body.contains(pattern) {
+                    new_body = new_body.replace(pattern, &pushdown_cte_name);
+                    parent_found = true;
                 }
             }
-
-            // PARITY: Python always passes `datepart='minute'` here, even for integer bounds.
-            let parent_begin_da = if p_begin.is_unset() {
-                None
-            } else {
-                Some(dateadd_str(
-                    Some(flavor),
-                    Some("minute"),
-                    Number::Int(if apply_backtrack { -p_btm } else { 0 }),
-                    &p_begin.to_date_arg(),
-                    Some(&parent_db_dt_typ),
-                )?)
-            };
-            let parent_end_da = if p_end == Bound::None {
-                None
-            } else {
-                Some(dateadd_str(
-                    Some(flavor),
-                    Some("minute"),
-                    Number::Int(0),
-                    &p_end.to_date_arg(),
-                    Some(&parent_db_dt_typ),
-                )?)
-            };
-
-            let parent_target = parent.target.as_str();
-            let parent_item_name = sql_item_name(parent_target, flavor, None);
-            let parent_item_name_full =
-                sql_item_name(parent_target, flavor, parent.schema.as_deref());
-            if definition.contains(&parent_item_name)
-                || definition.contains(&parent_item_name_full)
-                || definition.contains(parent_target)
-            {
-                let pushdown_cte_name = sql_item_name("_mrsm_pushdown", flavor, None);
-                let mut pushdown_where = String::new();
-                if let Some(b) = &parent_begin_da {
-                    pushdown_where.push_str(&format!("\n    {parent_dt_name} >= {b}"));
-                }
-                if parent_begin_da.is_some() && parent_end_da.is_some() {
-                    pushdown_where.push_str("\n    AND");
-                }
-                if let Some(e) = &parent_end_da {
-                    pushdown_where.push_str(&format!("\n    {parent_dt_name} < {e}"));
-                }
-                let pushdown_query =
-                    format!("SELECT *\nFROM {parent_item_name_full}\nWHERE {pushdown_where}");
-                let mut new_body = definition.clone();
-                let mut parent_found = false;
-                for pattern in [
-                    parent_item_name_full.as_str(),
-                    parent_item_name.as_str(),
-                    parent_target,
-                ] {
-                    if new_body.contains(pattern) {
-                        new_body = new_body.replace(pattern, &pushdown_cte_name);
-                        parent_found = true;
-                    }
-                }
-                if parent_found {
-                    definition =
-                        wrap_query_with_cte(&pushdown_query, &new_body, flavor, "_mrsm_pushdown")?;
-                    handled_bounding = true;
-                }
+            if parent_found {
+                definition =
+                    wrap_query_with_cte(&pushdown_query, &new_body, flavor, "_mrsm_pushdown")?;
+                handled_bounding = true;
             }
         }
     }

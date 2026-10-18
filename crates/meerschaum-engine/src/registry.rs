@@ -56,6 +56,24 @@ pub trait SyncHooks: Send + Sync {
     async fn post_sync(&self, pipe: &Pipe, args: &SyncArgs, result: &SyncResult);
 }
 
+/// What a connector's `register(pipe)` answered (the connector half of v4's `Pipe.register()`).
+#[derive(Debug, Clone, PartialEq)]
+pub enum ConnectorRegister {
+    /// The connector defines no `register()`, or it could not be asked: nothing changes.
+    Undefined,
+    /// The parameters it returned (`{}` for `None`, also when `register()` raised).
+    Parameters(Map),
+    /// It returned something that is not a dict (`str()` of it): v4 warns and changes nothing.
+    Invalid(String),
+}
+
+/// A plugin or custom connector that may define `register(pipe)`.
+#[async_trait]
+pub trait ConnectorRegisterHook: Send + Sync {
+    /// Call `register(pipe)`.
+    async fn register_parameters(&self, pipe: &Pipe) -> ConnectorRegister;
+}
+
 /// Resolves connector keys for the engine.
 pub trait ConnectorRegistry: Send + Sync {
     /// The instance connector for `instance_keys`.
@@ -95,6 +113,13 @@ pub trait ConnectorRegistry: Send + Sync {
     /// A v4-pattern streaming connector (a `sync()` that subscribes and returns immediately),
     /// if `keys` names one (§5.6 "Compatibility").
     fn legacy_stream(&self, keys: &str) -> Option<Arc<dyn LegacyStream>> {
+        let _ = keys;
+        None
+    }
+
+    /// The `register(pipe)` hook of the plugin or custom connector `keys`, if it defines one
+    /// (asked when the engine registers a pipe it finds unregistered, as `Pipe.sync()` does).
+    fn register_hook(&self, keys: &str) -> Option<Arc<dyn ConnectorRegisterHook>> {
         let _ = keys;
         None
     }
@@ -159,10 +184,10 @@ fn load_registered(
     let key = pipe_cache_key(pipe);
     if let Some(cache) = cache {
         let guard = cache.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some((at, registered)) = guard.get(&key) {
-            if at.elapsed() < REGISTERED_TTL {
-                return with_registered(pipe, registered.as_ref());
-            }
+        if let Some((at, registered)) = guard.get(&key)
+            && at.elapsed() < REGISTERED_TTL
+        {
+            return with_registered(pipe, registered.as_ref());
         }
     }
     let registered = fetch_registered(registry, pipe);

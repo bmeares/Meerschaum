@@ -130,7 +130,7 @@ impl DateTimeValue {
             local.second()
         );
         let nanos = local.nanosecond() % 1_000_000_000;
-        if nanos % 1000 != 0 {
+        if !nanos.is_multiple_of(1000) {
             out.push_str(&format!(".{nanos:09}"));
         } else if nanos != 0 {
             out.push_str(&format!(".{:06}", nanos / 1000));
@@ -515,11 +515,11 @@ pub fn parse_iso_datetime(s: &str) -> Option<(NaiveDateTime, Option<FixedOffset>
     {
         time_end = stripped.trim_end().len();
         offset = FixedOffset::east_opt(0);
-    } else if let Some(ix) = rest.rfind(['+', '-']) {
-        if ix > 0 {
-            offset = Some(parse_offset(&rest[ix..])?);
-            time_end = ix;
-        }
+    } else if let Some(ix) = rest.rfind(['+', '-'])
+        && ix > 0
+    {
+        offset = Some(parse_offset(&rest[ix..])?);
+        time_end = ix;
     }
     let time_str = rest[..time_end].trim_end();
     let mut parts = time_str.splitn(3, ':');

@@ -159,15 +159,15 @@ impl JobsConfig {
         if let Some(b) = get(&["jobs", "logs", "timestamps", "enabled"]) {
             out.timestamps_enabled = b.truthy();
         }
-        if let Some(s) = get(&["jobs", "logs", "timestamps", "format"]) {
-            if let Some(s) = s.as_str() {
-                out.timestamp_format = s.to_string();
-            }
+        if let Some(s) = get(&["jobs", "logs", "timestamps", "format"])
+            && let Some(s) = s.as_str()
+        {
+            out.timestamp_format = s.to_string();
         }
-        if let Some(s) = get(&["jobs", "logs", "timestamps", "follow_format"]) {
-            if let Some(s) = s.as_str() {
-                out.follow_timestamp_format = s.to_string();
-            }
+        if let Some(s) = get(&["jobs", "logs", "timestamps", "follow_format"])
+            && let Some(s) = s.as_str()
+        {
+            out.follow_timestamp_format = s.to_string();
         }
         if let Some(i) = get(&["jobs", "logs", "num_files_to_keep"]).and_then(|v| v.as_i64()) {
             out.num_files_to_keep = i;

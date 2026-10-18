@@ -474,12 +474,12 @@ pub(crate) unsafe fn manifest_for(
         hash.update(candidate.fingerprint.as_bytes());
     }
     let key = hex::encode(hash.finalize());
-    if let Ok(bytes) = std::fs::read(cache) {
-        if let Ok(v) = serde_json::from_slice::<Value>(&bytes) {
-            if v["fingerprint"] == key && validate_manifest(&v).is_ok() {
-                return Ok((v, skipped));
-            }
-        }
+    if let Ok(bytes) = std::fs::read(cache)
+        && let Ok(v) = serde_json::from_slice::<Value>(&bytes)
+        && v["fingerprint"] == key
+        && validate_manifest(&v).is_ok()
+    {
+        return Ok((v, skipped));
     }
     let mut result = json!({"schema_version":crate::MANIFEST_SCHEMA_VERSION,"meerschaum_version":env!("CARGO_PKG_VERSION"),"python_version":"","python_executable":null,"fingerprint":key,"plugins":{},"connector_types":{},"pre_sync_hooks":[],"post_sync_hooks":[],"load_errors":{}});
     for candidate in candidates {

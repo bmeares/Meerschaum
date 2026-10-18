@@ -4,15 +4,14 @@
 //! with [`crate::ffi_import`] (arrow-rs FFI plus a repair for polars' `Null` arrays). Buffers are
 //! not copied: the imported arrays keep the producer's allocations alive through the C Data
 //! Interface release callbacks. Export goes the other way through [`ArrowStream`], a minimal
-//! pyclass implementing the PyCapsule protocol on top of `pyo3-arrow`'s export helpers, so no
+//! pyclass implementing the PyCapsule protocol on top of [`crate::ffi_export`], so no
 //! Python library (pyarrow, polars, arro3) is needed to produce or hold the result. Any consumer of
 //! the protocol can read it: `pyarrow.table(s)`, `polars.DataFrame(s)`, `duckdb`, ...
 
-use std::ffi::CStr;
-use std::sync::Arc;
+use std::ffi::{CStr, c_void};
 
-use arrow::array::{ArrayRef, RecordBatch, RecordBatchReader, StructArray};
-use arrow::datatypes::{Field, SchemaRef};
+use arrow::array::{RecordBatch, RecordBatchReader};
+use arrow::datatypes::SchemaRef;
 use arrow::error::ArrowError;
 use arrow::ffi::{FFI_ArrowArray, FFI_ArrowSchema};
 use arrow::ffi_stream::FFI_ArrowArrayStream;
@@ -20,8 +19,8 @@ use pyo3::exceptions::{PyTypeError, PyValueError};
 use pyo3::intern;
 use pyo3::prelude::*;
 use pyo3::types::PyCapsule;
-use pyo3_arrow::ffi::{ArrayIterator, to_schema_pycapsule, to_stream_pycapsule};
 
+use crate::ffi_export;
 use crate::ffi_import::{StreamImporter, import_record_batch};
 
 /// Drain a [`RecordBatchReader`] into its schema and batches.
@@ -64,12 +63,6 @@ impl ArrowStream {
     /// The total number of rows across all batches.
     pub fn row_count(&self) -> usize {
         self.batches.iter().map(RecordBatch::num_rows).sum()
-    }
-
-    /// The stream as a single struct-typed field, the form the C Stream interface carries.
-    fn stream_field(&self) -> Field {
-        Field::new_struct("", self.schema.fields().clone(), false)
-            .with_metadata(self.schema.metadata().clone())
     }
 }
 
@@ -125,7 +118,7 @@ impl ArrowStream {
 
     /// Export the schema as an `arrow_schema` PyCapsule.
     fn __arrow_c_schema__<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyCapsule>> {
-        Ok(to_schema_pycapsule(py, self.schema.as_ref())?)
+        ffi_export::schema_capsule(py, self.schema.as_ref())
     }
 
     /// Export the data as an `arrow_array_stream` PyCapsule. When the consumer passes a
@@ -136,14 +129,16 @@ impl ArrowStream {
         py: Python<'py>,
         requested_schema: Option<Bound<'py, PyCapsule>>,
     ) -> PyResult<Bound<'py, PyCapsule>> {
-        let field = Arc::new(self.stream_field());
-        let arrays = self
-            .batches
-            .clone()
-            .into_iter()
-            .map(|batch| Ok(Arc::new(StructArray::from(batch)) as ArrayRef));
-        let reader = Box::new(ArrayIterator::new(arrays, field));
-        Ok(to_stream_pycapsule(py, reader, requested_schema)?)
+        let requested = requested_schema
+            .as_ref()
+            .map(ffi_export::requested_schema)
+            .transpose()?;
+        let reader = ffi_export::batch_reader(
+            self.schema.clone(),
+            self.batches.clone(),
+            requested.as_ref(),
+        );
+        ffi_export::stream_capsule(py, reader)
     }
 }
 
@@ -151,14 +146,20 @@ fn arrow_err(err: ArrowError) -> PyErr {
     PyValueError::new_err(err.to_string())
 }
 
-/// Check that a capsule carries the Arrow PyCapsule Interface name `expected`.
-fn check_capsule_name(capsule: &Bound<'_, PyCapsule>, expected: &CStr) -> PyResult<()> {
-    match capsule.name()? {
-        Some(name) if name == expected => Ok(()),
-        name => Err(PyValueError::new_err(format!(
-            "Expected a PyCapsule named {expected:?}, got {name:?}."
-        ))),
+/// The pointer an Arrow PyCapsule Interface capsule carries, after checking that the capsule is
+/// named `expected` (an error names the capsule's actual name otherwise).
+fn capsule_pointer(capsule: &Bound<'_, PyCapsule>, expected: &CStr) -> PyResult<*mut c_void> {
+    // SAFETY: the name is only compared and formatted here, before any Python code can run and
+    // rename the capsule.
+    match capsule.name()?.map(|name| unsafe { name.as_cstr() }) {
+        Some(name) if name == expected => {}
+        name => {
+            return Err(PyValueError::new_err(format!(
+                "Expected a PyCapsule named {expected:?}, got {name:?}."
+            )));
+        }
     }
+    Ok(capsule.pointer_checked(Some(expected))?.as_ptr())
 }
 
 /// Import any Python object implementing the Arrow PyCapsule Interface into Rust batches.
@@ -170,12 +171,12 @@ pub fn import_from_python(obj: &Bound<'_, PyAny>) -> PyResult<(SchemaRef, Vec<Re
     if obj.hasattr(intern!(py, "__arrow_c_stream__"))? {
         let capsule = obj
             .call_method0(intern!(py, "__arrow_c_stream__"))?
-            .downcast_into::<PyCapsule>()?;
-        check_capsule_name(&capsule, c"arrow_array_stream")?;
+            .cast_into::<PyCapsule>()?;
+        let pointer = capsule_pointer(&capsule, ffi_export::STREAM_CAPSULE_NAME)?;
         // SAFETY: a capsule named "arrow_array_stream" holds a `struct ArrowArrayStream` (Arrow
         // PyCapsule Interface). `from_raw` moves it out and leaves a released stream behind, which
         // the capsule's destructor then skips, as the interface prescribes for consumers.
-        let stream = unsafe { FFI_ArrowArrayStream::from_raw(capsule.pointer().cast()) };
+        let stream = unsafe { FFI_ArrowArrayStream::from_raw(pointer.cast()) };
         let reader = StreamImporter::try_new(stream).map_err(arrow_err)?;
         return collect_reader(reader).map_err(arrow_err);
     }
@@ -183,14 +184,14 @@ pub fn import_from_python(obj: &Bound<'_, PyAny>) -> PyResult<(SchemaRef, Vec<Re
         let (schema_capsule, array_capsule): (Bound<'_, PyCapsule>, Bound<'_, PyCapsule>) = obj
             .call_method0(intern!(py, "__arrow_c_array__"))?
             .extract()?;
-        check_capsule_name(&schema_capsule, c"arrow_schema")?;
-        check_capsule_name(&array_capsule, c"arrow_array")?;
+        let schema_pointer = capsule_pointer(&schema_capsule, ffi_export::SCHEMA_CAPSULE_NAME)?;
+        let array_pointer = capsule_pointer(&array_capsule, ffi_export::ARRAY_CAPSULE_NAME)?;
         // SAFETY: a capsule named "arrow_schema" holds a valid `struct ArrowSchema`, owned and
         // released by the capsule, which `schema_capsule` keeps alive for this borrow.
-        let ffi_schema = unsafe { &*schema_capsule.pointer().cast::<FFI_ArrowSchema>() };
+        let ffi_schema = unsafe { &*schema_pointer.cast::<FFI_ArrowSchema>() };
         // SAFETY: a capsule named "arrow_array" holds a `struct ArrowArray`; `from_raw` moves it
         // out and leaves a released array for the capsule's destructor to skip.
-        let array = unsafe { FFI_ArrowArray::from_raw(array_capsule.pointer().cast()) };
+        let array = unsafe { FFI_ArrowArray::from_raw(array_pointer.cast()) };
         let (schema, batch) = import_record_batch(array, ffi_schema).map_err(arrow_err)?;
         return Ok((schema, vec![batch]));
     }

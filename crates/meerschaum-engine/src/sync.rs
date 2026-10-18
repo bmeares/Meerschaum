@@ -33,7 +33,6 @@ use meerschaum_core::value::apply_patch_maps;
 use meerschaum_core::{Map, Pipe, Value};
 use meerschaum_kernel::Frame;
 use meerschaum_kernel::cast::{coerce_datetime, datetime_to_int};
-use meerschaum_kernel::detect::get_special_cols;
 use meerschaum_kernel::diff::{BacktrackRequest, FilterExistingParams, filter_existing};
 use meerschaum_kernel::enforce::{PipeInput, pipe_enforce_dtypes};
 use meerschaum_kernel::value::{DateTimeValue, Value as KValue};
@@ -492,13 +491,13 @@ async fn sync_inner(
 
     // `pipe.parameters`: the registered parameters patched with the in-memory ones.
     let mut pipe = pipe.clone();
-    if !args.parameters_loaded && !pipe.temporary {
-        if let Ok(attrs) = instance.get_pipe_attributes(&pipe).await {
-            if let Some(Value::Map(registered)) = attrs.get("parameters") {
-                let merged = apply_patch_maps(registered, pipe.raw_parameters());
-                pipe.set_parameters(merged);
-            }
-        }
+    if !args.parameters_loaded
+        && !pipe.temporary
+        && let Ok(attrs) = instance.get_pipe_attributes(&pipe).await
+        && let Some(Value::Map(registered)) = attrs.get("parameters")
+    {
+        let merged = apply_patch_maps(registered, pipe.raw_parameters());
+        pipe.set_parameters(merged);
     }
     let (mut pipe, warnings) = if env.known.is_none()
         && meerschaum_connector::template::needs_instance_resolution(&pipe)
@@ -525,6 +524,21 @@ async fn sync_inner(
         match instance.get_pipe_id(&pipe).await {
             Ok(Some(_)) => {}
             Ok(None) => {
+                // `Pipe.register()`: a plugin's `register(pipe)` supplies the base parameters
+                // under the pipe's own (`apply_patch_to_config(params, self.parameters)`).
+                if let Some(hook) = env.registry.register_hook(pipe.connector_keys()) {
+                    match hook.register_parameters(&pipe).await {
+                        crate::ConnectorRegister::Parameters(params) => {
+                            let merged = apply_patch_maps(&params, pipe.raw_parameters());
+                            pipe.set_parameters(merged);
+                        }
+                        crate::ConnectorRegister::Invalid(repr) => tracing::warn!(
+                            "Invalid parameters returned from `register()` in connector {}:\n{repr}",
+                            pipe.connector_keys()
+                        ),
+                        crate::ConnectorRegister::Undefined => {}
+                    }
+                }
                 let reg = instance.register_pipe(&pipe).await;
                 if !reg.success && !reg.message.contains("already") {
                     return reg.into();
@@ -691,45 +705,9 @@ async fn sync_inner(
     }
 
     // `_persist_new_special_columns`.
-    let new_special: IndexMap<String, String> = get_special_cols(&df)
-        .into_iter()
-        .filter(|(c, _)| {
-            !ctx.dtypes
-                .get(c)
-                .is_some_and(|t| meerschaum_core::dtypes::is_dtype_special(t))
-        })
-        .collect();
     let mut extra = Map::new();
-    if !new_special.is_empty() {
-        let mut dtypes = pipe
-            .param("dtypes")
-            .and_then(|d| d.as_map().cloned())
-            .unwrap_or_default();
-        for (c, t) in &new_special {
-            dtypes.insert(c.clone(), Value::Str(t.clone()));
-        }
-        let mut patch = Map::new();
-        patch.insert("dtypes".into(), Value::Map(dtypes));
-        pipe.update_parameters(patch);
-        if !pipe.temporary {
-            let res = instance.edit_pipe(&pipe, false).await;
-            if !res.success {
-                tracing::warn!(
-                    "Failed to capture new special columns for {pipe}:\n{}",
-                    res.message
-                );
-            }
-        }
-        extra.insert(
-            "new_special_cols".into(),
-            Value::Map(
-                new_special
-                    .iter()
-                    .map(|(k, v)| (k.clone(), Value::Str(v.clone())))
-                    .collect(),
-            ),
-        );
-    }
+    pipe_ops::persist_new_special_columns(instance, &mut pipe, &df, &ctx.dtypes, true, &mut extra)
+        .await;
     if let Some(w) = args.workers {
         extra.insert("workers".into(), Value::Int(w));
     }
@@ -782,12 +760,11 @@ async fn sync_inner(
         tokio::time::sleep(Duration::from_secs_f64(args.min_seconds.max(0.0))).await;
     };
     let mut result = result_from_message(result.success, result.message);
-    if result.success {
-        if let Some(obs) = observer {
-            if let Err(e) = obs.after_commit(&pipe, &result).await {
-                return fail(e);
-            }
-        }
+    if result.success
+        && let Some(obs) = observer
+        && let Err(e) = obs.after_commit(&pipe, &result).await
+    {
+        return fail(e);
     }
     result.end = args.end.as_ref().and_then(date_bound_to_bound);
     if let SyncBegin::At(b) = &args.begin {
@@ -1246,7 +1223,7 @@ fn comma_count(count: usize) -> String {
     let digits = count.to_string();
     let mut out = String::new();
     for (index, digit) in digits.chars().enumerate() {
-        if index > 0 && (digits.len() - index) % 3 == 0 {
+        if index > 0 && (digits.len() - index).is_multiple_of(3) {
             out.push(',');
         }
         out.push(digit);

@@ -152,17 +152,15 @@ pub(crate) fn dateadd_for_execution(
 ) -> Result<String> {
     let sql = dateadd_str(flavor, datepart, number, begin, db_type)?;
     #[cfg(feature = "duckdb")]
-    if flavor == Some(Flavor::Duckdb) {
-        if let Some((base, interval)) = sql.rsplit_once(" + INTERVAL ") {
-            if base.contains("TIMESTAMPTZ")
-                || base.contains("TIMESTAMP WITH TIME ZONE")
-                || base == "NOW()"
-            {
-                return Ok(format!(
-                    "CAST(CAST({base} AS TIMESTAMP) + INTERVAL {interval} AS TIMESTAMPTZ)"
-                ));
-            }
-        }
+    if flavor == Some(Flavor::Duckdb)
+        && let Some((base, interval)) = sql.rsplit_once(" + INTERVAL ")
+        && (base.contains("TIMESTAMPTZ")
+            || base.contains("TIMESTAMP WITH TIME ZONE")
+            || base == "NOW()")
+    {
+        return Ok(format!(
+            "CAST(CAST({base} AS TIMESTAMP) + INTERVAL {interval} AS TIMESTAMPTZ)"
+        ));
     }
     Ok(sql)
 }
@@ -288,13 +286,14 @@ pub fn dateadd_str(
         }
         Some(Flavor::Mssql) => {
             let mut b = begin_sql.clone();
-            if let Some(bt) = &begin_time {
-                if bt.microsecond() != 0 && !dt_is_utc {
-                    // PARITY: `begin[:-4] + "'"` trims to milliseconds (`utils/sql.py:837`).
-                    let chars: Vec<char> = b.chars().collect();
-                    let keep = chars.len().saturating_sub(4);
-                    b = chars[..keep].iter().collect::<String>() + "'";
-                }
+            if let Some(bt) = &begin_time
+                && bt.microsecond() != 0
+                && !dt_is_utc
+            {
+                // PARITY: `begin[:-4] + "'"` trims to milliseconds (`utils/sql.py:837`).
+                let chars: Vec<char> = b.chars().collect();
+                let keep = chars.len().saturating_sub(4);
+                b = chars[..keep].iter().collect::<String>() + "'";
             }
             let mut b = if b != "now" {
                 format!("CAST({b} AS {db_type})")

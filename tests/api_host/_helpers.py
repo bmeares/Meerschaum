@@ -35,9 +35,6 @@ def make_env(root: pathlib.Path, plugins: pathlib.Path, host_mode: bool = True) 
         'MRSM_SQL_APIHOSTTEST': f"sqlite:///{root / 'instance.db'}",
         'MRSM_API_HOST_CONFIG': json.dumps({'mrsm_instance': 'sql:apihosttest'}),
     })
-    venvs = REPO / 'test_root' / 'venvs'
-    if (venvs / 'mrsm').is_dir():
-        env['MRSM_VENVS_DIR'] = str(venvs)
     if host_mode:
         env['MRSM_API_HOST'] = '1'
     return env
@@ -68,7 +65,7 @@ def sandbox():
     check = run_python(
         root, plugins,
         "import meerschaum.utils.venv as v; v.activate_venv('mrsm'); "
-        "import fastapi, uvicorn, dash, a2wsgi, jose, fastapi_login",
+        "import fastapi, uvicorn, dash, a2wsgi, jwt",
     )
     if check.returncode != 0:
         pytest.skip(f"The API host's dependencies are missing:\n{check.stderr[-1500:]}")

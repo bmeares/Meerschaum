@@ -448,7 +448,7 @@ impl SqlDriver {
     /// statement), so `sql` must be a single statement. The schema is fixed by the first batch
     /// (or by describing the statement when it returns no rows).
     pub async fn read_stream(&self, sql: &str, chunksize: usize) -> Result<RecordBatchStream> {
-        self.read_stream_as(sql, chunksize, false).await
+        self.read_stream_as(sql, chunksize, false, false).await
     }
 
     /// Whether catalog statements are prepared once per connection on this driver: the
@@ -463,16 +463,17 @@ impl SqlDriver {
         sql: &str,
         chunksize: usize,
         persistent: bool,
+        collect: bool,
     ) -> Result<RecordBatchStream> {
         let chunksize = chunksize.max(1);
         let sql = sql.to_string();
-        on_native!(self.pool, p => p.read_stream(sql, chunksize).await);
+        on_native!(self.pool, p => p.read_stream(sql, chunksize, collect).await);
         on_pool!(self.pool, p, B => backend::read_stream::<B>(p, sql, chunksize, persistent).await)
     }
 
     /// Execute a query and collect all rows (in batches of [`DEFAULT_CHUNKSIZE`]).
     pub async fn read(&self, sql: &str) -> Result<Vec<RecordBatch>> {
-        self.read_stream(sql, DEFAULT_CHUNKSIZE)
+        self.read_stream_as(sql, DEFAULT_CHUNKSIZE, false, true)
             .await?
             .collect_batches()
             .await
@@ -518,7 +519,7 @@ impl SqlDriver {
 
     async fn read_frame_as(&self, sql: &str, persistent: bool) -> Result<Frame> {
         let stream = self
-            .read_stream_as(sql, DEFAULT_CHUNKSIZE, persistent)
+            .read_stream_as(sql, DEFAULT_CHUNKSIZE, persistent, true)
             .await?;
         let schema = stream.schema();
         let batches = stream.collect_batches().await?;

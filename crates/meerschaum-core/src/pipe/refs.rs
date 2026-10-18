@@ -15,13 +15,13 @@ static PIPE_CALL_RE: LazyLock<Regex> =
 const INSTANCE_KWARGS: [&str; 3] = ["instance", "mrsm_instance", "instance_keys"];
 
 fn with_parent_instance(kwargs: &mut Map, parent: Option<&Pipe>) {
-    if let Some(parent) = parent {
-        if !INSTANCE_KWARGS.iter().any(|k| kwargs.contains_key(*k)) {
-            kwargs.insert(
-                "instance".into(),
-                Value::Str(parent.instance_keys().to_string()),
-            );
-        }
+    if let Some(parent) = parent
+        && !INSTANCE_KWARGS.iter().any(|k| kwargs.contains_key(*k))
+    {
+        kwargs.insert(
+            "instance".into(),
+            Value::Str(parent.instance_keys().to_string()),
+        );
     }
 }
 

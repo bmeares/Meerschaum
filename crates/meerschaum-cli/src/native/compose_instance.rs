@@ -103,15 +103,14 @@ impl ComposeInstance {
         if let Some(error) = self.failed.get(&full) {
             return Resolved::Failed(error.clone());
         }
-        if typ == "sql" {
-            if let Some((attributes, path)) = sqlite_file(config, &label) {
-                if !path.exists() {
-                    return match self.lazy_connector(&full, &label, &attributes) {
-                        Ok(conn) => Resolved::Absent(conn),
-                        Err(e) => Resolved::Failed(e),
-                    };
-                }
-            }
+        if typ == "sql"
+            && let Some((attributes, path)) = sqlite_file(config, &label)
+            && !path.exists()
+        {
+            return match self.lazy_connector(&full, &label, &attributes) {
+                Ok(conn) => Resolved::Absent(conn),
+                Err(e) => Resolved::Failed(e),
+            };
         }
         // `Session::instance` caches the connector it builds.
         let config = self.config().expect("scope");

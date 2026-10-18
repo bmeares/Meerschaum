@@ -22,6 +22,14 @@ pub(crate) trait Backend: 'static {
     /// A cheap statement run before describing an empty read, for drivers whose connection
     /// keeps a stale schema until a statement touches the database (SQLite).
     const SCHEMA_REFRESH: Option<&'static str> = None;
+    /// Prepare every statement once per connection (`persistent(true)`, bounded by the statement
+    /// cache) instead of preparing and closing it around each execution. `sqlx` 0.9.0 does not set
+    /// `TCP_NODELAY` (fixed after 0.9.0, sqlx #4335), and MySQL's `COM_STMT_CLOSE` has no reply:
+    /// the connection's next small write (the pool's ping on release, the next statement, `COMMIT`)
+    /// waits for the server's delayed ACK, ~40 ms each, and the busy connection makes the pool open
+    /// another. A cached statement is never closed, so none of that happens. See
+    /// [`statement_persistent`].
+    const PERSISTENT_STATEMENTS: bool = false;
 
     /// Plan the output columns from the statement's column metadata.
     fn plan(columns: &[<Self::DB as Database>::Column]) -> Vec<ColumnPlan>;
@@ -54,6 +62,23 @@ pub(crate) trait Backend: 'static {
         q: sqlx::query::Query<'q, Self::DB, <Self::DB as Database>::Arguments>,
         p: &SqlParam,
     ) -> sqlx::query::Query<'q, Self::DB, <Self::DB as Database>::Arguments>;
+}
+
+/// The largest statement text kept in a connection's statement cache.
+const MAX_PERSISTENT_SQL_BYTES: usize = 8 * 1024;
+
+/// The most bound parameters of a statement kept in a connection's statement cache.
+const MAX_PERSISTENT_PARAMS: usize = 128;
+
+/// Whether to prepare a statement once per connection: what the caller asked for, or every
+/// small statement on a backend with [`Backend::PERSISTENT_STATEMENTS`]. Large statements (batch
+/// inserts) stay unnamed: they are rare, one extra round trip is nothing next to their cost, and
+/// the server should not hold them.
+fn statement_persistent<B: Backend>(requested: bool, sql: &str, params: usize) -> bool {
+    requested
+        || (B::PERSISTENT_STATEMENTS
+            && sql.len() <= MAX_PERSISTENT_SQL_BYTES
+            && params <= MAX_PERSISTENT_PARAMS)
 }
 
 /// Decode a buffer of rows into column-major cells.
@@ -216,6 +241,7 @@ where
 {
     let (tx, rx) = mpsc::channel::<Result<RecordBatch>>(2);
     let (schema_tx, schema_rx) = oneshot::channel::<Result<SchemaRef>>();
+    let persistent = statement_persistent::<B>(persistent, &sql, 0);
 
     tokio::spawn(async move {
         let mut schema_tx = Some(schema_tx);
@@ -341,7 +367,7 @@ where
     B::DB: HasStatementCache,
 {
     let row = match sqlx::query::<B::DB>(AssertSqlSafe(sql))
-        .persistent(persistent)
+        .persistent(statement_persistent::<B>(persistent, sql, 0))
         .fetch_optional(pool)
         .await
     {
@@ -380,6 +406,7 @@ fn bound_as<'q, B: Backend>(
 where
     B::DB: HasStatementCache,
 {
+    let persistent = statement_persistent::<B>(persistent, sql, params.len());
     let mut q = sqlx::query::<B::DB>(AssertSqlSafe(sql)).persistent(persistent);
     for p in params {
         q = B::bind(q, p);
@@ -540,7 +567,8 @@ macro_rules! tx_ops {
             ) -> Result<Vec<RecordBatch>> {
                 let rows = sqlx::Executor::fetch_all(
                     &mut **tx,
-                    sqlx::query::<Db>(AssertSqlSafe(sql)).persistent(false),
+                    sqlx::query::<Db>(AssertSqlSafe(sql))
+                        .persistent(super::statement_persistent::<B>(false, sql, 0)),
                 )
                 .await?;
                 if rows.is_empty() {

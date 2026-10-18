@@ -296,6 +296,24 @@ fn os_runs_a_command_prints_its_output_and_reports_the_exit_code() {
     );
 }
 
+/// `sql <label> "CREATE VIEW ... AS SELECT ..."`: the text contains `select`, so v4 routes it to `read`;
+/// the statement runs, `read()` finds no result set and the action prints `None` and succeeds.
+#[test]
+fn sql_runs_a_create_view_routed_to_read_and_prints_none() {
+    let home = Home::new();
+    let created = home.sql("CREATE VIEW v AS SELECT 1 AS a");
+    assert_eq!(created.code, 0, "{}", created.text);
+    assert!(created.text.contains("None"), "{}", created.text);
+    assert!(
+        created.text.contains("does not return rows"),
+        "{}",
+        created.text
+    );
+    let rows = home.sql("SELECT a FROM v");
+    assert_eq!(rows.code, 0, "{}", rows.text);
+    assert!(rows.text.contains("|   1 |"), "{}", rows.text);
+}
+
 #[test]
 fn sql_reads_execs_and_prints_none_for_a_bad_query() {
     let home = Home::new();

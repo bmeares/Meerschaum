@@ -68,20 +68,15 @@ _IMPORT_KW = {} if _host_mode else {'install': False, 'warn': False}
 
 endpoints = STATIC_CONFIG['api']['endpoints']
 
+### Everything the host imports is in the `api` extra (`fastapi`, `uvicorn`, `a2wsgi`,
+### `python-multipart`, `PyJWT`; FastAPI brings `starlette` and `anyio`): `fastapi-login`,
+### `python-jose` and `aiofiles` are not needed (the login manager is `_login.LoginManager`).
 (
     fastapi,
-    aiofiles,
     starlette_responses,
-    multipart,
-    packaging_version,
-    importlib_metadata,
 ) = attempt_import(
     'fastapi',
-    'aiofiles',
     'starlette.responses',
-    'multipart',
-    'packaging.version',
-    'importlib_metadata',
     lazy=False,
     check_update=CHECK_UPDATE,
     **_IMPORT_KW,
@@ -91,17 +86,6 @@ if fastapi is None:
         "`meerschaum.api` needs FastAPI: install the `api` extra "
         "(`pip install \"meerschaum[api]\"`). The API server itself is the native `mrsm start api`."
     )
-(
-    typing_extensions,
-    uvicorn_workers,
-) = attempt_import(
-    'typing_extensions',
-    'uvicorn.workers',
-    lazy=False,
-    check_update=CHECK_UPDATE,
-    venv=None,
-    **_IMPORT_KW,
-)
 from meerschaum.api._chain import check_allow_chaining, DISALLOW_CHAINING_MESSAGE
 from meerschaum.api._exceptions import APIPermissionError
 uvicorn_config_path = paths.API_UVICORN_RESOURCES_PATH / SERVER_ID / 'config.json'

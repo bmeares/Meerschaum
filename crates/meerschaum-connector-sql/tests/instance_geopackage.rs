@@ -332,10 +332,10 @@ fn run_py(exe: &Path, work: &Path, args: &[&str]) -> J {
         .env("MRSM_ROOT_DIR", &root)
         .env("MRSM_PLUGINS_DIR", &plugins);
     // The geometry stack (shapely, geopandas) lives in the reference interpreter's own venv.
-    if let Some(venvs) = exe.parent().and_then(Path::parent).and_then(Path::parent) {
-        if venvs.ends_with("venvs") {
-            cmd.env("MRSM_VENVS_DIR", venvs);
-        }
+    if let Some(venvs) = exe.parent().and_then(Path::parent).and_then(Path::parent)
+        && venvs.ends_with("venvs")
+    {
+        cmd.env("MRSM_VENVS_DIR", venvs);
     }
     let out = cmd.output().expect("python runs");
     let stdout = String::from_utf8_lossy(&out.stdout);

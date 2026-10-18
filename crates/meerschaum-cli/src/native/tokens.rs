@@ -287,16 +287,16 @@ pub fn register_tokens(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     });
     // An `api` instance enforces the cap itself (a refused request comes back as the failure).
     let mut scopes = scopes;
-    if inst.type_name() != "api" {
-        if let Some(cap) = grant_cap(rt, &inst, &username) {
-            match &scopes {
-                Some(asked) => {
-                    if let Some(failure) = cap_failure(&username, asked, &cap, &[]) {
-                        return Ok(failure);
-                    }
+    if inst.type_name() != "api"
+        && let Some(cap) = grant_cap(rt, &inst, &username)
+    {
+        match &scopes {
+            Some(asked) => {
+                if let Some(failure) = cap_failure(&username, asked, &cap, &[]) {
+                    return Ok(failure);
                 }
-                None => scopes = Some(cap),
             }
+            None => scopes = Some(cap),
         }
     }
     let mut token = Token::new(Some(&label), expiration, scopes, default_days, Utc::now());

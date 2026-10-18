@@ -768,6 +768,20 @@ async fn register_pipe(args: &Map, cx: &ToolCx<'_>) -> Result<Value, ToolError> 
     let mut pipe = build_pipe(cx, &conn, &ck, &mk, lk.as_deref(), Some(parameters))?;
     // Checked after construction because `target` may be set in `parameters`.
     check_protected_target(&pipe)?;
+    // `Pipe.register()`: a plugin or custom connector's `register(pipe)` supplies the base
+    // parameters under the ones given (`apply_patch_to_config(params, self.parameters)`).
+    match cx.server.backend.connector_register(&pipe).await {
+        super::ConnectorRegister::Parameters(params) => {
+            let merged = meerschaum_core::value::apply_patch_maps(&params, pipe.raw_parameters());
+            pipe.set_parameters(merged);
+            // The plugin's parameters may name the table (`target`).
+            check_protected_target(&pipe)?;
+        }
+        super::ConnectorRegister::Invalid(repr) => tracing::warn!(
+            "Invalid parameters returned from `register()` in connector {ck}:\n{repr}"
+        ),
+        super::ConnectorRegister::Undefined => {}
+    }
     // `Pipe.register()`: an empty parameters dict registers the default index columns.
     if pipe.raw_parameters().is_empty() {
         let cols = pipe.columns();

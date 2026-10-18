@@ -157,6 +157,18 @@ pub enum SqlReadError {
     Failed,
 }
 
+/// What a plugin or custom connector's `register(pipe)` answered: the connector half of v4's
+/// `Pipe.register()` (see [`McpBackend::connector_register`]).
+#[derive(Debug, Clone, PartialEq)]
+pub enum ConnectorRegister {
+    /// The connector defines no `register()`, or this server cannot ask it: nothing changes.
+    Undefined,
+    /// The parameters it returned (`{}` for `None`, also when `register()` raised).
+    Parameters(Map),
+    /// It returned something that is not a dict (`str()` of it): v4 warns and changes nothing.
+    Invalid(String),
+}
+
 /// Operations the MCP tools need beyond the instance connector. The CLI implements them with the
 /// engine and the SQL crate; [`NoBackend`] is a server without them.
 #[async_trait]
@@ -185,6 +197,14 @@ pub trait McpBackend: Send + Sync {
         query: &str,
         limit: usize,
     ) -> Result<Vec<Value>, SqlReadError>;
+
+    /// The connector half of `Pipe.register()`: ask the `plugin:` or custom connector of
+    /// `pipe` for its `register(pipe)` parameters. Needs a Python worker, so a server without
+    /// one keeps this default (nothing is asked and the pipe is registered as given).
+    async fn connector_register(&self, pipe: &Pipe) -> ConnectorRegister {
+        let _ = pipe;
+        ConnectorRegister::Undefined
+    }
 }
 
 /// No source syncs and no user SQL.

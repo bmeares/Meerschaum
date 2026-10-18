@@ -131,7 +131,7 @@ fn gantt_figure(detail: &RunDetail) -> Json {
             "y":y,"base":base,"x":x,"marker":{"color":color}}));
     }
     json!({"data": traces, "layout": {
-        "title": format!("Run {}", detail.summary.run.run_id),
+        "title": {"text": format!("Run {}", detail.summary.run.run_id)},
         "xaxis": {"type":"date"}, "yaxis": {"autorange":"reversed"}, "barmode": "group"}})
 }
 

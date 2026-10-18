@@ -607,6 +607,25 @@ fn create_table_options(a: &Value) -> CreateTableOptions {
     }
 }
 
+/// Whether the case runs on the Oracle flavor.
+fn a_flavor_is_oracle(args: &Value) -> bool {
+    args.get("flavor").is_some_and(|f| f.py_str() == "oracle")
+}
+
+/// PARITY W17O-003 (`crates/meerschaum-py/PARITY.md`): v5 quotes Oracle's true reserved words
+/// (`uid`, `user`, `level`, `size`, ...) that v4 leaves bare, because v4's bare DDL / DML fails on a
+/// real Oracle (`ORA-00904`). This is the only accepted difference from the v4.1.4 golden output:
+/// the quotes of exactly those words (lowercase, as `sql_item_name` emits them) are removed from the
+/// Rust output before it is compared, so every other difference still fails the test. The JSON
+/// dump shows a quoted identifier as `\"word\"`.
+fn without_intentional_oracle_quoting(dumped: &str) -> String {
+    let mut out = dumped.to_string();
+    for word in meerschaum_connector_sql::ident::ORACLE_RESERVED_EXTRA {
+        out = out.replace(&format!("\\\"{word}\\\""), word);
+    }
+    out
+}
+
 fn run(func: &str, a: &Value) -> Outcome {
     match func {
         "sql_item_name" => ok(v_str(sql_item_name(
@@ -918,10 +937,10 @@ fn run(func: &str, a: &Value) -> Outcome {
             };
             // Python records the `_is_hypertable` lookup before the groups on TimescaleDB.
             let mut queries: Vec<String> = Vec::new();
-            if f.compressible() {
-                if let Some(q) = get_is_hypertable_query(&ctx, &p) {
-                    queries.push(q);
-                }
+            if f.compressible()
+                && let Some(q) = get_is_hypertable_query(&ctx, &p)
+            {
+                queries.push(q);
             }
             let success = groups.is_ok();
             if let Ok(groups) = groups {
@@ -1216,16 +1235,16 @@ fn golden_queries_match_python() {
         }
 
         let mut args = case.args.clone();
-        if func == "partition_ranges" {
-            if let (Value::Map(d), Some(text)) = (
+        if func == "partition_ranges"
+            && let (Value::Map(d), Some(text)) = (
                 &mut args,
                 case.result
                     .as_ref()
                     .and_then(|r| r.get("mssql_max_boundary_text"))
                     .map(Value::py_str),
-            ) {
-                d.insert("_mssql_max_text".into(), Value::Str(text));
-            }
+            )
+        {
+            d.insert("_mssql_max_text".into(), Value::Str(text));
         }
         let outcome = std::panic::catch_unwind(|| run(func, &args));
         let outcome = match outcome {
@@ -1239,7 +1258,13 @@ fn golden_queries_match_python() {
             None
         });
         let matched = match (&outcome, &expected, &case.error) {
-            (Outcome::Value(got), Some(exp), None) => got.json_dumps() == exp.json_dumps(),
+            (Outcome::Value(got), Some(exp), None) => {
+                let exp = exp.json_dumps();
+                let got = got.json_dumps();
+                got == exp
+                    || (a_flavor_is_oracle(&args)
+                        && without_intentional_oracle_quoting(&got) == exp)
+            }
             (Outcome::Error(_), None, Some(_)) => true,
             _ => false,
         };

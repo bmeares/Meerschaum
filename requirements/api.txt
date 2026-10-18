@@ -3,3 +3,4 @@ uvicorn>=0.35.0
 a2wsgi>=1.10.0
 python-multipart>=0.0.20
 PyJWT>=2.8.0
+websockets>=15.0.1

@@ -391,6 +391,16 @@ pub fn sql(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
             )
         };
         match sess.block_on(conn.driver().read_frame(&text)) {
+            // PARITY: a statement that returns no result set (`CREATE VIEW ... AS SELECT ...`, which
+            // contains `select` and so is routed to `read`) has already run; v4's `read()` then
+            // fails with SQLAlchemy's "This result object does not return rows", logs it and
+            // returns `None`, which the action prints (`actions/sql.py`).
+            Ok(frame) if frame.names().is_empty() => {
+                rt.eprint(
+                    "This result object does not return rows. It has been closed automatically.\n",
+                );
+                pprint(rt, &PyObj::None, nopretty);
+            }
             Ok(frame) => {
                 if nopretty {
                     rt.print(&format!("{}\n", split_json(&frame)));

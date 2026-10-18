@@ -91,10 +91,10 @@ pub fn sqlite_reflected_type(declared: &str) -> String {
     match ty {
         T::Null => "NULL".to_string(),
         T::Plain(name) => {
-            if name == "BLOB" {
-                if let Some(len) = args.first().filter(|l| **l != 0) {
-                    return format!("BLOB({len})");
-                }
+            if name == "BLOB"
+                && let Some(len) = args.first().filter(|l| **l != 0)
+            {
+                return format!("BLOB({len})");
             }
             name.to_string()
         }
@@ -161,6 +161,207 @@ pub fn mysql_reflected_type(column_type: &str) -> String {
     }
 }
 
+/// The words SQLAlchemy's Oracle dialect quotes (`sqlalchemy/dialects/oracle/base.py`
+/// `RESERVED_WORDS`); `normalize_name` / `denormalize_name` use them to decide whether a name
+/// needs quotes.
+const SQLALCHEMY_ORACLE_RESERVED: &[&str] = &[
+    "share",
+    "raw",
+    "drop",
+    "between",
+    "from",
+    "desc",
+    "option",
+    "prior",
+    "long",
+    "then",
+    "default",
+    "alter",
+    "is",
+    "into",
+    "minus",
+    "integer",
+    "number",
+    "grant",
+    "identified",
+    "all",
+    "to",
+    "order",
+    "on",
+    "float",
+    "date",
+    "having",
+    "cluster",
+    "nowait",
+    "resource",
+    "any",
+    "table",
+    "index",
+    "for",
+    "update",
+    "where",
+    "check",
+    "smallint",
+    "with",
+    "delete",
+    "by",
+    "asc",
+    "revoke",
+    "like",
+    "size",
+    "rename",
+    "nocompress",
+    "null",
+    "group",
+    "values",
+    "as",
+    "in",
+    "view",
+    "exclusive",
+    "compress",
+    "synonym",
+    "select",
+    "insert",
+    "exists",
+    "not",
+    "trigger",
+    "else",
+    "create",
+    "intersect",
+    "pctfree",
+    "distinct",
+    "user",
+    "connect",
+    "set",
+    "mode",
+    "of",
+    "unique",
+    "varchar2",
+    "varchar",
+    "lock",
+    "or",
+    "char",
+    "decimal",
+    "union",
+    "public",
+    "and",
+    "start",
+    "uid",
+    "comment",
+    "current",
+    "level",
+];
+
+/// Whether SQLAlchemy's Oracle identifier preparer would quote the lowercase name `lower`
+/// (`IdentifierPreparer._requires_quotes` for a name that already is lowercase).
+fn oracle_requires_quotes(lower: &str) -> bool {
+    SQLALCHEMY_ORACLE_RESERVED.contains(&lower)
+        || lower
+            .chars()
+            .next()
+            .is_none_or(|c| c.is_ascii_digit() || c == '_' || c == '$')
+        || !lower
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '$')
+}
+
+/// `OracleDialect.normalize_name`: an all-uppercase name that needs no quotes is lowercased.
+fn oracle_normalize_name(name: &str) -> String {
+    let lower = name.to_lowercase();
+    if name.to_uppercase() == name && !oracle_requires_quotes(&lower) {
+        lower
+    } else {
+        name.to_string()
+    }
+}
+
+/// `OracleDialect.denormalize_name`: a lowercase name that needs no quotes is uppercased.
+fn oracle_denormalize_name(name: &str) -> String {
+    if name.to_lowercase() == name && !oracle_requires_quotes(name) {
+        name.to_uppercase()
+    } else {
+        name.to_string()
+    }
+}
+
+/// SQLAlchemy's Oracle type reflection (`OracleDialect.get_multi_columns`) followed by
+/// `str(column.type)`, the strings v4's `get_pipe_columns_types` returns on Oracle.
+///
+/// PARITY: `sqlalchemy/dialects/oracle/base.py` `get_multi_columns`: `NUMBER` with no precision and
+/// scale 0 is `INTEGER`, every other `NUMBER` renders as a bare `NUMBER` (no precision), `FLOAT` with
+/// binary precision 126 / 63 is `DOUBLE PRECISION` / `REAL`, character types render `VARCHAR(n)` /
+/// `NVARCHAR(n)` / `CHAR(n)` / `NCHAR(n)` with the character length, `RAW` drops its length, every
+/// `TIMESTAMP` variant is `TIMESTAMP`, `INTERVAL DAY TO SECOND` is `INTERVAL`, and a type SQLAlchemy
+/// does not know reflects as `NullType` (`NULL`).
+pub fn oracle_reflected_type(
+    data_type: &str,
+    char_length: Option<i64>,
+    precision: Option<i64>,
+    scale: Option<i64>,
+) -> String {
+    match data_type {
+        "NUMBER" => {
+            if precision.is_none() && scale == Some(0) {
+                "INTEGER".into()
+            } else {
+                "NUMBER".into()
+            }
+        }
+        "FLOAT" => match precision {
+            Some(126) => "DOUBLE PRECISION".into(),
+            Some(63) => "REAL".into(),
+            _ => "FLOAT".into(),
+        },
+        "VARCHAR2" | "NVARCHAR2" | "CHAR" | "NCHAR" => {
+            let name = match data_type {
+                "VARCHAR2" => "VARCHAR",
+                "NVARCHAR2" => "NVARCHAR",
+                other => other,
+            };
+            match char_length {
+                Some(n) => format!("{name}({n})"),
+                None => name.to_string(),
+            }
+        }
+        "RAW" => "RAW".into(),
+        t if t.contains("WITH TIME ZONE") || t.contains("WITH LOCAL TIME ZONE") => {
+            "TIMESTAMP".into()
+        }
+        other => {
+            // `re.sub(r"\(\d+\)", "", coltype)`.
+            let mut stripped = String::new();
+            let mut rest = other;
+            while let Some(open) = rest.find('(') {
+                match rest[open + 1..].find(')') {
+                    Some(close)
+                        if close > 0
+                            && rest[open + 1..open + 1 + close]
+                                .chars()
+                                .all(|c| c.is_ascii_digit()) =>
+                    {
+                        stripped.push_str(&rest[..open]);
+                        rest = &rest[open + close + 2..];
+                    }
+                    _ => {
+                        stripped.push_str(&rest[..=open]);
+                        rest = &rest[open + 1..];
+                    }
+                }
+            }
+            stripped.push_str(rest);
+            match stripped.as_str() {
+                "VARCHAR2" | "NVARCHAR2" | "CHAR" | "NCHAR" | "DATE" | "BLOB" | "BFILE"
+                | "CLOB" | "NCLOB" | "LONG" | "BINARY_DOUBLE" | "BINARY_FLOAT" | "ROWID"
+                | "VECTOR" | "TIMESTAMP" | "FLOAT" | "REAL" | "RAW" => stripped,
+                "NUMBER" => "NUMBER".into(),
+                "DOUBLE PRECISION" => "DOUBLE PRECISION".into(),
+                "INTERVAL DAY TO SECOND" => "INTERVAL".into(),
+                _ => "NULL".into(),
+            }
+        }
+    }
+}
+
 fn type_rows(docs: &[IndexMap<String, KValue>]) -> Vec<ColumnTypeRow> {
     docs.iter()
         .filter_map(|d| {
@@ -218,23 +419,23 @@ impl SqlConnector {
         } else {
             &filtered
         };
-        if self.flavor.driver_family() == DriverFamily::Postgres && needs_postgis_lookup(check) {
-            if let Ok(q) = get_postgis_geo_columns_types_query(table, schema_resolved.as_deref()) {
-                if let Ok(gdf) = self.read(&q).await {
-                    let geo_rows: Vec<(String, String, String, Option<i64>)> = frame_docs(&gdf)
-                        .iter()
-                        .filter_map(|d| {
-                            Some((
-                                kv_str(d.get("column"))?,
-                                kv_str(d.get("func"))?,
-                                kv_str(d.get("type")).unwrap_or_default(),
-                                kv_int(d.get("srid")),
-                            ))
-                        })
-                        .collect();
-                    geometry = postgis_geo_columns_types_from_rows(&geo_rows);
-                }
-            }
+        if self.flavor.driver_family() == DriverFamily::Postgres
+            && needs_postgis_lookup(check)
+            && let Ok(q) = get_postgis_geo_columns_types_query(table, schema_resolved.as_deref())
+            && let Ok(gdf) = self.read(&q).await
+        {
+            let geo_rows: Vec<(String, String, String, Option<i64>)> = frame_docs(&gdf)
+                .iter()
+                .filter_map(|d| {
+                    Some((
+                        kv_str(d.get("column"))?,
+                        kv_str(d.get("func"))?,
+                        kv_str(d.get("type")).unwrap_or_default(),
+                        kv_int(d.get("srid")),
+                    ))
+                })
+                .collect();
+            geometry = postgis_geo_columns_types_from_rows(&geo_rows);
         }
         // `database` is not passed by the pipe methods, so it does not filter.
         cols_types_from_rows(&rows, self.flavor, schema, None, &geometry)
@@ -322,8 +523,57 @@ impl SqlConnector {
                     })
                     .collect()
             }
+            DriverFamily::Oracle => self.get_oracle_reflected_columns_types(table, schema).await,
             _ => self.get_table_cols_types(table, schema).await,
         }
+    }
+
+    /// The Oracle branch of [`get_reflected_columns_types`](Self::get_reflected_columns_types):
+    /// SQLAlchemy's `Table(name, autoload_with=engine)` reads `all_tab_cols` for the current schema
+    /// (or the given one) and the denormalized table name, in column order.
+    async fn get_oracle_reflected_columns_types(
+        &self,
+        table: &str,
+        schema: Option<&str>,
+    ) -> IndexMap<String, String> {
+        let esc = |s: &str| s.replace('\'', "''");
+        let table_trunc = crate::ident::truncate_item_name(table, self.flavor);
+        let owner = match schema.filter(|s| !s.is_empty()) {
+            Some(s) => format!("'{}'", esc(&oracle_denormalize_name(s))),
+            None => "sys_context('USERENV', 'CURRENT_SCHEMA')".to_string(),
+        };
+        // The denormalized name first; the name as given when the table was created quoted.
+        let mut names = vec![oracle_denormalize_name(&table_trunc)];
+        if !names.contains(&table_trunc) {
+            names.push(table_trunc.clone());
+        }
+        for name in names {
+            let query = format!(
+                "SELECT column_name AS \"column\", data_type AS \"type\", char_length AS \"char_length\", data_precision AS \"numeric_precision\", data_scale AS \"numeric_scale\"\nFROM all_tab_cols\nWHERE owner = {owner} AND table_name = '{}' AND hidden_column = 'NO'\nORDER BY column_id",
+                esc(&name)
+            );
+            let Ok(df) = self.read(&query).await else {
+                continue;
+            };
+            let out: IndexMap<String, String> = frame_docs(&df)
+                .iter()
+                .filter_map(|d| {
+                    Some((
+                        oracle_normalize_name(&kv_str(d.get("column"))?),
+                        oracle_reflected_type(
+                            &kv_str(d.get("type")).unwrap_or_default(),
+                            kv_int(d.get("char_length")),
+                            kv_int(d.get("numeric_precision")),
+                            kv_int(d.get("numeric_scale")),
+                        ),
+                    ))
+                })
+                .collect();
+            if !out.is_empty() {
+                return out;
+            }
+        }
+        IndexMap::new()
     }
 }
 
@@ -352,6 +602,54 @@ mod tests {
         assert_eq!(sqlite_reflected_type("VARCHAR(256)"), "VARCHAR(256)");
         assert_eq!(sqlite_reflected_type(""), "NULL");
         assert_eq!(sqlite_reflected_type("FLOAT"), "FLOAT");
+    }
+
+    #[test]
+    fn oracle_types() {
+        let t = oracle_reflected_type;
+        // INT / INTEGER / SMALLINT (precision NULL, scale 0) are INTEGER; other NUMBERs render bare.
+        assert_eq!(t("NUMBER", None, None, Some(0)), "INTEGER");
+        assert_eq!(t("NUMBER", None, None, None), "NUMBER");
+        assert_eq!(t("NUMBER", None, Some(38), Some(0)), "NUMBER");
+        assert_eq!(t("NUMBER", None, Some(10), Some(2)), "NUMBER");
+        assert_eq!(t("FLOAT", None, Some(126), None), "DOUBLE PRECISION");
+        assert_eq!(t("FLOAT", None, Some(63), None), "REAL");
+        assert_eq!(t("FLOAT", None, Some(10), None), "FLOAT");
+        assert_eq!(t("NVARCHAR2", Some(2000), None, None), "NVARCHAR(2000)");
+        assert_eq!(t("VARCHAR2", Some(10), None, None), "VARCHAR(10)");
+        assert_eq!(t("CHAR", Some(36), None, None), "CHAR(36)");
+        assert_eq!(t("NCHAR", Some(5), None, None), "NCHAR(5)");
+        assert_eq!(t("RAW", None, None, None), "RAW");
+        assert_eq!(t("TIMESTAMP(6)", None, None, None), "TIMESTAMP");
+        assert_eq!(
+            t("TIMESTAMP(9) WITH TIME ZONE", None, None, None),
+            "TIMESTAMP"
+        );
+        assert_eq!(
+            t("TIMESTAMP(6) WITH LOCAL TIME ZONE", None, None, None),
+            "TIMESTAMP"
+        );
+        assert_eq!(t("DATE", None, None, None), "DATE");
+        assert_eq!(t("BLOB", None, None, None), "BLOB");
+        assert_eq!(t("NCLOB", None, None, None), "NCLOB");
+        assert_eq!(t("BINARY_DOUBLE", None, None, None), "BINARY_DOUBLE");
+        assert_eq!(
+            t("INTERVAL DAY(2) TO SECOND(6)", None, None, None),
+            "INTERVAL"
+        );
+        assert_eq!(t("INTERVAL YEAR(2) TO MONTH", None, None, None), "NULL");
+        assert_eq!(t("LONG RAW", None, None, None), "NULL");
+    }
+
+    #[test]
+    fn oracle_names() {
+        assert_eq!(oracle_normalize_name("DT"), "dt");
+        assert_eq!(oracle_normalize_name("COL1"), "col1");
+        assert_eq!(oracle_normalize_name("MyCol"), "MyCol");
+        assert_eq!(oracle_normalize_name("DATE"), "DATE");
+        assert_eq!(oracle_denormalize_name("w5sql_table"), "W5SQL_TABLE");
+        assert_eq!(oracle_denormalize_name("Mixed"), "Mixed");
+        assert_eq!(oracle_denormalize_name("date"), "date");
     }
 
     #[test]

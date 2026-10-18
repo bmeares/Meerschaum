@@ -661,10 +661,10 @@ impl JobExecutor for SystemdExecutor {
                 .filter_map(|(k, v)| Some((k.into_string().ok()?, v.into_string().ok()?)))
                 .collect()
         });
-        if resolve_python(&process_env).is_none() {
-            if let Ok(mut warnings) = self.warnings.lock() {
-                warnings.push(unpinned_python_warning(name));
-            }
+        if resolve_python(&process_env).is_none()
+            && let Ok(mut warnings) = self.warnings.lock()
+        {
+            warnings.push(unpinned_python_warning(name));
         }
         let text = self.get_service_file_text(name, sysargs, &self.exec_program(), &process_env);
         if let Err(e) = std::fs::write(&service_file_path, text) {
@@ -741,10 +741,10 @@ impl JobExecutor for SystemdExecutor {
         }
 
         let job_path = self.get_service_job_path(name);
-        if job_path.exists() {
-            if let Err(e) = std::fs::remove_dir_all(&job_path) {
-                return SuccessTuple::fail(e.to_string());
-            }
+        if job_path.exists()
+            && let Err(e) = std::fs::remove_dir_all(&job_path)
+        {
+            return SuccessTuple::fail(e.to_string());
         }
 
         let logs_path = self.get_service_logs_path(name);
@@ -777,10 +777,10 @@ impl JobExecutor for SystemdExecutor {
             // is gone (the job directory was just removed), so v4 leaves a dangling
             // `mrsm-<name>.service` link behind and a later `create_job` fails with
             // `FileExistsError`. A dangling link is removed here (`symlink_metadata`).
-            if path.symlink_metadata().is_ok() {
-                if let Err(e) = std::fs::remove_file(&path) {
-                    return SuccessTuple::fail(e.to_string());
-                }
+            if path.symlink_metadata().is_ok()
+                && let Err(e) = std::fs::remove_file(&path)
+            {
+                return SuccessTuple::fail(e.to_string());
             }
         }
 

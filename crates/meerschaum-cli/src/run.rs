@@ -55,8 +55,25 @@ pub fn process_args() -> Vec<String> {
         .collect()
 }
 
+/// Forget that a Python launcher handed this process over (`MRSM_BIN_EXEC`, see
+/// [`meerschaum_core::self_exe::BIN_GUARD_ENV`]).
+///
+/// The guard only blocks the immediate re-entry of a launcher which is not a real binary. This
+/// process *is* a real standalone binary, so it must not reach its children (Python workers, the
+/// API host, jobs), where it would make a Python process ignore `MRSM_BIN` and warn that it was
+/// "started again". Only the standalone entry does this: inside the extension the guard stays,
+/// because there it means "this Python process was started by a launcher".
+#[allow(unsafe_code)]
+fn drop_handover_guard() {
+    // SAFETY: called first thing in `fn main` of the standalone binary (`run_main`), before this
+    // program starts any thread or reads the environment elsewhere, so nothing can observe the
+    // environment while it changes.
+    unsafe { std::env::remove_var(meerschaum_core::self_exe::BIN_GUARD_ENV) };
+}
+
 /// [`run`] on this process's own arguments, as an [`ExitCode`]: the whole of `fn main` for a
 /// standalone `mrsm`.
 pub fn run_main() -> ExitCode {
+    drop_handover_guard();
     exit_code(run(&process_args()))
 }

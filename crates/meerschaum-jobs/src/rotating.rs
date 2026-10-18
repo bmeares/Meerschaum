@@ -381,14 +381,15 @@ impl RotatingFile {
     }
 
     fn after_read(&mut self, read_indices: &[i64]) {
-        if let Some(current) = self.current.as_mut() {
-            if current.in_dict && read_indices.contains(&current.index) {
-                current.pos = current
-                    .file
-                    .metadata()
-                    .map(|m| m.len())
-                    .unwrap_or(current.pos);
-            }
+        if let Some(current) = self.current.as_mut()
+            && current.in_dict
+            && read_indices.contains(&current.index)
+        {
+            current.pos = current
+                .file
+                .metadata()
+                .map(|m| m.len())
+                .unwrap_or(current.pos);
         }
     }
 
@@ -445,11 +446,11 @@ impl RotatingFile {
                 refresh_cursor = false;
             }
             let mut new_lines = subfile_lines.as_slice();
-            if let (Some(last), Some(first)) = (lines.last_mut(), subfile_lines.first()) {
-                if !last.ends_with('\n') {
-                    last.push_str(first);
-                    new_lines = &subfile_lines[1..];
-                }
+            if let (Some(last), Some(first)) = (lines.last_mut(), subfile_lines.first())
+                && !last.ends_with('\n')
+            {
+                last.push_str(first);
+                new_lines = &subfile_lines[1..];
             }
             lines.extend(new_lines.iter().cloned());
         }

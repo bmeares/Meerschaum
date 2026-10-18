@@ -31,7 +31,7 @@ fn str_map(obj: Option<&Bound<'_, PyAny>>) -> PyResult<IndexMap<String, String>>
     let Some(obj) = obj.filter(|o| !o.is_none()) else {
         return Ok(out);
     };
-    let dict = obj.downcast::<PyDict>()?;
+    let dict = obj.cast::<PyDict>()?;
     for (k, v) in dict.iter() {
         out.insert(k.str()?.extract()?, v.str()?.extract()?);
     }
@@ -95,7 +95,7 @@ pub fn enforce_dtypes<'py>(
     let run = |input: &PyFrame<'py>| {
         let frame = &input.frame;
         let _t = crate::trace::Stage::new("kernel: enforce_dtypes");
-        py.allow_threads(|| enforce_dtypes_with_report(frame, &dtypes, &opts))
+        py.detach(|| enforce_dtypes_with_report(frame, &dtypes, &opts))
             .map_err(|e| PyValueError::new_err(e.to_string()))
     };
     // v4 never reads or casts untyped columns of a pandas frame (it returns them as copies), so
@@ -346,7 +346,7 @@ pub fn filter_unseen_df<'py>(
     let (old_frame, new_frame) = (&old.frame, &new.frame);
     let mut delta = {
         let _t = crate::trace::Stage::new("kernel: filter_unseen_df");
-        py.allow_threads(|| k_filter_unseen_df(Some(old_frame), new_frame, &opts))
+        py.detach(|| k_filter_unseen_df(Some(old_frame), new_frame, &opts))
     };
 
     // v4 casts the new frame to `to_pandas_dtype()` of `dtypes` (default: the old frame's dtypes,
@@ -377,21 +377,21 @@ pub fn filter_unseen_df<'py>(
                         .set(col, meerschaum_kernel::ColumnData::Object(values))
                         .map_err(|e| PyValueError::new_err(e.to_string()))?;
                 }
-            } else if merge_target == "object" && old.series.contains_key(col) {
-                if let (Ok(old_col), Ok(new_col), Ok(result)) =
+            } else if merge_target == "object"
+                && old.series.contains_key(col)
+                && let (Ok(old_col), Ok(new_col), Ok(result)) =
                     (old.frame.data(col), new.frame.data(col), delta.data(col))
+            {
+                if infer_string && object_string_inference(old_col, new_col) {
+                    merge_target = "str".to_string();
+                }
+                if let Some(normalized) =
+                    object_string_nulls(old_col, new_col, result, infer_string)
+                        .filter(|_| merge_target == "object")
                 {
-                    if infer_string && object_string_inference(old_col, new_col) {
-                        merge_target = "str".to_string();
-                    }
-                    if let Some(normalized) =
-                        object_string_nulls(old_col, new_col, result, infer_string)
-                            .filter(|_| merge_target == "object")
-                    {
-                        delta
-                            .set(col, normalized)
-                            .map_err(|e| PyValueError::new_err(e.to_string()))?;
-                    }
+                    delta
+                        .set(col, normalized)
+                        .map_err(|e| PyValueError::new_err(e.to_string()))?;
                 }
             }
             hints.insert(col.clone(), merge_target);
@@ -523,7 +523,7 @@ pub fn query_df<'py>(
     let input = frame_from_py(&ctx, &df, ColumnMode::Full)?;
     let mut param_map = IndexMap::new();
     if let Some(p) = params.as_ref().filter(|p| !p.is_none()) {
-        for (k, v) in p.downcast::<PyDict>()?.iter() {
+        for (k, v) in p.cast::<PyDict>()?.iter() {
             param_map.insert(k.str()?.extract::<String>()?, param_value(&ctx, &v)?);
         }
     }
@@ -562,7 +562,7 @@ pub fn query_df<'py>(
     };
     let frame = &input.frame;
     let result = py
-        .allow_threads(|| k_query_df(frame, &opts))
+        .detach(|| k_query_df(frame, &opts))
         .map_err(|e| PyValueError::new_err(e.to_string()))?;
 
     if !has_query {
@@ -797,7 +797,7 @@ pub fn to_pandas_dtype(dtype: &Bound<'_, PyAny>) -> PyResult<String> {
 /// `are_dtypes_equal(ldtype, rdtype)` (strings, dtype objects, or two `{col: dtype}` dicts).
 #[pyfunction]
 pub fn are_dtypes_equal(ldtype: &Bound<'_, PyAny>, rdtype: &Bound<'_, PyAny>) -> PyResult<bool> {
-    if let (Ok(l), Ok(r)) = (ldtype.downcast::<PyDict>(), rdtype.downcast::<PyDict>()) {
+    if let (Ok(l), Ok(r)) = (ldtype.cast::<PyDict>(), rdtype.cast::<PyDict>()) {
         let mut lkeys: Vec<(String, Bound<'_, PyAny>)> = l
             .iter()
             .map(|(k, v)| Ok((k.str()?.extract::<String>()?, v)))
@@ -816,10 +816,10 @@ pub fn are_dtypes_equal(ldtype: &Bound<'_, PyAny>, rdtype: &Bound<'_, PyAny>) ->
         return Ok(true);
     }
     // PARITY: `ldtype == rdtype` is tried first (pandas / NumPy dtype objects compare to strings).
-    if let Ok(eq) = ldtype.eq(rdtype) {
-        if eq {
-            return Ok(true);
-        }
+    if let Ok(eq) = ldtype.eq(rdtype)
+        && eq
+    {
+        return Ok(true);
     }
     let l: String = ldtype.str()?.extract()?;
     let r: String = rdtype.str()?.extract()?;

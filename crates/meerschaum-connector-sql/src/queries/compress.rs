@@ -108,12 +108,11 @@ pub fn get_compress_settings(flavor: Flavor, pipe: &SqlPipe) -> CompressSettings
             if let Some(name) = &dt_col_name {
                 out.push(format!("{name} DESC"));
             }
-            if id_is_unique {
-                if let Some(name) = &id_col_name {
-                    if !out.contains(name) {
-                        out.push(name.clone());
-                    }
-                }
+            if id_is_unique
+                && let Some(name) = &id_col_name
+                && !out.contains(name)
+            {
+                out.push(name.clone());
             }
             out
         }

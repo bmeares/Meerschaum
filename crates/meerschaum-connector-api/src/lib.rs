@@ -9,12 +9,14 @@
 //! - [`models`]: route request/response bodies, `ScopedAuth`, JWT claims, engine-state models.
 //! - [`routes`]: endpoint paths and path builders.
 //! - [`wire`]: Python-compatible query/form encoding and the pandas `to_json` port.
+//! - [`engine_pipes`]: the engine state pipes over `/engine/pipes/{metric}/*` (shared wire).
 //! - [`client`] (feature `client`, default): the `APIConnector` over `reqwest`, speaking every
 //!   route of §7.1 with the same paths, query parameters and bodies as the v4 Python client.
 //!
 //! Wire quirks of the v4 client are kept and marked `// PARITY:`.
 #![deny(unsafe_code)]
 
+pub mod engine_pipes;
 pub mod models;
 pub mod routes;
 pub mod wire;

@@ -162,6 +162,13 @@ impl ConnectorRegistry for PythonRegistry {
         self.native.source_for_sync(keys, args)
     }
 
+    fn register_hook(&self, keys: &str) -> Option<Arc<dyn crate::ConnectorRegisterHook>> {
+        if self.info(keys).is_some_and(|i| i.has_register) {
+            return Some(Arc::new(PythonRegister(self.connector(keys)?)));
+        }
+        self.native.register_hook(keys)
+    }
+
     fn plugin_sync(&self, keys: &str) -> Option<Arc<dyn PluginSync>> {
         if self.info(keys).is_some_and(|i| i.has_sync) {
             return Some(Arc::new(PythonSync(self.connector(keys)?)));
@@ -226,6 +233,25 @@ fn kwargs(args: &SyncArgs) -> Map {
 }
 
 struct PythonSync(PythonConnector);
+
+struct PythonRegister(PythonConnector);
+
+#[async_trait]
+impl crate::ConnectorRegisterHook for PythonRegister {
+    async fn register_parameters(&self, pipe: &Pipe) -> crate::ConnectorRegister {
+        match self.0.register(pipe).await {
+            Ok(outcome) if !outcome.defined => crate::ConnectorRegister::Undefined,
+            Ok(outcome) if outcome.valid => {
+                crate::ConnectorRegister::Parameters(outcome.parameters)
+            }
+            Ok(outcome) => crate::ConnectorRegister::Invalid(outcome.repr),
+            Err(e) => {
+                tracing::warn!("`register()` failed for {pipe}: {e}");
+                crate::ConnectorRegister::Undefined
+            }
+        }
+    }
+}
 type CallbackReply = (CallbackRequest, oneshot::Sender<SuccessTuple>);
 struct ScopedCallbacks(tokio::sync::mpsc::UnboundedSender<CallbackReply>);
 #[async_trait]

@@ -117,7 +117,7 @@ pub fn core_pipe(obj: &Bound<'_, PyAny>, view: ParamsView) -> PyResult<Pipe> {
 /// the instance). `None` when the object has no such method or the call fails (duck typing).
 pub fn cached_columns_types(pipe: &Bound<'_, PyAny>) -> Option<indexmap::IndexMap<String, String>> {
     let v = pipe.call_method0("get_columns_types").ok()?;
-    let d = v.downcast::<PyDict>().ok()?;
+    let d = v.cast::<PyDict>().ok()?;
     let mut out = indexmap::IndexMap::with_capacity(d.len());
     for (k, v) in d.iter() {
         out.insert(k.str().ok()?.to_string(), v.str().ok()?.to_string());
@@ -130,7 +130,7 @@ pub fn date_bound(ctx: &PyCtx<'_>, obj: Option<&Bound<'_, PyAny>>) -> PyResult<O
     let Some(obj) = obj.filter(|o| !o.is_none()) else {
         return Ok(None);
     };
-    if let Ok(s) = obj.downcast::<PyString>() {
+    if let Ok(s) = obj.cast::<PyString>() {
         let s = s.to_str()?;
         if s.trim().is_empty() {
             return Ok(None);
@@ -184,7 +184,7 @@ pub fn str_list(obj: Option<&Bound<'_, PyAny>>) -> PyResult<Option<Vec<String>>>
     let Some(obj) = obj.filter(|o| !o.is_none()) else {
         return Ok(None);
     };
-    if let Ok(s) = obj.downcast::<PyString>() {
+    if let Ok(s) = obj.cast::<PyString>() {
         return Ok(Some(vec![s.to_str()?.to_string()]));
     }
     let mut out = Vec::new();
@@ -241,21 +241,21 @@ pub fn core_user(obj: &Bound<'_, PyAny>) -> PyResult<User> {
     let attrs = obj
         .getattr("_attributes")
         .or_else(|_| obj.getattr("attributes"));
-    if let Ok(a) = attrs {
-        if !a.is_none() {
-            user.attributes = Some(map_of(&a)?);
-        }
+    if let Ok(a) = attrs
+        && !a.is_none()
+    {
+        user.attributes = Some(map_of(&a)?);
     }
     let user_id = obj.getattr("_user_id").or_else(|_| obj.getattr("user_id"));
-    if let Ok(id) = user_id {
-        if !id.is_none() {
-            user.user_id = Some(py_to_core(&id)?);
-        }
+    if let Ok(id) = user_id
+        && !id.is_none()
+    {
+        user.user_id = Some(py_to_core(&id)?);
     }
-    if let Ok(h) = obj.getattr("_password_hash") {
-        if !h.is_none() {
-            user.password_hash = Some(h.str()?.to_str()?.to_string());
-        }
+    if let Ok(h) = obj.getattr("_password_hash")
+        && !h.is_none()
+    {
+        user.password_hash = Some(h.str()?.to_str()?.to_string());
     }
     user.instance_keys = opt_str(obj, "_instance_keys")?;
     Ok(user)
@@ -272,10 +272,10 @@ pub fn plugin_record(obj: &Bound<'_, PyAny>, full: bool) -> PyResult<PluginRecor
     };
     if full {
         rec.version = opt_str(obj, "version")?;
-        if let Ok(id) = obj.getattr("user_id") {
-            if !id.is_none() {
-                rec.user_id = Some(py_to_core(&id)?);
-            }
+        if let Ok(id) = obj.getattr("user_id")
+            && !id.is_none()
+        {
+            rec.user_id = Some(py_to_core(&id)?);
         }
         if let Ok(a) = obj.getattr("attributes") {
             rec.attributes = map_of(&a)?;

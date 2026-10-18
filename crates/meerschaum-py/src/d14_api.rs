@@ -115,7 +115,7 @@ fn metadef_bound(obj: Option<&Bound<'_, PyAny>>) -> PyResult<MBound> {
     let Some(obj) = obj.filter(|o| !o.is_none()) else {
         return Ok(MBound::None);
     };
-    if let Ok(s) = obj.downcast::<PyString>() {
+    if let Ok(s) = obj.cast::<PyString>() {
         let s = s.to_str()?;
         return Ok(if s.is_empty() {
             MBound::Default
@@ -170,7 +170,7 @@ fn rust_conn(
     conn: &Bound<'_, PyAny>,
 ) -> PyResult<std::sync::Arc<meerschaum_connector_sql::SqlConnector>> {
     let c = conn
-        .downcast::<PySqlConnector>()
+        .cast::<PySqlConnector>()
         .map_err(|_| PyValueError::new_err("Expected a `_core.SqlConnector`."))?;
     Ok(c.get().inner.clone())
 }

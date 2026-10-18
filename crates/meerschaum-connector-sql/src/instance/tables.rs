@@ -236,15 +236,15 @@ impl SqlConnector {
                 .await;
         }
         // `create_schemas(conn, [conn.internal_schema])`.
-        if !self.flavor.no_schema() {
-            if let Some(schema) = self.internal_schema() {
-                let query = crate::queries::table::get_create_schema_if_not_exists_queries(
-                    Some(schema),
-                    self.flavor,
-                );
-                if let Ok(queries) = query {
-                    let _ = self.exec_queries(&queries, false, false).await;
-                }
+        if !self.flavor.no_schema()
+            && let Some(schema) = self.internal_schema()
+        {
+            let query = crate::queries::table::get_create_schema_if_not_exists_queries(
+                Some(schema),
+                self.flavor,
+            );
+            if let Ok(queries) = query {
+                let _ = self.exec_queries(&queries, false, false).await;
             }
         }
         let mut ok = true;
@@ -349,10 +349,10 @@ impl SqlConnector {
             );
             if let Ok(df) = self.read(&query).await {
                 for doc in super::frame_docs(&df) {
-                    if let Some(t) = super::kv_str(doc.get("table")) {
-                        if !tables_to_drop.contains(&t) {
-                            tables_to_drop.push(t);
-                        }
+                    if let Some(t) = super::kv_str(doc.get("table"))
+                        && !tables_to_drop.contains(&t)
+                    {
+                        tables_to_drop.push(t);
                     }
                 }
             }

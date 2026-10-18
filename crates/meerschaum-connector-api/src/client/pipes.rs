@@ -116,7 +116,7 @@ fn thousands(n: usize) -> String {
     let s = n.to_string();
     let mut out = String::new();
     for (i, c) in s.chars().enumerate() {
-        if i > 0 && (s.len() - i) % 3 == 0 {
+        if i > 0 && (s.len() - i).is_multiple_of(3) {
             out.push(',');
         }
         out.push(c);
@@ -263,10 +263,10 @@ impl APIConnector {
 
     /// `pipe.exists()`: `True` results are cached for 60 s.
     pub async fn pipe_exists_cached(&self, pipe: &Pipe) -> ConnectorResult<bool> {
-        if let Some(at) = self.cache_entry(pipe).exists {
-            if at.elapsed().as_secs_f64() < EXISTS_CACHE_SECONDS {
-                return Ok(true);
-            }
+        if let Some(at) = self.cache_entry(pipe).exists
+            && at.elapsed().as_secs_f64() < EXISTS_CACHE_SECONDS
+        {
+            return Ok(true);
         }
         let exists = self.pipe_exists(pipe).await?;
         if exists {
@@ -287,10 +287,11 @@ impl APIConnector {
         } else {
             COLUMNS_TYPES_CACHE_SECONDS
         };
-        if let Some((at, types)) = self.cache_entry(pipe).columns_types {
-            if !types.is_empty() && at.elapsed().as_secs_f64() < ttl {
-                return Ok(types);
-            }
+        if let Some((at, types)) = self.cache_entry(pipe).columns_types
+            && !types.is_empty()
+            && at.elapsed().as_secs_f64() < ttl
+        {
+            return Ok(types);
         }
         let types = self
             .get_pipe_columns_types_opt(pipe)
@@ -422,6 +423,9 @@ impl APIConnector {
     /// (`to_json(chunk, orient='columns', geometry_format='wkb_hex')`), forwarding the keyword
     /// arguments as query parameters, then invalidate the server's pipe cache.
     pub async fn sync_pipe(&self, pipe: &Pipe, df: Frame, opts: &SyncOptions) -> SuccessTuple {
+        if crate::engine_pipes::is_engine_pipe(pipe) {
+            return self.write_engine_pipe(pipe.metric_key(), &df).await;
+        }
         let begin = Instant::now();
         // PARITY: `chunksize=None` posts one row per request (`1 if chunksize is None`).
         let chunksize = match opts.chunksize {
@@ -589,6 +593,10 @@ impl APIConnector {
         pipe: &Pipe,
         query: &DataQuery,
     ) -> ConnectorResult<Option<Frame>> {
+        if crate::engine_pipes::is_engine_pipe(pipe) {
+            let q = crate::engine_pipes::EnginePipeQuery::from_data_query(query);
+            return self.read_engine_pipe(pipe.metric_key(), &q).await;
+        }
         let r_url = Self::pipe_r_url(pipe) + "/data";
         let params_json = py_json_opt_map(&query.params);
         let opts = RequestOptions::query(vec![
@@ -722,10 +730,10 @@ impl APIConnector {
             )
             .await?;
         let text = response.text();
-        if meerschaum_core::pyfmt::is_int(&text) {
-            if let Ok(i) = text.trim().parse::<i64>() {
-                return Ok(Some(PipeId::Int(i)));
-            }
+        if meerschaum_core::pyfmt::is_int(&text)
+            && let Ok(i) = text.trim().parse::<i64>()
+        {
+            return Ok(Some(PipeId::Int(i)));
         }
         if !text.is_empty() && !text.starts_with('{') {
             return Ok(Some(PipeId::Str(text)));
@@ -818,6 +826,14 @@ impl APIConnector {
 
     /// `pipe_exists(pipe)`: `GET /pipes/{keys}/exists`.
     pub async fn pipe_exists(&self, pipe: &Pipe) -> ConnectorResult<bool> {
+        if crate::engine_pipes::is_engine_pipe(pipe) {
+            // The engine probes its state pipes; a server that cannot answer (an older server,
+            // a failure) means "not there yet", without a warning, as before the routes existed.
+            return Ok(self
+                .engine_pipe_exists(pipe.metric_key())
+                .await
+                .unwrap_or(false));
+        }
         let r_url = Self::pipe_r_url(pipe) + "/exists";
         let response = self
             .get(
@@ -853,10 +869,10 @@ impl APIConnector {
     ///
     /// PARITY: v4 always returns `False` (`_pipes.py:607`).
     pub async fn create_metadata(&self) -> bool {
-        if let Ok(r) = self.post(routes::METADATA, RequestOptions::default()).await {
-            if let Err(e) = r.json() {
-                super::warnings::warn_fmt!("Failed to create metadata on {self}:\n{e}");
-            }
+        if let Ok(r) = self.post(routes::METADATA, RequestOptions::default()).await
+            && let Err(e) = r.json()
+        {
+            super::warnings::warn_fmt!("Failed to create metadata on {self}:\n{e}");
         }
         false
     }
@@ -918,6 +934,10 @@ impl APIConnector {
 
     /// `clear_pipe(pipe, begin, end, params)`: `DELETE /pipes/{keys}/clear`.
     pub async fn clear_pipe(&self, pipe: &Pipe, query: &DataQuery) -> SuccessTuple {
+        if crate::engine_pipes::is_engine_pipe(pipe) {
+            let q = crate::engine_pipes::EnginePipeQuery::from_data_query(query);
+            return self.clear_engine_pipe(pipe.metric_key(), &q).await;
+        }
         let r_url = Self::pipe_r_url(pipe) + "/clear";
         let opts = RequestOptions::query(vec![
             ("begin", bound_query(&query.begin)),

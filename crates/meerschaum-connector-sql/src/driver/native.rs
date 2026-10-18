@@ -16,7 +16,7 @@ use futures_util::StreamExt;
 use futures_util::stream;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc, oneshot};
 
-use super::batch::{self, ColumnPlan};
+use super::batch::{self, ColumnKind, ColumnPlan};
 use super::params::SqlParam;
 use super::{RecordBatchStream, SqlValue};
 use crate::error::{Result, SqlError};
@@ -90,12 +90,12 @@ pub(crate) struct PooledConn {
 
 impl Drop for PooledConn {
     fn drop(&mut self) {
-        if let Some(conn) = self.conn.take() {
-            if !self.in_tx && !conn.is_broken() {
-                if let Ok(mut idle) = self.pool.idle.lock() {
-                    idle.push(conn);
-                }
-            }
+        if let Some(conn) = self.conn.take()
+            && !self.in_tx
+            && !conn.is_broken()
+            && let Ok(mut idle) = self.pool.idle.lock()
+        {
+            idle.push(conn);
         }
     }
 }
@@ -151,11 +151,20 @@ impl NativePool {
         }
     }
 
-    /// Stream a query's rows as record batches of at most `chunksize` rows.
+    /// Stream a query's rows as record batches of at most `chunksize` rows, all with the schema
+    /// of the stream.
+    ///
+    /// An unconstrained Oracle `NUMBER` ([`ColumnKind::NumberAuto`]) has no type known up front.
+    /// With `collect` (the caller gathers the whole result: [`SqlDriver::read_frame`](super::SqlDriver::read_frame),
+    /// `read`) the rows of such a result are held until the end and the column is typed from every
+    /// value (`Int64`, `Float64` or an exact decimal), so the batches agree and nothing is cast.
+    /// Without it (a stream handed out batch by batch, one schema for the whole stream) the column is
+    /// exact decimal text (`NumericText`), whatever later chunks hold.
     pub(crate) async fn read_stream(
         &self,
         sql: String,
         chunksize: usize,
+        collect: bool,
     ) -> Result<RecordBatchStream> {
         let (tx, rx) = mpsc::channel::<Result<RecordBatch>>(2);
         let (schema_tx, schema_rx) = oneshot::channel::<Result<SchemaRef>>();
@@ -171,40 +180,74 @@ impl NativePool {
             };
             let (etx, mut erx) = mpsc::channel::<NativeEvent>(2);
             let query = conn.conn().query(&sql, &[], chunksize, etx);
+            // Sends one batch (and the schema before the first); `false` once the consumer is gone
+            // or the first batch failed.
             let consume = async {
                 let mut plans: Option<Vec<ColumnPlan>> = None;
                 let mut schema: Option<SchemaRef> = None;
+                let mut held: Vec<(Vec<Vec<SqlValue>>, usize)> = Vec::new();
+                macro_rules! emit {
+                    ($item:expr, $plans:expr) => {{
+                        let item = $item;
+                        if let Some(stx) = schema_tx.take() {
+                            let failed = item.is_err();
+                            let _ = stx.send(item.as_ref().map(|b| b.schema()).map_err(|e| {
+                                SqlError::Conversion {
+                                    column: String::new(),
+                                    reason: e.to_string(),
+                                }
+                            }));
+                            if failed {
+                                return ($plans.clone(), schema);
+                            }
+                        }
+                        if tx.send(item).await.is_err() {
+                            return ($plans.clone(), schema);
+                        }
+                    }};
+                }
                 while let Some(ev) = erx.recv().await {
                     match ev {
-                        NativeEvent::Columns(p) => plans = Some(p),
+                        NativeEvent::Columns(mut p) => {
+                            if !collect {
+                                for plan in &mut p {
+                                    if plan.kind == ColumnKind::NumberAuto {
+                                        plan.kind = ColumnKind::NumericText;
+                                    }
+                                }
+                            }
+                            plans = Some(p);
+                        }
                         NativeEvent::Rows(rows) => {
                             let Some(plans) = plans.as_mut() else {
                                 continue;
                             };
                             let n = rows.len();
                             let cells = transpose(rows, plans.len());
+                            if plans.iter().any(|p| p.kind == ColumnKind::NumberAuto) {
+                                held.push((cells, n));
+                                continue;
+                            }
                             if schema.is_none() {
                                 batch::resolve_decimal_scales(plans, &cells);
                                 schema = Some(batch::schema_for(plans));
                             }
                             let s = schema.clone().expect("schema");
-                            let item = batch::build_batch(&s, plans, cells, n);
-                            if let Some(stx) = schema_tx.take() {
-                                let failed = item.is_err();
-                                let _ = stx.send(item.as_ref().map(|b| b.schema()).map_err(|e| {
-                                    SqlError::Conversion {
-                                        column: String::new(),
-                                        reason: e.to_string(),
-                                    }
-                                }));
-                                if failed {
-                                    return (plans.clone(), schema);
-                                }
-                            }
-                            if tx.send(item).await.is_err() {
-                                return (plans.clone(), schema);
-                            }
+                            emit!(batch::build_batch(&s, plans, cells, n), plans);
                         }
+                    }
+                }
+                if let Some(plans) = plans.as_mut().filter(|_| !held.is_empty()) {
+                    // Decimal columns keep the first chunk's scale (as when streaming); the
+                    // unconstrained `NUMBER` ones are typed from every chunk.
+                    batch::resolve_scales(plans, &held[0].0);
+                    batch::resolve_number_auto_with(plans, |i| {
+                        held.iter().map(|(cells, _)| cells[i].as_slice()).collect()
+                    });
+                    let s = batch::schema_for(plans);
+                    schema = Some(s.clone());
+                    for (cells, n) in std::mem::take(&mut held) {
+                        emit!(batch::build_batch(&s, plans, cells, n), plans);
                     }
                 }
                 (plans.unwrap_or_default(), schema)

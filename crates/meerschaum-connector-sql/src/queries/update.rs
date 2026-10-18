@@ -182,10 +182,10 @@ pub fn get_update_queries(args: &UpdateQueriesArgs<'_>) -> Vec<String> {
             continue;
         }
         let mut c_type = c_type.clone();
-        if has_cast_dtypes(flavor) {
-            if let Some(cast) = cast_dtype(flavor, &c_type.to_uppercase()) {
-                c_type = cast.to_string();
-            }
+        if has_cast_dtypes(flavor)
+            && let Some(cast) = cast_dtype(flavor, &c_type.to_uppercase())
+        {
+            c_type = cast.to_string();
         }
         if args.join_cols.contains(c_name) {
             join_cols_types.push((c_name.clone(), c_type));

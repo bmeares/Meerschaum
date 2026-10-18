@@ -30,7 +30,8 @@
 //! signature changed.
 
 use meerschaum_worker::manifest::{
-    Manifest, ManifestSource, ensure_manifest, manifest_path, rebuild_manifest, stale_plugins,
+    Manifest, ManifestSource, ensure_manifest_for, manifest_path, probe_entry_points,
+    rebuild_manifest_for, stale_plugins_for,
 };
 use meerschaum_worker::{PoolConfig, WorkerPool};
 use std::collections::{HashMap, HashSet};
@@ -226,7 +227,8 @@ impl Session {
         self.python_worker.store(on, Ordering::SeqCst);
     }
 
-    fn worker_enabled(&self) -> bool {
+    /// Whether this session may start the Python worker ([`Session::set_python_worker`]).
+    pub fn worker_enabled(&self) -> bool {
         self.python_worker.load(Ordering::SeqCst)
     }
 
@@ -348,14 +350,32 @@ impl Session {
         let manifest_file = manifest_path(&paths.root_dir);
         let previous = state.python.clone();
         let mut python_changed = state.merged.is_none();
+        // v4 finds pip-installed plugins whatever the plugins directory holds: a cached probe of
+        // the interpreter (a few `stat` calls) says whether any exist, so an empty tree with no
+        // entry point still starts no Python.
+        let entry_points = probe_entry_points(&pool, &manifest_file, force);
         let python = match previous.clone() {
-            Some(cached) if !force && !stale_plugins(&cached, &paths.plugins_dirs).0 => cached,
+            Some(cached)
+                if !force && !stale_plugins_for(&cached, &paths.plugins_dirs, &entry_points).0 =>
+            {
+                cached
+            }
             _ => {
                 let (manifest, source) = if force {
-                    self.block_on(rebuild_manifest(&pool, &manifest_file, &paths.plugins_dirs))
-                        .map(|manifest| (manifest, ManifestSource::Built))
+                    self.block_on(rebuild_manifest_for(
+                        &pool,
+                        &manifest_file,
+                        &paths.plugins_dirs,
+                        &entry_points,
+                    ))
+                    .map(|manifest| (manifest, ManifestSource::Built))
                 } else {
-                    self.block_on(ensure_manifest(&pool, &manifest_file, &paths.plugins_dirs))
+                    self.block_on(ensure_manifest_for(
+                        &pool,
+                        &manifest_file,
+                        &paths.plugins_dirs,
+                        &entry_points,
+                    ))
                 }
                 .map_err(|e| ActionError::new("WorkerError", e.to_string()))?;
                 // A cache another process rebuilt: this process's workers still hold the old

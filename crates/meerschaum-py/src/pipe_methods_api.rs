@@ -131,7 +131,7 @@ impl Opened {
 
 fn rust_sql(obj: &Bound<'_, PyAny>) -> PyResult<Arc<SqlConnector>> {
     Ok(obj
-        .downcast::<PySqlConnector>()
+        .cast::<PySqlConnector>()
         .map_err(|_| PyValueError::new_err("Expected a `_core.SqlConnector`."))?
         .get()
         .inner
@@ -149,7 +149,7 @@ fn columns_types_of(context: &Bound<'_, PyDict>) -> PyResult<Option<IndexMap<Str
     let Some(types) = context_item(context, "columns_types")? else {
         return Ok(None);
     };
-    let dict = types.downcast::<PyDict>()?;
+    let dict = types.cast::<PyDict>()?;
     let mut out = IndexMap::with_capacity(dict.len());
     for (k, v) in dict.iter() {
         out.insert(k.str()?.to_string(), v.str()?.to_string());
@@ -180,7 +180,7 @@ fn open(
     };
     let mut sources = HashMap::new();
     if let Some(connectors) = context_item(context, "connectors")? {
-        for (keys, conn) in connectors.downcast::<PyDict>()?.iter() {
+        for (keys, conn) in connectors.cast::<PyDict>()?.iter() {
             let keys = keys.str()?.to_string();
             let conn = rust_sql(&conn)?;
             sources.insert(facade::full_keys(&keys), conn.clone());
@@ -198,7 +198,7 @@ fn open(
         }
         _ => {
             let attributes = match context_item(context, "attributes")? {
-                Some(a) => attribute_maps(Some(a.downcast::<PyDict>()?))?,
+                Some(a) => attribute_maps(Some(a.cast::<PyDict>()?))?,
                 None => Vec::new(),
             };
             let need_python = !facade::is_native(&instance_keys)
@@ -866,7 +866,7 @@ pub fn pipe_enforce_dtypes<'py>(
     let override_dtypes = match dtypes.filter(|d| !d.is_none()) {
         Some(d) => {
             let mut map = IndexMap::new();
-            for (k, v) in d.downcast::<PyDict>()?.iter() {
+            for (k, v) in d.cast::<PyDict>()?.iter() {
                 map.insert(k.str()?.to_string(), v.str()?.to_string());
             }
             Some(map).filter(|m: &IndexMap<String, String>| !m.is_empty())
@@ -1161,7 +1161,7 @@ pub fn pipe_deduplicate<'py>(
 /// does); an exception is the `(False, traceback)` result v4 records.
 fn python_hook(hook: Py<PyAny>, kwargs: Py<PyDict>, debug: bool) -> ChunkHook {
     Arc::new(move |chunk: Frame| -> Result<HookOutcome, String> {
-        Python::with_gil(|py| -> PyResult<HookOutcome> {
+        Python::attach(|py| -> PyResult<HookOutcome> {
             let ctx = PyCtx::new(py)?;
             let df = frame_to_pandas(&ctx, &chunk, &out_spec(IndexMap::new()))?;
             let kw = kwargs.bind(py).copy()?;
@@ -1335,7 +1335,7 @@ fn with_kwargs(
     kwargs: Option<&Bound<'_, PyDict>>,
 ) -> PyResult<GetDataArgs> {
     args.sql_options.begin_default = begin
-        .and_then(|b| b.downcast::<pyo3::types::PyString>().ok())
+        .and_then(|b| b.cast::<pyo3::types::PyString>().ok())
         .is_some_and(|s| s.to_str().map(str::is_empty).unwrap_or(false));
     args.extra = kwargs_map(kwargs)?;
     let int = |key: &str| args.extra.get(key).and_then(Value::as_i64);

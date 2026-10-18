@@ -72,10 +72,8 @@ impl SqlConnector {
                         .as_deref()
                         .is_some_and(|existing| existing.eq_ignore_ascii_case(name))
                 });
-                if exists {
-                    if let Some(column) = sp.column(role) {
-                        queries.shift_remove(&column);
-                    }
+                if exists && let Some(column) = sp.column(role) {
+                    queries.shift_remove(&column);
                 }
             }
         }

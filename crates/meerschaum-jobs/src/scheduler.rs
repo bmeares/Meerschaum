@@ -130,12 +130,11 @@ impl RootScheduler {
         schedule: &str,
         now: Fire,
     ) -> Result<Option<Fire>, ScheduleError> {
-        if let Some(state) = self.state(name) {
-            if state.schedule == schedule {
-                if let Some(next) = state.next_fire.filter(|n| *n > now) {
-                    return Ok(Some(next));
-                }
-            }
+        if let Some(state) = self.state(name)
+            && state.schedule == schedule
+            && let Some(next) = state.next_fire.filter(|n| *n > now)
+        {
+            return Ok(Some(next));
         }
         let mut trigger = parse_schedule(schedule, now)?;
         Ok(trigger.next_after(now))

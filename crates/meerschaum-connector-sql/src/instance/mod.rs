@@ -408,6 +408,42 @@ impl SqlConnector {
         self.internal_schema.as_deref()
     }
 
+    /// The suffix of this instance's engine-state targets ([`engine_state_namespace`] over
+    /// `self.schema`). Meaningful once the schema is known (`require_schema`).
+    pub fn engine_state_namespace(&self) -> Option<String> {
+        engine_state_namespace(self.flavor, self.schema())
+    }
+
+    /// The Syncing Engine's state pipe `mrsm:<metric_key>` on this instance (§5.8): on schema
+    /// flavors in the internal schema (`_mrsm_internal`), with the target namespaced by the
+    /// instance schema ([`engine_state_namespace`]) so that instances sharing a database keep
+    /// disjoint state; on schema-less flavors beside the instance tables, where v4 also puts
+    /// its temporary tables. `None` for a metric that is not engine state. Built from the
+    /// schema in effect: the `InstanceConnector` method asks the database for it first.
+    pub fn engine_state_pipe(&self, instance_keys: &str, metric_key: &str) -> Option<Pipe> {
+        let mut parameters = meerschaum_connector::pipe_ops::engine_state_parameters(metric_key)?;
+        let internal = self.internal_schema().filter(|_| !self.flavor.no_schema());
+        if let Some(internal) = internal {
+            let target = match self.engine_state_namespace() {
+                Some(ns) => format!("mrsm_{metric_key}_{ns}"),
+                None => format!("mrsm_{metric_key}"),
+            };
+            parameters.insert(
+                "schema".into(),
+                meerschaum_core::Value::Str(internal.into()),
+            );
+            parameters.insert("target".into(), meerschaum_core::Value::Str(target));
+        }
+        Pipe::builder("mrsm", metric_key)
+            .instance(instance_keys)
+            .parameters(parameters)
+            .kwarg("temporary", true)
+            .kwarg("static", true)
+            .kwarg("cache", false)
+            .build()
+            .ok()
+    }
+
     /// `self.database`.
     pub fn database(&self) -> Option<&str> {
         self.spec.database.as_deref()
@@ -856,5 +892,212 @@ async fn query_default_schema(driver: &SqlDriver, flavor: Flavor) -> Option<Stri
     match driver.value(default_schema_query(flavor)?).await {
         Ok(Some(SqlValue::Text(s))) => Some(s),
         _ => None,
+    }
+}
+
+/// The longest instance schema used verbatim in an engine-state target; longer or non-plain
+/// schemas get a hashed suffix of exactly one character more, so the two forms never meet.
+const ENGINE_NAMESPACE_VERBATIM_MAX: usize = 15;
+
+/// The suffix that namespaces the Syncing Engine's state targets in the shared internal schema
+/// (`_mrsm_internal.mrsm_engine_<kind>_<suffix>`), so two instances on one database whose
+/// connector schemas differ never share state (§5.8).
+///
+/// - `None` (no suffix) on schema-less flavors (the targets stay beside the instance tables)
+///   and for no schema or the flavor's default schema (`public`, `dbo`).
+/// - The schema itself when it is a plain identifier (`[A-Za-z0-9_]`) of at most 15
+///   characters.
+/// - Otherwise exactly 16 characters: the schema's first (at most 7) characters, lowercased,
+///   with anything but ASCII letters and digits as `_`, then `_`, then the leading hex digits
+///   of the schema's SHA-256 (at least 8).
+///
+/// The longest target is then `mrsm_engine_cursors_` + 16 = 36 characters, and every name
+/// derived from it (`IX_<target>_<columns>` indices, `<target>_p_<bound>` partitions,
+/// `pf_`/`ps_` partition functions) stays under PostgreSQL's 63-byte limit, so v4's lossy
+/// `truncate_item_name` never applies to them.
+pub fn engine_state_namespace(flavor: Flavor, schema: Option<&str>) -> Option<String> {
+    if flavor.no_schema() {
+        return None;
+    }
+    let schema = schema.filter(|s| !s.is_empty())?;
+    if Some(schema) == flavor.default_schema() {
+        return None;
+    }
+    let plain = schema
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '_');
+    if plain && schema.len() <= ENGINE_NAMESPACE_VERBATIM_MAX {
+        return Some(schema.to_string());
+    }
+    use sha2::{Digest, Sha256};
+    let prefix: String = schema
+        .chars()
+        .take(7)
+        .map(|c| {
+            if c.is_ascii_alphanumeric() {
+                c.to_ascii_lowercase()
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    let digest = hex::encode(Sha256::digest(schema.as_bytes()));
+    let hex_len = ENGINE_NAMESPACE_VERBATIM_MAX - prefix.len();
+    Some(format!("{prefix}_{}", &digest[..hex_len]))
+}
+
+#[cfg(test)]
+mod engine_state_tests {
+    use super::*;
+
+    const KINDS: [&str; 6] = [
+        "engine_state",
+        "engine_ledger",
+        "engine_cursors",
+        "engine_runs",
+        "engine_nodes",
+        "engine_events",
+    ];
+
+    #[test]
+    fn default_and_schemaless_have_no_suffix() {
+        for flavor in [
+            Flavor::Postgresql,
+            Flavor::Postgis,
+            Flavor::Timescaledb,
+            Flavor::TimescaledbHa,
+            Flavor::Citus,
+            Flavor::Cockroachdb,
+        ] {
+            assert_eq!(engine_state_namespace(flavor, Some("public")), None);
+            assert_eq!(engine_state_namespace(flavor, None), None);
+            assert_eq!(engine_state_namespace(flavor, Some("")), None);
+        }
+        assert_eq!(engine_state_namespace(Flavor::Mssql, Some("dbo")), None);
+        // `public` is only PostgreSQL's default.
+        assert_eq!(
+            engine_state_namespace(Flavor::Mssql, Some("public")).as_deref(),
+            Some("public")
+        );
+        for flavor in [
+            Flavor::Sqlite,
+            Flavor::Geopackage,
+            Flavor::Mysql,
+            Flavor::Mariadb,
+            Flavor::Duckdb,
+            Flavor::Oracle,
+        ] {
+            assert_eq!(engine_state_namespace(flavor, Some("analytics")), None);
+        }
+    }
+
+    #[test]
+    fn plain_short_schemas_are_verbatim() {
+        let f = Flavor::Postgresql;
+        assert_eq!(
+            engine_state_namespace(f, Some("analytics")).as_deref(),
+            Some("analytics")
+        );
+        assert_eq!(
+            engine_state_namespace(f, Some("Mixed_Case_15ch")).as_deref(),
+            Some("Mixed_Case_15ch")
+        );
+        assert_eq!(
+            engine_state_namespace(f, Some("_mrsm_internal")).as_deref(),
+            Some("_mrsm_internal")
+        );
+    }
+
+    #[test]
+    fn long_or_odd_schemas_are_hashed_to_sixteen_characters() {
+        let f = Flavor::Postgresql;
+        let cases = [
+            "sixteen_chars_ab",
+            "a_much_longer_schema_name_than_fits",
+            "a_much_longer_schema_name_than_fitz",
+            "a-b",
+            "Spaced Schema",
+            "ümlaut",
+        ];
+        let mut seen = std::collections::HashSet::new();
+        for s in cases {
+            let ns = engine_state_namespace(f, Some(s)).unwrap();
+            assert_eq!(ns.len(), ENGINE_NAMESPACE_VERBATIM_MAX + 1, "{s} -> {ns}");
+            assert!(
+                ns.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'),
+                "{ns}"
+            );
+            // Deterministic.
+            assert_eq!(engine_state_namespace(f, Some(s)).unwrap(), ns);
+            assert!(seen.insert(ns), "{s} collides");
+        }
+        assert!(
+            engine_state_namespace(f, Some("a-b"))
+                .unwrap()
+                .starts_with("a_b_")
+        );
+        assert!(
+            engine_state_namespace(f, Some("a_much_longer_schema_name_than_fits"))
+                .unwrap()
+                .starts_with("a_much__")
+        );
+    }
+
+    /// Every target and every index and partition name derived from it stays under the
+    /// flavor's limit, so `truncate_item_name` (lossy) never shortens them.
+    #[test]
+    fn derived_names_fit_without_truncation() {
+        let schemas = [
+            "abcdefghijklmno",
+            "a_much_longer_schema_name_than_fits_any_identifier_limit_xxxxxxxxxxxx",
+        ];
+        for flavor in [Flavor::Postgresql, Flavor::Timescaledb, Flavor::Mssql] {
+            let limit = flavor.max_name_len();
+            for schema in schemas {
+                let ns = engine_state_namespace(flavor, Some(schema)).unwrap();
+                for kind in KINDS {
+                    let target = format!("mrsm_{kind}_{ns}");
+                    let mut params =
+                        meerschaum_connector::pipe_ops::engine_state_parameters(kind).unwrap();
+                    params.insert("target".into(), meerschaum_core::Value::Str(target.clone()));
+                    params.insert(
+                        "schema".into(),
+                        meerschaum_core::Value::Str("_mrsm_internal".into()),
+                    );
+                    let pipe = Pipe::builder("mrsm", kind)
+                        .instance("sql:x")
+                        .parameters(params)
+                        .kwarg("temporary", true)
+                        .kwarg("static", true)
+                        .build()
+                        .unwrap();
+                    let sp = SqlPipe::new(pipe, flavor).unwrap();
+                    let ctx = ConnectorCtx::with_schema(flavor, Some("_mrsm_internal"));
+                    let mut names: Vec<String> =
+                        crate::queries::index::get_pipe_index_names(&ctx, &sp)
+                            .into_values()
+                            .collect();
+                    // The unique index and constraint of an upsert pipe.
+                    let cols = sp
+                        .pipe()
+                        .parameters()
+                        .get("columns")
+                        .map(|c| c.to_map().values().map(|v| v.py_str()).collect::<Vec<_>>())
+                        .unwrap_or_default();
+                    names.push(format!("IX_{target}_{}", cols.join("_")));
+                    names.push(format!("UQ_{target}_{}", cols.join("_")));
+                    names.push(format!("IX_{target}_unique"));
+                    names.push(format!("{target}_p_20260101000000"));
+                    names.push(format!("pf_{target}"));
+                    names.push(format!("ps_{target}"));
+                    names.push(target.clone());
+                    for name in names {
+                        assert!(name.len() < limit, "{name} ({}) >= {limit}", name.len());
+                        assert!(name.len() <= 63, "{name}");
+                        assert_eq!(crate::ident::truncate_item_name(&name, flavor), name);
+                    }
+                }
+            }
+        }
     }
 }

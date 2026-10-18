@@ -12,7 +12,7 @@ homepage.workspace = true
 documentation = "https://docs.rs/meerschaum-web"
 keywords = ["meerschaum", "dashboard", "htmx", "askama", "etl"]
 categories = ["web-programming", "visualization"]
-include = ["src/**/*", "assets/**/*", "templates/**/*", "/LICENSE", "/NOTICE"]
+include = ["src/**/*", "assets/**/*", "templates/**/*", "build.rs", "/LICENSE", "/NOTICE"]
 
 [dependencies]
 meerschaum-server = { workspace = true }
@@ -27,11 +27,18 @@ chrono = { workspace = true }
 uuid = { workspace = true }
 tokio = { workspace = true }
 axum = "0.8"
-askama = "0.14"
+askama = "0.16"
 async-trait = "0.1"
 tower = { version = "0.5", features = ["util"] }
 percent-encoding = "2"
 futures-util = "0.3"
+# The vendored console assets are embedded gzip-compressed (`build.rs`) and inflated for the
+# rare client that does not accept gzip.
+flate2 = "1"
+
+[build-dependencies]
+flate2 = "1"
+sha2 = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"

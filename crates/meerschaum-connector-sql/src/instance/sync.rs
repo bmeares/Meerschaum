@@ -125,8 +125,10 @@ fn current_timestamp(unit: meerschaum_core::dtypes::PrecisionUnit, as_int: bool)
     ))
 }
 
-/// The longest internal key value (characters) MySQL / MariaDB / MSSQL can index: internal
-/// (`mrsm`) string keys are stored as `VARCHAR(255)` / `NVARCHAR(255)`.
+/// The longest internal key value (characters) MySQL / MariaDB / MSSQL / Oracle can index:
+/// internal (`mrsm`) string keys are stored as `VARCHAR(255)` / `NVARCHAR(255)` / `NVARCHAR2(255)`.
+/// (Oracle bounds an index key to about 6398 bytes at the default 8 KB block, and a unique key over
+/// two `NVARCHAR2(2000)` columns is 8000 bytes: `ORA-01450`.)
 pub const INTERNAL_KEY_MAX_CHARS: usize = 255;
 
 /// A failure message when an internal pipe's key column holds a string longer than
@@ -134,14 +136,17 @@ pub const INTERNAL_KEY_MAX_CHARS: usize = 255;
 /// otherwise reject or silently truncate it).
 fn internal_key_length_error(sp: &SqlPipe, flavor: Flavor, df: &Frame) -> Option<String> {
     if sp.pipe().connector_keys() != "mrsm"
-        || !matches!(flavor, Flavor::Mysql | Flavor::Mariadb | Flavor::Mssql)
+        || !matches!(
+            flavor,
+            Flavor::Mysql | Flavor::Mariadb | Flavor::Mssql | Flavor::Oracle
+        )
     {
         return None;
     }
     let limit = |v: &KValue| -> usize {
         match flavor {
-            // NVARCHAR counts UTF-16 code units.
-            Flavor::Mssql => v.py_str().encode_utf16().count(),
+            // NVARCHAR / NVARCHAR2 count UTF-16 code units.
+            Flavor::Mssql | Flavor::Oracle => v.py_str().encode_utf16().count(),
             _ => v.py_str().chars().count(),
         }
     };
@@ -310,14 +315,14 @@ impl SqlConnector {
                 Ok(r) => r,
                 Err(e) => SyncResult::new(false, e.to_string()),
             };
-            if !result.success {
-                if let Ok(sp) = self.sql_pipe(pipe) {
-                    self.state
-                        .lock()
-                        .expect("state")
-                        .internal_pipe_states
-                        .remove(&self.pipe_table_name(&sp));
-                }
+            if !result.success
+                && let Ok(sp) = self.sql_pipe(pipe)
+            {
+                self.state
+                    .lock()
+                    .expect("state")
+                    .internal_pipe_states
+                    .remove(&self.pipe_table_name(&sp));
             }
             result.duration = Some(start.elapsed());
             result
@@ -471,24 +476,22 @@ impl SqlConnector {
                 .as_ref()
                 .is_some_and(|pk| unseen_df.contains(pk))
             && pk_has_values(&unseen_df);
-        if autoincrement {
-            if let Some(pk) = &primary_key {
-                for f in [
-                    Some(&mut unseen_df),
-                    update_df.as_mut(),
-                    Some(&mut delta_df),
-                ]
-                .into_iter()
-                .flatten()
+        if autoincrement && let Some(pk) = &primary_key {
+            for f in [
+                Some(&mut unseen_df),
+                update_df.as_mut(),
+                Some(&mut delta_df),
+            ]
+            .into_iter()
+            .flatten()
+            {
+                if f.contains(pk)
+                    && !f
+                        .data(pk)
+                        .map(|d| d.is_null_mask().iter().any(|n| !n))
+                        .unwrap_or(false)
                 {
-                    if f.contains(pk)
-                        && !f
-                            .data(pk)
-                            .map(|d| d.is_null_mask().iter().any(|n| !n))
-                            .unwrap_or(false)
-                    {
-                        f.drop(pk);
-                    }
+                    f.drop(pk);
                 }
             }
         }
@@ -552,21 +555,14 @@ impl SqlConnector {
             }
         }
 
-        if autoincrement_needs_reset {
-            if let Some(pk) = &primary_key {
-                let max_id_query = get_max_id_query(&sp.target, pk, flavor, schema.as_deref());
-                let max_id = self.value(&max_id_query).await.and_then(|v| v.as_i64());
-                let queries = get_reset_autoincrement_queries(
-                    &sp.target,
-                    pk,
-                    flavor,
-                    schema.as_deref(),
-                    max_id,
-                );
-                for r in self.exec_queries(&queries, false, true).await {
-                    if r.is_none() {
-                        tracing::warn!("Could not reset auto-incrementing primary key for {pipe}.");
-                    }
+        if autoincrement_needs_reset && let Some(pk) = &primary_key {
+            let max_id_query = get_max_id_query(&sp.target, pk, flavor, schema.as_deref());
+            let max_id = self.value(&max_id_query).await.and_then(|v| v.as_i64());
+            let queries =
+                get_reset_autoincrement_queries(&sp.target, pk, flavor, schema.as_deref(), max_id);
+            for r in self.exec_queries(&queries, false, true).await {
+                if r.is_none() {
+                    tracing::warn!("Could not reset auto-incrementing primary key for {pipe}.");
                 }
             }
         }
@@ -686,12 +682,11 @@ impl SqlConnector {
             .column("primary")
             .map(|k| vec![k])
             .unwrap_or_else(|| columns_map(sp).into_values().collect());
-        if self.should_partition(sp) || self.flavor.is_timescaledb() {
-            if let Some(dt) = sp.column("datetime") {
-                if !keys.contains(&dt) {
-                    keys.push(dt);
-                }
-            }
+        if (self.should_partition(sp) || self.flavor.is_timescaledb())
+            && let Some(dt) = sp.column("datetime")
+            && !keys.contains(&dt)
+        {
+            keys.push(dt);
         }
         let mut unique_keys = std::collections::HashSet::new();
         keys.retain(|key| unique_keys.insert(key.clone()));
@@ -766,18 +761,47 @@ impl SqlConnector {
         let mut params = Vec::new();
         let mut values = Vec::new();
         let mut selects = Vec::new();
+        let encoding = |i: usize| ColumnEncoding {
+            name: cols[i].clone(),
+            numeric: state
+                .cols_types
+                .get(&cols[i])
+                .and_then(|t| numeric_precision_scale(t))
+                .map(|(p, s)| (Some(p), Some(s))),
+        };
+        // Oracle's `UNION ALL` branches must agree on every column's datatype, and a bound `NULL`
+        // is a typeless `VARCHAR2` (ORA-01790 next to a bound timestamp or number): a `NULL` cell
+        // of a column that has typed cells in this batch is written as `CAST(NULL AS <type>)`.
+        let oracle_null_types: Vec<Option<&'static str>> = if f == Flavor::Oracle {
+            (0..cols.len())
+                .map(|i| {
+                    let enc = encoding(i);
+                    columns[i]
+                        .iter()
+                        .find_map(|v| match encode_param(v, f, &enc) {
+                            SqlParam::Bool(_) | SqlParam::Int(_) => Some("NUMBER"),
+                            SqlParam::Float(_) => Some("BINARY_DOUBLE"),
+                            SqlParam::Text(_) | SqlParam::Json(_) => Some("VARCHAR2(4000)"),
+                            SqlParam::Timestamp(_) => Some("TIMESTAMP"),
+                            SqlParam::TimestampTz(_) => Some("TIMESTAMP WITH TIME ZONE"),
+                            SqlParam::Date(_) => Some("DATE"),
+                            SqlParam::Bytes(_) => Some("RAW(2000)"),
+                            SqlParam::Null => None,
+                        })
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
         for (row, _) in columns[0].iter().enumerate() {
             let mut cells = Vec::new();
             for (i, col) in cols.iter().enumerate() {
-                let enc = ColumnEncoding {
-                    name: col.clone(),
-                    numeric: state
-                        .cols_types
-                        .get(col)
-                        .and_then(|t| numeric_precision_scale(t))
-                        .map(|(p, s)| (Some(p), Some(s))),
-                };
+                let enc = encoding(i);
                 let param = encode_param(&columns[i][row], f, &enc);
+                if let (SqlParam::Null, Some(Some(typ))) = (&param, oracle_null_types.get(i)) {
+                    cells.push(format!("CAST(NULL AS {typ})"));
+                    continue;
+                }
                 cells.push(crate::driver::params::typed_placeholder(
                     f,
                     params.len() + 1,
@@ -1142,31 +1166,58 @@ impl SqlConnector {
             || primary_key
                 .as_ref()
                 .is_some_and(|pk| !new_dtypes.contains_key(pk));
-        if autoincrement {
-            if let Some(pk) = &primary_key {
-                new_dtypes.shift_remove(pk);
-            }
+        if autoincrement && let Some(pk) = &primary_key {
+            new_dtypes.shift_remove(pk);
         }
         // Internal state keys must be indexable on engines which disallow TEXT keys.
         // Keep the public pipe dtype unchanged; only the physical key type is bounded.
         let internal_key_types = sp.pipe().connector_keys() == "mrsm"
-            && matches!(flavor, Flavor::Mysql | Flavor::Mariadb | Flavor::Mssql);
+            && matches!(
+                flavor,
+                Flavor::Mysql | Flavor::Mariadb | Flavor::Mssql | Flavor::Oracle
+            );
         if internal_key_types {
             let keys = columns_map(sp);
             for (column, dtype) in &mut new_dtypes {
                 let db_type = get_db_type_from_pd_type(dtype, Some(flavor));
                 *dtype = if keys.values().any(|key| key == column)
-                    && matches!(db_type.as_str(), "TEXT" | "NVARCHAR(MAX)" | "VARCHAR(MAX)")
-                {
-                    if flavor == Flavor::Mssql {
-                        "NVARCHAR(255)"
-                    } else {
-                        "VARCHAR(255)"
+                    && matches!(
+                        db_type.as_str(),
+                        "TEXT" | "NVARCHAR(MAX)" | "VARCHAR(MAX)" | "NVARCHAR2(2000)"
+                    ) {
+                    match flavor {
+                        Flavor::Mssql => "NVARCHAR(255)",
+                        Flavor::Oracle => "NVARCHAR2(255)",
+                        _ => "VARCHAR(255)",
                     }
                     .into()
                 } else {
                     db_type
                 };
+            }
+            // The Syncing Engine's state tables (new in v5, no v4 layout to keep) hold free text
+            // (planner reasons, sync messages): declare utf8mb4 so a database whose default
+            // charset is not (MySQL 5.7 defaults to latin1) still records every row.
+            if matches!(flavor, Flavor::Mysql | Flavor::Mariadb)
+                && meerschaum_connector::pipe_ops::engine_state_parameters(sp.pipe().metric_key())
+                    .is_some()
+            {
+                for dtype in new_dtypes.values_mut() {
+                    let upper = dtype.to_ascii_uppercase();
+                    let textual = [
+                        "TEXT",
+                        "TINYTEXT",
+                        "MEDIUMTEXT",
+                        "LONGTEXT",
+                        "VARCHAR",
+                        "CHAR",
+                    ]
+                    .iter()
+                    .any(|t| upper == *t || upper.starts_with(&format!("{t}(")));
+                    if textual {
+                        dtype.push_str(" CHARACTER SET utf8mb4 COLLATE utf8mb4_bin");
+                    }
+                }
             }
             primary_key_db_type = primary_key
                 .as_ref()
@@ -1519,10 +1570,11 @@ impl SqlConnector {
                 || are_dtypes_equal("bool", t)
         };
         for bool_col in pipe_bool_cols {
-            if let Some((db, dft)) = altered_cols.get(bool_col) {
-                if bool_compat(db) && bool_compat(dft) {
-                    ignore.push(bool_col.clone());
-                }
+            if let Some((db, dft)) = altered_cols.get(bool_col)
+                && bool_compat(db)
+                && bool_compat(dft)
+            {
+                ignore.push(bool_col.clone());
             }
         }
         for c in &ignore {
@@ -1607,6 +1659,49 @@ impl SqlConnector {
                 vec![rename_query, create_query, insert_query, drop_query],
                 new_dtypes,
             );
+        }
+
+        if flavor == Flavor::Oracle {
+            // `_pipes.py:3843`: Oracle cannot change a populated column's type in place (and has
+            // no `TYPE` clause), so each altered column goes through a temporary column.
+            let mut queries = Vec::new();
+            let temp = |c: &str| q(&format!("{c}_temp"));
+            for (col, typ) in &altered_types {
+                queries.push(format!(
+                    "ALTER TABLE {target_name}\nADD {} {typ}",
+                    temp(col)
+                ));
+            }
+            for col in altered_types.keys() {
+                queries.push(format!(
+                    "UPDATE {target_name}\nSET {} = {}",
+                    temp(col),
+                    q(col)
+                ));
+            }
+            for col in altered_types.keys() {
+                queries.push(format!("UPDATE {target_name}\nSET {} = NULL", q(col)));
+            }
+            for (col, typ) in &altered_types {
+                queries.push(format!(
+                    "ALTER TABLE {target_name}\nMODIFY {} {typ}",
+                    q(col)
+                ));
+            }
+            for col in altered_types.keys() {
+                queries.push(format!(
+                    "UPDATE {target_name}\nSET {} = {}",
+                    q(col),
+                    temp(col)
+                ));
+            }
+            for col in altered_types.keys() {
+                queries.push(format!(
+                    "ALTER TABLE {target_name}\nDROP COLUMN {}",
+                    temp(col)
+                ));
+            }
+            return (queries, new_dtypes);
         }
 
         let mut queries = Vec::new();
@@ -1761,8 +1856,9 @@ impl SqlConnector {
             };
         }
 
-        if flavor == Flavor::Mssql && self.settings.bulk_insert {
-            if let Some(statements) = mssql_insert_json_statements(
+        if flavor == Flavor::Mssql
+            && self.settings.bulk_insert
+            && let Some(statements) = mssql_insert_json_statements(
                 &table_name,
                 &cols,
                 &columns,
@@ -1774,11 +1870,11 @@ impl SqlConnector {
                     Some(-1) => Some(self.settings.chunksize),
                     other => other,
                 },
-            ) {
-                return self
-                    .exec_insert_statements(statements, &table_name, identity_insert)
-                    .await;
-            }
+            )
+        {
+            return self
+                .exec_insert_statements(statements, &table_name, identity_insert)
+                .await;
         }
 
         let default_chunksize = self.settings.chunksize;
@@ -1786,10 +1882,10 @@ impl SqlConnector {
             Some(-1) => Some(default_chunksize),
             other => other,
         };
-        if let (Some(c), Some(max)) = (chunk, max_chunks(flavor)) {
-            if c > max {
-                chunk = Some(max);
-            }
+        if let (Some(c), Some(max)) = (chunk, max_chunks(flavor))
+            && c > max
+        {
+            chunk = Some(max);
         }
         let max_rows_per_stmt = (max_bind_params(flavor) / cols.len()).max(1);
         let rows_per_stmt = if flavor == Flavor::Oracle {
@@ -1887,12 +1983,10 @@ fn mssql_insert_json_statements(
             let mut pd = get_pd_type_from_db_type(typ, true);
             if cols.contains(col)
                 && (typ.to_lowercase().contains("numeric") || numeric_cols.contains(col))
-            {
-                if let Some((p, s)) =
+                && let Some((p, s)) =
                     numeric_precision_scale(typ).filter(|(p, s)| *p != 0 && *s != 0)
-                {
-                    pd = format!("numeric[{p},{s}]");
-                }
+            {
+                pd = format!("numeric[{p},{s}]");
             }
             (col.clone(), get_db_type_from_pd_type(&pd, Some(flavor)))
         })

@@ -39,6 +39,30 @@ static HANDLER: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::n
 
 static EMBEDDED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
+/// Whether [`install_stop_handler`] turned SIGINT / SIGTERM into stop requests in this process.
+pub fn stop_handler_installed() -> bool {
+    HANDLER.load(Ordering::SeqCst)
+}
+
+static OWN_SIGNALS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Whether this process embeds the dispatcher (the Python extension, outside `mrsm`'s own run).
+pub fn is_embedded() -> bool {
+    EMBEDDED.load(Ordering::SeqCst)
+}
+
+/// The running action handles SIGINT / SIGTERM itself (the servers: `start api` / `start mcp`
+/// wait on them for a graceful shutdown), so nothing else may take them, the progress spinner's
+/// guard included.
+pub fn own_signals() {
+    OWN_SIGNALS.store(true, Ordering::SeqCst);
+}
+
+/// Whether the running action handles the signals itself (see [`own_signals`]).
+pub fn signals_owned() -> bool {
+    OWN_SIGNALS.load(Ordering::SeqCst)
+}
+
 /// Mark this process as embedding the dispatcher (the Python extension). The process-wide
 /// SIGINT / SIGTERM handler of [`install_stop_handler`], which ends the process on a second
 /// signal, belongs to the `mrsm` binary: an embedding host is never given one, and sets
@@ -119,6 +143,7 @@ pub fn install_stop_handler(session: &super::Session) {
                 }
                 flag.store(true, Ordering::SeqCst);
                 if SIGNALS.fetch_add(1, Ordering::SeqCst) >= 1 {
+                    crate::format::progress::abandon();
                     std::process::exit(130);
                 }
             }
@@ -131,6 +156,7 @@ pub fn install_stop_handler(session: &super::Session) {
                 }
                 flag.store(true, Ordering::SeqCst);
                 if SIGNALS.fetch_add(1, Ordering::SeqCst) >= 1 {
+                    crate::format::progress::abandon();
                     std::process::exit(130);
                 }
             }

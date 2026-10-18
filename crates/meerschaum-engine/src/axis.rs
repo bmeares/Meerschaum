@@ -425,12 +425,11 @@ pub fn get_chunk_bounds(
     if last.0 == last.1 {
         bounds.pop();
     }
-    if align {
-        if let Some(first) = bounds.first_mut() {
-            if first.0 < begin {
-                first.0 = begin;
-            }
-        }
+    if align
+        && let Some(first) = bounds.first_mut()
+        && first.0 < begin
+    {
+        first.0 = begin;
     }
     let mut out: Vec<ChunkBound> = bounds
         .into_iter()

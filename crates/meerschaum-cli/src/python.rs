@@ -25,18 +25,58 @@ pub fn refresh_manifest(rt: &mut Runtime<'_>) -> Result<Arc<Manifest>, ActionErr
     session.refresh_manifest(rt.config())
 }
 
-/// Resolve plugin actions by the longest matching underscore-separated name.
+/// The plugin action `words` name, resolved the way v4's `get_action(action)` does (the
+/// action list is the positional words before the first flag):
+///
+/// - one word: the action with exactly that name, underscores included (`foo_bar`);
+/// - several words: they are joined with `_` and every action whose name contains `_` and is
+///   a prefix of the joined string is a candidate (the prefix need not end at a word); the
+///   candidate leaving the fewest characters unmatched wins, before any subaction;
+/// - otherwise the action named by the first word, whose subaction the next word may name.
+///
+/// `names` are the candidate action names. Core actions have no `_` in their names, so they
+/// never compete in the second rule. The worker repeats the resolution with v4's own code;
+/// this only decides whether a plugin owns the words.
+pub fn resolve_action<'a>(
+    words: &[String],
+    names: impl IntoIterator<Item = &'a str>,
+) -> Option<&'a str> {
+    if words.iter().all(String::is_empty) {
+        return None;
+    }
+    let names: Vec<&str> = names.into_iter().collect();
+    if words.len() == 1 {
+        return names.iter().copied().find(|name| *name == words[0]);
+    }
+    let joined = words.join("_");
+    // PARITY: v4 sorts `(len(leftovers), function)` tuples, which raises `TypeError` on a
+    // length tie; the first minimal candidate is used here.
+    let mut best: Option<(usize, &str)> = None;
+    for name in names.iter().copied().filter(|name| name.contains('_')) {
+        if joined.starts_with(name) {
+            let leftovers = joined.replace(name, "").chars().count();
+            if best.is_none_or(|(len, _)| leftovers < len) {
+                best = Some((leftovers, name));
+            }
+        }
+    }
+    if let Some((_, name)) = best {
+        return Some(name);
+    }
+    names.iter().copied().find(|name| *name == words[0])
+}
+
+/// Resolve plugin actions as v4's `get_action` does ([`resolve_action`]).
 pub fn action_name(words: &[String], manifest: &Manifest) -> Option<String> {
-    manifest
-        .plugins
-        .values()
-        .flat_map(|p| &p.actions)
-        .filter(|a| {
-            let parts: Vec<_> = a.name.split('_').collect();
-            words.len() >= parts.len() && words.iter().zip(parts).all(|(word, part)| word == part)
-        })
-        .max_by_key(|a| a.name.len())
-        .map(|a| a.name.clone())
+    resolve_action(
+        words,
+        manifest
+            .plugins
+            .values()
+            .flat_map(|p| &p.actions)
+            .map(|a| a.name.as_str()),
+    )
+    .map(str::to_owned)
 }
 
 /// Plugin sysargs are parsed by the worker so `add_plugin_argument` retains Python semantics.
@@ -327,6 +367,10 @@ fn unused_defaults(
 ) -> Option<Vec<(String, crate::value::PyValue)>> {
     let mut defaults = Vec::new();
     for argument in arguments {
+        // PARITY: `parse_arguments` pops every value that `is False` and every `None`, so an
+        // argument that was not given is absent from the keyword arguments (a plugin sees
+        // `kwargs.get('flag')` as `None`, not `False`), and the string `'None'` becomes `None`
+        // (kept, `none_args_keep`).
         let default = &argument.default;
         let converted = default.as_str().is_some_and(|text| {
             text == "==SUPPRESS==" || argument.type_name.as_deref().is_some_and(|t| t != "str")
@@ -347,10 +391,12 @@ fn unused_defaults(
         if mentioned {
             return None;
         }
-        defaults.push((
-            argument.dest.clone()?,
-            crate::native_plugins::json_to_py(default),
-        ));
+        let dest = argument.dest.clone()?;
+        if let Some(value) =
+            crate::native_plugins::v4_argument_value(crate::native_plugins::json_to_py(default))
+        {
+            defaults.push((dest, value));
+        }
     }
     Some(defaults)
 }
@@ -406,13 +452,68 @@ mod tests {
         let arguments = [&level, &loud, &none];
         let defaults = unused_defaults(&arguments, &words(&["show", "pipes", "-c", "sql:main"]))
             .expect("fast path");
+        // v4 pops `False` and `None`: a flag that was not given is absent.
+        assert_eq!(defaults, vec![("zz_level".to_string(), PyValue::Int(3))]);
+    }
+
+    #[test]
+    fn defaults_follow_v4s_parse_arguments() {
+        let on = argument("--zz-on", "_StoreTrueAction", serde_json::json!(true));
+        let string_none = argument("--zz-none", "_StoreAction", serde_json::json!("None"));
+        let empty = argument("--zz-empty", "_StoreAction", serde_json::json!(""));
+        let zero = argument("--zz-zero", "_StoreAction", serde_json::json!(0));
+        let list = argument("--zz-list", "_StoreAction", serde_json::json!([]));
+        let off = argument("--zz-off", "_StoreFalseAction", serde_json::json!(false));
+        let arguments = [&on, &string_none, &empty, &zero, &list, &off];
+        let defaults = unused_defaults(&arguments, &words(&["show"])).expect("fast path");
         assert_eq!(
             defaults,
             vec![
-                ("zz_level".to_string(), PyValue::Int(3)),
-                ("zz_loud".to_string(), PyValue::Bool(false)),
-                ("zz_name".to_string(), PyValue::None),
+                ("zz_on".to_string(), PyValue::Bool(true)),
+                ("zz_none".to_string(), PyValue::None),
+                ("zz_empty".to_string(), PyValue::Str(String::new())),
+                ("zz_zero".to_string(), PyValue::Int(0)),
+                ("zz_list".to_string(), PyValue::List(vec![])),
             ]
+        );
+    }
+
+    fn names<'a>(list: &[&'a str]) -> Vec<&'a str> {
+        list.to_vec()
+    }
+
+    #[test]
+    fn actions_resolve_like_v4s_get_action() {
+        let all = names(&["w17bx_hello", "w17bx", "show_w17b", "plain"]);
+        let resolve = |input: &[&str]| resolve_action(&words(input), all.iter().copied());
+        // One word: the exact name, underscores included.
+        assert_eq!(resolve(&["w17bx_hello"]), Some("w17bx_hello"));
+        assert_eq!(resolve(&["w17bx"]), Some("w17bx"));
+        assert_eq!(resolve(&["w17bx_hellofoo"]), None);
+        assert_eq!(resolve(&["hello"]), None);
+        // Several words: joined, prefix match, before any subaction.
+        assert_eq!(resolve(&["w17bx", "hello"]), Some("w17bx_hello"));
+        assert_eq!(resolve(&["w17bx_hello", "extra"]), Some("w17bx_hello"));
+        assert_eq!(resolve(&["w17bx", "hellofoo"]), Some("w17bx_hello"));
+        assert_eq!(resolve(&["w17bx_hello_more", "x"]), Some("w17bx_hello"));
+        assert_eq!(resolve(&["show", "w17b"]), Some("show_w17b"));
+        // The first word names an action: it owns the rest (subactions, arguments).
+        assert_eq!(resolve(&["w17bx", "foo"]), Some("w17bx"));
+        assert_eq!(resolve(&["plain", "anything", "else"]), Some("plain"));
+        // Nobody claims it: core actions and shell commands.
+        assert_eq!(resolve(&["show", "pipes"]), None);
+        assert_eq!(resolve(&["ls", "-l"]), None);
+        assert_eq!(resolve(&[]), None);
+        assert_eq!(resolve(&[""]), None);
+        // The candidate leaving the fewest characters unmatched wins.
+        let nested = names(&["a_b", "a_b_c"]);
+        assert_eq!(
+            resolve_action(&words(&["a", "b", "c"]), nested.iter().copied()),
+            Some("a_b_c")
+        );
+        assert_eq!(
+            resolve_action(&words(&["a_b", "d"]), nested.iter().copied()),
+            Some("a_b")
         );
     }
 

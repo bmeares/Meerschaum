@@ -130,7 +130,35 @@ PyPI wheel, not on crates.io) is published, in lockstep at the workspace version
   `sql valkey api engine server plugin` alone, and tests it with `full`: the workspace only builds the
   features together.
 - **The sqlx `[patch]` in the root `Cargo.toml` is ignored by crates.io**: published SQL connectors build
-  against plain sqlx 0.9.x until 0.9.1 ships. The real `cargo publish` is run by the maintainer, never by CI.
+  against plain sqlx 0.9.x until 0.9.1 ships. The real `cargo publish` is run by the maintainer, never by CI,
+  and never without the maintainer's explicit authorization.
+- **The publish command** is `cargo publish --workspace --exclude meerschaum-py --locked`: it publishes the 15
+  crates in dependency order and waits for the index between them (`meerschaum-py` is `publish = false`).
+  Run `scripts/rust/ci.sh package` and then `scripts/rust/ci.sh publish-dry-run` first. A published version can
+  only be yanked (`cargo yank --version <v> <crate>`), never replaced, so a fix is a new lockstep version.
+- **Order, for recovery after a partial failure** (publish the missing crates one by one with `cargo publish -p
+  <crate> --locked`; crates of one level are independent except for the dev-dependencies noted below): 1 `meerschaum-core`; 2 `meerschaum-kernel`,
+  `meerschaum-jobs`, `meerschaum-compose`; 3 `meerschaum-connector`; 4 `meerschaum-connector-sql`,
+  `meerschaum-connector-api`, `meerschaum-plugin`, `meerschaum-worker`; 5 `meerschaum-connector-valkey`,
+  `meerschaum-engine`, `meerschaum-server`; 6 `meerschaum-web`; 7 `meerschaum-cli`; 8 `meerschaum`.
+  Within a level publish `meerschaum-connector-sql` before `meerschaum-worker` (level 4) and
+  `meerschaum-connector-valkey` before `meerschaum-engine` (level 5): `-worker`, `-engine` and `-web` dev-depend on
+  them and `cargo publish` verifies the dev-dependencies. Recompute with `cargo metadata --no-deps` if a dependency changes.
+- **Installing.** `cargo install meerschaum --locked` (Rust 1.95 or newer, the workspace `rust-version`): without `--locked`
+  Cargo may resolve newer dependencies than the tested ones (on Windows a newer `aws-lc-sys` than our
+  prebuilt-NASM pin). A pre-release is ignored unless `--version 5.0.0-rc.1` is given.
+  The full release procedure (PyPI, crates.io, tag, GitHub release, Docker) is
+  `.agents/skills/release/SKILL.md`, section "Meerschaum 5.x".
+  sqlx 0.9.0 no longer sets `TCP_NODELAY` (upstream #4335, fixed by #4336) and has no API to set it, so
+  `crates/meerschaum-connector-sql` prepares small MySQL/MariaDB statements once per connection instead of
+  closing them after each use (`Backend::PERSISTENT_STATEMENTS`, 32 cached statements per connection).
+  What is left on a crates.io build is one ~40 ms wait for each empty read (zero rows) on MySQL/MariaDB over a
+  network, plus statements over 8 KiB or 128 parameters; PostgreSQL is not changed by the mitigation (its
+  statements are not closed without a reply). Measured on this repo's test containers (instance suites, 8 test
+  threads), connections opened for `instance_sync` / `instance_dtypes` on MySQL: 314 / 493 unmitigated, 46 / 67
+  mitigated, 45 / 67 with the `[patch]`; wall time of `instance_dtypes`: 2.0 s, 1.7 s, 1.1 s (MariaDB 3.5 s, 2.0 s,
+  0.9 s). 5.0.0 final waits for sqlx 0.9.1; then delete the `[patch]` section and keep or drop the mitigation
+  (it is harmless on a fixed sqlx).
 
 ## Building
 

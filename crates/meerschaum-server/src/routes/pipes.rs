@@ -545,11 +545,19 @@ async fn create_metadata(ctx: Ctx) -> ApiResult {
     let conn = ctx
         .state
         .get_api_connector(ctx.instance_keys().as_deref())?;
-    // `get_tables()` only applies to SQL and API instances; other instances answer `false`.
-    // TODO(connector-trait): no `create_metadata()` / `get_tables()` on `InstanceConnector`, so
-    // the internal tables are not created here; SQL instances create them on first use.
-    let ok = matches!(conn.connector_type(), "sql" | "api");
-    Ok(ok_json(&Json::Bool(ok)))
+    // `if conn.type not in ('sql', 'api'): return False`.
+    if !matches!(conn.connector_type(), "sql" | "api") {
+        return Ok(ok_json(&Json::Bool(false)));
+    }
+    // `get_tables(mrsm_instance=conn)`: creates the instance tables of a SQL instance (an API
+    // instance has none of its own).
+    // PARITY: v4 only logs a failed `create_all` (`tables/__init__.py: create_tables`) and still
+    // answers `true`; a failure here is a 500 carrying the reason.
+    match conn.create_instance_tables().await {
+        Ok(true) => Ok(ok_json(&Json::Bool(true))),
+        Ok(false) => Err(ApiError::new(500, "Failed to create the instance tables.")),
+        Err(e) => Err(ApiError::new(500, e.to_string())),
+    }
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -645,13 +653,13 @@ async fn sync_pipe(ctx: Ctx, Path((ck, mk, lk)): Keys3, body: Body) -> ApiResult
         ));
     }
     let mut pipe = h.pipe.clone();
-    if pipe.columns().is_empty() {
-        if let Some(c) = columns {
-            let cols = Value::from_json_str(&c)
-                .map_err(|e| ApiError::exception("json.loads(columns)", e))?;
-            pipe.set_columns(cols)
-                .map_err(|e| ApiError::exception("pipe.columns", e))?;
-        }
+    if pipe.columns().is_empty()
+        && let Some(c) = columns
+    {
+        let cols =
+            Value::from_json_str(&c).map_err(|e| ApiError::exception("json.loads(columns)", e))?;
+        pipe.set_columns(cols)
+            .map_err(|e| ApiError::exception("pipe.columns", e))?;
     }
     let kw = SyncKwargs {
         check_existing,

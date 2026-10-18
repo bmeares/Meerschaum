@@ -20,9 +20,13 @@ All Meerschaum environment variables begin with the prefix `MRSM_`. The most com
 | `MRSM_CONFIG` | Inline JSON or simplified-dictionary patch applied to the configuration. | _(unset)_ |
 | `MRSM_PATCH` | A second patch applied *after* `MRSM_CONFIG` (may reference its keys). | _(unset)_ |
 | `MRSM_<TYPE>_<LABEL>` | Define a connector by URI (e.g. `MRSM_SQL_MAIN`, `MRSM_API_MAIN`). | _(unset)_ |
-| `MRSM_RUNTIME` | Marks a special runtime (e.g. `portable`, `docker`). | _(unset)_ |
+| `MRSM_RUNTIME` | Marks a special runtime (e.g. `docker`). | _(unset)_ |
 | `MRSM_NO_AUTO_INSTALL` | Disable every implicit package installation (imports, dependency checks, `uv`/`pip` bootstraps). | _(unset)_ |
 | `MRSM_NOASK` / `MRSM_NONINTERACTIVE` | Disable interactive prompts (assume defaults). | _(unset)_ |
+| `MRSM_DUCKDB_LIB` | Path to DuckDB's own shared library (`libduckdb`) for the `duckdb` flavor. | _(unset: cached or downloaded on first use)_ |
+| `MRSM_BIN` | Run a standalone `mrsm` binary instead of the in-process CLI of the Python package. | _(unset)_ |
+| `MRSM_PYTHON` | The Python interpreter the binary runs plugin workers and `upgrade meerschaum` with. | _(auto-detected)_ |
+| `MRSM_ALLOW_DEFAULT_ROOT` | Let a debug build use the default root directory. | _(unset)_ |
 
 !!! tip "Inspecting your environment"
     Run `mrsm show environment` to list every currently set `MRSM_` variable. Run `mrsm show config` to inspect the resolved configuration after all patches and connectors have been applied.
@@ -80,7 +84,7 @@ MRSM_VENVS_DIR='venvs/' mrsm show plugins
 
 ## **`MRSM_WORK_DIR`**
 
-`MRSM_WORK_DIR` designates the base working directory under which the root directory is located when `MRSM_ROOT_DIR` is not explicitly set. This is primarily useful for portable and containerized deployments where the process is launched from a known location.
+`MRSM_WORK_DIR` designates the base working directory under which the root directory is located when `MRSM_ROOT_DIR` is not explicitly set. This is primarily useful for containerized deployments where the process is launched from a known location.
 
 ## **`MRSM_<TYPE>_<LABEL>`**
 
@@ -137,7 +141,7 @@ MRSM_PATCH='baz:MRSM{foo:bar}' \
 
 ## **`MRSM_RUNTIME`**
 
-`MRSM_RUNTIME` marks a special runtime context. For example, `MRSM_RUNTIME=portable` is set by the portable distribution so that Meerschaum can ensure `readline` is available, and `MRSM_RUNTIME=docker` is set inside the official Docker image. You typically do not need to set this yourself.
+`MRSM_RUNTIME` marks a special runtime context. For example, `MRSM_RUNTIME=docker` is set inside the official Docker image. You typically do not need to set this yourself.
 
 ## **`MRSM_NOASK` / `MRSM_NONINTERACTIVE`**
 
@@ -155,13 +159,51 @@ will be reported instead of downloaded; otherwise Meerschaum warns before the fi
 in each process. Install the dependency group before starting Meerschaum.
 
 The variable covers every implicit installation: `attempt_import()`, the dependency version checks
-(which never install a version parser), creating a virtual environment (no `uv venv --seed`) and
-the API host. Installs you ask for, such as `mrsm install packages` or `pip_install()` from your
+(which never install a version parser), creating a virtual environment (no `uv venv --seed`), the
+API host, and the DuckDB library download (see [`MRSM_DUCKDB_LIB`](#mrsm_duckdb_lib)), including
+DuckDB's own extension auto-install. Installs you ask for, such as `mrsm install packages` or `pip_install()` from your
 own code, still run, but never bootstrap `uv`, `pip` or `wheel` for themselves.
 
 ```bash
 MRSM_NO_AUTO_INSTALL=1 mrsm show pipes
 ```
+
+## **`MRSM_DUCKDB_LIB`**
+
+The `duckdb` flavor does not bundle DuckDB: it loads DuckDB's own shared library (`libduckdb.so`,
+`libduckdb.dylib` or `duckdb.dll`, version 1.4 or newer) at run time. Meerschaum looks for it in this order:
+
+1. `MRSM_DUCKDB_LIB`, a path to the file (for air-gapped hosts; a library that fails to load is an error);
+2. the cache under `<root>/drivers/`;
+3. the system library path;
+4. a checksum-verified download of the official release, unless `MRSM_NO_AUTO_INSTALL` is set.
+
+```bash
+MRSM_DUCKDB_LIB=/opt/duckdb/libduckdb.so mrsm show drivers
+```
+
+Run `mrsm show drivers` to see where the library comes from, and `mrsm install driver duckdb` /
+`mrsm uninstall driver duckdb` to manage the cached copy.
+
+## **`MRSM_BIN`**
+
+By default the `mrsm` and `meerschaum` console scripts of the Python package run the CLI inside the
+installed extension. Set `MRSM_BIN` to the path of a standalone `mrsm` binary (for example one built by
+`cargo install meerschaum`) to run that program instead. The binary must report the same `--version`
+as the installed package. Everything Meerschaum re-launches itself for (jobs, compose, pipeline steps)
+uses the same program.
+
+## **`MRSM_PYTHON`**
+
+The standalone `mrsm` binary runs Python plugins in a worker process. `MRSM_PYTHON` names the Python
+interpreter for those workers, for package installs, and for `mrsm upgrade meerschaum` (which otherwise
+refuses to guess which environment to upgrade). Inside the Python package the interpreter that is already
+running is used and you do not need to set it.
+
+## **`MRSM_ALLOW_DEFAULT_ROOT`**
+
+Debug builds of the binary refuse to start without `MRSM_ROOT_DIR` so development never touches the
+real root. Release builds and the published packages are unaffected. Prefer setting `MRSM_ROOT_DIR`.
 
 ## Internal Variables
 
@@ -172,6 +214,9 @@ The following variables are set automatically by Meerschaum (e.g. for background
 | `MRSM_SERVER_ID` | Identifier of the API server instance. |
 | `MRSM_DAEMON_ID` | Identifier of the running daemon (background job). |
 | `MRSM_JOB` | Marks that the current process is running as a job. |
+| `MRSM_BIN_EXEC` | Set by the Python launcher to the path of `MRSM_BIN` when it hands over to it; guards against a launcher re-executing itself forever. |
+| `MRSM_API_HOST` | Marks the process as the Python API host (plugin routes and Dash apps). |
+| `MRSM_CORE_TRACE` | Set to `1` to print per-stage timings of the native boundary to stderr (diagnostics). |
 | `MRSM_SYSTEMD_LOG_PATH` | Log path used by the `systemd` job executor. |
 | `MRSM_SYSTEMD_STDIN_PATH` | Stdin FIFO path used by the `systemd` job executor. |
 | `MRSM_SYSTEMD_RESULT_PATH` | Result path used by the `systemd` job executor. |

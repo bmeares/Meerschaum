@@ -14,13 +14,20 @@ use crate::uri::ConnectionSpec;
 
 pub(crate) struct MySqlBackend;
 
+/// Prepared statements kept per connection ([`Backend::PERSISTENT_STATEMENTS`]). The server
+/// counts them across every client against `max_prepared_stmt_count` (16382 by default), so a
+/// full pool of a few dozen processes must stay below it; `sqlx` closes the least recently used
+/// statement beyond this.
+const STATEMENT_CACHE_CAPACITY: usize = 32;
+
 pub(crate) fn connect_options(spec: &ConnectionSpec) -> Result<MySqlConnectOptions> {
     // PyMySQL does not alter `sql_mode`; sqlx appends PIPES_AS_CONCAT and NO_ENGINE_SUBSTITUTION
     // by default, which would change the meaning of `||`. The session time zone stays at sqlx's
     // `+00:00` so `TIMESTAMP` values decode as UTC (Meerschaum stores naive UTC on MySQL).
     let mut opts = MySqlConnectOptions::new()
         .pipes_as_concat(false)
-        .no_engine_substitution(false);
+        .no_engine_substitution(false)
+        .statement_cache_capacity(STATEMENT_CACHE_CAPACITY);
     if let Some(host) = &spec.host {
         opts = opts.host(host);
     }
@@ -102,6 +109,7 @@ fn decode_err(plan: &ColumnPlan, e: sqlx::Error) -> SqlError {
 
 impl Backend for MySqlBackend {
     type DB = MySql;
+    const PERSISTENT_STATEMENTS: bool = true;
 
     fn plan(columns: &[MySqlColumn]) -> Vec<ColumnPlan> {
         columns

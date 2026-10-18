@@ -82,7 +82,10 @@ pub use read::{
     DirtyRange, EdgeView, EngineReader, GanttBar, NodeView, PipelineView, RunDetail, RunFilter,
     RunStatus, RunSummary,
 };
-pub use registry::{ConnectorRegistry, PluginSync, StaticRegistry, SyncHooks};
+pub use registry::{
+    ConnectorRegister, ConnectorRegisterHook, ConnectorRegistry, PluginSync, StaticRegistry,
+    SyncHooks,
+};
 pub use runs::{NodeRow, NodeStatus, RunRecord, RunRow};
 pub use schedule::{DurationSource, EwmaDurations, Schedule};
 pub use selection::{Depth, KeyFilter, Pipeline, Selection, Subgraph, Targets};

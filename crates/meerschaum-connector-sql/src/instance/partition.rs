@@ -465,12 +465,12 @@ impl SqlConnector {
         // Non-TimescaleDB: rebuild via a drop + re-sync round-trip.
         let current = sp.chunk_interval();
         let new = sp.chunk_interval_with(ChunkIntervalArg::Delta(TimeDelta::minutes(new_minutes)));
-        if let (Ok(c), Ok(n)) = (&current, &new) {
-            if c == n {
-                return SuccessTuple::ok(format!(
-                    "{pipe} is already partitioned at {new_minutes} minutes."
-                ));
-            }
+        if let (Ok(c), Ok(n)) = (&current, &new)
+            && c == n
+        {
+            return SuccessTuple::ok(format!(
+                "{pipe} is already partitioned at {new_minutes} minutes."
+            ));
         }
         let rowcount_before = self
             .get_pipe_rowcount(pipe, &DataQuery::default())
@@ -518,10 +518,10 @@ impl SqlConnector {
             .await
             .ok()
             .flatten();
-        if let (Some(b), Some(a)) = (rowcount_before, rowcount_after) {
-            if a != b {
-                tracing::warn!("Row count changed during repartition of {pipe} ({b} -> {a}).");
-            }
+        if let (Some(b), Some(a)) = (rowcount_before, rowcount_after)
+            && a != b
+        {
+            tracing::warn!("Row count changed during repartition of {pipe} ({b} -> {a}).");
         }
         SuccessTuple::ok(format!("Repartitioned {pipe} to {new_minutes} minutes."))
     }

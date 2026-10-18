@@ -505,3 +505,39 @@ after one warm-up call, release extension, fresh root, best of 3; shared host):
 | `meerschaum:instance` | 13.1 µs | 7.5 µs | 3.7 µs |
 | `system:experimental:inplace_sync` | 17.0 µs | 8.7 µs | 5.3 µs |
 | `pipes:dtypes:columns_types_cache_seconds` | 10.9 µs | 5.4 µs | 3.0 µs |
+
+## Wave 17b (task D2): pyo3 0.30, arrow 60, polars 0.55
+
+Same boundary scenarios as above (the Rust side only: `bench_boundary.py` was removed in wave 16, so it
+was re-run from its last version with the Python mode taken out), release extensions built from the base
+commit (pyo3 0.25, arrow 56, polars 0.51) and from this wave, CPython 3.14.8, pandas 3.0.6, pyarrow 26,
+polars 2.0.0, 1,000,000 rows (special scenarios 100,000), best of 5-7, three interleaved runs on the
+shared 40-core host (load 20-50 from other builds; the best of each scenario across runs is shown).
+Every result of the new build equals the base build's (values, dtypes, index: `assert_frame_equal`
+with `check_exact=True`).
+
+| scenario | base | 17b |
+|---|---|---|
+| `filter_unseen_df` | 0.550 s | 0.458 s |
+| `enforce_all_string` | 0.686 s | 0.658 s |
+| `enforce_mixed` | 0.019 s | 0.019 s |
+| `enforce_special` | 0.760 s | 0.741 s |
+| `filter_special` | 1.300 s | 1.266 s |
+
+`filter_special` is bimodal on this host (1.3 or 2.1 s in both builds).
+
+**Sizes** (release, `x86_64-unknown-linux-gnu`; the wheel is `maturin build --release` of the root
+`pyproject.toml`, which strips):
+
+| artifact | base | 17b, all old Polars features | 17b, trimmed Polars features |
+|---|---|---|---|
+| `_native.abi3.so` | 97.7 MB (81.5 MB stripped) | 104.8 MB (86.8 MB stripped) | 103.2 MB (85.5 MB stripped) |
+| `target/release/mrsm` | 85.0 MB (70.8 MB stripped) | | 90.8 MB (75.1 MB stripped) |
+| `meerschaum-5.0.0a1-cp311-abi3-linux_x86_64.whl` | 31.3 MB | | 32.4 MB |
+
+The growth comes from the libraries themselves (largest per-crate symbol deltas: `polars_core` +1.1 MB,
+`rayon`/`rayon_core` +1.3 MB, `arrow_select` + `arrow_cast` +0.9 MB). Trimming the workspace Polars features
+to what a code path uses (`dtype-full`, `ipc`, `strings`, `temporal`, `timezones`; dropped `lazy`, `serde`,
+`json`, `parquet`, `object`) saves 1.25 MB of the stripped extension (LTO already dropped most unused code)
+and 40 of 517 normal-dependency packages from the build (`polars-lazy`, `-plan`, `-expr`, `-mem-engine`,
+`-stream`, `-json`, ...).

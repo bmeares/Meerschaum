@@ -270,10 +270,16 @@ _extras_packages: Dict[str, Dict[str, str]] = {
         'a2wsgi'                     : 'a2wsgi>=1.10.0',
         'multipart'                  : 'python-multipart>=0.0.20',
         'jwt'                        : 'PyJWT>=2.8.0',
+        'websockets'                 : 'websockets>=15.0.1',
     },
     'dash': {
         'dash'                       : 'dash>=4.1.0',
         'a2wsgi'                     : 'a2wsgi>=1.10.0',
+        ### What a plugin-owned Dash app written for v4 finds on its import path: the host builds the
+        ### app with `dash_extensions.enrich.DashProxy` (`Trigger`, duplicate outputs) when it is
+        ### installed, and v4 plugin layouts are written with `dash_bootstrap_components`.
+        'dash_bootstrap_components'  : 'dash-bootstrap-components>=2.0.4',
+        'dash_extensions'            : 'dash-extensions>=2.0.5',
     },
     'shell': {
         'ptpython'                   : 'ptpython>=3.0.27',

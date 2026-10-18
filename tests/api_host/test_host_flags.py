@@ -89,7 +89,7 @@ def test_internal_token_as_header_or_bearer(sandbox):
     root, plugins = sandbox
     body = """
 import time
-from jose import jwt
+import jwt
 from meerschaum.api._oauth2 import SECRET
 from meerschaum.api.host import REGISTRY_PATH
 good = jwt.encode({'mrsm_host': 'mcp', 'scopes': [], 'exp': int(time.time()) + 60}, SECRET, algorithm='HS256')

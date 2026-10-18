@@ -31,6 +31,7 @@
 pub mod auth;
 pub mod backends;
 pub mod config;
+pub mod engine_store;
 pub mod error;
 pub mod host;
 pub mod json;

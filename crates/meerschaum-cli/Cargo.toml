@@ -57,6 +57,7 @@ axum = "0.8"
 async-trait = "0.1"
 rmpv = "1"
 tokio = { workspace = true }
+tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
@@ -65,7 +66,7 @@ indexmap = { workspace = true }
 regex = { workspace = true }
 rust_decimal = { workspace = true }
 serde_json = { workspace = true }
-fancy-regex = "0.14"
+fancy-regex = "0.19"
 terminal_size = "0.4"
 unicode-width = "0.2"
 reedline = "0.52"
@@ -84,6 +85,8 @@ fs4 = "1.1"
 # `timed_input`: poll stdin with a timeout (no reader thread that outlives the call);
 # `setsid` for the timed pipeline step.
 rustix = { version = "1", default-features = false, features = ["std", "event", "process"] }
+# The progress line's SIGINT / SIGTERM guard (`format/progress.rs`), a safe API.
+signal-hook = "0.4"
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }

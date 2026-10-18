@@ -35,7 +35,8 @@ maintainers = [
     { name = "Bennett Meares", email = "bennett.meares@gmail.com" },
 ]
 classifiers = [
-    "Development Status :: 5 - Production/Stable",
+    # 5.0.0rc1: Beta. Switch back to "5 - Production/Stable" for 5.0.0 final (.agents/skills/release).
+    "Development Status :: 4 - Beta",
     "Intended Audience :: System Administrators",
     "Operating System :: POSIX :: Linux",
     "Operating System :: Microsoft :: Windows",
@@ -66,8 +67,8 @@ sql-mssql = ["pyodbc>=4.0.30"]
 sql-oracle = ["oracledb>=2.5.0"]
 sql-duckdb = ["duckdb>=1.0.0", "duckdb-engine>=0.13.0"]
 sql-cockroachdb = ["sqlalchemy-cockroachdb>=2.0.0"]
-api = ["fastapi>=0.128.0", "uvicorn>=0.35.0", "a2wsgi>=1.10.0", "python-multipart>=0.0.20", "PyJWT>=2.8.0"]
-dash = ["dash>=4.1.0", "a2wsgi>=1.10.0"]
+api = ["fastapi>=0.128.0", "uvicorn>=0.35.0", "a2wsgi>=1.10.0", "python-multipart>=0.0.20", "PyJWT>=2.8.0", "websockets>=15.0.1"]
+dash = ["dash>=4.1.0", "a2wsgi>=1.10.0", "dash-bootstrap-components>=2.0.4", "dash-extensions>=2.0.5"]
 shell = ["ptpython>=3.0.27"]
 cli-tools = ["pgcli>=3.1.0", "mycli>=1.23.2", "litecli>=1.5.0", "gadwall>=0.2.0"]
 gui = ["pywebview>=3.6.3"]
@@ -97,9 +98,9 @@ module-name = "meerschaum._core._native"
 python-source = "."
 python-packages = ["meerschaum"]
 include = [{ path = "_meerschaum_mrsm.py", format = ["sdist", "wheel"] }]
-# `extension-module` is a crate feature (not a default) so `cargo test` can link libpython;
-# `polars` is the pyo3-polars zero-copy path (same feature set as scripts/rust/build_py.sh).
-features = ["pyo3/abi3-py311", "extension-module", "polars", "oracle"]
+# `extension-module` is a crate feature (not a default) so `cargo test` can link libpython
+# (same feature set as scripts/rust/build_py.sh).
+features = ["pyo3/abi3-py311", "extension-module", "oracle"]
 exclude = [
     "**/__pycache__/**",
     "**/*.pyc",
@@ -107,4 +108,6 @@ exclude = [
     "meerschaum/_core/_native*.pyd",
     "meerschaum/_core/_core*.so",
     "meerschaum/_core/_core*.pyd",
+    # Test sources of the extension crate are not shipped in the sdist.
+    "crates/meerschaum-py/tests/**",
 ]

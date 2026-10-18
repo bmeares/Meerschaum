@@ -125,12 +125,11 @@ impl APIConnector {
             )
             .await?;
         let mut attributes = r.json()?;
-        if let serde_json::Value::String(s) = &attributes {
-            if s.starts_with('{') {
-                if let Ok(parsed) = serde_json::from_str(s) {
-                    attributes = parsed;
-                }
-            }
+        if let serde_json::Value::String(s) = &attributes
+            && s.starts_with('{')
+            && let Ok(parsed) = serde_json::from_str(s)
+        {
+            attributes = parsed;
         }
         match pipe_ops::json_to_core(&attributes) {
             Value::Map(m) => {

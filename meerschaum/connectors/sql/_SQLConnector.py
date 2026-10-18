@@ -22,6 +22,20 @@ _RUST_FLAVORS = {
 }
 
 
+#: Flavors that share a driver (and an SQL dialect family), by the first member.
+_FLAVOR_FAMILIES = {
+    'postgresql': 'postgresql', 'timescaledb': 'postgresql', 'timescaledb-ha': 'postgresql',
+    'postgis': 'postgresql', 'citus': 'postgresql', 'cockroachdb': 'postgresql',
+    'mysql': 'mysql', 'mariadb': 'mysql',
+    'sqlite': 'sqlite', 'geopackage': 'sqlite',
+}
+
+
+def _flavor_family(flavor: Optional[str]) -> Optional[str]:
+    """The driver family of a flavor (a flavor of its own is its own family)."""
+    return _FLAVOR_FAMILIES.get(flavor, flavor) if flavor else None
+
+
 def _remove_memory_directory(directory: str, owner_pid: int) -> None:
     """
     Remove the database directory of an in-memory SQLite connector, in the process that created
@@ -243,6 +257,21 @@ class SQLConnector(InstanceConnector):
             ):
                 import meerschaum.config.paths as paths
                 self.database = paths.SQLITE_DB_PATH.as_posix()
+
+        ### A `uri` decides where the connection goes (v4's engine is built from it alone), so
+        ### its scheme must also decide the dialect when it names another driver family than the
+        ### label's configured flavor (`MRSM_SQL_MAIN=sqlite:///x.db` on a `timescaledb-ha`
+        ### default config). v4 kept the configured flavor and generated SQL for the wrong
+        ### dialect; a flavor of the same family (`postgresql://` for `timescaledb-ha`) is kept.
+        if self.__dict__.get('uri') and self.__dict__.get('flavor'):
+            try:
+                uri_flavor = self.parse_uri(self.__dict__['uri']).get('flavor', None)
+            except Exception:
+                uri_flavor = None
+            if (
+                uri_flavor in _FLAVOR_FAMILIES or uri_flavor in _RUST_FLAVORS
+            ) and _flavor_family(uri_flavor) != _flavor_family(self.__dict__['flavor']):
+                self.__dict__['flavor'] = uri_flavor
 
         ### ensure flavor and label are set accordingly
         if 'flavor' not in self.__dict__:

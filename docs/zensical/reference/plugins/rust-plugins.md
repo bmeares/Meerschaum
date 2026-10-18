@@ -142,6 +142,8 @@ The part for your plugin lives under `plugins.<name>`:
 }
 ```
 
+Arguments reach `context.kwargs` exactly as they reach a Python plugin's `**kwargs`, which is v4's rule: an argument that was not given is **absent** (never `false` or `null`), a flag that was given is `true`, and a `store_false` flag is present (as `true`) only while it is not given. Declare `"default": "None"` to receive an explicit `null`. Read flags with a fallback (`kwargs.get("native_demo").and_then(Value::as_bool).unwrap_or(false)`).
+
 ## 🧩 What a plugin can provide
 
 | You want | Do this |

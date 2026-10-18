@@ -3,6 +3,7 @@
 //!
 //! Server-rendered `/dash` console. Compose with `app`; plugin Dash apps remain unmatched.
 #![deny(unsafe_code)]
+mod assets;
 mod pages;
 mod pipelines;
 pub mod sessions;
@@ -263,22 +264,9 @@ pub fn router(server: AppState, config: WebConfig) -> Result<Router, String> {
     router = router
         .route("/dash/login", get(login_page).post(login))
         .route("/dash/logout", post(logout));
-    for name in [
-        "console.js",
-        "console.css",
-        "htmx.min.js",
-        "plotly.min.js",
-        "maplibre-gl.js",
-        "maplibre-gl.css",
-        "cytoscape.min.js",
-        "xterm.js",
-        "xterm.css",
-        "addon-fit.js",
-        "addon-unicode11.js",
-        "webterm.js",
-        "webterm.css",
-    ] {
-        router = router.route(&format!("/dash/assets/{name}"), get(asset));
+    // One route per embedded asset (the table `build.rs` generates from `assets/`).
+    for asset in assets::ASSETS {
+        router = router.route(&format!("/dash/assets/{}", asset.name), get(assets::serve));
     }
     let reserved = [
         "dashboard",
@@ -728,10 +716,10 @@ async fn logout(State(state): State<WebState>, headers: HeaderMap, body: String)
     ) {
         return StatusCode::FORBIDDEN.into_response();
     }
-    if let Some(id) = cookie(&headers) {
-        if state.config.sessions.delete(&id).await.is_err() {
-            return StatusCode::SERVICE_UNAVAILABLE.into_response();
-        }
+    if let Some(id) = cookie(&headers)
+        && state.config.sessions.delete(&id).await.is_err()
+    {
+        return StatusCode::SERVICE_UNAVAILABLE.into_response();
     }
     let mut response = Redirect::to("/dash/login").into_response();
     response.headers_mut().insert(
@@ -766,35 +754,6 @@ async fn legacy(State(state): State<WebState>, req: Request) -> Response {
         target.push_str(q);
     }
     Redirect::temporary(&target).into_response()
-}
-async fn asset(req: Request) -> Response {
-    let name = req.uri().path().rsplit('/').next().unwrap_or("");
-    let (data, mime): (&'static [u8], &str) = match name {
-        "console.js" => (include_bytes!("../assets/console.js"), "text/javascript"),
-        "console.css" => (include_bytes!("../assets/console.css"), "text/css"),
-        "htmx.min.js" => (include_bytes!("../assets/htmx.min.js"), "text/javascript"),
-        "plotly.min.js" => (include_bytes!("../assets/plotly.min.js"), "text/javascript"),
-        "maplibre-gl.js" => (
-            include_bytes!("../assets/maplibre-gl.js"),
-            "text/javascript",
-        ),
-        "maplibre-gl.css" => (include_bytes!("../assets/maplibre-gl.css"), "text/css"),
-        "cytoscape.min.js" => (
-            include_bytes!("../assets/cytoscape.min.js"),
-            "text/javascript",
-        ),
-        "xterm.js" => (include_bytes!("../assets/xterm.js"), "text/javascript"),
-        "xterm.css" => (include_bytes!("../assets/xterm.css"), "text/css"),
-        "addon-fit.js" => (include_bytes!("../assets/addon-fit.js"), "text/javascript"),
-        "addon-unicode11.js" => (
-            include_bytes!("../assets/addon-unicode11.js"),
-            "text/javascript",
-        ),
-        "webterm.js" => (include_bytes!("../assets/webterm.js"), "text/javascript"),
-        "webterm.css" => (include_bytes!("../assets/webterm.css"), "text/css"),
-        _ => return StatusCode::NOT_FOUND.into_response(),
-    };
-    ([(header::CONTENT_TYPE, mime)], data).into_response()
 }
 
 /// Native page providers return the same trusted HTML fragment and status as Python pages.

@@ -118,10 +118,10 @@ impl Fixture {
 
     fn scan(&self, cargo: Option<&Path>) -> Discovery {
         let mut found = discovery::discover_report_in(&[self.plugins()], &self.build_dir());
-        if let (Some(cargo), Some(candidate)) = (cargo, found.candidates.first_mut()) {
-            if let Some(build) = candidate.build.as_mut() {
-                build.cargo = cargo.to_path_buf();
-            }
+        if let (Some(cargo), Some(candidate)) = (cargo, found.candidates.first_mut())
+            && let Some(build) = candidate.build.as_mut()
+        {
+            build.cargo = cargo.to_path_buf();
         }
         found
     }

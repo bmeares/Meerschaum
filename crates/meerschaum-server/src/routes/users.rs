@@ -177,10 +177,8 @@ async fn edit_user(ctx: Ctx, body: Body) -> ApiResult {
         None => Some("admin".into()),
     };
     let is_admin = user_type.as_deref() == Some("admin");
-    if is_admin {
-        if let Some(t) = form_get(&form, "type") {
-            user.user_type = Some(t.to_string());
-        }
+    if is_admin && let Some(t) = form_get(&form, "type") {
+        user.user_type = Some(t.to_string());
     }
     if is_admin || curr_user.is_some_and(|u| u.username == user.username) {
         return Ok(tuple_response(&conn.edit_user(&user).await));

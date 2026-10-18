@@ -83,6 +83,14 @@ jobs:
         env:
           MRSM_INSTALL_PACKAGES: "full sql-mssql sql-oracle sql-duckdb"
 
+      - name: Reference interpreter (v4.1.4, for the parity comparisons)
+        ### Tests that compare against the released v4.1.4 (`tests/test_valkey_connector.py`,
+        ### `tests/test_api_connector.py`, ...) fail, never skip, when `.venv-ref` is missing or lacks a
+        ### pinned library. Idempotent: it only rebuilds when `scripts/parity/requirements.txt` (or the
+        ### version) changes, finds or installs `uv` itself, and runs from its own path (no working
+        ### directory or `PYTHONPATH` dependence: the reference interpreter runs with `-I`).
+        run: scripts/parity/setup_reference.sh
+
       - name: Integration Tests
         run: ./scripts/test.sh db
         env:

@@ -90,26 +90,22 @@ pub fn action_owner(
     manifest: &Manifest,
     native: &NativePlugins,
 ) -> Option<(String, String)> {
-    let mut best: Option<(String, String)> = None;
-    for plugin in manifest
+    let owned: Vec<(&str, &str)> = manifest
         .plugins
         .values()
         .filter(|p| native.contains(&p.name))
-    {
-        for action in &plugin.actions {
-            let parts: Vec<_> = action.name.split('_').collect();
-            let matches = words.len() >= parts.len()
-                && words.iter().zip(&parts).all(|(word, part)| word == part);
-            if matches
-                && best
-                    .as_ref()
-                    .is_none_or(|(_, current)| current.len() < action.name.len())
-            {
-                best = Some((plugin.name.clone(), action.name.clone()));
-            }
-        }
-    }
-    best
+        .flat_map(|p| {
+            p.actions
+                .iter()
+                .map(move |a| (p.name.as_str(), a.name.as_str()))
+        })
+        .collect();
+    // v4's `get_action` over the native plugins' actions (see `python::resolve_action`).
+    let name = crate::python::resolve_action(words, owned.iter().map(|(_, action)| *action))?;
+    owned
+        .iter()
+        .find(|(_, action)| *action == name)
+        .map(|(plugin, action)| (plugin.to_string(), action.to_string()))
 }
 
 fn kwargs_json(args: &ArgsMap) -> serde_json::Value {
@@ -224,25 +220,42 @@ pub fn arguments(args: &mut ArgsMap, plugins: &[&PluginManifest], sysargs: &[Str
             }
         };
         let action = normalize_action(&argument.action);
-        let value = match action.as_str() {
-            "store_true" => Some(PyValue::Bool(!found.is_empty())),
-            "store_false" => Some(PyValue::Bool(found.is_empty())),
-            "count" => Some(PyValue::Int(found.len() as i128)),
+        let given = match action.as_str() {
+            "store_true" if !found.is_empty() => Some(PyValue::Bool(true)),
+            "store_false" if !found.is_empty() => Some(PyValue::Bool(false)),
+            "count" if !found.is_empty() => Some(PyValue::Int(found.len() as i128)),
             "store_const" if !found.is_empty() => Some(json_to_py(&argument.const_value)),
             "append" => (!found.is_empty())
                 .then(|| PyValue::List(found.iter().flatten().map(|v| convert(v)).collect())),
             "store" | "" => found.last().and_then(|v| v.as_deref()).map(convert),
             _ => None,
         };
-        match value {
-            Some(value) => {
-                args.insert(dest, value);
-            }
-            None if !args.contains_key(&dest) => {
-                args.insert(dest, json_to_py(&argument.default));
-            }
-            None => {}
+        let value = match given {
+            Some(value) => Some(value),
+            None if !args.contains_key(&dest) => Some(match action.as_str() {
+                // `argparse`: `store_false` defaults to `True` unless a default was declared.
+                "store_false" if argument.default.is_null() => PyValue::Bool(true),
+                _ => json_to_py(&argument.default),
+            }),
+            None => None,
+        };
+        // PARITY: the keyword arguments of a plugin action go through v4's `parse_arguments`,
+        // which pops every `False` and every `None` (a flag that was not given is absent, and
+        // `kwargs.get('flag')` is `None`) and turns the string `'None'` into `None`. Native
+        // plugins get the same keyword arguments as Python plugins.
+        if let Some(value) = value.and_then(v4_argument_value) {
+            args.insert(dest, value);
         }
+    }
+}
+
+/// What v4's `parse_arguments` leaves of a parsed argument: nothing for `False` and `None` (the
+/// argument is dropped), `None` (kept) for the string `'None'`, everything else unchanged.
+pub(crate) fn v4_argument_value(value: PyValue) -> Option<PyValue> {
+    match value {
+        PyValue::Bool(false) | PyValue::None => None,
+        PyValue::Str(text) if text == "None" => Some(PyValue::None),
+        other => Some(other),
     }
 }
 

@@ -36,7 +36,7 @@ use num_bigint::BigInt;
 use pyo3::exceptions::{PyKeyError, PyOSError, PyRuntimeError, PyTypeError, PyValueError};
 use pyo3::intern;
 use pyo3::prelude::*;
-use pyo3::sync::GILOnceCell;
+use pyo3::sync::PyOnceLock;
 use pyo3::types::{
     PyBool, PyByteArray, PyBytes, PyDict, PyFloat, PyFrozenSet, PyInt, PyList, PyModule, PySet,
     PyString, PyTuple,
@@ -65,7 +65,7 @@ pub(crate) fn store(py: Python<'_>) -> Bound<'_, PyDict> {
         .import("meerschaum.config._store")
         .and_then(|m| m.getattr("_dict"))
         .ok()
-        .and_then(|d| d.downcast_into::<PyDict>().ok());
+        .and_then(|d| d.cast_into::<PyDict>().ok());
     let mut guard = STORE.lock().unwrap_or_else(|e| e.into_inner());
     match guard.as_ref() {
         Some(d) => d.bind(py).clone(),
@@ -87,7 +87,7 @@ pub fn config_dict(py: Python<'_>) -> Bound<'_, PyDict> {
 #[pyfunction]
 pub fn config_set<'py>(py: Python<'py>, cf: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyDict>> {
     let d = cf
-        .downcast::<PyDict>()
+        .cast::<PyDict>()
         .map_err(|_| PyTypeError::new_err(format!("Invalid value for config: {cf}")))?
         .clone();
     *STORE.lock().unwrap_or_else(|e| e.into_inner()) = Some(d.clone().unbind());
@@ -124,10 +124,19 @@ struct Host {
 }
 
 fn config_module(py: Python<'_>) -> PyResult<&Bound<'_, PyModule>> {
-    static MODULE: GILOnceCell<Py<PyModule>> = GILOnceCell::new();
+    static MODULE: PyOnceLock<Py<PyModule>> = PyOnceLock::new();
+    if let Some(module) = MODULE.get(py) {
+        return Ok(module.bind(py));
+    }
+    // Import outside the cell: importing `meerschaum.config` can call back into `_core` (and so
+    // into this function), and a `PyOnceLock` initializer must not re-enter its own cell. Two
+    // racing threads import the same `sys.modules` entry; the first `set` wins.
+    let module = py.import("meerschaum.config")?.unbind();
+    let _ = MODULE.set(py, module);
     MODULE
-        .get_or_try_init(py, || Ok(py.import("meerschaum.config")?.unbind()))
-        .map(|m| m.bind(py))
+        .get(py)
+        .map(|module| module.bind(py))
+        .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("meerschaum.config is not cached"))
 }
 
 fn path_text(obj: &Bound<'_, PyAny>) -> PyResult<PathBuf> {
@@ -399,7 +408,7 @@ impl<'py> ToCfg<'py> {
     fn map(&mut self, dict: &Bound<'py, PyDict>, depth: usize) -> PyResult<ConfigMap> {
         let mut out = ConfigMap::with_capacity(dict.len());
         for (k, v) in dict.iter() {
-            let key = match k.downcast::<PyString>() {
+            let key = match k.cast::<PyString>() {
                 Ok(s) => s.to_str()?.to_string(),
                 Err(_) => k.str()?.to_str()?.to_string(),
             };
@@ -412,7 +421,7 @@ impl<'py> ToCfg<'py> {
         if obj.is_none() {
             return Ok(ConfigValue::Null);
         }
-        if let Ok(b) = obj.downcast::<PyBool>() {
+        if let Ok(b) = obj.cast::<PyBool>() {
             return Ok(ConfigValue::Bool(b.is_true()));
         }
         if obj.is_instance_of::<PyInt>() {
@@ -429,10 +438,10 @@ impl<'py> ToCfg<'py> {
         if obj.is_instance_of::<PyFloat>() {
             return Ok(ConfigValue::Float(obj.extract::<f64>()?));
         }
-        if let Ok(s) = obj.downcast::<PyString>() {
+        if let Ok(s) = obj.cast::<PyString>() {
             return Ok(ConfigValue::Str(s.to_str()?.to_string()));
         }
-        if let Ok(b) = obj.downcast::<PyBytes>() {
+        if let Ok(b) = obj.cast::<PyBytes>() {
             return Ok(ConfigValue::Bytes(b.as_bytes().to_vec()));
         }
         if obj.is_instance_of::<PyByteArray>() || obj.is_instance_of::<PyFrozenSet>() {
@@ -441,7 +450,7 @@ impl<'py> ToCfg<'py> {
         if depth > MAX_DEPTH {
             return self.opaque(obj);
         }
-        if let Ok(d) = obj.downcast::<PyDict>() {
+        if let Ok(d) = obj.cast::<PyDict>() {
             let mut entries: Vec<(ConfigValue, ConfigValue)> = Vec::with_capacity(d.len());
             let mut all_str = true;
             for (k, v) in d.iter() {
@@ -462,21 +471,21 @@ impl<'py> ToCfg<'py> {
                 ConfigValue::from_pairs(entries)
             });
         }
-        if let Ok(l) = obj.downcast::<PyList>() {
+        if let Ok(l) = obj.cast::<PyList>() {
             let mut items = Vec::with_capacity(l.len());
             for item in l.iter() {
                 items.push(self.value(&item, depth + 1)?);
             }
             return Ok(ConfigValue::List(items));
         }
-        if let Ok(t) = obj.downcast::<PyTuple>() {
+        if let Ok(t) = obj.cast::<PyTuple>() {
             let mut items = Vec::with_capacity(t.len());
             for item in t.iter() {
                 items.push(self.value(&item, depth + 1)?);
             }
             return Ok(ConfigValue::Tuple(items));
         }
-        if let Ok(s) = obj.downcast::<PySet>() {
+        if let Ok(s) = obj.cast::<PySet>() {
             let mut items = Vec::with_capacity(s.len());
             for item in s.iter() {
                 items.push(self.value(&item, depth + 1)?);
@@ -637,7 +646,7 @@ fn load_keys<'a>(
 ) -> PyResult<ConfigMap> {
     let mut out = ConfigMap::new();
     for (k, v) in dict.iter() {
-        let key = match k.downcast::<PyString>() {
+        let key = match k.cast::<PyString>() {
             Ok(s) => s.to_str()?.to_string(),
             Err(_) => k.str()?.to_str()?.to_string(),
         };
@@ -701,12 +710,12 @@ fn holds_symlink(obj: &Bound<'_, PyAny>, depth: usize) -> Option<bool> {
     if depth > 64 {
         return None;
     }
-    if let Ok(s) = obj.downcast::<PyString>() {
+    if let Ok(s) = obj.cast::<PyString>() {
         return Some(s.to_str().ok()?.contains(MARKER));
     }
-    if let Ok(d) = obj.downcast_exact::<PyDict>() {
+    if let Ok(d) = obj.cast_exact::<PyDict>() {
         for (k, v) in d.iter() {
-            match k.downcast::<PyString>() {
+            match k.cast::<PyString>() {
                 Ok(ks) => {
                     if ks.to_str().ok()?.contains(MARKER) {
                         return Some(true);
@@ -723,7 +732,7 @@ fn holds_symlink(obj: &Bound<'_, PyAny>, depth: usize) -> Option<bool> {
         }
         return Some(false);
     }
-    if let Ok(l) = obj.downcast_exact::<PyList>() {
+    if let Ok(l) = obj.cast_exact::<PyList>() {
         for v in l.iter() {
             if holds_symlink(&v, depth + 1)? {
                 return Some(true);
@@ -731,7 +740,7 @@ fn holds_symlink(obj: &Bound<'_, PyAny>, depth: usize) -> Option<bool> {
         }
         return Some(false);
     }
-    if let Ok(t) = obj.downcast_exact::<PyTuple>() {
+    if let Ok(t) = obj.cast_exact::<PyTuple>() {
         for v in t.iter() {
             if holds_symlink(&v, depth + 1)? {
                 return Some(true);
@@ -763,7 +772,7 @@ fn fast_lookup<'py>(
         return Ok(None);
     }
     let first = keys.get_item(0)?;
-    let Ok(first_str) = first.downcast_exact::<PyString>() else {
+    let Ok(first_str) = first.cast_exact::<PyString>() else {
         return Ok(None);
     };
     if first_str.to_str()? == meerschaum_core::static_config().config.symlinks_key {
@@ -781,7 +790,7 @@ fn fast_lookup<'py>(
         if !key.is_exact_instance_of::<PyString>() {
             return Ok(None);
         }
-        let Ok(d) = current.downcast_exact::<PyDict>() else {
+        let Ok(d) = current.cast_exact::<PyDict>() else {
             return Ok(None);
         };
         match d.get_item(&key)? {
@@ -846,7 +855,7 @@ pub fn get_config<'py>(
     }
     let keys: Vec<String> = keys
         .iter()
-        .map(|k| match k.downcast::<PyString>() {
+        .map(|k| match k.cast::<PyString>() {
             Ok(s) => Ok(s.to_str()?.to_string()),
             Err(_) => Ok(k.str()?.to_str()?.to_string()),
         })
@@ -972,7 +981,7 @@ pub fn write_plugin_config<'py>(
 ) -> PyResult<bool> {
     let keys = PyTuple::new(py, ["plugins"])?;
     let plugins = get_config(py, &keys, true, true, true, true, false, false, false)?;
-    let plugins: Bound<'py, PyDict> = match plugins.downcast_into::<PyDict>() {
+    let plugins: Bound<'py, PyDict> = match plugins.cast_into::<PyDict>() {
         Ok(d) => d,
         Err(_) => PyDict::new(py),
     };
@@ -1070,7 +1079,7 @@ pub fn write_config<'py>(
         }
     };
     let source = source
-        .downcast::<PyDict>()
+        .cast::<PyDict>()
         .map_err(|_| PyTypeError::new_err("config_dict must be a dictionary"))?
         .clone();
 
@@ -1080,7 +1089,7 @@ pub fn write_config<'py>(
     let mut writable = ConfigMap::new();
     let mut failure: Option<(String, PyErr)> = None;
     for (k, v) in source.iter() {
-        let key = match k.downcast::<PyString>() {
+        let key = match k.cast::<PyString>() {
             Ok(s) => s.to_str()?.to_string(),
             Err(_) => k.str()?.to_str()?.to_string(),
         };
@@ -1227,7 +1236,7 @@ pub fn search_and_substitute_config<'py>(
     keep_symlinks: bool,
 ) -> PyResult<Bound<'py, PyAny>> {
     let dict = config
-        .downcast::<PyDict>()
+        .cast::<PyDict>()
         .map_err(|_| PyTypeError::new_err("config must be a dictionary"))?;
     let options = SubstituteOptions {
         leading_key: leading_key.to_string(),
@@ -1276,7 +1285,7 @@ pub fn revert_symlinks_config<'py>(
     config: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
     let dict = config
-        .downcast::<PyDict>()
+        .cast::<PyDict>()
         .map_err(|_| PyTypeError::new_err("config must be a dictionary"))?;
     let symlinks_key = &meerschaum_core::static_config().config.symlinks_key;
     if !dict.contains(symlinks_key)? {

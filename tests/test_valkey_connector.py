@@ -27,6 +27,7 @@ import pytest
 
 import meerschaum as mrsm
 from meerschaum.connectors.valkey import ValkeyConnector
+from tests._binary import skip_or_fail
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
 REF_PYTHON = REPO / '.venv-ref' / 'bin' / 'python'
@@ -50,9 +51,9 @@ def _scratch() -> str:
     return str(base)
 
 
-def _v4(code: str, venvs: bool = False) -> str:
+def _v4(code: str) -> str:
     if not REF_PYTHON.exists():
-        pytest.skip("the 4.1.4 reference is not built (scripts/parity/setup_reference.sh)")
+        skip_or_fail("the 4.1.4 reference is not built (scripts/parity/setup_reference.sh)")
     root = tempfile.mkdtemp(prefix='mrsm-w16s-ref-', dir=_scratch())
     env = {
         key: val for key, val in os.environ.items()
@@ -64,16 +65,29 @@ def _v4(code: str, venvs: bool = False) -> str:
         'MRSM_NO_AUTO_INSTALL': '1',
         'MRSM_NO_UPDATE_CHECK': '1',
     })
-    ### The packages the v4 connector needs (`valkey`, `pandas`) live in the shared test venv.
-    shared = REPO / 'test_root' / 'venvs'
-    if venvs and (shared / 'mrsm').is_dir():
-        env['MRSM_VENVS_DIR'] = str(shared)
     result = subprocess.run(
         [str(REF_PYTHON), '-s', '-E', '-c', code],
         env=env, cwd=root, capture_output=True, text=True, timeout=180,
     )
     assert result.returncode == 0, result.stderr[-3000:]
     return result.stdout
+
+
+def _require_reference_valkey_client() -> None:
+    """
+    v4's connector needs the `valkey` client (and pandas for `get_data`) inside the reference
+    interpreter itself (`-s -E`: never a developer's venv); v5 needs neither `valkey` nor a venv.
+    """
+    probe = None
+    if REF_PYTHON.exists():
+        probe = subprocess.run(
+            [str(REF_PYTHON), '-s', '-E', '-c', 'import valkey, pandas'], capture_output=True,
+        )
+    if probe is None or probe.returncode != 0:
+        skip_or_fail(
+            "the 4.1.4 reference has no `valkey` client or pandas "
+            "(scripts/parity/requirements.txt; rebuild with scripts/parity/setup_reference.sh)"
+        )
 
 
 # ---------------------------------------------------------------------------------------------
@@ -628,6 +642,7 @@ def run(port, tag):
 
 
 def test_every_call_matches_the_v4_connector(conn):
+    _require_reference_valkey_client()
     tag = uuid.uuid4().hex[:6]
 
     def clean():
@@ -636,7 +651,6 @@ def test_every_call_matches_the_v4_connector(conn):
     clean()
     ref = json.loads(_v4(
         BATTERY + f"\nprint('RESULT' + json.dumps(run({PORT}, {tag!r}), default=str))\n",
-        venvs=True,
     ).split('RESULT')[-1])
     clean()
     namespace = {}
@@ -722,15 +736,13 @@ def run(port, tag):
 
 
 def test_pipe_get_data_dtypes_match_the_v4_connector(conn):
-    shared = REPO / 'test_root' / 'venvs'
-    if not (shared / 'mrsm').is_dir():
-        pytest.skip("the shared test venv (test_root/venvs/mrsm) is not built")
+    _require_reference_valkey_client()
     tag = uuid.uuid4().hex[:6]
     _delete('w16s*', 'mrsm_pipe:w16s:*')
     code = lambda t: (  # noqa: E731
         PIPE_BATTERY + f"\nprint('RESULT' + json.dumps(run({PORT}, {t!r})))\n"
     )
-    ref = json.loads(_v4(code(tag), venvs=True).split('RESULT')[-1])
+    ref = json.loads(_v4(code(tag)).split('RESULT')[-1])
     _delete('w16s*', 'mrsm_pipe:w16s:*')
     root = tempfile.mkdtemp(prefix='mrsm-w16s-child-', dir=_scratch())
     env = {
@@ -740,7 +752,7 @@ def test_pipe_get_data_dtypes_match_the_v4_connector(conn):
     env.update({
         'PYTHONPATH': str(REPO), 'MRSM_ROOT_DIR': root,
         'MRSM_PLUGINS_DIR': str(pathlib.Path(root) / 'plugins'),
-        'MRSM_NO_AUTO_INSTALL': '1', 'MRSM_VENVS_DIR': str(shared),
+        'MRSM_NO_AUTO_INSTALL': '1',
     })
     result = subprocess.run(
         [sys.executable, '-c', code(tag + 'x')], env=env, cwd=root,

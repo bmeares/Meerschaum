@@ -48,7 +48,7 @@ pub fn facade_session() -> Session {
 #[pyfunction]
 pub fn register_connector(keys: &str, connector: &Bound<'_, PyAny>) -> PyResult<bool> {
     let conn = connector
-        .downcast::<PySqlConnector>()
+        .cast::<PySqlConnector>()
         .map_err(|_| PyValueError::new_err("Expected a `_core.SqlConnector`."))?;
     Ok(facade_session()
         .register_sql(keys, conn.get().inner.clone())
@@ -67,25 +67,29 @@ pub(crate) struct PyStream(pub(crate) &'static str);
 impl Write for PyStream {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         let text = String::from_utf8_lossy(buf).into_owned();
-        Python::with_gil(|py| -> PyResult<()> {
+        // `try_attach`: the dispatcher thread may outlive the interpreter (pyo3 0.30's `attach`
+        // panics during finalization on Python 3.13+); its output is then dropped.
+        Python::try_attach(|py| -> PyResult<()> {
             let stream = py.import("sys")?.getattr(self.0)?;
             if !stream.is_none() {
                 stream.call_method1("write", (text,))?;
             }
             Ok(())
         })
+        .unwrap_or(Ok(()))
         .map_err(|e| std::io::Error::other(e.to_string()))?;
         Ok(buf.len())
     }
 
     fn flush(&mut self) -> std::io::Result<()> {
-        Python::with_gil(|py| -> PyResult<()> {
+        Python::try_attach(|py| -> PyResult<()> {
             let stream = py.import("sys")?.getattr(self.0)?;
             if !stream.is_none() && stream.hasattr("flush")? {
                 stream.call_method0("flush")?;
             }
             Ok(())
         })
+        .unwrap_or(Ok(()))
         .map_err(|e| std::io::Error::other(e.to_string()))
     }
 }
@@ -161,9 +165,9 @@ pub fn verify_pipe<'py>(
     crate::facade::suggest_worker_python(py, &session);
     let mut held = Vec::new();
     for (keys, conn) in connectors.iter() {
-        let keys = keys.downcast::<PyString>()?.to_str()?.to_string();
+        let keys = keys.cast::<PyString>()?.to_str()?.to_string();
         let conn = conn
-            .downcast::<PySqlConnector>()
+            .cast::<PySqlConnector>()
             .map_err(|_| PyValueError::new_err("Expected a `_core.SqlConnector`."))?;
         session.register_sql(&keys, conn.get().inner.clone());
         held.push((keys, conn.get().inner.clone()));
@@ -197,7 +201,7 @@ pub fn verify_pipe<'py>(
         chunksize,
         extra: crate::sync_api::kwargs_map(kwargs)?,
     };
-    let result: Result<SuccessTuple, String> = py.allow_threads(move || {
+    let result: Result<SuccessTuple, String> = py.detach(move || {
         let inst = session
             .instance(&instance_keys, &config)
             .map_err(|e| e.message)?;

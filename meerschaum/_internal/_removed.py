@@ -60,6 +60,12 @@ REMOVED: Dict[str, str] = {
     'meerschaum._internal.shell.ShellCompleter': _SHELL,
     'meerschaum._internal.shell.ValidAutoSuggest': _SHELL,
     'meerschaum._internal.shell.updates': _SHELL,
+    'meerschaum.api.dash.assets': _SERVER,
+    'meerschaum._internal.shell.resources': _SHELL,
+    'meerschaum.utils.daemon.FileDescriptorInterceptor': (
+        "Jobs run in the Rust supervisor, which owns the capture of their output: use "
+        "`meerschaum.jobs.Job` (`Job.start()`, `Job.monitor_logs()`)."
+    ),
     'meerschaum.connectors.sql._instance': (
         "The temporary-table bookkeeping of the SQL instance runs in the Rust core."
     ),

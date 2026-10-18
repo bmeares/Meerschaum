@@ -3,6 +3,7 @@
 //! Records toolchain, profile, target and feature information for `_core.build_info()`.
 //! (`static.toml` is embedded by `meerschaum-core`, which this crate depends on.)
 
+use pyo3_build_config::PythonAbiKind;
 use std::env;
 use std::process::Command;
 
@@ -32,17 +33,26 @@ fn record_build_info() {
         .collect();
     features.sort();
 
+    // The ABI the extension targets: `abi3-py311` for the stable-ABI wheels (the minimum version
+    // the `pyo3/abi3-py3XX` feature asks for, not the interpreter's), `abi3t-py3XX` for the
+    // free-threaded stable ABI, `cp3XX` / `cp3XXt` for a version-specific build.
     let pyo3_config = pyo3_build_config::get();
-    let python_abi = if pyo3_config.abi3 {
-        format!(
-            "abi3-py{}{}",
-            pyo3_config.version.major, pyo3_config.version.minor
-        )
-    } else {
-        format!(
-            "cp{}{}",
-            pyo3_config.version.major, pyo3_config.version.minor
-        )
+    let target_abi = pyo3_config.target_abi();
+    let version = target_abi.version();
+    let python_abi = match target_abi.kind() {
+        PythonAbiKind::Stable(stable) => {
+            format!("{stable}-py{}{}", version.major, version.minor)
+        }
+        PythonAbiKind::VersionSpecific(_) => format!(
+            "cp{}{}{}",
+            version.major,
+            version.minor,
+            if target_abi.kind().is_free_threaded() {
+                "t"
+            } else {
+                ""
+            }
+        ),
     };
 
     let vars = [
@@ -62,7 +72,7 @@ fn record_build_info() {
         ("MRSM_BUILD_PYTHON_ABI", python_abi),
         (
             "MRSM_BUILD_PYTHON_IMPLEMENTATION",
-            pyo3_config.implementation.to_string(),
+            pyo3_config.implementation().to_string(),
         ),
     ];
     for (key, value) in vars {

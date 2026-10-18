@@ -3,11 +3,20 @@
 mod common;
 use common::*;
 
-use meerschaum_connector::{DataQuery, DateBound};
+use meerschaum_connector::{DataQuery, DateBound, SyncOptions};
 use meerschaum_connector_sql::instance::fetch::FetchArgs;
 use meerschaum_core::dtypes::are_dtypes_equal;
+use meerschaum_kernel::enforce::PipeInput;
 use meerschaum_kernel::value::Value as KValue;
 use meerschaum_kernel::{Frame, Geometry};
+
+/// `pipe.sync(docs)` on a live `Pipe`: the sync leaves the special `dtypes` it detects (`uuid`, ...)
+/// on the caller's pipe, as the Python tests' `pipe` object keeps them for its next sync.
+async fn sync_live(c: &Ctx, pipe: &mut meerschaum_core::Pipe, docs: Vec<Doc>) {
+    ok(c.conn
+        .sync_mut(pipe, PipeInput::Docs(docs), &SyncOptions::default())
+        .await);
+}
 
 /// `df[col].tolist()`.
 fn col(df: &Frame, name: &str) -> Vec<KValue> {
@@ -700,7 +709,7 @@ flavor_tests!(test_sync_bytes_inplace, |c: Ctx| async move {
 });
 
 flavor_tests!(test_sync_uuids_simple_upsert, |c: Ctx| async move {
-    let pipe = c.pipe(
+    let mut pipe = c.pipe(
         "test",
         "uuids",
         Some("upsert"),
@@ -713,8 +722,9 @@ flavor_tests!(test_sync_uuids_simple_upsert, |c: Ctx| async move {
             ("val", uuid(val)),
         ])
     };
-    ok(c.sync(
-        &pipe,
+    sync_live(
+        &c,
+        &mut pipe,
         vec![
             row(
                 "2024-01-01",
@@ -728,9 +738,10 @@ flavor_tests!(test_sync_uuids_simple_upsert, |c: Ctx| async move {
             ),
         ],
     )
-    .await);
-    ok(c.sync(
-        &pipe,
+    .await;
+    sync_live(
+        &c,
+        &mut pipe,
         vec![
             row(
                 "2024-01-01",
@@ -744,7 +755,7 @@ flavor_tests!(test_sync_uuids_simple_upsert, |c: Ctx| async move {
             ),
         ],
     )
-    .await);
+    .await;
     assert_eq!(c.rowcount(&pipe, DataQuery::default()).await, Some(2));
     let pipe = refreshed(&c, &pipe).await;
     let df = c

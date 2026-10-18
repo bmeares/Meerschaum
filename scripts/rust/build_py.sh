@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Usage: scripts/rust/build_py.sh [--release | --debug] [--no-polars] [--no-check] [-- MATURIN_ARGS...]
+# Usage: scripts/rust/build_py.sh [--release | --debug] [--no-check] [-- MATURIN_ARGS...]
 #
 # Builds the PyO3 extension (crates/meerschaum-py) with maturin and places it in the working
 # tree at meerschaum/_core/_native.abi3.so, where `meerschaum._core` loads it from. Nothing is
@@ -8,8 +8,6 @@
 #
 #   --release    Optimized build (default). Small .so (~70 MB), slow first build.
 #   --debug      Unoptimized build, stripped of symbols (unstripped it is ~1 GB of debuginfo).
-#   --no-polars  Build without the pyo3-polars path (`_core.polars_roundtrip`, crate feature
-#                `polars`), which also skips compiling Polars (~12 MB .so).
 #   --no-check   Skip the post-build import check.
 #
 # The extension always includes the `duckdb` and `oracle` flavors (what the wheels ship). DuckDB is not
@@ -33,17 +31,15 @@ PYTHON="${PYTHON:-python3}"
 MATURIN_BIN="${MATURIN_BIN:-maturin}"
 
 profile="release"
-polars=1
 check=1
 extra=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --release) profile="release" ;;
     --debug) profile="debug" ;;
-    --no-polars) polars=0 ;;
     --no-check) check=0 ;;
     --) shift; extra+=("$@"); break ;;
-    -h|--help) sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "build_py.sh: unknown argument: $1" >&2; exit 2 ;;
   esac
   shift
@@ -77,6 +73,17 @@ fi
 # A unique directory per build, so concurrent builds never collide.
 mkdir -p "$REPO/target"
 wheel_dir="$(mktemp -d "$REPO/target/build_py_wheel.XXXXXX")"
+scratch=""
+# Remove the scratch directories on every exit path (a failed maturin run, a failed check, a signal),
+# never the extension already in the tree. Set before the first command that can fail.
+cleanup() {
+  [ -n "${wheel_dir:-}" ] && [ -d "$wheel_dir" ] && rm -rf "$wheel_dir"
+  [ -n "${scratch:-}" ] && [ -d "$scratch" ] && rm -rf "$scratch"
+  return 0
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM HUP
 args=(build --manifest-path crates/meerschaum-py/Cargo.toml --auditwheel skip --out "$wheel_dir")
 if [ "$profile" = "release" ]; then
   args+=(--release)
@@ -86,9 +93,6 @@ fi
 # A command-line `--features` REPLACES the `features` list in pyproject.toml (it does not add to
 # it), so always pass the full set. Without `extension-module` the module links libpython.
 features="pyo3/abi3-py311,extension-module,oracle"
-if [ "$polars" -eq 1 ]; then
-  features="$features,polars"
-fi
 args+=(--features "$features" -i "$(command -v "$PYTHON")")
 
 echo "==> $MATURIN_BIN ${args[*]} ${extra[*]:-}"
@@ -118,6 +122,7 @@ with zipfile.ZipFile(wheel) as zf:
 "$REPO/scripts/rust/clean_py.sh" --quiet
 mv "$wheel_dir"/x/meerschaum/_core/_native* meerschaum/_core/
 rm -rf "$wheel_dir"
+wheel_dir=""
 
 shopt -s nullglob
 built=(meerschaum/_core/_native*.so meerschaum/_core/_native*.pyd)
@@ -139,7 +144,6 @@ if [ "$check" -eq 1 ]; then
   # Importing `meerschaum._core` runs `meerschaum/__init__.py`: isolate it from real config and
   # plugins with an empty, throwaway root and plugins directory.
   scratch="$(mktemp -d)"
-  trap 'rm -rf "$scratch"' EXIT
   mkdir -p "$scratch/root" "$scratch/plugins"
   PYTHONPATH="$REPO" MRSM_ROOT_DIR="$scratch/root" \
     MRSM_PLUGINS_DIR="$scratch/plugins" "$PYTHON" - <<'EOF'

@@ -61,7 +61,7 @@ pub fn py_static_config(py: Python<'_>) -> PyResult<Option<Bound<'_, PyDict>>> {
     let tree = parse_static_toml(cpu_count)
         .map_err(|e| PyValueError::new_err(format!("Invalid embedded static.toml: {e}")))?;
     match tree {
-        Some(tree) => Ok(Some(value_to_py(py, &tree)?.downcast_into::<PyDict>()?)),
+        Some(tree) => Ok(Some(value_to_py(py, &tree)?.cast_into::<PyDict>()?)),
         None => Ok(None),
     }
 }

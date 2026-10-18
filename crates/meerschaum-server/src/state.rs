@@ -286,10 +286,8 @@ impl AppState {
         let conn = self.get_api_connector(instance_keys)?;
         let key = conn.connector_keys();
         let mut guard = self.pipes.lock().await;
-        if !refresh {
-            if let Some(d) = guard.get(&key) {
-                return Ok(d.clone());
-            }
+        if !refresh && let Some(d) = guard.get(&key) {
+            return Ok(d.clone());
         }
         let keys = conn
             .fetch_pipes_keys(&PipesKeysQuery::default())
@@ -345,16 +343,14 @@ impl AppState {
             return Err(ApiError::new(status, detail));
         }
         let dict = self.pipes(instance_keys, false).await?;
-        if !refresh {
-            if let Some(h) = dict
+        if !refresh
+            && let Some(h) = dict
                 .get(connector_keys)
                 .and_then(|m| m.get(metric_key))
                 .and_then(|l| l.get(&location_key))
-            {
-                if h.created.elapsed().as_secs_f64() < self.config.attributes_cache_seconds {
-                    return Ok(h.clone());
-                }
-            }
+            && h.created.elapsed().as_secs_f64() < self.config.attributes_cache_seconds
+        {
+            return Ok(h.clone());
         }
         let mut pipe = self.build_pipe(
             &conn,

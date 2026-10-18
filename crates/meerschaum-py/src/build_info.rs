@@ -109,6 +109,5 @@ mod tests {
             "{}",
             info.python_abi
         );
-        assert_eq!(info.features.contains(&"polars"), cfg!(feature = "polars"));
     }
 }

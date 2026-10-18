@@ -17,6 +17,24 @@ use crate::traits::{
 
 use super::APIConnector;
 
+/// After a successful drop, delete or full clear, forget the pipe's Syncing Engine state
+/// (ledger, cursors, definition hash; `pipe_ops::forget_engine_state`). The rows are keyed on
+/// this client's `pipe_ref` (`api:<label>|...`), which the server cannot derive, so the client
+/// clears them over `/engine/pipes/*`. Best effort: `res` is returned unchanged.
+async fn forget_engine_state_after(
+    conn: &APIConnector,
+    pipe: &Pipe,
+    res: SuccessTuple,
+) -> SuccessTuple {
+    if res.success {
+        let forgotten = crate::pipe_ops::forget_engine_state(conn, pipe).await;
+        if !forgotten.success {
+            tracing::warn!("{}", forgotten.message);
+        }
+    }
+    res
+}
+
 #[async_trait]
 impl Connector for APIConnector {
     fn connector_type(&self) -> &str {
@@ -109,7 +127,8 @@ impl InstanceConnector for APIConnector {
     }
 
     async fn delete_pipe(&self, pipe: &Pipe) -> SuccessTuple {
-        APIConnector::delete_pipe(self, pipe).await
+        let res = APIConnector::delete_pipe(self, pipe).await;
+        forget_engine_state_after(self, pipe, res).await
     }
 
     async fn fetch_pipes_keys(&self, query: &PipesKeysQuery) -> ConnectorResult<PipesKeys> {
@@ -121,7 +140,8 @@ impl InstanceConnector for APIConnector {
     }
 
     async fn drop_pipe(&self, pipe: &Pipe) -> SuccessTuple {
-        APIConnector::drop_pipe(self, pipe).await
+        let res = APIConnector::drop_pipe(self, pipe).await;
+        forget_engine_state_after(self, pipe, res).await
     }
 
     async fn sync_pipe(&self, pipe: &Pipe, df: Frame, opts: &SyncOptions) -> SuccessTuple {
@@ -129,7 +149,11 @@ impl InstanceConnector for APIConnector {
     }
 
     async fn clear_pipe(&self, pipe: &Pipe, query: &DataQuery) -> SuccessTuple {
-        APIConnector::clear_pipe(self, pipe, query).await
+        let res = APIConnector::clear_pipe(self, pipe, query).await;
+        if !crate::pipe_ops::is_full_clear(query) {
+            return res;
+        }
+        forget_engine_state_after(self, pipe, res).await
     }
 
     async fn get_pipe_data(

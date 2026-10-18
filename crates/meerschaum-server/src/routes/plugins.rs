@@ -78,12 +78,11 @@ async fn register_plugin(ctx: Ctx, Path(name): Path<String>, req: Request) -> Ap
     let raw_attrs = ctx.query.str_or("attributes", "{}");
     let mut attributes = Value::from_json_str(&raw_attrs)
         .map_err(|e| ApiError::exception("json.loads(attributes)", e))?;
-    if let Value::Str(s) = &attributes {
-        if s.starts_with('{') {
-            if let Ok(v) = Value::from_json_str(s) {
-                attributes = v;
-            }
-        }
+    if let Value::Str(s) = &attributes
+        && s.starts_with('{')
+        && let Ok(v) = Value::from_json_str(s)
+    {
+        attributes = v;
     }
     let conn = state.instance();
     let mut plugin = PluginRecord {
@@ -107,13 +106,13 @@ async fn register_plugin(ctx: Ctx, Path(name): Path<String>, req: Request) -> Ap
         .get_user_id(user)
         .await
         .map_err(|e| ApiError::exception("get_user_id", e))?;
-    if let Some(owner) = &plugin_user_id {
-        if Some(owner) != curr_user_id.as_ref() {
-            return Ok(tuple(
-                false,
-                format!("User '{}' cannot edit plugin '{name}'.", user.username),
-            ));
-        }
+    if let Some(owner) = &plugin_user_id
+        && Some(owner) != curr_user_id.as_ref()
+    {
+        return Ok(tuple(
+            false,
+            format!("User '{}' cannot edit plugin '{name}'.", user.username),
+        ));
     }
     plugin.user_id = curr_user_id;
     let res = conn.register_plugin(&plugin, false).await;
@@ -229,13 +228,13 @@ async fn delete_plugin(ctx: Ctx, Path(name): Path<String>) -> ApiResult {
         ));
     }
     let path = archive_path(&ctx.state, &name);
-    if path.exists() {
-        if let Err(e) = tokio::fs::remove_file(&path).await {
-            return Ok(tuple(
-                false,
-                format!("Failed to remove archive for plugin '{name}':\n{e}"),
-            ));
-        }
+    if path.exists()
+        && let Err(e) = tokio::fs::remove_file(&path).await
+    {
+        return Ok(tuple(
+            false,
+            format!("Failed to remove archive for plugin '{name}':\n{e}"),
+        ));
     }
     let res = conn.delete_plugin(&plugin).await;
     if !res.success {

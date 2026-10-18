@@ -215,13 +215,13 @@ impl DateTime {
         if self.second > 59 {
             return Err(format!("second must be in 0..59, not {}", self.second));
         }
-        if let Some(off) = self.utc_offset_us {
-            if off.abs() >= 86_400_000_000 {
-                return Err(format!(
-                    "offset must be a timedelta strictly between -timedelta(hours=24) and timedelta(hours=24), not {}",
-                    timedelta_repr(off)
-                ));
-            }
+        if let Some(off) = self.utc_offset_us
+            && off.abs() >= 86_400_000_000
+        {
+            return Err(format!(
+                "offset must be a timedelta strictly between -timedelta(hours=24) and timedelta(hours=24), not {}",
+                timedelta_repr(off)
+            ));
         }
         Ok(())
     }

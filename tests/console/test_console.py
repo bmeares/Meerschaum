@@ -129,6 +129,129 @@ def test_python_and_rust_pages_render_the_same_figure(server, tab):
     assert _errors(tab) == [], _errors(tab)
 
 
+def _mount(page, attribute: str, spec: dict, element_id: str, extra_style: str = '') -> None:
+    ### Add a page-contract element the way an HTMX swap does, then let the console render it.
+    page.evaluate(
+        """([attribute, spec, id, style]) => {
+            const el = document.createElement('div');
+            el.id = id;
+            el.style.cssText = 'width:420px;height:300px;' + style;
+            el.setAttribute(attribute, JSON.stringify(spec));
+            document.querySelector('main').append(el);
+            document.body.dispatchEvent(new Event('htmx:afterSwap', {bubbles: true}));
+        }""",
+        [attribute, spec, element_id, extra_style],
+    )
+
+
+#: A figure as plotly.js 2 / plotly.py 5 wrote it: string titles, `titlefont`, a mapbox trace.
+LEGACY_FIGURE = {
+    'data': [
+        {'type': 'bar', 'x': ['a', 'b'], 'y': [1, 2], 'name': 'bars'},
+    ],
+    'layout': {
+        'title': 'Legacy title',
+        'xaxis': {'title': 'Legacy x', 'titlefont': {'size': 18}},
+        'yaxis': {'title': {'text': 'Already current'}},
+    },
+}
+LEGACY_MAP_FIGURE = {
+    'data': [{'type': 'scattermapbox', 'lat': [10], 'lon': [20], 'mode': 'markers'}],
+    'layout': {'title': 'Legacy map', 'mapbox': {'style': 'white-bg', 'zoom': 2}},
+}
+
+
+def test_legacy_plotly_figures_are_rewritten_for_plotly_4(server, tab):
+    tab.login()
+    tab.page.goto(f"{server.base_url}/dash/w7-figure")
+    _rendered_figure(tab.page)
+    _mount(tab.page, 'data-mrsm-figure', LEGACY_FIGURE, 'legacy-bars')
+    figure = _rendered_figure(tab.page, '#legacy-bars')
+    assert figure['layout']['title']['text'] == 'Legacy title'
+    assert figure['layout']['xaxis']['title']['text'] == 'Legacy x'
+    assert figure['layout']['xaxis']['title']['font']['size'] == 18
+    assert 'titlefont' not in figure['layout']['xaxis']
+    assert figure['layout']['yaxis']['title']['text'] == 'Already current'
+    assert tab.page.locator('#legacy-bars .trace.bars .point').count() == 2
+
+    ### A mapbox trace becomes the maplibre-based `scattermap`; the `mapbox` subplot becomes `map`.
+    _mount(tab.page, 'data-mrsm-figure', LEGACY_MAP_FIGURE, 'legacy-map')
+    figure = _rendered_figure(tab.page, '#legacy-map')
+    assert figure['data'][0]['type'] == 'scattermap'
+    assert 'mapbox' not in figure['layout'] and figure['layout']['map']['zoom'] == 2
+    assert figure['layout']['title']['text'] == 'Legacy map'
+    assert _errors(tab) == [], _errors(tab)
+
+
+def test_plotly_figures_have_no_cloud_button_unless_they_ask(server, tab):
+    tab.login()
+    tab.page.goto(f"{server.base_url}/dash/w7-figure")
+    _rendered_figure(tab.page)
+    tab.page.hover('#w7-figure')
+    assert tab.page.locator('#w7-figure .modebar-btn').count() > 0
+    assert tab.page.locator('#w7-figure .modebar-btn[data-title="Share chart..."]').count() == 0
+    optin = dict(FIGURE, config={'showSendToCloud': True, 'displayModeBar': True})
+    _mount(tab.page, 'data-mrsm-figure', optin, 'cloud-optin')
+    _rendered_figure(tab.page, '#cloud-optin')
+    assert tab.page.locator('#cloud-optin .modebar-btn[data-title="Share chart..."]').count() == 1
+
+
+def test_maps_load_maplibre_on_demand_and_render(server, tab):
+    requested = []
+    tab.page.on('request', lambda r: requested.append(r.url.rsplit('/', 1)[-1].split('?')[0]))
+    tab.login()
+    tab.page.goto(f"{server.base_url}/dash/w7-figure")
+    _rendered_figure(tab.page)
+    ### MapLibre is an ES module (and a module worker): a page without a map never fetches it.
+    assert 'maplibre-gl.mjs' not in requested and 'maplibre-gl-worker.mjs' not in requested
+
+    geojson = {
+        'type': 'FeatureCollection',
+        'features': [
+            {'type': 'Feature', 'properties': {}, 'geometry': {'type': 'Point', 'coordinates': [-82.4, 34.85]}},
+        ],
+    }
+    with tab.page.expect_response(lambda r: r.url.split('?')[0].endswith('/maplibre-gl-worker.mjs')) as worker:
+        _mount(tab.page, 'data-mrsm-map', dict(geojson, center=[-82.4, 34.85], zoom=6), 'geo-map')
+        tab.page.wait_for_selector('#geo-map[data-rendered=true]')
+    assert worker.value.status == 200
+    assert 'text/javascript' in worker.value.headers['content-type']
+    tab.page.wait_for_selector('#geo-map canvas.maplibregl-canvas')
+    assert tab.page.locator('#geo-map .maplibregl-ctrl-zoom-in').count() == 1
+
+    ### A layer spec: any style document (here one with no network sources).
+    style = {
+        'version': 8, 'sources': {},
+        'layers': [{'id': 'bg', 'type': 'background', 'paint': {'background-color': '#dde7ee'}}],
+    }
+    _mount(tab.page, 'data-mrsm-map', {'style': style, 'center': [0, 0], 'zoom': 2}, 'style-map')
+    tab.page.wait_for_selector('#style-map[data-rendered=true]')
+    tab.page.wait_for_selector('#style-map canvas.maplibregl-canvas')
+    assert 'Map could not be displayed' not in tab.page.inner_text('main')
+    assert requested.count('maplibre-gl.mjs') == 1
+    assert _errors(tab) == [], _errors(tab)
+
+
+def test_assets_are_served_gzip_with_validators(server, context):
+    page = context.new_page()
+    url = f"{server.base_url}/dash/assets/plotly.min.js"
+    packed = page.request.get(url, headers={'Accept-Encoding': 'gzip'})
+    assert packed.status == 200
+    assert packed.headers['content-encoding'] == 'gzip'
+    assert packed.headers['vary'] == 'Accept-Encoding'
+    assert packed.headers['cache-control'] == 'no-cache'
+    assert int(packed.headers['content-length']) < 2_000_000
+    plain = page.request.get(url, headers={'Accept-Encoding': 'identity'})
+    assert 'content-encoding' not in plain.headers
+    assert int(plain.headers['content-length']) == len(plain.body()) > 4_000_000
+    assert packed.body() == plain.body()
+    assert packed.headers['etag'] != plain.headers['etag']
+    revalidated = page.request.get(
+        url, headers={'Accept-Encoding': 'gzip', 'If-None-Match': packed.headers['etag']},
+    )
+    assert revalidated.status == 304 and revalidated.body() == b''
+
+
 def test_plugin_owned_dash_app_fires_a_callback(server, tab):
     tab.login()
     tab.page.goto(f"{server.base_url}/dash/w7_dashapp/w7-dash")
@@ -298,6 +421,7 @@ def test_pipelines_page_graph_gantt_and_live_updates(server, tab):
     ### planner's end times, which the run rows do not carry yet).
     tab.page.wait_for_selector('#pipeline-gantt [data-mrsm-figure][data-rendered=true]')
     assert tab.page.locator('#pipeline-gantt .trace.bars .point').count() >= 2
+    assert tab.page.text_content('#pipeline-gantt .gtitle').startswith('Run ')
     assert tab.page.locator('#pipeline-gantt table tbody tr').count() == 2
     assert 'succeeded' in tab.page.inner_text('#pipeline-gantt table tbody')
     ### The runs table, and the run's events over SSE.

@@ -24,6 +24,28 @@ The following database flavors are confirmed to be feature-complete through the 
 - Microsoft SQL Server
 - Oracle SQL
 
+PostGIS and GeoPackage are supported for `geometry` columns. Two flavors need a native library that is **not** bundled with Meerschaum and is loaded at run time:
+
+### DuckDB
+
+The `duckdb` flavor uses DuckDB's own shared library (`libduckdb`, version 1.4 or newer). The first time you connect, Meerschaum downloads the official release for your platform into `<root>/drivers/` and verifies its checksum. Nothing else needs to be installed.
+
+- `mrsm install driver duckdb` downloads it ahead of time; `mrsm uninstall driver duckdb` removes the cached copy.
+- `mrsm show drivers` reports whether DuckDB (and the Oracle client) can be found, and where.
+- On an air-gapped host, or with [`MRSM_NO_AUTO_INSTALL`](/reference/environment/#mrsm_no_auto_install) set (which blocks the download, and DuckDB's extension auto-install), point [`MRSM_DUCKDB_LIB`](/reference/environment/#mrsm_duckdb_lib) at a `libduckdb` file you copied there.
+
+### Oracle SQL
+
+The `oracle` flavor needs [Oracle Instant Client](https://www.oracle.com/database/technologies/instant-client.html) (the `libclntsh` library) installed on the machine; Meerschaum cannot download it for you. Make it visible to the loader:
+
+| Platform | Make the client library findable |
+|---|---|
+| Linux | Add its directory to `ldconfig` (e.g. a file in `/etc/ld.so.conf.d/` followed by `ldconfig`) or set `LD_LIBRARY_PATH`. |
+| macOS | Set `DYLD_LIBRARY_PATH` to the Instant Client directory. |
+| Windows | Add the Instant Client directory (containing `oci.dll`) to `PATH`. |
+
+`mrsm show drivers` tells you whether the library was found.
+
 ## In-place Syncs
 
 When a pipe has the same fetch and instance connectors, syncing will occur entirely within the database context through SQL. As such, this is a high-performance method to incrementally materialize views.

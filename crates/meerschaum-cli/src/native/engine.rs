@@ -291,10 +291,10 @@ impl meerschaum_engine::PluginSync for Inplace {
             .await;
         let mut result =
             meerschaum_engine::sync::result_from_message(result.success, result.message);
-        if result.success {
-            if let Err(e) = observer.after_commit(pipe, &result).await {
-                result = meerschaum_core::success::SyncResult::new(false, e);
-            }
+        if result.success
+            && let Err(e) = observer.after_commit(pipe, &result).await
+        {
+            result = meerschaum_core::success::SyncResult::new(false, e);
         }
         result
     }

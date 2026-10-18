@@ -373,6 +373,10 @@ impl SqlConnector {
                     }
                     // Oracle has no unsized `VARCHAR` (`ORA-00906`), and `LIKE` reads the `CLOB` directly.
                     Flavor::Oracle => format!("{table}.parameters"),
+                    // PARITY: SQLAlchemy renders `cast(col, String)` as `CAST(col AS VARCHAR(max))` on
+                    // MSSQL (`MSTypeCompiler.visit_VARCHAR`); a bare `VARCHAR` is `VARCHAR(30)` there
+                    // and truncates the parameters before the tags.
+                    Flavor::Mssql => format!("CAST({table}.parameters AS VARCHAR(max))"),
                     _ => format!("CAST({table}.parameters AS VARCHAR)"),
                 };
                 let sub_ands: Vec<String> = inc

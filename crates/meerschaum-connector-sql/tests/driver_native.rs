@@ -232,6 +232,58 @@ async fn mssql_driver() {
         .await
         .unwrap();
     assert_eq!(v, Some(SqlValue::Bytes(vec![1, 2])));
+
+    // `sql <label> "CREATE VIEW ... AS SELECT ..."` reaches the driver through `read` (v4 routes any
+    // query containing `select` there): batch-leading statements run as is, like pyodbc's
+    // `cursor.execute`, instead of nesting in `sp_executesql` ("Incorrect syntax near the keyword
+    // 'VIEW'"). They return no rows.
+    let tag = &uuid::Uuid::new_v4().simple().to_string()[..8];
+    let (view, view2, proc_) = (
+        format!("w17bo_v_{tag}"),
+        format!("w17bo_v2_{tag}"),
+        format!("w17bo_p_{tag}"),
+    );
+    let exists = |kind: &'static str, name: String| {
+        let driver = &driver;
+        async move {
+            driver
+                .value(&format!(
+                    "SELECT COUNT(*) FROM sys.{kind} WHERE name = '{name}'"
+                ))
+                .await
+                .unwrap()
+                .and_then(|v| v.as_i64())
+        }
+    };
+    for statement in [
+        format!("CREATE VIEW dbo.{view} AS SELECT 1 AS a"),
+        format!("CREATE OR ALTER VIEW dbo.{view2} AS SELECT 1 AS a"),
+        format!("CREATE PROCEDURE dbo.{proc_} AS SELECT 1 AS a"),
+    ] {
+        let frame = driver
+            .read_frame(&statement)
+            .await
+            .unwrap_or_else(|e| panic!("{statement}: {e}"));
+        assert_eq!(frame.height(), 0, "{statement}");
+    }
+    assert_eq!(exists("views", view.clone()).await, Some(1));
+    assert_eq!(exists("views", view2.clone()).await, Some(1));
+    assert_eq!(exists("procedures", proc_.clone()).await, Some(1));
+    // A reading `SELECT` still returns its rows, and the views read back.
+    let frame = driver
+        .read_frame(&format!("SELECT * FROM dbo.{view}"))
+        .await
+        .unwrap();
+    assert_eq!(frame.height(), 1);
+    driver.exec(&format!("DROP VIEW dbo.{view}")).await.unwrap();
+    driver
+        .exec(&format!("DROP VIEW dbo.{view2}"))
+        .await
+        .unwrap();
+    driver
+        .exec(&format!("DROP PROCEDURE dbo.{proc_}"))
+        .await
+        .unwrap();
 }
 
 #[cfg(feature = "duckdb")]
@@ -255,4 +307,89 @@ async fn oracle_driver() {
         return;
     };
     exercise(&driver, |s| format!("\"{s}\""), |n| format!(":{n}")).await;
+
+    // An unconstrained `NUMBER` (`COUNT(*)`, expressions) reads as python-oracledb gives it: an int
+    // when every value is integral, a float when one has a fraction; declared precision / scale keeps
+    // its decimal.
+    let df = driver
+        .read_frame("SELECT COUNT(*) AS n, 1 + 1 AS two, 3 / 2 AS frac, CAST(1.25 AS NUMBER(10, 2)) AS d FROM dual")
+        .await
+        .unwrap();
+    let dtypes = df.dtypes();
+    assert_eq!(dtypes["n"], "int64", "{dtypes:?}");
+    assert_eq!(dtypes["two"], "int64", "{dtypes:?}");
+    assert_eq!(dtypes["frac"], "float64", "{dtypes:?}");
+    assert_eq!(dtypes["d"], "object", "{dtypes:?}");
+    assert_eq!(df.data("n").unwrap().values()[0].py_str(), "1");
+    assert_eq!(df.data("frac").unwrap().values()[0].py_str(), "1.5");
+    // An integral value too big for an `i64` keeps its exact digits.
+    let big = driver
+        .read_frame("SELECT 12345678901234567890 AS big FROM dual")
+        .await
+        .unwrap();
+    assert_eq!(
+        big.data("big").unwrap().values()[0].py_str(),
+        "12345678901234567890"
+    );
+    assert_eq!(big.dtypes()["big"], "object");
+    // A stream handed out batch by batch keeps one schema whatever later chunks hold: the column is
+    // exact decimal text (never cast down), here ints and then a float / a huge integer.
+    for (last, expected) in [
+        ("2.5", vec!["1", "2", "2.5"]),
+        (
+            "12345678901234567890",
+            vec!["1", "2", "12345678901234567890"],
+        ),
+    ] {
+        let sql = format!(
+            "SELECT n FROM (SELECT 1 AS n, 1 AS o FROM dual UNION ALL SELECT 2, 2 FROM dual UNION ALL SELECT {last}, 3 FROM dual) ORDER BY o"
+        );
+        let stream = driver.read_stream(&sql, 1).await.unwrap();
+        let schema = stream.schema();
+        let batches = stream.collect_batches().await.unwrap();
+        assert_eq!(batches.len(), 3);
+        assert!(batches.iter().all(|b| b.schema() == schema), "{schema:?}");
+        assert_eq!(schema.field(0).data_type(), &DataType::Utf8);
+        let values: Vec<String> = batches
+            .iter()
+            .map(|b| {
+                b.column(0)
+                    .as_any()
+                    .downcast_ref::<StringArray>()
+                    .unwrap()
+                    .value(0)
+                    .to_string()
+            })
+            .collect();
+        assert_eq!(values, expected);
+    }
+    // A result collected as a frame is typed from all of its values, across chunks of rows
+    // (`DEFAULT_CHUNKSIZE` is 100000): ints and then one float give float64, ints and then a huge
+    // integer keep every digit.
+    let spanning = |last: &str| {
+        format!(
+            "SELECT CASE WHEN LEVEL = 100001 THEN {last} ELSE LEVEL END AS n FROM dual CONNECT BY LEVEL <= 100001"
+        )
+    };
+    let df = driver.read_frame(&spanning("2.5")).await.unwrap();
+    assert_eq!(df.dtypes()["n"], "float64");
+    let values = df.data("n").unwrap().values();
+    assert_eq!(values.len(), 100_001);
+    assert_eq!(values[0].py_str(), "1.0");
+    assert_eq!(values[99_999].py_str(), "100000.0");
+    assert_eq!(values[100_000].py_str(), "2.5");
+    let df = driver
+        .read_frame(&spanning("12345678901234567890"))
+        .await
+        .unwrap();
+    assert_eq!(df.dtypes()["n"], "object");
+    let values = df.data("n").unwrap().values();
+    assert_eq!(values[0].py_str(), "1");
+    assert_eq!(values[100_000].py_str(), "12345678901234567890");
+    // Integral chunks stay `int64`.
+    let ints = driver
+        .read_frame("SELECT 1 AS n FROM dual UNION ALL SELECT 2 FROM dual")
+        .await
+        .unwrap();
+    assert_eq!(ints.dtypes()["n"], "int64");
 }

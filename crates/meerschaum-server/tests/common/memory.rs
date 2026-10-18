@@ -126,17 +126,16 @@ fn bound_cmp(cell: &KValue, bound: &DateBound) -> Option<std::cmp::Ordering> {
 fn row_matches(doc: &Doc, query: &DataQuery, dt_col: Option<&str>) -> bool {
     if let Some(dt) = dt_col {
         let cell = doc.get(dt).cloned().unwrap_or(KValue::Null);
-        if let Some(b) = &query.begin {
-            if bound_cmp(&cell, b) != Some(std::cmp::Ordering::Greater)
-                && bound_cmp(&cell, b) != Some(std::cmp::Ordering::Equal)
-            {
-                return false;
-            }
+        if let Some(b) = &query.begin
+            && bound_cmp(&cell, b) != Some(std::cmp::Ordering::Greater)
+            && bound_cmp(&cell, b) != Some(std::cmp::Ordering::Equal)
+        {
+            return false;
         }
-        if let Some(e) = &query.end {
-            if bound_cmp(&cell, e) != Some(std::cmp::Ordering::Less) {
-                return false;
-            }
+        if let Some(e) = &query.end
+            && bound_cmp(&cell, e) != Some(std::cmp::Ordering::Less)
+        {
+            return false;
         }
     }
     if let Some(params) = &query.params {

@@ -109,12 +109,12 @@ fn normalize_string_series(s: &polars::prelude::Series) -> polars::prelude::Seri
     let Ok(chunked) = s.str() else {
         return s.clone();
     };
-    if !chunked.into_iter().flatten().any(is_na_string) {
+    if !chunked.iter().flatten().any(is_na_string) {
         return s.clone();
     }
     StringChunked::from_iter_options(
         s.name().clone(),
-        chunked.into_iter().map(|v| v.filter(|t| !is_na_string(t))),
+        chunked.iter().map(|v| v.filter(|t| !is_na_string(t))),
     )
     .into_series()
 }
@@ -278,27 +278,15 @@ fn typed_key(s: &polars::prelude::Series) -> Option<KeyCol<'_>> {
     Some(match s.dtype() {
         D::Int8 | D::Int16 | D::Int32 | D::Int64 | D::UInt8 | D::UInt16 | D::UInt32 => {
             let ints = s.cast(&D::Int64).ok()?;
-            KeyCol::Int(ints.i64().ok()?.into_iter().collect())
+            KeyCol::Int(ints.i64().ok()?.iter().collect())
         }
         // `Value::Int(v as i64)`: the wrap-around is injective, so equality is unchanged.
-        D::UInt64 => KeyCol::Int(
-            s.u64()
-                .ok()?
-                .into_iter()
-                .map(|v| v.map(|x| x as i64))
-                .collect(),
-        ),
-        D::Boolean => KeyCol::Int(
-            s.bool()
-                .ok()?
-                .into_iter()
-                .map(|v| v.map(i64::from))
-                .collect(),
-        ),
+        D::UInt64 => KeyCol::Int(s.u64().ok()?.iter().map(|v| v.map(|x| x as i64)).collect()),
+        D::Boolean => KeyCol::Int(s.bool().ok()?.iter().map(|v| v.map(i64::from)).collect()),
         D::Datetime(..) | D::Date => {
             let phys = s.to_physical_repr().into_owned();
             let ints = phys.cast(&D::Int64).ok()?;
-            KeyCol::Int(ints.i64().ok()?.into_iter().collect())
+            KeyCol::Int(ints.i64().ok()?.iter().collect())
         }
         D::Float32 | D::Float64 => {
             let floats = s.cast(&D::Float64).ok()?;
@@ -306,7 +294,7 @@ fn typed_key(s: &polars::prelude::Series) -> Option<KeyCol<'_>> {
                 floats
                     .f64()
                     .ok()?
-                    .into_iter()
+                    .iter()
                     .map(|v| {
                         v.filter(|f| !f.is_nan())
                             .map(|f| if f == 0.0 { 0u64 } else { f.to_bits() })
@@ -317,11 +305,11 @@ fn typed_key(s: &polars::prelude::Series) -> Option<KeyCol<'_>> {
         D::String => KeyCol::Str(
             s.str()
                 .ok()?
-                .into_iter()
+                .iter()
                 .map(|v| v.filter(|t| !is_na_string(t)))
                 .collect(),
         ),
-        D::Binary => KeyCol::Bytes(s.binary().ok()?.into_iter().collect()),
+        D::Binary => KeyCol::Bytes(s.binary().ok()?.iter().collect()),
         _ => return None,
     })
 }
@@ -607,10 +595,10 @@ pub fn filter_unseen_df(old: Option<&Frame>, new: &Frame, opts: &FilterUnseenOpt
     if cast_cols {
         for (col, spec) in &dtypes {
             for frame in [&mut new, &mut old] {
-                if let Ok(data) = frame.data(col) {
-                    if let Ok(d) = cast_column(data, spec, col) {
-                        let _ = frame.set(col, d);
-                    }
+                if let Ok(data) = frame.data(col)
+                    && let Ok(d) = cast_column(data, spec, col)
+                {
+                    let _ = frame.set(col, d);
                 }
             }
         }
@@ -663,10 +651,10 @@ pub fn filter_unseen_df(old: Option<&Frame>, new: &Frame, opts: &FilterUnseenOpt
             .collect();
         for col in dt_frame_cols {
             let strip = strip_for(&dtypes, &col);
-            if let Ok(data) = frame.data(&col) {
-                if let Ok(d) = series_coerce_timezone(data, strip) {
-                    let _ = frame.set(&col, d);
-                }
+            if let Ok(data) = frame.data(&col)
+                && let Ok(d) = series_coerce_timezone(data, strip)
+            {
+                let _ = frame.set(&col, d);
             }
         }
     }
@@ -772,10 +760,10 @@ pub fn filter_unseen_df(old: Option<&Frame>, new: &Frame, opts: &FilterUnseenOpt
         if delta_geometry.contains(col) || !delta.contains(col) {
             continue;
         }
-        if let Some(column) = delta.column(col).cloned() {
-            if let Ok(c) = series_attempt_cast_to_geometry(&column) {
-                let _ = delta.set_column(c);
-            }
+        if let Some(column) = delta.column(col).cloned()
+            && let Ok(c) = series_attempt_cast_to_geometry(&column)
+        {
+            let _ = delta.set_column(c);
         }
     }
     delta
@@ -1054,16 +1042,19 @@ pub fn filter_existing(
     // PARITY: v4 drops an all-null autoincrement / autotime column and then pops the column
     // *name* from the role-keyed `columns` dict, which is a no-op
     // (meerschaum/core/Pipe/_sync.py, `filter_existing`).
-    if let Some(pk) = &primary {
-        if params.autoincrement && df.contains(pk) && df.data(pk)?.is_null_mask().iter().all(|n| *n)
-        {
-            df.drop(pk);
-        }
+    if let Some(pk) = &primary
+        && params.autoincrement
+        && df.contains(pk)
+        && df.data(pk)?.is_null_mask().iter().all(|n| *n)
+    {
+        df.drop(pk);
     }
-    if let Some(dt) = &dt_col {
-        if params.autotime && df.contains(dt) && df.data(dt)?.is_null_mask().iter().all(|n| *n) {
-            df.drop(dt);
-        }
+    if let Some(dt) = &dt_col
+        && params.autotime
+        && df.contains(dt)
+        && df.data(dt)?.is_null_mask().iter().all(|n| *n)
+    {
+        df.drop(dt);
     }
 
     if df.is_empty() {

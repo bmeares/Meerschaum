@@ -18,6 +18,7 @@ import meerschaum as mrsm
 from meerschaum import _core
 from meerschaum.core.Pipe._sync import SyncResult
 
+from tests._pipeline_diag import why
 from tests.connectors import conns
 
 pytestmark = pytest.mark.skipif(
@@ -105,17 +106,7 @@ def _build_chain():
     conn.exec_queries([f"DROP TABLE IF EXISTS {SOURCE_TABLE}"], silent=True)
 
 
-def _why(run):
-    """
-    The run message plus every node that did not succeed (the summary alone says only
-    `1 failed, 1 upstream_failed`).
-    """
-    failed = [
-        (o['pipe_ref'], o.get('status'), (o.get('result') or {}).get('message'))
-        for o in getattr(run, 'outcomes', [])
-        if not (o.get('result') or {}).get('success')
-    ]
-    return f"{run.message}; failed nodes: {failed}"
+_why = why
 
 
 def _statuses(run):
@@ -132,9 +123,9 @@ def _rowcounts(*pipes):
 def test_children_true_runs_the_whole_chain(chain):
     raw, clean, daily = chain
     run = raw.sync(children=True)
-    assert run[0] is True, run[1]
+    assert run[0] is True, _why(run)
     assert isinstance(run, tuple) and len(run) == 2
-    assert run.success is True
+    assert run.success is True, _why(run)
     assert run.run_id
     assert [o['pipe_ref'].split('|')[2] for o in run.outcomes] == ['w8_raw', 'w8_clean', 'w8_daily']
     assert all(o['result']['success'] for o in run.outcomes)
@@ -151,7 +142,8 @@ def test_children_true_runs_the_whole_chain(chain):
 
 def test_second_run_skips_caught_up_children(chain):
     raw, clean, daily = chain
-    assert raw.sync(children=True).success
+    run = raw.sync(children=True)
+    assert run.success, _why(run)
     run = raw.sync(children=True)
     assert run.success, _why(run)
     statuses = _statuses(run)
@@ -176,7 +168,8 @@ def test_parents_true_syncs_the_ancestors_first(chain):
 
 def test_depth_limits(chain):
     raw, clean, daily = chain
-    assert raw.sync(children=True).success
+    run = raw.sync(children=True)
+    assert run.success, _why(run)
     _insert(conns['sqlite'], [('2024-01-01 03:00:00', 'b', 4)])
 
     ### `children=1` stops at the direct child.

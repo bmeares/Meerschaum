@@ -128,7 +128,7 @@ fn is_handler(action: &libc::sigaction) -> bool {
 /// caller which keeps running (`Shell.cmdloop()` from a REPL).
 struct Restore<'py> {
     py: Python<'py>,
-    sigint: Option<PyObject>,
+    sigint: Option<Py<PyAny>>,
     /// The caller's OS-level action of SIGTERM (SIGINT's is Python's, put back through `signal`).
     #[cfg(unix)]
     sigterm: Option<libc::sigaction>,
@@ -142,7 +142,7 @@ impl<'py> Restore<'py> {
     fn enter(py: Python<'py>) -> Restore<'py> {
         let mut sigint = None;
         if let Ok(signal) = py.import("signal") {
-            let swap = || -> PyResult<Option<PyObject>> {
+            let swap = || -> PyResult<Option<Py<PyAny>>> {
                 let number = signal.getattr("SIGINT")?;
                 let current = signal.call_method1("getsignal", (&number,))?;
                 // Only Python's own `KeyboardInterrupt` handler is replaced: an inherited
@@ -273,7 +273,7 @@ pub fn main(py: Python<'_>, argv: Bound<'_, PyList>) -> PyResult<i32> {
     // action to stop, the second exits), as in the standalone binary; the extension's default is
     // that Python owns them.
     meerschaum_cli::native::jobs::set_embedded(false);
-    let rc = py.allow_threads(|| {
+    let rc = py.detach(|| {
         let rc = meerschaum_cli::run_cli(&argv);
         let _ = std::io::Write::flush(&mut std::io::stdout());
         rc

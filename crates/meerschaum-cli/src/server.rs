@@ -10,7 +10,7 @@ use meerschaum_server::host::{
     FileManifest, HostLauncher, HostManifest, HostProcess, HostSupervisor, PythonHostLauncher,
     SupervisorOptions, default_socket_path, spawn_manifest_watcher,
 };
-use meerschaum_server::mcp::{McpBackend, McpServer, SqlReadError};
+use meerschaum_server::mcp::{ConnectorRegister, McpBackend, McpServer, SqlReadError};
 use meerschaum_server::{AppState, ServerConfig, ServerFlags};
 
 use crate::builtin::{ActionError, ActionResult};
@@ -105,6 +105,9 @@ pub fn start_mcp(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
 }
 
 fn start(args: &ArgsMap, rt: &mut Runtime<'_>, stdio: bool) -> ActionResult {
+    // The server waits on SIGINT / SIGTERM itself (`shutdown_signal`): the spinner of its startup
+    // must not take them.
+    crate::native::jobs::own_signals();
     // A server prints nothing between requests: the API client's warnings go to `tracing`.
     crate::native::api_warnings::uninstall();
     let config = ServerConfig::from_config(rt.config(), &flags(args)?);
@@ -153,9 +156,16 @@ fn start(args: &ArgsMap, rt: &mut Runtime<'_>, stdio: bool) -> ActionResult {
     let jobs = Arc::new(crate::jobs_backend::LocalJobsBackend::new(
         crate::native::jobs::jobs_context(rt),
     ));
+    // Engine state (`/engine/*`, §5.8 R2) persists on the server's own instance, so an API
+    // instance's ledger, cursors, runs and leases survive a restart.
+    let engine_store = Arc::new(meerschaum_server::engine_store::InstanceEngine::new(
+        instance.conn(),
+        &instance.keys(),
+    ));
     let state = AppState::builder(config, instance.conn())
         .actions(backend.clone())
         .jobs(jobs)
+        .engine(engine_store)
         .host(Arc::new(meerschaum_server::proxy::HostProxy::supervised(
             supervisor.clone(),
         )))
@@ -450,6 +460,31 @@ impl meerschaum_server::backends::ActionsBackend for NativeBackend {
 
 #[async_trait]
 impl McpBackend for NativeBackend {
+    /// `Pipe.register()`'s connector half through the session's Python worker (the same ask as
+    /// `register pipes`), so the MCP `register_pipe` tool and `mrsm register pipes` agree.
+    async fn connector_register(&self, pipe: &Pipe) -> ConnectorRegister {
+        let backend = self.clone();
+        let pipe = pipe.clone();
+        tokio::task::spawn_blocking(move || {
+            let Ok(config) = backend.config() else {
+                return ConnectorRegister::Undefined;
+            };
+            match native::manage::ask_connector_register(&backend.session, &config, &pipe) {
+                None => ConnectorRegister::Undefined,
+                Some(Ok(outcome)) if outcome.valid => {
+                    ConnectorRegister::Parameters(outcome.parameters)
+                }
+                Some(Ok(outcome)) => ConnectorRegister::Invalid(outcome.repr),
+                Some(Err(error)) => {
+                    tracing::warn!("`register()` failed for {pipe}: {error}");
+                    ConnectorRegister::Undefined
+                }
+            }
+        })
+        .await
+        .unwrap_or(ConnectorRegister::Undefined)
+    }
+
     async fn sync_pipe(
         &self,
         pipe: &Pipe,

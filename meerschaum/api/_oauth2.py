@@ -24,17 +24,15 @@ fastapi, starlette = attempt_import(
 fastapi_responses = attempt_import(
     'fastapi.responses', lazy=False, check_update=CHECK_UPDATE, **_IMPORT_KW,
 )
-fastapi_login = attempt_import(
-    'fastapi_login', lazy=False, check_update=CHECK_UPDATE, **_IMPORT_KW,
+jwt = attempt_import(
+    'jwt', lazy=False, check_update=CHECK_UPDATE, **_IMPORT_KW,
 )
-jose_jwt, jose_exceptions = attempt_import(
-    'jose.jwt', 'jose.exceptions', lazy=False, check_update=CHECK_UPDATE, **_IMPORT_KW,
-)
-if fastapi_login is None or jose_jwt is None or jose_exceptions is None:
+if jwt is None:
     raise ImportError(
-        "`meerschaum.api` needs `fastapi-login` and `python-jose`: install the `api` extra "
+        "`meerschaum.api` needs `PyJWT`: install the `api` extra "
         "(`pip install \"meerschaum[api]\"`)."
     )
+### v4 validated with `python-jose`; PyJWT validates the same HS256 tokens.
 from fastapi import Depends, HTTPException, Request
 from starlette import status
 
@@ -184,8 +182,8 @@ def get_granted_scopes(
         )
 
     try:
-        payload = jose_jwt.decode(token_str, SECRET, algorithms=['HS256'])
-    except jose_exceptions.JWTError:
+        payload = decode_jwt(token_str)
+    except jwt.PyJWTError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid access token.",
@@ -252,7 +250,17 @@ def ScopedAuth(scopes: List[str]):
     return _authenticate
 
 
-LoginManager = fastapi_login.LoginManager
+from meerschaum.api._login import LoginManager
+
+
+def decode_jwt(token: str) -> dict:
+    """
+    Validate a JWT signed with the API secret (HS256) and return its claims.
+    Raises `jwt.PyJWTError` when the signature, expiry or format is invalid.
+    """
+    return jwt.decode(token, SECRET, algorithms=['HS256'])
+
+
 def generate_secret_key() -> bytes:
     """
     Read or generate the secret keyfile.

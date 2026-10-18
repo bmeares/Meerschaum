@@ -87,10 +87,11 @@ impl PipeId {
     /// Parse a key as Python does for the dict form of `fetch_pipes_keys`
     /// (`int(k) if str(k).isdigit() else k`).
     pub fn parse(s: &str) -> PipeId {
-        if !s.is_empty() && s.chars().all(|c| c.is_ascii_digit()) {
-            if let Ok(i) = s.parse() {
-                return PipeId::Int(i);
-            }
+        if !s.is_empty()
+            && s.chars().all(|c| c.is_ascii_digit())
+            && let Ok(i) = s.parse()
+        {
+            return PipeId::Int(i);
         }
         PipeId::Str(s.to_string())
     }
@@ -697,6 +698,20 @@ pub trait InstanceConnector: Connector {
         ))
     }
 
+    /// `apply_compression_policy(pipe)`: idempotently install the pipe's compression policy.
+    /// `Pipe.sync()` calls it after a successful sync when `compress` is set; instances without
+    /// one (v4: no such method) do nothing.
+    async fn apply_compression_policy(&self, pipe: &Pipe) -> SuccessTuple {
+        let _ = pipe;
+        SuccessTuple::success()
+    }
+
+    /// `get_tables(mrsm_instance=self, create=True)`: create the internal instance tables
+    /// (`POST /metadata`). Instances without tables of their own answer `true`.
+    async fn create_instance_tables(&self) -> ConnectorResult<bool> {
+        Ok(true)
+    }
+
     /// Decompress a pipe's target table, the inverse of `compress_pipe()`. `no_policy` keeps the
     /// compression policy in place.
     async fn decompress_pipe(&self, pipe: &Pipe, no_policy: bool) -> SuccessTuple {
@@ -764,6 +779,19 @@ pub trait InstanceConnector: Connector {
             "Leases are not implemented for instance connectors of type '{}'.",
             self.connector_type()
         )))
+    }
+
+    /// The Syncing Engine's state pipe `mrsm:<metric_key>` on this instance (§5.8), keyed under
+    /// `instance_keys`; `None` for a metric that is not engine state. The default keeps it
+    /// beside the instance's other tables (target `mrsm_<metric_key>`,
+    /// [`pipe_ops::engine_state_pipe`]); the SQL connector places it in the internal schema,
+    /// namespaced by the instance schema.
+    async fn engine_state_pipe(
+        &self,
+        instance_keys: &str,
+        metric_key: &str,
+    ) -> ConnectorResult<Option<Pipe>> {
+        Ok(pipe_ops::engine_state_pipe(instance_keys, metric_key))
     }
 
     // ----------------------------------------------------------------------------------------
@@ -1034,6 +1062,14 @@ pub trait InstanceConnector: Connector {
                 Some(Value::List(items)) => {
                     items.iter().map(meerschaum_core::pyfmt::py_str).collect()
                 }
+                // FIX (intentional v4 change): an instance that returns the `json` column as
+                // text (SQLite) used to give the raw string, which v4 compared by substring.
+                Some(Value::Str(text)) => match Value::from_json_str(&text) {
+                    Ok(Value::List(items)) => {
+                        items.iter().map(meerschaum_core::pyfmt::py_str).collect()
+                    }
+                    _ => Vec::new(),
+                },
                 _ => Vec::new(),
             },
         )

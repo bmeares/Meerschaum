@@ -15,10 +15,13 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use indexmap::IndexMap;
 use meerschaum_connector::InstanceConnector;
+use meerschaum_connector::pipe_ops::Doc;
+use meerschaum_connector_api::engine_pipes::EnginePipeQuery;
 use meerschaum_connector_api::models::{
     EdgeCursor, EngineEvent, EngineState, LedgerEntry, RunRecord,
 };
 use meerschaum_core::{Map, SuccessTuple};
+use meerschaum_kernel::Frame;
 use serde_json::Value as Json;
 use tokio::sync::mpsc;
 
@@ -211,6 +214,60 @@ pub trait EngineBackend: Send + Sync {
     async fn acquire_lease(&self, pipe_ref: &str, holder: &str, ttl: Duration) -> bool;
     /// `DELETE /engine/leases`.
     async fn release_lease(&self, pipe_ref: &str, holder: &str) -> bool;
+
+    /// `POST /engine/pipes/{metric}/read`: rows of an engine state pipe (`None`: none).
+    /// The default (no instance behind the store) is [`EngineStoreError::Unavailable`].
+    async fn read_pipe(
+        &self,
+        metric: &str,
+        query: &EnginePipeQuery,
+    ) -> Result<Option<Frame>, EngineStoreError> {
+        let _ = (metric, query);
+        Err(EngineStoreError::Unavailable)
+    }
+    /// `POST /engine/pipes/{metric}/write`: append (upsert for the upsert pipes) rows.
+    async fn write_pipe(
+        &self,
+        metric: &str,
+        docs: Vec<Doc>,
+    ) -> Result<SuccessTuple, EngineStoreError> {
+        let _ = (metric, docs);
+        Err(EngineStoreError::Unavailable)
+    }
+    /// `POST /engine/pipes/{metric}/clear`: delete the rows matching the query.
+    async fn clear_pipe(
+        &self,
+        metric: &str,
+        query: &EnginePipeQuery,
+    ) -> Result<SuccessTuple, EngineStoreError> {
+        let _ = (metric, query);
+        Err(EngineStoreError::Unavailable)
+    }
+    /// `GET /engine/pipes/{metric}/exists`.
+    async fn pipe_exists(&self, metric: &str) -> Result<bool, EngineStoreError> {
+        let _ = metric;
+        Err(EngineStoreError::Unavailable)
+    }
+}
+
+/// Why an engine-pipe primitive could not run.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EngineStoreError {
+    /// The store keeps no state pipes (the in-memory backend): `501`.
+    Unavailable,
+    /// The instance failed: `500` with the message.
+    Failed(String),
+}
+
+impl std::fmt::Display for EngineStoreError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            EngineStoreError::Unavailable => f.write_str(
+                "This server keeps no engine state pipes (no instance-backed engine store).",
+            ),
+            EngineStoreError::Failed(m) => f.write_str(m),
+        }
+    }
 }
 
 #[derive(Debug, Default)]
@@ -223,8 +280,9 @@ struct MemoryEngineData {
     leases: HashMap<String, (String, Instant)>,
 }
 
-/// An in-memory [`EngineBackend`]. A child's parents are the parents of its edge cursors (the
-/// instance-backed backend resolves them from the pipe graph).
+/// An in-memory [`EngineBackend`] (tests and builds without an instance; `start api` uses
+/// [`crate::engine_store::InstanceEngine`]). A child's parents are the parents of its edge
+/// cursors. It keeps no state pipes, so the `/engine/pipes/*` primitives answer `501`.
 #[derive(Debug, Default)]
 pub struct MemoryEngine {
     data: Mutex<MemoryEngineData>,

@@ -184,11 +184,7 @@ pub fn pandas_dtype_of(dtype: &DataType) -> String {
         },
         DataType::Duration(tu) => format!("timedelta64[{}]", time_unit_abbrev(*tu)),
         DataType::Time => "time64[ns][pyarrow]".into(),
-        DataType::Decimal(p, s) => format!(
-            "decimal128({}, {})[pyarrow]",
-            p.unwrap_or(38),
-            s.unwrap_or(0)
-        ),
+        DataType::Decimal(p, s) => format!("decimal128({}, {})[pyarrow]", *p, s),
         DataType::Categorical(..) | DataType::Enum(..) => "category".into(),
         _ => "object".into(),
     }

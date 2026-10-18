@@ -605,10 +605,10 @@ impl Paths {
     /// `*RESOURCES_PATH` names and `CONFIG_DIR_PATH`.
     pub fn ensure(&self, name: &str) -> std::io::Result<Option<PathValue>> {
         let value = self.get(name);
-        if let Some(PathValue::Path(p)) = &value {
-            if name.ends_with("RESOURCES_PATH") || name == "CONFIG_DIR_PATH" {
-                std::fs::create_dir_all(p)?;
-            }
+        if let Some(PathValue::Path(p)) = &value
+            && (name.ends_with("RESOURCES_PATH") || name == "CONFIG_DIR_PATH")
+        {
+            std::fs::create_dir_all(p)?;
         }
         Ok(value)
     }

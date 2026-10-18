@@ -253,12 +253,11 @@ pub fn get_chunk_bounds(
     if last.0 == last.1 {
         bounds.pop();
     }
-    if align {
-        if let Some(first) = bounds.first_mut() {
-            if first.0 < b {
-                first.0 = b;
-            }
-        }
+    if align
+        && let Some(first) = bounds.first_mut()
+        && first.0 < b
+    {
+        first.0 = b;
     }
     let mut out: Vec<ChunkBounds> = bounds
         .into_iter()
@@ -569,10 +568,10 @@ impl SqlConnector {
         }
         if let (Some(e), true) = (&end, dt_ok) {
             let mut e = e.clone();
-            if let (DateBound::Int(ei), Some(DateBound::Int(bi))) = (&e, &begin) {
-                if ei == bi {
-                    e = DateBound::Int(ei + 1);
-                }
+            if let (DateBound::Int(ei), Some(DateBound::Int(bi))) = (&e, &begin)
+                && ei == bi
+            {
+                e = DateBound::Int(ei + 1);
             }
             let end_da = dateadd_str(
                 Some(flavor),
@@ -747,18 +746,18 @@ impl SqlConnector {
                 if !are_dtypes_equal(typ, "geometry") && !typ.starts_with("geography") {
                     continue;
                 }
-                if let Some(c) = df.column_mut(col) {
-                    if c.tags.dtype.as_deref() == Some("bytes") {
-                        c.tags.dtype = Some("geometry".into());
-                    }
+                if let Some(c) = df.column_mut(col)
+                    && c.tags.dtype.as_deref() == Some("bytes")
+                {
+                    c.tags.dtype = Some("geometry".into());
                 }
             }
         }
         if options.no_order {
-            if let Some(limit) = query.limit {
-                if df.height() > limit.max(0) as usize {
-                    df = df.take(&(0..limit.max(0) as usize).collect::<Vec<_>>());
-                }
+            if let Some(limit) = query.limit
+                && df.height() > limit.max(0) as usize
+            {
+                df = df.take(&(0..limit.max(0) as usize).collect::<Vec<_>>());
             }
             Ok(Some(df))
         } else {
@@ -869,10 +868,9 @@ impl SqlConnector {
             if let Some(chunk) = self
                 .get_pipe_data_with_state(&sp, &state, &q, &DataQueryOptions::default())
                 .await?
+                && chunk.height() > 0
             {
-                if chunk.height() > 0 {
-                    out.push(chunk);
-                }
+                out.push(chunk);
             }
         }
         Ok(out)
@@ -1589,7 +1587,7 @@ pub fn fmt_thousands(n: i64) -> String {
     let s = n.unsigned_abs().to_string();
     let mut out = String::new();
     for (i, c) in s.chars().enumerate() {
-        if i > 0 && (s.len() - i) % 3 == 0 {
+        if i > 0 && (s.len() - i).is_multiple_of(3) {
             out.push(',');
         }
         out.push(c);

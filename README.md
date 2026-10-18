@@ -34,7 +34,7 @@ pipe.sync()  ### Pulls only what's new since the last sync.
 - 💼 **Jobs and scheduling** — run any command as a background [job](https://meerschaum.io/reference/background-jobs/) with `-d`. Built-in scheduler handles cron and interval schedules — no `crontab` or `systemd` setup. Execute locally, via `systemd`, or remotely on an API instance with `--executor-keys`.
 - 🔌 **Easily expandable** — ingest any source with a simple [plugin](https://meerschaum.io/reference/plugins/writing-plugins/): just return a DataFrame. [Add any function as a command](https://meerschaum.io/reference/plugins/types-of-plugins/#action-plugins), define parent/child pipe relationships for composable SQL pipelines, or embed Meerschaum via its [Python API](https://docs.meerschaum.io).
 - ✨ **Tailored for your experience** — a rich CLI that's surprisingly enjoyable, a web dashboard for the graphically inclined, and [connectors](https://meerschaum.io/reference/connectors/) for SQL, API, Valkey, and custom backends.
-- 🧳 **Portable from the start** — `$MRSM_ROOT_DIR` emulates multiple installations and groups [instances](https://meerschaum.io/reference/connectors/#instances-and-repositories). No dependencies required (anything needed installs into a virtual environment), and it's `uv`-compatible: `uv tool install meerschaum`.
+- 🧳 **Portable from the start** — `$MRSM_ROOT_DIR` emulates multiple installations and groups [instances](https://meerschaum.io/reference/connectors/#instances-and-repositories). The base wheel has no required Python dependencies (the native core is inside it; anything optional installs into a virtual environment), and it's `uv`-compatible: `uv tool install meerschaum`.
 
 ### Want to learn more?
 
@@ -56,6 +56,8 @@ pip install meerschaum # or `uv tool install meerschaum[api]`
 mrsm stack up -d
 mrsm bootstrap pipes
 ```
+
+Meerschaum 5 is a Rust core with a Python SDK. While it is in release candidates, install it with `pip install --pre meerschaum`; for a standalone `mrsm` binary run `cargo install meerschaum --locked` (Rust 1.95 or newer; add `--version 5.0.0-rc.1` for the candidate). Upgrading from 4.x? Read the [migration guide](https://meerschaum.io/reference/migrating-to-v5/).
 
 ## Usage
 Visit [meerschaum.io](https://meerschaum.io) for setup, usage, and troubleshooting information. You can find technical documentation at [docs.meerschaum.io](https://docs.meerschaum.io).

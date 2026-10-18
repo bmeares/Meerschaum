@@ -135,10 +135,10 @@ impl APIConnector {
             return Ok(None);
         };
         let text = meerschaum_core::pyfmt::py_str(&pipe_ops::json_to_core(&j));
-        if meerschaum_core::pyfmt::is_int(&text) {
-            if let Ok(i) = text.trim().parse() {
-                return Ok(Some(Value::Int(i)));
-            }
+        if meerschaum_core::pyfmt::is_int(&text)
+            && let Ok(i) = text.trim().parse()
+        {
+            return Ok(Some(Value::Int(i)));
         }
         Ok(Some(Value::Str(text)))
     }

@@ -224,47 +224,46 @@ pub fn query_df(df: &Frame, opts: &QueryOptions) -> Result<QueryResult, EnforceE
         begin = None;
         end = None;
     }
-    if let Some(col) = &dt_col {
-        if begin.is_some() || end.is_some() {
-            let data = df.data(col)?;
-            let df_is_dt = are_dtypes_equal(&data.dtype_str(), "datetime");
-            if df_is_dt {
-                let df_tz = match data.polars_dtype() {
-                    Some(DataType::Datetime(_, tz)) => tz.clone(),
-                    _ => None,
-                };
-                let from_int = |v: Option<Value>| -> Option<Value> {
-                    match v {
-                        Some(Value::Int(i)) => chrono::DateTime::from_timestamp(i, 0)
-                            .map(|d| Value::Datetime(DateTimeValue::naive(d.naive_utc()))),
-                        other => other,
-                    }
-                };
-                begin = from_int(begin);
-                end = from_int(end);
-                let strip = df_tz.is_none();
-                let had_begin = begin.is_some();
-                begin = match begin {
-                    Some(b) => Some(
-                        coerce_timezone(&b, strip)
+    if let Some(col) = &dt_col
+        && (begin.is_some() || end.is_some())
+    {
+        let data = df.data(col)?;
+        let df_is_dt = are_dtypes_equal(&data.dtype_str(), "datetime");
+        if df_is_dt {
+            let df_tz = match data.polars_dtype() {
+                Some(DataType::Datetime(_, tz)) => tz.clone(),
+                _ => None,
+            };
+            let from_int = |v: Option<Value>| -> Option<Value> {
+                match v {
+                    Some(Value::Int(i)) => chrono::DateTime::from_timestamp(i, 0)
+                        .map(|d| Value::Datetime(DateTimeValue::naive(d.naive_utc()))),
+                    other => other,
+                }
+            };
+            begin = from_int(begin);
+            end = from_int(end);
+            let strip = df_tz.is_none();
+            let had_begin = begin.is_some();
+            begin = match begin {
+                Some(b) => Some(
+                    coerce_timezone(&b, strip).map_err(|e| EnforceError::Raised(e.to_string()))?,
+                ),
+                None => None,
+            };
+            // PARITY: `end` is coerced only `if begin is not None`, so an `end`-only bound on
+            // a datetime column is dropped (meerschaum/utils/dataframe.py, `query_df`).
+            end = if had_begin {
+                match end {
+                    Some(e) => Some(
+                        coerce_timezone(&e, strip)
                             .map_err(|e| EnforceError::Raised(e.to_string()))?,
                     ),
                     None => None,
-                };
-                // PARITY: `end` is coerced only `if begin is not None`, so an `end`-only bound on
-                // a datetime column is dropped (meerschaum/utils/dataframe.py, `query_df`).
-                end = if had_begin {
-                    match end {
-                        Some(e) => Some(
-                            coerce_timezone(&e, strip)
-                                .map_err(|e| EnforceError::Raised(e.to_string()))?,
-                        ),
-                        None => None,
-                    }
-                } else {
-                    None
-                };
-            }
+                }
+            } else {
+                None
+            };
         }
     }
 

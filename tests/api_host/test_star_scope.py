@@ -24,7 +24,7 @@ from meerschaum.api._oauth2 import SECRET
 from meerschaum.core import Token
 
 def bearer(scopes):
-    token = oauth2.jose_jwt.encode(
+    token = oauth2.jwt.encode(
         {'sub': 'bob', 'scopes': scopes, 'exp': int(time.time()) + 60}, SECRET, algorithm='HS256',
     )
     return SimpleNamespace(headers={'authorization': 'Bearer ' + token})

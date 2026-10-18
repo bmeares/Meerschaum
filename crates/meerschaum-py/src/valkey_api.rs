@@ -45,7 +45,7 @@ fn docs_in(ctx: &PyCtx<'_>, docs: &Bound<'_, PyAny>) -> PyResult<Vec<Doc>> {
     for item in docs.try_iter()? {
         let item = item?;
         let d = item
-            .downcast::<PyDict>()
+            .cast::<PyDict>()
             .map_err(|_| PyTypeError::new_err("A document must be a dictionary."))?;
         let mut doc = Doc::new();
         for (k, v) in d.iter() {
@@ -280,7 +280,7 @@ impl PyValkeyConnector {
                 names.join(", ")
             )));
         }
-        let text = if let Ok(b) = value.downcast::<PyBytes>() {
+        let text = if let Ok(b) = value.cast::<PyBytes>() {
             String::from_utf8_lossy(b.as_bytes()).into_owned()
         } else {
             value.str()?.to_str()?.to_string()
@@ -324,7 +324,7 @@ impl PyValkeyConnector {
     ) -> PyResult<Bound<'py, PyAny>> {
         let mut texts: Vec<String> = Vec::with_capacity(args.len());
         for a in args.iter() {
-            texts.push(if let Ok(b) = a.downcast::<PyBytes>() {
+            texts.push(if let Ok(b) = a.cast::<PyBytes>() {
                 String::from_utf8_lossy(b.as_bytes()).into_owned()
             } else {
                 a.str()?.to_str()?.to_string()
@@ -472,7 +472,7 @@ impl PyValkeyConnector {
                 need(3)?;
                 let key = texts[0].clone();
                 let rest: Vec<String> = texts[1..].to_vec();
-                if rest.len() % 2 != 0 {
+                if !rest.len().is_multiple_of(2) {
                     return Err(PyTypeError::new_err("ZADD takes score and member pairs."));
                 }
                 let mut pairs = Vec::new();
@@ -608,7 +608,7 @@ impl PyValkeyConnector {
             "HSET" => {
                 need(3)?;
                 let key = texts[0].clone();
-                if texts[1..].len() % 2 != 0 {
+                if !texts[1..].len().is_multiple_of(2) {
                     return Err(PyTypeError::new_err("HSET takes field and value pairs."));
                 }
                 let fields: Vec<(String, String)> = texts[1..]

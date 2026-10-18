@@ -174,6 +174,7 @@ def serve(address: str) -> int:
     import meerschaum as mrsm
     from meerschaum.worker._ops import HANDLERS, error_message
     from meerschaum.worker._msgpack import USING_FALLBACK
+    from meerschaum.utils.venv import ensure_default_venvs
 
     conn.send({
         't': 'hello',
@@ -212,6 +213,10 @@ def serve(address: str) -> int:
         try:
             try:
                 interruptible = True
+                ### v4 plugin code always saw the shared `mrsm` venv (see `ensure_default_venvs`);
+                ### a previous call may have deactivated it (`op_action` ends by deactivating
+                ### every venv, as v4's `entry_with_args()` does before the process exits).
+                ensure_default_venvs()
                 _define_connectors(args.get('connector_attributes', None))
                 value, out_frames = handler(conn, call_id, args, frames)
             finally:

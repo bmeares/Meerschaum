@@ -65,6 +65,13 @@ pub const ENGINE_RUNS: &str = "/engine/runs";
 pub const ENGINE_EVENTS: &str = "/engine/events";
 /// `/engine/leases`
 pub const ENGINE_LEASES: &str = "/engine/leases";
+/// `/engine/pipes`: the engine's state pipes (`/engine/pipes/{metric}/{read,write,clear,exists}`).
+pub const ENGINE_PIPES: &str = "/engine/pipes";
+
+/// `/engine/pipes/{metric}/{op}` (`op`: `read`, `write`, `clear` or `exists`).
+pub fn engine_pipe_path(metric_key: &str, op: &str) -> String {
+    format!("{ENGINE_PIPES}/{metric_key}/{op}")
+}
 
 /// `STATIC_CONFIG['api']['jobs']['stdin_message']`.
 pub const JOBS_STDIN_MESSAGE: &str = "MRSM_STDIN";

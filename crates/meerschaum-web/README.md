@@ -65,9 +65,38 @@ its core Dash stores. Configure both hosts with the same instance/cache and TTL.
 ## Front-end assets
 
 Vendored files and upstream URLs are pinned in `assets/versions.json`, with adjacent licenses:
-HTMX 2.0.4, Plotly.js 2.35.2, MapLibre GL JS 4.7.1, Cytoscape.js 3.30.4, xterm.js 6.0.0.
-There are no runtime CDN fetches. Map specs referencing external tiles remain plugin-owned.
-The Python SDK should pin a compatible Plotly.py 5.24.x range for Plotly.js 2.35.x figures.
+HTMX 2.0.11 (the npm `latest` channel; 4.x is on `next`), Plotly.js 4.1.2, MapLibre GL JS 6.14.0,
+Cytoscape.js 3.34.4, xterm.js 6.0.0 (addon-fit 0.11.0, addon-unicode11 0.9.0). Each file is checked
+against the npm tarball's `dist.integrity`. There are no runtime CDN fetches. Map specs referencing
+external tiles remain plugin-owned. Figures from the current Plotly.py (7.1 bundles Plotly.js 4.1)
+render as they are.
+
+- **Plotly.js 4** (`console.js` `normalizeFigure`): string titles and `titlefont`/`titleside`/
+  `titleposition` (dropped in 3.0) are rewritten to `title.text`/`title.font`/..., and the
+  `scattermapbox`/`choroplethmapbox`/`densitymapbox` traces and `layout.mapbox` (dropped in 4.0) to the
+  `*map` traces and `layout.map`, so figures written for Plotly.js 2 keep drawing. The "Share chart"
+  button (4.0 turns `showSendToCloud` on and posts the figure to a Plotly cloud service) is off
+  unless a figure's own `config` turns it on.
+- **MapLibre GL JS 6** ships only as an ES module (`maplibre-gl.mjs`) plus a sibling module worker
+  (`maplibre-gl-worker.mjs`, found through `import.meta.url`), so `console.js` `import()`s it the
+  first time a `data-mrsm-map` element appears; a page without a map never fetches it. It needs
+  WebGL2.
+
+### Embedding and serving
+
+`build.rs` gzips every file of `assets/` (licenses and `versions.json` excluded) at the best level
+into `OUT_DIR` and writes the table `src/assets.rs` includes (name, MIME type, a SHA-256 prefix of the
+uncompressed bytes, the compressed bytes). The sources stay uncompressed in git; only the compressed
+copies are in the binary (7.5 MB of JavaScript and CSS become about 2.2 MB). Gzip, not Brotli, because
+browsers only offer `br` over HTTPS and the console is often served over plain HTTP (Brotli would also
+need a second copy: about +1.7 MB).
+
+`GET /dash/assets/<name>` sends the embedded gzip bytes with `Content-Encoding: gzip` when
+`Accept-Encoding` allows it (q-values, `x-gzip` and `*` honored) and inflates them for any other
+client. Every response has `Vary: Accept-Encoding`, an exact `Content-Length`, `Cache-Control:
+no-cache` and a strong `ETag` per representation (`"<hash>"`, `"<hash>-gzip"`); `If-None-Match`
+(lists, weak tags, `*`) gets a 304, so a browser revalidates cheaply and a new build is never hidden
+by a stale cache. To update an asset, replace the file, update `versions.json`, and rebuild.
 
 ## Verification
 

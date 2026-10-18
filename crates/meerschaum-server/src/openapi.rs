@@ -110,7 +110,8 @@ fn pipe_op(
     )
 }
 
-/// Every operation the Rust server serves (except `/dash/*`, `/mcp` and `/webterm`).
+/// Every operation the Rust server always serves (except `/dash/*`; [`optional_operations`] has
+/// `/mcp` and `/webterm`).
 pub fn operations() -> Vec<Operation> {
     use CurrUser::*;
     const ATTR: &str = "Pipes: Attributes";
@@ -865,6 +866,34 @@ pub fn operations() -> Vec<Operation> {
             vec![],
             true,
         ),
+        (
+            "post",
+            "/engine/pipes/{metric}/read",
+            "Read Engine State Pipe",
+            vec![("metric", "path", true, "string")],
+            true,
+        ),
+        (
+            "post",
+            "/engine/pipes/{metric}/write",
+            "Write Engine State Pipe",
+            vec![("metric", "path", true, "string")],
+            true,
+        ),
+        (
+            "post",
+            "/engine/pipes/{metric}/clear",
+            "Clear Engine State Pipe",
+            vec![("metric", "path", true, "string")],
+            true,
+        ),
+        (
+            "get",
+            "/engine/pipes/{metric}/exists",
+            "Engine State Pipe Exists",
+            vec![("metric", "path", true, "string")],
+            false,
+        ),
     ];
     for (method, path, summary, params, body) in engine {
         ops.push(op(
@@ -875,6 +904,51 @@ pub fn operations() -> Vec<Operation> {
             summary,
             &params,
             body.then_some((&[JSON_BODY][..], true)),
+            Never,
+        ));
+    }
+    ops
+}
+
+/// The operations that exist only under some configurations: `/mcp` (when `api:mcp:enabled` and the
+/// `mcp` route group is allowed, like the router registers it) and `/webterm/{session_id}` (when the
+/// console and its terminal are served: neither `--no-dash` nor `--no-webterm`). v4.1.4 lists both
+/// in its document (`/mcp` always, `/webterm/{session_id}` unless `--no-webterm`; tags `MCP` and
+/// `Webterm`); `/websocket/{session_id}` is a websocket route and is in neither document.
+pub fn optional_operations(cfg: &ServerConfig) -> Vec<Operation> {
+    use CurrUser::Never;
+    let mut ops = Vec::new();
+    if cfg.mcp.enabled && cfg.route_group_is_allowed("mcp") {
+        ops.push(op(
+            "get",
+            "/mcp",
+            "mcp",
+            &["MCP"],
+            "Mcp Info",
+            &[],
+            None,
+            Never,
+        ));
+        ops.push(op(
+            "post",
+            "/mcp",
+            "mcp",
+            &["MCP"],
+            "Mcp Endpoint",
+            &[],
+            None,
+            Never,
+        ));
+    }
+    if !cfg.no_dash && !cfg.no_webterm {
+        ops.push(op(
+            "get",
+            "/webterm/{session_id}",
+            "webterm",
+            &["Webterm"],
+            "Get Webterm",
+            &[("session_id", "path", true, "string")],
+            None,
             Never,
         ));
     }
@@ -980,7 +1054,13 @@ fn param_in(loc: &str) -> ParameterIn {
 /// The OpenAPI document for this configuration.
 pub fn document(cfg: &ServerConfig) -> OpenApi {
     let mut paths = Paths::new();
-    for op in operations().iter().filter(|o| is_served(o, cfg)) {
+    let optional = optional_operations(cfg);
+    let served = operations()
+        .into_iter()
+        .filter(|o| is_served(o, cfg))
+        .chain(optional);
+    for op in served {
+        let op = &op;
         let mut b = OperationBuilder::new()
             .summary(Some(op.summary))
             .operation_id(Some(format!(

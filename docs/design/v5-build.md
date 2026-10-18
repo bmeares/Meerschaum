@@ -14,6 +14,7 @@ Conventions for the crates themselves are in `crates/README.md`.
 | `rust` / `parity` | self-hosted | regenerate `crates/*/tests/fixtures/gen_*.py` with v4.1.4, diff | yes (optional job) |
 | `rust` / `check (ubuntu-latest)` | GitHub-hosted | `cargo check --workspace` | yes |
 | `rust` / `check (windows-latest, macos-latest)` | GitHub-hosted | `cargo check --workspace` | no (`continue-on-error`, §15) |
+| `wheels` (`wheels.yaml`) | GitHub-hosted, manual / `v5*` tag / packaging PRs | maturin-action: one `cp311-abi3` wheel on Linux x86_64 and Linux arm64 (`ubuntu-24.04-arm`, native `manylinux_2_28`), macOS arm64 and Windows x86_64, the sdist, an experimental `cp314t` Linux wheel, and the standalone `mrsm` release binary of the same four targets (Linux ones in `manylinux_2_28`, glibc floor 2.28); a wheel tag/size guard and a smoke test per OS (see below) | yes (`cp314t` is `continue-on-error`) |
 | `buildx` (`docker-build.yaml`) | GitHub-hosted, manual | `scripts/docker/buildx.sh`, then `size_gate.sh` | size gate enforces by default |
 | `pytest` | self-hosted | `scripts/rust/build_py.sh`, then `scripts/test.sh db` | yes |
 
@@ -89,7 +90,7 @@ There is no `setup.py`, `setup.cfg` or `MANIFEST.in` any more. One distribution 
 |---|---|---|
 | `meerschaum` | root `pyproject.toml` (maturin mixed project, `abi3-py311`, module `meerschaum._core._native`) | The Python SDK and façade plus the Rust extension, which holds the whole core and the CLI. The `mrsm` and `meerschaum` console scripts (`_meerschaum_mrsm:main`, a top-level module shipped in the wheel) call `_native.main(argv)`, so there is no `mrsm` binary in the wheel. `dependencies` is empty; every heavier package is an extra (`pandas`, `polars`, `geo`, `sql`, `sql-mssql`, `sql-oracle`, `sql-duckdb`, `sql-cockroachdb`, `api`, `dash`, `shell`, `cli-tools`, `gui`, `full`). |
 
-`scripts/check_packaging.py` verifies that the Cargo workspace version, the console scripts and the extras in `pyproject.toml` agree with `meerschaum/utils/packages/_packages.py`, and (`--wheels dist`) that the wheel has no dependencies and no `mrsm` binary. `.github/workflows/wheels.yaml` builds the wheel on GitHub-hosted runners only (Linux, macOS, Windows) and smoke-tests it in a fresh venv (`mrsm --version`, `mrsm show connectors`, `python -m meerschaum --version`, a `sync` of a tiny pipe on SQLite). The standalone binary is `cargo install meerschaum` (the front crate's default `cli` feature; library users use `default-features = false`). `scripts/rust/build_py.sh` still builds the in-tree extension for development. The Docker `slim` image installs the base wheel only; the default image installs `meerschaum[full]`. Current size and functional gates are recorded below, rather than inferred from the scaffold measurements.
+`scripts/check_packaging.py` verifies that the Cargo workspace version, the console scripts and the extras in `pyproject.toml` agree with `meerschaum/utils/packages/_packages.py`, and (`--wheels dist`) that the wheel has no dependencies and no `mrsm` binary. `.github/workflows/wheels.yaml` builds the wheel on GitHub-hosted runners only (Linux x86_64, Linux arm64, macOS arm64, Windows x86_64; macOS x86_64, musllinux and Windows arm64 are deferred) and smoke-tests it in a fresh venv (`mrsm --version`, `mrsm show connectors`, `python -m meerschaum --version`, a `sync` of a tiny pipe on SQLite, a job round trip, and the Python API through `scripts/docker/smoke_facade.py` with `MRSM_NO_AUTO_INSTALL=1`, a scratch SQLite instance and pip/uv shims that fail the step if anything tries to install). A build-job step checks the platform tag (Linux wheels must be `manylinux_2_28` or older and match the runner architecture, or PyPI rejects them) and fails a wheel over 95 MiB (PyPI refuses 100 MiB). The standalone binary is `cargo install meerschaum` (the front crate's default `cli` feature; library users use `default-features = false`). `scripts/rust/build_py.sh` still builds the in-tree extension for development. The Docker `slim` image installs the base wheel only; the default image installs `meerschaum[full]`. Current size and functional gates are recorded below, rather than inferred from the scaffold measurements.
 
 ## Docker targets and the size gate (§12.1)
 
@@ -159,8 +160,23 @@ so `-` and `_` count as the same name. Results on 2026-10-12:
 | `mrsm` | free |
 
 `meerschaum-py` is also free (it is `publish = false`: the extension ships in the PyPI wheel). `meerschaum-connector` and `meerschaum-worker` are free too (checked 2026-10-17). `meerschaum` is the front crate (`crates/meerschaum`, thin re-exports behind cargo features, plus the `mrsm` binary behind its default `cli` feature: `cargo install meerschaum`; `meerschaum-cli` is the internal library it calls); the other crates are internal. crates.io has no reservation mechanism. Claiming a name means
-publishing a version from the owner's account. The workspace is still at `5.0.0-a1`, so publish
-placeholders soon (§15).
+publishing a version from the owner's account. Nothing is published until the maintainer authorizes it (the
+procedure and the order of the 15 crates are in `.agents/skills/release/SKILL.md` and `crates/README.md`
+"Publishing"); the first publication is `5.0.0-rc.1` (PyPI `5.0.0rc1`).
+
+## Release procedure (5.x)
+
+`.agents/skills/release/SKILL.md`, section "Meerschaum 5.x", is the ordered runbook: bump the version (Cargo
+`[workspace.package]` and the lockstep `=` pins, `Cargo.lock`, `meerschaum/config/_version.py`, literals),
+`scripts/check_packaging.py`, `scripts/rust/ci.sh package` and `publish-dry-run`, dispatch `wheels`, `rust` and
+`pytest` on the release commit, download that run's wheels and sdist (`gh run download`), `twine check`, then the
+steps that need explicit authorization: PyPI `twine upload`, `cargo publish --workspace --exclude meerschaum-py`,
+the annotated tag (`v5.0.0rc1`) and a GitHub pre-release, and (separately) Docker. Release candidates are cut from the
+`v5` branch (no PR to `main`); `main` is merged at 5.0.0 final. The PyPI classifier is `Development Status ::
+4 - Beta` for a pre-release and `5 - Production/Stable` for 5.0.0 final. A pre-release gets only version-qualified
+Docker tags. The wheels uploaded are the CI artifacts of the release commit, never a local `python -m build` wheel
+(`linux_x86_64`, which PyPI rejects). The sdist needs a Rust toolchain and network access to crates.io and GitHub
+(the sqlx `[patch]` points at a git revision).
 
 ## Fixture hygiene
 

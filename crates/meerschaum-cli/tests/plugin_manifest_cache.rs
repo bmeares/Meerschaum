@@ -220,7 +220,8 @@ fn plugin_flags_still_reach_actions_through_the_worker() {
     )
     .unwrap();
     let defaults = text(&setup.run(&["flags", "show"], ""));
-    assert!(defaults.contains("level=3"), "{defaults}");
+    // v4 drops what was not given (`False`, `None`): the flag is absent, so `None`.
+    assert!(defaults.contains("level=3 loud=None"), "{defaults}");
     let given = text(&setup.run(&["flags", "show", "--zz-level", "7", "--zz-loud"], ""));
     assert!(given.contains("level=7 loud=True"), "{given}");
     let abbreviated = text(&setup.run(&["flags", "show", "--zz-lev=9"], ""));

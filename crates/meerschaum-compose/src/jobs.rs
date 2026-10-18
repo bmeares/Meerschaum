@@ -104,10 +104,10 @@ pub fn job_belongs_to_project(
         .get("MRSM__COMPOSE_CONFIG")
         .cloned()
         .unwrap_or_else(|| "{}".into());
-    if let Ok(Value::Map(m)) = Value::from_json_str(&cfg) {
-        if m.get("project_name").and_then(Value::as_str) == Some(project_name) {
-            return true;
-        }
+    if let Ok(Value::Map(m)) = Value::from_json_str(&cfg)
+        && m.get("project_name").and_then(Value::as_str) == Some(project_name)
+    {
+        return true;
     }
     for (ix, arg) in job.sysargs.iter().enumerate() {
         if arg != "-t" && arg != "--tags" {
@@ -122,10 +122,10 @@ pub fn job_belongs_to_project(
             }
         }
     }
-    if let Some(cmd) = project_command {
-        if command_signature(&job.sysargs) == command_signature(cmd) {
-            return true;
-        }
+    if let Some(cmd) = project_command
+        && command_signature(&job.sysargs) == command_signature(cmd)
+    {
+        return true;
     }
     false
 }
@@ -204,17 +204,19 @@ pub fn get_jobs_commands(
     } else if !has("--loop") {
         additional.push("--loop".into());
     }
-    if let Some(min_seconds) = min_seconds {
-        if !has("--min-seconds") && !has("--cooldown") {
-            additional.push("--min-seconds".into());
-            additional.push(py_str(min_seconds));
-        }
+    if let Some(min_seconds) = min_seconds
+        && !has("--min-seconds")
+        && !has("--cooldown")
+    {
+        additional.push("--min-seconds".into());
+        additional.push(py_str(min_seconds));
     }
-    if let Some(timeout) = timeout_seconds {
-        if !has("--timeout-seconds") && !has("--timeout") {
-            additional.push("--timeout-seconds".into());
-            additional.push(py_str(timeout));
-        }
+    if let Some(timeout) = timeout_seconds
+        && !has("--timeout-seconds")
+        && !has("--timeout")
+    {
+        additional.push("--timeout-seconds".into());
+        additional.push(py_str(timeout));
     }
     for instance_keys in groups.keys() {
         let job_name = format!("{project_name} sync ({instance_keys})");

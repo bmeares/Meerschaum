@@ -309,7 +309,7 @@ pub fn frame_from_py_with<'py>(
             if dtype.eq(pl.getattr("Object")?)? {
                 let series = collected.get_item(column.as_str())?;
                 let values = series.call_method0("to_list")?;
-                let list = values.downcast::<PyList>()?;
+                let list = values.cast::<PyList>()?;
                 if list.iter().any(|original| {
                     let missing = original.is_none()
                         || ctx
@@ -416,7 +416,7 @@ pub fn frame_from_py_with<'py>(
     let mut native_arrays: Vec<Bound<'py, PyAny>> = Vec::new();
 
     for (i, label) in columns.iter().enumerate() {
-        let col_name: String = match label.downcast::<PyString>() {
+        let col_name: String = match label.cast::<PyString>() {
             Ok(s) => s.to_str()?.to_string(),
             Err(_) => label.str()?.to_str()?.to_string(),
         };
@@ -575,13 +575,13 @@ fn object_column<'py>(
 ) -> PyResult<Column> {
     let py = ctx.py;
     let values = series.call_method0(intern!(py, "tolist"))?;
-    let list = values.downcast::<PyList>()?;
+    let list = values.cast::<PyList>()?;
     let cells = pylist_to_cells(ctx, list)?;
     let mut col = Column::object(name, cells);
-    if dtype == "geometry" {
-        if let Ok(crs) = series.getattr(intern!(py, "crs")) {
-            col.crs = srid_from_crs(&crs)?;
-        }
+    if dtype == "geometry"
+        && let Ok(crs) = series.getattr(intern!(py, "crs"))
+    {
+        col.crs = srid_from_crs(&crs)?;
     }
     Ok(col)
 }
@@ -668,8 +668,8 @@ fn column_identical(input: &Column, output: &Column) -> bool {
                     return false;
                 };
                 return x
-                    .into_iter()
-                    .zip(y)
+                    .iter()
+                    .zip(y.iter())
                     .all(|(p, q)| p.map(f64::to_bits) == q.map(f64::to_bits));
             }
             a.equals_missing(b)
@@ -1153,8 +1153,8 @@ pub fn frame_to_polars<'py>(
                 if name == "geoarrow.wkb" || name == "arrow.json" || name == "arrow.uuid" {
                     extensions.push((f.name().clone(), name, meta));
                 } else {
-                    md.insert(EXT_NAME.into(), name);
-                    md.insert(EXT_META.into(), meta);
+                    md.insert(EXT_NAME, name);
+                    md.insert(EXT_META, meta);
                 }
             }
             f.as_ref().clone().with_metadata(md)

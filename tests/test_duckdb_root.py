@@ -14,6 +14,10 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
+from tests._binary import in_ci
+
 REPO = Path(__file__).resolve().parent.parent
 LIB_SOURCE = REPO / 'crates' / 'meerschaum-connector-sql' / 'src' / 'duckdb_lib' / 'mod.rs'
 
@@ -36,6 +40,20 @@ if not ok:
         detail = str(e)
 print('RESULT', 'connected' if ok else 'failed', detail)
 """
+
+
+def _real_library() -> str:
+    """
+    The DuckDB library for the seeded cache (`MRSM_DUCKDB_LIB`). Without it the test is skipped,
+    except in CI, where a missing library is a failure (the same rule as `tests/_binary.py`).
+    """
+    real = os.environ.get('MRSM_DUCKDB_LIB')
+    if real and Path(real).is_file():
+        return real
+    message = 'set MRSM_DUCKDB_LIB to the DuckDB library for this test'
+    if in_ci():
+        pytest.fail(message)
+    pytest.skip(message)
 
 
 def _version() -> str:
@@ -66,8 +84,7 @@ def _run(tmp_path: Path, new_root: Path):
 
 
 def test_a_connector_built_after_set_root_uses_the_new_roots_cache(tmp_path):
-    real = os.environ.get('MRSM_DUCKDB_LIB')
-    assert real and Path(real).is_file(), 'set MRSM_DUCKDB_LIB to the DuckDB library for this test'
+    real = _real_library()
     new_root = tmp_path / 'new_root'
     cache = new_root / 'drivers' / 'duckdb' / _version()
     cache.mkdir(parents=True)
@@ -83,8 +100,7 @@ def test_without_a_cache_in_the_new_root_the_lookup_fails_there(tmp_path):
     new_root = tmp_path / 'new_root'
     new_root.mkdir()
     # The stale environment root has the library, the new root does not: the new root wins.
-    real = os.environ.get('MRSM_DUCKDB_LIB')
-    assert real and Path(real).is_file(), 'set MRSM_DUCKDB_LIB to the DuckDB library for this test'
+    real = _real_library()
     stale = tmp_path / 'env_root' / 'drivers' / 'duckdb' / _version()
     stale.mkdir(parents=True)
     (stale / Path(real).name).symlink_to(Path(real).resolve())

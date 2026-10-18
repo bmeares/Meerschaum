@@ -125,3 +125,61 @@ flavor_tests!(test_fetch_pipes_keys, |c: Ctx| async move {
     .await;
     assert!(keys(&none, p).is_empty());
 });
+
+// A tag filter reads the parameters as text, so it must see past the first 30 characters (MSSQL's
+// bare `VARCHAR` is `VARCHAR(30)`): pipes whose `tags` come after a long `columns` / `dtypes` /
+// `fetch` block still match, are excluded by `_tag`, and combine as `,`-AND / OR groups.
+flavor_tests!(
+    test_fetch_pipes_keys_tags_after_long_parameters,
+    |c: Ctx| async move {
+        let p = &c.prefix;
+        let long = r#""columns": {"datetime": "a_long_datetime_column", "id": "a_long_identifier_column"}, "dtypes": {"a_long_value_column": "float"}"#;
+        let pipes = [
+            c.pipe(
+                "a",
+                "m1",
+                None,
+                &format!(r#"{{{long}, "tags": ["kitchen", "w17bo"]}}"#),
+            ),
+            c.pipe(
+                "a",
+                "m2",
+                Some("l1"),
+                &format!(r#"{{{long}, "tags": ["kitchen"]}}"#),
+            ),
+            c.pipe(
+                "b",
+                "m1",
+                Some("l2"),
+                &format!(r#"{{{long}, "tags": ["garage"]}}"#),
+            ),
+        ];
+        for pipe in &pipes {
+            ok(c.conn.register_pipe(pipe).await);
+        }
+        let both = vec![format!("{p}a"), format!("{p}b")];
+        let run = |tags: &[&str]| {
+            let conn = &c.conn;
+            let q = PipesKeysQuery {
+                connector_keys: both.clone(),
+                tags: tags.iter().map(|t| t.to_string()).collect(),
+                ..Default::default()
+            };
+            async move { conn.fetch_pipes_keys(&q).await.unwrap() }
+        };
+        assert_eq!(
+            keys(&run(&["kitchen"]).await, p),
+            vec!["a:m1:None", "a:m2:l1"]
+        );
+        assert_eq!(keys(&run(&["kitchen,w17bo"]).await, p), vec!["a:m1:None"]);
+        assert_eq!(
+            keys(&run(&["garage", "w17bo"]).await, p),
+            vec!["a:m1:None", "b:m1:l2"]
+        );
+        assert_eq!(keys(&run(&["_kitchen"]).await, p), vec!["b:m1:l2"]);
+        assert!(keys(&run(&["nothing"]).await, p).is_empty());
+        for pipe in &pipes {
+            ok(c.conn.delete_pipe(pipe).await);
+        }
+    }
+);

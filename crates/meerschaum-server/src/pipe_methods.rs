@@ -231,14 +231,14 @@ pub async fn get_chunk_bounds(
     begin = coerce_bound(conn, pipe, begin, defaults).await?;
     end = coerce_bound(conn, pipe, end, defaults).await?;
 
-    if let (Some(b), Some(e)) = (&begin, &end) {
-        if !bound_lt(b, e) {
-            return Ok(if bounded {
-                vec![(Some(b.clone()), Some(b.clone()))]
-            } else {
-                vec![(Some(b.clone()), None)]
-            });
-        }
+    if let (Some(b), Some(e)) = (&begin, &end)
+        && !bound_lt(b, e)
+    {
+        return Ok(if bounded {
+            vec![(Some(b.clone()), Some(b.clone()))]
+        } else {
+            vec![(Some(b.clone()), None)]
+        });
     }
 
     let interval = pipe
@@ -270,10 +270,10 @@ pub async fn get_chunk_bounds(
     if chunks.is_empty() {
         chunks.push((b.clone(), e.clone()));
     }
-    if let Some(last) = chunks.last_mut() {
-        if bound_lt(&e, &last.1) {
-            last.1 = e.clone();
-        }
+    if let Some(last) = chunks.last_mut()
+        && bound_lt(&e, &last.1)
+    {
+        last.1 = e.clone();
     }
     if chunks.last().is_some_and(|(x, y)| x == y) {
         chunks.pop();
@@ -397,6 +397,26 @@ pub async fn sync(
     let Some(input) = payload_input(payload) else {
         return SuccessTuple::fail(format!("Cannot sync the given data to {pipe}."));
     };
+    let mut pipe = pipe.clone();
+    let pipe = &mut pipe;
+    // `if not p.temporary and p.id is None: p.register()`: 'already' is not a failure.
+    if !pipe.temporary {
+        match conn.get_pipe_id(pipe).await {
+            Ok(Some(_)) => {}
+            Ok(None) => {
+                let reg = conn.register_pipe(pipe).await;
+                if !reg.success && !reg.message.contains("already") {
+                    return reg;
+                }
+            }
+            Err(e) => return SuccessTuple::fail(e.to_string()),
+        }
+    }
+    // `p.validate_indices()`.
+    let valid = pipe.validate_indices();
+    if !valid.success {
+        return valid;
+    }
     let ctx = match pipe_ops::dtypes_context(conn.as_ref(), pipe, pipe.parameters()).await {
         Ok(c) => c,
         Err(e) => return SuccessTuple::fail(e.to_string()),
@@ -437,11 +457,18 @@ pub async fn sync(
             check_existing = dt_col.is_some();
         }
     }
-    // TODO(connector-trait): `Pipe._persist_new_special_columns()` (persisting new json /
-    // numeric / uuid / bytes / geometry dtypes into the parameters) and the post-sync
-    // `apply_compression_policy()` have no trait methods yet; they belong to the engine's
-    // `Pipe::sync`.
     let mut extra = Map::new();
+    // `_persist_new_special_columns`.
+    let registered = !pipe.temporary;
+    pipe_ops::persist_new_special_columns(
+        conn.as_ref(),
+        pipe,
+        &df,
+        &ctx.dtypes,
+        registered,
+        &mut extra,
+    )
+    .await;
     if let Some(w) = kw.workers {
         extra.insert("workers".into(), meerschaum_core::Value::Int(w));
     }
@@ -458,6 +485,16 @@ pub async fn sync(
         if res.success || !kw.force || attempt > retries {
             if !res.success && kw.force {
                 tracing::warn!("Unable to sync {pipe} within {retries} attempts!");
+            }
+            // Apply a compression policy if the pipe is configured for compression.
+            if res.success && pipe.param("compress").is_some_and(|v| v.truthy()) {
+                let compressed = conn.apply_compression_policy(pipe).await;
+                if !compressed.success {
+                    tracing::debug!(
+                        "Could not apply compression policy to {pipe}:\n{}",
+                        compressed.message
+                    );
+                }
             }
             return res;
         }

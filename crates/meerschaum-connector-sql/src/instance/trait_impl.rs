@@ -301,6 +301,19 @@ impl InstanceConnector for SqlConnector {
         SqlConnector::compress_pipe(self, pipe, false).await
     }
 
+    async fn apply_compression_policy(&self, pipe: &Pipe) -> SuccessTuple {
+        if let Err(e) = self.require_schema().await {
+            return SuccessTuple::fail(e.to_string());
+        }
+        let pipe = &self.prepare_pipe(pipe).await;
+        SqlConnector::apply_compression_policy(self, pipe).await
+    }
+
+    async fn create_instance_tables(&self) -> ConnectorResult<bool> {
+        self.require_schema().await?;
+        Ok(self.ensure_instance_tables(true).await)
+    }
+
     async fn decompress_pipe(&self, pipe: &Pipe, no_policy: bool) -> SuccessTuple {
         if let Err(e) = self.require_schema().await {
             return SuccessTuple::fail(e.to_string());
@@ -338,6 +351,20 @@ impl InstanceConnector for SqlConnector {
     async fn release_pipe_lease(&self, pipe: &Pipe, holder: &str) -> ConnectorResult<bool> {
         self.require_schema().await?;
         SqlConnector::release_pipe_lease(self, pipe, holder).await
+    }
+
+    async fn engine_state_pipe(
+        &self,
+        instance_keys: &str,
+        metric_key: &str,
+    ) -> ConnectorResult<Option<Pipe>> {
+        // The namespace depends on the instance schema: ask the database first if unknown.
+        self.require_schema().await?;
+        Ok(SqlConnector::engine_state_pipe(
+            self,
+            instance_keys,
+            metric_key,
+        ))
     }
 
     async fn partition_pipe(&self, pipe: &Pipe, chunk_minutes: Option<i64>) -> SuccessTuple {

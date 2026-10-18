@@ -52,10 +52,10 @@ pub struct WorkerOptions {
 
 /// The interpreter to use: `MRSM_PYTHON`, else `python3` (`python` on Windows).
 pub fn default_python() -> PathBuf {
-    if let Ok(p) = std::env::var("MRSM_PYTHON") {
-        if !p.trim().is_empty() {
-            return PathBuf::from(p);
-        }
+    if let Ok(p) = std::env::var("MRSM_PYTHON")
+        && !p.trim().is_empty()
+    {
+        return PathBuf::from(p);
     }
     PathBuf::from(if cfg!(windows) { "python" } else { "python3" })
 }
@@ -362,11 +362,10 @@ impl Worker {
 
     async fn exit_detail(&self) -> String {
         let mut guard = self.child.lock().await;
-        if let Some(child) = guard.as_mut() {
-            if let Ok(Ok(status)) = tokio::time::timeout(Duration::from_secs(2), child.wait()).await
-            {
-                return format!(" ({status})");
-            }
+        if let Some(child) = guard.as_mut()
+            && let Ok(Ok(status)) = tokio::time::timeout(Duration::from_secs(2), child.wait()).await
+        {
+            return format!(" ({status})");
         }
         String::new()
     }
@@ -482,10 +481,10 @@ impl Worker {
             .await;
         }
         let mut guard = self.child.lock().await;
-        if let Some(child) = guard.as_mut() {
-            if tokio::time::timeout(grace, child.wait()).await.is_err() {
-                let _ = child.kill().await;
-            }
+        if let Some(child) = guard.as_mut()
+            && tokio::time::timeout(grace, child.wait()).await.is_err()
+        {
+            let _ = child.kill().await;
         }
         self.reader.abort();
     }
@@ -494,10 +493,10 @@ impl Worker {
 impl Drop for Worker {
     fn drop(&mut self) {
         self.reader.abort();
-        if let Ok(mut guard) = self.child.try_lock() {
-            if let Some(child) = guard.as_mut() {
-                let _ = child.start_kill();
-            }
+        if let Ok(mut guard) = self.child.try_lock()
+            && let Some(child) = guard.as_mut()
+        {
+            let _ = child.start_kill();
         }
     }
 }

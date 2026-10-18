@@ -91,10 +91,10 @@ impl FileLeases {
     /// Release the lease if `holder` holds it.
     pub fn release_lease(&self, node: &PipeRef, holder: &str) {
         let mut held = self.lock();
-        if held.get(node).is_some_and(|(h, _)| h == holder) {
-            if let Some((_, file)) = held.remove(node) {
-                let _ = fs4::FileExt::unlock(&file);
-            }
+        if held.get(node).is_some_and(|(h, _)| h == holder)
+            && let Some((_, file)) = held.remove(node)
+        {
+            let _ = fs4::FileExt::unlock(&file);
         }
     }
 }

@@ -75,12 +75,12 @@ impl ConfigState {
         };
         // Skip redundant backups if the newest one is byte-for-byte identical.
         let existing = self.list_config_backups(key);
-        if let (Some(newest), Ok(current)) = (existing.first(), std::fs::read(&keyfile)) {
-            if std::fs::read(newest).is_ok_and(|b| b == current) {
-                let newest = newest.clone();
-                self.debug(format!("'{key}' unchanged since last backup; skipping."));
-                return Some(newest);
-            }
+        if let (Some(newest), Ok(current)) = (existing.first(), std::fs::read(&keyfile))
+            && std::fs::read(newest).is_ok_and(|b| b == current)
+        {
+            let newest = newest.clone();
+            self.debug(format!("'{key}' unchanged since last backup; skipping."));
+            return Some(newest);
         }
         let timestamp = chrono::Utc::now().format(TIMESTAMP_FORMAT).to_string();
         let backups_dir = self.key_backups_dir(key, true);

@@ -786,12 +786,12 @@ impl Graph {
             let r = item.1;
             out.push(r.clone());
             for e in self.child_edges(r) {
-                if let Some(d) = indegree.get_mut(&e.child) {
-                    if within.contains(r) {
-                        *d -= 1;
-                        if *d == 0 {
-                            ready.insert((self.index_of(&e.child).unwrap_or(usize::MAX), &e.child));
-                        }
+                if let Some(d) = indegree.get_mut(&e.child)
+                    && within.contains(r)
+                {
+                    *d -= 1;
+                    if *d == 0 {
+                        ready.insert((self.index_of(&e.child).unwrap_or(usize::MAX), &e.child));
                     }
                 }
             }

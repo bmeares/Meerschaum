@@ -335,10 +335,10 @@ impl<'a> Dumper<'a> {
 
     /// `represent_mapping`'s `sorted(mapping.items())` (skipped when keys cannot be compared).
     fn ordered(&self, entries: &[(NodeRef, NodeRef)]) -> Vec<(NodeRef, NodeRef)> {
-        if self.opts.sort_keys {
-            if let Some(sorted) = try_sort(entries.to_vec(), &|a, b| py_cmp(&a.0, &b.0)) {
-                return sorted;
-            }
+        if self.opts.sort_keys
+            && let Some(sorted) = try_sort(entries.to_vec(), &|a, b| py_cmp(&a.0, &b.0))
+        {
+            return sorted;
         }
         entries.to_vec()
     }

@@ -13,12 +13,27 @@
 python -m pip install --upgrade meerschaum
 ```
 
+!!! note "Release candidates"
+    While 5.0 is in release candidates, `pip install meerschaum` still installs the latest 4.x release. Install the candidate with `python -m pip install --pre meerschaum` (see the [migration guide](/reference/migrating-to-v5/) for what changed).
+
+The wheel contains the native core and has no required Python dependencies. Wheels are published for Linux (x86_64 and arm64), macOS (arm64) and Windows (x86_64), for Python 3.11 or newer.
+
 ??? info "Standalone binary (`cargo install meerschaum`)"
     `pip install meerschaum` is the whole product: the `mrsm` command it installs runs the native command line from inside the package. If you would rather have a standalone binary (it starts in about 10 ms and needs no Python until you use a Python plugin or connector), build the same command line with Cargo:
 
     ```bash
-    cargo install meerschaum
+    cargo install meerschaum --locked            # during the release candidates: --version 5.0.0-rc.1
     ```
+
+    This needs Rust 1.95 or newer. `--locked` builds with the dependency versions Meerschaum was tested with (without it Cargo may pick newer ones, which can break the build on Windows). Prebuilt standalone binaries for the same four platforms are attached to each GitHub release.
+
+    The `duckdb` and `oracle` flavors load native libraries at run time: see [SQL connectors](/reference/connectors/sql-connectors/#duckdb).
+
+??? info "Docker"
+    The official images are `bmeares/meerschaum` (the default image, with `meerschaum[full]`), `bmeares/meerschaum:api` and `bmeares/meerschaum:slim` (the base wheel only). See the [migration guide](/reference/migrating-to-v5/) for how they changed in v5.
+
+??? warning "Windows"
+    Everything runs on Windows except two things. The Python API host is proxied over a Unix socket, so `@api_plugin` routes and plugin Dash apps do not work on Windows (the built-in API and the native console are not affected). Background jobs are refused on Windows, so `-d` and `start jobs` do not work: run the command in the foreground, use Task Scheduler or a service wrapper, or run Meerschaum in Docker or WSL.
 
 
 ??? info "Installing dependencies"

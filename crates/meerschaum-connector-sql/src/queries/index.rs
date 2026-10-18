@@ -230,17 +230,17 @@ pub fn get_create_index_queries(
             dt_query = Some(format!(
                 "SELECT public.create_hypertable('{pipe_name}', '{dt}', {space}chunk_time_interval => {chunk_time_interval}, if_not_exists => true, migrate_data => true);"
             ));
-        } else if let Some(ix_name) = &datetime_index_name {
-            if Some(dt) != primary_key.as_ref() {
-                let dt_name = datetime_name.clone().unwrap_or_default();
-                dt_query = Some(if flavor == Flavor::Mssql {
-                    format!(
-                        "CREATE {datetime_clustered} INDEX {ix_name} \nON {pipe_name} ({dt_name}){include_clause}"
-                    )
-                } else {
-                    format!("CREATE INDEX {ix_name} ON {pipe_name} ({dt_name})")
-                });
-            }
+        } else if let Some(ix_name) = &datetime_index_name
+            && Some(dt) != primary_key.as_ref()
+        {
+            let dt_name = datetime_name.clone().unwrap_or_default();
+            dt_query = Some(if flavor == Flavor::Mssql {
+                format!(
+                    "CREATE {datetime_clustered} INDEX {ix_name} \nON {pipe_name} ({dt_name}){include_clause}"
+                )
+            } else {
+                format!("CREATE INDEX {ix_name} ON {pipe_name} ({dt_name})")
+            });
         }
     }
     if let (Some(query), Some(dt)) = (dt_query, &datetime) {
@@ -248,102 +248,102 @@ pub fn get_create_index_queries(
     }
 
     // Primary key.
-    if let Some(pk) = &primary_key {
-        if !existing_primary_keys.contains(&pk.to_lowercase()) && !is_static {
-            let mut primary_queries: Vec<String> = Vec::new();
-            let pk_exists = existing_cols_pd_types.contains_key(pk);
-            if autoincrement && !pk_exists {
-                primary_queries.push(format!(
-                    "ALTER TABLE {pipe_name}\nADD {primary_key_name} {pk_db_type} {}",
-                    flavor.auto_increment_column()
-                ));
-            } else if !autoincrement && pk_exists {
-                match flavor {
-                    Flavor::Sqlite | Flavor::Geopackage => {
-                        let new_table = format!("_new_{}", pipe.target);
-                        let new_table_name =
-                            sql_item_name(&new_table, flavor, pipe_schema.as_deref());
-                        let select_cols_str = existing_cols_types
-                            .keys()
-                            .map(|c| q(c))
-                            .collect::<Vec<_>>()
-                            .join(", ");
-                        let create = get_create_table_queries(
-                            &QueryOrDtypes::Dtypes(existing_cols_pd_types.clone()),
-                            &new_table,
-                            flavor,
-                            &CreateTableOptions {
-                                schema: pipe_schema.clone(),
-                                primary_key: Some(pk.clone()),
-                                ..Default::default()
-                            },
-                        )
-                        .unwrap_or_default();
-                        primary_queries.extend(create);
-                        primary_queries.push(format!(
+    if let Some(pk) = &primary_key
+        && !existing_primary_keys.contains(&pk.to_lowercase())
+        && !is_static
+    {
+        let mut primary_queries: Vec<String> = Vec::new();
+        let pk_exists = existing_cols_pd_types.contains_key(pk);
+        if autoincrement && !pk_exists {
+            primary_queries.push(format!(
+                "ALTER TABLE {pipe_name}\nADD {primary_key_name} {pk_db_type} {}",
+                flavor.auto_increment_column()
+            ));
+        } else if !autoincrement && pk_exists {
+            match flavor {
+                Flavor::Sqlite | Flavor::Geopackage => {
+                    let new_table = format!("_new_{}", pipe.target);
+                    let new_table_name = sql_item_name(&new_table, flavor, pipe_schema.as_deref());
+                    let select_cols_str = existing_cols_types
+                        .keys()
+                        .map(|c| q(c))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    let create = get_create_table_queries(
+                        &QueryOrDtypes::Dtypes(existing_cols_pd_types.clone()),
+                        &new_table,
+                        flavor,
+                        &CreateTableOptions {
+                            schema: pipe_schema.clone(),
+                            primary_key: Some(pk.clone()),
+                            ..Default::default()
+                        },
+                    )
+                    .unwrap_or_default();
+                    primary_queries.extend(create);
+                    primary_queries.push(format!(
                             "INSERT INTO {new_table_name} ({select_cols_str})\nSELECT {select_cols_str}\nFROM {pipe_name}"
                         ));
-                        primary_queries.push(format!("DROP TABLE {pipe_name}"));
-                        primary_queries.extend(
-                            get_rename_table_queries(
-                                &new_table,
-                                &pipe.target,
-                                flavor,
-                                pipe_schema.as_deref(),
-                                None,
-                            )
-                            .unwrap_or_default(),
-                        );
-                    }
-                    Flavor::Oracle => {
-                        primary_queries.push(format!(
-                            "ALTER TABLE {pipe_name}\nMODIFY {primary_key_name} NOT NULL"
-                        ));
-                        primary_queries.push(format!(
+                    primary_queries.push(format!("DROP TABLE {pipe_name}"));
+                    primary_queries.extend(
+                        get_rename_table_queries(
+                            &new_table,
+                            &pipe.target,
+                            flavor,
+                            pipe_schema.as_deref(),
+                            None,
+                        )
+                        .unwrap_or_default(),
+                    );
+                }
+                Flavor::Oracle => {
+                    primary_queries.push(format!(
+                        "ALTER TABLE {pipe_name}\nMODIFY {primary_key_name} NOT NULL"
+                    ));
+                    primary_queries.push(format!(
                             "ALTER TABLE {pipe_name}\nADD CONSTRAINT {primary_key_constraint_name} PRIMARY KEY ({primary_key_name})"
                         ));
-                    }
-                    Flavor::Mysql | Flavor::Mariadb => {
-                        primary_queries.push(format!(
-                            "ALTER TABLE {pipe_name}\nMODIFY {primary_key_name} {pk_db_type} NOT NULL"
-                        ));
-                        primary_queries.push(format!(
+                }
+                Flavor::Mysql | Flavor::Mariadb => {
+                    primary_queries.push(format!(
+                        "ALTER TABLE {pipe_name}\nMODIFY {primary_key_name} {pk_db_type} NOT NULL"
+                    ));
+                    primary_queries.push(format!(
                             "ALTER TABLE {pipe_name}\nADD CONSTRAINT {primary_key_constraint_name} PRIMARY KEY ({primary_key_name})"
                         ));
-                    }
-                    Flavor::Timescaledb | Flavor::TimescaledbHa => {
-                        primary_queries.push(format!(
-                            "ALTER TABLE {pipe_name}\nALTER COLUMN {primary_key_name} SET NOT NULL"
-                        ));
-                        let dt_prefix = datetime_name
-                            .as_ref()
-                            .map(|n| format!("{n}, "))
-                            .unwrap_or_default();
-                        primary_queries.push(format!(
+                }
+                Flavor::Timescaledb | Flavor::TimescaledbHa => {
+                    primary_queries.push(format!(
+                        "ALTER TABLE {pipe_name}\nALTER COLUMN {primary_key_name} SET NOT NULL"
+                    ));
+                    let dt_prefix = datetime_name
+                        .as_ref()
+                        .map(|n| format!("{n}, "))
+                        .unwrap_or_default();
+                    primary_queries.push(format!(
                             "ALTER TABLE {pipe_name}\nADD CONSTRAINT {primary_key_constraint_name} PRIMARY KEY ({dt_prefix}{primary_key_name})"
                         ));
-                    }
-                    Flavor::Citus | Flavor::Postgresql | Flavor::Duckdb | Flavor::Postgis => {
-                        primary_queries.push(format!(
-                            "ALTER TABLE {pipe_name}\nALTER COLUMN {primary_key_name} SET NOT NULL"
-                        ));
-                        primary_queries.push(format!(
+                }
+                Flavor::Citus | Flavor::Postgresql | Flavor::Duckdb | Flavor::Postgis => {
+                    primary_queries.push(format!(
+                        "ALTER TABLE {pipe_name}\nALTER COLUMN {primary_key_name} SET NOT NULL"
+                    ));
+                    primary_queries.push(format!(
                             "ALTER TABLE {pipe_name}\nADD CONSTRAINT {primary_key_constraint_name} PRIMARY KEY ({primary_key_name})"
                         ));
-                    }
-                    _ => {
-                        primary_queries.push(format!(
+                }
+                _ => {
+                    primary_queries.push(format!(
                             "ALTER TABLE {pipe_name}\nALTER COLUMN {primary_key_name} {pk_db_type} NOT NULL"
                         ));
-                        primary_queries.push(format!(
+                    primary_queries.push(format!(
                             "ALTER TABLE {pipe_name}\nADD CONSTRAINT {primary_key_constraint_name} PRIMARY KEY {primary_key_clustered} ({primary_key_name})"
                         ));
-                    }
                 }
             }
-            // PARITY: the key is set even when no query was produced (`_pipes.py:836`).
-            index_queries.insert(pk.clone(), primary_queries);
         }
+        // PARITY: the key is set even when no query was produced (`_pipes.py:836`).
+        index_queries.insert(pk.clone(), primary_queries);
     }
 
     // The `id` index.
@@ -465,18 +465,31 @@ pub fn get_create_index_queries(
     {
         constraint_queries.push(add_constraint_query);
     }
-    if upsert && !indices_cols_str.is_empty() && !unique_target_exists {
+    // PARITY: Oracle refuses a second index over the column list of the primary key (`CREATE UNIQUE
+    // INDEX`: ORA-01408; `ADD CONSTRAINT ... UNIQUE`: ORA-02261). v4 emits both anyway and only
+    // warns ("Failed to create indices ... Continuing..."), leaving the primary key as the unique
+    // key; v5's internal pipes treat an index failure as fatal, so the redundant pair is not
+    // emitted when the primary key already is the whole unique key (W17O-005).
+    let primary_key_is_the_unique_key = flavor == Flavor::Oracle
+        && primary_key.as_ref().is_some_and(|pk| {
+            indices_cols_str == q(pk) && existing_primary_keys.contains(&pk.to_lowercase())
+        });
+    if upsert
+        && !indices_cols_str.is_empty()
+        && !unique_target_exists
+        && !primary_key_is_the_unique_key
+    {
         index_queries.insert(unique_index_name, constraint_queries);
         // Remove regular indices covering the same single column as the unique index.
-        if Some(&unique_index_cols_str) == id_name.as_ref() {
-            if let Some(id) = &id {
-                index_queries.shift_remove(id);
-            }
+        if Some(&unique_index_cols_str) == id_name.as_ref()
+            && let Some(id) = &id
+        {
+            index_queries.shift_remove(id);
         }
-        if Some(&unique_index_cols_str) == datetime_name.as_ref() {
-            if let Some(dt) = &datetime {
-                index_queries.shift_remove(dt);
-            }
+        if Some(&unique_index_cols_str) == datetime_name.as_ref()
+            && let Some(dt) = &datetime
+        {
+            index_queries.shift_remove(dt);
         }
     }
     Ok(index_queries)

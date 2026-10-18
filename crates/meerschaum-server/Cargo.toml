@@ -32,18 +32,18 @@ async-trait = "0.1"
 # Crate-private: the HTTP stack.
 axum = { version = "0.8", features = ["ws", "multipart"] }
 tower = { version = "0.5", features = ["util"] }
-tower-http = { version = "0.6", features = ["fs"] }
+tower-http = { version = "0.7", features = ["fs"] }
 hyper = { version = "1", features = ["client", "http1"] }
 hyper-util = { version = "0.1", features = ["tokio"] }
 http-body-util = "0.1"
 bytes = "1"
 futures-util = { version = "0.3", default-features = false, features = ["std", "sink"] }
 # Crate-private: OpenAPI (`/openapi.json`, `/docs`).
-utoipa = "5"
+utoipa = "6"
 # Crate-private: HS256 JWTs (byte-identical to PyJWT) and the API-key base64.
 hmac = { workspace = true }
 sha2 = { workspace = true }
-base64 = "0.22"
+base64 = "0.23"
 # Crate-private: the web terminal PTY bridge (`webterm`).
 portable-pty = { workspace = true }
 
@@ -51,4 +51,7 @@ portable-pty = { workspace = true }
 tokio = { workspace = true, features = ["test-util"] }
 tempfile = "3"
 regex = { workspace = true }
-tokio-tungstenite = "0.28"
+tokio-tungstenite = "0.30"
+# Real-instance tests: a SQLite / PostgreSQL-family instance behind the router, driven by the client.
+meerschaum-connector-sql = { workspace = true }
+meerschaum-connector-api = { workspace = true, features = ["client"] }

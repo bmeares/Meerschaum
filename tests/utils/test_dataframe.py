@@ -12,13 +12,23 @@ from uuid import uuid4
 import pytest
 from meerschaum.utils.packages import attempt_import
 from meerschaum.utils.dtypes import MRSM_PD_DTYPES
+from tests._binary import skip_or_fail
 DEBUG: bool = True
 pd = attempt_import('pandas')
 
 
+def _polars():
+    """polars, which CI installs: missing, it fails the test in CI and skips it locally."""
+    try:
+        import polars
+    except ImportError:
+        skip_or_fail('polars is not installed')
+    return polars
+
+
 def test_polars_conversion():
     """Polars conversion is explicit and leaves Pandas inputs untouched."""
-    pl = pytest.importorskip('polars')
+    pl = _polars()
     from meerschaum.utils.dataframe import to_pandas, to_polars
 
     pd_df = pd.DataFrame({'a': [1, None], 'b': ['x', 'y']})
@@ -34,7 +44,7 @@ def test_polars_conversion():
 
 def test_polars_special_type_conversion():
     """Polars output preserves Meerschaum's Python-backed special values."""
-    pl = pytest.importorskip('polars')
+    pl = _polars()
     from meerschaum.utils.dataframe import to_pandas, to_polars
 
     uuid_value = uuid4()
@@ -54,7 +64,7 @@ def test_polars_geometry_uses_geoarrow_wkb():
     """Polars uses GeoArrow WKB while Pandas retains GeoPandas geometry."""
     pytest.importorskip('geoarrow.types')
     import json
-    pl = pytest.importorskip('polars')
+    pl = _polars()
     shapely = attempt_import('shapely')
     geopandas = attempt_import('geopandas')
     from meerschaum.utils.dataframe import enforce_dtypes
@@ -81,7 +91,7 @@ def test_polars_geometry_uses_geoarrow_wkb():
 
 def test_polars_enforce_all_string_dtypes():
     """Arrow-native dtype enforcement accepts string input and preserves Pandas compatibility."""
-    pl = pytest.importorskip('polars')
+    pl = _polars()
     from meerschaum.utils.dataframe import enforce_dtypes
 
     raw_df = pd.DataFrame([{
@@ -124,7 +134,7 @@ def test_polars_enforce_all_string_dtypes():
 
 def test_polars_enforce_mixed_special_dtypes():
     """JSON uses canonical Arrow storage while Pandas retains Python values."""
-    pl = pytest.importorskip('polars')
+    pl = _polars()
     from meerschaum.utils.dataframe import enforce_dtypes, to_pandas
 
     result = enforce_dtypes(
@@ -163,6 +173,55 @@ def test_polars_enforcement_preserves_untyped_objects():
     )
     assert result.iloc[0].to_dict() == {'id': 1, 'payload': {'foo': 'bar'}}
     assert str(result.dtypes['payload']) == 'object'
+
+
+@pytest.mark.parametrize(
+    'dtype,values,pandas_reprs,polars_dtype,polars_values',
+    [
+        (
+            'numeric[0,0]', [Decimal('1.5'), Decimal('0')],
+            ["Decimal('1.5')", "Decimal('0')"], 'Decimal(2, 1)', [Decimal('1.5'), Decimal('0.0')],
+        ),
+        (
+            'numeric[5,10]', [Decimal('1.5'), Decimal('0')],
+            ["Decimal('1.5')", "Decimal('0')"], 'Decimal(2, 1)', [Decimal('1.5'), Decimal('0.0')],
+        ),
+        ('numeric[0,0]', [None, None], ["Decimal('NaN')", "Decimal('NaN')"], 'Null', [None, None]),
+        ('numeric[5,10]', [None, None], ["Decimal('NaN')", "Decimal('NaN')"], 'Null', [None, None]),
+        (
+            'numeric[0,0]', [Decimal('0.000012345'), None],
+            ["Decimal('0.000012345')", "Decimal('NaN')"], 'Decimal(9, 9)', [Decimal('0.000012345'), None],
+        ),
+        (
+            'numeric[5,10]', [Decimal('0.000012345'), None],
+            ["Decimal('0.000012345')", 'None'], 'Decimal(9, 9)', [Decimal('0.000012345'), None],
+        ),
+    ],
+)
+def test_enforce_numeric_outside_polars_decimals_is_unbounded(
+    dtype, values, pandas_reprs, polars_dtype, polars_values,
+):
+    """
+    `numeric[p,s]` that is not a Polars decimal (precision 0, or a scale above the precision) is an
+    unbounded numeric, as in v4.1.4: v4's native `polars.Decimal(p, s)` cast raises, so the values
+    stay as they are (pandas, with v4's null quirks) or are typed from the values (`as_polars`).
+    Expected values recorded from `meerschaum==4.1.4`.
+    """
+    pl = _polars()
+    from meerschaum.utils.dataframe import enforce_dtypes
+
+    df = pd.DataFrame({'a': values})
+    result = enforce_dtypes(df, {'a': dtype})
+    assert str(result.dtypes['a']) == 'object'
+    assert [repr(value) for value in result['a']] == pandas_reprs
+
+    polars_result = enforce_dtypes(df, {'a': dtype}, as_polars=True)
+    expected_dtype = (
+        pl.Null if polars_dtype == 'Null'
+        else pl.Decimal(*map(int, polars_dtype[len('Decimal('):-1].split(',')))
+    )
+    assert polars_result.schema['a'] == expected_dtype
+    assert polars_result['a'].to_list() == polars_values
 
 
 @pytest.mark.parametrize(

@@ -269,20 +269,21 @@ pub fn decode_frame(j: &J) -> Frame {
         let dtype = c["dtype"].as_str().unwrap();
         let values: Vec<Value> = c["values"].as_array().unwrap().iter().map(decode).collect();
         let mut data = None;
-        if dtype != "object" && dtype != "geometry" {
-            if let Some(pl_dtype) = polars_dtype_for_pandas(dtype) {
-                // Floats: NaN is null in pandas float columns.
-                let values: Vec<Value> = values
-                    .iter()
-                    .map(|v| if v.is_na() { Value::Null } else { v.clone() })
-                    .collect();
-                // pandas second-precision columns map to milliseconds (Polars has no `s` unit).
-                data = values_to_series(&name, &values, &pl_dtype).map(ColumnData::Native);
-                assert!(
-                    data.is_some(),
-                    "could not build native column {name} ({dtype})"
-                );
-            }
+        if dtype != "object"
+            && dtype != "geometry"
+            && let Some(pl_dtype) = polars_dtype_for_pandas(dtype)
+        {
+            // Floats: NaN is null in pandas float columns.
+            let values: Vec<Value> = values
+                .iter()
+                .map(|v| if v.is_na() { Value::Null } else { v.clone() })
+                .collect();
+            // pandas second-precision columns map to milliseconds (Polars has no `s` unit).
+            data = values_to_series(&name, &values, &pl_dtype).map(ColumnData::Native);
+            assert!(
+                data.is_some(),
+                "could not build native column {name} ({dtype})"
+            );
         }
         let data = data.unwrap_or(ColumnData::Object(values));
         let mut column = Column::new(name, data);

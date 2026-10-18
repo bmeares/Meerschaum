@@ -333,15 +333,15 @@ fn kv(key: &str, value: i64) -> Doc {
     doc(vec![("key", s(key)), ("value", i(value))])
 }
 
-// MySQL / MariaDB / MSSQL index internal string keys as 255-character columns: a longer key is
-// refused up front with a clear message; other flavors keep storing it.
+// MySQL / MariaDB / MSSQL / Oracle index internal string keys as 255-character columns: a longer key
+// is refused up front with a clear message; other flavors keep storing it.
 flavor_tests!(internal_key_length_bound, |c: Ctx| async move {
     let pipe = internal_pipe(&c, "len");
     let fits = "k".repeat(255);
     ok(c.sync(&pipe, vec![kv(&fits, 1)]).await);
     let too_long = "k".repeat(256);
     let res = c.sync(&pipe, vec![kv(&too_long, 2)]).await;
-    if c.is_mysql() || c.is_mssql() {
+    if c.is_mysql() || c.is_mssql() || c.is_oracle() {
         assert!(!res.success, "{}", res.message);
         assert!(
             res.message.contains("exceeds 255 characters"),

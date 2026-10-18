@@ -608,10 +608,7 @@ def _clean_env(tmp_path, **extra):
     plugins = tmp_path / 'plugins'
     root.mkdir(exist_ok=True)
     plugins.mkdir(exist_ok=True)
-    env = {
-        k: v for k, v in os.environ.items()
-        if not k.startswith('MRSM_') or k == 'MRSM_CORE'
-    }
+    env = {k: v for k, v in os.environ.items() if not k.startswith('MRSM_')}
     env.update({
         'MRSM_ROOT_DIR': str(root),
         'MRSM_PLUGINS_DIR': str(plugins),
@@ -688,8 +685,7 @@ def test_api_host_help_makes_no_install_attempt(tmp_path):
     probe = subprocess.run(
         [
             sys.executable, '-c',
-            'import fastapi, fastapi_login, uvicorn, aiofiles, multipart, '
-            + 'importlib_metadata, typing_extensions',
+            'import fastapi, uvicorn, jwt, multipart',
         ],
         env=env,
         capture_output=True,

@@ -1,2 +1,4 @@
 dash>=4.1.0
 a2wsgi>=1.10.0
+dash-bootstrap-components>=2.0.4
+dash-extensions>=2.0.5

@@ -18,7 +18,7 @@ __all__ = sorted([
     'activate_venv', 'deactivate_venv', 'init_venv',
     'inside_venv', 'is_venv_active', 'venv_exec',
     'venv_executable', 'venv_exists', 'venv_target_path',
-    'Venv', 'get_venvs', 'verify_venv', 'get_module_venv',
+    'Venv', 'get_venvs', 'verify_venv', 'get_module_venv', 'ensure_default_venvs',
 ])
 __pdoc__ = {'Venv': True}
 
@@ -124,6 +124,53 @@ def activate_venv(
             pass
 
     return True
+
+
+def ensure_default_venvs(debug: bool = False) -> bool:
+    """
+    Put the shared `'mrsm'` virtual environment on `sys.path` (when it exists and is not already
+    there), the way v4 left it for plugin code.
+
+    In v4 every process that ran plugin code had imported `meerschaum` and called
+    `attempt_import(..., venv='mrsm')` long before the first plugin was imported, so the
+    shared `mrsm` venv (where a dependency-free `pip install meerschaum` puts pandas and
+    friends on first use) was always visible: a plugin with its own `required` venv could still
+    `import pandas`. The order v4 produced is: the plugin's venv(s) first, then the base
+    interpreter's site-packages, then `<root>/venvs/mrsm`, then the rest of `sys.path`. The
+    plugin venv is activated later (on top), so this activates `'mrsm'` and then the base
+    interpreter (`venv=None`), exactly as v4's `attempt_import` calls did.
+
+    This never creates a virtual environment and never installs anything
+    (`MRSM_NO_AUTO_INSTALL` is unaffected): without a `mrsm` venv there is nothing to expose.
+
+    Returns
+    -------
+    A bool indicating whether the `mrsm` venv is on `sys.path` afterwards.
+    """
+    import sys
+    try:
+        target_path = venv_target_path('mrsm', allow_nonexistent=True, debug=debug)
+        target = target_path.as_posix()
+        if not target_path.exists():
+            return False
+        with LOCKS['sys.path']:
+            if target not in sys.path:
+                activate_venv('mrsm', init_if_not_exists=False, debug=debug)
+            if target not in sys.path:
+                return False
+            try:
+                base = venv_target_path(None, debug=debug).as_posix()
+            except (Exception, SystemExit):
+                return True
+            ### The base interpreter's site-packages come before the `mrsm` venv (v4:
+            ### `activate_venv(None)` ran after `activate_venv('mrsm')`).
+            index = sys.path.index(target)
+            if base != target and base not in sys.path[:index]:
+                sys.path.insert(index, base)
+                active_venvs.add(None)
+            return True
+    except (Exception, SystemExit):
+        return False
 
 
 def deactivate_venv(

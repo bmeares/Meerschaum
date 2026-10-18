@@ -11,6 +11,13 @@ plugins directory, a SQLite instance inside that root and a synthetic user, and 
 Python Playwright's Chromium. It never touches the real configuration, port 8989, 8000, 8998,
 3000 or any container.
 
+The servers' Python (the API host and the plugin workers, `MRSM_PYTHON`, see `server_python()`)
+is the test interpreter when its own environment already has the `meerschaum[api,dash,sql,pandas]`
+packages (the CI virtual environment), otherwise a cached virtual environment built from
+`requirements/{api,dash,sql,pandas}.txt` under `~/.cache/mrsm-console-venvs/<hash of those files>`
+(override the directory with `MRSM_TEST_CONSOLE_VENV_DIR`; the first run needs a package index).
+It is never a developer's `test_root/venvs` or user site, so a Playwright-only `python3` works.
+
 It is opt-in: set `MRSM_TEST_CONSOLE=1`, otherwise every test here is skipped (the default
 sqlite pytest run starts no servers). Run it with the repo on the path:
 
@@ -23,6 +30,8 @@ from __future__ import annotations
 import os
 import sys
 import json
+import venv
+import hashlib
 import time
 import shutil
 import signal
@@ -86,13 +95,76 @@ def free_port() -> int:
     raise RuntimeError("No free port for the console test server.")
 
 
+SERVER_REQUIREMENTS = ('api', 'dash', 'sql', 'pandas')
+### What those extras let the host import (checked with `python -s`: the user site never counts).
+SERVER_IMPORTS = (
+    'fastapi', 'uvicorn', 'multipart', 'jwt', 'a2wsgi', 'websockets', 'dash',
+    'dash_bootstrap_components', 'dash_extensions', 'sqlalchemy', 'pandas',
+)
+_server_python: dict = {}
+
+
+def _provides_server_packages(python: str) -> bool:
+    probe = subprocess.run(
+        [python, '-s', '-c', 'import ' + ', '.join(SERVER_IMPORTS)], capture_output=True,
+    )
+    return probe.returncode == 0
+
+
+def server_python() -> str:
+    """
+    The interpreter the servers run Python in: the test interpreter itself when its own
+    environment (user site excluded) already provides the `meerschaum[api,dash,sql,pandas]`
+    packages, as the CI virtual environment does; otherwise a virtual environment holding exactly
+    those packages, keyed by the hash of their requirement files and the Python version and built
+    on first use. Fails (it never falls back to another interpreter) when the packages cannot be
+    installed.
+    """
+    if 'python' in _server_python:
+        return _server_python['python']
+    if _provides_server_packages(sys.executable):
+        _server_python['python'] = sys.executable
+        return sys.executable
+    files = [REPO / 'requirements' / f'{name}.txt' for name in SERVER_REQUIREMENTS]
+    digest = hashlib.sha256()
+    digest.update(f'{sys.version_info[0]}.{sys.version_info[1]}'.encode())
+    for path in files:
+        digest.update(path.read_bytes())
+    base = pathlib.Path(
+        os.environ.get('MRSM_TEST_CONSOLE_VENV_DIR')
+        or (pathlib.Path.home() / '.cache' / 'mrsm-console-venvs')
+    )
+    env_dir = base / digest.hexdigest()[:12]
+    python = env_dir / ('Scripts' if os.name == 'nt' else 'bin') / (
+        'python.exe' if os.name == 'nt' else 'python'
+    )
+    ready = env_dir / '.ready'
+    if not ready.exists():
+        base.mkdir(parents=True, exist_ok=True)
+        venv.EnvBuilder(with_pip=True, clear=True).create(env_dir)
+        command = [
+            str(python), '-m', 'pip', 'install', '--quiet', '--disable-pip-version-check',
+        ]
+        for path in files:
+            command += ['-r', str(path)]
+        result = subprocess.run(command, capture_output=True, text=True, timeout=1200)
+        if result.returncode != 0:
+            pytest.fail(
+                f"The console suite builds its server interpreter ({env_dir}) from "
+                f"requirements/{{{','.join(SERVER_REQUIREMENTS)}}}.txt and needs a package index; "
+                f"pip failed:\n{result.stderr[-2000:]}"
+            )
+        ready.write_text('\n'.join(str(p.name) for p in files), encoding='utf-8')
+    _server_python['python'] = str(python)
+    return str(python)
+
+
 def base_env(root: pathlib.Path, plugins: pathlib.Path, config: dict | None = None) -> dict:
     """
     The environment for every subprocess: isolated root and plugins, no inherited `MRSM_*`.
-    `HOME` is the temporary root so nothing falls back to `~/.config/meerschaum`; the user site is
-    kept (`PYTHONUSERBASE`) so the Python host finds its dependencies.
+    `HOME` is the temporary root so nothing falls back to `~/.config/meerschaum`; the Python
+    host and workers run in `server_python()` with no user site.
     """
-    import site
     env = {
         key: val for key, val in os.environ.items()
         if not key.startswith('MRSM_')
@@ -110,27 +182,24 @@ def base_env(root: pathlib.Path, plugins: pathlib.Path, config: dict | None = No
             merged_config[key] = val
     env.update({
         'HOME': str(root),
-        'PYTHONUSERBASE': site.getuserbase(),
+        'PYTHONNOUSERSITE': '1',
         'PYTHONPATH': str(REPO),
         'PYTHONDONTWRITEBYTECODE': '1',
         'MRSM_ROOT_DIR': str(root),
         'MRSM_PLUGINS_DIR': str(plugins),
         'MRSM_NO_AUTO_INSTALL': '1',
         'MRSM_NO_UPDATE_CHECK': '1',
-        'MRSM_PYTHON': sys.executable,
+        'MRSM_PYTHON': server_python(),
         'MRSM_W7_CONSOLE': '1',
         'MRSM_SQL_W7CONSOLE': f"sqlite:///{root / 'w7console.db'}",
         'MRSM_CONFIG': json.dumps(merged_config),
     })
-    venvs = REPO / 'test_root' / 'venvs'
-    if (venvs / 'mrsm').is_dir():
-        env['MRSM_VENVS_DIR'] = str(venvs)
     return env
 
 
 def run_python(env: dict, code: str, timeout: int = 180) -> subprocess.CompletedProcess:
     return subprocess.run(
-        [sys.executable, '-c', code],
+        [env['MRSM_PYTHON'], '-c', code],
         env=env, cwd=env['MRSM_ROOT_DIR'], capture_output=True, text=True, timeout=timeout,
     )
 

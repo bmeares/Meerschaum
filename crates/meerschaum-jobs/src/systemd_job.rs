@@ -276,11 +276,11 @@ mod imp {
                 use crate::executor::JobExecutor;
                 let _ = SystemdExecutor::new(ctx).delete_job(&job.name);
             }
-        } else if let (Some(path), Some((success, message))) = (&job.result_path, &result) {
-            if path.parent().is_some_and(|p| p.exists()) {
-                let json = serde_json::json!([success, message]).to_string();
-                let _ = fs::write(path, json);
-            }
+        } else if let (Some(path), Some((success, message))) = (&job.result_path, &result)
+            && path.parent().is_some_and(|p| p.exists())
+        {
+            let json = serde_json::json!([success, message]).to_string();
+            let _ = fs::write(path, json);
         }
 
         // A job stopped on request (`stop` sends SIGINT) exits 0 so that systemd does not

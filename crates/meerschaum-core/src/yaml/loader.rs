@@ -924,14 +924,14 @@ fn construct_timestamp(value: &str) -> Result<Node, PyYamlError> {
         return Ok(Node::Date(date));
     }
     let mut microsecond = 0;
-    if let Some(fraction) = caps.name("fraction").map(|m| m.as_str()) {
-        if !fraction.is_empty() {
-            let mut f: String = fraction.chars().take(6).collect();
-            while f.len() < 6 {
-                f.push('0');
-            }
-            microsecond = f.parse::<u32>().unwrap_or(0);
+    if let Some(fraction) = caps.name("fraction").map(|m| m.as_str())
+        && !fraction.is_empty()
+    {
+        let mut f: String = fraction.chars().take(6).collect();
+        while f.len() < 6 {
+            f.push('0');
         }
+        microsecond = f.parse::<u32>().unwrap_or(0);
     }
     let mut utc_offset_us = None;
     if let Some(sign) = caps.name("tz_sign") {

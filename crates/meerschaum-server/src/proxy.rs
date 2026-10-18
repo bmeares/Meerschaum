@@ -158,11 +158,11 @@ impl HostProxy {
 
     /// Forward a request to the host and return its response.
     pub async fn forward(&self, mut req: Request) -> Response {
-        if let Some(sup) = &self.supervisor {
-            if let Err(e) = sup.ensure_started().await {
-                tracing::warn!("The API host is unavailable: {e}");
-                return bad_gateway("The API host is unavailable.");
-            }
+        if let Some(sup) = &self.supervisor
+            && let Err(e) = sup.ensure_started().await
+        {
+            tracing::warn!("The API host is unavailable: {e}");
+            return bad_gateway("The API host is unavailable.");
         }
         let stream = match connect_host(&self.socket).await {
             Ok(s) => s,
@@ -197,10 +197,10 @@ impl HostProxy {
             .parse::<Uri>()
             .unwrap_or_else(|_| Uri::from_static("/"));
         strip_hop_by_hop(&mut parts.headers, is_upgrade);
-        if !parts.headers.contains_key(header::HOST) {
-            if let Ok(v) = "localhost".parse() {
-                parts.headers.insert(header::HOST, v);
-            }
+        if !parts.headers.contains_key(header::HOST)
+            && let Ok(v) = "localhost".parse()
+        {
+            parts.headers.insert(header::HOST, v);
         }
         let upstream_req = hyper::Request::from_parts(parts, body);
         let mut resp = match sender.send_request(upstream_req).await {

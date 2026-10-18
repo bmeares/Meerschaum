@@ -1,6 +1,6 @@
 # 🗃️ Engine State
 
-The engine adds **no database files** to your root directory. Everything it remembers lives on your **instance**, as internal pipes alongside Meerschaum's own tables (in the internal schema on flavors that have schemas; on SQLite they are plain tables named `mrsm_engine_*`). These pipes use the connector keys `mrsm`, are temporary and static (never registered, never shown by `show pipes`) and are excluded from the graph and the planner.
+The engine adds **no database files** to your root directory. Everything it remembers lives on your **instance**, as internal pipes alongside Meerschaum's own tables (on flavors that have schemas, PostgreSQL and MSSQL, in the internal schema `_mrsm_internal`; on MySQL, MariaDB, SQLite, DuckDB and Oracle they are plain tables named `mrsm_engine_*` in the instance's database). When an instance's connector uses a schema other than the default (`public`, `dbo`), its tables carry that schema as a suffix (`_mrsm_internal.mrsm_engine_runs_analytics`; a schema longer than 15 characters is shortened to a 16-character name ending in a hash), so instances that share a database never share engine state. These pipes use the connector keys `mrsm`, are temporary and static (never registered, never shown by `show pipes`) and are excluded from the graph and the planner.
 
 | Table (pipe) | Holds | Kept on |
 |---|---|---|
@@ -15,7 +15,7 @@ The first engine run creates them. Graphs, watermarks and duration estimates are
 
 !!! info "API instances"
 
-    Engine state travels over the dedicated `/engine` route family (`/engine/ledger`, `/engine/cursors`, `/engine/state`, `/engine/runs`, `/engine/events`, `/engine/leases`), which requires the `pipes:write` scope. The generic pipe routes refuse the `mrsm` connector keys. On a read-only instance the engine runs degraded: watermarks only, no ledger-driven backfill, no persisted history, with a warning.
+    Engine state travels over the dedicated `/engine` route family: the engine reads and writes its state tables through `/engine/pipes/{metric}/read`, `/write`, `/clear` and `/exists` (reads need the `pipes:read` scope, writes `pipes:write`), and leases go through `/engine/leases`; `/engine/ledger`, `/engine/cursors`, `/engine/state`, `/engine/runs` and `/engine/events` expose the same rows by shape (`pipes:write`). The server keeps all of it on its own instance (in `_mrsm_internal` on a PostgreSQL or MSSQL instance), so it survives a server restart. The generic pipe routes refuse the `mrsm` connector keys. On a read-only instance the engine runs degraded: watermarks only, no ledger-driven backfill, no persisted history, with a warning.
 
 ## 📒 The Dirty-Range Ledger
 
@@ -61,7 +61,7 @@ Before syncing a pipe the executor acquires a **lease** on it, so two jobs never
 |---|---|
 | SQL | An `INSERT` into the `mrsm_pipe_leases` table (unique key on the pipe), with conditional `DELETE` for expiry |
 | Valkey | `SET NX PX` |
-| API | The `/engine/leases` routes |
+| API | The `/engine/leases` routes, which take the lease on the server's own instance |
 | Custom instance connectors | Implement the optional `acquire_pipe_lease(pipe, holder, ttl)` / `release_pipe_lease(pipe, holder)` pair. Without it the engine falls back to **machine-local file locks** under `{root}/cache/engine_leases`, with a one-time warning that the lease only protects against processes on this machine. |
 
 ## 📜 Run History

@@ -29,11 +29,11 @@ fn steps(path: &Bound<'_, PyAny>) -> PyResult<Vec<Step>> {
     let mut out = Vec::new();
     for item in path.try_iter()? {
         let item = item?;
-        if let Ok(i) = item.extract::<i64>() {
-            if !item.is_instance_of::<pyo3::types::PyBool>() {
-                out.push(Step::Index(i));
-                continue;
-            }
+        if let Ok(i) = item.extract::<i64>()
+            && !item.is_instance_of::<pyo3::types::PyBool>()
+        {
+            out.push(Step::Index(i));
+            continue;
         }
         out.push(Step::Key(item.str()?.to_str()?.to_string()));
     }
@@ -366,7 +366,7 @@ impl PyPipe {
     }
 
     fn __eq__(&self, other: &Bound<'_, PyAny>) -> bool {
-        match other.downcast::<PyPipe>() {
+        match other.cast::<PyPipe>() {
             Ok(o) => *self.lock() == *o.borrow().lock(),
             Err(_) => false,
         }

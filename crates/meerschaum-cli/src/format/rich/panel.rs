@@ -381,7 +381,7 @@ impl Renderable for Columns<'_> {
         let item_count = self.renderables.len();
         let iter_widths = |column_count: usize| -> Vec<usize> {
             let mut v: Vec<usize> = renderable_widths.clone();
-            if item_count % column_count != 0 {
+            if !item_count.is_multiple_of(column_count) {
                 v.extend(std::iter::repeat_n(
                     0,
                     column_count - item_count % column_count,
@@ -415,7 +415,7 @@ impl Renderable for Columns<'_> {
         let mut table = Table::grid(padding, true, false);
         let mut cells: Vec<Option<&dyn Renderable>> =
             self.renderables.iter().map(|r| Some(r.as_ref())).collect();
-        if item_count % column_count != 0 {
+        if !item_count.is_multiple_of(column_count) {
             for _ in 0..(column_count - item_count % column_count) {
                 cells.push(None);
             }

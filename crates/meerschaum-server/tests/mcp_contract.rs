@@ -83,12 +83,11 @@ fn normalize(v: &Json, key: Option<&str>, version: &str) -> Json {
             if s == version || s == "<version>" {
                 return json!("<version>");
             }
-            if key == Some("text") {
-                if let Ok(parsed @ (Json::Object(_) | Json::Array(_))) =
+            if key == Some("text")
+                && let Ok(parsed @ (Json::Object(_) | Json::Array(_))) =
                     serde_json::from_str::<Json>(s)
-                {
-                    return json!({"<json>": normalize(&parsed, None, version)});
-                }
+            {
+                return json!({"<json>": normalize(&parsed, None, version)});
             }
             Json::String(canonical_datetime(s).unwrap_or_else(|| s.clone()))
         }

@@ -255,12 +255,13 @@ async fn legacy_adapter_survives_a_crash_mid_callback() {
                 let res = sink
                     .sync(&landing, Some(PipeInput::Docs(vec![doc])), &args)
                     .await;
-                if res.success && calls.fetch_add(1, Ordering::SeqCst) == 0 {
-                    if let Some(flag) = &crash {
-                        // Committed; the process dies before the PUBACK.
-                        flag.store(true, Ordering::SeqCst);
-                        std::future::pending::<()>().await;
-                    }
+                if res.success
+                    && calls.fetch_add(1, Ordering::SeqCst) == 0
+                    && let Some(flag) = &crash
+                {
+                    // Committed; the process dies before the PUBACK.
+                    flag.store(true, Ordering::SeqCst);
+                    std::future::pending::<()>().await;
                 }
                 res.success
             })

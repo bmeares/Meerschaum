@@ -176,9 +176,7 @@ fn build(py: Python<'_>, session: &Session, request: &Json) -> PyResult<Built> {
             // Never block on the runtime while holding the interpreter lock: the runtime's
             // `tracing` sink takes the lock on its own threads.
             let conn = py
-                .allow_threads(|| {
-                    session.block_on(SqlConnector::connect_with(label, spec, settings))
-                })
+                .detach(|| session.block_on(SqlConnector::connect_with(label, spec, settings)))
                 .map_err(|e| runtime_err(format!("Cannot connect to '{keys}': {e}")))?;
             conn.set_instance_provider(Arc::new(ConfiguredSqlProvider::new(config)));
             overrides.insert(keys.clone(), Instance::Sql(Arc::new(conn)));
@@ -187,7 +185,7 @@ fn build(py: Python<'_>, session: &Session, request: &Json) -> PyResult<Built> {
     let home = match overrides.get(&instance_keys) {
         Some(inst) => inst.clone(),
         None => py
-            .allow_threads(|| session.instance(&instance_keys, config))
+            .detach(|| session.instance(&instance_keys, config))
             .map_err(|e| {
                 runtime_err(format!(
                     "Cannot resolve the instance connector '{instance_keys}': {}",
@@ -209,7 +207,7 @@ fn build(py: Python<'_>, session: &Session, request: &Json) -> PyResult<Built> {
         mut config,
         ..
     } = py
-        .allow_threads(|| {
+        .detach(|| {
             registry_with(
                 config,
                 session,
@@ -334,7 +332,7 @@ pub fn engine_plan(py: Python<'_>, request: &str) -> PyResult<String> {
     let built = build(py, &session, &request)?;
     let opts = run_options(&request, &built.instance_keys)?;
     let planned = py
-        .allow_threads(|| session.block_on(built.engine.plan(&opts)))
+        .detach(|| session.block_on(built.engine.plan(&opts)))
         .map_err(runtime_err)?;
     to_json_string(&json!({
         "plan": planned.plan,
@@ -368,10 +366,10 @@ fn run_with_events(
     session: &Session,
     engine: Engine,
     mut opts: RunOptions,
-    on_event: PyObject,
+    on_event: Py<PyAny>,
 ) -> PyResult<RunResult> {
     let (tx, rx) = std::sync::mpsc::channel::<Event>();
-    // `allow_threads` needs a `Sync` receiver.
+    // `detach` needs a `Sync` receiver.
     let rx = Mutex::new(rx);
     opts.on_event = Some(Arc::new(EventChannel(tx)));
     let (cancel, cancelled) = tokio::sync::oneshot::channel::<()>();
@@ -391,7 +389,7 @@ fn run_with_events(
     };
     let mut raised: Option<PyErr> = None;
     loop {
-        let next = py.allow_threads(|| {
+        let next = py.detach(|| {
             rx.lock()
                 .unwrap_or_else(|e| e.into_inner())
                 .recv_timeout(SIGNAL_POLL)
@@ -415,10 +413,10 @@ fn run_with_events(
     }
     if let Some(e) = raised {
         let _ = cancel.send(());
-        let _ = py.allow_threads(|| worker.join());
+        let _ = py.detach(|| worker.join());
         return Err(e);
     }
-    py.allow_threads(|| worker.join())
+    py.detach(|| worker.join())
         .map_err(|_| runtime_err("The engine run panicked."))?
         .ok_or_else(|| runtime_err("The engine run was cancelled."))
 }
@@ -432,14 +430,14 @@ fn run_with_events(
 /// "critical_path", "warnings", "duration_seconds"}`.
 #[pyfunction]
 #[pyo3(signature = (request, on_event=None))]
-pub fn engine_run(py: Python<'_>, request: &str, on_event: Option<PyObject>) -> PyResult<String> {
+pub fn engine_run(py: Python<'_>, request: &str, on_event: Option<Py<PyAny>>) -> PyResult<String> {
     let request = parse_request(request)?;
     let session = session();
     let built = build(py, &session, &request)?;
     let opts = run_options(&request, &built.instance_keys)?;
     let result = match on_event {
         Some(callback) => run_with_events(py, &session, built.engine, opts, callback)?,
-        None => py.allow_threads(|| session.block_on(built.engine.run(opts))),
+        None => py.detach(|| session.block_on(built.engine.run(opts))),
     };
     let outcomes: Vec<Json> = result
         .outcomes
@@ -495,7 +493,7 @@ pub fn engine_runs(py: Python<'_>, request: &str) -> PyResult<String> {
             .map(|n| n as usize),
     };
     let runs = py
-        .allow_threads(|| session.block_on(reader.runs(&filter)))
+        .detach(|| session.block_on(reader.runs(&filter)))
         .map_err(|e| runtime_err(e.to_string()))?;
     to_json_string(&runs)
 }
@@ -508,7 +506,7 @@ pub fn engine_run_detail(py: Python<'_>, request: &str) -> PyResult<String> {
     let (session, reader) = reader(py, &request)?;
     let run_id = str_field(&request, "run_id").ok_or_else(|| value_err("`run_id` is required."))?;
     let detail = py
-        .allow_threads(|| session.block_on(reader.run_detail(run_id)))
+        .detach(|| session.block_on(reader.run_detail(run_id)))
         .map_err(|e| runtime_err(e.to_string()))?;
     to_json_string(&detail)
 }
@@ -521,7 +519,7 @@ pub fn engine_run_events(py: Python<'_>, request: &str) -> PyResult<String> {
     let run_id = str_field(&request, "run_id").ok_or_else(|| value_err("`run_id` is required."))?;
     let after = request.get("after_seq").and_then(Json::as_u64);
     let rows = py
-        .allow_threads(|| session.block_on(reader.events_after(run_id, after)))
+        .detach(|| session.block_on(reader.events_after(run_id, after)))
         .map_err(|e| runtime_err(e.to_string()))?;
     to_json_string(&rows)
 }

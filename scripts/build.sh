@@ -20,7 +20,9 @@ python scripts/check_packaging.py || exit 1
 
 ### Build the package for uploading to PyPI (the maturin backend; needs a Rust toolchain): the one
 ### `meerschaum` wheel, whose `mrsm` console script runs the CLI from the extension (D8, revised).
-### Per-platform wheels are built by .github/workflows/wheels.yaml. The standalone binary is
+### This local wheel is `linux_x86_64`, which PyPI rejects: never upload it. The release wheels are the
+### per-platform CI artifacts of .github/workflows/wheels.yaml (.agents/skills/release/SKILL.md, "5.x").
+### The standalone binary is
 ### `cargo install meerschaum`.
 python -m build
 

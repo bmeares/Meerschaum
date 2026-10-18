@@ -315,12 +315,27 @@ Source: https://meerschaum.io/get-started/
 python -m pip install --upgrade meerschaum
 ```
 
+!!! note "Release candidates"
+    While 5.0 is in release candidates, `pip install meerschaum` still installs the latest 4.x release. Install the candidate with `python -m pip install --pre meerschaum` (see the [migration guide](/reference/migrating-to-v5/) for what changed).
+
+The wheel contains the native core and has no required Python dependencies. Wheels are published for Linux (x86_64 and arm64), macOS (arm64) and Windows (x86_64), for Python 3.11 or newer.
+
 ??? info "Standalone binary (`cargo install meerschaum`)"
     `pip install meerschaum` is the whole product: the `mrsm` command it installs runs the native command line from inside the package. If you would rather have a standalone binary (it starts in about 10 ms and needs no Python until you use a Python plugin or connector), build the same command line with Cargo:
 
     ```bash
-    cargo install meerschaum
+    cargo install meerschaum --locked            # during the release candidates: --version 5.0.0-rc.1
     ```
+
+    `--locked` builds with the dependency versions Meerschaum was tested with. Prebuilt standalone binaries for the same four platforms are attached to each GitHub release.
+
+    The `duckdb` and `oracle` flavors load native libraries at run time: see [SQL connectors](/reference/connectors/sql-connectors/#duckdb).
+
+??? info "Docker"
+    The official images are `bmeares/meerschaum` (the default image, with `meerschaum[full]`), `bmeares/meerschaum:api` and `bmeares/meerschaum:slim` (the base wheel only). See the [migration guide](/reference/migrating-to-v5/) for how they changed in v5.
+
+??? warning "Windows"
+    Everything runs on Windows except two things. The Python API host is proxied over a Unix socket, so `@api_plugin` routes and plugin Dash apps do not work on Windows (the built-in API and the native console are not affected). Background jobs are refused on Windows, so `-d` and `start jobs` do not work: run the command in the foreground, use Task Scheduler or a service wrapper, or run Meerschaum in Docker or WSL.
 
 
 ??? info "Installing dependencies"
@@ -3004,7 +3019,7 @@ Source: https://meerschaum.io/reference/pipelines/state/
 
 # 🗃️ Engine State
 
-The engine adds **no database files** to your root directory. Everything it remembers lives on your **instance**, as internal pipes alongside Meerschaum's own tables (in the internal schema on flavors that have schemas; on SQLite they are plain tables named `mrsm_engine_*`). These pipes use the connector keys `mrsm`, are temporary and static (never registered, never shown by `show pipes`) and are excluded from the graph and the planner.
+The engine adds **no database files** to your root directory. Everything it remembers lives on your **instance**, as internal pipes alongside Meerschaum's own tables (on flavors that have schemas, PostgreSQL and MSSQL, in the internal schema `_mrsm_internal`; on MySQL, MariaDB, SQLite, DuckDB and Oracle they are plain tables named `mrsm_engine_*` in the instance's database). When an instance's connector uses a schema other than the default (`public`, `dbo`), its tables carry that schema as a suffix (`_mrsm_internal.mrsm_engine_runs_analytics`; a schema longer than 15 characters is shortened to a 16-character name ending in a hash), so instances that share a database never share engine state. These pipes use the connector keys `mrsm`, are temporary and static (never registered, never shown by `show pipes`) and are excluded from the graph and the planner.
 
 | Table (pipe) | Holds | Kept on |
 |---|---|---|
@@ -3460,6 +3475,28 @@ The following database flavors are confirmed to be feature-complete through the 
 - DuckDB
 - Microsoft SQL Server
 - Oracle SQL
+
+PostGIS and GeoPackage are supported for `geometry` columns. Two flavors need a native library that is **not** bundled with Meerschaum and is loaded at run time:
+
+### DuckDB
+
+The `duckdb` flavor uses DuckDB's own shared library (`libduckdb`, version 1.4 or newer). The first time you connect, Meerschaum downloads the official release for your platform into `<root>/drivers/` and verifies its checksum. Nothing else needs to be installed.
+
+- `mrsm install driver duckdb` downloads it ahead of time; `mrsm uninstall driver duckdb` removes the cached copy.
+- `mrsm show drivers` reports whether DuckDB (and the Oracle client) can be found, and where.
+- On an air-gapped host, or with [`MRSM_NO_AUTO_INSTALL`](/reference/environment/#mrsm_no_auto_install) set (which blocks the download, and DuckDB's extension auto-install), point [`MRSM_DUCKDB_LIB`](/reference/environment/#mrsm_duckdb_lib) at a `libduckdb` file you copied there.
+
+### Oracle SQL
+
+The `oracle` flavor needs [Oracle Instant Client](https://www.oracle.com/database/technologies/instant-client.html) (the `libclntsh` library) installed on the machine; Meerschaum cannot download it for you. Make it visible to the loader:
+
+| Platform | Make the client library findable |
+|---|---|
+| Linux | Add its directory to `ldconfig` (e.g. a file in `/etc/ld.so.conf.d/` followed by `ldconfig`) or set `LD_LIBRARY_PATH`. |
+| macOS | Set `DYLD_LIBRARY_PATH` to the Instant Client directory. |
+| Windows | Add the Instant Client directory (containing `oci.dll`) to `PATH`. |
+
+`mrsm show drivers` tells you whether the library was found.
 
 ## In-place Syncs
 
@@ -7464,6 +7501,8 @@ mrsm bootstrap plugin
 
 !!! tip "New in v5: Rust plugins"
 
+    Meerschaum v5 is still a Python package, and most plugins are still Python modules that work unchanged. Rust plugins are optional and target the native core, kernel and engine path.
+
     Prefer a native library over a Python module? [Rust plugins](/reference/plugins/rust-plugins/) can do everything Python plugins can, load in-process without a Python interpreter, and sit side by side with Python plugins in the same directory.
 
 !!! question "What can I do with plugins?"
@@ -8770,6 +8809,8 @@ The part for your plugin lives under `plugins.<name>`:
 }
 ```
 
+Arguments reach `context.kwargs` exactly as they reach a Python plugin's `**kwargs`, which is v4's rule: an argument that was not given is **absent** (never `false` or `null`), a flag that was given is `true`, and a `store_false` flag is present (as `true`) only while it is not given. Declare `"default": "None"` to receive an explicit `null`. Read flags with a fallback (`kwargs.get("native_demo").and_then(Value::as_bool).unwrap_or(false)`).
+
 ## 🧩 What a plugin can provide
 
 | You want | Do this |
@@ -9020,9 +9061,13 @@ All Meerschaum environment variables begin with the prefix `MRSM_`. The most com
 | `MRSM_CONFIG` | Inline JSON or simplified-dictionary patch applied to the configuration. | _(unset)_ |
 | `MRSM_PATCH` | A second patch applied *after* `MRSM_CONFIG` (may reference its keys). | _(unset)_ |
 | `MRSM_<TYPE>_<LABEL>` | Define a connector by URI (e.g. `MRSM_SQL_MAIN`, `MRSM_API_MAIN`). | _(unset)_ |
-| `MRSM_RUNTIME` | Marks a special runtime (e.g. `portable`, `docker`). | _(unset)_ |
+| `MRSM_RUNTIME` | Marks a special runtime (e.g. `docker`). | _(unset)_ |
 | `MRSM_NO_AUTO_INSTALL` | Disable every implicit package installation (imports, dependency checks, `uv`/`pip` bootstraps). | _(unset)_ |
 | `MRSM_NOASK` / `MRSM_NONINTERACTIVE` | Disable interactive prompts (assume defaults). | _(unset)_ |
+| `MRSM_DUCKDB_LIB` | Path to DuckDB's own shared library (`libduckdb`) for the `duckdb` flavor. | _(unset: cached or downloaded on first use)_ |
+| `MRSM_BIN` | Run a standalone `mrsm` binary instead of the in-process CLI of the Python package. | _(unset)_ |
+| `MRSM_PYTHON` | The Python interpreter the binary runs plugin workers and `upgrade meerschaum` with. | _(auto-detected)_ |
+| `MRSM_ALLOW_DEFAULT_ROOT` | Let a debug build use the default root directory. | _(unset)_ |
 
 !!! tip "Inspecting your environment"
     Run `mrsm show environment` to list every currently set `MRSM_` variable. Run `mrsm show config` to inspect the resolved configuration after all patches and connectors have been applied.
@@ -9080,7 +9125,7 @@ MRSM_VENVS_DIR='venvs/' mrsm show plugins
 
 ## **`MRSM_WORK_DIR`**
 
-`MRSM_WORK_DIR` designates the base working directory under which the root directory is located when `MRSM_ROOT_DIR` is not explicitly set. This is primarily useful for portable and containerized deployments where the process is launched from a known location.
+`MRSM_WORK_DIR` designates the base working directory under which the root directory is located when `MRSM_ROOT_DIR` is not explicitly set. This is primarily useful for containerized deployments where the process is launched from a known location.
 
 ## **`MRSM_<TYPE>_<LABEL>`**
 
@@ -9137,7 +9182,7 @@ MRSM_PATCH='baz:MRSM{foo:bar}' \
 
 ## **`MRSM_RUNTIME`**
 
-`MRSM_RUNTIME` marks a special runtime context. For example, `MRSM_RUNTIME=portable` is set by the portable distribution so that Meerschaum can ensure `readline` is available, and `MRSM_RUNTIME=docker` is set inside the official Docker image. You typically do not need to set this yourself.
+`MRSM_RUNTIME` marks a special runtime context. For example, `MRSM_RUNTIME=docker` is set inside the official Docker image. You typically do not need to set this yourself.
 
 ## **`MRSM_NOASK` / `MRSM_NONINTERACTIVE`**
 
@@ -9155,13 +9200,51 @@ will be reported instead of downloaded; otherwise Meerschaum warns before the fi
 in each process. Install the dependency group before starting Meerschaum.
 
 The variable covers every implicit installation: `attempt_import()`, the dependency version checks
-(which never install a version parser), creating a virtual environment (no `uv venv --seed`) and
-the API host. Installs you ask for, such as `mrsm install packages` or `pip_install()` from your
+(which never install a version parser), creating a virtual environment (no `uv venv --seed`), the
+API host, and the DuckDB library download (see [`MRSM_DUCKDB_LIB`](#mrsm_duckdb_lib)), including
+DuckDB's own extension auto-install. Installs you ask for, such as `mrsm install packages` or `pip_install()` from your
 own code, still run, but never bootstrap `uv`, `pip` or `wheel` for themselves.
 
 ```bash
 MRSM_NO_AUTO_INSTALL=1 mrsm show pipes
 ```
+
+## **`MRSM_DUCKDB_LIB`**
+
+The `duckdb` flavor does not bundle DuckDB: it loads DuckDB's own shared library (`libduckdb.so`,
+`libduckdb.dylib` or `duckdb.dll`, version 1.4 or newer) at run time. Meerschaum looks for it in this order:
+
+1. `MRSM_DUCKDB_LIB`, a path to the file (for air-gapped hosts; a library that fails to load is an error);
+2. the cache under `<root>/drivers/`;
+3. the system library path;
+4. a checksum-verified download of the official release, unless `MRSM_NO_AUTO_INSTALL` is set.
+
+```bash
+MRSM_DUCKDB_LIB=/opt/duckdb/libduckdb.so mrsm show drivers
+```
+
+Run `mrsm show drivers` to see where the library comes from, and `mrsm install driver duckdb` /
+`mrsm uninstall driver duckdb` to manage the cached copy.
+
+## **`MRSM_BIN`**
+
+By default the `mrsm` and `meerschaum` console scripts of the Python package run the CLI inside the
+installed extension. Set `MRSM_BIN` to the path of a standalone `mrsm` binary (for example one built by
+`cargo install meerschaum`) to run that program instead. The binary must report the same `--version`
+as the installed package. Everything Meerschaum re-launches itself for (jobs, compose, pipeline steps)
+uses the same program.
+
+## **`MRSM_PYTHON`**
+
+The standalone `mrsm` binary runs Python plugins in a worker process. `MRSM_PYTHON` names the Python
+interpreter for those workers, for package installs, and for `mrsm upgrade meerschaum` (which otherwise
+refuses to guess which environment to upgrade). Inside the Python package the interpreter that is already
+running is used and you do not need to set it.
+
+## **`MRSM_ALLOW_DEFAULT_ROOT`**
+
+Debug builds of the binary refuse to start without `MRSM_ROOT_DIR` so development never touches the
+real root. Release builds and the published packages are unaffected. Prefer setting `MRSM_ROOT_DIR`.
 
 ## Internal Variables
 
@@ -9172,6 +9255,9 @@ The following variables are set automatically by Meerschaum (e.g. for background
 | `MRSM_SERVER_ID` | Identifier of the API server instance. |
 | `MRSM_DAEMON_ID` | Identifier of the running daemon (background job). |
 | `MRSM_JOB` | Marks that the current process is running as a job. |
+| `MRSM_BIN_EXEC` | Set by the Python launcher to the path of `MRSM_BIN` when it hands over to it; guards against a launcher re-executing itself forever. |
+| `MRSM_API_HOST` | Marks the process as the Python API host (plugin routes and Dash apps). |
+| `MRSM_CORE_TRACE` | Set to `1` to print per-stage timings of the native boundary to stderr (diagnostics). |
 | `MRSM_SYSTEMD_LOG_PATH` | Log path used by the `systemd` job executor. |
 | `MRSM_SYSTEMD_STDIN_PATH` | Stdin FIFO path used by the `systemd` job executor. |
 | `MRSM_SYSTEMD_RESULT_PATH` | Result path used by the `systemd` job executor. |
@@ -9668,6 +9754,7 @@ Everything below is deliberate, and each item links to the section with the deta
 
 - **DuckDB is downloaded on first use.** `mrsm` and the extension no longer compile DuckDB in (that was ~35 MB per artifact and minutes of C++ on every build). A `sql:duckdb` connector loads DuckDB's own shared library, `libduckdb` (v1.5.6, MIT, published by the DuckDB project; Meerschaum does not redistribute it): the first connection downloads the release asset for your platform (about 41 MB) into `MRSM_ROOT_DIR/drivers/duckdb/<version>/`, after checking it against a SHA-256 that is pinned in Meerschaum, and later runs reuse it. `mrsm install driver duckdb` does the download on purpose (`--force` repeats it), `mrsm uninstall driver duckdb` removes it, and `mrsm show drivers` reports each driver's version, source (`env`, `cache`, `system` or `missing`) and path. **Behind a TLS-intercepting proxy** the download trusts the operating system's certificate store as well as its bundled roots, and honors `HTTPS_PROXY`; if it still cannot reach GitHub, run `mrsm install driver duckdb` on a machine that can and copy the library. **Air-gapped hosts:** copy a DuckDB library (v1.4 or newer) there and set `MRSM_DUCKDB_LIB` to its path, or put it on the system library path; `MRSM_NO_AUTO_INSTALL=1` forbids the implicit download and a missing library then fails with a message naming both fixes. In Docker, `--build-arg duckdb_driver=1` bakes it into the image's root. On Linux the library needs the C++ runtime (`libstdc++`), which both Docker images ship. DuckDB sessions run in UTC (the official build bundles ICU, whose default is the host's zone), aware timestamp parameters keep their instant, and nested, interval and enum values read as the text DuckDB prints.
 - **No Python at all** is an option: `cargo install meerschaum` or a release binary runs without an interpreter as long as no Python plugin, custom Python connector, API plugin or Dash plugin is used. Point `MRSM_PYTHON` at an interpreter when you add one.
+- **Windows limits.** The Python API host is proxied over a Unix socket, so `@api_plugin` routes and plugin Dash apps do not work on Windows, and background jobs (`-d`) are refused. Run those in Docker or WSL.
 - **Removed:** `pyoxidizer` builds and the standalone "portable" archive. `pip install meerschaum` and the standalone binary (`cargo install meerschaum`, release archives) replace them.
 
 ## ⚙️ Configuration
@@ -9788,6 +9875,7 @@ Things to check:
 What is different underneath, and when it matters:
 
 - **Plugins run in a worker process** when the host is the `mrsm` binary (CLI, jobs, server). The worker is a normal Python interpreter with the SDK loaded; `attempt_import(..., venv='myplugin')` and `Venv` activate venvs exactly as today. Module-level state in your plugin lives for the life of the worker, not of the command, which matches today's job behavior but not today's one-shot CLI behavior. Don't rely on module globals being fresh per action.
+- **The working directory is not on `sys.path`.** Every Python process Meerschaum starts (workers, the API host, jobs, compose and pipeline steps, `systemd` units) runs with `-P`, so a `meerschaum.py` or a `meerschaum/` in your project directory can never replace the installed package. A plugin which imports a sibling module from the directory it is run in (not from the plugins directory) must move that module into the plugins directory or into a package; plugins are imported through the plugins directory only. v4's in-process jobs never had the working directory on the path either.
 - **`@post_sync_hook` and `@pre_sync_hook`** receive the same kwargs (`success_tuple`, `sync_timestamp`, `sync_complete_timestamp`, `sync_duration`, ...) and run in the worker after each native sync.
 - **Plugin manifests.** On install, setup and on any source change, Meerschaum records which decorators your plugin uses so that `--help`, tab completion and the server can start without importing Python. If your plugin registers actions or pages **conditionally** (for example, only in production), the manifest sees whatever your module registers at import time with the config present at install time. `mrsm reload` (also spelled `mrsm reload plugins`) rebuilds the manifest unconditionally and recycles the Python workers; the manifest is also rebuilt automatically when a plugin file changes, and after `install`, `upgrade`, `uninstall` and `setup` of plugins.
 - **`fetch(begin, end)` windows in graph runs.** A bare `pipe.sync()` and a flat `sync pipes` pass the same `begin` / `end` as v4. Under `--parents`, `--children` or `mrsm.Pipeline`, a child can be asked to backfill chunk-aligned windows that start earlier than v4's `sync time − backtrack` (see [Windows your plugin receives](/reference/pipelines/#windows-your-plugin-receives)). A plugin that clears its window and recomputes it must be able to rebuild that whole window.
@@ -9979,6 +10067,8 @@ Notes on the contract:
 
 - The figure code did not change. Only the transport did: `dcc.Graph(figure=fig)` became a `div` with a `data-mrsm-figure` attribute carrying the figure JSON. `meerschaum.plugins.figure(fig)` builds that `div` from a `plotly.py` figure (or a figure `dict` or JSON string), escaping the JSON for the attribute; `figure_json(fig)` returns just the compact JSON, byte for byte what a Rust plugin built with the `plotly` crate would emit for the same chart. The console renders every such `div` on load and after each HTMX swap.
 - **Maps:** `<div data-mrsm-map='...'>` renders GeoJSON or a layer spec with the vendored MapLibre GL JS. This is the replacement for dash-leaflet.
+  Maps need a browser with WebGL2 (MapLibre GL JS 6 dropped WebGL1, as did Plotly.js 4's map traces).
+- **Plotly.js 4:** the console draws figures with Plotly.js 4.1, so figures written for Plotly.js 2 or 3 are adjusted before they are drawn: a string `title` becomes `title.text` (and `titlefont` becomes `title.font`), and the removed `scattermapbox`, `choroplethmapbox` and `densitymapbox` traces (and `layout.mapbox`) are renamed to `scattermap`, `choroplethmap` and `densitymap` (and `layout.map`). Use the new names in new code; `plotly.py` figures already emit `title.text`. Plotly.js 4 also changed a few defaults you may notice (`layout.geo.fitbounds` is `'locations'`, `hsv()` colors are no longer accepted), and it turns on a "Share chart" button that uploads the figure to a Plotly cloud service: the console switches it off (`showSendToCloud: false`) unless a figure's own `config` sets it.
 - **Tables:** return HTML tables; the console adds sorting. Editable grids are your concern.
 - **Login and session.** `login_required=True` (the default) is enforced by the console before your function runs: a request without an active `mrsm-session-id` session gets a `401`. Your function is called with **no arguments**, so read per-request values (the query string, the user) from an `@api_plugin` route that your HTMX elements call, as in the example above. An exception in the function answers `500` and prints the traceback in the host's output.
 - **Theme.** The `mrsm-theme-*` CSS classes keep their names. Style against them and your fragment matches the console in both themes.
@@ -10041,7 +10131,7 @@ A plugin directory may contain both a Rust library and a Python module; the Rust
 
 ## 🧪 How to upgrade safely
 
-1. **Try v5 in a copy.** `MRSM_ROOT_DIR=/tmp/v5-root mrsm ...` against the same instance. v5 writes no new files into an instance until an engine run happens, and engine state lives in internal `mrsm_engine_*` tables under `_mrsm_internal`.
+1. **Try v5 in a copy.** `MRSM_ROOT_DIR=/tmp/v5-root mrsm ...` against the same instance. v5 writes no new files into an instance until an engine run happens, and engine state lives in internal `mrsm_engine_*` tables under `_mrsm_internal` (on PostgreSQL and MSSQL; on MySQL, MariaDB, SQLite, DuckDB and Oracle beside your instance tables).
 2. **Lint your compose files:** `mrsm compose explain` now warns about unresolved `{{ Pipe() }}` references, `dtype:` typos (for `dtypes:`) and string-typed `tags`. It never changes behavior.
 3. **Dry-run the engine:** `mrsm plan pipes -t <tag>` prints what an engine run would do without moving data.
 4. **Import every plugin:** `mrsm show plugins` on v5 imports each plugin and reports `ImportError`s from removed internals, with the replacement named in the message.
@@ -10060,6 +10150,7 @@ A plugin directory may contain both a Rust library and a Python module; the Rust
 | Plugin middleware over core routes | `api.permissions.rate_limits`, `api.permissions.routes.allowlist`, a reverse proxy |
 | Patching console pages from a plugin | Your own page (Dash or the page contract) |
 | Python 3.10 | 3.11+ |
+| `meerschaum.utils.packages.dash` (the lazily imported `dash` module) | Declare `dash` in your plugin's `required` and call `attempt_import('dash')` |
 | `SQLConnector.get_add_columns_queries`, `get_alter_columns_queries`, `get_to_sql_dtype`, `create_pipe_table_from_df` | None: the Rust core builds the DDL during `pipe.sync()` |
 | `meerschaum.utils.daemon`: `Daemon(target=...)`, `run_daemon`, `daemon_action`, `daemon_entry`, `FileDescriptorInterceptor`, and the lock, pickle and file-descriptor members of `Daemon`, `RotatingFile` and `StdinFile`; `SystemdExecutor.get_job_process` | `meerschaum.jobs.Job` (jobs run in the Rust supervisor) |
 | `meerschaum.actions.<module>` (all 37 action modules; the functions live on in `meerschaum.actions.actions`), `meerschaum.api.routes.*`, `api._events` / `_websockets` / `_chunks`, `meerschaum.api.dash.{callbacks,pages,jobs,plugins,tokens,users,webterm,websockets,sync,assets}`, `api.dash.components.{console_div,pages_offcanvas,build_pages_offcanvas_children}`, `meerschaum._internal.term`, `_internal.cli`, `_internal.shell.{ShellCompleter,ValidAutoSuggest,updates}`, `_internal.arguments._parser.{parse_help,parse_version}` | `meerschaum.actions.actions[<name>]`, `meerschaum.entry([...])` and the `mrsm` binary (`MRSM_BIN` overrides it); `get_completer()` returns `None` for the standard actions and `entry()` ignores `_use_cli_daemon` / `_session_id` |
@@ -10221,64 +10312,17 @@ A templating syntax for referencing another pipe from within pipe parameters (no
 Source: https://meerschaum.io/reference/meerschaum-portable/
 
 # 💼 Meerschaum Portable
-Sometimes, it's not worth the hassle setting up a complete Python environment. If you're using a non-administrative account or just want to test out Meerschaum, Meerschaum Portable might be right for you.
 
-Meerschaum Portable is a self-contained Meerschaum installation, running entirely within one directory. Download and extract the archive, and you can have Meerschaum running in seconds.
+!!! warning "Removed in 5.0"
+    The standalone "portable" archive (`mrsm-full-*` / `mrsm-minimal-*`, built with `pyoxidizer`) is no longer produced. This page remains so old links keep working.
 
-!!! bug "Compatability Notice"
-    Although Meerschaum Portable has been well tested, you may still encounter problems, such as permissions issues on Mac OS. In case you cannot successfully extract Meerschaum Portable, consider following the directions for a normal install found on the [Getting Started](/get-started) page.
+Use one of these instead:
 
-## Installation
-Installing Meerschaum Portable is pretty straightforward: download and extract the archive file, then execute `mrsm`. Follow the steps below for more information.
+- **`pip install meerschaum`** (or `pipx install meerschaum` / `uv tool install meerschaum`). The wheel contains the native core and has no required Python dependencies. During the 5.0 release candidates add `--pre`: `pip install --pre meerschaum`. See [Getting Started](/get-started).
+- **A standalone `mrsm` binary**, with no Python needed for the core: `cargo install meerschaum --locked`, or the binaries attached to each GitHub release.
+- **Docker**: the official `bmeares/meerschaum` image.
 
-### Download the Archive
-
-Download the appropriate archive for your operating system. For convenience, I recommend installing the Full version, though note that the extracted folder can grow to >1 GB in size!
-
-If you don't need all of Meerschaum's functionality and would rather save a bit of disk space, download the Minimal version. You can always install dependencies later with `mrsm upgrade packages`.
-
-| Windows 10 x64                                               | Linux x64                                                    | MacOS                                                        |
-| ------------------------------------------------------------ | ------------------------------------------------------------ | ------------------------------------------------------------ |
-| [Windows Full](https://meerschaum.io/files/mrsm-full-windows.zip) | [Linux Full](https://meerschaum.io/files/mrsm-full-linux.tar.gz) | [MacOS Full](https://meerschaum.io/files/mrsm-full-macos.tar.gz) |
-| [Windows Minimal](https://meerschaum.io/files/mrsm-minimal-windows.zip) | [Linux Minimal](https://meerschaum.io/files/mrsm-minimal-linux.tar.gz) | [MacOS Minimal](https://meerschaum.io/files/mrsm-minimal-macos.tar.gz) |
-
-### Extract the Archive
-
-After downloading the archive, move it to your desired location and extract its contents:
-
-=== "Windows"
-    Right click the zip file and choose Extract All. Once it's finished extracting, open the folder and double click `setup.bat`. Allow permissions if prompted.
-
-=== "Linux"
-    Extract the `tar` archive:
-    ```
-    tar -xvf mrsm-full.tar.gz
-    ```
-
-=== "MacOS"
-    Double-click the archive to open the Archive Utility, or use `tar` (see Linux instructions).
-
-### Run the Script
-Inside the extracted folder, there is an executable called `mrsm` (`mrsm.bat` on Windows). Run this script by double-clicking (Windows and MacOS) or via a terminal window. The first time launching may take a bit, so be patient!
-
-### Upgrading
-Oftentimes, Meerschaum Portable is a few versions behind the latest official release. To upgrade to the latest release, run the `upgrade meerschaum` command from within `mrsm`:
-
-```bash
-upgrade meerschaum
-```
-
-## Resetting
-To return Meerschaum Portable to its "factory" state, delete the folder called `root` inside the extracted directory. The `root` folder contains Meerschaum data and configuration files, so make sure you back up your data before deleting!
-
-## Uninstallation
-On Windows, run the included `uninstall.bat` script to uninstall Meerschaum. On Linux and MacOS, simply delete the extracted directory:
-```bash
-rm -rf mrsm/
-```
-
-!!! warning "Keep Meerschaum Portable in its own folder."
-    On Windows, the script `uninstall.bat` deletes the parent folder of `mrsm.bat`. Therefore **do not** keep the contents of the `.zip` folder by themselves on your desktop, or `uninstall.bat` will delete your `Desktop` folder!
+To keep an installation self-contained in one directory, set [`MRSM_ROOT_DIR`](/reference/environment/#mrsm_root_dir) (and optionally `MRSM_PLUGINS_DIR`) to a folder of your choice. See the [migration guide](/reference/migrating-to-v5/) for everything else that changed in v5.
 
 
 ---

@@ -57,7 +57,7 @@ pub fn deserialize_bytes_string(data: &str, force_hex: bool) -> Result<Vec<u8>, 
     let is_hex = force_hex || data.starts_with("\\x");
     if is_hex {
         let h = data.strip_prefix("\\x").unwrap_or(data);
-        if h.len() % 2 != 0 && h.bytes().all(|b| b.is_ascii_hexdigit()) {
+        if !h.len().is_multiple_of(2) && h.bytes().all(|b| b.is_ascii_hexdigit()) {
             return Err(SerializeError::Binascii("Odd-length string".into()));
         }
         if !h.bytes().all(|b| b.is_ascii_hexdigit()) {

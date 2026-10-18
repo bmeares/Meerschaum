@@ -21,6 +21,7 @@ pub const EXTRAS: &[(&str, &[&str])] = &[
             "a2wsgi>=1.10.0",
             "python-multipart>=0.0.20",
             "PyJWT>=2.8.0",
+            "websockets>=15.0.1",
         ],
     ),
     (
@@ -32,7 +33,15 @@ pub const EXTRAS: &[(&str, &[&str])] = &[
             "gadwall>=0.2.0",
         ],
     ),
-    ("dash", &["dash>=4.1.0", "a2wsgi>=1.10.0"]),
+    (
+        "dash",
+        &[
+            "dash>=4.1.0",
+            "a2wsgi>=1.10.0",
+            "dash-bootstrap-components>=2.0.4",
+            "dash-extensions>=2.0.5",
+        ],
+    ),
     (
         "full",
         &[
@@ -51,7 +60,10 @@ pub const EXTRAS: &[(&str, &[&str])] = &[
             "a2wsgi>=1.10.0",
             "python-multipart>=0.0.20",
             "PyJWT>=2.8.0",
+            "websockets>=15.0.1",
             "dash>=4.1.0",
+            "dash-bootstrap-components>=2.0.4",
+            "dash-extensions>=2.0.5",
             "ptpython>=3.0.27",
         ],
     ),

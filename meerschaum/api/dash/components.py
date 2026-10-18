@@ -18,7 +18,6 @@ from meerschaum.utils.misc import get_connector_labels
 from meerschaum.config import __doc__ as doc
 dbc = attempt_import('dash_bootstrap_components', lazy=False, check_update=CHECK_UPDATE)
 html, dcc = import_html(check_update=CHECK_UPDATE), import_dcc(check_update=CHECK_UPDATE)
-dex = attempt_import('dash_extensions', lazy=False, check_update=CHECK_UPDATE)
 dash_ace = attempt_import('dash_ace', lazy=False, check_update=CHECK_UPDATE)
 _load_builtin_custom_connectors()
 

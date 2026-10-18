@@ -584,9 +584,14 @@ def import_plugins(
     import importlib
     import meerschaum.config.paths as paths
     from meerschaum.utils.misc import flatten_list
-    from meerschaum.utils.venv import is_venv_active, activate_venv, deactivate_venv, Venv
+    from meerschaum.utils.venv import (
+        is_venv_active, activate_venv, deactivate_venv, Venv, ensure_default_venvs,
+    )
     from meerschaum.utils.warnings import warn as _warn
     plugins_to_import = list(plugins_to_import)
+    ### PARITY: v4 had already activated the shared 'mrsm' venv (`attempt_import`) before the first
+    ### plugin was imported, so plugin code with its own `required` venv still saw it.
+    ensure_default_venvs()
     prepended_sys_path = False
     with _locks['sys.path']:
 

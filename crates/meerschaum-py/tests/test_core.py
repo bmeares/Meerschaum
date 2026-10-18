@@ -38,12 +38,12 @@ REPO = Path(__file__).resolve().parents[3]
 import meerschaum._core as core  # noqa: E402
 from meerschaum.utils.packages import attempt_import  # noqa: E402
 from tests import _oracle as oracle  # noqa: E402
+from tests._binary import skip_or_fail  # noqa: E402
 
 ### The data libraries come from the `mrsm` venv, as for the façade: the recorded dtypes
 ### depend on the pandas version (3.x), so the replay has to load the same libraries.
 attempt_import('pandas', 'pyarrow', 'shapely', 'geopandas', lazy=False)
 
-HAS_POLARS = core.HAS_POLARS
 
 
 def run_python(code: str, **env_overrides: str) -> subprocess.CompletedProcess:
@@ -140,7 +140,8 @@ def test_import_with_extension():
     assert info['python_abi'] == 'abi3-py311'
     assert 'extension-module' in info['features']
     assert info['static_config'] is core.HAS_STATIC_CONFIG
-    assert ('polars' in info['features']) is core.HAS_POLARS
+    assert 'polars' not in info['features']
+    assert not hasattr(core, 'HAS_POLARS')
 
 
 def test_extension_has_no_pyarrow_import_dependency():
@@ -381,8 +382,17 @@ def test_roundtrip_rejects_non_arrow_objects():
         core.roundtrip_arrow({'a': [1, 2, 3]})
 
 
+def _polars():
+    """polars, which CI installs: missing, it fails the test in CI and skips it locally."""
+    try:
+        import polars
+    except ImportError:
+        skip_or_fail('polars is not installed')
+    return polars
+
+
 def _polars_frame():
-    pl = pytest.importorskip('polars')
+    pl = _polars()
     t0 = dt.datetime(2024, 1, 2, 3, 4, 5, 678901)
     return pl.DataFrame([
         pl.Series('int8', [-1, None, 127], pl.Int8),
@@ -430,30 +440,19 @@ POLARS_COLUMN_NAMES = [
 
 @pytest.mark.parametrize('column', POLARS_COLUMN_NAMES)
 def test_roundtrip_arrow_from_polars(column):
-    pl = pytest.importorskip('polars')
+    pl = _polars()
     from polars.testing import assert_frame_equal
     df = _polars_frame().select(column)
     out = pl.DataFrame(core.roundtrip_arrow(df))
     assert_frame_equal(out, df, categorical_as_str=True)
 
 
-# pyo3-polars 0.24 imports each column from `Series.to_arrow()` and builds the Rust Series from
-# the array's dtype alone, dropping the field metadata polars uses to mark `Enum`: an Enum comes
-# back as Categorical. The `__arrow_c_stream__` path keeps it (test_roundtrip_arrow_from_polars).
-PYO3_POLARS_XFAIL = {
-    'enum': 'pyo3-polars 0.24 drops field metadata on import: Enum -> Categorical',
-}
-
-
-@pytest.mark.skipif(not HAS_POLARS, reason='built without pyo3-polars')
-@pytest.mark.parametrize('column', [
-    pytest.param(name, marks=pytest.mark.xfail(reason=PYO3_POLARS_XFAIL[name], strict=True))
-    if name in PYO3_POLARS_XFAIL else name
-    for name in POLARS_COLUMN_NAMES
-])
+# `polars_roundtrip` reads the frame's Arrow C stream with Polars' own FFI, so every Polars type
+# (`Enum` included, which keeps its categories through the field metadata) round-trips without
+# pyarrow.
+@pytest.mark.parametrize('column', POLARS_COLUMN_NAMES)
 def test_polars_roundtrip(column):
-    pl = pytest.importorskip('polars')
-    pytest.importorskip('pyarrow')  # pyo3-polars extraction goes through `Series.to_arrow()`
+    pl = _polars()
     from polars.testing import assert_frame_equal
     df = _polars_frame().select(column)
     out = core.polars_roundtrip(df)
@@ -461,15 +460,28 @@ def test_polars_roundtrip(column):
     assert_frame_equal(out, df, categorical_as_str=True)
 
 
-@pytest.mark.skipif(not HAS_POLARS, reason='built without pyo3-polars')
 def test_polars_roundtrip_multi_chunk_frame():
-    pl = pytest.importorskip('polars')
-    pytest.importorskip('pyarrow')
+    pl = _polars()
     from polars.testing import assert_frame_equal
     df = pl.concat([pl.DataFrame({'a': [1, 2]}), pl.DataFrame({'a': [3]})], rechunk=False)
     assert df.n_chunks() == 2
     assert_frame_equal(core.polars_roundtrip(df), df)
 
+
+
+def test_polars_roundtrip_empty_frame_keeps_schema():
+    pl = _polars()
+    from polars.testing import assert_frame_equal
+    df = _polars_frame().clear()
+    assert df.height == 0
+    out = core.polars_roundtrip(df)
+    assert out.schema == df.schema
+    assert_frame_equal(out, df)
+
+
+def test_polars_roundtrip_rejects_objects_without_a_stream():
+    with pytest.raises(TypeError, match='__arrow_c_stream__'):
+        core.polars_roundtrip([1, 2, 3])
 
 def _pandas_frame():
     pd = pytest.importorskip('pandas')
@@ -705,7 +717,7 @@ def test_filter_unseen_declared_json_encoded_strings():
 
 
 def test_filter_unseen_polars_object_null_stays_none():
-    pl = pytest.importorskip('polars')
+    pl = _polars()
     old = pl.DataFrame({'s': pl.Series(['a'], dtype=pl.Object)})
     new = pl.DataFrame({'s': pl.Series([None], dtype=pl.Object)})
     actual = core.filter_unseen_df(old, new)

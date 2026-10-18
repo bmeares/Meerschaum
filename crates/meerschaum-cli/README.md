@@ -1,7 +1,7 @@
 # meerschaum-cli
 
 > The CLI of [Meerschaum](https://meerschaum.io) as a library: `pip install meerschaum` (the `mrsm` console
-> script runs it from the wheel's extension) or `cargo install meerschaum` (the front crate's `cli` feature
+> script runs it from the wheel's extension) or `cargo install meerschaum --locked` (the front crate's `cli` feature
 > builds the standalone `mrsm`). This crate is **internal** and may change in any minor release;
 > depend on the [`meerschaum`](https://crates.io/crates/meerschaum) crate for the Rust API.
 

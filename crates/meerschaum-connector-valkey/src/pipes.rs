@@ -300,12 +300,12 @@ impl ValkeyConnector {
         // (`_pipes.py`, `drop_pipe`). A pipe built without `valkey` in memory falls back to the
         // persisted parameters so the reset is not silently skipped.
         let mut parameters = pipe.raw_parameters().clone();
-        if !parameters.contains_key("valkey") && !pipe.temporary {
-            if let Ok(Some(persisted)) = self.get_pipe_parameters(pipe).await {
-                if persisted.contains_key("valkey") {
-                    parameters = persisted;
-                }
-            }
+        if !parameters.contains_key("valkey")
+            && !pipe.temporary
+            && let Ok(Some(persisted)) = self.get_pipe_parameters(pipe).await
+            && persisted.contains_key("valkey")
+        {
+            parameters = persisted;
         }
         if !parameters.contains_key("valkey") {
             return SuccessTuple::success();
@@ -684,15 +684,14 @@ impl ValkeyConnector {
             })
             .collect();
         let new_indices_docs = serialize_indices_docs(&new_update_docs);
-        if !new_indices_docs.is_empty() {
-            if let Err(e) = self
+        if !new_indices_docs.is_empty()
+            && let Err(e) = self
                 .push_docs(&new_indices_docs, &target, dt_col.as_deref())
                 .await
-            {
-                return Ok(SuccessTuple::fail(format!(
-                    "Failed to upsert '{target}':\n{e}"
-                )));
-            }
+        {
+            return Ok(SuccessTuple::fail(format!(
+                "Failed to upsert '{target}':\n{e}"
+            )));
         }
         for (key, doc) in &old_update_docs {
             if let Err(e) = self.set(key, &serialize_document(doc)).await {

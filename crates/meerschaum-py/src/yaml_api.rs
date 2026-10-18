@@ -252,10 +252,10 @@ impl<'py> FromPy<'py> {
         if obj.is_instance_of::<PyFloat>() {
             return Ok(Rc::new(Node::Float(obj.extract::<f64>()?)));
         }
-        if let Ok(s) = obj.downcast::<PyString>() {
+        if let Ok(s) = obj.cast::<PyString>() {
             return Ok(Rc::new(Node::Str(s.to_str()?.to_string())));
         }
-        if let Ok(b) = obj.downcast::<PyBytes>() {
+        if let Ok(b) = obj.cast::<PyBytes>() {
             return Ok(Rc::new(Node::Bytes(b.as_bytes().to_vec())));
         }
         if obj.is_instance_of::<PyByteArray>() || obj.is_instance_of::<PyFrozenSet>() {
@@ -291,21 +291,21 @@ impl<'py> FromPy<'py> {
 
     fn convert_container(&mut self, obj: &Bound<'py, PyAny>, depth: usize) -> PyResult<NodeRef> {
         let py = self.py;
-        if let Ok(list) = obj.downcast::<PyList>() {
+        if let Ok(list) = obj.cast::<PyList>() {
             let mut items = Vec::with_capacity(list.len());
             for item in list.iter() {
                 items.push(self.convert(&item, depth + 1)?);
             }
             return Ok(Rc::new(Node::Seq(items)));
         }
-        if let Ok(t) = obj.downcast::<PyTuple>() {
+        if let Ok(t) = obj.cast::<PyTuple>() {
             let mut items = Vec::with_capacity(t.len());
             for item in t.iter() {
                 items.push(self.convert(&item, depth + 1)?);
             }
             return Ok(Rc::new(Node::Tuple(items)));
         }
-        if let Ok(d) = obj.downcast::<PyDict>() {
+        if let Ok(d) = obj.cast::<PyDict>() {
             let mut entries = Vec::with_capacity(d.len());
             for (k, v) in d.iter() {
                 let kn = self.convert(&k, depth + 1)?;
@@ -314,7 +314,7 @@ impl<'py> FromPy<'py> {
             }
             return Ok(Rc::new(Node::Map(entries)));
         }
-        if let Ok(s) = obj.downcast::<PySet>() {
+        if let Ok(s) = obj.cast::<PySet>() {
             let mut items = Vec::with_capacity(s.len());
             for item in s.iter() {
                 items.push(self.convert(&item, depth + 1)?);
@@ -373,7 +373,9 @@ impl<'py> FromPy<'py> {
 
 fn decode_utf16(bytes: &[u8], little: bool) -> Result<String, PyYamlError> {
     let units: Vec<u16> = bytes
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|c| {
             if little {
                 u16::from_le_bytes([c[0], c[1]])
@@ -429,14 +431,14 @@ struct Input {
 }
 
 fn read_stream(stream: &Bound<'_, PyAny>) -> PyResult<Input> {
-    if let Ok(s) = stream.downcast::<PyString>() {
+    if let Ok(s) = stream.cast::<PyString>() {
         return Ok(Input {
             text: s.to_str()?.to_string(),
             name: "<unicode string>".to_string(),
             snippets: true,
         });
     }
-    if let Ok(b) = stream.downcast::<PyBytes>() {
+    if let Ok(b) = stream.cast::<PyBytes>() {
         let name = "<byte string>";
         let text = decode_bytes(b.as_bytes(), name).map_err(to_py_err)?;
         return Ok(Input {
@@ -450,14 +452,14 @@ fn read_stream(stream: &Bound<'_, PyAny>) -> PyResult<Input> {
         Err(_) => "<file>".to_string(),
     };
     let data = stream.call_method0("read")?;
-    if let Ok(s) = data.downcast::<PyString>() {
+    if let Ok(s) = data.cast::<PyString>() {
         return Ok(Input {
             text: s.to_str()?.to_string(),
             name,
             snippets: false,
         });
     }
-    if let Ok(b) = data.downcast::<PyBytes>() {
+    if let Ok(b) = data.cast::<PyBytes>() {
         let text = decode_bytes(b.as_bytes(), &name).map_err(to_py_err)?;
         return Ok(Input {
             text,
@@ -496,10 +498,10 @@ fn load(
     kwargs: Option<&Bound<'_, PyDict>>,
 ) -> PyResult<Py<PyAny>> {
     let mut safe = false;
-    if let Some(loader) = kwargs.and_then(|k| k.get_item("Loader").ok().flatten()) {
-        if let Ok(t) = loader.downcast::<PyType>() {
-            safe = matches!(t.name()?.to_str()?, "SafeLoader" | "BaseLoader");
-        }
+    if let Some(loader) = kwargs.and_then(|k| k.get_item("Loader").ok().flatten())
+        && let Ok(t) = loader.cast::<PyType>()
+    {
+        safe = matches!(t.name()?.to_str()?, "SafeLoader" | "BaseLoader");
     }
     run_load(py, stream, safe)
 }

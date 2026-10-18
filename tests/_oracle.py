@@ -201,11 +201,19 @@ def _skip_for_pandas(recorded: str) -> None:
         )
 
 
-def expected() -> Any:
-    """Return the recorded value of this test's next call."""
-    node = _node()
-    index = _counters.get(node, 0)
-    _counters[node] = index + 1
+def expected(node: Any = None) -> Any:
+    """
+    Return the recorded value of this test's next call.
+
+    `node` names another recorded node id (`tests/<file>::<test>[<params>]`) to read instead of the
+    running test's own: for a scenario whose recorded result does not depend on the parametrized
+    flavor, so a flavor that could not be recorded (no v4 driver on the recording host) compares
+    with the same value. The call counter stays per running test.
+    """
+    running = _node()
+    index = _counters.get(running, 0)
+    _counters[running] = index + 1
+    node = node or running
     path = _path(node)
     document = _load(path)
     if node.startswith(tuple(document.get('pandas_dependent', ()))):

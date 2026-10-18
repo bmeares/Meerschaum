@@ -239,7 +239,7 @@ pub fn ujson_double(value: f64, precision: u32) -> String {
         return format!("{sign}{whole}.0");
     }
     let mut count = precision as usize;
-    while frac % 10 == 0 {
+    while frac.is_multiple_of(10) {
         count -= 1;
         frac /= 10;
     }

@@ -86,6 +86,12 @@ pub enum ColumnKind {
     /// `meerschaum:dtype=numeric`), so every value keeps the exact digits and scale the database
     /// stored (`3`, `2.5`, `-0.10`, a 40-digit value), as `psycopg2` returns them.
     NumericText,
+    /// An unconstrained Oracle `NUMBER` (an expression result such as `COUNT(*)`, or a `NUMBER`
+    /// column declared without precision): python-oracledb returns an `int` or a `float` per value,
+    /// so the kind is resolved per chunk of rows by [`resolve_number_auto`]: `Int64` when every
+    /// non-null value is integral and fits, `Float64` when a value has a fraction (and every such
+    /// value survives a round trip through `f64`), `Decimal` otherwise.
+    NumberAuto,
     Utf8,
     /// JSON text (`Utf8` with `meerschaum:dtype=json`).
     Json,
@@ -141,7 +147,9 @@ impl ColumnPlan {
             ColumnKind::UInt64 => DataType::UInt64,
             ColumnKind::Float32 => DataType::Float32,
             ColumnKind::Float64 => DataType::Float64,
-            ColumnKind::Decimal => DataType::Decimal128(DECIMAL_PRECISION, self.scale as i8),
+            ColumnKind::Decimal | ColumnKind::NumberAuto => {
+                DataType::Decimal128(DECIMAL_PRECISION, self.scale as i8)
+            }
             ColumnKind::Utf8 | ColumnKind::Json | ColumnKind::NumericText => DataType::Utf8,
             ColumnKind::Bytes | ColumnKind::Geometry(_) | ColumnKind::Raw => DataType::Binary,
             ColumnKind::Uuid => DataType::FixedSizeBinary(16),
@@ -173,7 +181,7 @@ impl ColumnPlan {
                 meta.insert(META_DTYPE.to_string(), "geometry".to_string());
                 meta.insert(META_ENCODING.to_string(), enc.as_str().to_string());
             }
-            ColumnKind::Decimal | ColumnKind::NumericText => {
+            ColumnKind::Decimal | ColumnKind::NumberAuto | ColumnKind::NumericText => {
                 meta.insert(META_DTYPE.to_string(), "numeric".to_string());
             }
             _ => {}
@@ -189,8 +197,90 @@ pub fn schema_for(plans: &[ColumnPlan]) -> SchemaRef {
     ))
 }
 
-/// Set each decimal column's scale to the largest scale among its (first-batch) cells.
+/// Whether a fractional decimal survives a round trip through `f64` (its shortest `f64` text parses
+/// back to the same value), i.e. whether python-oracledb's `float` would have kept it exactly.
+fn survives_f64(d: &rust_decimal::Decimal) -> bool {
+    let Ok(f) = d.to_string().parse::<f64>() else {
+        return false;
+    };
+    f.is_finite()
+        && rust_decimal::Decimal::from_str_exact(&format!("{f}")).is_ok_and(|back| back == *d)
+}
+
+/// Resolve each [`ColumnKind::NumberAuto`] column from the cells of a result (python-oracledb's
+/// per-value `int` / `float`, within Arrow's one type per column): `Int64` when every non-null value
+/// is integral and fits an `i64`; `Float64` when some value has a fraction and every such value is
+/// exact as an `f64`; `Decimal` (scale: the largest) otherwise, and for a result without values.
+/// `column(i)` yields the cells of column `i` as slices (one per chunk of rows). Returns whether
+/// any column was resolved.
+pub fn resolve_number_auto_with<'a>(
+    plans: &mut [ColumnPlan],
+    column: impl Fn(usize) -> Vec<&'a [SqlValue]>,
+) -> bool {
+    let mut any = false;
+    for (i, plan) in plans.iter_mut().enumerate() {
+        if plan.kind != ColumnKind::NumberAuto {
+            continue;
+        }
+        any = true;
+        let (mut seen, mut fractional, mut exotic, mut scale) = (false, false, false, 0u32);
+        for cell in column(i).into_iter().flatten() {
+            match cell {
+                SqlValue::Null => {}
+                SqlValue::Int(_) => seen = true,
+                SqlValue::Decimal(d) => {
+                    seen = true;
+                    scale = scale.max(d.scale());
+                    if d.fract().is_zero() {
+                        exotic |= d.to_i64().is_none();
+                    } else {
+                        fractional = true;
+                        exotic |= !survives_f64(d);
+                    }
+                }
+                _ => {
+                    seen = true;
+                    exotic = true;
+                }
+            }
+        }
+        plan.kind = if !seen || exotic {
+            ColumnKind::Decimal
+        } else if fractional {
+            ColumnKind::Float64
+        } else {
+            ColumnKind::Int64
+        };
+        if plan.kind == ColumnKind::Decimal {
+            plan.scale = if seen {
+                scale.min(MAX_DECIMAL_SCALE)
+            } else {
+                DEFAULT_DECIMAL_SCALE
+            };
+        }
+    }
+    any
+}
+
+/// [`resolve_number_auto_with`] over one chunk of column-major cells.
+pub fn resolve_number_auto(plans: &mut [ColumnPlan], columns: &[Vec<SqlValue>]) -> bool {
+    resolve_number_auto_with(plans, |i| {
+        columns
+            .get(i)
+            .map(|c| vec![c.as_slice()])
+            .unwrap_or_default()
+    })
+}
+
+/// Resolve the [`ColumnKind::NumberAuto`] columns and set each decimal column's scale (for a result
+/// read as one chunk).
 pub fn resolve_decimal_scales(plans: &mut [ColumnPlan], columns: &[Vec<SqlValue>]) {
+    resolve_number_auto(plans, columns);
+    resolve_scales(plans, columns);
+}
+
+/// Set each decimal column's scale to the largest scale among its (first-batch) cells.
+pub fn resolve_scales(plans: &mut [ColumnPlan], columns: &[Vec<SqlValue>]) {
     for (plan, cells) in plans.iter_mut().zip(columns) {
         if plan.kind != ColumnKind::Decimal {
             continue;
@@ -281,7 +371,7 @@ pub fn build_array(plan: &ColumnPlan, cells: &[SqlValue]) -> Result<ArrayRef> {
             Ok(to_f64(c)?.map(|f| f as f32))
         })?)),
         ColumnKind::Float64 => Arc::new(Float64Array::from(collect(plan, cells, "f64", to_f64)?)),
-        ColumnKind::Decimal => {
+        ColumnKind::Decimal | ColumnKind::NumberAuto => {
             let scale = plan.scale;
             let values = collect(plan, cells, "decimal", |c| {
                 let Some((m, s)) = to_decimal_parts(c)? else {
@@ -714,5 +804,28 @@ mod tests {
         assert_eq!(arr.value_as_string(0), "1.500");
         assert!(arr.is_null(1));
         assert_eq!(arr.value_as_string(2), "-2.125");
+    }
+
+    #[test]
+    fn number_auto_resolves_per_chunk() {
+        let dec = |t: &str| SqlValue::Decimal(Decimal::from_str(t).unwrap());
+        let kind = |cells: Vec<SqlValue>| {
+            let mut plans = vec![ColumnPlan::new("n", ColumnKind::NumberAuto, "NUMBER")];
+            resolve_number_auto(&mut plans, std::slice::from_ref(&cells));
+            plans[0].clone()
+        };
+        assert_eq!(
+            kind(vec![dec("1"), dec("2"), SqlValue::Null]).kind,
+            ColumnKind::Int64
+        );
+        assert_eq!(kind(vec![dec("1"), dec("2.5")]).kind, ColumnKind::Float64);
+        // An integral value beyond `i64`, or a fraction an `f64` cannot hold, keeps the decimal.
+        let big = kind(vec![dec("12345678901234567890")]);
+        assert_eq!(big.kind, ColumnKind::Decimal);
+        let fine = kind(vec![dec("1"), dec("0.78431372549019607843")]);
+        assert_eq!((fine.kind, fine.scale), (ColumnKind::Decimal, 20));
+        // No value at all: today's decimal.
+        assert_eq!(kind(vec![SqlValue::Null]).kind, ColumnKind::Decimal);
+        assert_eq!(kind(vec![]).kind, ColumnKind::Decimal);
     }
 }

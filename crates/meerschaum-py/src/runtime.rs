@@ -19,10 +19,10 @@ pub fn runtime() -> &'static Runtime {
     static RUNTIME: Mutex<Option<(u32, &'static Runtime)>> = Mutex::new(None);
     let pid = std::process::id();
     let mut slot = RUNTIME.lock().unwrap_or_else(|e| e.into_inner());
-    if let Some((owner, rt)) = *slot {
-        if owner == pid {
-            return rt;
-        }
+    if let Some((owner, rt)) = *slot
+        && owner == pid
+    {
+        return rt;
     }
     let rt: &'static Runtime = Box::leak(Box::new(
         tokio::runtime::Builder::new_multi_thread()
@@ -48,5 +48,5 @@ where
     F: Future + Send,
     F::Output: Send,
 {
-    py.allow_threads(|| runtime().block_on(fut))
+    py.detach(|| runtime().block_on(fut))
 }

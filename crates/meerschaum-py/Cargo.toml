@@ -19,12 +19,6 @@ default = []
 # Enabled by maturin (see pyproject.toml). Kept off for `cargo test` / `cargo clippy` so the
 # rlib and test binaries can link without libpython.
 extension-module = ["pyo3/extension-module"]
-# The `pyo3-polars` zero-copy path (`_core.polars_roundtrip`). Opt-in (scripts/rust/build_py.sh
-# enables it by default): pyo3-polars turns on `polars-error/python` and `polars-core/allow_unused`,
-# which changes the fingerprint of every Polars crate, so with it this crate cannot share the
-# kernel's Polars build. Without it, this crate reuses the kernel's Polars build (it depends on
-# `meerschaum-kernel`, see crates/README.md "Crate layering").
-polars = ["dep:pyo3-polars"]
 # The `oracle` flavor of `meerschaum-connector-sql` (D13): the wheels ship it
 # (`scripts/rust/build_py.sh` and the root `pyproject.toml` enable it), so `Pipe.sync()` and the
 # instance methods reach that database natively. `mssql` and `duckdb` are default features of the SQL
@@ -56,17 +50,16 @@ tokio = { workspace = true }
 meerschaum-cli = { path = "../meerschaum-cli", default-features = false }
 # `meerschaum.compose.utils` delegates its configuration helpers (`compose_api.rs`).
 meerschaum-compose = { workspace = true }
-# VERSION SKEW (see README "Dependency pins"): the workspace pins `pyo3 = 0.26`, but
-# `pyo3-polars` for the workspace's `polars = 0.51` (0.24.x) requires pyo3 0.25, and
-# `pyo3-arrow` for `arrow = 56` exists for pyo3 0.25 (0.11) and 0.26 (0.12). pyo3 0.25 is the
-# only version consistent with both workspace data pins, so it is declared here until the
-# workspace moves pyo3/polars/arrow together.
-pyo3 = { version = "0.25", features = ["abi3-py311"] }
-pyo3-arrow = { version = "0.11", default-features = false }
-pyo3-polars = { version = "0.24", features = ["dtype-full"], optional = true }
+# pyo3, arrow and polars are workspace dependencies that move together (README "Dependency pins").
+# Python <-> Arrow goes through our own PyCapsule code (`ffi_import.rs`, `ffi_export.rs`), and Python
+# polars <-> Rust polars through polars' own Arrow FFI (`polars_bridge.rs`), so no pyo3-arrow or
+# pyo3-polars pins pyo3 to a particular arrow or polars release.
+pyo3 = { workspace = true }
 # The kernel's Polars (same workspace features, so the build is shared): column types at the
 # pandas boundary.
 polars = { workspace = true }
+# Polars' Arrow crate (its C Data Interface) for `polars_roundtrip`; keep it on the `polars` version.
+polars-arrow = "0.55"
 arrow = { workspace = true, features = ["ffi"] }
 toml = { workspace = true }
 indexmap = { workspace = true }
@@ -74,7 +67,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 chrono = { workspace = true }
 uuid = { workspace = true }
-num-bigint = "0.4"
+num-bigint = "0.5"
 
 [build-dependencies]
-pyo3-build-config = "0.25"
+pyo3-build-config = "0.30"

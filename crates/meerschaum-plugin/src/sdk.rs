@@ -74,7 +74,7 @@ pub(crate) fn stream(frame: &Frame) -> Result<FFI_ArrowArrayStream> {
 
 // Materialize before returning: no imported array may outlive its producer library.
 pub(crate) fn frame(stream: FFI_ArrowArrayStream) -> Result<Option<Frame>> {
-    if stream.release.is_none() {
+    if stream.release().is_none() {
         return Ok(None);
     }
     let reader = ArrowArrayStreamReader::try_new(stream).map_err(error)?;
@@ -198,7 +198,7 @@ mod tests {
             let null = (table.invoke)(Bytes::borrowed(b"{}"), std::ptr::null_mut(), &mut output);
             assert_eq!(null.status, 1);
             (table.free_bytes)(null.payload);
-            assert!(output.release.is_none());
+            assert!(output.release().is_none());
         }
     }
 

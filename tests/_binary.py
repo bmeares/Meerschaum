@@ -38,6 +38,17 @@ def in_ci() -> bool:
     return bool(os.environ.get('CI') or os.environ.get('GITHUB_ACTIONS'))
 
 
+def skip_or_fail(message: str) -> None:
+    """
+    For a dependency CI is supposed to provide (the package index, `.venv-ref`): fail the test in
+    CI, where a silent skip would hide a broken setup, and skip it on a developer's machine.
+    """
+    import pytest
+    if in_ci():
+        pytest.fail(message)
+    pytest.skip(message)
+
+
 def _is_program(path: pathlib.Path) -> bool:
     if not (path.is_file() and os.access(path, os.X_OK)):
         return False

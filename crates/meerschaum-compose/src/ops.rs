@@ -197,12 +197,11 @@ impl InstanceOps for InMemoryInstance {
         self.synced.push(pipe.to_string());
         let ck = pipe.connector_keys();
         if let (Some(installed), Some(name)) = (&self.installed_plugins, ck.strip_prefix("plugin:"))
+            && !installed.iter().any(|p| p == name)
         {
-            if !installed.iter().any(|p| p == name) {
-                return SuccessTuple::fail(format!(
-                    "{pipe} does not have a valid connector.\n    Perhaps {ck} has a syntax error?"
-                ));
-            }
+            return SuccessTuple::fail(format!(
+                "{pipe} does not have a valid connector.\n    Perhaps {ck} has a syntax error?"
+            ));
         }
         SuccessTuple::success()
     }

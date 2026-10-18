@@ -369,7 +369,7 @@ fn run_interruptible<T: Send + 'static>(
             return Ok(None);
         }
         let stop = stop.clone();
-        let step = py.allow_threads(|| {
+        let step = py.detach(|| {
             runtime().block_on(async {
                 tokio::select! {
                     r = &mut handle => Some(Some(r)),
@@ -418,7 +418,8 @@ fn utc_datetime(ctx: &PyCtx<'_>, obj: &Bound<'_, PyAny>) -> PyResult<Option<Date
 pub(crate) fn install_warning_sink() {
     meerschaum_connector_api::client::warnings::set_warning_sink(Some(Arc::new(
         |message: &str| {
-            Python::with_gil(|py| {
+            // Skipped once the interpreter is finalizing (`attach` would panic there).
+            let _ = Python::try_attach(|py| {
                 let _ = (|| -> PyResult<()> {
                     let warn = py.import("meerschaum.utils.warnings")?.getattr("warn")?;
                     let kwargs = PyDict::new(py);
@@ -549,10 +550,8 @@ impl CallbackError {
                 )
             })
             .unwrap_or(false);
-        if !quiet {
-            if let Ok(mut slot) = self.error.lock() {
-                slot.get_or_insert(err);
-            }
+        if !quiet && let Ok(mut slot) = self.error.lock() {
+            slot.get_or_insert(err);
         }
         self.stopped
             .store(true, std::sync::atomic::Ordering::SeqCst);
@@ -584,13 +583,11 @@ pub(crate) fn id_pipe(pipe: &Bound<'_, PyAny>) -> PyResult<meerschaum_core::Pipe
     if let Ok(params) = pipe
         .getattr("_attributes")
         .and_then(|a| a.get_item("parameters"))
-    {
-        if let Some(Value::Map(m)) = (!params.is_none())
+        && let Some(Value::Map(m)) = (!params.is_none())
             .then(|| py_to_core(&params).ok())
             .flatten()
-        {
-            p.set_parameters(m);
-        }
+    {
+        p.set_parameters(m);
     }
     Ok(p)
 }
@@ -701,7 +698,7 @@ impl PyApiConnector {
         };
         let mut query = Vec::new();
         if let Some(p) = params.filter(|p| !p.is_none()) {
-            let d = p.downcast::<PyDict>()?;
+            let d = p.cast::<PyDict>()?;
             for (k, v) in d.iter() {
                 query.push((k.str()?.to_str()?.to_string(), query_value(&v)?));
             }
@@ -738,7 +735,7 @@ impl PyApiConnector {
                 data: content,
             }
         } else if let Some(d) = data.filter(|d| !d.is_none()) {
-            if let Ok(dict) = d.downcast::<PyDict>() {
+            if let Ok(dict) = d.cast::<PyDict>() {
                 let mut pairs = Vec::new();
                 for (k, v) in dict.iter() {
                     if v.is_none() {
@@ -750,7 +747,7 @@ impl PyApiConnector {
                     ));
                 }
                 Body::Form(pairs)
-            } else if let Ok(b) = d.downcast::<PyBytes>() {
+            } else if let Ok(b) = d.cast::<PyBytes>() {
                 Body::Text(String::from_utf8_lossy(b.as_bytes()).into_owned())
             } else {
                 Body::Text(d.str()?.to_str()?.to_string())
@@ -1618,7 +1615,7 @@ impl PyApiConnector {
         let errors = Arc::new(CallbackError::default());
         let (stop_cb, errors_cb) = (stop.clone(), errors.clone());
         let on_line: Box<dyn FnMut(String) + Send> = Box::new(move |line| {
-            Python::with_gil(|py| {
+            let _ = Python::try_attach(|py| {
                 let res = match &callback_function {
                     Some(cb) => cb.call1(py, (line,)).map(|_| ()),
                     None => py
@@ -1904,7 +1901,7 @@ impl PyApiConnector {
         let line_cb = {
             let (stop, errors) = (stop.clone(), errors.clone());
             Box::new(move |line: String| {
-                Python::with_gil(|py| {
+                let _ = Python::try_attach(|py| {
                     if let Err(e) = callback_function.call1(py, (line,)) {
                         errors.handle(py, e, &stop);
                     }
@@ -1914,19 +1911,20 @@ impl PyApiConnector {
         let input_cb = input_callback_function.map(|cb| {
             let (stop, errors) = (stop.clone(), errors.clone());
             Box::new(move || {
-                Python::with_gil(|py| match cb.call0(py) {
+                Python::try_attach(|py| match cb.call0(py) {
                     Ok(v) => v.extract::<String>(py).unwrap_or_default(),
                     Err(e) => {
                         errors.handle(py, e, &stop);
                         String::new()
                     }
                 })
+                .unwrap_or_default()
             }) as Box<dyn FnMut() -> String + Send>
         });
         let stop_cb = stop_callback_function.map(|cb| {
             let (stop, errors) = (stop.clone(), errors.clone());
             Box::new(move |result: SuccessTuple| {
-                Python::with_gil(|py| {
+                let _ = Python::try_attach(|py| {
                     let tuple = match success_to_py(py, &result) {
                         Ok(t) => t,
                         Err(_) => return,

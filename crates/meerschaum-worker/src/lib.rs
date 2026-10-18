@@ -24,6 +24,7 @@
 pub mod callback;
 pub mod chunk;
 pub mod connector;
+pub mod entry_points;
 pub mod error;
 pub mod manifest;
 pub mod plugins;

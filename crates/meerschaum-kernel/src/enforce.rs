@@ -142,10 +142,12 @@ pub fn enforce_dtypes_with_report(
         false
     };
 
-    if !native.is_empty() && fallback.is_empty() && !untyped {
-        if let Some(out) = enforce_native(df, &native, native_strip) {
-            return Ok((out, EnforcePath::Native));
-        }
+    if !native.is_empty()
+        && fallback.is_empty()
+        && !untyped
+        && let Some(out) = enforce_native(df, &native, native_strip)
+    {
+        return Ok((out, EnforcePath::Native));
     }
 
     let mut df = df.clone();
@@ -247,10 +249,15 @@ fn native_target(norm: &str, strip_timezone: bool) -> Option<DataType> {
         t if t.starts_with("numeric") => {
             let (p, s) = get_numeric_precision_scale(Some(t));
             let (p, s) = (p?, s?);
-            if !(0..=38).contains(&p) || s < 0 {
+            // PARITY: v4 casts to `polars.Decimal(precision, scale)`; for a precision outside
+            // 1..=38 (`numeric[0,0]` included) the cast raises "precision must be between 1 and
+            // 38", for a scale above the precision (`numeric[5,10]`) "scale must be less than or
+            // equal to precision", and `except Exception: return None` leaves the frame to the
+            // pandas path (meerschaum/utils/dataframe.py, `_enforce_dtypes_with_polars`).
+            if !(1..=38).contains(&p) || s < 0 || s > p {
                 return None;
             }
-            DataType::Decimal(Some(p as usize), Some(s as usize))
+            DataType::Decimal(p as usize, s as usize)
         }
         _ => return None,
     })
@@ -365,7 +372,7 @@ fn native_cast(s: &Series, target: &DataType) -> Option<Series> {
         return match target {
             DataType::Boolean => {
                 let out: Option<Vec<Option<bool>>> = ca
-                    .into_iter()
+                    .iter()
                     .map(|v| match v {
                         None => Some(None),
                         Some(t) => match t.to_lowercase().as_str() {
@@ -380,7 +387,7 @@ fn native_cast(s: &Series, target: &DataType) -> Option<Series> {
             DataType::Binary => {
                 use base64::Engine as _;
                 let out: Option<Vec<Option<Vec<u8>>>> = ca
-                    .into_iter()
+                    .iter()
                     .map(|v| match v {
                         None => Some(None),
                         Some(t) => base64::engine::general_purpose::STANDARD
@@ -392,9 +399,9 @@ fn native_cast(s: &Series, target: &DataType) -> Option<Series> {
                 Some(BinaryChunked::from_iter_options(name, out?.into_iter()).into_series())
             }
             DataType::Date => {
-                let fmt = infer_date_format(ca.into_iter().flatten().next()?)?;
+                let fmt = infer_date_format(ca.iter().flatten().next()?)?;
                 let out: Option<Vec<Option<i32>>> = ca
-                    .into_iter()
+                    .iter()
                     .map(|v| match v {
                         None => Some(None),
                         Some(t) => chrono::NaiveDate::parse_from_str(t.trim(), fmt)
@@ -410,14 +417,14 @@ fn native_cast(s: &Series, target: &DataType) -> Option<Series> {
             }
             DataType::Datetime(tu, tz) => str_to_datetime(ca, *tu, tz.clone()),
             DataType::Decimal(p, sc) => {
-                let scale = sc.unwrap_or(0) as i64;
+                let scale = *sc as i64;
                 let out: Option<Vec<Option<i128>>> = ca
-                    .into_iter()
+                    .iter()
                     .map(|v| match v {
                         None => Some(None),
                         Some(t) => {
                             let d = crate::Decimal::parse(t).ok()?;
-                            let q = d.quantize(p.unwrap_or(38) as i64, scale).ok()?;
+                            let q = d.quantize(*p as i64, scale).ok()?;
                             q.to_i128_at_scale(scale).map(Some)
                         }
                     })
@@ -445,7 +452,7 @@ fn native_cast(s: &Series, target: &DataType) -> Option<Series> {
                 );
             }
             let out: Vec<Option<i64>> = phys
-                .into_iter()
+                .iter()
                 .map(|v| v.map(|v| convert_time_unit(v, *stu, *ttu)))
                 .collect();
             Some(
@@ -478,7 +485,7 @@ fn native_cast(s: &Series, target: &DataType) -> Option<Series> {
             | DataType::UInt64,
             DataType::Decimal(p, sc),
         ) => {
-            let scale = sc.unwrap_or(0) as i64;
+            let scale = *sc as i64;
             let values = crate::frame::series_to_values(s);
             let out: Option<Vec<Option<i128>>> = values
                 .iter()
@@ -490,7 +497,7 @@ fn native_cast(s: &Series, target: &DataType) -> Option<Series> {
                         Value::Decimal(d) => d.clone(),
                         other => crate::Decimal::parse(&other.py_str()).ok()?,
                     };
-                    let q = d.quantize(p.unwrap_or(38) as i64, scale).ok()?;
+                    let q = d.quantize(*p as i64, scale).ok()?;
                     q.to_i128_at_scale(scale).map(Some)
                 })
                 .collect();
@@ -658,7 +665,7 @@ fn par_map_chunks<T: Sync, R: Send>(
 
 /// `Expr.str.to_datetime(time_unit, time_zone, strict=True)`.
 fn str_to_datetime(ca: &StringChunked, tu: TimeUnit, tz: Option<TimeZone>) -> Option<Series> {
-    let first = ca.into_iter().flatten().next();
+    let first = ca.iter().flatten().next();
     let shape = match first {
         Some(f) => dt_shape(f)?,
         None => {
@@ -669,7 +676,7 @@ fn str_to_datetime(ca: &StringChunked, tu: TimeUnit, tz: Option<TimeZone>) -> Op
             );
         }
     };
-    let texts: Vec<Option<&str>> = ca.into_iter().collect();
+    let texts: Vec<Option<&str>> = ca.iter().collect();
     let out = par_map_chunks(&texts, |chunk| {
         chunk
             .iter()
@@ -846,10 +853,10 @@ fn enforce_object_path(
             // PARITY: only the first parsed geometry column receives its dtype's CRS; the other
             // columns' `set_crs` results are discarded (`_ = df[col].set_crs(srid)`).
             let (_, srid) = &geometry_cols[first];
-            if let Some(c) = df.column_mut(first) {
-                if srid.truthy() {
-                    c.crs = Some(srid.clone());
-                }
+            if let Some(c) = df.column_mut(first)
+                && srid.truthy()
+            {
+                c.crs = Some(srid.clone());
             }
         }
     }
@@ -930,12 +937,11 @@ fn enforce_object_path(
         match pandas_astype(col, &data, target) {
             Ok(new) => df.set(col, new)?,
             Err(_) => {
-                if target.to_lowercase().contains("int") {
-                    if let Ok(as_float) = pandas_astype(col, &data, "float64") {
-                        if let Ok(new) = pandas_astype(col, &as_float, target) {
-                            df.set(col, new)?;
-                        }
-                    }
+                if target.to_lowercase().contains("int")
+                    && let Ok(as_float) = pandas_astype(col, &data, "float64")
+                    && let Ok(new) = pandas_astype(col, &as_float, target)
+                {
+                    df.set(col, new)?;
                 }
             }
         }
@@ -1139,10 +1145,10 @@ pub fn pandas_astype(name: &str, data: &ColumnData, target: &str) -> Result<Colu
     let Some(dtype) = polars_dtype_for_pandas(target) else {
         return Err(format!("Cannot cast to '{target}'"));
     };
-    if let ColumnData::Native(s) = data {
-        if astype_is_identity(s, &dtype) {
-            return Ok(ColumnData::Native(s.clone().with_name(name.into())));
-        }
+    if let ColumnData::Native(s) = data
+        && astype_is_identity(s, &dtype)
+    {
+        return Ok(ColumnData::Native(s.clone().with_name(name.into())));
     }
     let from_object = matches!(data, ColumnData::Object(_));
     // pandas' masked integer dtypes (`Int64`, `UInt8`, ...) refuse a fractional float or decimal
@@ -1281,15 +1287,16 @@ pub fn pipe_get_dtypes(
             (c, t)
         })
         .collect();
-    if let Some(dt_col) = columns.get("datetime").filter(|c| !c.is_empty()) {
-        if !configured.contains_key(dt_col) {
-            out.insert(dt_col.clone(), "datetime".into());
-        }
+    if let Some(dt_col) = columns.get("datetime").filter(|c| !c.is_empty())
+        && !configured.contains_key(dt_col)
+    {
+        out.insert(dt_col.clone(), "datetime".into());
     }
-    if let Some(primary) = columns.get("primary").filter(|c| !c.is_empty()) {
-        if autoincrement && !out.contains_key(primary) {
-            out.insert(primary.clone(), "int".into());
-        }
+    if let Some(primary) = columns.get("primary").filter(|c| !c.is_empty())
+        && autoincrement
+        && !out.contains_key(primary)
+    {
+        out.insert(primary.clone(), "int".into());
     }
     out
 }
@@ -1440,11 +1447,34 @@ mod tests {
             "a".into(),
             [Some(78_431_372_549_019_607_843i128), None].into_iter(),
         )
-        .into_decimal_unchecked(Some(38), 20)
+        .into_decimal_unchecked(38, 20)
         .into_series();
         let out = native_cast(&s, &DataType::Float64).unwrap();
         assert_eq!(out.f64().unwrap().get(0), Some(0.784_313_725_490_196_1));
         assert_eq!(out.f64().unwrap().get(1), None);
+    }
+
+    #[test]
+    fn numeric_precision_outside_polars_range_has_no_native_target() {
+        // Polars decimals need 1 <= precision <= 38; v4's `polars.Decimal(0, 0)` cast raises and
+        // leaves `numeric[0,0]` (an unbounded numeric) to the pandas path.
+        assert_eq!(native_target("numeric[0,0]", false), None);
+        assert_eq!(native_target("numeric[39,2]", false), None);
+        // A scale above the precision is not a Polars decimal either ("scale must be less than or
+        // equal to precision" in v4's cast).
+        assert_eq!(native_target("numeric[5,10]", false), None);
+        assert_eq!(
+            native_target("numeric[5,5]", false),
+            Some(DataType::Decimal(5, 5))
+        );
+        assert_eq!(
+            native_target("numeric[1,0]", false),
+            Some(DataType::Decimal(1, 0))
+        );
+        assert_eq!(
+            native_target("numeric[38,10]", false),
+            Some(DataType::Decimal(38, 10))
+        );
     }
 
     #[test]

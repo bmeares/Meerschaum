@@ -145,16 +145,17 @@ impl Emitter {
         double_top_level_breaks: bool,
     ) -> Emitter {
         let mut best_indent = 2;
-        if let Some(i) = indent {
-            if i > 1 && i < 10 {
-                best_indent = i;
-            }
+        if let Some(i) = indent
+            && i > 1
+            && i < 10
+        {
+            best_indent = i;
         }
         let mut best_width = 80;
-        if let Some(w) = width {
-            if w > best_indent * 2 {
-                best_width = w;
-            }
+        if let Some(w) = width
+            && w > best_indent * 2
+        {
+            best_width = w;
         }
         let best_line_break = match line_break {
             Some(l @ ("\r" | "\n" | "\r\n")) => l.to_string(),
@@ -660,10 +661,10 @@ impl Emitter {
         if self.prepared_anchor.is_none() {
             self.prepared_anchor = Some(self.prepare_anchor(&anchor)?);
         }
-        if let Some(p) = self.prepared_anchor.clone() {
-            if !p.is_empty() {
-                self.write_indicator(&format!("{indicator}{p}"), true, false, false);
-            }
+        if let Some(p) = self.prepared_anchor.clone()
+            && !p.is_empty()
+        {
+            self.write_indicator(&format!("{indicator}{p}"), true, false, false);
         }
         self.prepared_anchor = None;
         Ok(())
@@ -709,10 +710,10 @@ impl Emitter {
         if self.prepared_tag.is_none() {
             self.prepared_tag = Some(self.prepare_tag(&tag)?);
         }
-        if let Some(p) = self.prepared_tag.clone() {
-            if !p.is_empty() {
-                self.write_indicator(&p, true, false, false);
-            }
+        if let Some(p) = self.prepared_tag.clone()
+            && !p.is_empty()
+        {
+            self.write_indicator(&p, true, false, false);
         }
         self.prepared_tag = None;
         Ok(())
@@ -743,18 +744,17 @@ impl Emitter {
         {
             return Style::Plain;
         }
-        if let Some(s) = event_style {
-            if (*s == '|' || *s == '>')
-                && self.flow_level == 0
-                && !self.simple_key_context
-                && analysis.allow_block
-            {
-                return if *s == '|' {
-                    Style::Literal
-                } else {
-                    Style::Folded
-                };
-            }
+        if let Some(s) = event_style
+            && (*s == '|' || *s == '>')
+            && self.flow_level == 0
+            && !self.simple_key_context
+            && analysis.allow_block
+        {
+            return if *s == '|' {
+                Style::Literal
+            } else {
+                Style::Folded
+            };
         }
         if (event_style.is_none() || *event_style == Some('\''))
             && analysis.allow_single_quoted

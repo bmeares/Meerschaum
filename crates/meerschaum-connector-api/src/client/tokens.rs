@@ -76,10 +76,10 @@ impl APIConnector {
         token.label = data["label"].as_str().map(String::from);
         token.secret = data["secret"].as_str().map(String::from);
         token.id = data["id"].as_str().and_then(|s| Uuid::parse_str(s).ok());
-        if let Some(exp) = data["expiration"].as_str() {
-            if let Some(d) = meerschaum_kernel::value::parse_datetime_value(exp) {
-                token.expiration = Some(DateTime::<Utc>::from_naive_utc_and_offset(d.utc, Utc));
-            }
+        if let Some(exp) = data["expiration"].as_str()
+            && let Some(d) = meerschaum_kernel::value::parse_datetime_value(exp)
+        {
+            token.expiration = Some(DateTime::<Utc>::from_naive_utc_and_offset(d.utc, Utc));
         }
         SuccessTuple::ok(format!(
             "Registered token '{}'.",
@@ -183,11 +183,13 @@ impl APIConnector {
 
     /// `get_token_scopes(token_id)`.
     ///
-    /// PARITY: v4 reads `model.scopes` and then `getattr(<that list>, 'scopes', [])`, so it
-    /// returns `[]` for an existing token and raises for a missing one (`_tokens.py:105`).
+    /// FIX (intentional v4 change, PARITY W17T-004): v4 reads `model.scopes` and then
+    /// `getattr(<that list>, 'scopes', [])` (`_tokens.py:105`), so it returned `[]` for an
+    /// existing token (a scoped token looked scopeless). v5 returns the model's scopes; a missing
+    /// token still raises as in v4.
     pub async fn get_token_scopes(&self, token_id: Option<Uuid>) -> ConnectorResult<Vec<String>> {
         match self.get_token_model(token_id).await? {
-            Some(_) => Ok(Vec::new()),
+            Some(model) => Ok(model.scopes),
             None => Err(ConnectorError::Invalid(
                 "'NoneType' object has no attribute 'scopes'".into(),
             )),

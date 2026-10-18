@@ -245,7 +245,7 @@ pub fn preview_figure(docs: &Json) -> Json {
     };
     let xkey = first.keys().next().cloned().unwrap_or_default();
     let traces: Vec<_> = first.keys().filter(|key| *key != &xkey && rows.iter().any(|row| row[*key].is_number())).map(|key| json!({"type":"scatter","mode":"lines+markers","name":key,"x":rows.iter().map(|r| r[&xkey].clone()).collect::<Vec<_>>(),"y":rows.iter().map(|r| r[key].clone()).collect::<Vec<_>>() })).collect();
-    json!({"data":traces,"layout":{"title":"Pipe data preview","xaxis":{"title":xkey}}})
+    json!({"data":traces,"layout":{"title":{"text":"Pipe data preview"},"xaxis":{"title":{"text":xkey}}}})
 }
 async fn jobs(state: &WebState, data: &Json) -> WebResult<String> {
     let jobs = get_json(state, data, "/jobs").await?;

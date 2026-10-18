@@ -109,21 +109,41 @@ def build_app(load_plugins: bool = True, debug: bool = False):
     return app
 
 
-def run(socket_path: str, debug: bool = False) -> None:
+def _import_uvicorn():
     """
-    Serve the host app with uvicorn on a Unix socket.
+    Import uvicorn, or raise an `ImportError` naming the extra that provides it.
     """
     from meerschaum.utils.packages import attempt_import
     uvicorn = attempt_import('uvicorn', lazy=False, check_update=False)
-    app = build_app(debug=debug)
-    if os.path.exists(socket_path):
-        os.remove(socket_path)
-    os.makedirs(os.path.dirname(os.path.abspath(socket_path)), exist_ok=True)
-    uvicorn.run(
-        app,
-        uds=socket_path,
-        log_level=('debug' if debug else 'warning'),
-        proxy_headers=False,
-        ### Websockets and lifespan events behave as under `start api`.
-        lifespan='on',
-    )
+    if uvicorn is None:
+        raise ImportError(
+            "The API host needs uvicorn: install the `api` extra "
+            "(`pip install \"meerschaum[api]\"`), or unset `MRSM_NO_AUTO_INSTALL` "
+            "so that Meerschaum installs it into its `mrsm` virtual environment."
+        )
+    return uvicorn
+
+
+def run(socket_path: str, debug: bool = False) -> None:
+    """
+    Serve the host app with uvicorn on a Unix socket.
+
+    As in v4, the whole run happens inside the `mrsm` virtual environment: uvicorn, FastAPI and
+    Starlette import modules lazily (`h11`, `python_multipart`, ...) long after `attempt_import()`
+    has returned, so the environment holding them must stay on `sys.path` until the server stops.
+    """
+    from meerschaum.utils.venv import Venv
+    with Venv('mrsm', debug=debug):
+        uvicorn = _import_uvicorn()
+        app = build_app(debug=debug)
+        if os.path.exists(socket_path):
+            os.remove(socket_path)
+        os.makedirs(os.path.dirname(os.path.abspath(socket_path)), exist_ok=True)
+        uvicorn.run(
+            app,
+            uds=socket_path,
+            log_level=('debug' if debug else 'warning'),
+            proxy_headers=False,
+            ### Websockets and lifespan events behave as under `start api`.
+            lifespan='on',
+        )

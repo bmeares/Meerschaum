@@ -111,10 +111,10 @@ impl KeyFilter {
 
     /// Whether a record passes the filters.
     pub fn matches(&self, record: &PipeRecord) -> bool {
-        if let Some(i) = &self.instance_keys {
-            if *i != record.instance_keys {
-                return false;
-            }
+        if let Some(i) = &self.instance_keys
+            && *i != record.instance_keys
+        {
+            return false;
         }
         let locations: Vec<String> = self
             .location_keys

@@ -376,11 +376,11 @@ pub fn get_geometry_type_srid(
     }
     let mut geometry_type = default_type.to_string();
     for part in &parts {
-        if let PartVal::Str(s) = part {
-            if Srid::Authority(s.clone()) != srid {
-                geometry_type = s.clone();
-                break;
-            }
+        if let PartVal::Str(s) = part
+            && Srid::Authority(s.clone()) != srid
+        {
+            geometry_type = s.clone();
+            break;
         }
     }
     Ok((geometry_type, srid))
@@ -883,12 +883,13 @@ pub fn get_pd_type_from_db_type(db_type: &str, allow_custom_dtypes: bool) -> Str
         if db_type.to_lowercase().contains("json") {
             return "json".to_string();
         }
-        if are_dtypes_equal(pd_type, "numeric") && pd_type != "object" {
-            if let (Some(p), Some(s)) = get_numeric_precision_scale(Some(&db_type.to_uppercase())) {
-                if p != 0 && s != 0 {
-                    return format!("numeric[{p},{s}]");
-                }
-            }
+        if are_dtypes_equal(pd_type, "numeric")
+            && pd_type != "object"
+            && let (Some(p), Some(s)) = get_numeric_precision_scale(Some(&db_type.to_uppercase()))
+            && p != 0
+            && s != 0
+        {
+            return format!("numeric[{p},{s}]");
         }
         if are_dtypes_equal(pd_type, "geometry") && pd_type != "object" {
             let (geometry_type, srid) =

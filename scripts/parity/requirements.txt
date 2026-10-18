@@ -6,6 +6,9 @@ numpy==2.4.2
 pandas==3.0.0
 pyarrow==23.0.0
 pyodbc==5.3.0
+# Oracle driver of the v4 reference (thick mode, Instant Client): the Oracle parity probes of the
+# crate tests compare against v4.1.4 on the Oracle test container.
+oracledb==26.0.1
 shapely==2.1.2
 pyproj==3.7.2
 geopandas==1.1.1
@@ -13,6 +16,8 @@ pyogrio==0.12.1
 geoarrow-types==0.3.0
 polars==1.44.1
 pytz==2025.2
+# The v4 `valkey:` connector's client, for the Valkey parity tests (tests/test_valkey_connector.py).
+valkey==6.1.1
 
 # v4 `_internal` group (not expressible as a pip extra because of the leading underscore).
 dataclass-wizard>=0.35.0

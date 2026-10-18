@@ -74,6 +74,9 @@ pub(crate) fn config(spec: &ConnectionSpec) -> Result<Config> {
         }
     }
     config.encryption(encryption);
+    // tiberius 0.13 gives every server round-trip 30 s by default (ADO.NET's `Command Timeout`); v4's
+    // pyodbc connections have no query timeout, and a long read or insert is routine for a pipe.
+    config.command_timeout(None);
     if trust {
         config.trust_cert();
     }
@@ -204,7 +207,7 @@ fn query_for<'a>(sql: &'a str, params: &[SqlParam]) -> Query<'a> {
 fn runs_as_batch(sql: &str) -> bool {
     let words: Vec<String> = sql
         .split_whitespace()
-        .take(3)
+        .take(4)
         .map(|w| w.to_ascii_uppercase())
         .collect();
     let w = |i: usize| words.get(i).map(String::as_str).unwrap_or("");
@@ -305,11 +308,22 @@ impl NativeConn for MssqlConn {
         chunksize: usize,
         sink: mpsc::Sender<NativeEvent>,
     ) -> Result<()> {
-        let q = query_for(sql, params);
         let broken = &mut self.broken;
-        let mut stream = match q.query(&mut self.client).await {
-            Ok(s) => s,
-            Err(e) => return track(broken, Err(e)),
+        // PARITY: pyodbc's `cursor.execute(text)` sends the statement as is, so `read()` of a
+        // `CREATE VIEW` / `CREATE PROCEDURE` / `CREATE SCHEMA` / `SET ...` (`sql <label> "CREATE VIEW
+        // ... AS SELECT ..."`, which v4 routes to `read` because the text contains `select`) runs it.
+        // `sp_executesql` would nest it in a batch where these statements are a syntax error, so a
+        // parameterless batch statement goes through the plain batch path, as `execute` does.
+        let mut stream = if params.is_empty() && runs_as_batch(sql) {
+            match self.client.simple_query(sql).await {
+                Ok(s) => s,
+                Err(e) => return track(broken, Err(e)),
+            }
+        } else {
+            match query_for(sql, params).query(&mut self.client).await {
+                Ok(s) => s,
+                Err(e) => return track(broken, Err(e)),
+            }
         };
         let mut plans: Option<Vec<ColumnPlan>> = None;
         let mut buf: Vec<Vec<SqlValue>> = Vec::new();
@@ -526,6 +540,8 @@ mod tests {
         assert!(runs_as_batch("SET IDENTITY_INSERT [t] ON"));
         assert!(runs_as_batch("CREATE SCHEMA x"));
         assert!(runs_as_batch("create view v as select 1"));
+        assert!(runs_as_batch("CREATE OR ALTER VIEW dbo.v AS SELECT 1 AS a"));
+        assert!(runs_as_batch("create procedure dbo.p as select 1"));
         assert!(!runs_as_batch("UPDATE t SET a = 1"));
         assert!(!runs_as_batch("CREATE TABLE t (a INT)"));
     }

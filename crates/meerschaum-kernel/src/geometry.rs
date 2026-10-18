@@ -576,7 +576,7 @@ pub fn geometry_is_wkt_str(value: &str) -> Option<bool> {
     if !value.contains('\n') && WKT_RE.is_match(value) {
         return Some(true);
     }
-    if value.bytes().all(|b| b.is_ascii_hexdigit()) && value.len() % 2 == 0 {
+    if value.bytes().all(|b| b.is_ascii_hexdigit()) && value.len().is_multiple_of(2) {
         return Some(false);
     }
     None

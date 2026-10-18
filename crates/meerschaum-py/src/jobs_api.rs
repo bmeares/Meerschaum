@@ -226,7 +226,7 @@ fn sysargs_arg(obj: Option<&Bound<'_, PyAny>>) -> PyResult<Option<Vec<String>>> 
     let Some(obj) = obj.filter(|o| !o.is_none()) else {
         return Ok(None);
     };
-    if let Ok(text) = obj.downcast::<PyString>() {
+    if let Ok(text) = obj.cast::<PyString>() {
         return meerschaum_jobs::shlex::split(text.to_str()?)
             .map(Some)
             .map_err(|e| PyValueError::new_err(e.to_string()));
@@ -268,9 +268,12 @@ fn lock_without_the_gil<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
             Ok(guard) => return guard,
             Err(std::sync::TryLockError::Poisoned(e)) => return e.into_inner(),
             Err(std::sync::TryLockError::WouldBlock) => {
-                Python::with_gil(|py| {
-                    py.allow_threads(|| std::thread::sleep(Duration::from_millis(1)))
+                let slept = Python::try_attach(|py| {
+                    py.detach(|| std::thread::sleep(Duration::from_millis(1)))
                 });
+                if slept.is_none() {
+                    std::thread::sleep(Duration::from_millis(1));
+                }
             }
         }
     }
@@ -330,7 +333,7 @@ impl PyJob {
                 externally_managed,
             },
         };
-        let job = py.allow_threads(|| new_job(&spec, &ctx))?;
+        let job = py.detach(|| new_job(&spec, &ctx))?;
         Ok(PyJob {
             inner: Mutex::new(job),
             spec,
@@ -354,7 +357,7 @@ impl PyJob {
     }
 
     fn start<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyTuple>> {
-        let r = py.allow_threads(|| self.lock().start());
+        let r = py.detach(|| self.lock().start());
         tuple(py, &r)
     }
 
@@ -365,7 +368,7 @@ impl PyJob {
         timeout_seconds: Option<&Bound<'py, PyAny>>,
     ) -> PyResult<Bound<'py, PyTuple>> {
         let timeout = seconds(timeout_seconds)?;
-        let r = py.allow_threads(|| self.lock().stop(timeout));
+        let r = py.detach(|| self.lock().stop(timeout));
         tuple(py, &r)
     }
 
@@ -376,7 +379,7 @@ impl PyJob {
         timeout_seconds: Option<&Bound<'py, PyAny>>,
     ) -> PyResult<Bound<'py, PyTuple>> {
         let timeout = seconds(timeout_seconds)?;
-        let r = py.allow_threads(|| self.lock().pause(timeout));
+        let r = py.detach(|| self.lock().pause(timeout));
         tuple(py, &r)
     }
 
@@ -387,7 +390,7 @@ impl PyJob {
         timeout_seconds: Option<&Bound<'py, PyAny>>,
     ) -> PyResult<Bound<'py, PyTuple>> {
         let timeout = seconds(timeout_seconds)?;
-        let r = py.allow_threads(|| self.lock().resume(timeout));
+        let r = py.detach(|| self.lock().resume(timeout));
         tuple(py, &r)
     }
 
@@ -399,23 +402,23 @@ impl PyJob {
         timeout_seconds: Option<&Bound<'py, PyAny>>,
     ) -> PyResult<Bound<'py, PyTuple>> {
         let timeout = seconds(timeout_seconds)?;
-        let r = py.allow_threads(|| self.lock().restart(timeout));
+        let r = py.detach(|| self.lock().restart(timeout));
         tuple(py, &r)
     }
 
     fn delete<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyTuple>> {
-        let r = py.allow_threads(|| self.lock().delete());
+        let r = py.detach(|| self.lock().delete());
         tuple(py, &r)
     }
 
     fn is_running(&self, py: Python<'_>) -> bool {
-        py.allow_threads(|| self.lock().is_running())
+        py.detach(|| self.lock().is_running())
     }
 
     /// `exists()`; a failed remote read raises `RuntimeError` when `strict`.
     #[pyo3(signature = (strict=false))]
     fn exists(&self, py: Python<'_>, strict: bool) -> PyResult<bool> {
-        py.allow_threads(|| {
+        py.detach(|| {
             let mut job = self.lock();
             if strict {
                 job.try_exists().map_err(runtime_err)
@@ -427,7 +430,7 @@ impl PyJob {
 
     #[pyo3(signature = (strict=false))]
     fn get_logs(&self, py: Python<'_>, strict: bool) -> PyResult<Option<String>> {
-        py.allow_threads(|| {
+        py.detach(|| {
             let mut job = self.lock();
             if strict {
                 job.try_get_logs().map_err(runtime_err)
@@ -439,71 +442,71 @@ impl PyJob {
 
     #[getter]
     fn status(&self, py: Python<'_>) -> &'static str {
-        py.allow_threads(|| status_str(self.lock().status()))
+        py.detach(|| status_str(self.lock().status()))
     }
 
     #[getter]
     fn pid(&self, py: Python<'_>) -> Option<i32> {
-        py.allow_threads(|| self.lock().pid())
+        py.detach(|| self.lock().pid())
     }
 
     /// The `restart` property: whether a stopped job is started again by `check_restart`.
     #[getter]
     fn restarts(&self, py: Python<'_>) -> bool {
-        py.allow_threads(|| self.lock().restarts())
+        py.detach(|| self.lock().restarts())
     }
 
     #[getter]
     fn result<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyTuple>> {
-        let r = py.allow_threads(|| self.lock().result());
+        let r = py.detach(|| self.lock().result());
         tuple(py, &r)
     }
 
     #[getter]
     fn sysargs(&self, py: Python<'_>) -> Vec<String> {
-        py.allow_threads(|| self.lock().sysargs())
+        py.detach(|| self.lock().sysargs())
     }
 
     fn get_daemon_properties<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
-        let props = py.allow_threads(|| self.lock().get_daemon_properties());
+        let props = py.detach(|| self.lock().get_daemon_properties());
         map_to_py(py, props)
     }
 
     /// The daemon's properties (a local job's `properties.json` merged with the in-memory ones;
     /// for other executors the executor's, patched with this job's).
     fn properties<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
-        let props = py.allow_threads(|| self.lock().properties());
+        let props = py.detach(|| self.lock().properties());
         map_to_py(py, props)
     }
 
     #[getter]
     fn began(&self, py: Python<'_>) -> Option<String> {
-        py.allow_threads(|| iso(self.lock().began()))
+        py.detach(|| iso(self.lock().began()))
     }
 
     #[getter]
     fn ended(&self, py: Python<'_>) -> Option<String> {
-        py.allow_threads(|| iso(self.lock().ended()))
+        py.detach(|| iso(self.lock().ended()))
     }
 
     #[getter]
     fn paused(&self, py: Python<'_>) -> Option<String> {
-        py.allow_threads(|| iso(self.lock().paused()))
+        py.detach(|| iso(self.lock().paused()))
     }
 
     #[getter]
     fn stop_time(&self, py: Python<'_>) -> Option<String> {
-        py.allow_threads(|| iso(self.lock().stop_time()))
+        py.detach(|| iso(self.lock().stop_time()))
     }
 
     #[getter]
     fn hidden(&self, py: Python<'_>) -> bool {
-        py.allow_threads(|| self.lock().hidden())
+        py.detach(|| self.lock().hidden())
     }
 
     #[getter]
     fn is_externally_managed(&self, py: Python<'_>) -> bool {
-        py.allow_threads(|| self.lock().is_externally_managed())
+        py.detach(|| self.lock().is_externally_managed())
     }
 
     fn set_externally_managed(&self) {
@@ -511,18 +514,18 @@ impl PyJob {
     }
 
     fn check_restart<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyTuple>> {
-        let r = py.allow_threads(|| self.lock().check_restart());
+        let r = py.detach(|| self.lock().check_restart());
         tuple(py, &r)
     }
 
     #[getter]
     fn label(&self, py: Python<'_>) -> String {
-        py.allow_threads(|| self.lock().label())
+        py.detach(|| self.lock().label())
     }
 
     #[getter]
     fn env<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
-        let env = py.allow_threads(|| self.lock().env());
+        let env = py.detach(|| self.lock().env());
         let out = PyDict::new(py);
         for (k, v) in env {
             out.set_item(k, v)?;
@@ -532,22 +535,22 @@ impl PyJob {
 
     #[getter]
     fn delete_after_completion(&self, py: Python<'_>) -> bool {
-        py.allow_threads(|| self.lock().delete_after_completion())
+        py.detach(|| self.lock().delete_after_completion())
     }
 
     #[pyo3(signature = (strict=false))]
     fn is_blocking_on_stdin(&self, py: Python<'_>, strict: bool) -> PyResult<bool> {
         let _ = strict;
-        Ok(py.allow_threads(|| self.lock().is_blocking_on_stdin()))
+        Ok(py.detach(|| self.lock().is_blocking_on_stdin()))
     }
 
     fn get_prompt_kwargs<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
-        let kw = py.allow_threads(|| self.lock().get_prompt_kwargs());
+        let kw = py.detach(|| self.lock().get_prompt_kwargs());
         map_to_py(py, kw)
     }
 
     fn write_stdin(&self, py: Python<'_>, data: &str) -> PyResult<()> {
-        py.allow_threads(|| self.lock().write_stdin(data))
+        py.detach(|| self.lock().write_stdin(data))
             .map_err(|e| PyException::new_err(e.to_string()))
     }
 
@@ -586,18 +589,18 @@ impl PyJob {
     fn monitor_logs(
         &self,
         py: Python<'_>,
-        callback: PyObject,
-        input_callback: Option<PyObject>,
-        stop_callback: Option<PyObject>,
-        stop_event: Option<PyObject>,
+        callback: Py<PyAny>,
+        input_callback: Option<Py<PyAny>>,
+        stop_callback: Option<Py<PyAny>>,
+        stop_event: Option<Py<PyAny>>,
         stop_flag: Option<&PyStopFlag>,
         stop_on_exit: bool,
         strip_timestamps: bool,
         accept_input: bool,
         wait_if_stopped: bool,
-        stop_exception: Option<PyObject>,
-        clear_callback: Option<PyObject>,
-        warn: Option<PyObject>,
+        stop_exception: Option<Py<PyAny>>,
+        clear_callback: Option<Py<PyAny>>,
+        warn: Option<Py<PyAny>>,
         poll_seconds: Option<f64>,
     ) -> PyResult<()> {
         let spec = self.spec.clone();
@@ -637,8 +640,10 @@ impl PyJob {
                     *worker_fatal.lock().unwrap_or_else(|e| e.into_inner()) = Some(err);
                     true
                 };
+                // The monitor runs on its own thread: `try_attach` stops it quietly once the
+                // interpreter is finalizing (pyo3 0.30's `attach` panics there on Python 3.13+).
                 let line_cb = |line: &str| -> MonitorControl {
-                    Python::with_gil(|py| match callback.call1(py, (line,)) {
+                    Python::try_attach(|py| match callback.call1(py, (line,)) {
                         Ok(_) => MonitorControl::Continue,
                         Err(e) => {
                             if report(py, e) {
@@ -648,6 +653,7 @@ impl PyJob {
                             }
                         }
                     })
+                    .unwrap_or(MonitorControl::Stop)
                 };
                 let opts = MonitorOptions {
                     stop_on_exit,
@@ -656,7 +662,7 @@ impl PyJob {
                     stop: Some(worker_flag.clone()),
                     input: input_callback.as_ref().map(|cb| {
                         Box::new(move || -> Option<String> {
-                            Python::with_gil(|py| match cb.call0(py) {
+                            Python::try_attach(|py| match cb.call0(py) {
                                 Ok(v) => v.extract::<String>(py).ok(),
                                 Err(e) => {
                                     // KeyboardInterrupt while waiting for input ends the wait.
@@ -664,11 +670,12 @@ impl PyJob {
                                     None
                                 }
                             })
+                            .flatten()
                         }) as Box<dyn FnMut() -> Option<String>>
                     }),
                     on_stop: stop_callback.as_ref().map(|cb| {
                         Box::new(move |result: &SuccessTuple| {
-                            Python::with_gil(|py| {
+                            let _ = Python::try_attach(|py| {
                                 let t = match success_to_py(py, result) {
                                     Ok(t) => t,
                                     Err(_) => return,
@@ -676,14 +683,14 @@ impl PyJob {
                                 if let Err(e) = cb.call1(py, (t,)) {
                                     let _ = report(py, e);
                                 }
-                            })
+                            });
                         }) as Box<dyn FnMut(&SuccessTuple)>
                     }),
                     on_clear: clear_callback.as_ref().map(|cb| {
                         Box::new(move || {
-                            Python::with_gil(|py| {
+                            let _ = Python::try_attach(|py| {
                                 let _ = cb.call0(py);
-                            })
+                            });
                         }) as Box<dyn FnMut()>
                     }),
                     poll_interval: poll_seconds.map(Duration::from_secs_f64),
@@ -695,7 +702,7 @@ impl PyJob {
         });
         let rx = Mutex::new(rx);
         let wait = |timeout: Duration| {
-            py.allow_threads(|| {
+            py.detach(|| {
                 rx.lock()
                     .unwrap_or_else(|e| e.into_inner())
                     .recv_timeout(timeout)
@@ -875,22 +882,22 @@ impl PyDaemon {
 
     #[getter]
     fn status(&self, py: Python<'_>) -> &'static str {
-        py.allow_threads(|| status_str(self.lock().status()))
+        py.detach(|| status_str(self.lock().status()))
     }
 
     #[getter]
     fn pid(&self, py: Python<'_>) -> Option<i32> {
-        py.allow_threads(|| self.lock().pid())
+        py.detach(|| self.lock().pid())
     }
 
     /// `process`: the PID if the process exists.
     #[getter]
     fn process(&self, py: Python<'_>) -> Option<i32> {
-        py.allow_threads(|| self.lock().process())
+        py.detach(|| self.lock().process())
     }
 
     fn properties<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
-        let props = py.allow_threads(|| self.lock().properties());
+        let props = py.detach(|| self.lock().properties());
         map_to_py(py, props)
     }
 
@@ -927,11 +934,11 @@ impl PyDaemon {
     }
 
     fn log_text(&self, py: Python<'_>) -> Option<String> {
-        py.allow_threads(|| self.lock().log_text())
+        py.detach(|| self.lock().log_text())
     }
 
     fn readlines(&self, py: Python<'_>) -> Vec<String> {
-        py.allow_threads(|| self.lock().readlines())
+        py.detach(|| self.lock().readlines())
     }
 
     fn read_stop_file<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
@@ -964,7 +971,7 @@ impl PyDaemon {
         keep_daemon_output: bool,
         allow_dirty_run: bool,
     ) -> PyResult<Bound<'py, PyTuple>> {
-        let r = py.allow_threads(|| self.lock().run(keep_daemon_output, allow_dirty_run));
+        let r = py.detach(|| self.lock().run(keep_daemon_output, allow_dirty_run));
         tuple(py, &r)
     }
 
@@ -975,7 +982,7 @@ impl PyDaemon {
         timeout: Option<&Bound<'py, PyAny>>,
     ) -> PyResult<Bound<'py, PyTuple>> {
         let timeout = seconds(timeout)?;
-        let r = py.allow_threads(|| self.lock().kill(timeout));
+        let r = py.detach(|| self.lock().kill(timeout));
         tuple(py, &r)
     }
 
@@ -986,7 +993,7 @@ impl PyDaemon {
         timeout: Option<&Bound<'py, PyAny>>,
     ) -> PyResult<Bound<'py, PyTuple>> {
         let timeout = seconds(timeout)?;
-        let r = py.allow_threads(|| self.lock().quit(timeout));
+        let r = py.detach(|| self.lock().quit(timeout));
         tuple(py, &r)
     }
 
@@ -999,7 +1006,7 @@ impl PyDaemon {
     ) -> PyResult<Bound<'py, PyTuple>> {
         let timeout = seconds(timeout)?;
         let interval = seconds(check_timeout_interval)?;
-        let r = py.allow_threads(|| self.lock().pause(timeout, interval));
+        let r = py.detach(|| self.lock().pause(timeout, interval));
         tuple(py, &r)
     }
 
@@ -1012,13 +1019,13 @@ impl PyDaemon {
     ) -> PyResult<Bound<'py, PyTuple>> {
         let timeout = seconds(timeout)?;
         let interval = seconds(check_timeout_interval)?;
-        let r = py.allow_threads(|| self.lock().resume(timeout, interval));
+        let r = py.detach(|| self.lock().resume(timeout, interval));
         tuple(py, &r)
     }
 
     #[pyo3(signature = (keep_logs=false))]
     fn cleanup<'py>(&self, py: Python<'py>, keep_logs: bool) -> PyResult<Bound<'py, PyTuple>> {
-        let r = py.allow_threads(|| self.lock().cleanup(keep_logs));
+        let r = py.detach(|| self.lock().cleanup(keep_logs));
         tuple(py, &r)
     }
 
@@ -1027,7 +1034,7 @@ impl PyDaemon {
         &self,
         py: Python<'_>,
         timeout: Option<&Bound<'_, PyAny>>,
-    ) -> PyResult<PyObject> {
+    ) -> PyResult<Py<PyAny>> {
         let t = self.lock().get_timeout_seconds(seconds(timeout)?);
         seconds_to_py(py, t)
     }
@@ -1037,7 +1044,7 @@ impl PyDaemon {
         &self,
         py: Python<'_>,
         interval: Option<&Bound<'_, PyAny>>,
-    ) -> PyResult<PyObject> {
+    ) -> PyResult<Py<PyAny>> {
         let t = self
             .lock()
             .get_check_timeout_interval_seconds(seconds(interval)?);
@@ -1045,7 +1052,7 @@ impl PyDaemon {
     }
 }
 
-fn seconds_to_py(py: Python<'_>, s: Seconds) -> PyResult<PyObject> {
+fn seconds_to_py(py: Python<'_>, s: Seconds) -> PyResult<Py<PyAny>> {
     Ok(match s {
         Seconds::Int(i) => i.into_pyobject(py)?.into_any().unbind(),
         Seconds::Float(f) => f.into_pyobject(py)?.into_any().unbind(),
@@ -1107,7 +1114,7 @@ impl PyExecutor {
 
     #[pyo3(signature = (strict=false))]
     fn get_job_names(&self, py: Python<'_>, strict: bool) -> PyResult<Vec<String>> {
-        py.allow_threads(|| {
+        py.detach(|| {
             self.with(|ex| {
                 if strict {
                     ex.try_get_job_names().map_err(runtime_err)
@@ -1120,7 +1127,7 @@ impl PyExecutor {
 
     #[pyo3(signature = (name, strict=false))]
     fn get_job_exists(&self, py: Python<'_>, name: &str, strict: bool) -> PyResult<bool> {
-        py.allow_threads(|| {
+        py.detach(|| {
             self.with(|ex| {
                 if strict {
                     ex.try_get_job_exists(name).map_err(runtime_err)
@@ -1132,37 +1139,37 @@ impl PyExecutor {
     }
 
     fn get_job_metadata<'py>(&self, py: Python<'py>, name: &str) -> PyResult<Bound<'py, PyAny>> {
-        let meta = py.allow_threads(|| self.with(|ex| ex.get_job_metadata(name)));
+        let meta = py.detach(|| self.with(|ex| ex.get_job_metadata(name)));
         map_to_py(py, meta)
     }
 
     fn get_job_properties<'py>(&self, py: Python<'py>, name: &str) -> PyResult<Bound<'py, PyAny>> {
-        let props = py.allow_threads(|| self.with(|ex| ex.get_job_properties(name)));
+        let props = py.detach(|| self.with(|ex| ex.get_job_properties(name)));
         map_to_py(py, props)
     }
 
     fn get_job_status(&self, py: Python<'_>, name: &str) -> String {
-        py.allow_threads(|| self.with(|ex| ex.get_job_status(name)))
+        py.detach(|| self.with(|ex| ex.get_job_status(name)))
     }
 
     fn get_job_began(&self, py: Python<'_>, name: &str) -> Option<String> {
-        py.allow_threads(|| self.with(|ex| ex.get_job_began(name)))
+        py.detach(|| self.with(|ex| ex.get_job_began(name)))
     }
 
     fn get_job_ended(&self, py: Python<'_>, name: &str) -> Option<String> {
-        py.allow_threads(|| self.with(|ex| ex.get_job_ended(name)))
+        py.detach(|| self.with(|ex| ex.get_job_ended(name)))
     }
 
     fn get_job_paused(&self, py: Python<'_>, name: &str) -> Option<String> {
-        py.allow_threads(|| self.with(|ex| ex.get_job_paused(name)))
+        py.detach(|| self.with(|ex| ex.get_job_paused(name)))
     }
 
     fn get_job_pid(&self, py: Python<'_>, name: &str) -> Option<i32> {
-        py.allow_threads(|| self.with(|ex| ex.get_job_pid(name)))
+        py.detach(|| self.with(|ex| ex.get_job_pid(name)))
     }
 
     fn get_job_result<'py>(&self, py: Python<'py>, name: &str) -> PyResult<Bound<'py, PyAny>> {
-        match py.allow_threads(|| self.with(|ex| ex.get_job_result(name))) {
+        match py.detach(|| self.with(|ex| ex.get_job_result(name))) {
             Some(t) => Ok(tuple(py, &t)?.into_any()),
             None => Ok(py.None().into_bound(py)),
         }
@@ -1180,33 +1187,33 @@ impl PyExecutor {
             Some(p) => Some(py_to_core(p)?.to_map()),
             None => None,
         };
-        let r = py.allow_threads(|| self.with(|ex| ex.create_job(name, &sysargs, props.as_ref())));
+        let r = py.detach(|| self.with(|ex| ex.create_job(name, &sysargs, props.as_ref())));
         tuple(py, &r)
     }
 
     fn start_job<'py>(&self, py: Python<'py>, name: &str) -> PyResult<Bound<'py, PyTuple>> {
-        let r = py.allow_threads(|| self.with(|ex| ex.start_job(name)));
+        let r = py.detach(|| self.with(|ex| ex.start_job(name)));
         tuple(py, &r)
     }
 
     fn stop_job<'py>(&self, py: Python<'py>, name: &str) -> PyResult<Bound<'py, PyTuple>> {
-        let r = py.allow_threads(|| self.with(|ex| ex.stop_job(name)));
+        let r = py.detach(|| self.with(|ex| ex.stop_job(name)));
         tuple(py, &r)
     }
 
     fn pause_job<'py>(&self, py: Python<'py>, name: &str) -> PyResult<Bound<'py, PyTuple>> {
-        let r = py.allow_threads(|| self.with(|ex| ex.pause_job(name)));
+        let r = py.detach(|| self.with(|ex| ex.pause_job(name)));
         tuple(py, &r)
     }
 
     fn delete_job<'py>(&self, py: Python<'py>, name: &str) -> PyResult<Bound<'py, PyTuple>> {
-        let r = py.allow_threads(|| self.with(|ex| ex.delete_job(name)));
+        let r = py.detach(|| self.with(|ex| ex.delete_job(name)));
         tuple(py, &r)
     }
 
     #[pyo3(signature = (name, strict=false))]
     fn get_logs(&self, py: Python<'_>, name: &str, strict: bool) -> PyResult<Option<String>> {
-        py.allow_threads(|| {
+        py.detach(|| {
             self.with(|ex| {
                 if strict {
                     ex.try_get_logs(name).map_err(runtime_err)
@@ -1218,11 +1225,11 @@ impl PyExecutor {
     }
 
     fn get_job_stop_time(&self, py: Python<'_>, name: &str) -> Option<String> {
-        py.allow_threads(|| self.with(|ex| iso(ex.get_job_stop_time(name))))
+        py.detach(|| self.with(|ex| iso(ex.get_job_stop_time(name))))
     }
 
     fn get_job_is_blocking_on_stdin(&self, py: Python<'_>, name: &str) -> bool {
-        py.allow_threads(|| self.with(|ex| ex.get_job_is_blocking_on_stdin(name)))
+        py.detach(|| self.with(|ex| ex.get_job_is_blocking_on_stdin(name)))
     }
 
     fn get_job_prompt_kwargs<'py>(
@@ -1230,7 +1237,7 @@ impl PyExecutor {
         py: Python<'py>,
         name: &str,
     ) -> PyResult<Bound<'py, PyAny>> {
-        let kw = py.allow_threads(|| self.with(|ex| ex.get_job_prompt_kwargs(name)));
+        let kw = py.detach(|| self.with(|ex| ex.get_job_prompt_kwargs(name)));
         map_to_py(py, kw)
     }
 
@@ -1305,10 +1312,10 @@ impl PyExecutor {
         let refs: Vec<&str> = args.iter().map(String::as_str).collect();
         let ex = self.systemd();
         if as_output {
-            let out = py.allow_threads(|| ex.run_command_output(&refs));
+            let out = py.detach(|| ex.run_command_output(&refs));
             return Ok(PyString::new(py, &out).into_any());
         }
-        let r = py.allow_threads(|| ex.run_command(&refs));
+        let r = py.detach(|| ex.run_command(&refs));
         Ok(tuple(py, &r)?.into_any())
     }
 }
@@ -1348,7 +1355,7 @@ pub fn jobs_get_jobs<'py>(
 ) -> PyResult<(Bound<'py, PyList>, Vec<String>)> {
     let ctx = build_ctx(py, api_attributes)?;
     let listing = py
-        .allow_threads(|| {
+        .detach(|| {
             executor::get_jobs_for(
                 &ctx.jobs,
                 executor_keys.as_deref(),
@@ -1374,7 +1381,7 @@ pub fn jobs_get_filtered_jobs<'py>(
     let ctx = build_ctx(py, api_attributes)?;
     let filter = filter_list.unwrap_or_default();
     let filtered = py
-        .allow_threads(|| {
+        .detach(|| {
             executor::get_filtered_jobs_for(
                 &ctx.jobs,
                 executor_keys.as_deref(),
@@ -1581,13 +1588,13 @@ impl PyStdinFile {
     }
 
     fn write(&self, py: Python<'_>, data: &str) -> PyResult<usize> {
-        py.allow_threads(|| self.lock().write(data.as_bytes()))
+        py.detach(|| self.lock().write(data.as_bytes()))
             .map_err(|e| PyException::new_err(e.to_string()))?;
         Ok(data.len())
     }
 
     fn readline(&self, py: Python<'_>) -> PyResult<String> {
-        py.allow_threads(|| self.lock().readline())
+        py.detach(|| self.lock().readline())
             .map_err(|e| PyException::new_err(e.to_string()))
     }
 

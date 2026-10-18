@@ -50,10 +50,10 @@ fn open_job(ctx: &JobsContext, name: &str, sysargs: Option<Vec<String>>) -> Opti
         )
         .ok()
     };
-    if let Some(mut systemd) = make("systemd") {
-        if systemd.exists() {
-            return Some(systemd);
-        }
+    if let Some(mut systemd) = make("systemd")
+        && systemd.exists()
+    {
+        return Some(systemd);
     }
     make("local")
 }
@@ -162,10 +162,10 @@ impl JobsBackend for LocalJobsBackend {
             let stamp = &meerschaum_core::static_config::static_config()
                 .environment
                 .compose_project;
-            if let Some(Value::Map(client_env)) = properties.as_ref().and_then(|p| p.get("env")) {
-                if let Some(project) = client_env.get(stamp.as_str()) {
-                    env.insert(stamp.clone(), project.py_str());
-                }
+            if let Some(Value::Map(client_env)) = properties.as_ref().and_then(|p| p.get("env"))
+                && let Some(project) = client_env.get(stamp.as_str())
+            {
+                env.insert(stamp.clone(), project.py_str());
             }
             let job = Job::new(
                 &name,

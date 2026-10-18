@@ -36,9 +36,128 @@ pub fn clean(substring: &str) -> Result<()> {
     Ok(())
 }
 
-/// Reserved words that must stay quoted on Oracle (`utils/sql.py:986`).
-const ORACLE_RESERVED: [&str; 10] = [
+/// Words that must stay quoted on Oracle: v4's list (`utils/sql.py:986`: `float`, `varchar`,
+/// `nvarchar`, `clob`, `boolean`, `integer`, `table`, `row`, `date`, `time`) plus Oracle's true
+/// reserved words (every word that cannot be an unquoted column name).
+///
+/// PARITY (W17O-003 in `crates/meerschaum-py/PARITY.md`): v4 quotes only its ten words, so a column named `uid`, `user`, `level`, `comment`,
+/// `size`, `start`, ... fails to create (`ORA-00904`); v5 quotes them on purpose. This cannot
+/// change a name v4 created, because v4 could not create a table with such a name. The extra
+/// words are the Oracle SQL Language Reference's "Oracle SQL Reserved Words" table, verified on
+/// Oracle XE 21c by `CREATE TABLE t (x NUMBER, <word> NUMBER)` for every keyword in
+/// `V$RESERVED_WORDS` (109 failures: the documented words except `COLUMN_VALUE` and
+/// `NESTED_TABLE_ID`, which are creatable, plus `EXCEPT`); [`ORACLE_RESERVED_EXTRA`] is those 109
+/// minus the six that are also on v4's list. The golden test strips exactly these quotes from the Rust output on the Oracle
+/// flavor (`tests/golden.rs`).
+pub const ORACLE_RESERVED_V4: [&str; 10] = [
     "float", "varchar", "nvarchar", "clob", "boolean", "integer", "table", "row", "date", "time",
+];
+
+/// Oracle's true reserved words beyond [`ORACLE_RESERVED_V4`] (see there): quoted by v5 only.
+pub const ORACLE_RESERVED_EXTRA: &[&str] = &[
+    "access",
+    "add",
+    "all",
+    "alter",
+    "and",
+    "any",
+    "as",
+    "asc",
+    "audit",
+    "between",
+    "by",
+    "char",
+    "check",
+    "cluster",
+    "column",
+    "comment",
+    "compress",
+    "connect",
+    "create",
+    "current",
+    "decimal",
+    "default",
+    "delete",
+    "desc",
+    "distinct",
+    "drop",
+    "else",
+    "except",
+    "exclusive",
+    "exists",
+    "file",
+    "for",
+    "from",
+    "grant",
+    "group",
+    "having",
+    "identified",
+    "immediate",
+    "in",
+    "increment",
+    "index",
+    "initial",
+    "insert",
+    "intersect",
+    "into",
+    "is",
+    "level",
+    "like",
+    "lock",
+    "long",
+    "maxextents",
+    "minus",
+    "mlslabel",
+    "mode",
+    "modify",
+    "noaudit",
+    "nocompress",
+    "not",
+    "nowait",
+    "null",
+    "number",
+    "of",
+    "offline",
+    "on",
+    "online",
+    "option",
+    "or",
+    "order",
+    "pctfree",
+    "prior",
+    "public",
+    "raw",
+    "rename",
+    "resource",
+    "revoke",
+    "rowid",
+    "rownum",
+    "rows",
+    "select",
+    "session",
+    "set",
+    "share",
+    "size",
+    "smallint",
+    "start",
+    "successful",
+    "synonym",
+    "sysdate",
+    "then",
+    "to",
+    "trigger",
+    "uid",
+    "union",
+    "unique",
+    "update",
+    "user",
+    "validate",
+    "values",
+    "varchar2",
+    "view",
+    "whenever",
+    "where",
+    "with",
 ];
 
 /// `sql_item_name(item, flavor, schema)`: quote (and truncate) a table, column or index name.
@@ -52,7 +171,10 @@ pub fn sql_item_name_opt(item: &str, flavor: Option<Flavor>, schema: Option<&str
     let wrappers = if flavor == Some(Flavor::Oracle) {
         truncated_item = pg_capital(&truncated_item, true);
         // NOTE: System-reserved words must be quoted.
-        if ORACLE_RESERVED.contains(&truncated_item.to_lowercase().as_str()) {
+        let lower_item = truncated_item.to_lowercase();
+        if ORACLE_RESERVED_V4.contains(&lower_item.as_str())
+            || ORACLE_RESERVED_EXTRA.contains(&lower_item.as_str())
+        {
             ("\"", "\"")
         } else {
             ("", "")

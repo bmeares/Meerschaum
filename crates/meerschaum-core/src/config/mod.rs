@@ -173,15 +173,15 @@ pub fn default_config(root_dir: &str, cpu_count: i64, windows: bool) -> Map {
 fn resolve_default_markers(value: Value, root: &str, cpu: i64, windows: bool) -> Value {
     match value {
         Value::Map(m) => {
-            if m.len() == 1 {
-                if let Some(Value::Str(marker)) = m.get("__mrsm_dynamic__") {
-                    return match marker.as_str() {
-                        "cpu_count*3" => Value::Int(cpu * 3),
-                        "max(cpu_count/2,1)" => Value::Int(std::cmp::max(cpu / 2, 1)),
-                        "not_windows" => Value::Bool(!windows),
-                        _ => Value::Null,
-                    };
-                }
+            if m.len() == 1
+                && let Some(Value::Str(marker)) = m.get("__mrsm_dynamic__")
+            {
+                return match marker.as_str() {
+                    "cpu_count*3" => Value::Int(cpu * 3),
+                    "max(cpu_count/2,1)" => Value::Int(std::cmp::max(cpu / 2, 1)),
+                    "not_windows" => Value::Bool(!windows),
+                    _ => Value::Null,
+                };
             }
             Value::Map(
                 m.into_iter()
@@ -1491,11 +1491,11 @@ impl ConfigState {
                     .map(String::from)
                     .collect();
                 let mut force_literal = false;
-                if let Some(first) = keys.first_mut() {
-                    if let Some(stripped) = first.strip_prefix(options.literal_key.as_str()) {
-                        *first = stripped.to_string();
-                        force_literal = true;
-                    }
+                if let Some(first) = keys.first_mut()
+                    && let Some(stripped) = first.strip_prefix(options.literal_key.as_str())
+                {
+                    *first = stripped.to_string();
+                    force_literal = true;
                 }
                 if keys.len() == 1 && keys[0].is_empty() {
                     keys.clear();

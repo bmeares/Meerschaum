@@ -205,15 +205,16 @@ impl Pipe {
             return Ok(ChunkInterval::Delta(TimeDelta::minutes(minutes)));
         }
 
-        if dt_col.is_some() && is_int_axis {
-            if let Some(range) = verify.get("chunk_range").filter(|v| !v.is_null()) {
-                return py_int(range).map(ChunkInterval::Int).ok_or_else(|| {
-                    PipeError::ValueError(format!(
-                        "invalid literal for int(): {}",
-                        crate::pyfmt::py_repr(range)
-                    ))
-                });
-            }
+        if dt_col.is_some()
+            && is_int_axis
+            && let Some(range) = verify.get("chunk_range").filter(|v| !v.is_null())
+        {
+            return py_int(range).map(ChunkInterval::Int).ok_or_else(|| {
+                PipeError::ValueError(format!(
+                    "invalid literal for int(): {}",
+                    crate::pyfmt::py_repr(range)
+                ))
+            });
         }
 
         let mut chunk_delta = None;

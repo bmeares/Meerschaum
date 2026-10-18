@@ -143,15 +143,15 @@ pub fn jwt_decode(
         return Err(JwtError::Malformed);
     };
     let now = now.timestamp();
-    if let Some(exp) = int_claim(&payload, "exp")? {
-        if exp <= now {
-            return Err(JwtError::Expired);
-        }
+    if let Some(exp) = int_claim(&payload, "exp")?
+        && exp <= now
+    {
+        return Err(JwtError::Expired);
     }
-    if let Some(nbf) = int_claim(&payload, "nbf")? {
-        if nbf > now {
-            return Err(JwtError::Immature);
-        }
+    if let Some(nbf) = int_claim(&payload, "nbf")?
+        && nbf > now
+    {
+        return Err(JwtError::Immature);
     }
     int_claim(&payload, "iat")?;
     if payload.get("sub").is_some_and(|s| !s.is_string()) {

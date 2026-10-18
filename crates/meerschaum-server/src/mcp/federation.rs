@@ -238,10 +238,10 @@ impl Federation {
     pub async fn registry(&self) -> Arc<HostRegistry> {
         {
             let guard = self.cache.read().await;
-            if let Some(c) = guard.as_ref() {
-                if c.ok || c.fetched.elapsed() < RETRY_AFTER {
-                    return c.registry.clone();
-                }
+            if let Some(c) = guard.as_ref()
+                && (c.ok || c.fetched.elapsed() < RETRY_AFTER)
+            {
+                return c.registry.clone();
             }
         }
         match self.refresh().await {

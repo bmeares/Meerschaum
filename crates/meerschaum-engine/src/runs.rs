@@ -236,7 +236,9 @@ impl EnginePipe {
         }
     }
 
-    /// The target table (`mrsm_engine_ledger`; on SQL in the `_mrsm_internal` schema).
+    /// The default target table (`mrsm_engine_ledger`). On SQL schema flavors the table lives
+    /// in `_mrsm_internal` and carries the instance schema as a suffix when that is not the
+    /// flavor's default (`InstanceConnector::engine_state_pipe`).
     pub fn target(&self) -> String {
         format!("mrsm_{}", self.metric_key())
     }

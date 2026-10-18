@@ -86,7 +86,7 @@ export CARGO_INCREMENTAL=0                 # what CI uses; optional locally
 |---|---|
 | `cargo build -p meerschaum --bin mrsm` | the debug standalone `mrsm` at `target/debug/mrsm` (the front crate's `cli` feature, what `cargo install meerschaum` builds; `tests/console` runs it). Oracle needs Instant Client (`libclntsh`) only at runtime. `cargo build -p meerschaum-cli` builds only the internal `target/debug/mrsm-cli` its integration tests run (named differently so `--workspace` never writes two `mrsm`) |
 | `cargo build --release -p meerschaum --bin mrsm` | the release binary (`scripts/bench/run.py` uses it; the Docker image and the wheel run the CLI from the extension instead) |
-| `scripts/rust/build_py.sh [--debug] [--no-polars]` | builds `crates/meerschaum-py` with maturin and drops `meerschaum/_core/_native.abi3.so` into the working tree (release by default, ~10 min, atomic swap; the `meerschaum` package does not work without it). Needs `maturin` (`uv tool install maturin`) and a Python >= 3.11 (`PYTHON=...`). Keep `PYTHON` stable between runs or Polars rebuilds. It takes the tree lock `target/.build-py.lock` itself (concurrent builds would corrupt each other); do not wrap it in `flock`. |
+| `scripts/rust/build_py.sh [--debug]` | builds `crates/meerschaum-py` with maturin and drops `meerschaum/_core/_native.abi3.so` into the working tree (release by default, ~10 min, atomic swap; the `meerschaum` package does not work without it). Needs `maturin` (`uv tool install maturin`) and a Python >= 3.11 (`PYTHON=...`). Keep `PYTHON` stable between runs or Polars rebuilds. It takes the tree lock `target/.build-py.lock` itself (concurrent builds would corrupt each other); do not wrap it in `flock`. |
 | `scripts/rust/clean_py.sh [--cargo]` | removes the built extension |
 | `cargo build -p meerschaum-plugin --example native_demo` | the example C-ABI plugin |
 | `scripts/mrsm.sh <args>` | `python -m meerschaum` against `./test_root` + `./tests/plugins` (the façade launcher: the CLI runs from the built extension; an explicit `MRSM_BIN` is accepted only if its `--version` equals the extension's and, in CI, it is newer than the Rust sources) |
@@ -175,7 +175,7 @@ servers on random high ports with a temporary root, a SQLite instance and the `w
 scripts/parity/setup_reference.sh                       # .venv-ref/: released meerschaum==4.1.4 + pinned data libs (scripts/parity/requirements.txt)
 scripts/parity/run.sh crates/<crate>/tests/fixtures/gen_<x>.py [args]   # regenerate one fixture with the reference
 python scripts/bench/run.py --label <name>              # fixed sync benchmark set, v4.1.4 vs v5 (needs the release binary; results in scripts/bench/results/)
-PYTHONPATH=$(pwd) MRSM_ROOT_DIR=./test_root MRSM_PLUGINS_DIR=./tests/plugins python crates/meerschaum-py/bench/bench_boundary.py   # pandas-boundary bench (PERF.md)
+scripts/transition/run.sh [--flavors sqlite,postgis,...] [--wheel <whl>]   # v4 -> v5 upgrade harness: state created by released 4.1.4, continued by the tree (README there; uv + network; touches only trn* objects)
 ./scripts/zensical.sh                                   # serve docs/zensical/; ./scripts/pdoc.sh builds the Python API reference (PDOC_ALLOW_EXEC=1)
 ./scripts/build.sh                                      # clean, docs, check_packaging --write, `python -m build` for both maturin projects, wheel checks
 ```
@@ -323,9 +323,10 @@ interpreter the binary runs workers with (`tests/console` sets it to `sys.execut
 - One crate per directory; work inside your crate. Edit the root `Cargo.toml` only to add a
   `[workspace.dependencies]` entry that two or more crates need; crate-private deps go in the crate.
   Shared Python-behavior helpers belong in `meerschaum-core`, never copied into another crate.
-- `pyo3` is pinned to `0.25` in `meerschaum-py` (what `pyo3-polars 0.24` / `pyo3-arrow 0.11` need
-  with the workspace's `arrow 56` + `polars 0.51`); upgrade all of them together.
-  `extension-module` and `polars` are opt-in crate features so `cargo test -p meerschaum-py` links libpython.
+- `pyo3`, `arrow` and `polars` are workspace dependencies (0.30, 60 and 0.55); upgrade them together
+  (only one pyo3 can link libpython, RecordBatches cross crates). No pyo3-arrow / pyo3-polars: the
+  Python boundary is our own PyCapsule code (`ffi_import.rs`, `ffi_export.rs`, `polars_bridge.rs`).
+  `extension-module` is an opt-in crate feature so `cargo test -p meerschaum-py` links libpython.
 - Reproduce observable v4 behavior, quirks included (§4.4 "What the façade must preserve"); where v4
   is wrong, keep it and mark `// PARITY:` with the Python line. Rust-only behavior gets a crate test;
   behavior visible from Python also gets a pytest test.
@@ -360,9 +361,10 @@ organizations, home directories, hostnames or credentials.
   no batches; the boundary (`frame_from_arrow`) must import an empty batch carrying the schema or
   every column disappears (`TypeError: missing column dt`).
 - **Polars quirks at the Arrow boundary** (`crates/meerschaum-py/README.md`): `Null` columns export
-  `n_buffers = 1` (repaired in `ffi_import.rs`); Polars `Extension` string columns export a `Utf8View`
-  layout arrow-rs 56 panics on, so Polars inputs go through `DataFrame.to_arrow()`; `pyo3-polars`
-  needs pyarrow at call time and drops field metadata, so kernel bindings take streams.
+  `n_buffers = 1`, which arrow-rs (through 60) rejects (repaired in `ffi_import.rs`); older Polars
+  `Extension` string columns export a `Utf8View` layout arrow-rs 56 panicked on, so Polars inputs
+  still go through `DataFrame.to_arrow()` when pyarrow is there; arrow 60 made the C stream
+  callbacks private, so `ffi_import.rs` calls them through a `#[repr(C)]` mirror.
 - **Dtype hints restore pandas backends.** The kernel erases `int64` vs `Int64` vs `int64[pyarrow]`;
   `pandas_bridge.rs` restores what v4 returns per function (table in `PARITY.md`). Datetime targets
   always take `to_pandas_dtype(typ)`; special columns (`json`/`uuid`/`numeric`/`bytes`) stay `object`.

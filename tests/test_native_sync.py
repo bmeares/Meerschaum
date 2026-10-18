@@ -1023,7 +1023,12 @@ def test_duckdb_mssql_and_oracle_instances_sync_natively(flavor, native_calls, t
             pytest.skip("the Oracle client library (libclntsh) is not installed")
     params = {'columns': COLUMNS, 'dtypes': {'val': 'float', 'name': 'str'}}
     steps = [(_rows(6), {}), (_rows(6), {}), (_rows(8, offset=2), {})]
-    expected = oracle.expected()
+    # The recorded result is the SQLite-instance run of this scenario, which does not depend on the
+    # instance flavor: the `[duckdb]` and `[mssql]` nodes are byte-identical, and `[oracle]` (no v4
+    # Oracle driver where it was recorded) reads the same node instead of a hand-extended copy.
+    expected = oracle.expected(
+        'tests/test_native_sync.py::test_duckdb_mssql_and_oracle_instances_sync_natively[duckdb]'
+    )
     instance = _server_instance(flavor, tmp_path)
     handled = native_calls.handled
     actual = _run(instance, f'w15l_{flavor}', params, steps)
@@ -1525,9 +1530,6 @@ print('FRESH_OK', result.inserted)
         'W15L_DB': str(tmp_path / 'fresh.db'),
         'PYTHONPATH': os.getcwd(),
     })
-    venvs = os.path.abspath(os.path.join('test_root', 'venvs'))
-    if os.path.isdir(os.path.join(venvs, 'mrsm')):
-        env['MRSM_VENVS_DIR'] = venvs
     done = subprocess.run(
         [sys.executable, '-c', code], env=env, capture_output=True, text=True, timeout=240,
     )

@@ -8,9 +8,11 @@
 
 use chrono::{DateTime, Utc};
 use indexmap::IndexMap;
+use meerschaum_core::dtypes::is_dtype_special;
 use meerschaum_core::users::{Token, User};
 use meerschaum_core::{Map, Pipe, SuccessTuple, Value};
 use meerschaum_kernel::Frame;
+use meerschaum_kernel::detect::get_special_cols;
 use meerschaum_kernel::enforce::{
     PipeDtypesContext, PipeInput, pipe_enforce_dtypes, pipe_get_dtypes, pipe_is_tz_aware,
 };
@@ -199,6 +201,59 @@ pub async fn dtypes_context<C: InstanceConnector + ?Sized>(
         tz_aware,
         mixed_numerics: bool_param(parameters, "mixed_numerics", true),
     })
+}
+
+/// `Pipe._persist_new_special_columns(df, dtypes)`: json / uuid / numeric / bytes / geometry
+/// columns of `df` that `dtypes` (`Pipe.get_dtypes()`) does not already hold as special dtypes
+/// are merged into the pipe's `dtypes` parameter, persisted with `edit_pipe(patch=False)` when
+/// `registered` and not `temporary` (a failure only warns), and recorded in `extra` as
+/// `new_special_cols` (what `sync_pipe` reads as `pipe._get_cached_value('new_special_cols')`).
+///
+/// Returns the new special columns.
+pub async fn persist_new_special_columns<C: InstanceConnector + ?Sized>(
+    conn: &C,
+    pipe: &mut Pipe,
+    df: &Frame,
+    dtypes: &IndexMap<String, String>,
+    registered: bool,
+    extra: &mut Map,
+) -> IndexMap<String, String> {
+    let new_special: IndexMap<String, String> = get_special_cols(df)
+        .into_iter()
+        .filter(|(c, _)| !dtypes.get(c).is_some_and(|t| is_dtype_special(t)))
+        .collect();
+    if new_special.is_empty() {
+        return new_special;
+    }
+    let mut merged = pipe
+        .param("dtypes")
+        .and_then(|d| d.as_map().cloned())
+        .unwrap_or_default();
+    for (c, t) in &new_special {
+        merged.insert(c.clone(), Value::Str(t.clone()));
+    }
+    let mut patch = Map::new();
+    patch.insert("dtypes".into(), Value::Map(merged));
+    pipe.update_parameters(patch);
+    if registered && !pipe.temporary {
+        let res = conn.edit_pipe(pipe, false).await;
+        if !res.success {
+            tracing::warn!(
+                "Failed to capture new special columns for {pipe}:\n{}",
+                res.message
+            );
+        }
+    }
+    extra.insert(
+        "new_special_cols".into(),
+        Value::Map(
+            new_special
+                .iter()
+                .map(|(k, v)| (k.clone(), Value::Str(v.clone())))
+                .collect(),
+        ),
+    );
+    new_special
 }
 
 /// The essentials of `Pipe.sync(docs, check_existing=...)` for internal pipes: enforce the
@@ -496,7 +551,8 @@ pub async fn forget_engine_state<C: InstanceConnector + ?Sized>(
         ("engine_cursors", "child_ref"),
         ("engine_state", "pipe_ref"),
     ] {
-        let Some(state_pipe) = engine_state_pipe(pipe.instance_keys(), metric) else {
+        let Ok(Some(state_pipe)) = conn.engine_state_pipe(pipe.instance_keys(), metric).await
+        else {
             continue;
         };
         if !conn.pipe_exists(&state_pipe).await.unwrap_or(false) {

@@ -43,14 +43,12 @@ pub async fn protect_sessions(
     if let Ok(pipe) = state
         .get_pipe(&ck, &mk, Some(&lk), instance.as_deref(), true)
         .await
-    {
-        if pipe
+        && pipe
             .pipe
             .target(None)
             .is_ok_and(|target| session_target(&target))
-        {
-            return (StatusCode::FORBIDDEN, "The session table is internal.").into_response();
-        }
+    {
+        return (StatusCode::FORBIDDEN, "The session table is internal.").into_response();
     }
     if matches!(*req.method(), Method::POST | Method::PATCH)
         && parts.get(5).is_some_and(|p| p == "register" || p == "edit")
@@ -60,13 +58,12 @@ pub async fn protect_sessions(
             Ok(b) => b,
             Err(_) => return StatusCode::PAYLOAD_TOO_LARGE.into_response(),
         };
-        if let Ok(parameters) = serde_json::from_slice::<serde_json::Value>(&bytes) {
-            if ["target", "target_name", "target_table"]
+        if let Ok(parameters) = serde_json::from_slice::<serde_json::Value>(&bytes)
+            && ["target", "target_name", "target_table"]
                 .iter()
                 .any(|key| parameters[*key].as_str().is_some_and(session_target))
-            {
-                return (StatusCode::FORBIDDEN, "The session table is internal.").into_response();
-            }
+        {
+            return (StatusCode::FORBIDDEN, "The session table is internal.").into_response();
         }
         req = Request::from_parts(head, Body::from(bytes));
     }

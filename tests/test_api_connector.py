@@ -25,6 +25,7 @@ from datetime import datetime, timezone
 
 import pytest
 
+from tests._binary import skip_or_fail
 import meerschaum as mrsm
 from meerschaum.connectors.api import APIConnector
 
@@ -41,7 +42,7 @@ pytestmark = pytest.mark.skipif(
 def _v4(code: str) -> str:
     """Run `code` with the released 4.1.4 outside the repo; returns its stdout."""
     if not REF_PYTHON.exists():
-        pytest.skip("the 4.1.4 reference is not built (scripts/parity/setup_reference.sh)")
+        skip_or_fail("the 4.1.4 reference is not built (scripts/parity/setup_reference.sh)")
     root = tempfile.mkdtemp(prefix='mrsm-w16s-ref-', dir=_scratch())
     env = {
         key: val for key, val in os.environ.items()
@@ -174,7 +175,7 @@ def test_the_client_is_rebuilt_after_a_fork():
     assert 'FORK-OK' in result.stdout, result.stderr[-3000:]
 
 
-def _run_child(code: str, venvs: bool = False) -> subprocess.CompletedProcess:
+def _run_child(code: str) -> subprocess.CompletedProcess:
     root = tempfile.mkdtemp(prefix='mrsm-w16s-child-', dir=_scratch())
     env = {
         key: val for key, val in os.environ.items()
@@ -186,9 +187,6 @@ def _run_child(code: str, venvs: bool = False) -> subprocess.CompletedProcess:
         'MRSM_PLUGINS_DIR': str(pathlib.Path(root) / 'plugins'),
         'MRSM_NO_AUTO_INSTALL': '1',
     })
-    shared = REPO / 'test_root' / 'venvs'
-    if venvs and (shared / 'mrsm').is_dir():
-        env['MRSM_VENVS_DIR'] = str(shared)
     return subprocess.run(
         [sys.executable, '-c', code], env=env, cwd=root,
         capture_output=True, text=True, timeout=180,
@@ -541,7 +539,10 @@ def test_tokens_through_the_connector(conn):
         assert model.label == label
         assert label in [t.label for t in conn.get_tokens()]
         assert [t.label for t in conn.get_tokens(labels=[label])] == [label]
-        assert conn.get_token_scopes(token) == []
+        # PARITY W17T-004: v4 returned `[]` here (`getattr(<list>, 'scopes', [])`); v5 returns the
+        # token's real scopes (a token registered without scopes holds every scope).
+        from meerschaum._internal.static import STATIC_CONFIG
+        assert conn.get_token_scopes(token) == list(STATIC_CONFIG['tokens']['scopes'])
         # A token read back has its creation time (`edit_token` sends it).
         loaded = conn.get_tokens(labels=[label])[0]
         loaded.scopes = ['pipes:read']
@@ -897,7 +898,7 @@ def test_every_call_matches_the_v4_client_against_the_same_server(server):
     from tests.console.conftest import USERNAME, PASSWORD
     tag = uuid.uuid4().hex[:6]
     if not REF_PYTHON.exists():
-        pytest.skip("the 4.1.4 reference is not built (scripts/parity/setup_reference.sh)")
+        skip_or_fail("the 4.1.4 reference is not built (scripts/parity/setup_reference.sh)")
     ref = json.loads(_v4(
         BATTERY
         + f"\nprint('RESULT' + json.dumps(run('127.0.0.1', {server.port}, {USERNAME!r}, "
@@ -1027,7 +1028,7 @@ def test_users_plugins_and_tokens_match_the_v4_client(server):
     from tests.console.conftest import USERNAME, PASSWORD
     tag = uuid.uuid4().hex[:6]
     if not REF_PYTHON.exists():
-        pytest.skip("the 4.1.4 reference is not built (scripts/parity/setup_reference.sh)")
+        skip_or_fail("the 4.1.4 reference is not built (scripts/parity/setup_reference.sh)")
     ref = json.loads(_v4(
         BATTERY_ACCOUNTS
         + f"\nprint('RESULT' + json.dumps(run('127.0.0.1', {server.port}, {USERNAME!r}, "
@@ -1038,10 +1039,15 @@ def test_users_plugins_and_tokens_match_the_v4_client(server):
     ours = json.loads(json.dumps(
         namespace['run']('127.0.0.1', server.port, USERNAME, PASSWORD, tag), default=str,
     ))
+    ### PARITY W17T-004, the one intentional deviation: v4's `get_token_scopes()` returned `[]` for an
+    ### existing token; v5 returns its real scopes. Every other key stays strict.
+    from meerschaum._internal.static import STATIC_CONFIG
+    assert ref.get('token_scopes') == []
+    assert ours.get('token_scopes') == list(STATIC_CONFIG['tokens']['scopes'])
     differences = {
         key: (ref.get(key), ours.get(key))
         for key in sorted(set(ref) | set(ours))
-        if ref.get(key) != ours.get(key)
+        if key != 'token_scopes' and ref.get(key) != ours.get(key)
     }
     assert not differences, json.dumps(differences, indent=1, default=str)
 
@@ -1221,7 +1227,7 @@ def test_get_data_dtypes_match_the_v4_client(server):
     """
     from tests.console.conftest import USERNAME, PASSWORD
     if not REF_PYTHON.exists():
-        pytest.skip("the 4.1.4 reference is not built (scripts/parity/setup_reference.sh)")
+        skip_or_fail("the 4.1.4 reference is not built (scripts/parity/setup_reference.sh)")
     pandas = pytest.importorskip('pandas')
     if int(pandas.__version__.split('.')[0]) < 3:
         pytest.skip(f"the reference runs pandas 3 (pandas {pandas.__version__} is installed)")

@@ -161,19 +161,18 @@ pub fn lint(input: &LintInput, instance: &mut dyn InstanceOps) -> Vec<LintWarnin
         .get("sync")
         .and_then(Value::as_map)
         .and_then(|s| s.get("pipes"))
+        && !nested.is_empty()
     {
-        if !nested.is_empty() {
-            out.push(LintWarning {
-                code: "nested-pipes",
-                location: "sync.pipes".into(),
-                message: format!(
-                    "{} pipe{} nested under `sync:`; they are loaded (before the top-level `pipes:`), \
+        out.push(LintWarning {
+            code: "nested-pipes",
+            location: "sync.pipes".into(),
+            message: format!(
+                "{} pipe{} nested under `sync:`; they are loaded (before the top-level `pipes:`), \
                      but `pipes:` belongs at the top level.",
-                    nested.len(),
-                    if nested.len() == 1 { " is" } else { "s are" }
-                ),
-            });
-        }
+                nested.len(),
+                if nested.len() == 1 { " is" } else { "s are" }
+            ),
+        });
     }
 
     let base = input
@@ -233,17 +232,17 @@ pub fn lint(input: &LintInput, instance: &mut dyn InstanceOps) -> Vec<LintWarnin
                 });
             }
         }
-        if let Some(tags) = meta.get("tags") {
-            if !matches!(tags, Value::List(_)) {
-                out.push(LintWarning {
-                    code: "string-tags",
-                    location: format!("{label}.tags"),
-                    message: format!(
-                        "`tags` must be a list (got {}); compose fails to add the project tag.",
-                        crate::project::py_type_name(tags)
-                    ),
-                });
-            }
+        if let Some(tags) = meta.get("tags")
+            && !matches!(tags, Value::List(_))
+        {
+            out.push(LintWarning {
+                code: "string-tags",
+                location: format!("{label}.tags"),
+                message: format!(
+                    "`tags` must be a list (got {}); compose fails to add the project tag.",
+                    crate::project::py_type_name(tags)
+                ),
+            });
         }
         if let Some(Value::Map(params)) = meta.get("parameters") {
             for key in params.keys() {
@@ -257,9 +256,10 @@ pub fn lint(input: &LintInput, instance: &mut dyn InstanceOps) -> Vec<LintWarnin
                     });
                 }
             }
-            if let Some(tags) = params.get("tags") {
-                if !matches!(tags, Value::List(_)) {
-                    out.push(LintWarning {
+            if let Some(tags) = params.get("tags")
+                && !matches!(tags, Value::List(_))
+            {
+                out.push(LintWarning {
                         code: "string-tags",
                         location: format!("{label}.parameters.tags"),
                         message: format!(
@@ -267,7 +267,6 @@ pub fn lint(input: &LintInput, instance: &mut dyn InstanceOps) -> Vec<LintWarnin
                             crate::project::py_type_name(tags)
                         ),
                     });
-                }
             }
         }
 

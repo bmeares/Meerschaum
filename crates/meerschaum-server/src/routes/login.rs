@@ -84,21 +84,20 @@ async fn login(ctx: Ctx, body: Body) -> ApiResult {
         && !nonempty(&data.password)
         && !nonempty(&data.client_id)
         && !nonempty(&data.client_secret)
+        && let Some(auth) = authorization.filter(|a| !a.is_empty())
     {
-        if let Some(auth) = authorization.filter(|a| !a.is_empty()) {
-            let parts: Vec<&str> = auth.split_whitespace().collect();
-            if let [scheme, credentials] = parts.as_slice() {
-                let credentials = credentials.strip_prefix("mrsm-key:").unwrap_or(credentials);
-                if scheme.eq_ignore_ascii_case("basic") || scheme.eq_ignore_ascii_case("bearer") {
-                    let decoded = base64::engine::general_purpose::STANDARD
-                        .decode(credentials)
-                        .ok()
-                        .and_then(|b| String::from_utf8(b).ok());
-                    if let Some((id, secret)) = decoded.as_deref().and_then(|d| d.split_once(':')) {
-                        data.client_id = Some(id.to_string());
-                        data.client_secret = Some(secret.to_string());
-                        data.grant_type = Some("client_credentials".into());
-                    }
+        let parts: Vec<&str> = auth.split_whitespace().collect();
+        if let [scheme, credentials] = parts.as_slice() {
+            let credentials = credentials.strip_prefix("mrsm-key:").unwrap_or(credentials);
+            if scheme.eq_ignore_ascii_case("basic") || scheme.eq_ignore_ascii_case("bearer") {
+                let decoded = base64::engine::general_purpose::STANDARD
+                    .decode(credentials)
+                    .ok()
+                    .and_then(|b| String::from_utf8(b).ok());
+                if let Some((id, secret)) = decoded.as_deref().and_then(|d| d.split_once(':')) {
+                    data.client_id = Some(id.to_string());
+                    data.client_secret = Some(secret.to_string());
+                    data.grant_type = Some("client_credentials".into());
                 }
             }
         }
