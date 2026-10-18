@@ -317,6 +317,21 @@ pub fn v5_additions(function: &str) -> Option<&'static str> {
         - List the recorded engine runs, newest first.
     - `show run RUN_ID`
         - Print the Gantt chart of a recorded run.
+    - `show drivers`
+        - Print the native driver libraries (DuckDB, Oracle client): version, source, path.
+"##
+        }
+        "install" => {
+            r##"    - `install driver duckdb [--force]`
+        - Download DuckDB's shared library (checked against a pinned SHA-256) into
+          `<root>/drivers`. DuckDB is not compiled into `mrsm`: without this command the library is
+          downloaded on first use, unless `MRSM_NO_AUTO_INSTALL` is set. `MRSM_DUCKDB_LIB` names a
+          library to use instead (air-gapped hosts).
+"##
+        }
+        "uninstall" => {
+            r##"    - `uninstall driver duckdb`
+        - Remove the downloaded DuckDB library from `<root>/drivers`.
 "##
         }
         _ => return None,

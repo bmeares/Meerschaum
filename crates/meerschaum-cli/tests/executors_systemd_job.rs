@@ -47,7 +47,7 @@ impl Unit {
     }
 
     fn command(&self, args: &[&str]) -> Command {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_mrsm"));
+        let mut command = Command::new(env!("CARGO_BIN_EXE_mrsm-cli"));
         command
             .args(["-m", "meerschaum"])
             .args(args)
@@ -223,7 +223,7 @@ fn a_unit_stopped_on_request_exits_zero() {
 #[test]
 fn a_leading_dash_m_is_kept_outside_a_unit() {
     let dir = tempfile::tempdir().unwrap();
-    let out = Command::new(env!("CARGO_BIN_EXE_mrsm"))
+    let out = Command::new(env!("CARGO_BIN_EXE_mrsm-cli"))
         .args(["-m", "meerschaum", "show", "arguments"])
         .env_clear()
         .env("PATH", std::env::var_os("PATH").unwrap_or_default())

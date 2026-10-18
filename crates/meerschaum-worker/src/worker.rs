@@ -244,6 +244,10 @@ impl Worker {
         }
         let listener = Listener::bind(opts.socket_dir.as_deref())?;
         let mut cmd = Command::new(&opts.python);
+        // `-P`: the working directory (the user's, a project's) stays off `sys.path`, where a
+        // `meerschaum.py` or `meerschaum/` would replace the package (`-c` and `-m` both put it
+        // first). Plugins are imported through the plugins directory, never the working one.
+        cmd.arg(meerschaum_core::self_exe::PYTHON_SAFE_PATH_FLAG);
         if opts.module == "meerschaum.worker" {
             cmd.arg("-c").arg(include_str!("../python/host.py"));
         } else {

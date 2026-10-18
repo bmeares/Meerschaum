@@ -134,7 +134,7 @@ fn actions_match_v4_transcripts() {
     let _guard = KillOnDrop(root.clone());
     let root_str = root.to_string_lossy().to_string();
     let columns = fixture["columns"].as_i64().unwrap_or(100).to_string();
-    let bin = env!("CARGO_BIN_EXE_mrsm");
+    let bin = env!("CARGO_BIN_EXE_mrsm-cli");
 
     let mut failures: Vec<String> = Vec::new();
     for (i, step) in fixture["steps"].as_array().unwrap().iter().enumerate() {

@@ -31,6 +31,9 @@ const RESERVED_COMPLETERS: &[&str] = &["instance", "repo", "executor"];
 
 /// `meerschaum.utils.packages.packages`: the dependency groups `show packages` completes.
 // PARITY: v4 lists its setup extras here; v5 keeps the names for completion.
+/// The drivers `install driver` / `show drivers` know (v5).
+const DRIVER_NAMES: &[&str] = &["duckdb", "oracle"];
+
 pub const PACKAGE_GROUPS: &[&str] = &[
     "_internal",
     "api",
@@ -647,6 +650,20 @@ impl CompletionData {
         }
     }
 
+    /// The driver names `install driver`, `uninstall driver` and `show drivers` take (v5): the
+    /// ones not typed yet that start with the word being completed.
+    fn driver_completer(names: &[&str], action: &[String], line: &str) -> Vec<String> {
+        let prefix = match action.last() {
+            Some(last) if !line.ends_with(' ') => last.as_str(),
+            _ => "",
+        };
+        names
+            .iter()
+            .filter(|n| n.starts_with(prefix) && !action.iter().any(|a| a == **n))
+            .map(|n| n.to_string())
+            .collect()
+    }
+
     fn edit_plugins(&self, action: &[String], line: &str) -> Vec<String> {
         let names = &self.plugin_names;
         let Some(last) = action.last() else {
@@ -750,11 +767,16 @@ impl CompletionData {
                     "jobs",
                     "log",
                     "logs",
+                    "driver",
+                    "drivers",
                 ];
                 match dispatch(&subs, true) {
                     Some(sub) => {
                         action.remove(0);
                         match sub.as_str() {
+                            "driver" | "drivers" => {
+                                Self::driver_completer(DRIVER_NAMES, &action, kw.line)
+                            }
                             "connector" | "connectors" => self.show_connectors(&action),
                             "config" => Self::keys_completer(&self.config_keys, &action),
                             "package" | "packages" => {
@@ -811,12 +833,17 @@ impl CompletionData {
                 None => default_for("clear", &action),
             },
             "install" => {
-                let subs = ["plugin", "plugins", "package", "packages", "required"];
+                let subs = [
+                    "plugin", "plugins", "package", "packages", "required", "driver", "drivers",
+                ];
                 // PARITY: `install` dispatches without the line check.
                 match dispatch(&subs, false) {
                     Some(sub) => {
                         action.remove(0);
                         match sub.as_str() {
+                            "driver" | "drivers" => {
+                                Self::driver_completer(DRIVER_NAMES, &action, kw.line)
+                            }
                             // Disabled in v4 so typing is not interrupted by repository calls.
                             "plugin" | "plugins" | "package" | "packages" => Vec::new(),
                             _ => self.edit_plugins(&action, kw.line),
@@ -825,10 +852,15 @@ impl CompletionData {
                     None => default_for("install", &action),
                 }
             }
-            "uninstall" => match dispatch(&["plugin", "plugins"], true) {
-                Some(_) => {
+            "uninstall" => match dispatch(&["plugin", "plugins", "driver", "drivers"], true) {
+                Some(sub) => {
                     action.remove(0);
-                    self.edit_plugins(&action, kw.line)
+                    if sub.starts_with("driver") {
+                        // Only DuckDB's library is downloaded by Meerschaum.
+                        Self::driver_completer(&["duckdb"], &action, kw.line)
+                    } else {
+                        self.edit_plugins(&action, kw.line)
+                    }
                 }
                 None => default_for("uninstall", &action),
             },

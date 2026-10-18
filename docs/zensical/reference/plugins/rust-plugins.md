@@ -2,11 +2,11 @@
 
 !!! info "v5 is still a Python package"
 
-    Meerschaum 5 is installed the same way as before (`pip install meerschaum`), and most users keep writing Python plugins, which work unchanged. Rust plugins are an option, not a requirement: use one for the native performance path (the Rust core, kernel and Syncing Engine) or to run on the Python-free `slim` image. Everything on this page is about that option.
+    Meerschaum 5 is installed the same way as before (`pip install meerschaum`), and most users keep writing Python plugins, which work unchanged. Rust plugins are an option, not a requirement: use one for the native performance path (the Rust core, kernel and Syncing Engine) or to run on the lean `slim` image (the base wheel, no extras). Everything on this page is about that option.
 
 > New in v5. A Rust plugin is a native shared library that Meerschaum loads in-process. It can do everything a [Python plugin](/reference/plugins/types-of-plugins/) can: fetch or sync data, add actions and arguments, run hooks around syncs, provide a whole connector, serve HTTP routes and add console pages. Python plugins are unchanged, and the two kinds live side by side in the same plugins directory.
 
-Choose a Rust plugin when you want no Python interpreter at runtime (the `bmeares/meerschaum:slim` image), predictable performance on large frames, or a single binary artifact. Keep writing Python for everything else.
+Choose a Rust plugin when you want no Python interpreter at runtime (the standalone `mrsm` binary of `cargo install meerschaum`), predictable performance on large frames, or a single binary artifact. Keep writing Python for everything else.
 
 !!! warning "Trust"
 

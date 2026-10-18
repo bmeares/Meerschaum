@@ -13,9 +13,6 @@ Meerschaum 5 is a rewrite of the core in Rust: the data kernel, the `sql:` / `va
 - **The Syncing Engine and `mrsm.Pipeline`.**  
   The pipe graph (`parents`, `children` and `{{ Pipe() }}` references) is understood by the engine: `mrsm sync pipes --parents [N] --children [N] --resume <run_id>` and `pipe.sync(parents=, children=)` run ancestors and descendants in dependency order, cap a child at the minimum of its parents' watermarks, replay late data as exact backfills from a dirty-range ledger, and rebuild a pipe whose definition changed. `mrsm plan pipes` is a dry run, `mrsm show graph` draws the selection, `mrsm show runs` / `show run <id>` read the run history (with a Gantt chart), and every run is stored on your instance in `mrsm_engine_*` tables. A bare `sync pipes` keeps v4 semantics. See [Pipelines](/reference/pipelines/).
 
-- **Waiting feedback and a readable `show graph`.**  
-  Slow actions (`show rowcounts`, `sizes`, `partitions`, `columns`, `graph`, `plan pipes`, `show runs`, `register` / `drop` / `delete` / `clear pipes`, the plugin load at startup) draw a spinner, with `done/total` and a bar where the work is countable, on stderr, only on a terminal (never with `--nopretty` or in pipes). `mrsm show graph` now prints a colored, width-aware tree with box-drawing connectors, back-references for pipes with several parents, collapsed fan-outs (`--full` lists everything) and edge details (`lookback`, `lookahead`, `axis`, implicit `{{ Pipe() }}` edges); `--nopretty` JSON is unchanged.
-
 - **Continuous mode: `--loop` and `--listen`.**  
   `--loop --min-seconds N` behaves as v4's laps did (and `--engine laps` is gone), and becomes an engine run when the selection has edges. `--listen` supervises streaming sources: connectors with `IS_STREAMING = True` and `subscribe(pipe, sink)` get micro-batching (`parameters['stream']`), acknowledgement after commit, restarts with backoff and children triggered on flush; the v4 pattern (a `sync()` that subscribes and returns) keeps working. Per-pipe `schedule`, `retry` and `min_seconds` parameters and the `system.engine.*` settings are documented in the [parameters reference](/reference/pipes/parameters/).
 
@@ -31,8 +28,8 @@ Meerschaum 5 is a rewrite of the core in Rust: the data kernel, the `sql:` / `va
 - **The web terminal in Rust.**  
   `/webterm/<session id>` and `/dash/webterm` are served by the API server itself (a PTY bridge with the tmux session model and terminado's message format, xterm.js 6.0.0), with no Tornado process and no separate `start webterm`.
 
-- **A zero-dependency base wheel, extras and a binary wheel.**  
-  `pip install meerschaum` pulls in only the `meerschaum-cli` binary wheel. Heavier libraries are extras (`pandas`, `polars`, `geo`, `sql`, `sql-mssql`, `sql-oracle`, `sql-duckdb`, `sql-cockroachdb`, `api`, `dash`, `shell`, `gui`, `cli-tools`, `full`), imported only when used. `cargo install meerschaum-cli`, release binaries and a `bmeares/meerschaum:slim` image run without an interpreter until a Python plugin is installed.
+- **One wheel with no dependencies, extras, and `cargo install meerschaum`.**  
+  `pip install meerschaum` installs one wheel with nothing else: its `mrsm` (and `meerschaum`) console script runs the CLI inside the wheel's extension, and jobs, compose steps and `systemd` units re-run it as `python -P -m meerschaum`. There is no `meerschaum-cli` package. Heavier libraries are extras (`pandas`, `polars`, `geo`, `sql`, `sql-mssql`, `sql-oracle`, `sql-duckdb`, `sql-cockroachdb`, `api`, `dash`, `shell`, `gui`, `cli-tools`, `full`), imported only when used. `cargo install meerschaum` (the front crate's default `cli` feature; libraries use `default-features = false`), and release binaries run the same CLI as a standalone binary, without an interpreter until a Python plugin is installed. The `bmeares/meerschaum:slim` image is the base wheel (no extras) on a minimal Python.
 
 - **Venv accounting.**  
   `attempt_import` attributes every install to its requester in `venvs/<name>/.mrsm_requests.json`. `mrsm show venvs` lists venvs with sizes and requesters and `mrsm prune venvs` removes packages nothing needs; packages with no recorded requester are never removed.
@@ -87,7 +84,7 @@ Meerschaum 5 is a rewrite of the core in Rust: the data kernel, the `sql:` / `va
   `get_data(as_dask=True)` and syncing a Dask DataFrame raise a `TypeError` naming the migration guide. `dask`, `partd`, `joblib`, `psycopg2-binary`, `asyncpg`, `databases`, `GeoAlchemy2`, `rich`, `prompt-toolkit`, `pygments`, `tabulate`, `python-daemon`, `dill`, `psutil`, `gunicorn`, `httpx`, `valkey`, `python-jose`, `terminado`, `tornado`, `ruamel.yaml` and the other libraries that served code now in Rust are no longer installed by any extra; declare what your plugin imports in `required`.
 
 - **`--engine laps`, the CLI daemons, `pyoxidizer` builds and Python 3.10.**  
-  `--loop` replaces laps, `start|stop|restart daemons` and `start worker` report that actions run natively, `cargo install meerschaum-cli` and the binary wheel replace the portable archive, and the wheels require Python 3.11 or newer.
+  `--loop` replaces laps, `start|stop|restart daemons` and `start worker` report that actions run natively, `pip install meerschaum` and `cargo install meerschaum` replace the portable archive, and the wheels require Python 3.11 or newer.
 
 - **Meerschaum's own Dash console and middleware over core routes.**  
   The console is Rust; plugin Dash apps move under `/dash/<plugin>/`. Plugin middleware no longer sees core routes (use `api.permissions.rate_limits`, `api.permissions.routes.allowlist` or a reverse proxy), and a plugin cannot patch console pages.

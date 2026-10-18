@@ -70,6 +70,19 @@ if [ -z "$MRSM_TEST_SKIP_INSTALL" ]; then
 fi
 export MRSM_NO_AUTO_INSTALL=1
 
+### DuckDB is not compiled into Meerschaum: its own shared library is loaded at run time, and the tests
+### never download mid-run (`MRSM_NO_AUTO_INSTALL`). Provide it up front from a persistent cache
+### outside the workspace (one download per DuckDB version, checksum-verified; see
+### scripts/rust/duckdb_lib.sh). Set MRSM_DUCKDB_LIB yourself to use your own copy.
+if [ -z "$MRSM_DUCKDB_LIB" ]; then
+  if MRSM_DUCKDB_LIB="$("$PARENT/scripts/rust/duckdb_lib.sh")"; then
+    export MRSM_DUCKDB_LIB
+  else
+    unset MRSM_DUCKDB_LIB
+    echo "test.sh: could not provide the DuckDB library; tests that use DuckDB will fail." >&2
+  fi
+fi
+
 $mrsm stop daemon
 
 rm -rf "$test_root/data"

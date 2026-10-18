@@ -132,3 +132,47 @@ fn completions_match_v4() {
         failures.join("\n")
     );
 }
+
+/// v5-only: `install driver`, `uninstall driver` and `show drivers` complete driver names (not
+/// part of the v4 fixture).
+#[test]
+fn driver_names_complete() {
+    let tmp = tempfile::tempdir().unwrap();
+    let base = tmp.path().to_path_buf();
+    let root = base.join("root");
+    let plugins = base.join("plugins");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::create_dir_all(&plugins).unwrap();
+    let env: Vec<(String, String)> = vec![
+        ("MRSM_ROOT_DIR".into(), root.to_string_lossy().into_owned()),
+        (
+            "MRSM_PLUGINS_DIR".into(),
+            plugins.to_string_lossy().into_owned(),
+        ),
+        (
+            "MRSM_CONFIG".into(),
+            r#"{"shell": {"updates": {"check_remote": false}}}"#.into(),
+        ),
+    ];
+    let mut opts = ConfigOptions::with_env(env);
+    opts.home = base.join("home");
+    let config = Config::new(opts).unwrap();
+    let mut out = Vec::new();
+    let mut rt = Runtime::new(DateContext::system(), 80, &mut out, no_env);
+    rt.config = Some(config);
+    let state = ShellState::new(&mut rt, None);
+    let data = shell::completion_data(&state, &mut rt);
+    let dates = DateContext::system();
+    let texts = |input: &str| -> Vec<String> {
+        data.get_completions(input, &dates)
+            .into_iter()
+            .map(|c| c.text)
+            .collect()
+    };
+    assert_eq!(texts("install driver "), vec!["duckdb", "oracle"]);
+    assert_eq!(texts("install drivers d"), vec!["duckdb"]);
+    assert_eq!(texts("install driver duckdb "), vec!["oracle"]);
+    assert_eq!(texts("uninstall driver "), vec!["duckdb"]);
+    assert_eq!(texts("show drivers "), vec!["duckdb", "oracle"]);
+    assert_eq!(texts("show drivers o"), vec!["oracle"]);
+}

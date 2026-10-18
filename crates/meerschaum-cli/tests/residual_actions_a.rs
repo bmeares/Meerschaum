@@ -57,7 +57,7 @@ impl Home {
     }
 
     fn command(&self) -> Command {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_mrsm"));
+        let mut command = Command::new(env!("CARGO_BIN_EXE_mrsm-cli"));
         command
             .env_clear()
             .env("PATH", std::env::var_os("PATH").unwrap_or_default())
@@ -1856,7 +1856,7 @@ fn a_timed_pipeline_step_that_reads_the_terminal_is_not_stopped() {
             pixel_height: 0,
         })
         .unwrap();
-    let mut cmd = CommandBuilder::new(env!("CARGO_BIN_EXE_mrsm"));
+    let mut cmd = CommandBuilder::new(env!("CARGO_BIN_EXE_mrsm-cli"));
     cmd.env_clear();
     cmd.env("PATH", std::env::var("PATH").unwrap_or_default());
     cmd.env("HOME", home.path());

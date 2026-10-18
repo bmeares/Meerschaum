@@ -499,7 +499,14 @@ impl SqlConnector {
         // Add new columns and retype altered ones on their own connection, like v4. On SQLite,
         // v4's `sqlite3` driver autocommits DDL (`CREATE TABLE ... AS` included), so the staged
         // table is committed first and the session resumes afterwards.
-        let sqlite = flavor.driver_family() == DriverFamily::Sqlite;
+        // DuckDB gets the same treatment for another reason: its transactions are snapshots, so the
+        // open session cannot see a column that `ALTER TABLE ... ADD` adds on another connection
+        // after it began (`Referenced column "a" not found` in the backtrack query). Committing the
+        // staged tables first and starting a new session afterwards gives it the new schema.
+        let sqlite = matches!(
+            flavor.driver_family(),
+            DriverFamily::Sqlite | DriverFamily::Duckdb
+        );
         if sqlite {
             if let Some(t) = tx.take() {
                 if let Err(e) = t.commit().await {

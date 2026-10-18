@@ -22,13 +22,14 @@ def run_mrsm_command(
     **kw
 ) -> mrsm.SuccessTuple:
     """
-    Run a Meerschaum command in the Compose environment: the native `mrsm` binary, started with
+    Run a Meerschaum command in the Compose environment: this process's own `mrsm` (the native CLI,
+    `python -m meerschaum`, or the `MRSM_BIN` binary), started with
     the project's environment (`_replace`) and the project's tag.
     """
     import os
     import subprocess
     import sys
-    from meerschaum._internal.binary import find_binary, MISSING_MESSAGE
+    from meerschaum._internal.binary import self_command
 
     project_name = get_project_name(compose_config)
     if isinstance(args, str):
@@ -44,17 +45,19 @@ def run_mrsm_command(
         )
         + (['--no-daemon'] if compose_config.get('daemon', None) is False else [])
     )
-    binary = find_binary()
-    if binary is None:
-        return False, MISSING_MESSAGE
-
     env = (
         {key: ('' if value is None else str(value)) for key, value in get_env_dict(compose_config).items()}
         if _replace
         else dict(os.environ)
     )
     env.setdefault('MRSM_PYTHON', sys.executable)
-    process = subprocess.run([binary, *sysargs], env=env, capture_output=capture_output)
+    command = self_command()
+    if command[-2:] == ['-m', 'meerschaum']:
+        ### `python -m meerschaum` must find this package in the project's cleared environment.
+        for key in ('PYTHONPATH', 'PYTHONHOME'):
+            if key in os.environ:
+                env.setdefault(key, os.environ[key])
+    process = subprocess.run([*command, *sysargs], env=env, capture_output=capture_output)
     if process.returncode == 0:
         return True, "Success"
     return False, f"Failed to execute sysargs:\n{sysargs}"

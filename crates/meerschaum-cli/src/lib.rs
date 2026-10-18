@@ -37,6 +37,7 @@ pub mod native_plugins;
 pub mod parse;
 pub mod pyjson;
 pub mod pyliteral;
+pub mod run;
 pub mod schema;
 pub mod shell;
 pub mod shlex;
@@ -46,6 +47,7 @@ pub mod types;
 pub mod value;
 
 pub use parse::{parse_arguments, parse_line};
+pub use run::{run as run_cli, run_main};
 
 /// The version `show version` and `--version` print.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

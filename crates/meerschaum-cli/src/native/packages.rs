@@ -340,9 +340,16 @@ except Exception:
     }
 }
 
-/// `<dir>/python3` (`python`, `python.exe`) next to the running binary, after resolving
-/// symlinks (`pipx` exposes `mrsm` through a link into the environment).
+/// The interpreter of the environment which has `meerschaum`: the running interpreter inside the
+/// Python extension, else `<dir>/python3` (`python`, `python.exe`) next to the running binary,
+/// after resolving symlinks (`pipx` exposes `mrsm` through a link into the environment).
 fn sibling_interpreter() -> Option<String> {
+    // Inside the Python extension (`pip install meerschaum`) the interpreter running the CLI is
+    // the environment which has `meerschaum`; `current_exe()` would resolve a venv's `python`
+    // symlink to the base interpreter.
+    if meerschaum_core::self_exe::runs_in_python() {
+        return meerschaum_core::self_exe::self_command().into_iter().next();
+    }
     let exe = std::env::current_exe().ok()?.canonicalize().ok()?;
     let dir = exe.parent()?;
     ["python3", "python", "python3.exe", "python.exe"]

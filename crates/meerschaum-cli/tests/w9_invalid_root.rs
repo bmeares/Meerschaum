@@ -4,7 +4,7 @@
 use std::process::Command;
 
 fn run(env: &[(&str, &std::path::Path)]) -> (Option<i32>, String) {
-    let mut cmd = Command::new(env!("CARGO_BIN_EXE_mrsm"));
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_mrsm-cli"));
     cmd.args(["show", "version"]);
     for (k, v) in env {
         cmd.env(k, v);

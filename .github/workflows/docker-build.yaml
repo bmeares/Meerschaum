@@ -2,7 +2,7 @@ name: buildx
 
 # Builds the Docker images with scripts/docker/buildx.sh (docs/design/v5-build.md):
 #   minimal and full (the default target with `meerschaum` and `meerschaum[full]` installed from the
-#   maturin wheels, plus the native `mrsm`), and slim (`--target slim`: the base wheels only),
+#   maturin wheel; `mrsm` is its console script), and slim (`--target slim`: the base wheel only),
 #   then runs the §12.1 size gate (slim ≤ 250 MB, full < 900 MB).
 #
 # The size gate ENFORCES by default (5.0.0rc1 requires it, §13): the job fails when `slim`

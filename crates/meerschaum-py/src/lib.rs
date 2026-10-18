@@ -38,6 +38,7 @@ pub mod ffi_import;
 pub mod jobs_api;
 pub mod kernel_api;
 pub mod logging;
+pub mod main_api;
 pub mod pandas_bridge;
 pub mod pipe_api;
 pub mod pipe_bridge;
@@ -147,6 +148,7 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     pipe_methods_api::register(m)?;
 
     // `meerschaum.jobs.Job`, the executors and `utils.daemon.Daemon` over `meerschaum-jobs` (wave 16, S)
+    m.add_function(wrap_pyfunction!(main_api::main, m)?)?;
     jobs_api::register(m)?;
 
     // PyYAML-compatible YAML codec with a lossless Python boundary (wave 13)

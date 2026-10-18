@@ -777,3 +777,49 @@ fn starting_a_systemd_job_hands_the_unpinned_interpreter_warning_to_the_caller()
     assert!(job.start().success);
     assert!(job.warnings.is_empty(), "{:?}", job.warnings);
 }
+
+#[test]
+fn a_python_launcher_writes_v4s_exec_start_and_pins_its_interpreter() {
+    // Inside the Python extension the job program is `<python> -m meerschaum`: the unit is v4's
+    // `ExecStart=<python> -m meerschaum <sysargs>` (the interpreter consumes `-m meerschaum`), and
+    // its workers use that interpreter unless `MRSM_PYTHON` says otherwise.
+    let f = Fixture::new();
+    let python = "/opt/venv/bin/python3".to_string();
+    let mut supervisor = meerschaum_core::self_exe::python_command(&python);
+    supervisor.push("__mrsm_job_supervisor__".into());
+    let ctx = f.ctx.clone().with_launcher(Launcher {
+        supervisor,
+        program: meerschaum_core::self_exe::python_command(&python),
+    });
+    let ex = SystemdExecutor::new(ctx);
+    // `-P`: the unit's working directory stays off `sys.path`.
+    assert_eq!(ex.exec_program(), format!("{python} -P"));
+    let sysargs: Vec<String> = ["show", "version"].map(String::from).to_vec();
+    let text = ex.get_service_file_text("pyjob", &sysargs, &ex.exec_program(), &[]);
+    assert!(
+        text.contains(&format!(
+            "ExecStart={python} -P -m meerschaum show version\n"
+        )),
+        "{text}"
+    );
+    assert!(
+        text.contains(&format!("Environment=MRSM_PYTHON={python}\n")),
+        "{text}"
+    );
+    // The sysargs read back from the unit are the same ones for both shapes of the line.
+    assert_eq!(
+        meerschaum_jobs::systemd::parse_exec_start_sysargs(&text),
+        sysargs
+    );
+    // An explicit `MRSM_PYTHON` of the creating process wins.
+    let text = ex.get_service_file_text(
+        "pyjob",
+        &sysargs,
+        &ex.exec_program(),
+        &[("MRSM_PYTHON".to_string(), "/elsewhere/python".to_string())],
+    );
+    assert!(
+        !text.contains("Environment=MRSM_PYTHON=/opt/venv"),
+        "{text}"
+    );
+}

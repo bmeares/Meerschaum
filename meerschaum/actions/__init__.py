@@ -5,7 +5,7 @@
 """
 Default actions available to the mrsm CLI.
 
-Every standard action runs in the native dispatcher (`mrsm`, the `meerschaum-cli` wheel).
+Every standard action runs in the native dispatcher (`mrsm`, from the wheel's extension or the standalone binary).
 The functions in `actions` are thin façades over it: `actions['sync'](['pipes'], **kw)` runs
 `sync pipes` natively and returns its `SuccessTuple`. Actions added by plugins (`@make_action`)
 are the plugins' own functions.

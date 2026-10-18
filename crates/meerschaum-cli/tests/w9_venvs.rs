@@ -135,7 +135,7 @@ impl Fixture {
     fn mrsm(&self, args: &[&str], stdin: &str) -> (i32, String) {
         use std::io::Write;
         let mut child = self
-            .worker_env(Command::new(env!("CARGO_BIN_EXE_mrsm")))
+            .worker_env(Command::new(env!("CARGO_BIN_EXE_mrsm-cli")))
             .args(args)
             .current_dir(&self.root)
             .stdin(Stdio::piped())

@@ -33,7 +33,7 @@ impl Sandbox {
     }
 
     fn run(&self, args: &[&str]) -> Output {
-        Command::new(env!("CARGO_BIN_EXE_mrsm"))
+        Command::new(env!("CARGO_BIN_EXE_mrsm-cli"))
             .args(args).current_dir(self.path()).env_clear()
             .env("PATH", std::env::var("PATH").unwrap_or_default())
             .env("HOME", self.path().join("home"))

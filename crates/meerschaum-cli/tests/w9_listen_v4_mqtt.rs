@@ -213,7 +213,7 @@ fn listen_runs_a_v4_pattern_connector_and_lands_every_message() {
 
     let log_path = tmp.path().join("listen.log");
     let log = std::fs::File::create(&log_path).unwrap();
-    let mut command = Command::new(env!("CARGO_BIN_EXE_mrsm"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_mrsm-cli"));
     for (key, _) in std::env::vars() {
         if key.starts_with("MRSM_") || matches!(key.as_str(), "RUST_LOG" | "NO_COLOR" | "TERM") {
             command.env_remove(key);

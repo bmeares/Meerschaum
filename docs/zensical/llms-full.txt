@@ -315,6 +315,13 @@ Source: https://meerschaum.io/get-started/
 python -m pip install --upgrade meerschaum
 ```
 
+??? info "Standalone binary (`cargo install meerschaum`)"
+    `pip install meerschaum` is the whole product: the `mrsm` command it installs runs the native command line from inside the package. If you would rather have a standalone binary (it starts in about 10 ms and needs no Python until you use a Python plugin or connector), build the same command line with Cargo:
+
+    ```bash
+    cargo install meerschaum
+    ```
+
 
 ??? info "Installing dependencies"
     Meerschaum will auto-install packages as you use them (into a virtual environment, to preserve your base environment).
@@ -2839,7 +2846,7 @@ pipeline.pipes                   # every pipe the selection resolves to, in depe
 
 ```bash
 mrsm plan pipes -m daily --parents      # the plan table, nothing is synced
-mrsm show graph -m daily --parents      # the selection as an ASCII DAG
+mrsm show graph -m daily --parents      # the selection as a box-drawing tree
 mrsm show runs --last 5                 # recorded runs, newest first
 mrsm show run <run_id>                  # one run's Gantt chart
 ```
@@ -2857,12 +2864,16 @@ sql:local/daily  skip*   -           -       no cursor on the edge from sql:loca
 Nothing was synced.
 
 $ mrsm show graph -i sql:local -m daily --parents
-sql:local/raw
-  sql:local/clean  ← sql:local/raw
-    sql:local/daily*  ← sql:local/clean
+Pipe graph on sql:local: 3 pipes, 2 edges, 1 root, depth 3
+
+● sql:local/raw
+└── ◆ sql:local/clean
+    └── ○ sql:local/daily ★
+
+● root   ◆ has children   ○ leaf   ★ selected
 ```
 
-In the plan, a `*` after the action marks a provisional row: a child cannot know what its parent will change, so the executor plans it again when the parent finishes. In the graph, `*` marks the targets you selected (the others were pulled in by `--parents`). After a run, `show runs` lists it:
+In the plan, a `*` after the action marks a provisional row: a child cannot know what its parent will change, so the executor plans it again when the parent finishes. In the graph, `★` marks the targets you selected (the others were pulled in by `--parents`), `●` a root and `○` a leaf; see [Visualization](/reference/pipelines/visualization/) for back-references, collapsed fan-outs and edge details. After a run, `show runs` lists it:
 
 ```text
 $ mrsm show runs --last 5
@@ -3246,15 +3257,23 @@ Each node has two lanes on one time axis (which spans the longer of the run's wa
 
 The header adds the planned makespan (`planned 1m15s`) next to the actual wall time. A first run has no history, so every planned bar is 30 seconds long. For a run read back from the instance (`show run <id>`, the console), the planned duration is recomputed from the history before that run (the run's own rows store the planned start and slack, not the duration).
 
-The engine also renders a selection as an indented DAG, each node under its deepest parent, targets marked with `*`:
+`mrsm show graph` draws a selection as a top-down tree (a pipe with several parents is drawn once, under the first parent the walk reaches, and referred to elsewhere):
 
 ```text
-sql:src/raw
-  sql:local/clean  ← sql:src/raw
-    sql:local/daily*  ← sql:local/clean
+Pipe graph on sql:local: 4 pipes, 4 edges, 1 root, depth 3
+
+● sql:local/a
+├── ◆ sql:local/b
+│   └── ○ sql:local/d  (2 parents)
+└── ◆ sql:local/c
+    └── ↗ sql:local/d (shown above)
+
+● root   ◆ has children   ○ leaf   ↗ shown above
 ```
 
-`mrsm show graph` prints the DAG of a selection (it accepts the usual filters plus `--parents` and `--children`), and `mrsm show runs [--last N]` lists the recorded runs, newest first:
+Pipes use the colors `Pipe(...)` has in `show pipes` (connector, metric, location, instance); the guides and notes are dim. `★` marks the pipes you selected, `┄┄` in place of `──` an edge that exists only because of a `{{ Pipe() }}` reference, and `lookback`, `lookahead` and `axis` of an edge follow the pipe. A cycle (flat selections only; a `--parents` / `--children` selection that contains one fails with the cycle path) is drawn with its real edges, its members marked `⟲`, and a `⟲ cycle: a → b → a` note; the JSON gains a `cycles` key. Unconnected pipes are listed together at the end, and a pipe with more than 12 children collapses to `… and N more children` (`--full` lists them all; the line says how many hidden children have descendants of their own). Lines are cut to the terminal width, `formatting:unicode: false` gives an ASCII tree, and colors appear only on a terminal.
+
+`show graph` accepts the usual filters plus `--parents` and `--children`. `mrsm show runs [--last N]` lists the recorded runs, newest first:
 
 ```text
 run                         started (UTC)        status     wall  ok/nodes  targets
@@ -8611,11 +8630,11 @@ Source: https://meerschaum.io/reference/plugins/rust-plugins/
 
 !!! info "v5 is still a Python package"
 
-    Meerschaum 5 is installed the same way as before (`pip install meerschaum`), and most users keep writing Python plugins, which work unchanged. Rust plugins are an option, not a requirement: use one for the native performance path (the Rust core, kernel and Syncing Engine) or to run on the Python-free `slim` image. Everything on this page is about that option.
+    Meerschaum 5 is installed the same way as before (`pip install meerschaum`), and most users keep writing Python plugins, which work unchanged. Rust plugins are an option, not a requirement: use one for the native performance path (the Rust core, kernel and Syncing Engine) or to run on the lean `slim` image (the base wheel, no extras). Everything on this page is about that option.
 
 > New in v5. A Rust plugin is a native shared library that Meerschaum loads in-process. It can do everything a [Python plugin](/reference/plugins/types-of-plugins/) can: fetch or sync data, add actions and arguments, run hooks around syncs, provide a whole connector, serve HTTP routes and add console pages. Python plugins are unchanged, and the two kinds live side by side in the same plugins directory.
 
-Choose a Rust plugin when you want no Python interpreter at runtime (the `bmeares/meerschaum:slim` image), predictable performance on large frames, or a single binary artifact. Keep writing Python for everything else.
+Choose a Rust plugin when you want no Python interpreter at runtime (the standalone `mrsm` binary of `cargo install meerschaum`), predictable performance on large frames, or a single binary artifact. Keep writing Python for everything else.
 
 !!! warning "Trust"
 
@@ -9620,13 +9639,14 @@ Everything below is deliberate, and each item links to the section with the deta
 | Editors | `$EDITOR`, else installed `pyvim` | `$VISUAL`, else `$EDITOR`, else `vi`. Nothing is installed to open an editor. [Deployment](#deployment) |
 | Scopes | `*` entered in `edit tokens` / `edit users` was expanded to the built-in scope list; stopping a job over the API required the misspelled scope `josb:stop`; any user could register a token with any scopes, `*` included | `*` is stored literally and grants every scope, custom and future ones included; `POST /jobs/{name}/stop` requires `jobs:stop` (a token that holds the legacy `josb:stop` is still accepted); **a token carries at most its owner's scopes** (asking for more is refused with a `403` naming them), and only a token's owner or an administrator may edit, invalidate or delete it (only an administrator may make an invalidated token valid again). [Tokens](/reference/api-instance/tokens/#scopes) |
 | `sql <label>` | Passed the connection URL with the password to `pgcli` / `mycli` | Passes the URL without the password and sets `PGPASSWORD` / `MYSQL_PWD` for the client, so the password never shows in `ps`. |
+| DuckDB | The Python `duckdb` package, or (v5 pre-releases) a C++ library built into `mrsm` | DuckDB's own `libduckdb` loaded at run time and downloaded on first use; `MRSM_DUCKDB_LIB` for air-gapped hosts. [Installing and running](#installing-and-running) |
 | Time zone objects | `ZoneInfo('Etc/UTC')` from psycopg | `datetime.timezone.utc` (equal values). [Python users](#python-library-users-and-scripts) |
 
 ## 📦 Installing and running
 
 - **Python 3.11 or newer** (only needed when you use Python plugins, the Python API or an extra). 3.10 reaches end of life in October 2026 and is not supported by the v5 wheels.
-- **`pip install meerschaum` still works** and now also installs `meerschaum-cli`, a binary wheel containing the native `mrsm` executable. `python -m meerschaum ...` still works and dispatches to the same code.
-- **The base wheel has no third-party dependencies.** It depends only on `meerschaum-cli` (the same-version binary wheel). Build tooling is maturin; `setup.py` is gone, so build from source with `pip install .` (maturin backend) or `maturin build`. v4.1 installed about 110 packages into the shared `mrsm` venv on first run (pandas, dask, SQLAlchemy, three PostgreSQL drivers, Dash and its component libraries, rich, FastAPI, and so on). v5's `meerschaum` wheel contains the Rust core and the Python SDK and pulls in nothing else but the CLI binary. Everything heavier is an extra, imported only when used:
+- **`pip install meerschaum` still works** and is the only PyPI package. Its `mrsm` (and `meerschaum`) console script runs the native CLI from the wheel's extension, and `python -m meerschaum ...` runs the same code. `cargo install meerschaum` builds the same CLI as a standalone `mrsm` binary: both install Meerschaum, like `polars`. The console script pays for loading the extension: `mrsm show version` takes about 35 ms (the Python interpreter alone is 15 ms) against about 10 ms for the standalone binary (measured on a Linux x86_64 development machine with the release build). Jobs, `systemd` units and compose steps run `python -m meerschaum`, so they carry the same start-up cost per process.
+- **The base wheel has no third-party dependencies.** It depends on nothing. Build tooling is maturin; `setup.py` is gone, so build from source with `pip install .` (maturin backend) or `maturin build`. v4.1 installed about 110 packages into the shared `mrsm` venv on first run (pandas, dask, SQLAlchemy, three PostgreSQL drivers, Dash and its component libraries, rich, FastAPI, and so on). v5's `meerschaum` wheel contains the Rust core and the Python SDK and pulls in nothing else. Everything heavier is an extra, imported only when used:
 
     | Extra | Installs | You need it when |
     |---|---|---|
@@ -9646,8 +9666,9 @@ Everything below is deliberate, and each item links to the section with the deta
 
     **Gone from every extra** (they served code that is now Rust): `dask`, `partd`, `joblib`, `psycopg2-binary`, `asyncpg`, `databases`, `aiosqlite`, `aiomysql`, `GeoAlchemy2`, `rich`, `prompt-toolkit`, `pygments`, `tabulate`, `humanfriendly`, `python-daemon`, `dill`, `psutil`, `watchfiles`, `gunicorn`, `httpx`, `websockets`, `valkey`, `python-jose`, `fastapi-login`, `python-dotenv`, `envyaml`, `terminado`, `tornado`, `dash-bootstrap-components`, `dash-ace`, `dash-extensions`, `dash-daq`, `Flask-Compress`, `modin`, `cmd2`, `ruamel.yaml`. If your plugin imports one of these, declare it in `required` (see [Dependencies and venvs](#dependencies-and-venvs)).
 
-- **No Python at all** is an option: `cargo install meerschaum-cli` or a release binary runs without an interpreter as long as no Python plugin, custom Python connector, API plugin or Dash plugin is used. Point `MRSM_PYTHON` at an interpreter when you add one.
-- **Removed:** `pyoxidizer` builds and the standalone "portable" archive. The binary wheel and release binaries replace them.
+- **DuckDB is downloaded on first use.** `mrsm` and the extension no longer compile DuckDB in (that was ~35 MB per artifact and minutes of C++ on every build). A `sql:duckdb` connector loads DuckDB's own shared library, `libduckdb` (v1.5.6, MIT, published by the DuckDB project; Meerschaum does not redistribute it): the first connection downloads the release asset for your platform (about 41 MB) into `MRSM_ROOT_DIR/drivers/duckdb/<version>/`, after checking it against a SHA-256 that is pinned in Meerschaum, and later runs reuse it. `mrsm install driver duckdb` does the download on purpose (`--force` repeats it), `mrsm uninstall driver duckdb` removes it, and `mrsm show drivers` reports each driver's version, source (`env`, `cache`, `system` or `missing`) and path. **Behind a TLS-intercepting proxy** the download trusts the operating system's certificate store as well as its bundled roots, and honors `HTTPS_PROXY`; if it still cannot reach GitHub, run `mrsm install driver duckdb` on a machine that can and copy the library. **Air-gapped hosts:** copy a DuckDB library (v1.4 or newer) there and set `MRSM_DUCKDB_LIB` to its path, or put it on the system library path; `MRSM_NO_AUTO_INSTALL=1` forbids the implicit download and a missing library then fails with a message naming both fixes. In Docker, `--build-arg duckdb_driver=1` bakes it into the image's root. On Linux the library needs the C++ runtime (`libstdc++`), which both Docker images ship. DuckDB sessions run in UTC (the official build bundles ICU, whose default is the host's zone), aware timestamp parameters keep their instant, and nested, interval and enum values read as the text DuckDB prints.
+- **No Python at all** is an option: `cargo install meerschaum` or a release binary runs without an interpreter as long as no Python plugin, custom Python connector, API plugin or Dash plugin is used. Point `MRSM_PYTHON` at an interpreter when you add one.
+- **Removed:** `pyoxidizer` builds and the standalone "portable" archive. `pip install meerschaum` and the standalone binary (`cargo install meerschaum`, release archives) replace them.
 
 ## ⚙️ Configuration
 
@@ -9735,7 +9756,7 @@ Things to check:
 - **New in 5.0: `mrsm.SyncResult`, and every `pipe.sync()` input runs natively.** `mrsm.SyncResult` is the public name of the tuple subclass `pipe.sync()` returns (`success`, `message`, `inserted`, `updated`, `upserted`, `deleted`, `changed_intervals`, `duration`, `begin`, `end`). `pipe.sync()` with no data (a `sql:`, `api:` or `valkey:` source, a plugin or a `@make_connector` connector), text, tuples, generators of chunks, `force`, `workers`, `blocking=False`, `debug=True`, plugin keyword arguments, temporary pipes and pipes with `reference`s or `{{ }}` templates all run in the Rust core. Dask DataFrames are not accepted any more (`TypeError`): call `.compute()` or pass a generator of chunks. A generator of chunks returned by a plugin's `fetch()` is synced one chunk at a time, whatever `workers` says. A tuple is read as rows, as pandas does (v4 raised `TypeError`). `changed_intervals` holds the grid cells (one chunk interval wide) of the rows handed to the instance: a superset of the rows that actually changed. `sql:` instances on `mssql`, `oracle`, `duckdb` and in-memory SQLite run through the Rust drivers too; the `oracle` driver needs the Oracle client library (`libclntsh`) installed, and an in-memory SQLite database (`sql:memory`) is one database file that the `Pipe` methods and `connector.read()` / `exec()` (SQLAlchemy) share. `pyarrow` Tables and RecordBatches sync natively; any other unsupported value raises `TypeError` naming the accepted types. Unconstrained PostgreSQL `NUMERIC` values keep the exact scale they were stored with.
 - **`APIConnector` returns an `ApiResponse`.** `make_request()` and the verb helpers (`get`, `post`, `put`, `delete`, ...) return an `ApiResponse`, not a `requests.Response`, because `requests` is no longer a dependency. It offers the common surface only: `status_code`, `ok`, `text`, `content`, `headers` (just `Content-Type`), `url`, `json()`, `raise_for_status()` (raising an `OSError`, as `requests.HTTPError` is) and truthiness. Other `Response` members (`iter_content`, `cookies`, `elapsed`, ...) do not exist, and `make_request` honors `params`, `json`, `data`, one `files` entry and `timeout` only. A refused or reset connection raises the builtin `ConnectionError` (an `OSError`, as `requests.exceptions.ConnectionError` was) with the transport's message. `connector.session` creates a `requests.Session` on access if `requests` is installed, but the connector does not use it. `get_actions()` still returns a response whose `.json()` is the list of actions.
 - **`ValkeyConnector.client`** is a real `valkey.Valkey` when that package is importable (Meerschaum never installs it), and otherwise a built-in client covering the commands Meerschaum itself uses (`get`, `set` with `ex`, `px` and `nx`, `delete`, `unlink`, `exists`, `incr`, `keys`, the sorted-set, set, list and hash basics, `flushdb`, `ping`, `execute_command`); any other command raises `NotImplementedError`. Install the `valkey` package in your plugin's venv if you need the rest. Values it returns are `bytes`, as with `valkey.Valkey`.
-- **Raw SQL needs `meerschaum[sql]`.** `conn.read(sql, params=...)`, `conn.exec(...)`, `conn.value(select)`, `conn.to_sql(df, ...)`, `conn.engine` and `get_tables(conn)` stay SQLAlchemy-backed and keep accepting SQLAlchemy constructs. GeoPandas's `read_postgis(query, conn.engine)` keeps working. Without the extra these raise an `ImportError` naming the extra.
+- **Raw SQL needs `meerschaum[sql]`.** `conn.read(sql, params=...)`, `conn.exec(...)`, `conn.value(select)`, `conn.to_sql(df, ...)`, `conn.engine` and `get_tables(conn)` stay SQLAlchemy-backed and keep accepting SQLAlchemy constructs. GeoPandas's `read_postgis(query, conn.engine)` keeps working. Without the extra these raise an `ImportError` naming the extra (`conn.engine` raises an `AttributeError` with the same message, so `hasattr(conn, 'engine')` is `False`). `conn.URI`, `conn.DATABASE_URL`, `conn.IS_THREAD_SAFE`, `mrsm.get_pipes()` and every pipe operation work without it.
 - **`get_config` is served by the Rust config registry.** `get_config`, `set_config`, `read_config`, `write_config`, `get_plugin_config`, `write_plugin_config`, `MRSM{}` symlinks, `MRSM_CONFIG` / `MRSM_PATCH` and `MRSM_<TYPE>_<LABEL>` connectors behave as in v4, and the dictionaries `get_config` returns are still live (mutate one and the next call sees it). `meerschaum.config.config` is that live dictionary; assigning a new dict to it (or calling `set_config(cf)`) replaces it. Config YAML values that JSON cannot hold (a `2024-01-01` date, bytes, very large integers) now load, substitute and write back unchanged instead of failing.
 - **Constructing a `Pipe` never touches the instance.** Module-level `mrsm.Pipe(...)` definitions import without a database, as today. Attributes are fetched on first access.
 - **Partial-row syncs** on non-upsert pipes (`pipe.sync([{'ts': ..., 'id': ..., 'status': 'done'}])`) update the matching row without nulling other columns, as today.
@@ -9967,7 +9988,7 @@ A function that returns a string (or a `(html, status)` pair) is a page-contract
 
 ## 🦀 Rust plugins
 
-**v5 is still a Python package** (`pip install meerschaum`). Most users keep writing Python plugins, and they work unchanged. Rust plugins are an option for the native performance path (the core, kernel and engine) and for the Python-free `slim` image.
+**v5 is still a Python package** (`pip install meerschaum`). Most users keep writing Python plugins, and they work unchanged. Rust plugins are an option for the native performance path (the core, kernel and engine) and for a lean image: `slim` is the base wheel on a minimal Python, and a Rust plugin needs none of the extras.
 
 New in v5. A Rust plugin is a `cdylib` built with the `meerschaum-plugin` crate, installed into `MRSM_PLUGINS_DIR` as `<name>/plugin.toml` plus the shared library, or as a Cargo crate (`plugin.toml`, `Cargo.toml`, `src/`) that Meerschaum builds itself into `MRSM_ROOT_DIR/cache/native_build/` when `cargo` is on `PATH` (the prebuilt library is the only form that works on the `slim` image, which has no toolchain). It can implement `fetch`, `sync`, `register`, `setup`, actions, hooks, a connector, HTTP `routes` and console `pages`. Data crosses the boundary as Arrow record batches. (Continuous `subscribe` streams from a native plugin are not available yet: write a streaming connector in Python for `--listen`.)
 
@@ -9999,7 +10020,7 @@ A plugin directory may contain both a Rust library and a Python module; the Rust
     With the defaults, anyone who can reach the API can register an account (`api:permissions:registration:users`) and, as a logged-in user, open the web terminal (`api:permissions:actions:non_admin`): **a shell on the server for anyone who can reach the port**. Meerschaum 4 behaves the same, and v5 keeps it. Before exposing an API, start it with `--secure` (terminals and actions for administrators only) or `--private` (authentication on every endpoint), or set `api:permissions:registration:users: false` (no self-registration) or `api:permissions:actions:non_admin: false` (administrators only). `mrsm start api` prints a warning at startup when it binds a non-loopback address with both settings on; it cannot see a reverse proxy, so a loopback bind behind a proxy exposes the same terminal **without** the warning. (`--no-auth` on a non-loopback address also prints a warning: every route, `/actions` included, is then open to anyone who can connect.)
 
 - **Docker.** `bmeares/meerschaum` and `bmeares/meerschaum:api` keep their entrypoints, `/meerschaum/plugins`, `/meerschaum/config` and `/meerschaum/config/plugins.json`. `docker cp` of plugins into the container keeps working. The default image ships `meerschaum[full]`, so API and Dash plugins work without further installs. `bmeares/meerschaum:slim` ships only the base wheel and is the right base for Rust plugins or plugins that return dicts.
-- **Bare metal.** Replace `pip install --user meerschaum==4.1.4` with `pip install --user 'meerschaum[full]>=5,<6'` (or the extras you need). The `mrsm` on your `PATH` is now a native binary from the `meerschaum-cli` wheel.
+- **Bare metal.** Replace `pip install --user meerschaum==4.1.4` with `pip install --user 'meerschaum[full]>=5,<6'` (or the extras you need). The `mrsm` on your `PATH` is now a console script that runs the native CLI inside the `meerschaum` wheel (there is no separate binary package). Jobs and `systemd` units run `python -m meerschaum`, so they work from the same install.
 - **NGINX / reverse proxies.** Paths do not change. The server honors `api.server.forwarded_allow_ips` (old `api.uvicorn.*` key still read). The API host listens on a Unix socket under `MRSM_ROOT_DIR`; nothing else needs to reach it.
 - **`start api -p 8224 --host 127.0.0.1 -i sql:main --secure`** and friends are unchanged.
 - **Webterm** is served by the Rust API server itself (no Tornado/terminado process, no separate `start webterm`): `/webterm/<session id>` and its websocket keep their paths and the terminado message format, the console embeds the terminal at `/dash/webterm` (xterm.js 6.0.0 with the fit and unicode11 add-ons, vendored, plus the mobile extra-key row), and the shell is `mrsm` on the server's instance. It keeps its tmux session model (`api.webterm.tmux.enabled`, `api.webterm.tmux.session_suffix`): each user's terminal lives in the tmux session `<user><session_suffix>`, so a reload or a second tab reattaches to it, and closing a tab never kills the session. Without `tmux`, each tab gets its own shell. `--no-webterm` and `--no-auth` still turn it off. The terminal websocket refuses cross-origin requests: a reverse proxy in front of the API must pass the original `Host` (or set `X-Forwarded-Host`) or the terminal answers 403. ⚠️ The terminal is a shell on the server, and its gate is unchanged from v4: any logged-in user may open one unless `api.permissions.actions.non_admin` is false (or the server runs with `--secure`), in which case only administrators may. Set it to false on a server whose users should not have a shell. A second login no longer fails, and the shell echoes.
@@ -10014,7 +10035,7 @@ A plugin directory may contain both a Rust library and a Python module; the Rust
 - **`mrsm.SyncResult`:** the tuple subclass `pipe.sync()` returns, with `inserted`, `updated`, `upserted`, `deleted`, `changed_intervals`, `duration`, `begin` and `end`.
 - **Rust plugins**, prebuilt or as source crates, replacing a Python plugin of the same name ([Rust plugins](#rust-plugins)), and the **page contract** for console pages (`meerschaum.plugins.figure()`, `data-mrsm-figure`, `data-mrsm-map`).
 - **Engine settings** under `system.engine.*` (`workers`, `python_workers`, `limits.connectors`, `limits.instances`, `auto_rebuild`, `implicit_edges`, `inclusive_cap`, `flat_ledger`, `events`, `persist_runs`, `state_flush_ms`, `run_history_days`, `debounce_seconds`, `chunk_pipelining`, `default_duration_seconds`; [Engine State](/reference/pipelines/state/#settings)) and `api.permissions.rate_limits`.
-- **Packaging:** the `meerschaum-cli` binary wheel, `cargo install meerschaum-cli`, a dependency-free base wheel with extras, and the `bmeares/meerschaum:slim` image.
+- **Packaging:** one dependency-free `meerschaum` wheel with extras (its `mrsm` console script runs the native CLI), `cargo install meerschaum` for a standalone binary, and the `bmeares/meerschaum:slim` image.
 - **Venv accounting:** `mrsm show venvs`, `mrsm prune venvs`, and attribution of every package installed by `attempt_import`.
 - **Leases:** two jobs never sync the same pipe at once (`mrsm_pipe_leases`), with optional `acquire_pipe_lease` / `release_pipe_lease` on custom instance connectors.
 
@@ -10034,7 +10055,7 @@ A plugin directory may contain both a Rust library and a Python module; the Rust
 |---|---|
 | The Python core (`connectors/sql/_*.py`, `core/Pipe/_*.py`, `actions/*`, `api/routes/*`, `api/dash/callbacks/*`, `utils/daemon` (the `Daemon` façade stays)) | The Rust core; the façade keeps the public API |
 | `--engine laps` | `--loop` |
-| `pyoxidizer` builds, the portable archive | `meerschaum-cli` wheel, release binaries, `cargo install` |
+| `pyoxidizer` builds, the portable archive | the `meerschaum` wheel, release binaries, `cargo install meerschaum` |
 | Meerschaum's own Dash console | The Rust console; plugin Dash apps under `/dash/<plugin>/` |
 | Plugin middleware over core routes | `api.permissions.rate_limits`, `api.permissions.routes.allowlist`, a reverse proxy |
 | Patching console pages from a plugin | Your own page (Dash or the page contract) |
@@ -10526,8 +10547,8 @@ Meerschaum 5 is a rewrite of the core in Rust: the data kernel, the `sql:` / `va
 - **The web terminal in Rust.**  
   `/webterm/<session id>` and `/dash/webterm` are served by the API server itself (a PTY bridge with the tmux session model and terminado's message format, xterm.js 6.0.0), with no Tornado process and no separate `start webterm`.
 
-- **A zero-dependency base wheel, extras and a binary wheel.**  
-  `pip install meerschaum` pulls in only the `meerschaum-cli` binary wheel. Heavier libraries are extras (`pandas`, `polars`, `geo`, `sql`, `sql-mssql`, `sql-oracle`, `sql-duckdb`, `sql-cockroachdb`, `api`, `dash`, `shell`, `gui`, `cli-tools`, `full`), imported only when used. `cargo install meerschaum-cli`, release binaries and a `bmeares/meerschaum:slim` image run without an interpreter until a Python plugin is installed.
+- **One wheel with no dependencies, extras, and `cargo install meerschaum`.**  
+  `pip install meerschaum` installs one wheel with nothing else: its `mrsm` (and `meerschaum`) console script runs the CLI inside the wheel's extension, and jobs, compose steps and `systemd` units re-run it as `python -P -m meerschaum`. There is no `meerschaum-cli` package. Heavier libraries are extras (`pandas`, `polars`, `geo`, `sql`, `sql-mssql`, `sql-oracle`, `sql-duckdb`, `sql-cockroachdb`, `api`, `dash`, `shell`, `gui`, `cli-tools`, `full`), imported only when used. `cargo install meerschaum` (the front crate's default `cli` feature; libraries use `default-features = false`), and release binaries run the same CLI as a standalone binary, without an interpreter until a Python plugin is installed. The `bmeares/meerschaum:slim` image is the base wheel (no extras) on a minimal Python.
 
 - **Venv accounting.**  
   `attempt_import` attributes every install to its requester in `venvs/<name>/.mrsm_requests.json`. `mrsm show venvs` lists venvs with sizes and requesters and `mrsm prune venvs` removes packages nothing needs; packages with no recorded requester are never removed.
@@ -10582,7 +10603,7 @@ Meerschaum 5 is a rewrite of the core in Rust: the data kernel, the `sql:` / `va
   `get_data(as_dask=True)` and syncing a Dask DataFrame raise a `TypeError` naming the migration guide. `dask`, `partd`, `joblib`, `psycopg2-binary`, `asyncpg`, `databases`, `GeoAlchemy2`, `rich`, `prompt-toolkit`, `pygments`, `tabulate`, `python-daemon`, `dill`, `psutil`, `gunicorn`, `httpx`, `valkey`, `python-jose`, `terminado`, `tornado`, `ruamel.yaml` and the other libraries that served code now in Rust are no longer installed by any extra; declare what your plugin imports in `required`.
 
 - **`--engine laps`, the CLI daemons, `pyoxidizer` builds and Python 3.10.**  
-  `--loop` replaces laps, `start|stop|restart daemons` and `start worker` report that actions run natively, `cargo install meerschaum-cli` and the binary wheel replace the portable archive, and the wheels require Python 3.11 or newer.
+  `--loop` replaces laps, `start|stop|restart daemons` and `start worker` report that actions run natively, `pip install meerschaum` and `cargo install meerschaum` replace the portable archive, and the wheels require Python 3.11 or newer.
 
 - **Meerschaum's own Dash console and middleware over core routes.**  
   The console is Rust; plugin Dash apps move under `/dash/<plugin>/`. Plugin middleware no longer sees core routes (use `api.permissions.rate_limits`, `api.permissions.routes.allowlist` or a reverse proxy), and a plugin cannot patch console pages.

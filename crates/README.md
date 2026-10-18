@@ -37,8 +37,9 @@ Dependencies point down only. No cycles; `meerschaum-core` is a leaf. Verify wit
 `cargo tree -p <crate> -e normal --depth 1`; CI will diff this table against it.
 
 ```
-  meerschaum (front crate)         thin re-exports behind features; depends on everything below
-  cli ◀── py                       top layer; nothing depends on them
+  meerschaum (front crate)         thin re-exports behind features; depends on everything below, and
+                                   on `cli` (default feature) only for its `mrsm` binary
+  cli ◀── py                       top layer; no library depends on them
    │       │
    ▼       ▼
   server ─▶ c-api ─▶ connector ─▶ kernel ─▶ core
@@ -53,7 +54,7 @@ Dependencies point down only. No cycles; `meerschaum-core` is a leaf. Verify wit
 
 | Crate | Normal workspace dependencies |
 |---|---|
-| `meerschaum` | core, kernel, connector; optional: connector-sql, connector-valkey, connector-api, engine, server, plugin (features) |
+| `meerschaum` | core, kernel, connector; optional: connector-sql, connector-valkey, connector-api, engine, server, plugin (features); `cli` (default): the CLI library, for its `mrsm` binary only (`src/main.rs`; the library surface never touches it) |
 | `meerschaum-core` | none |
 | `meerschaum-kernel` | core |
 | `meerschaum-connector` | core, kernel |
@@ -107,7 +108,7 @@ PyPI wheel, not on crates.io) is published, in lockstep at the workspace version
 
 - **`meerschaum` is the front crate** (`crates/meerschaum`, the Polars model): thin `pub use` of the
   curated surface plus cargo features (`sql` default, `valkey`, `api`, `engine`, `server`, `plugin`,
-  `full`, `duckdb`, `oracle`). It holds no logic; its `lib.rs` says which items are semver-stable.
+  `full`, `oracle`; DuckDB is part of `sql`: its library is loaded at run time). It holds no logic; its `lib.rs` says which items are semver-stable.
   Every other `meerschaum-*` crate is internal and says so in its `lib.rs` and README (`meerschaum-plugin`,
   the native plugin SDK, is the one other public crate).
 - **Versions.** Cargo `5.0.0-rc.1` <-> PEP 440 `5.0.0rc1` (use the dot form: Cargo sorts `rc.10` after
@@ -137,7 +138,7 @@ PyPI wheel, not on crates.io) is published, in lockstep at the workspace version
 export PATH="$HOME/.cargo/bin:$PATH"
 cargo build                 # whole workspace
 cargo test -p meerschaum-core
-cargo run -p meerschaum-cli -- --help
+cargo run -p meerschaum --bin mrsm -- --help    # the standalone `mrsm` (`cargo install meerschaum` builds it)
 ```
 
 The PyO3 extension (`crates/meerschaum-py`) is built with maturin into `meerschaum/_core`; see that

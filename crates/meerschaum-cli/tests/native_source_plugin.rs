@@ -100,7 +100,7 @@ impl Home {
 
     /// Run `mrsm` with `PATH` as the parent's (so `cargo` is found) unless `path` is given.
     fn run_with(&self, args: &[&str], path: Option<&Path>, cargo: Option<&Path>) -> Output {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_mrsm"));
+        let mut command = Command::new(env!("CARGO_BIN_EXE_mrsm-cli"));
         command
             .args(args)
             .env_clear()

@@ -18,13 +18,23 @@ return Arrow record batches.
 | SQLite | `sqlite`, `geopackage` | `sqlx` | implemented |
 | MSSQL | `mssql` | `tiberius` (rustls) | implemented, cargo feature `mssql` (default) |
 | Oracle | `oracle` | `oracle` (ODPI-C) | implemented, cargo feature `oracle`; Oracle Instant Client at runtime |
-| DuckDB | `duckdb` | `duckdb` 1.4 (bundled) | implemented, cargo feature `duckdb` |
+| DuckDB | `duckdb` | DuckDB's own `libduckdb` (v1.5.6), loaded at run time through its C API | implemented, cargo feature `duckdb` (default; adds only the loader) |
 
 A flavor whose feature is off is refused with `SqlError::DriverUnavailable`. The non-`sqlx`
 drivers share the pool and operation layer in `driver/native.rs` (`NativeConn` per family).
-`duckdb` compiles the bundled DuckDB C++ library (several minutes, about 250 MB of build
-output) and `oracle` loads `libclntsh` when connecting (the build needs no Oracle libraries), so
-both are opt-in. `duckdb` stays on 1.4, whose Arrow major matches the workspace's.
+`oracle` loads `libclntsh` when connecting (the build needs no Oracle libraries), so it is
+opt-in. Nothing of DuckDB is compiled in: the `duckdb` feature (on by default) adds only a small
+loader (`driver/duckdb/ffi.rs`, ~60 C API functions bound with `libloading`) and the downloader
+(`duckdb_lib/`; `zip`, `fs4`, `reqwest`). The library is DuckDB's official release build,
+looked up in this order: `MRSM_DUCKDB_LIB` (a file path), `<root>/drivers/duckdb/<version>/`, the
+system loader path (on macOS and Windows only a file in an absolute system directory, never a bare name from the working directory; `show drivers` reports it without loading it), and finally a download of the release asset for the platform, checked against
+a SHA-256 pinned in `duckdb_lib/install.rs` (blocked by `MRSM_NO_AUTO_INSTALL`, which turns it into
+an error naming `mrsm install driver duckdb` and `MRSM_DUCKDB_LIB`). DuckDB v1.4 or newer works; the
+installer fetches v1.5.6. Results are read from data chunks (`driver/duckdb/decode.rs`);
+nested types, intervals, enums, bit strings, `TIME WITH TIME ZONE` and `BIGNUM` come back as the
+text DuckDB itself prints. Every session is pinned to `TimeZone = 'UTC'` (the official build has
+ICU, whose default is the host's zone), and aware timestamp parameters are bound as `TIMESTAMPTZ`
+instants (see `PARITY.md`).
 
 - **MSSQL**: statements run through `sp_executesql` with `@P1`, `@P2`, ... parameters; session
   `SET`s and batch-leading DDL (`CREATE SCHEMA`, `CREATE VIEW`, ...) run as plain batches.
@@ -167,10 +177,16 @@ export MRSM_TEST_GPKG_DIR=
 export MRSM_TEST_DUCKDB_PATH=
 # Oracle (needs Oracle Instant Client on the library path).
 export MRSM_TEST_ORACLE_URI='oracle://system:oracle@localhost:1529/xe'
-cargo test -p meerschaum-connector-sql                       # MSSQL and GeoPackage
-cargo test -p meerschaum-connector-sql --features duckdb     # + DuckDB
+# DuckDB's shared library (not compiled in): `scripts/rust/duckdb_lib.sh` downloads it once into
+# a persistent cache (checksum-verified) and prints the path; any DuckDB >= 1.4 library works.
+export MRSM_DUCKDB_LIB="$(scripts/rust/duckdb_lib.sh)"
+cargo test -p meerschaum-connector-sql                       # MSSQL, GeoPackage, DuckDB
 cargo test -p meerschaum-connector-sql --features oracle     # + Oracle
 ```
+
+Without `MRSM_DUCKDB_LIB` (and with no cached or system library) the DuckDB tests download the
+library on first use unless `MRSM_NO_AUTO_INSTALL` is set, in which case they fail with the
+message naming the fix. `tests/duckdb_library.rs` skips without `MRSM_DUCKDB_LIB`.
 
 `tests/driver_native.rs` exercises the MSSQL / DuckDB / Oracle drivers directly. MSSQL's
 instance schema must exist (v4 does not create it either); add `?schema=<name>` to the URI to

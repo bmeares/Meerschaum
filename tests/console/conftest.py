@@ -5,8 +5,8 @@
 """
 Fixtures for the console browser tests (v5 design §14 "Console tests").
 
-The suite starts real `mrsm start api` servers (the debug binary, `target/debug/mrsm`, or
-`MRSM_BIN`) on free high ports, each with a temporary `MRSM_ROOT_DIR`, an empty-but-for-the-test
+The suite starts real `mrsm start api` servers (the standalone binary: `MRSM_TEST_BIN`, or
+`target/{release,debug}/mrsm` outside CI; its version and age are checked, see `tests/_binary.py`) on free high ports, each with a temporary `MRSM_ROOT_DIR`, an empty-but-for-the-test
 plugins directory, a SQLite instance inside that root and a synthetic user, and drives them with
 Python Playwright's Chromium. It never touches the real configuration, port 8989, 8000, 8998,
 3000 or any container.
@@ -14,7 +14,7 @@ Python Playwright's Chromium. It never touches the real configuration, port 8989
 It is opt-in: set `MRSM_TEST_CONSOLE=1`, otherwise every test here is skipped (the default
 sqlite pytest run starts no servers). Run it with the repo on the path:
 
-    cargo build -p meerschaum-cli --bin mrsm
+    cargo build -p meerschaum --bin mrsm
     MRSM_TEST_CONSOLE=1 PYTHONPATH=$(pwd) python -m pytest tests/console -v
 """
 
@@ -38,7 +38,7 @@ import pytest
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
 ENABLE_ENV = 'MRSM_TEST_CONSOLE'
-BIN_ENV = 'MRSM_BIN'
+BIN_ENV = 'MRSM_TEST_BIN'
 USERNAME = 'alice'
 PASSWORD = 'correct-horse-1'
 PORT_RANGE = (18400, 18999)
@@ -66,7 +66,9 @@ def pytest_collection_modifyitems(config, items):
 
 
 def mrsm_binary() -> pathlib.Path:
-    return pathlib.Path(os.environ.get(BIN_ENV) or REPO / 'target' / 'debug' / 'mrsm')
+    """The verified standalone `mrsm` (`tests/_binary.py`: version and age are checked)."""
+    from tests._binary import binary_or_skip
+    return pathlib.Path(binary_or_skip())
 
 
 def free_port() -> int:
@@ -209,7 +211,6 @@ assert success, msg
     def start(self) -> None:
         self.prepare()
         binary = mrsm_binary()
-        assert binary.exists(), f"{binary} is missing; run `cargo build -p meerschaum-cli --bin mrsm`."
         with open(self.log_path, 'wb') as log:
             self.proc = subprocess.Popen(
                 [

@@ -13,6 +13,13 @@
 python -m pip install --upgrade meerschaum
 ```
 
+??? info "Standalone binary (`cargo install meerschaum`)"
+    `pip install meerschaum` is the whole product: the `mrsm` command it installs runs the native command line from inside the package. If you would rather have a standalone binary (it starts in about 10 ms and needs no Python until you use a Python plugin or connector), build the same command line with Cargo:
+
+    ```bash
+    cargo install meerschaum
+    ```
+
 
 ??? info "Installing dependencies"
     Meerschaum will auto-install packages as you use them (into a virtual environment, to preserve your base environment).

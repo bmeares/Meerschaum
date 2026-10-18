@@ -210,9 +210,8 @@ def test_a_connector_can_be_copied_and_pickled():
 
 @pytest.fixture(scope='module')
 def server():
-    binary = pathlib.Path(os.environ.get('MRSM_BIN') or REPO / 'target' / 'debug' / 'mrsm')
-    if not binary.exists():
-        pytest.skip("build the CLI first: cargo build -p meerschaum-cli --bin mrsm")
+    from tests._binary import binary_or_skip
+    binary_or_skip()
     from tests.console.conftest import Server
     instance = Server('w16s-api', native=False)
     try:

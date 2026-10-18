@@ -86,7 +86,7 @@ impl Setup {
         let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let repo = repo.canonicalize().unwrap_or(repo);
         let python_path = std::env::join_paths([repo, self.site.clone()]).unwrap();
-        let mut child = Command::new(env!("CARGO_BIN_EXE_mrsm"))
+        let mut child = Command::new(env!("CARGO_BIN_EXE_mrsm-cli"))
             .args(args)
             .env_clear()
             .env("PATH", std::env::var_os("PATH").unwrap_or_default())

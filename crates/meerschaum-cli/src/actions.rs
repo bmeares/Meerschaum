@@ -54,7 +54,13 @@ pub const V5_ONLY_ACTIONS: &[&str] = &["prune", "plan"];
 /// Subactions that exist only in v5 (`(action, subaction)`). They resolve and run like any
 /// core subaction, and complete once a prefix is typed, but the empty `show <TAB>` list and the
 /// registry parity test keep v4's contents.
-pub const V5_ONLY_SUBACTIONS: &[(&str, &str)] = &[("show", "graph"), ("show", "runs")];
+pub const V5_ONLY_SUBACTIONS: &[(&str, &str)] = &[
+    ("show", "graph"),
+    ("show", "runs"),
+    ("show", "drivers"),
+    ("install", "drivers"),
+    ("uninstall", "drivers"),
+];
 
 /// Whether `(action, subaction)` is v5-only.
 pub fn is_v5_only_subaction(action: &str, subaction: &str) -> bool {
@@ -144,6 +150,7 @@ pub static CORE_ACTIONS: &[ActionDef] = &[
     action(
         "install",
         &[
+            sub("drivers", "_install_drivers"),
             sub("packages", "_install_packages"),
             sub("plugins", "_install_plugins"),
             sub("required", "_install_required"),
@@ -179,6 +186,7 @@ pub static CORE_ACTIONS: &[ActionDef] = &[
     action(
         "uninstall",
         &[
+            sub("drivers", "_uninstall_drivers"),
             sub("packages", "_uninstall_packages"),
             sub("plugins", "_uninstall_plugins"),
         ],
@@ -197,6 +205,7 @@ pub static CORE_ACTIONS: &[ActionDef] = &[
             sub("connectors", "_show_connectors"),
             sub("daemons", "_show_daemons"),
             sub("data", "_show_data"),
+            sub("drivers", "_show_drivers"),
             sub("environment", "_show_environment"),
             sub("graph", "_show_graph"),
             sub("help", "_show_help"),

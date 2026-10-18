@@ -525,6 +525,50 @@ Examples:
     - `show graph -m daily --parents`
 "##
         }
+        "_install_drivers" => {
+            r##"
+Download a database driver's native library into `<root>/drivers` (v5).
+
+DuckDB is not compiled into `mrsm`: its official shared library (`libduckdb`, v1.5.6) is
+downloaded from DuckDB's GitHub release, checked against a SHA-256 pinned in Meerschaum and
+cached. Without this command it is downloaded on first use, unless `MRSM_NO_AUTO_INSTALL` is set.
+For an air-gapped host, set `MRSM_DUCKDB_LIB` to the path of a DuckDB library instead.
+Oracle's client library (`libclntsh`) is Oracle's own and is not downloaded.
+
+Options:
+    - `--force`
+        - Download the library again even if it is installed.
+
+Examples:
+    - `install driver duckdb`
+    - `install driver duckdb --force`
+"##
+        }
+        "_uninstall_drivers" => {
+            r##"
+Remove a downloaded database driver library from `<root>/drivers` (v5).
+
+Examples:
+    - `uninstall driver duckdb`
+    - `uninstall driver duckdb -y`
+"##
+        }
+        "_show_drivers" => {
+            r##"
+Show the native database driver libraries (v5).
+
+For each driver, its library version, where it was found (`env` for `MRSM_DUCKDB_LIB`, `cache`
+for `<root>/drivers`, `system` for the loader path, `missing`) and its path. DuckDB's library is
+downloaded on first use (`install driver duckdb` does it now); Oracle's `libclntsh` must be
+installed from Oracle.
+
+Name a driver (`duckdb`, `oracle`) to show only that one.
+
+Examples:
+    - `show drivers`
+    - `show drivers duckdb`
+"##
+        }
         "_show_runs" => {
             r##"
 List the recorded runs of the Syncing Engine, newest first (v5).

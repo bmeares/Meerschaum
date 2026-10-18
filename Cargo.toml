@@ -47,6 +47,8 @@ meerschaum-server = { path = "crates/meerschaum-server", version = "=5.0.0-a1" }
 meerschaum-web = { path = "crates/meerschaum-web", version = "=5.0.0-a1" }
 meerschaum-plugin = { path = "crates/meerschaum-plugin", version = "=5.0.0-a1" }
 meerschaum-worker = { path = "crates/meerschaum-worker", version = "=5.0.0-a1" }
+# The CLI library: the front crate's `cli` feature (`cargo install meerschaum`) and `meerschaum-py`. Its features are chosen by the dependent.
+meerschaum-cli = { path = "crates/meerschaum-cli", version = "=5.0.0-a1", default-features = false }
 
 anyhow = "1"
 thiserror = "2"

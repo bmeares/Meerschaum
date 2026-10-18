@@ -16,9 +16,12 @@
 //! fixtures under `tests/fixtures/` are generated from the Python code in this repository.
 #![deny(unsafe_code)]
 
+pub mod client_libs;
 pub mod dateadd;
 pub mod driver;
 pub mod dtypes;
+#[cfg(feature = "duckdb")]
+pub mod duckdb_lib;
 pub mod error;
 pub mod facade;
 pub mod flavor;

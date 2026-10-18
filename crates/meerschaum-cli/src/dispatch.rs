@@ -821,6 +821,7 @@ fn run_action(
     rt: &mut Runtime<'_>,
     depth: usize,
 ) -> SuccessTuple {
+    native::drivers::register_install_reporter(args, rt);
     let result: ActionResult = match resolved.function_name() {
         "_start_pipeline" => run_pipeline(args, rt, depth),
         "_show_version" => builtin::show_version(args, rt),
@@ -988,10 +989,11 @@ fn timed_pipeline_step(
 ) -> Result<Option<SuccessTuple>, ActionError> {
     use std::io::{BufRead, BufReader};
     use std::process::{Command, Stdio};
-    let exe = std::env::current_exe()
-        .map_err(|e| ActionError::new("OSError", format!("Cannot locate the executable: {e}")))?;
-    let mut command = Command::new(exe);
+    // This program again: the `mrsm` binary, or `python -m meerschaum` in the extension.
+    let (program, leading) = meerschaum_core::self_exe::self_program();
+    let mut command = Command::new(program);
     command
+        .args(leading)
         .arg(PIPELINE_CHILD_ARG)
         .arg(line)
         .arg(patch_json)

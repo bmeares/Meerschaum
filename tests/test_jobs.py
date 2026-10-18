@@ -4,15 +4,15 @@
 """
 Test Meerschaum jobs through the `meerschaum.jobs.Job` façade (native: `meerschaum-jobs`).
 
-The jobs run `mrsm <sysargs>` under the native supervisor, so these tests need the `mrsm`
-binary (`MRSM_BIN`, the installed `meerschaum-cli`, or `target/{release,debug}/mrsm`).
-Every job gets a unique name and is deleted afterwards.
+The jobs run `<self> <sysargs>` under the native supervisor, where `<self>` is `python -m
+meerschaum` (the extension's own CLI) or the `MRSM_BIN` binary. Every job gets a unique name and is deleted afterwards.
 """
 
 import asyncio
 import os
 import re
 import signal
+import sys
 import time
 import uuid
 
@@ -21,16 +21,6 @@ import pytest
 import meerschaum as mrsm
 from meerschaum.jobs import Job, StopMonitoringLogs
 
-
-def _find_binary():
-    from meerschaum._internal.binary import find_binary
-    return find_binary()
-
-
-pytestmark = pytest.mark.skipif(
-    _find_binary() is None,
-    reason="The `mrsm` binary is required to run jobs.",
-)
 
 LOOP = ['show', 'version', ':', '--loop', '--min-seconds', '0.2']
 
@@ -337,25 +327,26 @@ def test_stdin_and_prompt_state_of_an_idle_job(make_job):
     assert job.get_prompt_kwargs() == {}
 
 
-def test_launcher_error_when_no_binary(monkeypatch, tmp_path):
-    """Without a `mrsm` program a start says so; nothing falls back to another program."""
+def test_jobs_run_this_process_own_command(monkeypatch, tmp_path):
+    """Jobs run `python -P -m meerschaum` (the extension's own CLI) unless `MRSM_BIN` says otherwise."""
     from meerschaum import _core
     from meerschaum.jobs import _native
-    monkeypatch.setenv('PATH', str(tmp_path))
-    monkeypatch.setenv('MRSM_BIN', str(tmp_path / 'missing'))
     monkeypatch.delenv('MRSM_JOB_SUPERVISOR', raising=False)
     monkeypatch.delenv('MRSM_JOB_PROGRAM', raising=False)
+    monkeypatch.setenv('MRSM_BIN', str(tmp_path / 'missing'))
     _native.core()
-    _core.jobs_set_binary(None)
-    try:
-        supervisor, program, error = _core.jobs_launcher()
-        ### The scripts directory of this interpreter may still hold one.
-        if error is None:
-            pytest.skip("An installed `mrsm` was found next to the interpreter.")
-        assert supervisor == [] and program == []
-        job = Job(_name(), 'show version', executor_keys='local')
-        success, msg = job.start()
-        assert not success and 'no `mrsm` executable' in msg
-        assert not job.exists()
-    finally:
-        _native._binary_hinted = False
+    supervisor, program = _core.jobs_launcher()
+    assert program == [sys.executable, '-P', '-m', 'meerschaum']
+    assert supervisor == [*program, '__mrsm_job_supervisor__']
+
+    ### An executable program named by `MRSM_BIN` replaces it; a script named `mrsm` does not.
+    shim = tmp_path / 'mrsm'
+    shim.write_text('#!/bin/sh\n')
+    shim.chmod(0o755)
+    monkeypatch.setenv('MRSM_BIN', str(shim))
+    assert _core.jobs_launcher()[1] == [sys.executable, '-P', '-m', 'meerschaum']
+    program_file = tmp_path / 'prog'
+    program_file.write_bytes(b'\x7fELF')
+    program_file.chmod(0o755)
+    monkeypatch.setenv('MRSM_BIN', str(program_file))
+    assert _core.jobs_launcher()[1] == [str(program_file)]

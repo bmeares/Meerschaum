@@ -4,7 +4,7 @@ Fixed sync benchmark set: Meerschaum v4.1.4 (the reference venv, `scripts/parity
 against v5 (the release `mrsm` binary and the Python façade).
 Not part of CI. Spec §14 "Benchmarks": regressions block the RC.
 
-    cargo build --release -p meerschaum-cli          # target/release/mrsm
+    cargo build --release -p meerschaum --bin mrsm     # target/release/mrsm
     python scripts/bench/run.py --label rc1-dev      # all backends, sizes and cases
 
 Implementations (columns of the report):
@@ -175,7 +175,7 @@ class Impl:
         if self.name.startswith('v4') and not REF_PY.exists():
             return 'missing .venv-ref (run scripts/parity/setup_reference.sh)'
         if self.name == 'v5cli' and not self.mrsm_bin().exists():
-            return 'missing target/release/mrsm (cargo build --release -p meerschaum-cli)'
+            return 'missing target/release/mrsm (cargo build --release -p meerschaum --bin mrsm)'
         return None
 
     def mrsm_bin(self) -> Path:

@@ -27,9 +27,19 @@ and layering are in `crates/README.md`; the user-facing story is `docs/zensical/
   routed it to Rust are gone, so there is one implementation and tests run once. `meerschaum._core`
   is **required** (an unbuilt tree raises `CoreNotBuiltError`, naming `scripts/rust/build_py.sh`).
   A removed v4 module raises a `ModuleNotFoundError` naming its replacement
-  (`meerschaum/_internal/_removed.py`: add an entry when you delete a module). The CLI is the `mrsm`
-  binary (`meerschaum/_internal/binary.py`; `MRSM_BIN` overrides the lookup): `python -m meerschaum`,
-  the console script and the shell (`Shell.cmdloop()`) run it. `meerschaum.entry([...])` does not
+  (`meerschaum/_internal/_removed.py`: add an entry when you delete a module). **One PyPI wheel, one CLI
+  program** (D8 revised): the `mrsm` / `meerschaum` console scripts and `python -m meerschaum` call
+  `_native.main(argv)` (`_meerschaum_mrsm.py`, a top-level module in the wheel, -> `meerschaum/__main__.py` -> `_internal/binary.py`), which runs the whole CLI inside
+  the extension (real fds, real signals, GIL released; `meerschaum_cli::run_main` is shared with the
+  standalone binary); `cargo install meerschaum` builds that same binary from the front crate's `cli`
+  feature; `MRSM_BIN` makes Python exec a standalone binary instead. Everything that re-launches `mrsm`
+  (job supervisors and workers, compose, `systemd` units, pipeline steps, the web terminal) asks
+  `meerschaum_core::self_exe::self_command()`: `[current_exe]` standalone, `[sys.executable, "-P", "-m",
+  "meerschaum"]` in the extension (`-P`: the cwd never shadows the package; workers and the API host spawn
+  with `-P` too). `import meerschaum` stays EAGER (threads importing `meerschaum.*` while others touch
+  `mrsm.Pipe` must not deadlock) except in the CLI process (`sys._meerschaum_cli`, set by `_meerschaum_mrsm`,
+  or `python -m meerschaum` seen in `sys.orig_argv`), where it is lazy (PEP 562, `_internal/_facade.py`
+  holds the imports) so `mrsm` does not pay for the façade. `meerschaum.entry([...])` does not
   start a process: it runs the same native dispatcher in-process (`_core.entry`). There is no Python CLI. v4 stays the oracle only through the
   `.venv-ref` parity fixtures and the recordings in `tests/oracle/` (`tests/_oracle.py`).
 
@@ -74,12 +84,12 @@ export CARGO_INCREMENTAL=0                 # what CI uses; optional locally
 
 | Command | What it does |
 |---|---|
-| `cargo build -p meerschaum-cli` | the debug `mrsm` binary at `target/debug/mrsm` (what `tests/console` runs). Default features `duckdb` + `oracle` (D13) compile the bundled DuckDB C++ library (several minutes cold); `--no-default-features` builds the lean binary. Oracle needs Instant Client (`libclntsh`) only at runtime |
-| `cargo build --release -p meerschaum-cli` | the release binary (`scripts/bench/run.py` and Docker use it) |
+| `cargo build -p meerschaum --bin mrsm` | the debug standalone `mrsm` at `target/debug/mrsm` (the front crate's `cli` feature, what `cargo install meerschaum` builds; `tests/console` runs it). Oracle needs Instant Client (`libclntsh`) only at runtime. `cargo build -p meerschaum-cli` builds only the internal `target/debug/mrsm-cli` its integration tests run (named differently so `--workspace` never writes two `mrsm`) |
+| `cargo build --release -p meerschaum --bin mrsm` | the release binary (`scripts/bench/run.py` uses it; the Docker image and the wheel run the CLI from the extension instead) |
 | `scripts/rust/build_py.sh [--debug] [--no-polars]` | builds `crates/meerschaum-py` with maturin and drops `meerschaum/_core/_native.abi3.so` into the working tree (release by default, ~10 min, atomic swap; the `meerschaum` package does not work without it). Needs `maturin` (`uv tool install maturin`) and a Python >= 3.11 (`PYTHON=...`). Keep `PYTHON` stable between runs or Polars rebuilds. It takes the tree lock `target/.build-py.lock` itself (concurrent builds would corrupt each other); do not wrap it in `flock`. |
 | `scripts/rust/clean_py.sh [--cargo]` | removes the built extension |
 | `cargo build -p meerschaum-plugin --example native_demo` | the example C-ABI plugin |
-| `scripts/mrsm.sh <args>` | `python -m meerschaum` against `./test_root` + `./tests/plugins` (the façade launcher: it runs the `mrsm` binary, `MRSM_BIN` or `target/{release,debug}/mrsm`) |
+| `scripts/mrsm.sh <args>` | `python -m meerschaum` against `./test_root` + `./tests/plugins` (the façade launcher: the CLI runs from the built extension; an explicit `MRSM_BIN` is accepted only if its `--version` equals the extension's and, in CI, it is newer than the Rust sources) |
 
 ### Checks (what CI runs; `scripts/rust/ci.sh <step>` reproduces each job)
 
@@ -90,7 +100,7 @@ cargo test -p <crate>            # one crate; `cargo test --workspace` is the CI
 scripts/rust/ci.sh               # = fmt clippy test build
 scripts/rust/ci.sh parity        # regenerate every crates/*/tests/fixtures/gen_*.py with v4.1.4 and diff
 scripts/parity/check_fixture_hygiene.sh [PATH ...]   # run before every commit that touches fixtures (and on any new public file)
-python scripts/check_packaging.py            # Cargo version (`5.0.0-rc.1` <-> PEP 440 `5.0.0rc1`) == meerschaum-cli pin == _version.py; extras == _packages.py == requirements/ == extras.rs; lockstep workspace dep versions; crates.io metadata
+python scripts/check_packaging.py            # Cargo version (`5.0.0-rc.1` <-> PEP 440 `5.0.0rc1`) == _version.py; console scripts `mrsm`/`meerschaum`; no `dependencies`, no second wheel; extras == _packages.py == requirements/ == extras.rs; lockstep workspace dep versions; crates.io metadata
 scripts/rust/ci.sh frontcrate                # the `meerschaum` front crate: no default features, each feature alone, `full` tests (CI job `frontcrate`)
 scripts/rust/ci.sh package                   # cargo package --workspace --no-verify + contents/size checks (CI job `package`); `publish-dry-run` also builds the tarballs (it mutates the shared `target/` and `$CARGO_HOME`, see `crates/README.md` "Publishing"; publish from Linux/macOS because LICENSE/NOTICE are symlinks)
 python scripts/check_packaging.py --write    # regenerate requirements/<extra>.txt and crates/meerschaum-cli/src/extras.rs
@@ -101,8 +111,9 @@ Crate integration tests skip unless their service URI is set (an empty value cou
 | Variable | Used by |
 |---|---|
 | `MRSM_TEST_PG_URI`, `MRSM_TEST_TIMESCALE_URI`, `MRSM_TEST_POSTGIS_URI` | `meerschaum-connector-sql` drivers/instance tests, engine crash-restart (`w9_engine` schema) and lease tests (`w7_engine`) |
-| `MRSM_TEST_MYSQL_URI`, `MRSM_TEST_MARIADB_URI`, `MRSM_TEST_MSSQL_URI`, `MRSM_TEST_ORACLE_URI` | `meerschaum-connector-sql` (MSSQL is the default `mssql` feature; `--features oracle` / `--features duckdb` are opt-in and slow) |
+| `MRSM_TEST_MYSQL_URI`, `MRSM_TEST_MARIADB_URI`, `MRSM_TEST_MSSQL_URI`, `MRSM_TEST_ORACLE_URI` | `meerschaum-connector-sql` (MSSQL is the default `mssql` feature; `--features oracle` is opt-in) |
 | `MRSM_TEST_GPKG_DIR`, `MRSM_TEST_DUCKDB_PATH` | GeoPackage / DuckDB file flavors (empty = system temp dir) |
+| `MRSM_DUCKDB_LIB` | DuckDB is **not compiled in**: `mrsm`, the extension and every DuckDB test load DuckDB's own `libduckdb` (v1.5.6; any >= 1.4 works). `export MRSM_DUCKDB_LIB="$(scripts/rust/duckdb_lib.sh)"` downloads it once into `~/.cache/mrsm-ci/` (checksum-verified) and prints the path; without it the library is found in `<root>/drivers`, the system path, or downloaded on first use (not under `MRSM_NO_AUTO_INSTALL`, which CI and `test.sh` set). `mrsm install driver duckdb` / `uninstall driver duckdb` / `show drivers` manage it. |
 | `MRSM_TEST_VALKEY_URI` | `meerschaum-connector-valkey`, engine `leases_backends` |
 | `MRSM_TEST_MQTT_URI` (e.g. `mqtt://127.0.0.1:1893`) | `meerschaum-engine/tests/mqtt_stream.rs` (disposable Mosquitto, QoS 1) |
 | `MRSM_TEST_PYTHON`, `MRSM_TEST_KEEP=1` | cross-implementation tests in `meerschaum-connector-sql` (keep the databases for inspection) |
@@ -113,7 +124,7 @@ their host ports are in `tests/connectors.py` and `crates/meerschaum-connector-s
 ### Python tests (pytest)
 
 ```bash
-# sqlite; the suite runs once. Needs the built extension and the `mrsm` binary (target/debug/mrsm or MRSM_BIN).
+# sqlite; the suite runs once. Needs the built extension (jobs and the CLI run from it); a few tests also use a standalone `mrsm` (`MRSM_TEST_BIN`, else the newest `target/{release,debug}/mrsm` outside CI; `tests/_binary.py` checks its `--version` and age and fails a stale one in CI) and skip without one. `scripts/mrsm.sh` / `test.sh` run `mrsm` through the built extension, never a `target/` binary; the pytest workflow builds the binary in the job (`scripts/rust/ci.sh bin-debug`) and passes `MRSM_TEST_BIN`.
 MRSM_TEST_FLAVORS=sqlite PYTHONPATH=$(pwd) MRSM_ROOT_DIR=./test_root MRSM_PLUGINS_DIR=./tests/plugins \
   python -m pytest tests/ -q -p no:cacheprovider \
     --ignore=tests/test_jobs.py --ignore=tests/test_mcp.py --ignore=tests/test_listen_shutdown.py \
@@ -148,7 +159,7 @@ MRSM_TEST_FLAVORS=sqlite ./scripts/test.sh db ""
 ### Console (Playwright) and API host tests
 
 ```bash
-cargo build -p meerschaum-cli --bin mrsm                     # tests/console uses target/debug/mrsm (or MRSM_BIN)
+cargo build -p meerschaum --bin mrsm                         # tests/console uses MRSM_TEST_BIN or target/debug/mrsm (version and age checked)
 cargo build -p meerschaum-plugin && tests/console/build_native.sh <plugins-dir>   # the synthetic native page plugin
 MRSM_TEST_CONSOLE=1 PYTHONPATH=$(pwd) python -m pytest tests/console -v
 PYTHONPATH=$(pwd) MRSM_ROOT_DIR=./test_root MRSM_PLUGINS_DIR=./tests/plugins python -m pytest tests/api_host -v
@@ -175,16 +186,16 @@ PYTHONPATH=$(pwd) MRSM_ROOT_DIR=./test_root MRSM_PLUGINS_DIR=./tests/plugins pyt
 
 ### Crates (`crates/`, Cargo workspace, edition 2024, version `5.0.0-a1` is the single source of truth)
 
-Dependencies point down only; `meerschaum-core` is a leaf; `cli` and `py` are the top layer nothing
-depends on. Verify with `cargo tree -p <crate> -e normal --depth 1`.
+Dependencies point down only; `meerschaum-core` is a leaf; `cli` and `py` are the top layer no library
+depends on (the front crate's default `cli` feature pulls `cli` in for the `mrsm` binary only). Verify with `cargo tree -p <crate> -e normal --depth 1`.
 
 | Crate | Owns |
 |---|---|
-| `meerschaum` | the **front crate** (Polars model) published to crates.io: thin `pub use` of the curated public surface behind features (`sql` default, `valkey`, `api`, `engine`, `server`, `plugin`, `full`); no logic. Every other crate is internal (`meerschaum-py` is `publish = false`) |
+| `meerschaum` | the **front crate** (Polars model) published to crates.io: thin `pub use` of the curated public surface behind features (`sql` and `cli` default, `valkey`, `api`, `engine`, `server`, `plugin`, `full`); no logic except `src/main.rs`, the `mrsm` binary of `cargo install meerschaum` (`required-features = ["cli"]`; library users use `default-features = false`). Every other crate is internal (`meerschaum-py` is `publish = false`) |
 | `meerschaum-core` | `Pipe` (keys, raw vs resolved parameters, `target`), config registry + `MRSM{}` symlinks + `static.toml` (D15, the old `STATIC_CONFIG`), dtype vocabulary, `{{ Pipe() }}` template parser, users/tokens/plugins types, `SuccessTuple`/`SyncResult`, PEP 440 `version_ge`, shared Python-behavior helpers (`pyfmt`, `Value`, `shlex`) |
 | `meerschaum-kernel` | Arrow/Polars `Frame`: `enforce_dtypes`, `filter_unseen_df` (pandas merge-dtype rules in `merge_dtype.rs`), `query_df`, special-column detection/serialization (json, uuid, numeric, bytes, geometry as GeoArrow WKB) |
 | `meerschaum-connector` | the `Connector` / `InstanceConnector` traits, `DataQuery` / `SyncOptions`, generic users/plugins/tokens over internal pipes, cross-pipe template resolution |
-| `meerschaum-connector-sql` | `SqlConnector`: per-flavor query builders (`queries/`, golden-tested), `sqlx` (PostgreSQL family, MySQL family, SQLite/GeoPackage), `tiberius` (mssql), `oracle`, `duckdb` drivers; instance methods with the v4 names; partitioning, compression, maintenance, leases (`mrsm_pipe_leases`), `sync_pipe_inplace`, `facade.rs` helpers for the bindings |
+| `meerschaum-connector-sql` | `SqlConnector`: per-flavor query builders (`queries/`, golden-tested), `sqlx` (PostgreSQL family, MySQL family, SQLite/GeoPackage), `tiberius` (mssql), `oracle`, and `duckdb` (a loader for DuckDB's own shared library: `driver/duckdb/`, `duckdb_lib/`; no DuckDB code is compiled in) drivers; instance methods with the v4 names; partitioning, compression, maintenance, leases (`mrsm_pipe_leases`), `sync_pipe_inplace`, `facade.rs` helpers for the bindings |
 | `meerschaum-connector-valkey` / `meerschaum-connector-api` | `ValkeyConnector` over `fred`; the `APIConnector` client (`reqwest`) plus shared route/auth/JWT models |
 | `meerschaum-engine` | graph (parents/children/`{{ Pipe() }}` edges), planner (`skip`/`incremental`/`backfill`/`rebuild`/`observe`/`root`), executor (HEFT priorities, leases, retries), dirty-range ledger + edge cursors + run history as `mrsm:engine_*` internal pipes, continuous mode (`--loop` laps, `--listen` streams), events, Gantt data |
 | `meerschaum-worker` | the Python worker pool + msgpack/Arrow-IPC wire protocol, `PythonConnector` adapter, callbacks (`pipe.sync()` from plugin code), supervised streams, the plugin manifest (`<root>/cache/plugins_manifest.json`, schema in `schema/manifest.schema.json`) |
@@ -192,15 +203,15 @@ depends on. Verify with `cargo tree -p <crate> -e normal --depth 1`.
 | `meerschaum-server` | the `axum` API (every v4 route + `/engine/*`), OAuth2/JWT/tokens, rate limits, allowlist route groups, the API-host proxy over a Unix socket, MCP (`/mcp` + stdio) with federation of plugin tools |
 | `meerschaum-web` | the `/dash` console (askama + HTMX, vendored Plotly.js/MapLibre/Cytoscape/xterm.js, no CDN), sessions (`mrsm-session-id`, Valkey or the `mrsm_sessions` pipe), the plugin page contract (`data-mrsm-figure`, `data-mrsm-map`) |
 | `meerschaum-plugin` | the native plugin SDK: `Plugin` trait + `export_plugin!`, the C ABI (`mrsm_plugin_v1`, Arrow C stream), loader, discovery (`<name>/plugin.toml` + `lib<name>.so`), native manifest cache |
-| `meerschaum-cli` | the `mrsm` binary: clap spec/argparse parity, dispatch, every native action (`src/native/`), the reedline shell with prompt_toolkit parity (`src/shell/`), `start api`/`start mcp` (`server.rs`), venv accounting (`show`/`prune venvs`), engine views (`plan pipes`, `show graph`, `show runs`) |
-| `meerschaum-py` | PyO3 bindings -> `meerschaum._core` (`src/lib.rs`; kernel, core, `SqlConnector`, `Pipe`, engine, verify and D14 APIs); `PARITY.md` logs every python-vs-rust discrepancy and its resolution, `PERF.md` the boundary benchmarks |
+| `meerschaum-cli` | the CLI library (internal; `run_main()` is the process entry shared by the `meerschaum` front crate's `mrsm` binary and `_native.main`; its own `mrsm-cli` bin runs its integration tests): clap spec/argparse parity, dispatch, every native action (`src/native/`), the reedline shell with prompt_toolkit parity (`src/shell/`), `start api`/`start mcp` (`server.rs`), venv accounting (`show`/`prune venvs`), engine views (`plan pipes`, `show graph`, `show runs`) |
+| `meerschaum-py` | PyO3 bindings -> `meerschaum._core` (`src/lib.rs`; `main_api.rs` = `_native.main`, the `mrsm` console script's entry; kernel, core, `SqlConnector`, `Pipe`, engine, verify and D14 APIs); `PARITY.md` logs every python-vs-rust discrepancy and its resolution, `PERF.md` the boundary benchmarks |
 
 ### Python package after v5 (`meerschaum/`)
 
 | Path | Role |
 |---|---|
 | `_core/` | loader package (`__init__.py`, stdlib only, lazy PEP 562 load of `_native.abi3.so`; `AVAILABLE`, `LOAD_ERROR`, `CoreNotBuiltError`); the extension is required |
-| `_internal/` | `binary.py` (finds and runs the `mrsm` binary: `MRSM_BIN`, the interpreter's scripts dir, `PATH`, a checkout's `target/`), `entry.py` (`entry()` calls `_core.entry`, the in-process dispatcher), `_removed.py` (the `ModuleNotFoundError` finder naming replacements of deleted modules), `arguments/`, `shell/` |
+| `_internal/` | `binary.py` (the `mrsm` entry: `_native.main` in-process, `MRSM_BIN` exec, `self_command()`), `_facade.py` (the façade imports `meerschaum/__init__` runs on first use in the CLI process), `entry.py` (`entry()` calls `_core.entry`, the in-process dispatcher), `_removed.py` (the `ModuleNotFoundError` finder naming replacements of deleted modules), `arguments/`, `shell/` |
 | `core/Pipe/` | the façade `Pipe`; the parameter store is `_core.Pipe` and `_live_parameters.py` provides the live `pipe.parameters` views (`LiveDict`/`RawDict`); methods call the `_core.pipe_*` bindings |
 | `core/Pipeline/` | `mrsm.Pipeline`, `Plan`, `RunResult`, `pipe.sync(parents=, children=)`, event decoding (`_events.py`), calls into `_core` (`_engine.py`). Rust-only: needs the built extension |
 | `connectors/` | façades; `SQLConnector._rust_method()` builds one `_core.SqlConnector` per Python connector (rebuilt when the PID changes); `read/exec/value/to_sql/.engine` stay SQLAlchemy |

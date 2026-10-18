@@ -2,16 +2,17 @@
 #
 # One wheel per platform: the `meerschaum` Python package (the root `meerschaum/` directory) plus
 # the PyO3 extension `meerschaum._core._native` (crates/meerschaum-py) as a `cp311-abi3` module.
-# The `mrsm` binary ships in the separate `meerschaum-cli` wheel (crates/meerschaum-cli/pyproject.toml,
-# D8), which `meerschaum` depends on. The base wheel depends on nothing else (D20, §12.1); data,
-# SQL, GIS, API and Dash libraries are extras.
+# This is the only PyPI package (D8, revised): the `mrsm` and `meerschaum` console scripts run the
+# CLI in-process from the extension (`_native.main`), so there is no separate binary wheel. The
+# standalone binary is `cargo install meerschaum`. The base wheel depends on nothing (D20, §12.1);
+# data, SQL, GIS, API and Dash libraries are extras.
 #
 # Version: the single source of truth is `[workspace.package] version` in the root Cargo.toml
-# (maturin reads it from crates/meerschaum-py). `scripts/check_packaging.py` keeps the pinned
-# `meerschaum-cli` requirement, the extras below, `meerschaum/utils/packages/_packages.py`,
+# (maturin reads it from crates/meerschaum-py). `scripts/check_packaging.py` keeps the
+# console scripts, the extras below, `meerschaum/utils/packages/_packages.py`,
 # `requirements/<extra>.txt`, the extras table compiled into `mrsm`
 # (crates/meerschaum-cli/src/extras.rs) and `meerschaum/config/_version.py` in sync with it, and
-# with `--wheels DIST` checks the built wheels and the binary's `--version` (see that script).
+# with `--wheels DIST` checks the built wheel and its `mrsm --version` (see that script).
 #
 # In-tree development builds do not use this file's build: `scripts/rust/build_py.sh` drops
 # `meerschaum/_core/_native.abi3.so` into the working tree (crates/meerschaum-py/pyproject.toml).
@@ -51,9 +52,8 @@ classifiers = [
 ]
 dynamic = ["version"]
 
-# D8, D20: the only dependency is the binary wheel, pinned to this release (the Cargo workspace
-# version in PEP 440 form; enforced by scripts/check_packaging.py).
-dependencies = ["meerschaum-cli==5.0.0a1"]
+# D8, D20: the base wheel has no dependencies.
+dependencies = []
 
 # §12.1. Mirrors `extras` in meerschaum/utils/packages/_packages.py (enforced by
 # scripts/check_packaging.py): edit both together.
@@ -81,9 +81,13 @@ Homepage = "https://meerschaum.io"
 Donate = "https://github.com/sponsors/bmeares"
 Discord = "https://discord.gg/8U8qMUjvcc"
 
-# The `mrsm` command is the binary from `meerschaum-cli`; `meerschaum` stays a Python alias.
+# Both console scripts run the CLI in-process from the `_native` extension; `meerschaum` is the v4
+# name and stays an alias of `mrsm`. They point at the top-level module `_meerschaum_mrsm`, which
+# marks the process as the CLI before `meerschaum` is imported, so the package skips the façade
+# (`import meerschaum` is otherwise eager, as it always was).
 [project.scripts]
-meerschaum = "meerschaum.__main__:main"
+mrsm = "_meerschaum_mrsm:main"
+meerschaum = "_meerschaum_mrsm:main"
 
 [tool.maturin]
 bindings = "pyo3"
@@ -92,9 +96,10 @@ manifest-path = "crates/meerschaum-py/Cargo.toml"
 module-name = "meerschaum._core._native"
 python-source = "."
 python-packages = ["meerschaum"]
+include = [{ path = "_meerschaum_mrsm.py", format = ["sdist", "wheel"] }]
 # `extension-module` is a crate feature (not a default) so `cargo test` can link libpython;
 # `polars` is the pyo3-polars zero-copy path (same feature set as scripts/rust/build_py.sh).
-features = ["pyo3/abi3-py311", "extension-module", "polars", "duckdb", "oracle"]
+features = ["pyo3/abi3-py311", "extension-module", "polars", "oracle"]
 exclude = [
     "**/__pycache__/**",
     "**/*.pyc",

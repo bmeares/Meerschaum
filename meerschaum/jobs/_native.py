@@ -10,11 +10,7 @@ Importing this module is cheap; the extension is loaded on first use.
 
 from __future__ import annotations
 
-import threading
 from typing import Any, Dict, Optional
-
-_lock = threading.Lock()
-_binary_hinted = False
 
 #: The attributes of an `api:<label>` connector the native client needs.
 API_ATTRIBUTES = (
@@ -25,23 +21,11 @@ API_ATTRIBUTES = (
 
 def core():
     """
-    Return the `meerschaum._core` module, telling it once where the `mrsm` binary is (jobs run
-    `mrsm <sysargs>`; see `meerschaum._internal.binary.find_binary`).
+    Return the `meerschaum._core` module. Jobs run `<self> <sysargs>`, where `<self>` is this
+    process's own command (`python -m meerschaum`, or the `MRSM_BIN` binary): the extension
+    works that out itself (`meerschaum_core::self_exe`).
     """
-    global _binary_hinted
     from meerschaum import _core
-    if not _binary_hinted:
-        with _lock:
-            if not _binary_hinted:
-                path = None
-                try:
-                    from meerschaum._internal.binary import find_binary
-                    path = find_binary()
-                except Exception:
-                    path = None
-                if path:
-                    _core.jobs_set_binary(path)
-                _binary_hinted = True
     return _core
 
 

@@ -114,11 +114,10 @@ pub fn start_gui(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
             "Could not find an open port for the GUI's server.",
         ));
     };
-    let exe = std::env::current_exe().map_err(|e| {
-        crate::builtin::ActionError::new("OSError", format!("Cannot locate the executable: {e}"))
-    })?;
-    let mut server = Command::new(exe);
+    let (program, leading) = meerschaum_core::self_exe::self_program();
+    let mut server = Command::new(program);
     server
+        .args(leading)
         .args(["start", "api", "--no-auth", "--host", host, "--port"])
         .arg(port.to_string())
         .args(["-i", &instance])

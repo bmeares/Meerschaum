@@ -8,12 +8,11 @@
 //! which has ended) are not re-implemented in Python.
 //!
 //! **Launching.** A job runs `<mrsm> <sysargs>` under a detached supervisor
-//! (`<mrsm> __mrsm_job_supervisor__ ...`). Inside the extension `current_exe()` is the Python
-//! interpreter, so [`resolve_launcher`] chooses the program explicitly: `MRSM_JOB_SUPERVISOR` /
-//! `MRSM_JOB_PROGRAM` when set, else the `mrsm` executable named by `MRSM_BIN`, installed next to
-//! `sys.executable` or in `sysconfig`'s scripts directory (the `meerschaum-cli` wheel puts it
-//! there), or on `PATH`. When none exists the launcher is empty and every operation which would
-//! start a process answers `(False, <reason>)`; nothing falls back to another program.
+//! (`<mrsm> __mrsm_job_supervisor__ ...`), where `<mrsm>` is the process's own command
+//! (`meerschaum_core::self_exe::self_command`). Inside the extension that is
+//! `<sys.executable> -m meerschaum` (the `mrsm` console script and `python -m meerschaum` run the
+//! CLI from this same extension), or the standalone binary named by `MRSM_BIN` when it is set to an
+//! executable. `MRSM_JOB_SUPERVISOR` / `MRSM_JOB_PROGRAM` (shell-split) override either part.
 //!
 //! **`api:<label>` executors** resolve through the CLI's `CliRemoteResolver`, built once per
 //! process and per snapshot of the `meerschaum:connectors:api` configuration (so the login token
@@ -42,7 +41,7 @@ use meerschaum_jobs::executor::{self, JobExecutor, make_executor};
 use meerschaum_jobs::job::{Job, JobOptions, MonitorControl, MonitorOptions};
 use meerschaum_jobs::rotating::{RotatingFile, RotatingFileOptions};
 use meerschaum_jobs::stdin::StdinFile;
-use meerschaum_jobs::supervisor::{Launcher, SUPERVISOR_ARG, SUPERVISOR_ENV};
+use meerschaum_jobs::supervisor::{Launcher, SUPERVISOR_ENV};
 use meerschaum_jobs::systemd::SystemdExecutor;
 use pyo3::exceptions::{PyException, PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
@@ -51,11 +50,6 @@ use pyo3::types::{PyDict, PyFloat, PyInt, PyList, PyString, PyTuple};
 use crate::convert::{core_to_py, py_to_core};
 use crate::pipe_bridge::success_to_py;
 
-/// What a launch needs which could not be found (reported by every operation which would start
-/// a process).
-const NO_PROGRAM: &str = "Cannot start jobs: no `mrsm` executable was found. Install the \
-`meerschaum-cli` package, put `mrsm` on the PATH, or set MRSM_BIN to its path.";
-
 fn runtime_err(e: impl std::fmt::Display) -> PyErr {
     PyRuntimeError::new_err(e.to_string())
 }
@@ -63,111 +57,11 @@ fn runtime_err(e: impl std::fmt::Display) -> PyErr {
 // ---------------------------------------------------------------------------------------------
 // Context
 
-fn split_env(var: &str) -> Option<Vec<String>> {
-    std::env::var(var)
-        .ok()
-        .and_then(|v| meerschaum_jobs::shlex::split(&v).ok())
-        .filter(|v| !v.is_empty())
-}
-
-#[cfg(unix)]
-fn is_executable(path: &std::path::Path) -> bool {
-    use std::os::unix::fs::PermissionsExt;
-    path.metadata()
-        .map(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
-        .unwrap_or(false)
-}
-
-#[cfg(not(unix))]
-fn is_executable(path: &std::path::Path) -> bool {
-    path.is_file()
-}
-
-static BINARY_HINT: Mutex<Option<String>> = Mutex::new(None);
-
-/// Tell the jobs bindings where the façade found the `mrsm` binary (`None` forgets it).
-#[pyfunction]
-pub fn jobs_set_binary(path: Option<String>) {
-    *BINARY_HINT.lock().unwrap_or_else(|e| e.into_inner()) = path;
-}
-
-/// The `mrsm` executable: `MRSM_BIN`, the scripts directory of the interpreter's installation,
-/// the directory of `sys.executable`, then `PATH`.
-fn find_mrsm(py: Python<'_>) -> Option<PathBuf> {
-    // The façade's own lookup (`meerschaum._internal.binary.find_binary`, which also knows a
-    // source checkout's `target/` build) wins when it found something.
-    if let Some(hint) = BINARY_HINT
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .clone()
-        && is_executable(std::path::Path::new(&hint))
-    {
-        return Some(PathBuf::from(hint));
-    }
-    let name = if cfg!(windows) { "mrsm.exe" } else { "mrsm" };
-    if let Ok(bin) = std::env::var("MRSM_BIN")
-        && !bin.is_empty()
-    {
-        let path = PathBuf::from(bin);
-        return is_executable(&path).then_some(path);
-    }
-    let mut dirs: Vec<PathBuf> = Vec::new();
-    if let Ok(scripts) = py
-        .import("sysconfig")
-        .and_then(|m| m.call_method1("get_path", ("scripts",)))
-        .and_then(|p| p.extract::<String>())
-    {
-        dirs.push(PathBuf::from(scripts));
-    }
-    if let Ok(exe) = py
-        .import("sys")
-        .and_then(|m| m.getattr("executable"))
-        .and_then(|p| p.extract::<String>())
-        && let Some(parent) = std::path::Path::new(&exe).parent()
-    {
-        dirs.push(parent.to_path_buf());
-    }
-    if let Some(path) = std::env::var_os("PATH") {
-        dirs.extend(std::env::split_paths(&path));
-    }
-    dirs.into_iter()
-        .map(|d| d.join(name))
-        .find(|p| is_executable(p))
-}
-
-/// The launcher of this process's jobs and why it is empty, if it is.
-fn resolve_launcher(py: Python<'_>) -> (Launcher, Option<String>) {
-    let supervisor = split_env(SUPERVISOR_ENV);
-    let program = split_env(meerschaum_jobs::supervisor::PROGRAM_ENV);
-    if let (Some(supervisor), Some(program)) = (&supervisor, &program) {
-        return (
-            Launcher {
-                supervisor: supervisor.clone(),
-                program: program.clone(),
-            },
-            None,
-        );
-    }
-    match find_mrsm(py) {
-        Some(exe) => {
-            let exe = exe.to_string_lossy().to_string();
-            (
-                Launcher {
-                    supervisor: supervisor
-                        .unwrap_or_else(|| vec![exe.clone(), SUPERVISOR_ARG.to_string()]),
-                    program: program.unwrap_or_else(|| vec![exe]),
-                },
-                None,
-            )
-        }
-        None => (
-            Launcher {
-                supervisor: supervisor.unwrap_or_default(),
-                program: program.unwrap_or_default(),
-            },
-            Some(NO_PROGRAM.to_string()),
-        ),
-    }
+/// The launcher of this process's jobs: its own command (see [`crate::main_api`]) unless
+/// `MRSM_JOB_SUPERVISOR` / `MRSM_JOB_PROGRAM` say otherwise.
+fn resolve_launcher(py: Python<'_>) -> PyResult<Launcher> {
+    crate::main_api::ensure_self_command(py)?;
+    Ok(Launcher::from_env())
 }
 
 /// One `CliRemoteResolver` per process and API configuration (a fork builds its own, like the
@@ -197,7 +91,6 @@ fn resolver_for(section: Map) -> Arc<CliRemoteResolver> {
 #[derive(Clone)]
 struct Ctx {
     jobs: JobsContext,
-    launch_error: Option<String>,
 }
 
 fn api_overrides(attributes: Option<&Bound<'_, PyDict>>) -> PyResult<Map> {
@@ -237,10 +130,6 @@ fn ctx_fingerprint(py: Python<'_>, api: Option<&Bound<'_, PyDict>>) -> Option<St
         .map(|p| p.to_string())
         .unwrap_or_default();
     let env = |name: &str| std::env::var(name).unwrap_or_default();
-    let hint = BINARY_HINT
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .clone();
     let parts = [
         std::process::id().to_string(),
         root,
@@ -248,7 +137,6 @@ fn ctx_fingerprint(py: Python<'_>, api: Option<&Bound<'_, PyDict>>) -> Option<St
         section(&["system", "cli"]),
         section(&["meerschaum", "executor"]),
         section(&["meerschaum", "connectors", "api"]),
-        format!("{hint:?}"),
         env("MRSM_BIN"),
         env(SUPERVISOR_ENV),
         env(meerschaum_jobs::supervisor::PROGRAM_ENV),
@@ -270,7 +158,7 @@ fn build_ctx(py: Python<'_>, api_attributes: Option<&Bound<'_, PyDict>>) -> PyRe
         return Ok(ctx.clone());
     }
     let config: Config = crate::config_api::live_config(py)?;
-    let (launcher, launch_error) = resolve_launcher(py);
+    let launcher = resolve_launcher(py)?;
     let mut section = CliRemoteResolver::section(&config);
     for (label, attrs) in api_overrides(api_attributes)? {
         let base = section.get(&label).map(Value::to_map).unwrap_or_default();
@@ -284,7 +172,7 @@ fn build_ctx(py: Python<'_>, api_attributes: Option<&Bound<'_, PyDict>>) -> PyRe
         launcher,
     )
     .with_remote(resolver);
-    let ctx = Ctx { jobs, launch_error };
+    let ctx = Ctx { jobs };
     if let Some(fingerprint) = fingerprint {
         *CACHE.lock().unwrap_or_else(|e| e.into_inner()) = Some((fingerprint, ctx.clone()));
     }
@@ -400,13 +288,6 @@ impl PyJob {
     fn lock(&self) -> std::sync::MutexGuard<'_, Job> {
         lock_without_the_gil(&self.inner)
     }
-
-    fn launch_check<'py>(&self, py: Python<'py>) -> Option<PyResult<Bound<'py, PyTuple>>> {
-        self.ctx
-            .launch_error
-            .as_ref()
-            .map(|reason| tuple(py, &SuccessTuple::fail(reason.clone())))
-    }
 }
 
 #[pymethods]
@@ -473,9 +354,6 @@ impl PyJob {
     }
 
     fn start<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyTuple>> {
-        if let Some(refused) = self.launch_check(py) {
-            return refused;
-        }
         let r = py.allow_threads(|| self.lock().start());
         tuple(py, &r)
     }
@@ -520,9 +398,6 @@ impl PyJob {
         py: Python<'py>,
         timeout_seconds: Option<&Bound<'py, PyAny>>,
     ) -> PyResult<Bound<'py, PyTuple>> {
-        if let Some(refused) = self.launch_check(py) {
-            return refused;
-        }
         let timeout = seconds(timeout_seconds)?;
         let r = py.allow_threads(|| self.lock().restart(timeout));
         tuple(py, &r)
@@ -636,19 +511,7 @@ impl PyJob {
     }
 
     fn check_restart<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyTuple>> {
-        // A job which is running or does not restart never launches anything: only refuse when
-        // the launch would happen.
-        let r = py.allow_threads(|| {
-            let mut job = self.lock();
-            if self.ctx.launch_error.is_some()
-                && !job.is_running()
-                && job.restarts()
-                && job.stop_time().is_none()
-            {
-                return SuccessTuple::fail(NO_PROGRAM);
-            }
-            job.check_restart()
-        });
+        let r = py.allow_threads(|| self.lock().check_restart());
         tuple(py, &r)
     }
 
@@ -950,7 +813,6 @@ fn daemon_paths_dict<'py>(
 #[pyclass(frozen, name = "Daemon", module = "meerschaum._core")]
 pub struct PyDaemon {
     inner: Mutex<Daemon>,
-    ctx: Ctx,
 }
 
 impl PyDaemon {
@@ -988,7 +850,6 @@ impl PyDaemon {
         };
         Ok(PyDaemon {
             inner: Mutex::new(daemon),
-            ctx,
         })
     }
 
@@ -1103,9 +964,6 @@ impl PyDaemon {
         keep_daemon_output: bool,
         allow_dirty_run: bool,
     ) -> PyResult<Bound<'py, PyTuple>> {
-        if let Some(reason) = &self.ctx.launch_error {
-            return tuple(py, &SuccessTuple::fail(reason.clone()));
-        }
         let r = py.allow_threads(|| self.lock().run(keep_daemon_output, allow_dirty_run));
         tuple(py, &r)
     }
@@ -1247,11 +1105,6 @@ impl PyExecutor {
         std::mem::take(&mut self.warnings.lock().unwrap_or_else(|e| e.into_inner()))
     }
 
-    /// Whether `start`-like calls can launch a process here.
-    fn launch_error(&self) -> Option<String> {
-        self.ctx.launch_error.clone()
-    }
-
     #[pyo3(signature = (strict=false))]
     fn get_job_names(&self, py: Python<'_>, strict: bool) -> PyResult<Vec<String>> {
         py.allow_threads(|| {
@@ -1323,11 +1176,6 @@ impl PyExecutor {
         sysargs: Vec<String>,
         properties: Option<&Bound<'py, PyAny>>,
     ) -> PyResult<Bound<'py, PyTuple>> {
-        if self.keys == "local" || self.keys == "systemd" || self.keys.is_empty() {
-            if let Some(reason) = &self.ctx.launch_error {
-                return tuple(py, &SuccessTuple::fail(reason.clone()));
-            }
-        }
         let props = match properties.filter(|p| !p.is_none()) {
             Some(p) => Some(py_to_core(p)?.to_map()),
             None => None,
@@ -1337,9 +1185,6 @@ impl PyExecutor {
     }
 
     fn start_job<'py>(&self, py: Python<'py>, name: &str) -> PyResult<Bound<'py, PyTuple>> {
-        if let Some(reason) = &self.ctx.launch_error {
-            return tuple(py, &SuccessTuple::fail(reason.clone()));
-        }
         let r = py.allow_threads(|| self.with(|ex| ex.start_job(name)));
         tuple(py, &r)
     }
@@ -1575,11 +1420,11 @@ pub fn jobs_cmdline_scans() -> usize {
     meerschaum_jobs::process::cmdline_scans()
 }
 
-/// The program that runs jobs, `(supervisor, program, error)` (diagnostics and tests).
+/// The program that runs jobs, `(supervisor, program)` (diagnostics and tests).
 #[pyfunction]
-pub fn jobs_launcher(py: Python<'_>) -> (Vec<String>, Vec<String>, Option<String>) {
-    let (launcher, error) = resolve_launcher(py);
-    (launcher.supervisor, launcher.program, error)
+pub fn jobs_launcher(py: Python<'_>) -> PyResult<(Vec<String>, Vec<String>)> {
+    let launcher = resolve_launcher(py)?;
+    Ok((launcher.supervisor, launcher.program))
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1772,6 +1617,5 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(jobs_new_daemon_name, m)?)?;
     m.add_function(wrap_pyfunction!(jobs_cmdline_scans, m)?)?;
     m.add_function(wrap_pyfunction!(jobs_launcher, m)?)?;
-    m.add_function(wrap_pyfunction!(jobs_set_binary, m)?)?;
     Ok(())
 }

@@ -45,7 +45,7 @@ impl Sandbox {
     }
 
     fn command(&self) -> Command {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_mrsm"));
+        let mut command = Command::new(env!("CARGO_BIN_EXE_mrsm-cli"));
         #[cfg(unix)]
         {
             use std::os::unix::process::CommandExt;

@@ -5,24 +5,23 @@
 //! message; [`flush`] (called before `Runtime::print` / `eprint` write anything) prints what is
 //! queued, so a warning appears before the output that follows the request that raised it.
 
-use std::sync::{Arc, Mutex, Once};
+use std::sync::{Arc, Mutex};
 
 use crate::dispatch::Runtime;
 
 static PENDING: Mutex<Vec<String>> = Mutex::new(Vec::new());
-static INSTALL: Once = Once::new();
 
 /// The most warnings kept before the oldest are dropped (a process that never prints, such as a
 /// server, must not grow the queue without bound).
 const MAX_PENDING: usize = 256;
 
 /// Route the client's warnings into the queue (once per process). Only the `mrsm` binary's
-/// `main` calls this: an embedding host (the Python extension) and the long-running server
-/// have no one to print the queue, so there the client's warnings stay on `tracing`.
+/// `main` (and the Python extension's `_native.main`, which is the same program) calls
+/// this: an embedding host and the long-running server have no one to print the queue, so there the client's warnings stay on `tracing`.
 pub fn install() {
-    INSTALL.call_once(|| {
-        meerschaum_connector_api::client::warnings::set_warning_sink(Some(Arc::new(enqueue)));
-    });
+    // Not `Once`: the Python extension runs the CLI (`_native.main`) more than once per process
+    // and puts its own sink back between runs.
+    meerschaum_connector_api::client::warnings::set_warning_sink(Some(Arc::new(enqueue)));
 }
 
 fn enqueue(message: &str) {

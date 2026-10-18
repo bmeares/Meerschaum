@@ -147,7 +147,23 @@ impl SystemdExecutor {
         // else the first `python3` on the *unit's* PATH: pin the interpreter this process
         // resolves so the job runs plugins under the same environment it was created in.
         // (v4 pins it as `ExecStart=<sys.executable>`.)
-        if let Some(python) = resolve_python(process_env) {
+        // Inside the Python extension the unit runs `<python> -P -m meerschaum`, so its workers
+        // use that interpreter unless `MRSM_PYTHON` says otherwise.
+        // `python` is `<interpreter> -P` there (`-P`: the unit's working directory stays off
+        // `sys.path`), so the interpreter is its first word.
+        let interpreter = crate::shlex::split(python)
+            .ok()
+            .and_then(|words| words.into_iter().next())
+            .unwrap_or_else(|| python.to_string());
+        let own_python =
+            meerschaum_core::self_exe::ends_with_module_args(&self.ctx.launcher.program)
+                && std::path::Path::new(&interpreter).is_absolute()
+                && !process_env
+                    .iter()
+                    .any(|(k, v)| k == PYTHON_ENV && !v.trim().is_empty());
+        if own_python {
+            vars.insert(PYTHON_ENV.to_string(), interpreter);
+        } else if let Some(python) = resolve_python(process_env) {
             vars.insert(PYTHON_ENV.to_string(), python);
         }
         let mut job = self.get_hidden_job(name, None, None);
@@ -269,9 +285,12 @@ pub fn resolve_python(process_env: &[(String, String)]) -> Option<String> {
 
 impl SystemdExecutor {
     /// The program `ExecStart=` runs before ` -m meerschaum <sysargs>`: the job launcher's
-    /// program (the `mrsm` binary; Python uses `sys.executable`).
+    /// program (the `mrsm` binary, or the interpreter when the program is
+    /// `python -P -m meerschaum`, which is v4's `ExecStart=<sys.executable> -m meerschaum` plus `-P`).
     pub fn exec_program(&self) -> String {
-        crate::shlex::join(&self.ctx.launcher.program)
+        crate::shlex::join(&meerschaum_core::self_exe::without_module_args(
+            &self.ctx.launcher.program,
+        ))
     }
 
     /// `run_command(args)`: `systemctl --user <args>` as a `SuccessTuple`.

@@ -8,7 +8,7 @@
 //! | SQLite | `sqlite`, `geopackage` | `sqlx` |
 //! | MSSQL | `mssql` | `tiberius` (cargo feature `mssql`, on by default) |
 //! | Oracle | `oracle` | `oracle` (cargo feature `oracle`; Oracle Instant Client at runtime) |
-//! | DuckDB | `duckdb` | `duckdb` (cargo feature `duckdb`, bundled DuckDB) |
+//! | DuckDB | `duckdb` | DuckDB's own shared library, loaded at run time (cargo feature `duckdb`, on by default) |
 //!
 //! Without its cargo feature a flavor is refused with [`SqlError::DriverUnavailable`].
 //! The non-`sqlx` drivers share the pool and operation layer in `native.rs`.
@@ -19,7 +19,7 @@
 mod backend;
 pub mod batch;
 #[cfg(feature = "duckdb")]
-mod duckdb;
+pub(crate) mod duckdb;
 pub mod gpkg_functions;
 #[cfg(feature = "mssql")]
 mod mssql;

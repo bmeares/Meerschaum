@@ -9,13 +9,7 @@ import pytest
 import meerschaum as mrsm
 
 
-def _binary():
-    from meerschaum._internal.binary import find_binary
-    return find_binary()
-
-
 @pytest.mark.skipif(not os.environ.get('MRSM_TEST_MQTT_PORT'), reason='Isolated MQTT broker required.')
-@pytest.mark.skipif(_binary() is None, reason='The `mrsm` binary is required to run jobs.')
 @pytest.mark.parametrize('stop_method', ['quit', 'kill'])
 @pytest.mark.parametrize('repeat', range(3))
 def test_real_mqtt_listen_shutdown(stop_method, repeat):

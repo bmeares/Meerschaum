@@ -1,11 +1,11 @@
 name: wheels
 
-# Builds the two Meerschaum 5 distributions (docs/design/v5.0.0.md D8, D9, §12) on GitHub-hosted
-# runners and smoke-tests them in fresh virtual environments:
-#   - `meerschaum`      the maturin mixed project at the repository root (pyproject.toml): the
-#                       Python package plus the `meerschaum._core` extension, one `cp311-abi3`
-#                       wheel per platform;
-#   - `meerschaum-cli`  the `mrsm` binary wheel (crates/meerschaum-cli/pyproject.toml).
+# Builds the Meerschaum 5 wheel (docs/design/v5.0.0.md D8, D9, §12) on GitHub-hosted runners and
+# smoke-tests it in a fresh virtual environment: `meerschaum`, the maturin mixed project at the
+# repository root (pyproject.toml): the Python package plus the `meerschaum._core` extension, one
+# `cp311-abi3` wheel per platform. It is the only PyPI package: its `mrsm` console script runs the
+# CLI in-process from the extension (D8, revised); the standalone binary is `cargo install
+# meerschaum`.
 # Plus one EXPERIMENTAL free-threaded wheel (R8, §12): `cp314t` on Linux, built from the same
 # source as a version-specific (non-abi3) wheel with `continue-on-error`, and smoke-tested by a
 # non-blocking job. It never gates a release: pyo3 0.25 ignores the `abi3` feature on a
@@ -22,6 +22,13 @@ on:
     paths:
       - 'pyproject.toml'
       - 'crates/**/pyproject.toml'
+      - '_meerschaum_mrsm.py'
+      - 'meerschaum/__init__.py'
+      - 'meerschaum/__main__.py'
+      - 'meerschaum/_internal/binary.py'
+      - 'meerschaum/_internal/_facade.py'
+      - 'meerschaum/_core/**'
+      - 'crates/meerschaum-py/**'
       - '.github/workflows/wheels.yaml'
       - 'scripts/check_packaging.py'
 
@@ -59,8 +66,7 @@ jobs:
             manylinux: 'off'
           - os: windows-latest
             manylinux: 'off'
-          # EXPERIMENTAL (R8): the free-threaded `cp314t` wheel. Non-blocking; only the
-          # `meerschaum` wheel is rebuilt (the `meerschaum-cli` wheel is `py3-none`).
+          # EXPERIMENTAL (R8): the free-threaded `cp314t` wheel. Non-blocking.
           - os: ubuntu-latest
             manylinux: '2_28'
             freethreaded: true
@@ -84,19 +90,12 @@ jobs:
           # `cp311-abi3` wheel.
           args: --release --locked --out dist ${{ matrix.freethreaded && '--interpreter python3.14t' || '' }}
 
-      - name: Build the meerschaum-cli wheel
-        if: ${{ !matrix.freethreaded }}
-        uses: PyO3/maturin-action@v1
-        with:
-          command: build
-          manylinux: ${{ matrix.manylinux }}
-          args: --release --locked --out dist -m crates/meerschaum-cli/Cargo.toml
-
-      # Wheel metadata, `_version.py` inside the wheel and `mrsm --version` agree with Cargo.
-      - name: Check the wheels agree on the version
+      # Wheel metadata, `_version.py` inside the wheel and the console scripts agree with Cargo; no
+      # `mrsm` binary and no second wheel.
+      - name: Check the wheel agrees on the version
         if: ${{ !matrix.freethreaded }}
         shell: bash
-        run: python scripts/check_packaging.py --wheels dist --require-cli-run
+        run: python scripts/check_packaging.py --wheels dist
 
       - uses: actions/upload-artifact@v4
         with:
@@ -143,13 +142,12 @@ jobs:
         with:
           name: wheels-${{ matrix.os }}
           path: dist
-      - name: Install both wheels into a fresh venv
+      - name: Install the wheel into a fresh venv
         run: |
           ls -l dist
           python -m venv "$RUNNER_TEMP/venv"
           if [ -d "$RUNNER_TEMP/venv/Scripts" ]; then bindir=Scripts; else bindir=bin; fi
           echo "VENV_BIN=$RUNNER_TEMP/venv/$bindir" >> "$GITHUB_ENV"
-          # `meerschaum` depends on `meerschaum-cli` at the same version: resolve it from dist/.
           "$RUNNER_TEMP/venv/$bindir/python" -m pip install --no-index --find-links dist meerschaum
           "$RUNNER_TEMP/venv/$bindir/python" -m pip list
       - name: Import the package and the extension
@@ -162,22 +160,72 @@ jobs:
           assert core.AVAILABLE, core.LOAD_ERROR
           print('meerschaum', meerschaum.__version__, 'core', core.__version__, core.EXTENSION_PATH)
           "
-      - name: mrsm show version
+      # The console script runs the CLI in-process from the extension (no binary in the wheel).
+      - name: mrsm console script
         run: |
           export MRSM_ROOT_DIR="$RUNNER_TEMP/mrsm-root" MRSM_PLUGINS_DIR="$RUNNER_TEMP/mrsm-plugins"
           cd "$RUNNER_TEMP"
           "$VENV_BIN/mrsm" --version
           "$VENV_BIN/mrsm" show version
+          "$VENV_BIN/mrsm" show connectors
+          "$VENV_BIN/python" -m meerschaum --version
+          "$VENV_BIN/meerschaum" --version
+      - name: Sync a tiny pipe on SQLite
+        run: |
+          export MRSM_ROOT_DIR="$RUNNER_TEMP/mrsm-root" MRSM_PLUGINS_DIR="$RUNNER_TEMP/mrsm-plugins"
+          export MRSM_SQL_SMOKE="sqlite:///$RUNNER_TEMP/smoke.db"
+          cd "$RUNNER_TEMP"
+          "$VENV_BIN/mrsm" register pipe -i sql:smoke -c sql:smoke -m tiny --noask \
+            --params '{"columns": {"primary": "id"}, "fetch": {"definition": "SELECT 1 AS id, 2 AS val"}}'
+          "$VENV_BIN/mrsm" sync pipes -i sql:smoke -c sql:smoke -m tiny
+          "$VENV_BIN/mrsm" show data -i sql:smoke -c sql:smoke -m tiny --nopretty | tee "$RUNNER_TEMP/tiny.txt"
+          grep -Fq '\"0\":\"2\"' "$RUNNER_TEMP/tiny.txt"
+      # Jobs re-run the CLI as `python -P -m meerschaum`: start one through the installed console
+      # script, wait until it has run (its log holds the version line), then stop and delete it and
+      # check nothing is left running. Not on Windows: background jobs are refused there
+      # (`crates/meerschaum-jobs/src/supervisor.rs`).
+      - name: Job round trip through the console script
+        if: runner.os != 'Windows'
+        run: |
+          export MRSM_ROOT_DIR="$RUNNER_TEMP/mrsm-root" MRSM_PLUGINS_DIR="$RUNNER_TEMP/mrsm-plugins"
+          cd "$RUNNER_TEMP"
+          "$VENV_BIN/mrsm" show version : --loop --min-seconds 1 --name smoke-job -d --noask
+          # The job's log holds the version line once a lap ran (poll, do not guess a sleep).
+          ok=""
+          for _ in $(seq 1 30); do
+            if "$VENV_BIN/mrsm" show logs smoke-job --nopretty > "$RUNNER_TEMP/job.log" 2>&1 \
+               && grep -q 'Meerschaum v' "$RUNNER_TEMP/job.log"; then
+              ok=1; break
+            fi
+            sleep 1
+          done
+          cat "$RUNNER_TEMP/job.log"
+          if [ -z "$ok" ]; then echo "smoke-job never logged the version line" >&2; exit 1; fi
+          if grep -q 'Create a new job' "$RUNNER_TEMP/job.log"; then
+            echo "smoke-job is not running the command (it logged the job-creation hint)" >&2; exit 1
+          fi
+          "$VENV_BIN/mrsm" show jobs | tee "$RUNNER_TEMP/jobs.txt"
+          grep -q 'smoke-job' "$RUNNER_TEMP/jobs.txt"
+          grep -q 'running' "$RUNNER_TEMP/jobs.txt"
+          "$VENV_BIN/mrsm" stop job smoke-job -y
+          sleep 1
+          "$VENV_BIN/mrsm" delete job smoke-job -y
+          "$VENV_BIN/mrsm" show jobs > "$RUNNER_TEMP/jobs-after.txt"
+          ! grep -q 'smoke-job' "$RUNNER_TEMP/jobs-after.txt"
+          # No supervisor or worker of the job is left.
+          if command -v pgrep >/dev/null && pgrep -f '[d]aemon_id=.smoke-job|[-]-name smoke-job' >/dev/null; then
+            echo "a process of smoke-job is still running" >&2; exit 1
+          fi
       - name: Base wheel has no Python dependencies
         run: |
           "$VENV_BIN/python" -m pip list --format=freeze | sed 's/==.*//' | sort > "$RUNNER_TEMP/installed.txt"
           cat "$RUNNER_TEMP/installed.txt"
           # pip/setuptools/wheel (ensurepip) are not Meerschaum's; anything else is a leak.
-          extra="$(grep -viE '^(pip|setuptools|wheel|meerschaum|meerschaum-cli)$' "$RUNNER_TEMP/installed.txt" || true)"
+          extra="$(grep -viE '^(pip|setuptools|wheel|meerschaum)$' "$RUNNER_TEMP/installed.txt" || true)"
           if [ -n "$extra" ]; then echo "unexpected dependencies: $extra" >&2; exit 1; fi
 
-  # EXPERIMENTAL (R8): install the free-threaded wheel next to the stable `meerschaum-cli` wheel
-  # on a free-threaded interpreter and check that importing `_core` keeps the GIL disabled.
+  # EXPERIMENTAL (R8): install the free-threaded wheel on a free-threaded interpreter and check
+  # that importing `_core` keeps the GIL disabled.
   smoke-freethreaded:
     name: smoke (free-threaded, py3.14t)
     needs: build
@@ -196,7 +244,7 @@ jobs:
         with:
           name: wheels-ubuntu-latest-cp314t
           path: dist-ft
-      - name: Install the free-threaded wheel (cp314t) and the CLI wheel
+      - name: Install the free-threaded wheel (cp314t)
         run: |
           ls -l dist dist-ft
           python -m venv "$RUNNER_TEMP/venv"

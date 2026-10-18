@@ -483,7 +483,7 @@ fn compose_explain_and_native_down() {
 
     let plugins = tmp.path().join("plugins");
     std::fs::create_dir_all(&plugins).unwrap();
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_mrsm"))
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_mrsm-cli"))
         .args(["compose", "down"])
         .current_dir(&project)
         .env_clear()
@@ -535,7 +535,7 @@ fn python_only_actions_dispatch_to_worker() {
 /// A deliberately absent interpreter proves delegation without installing anything or
 /// starting Docker. Process-local environment also keeps concurrent tests isolated.
 fn assert_worker_dispatch(root: &Path, args: &[&str]) {
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_mrsm"))
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_mrsm-cli"))
         .args(args)
         .env("MRSM_ROOT_DIR", root)
         .env("MRSM_PLUGINS_DIR", root.join("plugins"))

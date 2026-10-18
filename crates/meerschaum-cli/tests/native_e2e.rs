@@ -96,7 +96,7 @@ impl Home {
     }
 
     fn command(&self, python: Option<&Path>) -> Command {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_mrsm"));
+        let mut command = Command::new(env!("CARGO_BIN_EXE_mrsm-cli"));
         command
             .env_clear()
             .env("PATH", std::env::var_os("PATH").unwrap_or_default())

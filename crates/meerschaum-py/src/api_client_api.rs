@@ -415,7 +415,7 @@ fn utc_datetime(ctx: &PyCtx<'_>, obj: &Bound<'_, PyAny>) -> PyResult<Option<Date
 
 /// The client's `warn(msg, stack=False)` calls (called from whichever runtime thread made the
 /// request) reach `meerschaum.utils.warnings.warn`, with v4's text.
-fn install_warning_sink() {
+pub(crate) fn install_warning_sink() {
     meerschaum_connector_api::client::warnings::set_warning_sink(Some(Arc::new(
         |message: &str| {
             Python::with_gil(|py| {

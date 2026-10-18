@@ -40,16 +40,6 @@ from meerschaum.jobs import (
 )
 
 
-def _find_binary():
-    from meerschaum._internal.binary import find_binary
-    return find_binary()
-
-
-pytestmark = pytest.mark.skipif(
-    _find_binary() is None,
-    reason="The `mrsm` binary is required to run jobs.",
-)
-
 LOOP = ['show', 'version', ':', '--loop', '--min-seconds', '0.2']
 SCRATCH = pathlib.Path.home() / '.cache' / 'mrsm-w16-s'
 
@@ -164,7 +154,7 @@ def test_systemd_executor_paths_and_unit_text():
 
     text = executor.get_service_file_text('x', ['show', 'version'])
     assert '[Service]' in text
-    assert ' -m meerschaum show version\n' in text
+    assert ' -P -m meerschaum show version\n' in text
     assert f"Environment={STATIC_CONFIG['environment']['daemon_id']}=x\n" in text
     assert 'Restart=always' in text
 
@@ -336,10 +326,10 @@ def api_server():
         'MRSM_SQL_W16SF': f"sqlite:///{root / 'w16sf.db'}",
         'MRSM_CONFIG': '{"meerschaum": {"instance": "sql:w16sf", "api_instance": "sql:w16sf"}}',
     })
-    binary = _find_binary()
+    from meerschaum._internal.binary import self_command
     log = open(root / 'server.log', 'wb')
     proc = subprocess.Popen(
-        [binary, 'start', 'api', '--host', '127.0.0.1', '--port', str(port),
+        [*self_command(), 'start', 'api', '--host', '127.0.0.1', '--port', str(port),
          '--no-auth', '--no-dash', '--no-webterm'],
         env=env, cwd=str(root), stdout=log, stderr=subprocess.STDOUT, start_new_session=True,
     )

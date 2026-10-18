@@ -3,8 +3,8 @@
 # A maturin *mixed* project whose Python source is the repository root (`python-source = "../.."`),
 # so `maturin develop --skip-install` drops `_native.abi3.so` straight into `meerschaum/_core/`.
 # This file is the IN-TREE DEVELOPMENT build only (`scripts/rust/build_py.sh`). The release
-# distributions are built from the root `pyproject.toml` (maturin mixed project, D9) and
-# `crates/meerschaum-cli/pyproject.toml` (the `mrsm` binary wheel, D8); see
+# distribution is built from the root `pyproject.toml` (maturin mixed project, D9; the one wheel,
+# whose `mrsm` console script runs the CLI from this extension, D8); see
 # `.github/workflows/wheels.yaml`. Keep `features` and `module-name` here in step with the root.
 #
 # `maturin build` from here produces an extension-only wheel (`meerschaum/_core/_native.abi3.so`):
@@ -30,7 +30,7 @@ bindings = "pyo3"
 # `extension-module` is a crate feature (not a default) so `cargo test` can link libpython.
 # NOTE: `maturin ... --features X` replaces this list; build_py.sh passes the full set plus
 # `polars` (the opt-in pyo3-polars path).
-features = ["pyo3/abi3-py311", "extension-module", "duckdb", "oracle"]
+features = ["pyo3/abi3-py311", "extension-module", "oracle"]
 module-name = "meerschaum._core._native"
 python-source = "../.."
 python-packages = ["meerschaum"]

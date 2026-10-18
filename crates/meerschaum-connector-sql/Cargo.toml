@@ -15,18 +15,19 @@ categories = ["database", "asynchronous"]
 include = ["src/**/*", "/LICENSE", "/NOTICE"]
 
 [package.metadata.docs.rs]
-# The default features only (`mssql`): `duckdb` bundles a C++ library docs.rs cannot build in time and `oracle`
-# needs a client library. Stated explicitly so a later change of the defaults cannot pull them in.
-features = ["mssql"]
+# The default features (`mssql`, `duckdb`); `oracle` needs a client library. Stated explicitly so a
+# later change of the defaults cannot pull `oracle` in.
+features = ["mssql", "duckdb"]
 
 [features]
-default = ["mssql"]
+default = ["mssql", "duckdb"]
 # The non-`sqlx` drivers (D13). `mssql` (pure Rust, `tiberius` + rustls) is on by default.
-# `duckdb` compiles the bundled DuckDB C++ library (several minutes, ~1 GB of objects), and
-# `oracle` needs Oracle Instant Client at runtime (as v4's thick mode did), so both are opt-in.
+# `duckdb` loads DuckDB's own shared library at run time (nothing of DuckDB is compiled in): the
+# feature only adds the downloader (`zip`, `fs4`, `reqwest`), so it is on by default.
+# `oracle` needs Oracle Instant Client at runtime (as v4's thick mode did): opt-in.
 mssql = ["dep:tiberius", "dep:tokio-util"]
 oracle = ["dep:oracle"]
-duckdb = ["dep:duckdb"]
+duckdb = ["dep:zip", "dep:fs4", "dep:reqwest"]
 
 [dependencies]
 sha2 = { workspace = true }
@@ -53,10 +54,18 @@ async-trait = "0.1"
 libsqlite3-sys = { version = "0.30", default-features = false }
 tiberius = { version = "0.12", default-features = false, features = ["tds73", "rustls", "chrono", "rust_decimal"], optional = true }
 tokio-util = { version = "0.7", features = ["compat"], optional = true }
-# 1.4 shares the workspace's Arrow major (56); newer releases pull a second Arrow.
-duckdb = { version = "~1.4", features = ["bundled"], optional = true }
+# `dlopen` (the DuckDB library, the Oracle client probe) and, behind the `duckdb` feature, the checked
+# download of the official DuckDB library.
+libloading = "0.9"
+zip = { version = "9", default-features = false, features = ["deflate"], optional = true }
+fs4 = { version = "1.1", optional = true }
+# `rustls-tls-native-roots` adds the operating system's trust store to the bundled webpki roots, so the
+# installer works behind a TLS-intercepting corporate proxy whose CA is installed system-wide.
+reqwest = { workspace = true, optional = true, features = ["rustls-tls-native-roots"] }
 oracle = { version = "0.6", features = ["chrono"], optional = true }
 
 [dev-dependencies]
+tempfile = "3"
+filetime = "0.2"
 tokio = { workspace = true }
 tracing-subscriber = { workspace = true }

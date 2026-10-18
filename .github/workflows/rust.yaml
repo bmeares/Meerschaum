@@ -170,7 +170,7 @@ jobs:
         run: scripts/rust/ci.sh setup
       - name: Disk guard (cargo clean below 10 GB free)
         run: scripts/rust/ci.sh disk-guard
-      - name: cargo build --release -p meerschaum-cli
+      - name: cargo build --release -p meerschaum --bin mrsm
         run: scripts/rust/ci.sh build
       - name: Upload mrsm
         uses: actions/upload-artifact@v4
@@ -224,3 +224,34 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: cargo check --workspace
         run: scripts/rust/ci.sh check
+
+  # DuckDB is not compiled in: `mrsm` and the extension load DuckDB's own `libduckdb`, downloaded from
+  # the pinned release (SHA-256 in crates/meerschaum-connector-sql/src/duckdb_lib/install.rs). The
+  # self-hosted `test` job is authoritative on Linux x86_64 (it runs the whole suite against the
+  # cached library). These hosted legs prove the other platforms' pinned assets: the installer
+  # downloads the library for the platform, the loader finds it, and the type / parameter / timezone
+  # tests run against it. Linux arm64 uses the `linux-arm64` zip, macOS (arm64) the `osx-universal`
+  # one, Windows the `windows-amd64` / `windows-arm64` DLLs. Required on Linux arm64, macOS and
+  # Windows x64; `windows-11-arm` stays optional (its runner image and toolchain are newer).
+  duckdb-platforms:
+    name: duckdb (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.os == 'windows-11-arm' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-24.04-arm, macos-latest, windows-latest, windows-11-arm ]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with: { persist-credentials: false }
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Toolchain
+        run: scripts/rust/ci.sh setup
+      - uses: Swatinem/rust-cache@v2
+      - name: DuckDB loader (download, verify, load, query)
+        run: scripts/rust/ci.sh duckdb-platform

@@ -1,2 +1,4 @@
 Consult the text file 'ACKNOWLEDGEMENTS.md' for licensing information regarding dynamically linked dependencies.
 
+
+DuckDB (MIT License, https://duckdb.org) is not part of Meerschaum: the DuckDB flavor loads the official `libduckdb` release build at run time, downloaded from the DuckDB project on first use or provided by you (`MRSM_DUCKDB_LIB`). Meerschaum neither compiles in nor redistributes it.

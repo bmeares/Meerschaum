@@ -501,8 +501,9 @@ class SQLConnector(InstanceConnector):
         Return the `meerschaum._core.SqlConnector` behind this connector (built once per process,
         see `crates/meerschaum-connector-sql`), which implements every pipe, user and plugin method.
 
-        Every flavor has a Rust driver (`mssql`, `oracle` and `duckdb` are compiled into the
-        wheels). An in-memory SQLite database (`sql:memory`) is one database file that the Rust
+        Every flavor has a Rust driver (`mssql` and `oracle` are compiled into the wheels;
+        `duckdb` loads DuckDB's own shared library, downloaded on first use, see
+        `mrsm install driver duckdb` and `MRSM_DUCKDB_LIB`). An in-memory SQLite database (`sql:memory`) is one database file that the Rust
         pool and SQLAlchemy both open (`_shared_memory_database`), so `Pipe` methods and
         `read()` / `exec()` / `.engine` see the same tables.
         `read`, `exec`, `value`, `to_sql` and `.engine` always stay SQLAlchemy (D16).

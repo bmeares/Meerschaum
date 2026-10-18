@@ -104,12 +104,13 @@ impl ShellCommand {
         }
     }
 
-    /// This binary's shell on `instance_keys` (`<exe> -i <instance>`), as v4 started
-    /// `get_shell(mrsm_instance=...)`.
+    /// This program's shell on `instance_keys` (`<self> -i <instance>`, where `<self>` is the
+    /// `mrsm` binary or `python -m meerschaum`), as v4 started `get_shell(mrsm_instance=...)`.
     pub fn current_exe_shell(instance_keys: &str) -> std::io::Result<ShellCommand> {
-        let exe = std::env::current_exe()?;
-        let mut shell = ShellCommand::new(exe.display().to_string());
-        shell.args = vec!["-i".into(), instance_keys.into()];
+        let (program, mut args) = meerschaum_core::self_exe::self_program();
+        let mut shell = ShellCommand::new(program);
+        args.extend(["-i".into(), instance_keys.into()]);
+        shell.args = args;
         Ok(shell)
     }
 }

@@ -19,6 +19,7 @@ pub mod cache;
 pub mod compose_instance;
 pub mod connectors;
 pub mod definition;
+pub mod drivers;
 pub mod editor;
 pub mod engine_views;
 pub mod gui;
@@ -86,6 +87,9 @@ pub fn run(function: &str, args: &ArgsMap, rt: &mut Runtime<'_>) -> Option<Actio
         "_prune_venvs" => venvs::prune_venvs(args, rt),
         "_setup_plugins" => lifecycle::setup_plugins(args, rt),
         "_install_plugins" => lifecycle::install_plugins(args, rt),
+        "_install_drivers" => drivers::install_drivers(args, rt),
+        "_uninstall_drivers" => drivers::uninstall_drivers(args, rt),
+        "_show_drivers" => drivers::show_drivers(args, rt),
         "_install_required" => lifecycle::install_required(args, rt),
         "_install_packages" => lifecycle::install_packages(args, rt),
         "_upgrade_meerschaum" | "_upgrade_packages" | "_upgrade_plugins" => {

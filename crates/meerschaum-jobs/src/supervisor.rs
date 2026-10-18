@@ -55,12 +55,12 @@ pub struct Launcher {
 }
 
 impl Launcher {
-    /// `MRSM_JOB_SUPERVISOR` / `MRSM_JOB_PROGRAM` when set, else the current executable (the
-    /// host must call [`run_if_requested`] first thing in `main`).
+    /// `MRSM_JOB_SUPERVISOR` / `MRSM_JOB_PROGRAM` when set, else this program's own command
+    /// ([`meerschaum_core::self_exe::self_command`]: the current executable, or
+    /// `python -m meerschaum` inside the Python extension). The host must call
+    /// [`run_if_requested`] (or [`run_if_requested_with`]) first thing.
     pub fn from_env() -> Launcher {
-        let exe = std::env::current_exe()
-            .map(|p| p.to_string_lossy().to_string())
-            .unwrap_or_else(|_| "mrsm".to_string());
+        let own = meerschaum_core::self_exe::self_command();
         let from_var = |var: &str| {
             std::env::var(var)
                 .ok()
@@ -68,9 +68,12 @@ impl Launcher {
                 .filter(|v| !v.is_empty())
         };
         Launcher {
-            supervisor: from_var(SUPERVISOR_ENV)
-                .unwrap_or_else(|| vec![exe.clone(), SUPERVISOR_ARG.to_string()]),
-            program: from_var(PROGRAM_ENV).unwrap_or_else(|| vec![exe]),
+            supervisor: from_var(SUPERVISOR_ENV).unwrap_or_else(|| {
+                let mut command = own.clone();
+                command.push(SUPERVISOR_ARG.to_string());
+                command
+            }),
+            program: from_var(PROGRAM_ENV).unwrap_or(own),
         }
     }
 }
@@ -210,9 +213,15 @@ impl SupervisorOptions {
 /// If this process was started as the job supervisor (its first argument is
 /// [`SUPERVISOR_ARG`]), run the supervisor and exit. Hosts call this first thing in `main`.
 pub fn run_if_requested() {
-    let mut args = std::env::args().skip(1);
-    if args.next().as_deref() == Some(SUPERVISOR_ARG) {
-        std::process::exit(main_with_args(args));
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    run_if_requested_with(&args);
+}
+
+/// [`run_if_requested`] for a host whose real command line is not `std::env::args()` (the
+/// Python extension: the arguments after `python -m meerschaum`).
+pub fn run_if_requested_with(args: &[String]) {
+    if args.first().map(String::as_str) == Some(SUPERVISOR_ARG) {
+        std::process::exit(main_with_args(args[1..].iter().cloned()));
     }
 }
 

@@ -25,10 +25,10 @@ extension-module = ["pyo3/extension-module"]
 # kernel's Polars build. Without it, this crate reuses the kernel's Polars build (it depends on
 # `meerschaum-kernel`, see crates/README.md "Crate layering").
 polars = ["dep:pyo3-polars"]
-# The `duckdb` and `oracle` flavors of `meerschaum-connector-sql` (D13): the wheels ship them
-# (`scripts/rust/build_py.sh` and the root `pyproject.toml` enable both), so `Pipe.sync()` and the
-# instance methods reach those databases natively. `mssql` is a default feature of the SQL crate.
-duckdb = ["meerschaum-connector-sql/duckdb", "meerschaum-cli/duckdb"]
+# The `oracle` flavor of `meerschaum-connector-sql` (D13): the wheels ship it
+# (`scripts/rust/build_py.sh` and the root `pyproject.toml` enable it), so `Pipe.sync()` and the
+# instance methods reach that database natively. `mssql` and `duckdb` are default features of the SQL
+# crate (DuckDB's own library is loaded at run time, not compiled in).
 oracle = ["meerschaum-connector-sql/oracle", "meerschaum-cli/oracle"]
 
 [dependencies]
@@ -46,6 +46,10 @@ meerschaum-worker = { workspace = true }
 meerschaum-jobs = { workspace = true }
 # The extension's `tracing` sink (`logging.rs`): engine warnings reach Python's `warn()`.
 tracing = { workspace = true }
+# `_native.main` (the `mrsm` console script) prints `tracing` events like the binary when `RUST_LOG` is set.
+tracing-subscriber = { workspace = true }
+# `_native.main` keeps the CLI's own SIGINT handler between runs (see `main_api.rs`).
+libc = "0.2"
 # The runtime the instance methods run on (owned by the extension, design §4.2).
 tokio = { workspace = true }
 # Only this crate depends on the CLI library (top layer, see crates/README.md "Crate layering").

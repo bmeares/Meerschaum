@@ -72,10 +72,10 @@ impl FileLeases {
             .write(true)
             .open(&path)
             .map_err(|e| StateError::Other(format!("cannot open {}: {e}", path.display())))?;
-        match fs4::fs_std::FileExt::try_lock_exclusive(&file) {
-            Ok(true) => {}
-            Ok(false) => return Ok(false),
-            Err(e) => {
+        match fs4::FileExt::try_lock(&file) {
+            Ok(()) => {}
+            Err(fs4::TryLockError::WouldBlock) => return Ok(false),
+            Err(fs4::TryLockError::Error(e)) => {
                 return Err(StateError::Other(format!(
                     "cannot lock {}: {e}",
                     path.display()
@@ -93,7 +93,7 @@ impl FileLeases {
         let mut held = self.lock();
         if held.get(node).is_some_and(|(h, _)| h == holder) {
             if let Some((_, file)) = held.remove(node) {
-                let _ = fs4::fs_std::FileExt::unlock(&file);
+                let _ = fs4::FileExt::unlock(&file);
             }
         }
     }

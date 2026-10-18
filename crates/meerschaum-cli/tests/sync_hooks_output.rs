@@ -37,7 +37,7 @@ impl Sandbox {
             command.args(["-E", "-m", "meerschaum"]);
             command
         } else {
-            Command::new(env!("CARGO_BIN_EXE_mrsm"))
+            Command::new(env!("CARGO_BIN_EXE_mrsm-cli"))
         };
         command.args(args).current_dir(self.temp.path()).env_clear()
             .env("PATH", std::env::var("PATH").unwrap_or_default())

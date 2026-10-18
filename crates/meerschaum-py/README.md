@@ -241,7 +241,11 @@ build-backend = "maturin"
 name = "meerschaum"
 requires-python = ">=3.11"
 dynamic = ["version"]                      # from the workspace Cargo version, PEP 440-normalized
-dependencies = ["meerschaum-cli==5.0.0"]   # D8: the binary; nothing else (D20)
+dependencies = []                          # D8 revised, D20: one wheel, no dependencies
+
+[project.scripts]
+mrsm = "_meerschaum_mrsm:main"             # `_native.main(argv)`: the CLI runs inside the extension
+meerschaum = "_meerschaum_mrsm:main"
 
 [project.optional-dependencies]            # §12.1
 pandas = ["pandas", "pyarrow"]
@@ -264,17 +268,22 @@ exclude = ["**/__pycache__/**", "**/*.pyc", "meerschaum/_core/_native*.so"]
   feature. The module already declares `gil_used = false`.
 - The extension statically links Arrow and Polars, so the base wheel needs no Python data library.
   pandas and pyarrow come with `[pandas]`, polars with `[polars]`.
-- The `[project.scripts] mrsm` / `meerschaum` entry points are **removed** from this wheel: the
-  `mrsm` command comes from `meerschaum-cli`, and two packages must not install the same script.
-  `python -m meerschaum` stays.
+- The `[project.scripts] mrsm` / `meerschaum` entry points call `_meerschaum_mrsm:main` (a top-level
+  module in the wheel that marks the process as the CLI before `meerschaum` is imported), which runs
+  `_native.main(argv)` (`src/main_api.rs`): the whole `mrsm` CLI inside the extension, the same
+  `meerschaum_cli::run_main` the standalone binary runs. It writes to the real file descriptors, resets
+  SIGINT to its default action for the run (and restores Python's handler when it returns to a
+  Python caller), releases the GIL for the whole run and sets `MRSM_PYTHON` to `sys.executable` unless
+  set. Everything the CLI re-launches (job supervisors and workers, compose, `systemd` units, the web
+  terminal) runs `<sys.executable> -m meerschaum` (`meerschaum_core::self_exe`), or the binary named by
+  `MRSM_BIN`. `import meerschaum` is eager (as it always was) except in the CLI process (`mrsm`, and
+  `python -m meerschaum`, detected from `sys.orig_argv`), where the façade is imported on first use. From the
+  main thread only; an empty `sys.executable` is an error.
 - The `rust_impl` guards and the replaced Python bodies are gone (D14).
 - The sdist must carry `Cargo.toml`, `Cargo.lock`, `.cargo/config.toml`, `rust-toolchain.toml`
   and the `crates/` the extension depends on (maturin's sdist collects the path dependencies of
   `manifest-path`).
 
-**`meerschaum-cli` (D8).** A separate project at `crates/meerschaum-cli/pyproject.toml` with
-`[tool.maturin] bindings = "bin"` (the uv/ruff pattern). The wheel is tagged `py3-none-<platform>`,
-has no Python dependency, and installs the `mrsm` executable into the environment's scripts
-directory. CI builds both wheels from the same workspace version and publishes them together.
-`meerschaum` pins `meerschaum-cli==<same version>`. The binary locates its Python environment as
-§4.3 describes.
+**One wheel (D8, revised 2026-10-17).** There is no `meerschaum-cli` wheel: the extension holds the one
+copy of the core and the CLI. The standalone `mrsm` binary is `cargo install meerschaum` (the front
+crate's default `cli` feature). The standalone binary locates its Python environment as §4.3 describes.

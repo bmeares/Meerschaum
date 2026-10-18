@@ -12,7 +12,9 @@
 #                `polars`), which also skips compiling Polars (~12 MB .so).
 #   --no-check   Skip the post-build import check.
 #
-# The extension always includes the `duckdb` and `oracle` flavors (what the wheels ship).
+# The extension always includes the `duckdb` and `oracle` flavors (what the wheels ship). DuckDB is not
+# compiled in: its own shared library is loaded at run time (`MRSM_DUCKDB_LIB`, `<root>/drivers`, or a
+# checked download on first use), so only `oracle` is a cargo feature.
 #
 # Requires maturin (`uv tool install maturin`) and a Python >= 3.11 (`PYTHON`, default python3).
 # MATURIN_BIN may select a specific maturin executable; otherwise use the current PATH lookup.
@@ -83,7 +85,7 @@ else
 fi
 # A command-line `--features` REPLACES the `features` list in pyproject.toml (it does not add to
 # it), so always pass the full set. Without `extension-module` the module links libpython.
-features="pyo3/abi3-py311,extension-module,duckdb,oracle"
+features="pyo3/abi3-py311,extension-module,oracle"
 if [ "$polars" -eq 1 ]; then
   features="$features,polars"
 fi

@@ -28,7 +28,7 @@ use meerschaum_connector::{PipeId, PipesKeys, PipesKeysQuery};
 use meerschaum_core::config::{Config, ConfigOptions};
 use meerschaum_core::value::{Map, Value};
 
-const MRSM: &str = env!("CARGO_BIN_EXE_mrsm");
+const MRSM: &str = env!("CARGO_BIN_EXE_mrsm-cli");
 
 fn fixtures() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/w9_compose_instance")

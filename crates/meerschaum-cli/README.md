@@ -1,15 +1,23 @@
 # meerschaum-cli
 
-> The `mrsm` binary of [Meerschaum](https://meerschaum.io): install it with `pip install meerschaum` or
-> `cargo install meerschaum-cli`. The library target is **internal** and may change in any minor release;
+> The CLI of [Meerschaum](https://meerschaum.io) as a library: `pip install meerschaum` (the `mrsm` console
+> script runs it from the wheel's extension) or `cargo install meerschaum` (the front crate's `cli` feature
+> builds the standalone `mrsm`). This crate is **internal** and may change in any minor release;
 > depend on the [`meerschaum`](https://crates.io/crates/meerschaum) crate for the Rust API.
 
-**Features.** `duckdb` and `oracle` (both default, D13) forward to the same features of `meerschaum-connector-sql`, so the binary
-can use DuckDB and Oracle instances like the `meerschaum._core` extension. DuckDB compiles its bundled C++ library
-(several minutes on a cold build); Oracle needs Oracle Instant Client at runtime only. `--no-default-features` gives the
-lean binary.
+**Features.** `oracle` (default, D13) forwards to the same feature of `meerschaum-connector-sql`, so the binary
+can use Oracle instances like the `meerschaum._core` extension; it needs Oracle Instant Client at runtime only.
+`--no-default-features` gives the lean binary. DuckDB is not a feature of this crate: the SQL crate's default `duckdb`
+feature adds only a loader for DuckDB's own shared library, which `mrsm` finds through `MRSM_DUCKDB_LIB` or the
+`<root>/drivers` cache and downloads on first use (`mrsm install driver duckdb` does it on purpose,
+`mrsm uninstall driver duckdb` removes it, `mrsm show drivers` reports it). `MRSM_NO_AUTO_INSTALL` forbids the implicit
+download.
 
-The `mrsm` binary: the argument parser (`spec`, `argparse`, `parse`), action dispatch, the native
+`run_main()` (`src/run.rs`) is the whole process: the front crate's `mrsm` binary and the Python extension's
+`_native.main` both call it. This crate's own `[[bin]]` is named `mrsm-cli` (`CARGO_BIN_EXE_mrsm-cli` in the
+integration tests) so that `cargo build --workspace` never writes two `target/*/mrsm`.
+
+The CLI: the argument parser (`spec`, `argparse`, `parse`), action dispatch, the native
 actions, the formatting toolkit, and the interactive shell. Design: `docs/design/v5.0.0.md` §4.3.
 
 ## The interactive shell (`src/shell/`)

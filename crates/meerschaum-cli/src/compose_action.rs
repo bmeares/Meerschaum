@@ -122,18 +122,28 @@ pub struct MrsmRunner<'r, 'a> {
 
 impl CommandRunner for MrsmRunner<'_, '_> {
     fn run(&mut self, command: &MrsmCommand) -> SuccessTuple {
-        let program = std::env::current_exe()
-            .map(|p| p.to_string_lossy().into_owned())
-            .unwrap_or_else(|_| "mrsm".into());
+        // This program again: the `mrsm` binary, or `python -m meerschaum` in the extension.
+        let (program, mut leading) = meerschaum_core::self_exe::self_program();
+        leading.extend(command.sysargs.iter().cloned());
         // An in-process command (`replace == false`) runs inside the subaction's project
         // environment in Python, so the child gets that environment too.
-        let (env, env_clear) = match command.env.as_ref().or(command.inherited_env.as_ref()) {
+        let (mut env, env_clear) = match command.env.as_ref().or(command.inherited_env.as_ref()) {
             Some(env) => (env_dict_to_strings(env), true),
             None => (Vec::new(), false),
         };
+        if env_clear && meerschaum_core::self_exe::runs_in_python() {
+            // `python -m meerschaum` must still find this package in the cleared environment.
+            for key in ["PYTHONPATH", "PYTHONHOME"] {
+                if let Some(value) = std::env::var_os(key)
+                    && !env.iter().any(|(k, _)| k == key)
+                {
+                    env.push((key.to_string(), value.to_string_lossy().into_owned()));
+                }
+            }
+        }
         let spec = CommandSpec {
             program,
-            args: command.sysargs.clone(),
+            args: leading,
             env,
             env_clear,
             quiet: command.capture_output,

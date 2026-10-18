@@ -135,6 +135,8 @@ struct Prepared {
 fn prepare(py: Python<'_>, context: Option<&Bound<'_, PyDict>>) -> PyResult<Prepared> {
     let session = crate::facade::worker_session();
     crate::facade::suggest_worker_python(py, &session);
+    // Compose steps and pipeline children the dispatcher starts re-run this program.
+    crate::main_api::ensure_self_command(py)?;
     // Native code that reads `Config::current()` (the engine, `MRSM{}` symlinks) sees the same
     // tree as the runtime's own copy.
     crate::facade::publish_live_config(py)?;

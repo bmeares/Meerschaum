@@ -19,20 +19,21 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 
+from __future__ import annotations
+
 import sys
-from typing import List, Optional
 
 
-def main(sysargs: Optional[List[str]] = None) -> None:
+def main(sysargs: list[str] | None = None) -> None:
     """
-    Main CLI entry point: `python -m meerschaum ...` runs the native `mrsm` binary
-    (the `meerschaum-cli` wheel) with the same arguments.
+    Main CLI entry point: `python -m meerschaum ...` and the `mrsm` / `meerschaum` console scripts
+    run the CLI in-process from the native extension (see `meerschaum._internal.binary`).
     """
-    from meerschaum._internal.binary import exec_binary
-    exec_binary(sysargs)
+    from meerschaum._internal.binary import main as run
+    run(sysargs)
 
 
-def _exit(return_code: int = 0, old_cwd: Optional[str] = None) -> None:
+def _exit(return_code: int = 0, old_cwd: str | None = None) -> None:
     _close_pools()
     sys.exit(return_code)
 

@@ -6,7 +6,7 @@ license.workspace = true
 repository.workspace = true
 authors.workspace = true
 rust-version.workspace = true
-description = "Meerschaum: sync pipes of data between databases, APIs and files (the stable Rust API; the `mrsm` CLI is the `meerschaum-cli` crate)"
+description = "Meerschaum: sync pipes of data between databases, APIs and files (the stable Rust API; `cargo install meerschaum` installs the `mrsm` CLI)"
 readme = "README.md"
 homepage.workspace = true
 documentation = "https://docs.rs/meerschaum"
@@ -15,19 +15,25 @@ categories = ["database", "data-structures"]
 include = ["src/**/*", "/LICENSE", "/NOTICE"]
 
 [package.metadata.docs.rs]
-# docs.rs builds with `full` so the feature-gated items are documented (not `duckdb` / `oracle`: the DuckDB
-# bundle is slow to compile and neither belongs in the front crate's documentation).
+# docs.rs builds with `full` so the feature-gated items are documented (not `oracle`: it needs a client
+# library and does not belong in the front crate's documentation).
+# No default features: the `cli` feature only adds the `mrsm` binary, which docs.rs does not document.
+no-default-features = true
 features = ["full"]
 
 [features]
 # The SQL connector is what most programs want; everything else is opt-in (the Polars model:
 # one crate to depend on, features choose what is compiled).
-default = ["sql"]
-# `SqlConnector` (PostgreSQL, MySQL, SQLite, MSSQL families).
+default = ["sql", "cli"]
+# `SqlConnector` (PostgreSQL, MySQL, SQLite, MSSQL and DuckDB families; DuckDB's own library is
+# loaded at run time and downloaded on first use, nothing of it is compiled in).
 sql = ["dep:meerschaum-connector-sql"]
-# DuckDB (bundled C++ library, slow to compile) and Oracle (needs Instant Client at runtime) flavors.
-duckdb = ["sql", "meerschaum-connector-sql?/duckdb"]
+# The Oracle flavor (needs Oracle Instant Client at runtime).
 oracle = ["sql", "meerschaum-connector-sql?/oracle"]
+# The standalone `mrsm` binary (`cargo install meerschaum`): the whole CLI, shell, API server, jobs
+# and engine, with the Oracle flavor like every other `mrsm`. Library users depend on this crate
+# with `default-features = false` (the binary is skipped and the CLI is not compiled).
+cli = ["sql", "oracle", "dep:meerschaum-cli"]
 # `ValkeyConnector` (Redis-compatible instances).
 valkey = ["dep:meerschaum-connector-valkey"]
 # `APIConnector`, the client of a Meerschaum API server, and the shared route/auth models.
@@ -38,7 +44,7 @@ engine = ["dep:meerschaum-engine"]
 server = ["api", "dep:meerschaum-server"]
 # The native (Rust) plugin SDK.
 plugin = ["dep:meerschaum-plugin"]
-# Everything above except the opt-in `duckdb` / `oracle` flavors.
+# Everything above except the opt-in `oracle` flavor.
 full = ["sql", "valkey", "api", "engine", "server", "plugin"]
 
 [dependencies]
@@ -51,3 +57,12 @@ meerschaum-connector-api = { workspace = true, features = ["client"], optional =
 meerschaum-engine = { workspace = true, optional = true }
 meerschaum-server = { workspace = true, optional = true }
 meerschaum-plugin = { workspace = true, optional = true }
+meerschaum-cli = { workspace = true, optional = true }
+
+[[bin]]
+# `cargo install meerschaum`. The CLI crate's own internal binary is `mrsm-cli`.
+name = "mrsm"
+path = "src/main.rs"
+required-features = ["cli"]
+test = false
+doc = false

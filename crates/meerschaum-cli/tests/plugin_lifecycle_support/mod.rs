@@ -133,7 +133,7 @@ impl Home {
             env.retain(|(k, _)| k != key);
             env.push((key.to_string(), value.to_string()));
         }
-        let mut command = Command::new(env!("CARGO_BIN_EXE_mrsm"));
+        let mut command = Command::new(env!("CARGO_BIN_EXE_mrsm-cli"));
         command
             .args(args)
             .env_clear()
@@ -173,7 +173,7 @@ impl Home {
 }
 
 pub fn run_binary(args: &[&str], env: &[(String, String)], cwd: Option<&Path>) -> Run {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_mrsm"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_mrsm-cli"));
     command
         .args(args)
         .env_clear()

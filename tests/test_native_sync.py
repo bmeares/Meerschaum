@@ -1113,10 +1113,8 @@ def test_a_valkey_instance_syncs_natively(native_calls):
 @pytest.fixture(scope='module')
 def api_server():
     """A loopback `mrsm start api` (random port, temporary root; never 8989)."""
-    import pathlib
-    binary = pathlib.Path(os.environ.get('MRSM_BIN') or 'target/debug/mrsm')
-    if not binary.exists():
-        pytest.skip("build the CLI first: cargo build -p meerschaum-cli --bin mrsm")
+    from tests._binary import binary_or_skip
+    binary_or_skip()
     from tests.console.conftest import Server
     server = Server('w15l-sync', native=False)
     try:

@@ -15,7 +15,8 @@
 #     the dynamic symbol table and so cannot change behavior (~110 MB for the `[full]` extras).
 #
 # It keeps every `*.dist-info` (so `pip list`, `importlib.metadata` and `prune venvs` still see the
-# distributions), the `.pyi` stubs, and the `mrsm` binary (already stripped by maturin).
+# distributions), the `.pyi` stubs, and the `_native` extension (already stripped by maturin; there
+# is no `mrsm` binary, the CLI runs from the extension).
 set -euo pipefail
 
 prefix="${1:?usage: trim_install.sh PREFIX}"

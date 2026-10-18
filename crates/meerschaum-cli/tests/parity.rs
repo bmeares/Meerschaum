@@ -697,7 +697,7 @@ fn dispatch_skeleton() {
         "x = 1\n",
     )
     .unwrap();
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_mrsm"))
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_mrsm-cli"))
         .args(["verify", "plugins"])
         .env("MRSM_ROOT_DIR", tmp.path())
         .env("MRSM_PLUGINS_DIR", tmp.path().join("plugins"))

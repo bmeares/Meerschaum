@@ -35,7 +35,7 @@ use super::{
 
 static STOP: OnceLock<Arc<AtomicBool>> = OnceLock::new();
 static SIGNALS: AtomicUsize = AtomicUsize::new(0);
-static HANDLER: OnceLock<()> = OnceLock::new();
+static HANDLER: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 static EMBEDDED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
@@ -77,6 +77,15 @@ pub fn with_call_stop<R>(flag: Arc<AtomicBool>, f: impl FnOnce() -> R) -> R {
     result
 }
 
+/// Forget that [`install_stop_handler`] ran, and any signal it counted. The handler is a task of the
+/// session's runtime, which ends with the session: a host which runs the CLI more than once in
+/// one process (the Python extension's `_native.main`) calls this after each run so the next run
+/// installs its own.
+pub fn release_stop_handler() {
+    HANDLER.store(false, Ordering::SeqCst);
+    reset_stop_request();
+}
+
 /// Begin a new interactive command after any previous command has finished stopping.
 pub fn reset_stop_request() {
     SIGNALS.store(0, Ordering::SeqCst);
@@ -89,7 +98,7 @@ pub fn reset_stop_request() {
 pub fn install_stop_handler(session: &super::Session) {
     // An embedding host (the Python extension) owns the process's signals: it polls them
     // itself and sets the stop flag for the call it runs (see [`set_embedded`]).
-    if EMBEDDED.load(Ordering::SeqCst) || HANDLER.set(()).is_err() {
+    if EMBEDDED.load(Ordering::SeqCst) || HANDLER.swap(true, Ordering::SeqCst) {
         return;
     }
     let flag = process_stop_flag();

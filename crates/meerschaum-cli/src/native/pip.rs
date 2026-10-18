@@ -492,7 +492,7 @@ impl InstallLock {
         {
             // Never hold the in-process table while waiting on another process.
             drop(held);
-            let _ = fs4::fs_std::FileExt::lock_exclusive(&file);
+            let _ = fs4::FileExt::lock(&file);
             held = held_locks().lock().expect("install locks");
             held.insert(path.clone(), (1, file));
         }
@@ -507,7 +507,7 @@ impl Drop for InstallLock {
             if *depth > 1 {
                 *depth -= 1;
             } else if let Some((_, file)) = held.remove(&self.path) {
-                let _ = fs4::fs_std::FileExt::unlock(&file);
+                let _ = fs4::FileExt::unlock(&file);
             }
         }
     }
@@ -920,7 +920,7 @@ pub fn record_request(venv_root: &Path, install_name: &str, requester: &str) -> 
         .open(venv_root.join(".mrsm_requests.lock"))
         .ok();
     if let Some(file) = &lock_file {
-        let _ = fs4::fs_std::FileExt::lock_exclusive(file);
+        let _ = fs4::FileExt::lock(file);
     }
     let mut data: Json = std::fs::read_to_string(&path)
         .ok()
@@ -954,7 +954,7 @@ pub fn record_request(venv_root: &Path, install_name: &str, requester: &str) -> 
         let _ = std::fs::remove_file(&temp);
     }
     if let Some(file) = &lock_file {
-        let _ = fs4::fs_std::FileExt::unlock(file);
+        let _ = fs4::FileExt::unlock(file);
     }
     written.is_ok()
 }

@@ -11,18 +11,29 @@
 #                MRSM_CI_MIN_FREE_GB (default 10). Self-hosted runner safety valve.
 #   fmt          cargo fmt --all --check
 #   clippy       cargo clippy --all-targets -- -D warnings
-#   test         cargo test --workspace
+#   test         cargo test --workspace, with DuckDB's shared library from the persistent cache
+#                (`duckdb-lib`) and the DuckDB integration tests enabled (MRSM_TEST_DUCKDB_PATH).
+#   duckdb-platform  The DuckDB loader on the platform running it (the hosted Linux arm64 / macOS / Windows
+#                legs): the loader unit tests, then `--test duckdb_install` (downloads the pinned library of
+#                this platform with the installer, SHA-256 verified, into a temporary root, loads it, runs a
+#                query) and `--test duckdb_library` (every type, parameter and timezone check, the library
+#                downloaded on first use into MRSM_ROOT_DIR or a temporary root). Needs network access.
+#   duckdb-lib   Print the path of DuckDB's official shared library, downloading it (checksum from the
+#                Rust source) into `${MRSM_CI_CACHE:-$HOME/.cache/mrsm-ci}` on the first run only; on
+#                GitHub it exports MRSM_DUCKDB_LIB to later steps. (scripts/rust/duckdb_lib.sh)
 #   generated    Fail when native/packages_table.rs or native/bootstrap_templates.json differ from
 #                their generators (scripts/rust/gen_*.py; reads the Python sources as text).
-#   build        cargo build --release -p meerschaum-cli
+#   bin-debug    cargo build -p meerschaum --bin mrsm (target/debug/mrsm: the standalone binary of this tree, which
+#                the pytest job passes to the tests that need one as MRSM_TEST_BIN; see tests/_binary.py)
+#   build        cargo build --release -p meerschaum --bin mrsm (the standalone `mrsm`, what `cargo install meerschaum` builds)
 #   check        cargo check --workspace            (the hosted ubuntu/windows/macos legs)
 #   extension    Build the `meerschaum._core._native` extension into the working tree (debug profile; maturin in
 #                a scratch venv, scripts/rust/build_py.sh, which takes the tree's build lock) for the cargo tests that start
 #                real Python workers (they import `meerschaum`, which requires it). PYTHON_BIN picks the
 #                interpreter (default python3); on GitHub it also exports MRSM_PYTHON to later steps.
 #   frontcrate   Compile the `meerschaum` front crate with `--no-default-features`, with each of
-#                `sql valkey api engine server plugin` alone, and `cargo test -p meerschaum --features full`
-#                (the `meerschaum` features are otherwise only built together by the workspace).
+#                `sql cli valkey api engine server plugin` alone (`cli` builds the `mrsm` binary), and
+#                `cargo test -p meerschaum --features full` (the `meerschaum` features are otherwise only built together by the workspace).
 #   package      cargo package --workspace --no-verify (the crates.io tarballs: manifests, `include` lists,
 #                lockstep versions) then scripts/rust/check_packages.py (size < 10 MB, no tests/fixtures/
 #                benches). Fast: nothing is compiled. MRSM_PACKAGE_ALLOW_DIRTY=1 allows a dirty tree.
@@ -85,8 +96,43 @@ step_disk_guard() {
 
 step_fmt()    { log "cargo fmt --all --check"; cargo fmt --all --check; }
 step_clippy() { log "cargo clippy --all-targets -- -D warnings"; cargo clippy --all-targets -- -D warnings; }
-step_test()   { log "cargo test --workspace"; cargo test --workspace; }
-step_build()  { log "cargo build --release -p meerschaum-cli"; cargo build --release -p meerschaum-cli; }
+step_duckdb_platform() {
+  local root
+  root="${MRSM_ROOT_DIR:-}"
+  if [ -z "$root" ]; then
+    root="$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/mrsm-duckdb-root.XXXXXX")"
+  fi
+  mkdir -p "$root"
+  # The library comes from the pinned download, never from the host: drop any override.
+  unset MRSM_DUCKDB_LIB MRSM_NO_AUTO_INSTALL
+  log "DuckDB loader unit tests"
+  cargo test -p meerschaum-connector-sql --lib duckdb
+  log "DuckDB: download, verify, load (root $root)"
+  MRSM_TEST_DUCKDB_DOWNLOAD=1 MRSM_ROOT_DIR="$root" \
+    cargo test -p meerschaum-connector-sql --test duckdb_install
+  log "DuckDB: the type, parameter and timezone tests against the downloaded library"
+  MRSM_TEST_DUCKDB_DOWNLOAD=1 MRSM_ROOT_DIR="$root" \
+    cargo test -p meerschaum-connector-sql --test duckdb_library
+}
+step_duckdb_lib() { log "DuckDB shared library"; scripts/rust/duckdb_lib.sh; }
+step_test()   {
+  # DuckDB is not compiled in: its own library is loaded at run time. Tests run with
+  # `MRSM_NO_AUTO_INSTALL=1` in CI, so provide it from the persistent cache (one download per
+  # DuckDB version on the runner, never per run) unless the caller already set MRSM_DUCKDB_LIB.
+  if [ -z "${MRSM_DUCKDB_LIB:-}" ]; then
+    MRSM_DUCKDB_LIB="$(scripts/rust/duckdb_lib.sh)"
+    export MRSM_DUCKDB_LIB
+  fi
+  if [ -z "${MRSM_TEST_DUCKDB_PATH+x}" ]; then
+    MRSM_TEST_DUCKDB_PATH="$(mktemp -d "${RUNNER_TEMP:-$HOME/.cache}/mrsm-duckdb-tests.XXXXXX")"
+    export MRSM_TEST_DUCKDB_PATH
+    trap "rm -rf '$MRSM_TEST_DUCKDB_PATH'" EXIT
+  fi
+  log "cargo test --workspace (DuckDB library: $MRSM_DUCKDB_LIB)"
+  cargo test --workspace
+}
+step_build()  { log "cargo build --release -p meerschaum --bin mrsm"; cargo build --release -p meerschaum --bin mrsm; }
+step_bin_debug() { log "cargo build -p meerschaum --bin mrsm"; cargo build -p meerschaum --bin mrsm; }
 step_generated() { log "generated tables match their generators"; cargo test -p meerschaum-cli --test generated_tables; }
 step_extension() {
   local python scratch
@@ -100,7 +146,8 @@ step_extension() {
   mkdir -p "$scratch/root" "$scratch/plugins"
   # `build_py.sh` takes the tree's build lock (target/.build-py.lock) itself. `--debug`: the same
   # profile `cargo test --workspace` compiles, so most dependencies are shared (the release build
-  # would add a second, optimized copy of every one); the debug extension keeps duckdb and oracle.
+  # would add a second, optimized copy of every one); the debug extension keeps the oracle flavor (DuckDB's
+  # own library is loaded at run time).
   PYTHON="$python" MATURIN_BIN="$scratch/tools/bin/maturin" PYTHONPATH="$REPO" \
     MRSM_ROOT_DIR="$scratch/root" MRSM_PLUGINS_DIR="$scratch/plugins" \
     scripts/rust/build_py.sh --debug
@@ -112,7 +159,7 @@ step_frontcrate() {
   log "cargo check -p meerschaum --no-default-features --all-targets"
   cargo check -p meerschaum --no-default-features --all-targets
   local feature
-  for feature in sql valkey api engine server plugin; do
+  for feature in sql cli valkey api engine server plugin; do
     log "cargo check -p meerschaum --no-default-features --all-targets --features $feature"
     cargo check -p meerschaum --no-default-features --all-targets --features "$feature"
   done
@@ -223,7 +270,10 @@ for s in "${steps[@]}"; do
     fmt)        step_fmt ;;
     clippy)     step_clippy ;;
     test)       step_test ;;
+    duckdb-lib) step_duckdb_lib ;;
+    duckdb-platform) step_duckdb_platform ;;
     build)      step_build ;;
+    bin-debug)  step_bin_debug ;;
     generated)  step_generated ;;
     check)      step_check ;;
     extension)  step_extension ;;

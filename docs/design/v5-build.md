@@ -10,7 +10,7 @@ Conventions for the crates themselves are in `crates/README.md`.
 | `rust` / `fmt` | self-hosted | `cargo fmt --all --check` | yes |
 | `rust` / `clippy` | self-hosted | `cargo clippy --all-targets -- -D warnings` | yes |
 | `rust` / `test` | self-hosted | `cargo test --workspace` | yes |
-| `rust` / `build` | self-hosted | `cargo build --release -p meerschaum-cli` (uploads `mrsm`) | yes |
+| `rust` / `build` | self-hosted | `cargo build --release -p meerschaum --bin mrsm` (the standalone `mrsm` that `cargo install meerschaum` builds; uploads it) | yes |
 | `rust` / `parity` | self-hosted | regenerate `crates/*/tests/fixtures/gen_*.py` with v4.1.4, diff | yes (optional job) |
 | `rust` / `check (ubuntu-latest)` | GitHub-hosted | `cargo check --workspace` | yes |
 | `rust` / `check (windows-latest, macos-latest)` | GitHub-hosted | `cargo check --workspace` | no (`continue-on-error`, §15) |
@@ -83,24 +83,23 @@ git-ignored, and persists on the runner.
 
 ## Python packaging (D8, D9, D20)
 
-There is no `setup.py`, `setup.cfg` or `MANIFEST.in` any more. Two distributions are built with maturin:
+There is no `setup.py`, `setup.cfg` or `MANIFEST.in` any more. One distribution is built with maturin (D8, revised 2026-10-17: there is no `meerschaum-cli` wheel):
 
 | Distribution | Source | Contents |
 |---|---|---|
-| `meerschaum` | root `pyproject.toml` (maturin mixed project, `abi3-py311`, module `meerschaum._core._native`) | The Python SDK and façade plus the Rust extension. `dependencies` is only `meerschaum-cli` (same version); every heavier package is an extra (`pandas`, `polars`, `geo`, `sql`, `sql-mssql`, `sql-oracle`, `sql-duckdb`, `sql-cockroachdb`, `api`, `dash`, `shell`, `cli-tools`, `gui`, `full`). |
-| `meerschaum-cli` | `crates/meerschaum-cli/pyproject.toml` (`bindings = "bin"`) | The native `mrsm` binary, no Python dependencies. |
+| `meerschaum` | root `pyproject.toml` (maturin mixed project, `abi3-py311`, module `meerschaum._core._native`) | The Python SDK and façade plus the Rust extension, which holds the whole core and the CLI. The `mrsm` and `meerschaum` console scripts (`_meerschaum_mrsm:main`, a top-level module shipped in the wheel) call `_native.main(argv)`, so there is no `mrsm` binary in the wheel. `dependencies` is empty; every heavier package is an extra (`pandas`, `polars`, `geo`, `sql`, `sql-mssql`, `sql-oracle`, `sql-duckdb`, `sql-cockroachdb`, `api`, `dash`, `shell`, `cli-tools`, `gui`, `full`). |
 
-`scripts/check_packaging.py` verifies that the Cargo workspace version, the `meerschaum-cli==X` pin and the extras in `pyproject.toml` agree with `meerschaum/utils/packages/_packages.py`. `.github/workflows/wheels.yaml` builds both wheels on GitHub-hosted runners only (Linux, macOS, Windows) and smoke-tests them in a fresh venv. `scripts/rust/build_py.sh` still builds the in-tree extension for development. The Docker `slim` image installs the base wheels only; the default image installs `meerschaum[full]`. Current size and functional gates are recorded below, rather than inferred from the scaffold measurements.
+`scripts/check_packaging.py` verifies that the Cargo workspace version, the console scripts and the extras in `pyproject.toml` agree with `meerschaum/utils/packages/_packages.py`, and (`--wheels dist`) that the wheel has no dependencies and no `mrsm` binary. `.github/workflows/wheels.yaml` builds the wheel on GitHub-hosted runners only (Linux, macOS, Windows) and smoke-tests it in a fresh venv (`mrsm --version`, `mrsm show connectors`, `python -m meerschaum --version`, a `sync` of a tiny pipe on SQLite). The standalone binary is `cargo install meerschaum` (the front crate's default `cli` feature; library users use `default-features = false`). `scripts/rust/build_py.sh` still builds the in-tree extension for development. The Docker `slim` image installs the base wheel only; the default image installs `meerschaum[full]`. Current size and functional gates are recorded below, rather than inferred from the scaffold measurements.
 
 ## Docker targets and the size gate (§12.1)
 
 | `docker buildx build ...` | Image | Contents |
 |---|---|---|
-| `.` (default, last stage) | `full` with selected extras | Installs both locally built maturin wheels; `dep_group=full` (default), `api` or `minimal` selects the extras. Entrypoint `mrsm`. |
-| `--target full` | full runtime | Fedora 44 installroot plus the wheels, selected extras, plugin-install tooling and interactive tools. Entrypoint `mrsm`. |
-| `--target slim` | base runtime | Fedora 44 installroot plus the two base wheels, with no package manager or compiler. Entrypoint `mrsm`. |
+| `.` (default, last stage) | `full` with selected extras | Installs the locally built maturin wheel; `dep_group=full` (default), `api` or `minimal` selects the extras. Entrypoint `mrsm`. |
+| `--target full` | full runtime | Fedora 44 installroot plus the wheel, selected extras, plugin-install tooling and interactive tools. Entrypoint `mrsm`. |
+| `--target slim` | base runtime | Fedora 44 installroot plus the base wheel, with no package manager or compiler. Entrypoint `mrsm`. |
 
-The Fedora 44 `rust-builder` stage builds both wheels with maturin and the repository's Rust
+The Fedora 44 `rust-builder` stage builds the wheel with maturin and the repository's Rust
 toolchain. BuildKit cache mounts share the Rust artifacts between builds. The `py-slim` and
 `py-full` stages install into a prefix and trim development files before copying into the
 runtime installroots. Full still explicitly includes PyYAML while public Python config I/O
@@ -159,7 +158,7 @@ so `-` and `_` count as the same name. Results on 2026-10-12:
 | `meerschaum-cli` | free |
 | `mrsm` | free |
 
-`meerschaum-py` is also free (it is `publish = false`: the extension ships in the PyPI wheel). `meerschaum-connector` and `meerschaum-worker` are free too (checked 2026-10-17). `meerschaum` is the front crate (`crates/meerschaum`, thin re-exports behind cargo features); the other crates are internal. crates.io has no reservation mechanism. Claiming a name means
+`meerschaum-py` is also free (it is `publish = false`: the extension ships in the PyPI wheel). `meerschaum-connector` and `meerschaum-worker` are free too (checked 2026-10-17). `meerschaum` is the front crate (`crates/meerschaum`, thin re-exports behind cargo features, plus the `mrsm` binary behind its default `cli` feature: `cargo install meerschaum`; `meerschaum-cli` is the internal library it calls); the other crates are internal. crates.io has no reservation mechanism. Claiming a name means
 publishing a version from the owner's account. The workspace is still at `5.0.0-a1`, so publish
 placeholders soon (§15).
 

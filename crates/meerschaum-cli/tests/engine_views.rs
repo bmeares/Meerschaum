@@ -37,7 +37,7 @@ impl Env {
 }
 
 fn run_in(root: &Path, plugins: &Path, args: &[&str]) -> Output {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_mrsm"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_mrsm-cli"));
     for (key, _) in std::env::vars() {
         if key.starts_with("MRSM_") || matches!(key.as_str(), "RUST_LOG" | "NO_COLOR" | "TERM") {
             command.env_remove(key);

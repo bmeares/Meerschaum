@@ -6,7 +6,7 @@ license.workspace = true
 repository.workspace = true
 authors.workspace = true
 rust-version.workspace = true
-description = "The mrsm command line of Meerschaum (clap CLI, interactive shell, native actions, Gantt TUI)"
+description = "Internal crate of Meerschaum: the CLI library behind `mrsm` (clap CLI, shell, native actions); install `meerschaum`, not this crate"
 readme = "README.md"
 homepage.workspace = true
 documentation = "https://docs.rs/meerschaum-cli"
@@ -19,21 +19,24 @@ name = "meerschaum_cli"
 path = "src/lib.rs"
 
 [[bin]]
-name = "mrsm"
+# Internal: what this crate's integration tests run (`CARGO_BIN_EXE_mrsm-cli`). The `mrsm` users
+# install is the `meerschaum` front crate's binary (`cargo install meerschaum`) or the Python
+# wheel's console script; naming this one `mrsm` as well would make `cargo build --workspace`
+# write both to `target/<profile>/mrsm` (cargo's "output filename collision").
+name = "mrsm-cli"
 path = "src/main.rs"
 
 [package.metadata.docs.rs]
-# docs.rs has no time for the bundled DuckDB C++ build (and no Oracle client): document the lean build.
+# docs.rs has no Oracle client: document the lean build.
 no-default-features = true
 
 [features]
-# D13: the `mrsm` binary ships the DuckDB and Oracle drivers, like the `meerschaum._core` extension, so
-# `cargo install meerschaum-cli`, `cargo build -p meerschaum-cli`, the maturin wheel and the Docker image
-# all get them. `duckdb` compiles the bundled DuckDB C++ library (several minutes, ~1 GB of objects);
-# `oracle` only needs Oracle Instant Client at runtime (`libclntsh`), never at build time.
-# `--no-default-features` gives the lean binary.
-default = ["duckdb", "oracle"]
-duckdb = ["meerschaum-connector-sql/duckdb"]
+# D13: the `mrsm` binary ships the DuckDB and Oracle drivers, like the `meerschaum._core` extension.
+# DuckDB's own shared library is loaded at run time (downloaded on first use, `MRSM_DUCKDB_LIB`;
+# nothing of DuckDB is compiled in), so it is always available: the SQL crate's default `duckdb`
+# feature adds only the small loader. `oracle` only needs Oracle Instant Client at runtime
+# (`libclntsh`), never at build time. `--no-default-features` gives the lean binary.
+default = ["oracle"]
 oracle = ["meerschaum-connector-sql/oracle"]
 
 [dependencies]
@@ -75,7 +78,7 @@ tar = { version = "0.4", default-features = false }
 flate2 = "1"
 sha2 = { workspace = true }
 hex = { workspace = true }
-fs4 = "0.13"
+fs4 = "1.1"
 
 [target.'cfg(unix)'.dependencies]
 # `timed_input`: poll stdin with a timeout (no reader thread that outlives the call);

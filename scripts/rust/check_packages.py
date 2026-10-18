@@ -13,6 +13,10 @@ For every archive:
   crate declares an explicit `include`, so a path here means the list is too broad);
 - it carries a README, the root `LICENSE` and `NOTICE`, and a `Cargo.toml` with `description`, `license` and `repository`.
 
+- the `meerschaum` front crate also ships `src/main.rs` and its manifest declares the `mrsm` binary
+  (`[[bin]] name = "mrsm"`, `required-features = ["cli"]`), a `cli` feature and `default = [.., "cli"]`:
+  `cargo install meerschaum` must build the standalone CLI.
+
 Prints a size table. Exit 1 on any failure. Standard library only.
 """
 
@@ -57,6 +61,16 @@ def check(archive: Path, limit: int) -> tuple[int, list[str]]:
             for key in ('description', 'license', 'repository'):
                 if not re.search(rf'^{key}\s*=', manifest, re.M):
                     failures.append(f"{archive.name}: Cargo.toml has no `{key}`")
+            if re.fullmatch(r'meerschaum-\d.*', stem):
+                if f"{stem}/src/main.rs" not in names:
+                    failures.append(f"{archive.name}: has no src/main.rs (the `mrsm` binary)")
+                if not re.search(r'\[\[bin\]\]\s*(?:#[^\n]*\n\s*)*name\s*=\s*"mrsm"', manifest):
+                    failures.append(f"{archive.name}: Cargo.toml declares no `mrsm` binary")
+                if not re.search(r'^cli\s*=', manifest, re.M):
+                    failures.append(f"{archive.name}: Cargo.toml has no `cli` feature")
+                default = re.search(r'^default\s*=\s*\[([^\]]*)\]', manifest, re.M)
+                if not default or '"cli"' not in default.group(1):
+                    failures.append(f"{archive.name}: the `cli` feature is not a default feature")
     return size, failures
 
 

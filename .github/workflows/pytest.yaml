@@ -47,6 +47,14 @@ jobs:
           export MATURIN_BIN="$build_scratch/tools/bin/maturin"
           scripts/rust/build_py.sh
 
+      - name: Build the standalone mrsm (only for the tests that run the binary itself)
+        ### The CLI runs from the extension built above (`python -m meerschaum`, what `scripts/mrsm.sh`
+        ### and the tests use). A few tests (the loopback API servers) need a standalone `mrsm`: it is
+        ### built here, from this checkout, and passed explicitly. `target/` is shared with earlier runs,
+        ### so nothing may pick a binary up from there (`tests/_binary.py` ignores it in CI and checks
+        ### the version and age of the one it is given).
+        run: scripts/rust/ci.sh bin-debug
+
       - name: Test environment
         ### A dedicated venv (kept across runs like `.venv-ref`): the tests never install anything
         ### themselves and the runner's own interpreter is never modified. It uses the Python the
@@ -82,5 +90,8 @@ jobs:
           MRSM_TEST_FLAVORS: "all"
           MRSM_DEBUG: "false"
           PYTHON_BIN: ${{ github.workspace }}/.venv-test/bin/python
+          ### Used only by tests/_binary.py (never `MRSM_BIN`, which would also change what the
+          ### product itself runs: jobs and `scripts/mrsm.sh` use the extension).
+          MRSM_TEST_BIN: ${{ github.workspace }}/target/debug/mrsm
           ### The venv above already holds the extras; `test.sh` must not install again.
           MRSM_TEST_SKIP_INSTALL: "1"

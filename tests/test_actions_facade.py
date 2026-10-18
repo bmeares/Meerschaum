@@ -42,7 +42,8 @@ def test_actions_are_the_native_registry():
         assert list(get_subactions(name)) == [sub[0] for sub in subs]
     ### v4's names are all there.
     assert {'sync', 'show', 'install', 'start', 'delete', 'register', 'compose'} <= set(actions)
-    assert set(get_subactions('install')) == {'packages', 'plugins', 'required'}
+    ### `drivers` is v5-only (DuckDB's shared library, `install driver duckdb`).
+    assert set(get_subactions('install')) == {'drivers', 'packages', 'plugins', 'required'}
 
 
 def test_get_action_resolves_subactions_by_v4_function_names():
@@ -188,32 +189,25 @@ def test_a_plugin_action_is_added_to_actions_and_wins_nothing_over_core():
         plugins.unload_custom_actions(['w16_facade'])
 
 
-def test_python_dash_m_runs_the_native_binary(tmp_path):
-    """`python -m meerschaum ...` is `mrsm ...`: same output, same exit code."""
-    from meerschaum._internal.binary import find_binary
+def test_python_dash_m_runs_the_cli_from_the_extension(tmp_path):
+    """`python -m meerschaum ...` is `mrsm ...`: same output, same exit code, no binary involved."""
+    from tests._binary import find_binary
 
-    binary = find_binary()
-    if binary is None:
-        pytest.skip("No `mrsm` binary is built (cargo build -p meerschaum-cli).")
     env = {
         **os.environ,
         'PYTHONPATH': str(REPO),
         'MRSM_ROOT_DIR': str(tmp_path / 'root'),
         'MRSM_PLUGINS_DIR': str(tmp_path / 'plugins'),
-        'MRSM_BIN': binary,
     }
+    env.pop('MRSM_BIN', None)
     (tmp_path / 'plugins').mkdir()
     (tmp_path / 'root').mkdir()
     via_python = subprocess.run(
         [sys.executable, '-m', 'meerschaum', 'show', 'version', '--nopretty'],
         capture_output=True, text=True, env=env, timeout=60,
     )
-    direct = subprocess.run(
-        [binary, 'show', 'version', '--nopretty'],
-        capture_output=True, text=True, env=env, timeout=60,
-    )
-    assert via_python.returncode == direct.returncode == 0
-    assert via_python.stdout == direct.stdout == _core.__version__ + '\n'
+    assert via_python.returncode == 0, via_python.stderr
+    assert via_python.stdout == _core.__version__ + '\n'
 
     failing = subprocess.run(
         [sys.executable, '-m', 'meerschaum', 'delete', 'users', 'no_such_user_w16', '-y'],
@@ -221,14 +215,53 @@ def test_python_dash_m_runs_the_native_binary(tmp_path):
     )
     assert failing.returncode == 1
 
+    binary = find_binary()
+    if binary is None:
+        return
+    ### The standalone binary prints the same thing, and `MRSM_BIN` makes python run it instead.
+    direct = subprocess.run(
+        [binary, 'show', 'version', '--nopretty'],
+        capture_output=True, text=True, env=env, timeout=60,
+    )
+    assert direct.returncode == 0 and direct.stdout == via_python.stdout
+    through_bin = subprocess.run(
+        [sys.executable, '-m', 'meerschaum', 'show', 'version', '--nopretty'],
+        capture_output=True, text=True, env={**env, 'MRSM_BIN': binary}, timeout=60,
+    )
+    assert through_bin.returncode == 0 and through_bin.stdout == via_python.stdout
+
+
+def test_console_script_does_not_import_the_facade(tmp_path):
+    """Starting `mrsm` pays for the extension, not for `import meerschaum.Pipe`."""
+    (tmp_path / 'root').mkdir()
+    (tmp_path / 'plugins').mkdir()
+    env = {
+        **os.environ,
+        'PYTHONPATH': str(REPO),
+        'MRSM_ROOT_DIR': str(tmp_path / 'root'),
+        'MRSM_PLUGINS_DIR': str(tmp_path / 'plugins'),
+    }
+    env.pop('MRSM_BIN', None)
+    trace = (
+        "import sys\n"
+        "sys._meerschaum_cli = True\n"
+        "import meerschaum._internal.binary as b\n"
+        "rc = b._extension().main(['--version'])\n"
+        "sys.stdout.flush()\n"
+        "assert rc == 0\n"
+        "assert 'meerschaum._internal._facade' not in sys.modules, 'the façade was imported'\n"
+        "assert 'meerschaum.core' not in sys.modules\n"
+        "print('ok')\n"
+    )
+    result = subprocess.run(
+        [sys.executable, '-c', trace], capture_output=True, text=True, env=env, timeout=60,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip().endswith('ok')
+
 
 def test_reload_rebuilds_the_plugin_manifest_through_the_worker(tmp_path):
     """`mrsm reload` imports the plugins in a Python worker and writes the manifest."""
-    from meerschaum._internal.binary import find_binary
-
-    binary = find_binary()
-    if binary is None:
-        pytest.skip("No `mrsm` binary is built (cargo build -p meerschaum-cli).")
     root, plugins = tmp_path / 'root', tmp_path / 'plugins'
     root.mkdir()
     plugins.mkdir()
@@ -242,11 +275,11 @@ def test_reload_rebuilds_the_plugin_manifest_through_the_worker(tmp_path):
         'PYTHONPATH': str(REPO),
         'MRSM_ROOT_DIR': str(root),
         'MRSM_PLUGINS_DIR': str(plugins),
-        'MRSM_PYTHON': sys.executable,
-        'MRSM_BIN': binary,
     })
+    ### No `MRSM_PYTHON`: the workers use the interpreter that runs the CLI.
     result = subprocess.run(
-        [binary, 'reload'], capture_output=True, text=True, env=env, timeout=120,
+        [sys.executable, '-m', 'meerschaum', 'reload'],
+        capture_output=True, text=True, env=env, timeout=120,
     )
     assert result.returncode == 0, result.stdout + result.stderr
     manifest = root / 'cache' / 'plugins_manifest.json'
@@ -254,8 +287,8 @@ def test_reload_rebuilds_the_plugin_manifest_through_the_worker(tmp_path):
     assert 'w16_reload' in manifest.read_text()
 
 
-def test_python_dash_m_names_the_missing_binary(tmp_path):
-    """Without a binary the error says which package to install."""
+def test_an_unusable_mrsm_bin_is_ignored_with_a_warning(tmp_path):
+    """`MRSM_BIN` which is not an executable program does not break `python -m meerschaum`."""
     (tmp_path / 'root').mkdir()
     env = {
         **os.environ,
@@ -263,38 +296,32 @@ def test_python_dash_m_names_the_missing_binary(tmp_path):
         'MRSM_ROOT_DIR': str(tmp_path / 'root'),
         'MRSM_BIN': str(tmp_path / 'missing'),
     }
-    code = (
-        "import sys\n"
-        "import meerschaum._internal.binary as b\n"
-        "b.find_binary = lambda: None\n"
-        "from meerschaum.__main__ import main\n"
-        "main(['show', 'version'])\n"
-    )
     result = subprocess.run(
-        [sys.executable, '-c', code], capture_output=True, text=True, env=env, timeout=60,
+        [sys.executable, '-m', 'meerschaum', 'show', 'version', '--nopretty'],
+        capture_output=True, text=True, env=env, timeout=60,
     )
-    assert result.returncode == 127
-    assert 'pip install meerschaum-cli' in result.stderr
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == _core.__version__
+    assert 'MRSM_BIN' in result.stderr
 
 
 def test_a_python_shim_named_mrsm_is_not_mistaken_for_the_binary(tmp_path, monkeypatch):
     """A console script that runs `python -m meerschaum` would start itself again."""
     from meerschaum._internal import binary
 
-    shim = tmp_path / binary.BINARY_NAME
+    shim = tmp_path / 'mrsm'
     shim.write_text('#!/usr/bin/env python\nimport sys\n')
     shim.chmod(0o755)
     monkeypatch.setenv(binary.BINARY_ENV, str(shim))
-    assert binary.find_binary() != str(shim)
+    with pytest.warns(RuntimeWarning, match=binary.BINARY_ENV):
+        assert binary.explicit_binary() is None
+        assert binary.self_command() == [sys.executable, '-P', '-m', 'meerschaum']
 
 
-def test_the_shell_facade_runs_the_native_binary(capfd):
+def test_the_shell_facade_runs_the_native_cli(capfd):
     """`get_shell(sysargs).cmdloop()` is `mrsm <sysargs>`, here a one-shot command."""
-    from meerschaum._internal.binary import find_binary
     from meerschaum._internal.entry import get_shell
 
-    if find_binary() is None:
-        pytest.skip("No `mrsm` binary is built (cargo build -p meerschaum-cli).")
     get_shell(['show', 'version', '--nopretty'], reload=True).cmdloop()
     assert capfd.readouterr().out.strip() == _core.__version__
 
@@ -411,14 +438,17 @@ def test_prompts_end_at_the_end_of_pythons_stdin(monkeypatch, capsys):
     assert success is False
 
 
-def test_running_the_binary_does_not_change_this_processs_environment(monkeypatch):
+def test_running_the_cli_does_not_change_this_processs_environment(monkeypatch):
+    import signal
     from meerschaum._internal import binary
 
-    if binary.find_binary() is None:
-        pytest.skip("No `mrsm` binary is built (cargo build -p meerschaum-cli).")
     monkeypatch.delenv('MRSM_PYTHON', raising=False)
+    monkeypatch.delenv('MRSM_BIN', raising=False)
+    handler = signal.getsignal(signal.SIGINT)
     assert binary.run_binary(['show', 'version', '--nopretty']) == 0
     assert 'MRSM_PYTHON' not in os.environ
+    ### The CLI runs with SIGINT at its default action and puts Python's handler back.
+    assert signal.getsignal(signal.SIGINT) is handler
     assert binary._environment()['MRSM_PYTHON'] == sys.executable
 
 
@@ -427,7 +457,7 @@ def test_an_invalid_mrsm_bin_is_reported(tmp_path, monkeypatch):
 
     monkeypatch.setenv(binary.BINARY_ENV, str(tmp_path / 'nothing-here'))
     with pytest.warns(RuntimeWarning, match=binary.BINARY_ENV):
-        binary.find_binary()
+        binary.explicit_binary()
 
 
 def test_probing_a_removed_module_does_not_raise():
@@ -885,3 +915,166 @@ def test_an_undecodable_environment_variable_does_not_panic_verify_or_the_system
     )
     assert result.returncode == 0, result.stderr[-2000:]
     assert b'VERIFY True' in result.stdout and b'UNIT True' in result.stdout, result.stdout
+
+
+def test_a_second_main_call_still_stops_on_ctrl_c_and_leaves_the_caller_alone(tmp_path):
+    """
+    `_native.main` twice in one process (e.g. `Shell.cmdloop()` from a REPL): each run's SIGINT
+    stops only the CLI, and Python's own Ctrl-C handling is back afterwards.
+    """
+    (tmp_path / 'root').mkdir()
+    (tmp_path / 'plugins').mkdir()
+    env = {
+        **os.environ,
+        'PYTHONPATH': str(REPO),
+        'MRSM_ROOT_DIR': str(tmp_path / 'root'),
+        'MRSM_PLUGINS_DIR': str(tmp_path / 'plugins'),
+        'MRSM_NO_AUTO_INSTALL': '1',
+    }
+    env.pop('MRSM_BIN', None)
+    code = r'''
+import os, signal, sys, threading, time
+from meerschaum import _core
+ext = _core.load()
+handler = signal.getsignal(signal.SIGINT)
+assert handler is signal.default_int_handler
+
+def interrupt_soon(delay=1.5):
+    def run():
+        time.sleep(delay)
+        os.kill(os.getpid(), signal.SIGINT)
+    threading.Thread(target=run, daemon=True).start()
+
+for attempt in (1, 2, 3):
+    interrupt_soon()
+    started = time.time()
+    rc = ext.main(['show', 'version', ':', '--loop', '--min-seconds', '0.2'])
+    print(f'RUN {attempt} rc={rc} after {time.time() - started:.1f}s', flush=True)
+    assert rc == 0, rc
+    ### The caller's handler is back: its next Ctrl-C is a KeyboardInterrupt, not a dead process.
+    assert signal.getsignal(signal.SIGINT) is handler
+    try:
+        os.kill(os.getpid(), signal.SIGINT)
+        time.sleep(1)
+    except KeyboardInterrupt:
+        print(f'CAUGHT {attempt}', flush=True)
+    else:
+        raise SystemExit(f'no KeyboardInterrupt after run {attempt}')
+print('ALIVE', flush=True)
+'''
+    result = subprocess.run(
+        [sys.executable, '-c', code], capture_output=True, text=True, env=env, timeout=120,
+    )
+    assert result.returncode == 0, (result.returncode, result.stdout[-1500:], result.stderr[-1500:])
+    assert 'RUN 3 rc=0' in result.stdout and 'CAUGHT 3' in result.stdout
+    assert result.stdout.strip().endswith('ALIVE')
+
+
+def _python(tmp_path, code, timeout=120):
+    (tmp_path / 'root').mkdir(exist_ok=True)
+    (tmp_path / 'plugins').mkdir(exist_ok=True)
+    env = {
+        **os.environ,
+        'PYTHONPATH': str(REPO),
+        'MRSM_ROOT_DIR': str(tmp_path / 'root'),
+        'MRSM_PLUGINS_DIR': str(tmp_path / 'plugins'),
+        'MRSM_NO_AUTO_INSTALL': '1',
+    }
+    env.pop('MRSM_BIN', None)
+    return subprocess.run(
+        [sys.executable, '-c', code], capture_output=True, text=True, env=env, timeout=timeout,
+    )
+
+
+def test_sigterm_is_not_swallowed_after_main_returns(tmp_path):
+    """The run's SIGTERM handler is put away with the caller's action (here `SIG_DFL`) restored."""
+    import signal
+
+    result = _python(tmp_path, r'''
+import os, signal, threading, time
+from meerschaum import _core
+ext = _core.load()
+assert ext.main(['show', 'version', ':', 'x1']) == 0
+### A run which installed the stop handler (a SIGINT stopped a loop), then SIGTERM.
+threading.Thread(
+    target=lambda: (time.sleep(1.5), os.kill(os.getpid(), signal.SIGINT)), daemon=True,
+).start()
+assert ext.main(['show', 'version', ':', '--loop', '--min-seconds', '0.2']) == 0
+assert signal.getsignal(signal.SIGTERM) == signal.SIG_DFL
+print('BEFORE', flush=True)
+os.kill(os.getpid(), signal.SIGTERM)
+time.sleep(5)
+print('SURVIVED', flush=True)
+''')
+    assert result.returncode == -signal.SIGTERM, (result.returncode, result.stdout, result.stderr)
+    assert 'BEFORE' in result.stdout and 'SURVIVED' not in result.stdout
+
+
+def test_a_python_sigterm_handler_survives_main(tmp_path):
+    result = _python(tmp_path, r'''
+import os, signal, time
+from meerschaum import _core
+ext = _core.load()
+caught = []
+signal.signal(signal.SIGTERM, lambda *args: caught.append(1))
+assert ext.main(['show', 'version', ':', 'x1']) == 0
+os.kill(os.getpid(), signal.SIGTERM)
+time.sleep(0.5)
+print('CAUGHT', len(caught), flush=True)
+''')
+    assert result.returncode == 0, result.stderr
+    assert 'CAUGHT 1' in result.stdout
+
+
+def test_main_refuses_a_non_main_thread(tmp_path):
+    result = _python(tmp_path, r'''
+import threading
+from meerschaum import _core
+ext = _core.load()
+errors = []
+def run():
+    try:
+        ext.main(['--version'])
+    except RuntimeError as e:
+        errors.append(str(e))
+t = threading.Thread(target=run); t.start(); t.join()
+print(errors)
+''')
+    assert result.returncode == 0, result.stderr
+    assert 'main thread' in result.stdout
+
+
+def test_an_empty_sys_executable_is_an_error_not_a_guess(tmp_path):
+    result = _python(tmp_path, r'''
+import sys
+from meerschaum import _core
+from meerschaum._internal import binary
+ext = _core.load()
+### No interpreter at all (an embedded Python): `sys._base_executable` is the fallback, so it is empty too.
+sys.executable = ''
+sys._base_executable = ''
+for call in (lambda: binary.self_command(), lambda: ext.main(['--version'])):
+    try:
+        call()
+    except RuntimeError as e:
+        print('ERROR', 'sys.executable' in str(e))
+''')
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.count('ERROR True') == 2
+
+
+@pytest.mark.parametrize('status,expected', [(0, 0), (3, 3), (255, 255), (256, 1), (-5, 1)])
+def test_the_console_script_maps_exit_codes_like_the_binary(tmp_path, status, expected):
+    result = _python(tmp_path, rf'''
+import sys
+sys._meerschaum_cli = True
+import meerschaum._internal.binary as binary
+
+class Fake:
+    def main(self, args):
+        return {status}
+
+binary._extension = lambda: Fake()
+binary.main(['x'])
+''')
+    assert result.returncode == expected, result.stderr

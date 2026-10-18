@@ -134,6 +134,7 @@ pub const MAINS: &[(&str, &[(&str, &str)])] = &[
             ("plugins", "_install_plugins"),
             ("packages", "_install_packages"),
             ("required", "_install_required"),
+            ("drivers", "_install_drivers"),
         ],
     ),
     ("partition", &[("pipes", "_partition_pipes")]),
@@ -184,6 +185,7 @@ pub const MAINS: &[(&str, &[(&str, &str)])] = &[
             ("daemons", "_show_daemons"),
             ("graph", "_show_graph"),
             ("runs", "_show_runs"),
+            ("drivers", "_show_drivers"),
         ],
     ),
     (

@@ -13,7 +13,7 @@ struct Home {
 
 impl Home {
     fn run(&self, args: &[&str]) -> Output {
-        Command::new(env!("CARGO_BIN_EXE_mrsm"))
+        Command::new(env!("CARGO_BIN_EXE_mrsm-cli"))
             .args(args)
             .env_clear()
             .env("PATH", std::env::var_os("PATH").unwrap_or_default())

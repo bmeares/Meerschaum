@@ -3,8 +3,9 @@
 # vim:fenc=utf-8
 
 """
-The interactive shell is the native `mrsm` shell (`meerschaum-cli`).
-`Shell(...).cmdloop()` runs it as a child process on the terminal.
+The interactive shell is the native `mrsm` shell (the `meerschaum-cli` library crate).
+`Shell(...).cmdloop()` runs it on the terminal, in this process (the extension's `_native.main`), or as
+a child process of the `MRSM_BIN` binary.
 """
 
 from __future__ import annotations
@@ -14,7 +15,7 @@ from meerschaum.utils.typing import Any, Dict, List, Optional, SuccessTuple
 
 class Shell:
     """
-    The interactive Meerschaum shell (the native `mrsm` shell, run as a child process).
+    The interactive Meerschaum shell (the native `mrsm` shell, run from the extension or the `MRSM_BIN` binary).
     """
 
     def __init__(

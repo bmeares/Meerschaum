@@ -60,6 +60,23 @@ fn py_int(v: Option<Value>) -> Option<i64> {
     v.and_then(|v| meerschaum_core::pyfmt::py_int(&v))
 }
 
+/// Tell the DuckDB loader which Meerschaum root is in effect (`meerschaum.config.paths.ROOT_DIR_PATH`),
+/// so a connection opened later looks for and installs the library under the same root as
+/// `mrsm install driver duckdb` and `show drivers`, also after `set_root()` /
+/// `replace_root_dir()` changed it. Set every time a connector is built, not once.
+fn follow_python_root(py: Python<'_>) {
+    let root = py
+        .import("meerschaum.config.paths")
+        .and_then(|paths| paths.getattr("ROOT_DIR_PATH"))
+        .and_then(|root| root.str().map(|s| s.to_string()))
+        .ok()
+        .filter(|root| !root.is_empty())
+        .map(std::path::PathBuf::from);
+    if root.is_some() {
+        meerschaum_connector_sql::duckdb_lib::set_root_override(root);
+    }
+}
+
 /// The instance settings, read from the Python config (`system:connectors:sql:*`, `pipes:*`).
 fn settings_from_py(py: Python<'_>, flavor: Flavor) -> InstanceSettings {
     let mut s = InstanceSettings::defaults(flavor);
@@ -297,6 +314,7 @@ impl PySqlConnector {
         let attrs = attributes_from_py(label, attributes)?;
         let spec = ConnectionSpec::from_attributes(&attrs).map_err(backend_err)?;
         let settings = settings_from_py(py, spec.flavor);
+        follow_python_root(py);
         let label = label.to_string();
         let conn = py.allow_threads(|| {
             let _guard = crate::runtime::runtime().enter();

@@ -9,7 +9,7 @@ pure-Python wheels built in the test, installed with `--no-index --find-links`.
 
 The native side (`mrsm prune venvs`, `crates/meerschaum-cli/tests/w9_venvs.rs`) reads what these
 functions write; `test_native_show_venvs_reads_the_python_ledger` checks that the two agree when
-a debug `mrsm` binary has been built.
+a standalone `mrsm` binary has been built (`tests/_binary.py`).
 
 Every test runs inside a temporary root (`replace_root_dir`), never `~/.config/meerschaum`.
 
@@ -171,9 +171,8 @@ def test_uninstall_action_without_consent_flags(throwaway):
 
 
 def test_native_show_venvs_reads_the_python_ledger(throwaway):
-    binary = REPO / 'target' / 'debug' / 'mrsm'
-    if not binary.exists():
-        pytest.skip("build the debug binary first (`cargo build -p meerschaum-cli`)")
+    from tests._binary import binary_or_skip
+    binary = pathlib.Path(binary_or_skip())
     root, wheels = throwaway
     assert _install(wheels, 'w9t-wanted>=1.0')
     assert _requests.record_request(VENV, 'w9t_stale', 'gone_plugin')

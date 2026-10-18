@@ -8,21 +8,26 @@
 //! ```toml
 //! [dependencies]
 //! # Use the exact pre-release version (e.g. "5.0.0-rc.1") until 5.0.0 is out: a bare "5" does not match one.
-//! meerschaum = { version = "5", features = ["sql", "engine"] }
+//! meerschaum = { version = "5", default-features = false, features = ["sql", "engine"] }
 //! ```
+//!
+//! A library takes `default-features = false`: the default `cli` feature compiles the whole command
+//! line (shell, API server, jobs) for the `mrsm` binary, which a library does not need.
+//! `cargo install meerschaum` builds that binary (see below).
 //!
 //! ## Features
 //!
 //! | Feature | Adds |
 //! |---|---|
 //! | `sql` (default) | [`SqlConnector`], [`Flavor`], [`SqlError`] and the [`sql`] module |
-//! | `duckdb`, `oracle` | the DuckDB / Oracle flavors of `sql` (opt-in: slow to compile / need a client library) |
+//! | `cli` (default) | the standalone `mrsm` binary (`cargo install meerschaum`); implies `sql`; adds no library API |
+//! | `oracle` | the Oracle flavor of `sql` (opt-in: needs Oracle Instant Client at runtime) |
 //! | `valkey` | [`ValkeyConnector`] and the [`valkey`] module |
 //! | `api` | [`APIConnector`] (the client of a Meerschaum API server) and the [`api`] module |
 //! | `engine` | the Syncing Engine: [`Pipeline`], [`Plan`], [`Engine`], [`RunOptions`], ... and the [`engine`] module |
 //! | `server` | the `axum` HTTP API server (the [`server`] module); implies `api` |
 //! | `plugin` | the native plugin SDK: [`Plugin`], [`Request`], [`Reply`], [`export_plugin!`] and the [`plugin`] module |
-//! | `full` | every feature above except `duckdb` / `oracle` |
+//! | `full` | every feature above except `oracle` |
 //!
 //! ## What is semver-stable
 //!
@@ -44,8 +49,10 @@
 //! ([`plugin`], from `meerschaum-plugin`) has its own versioned C ABI (`mrsm_plugin_v1`) and is
 //! stable independently of the Rust types around it.
 //!
-//! The `mrsm` binary is the `meerschaum-cli` crate (`cargo install meerschaum-cli`), also shipped
-//! on PyPI in the `meerschaum-cli` wheel (which the `meerschaum` Python package depends on).
+//! The `mrsm` command line is built from this crate: `cargo install meerschaum` produces the
+//! standalone `mrsm` binary (the `cli` feature, on by default). `pip install meerschaum` installs
+//! the same program inside the one Python wheel, whose `mrsm` console script runs it from the
+//! extension. `meerschaum-cli` is the internal library behind both.
 
 #![deny(unsafe_code)]
 

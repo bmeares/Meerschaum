@@ -216,7 +216,7 @@ impl Term {
                 pixel_height: 0,
             })
             .unwrap();
-        let mut cmd = CommandBuilder::new(env!("CARGO_BIN_EXE_mrsm"));
+        let mut cmd = CommandBuilder::new(env!("CARGO_BIN_EXE_mrsm-cli"));
         cmd.env_clear();
         for (k, v) in env {
             cmd.env(k, v);

@@ -3,7 +3,7 @@
 #
 # Builds the Meerschaum images (see the Dockerfile header and docs/design/v5-build.md):
 #   - one image per dep group in $tags (scripts/config.sh): `minimal` uses the default (v4) target,
-#     `full` uses `--target full` (the v4 full image plus the native `mrsm` binary);
+#     `full` uses `--target full` (`meerschaum[full]`; its `mrsm` is the console script);
 #   - `--target slim`, tagged `$image:<version>-slim` (and `$image:slim` for releases).
 # Images are loaded into the local daemon unless --push is given.
 #

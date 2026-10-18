@@ -285,8 +285,22 @@ impl Progress {
         debug: bool,
         message: impl Into<String>,
     ) -> Progress {
+        match Progress::context(rt, nopretty, debug) {
+            Some((sink, style, lines)) => Progress::begin(sink, style, lines, message.into()),
+            None => Progress::disabled(),
+        }
+    }
+
+    /// The sink, style and `lines` mode [`Progress::begin`] needs for this runtime, or `None` when
+    /// feedback is off (not a terminal, `--nopretty`). For callers that start the stage later, from
+    /// another thread (the first-use driver download).
+    pub fn context(
+        rt: &mut Runtime<'_>,
+        nopretty: bool,
+        debug: bool,
+    ) -> Option<(ProgressSink, LineStyle, bool)> {
         if !rt.progress.is_on() || nopretty {
-            return Progress::disabled();
+            return None;
         }
         let settings = rt.settings();
         let term = (rt.env)("TERM").map(|t| t.to_lowercase());
@@ -295,8 +309,7 @@ impl Progress {
             unicode: settings.unicode,
             color: settings.ansi && !settings.no_color && !dumb,
         };
-        let sink = rt.progress.clone();
-        Progress::begin(sink, style, debug, message.into())
+        Some((rt.progress.clone(), style, debug))
     }
 
     /// Start on an explicit sink (the shared body of [`Progress::start`]; tests use it).

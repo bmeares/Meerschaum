@@ -9,17 +9,18 @@ Check that the 5.0 packaging metadata agrees with itself (docs/design/v5.0.0.md 
 
 Source-tree checks (exit 1 on any failure):
 
-1. The Cargo workspace version (the single source of truth), converted to PEP 440, equals the
-   `meerschaum-cli==X` pin in the root pyproject.toml.
+1. The root pyproject.toml has no `dependencies` (D8 revised, D20: one wheel, nothing else to
+   install; the CLI is inside the extension) and no `meerschaum-cli` distribution exists
+   (`crates/meerschaum-cli/pyproject.toml` is gone).
 2. `[project.optional-dependencies]` in the root pyproject.toml equals `extras` in
-   meerschaum/utils/packages/_packages.py (with `[full]` expanded), and `dependencies` holds only
-   `meerschaum-cli`.
+   meerschaum/utils/packages/_packages.py (with `[full]` expanded).
 3. `meerschaum/config/_version.py` equals the Cargo version (PEP 440 form): the Python package,
-   the wheel metadata and the `mrsm` binary report one version.
-4. Both pyproject files declare the maturin backend and the expected distribution names.
+   the wheel metadata and `mrsm --version` report one version.
+4. The root pyproject.toml declares the maturin backend (`bindings = "pyo3"`), the distribution name
+   `meerschaum`, and the console scripts `mrsm` and `meerschaum` (both `_meerschaum_mrsm:main`, a
+   top-level module shipped in the wheel via `[tool.maturin] include`).
 5. `requirements/<extra>.txt` holds exactly the packages the `<extra>` extra declares (and
-   `requirements/minimal.txt` is empty: D8 intentionally retains the CLI-wheel dependency;
-   this metadata check does not establish D20 public SDK functionality). Regenerate with
+   `requirements/minimal.txt` is empty: the base wheel has no dependencies, D20). Regenerate with
    `--write` (scripts/docker/update_requirements.sh calls it).
 6. `crates/meerschaum-cli/src/extras.rs` (the extras the CLI's `show venvs` / `prune venvs` treat
    as wanted packages) equals the extras in the root pyproject.toml. Regenerate with `--write`.
@@ -39,12 +40,12 @@ and every published crate (`publish` not `false`) has the metadata crates.io req
 Wheel checks (`--wheels DIST`, for the wheels `maturin build` wrote into DIST; used by
 .github/workflows/wheels.yaml right after the build):
 
-7. Both wheels are present, once each, and their `METADATA` `Version` equals the Cargo version in
-   PEP 440 form; the `meerschaum` wheel requires exactly `meerschaum-cli==<version>` and nothing
-   else, and carries a `meerschaum/config/_version.py` with that same version.
-8. The `mrsm` binary inside the `meerschaum-cli` wheel reports that version for `--version` (run
-   in a throwaway root; with `--require-cli-run` an unrunnable binary, e.g. a cross-compiled
-   one, is a failure instead of a note).
+7. The `meerschaum` wheel is present once and its `METADATA` `Version` equals the Cargo version in
+   PEP 440 form; it has no base `Requires-Dist`, carries a `meerschaum/config/_version.py` with
+   that same version and the extension `meerschaum/_core/_native*`, declares the `mrsm` and
+   `meerschaum` console scripts, and contains no `mrsm` binary (no `*.data/scripts/mrsm` that is
+   not a Python script): the CLI runs from the extension.
+8. No `meerschaum_cli-*.whl` is in DIST (the second wheel is gone).
 
 Runs on any Python >= 3.11 with no third-party imports.
 """
@@ -52,12 +53,8 @@ Runs on any Python >= 3.11 with no third-party imports.
 from __future__ import annotations
 
 import argparse
-import os
 import re
-import stat
-import subprocess
 import sys
-import tempfile
 import tomllib
 import zipfile
 from pathlib import Path
@@ -264,7 +261,7 @@ def load_extras_from_packages_py() -> dict[str, list[str]]:
     return {k: list(v) for k, v in namespace['extras'].items()}
 
 
-def check_wheels(dist: Path, pep440: str, require_cli_run: bool) -> tuple[list[str], list[str]]:
+def check_wheels(dist: Path, pep440: str) -> tuple[list[str], list[str]]:
     failures: list[str] = []
     notes: list[str] = []
 
@@ -276,7 +273,9 @@ def check_wheels(dist: Path, pep440: str, require_cli_run: bool) -> tuple[list[s
         return found[0]
 
     mrsm_wheel = one('meerschaum-*.whl')
-    cli_wheel = one('meerschaum_cli-*.whl')
+    stray = sorted(dist.glob('meerschaum_cli-*.whl'))
+    if stray:
+        failures.append(f"{dist}: {[p.name for p in stray]} must not exist (one wheel, D8 revised)")
 
     def metadata(path: Path) -> tuple[dict[str, list[str]], zipfile.ZipFile]:
         zf = zipfile.ZipFile(path)
@@ -294,8 +293,8 @@ def check_wheels(dist: Path, pep440: str, require_cli_run: bool) -> tuple[list[s
         if version != pep440:
             failures.append(f"{mrsm_wheel.name}: METADATA Version is {version}, Cargo is {pep440}")
         requires = [r for r in fields.get('Requires-Dist', []) if 'extra ==' not in r]
-        if [normalize(r) for r in requires] != [normalize(f"meerschaum-cli=={pep440}")]:
-            failures.append(f"{mrsm_wheel.name}: base Requires-Dist is {requires}, expected only meerschaum-cli=={pep440}")
+        if requires:
+            failures.append(f"{mrsm_wheel.name}: base Requires-Dist is {requires}, expected none (D20)")
         try:
             inner = re.search(
                 r'__version__\s*=\s*["\']([^"\']+)["\']',
@@ -306,68 +305,26 @@ def check_wheels(dist: Path, pep440: str, require_cli_run: bool) -> tuple[list[s
         except (KeyError, AttributeError):
             failures.append(f"{mrsm_wheel.name}: has no readable meerschaum/config/_version.py")
 
-    if cli_wheel:
-        fields, zf = metadata(cli_wheel)
-        version = fields.get('Version', [''])[0]
-        if version != pep440:
-            failures.append(f"{cli_wheel.name}: METADATA Version is {version}, Cargo is {pep440}")
-        if [r for r in fields.get('Requires-Dist', [])]:
-            failures.append(f"{cli_wheel.name}: must have no Python dependencies")
-        binary = next(
-            (n for n in zf.namelist() if re.search(r'\.data/scripts/mrsm(\.exe)?$', n)),
-            None,
+    if mrsm_wheel:
+        names = zf.namelist()
+        if not any(re.fullmatch(r'meerschaum/_core/_native.*\.(so|pyd)', n) for n in names):
+            failures.append(f"{mrsm_wheel.name}: has no meerschaum/_core/_native extension")
+        entry_points = next((n for n in names if n.endswith('.dist-info/entry_points.txt')), None)
+        scripts_text = zf.read(entry_points).decode('utf-8') if entry_points else ''
+        for script in ('mrsm', 'meerschaum'):
+            if not re.search(rf'^{script}\s*=\s*_meerschaum_mrsm:main\s*$', scripts_text, re.M):
+                failures.append(f"{mrsm_wheel.name}: console script {script!r} is not _meerschaum_mrsm:main")
+        if '_meerschaum_mrsm.py' not in names:
+            failures.append(f"{mrsm_wheel.name}: has no top-level _meerschaum_mrsm.py")
+        for name in names:
+            if re.search(r'\.data/scripts/mrsm(\.exe)?$', name):
+                head = zf.read(name)[:2]
+                if head != b'#!':
+                    failures.append(f"{mrsm_wheel.name}: contains a native binary {name} (the CLI runs from the extension)")
+        notes.append(
+            f"{mrsm_wheel.name}: `mrsm --version` is checked by the wheel smoke test "
+            "(pip install in a fresh venv), not here"
         )
-        if binary is None:
-            failures.append(f"{cli_wheel.name}: has no mrsm binary under *.data/scripts/")
-        else:
-            with tempfile.TemporaryDirectory(prefix='mrsm-check-packaging-') as tmp:
-                tmp_path = Path(tmp)
-                exe = tmp_path / Path(binary).name
-                exe.write_bytes(zf.read(binary))
-                exe.chmod(exe.stat().st_mode | stat.S_IXUSR)
-                (tmp_path / 'root').mkdir()
-                (tmp_path / 'plugins').mkdir()
-                env = {
-                    k: v
-                    for k, v in os.environ.items()
-                    if not k.startswith('MRSM_') and k not in ('VIRTUAL_ENV',)
-                }
-                env.update({
-                    'MRSM_ROOT_DIR': str(tmp_path / 'root'),
-                    'MRSM_PLUGINS_DIR': str(tmp_path / 'plugins'),
-                    'HOME': str(tmp_path),
-                    'USERPROFILE': str(tmp_path),
-                })
-                try:
-                    proc = subprocess.run(
-                        [str(exe), '--version'],
-                        env=env,
-                        cwd=tmp,
-                        capture_output=True,
-                        text=True,
-                        timeout=120,
-                    )
-                except (OSError, subprocess.SubprocessError) as exc:
-                    message = f"{cli_wheel.name}: cannot run its mrsm binary here ({exc})"
-                    (failures if require_cli_run else notes).append(message)
-                else:
-                    m = re.search(r'v(\d[\w.\-+]*)', proc.stdout)
-                    if proc.returncode != 0 or not m:
-                        failures.append(
-                            f"{cli_wheel.name}: `mrsm --version` exited {proc.returncode}: "
-                            f"{(proc.stdout + proc.stderr).strip()[:300]!r}"
-                        )
-                    else:
-                        reported = m.group(1)
-                        try:
-                            reported_pep440 = cargo_to_pep440(reported)
-                        except ValueError:
-                            reported_pep440 = reported
-                        if reported_pep440 != pep440:
-                            failures.append(
-                                f"{cli_wheel.name}: `mrsm --version` reports {reported}, "
-                                f"wheel is {pep440}"
-                            )
     return failures, notes
 
 
@@ -376,7 +333,6 @@ def main() -> int:
     parser.add_argument('--version', action='store_true', help="print the wheel version (PEP 440) and exit")
     parser.add_argument('--write', action='store_true', help="regenerate requirements/ and crates/meerschaum-cli/src/extras.rs")
     parser.add_argument('--wheels', metavar='DIST', type=Path, help="also check the built wheels in DIST")
-    parser.add_argument('--require-cli-run', action='store_true', help="with --wheels: failing to run the mrsm binary is an error")
     args = parser.parse_args()
 
     cargo = tomllib.loads((ROOT / 'Cargo.toml').read_text(encoding='utf-8'))
@@ -390,21 +346,31 @@ def main() -> int:
     notes: list[str] = []
 
     root = tomllib.loads((ROOT / 'pyproject.toml').read_text(encoding='utf-8'))
-    cli = tomllib.loads((ROOT / 'crates/meerschaum-cli/pyproject.toml').read_text(encoding='utf-8'))
     project = root['project']
 
-    ### 4. Backends and names.
-    for label, data, name in (('root', root, 'meerschaum'), ('cli', cli, 'meerschaum-cli')):
-        if data['build-system']['build-backend'] != 'maturin':
-            failures.append(f"{label} pyproject.toml: build-backend is not maturin")
-        if data['project']['name'] != name:
-            failures.append(f"{label} pyproject.toml: project name is not {name!r}")
-        if 'version' not in data['project'].get('dynamic', []) or 'version' in data['project']:
-            failures.append(f"{label} pyproject.toml: version must be dynamic (read from Cargo)")
-    if cli['tool']['maturin'].get('bindings') != 'bin':
-        failures.append("meerschaum-cli pyproject.toml: bindings must be 'bin'")
-    if cli['project'].get('dependencies'):
-        failures.append("meerschaum-cli pyproject.toml: must have no Python dependencies")
+    ### 4. Backend, name, console scripts.
+    if root['build-system']['build-backend'] != 'maturin':
+        failures.append("root pyproject.toml: build-backend is not maturin")
+    if project['name'] != 'meerschaum':
+        failures.append("root pyproject.toml: project name is not 'meerschaum'")
+    if 'version' not in project.get('dynamic', []) or 'version' in project:
+        failures.append("root pyproject.toml: version must be dynamic (read from Cargo)")
+    if root['tool']['maturin'].get('bindings') != 'pyo3':
+        failures.append("root pyproject.toml: bindings must be 'pyo3'")
+    scripts = project.get('scripts', {})
+    for script in ('mrsm', 'meerschaum'):
+        if scripts.get(script) != '_meerschaum_mrsm:main':
+            failures.append(
+                f"root pyproject.toml: [project.scripts] {script} is {scripts.get(script)!r}, "
+                "expected '_meerschaum_mrsm:main'"
+            )
+    if not (ROOT / '_meerschaum_mrsm.py').is_file():
+        failures.append("_meerschaum_mrsm.py (the console scripts' module) is missing")
+    includes = root['tool']['maturin'].get('include', [])
+    if not any(i.get('path') == '_meerschaum_mrsm.py' and 'wheel' in i.get('format', []) for i in includes):
+        failures.append("root pyproject.toml: [tool.maturin] include must ship _meerschaum_mrsm.py in the wheel")
+    if (ROOT / 'crates/meerschaum-cli/pyproject.toml').exists():
+        failures.append("crates/meerschaum-cli/pyproject.toml exists: there is one PyPI wheel (D8 revised)")
 
     ### Version spelling (see the module docstring).
     problem = cargo_prerelease_problem(cargo_version)
@@ -450,12 +416,11 @@ def main() -> int:
                         and 'version' not in spec:
                     failures.append(f"{label}: path dependency {dep} has no `version`")
 
-    ### 1 + 2a. The cli pin.
-    expected_deps = [f"meerschaum-cli=={pep440}"]
-    if project.get('dependencies') != expected_deps:
+    ### 1. No dependencies.
+    if project.get('dependencies'):
         failures.append(
             f"root pyproject.toml: dependencies are {project.get('dependencies')!r}, "
-            f"expected {expected_deps!r} (Cargo version {cargo_version})"
+            "expected none (D8 revised, D20: the base wheel depends on nothing)"
         )
 
     ### 2b. Extras.
@@ -509,7 +474,7 @@ def main() -> int:
 
     ### 7 + 8. Built wheels.
     if args.wheels:
-        wheel_failures, wheel_notes = check_wheels(args.wheels, pep440, args.require_cli_run)
+        wheel_failures, wheel_notes = check_wheels(args.wheels, pep440)
         failures += wheel_failures
         notes += wheel_notes
 

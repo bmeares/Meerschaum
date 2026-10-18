@@ -10,7 +10,7 @@ fn schedule_runs_until_interrupted() {
     let tmp = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(tmp.path().join("root")).unwrap();
     std::fs::create_dir_all(tmp.path().join("plugins")).unwrap();
-    let mut cmd = Command::new(env!("CARGO_BIN_EXE_mrsm"));
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_mrsm-cli"));
     for (k, _) in std::env::vars() {
         if k.starts_with("MRSM_") {
             cmd.env_remove(k);
@@ -44,7 +44,7 @@ fn invalid_schedule_fails() {
     let tmp = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(tmp.path().join("root")).unwrap();
     std::fs::create_dir_all(tmp.path().join("plugins")).unwrap();
-    let out = std::process::Command::new(env!("CARGO_BIN_EXE_mrsm"))
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_mrsm-cli"))
         .args(["show", "version", "-s", "every 3 fortnights", "--nopretty"])
         .env("MRSM_ROOT_DIR", tmp.path().join("root"))
         .env("MRSM_PLUGINS_DIR", tmp.path().join("plugins"))

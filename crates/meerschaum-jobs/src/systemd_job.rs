@@ -11,7 +11,10 @@
 //! becomes a small wrapper which runs *itself* once more with the same arguments (marked by
 //! [`CHILD_ENV`]), copies the child's output into the rotating log, feeds it the FIFO, forwards
 //! termination signals, and records the result. [`strip_module_prefix`] drops the leading
-//! `-m meerschaum` the unit passes (`python -m meerschaum` has no counterpart in a binary).
+//! `-m meerschaum` the unit passes (`python -m meerschaum` has no counterpart in a binary). Inside
+//! the Python extension the unit is `<python> -P -m meerschaum <sysargs>` (v4's own line plus `-P`)
+//! and the interpreter has already consumed `-P -m meerschaum`; the wrapped child is then
+//! `python -P -m meerschaum <sysargs>` again (`meerschaum_core::self_exe`).
 
 use meerschaum_core::static_config::static_config;
 
@@ -66,18 +69,23 @@ impl SystemdJobEnv {
 /// If this process was started by a `systemd` job unit, run the job through the wrapper and
 /// exit with its status; otherwise return. Hosts call this first thing in `main`.
 pub fn run_if_requested() {
+    let args: Vec<String> = std::env::args_os()
+        .skip(1)
+        .map(|a| a.to_string_lossy().into_owned())
+        .collect();
+    run_if_requested_with(&args);
+}
+
+/// [`run_if_requested`] for a host whose real arguments are not `std::env::args_os()` (the
+/// Python extension: the arguments after `python -m meerschaum`).
+pub fn run_if_requested_with(args: &[String]) {
     if std::env::var_os(CHILD_ENV).is_some() {
         return;
     }
     let Some(job) = SystemdJobEnv::from_env(&|k| std::env::var(k).ok()) else {
         return;
     };
-    let args = strip_module_prefix(
-        std::env::args_os()
-            .skip(1)
-            .map(|a| a.to_string_lossy().into_owned())
-            .collect(),
-    );
+    let args = strip_module_prefix(args.to_vec());
     std::process::exit(imp::run(&job, &args));
 }
 
@@ -138,14 +146,13 @@ mod imp {
         }
         let _ = sigset.thread_block();
 
-        let Ok(exe) = std::env::current_exe() else {
-            eprintln!("Cannot determine the path of the running executable.");
-            return 1;
-        };
+        // This program again: the binary itself, or `python -m meerschaum` in the extension.
+        let (program, leading) = meerschaum_core::self_exe::self_program();
         let child_result = job.log_path.with_extension("child-result.json");
         let _ = fs::remove_file(&child_result);
-        let mut cmd = Command::new(exe);
-        cmd.args(args)
+        let mut cmd = Command::new(program);
+        cmd.args(leading)
+            .args(args)
             .env(CHILD_ENV, "1")
             .env(RESULT_PATH_ENV, &child_result)
             .stdout(Stdio::piped())

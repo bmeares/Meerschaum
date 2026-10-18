@@ -11,6 +11,7 @@
 //!   `ast.literal_eval`, `str.strip` / `splitlines`, `textwrap.dedent` / `indent`,
 //!   `str.format`, `datetime` strings).
 //! - [`yaml`]: a PyYAML-compatible (YAML 1.1) loader and a block emitter.
+//! - [`self_exe`]: how the process starts another copy of itself (`mrsm` binary or `python -m meerschaum`).
 //! - [`static_config`]: `static.toml` (D15), the port of `STATIC_CONFIG`.
 //! - [`config`]: the config registry (`get_config`, `MRSM{}` symlinks, environment overrides, paths).
 //! - [`pipe`]: pipe keys, parameters and the pure-data pipe attributes.
@@ -31,6 +32,7 @@ pub mod dtypes;
 pub mod pipe;
 pub mod process_env;
 pub mod pyfmt;
+pub mod self_exe;
 pub mod static_config;
 pub mod success;
 pub mod template;

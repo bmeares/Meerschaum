@@ -228,7 +228,12 @@ impl HostProcess for ChildProcess {
 impl HostLauncher for PythonHostLauncher {
     async fn launch(&self, socket: &Path) -> std::io::Result<Box<dyn HostProcess>> {
         let child = tokio::process::Command::new(&self.python)
-            .args(["-m", "meerschaum.api.host", "--socket"])
+            .args([
+                meerschaum_core::self_exe::PYTHON_SAFE_PATH_FLAG,
+                "-m",
+                "meerschaum.api.host",
+                "--socket",
+            ])
             .arg(socket)
             .envs(self.env.iter().map(|(k, v)| (k.as_str(), v.as_str())))
             .kill_on_drop(true)

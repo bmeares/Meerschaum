@@ -36,7 +36,7 @@ impl Home {
     /// remote API (`mrsm <action> -d` puts the job on the context's executor; an `-e` would be
     /// recorded in the job's own sysargs).
     fn command_on(&self, endpoints: &[(&str, u16)], executor: Option<&str>) -> Command {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_mrsm"));
+        let mut command = Command::new(env!("CARGO_BIN_EXE_mrsm-cli"));
         command
             .env_clear()
             .env("PATH", std::env::var_os("PATH").unwrap_or_default())
@@ -443,7 +443,7 @@ impl Project {
     }
 
     fn run(&self, args: &[&str]) -> Output {
-        Command::new(env!("CARGO_BIN_EXE_mrsm"))
+        Command::new(env!("CARGO_BIN_EXE_mrsm-cli"))
             .args(args)
             .current_dir(self.path())
             .env_clear()

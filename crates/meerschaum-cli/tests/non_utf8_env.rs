@@ -9,7 +9,7 @@ use std::process::Command;
 fn run(args: &[&str]) -> (Option<i32>, String, String) {
     let root = tempfile::tempdir().unwrap();
     let plugins = tempfile::tempdir().unwrap();
-    let output = Command::new(env!("CARGO_BIN_EXE_mrsm"))
+    let output = Command::new(env!("CARGO_BIN_EXE_mrsm-cli"))
         .args(args)
         .env("MRSM_ROOT_DIR", root.path())
         .env("MRSM_PLUGINS_DIR", plugins.path())
