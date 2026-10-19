@@ -92,8 +92,23 @@ jobs:
         run: scripts/parity/setup_reference.sh
 
       - name: Integration Tests
-        run: ./scripts/test.sh db
+        run: |
+          export MRSM_ROOT_DIR="$GITHUB_WORKSPACE/test_root" MRSM_PLUGINS_DIR="$GITHUB_WORKSPACE/tests/plugins"
+          mkdir -p "$MRSM_ROOT_DIR" "$MRSM_PLUGINS_DIR"
+          unset TMUX TMUX_PANE
+          "$PYTHON_BIN" - <<'PYTEST_MAIN_CHECK'
+          import os
+          import meerschaum as mrsm
+          connector = mrsm.get_connector('sql:main')
+          if connector.flavor != 'sqlite' or connector.URI != os.environ['MRSM_SQL_MAIN']:
+              raise RuntimeError('CI sql:main must resolve to the owned SQLite URI.')
+          print('CI sql:main resolves to owned SQLite.')
+          PYTEST_MAIN_CHECK
+          ./scripts/test.sh db
         env:
+          # Keep the default key for config oracles, but never let metadata reads dial port5432.
+          MRSM_SQL_MAIN: sqlite:///${{ runner.temp }}/mrsm-pytest-main-${{ github.run_id }}-${{ github.run_attempt }}.db
+          MRSM_NO_AUTO_INSTALL: "1"
           COMPOSE_INTERACTIVE_NO_CLI: 1
           MRSM_TEST_FLAVORS: "all"
           MRSM_DEBUG: "false"
