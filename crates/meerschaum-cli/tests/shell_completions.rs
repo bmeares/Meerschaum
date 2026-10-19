@@ -115,15 +115,32 @@ fn completions_match_v4() {
                 )
             })
             .collect();
+        // Overlay (v5 addition, PARITY.md "W17C-CP"): `show completions` is a v5-only subaction,
+        // so `show c` also completes it. The v4 fixture has no such word; nothing else differs.
+        // Overlay (v5 addition, PARITY.md "W17C-PG-001"): likewise `upgrade postgres` for
+        // `upgrade p`.
         let got: Vec<(String, i64, String, usize)> = data
             .get_completions(input, &dates)
             .into_iter()
+            .filter(|c| !(input == "show c" && c.text == "completions"))
+            .filter(|c| !(input == "upgrade p" && c.text == "postgres"))
             .map(|c| (c.text, c.start_position, c.display, c.highlight))
             .collect();
         if got != expected {
             failures.push(format!("{input:?}\n  v4: {expected:?}\n  v5: {got:?}"));
         }
     }
+    // The overlay above hides nothing else: the v5-only word is really offered.
+    assert!(
+        data.get_completions("show c", &dates)
+            .iter()
+            .any(|c| c.text == "completions")
+    );
+    assert!(
+        data.get_completions("upgrade p", &dates)
+            .iter()
+            .any(|c| c.text == "postgres")
+    );
     assert!(
         failures.is_empty(),
         "{} of {} inputs differ:\n{}",

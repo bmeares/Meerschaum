@@ -19,9 +19,11 @@ pub mod cache;
 pub mod compose_instance;
 pub mod connectors;
 pub mod definition;
+pub mod doctor;
 pub mod drivers;
 pub mod editor;
 pub mod engine_views;
+pub mod extensions;
 pub mod gui;
 pub mod jobs;
 pub mod lifecycle;
@@ -45,6 +47,7 @@ pub mod subactions;
 pub mod sync;
 pub mod terminal;
 pub mod tokens;
+pub mod upgrade_postgres;
 pub mod users;
 pub mod venv_admin;
 pub mod venvs;
@@ -90,11 +93,19 @@ pub fn run(function: &str, args: &ArgsMap, rt: &mut Runtime<'_>) -> Option<Actio
         "_install_drivers" => drivers::install_drivers(args, rt),
         "_uninstall_drivers" => drivers::uninstall_drivers(args, rt),
         "_show_drivers" => drivers::show_drivers(args, rt),
+        "_show_completions" => crate::completions::install::show_completions(args, rt),
+        "_install_completions" => crate::completions::install::install_completions(args, rt),
+        "_uninstall_completions" => crate::completions::install::uninstall_completions(args, rt),
         "_install_required" => lifecycle::install_required(args, rt),
         "_install_packages" => lifecycle::install_packages(args, rt),
         "_upgrade_meerschaum" | "_upgrade_packages" | "_upgrade_plugins" => {
             venvs::upgrade(function, args, rt)
         }
+        "_upgrade_extensions" => extensions::upgrade_extensions(args, rt),
+        "_upgrade_postgres" => upgrade_postgres::upgrade_postgres(args, rt),
+        "_backup_postgres" => upgrade_postgres::backup_postgres(args, rt),
+        "_restore_postgres" => upgrade_postgres::restore_postgres(args, rt),
+        "backup" | "restore" => subactions::choose_subaction(function, args, rt),
         // Wave 15 (N2): plugins, packages and venvs.
         "_bootstrap_plugins" => bootstrap_plugins::bootstrap_plugins(args, rt),
         "_uninstall_plugins" => plugin_admin::uninstall_plugins(args, rt),
@@ -125,6 +136,7 @@ pub fn run(function: &str, args: &ArgsMap, rt: &mut Runtime<'_>) -> Option<Actio
         "_copy_pipes" => manage::copy_pipes(args, rt),
         "_sync_pipes" => sync::sync_pipes(args, rt),
         "_plan_pipes" => engine_views::plan_pipes(args, rt),
+        "doctor" => doctor::doctor(args, rt),
         "_show_graph" => engine_views::show_graph(args, rt),
         "_show_runs" => engine_views::show_runs(args, rt),
         "_verify_pipes" => sync::sync_pipes_with(args, rt, sync::LapMethod::Verify),

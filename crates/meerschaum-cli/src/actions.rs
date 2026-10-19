@@ -49,7 +49,7 @@ impl ActionDef {
 /// Actions that exist only in v5. They resolve, have help and complete like any core action, but
 /// `show actions` and the unknown-action help table keep v4's listing (the parity fixtures are
 /// recorded from v4), and the registry parity test ignores them.
-pub const V5_ONLY_ACTIONS: &[&str] = &["prune", "plan"];
+pub const V5_ONLY_ACTIONS: &[&str] = &["prune", "plan", "doctor", "backup", "restore"];
 
 /// Subactions that exist only in v5 (`(action, subaction)`). They resolve and run like any
 /// core subaction, and complete once a prefix is typed, but the empty `show <TAB>` list and the
@@ -60,6 +60,11 @@ pub const V5_ONLY_SUBACTIONS: &[(&str, &str)] = &[
     ("show", "drivers"),
     ("install", "drivers"),
     ("uninstall", "drivers"),
+    ("show", "completions"),
+    ("install", "completions"),
+    ("uninstall", "completions"),
+    ("upgrade", "extensions"),
+    ("upgrade", "postgres"),
 ];
 
 /// Whether `(action, subaction)` is v5-only.
@@ -150,6 +155,7 @@ pub static CORE_ACTIONS: &[ActionDef] = &[
     action(
         "install",
         &[
+            sub("completions", "_install_completions"),
             sub("drivers", "_install_drivers"),
             sub("packages", "_install_packages"),
             sub("plugins", "_install_plugins"),
@@ -186,6 +192,7 @@ pub static CORE_ACTIONS: &[ActionDef] = &[
     action(
         "uninstall",
         &[
+            sub("completions", "_uninstall_completions"),
             sub("drivers", "_uninstall_drivers"),
             sub("packages", "_uninstall_packages"),
             sub("plugins", "_uninstall_plugins"),
@@ -195,12 +202,16 @@ pub static CORE_ACTIONS: &[ActionDef] = &[
     // v5 only (D20): not in v4's registry.
     action("prune", &[sub("venvs", "_prune_venvs")]),
     action("plan", &[sub("pipes", "_plan_pipes")]),
+    action("doctor", &[]),
+    action("backup", &[sub("postgres", "_backup_postgres")]),
+    action("restore", &[sub("postgres", "_restore_postgres")]),
     action(
         "show",
         &[
             sub("actions", "_show_actions"),
             sub("arguments", "_show_arguments"),
             sub("columns", "_show_columns"),
+            sub("completions", "_show_completions"),
             sub("config", "_show_config"),
             sub("connectors", "_show_connectors"),
             sub("daemons", "_show_daemons"),
@@ -283,9 +294,11 @@ pub static CORE_ACTIONS: &[ActionDef] = &[
     action(
         "upgrade",
         &[
+            sub("extensions", "_upgrade_extensions"),
             sub("meerschaum", "_upgrade_meerschaum"),
             sub("packages", "_upgrade_packages"),
             sub("plugins", "_upgrade_plugins"),
+            sub("postgres", "_upgrade_postgres"),
         ],
     ),
     action("compose", &[]),

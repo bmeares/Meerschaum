@@ -23,6 +23,7 @@ pub mod dtypes;
 #[cfg(feature = "duckdb")]
 pub mod duckdb_lib;
 pub mod error;
+pub mod extensions;
 pub mod facade;
 pub mod flavor;
 pub mod ident;

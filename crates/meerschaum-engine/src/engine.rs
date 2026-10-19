@@ -826,6 +826,25 @@ impl Engine {
         })
     }
 
+    /// `planned` as the executor is expected to run it: every provisional node re-planned as if
+    /// its parents had synced new rows ([`crate::plan::expected`]). `mrsm plan pipes` prints it.
+    pub async fn expected_plan(
+        &self,
+        planned: &PlannedRun,
+        opts: &RunOptions,
+    ) -> Result<Plan, String> {
+        let mut plan_opts = self.plan_options(opts);
+        self.resume_options(opts, &mut plan_opts).await?;
+        Ok(crate::plan::expected(
+            &planned.graph,
+            &planned.subgraph,
+            &planned.plan,
+            self.state.as_ref(),
+            &plan_opts,
+        )
+        .await)
+    }
+
     /// Run a selection to completion (`sync pipes [--parents] [--children]`,
     /// `pipe.sync(parents=...)`, `Pipeline.run`).
     pub async fn run(&self, opts: RunOptions) -> RunResult {

@@ -490,3 +490,75 @@ fn gantt_of_rows_without_a_plan_has_no_planned_bars() {
     assert!(!text.contains("planned"), "{text}");
     assert_eq!(text.lines().count(), 5, "{text}");
 }
+
+/// `plan pipes` shows a provisional node with the window the executor re-plans it with once
+/// its parents have synced (a backfill from the start of the parent's grid cell), not the
+/// static tail window: the planned and executed windows agree.
+#[test]
+fn plan_pipes_shows_the_window_the_executor_passes() {
+    let env = chain();
+    env.ok(&["sync", "pipes", "-m", "clean", "--parents", "--yes"]);
+
+    // A late reading before `raw`'s watermark (2024-01-02 00:00): `raw` syncs it, writes a
+    // ledger entry for its 30-day grid cell, and `clean` backfills that cell up to the cap.
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let attrs = ConnectorAttributes {
+        flavor: Some(Flavor::Sqlite),
+        database: Some(
+            env.root
+                .join("sqlite/mrsm_local.db")
+                .to_string_lossy()
+                .into_owned(),
+        ),
+        ..Default::default()
+    };
+    let connector = runtime
+        .block_on(SqlConnector::connect(
+            "local",
+            ConnectionSpec::from_attributes(&attrs).unwrap(),
+        ))
+        .unwrap();
+    let queries = ["INSERT INTO readings VALUES ('2024-01-01 12:00:00', 'c', 4.0)".to_string()];
+    assert!(
+        runtime
+            .block_on(connector.exec_queries(&queries, true, true))
+            .iter()
+            .all(Option::is_some)
+    );
+
+    let out = env.ok(&["plan", "pipes", "-m", "clean", "--parents", "--nopretty"]);
+    let plan: serde_json::Value = serde_json::from_str(out.trim()).unwrap();
+    let planned = plan["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|n| n["pipe_ref"].as_str().unwrap_or_default().contains("clean"))
+        .unwrap_or_else(|| panic!("{out}"))
+        .clone();
+    assert_eq!(planned["provisional"], true, "{planned}");
+    assert_eq!(planned["action"], "backfill", "{planned}");
+    // The static plan shows the tail window (own watermark − 1 day); the executor starts on
+    // the grid: 2024-01-01 is day 19723 since the epoch, so its 30-day cell starts 13 days
+    // earlier.
+    let begin = planned["bounds"]["begin"].to_string();
+    assert!(begin.contains("2023-12-19"), "{planned}");
+    let table = env.ok(&["plan", "pipes", "-m", "clean", "--parents"]);
+    assert!(table.contains("backfill*  [2023-12-19 00:00"), "{table}");
+
+    env.ok(&["sync", "pipes", "-m", "clean", "--parents", "--yes"]);
+    let runs = env.ok(&["show", "runs", "--nopretty"]);
+    let runs: serde_json::Value = serde_json::from_str(runs.trim()).unwrap();
+    let run_id = runs[0]["run"]["run_id"].as_str().unwrap().to_string();
+    let detail = env.ok(&["show", "run", &run_id, "--nopretty"]);
+    let detail: serde_json::Value = serde_json::from_str(detail.trim()).unwrap();
+    let executed = detail["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|n| n["pipe_ref"].as_str().unwrap_or_default().contains("clean"))
+        .unwrap_or_else(|| panic!("{detail}"))
+        .clone();
+    assert_eq!(executed["action"], planned["action"], "{executed}");
+    assert_eq!(executed["begin"], planned["bounds"]["begin"], "{executed}");
+    assert_eq!(executed["end"], planned["bounds"]["end"], "{executed}");
+}

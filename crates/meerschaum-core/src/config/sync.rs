@@ -15,8 +15,16 @@ use crate::yaml::loader::{LoadOptions, load_text};
 /// interpolation marker, `<DOLLAR>` the config's spelling of a literal one.
 const COMPOSE_REPLACEMENTS: &[(&str, &str)] = &[("$", "$$"), ("<DOLLAR>", "$")];
 
-/// The script `_write_initdb` creates when it is absent.
-const CREATE_EXTENSIONS_TEXT: &str = "CREATE EXTENSION IF NOT EXISTS timescaledb;\nCREATE EXTENSION IF NOT EXISTS postgis;\nCREATE EXTENSION IF NOT EXISTS timescaledb_toolkit;\nCREATE EXTENSION IF NOT EXISTS pg_stat_statements;\n";
+/// The stack's database setup script (`<root>/db/initdb/create-extensions.sql`), which
+/// `write_initdb` creates when it is absent (a customized file is never touched). The one copy of
+/// the text: `mrsm stack` (`meerschaum-cli`) writes it through this constant, and the Python
+/// façade's `meerschaum.config.stack.CREATE_EXTENSIONS_TEXT` must stay byte-identical
+/// (`tests/test_stack_setup.py`).
+///
+/// v5 differs from v4.1.4 (PARITY.md W17K1-001): v4 wrote four bare `CREATE EXTENSION` lines,
+/// which abort the first start of an image without one of them; this script creates each
+/// extension only when the server offers it and preloads `pg_stat_statements`.
+pub const CREATE_EXTENSIONS_TEXT: &str = include_str!("create-extensions.sql");
 
 impl ConfigState {
     /// `_read_yaml_config(path)`: the leading comment / blank-line header of a YAML file. A file

@@ -1346,7 +1346,7 @@ impl SqlConnector {
             );
         }
         if success && flavor == Flavor::Geopackage {
-            return self.init_geopackage_pipe(sp, &new_dtypes).await;
+            return self.init_geopackage_pipe(sp, &new_dtypes, df).await;
         }
         if success {
             SuccessTuple::ok("Success")

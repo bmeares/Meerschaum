@@ -607,6 +607,23 @@ pub fn cell_to_py<'py>(ctx: &PyCtx<'py>, value: &Cell) -> PyResult<Bound<'py, Py
     })
 }
 
+/// Restore a native wide integer's exact Decimal carrier as Python int. Explicit numeric
+/// columns pass `false` and retain Decimal; callers must preserve the original native dtype.
+pub fn native_integer_cell_to_py<'py>(
+    ctx: &PyCtx<'py>,
+    value: &Cell,
+    integer: bool,
+) -> PyResult<Bound<'py, PyAny>> {
+    if integer && let Cell::Decimal(value) = value {
+        let value: i128 = value
+            .to_plain_string()
+            .parse()
+            .map_err(|error: std::num::ParseIntError| PyValueError::new_err(error.to_string()))?;
+        return Ok(value.into_pyobject(ctx.py)?.into_any());
+    }
+    cell_to_py(ctx, value)
+}
+
 /// Convert a column of cells into a Python list, as [`cell_to_py`] would value by value, with the
 /// geometries decoded by a single vectorized `shapely.from_wkb` call.
 pub fn cells_to_pylist<'py>(ctx: &PyCtx<'py>, values: &[Cell]) -> PyResult<Bound<'py, PyList>> {
@@ -694,4 +711,26 @@ pub fn qualname(obj: &Bound<'_, PyAny>) -> PyResult<String> {
     let module: String = ty.getattr("__module__")?.extract()?;
     let name: String = ty.getattr("__name__")?.extract()?;
     Ok(format!("{module}.{name}"))
+}
+
+#[cfg(test)]
+mod native_integer_tests {
+    use super::*;
+
+    #[test]
+    fn native_integer_carriers_preserve_python_int_and_explicit_decimal() {
+        Python::initialize();
+        Python::attach(|py| {
+            let context = PyCtx::scalars(py).unwrap();
+            for integer in [i128::MIN, i128::MAX, i128::from(u64::MAX), 7] {
+                let value = Cell::Decimal(Decimal::from_i128_scale(integer, 0));
+                let native = native_integer_cell_to_py(&context, &value, true).unwrap();
+                assert!(native.is_instance_of::<PyInt>());
+                assert_eq!(native.extract::<i128>().unwrap(), integer);
+                let numeric = native_integer_cell_to_py(&context, &value, false).unwrap();
+                assert!(numeric.is_instance(&context.decimal_cls).unwrap());
+                assert_eq!(numeric.str().unwrap().to_string(), integer.to_string());
+            }
+        });
+    }
 }

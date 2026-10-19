@@ -1,0 +1,2011 @@
+{
+  "meta": {
+    "label": "rc1",
+    "date": "2026-10-19",
+    "backends": [
+      "startup",
+      "postgis",
+      "timescaledb",
+      "sqlite"
+    ],
+    "repeats": 3,
+    "sizes": [
+      "10k",
+      "100k",
+      "1M"
+    ],
+    "python": "3.14.8",
+    "pg_schema": "w17cbench_a3bd2e9874e4",
+    "pg_database": "w17cbench_a3bd2e9874e4",
+    "os": "Linux x86_64",
+    "cpus": 40,
+    "notes": [],
+    "load_checks": [
+      {
+        "backend": "startup",
+        "load_average": [
+          4.4072265625,
+          5.7724609375,
+          4.365234375
+        ],
+        "rustc_processes": 0
+      },
+      {
+        "backend": "postgis",
+        "load_average": [
+          4.57275390625,
+          5.76318359375,
+          4.37744140625
+        ],
+        "rustc_processes": 0
+      },
+      {
+        "backend": "timescaledb",
+        "load_average": [
+          5.5224609375,
+          4.0517578125,
+          4.04345703125
+        ],
+        "rustc_processes": 0
+      },
+      {
+        "backend": "sqlite",
+        "load_average": [
+          3.162109375,
+          3.51025390625,
+          3.72119140625
+        ],
+        "rustc_processes": 0
+      }
+    ],
+    "complete": true,
+    "profiling": false,
+    "latency_iterations": 200,
+    "implementations": [
+      "v4py",
+      "v4cli",
+      "v5py",
+      "v5cli",
+      "v5bin"
+    ],
+    "cases": [
+      "sync",
+      "inc",
+      "filter_existing",
+      "get_data",
+      "chain",
+      "latency",
+      "startup"
+    ],
+    "v4_version": "4.1.4",
+    "v5_version": "5.0.0a1",
+    "v4_python": "3.14.8",
+    "driver_source_revision": "95e0130d",
+    "v4_dependencies": {
+      "pandas": "3.0.0",
+      "numpy": "2.4.2",
+      "polars": "1.44.1",
+      "pyarrow": "23.0.0",
+      "SQLAlchemy": "2.0.51",
+      "psycopg": "3.3.6",
+      "psycopg2-binary": null
+    },
+    "harness_sha256": "64299bafa72abb2ad2f661f999a5076bc0b9f40233a3216775a91a75812f8194",
+    "v5_python": "3.14.8",
+    "v5_dependencies": {
+      "pandas": "3.0.6",
+      "numpy": "2.5.4",
+      "polars": "2.0.0",
+      "pyarrow": "26.0.0",
+      "SQLAlchemy": "2.1.5",
+      "psycopg": "3.3.6",
+      "psycopg2-binary": null
+    },
+    "v5_extension_sha256": "6a1c7006fd292f7f00f777d8844f593e5e5c250589c828fd59863007ce5232a3",
+    "v5_console_sha256": "8786c398038440dc3b0c29c1e654910dab4711c9b6f7126893b49287e4245661",
+    "v5_entry_module_sha256": "d46379b69fee7a359383e90496e99b1276e7808f241e32fbb2b3553f04ff0921",
+    "v5_binary_version": "Meerschaum v5.0.0-a1",
+    "v5_binary_sha256": "86e68786db3cad26f8db498dde238e79483b29fec797cc54c7b05fbc9995dba3",
+    "baseline_regressions": []
+  },
+  "results": [
+    {
+      "backend": "startup",
+      "case": "startup_import",
+      "impl": "v4py",
+      "seconds": [
+        4.644595,
+        0.20384,
+        0.191849
+      ],
+      "median": 0.20384,
+      "min": 0.191849,
+      "failed": 0
+    },
+    {
+      "backend": "startup",
+      "case": "startup_version",
+      "impl": "v4cli",
+      "seconds": [
+        4.707407,
+        0.201437,
+        0.207149
+      ],
+      "median": 0.207149,
+      "min": 0.201437,
+      "failed": 0
+    },
+    {
+      "backend": "startup",
+      "case": "startup_show_version",
+      "impl": "v4cli",
+      "seconds": [
+        0.295375,
+        0.278412,
+        0.286843
+      ],
+      "median": 0.286843,
+      "min": 0.278412,
+      "failed": 0
+    },
+    {
+      "backend": "startup",
+      "case": "startup_import",
+      "impl": "v5py",
+      "seconds": [
+        0.156394,
+        0.163926,
+        0.153642
+      ],
+      "median": 0.156394,
+      "min": 0.153642,
+      "failed": 0
+    },
+    {
+      "backend": "startup",
+      "case": "startup_version",
+      "impl": "v5cli",
+      "seconds": [
+        0.04204,
+        0.035826,
+        0.038721
+      ],
+      "median": 0.038721,
+      "min": 0.035826,
+      "failed": 0
+    },
+    {
+      "backend": "startup",
+      "case": "startup_show_version",
+      "impl": "v5cli",
+      "seconds": [
+        0.042795,
+        0.040231,
+        0.04358
+      ],
+      "median": 0.042795,
+      "min": 0.040231,
+      "failed": 0
+    },
+    {
+      "backend": "startup",
+      "case": "startup_version",
+      "impl": "v5bin",
+      "seconds": [
+        0.014746,
+        0.010154,
+        0.00988
+      ],
+      "median": 0.010154,
+      "min": 0.00988,
+      "failed": 0
+    },
+    {
+      "backend": "startup",
+      "case": "startup_show_version",
+      "impl": "v5bin",
+      "seconds": [
+        0.011491,
+        0.011773,
+        0.011674
+      ],
+      "median": 0.011674,
+      "min": 0.011491,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "sync_10k",
+      "impl": "v4py",
+      "seconds": [
+        1.369693,
+        1.409421,
+        1.407014
+      ],
+      "median": 1.407014,
+      "min": 1.369693,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "sync_100k",
+      "impl": "v4py",
+      "seconds": [
+        3.755062,
+        3.920194,
+        3.743364
+      ],
+      "median": 3.755062,
+      "min": 3.743364,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "sync_1M",
+      "impl": "v4py",
+      "seconds": [
+        41.318912,
+        42.712177,
+        41.045664
+      ],
+      "median": 41.318912,
+      "min": 41.045664,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "inc_100k",
+      "impl": "v4py",
+      "seconds": [
+        2.673092,
+        2.68344,
+        2.654174
+      ],
+      "median": 2.673092,
+      "min": 2.654174,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "inc_1M",
+      "impl": "v4py",
+      "seconds": [
+        2.896496,
+        2.926493,
+        2.928342
+      ],
+      "median": 2.926493,
+      "min": 2.896496,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "filter_existing_100k",
+      "impl": "v4py",
+      "seconds": [
+        1.774522,
+        1.768157,
+        1.795136
+      ],
+      "median": 1.774522,
+      "min": 1.768157,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "get_data_1M",
+      "impl": "v4py",
+      "seconds": [
+        6.248689,
+        6.122231,
+        6.185716
+      ],
+      "median": 6.185716,
+      "min": 6.122231,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "lat_first_call",
+      "impl": "v4py",
+      "seconds": [
+        0.302128,
+        0.297698,
+        0.299703
+      ],
+      "median": 0.299703,
+      "min": 0.297698,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "lat_get_sync_time",
+      "impl": "v4py",
+      "seconds": [
+        0.001799,
+        0.0018,
+        0.001849
+      ],
+      "median": 0.0018,
+      "min": 0.001799,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "lat_get_rowcount",
+      "impl": "v4py",
+      "seconds": [
+        0.001693,
+        0.001536,
+        0.001623
+      ],
+      "median": 0.001623,
+      "min": 0.001536,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "lat_get_data",
+      "impl": "v4py",
+      "seconds": [
+        0.009173,
+        0.009234,
+        0.009178
+      ],
+      "median": 0.009178,
+      "min": 0.009173,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "lat_fresh_get_sync_time",
+      "impl": "v4py",
+      "seconds": [
+        0.004464,
+        0.004523,
+        0.004519
+      ],
+      "median": 0.004519,
+      "min": 0.004464,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "lat_template_get_sync_time",
+      "impl": "v4py",
+      "seconds": [
+        0.011531,
+        0.011629,
+        0.011504
+      ],
+      "median": 0.011531,
+      "min": 0.011504,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "sync_10k",
+      "impl": "v4cli",
+      "seconds": [
+        2.095498,
+        2.001983,
+        2.051275
+      ],
+      "median": 2.051275,
+      "min": 2.001983,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "sync_100k",
+      "impl": "v4cli",
+      "seconds": [
+        4.470788,
+        4.598067,
+        4.453622
+      ],
+      "median": 4.470788,
+      "min": 4.453622,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "sync_1M",
+      "impl": "v4cli",
+      "seconds": [
+        41.865967,
+        42.358266,
+        42.383821
+      ],
+      "median": 42.358266,
+      "min": 41.865967,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "inc_100k",
+      "impl": "v4cli",
+      "seconds": [
+        3.367088,
+        3.394763,
+        3.420827
+      ],
+      "median": 3.394763,
+      "min": 3.367088,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "inc_1M",
+      "impl": "v4cli",
+      "seconds": [
+        3.540042,
+        3.601355,
+        3.73094
+      ],
+      "median": 3.601355,
+      "min": 3.540042,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "chain_3",
+      "impl": "v4cli",
+      "seconds": [
+        5.119316,
+        5.334662,
+        5.267768
+      ],
+      "median": 5.267768,
+      "min": 5.119316,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "sync_10k",
+      "impl": "v5py",
+      "seconds": [
+        0.208855,
+        0.277183,
+        0.204889
+      ],
+      "median": 0.208855,
+      "min": 0.204889,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "sync_100k",
+      "impl": "v5py",
+      "seconds": [
+        0.744414,
+        0.861379,
+        0.976879
+      ],
+      "median": 0.861379,
+      "min": 0.744414,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "sync_1M",
+      "impl": "v5py",
+      "seconds": [
+        8.916977,
+        9.129168,
+        9.350504
+      ],
+      "median": 9.129168,
+      "min": 8.916977,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "inc_100k",
+      "impl": "v5py",
+      "seconds": [
+        0.634207,
+        0.481906,
+        0.59746
+      ],
+      "median": 0.59746,
+      "min": 0.481906,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "inc_1M",
+      "impl": "v5py",
+      "seconds": [
+        0.654225,
+        0.717628,
+        0.568469
+      ],
+      "median": 0.654225,
+      "min": 0.568469,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "filter_existing_100k",
+      "impl": "v5py",
+      "seconds": [
+        0.442152,
+        0.441645,
+        0.48255
+      ],
+      "median": 0.442152,
+      "min": 0.441645,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "get_data_1M",
+      "impl": "v5py",
+      "seconds": [
+        1.391969,
+        1.412021,
+        1.402682
+      ],
+      "median": 1.402682,
+      "min": 1.391969,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "lat_first_call",
+      "impl": "v5py",
+      "seconds": [
+        0.104511,
+        0.079639,
+        0.082998
+      ],
+      "median": 0.082998,
+      "min": 0.079639,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "lat_get_sync_time",
+      "impl": "v5py",
+      "seconds": [
+        0.001549,
+        0.000963,
+        0.000659
+      ],
+      "median": 0.000963,
+      "min": 0.000659,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "lat_get_rowcount",
+      "impl": "v5py",
+      "seconds": [
+        0.001538,
+        0.001005,
+        0.001549
+      ],
+      "median": 0.001538,
+      "min": 0.001005,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "lat_get_data",
+      "impl": "v5py",
+      "seconds": [
+        0.005018,
+        0.005012,
+        0.005003
+      ],
+      "median": 0.005012,
+      "min": 0.005003,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "lat_fresh_get_sync_time",
+      "impl": "v5py",
+      "seconds": [
+        0.004084,
+        0.00372,
+        0.004673
+      ],
+      "median": 0.004084,
+      "min": 0.00372,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "lat_template_get_sync_time",
+      "impl": "v5py",
+      "seconds": [
+        0.011848,
+        0.011012,
+        0.011769
+      ],
+      "median": 0.011769,
+      "min": 0.011012,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "sync_10k",
+      "impl": "v5cli",
+      "seconds": [
+        0.504641,
+        0.622763,
+        0.48665
+      ],
+      "median": 0.504641,
+      "min": 0.48665,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "sync_100k",
+      "impl": "v5cli",
+      "seconds": [
+        1.147061,
+        1.114992,
+        1.08661
+      ],
+      "median": 1.114992,
+      "min": 1.08661,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "sync_1M",
+      "impl": "v5cli",
+      "seconds": [
+        10.45618,
+        9.915668,
+        10.076142
+      ],
+      "median": 10.076142,
+      "min": 9.915668,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "inc_100k",
+      "impl": "v5cli",
+      "seconds": [
+        0.756773,
+        0.738872,
+        0.766253
+      ],
+      "median": 0.756773,
+      "min": 0.738872,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "inc_1M",
+      "impl": "v5cli",
+      "seconds": [
+        0.82272,
+        0.857079,
+        0.983385
+      ],
+      "median": 0.857079,
+      "min": 0.82272,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "chain_3",
+      "impl": "v5cli",
+      "seconds": [
+        2.252274,
+        2.217107,
+        2.17353
+      ],
+      "median": 2.217107,
+      "min": 2.17353,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "sync_10k",
+      "impl": "v5bin",
+      "seconds": [
+        0.56408,
+        0.598507,
+        0.397313
+      ],
+      "median": 0.56408,
+      "min": 0.397313,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "sync_100k",
+      "impl": "v5bin",
+      "seconds": [
+        1.028407,
+        1.313118,
+        1.217673
+      ],
+      "median": 1.217673,
+      "min": 1.028407,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "sync_1M",
+      "impl": "v5bin",
+      "seconds": [
+        10.363934,
+        10.191372,
+        9.847992
+      ],
+      "median": 10.191372,
+      "min": 9.847992,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "inc_100k",
+      "impl": "v5bin",
+      "seconds": [
+        0.694897,
+        0.75556,
+        0.759326
+      ],
+      "median": 0.75556,
+      "min": 0.694897,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "inc_1M",
+      "impl": "v5bin",
+      "seconds": [
+        0.772653,
+        0.935571,
+        0.912115
+      ],
+      "median": 0.912115,
+      "min": 0.772653,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "chain_3",
+      "impl": "v5bin",
+      "seconds": [
+        2.099206,
+        2.336588,
+        2.117828
+      ],
+      "median": 2.117828,
+      "min": 2.099206,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "chain_3_engine",
+      "impl": "v5cli",
+      "seconds": [
+        2.746254,
+        2.723456,
+        2.514215
+      ],
+      "median": 2.723456,
+      "min": 2.514215,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "chain_3_engine",
+      "impl": "v5bin",
+      "seconds": [
+        2.423173,
+        2.682339,
+        2.505664
+      ],
+      "median": 2.505664,
+      "min": 2.423173,
+      "failed": 0
+    },
+    {
+      "backend": "timescaledb",
+      "case": "sync_10k",
+      "impl": "v4py",
+      "seconds": [
+        1.454951,
+        1.497338,
+        1.410325
+      ],
+      "median": 1.454951,
+      "min": 1.410325,
+      "failed": 0
+    },
+    {
+      "backend": "timescaledb",
+      "case": "sync_100k",
+      "impl": "v4py",
+      "seconds": [
+        3.535484,
+        3.539445,
+        3.434025
+      ],
+      "median": 3.535484,
+      "min": 3.434025,
+      "failed": 0
+    },
+    {
+      "backend": "timescaledb",
+      "case": "sync_1M",
+      "impl": "v4py",
+      "seconds": [
+        39.351367,
+        39.215429,
+        39.52091
+      ],
+      "median": 39.351367,
+      "min": 39.215429,
+      "failed": 0
+    },
+    {
+      "backend": "timescaledb",
+      "case": "inc_100k",
+      "impl": "v4py",
+      "seconds": [
+        2.25278,
+        2.220535,
+        2.260854
+      ],
+      "median": 2.25278,
+      "min": 2.220535,
+      "failed": 0
+    },
+    {
+      "backend": "timescaledb",
+      "case": "inc_1M",
+      "impl": "v4py",
+      "seconds": [
+        2.351754,
+        2.422968,
+        2.383095
+      ],
+      "median": 2.383095,
+      "min": 2.351754,
+      "failed": 0
+    },
+    {
+      "backend": "timescaledb",
+      "case": "filter_existing_100k",
+      "impl": "v4py",
+      "seconds": [
+        1.592553,
+        1.602345,
+        1.515943
+      ],
+      "median": 1.592553,
+      "min": 1.515943,
+      "failed": 0
+    },
+    {
+      "backend": "timescaledb",
+      "case": "get_data_1M",
+      "impl": "v4py",
+      "seconds": [
+        3.818323,
+        3.840581,
+        3.890195
+      ],
+      "median": 3.840581,
+      "min": 3.818323,
+      "failed": 0
+    },
+    {
+      "backend": "timescaledb",
+      "case": "lat_first_call",
+      "impl": "v4py",
+      "seconds": [
+        0.318847,
+        0.309409,
+        0.317478
+      ],
+      "median": 0.317478,
+      "min": 0.309409,
+      "failed": 0
+    },
+    {
+      "backend": "timescaledb",
+      "case": "lat_get_sync_time",
+      "impl": "v4py",
+      "seconds": [
+        0.001767,
+        0.001895,
+        0.001786
+      ],
+      "median": 0.001786,
+      "min": 0.001767,
+      "failed": 0
+    },
+    {
+      "backend": "timescaledb",
+      "case": "lat_get_rowcount",
+      "impl": "v4py",
+      "seconds": [
+        0.001705,
+        0.001741,
+        0.001818
+      ],
+      "median": 0.001741,
+      "min": 0.001705,
+      "failed": 0
+    },
+    {
+      "backend": "timescaledb",
+      "case": "lat_get_data",
+      "impl": "v4py",
+      "seconds": [
+        0.009703,
+        0.009189,
+        0.009767
+      ],
+      "median": 0.009703,
+      "min": 0.009189,
+      "failed": 0
+    },
+    {
+      "backend": "timescaledb",
+      "case": "lat_fresh_get_sync_time",
+      "impl": "v4py",
+      "seconds": [
+        0.004726,
+        0.004633,
+        0.00475
+      ],
+      "median": 0.004726,
+      "min": 0.004633,
+      "failed": 0
+    },
+    {
+      "backend": "timescaledb",
+      "case": "lat_template_get_sync_time",
+      "impl": "v4py",
+      "seconds": [
+        0.011827,
+        0.01411,
+        0.012179
+      ],
+      "median": 0.012179,
+      "min": 0.011827,
+      "failed": 0
+    },
+    {
+      "backend": "timescaledb",
+      "case": "sync_10k",
+      "impl": "v4cli",
+      "seconds": [
+        2.020581,
+        2.062333,
+        2.161719
+      ],
+      "median": 2.062333,
+      "min": 2.020581,
+      "failed": 0
+    },
+    {
+      "backend": "timescaledb",
+      "case": "sync_100k",
+      "impl": "v4cli",
+      "seconds": [
+        4.750755,
+        4.201877,
+        4.097245
+      ],
+      "median": 4.201877,
+      "min": 4.097245,
+      "failed": 0
+    },
+    {
+      "backend": "timescaledb",
+      "case": "sync_1M",
+      "impl": "v4cli",
+      "seconds": [
+        39.404357,
+        39.338852,
+        39.740386
+      ],
+      "median": 39.404357,
+      "min": 39.338852,
+      "failed": 0
+    },
+    {
+      "backend": "timescaledb",
+      "case": "inc_100k",
+      "impl": "v4cli",
+      "seconds": [
+        2.781597,
+        2.885213,
+        2.89346
+      ],
+      "median": 2.885213,
+      "min": 2.781597,
+      "failed": 0
+    },
+    {
+      "backend": "timescaledb",
+      "case": "inc_1M",
+      "impl": "v4cli",
+      "seconds": [
+        3.046367,
+        2.940099,
+        3.09187
+      ],
+      "median": 3.046367,
+      "min": 2.940099,
+      "failed": 0
+    },
+    {
+      "backend": "timescaledb",
+      "case": "chain_3",
+      "impl": "v4cli",
+      "seconds": [
+        5.323649,
+        5.339417,
+        5.397175
+      ],
+      "median": 5.339417,
+      "min": 5.323649,
+      "failed": 0
+    },
+    {
+      "backend": "timescaledb",
+      "case": "sync_10k",
+      "impl": "v5py",
+      "seconds": [
+        0.322018,
+        0.315758,
+        0.433411
+      ],
+      "median": 0.322018,
+      "min": 0.315758,
+      "failed": 0
+    },
+    {
+      "backend": "timescaledb",
+      "case": "sync_100k",
+      "impl": "v5py",
+      "seconds": [
+        1.072255,
+        1.106631,
+        1.025065
+      ],
+      "median": 1.072255,
+      "min": 1.025065,
+      "failed": 0
+    },
+    {
+      "backend": "timescaledb",
+      "case": "sync_1M",
+      "impl": "v5py",
+      "seconds": [
+        10.520837,
+        10.240018,
+        9.982627
+      ],
+      "median": 10.240018,
+      "min": 9.982627,
+      "failed": 0
+    },
+    {
+      "backend": "timescaledb",
+      "case": "inc_100k",
+      "impl": "v5py",
+      "seconds": [
+        0.691686,
+        0.689867,
+        0.682355
+      ],
+      "median": 0.689867,
+      "min": 0.682355,
+      "failed": 0
+    },
+    {
+      "backend": "timescaledb",
+      "case": "inc_1M",
+      "impl": "v5py",
+      "seconds": [
+        0.704189,
+        0.703915,
+        0.707562
+      ],
+      "median": 0.704189,
+      "min": 0.703915,
+      "failed": 0
+    },
+    {
+      "backend": "timescaledb",
+      "case": "filter_existing_100k",
+      "impl": "v5py",
+      "seconds": [
+        0.422529,
+        0.447601,
+        0.440142
+      ],
+      "median": 0.440142,
+      "min": 0.422529,
+      "failed": 0
+    },
+    {
+      "backend": "timescaledb",
+      "case": "get_data_1M",
+      "impl": "v5py",
+      "seconds": [
+        1.365405,
+        1.44415,
+        1.441871
+      ],
+      "median": 1.441871,
+      "min": 1.365405,
+      "failed": 0
+    },
+    {
+      "backend": "timescaledb",
+      "case": "lat_first_call",
+      "impl": "v5py",
+      "seconds": [
+        0.150064,
+        0.114431,
+        0.114133
+      ],
+      "median": 0.114431,
+      "min": 0.114133,
+      "failed": 0
+    },
+    {
+      "backend": "timescaledb",
+      "case": "lat_get_sync_time",
+      "impl": "v5py",
+      "seconds": [
+        0.00151,
+        0.001872,
+        0.001994
+      ],
+      "median": 0.001872,
+      "min": 0.00151,
+      "failed": 0
+    },
+    {
+      "backend": "timescaledb",
+      "case": "lat_get_rowcount",
+      "impl": "v5py",
+      "seconds": [
+        0.000882,
+        0.000765,
+        0.000862
+      ],
+      "median": 0.000862,
+      "min": 0.000765,
+      "failed": 0
+    },
+    {
+      "backend": "timescaledb",
+      "case": "lat_get_data",
+      "impl": "v5py",
+      "seconds": [
+        0.005498,
+        0.005691,
+        0.005985
+      ],
+      "median": 0.005691,
+      "min": 0.005498,
+      "failed": 0
+    },
+    {
+      "backend": "timescaledb",
+      "case": "lat_fresh_get_sync_time",
+      "impl": "v5py",
+      "seconds": [
+        0.004964,
+        0.005608,
+        0.005921
+      ],
+      "median": 0.005608,
+      "min": 0.004964,
+      "failed": 0
+    },
+    {
+      "backend": "timescaledb",
+      "case": "lat_template_get_sync_time",
+      "impl": "v5py",
+      "seconds": [
+        0.012925,
+        0.012378,
+        0.01227
+      ],
+      "median": 0.012378,
+      "min": 0.01227,
+      "failed": 0
+    },
+    {
+      "backend": "timescaledb",
+      "case": "sync_10k",
+      "impl": "v5cli",
+      "seconds": [
+        0.800051,
+        0.735502,
+        0.548461
+      ],
+      "median": 0.735502,
+      "min": 0.548461,
+      "failed": 0
+    },
+    {
+      "backend": "timescaledb",
+      "case": "sync_100k",
+      "impl": "v5cli",
+      "seconds": [
+        1.343538,
+        1.461859,
+        1.313386
+      ],
+      "median": 1.343538,
+      "min": 1.313386,
+      "failed": 0
+    },
+    {
+      "backend": "timescaledb",
+      "case": "sync_1M",
+      "impl": "v5cli",
+      "seconds": [
+        11.73289,
+        10.819843,
+        10.974623
+      ],
+      "median": 10.974623,
+      "min": 10.819843,
+      "failed": 0
+    },
+    {
+      "backend": "timescaledb",
+      "case": "inc_100k",
+      "impl": "v5cli",
+      "seconds": [
+        0.802573,
+        0.743087,
+        0.804753
+      ],
+      "median": 0.802573,
+      "min": 0.743087,
+      "failed": 0
+    },
+    {
+      "backend": "timescaledb",
+      "case": "inc_1M",
+      "impl": "v5cli",
+      "seconds": [
+        0.94056,
+        0.96172,
+        0.982402
+      ],
+      "median": 0.96172,
+      "min": 0.94056,
+      "failed": 0
+    },
+    {
+      "backend": "timescaledb",
+      "case": "chain_3",
+      "impl": "v5cli",
+      "seconds": [
+        3.09615,
+        3.058314,
+        3.172088
+      ],
+      "median": 3.09615,
+      "min": 3.058314,
+      "failed": 0
+    },
+    {
+      "backend": "timescaledb",
+      "case": "sync_10k",
+      "impl": "v5bin",
+      "seconds": [
+        0.753706,
+        0.628042,
+        0.566816
+      ],
+      "median": 0.628042,
+      "min": 0.566816,
+      "failed": 0
+    },
+    {
+      "backend": "timescaledb",
+      "case": "sync_100k",
+      "impl": "v5bin",
+      "seconds": [
+        1.277495,
+        1.465217,
+        1.205306
+      ],
+      "median": 1.277495,
+      "min": 1.205306,
+      "failed": 0
+    },
+    {
+      "backend": "timescaledb",
+      "case": "sync_1M",
+      "impl": "v5bin",
+      "seconds": [
+        11.744232,
+        11.032748,
+        10.837732
+      ],
+      "median": 11.032748,
+      "min": 10.837732,
+      "failed": 0
+    },
+    {
+      "backend": "timescaledb",
+      "case": "inc_100k",
+      "impl": "v5bin",
+      "seconds": [
+        0.864044,
+        0.855999,
+        0.835126
+      ],
+      "median": 0.855999,
+      "min": 0.835126,
+      "failed": 0
+    },
+    {
+      "backend": "timescaledb",
+      "case": "inc_1M",
+      "impl": "v5bin",
+      "seconds": [
+        0.935532,
+        0.840431,
+        0.917104
+      ],
+      "median": 0.917104,
+      "min": 0.840431,
+      "failed": 0
+    },
+    {
+      "backend": "timescaledb",
+      "case": "chain_3",
+      "impl": "v5bin",
+      "seconds": [
+        3.111092,
+        2.994958,
+        2.789634
+      ],
+      "median": 2.994958,
+      "min": 2.789634,
+      "failed": 0
+    },
+    {
+      "backend": "timescaledb",
+      "case": "chain_3_engine",
+      "impl": "v5cli",
+      "seconds": [
+        3.549315,
+        3.497136,
+        3.254805
+      ],
+      "median": 3.497136,
+      "min": 3.254805,
+      "failed": 0
+    },
+    {
+      "backend": "timescaledb",
+      "case": "chain_3_engine",
+      "impl": "v5bin",
+      "seconds": [
+        3.777331,
+        3.416919,
+        3.244767
+      ],
+      "median": 3.416919,
+      "min": 3.244767,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "sync_10k",
+      "impl": "v4py",
+      "seconds": [
+        3.171901,
+        3.14148,
+        3.01998
+      ],
+      "median": 3.14148,
+      "min": 3.01998,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "sync_100k",
+      "impl": "v4py",
+      "seconds": [
+        26.780444,
+        26.028665,
+        32.709308
+      ],
+      "median": 26.780444,
+      "min": 26.028665,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "sync_1M",
+      "impl": "v4py",
+      "seconds": [
+        266.782173,
+        259.975234,
+        358.189938
+      ],
+      "median": 266.782173,
+      "min": 259.975234,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "inc_100k",
+      "impl": "v4py",
+      "seconds": [
+        15.961956,
+        15.641249,
+        15.612383
+      ],
+      "median": 15.641249,
+      "min": 15.612383,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "inc_1M",
+      "impl": "v4py",
+      "seconds": [
+        38.220389,
+        48.691003,
+        44.854792
+      ],
+      "median": 44.854792,
+      "min": 38.220389,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "filter_existing_100k",
+      "impl": "v4py",
+      "seconds": [
+        1.658905,
+        1.748289,
+        1.706822
+      ],
+      "median": 1.706822,
+      "min": 1.658905,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "get_data_1M",
+      "impl": "v4py",
+      "seconds": [
+        5.017852,
+        5.029093,
+        5.25536
+      ],
+      "median": 5.029093,
+      "min": 5.017852,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "lat_first_call",
+      "impl": "v4py",
+      "seconds": [
+        0.218359,
+        0.217787,
+        0.219065
+      ],
+      "median": 0.218359,
+      "min": 0.217787,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "lat_get_sync_time",
+      "impl": "v4py",
+      "seconds": [
+        0.001176,
+        0.001165,
+        0.001168
+      ],
+      "median": 0.001168,
+      "min": 0.001165,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "lat_get_rowcount",
+      "impl": "v4py",
+      "seconds": [
+        0.000965,
+        0.000952,
+        0.000955
+      ],
+      "median": 0.000955,
+      "min": 0.000952,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "lat_get_data",
+      "impl": "v4py",
+      "seconds": [
+        0.008217,
+        0.008308,
+        0.008143
+      ],
+      "median": 0.008217,
+      "min": 0.008143,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "lat_fresh_get_sync_time",
+      "impl": "v4py",
+      "seconds": [
+        0.003335,
+        0.003311,
+        0.003342
+      ],
+      "median": 0.003335,
+      "min": 0.003311,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "lat_template_get_sync_time",
+      "impl": "v4py",
+      "seconds": [
+        0.007954,
+        0.007911,
+        0.008065
+      ],
+      "median": 0.007954,
+      "min": 0.007911,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "sync_10k",
+      "impl": "v4cli",
+      "seconds": [
+        4.06224,
+        3.86002,
+        3.452652
+      ],
+      "median": 3.86002,
+      "min": 3.452652,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "sync_100k",
+      "impl": "v4cli",
+      "seconds": [
+        27.408478,
+        26.427821,
+        27.184595
+      ],
+      "median": 27.184595,
+      "min": 26.427821,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "sync_1M",
+      "impl": "v4cli",
+      "seconds": [
+        367.161224,
+        266.605165,
+        359.161684
+      ],
+      "median": 359.161684,
+      "min": 266.605165,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "inc_100k",
+      "impl": "v4cli",
+      "seconds": [
+        19.193079,
+        23.087798,
+        18.130264
+      ],
+      "median": 19.193079,
+      "min": 18.130264,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "inc_1M",
+      "impl": "v4cli",
+      "seconds": [
+        41.567447,
+        49.933059,
+        50.951636
+      ],
+      "median": 49.933059,
+      "min": 41.567447,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "chain_3",
+      "impl": "v4cli",
+      "seconds": [
+        20.658827,
+        18.281859,
+        18.476752
+      ],
+      "median": 18.476752,
+      "min": 18.281859,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "sync_10k",
+      "impl": "v5py",
+      "seconds": [
+        0.245495,
+        0.234143,
+        0.201939
+      ],
+      "median": 0.234143,
+      "min": 0.201939,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "sync_100k",
+      "impl": "v5py",
+      "seconds": [
+        0.986125,
+        1.184072,
+        0.939397
+      ],
+      "median": 0.986125,
+      "min": 0.939397,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "sync_1M",
+      "impl": "v5py",
+      "seconds": [
+        8.942158,
+        9.718522,
+        9.693848
+      ],
+      "median": 9.693848,
+      "min": 8.942158,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "inc_100k",
+      "impl": "v5py",
+      "seconds": [
+        0.880825,
+        0.870855,
+        0.929015
+      ],
+      "median": 0.880825,
+      "min": 0.870855,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "inc_1M",
+      "impl": "v5py",
+      "seconds": [
+        0.970037,
+        1.030422,
+        1.030303
+      ],
+      "median": 1.030303,
+      "min": 0.970037,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "filter_existing_100k",
+      "impl": "v5py",
+      "seconds": [
+        0.607589,
+        0.590085,
+        0.615771
+      ],
+      "median": 0.607589,
+      "min": 0.590085,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "get_data_1M",
+      "impl": "v5py",
+      "seconds": [
+        2.828653,
+        2.925685,
+        2.987213
+      ],
+      "median": 2.925685,
+      "min": 2.828653,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "lat_first_call",
+      "impl": "v5py",
+      "seconds": [
+        0.050148,
+        0.048284,
+        0.047754
+      ],
+      "median": 0.048284,
+      "min": 0.047754,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "lat_get_sync_time",
+      "impl": "v5py",
+      "seconds": [
+        0.000378,
+        0.0005,
+        0.000379
+      ],
+      "median": 0.000379,
+      "min": 0.000378,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "lat_get_rowcount",
+      "impl": "v5py",
+      "seconds": [
+        0.000323,
+        0.000522,
+        0.000303
+      ],
+      "median": 0.000323,
+      "min": 0.000303,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "lat_get_data",
+      "impl": "v5py",
+      "seconds": [
+        0.004832,
+        0.004804,
+        0.004755
+      ],
+      "median": 0.004804,
+      "min": 0.004755,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "lat_fresh_get_sync_time",
+      "impl": "v5py",
+      "seconds": [
+        0.002487,
+        0.001965,
+        0.002472
+      ],
+      "median": 0.002472,
+      "min": 0.001965,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "lat_template_get_sync_time",
+      "impl": "v5py",
+      "seconds": [
+        0.006146,
+        0.006043,
+        0.006081
+      ],
+      "median": 0.006081,
+      "min": 0.006043,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "sync_10k",
+      "impl": "v5cli",
+      "seconds": [
+        0.360954,
+        0.351828,
+        0.249838
+      ],
+      "median": 0.351828,
+      "min": 0.249838,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "sync_100k",
+      "impl": "v5cli",
+      "seconds": [
+        1.12733,
+        1.277822,
+        1.122272
+      ],
+      "median": 1.12733,
+      "min": 1.122272,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "sync_1M",
+      "impl": "v5cli",
+      "seconds": [
+        10.207021,
+        10.666196,
+        10.880362
+      ],
+      "median": 10.666196,
+      "min": 10.207021,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "inc_100k",
+      "impl": "v5cli",
+      "seconds": [
+        0.949574,
+        0.903337,
+        0.927716
+      ],
+      "median": 0.927716,
+      "min": 0.903337,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "inc_1M",
+      "impl": "v5cli",
+      "seconds": [
+        1.118335,
+        1.08904,
+        1.212531
+      ],
+      "median": 1.118335,
+      "min": 1.08904,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "chain_3",
+      "impl": "v5cli",
+      "seconds": [
+        2.135047,
+        2.320659,
+        2.35694
+      ],
+      "median": 2.320659,
+      "min": 2.135047,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "sync_10k",
+      "impl": "v5bin",
+      "seconds": [
+        0.325212,
+        0.346749,
+        0.293131
+      ],
+      "median": 0.325212,
+      "min": 0.293131,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "sync_100k",
+      "impl": "v5bin",
+      "seconds": [
+        1.311716,
+        1.144228,
+        1.268048
+      ],
+      "median": 1.268048,
+      "min": 1.144228,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "sync_1M",
+      "impl": "v5bin",
+      "seconds": [
+        10.104222,
+        10.793445,
+        11.503253
+      ],
+      "median": 10.793445,
+      "min": 10.104222,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "inc_100k",
+      "impl": "v5bin",
+      "seconds": [
+        0.95996,
+        1.020943,
+        1.009301
+      ],
+      "median": 1.009301,
+      "min": 0.95996,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "inc_1M",
+      "impl": "v5bin",
+      "seconds": [
+        1.168259,
+        1.147479,
+        1.056064
+      ],
+      "median": 1.147479,
+      "min": 1.056064,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "chain_3",
+      "impl": "v5bin",
+      "seconds": [
+        2.188074,
+        2.181501,
+        2.250974
+      ],
+      "median": 2.188074,
+      "min": 2.181501,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "chain_3_engine",
+      "impl": "v5cli",
+      "seconds": [
+        2.201856,
+        2.181859,
+        2.289262
+      ],
+      "median": 2.201856,
+      "min": 2.181859,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "chain_3_engine",
+      "impl": "v5bin",
+      "seconds": [
+        2.509645,
+        2.369352,
+        2.279644
+      ],
+      "median": 2.369352,
+      "min": 2.279644,
+      "failed": 0
+    }
+  ]
+}

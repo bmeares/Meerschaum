@@ -32,6 +32,7 @@ pub mod dtypes;
 pub mod pipe;
 pub mod process_env;
 pub mod pyfmt;
+pub mod python_guard;
 pub mod self_exe;
 pub mod static_config;
 pub mod success;

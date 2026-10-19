@@ -467,7 +467,13 @@ class Pipeline:
                     return False, message
         return None
 
-    def plan(self, begin: Any = None, end: Any = None, **kwargs: Any) -> Plan:
+    def plan(
+        self,
+        begin: Any = None,
+        end: Any = None,
+        expected: bool = False,
+        **kwargs: Any
+    ) -> Plan:
         """
         Plan the run without moving any data.
 
@@ -475,6 +481,15 @@ class Pipeline:
         ----------
         begin, end: Union[datetime, int, str, None], default None
             Optionally bound the sync window. `None` and `''` leave it to the planner.
+
+        expected: bool, default False
+            If `False`, every node is planned against the state as it is now: a node whose
+            parents run first is provisional (`*`) and is planned again by the executor once
+            they finish. If `True`, return what `mrsm plan pipes` prints: each provisional node
+            re-planned as if every node that runs before it synced new rows after its
+            watermark, so its window starts where the executor will start it (often the start
+            of a parent's chunk-grid cell). Only the start is predicted; the executor caps the
+            end at the parents' new watermarks.
 
         Returns
         -------
@@ -485,6 +500,8 @@ class Pipeline:
             raise ValueError(failure[1])
         options = {'begin': begin, 'end': end, **kwargs}
         request = self._request(**options)
+        if expected:
+            request['expected'] = True
         data = call('engine_plan', request)
         return Plan(data, pipeline=self, options={
             key: value

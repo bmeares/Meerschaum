@@ -28,8 +28,9 @@ fn v4_view(value: &Value) -> Value {
     }
 }
 
+// The intentional v5 stack defaults (PARITY.md W17K1-002..004) read as v4's.
 fn assert_v4_same(actual: &Value, expected: &Value, context: &str) {
-    common::assert_same(&v4_view(actual), expected, context);
+    common::assert_same(&common::v4_stack_value(&v4_view(actual)), expected, context);
 }
 
 fn copy_dir(src: &Path, dst: &Path) {

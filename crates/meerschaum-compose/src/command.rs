@@ -48,6 +48,14 @@ pub trait CommandRunner {
     /// Run a command and return its result. For subprocesses only success matters (Python
     /// checks the return code).
     fn run(&mut self, command: &MrsmCommand) -> SuccessTuple;
+
+    /// Show the messages compose recorded so far, just before a command runs, so that they
+    /// interleave with the command's own output as in v4 (where `info()` / `warn()` print at
+    /// once). Return `true` when they were shown (compose then drops them); the default keeps
+    /// them in the output's messages.
+    fn show_messages(&mut self, _messages: &[crate::error::Message]) -> bool {
+        false
+    }
 }
 
 /// A runner that records every command and answers with a scripted result (success by default).

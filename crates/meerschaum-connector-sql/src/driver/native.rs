@@ -24,14 +24,14 @@ use crate::error::{Result, SqlError};
 /// One event produced by [`NativeConn::query`]: the result's column plans (exactly once, before
 /// any rows), then row-major chunks of cells.
 #[derive(Debug)]
-pub(crate) enum NativeEvent {
+pub enum NativeEvent {
     Columns(Vec<ColumnPlan>),
     Rows(Vec<Vec<SqlValue>>),
 }
 
 /// One open connection of a native driver family.
 #[async_trait]
-pub(crate) trait NativeConn: Send + 'static {
+pub trait NativeConn: Send + 'static {
     /// Execute one or more statements (several only without parameters), returning the rows
     /// affected.
     async fn execute(&mut self, sql: &str, params: &[SqlParam]) -> Result<u64>;
@@ -63,11 +63,17 @@ pub(crate) trait NativeConn: Send + 'static {
 
 /// Opens connections for a pool.
 #[async_trait]
-pub(crate) trait NativeConnector: Send + Sync + 'static {
+pub trait NativeConnector: Send + Sync + 'static {
+    /// Embedded drivers may forbid inherited pool reuse after fork.
+    fn owner_pid(&self) -> Option<u32> {
+        None
+    }
+
     async fn connect(&self) -> Result<Box<dyn NativeConn>>;
 }
 
 struct PoolInner {
+    owner_pid: Option<u32>,
     connector: Box<dyn NativeConnector>,
     idle: Mutex<Vec<Box<dyn NativeConn>>>,
     sem: Arc<Semaphore>,
@@ -85,12 +91,24 @@ pub(crate) struct PooledConn {
     conn: Option<Box<dyn NativeConn>>,
     pool: Arc<PoolInner>,
     in_tx: bool,
-    _permit: OwnedSemaphorePermit,
+    _permit: Option<OwnedSemaphorePermit>,
 }
 
 impl Drop for PooledConn {
     fn drop(&mut self) {
+        if self
+            .pool
+            .owner_pid
+            .is_some_and(|pid| pid != std::process::id())
+            && let Some(permit) = self._permit.take()
+        {
+            std::mem::forget(permit);
+        }
         if let Some(conn) = self.conn.take()
+            && self
+                .pool
+                .owner_pid
+                .is_none_or(|pid| pid == std::process::id())
             && !self.in_tx
             && !conn.is_broken()
             && let Ok(mut idle) = self.pool.idle.lock()
@@ -115,6 +133,7 @@ impl NativePool {
     pub(crate) fn new(connector: Box<dyn NativeConnector>, max: u32) -> Self {
         NativePool {
             inner: Arc::new(PoolInner {
+                owner_pid: connector.owner_pid(),
                 connector,
                 idle: Mutex::new(Vec::new()),
                 sem: Arc::new(Semaphore::new(max.max(1) as usize)),
@@ -124,6 +143,13 @@ impl NativePool {
 
     /// Check out a connection, opening one when none is idle.
     pub(crate) async fn acquire(&self) -> Result<PooledConn> {
+        if self
+            .inner
+            .owner_pid
+            .is_some_and(|pid| pid != std::process::id())
+        {
+            return Err(SqlError::Database("DuckDB state belongs to the parent process; start a fresh interpreter (spawn or exec).".into()));
+        }
         let permit = self
             .inner
             .sem
@@ -140,12 +166,19 @@ impl NativePool {
             conn: Some(conn),
             pool: self.inner.clone(),
             in_tx: false,
-            _permit: permit,
+            _permit: Some(permit),
         })
     }
 
     /// Drop every idle connection.
     pub(crate) fn close(&self) {
+        if self
+            .inner
+            .owner_pid
+            .is_some_and(|pid| pid != std::process::id())
+        {
+            return;
+        }
         if let Ok(mut idle) = self.inner.idle.lock() {
             idle.clear();
         }
@@ -198,10 +231,12 @@ impl NativePool {
                                 }
                             }));
                             if failed {
+                                erx.close();
                                 return ($plans.clone(), schema);
                             }
                         }
                         if tx.send(item).await.is_err() {
+                            erx.close();
                             return ($plans.clone(), schema);
                         }
                     }};
@@ -304,8 +339,9 @@ impl NativePool {
         rollback: bool,
     ) -> Result<Vec<Option<u64>>> {
         let mut conn = self.acquire().await?;
-        conn.conn().begin().await?;
+        // Mark before awaiting BEGIN: cancellation must discard a possibly active transaction.
         conn.in_tx = true;
+        conn.conn().begin().await?;
         let mut results = Vec::with_capacity(queries.len());
         for query in queries {
             match conn.conn().execute(query, &[]).await {
@@ -347,8 +383,9 @@ impl NativePool {
         statements: &[(String, Vec<SqlParam>)],
     ) -> Result<Vec<Option<u64>>> {
         let mut conn = self.acquire().await?;
-        conn.conn().begin().await?;
+        // Mark before awaiting BEGIN: cancellation must discard a possibly active transaction.
         conn.in_tx = true;
+        conn.conn().begin().await?;
         let mut results = Vec::with_capacity(statements.len());
         for (sql, params) in statements {
             match conn.conn().execute(sql, params).await {
@@ -391,8 +428,9 @@ impl NativePool {
     /// Begin a transaction on a pooled connection.
     pub(crate) async fn begin(&self) -> Result<NativeTx> {
         let mut conn = self.acquire().await?;
-        conn.conn().begin().await?;
+        // Mark before awaiting BEGIN: cancellation must discard a possibly active transaction.
         conn.in_tx = true;
+        conn.conn().begin().await?;
         Ok(NativeTx { conn })
     }
 }
@@ -503,4 +541,136 @@ pub(crate) fn blocking_send_rows(
     }
     let rows = std::mem::take(buf);
     sink.blocking_send(NativeEvent::Rows(rows)).is_ok()
+}
+
+#[cfg(test)]
+mod cancellation_tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct Connector {
+        opens: Arc<AtomicUsize>,
+        begun: Arc<tokio::sync::Notify>,
+    }
+    struct Conn {
+        begun: Arc<tokio::sync::Notify>,
+    }
+    #[async_trait]
+    impl NativeConnector for Connector {
+        async fn connect(&self) -> Result<Box<dyn NativeConn>> {
+            self.opens.fetch_add(1, Ordering::SeqCst);
+            Ok(Box::new(Conn {
+                begun: self.begun.clone(),
+            }))
+        }
+    }
+    #[async_trait]
+    impl NativeConn for Conn {
+        async fn execute(&mut self, _: &str, _: &[SqlParam]) -> Result<u64> {
+            Ok(0)
+        }
+        async fn query(
+            &mut self,
+            sql: &str,
+            _: &[SqlParam],
+            _: usize,
+            sink: mpsc::Sender<NativeEvent>,
+        ) -> Result<()> {
+            if sink
+                .send(NativeEvent::Columns(vec![ColumnPlan::new(
+                    "value",
+                    ColumnKind::Int64,
+                    "BIGINT",
+                )]))
+                .await
+                .is_err()
+            {
+                return Ok(());
+            }
+            let count = if sql == "large" { 10_000 } else { 1 };
+            for _ in 0..count {
+                let value = if sql == "invalid" {
+                    SqlValue::Bytes(vec![0xff])
+                } else {
+                    SqlValue::Int(1)
+                };
+                if sink
+                    .send(NativeEvent::Rows(vec![vec![value]]))
+                    .await
+                    .is_err()
+                {
+                    break;
+                }
+            }
+            Ok(())
+        }
+        async fn begin(&mut self) -> Result<()> {
+            // The server has accepted BEGIN, but its asynchronous acknowledgement may never
+            // reach the caller (e.g. cancellation at the Python / blocking-task boundary).
+            self.begun.notify_one();
+            std::future::pending().await
+        }
+        async fn commit(&mut self) -> Result<()> {
+            Ok(())
+        }
+        async fn rollback(&mut self) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn cancelling_begin_discards_the_possibly_active_connection() {
+        let opens = Arc::new(AtomicUsize::new(0));
+        let begun = Arc::new(tokio::sync::Notify::new());
+        let pool = NativePool::new(
+            Box::new(Connector {
+                opens: opens.clone(),
+                begun: begun.clone(),
+            }),
+            1,
+        );
+        let pending_pool = pool.clone();
+        let task = tokio::spawn(async move { pending_pool.begin().await });
+        begun.notified().await;
+        task.abort();
+        let result = task.await;
+        assert!(matches!(result, Err(ref error) if error.is_cancelled()));
+        let _connection = pool.acquire().await.unwrap();
+        assert_eq!(
+            opens.load(Ordering::SeqCst),
+            2,
+            "a cancelled BEGIN must not return its connection to the pool"
+        );
+    }
+
+    #[tokio::test]
+    async fn abandoned_or_invalid_stream_releases_pool_capacity() {
+        let pool = NativePool::new(
+            Box::new(Connector {
+                opens: Arc::new(AtomicUsize::new(0)),
+                begun: Arc::new(tokio::sync::Notify::new()),
+            }),
+            1,
+        );
+        let mut stream = pool.read_stream("large".into(), 1, false).await.unwrap();
+        assert!(stream.next().await.unwrap().is_ok());
+        drop(stream);
+        let value = tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            pool.value_with("SELECT 1", &[]),
+        )
+        .await
+        .expect("abandoning a bounded stream must unblock its producer")
+        .unwrap();
+        assert_eq!(value, Some(SqlValue::Int(1)));
+        assert!(pool.read_stream("invalid".into(), 1, false).await.is_err());
+        let value = tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            pool.value_with("SELECT 1", &[]),
+        )
+        .await
+        .expect("a conversion failure must release its producer and permit")
+        .unwrap();
+        assert_eq!(value, Some(SqlValue::Int(1)));
+    }
 }

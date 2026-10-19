@@ -291,10 +291,96 @@ pub fn upgrade_meerschaum(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult 
     if docker_available() {
         run_stack(rt, &["pull"], debug);
         if restart_stack {
-            run_stack(rt, &["up", "-d"], debug);
+            // The offer below prints the extensions hint once (not `stack up` too).
+            super::extensions::without_stack_hint(|| run_stack(rt, &["up", "-d"], debug));
+            offer_extension_upgrade(rt, yes, noask, debug);
         }
     }
     crate::builtin::reload(args, rt)
+}
+
+/// v5: once the stack is up again, wait (bounded) for its database to be healthy and offer
+/// `upgrade extensions` when an extension lags the freshly pulled image. Never fails the
+/// upgrade: errors and timeouts only skip the offer.
+fn offer_extension_upgrade(rt: &mut Runtime<'_>, yes: bool, noask: bool, debug: bool) {
+    use super::extensions;
+    if !wait_for_stack_db(rt, std::time::Duration::from_secs(90)) {
+        return;
+    }
+    let Some(hint) = extensions::lag_hint(rt, "sql:main", std::time::Duration::from_secs(5)) else {
+        return;
+    };
+    super::info(rt, &hint);
+    let noask = super::check_noask(rt, noask);
+    if !yes && noask {
+        return;
+    }
+    let run = yes || yes_no(rt, "Update the extensions now?", "y", yes, noask).unwrap_or(false);
+    if !run {
+        return;
+    }
+    let args = extensions::upgrade_args("sql:main", yes, noask, debug);
+    match extensions::upgrade_extensions(&args, rt) {
+        Ok(result) => super::print_tuple(rt, &result, Default::default()),
+        Err(e) => warn(rt, &e.message),
+    }
+}
+
+/// The `db` container's `{{.State.Health.Status}}`, or `{{.State.Status}}` without a
+/// healthcheck: ready when `healthy`, or `running` with no healthcheck to wait for.
+fn db_ready(state: Option<&str>) -> bool {
+    matches!(state, Some("healthy" | "running"))
+}
+
+/// Wait until the stack's `db` container is healthy, or running when it has no healthcheck (a
+/// user's `stack.yaml` may drop it), by the Compose labels, at most `limit`.
+fn wait_for_stack_db(rt: &mut Runtime<'_>, limit: std::time::Duration) -> bool {
+    let project = rt
+        .config()
+        .get(&["stack", "project_name"])
+        .map(|v| v.py_str())
+        .unwrap_or_else(|| "mrsm".into());
+    let start = std::time::Instant::now();
+    loop {
+        let ids = Command::new("docker")
+            .args([
+                "ps",
+                "-q",
+                "--filter",
+                &format!("label=com.docker.compose.project={project}"),
+                "--filter",
+                "label=com.docker.compose.service=db",
+            ])
+            .stdin(Stdio::null())
+            .stderr(Stdio::null())
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+            .unwrap_or_default();
+        let state = ids.lines().next().and_then(|id| {
+            Command::new("docker")
+                .args([
+                    "inspect",
+                    "-f",
+                    "{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}",
+                    id,
+                ])
+                .stdin(Stdio::null())
+                .stderr(Stdio::null())
+                .output()
+                .ok()
+                .filter(|o| o.status.success())
+                .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        });
+        if db_ready(state.as_deref()) {
+            return true;
+        }
+        if start.elapsed() >= limit {
+            return false;
+        }
+        std::thread::sleep(std::time::Duration::from_secs(2));
+    }
 }
 
 /// The interpreter `upgrade meerschaum` installs into: `MRSM_PYTHON`, else the one that sits next
@@ -320,9 +406,9 @@ except Exception:
     sys.exit(3)
 ";
     let installed = Command::new(&python)
-        // `-E`: `PYTHON*` variables (a `PYTHONPATH` pointing at a source tree) must not make a
-        // distribution look installed.
-        .args(["-E", "-c", CHECK])
+        // Ignore `PYTHON*` variables and exclude the current directory: source-tree metadata
+        // must not make an empty environment look installed. Keep legitimate user-site installs.
+        .args(["-E", "-P", "-c", CHECK])
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -360,7 +446,7 @@ fn sibling_interpreter() -> Option<String> {
 }
 
 /// `actions['stack'](words, debug=debug)`; the result is ignored, as in v4.
-fn run_stack(rt: &mut Runtime<'_>, words: &[&str], debug: bool) {
+pub(super) fn run_stack(rt: &mut Runtime<'_>, words: &[&str], debug: bool) {
     let mut stack_args = ArgsMap::new();
     let mut action = vec!["stack".to_string()];
     action.extend(words.iter().map(|w| (*w).to_string()));
@@ -491,6 +577,17 @@ pub fn verify_packages(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_stack_db_is_ready_when_healthy_or_running_without_a_healthcheck() {
+        assert!(db_ready(Some("healthy")));
+        // No healthcheck in the user's `stack.yaml`: the inspect template prints the state.
+        assert!(db_ready(Some("running")));
+        assert!(!db_ready(Some("starting")));
+        assert!(!db_ready(Some("unhealthy")));
+        assert!(!db_ready(Some("restarting")));
+        assert!(!db_ready(None));
+    }
 
     #[test]
     fn prereleases_are_pins_with_dev_rc_or_a() {

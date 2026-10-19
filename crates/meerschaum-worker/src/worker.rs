@@ -7,11 +7,11 @@
 //! process dies, every pending call fails with [`WorkerError::Crashed`] and nothing else.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use meerschaum_core::pipe::PipeDefaults;
 use meerschaum_core::{Pipe, SuccessTuple};
@@ -48,6 +48,67 @@ pub struct WorkerOptions {
     pub quiet: bool,
     /// The defaults used to rebuild pipes sent back by the worker.
     pub pipe_defaults: PipeDefaults,
+}
+
+/// Whether a start already had the same-major warning enabled (one per program).
+static WARNED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// The first delay after a refusal, and the longest (doubled each time).
+pub const REFUSAL_DELAY_INITIAL: Duration = Duration::from_secs(10);
+/// See [`REFUSAL_DELAY_INITIAL`].
+pub const REFUSAL_DELAY_MAX: Duration = Duration::from_secs(300);
+
+/// Interpreters whose worker host refused to start ([`WorkerError::Refused`]): asking again at
+/// once would print the same refusal again and fail the same way, so each is left alone until its
+/// delay (10 s, doubling to 5 min, per consecutive refusal) passes, a `reload` or a pool recycle.
+#[derive(Debug, Default)]
+struct Refusals {
+    /// `(interpreter, no start before, the next delay)`.
+    entries: Vec<(PathBuf, Instant, Duration)>,
+}
+
+impl Refusals {
+    /// How long `python` is still refused at `now` (`None`: it may be started).
+    fn remaining(&self, python: &Path, now: Instant) -> Option<Duration> {
+        self.entries
+            .iter()
+            .find(|(p, _, _)| p == python)
+            .and_then(|(_, until, _)| until.checked_duration_since(now))
+            .filter(|d| !d.is_zero())
+    }
+
+    /// Remember a refusal at `now`; the delay before `python` is asked again.
+    fn note(&mut self, python: &Path, now: Instant) -> Duration {
+        match self.entries.iter_mut().find(|(p, _, _)| p == python) {
+            Some((_, until, delay)) => {
+                let this = *delay;
+                *until = now + this;
+                *delay = (this * 2).min(REFUSAL_DELAY_MAX);
+                this
+            }
+            None => {
+                self.entries.push((
+                    python.to_path_buf(),
+                    now + REFUSAL_DELAY_INITIAL,
+                    (REFUSAL_DELAY_INITIAL * 2).min(REFUSAL_DELAY_MAX),
+                ));
+                REFUSAL_DELAY_INITIAL
+            }
+        }
+    }
+}
+
+fn refused() -> std::sync::MutexGuard<'static, Refusals> {
+    static REFUSED: Mutex<Refusals> = Mutex::new(Refusals {
+        entries: Vec::new(),
+    });
+    REFUSED.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Forget refusals, so the next start asks the interpreter again (`reload`, a pool recycle after
+/// a manifest change).
+pub fn clear_refusals() {
+    refused().entries.clear();
 }
 
 /// The interpreter to use: `MRSM_PYTHON`, else `python3` (`python` on Windows).
@@ -237,6 +298,9 @@ impl Worker {
                     .into(),
             ));
         }
+        if refused().remaining(&opts.python, Instant::now()).is_some() {
+            return Err(WorkerError::Refused);
+        }
         if !opts.quiet
             && let Some(hook) = SPAWN_HOOK.get()
         {
@@ -249,7 +313,11 @@ impl Worker {
         // first). Plugins are imported through the plugins directory, never the working one.
         cmd.arg(meerschaum_core::self_exe::PYTHON_SAFE_PATH_FLAG);
         if opts.module == "meerschaum.worker" {
-            cmd.arg("-c").arg(include_str!("../python/host.py"));
+            cmd.arg("-c").arg(format!(
+                "{}\n_mrsm_guard()\n{}",
+                meerschaum_core::python_guard::SCRIPT,
+                include_str!("../python/host.py")
+            ));
         } else {
             cmd.arg("-m").arg(&opts.module);
         }
@@ -266,6 +334,14 @@ impl Worker {
         }
         for k in &opts.env_remove {
             cmd.env_remove(k);
+        }
+        // The host refuses a `meerschaum` this program cannot work with, before importing it
+        // (`meerschaum_core::python_guard`); one start per program may warn about another release.
+        if opts.module == "meerschaum.worker" {
+            cmd.envs(meerschaum_core::python_guard::expect_env());
+            if !WARNED.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                cmd.env(meerschaum_core::python_guard::WARN_ENV, "1");
+            }
         }
         cmd.envs(opts.env.iter().map(|(k, v)| (k, v)));
         if let Some(dir) = &opts.current_dir {
@@ -287,6 +363,14 @@ impl Worker {
                 }
             },
             status = child.wait() => {
+                if status.as_ref().is_ok_and(|s| {
+                    s.code() == Some(meerschaum_core::python_guard::REFUSED_EXIT_CODE)
+                }) && opts.module == "meerschaum.worker" {
+                    // The host said why on stderr. Do not start another one for this
+                    // interpreter until `clear_refusals` (`reload`).
+                    refused().note(&opts.python, Instant::now());
+                    return Err(WorkerError::Refused);
+                }
                 return Err(WorkerError::Spawn(format!(
                     "the worker exited before connecting ({})",
                     status.map(|s| s.to_string()).unwrap_or_else(|e| e.to_string())
@@ -632,6 +716,55 @@ async fn run_callback(shared: &Shared, mut msg: Msg, mut frames: Vec<Vec<u8>>) -
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_refusal_expires_with_a_doubling_delay_and_is_cleared_by_reload() {
+        use super::*;
+        let python = Path::new("/usr/bin/python3");
+        let other = Path::new("/opt/python");
+        let t0 = Instant::now();
+        let mut r = Refusals::default();
+        assert_eq!(r.remaining(python, t0), None, "nothing refused yet");
+        // First refusal: 10 s.
+        assert_eq!(r.note(python, t0), Duration::from_secs(10));
+        assert_eq!(r.remaining(python, t0), Some(Duration::from_secs(10)));
+        assert!(r.remaining(python, t0 + Duration::from_secs(9)).is_some());
+        // Another interpreter is not refused.
+        assert_eq!(r.remaining(other, t0), None);
+        // It recovers on its own once the delay passes.
+        assert_eq!(r.remaining(python, t0 + Duration::from_secs(10)), None);
+        // Refused again: 20 s, 40 s, ... capped at 5 min.
+        let t1 = t0 + Duration::from_secs(11);
+        assert_eq!(r.note(python, t1), Duration::from_secs(20));
+        assert!(r.remaining(python, t1 + Duration::from_secs(19)).is_some());
+        assert_eq!(r.remaining(python, t1 + Duration::from_secs(20)), None);
+        let mut delay = Duration::ZERO;
+        for _ in 0..10 {
+            delay = r.note(python, t1);
+        }
+        assert_eq!(delay, REFUSAL_DELAY_MAX);
+        // `reload` (clear) forgets everything at once.
+        r.entries.clear();
+        assert_eq!(r.remaining(python, t1), None);
+        assert_eq!(r.note(python, t1), REFUSAL_DELAY_INITIAL);
+    }
+
+    #[test]
+    fn the_process_wide_registry_is_cleared_by_clear_refusals() {
+        let python = std::path::Path::new("/w17c/process-wide-registry-python");
+        super::refused().note(python, std::time::Instant::now());
+        assert!(
+            super::refused()
+                .remaining(python, std::time::Instant::now())
+                .is_some()
+        );
+        super::clear_refusals();
+        assert!(
+            super::refused()
+                .remaining(python, std::time::Instant::now())
+                .is_none()
+        );
+    }
+
     use super::*;
 
     #[test]

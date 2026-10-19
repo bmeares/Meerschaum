@@ -672,17 +672,30 @@ impl SqlConnector {
         pipe: &Pipe,
         query: &DataQuery,
     ) -> ConnectorResult<Vec<IndexMap<String, meerschaum_kernel::Value>>> {
+        let frame = self.get_pipe_docs_frame(pipe, query).await?;
+        Ok(super::frame_docs(&frame))
+    }
+
+    /// Raw SQL documents with their native column types, before conversion to untyped maps.
+    pub async fn get_pipe_docs_frame(
+        &self,
+        pipe: &Pipe,
+        query: &DataQuery,
+    ) -> ConnectorResult<Frame> {
+        self.require_schema().await?;
+        let prepared = self.prepare_pipe(pipe).await;
+        let pipe = &prepared;
         let sp = self.sql_pipe(pipe)?;
         let state = self.pipe_state(&sp).await;
         if !state.exists {
-            return Ok(Vec::new());
+            return Ok(Frame::empty());
         }
         let sql = self
             .build_data_query(&sp, &state, query, &DataQueryOptions::default())
             .await?;
         self.log(&sql);
         let df = self.driver.read_docs_frame(&sql).await.map_err(be)?;
-        Ok(super::frame_docs(&df))
+        Ok(df)
     }
 
     pub(crate) async fn get_pipe_data_with_state(

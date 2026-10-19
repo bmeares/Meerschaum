@@ -93,6 +93,7 @@ def _pty(argv, env, cwd, wait_for, signum=None, byte=b'\x03', after=4.0, timeout
         os.chdir(cwd)
         os.execve(argv[0], argv, env)
     out = b''
+    reaped = False
     deadline = time.time() + timeout
 
     def pump(seconds):
@@ -135,16 +136,18 @@ def _pty(argv, env, cwd, wait_for, signum=None, byte=b'\x03', after=4.0, timeout
             pump(0.2)
             done, st = os.waitpid(pid, os.WNOHANG)
             if done:
+                reaped = True
                 status = st
                 pump(0.3)
                 break
         return out, status
     finally:
-        try:
-            os.kill(pid, signal.SIGKILL)
-            os.waitpid(pid, 0)
-        except (OSError, ChildProcessError):
-            pass
+        if not reaped:
+            try:
+                os.kill(pid, signal.SIGKILL)
+                os.waitpid(pid, 0)
+            except (OSError, ChildProcessError):
+                pass
         os.close(fd)
 
 
@@ -188,7 +191,9 @@ def test_the_standalone_binary_clears_the_spinner_and_dies_by_the_signal(home):
     assert CLEAR in _after_last_frame(out)
 
 
-def test_start_api_keeps_its_graceful_shutdown_on_sigint(home):
+@pytest.mark.parametrize('readiness', ['tcp', 'http'])
+@pytest.mark.parametrize('signum', [signal.SIGINT, signal.SIGTERM], ids=['sigint', 'sigterm'])
+def test_start_api_keeps_its_graceful_shutdown_on_signal(home, readiness, signum):
     from tests._binary import binary_or_skip
     from tests.console.conftest import free_port
     binary = binary_or_skip()
@@ -201,13 +206,28 @@ def test_start_api_keeps_its_graceful_shutdown_on_sigint(home):
             probe.settimeout(0.5)
             return probe.connect_ex(('127.0.0.1', port)) == 0
 
+    def healthy():
+        import http.client
+        connection = http.client.HTTPConnection('127.0.0.1', port, timeout=0.5)
+        try:
+            connection.request('GET', '/healthcheck')
+            response = connection.getresponse()
+            response.read()
+            return response.status == 200
+        except (OSError, http.client.HTTPException):
+            return False
+        finally:
+            connection.close()
+
     out, status = _pty(
         [str(binary), 'start', 'api', '-i', 'sql:w17bp', '--host', '127.0.0.1', '--port',
          str(port), '--no-webterm'],
-        env, root, listening, signum=signal.SIGINT, after=30,
+        env, root, listening if readiness == 'tcp' else healthy, signum=signum, after=30,
     )
-    assert status is not None, out.decode('utf-8', 'replace')[-1500:]
-    assert os.WIFEXITED(status), (status, out.decode('utf-8', 'replace')[-1500:])
+    text = out.decode('utf-8', 'replace')[-1500:]
+    assert status is not None, text
+    assert os.WIFEXITED(status) and os.WEXITSTATUS(status) == 0, (status, text)
+    assert not listening(), "the owned API listener survived server shutdown"
 
 
 def _sleeps_after_the_spinner(argv_prefix, env, root, signum):

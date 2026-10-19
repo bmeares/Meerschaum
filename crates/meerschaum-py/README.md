@@ -7,7 +7,7 @@ every discrepancy found while the two implementations ran side by side is tracke
 
 | Symbol | What it does |
 |---|---|
-| `__version__` | Cargo version (`5.0.0-a1`); `build_info()['version_pep440']` is the wheel form (`5.0.0a1`) |
+| `__version__` | Cargo version (`5.0.0-rc.1`); `build_info()['version_pep440']` is the wheel form (`5.0.0rc1`) |
 | `build_info()` | rustc version, profile, opt level, target/host, enabled features, Python ABI (`abi3-py311`) |
 | `static_config()` | `crates/meerschaum-core/static.toml` (D15) as a dict, parsed by `meerschaum_core::static_config` (which embeds it at build time). The file's `{ __null__ = true }` and `{ __cpu_count_or__ = N }` markers are resolved the way `STATIC_CONFIG` does, with Python's own `os.cpu_count()` |
 | `roundtrip_arrow(obj)` | Imports anything with `__arrow_c_stream__` / `__arrow_c_array__` into Rust `RecordBatch`es and returns an `ArrowStream`, a pyarrow-free object that exports the data back through `__arrow_c_stream__` / `__arrow_c_schema__` (`ffi_export.rs`, honoring `requested_schema`) |
@@ -59,10 +59,15 @@ and reaches the routed methods through `self`. `sync_pipe` writes the parameter 
 parameters (`update_parameters(..., persist=False)`, Rust already persisted them) and clears the
 pipe's `_exists` / column-type / index caches.
 
-Routed flavors are those with a Rust driver (`postgresql`, `postgis`, `timescaledb`,
-`timescaledb-ha`, `citus`, `cockroachdb`, `mysql`, `mariadb`, `sqlite`, `geopackage`); `mssql`,
-`oracle`, `duckdb` and in-memory SQLite databases (where SQLAlchemy and the Rust pool would see
-different databases) stay on the v4 path. `src/pipe_bridge.rs` converts the duck-typed objects;
+All supported SQL flavors route Pipe methods through the Rust instance layer, including
+MSSQL, Oracle, DuckDB, and memory SQLite. In a Python host, DuckDB uses a lazy public Python
+driver transport when `duckdb >= 1.5.6` is installed and `MRSM_DUCKDB_LIB` is unset. A shared
+anchor and duplicate connections make Rust Pipe methods and D16 SQLAlchemy methods see the
+same database while retaining separate transactions. Standalone / base-only installs use the
+native C API. An explicit override pins native mode and refuses mixed SQLAlchemy access;
+unset it, install `meerschaum[sql-duckdb]`, and restart to use both. Transport selection does
+not install packages or move Pipe algorithms into Python. The tested public-driver minimums are `duckdb >= 1.5.6` and `duckdb-engine >= 0.17.0`. Fork guards cover Meerschaum-owned handles and engine access; the public driver also cannot safely close/finalize inherited worker threads during normal child interpreter exit. Fork children must exec a fresh interpreter or use immediate process exit; prefer spawn. Direct use of previously held raw SQLAlchemy/DBAPI connections after fork remains unsupported. Conflicting configuration and
+unsupported custom connection routing fail before database access. `src/pipe_bridge.rs` converts the duck-typed objects;
 `meerschaum_connector_sql::facade` (`crates/meerschaum-connector-sql/src/facade.rs`) holds the two additive helpers
 the bindings need (`sync_pipe_mut`, `get_pipe_data_and_state`).
 

@@ -424,6 +424,7 @@ impl WorkerPool {
     /// The next call starts a fresh interpreter, which re-imports plugins (e.g. after a manifest
     /// rebuild detected changed plugin sources).
     pub async fn recycle(&self) {
+        crate::worker::clear_refusals();
         self.inner.generation.fetch_add(1, Ordering::SeqCst);
         let workers: Vec<(u64, Worker)> =
             std::mem::take(&mut *self.inner.idle.lock().unwrap_or_else(|e| e.into_inner()));

@@ -115,6 +115,52 @@ Most subactions accept the standard pipe selectors (`-c`/`--connector-keys`, `-m
 !!! tip ""
     Every action also has a Python equivalent. See the [API reference at docs.meerschaum.io](https://docs.meerschaum.io) for programmatic usage (e.g. `mrsm.Pipe.sync()`, `mrsm.actions.actions['sync']`).
 
+## Shell Completions
+
+!!! note ""
+    New in v5.
+
+`mrsm` completes actions, subactions, flags and values in `bash`, `zsh`, `fish` and PowerShell, for both the `mrsm` and `meerschaum` commands. Inside the Meerschaum shell (`mrsm`) completion is built in; this is for your own shell.
+
+Install the script for the shell you use (`mrsm install completions` picks it from `$SHELL`; on Windows it is PowerShell), then start a new shell session:
+
+```bash
+mrsm install completions bash
+mrsm install completions zsh
+mrsm install completions fish
+mrsm install completions powershell
+```
+
+Each command lists every file it wrote and where. Running it again is harmless, a file with the same name that `mrsm` did not write is never replaced (unless you add `--force`), and `mrsm uninstall completions <shell>` removes exactly what was installed.
+
+| Shell | Written to |
+|---|---|
+| `bash` | `${XDG_DATA_HOME:-~/.local/share}/bash-completion/completions/mrsm` and `meerschaum` (loaded on demand by the `bash-completion` package; without it, add `source <(mrsm show completions bash)` to `~/.bashrc`) |
+| `zsh` | `${XDG_DATA_HOME:-~/.local/share}/zsh/site-functions/_mrsm`. Add `fpath=(~/.local/share/zsh/site-functions $fpath)` and `autoload -Uz compinit && compinit` to `~/.zshrc` if that directory is not already on your `fpath` (the command prints the exact lines). |
+| `fish` | `${XDG_CONFIG_HOME:-~/.config}/fish/completions/mrsm.fish` and `meerschaum.fish` |
+| `powershell` | `mrsm.ps1` in your user data directory, loaded from a marked block that is added to the profile PowerShell reports (`$PROFILE`; a profile that is not UTF-8, such as one Windows PowerShell 5.1 wrote as UTF-16, is never edited and the line to add is printed instead) |
+
+To try it without installing, load the script into the current session:
+
+```bash
+source <(mrsm show completions bash)           # bash
+source <(mrsm show completions zsh)            # zsh (after compinit)
+mrsm show completions fish | source            # fish
+mrsm show completions powershell | Out-String | Invoke-Expression   # PowerShell
+```
+
+`show completions` is answered before anything else starts, so loading the script from a start-up file (`~/.bashrc`, `~/.zshrc`) is cheap and never runs plugin code.
+
+The script contains no candidates. On every <kbd>Tab</kbd> it asks the program, so the answers follow what is installed and configured:
+
+- actions (including those of your plugins) and subactions: `mrsm sh<Tab>`, `mrsm show <Tab>`
+- flags and the values they take: `mrsm show pipes -<Tab>`, `mrsm show jobs --executor-keys <Tab>` (flags that a plugin declares with `choices` complete them too)
+- connector keys for `-i` / `--instance`, `-c` / `--connector-keys`, `-r` / `--repository` and `-e` / `--executor-keys`: `mrsm show pipes -c <Tab>`
+- job names (`stop jobs <Tab>`), plugin names (`edit plugins <Tab>`), configuration keys (`show config <Tab>`)
+- file names for `--file` / `--compose-file` and `--env-file`
+
+Asking never runs an action or writes anything: it reads the configuration and the plugin manifest the last command cached, starts no plugin code and no Python, and takes about 20 ms (50 ms through the Python `mrsm` command of the wheel). A plugin added since the last command appears after any command that loads plugins (`mrsm reload` does it on purpose). Pipe keys (`-m`, `-l`) and tags are not completed, since they need a database connection.
+
 ## Action Reference
 
 ### Pipe Lifecycle
@@ -197,6 +243,8 @@ Optimize storage and statistics for pipes' target tables. See [Pipe Maintenance]
 | `partition` | Repartition target tables to a new chunk width (`--chunk-minutes`). |
 | `restart` | Restart stopped jobs that were not manually stopped. |
 | `index` | Create the indices defined in pipes' parameters. |
+| `backup` | `backup postgres`: an online backup of the stack's database (v5, see [Backing up and restoring](../stack-upgrades.md#backing-up-and-restoring)). |
+| `restore` | `restore postgres`: restore the stack's database from a backup into a new volume (v5, same page). |
 
 #### `index`
 
@@ -223,7 +271,7 @@ Manage Meerschaum plugins and their Python dependencies.
 |---|---|
 | `install` | Install Meerschaum plugins (from a repository) or Python packages (into the `mrsm` venv). |
 | `uninstall` | Uninstall plugins or Python packages. |
-| `upgrade` | Upgrade Meerschaum itself, plugins, or packages (e.g. `upgrade meerschaum`). |
+| `upgrade` | Upgrade Meerschaum itself, plugins, or packages (e.g. `upgrade meerschaum`); `upgrade extensions` updates a PostgreSQL instance's extensions, `upgrade postgres` moves the stack's database to a newer PostgreSQL major (v5, see [Upgrading the stack](../stack-upgrades.md)). |
 | `setup` | Run a plugin's `setup()` function (e.g. `setup plugins noaa`). |
 | `reload` | Reload the running Meerschaum instance (re-import plugins and modules in place). |
 

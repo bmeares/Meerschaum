@@ -163,8 +163,30 @@ fn selected_plugins(rt: &mut Runtime<'_>, ctx: &Context, args: &ArgsMap) -> Vec<
         return action;
     }
     let mut names = plugin_files::installed_plugin_names(&ctx.plugins_dirs);
+    let manifest = crate::python::manifest(rt);
+    // PARITY: v4's `get_plugins()` lists `os.listdir(PLUGINS_RESOURCES_PATH)`
+    // (`plugins/__init__.py:1010-1018`), the directory of links to every plugins directory's
+    // plugins that the worker keeps (`sync_plugins_symlinks`): keep that directory's order, so
+    // `install required` goes through the plugins as v4 does (not alphabetically).
+    let links = rt.config().paths().path("PLUGINS_RESOURCES_PATH");
+    if let Ok(entries) = std::fs::read_dir(&links) {
+        let mut ordered: Vec<String> = Vec::with_capacity(names.len());
+        for entry in entries.flatten() {
+            let item = entry.file_name().to_string_lossy().into_owned();
+            let name = item.strip_suffix(".py").unwrap_or(&item).to_string();
+            if names.contains(&name) && !ordered.contains(&name) {
+                ordered.push(name);
+            }
+        }
+        for name in names {
+            if !ordered.contains(&name) {
+                ordered.push(name);
+            }
+        }
+        names = ordered;
+    }
     // Plugins Python found elsewhere (entry points) are in the manifest.
-    if let Ok(manifest) = crate::python::manifest(rt) {
+    if let Ok(manifest) = manifest {
         for name in manifest.plugins.keys() {
             if !names.contains(name) {
                 names.push(name.clone());

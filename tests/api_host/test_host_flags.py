@@ -129,3 +129,20 @@ def test_the_host_never_mounts_the_web_terminal(sandbox):
             [l for l in result.stdout.splitlines() if l.startswith('JSON:')][-1][5:]
         )
         assert (routed, route_module, dash_module) == (False, False, False), flags
+
+
+def test_the_host_app_builds_with_its_openapi_tags(sandbox):
+    """
+    `meerschaum.api` passes `openapi_tags` (v4 passed the misspelled `open_api_tags`, which older
+    FastAPI releases swallowed and newer ones reject with a `TypeError`, so the host never
+    started). The host's own OpenAPI document now carries the tag descriptions.
+    """
+    root, plugins = sandbox
+    body = """
+document = client.get(app.openapi_url).json()
+out['tags'] = [tag['name'] for tag in document.get('tags', [])]
+"""
+    out = _run(root, plugins, {}, body)
+    assert out['tags'] == [
+        'Pipes', 'Actions', 'Connectors', 'Users', 'Plugins', 'Misc', 'Version', 'MCP',
+    ]

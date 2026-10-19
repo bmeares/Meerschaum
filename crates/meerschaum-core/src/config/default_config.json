@@ -685,11 +685,12 @@
           "healthcheck": {
             "test": [
               "CMD-SHELL",
-              "pg_isready -d <DOLLAR>POSTGRES_DB -U <DOLLAR>POSTGRES_USER"
+              "pg_isready -h 127.0.0.1 -p 5432 -d <DOLLAR>POSTGRES_DB -U <DOLLAR>POSTGRES_USER"
             ],
             "interval": "5s",
             "timeout": "3s",
-            "retries": 5
+            "retries": 5,
+            "start_period": "300s"
           },
           "restart": "always",
           "image": "timescale/timescaledb-ha:pg18",
@@ -699,7 +700,7 @@
           "hostname": "db",
           "volumes": [
             "meerschaum_db_data:/home/postgres/pgdata",
-            "{__MRSM_ROOT_DIR__}/db/initdb:/docker-entrypoint-initdb.d:z,ro"
+            "{__MRSM_ROOT_DIR__}/db/initdb/create-extensions.sql:/docker-entrypoint-initdb.d/100_meerschaum.sql:z,ro"
           ],
           "shm_size": "1024m",
           "networks": [
@@ -837,7 +838,7 @@
             "type": "postgres",
             "jsonData": {
               "sslmode": "disable",
-              "postgresVersion": 1500,
+              "postgresVersion": 1800,
               "timescaledb": true,
               "database": "MRSM{meerschaum:connectors:sql:main:database}"
             },

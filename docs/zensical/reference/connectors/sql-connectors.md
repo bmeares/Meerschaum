@@ -24,15 +24,21 @@ The following database flavors are confirmed to be feature-complete through the 
 - Microsoft SQL Server
 - Oracle SQL
 
-PostGIS and GeoPackage are supported for `geometry` columns. Two flavors need a native library that is **not** bundled with Meerschaum and is loaded at run time:
+PostGIS and GeoPackage are supported for `geometry` columns. DuckDB and Oracle have additional driver requirements:
 
 ### DuckDB
 
-The `duckdb` flavor uses DuckDB's own shared library (`libduckdb`, version 1.4 or newer). The first time you connect, Meerschaum downloads the official release for your platform into `<root>/drivers/` and verifies its checksum. Nothing else needs to be installed.
+In Python, install `meerschaum[sql-duckdb]` and leave `MRSM_DUCKDB_LIB` unset. Rust Pipe operations and SQLAlchemy then share the public Python DuckDB driver, so both interfaces see the same writes. The extra requires `duckdb >= 1.5.6` and `duckdb-engine >= 0.17.0`.
+
+The standalone binary and Python installations without the optional DuckDB driver use DuckDB's own shared library (`libduckdb`, version 1.4 or newer). When no cached or system library is available, the first connection downloads the official release for your platform into `<root>/drivers/` and verifies its checksum.
 
 - `mrsm install driver duckdb` downloads it ahead of time; `mrsm uninstall driver duckdb` removes the cached copy.
 - `mrsm show drivers` reports whether DuckDB (and the Oracle client) can be found, and where.
 - On an air-gapped host, or with [`MRSM_NO_AUTO_INSTALL`](/reference/environment/#mrsm_no_auto_install) set (which blocks the download, and DuckDB's extension auto-install), point [`MRSM_DUCKDB_LIB`](/reference/environment/#mrsm_duckdb_lib) at a `libduckdb` file you copied there.
+
+Setting `MRSM_DUCKDB_LIB` explicitly selects the native C API in Python too. SQLAlchemy access is then refused to prevent separate database instances from losing writes. Unset it, install the extra, and restart the interpreter to use both interfaces. A process that first selected the native driver also needs a restart after installing the extra. See the [migration guide](/reference/migrating-to-v5/) for connection settings and process restrictions.
+
+The native C API path refuses unsupported per-connection options, including read-only settings. Use the Python extra when configuring these options.
 
 ### Oracle SQL
 

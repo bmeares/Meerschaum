@@ -157,6 +157,10 @@ impl CommandRunner for Tee<'_> {
         self.commands.push(command.clone());
         self.inner.run(command)
     }
+
+    fn show_messages(&mut self, messages: &[crate::error::Message]) -> bool {
+        self.inner.show_messages(messages)
+    }
 }
 
 struct Ctx<'a, 'b> {
@@ -181,6 +185,11 @@ impl Ctx<'_, '_> {
             debug: self.args.debug,
             ..opts
         };
+        if !self.out.messages.items.is_empty()
+            && self.runner.show_messages(&self.out.messages.items)
+        {
+            self.out.messages.items.clear();
+        }
         run_mrsm_command(
             args,
             project,

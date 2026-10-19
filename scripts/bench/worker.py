@@ -19,14 +19,77 @@ import sys
 import time
 
 
+def record_identity(dist, path):
+    """Verify an installed file against its distribution's RECORD without trusting its name."""
+    import base64
+    import hashlib
+    from pathlib import Path
+    path = Path(path)
+    if not path.is_file():
+        return None
+    for entry in dist.files or []:
+        if Path(dist.locate_file(entry)).resolve() != path.resolve() or entry.hash is None:
+            continue
+        digest = hashlib.new(entry.hash.mode, path.read_bytes()).digest()
+        if base64.urlsafe_b64encode(digest).decode().rstrip('=') == entry.hash.value:
+            return hashlib.sha256(path.read_bytes()).hexdigest()
+    return None
+
+
+def console_identity(dist, path, python):
+    """A generated script must use this venv and this wheel's documented entry point."""
+    from pathlib import Path
+    path = Path(path)
+    try:
+        lines = path.read_text().splitlines()
+    except (OSError, UnicodeError):
+        return None
+    if not lines or lines[0] != '#!' + str(Path(python).absolute()):
+        return None
+    if 'from _meerschaum_mrsm import main' not in [line.strip() for line in lines]:
+        return None
+    if not any(entry.name == 'mrsm' and entry.group == 'console_scripts'
+               and entry.value == '_meerschaum_mrsm:main' for entry in dist.entry_points):
+        return None
+    return record_identity(dist, path)
+
+
 def main() -> int:
     op = sys.argv[1]
     import meerschaum as mrsm
 
     info = {
         'version': mrsm.__version__,
-        'package': 'repo' if '.venv-ref' not in mrsm.__file__ else 'reference',
+        'python': sys.version.split()[0],
+        'package': 'reference' if mrsm.__version__.startswith('4.') else 'wheel',
     }
+    if op == 'identify':
+        from importlib.metadata import distribution, version, PackageNotFoundError
+        from pathlib import Path
+        dist = distribution('meerschaum')
+        metadata = dist.read_text('direct_url.json')
+        direct = json.loads(metadata) if metadata else {}
+        editable = direct.get('dir_info', {}).get('editable', False)
+        in_repo = Path(mrsm.__file__).resolve().is_relative_to(Path(__file__).resolve().parents[2])
+        # The released reference also lives below the repository, but is identified by version.
+        identity = {'installed_wheel': not editable and not in_repo}
+        identity['dependencies'] = {}
+        for name in ('pandas', 'numpy', 'polars', 'pyarrow', 'SQLAlchemy', 'psycopg', 'psycopg2-binary'):
+            try:
+                identity['dependencies'][name] = version(name)
+            except PackageNotFoundError:
+                identity['dependencies'][name] = None
+        if mrsm.__version__.startswith('5.'):
+            from importlib.util import find_spec
+            from meerschaum import _core
+            extension = _core.load()
+            identity['extension_sha256'] = record_identity(dist, extension.__file__) if extension else None
+            identity['console_sha256'] = console_identity(
+                dist, Path(sys.executable).parent / 'mrsm', sys.executable)
+            entry_module = find_spec('_meerschaum_mrsm')
+            identity['entry_module_sha256'] = record_identity(dist, entry_module.origin) if entry_module else None
+        emit({'ok': True, **identity, **info})
+        return 0
     if op == 'setup':
         for d in json.loads(sys.argv[2]):
             pipe = mrsm.Pipe(

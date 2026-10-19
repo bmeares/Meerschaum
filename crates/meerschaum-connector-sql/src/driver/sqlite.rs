@@ -36,6 +36,19 @@ pub(crate) fn connect_options(spec: &ConnectionSpec) -> Result<SqliteConnectOpti
         .journal_mode(sqlx::sqlite::SqliteJournalMode::Delete))
 }
 
+/// Diagnostic connections must not create a file or change an existing journal mode.
+/// In particular, applying the normal connector's DELETE pragma to a WAL database changes
+/// its persistent configuration (or fails while another client holds the WAL open).
+pub(crate) fn read_only_connect_options(spec: &ConnectionSpec) -> Result<SqliteConnectOptions> {
+    let database = spec.resolved_database()?;
+    Ok(SqliteConnectOptions::new()
+        .filename(database.as_deref().unwrap_or(":memory:"))
+        .read_only(true)
+        .create_if_missing(false)
+        .foreign_keys(false)
+        .pragma("query_only", "ON"))
+}
+
 /// The pool options: on `geopackage`, every connection gets the GeoPackage SQL functions the
 /// R-tree triggers call.
 pub(crate) fn pool_options(spec: &ConnectionSpec) -> SqlitePoolOptions {

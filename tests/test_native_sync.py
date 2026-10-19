@@ -29,7 +29,9 @@ import meerschaum as mrsm
 from meerschaum import _core
 from tests import _oracle as oracle
 
-SCHEMA = 'w13h'
+### Fresh per process/import: isolate xdist workers and concurrent pytest runs.
+### The fixed prefix and UUID hex are safe SQL identifiers below PostgreSQL's 63-byte limit.
+SCHEMA = 'w13h_' + uuid.uuid4().hex
 START = datetime(2026, 1, 1, tzinfo=timezone.utc)
 
 
@@ -71,7 +73,7 @@ def plugin_venvs():
 
 @pytest.fixture(scope='module')
 def postgis_instance():
-    """One schema (`w13h`) with its own instance tables for the whole module."""
+    """One owned schema with instance tables for this module in this process."""
     conn = mrsm.get_connector(
         'sql', 'w13h_postgis',
         flavor='postgis',
@@ -82,13 +84,15 @@ def postgis_instance():
         host='localhost',
         schema=SCHEMA,
     )
-    conn.exec(f'DROP SCHEMA IF EXISTS "{SCHEMA}" CASCADE')
-    conn.exec(f'CREATE SCHEMA "{SCHEMA}"')
-    ### The instance tables (`mrsm_pipes`, ...) of a fresh schema.
-    from meerschaum.connectors.sql.tables import get_tables
-    get_tables(mrsm_instance=conn, create=True, refresh=True)
-    yield conn
-    conn.exec(f'DROP SCHEMA IF EXISTS "{SCHEMA}" CASCADE')
+    ### A failed CREATE owns nothing; never drop an existing schema on collision.
+    assert conn.exec(f'CREATE SCHEMA "{SCHEMA}"') is not None
+    try:
+        ### The instance tables (`mrsm_pipes`, ...) of a fresh schema.
+        from meerschaum.connectors.sql.tables import get_tables
+        get_tables(mrsm_instance=conn, create=True, refresh=True)
+        yield conn
+    finally:
+        assert conn.exec(f'DROP SCHEMA IF EXISTS "{SCHEMA}" CASCADE') is not None
 
 
 @pytest.fixture(params=_flavors())
@@ -173,6 +177,8 @@ def _run(instance, name, params, steps, native_calls=None):
 def _untimed(message):
     import re
     message = re.sub(r'in \d+(\.\d+)? seconds\.', 'in N seconds.', message)
+    ### Only the owned schema qualifier in a debug table label differs from the recording.
+    message = message.replace(f'\non table "{SCHEMA}".', '\non table "w13h".')
     ### The labels of the throwaway instances end in a random suffix.
     message = re.sub(r'\b(w13h|w15l_source)_[0-9a-f]{6,8}\b', r'\1_X', message)
     ### A SQLite source hands v4 its datetimes as text, so v4's chunk label carries the stored
@@ -1012,8 +1018,10 @@ def _server_instance(flavor, tmp_path=None):
 @pytest.mark.parametrize('flavor', ['duckdb', 'mssql', 'oracle'])
 def test_duckdb_mssql_and_oracle_instances_sync_natively(flavor, native_calls, tmp_path):
     """
-    The Rust drivers of `duckdb`, `mssql` and `oracle` run the whole flow (their Python drivers
-    are not needed): the rows and the counts equal what the recorded Python mode gave on a SQLite instance.
+    The Rust Pipe flow handles `duckdb`, `mssql` and `oracle`: rows and counts equal the
+    recorded Python mode on SQLite. In a full SDK, DuckDB shares its public Python driver
+    transport with SQLAlchemy; MSSQL and Oracle use their Rust drivers. The DuckDB native-only
+    path without optional Python packages is covered by test_duckdb_root.py.
     """
     if flavor != 'duckdb' and flavor not in os.environ.get('MRSM_TEST_FLAVORS', 'sqlite').split(','):
         pytest.skip(f"set MRSM_TEST_FLAVORS to include {flavor}")

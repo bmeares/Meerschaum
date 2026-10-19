@@ -85,6 +85,13 @@ other plugins still load.
 
 ## ABI v1 and ownership
 
+Native plugins and Python workers share manifest schema 5, separately from ABI v1 and
+worker protocol v1. Return `MANIFEST_SCHEMA_VERSION` from the SDK in your manifest rather
+than a version literal. A prerelease native library exporting schema 3 must be rebuilt
+against the current SDK (and its SDK dependency updated); refreshing the manifest cache
+cannot rewrite the library's exported `describe` metadata. Aggregate caches from an older
+schema are regenerated automatically. Unsupported manifest versions are rejected.
+
 The only exported symbol is `mrsm_plugin_v1`, returning a static `#[repr(C)] MrsmPluginV1`.
 The permanent prefix contains two `u32`s: ABI version and structure size. The host reads only
 this prefix before rejecting incompatible or truncated tables. Breaking changes require a

@@ -17,7 +17,8 @@ default_datasource = {
             'type': 'postgres',
             'jsonData': {
                 'sslmode': 'disable',
-                'postgresVersion': 1500,
+                ### The major version of the default `db` image (`timescaledb-ha:pg18`).
+                'postgresVersion': 1800,
                 'timescaledb': True,
                 'database': db_base,
             },

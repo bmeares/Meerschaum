@@ -5,9 +5,9 @@
 # Self-hosted runner and disk: the runner is persistent, so the workspace's `target/` (shared by every
 # crate via .cargo/config.toml) *is* the build cache. Nothing here uses actions/cache or a second
 # target dir on the self-hosted legs. Checkout runs with `clean: false` and a targeted `git clean`
-# that keeps `target/` and `.venv-ref/`; a `disk-guard` step runs `cargo clean` when free space drops
+# that keeps `target/`, `.venv-ref/` and `.venv-test/`; a `disk-guard` step runs `cargo clean` when free space drops
 # below 10 GB. Expect target/ to hold debug + clippy + release artifacts (several GB once Polars and
-# Arrow are in the graph). pytest.yaml preserves the same target/ and .venv-ref/ caches and builds
+# Arrow are in the graph). pytest.yaml preserves the same target/, .venv-ref/ and .venv-test/ caches and builds
 # the native Python extension before running its integration suite.
 name: rust
 
@@ -66,8 +66,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: { clean: false, persist-credentials: false }
-      - name: Clean the workspace (keep target/ and .venv-ref/)
-        run: git clean -ffdx -e /target/ -e /.venv-ref/
+      - name: Clean the workspace (keep target/, .venv-ref/ and .venv-test/)
+        run: git clean -ffdx -e /target/ -e /.venv-ref/ -e /.venv-test/
       - name: Toolchain
         run: scripts/rust/ci.sh setup
       - name: cargo fmt --all --check
@@ -80,8 +80,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: { clean: false, persist-credentials: false }
-      - name: Clean the workspace (keep target/ and .venv-ref/)
-        run: git clean -ffdx -e /target/ -e /.venv-ref/
+      - name: Clean the workspace (keep target/, .venv-ref/ and .venv-test/)
+        run: git clean -ffdx -e /target/ -e /.venv-ref/ -e /.venv-test/
       - name: Toolchain
         run: scripts/rust/ci.sh setup
       - name: Disk guard (cargo clean below 10 GB free)
@@ -96,8 +96,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: { clean: false, persist-credentials: false }
-      - name: Clean the workspace (keep target/ and .venv-ref/)
-        run: git clean -ffdx -e /target/ -e /.venv-ref/
+      - name: Clean the workspace (keep target/, .venv-ref/ and .venv-test/)
+        run: git clean -ffdx -e /target/ -e /.venv-ref/ -e /.venv-test/
       - name: Toolchain
         run: scripts/rust/ci.sh setup
       - name: Disk guard (cargo clean below 10 GB free)
@@ -124,8 +124,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: { clean: false, persist-credentials: false }
-      - name: Clean the workspace (keep target/ and .venv-ref/)
-        run: git clean -ffdx -e /target/ -e /.venv-ref/
+      - name: Clean the workspace (keep target/, .venv-ref/ and .venv-test/)
+        run: git clean -ffdx -e /target/ -e /.venv-ref/ -e /.venv-test/
       - name: Toolchain
         run: scripts/rust/ci.sh setup
       - name: Disk guard (cargo clean below 10 GB free)
@@ -148,8 +148,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: { clean: false, persist-credentials: false }
-      - name: Clean the workspace (keep target/ and .venv-ref/)
-        run: git clean -ffdx -e /target/ -e /.venv-ref/
+      - name: Clean the workspace (keep target/, .venv-ref/ and .venv-test/)
+        run: git clean -ffdx -e /target/ -e /.venv-ref/ -e /.venv-test/
       - name: Toolchain
         run: scripts/rust/ci.sh setup
       - name: Packaging metadata (versions, extras, crates.io metadata)
@@ -164,8 +164,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: { clean: false, persist-credentials: false }
-      - name: Clean the workspace (keep target/ and .venv-ref/)
-        run: git clean -ffdx -e /target/ -e /.venv-ref/
+      - name: Clean the workspace (keep target/, .venv-ref/ and .venv-test/)
+        run: git clean -ffdx -e /target/ -e /.venv-ref/ -e /.venv-test/
       - name: Toolchain
         run: scripts/rust/ci.sh setup
       - name: Disk guard (cargo clean below 10 GB free)
@@ -192,8 +192,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: { clean: false, persist-credentials: false }
-      - name: Clean the workspace (keep target/ and .venv-ref/)
-        run: git clean -ffdx -e /target/ -e /.venv-ref/
+      - name: Clean the workspace (keep target/, .venv-ref/ and .venv-test/)
+        run: git clean -ffdx -e /target/ -e /.venv-ref/ -e /.venv-test/
       - name: Regenerate fixtures with the v4.1.4 reference and diff
         run: scripts/rust/ci.sh parity
 

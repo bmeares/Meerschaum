@@ -168,6 +168,12 @@ pub struct CompletionData {
     pub plugin_arguments: Vec<meerschaum_worker::manifest::ArgumentManifest>,
     /// Plugin completers.
     pub plugins: Option<Arc<dyn PluginCompleter>>,
+    /// Offer the v5-only subactions in the bare `<action> <TAB>` list. The interactive shell
+    /// keeps v4's lists (they complete once a prefix is typed); the program's shell completions
+    /// (`mrsm show completions`) list them all.
+    pub include_v5_only: bool,
+    /// Plugin connector types that can be an instance (`IS_INSTANCE`), for `-i` values.
+    pub instance_types: Vec<String>,
 }
 
 impl std::fmt::Debug for CompletionData {
@@ -197,6 +203,8 @@ impl Default for CompletionData {
             plugins: None,
             plugin_actions: Vec::new(),
             plugin_arguments: Vec::new(),
+            include_v5_only: false,
+            instance_types: Vec::new(),
         }
     }
 }
@@ -211,6 +219,15 @@ pub fn default_do_names(actions: &[ActionDef]) -> Vec<String> {
         .map(|a| a.name.to_string())
         .collect();
     names.extend(SHELL_METHODS.iter().map(|s| s.to_string()));
+    names.sort();
+    names.dedup();
+    names
+}
+
+/// The first words the program's own command line takes (`mrsm <action>`): every registered action,
+/// the v5-only ones included, and none of the shell's own commands.
+pub fn cli_do_names(actions: &[ActionDef]) -> Vec<String> {
+    let mut names: Vec<String> = actions.iter().map(|a| a.name.to_string()).collect();
     names.sort();
     names.dedup();
     names
@@ -542,7 +559,11 @@ impl CompletionData {
         let mut out: Vec<String> = actions::get_subactions(self.actions, first)
             .iter()
             // v5-only subactions complete once a prefix is typed (the bare list is v4's).
-            .filter(|s| !sub.is_empty() || !actions::is_v5_only_subaction(first, s.name))
+            .filter(|s| {
+                !sub.is_empty()
+                    || self.include_v5_only
+                    || !actions::is_v5_only_subaction(first, s.name)
+            })
             .map(|s| s.name.to_string())
             .filter(|s| s.starts_with(sub) && s != sub)
             .collect();
@@ -769,6 +790,8 @@ impl CompletionData {
                     "logs",
                     "driver",
                     "drivers",
+                    "completion",
+                    "completions",
                 ];
                 match dispatch(&subs, true) {
                     Some(sub) => {
@@ -777,6 +800,11 @@ impl CompletionData {
                             "driver" | "drivers" => {
                                 Self::driver_completer(DRIVER_NAMES, &action, kw.line)
                             }
+                            "completion" | "completions" => Self::driver_completer(
+                                crate::completions::SHELL_NAMES,
+                                &action,
+                                kw.line,
+                            ),
                             "connector" | "connectors" => self.show_connectors(&action),
                             "config" => Self::keys_completer(&self.config_keys, &action),
                             "package" | "packages" => {
@@ -834,7 +862,15 @@ impl CompletionData {
             },
             "install" => {
                 let subs = [
-                    "plugin", "plugins", "package", "packages", "required", "driver", "drivers",
+                    "plugin",
+                    "plugins",
+                    "package",
+                    "packages",
+                    "required",
+                    "driver",
+                    "drivers",
+                    "completion",
+                    "completions",
                 ];
                 // PARITY: `install` dispatches without the line check.
                 match dispatch(&subs, false) {
@@ -844,6 +880,11 @@ impl CompletionData {
                             "driver" | "drivers" => {
                                 Self::driver_completer(DRIVER_NAMES, &action, kw.line)
                             }
+                            "completion" | "completions" => Self::driver_completer(
+                                crate::completions::SHELL_NAMES,
+                                &action,
+                                kw.line,
+                            ),
                             // Disabled in v4 so typing is not interrupted by repository calls.
                             "plugin" | "plugins" | "package" | "packages" => Vec::new(),
                             _ => self.edit_plugins(&action, kw.line),
@@ -852,10 +893,22 @@ impl CompletionData {
                     None => default_for("install", &action),
                 }
             }
-            "uninstall" => match dispatch(&["plugin", "plugins", "driver", "drivers"], true) {
+            "uninstall" => match dispatch(
+                &[
+                    "plugin",
+                    "plugins",
+                    "driver",
+                    "drivers",
+                    "completion",
+                    "completions",
+                ],
+                true,
+            ) {
                 Some(sub) => {
                     action.remove(0);
-                    if sub.starts_with("driver") {
+                    if sub.starts_with("completion") {
+                        Self::driver_completer(crate::completions::SHELL_NAMES, &action, kw.line)
+                    } else if sub.starts_with("driver") {
                         // Only DuckDB's library is downloaded by Meerschaum.
                         Self::driver_completer(&["duckdb"], &action, kw.line)
                     } else {

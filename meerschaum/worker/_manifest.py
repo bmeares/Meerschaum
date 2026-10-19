@@ -27,7 +27,7 @@ from typing import Any, Dict, List, Optional
 
 #: 4: custom connector `methods` include methods imported into the class body (v4's
 #: mixin-via-import pattern, e.g. `from ._sync import sync`); older manifests missed them.
-MANIFEST_SCHEMA_VERSION = 4
+MANIFEST_SCHEMA_VERSION = 5
 DATA_FUNCTIONS = ('fetch', 'sync', 'register', 'setup', 'subscribe')
 
 
@@ -269,10 +269,13 @@ def build_manifest(debug: bool = False) -> Dict[str, Any]:
                 warn(f"[{name}] {message}", stack=False, color=False)
         except Exception:
             pass
+        ### v4's `PluginConnector` calls any `register` / `fetch` / ... attribute, so a
+        ### `functools.partial`, an `lru_cache` wrapper or a callable object counts too
+        ### (schema 5; schema 4 listed plain functions only).
         info['data_functions'] = [
             fn_name
             for fn_name in DATA_FUNCTIONS
-            if inspect.isfunction(getattr(module, fn_name, None))
+            if callable(getattr(module, fn_name, None))
         ]
 
     ### Actions

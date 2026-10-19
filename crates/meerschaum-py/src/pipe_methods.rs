@@ -17,7 +17,7 @@
 //! port of the v4 body here, which does that post-processing over the `InstanceConnector`
 //! trait.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use chrono::{Duration, TimeDelta};
@@ -94,6 +94,8 @@ pub enum Data {
     Missing,
     /// Documents.
     Docs(Vec<Doc>),
+    /// SQL documents retaining original native wide integer columns for Python output.
+    TypedDocs(Vec<Doc>, HashSet<String>),
     /// A frame and the pipe dtypes the pandas / Polars conversion needs.
     Frame(Frame, IndexMap<String, String>),
 }
@@ -663,6 +665,19 @@ impl Reader {
         if args.as_docs {
             if !self.exists(pipe).await? {
                 return Ok(Data::Docs(Vec::new()));
+            }
+            if let Some(sql) = &self.sql {
+                let frame = sql.get_pipe_docs_frame(pipe, &query).await.map_err(err)?;
+                let integers = frame.columns().iter().filter(|column| {
+                    matches!(&column.data, meerschaum_kernel::frame::ColumnData::Native(series)
+                        if matches!(series.dtype(), polars::prelude::DataType::UInt64 | polars::prelude::DataType::Int128))
+                }).map(|column| column.name.clone()).collect::<HashSet<_>>();
+                let docs = self.raw_geometries(pipe_ops::frame_to_docs(&frame));
+                return Ok(if integers.is_empty() {
+                    Data::Docs(docs)
+                } else {
+                    Data::TypedDocs(docs, integers)
+                });
             }
             // PARITY: `get_pipe_docs()` of an instance without its own (Valkey, custom
             // connectors) is `get_pipe_data()` as documents: `limit` and `order` are not applied
@@ -1710,7 +1725,7 @@ mod tests {
     fn rows(data: &Data) -> Vec<Vec<String>> {
         match data {
             Data::Missing => vec![],
-            Data::Docs(docs) => docs
+            Data::Docs(docs) | Data::TypedDocs(docs, _) => docs
                 .iter()
                 .map(|d| d.values().map(Cell::py_str).collect())
                 .collect(),

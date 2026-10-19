@@ -65,24 +65,28 @@ if [ -z "$MRSM_TEST_SKIP_INSTALL" ]; then
   for extra in $MRSM_INSTALL_PACKAGES; do
     requirement_args="$requirement_args -r $PARENT/requirements/$extra.txt"
   done
-  ### `httpx` is the client of the API host tests (not a Meerschaum dependency).
-  $PYTHON_BIN -m pip install --quiet $MRSM_TEST_PIP_ARGS $requirement_args httpx; rc="$?"
+  ### `httpx2` is the client of `starlette.testclient` in the API host tests (Starlette 1.9 deprecates
+  ### `httpx` there and falls back to it with a warning); neither is a dependency of the host itself.
+  $PYTHON_BIN -m pip install --quiet $MRSM_TEST_PIP_ARGS $requirement_args httpx httpx2; rc="$?"
   [ "$rc" != '0' ] && exit "$rc"
 fi
 export MRSM_NO_AUTO_INSTALL=1
 
-### DuckDB is not compiled into Meerschaum: its own shared library is loaded at run time, and the tests
-### never download mid-run (`MRSM_NO_AUTO_INSTALL`). Provide it up front from a persistent cache
-### outside the workspace (one download per DuckDB version, checksum-verified; see
-### scripts/rust/duckdb_lib.sh). Set MRSM_DUCKDB_LIB yourself to use your own copy.
-if [ -z "$MRSM_DUCKDB_LIB" ]; then
-  if MRSM_DUCKDB_LIB="$("$PARENT/scripts/rust/duckdb_lib.sh")"; then
-    export MRSM_DUCKDB_LIB
+### Native-only DuckDB fixtures need a shared library; ordinary SDK tests share the installed
+### Python driver's database instance with SQLAlchemy. Keep the native fixture path in a test-only
+### variable: MRSM_DUCKDB_LIB is a product override that explicitly selects the native-only driver.
+### Suppress the download helper's GITHUB_ENV export so later Python steps keep the default policy.
+MRSM_TEST_DUCKDB_LIB="${MRSM_TEST_DUCKDB_LIB:-${MRSM_DUCKDB_LIB:-}}"
+if [ -z "$MRSM_TEST_DUCKDB_LIB" ]; then
+  if MRSM_TEST_DUCKDB_LIB="$(env -u GITHUB_ENV "$PARENT/scripts/rust/duckdb_lib.sh")"; then
+    export MRSM_TEST_DUCKDB_LIB
   else
-    unset MRSM_DUCKDB_LIB
+    unset MRSM_TEST_DUCKDB_LIB
     echo "test.sh: could not provide the DuckDB library; tests that use DuckDB will fail." >&2
   fi
 fi
+export MRSM_TEST_DUCKDB_LIB
+unset MRSM_DUCKDB_LIB
 
 $mrsm stop daemon
 
@@ -135,6 +139,17 @@ $PYTHON_BIN -c "$connectors_uri_code"
 
 MRSM_URIS=$($PYTHON_BIN -c "$connectors_uri_code")
 export $MRSM_URIS
+
+### `all` was unset above so `get_flavors()` returns every flavor. Export the resolved list: modules
+### that choose their own instances (`postgis`, ...) read MRSM_TEST_FLAVORS and would otherwise
+### fall back to SQLite only.
+MRSM_TEST_FLAVORS=$($PYTHON_BIN -c "
+from tests.connectors import get_flavors
+print(','.join(get_flavors()))
+"); rc="$?"
+[ "$rc" != '0' ] && exit "$rc"
+[ -z "$MRSM_TEST_FLAVORS" ] && echo "test.sh: no test flavors resolved." >&2 && exit 1
+export MRSM_TEST_FLAVORS
 
 ### Start the test API on port 8989.
 ### For whatever reason, GitHub actions only works

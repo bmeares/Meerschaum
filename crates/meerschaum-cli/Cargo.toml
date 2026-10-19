@@ -65,6 +65,7 @@ clap = { workspace = true }
 indexmap = { workspace = true }
 regex = { workspace = true }
 rust_decimal = { workspace = true }
+serde = { workspace = true }
 serde_json = { workspace = true }
 fancy-regex = "0.19"
 terminal_size = "0.4"
@@ -83,8 +84,8 @@ fs4 = "1.1"
 
 [target.'cfg(unix)'.dependencies]
 # `timed_input`: poll stdin with a timeout (no reader thread that outlives the call);
-# `setsid` for the timed pipeline step.
-rustix = { version = "1", default-features = false, features = ["std", "event", "process"] }
+# `setsid` for the timed pipeline step; `fs` for `doctor` (`access`, `statvfs`).
+rustix = { version = "1", default-features = false, features = ["std", "event", "process", "fs"] }
 # The progress line's SIGINT / SIGTERM guard (`format/progress.rs`), a safe API.
 signal-hook = "0.4"
 

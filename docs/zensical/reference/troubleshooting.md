@@ -9,6 +9,70 @@ For terminology used below, see the [glossary](glossary.md). For everything else
 
 ---
 
+## Start here: `mrsm doctor`
+
+!!! tip "Run `mrsm doctor` first"
+    One command checks the installation and tells you what is wrong and how to fix it. It is **read-only** and takes about a second: it never installs, creates, migrates or writes anything, not even on a new root (no default config files, no plugin manifest, no entry-point cache), and it never imports plugin code. It reads the plugin manifest the last command cached and warns when it is stale or missing (`mrsm reload` rebuilds it). The one caveat: opening an existing SQLite database may create its `-wal` and `-shm` files beside it. Paste its `--nopretty` output into a bug report.
+
+```bash
+mrsm doctor                  # a table: group, check, PASS / WARN / FAIL / SKIP, and the fix for each problem
+mrsm doctor -i sql:main      # check another instance
+mrsm doctor --nopretty       # one JSON document, for a bug report or a script
+mrsm doctor --debug          # the time each check took
+```
+
+In the SDK, importing `meerschaum.actions` initializes the action registry and discovers plugins before any action runs. A subsequent `actions['doctor'](...)` call is read-only from that point; `mrsm.entry(['doctor', ...])` also avoids that initial registry import.
+
+Every check is **PASS**, **WARN** (works, but look at it), **FAIL** (something is broken) or **SKIP** (not applicable here, the detail says why); each WARN or FAIL carries the exact command or setting that fixes it. The command fails (and exits `1`) only when a check FAILs. `--nopretty` always exits `0`, like every `mrsm` command, so a script reads `summary.ok` (and `summary.fail`) of the JSON document instead of the exit code. A sample on a machine with a Python plugin installed, where an old `meerschaum` 4.x in the user site shadows the one `mrsm` was built with:
+
+```text
+┏━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ Group      ┃ Check              ┃ Status ┃ Detail                                                ┃
+┡━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ install    │ meerschaum         │ PASS   │ 5.0.0rc1; Python extension, in-process                │
+│            │ worker python      │ PASS   │ Python 3.13.1 at /usr/bin/python3                     │
+│            │ meerschaum package │ FAIL   │ /usr/bin/python3 imports `meerschaum` 4.1.4 from      │
+│            │                    │        │ /home/user/.local/lib/python3.13/site-packages/       │
+│            │                    │        │ meerschaum (the user site), but this program is       │
+│            │                    │        │ 5.0.0rc1                                              │
+│            │                    │        │ Fix: remove or upgrade the stale copy                 │
+│            │                    │        │ (`/usr/bin/python3 -m pip install --upgrade           │
+│            │                    │        │ meerschaum`, or delete that directory), or set        │
+│            │                    │        │ MRSM_PYTHON to the interpreter that has 5.0.0rc1      │
+│ paths      │ root               │ PASS   │ /home/user/.config/meerschaum (writable)              │
+│            │ disk: root         │ PASS   │ /home/user/.config/meerschaum: 11.3 GB free of        │
+│            │                    │        │ 214.9 GB, inodes 90% free                             │
+│            │ disk: temp         │ WARN   │ /tmp: 2.1 GB free of 8.0 GB, inodes 3% free           │
+│            │                    │        │ Fix: free space on the filesystem of /tmp (or point   │
+│            │                    │        │ it elsewhere: MRSM_ROOT_DIR, TMPDIR)                  │
+│ config     │ files              │ PASS   │ 4 config files parsed                                 │
+│ instance   │ connection         │ PASS   │ sql:main (timescaledb) at localhost:5432/meerschaum   │
+│            │ server version     │ PASS   │ PostgreSQL 18.1                                       │
+│            │ tables             │ PASS   │ mrsm_pipes, mrsm_users, mrsm_plugins exist            │
+│ extras     │ api                │ PASS   │ fastapi 0.141.1, uvicorn 0.38.0, jwt 2.13.0           │
+│ ...        │                    │        │                                                       │
+└────────────┴────────────────────┴────────┴───────────────────────────────────────────────────────┘
+
+ 💢 1 check failed (install: meerschaum package); 20 passed, 1 warning, 1 failed, 7 skipped.
+```
+
+What each group looks at:
+
+| Group | Checks |
+|---|---|
+| `install` | The version and how this process runs (Python extension in-process, or a standalone binary), the build, the platform, the worker interpreter (`MRSM_PYTHON`, else `python3`) and its version, and the `meerschaum` package that interpreter imports: the same rule the worker and API host apply before importing it: a copy of another **major** version (a stale v4 in `~/.local`), a copy that looks like v4, or one speaking another worker protocol is a FAIL that names the path when Python plugins are installed (they run in that interpreter) and a WARN otherwise; another release of the same major version is a WARN naming both versions (the worker starts and warns once); extra copies on `sys.path` are a WARN. Plugins, Python connectors and the API host run in that interpreter. |
+| `paths` | The root, config and plugins directories exist and are writable; free space and free inodes of the root's filesystem and of the temporary directory (WARN under 1 GB or 5% inodes, FAIL under 64 MB or 1% inodes: a full `/tmp` breaks workers). |
+| `config` | The config files parse, no unknown top-level keys or removed v4 keys (`system:experimental:join_fetch: true`), the `MRSM_<TYPE>_<LABEL>` connector variables found (names only, never values; other `MRSM_*` variables are listed apart), the default instance. |
+| `instance` | A connection to the default instance (or `-i`) with a 5 second limit, the server version and the Meerschaum tables (`mrsm_pipes`, `mrsm_users`, `mrsm_plugins`) for `sql:` instances; `/healthcheck` and `/version` of an `api:` instance (WARN if its version differs from the client's). A SQLite database that does not exist yet is reported, not created. With the public Python DuckDB transport, the live query is SKIPped to keep diagnostics read-only: no database or shared anchor is opened. Instances are read from the config, so a connector registered only through Python (`mrsm.get_connector(...)` with no config entry) is not known to `doctor`. |
+| `drivers` | In a Python host using the public DuckDB transport, installed driver metadata and the existing policy are checked without importing DuckDB or selecting a policy. A metadata PASS does not verify importability or connectivity; missing version metadata is a WARN. Standalone/native DuckDB and Oracle use the shared-library checks (`mrsm show drivers`): a missing library is a WARN when a configured connector needs it, a FAIL for the default instance when nothing will fetch it (Oracle always; native DuckDB with `MRSM_NO_AUTO_INSTALL` or a load error), and a WARN for native DuckDB downloaded on first use. A missing native library is never installed by the doctor. |
+| `extras` | Which extras (`pandas`, `polars`, `geo`, `sql`, `api`, `dash`, `shell`) the worker interpreter can import, and a WARN when an installed plugin needs one that is missing (API-host plugins need `api`, Dash plugins `dash`). An extra that is partly installed and that no plugin needs is a PASS naming the packages that are not installed. |
+| `plugins` | Whether the cached plugin manifest is current (a missing or stale one is a WARN: `mrsm reload`), how many plugins are installed, the ones whose import failed, and virtual environments built by another Python than the worker's (or whose interpreter is gone). Plugin code is never imported by the doctor. |
+| `jobs` | Jobs that are running, paused or stopped, jobs whose last run failed, and stale PID files. |
+| `stack` | If the Docker stack's compose file exists and Docker answers, the state and health of each service (a service stopped on purpose is a WARN, a crashed or unhealthy one a FAIL). The stack is never touched. |
+| `extensions` | The PostgreSQL extensions of the instance against what the server ships (see [Upgrading the stack](/reference/stack-upgrades/)). |
+
+---
+
 ## Syncing
 
 ### Sync succeeds but no rows land
@@ -291,7 +355,7 @@ mrsm reload plugins
 
 **Cause:** A separately installed `meerschaum` under `~/.local/lib/pythonX.Y/site-packages/` is earlier on `sys.path` than the repo checkout and shadows it.
 
-**Fix:** Force the repo onto the path:
+**Fix:** `mrsm doctor` names the stale copy (`install: meerschaum package` reports its path). A Python worker (and the API host) also refuses to import a `meerschaum` of another major version, one that looks like v4, or one speaking another worker protocol (importing v4 would run its start-up, which installs packages whatever `MRSM_NO_AUTO_INSTALL` says), and says so once; for another release of the same major version it starts and warns once. Force the repo onto the path:
 
 ```bash
 PYTHONPATH=$(pwd) python -m pytest ...

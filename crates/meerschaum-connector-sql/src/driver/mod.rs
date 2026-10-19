@@ -50,10 +50,26 @@ use crate::flavor::{DriverFamily, Flavor};
 use crate::uri::ConnectionSpec;
 
 pub use batch::{ColumnKind, ColumnPlan, GeometryEncoding};
+#[cfg(feature = "duckdb")]
+pub use duckdb::register_host_factory as register_duckdb_host_factory;
+pub use duckdb::{
+    HostDiagnostic as DuckdbHostDiagnostic, host_diagnostic as duckdb_host_diagnostic,
+    register_host_diagnostic as register_duckdb_host_diagnostic,
+};
+#[cfg(feature = "duckdb")]
+pub use native::{NativeConn, NativeConnector, NativeEvent};
 pub use params::SqlParam;
 
 /// Python's default `chunksize` (`system.connectors.sql.chunksize`).
 pub const DEFAULT_CHUNKSIZE: usize = 100_000;
+
+/// The `sqlx` connect options of a PostgreSQL-family spec, for a dedicated connection outside
+/// the pool (`crate::extensions`).
+pub(crate) fn pg_connect_options(
+    spec: &ConnectionSpec,
+) -> Result<sqlx::postgres::PgConnectOptions> {
+    postgres::connect_options(spec)
+}
 
 /// A single value read from the database.
 #[derive(Debug, Clone, PartialEq)]
@@ -434,6 +450,23 @@ impl SqlDriver {
         Ok(Self {
             flavor: spec.flavor,
             pool,
+        })
+    }
+
+    /// A SQLite-family diagnostic pool: never create the file, switch journal mode or write.
+    /// Must be called within a Tokio runtime; other driver families are refused.
+    pub fn connect_lazy_sqlite_read_only(spec: &ConnectionSpec) -> Result<Self> {
+        if spec.flavor.driver_family() != DriverFamily::Sqlite {
+            return Err(crate::SqlError::InvalidArgument(
+                "A read-only SQLite probe requires sqlite or geopackage".into(),
+            ));
+        }
+        Ok(Self {
+            flavor: spec.flavor,
+            pool: Pool::Sqlite(
+                sqlite::pool_options(spec)
+                    .connect_lazy_with(sqlite::read_only_connect_options(spec)?),
+            ),
         })
     }
 

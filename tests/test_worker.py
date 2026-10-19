@@ -196,7 +196,7 @@ def test_pipe_sync_is_forwarded_to_the_host():
 def test_build_manifest_includes_test_plugins():
     from meerschaum.worker._manifest import MANIFEST_SCHEMA_VERSION, build_manifest
     manifest = build_manifest()
-    assert manifest['schema_version'] == MANIFEST_SCHEMA_VERSION == 4
+    assert manifest['schema_version'] == MANIFEST_SCHEMA_VERSION == 5
     assert 'stress' in manifest['plugins']
     stress = manifest['plugins']['stress']
     assert stress['version'] == '0.4.0'
@@ -315,3 +315,193 @@ def test_worker_session_end_to_end():
             if proc.poll() is None:
                 proc.kill()
                 proc.wait()
+
+
+_LEAKY_PLUGIN = '''
+import multiprocessing
+required = []
+
+def fetch(pipe, **kwargs):
+    import meerschaum as mrsm
+    ### Python 3.14 defaults to `forkserver` on Linux: force it so older interpreters take the same
+    ### named-semaphore path (`spawn` is the default on macOS already).
+    if 'forkserver' in multiprocessing.get_all_start_methods():
+        multiprocessing.set_start_method('forkserver', force=True)
+    conn = mrsm.get_connector('sql', 'w17cf2_leaky', flavor='sqlite', database=DATABASE)
+    df = conn.read("SELECT 1 AS x")
+    return [{'x': int(df['x'][0])}]
+'''
+
+
+@pytest.mark.skipif(not hasattr(socket, 'AF_UNIX'), reason="Unix sockets only")
+def test_worker_exit_releases_multiprocessing_semaphores():
+    """
+    A plugin that calls `SQLConnector.read()` builds a `ThreadPool`, whose `SimpleQueue` locks are
+    named semaphores under `forkserver`/`spawn`. The worker ends with `os._exit()`, so it must
+    unlink them first: v4 exits cleanly, and the resource tracker must not print
+    "There appear to be N leaked semaphore objects to clean up at shutdown".
+    """
+    pytest.importorskip('sqlalchemy')
+    pytest.importorskip('pandas')
+    with tempfile.TemporaryDirectory() as tmpdir:
+        plugins_dir = os.path.join(tmpdir, 'plugins')
+        os.makedirs(plugins_dir)
+        database = os.path.join(tmpdir, 'leaky.db')
+        with open(os.path.join(plugins_dir, 'w17cf2_leaky.py'), 'w', encoding='utf-8') as f:
+            f.write(f"DATABASE = {database!r}\n" + _LEAKY_PLUGIN)
+
+        path = os.path.join(tmpdir, 's.sock')
+        server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        server.bind(path)
+        server.listen(1)
+        server.settimeout(120)
+        proc = subprocess.Popen(
+            [sys.executable, '-m', 'meerschaum.worker', '--socket', path],
+            env={**os.environ, 'PYTHONDONTWRITEBYTECODE': '1', 'MRSM_PLUGINS_DIR': plugins_dir},
+            stderr=subprocess.PIPE,
+        )
+        try:
+            conn, _ = server.accept()
+            server.close()
+            stream = conn.makefile('rwb')
+            hello, _ = read_message(stream)
+            assert hello['t'] == 'hello'
+
+            def call(call_id, op, args):
+                stream.write(encode_message({'t': 'call', 'id': call_id, 'op': op, 'args': args}))
+                stream.flush()
+                chunks = []
+                while True:
+                    msg, frames = read_message(stream)
+                    if msg['t'] == 'chunk':
+                        chunks.append(msg)
+                        continue
+                    return msg, chunks
+
+            msg, chunks = call(1, 'fetch', {
+                'connector': 'plugin:w17cf2_leaky',
+                'pipe': {
+                    'connector_keys': 'plugin:w17cf2_leaky',
+                    'metric_key': 'leak',
+                    'location_key': None,
+                    'instance_keys': 'sql:w17cf2_leaky',
+                    'parameters': {},
+                },
+                'begin': None,
+                'end': None,
+                'kwargs': {},
+            })
+            assert msg['t'] == 'result', msg
+            msg, _ = call(2, 'shutdown', {})
+            assert msg['t'] == 'result'
+            assert proc.wait(timeout=60) == 0
+            ### EOF only once the resource tracker (which shares the worker's stderr) has exited.
+            stderr = proc.stderr.read().decode('utf-8', errors='replace')
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait()
+            proc.stderr.close()
+        assert 'leaked semaphore' not in stderr, stderr
+
+
+@pytest.mark.skipif(not hasattr(socket, 'AF_UNIX'), reason="Unix sockets only")
+def test_pipe_connector_ops_build_the_connector_quietly():
+    """
+    The ops that act on a pipe's connector build it the way v4's `Pipe.connector` does, with
+    warnings ignored: a connector type no plugin defines fails the call without printing
+    "Cannot create Connector of type '...'" (v4's `register pipe` of such a pipe is silent).
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        path = os.path.join(tmpdir, 's.sock')
+        server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        server.bind(path)
+        server.listen(1)
+        server.settimeout(120)
+        proc = subprocess.Popen(
+            [sys.executable, '-m', 'meerschaum.worker', '--socket', path],
+            env={**os.environ, 'PYTHONDONTWRITEBYTECODE': '1'},
+            stderr=subprocess.PIPE,
+        )
+        try:
+            conn, _ = server.accept()
+            server.close()
+            stream = conn.makefile('rwb')
+            hello, _ = read_message(stream)
+            assert hello['t'] == 'hello'
+            stream.write(encode_message({
+                't': 'call', 'id': 1, 'op': 'describe_connector',
+                'args': {'connector': 'w17cf2unknown:bar'},
+            }))
+            stream.flush()
+            msg, _ = read_message(stream)
+            assert msg['t'] == 'error', msg
+            ### The suppressed warning is kept in the error.
+            assert "Cannot create Connector of type 'w17cf2unknown'" in msg['message'], msg
+            stream.write(encode_message({'t': 'call', 'id': 2, 'op': 'shutdown', 'args': {}}))
+            stream.flush()
+            msg, _ = read_message(stream)
+            assert msg['t'] == 'result'
+            assert proc.wait(timeout=60) == 0
+            stderr = proc.stderr.read().decode('utf-8', errors='replace')
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait()
+            proc.stderr.close()
+        assert 'Cannot create Connector' not in stderr, stderr
+
+
+@pytest.mark.skipif(not hasattr(socket, 'AF_UNIX'), reason="Unix sockets only")
+def test_quiet_connector_builds_keep_a_plugins_own_stderr():
+    """
+    Building a pipe's connector quietly silences warnings only (v4's `Pipe.connector`): what a
+    plugin writes to stderr while it is imported still reaches stderr.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        plugins_dir = os.path.join(tmpdir, 'plugins')
+        os.makedirs(plugins_dir)
+        with open(os.path.join(plugins_dir, 'w17cf2_noisy.py'), 'w', encoding='utf-8') as f:
+            f.write(
+                "import sys\n"
+                "print('w17cf2 plugin import note', file=sys.stderr)\n"
+                "required = []\n"
+                "def fetch(pipe, **kwargs):\n"
+                "    return []\n"
+            )
+        path = os.path.join(tmpdir, 's.sock')
+        server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        server.bind(path)
+        server.listen(1)
+        server.settimeout(120)
+        proc = subprocess.Popen(
+            [sys.executable, '-m', 'meerschaum.worker', '--socket', path],
+            env={**os.environ, 'PYTHONDONTWRITEBYTECODE': '1', 'MRSM_PLUGINS_DIR': plugins_dir},
+            stderr=subprocess.PIPE,
+        )
+        try:
+            conn, _ = server.accept()
+            server.close()
+            stream = conn.makefile('rwb')
+            hello, _ = read_message(stream)
+            assert hello['t'] == 'hello'
+            stream.write(encode_message({
+                't': 'call', 'id': 1, 'op': 'describe_connector',
+                'args': {'connector': 'plugin:w17cf2_noisy'},
+            }))
+            stream.flush()
+            msg, _ = read_message(stream)
+            assert msg['t'] == 'result', msg
+            assert msg['value']['has_fetch'], msg
+            stream.write(encode_message({'t': 'call', 'id': 2, 'op': 'shutdown', 'args': {}}))
+            stream.flush()
+            msg, _ = read_message(stream)
+            assert msg['t'] == 'result'
+            assert proc.wait(timeout=60) == 0
+            stderr = proc.stderr.read().decode('utf-8', errors='replace')
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait()
+            proc.stderr.close()
+        assert 'w17cf2 plugin import note' in stderr, stderr

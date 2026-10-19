@@ -133,6 +133,13 @@ pub enum ConfigError {
         /// The exception.
         error: LoadError,
     },
+    /// A path variable (`MRSM_ROOT_DIR`, `MRSM_CONFIG_DIR`, `MRSM_VENVS_DIR`) is set but empty.
+    /// v4 reads that as the working directory; a development build refuses it.
+    #[error("{var} is set but empty: set it to a directory, or unset it.")]
+    EmptyPath {
+        /// The environment variable.
+        var: String,
+    },
     /// A development build refused to fall back to the real default root.
     #[error(
         "Refusing to use the default root '{path}' from a development build. \
@@ -145,6 +152,16 @@ pub enum ConfigError {
     /// An I/O error.
     #[error(transparent)]
     Io(#[from] std::io::Error),
+}
+
+/// The default-config paths v5 adds to v4.1.4's `default_config` (see [`default_config`]).
+pub const V5_ONLY_DEFAULT_PATHS: &[&[&str]] = &[&["system", "engine"]];
+
+/// Whether `keys` names a v5-only default (a path under [`V5_ONLY_DEFAULT_PATHS`]).
+pub fn is_v5_only_default(keys: &[&str]) -> bool {
+    V5_ONLY_DEFAULT_PATHS
+        .iter()
+        .any(|path| keys.len() >= path.len() && keys[..path.len()] == **path)
 }
 
 /// Build the default config for a root directory (`meerschaum.config._default.default_config`).
@@ -432,7 +449,13 @@ impl Config {
     /// and the patch directories, like importing `meerschaum.config`.
     pub fn new(opts: ConfigOptions) -> Result<Config, ConfigError> {
         let lookup = |k: &str| opts.lookup(k);
-        let paths = Paths::from_env(&lookup, &opts.home, opts.windows, opts.package_root.clone())?;
+        let paths = Paths::from_env_with_writes(
+            &lookup,
+            &opts.home,
+            opts.windows,
+            opts.package_root.clone(),
+            opts.allow_writes,
+        )?;
         let defaults = ConfigValue::map_from_value(&default_config(
             &paths::posix(&paths.root_dir),
             opts.cpu_count,
@@ -981,6 +1004,17 @@ impl ConfigState {
             }
             return (false, ConfigValue::Null);
         };
+
+        // v5-only defaults (`system:engine`, which v4.1.4's `default_config` lacks): a v4-written
+        // `system.json` never has them, so v5's own lookups of them (the engine and worker
+        // settings, read by most commands) always fall back. v4 never looks them up, so its
+        // fallback below (deep-merging EVERY default into every loaded key) never runs for them:
+        // answer with the default and leave the loaded config alone, or an upgraded v4 root
+        // would get defaults filled into keys that are present (e.g. `start_period` and a
+        // deliberately removed `retries` in `stack.yaml`'s compose section; PARITY.md W17K1-006).
+        if is_v5_only_default(&key_refs) {
+            return (true, default_value);
+        }
 
         // Don't write keys that we haven't yet loaded into memory.
         let mut trimmed = patched_default;

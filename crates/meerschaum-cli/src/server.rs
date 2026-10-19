@@ -105,7 +105,7 @@ pub fn start_mcp(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
 }
 
 fn start(args: &ArgsMap, rt: &mut Runtime<'_>, stdio: bool) -> ActionResult {
-    // The server waits on SIGINT / SIGTERM itself (`shutdown_signal`): the spinner of its startup
+    // The server waits on SIGINT / SIGTERM itself (`ShutdownSignal`): the spinner of its startup
     // must not take them.
     crate::native::jobs::own_signals();
     // A server prints nothing between requests: the API client's warnings go to `tracing`.
@@ -152,6 +152,18 @@ fn start(args: &ArgsMap, rt: &mut Runtime<'_>, stdio: bool) -> ActionResult {
         {
             native::warn(rt, &warning);
         }
+        // v5: one line when the PostgreSQL instance has an extension older than its server's
+        // (bounded probe on its own connection; errors are ignored, startup never waits long).
+        if let Some(sql) = instance.sql()
+            && let Some(hint) = native::extensions::spec_hint(
+                &session,
+                sql.spec(),
+                &instance.keys(),
+                native::extensions::HINT_TIMEOUT,
+            )
+        {
+            native::warn(rt, &hint);
+        }
     }
     let jobs = Arc::new(crate::jobs_backend::LocalJobsBackend::new(
         crate::native::jobs::jobs_context(rt),
@@ -185,6 +197,9 @@ fn start(args: &ArgsMap, rt: &mut Runtime<'_>, stdio: bool) -> ActionResult {
     }
     let server_runtime = builder.enable_all().build().map_err(io_error)?;
     let result = server_runtime.block_on(async {
+        // Register synchronously before either serving future can expose readiness. An async
+        // ctrl_c() constructor would register only when select! first polls that branch.
+        let mut shutdown = ShutdownSignal::new().map_err(io_error)?;
         let console = if stdio {
             None
         } else {
@@ -219,12 +234,12 @@ fn start(args: &ArgsMap, rt: &mut Runtime<'_>, stdio: bool) -> ActionResult {
             };
             tokio::select! {
                 result = serve => Ok(result),
-                result = shutdown_signal() => result.map(|()| SuccessTuple::success()).map_err(io_error),
+                result = shutdown.wait() => result.map(|()| SuccessTuple::success()).map_err(io_error),
             }
         } else {
             tokio::select! {
                 result = meerschaum_server::serve_with_mcp_and_console(state, mcp, console) => result.map(|()| SuccessTuple::success()).map_err(io_error),
-                result = shutdown_signal() => result.map(|()| SuccessTuple::success()).map_err(io_error),
+                result = shutdown.wait() => result.map(|()| SuccessTuple::success()).map_err(io_error),
             }
         };
         watcher.abort();
@@ -304,18 +319,47 @@ async fn host_registry(
     host.registry(state.secret()).await
 }
 
-async fn shutdown_signal() -> std::io::Result<()> {
+/// Own the subscriptions through serving and supervisor cleanup, independently of which
+/// select! branch is polled first or completes. Construction requires the entered runtime.
+struct ShutdownSignal {
     #[cfg(unix)]
-    {
-        let mut terminate =
-            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
-        tokio::select! {
-            result = tokio::signal::ctrl_c() => result,
-            _ = terminate.recv() => Ok(()),
+    interrupt: tokio::signal::unix::Signal,
+    #[cfg(unix)]
+    terminate: tokio::signal::unix::Signal,
+    #[cfg(windows)]
+    interrupt: tokio::signal::windows::CtrlC,
+}
+
+impl ShutdownSignal {
+    fn new() -> std::io::Result<Self> {
+        #[cfg(unix)]
+        {
+            use tokio::signal::unix::{SignalKind, signal};
+            Ok(Self {
+                interrupt: signal(SignalKind::interrupt())?,
+                terminate: signal(SignalKind::terminate())?,
+            })
+        }
+        #[cfg(windows)]
+        {
+            Ok(Self {
+                interrupt: tokio::signal::windows::ctrl_c()?,
+            })
         }
     }
-    #[cfg(not(unix))]
-    tokio::signal::ctrl_c().await
+
+    async fn wait(&mut self) -> std::io::Result<()> {
+        #[cfg(unix)]
+        tokio::select! {
+            _ = self.interrupt.recv() => Ok(()),
+            _ = self.terminate.recv() => Ok(()),
+        }
+        #[cfg(windows)]
+        {
+            self.interrupt.recv().await;
+            Ok(())
+        }
+    }
 }
 
 // Native actions synchronously drive the shared Session runtime. Run them on a blocking
@@ -544,6 +588,63 @@ impl McpBackend for NativeBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn shutdown_signals_are_registered_before_wait_is_polled() {
+        const CHILD_SIGNAL: &str = "MRSM_TEST_SERVER_REGISTRATION_SIGNAL";
+        const TEST: &str = "server::tests::shutdown_signals_are_registered_before_wait_is_polled";
+        if let Some(signum) = std::env::var_os(CHILD_SIGNAL) {
+            let signum: i32 = signum.to_str().unwrap().parse().unwrap();
+            assert!(matches!(
+                signum,
+                signal_hook::consts::SIGINT | signal_hook::consts::SIGTERM
+            ));
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            runtime.block_on(async {
+                let mut shutdown = ShutdownSignal::new().unwrap();
+                // Deliver only to this owned child, before wait() has even been constructed.
+                signal_hook::low_level::raise(signum).unwrap();
+                tokio::time::timeout(Duration::from_secs(5), shutdown.wait())
+                    .await
+                    .expect("registered signal was lost before the first wait poll")
+                    .unwrap();
+            });
+            return;
+        }
+        for signum in [signal_hook::consts::SIGINT, signal_hook::consts::SIGTERM] {
+            let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", TEST, "--nocapture"])
+                .env(CHILD_SIGNAL, signum.to_string())
+                .env_remove("TMUX")
+                .env_remove("TMUX_PANE")
+                .spawn()
+                .unwrap();
+            let deadline = std::time::Instant::now() + Duration::from_secs(10);
+            loop {
+                match child.try_wait() {
+                    Ok(Some(status)) => {
+                        assert!(
+                            status.success(),
+                            "registration child for {signum} exited {status}"
+                        );
+                        break;
+                    }
+                    Ok(None) if std::time::Instant::now() < deadline => {
+                        std::thread::sleep(Duration::from_millis(10));
+                    }
+                    result => {
+                        let _ = child.kill();
+                        let _ = child.wait();
+                        panic!("registration child for {signum} did not finish: {result:?}");
+                    }
+                }
+            }
+        }
+    }
 
     #[test]
     fn server_flags_preserve_cli_values() {

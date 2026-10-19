@@ -139,7 +139,9 @@ RUN --mount=type=bind,source=scripts/rust/duckdb_lib.sh,target=/scripts/rust/duc
 
 
 ### ---------------------------------------------------------------------------------------------
-### slim-rootfs: a Fedora 44 root filesystem with only python3 and its runtime libraries, installed
+### slim-rootfs: a Fedora 44 root filesystem with only python3 and its runtime libraries (and
+### `curl`, which the stack's API healthcheck runs: `curl --fail http://localhost:<port>/healthcheck`;
+### `curl-minimal` + `libcurl-minimal` add ~6 MB, the full `libcurl` twice that), installed
 ### with `dnf --installroot` so the image carries no dnf, rpm tooling, compilers or pip. The rpm
 ### database is kept so image scanners still see the package list. The CA trust *sources*
 ### (`update-ca-trust` input; the extracted bundles stay), the Java/EDK2 trust stores, the
@@ -157,7 +159,7 @@ ARG mrsm_user=meerschaum \
 
 RUN dnf install -y --installroot=/rootfs --use-host-config --releasever=44 \
       --setopt=install_weak_deps=False --nodocs \
-      python3 bash coreutils-single ca-certificates tzdata libstdc++ \
+      python3 bash coreutils-single ca-certificates tzdata libstdc++ curl-minimal libcurl-minimal \
   && dnf --installroot=/rootfs --use-host-config clean all \
   && rm -rf /rootfs/var/cache/* /rootfs/var/log/* /rootfs/var/lib/dnf /rootfs/usr/share/locale/* \
   && rm -rf /rootfs/usr/share/pki/ca-trust-source /rootfs/usr/share/zoneinfo/right \
@@ -219,8 +221,9 @@ ENTRYPOINT ["mrsm"]
 ### full-rootfs: the slim rootfs (which has `libstdc++` too: DuckDB's library and numpy, pyarrow, pandas
 ### and the other compiled extras link it dynamically) plus `pip` (plugins and `attempt_import` install their requirements into
 ### `mrsm` venvs with the interpreter's pip), the few interactive tools the image has always shipped (tmux for
-### `mrsm` sessions, less, htop, openssl, `python` -> python3), the user's dotfiles, and the
-### trimmed `py-full` prefix in /usr/local.
+### `mrsm` sessions, less, htop, openssl, `python` -> python3, `curl` for the stack's API healthcheck, and
+### `git` (`git-core`, which brings `ssh`) so plugins can require `git+https://...` packages: the v4 images
+### had all three; ~46 MB), the user's dotfiles, and the trimmed `py-full` prefix in /usr/local.
 FROM fedora:44 AS full-rootfs
 
 ARG mrsm_user=meerschaum \
@@ -231,7 +234,7 @@ ARG mrsm_user=meerschaum \
 RUN dnf install -y --installroot=/rootfs --use-host-config --releasever=44 \
       --setopt=install_weak_deps=False --nodocs \
       python3 python-unversioned-command bash coreutils-single ca-certificates tzdata \
-      libstdc++ python3-pip ncurses tmux less htop openssl \
+      libstdc++ python3-pip ncurses tmux less htop openssl curl-minimal libcurl-minimal git-core \
   && dnf --installroot=/rootfs --use-host-config clean all \
   && rm -rf /rootfs/var/cache/* /rootfs/var/log/* /rootfs/var/lib/dnf /rootfs/usr/share/locale/* \
   && rm -rf /rootfs/usr/share/pki/ca-trust-source /rootfs/usr/share/zoneinfo/right \

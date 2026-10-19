@@ -122,6 +122,15 @@ class Connector(metaclass=abc.ABCMeta):
         ### add additional arguments or override configuration
         self._attributes.update(kw)
 
+        ### Remember what the caller passed: a connector built with its own attributes
+        ### (`get_connector('sql', 'x', flavor=...)`) overrides the configured `sql:x` in the
+        ### actions this process runs (`meerschaum._internal.entry.adhoc_context`), as in v4.
+        self.__dict__['_explicit_attributes'] = {
+            key: value
+            for key, value in kw.items()
+            if key not in ('type', 'label')
+        }
+
         ### finally, update __dict__ with _attributes.
         self.__dict__.update(self._attributes)
 

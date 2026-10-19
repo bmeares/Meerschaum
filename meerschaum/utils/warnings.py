@@ -13,6 +13,9 @@ from meerschaum.utils.debug import dprint
 import sys
 import warnings
 
+#: Set (process-wide, like `warnings.catch_warnings`) while warnings are being recorded.
+_RECORDING: bool = False
+
 __all__ = (
     'warn',
     'info',
@@ -92,10 +95,14 @@ def warn(*args, stacklevel=2, stack=True, color: bool = True, **kw) -> None:
     def _no_stack_sw(message, category, filename, lineno, file=None, line=None):
         sys.stderr.write(str(message) + '\n')
 
-    if not stack:
+    ### While a caller records warnings (`_RECORDING`, the worker's quiet connector builds), a
+    ### stackless warning goes through `warnings` like any other, so it can be recorded instead
+    ### of being written straight to stderr.
+    swap = not stack and not _RECORDING
+    if swap:
         warnings.showwarning = _no_stack_sw
     warnings.warn(*a, stacklevel=stacklevel, **kw)
-    if not stack:
+    if swap:
         warnings.showwarning = _old_sw
 
 

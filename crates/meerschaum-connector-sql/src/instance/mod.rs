@@ -293,6 +293,26 @@ impl SqlConnector {
         settings: InstanceSettings,
     ) -> Result<Self> {
         let driver = SqlDriver::connect_lazy(&spec)?;
+        Ok(Self::from_lazy_driver(label, spec, settings, driver))
+    }
+
+    /// A SQLite/GeoPackage diagnostic connector that cannot create or write its database and
+    /// leaves its journal mode unchanged. Other flavors are refused. Requires a Tokio runtime.
+    pub fn connect_lazy_sqlite_read_only(
+        label: &str,
+        spec: ConnectionSpec,
+        settings: InstanceSettings,
+    ) -> Result<Self> {
+        let driver = SqlDriver::connect_lazy_sqlite_read_only(&spec)?;
+        Ok(Self::from_lazy_driver(label, spec, settings, driver))
+    }
+
+    fn from_lazy_driver(
+        label: &str,
+        spec: ConnectionSpec,
+        settings: InstanceSettings,
+        driver: SqlDriver,
+    ) -> Self {
         let flavor = spec.flavor;
         let configured = spec.schema.clone().filter(|s| !s.is_empty());
         let fallback_schema = if flavor.no_schema() {
@@ -312,7 +332,7 @@ impl SqlConnector {
         } else {
             Some(static_config().sql.internal_schema.clone())
         };
-        Ok(SqlConnector {
+        SqlConnector {
             label: label.to_string(),
             flavor,
             spec,
@@ -323,7 +343,7 @@ impl SqlConnector {
             settings,
             state: Mutex::new(State::default()),
             provider: Mutex::new(None),
-        })
+        }
     }
 
     /// Whether `self.schema` is settled (configured, schema-less, or discovered), not the flavor

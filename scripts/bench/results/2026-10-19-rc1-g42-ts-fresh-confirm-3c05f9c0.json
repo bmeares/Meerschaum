@@ -1,0 +1,226 @@
+{
+  "meta": {
+    "label": "rc1-g42-ts-fresh-confirm-3c05f9c0",
+    "date": "2026-10-19",
+    "backends": [
+      "timescaledb"
+    ],
+    "repeats": 3,
+    "sizes": [
+      "10k"
+    ],
+    "python": "3.14.8",
+    "pg_schema": "w17cbench_6b0a113b9d9d",
+    "pg_database": "w17cbench_6b0a113b9d9d",
+    "os": "Linux x86_64",
+    "cpus": 40,
+    "notes": [],
+    "load_checks": [
+      {
+        "backend": "timescaledb",
+        "load_average": [
+          1.3037109375,
+          2.83251953125,
+          4.359375
+        ],
+        "rustc_processes": 0
+      }
+    ],
+    "complete": true,
+    "profiling": false,
+    "latency_iterations": 200,
+    "implementations": [
+      "v4py",
+      "v5py"
+    ],
+    "cases": [
+      "latency"
+    ],
+    "v4_version": "4.1.4",
+    "v5_version": "5.0.0a1",
+    "v4_python": "3.14.8",
+    "driver_source_revision": "95e0130d",
+    "v4_dependencies": {
+      "pandas": "3.0.0",
+      "numpy": "2.4.2",
+      "polars": "1.44.1",
+      "pyarrow": "23.0.0",
+      "SQLAlchemy": "2.0.51",
+      "psycopg": "3.3.6",
+      "psycopg2-binary": null
+    },
+    "harness_sha256": "64299bafa72abb2ad2f661f999a5076bc0b9f40233a3216775a91a75812f8194",
+    "v5_python": "3.14.8",
+    "v5_dependencies": {
+      "pandas": "3.0.6",
+      "numpy": "2.5.4",
+      "polars": "2.0.0",
+      "pyarrow": "26.0.0",
+      "SQLAlchemy": "2.1.5",
+      "psycopg": "3.3.6",
+      "psycopg2-binary": null
+    },
+    "v5_extension_sha256": "6a1c7006fd292f7f00f777d8844f593e5e5c250589c828fd59863007ce5232a3",
+    "v5_console_sha256": "8786c398038440dc3b0c29c1e654910dab4711c9b6f7126893b49287e4245661",
+    "v5_entry_module_sha256": "d46379b69fee7a359383e90496e99b1276e7808f241e32fbb2b3553f04ff0921",
+    "baseline_regressions": []
+  },
+  "results": [
+    {
+      "backend": "timescaledb",
+      "case": "lat_first_call",
+      "impl": "v4py",
+      "seconds": [
+        0.330289,
+        0.312706,
+        0.308362
+      ],
+      "median": 0.312706,
+      "min": 0.308362,
+      "failed": 0
+    },
+    {
+      "backend": "timescaledb",
+      "case": "lat_get_sync_time",
+      "impl": "v4py",
+      "seconds": [
+        0.001765,
+        0.001914,
+        0.001784
+      ],
+      "median": 0.001784,
+      "min": 0.001765,
+      "failed": 0
+    },
+    {
+      "backend": "timescaledb",
+      "case": "lat_get_rowcount",
+      "impl": "v4py",
+      "seconds": [
+        0.001824,
+        0.00168,
+        0.001768
+      ],
+      "median": 0.001768,
+      "min": 0.00168,
+      "failed": 0
+    },
+    {
+      "backend": "timescaledb",
+      "case": "lat_get_data",
+      "impl": "v4py",
+      "seconds": [
+        0.009504,
+        0.009306,
+        0.009886
+      ],
+      "median": 0.009504,
+      "min": 0.009306,
+      "failed": 0
+    },
+    {
+      "backend": "timescaledb",
+      "case": "lat_fresh_get_sync_time",
+      "impl": "v4py",
+      "seconds": [
+        0.004646,
+        0.004577,
+        0.004575
+      ],
+      "median": 0.004577,
+      "min": 0.004575,
+      "failed": 0
+    },
+    {
+      "backend": "timescaledb",
+      "case": "lat_template_get_sync_time",
+      "impl": "v4py",
+      "seconds": [
+        0.01218,
+        0.013236,
+        0.012111
+      ],
+      "median": 0.01218,
+      "min": 0.012111,
+      "failed": 0
+    },
+    {
+      "backend": "timescaledb",
+      "case": "lat_first_call",
+      "impl": "v5py",
+      "seconds": [
+        0.124857,
+        0.10478,
+        0.110888
+      ],
+      "median": 0.110888,
+      "min": 0.10478,
+      "failed": 0
+    },
+    {
+      "backend": "timescaledb",
+      "case": "lat_get_sync_time",
+      "impl": "v5py",
+      "seconds": [
+        0.001758,
+        0.000935,
+        0.001561
+      ],
+      "median": 0.001561,
+      "min": 0.000935,
+      "failed": 0
+    },
+    {
+      "backend": "timescaledb",
+      "case": "lat_get_rowcount",
+      "impl": "v5py",
+      "seconds": [
+        0.001978,
+        0.001427,
+        0.001898
+      ],
+      "median": 0.001898,
+      "min": 0.001427,
+      "failed": 0
+    },
+    {
+      "backend": "timescaledb",
+      "case": "lat_get_data",
+      "impl": "v5py",
+      "seconds": [
+        0.005216,
+        0.006078,
+        0.005592
+      ],
+      "median": 0.005592,
+      "min": 0.005216,
+      "failed": 0
+    },
+    {
+      "backend": "timescaledb",
+      "case": "lat_fresh_get_sync_time",
+      "impl": "v5py",
+      "seconds": [
+        0.006382,
+        0.005378,
+        0.00508
+      ],
+      "median": 0.005378,
+      "min": 0.00508,
+      "failed": 0
+    },
+    {
+      "backend": "timescaledb",
+      "case": "lat_template_get_sync_time",
+      "impl": "v5py",
+      "seconds": [
+        0.01185,
+        0.011217,
+        0.013068
+      ],
+      "median": 0.01185,
+      "min": 0.011217,
+      "failed": 0
+    }
+  ]
+}

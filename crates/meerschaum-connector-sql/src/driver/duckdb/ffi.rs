@@ -222,7 +222,7 @@ fn cstr(p: *const c_char) -> String {
     }
 }
 
-pub struct Database(Ptr);
+pub struct Database(Ptr, u32);
 // SAFETY: a `duckdb_database` is DuckDB's thread-safe instance object: connections to it may be
 // opened from any thread, and the handle is only closed once, in `Drop`, after every
 // `Connection` (each holds an `Arc<Database>`) is gone.
@@ -232,6 +232,12 @@ unsafe impl Send for Database {}
 unsafe impl Sync for Database {}
 
 impl Database {
+    fn check_pid(&self) -> Result<(), String> {
+        if self.1 != std::process::id() {
+            return Err("DuckDB handles belong to the parent process; start a fresh interpreter (spawn or exec).".into());
+        }
+        Ok(())
+    }
     /// Open (or create) the database at `path` (`None`: in memory). With `no_auto_install`,
     /// DuckDB's own extension auto-installer is off (`MRSM_NO_AUTO_INSTALL` forbids every
     /// implicit install, including `INSTALL` of a known extension from DuckDB's repository);
@@ -272,10 +278,11 @@ impl Database {
                 return Err(msg);
             }
         }
-        Ok(Database(db))
+        Ok(Database(db, std::process::id()))
     }
 
     pub fn connect(self: &std::sync::Arc<Self>) -> Result<Connection, String> {
+        self.check_pid()?;
         let mut c: Ptr = std::ptr::null_mut();
         // SAFETY: `self.0` is an open database; `c` is a valid out-pointer.
         let state = unsafe { (api().duckdb_connect)(self.0, &mut c) };
@@ -291,6 +298,9 @@ impl Database {
 
 impl Drop for Database {
     fn drop(&mut self) {
+        if self.1 != std::process::id() {
+            return;
+        }
         // SAFETY: closes the handle once; every `Connection` holds an `Arc` so none outlive it.
         unsafe { (api().duckdb_close)(&mut self.0) }
     }
@@ -305,6 +315,9 @@ unsafe impl Send for Connection {}
 
 impl Drop for Connection {
     fn drop(&mut self) {
+        if self._db.check_pid().is_err() {
+            return;
+        }
         // SAFETY: disconnects once.
         unsafe { (api().duckdb_disconnect)(&mut self.ptr) }
     }
@@ -314,6 +327,7 @@ pub struct Statement(Ptr);
 
 impl Connection {
     pub fn prepare(&self, sql: &str) -> Result<Statement, String> {
+        self._db.check_pid()?;
         let c = CString::new(sql).map_err(|_| "The SQL contains a NUL byte.".to_string())?;
         let mut s: Ptr = std::ptr::null_mut();
         // SAFETY: valid connection, NUL-terminated SQL, out-pointer.
@@ -330,6 +344,7 @@ impl Connection {
 
     /// Run SQL directly (several statements allowed).
     pub fn batch(&self, sql: &str) -> Result<QueryResult, String> {
+        self._db.check_pid()?;
         let c = CString::new(sql).map_err(|_| "The SQL contains a NUL byte.".to_string())?;
         let mut r = QueryResult::empty();
         // SAFETY: valid connection and SQL; `r` is destroyed by its Drop even on error.

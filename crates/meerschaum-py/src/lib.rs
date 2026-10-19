@@ -31,6 +31,7 @@ pub mod config_api;
 pub mod convert;
 pub mod core_api;
 pub mod d14_api;
+mod duckdb_transport;
 pub mod engine_api;
 pub mod entry_api;
 pub mod facade;
@@ -63,6 +64,7 @@ pub mod yaml_api;
 #[pymodule(gil_used = false)]
 fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     logging::install();
+    duckdb_transport::register(m)?;
     // Python owns this process's signals: no `mrsm` stop handler that could end the interpreter.
     meerschaum_cli::native::jobs::set_embedded(true);
     m.add("__version__", build_info::VERSION)?;

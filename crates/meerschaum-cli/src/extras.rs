@@ -89,7 +89,7 @@ pub const EXTRAS: &[(&str, &[&str])] = &[
         ],
     ),
     ("sql-cockroachdb", &["sqlalchemy-cockroachdb>=2.0.0"]),
-    ("sql-duckdb", &["duckdb>=1.0.0", "duckdb-engine>=0.13.0"]),
+    ("sql-duckdb", &["duckdb>=1.5.6", "duckdb-engine>=0.17.0"]),
     ("sql-mssql", &["pyodbc>=4.0.30"]),
     ("sql-oracle", &["oracledb>=2.5.0"]),
 ];

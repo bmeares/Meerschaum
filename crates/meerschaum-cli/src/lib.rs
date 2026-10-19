@@ -24,6 +24,7 @@ pub mod actions;
 pub mod argparse;
 pub mod builtin;
 pub mod command;
+pub mod completions;
 pub mod compose_action;
 pub mod dateutil;
 pub mod dispatch;
@@ -47,7 +48,7 @@ pub mod types;
 pub mod value;
 
 pub use parse::{parse_arguments, parse_line};
-pub use run::{run as run_cli, run_main};
+pub use run::{run as run_cli, run_main, set_entry_child_marker};
 
 /// The version `show version` and `--version` print.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

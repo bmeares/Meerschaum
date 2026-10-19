@@ -290,4 +290,155 @@ mod tests {
         tap.emit(Some(&r), flushed(true));
         assert_eq!(hub.take().get(&r), Some(&2));
     }
+
+    // Exercise the actual private dispatch gate without database or wall-clock work. Once
+    // dispatched, run_inner fails on the deliberately unregistered instance; its outcome
+    // cannot change the common throttle prefix, stamp, or emitted trigger accounting.
+    fn dispatch_fixture() -> (
+        Engine,
+        Triggers,
+        PipeRef,
+        PipeRef,
+        Arc<crate::events::VecSink>,
+    ) {
+        use meerschaum_core::{Map, Value};
+        let instance = "sql:trigger_unit";
+        let mut parent = crate::PipeRecord::new(instance, "mqtt:test", "landing", None);
+        parent.streaming = true;
+        let stream = parent.pipe_ref();
+        let child = crate::PipeRecord::new(instance, instance, "totals", None).with_parameters(
+            Map::from_iter([
+                ("min_seconds".into(), Value::Float(0.6)),
+                (
+                    "parents".into(),
+                    Value::List(vec![Value::Str(
+                        "Pipe('mqtt:test', 'landing', instance='sql:trigger_unit')".into(),
+                    )]),
+                ),
+            ]),
+        );
+        let child_ref = child.pipe_ref();
+        let graph = Arc::new(Graph::build(
+            [parent, child],
+            &crate::graph::GraphOptions::default(),
+        ));
+        let sub =
+            crate::Pipeline::new(Selection::refs([stream.clone()]).with_children(Some(Depth::All)))
+                .resolve(&graph)
+                .unwrap();
+        assert_eq!(
+            sub.descendants(&stream),
+            BTreeSet::from([child_ref.clone()])
+        );
+        let engine = Engine::new(
+            Arc::new(crate::StaticRegistry::new()),
+            crate::EngineConfig {
+                home_instance: instance.into(),
+                persist_runs: false,
+                ..Default::default()
+            },
+        );
+        let sink = Arc::new(crate::events::VecSink::default());
+        let triggers = Triggers::new(
+            TriggerHub::new(),
+            graph,
+            sub,
+            RunOptions::default(),
+            0.0,
+            Emitter::new("dispatch-unit", sink.clone()),
+        );
+        (engine, triggers, stream, child_ref, sink)
+    }
+
+    fn dispatched_flushes(sink: &crate::events::VecSink) -> Vec<u64> {
+        sink.events()
+            .into_iter()
+            .filter_map(|event| match event.kind {
+                EventKind::ChildrenTriggered {
+                    nodes: 1, flushes, ..
+                } => Some(flushes),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn trigger_dispatch_min_seconds_uses_monotonic_gate() {
+        let (engine, mut triggers, stream, child, sink) = dispatch_fixture();
+        let start = Instant::now();
+        let interval = Duration::from_millis(600);
+        triggers.hub.record(&stream);
+        engine.run_triggers(&mut triggers).await;
+        assert_eq!(triggers.last_run.get(&child), Some(&start));
+        assert_eq!(dispatched_flushes(&sink), vec![1]);
+
+        // Variable downstream work/completion time does not define eligibility. At 200 ms
+        // three more flushes arrive; they must be retained behind the actual 600 ms gate.
+        tokio::time::advance(Duration::from_millis(200)).await;
+        for _ in 0..3 {
+            triggers.hub.record(&stream);
+        }
+        engine.run_triggers(&mut triggers).await;
+        assert_eq!(triggers.last_run.get(&child), Some(&start));
+        assert_eq!(triggers.dirty.get(&stream), Some(&3));
+        assert_eq!(triggers.next_due, Some(start + interval));
+        assert_eq!(dispatched_flushes(&sink), vec![1]);
+
+        tokio::time::advance(Duration::from_millis(399)).await;
+        engine.run_triggers(&mut triggers).await;
+        assert_eq!(Instant::now() - start, Duration::from_millis(599));
+        assert_eq!(triggers.last_run.get(&child), Some(&start));
+        assert_eq!(triggers.dirty.get(&stream), Some(&3));
+        assert_eq!(dispatched_flushes(&sink), vec![1]);
+
+        tokio::time::advance(Duration::from_millis(1)).await;
+        engine.run_triggers(&mut triggers).await;
+        let second = *triggers.last_run.get(&child).unwrap();
+        assert_eq!(second - start, interval);
+        assert_eq!(dispatched_flushes(&sink), vec![1, 3]);
+        assert!(!triggers.dirty.contains_key(&stream));
+
+        // A fast subsequent run cannot reuse the old window: another full interval is due.
+        triggers.hub.record(&stream);
+        engine.run_triggers(&mut triggers).await;
+        assert_eq!(triggers.next_due, Some(second + interval));
+        tokio::time::advance(Duration::from_millis(599)).await;
+        engine.run_triggers(&mut triggers).await;
+        assert_eq!(triggers.last_run.get(&child), Some(&second));
+        assert_eq!(dispatched_flushes(&sink), vec![1, 3]);
+        tokio::time::advance(Duration::from_millis(1)).await;
+        engine.run_triggers(&mut triggers).await;
+        let third = *triggers.last_run.get(&child).unwrap();
+        assert_eq!(third - second, interval);
+        assert_eq!(dispatched_flushes(&sink), vec![1, 3, 1]);
+        assert!(!triggers.dirty.contains_key(&stream));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn initial_lap_stamp_holds_first_trigger_for_its_full_interval() {
+        let (engine, mut triggers, stream, child, sink) = dispatch_fixture();
+        let lap_finished = Instant::now();
+        triggers.note_ran([&child]);
+        triggers.hub.record(&stream);
+        triggers.hub.record(&stream);
+        engine.run_triggers(&mut triggers).await;
+        assert_eq!(triggers.last_run.get(&child), Some(&lap_finished));
+        assert_eq!(
+            triggers.next_due,
+            Some(lap_finished + Duration::from_millis(600))
+        );
+        assert_eq!(triggers.dirty.get(&stream), Some(&2));
+        assert!(dispatched_flushes(&sink).is_empty());
+        tokio::time::advance(Duration::from_millis(599)).await;
+        engine.run_triggers(&mut triggers).await;
+        assert!(dispatched_flushes(&sink).is_empty());
+        tokio::time::advance(Duration::from_millis(1)).await;
+        engine.run_triggers(&mut triggers).await;
+        assert_eq!(
+            triggers.last_run.get(&child),
+            Some(&(lap_finished + Duration::from_millis(600)))
+        );
+        assert_eq!(dispatched_flushes(&sink), vec![2]);
+        assert!(!triggers.dirty.contains_key(&stream));
+    }
 }

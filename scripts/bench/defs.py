@@ -12,10 +12,10 @@ import os
 
 SIZES = {'10k': 10_000, '100k': 100_000, '1M': 1_000_000}
 BASE_EPOCH = 1_704_067_200  # 2024-01-01T00:00:00Z
-#: PostgreSQL schema and database of the `postgis` backend (disposable `w7_bench` database of the
-#: test container). `run.py --pg-schema` sets `MRSM_BENCH_PG_SCHEMA` for the driver and workers.
-SCHEMA = os.environ.get('MRSM_BENCH_PG_SCHEMA', 'w7_bench')
-PG_DATABASE = 'w7_bench'
+#: The driver assigns a fresh database and schema per run, and passes them to its workers.
+SCHEMA = os.environ.get('MRSM_BENCH_PG_SCHEMA', 'w17cbench_unset')
+PG_DATABASE = os.environ.get('MRSM_BENCH_PG_DATABASE', 'w17cbench_unset')
+PG_BACKENDS = {'postgis': 5449, 'timescaledb': 5439}
 #: Rows of the small pipe of the per-call latency cases.
 LATENCY_ROWS = 50
 SRC_INSTANCE = 'sql:a_src'
@@ -23,11 +23,11 @@ DEST_INSTANCE = 'sql:b_dest'
 
 #: Implementations: how a case is executed. `py` runs `worker.py` inside the implementation's
 #: interpreter (timed around the call); `cli` times the whole process, startup included.
-IMPLS = ('v4py', 'v4cli', 'v5py', 'v5cli')
+IMPLS = ('v4py', 'v4cli', 'v5py', 'v5cli', 'v5bin')
 PY_IMPLS = ('v4py', 'v5py')
 #: Every implementation `--impls` accepts.
 ALL_IMPLS = IMPLS
-CLI_IMPLS = ('v4cli', 'v5cli')
+CLI_IMPLS = ('v4cli', 'v5cli', 'v5bin')
 
 DTYPES = {'dt': 'datetime', 'id': 'int', 'value': 'float'}
 COLUMNS = {'datetime': 'dt', 'id': 'id'}
@@ -124,9 +124,9 @@ def connector_env(backend: str, workdir: str) -> Dict[str, str]:
     if backend == 'sqlite':
         a = {'flavor': 'sqlite', 'database': f'{workdir}/src.db'}
         b = {'flavor': 'sqlite', 'database': f'{workdir}/dest.db'}
-    elif backend == 'postgis':
+    elif backend in PG_BACKENDS:
         base = {
-            'flavor': 'postgis', 'host': 'localhost', 'port': 5449,
+            'flavor': backend, 'host': 'localhost', 'port': PG_BACKENDS[backend],
             'username': 'test', 'password': 'test1234',
             'database': PG_DATABASE, 'schema': SCHEMA,
         }

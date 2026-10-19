@@ -9,7 +9,7 @@ recorded in `tests/oracle/test_pipe_methods_native.json` (not v4.1.4 output; see
 pandas dtype of every column. The calls assert that the binding handled them (a silent
 fall-through to a Python body cannot pass).
 
-Instances: SQLite (always), PostgreSQL (`MRSM_TEST_FLAVORS` has `postgis`, schema `w15l2`), a custom
+Instances: SQLite (always), PostgreSQL (`MRSM_TEST_FLAVORS` has `postgis`, an owned `w15l2_` schema), a custom
 `@make_connector` instance (`w15lmem`, driven by the Python worker) and Valkey (`MRSM_TEST_FLAVORS`
 has `valkey`). The Python `valkey` package is not installed for v4, so a Valkey pipe is compared
 with the same data on SQLite (recorded on SQLite).
@@ -32,7 +32,9 @@ from tests import _oracle as oracle
 ### depend on the pandas version (3.x), so the replay has to load the same libraries.
 attempt_import('pandas', 'pyarrow', 'shapely', 'geopandas', lazy=False)
 
-SCHEMA = 'w15l2'
+### Fresh per process/import: isolate xdist workers and concurrent pytest runs.
+### The fixed prefix and UUID hex are safe SQL identifiers below PostgreSQL's 63-byte limit.
+SCHEMA = 'w15l2_' + uuid.uuid4().hex
 START = datetime(2026, 1, 1, tzinfo=timezone.utc)
 COLUMNS = {'datetime': 'dt', 'id': 'id'}
 DTYPES = {'val': 'float', 'name': 'str'}
@@ -71,12 +73,14 @@ def postgis_instance():
         flavor='postgis', username='test', password='test1234', database='testdb',
         port=5449, host='localhost', schema=SCHEMA,
     )
-    conn.exec(f'DROP SCHEMA IF EXISTS "{SCHEMA}" CASCADE')
-    conn.exec(f'CREATE SCHEMA "{SCHEMA}"')
-    from meerschaum.connectors.sql.tables import get_tables
-    get_tables(mrsm_instance=conn, create=True, refresh=True)
-    yield conn
-    conn.exec(f'DROP SCHEMA IF EXISTS "{SCHEMA}" CASCADE')
+    ### A failed CREATE owns nothing; never drop an existing schema on collision.
+    assert conn.exec(f'CREATE SCHEMA "{SCHEMA}"') is not None
+    try:
+        from meerschaum.connectors.sql.tables import get_tables
+        get_tables(mrsm_instance=conn, create=True, refresh=True)
+        yield conn
+    finally:
+        assert conn.exec(f'DROP SCHEMA IF EXISTS "{SCHEMA}" CASCADE') is not None
 
 
 def _resp(command, port=6399):

@@ -483,7 +483,7 @@ const COMPOSE_HEADER: &str = "
 ";
 
 /// `meerschaum.config.stack.env_dict` (values may hold `MRSM{}` symlinks).
-fn stack_env_dict() -> Map {
+pub(crate) fn stack_env_dict() -> Map {
     let mut env = Map::new();
     let s = |v: &str| Value::Str(v.to_string());
     env.insert("COMPOSE_PROJECT_NAME".into(), s("mrsm"));
@@ -563,7 +563,9 @@ fn sync_yaml_config(
 }
 
 /// `sync_files(['stack'])` (`config/_sync.py`): rewrite the compose, Grafana and init files from
-/// the `stack` config.
+/// the `stack` config. `stack()` runs it before every `docker compose` command, so the setup script
+/// the compose file mounts as a FILE (`create-extensions.sql:/docker-entrypoint-initdb.d/
+/// 100_meerschaum.sql`) always exists: a missing bind-mount source would become a directory.
 fn sync_stack_files(rt: &mut Runtime<'_>) -> Result<(), String> {
     let paths = rt.config().paths();
     sync_yaml_config(
@@ -589,11 +591,9 @@ fn sync_stack_files(rt: &mut Runtime<'_>) -> Result<(), String> {
         if let Some(parent) = init.parent() {
             std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
         }
-        std::fs::write(
-            &init,
-            "CREATE EXTENSION IF NOT EXISTS timescaledb;\nCREATE EXTENSION IF NOT EXISTS postgis;\nCREATE EXTENSION IF NOT EXISTS timescaledb_toolkit;\nCREATE EXTENSION IF NOT EXISTS pg_stat_statements;\n",
-        )
-        .map_err(|e| e.to_string())?;
+        // The one copy of the setup script (`meerschaum-core`, `config/create-extensions.sql`).
+        std::fs::write(&init, meerschaum_core::config::sync::CREATE_EXTENSIONS_TEXT)
+            .map_err(|e| e.to_string())?;
     }
     Ok(())
 }
@@ -716,9 +716,22 @@ pub fn stack(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     {
         return Ok(SuccessTuple::fail("Nothing was dropped."));
     }
+    let starting = sysargs.iter().skip(1).any(|a| a == "up");
+    if starting
+        && !flag(args, "force")
+        && !sysargs.iter().any(|a| a == "--force")
+        && let Err(e) = super::upgrade_postgres::stack_up_preflight(
+            rt,
+            &project_name,
+            &paths.path("STACK_COMPOSE_PATH"),
+            &stack_env,
+        )
+    {
+        return Ok(SuccessTuple::fail(e));
+    }
     let mut cmd_list: Vec<String> = vec!["--project-name".into(), project_name];
     cmd_list.extend(sysargs.iter().skip(1).cloned());
-    cmd_list.retain(|a| a != "--debug");
+    cmd_list.retain(|a| a != "--debug" && !(starting && a == "--force"));
     let mut compose_args = vec!["compose".to_string()];
     compose_args.extend(cmd_list.iter().cloned());
     let spec = CommandSpec {
@@ -733,6 +746,16 @@ pub fn stack(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     };
     let rc = rt.host.run(&spec).unwrap_or(1);
     let success = rc == 0;
+    // v5: after `stack up`, one line when the stack's database answers quickly and an extension
+    // lags the image's version (never fails or noticeably slows `stack up`).
+    if success
+        && sysargs.iter().skip(1).any(|a| a == "up")
+        && super::extensions::stack_hint_enabled()
+        && let Some(hint) =
+            super::extensions::lag_hint(rt, "sql:main", super::extensions::HINT_TIMEOUT)
+    {
+        super::info(rt, &hint);
+    }
     let message = if success {
         "Success".to_string()
     } else {

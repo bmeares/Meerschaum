@@ -17,6 +17,7 @@ SCRATCH = pathlib.Path(os.environ.get('MRSM_TRANSITION_DIR', os.path.expanduser(
 V4_PY = pathlib.Path(os.environ.get('MRSM_TRANSITION_V4_PY', str(SCRATCH / 'venv-v4' / 'bin' / 'python')))
 V5_PY = pathlib.Path(os.environ.get('MRSM_TRANSITION_V5_PY', str(V4_PY)))
 V5_NO_AUTO_INSTALL = os.environ.get('MRSM_TRANSITION_V5_NO_AUTO_INSTALL', '0') == '1'
+V5_VERSION = None  # the exact v5 version under test (set by the harness); None: no CLI version classification
 V5_BIN = REPO / 'target' / 'debug' / 'mrsm'
 
 
@@ -58,6 +59,9 @@ class Run:
             'TRN_LOG': str(self.work / 'hooks.log'),
             'TRN_FETCH_N': str(self.state.get('fetch_n', 5)),
             'UV_PYTHON': str(V4_PY),
+            # Each side names its own interpreter (v4 does not read it): `show environment` then
+            # differs only by these two known owned paths, which `stage_v5.expected_cli` normalizes.
+            'MRSM_PYTHON': str(V4_PY),
         }
         if v5:
             if os.environ.get('MRSM_TRANSITION_V5_WHEEL') != '1':

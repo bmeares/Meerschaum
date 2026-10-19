@@ -14,7 +14,7 @@ plugins receive exactly the arguments they received on v4.
 from __future__ import annotations
 
 import traceback
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from meerschaum.worker._arrow import ipc_to_df, is_dataframe, to_payload, df_to_ipc
 from meerschaum.worker._server import Connection, WorkerCallError
@@ -79,14 +79,53 @@ def _pipe_state(pipe) -> Dict[str, Any]:
     }
 
 
-def _get_connector(keys: str):
+def _get_connector(keys: str, quiet: bool = False):
+    """
+    Build the connector named by `keys`. With `quiet`, warnings raised while building it are
+    not printed, as v4's `Pipe.connector` does (`warnings.simplefilter('ignore')` around
+    `parse_instance_keys`): the ops that act on a pipe's connector (describe, fetch, sync,
+    subscribe, register) must not print e.g. "Cannot create Connector of type 'x'." for a pipe
+    whose connector type is not installed. The warnings are kept and appended to the error when
+    the connector cannot be built.
+    """
     import meerschaum as mrsm
     if not keys or not isinstance(keys, str):
         raise BadRequest("Connector keys are required.")
-    conn = mrsm.get_connector(keys)
+    suppressed: List[str] = []
+    if quiet:
+        conn = _quietly(lambda: mrsm.get_connector(keys), suppressed)
+    else:
+        conn = mrsm.get_connector(keys)
     if conn is None:
-        raise BadRequest(f"Could not build connector '{keys}'.")
+        detail = ''.join(f"\n{line}" for line in suppressed)
+        raise BadRequest(f"Could not build connector '{keys}'.{detail}")
     return conn
+
+
+def _quietly(func: Callable[[], Any], suppressed: List[str]) -> Any:
+    """
+    Call `func` with warnings recorded instead of printed, appending their text to
+    `suppressed`. Only warnings are captured (Meerschaum's stackless `warn()` is routed through
+    `warnings` meanwhile); anything else written to stderr, e.g. by a plugin imported during the
+    build, is left alone. `warnings.catch_warnings` is process-wide, so the window is this call.
+    """
+    import warnings
+    import meerschaum.utils.warnings as mrsm_warnings
+    from meerschaum.utils.misc import remove_ansi
+    recording = mrsm_warnings._RECORDING
+    mrsm_warnings._RECORDING = True
+    try:
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter('always')
+            result = func()
+    finally:
+        mrsm_warnings._RECORDING = recording
+    for warning in caught:
+        for line in str(warning.message).splitlines():
+            line = remove_ansi(line).strip()
+            if line and line not in suppressed:
+                suppressed.append(line)
+    return result
 
 
 def _kwargs(args: Dict[str, Any]) -> Dict[str, Any]:
@@ -200,7 +239,7 @@ def op_ping(conn: Connection, call_id: int, args: Dict[str, Any], frames: List[b
 
 def op_describe_connector(conn, call_id, args, frames) -> Result:
     """Describe a connector's capabilities (which optional methods it implements)."""
-    connector = _get_connector(args.get('connector'))
+    connector = _get_connector(args.get('connector'), quiet=True)
     methods = sorted(
         name for name in dir(connector)
         if not name.startswith('_') and callable(getattr(connector, name, None))
@@ -231,7 +270,7 @@ def op_fetch(conn, call_id, args, frames) -> Result:
     from meerschaum.utils.misc import filter_arguments
     from meerschaum.utils.dataframe import df_is_chunk_generator
 
-    connector = _get_connector(args.get('connector'))
+    connector = _get_connector(args.get('connector'), quiet=True)
     fetch_function = getattr(connector, 'fetch', None)
     if fetch_function is None:
         raise NotImplementedError(f"No `fetch()` function defined for connector '{connector}'")
@@ -311,7 +350,7 @@ def op_sync(conn, call_id, args, frames) -> Result:
     from meerschaum.connectors import get_connector_plugin
     from meerschaum.utils.misc import filter_arguments
 
-    connector = _get_connector(args.get('connector'))
+    connector = _get_connector(args.get('connector'), quiet=True)
     sync_function = getattr(connector, 'sync', None)
     if sync_function is None:
         raise NotImplementedError(f"No `sync()` function defined for connector '{connector}'")
@@ -344,7 +383,7 @@ def op_subscribe(conn, call_id, args, frames) -> Result:
     from meerschaum.connectors import get_connector_plugin
     from meerschaum.utils.misc import filter_arguments
 
-    connector = _get_connector(args.get('connector'))
+    connector = _get_connector(args.get('connector'), quiet=True)
     subscribe = getattr(connector, 'subscribe', None)
     if subscribe is None:
         raise NotImplementedError(f"No `subscribe()` function defined for connector '{connector}'")
@@ -372,12 +411,28 @@ def op_subscribe(conn, call_id, args, frames) -> Result:
     return _encode_value(result)
 
 
+def _print_exception() -> None:
+    """Print the exception being handled as v4 does (`get_console().print_exception()`)."""
+    try:
+        from meerschaum.utils.formatting import get_console
+        console = get_console()
+    except Exception:
+        console = None
+    if console is None:
+        traceback.print_exc()
+        return
+    try:
+        console.print_exception()
+    except Exception:
+        traceback.print_exc()
+
+
 def op_register(conn, call_id, args, frames) -> Result:
     """The connector half of `Pipe.register()`: `connector.register(pipe)` → parameters."""
     from meerschaum.utils.venv import Venv
     from meerschaum.connectors import get_connector_plugin
 
-    connector = _get_connector(args.get('connector'))
+    connector = _get_connector(args.get('connector'), quiet=True)
     register = getattr(connector, 'register', None)
     if register is None:
         return {'parameters': {}, 'valid': True, 'defined': False}, []
@@ -386,7 +441,10 @@ def op_register(conn, call_id, args, frames) -> Result:
         with Venv(get_connector_plugin(connector)):
             params = register(pipe)
     except Exception:
-        traceback.print_exc()
+        ### PARITY: `core/Pipe/_register.py`: `get_console().print_exception()` (a rich
+        ### traceback); a plain one when `rich` is not installed. Both go to stderr: a worker's
+        ### stdout is its stderr (`python/host.py`, never an MCP host's protocol stdout).
+        _print_exception()
         params = None
     params = {} if params is None else params
     if not isinstance(params, dict):

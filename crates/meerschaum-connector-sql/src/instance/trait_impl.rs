@@ -201,8 +201,6 @@ impl InstanceConnector for SqlConnector {
         pipe: &Pipe,
         query: &DataQuery,
     ) -> ConnectorResult<Vec<IndexMap<String, meerschaum_kernel::Value>>> {
-        self.require_schema().await?;
-        let pipe = &self.prepare_pipe(pipe).await;
         SqlConnector::get_pipe_docs(self, pipe, query).await
     }
 

@@ -1030,6 +1030,170 @@ pub async fn plan_node<S: StateSource>(
     )
 }
 
+/// The plan as the executor is expected to run it (`mrsm plan pipes`).
+///
+/// The static [`plan`] shows a provisional node as the state is *now*, but the executor re-plans
+/// it with [`plan_node`] once its parents finish, against the ledger entries their syncs wrote.
+/// Those entries cover whole epoch-aligned grid cells (§5.4), so a child usually runs a
+/// `backfill` from the start of its parent's current chunk (e.g. `[2026-10-04 00:00, …)` on the
+/// default 30-day grid) where the static plan showed `skip` or the tail window
+/// `[own watermark − backtrack, …)`.
+///
+/// This re-plans every provisional node in order, as the executor would, assuming that each
+/// node that runs before it writes new rows from its watermark on: one ledger entry from the
+/// grid cell holding its watermark, open-ended (the full range for a `rebuild`, a node without a
+/// watermark or without a datetime axis). The parents' watermarks stay as they are now, so an
+/// expected window ends at the parents' current watermarks; the executor caps it at their new
+/// ones. Expected nodes keep `provisional` (what the parents really write decides).
+pub async fn expected<S: StateSource>(
+    graph: &Graph,
+    sub: &Subgraph,
+    plan: &Plan,
+    state: &S,
+    options: &PlanOptions,
+) -> Plan {
+    let predicted = PredictedState {
+        inner: state,
+        writes: std::sync::Mutex::new(HashMap::new()),
+    };
+    let mut parents: HashMap<PipeRef, ParentState> = HashMap::new();
+    let mut nodes = Vec::with_capacity(plan.nodes.len());
+    for planned in &plan.nodes {
+        let node = if planned.provisional {
+            let mut node =
+                plan_node(graph, sub, &planned.pipe_ref, &parents, &predicted, options).await;
+            node.provisional = true;
+            let running = sub
+                .parent_edges(&planned.pipe_ref)
+                .any(|e| parents.get(&e.parent) == Some(&ParentState::Succeeded));
+            node.reason = if running {
+                format!("if its parents sync new rows: {}", node.reason)
+            } else {
+                format!("no parent is expected to sync: {}", node.reason)
+            };
+            node
+        } else {
+            planned.clone()
+        };
+        let as_parent = if node.action.runs() {
+            if let Some(graph_node) = graph.node(&node.pipe_ref) {
+                predicted.write(&node, &graph_node.axis);
+            }
+            ParentState::Succeeded
+        } else if node.action == Action::UpstreamFailed {
+            ParentState::Failed
+        } else {
+            ParentState::Idle
+        };
+        parents.insert(node.pipe_ref.clone(), as_parent);
+        nodes.push(node);
+    }
+    Plan {
+        nodes,
+        edges: plan.edges.clone(),
+        flat: plan.flat,
+        warnings: plan.warnings.clone(),
+    }
+}
+
+/// The `(begin, end)` an expected run dirties.
+type Written = (Option<Bound>, Option<Bound>);
+
+/// A [`StateSource`] with one more ledger entry for every node expected to run ([`expected`]).
+struct PredictedState<'a, S> {
+    inner: &'a S,
+    /// The interval each expected run dirties, by node.
+    writes: std::sync::Mutex<HashMap<PipeRef, Written>>,
+}
+
+impl<S> PredictedState<'_, S> {
+    fn write(&self, node: &PlannedNode, axis: &Axis) {
+        let from = match (node.action, axis.kind) {
+            (Action::Rebuild, _) | (_, AxisKind::None) => None,
+            _ => node
+                .watermark
+                .as_ref()
+                .and_then(|w| axis.pos(w))
+                .and_then(|pos| axis.bound(crate::axis::grid_floor(pos, axis.chunk))),
+        };
+        self.writes
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(node.pipe_ref.clone(), (from, None));
+    }
+
+    fn written(&self, node: &PipeRef) -> Option<Written> {
+        self.writes
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(node)
+            .copied()
+    }
+}
+
+impl<S: StateSource> StateSource for PredictedState<'_, S> {
+    async fn watermark(&self, node: &PipeRef) -> Result<Option<Bound>, crate::state::StateError> {
+        self.inner.watermark(node).await
+    }
+
+    async fn definition_hash(
+        &self,
+        node: &PipeRef,
+    ) -> Result<Option<String>, crate::state::StateError> {
+        self.inner.definition_hash(node).await
+    }
+
+    async fn cursor(
+        &self,
+        state_instance: &str,
+        parent: &PipeRef,
+        child: &PipeRef,
+    ) -> Result<Option<crate::ledger::EdgeCursor>, crate::state::StateError> {
+        self.inner.cursor(state_instance, parent, child).await
+    }
+
+    async fn ledger_after(
+        &self,
+        state_instance: &str,
+        parent: &PipeRef,
+        after_seq: i64,
+    ) -> Result<Vec<crate::ledger::LedgerEntry>, crate::state::StateError> {
+        let mut entries = self
+            .inner
+            .ledger_after(state_instance, parent, after_seq)
+            .await?;
+        if let Some((begin, end)) = self.written(parent) {
+            let latest = self.inner.latest_seq(state_instance, parent).await?;
+            let seq = latest
+                .unwrap_or(0)
+                .max(entries.last().map_or(0, |e| e.seq))
+                .saturating_add(1);
+            if seq > after_seq {
+                entries.push(crate::ledger::LedgerEntry {
+                    pipe_ref: parent.clone(),
+                    seq,
+                    begin,
+                    end,
+                    created: crate::state::epoch(),
+                });
+            }
+        }
+        Ok(entries)
+    }
+
+    async fn latest_seq(
+        &self,
+        state_instance: &str,
+        parent: &PipeRef,
+    ) -> Result<Option<i64>, crate::state::StateError> {
+        let latest = self.inner.latest_seq(state_instance, parent).await?;
+        Ok(match self.written(parent) {
+            Some(_) => Some(latest.unwrap_or(0).saturating_add(1)),
+            None => latest,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

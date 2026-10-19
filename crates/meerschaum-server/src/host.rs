@@ -143,7 +143,7 @@ pub trait HostLauncher: Send + Sync {
     async fn launch(&self, socket: &Path) -> std::io::Result<Box<dyn HostProcess>>;
 }
 
-/// Launches `python -m meerschaum.api.host --socket <path>`.
+/// Launches the API host, `python -m meerschaum.api.host --socket <path>` behind the version guard.
 #[derive(Debug, Clone)]
 pub struct PythonHostLauncher {
     /// The interpreter (`MRSM_PYTHON` or the environment that installed the binary).
@@ -227,14 +227,27 @@ impl HostProcess for ChildProcess {
 #[async_trait]
 impl HostLauncher for PythonHostLauncher {
     async fn launch(&self, socket: &Path) -> std::io::Result<Box<dyn HostProcess>> {
+        // `python -c <guard> + runpy` instead of `python -m`: the guard refuses a `meerschaum`
+        // this program cannot work with before anything of it is imported (importing a stale v4
+        // would run its start-up), then the module runs as `-m` would run it.
+        let program = format!(
+            "{}\n_mrsm_guard()\nimport runpy\nrunpy.run_module('meerschaum.api.host', run_name='__main__', alter_sys=True)\n",
+            meerschaum_core::python_guard::SCRIPT
+        );
         let child = tokio::process::Command::new(&self.python)
             .args([
                 meerschaum_core::self_exe::PYTHON_SAFE_PATH_FLAG,
-                "-m",
-                "meerschaum.api.host",
+                "-c",
+                program.as_str(),
                 "--socket",
             ])
             .arg(socket)
+            .envs(meerschaum_core::python_guard::expect_env())
+            .env(meerschaum_core::python_guard::WARN_ENV, "1")
+            .env(
+                meerschaum_core::python_guard::RETRY_HINT_ENV,
+                "Then restart `mrsm start api` (or it is retried within 5 minutes, and when the plugins change).",
+            )
             .envs(self.env.iter().map(|(k, v)| (k.as_str(), v.as_str())))
             .kill_on_drop(true)
             .spawn()?;
@@ -279,6 +292,34 @@ pub struct HostSupervisor {
     restart: Notify,
     /// Set once the supervised process is gone after a shutdown request.
     terminated: tokio::sync::watch::Sender<bool>,
+    /// The host's socket has accepted a connection at least once: a later exit is a crash, never
+    /// a refusal to start.
+    ever_ready: AtomicBool,
+    /// Remembered guard refusals (see [`Refusals`]).
+    refusals: std::sync::Mutex<Refusals>,
+}
+
+/// A host that refused to start (its guard found a `meerschaum` package this program cannot work
+/// with, `python_guard::REFUSED_EXIT_CODE`) is not launched again for every proxied request: the
+/// refusal is remembered and the host is asked again after a delay that doubles, or at once when
+/// the plugin manifest changes (or [`HostSupervisor::clear_refusal`]).
+#[derive(Debug, Clone, Copy)]
+struct Refusals {
+    /// No launch before this instant.
+    until: Option<std::time::Instant>,
+    /// The next delay.
+    delay: Duration,
+}
+
+/// The first delay after a refusal, and the longest.
+const REFUSAL_DELAY_INITIAL: Duration = Duration::from_secs(10);
+const REFUSAL_DELAY_MAX: Duration = Duration::from_secs(300);
+
+impl Refusals {
+    const NONE: Refusals = Refusals {
+        until: None,
+        delay: REFUSAL_DELAY_INITIAL,
+    };
 }
 
 impl std::fmt::Debug for HostSupervisor {
@@ -340,6 +381,8 @@ impl HostSupervisor {
             manifest: std::sync::Mutex::new(manifest.clone()),
             restart: Notify::new(),
             terminated: tokio::sync::watch::channel(false).0,
+            ever_ready: AtomicBool::new(false),
+            refusals: std::sync::Mutex::new(Refusals::NONE),
         })
     }
 
@@ -368,10 +411,43 @@ impl HostSupervisor {
             *current = manifest.clone();
         }
         self.needed.store(manifest.needs_host(), Ordering::SeqCst);
+        // A changed plugin set may come with a fixed install: ask the host again.
+        self.clear_refusal();
         if *self.started.lock().await {
             self.restart.notify_one();
         }
         true
+    }
+
+    /// Forget a remembered refusal: the next request starts the host again.
+    pub fn clear_refusal(&self) {
+        *self
+            .refusals
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Refusals::NONE;
+    }
+
+    /// Remember a refusal; the delay before the next attempt (doubled each time).
+    fn remember_refusal(&self) -> Duration {
+        let mut r = self
+            .refusals
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let delay = r.delay;
+        r.until = Some(std::time::Instant::now() + delay);
+        r.delay = (delay * 2).min(REFUSAL_DELAY_MAX);
+        delay
+    }
+
+    /// How long until a refused host may be launched again (`None`: it may).
+    fn refusal_remaining(&self) -> Option<Duration> {
+        let r = self
+            .refusals
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        r.until
+            .and_then(|u| u.checked_duration_since(std::time::Instant::now()))
+            .filter(|d| !d.is_zero())
     }
 
     /// The host's socket.
@@ -390,6 +466,7 @@ impl HostSupervisor {
             private_dir(parent)?;
         }
         let proc = self.launcher.launch(&self.socket).await?;
+        self.terminated.send_replace(false);
         self.starts.fetch_add(1, Ordering::SeqCst);
         Ok(proc)
     }
@@ -405,13 +482,32 @@ impl HostSupervisor {
         {
             let mut started = self.started.lock().await;
             if !*started {
+                if let Some(wait) = self.refusal_remaining() {
+                    return Err(std::io::Error::other(format!(
+                        "the API host refused to start (see the earlier message); not asking again for {}s, or until the plugins change",
+                        wait.as_secs().max(1)
+                    )));
+                }
                 let proc = self.launch_once().await?;
                 *started = true;
                 let me = self.clone();
                 tokio::spawn(async move { me.supervise(proc).await });
             }
         }
-        socket_ready(&self.socket, self.opts.ready_timeout).await
+        // A host that refused to start (or died for good) ends the wait at once.
+        let mut terminated = self.terminated.subscribe();
+        tokio::select! {
+            ready = async {
+                let ready = socket_ready(&self.socket, self.opts.ready_timeout).await;
+                if ready.is_ok() {
+                    self.ever_ready.store(true, Ordering::SeqCst);
+                }
+                ready
+            } => ready,
+            _ = terminated.wait_for(|done| *done) => Err(std::io::Error::other(
+                "the API host was not started (see the message above)",
+            )),
+        }
     }
 
     async fn supervise(self: Arc<Self>, mut proc: Box<dyn HostProcess>) {
@@ -445,6 +541,22 @@ impl HostSupervisor {
                     }
                     tracing::info!("The plugin manifest changed; restarting the API host.");
                     backoff = self.opts.backoff_initial;
+                }
+                Event::Exited(Ok(Some(meerschaum_core::python_guard::REFUSED_EXIT_CODE)))
+                    if !self.ever_ready.load(Ordering::SeqCst) =>
+                {
+                    // The host's guard said why on stderr (a `meerschaum` this program cannot
+                    // work with, before the socket was ever ready): restarting would only print
+                    // it again, and so would a launch per request. Remember it.
+                    let delay = self.remember_refusal();
+                    tracing::error!(
+                        "The API host was not started: the Python package `meerschaum` it would import does not fit this program (see the message above); not restarting it, and not asking again for {}s or until the plugins change.",
+                        delay.as_secs()
+                    );
+                    *self.started.lock().await = false;
+                    let _ = std::fs::remove_file(&self.socket);
+                    self.terminated.send_replace(true);
+                    return;
                 }
                 Event::Exited(status) => {
                     tracing::warn!("The API host exited ({status:?}); restarting in {backoff:?}.");
@@ -482,6 +594,7 @@ impl HostSupervisor {
                 .await
                 .is_ok()
             {
+                self.ever_ready.store(true, Ordering::SeqCst);
                 backoff = self.opts.backoff_initial;
             }
         }

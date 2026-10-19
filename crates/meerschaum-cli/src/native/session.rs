@@ -139,6 +139,9 @@ struct ManifestState {
     native_error: Option<String>,
     merged: Option<Arc<Manifest>>,
     validated: bool,
+    /// Read-only mode (`doctor`): the manifests are whatever the last command cached on disk,
+    /// never validated, rebuilt or imported.
+    cached_only: bool,
 }
 
 impl Default for Session {
@@ -308,6 +311,21 @@ impl Session {
         Ok(state.merged.clone().expect("validated manifest"))
     }
 
+    /// Switch read-only manifest mode on or off (`doctor`): on, [`Session::manifest`] returns the
+    /// manifests the last command cached on disk and never validates, rebuilds or imports
+    /// anything; either way the manifest state is dropped, so the next call starts afresh.
+    pub fn set_cached_manifest_only(&self, on: bool) {
+        *self.manifests.lock().expect("manifests") = ManifestState {
+            cached_only: on,
+            ..ManifestState::default()
+        };
+    }
+
+    /// Whether [`Session::set_cached_manifest_only`] is on.
+    pub fn cached_manifest_only(&self) -> bool {
+        self.manifests.lock().expect("manifests").cached_only
+    }
+
     /// Re-arm the next [`Session::manifest`] call to validate the plugin trees again (one
     /// fingerprint walk). Cheap; the shell calls it after every command.
     pub fn invalidate_manifest(&self) {
@@ -323,6 +341,8 @@ impl Session {
     /// `reload`: rebuild the Python manifest unconditionally in a fresh worker, re-open the
     /// native plugins and recycle the worker pool.
     pub fn reload_plugins(&self, config: &Config) -> Result<Arc<Manifest>, ActionError> {
+        // A refused interpreter (a stale `meerschaum`) may have been fixed: ask it again.
+        meerschaum_worker::worker::clear_refusals();
         let mut state = self.manifests.lock().expect("manifests");
         self.validate_manifests(&mut state, config, true)?;
         Ok(state.merged.clone().expect("validated manifest"))
@@ -335,6 +355,20 @@ impl Session {
         force: bool,
     ) -> Result<(), ActionError> {
         if !force && state.validated && state.merged.is_some() {
+            return Ok(());
+        }
+        if state.cached_only {
+            let paths = config.paths();
+            let python = Manifest::read(&manifest_path(&paths.root_dir))
+                .ok()
+                .flatten()
+                .unwrap_or_default();
+            state.python = Some(Arc::new(python));
+            state.natives = Some(Arc::new(NativePlugins::empty()));
+            state.merged = Some(Arc::new(crate::completions::cached_manifest(
+                &paths.root_dir,
+            )));
+            state.validated = true;
             return Ok(());
         }
         if !self.worker_enabled() {
@@ -566,39 +600,7 @@ impl Session {
 
     /// A `sql:<label>` connector from the config registry.
     pub fn sql_connector(&self, label: &str, config: &Config) -> Result<SqlConnector, ActionError> {
-        let mut attrs = connector_attributes(config, "sql", label);
-        // PARITY: SQLite / GeoPackage connectors do not inherit `sql:default`, and
-        // `{SQLITE_DB_PATH}` (or a missing database for `sql:local`) is the root's SQLite file
-        // (`SQLConnector.__init__`, `create_engine`).
-        let flavor = attrs.get("flavor").map(pyfmt::py_str).unwrap_or_default();
-        if matches!(flavor.as_str(), "sqlite" | "geopackage") {
-            attrs = config
-                .get(&["meerschaum", "connectors", "sql", label])
-                .map(|v| v.to_map())
-                .unwrap_or_default();
-            let db = attrs.get("database").map(pyfmt::py_str);
-            let is_placeholder = db.as_deref() == Some("{SQLITE_DB_PATH}");
-            if is_placeholder || (label == "local" && db.is_none()) {
-                let path = config.paths().path("SQLITE_DB_PATH");
-                if let Some(parent) = path.parent() {
-                    let _ = std::fs::create_dir_all(parent);
-                }
-                attrs.insert(
-                    "database".into(),
-                    Value::Str(path.to_string_lossy().into_owned()),
-                );
-            }
-        }
-        if attrs.is_empty() {
-            // PARITY: `SQLConnector.__init__` raises when neither `flavor` nor `uri` is set.
-            return Err(ActionError::new(
-                "ValueError",
-                format!("    Missing flavor. Provide flavor as a key for 'sql:{label}'."),
-            ));
-        }
-        let ca = sql_attributes(label, &attrs)?;
-        let spec = ConnectionSpec::from_attributes(&ca)
-            .map_err(|e| ActionError::new("ValueError", e.to_string()))?;
+        let spec = sql_spec(label, config)?;
         let settings = InstanceSettings::from_config(spec.flavor, config);
         let conn = self
             .block_on(SqlConnector::connect_with(label, spec, settings))
@@ -608,6 +610,42 @@ impl Session {
         conn.set_instance_provider(Arc::new(ConfiguredSqlProvider::new(config)));
         Ok(conn)
     }
+}
+
+/// The connection spec of `sql:<label>` from the config registry, without connecting.
+pub fn sql_spec(label: &str, config: &Config) -> Result<ConnectionSpec, ActionError> {
+    let mut attrs = connector_attributes(config, "sql", label);
+    // PARITY: SQLite / GeoPackage connectors do not inherit `sql:default`, and
+    // `{SQLITE_DB_PATH}` (or a missing database for `sql:local`) is the root's SQLite file
+    // (`SQLConnector.__init__`, `create_engine`).
+    let flavor = attrs.get("flavor").map(pyfmt::py_str).unwrap_or_default();
+    if matches!(flavor.as_str(), "sqlite" | "geopackage") {
+        attrs = config
+            .get(&["meerschaum", "connectors", "sql", label])
+            .map(|v| v.to_map())
+            .unwrap_or_default();
+        let db = attrs.get("database").map(pyfmt::py_str);
+        let is_placeholder = db.as_deref() == Some("{SQLITE_DB_PATH}");
+        if is_placeholder || (label == "local" && db.is_none()) {
+            let path = config.paths().path("SQLITE_DB_PATH");
+            if let Some(parent) = path.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            attrs.insert(
+                "database".into(),
+                Value::Str(path.to_string_lossy().into_owned()),
+            );
+        }
+    }
+    if attrs.is_empty() {
+        // PARITY: `SQLConnector.__init__` raises when neither `flavor` nor `uri` is set.
+        return Err(ActionError::new(
+            "ValueError",
+            format!("    Missing flavor. Provide flavor as a key for 'sql:{label}'."),
+        ));
+    }
+    let ca = sql_attributes(label, &attrs)?;
+    ConnectionSpec::from_attributes(&ca).map_err(|e| ActionError::new("ValueError", e.to_string()))
 }
 
 /// `type:label` with the default label filled in (the session's map key).

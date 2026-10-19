@@ -63,6 +63,12 @@ pub fn signals_owned() -> bool {
     OWN_SIGNALS.load(Ordering::SeqCst)
 }
 
+/// Give the signals back after [`own_signals`], for an action that owns them only while it
+/// runs (`upgrade postgres` and friends: a shell goes on afterwards).
+pub fn disown_signals() {
+    OWN_SIGNALS.store(false, Ordering::SeqCst);
+}
+
 /// Mark this process as embedding the dispatcher (the Python extension). The process-wide
 /// SIGINT / SIGTERM handler of [`install_stop_handler`], which ends the process on a second
 /// signal, belongs to the `mrsm` binary: an embedding host is never given one, and sets

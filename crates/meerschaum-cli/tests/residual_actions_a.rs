@@ -451,7 +451,9 @@ fn an_api_connector_without_credentials_warns_to_login_once() {
 
 #[test]
 fn stack_prints_the_generated_compose_project() {
-    let home = Home::new();
+    // No `docker` on `PATH`: a fresh root's project is `mrsm`, and on a developer's machine that
+    // is a real stack, so the test never hands the generated project to the real `docker compose`.
+    let home = Home::new().with_env("PATH", "/nonexistent");
     let out = home.run(&["stack", "--help"]);
     assert_eq!(out.code, 0);
     assert!(

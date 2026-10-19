@@ -290,6 +290,30 @@ async fn plugin_sync_callbacks_match_v4() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn raw_worker_manifest_preserves_current_schema_version() {
+    require_python!();
+    let env = TestEnv::new();
+    let pool = env.pool(1);
+    let reply = pool
+        .call(
+            "build_manifest",
+            meerschaum_worker::protocol::Msg::new(),
+            Vec::new(),
+            CallOptions::default(),
+            None,
+        )
+        .await
+        .unwrap();
+    // Inspect the raw wire reply before manifest::build_manifest can stamp its cache version.
+    let value = meerschaum_worker::protocol::wire_to_json(&reply.value);
+    assert_eq!(
+        value["schema_version"],
+        meerschaum_worker::manifest::MANIFEST_SCHEMA_VERSION
+    );
+    pool.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn manifest_is_built_cached_and_rebuilt_when_stale() {
     require_python!();
     let env = TestEnv::new();

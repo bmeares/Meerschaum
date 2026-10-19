@@ -21,6 +21,7 @@
 use indexmap::IndexMap;
 use meerschaum_core::SuccessTuple;
 use meerschaum_core::dtypes::{Srid, are_dtypes_equal, get_geometry_type_srid};
+use meerschaum_kernel::Frame;
 
 use crate::driver::{SqlParam, SqlValue};
 use crate::flavor::Flavor;
@@ -355,11 +356,19 @@ impl SqlConnector {
     }
 
     /// `_init_geopackage_pipe(df, pipe)`: register a new pipe table's geometry column in the
-    /// GeoPackage metadata. `dtypes` are the table's columns and dtypes in column order.
+    /// GeoPackage metadata. `dtypes` are the table's columns and dtypes in column order; `df` is
+    /// the frame the table is created from.
+    ///
+    /// The spatial reference is the CRS of `df`'s geometry column, else the dtype's SRID.
+    // PARITY: v4 writes the empty frame with `df.head(0).to_file(..., driver='GPKG')`
+    // (meerschaum/connectors/sql/_pipes.py, `_init_geopackage_pipe`), so GDAL registers the
+    // GeoDataFrame's CRS: a bare `geometry` dtype synced from a GeoDataFrame in EPSG:4326 gets
+    // `srs_id` 4326, not the undefined 99999.
     pub async fn init_geopackage_pipe(
         &self,
         sp: &SqlPipe,
         dtypes: &IndexMap<String, String>,
+        df: &Frame,
     ) -> SuccessTuple {
         if !self.is_geopackage() {
             return SuccessTuple::ok("Success");
@@ -372,8 +381,13 @@ impl SqlConnector {
         if !self.ensure_geopackage_tables().await {
             return SuccessTuple::fail(format!("Failed to init table '{table}'."));
         }
-        let (gtype, srid) = get_geometry_type_srid(&typ, "geometry", Srid::Code(0))
+        let (gtype, dtype_srid) = get_geometry_type_srid(&typ, "geometry", Srid::Code(0))
             .unwrap_or_else(|_| ("geometry".to_string(), Srid::Code(0)));
+        let srid = df
+            .column(&col)
+            .and_then(|c| c.crs.clone())
+            .filter(Srid::truthy)
+            .unwrap_or(dtype_srid);
         let srs = srs_row_for(&srid);
         if !self.insert_srs_row(&srs).await {
             return SuccessTuple::fail(format!("Failed to init table '{table}'."));

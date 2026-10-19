@@ -7,7 +7,7 @@
 entry points of the Rust Syncing Engine, over a three-level `{{ Pipe() }}` chain on SQLite.
 
 The engine is Rust-only (D14), so these need the built extension (`scripts/rust/build_py.sh`).
-Everything is synthetic and runs on the SQLite test instance (the test root's data directory).
+Everything is synthetic and runs on a SQLite file of its own per worker (`_conn()`).
 """
 
 import json
@@ -19,7 +19,7 @@ from meerschaum import _core
 from meerschaum.core.Pipe._sync import SyncResult
 
 from tests._pipeline_diag import why
-from tests.connectors import conns
+from tests._worker_sqlite import worker_sqlite
 
 pytestmark = pytest.mark.skipif(
     _core.load() is None,
@@ -28,6 +28,15 @@ pytestmark = pytest.mark.skipif(
 
 SOURCE_TABLE = 'w8_pipeline_readings'
 TAG = 'w8-pipeline'
+
+
+def _conn():
+    """
+    The SQLite instance of these tests: a file of their own per `pytest -n` worker
+    (`tests/_worker_sqlite.py`), not the shared `sql:test_sqlite`, whose other writers made a
+    chain sync fail with `database is locked` under `pytest -n 8`.
+    """
+    return worker_sqlite('w8_pipeline')
 
 
 def _insert(conn, rows):
@@ -54,7 +63,7 @@ def chain():
 
 
 def _build_chain():
-    conn = conns['sqlite']
+    conn = _conn()
     inst = str(conn)
     conn.exec_queries([f"DROP TABLE IF EXISTS {SOURCE_TABLE}"], silent=True)
     conn.exec_queries(
@@ -152,7 +161,7 @@ def test_second_run_skips_caught_up_children(chain):
     assert _rowcounts(raw, clean, daily) == [3, 3, 3]
 
     ### New source rows flow all the way down.
-    _insert(conns['sqlite'], [('2024-01-01 03:00:00', 'b', 4)])
+    _insert(_conn(), [('2024-01-01 03:00:00', 'b', 4)])
     run = raw.sync(children=True)
     assert run.success, _why(run)
     assert _rowcounts(raw, clean, daily) == [4, 4, 4]
@@ -170,7 +179,7 @@ def test_depth_limits(chain):
     raw, clean, daily = chain
     run = raw.sync(children=True)
     assert run.success, _why(run)
-    _insert(conns['sqlite'], [('2024-01-01 03:00:00', 'b', 4)])
+    _insert(_conn(), [('2024-01-01 03:00:00', 'b', 4)])
 
     ### `children=1` stops at the direct child.
     run = raw.sync(children=1)
@@ -180,7 +189,7 @@ def test_depth_limits(chain):
     assert _rowcounts(raw, clean, daily) == [4, 4, 3]
 
     ### `parents=1` is the direct parent only.
-    _insert(conns['sqlite'], [('2024-01-01 04:00:00', 'a', 5)])
+    _insert(_conn(), [('2024-01-01 04:00:00', 'a', 5)])
     run = daily.sync(parents=1)
     assert run.success, _why(run)
     names = [o['pipe_ref'].split('|')[2] for o in run.outcomes]
@@ -244,7 +253,7 @@ def test_pipeline_sync_and_plan_execute(chain):
     assert runs[0]['status'] == 'succeeded'
     assert pipeline.get_events(run.run_id)
 
-    _insert(conns['sqlite'], [('2024-01-01 05:00:00', 'b', 6)])
+    _insert(_conn(), [('2024-01-01 05:00:00', 'b', 6)])
     plan = mrsm.Pipeline(raw, children=True).plan()
     second = plan.execute()
     assert second.success, _why(second)
@@ -254,12 +263,12 @@ def test_pipeline_sync_and_plan_execute(chain):
 
 def test_pipeline_from_tags_and_keys(chain):
     raw, clean, daily = chain
-    pipeline = mrsm.Pipeline(tags=[TAG], instance=conns['sqlite'])
+    pipeline = mrsm.Pipeline(tags=[TAG], instance=_conn())
     assert sorted(p.metric_key for p in pipeline.pipes) == ['w8_clean', 'w8_daily', 'w8_raw']
     by_keys = mrsm.Pipeline(
         [(raw.connector_keys, 'w8_clean')],
         parents=True,
-        instance=conns['sqlite'],
+        instance=_conn(),
     )
     assert [p.metric_key for p in by_keys.pipes] == ['w8_raw', 'w8_clean']
     run = pipeline.sync()
@@ -279,3 +288,48 @@ def test_run_result_pickles_as_a_success_tuple(chain):
     raw, _, _ = chain
     run = raw.sync(children=1)
     assert pickle.loads(pickle.dumps(run)) == (run.success, run.message)
+
+
+def test_cli_plan_is_pipeline_plan_expected(chain):
+    """
+    `mrsm plan pipes --nopretty` prints `Pipeline.plan(expected=True)`: provisional nodes
+    re-planned as the executor will re-plan them once their parents have synced. The default
+    `Pipeline.plan()` stays the static plan.
+    """
+    import os
+    import subprocess
+    import sys
+    raw, clean, daily = chain
+    pipeline = mrsm.Pipeline(daily, parents=True)
+    first = pipeline.sync(yes=True)
+    assert first.success, _why(first)
+    ### A late reading before `raw`'s watermark: `raw` will write a ledger entry for its grid cell.
+    _insert(_conn(), [('2024-01-01 01:30:00', 'c', 4)])
+
+    static = pipeline.plan()
+    expected = pipeline.plan(expected=True)
+    assert static.node(clean).action == 'skip'
+    assert expected.node(clean).action == 'backfill'
+    assert expected.node(clean).raw['provisional'] is True
+
+    conn = _conn()
+    inst = str(conn)
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if key not in ('MRSM_CONFIG', 'MRSM_PATCH')
+    }
+    env[f'MRSM_SQL_{conn.label.upper()}'] = f"sqlite:///{conn.database}"
+    result = subprocess.run(
+        [
+            sys.executable, '-m', 'meerschaum', 'plan', 'pipes',
+            '-c', inst, '-m', 'w8_daily', '--parents', '-i', inst, '--nopretty',
+        ],
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=300,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    cli = json.loads(result.stdout.strip().splitlines()[-1])
+    assert cli['nodes'] == expected.raw['plan']['nodes']

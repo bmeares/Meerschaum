@@ -269,6 +269,9 @@ pub struct Runtime<'a> {
     /// Where waiting feedback (spinners, [`crate::format::progress`]) is drawn. Only the process
     /// runtime turns it on (stderr is a terminal); tests and piped output never see it.
     pub progress: crate::format::progress::ProgressSink,
+    /// Startup owns read-only manifest mode until the first doctor step (or an early return).
+    /// The value records whether that startup created the config registry.
+    doctor_startup: Option<bool>,
 }
 
 fn no_vars() -> Vec<(String, String)> {
@@ -299,6 +302,7 @@ impl<'a> Runtime<'a> {
             native: None,
             live: std::io::IsTerminal::is_terminal(&std::io::stdout()),
             progress: crate::format::progress::ProgressSink::stderr_if_tty(),
+            doctor_startup: None,
         }
     }
 
@@ -325,16 +329,30 @@ impl<'a> Runtime<'a> {
             native: None,
             live: false,
             progress: crate::format::progress::ProgressSink::Off,
+            doctor_startup: None,
         }
     }
 
     /// The config registry.
     pub fn config(&mut self) -> &Config {
-        self.config.get_or_insert_with(|| {
-            Config::new(ConfigOptions::from_process()).unwrap_or_else(|e| {
+        self.config.get_or_insert_with(|| Self::build_config(true))
+    }
+
+    /// The config registry, created (when it does not exist yet) so that it never writes a file
+    /// (`write_missing` defaults, `formatting.json`): what `doctor` promises. A registry that
+    /// already exists is returned as it is.
+    pub fn config_read_only(&mut self) -> &Config {
+        self.config.get_or_insert_with(|| Self::build_config(false))
+    }
+
+    fn build_config(allow_writes: bool) -> Config {
+        {
+            let mut options = ConfigOptions::from_process();
+            options.allow_writes = allow_writes;
+            Config::new(options).unwrap_or_else(|e| {
                 use meerschaum_core::config::ConfigError;
                 match &e {
-                    ConfigError::DefaultRootRefused { .. } => {
+                    ConfigError::DefaultRootRefused { .. } | ConfigError::EmptyPath { .. } => {
                         eprintln!("{e}");
                         std::process::exit(1);
                     }
@@ -360,7 +378,7 @@ impl<'a> Runtime<'a> {
                 opts.allow_writes = false;
                 Config::new(opts).expect("config registry")
             })
-        })
+        }
     }
 
     /// The formatting settings.
@@ -405,6 +423,27 @@ fn contains(sysargs: &[String], flag: &str) -> bool {
 
 /// `meerschaum.__main__.main`: returns the process exit code.
 pub fn main(sysargs: &[String], rt: &mut Runtime<'_>) -> i32 {
+    // `doctor` is read-only: from the first config read on, nothing is written and the plugin
+    // manifest is the cached one (never validated or rebuilt, which imports plugin code).
+    if starts_with_doctor(sysargs, &rt.dates, None).unwrap_or(true) {
+        let config_created = rt.config.is_none();
+        rt.config_read_only();
+        let session = native::session(rt);
+        if !session.cached_manifest_only() {
+            session.set_cached_manifest_only(true);
+            rt.doctor_startup = Some(config_created);
+        }
+    }
+    let code = main_inner(sysargs, rt);
+    // Parse errors, help, version and schema output can return before a doctor step consumes
+    // startup ownership. Always release it, including when this runtime is reused by a host.
+    if let Some(config_created) = rt.doctor_startup.take() {
+        end_doctor_mode(rt, config_created);
+    }
+    code
+}
+
+fn main_inner(sysargs: &[String], rt: &mut Runtime<'_>) -> i32 {
     let progress = crate::format::progress::Progress::start_flags(
         rt,
         contains(sysargs, "--nopretty"),
@@ -515,12 +554,43 @@ pub fn entry_with_patch(sysargs: &[String], patch: &ArgsMap, rt: &mut Runtime<'_
     }
 }
 
+/// Whether the first effective dispatched step is `doctor`, after chaining, pipeline rewriting
+/// and argument patches. SDK hosts use this before loading plugins; the step itself owns the
+/// read-only mode, so later chained actions retain normal plugin discovery.
+/// A parsing error means no action can execute and also needs no eager plugin loading.
+pub fn starts_with_doctor(
+    sysargs: &[String],
+    dates: &DateContext,
+    patch_args: Option<&ArgsMap>,
+) -> Result<bool, PyException> {
+    let mut doctor = false;
+    // Reuse the real parser, stopping before any action executes or later steps are parsed.
+    run_chain_inner(sysargs, dates, patch_args, false, |args| {
+        doctor = action_words(&args).first().is_some_and(|a| a == "doctor");
+        SuccessTuple::fail("")
+    })?;
+    Ok(doctor)
+}
+
 /// `entry_without_daemon` without the shell's executor keys and the systemd result file:
 /// split `:` pipeline flags and `+` chains, parse each step and run `execute` until one fails.
 pub fn run_chain<F>(
     sysargs: &[String],
     dates: &DateContext,
     patch_args: Option<&ArgsMap>,
+    execute: F,
+) -> Result<SuccessTuple, PyException>
+where
+    F: FnMut(ArgsMap) -> SuccessTuple,
+{
+    run_chain_inner(sysargs, dates, patch_args, true, execute)
+}
+
+fn run_chain_inner<F>(
+    sysargs: &[String],
+    dates: &DateContext,
+    patch_args: Option<&ArgsMap>,
+    validate_arguments: bool,
     mut execute: F,
 ) -> Result<SuccessTuple, PyException>
 where
@@ -559,7 +629,7 @@ where
                 args.insert(k.clone(), v.clone());
             }
         }
-        if let Some(PyValue::Exception(e)) = args.get(keys::FAILURE_KEY) {
+        if validate_arguments && let Some(PyValue::Exception(e)) = args.get(keys::FAILURE_KEY) {
             let text = args.get("text").map(PyValue::py_str).unwrap_or_default();
             if !text.starts_with("show arguments") {
                 let mut msg = "Invalid arguments:".to_string();
@@ -694,8 +764,38 @@ fn action_words(args: &ArgsMap) -> Vec<String> {
         .unwrap_or_default()
 }
 
+fn end_doctor_mode(rt: &mut Runtime<'_>, config_created: bool) {
+    native::session(rt).set_cached_manifest_only(false);
+    if config_created {
+        rt.config().with_state(|s| s.set_allow_writes(true));
+    }
+}
+
 /// `entry_with_args(**args)`: resolve the action function and run it.
-pub fn entry_with_args(mut args: ArgsMap, rt: &mut Runtime<'_>, depth: usize) -> SuccessTuple {
+///
+/// `doctor` runs with the cached plugin manifest and a config that never writes (see [`main`]).
+/// Both are undone when its step ends, whoever started them: the manifest state is dropped (the
+/// next step validates the plugins again) and a registry the read-only start created is made
+/// writable again, as [`Runtime::config`] would have built it.
+pub fn entry_with_args(args: ArgsMap, rt: &mut Runtime<'_>, depth: usize) -> SuccessTuple {
+    if !action_words(&args).first().is_some_and(|a| a == "doctor") {
+        return entry_with_args_inner(args, rt, depth);
+    }
+    let session = native::session(rt);
+    let startup = rt.doctor_startup.take();
+    if session.cached_manifest_only() && startup.is_none() {
+        // An outer caller set the mode up and owns it.
+        return entry_with_args_inner(args, rt, depth);
+    }
+    let config_created = startup.unwrap_or_else(|| rt.config.is_none());
+    rt.config_read_only();
+    session.set_cached_manifest_only(true);
+    let result = entry_with_args_inner(args, rt, depth);
+    end_doctor_mode(rt, config_created);
+    result
+}
+
+fn entry_with_args_inner(mut args: ArgsMap, rt: &mut Runtime<'_>, depth: usize) -> SuccessTuple {
     let sysargs: Vec<String> = args
         .get("sysargs")
         .and_then(PyValue::as_list)
@@ -1085,6 +1185,52 @@ fn timed_pipeline_step(
     Ok(result)
 }
 
+/// The first argument of a child that runs an in-process command of Compose (v4's
+/// `run_mrsm_command(..., _subprocess=False)`, which calls `entry(sysargs)` and returns the
+/// result without printing it): `mrsm __mrsm_entry_child__ <result path> <sysargs...>`. It is
+/// honored only when [`ENTRY_CHILD_ENV`] names the same path (the compose runner sets both).
+pub const ENTRY_CHILD_ARG: &str = "__mrsm_entry_child__";
+
+/// The environment marker of an [`ENTRY_CHILD_ARG`] child: the result path. The process entry
+/// takes it out of the environment before running anything (`run::take_entry_child_marker`), so
+/// the command's own children (jobs, workers) never see it.
+pub const ENTRY_CHILD_ENV: &str = "MRSM__ENTRY_CHILD";
+
+/// The child of [`ENTRY_CHILD_ARG`]: run `entry(sysargs)`, write the result as
+/// `[success, message]` JSON to the result path (a new file, 0600 on Unix, in the private
+/// directory the parent created) and print nothing of it. The exit code is 0 on success, else 1.
+pub fn entry_child(args: &[String], rt: &mut Runtime<'_>) -> i32 {
+    let Some((path, sysargs)) = args.split_first() else {
+        return 1;
+    };
+    if let Err(e) = crate::python::manifest(rt) {
+        rt.eprint(&format!("Unable to load plugin manifest: {}\n", e.message));
+    }
+    let result = entry(sysargs, rt);
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    if let Ok(mut file) = options.open(path) {
+        let _ = file.write_all(fence_json(&result).as_bytes());
+    }
+    if result.success { 0 } else { 1 }
+}
+
+/// Read the result an [`entry_child`] wrote to `path` (`None` when it wrote none).
+pub fn read_entry_child_result(path: &std::path::Path) -> Option<SuccessTuple> {
+    let text = std::fs::read_to_string(path).ok()?;
+    let value: serde_json::Value = serde_json::from_str(&text).ok()?;
+    let items = value.as_array()?;
+    Some(SuccessTuple {
+        success: items.first()?.as_bool()?,
+        message: items.get(1)?.as_str()?.to_string(),
+    })
+}
+
 /// The child of [`timed_pipeline_step`]: run `line` with the patch arguments and print the result
 /// between the fences.
 pub fn pipeline_child(args: &[String], rt: &mut Runtime<'_>) -> i32 {
@@ -1227,4 +1373,115 @@ pub fn parse_version(sysargs: &[String], rt: &mut Runtime<'_>) {
     } else {
         writeln!(rt.out, "Meerschaum v{version}")
     };
+}
+
+#[cfg(test)]
+mod doctor_entry_tests {
+    use super::*;
+
+    #[test]
+    fn main_doctor_early_returns_restore_only_owned_startup_mode() {
+        let scratch = tempfile::tempdir().unwrap();
+        let make_config = || {
+            let mut options = ConfigOptions::with_env(vec![
+                ("MRSM_ROOT_DIR".into(), scratch.path().display().to_string()),
+                (
+                    "MRSM_CONFIG".into(),
+                    serde_json::json!({"meerschaum": {"connectors": {"sql": {"main": {
+                        "flavor": "sqlite", "database": scratch.path().join("fallback.sqlite")
+                    }}}}})
+                    .to_string(),
+                ),
+            ]);
+            options.allow_writes = false;
+            Config::new(options).unwrap()
+        };
+        let mut output = Vec::new();
+        let mut rt = Runtime::new(DateContext::system(), 80, &mut output, |_| None);
+        rt.config = Some(make_config());
+        let session = native::Session::new();
+        session.set_python_worker(false);
+        rt.native = Some(session.clone());
+        let words = |items: &[&str]| items.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        for args in [
+            words(&["doctor", "--port", "not-a-number"]),
+            words(&["doctor", "--chunk-days", "9223372036854775807"]),
+            words(&["doctor", "--help"]),
+            words(&["doctor", "--version"]),
+            words(&["doctor", PRINT_ARG_SCHEMA_FLAG]),
+        ] {
+            main(&args, &mut rt);
+            assert!(!session.cached_manifest_only(), "{args:?}");
+            assert!(rt.doctor_startup.is_none(), "{args:?}");
+            assert!(!rt.config().with_state(|s| s.allow_writes()), "{args:?}");
+            assert_eq!(main(&words(&["show", "version"]), &mut rt), 0);
+            assert!(!session.cached_manifest_only());
+        }
+
+        // A host-owned cached-only mode remains owned by that host. Another runtime's
+        // startup marker cannot consume it or change the caller's read-only config.
+        session.set_cached_manifest_only(true);
+        let mut other_output = Vec::new();
+        let mut other = Runtime::new(DateContext::system(), 80, &mut other_output, |_| None);
+        other.config = Some(make_config());
+        let other_session = native::Session::new();
+        other_session.set_python_worker(false);
+        other_session.set_cached_manifest_only(true);
+        other.native = Some(other_session.clone());
+        rt.doctor_startup = Some(false);
+        main(&words(&["doctor", "--help"]), &mut other);
+        assert!(other_session.cached_manifest_only());
+        assert!(session.cached_manifest_only());
+        assert_eq!(rt.doctor_startup, Some(false));
+        assert!(!rt.config().with_state(|s| s.allow_writes()));
+        assert!(!other.config().with_state(|s| s.allow_writes()));
+        let config_created = rt.doctor_startup.take().unwrap();
+        end_doctor_mode(&mut rt, config_created);
+    }
+
+    #[test]
+    fn first_effective_doctor_respects_chains_patches_and_pipelines() {
+        let dates = DateContext::system();
+        let words = |items: &[&str]| items.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        for args in [
+            words(&["doctor", "--nopretty"]),
+            words(&["+", "doctor", "+", "show", "version"]),
+            words(&["doctor", "--not-a-valid-flag"]),
+            words(&["doctor", "--port", "not-a-number"]),
+        ] {
+            assert!(starts_with_doctor(&args, &dates, None).unwrap(), "{args:?}");
+        }
+        for args in [
+            words(&["show", "version", "+", "doctor"]),
+            words(&["doctor", ":", "--name", "diagnostic"]),
+            words(&["start", "job", "diagnostic", "+", "doctor"]),
+        ] {
+            assert!(
+                !starts_with_doctor(&args, &dates, None).unwrap(),
+                "{args:?}"
+            );
+        }
+        assert!(
+            starts_with_doctor(
+                &words(&["doctor", "--chunk-days", "9223372036854775807"]),
+                &dates,
+                None
+            )
+            .is_err()
+        );
+        let malformed = parse_arguments(&words(&["doctor", "--port", "not-a-number"]), &dates)
+            .expect("invalid typed arguments are captured in the argument map");
+        assert!(matches!(
+            malformed.get(keys::FAILURE_KEY),
+            Some(PyValue::Exception(_))
+        ));
+        let mut patch = ArgsMap::new();
+        patch.insert("action".into(), PyValue::str_list(&words(&["doctor"])));
+        assert!(starts_with_doctor(&words(&["show", "version"]), &dates, Some(&patch)).unwrap());
+        patch.insert(
+            "action".into(),
+            PyValue::str_list(&words(&["show", "version"])),
+        );
+        assert!(!starts_with_doctor(&words(&["doctor"]), &dates, Some(&patch)).unwrap());
+    }
 }

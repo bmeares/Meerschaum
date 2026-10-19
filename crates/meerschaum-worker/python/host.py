@@ -6,10 +6,15 @@ CLI-only dispatch, output capture, and completion without editing the SDK tree.
 import contextlib
 import io
 import json
+import os
 import sys
 
 # Worker diagnostics must never share an MCP host's protocol stdout.
 sys.stdout = sys.stderr
+
+
+# `_mrsm_guard()` (`meerschaum-core/src/python_guard.py`) runs before this file, in the same
+# program: it refuses a `meerschaum` package this program cannot work with, without importing it.
 
 from meerschaum.worker import main
 from meerschaum.worker import _ops
@@ -98,7 +103,7 @@ original_manifest = _ops.HANDLERS['build_manifest']
 def manifest(conn, call_id, args, frames):
     value, result_frames = original_manifest(conn, call_id, args, frames)
     from meerschaum.actions import get_completer
-    value['schema_version'] = 3
+    # The SDK builder owns the manifest version; enrichment must not downgrade it.
     for plugin in value.get('plugins', {}).values():
         for action in plugin.get('actions', []):
             action['has_completer'] = get_completer(action['name']) is not None

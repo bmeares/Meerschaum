@@ -331,6 +331,9 @@ class SQLConnector(InstanceConnector):
         """
         import os
         import threading
+        if self.flavor == 'duckdb':
+            from ._duckdb_transport import guard_sdk
+            guard_sdk()
         if '_engine' not in self.__dict__:
             try:
                 self._engine, self._engine_str = self.create_engine(include_uri=True)
@@ -525,20 +528,30 @@ class SQLConnector(InstanceConnector):
             weakref.finalize(self, _remove_memory_directory, directory, os.getpid())
         return path
 
-    def _core_connector(self):
+    def _core_connector(self, discover_schema: bool = True):
         """
         Return the `meerschaum._core.SqlConnector` behind this connector (built once per process,
         see `crates/meerschaum-connector-sql`), which implements every pipe, user and plugin method.
 
         Every flavor has a Rust driver (`mssql` and `oracle` are compiled into the wheels;
-        `duckdb` loads DuckDB's own shared library, downloaded on first use, see
-        `mrsm install driver duckdb` and `MRSM_DUCKDB_LIB`). An in-memory SQLite database (`sql:memory`) is one database file that the Rust
+        `duckdb` uses its public Python driver transport when installed, sharing a database
+        anchor with SQLAlchemy while keeping Pipe algorithms in Rust. Standalone / base
+        installs use DuckDB's C API. Explicit `MRSM_DUCKDB_LIB` pins native mode and refuses
+        mixed SQLAlchemy access; unset it and restart to use both). An in-memory SQLite database (`sql:memory`) is one database file that the Rust
         pool and SQLAlchemy both open (`_shared_memory_database`), so `Pipe` methods and
         `read()` / `exec()` / `.engine` see the same tables.
         `read`, `exec`, `value`, `to_sql` and `.engine` always stay SQLAlchemy (D16).
 
         The Rust connector (and its pool) is built once per process: a forked child (a job
         daemon) builds its own, like SQLAlchemy engines must.
+
+        Parameters
+        ----------
+        discover_schema: bool, default True
+            Ask the database for its default schema now (when none is configured) so `self.schema`
+            is the one the Rust methods use. `False` returns the connector without touching the
+            database (`meerschaum._internal.entry.adhoc_context`): its methods still ask for the
+            schema before they run.
 
         Raises
         ------
@@ -569,6 +582,10 @@ class SQLConnector(InstanceConnector):
                 key: self.__dict__.get(key, None)
                 for key in ('flavor', 'uri', 'host', 'port', 'username', 'password', 'database')
             }
+            if self.flavor == 'duckdb':
+                from ._duckdb_transport import prepare_connector
+                attributes['_duckdb_memory_id'] = prepare_connector(self)
+                attributes['_duckdb_database'] = self.__dict__.get('_duckdb_database')
             if (shared := self._shared_memory_database()) is not None:
                 attributes['database'] = shared
             ### Only a configured schema: the Rust connector discovers the default itself.
@@ -585,7 +602,7 @@ class SQLConnector(InstanceConnector):
             self.__dict__['_schema_pending'] = (
                 not attributes['schema'] and self.flavor not in NO_SCHEMA_FLAVORS
             )
-        if self.__dict__.get('_schema_pending', False):
+        if discover_schema and self.__dict__.get('_schema_pending', False):
             ### The default schema is asked of the database before the first query runs, so the
             ### Rust methods see the same schema as `self.schema`. While the database cannot be
             ### asked, nothing runs: the flavor default (`public` / `dbo`) is the wrong schema

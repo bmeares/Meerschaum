@@ -56,7 +56,7 @@ config:
           flavor: sqlite
           database: "{MRSM_ROOT_DIR}/proj.db"
 pipes:
-  - connector: "plugin:trn_plug"
+  - connector: "plugin:trn_compose"
     metric: "readings"
     location: "projloc"
     columns:
@@ -66,7 +66,7 @@ pipes:
     metric: "derived"
     parameters:
       fetch:
-        definition: "SELECT ts, sensor, reading * 2 AS doubled FROM {{ Pipe('plugin:trn_plug', 'readings', 'projloc', instance='sql:trnproj') }}"
+        definition: "SELECT ts, sensor, reading * 2 AS doubled FROM {{ Pipe('plugin:trn_compose', 'readings', 'projloc', instance='sql:trnproj') }}"
       columns:
         datetime: "ts"
         id: "sensor"
@@ -76,13 +76,14 @@ pipes:
 def compose(run: Run):
     proj = run.work / 'compose-proj'
     (proj / 'plugins').mkdir(parents=True, exist_ok=True)
-    shutil.copy(HERE / 'plugin' / 'trn_plug.py', proj / 'plugins' / 'trn_plug.py')
+    shutil.copy(HERE / 'plugin' / 'trn_compose.py', proj / 'plugins' / 'trn_compose.py')
     (proj / 'mrsm-compose.yaml').write_text(COMPOSE_YAML.replace('FLAVOR', run.state['flavors'][0]))
     run.state['compose_dir'] = str(proj)
     for sub in (['compose', 'init'], ['compose', 'up'], ['compose', 'ps']):
         r = run.mrsm('v4', *sub, cwd=proj, timeout=600)
         print(sub, r.returncode, strip_ansi(r.stdout)[-600:], strip_ansi(r.stderr)[-300:])
         run.state['v4_compose_' + sub[1]] = strip_ansi(r.stdout) + strip_ansi(r.stderr)
+        run.state['v4_compose_rc_' + sub[1]] = r.returncode
         if sub[1] == 'up':
             time.sleep(8)
     run.save()

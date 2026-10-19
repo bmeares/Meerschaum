@@ -40,6 +40,38 @@ async fn driver_for(uri: &str) -> SqlDriver {
 }
 
 #[tokio::test]
+async fn read_only_probe_refuses_writes_and_file_creation() {
+    let db = TempDb::new();
+    let spec = ConnectionSpec::from_uri(&db.uri(), None, None).unwrap();
+    let probe = SqlDriver::connect_lazy_sqlite_read_only(&spec).unwrap();
+    let missing =
+        tokio::time::timeout(std::time::Duration::from_secs(2), probe.read("SELECT 1")).await;
+    assert!(
+        !matches!(missing, Ok(Ok(_))),
+        "read-only probe opened a missing file"
+    );
+    assert!(!db.path.exists());
+    probe.close().await;
+
+    let writer = driver_for(&db.uri()).await;
+    writer
+        .exec("CREATE TABLE sentinel (id INTEGER); INSERT INTO sentinel VALUES (1)")
+        .await
+        .unwrap();
+    writer.close().await;
+    let before = std::fs::read(&db.path).unwrap();
+    let probe = SqlDriver::connect_lazy_sqlite_read_only(&spec).unwrap();
+    assert_eq!(
+        probe.value("SELECT id FROM sentinel").await.unwrap(),
+        Some(SqlValue::Int(1))
+    );
+    assert!(probe.exec("INSERT INTO sentinel VALUES (2)").await.is_err());
+    assert!(probe.exec("PRAGMA user_version=99").await.is_err());
+    probe.close().await;
+    assert_eq!(std::fs::read(&db.path).unwrap(), before);
+}
+
+#[tokio::test]
 async fn exec_read_and_type_mapping() {
     let db = TempDb::new();
     let driver = driver_for(&db.uri()).await;

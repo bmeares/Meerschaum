@@ -26,6 +26,8 @@ extension-module = ["pyo3/extension-module"]
 oracle = ["meerschaum-connector-sql/oracle", "meerschaum-cli/oracle"]
 
 [dependencies]
+async-trait = "0.1"
+rust_decimal = { workspace = true }
 meerschaum-core = { workspace = true }
 meerschaum-kernel = { workspace = true }
 meerschaum-connector-sql = { workspace = true }

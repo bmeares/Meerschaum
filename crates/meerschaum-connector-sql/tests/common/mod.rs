@@ -23,6 +23,9 @@ pub const FLAVOR_ENVS: &[(&str, &str)] = &[
     ("postgresql", "MRSM_TEST_PG_URI"),
     ("timescaledb", "MRSM_TEST_TIMESCALE_URI"),
     ("postgis", "MRSM_TEST_POSTGIS_URI"),
+    // The TimescaleDB-HA image (TimescaleDB + PostGIS), e.g.
+    // `timescaledb-ha://test:test1234@localhost:5459/testdb`.
+    ("timescaledb-ha", "MRSM_TEST_TIMESCALE_HA_URI"),
     ("mysql", "MRSM_TEST_MYSQL_URI"),
     ("mariadb", "MRSM_TEST_MARIADB_URI"),
     ("mssql", "MRSM_TEST_MSSQL_URI"),

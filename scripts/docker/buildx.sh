@@ -5,7 +5,8 @@
 #   - one image per dep group in $tags (scripts/config.sh): `minimal` uses the default (v4) target,
 #     `full` uses `--target full` (`meerschaum[full]`; its `mrsm` is the console script);
 #   - `--target slim`, tagged `$image:<version>-slim` (and `$image:slim` for releases).
-# Images are loaded into the local daemon unless --push is given.
+# Images are loaded into the local daemon unless --push is given; loaded images are then smoke-tested
+# (scripts/docker/smoke_image.sh: curl, git in full, the stack's API healthcheck; SKIP_SMOKE=1 skips it).
 #
 #   --push      push to the registry instead of loading locally.
 #   --v4-only   build every dep group on the default target only (no `slim`).
@@ -91,6 +92,22 @@ if [ -z "$v4_only" ]; then
   slim_tags=("$image:$mrsm_version-slim")
   [ -z "$prerelease" ] && slim_tags+=("$image:slim")
   build "slim" "minimal" "${slim_tags[@]}"
+fi
+
+### Smoke-test the images that were loaded locally (scripts/docker/smoke_image.sh): `curl` in every
+### image (the stack's API healthcheck), `git` and `ssh` in full, and the API healthcheck run for
+### real inside the full image. A failure fails the build. `SKIP_SMOKE=1` skips it.
+if [ "$push" = "--load" ] && [ -z "${SKIP_SMOKE:-}" ]; then
+  smoke_args=()
+  for tag in "${tags[@]}"; do
+    if [ "$tag" == "full" ]; then
+      smoke_args+=(--full-image "$image:$mrsm_version-$tag")
+    else
+      smoke_args+=(--image "$image:$mrsm_version-$tag")
+    fi
+  done
+  [ -z "$v4_only" ] && smoke_args+=(--slim-image "$image:$mrsm_version-slim")
+  ./scripts/docker/smoke_image.sh "${smoke_args[@]}"
 fi
 
 if [ -n "${GITHUB_OUTPUT:-}" ]; then

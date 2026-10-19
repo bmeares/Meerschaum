@@ -325,19 +325,35 @@ fn to_json_string<T: serde::Serialize>(value: &T) -> PyResult<String> {
 /// `engine_plan(request) -> json`: the plan only, no data movement.
 ///
 /// Result: `{"plan": <Plan>, "text": <plan table>, "critical_path": [...], "warnings": [...]}`.
+/// With `"expected": true` in the request, the plan `mrsm plan pipes` prints
+/// (`Engine::expected_plan`).
 #[pyfunction]
 pub fn engine_plan(py: Python<'_>, request: &str) -> PyResult<String> {
     let request = parse_request(request)?;
     let session = session();
     let built = build(py, &session, &request)?;
     let opts = run_options(&request, &built.instance_keys)?;
-    let planned = py
-        .detach(|| session.block_on(built.engine.plan(&opts)))
+    let expected = request
+        .get("expected")
+        .and_then(Json::as_bool)
+        .unwrap_or(false);
+    let plan = py
+        .detach(|| {
+            session.block_on(async {
+                let planned = built.engine.plan(&opts).await?;
+                if expected {
+                    // What `mrsm plan pipes` prints (`Engine::expected_plan`).
+                    built.engine.expected_plan(&planned, &opts).await
+                } else {
+                    Ok(planned.plan)
+                }
+            })
+        })
         .map_err(runtime_err)?;
     to_json_string(&json!({
-        "plan": planned.plan,
-        "text": planned.plan.to_string(),
-        "warnings": planned.plan.warnings,
+        "plan": plan,
+        "text": plan.to_string(),
+        "warnings": plan.warnings,
     }))
 }
 

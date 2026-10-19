@@ -112,7 +112,9 @@ def build_instance(flavor):
         t.user  # touch
         t.generate_credentials()
         ok(f'{flavor} register token {label}', t.register())
-        toks[label] = {'id': str(t.id), 'secret': t.secret, 'scopes': scopes, 'api_key': t.get_api_key()}
+        toks[label] = {'id': str(t.id), 'secret': t.secret, 'scopes': scopes, 'api_key': t.get_api_key(),
+                       'user': user.username,
+                       'expiration': t.expiration.isoformat() if t.expiration is not None else None}
     out['tokens'][flavor] = toks
     out['users'][flavor] = {
         'admin': {'username': 'trn_admin', 'password': 'AdminPass-12345'},

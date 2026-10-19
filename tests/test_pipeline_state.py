@@ -18,6 +18,7 @@ import meerschaum as mrsm
 from meerschaum import _core
 
 from tests._pipeline_diag import why
+from tests._worker_sqlite import worker_sqlite
 from tests.connectors import conns
 
 pytestmark = pytest.mark.skipif(
@@ -67,7 +68,12 @@ def _count(conn, metric, column, value, internal=True):
 
 @pytest.fixture(params=_FLAVORS)
 def chain(request):
-    conn = conns[request.param]
+    ### SQLite: a file of this module's own per worker (`database is locked` under `pytest -n`).
+    conn = (
+        worker_sqlite('w9_state')
+        if request.param == 'sqlite'
+        else conns[request.param]
+    )
     inst = str(conn)
     tag = uuid.uuid4().hex[:8]
     table = f'w9_state_src_{tag}'

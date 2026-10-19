@@ -94,6 +94,67 @@ env_dict['MEERSCHAUM_API_PATCH'] = json.dumps(
     indent=4,
 )
 
+### The database setup script `mrsm stack` writes to `DB_CREATE_EXTENSIONS_PATH` when it is absent
+### and mounts as `/docker-entrypoint-initdb.d/100_meerschaum.sql`. Byte-identical to the Rust
+### `meerschaum_core::config::sync::CREATE_EXTENSIONS_TEXT`
+### (`crates/meerschaum-core/src/config/create-extensions.sql`; `tests/test_stack_setup.py`).
+CREATE_EXTENSIONS_TEXT = r"""-- Meerschaum stack: database setup.
+--
+-- `mrsm stack` writes this file once, when it is absent (your edits are kept), and mounts it into
+-- the `db` container as `/docker-entrypoint-initdb.d/100_meerschaum.sql`. The image's entrypoint
+-- runs it with `psql` only when the data volume is empty (the first start of a new stack), after
+-- the image's own setup scripts (TimescaleDB, the telemetry opt-out, `timescaledb-tune`, the
+-- TimescaleDB Toolkit). It is safe to run more than once and with any PostgreSQL image: an
+-- extension the image does not ship is skipped with a NOTICE.
+--
+-- To change an existing database, see "Upgrading the stack" in the Meerschaum documentation
+-- (`mrsm upgrade extensions`).
+
+-- Create each extension the server offers. TimescaleDB must be preloaded to be created.
+DO $mrsm$
+DECLARE
+    ext TEXT;
+BEGIN
+    FOREACH ext IN ARRAY ARRAY['timescaledb', 'postgis', 'timescaledb_toolkit', 'pg_stat_statements'] LOOP
+        IF NOT EXISTS (SELECT 1 FROM pg_available_extensions WHERE name = ext) THEN
+            RAISE NOTICE 'Meerschaum: skipping the extension "%": this image does not provide it.', ext;
+        ELSIF ext = 'timescaledb' AND NOT (
+            'timescaledb' = ANY (
+                SELECT btrim(lib, ' "')
+                FROM unnest(string_to_array(current_setting('shared_preload_libraries'), ',')) AS l(lib)
+            )
+        ) THEN
+            RAISE NOTICE 'Meerschaum: skipping the extension "timescaledb": it is not in shared_preload_libraries.';
+        ELSE
+            EXECUTE format('CREATE EXTENSION IF NOT EXISTS %I CASCADE', ext);
+        END IF;
+    END LOOP;
+END
+$mrsm$;
+
+-- `pg_stat_statements` can only be queried when the server preloads it: append it to
+-- `shared_preload_libraries` (keeping the current entries) with `ALTER SYSTEM`, which writes
+-- `postgresql.auto.conf` and takes effect at the server's next start (the first real start, after
+-- this setup). `ALTER SYSTEM` cannot run inside a `DO` block, so psql runs the generated
+-- statement (`\gexec`); nothing is generated when it is unavailable or already listed.
+WITH current_libs AS (
+    SELECT btrim(lib, ' "') AS lib, ord
+    FROM unnest(string_to_array(current_setting('shared_preload_libraries'), ','))
+        WITH ORDINALITY AS l(lib, ord)
+), wanted AS (
+    SELECT lib, ord FROM current_libs WHERE lib <> ''
+    UNION ALL
+    SELECT 'pg_stat_statements', 2147483647
+)
+SELECT 'ALTER SYSTEM SET shared_preload_libraries = '
+    || string_agg(quote_literal(lib), ', ' ORDER BY ord)
+FROM wanted
+WHERE EXISTS (SELECT 1 FROM pg_available_extensions WHERE name = 'pg_stat_statements')
+    AND NOT EXISTS (SELECT 1 FROM current_libs WHERE lib = 'pg_stat_statements')
+HAVING count(*) > 0
+\gexec
+"""
+
 compose_header = """
 ##############################################################
 #                                                            #
@@ -119,13 +180,17 @@ default_docker_compose_config = {
                 'ALLOW_IP_RANGE': env_dict['ALLOW_IP_RANGE'],
             },
             'command': 'postgres -c max_connections=1000 -c shared_buffers=1024MB -c max_prepared_transactions=100',
+            ### `-h 127.0.0.1`: the entrypoint's setup server listens only on its Unix socket, so
+            ### the check stays unhealthy until setup is done and the real server is up.
             'healthcheck': {
                 'test': [
-                    'CMD-SHELL', 'pg_isready -d <DOLLAR>POSTGRES_DB -U <DOLLAR>POSTGRES_USER',
+                    'CMD-SHELL',
+                    'pg_isready -h 127.0.0.1 -p 5432 -d <DOLLAR>POSTGRES_DB -U <DOLLAR>POSTGRES_USER',
                 ],
                 'interval': '5s',
                 'timeout': '3s',
-                'retries': 5
+                'retries': 5,
+                'start_period': '300s',
             },
             'restart': 'always',
             'image': 'timescale/timescaledb-ha:' + env_dict['TIMESCALEDB_VERSION'],
@@ -135,7 +200,12 @@ default_docker_compose_config = {
             'hostname': db_hostname,
             'volumes': [
                 'meerschaum_db_data:' + volumes['meerschaum_db_data'],
-                f'{paths.DB_INIT_RESOURCES_PATH.as_posix()}:/docker-entrypoint-initdb.d:z,ro',
+                ### Mount the setup FILE into the image's directory (not a directory over it), so
+                ### the image's own setup scripts run first (telemetry, timescaledb-tune, ...).
+                (
+                    f'{paths.DB_CREATE_EXTENSIONS_PATH.as_posix()}'
+                    ':/docker-entrypoint-initdb.d/100_meerschaum.sql:z,ro'
+                ),
             ],
             'shm_size': '1024m',
             'networks': [
@@ -276,17 +346,13 @@ def _sync_stack_files():
     _write_initdb()
 
 def _write_initdb():
-    create_postgis_text = (
-        "CREATE EXTENSION IF NOT EXISTS timescaledb;\n"
-        "CREATE EXTENSION IF NOT EXISTS postgis;\n"
-        "CREATE EXTENSION IF NOT EXISTS timescaledb_toolkit;\n"
-        "CREATE EXTENSION IF NOT EXISTS pg_stat_statements;\n"
-    )
+    """Write the database setup script when it is absent (a customized file is kept)."""
     if paths.DB_CREATE_EXTENSIONS_PATH.exists():
         return
 
-    with open(paths.DB_CREATE_EXTENSIONS_PATH, 'w+', encoding='utf-8') as f:
-        f.write(create_postgis_text)
+    paths.DB_CREATE_EXTENSIONS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with open(paths.DB_CREATE_EXTENSIONS_PATH, 'w+', encoding='utf-8', newline='\n') as f:
+        f.write(CREATE_EXTENSIONS_TEXT)
 
 NECESSARY_FILES = [
     paths.STACK_COMPOSE_PATH,

@@ -218,44 +218,52 @@ pub fn uninstall_drivers(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     Ok(SuccessTuple::ok(messages.join("\n")))
 }
 
-/// One row of `show drivers`.
-struct DriverRow {
-    name: &'static str,
-    version: String,
-    source: String,
-    path: String,
+/// One row of `show drivers` (`doctor` reads the same rows).
+pub(super) struct DriverRow {
+    pub(super) name: &'static str,
+    pub(super) version: String,
+    pub(super) source: String,
+    pub(super) path: String,
 }
 
-fn rows(rt: &mut Runtime<'_>) -> Vec<DriverRow> {
-    let settings = duckdb_settings(rt);
-    let status = duckdb_lib::status(&settings);
-    let duckdb = match (&status.source, &status.error) {
-        (Some(source), _) => DriverRow {
-            name: "duckdb",
-            // A library on the system path is reported by path and not loaded (no version).
-            version: status
-                .version
-                .clone()
-                .unwrap_or_else(|| "(found, not loaded)".into()),
-            source: source.as_str().to_string(),
-            path: status.path.clone().unwrap_or_default(),
-        },
-        (None, Some(error)) => DriverRow {
-            name: "duckdb",
-            version: String::new(),
-            source: "error".into(),
-            path: error.clone(),
-        },
-        (None, None) => DriverRow {
-            name: "duckdb",
-            version: format!("v{} (on first use)", duckdb_lib::VERSION),
-            source: "missing".into(),
-            path: format!(
-                "`mrsm install driver duckdb` downloads it ({} MB)",
-                duckdb_lib::download_megabytes().unwrap_or_default()
-            ),
-        },
-    };
+pub(super) fn rows(rt: &mut Runtime<'_>) -> Vec<DriverRow> {
+    rows_with_duckdb(rt, true)
+}
+
+/// A Python-host diagnostic must not load a separate native DuckDB library just to report its
+/// version. The caller supplies the host transport's metadata instead; Oracle is unchanged.
+pub(super) fn rows_with_duckdb(rt: &mut Runtime<'_>, native_duckdb: bool) -> Vec<DriverRow> {
+    let duckdb = native_duckdb.then(|| {
+        let settings = duckdb_settings(rt);
+        let status = duckdb_lib::status(&settings);
+        match (&status.source, &status.error) {
+            (Some(source), _) => DriverRow {
+                name: "duckdb",
+                // A library on the system path is reported by path and not loaded (no version).
+                version: status
+                    .version
+                    .clone()
+                    .unwrap_or_else(|| "(found, not loaded)".into()),
+                source: source.as_str().to_string(),
+                path: status.path.clone().unwrap_or_default(),
+            },
+            (None, Some(error)) => DriverRow {
+                name: "duckdb",
+                version: String::new(),
+                source: "error".into(),
+                path: error.clone(),
+            },
+            (None, None) => DriverRow {
+                name: "duckdb",
+                version: format!("v{} (on first use)", duckdb_lib::VERSION),
+                source: "missing".into(),
+                path: format!(
+                    "`mrsm install driver duckdb` downloads it ({} MB)",
+                    duckdb_lib::download_megabytes().unwrap_or_default()
+                ),
+            },
+        }
+    });
     let oracle = match client_libs::oracle_client_library() {
         Some(lib) => DriverRow {
             name: "oracle",
@@ -273,7 +281,12 @@ fn rows(rt: &mut Runtime<'_>) -> Vec<DriverRow> {
             ),
         },
     };
-    vec![duckdb, oracle]
+    let mut rows = Vec::new();
+    if let Some(duckdb) = duckdb {
+        rows.push(duckdb);
+    }
+    rows.push(oracle);
+    rows
 }
 
 /// `show drivers [names]`: each driver's library version, where it comes from (`env`, `cache`,

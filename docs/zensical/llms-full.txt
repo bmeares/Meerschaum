@@ -327,7 +327,7 @@ The wheel contains the native core and has no required Python dependencies. Whee
     cargo install meerschaum --locked            # during the release candidates: --version 5.0.0-rc.1
     ```
 
-    `--locked` builds with the dependency versions Meerschaum was tested with. Prebuilt standalone binaries for the same four platforms are attached to each GitHub release.
+    This needs Rust 1.95 or newer. `--locked` builds with the dependency versions Meerschaum was tested with (without it Cargo may pick newer ones, which can break the build on Windows). Prebuilt standalone binaries for the same four platforms are attached to each GitHub release.
 
     The `duckdb` and `oracle` flavors load native libraries at run time: see [SQL connectors](/reference/connectors/sql-connectors/#duckdb).
 
@@ -2837,7 +2837,8 @@ All the usual `sync` options (`begin`, `end`, `workers`, `force`, `retries`, `ch
 
 ```python
 pipeline = mrsm.Pipeline(pipe, parents=True, children=False)   # or Pipeline([p1, p2]) / Pipeline(tags=['demo'])
-plan = pipeline.plan()           # dry run, no data movement
+plan = pipeline.plan()           # dry run, no data movement (the static plan)
+plan = pipeline.plan(expected=True)  # what `mrsm plan pipes` prints (see below)
 print(plan)                      # node | action | bounds | chunks | reason
 plan.nodes                       # the same table as data: node.pipe, node.action, node.reason, ...
 plan.to_dataframe()
@@ -2870,12 +2871,12 @@ For the three pipes above on one SQLite instance (`raw` reads a `readings` table
 
 ```text
 $ mrsm plan pipes -i sql:local -m daily --parents
-node             action  bounds      chunks  reason
-sql:local/raw    root    ['', None)  -       no parents in the selection: v4 sync (begin = sync time − backtrack)
-sql:local/clean  skip*   -           -       no cursor on the edge from sql:local/raw; its watermark None is not ahead; definition unchanged
-sql:local/daily  skip*   -           -       no cursor on the edge from sql:local/clean; its watermark None is not ahead; definition unchanged
+node             action        bounds        chunks  reason
+sql:local/raw    root          ['', None)    -       no parents in the selection: v4 sync (begin = sync time − backtrack)
+sql:local/clean  incremental*  [None, None)  1       if its parents sync new rows: no cursor on the edge from sql:local/raw (first engine run); 1 unconsumed ledger entry (seq 1); sync from own watermark − backtrack to min parent watermark
+sql:local/daily  incremental*  [None, None)  1       if its parents sync new rows: no cursor on the edge from sql:local/clean (first engine run); 1 unconsumed ledger entry (seq 1); sync from own watermark − backtrack to min parent watermark
 * re-planned after its parents finish
- 💬 Planned 3 nodes (1 would sync, 2 re-planned after their parents finish).
+ 💬 Planned 3 nodes (1 would sync, 2 re-planned after their parents finish, shown as if they sync new rows).
 Nothing was synced.
 
 $ mrsm show graph -i sql:local -m daily --parents
@@ -2888,7 +2889,7 @@ Pipe graph on sql:local: 3 pipes, 2 edges, 1 root, depth 3
 ● root   ◆ has children   ○ leaf   ★ selected
 ```
 
-In the plan, a `*` after the action marks a provisional row: a child cannot know what its parent will change, so the executor plans it again when the parent finishes. In the graph, `★` marks the targets you selected (the others were pulled in by `--parents`), `●` a root and `○` a leaf; see [Visualization](/reference/pipelines/visualization/) for back-references, collapsed fan-outs and edge details. After a run, `show runs` lists it:
+In the plan, a `*` after the action marks a provisional row: a child cannot know what its parent will change, so the executor plans it again when the parent finishes. `plan pipes` shows that second plan as it would be if every parent that runs synced new rows after its watermark: the parent's ledger entry covers its whole chunk-grid cell, so a child usually backfills from the start of that cell (`[2026-10-04 00:00, …)` on the default 30-day grid), which is the `begin` its `fetch` receives. Only the start of the window is predicted: its end is the parents' current watermarks, and the executor caps it at their new ones. `--nopretty` prints the same plan as JSON. In Python, `pipeline.plan()` returns the static plan (each provisional row as the state is now, often `skip*`) and `pipeline.plan(expected=True)` the one `plan pipes` prints. In the graph, `★` marks the targets you selected (the others were pulled in by `--parents`), `●` a root and `○` a leaf; see [Visualization](/reference/pipelines/visualization/) for back-references, collapsed fan-outs and edge details. After a run, `show runs` lists it:
 
 ```text
 $ mrsm show runs --last 5
@@ -3034,7 +3035,7 @@ The first engine run creates them. Graphs, watermarks and duration estimates are
 
 !!! info "API instances"
 
-    Engine state travels over the dedicated `/engine` route family (`/engine/ledger`, `/engine/cursors`, `/engine/state`, `/engine/runs`, `/engine/events`, `/engine/leases`), which requires the `pipes:write` scope. The generic pipe routes refuse the `mrsm` connector keys. On a read-only instance the engine runs degraded: watermarks only, no ledger-driven backfill, no persisted history, with a warning.
+    Engine state travels over the dedicated `/engine` route family: the engine reads and writes its state tables through `/engine/pipes/{metric}/read`, `/write`, `/clear` and `/exists` (reads need the `pipes:read` scope, writes `pipes:write`), and leases go through `/engine/leases`; `/engine/ledger`, `/engine/cursors`, `/engine/state`, `/engine/runs` and `/engine/events` expose the same rows by shape (`pipes:write`). The server keeps all of it on its own instance (in `_mrsm_internal` on a PostgreSQL or MSSQL instance), so it survives a server restart. The generic pipe routes refuse the `mrsm` connector keys. On a read-only instance the engine runs degraded: watermarks only, no ledger-driven backfill, no persisted history, with a warning.
 
 ## 📒 The Dirty-Range Ledger
 
@@ -3080,7 +3081,7 @@ Before syncing a pipe the executor acquires a **lease** on it, so two jobs never
 |---|---|
 | SQL | An `INSERT` into the `mrsm_pipe_leases` table (unique key on the pipe), with conditional `DELETE` for expiry |
 | Valkey | `SET NX PX` |
-| API | The `/engine/leases` routes |
+| API | The `/engine/leases` routes, which take the lease on the server's own instance |
 | Custom instance connectors | Implement the optional `acquire_pipe_lease(pipe, holder, ttl)` / `release_pipe_lease(pipe, holder)` pair. Without it the engine falls back to **machine-local file locks** under `{root}/cache/engine_leases`, with a one-time warning that the lease only protects against processes on this machine. |
 
 ## 📜 Run History
@@ -3476,15 +3477,21 @@ The following database flavors are confirmed to be feature-complete through the 
 - Microsoft SQL Server
 - Oracle SQL
 
-PostGIS and GeoPackage are supported for `geometry` columns. Two flavors need a native library that is **not** bundled with Meerschaum and is loaded at run time:
+PostGIS and GeoPackage are supported for `geometry` columns. DuckDB and Oracle have additional driver requirements:
 
 ### DuckDB
 
-The `duckdb` flavor uses DuckDB's own shared library (`libduckdb`, version 1.4 or newer). The first time you connect, Meerschaum downloads the official release for your platform into `<root>/drivers/` and verifies its checksum. Nothing else needs to be installed.
+In Python, install `meerschaum[sql-duckdb]` and leave `MRSM_DUCKDB_LIB` unset. Rust Pipe operations and SQLAlchemy then share the public Python DuckDB driver, so both interfaces see the same writes. The extra requires `duckdb >= 1.5.6` and `duckdb-engine >= 0.17.0`.
+
+The standalone binary and Python installations without the optional DuckDB driver use DuckDB's own shared library (`libduckdb`, version 1.4 or newer). When no cached or system library is available, the first connection downloads the official release for your platform into `<root>/drivers/` and verifies its checksum.
 
 - `mrsm install driver duckdb` downloads it ahead of time; `mrsm uninstall driver duckdb` removes the cached copy.
 - `mrsm show drivers` reports whether DuckDB (and the Oracle client) can be found, and where.
 - On an air-gapped host, or with [`MRSM_NO_AUTO_INSTALL`](/reference/environment/#mrsm_no_auto_install) set (which blocks the download, and DuckDB's extension auto-install), point [`MRSM_DUCKDB_LIB`](/reference/environment/#mrsm_duckdb_lib) at a `libduckdb` file you copied there.
+
+Setting `MRSM_DUCKDB_LIB` explicitly selects the native C API in Python too. SQLAlchemy access is then refused to prevent separate database instances from losing writes. Unset it, install the extra, and restart the interpreter to use both interfaces. A process that first selected the native driver also needs a restart after installing the extra. See the [migration guide](/reference/migrating-to-v5/) for connection settings and process restrictions.
+
+The native C API path refuses unsupported per-connection options, including read-only settings. Use the Python extra when configuring these options.
 
 ### Oracle SQL
 
@@ -3818,6 +3825,7 @@ cols_types = get_table_cols_types('foo', conn)
 print(cols_types)
 # {'a': 'BIGINT'}
 ```
+
 
 ---
 
@@ -5227,9 +5235,9 @@ The default stack starts 4 services:
 
 | Service | Description                                                                            | Image                                   |
 |---------|----------------------------------------------------------------------------------------|-----------------------------------------|
-| db      | TimescaleDB instance corresponding to `sql:main`.                                      | `timescale/timescaledb:latest-pg16-oss` |
+| db      | TimescaleDB instance corresponding to `sql:main`.                                      | `timescale/timescaledb-ha:pg18`         |
 | api     | Production Meerschaum Web API server corresponding to `api:main`.                      | `bmeares/meerschaum:api`                |
-| valkey  | Valkey instance corresponding to `valkey:main`. Used for caching sessions in by `api`. | `bitnami/valkey:latest`                 |
+| valkey  | Valkey instance corresponding to `valkey:main`. Used for caching sessions in by `api`. | `valkey/valkey-bundle:latest`           |
 | grafana | Grafana instance connected to `sql:main`.                                              | `grafana/grafana:latest`                |
 
 You can edit the stack's Docker Compose file with `mrsm edit config stack`.
@@ -5240,6 +5248,32 @@ You can edit the stack's Docker Compose file with `mrsm edit config stack`.
     ```bash
     mrsm stack exec -it api mrsm
     ```
+
+### 🗄️ The Database Setup
+
+The first time the `db` service starts on an empty volume, the image's entrypoint sets up the database. A new stack mounts Meerschaum's setup script as a single file into the image's own setup directory:
+
+```yaml
+volumes:
+  - meerschaum_db_data:/home/postgres/pgdata
+  - <root>/db/initdb/create-extensions.sql:/docker-entrypoint-initdb.d/100_meerschaum.sql:z,ro
+```
+
+so the image's scripts run first and Meerschaum's runs last:
+
+1. The image creates the `timescaledb` extension in the `postgres`, `template1` and `POSTGRES_DB` databases (new databases created from `template1` have it too).
+2. `TIMESCALEDB_TELEMETRY: 'off'` (the stack default) turns off TimescaleDB's telemetry.
+3. [`timescaledb-tune`](https://github.com/timescale/timescaledb-tune) tunes `postgresql.conf` for the container's memory and CPU limits. Set `NO_TS_TUNE: 'true'` in the service's `environment` to skip it (the stack's `command` still sets `max_connections` and `shared_buffers`, which win over the tuned values).
+4. The image creates the `timescaledb_toolkit` extension.
+5. `create-extensions.sql` creates `timescaledb`, `postgis`, `timescaledb_toolkit` and `pg_stat_statements` in `POSTGRES_DB`, each only when the image provides it (a `NOTICE` in the container's log names each one it skips, so another PostgreSQL image such as `postgres:18` or `postgis/postgis` still starts), and adds `pg_stat_statements` to `shared_preload_libraries` (keeping the entries already there) so its view can be queried once the server is up.
+
+The `db` healthcheck asks the server over TCP (`pg_isready -h 127.0.0.1 -p 5432 ...`, with a 300 second `start_period`): the entrypoint's setup server only listens on its Unix socket, so the service turns healthy (and `api` and `grafana` start) only after the setup is done. A passing check turns it healthy at once; the long start period only keeps a slow first setup (e.g. on a Raspberry Pi) from being reported unhealthy, which would abort `mrsm stack up`.
+
+!!! note "The setup runs once"
+    Docker runs the setup only when the data volume is empty. `mrsm stack` writes `create-extensions.sql` under your root directory once, when it is missing, and never overwrites it, so you may edit it before the first `mrsm stack up` (e.g. to create more extensions). Changing it later does nothing for an existing database: see [Upgrading the stack](/reference/stack-upgrades/) (`mrsm upgrade extensions`) for updating the extensions and settings of a database that already exists.
+
+!!! info "Stacks created before 5.0"
+    Earlier versions mounted the whole `<root>/db/initdb` directory over `/docker-entrypoint-initdb.d`, which hid the image's own scripts (no telemetry opt-out, no tuning, no extensions in `template1`), and checked health over the Unix socket. `mrsm stack` regenerates the compose file on every run: a root without `config/stack.yaml` (v4's `mrsm stack` never writes one) takes the new defaults, and the next `mrsm stack up -d` recreates the `db` container once (the data volume is kept; extra scripts in `<root>/db/initdb/` are no longer mounted for a future fresh volume). A `stack.yaml` with a `docker-compose.yaml` section keeps that section as it is. See the [migration guide](/reference/migrating-to-v5/#deployment).
 
 ### Docker Images
 
@@ -5299,6 +5333,15 @@ mrsm stack up -d db grafana
 
     Open a web browser and navigate to [http://localhost:3000](http://localhost:3000) where you can log into Grafana with username `admin`, password `admin`.
 
+## 💾 Backing Up and Upgrading the Database
+
+`mrsm backup postgres` takes an online backup of the stack's database (nothing is stopped) into
+`<root>/backups/postgres/<timestamp>/`, and `mrsm restore postgres` puts a backup into a new volume
+and switches the stack to it, keeping the current one. `mrsm upgrade postgres` moves the database
+to a newer PostgreSQL major the same way (a backup first, then a verified restore). See
+[Backing up and restoring](/reference/stack-upgrades/#backing-up-and-restoring) and
+[Upgrading PostgreSQL](/reference/stack-upgrades/#upgrading-postgresql).
+
 ## 🛑 Stopping the Stack
 
 If you want to stop all the services in the stack, run the stack command with `down`:
@@ -5334,6 +5377,412 @@ mrsm edit config stack
 ```
 
 <asciinema-player src="/assets/casts/edit-stack.cast" autoplay="true" loop="true" size="small" preload="true"></asciinema-player>
+
+
+---
+
+# ⬆️ Upgrading the Stack
+
+Source: https://meerschaum.io/reference/stack-upgrades/
+
+# ⬆️ Upgrading the Stack
+
+Pulling newer images (`mrsm stack pull`, or `mrsm upgrade mrsm`) updates the stack's software, but
+not everything inside its database volume. This page covers what an upgrade leaves behind and the
+commands that finish the job. See [the stack page](stack.md) for how the stack's database is set
+up in the first place.
+
+## Updating extensions
+
+### What lags and why
+
+Docker runs the database's setup scripts (`/docker-entrypoint-initdb.d`) only when the volume is
+empty, so after a new image is pulled the database keeps the **extension versions it was created
+with**. The image ships the new versions (and, for TimescaleDB, the older libraries too, so
+nothing breaks), but the database keeps using the old ones until each extension is updated:
+
+- **TimescaleDB** keeps loading its old library (fixes and features of the new release stay off).
+- **PostGIS** (with `postgis_raster`, `postgis_topology`, ...) keeps its old SQL functions.
+- **TimescaleDB Toolkit** and any other extension keep their old SQL objects.
+
+Meerschaum tells you when this happens: `mrsm stack up` and `mrsm start api` print a one-line
+hint when an extension of the instance is older than the server's version, and
+`mrsm upgrade mrsm` offers the update after it brings the stack back up. `mrsm doctor` reports it
+too.
+
+The stack's own setup has also missed a few settings on stacks created before 5.0: the compose
+file's `TIMESCALEDB_TELEMETRY: 'off'` never applied (the image's setup script that reads it was
+hidden by the stack's mount), and `pg_stat_statements` was created without being added to
+`shared_preload_libraries`, so its view cannot be read.
+
+### The command
+
+```bash
+mrsm upgrade extensions
+```
+
+It reads the instance's database (`-i` picks another instance; the default is the configured
+instance, usually `sql:main`), prints a plan and asks before changing anything:
+
+```text
+┏━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ Database   ┃ Extension           ┃ Installed ┃ Available ┃ Statement                                       ┃
+┡━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ meerschaum │ timescaledb         │ 2.29.2    │ 2.30.2    │ ALTER EXTENSION timescaledb UPDATE;             │
+├────────────┼─────────────────────┼───────────┼───────────┼─────────────────────────────────────────────────┤
+│ meerschaum │ timescaledb_toolkit │ 1.22.0    │ 1.26.0    │ ALTER EXTENSION "timescaledb_toolkit" UPDATE;   │
+└────────────┴─────────────────────┴───────────┴───────────┴─────────────────────────────────────────────────┘
+```
+
+| Flag / word | Meaning |
+|---|---|
+| `-i, --instance` | The PostgreSQL instance to update (e.g. `sql:main`). A non-PostgreSQL instance has nothing to update. |
+| `<database> ...` | Other databases on the same server to update as well, e.g. `mrsm upgrade extensions template1 postgres`. Databases are never updated unless they are the instance's own or named here: a shared server may host other applications' databases. |
+| `-y`, `-f` | Update without asking, including the `pg_stat_statements` preload on the stack's database (see below). |
+| `--noask` | Accept the default answers: yes for the extensions, no for the `pg_stat_statements` preload (the statement is printed instead). |
+
+### What it changes
+
+Each update runs in a **new session of its own, as that session's first statement**:
+
+| Extension | Statement |
+|---|---|
+| `timescaledb` | `ALTER EXTENSION timescaledb UPDATE;` (TimescaleDB refuses the update in a session that has already loaded the old library, so nothing else runs before it.) |
+| `postgis`, `postgis_raster`, `postgis_topology`, `postgis_sfcgal`, `postgis_tiger_geocoder` | `SELECT postgis_extensions_upgrade();` (one call updates the family.) |
+| anything else (`timescaledb_toolkit`, `pg_stat_statements`, ...) | `ALTER EXTENSION "<name>" UPDATE;` |
+
+An extension the server cannot update (no update path from the installed version, e.g. a version
+newer than the image's) is reported and skipped.
+
+On **the stack's own database**, connected as a superuser, it also does the following. The
+instance is the stack's database when it is `sql:main`, the stack was set up from this Meerschaum
+root (its Compose origin labels identify this root's compose file), and the running `db`
+container's initialized database and published or internal port match the connector. A read-only
+check also matches PostgreSQL's system identifier and server address to that container, then
+proves that the container can see a uniquely named live probe connection. This also separates
+cloned clusters on different Docker hosts. A `sql:main` override to another localhost port or database is treated as an explicit instance:
+extensions can still be updated there, while stack-specific settings and restarts are omitted.
+The API and Grafana containers must also belong to this root before they can be restarted.
+
+- applies the stack's `TIMESCALEDB_TELEMETRY: 'off'` the way the image's setup script does:
+  `ALTER SYSTEM SET timescaledb.telemetry_level = 'off'`, `SELECT pg_reload_conf()`, and
+  unscheduling TimescaleDB's telemetry job in each updated database;
+- asks (a separate question, default no) whether to add `pg_stat_statements` to
+  `shared_preload_libraries` with `ALTER SYSTEM`, keeping the libraries already listed. `-y` and
+  `-f` add it without asking (so does `mrsm upgrade mrsm -y` when it runs the update); `--noask`
+  keeps the default answer and prints the statement instead. It takes effect after the database
+  restarts: `mrsm stack restart db`. Meerschaum never restarts the database for you.
+
+The result counts the extensions updated, failed and skipped.
+
+### Permissions
+
+Updating an extension needs a superuser or the extension's owner (the stack's `sql:main` user is
+a superuser). When an update is refused, the others still run and the result names the exact
+statement to run as a superuser, connected to that database, e.g.:
+
+```bash
+psql -d meerschaum -X -c 'ALTER EXTENSION timescaledb UPDATE;'
+```
+
+(`-X` keeps `psql` from running a startup file first; TimescaleDB's update must be the session's
+first statement.)
+
+### Restarts
+
+Sessions that loaded the old TimescaleDB library keep it until they reconnect. After a
+TimescaleDB update on the stack's database, `mrsm upgrade extensions` restarts the stack's `api`
+and `grafana` services if they are running (their pooled sessions hold the old library). Restart any other long-running process that uses the database (jobs,
+API servers on other hosts) so it loads the new version:
+
+```bash
+mrsm restart jobs
+```
+
+## Upgrading PostgreSQL
+
+The image of the stack's `db` service decides its PostgreSQL major. A stack whose `stack.yaml`
+names the image keeps that major (stacks set up by Meerschaum 3.0 to 3.3 with a `stack.yaml` run
+`timescale/timescaledb-ha:pg17`, new stacks get `pg18`). A new major cannot read an older major's
+data directory, and the stack's images ship one PostgreSQL major each, so moving to a new major is
+a dump and a restore. `mrsm upgrade postgres` does it, the way TimescaleDB requires, and never
+touches the old data: you can go back at any time.
+
+### The command
+
+```bash
+mrsm upgrade postgres                                  # to the default stack image's major
+mrsm upgrade postgres 18                               # to a major, in the same image family
+mrsm upgrade postgres timescale/timescaledb-ha:pg18    # to an image
+mrsm upgrade postgres rollback                         # back to the old database
+```
+
+A major keeps the image family and variant of the current image:
+
+| Current image | With `18` |
+|---|---|
+| `timescale/timescaledb-ha:pg17` (also `-oss`, `-all`) | `timescale/timescaledb-ha:pg18` |
+| `timescale/timescaledb:latest-pg16` (also `-oss`) | `timescale/timescaledb:latest-pg18` |
+| `postgres:17` (also `-alpine`, ...) | `postgres:18` |
+| `postgis/postgis:17-3.5` | `postgis/postgis:18-3.5` |
+
+Any other image, or a pinned tag (`pg17.5-ts2.20.3`, `postgres:17.6`), cannot be mapped: name the
+target image, or follow [the manual procedure](#the-manual-procedure).
+
+| Flag | Meaning |
+|---|---|
+| `-y, --yes` | Answer yes to the questions (pulling the image, starting the upgrade). |
+| `-f, --force` | Like `--yes`, and go on although other clients are connected or disk space is low. |
+| `--noask` | Take each question's default: nothing is pulled and the upgrade does not start. |
+| `--debug` | Print the Docker commands; keep the new volume of a failed run for inspection. |
+
+### What it does
+
+Nothing changes until the plan is shown and confirmed:
+
+1. **Preflight** (read-only). The stack's `db` service must be running. The command reads its
+   server, databases, extensions and data volume, pulls the target image (after asking), and
+   starts a throwaway container of it to check that it can create every extension, and every
+   database's exact TimescaleDB version. It checks the free space for the backup and for Docker's
+   volumes, and lists what may write to the database: the stack's services that depend on `db`
+   (`api`, `grafana`, ...), other connected clients and the Meerschaum jobs running in this root.
+2. **Quiesce.** The services that depend on `db` are stopped; `db` runs through the dump. If any other
+   client is still connected, the upgrade stops here (unless `--force`): what it would write
+   after the dump would not be in the new database. The old database is disconnected from its
+   Docker networks before dumping, blocking new external TCP clients through the final checks
+   and its stop; its loopback and Unix socket remain available to the dump tools. Network aliases
+   and declared static addresses are recorded before disconnecting, and restored after it stops
+   or during recovery. TimescaleDB's background jobs are paused until the old server restarts.
+   Stop writers running inside the database container or using its Unix socket too: these
+   administrative connections are outside the external-client fence.
+3. **A full backup first**, exactly as [`mrsm backup postgres`](#backing-up-and-restoring) takes
+   it, into `<root>/backups/postgres/<UTC timestamp>/`, with the new image's client tools (as
+   PostgreSQL recommends) when they can reach the old server, and with the exact row count of
+   every table recorded in each dump's own snapshot. After all dumps, connected clients, per-table
+   write counters and structure are checked again. Any write after a snapshot aborts the upgrade,
+   including an update that leaves the row count unchanged. Then the old database stops, before
+   the restore begins. Stop external writers before starting; `--force` permits connected clients
+   but does not bypass detected changes. Host/shared network namespaces and unsupported custom
+   network attachments cannot be fenced; without `--force` they are refused. With `--force` the
+   command's warnings explicitly describe the risk of concurrent writes being lost. Enabled logical
+   replication subscriptions and unhandled background workers are also refused unless forced.
+   A source running as a standby is always refused.
+4. **Restore into a new volume.** A new volume, `<volume>_pg<major>` (e.g.
+   `mrsm_meerschaum_db_data_pg18`, or a run-specific name if that name is in use), is set up by
+   the new image in a temporary container with the stack's environment, command and setup script; it has no network and no published port, so
+   nothing else can write to it. Then, per database: TimescaleDB is created at **the dump's
+   version** (TimescaleDB restores only into the same version), the roles and the data are
+   restored between `timescaledb_pre_restore()` and `timescaledb_post_restore()` with
+   `--exit-on-error` (the restore list skips only the extensions that already exist, so every
+   remaining error is real), then the database's own settings and `ANALYZE`. The server settings
+   made with `ALTER SYSTEM` (`postgresql.auto.conf`, e.g. TimescaleDB's telemetry level or
+   `shared_preload_libraries`) are carried over, and the temporary server is restarted to prove it
+   still starts with them. If the old server's TimescaleDB is too old for the new image, it is
+   updated on the old server first (the plan says so).
+5. **Verify.** The copy must match the recorded counts and structure exactly. Its extensions are
+   then updated to the new image's versions (TimescaleDB as the first statement of its own
+   session, PostGIS with `postgis_extensions_upgrade()`), then its structure is checked again.
+   Any difference stops the upgrade: nothing is switched, the stopped services start again, and the new volume is removed.
+6. **Switch.** With the old `db` already stopped, `stack.yaml` is copied byte for byte into the backup's
+   directory, and only three things in it change: the `db` image, its data volume entry and that
+   volume's declaration under `volumes:`. Block-style YAML keeps its comments and formatting;
+   if a safe line edit is unavailable (for example flow-style YAML or anchors), the plan says
+   that the config will be rewritten. The original remains in the backup. If there was no stack
+   config file, the command creates one with the current full stack config, pinning its defaults.
+   The compose file is regenerated, `db` starts on the new volume, and the services that were running start again.
+
+The old volume is never removed and nothing writes to it but its own server (and, only when the
+plan says so, the TimescaleDB update of step 4).
+
+On Linux and macOS, Ctrl-C, SIGTERM and a closed terminal (SIGHUP) stop the running step and
+put the old stack back. Further signals are ignored during cleanup. On Windows a second Ctrl-C
+exits immediately. Run long upgrades in tmux or screen. A forced kill or power loss can interrupt
+cleanup: the next upgrade or restore detects the run and offers to put it back first;
+`mrsm upgrade postgres rollback` also recovers an interrupted run. An interrupted rollback is
+completed on its requested old volume, keeping both database volumes. Backups only warn about
+unfinished recovery.
+
+### Downtime
+
+The services that use the database (the API, Grafana) are down from the start of the backup to the
+end of the switch. External database connections are unavailable from network isolation before
+the dump through the switch; the database process itself stops at the end of the dump. The whole run takes about as long as one dump, one restore and two passes of row counts: a few seconds for a small
+database, tens of minutes for a large one. Stop the Meerschaum jobs and other clients that write
+to the database before you start (`mrsm stop jobs`), and start them again afterwards.
+
+### Rollback and cleaning up
+
+`mrsm upgrade postgres rollback` (after its own plan and question) stops the stack's database and
+the services that use it, puts `stack.yaml` back from the latest upgrade's (or restore's) copy
+(the current one is kept next to it as `stack.yaml.before-rollback-<timestamp>`), and starts `db`
+on the old volume with the old image again. **What was written to the database after the upgrade
+is not in the old volume.** The new volume is kept.
+
+When you are satisfied with the new database, free the space of the old one, with the names the
+upgrade printed:
+
+```bash
+docker volume rm mrsm_meerschaum_db_data                  # the old volume
+rm -r ~/.config/meerschaum/backups/postgres/<timestamp>   # its backup (Linux; `<root>/backups/...`)
+```
+
+After a rollback, the new volume is kept too. A later upgrade chooses another unused name; it
+never reuses or removes an existing volume automatically.
+
+### When it refuses
+
+- The stack's `db` is not running (`mrsm stack up -d db` first), or its container runs another
+  image than the stack config says. When its image cannot start on the data (the stack config's
+  image moved to a newer major while the data stayed, e.g. a stack without `stack.yaml` that
+  follows a new default image), the command reads the data's major from the volume and says
+  which image to pin first (`mrsm edit config stack`), so that the data runs again and can then be
+  upgraded.
+- The stack config is patched by `MRSM_CONFIG`, `MRSM_PATCH` or a patch directory (the edit of
+  `stack.yaml` would not take effect), or an override file changes the `db` image or volume.
+- The data is in a bind mount, not a named volume; or the server has tablespaces outside its data
+  directory; or a database is a template or does not allow connections.
+- An extension, or a database's TimescaleDB version, cannot be created by the new image.
+- A database's encoding or locale cannot be recreated by the new image; additional named
+  volumes, mounts inside a data directory or over a socket directory, or volume `driver` /
+  `driver_opts` would require a manual migration.
+- Another root uses the same Compose project: the container's Compose labels must identify this
+  root's stack file. Commands lock both the root and the project on the Docker daemon.
+- PostgreSQL older than 13.
+
+The settings in the old volume's `postgresql.conf` and `pg_hba.conf` are not copied (the new image
+writes its own); settings made with `ALTER SYSTEM` are, except preloaded libraries the new image
+does not have (a warning names them). File paths, socket / port settings, archiving, recovery and
+replication settings are not carried to the temporary server; the plan and warnings identify
+these. Bind mounts outside the data and socket directories are read-only in that server.
+
+### The manual procedure
+
+For a database that is not the stack's (another server, a bind mount, a custom image), the same
+steps by hand: `pg_dump` from the old server, `pg_restore` into a new one of the new major, with
+TimescaleDB at the same version on both sides. Use the client tools of the **new** version, and
+stop every client that writes to the database first. With the old server at `old`, the new one at
+`new`, and one database `mydb`:
+
+```bash
+export PGUSER=mrsm PGPASSWORD=...    # a superuser of both servers
+
+# 1. The database's TimescaleDB version on the old server (here 2.29.2). The new server must
+#    be able to create it: SELECT version FROM pg_available_extension_versions WHERE name = 'timescaledb'
+psql -h old -d mydb -X -At -c "SELECT extversion FROM pg_extension WHERE extname = 'timescaledb'"
+
+# 2. The roles and the database.
+pg_dumpall -h old --globals-only -f globals.sql
+pg_dump -h old -Fc --create -d mydb -f mydb.dump
+
+# 3. The roles ("role ... already exists" for the new server's own superuser is expected).
+psql -h new -d postgres -X -f globals.sql
+
+# 4. The database, and TimescaleDB at the SAME version as in the old database.
+# Use the dump's DATABASE entries to keep its owner, encoding, locale and database settings.
+pg_restore -l mydb.dump | awk '/^[0-9]+; [0-9]+ [0-9]+ (DATABASE - |DATABASE PROPERTIES - |COMMENT - DATABASE |ACL - DATABASE |SECURITY LABEL - DATABASE )/' > mydb-create.list
+pg_restore -h new -d postgres --create --exit-on-error -L mydb-create.list mydb.dump
+psql -h new -d mydb -X -c "CREATE EXTENSION timescaledb VERSION '2.29.2'"
+
+# 5. Everything but the extension that now exists, between the pre- and post-restore calls.
+pg_restore -l mydb.dump | grep -v -E '(EXTENSION - |COMMENT - EXTENSION )timescaledb *$|^[0-9]+; [0-9]+ [0-9]+ (DATABASE - |DATABASE PROPERTIES - |COMMENT - DATABASE |ACL - DATABASE |SECURITY LABEL - DATABASE )' > mydb.list
+psql -h new -d mydb -X -c "SELECT timescaledb_pre_restore()"
+pg_restore -h new -d mydb --exit-on-error -L mydb.list mydb.dump
+psql -h new -d mydb -X -c "SELECT timescaledb_post_restore()"
+psql -h new -d mydb -X -c "ANALYZE"
+
+# 6. TimescaleDB's update to the new server's version: the first statement of its own session.
+psql -h new -d mydb -X -c "ALTER EXTENSION timescaledb UPDATE"
+```
+
+Then compare the row counts and database settings on both servers. Repeat steps 1, 2 and 4 to 6
+for each database. In a Docker setup, run these commands in a container of the new image that can
+reach both servers, and point the service at the new server's volume when it matches.
+
+## Backing up and restoring
+
+### `mrsm backup postgres`
+
+An **online** backup of the stack's database: nothing is stopped or restarted, and clients keep
+writing. Each database is dumped from one consistent snapshot (`pg_dump -Fc` of a snapshot that a
+session exports for it, compressed with zstd when the server's `pg_dump` supports it), together
+with the roles (`pg_dumpall --globals-only`), and the database's structure and a row estimate are
+recorded in the same snapshot.
+
+```bash
+mrsm backup postgres
+```
+
+Each backup is a directory `<root>/backups/postgres/<UTC timestamp>/`:
+
+| File | What it is |
+|---|---|
+| `globals.sql` | The roles (`pg_dumpall --globals-only`; it holds their password hashes). |
+| `NN-<database>.dump` | Each database (`pg_dump -Fc --create`; readable with `pg_restore`). |
+| `manifest.json` | The PostgreSQL version and image, each database's extensions and their versions (TimescaleDB's above all: a restore needs it), each file's size and SHA-256, and row estimates. |
+
+The files are written to `<timestamp>.partial/` and the directory is renamed once every dump has
+been read back with `pg_restore --list`; a failed backup removes it. The directories are readable
+by you only on Linux and macOS (0700 directories, 0600 files); Windows uses the directory's
+inherited access controls. The free disk space is checked first (`--force`
+goes on anyway). The command prints the path, the sizes and the time it took.
+
+Backups contain the roles and each connectable, non-template database. They do not copy
+`postgresql.conf`, `pg_hba.conf`, or customizations of `template1`; keep those separately.
+Settings made with `ALTER SYSTEM` are recorded, subject to the restore exclusions above.
+
+**Scheduled backups.** The command asks nothing, so it runs as a [job](background-jobs.md):
+
+```bash
+mrsm backup postgres -s 'daily' -d
+```
+
+**Retention.** Every backup is kept unless you set how many to keep, e.g. with
+`mrsm edit config system`:
+
+```yaml
+backups:
+  postgres:
+    keep: 7
+```
+
+After each successful backup, the oldest complete backups beyond that number are removed. Only
+directories whose manifest says they are complete backups are removed: never an upgrade's or a
+restore's directory, nor anything else in `backups/postgres/`.
+
+### `mrsm restore postgres`
+
+```bash
+mrsm restore postgres                     # the newest complete backup
+mrsm restore postgres 20261018T120000Z    # a backup by its timestamp (an upgrade's backup works too)
+mrsm restore postgres /path/to/backup     # a backup directory elsewhere
+mrsm restore postgres rollback            # back to the database before the restore
+```
+
+The restore never overwrites the current database. Every file is first checked against the size
+and SHA-256 in the backup's manifest (damage is refused before anything changes;
+these checksums do not authenticate the backup or protect against someone editing both files
+and manifest), and a throwaway container of the stack's image checks that it can read every dump and
+create every extension and TimescaleDB version. After the plan and its question (`--yes` answers
+it), the backup is restored the way an upgrade restores its dump: into a NEW volume, in a temporary
+container without network, verified against the manifest (each database's tables, hypertables,
+compression settings, chunks, policies and extensions), and only then is the stack's `db` switched
+to it (`stack.yaml` is copied first; only the `db` volume changes). The services that use the
+database are stopped only for the switch, and the database keeps running until then.
+
+**Everything written since the backup is not in the restored database**: it stays in the previous
+volume, which is kept. `mrsm restore postgres rollback` (or `mrsm upgrade postgres rollback`)
+switches back to it; remove it with `docker volume rm` once you no longer need it.
+
+A backup of an older PostgreSQL major is restored into the stack's (newer) image the way an upgrade
+does it; a backup of a newer major than the image is refused (set an image of that major for `db`
+first).
+
+Before `mrsm stack up`, a PostgreSQL image whose major can be identified is checked against
+`PG_VERSION` in existing named volumes through a read-only mount, without pulling an image.
+A mismatch refuses startup and explains how to pin the old image and run `mrsm upgrade postgres`.
+A database already running its configured image skips the check. `mrsm stack up --force` bypasses
+it; Compose does not receive that flag. Unknown image families and tags such as `latest` cannot
+be checked this way.
 
 
 ---
@@ -6843,6 +7292,52 @@ Most subactions accept the standard pipe selectors (`-c`/`--connector-keys`, `-m
 !!! tip ""
     Every action also has a Python equivalent. See the [API reference at docs.meerschaum.io](https://docs.meerschaum.io) for programmatic usage (e.g. `mrsm.Pipe.sync()`, `mrsm.actions.actions['sync']`).
 
+## Shell Completions
+
+!!! note ""
+    New in v5.
+
+`mrsm` completes actions, subactions, flags and values in `bash`, `zsh`, `fish` and PowerShell, for both the `mrsm` and `meerschaum` commands. Inside the Meerschaum shell (`mrsm`) completion is built in; this is for your own shell.
+
+Install the script for the shell you use (`mrsm install completions` picks it from `$SHELL`; on Windows it is PowerShell), then start a new shell session:
+
+```bash
+mrsm install completions bash
+mrsm install completions zsh
+mrsm install completions fish
+mrsm install completions powershell
+```
+
+Each command lists every file it wrote and where. Running it again is harmless, a file with the same name that `mrsm` did not write is never replaced (unless you add `--force`), and `mrsm uninstall completions <shell>` removes exactly what was installed.
+
+| Shell | Written to |
+|---|---|
+| `bash` | `${XDG_DATA_HOME:-~/.local/share}/bash-completion/completions/mrsm` and `meerschaum` (loaded on demand by the `bash-completion` package; without it, add `source <(mrsm show completions bash)` to `~/.bashrc`) |
+| `zsh` | `${XDG_DATA_HOME:-~/.local/share}/zsh/site-functions/_mrsm`. Add `fpath=(~/.local/share/zsh/site-functions $fpath)` and `autoload -Uz compinit && compinit` to `~/.zshrc` if that directory is not already on your `fpath` (the command prints the exact lines). |
+| `fish` | `${XDG_CONFIG_HOME:-~/.config}/fish/completions/mrsm.fish` and `meerschaum.fish` |
+| `powershell` | `mrsm.ps1` in your user data directory, loaded from a marked block that is added to the profile PowerShell reports (`$PROFILE`; a profile that is not UTF-8, such as one Windows PowerShell 5.1 wrote as UTF-16, is never edited and the line to add is printed instead) |
+
+To try it without installing, load the script into the current session:
+
+```bash
+source <(mrsm show completions bash)           # bash
+source <(mrsm show completions zsh)            # zsh (after compinit)
+mrsm show completions fish | source            # fish
+mrsm show completions powershell | Out-String | Invoke-Expression   # PowerShell
+```
+
+`show completions` is answered before anything else starts, so loading the script from a start-up file (`~/.bashrc`, `~/.zshrc`) is cheap and never runs plugin code.
+
+The script contains no candidates. On every <kbd>Tab</kbd> it asks the program, so the answers follow what is installed and configured:
+
+- actions (including those of your plugins) and subactions: `mrsm sh<Tab>`, `mrsm show <Tab>`
+- flags and the values they take: `mrsm show pipes -<Tab>`, `mrsm show jobs --executor-keys <Tab>` (flags that a plugin declares with `choices` complete them too)
+- connector keys for `-i` / `--instance`, `-c` / `--connector-keys`, `-r` / `--repository` and `-e` / `--executor-keys`: `mrsm show pipes -c <Tab>`
+- job names (`stop jobs <Tab>`), plugin names (`edit plugins <Tab>`), configuration keys (`show config <Tab>`)
+- file names for `--file` / `--compose-file` and `--env-file`
+
+Asking never runs an action or writes anything: it reads the configuration and the plugin manifest the last command cached, starts no plugin code and no Python, and takes about 20 ms (50 ms through the Python `mrsm` command of the wheel). A plugin added since the last command appears after any command that loads plugins (`mrsm reload` does it on purpose). Pipe keys (`-m`, `-l`) and tags are not completed, since they need a database connection.
+
 ## Action Reference
 
 ### Pipe Lifecycle
@@ -6925,6 +7420,8 @@ Optimize storage and statistics for pipes' target tables. See [Pipe Maintenance]
 | `partition` | Repartition target tables to a new chunk width (`--chunk-minutes`). |
 | `restart` | Restart stopped jobs that were not manually stopped. |
 | `index` | Create the indices defined in pipes' parameters. |
+| `backup` | `backup postgres`: an online backup of the stack's database (v5, see [Backing up and restoring](../stack-upgrades.md#backing-up-and-restoring)). |
+| `restore` | `restore postgres`: restore the stack's database from a backup into a new volume (v5, same page). |
 
 #### `index`
 
@@ -6951,7 +7448,7 @@ Manage Meerschaum plugins and their Python dependencies.
 |---|---|
 | `install` | Install Meerschaum plugins (from a repository) or Python packages (into the `mrsm` venv). |
 | `uninstall` | Uninstall plugins or Python packages. |
-| `upgrade` | Upgrade Meerschaum itself, plugins, or packages (e.g. `upgrade meerschaum`). |
+| `upgrade` | Upgrade Meerschaum itself, plugins, or packages (e.g. `upgrade meerschaum`); `upgrade extensions` updates a PostgreSQL instance's extensions, `upgrade postgres` moves the stack's database to a newer PostgreSQL major (v5, see [Upgrading the stack](../stack-upgrades.md)). |
 | `setup` | Run a plugin's `setup()` function (e.g. `setup plugins noaa`). |
 | `reload` | Reload the running Meerschaum instance (re-import plugins and modules in place). |
 
@@ -8788,7 +9285,9 @@ Bounds (`begin`, `end`) are integers, ISO timestamp strings or `null`. Results a
 
 ## 📜 The manifest
 
-`manifest()` returns the same JSON document the Python plugin manifest uses, as a whole: the top-level keys `schema_version` (use the SDK constant `meerschaum_plugin::MANIFEST_SCHEMA_VERSION`; it is `3`, the native manifest's own schema, not the Python worker's), `meerschaum_version`, `python_version` (`""`), `fingerprint` (`null`) and `plugins`, plus `connector_types`, `pre_sync_hooks` and `post_sync_hooks` when you provide them (the shipped example is the reference). The host validates it against the bundled JSON schema (`crates/meerschaum-plugin/schema/manifest.schema.json`) at load time, so `--help`, tab completion and the server can learn what your plugin offers **without loading the library**: it is cached by a fingerprint of the plugin directory and rebuilt when a file changes.
+`manifest()` returns the same JSON document the Python plugin manifest uses, as a whole: the top-level keys `schema_version` (use the SDK constant `meerschaum_plugin::MANIFEST_SCHEMA_VERSION`; native plugins and Python workers share manifest schema `5`), `meerschaum_version`, `python_version` (`""`), `fingerprint` (`null`) and `plugins`, plus `connector_types`, `pre_sync_hooks` and `post_sync_hooks` when you provide them (the shipped example is the reference). The host validates it against the bundled JSON schema (`crates/meerschaum-plugin/schema/manifest.schema.json`) at load time, so `--help`, tab completion and the server can learn what your plugin offers **without loading the library**: it is cached by a fingerprint of the plugin directory and rebuilt when a file changes.
+
+Rebuild prerelease native libraries that export manifest schema `3` with the current SDK. Stale manifest caches are regenerated automatically. The native ABI and worker protocol remain at version `1`.
 
 The part for your plugin lives under `plugins.<name>`:
 
@@ -9064,7 +9563,7 @@ All Meerschaum environment variables begin with the prefix `MRSM_`. The most com
 | `MRSM_RUNTIME` | Marks a special runtime (e.g. `docker`). | _(unset)_ |
 | `MRSM_NO_AUTO_INSTALL` | Disable every implicit package installation (imports, dependency checks, `uv`/`pip` bootstraps). | _(unset)_ |
 | `MRSM_NOASK` / `MRSM_NONINTERACTIVE` | Disable interactive prompts (assume defaults). | _(unset)_ |
-| `MRSM_DUCKDB_LIB` | Path to DuckDB's own shared library (`libduckdb`) for the `duckdb` flavor. | _(unset: cached or downloaded on first use)_ |
+| `MRSM_DUCKDB_LIB` | Path to DuckDB's shared library; explicitly selects the native C API and prevents mixed Python SQLAlchemy access. | _(unset: Python driver when installed; otherwise native library lookup)_ |
 | `MRSM_BIN` | Run a standalone `mrsm` binary instead of the in-process CLI of the Python package. | _(unset)_ |
 | `MRSM_PYTHON` | The Python interpreter the binary runs plugin workers and `upgrade meerschaum` with. | _(auto-detected)_ |
 | `MRSM_ALLOW_DEFAULT_ROOT` | Let a debug build use the default root directory. | _(unset)_ |
@@ -9211,8 +9710,15 @@ MRSM_NO_AUTO_INSTALL=1 mrsm show pipes
 
 ## **`MRSM_DUCKDB_LIB`**
 
-The `duckdb` flavor does not bundle DuckDB: it loads DuckDB's own shared library (`libduckdb.so`,
-`libduckdb.dylib` or `duckdb.dll`, version 1.4 or newer) at run time. Meerschaum looks for it in this order:
+Python hosts with `meerschaum[sql-duckdb]` installed and this variable unset share the public Python
+DuckDB driver between Rust Pipe operations and SQLAlchemy. An explicit `MRSM_DUCKDB_LIB` selects
+the native C API instead. SQLAlchemy access is refused in that process to prevent separate database
+instances from losing writes. Unset the variable and restart the interpreter to use both interfaces.
+Restart after installing the extra if the process already selected the native driver.
+
+The standalone binary and Python hosts using the native C API load DuckDB's own shared library
+(`libduckdb.so`, `libduckdb.dylib` or `duckdb.dll`, version 1.4 or newer) at run time.
+Meerschaum looks for it in this order:
 
 1. `MRSM_DUCKDB_LIB`, a path to the file (for air-gapped hosts; a library that fails to load is an error);
 2. the cache under `<root>/drivers/`;
@@ -9225,6 +9731,9 @@ MRSM_DUCKDB_LIB=/opt/duckdb/libduckdb.so mrsm show drivers
 
 Run `mrsm show drivers` to see where the library comes from, and `mrsm install driver duckdb` /
 `mrsm uninstall driver duckdb` to manage the cached copy.
+
+The native C API path refuses per-connection DuckDB options that it cannot honor, including
+`access_mode=READ_ONLY`. Use the Python `sql-duckdb` extra for connections with these settings.
 
 ## **`MRSM_BIN`**
 
@@ -9331,6 +9840,70 @@ A symptom-driven guide to the most common Meerschaum issues. Each entry follows 
     Almost every issue is faster to diagnose with the `--debug` flag. It prints the actual SQL, the resolved sync window, and the dtypes being applied. See [Debugging tips](#debugging-tips) at the bottom of this page.
 
 For terminology used below, see the [glossary](glossary.md). For everything else, visit [docs.meerschaum.io](https://docs.meerschaum.io).
+
+---
+
+## Start here: `mrsm doctor`
+
+!!! tip "Run `mrsm doctor` first"
+    One command checks the installation and tells you what is wrong and how to fix it. It is **read-only** and takes about a second: it never installs, creates, migrates or writes anything, not even on a new root (no default config files, no plugin manifest, no entry-point cache), and it never imports plugin code. It reads the plugin manifest the last command cached and warns when it is stale or missing (`mrsm reload` rebuilds it). The one caveat: opening an existing SQLite database may create its `-wal` and `-shm` files beside it. Paste its `--nopretty` output into a bug report.
+
+```bash
+mrsm doctor                  # a table: group, check, PASS / WARN / FAIL / SKIP, and the fix for each problem
+mrsm doctor -i sql:main      # check another instance
+mrsm doctor --nopretty       # one JSON document, for a bug report or a script
+mrsm doctor --debug          # the time each check took
+```
+
+In the SDK, importing `meerschaum.actions` initializes the action registry and discovers plugins before any action runs. A subsequent `actions['doctor'](...)` call is read-only from that point; `mrsm.entry(['doctor', ...])` also avoids that initial registry import.
+
+Every check is **PASS**, **WARN** (works, but look at it), **FAIL** (something is broken) or **SKIP** (not applicable here, the detail says why); each WARN or FAIL carries the exact command or setting that fixes it. The command fails (and exits `1`) only when a check FAILs. `--nopretty` always exits `0`, like every `mrsm` command, so a script reads `summary.ok` (and `summary.fail`) of the JSON document instead of the exit code. A sample on a machine with a Python plugin installed, where an old `meerschaum` 4.x in the user site shadows the one `mrsm` was built with:
+
+```text
+┏━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ Group      ┃ Check              ┃ Status ┃ Detail                                                ┃
+┡━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ install    │ meerschaum         │ PASS   │ 5.0.0rc1; Python extension, in-process                │
+│            │ worker python      │ PASS   │ Python 3.13.1 at /usr/bin/python3                     │
+│            │ meerschaum package │ FAIL   │ /usr/bin/python3 imports `meerschaum` 4.1.4 from      │
+│            │                    │        │ /home/user/.local/lib/python3.13/site-packages/       │
+│            │                    │        │ meerschaum (the user site), but this program is       │
+│            │                    │        │ 5.0.0rc1                                              │
+│            │                    │        │ Fix: remove or upgrade the stale copy                 │
+│            │                    │        │ (`/usr/bin/python3 -m pip install --upgrade           │
+│            │                    │        │ meerschaum`, or delete that directory), or set        │
+│            │                    │        │ MRSM_PYTHON to the interpreter that has 5.0.0rc1      │
+│ paths      │ root               │ PASS   │ /home/user/.config/meerschaum (writable)              │
+│            │ disk: root         │ PASS   │ /home/user/.config/meerschaum: 11.3 GB free of        │
+│            │                    │        │ 214.9 GB, inodes 90% free                             │
+│            │ disk: temp         │ WARN   │ /tmp: 2.1 GB free of 8.0 GB, inodes 3% free           │
+│            │                    │        │ Fix: free space on the filesystem of /tmp (or point   │
+│            │                    │        │ it elsewhere: MRSM_ROOT_DIR, TMPDIR)                  │
+│ config     │ files              │ PASS   │ 4 config files parsed                                 │
+│ instance   │ connection         │ PASS   │ sql:main (timescaledb) at localhost:5432/meerschaum   │
+│            │ server version     │ PASS   │ PostgreSQL 18.1                                       │
+│            │ tables             │ PASS   │ mrsm_pipes, mrsm_users, mrsm_plugins exist            │
+│ extras     │ api                │ PASS   │ fastapi 0.141.1, uvicorn 0.38.0, jwt 2.13.0           │
+│ ...        │                    │        │                                                       │
+└────────────┴────────────────────┴────────┴───────────────────────────────────────────────────────┘
+
+ 💢 1 check failed (install: meerschaum package); 20 passed, 1 warning, 1 failed, 7 skipped.
+```
+
+What each group looks at:
+
+| Group | Checks |
+|---|---|
+| `install` | The version and how this process runs (Python extension in-process, or a standalone binary), the build, the platform, the worker interpreter (`MRSM_PYTHON`, else `python3`) and its version, and the `meerschaum` package that interpreter imports: the same rule the worker and API host apply before importing it: a copy of another **major** version (a stale v4 in `~/.local`), a copy that looks like v4, or one speaking another worker protocol is a FAIL that names the path when Python plugins are installed (they run in that interpreter) and a WARN otherwise; another release of the same major version is a WARN naming both versions (the worker starts and warns once); extra copies on `sys.path` are a WARN. Plugins, Python connectors and the API host run in that interpreter. |
+| `paths` | The root, config and plugins directories exist and are writable; free space and free inodes of the root's filesystem and of the temporary directory (WARN under 1 GB or 5% inodes, FAIL under 64 MB or 1% inodes: a full `/tmp` breaks workers). |
+| `config` | The config files parse, no unknown top-level keys or removed v4 keys (`system:experimental:join_fetch: true`), the `MRSM_<TYPE>_<LABEL>` connector variables found (names only, never values; other `MRSM_*` variables are listed apart), the default instance. |
+| `instance` | A connection to the default instance (or `-i`) with a 5 second limit, the server version and the Meerschaum tables (`mrsm_pipes`, `mrsm_users`, `mrsm_plugins`) for `sql:` instances; `/healthcheck` and `/version` of an `api:` instance (WARN if its version differs from the client's). A SQLite database that does not exist yet is reported, not created. With the public Python DuckDB transport, the live query is SKIPped to keep diagnostics read-only: no database or shared anchor is opened. Instances are read from the config, so a connector registered only through Python (`mrsm.get_connector(...)` with no config entry) is not known to `doctor`. |
+| `drivers` | In a Python host using the public DuckDB transport, installed driver metadata and the existing policy are checked without importing DuckDB or selecting a policy. A metadata PASS does not verify importability or connectivity; missing version metadata is a WARN. Standalone/native DuckDB and Oracle use the shared-library checks (`mrsm show drivers`): a missing library is a WARN when a configured connector needs it, a FAIL for the default instance when nothing will fetch it (Oracle always; native DuckDB with `MRSM_NO_AUTO_INSTALL` or a load error), and a WARN for native DuckDB downloaded on first use. A missing native library is never installed by the doctor. |
+| `extras` | Which extras (`pandas`, `polars`, `geo`, `sql`, `api`, `dash`, `shell`) the worker interpreter can import, and a WARN when an installed plugin needs one that is missing (API-host plugins need `api`, Dash plugins `dash`). An extra that is partly installed and that no plugin needs is a PASS naming the packages that are not installed. |
+| `plugins` | Whether the cached plugin manifest is current (a missing or stale one is a WARN: `mrsm reload`), how many plugins are installed, the ones whose import failed, and virtual environments built by another Python than the worker's (or whose interpreter is gone). Plugin code is never imported by the doctor. |
+| `jobs` | Jobs that are running, paused or stopped, jobs whose last run failed, and stale PID files. |
+| `stack` | If the Docker stack's compose file exists and Docker answers, the state and health of each service (a service stopped on purpose is a WARN, a crashed or unhealthy one a FAIL). The stack is never touched. |
+| `extensions` | The PostgreSQL extensions of the instance against what the server ships (see [Upgrading the stack](/reference/stack-upgrades/)). |
 
 ---
 
@@ -9616,7 +10189,7 @@ mrsm reload plugins
 
 **Cause:** A separately installed `meerschaum` under `~/.local/lib/pythonX.Y/site-packages/` is earlier on `sys.path` than the repo checkout and shadows it.
 
-**Fix:** Force the repo onto the path:
+**Fix:** `mrsm doctor` names the stale copy (`install: meerschaum package` reports its path). A Python worker (and the API host) also refuses to import a `meerschaum` of another major version, one that looks like v4, or one speaking another worker protocol (importing v4 would run its start-up, which installs packages whatever `MRSM_NO_AUTO_INSTALL` says), and says so once; for another release of the same major version it starts and warns once. Force the repo onto the path:
 
 ```bash
 PYTHONPATH=$(pwd) python -m pytest ...
@@ -9725,7 +10298,9 @@ Everything below is deliberate, and each item links to the section with the deta
 | Editors | `$EDITOR`, else installed `pyvim` | `$VISUAL`, else `$EDITOR`, else `vi`. Nothing is installed to open an editor. [Deployment](#deployment) |
 | Scopes | `*` entered in `edit tokens` / `edit users` was expanded to the built-in scope list; stopping a job over the API required the misspelled scope `josb:stop`; any user could register a token with any scopes, `*` included | `*` is stored literally and grants every scope, custom and future ones included; `POST /jobs/{name}/stop` requires `jobs:stop` (a token that holds the legacy `josb:stop` is still accepted); **a token carries at most its owner's scopes** (asking for more is refused with a `403` naming them), and only a token's owner or an administrator may edit, invalidate or delete it (only an administrator may make an invalidated token valid again). [Tokens](/reference/api-instance/tokens/#scopes) |
 | `sql <label>` | Passed the connection URL with the password to `pgcli` / `mycli` | Passes the URL without the password and sets `PGPASSWORD` / `MYSQL_PWD` for the client, so the password never shows in `ps`. |
-| DuckDB | The Python `duckdb` package, or (v5 pre-releases) a C++ library built into `mrsm` | DuckDB's own `libduckdb` loaded at run time and downloaded on first use; `MRSM_DUCKDB_LIB` for air-gapped hosts. [Installing and running](#installing-and-running) |
+| `sql <label> "<query>"` | The query went to the driver in one call: SQLite (`sqlite3`) and MySQL / MariaDB (`pymysql`) refused a string holding several statements (`a; b`) with a driver error and ran none of them | The text is sent as written, so `CREATE TABLE t (a INT); INSERT INTO t (a) VALUES (5)` runs on SQLite, MySQL and MariaDB like it already did on PostgreSQL and MSSQL (Oracle still takes one statement per call). Only SQL you type is affected |
+| `sql <label> "<query>"` that contains `select` but changes data | v4 sends any text containing `select` through `read()`, which fails after the statement ran and, on most flavors, rolled it back silently: `INSERT ... SELECT` kept its rows only on MSSQL, and `CREATE VIEW ... AS SELECT` was kept on MSSQL, MySQL, MariaDB, Oracle and SQLite but not on PostgreSQL or DuckDB | The statement runs and is **committed** on every flavor, and the action still prints `None` after "This result object does not return rows" (DuckDB prints its `Count` table). |
+| DuckDB | The Python `duckdb` package, or (v5 pre-releases) a C++ library built into `mrsm` | Python hosts share the optional Python driver between Pipe operations and SQLAlchemy. Standalone and base-only installs load `libduckdb` at run time, downloading it when needed. Explicit `MRSM_DUCKDB_LIB` selects the native C API and refuses mixed SQLAlchemy access. [Installing and running](#installing-and-running) |
 | Time zone objects | `ZoneInfo('Etc/UTC')` from psycopg | `datetime.timezone.utc` (equal values). [Python users](#python-library-users-and-scripts) |
 
 ## 📦 Installing and running
@@ -9741,8 +10316,8 @@ Everything below is deliberate, and each item links to the section with the deta
     | `meerschaum[geo]` | shapely, pyproj, GeoPandas, geoarrow-types (GeoPolars when released) | You read `geometry[...]` pipes into Python |
     | `meerschaum[sql]` | SQLAlchemy, psycopg, PyMySQL | Your Python code calls `conn.read()`, `conn.exec()`, `conn.value()`, `conn.to_sql()`, `conn.engine` or `get_tables()`. Pipe operations do **not** need it. |
     | `meerschaum[sql-mssql]`, `[sql-oracle]`, `[sql-duckdb]`, `[sql-cockroachdb]` | pyodbc; oracledb; duckdb + duckdb-engine; sqlalchemy-cockroachdb | Raw SQL from Python against those flavors |
-    | `meerschaum[api]` | FastAPI, uvicorn, a2wsgi, python-multipart, PyJWT | Any installed plugin uses `@api_plugin`, `@web_page` or registers an MCP tool |
-    | `meerschaum[dash]` | Dash, a2wsgi | Any installed plugin uses `@dash_plugin` |
+    | `meerschaum[api]` | FastAPI, uvicorn, a2wsgi, python-multipart, PyJWT, websockets | Any installed plugin uses `@api_plugin`, `@web_page` or registers an MCP tool |
+    | `meerschaum[dash]` | Dash, a2wsgi, dash-bootstrap-components, dash-extensions | Any installed plugin uses `@dash_plugin` or a Dash `@web_page`. The host builds each plugin's app with `dash_extensions.enrich.DashProxy` (`Trigger`, duplicate outputs, as in v4) when dash-extensions is importable, and the documented plugin page examples use `dash_bootstrap_components` |
     | `meerschaum[shell]` | ptpython | You use `mrsm python` |
     | `meerschaum[gui]` | pywebview | You use `mrsm start gui` |
     | `meerschaum[cli-tools]` | pgcli, mycli, litecli, gadwall | You use `mrsm sql` to open a database shell |
@@ -9750,20 +10325,21 @@ Everything below is deliberate, and each item links to the section with the deta
 
     The Docker image installs `meerschaum[full]`; a new `bmeares/meerschaum:slim` tag installs only the base wheel.
 
-    **Gone from every extra** (they served code that is now Rust): `dask`, `partd`, `joblib`, `psycopg2-binary`, `asyncpg`, `databases`, `aiosqlite`, `aiomysql`, `GeoAlchemy2`, `rich`, `prompt-toolkit`, `pygments`, `tabulate`, `humanfriendly`, `python-daemon`, `dill`, `psutil`, `watchfiles`, `gunicorn`, `httpx`, `websockets`, `valkey`, `python-jose`, `fastapi-login`, `python-dotenv`, `envyaml`, `terminado`, `tornado`, `dash-bootstrap-components`, `dash-ace`, `dash-extensions`, `dash-daq`, `Flask-Compress`, `modin`, `cmd2`, `ruamel.yaml`. If your plugin imports one of these, declare it in `required` (see [Dependencies and venvs](#dependencies-and-venvs)).
+    **Gone from every extra** (they served code that is now Rust): `dask`, `partd`, `joblib`, `psycopg2-binary`, `asyncpg`, `databases`, `aiosqlite`, `aiomysql`, `GeoAlchemy2`, `rich`, `prompt-toolkit`, `pygments`, `tabulate`, `humanfriendly`, `python-daemon`, `dill`, `psutil`, `watchfiles`, `gunicorn`, `httpx`, `valkey`, `python-jose`, `fastapi-login`, `aiofiles`, `python-dotenv`, `envyaml`, `terminado`, `tornado`, `dash-ace`, `dash-daq`, `Flask-Compress`, `modin`, `cmd2`, `ruamel.yaml`. If your plugin imports one of these, declare it in `required` (see [Dependencies and venvs](#dependencies-and-venvs)).
 
-- **DuckDB is downloaded on first use.** `mrsm` and the extension no longer compile DuckDB in (that was ~35 MB per artifact and minutes of C++ on every build). A `sql:duckdb` connector loads DuckDB's own shared library, `libduckdb` (v1.5.6, MIT, published by the DuckDB project; Meerschaum does not redistribute it): the first connection downloads the release asset for your platform (about 41 MB) into `MRSM_ROOT_DIR/drivers/duckdb/<version>/`, after checking it against a SHA-256 that is pinned in Meerschaum, and later runs reuse it. `mrsm install driver duckdb` does the download on purpose (`--force` repeats it), `mrsm uninstall driver duckdb` removes it, and `mrsm show drivers` reports each driver's version, source (`env`, `cache`, `system` or `missing`) and path. **Behind a TLS-intercepting proxy** the download trusts the operating system's certificate store as well as its bundled roots, and honors `HTTPS_PROXY`; if it still cannot reach GitHub, run `mrsm install driver duckdb` on a machine that can and copy the library. **Air-gapped hosts:** copy a DuckDB library (v1.4 or newer) there and set `MRSM_DUCKDB_LIB` to its path, or put it on the system library path; `MRSM_NO_AUTO_INSTALL=1` forbids the implicit download and a missing library then fails with a message naming both fixes. In Docker, `--build-arg duckdb_driver=1` bakes it into the image's root. On Linux the library needs the C++ runtime (`libstdc++`), which both Docker images ship. DuckDB sessions run in UTC (the official build bundles ICU, whose default is the host's zone), aware timestamp parameters keep their instant, and nested, interval and enum values read as the text DuckDB prints.
-- **No Python at all** is an option: `cargo install meerschaum` or a release binary runs without an interpreter as long as no Python plugin, custom Python connector, API plugin or Dash plugin is used. Point `MRSM_PYTHON` at an interpreter when you add one.
+- **DuckDB uses an optional Python driver or a native library.** In Python, install `meerschaum[sql-duckdb]` and leave `MRSM_DUCKDB_LIB` unset so Pipe operations and SQLAlchemy share one driver. The standalone binary and base-only Python installs use DuckDB's own shared library, `libduckdb` (v1.5.6, MIT, published by the DuckDB project; Meerschaum does not redistribute it). When no cached or system library is available, the first native connection downloads the release asset for your platform (about 41 MB) into `MRSM_ROOT_DIR/drivers/duckdb/<version>/`, after checking it against a SHA-256 pinned in Meerschaum. Later native runs reuse it. `mrsm install driver duckdb` does the download on purpose (`--force` repeats it), `mrsm uninstall driver duckdb` removes it, and `mrsm show drivers` reports each driver's version, source (`env`, `cache`, `system` or `missing`) and path. **Behind a TLS-intercepting proxy** the download trusts the operating system's certificate store as well as its bundled roots, and honors `HTTPS_PROXY`; if it still cannot reach GitHub, run `mrsm install driver duckdb` on a machine that can and copy the library. **Air-gapped hosts:** copy a DuckDB library (v1.4 or newer) there and set `MRSM_DUCKDB_LIB` to its path, or put it on the system library path; `MRSM_NO_AUTO_INSTALL=1` forbids the implicit download and a missing library then fails with a message naming both fixes. In Docker, `--build-arg duckdb_driver=1` bakes it into the image's root. On Linux the library needs the C++ runtime (`libstdc++`), which both Docker images ship. Native Pipe sessions run in UTC (the official build bundles ICU, whose default is the host's zone), aware timestamp parameters keep their instant, and nested, interval and enum values read as the text DuckDB prints.
+- **No Python at all** is an option: `cargo install meerschaum --locked` (Rust 1.95 or newer) or a release binary runs without an interpreter as long as no Python plugin, custom Python connector, API plugin or Dash plugin is used. Point `MRSM_PYTHON` at an interpreter when you add one.
 - **Windows limits.** The Python API host is proxied over a Unix socket, so `@api_plugin` routes and plugin Dash apps do not work on Windows, and background jobs (`-d`) are refused. Run those in Docker or WSL.
 - **Removed:** `pyoxidizer` builds and the standalone "portable" archive. `pip install meerschaum` and the standalone binary (`cargo install meerschaum`, release archives) replace them.
 
 ## ⚙️ Configuration
 
-Everything under `MRSM_ROOT_DIR/config/` is read unchanged. Three things to know:
+Everything under `MRSM_ROOT_DIR/config/` is read unchanged. Things to know:
 
 - `api.uvicorn.*` keys (such as `forwarded_allow_ips`) are honored with a deprecation notice and mapped to `api.server.*`. Rename them at your leisure.
 - **YAML is parsed by Meerschaum's own codec.** It reads and writes what v4 (PyYAML) did, byte for byte on the files Meerschaum writes, and keeps dates, bytes and very large integers intact. The one deliberate difference: the full-`Loader` tags `!!python/object`, `!!python/apply`, `!!python/name`, `!!python/module` and friends are **refused** like `safe_load` does, so a config file or a pipe's `parameters` can never run code. `!!python/tuple` is still read. A lone surrogate escape (`"\ud800"`) loads as U+FFFD.
 - **Config files are written atomically.** `edit config`, `write_config` and the actions that save configuration write a temporary file in the same directory and rename it over the target, keeping its mode, owner and group (a new file is `0600`). A failed write never deletes or truncates the existing file. On a single bind-mounted file (`/meerschaum/config/plugins.json` in Docker) or a writable file in a read-only directory, the write falls back to rewriting the file in place, as v4 did.
+- **Default pipe configuration may appear on startup.** Most v5 commands load the pipe defaults and can create `config/pipes.json` when it is missing. This file contains configuration defaults; registered pipes remain in their instance database. `mrsm doctor` uses read-only configuration and does not create it.
 - **New:** `api.permissions.rate_limits`, keyed by route group, so you no longer need HTTP middleware to throttle `/login` (see [API plugins](#api-plugins)):
 
     ```yaml
@@ -9840,10 +10416,12 @@ Things to check:
 - **`get_data(as_dask=True)` raises.** Dask is removed in 5.0: the call raises a `TypeError` naming this guide. Use `as_iterator=True` (chunks, lazily) or `as_polars=True`; `pipe.sync()` of a Dask DataFrame raises the same way (convert with `ddf.compute()`, or pass a generator of chunks).
 - **Result shapes of the native `Pipe` methods.** `pipe.enforce_dtypes(<list, dict, tuple or text>)` returns the columns' values, order and datetime dtype as before, but its pandas backends for untyped columns are the native engine's (`int64`, `float64`, `string`) where pandas' own inference gave `Int64` or `object`. `pipe.filter_existing()` keeps the pandas dtypes of the merge, except that a string column whose stored rows come back Arrow-backed from a custom instance is `string` rather than `object`. `pipe.fetch()` from a `sql:` source returns a generator of chunks with parsed datetimes (SQLite used to return text); a plugin `fetch()` that returns a list or dictionary comes back as one DataFrame, and a caller's `chunk_hook` on a plugin source runs in your process for every chunk the plugin yields. `pipe.deduplicate(workers=N)` runs the chunks concurrently only on thread-safe connectors, as before.
 - **Time zone objects.** On PostgreSQL, the datetimes in `get_data()` frames and `as_docs` carry `datetime.timezone.utc` where v4 (psycopg) had `ZoneInfo('Etc/UTC')`. The values compare equal, but `str(tz)`, `repr(tz)`, `tz.key` and `isinstance(tz, ZoneInfo)` differ.
+- **`get_data()` / `enforce_dtypes()` dtypes if your v4 never had polars.** v4.1.4 chose its pandas dtypes by whether `polars` could be imported. Every v4 extra that brings pandas (`sql`, `api`, `polars`, `full`) also brings polars, and then declared columns came back Arrow-backed: `double[pyarrow]`, `large_string[pyarrow]`, and `timestamp[ns, tz=UTC][pyarrow]` for a declared `datetime64[ns, UTC]`. A bare `pip install meerschaum==4.1.4` (no extras) never installs polars and returned NumPy `float64`, pandas `string` and `datetime64[us, UTC]` instead. v5 always returns the first set, with or without polars; the values are the same. If you upgrade from a bare v4 install and your code needs the NumPy dtypes, cast after reading, for example `df = df.astype({'dt': 'datetime64[us, UTC]', 'x': 'float64', 's': 'string'})` (works on pandas 2 and 3). `df.convert_dtypes(dtype_backend='numpy_nullable')` is not a substitute: pandas 3 raises on Arrow-backed timestamps with a time zone.
 - **New in 5.0: `mrsm.SyncResult`, and every `pipe.sync()` input runs natively.** `mrsm.SyncResult` is the public name of the tuple subclass `pipe.sync()` returns (`success`, `message`, `inserted`, `updated`, `upserted`, `deleted`, `changed_intervals`, `duration`, `begin`, `end`). `pipe.sync()` with no data (a `sql:`, `api:` or `valkey:` source, a plugin or a `@make_connector` connector), text, tuples, generators of chunks, `force`, `workers`, `blocking=False`, `debug=True`, plugin keyword arguments, temporary pipes and pipes with `reference`s or `{{ }}` templates all run in the Rust core. Dask DataFrames are not accepted any more (`TypeError`): call `.compute()` or pass a generator of chunks. A generator of chunks returned by a plugin's `fetch()` is synced one chunk at a time, whatever `workers` says. A tuple is read as rows, as pandas does (v4 raised `TypeError`). `changed_intervals` holds the grid cells (one chunk interval wide) of the rows handed to the instance: a superset of the rows that actually changed. `sql:` instances on `mssql`, `oracle`, `duckdb` and in-memory SQLite run through the Rust drivers too; the `oracle` driver needs the Oracle client library (`libclntsh`) installed, and an in-memory SQLite database (`sql:memory`) is one database file that the `Pipe` methods and `connector.read()` / `exec()` (SQLAlchemy) share. `pyarrow` Tables and RecordBatches sync natively; any other unsupported value raises `TypeError` naming the accepted types. Unconstrained PostgreSQL `NUMERIC` values keep the exact scale they were stored with.
 - **`APIConnector` returns an `ApiResponse`.** `make_request()` and the verb helpers (`get`, `post`, `put`, `delete`, ...) return an `ApiResponse`, not a `requests.Response`, because `requests` is no longer a dependency. It offers the common surface only: `status_code`, `ok`, `text`, `content`, `headers` (just `Content-Type`), `url`, `json()`, `raise_for_status()` (raising an `OSError`, as `requests.HTTPError` is) and truthiness. Other `Response` members (`iter_content`, `cookies`, `elapsed`, ...) do not exist, and `make_request` honors `params`, `json`, `data`, one `files` entry and `timeout` only. A refused or reset connection raises the builtin `ConnectionError` (an `OSError`, as `requests.exceptions.ConnectionError` was) with the transport's message. `connector.session` creates a `requests.Session` on access if `requests` is installed, but the connector does not use it. `get_actions()` still returns a response whose `.json()` is the list of actions.
 - **`ValkeyConnector.client`** is a real `valkey.Valkey` when that package is importable (Meerschaum never installs it), and otherwise a built-in client covering the commands Meerschaum itself uses (`get`, `set` with `ex`, `px` and `nx`, `delete`, `unlink`, `exists`, `incr`, `keys`, the sorted-set, set, list and hash basics, `flushdb`, `ping`, `execute_command`); any other command raises `NotImplementedError`. Install the `valkey` package in your plugin's venv if you need the rest. Values it returns are `bytes`, as with `valkey.Valkey`.
 - **Raw SQL needs `meerschaum[sql]`.** `conn.read(sql, params=...)`, `conn.exec(...)`, `conn.value(select)`, `conn.to_sql(df, ...)`, `conn.engine` and `get_tables(conn)` stay SQLAlchemy-backed and keep accepting SQLAlchemy constructs. GeoPandas's `read_postgis(query, conn.engine)` keeps working. Without the extra these raise an `ImportError` naming the extra (`conn.engine` raises an `AttributeError` with the same message, so `hasattr(conn, 'engine')` is `False`). `conn.URI`, `conn.DATABASE_URL`, `conn.IS_THREAD_SAFE`, `mrsm.get_pipes()` and every pipe operation work without it.
+- **DuckDB connections.** Python DuckDB connectors share the public `duckdb` driver between Rust Pipe operations and SQLAlchemy, so both interfaces observe the same writes. Install the `sql-duckdb` extra (`duckdb >= 1.5.6`, `duckdb-engine >= 0.17.0`) and leave `MRSM_DUCKDB_LIB` unset. An explicit override selects the native C API and refuses mixed SQLAlchemy access; unset it and restart to use both. Standalone / base-only installs continue to load the native shared library. Per-file connection settings must agree. Custom `creator`, `module`, and `do_connect` routing hooks are refused before connection access; standard `connect`, `checkout`, and transaction events remain available. Prefer spawn for child processes. Fork children must exec a fresh interpreter before using DuckDB; the public driver cannot safely close inherited connections or finalize inherited worker threads during normal child interpreter shutdown.
 - **`get_config` is served by the Rust config registry.** `get_config`, `set_config`, `read_config`, `write_config`, `get_plugin_config`, `write_plugin_config`, `MRSM{}` symlinks, `MRSM_CONFIG` / `MRSM_PATCH` and `MRSM_<TYPE>_<LABEL>` connectors behave as in v4, and the dictionaries `get_config` returns are still live (mutate one and the next call sees it). `meerschaum.config.config` is that live dictionary; assigning a new dict to it (or calling `set_config(cf)`) replaces it. Config YAML values that JSON cannot hold (a `2024-01-01` date, bytes, very large integers) now load, substitute and write back unchanged instead of failing.
 - **Constructing a `Pipe` never touches the instance.** Module-level `mrsm.Pipe(...)` definitions import without a database, as today. Attributes are fetched on first access.
 - **Partial-row syncs** on non-upsert pipes (`pipe.sync([{'ts': ..., 'id': ..., 'status': 'done'}])`) update the matching row without nulling other columns, as today.
@@ -9932,9 +10510,11 @@ In v5 the `mrsm` venv starts out holding only the extras you installed. To keep 
 
 ## 🌐 API plugins
 
-`@api_plugin` functions still receive a FastAPI `app` and can add routes, middleware, `StaticFiles` mounts and background threads. `meerschaum.api.endpoints`, `get_api_connector`, `get_cache_connector`, `production`, `debug`, `ScopedAuth`, `CurrentScopes`, `_oauth2.SECRET`, `_tokens.get_token_from_authorization`, `get_pipe` and the `models` stay. `api_plugin` returns your function unchanged, so tests that call `init_app(FastAPI())` against a bare app keep passing.
+`@api_plugin` functions still receive a FastAPI `app` and can add routes, middleware, `StaticFiles` mounts and background threads. `meerschaum.api.endpoints`, `get_api_connector`, `get_cache_connector`, `production`, `debug`, `ScopedAuth`, `CurrentScopes`, `_oauth2.SECRET`, `_tokens.get_token_from_authorization`, `get_pipe` and the `models` stay. `api_plugin` returns your function unchanged, so tests that call `init_app(FastAPI())` against a bare app keep passing. `from meerschaum.api import manager` and `Depends(manager)` keep working too: `manager` is now a built-in JWT login manager with `fastapi_login.LoginManager`'s call signature (`user_loader()`, `optional`, `create_access_token()`, ...), so neither `fastapi-login` nor `python-jose` is installed (tokens are validated with PyJWT against the same secret file as the Rust server). `meerschaum.api.aiofiles`, `typing_extensions`, `importlib_metadata`, `packaging_version`, `multipart` and `uvicorn_workers` are no longer re-exported; import what you use from your plugin (declare it in `required`).
 
-**What changed:** Meerschaum's own routes are served by the Rust server. Your routes are served by a Python **API host** that the Rust server starts when it sees a plugin needs it and reverse-proxies to. Every path the Rust server does not own, websockets included, reaches your app unchanged, so your public URLs do not move. Install `meerschaum[api]` wherever such plugins run (the Docker images already do).
+**Known difference:** your `@api_plugin` routes work, but they are not listed in the server's `/openapi.json`, `/docs` or `/redoc` (v4 listed them because one FastAPI app served everything); the Rust server documents only its own routes.
+
+**What changed:** Meerschaum's own routes are served by the Rust server. Your routes are served by a Python **API host** that the Rust server starts when it sees a plugin needs it and reverse-proxies to. Every path the Rust server does not own, websockets included, reaches your app unchanged, so your public URLs do not move. Install `meerschaum[api]` wherever such plugins run (the Docker images already do), or leave `MRSM_NO_AUTO_INSTALL` unset and the host installs what it needs into the `mrsm` venv on its first start. With `MRSM_NO_AUTO_INSTALL=1` and the extra missing, the host exits with an `ImportError` naming `pip install "meerschaum[api]"`. The host runs inside the `mrsm` venv for its whole life, as v4's API server did.
 
 Three patterns need attention because they assumed one process:
 
@@ -9997,7 +10577,7 @@ Checklist:
 4. **You cannot patch console pages.** A callback with an `Output` targeting a component on a Meerschaum page (the pipes dashboard, the jobs page, ...) raises at registration time because that ID does not exist in your app. Move that UI into a page of your own.
 5. **`session-store` is filled on page load** from the shared session cookie by the shim. Callbacks that only `State('session-store', 'data')` need no change. Callbacks that *wrote* `session-store` to log a user in should call `meerschaum.api.dash.sessions.set_session` so the console sees the login too.
 6. **Install `meerschaum[dash]`** (and `[api]`) wherever the server runs.
-7. Dash version compatibility is now your plugin's concern. Pin `dash` in your plugin's `required`, and add `dash-bootstrap-components`, `dash-extensions`, `dash-ace` or `dash-daq` there if you use them: Meerschaum no longer installs them.
+7. Dash version compatibility is now your plugin's concern. Pin `dash` in your plugin's `required`, and add `dash-ace` or `dash-daq` there if you use them: Meerschaum no longer installs them. `meerschaum[dash]` still installs `dash-bootstrap-components` and `dash-extensions`.
 
 ### Option B: the page contract (recommended for new pages)
 
@@ -10109,13 +10689,16 @@ A plugin directory may contain both a Rust library and a Python module; the Rust
 
     With the defaults, anyone who can reach the API can register an account (`api:permissions:registration:users`) and, as a logged-in user, open the web terminal (`api:permissions:actions:non_admin`): **a shell on the server for anyone who can reach the port**. Meerschaum 4 behaves the same, and v5 keeps it. Before exposing an API, start it with `--secure` (terminals and actions for administrators only) or `--private` (authentication on every endpoint), or set `api:permissions:registration:users: false` (no self-registration) or `api:permissions:actions:non_admin: false` (administrators only). `mrsm start api` prints a warning at startup when it binds a non-loopback address with both settings on; it cannot see a reverse proxy, so a loopback bind behind a proxy exposes the same terminal **without** the warning. (`--no-auth` on a non-loopback address also prints a warning: every route, `/actions` included, is then open to anyone who can connect.)
 
-- **Docker.** `bmeares/meerschaum` and `bmeares/meerschaum:api` keep their entrypoints, `/meerschaum/plugins`, `/meerschaum/config` and `/meerschaum/config/plugins.json`. `docker cp` of plugins into the container keeps working. The default image ships `meerschaum[full]`, so API and Dash plugins work without further installs. `bmeares/meerschaum:slim` ships only the base wheel and is the right base for Rust plugins or plugins that return dicts.
+- **Docker.** `bmeares/meerschaum` and `bmeares/meerschaum:api` keep their entrypoints, `/meerschaum/plugins`, `/meerschaum/config` and `/meerschaum/config/plugins.json`. `docker cp` of plugins into the container keeps working. The default image ships `meerschaum[full]`, so API and Dash plugins work without further installs. `bmeares/meerschaum:slim` ships only the base wheel and is the right base for Rust plugins or plugins that return dicts. As in v4, the images ship `curl` (the stack's API healthcheck runs `curl --fail http://localhost:<port>/healthcheck`), and the full image ships `git` and `ssh` (plugins may require `git+https://...` packages); the slim image has `curl` but no `git`.
+- **Stack database setup.** The default `db` service mounts `<root>/db/initdb/create-extensions.sql` as a single file, `/docker-entrypoint-initdb.d/100_meerschaum.sql`, instead of mounting the `<root>/db/initdb` directory over the image's whole setup directory, so the image's own setup runs again on a new volume (`TIMESCALEDB_TELEMETRY: 'off'` takes effect, `timescaledb-tune` tunes the server, `template1` gets TimescaleDB). The script v5 writes creates each extension only when the image ships it (another PostgreSQL image no longer aborts the first start) and preloads `pg_stat_statements`. The healthcheck is `pg_isready -h 127.0.0.1 -p 5432 ...` with a 300 s `start_period`, so `db` is healthy only once the setup is done (a passing check turns it healthy at once; the long start period keeps a slow first setup, e.g. on a Raspberry Pi, from aborting `stack up`), and Grafana's datasource says PostgreSQL 18 (`postgresVersion: 1800`). See [The Database Setup](/reference/stack/#the-database-setup).
+- **Existing stacks.** `mrsm stack` regenerates the compose file from the `stack` config on every run. **Without** `<root>/config/stack.yaml` (v4's `mrsm stack` never writes one; it exists only if you created it, e.g. with `mrsm edit config stack`), your stack takes the new defaults: the next `mrsm stack up -d` recreates the `db` container once (a short restart; the data volume is kept and nothing in the database changes, since Docker runs the setup only on an empty volume). Any extra scripts you put in `<root>/db/initdb/` are no longer mounted, so they would not run for a future fresh volume: move them into `create-extensions.sql`, or add your own mount in `stack.yaml`. **With** a `stack.yaml`, its `docker-compose.yaml` section is used as it is (v5's defaults fill in only a key that is missing entirely, as in v4), so its mount, healthcheck and image stay and the container is not recreated. To take the new compose defaults, edit the `db` service with `mrsm edit config stack` (the mount, the `healthcheck` test and `start_period`), or delete the `docker-compose.yaml` key from `stack.yaml` (your other `stack` keys stay) and run `mrsm stack` again. An existing `create-extensions.sql` is never rewritten: before creating a NEW database volume, delete it (or merge your changes into v5's) so that `mrsm stack` writes v5's script. Update an existing database's extensions and settings with `mrsm upgrade extensions` ([Upgrading the stack](/reference/stack-upgrades/)).
 - **Bare metal.** Replace `pip install --user meerschaum==4.1.4` with `pip install --user 'meerschaum[full]>=5,<6'` (or the extras you need). The `mrsm` on your `PATH` is now a console script that runs the native CLI inside the `meerschaum` wheel (there is no separate binary package). Jobs and `systemd` units run `python -m meerschaum`, so they work from the same install.
 - **NGINX / reverse proxies.** Paths do not change. The server honors `api.server.forwarded_allow_ips` (old `api.uvicorn.*` key still read). The API host listens on a Unix socket under `MRSM_ROOT_DIR`; nothing else needs to reach it.
 - **`start api -p 8224 --host 127.0.0.1 -i sql:main --secure`** and friends are unchanged.
 - **Webterm** is served by the Rust API server itself (no Tornado/terminado process, no separate `start webterm`): `/webterm/<session id>` and its websocket keep their paths and the terminado message format, the console embeds the terminal at `/dash/webterm` (xterm.js 6.0.0 with the fit and unicode11 add-ons, vendored, plus the mobile extra-key row), and the shell is `mrsm` on the server's instance. It keeps its tmux session model (`api.webterm.tmux.enabled`, `api.webterm.tmux.session_suffix`): each user's terminal lives in the tmux session `<user><session_suffix>`, so a reload or a second tab reattaches to it, and closing a tab never kills the session. Without `tmux`, each tab gets its own shell. `--no-webterm` and `--no-auth` still turn it off. The terminal websocket refuses cross-origin requests: a reverse proxy in front of the API must pass the original `Host` (or set `X-Forwarded-Host`) or the terminal answers 403. ⚠️ The terminal is a shell on the server, and its gate is unchanged from v4: any logged-in user may open one unless `api.permissions.actions.non_admin` is false (or the server runs with `--secure`), in which case only administrators may. Set it to false on a server whose users should not have a shell. A second login no longer fails, and the shell echoes.
 - **`start gui`** opens a `pywebview` window (the `meerschaum[gui]` extra) around the console at `/dash/` instead of around the Tornado terminal: `mrsm` starts a local `start api --no-auth` for it (bound to `127.0.0.1` only, on a free port) and stops it when the window closes. ⚠️ While the window is open that console is **unauthenticated**: any process on the same machine can reach it on that loopback port, so do not use `start gui` on a shared machine. `api start` is an alias of `start api`. `login`, `os`, `sql`, `stack`, `bootstrap`, the connector, token and cache actions and `edit config --rollback` keep their prompts, messages and exit codes and no longer need a Python interpreter.
 - **Plugin, package and venv actions run in `mrsm`.** `uninstall plugins|packages`, `delete plugins|venvs`, `edit plugins`, `show packages`, `verify packages|plugins|venvs`, `bootstrap plugins`, `upgrade meerschaum|packages|plugins` and `register plugins` keep their prompts, messages and exit codes. They are orchestrated by `mrsm` itself: `show packages`, `delete plugins|venvs`, `uninstall plugins`, `register plugins`, `bootstrap plugins` and `edit plugins` need no Python interpreter, `verify plugins` starts the Python worker to import each Python plugin, and the actions that install or remove packages (`install|uninstall|upgrade packages`, `upgrade meerschaum|plugins`, `verify packages`) run `uv` or `pip` as child processes against the interpreter in `MRSM_PYTHON` (else `python3`). `verify packages` no longer imports every package to read its version: it reads the versions from the installed `*.dist-info` in the `mrsm` environment and repairs an old one, and a package found in the host interpreter is counted but never changed. `edit plugins`, `bootstrap plugins`, `edit definition` and `edit config` open `$VISUAL`, else `$EDITOR`, else `vi` (v4 installed `pyvim` when none was set), and say so when the editor cannot be started. `upgrade meerschaum` upgrades the environment that `mrsm` itself was installed into (or `MRSM_PYTHON`), never a guessed `python3`, and adds no `--break-system-packages` unless you pass it. Plugin names may not contain path separators or `..`, start with `.`, or be `mrsm`, and `delete venvs` takes plain directory names only. Installing a plugin archive refuses symlink and hard-link members and writes only under the plugin's directory. `mrsm start worker` and `start|restart daemons` are not used in v5: actions run natively, so there is no CLI daemon to feed (`show daemons` answers that none are running). `MRSM_NO_AUTO_INSTALL=1` disables implicit installs only; `upgrade`, `install` and `uninstall` always run.
+- **The Python package must fit the program.** The Python worker and the API host check the `meerschaum` package they would import before importing it, so a stale copy cannot run its start-up (v4 installs packages whatever `MRSM_NO_AUTO_INSTALL` says). A package of another **major** version, one that looks like v4 (no `worker` module), or one speaking another worker protocol is refused with one message (nothing is imported or installed; the message names the copy and the fix, and `mrsm doctor` shows it); a different release of the same major version starts and warns once, naming both versions. This matters when `mrsm` (`cargo install meerschaum`, a release binary, the Docker image) and the Python package come from different installs: keep them on the same release, or point `MRSM_PYTHON` at an interpreter that has the matching one.
 - **Logs.** The Rust server's logs and the API host's output are interleaved in the same stream (the API job's logs under `mrsm start api -d`). There is no separate host log and no filter in 5.0; the host's own lines (`The API host exited ...; restarting`, `The plugin manifest changed; restarting the API host.`) come from the server. The host is started only when an installed plugin needs it and restarted with backoff if it exits.
 
 ## ✨ New in 5.0
@@ -10128,6 +10711,12 @@ A plugin directory may contain both a Rust library and a Python module; the Rust
 - **Packaging:** one dependency-free `meerschaum` wheel with extras (its `mrsm` console script runs the native CLI), `cargo install meerschaum` for a standalone binary, and the `bmeares/meerschaum:slim` image.
 - **Venv accounting:** `mrsm show venvs`, `mrsm prune venvs`, and attribution of every package installed by `attempt_import`.
 - **Leases:** two jobs never sync the same pipe at once (`mrsm_pipe_leases`), with optional `acquire_pipe_lease` / `release_pipe_lease` on custom instance connectors.
+- **`mrsm upgrade extensions`:** updates a PostgreSQL instance's extensions (TimescaleDB, PostGIS, the Toolkit, ...) to the versions its server ships after an image upgrade, and on the stack's database applies `TIMESCALEDB_TELEMETRY: 'off'` and offers to preload `pg_stat_statements`; `mrsm stack up`, `mrsm start api` and `mrsm upgrade mrsm` point to it when an extension lags ([Upgrading the stack](/reference/stack-upgrades/)).
+- **`mrsm upgrade postgres`:** moves the stack's database to another PostgreSQL major (e.g. a stack whose `stack.yaml` pins `timescale/timescaledb-ha:pg17` to `pg18`): a full backup, then a restore into a new volume that is verified table by table before the stack switches to it; the old volume, the backup and a byte-for-byte copy of `stack.yaml` are kept, and `mrsm upgrade postgres rollback` goes back ([Upgrading the stack](/reference/stack-upgrades/#upgrading-postgresql)).
+- **PostgreSQL startup safety:** `mrsm stack up` refuses a known image whose PostgreSQL major differs from an existing named volume's `PG_VERSION`. Pin the old image, start the old database, then run `mrsm upgrade postgres <major>`. `stack up --force` bypasses this check; interrupted upgrades and restores offer recovery before another run ([Upgrading the stack](/reference/stack-upgrades/#upgrading-postgresql)).
+- **`mrsm backup postgres` / `mrsm restore postgres`:** an online, checksummed backup of the stack's database (nothing is stopped; `mrsm backup postgres -s 'daily' -d` schedules it, `system:backups:postgres:keep` keeps the newest N), and its restore into a new volume, verified against the backup's manifest before the stack switches to it (`mrsm restore postgres rollback` goes back) ([Backing up and restoring](/reference/stack-upgrades/#backing-up-and-restoring)).
+- **Shell completions:** `mrsm install completions [bash|zsh|fish|powershell]` writes a completion script for `mrsm` and `meerschaum` (actions, subactions, flags, connector keys, jobs, plugins, files); `mrsm show completions <shell>` prints it and `mrsm uninstall completions` removes it ([Shell Completions](/reference/actions/#shell-completions)).
+- **`mrsm doctor`:** a read-only health check that says what is wrong with an installation and how to fix it: the version and worker interpreter, a stale `meerschaum` copy shadowing the right one, writable directories and free space (a full `/tmp` included), the config files, the instance and its tables, DuckDB and the Oracle client, the Python extras your plugins need, stale plugin virtual environments, failed jobs, the Docker stack and the PostgreSQL extensions. Every WARN or FAIL names its fix, `--nopretty` prints one JSON document for a bug report, and the result fails only when a check FAILs ([Troubleshooting](/reference/troubleshooting/#start-here-mrsm-doctor)).
 
 ## 🧪 How to upgrade safely
 
@@ -10158,7 +10747,7 @@ A plugin directory may contain both a Rust library and a Python module; the Rust
 | `system:experimental:join_fetch` | Ignored with a warning |
 | PyYAML / `ruamel.yaml` for the config | The native YAML codec (no package) |
 | `api.uvicorn.*` | `api.server.*` (old keys read with a notice) |
-| Meerschaum-installed `dask`, `rich`, `dash-bootstrap-components` and the other packages listed under [Installing](#installing-and-running) | Declare them in your plugin's `required` |
+| Meerschaum-installed `dask`, `rich`, `dash-ace` and the other packages listed under [Installing](#installing-and-running) | Declare them in your plugin's `required` |
 
 
 ---

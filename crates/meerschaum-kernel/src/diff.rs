@@ -457,10 +457,26 @@ fn cast_column(data: &ColumnData, spec: &CastSpec, name: &str) -> Result<ColumnD
 
 /// `filter_unseen_df(old_df, new_df, dtypes=..., coerce_mixed_numerics=...)`: the rows of `new`
 /// not present in `old`.
+///
+/// Without `old` the new frame comes back as it is (CRS included). Otherwise the result carries
+/// no geometry CRS.
+// PARITY: v4 builds the delta with `new_df.merge(old_df, ..., indicator=True)`
+// (meerschaum/utils/dataframe.py, `filter_unseen_df`), and the merge of two GeoDataFrames is a
+// plain DataFrame: its geometry columns lose their CRS. The update path of `sync_pipe` types its
+// temporary table from the delta (`get_special_cols(update_df)`), so on PostGIS a bare
+// `geometry` column updated from a GeoDataFrame keeps SRID 0, as the rows inserted first do.
 pub fn filter_unseen_df(old: Option<&Frame>, new: &Frame, opts: &FilterUnseenOptions) -> Frame {
     let Some(old) = old else {
         return new.clone();
     };
+    let mut delta = filter_unseen_df_against(old, new, opts);
+    for column in delta.columns_mut() {
+        column.crs = None;
+    }
+    delta
+}
+
+fn filter_unseen_df_against(old: &Frame, new: &Frame, opts: &FilterUnseenOptions) -> Frame {
     let mut old = old.clone();
     let mut new = new.clone();
     let mut new_dtypes = new.dtypes();

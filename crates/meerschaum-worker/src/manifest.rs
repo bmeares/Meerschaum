@@ -43,8 +43,9 @@ use crate::worker::CallOptions;
 
 /// The manifest schema version (`meerschaum/worker/_manifest.py`). 4: custom connector
 /// `methods` include methods imported into the class body, so cached version-3 manifests (which
-/// missed them) are rebuilt.
-pub const MANIFEST_SCHEMA_VERSION: u32 = 4;
+/// missed them) are rebuilt. 5: a plugin's `data_functions` list every callable attribute (a
+/// `functools.partial` or callable object `register` too), not only plain functions.
+pub const MANIFEST_SCHEMA_VERSION: u32 = 5;
 
 /// The manifest file name under the cache directory.
 pub const MANIFEST_FILE_NAME: &str = "plugins_manifest.json";
@@ -1009,6 +1010,10 @@ mod tests {
     #[test]
     fn schema_is_valid_json() {
         let schema: serde_json::Value = serde_json::from_str(MANIFEST_JSON_SCHEMA).unwrap();
+        assert_eq!(
+            schema["properties"]["schema_version"]["const"],
+            MANIFEST_SCHEMA_VERSION
+        );
         let required: Vec<&str> = schema["required"]
             .as_array()
             .unwrap()

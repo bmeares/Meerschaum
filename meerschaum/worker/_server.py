@@ -11,7 +11,8 @@ from any thread, e.g. an MQTT client's network thread), and `shutdown` ends the 
 serialized by a lock so callbacks from other threads never interleave with a response.
 
 When the host goes away the worker exits with `os._exit()` so stray plugin threads cannot keep
-the process alive.
+the process alive, after `release_multiprocessing()` has run the `multiprocessing` exit work
+(named semaphores, pools) that `os._exit()` would skip.
 """
 
 from __future__ import annotations
@@ -233,8 +234,61 @@ def serve(address: str) -> int:
             sys.stderr.flush()
 
     try:
+        release_multiprocessing()
         sys.stdout.flush()
         sys.stderr.flush()
     finally:
         os._exit(0)
     return 0
+
+
+def release_multiprocessing(timeout: float = 1.5) -> None:
+    """
+    Run what `multiprocessing` runs at a normal interpreter exit, which `os._exit()` skips.
+
+    Where the default start method is not `fork` (`forkserver` on Linux since Python 3.14, `spawn`
+    on macOS), every `multiprocessing` lock is a *named* POSIX semaphore registered with the
+    resource tracker and unlinked by a `util.Finalize` at exit; that includes the `SimpleQueue`
+    that `multiprocessing.pool.Pool.__init__` builds even for a `ThreadPool` (e.g. the pool
+    `SQLConnector.read()` takes from `meerschaum.utils.pool.get_pool()`). Skipping those finalizers
+    makes the tracker print "There appear to be N leaked semaphore objects to clean up at
+    shutdown" after the worker exits; v4 exited through `sys.exit()` and printed nothing.
+
+    CPython's order is kept: the higher-priority finalizers first (pool teardown, priority 15),
+    then the semaphores (priority 0), then child processes and the rest. Pool teardown and the
+    rest run in a daemon thread and share `timeout` (well under the host's 5 s grace), so a
+    plugin thread or child that never returns still cannot keep the worker alive (the reason the
+    worker ends with `os._exit`); the semaphores are unlinked in any case (`sem_unlink` +
+    unregister never blocks, and a live lock keeps working on an unlinked name).
+    """
+    import time
+    mp_util = sys.modules.get('multiprocessing.util', None)
+    if mp_util is None:
+        return
+    deadline = time.monotonic() + max(timeout, 0.0)
+
+    def bounded(func: Optional[Callable[[], Any]]) -> None:
+        if func is None:
+            return
+        thread = threading.Thread(target=func, name='mrsm-worker-mp-exit', daemon=True)
+        try:
+            thread.start()
+            thread.join(max(deadline - time.monotonic(), 0.0))
+        except Exception:
+            pass
+
+    run_finalizers = getattr(mp_util, '_run_finalizers', None)
+    if run_finalizers is not None:
+        bounded(lambda: run_finalizers(1))
+
+    try:
+        from multiprocessing.synchronize import SemLock
+        cleanup = getattr(SemLock, '_cleanup', None)
+        registry = getattr(mp_util, '_finalizer_registry', None) or {}
+        for finalizer in list(registry.values()):
+            if cleanup is not None and getattr(finalizer, '_callback', None) is cleanup:
+                finalizer()
+    except Exception:
+        pass
+
+    bounded(getattr(mp_util, '_exit_function', None))

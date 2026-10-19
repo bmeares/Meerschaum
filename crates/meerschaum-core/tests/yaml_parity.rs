@@ -506,8 +506,11 @@ fn registry_config_cases_match_python() {
                 other => panic!("unhandled step {other}"),
             };
             let root_text = meerschaum_core::config::paths::posix(&root);
-            let got: J =
-                serde_json::from_str(&got.to_string().replace(&root_text, "{ROOT}")).unwrap();
+            // The intentional v5 stack defaults (PARITY.md W17K1-002..004) read as v4's.
+            let got: J = serde_json::from_str(&common::v4_stack_text(
+                &got.to_string().replace(&root_text, "{ROOT}"),
+            ))
+            .unwrap();
             let got = without_v5_defaults(got);
             let expected = &without_v5_defaults(expected.clone());
             if let (Ok(dump), true) = (std::env::var("MRSM_TEST_DUMP_DIR"), &got != expected) {
@@ -529,9 +532,11 @@ fn registry_config_cases_match_python() {
         expected_names.sort();
         assert_eq!(actual_files, expected_names, "case {name} files");
         for (file, text) in expected_files {
-            let actual = std::fs::read_to_string(dir.join(file))
-                .unwrap()
-                .replace(&meerschaum_core::config::paths::posix(&root), "{ROOT}");
+            let actual = common::v4_stack_text(
+                &std::fs::read_to_string(dir.join(file))
+                    .unwrap()
+                    .replace(&meerschaum_core::config::paths::posix(&root), "{ROOT}"),
+            );
             let want = text.as_str().unwrap();
             assert_eq!(actual, want, "case {name} file {file}");
         }

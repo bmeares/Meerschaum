@@ -75,8 +75,8 @@ packages: Dict[str, Dict[str, str]] = {
         'pymysql'                    : 'PyMySQL>=0.9.0',
         'aiomysql'                   : 'aiomysql>=0.0.21',
         'sqlalchemy_cockroachdb'     : 'sqlalchemy-cockroachdb>=2.0.0',
-        'duckdb'                     : 'duckdb>=1.0.0',
-        'duckdb_engine'              : 'duckdb-engine>=0.13.0',
+        'duckdb'                     : 'duckdb>=1.5.6',
+        'duckdb_engine'              : 'duckdb-engine>=0.17.0',
     },
     'drivers-extras': {
         'pyodbc'                     : 'pyodbc>=4.0.30',
@@ -258,8 +258,8 @@ _extras_packages: Dict[str, Dict[str, str]] = {
         'oracledb'                   : 'oracledb>=2.5.0',
     },
     'sql-duckdb': {
-        'duckdb'                     : 'duckdb>=1.0.0',
-        'duckdb_engine'              : 'duckdb-engine>=0.13.0',
+        'duckdb'                     : 'duckdb>=1.5.6',
+        'duckdb_engine'              : 'duckdb-engine>=0.17.0',
     },
     'sql-cockroachdb': {
         'sqlalchemy_cockroachdb'     : 'sqlalchemy-cockroachdb>=2.0.0',

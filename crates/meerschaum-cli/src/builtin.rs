@@ -440,7 +440,11 @@ fn reload_config(rt: &mut Runtime<'_>) -> ActionResult {
 
 /// `get_possible_keys()`: the default keys and the files in the config directory, sorted.
 pub fn possible_config_keys(rt: &mut Runtime<'_>) -> Vec<String> {
-    let config = rt.config();
+    possible_config_keys_of(rt.config())
+}
+
+/// [`possible_config_keys`] of a registry (the program's shell completions have no runtime).
+pub fn possible_config_keys_of(config: &meerschaum_core::config::Config) -> Vec<String> {
     let mut keys: Vec<String> = config.defaults().keys().cloned().collect();
     if let Ok(entries) = std::fs::read_dir(config.paths().config_dir) {
         for e in entries.filter_map(|e| e.ok()) {

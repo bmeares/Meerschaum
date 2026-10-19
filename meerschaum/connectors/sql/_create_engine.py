@@ -140,6 +140,13 @@ def create_engine(
     """Create a sqlalchemy engine by building the engine string."""
     from meerschaum.utils.packages import attempt_import
     from meerschaum.utils.warnings import error, warn
+    if self.flavor == 'duckdb':
+        from ._duckdb_transport import guard_sdk, validate_connector_uri
+        guard_sdk()
+        validate_connector_uri(self)
+        for source in (kw, self._sys_config.get('create_engine', {})):
+            if any(source.get(key) is not None for key in ('creator', 'module')):
+                raise RuntimeError('DuckDB custom creator/module overrides cannot share the native driver safely.')
     sqlalchemy = import_sqlalchemy()
     import urllib
     import copy
@@ -161,7 +168,7 @@ def create_engine(
     if self.flavor in flavor_dialects:
         sqlalchemy.dialects.registry.register(*flavor_dialects[self.flavor])
 
-    if self.flavor in ("sqlite", "duckdb", "geopackage"):
+    if self.flavor in ("sqlite", "geopackage"):
         if 'create_engine' not in self._sys_config:
             self._sys_config['create_engine'] = {}
         if 'connect_args' not in self._sys_config['create_engine']:
@@ -189,7 +196,7 @@ def create_engine(
         flavor_configs.get(self.flavor, {}).get('create_engine', {})
     )
     def _apply_create_engine_args(update):
-        if 'ALL' not in flavor_configs[self.flavor].get('omit_create_engine', {}):
+        if self.flavor == 'duckdb' or 'ALL' not in flavor_configs[self.flavor].get('omit_create_engine', {}):
             _create_engine_args.update(
                 { k: v for k, v in update.items()
                     if 'omit_create_engine' not in flavor_configs[self.flavor]
@@ -199,6 +206,18 @@ def create_engine(
     _apply_create_engine_args(self._sys_config.get('create_engine', {}))
     _apply_create_engine_args(self.__dict__.get('create_engine', {}))
     _apply_create_engine_args(_kw_copy)
+
+    if self.flavor == 'duckdb':
+        # Historical system config includes pandas.to_sql's method, not an engine option.
+        _create_engine_args.pop('method', None)
+
+    duckdb_creator = None
+    if self.flavor == 'duckdb':
+        if any(_create_engine_args.get(key) is not None for key in ('creator', 'module')):
+            raise RuntimeError('DuckDB custom creator/module overrides cannot share the native driver safely.')
+        duckdb_creator = []
+        # SQLAlchemy constructs engines lazily; bind the shared creator before first checkout.
+        _create_engine_args['creator'] = lambda: duckdb_creator[0]()
 
     try:
         engine = sqlalchemy.create_engine(
@@ -219,6 +238,16 @@ def create_engine(
     except Exception:
         warn(f"Failed to create connector '{self}':\n{traceback.format_exc()}", stack=False)
         engine = None
+
+    if engine is not None and duckdb_creator is not None:
+        from ._duckdb_transport import engine_creator
+        args = dict(_create_engine_args)
+        args.pop('creator', None)
+        try:
+            duckdb_creator.append(engine_creator(self, engine, args))
+        except BaseException:
+            engine.dispose()
+            raise
 
     if include_uri:
         return engine, engine_str

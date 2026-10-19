@@ -111,9 +111,10 @@ Crate integration tests skip unless their service URI is set (an empty value cou
 | Variable | Used by |
 |---|---|
 | `MRSM_TEST_PG_URI`, `MRSM_TEST_TIMESCALE_URI`, `MRSM_TEST_POSTGIS_URI` | `meerschaum-connector-sql` drivers/instance tests, engine crash-restart (`w9_engine` schema) and lease tests (`w7_engine`) |
+| `MRSM_TEST_TIMESCALE_HA_URI` | `meerschaum-connector-sql/tests/w17c_geometry_srid.rs`: TimescaleDB-HA with PostGIS, using the `timescaledb-ha://` scheme |
 | `MRSM_TEST_MYSQL_URI`, `MRSM_TEST_MARIADB_URI`, `MRSM_TEST_MSSQL_URI`, `MRSM_TEST_ORACLE_URI` | `meerschaum-connector-sql` (MSSQL is the default `mssql` feature; `--features oracle` is opt-in) |
 | `MRSM_TEST_GPKG_DIR`, `MRSM_TEST_DUCKDB_PATH` | GeoPackage / DuckDB file flavors (empty = system temp dir) |
-| `MRSM_DUCKDB_LIB` | DuckDB is **not compiled in**: `mrsm`, the extension and every DuckDB test load DuckDB's own `libduckdb` (v1.5.6; any >= 1.4 works). `export MRSM_DUCKDB_LIB="$(scripts/rust/duckdb_lib.sh)"` downloads it once into `~/.cache/mrsm-ci/` (checksum-verified) and prints the path; without it the library is found in `<root>/drivers`, the system path, or downloaded on first use (not under `MRSM_NO_AUTO_INSTALL`, which CI and `test.sh` set). `mrsm install driver duckdb` / `uninstall driver duckdb` / `show drivers` manage it. |
+| `MRSM_DUCKDB_LIB` | Explicitly pins the native DuckDB C API for this process (library >= 1.4; pinned download 1.5.6). Standalone / base installs find it in `<root>/drivers`, the system loader, or download on first use unless `MRSM_NO_AUTO_INSTALL`. In Python, leave unset with `meerschaum[sql-duckdb]` installed to share the public Python driver between Rust Pipe operations and SQLAlchemy. A native-pinned Python process refuses SQLAlchemy DuckDB access: unset the override and restart to use both safely. `MRSM_TEST_DUCKDB_LIB` supplies native-only test fixtures without pinning SDK tests. |
 | `MRSM_TEST_VALKEY_URI` | `meerschaum-connector-valkey`, engine `leases_backends` |
 | `MRSM_TEST_MQTT_URI` (e.g. `mqtt://127.0.0.1:1893`) | `meerschaum-engine/tests/mqtt_stream.rs` (disposable Mosquitto, QoS 1) |
 | `MRSM_TEST_PYTHON`, `MRSM_TEST_KEEP=1` | cross-implementation tests in `meerschaum-connector-sql` (keep the databases for inspection) |
@@ -184,7 +185,7 @@ scripts/transition/run.sh [--flavors sqlite,postgis,...] [--wheel <whl>]   # v4 
 
 ## Architecture map
 
-### Crates (`crates/`, Cargo workspace, edition 2024, version `5.0.0-a1` is the single source of truth)
+### Crates (`crates/`, Cargo workspace, edition 2024, version `5.0.0-rc.1` is the single source of truth)
 
 Dependencies point down only; `meerschaum-core` is a leaf; `cli` and `py` are the top layer no library
 depends on (the front crate's default `cli` feature pulls `cli` in for the `mrsm` binary only). Verify with `cargo tree -p <crate> -e normal --depth 1`.

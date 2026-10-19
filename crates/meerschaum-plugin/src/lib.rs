@@ -17,8 +17,9 @@ pub use registry::NativePlugins;
 pub use sdk::{Plugin, Reply, Request};
 pub use serde_json;
 
-/// Worker manifest format version (independent of the native ABI version).
-pub const MANIFEST_SCHEMA_VERSION: u32 = 3;
+/// Shared worker/native manifest format version (independent of the native ABI version).
+/// Keep the native schema copy and the worker schema in sync; cache fingerprints include it.
+pub const MANIFEST_SCHEMA_VERSION: u32 = 5;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {

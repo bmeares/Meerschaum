@@ -115,15 +115,130 @@ impl JobOps for ComposeJobs {
     }
 }
 
-/// Runs compose's commands by re-invoking `mrsm` (the current executable).
+/// Runs compose's commands by re-invoking `mrsm` (the current executable), except the
+/// in-process `register pipes` commands, which run in this process ([`MrsmRunner::run_in_process`]).
 pub struct MrsmRunner<'r, 'a> {
     rt: &'r RefCell<&'r mut Runtime<'a>>,
+    /// The project view in-process commands run under, by project environment: its config
+    /// registry and a session whose Python workers get that environment (one worker pool for
+    /// every registration of the project instead of one worker per `mrsm` child).
+    projects: Vec<ProjectView>,
+}
+
+/// One project environment's config registry (lent to the runtime while a command runs) and
+/// session.
+struct ProjectView {
+    env: Vec<(String, String)>,
+    config: Option<meerschaum_core::config::Config>,
+    session: crate::native::Session,
+}
+
+impl<'r, 'a> MrsmRunner<'r, 'a> {
+    fn new(rt: &'r RefCell<&'r mut Runtime<'a>>) -> Self {
+        MrsmRunner {
+            rt,
+            projects: Vec::new(),
+        }
+    }
+
+    /// Whether `command` runs in this process: an in-process (`_subprocess=False`) `register
+    /// pipes`, the command compose runs once per newly registered pipe.
+    ///
+    /// v4 runs in-process commands with `entry(sysargs)` inside the subaction's project
+    /// environment: the result is returned, never printed. A child `mrsm` printed
+    /// "Successfully registered 1 pipe." per pipe and started a Python worker per pipe for the
+    /// connector's `register()` hook (`compose up` on a large file took several times v4's time).
+    /// Other in-process commands still run as children: they may start jobs, whose environment
+    /// must be the project's, which only a child process has.
+    fn in_process(command: &MrsmCommand) -> bool {
+        !command.subprocess
+            && !command.capture_output
+            && command.sysargs.first().map(String::as_str) == Some("register")
+            && matches!(
+                command.sysargs.get(1).map(String::as_str),
+                Some("pipes" | "pipe")
+            )
+    }
+
+    /// Run `command` with `entry(sysargs)` under the project's config and worker environment
+    /// `env`, returning its result without printing it (v4's `run_mrsm_command(...,
+    /// _subprocess=False)`).
+    fn run_in_process(
+        &mut self,
+        command: &MrsmCommand,
+        env: Vec<(String, String)>,
+    ) -> SuccessTuple {
+        let index = match self.projects.iter().position(|p| p.env == env) {
+            Some(index) => index,
+            None => {
+                let config = match meerschaum_core::config::Config::new(
+                    meerschaum_core::config::ConfigOptions::with_env(env.clone()),
+                ) {
+                    Ok(config) => config,
+                    Err(e) => return SuccessTuple::fail(e.to_string()),
+                };
+                let session = crate::native::Session::new();
+                if let Err(e) = session.set_worker_environment(env.clone()) {
+                    return SuccessTuple::fail(e.message);
+                }
+                self.projects.push(ProjectView {
+                    env,
+                    config: Some(config),
+                    session,
+                });
+                self.projects.len() - 1
+            }
+        };
+        let project = &mut self.projects[index];
+        let mut guard = self.rt.borrow_mut();
+        let rt: &mut Runtime<'_> = &mut guard;
+        let host_config = std::mem::replace(&mut rt.config, project.config.take());
+        let host_session = rt.native.replace(project.session.clone());
+        let result = crate::dispatch::entry(&command.sysargs, rt);
+        project.config = std::mem::replace(&mut rt.config, host_config);
+        rt.native = host_session;
+        result
+    }
+}
+
+impl Drop for MrsmRunner<'_, '_> {
+    fn drop(&mut self) {
+        for project in &self.projects {
+            project.session.shutdown();
+        }
+    }
 }
 
 impl CommandRunner for MrsmRunner<'_, '_> {
+    fn show_messages(&mut self, messages: &[Message]) -> bool {
+        print_messages(&mut self.rt.borrow_mut(), messages);
+        true
+    }
+
     fn run(&mut self, command: &MrsmCommand) -> SuccessTuple {
+        if Self::in_process(command)
+            && let Some(env) = command.env.as_ref().or(command.inherited_env.as_ref())
+        {
+            return self.run_in_process(command, env_dict_to_strings(env));
+        }
         // This program again: the `mrsm` binary, or `python -m meerschaum` in the extension.
         let (program, mut leading) = meerschaum_core::self_exe::self_program();
+        // An in-process command returns its result instead of printing it (v4's `entry()`):
+        // the child writes it to a file in a private directory this process created, named on
+        // its command line and in `ENTRY_CHILD_ENV` (only a child of this runner honors it).
+        // Without a private directory with a UTF-8 path (the command line and the environment
+        // carry it as text), the command runs as a plain child and only its exit code counts.
+        let result_dir = if command.subprocess {
+            None
+        } else {
+            ResultDir::create()
+                .ok()
+                .filter(|dir| dir.file().to_str().is_some())
+        };
+        if let Some(dir) = &result_dir {
+            leading.push(crate::dispatch::ENTRY_CHILD_ARG.to_string());
+            leading.push(dir.file().to_string_lossy().into_owned());
+        }
         leading.extend(command.sysargs.iter().cloned());
         // An in-process command (`replace == false`) runs inside the subaction's project
         // environment in Python, so the child gets that environment too.
@@ -141,6 +256,12 @@ impl CommandRunner for MrsmRunner<'_, '_> {
                 }
             }
         }
+        if let Some(dir) = &result_dir {
+            env.push((
+                crate::dispatch::ENTRY_CHILD_ENV.to_string(),
+                dir.file().to_string_lossy().into_owned(),
+            ));
+        }
         let spec = CommandSpec {
             program,
             args: leading,
@@ -149,11 +270,83 @@ impl CommandRunner for MrsmRunner<'_, '_> {
             quiet: command.capture_output,
             cwd: None,
         };
-        match self.rt.borrow_mut().host.run(&spec) {
-            Ok(0) => SuccessTuple::success(),
-            Ok(code) => SuccessTuple::fail(format!("Command returned exit code {code}.")),
-            Err(e) => SuccessTuple::fail(e.to_string()),
+        let status = self.rt.borrow_mut().host.run(&spec);
+        // The directory (and the file in it) is removed when `result_dir` drops.
+        let written = result_dir
+            .as_ref()
+            .and_then(|dir| crate::dispatch::read_entry_child_result(&dir.file()));
+        match (status, written) {
+            (Ok(_), Some(result)) => result,
+            (Ok(0), None) => SuccessTuple::success(),
+            (Ok(code), None) => SuccessTuple::fail(format!("Command returned exit code {code}.")),
+            (Err(e), _) => SuccessTuple::fail(e.to_string()),
         }
+    }
+}
+
+/// Print compose's messages (warnings to stderr, info to stdout).
+fn print_messages(rt: &mut Runtime<'_>, messages: &[Message]) {
+    for m in messages {
+        match m {
+            Message::Warn(w) => {
+                let text = rt.with_formatter(|f| f.warn(w));
+                rt.eprint(&text);
+            }
+            Message::Info(i) => {
+                let text = rt.with_formatter(|f| f.info(i, true));
+                rt.print(&text);
+            }
+        }
+    }
+}
+
+/// A private directory for the result of one in-process command's child: created exclusively
+/// (an existing path, e.g. one planted by another user, is never reused) with mode 0700 on Unix
+/// under the per-user temporary directory, and removed with its contents on drop.
+struct ResultDir {
+    path: PathBuf,
+}
+
+impl ResultDir {
+    fn create() -> std::io::Result<ResultDir> {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static COUNTER: AtomicUsize = AtomicUsize::new(0);
+        let base = std::env::temp_dir();
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.subsec_nanos())
+            .unwrap_or_default();
+        let mut last_error = None;
+        for _ in 0..16 {
+            let path = base.join(format!(
+                "mrsm-compose-{}-{}-{nanos:08x}",
+                std::process::id(),
+                COUNTER.fetch_add(1, Ordering::SeqCst)
+            ));
+            let mut builder = std::fs::DirBuilder::new();
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::DirBuilderExt;
+                builder.mode(0o700);
+            }
+            match builder.create(&path) {
+                Ok(()) => return Ok(ResultDir { path }),
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => last_error = Some(e),
+                Err(e) => return Err(e),
+            }
+        }
+        Err(last_error.unwrap_or_else(|| std::io::Error::other("no free name")))
+    }
+
+    /// The result file the child creates.
+    fn file(&self) -> PathBuf {
+        self.path.join("result.json")
+    }
+}
+
+impl Drop for ResultDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.path);
     }
 }
 
@@ -266,22 +459,11 @@ pub fn compose_action(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
         Host::new(cwd, env).map_err(|e| ActionError::new(e.kind.python_name(), e.message))?;
     let output = {
         let shared = RefCell::new(&mut *rt);
-        let mut runner = MrsmRunner { rt: &shared };
+        let mut runner = MrsmRunner::new(&shared);
         let mut prompter = HostPrompter { rt: &shared };
         compose_native(&host, &compose_args, &mut runner, &mut prompter)
     };
-    for m in &output.messages.items {
-        match m {
-            Message::Warn(w) => {
-                let text = rt.with_formatter(|f| f.warn(w));
-                rt.eprint(&text);
-            }
-            Message::Info(i) => {
-                let text = rt.with_formatter(|f| f.info(i, true));
-                rt.print(&text);
-            }
-        }
-    }
+    print_messages(rt, &output.messages.items);
     if let Some(explain) = &output.explain {
         rt.print(explain);
         if !explain.ends_with('\n') {

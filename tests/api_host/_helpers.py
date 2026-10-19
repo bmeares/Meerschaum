@@ -35,9 +35,21 @@ def make_env(root: pathlib.Path, plugins: pathlib.Path, host_mode: bool = True) 
         'MRSM_SQL_APIHOSTTEST': f"sqlite:///{root / 'instance.db'}",
         'MRSM_API_HOST_CONFIG': json.dumps({'mrsm_instance': 'sql:apihosttest'}),
     })
+    ### Starlette 1.9 warns when `starlette.testclient` falls back to `httpx` (it wants `httpx2`,
+    ### which CI and `scripts/test.sh` install): the tests behave the same either way, so a
+    ### developer venv without `httpx2` prints no deprecation noise into the stderr they check.
+    env['PYTHONWARNINGS'] = ','.join(filter(None, [
+        os.environ.get('PYTHONWARNINGS', ''),
+        STARLETTE_HTTPX_WARNING_FILTER,
+    ]))
     if host_mode:
         env['MRSM_API_HOST'] = '1'
     return env
+
+
+### `-W action:message`: the message is matched literally from its start (no category, so the
+### filter does not import Starlette at interpreter startup).
+STARLETTE_HTTPX_WARNING_FILTER = 'ignore:Using `httpx` with `starlette.testclient` is deprecated'
 
 
 def run_python(root, plugins, code: str, host_mode: bool = True):
@@ -62,14 +74,17 @@ def sandbox():
     """A temporary root and plugins directory, skipped when the host dependencies are missing."""
     root = pathlib.Path(tempfile.mkdtemp(prefix='mrsm-apihost-'))
     plugins = pathlib.Path(tempfile.mkdtemp(prefix='mrsm-apihost-plugins-'))
-    check = run_python(
-        root, plugins,
-        "import meerschaum.utils.venv as v; v.activate_venv('mrsm'); "
-        "import fastapi, uvicorn, dash, a2wsgi, jwt",
-    )
-    if check.returncode != 0:
-        pytest.skip(f"The API host's dependencies are missing:\n{check.stderr[-1500:]}")
-    yield root, plugins
     import shutil
-    shutil.rmtree(root, ignore_errors=True)
-    shutil.rmtree(plugins, ignore_errors=True)
+    try:
+        check = run_python(
+            root, plugins,
+            "import meerschaum.utils.venv as v; v.activate_venv('mrsm'); "
+            "import fastapi, uvicorn, dash, a2wsgi, jwt",
+        )
+        if check.returncode != 0:
+            pytest.skip(f"The API host's dependencies are missing:\n{check.stderr[-1500:]}")
+        yield root, plugins
+    finally:
+        ### Also when the check skips or fails: the directories are never left behind.
+        shutil.rmtree(root, ignore_errors=True)
+        shutil.rmtree(plugins, ignore_errors=True)

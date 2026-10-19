@@ -23,7 +23,7 @@ All Meerschaum environment variables begin with the prefix `MRSM_`. The most com
 | `MRSM_RUNTIME` | Marks a special runtime (e.g. `docker`). | _(unset)_ |
 | `MRSM_NO_AUTO_INSTALL` | Disable every implicit package installation (imports, dependency checks, `uv`/`pip` bootstraps). | _(unset)_ |
 | `MRSM_NOASK` / `MRSM_NONINTERACTIVE` | Disable interactive prompts (assume defaults). | _(unset)_ |
-| `MRSM_DUCKDB_LIB` | Path to DuckDB's own shared library (`libduckdb`) for the `duckdb` flavor. | _(unset: cached or downloaded on first use)_ |
+| `MRSM_DUCKDB_LIB` | Path to DuckDB's shared library; explicitly selects the native C API and prevents mixed Python SQLAlchemy access. | _(unset: Python driver when installed; otherwise native library lookup)_ |
 | `MRSM_BIN` | Run a standalone `mrsm` binary instead of the in-process CLI of the Python package. | _(unset)_ |
 | `MRSM_PYTHON` | The Python interpreter the binary runs plugin workers and `upgrade meerschaum` with. | _(auto-detected)_ |
 | `MRSM_ALLOW_DEFAULT_ROOT` | Let a debug build use the default root directory. | _(unset)_ |
@@ -170,8 +170,15 @@ MRSM_NO_AUTO_INSTALL=1 mrsm show pipes
 
 ## **`MRSM_DUCKDB_LIB`**
 
-The `duckdb` flavor does not bundle DuckDB: it loads DuckDB's own shared library (`libduckdb.so`,
-`libduckdb.dylib` or `duckdb.dll`, version 1.4 or newer) at run time. Meerschaum looks for it in this order:
+Python hosts with `meerschaum[sql-duckdb]` installed and this variable unset share the public Python
+DuckDB driver between Rust Pipe operations and SQLAlchemy. An explicit `MRSM_DUCKDB_LIB` selects
+the native C API instead. SQLAlchemy access is refused in that process to prevent separate database
+instances from losing writes. Unset the variable and restart the interpreter to use both interfaces.
+Restart after installing the extra if the process already selected the native driver.
+
+The standalone binary and Python hosts using the native C API load DuckDB's own shared library
+(`libduckdb.so`, `libduckdb.dylib` or `duckdb.dll`, version 1.4 or newer) at run time.
+Meerschaum looks for it in this order:
 
 1. `MRSM_DUCKDB_LIB`, a path to the file (for air-gapped hosts; a library that fails to load is an error);
 2. the cache under `<root>/drivers/`;
@@ -184,6 +191,9 @@ MRSM_DUCKDB_LIB=/opt/duckdb/libduckdb.so mrsm show drivers
 
 Run `mrsm show drivers` to see where the library comes from, and `mrsm install driver duckdb` /
 `mrsm uninstall driver duckdb` to manage the cached copy.
+
+The native C API path refuses per-connection DuckDB options that it cannot honor, including
+`access_mode=READ_ONLY`. Use the Python `sql-duckdb` extra for connections with these settings.
 
 ## **`MRSM_BIN`**
 

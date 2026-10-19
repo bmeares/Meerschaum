@@ -77,7 +77,7 @@ pub use leases::{FileLeases, InstanceLeases};
 pub use ledger::{EdgeCursor, LedgerEntry, definition_hash};
 pub use native::{FaultInjector, NativeConfig, NativeExecutor, NodeSyncOptions};
 pub use node::{PipeRecord, PipeRef};
-pub use plan::{Action, Begin, Bounds, Plan, PlanOptions, PlannedNode, Span, plan};
+pub use plan::{Action, Begin, Bounds, Plan, PlanOptions, PlannedNode, Span, expected, plan};
 pub use read::{
     DirtyRange, EdgeView, EngineReader, GanttBar, NodeView, PipelineView, RunDetail, RunFilter,
     RunStatus, RunSummary,

@@ -31,12 +31,46 @@ def _plain_value(value: Any) -> bool:
     return False
 
 
-def _is_configured(connector_type: str, label: str) -> bool:
-    """Whether the config registry or the environment (`MRSM_SQL_MAIN`) defines the connector."""
-    if mrsm.get_config('meerschaum', 'connectors', connector_type, label, warn=False) is not None:
+def _is_configured(connector_type: str, label: str, connector: Any = None) -> bool:
+    """
+    Whether the config registry or the environment (`MRSM_SQL_MAIN`) defines the connector the
+    process holds, so the native dispatcher builds the same one from its keys.
+
+    A connector built with attributes of its own that the configured one lacks or sets
+    differently (`get_connector('sql', 'x', flavor='timescaledb-ha', ...)` while
+    `MRSM_SQL_X=postgresql://...` defines `sql:x`) is not: as in v4, where actions run in the
+    process got the cached connector, its attributes win. Otherwise the dispatcher would rebuild
+    it from the URI alone and the flavor could silently change (`timescaledb-ha` -> `postgresql`).
+    """
+    configured = mrsm.get_config('meerschaum', 'connectors', connector_type, label, warn=False)
+    if configured is None:
+        env_key = f'MRSM_{connector_type}_{label}'.upper()
+        if not any(key.upper() == env_key for key in os.environ):
+            return False
+        configured = {}
+    explicit = (
+        getattr(connector, '__dict__', {}).get('_explicit_attributes', None)
+        if connector is not None
+        else None
+    ) or {}
+    if not explicit:
         return True
-    env_key = f'MRSM_{connector_type}_{label}'.upper()
-    return any(key.upper() == env_key for key in os.environ)
+    configured = configured if isinstance(configured, dict) else {}
+    return all(
+        key in configured and _same_value(configured[key], value)
+        for key, value in explicit.items()
+    )
+
+
+def _same_value(configured: Any, explicit: Any) -> bool:
+    """
+    Whether an explicit attribute equals the configured one. A comparison that fails or has no
+    single truth value (an array, a frame) counts as different: the process's connector wins.
+    """
+    try:
+        return bool(configured == explicit)
+    except Exception:
+        return False
 
 
 def adhoc_context() -> Optional[Dict[str, Any]]:
@@ -53,7 +87,7 @@ def adhoc_context() -> Optional[Dict[str, Any]]:
         if connector_type == 'plugin':
             continue
         for label, connector in list(by_label.items()):
-            if connector is None or _is_configured(connector_type, label):
+            if connector is None or _is_configured(connector_type, label, connector):
                 continue
             keys = f'{connector_type}:{label}'
             meta = dict(getattr(connector, 'meta', None) or {})
@@ -64,7 +98,12 @@ def adhoc_context() -> Optional[Dict[str, Any]]:
             }
             if connector_type == 'sql':
                 try:
-                    context['connectors'][keys] = connector._core_connector()
+                    ### The Rust connector's pool connects lazily and its methods ask for the
+                    ### default schema before they run, so nothing here waits on the database:
+                    ### an unreachable connector the action never uses costs nothing.
+                    context['connectors'][keys] = connector._core_connector(
+                        discover_schema=False,
+                    )
                 except Exception:
                     ### No Rust driver (in-memory SQLite, ...): the native side reports it.
                     pass

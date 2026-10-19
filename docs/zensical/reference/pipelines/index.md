@@ -141,7 +141,8 @@ All the usual `sync` options (`begin`, `end`, `workers`, `force`, `retries`, `ch
 
 ```python
 pipeline = mrsm.Pipeline(pipe, parents=True, children=False)   # or Pipeline([p1, p2]) / Pipeline(tags=['demo'])
-plan = pipeline.plan()           # dry run, no data movement
+plan = pipeline.plan()           # dry run, no data movement (the static plan)
+plan = pipeline.plan(expected=True)  # what `mrsm plan pipes` prints (see below)
 print(plan)                      # node | action | bounds | chunks | reason
 plan.nodes                       # the same table as data: node.pipe, node.action, node.reason, ...
 plan.to_dataframe()
@@ -174,12 +175,12 @@ For the three pipes above on one SQLite instance (`raw` reads a `readings` table
 
 ```text
 $ mrsm plan pipes -i sql:local -m daily --parents
-node             action  bounds      chunks  reason
-sql:local/raw    root    ['', None)  -       no parents in the selection: v4 sync (begin = sync time − backtrack)
-sql:local/clean  skip*   -           -       no cursor on the edge from sql:local/raw; its watermark None is not ahead; definition unchanged
-sql:local/daily  skip*   -           -       no cursor on the edge from sql:local/clean; its watermark None is not ahead; definition unchanged
+node             action        bounds        chunks  reason
+sql:local/raw    root          ['', None)    -       no parents in the selection: v4 sync (begin = sync time − backtrack)
+sql:local/clean  incremental*  [None, None)  1       if its parents sync new rows: no cursor on the edge from sql:local/raw (first engine run); 1 unconsumed ledger entry (seq 1); sync from own watermark − backtrack to min parent watermark
+sql:local/daily  incremental*  [None, None)  1       if its parents sync new rows: no cursor on the edge from sql:local/clean (first engine run); 1 unconsumed ledger entry (seq 1); sync from own watermark − backtrack to min parent watermark
 * re-planned after its parents finish
- 💬 Planned 3 nodes (1 would sync, 2 re-planned after their parents finish).
+ 💬 Planned 3 nodes (1 would sync, 2 re-planned after their parents finish, shown as if they sync new rows).
 Nothing was synced.
 
 $ mrsm show graph -i sql:local -m daily --parents
@@ -192,7 +193,7 @@ Pipe graph on sql:local: 3 pipes, 2 edges, 1 root, depth 3
 ● root   ◆ has children   ○ leaf   ★ selected
 ```
 
-In the plan, a `*` after the action marks a provisional row: a child cannot know what its parent will change, so the executor plans it again when the parent finishes. In the graph, `★` marks the targets you selected (the others were pulled in by `--parents`), `●` a root and `○` a leaf; see [Visualization](/reference/pipelines/visualization/) for back-references, collapsed fan-outs and edge details. After a run, `show runs` lists it:
+In the plan, a `*` after the action marks a provisional row: a child cannot know what its parent will change, so the executor plans it again when the parent finishes. `plan pipes` shows that second plan as it would be if every parent that runs synced new rows after its watermark: the parent's ledger entry covers its whole chunk-grid cell, so a child usually backfills from the start of that cell (`[2026-10-04 00:00, …)` on the default 30-day grid), which is the `begin` its `fetch` receives. Only the start of the window is predicted: its end is the parents' current watermarks, and the executor caps it at their new ones. `--nopretty` prints the same plan as JSON. In Python, `pipeline.plan()` returns the static plan (each provisional row as the state is now, often `skip*`) and `pipeline.plan(expected=True)` the one `plan pipes` prints. In the graph, `★` marks the targets you selected (the others were pulled in by `--parents`), `●` a root and `○` a leaf; see [Visualization](/reference/pipelines/visualization/) for back-references, collapsed fan-outs and edge details. After a run, `show runs` lists it:
 
 ```text
 $ mrsm show runs --last 5

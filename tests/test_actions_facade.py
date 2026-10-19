@@ -42,8 +42,11 @@ def test_actions_are_the_native_registry():
         assert list(get_subactions(name)) == [sub[0] for sub in subs]
     ### v4's names are all there.
     assert {'sync', 'show', 'install', 'start', 'delete', 'register', 'compose'} <= set(actions)
-    ### `drivers` is v5-only (DuckDB's shared library, `install driver duckdb`).
-    assert set(get_subactions('install')) == {'drivers', 'packages', 'plugins', 'required'}
+    ### `drivers` and `completions` are v5-only (DuckDB's shared library, `install driver duckdb`;
+    ### the shell completion scripts, `install completions`).
+    assert set(get_subactions('install')) == {
+        'completions', 'drivers', 'packages', 'plugins', 'required',
+    }
 
 
 def test_get_action_resolves_subactions_by_v4_function_names():

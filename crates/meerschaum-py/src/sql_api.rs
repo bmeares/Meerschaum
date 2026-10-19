@@ -25,7 +25,7 @@ use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList, PyTuple};
 
-use crate::convert::{PyCtx, cell_to_py, core_to_py, py_to_core};
+use crate::convert::{PyCtx, core_to_py, py_to_core};
 use crate::pandas_bridge::{
     ColumnMode, IndexSpec, OutSpec, frame_from_py, frame_to_pandas, frame_to_polars,
 };
@@ -253,21 +253,28 @@ fn pandas_out<'py>(
 fn frame_docs_py<'py>(ctx: &PyCtx<'py>, frame: &Frame) -> PyResult<Bound<'py, PyList>> {
     let py = ctx.py;
     let names = frame.names();
-    let columns: Vec<(Vec<meerschaum_kernel::Value>, Vec<bool>)> = frame
+    let columns: Vec<(Vec<meerschaum_kernel::Value>, Vec<bool>, bool)> = frame
         .columns()
         .iter()
-        .map(|c| (c.data.values(), c.data.is_null_mask()))
+        .map(|c| {
+            let wide_integer = matches!(&c.data, meerschaum_kernel::frame::ColumnData::Native(series)
+                if matches!(series.dtype(), polars::prelude::DataType::UInt64 | polars::prelude::DataType::Int128));
+            (c.data.values(), c.data.is_null_mask(), wide_integer)
+        })
         .collect();
     let out = PyList::empty(py);
     for i in 0..frame.height() {
         let d = PyDict::new(py);
-        for (n, (vals, nulls)) in names.iter().zip(&columns) {
+        for (n, (vals, nulls, wide_integer)) in names.iter().zip(&columns) {
             // A `Decimal('NaN')` read from a `NUMERIC` column is a value, not a null (v4 keeps it
             // in the documents; a database NULL is `None`).
             if nulls[i] && !matches!(vals[i], meerschaum_kernel::Value::Decimal(_)) {
                 d.set_item(n, py.None())?;
             } else {
-                d.set_item(n, cell_to_py(ctx, &vals[i])?)?;
+                d.set_item(
+                    n,
+                    crate::convert::native_integer_cell_to_py(ctx, &vals[i], *wide_integer)?,
+                )?;
             }
         }
         out.append(d)?;

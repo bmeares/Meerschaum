@@ -65,6 +65,9 @@ pub(crate) fn ask_connector_register(
     if !super::pipes::is_python_connector(pipe.connector_keys()) || !session.worker_enabled() {
         return None;
     }
+    if !manifest_may_register(session, config, pipe.connector_keys()) {
+        return None;
+    }
     let pool = session.pool(config);
     let connector = session
         .block_on(meerschaum_worker::PythonConnector::connect(
@@ -76,6 +79,39 @@ pub(crate) fn ask_connector_register(
         return None;
     }
     Some(session.block_on(connector.register(pipe)))
+}
+
+/// Whether the plugin manifest leaves open that the connector of `keys` implements
+/// `register()`, so that a Python worker must be asked. It answers `false` (no worker) for a
+/// `plugin:` connector whose plugin imported cleanly and defines no `register` function, and
+/// for a connector type that no plugin defines while every plugin imported (v4's
+/// `Pipe.connector` then falls back to the keys string and `Pipe.register()` skips the hook).
+/// Without this check every `register pipes` of such a pipe started a worker (one per pipe
+/// in `compose up`, which registers each pipe with its own `mrsm` command).
+fn manifest_may_register(
+    session: &super::Session,
+    config: &meerschaum_core::config::Config,
+    keys: &str,
+) -> bool {
+    let Ok(manifest) = session.manifest(config) else {
+        return true;
+    };
+    let (typ, label) = super::session::split_keys(keys);
+    if typ == "plugin" {
+        return match manifest.plugins.get(&label) {
+            Some(plugin) if plugin.import_error.is_none() => {
+                plugin.data_functions.iter().any(|f| f == "register")
+            }
+            _ => true,
+        };
+    }
+    match manifest.connector_types.get(&typ) {
+        Some(connector_type) => connector_type.methods.iter().any(|m| m == "register"),
+        None => {
+            !manifest.load_errors.is_empty()
+                || manifest.plugins.values().any(|p| p.import_error.is_some())
+        }
+    }
 }
 
 /// `Pipe.register()`.

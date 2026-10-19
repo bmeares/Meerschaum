@@ -267,6 +267,31 @@ pub fn main(py: Python<'_>, argv: Bound<'_, PyList>) -> PyResult<i32> {
         ));
     }
     ensure_self_command(py)?;
+    // A compose runner's in-process child (`__mrsm_entry_child__`): take its marker out of the
+    // environment so the command's own children never inherit it.
+    let os = py.import("os")?;
+    let popped = os.getattr("environ")?.call_method1(
+        "pop",
+        (meerschaum_cli::dispatch::ENTRY_CHILD_ENV, py.None()),
+    )?;
+    let marker = if popped.is_none() {
+        None
+    } else {
+        // The variable's bytes as the OS gave them (`os.fsencode` undoes `surrogateescape`).
+        let bytes: Vec<u8> = os.call_method1("fsencode", (popped,))?.extract()?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::ffi::OsStringExt;
+            Some(std::ffi::OsString::from_vec(bytes))
+        }
+        #[cfg(not(unix))]
+        {
+            Some(std::ffi::OsString::from(
+                String::from_utf8_lossy(&bytes).into_owned(),
+            ))
+        }
+    };
+    meerschaum_cli::set_entry_child_marker(marker);
     crate::logging::enter_cli_mode();
     let restore = Restore::enter(py);
     // The CLI owns the process's signals for the run (its first SIGINT / SIGTERM asks a long

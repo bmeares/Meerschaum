@@ -888,12 +888,18 @@ pub fn any_value_to_value(av: &AnyValue, dtype: &DataType) -> Value {
         AnyValue::UInt8(v) => Value::Int(*v as i64),
         AnyValue::UInt16(v) => Value::Int(*v as i64),
         AnyValue::UInt32(v) => Value::Int(*v as i64),
-        AnyValue::UInt64(v) => Value::Int(*v as i64),
+        AnyValue::UInt64(v) => match i64::try_from(*v) {
+            Ok(value) => Value::Int(value),
+            Err(_) => Value::Decimal(Decimal::from_i128_scale(i128::from(*v), 0)),
+        },
         AnyValue::Int8(v) => Value::Int(*v as i64),
         AnyValue::Int16(v) => Value::Int(*v as i64),
         AnyValue::Int32(v) => Value::Int(*v as i64),
         AnyValue::Int64(v) => Value::Int(*v),
-        AnyValue::Int128(v) => Value::Int(*v as i64),
+        AnyValue::Int128(v) => match i64::try_from(*v) {
+            Ok(value) => Value::Int(value),
+            Err(_) => Value::Decimal(Decimal::from_i128_scale(*v, 0)),
+        },
         AnyValue::Float32(v) => Value::Float(*v as f64),
         AnyValue::Float64(v) => Value::Float(*v),
         AnyValue::Date(d) => NaiveDate::from_num_days_from_ce_opt(*d + 719_163)
@@ -926,6 +932,19 @@ pub fn series_to_values(s: &Series) -> Vec<Value> {
     s.iter().map(|av| any_value_to_value(&av, &dtype)).collect()
 }
 
+/// Exact integer reconstruction for native wide columns. Large Python integers already use
+/// the kernel's Decimal representation; never route those digits through a float or a cast.
+fn exact_integer_cell(value: &Value) -> Option<i128> {
+    match value {
+        Value::Int(value) => Some(i128::from(*value)),
+        Value::Bool(value) => Some(if *value { 1 } else { 0 }),
+        Value::Decimal(value @ Decimal::Finite { exp: 0, .. }) => {
+            value.to_plain_string().parse().ok()
+        }
+        _ => None,
+    }
+}
+
 /// Build a native `Series` of `dtype` from values; `None` if some non-null value does not fit.
 pub fn values_to_series(name: &str, values: &[Value], dtype: &DataType) -> Option<Series> {
     let name: PlSmallStr = name.into();
@@ -948,8 +967,7 @@ pub fn values_to_series(name: &str, values: &[Value], dtype: &DataType) -> Optio
         | DataType::Int64
         | DataType::UInt8
         | DataType::UInt16
-        | DataType::UInt32
-        | DataType::UInt64 => {
+        | DataType::UInt32 => {
             let mut out = Vec::with_capacity(values.len());
             for v in values {
                 out.push(match v {
@@ -963,6 +981,28 @@ pub fn values_to_series(name: &str, values: &[Value], dtype: &DataType) -> Optio
                 .into_series()
                 .strict_cast(dtype)
                 .ok()?
+        }
+        DataType::UInt64 => {
+            let mut out = Vec::with_capacity(values.len());
+            for value in values {
+                out.push(if value.is_na() {
+                    None
+                } else {
+                    Some(u64::try_from(exact_integer_cell(value)?).ok()?)
+                });
+            }
+            UInt64Chunked::from_iter_options(name, out.into_iter()).into_series()
+        }
+        DataType::Int128 => {
+            let mut out = Vec::with_capacity(values.len());
+            for value in values {
+                out.push(if value.is_na() {
+                    None
+                } else {
+                    Some(exact_integer_cell(value)?)
+                });
+            }
+            Int128Chunked::from_iter_options(name, out.into_iter()).into_series()
         }
         DataType::Float32 | DataType::Float64 => {
             let mut out = Vec::with_capacity(values.len());
@@ -1191,4 +1231,58 @@ pub fn infer_native_series(name: &str, values: &[Value]) -> Option<Series> {
         }
     }
     None
+}
+
+#[cfg(test)]
+mod wide_integer_tests {
+    use super::*;
+
+    #[test]
+    fn native_wide_integer_values_and_reconstruction_are_exact() {
+        let unsigned = UInt64Chunked::from_iter_options(
+            "value".into(),
+            [Some(0), Some(i64::MAX as u64), Some(u64::MAX), None].into_iter(),
+        )
+        .into_series();
+        let values = series_to_values(&unsigned);
+        assert!(matches!(values[1], Value::Int(i64::MAX)));
+        assert_eq!(values[2].py_str(), u64::MAX.to_string());
+        let rebuilt = values_to_series("value", &values, &DataType::UInt64).unwrap();
+        assert_eq!(
+            rebuilt.u64().unwrap().iter().collect::<Vec<_>>(),
+            vec![Some(0), Some(i64::MAX as u64), Some(u64::MAX), None]
+        );
+        let signed = Int128Chunked::from_iter_options(
+            "value".into(),
+            [Some(i128::MIN), Some(i128::MAX), Some(1), None].into_iter(),
+        )
+        .into_series();
+        let values = series_to_values(&signed);
+        assert_eq!(values[0].py_str(), i128::MIN.to_string());
+        assert_eq!(values[1].py_str(), i128::MAX.to_string());
+        let rebuilt = values_to_series("value", &values, &DataType::Int128).unwrap();
+        assert_eq!(
+            rebuilt.i128().unwrap().iter().collect::<Vec<_>>(),
+            vec![Some(i128::MIN), Some(i128::MAX), Some(1), None]
+        );
+        assert!(values_to_series("bad", &[Value::Int(-1)], &DataType::UInt64).is_none());
+        assert!(
+            values_to_series(
+                "bad",
+                &[Value::Decimal(Decimal::parse("1.5").unwrap())],
+                &DataType::UInt64
+            )
+            .is_none()
+        );
+        assert!(
+            values_to_series(
+                "bad",
+                &[Value::Decimal(
+                    Decimal::parse("340282366920938463463374607431768211456").unwrap()
+                )],
+                &DataType::Int128
+            )
+            .is_none()
+        );
+    }
 }

@@ -152,6 +152,16 @@ fn manifest_roundtrip_matches_worker_schema() {
     let roundtrip: serde_json::Value =
         serde_json::from_slice(&serde_json::to_vec(&plugin.manifest).unwrap()).unwrap();
     validator.validate(&roundtrip).unwrap();
+    assert_eq!(
+        roundtrip["schema_version"],
+        meerschaum_plugin::MANIFEST_SCHEMA_VERSION
+    );
+    for version in [3, meerschaum_plugin::MANIFEST_SCHEMA_VERSION - 1] {
+        let mut stale = roundtrip.clone();
+        stale["schema_version"] = json!(version);
+        assert!(validator.validate(&stale).is_err());
+        assert!(host::validate_manifest(&stale).is_err());
+    }
     assert_eq!(roundtrip, plugin.manifest);
     assert!(host::validate_manifest(&json!({"schema_version":99})).is_err());
     assert_eq!(
@@ -199,6 +209,15 @@ fn discovery_precedence_cache_and_invalidation() {
         modified,
         std::fs::metadata(&cache).unwrap().modified().unwrap()
     );
+    // Keep the current fingerprint: only schema validation may invalidate this cache.
+    let mut stale = a.clone();
+    stale["schema_version"] = json!(3);
+    std::fs::write(&cache, serde_json::to_vec(&stale).unwrap()).unwrap();
+    let refreshed = unsafe { discovery::cached_manifest(&dirs, &cache) }.unwrap();
+    assert_eq!(refreshed, a);
+    let persisted: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&cache).unwrap()).unwrap();
+    assert_eq!(persisted, a);
     let tree = first.join("native_demo");
     std::fs::create_dir(tree.join("__pycache__")).unwrap();
     std::fs::write(tree.join("__pycache__/demo.pyc"), "ignored").unwrap();

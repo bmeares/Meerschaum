@@ -70,6 +70,21 @@ jobs:
           fi
           ./scripts/docker/size_gate.sh "${args[@]}"
 
+      # Release skill §5.7: the base wheel must serve its public operations offline, on a read-only
+      # filesystem, with installs disabled (scripts/docker/smoke_facade.py exits nonzero otherwise).
+      # The slim rootfs ships `python3` and `bash` only (no `python` alias).
+      - name: Facade smoke (slim)
+        if: ${{ !inputs.v4_only }}
+        env:
+          SLIM_IMAGE: ${{ steps.build.outputs.slim_image }}
+        run: |
+          [ -n "$SLIM_IMAGE" ] || { echo "No slim image was built." >&2; exit 1; }
+          docker run --rm --network none --read-only --tmpfs /scratch \
+            -e MRSM_NO_AUTO_INSTALL=1 -e MRSM_ROOT_DIR=/scratch/root -e MRSM_PLUGINS_DIR=/scratch/plugins \
+            -v "$PWD/scripts/docker/smoke_facade.py:/smoke_facade.py:ro" \
+            --entrypoint bash "$SLIM_IMAGE" \
+            -c 'mkdir -p /scratch/root /scratch/plugins && exec python3 -I /smoke_facade.py'
+
       - name: Login to DockerHub
         if: inputs.publish
         uses: docker/login-action@v3

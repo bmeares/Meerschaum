@@ -6,7 +6,7 @@
   "type": "object",
   "required": ["schema_version", "meerschaum_version", "python_version", "fingerprint", "plugins"],
   "properties": {
-    "schema_version": {"const": 3},
+    "schema_version": {"const": 5},
     "meerschaum_version": {"type": "string"},
     "python_version": {"type": "string"},
     "python_executable": {"type": ["string", "null"]},

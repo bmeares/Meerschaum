@@ -24,7 +24,7 @@ use crate::error::{WorkerError, WorkerResult};
 
 /// The protocol version. The worker announces its version in `hello`; the host refuses a
 /// worker speaking another version.
-pub const PROTOCOL_VERSION: u32 = 1;
+pub const PROTOCOL_VERSION: u32 = meerschaum_core::python_guard::WORKER_PROTOCOL_VERSION;
 
 /// Frame kind: a MessagePack control message.
 pub const KIND_CONTROL: u8 = 1;

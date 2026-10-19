@@ -43,6 +43,7 @@ nav = [
     ]},
     {"🐍 Python API" = "reference/python-api.md"},
     {"🥞 Stack" = "reference/stack.md"},
+    {"⬆️ Upgrading the Stack" = "reference/stack-upgrades.md"},
     {"🌐 API Instance" = [
       "reference/api-instance/index.md",
       {"Security and Tokens" = "reference/api-instance/tokens.md"},

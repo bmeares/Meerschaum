@@ -21,6 +21,7 @@ import importlib.util
 import json
 import os
 import pathlib
+import re
 import site
 import subprocess
 import sys
@@ -499,6 +500,44 @@ def _without_v5_defaults(spec):
     return {k: _without_v5_defaults(v) for k, v in spec.items()}
 
 
+def _v4_stack(value):
+    """
+    The stack defaults v5 changed on purpose read as v4.1.4's (PARITY.md W17K1-002..004; the Rust
+    side is `crates/meerschaum-core/tests/common::v4_stack_text`): the `db` setup FILE mount, the
+    TCP healthcheck and its `start_period`, and Grafana's `postgresVersion: 1800`.
+    """
+    if isinstance(value, str):
+        value = value.replace(
+            '/db/initdb/create-extensions.sql:/docker-entrypoint-initdb.d/100_meerschaum.sql:z,ro',
+            '/db/initdb:/docker-entrypoint-initdb.d:z,ro',
+        ).replace(
+            'pg_isready -h 127.0.0.1 -p 5432 -d ', 'pg_isready -d ',
+        ).replace('postgresVersion: 1800', 'postgresVersion: 1500')
+        return re.sub(r'\n *start_period: 300s(?=\n)', '', value)
+    if isinstance(value, list):
+        out = []
+        for item in value:
+            ### A tagged mapping is a list of `[key, value]` pairs.
+            if (
+                isinstance(item, list) and len(item) == 2
+                and all(isinstance(i, dict) for i in item)
+            ):
+                key, val = item
+                if key.get('v') == 'start_period' and val == {'t': 'str', 'v': '300s'}:
+                    continue
+                if key.get('v') == 'postgresVersion' and val == {'t': 'int', 'v': '1800'}:
+                    item = [key, {'t': 'int', 'v': '1500'}]
+            out.append(_v4_stack(item))
+        return out
+    if isinstance(value, dict):
+        return {
+            k: (1500 if k == 'postgresVersion' and v == 1800 else _v4_stack(v))
+            for k, v in value.items()
+            if not (k == 'start_period' and v == '300s')
+        }
+    return value
+
+
 def test_config_cases_match_released_reference(parity, tmp_path):
     actual = _run_config_cases(tmp_path)
     failures = []
@@ -510,6 +549,8 @@ def test_config_cases_match_released_reference(parity, tmp_path):
         expected, got = _unwrapped(expected), _unwrapped(got, tmp_path / 'root')
         ### PARITY (wave 13, PARITY.md): the Rust default config carries `system:engine`.
         expected, got = _without_v5_defaults(expected), _without_v5_defaults(got)
+        ### PARITY (wave 17c, W17K1-002..004): the v5 stack defaults.
+        got = _v4_stack(got)
         if got != expected:
             failures.append((case['name'], {
                 key: (expected[key], got[key]) for key in expected if expected[key] != got[key]

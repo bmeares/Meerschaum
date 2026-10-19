@@ -17,7 +17,7 @@
 //! the instance read of v4 (`read_hints`); the frames of `filter_existing` and
 //! `enforce_dtypes` follow the kernel bindings' output rules.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
 use indexmap::IndexMap;
@@ -35,7 +35,7 @@ use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyBool, PyDict, PyList, PyTuple};
 
-use crate::convert::{PyCtx, cell_to_py, py_to_core};
+use crate::convert::{PyCtx, py_to_core};
 use crate::facade::{self, RegistryInput};
 use crate::pandas_bridge::{
     ColumnMode, FrameKind, IndexSpec, OutSpec, frame_from_py, frame_to_pandas, frame_to_polars,
@@ -301,6 +301,14 @@ fn docs_out<'py>(
     py: Python<'py>,
     docs: &[meerschaum_connector::pipe_ops::Doc],
 ) -> PyResult<Bound<'py, PyList>> {
+    docs_out_typed(py, docs, &HashSet::new())
+}
+
+fn docs_out_typed<'py>(
+    py: Python<'py>,
+    docs: &[meerschaum_connector::pipe_ops::Doc],
+    integers: &HashSet<String>,
+) -> PyResult<Bound<'py, PyList>> {
     let ctx = PyCtx::scalars(py)?;
     let out = PyList::empty(py);
     for doc in docs {
@@ -318,7 +326,10 @@ fn docs_out<'py>(
             if is_null {
                 d.set_item(key, py.None())?;
             } else {
-                d.set_item(key, cell_to_py(&ctx, value)?)?;
+                d.set_item(
+                    key,
+                    crate::convert::native_integer_cell_to_py(&ctx, value, integers.contains(key))?,
+                )?;
             }
         }
         out.append(d)?;
@@ -382,6 +393,7 @@ fn data_out<'py>(
         Data::Missing if as_docs => Ok(PyList::empty(py).into_any()),
         Data::Missing => Ok(py.None().into_bound(py)),
         Data::Docs(docs) => Ok(docs_out(py, &docs)?.into_any()),
+        Data::TypedDocs(docs, integers) => Ok(docs_out_typed(py, &docs, &integers)?.into_any()),
         Data::Frame(frame, dtypes) => enforced_frame(py, &frame, &dtypes, ctx, as_polars, hinted),
     }
 }
@@ -411,7 +423,7 @@ async fn with_context(
 fn data_len(data: &Data) -> usize {
     match data {
         Data::Missing => 0,
-        Data::Docs(d) => d.len(),
+        Data::Docs(d) | Data::TypedDocs(d, _) => d.len(),
         Data::Frame(f, _) => f.height(),
     }
 }

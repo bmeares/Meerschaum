@@ -553,6 +553,68 @@ Examples:
     - `uninstall driver duckdb -y`
 "##
         }
+        "_show_completions" => {
+            r##"
+Print the shell completion script for `mrsm` and `meerschaum` (v5).
+
+Name a shell (`bash`, `zsh`, `fish` or `powershell`); without one the script is for the shell in
+`$SHELL` (PowerShell on Windows). The script holds no candidates: on every <TAB> it runs the
+program again to ask for them, so they always match what is installed and configured (actions,
+subactions, flags, connectors, jobs, plugins and files). Nothing is run, written or downloaded to
+answer.
+
+Load it for one session, or write it where the shell finds it with `install completions`.
+
+Examples:
+    - `source <(mrsm show completions bash)`
+    - `source <(mrsm show completions zsh)`
+    - `mrsm show completions fish | source`
+    - `mrsm show completions powershell | Out-String | Invoke-Expression`
+"##
+        }
+        "_install_completions" => {
+            r##"
+Write the shell completion script where the shell loads it, idempotently (v5).
+
+Name a shell (`bash`, `zsh`, `fish` or `powershell`); without one it is the shell in `$SHELL`
+(PowerShell on Windows). What is written, per shell:
+
+    - bash: `${XDG_DATA_HOME:-~/.local/share}/bash-completion/completions/{mrsm,meerschaum}`
+    - fish: `${XDG_CONFIG_HOME:-~/.config}/fish/completions/{mrsm,meerschaum}.fish`
+    - zsh: `${XDG_DATA_HOME:-~/.local/share}/zsh/site-functions/_mrsm`; the two lines to add to
+      `~/.zshrc` (`fpath` and `compinit`) are printed unless the directory is already on `fpath`.
+    - PowerShell: `mrsm.ps1` under the user's data directory, and a marked block that loads it in
+      the profile PowerShell reports (`$PROFILE`); if PowerShell is not found the line to add is
+      printed. A profile that is not UTF-8 (UTF-16, as Windows PowerShell 5.1 writes with `>`) is
+      never edited: the line to add is printed instead. A profile that does not exist is created.
+
+Every file says which `mrsm` wrote it. A file of the same name that `mrsm` did not write is never
+replaced unless you pass `--force`. Each file written (or already up to date) is listed.
+`uninstall completions` removes exactly these.
+
+Options:
+    - `--force`
+        - Replace a file of the same name that `mrsm` did not write.
+
+Examples:
+    - `install completions`
+    - `install completions zsh`
+    - `install completions powershell`
+"##
+        }
+        "_uninstall_completions" => {
+            r##"
+Remove the shell completion script `install completions` wrote (v5).
+
+Only files that carry the marker `mrsm` writes are removed (a file of your own with the same name
+is left alone), and for PowerShell only the marked block in the profile. Name a shell, or it is
+the one in `$SHELL`.
+
+Examples:
+    - `uninstall completions`
+    - `uninstall completions fish`
+"##
+        }
         "_show_drivers" => {
             r##"
 Show the native database driver libraries (v5).
@@ -567,6 +629,162 @@ Name a driver (`duckdb`, `oracle`) to show only that one.
 Examples:
     - `show drivers`
     - `show drivers duckdb`
+"##
+        }
+        "_upgrade_extensions" => {
+            r##"
+Update a PostgreSQL instance's extensions to the versions its server ships (v5).
+
+Docker sets up a database only on an empty volume, so after a new image is pulled the database
+keeps the extension versions it was created with (TimescaleDB, PostGIS, the TimescaleDB
+Toolkit, ...). This lists every extension whose installed version is older than the server's
+default version, shows the statements, asks, and runs each update in its own new session
+(TimescaleDB must be updated before a session loads the old library). PostGIS and its raster,
+topology, SFCGAL and tiger geocoder extensions are updated with `postgis_extensions_upgrade()`.
+
+The target is the instance (`-i`, default the configured instance) and its database. Name other
+databases on the same server as words to update them too; no other database is touched. A
+non-PostgreSQL instance has nothing to update.
+
+On the stack's own database (`sql:main` on a local host, with a stack in this root and a `db`
+container for its project), as a superuser, this also applies the stack's
+`TIMESCALEDB_TELEMETRY: 'off'` (`ALTER SYSTEM`, reload, and unscheduling the telemetry job), asks
+whether to add `pg_stat_statements` to `shared_preload_libraries` (default no; `-y` / `--force`
+add it without asking, `--noask` keeps the default; it takes effect after `mrsm stack restart db`,
+and the database is never restarted here), and restarts the stack's running `api` and `grafana` services after a
+TimescaleDB update. An update the user may not run is reported with the
+statement to run as a superuser.
+
+Options:
+    - `-i, --instance`
+        - The PostgreSQL instance (e.g. `sql:main`).
+    - `-y, --yes`, `-f, --force`
+        - Update without asking.
+
+Examples:
+    - `upgrade extensions`
+    - `upgrade extensions -i sql:main`
+    - `upgrade extensions template1 postgres -y`
+"##
+        }
+        "backup" => {
+            r##"
+Back up a database (v5). Choose a subaction:
+
+    - `backup postgres`
+        - An online backup of the stack's PostgreSQL database.
+"##
+        }
+        "restore" => {
+            r##"
+Restore a database from a backup (v5). Choose a subaction:
+
+    - `restore postgres`
+        - Restore the stack's PostgreSQL database from a backup.
+"##
+        }
+        "_backup_postgres" => {
+            r##"
+Take an online backup of the stack's PostgreSQL database (v5).
+
+Nothing is stopped: every database is dumped from one consistent snapshot (`pg_dump -Fc` of a
+snapshot a session exports, zstd-compressed when the server's `pg_dump` supports it), together
+with the roles (`pg_dumpall --globals-only`). The backup goes to
+`<root>/backups/postgres/<UTC timestamp>/` with a `manifest.json`: the PostgreSQL version, the
+image, each database's extension versions (TimescaleDB's above all: a restore needs it), each
+file's size and SHA-256, and row estimates. Each dump is checked with `pg_restore --list`; the
+files are written to a `.partial` directory that is renamed at the end (a failed backup removes
+it). Directories are readable by you only (0700), files too (0600): the roles' dump holds
+password hashes.
+
+Keep only the newest N backups with the config key `system:backups:postgres:keep` (e.g.
+`mrsm edit config system`); by default every backup is kept. Only complete backups are removed,
+never an upgrade's or a restore's files.
+
+It asks nothing, so it can run as a job: `mrsm backup postgres -s 'daily' -d` takes a backup
+every day.
+
+Options:
+    - `-f, --force`
+        - Back up even when the free disk space looks too small.
+    - `--debug`
+        - Print the Docker commands.
+
+Examples:
+    - `backup postgres`
+    - `backup postgres -s 'daily' -d`
+"##
+        }
+        "_restore_postgres" => {
+            r##"
+Restore the stack's PostgreSQL database from a backup (v5).
+
+Without a word, the newest complete backup in `<root>/backups/postgres/`; or name one by its
+timestamp (`20261018T120000Z`) or its directory (an upgrade's backup works too). Every file is
+checked against the SHA-256 in the backup's manifest first, and a damaged backup is refused.
+
+The backup is restored into a NEW volume with the stack's current image, checked against the
+manifest (every database's tables, hypertables, compression settings and extensions), and only
+then does the stack's `db` switch to it (`stack.yaml` is copied first; only the `db` volume
+changes). The current volume is never modified or removed: `restore postgres rollback` switches
+back to it. Everything written since the backup stays only in the current volume. A backup of an
+older PostgreSQL major is restored the way an upgrade restores its dump; a backup of a newer
+major than the image is refused.
+
+Options:
+    - `-y, --yes`
+        - Answer yes to the question.
+    - `-f, --force`
+        - Restore even when the free disk space looks too small.
+    - `--debug`
+        - Print the Docker commands, and keep the new volume of a failed run for inspection.
+
+Examples:
+    - `restore postgres`
+    - `restore postgres 20261018T120000Z`
+    - `restore postgres rollback`
+"##
+        }
+        "_upgrade_postgres" => {
+            r##"
+Move the stack's database to another PostgreSQL major version (v5).
+
+A new major cannot read the old data directory, so this takes a full backup of the stack's `db`
+service first (as `backup postgres` does, with exact row counts) and restores it into a NEW
+volume that the new image sets up, the way TimescaleDB requires (the same TimescaleDB version on
+both sides, `timescaledb_pre_restore()` and `timescaledb_post_restore()`). Nothing is switched
+unless every database's row counts, tables, hypertables, compression settings and extensions
+match. Only then is `stack.yaml` changed (the `db` image, its data volume and that volume's
+declaration; the file is first copied into the backup's directory) and the stack started again.
+
+The old volume is never removed and nothing writes to it but its own server (TimescaleDB is
+updated in it first only when the new image cannot create the installed version; the plan says
+so). The backup stays in `<root>/backups/postgres/<timestamp>/` (`restore postgres <timestamp>`
+can restore it), `upgrade postgres rollback` brings the old database back, and the commands that
+free the space are printed at the end.
+
+The database keeps running during the dump; the services that use it (`api`, `grafana`, ...)
+are stopped until the end. Stop Meerschaum jobs and other clients that write to it first: a
+connection still open when the dump starts stops the upgrade (unless `--force`).
+
+Name the target as a major (the same image family: `timescale/timescaledb-ha:pg17` becomes
+`pg18`) or as an image. Without a word, the major of the default stack image.
+
+Options:
+    - `-y, --yes`
+        - Answer yes to the questions (pulling the image, starting the upgrade).
+    - `-f, --force`
+        - Also go on with other clients connected or with little free disk space.
+    - `--noask`
+        - Take each question's default: nothing is pulled and the upgrade does not start.
+    - `--debug`
+        - Print the Docker commands, and keep the new volume of a failed run for inspection.
+
+Examples:
+    - `upgrade postgres`
+    - `upgrade postgres 18`
+    - `upgrade postgres timescale/timescaledb-ha:pg18`
+    - `upgrade postgres rollback`
 "##
         }
         "_show_runs" => {
@@ -589,9 +807,52 @@ One row per node: the action (`root`, `skip`, `incremental`, `backfill`, `rebuil
 the sync bounds, the number of chunks and the reason. Accepts the usual key and tag filters,
 `--begin`, `--end`, `--parents [N]`, `--children [N]` and `--resume RUN_ID`.
 
+A `*` marks a provisional node: the executor plans it again once its parents finish. Its row
+shows that second plan as if every node that runs before it synced new rows after its watermark,
+so the window starts where the executor will start it (often the start of a parent's chunk-grid
+cell). Only the start is predicted; the executor caps the end at the parents' new watermarks.
+This is `Pipeline.plan(expected=True)` in Python (the default there is the static plan).
+`--nopretty` prints the same plan as JSON.
+
 Examples:
     - `plan pipes -t demo --parents`
     - `plan pipes -m daily --nopretty`
+"##
+        }
+        "doctor" => {
+            r##"
+Check this installation and print what is wrong with it, and how to fix it (v5).
+
+Read-only: it never installs, creates, migrates or writes anything, not even on a new root (no
+default config files, no plugin manifest or entry-point cache), and it never imports plugin code: it
+reads the plugin manifest the last command cached and WARNs when it is stale or missing (`mrsm
+reload` rebuilds it). A SQLite database that does not exist is reported, not created; a DuckDB
+instance whose library is missing is not probed (the library is never installed). One caveat:
+opening an existing SQLite database may create its `-wal` and `-shm` files beside it. Every check is
+PASS, WARN, FAIL or SKIP, and each WARN or FAIL carries the command or setting that fixes it. Checks, by group:
+install (version, build, worker interpreter, the `meerschaum` package it imports), paths (the root
+and plugins directories, free space and inodes), config (files, `MRSM_*` connector variables, the
+default instance), instance (connection, server version, the Meerschaum tables), drivers (DuckDB,
+Oracle client), extras (Python extras the worker can import), plugins (import errors, stale
+virtual environments), jobs (failed jobs, stale PID files), stack (Docker services) and extensions.
+
+For DuckDB in a Python host, the public driver's installed metadata and existing transport policy
+are checked without importing the driver or selecting a policy. Its live instance query is SKIPped
+to preserve read-only diagnostics: no database or shared anchor is opened. Metadata availability
+does not verify that importing the driver or connecting will succeed. Standalone/native driver
+checks keep their library lookup behavior.
+
+Use `-i` to check another instance; instances are read from the config (and `MRSM_*` variables),
+so a connector registered only through Python (`mrsm.get_connector(...)` without a config entry) is
+not known to `doctor`. `--nopretty` prints one JSON document (`version`, `summary`,
+`checks`: `group`, `name`, `status`, `detail`, `fix`) to attach to a bug report; `--debug` adds
+the time each check took. The result fails (exit code 1) if any check FAILs; `--nopretty` always exits 0
+like every command, so scripts read `summary.ok` of the JSON document.
+
+Examples:
+    - `doctor`
+    - `doctor -i sql:main`
+    - `doctor --nopretty`
 "##
         }
         "plan" => {

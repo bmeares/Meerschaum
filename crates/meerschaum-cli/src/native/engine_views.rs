@@ -44,9 +44,15 @@ pub fn plan_pipes(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
         Ok(planned) => planned,
         Err(error) => return Ok(SuccessTuple::fail(error)),
     };
+    // Provisional nodes as the executor re-plans them once their parents have synced: a
+    // backfill starts on the chunk grid, not at the tail window the static plan shows.
+    let expected = match session.block_on(engine.expected_plan(&planned, &opts)) {
+        Ok(plan) => plan,
+        Err(error) => return Ok(SuccessTuple::fail(error)),
+    };
     drop(progress);
     if nopretty {
-        match serde_json::to_value(&planned.plan) {
+        match serde_json::to_value(&expected) {
             Ok(value) => json(rt, &value),
             Err(error) => return Ok(SuccessTuple::fail(error.to_string())),
         }
@@ -55,7 +61,7 @@ pub fn plan_pipes(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     for warning in &planned.subgraph.warnings {
         warn(rt, warning);
     }
-    let plan = &planned.plan;
+    let plan = &expected;
     rt.print(&format!("{plan}"));
     let runs = plan
         .nodes
@@ -71,7 +77,7 @@ pub fn plan_pipes(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     if provisional > 0 {
         let _ = write!(
             summary,
-            ", {provisional} re-planned after their parents finish"
+            ", {provisional} re-planned after their parents finish, shown as if they sync new rows"
         );
     }
     info(rt, &format!("{summary}). Nothing was synced."));

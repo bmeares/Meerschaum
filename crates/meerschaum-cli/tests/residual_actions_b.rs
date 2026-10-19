@@ -406,8 +406,10 @@ fn upgrade_plugins_reinstalls_from_the_repository() {
 fn scratch_venv(home: &Home, name: &str) -> Option<std::path::PathBuf> {
     let venv = home.root.join(name);
     let status = std::process::Command::new("python3")
-        .args(["-m", "venv"])
+        .args(["-I", "-m", "venv"])
         .arg(&venv)
+        .env_remove("PYTHONPATH")
+        .env_remove("PYTHONHOME")
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .status()
@@ -415,13 +417,16 @@ fn scratch_venv(home: &Home, name: &str) -> Option<std::path::PathBuf> {
     status.success().then(|| venv.join("bin/python"))
 }
 
-/// The installed version of a distribution according to `python`.
+/// The installed version in the scratch interpreter, excluding source-tree / user metadata.
 fn dist_version(python: &std::path::Path, dist: &str) -> Option<String> {
     let output = std::process::Command::new(python)
         .args([
+            "-I",
             "-c",
             &format!("import importlib.metadata as m; print(m.version('{dist}'))"),
         ])
+        .env_remove("PYTHONPATH")
+        .env_remove("PYTHONHOME")
         .output()
         .ok()?;
     output
@@ -482,6 +487,42 @@ fn upgrade_meerschaum_never_guesses_an_interpreter() {
 }
 
 #[test]
+fn upgrade_meerschaum_ignores_source_metadata_in_the_working_directory() {
+    if !python_available() {
+        return;
+    }
+    let home = Home::new();
+    let path = path_without_docker(&home);
+    let Some(python) = scratch_venv(&home, "cwd-bare-venv") else {
+        return;
+    };
+    assert!(dist_version(&python, "meerschaum").is_none());
+    let cwd = home.root.join("foreign-cwd");
+    let metadata = cwd.join("meerschaum.egg-info");
+    std::fs::create_dir_all(&metadata).unwrap();
+    std::fs::write(
+        metadata.join("PKG-INFO"),
+        "Metadata-Version: 2.1\nName: meerschaum\nVersion: 99.0.0\n",
+    )
+    .unwrap();
+    let mut env = home.env();
+    env.retain(|(key, _)| key != "PATH" && key != "MRSM_PYTHON");
+    env.push(("PATH".into(), path));
+    env.push(("MRSM_PYTHON".into(), python.display().to_string()));
+    // Home owns this cwd and all metadata. run_binary explicitly sets current_dir(cwd),
+    // so ignoring PYTHONPATH alone cannot make this refusal pass.
+    let run =
+        plugin_lifecycle_support::run_binary(&["upgrade", "meerschaum", "--yes"], &env, Some(&cwd));
+    let text = flat(&run.text());
+    assert!(!run.success, "{text}");
+    assert!(
+        text.contains("Meerschaum is not installed in the Python environment"),
+        "{text}"
+    );
+    assert!(dist_version(&python, "meerschaum").is_none());
+}
+
+#[test]
 fn upgrade_meerschaum_upgrades_the_environment_that_has_it_and_adds_no_system_flag() {
     if !python_available() || !installer_available() {
         return;
@@ -495,6 +536,7 @@ fn upgrade_meerschaum_upgrades_the_environment_that_has_it_and_adds_no_system_fl
     plugin_lifecycle_support::write_wheel(&home.wheels, "meerschaum", "1.0.0");
     let installed = std::process::Command::new(&python)
         .args([
+            "-I",
             "-m",
             "pip",
             "install",
@@ -503,6 +545,8 @@ fn upgrade_meerschaum_upgrades_the_environment_that_has_it_and_adds_no_system_fl
             home.wheels.to_str().unwrap(),
             "meerschaum==1.0.0",
         ])
+        .env_remove("PYTHONPATH")
+        .env_remove("PYTHONHOME")
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .status()
@@ -684,14 +728,34 @@ fn edit_plugins_opens_the_editor_for_an_installed_plugin_only() {
     );
 
     home.write_plugin("foo.py", "x = 1\n");
-    let run = home.run_input(&["edit", "plugins", "foo"], "\n", &[NO_EDITOR]);
+    let receipt = home.root.join("editor-argv.json");
+    let receipt_path = receipt.to_string_lossy().into_owned();
+    // Record the actual argument, independent of wrapping a long scratch path in the prompt.
+    // The editor is an argument vector, never a shell; Python writes only this owned receipt.
+    let editor = r#"python3 -I -c 'import json, os, pathlib, sys; pathlib.Path(os.environ["MRSM_TEST_EDITOR_RECEIPT"]).write_text(json.dumps(sys.argv[1:]))'"#;
+    let editor_env = [
+        ("EDITOR", editor),
+        ("MRSM_TEST_EDITOR_RECEIPT", receipt_path.as_str()),
+        // This dependency-free plugin needs no pip seed packages in the offline scratch venv.
+        ("MRSM_NO_AUTO_INSTALL", "1"),
+        ("COLUMNS", "40"),
+    ];
+    let run = home.run_input(&["edit", "plugins", "foo"], "\n", &editor_env);
     let text = flat(&run.text());
     assert!(run.success, "{text}");
     assert!(text.contains("Press [Enter] to open"), "{text}");
-    assert!(text.contains("foo.py"), "{text}");
+    assert!(text.contains("Reloaded 1 plugin"), "{text}");
+    let recorded: Vec<String> = serde_json::from_slice(&std::fs::read(&receipt).unwrap()).unwrap();
+    let expected = home.plugins.join("foo.py").canonicalize().unwrap();
+    assert_eq!(
+        recorded,
+        vec![expected.to_string_lossy().into_owned()],
+        "{text}"
+    );
 
-    // An unknown plugin offers to create one; a refusal ends there.
-    let run = home.run_input(&["edit", "plugins", "unknown"], "n\n", &[NO_EDITOR]);
+    // An unknown plugin offers to create one; a refusal must not invoke the editor.
+    std::fs::remove_file(&receipt).unwrap();
+    let run = home.run_input(&["edit", "plugins", "unknown"], "n\n", &editor_env);
     let text = flat(&run.text());
     assert!(!run.success, "{text}");
     assert!(
@@ -703,6 +767,10 @@ fn edit_plugins_opens_the_editor_for_an_installed_plugin_only() {
         "{text}"
     );
     assert!(text.contains("Plugin 'unknown' does not exist."), "{text}");
+    assert!(
+        !receipt.exists(),
+        "a refused unknown plugin invoked the editor"
+    );
 }
 
 #[test]

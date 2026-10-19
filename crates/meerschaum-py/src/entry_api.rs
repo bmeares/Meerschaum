@@ -415,7 +415,10 @@ pub fn entry<'py>(
             // a worker (the import would recurse): it runs natively, without plugins.
             if meerschaum_worker::worker::spawn_refused() {
                 rt.eprint(NESTED_IMPORT_NOTICE);
-            } else if let Err(e) = meerschaum_cli::python::manifest(rt) {
+            } else if !dispatch::starts_with_doctor(&sysargs, &rt.dates, patch.as_ref())
+                .unwrap_or(true)
+                && let Err(e) = meerschaum_cli::python::manifest(rt)
+            {
                 rt.eprint(&format!("Unable to load plugin manifest: {}\n", e.message));
             }
             match &patch {

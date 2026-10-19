@@ -37,21 +37,52 @@ fn task_err(e: tokio::task::JoinError) -> SqlError {
 }
 
 /// The database file (`None` for an in-memory database).
-fn database_path(spec: &ConnectionSpec) -> Option<String> {
-    spec.database
+fn database_path(spec: &ConnectionSpec) -> Result<Option<String>> {
+    let Some(path) = spec
+        .database
         .as_deref()
-        .filter(|d| !d.is_empty() && *d != ":memory:")
-        .map(str::to_string)
+        .filter(|path| !path.is_empty() && *path != ":memory:")
+    else {
+        return Ok(None);
+    };
+    let path = PathBuf::from(path);
+    let absolute = if path.is_absolute() {
+        path
+    } else {
+        std::env::current_dir()
+            .map_err(|error| SqlError::Database(error.to_string()))?
+            .join(path)
+    };
+    let canonical = absolute.canonicalize().unwrap_or_else(|_| {
+        let parent = absolute.parent().and_then(|path| path.canonicalize().ok());
+        match (parent, absolute.file_name()) {
+            (Some(parent), Some(name)) => parent.join(name),
+            _ => absolute.clone(),
+        }
+    });
+    let path = canonical.to_str().ok_or_else(|| {
+        SqlError::InvalidArgument("DuckDB database path is not valid UTF-8.".into())
+    })?;
+    Ok(Some(path.to_owned()))
 }
 
 struct DuckdbConnector {
+    pid: u32,
     path: Option<String>,
     /// The database instance, opened on first use; connections are made on it.
     primary: Arc<Mutex<Option<Arc<ffi::Database>>>>,
 }
 
+fn check_pid(pid: u32) -> Result<()> {
+    if pid != std::process::id() {
+        return Err(SqlError::Database("DuckDB state belongs to the parent process; start a fresh interpreter (spawn or exec).".into()));
+    }
+    Ok(())
+}
+
 impl DuckdbConnector {
     fn open(&self, no_auto_install: bool) -> Result<ffi::Connection> {
+        check_pid(self.pid)?;
         let mut primary = self
             .primary
             .lock()
@@ -77,12 +108,17 @@ impl DuckdbConnector {
 
 #[async_trait]
 impl NativeConnector for DuckdbConnector {
+    fn owner_pid(&self) -> Option<u32> {
+        Some(self.pid)
+    }
     async fn connect(&self) -> Result<Box<dyn NativeConn>> {
+        check_pid(self.pid)?;
         // Find the library, or download it on first use (not under `MRSM_NO_AUTO_INSTALL`).
         let settings = duckdb_lib::Settings::from_process_env();
         duckdb_lib::ensure_loaded(&settings).await?;
         let conn = self.open(settings.no_auto_install)?;
         Ok(Box::new(DuckdbConn {
+            pid: self.pid,
             conn: Arc::new(Mutex::new(conn)),
         }))
     }
@@ -95,28 +131,79 @@ pub(crate) async fn connect(spec: &ConnectionSpec) -> Result<NativePool> {
     Ok(pool)
 }
 
+/// Optional host transport. Standalone executables leave this unset and use the C API.
+pub type HostFactory = fn(&ConnectionSpec) -> Result<Option<Box<dyn NativeConnector>>>;
+static HOST_FACTORY: OnceLock<HostFactory> = OnceLock::new();
+
+/// Read-only facts about the embedding host's DuckDB transport. Metadata is not proof that
+/// importing the driver or connecting to a database will succeed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HostDiagnostic {
+    /// This host uses the native library, just like a standalone process.
+    Native,
+    /// The public Python driver is selected, or would be selected on first use.
+    Python {
+        /// Installed metadata version (or an already imported driver's version).
+        version: Option<String>,
+        /// The metadata distribution location, when known.
+        path: Option<String>,
+        /// Whether this process already selected its transport.
+        pinned: bool,
+    },
+    /// Reuse is refused, e.g. after fork or a changed explicit driver override.
+    Refused(String),
+}
+
+/// A host diagnostic must not import optional drivers, select a policy, open a database or
+/// install anything. No provider is registered by standalone executables.
+pub type HostDiagnosticProvider = fn() -> HostDiagnostic;
+static HOST_DIAGNOSTIC: OnceLock<HostDiagnosticProvider> = OnceLock::new();
+
+/// Register the host's side-effect-free diagnostic provider.
+pub fn register_host_diagnostic(provider: HostDiagnosticProvider) {
+    let _ = HOST_DIAGNOSTIC.set(provider);
+}
+
+/// The embedding host's transport facts; `None` for standalone processes.
+pub fn host_diagnostic() -> Option<HostDiagnostic> {
+    HOST_DIAGNOSTIC.get().map(|provider| provider())
+}
+
+/// Register the Python host's lazy public-driver adapter, without importing a driver.
+pub fn register_host_factory(factory: HostFactory) {
+    let _ = HOST_FACTORY.set(factory);
+}
+
 /// Build the pool without opening the database.
 pub(crate) fn connect_lazy(spec: &ConnectionSpec) -> Result<NativePool> {
+    if let Some(factory) = HOST_FACTORY.get()
+        && let Some(connector) = factory(spec)?
+    {
+        return Ok(NativePool::new(connector, spec.max_connections()));
+    }
+    // The C API backend currently supports only its explicit environment settings. Never
+    // silently ignore options such as access_mode=READ_ONLY. Host-only identity attributes
+    // are not DuckDB options and remain valid after an installed host selects this backend.
+    let host = HOST_FACTORY.get().is_some();
+    if spec
+        .params
+        .keys()
+        .any(|key| !(host && matches!(key.as_str(), "_duckdb_memory_id" | "_duckdb_database")))
+        || spec
+            .options
+            .as_ref()
+            .is_some_and(|options| !options.pairs().is_empty())
+    {
+        return Err(SqlError::InvalidArgument("The native DuckDB C API does not support connection options; refusing to ignore them. Remove the options or use the public Python driver transport.".into()));
+    }
+    static PROCESS_PID: OnceLock<u32> = OnceLock::new();
+    check_pid(*PROCESS_PID.get_or_init(std::process::id))?;
     type Primary = Mutex<Option<Arc<ffi::Database>>>;
     static DATABASES: OnceLock<Mutex<HashMap<PathBuf, Weak<Primary>>>> = OnceLock::new();
-    let path = database_path(spec);
+    let path = database_path(spec)?;
     let primary = match &path {
         Some(path) => {
-            let path = PathBuf::from(path);
-            let absolute = if path.is_absolute() {
-                path
-            } else {
-                std::env::current_dir()
-                    .map_err(|e| SqlError::Database(e.to_string()))?
-                    .join(path)
-            };
-            let key = absolute.canonicalize().unwrap_or_else(|_| {
-                let parent = absolute.parent().and_then(|p| p.canonicalize().ok());
-                match (parent, absolute.file_name()) {
-                    (Some(parent), Some(name)) => parent.join(name),
-                    _ => absolute.clone(),
-                }
-            });
+            let key = PathBuf::from(path);
             let mut databases = DATABASES
                 .get_or_init(Default::default)
                 .lock()
@@ -134,12 +221,17 @@ pub(crate) fn connect_lazy(spec: &ConnectionSpec) -> Result<NativePool> {
         None => Arc::new(Mutex::new(None)),
     };
     Ok(NativePool::new(
-        Box::new(DuckdbConnector { path, primary }),
+        Box::new(DuckdbConnector {
+            pid: std::process::id(),
+            path,
+            primary,
+        }),
         spec.max_connections(),
     ))
 }
 
 struct DuckdbConn {
+    pid: u32,
     conn: Arc<Mutex<ffi::Connection>>,
 }
 
@@ -254,6 +346,7 @@ fn query_blocking(
 #[async_trait]
 impl NativeConn for DuckdbConn {
     async fn execute(&mut self, sql: &str, params: &[SqlParam]) -> Result<u64> {
+        check_pid(self.pid)?;
         let (conn, sql, params) = (self.conn.clone(), sql.to_string(), params.to_vec());
         tokio::task::spawn_blocking(move || execute_blocking(&*lock(&conn)?, &sql, &params))
             .await
@@ -267,6 +360,7 @@ impl NativeConn for DuckdbConn {
         chunksize: usize,
         sink: mpsc::Sender<NativeEvent>,
     ) -> Result<()> {
+        check_pid(self.pid)?;
         let (conn, sql, params) = (self.conn.clone(), sql.to_string(), params.to_vec());
         tokio::task::spawn_blocking(move || {
             query_blocking(&*lock(&conn)?, &sql, &params, chunksize.max(1), &sink)
@@ -286,6 +380,9 @@ impl NativeConn for DuckdbConn {
     async fn rollback(&mut self) -> Result<()> {
         self.execute("ROLLBACK", &[]).await.map(|_| ())
     }
+    fn is_broken(&self) -> bool {
+        self.pid != std::process::id()
+    }
 }
 
 #[cfg(test)]
@@ -295,6 +392,42 @@ mod tests {
 
     fn ty(id: i32) -> ColumnType {
         ColumnType { id, decimal: None }
+    }
+
+    #[test]
+    fn connection_options_are_refused_before_native_open() {
+        let path =
+            std::env::temp_dir().join(format!("w17cduck-options-{}.db", uuid::Uuid::new_v4()));
+        for option in [
+            "access_mode=READ_ONLY",
+            "threads=2",
+            "_duckdb_database=ignored.db",
+        ] {
+            let spec = ConnectionSpec::from_uri(
+                &format!("duckdb:///{}?{option}", path.display()),
+                None,
+                None,
+            )
+            .unwrap();
+            let error = match connect_lazy(&spec) {
+                Ok(_) => panic!("ignored DuckDB connection option"),
+                Err(error) => error,
+            };
+            assert!(error.to_string().contains("refusing to ignore"), "{error}");
+            assert!(!path.exists());
+        }
+    }
+
+    #[test]
+    fn lazy_native_database_path_is_frozen_to_an_absolute_file() {
+        let name = format!("w17cduck-relative-{}.db", uuid::Uuid::new_v4());
+        let spec = ConnectionSpec::from_uri(&format!("duckdb:///{name}"), None, None).unwrap();
+        let frozen = PathBuf::from(database_path(&spec).unwrap().unwrap());
+        assert!(frozen.is_absolute());
+        assert_eq!(frozen, std::env::current_dir().unwrap().join(name));
+        assert!(!frozen.exists());
+        let memory = ConnectionSpec::from_uri("duckdb:///:memory:", None, None).unwrap();
+        assert!(database_path(&memory).unwrap().is_none());
     }
 
     #[test]

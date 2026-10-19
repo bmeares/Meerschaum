@@ -87,7 +87,168 @@ def norm(s):
     return s.strip('\n')
 
 
+V4_ACTIVE_CONNECTORS = "{'api': {}, 'sql': {}, 'plugin': {}, 'valkey': {}}"  # v4.1.4, fresh CLI process
+
+
+def _cells(line):
+    return [x.strip() for x in line.strip().strip('│').split('│')]
+
+
+def _shown(cell, full):
+    """Whether a table cell displays `full`, whole or truncated with a trailing ellipsis."""
+    if cell == full:
+        return True
+    shown = cell[:-1]
+    return cell.endswith('…') and 8 <= len(shown) < len(full) and full.startswith(shown)
+
+
+def _pipe_table(text):
+    """`(before, header, rows, after)` of a `|`-delimited table, rejoining rows whose raw cell bytes broke
+    the line. Splits on newlines only (`str.splitlines()` also breaks on other control characters) and keeps
+    cell text minus padding spaces. `header` is None when the table cannot be parsed."""
+    lines = text.split('\n')
+    start = next((i for i, l in enumerate(lines) if l.startswith('|')), None)
+    if start is None or start + 1 >= len(lines):
+        return lines, None, [], []
+    header = [c.strip(' ') for c in lines[start].strip(' ').strip('|').split('|')]
+    width = len(header) + 2
+    rows, current, i = [], None, start + 2
+    while i < len(lines):
+        line = lines[i]
+        if current is not None and current.count('|') < width - 1:
+            current += '\n' + line
+        elif line.startswith('|'):
+            if current is not None:
+                rows.append(current)
+            current = line
+        else:
+            break
+        i += 1
+    if current is not None:
+        rows.append(current)
+    cells = []
+    for row in rows:
+        parts = row.split('|')
+        if len(parts) != width or parts[0] != '' or parts[-1].strip(' ') != '':
+            return lines, None, [], []
+        cells.append([c.strip(' ') for c in parts[1:-1]])
+    return lines[:start + 2], header, cells, lines[i:]
+
+
+def _separator(line, columns):
+    """The alignment pattern of a markdown separator row (`|---:|:---|`), or None when malformed."""
+    if not re.fullmatch(r'\|(?::?-+:?\|)+', line) or line.count('|') != columns + 1:
+        return None
+    return re.sub(r'-+', '-', line)
+
+
+def _border(line):
+    """The junction pattern of a box-table border line (`╭───┬──╮`), or None when malformed."""
+    if not re.fullmatch(r'╭─+(?:┬─+)*╮|├─+(?:┼─+)*┤|╰─+(?:┴─+)*╯', line):
+        return None
+    return re.sub(r'─+', '─', line)
+
+
+def _without_mrsm_python(text, python):
+    """`text` with its single `'MRSM_PYTHON'` entry for exactly `python` replaced, else None."""
+    pattern = r"(    'MRSM_PYTHON':[ \n])'" + re.escape(str(python)) + r"',\n"
+    found = re.findall(pattern, text)
+    if len(found) != 1:
+        return None
+    return re.sub(pattern, r"\1'<mrsm-python>',\n", text)
+
+
+def expected_cli(c, ao, bo, outs, facts):
+    """Exact, per-command classification of a known v4/v5 output difference against the harness's
+    own fixture facts (`facts`: `v5_version`, `tokens` {label: {id, user, expiration}}).
+
+    Returns `(status, detail)`, or `None` to keep the DIFF. Every branch requires every other byte of
+    the output to be identical.
+    """
+    import ast
+    w = c.split()
+    la, lb = ao.split('\n'), bo.split('\n')
+    if w == ['show', 'version']:
+        v5 = facts.get('v5_version')
+        if v5 and ao == ' 💬 Meerschaum v4.1.4' and bo == f' 💬 Meerschaum v{v5}':
+            return 'PASS', ''
+        return None
+    if w == ['show', 'environment']:
+        a, b = _without_mrsm_python(ao, V4_PY), _without_mrsm_python(bo, V5_PY)
+        return ('PASS', '') if a is not None and a == b else None
+    if w == ['show', 'plugins']:
+        names = [l.strip() for l in lb if re.fullmatch(r'  [A-Za-z_][A-Za-z0-9_]*', l.rstrip())]
+        if sorted(la) == sorted(lb) and names and names == sorted(names) and len(la) == len(lb):
+            return 'EXPECTED', 'PARITY W17T-CLI-004 (W13I-008): v5 lists plugins sorted by name, v4 in file-system order'
+        return None
+    if len(la) != len(lb):
+        return None
+    differing = [i for i, (x, y) in enumerate(zip(la, lb)) if x != y]
+    if w == ['show', 'connectors']:
+        if len(differing) == 1 and la[differing[0]] == V4_ACTIVE_CONNECTORS and lb[differing[0]] == '{}':
+            return 'EXPECTED', ('PARITY W17T-CLI-003: the active-connector registry of a fresh CLI; v4 prints its '
+                                'pre-seeded empty type keys, v5 an empty dict\n' + V4_ACTIVE_CONNECTORS)
+        return None
+    if w[:2] == ['show', 'tokens']:
+        tokens = facts.get('tokens') or {}
+        def same_box(x, y):
+            if x.startswith('│') and y.startswith('│'):
+                return x.endswith('│') and y.endswith('│') and len(_cells(x)) == len(_cells(y)) == 5
+            return _border(x) is not None and _border(x) == _border(y) and _border(x).count('─') == 5
+        if not tokens or any(not same_box(la[i], lb[i]) for i in differing):
+            return None
+        rows_a = [(i, _cells(l)) for i, l in enumerate(la) if l.startswith('│')]
+        rows_b = [(i, _cells(l)) for i, l in enumerate(lb) if l.startswith('│')]
+        if [i for i, _ in rows_a] != [i for i, _ in rows_b] or not rows_a:
+            return None
+        if rows_a[0][1] != ['ID', 'Label', 'User', 'Expiration', 'Valid'] or rows_b[0][1] != rows_a[0][1]:
+            return None
+        seen = set()
+        for (_, a), (_, b) in zip(rows_a[1:], rows_b[1:]):
+            fact = tokens.get(a[1])
+            if fact is None or a[1] != b[1] or a[1] in seen or a[4] != b[4]:
+                return None
+            seen.add(a[1])
+            if not (_shown(a[0], fact['id']) and _shown(b[0], fact['id'])):
+                return None
+            if not fact.get('expiration') or not (_shown(a[3], fact['expiration']) and _shown(b[3], fact['expiration'])):
+                return None
+            if a[2] != '' or b[2] != fact['user']:
+                return None
+        if seen != set(tokens):
+            return None
+        return 'EXPECTED', 'PARITY W17T-CLI-002: v5 fills the User column with the token owner; v4 leaves it blank'
+    if w[:2] == ['show', 'data'] and '-m' in w and w[w.index('-m') + 1:w.index('-m') + 2] == ['kitchen']:
+        before_a, head_a, rows_a, after_a = _pipe_table(ao)
+        before_b, head_b, rows_b, after_b = _pipe_table(bo)
+        if head_a is None or head_b is None or head_a != head_b or 'by' not in head_a or 'id' not in head_a:
+            return None
+        if before_a[:-2] != before_b[:-2] or after_a != after_b or len(rows_a) != len(rows_b) or not rows_a:
+            return None
+        ### Column widths may differ (the `by` cells are wider in v5); the alignment syntax may not.
+        sep = _separator(before_a[-1], len(head_a))
+        if sep is None or sep != _separator(before_b[-1], len(head_b)):
+            return None
+        k, key = head_a.index('by'), head_a.index('id')
+        for a, b in zip(rows_a, rows_b):
+            if [x for j, x in enumerate(a) if j != k] != [x for j, x in enumerate(b) if j != k]:
+                return None
+            try:
+                expected = bytes([int(a[key]) % 256, 1, 2])  # the fixture's value (data.kitchen_df)
+            except ValueError:
+                return None
+            ### v4's tabulate prints the decoded bytes and strips surrounding whitespace bytes.
+            if b[k] != repr(expected) or a[k] != expected.decode('ascii').strip():
+                return None
+        return 'EXPECTED', ('PARITY W17T-CLI-001: the `bytes` column `by`; v4 writes the decoded bytes (control '
+                            'characters; leading/trailing whitespace bytes dropped) to the terminal, v5 their repr')
+    return None
+
+
 def cli_diffs(run, F, flavor='sqlite', cmds=CLI_CMDS):
+    outs = {}
+    v4_out = json.loads((run.work / 'v4_out.json').read_text()) if (run.work / 'v4_out.json').exists() else {}
+    facts = {'v5_version': V5_VERSION, 'tokens': (v4_out.get('tokens') or {}).get(flavor) or {}}
     for c in cmds:
         c = c.replace('sql:trn_sqlite', f'sql:trn_{flavor}')
         w = c.split()
@@ -97,8 +258,12 @@ def cli_diffs(run, F, flavor='sqlite', cmds=CLI_CMDS):
         # v4 prints package-install chatter on a cold venv; drop it
         ao = '\n'.join(l for l in ao.splitlines() if not re.match(r'^(Installing packages|Successfully installed|Failed to install|  - |Using CPython|Resolved|Prepared|Installed| \+ |Downloading| Downloaded|Audited|Checked)', l))
         speed = f"v4 {a.elapsed:.1f}s v5 {b.elapsed:.1f}s"
+        outs[c] = (ao, bo)
+        known = expected_cli(c, ao, bo, outs, facts) if a.returncode == b.returncode == 0 and ao != bo else None
         if ao == bo and a.returncode == b.returncode:
             F.add('cli', f'`{c}` output identical ({speed})', 'PASS')
+        elif known is not None:
+            F.add('cli', f'`{c}` output matches the recorded v4/v5 difference ({speed})', known[0], known[1])
         else:
             d = '\n'.join(list(difflib.unified_diff(ao.splitlines(), bo.splitlines(), 'v4', 'v5', lineterm='', n=0))[:30])
             F.add('cli', f'`{c}` output differs (rc {a.returncode}/{b.returncode}; {speed})', 'DIFF', d)
@@ -269,6 +434,10 @@ def segs(x):
 
 def compose(run, F):
     proj = pathlib.Path(run.state['compose_dir'])
+    rcs = {sub: run.state.get('v4_compose_rc_' + sub) for sub in ('init', 'up', 'ps')}
+    F.add('compose', 'v4 `compose init` / `up` / `ps` succeeded (the baseline v5 continues)',
+          'PASS' if all(rc == 0 for rc in rcs.values()) else 'FAIL',
+          f"{rcs}\n" + run.state.get('v4_compose_up', '')[-400:])
     r = run.mrsm('v5', 'compose', 'ps', cwd=proj, timeout=120)
     t = strip_ansi(r.stdout)
     F.add('compose', '`compose ps` shows the v4-started project job running', 'PASS' if 'running' in t and 'PID' in t else 'FAIL', t[-400:])

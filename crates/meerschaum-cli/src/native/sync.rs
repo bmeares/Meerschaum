@@ -592,6 +592,24 @@ pub(in crate::native) fn run_options(
     }
 }
 
+/// The `Sleeping for N seconds.` line of a lap: v4 formats the `--min-seconds` value as parsed
+/// (`type=float`, so `--min-seconds 300` prints `300.0`; the default is the int `1`), which the
+/// engine's `f64` cannot tell apart. A sleep shortened by a pipe's `schedule` (Rust-only) keeps the
+/// engine's message.
+fn sleeping_message(args: &ArgsMap, seconds: f64, message: String) -> String {
+    match args.get("min_seconds") {
+        Some(value)
+            if !matches!(value, crate::value::PyValue::None)
+                && float(args, "min_seconds") == Some(seconds) =>
+        {
+            // PARITY: `actions/sync.py:414` `f"Sleeping for {min_seconds} second" + ...`.
+            let s = if seconds.abs() != 1.0 { "s" } else { "" };
+            format!("Sleeping for {} second{s}.", value.py_str())
+        }
+        _ => message,
+    }
+}
+
 /// Run a graph selection on the session's runtime while printing one progress line per node
 /// transition (the terminal's live view; the Gantt chart follows once the run ends).
 fn run_live(
@@ -795,9 +813,9 @@ fn listen(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
                     );
                 }
             }
-            Ok(LapEvent::Sleeping { message, .. }) => {
+            Ok(LapEvent::Sleeping { seconds, message }) => {
                 rt.print("\n");
-                info(rt, &message);
+                info(rt, &sleeping_message(args, seconds, message));
             }
             Ok(LapEvent::Cooldown { message, .. }) => warn(rt, &message),
             Err(mpsc::RecvTimeoutError::Disconnected) => break,
@@ -903,5 +921,43 @@ fn print_chunk_progress(rt: &mut Runtime<'_>, message: &str) {
                 },
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::sleeping_message;
+    use crate::parse::parse_arguments;
+    use crate::types::DateContext;
+
+    fn args(sysargs: &[&str]) -> crate::value::ArgsMap {
+        let sysargs: Vec<String> = sysargs.iter().map(|s| s.to_string()).collect();
+        parse_arguments(&sysargs, &DateContext::system()).unwrap()
+    }
+
+    #[test]
+    fn a_lap_sleeps_for_the_min_seconds_as_v4_formats_them() {
+        // PARITY: argparse `type=float`: `--min-seconds 300` prints `300.0`.
+        let given = args(&["sync", "pipes", "--loop", "--min-seconds", "300"]);
+        assert_eq!(
+            sleeping_message(&given, 300.0, "Sleeping for 300 seconds.".into()),
+            "Sleeping for 300.0 seconds."
+        );
+        let one = args(&["sync", "pipes", "--loop", "--min-seconds", "1"]);
+        assert_eq!(
+            sleeping_message(&one, 1.0, "Sleeping for 1 second.".into()),
+            "Sleeping for 1.0 second."
+        );
+        // The default is v4's `min_seconds: int = 1`: the engine's message stands.
+        let default = args(&["sync", "pipes", "--loop"]);
+        assert_eq!(
+            sleeping_message(&default, 1.0, "Sleeping for 1 second.".into()),
+            "Sleeping for 1 second."
+        );
+        // A sleep a pipe's `schedule` shortened keeps the engine's message.
+        assert_eq!(
+            sleeping_message(&given, 12.5, "Sleeping for 12.5 seconds.".into()),
+            "Sleeping for 12.5 seconds."
+        );
     }
 }

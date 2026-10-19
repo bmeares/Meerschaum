@@ -7,6 +7,7 @@ import shutil
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 
 import pytest
@@ -19,7 +20,8 @@ def _subprocess_env(root, plugins):
     # MRSM_TEST_* variables are also interpreted as connector definitions. Bare
     # bootstrap interpreters must not inherit the surrounding integration-test setup.
     return {
-        **{key: value for key, value in os.environ.items() if not key.startswith('MRSM_')},
+        **{key: value for key, value in os.environ.items()
+           if not key.startswith('MRSM_') and key not in ('TMUX', 'TMUX_PANE')},
         'PYTHONPATH': str(Path(__file__).resolve().parents[1]),
         'MRSM_ROOT_DIR': str(root),
         'MRSM_PLUGINS_DIR': str(plugins),
@@ -210,9 +212,19 @@ def test_venv_creation_releases_lock_on_failure(tmp_path, monkeypatch, exception
         assert not (tmp_path / '.cache' / 'venvs' / 'bridge_failure.lock').exists()
 
 
+@pytest.fixture
+def worker_socket_address():
+    # pytest basetemp + test names can exceed sockaddr_un.sun_path even with a short filename.
+    # Keep only the socket in an owned short cache directory; roots/plugins stay in tmp_path.
+    cache = Path.home() / '.cache'
+    cache.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix='mrsm-sock-', dir=cache) as directory:
+        yield str(Path(directory) / 's')
+
+
 @pytest.mark.skipif(sys.platform == 'win32', reason='POSIX SIGINT and Unix sockets')
-def test_worker_survives_idle_and_active_interrupts(tmp_path):
-    address = str(tmp_path / 'worker.sock')
+def test_worker_survives_idle_and_active_interrupts(tmp_path, worker_socket_address):
+    address = worker_socket_address
     server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     server.bind(address)
     server.listen(1)

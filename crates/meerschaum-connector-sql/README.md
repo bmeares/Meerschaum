@@ -20,6 +20,26 @@ return Arrow record batches.
 | Oracle | `oracle` | `oracle` (ODPI-C) | implemented, cargo feature `oracle`; Oracle Instant Client at runtime |
 | DuckDB | `duckdb` | DuckDB's own `libduckdb` (v1.5.6), loaded at run time through its C API | implemented, cargo feature `duckdb` (default; adds only the loader) |
 
+
+Python hosts register a lazy DuckDB transport factory at extension initialization. When the
+public `duckdb >= 1.5.6` package is installed and `MRSM_DUCKDB_LIB` is unset, Rust instance
+methods use that driver for database I/O, sharing an anchor with SQLAlchemy. Pipe algorithms,
+query generation, pooling, and the instance layer stay Rust. Each duplicate connection has an
+independent transaction; SDK memory identities are per connector object. Standalone and
+base-only installs continue to use the C API described below. Explicit `MRSM_DUCKDB_LIB`
+pins native mode; a native-selected Python process refuses SQLAlchemy DuckDB access before
+optional imports to prevent incompatible snapshots and lost writes. Unset the override,
+install `meerschaum[sql-duckdb]`, and restart to use both interfaces. Transport selection never
+installs packages. Conflicting per-file settings and custom creator/module or unsupported
+connection overrides are rejected before opening a database. Forked processes must start a
+fresh interpreter instead of reusing opened DuckDB state.
+
+Parameterized native reads accept one `SELECT` statement. The public driver materializes
+bound relations and renames duplicate output columns, so the transport first binds a
+metadata-only `DESCRIBE` to retain their original names, then evaluates the data plan once.
+Use `SQLConnector.exec()` for writes or multiple statements; raw SQLAlchemy execution keeps
+the driver's ordinary behavior.
+
 A flavor whose feature is off is refused with `SqlError::DriverUnavailable`. The non-`sqlx`
 drivers share the pool and operation layer in `driver/native.rs` (`NativeConn` per family).
 `oracle` loads `libclntsh` when connecting (the build needs no Oracle libraries), so it is
@@ -159,6 +179,7 @@ The instance tests read one URI per flavor:
 ```bash
 export MRSM_TEST_PG_URI=postgresql://test:test1234@localhost:5559/testdb
 export MRSM_TEST_TIMESCALE_URI=timescaledb://test:test1234@localhost:5439/testdb
+export MRSM_TEST_TIMESCALE_HA_URI=timescaledb-ha://test:test1234@localhost:5459/testdb
 export MRSM_TEST_POSTGIS_URI=postgis://test:test1234@localhost:5449/testdb
 export MRSM_TEST_MYSQL_URI=mysql://root:my-secret-pw@localhost:3310/mysql
 export MRSM_TEST_MARIADB_URI=mariadb://test:test1234@localhost:3309/testdb
@@ -166,6 +187,12 @@ cargo test -p meerschaum-connector-sql
 ``` Any PostgreSQL-family URI works for `MRSM_TEST_PG_URI`, including
 the `timescaledb://` / `timescaledb-ha://` / `postgis://` schemes (e.g.
 `timescaledb-ha://test:test1234@localhost:5459/testdb`).
+
+`MRSM_TEST_TIMESCALE_HA_URI` separately enables the TimescaleDB-HA geometry SRID tests in
+`tests/w17c_geometry_srid.rs`. Use the `timescaledb-ha://` scheme to exercise the PostGIS
+column types; `timescaledb://` and `postgresql://` use text geometry storage, even on a server
+with PostGIS installed. The tests compare insert and update SRIDs, inferred geometry types,
+and the GeoPackage spatial reference with v4.1.4.
 
 The other flavors read their own variables (unset skips; an empty value counts as set):
 

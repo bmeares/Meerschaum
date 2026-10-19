@@ -163,12 +163,46 @@ async fn child_min_seconds_rate_limits_and_coalesces_flushes() {
         "the child ran {} times for 6 flushes",
         runs.len()
     );
-    for pair in runs.windows(2) {
-        let gap = (pair[1].ts - pair[0].ts).to_std().unwrap_or_default();
-        assert!(
-            gap >= Duration::from_millis(550),
-            "child runs {gap:?} apart violate min_seconds=0.6"
-        );
+    // Completion gaps include variable plan/sync/state-write latency and cannot prove
+    // the throttle interval. The private paused-clock tests exercise run_triggers itself
+    // at 599/600 ms and verify exact dispatch stamps, held flushes, and initial-lap stamping.
+    // Keep the real SQLite/coalescing proof here, and reject a successful initial lap
+    // bypassing the trigger lifecycle after a triggered child has already started.
+    let triggered_run_ids: std::collections::BTreeSet<_> = events
+        .iter()
+        .filter_map(|event| match &event.kind {
+            EventKind::ChildrenTriggered { run_id, .. } => Some(run_id.as_str()),
+            _ => None,
+        })
+        .collect();
+    let initial: Vec<_> = runs
+        .iter()
+        .copied()
+        .filter(|event| !triggered_run_ids.contains(event.run_id.as_str()))
+        .collect();
+    assert!(
+        initial.len() <= 1,
+        "multiple ordinary laps in listen-only mode: {events:#?}"
+    );
+    if let Some(initial) = initial.first() {
+        let initial_finish = events
+            .iter()
+            .position(|event| std::ptr::eq(event, *initial))
+            .unwrap();
+        let first_trigger_start = events.iter().position(|event| {
+            matches!(event.kind, EventKind::NodeStarted { .. })
+                && event
+                    .pipe_ref
+                    .as_ref()
+                    .is_some_and(|r| r.as_str().contains("|totals|"))
+                && triggered_run_ids.contains(event.run_id.as_str())
+        });
+        if let Some(start) = first_trigger_start {
+            assert!(
+                initial_finish < start,
+                "initial child lap ran after a triggered child; throttle lifecycle bypass: {events:#?}"
+            );
+        }
     }
     let flushes: u64 = events
         .iter()
