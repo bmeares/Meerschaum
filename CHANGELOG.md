@@ -4,6 +4,11 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v4.1.7
+
+- **Fix starting the API with FastAPI 0.145 or newer.**  
+  The API passed its tag descriptions to `FastAPI()` under the misspelled keyword `open_api_tags`. Older FastAPI versions silently ignored unknown keywords, but FastAPI 0.145 removed that catch-all, so `start api` failed with "FastAPI.__init__() got an unexpected keyword argument 'open_api_tags'". The keyword is now `openapi_tags`, which also restores the tag descriptions on the API documentation pages.
+
 ### v4.1.6
 
 - **Let tokens with `jobs:stop` stop jobs over the API.**  

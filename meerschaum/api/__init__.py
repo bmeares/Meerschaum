@@ -308,7 +308,7 @@ app = fastapi.FastAPI(
     docs_url=(None if not docs_enabled else endpoints['docs']),
     redoc_url=(None if not docs_enabled else endpoints['redoc']),
     openapi_url=endpoints['openapi'],
-    open_api_tags=[
+    openapi_tags=[
         {
             'name': 'Pipes',
             'description': 'Access pipes by indexing their keys.',
