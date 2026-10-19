@@ -59,6 +59,25 @@ def _get_registered_route_paths(config: dict) -> list:
     raise AssertionError(f"No routes printed:\n{stdout}")
 
 
+def test_openapi_tags_reach_fastapi():
+    """
+    The tag descriptions must be passed as `openapi_tags`: FastAPI 0.145 rejects unknown keywords,
+    and older versions silently dropped the misspelled `open_api_tags`.
+    """
+    code = (
+        "import json\n"
+        "from meerschaum.api import app\n"
+        "print('TAGS=' + json.dumps([tag['name'] for tag in (app.openapi_tags or [])]))\n"
+    )
+    stdout = _api_boot_output(code, {'api': {'uvicorn': {'no_dash': True}}})
+    tags = next(
+        json.loads(line[len('TAGS='):])
+        for line in stdout.splitlines()
+        if line.startswith('TAGS=')
+    )
+    assert tags[:2] == ['Pipes', 'Actions']
+
+
 def test_unreachable_cache_connector_degrades_to_none():
     """
     A configured but unreachable cache connector must resolve to `None`
