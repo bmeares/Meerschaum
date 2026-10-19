@@ -66,7 +66,7 @@ jobs:
           ### the requirement files, `pyproject.toml` and the extras installed is stored in it).
           wanted="$("$PYTHON" -c 'import sys; print(sys.version_info[:2])')"
           deps_hash="$({ cat requirements/*.txt pyproject.toml; \
-            echo "$MRSM_INSTALL_PACKAGES pytest pytest-xdist httpx httpx2 $wanted"; } | sha256sum | cut -d' ' -f1)"
+            echo "$MRSM_INSTALL_PACKAGES pytest pytest-xdist httpx httpx2 uv $wanted"; } | sha256sum | cut -d' ' -f1)"
           if [ ! -x "$VENV/bin/python" ] || \
              [ "$("$VENV/bin/python" -c 'import sys; print(sys.version_info[:2])')" != "$wanted" ] || \
              [ "$(cat "$VENV/.deps-hash" 2>/dev/null)" != "$deps_hash" ]; then
@@ -78,7 +78,7 @@ jobs:
             requirement_args="$requirement_args -r requirements/$extra.txt"
           done
           "$VENV/bin/python" -m pip install --quiet --upgrade pip
-          "$VENV/bin/python" -m pip install --quiet $requirement_args pytest pytest-xdist httpx httpx2
+          "$VENV/bin/python" -m pip install --quiet $requirement_args pytest pytest-xdist httpx httpx2 uv
           echo "$deps_hash" > "$VENV/.deps-hash"
         env:
           MRSM_INSTALL_PACKAGES: "full sql-mssql sql-oracle sql-duckdb"
