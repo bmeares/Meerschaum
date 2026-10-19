@@ -424,7 +424,13 @@ mod tests {
         let spec = ConnectionSpec::from_uri(&format!("duckdb:///{name}"), None, None).unwrap();
         let frozen = PathBuf::from(database_path(&spec).unwrap().unwrap());
         assert!(frozen.is_absolute());
-        assert_eq!(frozen, std::env::current_dir().unwrap().join(name));
+        // Canonical paths include the extended-length prefix on Windows.
+        let expected = std::env::current_dir()
+            .unwrap()
+            .canonicalize()
+            .unwrap()
+            .join(name);
+        assert_eq!(frozen, expected);
         assert!(!frozen.exists());
         let memory = ConnectionSpec::from_uri("duckdb:///:memory:", None, None).unwrap();
         assert!(database_path(&memory).unwrap().is_none());
