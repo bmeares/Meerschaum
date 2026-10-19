@@ -82,8 +82,21 @@ jobs:
           docker run --rm --network none --read-only --tmpfs /scratch \
             -e MRSM_NO_AUTO_INSTALL=1 -e MRSM_ROOT_DIR=/scratch/root -e MRSM_PLUGINS_DIR=/scratch/plugins \
             -v "$PWD/scripts/docker/smoke_facade.py:/smoke_facade.py:ro" \
-            --entrypoint bash "$SLIM_IMAGE" \
-            -c 'mkdir -p /scratch/root /scratch/plugins && exec python3 -I /smoke_facade.py'
+            --entrypoint python3 "$SLIM_IMAGE" -I -c '
+          import importlib.util
+          import runpy
+          import site
+          import sys
+          from pathlib import Path
+          for directory in ("/scratch/root", "/scratch/plugins"):
+              Path(directory).mkdir(parents=True, exist_ok=True)
+          sites = [Path(p).resolve() for p in site.getsitepackages(["/usr/local"]) if Path(p).is_dir()]
+          assert sites and all(p.is_relative_to("/usr/local") and p.name == "site-packages" for p in sites), sites
+          sys.path[:0] = [str(p) for p in sites]
+          spec = importlib.util.find_spec("meerschaum")
+          assert spec and spec.origin and any(Path(spec.origin).resolve().is_relative_to(p) for p in sites), spec
+          runpy.run_path("/smoke_facade.py", run_name="__main__")
+          '
 
       - name: Login to DockerHub
         if: inputs.publish
