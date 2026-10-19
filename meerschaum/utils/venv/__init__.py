@@ -75,6 +75,33 @@ def activate_venv(
         init_venv(venv=venv, debug=debug)
 
     with LOCKS['active_venvs']:
+        base_fallback = False
+        try:
+            target_path = venv_target_path(venv, debug=debug, allow_nonexistent=True)
+        except OSError as error:
+            import errno
+            import site
+            from meerschaum._internal.static import STATIC_CONFIG
+            if (
+                venv is not None
+                or inside_venv()
+                or os.environ.get(STATIC_CONFIG['environment']['runtime']) == 'portable'
+                or error.errno not in (errno.EACCES, errno.EROFS)
+            ):
+                raise
+            ### Activating the base interpreter does not install anything. If its user site
+            ### cannot be created, reuse an existing global site already visible to it.
+            ### Keep venv_target_path(None) strict for callers that need an install target.
+            base_sites = set(site.getsitepackages())
+            target_path = next((
+                pathlib.Path(path)
+                for path in sys.path
+                if path in base_sites and pathlib.Path(path).is_dir()
+            ), None)
+            if target_path is None:
+                raise
+            base_fallback = True
+
         if thread_id not in threads_active_venvs:
             threads_active_venvs[thread_id] = {}
         active_venvs.add(venv)
@@ -83,7 +110,6 @@ def activate_venv(
         else:
             threads_active_venvs[thread_id][venv] += 1
 
-        target_path = venv_target_path(venv, debug=debug, allow_nonexistent=True)
         if not target_path.exists() and venv is not None and init_if_not_exists:
             init_venv(venv=venv, force=True, debug=debug)
 
@@ -101,7 +127,7 @@ def activate_venv(
         ):
             return True
 
-        if venv in active_venvs_order:
+        if venv in active_venvs_order or base_fallback:
             try:
                 sys.path.remove(target)
             except Exception:

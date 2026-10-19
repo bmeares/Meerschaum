@@ -259,8 +259,15 @@
     "exact_commit_release_artifacts": "Separate packaging/CI provenance; not inferred from these local measurements.",
     "measured_artifacts_remain": "5.0.0a1",
     "python": "5.0.0rc1",
-    "runtime_logic_changed_since_measurements": false,
-    "version_only_delta": true
+    "post_measurement_runtime_change": {
+      "kind": "correctness_fix",
+      "performance_remeasured": false,
+      "relationship_to_measured_cases": "The permission/read-only failure branch is outside the writable-home benchmark cases.",
+      "runtime_optimization": false,
+      "scope": "Base Python environment activation may reuse an already visible interpreter site after EACCES/EROFS prevents user-site creation; it does not recreate the base interpreter as a named environment."
+    },
+    "runtime_logic_changed_since_measurements": true,
+    "version_only_delta": false
   },
   "runs": [
     {
