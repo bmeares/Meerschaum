@@ -155,3 +155,6 @@ target/
 # v5 parity harness reference interpreter (scripts/parity/setup_reference.sh)
 .venv-ref/
 /.venv-test/
+
+# Benchmark checkpoints (scripts/bench/run.py writes one per stage; the final results are committed)
+scripts/bench/results/*-checkpoint-*.json
