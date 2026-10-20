@@ -22,7 +22,10 @@ use tokio::sync::mpsc;
 
 use super::SqlValue;
 use super::batch::{ColumnKind, ColumnPlan};
-use super::native::{NativeConn, NativeConnector, NativeEvent, NativePool, blocking_send_rows};
+use super::native::{
+    CONFLICT_RETRIES, NativeConn, NativeConnector, NativeEvent, NativePool, blocking_send_rows,
+    conflict_backoff_duration, is_transaction_conflict,
+};
 use super::params::SqlParam;
 use crate::duckdb_lib;
 use crate::error::{Result, SqlError};
@@ -120,6 +123,7 @@ impl NativeConnector for DuckdbConnector {
         Ok(Box::new(DuckdbConn {
             pid: self.pid,
             conn: Arc::new(Mutex::new(conn)),
+            in_transaction: Arc::default(),
         }))
     }
 }
@@ -233,6 +237,8 @@ pub(crate) fn connect_lazy(spec: &ConnectionSpec) -> Result<NativePool> {
 struct DuckdbConn {
     pid: u32,
     conn: Arc<Mutex<ffi::Connection>>,
+    /// Whether an explicit transaction is open on this connection (`BEGIN` ... `COMMIT`).
+    in_transaction: Arc<std::sync::atomic::AtomicBool>,
 }
 
 fn lock(conn: &Mutex<ffi::Connection>) -> Result<std::sync::MutexGuard<'_, ffi::Connection>> {
@@ -257,6 +263,60 @@ fn to_param(p: &SqlParam) -> ffi::Param {
         SqlParam::Date(d) => {
             let epoch = NaiveDate::from_ymd_opt(1970, 1, 1).expect("epoch");
             ffi::Param::Date((*d - epoch).num_days() as i32)
+        }
+    }
+}
+
+/// What a statement does to the connection's transaction: `Some(true)` opens one,
+/// `Some(false)` closes it.
+fn transaction_effect(sql: &str) -> Option<bool> {
+    let first = sql
+        .trim_start()
+        .split(|c: char| c.is_whitespace() || c == ';')
+        .next()
+        .unwrap_or("");
+    if first.eq_ignore_ascii_case("BEGIN") || first.eq_ignore_ascii_case("START") {
+        Some(true)
+    } else if ["COMMIT", "ROLLBACK", "END", "ABORT"]
+        .iter()
+        .any(|k| first.eq_ignore_ascii_case(k))
+    {
+        Some(false)
+    } else {
+        None
+    }
+}
+
+/// Run a statement, running it again while it loses a transaction conflict. Only an autocommit
+/// statement is retried (it was rolled back whole, so a new attempt starts on a fresh snapshot
+/// and, for the idempotent `IF NOT EXISTS` DDL the lazily created internal tables use, sees the
+/// winner's object); inside an explicit transaction the conflict aborts the caller's
+/// transaction and is reported as it is.
+fn execute_retrying(
+    conn: &ffi::Connection,
+    in_transaction: &mut bool,
+    sql: &str,
+    params: &[SqlParam],
+) -> Result<u64> {
+    let effect = transaction_effect(sql);
+    let retryable = !*in_transaction && effect.is_none();
+    let mut attempt = 0u32;
+    loop {
+        match execute_blocking(conn, sql, params) {
+            Err(error)
+                if retryable && attempt < CONFLICT_RETRIES && is_transaction_conflict(&error) =>
+            {
+                attempt += 1;
+                std::thread::sleep(conflict_backoff_duration(attempt));
+            }
+            other => {
+                if other.is_ok()
+                    && let Some(opens) = effect
+                {
+                    *in_transaction = opens;
+                }
+                return other;
+            }
         }
     }
 }
@@ -347,10 +407,17 @@ fn query_blocking(
 impl NativeConn for DuckdbConn {
     async fn execute(&mut self, sql: &str, params: &[SqlParam]) -> Result<u64> {
         check_pid(self.pid)?;
+        use std::sync::atomic::Ordering::SeqCst;
         let (conn, sql, params) = (self.conn.clone(), sql.to_string(), params.to_vec());
-        tokio::task::spawn_blocking(move || execute_blocking(&*lock(&conn)?, &sql, &params))
-            .await
-            .map_err(task_err)?
+        let state = self.in_transaction.clone();
+        tokio::task::spawn_blocking(move || {
+            let mut in_transaction = state.load(SeqCst);
+            let result = execute_retrying(&*lock(&conn)?, &mut in_transaction, &sql, &params);
+            state.store(in_transaction, SeqCst);
+            result
+        })
+        .await
+        .map_err(task_err)?
     }
 
     async fn query(
@@ -387,6 +454,7 @@ impl NativeConn for DuckdbConn {
 
 #[cfg(test)]
 mod tests {
+    use super::super::native::is_conflict_message;
     use super::*;
     use decode::*;
 
@@ -434,6 +502,38 @@ mod tests {
         assert!(!frozen.exists());
         let memory = ConnectionSpec::from_uri("duckdb:///:memory:", None, None).unwrap();
         assert!(database_path(&memory).unwrap().is_none());
+    }
+
+    #[test]
+    fn recognizes_transaction_conflicts() {
+        for message in [
+            r#"TransactionContext Error: Catalog write-write conflict on create with "Schema\0main\0main\0Table\0main\0t""#,
+            "TransactionContext Error: Catalog write-write conflict on alter with \"t\"",
+            "TransactionContext Error: Conflict on tuple deletion!",
+            "TransactionContext Error: Conflict on update!",
+        ] {
+            assert!(is_conflict_message(message), "{message}");
+        }
+        for message in [
+            "Constraint Error: Duplicate key \"id: 1\" violates primary key constraint.",
+            "Catalog Error: Table with name \"t\" already exists!",
+            "TransactionContext Error: cannot start a transaction within a transaction",
+        ] {
+            assert!(!is_conflict_message(message), "{message}");
+        }
+    }
+
+    #[test]
+    fn tracks_explicit_transactions() {
+        for sql in ["BEGIN TRANSACTION", " begin;", "START TRANSACTION"] {
+            assert_eq!(transaction_effect(sql), Some(true), "{sql}");
+        }
+        for sql in ["COMMIT", "rollback", "END TRANSACTION", "ABORT;"] {
+            assert_eq!(transaction_effect(sql), Some(false), "{sql}");
+        }
+        for sql in ["CREATE TABLE t (a INT)", "SELECT 1", "", "BEGINNING()"] {
+            assert_eq!(transaction_effect(sql), None, "{sql}");
+        }
     }
 
     #[test]

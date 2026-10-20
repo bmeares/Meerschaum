@@ -398,7 +398,8 @@ impl SqlConnector {
 
         if !pipe.temporary && self.get_pipe_id(pipe).await?.is_none() {
             let reg = self.register_pipe(pipe).await;
-            if !reg.success {
+            // A concurrent first sync of the same pipe may have registered it in between.
+            if !reg.success && self.get_pipe_id(pipe).await?.is_none() {
                 return Ok(reg.into());
             }
         }
@@ -1399,6 +1400,13 @@ impl SqlConnector {
             if let Ok(queries) = build(None) {
                 success = self.exec_queries_all(&queries, true, true).await;
             }
+        }
+        if !success && self.table_exists(&sp.target, schema.as_deref()).await {
+            // Another connection created the table between our existence check and the
+            // CREATE (two writers' first sync of a new pipe, e.g. the engine's state pipes):
+            // the table is there, so the rows can be written to it.
+            tracing::debug!("{} was created concurrently.", self.pipe_table_name(sp));
+            return SuccessTuple::ok("Success");
         }
         if success && hypercore && !self.set_integer_now_func(sp).await {
             tracing::warn!(

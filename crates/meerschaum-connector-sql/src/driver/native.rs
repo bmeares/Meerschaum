@@ -128,6 +128,42 @@ fn task_err(e: impl std::fmt::Display) -> SqlError {
     SqlError::InvalidArgument(format!("The database task failed: {e}"))
 }
 
+/// How many times a statement or transaction that lost a transaction conflict is run again.
+pub(crate) const CONFLICT_RETRIES: u32 = 40;
+
+/// Whether a database message says a concurrent transaction changed the same catalog entry or
+/// row first (DuckDB: "Catalog write-write conflict on create with ...", "Conflict on tuple
+/// deletion!", ...). DuckDB uses optimistic concurrency: the loser is rolled back whole and is
+/// expected to try again on a fresh snapshot.
+pub(crate) fn is_conflict_message(message: &str) -> bool {
+    message.contains("TransactionContext Error")
+        && (message.contains("write-write conflict")
+            || message.contains("Conflict on")
+            || message.contains("conflict on"))
+}
+
+/// [`is_conflict_message`] for a driver error.
+pub(crate) fn is_transaction_conflict(error: &SqlError) -> bool {
+    matches!(error, SqlError::Database(message) if is_conflict_message(message))
+}
+
+/// How long the loser of a conflict waits before attempt `attempt` (1-based): the winner commits
+/// within microseconds, so a short, growing pause with jitter keeps several losers from
+/// colliding again in lockstep.
+pub(crate) fn conflict_backoff_duration(attempt: u32) -> std::time::Duration {
+    let jitter = u64::from(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.subsec_nanos())
+            % 1000,
+    );
+    std::time::Duration::from_micros(u64::from(attempt.min(10)) * 500 + jitter)
+}
+
+async fn conflict_backoff(attempt: u32) {
+    tokio::time::sleep(conflict_backoff_duration(attempt)).await;
+}
+
 impl NativePool {
     /// A pool over `connector` with at most `max` open connections.
     pub(crate) fn new(connector: Box<dyn NativeConnector>, max: u32) -> Self {
@@ -332,6 +368,10 @@ impl NativePool {
     }
 
     /// `SQLConnector.exec_queries` (`_sql.py:622`).
+    ///
+    /// A transaction that loses a catalog / row conflict to a concurrent one (DuckDB's optimistic
+    /// concurrency, see [`is_transaction_conflict`]) is rolled back and run again from its first
+    /// statement, a bounded number of times.
     pub(crate) async fn exec_queries(
         &self,
         queries: &[String],
@@ -339,30 +379,40 @@ impl NativePool {
         rollback: bool,
     ) -> Result<Vec<Option<u64>>> {
         let mut conn = self.acquire().await?;
-        // Mark before awaiting BEGIN: cancellation must discard a possibly active transaction.
-        conn.in_tx = true;
-        conn.conn().begin().await?;
-        let mut results = Vec::with_capacity(queries.len());
-        for query in queries {
-            match conn.conn().execute(query, &[]).await {
-                Ok(n) => results.push(Some(n)),
-                Err(e) => {
-                    tracing::warn!("Encountered error while executing:\n{e}");
-                    results.push(None);
-                    if break_on_error {
-                        if rollback {
+        let mut attempt = 0u32;
+        'attempt: loop {
+            // Mark before awaiting BEGIN: cancellation must discard a possibly active transaction.
+            conn.in_tx = true;
+            conn.conn().begin().await?;
+            let mut results = Vec::with_capacity(queries.len());
+            for query in queries {
+                match conn.conn().execute(query, &[]).await {
+                    Ok(n) => results.push(Some(n)),
+                    Err(e) => {
+                        if attempt < CONFLICT_RETRIES && is_transaction_conflict(&e) {
+                            attempt += 1;
                             conn.conn().rollback().await?;
                             conn.in_tx = false;
-                            return Ok(results);
+                            conflict_backoff(attempt).await;
+                            continue 'attempt;
                         }
-                        break;
+                        tracing::warn!("Encountered error while executing:\n{e}");
+                        results.push(None);
+                        if break_on_error {
+                            if rollback {
+                                conn.conn().rollback().await?;
+                                conn.in_tx = false;
+                                return Ok(results);
+                            }
+                            break;
+                        }
                     }
                 }
             }
+            conn.conn().commit().await?;
+            conn.in_tx = false;
+            return Ok(results);
         }
-        conn.conn().commit().await?;
-        conn.in_tx = false;
-        Ok(results)
     }
 
     /// `SQLConnector._run_in_autocommit` (`_maintenance.py:54`).
@@ -378,30 +428,39 @@ impl NativePool {
     }
 
     /// Bound statements in one transaction, stopping (and rolling back) at the first failure.
+    /// A lost transaction conflict is retried like in [`NativePool::exec_queries`].
     pub(crate) async fn exec_many_with(
         &self,
         statements: &[(String, Vec<SqlParam>)],
     ) -> Result<Vec<Option<u64>>> {
         let mut conn = self.acquire().await?;
-        // Mark before awaiting BEGIN: cancellation must discard a possibly active transaction.
-        conn.in_tx = true;
-        conn.conn().begin().await?;
-        let mut results = Vec::with_capacity(statements.len());
-        for (sql, params) in statements {
-            match conn.conn().execute(sql, params).await {
-                Ok(n) => results.push(Some(n)),
-                Err(e) => {
-                    tracing::warn!("Encountered error while executing:\n{e}");
-                    results.push(None);
-                    conn.conn().rollback().await?;
-                    conn.in_tx = false;
-                    return Ok(results);
+        let mut attempt = 0u32;
+        'attempt: loop {
+            // Mark before awaiting BEGIN: cancellation must discard a possibly active transaction.
+            conn.in_tx = true;
+            conn.conn().begin().await?;
+            let mut results = Vec::with_capacity(statements.len());
+            for (sql, params) in statements {
+                match conn.conn().execute(sql, params).await {
+                    Ok(n) => results.push(Some(n)),
+                    Err(e) => {
+                        conn.conn().rollback().await?;
+                        conn.in_tx = false;
+                        if attempt < CONFLICT_RETRIES && is_transaction_conflict(&e) {
+                            attempt += 1;
+                            conflict_backoff(attempt).await;
+                            continue 'attempt;
+                        }
+                        tracing::warn!("Encountered error while executing:\n{e}");
+                        results.push(None);
+                        return Ok(results);
+                    }
                 }
             }
+            conn.conn().commit().await?;
+            conn.in_tx = false;
+            return Ok(results);
         }
-        conn.conn().commit().await?;
-        conn.in_tx = false;
-        Ok(results)
     }
 
     /// Run a query with bound parameters and collect its rows as record batches.
