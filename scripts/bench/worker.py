@@ -1,6 +1,6 @@
 """
-Runs one benchmark operation inside an implementation's interpreter (v4.1.4 from `.venv-ref`, or
-the repository's `meerschaum`). Prints one `RESULT {json}` line.
+Runs one benchmark operation inside an implementation's interpreter (released v3.x or v4.1.4, or
+the installed v5 wheel). Prints one `RESULT {json}` line.
 
     worker.py setup   '<json list of pipe definitions>'
     worker.py sync    <connector> <metric> <instance>
@@ -61,7 +61,7 @@ def main() -> int:
     info = {
         'version': mrsm.__version__,
         'python': sys.version.split()[0],
-        'package': 'reference' if mrsm.__version__.startswith('4.') else 'wheel',
+        'package': 'reference' if mrsm.__version__.startswith(('3.', '4.')) else 'wheel',
     }
     if op == 'identify':
         from importlib.metadata import distribution, version, PackageNotFoundError
@@ -71,7 +71,8 @@ def main() -> int:
         direct = json.loads(metadata) if metadata else {}
         editable = direct.get('dir_info', {}).get('editable', False)
         in_repo = Path(mrsm.__file__).resolve().is_relative_to(Path(__file__).resolve().parents[2])
-        # The released reference also lives below the repository, but is identified by version.
+        # The released references (3.x, 4.x) may live below the repository, but are identified
+        # by version.
         identity = {'installed_wheel': not editable and not in_repo}
         identity['dependencies'] = {}
         for name in ('pandas', 'numpy', 'polars', 'pyarrow', 'SQLAlchemy', 'psycopg', 'psycopg2-binary'):

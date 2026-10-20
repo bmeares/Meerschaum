@@ -1,0 +1,1566 @@
+{
+  "meta": {
+    "label": "v3-v4-v5",
+    "date": "2026-10-20",
+    "backends": [
+      "sqlite",
+      "timescaledb",
+      "startup",
+      "postgis"
+    ],
+    "repeats": 3,
+    "sizes": [
+      "10k",
+      "100k",
+      "1M"
+    ],
+    "python": "3.14.8",
+    "pg_schema": "w17cbench_5d42cfb2d09e",
+    "pg_database": "w17cbench_5d42cfb2d09e",
+    "os": "Linux x86_64",
+    "cpus": 40,
+    "hardware": {
+      "logical_cpus": 40,
+      "cpu_model": "Intel(R) Xeon(R) Gold 5215 CPU @ 2.50GHz",
+      "ram_gib": 377
+    },
+    "notes": [],
+    "load_checks": [
+      {
+        "backend": "sqlite",
+        "load_average": [
+          1.580078125,
+          1.7939453125,
+          1.44384765625
+        ],
+        "rustc_processes": 0
+      },
+      {
+        "backend": "timescaledb",
+        "load_average": [
+          1.74267578125,
+          2.91064453125,
+          3.34814453125
+        ],
+        "rustc_processes": 0
+      },
+      {
+        "backend": "startup",
+        "load_average": [
+          1.4130859375,
+          2.68896484375,
+          3.07421875
+        ],
+        "rustc_processes": 0
+      },
+      {
+        "backend": "postgis",
+        "load_average": [
+          1.77099609375,
+          2.65380859375,
+          3.05029296875
+        ],
+        "rustc_processes": 0
+      }
+    ],
+    "complete": true,
+    "profiling": false,
+    "latency_iterations": 200,
+    "implementations": [
+      "v3py",
+      "v3cli",
+      "v4py",
+      "v4cli",
+      "v5py",
+      "v5cli",
+      "v5bin"
+    ],
+    "cases": [
+      "sync",
+      "inc",
+      "filter_existing",
+      "resync",
+      "get_data_100k",
+      "get_data",
+      "startup"
+    ],
+    "v4_version": "4.1.4",
+    "v5_version": "5.0.0rc2",
+    "v4_python": "3.14.8",
+    "driver_source_revision": "f750eab8",
+    "v4_dependencies": {
+      "pandas": "3.0.0",
+      "numpy": "2.4.2",
+      "polars": "1.44.1",
+      "pyarrow": "23.0.0",
+      "SQLAlchemy": "2.0.51",
+      "psycopg": "3.3.6",
+      "psycopg2-binary": null
+    },
+    "harness_sha256": "ff699e297034dce71bc17ce39f398c8b9ca5906d9f1c546b8c47226e580a017a",
+    "v3_version": "3.5.2",
+    "v3_python": "3.14.8",
+    "v3_dependencies": {
+      "pandas": "3.0.0",
+      "numpy": "2.4.2",
+      "polars": null,
+      "pyarrow": "23.0.0",
+      "SQLAlchemy": "2.0.51",
+      "psycopg": "3.3.6",
+      "psycopg2-binary": "2.9.13"
+    },
+    "v5_python": "3.14.8",
+    "v5_dependencies": {
+      "pandas": "3.0.0",
+      "numpy": "2.4.2",
+      "polars": "2.0.0",
+      "pyarrow": "23.0.0",
+      "SQLAlchemy": "2.0.51",
+      "psycopg": "3.3.6",
+      "psycopg2-binary": null
+    },
+    "v5_extension_sha256": "cbe7d4c7292901ecfb9fb4f4cd4a32359aa691eb4b1fb2e33aba670adb7d1b06",
+    "v5_console_sha256": "646aaadf548f9fe42e8389e2c452b103d7c9abdc3994d82d60da06be86376dee",
+    "v5_entry_module_sha256": "d46379b69fee7a359383e90496e99b1276e7808f241e32fbb2b3553f04ff0921",
+    "v5_binary_version": "Meerschaum v5.0.0-rc.2",
+    "v5_binary_sha256": "350f60e3adac56e5b85e2616144c3d6c99b51b68ac4adb6f36eac3b35550fe94",
+    "startup_only": [
+      "v3cli",
+      "v4cli",
+      "v5cli"
+    ],
+    "baseline_regressions": []
+  },
+  "results": [
+    {
+      "backend": "sqlite",
+      "case": "sync_10k",
+      "impl": "v3py",
+      "seconds": [
+        3.40285,
+        3.438759,
+        3.509699
+      ],
+      "median": 3.438759,
+      "min": 3.40285,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "sync_100k",
+      "impl": "v3py",
+      "seconds": [
+        30.604882,
+        29.890554,
+        30.646621
+      ],
+      "median": 30.604882,
+      "min": 29.890554,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "sync_1M",
+      "impl": "v3py",
+      "seconds": [
+        308.242116,
+        310.282516,
+        307.592126
+      ],
+      "median": 308.242116,
+      "min": 307.592126,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "inc_100k",
+      "impl": "v3py",
+      "seconds": [
+        17.588274,
+        18.195203,
+        17.802465
+      ],
+      "median": 17.802465,
+      "min": 17.588274,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "inc_1M",
+      "impl": "v3py",
+      "seconds": [
+        20.449548,
+        20.787603,
+        20.981923
+      ],
+      "median": 20.787603,
+      "min": 20.449548,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "filter_existing_100k",
+      "impl": "v3py",
+      "seconds": [
+        0.976791,
+        1.004719,
+        0.979068
+      ],
+      "median": 0.979068,
+      "min": 0.976791,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "resync_100k",
+      "impl": "v3py",
+      "seconds": [
+        18.23064,
+        18.093852,
+        17.992433
+      ],
+      "median": 18.093852,
+      "min": 17.992433,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "get_data_100k",
+      "impl": "v3py",
+      "seconds": [
+        1.038191,
+        1.065504,
+        1.039054
+      ],
+      "median": 1.039054,
+      "min": 1.038191,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "get_data_1M",
+      "impl": "v3py",
+      "seconds": [
+        5.295244,
+        5.306466,
+        5.375431
+      ],
+      "median": 5.306466,
+      "min": 5.295244,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "sync_10k",
+      "impl": "v4py",
+      "seconds": [
+        3.284056,
+        3.383536,
+        3.693907
+      ],
+      "median": 3.383536,
+      "min": 3.284056,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "sync_100k",
+      "impl": "v4py",
+      "seconds": [
+        29.649219,
+        29.422965,
+        29.123352
+      ],
+      "median": 29.422965,
+      "min": 29.123352,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "sync_1M",
+      "impl": "v4py",
+      "seconds": [
+        412.592321,
+        286.711941,
+        414.404541
+      ],
+      "median": 412.592321,
+      "min": 286.711941,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "inc_100k",
+      "impl": "v4py",
+      "seconds": [
+        19.304703,
+        19.653582,
+        19.568913
+      ],
+      "median": 19.568913,
+      "min": 19.304703,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "inc_1M",
+      "impl": "v4py",
+      "seconds": [
+        41.605475,
+        53.839369,
+        50.854712
+      ],
+      "median": 50.854712,
+      "min": 41.605475,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "filter_existing_100k",
+      "impl": "v4py",
+      "seconds": [
+        1.66432,
+        1.65219,
+        1.67692
+      ],
+      "median": 1.66432,
+      "min": 1.65219,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "resync_100k",
+      "impl": "v4py",
+      "seconds": [
+        19.114927,
+        18.639954,
+        18.621953
+      ],
+      "median": 18.639954,
+      "min": 18.621953,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "get_data_100k",
+      "impl": "v4py",
+      "seconds": [
+        1.086952,
+        1.084253,
+        1.090555
+      ],
+      "median": 1.086952,
+      "min": 1.084253,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "get_data_1M",
+      "impl": "v4py",
+      "seconds": [
+        4.99031,
+        5.00646,
+        5.090878
+      ],
+      "median": 5.00646,
+      "min": 4.99031,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "sync_10k",
+      "impl": "v5py",
+      "seconds": [
+        0.242001,
+        0.24861,
+        0.25907
+      ],
+      "median": 0.24861,
+      "min": 0.242001,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "sync_100k",
+      "impl": "v5py",
+      "seconds": [
+        1.0961,
+        1.115844,
+        1.028738
+      ],
+      "median": 1.0961,
+      "min": 1.028738,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "sync_1M",
+      "impl": "v5py",
+      "seconds": [
+        9.621265,
+        9.818672,
+        9.548665
+      ],
+      "median": 9.621265,
+      "min": 9.548665,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "inc_100k",
+      "impl": "v5py",
+      "seconds": [
+        0.902651,
+        0.926315,
+        0.889555
+      ],
+      "median": 0.902651,
+      "min": 0.889555,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "inc_1M",
+      "impl": "v5py",
+      "seconds": [
+        1.037772,
+        1.05851,
+        1.00183
+      ],
+      "median": 1.037772,
+      "min": 1.00183,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "filter_existing_100k",
+      "impl": "v5py",
+      "seconds": [
+        0.609428,
+        0.580849,
+        0.586389
+      ],
+      "median": 0.586389,
+      "min": 0.580849,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "resync_100k",
+      "impl": "v5py",
+      "seconds": [
+        0.906696,
+        0.889487,
+        0.912696
+      ],
+      "median": 0.906696,
+      "min": 0.889487,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "get_data_100k",
+      "impl": "v5py",
+      "seconds": [
+        0.704335,
+        0.695177,
+        0.73852
+      ],
+      "median": 0.704335,
+      "min": 0.695177,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "get_data_1M",
+      "impl": "v5py",
+      "seconds": [
+        2.916112,
+        2.986346,
+        2.930777
+      ],
+      "median": 2.930777,
+      "min": 2.916112,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "sync_10k",
+      "impl": "v5bin",
+      "seconds": [
+        0.342238,
+        0.330703,
+        0.290995
+      ],
+      "median": 0.330703,
+      "min": 0.290995,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "sync_100k",
+      "impl": "v5bin",
+      "seconds": [
+        1.090953,
+        1.332862,
+        1.248224
+      ],
+      "median": 1.248224,
+      "min": 1.090953,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "sync_1M",
+      "impl": "v5bin",
+      "seconds": [
+        10.847266,
+        10.602422,
+        11.524006
+      ],
+      "median": 10.847266,
+      "min": 10.602422,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "inc_100k",
+      "impl": "v5bin",
+      "seconds": [
+        0.967763,
+        0.885229,
+        0.929567
+      ],
+      "median": 0.929567,
+      "min": 0.885229,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "inc_1M",
+      "impl": "v5bin",
+      "seconds": [
+        1.143355,
+        1.07472,
+        1.138809
+      ],
+      "median": 1.138809,
+      "min": 1.07472,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "resync_100k",
+      "impl": "v5bin",
+      "seconds": [
+        0.869112,
+        0.978625,
+        0.991427
+      ],
+      "median": 0.978625,
+      "min": 0.869112,
+      "failed": 0
+    },
+    {
+      "backend": "timescaledb",
+      "case": "sync_10k",
+      "impl": "v3py",
+      "seconds": [
+        1.238574,
+        1.236924,
+        1.214769
+      ],
+      "median": 1.236924,
+      "min": 1.214769,
+      "failed": 0
+    },
+    {
+      "backend": "timescaledb",
+      "case": "sync_100k",
+      "impl": "v3py",
+      "seconds": [
+        2.917563,
+        2.90037,
+        2.904576
+      ],
+      "median": 2.904576,
+      "min": 2.90037,
+      "failed": 0
+    },
+    {
+      "backend": "timescaledb",
+      "case": "sync_1M",
+      "impl": "v3py",
+      "seconds": [
+        38.726906,
+        38.459676,
+        38.699986
+      ],
+      "median": 38.699986,
+      "min": 38.459676,
+      "failed": 0
+    },
+    {
+      "backend": "timescaledb",
+      "case": "inc_100k",
+      "impl": "v3py",
+      "seconds": [
+        1.678195,
+        1.76404,
+        1.743408
+      ],
+      "median": 1.743408,
+      "min": 1.678195,
+      "failed": 0
+    },
+    {
+      "backend": "timescaledb",
+      "case": "inc_1M",
+      "impl": "v3py",
+      "seconds": [
+        1.898953,
+        1.897821,
+        1.880641
+      ],
+      "median": 1.897821,
+      "min": 1.880641,
+      "failed": 0
+    },
+    {
+      "backend": "timescaledb",
+      "case": "filter_existing_100k",
+      "impl": "v3py",
+      "seconds": [
+        0.9043,
+        0.903888,
+        0.954978
+      ],
+      "median": 0.9043,
+      "min": 0.903888,
+      "failed": 0
+    },
+    {
+      "backend": "timescaledb",
+      "case": "resync_100k",
+      "impl": "v3py",
+      "seconds": [
+        1.630843,
+        1.651395,
+        1.594275
+      ],
+      "median": 1.630843,
+      "min": 1.594275,
+      "failed": 0
+    },
+    {
+      "backend": "timescaledb",
+      "case": "get_data_100k",
+      "impl": "v3py",
+      "seconds": [
+        0.998421,
+        1.015143,
+        1.065321
+      ],
+      "median": 1.015143,
+      "min": 0.998421,
+      "failed": 0
+    },
+    {
+      "backend": "timescaledb",
+      "case": "get_data_1M",
+      "impl": "v3py",
+      "seconds": [
+        3.874209,
+        3.774351,
+        4.01019
+      ],
+      "median": 3.874209,
+      "min": 3.774351,
+      "failed": 0
+    },
+    {
+      "backend": "timescaledb",
+      "case": "sync_10k",
+      "impl": "v4py",
+      "seconds": [
+        1.415677,
+        1.378803,
+        1.397658
+      ],
+      "median": 1.397658,
+      "min": 1.378803,
+      "failed": 0
+    },
+    {
+      "backend": "timescaledb",
+      "case": "sync_100k",
+      "impl": "v4py",
+      "seconds": [
+        3.600672,
+        3.532968,
+        3.503826
+      ],
+      "median": 3.532968,
+      "min": 3.503826,
+      "failed": 0
+    },
+    {
+      "backend": "timescaledb",
+      "case": "sync_1M",
+      "impl": "v4py",
+      "seconds": [
+        42.443319,
+        41.661053,
+        42.247004
+      ],
+      "median": 42.247004,
+      "min": 41.661053,
+      "failed": 0
+    },
+    {
+      "backend": "timescaledb",
+      "case": "inc_100k",
+      "impl": "v4py",
+      "seconds": [
+        2.320862,
+        2.290156,
+        2.229497
+      ],
+      "median": 2.290156,
+      "min": 2.229497,
+      "failed": 0
+    },
+    {
+      "backend": "timescaledb",
+      "case": "inc_1M",
+      "impl": "v4py",
+      "seconds": [
+        2.445682,
+        2.533813,
+        2.631797
+      ],
+      "median": 2.533813,
+      "min": 2.445682,
+      "failed": 0
+    },
+    {
+      "backend": "timescaledb",
+      "case": "filter_existing_100k",
+      "impl": "v4py",
+      "seconds": [
+        1.535583,
+        1.52012,
+        1.495951
+      ],
+      "median": 1.52012,
+      "min": 1.495951,
+      "failed": 0
+    },
+    {
+      "backend": "timescaledb",
+      "case": "resync_100k",
+      "impl": "v4py",
+      "seconds": [
+        2.286606,
+        2.180812,
+        2.183331
+      ],
+      "median": 2.183331,
+      "min": 2.180812,
+      "failed": 0
+    },
+    {
+      "backend": "timescaledb",
+      "case": "get_data_100k",
+      "impl": "v4py",
+      "seconds": [
+        1.155553,
+        1.092613,
+        1.155434
+      ],
+      "median": 1.155434,
+      "min": 1.092613,
+      "failed": 0
+    },
+    {
+      "backend": "timescaledb",
+      "case": "get_data_1M",
+      "impl": "v4py",
+      "seconds": [
+        3.821862,
+        4.009516,
+        3.819476
+      ],
+      "median": 3.821862,
+      "min": 3.819476,
+      "failed": 0
+    },
+    {
+      "backend": "timescaledb",
+      "case": "sync_10k",
+      "impl": "v5py",
+      "seconds": [
+        0.372097,
+        0.432891,
+        0.29173
+      ],
+      "median": 0.372097,
+      "min": 0.29173,
+      "failed": 0
+    },
+    {
+      "backend": "timescaledb",
+      "case": "sync_100k",
+      "impl": "v5py",
+      "seconds": [
+        0.986383,
+        1.088485,
+        1.094663
+      ],
+      "median": 1.088485,
+      "min": 0.986383,
+      "failed": 0
+    },
+    {
+      "backend": "timescaledb",
+      "case": "sync_1M",
+      "impl": "v5py",
+      "seconds": [
+        10.056634,
+        10.369173,
+        10.356939
+      ],
+      "median": 10.356939,
+      "min": 10.056634,
+      "failed": 0
+    },
+    {
+      "backend": "timescaledb",
+      "case": "inc_100k",
+      "impl": "v5py",
+      "seconds": [
+        0.52292,
+        0.673532,
+        0.686315
+      ],
+      "median": 0.673532,
+      "min": 0.52292,
+      "failed": 0
+    },
+    {
+      "backend": "timescaledb",
+      "case": "inc_1M",
+      "impl": "v5py",
+      "seconds": [
+        0.805342,
+        0.783065,
+        0.82619
+      ],
+      "median": 0.805342,
+      "min": 0.783065,
+      "failed": 0
+    },
+    {
+      "backend": "timescaledb",
+      "case": "filter_existing_100k",
+      "impl": "v5py",
+      "seconds": [
+        0.459112,
+        0.410751,
+        0.387404
+      ],
+      "median": 0.410751,
+      "min": 0.387404,
+      "failed": 0
+    },
+    {
+      "backend": "timescaledb",
+      "case": "resync_100k",
+      "impl": "v5py",
+      "seconds": [
+        0.584579,
+        0.519335,
+        0.633727
+      ],
+      "median": 0.584579,
+      "min": 0.519335,
+      "failed": 0
+    },
+    {
+      "backend": "timescaledb",
+      "case": "get_data_100k",
+      "impl": "v5py",
+      "seconds": [
+        0.568464,
+        0.567498,
+        0.537338
+      ],
+      "median": 0.567498,
+      "min": 0.537338,
+      "failed": 0
+    },
+    {
+      "backend": "timescaledb",
+      "case": "get_data_1M",
+      "impl": "v5py",
+      "seconds": [
+        1.356838,
+        1.409014,
+        1.417283
+      ],
+      "median": 1.409014,
+      "min": 1.356838,
+      "failed": 0
+    },
+    {
+      "backend": "timescaledb",
+      "case": "sync_10k",
+      "impl": "v5bin",
+      "seconds": [
+        0.733096,
+        0.547745,
+        0.696885
+      ],
+      "median": 0.696885,
+      "min": 0.547745,
+      "failed": 0
+    },
+    {
+      "backend": "timescaledb",
+      "case": "sync_100k",
+      "impl": "v5bin",
+      "seconds": [
+        1.38214,
+        1.412838,
+        1.418168
+      ],
+      "median": 1.412838,
+      "min": 1.38214,
+      "failed": 0
+    },
+    {
+      "backend": "timescaledb",
+      "case": "sync_1M",
+      "impl": "v5bin",
+      "seconds": [
+        11.563481,
+        11.557256,
+        11.767429
+      ],
+      "median": 11.563481,
+      "min": 11.557256,
+      "failed": 0
+    },
+    {
+      "backend": "timescaledb",
+      "case": "inc_100k",
+      "impl": "v5bin",
+      "seconds": [
+        0.779084,
+        0.82572,
+        0.756057
+      ],
+      "median": 0.779084,
+      "min": 0.756057,
+      "failed": 0
+    },
+    {
+      "backend": "timescaledb",
+      "case": "inc_1M",
+      "impl": "v5bin",
+      "seconds": [
+        0.926467,
+        1.034689,
+        0.894074
+      ],
+      "median": 0.926467,
+      "min": 0.894074,
+      "failed": 0
+    },
+    {
+      "backend": "timescaledb",
+      "case": "resync_100k",
+      "impl": "v5bin",
+      "seconds": [
+        0.83318,
+        0.806547,
+        0.77988
+      ],
+      "median": 0.806547,
+      "min": 0.77988,
+      "failed": 0
+    },
+    {
+      "backend": "startup",
+      "case": "startup_import",
+      "impl": "v3py",
+      "seconds": [
+        0.203685,
+        0.19197,
+        0.193295
+      ],
+      "median": 0.193295,
+      "min": 0.19197,
+      "failed": 0
+    },
+    {
+      "backend": "startup",
+      "case": "startup_version",
+      "impl": "v3cli",
+      "seconds": [
+        0.196787,
+        0.195988,
+        0.198666
+      ],
+      "median": 0.196787,
+      "min": 0.195988,
+      "failed": 0
+    },
+    {
+      "backend": "startup",
+      "case": "startup_show_version",
+      "impl": "v3cli",
+      "seconds": [
+        0.284311,
+        0.289387,
+        0.288782
+      ],
+      "median": 0.288782,
+      "min": 0.284311,
+      "failed": 0
+    },
+    {
+      "backend": "startup",
+      "case": "startup_import",
+      "impl": "v4py",
+      "seconds": [
+        0.18974,
+        0.193829,
+        0.195748
+      ],
+      "median": 0.193829,
+      "min": 0.18974,
+      "failed": 0
+    },
+    {
+      "backend": "startup",
+      "case": "startup_version",
+      "impl": "v4cli",
+      "seconds": [
+        0.197222,
+        0.192772,
+        0.198056
+      ],
+      "median": 0.197222,
+      "min": 0.192772,
+      "failed": 0
+    },
+    {
+      "backend": "startup",
+      "case": "startup_show_version",
+      "impl": "v4cli",
+      "seconds": [
+        0.276422,
+        0.277342,
+        0.278739
+      ],
+      "median": 0.277342,
+      "min": 0.276422,
+      "failed": 0
+    },
+    {
+      "backend": "startup",
+      "case": "startup_import",
+      "impl": "v5py",
+      "seconds": [
+        0.152596,
+        0.153677,
+        0.161548
+      ],
+      "median": 0.153677,
+      "min": 0.152596,
+      "failed": 0
+    },
+    {
+      "backend": "startup",
+      "case": "startup_version",
+      "impl": "v5cli",
+      "seconds": [
+        0.038853,
+        0.036929,
+        0.032094
+      ],
+      "median": 0.036929,
+      "min": 0.032094,
+      "failed": 0
+    },
+    {
+      "backend": "startup",
+      "case": "startup_show_version",
+      "impl": "v5cli",
+      "seconds": [
+        0.046574,
+        0.041465,
+        0.044777
+      ],
+      "median": 0.044777,
+      "min": 0.041465,
+      "failed": 0
+    },
+    {
+      "backend": "startup",
+      "case": "startup_version",
+      "impl": "v5bin",
+      "seconds": [
+        0.005836,
+        0.00524,
+        0.005002
+      ],
+      "median": 0.00524,
+      "min": 0.005002,
+      "failed": 0
+    },
+    {
+      "backend": "startup",
+      "case": "startup_show_version",
+      "impl": "v5bin",
+      "seconds": [
+        0.026461,
+        0.013315,
+        0.011687
+      ],
+      "median": 0.013315,
+      "min": 0.011687,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "sync_10k",
+      "impl": "v3py",
+      "seconds": [
+        1.458134,
+        1.369501,
+        1.386915
+      ],
+      "median": 1.386915,
+      "min": 1.369501,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "sync_100k",
+      "impl": "v3py",
+      "seconds": [
+        3.273663,
+        3.287305,
+        3.353631
+      ],
+      "median": 3.287305,
+      "min": 3.273663,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "sync_1M",
+      "impl": "v3py",
+      "seconds": [
+        41.246026,
+        41.368011,
+        42.976839
+      ],
+      "median": 41.368011,
+      "min": 41.246026,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "inc_100k",
+      "impl": "v3py",
+      "seconds": [
+        2.289119,
+        2.279403,
+        2.325512
+      ],
+      "median": 2.289119,
+      "min": 2.279403,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "inc_1M",
+      "impl": "v3py",
+      "seconds": [
+        2.422999,
+        2.594636,
+        2.488243
+      ],
+      "median": 2.488243,
+      "min": 2.422999,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "filter_existing_100k",
+      "impl": "v3py",
+      "seconds": [
+        1.303016,
+        1.283879,
+        1.283461
+      ],
+      "median": 1.283879,
+      "min": 1.283461,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "resync_100k",
+      "impl": "v3py",
+      "seconds": [
+        2.084403,
+        2.126809,
+        2.112797
+      ],
+      "median": 2.112797,
+      "min": 2.084403,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "get_data_100k",
+      "impl": "v3py",
+      "seconds": [
+        1.382956,
+        1.469753,
+        1.417697
+      ],
+      "median": 1.417697,
+      "min": 1.382956,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "get_data_1M",
+      "impl": "v3py",
+      "seconds": [
+        6.261969,
+        6.783107,
+        6.290289
+      ],
+      "median": 6.290289,
+      "min": 6.261969,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "sync_10k",
+      "impl": "v4py",
+      "seconds": [
+        1.450953,
+        1.500814,
+        1.425606
+      ],
+      "median": 1.450953,
+      "min": 1.425606,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "sync_100k",
+      "impl": "v4py",
+      "seconds": [
+        3.814053,
+        3.707163,
+        3.725397
+      ],
+      "median": 3.725397,
+      "min": 3.707163,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "sync_1M",
+      "impl": "v4py",
+      "seconds": [
+        46.92291,
+        45.734332,
+        44.091845
+      ],
+      "median": 45.734332,
+      "min": 44.091845,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "inc_100k",
+      "impl": "v4py",
+      "seconds": [
+        2.676607,
+        2.685562,
+        2.808762
+      ],
+      "median": 2.685562,
+      "min": 2.676607,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "inc_1M",
+      "impl": "v4py",
+      "seconds": [
+        3.057046,
+        2.963318,
+        2.967716
+      ],
+      "median": 2.967716,
+      "min": 2.963318,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "filter_existing_100k",
+      "impl": "v4py",
+      "seconds": [
+        1.912656,
+        1.774661,
+        1.748554
+      ],
+      "median": 1.774661,
+      "min": 1.748554,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "resync_100k",
+      "impl": "v4py",
+      "seconds": [
+        2.625724,
+        2.628762,
+        2.618687
+      ],
+      "median": 2.625724,
+      "min": 2.618687,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "get_data_100k",
+      "impl": "v4py",
+      "seconds": [
+        1.395019,
+        1.367043,
+        1.404194
+      ],
+      "median": 1.395019,
+      "min": 1.367043,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "get_data_1M",
+      "impl": "v4py",
+      "seconds": [
+        6.368028,
+        6.294664,
+        6.424535
+      ],
+      "median": 6.368028,
+      "min": 6.294664,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "sync_10k",
+      "impl": "v5py",
+      "seconds": [
+        0.330985,
+        0.247077,
+        0.294514
+      ],
+      "median": 0.294514,
+      "min": 0.247077,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "sync_100k",
+      "impl": "v5py",
+      "seconds": [
+        0.96247,
+        0.945775,
+        0.810293
+      ],
+      "median": 0.945775,
+      "min": 0.810293,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "sync_1M",
+      "impl": "v5py",
+      "seconds": [
+        9.047655,
+        8.863869,
+        8.944758
+      ],
+      "median": 8.944758,
+      "min": 8.863869,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "inc_100k",
+      "impl": "v5py",
+      "seconds": [
+        0.660139,
+        0.569694,
+        0.653811
+      ],
+      "median": 0.653811,
+      "min": 0.569694,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "inc_1M",
+      "impl": "v5py",
+      "seconds": [
+        0.717346,
+        0.79556,
+        0.755479
+      ],
+      "median": 0.755479,
+      "min": 0.717346,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "filter_existing_100k",
+      "impl": "v5py",
+      "seconds": [
+        0.393475,
+        0.392373,
+        0.414317
+      ],
+      "median": 0.393475,
+      "min": 0.392373,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "resync_100k",
+      "impl": "v5py",
+      "seconds": [
+        0.592735,
+        0.563181,
+        0.591821
+      ],
+      "median": 0.591821,
+      "min": 0.563181,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "get_data_100k",
+      "impl": "v5py",
+      "seconds": [
+        0.516489,
+        0.522005,
+        0.528719
+      ],
+      "median": 0.522005,
+      "min": 0.516489,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "get_data_1M",
+      "impl": "v5py",
+      "seconds": [
+        1.404141,
+        1.407329,
+        1.370054
+      ],
+      "median": 1.404141,
+      "min": 1.370054,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "sync_10k",
+      "impl": "v5bin",
+      "seconds": [
+        0.582869,
+        0.609904,
+        0.555274
+      ],
+      "median": 0.582869,
+      "min": 0.555274,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "sync_100k",
+      "impl": "v5bin",
+      "seconds": [
+        1.254964,
+        1.224218,
+        1.139444
+      ],
+      "median": 1.224218,
+      "min": 1.139444,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "sync_1M",
+      "impl": "v5bin",
+      "seconds": [
+        10.561703,
+        10.109109,
+        10.207375
+      ],
+      "median": 10.207375,
+      "min": 10.109109,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "inc_100k",
+      "impl": "v5bin",
+      "seconds": [
+        0.665141,
+        0.712716,
+        0.864606
+      ],
+      "median": 0.712716,
+      "min": 0.665141,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "inc_1M",
+      "impl": "v5bin",
+      "seconds": [
+        0.874685,
+        0.919584,
+        0.836535
+      ],
+      "median": 0.874685,
+      "min": 0.836535,
+      "failed": 0
+    },
+    {
+      "backend": "postgis",
+      "case": "resync_100k",
+      "impl": "v5bin",
+      "seconds": [
+        0.707627,
+        0.688563,
+        0.718807
+      ],
+      "median": 0.707627,
+      "min": 0.688563,
+      "failed": 0
+    }
+  ]
+}

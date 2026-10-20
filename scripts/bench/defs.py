@@ -24,10 +24,13 @@ DEST_INSTANCE = 'sql:b_dest'
 #: Implementations: how a case is executed. `py` runs `worker.py` inside the implementation's
 #: interpreter (timed around the call); `cli` times the whole process, startup included.
 IMPLS = ('v4py', 'v4cli', 'v5py', 'v5cli', 'v5bin')
-PY_IMPLS = ('v4py', 'v5py')
+#: Released 3.x (an installed wheel in its own venv, `--v3-python`). Opt-in: not in `IMPLS`, so the
+#: default selection and every existing report keep their meaning.
+V3_IMPLS = ('v3py', 'v3cli')
+PY_IMPLS = ('v3py', 'v4py', 'v5py')
 #: Every implementation `--impls` accepts.
-ALL_IMPLS = IMPLS
-CLI_IMPLS = ('v4cli', 'v5cli', 'v5bin')
+ALL_IMPLS = IMPLS + V3_IMPLS
+CLI_IMPLS = ('v3cli', 'v4cli', 'v5cli', 'v5bin')
 
 DTYPES = {'dt': 'datetime', 'id': 'int', 'value': 'float'}
 COLUMNS = {'datetime': 'dt', 'id': 'id'}

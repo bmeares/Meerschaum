@@ -71,6 +71,8 @@ import defs  # noqa: E402
 REF_PY = REPO / '.venv-ref' / 'bin' / 'python'
 MRSM_BIN = REPO / 'target' / 'release' / 'mrsm'
 V5_PY = Path(sys.executable)
+#: Released 3.x environment (`--v3-python`); the default is only a conventional location.
+V3_PY = Path.home() / '.cache' / 'mrsm-bench-v345' / 'venv-v3' / 'bin' / 'python'
 PROFILE_TRACE = False
 RUN_TIMEOUT = 3600
 
@@ -201,7 +203,15 @@ class Impl:
     def is_py(self) -> bool:
         return self.name in defs.PY_IMPLS
 
+    def python(self) -> Path:
+        """The interpreter of this implementation's environment."""
+        if self.name.startswith('v3'):
+            return V3_PY
+        return REF_PY if self.name.startswith('v4') else V5_PY
+
     def available(self) -> Optional[str]:
+        if self.name.startswith('v3') and not V3_PY.exists():
+            return 'missing --v3-python (a venv with the released meerschaum 3.x)'
         if self.name.startswith('v4') and not REF_PY.exists():
             return 'missing .venv-ref (run scripts/parity/setup_reference.sh)'
         if self.name == 'v5bin' and not self.mrsm_bin().exists():
@@ -227,9 +237,9 @@ class Impl:
             'MRSM_VENVS_DIR': str(self.root / 'venvs'),
             'MRSM_CONFIG': json.dumps({'meerschaum': {'instance': defs.DEST_INSTANCE}}),
             'MRSM_NO_AUTO_INSTALL': '1',
-            'MRSM_PYTHON': str(REF_PY if self.name.startswith('v4') else V5_PY),
+            'MRSM_PYTHON': str(self.python()),
             'MRSM_NO_UPDATE_CHECK': '1',
-            'UV_PYTHON': str(REF_PY if self.name.startswith('v4') else V5_PY),
+            'UV_PYTHON': str(self.python()),
             'PYTHONHASHSEED': '0',
             'PYTHONDONTWRITEBYTECODE': '1',
             'PYTHONNOUSERSITE': '1',
@@ -243,13 +253,13 @@ class Impl:
 
     def py_cmd(self, *args: str) -> List[str]:
         worker = str(HERE / 'worker.py')
-        if self.name.startswith('v4'):
-            return [str(REF_PY), '-B', '-s', '-E', worker, *args]
+        if self.name.startswith(('v3', 'v4')):
+            return [str(self.python()), '-B', '-s', '-E', worker, *args]
         return [str(V5_PY), '-B', '-s', worker, *args]
 
     def cli_cmd(self, *args: str) -> List[str]:
-        if self.name == 'v4cli':
-            return [str(REF_PY), '-B', '-s', '-E', '-m', 'meerschaum', *args]
+        if self.name in ('v3cli', 'v4cli'):
+            return [str(self.python()), '-B', '-s', '-E', '-m', 'meerschaum', *args]
         if self.name == 'v5cli':
             return [str(self.wheel_cli()), *args]
         return [str(self.mrsm_bin()), *args]
@@ -263,6 +273,23 @@ class Impl:
             cmd, env=self.env(), cwd=self.workdir, capture_output=True, text=True,
             timeout=RUN_TIMEOUT,
         )
+
+    def bootstrap(self) -> None:
+        """
+        Released 3.x and 4.x only: the first imports in a fresh root recurse through their own
+        config and virtual-environment initialization (RecursionError and a stale venv lock,
+        4-7 s, one time per root). Initialize the root before any measurement: not timed and
+        not a warm-up of product behavior. Two consecutive clean imports are required.
+        """
+        if not self.name.startswith(('v3', 'v4')):
+            return
+        clean = 0
+        for _ in range(6):
+            proc = self.run([str(self.python()), '-B', '-s', '-E', '-c', 'import meerschaum'])
+            clean = clean + 1 if proc.returncode == 0 and not (proc.stdout + proc.stderr).strip() else 0
+            if clean >= 2:
+                return
+        raise RuntimeError(f'{self.name}: the fresh root did not initialize cleanly')
 
     def worker(self, *args: str) -> Dict[str, Any]:
         proc = self.run(self.py_cmd(*args))
@@ -339,9 +366,10 @@ class Bench:
         for name in self.args.impls:
             impl = Impl(name, self.workdir / 'startup', 'sqlite', self.snapshot)
             self._unavailable(impl)
+            impl.bootstrap()
             if impl.is_py:
-                python = REF_PY if name.startswith('v4') else V5_PY
-                flags = ['-B', '-s', '-E'] if name.startswith('v4') else ['-B', '-s']
+                python = impl.python()
+                flags = ['-B', '-s', '-E'] if name.startswith(('v3', 'v4')) else ['-B', '-s']
                 commands = {'startup_import': [str(python), *flags, '-c', 'import meerschaum']}
             else:
                 commands = {
@@ -390,7 +418,8 @@ class Bench:
         self.databases.append(db)
         labels = [lab for lab in defs.SIZES if lab in a.sizes]
         needed = sorted(set(labels) | {'10k', '100k'}, key=lambda s: defs.SIZES[s])
-        impls = [Impl(n, wd, backend, self.snapshot) for n in a.impls]
+        startup_only = set(getattr(a, 'startup_only', None) or [])
+        impls = [Impl(n, wd, backend, self.snapshot) for n in a.impls if n not in startup_only]
         impls = [i for i in impls if not self._unavailable(i)]
         if not impls:
             return
@@ -417,6 +446,7 @@ class Bench:
 
         for impl in impls:
             self.log(f'-- {backend} / {impl.name}: warm-up')
+            impl.bootstrap()
             self._warmup(db, impl)
             if 'sync' in a.cases:
                 for lab in labels:
@@ -427,6 +457,10 @@ class Bench:
                         self.case_inc(db, impl, lab)
             if impl.is_py and 'filter_existing' in a.cases and '100k' in labels:
                 self.case_filter_existing(db, impl)
+            if 'resync' in a.cases and '100k' in labels:
+                self.case_resync(db, impl, '100k')
+            if impl.is_py and 'get_data_100k' in a.cases and '100k' in labels:
+                self.case_get_data(db, impl, '100k')
             if impl.is_py and 'get_data' in a.cases and '1M' in labels:
                 self.case_get_data(db, impl)
             if not impl.is_py and 'chain' in a.cases:
@@ -529,19 +563,39 @@ class Bench:
                 runs.append(res)
         self.record(db.backend, 'filter_existing_100k', impl.name, runs)
 
-    def case_get_data(self, db: Db, impl: Impl) -> None:
-        metric = defs.sync_metric('1M', impl.name)
-        if not self._ensure_seed(db, impl, '1M'):
-            self.record(db.backend, 'get_data_1M', impl.name, [{'ok': False, 'error': 'seed failed'}])
+    def case_get_data(self, db: Db, impl: Impl, lab: str = '1M') -> None:
+        metric = defs.sync_metric(lab, impl.name)
+        case = f'get_data_{lab}'
+        n = defs.SIZES[lab]
+        if not self._ensure_seed(db, impl, lab):
+            self.record(db.backend, case, impl.name, [{'ok': False, 'error': 'seed failed'}])
             return
         runs = []
         for k in range(1 + self.args.repeats):
             res = impl.worker('get_data', defs.SRC_INSTANCE, metric, defs.DEST_INSTANCE)
-            if res.get('ok') and res.get('rows') != 1_000_000:
-                res = {**res, 'ok': False, 'error': f'expected 1M rows, got {res.get("rows")}'}
+            if res.get('ok') and res.get('rows') != n:
+                res = {**res, 'ok': False, 'error': f'expected {n} rows, got {res.get("rows")}'}
             if k >= 1 or not res.get('ok'):
                 runs.append(res)
-        self.record(db.backend, 'get_data_1M', impl.name, runs)
+        self.record(db.backend, case, impl.name, runs)
+
+    def case_resync(self, db: Db, impl: Impl, lab: str = '100k') -> None:
+        """
+        Re-sync of a fully synced pipe whose source did not change: every fetched row is a
+        duplicate, so the time is the fetch plus the `filter_existing` diff (no inserts).
+        """
+        n = defs.SIZES[lab]
+        metric = defs.sync_metric(lab, impl.name)
+        table = db.tbl(defs.target_name(metric))
+        if not self._ensure_seed(db, impl, lab):
+            self.record(db.backend, f'resync_{lab}', impl.name, [{'ok': False, 'error': 'seed failed'}])
+            return
+        warm, reps = self.reps(lab)
+        runs = self._run_timed(
+            impl, lambda _k: impl.sync_timed(defs.SRC_INSTANCE, metric),
+            lambda _k: db.count(table) == n, warm, reps,
+        )
+        self.record(db.backend, f'resync_{lab}', impl.name, runs)
 
     def case_latency(self, db: Db, impl: Impl) -> None:
         """Per-call latency on a small synced pipe: one fresh process per repeat."""
@@ -602,19 +656,75 @@ LATENCY_CALLS = (
 CASE_ORDER = [
     'startup_import', 'startup_version', 'startup_show_version',
     'sync_10k', 'sync_100k', 'sync_1M', 'inc_100k', 'inc_1M',
-    'filter_existing_100k', 'get_data_1M', 'chain_3', 'chain_3_engine',
+    'filter_existing_100k', 'resync_100k', 'get_data_100k', 'get_data_1M', 'chain_3', 'chain_3_engine',
 ] + [f'lat_{call}' for call in LATENCY_CALLS]
 PAIRS = [('v5py', 'v4py'), ('v5cli', 'v4cli'), ('v5bin', 'v4cli')]
 REGRESSION_THRESHOLD = 1.10  # v5 slower than v4 by more than 10%
 
 
+V345_RATIOS = [
+    ('v5py', 'v3py'), ('v5py', 'v4py'), ('v5cli', 'v3cli'), ('v5cli', 'v4cli'),
+    ('v5bin', 'v3cli'), ('v5bin', 'v4cli'),
+]
+
+
+def render_v345_table(backend, by, results, regressions) -> List[str]:
+    """One backend's table when a v3 implementation is part of the run (columns by presence)."""
+    order = ('v3py', 'v4py', 'v5py', 'v3cli', 'v4cli', 'v5cli', 'v5bin')
+    present = {r['impl'] for r in results if r['backend'] == backend}
+    impls = [i for i in order if i in present]
+    ratios = [(a, b) for a, b in V345_RATIOS if a in present and b in present]
+    header = ['case', *impls, *[f'{a}/{b}' for a, b in ratios]]
+    lines = ['| ' + ' | '.join(header) + ' |', '|' + '---|' * len(header)]
+    for case in CASE_ORDER:
+        if not any((case, i) in by for i in impls):
+            continue
+
+        def cell(impl):
+            r = by.get((case, impl))
+            if r is None:
+                return 'n/a'
+            if r['median'] is None:
+                return 'FAILED'
+            if case.startswith('lat_'):
+                return f'{r["median"] * 1000:.2f} ms'
+            return f'{r["median"]:.3f}'
+
+        def ratio(a, b):
+            ra, rb = by.get((case, a)), by.get((case, b))
+            if not ra or not rb or ra['median'] is None or not rb['median']:
+                return ''
+            x = ra['median'] / rb['median']
+            if x > REGRESSION_THRESHOLD:
+                regressions.append((backend, case, a, b, x))
+                return f'**{x:.2f}**'
+            return f'{x:.2f}'
+
+        lines.append('| ' + ' | '.join(
+            [case, *[cell(i) for i in impls], *[ratio(a, b) for a, b in ratios]]) + ' |')
+    lines.append('')
+    return lines
+
+
 def render_markdown(meta: Dict[str, Any], results: List[Dict[str, Any]]) -> str:
     lines = [f'# Sync benchmark: {meta["label"]} ({meta["date"]})', '']
+    with_v3 = any(name.startswith('v3') for name in meta.get('implementations', []))
+    if with_v3:
+        lines += [f'- v3: meerschaum {meta.get("v3_version", "unrecorded")} (released wheel, '
+                  'own environment)']
     lines += [
         f'- v4: meerschaum {meta["v4_version"]} (reference venv)',
         f'- v5: {meta["v5_version"]}',
         f'- Python {meta["python"]}, {meta["os"]}, {meta["cpus"]} CPUs',
-        f'- measured interpreters: v4 Python {meta.get("v4_python", "unrecorded")}; '
+    ]
+    hardware = meta.get('hardware') or {}
+    if hardware.get('cpu_model'):
+        lines.append(f'- hardware: {hardware["cpu_model"]}, {hardware.get("logical_cpus")} logical '
+                     f'CPUs, {hardware.get("ram_gib", "?")} GiB RAM')
+    lines += [
+        f'- measured interpreters: '
+        + (f'v3 Python {meta.get("v3_python", "unrecorded")}; ' if with_v3 else '')
+        + f'v4 Python {meta.get("v4_python", "unrecorded")}; '
         f'v5 Python {meta.get("v5_python", "unrecorded")}',
         f'- repeats: {meta["repeats"]}, including every 1M case (one extra warm-up up to 100k); '
         'the table shows the median seconds',
@@ -622,8 +732,10 @@ def render_markdown(meta: Dict[str, Any], results: List[Dict[str, Any]]) -> str:
         'wall time (startup included)',
         '- `v5cli` uses the installed wheel console script; `v5bin` uses the standalone release '
         'binary. Historical reports named the standalone binary `v5cli`.',
-        '- `x` columns: v5 time / v4 time for the same style (`py`, `cli`). Below 1.00 is faster; '
-        f'**bold** marks a regression (> {int((REGRESSION_THRESHOLD - 1) * 100)}% slower)',
+        ('- `a/b` columns: time of `a` / time of `b` (v5 against v3 and v4, same style). '
+           if with_v3 else
+           '- `x` columns: v5 time / v4 time for the same style (`py`, `cli`). ')
+        + f'Below 1.00 is faster; **bold** marks a regression (> {int((REGRESSION_THRESHOLD - 1) * 100)}% slower)',
         '`lat_*` cases are per call, in milliseconds',
         '',
     ]
@@ -637,11 +749,14 @@ def render_markdown(meta: Dict[str, Any], results: List[Dict[str, Any]]) -> str:
     regressions = []
     for backend in meta['backends']:
         lines += [f'## {backend}', '']
+        by = {(r['case'], r['impl']): r for r in results if r['backend'] == backend}
+        if with_v3:
+            lines += render_v345_table(backend, by, results, regressions)
+            continue
         lines += [
             '| case | v4py | v5py | x | v4cli | v5cli (wheel) | x | v5bin | x |',
             '|---|---|---|---|---|---|---|---|---|',
         ]
-        by = {(r['case'], r['impl']): r for r in results if r['backend'] == backend}
         for case in CASE_ORDER:
             if not any((case, i) in by for i in defs.ALL_IMPLS):
                 continue
@@ -712,6 +827,13 @@ def version_info(workdir: Path, snapshot: Path, implementations: List[str]) -> D
     if not v4_info.get('ok') or v4_info.get('version') != '4.1.4':
         raise RuntimeError(f'Released v4.1.4 reference required: {v4_info}')
     v4 = v4_info['version']
+    v3_info = None
+    if any(name.startswith('v3') for name in implementations):
+        v3_info = Impl('v3py', workdir / 'versions', 'sqlite', snapshot).worker('identify')
+        if not v3_info.get('ok') or not v3_info.get('version', '').startswith('3.'):
+            raise RuntimeError(f'A released 3.x environment is required: {v3_info}')
+        if v4_info['python'].split('.')[:2] != v3_info['python'].split('.')[:2]:
+            raise RuntimeError('Use the same Python major/minor for every implementation')
     v5 = 'unavailable'
     if any(name.startswith('v5') for name in implementations):
         wheel = Impl('v5py', workdir / 'versions', 'sqlite', snapshot)
@@ -733,6 +855,10 @@ def version_info(workdir: Path, snapshot: Path, implementations: List[str]) -> D
     for name in ('defs.py', 'run.py', 'worker.py'):
         harness.update((HERE / name).read_bytes())
     info['harness_sha256'] = harness.hexdigest()
+    if v3_info is not None:
+        info['v3_version'] = v3_info['version']
+        info['v3_python'] = v3_info['python']
+        info['v3_dependencies'] = v3_info['dependencies']
     if any(name.startswith('v5') for name in implementations):
         info['v5_python'] = v5_info['python']
         info['v5_dependencies'] = v5_info['dependencies']
@@ -767,13 +893,20 @@ def version_info(workdir: Path, snapshot: Path, implementations: List[str]) -> D
 def expected_cells(args):
     """The measurements applicable to this selection, independent of subprocess outcomes."""
     cells = set()
+    startup_only = set(getattr(args, 'startup_only', None) or [])
     for impl in args.impls:
         python = impl in defs.PY_IMPLS
         if 'startup' in args.cases:
             names = ['startup_import'] if python else ['startup_version', 'startup_show_version']
             cells.update(('startup', name, impl) for name in names)
+        if impl in startup_only:
+            continue
         for backend in args.backends:
             names = []
+            if 'resync' in args.cases and '100k' in args.sizes:
+                names += ['resync_100k']
+            if python and 'get_data_100k' in args.cases and '100k' in args.sizes:
+                names += ['get_data_100k']
             if 'sync' in args.cases:
                 names += [f'sync_{size}' for size in args.sizes]
             if 'inc' in args.cases:
@@ -795,7 +928,8 @@ def expected_cells(args):
 
 def merge_compatible(meta, results, previous):
     """Preserve per-run provenance: only identical artifacts and workloads can share a report."""
-    keys = ('v4_version', 'v5_version', 'v4_python', 'v5_python', 'v4_dependencies',
+    keys = ('v3_version', 'v3_python', 'v3_dependencies', 'startup_only',
+            'v4_version', 'v5_version', 'v4_python', 'v5_python', 'v4_dependencies',
             'v5_dependencies', 'v5_extension_sha256', 'v5_console_sha256', 'v5_entry_module_sha256',
             'v5_binary_version', 'v5_binary_sha256', 'repeats', 'sizes', 'cases',
             'implementations', 'profiling', 'latency_iterations',
@@ -838,6 +972,23 @@ def baseline_regressions(results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return slow
 
 
+def hardware_summary() -> Dict[str, Any]:
+    """CPU model and memory class only: no hostname, serial number or other identifier."""
+    out: Dict[str, Any] = {'logical_cpus': os.cpu_count()}
+    try:
+        for line in Path('/proc/cpuinfo').read_text().splitlines():
+            if line.startswith('model name'):
+                out['cpu_model'] = re.sub(r'\s+', ' ', line.split(':', 1)[1]).strip()
+                break
+        for line in Path('/proc/meminfo').read_text().splitlines():
+            if line.startswith('MemTotal:'):
+                out['ram_gib'] = round(int(line.split()[1]) / 1024 / 1024)
+                break
+    except (OSError, ValueError, IndexError):
+        pass
+    return out
+
+
 def scrub_public(value: Any, workdir: Path) -> Any:
     """Subprocess failures may contain paths or a URI; remove them before storing results."""
     if isinstance(value, str):
@@ -853,7 +1004,7 @@ def scrub_public(value: Any, workdir: Path) -> Any:
 
 
 def main() -> int:
-    global V5_PY, PROFILE_TRACE
+    global V5_PY, V3_PY, REF_PY, MRSM_BIN, PROFILE_TRACE
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     p.add_argument('--label', default='dev', help='Host-agnostic label for the result files.')
     p.add_argument('--backends', default='sqlite,postgis,timescaledb')
@@ -865,17 +1016,33 @@ def main() -> int:
                    help='Fresh scratch schema (must start with w17cbench_; default: unique).')
     p.add_argument('--v5-python', default=str(V5_PY),
                    help='Python in a dedicated environment holding the installed v5 wheel.')
+    p.add_argument('--v3-python', default=str(V3_PY),
+                   help='Python in a dedicated environment holding the released meerschaum 3.x '
+                        '(needed by the v3py / v3cli implementations).')
+    p.add_argument('--v4-python', default=str(REF_PY),
+                   help='Python of the released meerschaum 4.1.4 environment (default: .venv-ref).')
+    p.add_argument('--v5-binary', default=str(MRSM_BIN),
+                   help='The standalone mrsm binary measured as v5bin (default: target/release/mrsm).')
+    p.add_argument('--startup-only-impls', default='',
+                   help='Comma list of selected implementations measured only in the startup '
+                        'case (no sync, resync, or other workload cases).')
     p.add_argument('--latency-iterations', type=int, default=200)
     p.add_argument('--workdir', default=None, help='Empty scratch directory below ~/.cache.')
     p.add_argument('--keep', action='store_true', help='Keep the temporary work directory.')
     p.add_argument('--plan', action='store_true', help='Print the workload without importing or running Meerschaum.')
     p.add_argument('--trace', action='store_true', help='Enable MRSM_CORE_TRACE for separate profiling runs.')
     args = p.parse_args()
-    for attr in ('backends', 'sizes', 'impls', 'cases'):
+    for attr in ('backends', 'sizes', 'impls', 'cases', 'startup_only_impls'):
         setattr(args, attr, [s for s in getattr(args, attr).split(',') if s])
+    args.startup_only = args.startup_only_impls
+    if set(args.startup_only) - set(args.impls):
+        p.error('--startup-only-impls must be a subset of --impls')
+    if args.startup_only and 'startup' not in args.cases:
+        p.error('--startup-only-impls needs the startup case')
     for name, choices in [('backends', ('sqlite', *defs.PG_BACKENDS)), ('sizes', defs.SIZES),
                           ('impls', defs.ALL_IMPLS),
-                          ('cases', ('sync', 'inc', 'filter_existing', 'get_data', 'chain', 'latency', 'startup'))]:
+                          ('cases', ('sync', 'inc', 'filter_existing', 'get_data', 'chain', 'latency',
+                                     'startup', 'resync', 'get_data_100k'))]:
         if not getattr(args, name) or set(getattr(args, name)) - set(choices):
             p.error(f'Invalid {name}; choose from {", ".join(choices)}')
         if len(getattr(args, name)) != len(set(getattr(args, name))):
@@ -894,6 +1061,9 @@ def main() -> int:
                          indent=2))
         return 0
     V5_PY = Path(args.v5_python).expanduser().absolute()
+    V3_PY = Path(args.v3_python).expanduser().absolute()
+    REF_PY = Path(args.v4_python).expanduser().absolute()
+    MRSM_BIN = Path(args.v5_binary).expanduser().absolute()
     PROFILE_TRACE = args.trace
     token = 'w17cbench_' + uuid.uuid4().hex[:12]
     defs.SCHEMA = args.pg_schema or token
@@ -918,6 +1088,7 @@ def main() -> int:
             'sizes': args.sizes, 'python': platform.python_version(), 'pg_schema': defs.SCHEMA,
             'pg_database': defs.PG_DATABASE,
             'os': f'{platform.system()} {platform.machine()}', 'cpus': os.cpu_count(),
+            'hardware': hardware_summary(),
             'notes': bench.notes, 'load_checks': bench.loads, 'complete': complete,
             'profiling': args.trace,
             'latency_iterations': args.latency_iterations,
@@ -926,6 +1097,8 @@ def main() -> int:
         }
         if 'startup' in args.cases:
             meta['backends'] = ['startup', *meta['backends']]
+        if args.startup_only:
+            meta['startup_only'] = args.startup_only
         return meta
 
     def checkpoint(stage):
@@ -952,8 +1125,8 @@ def main() -> int:
     try:
         versions = version_info(workdir, bench.snapshot, args.impls)
         if set(args.backends) & {'postgis', 'timescaledb'}:
-            for version in ('v4', 'v5'):
-                if version == 'v5' and not any(impl.startswith('v5') for impl in args.impls):
+            for version in ('v3', 'v4', 'v5'):
+                if version != 'v4' and not any(impl.startswith(version) for impl in args.impls):
                     continue
                 if not versions.get(f'{version}_dependencies', {}).get('psycopg'):
                     raise RuntimeError(

@@ -368,5 +368,147 @@ class HarnessTests(unittest.TestCase):
         self.assertEqual({line.count('|') for line in table}, {10})
 
 
+class ThreeImplementationTests(unittest.TestCase):
+    """The opt-in v3 adapter: commands, selection, coverage and reporting (no children run)."""
+
+    def setUp(self):
+        cache = Path.home() / '.cache'
+        cache.mkdir(exist_ok=True)
+        self.temp = tempfile.TemporaryDirectory(prefix='mrsm-bench-static-v3-', dir=cache)
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+
+    def test_v3_is_opt_in_and_does_not_change_the_default_selection(self):
+        self.assertEqual(defs.IMPLS, ('v4py', 'v4cli', 'v5py', 'v5cli', 'v5bin'))
+        self.assertEqual(defs.V3_IMPLS, ('v3py', 'v3cli'))
+        self.assertTrue(set(defs.V3_IMPLS) <= set(defs.ALL_IMPLS))
+        self.assertIn('v3py', defs.PY_IMPLS)
+        self.assertIn('v3cli', defs.CLI_IMPLS)
+
+    def test_v3_commands_use_the_v3_interpreter_in_isolated_mode(self):
+        with mock.patch.object(bench, 'V3_PY', Path('/isolated-v3/bin/python')), \
+             mock.patch.object(bench, 'V5_PY', Path('/isolated-v5/bin/python')), \
+             mock.patch.dict(os.environ, {'MRSM_SQL_MAIN': 'x', 'TMUX': 'y', 'PYTHONPATH': 'z'},
+                             clear=True):
+            py = bench.Impl('v3py', self.root, 'sqlite')
+            cli = bench.Impl('v3cli', self.root, 'sqlite')
+            self.assertTrue(py.is_py)
+            self.assertFalse(cli.is_py)
+            self.assertEqual(py.py_cmd('identify')[:4], ['/isolated-v3/bin/python', '-B', '-s', '-E'])
+            self.assertEqual(
+                cli.cli_cmd('--version'),
+                ['/isolated-v3/bin/python', '-B', '-s', '-E', '-m', 'meerschaum', '--version'],
+            )
+            env = cli.env()
+        self.assertEqual(env['MRSM_PYTHON'], '/isolated-v3/bin/python')
+        self.assertEqual(env['UV_PYTHON'], '/isolated-v3/bin/python')
+        for key in ('MRSM_SQL_MAIN', 'TMUX', 'PYTHONPATH'):
+            self.assertNotIn(key, env)
+        self.assertTrue(Path(env['MRSM_ROOT_DIR']).is_relative_to(self.root))
+        self.assertTrue(Path(env['MRSM_VENVS_DIR']).is_relative_to(self.root))
+        self.assertEqual(env['MRSM_NO_AUTO_INSTALL'], '1')
+
+    def test_v4_and_v5_commands_are_unchanged_by_the_v3_adapter(self):
+        with mock.patch.object(bench, 'V3_PY', Path('/isolated-v3/bin/python')), \
+             mock.patch.object(bench, 'REF_PY', Path('/ref/bin/python')), \
+             mock.patch.object(bench, 'V5_PY', Path('/isolated-v5/bin/python')):
+            self.assertEqual(bench.Impl('v4py', self.root, 'sqlite').py_cmd('x')[:4],
+                             ['/ref/bin/python', '-B', '-s', '-E'])
+            self.assertEqual(bench.Impl('v4cli', self.root, 'sqlite').cli_cmd('x')[-3:],
+                             ['-m', 'meerschaum', 'x'])
+            self.assertEqual(bench.Impl('v5py', self.root, 'sqlite').py_cmd('x')[:3],
+                             ['/isolated-v5/bin/python', '-B', '-s'])
+            self.assertNotIn('-E', bench.Impl('v5py', self.root, 'sqlite').py_cmd('x')[:4])
+
+    def test_missing_v3_environment_is_reported_not_faked(self):
+        with mock.patch.object(bench, 'V3_PY', self.root / 'absent' / 'python'):
+            for name in defs.V3_IMPLS:
+                self.assertIn('--v3-python', bench.Impl(name, self.root, 'sqlite').available())
+
+    def test_expected_cells_cover_v3_new_cases_and_startup_only_selection(self):
+        args = argparse.Namespace(
+            backends=['sqlite'], impls=['v3py', 'v3cli', 'v5py'], sizes=['100k'],
+            cases=['startup', 'sync', 'resync', 'get_data_100k'], startup_only=['v3cli'],
+        )
+        cells = bench.expected_cells(args)
+        self.assertIn(('startup', 'startup_import', 'v3py'), cells)
+        self.assertIn(('startup', 'startup_version', 'v3cli'), cells)
+        self.assertIn(('sqlite', 'resync_100k', 'v3py'), cells)
+        self.assertIn(('sqlite', 'get_data_100k', 'v5py'), cells)
+        self.assertNotIn(('sqlite', 'get_data_100k', 'v3cli'), cells)
+        self.assertEqual({c for c in cells if c[2] == 'v3cli'},
+                         {('startup', 'startup_version', 'v3cli'),
+                          ('startup', 'startup_show_version', 'v3cli')})
+
+    def test_startup_only_must_be_selected_and_needs_the_startup_case(self):
+        for extra in (['--impls', 'v5py', '--startup-only-impls', 'v3cli'],
+                      ['--impls', 'v3cli', '--cases', 'sync', '--startup-only-impls', 'v3cli']):
+            with mock.patch.object(bench.sys, 'argv', ['run.py', *extra]), \
+                 mock.patch.object(bench, 'Bench') as runner, \
+                 contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as raised:
+                bench.main()
+            self.assertEqual(raised.exception.code, 2)
+            runner.assert_not_called()
+
+    def test_v3_selection_is_accepted_by_the_plan(self):
+        argv = ['run.py', '--plan', '--impls', 'v3py,v3cli,v4py,v5py', '--cases', 'sync,resync,startup',
+                '--startup-only-impls', 'v3cli']
+        with mock.patch.object(bench.sys, 'argv', argv), \
+             mock.patch.object(bench.subprocess, 'run') as process, \
+             contextlib.redirect_stdout(io.StringIO()) as output:
+            self.assertEqual(bench.main(), 0)
+        process.assert_not_called()
+        self.assertIn('v3py', json.loads(output.getvalue())['impls'])
+
+    def test_different_v3_artifacts_cannot_merge(self):
+        meta = {'v3_version': '3.5.2'}
+        prior = {'meta': {'v3_version': '3.5.1', 'complete': True}, 'results': []}
+        with self.assertRaisesRegex(ValueError, 'v3_version'):
+            bench.merge_compatible(meta, [], prior)
+
+    def test_report_with_v3_has_v3_columns_ratios_and_na_for_missing_cases(self):
+        meta = {'label': 'static', 'date': '2000-01-01', 'v3_version': '3.5.2', 'v4_version': '4.1.4',
+                'v5_version': '5.0.0rc2', 'python': '3.14', 'os': 'Linux', 'cpus': 1, 'repeats': 3,
+                'backends': ['sqlite'], 'implementations': ['v3py', 'v4py', 'v5py'],
+                'hardware': {'cpu_model': 'Test CPU', 'logical_cpus': 8, 'ram_gib': 16}}
+
+        def row(case, impl, median):
+            return {'backend': 'sqlite', 'case': case, 'impl': impl, 'median': median, 'failed': 0}
+
+        results = [row('sync_10k', 'v3py', 4.0), row('sync_10k', 'v4py', 2.0),
+                   row('sync_10k', 'v5py', 1.0), row('resync_100k', 'v5py', 1.0),
+                   row('resync_100k', 'v3py', 0.5)]
+        text = bench.render_markdown(meta, results)
+        self.assertIn('- v3: meerschaum 3.5.2', text)
+        self.assertIn('Test CPU, 8 logical CPUs, 16 GiB RAM', text)
+        self.assertIn('| case | v3py | v4py | v5py | v5py/v3py | v5py/v4py |', text)
+        self.assertIn('| sync_10k | 4.000 | 2.000 | 1.000 | 0.25 | 0.50 |', text)
+        self.assertIn('| resync_100k | 0.500 | n/a | 1.000 | **2.00** |  |', text)
+        self.assertIn('- sqlite `resync_100k`: v5py is 2.00x v3py', text)
+
+    def test_fresh_reference_root_is_initialized_before_measurement_and_v5_is_untouched(self):
+        with mock.patch.object(bench, 'V3_PY', Path('/isolated-v3/bin/python')):
+            v3 = bench.Impl('v3py', self.root, 'sqlite')
+            outcomes = [SimpleNamespace(returncode=1, stdout='', stderr='RecursionError'),
+                        SimpleNamespace(returncode=0, stdout='', stderr=''),
+                        SimpleNamespace(returncode=0, stdout='', stderr=''),
+                        SimpleNamespace(returncode=0, stdout='', stderr='')]
+            with mock.patch.object(v3, 'run', side_effect=outcomes) as run:
+                v3.bootstrap()
+            self.assertEqual(run.call_count, 3)
+            self.assertEqual(run.call_args[0][0][-2:], ['-c', 'import meerschaum'])
+            stuck = SimpleNamespace(returncode=0, stdout='', stderr='warning')
+            with mock.patch.object(v3, 'run', return_value=stuck), self.assertRaises(RuntimeError):
+                v3.bootstrap()
+            v5 = bench.Impl('v5py', self.root, 'sqlite')
+            with mock.patch.object(v5, 'run') as run:
+                v5.bootstrap()
+            run.assert_not_called()
+
+    def test_hardware_summary_has_no_host_identifier(self):
+        info = bench.hardware_summary()
+        self.assertEqual(set(info) - {'logical_cpus', 'cpu_model', 'ram_gib'}, set())
+
+
 if __name__ == '__main__':
     unittest.main()
