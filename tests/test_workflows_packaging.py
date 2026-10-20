@@ -197,3 +197,145 @@ def test_the_wheel_size_guard_still_fails_over_95_mib(wheels, tmp_path):
         wheel_arch='x86_64', musl=True, size=100 * 1024 * 1024,
     )
     assert result.returncode != 0 and '95 MiB' in (result.stdout + result.stderr)
+
+
+# ---------------------------------------------------------------------------------------------
+# CI structure: quick builds for development, release builds only on dispatch / tag
+# (docs/design/v5-build.md "CI: what runs when")
+# ---------------------------------------------------------------------------------------------
+
+import re
+
+
+def _triggers(workflow):
+    ### YAML 1.1 reads the key `on` as the boolean True.
+    return workflow.get('on', workflow.get(True))
+
+
+@pytest.fixture(scope='module')
+def rust():
+    return _load('rust.yaml')
+
+
+@pytest.fixture(scope='module')
+def pytest_workflow():
+    return _load('pytest.yaml')
+
+
+def test_the_release_workflows_run_only_on_dispatch_or_tag(wheels, docker_build):
+    triggers = _triggers(wheels)
+    assert set(triggers) == {'workflow_dispatch', 'push'}, 'no pull_request: release builds are --release'
+    assert triggers['push'] == {'tags': ['v5*']}, 'a branch push must not build the wheels'
+    assert set(_triggers(docker_build)) == {'workflow_dispatch'}
+
+
+def _workflow_texts():
+    return {path.name: path.read_text(encoding='utf-8') for path in sorted(WORKFLOWS.glob('*.yaml'))}
+
+
+def test_the_ci_profile_is_a_quick_build_and_never_ships():
+    manifest = (REPO / 'Cargo.toml').read_text(encoding='utf-8')
+    section = manifest[manifest.index('[profile.ci]'):]
+    section = section[:section.index('\n\n')]
+    assert 'inherits = "release"' in section
+    assert 'lto = false' in section and 'opt-level = 1' in section
+    assert 'codegen-units = 256' in section and 'line-tables-only' in section
+    ### The release profile is untouched: thin LTO, one codegen unit.
+    release = manifest[manifest.index('[profile.release]'):]
+    release = release[:release.index('\n\n')]
+    assert 'lto = "thin"' in release and 'codegen-units = 1' in release
+    script = (REPO / 'scripts' / 'rust' / 'build_py.sh').read_text(encoding='utf-8')
+    assert 'profile="release"' in script.split('while [', 1)[0], 'build_py.sh must default to release'
+    ### Nothing that ships names the ci profile.
+    for name in ('wheels.yaml', 'docker-build.yaml'):
+        assert 'profile ci' not in (WORKFLOWS / name).read_text(encoding='utf-8'), name
+    for path in [REPO / 'Dockerfile', REPO / 'pyproject.toml', REPO / 'crates' / 'meerschaum-py' / 'pyproject.toml',
+                 *(REPO / 'scripts' / 'docker').glob('*')]:
+        if path.is_file():
+            text = path.read_text(encoding='utf-8', errors='ignore')
+            assert 'profile ci' not in text and '--profile=ci' not in text, path
+
+
+def test_pytest_builds_the_extension_with_the_ci_profile(pytest_workflow):
+    tests = pytest_workflow['jobs']['tests']
+    build = _step(tests, 'Build the native Python extension')
+    assert 'scripts/rust/build_py.sh --profile ci' in build['run']
+    assert 'scripts/rust/build_py.sh --release' in build['run'], 'the release gate can test the shipped profile'
+    assert build['env']['EXT_PROFILE'] == "${{ inputs.profile || 'ci' }}"
+    inputs = _triggers(pytest_workflow)['workflow_dispatch']['inputs']
+    assert inputs['profile']['default'] == 'ci' and inputs['profile']['options'] == ['ci', 'release']
+    assert inputs['flavors']['default'] == 'all'
+    ### One run of the suite at a time per host: the test containers and port 8989 are shared.
+    assert tests['concurrency'] == {'group': 'mrsm-test-services', 'cancel-in-progress': False}
+    assert tests['runs-on'] == 'self-hosted'
+    assert 'head.repo.full_name == github.repository' in tests['if'], 'no fork code on the self-hosted runner'
+
+
+def test_every_workflow_job_is_covered_by_a_summary(rust, pytest_workflow):
+    for workflow in (rust, pytest_workflow):
+        jobs = workflow['jobs']
+        summary = jobs['summary']
+        assert summary['if'] == '${{ always() }}'
+        assert summary['runs-on'] == 'ubuntu-latest'
+        assert set(summary['needs']) == set(jobs) - {'summary'}, 'a job missing from the summary is ignored'
+
+
+def test_rust_jobs_follow_the_changes_job(rust):
+    jobs = rust['jobs']
+    triggers = _triggers(rust)
+    assert 'paths' not in triggers['push'] and 'paths' not in (triggers['pull_request'] or {}), (
+        'the `changes` job decides, so a skipped job never leaves a required check pending'
+    )
+    assert triggers['push']['tags'] == ['v5*']
+    gates = {
+        'fmt': 'rust', 'clippy': 'rust', 'check': 'rust', 'test': 'rust_test', 'parity': 'parity',
+        'frontcrate': 'frontcrate', 'package': 'package', 'duckdb-platforms': 'duckdb', 'build': 'full',
+    }
+    assert set(gates) == set(jobs) - {'changes', 'summary'}
+    for name, flag in gates.items():
+        job = jobs[name]
+        assert 'changes' in job['needs'] if isinstance(job['needs'], list) else job['needs'] == 'changes', name
+        assert f"needs.changes.outputs.{flag} == 'true'" in job['if'], name
+    ### The release binary (thin LTO, one codegen unit) is dispatch / tag only.
+    assert jobs['build']['steps'][-2]['run'] == 'scripts/rust/ci.sh build'
+    for name, job in jobs.items():
+        if job['runs-on'] == 'self-hosted':
+            assert 'head.repo.full_name == github.repository' in job['if'], name
+            ### The workspace's target/ is the build cache: checkout never wipes it.
+            clean = _step(job, 'Clean the workspace')['run']
+            assert re.search(r'-e /target(\s|$)', clean), name
+            assert any(s.get('with', {}).get('clean') is False for s in job['steps'] if 'checkout' in str(s.get('uses'))), name
+
+
+def test_a_dispatch_or_push_does_not_cancel_the_other(rust, pytest_workflow):
+    for workflow in (rust, pytest_workflow):
+        group = workflow['concurrency']['group']
+        assert 'github.event_name' in group and 'github.ref' in group
+    assert 'workflow_dispatch' not in rust['concurrency']['cancel-in-progress'], 'a dispatch is the release gate'
+
+
+def test_rust_cache_is_pinned_by_commit_everywhere():
+    found = 0
+    for name, text in _workflow_texts().items():
+        for match in re.finditer(r'uses:\s*Swatinem/rust-cache@(\S+)', text):
+            found += 1
+            assert re.fullmatch(r'[0-9a-f]{40}', match.group(1)), f'{name}: pin rust-cache by full SHA'
+    assert found >= 4
+
+
+def test_nextest_runs_the_tests_and_doc_tests_still_run():
+    script = (REPO / 'scripts' / 'rust' / 'ci.sh').read_text(encoding='utf-8')
+    body = script[script.index('step_test()'):script.index('step_build()')]
+    assert 'cargo nextest run --workspace' in body
+    assert 'cargo test --workspace --doc' in body, 'nextest does not run doc tests'
+    assert 'else' in body and 'cargo test --workspace\n' in body, 'plain cargo test without nextest'
+
+
+def test_the_ci_tools_are_pinned_by_checksum():
+    script = (REPO / 'scripts' / 'rust' / 'ci_tools.sh').read_text(encoding='utf-8')
+    shas = re.findall(r'^[A-Z]+_SHA_(?:X86_64|AARCH64)="([0-9a-f]+)"$', script, re.M)
+    assert len(shas) == 6 and all(len(s) == 64 for s in shas)
+    assert re.search(r'^SCCACHE_VERSION="\d+\.\d+\.\d+"$', script, re.M)
+    assert 'sha256sum' in script and 'checksum mismatch' in script
+    subprocess.run(['bash', '-n', str(REPO / 'scripts' / 'rust' / 'ci_tools.sh')], check=True)
+    subprocess.run(['bash', '-n', str(REPO / 'scripts' / 'rust' / 'ci.sh')], check=True)

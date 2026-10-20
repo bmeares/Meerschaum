@@ -94,15 +94,18 @@ NEW_CARGO=5.0.0-rc.1 NEW_PEP=5.0.0rc1      # final: 5.0.0 and 5.0.0
 
 ## 5.2 CI on the release commit
 
-Dispatch the workflows on the branch and wait for the commit's runs (`wheels.yaml` only runs on dispatch, a
-`v5*` tag push or a pull request touching packaging files; `rust.yaml` also runs on every push to `v5`, so
-check `gh run list` before dispatching a duplicate):
+Dispatch the workflows on the branch and wait for the commit's runs. `wheels.yaml` and `docker-build.yaml` run only on
+dispatch (`wheels.yaml` also on a `v5*` tag push), never on a push or pull request. `rust.yaml` and `pytest.yaml` also run on
+pushes to `v5`, but a push runs only the jobs its diff needs (`scripts/ci/changes.py`; pytest runs just the sqlite and timescaledb
+flavors); a **dispatch or a tag runs every job** (release-profile `build`, `parity`, `frontcrate`, `package`, the 4-OS DuckDB matrix;
+pytest: all flavors), so the dispatched runs below are the release gate and the push runs are not a substitute for them. Check
+`gh run list` before dispatching a duplicate:
 
 ```bash
 SHA=$(git rev-parse HEAD)
 gh workflow run wheels.yaml --ref v5         # builds wheels + sdist, smoke-tests them (see 5.3)
-gh workflow run rust.yaml --ref v5           # self-hosted: fmt, clippy, test, build, parity, frontcrate, package
-gh workflow run pytest.yaml --ref v5         # self-hosted: builds _core, runs the flavors (check no local test.sh is running)
+gh workflow run rust.yaml --ref v5           # everything: fmt, clippy, test (nextest), build (release), parity, frontcrate, package, check, duckdb matrix
+gh workflow run pytest.yaml --ref v5 -f profile=release   # self-hosted: builds the release _core (the default `ci` profile is quick and nothing ships from it), all flavors (check no local test.sh is running)
 gh run list --branch v5 --limit 6 --json databaseId,workflowName,status,conclusion,headSha
 ```
 
@@ -283,7 +286,7 @@ pre-release (`rc`, `aN`, `bN`, `dev`) gets only version-qualified tags** (`bmear
 docker run --rm --network none --read-only --tmpfs /scratch -e MRSM_NO_AUTO_INSTALL=1 \
   -e MRSM_ROOT_DIR=/scratch/root -e MRSM_PLUGINS_DIR=/scratch/plugins \
   -v "$PWD/scripts/docker/smoke_facade.py:/smoke_facade.py:ro" --entrypoint sh bmeares/meerschaum:5.0.0rc1-slim \
-  -c 'mkdir -p /scratch/root /scratch/plugins && exec python -I /smoke_facade.py'      # must exit 0, install_requests []
+  -c 'mkdir -p /scratch/root /scratch/plugins && exec python3 -I /smoke_facade.py'     # must exit 0, install_requests []
 gh workflow run docker-build.yaml --ref v5 -f publish=true   # the authorized step (both architectures, then the merge job)
 docker buildx imagetools inspect bmeares/meerschaum:latest   # still the previous release: unchanged
 ```

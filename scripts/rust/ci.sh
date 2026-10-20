@@ -11,8 +11,10 @@
 #                MRSM_CI_MIN_FREE_GB (default 10). Self-hosted runner safety valve.
 #   fmt          cargo fmt --all --check
 #   clippy       cargo clippy --all-targets -- -D warnings
-#   test         cargo test --workspace, with DuckDB's shared library from the persistent cache
-#                (`duckdb-lib`) and the DuckDB integration tests enabled (MRSM_TEST_DUCKDB_PATH).
+#   test         cargo nextest run --workspace (when nextest is installed: `ci_tools.sh`, self-hosted runner) plus
+#                cargo test --workspace --doc; plain `cargo test --workspace` without nextest. With DuckDB's shared
+#                library from the persistent cache (`duckdb-lib`) and the DuckDB integration tests enabled
+#                (MRSM_TEST_DUCKDB_PATH). MRSM_CI_NEXTEST=0 forces `cargo test`.
 #   duckdb-platform  The DuckDB loader on the platform running it (the hosted Linux arm64 / macOS / Windows
 #                legs): the loader unit tests, then `--test duckdb_install` (downloads the pinned library of
 #                this platform with the installer, SHA-256 verified, into a temporary root, loads it, runs a
@@ -31,6 +33,8 @@
 #                a scratch venv, scripts/rust/build_py.sh, which takes the tree's build lock) for the cargo tests that start
 #                real Python workers (they import `meerschaum`, which requires it). PYTHON_BIN picks the
 #                interpreter (default python3); on GitHub it also exports MRSM_PYTHON to later steps.
+#   env          Print `export` lines for the build accelerators (below) for a workflow step that runs cargo or
+#                maturin itself: `eval "$(scripts/rust/ci.sh env)"`.
 #   frontcrate   Compile the `meerschaum` front crate with `--no-default-features`, with each of
 #                `sql cli valkey api engine server plugin` alone (`cli` builds the `mrsm` binary), and
 #                `cargo test -p meerschaum --features full` (the `meerschaum` features are otherwise only built together by the workspace).
@@ -42,6 +46,19 @@
 #                needed, nothing is uploaded. The real `cargo publish` is never run by CI.
 #   parity       Regenerate every crates/*/tests/fixtures/gen_*.py with the v4.1.4 reference
 #                interpreter (scripts/parity/) and fail if the fixtures differ from git.
+#
+# Build accelerators (SELF-HOSTED Linux runners only: `RUNNER_ENVIRONMENT=self-hosted`, or MRSM_CI_ACCEL=1 to force
+# them elsewhere, MRSM_CI_ACCEL=0 to disable; GitHub-hosted runners use Swatinem/rust-cache instead):
+#   sccache   RUSTC_WRAPPER with an on-disk cache shared by every runner of the host (one server per runner, on a
+#             port derived from RUNNER_NAME, because a runner kills the processes of its job when the job ends):
+#             SCCACHE_DIR=${MRSM_CI_CACHE:-$HOME/.cache/mrsm-ci}/sccache, SCCACHE_CACHE_SIZE=${MRSM_CI_SCCACHE_SIZE:-20G}.
+#   mold      OPT-IN (MRSM_CI_MOLD=1): `-C link-arg=-fuse-ld=mold` appended to RUSTFLAGS. Measured on the debug
+#             `mrsm` (280 MB): rustc's default lld links in 1.3 s, mold in 0.45 s, GNU ld in 12 s. Rust >= 1.90
+#             already links with lld on x86_64 Linux, so the gain is under a second per binary, and the RUSTFLAGS
+#             change makes the first build after enabling it a cold one: off by default.
+#   nextest   used by the `test` step when installed.
+# `scripts/rust/ci_tools.sh` installs the pinned versions into ${MRSM_CI_CACHE:-$HOME/.cache/mrsm-ci}/bin (no sudo);
+# ci.sh runs it once when a tool is missing (MRSM_CI_TOOLS_INSTALL=0 skips that).
 #
 # Never set CARGO_TARGET_DIR: the shared `target/` from .cargo/config.toml is the build cache.
 set -euo pipefail
@@ -58,6 +75,61 @@ if [ -n "${CARGO_TARGET_DIR:-}" ]; then
 fi
 
 log() { printf '\n==> %s\n' "$*"; }
+logerr() { printf '\n==> %s\n' "$*" >&2; }
+
+CI_CACHE="${MRSM_CI_CACHE:-$HOME/.cache/mrsm-ci}"
+CI_ACCEL=0
+case "${MRSM_CI_ACCEL:-auto}" in
+  1) CI_ACCEL=1 ;;
+  0) CI_ACCEL=0 ;;
+  *) [ "${RUNNER_ENVIRONMENT:-}" = "self-hosted" ] && CI_ACCEL=1 ;;
+esac
+[ "$(uname -s)" = Linux ] || CI_ACCEL=0
+
+# Put the accelerators in the environment of every cargo/maturin process this script starts.
+ci_accel() {
+  [ "$CI_ACCEL" -eq 1 ] || return 0
+  if [ "${MRSM_CI_TOOLS_INSTALL:-1}" != 0 ]; then
+    local missing=()
+    [ -x "$CI_CACHE/bin/sccache" ] || missing+=(sccache)
+    [ -x "$CI_CACHE/bin/cargo-nextest" ] || missing+=(nextest)
+    [ "${MRSM_CI_MOLD:-0}" != 1 ] || [ -x "$CI_CACHE/bin/mold" ] || missing+=(mold)
+    if [ "${#missing[@]}" -gt 0 ]; then
+      MRSM_CI_CACHE="$CI_CACHE" "$REPO/scripts/rust/ci_tools.sh" "${missing[@]}" \
+        || echo "ci.sh: could not install the build accelerators; building without them." >&2
+    fi
+  fi
+  export PATH="$CI_CACHE/bin:$PATH"
+  if [ "${MRSM_CI_SCCACHE:-1}" != 0 ] && command -v sccache >/dev/null 2>&1; then
+    export RUSTC_WRAPPER="$(command -v sccache)"
+    export SCCACHE_DIR="${SCCACHE_DIR:-$CI_CACHE/sccache}"
+    export SCCACHE_CACHE_SIZE="${SCCACHE_CACHE_SIZE:-${MRSM_CI_SCCACHE_SIZE:-20G}}"
+    # One sccache server per runner: the runner kills the processes a job started when the job ends, which
+    # would cut a server another runner's compile is using. The servers share the disk cache, not a port.
+    if [ -z "${SCCACHE_SERVER_PORT:-}" ]; then
+      SCCACHE_SERVER_PORT=$((43000 + $(printf '%s' "${RUNNER_NAME:-$(id -un)}" | cksum | cut -d' ' -f1) % 1000))
+      export SCCACHE_SERVER_PORT
+    fi
+    mkdir -p "$SCCACHE_DIR"
+  fi
+  if [ "${MRSM_CI_MOLD:-0}" = 1 ] && command -v mold >/dev/null 2>&1; then
+    case " ${RUSTFLAGS:-} " in
+      *" -C link-arg=-fuse-ld=mold "*) ;;
+      *) export RUSTFLAGS="${RUSTFLAGS:+$RUSTFLAGS }-C link-arg=-fuse-ld=mold" ;;
+    esac
+  fi
+}
+
+ci_have_nextest() {
+  [ "${MRSM_CI_NEXTEST:-1}" != 0 ] && cargo nextest --version >/dev/null 2>&1
+}
+
+ci_accel_stats() {
+  if [ -n "${RUSTC_WRAPPER:-}" ] && [ -x "$RUSTC_WRAPPER" ]; then
+    logerr "sccache statistics (cache $SCCACHE_DIR, limit $SCCACHE_CACHE_SIZE)"
+    "$RUSTC_WRAPPER" --show-stats 2>&1 | grep -E "Compile requests|Cache hits|Cache misses|Cache hits rate|Cache size|Max cache" >&2 || true
+  fi
+}
 
 step_setup() {
   if [ ! -x "$CARGO_HOME/bin/cargo" ] && ! command -v cargo >/dev/null 2>&1; then
@@ -88,9 +160,18 @@ step_disk_guard() {
   free="$(free_gb)"
   log "Free space: ${free} GiB (threshold ${min} GiB); target/ is $(du -sh target 2>/dev/null | cut -f1 || echo 0)"
   if [ "$free" -lt "$min" ]; then
-    log "Below ${min} GiB: running cargo clean"
-    cargo clean
-    log "Free space after clean: $(free_gb) GiB"
+    # Drop the cheapest-to-rebuild layers first: the optimized profiles (`release` is only built by the
+    # dispatch/tag jobs, `ci` by pytest), then everything.
+    log "Below ${min} GiB: cargo clean --release, then the ci profile"
+    cargo clean --release || true
+    cargo clean --profile ci || true
+    free="$(free_gb)"
+    log "Free space after dropping release and ci: ${free} GiB"
+    if [ "$free" -lt "$min" ]; then
+      log "Still below ${min} GiB: running cargo clean"
+      cargo clean
+      log "Free space after clean: $(free_gb) GiB"
+    fi
   fi
 }
 
@@ -128,8 +209,16 @@ step_test()   {
     export MRSM_TEST_DUCKDB_PATH
     trap "rm -rf '$MRSM_TEST_DUCKDB_PATH'" EXIT
   fi
-  log "cargo test --workspace (DuckDB library: $MRSM_DUCKDB_LIB)"
-  cargo test --workspace
+  if ci_have_nextest; then
+    # nextest runs every test in its own process (and does not run doc tests: those follow).
+    log "cargo nextest run --workspace --no-fail-fast (DuckDB library: $MRSM_DUCKDB_LIB)"
+    cargo nextest run --workspace --no-fail-fast
+    log "cargo test --workspace --doc"
+    cargo test --workspace --doc
+  else
+    log "cargo test --workspace (DuckDB library: $MRSM_DUCKDB_LIB)"
+    cargo test --workspace
+  fi
 }
 step_build()  { log "cargo build --release -p meerschaum --bin mrsm"; cargo build --release -p meerschaum --bin mrsm; }
 step_bin_debug() { log "cargo build -p meerschaum --bin mrsm"; cargo build -p meerschaum --bin mrsm; }
@@ -139,7 +228,13 @@ step_extension() {
   python="$(command -v "${PYTHON_BIN:-python3}")"
   scratch="$(mktemp -d "${RUNNER_TEMP:-$HOME/.cache}/mrsm-ext-build.XXXXXX")"
   trap "rm -rf '$scratch'" EXIT
-  log "Building the native extension (debug) with $python"
+  local profile="${MRSM_CI_EXT_PROFILE:-debug}" profile_args
+  case "$profile" in
+    debug) profile_args=(--debug) ;;
+    release) profile_args=(--release) ;;
+    *) profile_args=(--profile "$profile") ;;
+  esac
+  log "Building the native extension ($profile) with $python"
   "$python" -m venv "$scratch/tools"
   "$scratch/tools/bin/python" -m pip install --quiet 'maturin>=1.9,<2.0'
   # Scratch root and plugins for build_py.sh's import check (never the runner's config).
@@ -150,8 +245,8 @@ step_extension() {
   # own library is loaded at run time).
   PYTHON="$python" MATURIN_BIN="$scratch/tools/bin/maturin" PYTHONPATH="$REPO" \
     MRSM_ROOT_DIR="$scratch/root" MRSM_PLUGINS_DIR="$scratch/plugins" \
-    scripts/rust/build_py.sh --debug
-  if [ -n "${GITHUB_ENV:-}" ]; then
+    scripts/rust/build_py.sh "${profile_args[@]}"
+  if [ -n "${GITHUB_ENV:-}" ] && [ "${MRSM_CI_EXPORT_PYTHON:-1}" != 0 ]; then
     echo "MRSM_PYTHON=$python" >> "$GITHUB_ENV"
   fi
 }
@@ -263,6 +358,8 @@ step_parity() {
 steps=("$@")
 [ "${#steps[@]}" -eq 0 ] && steps=(fmt clippy test build)
 
+ci_accel
+
 for s in "${steps[@]}"; do
   case "$s" in
     setup)      step_setup ;;
@@ -281,7 +378,14 @@ for s in "${steps[@]}"; do
     package)    step_package ;;
     publish-dry-run) step_publish_dry_run ;;
     parity)     step_parity ;;
-    -h|--help)  sed -n '2,34p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    env)
+      for v in PATH RUSTC_WRAPPER SCCACHE_DIR SCCACHE_CACHE_SIZE SCCACHE_SERVER_PORT RUSTFLAGS; do
+        [ -n "${!v:-}" ] && printf 'export %s=%q\n' "$v" "${!v}"
+      done
+      ;;
+    -h|--help)  sed -n '2,63p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "ci.sh: unknown step '$s' (see --help)" >&2; exit 2 ;;
   esac
 done
+
+[ "${steps[*]}" = env ] || ci_accel_stats

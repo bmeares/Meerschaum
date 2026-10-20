@@ -89,7 +89,7 @@ export CARGO_INCREMENTAL=0                 # what CI uses; optional locally
 |---|---|
 | `cargo build -p meerschaum --bin mrsm` | the debug standalone `mrsm` at `target/debug/mrsm` (the front crate's `cli` feature, what `cargo install meerschaum` builds; `tests/console` runs it). Oracle needs Instant Client (`libclntsh`) only at runtime. `cargo build -p meerschaum-cli` builds only the internal `target/debug/mrsm-cli` its integration tests run (named differently so `--workspace` never writes two `mrsm`) |
 | `cargo build --release -p meerschaum --bin mrsm` | the release binary (`scripts/bench/run.py` uses it; the Docker image and the wheel run the CLI from the extension instead) |
-| `scripts/rust/build_py.sh [--debug]` | builds `crates/meerschaum-py` with maturin and drops `meerschaum/_core/_native.abi3.so` into the working tree (release by default, ~10 min, atomic swap; the `meerschaum` package does not work without it). Needs `maturin` (`uv tool install maturin`) and a Python >= 3.11 (`PYTHON=...`). Keep `PYTHON` stable between runs or Polars rebuilds. It takes the tree lock `target/.build-py.lock` itself (concurrent builds would corrupt each other); do not wrap it in `flock`. |
+| `scripts/rust/build_py.sh [--debug \| --profile ci]` | builds `crates/meerschaum-py` with maturin and drops `meerschaum/_core/_native.abi3.so` into the working tree (release by default, ~10 min, atomic swap; the `meerschaum` package does not work without it). `--profile ci` (Cargo `[profile.ci]`: no LTO, opt-level 1) takes 2 to 4 minutes and is what the pytest CI job builds and what to use for everyday Python test runs; only `--release` artifacts ship. Needs `maturin` (`uv tool install maturin`) and a Python >= 3.11 (`PYTHON=...`). Keep `PYTHON` stable between runs or Polars rebuilds. It takes the tree lock `target/.build-py.lock` itself (concurrent builds would corrupt each other); do not wrap it in `flock`. |
 | `scripts/rust/clean_py.sh [--cargo]` | removes the built extension |
 | `cargo build -p meerschaum-plugin --example native_demo` | the example C-ABI plugin |
 | `scripts/mrsm.sh <args>` | `python -m meerschaum` against `./test_root` + `./tests/plugins` (the façade launcher: the CLI runs from the built extension; an explicit `MRSM_BIN` is accepted only if its `--version` equals the extension's and, in CI, it is newer than the Rust sources) |
@@ -100,7 +100,7 @@ export CARGO_INCREMENTAL=0                 # what CI uses; optional locally
 cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings      # CI: `cargo clippy --all-targets -- -D warnings`
 cargo test -p <crate>            # one crate; `cargo test --workspace` is the CI job
-scripts/rust/ci.sh               # = fmt clippy test build
+scripts/rust/ci.sh               # = fmt clippy test build (test = cargo nextest when installed + `cargo test --doc`; MRSM_CI_ACCEL=1 enables sccache/nextest locally)
 scripts/rust/ci.sh parity        # regenerate every crates/*/tests/fixtures/gen_*.py with v4.1.4 and diff
 scripts/parity/check_fixture_hygiene.sh [PATH ...]   # run before every commit that touches fixtures (and on any new public file)
 python scripts/check_packaging.py            # Cargo version (`5.0.0-rc.2` <-> PEP 440 `5.0.0rc2`) == _version.py; console scripts `mrsm`/`meerschaum`; no `dependencies`, no second wheel; extras == _packages.py == requirements/ == extras.rs; lockstep workspace dep versions; crates.io metadata
@@ -423,7 +423,12 @@ organizations, home directories, hostnames or credentials.
 - **v4 reads every `MRSM_<TYPE>_<LABEL>` variable as a connector**: an inherited `MRSM_CI_MIN_FREE_GB`
   once became a `ci:min_free_gb` connector in a recorded fixture. Drop unrelated `MRSM_*` variables
   when spawning reference or test processes.
-- **`test.sh` and `pytest.yaml` wipe `target/`** on the shared self-hosted runner (default
-  `clean: true`), so the next Rust CI run is a cold build; `rust.yaml` keeps `target/` and `.venv-ref/`.
+- **CI keeps `target/` on the self-hosted runners.** `rust.yaml` and `pytest.yaml` both check out with `clean: false` and
+  `git clean -ffdx -e /target -e /.venv-ref -e /.venv-test` (no trailing slash: a symlinked `target` survives); `test.sh` does
+  not touch `target/`. What runs on a push is decided by `scripts/ci/changes.py` (docs-only: nothing heavy; Python-only: pytest
+  only; parity only for generators/fixtures; frontcrate/package/duckdb only for their inputs; a dispatch or `v5*` tag runs
+  everything, including the release-profile `build`). Make the `summary` job of each workflow the required check. The pytest
+  job builds the extension with `--profile ci`; wheels, binaries and Docker stay `--release`. Details: `docs/design/v5-build.md`
+  "CI: what runs when" (also how to add runner instances).
 - **Read pytest summaries carefully**: "N passed, 2 warnings" is not "2 failed"; the two
   `test_worker.py` codec tests are order-dependent (pass alone, fail after the suite).

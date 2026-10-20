@@ -17,6 +17,11 @@ name: wheels
 # macOS x86_64 (`macos-15-intel`, the last Intel runner image) and Windows x86_64. Not built: Windows arm64.
 # Also one standalone `mrsm` binary per platform (job `binaries`: the same glibc/macOS/Windows targets,
 # manylinux_2_28 glibc floor on Linux, plus macOS x86_64) for the GitHub release assets.
+# Release builds only: a manual dispatch or a `v5*` tag, never a push or a pull request (ordinary development
+# is covered by rust.yaml / pytest.yaml, which build with the quick `ci` profile; the wheels, the binaries
+# and the Docker images are `--release`). Swatinem/rust-cache restores the dependencies' build between
+# dispatches (saved from `v5`; GitHub's cache storage is capped at 10 GB per repository, least recently
+# used evicted first, so check `gh cache list` if release builds turn cold).
 # Nothing here publishes anything: the wheels and binaries are workflow artifacts. Never `self-hosted`: the
 # self-hosted runner is reserved for rust.yaml / pytest.yaml (docs/design/v5-build.md).
 
@@ -25,24 +30,6 @@ on:
   push:
     tags:
       - 'v5*'
-  pull_request:
-    paths:
-      - 'pyproject.toml'
-      - 'Cargo.toml'
-      - 'Cargo.lock'
-      - 'rust-toolchain.toml'
-      - '.cargo/**'
-      - 'crates/**'
-      - '_meerschaum_mrsm.py'
-      - 'meerschaum/__init__.py'
-      - 'meerschaum/__main__.py'
-      - 'meerschaum/_internal/binary.py'
-      - 'meerschaum/_internal/_facade.py'
-      - 'meerschaum/_core/**'
-      - '.github/workflows/wheels.yaml'
-      - 'scripts/check_packaging.py'
-      - 'scripts/docker/smoke_facade.py'
-      - 'scripts/docker/smoke_wheel_alpine.sh'
 
 permissions:
   contents: read
@@ -115,6 +102,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: wheel-${{ matrix.os }}-${{ matrix.target || matrix.manylinux }}${{ matrix.freethreaded && '-cp314t' || '' }}
+          save-if: ${{ github.ref == 'refs/heads/v5' }}
 
       - name: Build the meerschaum wheel
         uses: PyO3/maturin-action@v1
@@ -250,6 +242,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: binary-${{ matrix.target }}
+          save-if: ${{ github.ref == 'refs/heads/v5' }}
+
       - name: Versions (PEP 440 for the file name, Cargo for `mrsm --version`)
         run: |
           echo "VERSION=$(python scripts/check_packaging.py --version)" >> "$GITHUB_ENV"

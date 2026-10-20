@@ -133,3 +133,21 @@ sqlx-sqlite = { git = "https://github.com/launchbadge/sqlx", rev = "6e57d0549085
 [profile.release]
 lto = "thin"
 codegen-units = 1
+
+# CI profile: a working build that is quick to produce, for the jobs that only need the code to run
+# (the pytest job's `_core` extension: `scripts/rust/build_py.sh --profile ci`). It inherits `release`
+# (no debug assertions or overflow checks, the same `panic` strategy, so the behavior the tests see is
+# the release behavior) and drops what makes a release build slow: no LTO, 256 codegen units, opt-level
+# 1. Never used for anything that ships: the wheels, the Docker images and the release binaries build
+# `--release` (tests/test_workflows_packaging.py enforces it). Artifacts go to `target/ci/`.
+[profile.ci]
+inherits = "release"
+opt-level = 1
+lto = false
+codegen-units = 256
+debug = "line-tables-only"
+incremental = false
+
+# Dependencies carry no debug info (Polars alone is ~1 GB per feature set with it), as in `[profile.dev]`.
+[profile.ci.package."*"]
+debug = false

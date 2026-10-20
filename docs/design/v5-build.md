@@ -5,23 +5,169 @@ Conventions for the crates themselves are in `crates/README.md`.
 
 ## Build matrix
 
-| Workflow / job | Runner | Command (`scripts/rust/ci.sh <step>`) | Blocks? |
-|---|---|---|---|
-| `rust` / `fmt` | self-hosted | `cargo fmt --all --check` | yes |
-| `rust` / `clippy` | self-hosted | `cargo clippy --all-targets -- -D warnings` | yes |
-| `rust` / `test` | self-hosted | `cargo test --workspace` | yes |
-| `rust` / `build` | self-hosted | `cargo build --release -p meerschaum --bin mrsm` (the standalone `mrsm` that `cargo install meerschaum` builds; uploads it) | yes |
-| `rust` / `parity` | self-hosted | regenerate `crates/*/tests/fixtures/gen_*.py` with v4.1.4, diff | yes (optional job) |
-| `rust` / `check (ubuntu-latest)` | GitHub-hosted | `cargo check --workspace` | yes |
-| `rust` / `check (windows-latest, macos-latest)` | GitHub-hosted | `cargo check --workspace` | no (`continue-on-error`, §15) |
-| `wheels` (`wheels.yaml`) | GitHub-hosted, manual / `v5*` tag / packaging PRs | maturin-action: one `cp311-abi3` wheel on Linux x86_64 and Linux arm64 (`ubuntu-24.04-arm`, native `manylinux_2_28`), the same two as `musllinux_1_2` (cross-built in the `rust-musl-cross` containers on `ubuntu-latest`, smoke-tested in Alpine, the aarch64 one natively on the arm runner), macOS arm64 and x86_64 (`macos-15-intel`) and Windows x86_64, the sdist, an experimental `cp314t` Linux wheel, and the standalone `mrsm` release binary of five targets (Linux ones in `manylinux_2_28`, glibc floor 2.28; macOS arm64 and x86_64; Windows x86_64); a wheel tag/size guard and a smoke test per OS (see below) | yes (`cp314t` is `continue-on-error`) |
-| `buildx` (`docker-build.yaml`) | GitHub-hosted (`ubuntu-latest` for `linux/amd64`, `ubuntu-24.04-arm` for `linux/arm64`, no QEMU), manual | `scripts/docker/buildx.sh` per architecture, then `size_gate.sh`; a publish pushes `<version>-<tag>-<arch>` images and the `publish` job joins them (`buildx.sh --merge`) | size gate enforces by default |
-| `pytest` | self-hosted | `scripts/rust/build_py.sh`, then `scripts/test.sh db` | yes |
+| Workflow / job | Runner | Command (`scripts/rust/ci.sh <step>`) | Runs when | Blocks? |
+|---|---|---|---|---|
+| `rust` / `changes` | GitHub-hosted | `scripts/ci/changes.py`: which jobs this diff needs | always | n/a |
+| `rust` / `fmt` | GitHub-hosted | `cargo fmt --all --check` | Rust inputs | yes |
+| `rust` / `clippy` | self-hosted | `cargo clippy --all-targets -- -D warnings` | Rust inputs | yes |
+| `rust` / `test` | self-hosted | debug `_core` extension, `cargo nextest run --workspace` (all tests, one process each), `cargo test --workspace --doc` | Rust inputs, or the Python the cargo tests read / import | yes |
+| `rust` / `frontcrate` | self-hosted | the `meerschaum` front crate's feature matrix | front crate / manifests, dispatch, tag | yes |
+| `rust` / `package` | self-hosted | `check_packaging.py`, `cargo package --workspace --no-verify` + checks | manifests / packaging files, dispatch, tag | yes |
+| `rust` / `build` | self-hosted | `cargo build --release -p meerschaum --bin mrsm` (the standalone `mrsm` that `cargo install meerschaum` builds; uploads it) | dispatch / tag only | yes |
+| `rust` / `parity` | self-hosted | regenerate `crates/*/tests/fixtures/gen_*.py` with v4.1.4, diff | generators, fixtures, `scripts/parity/`, dispatch, tag | yes (optional job) |
+| `rust` / `check (ubuntu-latest)` | GitHub-hosted | `cargo check --workspace` | Rust inputs | yes |
+| `rust` / `check (windows-latest, macos-latest)` | GitHub-hosted | `cargo check --workspace` | Rust inputs | no (`continue-on-error`, §15) |
+| `rust` / `duckdb (...)` | GitHub-hosted (Linux arm64, macOS, Windows x64 and arm64) | `ci.sh duckdb-platform` | the DuckDB loader, dispatch, tag | yes (`windows-11-arm`: no) |
+| `rust` / `summary` | GitHub-hosted | fails if a job that ran failed or was cancelled | always | **the required check** |
+| `wheels` (`wheels.yaml`) | GitHub-hosted, manual dispatch / `v5*` tag only | maturin-action: one `cp311-abi3` wheel on Linux x86_64 and Linux arm64 (`ubuntu-24.04-arm`, native `manylinux_2_28`), the same two as `musllinux_1_2` (cross-built in the `rust-musl-cross` containers on `ubuntu-latest`, smoke-tested in Alpine, the aarch64 one natively on the arm runner), macOS arm64 and x86_64 (`macos-15-intel`) and Windows x86_64, the sdist, an experimental `cp314t` Linux wheel, and the standalone `mrsm` release binary of five targets (Linux ones in `manylinux_2_28`, glibc floor 2.28; macOS arm64 and x86_64; Windows x86_64); a wheel tag/size guard and a smoke test per OS (see below) | dispatch / `v5*` tag | yes (`cp314t` is `continue-on-error`) |
+| `buildx` (`docker-build.yaml`) | GitHub-hosted (`ubuntu-latest` for `linux/amd64`, `ubuntu-24.04-arm` for `linux/arm64`, no QEMU), manual | `scripts/docker/buildx.sh` per architecture, then `size_gate.sh`; a publish pushes `<version>-<tag>-<arch>` images and the `publish` job joins them (`buildx.sh --merge`) | dispatch only | size gate enforces by default |
+| `pytest` / `changes`, `tests`, `summary` | GitHub-hosted, self-hosted, GitHub-hosted | `scripts/rust/build_py.sh --profile ci` (the quick `ci` Cargo profile), then `scripts/test.sh db` | Python, tests, harness or Rust inputs; a push to `v5` runs the `sqlite,timescaledb` flavors, a dispatch and a PR run `all` | `pytest / summary` is the required check |
 
-`rust.yaml` runs on pushes to `v5` and on pull requests that touch `crates/**`, `Cargo.*`, `rust-toolchain.toml`,
-`.cargo/**`, `scripts/rust/**`, `scripts/parity/**` or the workflow itself, and on manual dispatch.
-`clippy`, `test` and `build` wait for `fmt`. Self-hosted jobs are skipped for pull requests from forks, so
-untrusted code never runs on the maintainer's host. Those PRs still get the hosted `check` legs.
+`rust.yaml` runs on pushes to `v5`, on `v5*` tags, on pull requests and on manual dispatch; `pytest.yaml` on pushes to
+`v5` (and `main`/`staging`), pull requests and dispatch; `wheels.yaml` only on dispatch and `v5*` tags; `docker-build.yaml`
+only on dispatch. What a push actually runs is decided by the `changes` job ("CI: what runs when" below), not by
+`paths:` filters. `clippy`, `test`, `frontcrate`, `package` and `build` wait for `fmt` (a few seconds on a hosted runner) so a
+formatting slip costs no self-hosted time. Self-hosted jobs are skipped for pull requests from forks, so untrusted code never runs on
+the maintainer's host. Those PRs still get the hosted `fmt` and `check` legs.
+
+## CI: what runs when
+
+Goal: a push never waits on CI between commits (about 8 to 12 minutes on warm caches, jobs running side by side on
+the host's runners) while a release is as rigorous as before. Four mechanisms:
+
+1. **Change detection** (`scripts/ci/changes.py`, the `changes` job of `rust.yaml` and `pytest.yaml`; pinned by
+   `tests/test_ci_changes.py`). It diffs the push (`before..after`) or the pull request (`base..HEAD`) and turns jobs on from the
+   changed paths. A dispatch, a tag, a schedule or a diff it cannot compute (new branch, error) turns **everything** on.
+
+   | Change | Jobs that run |
+   |---|---|
+   | docs only (`docs/**`, root `*.md`, `.claude/**`, `.agents/**`, `scripts/bench/**`, licenses) | none (`changes` and `summary` only) |
+   | Python only (`meerschaum/**`, `tests/**`, harness scripts) | `pytest` (sqlite + timescaledb flavors) |
+   | Python the cargo tests read or import (`meerschaum/worker/**`, `_core`, `_internal`, `utils/packages`, `api/dash/execute.py`, `pyproject.toml`, `requirements/**`) | `pytest`, `test` |
+   | Rust (`crates/**`, `Cargo.*`, toolchain, `.cargo/**`, `scripts/rust/**`, `scripts/ci/**`) | `fmt`, `clippy`, `test`, `check` x3, `pytest` |
+   | generators, fixtures, plugins a generator loads, `scripts/parity/**` | also `parity` (v4.1.4 produces the fixtures; no Rust source can change the result, so Rust changes alone skip it) |
+   | `crates/meerschaum/**` or any `crates/*/Cargo.toml` | also `frontcrate` |
+   | manifests, crate READMEs/licenses, `check_packaging.py`, extras | also `package` |
+   | `crates/meerschaum-connector-sql/**`, `duckdb_lib.sh` | also `duckdb` (4-OS matrix) |
+   | dispatch, `v5*` tag, schedule, unknown diff | everything, including `build` (release binary) and `parity` |
+   | a file no rule claims | `rust`, `test`, `pytest` (the safe default) |
+
+   The rule tables are the lists at the top of `scripts/ci/changes.py`: widen one there (for example parity on kernel / core /
+   connector changes) and add the case to `tests/test_ci_changes.py`.
+2. **Required status**: each workflow ends in an always-running `summary` job that fails only when a job that ran failed or was
+   cancelled. Skipped jobs do not block it. Make `rust / summary` and `pytest / summary` the required checks, never the
+   individual jobs.
+3. **A quick profile for development builds.** Cargo's `ci` profile (`Cargo.toml`: inherits `release`, no LTO, opt-level 1,
+   256 codegen units, line tables only) builds the pytest job's `_core` extension (`scripts/rust/build_py.sh --profile ci`;
+   a profile is the only addition, `--release` stays the default of the script). Measured on this host (40 cores): cold
+   3 min 24 s, after touching `meerschaum-core` (everything rebuilds) 1 min 50 s, against 9 min 54 s for the release profile in CI;
+   `target/ci` is 2.2 GB. The suite passes identically (1602 passed, 170 skipped on the sqlite flavor with the `ci` extension). Nothing that ships uses it:
+   the wheels, the Docker images and the release binaries are `--release`, and `tests/test_workflows_packaging.py` fails if a
+   release path names the `ci` profile. `build_info()['profile']` still says `release` (it reports Cargo's `PROFILE`).
+4. **Release builds only on dispatch / tag.** `wheels.yaml` (no pull-request trigger any more) and `docker-build.yaml` run on
+   dispatch (wheels also on `v5*` tags); the `rust` dispatch / tag also runs `build`, `parity`, `frontcrate`, `package` and the DuckDB matrix.
+   `pytest` on a dispatch runs every flavor.
+
+Build accelerators (self-hosted Linux runners; GitHub-hosted legs use `Swatinem/rust-cache`, pinned by commit, restored on every
+run and saved from `v5` only, in the wheels, `check` and `duckdb` jobs):
+
+- **warm `target/`**: self-hosted checkouts use `clean: false` and `git clean -ffdx -e /target -e /.venv-ref -e /.venv-test`
+  (no trailing slash: it also protects a `target` that is a symlink to another disk). `pytest.yaml` and `rust.yaml` both keep it;
+  neither wipes `target/` any more. The disk guard drops the `release` and `ci` layers before a full `cargo clean`.
+- **sccache** (`RUSTC_WRAPPER`): a local on-disk cache shared by every runner of the host, 20 GB cap
+  (`SCCACHE_CACHE_SIZE`), in `${MRSM_CI_CACHE:-$HOME/.cache/mrsm-ci}/sccache`. It makes a second runner's cold `target/`, a
+  `cargo clean`, or a re-run of a job fast: dependencies compile once per host, not once per workspace.
+- **cargo-nextest**: the `test` step runs `cargo nextest run --workspace --no-fail-fast` and then `cargo test --workspace --doc`
+  (nextest does not run doc tests). Settings in `.config/nextest.toml`. Measured on this host: 2939 tests in 84 s of test time
+  (2 m 44 s including the compile), all passing, against 10 m 20 s for `cargo test --workspace` in the last CI run.
+  Without nextest installed `ci.sh test` falls back to `cargo test --workspace` (`MRSM_CI_NEXTEST=0` forces it).
+- **mold** is opt-in (`MRSM_CI_MOLD=1`): since Rust 1.90 rustc links with lld on x86_64 Linux, and linking the 280 MB debug `mrsm`
+  takes 1.3 s with lld, 0.45 s with mold and 12 s with GNU ld. A saving of under a second per binary does not pay for the cold rebuild that
+  a `RUSTFLAGS` change forces, so it is off. Enabling it needs nothing but the variable (the pinned binary is downloaded).
+- The tools are installed by `scripts/rust/ci_tools.sh` into `${MRSM_CI_CACHE:-$HOME/.cache/mrsm-ci}/bin` (user level, pinned versions
+  and SHA-256, no sudo), once, by `ci.sh` itself the first time a self-hosted job runs. `ci.sh` enables them only when
+  `RUNNER_ENVIRONMENT=self-hosted` (set by the runner) or `MRSM_CI_ACCEL=1`; locally and on hosted runners nothing changes.
+  `ci.sh env` prints the `export` lines for workflow steps that run cargo or maturin themselves.
+
+### Parallel self-hosted runners
+
+One runner serializes every job; three runner instances on this host let `clippy`, `test` and `pytest` run side by side.
+Do not register or start them from CI or from an agent: the maintainer applies this once.
+
+Layout. Each runner has its own directory and therefore its own workspace, `target/`, `.venv-ref`, `.venv-test` and `test_root`
+(nothing is shared between workspaces except what is listed below). Keep them on the big disk: the root filesystem may have
+little free space and one workspace's `target/` is about 50 GB. `BIG` below is a directory there.
+
+```bash
+# 1. Runner software and directories (as the user that runs the existing runner)
+BIG=/path/on/the/big/disk
+mkdir -p "$BIG/actions-runners/ci-2" "$BIG/actions-runners/ci-3" "$BIG/mrsm-ci"
+RUNNER_VERSION="$(gh api repos/actions/runner/releases/latest --jq '.tag_name | ltrimstr("v")')"
+for n in ci-2 ci-3; do
+  cd "$BIG/actions-runners/$n"
+  curl -fsSL -o runner.tar.gz "https://github.com/actions/runner/releases/download/v${RUNNER_VERSION}/actions-runner-linux-x64-${RUNNER_VERSION}.tar.gz"
+  tar xzf runner.tar.gz && rm runner.tar.gz
+  TOKEN="$(gh api -X POST repos/<owner>/<repo>/actions/runners/registration-token --jq .token)"   # needs admin rights; valid 1 hour
+  ./config.sh --unattended --url https://github.com/<owner>/<repo> --token "$TOKEN" \
+    --name "$n" --labels mrsm-ci --work _work --replace
+  # Per-runner environment (read by every job): the shared tool/cache directory on the big disk, and the sccache cap.
+  printf 'MRSM_CI_CACHE=%s/mrsm-ci\nSCCACHE_CACHE_SIZE=20G\n' "$BIG" >> .env
+done
+# The existing runner (~/actions-runner) keeps working as is. Give it the same two lines in ~/actions-runner/.env.
+# (`runs-on: self-hosted` matches every registered runner; `--labels mrsm-ci` is for a future `runs-on: [self-hosted, mrsm-ci]`.)
+```
+
+```ini
+# ~/.config/systemd/user/mrsm-actions-runner@.service   (user level: needs `loginctl enable-linger`, no sudo; replace <BIG>)
+[Unit]
+Description=GitHub Actions runner %i
+After=network-online.target docker.service
+
+[Service]
+Type=simple
+WorkingDirectory=<BIG>/actions-runners/%i
+ExecStart=<BIG>/actions-runners/%i/run.sh
+Restart=always
+RestartSec=10
+KillMode=process
+KillSignal=SIGTERM
+TimeoutStopSec=5min
+# The host may also run production services: CI yields CPU and is capped.
+Nice=10
+CPUQuota=1600%
+
+[Install]
+WantedBy=default.target
+```
+
+```bash
+systemctl --user daemon-reload
+systemctl --user enable --now mrsm-actions-runner@ci-2 mrsm-actions-runner@ci-3
+systemctl --user status 'mrsm-actions-runner@*' --no-pager
+# The original runner (~/actions-runner) runs the same way from mrsm-actions-runner-main.service
+# (WorkingDirectory=%h/actions-runner, ExecStart=%h/actions-runner/run.sh), so all runners survive a reboot.
+gh api repos/<owner>/<repo>/actions/runners --jq '.runners[] | [.name, .status, .busy] | @tsv'
+```
+
+Moving a workspace's `target/` off the root filesystem (optional, while its runner is stopped and idle):
+`mv <workspace>/target "$BIG/runner-target" && ln -s "$BIG/runner-target" <workspace>/target`
+(the workflows' `git clean -e /target` keeps a symlink; `.cargo/config.toml`'s `target-dir = "target"` follows it).
+
+Isolation between concurrent jobs:
+
+| Shared resource | Handling |
+|---|---|
+| `tests-*` containers (`tests/docker-compose.yaml`), the test API on port 8989, the `mrsm` Docker stack, port 8000, the production processes | only `pytest.yaml`'s `tests` job touches the test containers and 8989, and it carries `concurrency: {group: mrsm-test-services, cancel-in-progress: false}`: one at a time per repository, whichever runner takes it (a queued second run waits; a newer one replaces a waiting one). Nothing else in CI uses Docker, 8989, 8000 or the production stack. |
+| `target/`, `.venv-ref`, `.venv-test`, `test_root`, `.mrsm-cargo-root`, the build lock `target/.build-py.lock` | per workspace (per runner): no sharing, no locking between runners |
+| the compile work of dependencies | shared through sccache (one server per user, same `SCCACHE_DIR`): a second runner's cold build is mostly cache hits |
+| `~/.cargo` (registry, git checkouts), the `rustup` toolchain | cargo and rustup take their own locks; safe |
+| `${MRSM_CI_CACHE}/duckdb`, `/bin`, `/sccache` | written by atomic `mv` (`duckdb_lib.sh`, `ci_tools.sh`); sccache is concurrent by design |
+| ports of the Rust tests | tests bind random free ports; the optional `MRSM_TEST_*_URI` services are not set in CI |
+| disk | each runner's `disk-guard` measures its own filesystem; sccache is capped at 20 GB; GitHub-hosted legs use no local disk |
+
+A label-based alternative for the same isolation is to give one runner the label `mrsm-pytest` and set the `tests` job to
+`runs-on: [self-hosted, mrsm-pytest]`; the concurrency group needs no runner changes and is what the workflow uses.
+A new runner starts with a cold `target/` (the first job there compiles everything once; sccache serves the dependencies).
 
 ## Running CI locally
 
@@ -36,20 +182,22 @@ scripts/rust/ci.sh parity         # reference harness (below)
 ```
 
 CI also sets `CARGO_INCREMENTAL=0`, which only changes how workspace crates are cached, not the results.
+On a self-hosted runner `ci.sh` also turns on sccache and nextest (see "CI: what runs when"); to try them locally:
+`MRSM_CI_ACCEL=1 scripts/rust/ci.sh test` (installs the pinned tools under `$MRSM_CI_CACHE`, default `~/.cache/mrsm-ci`).
 
 ## Disk on the self-hosted runner
 
-The runner (`~/actions-runner`, workspace `_work/Meerschaum/Meerschaum`) is persistent, so its `target/`
-is the build cache. There is no `actions/cache` and no second target directory. Self-hosted checkouts use
-`clean: false` followed by `git clean -ffdx -e /target/ -e /.venv-ref/`. Expect the runner's `target/`
-to hold debug, clippy and release artifacts for the whole graph, several GB once Polars and Arrow
-build (the development checkout's `target/` is already about 10 GB). This is in addition to the
-development checkout's own `target/`, on the same disk. `disk-guard` runs `cargo clean` before the
-Rust clippy, test and build jobs when free space is under 10 GB. `pytest.yaml` preserves the same
-`target/` and `.venv-ref/` caches and builds the native extension with the interpreter used by its
-test script. Maturin runs from an isolated tool environment under `RUNNER_TEMP`; pytest does not
-add an automatic Cargo cleanup step. The hosted legs use `Swatinem/rust-cache`, which stores its
-cache with GitHub, not on this host.
+A runner (`~/actions-runner`, workspace `_work/<repo>/<repo>`) is persistent, so its `target/` is the build cache; sccache adds a
+host-wide dependency cache on top (see "CI: what runs when"). There is no `actions/cache` on the self-hosted legs and no second
+target directory. Self-hosted checkouts use `clean: false` followed by
+`git clean -ffdx -e /target -e /.venv-ref -e /.venv-test`; **neither `rust.yaml` nor `pytest.yaml` wipes `target/`**. Expect a
+runner's `target/` to hold debug, clippy, `ci` and release artifacts for the whole graph (tens of GB once Polars and Arrow are in the
+graph; the `ci` layer is about 2 GB, the dispatch-only release layer the largest), in addition to the development checkout's own
+`target/`. `disk-guard` runs before the clippy, test, frontcrate and build jobs: below 10 GB free it first drops the `release` and `ci`
+layers (`cargo clean --release`, `cargo clean --profile ci`) and only then runs a full `cargo clean`. `pytest.yaml` preserves the same
+`target/`, `.venv-ref/` and `.venv-test/` caches and builds the native extension with the interpreter used by its test script (the
+test venv is only reinstalled when its dependency hash changes). Maturin runs from an isolated tool environment under `RUNNER_TEMP`.
+The hosted legs use `Swatinem/rust-cache`, which stores its cache with GitHub, not on this host.
 
 ## Reference harness (§10.2)
 

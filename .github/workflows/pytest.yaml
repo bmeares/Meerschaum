@@ -1,23 +1,72 @@
+# The Python suite against the extension built from this checkout (docs/design/v5-build.md).
+#
+# What runs: the `changes` job (scripts/ci/changes.py) switches the suite on for any Python, test, harness or
+# Rust change (the extension is built from the crates) and off for a docs-only push. A push to `v5` runs
+# the quick flavors (sqlite and timescaledb); a dispatch (the release gate) and pull requests run `all`
+# (every database flavor, the test API on port 8989), as before. The extension is built with the `ci`
+# Cargo profile (no LTO, opt-level 1: ~2-4 minutes instead of ~10 for the release profile); nothing that
+# ships uses it. The last job, `summary`, always runs: make `pytest / summary` the required check.
+#
+# The suite owns this host's test containers (`tests-*`, tests/docker-compose.yaml), port 8989 and its
+# own `test_root`: the job-level concurrency group below lets only one run of it go at a time, on whichever
+# self-hosted runner picks it up (the build and the other workflows still run in parallel on the others).
 name: pytest
 
 on:
   workflow_dispatch:
     inputs:
-      publish:
-        description: 'Run the pytest script.'
+      flavors:
+        description: 'MRSM_TEST_FLAVORS: `all`, or a comma list such as sqlite,timescaledb.'
         required: false
-        default: ""
+        default: all
+      profile:
+        description: 'Cargo profile of the extension under test: `ci` (quick, no LTO) or `release` (what ships; the release gate).'
+        type: choice
+        options: [ ci, release ]
+        default: ci
   push:
-    branches: [ main, staging ]
+    branches: [ main, staging, v5 ]
   pull_request:
     branches:
       - dev
       - main
       - staging
 
+permissions:
+  contents: read
+
+# A newer push supersedes a running push; a dispatch (the release gate) is never cancelled.
+concurrency:
+  group: pytest-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'push' || github.event_name == 'pull_request' }}
+
 jobs:
+  changes:
+    name: changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      pytest: ${{ steps.changes.outputs.pytest }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 1 }
+      - id: changes
+        name: Does this change need the Python suite?
+        env:
+          BEFORE: ${{ github.event.before }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: python3 scripts/ci/changes.py --event "$GITHUB_EVENT_NAME" --ref "$GITHUB_REF" --before "$BEFORE" --after "$GITHUB_SHA" --base "$BASE"
+
   tests:
+    needs: changes
+    # Self-hosted: never for a pull request from a fork (untrusted code on the maintainer's host).
+    if: ${{ needs.changes.outputs.pytest == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
     runs-on: self-hosted
+    timeout-minutes: 90
+    # One run of the suite at a time per host: the test containers and port 8989 are shared.
+    concurrency:
+      group: mrsm-test-services
+      cancel-in-progress: false
     env:
       CARGO_INCREMENTAL: '0'
       PYTHONPATH: ${{ github.workspace }}
@@ -28,15 +77,21 @@ jobs:
         with: { clean: false, persist-credentials: false }
 
       - name: Clean the workspace (keep shared Cargo target, reference and test environments)
-        run: git clean -ffdx -e /target/ -e /.venv-ref/ -e /.venv-test/
+        run: git clean -ffdx -e /target -e /.venv-ref -e /.venv-test
 
       - name: Rust toolchain
         run: scripts/rust/ci.sh setup
 
-      - name: Build the native Python extension
+      - name: Build the native Python extension (ci profile; release on request)
+        ### `--profile ci`: no LTO, opt-level 1 (Cargo.toml `[profile.ci]`). Behaviorally the release build
+        ### (no debug assertions); the shipped wheels, binaries and images are all `--release`. A dispatch with
+        ### `profile: release` (the release gate) tests the optimized extension itself.
+        env:
+          EXT_PROFILE: ${{ inputs.profile || 'ci' }}
         run: |
           PYTHON="$(command -v "${PYTHON_BIN:-python}")"
           export PYTHON
+          eval "$(scripts/rust/ci.sh env)"
           build_scratch="$(mktemp -d "$RUNNER_TEMP/mrsm-pytest-build.XXXXXX")"
           trap 'rm -rf "$build_scratch"' EXIT
           export MRSM_ROOT_DIR="$build_scratch/root" MRSM_PLUGINS_DIR="$build_scratch/plugins"
@@ -45,7 +100,11 @@ jobs:
           "$PYTHON" -m venv "$build_scratch/tools"
           "$build_scratch/tools/bin/python" -m pip install 'maturin>=1.9,<2.0'
           export MATURIN_BIN="$build_scratch/tools/bin/maturin"
-          scripts/rust/build_py.sh
+          if [ "$EXT_PROFILE" = release ]; then
+            scripts/rust/build_py.sh --release
+          else
+            scripts/rust/build_py.sh --profile ci
+          fi
 
       - name: Build the standalone mrsm (only for the tests that run the binary itself)
         ### The CLI runs from the extension built above (`python -m meerschaum`, what `scripts/mrsm.sh`
@@ -73,13 +132,16 @@ jobs:
             "$PYTHON" -m venv --clear "$VENV"
             rm -f "$VENV/.deps-hash"
           fi
-          requirement_args=""
-          for extra in $MRSM_INSTALL_PACKAGES; do
-            requirement_args="$requirement_args -r requirements/$extra.txt"
-          done
-          "$VENV/bin/python" -m pip install --quiet --upgrade pip
-          "$VENV/bin/python" -m pip install --quiet $requirement_args pytest pytest-xdist httpx httpx2 uv
-          echo "$deps_hash" > "$VENV/.deps-hash"
+          ### Nothing to install while the hash matches (the venv persists between runs).
+          if [ "$(cat "$VENV/.deps-hash" 2>/dev/null)" != "$deps_hash" ]; then
+            requirement_args=""
+            for extra in $MRSM_INSTALL_PACKAGES; do
+              requirement_args="$requirement_args -r requirements/$extra.txt"
+            done
+            "$VENV/bin/python" -m pip install --quiet --upgrade pip
+            "$VENV/bin/python" -m pip install --quiet $requirement_args pytest pytest-xdist httpx httpx2 uv
+            echo "$deps_hash" > "$VENV/.deps-hash"
+          fi
         env:
           MRSM_INSTALL_PACKAGES: "full sql-mssql sql-oracle sql-duckdb"
 
@@ -110,7 +172,9 @@ jobs:
           MRSM_SQL_MAIN: sqlite:///${{ runner.temp }}/mrsm-pytest-main-${{ github.run_id }}-${{ github.run_attempt }}.db
           MRSM_NO_AUTO_INSTALL: "1"
           COMPOSE_INTERACTIVE_NO_CLI: 1
-          MRSM_TEST_FLAVORS: "all"
+          ### A dispatch and a pull request: every flavor. A push to v5: the quick ones (the release gate,
+          ### a dispatch, runs them all).
+          MRSM_TEST_FLAVORS: ${{ inputs.flavors || ((github.event_name == 'push' && github.ref == 'refs/heads/v5') && 'sqlite,timescaledb' || 'all') }}
           MRSM_DEBUG: "false"
           PYTHON_BIN: ${{ github.workspace }}/.venv-test/bin/python
           ### Used only by tests/_binary.py (never `MRSM_BIN`, which would also change what the
@@ -118,3 +182,25 @@ jobs:
           MRSM_TEST_BIN: ${{ github.workspace }}/target/debug/mrsm
           ### The venv above already holds the extras; `test.sh` must not install again.
           MRSM_TEST_SKIP_INSTALL: "1"
+
+  # The required status check: always runs, fails only when the suite ran and failed or was cancelled.
+  summary:
+    name: summary
+    if: ${{ always() }}
+    needs: [ changes, tests ]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: The suite did not fail
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          python3 - <<'PY'
+          import json, os, sys
+          needs = json.loads(os.environ['NEEDS'])
+          for name, job in needs.items():
+              print(f"{name}: {job['result']}")
+          bad = {name: job['result'] for name, job in needs.items() if job['result'] in ('failure', 'cancelled')}
+          if bad:
+              sys.exit(f'failed or cancelled: {bad}')
+          PY

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Usage: scripts/rust/build_py.sh [--release | --debug] [--no-check] [-- MATURIN_ARGS...]
+# Usage: scripts/rust/build_py.sh [--release | --debug | --profile NAME] [--no-check] [-- MATURIN_ARGS...]
 #
 # Builds the PyO3 extension (crates/meerschaum-py) with maturin and places it in the working
 # tree at meerschaum/_core/_native.abi3.so, where `meerschaum._core` loads it from. Nothing is
@@ -8,6 +8,9 @@
 #
 #   --release    Optimized build (default). Small .so (~70 MB), slow first build.
 #   --debug      Unoptimized build, stripped of symbols (unstripped it is ~1 GB of debuginfo).
+#   --profile P  Build with the Cargo profile P of the root Cargo.toml (`ci`: no LTO, opt-level 1, quick;
+#                what the pytest job uses). Stripped like --debug. `--release` stays the default and the
+#                only profile a shipped artifact may use.
 #   --no-check   Skip the post-build import check.
 #
 # The extension always includes the `duckdb` and `oracle` flavors (what the wheels ship). DuckDB is not
@@ -37,9 +40,13 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --release) profile="release" ;;
     --debug) profile="debug" ;;
+    --profile)
+      [ $# -ge 2 ] || { echo "build_py.sh: --profile needs a profile name" >&2; exit 2; }
+      profile="$2"; shift ;;
+    --profile=*) profile="${1#--profile=}" ;;
     --no-check) check=0 ;;
     --) shift; extra+=("$@"); break ;;
-    -h|--help) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "build_py.sh: unknown argument: $1" >&2; exit 2 ;;
   esac
   shift
@@ -85,11 +92,12 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM HUP
 args=(build --manifest-path crates/meerschaum-py/Cargo.toml --auditwheel skip --out "$wheel_dir")
-if [ "$profile" = "release" ]; then
-  args+=(--release)
-else
-  args+=(--strip)
-fi
+case "$profile" in
+  release) args+=(--release) ;;
+  debug) args+=(--strip) ;;
+  ""|*[!A-Za-z0-9_-]*) echo "build_py.sh: invalid profile name '$profile'" >&2; exit 2 ;;
+  *) args+=(--profile "$profile" --strip) ;;
+esac
 # A command-line `--features` REPLACES the `features` list in pyproject.toml (it does not add to
 # it), so always pass the full set. Without `extension-module` the module links libpython.
 features="pyo3/abi3-py311,extension-module,oracle"
