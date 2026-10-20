@@ -834,6 +834,14 @@ pub fn pip_install(env: &PipEnv, rt: &mut Runtime<'_>, opts: &PipInstall) -> boo
     success
 }
 
+/// A removal succeeded, or found nothing left to remove.
+fn gone(result: std::io::Result<()>) -> bool {
+    match result {
+        Ok(()) => true,
+        Err(error) => error.kind() == std::io::ErrorKind::NotFound,
+    }
+}
+
 /// Remove an installed distribution from a `--target` directory: every file its `RECORD` lists,
 /// the emptied directories, then the `*.dist-info` itself. A package that is not installed
 /// counts as removed (as `pip uninstall` does, with a warning of its own).
@@ -862,7 +870,7 @@ pub fn remove_distribution(target: &Path, install_name: &str) -> bool {
             }
             let path = target.join(relative);
             if std::fs::symlink_metadata(&path).is_ok_and(|m| !m.is_dir()) {
-                ok &= std::fs::remove_file(&path).is_ok();
+                ok &= gone(std::fs::remove_file(&path));
             }
             let mut parent = path.parent().map(Path::to_path_buf);
             while let Some(dir) = parent {
@@ -875,12 +883,14 @@ pub fn remove_distribution(target: &Path, install_name: &str) -> bool {
                 parent = dir.parent().map(Path::to_path_buf);
             }
         }
-        // Deepest first; `remove_dir` only removes empty directories.
+        // Deepest first; `remove_dir` only removes empty directories. pip's own RECORD lists every
+        // file of the `.dist-info` directory, so it is already gone when it is removed below:
+        // that is success, not a failure.
         directories.sort_by_key(|d| std::cmp::Reverse(d.components().count()));
         for dir in directories {
             let _ = std::fs::remove_dir(&dir);
         }
-        ok &= std::fs::remove_dir_all(&dist_info).is_ok();
+        ok &= gone(std::fs::remove_dir_all(&dist_info));
     }
     ok
 }
@@ -1032,6 +1042,41 @@ mod tests {
         assert_eq!(install_name_no_version("pandas>=2.0"), "pandas");
         assert_eq!(install_name_no_version("pkg[extra]==1"), "pkg");
         assert_eq!(install_name_no_version("plain"), "plain");
+    }
+
+    #[test]
+    fn removing_a_distribution_whose_record_lists_the_whole_dist_info_succeeds() {
+        // pip's RECORD lists every file of the `.dist-info` directory, so emptying the
+        // directories removes it before the final `remove_dir_all` (which used to report a
+        // failure for the missing directory, so `uninstall packages` failed without `uv`).
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path();
+        std::fs::create_dir_all(target.join("some_pkg/__pycache__")).unwrap();
+        std::fs::create_dir_all(target.join("some_pkg-1.0.0.dist-info")).unwrap();
+        let record = "some_pkg-1.0.0.dist-info/INSTALLER,sha256=x,4\n\
+                      some_pkg-1.0.0.dist-info/METADATA,,\n\
+                      some_pkg-1.0.0.dist-info/RECORD,,\n\
+                      some_pkg/__init__.py,,\n\
+                      some_pkg/__pycache__/__init__.cpython-314.pyc,,\n";
+        for line in record.lines() {
+            let relative = line.split(',').next().unwrap();
+            std::fs::write(
+                target.join(relative),
+                if relative.ends_with("RECORD") {
+                    record
+                } else {
+                    "x"
+                },
+            )
+            .unwrap();
+        }
+        std::fs::write(target.join("other_pkg.py"), "x").unwrap();
+        assert!(remove_distribution(target, "some-pkg"));
+        assert!(!target.join("some_pkg").exists());
+        assert!(!target.join("some_pkg-1.0.0.dist-info").exists());
+        assert!(target.join("other_pkg.py").exists());
+        // Nothing installed: still success.
+        assert!(remove_distribution(target, "some-pkg"));
     }
 
     #[test]
