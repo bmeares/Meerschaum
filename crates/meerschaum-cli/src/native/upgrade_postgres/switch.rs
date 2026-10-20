@@ -43,6 +43,10 @@ pub(crate) struct Undo {
     pub new_volume: Option<String>,
     /// The old `db` was stopped for the switch.
     pub old_db_stopped: bool,
+    /// The stack's `db` was not running when the run began (a `restore postgres` of a broken or
+    /// stopped database): putting back leaves it stopped, and stops one that the switch (or a
+    /// service that depends on it) started on the way.
+    pub db_down_before: bool,
     /// The stack config file was rewritten: its path, original bytes (`None`: there was no
     /// file), and the file written.
     pub config: Option<(PathBuf, Option<Vec<u8>>, PathBuf)>,
@@ -72,6 +76,51 @@ pub(crate) fn background_workers(what: &str) -> String {
   END IF;
 END$mrsm$;"
     )
+}
+
+/// Whether putting back an interrupted run starts the old `db`: the run stopped it, or it is down
+/// after the run edited the config (a kill between the stop and its record). Never when it was
+/// down before the run: that database is left as it was (starting it would run PostgreSQL's
+/// crash recovery on a volume the plan promised not to modify).
+pub(crate) fn recovery_starts_old_db(
+    stopped_by_run: bool,
+    down_before: bool,
+    config_edited: bool,
+    db_running: bool,
+) -> bool {
+    stopped_by_run || (!down_before && config_edited && !db_running)
+}
+
+/// A `db` that was down before the run stays down: stop the one that is running now, and remove
+/// a container that mounts the run's new volume (the switch started it; the new volume is about
+/// to be removed). Returns what could not be done.
+fn keep_db_down(stack: &Stack, new_volume: Option<&str>) -> Vec<String> {
+    let mut problems = Vec::new();
+    let Ok(Some(id)) = stack.compose.any_container_id(DB_SERVICE) else {
+        return problems;
+    };
+    let on_new = new_volume.is_some_and(|new| {
+        docker::container_volumes(&id).is_ok_and(|volumes| volumes.iter().any(|v| v == new))
+    });
+    let done = if on_new {
+        Docker::new(&["rm", "-f", &id])
+            .check("Removing the database container of the new volume")
+            .map(|_| ())
+    } else if matches!(stack.compose.container_id(DB_SERVICE), Ok(Some(_))) {
+        stack
+            .compose
+            .stop(&[DB_SERVICE.to_string()], STOP_TIMEOUT_SECONDS)
+    } else {
+        return problems;
+    };
+    if let Err(e) = done {
+        problems.push(format!("Cannot leave the database stopped: {}", e.message));
+    } else if on_new {
+        // The stopped container the stack had is gone with it: make one again, from the config
+        // that was put back (best effort: `stack up` makes it too).
+        let _ = stack.compose.create(&[DB_SERVICE.to_string()]);
+    }
+    problems
 }
 
 /// The started `db` container must mount `volume` and run `major`.
@@ -107,6 +156,44 @@ pub(crate) struct SwitchTo<'a> {
     pub run_dir: &'a Path,
     /// Whether the stack's `db` was running before the run.
     pub db_running: bool,
+    /// The old `db` container as the upgrade left it stopped (its dump is what the new volume
+    /// holds): when it ran again before the switch, the writes it took are not in the copy.
+    pub old_stop: Option<&'a docker::RunMarks>,
+}
+
+/// Why a container that was stopped after the dump is not as it was left, or `None` when it is
+/// (still the same container, still exited, not started since).
+pub(crate) fn old_db_ran_again(left: &docker::RunMarks, now: &docker::RunMarks) -> Option<String> {
+    if left.id != now.id {
+        return Some("it was removed and created again".into());
+    }
+    if now.status != "exited" && now.status != "created" {
+        return Some(format!("it is {} again", now.status));
+    }
+    if left.started != now.started || left.finished != now.finished {
+        return Some("it was started and stopped again".into());
+    }
+    None
+}
+
+/// Before the switch: the old database must not have run since it was stopped for the copy.
+fn check_old_stayed_stopped(old_stop: &docker::RunMarks) -> Res<()> {
+    let now = docker::container_run_marks(&old_stop.id).map_err(|_| {
+        StepError::new(
+            "The old database container was removed after it was stopped: whatever the stack \
+             did with it since may have written to the old volume, which the new copy does not \
+             hold. Nothing was switched.",
+        )
+    })?;
+    match old_db_ran_again(old_stop, &now) {
+        None => Ok(()),
+        Some(why) => Err(StepError::new(format!(
+            "The old database ran again while the new copy was being restored ({why}; \
+             `mrsm stack up`, `stack start`/`restart` or a Docker restart start a stopped \
+             `db`). What clients wrote to it after the dump is not in the copy, so nothing was \
+             switched. Stop the stack's clients, then run this again."
+        ))),
+    }
 }
 
 /// Record in the manifest that `services` are stopped by the run (before stopping them).
@@ -163,6 +250,9 @@ pub(crate) fn switch_over(
             "Stopping the stack's database",
         )?;
     }
+    if let Some(old_stop) = to.old_stop {
+        check_old_stayed_stopped(old_stop)?;
+    }
     steps.run(rt, "Editing the stack config", |rt| {
         edit_config(rt, stack, to, undo, manifest)
     })?;
@@ -182,6 +272,11 @@ pub(crate) fn switch_over(
     undo.commit();
     super::set_state(to.run_dir, manifest, "switched", None);
     let mut warnings = Vec::new();
+    if let Ok(Some(id)) = stack.compose.container_id(DB_SERVICE)
+        && let Some(refused) = PgContainer::new(id).refused_login()
+    {
+        warnings.push(login_warning(&refused));
+    }
     let stopped = std::mem::take(&mut undo.stopped);
     if !stopped.is_empty() {
         let started = steps.run(rt, &format!("Starting {}", stopped.join(", ")), |_| {
@@ -197,6 +292,18 @@ pub(crate) fn switch_over(
         }
     }
     Ok(warnings)
+}
+
+/// What to tell when the stack's own login is refused by the database that now runs: its roles
+/// keep the passwords they had when the dump, backup or old volume was made.
+pub(crate) fn login_warning(refused: &str) -> String {
+    format!(
+        "The database now refuses the stack's own login ({refused}). The roles come with the data, \
+         with the passwords they had at that time, and `POSTGRES_PASSWORD` (the stack's \
+         `sql:main` password) differs: the stack's services cannot log in until the two agree. \
+         Set the role's password to the configured one (`ALTER ROLE ... PASSWORD ...`), or put \
+         the old password back in the config."
+    )
 }
 
 /// How the switch changes the stack config file.
@@ -335,6 +442,12 @@ fn edit_config(
     if written != path {
         undo.config = Some((path.clone(), original.clone(), written.clone()));
         manifest["config"]["written"] = json!(written);
+    }
+    // What the switch wrote, to tell a later rollback whether the file was edited since.
+    if let Ok((sha, _)) = docker::sha256_file(&written) {
+        manifest["config"]["written_sha256"] = json!(sha);
+    }
+    if written != path || manifest["config"].get("written_sha256").is_some() {
         super::write_manifest(to.run_dir, manifest)?;
     }
     super::super::os_sql_stack::write_stack(rt)
@@ -386,6 +499,25 @@ pub(crate) struct OldSide<'a> {
     pub server: Option<&'a PgContainer>,
 }
 
+/// Resume TimescaleDB's background jobs in the databases they were paused in (`psql` runs a
+/// statement in a database). Returns what could not be done.
+fn resume_workers(
+    paused: &mut Vec<String>,
+    psql: &dyn Fn(&str, &str) -> Res<String>,
+) -> Vec<String> {
+    let mut problems = Vec::new();
+    for database in std::mem::take(paused) {
+        if let Err(e) = psql(&database, &background_workers("start")) {
+            problems.push(format!(
+                "Cannot resume TimescaleDB's background jobs in '{database}' (they resume when \
+                 the database restarts): {}",
+                e.message
+            ));
+        }
+    }
+    problems
+}
+
 /// Put the stack back after a failure: remove this run's containers, restore the config, start
 /// the old database and the stopped services again, and remove the new volume (kept with
 /// `--debug`; only a volume that carries the run's label). Signals are ignored meanwhile: it runs
@@ -431,28 +563,35 @@ fn put_back_now(
             .up(&[DB_SERVICE.to_string()])
             .and_then(|_| docker::wait_healthy(&stack.compose, DB_SERVICE, START_TIMEOUT))
         {
-            Ok(id) => {
-                if let Err(e) = check_running(&id, old.volume, old.major) {
-                    problems.push(e.message);
+            Ok(id) => match check_running(&id, old.volume, old.major) {
+                // The database may never have stopped (the record of its stop failed before the
+                // stop itself) with the jobs paused; after a real restart they run already.
+                Ok(()) => {
+                    let server = PgContainer::new(id);
+                    problems.extend(resume_workers(&mut undo.paused, &|database, sql| {
+                        server.psql(database, sql)
+                    }));
                 }
-            }
+                Err(e) => problems.push(e.message),
+            },
             Err(e) => problems.push(format!("Cannot start the old database: {}", e.message)),
         }
     } else if let Some(server) = old.server {
-        for database in std::mem::take(&mut undo.paused) {
-            if let Err(e) = server.psql(&database, &background_workers("start")) {
-                problems.push(format!(
-                    "Cannot resume TimescaleDB's background jobs in '{database}' (they resume \
-                     when the database restarts): {}",
-                    e.message
-                ));
-            }
-        }
+        problems.extend(resume_workers(&mut undo.paused, &|database, sql| {
+            server.psql(database, sql)
+        }));
+    }
+    if undo.db_down_before && !undo.old_db_stopped {
+        problems.extend(keep_db_down(stack, undo.new_volume.as_deref()));
     }
     if !undo.stopped.is_empty()
         && let Err(e) = stack.compose.up(&undo.stopped)
     {
         problems.push(e.message);
+    }
+    if undo.db_down_before && !undo.old_db_stopped && !undo.stopped.is_empty() {
+        // Compose starts what a service depends on: `db` goes down again.
+        problems.extend(keep_db_down(stack, None));
     }
     if let Some(volume) = undo.new_volume.take() {
         if !docker::volume_has_label(&volume, LABEL, run_id) {
@@ -497,6 +636,130 @@ mod tests {
         assert!(sql.contains("_timescaledb_internal.stop_background_workers()"));
     }
 
+    fn marks(id: &str, status: &str, started: &str, finished: &str) -> docker::RunMarks {
+        docker::RunMarks {
+            id: id.into(),
+            status: status.into(),
+            started: started.into(),
+            finished: finished.into(),
+        }
+    }
+
+    #[test]
+    fn an_old_database_that_ran_again_is_not_switched_away_from() {
+        let left = marks(
+            "abc",
+            "exited",
+            "2026-10-19T10:00:00Z",
+            "2026-10-19T10:05:00Z",
+        );
+        // Untouched: same container, still stopped, same start and stop times.
+        assert_eq!(old_db_ran_again(&left, &left.clone()), None);
+        // Started again by `stack up` (running), or started and stopped again (new times).
+        assert!(
+            old_db_ran_again(
+                &left,
+                &marks(
+                    "abc",
+                    "running",
+                    "2026-10-19T10:09:00Z",
+                    "2026-10-19T10:05:00Z"
+                )
+            )
+            .unwrap()
+            .contains("running")
+        );
+        assert!(
+            old_db_ran_again(
+                &left,
+                &marks(
+                    "abc",
+                    "exited",
+                    "2026-10-19T10:09:00Z",
+                    "2026-10-19T10:10:00Z"
+                )
+            )
+            .unwrap()
+            .contains("again")
+        );
+        // Removed and created again by Compose (another ID, even when it is stopped).
+        assert!(
+            old_db_ran_again(
+                &left,
+                &marks(
+                    "def",
+                    "exited",
+                    "2026-10-19T10:00:00Z",
+                    "2026-10-19T10:05:00Z"
+                )
+            )
+            .unwrap()
+            .contains("created again")
+        );
+        // A restarting or paused container is never "still stopped".
+        for status in ["restarting", "paused", "dead"] {
+            assert!(
+                old_db_ran_again(&left, &marks("abc", status, &left.started, &left.finished))
+                    .is_some(),
+                "{status}"
+            );
+        }
+    }
+
+    #[test]
+    fn paused_jobs_resume_in_every_database_and_failures_are_reported() {
+        use std::cell::RefCell;
+        let calls = RefCell::new(Vec::new());
+        let mut paused = vec!["meerschaum".to_string(), "postgres".to_string()];
+        let problems = resume_workers(&mut paused, &|database, sql| {
+            calls
+                .borrow_mut()
+                .push((database.to_string(), sql.to_string()));
+            if database == "postgres" {
+                Err(StepError::new("connection refused"))
+            } else {
+                Ok(String::new())
+            }
+        });
+        // Every database is tried (one failing does not skip the next), each with the `start`
+        // statement, and the list is emptied.
+        let calls = calls.borrow();
+        assert_eq!(calls.len(), 2);
+        assert!(
+            calls
+                .iter()
+                .all(|(_, sql)| sql.contains("start_background_workers"))
+        );
+        assert!(paused.is_empty());
+        assert_eq!(problems.len(), 1);
+        assert!(problems[0].contains("'postgres'") && problems[0].contains("connection refused"));
+    }
+
+    #[test]
+    fn recovery_never_starts_a_database_that_was_down_before_the_run() {
+        // (stopped by the run, down before, config edited, running now) -> starts the old db
+        for (args, starts) in [
+            // An upgrade stopped it: always.
+            ((true, false, true, false), true),
+            ((true, false, false, false), true),
+            // Killed after the config edit with `db` down and no record of a stop: started.
+            ((false, false, true, false), true),
+            // Still running, or the config was never edited: nothing to start.
+            ((false, false, true, true), false),
+            ((false, false, false, false), false),
+            // A restore that began with `db` down: left down (this was the F6 case).
+            ((false, true, true, false), false),
+            ((false, true, false, false), false),
+        ] {
+            let (stopped, down, edited, running) = args;
+            assert_eq!(
+                recovery_starts_old_db(stopped, down, edited, running),
+                starts,
+                "{args:?}"
+            );
+        }
+    }
+
     #[test]
     fn a_committed_switch_puts_nothing_back() {
         let mut undo = Undo {
@@ -506,6 +769,7 @@ mod tests {
             isolated: Vec::new(),
             isolated_container: None,
             old_db_stopped: true,
+            db_down_before: false,
             config: Some((PathBuf::from("a"), None, PathBuf::from("a"))),
             new_volume_outcome: None,
         };

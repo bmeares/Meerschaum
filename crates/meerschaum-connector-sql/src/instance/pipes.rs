@@ -135,17 +135,34 @@ impl SqlConnector {
     }
 
     /// `get_pipe_attributes(pipe)`: the pipe's row from `mrsm_pipes` (`{}` if unregistered).
+    ///
+    /// One query by the pipe's keys. (v4 looks the `pipe_id` up first and then reads the row by
+    /// it, two round trips; the id comes back with the row.) A temporary pipe, and a database
+    /// without the instance tables, have no row.
     pub async fn get_pipe_attributes(&self, pipe: &Pipe) -> ConnectorResult<Map> {
-        let Some(id) = self.get_pipe_id(pipe).await? else {
+        if pipe.temporary || !self.ensure_instance_tables(true).await {
             return Ok(Map::new());
-        };
+        }
         let table = self.instance_table_name("mrsm_pipes");
+        let f = self.flavor;
+        let mut params = vec![
+            SqlParam::Text(pipe.connector_keys().to_string()),
+            SqlParam::Text(pipe.metric_key().to_string()),
+        ];
+        let loc_clause = match pipe.location_key() {
+            Some(lk) => {
+                params.push(SqlParam::Text(lk.to_string()));
+                format!("{table}.location_key = {}", placeholder(f, 3))
+            }
+            None => format!("{table}.location_key IS NULL"),
+        };
         let query = format!(
-            "SELECT {table}.pipe_id, {table}.connector_keys, {table}.metric_key, {table}.location_key, {table}.parameters \nFROM {table} \nWHERE {table}.pipe_id = {}",
-            placeholder(self.flavor, 1)
+            "SELECT {table}.pipe_id, {table}.connector_keys, {table}.metric_key, {table}.location_key, {table}.parameters \nFROM {table} \nWHERE {table}.connector_keys = {} AND {table}.metric_key = {} AND {loc_clause}",
+            placeholder(f, 1),
+            placeholder(f, 2)
         );
         let df = self
-            .read_params_catalog(&query, &[SqlParam::Int(id)])
+            .read_params_catalog(&query, &params)
             .await
             .map_err(|e| {
                 be(format!(

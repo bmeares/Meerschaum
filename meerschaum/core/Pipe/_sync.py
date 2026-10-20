@@ -219,6 +219,33 @@ def _native_context(self, debug: bool = False) -> Tuple[Optional[Dict[str, Any]]
     return context, ''
 
 
+def _adopt_synced_columns_types(self, debug: bool = False) -> None:
+    """
+    Keep the table layout the native sync ended with as the pipe's cached `get_columns_types()`
+    (in memory only, as if it had just been read) instead of reflecting the table again on the
+    next read. The sync reflects the layout before it writes and again after any DDL of its own;
+    the instance hands it out once, and nothing when the sync created the table. Any failure
+    leaves the cache empty (the next read reflects the table).
+    """
+    instance = self.instance_connector
+    if getattr(instance, 'type', None) != 'sql':
+        return
+    try:
+        columns_types = instance._rust_method('take_synced_columns_types')(self)
+    except Exception:
+        return
+    if not columns_types:
+        return
+    from meerschaum.utils.dtypes import get_current_timestamp
+    self._cache_value('_columns_types', dict(columns_types), memory_only=True, debug=debug)
+    self._cache_value(
+        '_columns_types_timestamp',
+        get_current_timestamp('ms', as_int=True) / 1000,
+        memory_only=True,
+        debug=debug,
+    )
+
+
 def _native_pipe_result(
     self,
     out: Dict[str, Any],
@@ -252,6 +279,9 @@ def _native_pipe_result(
     ### newly detected special `dtypes`): the engine persisted them, so patch the object.
     if out['parameters']:
         self.update_parameters(out['parameters'], persist=False, debug=debug)
+
+    if out['success']:
+        _adopt_synced_columns_types(self, debug=debug)
 
     message = out['message']
     if (

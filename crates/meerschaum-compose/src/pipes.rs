@@ -60,6 +60,24 @@ impl ProjectConfig {
         Ok(ProjectConfig { registry })
     }
 
+    /// The host's own view, before any project exists (`compose init` reads registered pipes
+    /// from the host's default instance).
+    pub fn for_host(host: &Host) -> Result<ProjectConfig, ComposeError> {
+        let env: Vec<(String, String)> = host
+            .env
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        let mut opts = meerschaum_core::config::ConfigOptions::with_env(env);
+        opts.allow_writes = false;
+        if let Some(home) = host.env.get("HOME") {
+            opts.home = std::path::PathBuf::from(home);
+        }
+        let registry = meerschaum_core::Config::new(opts)
+            .map_err(|e| ComposeError::new(crate::error::ErrorKind::Os, e.to_string()))?;
+        Ok(ProjectConfig { registry })
+    }
+
     /// `get_config(*keys)` inside the project.
     pub fn get(&self, keys: &[&str]) -> Option<Value> {
         let opts = GetOptions {
@@ -263,11 +281,14 @@ pub fn custom_connectors(config: &Map) -> Result<Vec<(String, Map)>, ComposeErro
         for (label, attrs) in labels {
             match attrs {
                 Value::Map(m) => out.push((format!("{typ}:{label}"), m.clone())),
-                // PARITY: `mrsm.get_connector(keys, **None)` raises (a stale `'{sql:x}'` host
-                // reference resolves to `None`).
+                // An unresolved host reference (`'{sql:x}'` the host does not define) resolves
+                // to `null`. v4 raised its own `TypeError` here; the lint reports the reference
+                // and `up` / `run` refuse to start on it (`refs::findings`).
+                Value::Null => {}
                 other => {
-                    return Err(ComposeError::type_error(format!(
-                        "meerschaum.connectors.get_connector() argument after ** must be a mapping, not {}",
+                    return Err(ComposeError::value(format!(
+                        "The connector '{typ}:{label}' must be a mapping of attributes, not {} \
+                         (config.meerschaum.connectors.{typ}.{label})",
                         py_type_name(other)
                     )));
                 }

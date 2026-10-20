@@ -8,7 +8,7 @@ Meerschaum API backend. Start an API instance with `start api`.
 The API server is the native `mrsm` server (Rust). This package is the Python side of it: the
 helpers `@api_plugin` functions import (`app`, `get_api_connector`, `get_pipe`, `ScopedAuth`, ...)
 and the API host (`meerschaum.api.host`), which serves what only Python can: `@api_plugin` routes,
-plugin MCP tools and plugin-owned Dash apps.
+plugin MCP tools and the Dash web console with the plugin pages that register into it.
 """
 from __future__ import annotations
 
@@ -139,6 +139,24 @@ production = get_uvicorn_config().get('production', False)
 _include_dash = (not no_dash)
 _include_webterm = (not no_webterm) and _include_dash
 docs_enabled = not production or sys_config.get('endpoints', {}).get('docs_in_production', True)
+
+### An explicitly empty allowlist means "serve no core route groups";
+### only a MISSING (or null) allowlist falls back to serving everything.
+_allowed_route_group_patterns = permissions_config.get('routes', {}).get('allowlist', None)
+if _allowed_route_group_patterns is None:
+    _allowed_route_group_patterns = ['*']
+
+
+def route_group_is_allowed(route_group: str) -> bool:
+    """
+    Return whether a group of core routes (or the console's own pages, group `dash`) may be served,
+    according to the patterns in `api:permissions:routes:allowlist`.
+    """
+    return any(
+        fnmatch(route_group, pattern)
+        for pattern in _allowed_route_group_patterns
+    )
+
 
 ### Meerschaum's own MCP server at `/mcp`, authenticated per-tool by OAuth2 scope.
 mcp_enabled = sys_config.get('mcp', {}).get('enabled', True)

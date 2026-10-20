@@ -3,13 +3,15 @@
 # vim:fenc=utf-8
 
 """
-Fixtures for the console browser tests (v5 design §14 "Console tests").
+Fixtures for the console browser tests (v5 design §14 "Console tests", D21).
 
-The suite starts real `mrsm start api` servers (the standalone binary: `MRSM_TEST_BIN`, or
-`target/{release,debug}/mrsm` outside CI; its version and age are checked, see `tests/_binary.py`) on free high ports, each with a temporary `MRSM_ROOT_DIR`, an empty-but-for-the-test
-plugins directory, a SQLite instance inside that root and a synthetic user, and drives them with
-Python Playwright's Chromium. It never touches the real configuration, port 8989, 8000, 8998,
-3000 or any container.
+The console is the Plotly Dash app of v4 (`meerschaum.api.dash`), served by the Python API host
+behind the Rust server. The suite starts real `mrsm start api` servers (the standalone binary:
+`MRSM_TEST_BIN`, or `target/{release,debug}/mrsm` outside CI; its version and age are checked, see
+`tests/_binary.py`) on free high ports, each with a temporary `MRSM_ROOT_DIR`, an
+empty-but-for-the-test plugins directory, a SQLite instance inside that root and a synthetic user,
+and drives them with Python Playwright's Chromium. It never touches the real configuration,
+port 8989, 8000, 8998, 3000 or any container.
 
 The servers' Python (the API host and the plugin workers, `MRSM_PYTHON`, see `server_python()`)
 is the test interpreter when its own environment already has the `meerschaum[api,dash,sql,pandas]`
@@ -53,6 +55,16 @@ PASSWORD = 'correct-horse-1'
 PORT_RANGE = (18400, 18999)
 FORBIDDEN_PORTS = {8989, 8000, 8998, 3000, 5432, 1883}
 COPIED_PLUGINS = ('w7_pyfig', 'w7_dashapp')
+
+#: Console noise that is not a failure: Dash's renderer logs this (as a `console.error`) whenever a
+#: callback's inputs are re-rendered in the same round, which every page of v4's console does.
+IGNORED_CONSOLE_ERRORS = (
+    'Failed to load resource',
+    'A nonexistent object was used in an `Input` of a Dash callback',
+    '{index,type:',
+    ### A page navigation cancels the callbacks in flight.
+    'Callback failed: the server did not respond',
+)
 
 
 def pytest_configure(config):
@@ -99,7 +111,7 @@ SERVER_REQUIREMENTS = ('api', 'dash', 'sql', 'pandas')
 ### What those extras let the host import (checked with `python -s`: the user site never counts).
 SERVER_IMPORTS = (
     'fastapi', 'uvicorn', 'multipart', 'jwt', 'a2wsgi', 'websockets', 'dash',
-    'dash_bootstrap_components', 'dash_extensions', 'sqlalchemy', 'pandas',
+    'dash_bootstrap_components', 'dash_ace', 'dash_extensions', 'sqlalchemy', 'pandas',
 )
 _server_python: dict = {}
 
@@ -237,6 +249,7 @@ class Server:
         args: list[str] | None = None,
         native: bool = True,
         webterm: bool = False,
+        env: dict | None = None,
     ):
         self.name = name
         self.root = pathlib.Path(tempfile.mkdtemp(prefix=f'mrsm-w7-{name}-'))
@@ -244,6 +257,7 @@ class Server:
         self.port = free_port()
         self.base_url = f"http://127.0.0.1:{self.port}"
         self.env = base_env(self.root, self.plugins, config)
+        self.env.update(env or {})
         self.args = list(args or [])
         self.native = native
         self.webterm = webterm
@@ -296,9 +310,21 @@ assert success, msg
             if self.proc.poll() is not None:
                 raise RuntimeError(f"The server exited early:\n{self.log()}")
             if http(f"{self.base_url}/version")[0] == 200:
-                return
+                break
             time.sleep(0.5)
-        raise RuntimeError(f"The server did not start in time:\n{self.log()}")
+        else:
+            raise RuntimeError(f"The server did not start in time:\n{self.log()}")
+        ### The Python host starts on the first `/dash` request (it imports Dash and builds the
+        ### console, which takes a while): wait for it here, so no test pays for it.
+        while time.time() < deadline:
+            if self.proc.poll() is not None:
+                raise RuntimeError(f"The server exited early:\n{self.log()}")
+            status, body = http(f"{self.base_url}/dash/_dash-layout", timeout=60)
+            ### 200: the console; 404: its pointer page (no Dash installed, or `--no-dash`).
+            if status and status < 500:
+                return
+            time.sleep(1)
+        raise RuntimeError(f"The console did not start in time:\n{self.log()}")
 
     def log(self) -> str:
         try:
@@ -424,6 +450,46 @@ def webterm_server():
     assert instance.leaked_ports == [], "the terminal process outlived the server"
 
 
+@pytest.fixture(scope='session')
+def noauth_server():
+    """A server started with `--no-auth`: the console needs no login."""
+    instance = Server('noauth', args=['--no-auth'], native=False)
+    try:
+        instance.start()
+    except Exception:
+        instance.stop()
+        raise
+    yield instance
+    instance.stop()
+
+
+@pytest.fixture(scope='session')
+def nodashpkg_server():
+    """
+    A server whose Python cannot import Dash: a stub `dash` package that raises `ImportError` sits
+    in the `mrsm` virtual environment, which the host puts first on its path for its whole life. The
+    host starts, reports that the console is not mounted, and `/dash` shows the pointer page. The
+    API plugins' routes still work.
+    """
+    instance = Server('nodashpkg', native=False)
+    version = subprocess.run(
+        [server_python(), '-c', 'import sys; print(f"{sys.version_info[0]}.{sys.version_info[1]}")'],
+        capture_output=True, text=True,
+    ).stdout.strip()
+    site = instance.root / 'venvs' / 'mrsm' / 'lib' / f"python{version}" / 'site-packages'
+    (site / 'dash').mkdir(parents=True)
+    (site / 'dash' / '__init__.py').write_text(
+        "raise ImportError(\"No module named 'dash' (a stub for the tests)\")\n"
+    )
+    try:
+        instance.start()
+    except Exception:
+        instance.stop()
+        raise
+    yield instance
+    instance.stop()
+
+
 @pytest.fixture
 def context(browser):
     context = browser.new_context()
@@ -438,26 +504,75 @@ class Tab:
         self.page = page
         self.base_url = base_url
         self.errors: list[str] = []
+        self.network_changed = False
+        self.network_changed_ever = False
         page.on('console', self._on_console)
-        page.on('pageerror', lambda e: self.errors.append(f"pageerror: {e}"))
+        page.on('pageerror', self._on_pageerror)
         page.on('response', self._on_response)
+        page.on('requestfailed', self._on_requestfailed)
+
+    def _on_requestfailed(self, request):
+        if 'ERR_NETWORK_CHANGED' in str(request.failure):
+            self.network_changed = True
+            self.network_changed_ever = True
+
+    def _on_pageerror(self, error):
+        ### The scripts of that page never loaded (see `goto`).
+        if self.network_changed_ever and 'is not defined' in str(error):
+            return
+        self.errors.append(f"pageerror: {error}")
 
     def _on_console(self, message):
-        if message.type == 'error':
+        ### A script that never loaded (see `goto`) leaves its globals undefined.
+        unloaded = self.network_changed_ever and 'is not defined' in message.text
+        if message.type == 'error' and not unloaded and not any(
+            ignored in message.text for ignored in IGNORED_CONSOLE_ERRORS
+        ):
             self.errors.append(f"console.error: {message.text} ({message.location})")
 
     def _on_response(self, response):
+        ### Browsers ask for a source map of each Dash bundle; the console answers `404` on purpose.
+        if response.url.endswith('.map'):
+            return
         if response.url.startswith(self.base_url) and response.status >= 400:
             ### Intentional 404/401 probes are made with `request`, not the page; any failure
             ### a page itself triggers is an error.
             self.errors.append(f"{response.status} {response.url}")
 
+    def goto(self, path: str, selector: str | None = None) -> None:
+        """
+        Open a console path and wait for the Dash app to render (a selector, else the navbar).
+        Chromium aborts every request of a page when the machine's network interfaces change
+        (`ERR_NETWORK_CHANGED`: a container bridge coming up is enough), which leaves a Dash page
+        without its scripts: that, and only that, is retried.
+        """
+        selector = selector or '#logo-img, #username-input'
+        for attempt in range(3):
+            self.network_changed = False
+            self.page.goto(f"{self.base_url}{path}")
+            try:
+                self.page.wait_for_selector(selector, timeout=30000 if attempt == 2 else 15000)
+                return
+            except Exception:
+                if not self.network_changed or attempt == 2:
+                    raise
+        return
+
     def login(self, username: str = USERNAME, password: str = PASSWORD) -> None:
-        self.page.goto(f"{self.base_url}/dash/login")
-        self.page.fill('input[name=username]', username)
-        self.page.fill('input[name=password]', password)
-        self.page.click('button:has-text("Log in")')
-        self.page.wait_for_url(f"{self.base_url}/dash")
+        self.goto('/dash', '#username-input')
+        self.page.fill('#username-input', username)
+        self.page.fill('#password-input', password)
+        self.page.click('#login-button')
+        self.wait_for_dashboard()
+
+    def wait_for_dashboard(self) -> None:
+        """The dashboard is ready when its action form has its default (`show pipes`)."""
+        self.page.wait_for_selector('#go-button', timeout=30000)
+        self.page.wait_for_function(
+            "document.getElementById('action-dropdown') && "
+            "document.getElementById('action-dropdown').value === 'show'",
+            timeout=30000,
+        )
 
 
 @pytest.fixture

@@ -236,8 +236,12 @@ fn lint_reports_without_changing_behavior() {
     );
     assert!(out.result.is_err());
 
+    // Nothing to warn about; `up` would install the listed plugin (an informational finding).
     let (codes, _) = lint_codes("basic");
-    assert!(codes.is_empty(), "{codes:?}");
+    assert!(
+        codes.iter().all(|(c, _)| c == "pending-plugin"),
+        "{codes:?}"
+    );
 }
 
 #[test]
@@ -837,7 +841,7 @@ fn up_refuses_foreign_collisions_and_propagates_job_start_failures() {
 #[test]
 fn up_starts_jobs_instead_of_syncing_pipes() {
     let env = env_from_yaml(
-        "project_name: alpha\nroot_dir: ./root\npipes:\n  - connector: plugin:foo\n    metric: bar\n    instance: sql:local\njobs:\n  hello: show version\n",
+        "project_name: alpha\nroot_dir: ./root\npipes:\n  - connector: sql:local\n    metric: bar\n    instance: sql:local\njobs:\n  hello: show version\n",
     );
     let o = scoped(&env, &["up"], &mut InMemoryJobs::default(), true);
     assert!(succeeded(&o), "{}", message(&o));

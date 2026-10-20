@@ -16,6 +16,7 @@
 //! - [`ops`]: the instance connector, job supervisor and prompt as traits, with in-memory fakes.
 //! - [`subactions`]: `up`, `down`, `run`, `explain`, `init`, `ps`, `logs` and the passthrough
 //!   (`sync pipes`, `start/stop/delete jobs` scoped to the project, `start api`, the shell).
+//! - [`tree`]: `include:` and `parent:` (v5): compose trees, their overrides and their order.
 //! - [`lint`]: the `explain` lint. [`render`]: the `rich` table layout `explain` prints.
 //!
 //! Python quirks that are reproduced on purpose are marked `// PARITY:` in the source.
@@ -35,12 +36,16 @@ pub mod ops;
 pub mod pipes;
 pub mod plugins;
 pub mod project;
+pub mod refs;
 pub mod render;
 pub mod shlex;
 pub mod subactions;
+pub mod tree;
 
 pub use command::{CommandRunner, MrsmCommand, RecordingRunner};
 pub use error::{ComposeError, Message, Messages};
-pub use ops::{InMemoryInstance, InMemoryJobs, InstanceOps, JobInfo, JobOps, Prompter};
+pub use ops::{
+    InMemoryInstance, InMemoryJobs, InstanceOps, JobInfo, JobOps, PipeFilters, Prompter,
+};
 pub use project::{Host, Project, Session};
 pub use subactions::{ComposeArgs, ComposeOutput, Services, compose};

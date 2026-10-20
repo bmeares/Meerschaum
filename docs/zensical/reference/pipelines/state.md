@@ -4,7 +4,7 @@ The engine adds **no database files** to your root directory. Everything it reme
 
 | Table (pipe) | Holds | Kept on |
 |---|---|---|
-| `mrsm_engine_state` (`mrsm:engine_state`) | The definition hash per pipe (rebuild detection) | The pipe's instance |
+| `mrsm_engine_state` (`mrsm:engine_state`) | The definition hash per pipe (rebuild detection), plus `<pipe_ref>\|remote\|<instance>` markers that remember on which other instances the pipe's ledger entries and cursors were written, so removing the pipe can forget them there | The pipe's instance |
 | `mrsm_engine_ledger` | The [dirty-range ledger](#the-dirty-range-ledger) | The child's instance |
 | `mrsm_engine_cursors` | The [edge cursors](#cursors) | The child's instance |
 | `mrsm_engine_runs`, `mrsm_engine_nodes` | [Run history](#run-history) and per-node results | The home instance |

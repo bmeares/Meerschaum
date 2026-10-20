@@ -79,7 +79,7 @@ def sandbox():
         check = run_python(
             root, plugins,
             "import meerschaum.utils.venv as v; v.activate_venv('mrsm'); "
-            "import fastapi, uvicorn, dash, a2wsgi, jwt",
+            "import fastapi, uvicorn, dash, dash_bootstrap_components, dash_ace, a2wsgi, jwt",
         )
         if check.returncode != 0:
             pytest.skip(f"The API host's dependencies are missing:\n{check.stderr[-1500:]}")

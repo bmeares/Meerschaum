@@ -26,6 +26,8 @@ pub struct Ask {
     pub no_detect_password: bool,
     /// `noask=True`.
     pub noask: bool,
+    /// Suggestions for a filtering dropdown (any answer is still accepted).
+    pub suggestions: Vec<String>,
 }
 
 impl Ask {
@@ -63,6 +65,69 @@ impl Ask {
         self.password = true;
         self
     }
+
+    /// A dropdown of `items` which filters while the user types (`bootstrap pipes`).
+    pub fn suggestions(mut self, items: Vec<String>) -> Ask {
+        self.suggestions = items;
+        self
+    }
+}
+
+/// Whether a connector attribute holds a secret, by name: its prompt echoes `*` per character
+/// instead of the text (`password`, `api_key`, `secret`, `token`, `client_secret`, ...).
+///
+/// The name is split into words at `_`, `-`, `.` and case changes; a word that names a secret
+/// (`password`, `passwd`, `pwd`, `passphrase`, `secret`, `token`, `credential`, `apikey`) or a
+/// `key` that follows `api`, `private`, `access`, `secret`, `auth`, `signing`, `encryption` or
+/// `license` makes it one. A bare `key` (`partition_key`, `ssh_key_path`) does not.
+pub fn is_secret_attribute(name: &str) -> bool {
+    let mut words: Vec<String> = Vec::new();
+    let mut word = String::new();
+    let mut previous_lower = false;
+    for c in name.chars() {
+        if matches!(c, '_' | '-' | '.' | ' ') {
+            if !word.is_empty() {
+                words.push(std::mem::take(&mut word));
+            }
+            previous_lower = false;
+            continue;
+        }
+        if c.is_uppercase() && previous_lower && !word.is_empty() {
+            words.push(std::mem::take(&mut word));
+        }
+        previous_lower = c.is_lowercase() || c.is_ascii_digit();
+        word.extend(c.to_lowercase());
+    }
+    if !word.is_empty() {
+        words.push(word);
+    }
+    const SECRET_WORDS: &[&str] = &[
+        "password",
+        "passwd",
+        "pwd",
+        "passphrase",
+        "secret",
+        "secrets",
+        "token",
+        "tokens",
+        "credential",
+        "credentials",
+        "apikey",
+    ];
+    const KEY_PREFIXES: &[&str] = &[
+        "api",
+        "private",
+        "access",
+        "secret",
+        "auth",
+        "signing",
+        "encryption",
+        "license",
+    ];
+    words.iter().enumerate().any(|(i, w)| {
+        SECRET_WORDS.contains(&w.as_str())
+            || (w == "key" && i > 0 && KEY_PREFIXES.contains(&words[i - 1].as_str()))
+    })
 }
 
 /// The error an interactive prompt raises when input ends (`EOFError`).
@@ -111,6 +176,12 @@ pub fn ask(rt: &mut Runtime<'_>, question: &str, options: &Ask) -> Result<String
         crate::format::progress::suspend();
         let read = if is_password {
             rt.host.read_secret(&text)
+        } else if !options.suggestions.is_empty() {
+            rt.host.read_line_suggesting(
+                &text,
+                &options.suggestions,
+                options.editable.as_deref().unwrap_or(""),
+            )
         } else if let Some(prefill) = &options.editable {
             rt.host.read_line_prefilled(&text, prefill)
         } else {
@@ -272,5 +343,46 @@ pub fn get_password(
             continue;
         }
         return Ok(password);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_secret_attribute;
+
+    #[test]
+    fn secret_attributes_are_recognized_by_name() {
+        for name in [
+            "password",
+            "PASSWORD",
+            "api_key",
+            "apiKey",
+            "API_KEY",
+            "secret",
+            "client_secret",
+            "token",
+            "access_token",
+            "auth-token",
+            "private_key",
+            "secret_access_key",
+            "db_passwd",
+            "credentials",
+        ] {
+            assert!(is_secret_attribute(name), "{name}");
+        }
+        for name in [
+            "host",
+            "port",
+            "username",
+            "client_id",
+            "database",
+            "partition_key",
+            "ssh_key_path",
+            "key",
+            "tokenizer",
+            "protocol",
+        ] {
+            assert!(!is_secret_attribute(name), "{name}");
+        }
     }
 }

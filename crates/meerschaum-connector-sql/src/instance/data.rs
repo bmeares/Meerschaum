@@ -957,7 +957,13 @@ impl SqlConnector {
         newest: bool,
     ) -> Option<DateBound> {
         let query = self.get_sync_time_query(sp, state, params, newest)?;
-        let v = self.value(&query).await?;
+        // Without `params` the text only depends on the table, so it is prepared once per
+        // pooled connection on PostgreSQL instead of parsed (a round trip) on every call.
+        let v = if params.is_none_or(|p| p.is_empty()) {
+            self.value_catalog(&query).await?
+        } else {
+            self.value(&query).await?
+        };
         let bound = sync_time_from_sql(&v)?;
         // PARITY: v4 restores the pipe timezone after parsing SQLite's raw timestamp text.
         self.parse_date_bound(sp, &state.dtypes, Some(bound))

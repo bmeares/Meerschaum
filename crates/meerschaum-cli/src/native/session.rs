@@ -150,6 +150,10 @@ impl Default for Session {
     }
 }
 
+/// How long an interrupted action waits for the leases of its dropped engine tasks to be
+/// handed back.
+const LEASE_DRAIN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
+
 impl Session {
     /// A new session with a multi-threaded runtime.
     pub fn new() -> Session {
@@ -190,11 +194,11 @@ impl Session {
         let full = full_keys(keys);
         self.registered
             .lock()
-            .expect("registered")
+            .unwrap_or_else(|e| e.into_inner())
             .insert(full.clone());
         self.instances
             .lock()
-            .expect("instances")
+            .unwrap_or_else(|e| e.into_inner())
             .insert(full, instance)
     }
 
@@ -206,15 +210,21 @@ impl Session {
     /// Forget the connector for `keys` (registered or built); the next lookup builds it again.
     pub fn unregister(&self, keys: &str) -> Option<Instance> {
         let full = full_keys(keys);
-        self.registered.lock().expect("registered").remove(&full);
-        self.instances.lock().expect("instances").remove(&full)
+        self.registered
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&full);
+        self.instances
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&full)
     }
 
     /// Whether the host registered the connector for `keys`.
     pub fn is_registered(&self, keys: &str) -> bool {
         self.registered
             .lock()
-            .expect("registered")
+            .unwrap_or_else(|e| e.into_inner())
             .contains(&full_keys(keys))
     }
 
@@ -238,41 +248,51 @@ impl Session {
     /// Set an isolated session's complete worker environment before creating its pool.
     /// Clones share this setting; the host process environment is never changed.
     pub fn set_worker_environment(&self, env: Vec<(String, String)>) -> Result<(), ActionError> {
-        let pool = self.pool.lock().expect("worker pool");
+        let pool = self.pool.lock().unwrap_or_else(|e| e.into_inner());
         if pool.is_some() {
             return Err(ActionError::new(
                 "RuntimeError",
                 "Worker pool already initialized.",
             ));
         }
-        *self.worker_environment.lock().expect("worker environment") = Some(env);
+        *self
+            .worker_environment
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = Some(env);
         Ok(())
     }
 
     /// Suggest the interpreter the workers run with when `MRSM_PYTHON` is not set (the host
     /// process's environment is never changed). Takes effect when the pool is created.
     pub fn set_worker_python(&self, python: &str) {
-        *self.worker_python.lock().expect("worker python") = Some(python.to_string());
+        *self.worker_python.lock().unwrap_or_else(|e| e.into_inner()) = Some(python.to_string());
     }
 
     /// Queue a hook result from an engine task for the host's output thread.
     pub fn report_hook_result(&self, result: meerschaum_core::SuccessTuple) {
-        self.hook_results.lock().expect("hook results").push(result);
+        self.hook_results
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(result);
     }
 
     /// Drain hook results in the order the engine reported them.
     pub fn take_hook_results(&self) -> Vec<meerschaum_core::SuccessTuple> {
-        std::mem::take(&mut *self.hook_results.lock().expect("hook results"))
+        std::mem::take(&mut *self.hook_results.lock().unwrap_or_else(|e| e.into_inner()))
     }
 
     /// The single lazily-created Python pool shared by this process session.
     pub fn pool(&self, config: &Config) -> WorkerPool {
         self.pool
             .lock()
-            .expect("worker pool")
+            .unwrap_or_else(|e| e.into_inner())
             .get_or_insert_with(|| {
                 let mut settings = PoolConfig::from_config(config);
-                if let Some(env) = &*self.worker_environment.lock().expect("worker environment") {
+                if let Some(env) = &*self
+                    .worker_environment
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                {
                     // Workers normally inherit the host. A compose session instead supplies
                     // a complete project view, including removal of host-only variables.
                     settings.worker.env_remove = std::env::vars_os()
@@ -289,10 +309,11 @@ impl Session {
                 if self
                     .worker_environment
                     .lock()
-                    .expect("worker environment")
+                    .unwrap_or_else(|e| e.into_inner())
                     .is_none()
                     && !std::env::var("MRSM_PYTHON").is_ok_and(|v| !v.trim().is_empty())
-                    && let Some(python) = &*self.worker_python.lock().expect("worker python")
+                    && let Some(python) =
+                        &*self.worker_python.lock().unwrap_or_else(|e| e.into_inner())
                 {
                     settings.worker.python = python.into();
                 }
@@ -306,7 +327,7 @@ impl Session {
     /// once per [`Session::invalidate_manifest`]. Starts no Python for an empty plugin tree or
     /// an unchanged cache.
     pub fn manifest(&self, config: &Config) -> Result<Arc<Manifest>, ActionError> {
-        let mut state = self.manifests.lock().expect("manifests");
+        let mut state = self.manifests.lock().unwrap_or_else(|e| e.into_inner());
         self.validate_manifests(&mut state, config, false)?;
         Ok(state.merged.clone().expect("validated manifest"))
     }
@@ -315,7 +336,7 @@ impl Session {
     /// manifests the last command cached on disk and never validates, rebuilds or imports
     /// anything; either way the manifest state is dropped, so the next call starts afresh.
     pub fn set_cached_manifest_only(&self, on: bool) {
-        *self.manifests.lock().expect("manifests") = ManifestState {
+        *self.manifests.lock().unwrap_or_else(|e| e.into_inner()) = ManifestState {
             cached_only: on,
             ..ManifestState::default()
         };
@@ -323,13 +344,19 @@ impl Session {
 
     /// Whether [`Session::set_cached_manifest_only`] is on.
     pub fn cached_manifest_only(&self) -> bool {
-        self.manifests.lock().expect("manifests").cached_only
+        self.manifests
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .cached_only
     }
 
     /// Re-arm the next [`Session::manifest`] call to validate the plugin trees again (one
     /// fingerprint walk). Cheap; the shell calls it after every command.
     pub fn invalidate_manifest(&self) {
-        self.manifests.lock().expect("manifests").validated = false;
+        self.manifests
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .validated = false;
     }
 
     /// Validate the plugin trees now, rebuilding the manifest if a plugin changed.
@@ -343,7 +370,7 @@ impl Session {
     pub fn reload_plugins(&self, config: &Config) -> Result<Arc<Manifest>, ActionError> {
         // A refused interpreter (a stale `meerschaum`) may have been fixed: ask it again.
         meerschaum_worker::worker::clear_refusals();
-        let mut state = self.manifests.lock().expect("manifests");
+        let mut state = self.manifests.lock().unwrap_or_else(|e| e.into_inner());
         self.validate_manifests(&mut state, config, true)?;
         Ok(state.merged.clone().expect("validated manifest"))
     }
@@ -456,7 +483,7 @@ impl Session {
 
     /// The Python-only manifest (what the Python worker adapters may claim).
     pub fn python_manifest(&self, config: &Config) -> Result<Arc<Manifest>, ActionError> {
-        let mut state = self.manifests.lock().expect("manifests");
+        let mut state = self.manifests.lock().unwrap_or_else(|e| e.into_inner());
         // Engine tasks call this per sync: whatever the session holds is current enough.
         if let Some(python) = state.python.clone() {
             return Ok(python);
@@ -467,7 +494,7 @@ impl Session {
 
     /// The native plugins (discovered with the manifest).
     pub fn native_plugins(&self, config: &Config) -> Result<Arc<NativePlugins>, ActionError> {
-        let mut state = self.manifests.lock().expect("manifests");
+        let mut state = self.manifests.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(natives) = state.natives.clone() {
             return Ok(natives);
         }
@@ -480,14 +507,39 @@ impl Session {
 
     /// Shut down pooled children before dropping the Tokio runtime.
     pub fn shutdown(&self) {
-        let pool = self.pool.lock().expect("worker pool").clone();
+        let pool = self.pool.lock().unwrap_or_else(|e| e.into_inner()).clone();
         if let Some(pool) = pool {
             self.block_on(pool.shutdown());
         }
     }
 
     /// Run a future to completion.
+    ///
+    /// While the `mrsm` program runs an action, Ctrl-C cancels it: the future is dropped at its
+    /// next await point and this call unwinds with [`crate::shell::interrupt::Interrupted`],
+    /// which the dispatcher turns into `Interrupted.` (see `shell::interrupt`). Hosts which own
+    /// their signals (the Python extension's `entry`, servers, jobs) never see that.
     pub fn block_on<F: Future>(&self, fut: F) -> F::Output {
+        if !crate::shell::interrupt::cancellable() {
+            return self.block_on_uninterruptible(fut);
+        }
+        match self.block_on_uninterruptible(crate::shell::interrupt::interruptible(fut)) {
+            Ok(output) => output,
+            Err(interrupted) => {
+                // The cancelled action's engine tasks were dropped mid-sync: let them hand
+                // their pipe leases back before the process (or the shell's next action) goes
+                // on, so a rerun does not wait for the leases to expire. Returns at once when
+                // none is held.
+                self.block_on_uninterruptible(meerschaum_engine::drain_lease_releases(
+                    LEASE_DRAIN_TIMEOUT,
+                ));
+                std::panic::resume_unwind(Box::new(interrupted))
+            }
+        }
+    }
+
+    /// [`Session::block_on`] without the Ctrl-C cancellation (clean-up that must finish).
+    pub fn block_on_uninterruptible<F: Future>(&self, fut: F) -> F::Output {
         match self.rt.as_ref() {
             SessionRuntime::Owned(rt) => rt.block_on(fut),
             SessionRuntime::Shared(handle) => handle.block_on(fut),
@@ -512,7 +564,7 @@ impl Session {
         let mut keys: Vec<String> = self
             .instances
             .lock()
-            .expect("instances")
+            .unwrap_or_else(|e| e.into_inner())
             .keys()
             .cloned()
             .collect();
@@ -529,7 +581,12 @@ impl Session {
     pub fn instance(&self, keys: &str, config: &Config) -> Result<Instance, ActionError> {
         let (typ, label) = split_keys(keys);
         let full = format!("{typ}:{label}");
-        if let Some(i) = self.instances.lock().expect("instances").get(&full) {
+        if let Some(i) = self
+            .instances
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&full)
+        {
             return Ok(i.clone());
         }
         if self.registered_only.load(Ordering::SeqCst) {
@@ -572,7 +629,7 @@ impl Session {
                     let inst = Instance::Other(connector);
                     self.instances
                         .lock()
-                        .expect("instances")
+                        .unwrap_or_else(|e| e.into_inner())
                         .insert(full, inst.clone());
                     return Ok(inst);
                 }
@@ -593,7 +650,7 @@ impl Session {
         };
         self.instances
             .lock()
-            .expect("instances")
+            .unwrap_or_else(|e| e.into_inner())
             .insert(full, inst.clone());
         Ok(inst)
     }

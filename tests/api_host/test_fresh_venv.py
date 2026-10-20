@@ -108,8 +108,10 @@ def _api_requirements() -> list:
 
 
 def _dash_requirements() -> list:
+    ### `meerschaum[dash]` alone is a working console: it brings the `api` extra (the host) and
+    ### `pandas` (the pipe cards) with it.
     from meerschaum.utils.packages._packages import extras
-    return list(dict.fromkeys(extras['api'] + extras['dash']))
+    return list(extras['dash'])
 
 
 def _python_of(env_dir: pathlib.Path) -> pathlib.Path:
@@ -395,27 +397,32 @@ def _dash_outputs(output: str):
 
 
 def _probe_dash(port: int, tmp_path: pathlib.Path) -> dict:
-    status, index = _get(port, '/dash/freshdash/')
-    _status, dependencies = _get(port, '/dash/freshdash/_dash-dependencies')
+    status, index = _get(port, '/dash/')
+    _status, dependencies = _get(port, '/dash/_dash-dependencies')
     dependencies = json.loads(dependencies)
 
-    def _fire(output_id: str, inputs: list):
+    def _fire(output_id: str, inputs: list, state: list = None):
         dependency = next(d for d in dependencies if output_id in d['output'])
         payload = {
             'output': dependency['output'],
             'outputs': _dash_outputs(dependency['output']),
             'inputs': inputs,
-            'changedPropIds': [f"{i['id']}.{i['property']}" for i in inputs],
-            'state': [],
+            'changedPropIds': [f"{i['id']}.{i['property']}" for i in inputs][:1],
+            'state': state or [],
         }
-        status, text = _get(port, '/dash/freshdash/_dash-update-component', body=payload)
+        status, text = _get(port, '/dash/_dash-update-component', body=payload)
         return status, (json.loads(text)['response'] if status == 200 else text)
 
     return {
         'index': (status, 'mrsm-theme-dark' in index),
         'page': _fire(
             'page-layout-div',
-            [{'id': 'mrsm-location', 'property': 'pathname', 'value': '/dash/freshdash/page'}],
+            [
+                {'id': 'mrsm-location', 'property': 'pathname', 'value': '/dash/freshdash/page'},
+                {'id': 'session-store', 'property': 'data', 'value': {}},
+            ],
+            [{'id': 'mrsm-location', 'property': 'href',
+              'value': 'http://localhost/dash/freshdash/page'}],
         ),
         'callback': _fire(
             'freshdash-out',
@@ -426,11 +433,12 @@ def _probe_dash(port: int, tmp_path: pathlib.Path) -> dict:
 
 def test_plugin_dash_app_works_with_the_dash_extra_only(tmp_path):
     """
-    `pip install meerschaum[api,dash]` and `MRSM_NO_AUTO_INSTALL=1`: a plugin-owned Dash app
-    (a `@dash_plugin` callback using `dash_extensions.enrich.Trigger`, a legacy `@web_page` layout
-    built with `dash_bootstrap_components`) renders and its callback fires through `mrsm start api`.
-    The `dash` extra must carry both packages: the host builds the app with `DashProxy` when
-    `dash_extensions` is importable, and v4 plugin layouts use `dash_bootstrap_components`.
+    `pip install meerschaum[dash]` and `MRSM_NO_AUTO_INSTALL=1`: the web console renders, and a
+    plugin's Dash page (a `@dash_plugin` callback using `dash_extensions.enrich.Trigger`, a
+    `@web_page` layout built with `dash_bootstrap_components`) is a page of it whose callback fires
+    through `mrsm start api`. The `dash` extra must carry everything the console imports, the
+    `api` extra (the host) included: the console builds the app with `DashProxy` and `dash-ace`
+    editors, and v4 plugin layouts use `dash_bootstrap_components`.
     """
     base_env = tmp_path / 'dash-env'
     venv.EnvBuilder(with_pip=True, clear=True).create(base_env)
@@ -440,7 +448,7 @@ def test_plugin_dash_app_works_with_the_dash_extra_only(tmp_path):
         tmp_path, plugin_name='freshdash', plugin_source=DASH_PLUGIN, MRSM_NO_AUTO_INSTALL='1',
     )
     probe = _serve_and_probe(
-        python, env, tmp_path, ready_path='/dash/freshdash/', probe=_probe_dash,
+        python, env, tmp_path, ready_path='/dash/', probe=_probe_dash,
     )
     assert probe['index'] == (200, True)
     status, page = probe['page']

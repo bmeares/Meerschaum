@@ -36,6 +36,12 @@ fn db_volume_names(resolved: &Json) -> Vec<String> {
         .collect()
 }
 
+/// Whether the stack config file is no longer what the switch wrote: `expected` is the SHA-256 the
+/// run's manifest records (runs of earlier versions record none), `current` the file's now.
+pub(crate) fn edited_since_switch(expected: Option<&str>, current: Option<&str>) -> bool {
+    matches!((expected, current), (Some(e), Some(c)) if e != c)
+}
+
 fn text<'a>(value: &'a Json, keys: &[&str]) -> &'a str {
     let mut current = value;
     for key in keys {
@@ -104,6 +110,26 @@ pub(crate) fn rollback(rt: &mut Runtime<'_>, opts: &Options) -> ActionResult {
         Err(e) => return Ok(SuccessTuple::fail(e)),
     };
     let existed = original.is_some();
+    // Whether the config file is what the switch wrote: a rollback replaces the whole file with
+    // the copy from before the switch, so edits made since would otherwise vanish unannounced.
+    let edited_since = edited_since_switch(
+        manifest
+            .pointer("/config/written_sha256")
+            .and_then(Json::as_str),
+        docker::sha256_file(&written)
+            .ok()
+            .map(|(sha, _)| sha)
+            .as_deref(),
+    );
+    let saved_name = stack.file.as_ref().map(|file| {
+        format!(
+            "{}.before-rollback-{}",
+            file.file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "stack.yaml".into()),
+            super::run_id()
+        )
+    });
 
     let current_image = stack
         .db()
@@ -146,6 +172,15 @@ pub(crate) fn rollback(rt: &mut Runtime<'_>, opts: &Options) -> ActionResult {
             current_volumes.join(", ")
         ));
     }
+    if edited_since && let Some(name) = &saved_name {
+        text_plan.push_str(&format!(
+            "\nWarning: {} was changed after this run (it is not what the switch wrote). The \
+             rollback replaces it with the copy from before the run, so those changes are not \
+             kept in the stack config; the current file is saved as {}.\n",
+            written.display(),
+            dir.join(name).display()
+        ));
+    }
     rt.print(&format!("{text_plan}\n"));
     let question = format!("Roll the stack's database back to PostgreSQL {old_major} now?");
     if !super::ask(rt, &question, "n", opts)? {
@@ -159,13 +194,9 @@ pub(crate) fn rollback(rt: &mut Runtime<'_>, opts: &Options) -> ActionResult {
         let saved = match &current_file {
             Some(file) => match std::fs::read(file) {
                 Ok(bytes) => {
-                    let name = format!(
-                        "{}.before-rollback-{}",
-                        file.file_name()
-                            .map(|n| n.to_string_lossy().into_owned())
-                            .unwrap_or_else(|| "stack.yaml".into()),
-                        super::run_id()
-                    );
+                    let name = saved_name
+                        .clone()
+                        .unwrap_or_else(|| "stack.yaml.before-rollback".into());
                     if let Err(e) = docker::write_private(&dir.join(&name), &bytes) {
                         return Ok(SuccessTuple::fail(format!(
                             "Cannot save the current stack config: {}",
@@ -193,6 +224,7 @@ pub(crate) fn rollback(rt: &mut Runtime<'_>, opts: &Options) -> ActionResult {
         if let Err(e) = super::write_manifest(&dir, &manifest) {
             return Ok(SuccessTuple::fail(e));
         }
+        let mut login_warning: Option<String> = None;
         let result = (|| -> Res<()> {
             super::super::info(rt, &format!("Stopping {}...", services.join(", ")));
             stack.compose.stop(&services, STOP_TIMEOUT_SECONDS)?;
@@ -232,6 +264,9 @@ pub(crate) fn rollback(rt: &mut Runtime<'_>, opts: &Options) -> ActionResult {
             stack.compose.up(&[DB_SERVICE.to_string()])?;
             let id = docker::wait_healthy(&stack.compose, DB_SERVICE, START_TIMEOUT)?;
             check_running(&id, &old_volume, old_major)?;
+            login_warning = super::docker::PgContainer::new(id.clone())
+                .refused_login()
+                .map(|refused| super::switch::login_warning(&refused));
             if !dependents.is_empty() {
                 super::super::info(rt, &format!("Starting {}...", dependents.join(", ")));
                 stack.compose.up(&dependents)?;
@@ -242,10 +277,20 @@ pub(crate) fn rollback(rt: &mut Runtime<'_>, opts: &Options) -> ActionResult {
             Ok(()) => {
                 manifest["rollback_pending"] = serde_json::json!(false);
                 super::set_state(&dir, &mut manifest, "rolled_back", None);
+                if let Some(warning) = &login_warning {
+                    super::super::warn(rt, warning);
+                }
+                let kept_config = match (&saved_name, saved.is_some()) {
+                    (Some(name), true) => format!(
+                        "\nThe stack config from before the rollback is saved as {}.",
+                        dir.join(name).display()
+                    ),
+                    _ => String::new(),
+                };
                 Ok(SuccessTuple::ok(format!(
                     "The stack's database runs PostgreSQL {old_major} ('{old_image}') on '{old_volume}' \
                  again.\nThe volume '{new_volume}' was kept; remove it with `docker volume rm \
-                 {new_volume}` once you no longer need what was written to it."
+                 {new_volume}` once you no longer need what was written to it.{kept_config}"
                 )))
             }
             Err(e) => {
@@ -309,6 +354,15 @@ pub(crate) fn rollback(rt: &mut Runtime<'_>, opts: &Options) -> ActionResult {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn edits_made_after_the_switch_are_noticed() {
+        assert!(!edited_since_switch(Some("abc"), Some("abc")));
+        assert!(edited_since_switch(Some("abc"), Some("abd")));
+        // Nothing recorded (an older run) or nothing readable: no claim either way.
+        assert!(!edited_since_switch(None, Some("abc")));
+        assert!(!edited_since_switch(Some("abc"), None));
+    }
 
     #[test]
     fn the_db_volume_names_are_the_resolved_ones() {

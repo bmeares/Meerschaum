@@ -21,13 +21,47 @@ SESSION_COOKIE_NAME: str = 'mrsm-session-id'
 EXPIRES_SECONDS: int = get_config('api', 'cache', 'session_expires_minutes') * 60
 _active_sessions: Dict[str, Dict[str, Any]] = {}
 
-### Without a cache connector, the v5 API host shares the Rust console's durable instance store
-### (`crates/meerschaum-web/src/sessions.rs`, `InstanceSessions`): rows of
-### `session_id` (primary key), `data` (compact JSON string) and `expires` (Unix seconds)
-### in the temporary pipe `mrsm_sessions`. The v4 console (not the host) keeps its in-process dict.
+### Without a cache connector, the API host (which serves the console) keeps sessions in the instance,
+### where the Rust server's terminal reads them too (`crates/meerschaum-server/src/webterm.rs`): rows
+### of `session_id` (primary key), `data` (compact JSON string) and `expires` (Unix seconds)
+### in the temporary pipe `mrsm_sessions`.
 INSTANCE_SESSIONS_TARGET: str = 'mrsm_sessions'
 _instance_pipe: Any = None
 _instance_write_lock = threading.Lock()
+
+### Every Dash callback and every plugin route looks its session up; in this process a result is
+### reused for `SESSION_CACHE_SECONDS` (dropped when this process changes or deletes the session,
+### so a logout is immediate here and at most this stale in another process).
+SESSION_CACHE_SECONDS: float = 5.0
+_session_cache: Dict[str, Any] = {}
+_session_cache_lock = threading.Lock()
+
+
+def _cache_get(session_id: str):
+    with _session_cache_lock:
+        entry = _session_cache.get(session_id, None)
+    if entry is None:
+        return None
+    expires_at, data = entry
+    if time.monotonic() >= expires_at:
+        with _session_cache_lock:
+            _session_cache.pop(session_id, None)
+        return None
+    return data
+
+
+def _cache_set(session_id: str, data: Any) -> None:
+    now = time.monotonic()
+    with _session_cache_lock:
+        if len(_session_cache) > 1024:
+            for key in [k for k, (until, _) in _session_cache.items() if until <= now]:
+                _session_cache.pop(key, None)
+        _session_cache[session_id] = (now + SESSION_CACHE_SECONDS, data)
+
+
+def _cache_drop(session_id: Any) -> None:
+    with _session_cache_lock:
+        _session_cache.pop(str(session_id), None)
 
 
 def _use_instance_store() -> bool:
@@ -40,7 +74,7 @@ def _use_instance_store() -> bool:
 
 def get_instance_sessions_pipe():
     """
-    Return the temporary pipe holding sessions, with the Rust console's parameters.
+    Return the temporary pipe holding sessions, with the parameters the Rust server's session store (`meerschaum-web`) expects.
     """
     global _instance_pipe
     if _instance_pipe is None:
@@ -135,7 +169,19 @@ def clear_session_cookie(response) -> None:
     """
     Remove the session cookie from a response (e.g. on logout).
     """
-    response.delete_cookie(SESSION_COOKIE_NAME, path='/')
+    ### Dash's response adapter (`dash.callback_context.response`) has `set_cookie` only.
+    if hasattr(response, 'delete_cookie'):
+        response.delete_cookie(SESSION_COOKIE_NAME, path='/')
+        return
+    response.set_cookie(
+        SESSION_COOKIE_NAME,
+        '',
+        max_age=0,
+        expires=0,
+        path='/',
+        httponly=True,
+        samesite='Lax',
+    )
 
 
 def get_session_id_from_request(request) -> Union[str, None]:
@@ -163,6 +209,7 @@ def set_session(session_id: str, session_data: Dict[str, Any]):
     """
     Set a `session_id` to a dictionary.
     """
+    _cache_drop(session_id)
     conn = get_cache_connector()
     if conn is None and _use_instance_store():
         _instance_set(str(session_id), json.dumps(session_data, separators=(',', ':')))
@@ -185,14 +232,33 @@ def update_session(session_id: Optional[str], session_data: Dict[str, Any]):
     """
     Update the session's data dictionary.
     """
-    existing_session_data = get_session_data(session_id) or {}
+    existing_session_data = get_session_data(session_id, use_cache=False) or {}
     existing_session_data.update(session_data)
     set_session(str(session_id), existing_session_data)
 
 
-def get_session_data(session_id: Optional[str]) -> Union[Dict[str, Any], None]:
+def get_session_data(
+    session_id: Optional[str],
+    use_cache: bool = True,
+) -> Union[Dict[str, Any], None]:
     """
-    Return the session data dictionary.
+    Return the session data dictionary (looked up at most once per `SESSION_CACHE_SECONDS`
+    per process unless `use_cache` is `False`).
+    """
+    key = str(session_id)
+    if use_cache:
+        cached = _cache_get(key)
+        if cached is not None:
+            return dict(cached) if isinstance(cached, dict) else cached
+    data = _get_session_data(session_id)
+    if use_cache and data is not None:
+        _cache_set(key, dict(data))
+    return data
+
+
+def _get_session_data(session_id: Optional[str]) -> Union[Dict[str, Any], None]:
+    """
+    Return the session data dictionary from the store.
     """
     if debug:
         dprint(f"Getting session data for {session_id=}")
@@ -247,9 +313,9 @@ def delete_session(session_id: str):
     """
     Delete a session if it's been set.
     """
-    ### TODO: Delete webterm sessions.
     if debug:
         dprint(f"Deleting {session_id=}")
+    _cache_drop(session_id)
     conn = get_cache_connector()
     if conn is None and _use_instance_store():
         _instance_delete(str(session_id))

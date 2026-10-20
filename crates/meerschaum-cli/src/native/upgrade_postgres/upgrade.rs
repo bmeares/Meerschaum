@@ -81,7 +81,7 @@ pub(crate) fn upgrade(rt: &mut Runtime<'_>, opts: &Options, word: Option<&str>) 
                 server: Some(&plan.old),
             };
             let problems = switch::put_back(rt, opts.debug, &stack, &old, &mut undo, &plan.run_id);
-            super::set_state(
+            let note = super::finish_state(
                 &plan.run_dir,
                 &mut manifest,
                 if problems.is_empty() {
@@ -91,9 +91,12 @@ pub(crate) fn upgrade(rt: &mut Runtime<'_>, opts: &Options, word: Option<&str>) 
                 },
                 Some(&e.message),
             );
-            Ok(SuccessTuple::fail(failure_message(
-                &plan, &e, &problems, &undo,
-            )))
+            let mut text = failure_message(&plan, &e, &problems, &undo);
+            if let Some(note) = note {
+                text.push('\n');
+                text.push_str(&note);
+            }
+            Ok(SuccessTuple::fail(text))
         }
     }
 }
@@ -377,6 +380,8 @@ fn run(
             "The old database container did not stop; its network fence remains in place until recovery.",
         ));
     }
+    // How the old container was left: the switch checks that nothing started it again.
+    let old_stop = docker::container_run_marks(&old.container)?;
     let problems = super::fence::reconnect(&old.container, &undo.isolated);
     if !problems.is_empty() {
         return Err(StepError::new(problems.join("\n")));
@@ -424,6 +429,7 @@ fn run(
         major: plan.target.major,
         run_dir: &plan.run_dir,
         db_running: false,
+        old_stop: Some(&old_stop),
     };
     switch::switch_over(rt, steps, stack, &to, undo, manifest)
 }

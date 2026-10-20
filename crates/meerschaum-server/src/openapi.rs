@@ -148,6 +148,27 @@ pub fn operations() -> Vec<Operation> {
             Some((&[JSON_BODY], true)),
             Never,
         ),
+        // v5 (D21): the dashboard's Execute console runs an action line as an ephemeral job.
+        op(
+            "post",
+            "/execute",
+            "actions",
+            &["Actions"],
+            "Execute Action",
+            &[],
+            Some((&[JSON_BODY], true)),
+            Never,
+        ),
+        op(
+            "get",
+            "/execute/policy",
+            "actions",
+            &["Actions"],
+            "Get Execute Policy",
+            &[],
+            None,
+            UnlessPrivate,
+        ),
         op(
             "get",
             "/connectors",

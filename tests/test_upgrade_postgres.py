@@ -1144,3 +1144,134 @@ def test_extension_tuning_requires_a_live_owned_stack_endpoint():
     finally:
         first.cleanup()
         second.cleanup()
+
+
+def _db_status(stack: ScratchStack) -> str:
+    done = _docker('inspect', '--format', '{{.State.Status}}', stack.db_container, check=False)
+    return done.stdout.strip() or 'absent'
+
+
+@docker_test
+@pytest.mark.skipif(sys.platform == 'win32', reason='Unix process handling')
+def test_stack_up_start_and_restart_wait_while_the_database_is_moved():
+    """The guard covers every way to start the stopped old `db`, and only while a move runs."""
+    _require_images('timescale/timescaledb-ha:pg17', 'timescale/timescaledb-ha:pg18')
+    stack = ScratchStack('timescale/timescaledb-ha:pg17', '/home/postgres/pgdata', False, True)
+    process = None
+    try:
+        stack.check_isolation()
+        stack.up('db')
+        stack.check_sql_main()
+        stack.psql('meerschaum', 'CREATE TABLE guard_sentinel (v int); INSERT INTO guard_sentinel VALUES (7);')
+        stack.up('holder')
+        log_path = stack.scratch / 'guard.log'
+        with log_path.open('w') as log:
+            process = subprocess.Popen(
+                [stack.binary, 'upgrade', 'postgres', '18', '--yes'],
+                env=stack.env(MRSM_TEST_DOCKER='1', MRSM_TEST_UPGRADE_POSTGRES_FAIL='after_restore:meerschaum:SELECT pg_sleep(40)'),
+                cwd=str(stack.scratch), stdout=log, stderr=subprocess.STDOUT,
+                stdin=subprocess.DEVNULL, start_new_session=True,
+            )
+            deadline = time.time() + 180
+            while time.time() < deadline:
+                assert process.poll() is None, log_path.read_text()[-6000:]
+                manifests = sorted((stack.root / 'backups' / 'postgres').glob('*/manifest.json'))
+                if manifests and json.loads(manifests[-1].read_text()).get('old_db_stopped'):
+                    break
+                time.sleep(0.2)
+            else:
+                raise AssertionError(log_path.read_text()[-6000:])
+            # The old `db` is stopped for the restore: no way of starting it gets through.
+            for command in (('up', '-d', 'db', 'holder'), ('start', 'db'), ('restart', 'db'), ('start', 'holder')):
+                refused = stack.mrsm('stack', *command, timeout=300)
+                assert refused.returncode != 0, command
+                assert 'moving the database' in ' '.join(_plain_output(refused).split()), command
+            assert _db_status(stack) == 'exited'
+            process.wait(timeout=300)
+        assert process.returncode == 0, log_path.read_text()[-6000:]
+        # Nothing is held back once it ended.
+        restarted = stack.mrsm('stack', 'restart', 'holder', timeout=300)
+        assert restarted.returncode == 0, restarted.stdout + restarted.stderr
+        assert stack.psql('meerschaum', 'TABLE guard_sentinel;') == '7'
+    finally:
+        if process is not None and process.poll() is None:
+            process.kill()
+            process.wait(timeout=30)
+        stack.cleanup()
+
+
+@docker_test
+@pytest.mark.skipif(sys.platform == 'win32', reason='Unix SIGKILL recovery')
+def test_a_restore_that_began_with_db_stopped_leaves_it_stopped():
+    """A killed restore, and one whose switch fails, never start a `db` that was down before."""
+    _require_images('timescale/timescaledb-ha:pg17')
+    stack = ScratchStack('timescale/timescaledb-ha:pg17', '/home/postgres/pgdata', False, False)
+    process = None
+    taken = None
+    try:
+        stack.check_isolation()
+        stack.up('db')
+        stack.check_sql_main()
+        stack.psql('meerschaum', 'CREATE TABLE down_sentinel (v int); INSERT INTO down_sentinel VALUES (3);')
+        assert stack.mrsm('backup', 'postgres').returncode == 0
+        original = (stack.root / 'config' / 'stack.yaml').read_bytes()
+        compose_file = stack.root / 'stack' / 'docker-compose.yaml'
+        _docker(
+            'compose', '--project-name', stack.project, '-f', str(compose_file), 'stop', 'db',
+            cwd=str(stack.root / 'stack'), env={**os.environ, 'POSTGRES_PASSWORD': stack.password},
+        )
+        assert _db_status(stack) == 'exited'
+        # 1. kill -9 while the copy is being restored, then recover.
+        log_path = stack.scratch / 'down.log'
+        with log_path.open('w') as log:
+            process = subprocess.Popen(
+                [stack.binary, 'restore', 'postgres', '--yes'],
+                env=stack.env(MRSM_TEST_DOCKER='1', MRSM_TEST_UPGRADE_POSTGRES_FAIL='after_restore:meerschaum:SELECT pg_sleep(60)'),
+                cwd=str(stack.scratch), stdout=log, stderr=subprocess.STDOUT,
+                stdin=subprocess.DEVNULL, start_new_session=True,
+            )
+            deadline = time.time() + 180
+            while time.time() < deadline:
+                assert process.poll() is None, log_path.read_text()[-6000:]
+                temporary = _docker('ps', '--format', '{{.Names}}', '--filter', f'label={LABEL}', check=False).stdout.split()
+                if any(name.startswith(f'{stack.project}-pgrestore-') for name in temporary):
+                    time.sleep(8)
+                    break
+                time.sleep(0.2)
+            else:
+                raise AssertionError(log_path.read_text()[-6000:])
+            process.kill()
+            process.wait(timeout=60)
+        recovery = stack.mrsm('restore', 'postgres', '--noask')
+        assert 'stays stopped' in recovery.stdout, recovery.stdout + recovery.stderr
+        assert _db_status(stack) == 'exited'
+        assert (stack.root / 'config' / 'stack.yaml').read_bytes() == original
+        assert len(stack.volumes()) == 1
+        # 2. the switch fails (the published port is taken): the db stays down, its container is
+        #    the stack's own again, and the new volume is gone.
+        taken = socket.socket()
+        taken.bind(('127.0.0.1', stack.db_port))
+        taken.listen(1)
+        failed = stack.mrsm('restore', 'postgres', '--yes')
+        taken.close()
+        taken = None
+        assert failed.returncode != 0
+        assert 'Putting the stack back' in failed.stdout + failed.stderr
+        assert _db_status(stack) in ('created', 'exited', 'absent')
+        assert (stack.root / 'config' / 'stack.yaml').read_bytes() == original
+        assert len(stack.volumes()) == 1
+        manifests = [json.loads(m.read_text()) for m in sorted((stack.root / 'backups' / 'postgres').glob('*/manifest.json'))]
+        assert [m['state'] for m in manifests if m['kind'] == 'restore'] == ['failed', 'failed']
+        # 3. the plain restore still works and leaves the restored database running.
+        restored = stack.mrsm('restore', 'postgres', '--yes')
+        assert restored.returncode == 0, restored.stdout + restored.stderr
+        stack.wait_db()
+        assert stack.psql('meerschaum', 'TABLE down_sentinel;') == '3'
+    finally:
+        if taken is not None:
+            taken.close()
+        if process is not None and process.poll() is None:
+            process.kill()
+            process.wait(timeout=30)
+        stack.cleanup()
+

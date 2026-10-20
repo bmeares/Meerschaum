@@ -3,7 +3,7 @@
 use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, Utc};
 use rust_decimal::Decimal;
 use sqlx::mysql::MySqlSslMode;
-use sqlx::mysql::{MySql, MySqlColumn, MySqlConnectOptions, MySqlPool, MySqlPoolOptions, MySqlRow};
+use sqlx::mysql::{MySql, MySqlColumn, MySqlConnectOptions, MySqlRow};
 use sqlx::{Column, Row, TypeInfo, ValueRef};
 
 use super::SqlValue;
@@ -60,14 +60,6 @@ pub(crate) fn connect_options(spec: &ConnectionSpec) -> Result<MySqlConnectOptio
         }
     }
     Ok(opts)
-}
-
-pub(crate) async fn connect(spec: &ConnectionSpec) -> Result<MySqlPool> {
-    let opts = connect_options(spec)?;
-    Ok(MySqlPoolOptions::new()
-        .max_connections(spec.max_connections())
-        .connect_with(opts)
-        .await?)
 }
 
 /// Map a MySQL type name (as reported by sqlx) to an Arrow column kind.

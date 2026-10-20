@@ -38,11 +38,20 @@ pub fn repo_root() -> PathBuf {
 /// The stack defaults v5 changed on purpose, mapped back to v4.1.4's values in serialized text
 /// (PARITY.md W17K1-002..004): the `db` service mounts the setup FILE into the image's directory
 /// instead of the directory over it, its healthcheck asks the TCP socket and has a `start_period`,
-/// and Grafana's datasource names PostgreSQL 18. Works on compact JSON (`Value::to_json_string`,
+/// and Grafana's datasource names PostgreSQL 18; the `api` service runs this release's `full` image
+/// (`bmeares/meerschaum:<version>-full`, PARITY.md W18PK-001) instead of `bmeares/meerschaum:api`.
+/// Works on compact JSON (`Value::to_json_string`,
 /// `serde_json::to_string`, including the tagged `{"t": ..., "v": ...}` form of the YAML tests)
 /// and on YAML text, also when the YAML is itself a JSON string (escaped newlines).
 pub fn v4_stack_text(text: &str) -> String {
     let mut text = text
+        .replace(
+            &format!(
+                "bmeares/meerschaum:{}-full",
+                meerschaum_core::python_guard::expected_version()
+            ),
+            "bmeares/meerschaum:api",
+        )
         .replace(
             "/db/initdb/create-extensions.sql:/docker-entrypoint-initdb.d/100_meerschaum.sql:z,ro",
             "/db/initdb:/docker-entrypoint-initdb.d:z,ro",

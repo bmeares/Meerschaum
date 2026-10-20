@@ -5,6 +5,13 @@ name: buildx
 #   maturin wheel; `mrsm` is its console script), and slim (`--target slim`: the base wheel only),
 #   then runs the §12.1 size gate (slim ≤ 250 MB, full < 900 MB).
 #
+# Two architectures, `linux/amd64` and `linux/arm64`, each built NATIVELY on a runner of its own
+# architecture (`ubuntu-latest`, `ubuntu-24.04-arm`): the Rust release build (thin LTO, one codegen
+# unit) is far too slow under QEMU. Every architecture builds, size-gates and smoke-tests its own
+# images; a publish pushes each architecture's `<version>-<tag>-<arch>` image and the `publish` job then
+# joins them into the multi-architecture tags (`buildx.sh --merge`: `docker buildx imagetools create`).
+# A pre-release only gets version-qualified tags; the `-<arch>` tags stay in the registry.
+#
 # The size gate ENFORCES by default (5.0.0rc1 requires it, §13): the job fails when `slim`
 # exceeds 250 MB or `full` exceeds 900 MB (uncompressed, `docker image inspect`). `warn` only
 # reports (use it to look at a branch that is over budget); `skip` does not measure.
@@ -36,7 +43,16 @@ permissions:
 
 jobs:
   buildx:
-    runs-on: ubuntu-latest
+    name: buildx (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    # A release build of the wheel on a 4-core hosted runner takes a while; the default is 6 hours.
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: amd64, runner: ubuntu-latest, platform: linux/amd64 }
+          - { arch: arm64, runner: ubuntu-24.04-arm, platform: linux/arm64 }
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -46,12 +62,10 @@ jobs:
         with:
           python-version: '3.14'
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
       - name: Set Up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      # Loads this architecture's images into the runner's daemon (no QEMU, no manifest list).
       - name: Build Docker images
         id: build
         run: ./scripts/docker/buildx.sh ${{ inputs.v4_only && '--v4-only' || '' }}
@@ -105,7 +119,46 @@ jobs:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
-      # Reuses the builder's layer cache from the build step above.
-      - name: Publish Docker images
+      # Reuses the builder's layer cache from the build step above. Only the architecture's own
+      # `<version>-<tag>-<arch>` tags are pushed here; the `publish` job joins them.
+      - name: Publish this architecture's images
         if: inputs.publish
-        run: ./scripts/docker/buildx.sh --push ${{ inputs.v4_only && '--v4-only' || '' }}
+        run: |
+          ./scripts/docker/buildx.sh --push --arch-tags --platform ${{ matrix.platform }} \
+            ${{ inputs.v4_only && '--v4-only' || '' }}
+
+  # Joins the architectures' images into the published tags. Runs only for a publish, and only when
+  # every architecture built, passed its gates and pushed.
+  publish:
+    name: publish (multi-architecture tags)
+    needs: buildx
+    if: ${{ inputs.publish }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install python3
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+
+      - name: Set Up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to DockerHub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Create the multi-architecture tags
+        run: ./scripts/docker/buildx.sh --merge ${{ inputs.v4_only && '--v4-only' || '' }}
+
+      # Both architectures must be in the version-qualified full image's manifest list.
+      - name: Check the manifest list
+        run: |
+          version="$(python scripts/check_packaging.py --version)"
+          docker buildx imagetools inspect "bmeares/meerschaum:$version-full" | tee manifest.txt
+          grep -q 'linux/amd64' manifest.txt
+          grep -q 'linux/arm64' manifest.txt

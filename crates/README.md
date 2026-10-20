@@ -49,7 +49,8 @@ Dependencies point down only. No cycles; `meerschaum-core` is a leaf. Verify wit
   engine ─▶ connector              (SQLite-backed tests use connector-sql as a dev-dependency)
   jobs, compose ─▶ core
   worker ─▶ connector              (Python worker pool + adapter; used by engine/jobs/server/cli)
-  web, plugin                      (stubs; web will depend on server, plugin on kernel + core)
+  web ─▶ server, plugin ─▶ kernel + core   (web = the terminal, the job-log stream and native plugin pages;
+                                    the console itself is the Dash app of the Python package, D21)
 ```
 
 | Crate | Normal workspace dependencies |
@@ -68,7 +69,7 @@ Dependencies point down only. No cycles; `meerschaum-core` is a leaf. Verify wit
 | `meerschaum-worker` | connector, core, kernel |
 | `meerschaum-cli` | compose, connector, connector-api, connector-sql, connector-valkey, core, engine, jobs, kernel, plugin, server, web, worker |
 | `meerschaum-py` | cli, compose, connector, connector-api, connector-sql, connector-valkey, core, engine, jobs, kernel, worker (not published) |
-| `meerschaum-web` | server, connector, connector-valkey, core, engine, kernel |
+| `meerschaum-web` | server, connector, connector-valkey, core, kernel |
 | `meerschaum-plugin` | connector, core, kernel |
 
 Shared Python-behavior helpers (`pyfmt`, `Value`, dtype vocabulary, `shlex`) belong in `meerschaum-core`;
@@ -130,7 +131,7 @@ PyPI wheel, not on crates.io) is published, in lockstep at the workspace version
   `sql valkey api engine server plugin` alone, and tests it with `full`: the workspace only builds the
   features together.
 - **The sqlx `[patch]` in the root `Cargo.toml` is ignored by crates.io**: published SQL connectors build
-  against plain sqlx 0.9.x until 0.9.1 ships. The real `cargo publish` is run by the maintainer, never by CI,
+  against plain sqlx 0.9.x until 0.9.1 ships (5.0.0 does not wait for it). The real `cargo publish` is run by the maintainer, never by CI,
   and never without the maintainer's explicit authorization.
 - **The publish command** is `cargo publish --workspace --exclude meerschaum-py --locked`: it publishes the 15
   crates in dependency order and waits for the index between them (`meerschaum-py` is `publish = false`).
@@ -157,7 +158,8 @@ PyPI wheel, not on crates.io) is published, in lockstep at the workspace version
   statements are not closed without a reply). Measured on this repo's test containers (instance suites, 8 test
   threads), connections opened for `instance_sync` / `instance_dtypes` on MySQL: 314 / 493 unmitigated, 46 / 67
   mitigated, 45 / 67 with the `[patch]`; wall time of `instance_dtypes`: 2.0 s, 1.7 s, 1.1 s (MariaDB 3.5 s, 2.0 s,
-  0.9 s). 5.0.0 final waits for sqlx 0.9.1; then delete the `[patch]` section and keep or drop the mitigation
+  0.9 s). 5.0.0 ships on sqlx 0.9.0 (wheels, Docker images and release binaries use the `[patch]`); once sqlx 0.9.1
+  is on crates.io, a 5.0.x release deletes the `[patch]` section and keeps or drops the mitigation
   (it is harmless on a fixed sqlx).
 
 ## Building

@@ -14,7 +14,7 @@ use meerschaum_core::value::{Map, Value};
 
 use crate::env::{EnvDict, ProcessEnv};
 use crate::error::{ComposeError, Messages};
-use crate::project::{Project, env_dict_as_process_env, get_env_dict, get_project_name};
+use crate::project::{Project, env_dict_as_process_env, get_env_dict_in, get_project_name};
 
 /// A command compose runs in the project environment.
 #[derive(Debug, Clone, PartialEq)]
@@ -109,14 +109,23 @@ pub fn build_command(
     opts: RunOptions,
     msgs: &mut Messages,
 ) -> Result<MrsmCommand, ComposeError> {
-    build_command_with_env(args, &project.config, &project.process_env, opts, msgs)
+    build_command_with_env(
+        args,
+        &project.config,
+        &project.process_env,
+        project.compose_root.as_deref(),
+        opts,
+        msgs,
+    )
 }
 
-/// [`build_command`] for an explicit compose config and process environment.
+/// [`build_command`] for an explicit compose config and process environment (and the root
+/// compose file of the tree the project runs in, if any).
 pub fn build_command_with_env(
     args: &[String],
     config: &Map,
     process_env: &ProcessEnv,
+    compose_root: Option<&std::path::Path>,
     opts: RunOptions,
     msgs: &mut Messages,
 ) -> Result<MrsmCommand, ComposeError> {
@@ -142,10 +151,10 @@ pub fn build_command_with_env(
     let inherited_env = if replace {
         None
     } else {
-        get_env_dict(config, process_env).ok()
+        get_env_dict_in(config, process_env, compose_root).ok()
     };
     let (env, root_dir, cfg) = if replace {
-        let env = get_env_dict(config, process_env)?;
+        let env = get_env_dict_in(config, process_env, compose_root)?;
         // PARITY: in-process commands apply the environment with `replace_env()`, which raises
         // `TypeError` for non-string values from `environment:`.
         if !subprocess && !opts.capture_output {

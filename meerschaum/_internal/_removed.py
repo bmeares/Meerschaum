@@ -26,8 +26,8 @@ _ACTIONS = (
     "`meerschaum.entry([...])` or the `mrsm` command."
 )
 _SERVER = (
-    "The API server and the web console are native (`mrsm start api`); "
-    "`@api_plugin` routes and plugin-owned Dash apps run in `meerschaum.api.host`."
+    "The API server is native (`mrsm start api`); the web console (Dash) and `@api_plugin` "
+    "routes run in `meerschaum.api.host`."
 )
 _SHELL = (
     "The interactive shell is the native shell (`mrsm`): run `mrsm`, or use "
@@ -43,13 +43,6 @@ REMOVED: Dict[str, str] = {
     'meerschaum.api._events': _SERVER,
     'meerschaum.api._websockets': _SERVER,
     'meerschaum.api._chunks': _SERVER,
-    'meerschaum.api.dash.callbacks': _SERVER,
-    'meerschaum.api.dash.pages': _SERVER,
-    'meerschaum.api.dash.jobs': _SERVER,
-    'meerschaum.api.dash.plugins': _SERVER,
-    'meerschaum.api.dash.tokens': _SERVER,
-    'meerschaum.api.dash.users': _SERVER,
-    'meerschaum.api.dash.webterm': _SHELL,
     'meerschaum.api.dash.websockets': _SERVER,
     'meerschaum.api.dash.sync': _SERVER,
     'meerschaum._internal.term': _SHELL,
@@ -60,7 +53,6 @@ REMOVED: Dict[str, str] = {
     'meerschaum._internal.shell.ShellCompleter': _SHELL,
     'meerschaum._internal.shell.ValidAutoSuggest': _SHELL,
     'meerschaum._internal.shell.updates': _SHELL,
-    'meerschaum.api.dash.assets': _SERVER,
     'meerschaum._internal.shell.resources': _SHELL,
     'meerschaum.utils.daemon.FileDescriptorInterceptor': (
         "Jobs run in the Rust supervisor, which owns the capture of their output: use "

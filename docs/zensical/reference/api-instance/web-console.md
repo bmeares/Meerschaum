@@ -2,6 +2,10 @@
 
 The Meerschaum Web Console provides a graphical interface for managing your Meerschaum instance, served by the [API instance](/reference/api-instance/). To access it, start the API (`mrsm start api`) and navigate to your host URL (e.g., [http://localhost:8000](http://localhost:8000)).
 
+!!! note "The console comes with the Python package"
+
+    The Web Console is the Plotly Dash app of the Python package: install it with `pip install meerschaum[dash]` (also part of `meerschaum[full]` and the `full` Docker image). The Python API host serves it and the Rust API server proxies `/dash` to it. A standalone install (`cargo install meerschaum`, the minimal Docker image) serves the API, `/docs`, `/engine/*`, MCP and the web terminal, and shows a pointer page at `/dash` that names this command. `--no-dash` turns the console off.
+
 <img src="/assets/screenshots/web-console.png" alt="Meerschaum Web Console Dashboard">
 
 ---
@@ -23,7 +27,7 @@ You have complete control of your Meerschaum instance via the webterm, an intera
 
 <img src="/assets/screenshots/web-console-webterm.png" alt="Webterm">
 
-Run actions by clicking `Exec`, which uses the values of your currently selected dropdowns (i.e. `-c` for connectors, `-t` for tags, etc.). Alternatively, click the webterm and type your commands directly into the shell session (the choice is yours!).
+Run actions by clicking `Exec`, which uses the values of your currently selected dropdowns (i.e. `-c` for connectors, `-t` for tags, etc.). Exec, a pipe card's **Manage** menu and **Follow logs** run through the API server as an ordinary job (`POST /execute`) and stream its log into the page (`GET /logs/<job>/stream`); they are for administrators (the rule of `POST /execute`: other users only when `system.api.permissions.actions.non_admin` is set), and drop, delete and clear confirm first. Log streams follow the `jobs` rate limit and are capped (`api.permissions.log_streams.max`, default 32 per server, and `per_user`, default 4; the next one gets `429`), and a stream ends when its session does. Alternatively, click the webterm and type your commands directly into the shell session (the choice is yours!).
 
 <img src="/assets/screenshots/web-console-execute-action-button.png" alt="Execute actions via the webterm">
 
@@ -40,6 +44,10 @@ Alternatively, navigate to the dedicated **Pipes** page on the side navbar (`/da
 Expand the accordion items to view and edit parameters and other metadata about your pipes.
 
 <img src="/assets/screenshots/web-console-pipe-card-open.png" alt="Expanded pipe card on the web console">
+
+## Pipelines
+
+The **Pipelines** page (`/dash/pipelines`) shows the dependency graph of your pipes, a Gantt chart of the latest or selected run, the runs table and the run events, and every pipe card has a **Parents & Children** section. See [Visualization](/reference/pipelines/visualization/#in-the-web-console).
 
 ## Plugins
 

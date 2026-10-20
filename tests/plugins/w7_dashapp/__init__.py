@@ -3,7 +3,7 @@
 # vim:fenc=utf-8
 
 """
-Synthetic wave-7 console test plugin (legacy Dash, design §8.4): a plugin-owned Dash app with a
+Synthetic wave-7 console test plugin (Dash, design §8.4): a plugin of the console's one Dash app with a
 `@dash_plugin` callback and a `@web_page` Dash layout that reads the core `session-store`.
 
 Inert unless `MRSM_W7_CONSOLE=1`. Used by `tests/console/`. All data is synthetic.

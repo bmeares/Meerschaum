@@ -2,14 +2,16 @@
 //! `columns`, `rowcounts`, `data`, `users`, `sizes`, `partitions` and `tags`, plus `Pipe.show()`
 //! and `pprint_pipe_columns`.
 
-use meerschaum_connector::{DataQuery, DateBound, pipe_ops};
+use meerschaum_connector::{DataQuery, DateBound, InstanceConnector, pipe_ops};
 use meerschaum_core::SuccessTuple;
 use meerschaum_core::pyfmt::{JsonStyle, json_dumps};
 use meerschaum_core::value::{Map, Value};
+use meerschaum_kernel::value::DateTimeValue;
 use meerschaum_kernel::value::Value as KValue;
 
 use crate::builtin::{ActionError, ActionResult};
 use crate::dispatch::Runtime;
+use crate::format::dataframe::{DisplayOptions, Fetched, format_dataframe_display};
 use crate::format::progress::Progress;
 use crate::format::rich::console::{Justify, Renderable};
 use crate::format::rich::pretty::PyObj;
@@ -291,13 +293,268 @@ fn py_float(f: f64) -> String {
     meerschaum_core::pyfmt::float_repr(f)
 }
 
+/// How `show data` reads each pipe.
+#[derive(Clone)]
+struct DataPlan {
+    /// The window of the last N minutes (`show data 60`, and the 1440-minute default).
+    backtrack: Option<f64>,
+    begin: Option<DateBound>,
+    end: Option<DateBound>,
+    params: Option<Map>,
+    /// Pretty mode with truncation: the limits (`None`: read every row).
+    limits: Option<DisplayOptions>,
+}
+
+/// The rows a read returned: the kernel frame (whole reads, which `--nopretty` serializes) or
+/// the cells of the head and tail of a limited read.
+enum Rows {
+    Whole(meerschaum_kernel::Frame),
+    Cells(TabFrame),
+}
+
+impl Rows {
+    fn cells(&self) -> TabFrame {
+        match self {
+            Rows::Whole(df) => tab_frame(df),
+            Rows::Cells(cells) => cells.clone(),
+        }
+    }
+}
+
+/// One pipe's rows as `show data` prints them.
+struct DataRead {
+    frame: Rows,
+    /// The true number of rows in the window.
+    total: usize,
+    fetched: Fetched,
+}
+
+/// `begin` of the backtrack window: the newest value of the axis minus `minutes`.
+fn backtrack_begin(sync_time: DateBound, minutes: i64) -> DateBound {
+    match sync_time {
+        DateBound::Int(i) => DateBound::Int(i - minutes),
+        DateBound::Datetime(dt) => DateBound::Datetime(DateTimeValue {
+            utc: dt.utc - chrono::Duration::minutes(minutes),
+            tz: dt.tz,
+        }),
+    }
+}
+
+/// The rows of `tail` appended to `head` by column name.
+fn append_rows(head: TabFrame, tail: &TabFrame) -> TabFrame {
+    TabFrame {
+        columns: head
+            .columns
+            .into_iter()
+            .map(|(name, mut cells)| {
+                if let Some((_, more)) = tail.columns.iter().find(|(n, _)| *n == name) {
+                    cells.extend(more.iter().cloned());
+                }
+                (name, cells)
+            })
+            .collect(),
+    }
+}
+
+/// Whether `get_pipe_data` orders the rows by the pipe's datetime axis: the axis is the
+/// `columns:datetime` column, else the datetime column v4's `guess_datetime` finds in the dtypes
+/// (none when `dtypes:datetime` is null), it exists in the table, and the read emits an `ORDER BY`
+/// at all (it needs at least one existing `columns` entry; v4 skips the clause otherwise, and a
+/// "tail" of unordered rows is arbitrary).
+fn orders_by_datetime(
+    columns: &Map,
+    dtypes_datetime_is_null: bool,
+    dtypes: &indexmap::IndexMap<String, String>,
+) -> bool {
+    let named = |role: &str| {
+        columns
+            .get(role)
+            .filter(|v| v.truthy())
+            .map(meerschaum_core::pyfmt::py_str)
+    };
+    let axis = match named("datetime") {
+        Some(column) => Some(column),
+        None if dtypes_datetime_is_null => None,
+        None => dtypes
+            .iter()
+            .find(|(_, t)| t.starts_with("datetime"))
+            .map(|(c, _)| c.clone()),
+    };
+    let Some(axis) = axis else {
+        return false;
+    };
+    dtypes.contains_key(&axis)
+        && columns
+            .values()
+            .filter(|v| v.truthy())
+            .any(|v| dtypes.contains_key(&meerschaum_core::pyfmt::py_str(v)))
+}
+
+/// Whether the pipe has a datetime axis the rows can be ordered by (see [`orders_by_datetime`]).
+async fn has_datetime_axis(conn: &dyn InstanceConnector, pipe: &meerschaum_core::Pipe) -> bool {
+    let Ok(dtypes) = pipe_ops::get_dtypes(conn, pipe, pipe.parameters(), true).await else {
+        return false;
+    };
+    let null_datetime = matches!(pipe.dtypes().get("datetime"), Some(Value::Null));
+    orders_by_datetime(&pipe.columns(), null_datetime, &dtypes)
+}
+
+/// The head and tail of a window that has more rows than the view shows, or `None` to read it
+/// whole (a short window, an empty or missing table, or a connector that ignores `limit`).
+async fn read_limited(
+    conn: &dyn InstanceConnector,
+    pipe: &meerschaum_core::Pipe,
+    plan: &DataPlan,
+    opts: &DisplayOptions,
+) -> Option<DataRead> {
+    let mut window = DataQuery {
+        begin: plan.begin.clone(),
+        end: plan.end.clone(),
+        params: plan.params.clone(),
+        ..Default::default()
+    };
+    if let Some(minutes) = plan.backtrack {
+        // `Pipe.get_backtrack_data`: everything newer than the sync time minus the backtrack.
+        let sync_time = conn
+            .get_sync_time(pipe, plan.params.as_ref(), true)
+            .await
+            .ok()??;
+        window.begin = Some(backtrack_begin(sync_time, minutes as i64));
+        window.end = None;
+    }
+    let total = usize::try_from(conn.get_pipe_rowcount(pipe, &window).await.ok()??).ok()?;
+    if !opts.truncates(total) {
+        return None;
+    }
+    let (head_n, tail_n) = opts.head_tail();
+    let ordered = has_datetime_axis(conn, pipe).await;
+    // Without a datetime axis there is no cheap tail: the first rows and the count.
+    let head_limit = if ordered { head_n } else { head_n + tail_n };
+    let read = |limit: usize, order: &str| {
+        let query = DataQuery {
+            limit: Some(limit as i64),
+            order: Some(order.into()),
+            ..window.clone()
+        };
+        async move { conn.get_pipe_data(pipe, &query).await.ok().flatten() }
+    };
+    // The rows keep the orientation of an unlimited read: a backtrack window is newest first
+    // (`Pipe.get_backtrack_data` orders descending), the rest oldest first.
+    let (first, last) = if plan.backtrack.is_some() && ordered {
+        ("desc", "asc")
+    } else {
+        ("asc", "desc")
+    };
+    let head = read(head_limit, first).await?;
+    if head.height() > head_limit {
+        return None;
+    }
+    let head = tab_frame(&head);
+    if !ordered {
+        return Some(DataRead {
+            frame: Rows::Cells(head),
+            total,
+            fetched: Fetched::HeadOnly,
+        });
+    }
+    let tail = read(tail_n, last).await?;
+    if tail.height() > tail_n {
+        return None;
+    }
+    // The tail was read from the far end: reverse it into the orientation of the head.
+    let newest_last = tail.take(&(0..tail.height()).rev().collect::<Vec<_>>());
+    let head_rows = head.num_rows();
+    Some(DataRead {
+        frame: Rows::Cells(append_rows(head, &tab_frame(&newest_last))),
+        total,
+        fetched: Fetched::HeadTail { head: head_rows },
+    })
+}
+
+/// One pipe's rows for `show data`: limited in pretty mode when the window is long, else whole.
+async fn read_pipe_data(
+    conn: &dyn InstanceConnector,
+    pipe: &meerschaum_core::Pipe,
+    plan: &DataPlan,
+) -> Option<DataRead> {
+    if let Some(opts) = &plan.limits
+        && let Some(read) = read_limited(conn, pipe, plan, opts).await
+    {
+        return Some(read);
+    }
+    let df = match plan.backtrack {
+        Some(m) => {
+            conn.get_backtrack_data(
+                pipe,
+                m as i64,
+                &DataQuery {
+                    params: plan.params.clone(),
+                    ..Default::default()
+                },
+            )
+            .await
+        }
+        None => {
+            conn.get_pipe_data(
+                pipe,
+                &DataQuery {
+                    begin: plan.begin.clone(),
+                    end: plan.end.clone(),
+                    params: plan.params.clone(),
+                    ..Default::default()
+                },
+            )
+            .await
+        }
+    };
+    let df = df.ok().flatten()?;
+    Some(DataRead {
+        total: df.height(),
+        frame: Rows::Whole(df),
+        fetched: Fetched::All,
+    })
+}
+
+/// The pipe with the parameters registered on the instance (`Pipe.attributes`), read inside the
+/// concurrent per-pipe future.
+async fn hydrated_pipe(conn: &dyn InstanceConnector, sp: &SelectedPipe) -> meerschaum_core::Pipe {
+    let mut pipe = sp.pipe.clone();
+    if sp.hydrated {
+        return pipe;
+    }
+    if let Ok(attrs) = conn.get_pipe_attributes(&pipe).await
+        && let Some(registered) = attrs.get("parameters").and_then(Value::as_map)
+    {
+        let mut params = registered.clone();
+        for (k, v) in pipe.raw_parameters() {
+            params.insert(k.clone(), v.clone());
+        }
+        pipe.set_parameters(params);
+    }
+    pipe
+}
+
+/// The terminal width the table has to fit: the terminal of stdout, else `$COLUMNS`; a pipe or a
+/// file gets every column.
+fn display_width(rt: &Runtime<'_>) -> Option<usize> {
+    crate::format::terminal_width(1).or_else(|| {
+        (rt.env)("COLUMNS")
+            .and_then(|c| c.trim().parse::<usize>().ok())
+            .filter(|w| *w > 0)
+    })
+}
+
 /// `show data [minutes|all]`.
+///
+/// In pretty mode the output is truncated like a pandas frame (`formatting:dataframe:*`, see
+/// `format::dataframe`) and only the rows shown are read; `--all` and `--nopretty` print
+/// everything. The pipes are read concurrently (`--workers`) and printed in their order.
 pub fn show_data(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     let action = words(args, "action");
     let nopretty = flag(args, "nopretty");
     let begin = bound(args, "begin");
     let end = bound(args, "end");
-    let (inst, pipes) = selected_pipes(rt, args)?;
+    let (inst, mut pipes) = selected_pipes(rt, args)?;
     let session = session(rt);
     let conn = inst.conn();
     // PARITY: `float(action[0])` is a float (`show data 60` prints `Last 60.0 minutes`), while the
@@ -318,77 +575,123 @@ pub fn show_data(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
                 }
             }
         };
-    let params = super::params(args);
+    let limits = (!nopretty && !flag(args, "all")).then(|| {
+        let width = display_width(rt);
+        rt.with_formatter(|f| DisplayOptions::from_config(f.config(), width))
+    });
+    let plan = DataPlan {
+        backtrack: backtrack_minutes,
+        begin: begin.clone(),
+        end: end.clone(),
+        params: super::params(args),
+        limits: limits.clone(),
+    };
+    let concurrency = super::metadata::concurrency(&inst, args);
     let progress = Progress::start(rt, args, "Reading data");
     progress.set_total(pipes.len());
-    for (index, p) in pipes.iter().enumerate() {
-        progress.set_done(index);
-        let df = match backtrack_minutes {
-            Some(m) => session.block_on(conn.get_backtrack_data(
-                &p.pipe,
-                m as i64,
-                &DataQuery {
-                    params: params.clone(),
-                    ..Default::default()
-                },
-            )),
-            None => session.block_on(conn.get_pipe_data(
-                &p.pipe,
-                &DataQuery {
-                    begin: begin.clone(),
-                    end: end.clone(),
-                    params: params.clone(),
-                    ..Default::default()
-                },
-            )),
-        };
-        let df = match df {
-            Ok(Some(df)) => df,
-            Ok(None) | Err(_) => {
+    let counter = progress.counter();
+    let (conn, plan, counter) = (&conn, &plan, &counter);
+    // Whole tables are read a few pipes at a time so memory stays bounded; limited reads are
+    // small and all go at once.
+    let batch = if limits.is_some() {
+        pipes.len().max(1)
+    } else {
+        concurrency.max(1)
+    };
+    for chunk in pipes.chunks_mut(batch) {
+        let reads = session.block_on(super::metadata::ordered(
+            chunk.iter().collect(),
+            concurrency,
+            |sp| async move {
+                let pipe = hydrated_pipe(conn.as_ref(), sp).await;
+                let read = read_pipe_data(conn.as_ref(), &pipe, plan).await;
+                counter.inc();
+                read
+            },
+        ));
+        for (p, read) in chunk.iter().zip(reads) {
+            let Some(read) = read else {
                 warn(rt, &format!("Failed to fetch data for {}.", p.pipe));
                 continue;
+            };
+            let info_msg = match backtrack_minutes {
+                Some(m) => format!(
+                    "Last {} minute{} of data for {}:",
+                    if default_backtrack {
+                        (m as i64).to_string()
+                    } else {
+                        py_float(m)
+                    },
+                    if m != 1.0 { "s" } else { "" },
+                    p.pipe
+                ),
+                None => format!(
+                    "Data for {}{}{}:",
+                    p.pipe,
+                    bound_str(args, "begin")
+                        .map(|b| format!(" from {b}"))
+                        .unwrap_or_default(),
+                    bound_str(args, "end")
+                        .map(|e| format!(" to {e}"))
+                        .unwrap_or_default(),
+                ),
+            };
+            if !nopretty {
+                info(rt, &info_msg);
+                let cells = read.frame.cells();
+                let text = match &limits {
+                    Some(opts) => format_dataframe_display(&cells, read.total, read.fetched, opts),
+                    None => format_dataframe(&cells, None),
+                };
+                rt.print(&format!("{text}\n"));
+            } else {
+                rt.print(&format!("{}\n", dumps(&Value::Map(pipe_state(&p.pipe)))));
+                let Rows::Whole(df) = &read.frame else {
+                    unreachable!("--nopretty reads whole tables");
+                };
+                let json = meerschaum_connector_api::wire::to_json(
+                    df,
+                    None,
+                    &meerschaum_connector_api::wire::ToJsonOptions {
+                        columns_orient: true,
+                        ..Default::default()
+                    },
+                );
+                pprint(rt, &PyObj::Str(json), true);
             }
-        };
-        let info_msg = match backtrack_minutes {
-            Some(m) => format!(
-                "Last {} minute{} of data for {}:",
-                if default_backtrack {
-                    (m as i64).to_string()
-                } else {
-                    py_float(m)
-                },
-                if m != 1.0 { "s" } else { "" },
-                p.pipe
-            ),
-            None => format!(
-                "Data for {}{}{}:",
-                p.pipe,
-                bound_str(args, "begin")
-                    .map(|b| format!(" from {b}"))
-                    .unwrap_or_default(),
-                bound_str(args, "end")
-                    .map(|e| format!(" to {e}"))
-                    .unwrap_or_default(),
-            ),
-        };
-        if !nopretty {
-            info(rt, &info_msg);
-            let text = format_dataframe(&tab_frame(&df), None);
-            rt.print(&format!("{text}\n"));
-        } else {
-            rt.print(&format!("{}\n", dumps(&Value::Map(pipe_state(&p.pipe)))));
-            let json = meerschaum_connector_api::wire::to_json(
-                &df,
-                None,
-                &meerschaum_connector_api::wire::ToJsonOptions {
-                    columns_orient: true,
-                    ..Default::default()
-                },
-            );
-            pprint(rt, &PyObj::Str(json), true);
         }
     }
+    drop(progress);
     Ok(SuccessTuple::success())
+}
+
+/// What `pprint_pipe_columns` prints about one pipe, read from the instance.
+struct ColumnsInfo {
+    pipe: meerschaum_core::Pipe,
+    cols: Map,
+    cols_types: indexmap::IndexMap<String, String>,
+    dtypes: indexmap::IndexMap<String, String>,
+}
+
+/// The registered columns, the table's column types and the resolved dtypes of a pipe.
+async fn read_columns(conn: &dyn InstanceConnector, sp: &SelectedPipe) -> ColumnsInfo {
+    let pipe = hydrated_pipe(conn, sp).await;
+    let exists = conn.pipe_exists(&pipe).await.unwrap_or(false);
+    let cols: Map = if exists { pipe.columns() } else { Map::new() };
+    let cols_types = if exists {
+        conn.get_pipe_columns_types(&pipe).await.unwrap_or_default()
+    } else {
+        Default::default()
+    };
+    let dtypes = pipe_ops::get_dtypes(conn, &pipe, pipe.parameters(), true)
+        .await
+        .unwrap_or_default();
+    ColumnsInfo {
+        pipe,
+        cols,
+        cols_types,
+        dtypes,
+    }
 }
 
 /// `pprint_pipe_columns(pipe, nopretty)`.
@@ -398,27 +701,20 @@ pub fn pprint_pipe_columns(
     sp: &mut SelectedPipe,
     nopretty: bool,
 ) {
-    hydrate(rt, inst, sp);
     let session = session(rt);
     let conn = inst.conn();
-    let pipe = sp.pipe.clone();
-    let exists = session.block_on(conn.pipe_exists(&pipe)).unwrap_or(false);
-    let cols: Map = if exists { pipe.columns() } else { Map::new() };
-    let cols_types = if exists {
-        session
-            .block_on(conn.get_pipe_columns_types(&pipe))
-            .unwrap_or_default()
-    } else {
-        Default::default()
-    };
-    let dtypes = session
-        .block_on(pipe_ops::get_dtypes(
-            conn.as_ref(),
-            &pipe,
-            pipe.parameters(),
-            true,
-        ))
-        .unwrap_or_default();
+    let info = session.block_on(read_columns(conn.as_ref(), sp));
+    print_columns(rt, info, nopretty);
+}
+
+/// Print what [`read_columns`] returned.
+fn print_columns(rt: &mut Runtime<'_>, info: ColumnsInfo, nopretty: bool) {
+    let ColumnsInfo {
+        pipe,
+        cols,
+        cols_types,
+        dtypes,
+    } = info;
     if nopretty {
         let types_map: Map = cols_types
             .iter()
@@ -499,12 +795,25 @@ pub fn pprint_pipe_columns(
 /// `show columns`.
 pub fn show_columns(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     let nopretty = flag(args, "nopretty");
-    let (inst, mut pipes) = selected_pipes(rt, args)?;
+    let (inst, pipes) = selected_pipes(rt, args)?;
+    let session = session(rt);
+    let conn = inst.conn();
     let progress = Progress::start(rt, args, "Reading columns");
     progress.set_total(pipes.len());
-    for sp in pipes.iter_mut() {
-        pprint_pipe_columns(rt, &inst, sp, nopretty);
-        progress.inc();
+    let counter = progress.counter();
+    let (conn, counter) = (&conn, &counter);
+    // Read concurrently (`--workers`), print in the order of the pipes.
+    let infos = session.block_on(super::metadata::ordered(
+        pipes.iter().collect(),
+        super::metadata::concurrency(&inst, args),
+        |sp| async move {
+            let info = read_columns(conn.as_ref(), sp).await;
+            counter.inc();
+            info
+        },
+    ));
+    for info in infos {
+        print_columns(rt, info, nopretty);
     }
     drop(progress);
     Ok(SuccessTuple::success())
@@ -537,7 +846,54 @@ pub fn format_bytes(n: Option<i64>) -> String {
     meerschaum_connector_sql::instance::values::format_bytes(n)
 }
 
+/// The physical table behind a pipe: the database (flavor, host, port, database; never the
+/// credentials), the schema and the target, so pipes that share a `target` are recognized.
+/// A non-SQL instance is identified by its connector keys.
+fn table_identity(inst: &Instance, pipe: &meerschaum_core::Pipe) -> String {
+    match inst.sql() {
+        Some(sql) => {
+            let spec = sql.spec();
+            let (target, schema) = match sql.sql_pipe(pipe) {
+                Ok(sp) => {
+                    let schema = sql.get_pipe_schema(&sp);
+                    (sp.target.clone(), schema)
+                }
+                Err(_) => (pipe.target(None).unwrap_or_default(), None),
+            };
+            format!(
+                "{}|{}|{}|{}|{}|{}",
+                spec.flavor,
+                spec.host.as_deref().unwrap_or_default(),
+                spec.port.map(|p| p.to_string()).unwrap_or_default(),
+                spec.database.as_deref().unwrap_or_default(),
+                schema.unwrap_or_default(),
+                target
+            )
+        }
+        None => format!("{}|{}", inst.keys(), pipe.target(None).unwrap_or_default()),
+    }
+}
+
+/// A pipe's table identity and its size in bytes.
+async fn read_size(inst: &Instance, sp: &SelectedPipe) -> (String, Option<i64>) {
+    let conn = inst.conn();
+    let pipe = hydrated_pipe(conn.as_ref(), sp).await;
+    let size = conn.get_pipe_size(&pipe).await.unwrap_or(None);
+    (table_identity(inst, &pipe), size)
+}
+
+/// One row of `show sizes`.
+struct SizeRow {
+    pipe: SelectedPipe,
+    size: Option<i64>,
+    /// How many of the selected pipes share this pipe's table (1: not shared).
+    sharers: usize,
+}
+
 /// `show sizes`.
+///
+/// Pipes whose `target` is the same physical table (same database, schema and table) show the
+/// same size, are marked `shared xN`, and the total counts the table once.
 pub fn show_sizes(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     let nopretty = flag(args, "nopretty");
     let (inst, pipes) = selected_pipes(rt, args)?;
@@ -545,9 +901,8 @@ pub fn show_sizes(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
         return Ok(SuccessTuple::fail("No pipes selected."));
     }
     let session = session(rt);
-    let conn = inst.conn();
-    let mut sizes: Vec<(SelectedPipe, Option<i64>)> = Vec::new();
-    let conn = &conn;
+    let mut sized: Vec<(SelectedPipe, String, Option<i64>)> = Vec::new();
+    let inst_ref = &inst;
     let concurrency = super::metadata::concurrency(&inst, args);
     let progress = Progress::start(rt, args, "Measuring pipe sizes");
     progress.set_total(pipes.len());
@@ -559,9 +914,9 @@ pub fn show_sizes(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
                 pipes.iter().collect(),
                 concurrency,
                 |p| async move {
-                    let size = conn.get_pipe_size(&p.pipe).await.unwrap_or(None);
+                    let read = read_size(inst_ref, p).await;
                     counter.inc();
-                    size
+                    read
                 },
             ))
             .into_iter()
@@ -573,40 +928,68 @@ pub fn show_sizes(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
         if !nopretty {
             info(rt, &format!("Calculating size for {}...", p.pipe));
         }
-        let size = match fetched.as_mut() {
+        let (identity, size) = match fetched.as_mut() {
             Some(results) => results.next().expect("one size per pipe"),
-            None => session
-                .block_on(conn.get_pipe_size(&p.pipe))
-                .unwrap_or(None),
+            None => session.block_on(read_size(&inst, &p)),
         };
         if !nopretty {
             info(rt, &format!("Size for {}: {}", p.pipe, format_bytes(size)));
         }
-        sizes.push((p, size));
+        sized.push((p, identity, size));
     }
     drop(progress);
+    let mut sharing: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+    for (_, identity, _) in &sized {
+        *sharing.entry(identity.as_str()).or_default() += 1;
+    }
+    // Each physical table counts once in the total.
+    let mut counted = std::collections::HashSet::new();
+    let total: i64 = sized
+        .iter()
+        .filter(|(_, identity, _)| counted.insert(identity.as_str()))
+        .filter_map(|(_, _, size)| *size)
+        .sum();
+    let sharers: Vec<usize> = sized
+        .iter()
+        .map(|(_, id, _)| sharing[id.as_str()])
+        .collect();
+    let mut sizes: Vec<SizeRow> = sized
+        .into_iter()
+        .zip(sharers)
+        .map(|((pipe, _, size), sharers)| SizeRow {
+            pipe,
+            size,
+            sharers,
+        })
+        .collect();
     sizes.sort_by(|a, b| {
-        let ka = (a.1.is_some(), a.1.unwrap_or(0));
-        let kb = (b.1.is_some(), b.1.unwrap_or(0));
+        let ka = (a.size.is_some(), a.size.unwrap_or(0));
+        let kb = (b.size.is_some(), b.size.unwrap_or(0));
         kb.cmp(&ka)
     });
-    let total: i64 = sizes.iter().filter_map(|(_, s)| *s).sum();
+    let shared = |n: usize| (n > 1).then(|| format!("shared x{n}"));
     if nopretty {
         let mut out = String::new();
-        for (p, s) in &sizes {
-            out.push_str(&format!("{}\t{}\n", p.pipe, format_bytes(*s)));
+        for row in &sizes {
+            out.push_str(&format!("{}\t{}", row.pipe.pipe, format_bytes(row.size)));
+            if let Some(note) = shared(row.sharers) {
+                out.push('\t');
+                out.push_str(&note);
+            }
+            out.push('\n');
         }
         rt.print(&out);
         return Ok(SuccessTuple::success());
     }
     let text = rt.with_formatter(|f| {
-        let rows: Vec<(String, String, String)> = sizes
+        let rows: Vec<(String, String, String, Option<String>)> = sizes
             .iter()
-            .map(|(p, s)| {
+            .map(|row| {
                 (
-                    p.pipe.to_string(),
-                    f.pipe_repr(&pipe_keys(&p.pipe)),
-                    format_bytes(*s),
+                    row.pipe.pipe.to_string(),
+                    f.pipe_repr(&pipe_keys(&row.pipe.pipe)),
+                    format_bytes(row.size),
+                    shared(row.sharers),
                 )
             })
             .collect();
@@ -626,9 +1009,10 @@ pub fn show_sizes(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
         let header = format!("    {:<name_w$}  {:>size_w$}", "Pipe", "Size");
         let sep = format!("    {}", "-".repeat(header.chars().count() - 4));
         let mut lines = vec![header, sep.clone()];
-        for (plain, hl, s) in &rows {
+        for (plain, hl, s, note) in &rows {
             let pad = " ".repeat(name_w - plain.chars().count());
-            lines.push(format!("    {hl}{pad}  {s:>size_w$}"));
+            let note = note.as_ref().map(|n| format!("  {n}")).unwrap_or_default();
+            lines.push(format!("    {hl}{pad}  {s:>size_w$}{note}"));
         }
         lines.push(sep);
         lines.push(format!("    {:<name_w$}  {:>size_w$}", "Total", total_str));
@@ -1026,5 +1410,265 @@ mod partition_interval_tests {
             "1,440 (int axis)"
         );
         assert_eq!(partition_interval_str(None), "-");
+    }
+}
+
+#[cfg(test)]
+mod limited_read_tests {
+    use super::*;
+    use meerschaum_connector_sql::uri::{ConnectionSpec, ConnectorAttributes};
+    use meerschaum_connector_sql::{SqlConnector, flavor::Flavor};
+    use std::sync::Arc;
+
+    async fn connector(dir: &std::path::Path, rows: usize) -> Arc<SqlConnector> {
+        let attrs = ConnectorAttributes {
+            flavor: Some(Flavor::Sqlite),
+            database: Some(dir.join("show.db").to_string_lossy().into_owned()),
+            ..Default::default()
+        };
+        let sql = Arc::new(
+            SqlConnector::connect("show", ConnectionSpec::from_attributes(&attrs).unwrap())
+                .await
+                .unwrap(),
+        );
+        sql.exec("CREATE TABLE show_t (id INTEGER PRIMARY KEY, dt TEXT, v REAL)")
+            .await
+            .unwrap();
+        for i in 0..rows {
+            sql.exec(&format!(
+                "INSERT INTO show_t VALUES ({i}, datetime('2024-01-01', '+{i} hours'), {i}.5)"
+            ))
+            .await
+            .unwrap();
+        }
+        sql
+    }
+
+    fn pipe(datetime: bool) -> meerschaum_core::Pipe {
+        let mut columns = Map::new();
+        columns.insert("primary".into(), Value::Str("id".into()));
+        if datetime {
+            columns.insert("datetime".into(), Value::Str("dt".into()));
+        }
+        let mut params = Map::new();
+        params.insert("columns".into(), Value::Map(columns));
+        params.insert("target".into(), Value::Str("show_t".into()));
+        meerschaum_core::Pipe::builder("sql:show", "t")
+            .parameters(params)
+            .build()
+            .unwrap()
+    }
+
+    fn plan(limits: Option<DisplayOptions>) -> DataPlan {
+        DataPlan {
+            backtrack: None,
+            begin: None,
+            end: None,
+            params: None,
+            limits,
+        }
+    }
+
+    fn options() -> DisplayOptions {
+        DisplayOptions {
+            max_rows: 20,
+            min_rows: 6,
+            max_columns: None,
+            max_colwidth: 50,
+            width: None,
+        }
+    }
+
+    fn first_column(read: &DataRead) -> Vec<String> {
+        let cells = read.frame.cells();
+        cells.columns[0]
+            .1
+            .iter()
+            .map(|c| match c {
+                Cell::Int(i) => i.to_string(),
+                other => format!("{other:?}"),
+            })
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn a_long_window_reads_only_the_head_and_the_tail() {
+        let dir = tempfile::tempdir().unwrap();
+        let sql = connector(dir.path(), 100).await;
+        sql.enable_query_log();
+        let conn: &dyn InstanceConnector = sql.as_ref();
+        let read = read_pipe_data(conn, &pipe(true), &plan(Some(options())))
+            .await
+            .expect("rows");
+        assert_eq!(read.total, 100);
+        assert_eq!(read.fetched, Fetched::HeadTail { head: 3 });
+        assert_eq!(first_column(&read), ["0", "1", "2", "97", "98", "99"]);
+        // No statement read the whole table: every `SELECT *`-style read carries a LIMIT.
+        let reads: Vec<String> = sql
+            .take_query_log()
+            .into_iter()
+            .filter(|q| q.contains("show_t") && !q.contains("COUNT") && !q.contains("count("))
+            .filter(|q| q.trim_start().to_uppercase().starts_with("SELECT"))
+            .filter(|q| !q.contains("pragma") && !q.contains("sqlite_master"))
+            .collect();
+        assert!(!reads.is_empty());
+        assert!(
+            reads.iter().all(|q| q.to_uppercase().contains("LIMIT")),
+            "{reads:#?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_backtrack_window_keeps_the_newest_first_orientation() {
+        let dir = tempfile::tempdir().unwrap();
+        let sql = connector(dir.path(), 100).await;
+        let conn: &dyn InstanceConnector = sql.as_ref();
+        let mut backtrack = plan(Some(options()));
+        // 60 hours back from the newest row: 61 rows (the bound is inclusive).
+        backtrack.backtrack = Some(3600.0);
+        let read = read_pipe_data(conn, &pipe(true), &backtrack)
+            .await
+            .expect("rows");
+        assert_eq!(read.total, 61);
+        assert_eq!(first_column(&read), ["99", "98", "97", "41", "40", "39"]);
+        // Short enough to read whole: the plain backtrack read, newest first as in v4.
+        backtrack.backtrack = Some(600.0);
+        let short = read_pipe_data(conn, &pipe(true), &backtrack)
+            .await
+            .expect("rows");
+        assert_eq!((short.total, short.fetched), (11, Fetched::All));
+        assert_eq!(first_column(&short)[..2], ["99", "98"]);
+    }
+
+    #[tokio::test]
+    async fn a_pipe_without_a_datetime_reads_the_first_rows_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let sql = connector(dir.path(), 100).await;
+        let conn: &dyn InstanceConnector = sql.as_ref();
+        // The table has a TEXT column named `dt`, not a datetime dtype, so it has no axis.
+        let read = read_pipe_data(conn, &pipe(false), &plan(Some(options())))
+            .await
+            .expect("rows");
+        assert_eq!(read.total, 100);
+        assert_eq!(read.fetched, Fetched::HeadOnly);
+        assert_eq!(first_column(&read), ["0", "1", "2", "3", "4", "5"]);
+    }
+
+    #[test]
+    fn the_axis_is_columns_datetime_or_v4s_guess_and_needs_an_order_by() {
+        let dtypes = |pairs: &[(&str, &str)]| -> indexmap::IndexMap<String, String> {
+            pairs
+                .iter()
+                .map(|(c, t)| (c.to_string(), t.to_string()))
+                .collect()
+        };
+        let cols = |pairs: &[(&str, &str)]| -> Map {
+            pairs
+                .iter()
+                .map(|(r, c)| (r.to_string(), Value::Str(c.to_string())))
+                .collect()
+        };
+        let table = dtypes(&[("id", "int"), ("ts", "datetime64[ns, UTC]"), ("v", "float")]);
+        // `columns:datetime`, or the guessed datetime dtype next to another index column.
+        assert!(orders_by_datetime(
+            &cols(&[("datetime", "ts")]),
+            false,
+            &table
+        ));
+        assert!(orders_by_datetime(&cols(&[("id", "id")]), false, &table));
+        // A datetime dtype alone: v4 emits no ORDER BY, so a "tail" would be arbitrary.
+        assert!(!orders_by_datetime(&cols(&[]), false, &table));
+        // `dtypes:datetime: null` switches the guess off; a missing column is no axis.
+        assert!(!orders_by_datetime(&cols(&[("id", "id")]), true, &table));
+        assert!(!orders_by_datetime(
+            &cols(&[("datetime", "gone")]),
+            false,
+            &table
+        ));
+        assert!(!orders_by_datetime(
+            &cols(&[("id", "id")]),
+            false,
+            &dtypes(&[("id", "int"), ("v", "float")])
+        ));
+    }
+
+    #[tokio::test]
+    async fn a_datetime_dtype_without_columns_prints_the_head_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let sql = connector(dir.path(), 0).await;
+        sql.exec("CREATE TABLE show_d (ts DATETIME, v REAL)")
+            .await
+            .unwrap();
+        for i in 0..100 {
+            // Out of time order: an unordered "tail" would be the last physical rows.
+            sql.exec(&format!(
+                "INSERT INTO show_d VALUES (datetime('2024-01-01', '+{} hours'), {i}.5)",
+                (i * 37) % 100
+            ))
+            .await
+            .unwrap();
+        }
+        let mut params = Map::new();
+        params.insert("target".into(), Value::Str("show_d".into()));
+        params.insert(
+            "dtypes".into(),
+            Value::Map(Map::from_iter([(
+                "ts".into(),
+                Value::Str("datetime".into()),
+            )])),
+        );
+        let pipe = meerschaum_core::Pipe::builder("sql:show", "d")
+            .parameters(params)
+            .build()
+            .unwrap();
+        let conn: &dyn InstanceConnector = sql.as_ref();
+        let read = read_pipe_data(conn, &pipe, &plan(Some(options())))
+            .await
+            .expect("rows");
+        assert_eq!(read.total, 100);
+        assert_eq!(read.fetched, Fetched::HeadOnly);
+    }
+
+    #[tokio::test]
+    async fn short_windows_unlimited_reads_and_missing_tables_read_whole() {
+        let dir = tempfile::tempdir().unwrap();
+        let sql = connector(dir.path(), 15).await;
+        let conn: &dyn InstanceConnector = sql.as_ref();
+        let short = read_pipe_data(conn, &pipe(true), &plan(Some(options())))
+            .await
+            .expect("rows");
+        assert_eq!((short.total, short.fetched), (15, Fetched::All));
+        let all = read_pipe_data(conn, &pipe(true), &plan(None))
+            .await
+            .expect("rows");
+        assert_eq!((all.total, all.fetched), (15, Fetched::All));
+        let long_dir = tempfile::tempdir().unwrap();
+        let long = connector(long_dir.path(), 40).await;
+        let unlimited = read_pipe_data(long.as_ref(), &pipe(true), &plan(None))
+            .await
+            .expect("rows");
+        assert_eq!((unlimited.total, unlimited.fetched), (40, Fetched::All));
+        let missing = meerschaum_core::Pipe::builder("sql:show", "nothing")
+            .build()
+            .unwrap();
+        assert!(
+            read_pipe_data(conn, &missing, &plan(Some(options())))
+                .await
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn the_backtrack_window_starts_before_the_newest_value() {
+        assert_eq!(
+            backtrack_begin(DateBound::Int(100), 30).py_str(),
+            "70".to_string()
+        );
+        let day = chrono::NaiveDate::from_ymd_opt(2024, 1, 2)
+            .unwrap()
+            .and_hms_opt(0, 0, 0)
+            .unwrap();
+        let begin = backtrack_begin(DateBound::Datetime(DateTimeValue::naive(day)), 90);
+        assert_eq!(begin.py_str(), "2024-01-01 22:30:00");
     }
 }

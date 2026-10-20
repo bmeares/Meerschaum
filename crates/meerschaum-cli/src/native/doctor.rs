@@ -15,7 +15,7 @@
 //! Layout: [`Status`] / [`Check`] / [`Report`] (the model and both renderings), the `judge_*`
 //! functions (decisions), the `gather_*` functions (I/O), and [`doctor`] (the action).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -1028,7 +1028,8 @@ pub fn split_env_vars(names: &[String], custom_types: &[String]) -> (Vec<String>
     for name in names {
         let known =
             meerschaum_core::config::parse_connector_env_var(name).is_some_and(|(typ, _)| {
-                matches!(typ.as_str(), "sql" | "api" | "valkey") || custom_types.contains(&typ)
+                meerschaum_core::config::connector_types::is_builtin_connector_type(&typ)
+                    || custom_types.contains(&typ)
             });
         if known {
             connectors.push(name.clone());
@@ -2844,10 +2845,27 @@ fn run_checks(args: &ArgsMap, rt: &mut Runtime<'_>) -> Report {
         host: duckdb_host,
     };
     let explicit_instance = super::string(args, "mrsm_instance").is_some();
+    // The types `apply_environment_uris` accepts besides the built-in ones: the loaded
+    // manifest's, the cached manifests' and the `@make_connector` classes of the plugin sources.
     let custom_types: Vec<String> = manifest
         .as_ref()
-        .map(|m| m.connector_types.keys().cloned().collect())
-        .unwrap_or_default();
+        .map(|m| {
+            m.connector_types
+                .keys()
+                .cloned()
+                .collect::<BTreeSet<String>>()
+        })
+        .unwrap_or_default()
+        .into_iter()
+        .chain(
+            meerschaum_core::config::connector_types::plugin_connector_types(
+                &paths.root_dir,
+                &paths.plugins_dirs,
+            ),
+        )
+        .collect::<BTreeSet<String>>()
+        .into_iter()
+        .collect();
     let jobs_dir = paths.path("DAEMON_RESOURCES_PATH");
     let venvs_dir = paths
         .get("VIRTENV_RESOURCES_PATH")
@@ -3227,6 +3245,9 @@ mod tests {
         let names: Vec<String> = [
             "MRSM_SQL_MAIN",
             "MRSM_API_PROD",
+            "MRSM_VALKEY_CACHE",
+            "MRSM_PLUGIN_TOOLS",
+            "MRSM_SYSTEMD_UNITS",
             "MRSM_DUCKDB_LIB",
             "MRSM_FOO_BAR",
             "MRSM_TEST_PG_URI",
@@ -3236,7 +3257,14 @@ mod tests {
         let (connectors, others) = split_env_vars(&names, &["foo".to_string()]);
         assert_eq!(
             connectors,
-            ["MRSM_SQL_MAIN", "MRSM_API_PROD", "MRSM_FOO_BAR"]
+            [
+                "MRSM_SQL_MAIN",
+                "MRSM_API_PROD",
+                "MRSM_VALKEY_CACHE",
+                "MRSM_PLUGIN_TOOLS",
+                "MRSM_SYSTEMD_UNITS",
+                "MRSM_FOO_BAR"
+            ]
         );
         assert_eq!(others, ["MRSM_DUCKDB_LIB", "MRSM_TEST_PG_URI"]);
     }

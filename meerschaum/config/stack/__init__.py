@@ -12,6 +12,7 @@ import os
 import json
 
 import meerschaum.config.paths as paths
+from meerschaum.config._version import __version__
 from meerschaum.utils.typing import Optional, List
 
 db_port = "MRSM{meerschaum:connectors:sql:main:port}"
@@ -24,6 +25,10 @@ db_hostname = "db"
 db_host = 'MRSM{stack:' + str(paths.STACK_COMPOSE_FILENAME) + ':services:db:hostname}'
 api_port = "MRSM{meerschaum:connectors:api:main:port}"
 api_host = "api"
+### The API server runs the image of the release that writes the compose file (the `full` image:
+### `meerschaum[full]`, so API plugins work). The Rust defaults (`default_config.json`) spell the same
+### tag with `{__MRSM_VERSION__}`; `tests/test_stack_setup.py` checks they agree.
+api_image = 'bmeares/meerschaum:' + __version__ + '-full'
 
 valkey_hostname = "valkey"
 valkey_host = 'MRSM{stack:' + str(paths.STACK_COMPOSE_FILENAME) + ':services:valkey:hostname}'
@@ -213,7 +218,7 @@ default_docker_compose_config = {
             ],
         },
         'api': {
-            'image': 'bmeares/meerschaum:api',
+            'image': api_image,
             'ports': [f'{api_port}:{api_port}'],
             'hostname': f'{api_host}',
             'networks': [

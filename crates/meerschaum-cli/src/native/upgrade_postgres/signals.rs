@@ -146,6 +146,7 @@ impl Drop for Session {
 }
 
 /// Write a notice to stderr without failing when it is gone (a closed terminal).
+#[cfg(unix)]
 fn notice(text: &str) {
     use std::io::Write;
     let _ = writeln!(std::io::stderr(), "{text}");

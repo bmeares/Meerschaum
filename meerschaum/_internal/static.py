@@ -255,6 +255,7 @@ STATIC_CONFIG: Dict[str, Any] = {
         'test_flavors': 'MRSM_TEST_FLAVORS',
         'daemon_id': 'MRSM_DAEMON_ID',
         'compose_project': 'MRSM__COMPOSE_PROJECT',
+        'compose_root': 'MRSM__COMPOSE_ROOT',
         'systemd_log_path': 'MRSM_SYSTEMD_LOG_PATH',
         'systemd_stdin_path': 'MRSM_SYSTEMD_STDIN_PATH',
         'systemd_result_path': 'MRSM_SYSTEMD_RESULT_PATH',

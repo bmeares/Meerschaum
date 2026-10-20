@@ -64,12 +64,12 @@ pub use axis::{Axis, AxisKind, Interval};
 pub use cadence::{Cadence, PipeSchedules, Timer};
 pub use engine::{
     Engine, EngineConfig, EventGranularity, LapEvent, LapSummary, LoopOptions, LoopResult,
-    NodeOutcome, PlannedRun, RunOptions, RunResult,
+    NodeOutcome, PendingRebuild, PlannedRun, RunOptions, RunResult,
 };
 pub use events::{ChunkSource, Event, EventKind, EventSink};
 pub use executor::{
     ChunkProgress, ExecuteContext, ExecutorOptions, LeaseSource, Limits, Priority, RetryPolicy,
-    SyncExecutor, SyncRequest, execute,
+    SyncExecutor, SyncRequest, drain_lease_releases, execute,
 };
 pub use graph::{Edge, EdgeOptions, Graph, GraphError, GraphOptions, GraphWarning, Node};
 pub use instance_state::InstanceState;

@@ -6,7 +6,10 @@
 The host's internal routes, called only by the Rust server (§7.2 federation):
 
 - `GET /_mrsm/host/registry`: the MCP tools, resources and prompts registered by plugins (not
-  the built-ins, which the Rust server implements), and the paths of the app's routes;
+  the built-ins, which the Rust server implements), the paths of the app's routes, the plugin
+  pages and the console's status;
+- `GET /_mrsm/host/status`: `{"console": {"mounted", "reason", "dash_version"}, "version"}`, what the
+  Rust server reads to decide whether `/dash/*` is proxied here or shows the pointer page;
 - `POST /_mrsm/host/mcp`: a JSON-RPC message, dispatched by `meerschaum.mcp` with the caller's
   scopes from the internal token.
 
@@ -49,12 +52,13 @@ def app_route_paths(app) -> List[str]:
 
 def web_page_registry() -> List[Dict[str, Any]]:
     """
-    Return every `@web_page` with its mode: `html` (page contract, served at `route`) or `dash`
-    (legacy layout, served by the plugin's Dash app at `/dash/<plugin>/...`).
+    Return every `@web_page` with its mode: `html` (page contract, a fragment served at `route`
+    and shown in the console in an iframe) or `dash` (a Dash layout). `path` is the page's path
+    in the console (`/dash/...`).
     """
     from meerschaum.plugins import _plugin_endpoints_to_pages, _get_parent_plugin
     from meerschaum.api.host import dash_enabled
-    from meerschaum.api.host.dash import get_page_contract_pages, plugin_path
+    from meerschaum.api.host.dash import get_page_contract_pages
 
     if not dash_enabled():
         return []
@@ -63,6 +67,9 @@ def web_page_registry() -> List[Dict[str, Any]]:
     out = []
     for page_group, pages in list(_plugin_endpoints_to_pages.items()):
         for page_str, page in list(pages.items()):
+            ### The console's own pages (`password-reset`) are not the plugins'.
+            if str(getattr(page.get('function'), '__module__', '')).startswith('meerschaum.'):
+                continue
             contract = html_pages.get(page_str, None)
             ### The owning plugin is the one that defined the function; `page_group` is a label
             ### the plugin may choose freely (it defaults to the plugin's name).
@@ -81,11 +88,8 @@ def web_page_registry() -> List[Dict[str, Any]]:
                 'function': getattr(page.get('function'), '__name__', None),
                 'plugin': plugin_name,
                 'mode': 'html' if contract else 'dash',
+                'route': contract['route'] if contract else page_str,
             }
-            if contract:
-                entry['route'] = contract['route']
-            else:
-                entry['route'] = plugin_path(plugin_name, page_str)
             out.append(entry)
     return out
 
@@ -95,11 +99,22 @@ def registry_document(app) -> Dict[str, Any]:
     Return the plugin registry the Rust server federates.
     """
     from meerschaum.mcp._registry import get_plugin_registry
+    from meerschaum.api.host.dash import console_status
     return {
         **get_plugin_registry(),
         'routes': app_route_paths(app),
         'web_pages': web_page_registry(),
+        'console': console_status(),
     }
+
+
+def status_document() -> Dict[str, Any]:
+    """
+    Return the host's status: whether the web console is mounted (see `console_status()`).
+    """
+    from meerschaum.api.host.dash import console_status
+    from meerschaum import __version__
+    return {'console': console_status(), 'version': __version__}
 
 
 def register(app) -> None:
@@ -109,7 +124,7 @@ def register(app) -> None:
     import fastapi
     from fastapi.concurrency import run_in_threadpool
     from starlette.responses import JSONResponse, Response
-    from meerschaum.api.host import REGISTRY_PATH, MCP_PATH, TOKEN_HEADER
+    from meerschaum.api.host import REGISTRY_PATH, MCP_PATH, STATUS_PATH, TOKEN_HEADER
     from meerschaum.api.host._auth import decode_internal_token, load_user_or_token_from_manager
 
     def _forbidden():
@@ -120,6 +135,12 @@ def register(app) -> None:
         if decode_internal_token(internal_token_from(request)) is None:
             return _forbidden()
         return JSONResponse(content=registry_document(app))
+
+    @app.get(STATUS_PATH, include_in_schema=False)
+    async def _host_status(request: fastapi.Request):
+        if decode_internal_token(internal_token_from(request)) is None:
+            return _forbidden()
+        return JSONResponse(content=status_document())
 
     @app.post(MCP_PATH, include_in_schema=False)
     async def _host_mcp(request: fastapi.Request):

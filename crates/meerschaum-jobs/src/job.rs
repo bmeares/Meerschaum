@@ -15,6 +15,7 @@ use crate::daemon::{Daemon, JobsContext, Status};
 use crate::executor::{JobExecutor, make_executor};
 use crate::pytime;
 use crate::rotating::RotatingFile;
+use crate::startup::StartKind;
 
 /// `BANNED_CHARS`: characters a job name may not contain.
 pub const BANNED_CHARS: [char; 12] = [',', ';', '\'', '"', '$', '#', '=', '*', '&', '!', '`', '~'];
@@ -118,6 +119,7 @@ pub struct Job {
     daemon: Option<Daemon>,
     refresh_seconds: Seconds,
     externally_managed: bool,
+    start_kind: StartKind,
 }
 
 impl std::fmt::Debug for Job {
@@ -216,6 +218,7 @@ impl Job {
                 .refresh_seconds
                 .unwrap_or(ctx.config.cli_refresh_seconds),
             externally_managed: opts.externally_managed,
+            start_kind: StartKind::default(),
         })
     }
 
@@ -266,8 +269,28 @@ impl Job {
         self.daemon.as_mut().expect("daemon")
     }
 
+    /// How [`Job::start`] is classified for the startup gate.
+    pub fn start_kind(&self) -> StartKind {
+        self.start_kind
+    }
+
+    /// Classify [`Job::start`] for the startup gate: [`StartKind::Bulk`] for a start which is one
+    /// of many (jitter, load and memory wait, slot), [`StartKind::Single`] for an explicit start
+    /// (slot only), [`StartKind::None`] for `--no-stagger`.
+    pub fn set_start_kind(&mut self, kind: StartKind) {
+        self.start_kind = kind;
+    }
+
     /// `start()`: start (or resume) the job.
     pub fn start(&mut self) -> SuccessTuple {
+        if self.executor_keys == "systemd" {
+            // The unit cannot carry per-start environment: the wrapper reads this hint.
+            crate::startup::write_start_hint(
+                &self.ctx.paths.jobs_dir.join(crate::startup::STARTUP_DIR),
+                &self.name,
+                self.start_kind,
+            );
+        }
         if let Some(ex) = self.executor() {
             // A failed read is an error, never "the job does not exist": creating over an
             // unreachable endpoint must not look like success.
@@ -286,6 +309,8 @@ impl Job {
             return SuccessTuple::ok(format!("{self} is already running."));
         }
         let keep = !self.delete_after_completion();
+        let kind = self.start_kind;
+        self.daemon().set_start_kind(kind);
         let result = self.daemon().run(keep, true);
         if !result.success {
             return result;
@@ -570,7 +595,14 @@ impl Job {
         if self.stop_time().is_some() {
             return SuccessTuple::ok(format!("{self} was manually stopped."));
         }
-        self.start()
+        // An automatic restart is a bulk start (`--no-stagger` still bypasses the gate).
+        let previous = self.start_kind;
+        if previous != StartKind::None {
+            self.start_kind = StartKind::Bulk;
+        }
+        let started = self.start();
+        self.start_kind = previous;
+        started
     }
 
     /// `label`: the sysargs joined, pipelines compressed, one chained command per line.

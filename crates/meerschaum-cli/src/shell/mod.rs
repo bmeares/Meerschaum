@@ -25,6 +25,8 @@
 
 pub mod completer;
 pub mod editor;
+pub mod interrupt;
+pub mod suggest;
 pub mod toolbar;
 pub mod updates;
 
@@ -319,6 +321,11 @@ pub fn clear_screen(rt: &mut Runtime<'_>, debug: bool) {
         .get(&["shell", "clear_screen"])
         .is_none_or(|v| v.truthy());
     if !enabled {
+        return;
+    }
+    // rich's `console.clear()` writes control codes to a terminal only: a pipe or a file never
+    // gets `ESC[2J ESC[H` (and `clear` would print them as well).
+    if !rt.live {
         return;
     }
     let ansi = rt.settings().ansi;
@@ -780,7 +787,12 @@ fn run_line(line: &str, state: &mut ShellState, rt: &mut Runtime<'_>) -> Control
     rt.in_shell = true;
     crate::native::jobs::reset_stop_request();
     let result = dispatch::entry_with_patch(&sysargs_to_execute, &patch, rt);
-    print_result(&result, state, rt);
+    if interrupt::take_interrupted(&result) {
+        // Ctrl-C cancelled the command: back to the prompt, which keeps working.
+        rt.eprint(&format!("\n{}\n", interrupt::MESSAGE));
+    } else {
+        print_result(&result, state, rt);
+    }
     if let Some(old) = old_cwd
         && std::env::current_dir().ok().as_ref() != Some(&old)
     {
@@ -989,6 +1001,8 @@ pub fn run(sysargs: &[String], instance: Option<&str>, rt: &mut Runtime<'_>) {
     let mut state = ShellState::new(rt, instance);
     let noninteractive = crate::env::noninteractive(rt.env);
     let interactive = !noninteractive && std::io::IsTerminal::is_terminal(&std::io::stdin());
+    // Between commands a Ctrl-C is the editor's; while a command runs it cancels that command.
+    let _interrupts = interrupt::ShellScope::enter(rt.native.as_ref(), interactive);
     // `Shell.__init__` builds the intro (with the cached update messages), then starts the
     // version check thread.
     let intro = intro_with_updates(rt);

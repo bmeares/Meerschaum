@@ -13,6 +13,7 @@
 //! `print_options` column fitting follows `get_cols_lines` (the terminal of stdout, else
 //! `$COLUMNS`, else 100).
 
+pub mod dataframe;
 pub mod graph;
 pub mod pprintpp;
 pub mod progress;

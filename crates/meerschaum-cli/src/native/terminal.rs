@@ -4,6 +4,7 @@
 
 use std::io::{Read, Write};
 use std::process::{Command, Stdio};
+#[cfg(not(test))]
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
@@ -11,11 +12,33 @@ use crate::dispatch::{CommandOutput, CommandSpec};
 
 /// Set when the last interactive read ended with Ctrl-C (`KeyboardInterrupt` in v4) rather than
 /// the end of input (`EOFError`).
+#[cfg(not(test))]
 static INTERRUPTED: AtomicBool = AtomicBool::new(false);
+
+// The unit tests run in parallel threads of one process, each with its own prompt: a flag of
+// their own per thread keeps one test's Ctrl-C from being taken by another.
+#[cfg(test)]
+thread_local! {
+    static INTERRUPTED_HERE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+fn set_interrupted(value: bool) {
+    #[cfg(not(test))]
+    INTERRUPTED.store(value, Ordering::SeqCst);
+    #[cfg(test)]
+    INTERRUPTED_HERE.with(|flag| flag.set(value));
+}
 
 /// Whether the last read that returned `None` was a Ctrl-C (and reset the flag).
 pub fn take_interrupt() -> bool {
-    INTERRUPTED.swap(false, Ordering::SeqCst)
+    #[cfg(not(test))]
+    {
+        INTERRUPTED.swap(false, Ordering::SeqCst)
+    }
+    #[cfg(test)]
+    {
+        INTERRUPTED_HERE.with(|flag| flag.replace(false))
+    }
 }
 
 /// Build a [`Command`] from a [`CommandSpec`] (without the stdio configuration).
@@ -59,6 +82,8 @@ pub fn capture(spec: &CommandSpec, timeout: Option<Duration>) -> std::io::Result
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     let mut child = cmd.spawn()?;
+    // Ctrl-C reaches the program through the terminal; this process waits for it.
+    let _waiting = crate::shell::interrupt::ChildScope::enter(Some(child.id()), true);
     let stdout = child.stdout.take().map(drain);
     let stderr = child.stderr.take().map(drain);
     let start = Instant::now();
@@ -86,33 +111,106 @@ pub fn capture(spec: &CommandSpec, timeout: Option<Duration>) -> std::io::Result
     })
 }
 
-/// Read a line without echoing it. `None` on Ctrl-C / Ctrl-D.
+/// The character a secret prompt echoes for each character typed.
+pub const MASK: char = '*';
+
+/// The terminal in raw mode until dropped: it is restored on every way out of a prompt,
+/// including a panic or an early return.
+pub struct RawMode;
+
+impl RawMode {
+    /// Put the terminal in raw mode (an error when stdin is not a terminal).
+    pub fn enable() -> std::io::Result<RawMode> {
+        crossterm::terminal::enable_raw_mode()?;
+        Ok(RawMode)
+    }
+}
+
+impl Drop for RawMode {
+    fn drop(&mut self) {
+        let _ = crossterm::terminal::disable_raw_mode();
+    }
+}
+
+/// Whether a `Char` key with these modifiers is text. Plain and Shift-ed characters are; Ctrl or
+/// Alt alone are shortcuts. On Windows the AltGr key reaches the program as Ctrl+Alt (crossterm
+/// reports `RIGHT_ALT | LEFT_CTRL` as `CONTROL | ALT`), and it types `@ \ { } [ ] ~ | €` on
+/// German, Spanish and Nordic layouts: with a printable character that is text too.
+pub fn is_text_modifiers(modifiers: crossterm::event::KeyModifiers) -> bool {
+    is_text_modifiers_on(modifiers, cfg!(windows))
+}
+
+/// [`is_text_modifiers`] for either platform's AltGr convention.
+pub fn is_text_modifiers_on(modifiers: crossterm::event::KeyModifiers, altgr: bool) -> bool {
+    use crossterm::event::KeyModifiers as M;
+    let m = modifiers - M::SHIFT;
+    m.is_empty() || (altgr && m == (M::CONTROL | M::ALT))
+}
+
+/// What erases one echoed [`MASK`] from the terminal (back, overwrite, back).
+const ERASE_ONE: &str = "\u{8} \u{8}";
+
+/// Read a secret, echoing [`MASK`] for each character (Backspace erases one, Ctrl-U all of
+/// them). `None` on Ctrl-C / Ctrl-D. With stdin not a terminal nothing is echoed at all: the
+/// caller reads a plain line then (`Host::read_secret`).
 pub fn read_secret(prompt: &str) -> Option<String> {
-    use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
     print!("{prompt}");
     let _ = std::io::stdout().flush();
-    if enable_raw_mode().is_err() {
+    let Ok(raw) = RawMode::enable() else {
         let mut line = String::new();
         return match std::io::stdin().read_line(&mut line) {
             Ok(0) | Err(_) => None,
             Ok(_) => Some(line.trim_end_matches(['\n', '\r']).to_string()),
         };
-    }
-    let answer = secret_from_events(crossterm::event::read);
-    let _ = disable_raw_mode();
+    };
+    let answer = masked_from_events(crossterm::event::read, |echo| {
+        let mut out = std::io::stdout();
+        let _ = out.write_all(echo.as_bytes());
+        let _ = out.flush();
+    });
+    drop(raw);
     println!();
     answer
 }
 
-/// The keys of a hidden prompt until Enter (the secret) or Ctrl-C / Ctrl-D (`None`). A failing
-/// event source ends the prompt: it never spins on an error that will not go away.
+/// The keys of a hidden prompt until Enter (the secret) or Ctrl-C / Ctrl-D (`None`), echoing
+/// nothing. A failing event source ends the prompt: it never spins on an error that will not go
+/// away.
 pub fn secret_from_events(
+    next: impl FnMut() -> std::io::Result<crossterm::event::Event>,
+) -> Option<String> {
+    masked_from_events(next, |_| {})
+}
+
+/// [`secret_from_events`] that tells `echo` what to write to the terminal: one [`MASK`] for each
+/// character typed or pasted, the erasing sequence for Backspace (only when there is a character
+/// to erase) and for Ctrl-U (one per character).
+pub fn masked_from_events(
+    next: impl FnMut() -> std::io::Result<crossterm::event::Event>,
+    echo: impl FnMut(&str),
+) -> Option<String> {
+    masked_from_events_on(next, echo, cfg!(windows))
+}
+
+/// [`masked_from_events`] where `altgr_is_ctrl_alt` says whether Ctrl+Alt is the AltGr key
+/// (Windows), whose characters are typed text.
+pub fn masked_from_events_on(
     mut next: impl FnMut() -> std::io::Result<crossterm::event::Event>,
+    mut echo: impl FnMut(&str),
+    altgr_is_ctrl_alt: bool,
 ) -> Option<String> {
     use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers};
     let mut secret = String::new();
     loop {
-        let Event::Key(key) = next().ok()? else {
+        let event = next().ok()?;
+        if let Event::Paste(text) = &event {
+            for c in text.chars().filter(|c| !c.is_control()) {
+                secret.push(c);
+                echo(&MASK.to_string());
+            }
+            continue;
+        }
+        let Event::Key(key) = event else {
             continue;
         };
         if key.kind == KeyEventKind::Release {
@@ -121,13 +219,24 @@ pub fn secret_from_events(
         match key.code {
             KeyCode::Enter => return Some(secret),
             KeyCode::Char('c') | KeyCode::Char('d') if key.modifiers == KeyModifiers::CONTROL => {
-                INTERRUPTED.store(key.code == KeyCode::Char('c'), Ordering::SeqCst);
+                set_interrupted(key.code == KeyCode::Char('c'));
                 return None;
             }
-            KeyCode::Backspace => {
-                secret.pop();
+            KeyCode::Char('u') if key.modifiers == KeyModifiers::CONTROL => {
+                for _ in secret.chars() {
+                    echo(ERASE_ONE);
+                }
+                secret.clear();
             }
-            KeyCode::Char(c) => secret.push(c),
+            KeyCode::Backspace => {
+                if secret.pop().is_some() {
+                    echo(ERASE_ONE);
+                }
+            }
+            KeyCode::Char(c) if is_text_modifiers_on(key.modifiers, altgr_is_ctrl_alt) => {
+                secret.push(c);
+                echo(&MASK.to_string());
+            }
             _ => {}
         }
     }
@@ -165,10 +274,26 @@ pub fn read_prefilled(prompt: &str, prefill: &str) -> Option<String> {
     match editor.read_line(&Question(prompt.to_string())) {
         Ok(Signal::Success(line)) => Some(line),
         Ok(Signal::CtrlC) => {
-            INTERRUPTED.store(true, Ordering::SeqCst);
+            set_interrupted(true);
             None
         }
         _ => None,
+    }
+}
+
+/// A prompt with a filtering dropdown of `items` (see [`crate::shell::suggest`]): `None` on Ctrl-C
+/// (recorded for [`take_interrupt`]) or the end of input. Falls back to a plain prefilled prompt
+/// when the terminal cannot be put in raw mode.
+pub fn read_suggested(prompt: &str, items: &[String], prefill: &str, ansi: bool) -> Option<String> {
+    use crate::shell::suggest::{Answer, read};
+    match read(prompt, items, prefill, ansi) {
+        Some(Answer::Line(line)) => Some(line),
+        Some(Answer::Interrupted) => {
+            set_interrupted(true);
+            None
+        }
+        Some(Answer::Eof) => None,
+        None => read_prefilled(prompt, prefill),
     }
 }
 
@@ -294,7 +419,7 @@ pub fn read_multiline(prompt: &str) -> Option<String> {
     match editor.read_line(&Plain(prompt.to_string())) {
         Ok(Signal::Success(text)) => Some(text),
         Ok(Signal::CtrlC) => {
-            INTERRUPTED.store(true, Ordering::SeqCst);
+            set_interrupted(true);
             None
         }
         _ => None,
@@ -308,6 +433,36 @@ mod tests {
 
     fn key(code: KeyCode, modifiers: KeyModifiers) -> std::io::Result<Event> {
         Ok(Event::Key(KeyEvent::new(code, modifiers)))
+    }
+
+    #[test]
+    fn altgr_characters_are_typed_into_a_secret_on_windows_only() {
+        let both = KeyModifiers::CONTROL | KeyModifiers::ALT;
+        let events = || {
+            vec![
+                key(KeyCode::Char('p'), KeyModifiers::NONE),
+                key(KeyCode::Char('@'), both),
+                key(KeyCode::Char('\\'), both),
+                key(KeyCode::Char('W'), KeyModifiers::SHIFT),
+                // Plain Alt and plain Ctrl stay shortcuts.
+                key(KeyCode::Char('x'), KeyModifiers::ALT),
+                key(KeyCode::Char('x'), KeyModifiers::CONTROL),
+                key(KeyCode::Enter, KeyModifiers::NONE),
+            ]
+            .into_iter()
+        };
+        let mut windows = events();
+        let mut echoed = String::new();
+        assert_eq!(
+            masked_from_events_on(|| windows.next().unwrap(), |e| echoed.push_str(e), true),
+            Some("p@\\W".to_string())
+        );
+        assert_eq!(echoed, "****");
+        let mut unix = events();
+        assert_eq!(
+            masked_from_events_on(|| unix.next().unwrap(), |_| {}, false),
+            Some("pW".to_string())
+        );
     }
 
     #[test]
@@ -325,6 +480,63 @@ mod tests {
             secret_from_events(|| events.next().unwrap()),
             Some("ab".to_string())
         );
+    }
+
+    #[test]
+    fn a_masked_prompt_echoes_one_star_per_character_and_erases_one_on_backspace() {
+        let mut events = vec![
+            key(KeyCode::Char('s'), KeyModifiers::NONE),
+            key(KeyCode::Char('e'), KeyModifiers::NONE),
+            key(KeyCode::Char('x'), KeyModifiers::NONE),
+            key(KeyCode::Backspace, KeyModifiers::NONE),
+            key(KeyCode::Char('c'), KeyModifiers::NONE),
+            key(KeyCode::Char('\u{e9}'), KeyModifiers::SHIFT),
+            Ok(Event::Paste("rt\n".into())),
+            key(KeyCode::Enter, KeyModifiers::NONE),
+        ]
+        .into_iter();
+        let mut echoed = String::new();
+        let secret = masked_from_events(|| events.next().unwrap(), |text| echoed.push_str(text));
+        assert_eq!(secret.as_deref(), Some("sec\u{e9}rt"));
+        assert_eq!(echoed, "***\u{8} \u{8}****");
+        assert!(
+            !echoed.contains('s') && !echoed.contains('e'),
+            "the secret itself is never echoed"
+        );
+    }
+
+    #[test]
+    fn backspace_on_an_empty_secret_echoes_nothing_and_ctrl_u_erases_all() {
+        let mut events = vec![
+            key(KeyCode::Backspace, KeyModifiers::NONE),
+            key(KeyCode::Char('a'), KeyModifiers::NONE),
+            key(KeyCode::Char('b'), KeyModifiers::NONE),
+            key(KeyCode::Char('u'), KeyModifiers::CONTROL),
+            key(KeyCode::Char('z'), KeyModifiers::NONE),
+            key(KeyCode::Enter, KeyModifiers::NONE),
+        ]
+        .into_iter();
+        let mut echoed = String::new();
+        let secret = masked_from_events(|| events.next().unwrap(), |text| echoed.push_str(text));
+        assert_eq!(secret.as_deref(), Some("z"));
+        assert_eq!(echoed, "**\u{8} \u{8}\u{8} \u{8}*");
+    }
+
+    #[test]
+    fn ctrl_c_cancels_a_masked_prompt_after_echoing_what_was_typed() {
+        take_interrupt();
+        let mut events = vec![
+            key(KeyCode::Char('a'), KeyModifiers::NONE),
+            key(KeyCode::Char('c'), KeyModifiers::CONTROL),
+        ]
+        .into_iter();
+        let mut echoed = String::new();
+        assert_eq!(
+            masked_from_events(|| events.next().unwrap(), |text| echoed.push_str(text)),
+            None
+        );
+        assert_eq!(echoed, "*");
+        assert!(take_interrupt());
     }
 
     #[test]

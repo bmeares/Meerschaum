@@ -53,6 +53,41 @@ pub(crate) fn be(e: BackendError) -> ConnectorError {
     ConnectorError::Backend(e.0)
 }
 
+/// `host:port` of a `redis://[user:password@]host[:port][/db]` URL.
+fn address_of(url: &str) -> String {
+    let rest = url.split_once("://").map_or(url, |(_, r)| r);
+    let rest = rest.rsplit_once('@').map_or(rest, |(_, r)| r);
+    let host_port = rest.split(['/', '?']).next().unwrap_or(rest);
+    if host_port.contains(':') || host_port.is_empty() {
+        host_port.to_string()
+    } else {
+        format!("{host_port}:6379")
+    }
+}
+
+/// A failed first connection as one clear message:
+/// `valkey:main: cannot connect to localhost:6379 (connection refused). Is the Valkey server running?`
+fn connect_failure(
+    label: &str,
+    url: &str,
+    attributes: &Map,
+    error: BackendError,
+    limit: Duration,
+) -> ConnectorError {
+    use meerschaum_core::connect::{ConnectErrorKind, ConnectTarget, classify_text, connect_error};
+    let kind = classify_text(&error.0).unwrap_or(ConnectErrorKind::Other);
+    let target = ConnectTarget {
+        connector: format!("valkey:{label}"),
+        address: address_of(url),
+        user: attributes
+            .get("username")
+            .map(attr_str)
+            .unwrap_or_else(|| "default".into()),
+        noun: "Valkey server",
+    };
+    ConnectorError::Backend(connect_error(&target, kind, &error.0, limit).to_string())
+}
+
 fn attr_str(v: &Value) -> String {
     meerschaum_core::pyfmt::py_str(v)
 }
@@ -114,9 +149,17 @@ impl ValkeyConnector {
             .get("socket_timeout")
             .and_then(|v| v.as_i64().or_else(|| attr_str(v).parse().ok()))
             .map(|s: i64| Duration::from_secs(s.max(1) as u64));
-        let backend = FredBackend::connect(&probe.connection_url(), timeout)
+        let url = probe.connection_url();
+        let connect_timeout = meerschaum_core::connect::connect_timeout(
+            probe
+                .attributes
+                .get("connect_timeout")
+                .map(attr_str)
+                .as_deref(),
+        );
+        let backend = FredBackend::connect_with(&url, timeout, connect_timeout)
             .await
-            .map_err(be)?;
+            .map_err(|e| connect_failure(label, &url, &probe.attributes, e, connect_timeout))?;
         Ok(ValkeyConnector {
             backend: Arc::new(backend),
             ..probe

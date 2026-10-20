@@ -201,7 +201,7 @@ fn api_serves_health_and_mcp_on_an_isolated_sqlite_instance() {
 }
 
 #[test]
-fn api_serves_the_dash_console_unless_no_dash() {
+fn api_points_to_the_python_console_unless_no_dash() {
     for no_dash in [false, true] {
         let sandbox = Sandbox::new();
         let socket = TcpListener::bind(("127.0.0.1", 0)).unwrap();
@@ -223,7 +223,16 @@ fn api_serves_the_dash_console_unless_no_dash() {
         if no_dash {
             args.push("--nodash".into());
         }
-        let mut child = ChildGuard(sandbox.command().args(&args).spawn().unwrap());
+        // No interpreter: the console probe finds no Dash, so `/dash` is the pointer page whatever
+        // Python this machine has.
+        let mut child = ChildGuard(
+            sandbox
+                .command()
+                .env("MRSM_PYTHON", "/nonexistent/python")
+                .args(&args)
+                .spawn()
+                .unwrap(),
+        );
         let deadline = Instant::now() + Duration::from_secs(20);
         loop {
             assert!(
@@ -237,13 +246,13 @@ fn api_serves_the_dash_console_unless_no_dash() {
             std::thread::sleep(Duration::from_millis(20));
         }
         let login = request(port, "GET", "/dash/login", "");
+        assert!(login.starts_with("HTTP/1.1 404"), "{login}");
+        let dash = request(port, "GET", "/dash", "");
         if no_dash {
-            assert!(!login.starts_with("HTTP/1.1 200"), "{login}");
+            assert!(dash.starts_with("HTTP/1.1 404"), "{dash}");
         } else {
-            assert!(login.starts_with("HTTP/1.1 200"), "{login}");
-            let dash = request(port, "GET", "/dash", "");
-            assert!(dash.starts_with("HTTP/1.1 303"), "{dash}");
-            assert!(dash.contains("location: /dash/login"), "{dash}");
+            assert!(dash.starts_with("HTTP/1.1 200"), "{dash}");
+            assert!(dash.contains("pip install meerschaum[dash]"), "{dash}");
         }
         let index = request(port, "GET", "/", "");
         let target = if no_dash { "/docs" } else { "/dash" };

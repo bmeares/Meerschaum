@@ -102,6 +102,11 @@ pub struct JobsConfig {
     pub executor: Option<String>,
     /// `jobs.detached.*`: how a job's process is searched for without its PID file.
     pub detached: crate::detached::Limits,
+    /// `jobs.startup.*`: the startup admission gate (v5; defaults live here, not in
+    /// `default_config`, so the v4 defaults stay as they are).
+    pub startup: crate::startup::StartupConfig,
+    /// `jobs.schedule.jitter_seconds`: the fixed per-job offset bound of `-s` schedules (v5).
+    pub schedule_jitter_seconds: f64,
 }
 
 impl Default for JobsConfig {
@@ -122,6 +127,8 @@ impl Default for JobsConfig {
             cli_refresh_seconds: Seconds::Float(0.1),
             executor: None,
             detached: crate::detached::Limits::default(),
+            startup: crate::startup::StartupConfig::default(),
+            schedule_jitter_seconds: 0.0,
         }
     }
 }
@@ -209,6 +216,16 @@ impl JobsConfig {
         }
         if let Some(d) = secs("create_time_slack_seconds") {
             out.detached.create_slack = d;
+        }
+        if let Some(Value::Map(startup)) = get(&["jobs", "startup"]) {
+            out.startup.apply(&startup);
+        }
+        if let Some(n) = get(&["jobs", "schedule", "jitter_seconds"])
+            .filter(|v| !matches!(v, Value::Bool(_)))
+            .and_then(|v| v.as_f64())
+            .filter(|n| n.is_finite() && *n >= 0.0)
+        {
+            out.schedule_jitter_seconds = n;
         }
         out
     }

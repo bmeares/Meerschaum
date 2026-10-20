@@ -15,6 +15,10 @@ use crate::shlex;
 /// Flags which don't identify a job's workload (`NON_IDENTIFYING_FLAGS`).
 pub const NON_IDENTIFYING_FLAGS: &[&str] = &["-d", "--daemon", "--no-daemon", "--debug"];
 
+/// Flags with a value which don't identify a job's workload either: the startup and schedule
+/// jitter (`daemon:` settings) of D23.
+pub const NON_IDENTIFYING_VALUE_FLAGS: &[&str] = &["--jitter", "--startup-jitter"];
+
 fn compose_project_var() -> String {
     static_config()
         .get(&["environment", "compose_project"])
@@ -64,10 +68,22 @@ pub fn compress_pipeline_sysargs(sysargs: &[String]) -> Vec<String> {
 
 /// `_command_signature(sysargs)`.
 pub fn command_signature(sysargs: &[String]) -> Vec<String> {
-    compress_pipeline_sysargs(sysargs)
-        .into_iter()
-        .filter(|a| !NON_IDENTIFYING_FLAGS.contains(&a.as_str()))
-        .collect()
+    let mut out = Vec::new();
+    let mut skip_value = false;
+    for a in compress_pipeline_sysargs(sysargs) {
+        if skip_value {
+            skip_value = false;
+            continue;
+        }
+        if NON_IDENTIFYING_VALUE_FLAGS.contains(&a.as_str()) {
+            skip_value = true;
+            continue;
+        }
+        if !NON_IDENTIFYING_FLAGS.contains(&a.as_str()) {
+            out.push(a);
+        }
+    }
+    out
 }
 
 /// `get_job_project_name(job)`.
@@ -88,6 +104,14 @@ pub fn job_project_name(job: &JobInfo) -> Option<String> {
         Ok(Value::Map(m)) => m.get("project_name").filter(|v| v.truthy()).map(py_str),
         _ => None,
     }
+}
+
+/// The root compose file a job was started from (its `MRSM__COMPOSE_ROOT` label), if any.
+pub fn job_compose_root(job: &JobInfo) -> Option<String> {
+    job.env
+        .get(crate::project::COMPOSE_ROOT_VAR)
+        .filter(|s| !s.is_empty())
+        .cloned()
 }
 
 /// `job_belongs_to_project(job, project_name, project_command)`.
@@ -137,6 +161,38 @@ fn sync_value<'a>(config: &'a Map, key: &str) -> Option<&'a Value> {
         .and_then(|s| s.get(key))
 }
 
+/// The start-up flags of a `daemon:` mapping (`daemon: {jitter: 30s, startup_jitter: 5s}`): a
+/// schedule's fixed offset (`--jitter`, only for a job with a schedule) and the bound of a new
+/// job's startup delay (`--startup-jitter`). A command that sets its own flag keeps it.
+fn daemon_flags(config: &Map, command: &[String]) -> Vec<String> {
+    let Some(Value::Map(daemon)) = config.get("daemon") else {
+        return Vec::new();
+    };
+    let has = |flag: &str| {
+        command
+            .iter()
+            .any(|a| a == flag || a.starts_with(&format!("{flag}=")))
+    };
+    let scheduled = command
+        .iter()
+        .any(|a| matches!(a.as_str(), "-s" | "--schedule" | "--cron"));
+    let mut out = Vec::new();
+    if let Some(v) = daemon.get("jitter").filter(|v| v.truthy())
+        && scheduled
+        && !has("--jitter")
+    {
+        out.push("--jitter".into());
+        out.push(py_str(v));
+    }
+    if let Some(v) = daemon.get("startup_jitter").filter(|v| v.truthy())
+        && !has("--startup-jitter")
+    {
+        out.push("--startup-jitter".into());
+        out.push(py_str(v));
+    }
+    out
+}
+
 /// `get_jobs_commands(compose_config)`: the jobs `compose up` starts, by name.
 ///
 /// `pipes` are the project's defined pipes (only used when no explicit `jobs:` are configured).
@@ -173,6 +229,7 @@ pub fn get_jobs_commands(
                 command_list.push("--name".into());
                 command_list.push(project_job_name.clone());
             }
+            command_list.extend(daemon_flags(config, &command_list));
             if !command_list.iter().any(|a| a == "-d" || a == "--daemon") {
                 command_list.push("-d".into());
             }
@@ -236,6 +293,8 @@ pub fn get_jobs_commands(
         .map(|s| s.to_string())
         .collect();
         cmd.extend(additional.iter().cloned());
+        let extra = daemon_flags(config, &cmd);
+        cmd.extend(extra);
         jobs.insert(job_name, cmd);
     }
     Ok(jobs)
@@ -317,6 +376,44 @@ mod tests {
                 "-d",
                 "-f"
             ])
+        );
+    }
+
+    #[test]
+    fn daemon_settings_become_jitter_flags_that_do_not_identify_a_job() {
+        let cfg = config(
+            r#"{"project_name": "p", "daemon": {"jitter": "30s", "startup_jitter": "5s"}, "jobs": {"timed": "sync pipes -s 'every 5 minutes'", "loop": "sync pipes --loop", "own": "sync pipes -s 'daily' --jitter 1m"}}"#,
+        );
+        let cmds = get_jobs_commands(&cfg, &[], &mut Messages::default()).unwrap();
+        let has_pair =
+            |c: &Vec<String>, k: &str, v: &str| c.windows(2).any(|w| w[0] == k && w[1] == v);
+        assert!(has_pair(&cmds["timed"], "--jitter", "30s"));
+        assert!(has_pair(&cmds["timed"], "--startup-jitter", "5s"));
+        // Without a schedule only the startup jitter applies.
+        assert!(!cmds["loop"].contains(&"--jitter".to_string()));
+        assert!(has_pair(&cmds["loop"], "--startup-jitter", "5s"));
+        // The job's own flag wins.
+        assert!(has_pair(&cmds["own"], "--jitter", "1m"));
+        assert!(!has_pair(&cmds["own"], "--jitter", "30s"));
+        // A running job without the flags is still the project's.
+        let stripped: Vec<String> = cmds["timed"]
+            .iter()
+            .scan(false, |skip, a| {
+                if *skip {
+                    *skip = false;
+                    return Some(None);
+                }
+                if a == "--jitter" || a == "--startup-jitter" {
+                    *skip = true;
+                    return Some(None);
+                }
+                Some(Some(a.clone()))
+            })
+            .flatten()
+            .collect();
+        assert_eq!(
+            command_signature(&stripped),
+            command_signature(&cmds["timed"])
         );
     }
 

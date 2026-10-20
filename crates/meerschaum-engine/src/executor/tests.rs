@@ -325,6 +325,28 @@ async fn rebuild_pending_does_not_block_descendants() {
         NodeStatus::RebuildPending
     );
     assert_eq!(h.fake.synced(), vec![r("dst")]);
+    // The run names the pipe and how to approve, for the CLI to print (never a silent stop).
+    let result = crate::engine::RunResult {
+        success: true,
+        message: String::new(),
+        plan: None,
+        record: Some(record.clone()),
+        outcomes: Vec::new(),
+        critical_path: Vec::new(),
+        warnings: Vec::new(),
+        duration: std::time::Duration::ZERO,
+    };
+    let pending = result.rebuild_pending();
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].pipe_ref, r("src"));
+    assert!(pending[0].reason.contains("--yes"), "{}", pending[0].reason);
+    assert_eq!(result.lap_summary(1).rebuild_pending, pending);
+    assert!(
+        result
+            .lap_summary(1)
+            .v4_message("1 second")
+            .contains("1 not synced: rebuild_pending")
+    );
     assert!(
         h.sink
             .names(Some(&r("src")))
@@ -417,4 +439,44 @@ async fn a_lost_lease_cancels_sync_before_it_commits() {
     assert_eq!(row.status, NodeStatus::Failed);
     assert!(row.message.as_deref().unwrap().contains("lost during sync"));
     assert_eq!(h.state.watermark(&r("a")).await.unwrap(), None);
+}
+
+/// Dropping a run mid-sync (Ctrl-C, a closed request) hands the held leases back at once
+/// instead of leaving them to their TTL.
+#[tokio::test(start_paused = true)]
+async fn a_cancelled_run_releases_its_leases() {
+    let h = Harness::new(
+        vec![rec("a", "{}"), rec("b", "{}")],
+        MemoryStateData::default(),
+    );
+    for metric in ["a", "b"] {
+        h.fake
+            .script(&r(metric), FakeStep::ok(Duration::from_secs(600)));
+    }
+    let options = ExecutorOptions {
+        lease_ttl: Duration::from_secs(60),
+        ..Default::default()
+    };
+    // The run is dropped by the timeout, as `Session::block_on` drops it on Ctrl-C.
+    let cancelled = tokio::time::timeout(
+        Duration::from_secs(5),
+        h.run(Selection::refs([r("a"), r("b")]), options),
+    )
+    .await;
+    assert!(cancelled.is_err(), "the run was still going");
+    drain_lease_releases(Duration::from_secs(5)).await;
+    let held = h.leases.held.lock().unwrap();
+    assert!(held.is_empty(), "leases still held: {held:?}");
+}
+
+/// A run that finishes releases its leases itself and arms no release task.
+#[tokio::test(start_paused = true)]
+async fn a_finished_run_leaves_no_pending_release() {
+    let h = Harness::new(vec![rec("a", "{}")], MemoryStateData::default());
+    h.fake.script(&r("a"), FakeStep::ok(Duration::from_secs(1)));
+    let (_, record) = h
+        .run(Selection::refs([r("a")]), ExecutorOptions::default())
+        .await;
+    assert_eq!(record.node(&r("a")).unwrap().status, NodeStatus::Succeeded);
+    assert!(h.leases.held.lock().unwrap().is_empty());
 }

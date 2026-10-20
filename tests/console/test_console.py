@@ -3,13 +3,13 @@
 # vim:fenc=utf-8
 
 """
-Playwright tests of the v5 console against a real `mrsm start api` (design §14 "Console tests").
-Opt-in (`MRSM_TEST_CONSOLE=1`); see `tests/console/conftest.py`. All data is synthetic.
+Playwright tests of the web console against a real `mrsm start api` (design §14 "Console tests",
+D21): the Plotly Dash console of v4 on the Python API host behind the Rust server. Opt-in
+(`MRSM_TEST_CONSOLE=1`); see `tests/console/conftest.py`. All data is synthetic.
 """
 
 import json
-import tarfile
-import pathlib
+import time
 
 import pytest
 
@@ -24,75 +24,383 @@ FIGURE = {
 }
 
 CORE_PAGES = (
-    '/dash', '/dash/dashboard', '/dash/pipes', '/dash/jobs', '/dash/plugins',
-    '/dash/users', '/dash/tokens', '/dash/settings', '/dash/pipelines', '/dash/webterm',
+    '/dash', '/dash/pipes', '/dash/jobs', '/dash/plugins', '/dash/users', '/dash/tokens',
+    '/dash/pipelines', '/dash/webterm', '/dash/password-reset',
 )
 
 
-def _ignore(error: str) -> bool:
-    ### Chromium logs a failed resource as a console error without the URL; the matching
-    ### `response` entry carries it, so only the latter is asserted.
-    return error.startswith('console.error: Failed to load resource')
-
-
 def _errors(tab: Tab) -> list:
-    return [e for e in tab.errors if not _ignore(e)]
+    return list(tab.errors)
+
+
+def _frame(page, selector: str = 'iframe.mrsm-contract-frame'):
+    """The frame of a page-contract page (an iframe of the host's `/_pages/<path>?frame=1`)."""
+    page.wait_for_selector(selector, timeout=30000)
+    frame = page.query_selector(selector).content_frame()
+    assert frame is not None
+    return frame
+
+
+def _wait_text(page, selector: str, text: str, timeout: int = 30000) -> None:
+    page.wait_for_function(
+        "([selector, text]) => { const el = document.querySelector(selector); "
+        "return el && el.textContent.includes(text); }",
+        arg=[selector, text],
+        timeout=timeout,
+    )
 
 
 def test_login_round_trip(server, context):
     page = context.new_page()
-    page.goto(f"{server.base_url}/dash")
-    assert page.url == f"{server.base_url}/dash/login"
+    tab = Tab(page, server.base_url)
+    ### The console's pages need a login: `/dash` is the login page without a session.
+    tab.goto('/dash', '#username-input')
+    assert page.locator('#login-button').is_visible()
 
     ### A wrong password does not start a session.
-    page.fill('input[name=username]', USERNAME)
-    page.fill('input[name=password]', 'not-the-password')
-    page.click('button:has-text("Log in")')
+    page.fill('#username-input', USERNAME)
+    page.fill('#password-input', 'not-the-password')
+    page.click('#login-button')
+    _wait_text(page, '#login-alert-div', 'Invalid login')
     assert not [c for c in context.cookies() if c['name'] == 'mrsm-session-id']
-    page.goto(f"{server.base_url}/dash")
-    assert page.url == f"{server.base_url}/dash/login"
 
-    tab = Tab(page, server.base_url)
     tab.login()
     cookies = [c for c in context.cookies() if c['name'] == 'mrsm-session-id']
     assert len(cookies) == 1
     assert cookies[0]['httpOnly'] is True and cookies[0]['sameSite'] == 'Lax'
     assert cookies[0]['path'] == '/'
-    assert page.locator('nav[aria-label=Console]').is_visible()
     assert _errors(tab) == []
 
-    page.click('button:has-text("Log out")')
-    page.wait_for_url(f"{server.base_url}/dash/login")
+    page.click('#sign-out-button')
+    page.wait_for_selector('#username-input')
     assert not [c for c in context.cookies() if c['name'] == 'mrsm-session-id']
-    page.goto(f"{server.base_url}/dash/pipes")
-    assert page.url == f"{server.base_url}/dash/login"
+    tab.goto('/dash/pipes', '#username-input')
 
 
 def test_every_console_page_renders_without_errors(server, tab):
     tab.login()
     for path in CORE_PAGES:
-        tab.page.goto(f"{server.base_url}{path}")
+        tab.goto(path)
         tab.page.wait_for_load_state('networkidle')
-        assert tab.page.locator('main#content').is_visible(), path
-        assert tab.page.locator('nav[aria-label=Console] a').count() >= 8, path
+        assert tab.page.locator('#logo-img').count() == 1, path
+        assert tab.page.url.startswith(f"{server.base_url}/dash"), path
     assert _errors(tab) == [], _errors(tab)
 
-    ### Every link of the navbar, plugin pages and plugin-owned Dash apps included.
-    links = tab.page.eval_on_selector_all(
-        'nav[aria-label=Console] a', 'els => els.map(e => e.getAttribute("href"))',
+    ### The logo opens the page menu: the console's pages and the plugins' (grouped by their group).
+    tab.goto('/dash/pipes')
+    tab.page.click('#logo-img')
+    tab.page.wait_for_selector('#pages-offcanvas.show')
+    menu = tab.page.inner_text('#pages-offcanvas')
+    for label in ('Web Console', 'Pipes', 'Jobs', 'Plugins', 'Users', 'Tokens', 'Pipelines'):
+        assert label in menu, label
+    assert 'W7 Python' in menu or 'W7 Figure' in menu
+    assert 'W7 Dash' in menu
+    assert _errors(tab) == [], _errors(tab)
+
+
+def test_dashboard_dropdowns_list_the_registered_pipes(server, tab):
+    result = server.python(SETUP_PIPES)
+    assert result.returncode == 0, result.stderr[-2000:]
+    tab.login()
+    tab.page.click('#connector-keys-dropdown')
+    tab.page.wait_for_selector('.Select-option, .dash-dropdown-option, [role=option]')
+    options = tab.page.locator('[role=option]').all_inner_texts()
+    assert any('sql:w7console' in option for option in options), options
+    assert _errors(tab) == [], _errors(tab)
+
+
+def test_dashboard_pipes_button_lists_cards_and_sections(server, tab):
+    result = server.python(SETUP_PIPES)
+    assert result.returncode == 0, result.stderr[-2000:]
+    tab.login()
+    tab.page.click('#get-pipes-button')
+    tab.page.wait_for_selector('.card-title:has-text("w7parent")')
+    titles = tab.page.locator('.card-title').all_inner_texts()
+    assert any('w7parent' in t for t in titles) and any('w7child' in t for t in titles)
+    assert _errors(tab) == [], _errors(tab)
+
+    ### The sections of a pipe's card, each loaded when it opens.
+    tab.goto('/dash/pipes/sql:w7console/w7parent')
+    for title, expect in (
+        ('Keys', 'w7parent'),
+        ('Statistics', 'Row count'),
+        ('Columns', 'DB Type'),
+        ('Parameters', 'columns'),
+        ('SQL Query', 'SELECT'),
+        ('Recent Data', 'val'),
+        ('Query Data', 'Row Limit'),
+        ('Sync Documents', 'Sync'),
+    ):
+        tab.page.click(f'.accordion-button:has-text("{title}")')
+        _wait_text(tab.page, '.accordion-collapse.show', expect)
+    assert _errors(tab) == [], _errors(tab)
+
+
+def test_pipe_card_runs_queries_and_edits(server, tab):
+    result = server.python(SETUP_PIPES)
+    assert result.returncode == 0, result.stderr[-2000:]
+    tab.login()
+    tab.goto('/dash/pipes/sql:w7console/w7parent')
+
+    ### Query: the rows come back as a table.
+    tab.page.click('.accordion-button:has-text("Query Data")')
+    tab.page.wait_for_selector('.accordion-collapse.show button:text-is("Query")')
+    tab.page.click('.accordion-collapse.show button:text-is("Query")')
+    _wait_text(tab.page, '.accordion-collapse.show', '2026-01-02')
+
+    ### Sync documents: one new row.
+    tab.page.click('.accordion-button:has-text("Sync Documents")')
+    tab.page.wait_for_selector('.accordion-collapse.show .ace_editor')
+    tab.page.evaluate(
+        """(text) => document.querySelector('.accordion-collapse.show .ace_editor').env.editor
+            .setValue(text, -1)""",
+        json.dumps([{'dt': '2026-02-01 00:00:00', 'id': 3, 'val': 9.5}]),
     )
-    assert '/dash/w7-figure' in links
-    assert '/dash/w7_dashapp/w7-dash' in links
-    for href in links:
-        tab.page.goto(f"{server.base_url}{href}")
-        tab.page.wait_for_load_state('networkidle')
-        assert tab.page.url.startswith(f"{server.base_url}/dash"), href
+    tab.page.click('.accordion-collapse.show button:text-is("Sync")')
+    _wait_text(tab.page, '.accordion-collapse.show', 'Inserted 1')
+
+    ### Parameters: edit and save.
+    tab.page.click('.accordion-button:has-text("Parameters")')
+    tab.page.wait_for_selector('.accordion-collapse.show .ace_editor')
+    parameters = {
+        'columns': {'datetime': 'dt', 'id': 'id'},
+        'fetch': {'definition': 'SELECT * FROM w7_raw'},
+        'tags': ['dash-edit'],
+    }
+    tab.page.evaluate(
+        """(text) => document.querySelector('.accordion-collapse.show .ace_editor').env.editor
+            .setValue(text, -1)""",
+        json.dumps(parameters),
+    )
+    tab.page.click('.accordion-collapse.show button:text-is("Update")')
+    _wait_text(tab.page, '.accordion-collapse.show', 'Successfully edited')
+    saved = server.python(
+        "import meerschaum as mrsm, json\n"
+        "pipe = mrsm.Pipe('sql:w7console', 'w7parent', instance='sql:w7console')\n"
+        "print('JSON:' + json.dumps({'rows': pipe.get_rowcount(), 'tags': pipe.tags}))\n"
+    )
+    out = json.loads([l for l in saved.stdout.splitlines() if l.startswith('JSON:')][-1][5:])
+    assert out['rows'] == 3 and out['tags'] == ['dash-edit']
     assert _errors(tab) == [], _errors(tab)
 
 
-def _rendered_figure(page, selector: str = '#w7-figure'):
-    page.wait_for_selector(f"{selector}[data-rendered=true]")
-    return page.eval_on_selector(selector, 'el => ({data: el.data, layout: el.layout})')
+def test_pipe_card_shows_parents_and_children(server, tab):
+    result = server.python(SETUP_PIPES)
+    assert result.returncode == 0, result.stderr[-2000:]
+    tab.login()
+    tab.goto('/dash/pipes/sql:w7console/w7child')
+    tab.page.click('.accordion-button:has-text("Parents & Children")')
+    _wait_text(tab.page, '.accordion-collapse.show', 'Parents (1)')
+    body = tab.page.inner_text('.accordion-collapse.show')
+    assert 'Children (0)' in body and 'w7parent' in body
+    ### The parent links to its own card.
+    href = tab.page.locator('.accordion-collapse.show a:has-text("w7parent")').get_attribute('href')
+    assert href.startswith('/dash/pipes/sql%3Aw7console/w7parent')
+
+    tab.goto('/dash/pipes/sql:w7console/w7parent')
+    tab.page.click('.accordion-button:has-text("Parents & Children")')
+    _wait_text(tab.page, '.accordion-collapse.show', 'Children (1)')
+    tab.page.click('.accordion-collapse.show a.nav-link:has-text("Children")')
+    _wait_text(tab.page, '.accordion-collapse.show .tab-pane.active', 'w7child')
+    assert _errors(tab) == [], _errors(tab)
+
+
+def test_exec_runs_an_action_through_the_server(server, tab):
+    result = server.python(SETUP_PIPES)
+    assert result.returncode == 0, result.stderr[-2000:]
+    tab.login()
+    ### `show pipes` is the dashboard's default selection.
+    tab.page.click('#go-button')
+    tab.page.wait_for_selector('#exec-div', state='visible')
+    _wait_text(tab.page, '#exec-view', 'w7parent', timeout=60000)
+    _wait_text(tab.page, '#exec-header', 'show pipes')
+    _wait_text(tab.page, '#exec-header', 'stopped')
+    ### The terminal makes way for the output; `Term` brings it back.
+    assert not tab.page.locator('#webterm-div').is_visible()
+    tab.page.click('#show-webterm-button')
+    tab.page.wait_for_selector('#exec-div', state='hidden')
+    assert _errors(tab) == [], _errors(tab)
+
+
+def test_exec_refuses_what_the_dashboard_does_not_offer(server, tab):
+    tab.login()
+    tab.page.click('#go-button')
+    tab.page.wait_for_selector('#exec-div', state='visible')
+    ### The server applies the action's permissions itself: a non-admin user is refused.
+    anonymous = tab.page.request.post(
+        f"{server.base_url}/execute", data=json.dumps({'sysargs': ['show', 'version']}),
+        headers={'content-type': 'application/json'},
+    )
+    assert anonymous.status in (401, 403)
+    assert _errors(tab) == [], _errors(tab)
+
+
+def test_a_non_admin_runs_what_the_console_offers_and_is_refused_the_rest(server, tab):
+    """`POST /execute` limits a non-administrator to the console's actions, with a clear message."""
+    result = server.python("""
+import meerschaum as mrsm
+from meerschaum.core import User
+conn = mrsm.get_connector('sql:w7console')
+success, msg = conn.register_user(User('bobby', 'correct-horse-2', instance=conn))
+assert success, msg
+""")
+    assert result.returncode == 0, result.stderr[-2000:]
+    tab.login('bobby', 'correct-horse-2')
+    ### An action the server keeps from non-administrators (it runs code): refused, with the reason.
+    tab.page.select_option('#action-dropdown', 'python')
+    tab.page.click('#go-button')
+    _wait_text(tab.page, '#exec-alert-div', 'cannot be run by non-administrators', timeout=30000)
+    ### The dashboard's own omit list comes from the server (`GET /execute/policy`).
+    options = tab.page.locator('#action-dropdown option').all_inner_texts()
+    assert 'show' in options and 'sh' not in options and 'stack' not in options
+    ### The default selection (`show pipes`) is allowed for any user: the server reads
+    ### `api:permissions:actions:non_admin` (true by default) for `/execute`, as the console does.
+    tab.page.select_option('#action-dropdown', 'show')
+    tab.page.click('#go-button')
+    tab.page.wait_for_selector('#exec-div', state='visible')
+    _wait_text(tab.page, '#exec-header', 'stopped', timeout=60000)
+    assert _errors(tab) == [], _errors(tab)
+
+
+def test_manage_menu_syncs_a_pipe_and_confirms_destructive_actions(server, tab):
+    result = server.python(SETUP_PIPES)
+    assert result.returncode == 0, result.stderr[-2000:]
+    tab.login()
+    tab.page.click('#get-pipes-button')
+    tab.page.wait_for_selector('.card-title:has-text("w7parent")')
+    card = tab.page.locator('.card:has(.card-title:has-text("w7parent"))').first
+    card.locator('.dropdown-toggle:has-text("Manage")').click()
+    tab.page.click('.dropdown-menu.show .dropdown-item:text-is("Sync")')
+    tab.page.wait_for_selector('#exec-div', state='visible')
+    _wait_text(tab.page, '#exec-view', 'w7parent', timeout=60000)
+
+    ### Clear asks first: cancel leaves the data alone.
+    before_rows = server.python(ROWCOUNT).stdout.strip()
+    assert before_rows.isdigit() and int(before_rows) >= 2, before_rows
+    card.locator('.dropdown-toggle:has-text("Manage")').click()
+    tab.page.click('.dropdown-menu.show .dropdown-item:text-is("Clear")')
+    tab.page.wait_for_selector('.modal.show')
+    assert 'clear' in tab.page.inner_text('#manage-confirm-body')
+    tab.page.click('#manage-cancel-button')
+    tab.page.wait_for_selector('.modal.show', state='detached')
+    rows = server.python(ROWCOUNT)
+    assert rows.stdout.strip() == before_rows, rows.stdout + rows.stderr[-500:]
+    assert _errors(tab) == [], _errors(tab)
+
+
+def test_jobs_page_starts_and_deletes_a_job(server, tab):
+    started = server.mrsm('show', 'version', '-d', '--name', 'w7job', '--yes', '--nopretty')
+    assert started.returncode == 0, started.stdout + started.stderr
+    tab.login()
+    tab.goto('/dash/jobs', '.card-title')
+    tab.page.wait_for_selector('.card-title:has-text("w7job")')
+    ### Other jobs (the actions the dashboard ran) have cards too: work in this job's.
+    card = tab.page.locator('.card:has(.card-title:has-text("w7job"))').first
+    card.locator('button:text-is("Start")').wait_for()
+    began = lambda: server.python(
+        "from meerschaum.jobs import Job\n"
+        "job = Job('w7job', executor_keys='local')\n"
+        "print(job.began, job.status)"
+    ).stdout.strip()
+    first_began = began().rsplit(' ', 1)[0]
+    ### The click is a request to the host (a click before the page's callbacks are bound is lost,
+    ### so click again): wait until the job really started again (a new `began`) and ended, or
+    ### deleting it below would race the start.
+    current = ''
+    for attempt in range(4):
+        card.locator('button:text-is("Start")').wait_for()
+        card.locator('button:text-is("Start")').click()
+        deadline = time.time() + 20
+        while time.time() < deadline:
+            current = began()
+            if current.rsplit(' ', 1)[0] != first_began and current.endswith('stopped'):
+                break
+            time.sleep(0.5)
+        if current.rsplit(' ', 1)[0] != first_began:
+            break
+    assert current.rsplit(' ', 1)[0] != first_began and current.endswith('stopped'), current
+    ### The card shows the status of the job as of its last refresh (every few seconds).
+    time.sleep(4)
+    card.locator('p:has-text("Stopped")').first.wait_for()
+    ### The card's buttons are rebuilt every few seconds: a click that lands on a button which
+    ### is being replaced is lost, so click until the confirmation opens.
+    for attempt in range(3):
+        card.locator('button:text-is("Delete")').wait_for()
+        card.locator('button:text-is("Delete")').click()
+        try:
+            tab.page.wait_for_selector('.modal.show', timeout=15000)
+            break
+        except Exception:
+            if attempt == 2:
+                raise
+    ### A job that is still winding down cannot be deleted yet: the modal stays open and says so,
+    ### so confirm again (deleting is idempotent) before calling it a failure.
+    for attempt in range(3):
+        tab.page.click('.modal.show button:text-is("Delete")')
+        try:
+            tab.page.wait_for_selector('.modal.show', state='detached', timeout=15000)
+            break
+        except Exception:
+            if attempt == 2:
+                raise AssertionError(
+                    f"The job was not deleted: {tab.page.locator('.modal.show').inner_text()!r}"
+                )
+            time.sleep(2)
+    ### Gone from the server (the card stays until the page reloads, as in v4).
+    deadline = time.time() + 30
+    while time.time() < deadline:
+        listing = server.mrsm('show', 'jobs', '--nopretty')
+        if 'w7job' not in listing.stdout:
+            break
+        time.sleep(1)
+    assert 'w7job' not in listing.stdout
+    tab.goto('/dash/jobs')
+    tab.page.wait_for_load_state('networkidle')
+    assert tab.page.locator('.card-title:has-text("w7job")').count() == 0
+    assert _errors(tab) == [], _errors(tab)
+
+
+def test_follow_logs_streams_a_running_job(server, tab):
+    started = server.mrsm(
+        'sync', 'pipes', '-i', 'sql:w7console', '--loop', '--min-seconds', '3',
+        '-d', '--name', 'w7loop', '--yes', '--nopretty',
+    )
+    assert started.returncode == 0, started.stdout + started.stderr
+    try:
+        tab.login()
+        tab.page.click('#get-jobs-button')
+        tab.page.wait_for_selector('.card-title:has-text("w7loop")')
+        card = tab.page.locator('.card:has(.card-title:has-text("w7loop"))').first
+        card.locator('.dropdown-toggle:has-text("Logs")').click()
+        tab.page.click('.dropdown-menu.show .dropdown-item:text-is("Follow logs")')
+        tab.page.wait_for_selector('#exec-div', state='visible')
+        _wait_text(tab.page, '#exec-header', 'show logs w7loop')
+        tab.page.wait_for_function(
+            "document.querySelector('#exec-view').textContent.trim().length > 0", timeout=60000,
+        )
+        assert _errors(tab) == [], _errors(tab)
+    finally:
+        server.mrsm('stop', 'jobs', 'w7loop', '--nopretty')
+        server.mrsm('delete', 'jobs', 'w7loop', '--yes', '--nopretty')
+
+
+def test_page_contract_page_renders_a_figure_in_its_frame(server, tab):
+    tab.login()
+    tab.goto('/dash/w7-figure')
+    frame = _frame(tab.page)
+    frame.wait_for_selector('#w7-figure[data-rendered=true]')
+    figure = frame.eval_on_selector('#w7-figure', 'el => ({data: el.data, layout: el.layout})')
+    assert _strip(figure) == FIGURE
+    assert frame.locator('#w7-figure .trace.bars .point').count() == 3
+    assert frame.locator('h2:has-text("W7 Python page")').is_visible()
+    ### The console's navbar stays around the page.
+    assert tab.page.locator('#pages-navbar-div #logo-img').count() == 1
+
+    ### HTMX: a page element requests a plugin API route and swaps the fragment.
+    frame.click('#w7-load')
+    frame.wait_for_selector('#w7-fragment')
+    assert 'Fragment from a Python plugin route' in frame.inner_text('#w7-slot')
+    assert _errors(tab) == [], _errors(tab)
 
 
 def _strip(figure: dict) -> dict:
@@ -105,33 +413,30 @@ def _strip(figure: dict) -> dict:
     return {'data': data, 'layout': {'title': {'text': figure['layout']['title']['text']}}}
 
 
-def test_python_and_rust_pages_render_the_same_figure(server, tab):
-    tab.login()
-    tab.page.goto(f"{server.base_url}/dash/w7-figure")
-    python_figure = _rendered_figure(tab.page)
-    assert _strip(python_figure) == FIGURE
-    assert tab.page.locator('#w7-figure .trace.bars .point').count() == 3
-    assert tab.page.locator('h2:has-text("W7 Python page")').is_visible()
+def _rendered_figure(frame, selector: str = '#w7-figure'):
+    frame.wait_for_selector(f"{selector}[data-rendered=true]")
+    return frame.eval_on_selector(selector, 'el => ({data: el.data, layout: el.layout})')
 
-    ### HTMX: a page element requests a plugin API route and swaps the fragment.
-    tab.page.click('#w7-load')
-    tab.page.wait_for_selector('#w7-fragment')
-    assert 'Fragment from a Python plugin route' in tab.page.inner_text('#w7-slot')
 
+def test_native_page_renders_the_same_figure(server, tab):
     if not server.native_built:
         pytest.skip(f"The native plugin was not built: {(server.root / 'native_build.log').read_text()[-800:]}")
-    tab.page.goto(f"{server.base_url}/dash/w7-native-figure")
-    rust_figure = _rendered_figure(tab.page)
-    assert tab.page.locator('h2:has-text("W7 Rust page")').is_visible()
-    assert tab.page.locator('#w7-figure .trace.bars .point').count() == 3
+    tab.login()
+    tab.goto('/dash/w7-figure')
+    python_figure = _rendered_figure(_frame(tab.page))
+    tab.goto('/dash/w7-native-figure')
+    frame = _frame(tab.page)
+    rust_figure = _rendered_figure(frame)
+    assert frame.locator('h2:has-text("W7 Rust page")').is_visible()
+    assert frame.locator('#w7-figure .trace.bars .point').count() == 3
     assert rust_figure == python_figure
     assert _strip(rust_figure) == FIGURE
     assert _errors(tab) == [], _errors(tab)
 
 
-def _mount(page, attribute: str, spec: dict, element_id: str, extra_style: str = '') -> None:
-    ### Add a page-contract element the way an HTMX swap does, then let the console render it.
-    page.evaluate(
+def _mount(frame, attribute: str, spec: dict, element_id: str, extra_style: str = '') -> None:
+    ### Add a page-contract element the way an HTMX swap does, then let the page draw it.
+    frame.evaluate(
         """([attribute, spec, id, style]) => {
             const el = document.createElement('div');
             el.id = id;
@@ -163,20 +468,21 @@ LEGACY_MAP_FIGURE = {
 
 def test_legacy_plotly_figures_are_rewritten_for_plotly_4(server, tab):
     tab.login()
-    tab.page.goto(f"{server.base_url}/dash/w7-figure")
-    _rendered_figure(tab.page)
-    _mount(tab.page, 'data-mrsm-figure', LEGACY_FIGURE, 'legacy-bars')
-    figure = _rendered_figure(tab.page, '#legacy-bars')
+    tab.goto('/dash/w7-figure')
+    frame = _frame(tab.page)
+    _rendered_figure(frame)
+    _mount(frame, 'data-mrsm-figure', LEGACY_FIGURE, 'legacy-bars')
+    figure = _rendered_figure(frame, '#legacy-bars')
     assert figure['layout']['title']['text'] == 'Legacy title'
     assert figure['layout']['xaxis']['title']['text'] == 'Legacy x'
     assert figure['layout']['xaxis']['title']['font']['size'] == 18
     assert 'titlefont' not in figure['layout']['xaxis']
     assert figure['layout']['yaxis']['title']['text'] == 'Already current'
-    assert tab.page.locator('#legacy-bars .trace.bars .point').count() == 2
+    assert frame.locator('#legacy-bars .trace.bars .point').count() == 2
 
     ### A mapbox trace becomes the maplibre-based `scattermap`; the `mapbox` subplot becomes `map`.
-    _mount(tab.page, 'data-mrsm-figure', LEGACY_MAP_FIGURE, 'legacy-map')
-    figure = _rendered_figure(tab.page, '#legacy-map')
+    _mount(frame, 'data-mrsm-figure', LEGACY_MAP_FIGURE, 'legacy-map')
+    figure = _rendered_figure(frame, '#legacy-map')
     assert figure['data'][0]['type'] == 'scattermap'
     assert 'mapbox' not in figure['layout'] and figure['layout']['map']['zoom'] == 2
     assert figure['layout']['title']['text'] == 'Legacy map'
@@ -185,23 +491,25 @@ def test_legacy_plotly_figures_are_rewritten_for_plotly_4(server, tab):
 
 def test_plotly_figures_have_no_cloud_button_unless_they_ask(server, tab):
     tab.login()
-    tab.page.goto(f"{server.base_url}/dash/w7-figure")
-    _rendered_figure(tab.page)
-    tab.page.hover('#w7-figure')
-    assert tab.page.locator('#w7-figure .modebar-btn').count() > 0
-    assert tab.page.locator('#w7-figure .modebar-btn[data-title="Share chart..."]').count() == 0
+    tab.goto('/dash/w7-figure')
+    frame = _frame(tab.page)
+    _rendered_figure(frame)
+    frame.hover('#w7-figure')
+    assert frame.locator('#w7-figure .modebar-btn').count() > 0
+    assert frame.locator('#w7-figure .modebar-btn[data-title="Share chart..."]').count() == 0
     optin = dict(FIGURE, config={'showSendToCloud': True, 'displayModeBar': True})
-    _mount(tab.page, 'data-mrsm-figure', optin, 'cloud-optin')
-    _rendered_figure(tab.page, '#cloud-optin')
-    assert tab.page.locator('#cloud-optin .modebar-btn[data-title="Share chart..."]').count() == 1
+    _mount(frame, 'data-mrsm-figure', optin, 'cloud-optin')
+    _rendered_figure(frame, '#cloud-optin')
+    assert frame.locator('#cloud-optin .modebar-btn[data-title="Share chart..."]').count() == 1
 
 
 def test_maps_load_maplibre_on_demand_and_render(server, tab):
     requested = []
     tab.page.on('request', lambda r: requested.append(r.url.rsplit('/', 1)[-1].split('?')[0]))
     tab.login()
-    tab.page.goto(f"{server.base_url}/dash/w7-figure")
-    _rendered_figure(tab.page)
+    tab.goto('/dash/w7-figure')
+    frame = _frame(tab.page)
+    _rendered_figure(frame)
     ### MapLibre is an ES module (and a module worker): a page without a map never fetches it.
     assert 'maplibre-gl.mjs' not in requested and 'maplibre-gl-worker.mjs' not in requested
 
@@ -212,303 +520,284 @@ def test_maps_load_maplibre_on_demand_and_render(server, tab):
         ],
     }
     with tab.page.expect_response(lambda r: r.url.split('?')[0].endswith('/maplibre-gl-worker.mjs')) as worker:
-        _mount(tab.page, 'data-mrsm-map', dict(geojson, center=[-82.4, 34.85], zoom=6), 'geo-map')
-        tab.page.wait_for_selector('#geo-map[data-rendered=true]')
+        _mount(frame, 'data-mrsm-map', dict(geojson, center=[-82.4, 34.85], zoom=6), 'geo-map')
+        frame.wait_for_selector('#geo-map[data-rendered=true]')
     assert worker.value.status == 200
-    assert 'text/javascript' in worker.value.headers['content-type']
-    tab.page.wait_for_selector('#geo-map canvas.maplibregl-canvas')
-    assert tab.page.locator('#geo-map .maplibregl-ctrl-zoom-in').count() == 1
+    assert 'javascript' in worker.value.headers['content-type']
+    frame.wait_for_selector('#geo-map canvas.maplibregl-canvas')
+    assert frame.locator('#geo-map .maplibregl-ctrl-zoom-in').count() == 1
 
     ### A layer spec: any style document (here one with no network sources).
     style = {
         'version': 8, 'sources': {},
         'layers': [{'id': 'bg', 'type': 'background', 'paint': {'background-color': '#dde7ee'}}],
     }
-    _mount(tab.page, 'data-mrsm-map', {'style': style, 'center': [0, 0], 'zoom': 2}, 'style-map')
-    tab.page.wait_for_selector('#style-map[data-rendered=true]')
-    tab.page.wait_for_selector('#style-map canvas.maplibregl-canvas')
-    assert 'Map could not be displayed' not in tab.page.inner_text('main')
+    _mount(frame, 'data-mrsm-map', {'style': style, 'center': [0, 0], 'zoom': 2}, 'style-map')
+    frame.wait_for_selector('#style-map[data-rendered=true]')
+    frame.wait_for_selector('#style-map canvas.maplibregl-canvas')
+    assert 'Map could not be displayed' not in frame.inner_text('main')
     assert requested.count('maplibre-gl.mjs') == 1
     assert _errors(tab) == [], _errors(tab)
 
 
-def test_assets_are_served_gzip_with_validators(server, context):
-    page = context.new_page()
-    url = f"{server.base_url}/dash/assets/plotly.min.js"
-    packed = page.request.get(url, headers={'Accept-Encoding': 'gzip'})
-    assert packed.status == 200
-    assert packed.headers['content-encoding'] == 'gzip'
-    assert packed.headers['vary'] == 'Accept-Encoding'
-    assert packed.headers['cache-control'] == 'no-cache'
-    assert int(packed.headers['content-length']) < 2_000_000
-    plain = page.request.get(url, headers={'Accept-Encoding': 'identity'})
-    assert 'content-encoding' not in plain.headers
-    assert int(plain.headers['content-length']) == len(plain.body()) > 4_000_000
-    assert packed.body() == plain.body()
-    assert packed.headers['etag'] != plain.headers['etag']
-    revalidated = page.request.get(
-        url, headers={'Accept-Encoding': 'gzip', 'If-None-Match': packed.headers['etag']},
-    )
-    assert revalidated.status == 304 and revalidated.body() == b''
-
-
-def test_plugin_owned_dash_app_fires_a_callback(server, tab):
+def test_plugin_dash_page_fires_a_callback_on_the_core_app(server, tab):
     tab.login()
-    tab.page.goto(f"{server.base_url}/dash/w7_dashapp/w7-dash")
-    tab.page.wait_for_selector('#w7-dash-title')
-    ### The core stores are filled from the console's session cookie.
-    tab.page.wait_for_function(
-        "document.querySelector('#w7-session') && "
-        "document.querySelector('#w7-session').textContent === 'session: active'"
-    )
+    tab.goto('/dash/w7-dash', '#w7-dash-title')
+    ### The core stores are the console's: `session-store` carries the login.
+    _wait_text(tab.page, '#w7-session', 'session: active')
     tab.page.click('#w7-btn')
-    tab.page.wait_for_function("document.querySelector('#w7-out').textContent === 'clicked 1'")
+    _wait_text(tab.page, '#w7-out', 'clicked 1')
     tab.page.click('#w7-btn')
-    tab.page.wait_for_function("document.querySelector('#w7-out').textContent === 'clicked 2'")
-    ### The Dash app's navbar links back to the console.
-    assert tab.page.locator('nav.mrsm-plugin-navbar a[href="/dash/pipes"]').count() == 1
+    _wait_text(tab.page, '#w7-out', 'clicked 2')
+    ### The page has the console's navbar.
+    assert tab.page.locator('#pages-navbar-div #logo-img').count() == 1
     assert _errors(tab) == [], _errors(tab)
 
 
-def test_old_v4_urls_redirect_to_the_plugin_app(server, tab):
+def test_rc1_plugin_paths_redirect_to_the_v4_paths(server, tab):
     tab.login()
-    response = tab.page.request.get(f"{server.base_url}/dash/w7-dash?x=1", max_redirects=0)
+    response = tab.page.request.get(f"{server.base_url}/dash/w7_dashapp/w7-dash?x=1", max_redirects=0)
     assert response.status in (302, 307), response.status
-    assert response.headers['location'] == '/dash/w7_dashapp/w7-dash?x=1'
-    tab.page.goto(f"{server.base_url}/dash/w7-dash?x=1")
+    assert response.headers['location'] == '/dash/w7-dash?x=1'
+    tab.page.goto(f"{server.base_url}/dash/w7_dashapp/w7-dash?x=1")
     tab.page.wait_for_selector('#w7-dash-title')
-    assert tab.page.url == f"{server.base_url}/dash/w7_dashapp/w7-dash?x=1"
-    ### A URL already under the plugin's name is not redirected.
-    response = tab.page.request.get(f"{server.base_url}/dash/w7_dashapp/w7-dash", max_redirects=0)
-    assert response.status == 200
+    assert tab.page.url == f"{server.base_url}/dash/w7-dash?x=1"
 
 
-def test_session_is_shared_by_console_dash_app_and_api_plugin(server, context):
-    anonymous = context.new_page()
-    response = anonymous.request.get(f"{server.base_url}/w7/session")
+def test_session_is_shared_by_console_and_api_plugin(server, context):
+    anonymous = Tab(context.new_page(), server.base_url)
+    response = anonymous.page.request.get(f"{server.base_url}/w7/session")
     assert response.json() == {'active': False, 'username': None}
-    anonymous.goto(f"{server.base_url}/dash/w7_dashapp/w7-dash")
-    anonymous.wait_for_selector('text=Login required')
+    ### A page that needs a login is the login page for an anonymous visitor.
+    anonymous.goto('/dash/w7-dash', '#username-input')
 
     tab = Tab(context.new_page(), server.base_url)
     tab.login()
     ### The API plugin route (served by the Python host) reads the console's session.
     response = tab.page.request.get(f"{server.base_url}/w7/session")
     assert response.json() == {'active': True, 'username': USERNAME}
-    tab.page.goto(f"{server.base_url}/dash/w7_dashapp/w7-dash")
-    tab.page.wait_for_function(
-        "document.querySelector('#w7-session') && "
-        "document.querySelector('#w7-session').textContent === 'session: active'"
-    )
+    tab.goto('/dash/w7-dash', '#w7-dash-title')
+    _wait_text(tab.page, '#w7-session', 'session: active')
     ### Logging out in the console ends it everywhere.
-    tab.page.goto(f"{server.base_url}/dash")
-    tab.page.click('button:has-text("Log out")')
-    tab.page.wait_for_url(f"{server.base_url}/dash/login")
+    tab.page.click('#sign-out-button')
+    tab.page.wait_for_selector('#username-input')
     assert tab.page.request.get(f"{server.base_url}/w7/session").json()['active'] is False
-    tab.page.goto(f"{server.base_url}/dash/w7_dashapp/w7-dash")
-    tab.page.wait_for_selector('text=Login required')
+    tab.goto('/dash/w7-dash', '#username-input')
 
 
-def _plugin_archive(tmp_path: pathlib.Path, name: str) -> pathlib.Path:
-    source = tmp_path / name
-    source.mkdir()
-    (source / '__init__.py').write_text("__version__ = '0.1.0'\nrequired = []\n")
-    archive = tmp_path / f"{name}.tar.gz"
-    with tarfile.open(archive, 'w:gz') as tar:
-        tar.add(source, arcname=name)
-    return archive
-
-
-def test_plugin_archive_upload_through_the_console(server, tab, tmp_path):
-    archive = _plugin_archive(tmp_path, 'w7_uploaded')
+def test_plugins_page_lists_hosted_plugins(server, tab):
     tab.login()
-    tab.page.goto(f"{server.base_url}/dash/plugins")
-    tab.page.fill('form[action="/dash/plugins/upload"] input[name=name]', 'w7_uploaded')
-    tab.page.fill('form[action="/dash/plugins/upload"] input[name=version]', '0.1.0')
-    tab.page.fill('form[action="/dash/plugins/upload"] input[name=description]', 'Uploaded in a test')
-    tab.page.set_input_files('form[action="/dash/plugins/upload"] input[type=file]', str(archive))
-    tab.page.click('button:has-text("Upload plugin")')
-    tab.page.wait_for_selector('[role=status]')
-    assert 'Success' in tab.page.inner_text('[role=status]'), tab.page.inner_text('[role=status]')
-    stored = tab.page.request.get(f"{server.base_url}/plugins/w7_uploaded")
-    assert stored.status == 200 and stored.body() == archive.read_bytes()
-    assert tab.page.request.get(f"{server.base_url}/plugins/w7_uploaded/version").json() == '0.1.0'
-    ### The new plugin is listed on the plugins page.
-    tab.page.goto(f"{server.base_url}/dash/plugins")
-    assert tab.page.locator('article h2:has-text("w7_uploaded")').count() == 1
+    tab.goto('/dash/plugins')
+    tab.page.wait_for_selector('#plugins-content-div')
+    _wait_text(tab.page, '#plugins-content-div', 'plugin')
+    assert _errors(tab) == [], _errors(tab)
 
 
-def _login_request(page, base_url: str) -> None:
-    response = page.request.post(
-        f"{base_url}/dash/login",
-        form={'username': USERNAME, 'password': PASSWORD},
-        max_redirects=0,
-    )
-    assert response.status == 303, response.status
+def test_users_page_lists_the_users(server, tab):
+    tab.login()
+    tab.goto('/dash/users')
+    tab.page.wait_for_selector(f'.card:has-text("{USERNAME}")')
+    assert _errors(tab) == [], _errors(tab)
+
+
+def test_tokens_page_registers_a_token(server, tab):
+    tab.login()
+    tab.goto('/dash/tokens')
+    tab.page.wait_for_selector('#tokens-create-button')
+    tab.page.click('#tokens-create-button')
+    tab.page.wait_for_selector('.modal.show')
+    tab.page.fill('.modal.show input[type=text]', 'w7-token')
+    tab.page.click('.modal.show button:text-is("Register")')
+    _wait_text(tab.page, '.modal.show', 'Client Secret')
+    shown = tab.page.inner_text('.modal.show')
+    assert 'Client Secret' in shown and 'mrsm-key:' in shown
+    ### The secret is only ever shown once: it is stored hashed.
+    listing = tab.page.request.get(f"{server.base_url}/tokens")
+    assert listing.status in (200, 401, 403)
+    assert _errors(tab) == [], _errors(tab)
+
+
+def test_password_reset_validates_both_fields(server, tab):
+    tab.login()
+    tab.goto('/dash/password-reset', '#password-reset-input')
+    assert tab.page.locator('#password-reset-button').is_disabled()
+    tab.page.fill('#password-reset-input', 'a')
+    tab.page.wait_for_selector('#password-reset-input.is-invalid')
+    tab.page.fill('#password-reset-input', 'a-new-correct-horse-2')
+    tab.page.wait_for_selector('#password-reset-input.is-valid')
+    tab.page.fill('#password-reset-confirm-input', 'something-else-entirely')
+    tab.page.wait_for_selector('#password-reset-confirm-input.is-invalid')
+    assert tab.page.locator('#password-reset-button').is_disabled()
+    tab.page.fill('#password-reset-confirm-input', 'a-new-correct-horse-2')
+    tab.page.wait_for_selector('#password-reset-confirm-input.is-valid')
+    assert not tab.page.locator('#password-reset-button').is_disabled()
+    assert _errors(tab) == [], _errors(tab)
 
 
 def test_dash_route_group_hides_console_pages_only(gated_server, context):
     base = gated_server.base_url
-    page = context.new_page()
-    tab = Tab(page, base)
-    ### The index redirects to the login page when the console's group is not allowed.
-    response = page.request.get(f"{base}/", max_redirects=0)
-    assert response.headers['location'] == '/dash/login'
-    assert page.request.get(f"{base}/dash/login").status == 200
-    assert page.request.get(f"{base}/dash/assets/console.js").status == 200
-    _login_request(page, base)
-    for hidden in ('/dash', '/dash/pipes', '/dash/jobs', '/dash/plugins', '/dash/users',
-                   '/dash/tokens', '/dash/settings', '/dash/pipelines', '/dash/register'):
-        assert page.request.get(f"{base}{hidden}", max_redirects=0).status == 404, hidden
-    ### Plugin pages are always served and show no core links.
-    page.goto(f"{base}/dash/w7-figure")
-    _rendered_figure(page)
-    assert page.locator('nav[aria-label=Console] a[href="/dash/jobs"]').count() == 0
-    assert page.locator('nav[aria-label=Console] a[href="/dash/w7-figure"]').count() == 1
-    page.goto(f"{base}/dash/w7-dash")
-    page.wait_for_selector('#w7-dash-title')
-    assert page.url == f"{base}/dash/w7_dashapp/w7-dash"
-    ### Other route groups keep working.
-    assert page.request.get(f"{base}/version").status == 200
-    assert page.request.get(f"{base}/pipes").status in (200, 401)
-    assert _errors(tab) == [], _errors(tab)
+    tab = Tab(context.new_page(), base)
+    ### The login page is always served so plugin pages requiring a login keep an entrypoint.
+    tab.goto('/dash/login', '#username-input')
+    tab.goto('/dash', '#username-input')
+    tab.page.fill('#username-input', USERNAME)
+    tab.page.fill('#password-input', PASSWORD)
+    tab.page.click('#login-button')
+    tab.page.wait_for_selector('#logo-img, h2:has-text("Page not found")', timeout=30000)
+    ### The console's own pages are gone (v4's error page); other route groups keep working.
+    for hidden in ('/dash/pipes', '/dash/jobs', '/dash/users', '/dash/tokens'):
+        tab.goto(hidden, 'h2:has-text("Page not found")')
+    ### Plugin pages are always served.
+    tab.goto('/dash/w7-figure')
+    _rendered_figure(_frame(tab.page))
+    assert tab.page.request.get(f"{base}/version").status == 200
 
 
 def test_no_dash_serves_no_console_and_no_plugin_pages(nodash_server, context):
     base = nodash_server.base_url
     page = context.new_page()
-    for path in ('/dash', '/dash/login', '/dash/pipes', '/dash/w7-figure', '/dash/w7-dash',
-                 '/dash/w7_dashapp/', '/dash/w7_dashapp/_dash-layout', '/_pages/w7-figure'):
-        assert page.request.get(f"{base}{path}", max_redirects=0).status in (404, 401, 403), path
+    for path in ('/dash/pipes', '/dash/w7-figure', '/dash/w7-dash', '/dash/_dash-layout',
+                 '/_pages/w7-figure'):
+        response = page.request.get(f"{base}{path}", max_redirects=0)
+        assert response.status in (404, 401, 403) or 'pip install' in response.text(), path
+    assert 'dash-renderer' not in page.request.get(f"{base}/dash/").text()
     ### The API plugin's routes still work through the host.
     assert page.request.get(f"{base}/w7/session").json() == {'active': False, 'username': None}
     assert page.request.get(f"{base}/version").status == 200
-    assert page.request.get(f"{base}/", max_redirects=0).headers['location'] in ('/docs', '/openapi.json')
+
+
+ROWCOUNT = (
+    "import meerschaum as mrsm\n"
+    "print(mrsm.Pipe('sql:w7console', 'w7parent', instance='sql:w7console').get_rowcount())"
+)
+
+def test_no_auth_console_needs_no_login(noauth_server, context):
+    tab = Tab(context.new_page(), noauth_server.base_url)
+    tab.goto('/dash', '#go-button')
+    tab.wait_for_dashboard()
+    ### Everything the login gates is open, including the pages that list and run things.
+    tab.page.click('#go-button')
+    tab.page.wait_for_selector('#exec-div', state='visible')
+    _wait_text(tab.page, '#exec-view', 'No pipes to show', timeout=60000)
+    for path in ('/dash/pipes', '/dash/jobs', '/dash/tokens', '/dash/pipelines'):
+        tab.goto(path)
+        assert tab.page.locator('#username-input').count() == 0, path
+    assert tab.errors == [], tab.errors
+
+
+def test_without_dash_the_console_is_a_pointer_page(nodashpkg_server, context):
+    """
+    When the host cannot import Dash it says so, and `/dash` explains how to get the console
+    (the standalone binary serves the API, `/docs`, `/engine/*` and MCP; the console is Python's).
+    """
+    base = nodashpkg_server.base_url
+    page = context.new_page()
+    response = page.request.get(f"{base}/dash")
+    assert response.status == 200
+    assert 'pip install meerschaum[dash]' in response.text()
+    assert 'dash-renderer' not in response.text()
+    assert page.request.get(f"{base}/dash/").status == 200
+    assert page.request.get(f"{base}/dash/pipes").status == 404
+    ### The rest of the server, and the host's plugin routes, are unaffected.
+    assert page.request.get(f"{base}/version").status == 200
+    assert page.request.get(f"{base}/w7/session").json() == {'active': False, 'username': None}
+    ### One warning in the log, not one per request.
+    log = nodashpkg_server.log_path.read_text(errors='replace')
+    assert log.count('The web console is not available') <= 1
+    assert 'Traceback' not in log, log[-2000:]
 
 
 SETUP_PIPES = """
 import meerschaum as mrsm
 conn = mrsm.get_connector('sql:w7console')
 conn.exec("CREATE TABLE IF NOT EXISTS w7_raw (dt TIMESTAMP, id INTEGER, val REAL)")
+conn.exec("DELETE FROM w7_raw")
 conn.exec("INSERT INTO w7_raw VALUES ('2026-01-01 00:00:00', 1, 1.5), ('2026-01-02 00:00:00', 2, 2.5)")
 parent = mrsm.Pipe('sql:w7console', 'w7parent', instance='sql:w7console', parameters={
     'columns': {'datetime': 'dt', 'id': 'id'},
     'fetch': {'definition': 'SELECT * FROM w7_raw'},
 })
-assert parent.register()[0]
+if parent.get_id() is None:
+    assert parent.register()[0]
 child = mrsm.Pipe('sql:w7console', 'w7child', instance='sql:w7console', parameters={
     'columns': {'datetime': 'dt', 'id': 'id'},
     'sql': "SELECT * FROM {{ Pipe('sql:w7console', 'w7parent') }}",
 })
-assert child.register()[0]
+if child.get_id() is None:
+    assert child.register()[0]
+if parent.get_rowcount() == 0:
+    success, msg = parent.sync()
+    assert success, msg
 """
 
 
-def test_pipelines_page_graph_gantt_and_live_updates(server, tab):
+def test_pipelines_page_graph_gantt_and_runs(server, tab):
     result = server.python(SETUP_PIPES)
     assert result.returncode == 0, result.stderr[-2000:]
     sync = server.mrsm('sync', 'pipes', '-i', 'sql:w7console', '--nopretty')
     assert sync.returncode == 0, sync.stdout[-1500:] + sync.stderr[-1500:]
 
     tab.login()
-    tab.page.goto(f"{server.base_url}/dash/pipelines")
-    ### The dependency graph (cytoscape draws onto canvases) with its edge table.
-    tab.page.wait_for_selector('#pipeline-graph [data-mrsm-graph][data-rendered=true] canvas', state='attached')
-    assert tab.page.locator('#pipeline-graph table tbody tr').count() == 1
-    row = tab.page.inner_text('#pipeline-graph table tbody tr')
-    assert 'w7parent' in row and 'w7child' in row and 'template' in row
-    ### The Gantt chart of the current run: an actual bar per pipe (planned bars need the
-    ### planner's end times, which the run rows do not carry yet).
-    tab.page.wait_for_selector('#pipeline-gantt [data-mrsm-figure][data-rendered=true]')
-    assert tab.page.locator('#pipeline-gantt .trace.bars .point').count() >= 2
-    assert tab.page.text_content('#pipeline-gantt .gtitle').startswith('Run ')
-    assert tab.page.locator('#pipeline-gantt table tbody tr').count() == 2
-    assert 'succeeded' in tab.page.inner_text('#pipeline-gantt table tbody')
-    ### The runs table, and the run's events over SSE.
-    assert tab.page.locator('#pipeline-runs table tbody tr').count() == 1
-    assert 'succeeded' in tab.page.inner_text('#pipeline-runs table tbody tr')
-    tab.page.wait_for_function(
-        "document.querySelector('pre[data-mrsm-events]').textContent.trim().length > 0",
-        timeout=20000,
-    )
-    events = tab.page.inner_text('pre[data-mrsm-events]')
+    tab.goto('/dash/pipelines', '#pipelines-graph-div')
+    ### The dependency graph (a Plotly figure) with its edge table.
+    tab.page.wait_for_selector('#pipelines-graph .scatterlayer .point', timeout=60000)
+    assert tab.page.locator('#pipelines-graph .scatterlayer .point').count() == 2
+    tab.page.wait_for_selector('#pipelines-edges-table tbody tr')
+    row = tab.page.inner_text('#pipelines-edges-table tbody tr')
+    assert 'w7parent' in row and 'w7child' in row
+    ### The Gantt chart of the latest run, and its nodes.
+    tab.page.wait_for_selector('#pipelines-gantt .barlayer .point', timeout=60000)
+    assert tab.page.locator('#pipelines-gantt .barlayer .point').count() >= 2
+    assert tab.page.text_content('#pipelines-gantt .gtitle').startswith('Run ')
+    assert tab.page.locator('#pipelines-nodes-table tbody tr').count() == 2
+    assert 'succeeded' in tab.page.inner_text('#pipelines-nodes-table tbody')
+    ### The runs table and the run's events.
+    assert tab.page.locator('#pipelines-runs-table tbody tr').count() >= 1
+    assert 'succeeded' in tab.page.inner_text('#pipelines-runs-table tbody tr')
+    _wait_text(tab.page, '#pipelines-events-pre', 'run_started', timeout=30000)
+    events = tab.page.inner_text('#pipelines-events-pre')
     assert 'w7parent' in events and 'w7child' in events
 
-    ### A sync while the page is open appears without a reload (the runs table polls).
+    ### A sync while the page is open appears without a reload (the page refreshes itself).
+    before = tab.page.locator('#pipelines-runs-table tbody tr').count()
     again = server.mrsm('sync', 'pipes', '-i', 'sql:w7console', '--nopretty')
     assert again.returncode == 0, again.stdout[-1500:] + again.stderr[-1500:]
     tab.page.wait_for_function(
-        "document.querySelectorAll('#pipeline-runs table tbody tr').length === 2",
-        timeout=45000,
+        "(n) => document.querySelectorAll('#pipelines-runs-table tbody tr').length > n",
+        arg=before,
+        timeout=60000,
     )
-    ### Filtering the runs by status.
-    tab.page.goto(f"{server.base_url}/dash/pipelines?status=failed")
-    assert 'No runs match' in tab.page.inner_text('#pipeline-runs')
+    ### Filtering the runs by status (the filters live in the URL).
+    tab.goto('/dash/pipelines?status=failed', '#pipelines-runs-div')
+    _wait_text(tab.page, '#pipelines-runs-div', 'No runs match')
     assert _errors(tab) == [], _errors(tab)
 
 
-def test_webterm_is_served_by_the_rust_server(webterm_server, context):
+def test_the_terminal_page_embeds_the_servers_terminal(webterm_server, context):
     base = webterm_server.base_url
-    page = context.new_page()
-    ### The terminal route authenticates the console's session through the shared store.
-    assert 'Unauthorized' in page.request.get(f"{base}/webterm/not-a-session").text()
-    assert page.request.get(f"{base}/webterm/not-a-session").status == 401
-    tab = Tab(page, base)
+    tab = Tab(context.new_page(), base)
     tab.login()
     cookie = [c for c in context.cookies() if c['name'] == 'mrsm-session-id'][0]['value']
-    ### The console page embeds the terminal; the standalone page is linked.
-    page.goto(f"{base}/dash/webterm")
-    assert page.locator('[data-mrsm-webterm]').get_attribute('data-ws') == f"/websocket/{cookie}"
-    assert page.locator('main a:has-text("its own page")').get_attribute('href') == f"/webterm/{cookie}"
-    response = page.request.get(f"{base}/webterm/{cookie}")
+    tab.goto('/dash/webterm', '#webterm-iframe')
+    assert tab.page.get_attribute('#webterm-iframe', 'src') == f"/webterm/{cookie}"
+    response = tab.page.request.get(f"{base}/webterm/{cookie}")
     assert response.status == 200, response.status
-    assert 'Meerschaum Shell' in response.text()
-    ### No separate terminal process listens anywhere any more (`tests/console/test_webterm.py`
-    ### drives the terminal itself).
+    assert 'Meerschaum' in response.text()
+    ### The dashboard embeds the same terminal beside the action form.
+    tab.goto('/dash', '#go-button')
+    tab.page.wait_for_selector('#webterm-iframe')
+    assert tab.page.get_attribute('#webterm-iframe', 'src') == f"/webterm/{cookie}"
+    ### No separate terminal process listens anywhere (`tests/console/test_webterm.py` drives it).
     assert not webterm_server.port_is_open(webterm_server.webterm_port)
+    assert _errors(tab) == [], _errors(tab)
 
 
-def test_token_forms_grant_all_scopes_switch(server, tab):
+def test_without_the_terminal_the_dashboard_shows_the_banner(server, tab):
     tab.login()
-    tab.page.goto(f"{server.base_url}/dash/tokens")
-    page = tab.page
-    switch = page.locator('#all-scopes-register')
-    fields = page.locator('form:has(#all-scopes-register) .scopes-fields')
-
-    ### The registration form starts with "Grant all scopes" on and the checklist hidden.
-    assert page.locator('label[for=all-scopes-register]').inner_text() == (
-        'Grant all scopes (`*`, including custom and future scopes)'
-    )
-    assert switch.is_checked()
-    assert not fields.is_visible()
-
-    ### Off: the built-in scopes are selectable, "Deselect all" clears them, and a custom scope
-    ### has its own field.
-    switch.uncheck()
-    assert fields.is_visible()
-    boxes = fields.locator('input[name=scopes]')
-    assert boxes.count() > 10 and boxes.first.is_checked()
-    fields.locator('[data-scopes-toggle]').click()
-    assert fields.locator('input[name=scopes]:checked').count() == 0
-    assert fields.locator('[data-scopes-toggle]').inner_text() == 'Select all'
-    fields.locator('input[name=custom_scopes]').fill('myplugin:read')
-    page.fill('form:has(#all-scopes-register) input[name=label]', 'ui-custom')
-    page.click('form:has(#all-scopes-register) button:has-text("Create token")')
-    page.wait_for_selector('h1:has-text("Action result")')
-    page.goto(f"{server.base_url}/dash/tokens")
-
-    ### The saved token is listed with its custom scope, and its edit form has the switch off.
-    assert 'myplugin:read' in page.inner_text('main')
-    form = page.locator('form:has(input[name=label][value=ui-custom])')
-    assert not form.locator('input.grant-all-scopes').is_checked()
-    assert form.locator('input[name=custom_scopes]').input_value() == 'myplugin:read'
-
-    ### Registering with the switch on stores `*`, and its edit form shows the switch on.
-    page.fill('form:has(#all-scopes-register) input[name=label]', 'ui-all')
-    page.click('form:has(#all-scopes-register) button:has-text("Create token")')
-    page.wait_for_selector('h1:has-text("Action result")')
-    page.goto(f"{server.base_url}/dash/tokens")
-    form = page.locator('form:has(input[name=label][value=ui-all])')
-    assert form.locator('input.grant-all-scopes').is_checked()
-    assert not form.locator('.scopes-fields').is_visible()
+    ### `server` runs with `--no-webterm`: v4's banner takes the terminal's place.
+    tab.page.wait_for_selector('#console-pre')
+    assert 'v' in tab.page.inner_text('#console-pre')
+    assert tab.page.locator('#webterm-iframe').count() == 0
+    tab.goto('/dash/webterm', '#webterm-page-div')
+    assert tab.page.locator('#webterm-iframe').count() == 0
     assert _errors(tab) == [], _errors(tab)

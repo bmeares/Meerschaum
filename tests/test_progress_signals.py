@@ -7,8 +7,9 @@ The CLI progress spinner and the process's signals (wave 17b, PARITY W17T-003), 
 - `mrsm.entry()` in an embedding Python process: Ctrl-C while the spinner is drawn raises
   `KeyboardInterrupt` and the interpreter keeps running (the spinner's signal guard belongs to the
   `mrsm` program only);
-- `python -m meerschaum` and the standalone binary: the spinner is cleared and the exit is by the
-  signal;
+- `python -m meerschaum` and the standalone binary: Ctrl-C cancels the action (wave 18, decision 1):
+  the spinner is cleared, `Interrupted.` is printed and the exit status is 130; SIGTERM still ends
+  the process by the signal;
 - `start api`: the server keeps its own graceful shutdown on SIGINT.
 """
 
@@ -173,22 +174,29 @@ def test_entry_raises_keyboard_interrupt_and_the_interpreter_keeps_running(home)
     assert 'KEYBOARDINTERRUPT' in text and 'ALIVE' in text, text[-1500:]
 
 
-def test_the_python_console_script_clears_the_spinner_and_dies_by_the_signal(home):
+def _assert_interrupted(out, status):
+    text = out.decode('utf-8', 'replace')
+    assert status is not None, text[-1500:]
+    assert os.WIFEXITED(status) and os.WEXITSTATUS(status) == 130, (status, text[-1500:])
+    assert 'Interrupted.' in text, text[-1500:]
+    assert 'Traceback' not in text and 'panicked' not in text, text[-1500:]
+    assert CLEAR in _after_last_frame(out)
+
+
+def test_the_python_console_script_clears_the_spinner_and_exits_130(home):
     env, root = home
     out, status = _pty(
         [sys.executable, '-m', 'meerschaum', *ARGS], env, root, b'Reading data',
     )
-    assert status is not None and os.WIFSIGNALED(status), status
-    assert CLEAR in _after_last_frame(out)
+    _assert_interrupted(out, status)
 
 
-def test_the_standalone_binary_clears_the_spinner_and_dies_by_the_signal(home):
+def test_the_standalone_binary_clears_the_spinner_and_exits_130(home):
     from tests._binary import binary_or_skip
     binary = binary_or_skip()
     env, root = home
     out, status = _pty([str(binary), *ARGS], env, root, b'Reading data')
-    assert status is not None and os.WIFSIGNALED(status), status
-    assert CLEAR in _after_last_frame(out)
+    _assert_interrupted(out, status)
 
 
 @pytest.mark.parametrize('readiness', ['tcp', 'http'])
@@ -238,7 +246,13 @@ def _sleeps_after_the_spinner(argv_prefix, env, root, signum):
     )
     text = out.decode('utf-8', 'replace')
     assert status is not None, "the process survived the signal:\n" + text[-1500:]
-    assert os.WIFSIGNALED(status), (status, text[-800:])
+    if signum == signal.SIGINT:
+        ### Sent to the process alone, SIGINT is forwarded to the program it waits for (`sleep`),
+        ### which ends; the action is then reported as interrupted.
+        assert os.WIFEXITED(status) and os.WEXITSTATUS(status) == 130, (status, text[-800:])
+        assert 'Interrupted.' in text, text[-800:]
+    else:
+        assert os.WIFSIGNALED(status), (status, text[-800:])
 
 
 @pytest.mark.parametrize('signum', [signal.SIGINT, signal.SIGTERM], ids=['sigint', 'sigterm'])

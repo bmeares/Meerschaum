@@ -19,13 +19,15 @@ All Meerschaum environment variables begin with the prefix `MRSM_`. The most com
 | `MRSM_WORK_DIR` | Base directory under which the root directory is created when `MRSM_ROOT_DIR` is unset. | current working directory |
 | `MRSM_CONFIG` | Inline JSON or simplified-dictionary patch applied to the configuration. | _(unset)_ |
 | `MRSM_PATCH` | A second patch applied *after* `MRSM_CONFIG` (may reference its keys). | _(unset)_ |
-| `MRSM_<TYPE>_<LABEL>` | Define a connector by URI (e.g. `MRSM_SQL_MAIN`, `MRSM_API_MAIN`). | _(unset)_ |
+| `MRSM_<TYPE>_<LABEL>` | Define a connector by URI (e.g. `MRSM_SQL_MAIN`, `MRSM_API_MAIN`). Only variables of an existing connector type are read. | _(unset)_ |
+| `MRSM_CONNECT_TIMEOUT` | Seconds to wait for the first connection of a SQL, API or Valkey connector; overrides every connector's `connect_timeout` attribute. | `5` |
 | `MRSM_RUNTIME` | Marks a special runtime (e.g. `docker`). | _(unset)_ |
 | `MRSM_NO_AUTO_INSTALL` | Disable every implicit package installation (imports, dependency checks, `uv`/`pip` bootstraps). | _(unset)_ |
 | `MRSM_NOASK` / `MRSM_NONINTERACTIVE` | Disable interactive prompts (assume defaults). | _(unset)_ |
 | `MRSM_DUCKDB_LIB` | Path to DuckDB's shared library; explicitly selects the native C API and prevents mixed Python SQLAlchemy access. | _(unset: Python driver when installed; otherwise native library lookup)_ |
 | `MRSM_BIN` | Run a standalone `mrsm` binary instead of the in-process CLI of the Python package. | _(unset)_ |
 | `MRSM_PYTHON` | The Python interpreter the binary runs plugin workers and `upgrade meerschaum` with. | _(auto-detected)_ |
+| `MRSM_WORKER_STARTUP_TIMEOUT` | Seconds a Python worker may take to connect and say hello before it is killed and refused (for 10 s only). | `60` |
 | `MRSM_ALLOW_DEFAULT_ROOT` | Let a debug build use the default root directory. | _(unset)_ |
 
 !!! tip "Inspecting your environment"
@@ -113,6 +115,19 @@ MRSM_SQL_FOO='{"flavor": "sqlite", "database": "/tmp/temp.db"}' \
 
 !!! note "Reserved names"
     Names that match the reserved Meerschaum variables (e.g. `MRSM_ROOT_DIR`, `MRSM_CONFIG`) are *not* interpreted as connectors.
+
+!!! note "Only real connector types"
+    Since v5.0.0rc2, only a variable whose `<TYPE>` is a connector type that exists becomes a connector: the built-in types (`sql`, `api`, `valkey`, `plugin`, `systemd`) and the types your plugins register with `@make_connector`. Any other `MRSM_<X>_<Y>` variable (`MRSM_DUCKDB_LIB`, `MRSM_TEST_PG_URI`, a variable a plugin reads itself) is ignored instead of turning into a connector such as `duckdb:lib`.
+
+## **`MRSM_CONNECT_TIMEOUT`**
+
+A SQL, API or Valkey connector fails fast when its server cannot be reached. The first connection a command makes reports a refused connection, an unknown host or rejected credentials at once (`sql:main: cannot connect to localhost:5432 (connection refused). Is the database running?`), and gives up on a host that does not answer after `connect_timeout` seconds (5 by default). Set the `connect_timeout` attribute on a connector to change it for that connector, or `MRSM_CONNECT_TIMEOUT` to change it for all of them:
+
+```bash
+MRSM_CONNECT_TIMEOUT=2 mrsm show pipes -i sql:main
+```
+
+A long-running job that loses a connection it had already established keeps retrying as before.
 
 ## **`MRSM_CONFIG`**
 
@@ -209,6 +224,14 @@ The standalone `mrsm` binary runs Python plugins in a worker process. `MRSM_PYTH
 interpreter for those workers, for package installs, and for `mrsm upgrade meerschaum` (which otherwise
 refuses to guess which environment to upgrade). Inside the Python package the interpreter that is already
 running is used and you do not need to set it.
+
+Before the first worker starts, the binary checks the interpreter once (`python -P -c ...`, 10 s limit):
+it must import a `meerschaum` of the same major version. A missing, stale (v4) or mismatched package, an
+interpreter that cannot start, and a worker that never connects each fail at once with one message that
+names the interpreter, what it found and the fix (`pip install meerschaum==<version>` or `MRSM_PYTHON`);
+the refusal is remembered for a few seconds, so many pipes do not each wait. A worker has
+`MRSM_WORKER_STARTUP_TIMEOUT` seconds (default 60, for connecting and the hello together) before it is
+killed; raise it for a legitimately slow cold start.
 
 ## **`MRSM_ALLOW_DEFAULT_ROOT`**
 

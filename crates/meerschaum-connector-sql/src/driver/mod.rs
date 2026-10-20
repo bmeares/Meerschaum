@@ -18,6 +18,7 @@
 
 mod backend;
 pub mod batch;
+pub mod connect;
 #[cfg(feature = "duckdb")]
 pub(crate) mod duckdb;
 pub mod gpkg_functions;
@@ -348,6 +349,15 @@ fn connect_native_lazy(spec: &ConnectionSpec) -> Result<Pool> {
 pub struct SqlDriver {
     flavor: Flavor,
     pool: Pool,
+    /// The fail-fast gate of the first connection (network flavors only; see [`connect`]).
+    gate: Option<std::sync::Arc<ConnectGate>>,
+}
+
+/// The first-connection gate shared by the clones of one driver.
+struct ConnectGate {
+    spec: ConnectionSpec,
+    established: tokio::sync::OnceCell<()>,
+    failures: connect::FailureCache,
 }
 
 impl fmt::Debug for SqlDriver {
@@ -356,6 +366,41 @@ impl fmt::Debug for SqlDriver {
             .field("flavor", &self.flavor)
             .finish_non_exhaustive()
     }
+}
+
+/// Whether an error says the connection to the server was lost (an I/O error, a server that
+/// terminated the session: `57P01` / `57P02`, or a connection exception of class `08`).
+fn is_lost_connection(error: &crate::error::SqlError) -> bool {
+    match error {
+        crate::error::SqlError::Driver(sqlx::Error::Io(_)) => true,
+        crate::error::SqlError::Driver(sqlx::Error::Database(db)) => db
+            .code()
+            .is_some_and(|c| c.starts_with("08") || matches!(&*c, "57P01" | "57P02")),
+        _ => false,
+    }
+}
+
+/// A pooled connection idle for less than this is handed out without a liveness check.
+pub(crate) const PING_IDLE_AFTER: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// sqlx pings every idle connection before handing it out (`test_before_acquire`): one extra
+/// protocol round trip per acquire, half of a fresh `Pipe`'s `get_sync_time`. A connection used
+/// within [`PING_IDLE_AFTER`] is trusted instead; one idle for longer is still pinged, and a
+/// broken one is discarded and replaced as before (an error from the hook closes it and the
+/// acquire takes the next idle connection or opens a new one).
+fn ping_idle_connections<DB: sqlx::Database>(
+    options: sqlx::pool::PoolOptions<DB>,
+) -> sqlx::pool::PoolOptions<DB> {
+    options
+        .test_before_acquire(false)
+        .before_acquire(|conn, meta| {
+            Box::pin(async move {
+                if meta.idle_for >= PING_IDLE_AFTER {
+                    sqlx::Connection::ping(conn).await?;
+                }
+                Ok(true)
+            })
+        })
 }
 
 impl SqlDriver {
@@ -374,6 +419,7 @@ impl SqlDriver {
         let Pool::Postgres(pool) = &self.pool else {
             return Ok(None);
         };
+        self.ready().await?;
         // Cockroach speaks the PostgreSQL wire protocol but has no advisory locks.
         if self.flavor == Flavor::Cockroachdb {
             return Ok(None);
@@ -411,18 +457,106 @@ impl SqlDriver {
     /// Open a connection pool for a connection spec. Connections are opened lazily by the pool,
     /// except that this verifies one connection can be established.
     pub async fn connect(spec: &ConnectionSpec) -> Result<Self> {
-        let pool = match spec.flavor.driver_family() {
-            DriverFamily::Postgres => Pool::Postgres(postgres::connect(spec).await?),
-            DriverFamily::Mysql => Pool::Mysql(mysql::connect(spec).await?),
-            DriverFamily::Sqlite => Pool::Sqlite(sqlite::connect(spec).await?),
-            DriverFamily::Mssql | DriverFamily::Oracle | DriverFamily::Duckdb => {
-                connect_native(spec).await?
+        match spec.flavor.driver_family() {
+            DriverFamily::Sqlite => Ok(Self::new(spec, Pool::Sqlite(sqlite::connect(spec).await?))),
+            DriverFamily::Duckdb => Ok(Self::new(spec, connect_native(spec).await?)),
+            // Network flavors: build the pool, then establish the first connection with the
+            // fail-fast gate (`connect_timeout`, classified errors).
+            _ => {
+                let driver = Self::connect_lazy(spec)?;
+                driver.ready().await?;
+                Ok(driver)
             }
-        };
-        Ok(Self {
+        }
+    }
+
+    fn new(spec: &ConnectionSpec, pool: Pool) -> Self {
+        let networked = matches!(
+            spec.flavor.driver_family(),
+            DriverFamily::Postgres
+                | DriverFamily::Mysql
+                | DriverFamily::Mssql
+                | DriverFamily::Oracle
+        );
+        Self {
             flavor: spec.flavor,
             pool,
-        })
+            gate: networked.then(|| {
+                std::sync::Arc::new(ConnectGate {
+                    spec: spec.clone(),
+                    established: tokio::sync::OnceCell::new(),
+                    failures: connect::FailureCache::default(),
+                })
+            }),
+        }
+    }
+
+    /// Make sure the first connection was established (once per driver): bounded by
+    /// `connect_timeout`, failing at once with a classified message when the host refuses, does
+    /// not resolve, is unreachable or rejects the credentials. Later calls cost one atomic load,
+    /// and an established pool keeps the driver's own reconnect behavior.
+    pub(crate) async fn ready(&self) -> Result<()> {
+        let Some(gate) = &self.gate else {
+            return Ok(());
+        };
+        if gate.established.initialized() {
+            return Ok(());
+        }
+        // The slow path is boxed: `ready()` is awaited at the top of every driver method, and
+        // an inline `get_or_try_init` + `select!` state machine would be embedded in every one
+        // of those futures (and, unoptimized, in every future above them), which overflowed
+        // the 2 MiB stack of a runtime worker on a plain `sync pipes` in debug builds.
+        Box::pin(self.establish_first(gate)).await
+    }
+
+    /// The slow path of [`SqlDriver::ready`]: establish the first connection once.
+    async fn establish_first(&self, gate: &ConnectGate) -> Result<()> {
+        if let Some(failure) = gate.failures.recent() {
+            return Err(crate::error::SqlError::Connect(failure));
+        }
+        let result = gate
+            .established
+            .get_or_try_init(|| async {
+                let started = std::time::Instant::now();
+                let spec = &gate.spec;
+                match &self.pool {
+                    Pool::Postgres(p) => {
+                        connect::establish(spec, async {
+                            p.acquire()
+                                .await
+                                .map(drop)
+                                .map_err(|e| connect::map_sqlx(spec, e, started.elapsed()))
+                        })
+                        .await
+                    }
+                    Pool::Mysql(p) => {
+                        connect::establish(spec, async {
+                            p.acquire()
+                                .await
+                                .map(drop)
+                                .map_err(|e| connect::map_sqlx(spec, e, started.elapsed()))
+                        })
+                        .await
+                    }
+                    Pool::Sqlite(_) => Ok(()),
+                    #[cfg(any(feature = "mssql", feature = "duckdb", feature = "oracle"))]
+                    Pool::Native(p) => {
+                        connect::establish(spec, async {
+                            p.acquire()
+                                .await
+                                .map(drop)
+                                .map_err(|e| connect::map_text(spec, e, started.elapsed()))
+                        })
+                        .await
+                    }
+                }
+            })
+            .await
+            .map(|_| ());
+        if let Err(e) = &result {
+            gate.failures.record(e);
+        }
+        result
     }
 
     /// Build the pool without connecting (SQLAlchemy's lazy `create_engine`): the first query
@@ -431,13 +565,11 @@ impl SqlDriver {
         let max = spec.max_connections();
         let pool = match spec.flavor.driver_family() {
             DriverFamily::Postgres => Pool::Postgres(
-                sqlx::postgres::PgPoolOptions::new()
-                    .max_connections(max)
+                ping_idle_connections(sqlx::postgres::PgPoolOptions::new().max_connections(max))
                     .connect_lazy_with(postgres::connect_options(spec)?),
             ),
             DriverFamily::Mysql => Pool::Mysql(
-                sqlx::mysql::MySqlPoolOptions::new()
-                    .max_connections(max)
+                ping_idle_connections(sqlx::mysql::MySqlPoolOptions::new().max_connections(max))
                     .connect_lazy_with(mysql::connect_options(spec)?),
             ),
             DriverFamily::Sqlite => Pool::Sqlite(
@@ -447,10 +579,7 @@ impl SqlDriver {
                 connect_native_lazy(spec)?
             }
         };
-        Ok(Self {
-            flavor: spec.flavor,
-            pool,
-        })
+        Ok(Self::new(spec, pool))
     }
 
     /// A SQLite-family diagnostic pool: never create the file, switch journal mode or write.
@@ -461,13 +590,13 @@ impl SqlDriver {
                 "A read-only SQLite probe requires sqlite or geopackage".into(),
             ));
         }
-        Ok(Self {
-            flavor: spec.flavor,
-            pool: Pool::Sqlite(
+        Ok(Self::new(
+            spec,
+            Pool::Sqlite(
                 sqlite::pool_options(spec)
                     .connect_lazy_with(sqlite::read_only_connect_options(spec)?),
             ),
-        })
+        ))
     }
 
     /// The flavor this driver serves.
@@ -498,6 +627,7 @@ impl SqlDriver {
         persistent: bool,
         collect: bool,
     ) -> Result<RecordBatchStream> {
+        self.ready().await?;
         let chunksize = chunksize.max(1);
         let sql = sql.to_string();
         on_native!(self.pool, p => p.read_stream(sql, chunksize, collect).await);
@@ -506,15 +636,71 @@ impl SqlDriver {
 
     /// Execute a query and collect all rows (in batches of [`DEFAULT_CHUNKSIZE`]).
     pub async fn read(&self, sql: &str) -> Result<Vec<RecordBatch>> {
-        self.read_stream_as(sql, DEFAULT_CHUNKSIZE, false, true)
-            .await?
-            .collect_batches()
-            .await
+        Ok(self.read_collected(sql, false).await?.1)
+    }
+
+    /// Run a read to the end (schema and every batch). A pooled connection the server closed in
+    /// the moments a connection is trusted without a ping ([`PING_IDLE_AFTER`]) fails the first
+    /// attempt with a lost-connection error: dead idle connections are dropped and the read is
+    /// tried once more on a live one (a read has no side effects to repeat).
+    async fn read_collected(
+        &self,
+        sql: &str,
+        persistent: bool,
+    ) -> Result<(arrow::datatypes::SchemaRef, Vec<RecordBatch>)> {
+        match self.read_collected_once(sql, persistent).await {
+            Err(e) if self.retry_after(&e) => {
+                self.evict_dead_connections().await;
+                self.read_collected_once(sql, persistent).await
+            }
+            other => other,
+        }
+    }
+
+    async fn read_collected_once(
+        &self,
+        sql: &str,
+        persistent: bool,
+    ) -> Result<(arrow::datatypes::SchemaRef, Vec<RecordBatch>)> {
+        let stream = self
+            .read_stream_as(sql, DEFAULT_CHUNKSIZE, persistent, true)
+            .await?;
+        let schema = stream.schema();
+        Ok((schema, stream.collect_batches().await?))
+    }
+
+    /// Whether a failed read should be retried once: the connection was lost, and this pool
+    /// trusts recently used connections without pinging them.
+    fn retry_after(&self, error: &crate::error::SqlError) -> bool {
+        matches!(self.pool, Pool::Postgres(_) | Pool::Mysql(_)) && is_lost_connection(error)
+    }
+
+    /// Drop the idle connections the server closed: ping what the pool hands out (the
+    /// pool's own hook skips the ping for a connection used a moment ago) until one answers.
+    async fn evict_dead_connections(&self) {
+        async fn evict<DB: sqlx::Database>(pool: &sqlx::Pool<DB>) {
+            for _ in 0..16 {
+                let Ok(mut conn) = pool.acquire().await else {
+                    return;
+                };
+                if sqlx::Connection::ping(&mut *conn).await.is_ok() {
+                    return;
+                }
+                // Leaves the pool and closes when dropped.
+                drop(conn.detach());
+            }
+        }
+        match &self.pool {
+            Pool::Postgres(p) => evict(p).await,
+            Pool::Mysql(p) => evict(p).await,
+            _ => {}
+        }
     }
 
     /// Execute one or more statements (simple-query protocol, like SQLAlchemy `text()`),
     /// returning the number of rows affected.
     pub async fn exec(&self, sql: &str) -> Result<u64> {
+        self.ready().await?;
         let sql = sql.to_string();
         on_native!(self.pool, p => p.exec(&sql).await);
         on_pool!(self.pool, p, B => backend::exec::<B>(&p, &sql).await)
@@ -551,11 +737,7 @@ impl SqlDriver {
     }
 
     async fn read_frame_as(&self, sql: &str, persistent: bool) -> Result<Frame> {
-        let stream = self
-            .read_stream_as(sql, DEFAULT_CHUNKSIZE, persistent, true)
-            .await?;
-        let schema = stream.schema();
-        let batches = stream.collect_batches().await?;
+        let (schema, batches) = self.read_collected(sql, persistent).await?;
         if batches.is_empty() {
             return batches_to_frame(&[RecordBatch::new_empty(schema)]);
         }
@@ -576,6 +758,7 @@ impl SqlDriver {
         break_on_error: bool,
         rollback: bool,
     ) -> Result<Vec<Option<u64>>> {
+        self.ready().await?;
         let queries = queries.to_vec();
         on_native!(self.pool, p => p.exec_queries(&queries, break_on_error, rollback).await);
         on_pool!(self.pool, p, B, M => M::exec_queries(&p, &queries, break_on_error, rollback).await)
@@ -585,6 +768,7 @@ impl SqlDriver {
     /// (`SQLConnector._run_in_autocommit`, `_maintenance.py:54`; required for `VACUUM`).
     /// Returns whether every statement succeeded.
     pub async fn exec_autocommit(&self, queries: &[String]) -> Result<bool> {
+        self.ready().await?;
         let queries = queries.to_vec();
         on_native!(self.pool, p => p.exec_autocommit(&queries).await);
         on_pool!(self.pool, p, B, M => M::exec_autocommit(&p, &queries).await)
@@ -605,6 +789,17 @@ impl SqlDriver {
     }
 
     async fn value_as(&self, sql: &str, persistent: bool) -> Result<Option<SqlValue>> {
+        match self.value_once(sql, persistent).await {
+            Err(e) if self.retry_after(&e) => {
+                self.evict_dead_connections().await;
+                self.value_once(sql, persistent).await
+            }
+            other => other,
+        }
+    }
+
+    async fn value_once(&self, sql: &str, persistent: bool) -> Result<Option<SqlValue>> {
+        self.ready().await?;
         let sql = sql.to_string();
         on_native!(self.pool, p => p.value_with(&sql, &[]).await);
         on_pool!(self.pool, p, B => backend::value::<B>(&p, &sql, persistent).await)
@@ -612,6 +807,7 @@ impl SqlDriver {
 
     /// Execute one statement with bound parameters, returning the rows affected.
     pub async fn exec_with(&self, sql: &str, params: &[SqlParam]) -> Result<u64> {
+        self.ready().await?;
         let (sql, params) = (sql.to_string(), params.to_vec());
         on_native!(self.pool, p => p.exec_with(&sql, &params).await);
         on_pool!(self.pool, p, B => backend::exec_with::<B>(&p, &sql, &params).await)
@@ -623,6 +819,7 @@ impl SqlDriver {
         &self,
         statements: &[(String, Vec<SqlParam>)],
     ) -> Result<Vec<Option<u64>>> {
+        self.ready().await?;
         let statements = statements.to_vec();
         on_native!(self.pool, p => p.exec_many_with(&statements).await);
         on_pool!(self.pool, p, B, M => M::exec_many_with(&p, &statements).await)
@@ -653,6 +850,22 @@ impl SqlDriver {
         params: &[SqlParam],
         persistent: bool,
     ) -> Result<Vec<RecordBatch>> {
+        match self.read_with_once(sql, params, persistent).await {
+            Err(e) if self.retry_after(&e) => {
+                self.evict_dead_connections().await;
+                self.read_with_once(sql, params, persistent).await
+            }
+            other => other,
+        }
+    }
+
+    async fn read_with_once(
+        &self,
+        sql: &str,
+        params: &[SqlParam],
+        persistent: bool,
+    ) -> Result<Vec<RecordBatch>> {
+        self.ready().await?;
         let (sql, params) = (sql.to_string(), params.to_vec());
         on_native!(self.pool, p => p.read_with(&sql, &params).await);
         on_pool!(self.pool, p, B => backend::read_with::<B>(&p, &sql, &params, persistent).await)
@@ -680,6 +893,22 @@ impl SqlDriver {
         params: &[SqlParam],
         persistent: bool,
     ) -> Result<Option<SqlValue>> {
+        match self.value_with_once(sql, params, persistent).await {
+            Err(e) if self.retry_after(&e) => {
+                self.evict_dead_connections().await;
+                self.value_with_once(sql, params, persistent).await
+            }
+            other => other,
+        }
+    }
+
+    async fn value_with_once(
+        &self,
+        sql: &str,
+        params: &[SqlParam],
+        persistent: bool,
+    ) -> Result<Option<SqlValue>> {
+        self.ready().await?;
         let (sql, params) = (sql.to_string(), params.to_vec());
         on_native!(self.pool, p => p.value_with(&sql, &params).await);
         on_pool!(self.pool, p, B => backend::value_with::<B>(&p, &sql, &params, persistent).await)
@@ -688,6 +917,7 @@ impl SqlDriver {
     /// PostgreSQL `COPY ... FROM STDIN` with a pre-encoded payload, in its own transaction
     /// (`psql_insert_copy`, `_sql.py:1109`). Returns the number of rows copied.
     pub async fn copy_in(&self, copy_sql: &str, data: Vec<u8>) -> Result<u64> {
+        self.ready().await?;
         match &self.pool {
             Pool::Postgres(p) => {
                 let mut tx = p.begin().await?;
@@ -709,6 +939,7 @@ impl SqlDriver {
 
     /// Begin a transaction on a pooled connection.
     pub async fn begin(&self) -> Result<SqlTransaction> {
+        self.ready().await?;
         let inner = match &self.pool {
             Pool::Postgres(p) => TxInner::Postgres(p.begin().await?),
             Pool::Mysql(p) => TxInner::Mysql(p.begin().await?),
@@ -785,5 +1016,35 @@ mod initialization_tests {
         .expect("cancellation must close the connection and release its lock")
         .unwrap();
         assert!(guard.is_some());
+    }
+}
+
+#[cfg(test)]
+mod future_size_tests {
+    use super::*;
+
+    /// `ready()` is awaited at the top of every driver method, so whatever state it holds is
+    /// embedded in each of those futures and in every future above them. Unoptimized, an
+    /// inline first-connection state machine took enough of the 2 MiB runtime worker stack to
+    /// overflow it on a plain `sync pipes` (wave 18 regression): keep the slow path boxed.
+    #[tokio::test]
+    async fn ready_future_stays_small() {
+        let attrs = crate::uri::ConnectorAttributes {
+            flavor: Some(Flavor::Postgresql),
+            host: Some("127.0.0.1".into()),
+            port: Some(1),
+            database: Some("w18fx1".into()),
+            username: Some("u".into()),
+            password: Some("p".into()),
+            ..Default::default()
+        };
+        let spec = ConnectionSpec::from_attributes(&attrs).unwrap();
+        // Lazy: nothing connects until the first operation.
+        let driver = SqlDriver::connect_lazy(&spec).unwrap();
+        let ready = std::mem::size_of_val(&driver.ready());
+        let exec = std::mem::size_of_val(&driver.exec("SELECT 1"));
+        eprintln!("ready={ready} exec={exec}");
+        assert!(ready <= 128, "ready() future is {ready} bytes");
+        assert!(exec <= 1024, "exec() future is {exec} bytes");
     }
 }

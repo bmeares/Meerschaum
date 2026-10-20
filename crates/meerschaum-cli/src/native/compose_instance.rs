@@ -26,7 +26,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use meerschaum_compose::ops::InstanceOps;
+use meerschaum_compose::ops::{InstanceOps, PipeFilters};
 use meerschaum_compose::pipes::ProjectConfig;
 use meerschaum_compose::project::{Host, Project};
 use meerschaum_connector::{InstanceConnector, PipeId, PipesKeys, PipesKeysQuery};
@@ -298,6 +298,69 @@ impl InstanceOps for ComposeInstance {
         let defaults = config.pipe_defaults();
         self.scope = Some(Scope { config, defaults });
         Ok(())
+    }
+
+    fn configure_host(&mut self, host: &Host) {
+        if self.scope.is_some() {
+            self.session.shutdown();
+            self.session = Session::new();
+        }
+        self.failed.clear();
+        self.absent.clear();
+        self.warnings.clear();
+        self.scope = None;
+        let Ok(config) = ProjectConfig::for_host(host) else {
+            return;
+        };
+        let env: Vec<(String, String)> = host
+            .env
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        if self.session.set_worker_environment(env).is_err() {
+            return;
+        }
+        let defaults = config.pipe_defaults();
+        self.scope = Some(Scope { config, defaults });
+    }
+
+    fn get_pipes_matching(&mut self, filters: &PipeFilters) -> Result<Vec<Pipe>, String> {
+        let instance_keys = match &filters.instance {
+            Some(keys) => keys.clone(),
+            None => self
+                .scope
+                .as_ref()
+                .map(|s| s.defaults.instance_keys.clone())
+                .ok_or_else(|| "No instance is configured.".to_string())?,
+        };
+        let pipes = match self.resolve(&instance_keys) {
+            Resolved::Absent(_) => return Ok(Vec::new()),
+            Resolved::Failed(e) => return Err(raised(&e)),
+            Resolved::Live(instance) => {
+                let query = PipesKeysQuery {
+                    connector_keys: filters.connector_keys.clone(),
+                    metric_keys: filters.metric_keys.clone(),
+                    location_keys: filters.location_keys.clone(),
+                    tags: filters.tags.clone(),
+                    ..Default::default()
+                };
+                let result = self
+                    .session
+                    .block_on(instance.conn().fetch_pipes_keys(&query))
+                    .map_err(|e| raised(&e.to_string()))?;
+                self.pipes_from_keys(&instance_keys, result)?
+            }
+        };
+        // The registered parameters go into the new compose file.
+        Ok(pipes
+            .into_iter()
+            .map(|mut pipe| {
+                if let Some(params) = self.get_parameters(&pipe) {
+                    pipe.set_parameters(params);
+                }
+                pipe
+            })
+            .collect())
     }
 
     fn get_pipes(&mut self, instance_keys: &str, tags: &[String]) -> Vec<Pipe> {

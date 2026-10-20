@@ -236,6 +236,8 @@ pub struct EnvironmentStatic {
     pub daemon_id: String,
     /// `MRSM__COMPOSE_PROJECT`.
     pub compose_project: String,
+    /// `MRSM__COMPOSE_ROOT` (v5): the root compose file a job was started from.
+    pub compose_root: String,
     /// `MRSM_SYSTEMD_LOG_PATH`.
     pub systemd_log_path: String,
     /// `MRSM_SYSTEMD_STDIN_PATH`.

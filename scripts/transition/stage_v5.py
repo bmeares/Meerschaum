@@ -642,7 +642,7 @@ def engine_free(run, F, flavor):
 
 
 def dash(run, F, flavor):
-    """A v4-style plugin Dash app (`@dash_plugin` + `@web_page`) served by `mrsm start api`: v4 at /dash/<page>, v5 at /dash/<plugin>/<page>."""
+    """A v4-style plugin Dash app (`@dash_plugin` + `@web_page`) served by `mrsm start api`: v4 and v5 (D21, 5.0.0rc2) both at /dash/<page>; rc1's /dash/<plugin>/<page> redirects."""
     import urllib.request, urllib.error
     shutil.copy(HERE / 'plugin' / 'trn_dash.py', run.plugins / 'trn_dash.py')
     inst = f'sql:trn_{flavor}'
@@ -665,7 +665,7 @@ def dash(run, F, flavor):
             time.sleep(2)
         return last
     res = {}
-    for which, base_paths in (('v4', ('/dash/counts', '/dash/_dash-update-component')), ('v5', ('/dash/trn_dash/counts', '/dash/trn_dash/_dash-update-component'))):
+    for which, base_paths in (('v4', ('/dash/counts', '/dash/_dash-update-component')), ('v5', ('/dash/counts', '/dash/_dash-update-component'))):
         env = run.env(v5=(which != 'v4'))
         argv = run.argv(which)
         if which == 'v4':
@@ -679,7 +679,7 @@ def dash(run, F, flavor):
                 u = f'http://127.0.0.1:{s.port}'
                 page = get(u + base_paths[0])
                 cb = get(u + base_paths[1], payload)
-                old = get(u + '/dash/counts') if which == 'v5' else None
+                old = get(u + '/dash/trn_dash/counts') if which == 'v5' else None
                 res[which] = {'page': (page[0], page[1][:120]), 'cb': (cb[0], cb[1][:300]), 'old': (old[0], old[2]) if old else None}
         except Exception as e:
             res[which] = {'error': repr(e)[:400]}
@@ -692,4 +692,4 @@ def dash(run, F, flavor):
         ok = r['cb'][0] == 200 and 'clicked 3' in r['cb'][1]
         F.add('dash', f'{which}: plugin callback answers "clicked 3" (HTTP {r["cb"][0]})', 'PASS' if ok else 'FAIL', r['cb'][1])
     if res['v5'].get('old'):
-        F.add('dash', 'v5: the old /dash/<page> path reaches the page (redirect)', 'PASS' if res['v5']['old'][0] == 200 and 'trn_dash' in res['v5']['old'][1] else 'FAIL', res['v5']['old'])
+        F.add('dash', "v5: rc1's /dash/<plugin>/<page> redirects to the page", 'PASS' if res['v5']['old'][0] == 200 and res['v5']['old'][1].split('?')[0].rstrip('/').endswith('/dash/counts') else 'FAIL', res['v5']['old'])

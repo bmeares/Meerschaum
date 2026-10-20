@@ -26,7 +26,9 @@ use std::sync::{Arc, Mutex, RwLock};
 
 use chrono::{DateTime, Utc};
 use indexmap::IndexMap;
-use meerschaum_connector::pipe_ops::{Doc, frame_to_docs};
+use meerschaum_connector::pipe_ops::{
+    Doc, REMOTE_STATE_HASH_PREFIX, frame_to_docs, remote_state_key,
+};
 use meerschaum_connector::{ConnectorError, DataQuery, DateBound, InstanceConnector, SyncOptions};
 use meerschaum_core::success::Bound;
 use meerschaum_core::{Map, Pipe, Value};
@@ -807,8 +809,46 @@ fn cursor_doc(cursor: &EdgeCursor) -> Doc {
     .collect()
 }
 
+impl InstanceState {
+    /// Record, on `owner`'s home instance, that engine state of `owner` is written onto
+    /// `state_instance` (a cross-instance child's). A removed pipe's instance reads these
+    /// markers to forget that state too (GAP-002, [`remote_state_key`]). Nothing is recorded
+    /// for state on the owner's own instance. Failing to record is logged, never fatal: the
+    /// state write that follows still proceeds.
+    async fn note_remote_state(&self, owner: &PipeRef, state_instance: &str) {
+        if owner.instance_keys() == state_instance {
+            return;
+        }
+        let doc: Doc = [
+            (
+                "pipe_ref",
+                kv_str(remote_state_key(owner.as_str(), state_instance)),
+            ),
+            (
+                "definition_hash",
+                kv_str(format!("{REMOTE_STATE_HASH_PREFIX}{state_instance}")),
+            ),
+            ("updated", kv_dt(Utc::now())),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_string(), v))
+        .collect();
+        if let Err(e) = self
+            .write_rows(owner.instance_keys(), EnginePipe::State, vec![doc])
+            .await
+        {
+            tracing::warn!(
+                "{}: cannot record that its engine state is on '{state_instance}': {e}",
+                owner.label()
+            );
+        }
+    }
+}
+
 impl StateWriter for InstanceState {
     async fn put_cursor(&self, state_instance: &str, cursor: EdgeCursor) -> Result<(), StateError> {
+        self.note_remote_state(&cursor.parent_ref, state_instance)
+            .await;
         self.write_rows(
             state_instance,
             EnginePipe::Cursors,
@@ -823,6 +863,15 @@ impl StateWriter for InstanceState {
         cursors: Vec<EdgeCursor>,
     ) -> Result<(), StateError> {
         // One upsert for all of a node's edges on this instance.
+        let mut parents: Vec<&PipeRef> = Vec::new();
+        for cursor in &cursors {
+            if !parents.contains(&&cursor.parent_ref) {
+                parents.push(&cursor.parent_ref);
+            }
+        }
+        for parent in parents {
+            self.note_remote_state(parent, state_instance).await;
+        }
         self.write_rows(
             state_instance,
             EnginePipe::Cursors,
@@ -890,6 +939,7 @@ impl StateWriter for InstanceState {
                 .collect()
             })
             .collect();
+        self.note_remote_state(pipe_ref, state_instance).await;
         self.write_rows(state_instance, EnginePipe::Ledger, docs)
             .await?;
         Ok(entries)

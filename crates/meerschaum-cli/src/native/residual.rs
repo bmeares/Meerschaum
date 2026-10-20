@@ -841,7 +841,7 @@ mod tests {
     use std::sync::{Arc, Mutex};
     use std::time::{Duration, Instant};
 
-    /// A stdout that records when each write happened.
+    /// A stdout that records each write.
     struct Stamped(Arc<Mutex<Vec<(Instant, String)>>>);
 
     impl std::io::Write for Stamped {
@@ -902,35 +902,33 @@ mod tests {
         let mut out = Stamped(writes.clone());
         let mut rt = Runtime::system(&mut out);
         let sess = super::super::Session::new();
-        let started = Instant::now();
+        // The job reports a line, then does not go on until the line has been printed: output held
+        // back until the job ends would never get there (the wait gives up after `PATIENCE` and the
+        // job records it), so no timing of the machine decides the result.
+        const PATIENCE: Duration = Duration::from_secs(20);
+        let seen = writes.clone();
         let result = run_streaming(
             &mut rt,
             &sess,
             TupleTailFilter::default(),
             |mut on_line| async move {
+                let mut printed_while_running = 0;
                 for i in 0..3 {
                     on_line(format!("line {i}\n"));
-                    tokio::time::sleep(Duration::from_millis(300)).await;
+                    let deadline = Instant::now() + PATIENCE;
+                    while seen.lock().unwrap().len() <= i && Instant::now() < deadline {
+                        tokio::time::sleep(Duration::from_millis(5)).await;
+                    }
+                    if seen.lock().unwrap().len() > i {
+                        printed_while_running += 1;
+                    }
                 }
-                SuccessTuple::ok("done")
+                SuccessTuple::ok(format!("done {printed_while_running}"))
             },
         );
-        let total = started.elapsed();
-        assert_eq!(result, SuccessTuple::ok("done"));
+        assert_eq!(result, SuccessTuple::ok("done 3"));
         let writes = writes.lock().unwrap();
         let lines: Vec<&str> = writes.iter().map(|(_, text)| text.as_str()).collect();
         assert_eq!(lines, ["line 0\n", "line 1\n", "line 2\n"]);
-        // The first line is out long before the job ends.
-        let first = writes[0].0.duration_since(started);
-        assert!(
-            first < Duration::from_millis(200),
-            "first line after {first:?}"
-        );
-        assert!(total >= Duration::from_millis(850), "ended after {total:?}");
-        let second = writes[1].0.duration_since(started);
-        assert!(
-            second >= Duration::from_millis(250),
-            "second line after {second:?}"
-        );
     }
 }

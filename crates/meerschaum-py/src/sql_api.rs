@@ -544,6 +544,27 @@ impl PySqlConnector {
         Ok(out)
     }
 
+    /// The columns types the last successful `sync_pipe` of this connector left for the pipe's
+    /// table, handed out once (`None` when there are none): what the façade adopts as the
+    /// pipe's cached `get_columns_types()` after a sync instead of reflecting the table again.
+    #[pyo3(signature = (pipe, **_kw))]
+    fn take_synced_columns_types<'py>(
+        &self,
+        py: Python<'py>,
+        pipe: &Bound<'py, PyAny>,
+        _kw: Option<&Bound<'py, PyDict>>,
+    ) -> PyResult<Option<Bound<'py, PyDict>>> {
+        let p = core_pipe(pipe, ParamsView::Keys)?;
+        let Some(types) = self.conn().take_synced_columns_types(&p) else {
+            return Ok(None);
+        };
+        let out = PyDict::new(py);
+        for (k, v) in types {
+            out.set_item(k, v)?;
+        }
+        Ok(Some(out))
+    }
+
     #[pyo3(signature = (pipe, **_kw))]
     fn get_pipe_columns_indices<'py>(
         &self,
@@ -645,7 +666,13 @@ impl PySqlConnector {
         let p = core_pipe(pipe, ParamsView::Resolved)?;
         let c = self.conn();
         let res = block_on(py, async move {
-            meerschaum_connector::pipe_ops::forget_engine_state(c.as_ref(), &p).await
+            let local = meerschaum_connector::pipe_ops::forget_engine_state(c.as_ref(), &p).await;
+            // GAP-002: also the state written onto other instances (cross-instance children).
+            let remote = c.forget_remote_engine_state(&p).await;
+            if !remote.success {
+                tracing::warn!("{}", remote.message);
+            }
+            local
         });
         success_to_py(py, &res)
     }

@@ -158,15 +158,13 @@ packages['polars'] = {
     'pyarrow'                        : packages['sql']['pyarrow'],
     'geoarrow'                       : packages['gis']['geoarrow'],
 }
+### The web console (Plotly Dash, served by the API host; design D21). `dash_daq`, `flask_compress`,
+### `terminado` and `tornado` (v4's console) are not used any more: the terminal is the Rust server's.
 packages['dash'] = {
-    'flask_compress'                 : 'Flask-Compress>=1.17.0',
     'dash'                           : 'dash>=4.1.0',
     'dash_bootstrap_components'      : 'dash-bootstrap-components>=2.0.4',
     'dash_ace'                       : 'dash-ace>=0.2.1',
     'dash_extensions'                : 'dash-extensions>=2.0.5',
-    'dash_daq'                       : 'dash-daq>=0.6.0',
-    'terminado'                      : 'terminado>=0.18.1',
-    'tornado'                        : 'tornado>=6.5.1',
     'a2wsgi'                         : 'a2wsgi>=1.10.0',
 }
 packages['api'] = {
@@ -275,10 +273,10 @@ _extras_packages: Dict[str, Dict[str, str]] = {
     'dash': {
         'dash'                       : 'dash>=4.1.0',
         'a2wsgi'                     : 'a2wsgi>=1.10.0',
-        ### What a plugin-owned Dash app written for v4 finds on its import path: the host builds the
-        ### app with `dash_extensions.enrich.DashProxy` (`Trigger`, duplicate outputs) when it is
-        ### installed, and v4 plugin layouts are written with `dash_bootstrap_components`.
         'dash_bootstrap_components'  : 'dash-bootstrap-components>=2.0.4',
+        'dash_ace'                   : 'dash-ace>=0.2.1',
+        ### The console builds its app with `dash_extensions.enrich.DashProxy` (`Trigger` and
+        ### duplicate outputs, which plugins written for v4's console use).
         'dash_extensions'            : 'dash-extensions>=2.0.5',
     },
     'shell': {
@@ -308,6 +306,9 @@ extras: Dict[str, List[str]] = {
     group: list(dict.fromkeys(_import_names.values()))
     for group, _import_names in _extras_packages.items()
 }
+### The console runs in the API host and shows pipe data as pandas frames, so `[dash]` brings the
+### `api` and `pandas` extras with it (`pip install meerschaum[dash]` is a working console).
+extras['dash'] = list(dict.fromkeys(extras['dash'] + extras['api'] + extras['pandas']))
 extras['full'] = list(dict.fromkeys(
     install_name
     for group in _full_extras

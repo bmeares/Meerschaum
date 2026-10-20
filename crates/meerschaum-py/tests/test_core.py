@@ -192,6 +192,13 @@ def _diff(left, right, path=''):
         yield f"{path}: {left!r} != {right!r}"
 
 
+### Keys v5 adds to the v4 table (an overlay: the recorded v4 dictionary is never edited), as
+### `(table, key)`. W18-FX4-001: `environment.compose_root`, the `MRSM__COMPOSE_ROOT` label of jobs
+### started from a root compose file. Mirrors `static_toml_matches_python` in
+### `crates/meerschaum-core/tests/static_config.rs`.
+V5_ONLY_STATIC_KEYS = (('environment', 'compose_root'),)
+
+
 def test_static_config_matches_v4():
     """`static_config()` equals the v4 `STATIC_CONFIG` dictionary (recorded, normalized)."""
     if not core.HAS_STATIC_CONFIG:
@@ -201,7 +208,11 @@ def test_static_config_matches_v4():
     expected = oracle.expected()
     rust = core.static_config()
     assert isinstance(rust, dict)
-    differences = list(_diff(_normalize(rust), expected))
+    rust = _normalize(rust)
+    for table, key in V5_ONLY_STATIC_KEYS:
+        assert key in rust[table], f"v5-only key {table}.{key} is not in static.toml"
+        del rust[table][key]
+    differences = list(_diff(rust, expected))
     assert not differences, '\n'.join(differences)
 
 

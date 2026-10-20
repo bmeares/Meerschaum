@@ -719,6 +719,28 @@ pub fn python_init_script(
     command
 }
 
+/// The failure `mrsm python` returns when the interpreter it would start cannot import
+/// `meerschaum` (`None` when it can, or when it cannot be run at all: starting it then reports
+/// the real error). The message names the interpreter and the release to install; nothing is
+/// installed and no plain REPL is started instead.
+fn missing_package_failure(rt: &mut Runtime<'_>) -> Option<SuccessTuple> {
+    let python = python_executable(rt, None);
+    let probe = CommandSpec {
+        program: python.clone(),
+        args: vec!["-c".into(), "import meerschaum".into()],
+        quiet: true,
+        ..CommandSpec::default()
+    };
+    match rt.host.run(&probe) {
+        Ok(0) | Err(_) => None,
+        Ok(_) => Some(SuccessTuple::fail(format!(
+            "The meerschaum Python package is not installed for {python}; install it with \
+             pip install meerschaum=={} to use mrsm python",
+            meerschaum_core::python_guard::expected_version()
+        ))),
+    }
+}
+
 /// `python [code]`: start an interpreter with `meerschaum` imported.
 pub fn python(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     let action = words(args, "action");
@@ -731,6 +753,14 @@ pub fn python(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
             f.warn("Cannot open a Python REPL remotely, falling back to local...")
         });
         rt.eprint(&w);
+    }
+    // The REPL starts with `import meerschaum as mrsm`: ask the chosen interpreter first, and say
+    // how to fix it instead of opening a REPL that opens with a traceback. Nothing is installed.
+    if venv.is_none()
+        && sub_args.is_empty()
+        && let Some(failure) = missing_package_failure(rt)
+    {
+        return Ok(failure);
     }
     let command = python_init_script(&action, venv.as_deref(), &sub_args, nopretty);
     if !sub_args.is_empty() {

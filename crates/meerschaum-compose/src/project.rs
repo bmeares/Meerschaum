@@ -164,7 +164,37 @@ pub struct Project {
     /// The compose file's YAML document as parsed (after substitution, including unknown keys),
     /// for the model and the lint.
     pub document: Map,
+    /// References that could not be resolved while reading the file (host connector references
+    /// `'{type:label}'` and `MRSM{...}` symlinks): the lint reports each one and `up` / `run` /
+    /// `sync` refuse to start on a missing connector.
+    pub unresolved: Vec<UnresolvedRef>,
+    /// The root compose file of the tree this project runs in (`None` for a project that runs
+    /// alone). Jobs started from a root carry it as the `MRSM__COMPOSE_ROOT` label.
+    pub compose_root: Option<PathBuf>,
+    /// A suffix for the config cache file of an included project (several projects share one
+    /// root directory), `None` for the root project.
+    pub cache_suffix: Option<String>,
+    /// Pipes an ancestor project defines (the ancestor's entry wins): `(connector, metric,
+    /// location, instance)` keys this project must not define.
+    pub excluded_pipes: Vec<PipeKey>,
 }
+
+/// The keys that identify a pipe in a project tree: connector, metric, location and instance.
+pub type PipeKey = (String, String, Option<String>, String);
+
+/// A reference in the compose file that does not resolve on this host.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnresolvedRef {
+    /// `connector` (a `'{type:label}'` host reference) or `symlink` (`MRSM{a:b}`).
+    pub kind: &'static str,
+    /// What is referenced (`mqtt:x`, `meerschaum:foo:bar`).
+    pub name: String,
+    /// Where it is referenced (`config.meerschaum.connectors.mqtt.y`).
+    pub location: String,
+}
+
+/// The label compose stamps on the jobs it starts from a root compose file.
+pub const COMPOSE_ROOT_VAR: &str = "MRSM__COMPOSE_ROOT";
 
 impl Project {
     /// The project root directory (`compose_config['root_dir']`).
@@ -188,9 +218,14 @@ impl Project {
             .unwrap_or_default()
     }
 
-    /// `get_env_dict(compose_config)`.
+    /// `get_env_dict(compose_config)`, plus the `MRSM__COMPOSE_ROOT` label when the project runs
+    /// in a tree.
     pub fn env_dict(&self) -> Result<EnvDict, ComposeError> {
-        get_env_dict(&self.config, &self.process_env)
+        get_env_dict_in(
+            &self.config,
+            &self.process_env,
+            self.compose_root.as_deref(),
+        )
     }
 
     /// The project's `config:` block (`compose_config.get('config', {})`).
@@ -352,7 +387,107 @@ pub fn read_compose_config(
     process_env: &mut ProcessEnv,
     msgs: &mut Messages,
 ) -> Result<(Map, Map), ComposeError> {
-    let env = load_envyaml(compose_file, env_file, &host.cwd, process_env, msgs)?;
+    let read = read_compose_config_in(
+        host,
+        &ReadOptions {
+            cwd: &host.cwd,
+            compose_file,
+            env_file,
+            isolated,
+            inherit_root: None,
+        },
+        process_env,
+        msgs,
+    )?;
+    Ok((read.config, read.document))
+}
+
+/// The inputs of [`read_compose_config_in`].
+#[derive(Debug, Clone, Copy)]
+pub struct ReadOptions<'a> {
+    /// The working directory (envyaml's default `.env` is read from here).
+    pub cwd: &'a Path,
+    /// The compose file.
+    pub compose_file: &'a Path,
+    /// `--env-file`.
+    pub env_file: Option<&'a Path>,
+    /// `--isolated`.
+    pub isolated: bool,
+    /// An included project without a `root_dir` of its own uses the including project's root.
+    pub inherit_root: Option<&'a Path>,
+}
+
+/// What reading a compose file produced.
+#[derive(Debug, Clone)]
+pub struct ReadResult {
+    /// The resolved compose configuration.
+    pub config: Map,
+    /// The parsed document (after substitution).
+    pub document: Map,
+    /// References that do not resolve on this host.
+    pub unresolved: Vec<UnresolvedRef>,
+}
+
+/// Every `MRSM{a:b:c}` in a value that does not resolve on the host, with where it sits.
+fn unresolved_symlinks(host: &Host, value: &Value, path: &str, out: &mut Vec<UnresolvedRef>) {
+    static RE: std::sync::LazyLock<regex::Regex> =
+        std::sync::LazyLock::new(|| regex::Regex::new(r"MRSM\{([^{}]*?)\}").expect("valid regex"));
+    match value {
+        Value::Map(m) => {
+            for (k, v) in m {
+                unresolved_symlinks(host, v, &format!("{path}.{k}"), out);
+            }
+        }
+        Value::List(l) => {
+            for (i, v) in l.iter().enumerate() {
+                unresolved_symlinks(host, v, &format!("{path}[{i}]"), out);
+            }
+        }
+        Value::Str(s) => {
+            for caps in RE.captures_iter(s) {
+                let keys_text = &caps[1];
+                // `MRSM{!...}` is a literal, not a symlink.
+                if keys_text.starts_with('!') || keys_text.is_empty() {
+                    continue;
+                }
+                let keys: Vec<&str> = keys_text.split(':').collect();
+                let opts = GetOptions {
+                    warn: false,
+                    write_missing: false,
+                    ..GetOptions::default()
+                };
+                let (valid, _) = host.config.get_with(&keys, opts);
+                let _ = host.config.take_warnings();
+                if !valid {
+                    out.push(UnresolvedRef {
+                        kind: "symlink",
+                        name: keys_text.to_string(),
+                        location: path.to_string(),
+                    });
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+/// [`read_compose_config`] with the working directory, the inherited root directory of an
+/// included project, and the unresolved references.
+pub fn read_compose_config_in(
+    host: &Host,
+    opts: &ReadOptions<'_>,
+    process_env: &mut ProcessEnv,
+    msgs: &mut Messages,
+) -> Result<ReadResult, ComposeError> {
+    let ReadOptions {
+        cwd,
+        compose_file,
+        env_file,
+        isolated,
+        inherit_root,
+    } = *opts;
+    let mut unresolved: Vec<UnresolvedRef> = Vec::new();
+    let env = load_envyaml(compose_file, env_file, cwd, process_env, msgs)?;
     let document = match &env.document {
         Value::Map(m) => m.clone(),
         _ => Map::new(),
@@ -368,6 +503,7 @@ pub fn read_compose_config(
     }
 
     let compose_cf = cc.get("config").cloned().unwrap_or(Value::new_map());
+    unresolved_symlinks(host, &compose_cf, "config", &mut unresolved);
     if compose_cf.truthy() {
         let Value::Map(cf_map) = &compose_cf else {
             return Err(ComposeError::attribute(format!(
@@ -444,6 +580,13 @@ pub fn read_compose_config(
                         let host_cf = host
                             .get_config(&["meerschaum", "connectors", host_typ, host_label], msgs)
                             .unwrap_or(Value::Null);
+                        if host_cf.is_null() {
+                            unresolved.push(UnresolvedRef {
+                                kind: "connector",
+                                name: format!("{host_typ}:{host_label}"),
+                                location: format!("config.meerschaum.connectors.{typ}.{label}"),
+                            });
+                        }
                         target.insert(label.clone(), host_cf);
                     }
                     _ => {}
@@ -495,7 +638,7 @@ pub fn read_compose_config(
     cc.insert("daemon".into(), daemon);
 
     cc.insert("__file__".into(), Value::Str(posix(compose_file)));
-    ensure_dir_keys(&mut cc, host, msgs)?;
+    ensure_dir_keys_in(&mut cc, host, inherit_root, msgs)?;
     ensure_project_name(&mut cc, msgs)?;
 
     let root_dir = cc.get("root_dir").map(py_str).unwrap_or_default();
@@ -505,7 +648,11 @@ pub fn read_compose_config(
     let Value::Map(cc) = value else {
         unreachable!("a map stays a map")
     };
-    Ok((cc, document))
+    Ok(ReadResult {
+        config: cc,
+        document,
+        unresolved,
+    })
 }
 
 /// `ensure_dir_keys(compose_config)`.
@@ -514,7 +661,24 @@ pub fn ensure_dir_keys(
     host: &Host,
     msgs: &mut Messages,
 ) -> Result<(), ComposeError> {
-    let root = get_dir_paths(config, "root", host, msgs)?;
+    ensure_dir_keys_in(config, host, None, msgs)
+}
+
+/// [`ensure_dir_keys`] where an included project with no `root_dir` (and no `MRSM_ROOT_DIR` in
+/// its `environment:`) uses `inherit_root`, the including project's root directory.
+pub fn ensure_dir_keys_in(
+    config: &mut Map,
+    host: &Host,
+    inherit_root: Option<&Path>,
+    msgs: &mut Messages,
+) -> Result<(), ComposeError> {
+    let inherits = inherit_root.is_some()
+        && !config.contains_key("root_dir")
+        && environment_get(config, "MRSM_ROOT_DIR")?.is_none();
+    let root = match inherit_root {
+        Some(root) if inherits => vec![root.to_path_buf()],
+        _ => get_dir_paths(config, "root", host, msgs)?,
+    };
     config.insert(
         "root_dir".into(),
         Value::Str(root.first().map(|p| posix(p)).unwrap_or_default()),
@@ -718,6 +882,16 @@ fn resolve_abs(path_str: &str, base: &Path) -> String {
 
 /// `get_env_dict(compose_config)`: the environment every subaction runs under.
 pub fn get_env_dict(config: &Map, process_env: &ProcessEnv) -> Result<EnvDict, ComposeError> {
+    get_env_dict_in(config, process_env, None)
+}
+
+/// [`get_env_dict`] for a project that runs in a tree: `compose_root` (the root compose file)
+/// is added as the [`COMPOSE_ROOT_VAR`] label the jobs carry.
+pub fn get_env_dict_in(
+    config: &Map,
+    process_env: &ProcessEnv,
+    compose_root: Option<&Path>,
+) -> Result<EnvDict, ComposeError> {
     let mut env: EnvDict = process_env
         .iter()
         .map(|(k, v)| (k.clone(), Value::Str(v.clone())))
@@ -818,6 +992,10 @@ pub fn get_env_dict(config: &Map, process_env: &ProcessEnv) -> Result<EnvDict, C
         }
     }
 
+    if let Some(root) = compose_root {
+        env.insert(COMPOSE_ROOT_VAR.into(), Value::Str(posix(root)));
+    }
+
     for v in env.values_mut() {
         if v.is_null() {
             *v = Value::Str(String::new());
@@ -880,7 +1058,14 @@ pub fn hash_config(config: &Map) -> String {
 
 /// `get_config_cache_path(compose_config)`.
 pub fn config_cache_path(project: &Project) -> PathBuf {
-    project.root_dir().join(CONFIG_CACHE_FILENAME)
+    match &project.cache_suffix {
+        // Included projects share the root directory: one cache file each.
+        Some(suffix) => project.root_dir().join(format!(
+            ".compose-cache.{}.pkl",
+            suffix.replace(['/', '\\'], "_")
+        )),
+        None => project.root_dir().join(CONFIG_CACHE_FILENAME),
+    }
 }
 
 /// `read_config_cache(compose_config)`: the cached hash, if valid.
@@ -920,34 +1105,85 @@ pub fn load_project(
     isolated: bool,
     msgs: &mut Messages,
 ) -> Result<Project, ComposeError> {
-    let Some(compose_file) = infer_compose_file_path(file, &host.cwd, msgs) else {
+    load_project_in(
+        host,
+        &LoadOptions {
+            file,
+            env_file,
+            isolated,
+            ..LoadOptions::default()
+        },
+        msgs,
+    )
+}
+
+/// How to load a project (see [`load_project_in`]).
+#[derive(Debug, Clone, Default)]
+pub struct LoadOptions<'a> {
+    /// `--file`.
+    pub file: Option<&'a Path>,
+    /// `--env-file`.
+    pub env_file: Option<&'a Path>,
+    /// `--isolated`.
+    pub isolated: bool,
+    /// The working directory (default: the host's). An included project resolves its `.env`
+    /// from its own directory.
+    pub cwd: Option<&'a Path>,
+    /// The process environment the file is read under (default: the host's). An included
+    /// project is read under the including project's environment, so the root's variables win.
+    pub env: Option<&'a ProcessEnv>,
+    /// The root directory an included project without a `root_dir` uses.
+    pub inherit_root: Option<&'a Path>,
+}
+
+/// [`load_project`] with [`LoadOptions`].
+pub fn load_project_in(
+    host: &Host,
+    opts: &LoadOptions<'_>,
+    msgs: &mut Messages,
+) -> Result<Project, ComposeError> {
+    let cwd = opts.cwd.unwrap_or(&host.cwd);
+    let Some(compose_file) = infer_compose_file_path(opts.file, cwd, msgs) else {
         return Err(ComposeError::new(
             ErrorKind::FileNotFound,
             "No compose file could be found.\n    \
              Create a file mrsm-compose.yaml or specify a path with `--file`.",
         ));
     };
-    let mut process_env = host.env.clone();
-    init_env(&compose_file, env_file, &mut process_env, msgs);
-    let (config, document) = read_compose_config(
+    let mut process_env = opts.env.cloned().unwrap_or_else(|| host.env.clone());
+    init_env(&compose_file, opts.env_file, &mut process_env, msgs);
+    let read = read_compose_config_in(
         host,
-        &compose_file,
-        env_file,
-        isolated,
+        &ReadOptions {
+            cwd,
+            compose_file: &compose_file,
+            env_file: opts.env_file,
+            isolated: opts.isolated,
+            inherit_root: opts.inherit_root,
+        },
         &mut process_env,
         msgs,
     )?;
     Ok(Project {
-        config,
+        config: read.config,
         file: compose_file,
         process_env,
-        document,
+        document: read.document,
+        unresolved: read.unresolved,
+        compose_root: None,
+        cache_suffix: None,
+        excluded_pipes: Vec::new(),
     })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_root_label_is_the_static_environment_name() {
+        assert_eq!(COMPOSE_ROOT_VAR, static_config().environment.compose_root);
+    }
 
     #[test]
     fn items_str_matches_python() {

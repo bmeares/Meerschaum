@@ -94,34 +94,92 @@ fn write_canonical(value: &Value, out: &mut String) {
     }
 }
 
-/// The scheme prefix of [`definition_hash`]. A stored hash with another prefix was computed by
-/// a different scheme and is treated as unknown rather than as a change.
-pub const DEFINITION_HASH_SCHEME: &str = "v1:";
+/// The scheme prefix of [`definition_hash`]. A stored hash with a scheme this build does not
+/// know was computed by a different scheme and is treated as unknown rather than as a change.
+pub const DEFINITION_HASH_SCHEME: &str = "v2:";
 
-/// The definition hash of a pipe's **registered** parameters: SHA-256 over the canonical JSON
-/// of `{"dtypes": ..., "fetch": ..., "sql": ...}` (missing keys are `null`), prefixed with the
-/// scheme (`v1:`). Templates and `MRSM{}` symlinks are hashed as written, unresolved.
-pub fn definition_hash(parameters: &Map) -> String {
+/// The scheme of rc1, which hashed `dtypes`, `fetch` and `sql` only. A stored `v1:` hash is still
+/// compared (against [`legacy_definition_hash`]) so a definition changed before the upgrade is
+/// noticed, and is replaced by a `v2:` hash after the next successful sync.
+pub const LEGACY_DEFINITION_HASH_SCHEME: &str = "v1:";
+
+/// The parameters a definition change is detected in (`columns` since 5.0.0rc2, reduced to the
+/// roles in [`DEFINITION_COLUMN_ROLES`]).
+const DEFINITION_KEYS: [&str; 4] = ["columns", "dtypes", "fetch", "sql"];
+
+/// The `columns` roles that are part of the definition: a changed or renamed `datetime`, `id` or
+/// `primary` column changes what the table is keyed and ordered by. Other roles (`value`, custom
+/// index roles) and a column set to `null` / `''` do not: adding an index must not make a
+/// rebuild that clears the table and re-fetches its whole history.
+const DEFINITION_COLUMN_ROLES: [&str; 3] = ["datetime", "id", "primary"];
+
+/// `columns` as the definition hash sees it: each of [`DEFINITION_COLUMN_ROLES`] with its column
+/// name, `null` when the role is unset (a null, empty or non-string value is unset).
+fn definition_columns(columns: Option<&Value>) -> Value {
     let mut m = Map::new();
-    for key in ["dtypes", "fetch", "sql"] {
-        m.insert(
-            key.to_string(),
-            parameters.get(key).cloned().unwrap_or(Value::Null),
-        );
+    for role in DEFINITION_COLUMN_ROLES {
+        let column = match columns {
+            Some(Value::Map(cols)) => match cols.get(role) {
+                Some(Value::Str(name)) if !name.is_empty() => Value::Str(name.clone()),
+                _ => Value::Null,
+            },
+            _ => Value::Null,
+        };
+        m.insert(role.to_string(), column);
+    }
+    Value::Map(m)
+}
+
+/// The keys of the rc1 (`v1:`) scheme.
+const LEGACY_DEFINITION_KEYS: [&str; 3] = ["dtypes", "fetch", "sql"];
+
+fn hash_keys(parameters: &Map, keys: &[&str], scheme: &str) -> String {
+    let mut m = Map::new();
+    for key in keys {
+        let value = if scheme == DEFINITION_HASH_SCHEME && *key == "columns" {
+            definition_columns(parameters.get("columns"))
+        } else {
+            parameters.get(*key).cloned().unwrap_or(Value::Null)
+        };
+        m.insert((*key).to_string(), value);
     }
     let digest = Sha256::digest(canonical_json(&Value::Map(m)).as_bytes());
-    let mut hex = String::with_capacity(DEFINITION_HASH_SCHEME.len() + 64);
-    hex.push_str(DEFINITION_HASH_SCHEME);
+    let mut hex = String::with_capacity(scheme.len() + 64);
+    hex.push_str(scheme);
     for byte in digest {
         hex.push_str(&format!("{byte:02x}"));
     }
     hex
 }
 
-/// Whether a stored hash differs from the current one under the same scheme.
-pub fn definition_changed(stored: Option<&str>, current: &str) -> bool {
+/// The definition hash of a pipe's **registered** parameters: SHA-256 over the canonical JSON
+/// of `{"columns": {"datetime", "id", "primary"}, "dtypes": ..., "fetch": ..., "sql": ...}`
+/// (missing keys are `null`), prefixed with the scheme (`v2:`). Templates and `MRSM{}` symlinks are hashed as written,
+/// unresolved.
+pub fn definition_hash(parameters: &Map) -> String {
+    hash_keys(parameters, &DEFINITION_KEYS, DEFINITION_HASH_SCHEME)
+}
+
+/// The rc1 (`v1:`) hash, over `dtypes`, `fetch` and `sql` only.
+pub fn legacy_definition_hash(parameters: &Map) -> String {
+    hash_keys(
+        parameters,
+        &LEGACY_DEFINITION_KEYS,
+        LEGACY_DEFINITION_HASH_SCHEME,
+    )
+}
+
+/// Whether a stored hash differs from the current parameters under the stored hash's scheme.
+/// No stored hash, or a scheme this build does not know, is a baseline and not a change; a
+/// stored rc1 `v1:` hash is compared with the rc1 scheme, so upgrading never rebuilds a pipe
+/// whose definition did not change, and a `columns` edit is only noticed once a `v2:` hash is
+/// stored.
+pub fn definition_changed(stored: Option<&str>, parameters: &Map) -> bool {
     match stored {
-        Some(s) if s.starts_with(DEFINITION_HASH_SCHEME) => s != current,
+        Some(s) if s.starts_with(DEFINITION_HASH_SCHEME) => s != definition_hash(parameters),
+        Some(s) if s.starts_with(LEGACY_DEFINITION_HASH_SCHEME) => {
+            s != legacy_definition_hash(parameters)
+        }
         _ => false,
     }
 }
@@ -275,16 +333,89 @@ mod tests {
         let b = Value::from_json_str(r#"{"fetch": {"b": 2, "a": 1}, "sql": "SELECT 1"}"#).unwrap();
         let c = Value::from_json_str(r#"{"fetch": {"b": 2, "a": 1}, "sql": "SELECT 2"}"#).unwrap();
         let ha = definition_hash(a.as_map().unwrap());
-        assert!(ha.starts_with("v1:") && ha.len() == 67);
+        assert!(ha.starts_with("v2:") && ha.len() == 67);
         assert_eq!(ha, definition_hash(b.as_map().unwrap()));
         assert_ne!(ha, definition_hash(c.as_map().unwrap()));
-        assert!(!definition_changed(None, &ha));
-        assert!(!definition_changed(Some("v0:abc"), &ha));
-        assert!(definition_changed(Some("v1:abc"), &ha));
+        let a = a.as_map().unwrap();
+        assert!(!definition_changed(None, a));
+        assert!(!definition_changed(Some("v0:abc"), a));
+        assert!(definition_changed(Some("v2:abc"), a));
+        assert!(!definition_changed(Some(&ha), a));
         assert_eq!(
             canonical_json(&Value::from_json_str(r#"{"b": [1, 2.5, null], "a": "é"}"#).unwrap()),
             r#"{"a":"é","b":[1,2.5,null]}"#
         );
+    }
+
+    #[test]
+    fn columns_are_part_of_the_definition() {
+        let json = |s: &str| Value::from_json_str(s).unwrap();
+        let before = json(r#"{"columns": {"datetime": "ts", "id": "sensor"}, "sql": "SELECT 1"}"#);
+        let after = json(r#"{"columns": {"datetime": "time", "id": "sensor"}, "sql": "SELECT 1"}"#);
+        let reordered =
+            json(r#"{"sql": "SELECT 1", "columns": {"id": "sensor", "datetime": "ts"}}"#);
+        let (before, after, reordered) = (
+            before.as_map().unwrap(),
+            after.as_map().unwrap(),
+            reordered.as_map().unwrap(),
+        );
+        let stored = definition_hash(before);
+        assert!(definition_changed(Some(&stored), after));
+        assert!(!definition_changed(Some(&stored), reordered));
+        assert_ne!(stored, definition_hash(after));
+    }
+
+    #[test]
+    fn only_the_datetime_id_and_primary_columns_are_part_of_the_definition() {
+        let json = |s: &str| Value::from_json_str(s).unwrap();
+        let base = json(r#"{"columns": {"datetime": "ts"}, "sql": "SELECT 1"}"#);
+        let stored = definition_hash(base.as_map().unwrap());
+        // Another role, a custom index role and an unset (null / empty) column are not a change.
+        for same in [
+            r#"{"columns": {"datetime": "ts", "value": "v"}, "sql": "SELECT 1"}"#,
+            r#"{"columns": {"datetime": "ts", "station": "s"}, "sql": "SELECT 1"}"#,
+            r#"{"columns": {"datetime": "ts", "id": null, "primary": ""}, "sql": "SELECT 1"}"#,
+            r#"{"columns": {"datetime": "ts"}, "sql": "SELECT 1", "tags": ["x"]}"#,
+        ] {
+            let params = json(same);
+            assert!(
+                !definition_changed(Some(&stored), params.as_map().unwrap()),
+                "{same}"
+            );
+        }
+        // A new, renamed or removed datetime / id / primary is.
+        for different in [
+            r#"{"columns": {"datetime": "ts", "id": "sensor"}, "sql": "SELECT 1"}"#,
+            r#"{"columns": {"datetime": "ts", "primary": "pk"}, "sql": "SELECT 1"}"#,
+            r#"{"columns": {"datetime": "time"}, "sql": "SELECT 1"}"#,
+            r#"{"sql": "SELECT 1"}"#,
+        ] {
+            let params = json(different);
+            assert!(
+                definition_changed(Some(&stored), params.as_map().unwrap()),
+                "{different}"
+            );
+        }
+    }
+
+    #[test]
+    fn rc1_hashes_are_compared_with_the_rc1_scheme() {
+        let json = |s: &str| Value::from_json_str(s).unwrap();
+        let rc1 = json(r#"{"columns": {"datetime": "ts"}, "sql": "SELECT 1"}"#);
+        let rc1 = rc1.as_map().unwrap();
+        let stored = legacy_definition_hash(rc1);
+        assert!(stored.starts_with("v1:"));
+        // Upgrading does not rebuild a pipe whose rc1 definition is unchanged ...
+        assert!(!definition_changed(Some(&stored), rc1));
+        // ... a `columns` edit made before the first rc2 sync is not noticed (baseline) ...
+        let renamed = json(r#"{"columns": {"datetime": "time"}, "sql": "SELECT 1"}"#);
+        assert!(!definition_changed(
+            Some(&stored),
+            renamed.as_map().unwrap()
+        ));
+        // ... and a `sql` edit still is.
+        let edited = json(r#"{"columns": {"datetime": "ts"}, "sql": "SELECT 2"}"#);
+        assert!(definition_changed(Some(&stored), edited.as_map().unwrap()));
     }
 
     #[test]

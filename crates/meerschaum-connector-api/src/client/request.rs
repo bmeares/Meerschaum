@@ -265,6 +265,9 @@ impl APIConnector {
             }
         };
         let response = req.send().await.map_err(|e| {
+            if let Some(message) = self.connect_failure(&e) {
+                return ConnectorError::Backend(message);
+            }
             let mut msg = e.to_string();
             let mut source = std::error::Error::source(&e);
             while let Some(s) = source {

@@ -535,6 +535,10 @@ pub enum Trigger {
     Or(Vec<Trigger>, Vec<Option<Fire>>),
     /// `_AndTrigger`.
     And(Vec<Trigger>, Vec<Option<Fire>>),
+    /// A trigger whose every fire time is moved by a fixed offset (`... jitter 30 seconds`,
+    /// `--jitter`, `jobs.schedule.jitter_seconds`; v5 only). The offset is the job's own, seeded
+    /// by its name: it is the same on every fire and every restart.
+    Jittered(Box<Trigger>, i64),
 }
 
 impl Trigger {
@@ -546,6 +550,7 @@ impl Trigger {
             Trigger::Cron(_) => "_CronTrigger",
             Trigger::Or(..) => "_OrTrigger",
             Trigger::And(..) => "_AndTrigger",
+            Trigger::Jittered(..) => "_JitteredTrigger",
         }
     }
 
@@ -556,6 +561,7 @@ impl Trigger {
             Trigger::Interval(t) => t.next(),
             Trigger::Calendar(t) => t.next(),
             Trigger::Cron(t) => t.next(),
+            Trigger::Jittered(inner, offset_us) => inner.next().map(|t| add_us(t, *offset_us)),
             Trigger::Or(triggers, fires) => {
                 if fires.is_empty() {
                     *fires = triggers.iter_mut().map(Trigger::next).collect();
@@ -603,6 +609,9 @@ impl Trigger {
             Trigger::Interval(t) => t.next_after(after),
             Trigger::Calendar(t) => t.next_after(after),
             Trigger::Cron(t) => t.next_after(after),
+            Trigger::Jittered(inner, offset_us) => inner
+                .next_after(add_us(after, -*offset_us))
+                .map(|t| add_us(t, *offset_us)),
             Trigger::Or(triggers, fires) | Trigger::And(triggers, fires) => {
                 *fires = triggers.iter_mut().map(|t| t.next_after(after)).collect();
                 self.next()
@@ -654,8 +663,86 @@ fn timedelta_us(unit: &str, num: f64) -> Result<i64, String> {
     Ok((num * per).round_ties_even() as i64)
 }
 
-/// `parse_schedule(schedule, now)`.
+/// A duration in seconds from `30`, `30s`, `1.5 seconds`, `5m`, `1 hour`, `250ms` (the
+/// `--jitter` value and the `jitter` suffix of `-s`). `None` when it is not one.
+pub fn parse_jitter_seconds(text: &str) -> Option<f64> {
+    static RE: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
+    let re = RE.get_or_init(|| {
+        Regex::new(r"(?i)^\s*(\d+(?:\.\d+)?|\.\d+)\s*([a-z]*)\s*$").expect("valid regex")
+    });
+    let caps = re.captures(text)?;
+    let number: f64 = caps[1].parse().ok()?;
+    let per = match caps[2].to_ascii_lowercase().as_str() {
+        "" | "s" | "sec" | "secs" | "second" | "seconds" => 1.0,
+        "ms" | "millisecond" | "milliseconds" => 0.001,
+        "m" | "min" | "mins" | "minute" | "minutes" => 60.0,
+        "h" | "hr" | "hrs" | "hour" | "hours" => 3600.0,
+        _ => return None,
+    };
+    let seconds = number * per;
+    seconds.is_finite().then_some(seconds)
+}
+
+/// Split a trailing `jitter <n> [unit]` off a schedule (`every 5 minutes jitter 30 seconds`).
+/// The jitter is `None` when the schedule has no such suffix; an unreadable one is an error.
+pub fn split_jitter(schedule: &str) -> Result<(String, Option<f64>), ScheduleError> {
+    static RE: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
+    let re = RE.get_or_init(|| {
+        Regex::new(r"(?i)^(.*?)\s+jitter\s+(\S+)(?:\s+(\S+))?\s*$").expect("valid regex")
+    });
+    let Some(caps) = re.captures(schedule) else {
+        return Ok((schedule.to_string(), None));
+    };
+    let text = match caps.get(3) {
+        Some(unit) => format!("{} {}", &caps[2], unit.as_str()),
+        None => caps[2].to_string(),
+    };
+    let seconds = parse_jitter_seconds(&text).ok_or_else(|| {
+        freq(format!(
+            "Invalid jitter '{text}'.\n    Use a number and an optional unit, e.g. 'jitter 30 seconds'."
+        ))
+    })?;
+    Ok((caps[1].to_string(), Some(seconds)))
+}
+
+/// Where the jitter of a schedule comes from besides its own `jitter` suffix.
+#[derive(Debug, Clone, Copy)]
+pub struct JitterSpec<'a> {
+    /// The bound used when the schedule has no suffix (`--jitter`, `jobs.schedule.jitter_seconds`).
+    pub default_seconds: f64,
+    /// Seeds the fixed offset (the job's name).
+    pub seed: &'a str,
+}
+
+/// `parse_schedule(schedule, now)`. A trailing `jitter <n> [unit]` moves every fire time by a
+/// fixed offset in `[0, n]` seconds (seeded by the schedule text; see [`parse_schedule_jittered`]).
 pub fn parse_schedule(schedule: &str, now: Fire) -> Result<Trigger, ScheduleError> {
+    parse_schedule_jittered(schedule, now, None)
+}
+
+/// [`parse_schedule`] with a default jitter and the seed of the fixed offset: the offset is
+/// `fnv1a(seed) mod (jitter + 1ms)` (see [`crate::startup::fixed_offset`]), so a job keeps the
+/// same offset on every fire and every restart, and different jobs spread. The schedule's own
+/// `jitter` suffix wins over `spec.default_seconds`.
+pub fn parse_schedule_jittered(
+    schedule: &str,
+    now: Fire,
+    spec: Option<JitterSpec<'_>>,
+) -> Result<Trigger, ScheduleError> {
+    let (base, suffix) = split_jitter(schedule)?;
+    let trigger = parse_schedule_unjittered(&base, now)?;
+    let seconds = suffix.or(spec.map(|s| s.default_seconds)).unwrap_or(0.0);
+    let offset = crate::startup::fixed_offset(spec.map_or(base.as_str(), |s| s.seed), seconds);
+    if offset.is_zero() {
+        return Ok(trigger);
+    }
+    Ok(Trigger::Jittered(
+        Box::new(trigger),
+        offset.as_micros() as i64,
+    ))
+}
+
+fn parse_schedule_unjittered(schedule: &str, now: Fire) -> Result<Trigger, ScheduleError> {
     let schedule = canonicalize_starting_keyword(schedule);
     let starting_ts = parse_start_time(&schedule, Some(now))?;
     let mut s = schedule

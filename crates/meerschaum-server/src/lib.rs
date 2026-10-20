@@ -5,8 +5,9 @@
 //! (`docs/design/v5.0.0.md` §7.1, §7.3, §5.8, D7, D17).
 //!
 //! Every route of `meerschaum/api/routes` is served at the same path, method, query parameters,
-//! status codes and JSON shapes as v4.1 (`/dash/*` is the `meerschaum-web` console; the web
-//! terminal's routes are [`webterm`], merged by the console), plus the v5 `/engine/*` family. Wire quirks of the v4 server are kept and marked
+//! status codes and JSON shapes as v4.1 (`/dash/*` is the Python host's Dash console, proxied or
+//! replaced by a pointer page, [`web`]; the web terminal's routes are [`webterm`], merged by
+//! `meerschaum-web`), plus the v5 `/engine/*` family and `POST /execute`. Wire quirks of the v4 server are kept and marked
 //! `// PARITY:` with the Python line.
 //!
 //! | Module | What it does |
@@ -33,6 +34,7 @@ pub mod backends;
 pub mod config;
 pub mod engine_store;
 pub mod error;
+pub mod execute_policy;
 pub mod host;
 pub mod json;
 pub mod mcp;
@@ -41,6 +43,7 @@ pub mod pipe_methods;
 pub mod proxy;
 pub mod query;
 pub mod ratelimit;
+pub mod redact;
 pub mod routes;
 pub mod serialize;
 pub mod state;
@@ -81,8 +84,8 @@ pub async fn serve_with_mcp(
     serve_with_mcp_and_console(state, mcp, None).await
 }
 
-/// [`serve_with_mcp`] with an optional console router (`/dash/*`, built by `meerschaum-web`)
-/// merged into the application. `meerschaum-web` depends on this crate, so the CLI composes
+/// [`serve_with_mcp`] with an optional router of the routes `meerschaum-web` keeps (the web
+/// terminal, the job-log stream, native pages) merged into the application. `meerschaum-web` depends on this crate, so the CLI composes
 /// the two and passes the console in here.
 pub async fn serve_with_mcp_and_console(
     state: AppState,
@@ -104,14 +107,15 @@ pub async fn serve_with_mcp_and_console(
     .await
 }
 
-/// Compose exact console routes with the API without making server depend on web.
-/// The console must not install a fallback or a wildcard under `/dash`.
+/// Compose `meerschaum-web`'s exact routes with the API without making server depend on web.
+/// They must not install a fallback (`/dash/*` is the server's: proxied to the host or the
+/// pointer page).
 pub fn app_with_console(state: AppState, console: axum::Router) -> axum::Router {
     app(state).merge(console)
 }
 
-/// [`app_with_mcp`] plus an optional console router (exact `/dash/*` routes; the console must
-/// not install a fallback, which would shadow the API host proxy).
+/// [`app_with_mcp`] plus an optional router of `meerschaum-web`'s exact routes (it must not
+/// install a fallback, which would shadow the API host proxy).
 pub fn app_with_mcp_and_console(
     state: AppState,
     mcp: std::sync::Arc<mcp::McpServer>,

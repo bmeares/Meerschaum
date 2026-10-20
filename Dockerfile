@@ -29,6 +29,10 @@
 ###   4. `slim` / `full` are `FROM scratch` + that rootfs.
 ###
 ### Requires BuildKit (`docker buildx build`).
+###
+### Multi-architecture: every stage is architecture-neutral (Fedora 44 and the wheels' dependencies ship
+### `linux/amd64` and `linux/arm64`), so the images are built natively on each (`scripts/docker/buildx.sh
+### --platform linux/arm64 ...`, `.github/workflows/docker-build.yaml`) and joined with `buildx.sh --merge`.
 
 ### ---------------------------------------------------------------------------------------------
 ### rust-builder: `maturin build --release` for the `meerschaum` wheel.

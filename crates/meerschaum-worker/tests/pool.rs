@@ -163,6 +163,10 @@ async fn failed_spawns_back_off() {
     let env = TestEnv::without_init();
     let mut opts = env.worker_options();
     opts.python = "/nonexistent/python-for-mrsm-tests".into();
+    // Any module but the default one: the default is preflighted, and an interpreter that cannot
+    // start is then refused at once and without backoff (`tests/preflight.rs`). This test is about
+    // the backoff after a start that failed some other way.
+    opts.module = "meerschaum_test_module".into();
     let pool = meerschaum_worker::WorkerPool::new(meerschaum_worker::PoolConfig {
         size: 1,
         worker: opts,

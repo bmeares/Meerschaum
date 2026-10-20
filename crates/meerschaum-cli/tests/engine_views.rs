@@ -321,6 +321,88 @@ fn graph_sync_ends_with_a_gantt_and_runs_are_listed() {
     assert!(String::from_utf8_lossy(&missing.stdout).contains("No run '01NOPE'"));
 }
 
+/// Replace the `columns` of a registered pipe of the chain (what `pipe.edit()` does).
+fn edit_columns(env: &Env, metric: &str, columns: serde_json::Value) {
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let attrs = ConnectorAttributes {
+        flavor: Some(Flavor::Sqlite),
+        database: Some(
+            env.root
+                .join("sqlite/mrsm_local.db")
+                .to_string_lossy()
+                .into_owned(),
+        ),
+        ..Default::default()
+    };
+    let connector = runtime
+        .block_on(SqlConnector::connect(
+            "local",
+            ConnectionSpec::from_attributes(&attrs).unwrap(),
+        ))
+        .unwrap();
+    let mut edited = pipe(metric, "SELECT * FROM readings");
+    let mut parameters = edited.parameters().clone();
+    parameters.insert(
+        "columns".into(),
+        Value::from_json_str(&columns.to_string()).unwrap(),
+    );
+    edited.set_parameters(parameters);
+    assert!(
+        runtime
+            .block_on(connector.edit_pipe(&edited, false))
+            .success
+    );
+}
+
+#[test]
+fn a_pending_rebuild_is_printed_with_the_way_out_and_never_a_silent_stop() {
+    let env = chain();
+    env.ok(&["sync", "pipes", "-m", "raw", "--parents"]);
+    // A `value` column is not part of the definition: the pipe still syncs.
+    edit_columns(
+        &env,
+        "raw",
+        serde_json::json!({"datetime": "ts", "id": "site", "value": "temp"}),
+    );
+    let out = env.ok(&["sync", "pipes", "-m", "raw", "--parents"]);
+    assert!(
+        !out.contains("rebuild_pending") && out.contains("Successfully synced pipes"),
+        "{out}"
+    );
+    // A different `id` column is a definition change: nothing syncs, and the run says why.
+    edit_columns(
+        &env,
+        "raw",
+        serde_json::json!({"datetime": "ts", "id": "temp"}),
+    );
+    let run = env.run(&["sync", "pipes", "-m", "raw", "--parents"]);
+    let text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&run.stdout),
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert!(!run.status.success(), "{text}");
+    assert!(text.contains("NOT synced"), "{text}");
+    assert!(text.contains("raw"), "{text}");
+    assert!(
+        text.contains("--yes") && text.contains("auto_rebuild"),
+        "{text}"
+    );
+    assert!(text.contains("1 not synced: rebuild_pending"), "{text}");
+    // `--nopretty` prints one line per pipe on stdout.
+    let plain = env.run(&["sync", "pipes", "-m", "raw", "--parents", "--nopretty"]);
+    let stdout = String::from_utf8_lossy(&plain.stdout);
+    assert!(!plain.status.success(), "{stdout}");
+    assert!(stdout.contains("rebuild_pending: "), "{stdout}");
+    assert!(stdout.contains("--yes"), "{stdout}");
+    // `--yes` approves it.
+    let approved = env.ok(&["sync", "pipes", "-m", "raw", "--parents", "--yes"]);
+    assert!(
+        approved.contains("Successfully synced pipes") && !approved.contains("NOT synced"),
+        "{approved}"
+    );
+}
+
 #[test]
 fn flat_sync_output_has_no_gantt() {
     let env = chain();

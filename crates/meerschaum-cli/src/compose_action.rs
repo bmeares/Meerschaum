@@ -10,14 +10,21 @@ use std::path::PathBuf;
 use meerschaum_compose::command::{CommandRunner, MrsmCommand};
 use meerschaum_compose::env::env_dict_to_strings;
 use meerschaum_compose::error::Message;
+use meerschaum_compose::lint::Severity;
 use meerschaum_compose::ops::{JobInfo, JobOps, Prompter};
 use meerschaum_compose::pipes::ProjectConfig;
 use meerschaum_compose::project::{Host, Session};
-use meerschaum_compose::subactions::{ComposeArgs, ComposeOutput, Services, compose};
+use meerschaum_compose::subactions::{ComposeArgs, ComposeOutput, ExplainModel, Services, compose};
 use meerschaum_core::SuccessTuple;
+use meerschaum_core::value::Value;
 
 use crate::builtin::{ActionError, ActionResult};
 use crate::dispatch::{CommandSpec, Runtime};
+use crate::format::Formatter;
+use crate::format::rich::console::Renderable;
+use crate::format::rich::panel::Panel;
+use crate::format::rich::table::{Column, MINIMAL, Table};
+use crate::format::rich::text::Text;
 use crate::native::compose_instance::ComposeInstance;
 use crate::value::{ArgsMap, PyValue};
 
@@ -323,6 +330,7 @@ impl ResultDir {
                 std::process::id(),
                 COUNTER.fetch_add(1, Ordering::SeqCst)
             ));
+            #[cfg_attr(not(unix), allow(unused_mut))]
             let mut builder = std::fs::DirBuilder::new();
             #[cfg(unix)]
             {
@@ -372,8 +380,241 @@ impl Prompter for HostPrompter<'_, '_> {
     }
 }
 
+/// `pipe_repr(pipe, as_rich_text=True)` inside the project: `instance=` is shown unless the pipe
+/// is on the project's default instance (v4 runs `explain` under the project's configuration).
+fn pipe_repr(
+    f: &Formatter<'_>,
+    pipe: &meerschaum_compose::subactions::ExplainPipe,
+    default_instance: &str,
+) -> Text {
+    let ansi = f.settings.ansi;
+    let style = |key: &str| -> String {
+        if ansi {
+            f.formatting_str(&["pipes", "__repr__", "ansi", "styles", key])
+        } else {
+            String::new()
+        }
+    };
+    let pipe_style = style("Pipe");
+    let markup = |s: &str| {
+        let mut t = Text::plain_text(s);
+        if !pipe_style.is_empty() {
+            t.stylize(pipe_style.as_str(), 0, None);
+        }
+        t
+    };
+    let mut text = markup("Pipe(");
+    text.append_text(&Text::new(
+        &format!("'{}'", pipe.connector),
+        style("connector").as_str(),
+    ));
+    text.append_text(&markup(", "));
+    text.append_text(&Text::new(
+        &format!("'{}'", pipe.metric),
+        style("metric").as_str(),
+    ));
+    if let Some(location) = &pipe.location {
+        text.append_text(&Text::new(", ", style("punctuation").as_str()));
+        text.append_text(&Text::new(
+            &format!("'{location}'"),
+            style("location").as_str(),
+        ));
+    }
+    if pipe.instance != default_instance {
+        text.append_text(&Text::new(", instance=", style("punctuation").as_str()));
+        text.append_text(&Text::new(
+            &format!("'{}'", pipe.instance),
+            style("instance").as_str(),
+        ));
+    }
+    text.append_text(&markup(")"));
+    text
+}
+
+/// One project's `explain` table as v4 prints it: `rich` table (`box.MINIMAL`, expanded) of the
+/// defined pipes (`pipe_repr` colors, instance panels) and their parameters (`rich` JSON).
+pub fn render_explain(f: &Formatter<'_>, model: &ExplainModel) -> String {
+    let instance_style = f.formatting_str(&["pipes", "__repr__", "ansi", "styles", "instance"]);
+    let mut table = Table::new();
+    table.title = Some(Text::new(
+        &format!("Pipes in '{}'", model.project_name),
+        "bold",
+    ));
+    table.box_chars = Some(MINIMAL);
+    table.show_header = true;
+    table.expand = true;
+    table.collapse_padding = true;
+    let mut headers = vec!["Defined Pipes", "Compose Parameters"];
+    // PARITY: the instance rows carry an empty remote cell, so the column shows whenever there
+    // is a pipe (v4 explain.py:249).
+    if !model.instances.is_empty() {
+        headers.push("Remote Parameters");
+    }
+    for header in &headers {
+        table.add_column(Column {
+            header: Text::plain_text(header),
+            ..Column::default()
+        });
+    }
+    let json = |map: &meerschaum_core::value::Map| -> Box<dyn Renderable> {
+        let mut text = crate::native::rich_json::json_text(&Value::Map(map.clone()));
+        text.no_wrap = Some(true);
+        text.overflow = None;
+        Box::new(text)
+    };
+    let blank = || -> Option<Box<dyn Renderable>> { Some(Box::new(Text::plain_text(""))) };
+    for instance in &model.instances {
+        let mut panel = Panel::new(Box::new(Text::new(&instance.keys, instance_style.as_str())));
+        panel.title = Some(Text::plain_text("Instance"));
+        let mut row: Vec<Option<Box<dyn Renderable>>> = vec![Some(Box::new(panel))];
+        row.push(blank());
+        row.push(blank());
+        row.truncate(headers.len());
+        table.add_row(row);
+        table.add_row(vec![blank(), blank()]);
+        for (i, pipe) in instance.pipes.iter().enumerate() {
+            let mut text = pipe_repr(f, pipe, &model.default_instance);
+            text.append_text(&Text::plain_text(&format!("\n\n{}\n", pipe.status)));
+            let mut row: Vec<Option<Box<dyn Renderable>>> =
+                vec![Some(Box::new(text)), Some(json(&pipe.local))];
+            row.push(match &pipe.remote {
+                Some(remote) => Some(json(remote)),
+                None => blank(),
+            });
+            row.truncate(headers.len());
+            table.add_row(row);
+            if i + 1 == instance.pipes.len() {
+                table.end_last_section();
+            } else {
+                table.add_row(vec![blank(), blank()]);
+            }
+        }
+    }
+    f.console().print(&table)
+}
+
+/// What the compose command line says that argparse leaves out: the compose flags and action
+/// words may come in any order (`compose --file F up`), and `-f F` names a file when it is
+/// followed by a YAML path (`-f` alone still follows the logs).
+#[derive(Debug, Default, PartialEq)]
+struct ComposeWords {
+    /// The action words after `compose` (the subaction first).
+    action: Vec<String>,
+    /// `--file`, `--compose-file` or `-f <path>.yaml`.
+    file: Option<PathBuf>,
+    /// `-f` alone (force / follow the logs).
+    force: bool,
+    /// `--project <name>`.
+    project: Option<String>,
+    /// `--standalone`.
+    standalone: bool,
+    /// `--no-stagger`.
+    no_stagger: bool,
+}
+
+/// The compose flags that take no value (so the words around them are still action words).
+const FLAGS_WITHOUT_VALUE: &[&str] = &[
+    "--dry",
+    "-v",
+    "--volumes",
+    "--drop",
+    "--presync",
+    "--no-jobs",
+    "--isolated",
+    "--force",
+    "-y",
+    "--yes",
+    "--noask",
+    "--nopretty",
+    "--debug",
+    "--standalone",
+    "--no-stagger",
+];
+
+fn is_yaml_path(s: &str) -> bool {
+    !s.starts_with('-') && (s.ends_with(".yaml") || s.ends_with(".yml"))
+}
+
+fn compose_words(sysargs: &[String]) -> ComposeWords {
+    let mut words = ComposeWords::default();
+    let Some(start) = sysargs.iter().position(|a| a == "compose") else {
+        return words;
+    };
+    let mut collecting = true;
+    let mut i = start + 1;
+    while i < sysargs.len() {
+        let arg = sysargs[i].as_str();
+        let next = sysargs.get(i + 1).map(String::as_str);
+        match arg {
+            "--file" | "--compose-file" => {
+                if let Some(v) = next {
+                    words.file = Some(PathBuf::from(v));
+                    i += 1;
+                }
+            }
+            "--env-file" | "--env" => i += usize::from(next.is_some()),
+            "--project" => {
+                if let Some(v) = next {
+                    words.project = Some(v.to_string());
+                    i += 1;
+                }
+            }
+            "-f" => match next {
+                Some(v) if is_yaml_path(v) => {
+                    words.file = Some(PathBuf::from(v));
+                    i += 1;
+                }
+                _ => words.force = true,
+            },
+            "--standalone" => words.standalone = true,
+            "--no-stagger" => words.no_stagger = true,
+            _ if arg.starts_with("--project=") => {
+                words.project = Some(arg["--project=".len()..].to_string());
+            }
+            _ if arg.starts_with("--file=") || arg.starts_with("--compose-file=") => {
+                let value = arg.split_once('=').map(|(_, v)| v).unwrap_or_default();
+                words.file = Some(PathBuf::from(value));
+            }
+            _ if FLAGS_WITHOUT_VALUE.contains(&arg) => {}
+            _ if arg.starts_with('-') => collecting = false,
+            _ => {
+                if collecting {
+                    words.action.push(arg.to_string());
+                }
+            }
+        }
+        i += 1;
+    }
+    words
+}
+
 fn flag(args: &ArgsMap, key: &str) -> bool {
     args.get(key).is_some_and(PyValue::is_truthy)
+}
+
+fn str_list(args: &ArgsMap, key: &str) -> Vec<String> {
+    match args.get(key) {
+        Some(PyValue::List(items)) => items.iter().map(PyValue::py_str).collect(),
+        Some(PyValue::Str(s)) => vec![s.clone()],
+        _ => Vec::new(),
+    }
+}
+
+/// `-l` values (`None` for a null location).
+fn location_list(args: &ArgsMap, key: &str) -> Vec<Option<String>> {
+    match args.get(key) {
+        Some(PyValue::List(items)) => items
+            .iter()
+            .map(|v| match v {
+                PyValue::None => None,
+                other => {
+                    let s = other.py_str();
+                    (s != "None").then_some(s)
+                }
+            })
+            .collect(),
+        _ => Vec::new(),
+    }
 }
 
 fn path(args: &ArgsMap, key: &str) -> Option<PathBuf> {
@@ -420,7 +661,7 @@ pub fn compose_native_with_jobs(
 
 /// `compose(action, file, env_file, ...)`.
 pub fn compose_action(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
-    let action: Vec<String> = args
+    let parsed_action: Vec<String> = args
         .get("action")
         .and_then(PyValue::as_list)
         .map(|l| l.iter().map(PyValue::py_str).collect())
@@ -430,15 +671,30 @@ pub fn compose_action(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
         .and_then(PyValue::as_list)
         .map(|l| l.iter().map(PyValue::py_str).collect())
         .unwrap_or_default();
+    // The flags may come before the subaction (`compose --file F up`): argparse then leaves the
+    // action words out, so they are read from the command line.
+    let words = compose_words(&sysargs);
+    let action = if words.action.len() > parsed_action.len() {
+        words.action.clone()
+    } else {
+        parsed_action
+    };
     let dry = flag(args, "dry");
     let settings = rt.settings();
+    let file = path(args, "file").or_else(|| words.file.clone());
+    // `-f <path>.yaml` names the file; only a bare `-f` is the force / follow flag.
+    let force = if words.file.is_some() && path(args, "file").is_none() {
+        words.force
+    } else {
+        flag(args, "force")
+    };
     let compose_args = ComposeArgs {
         action: action.clone(),
         sysargs,
-        file: path(args, "file"),
+        file,
         env_file: path(args, "env_file"),
         dry,
-        force: flag(args, "force"),
+        force,
         presync: flag(args, "presync"),
         no_jobs: flag(args, "no_jobs"),
         isolated: flag(args, "isolated"),
@@ -448,6 +704,17 @@ pub fn compose_action(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
         nopretty: flag(args, "nopretty"),
         debug: flag(args, "debug"),
         width: Some(settings.width),
+        standalone: words.standalone || flag(args, "standalone"),
+        project: words.project.clone(),
+        no_stagger: words.no_stagger || flag(args, "no_stagger"),
+        connector_keys: str_list(args, "connector_keys"),
+        metric_keys: str_list(args, "metric_keys"),
+        location_keys: location_list(args, "location_keys"),
+        tags: str_list(args, "tags"),
+        mrsm_instance: args
+            .get("mrsm_instance")
+            .filter(|v| v.is_truthy())
+            .map(PyValue::py_str),
     };
     let cwd = rt
         .cwd
@@ -464,18 +731,102 @@ pub fn compose_action(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
         compose_native(&host, &compose_args, &mut runner, &mut prompter)
     };
     print_messages(rt, &output.messages.items);
-    if let Some(explain) = &output.explain {
+    if !output.explain_models.is_empty() {
+        let text = rt.with_formatter(|f| {
+            output
+                .explain_models
+                .iter()
+                .map(|model| render_explain(f, model))
+                .collect::<Vec<_>>()
+                .join("\n")
+        });
+        rt.print(&text);
+        if !text.ends_with('\n') {
+            rt.print("\n");
+        }
+    } else if let Some(explain) = &output.explain {
         rt.print(explain);
         if !explain.ends_with('\n') {
             rt.print("\n");
         }
     }
-    // Rust-only: the `explain` lint (v4 has none) goes to stderr as warnings.
+    // Rust-only: the `explain` lint (v4 has none): warnings to stderr, notes (overrides, what
+    // `up` would install) like `info()`.
     for finding in &output.lint {
-        let text = rt.with_formatter(|f| f.warn(&finding.to_string()));
-        rt.eprint(&text);
+        match finding.severity {
+            Severity::Warning => {
+                let text = rt.with_formatter(|f| f.warn(&finding.to_string()));
+                rt.eprint(&text);
+            }
+            Severity::Info => {
+                let text = rt.with_formatter(|f| f.info(&finding.to_string(), true));
+                rt.print(&text);
+            }
+        }
     }
     output
         .result
         .map_err(|e| ActionError::new(e.kind.python_name(), e.message))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn words(line: &str) -> ComposeWords {
+        let sysargs: Vec<String> = line.split_whitespace().map(String::from).collect();
+        compose_words(&sysargs)
+    }
+
+    #[test]
+    fn the_action_words_survive_flags_in_front_of_them() {
+        assert_eq!(words("compose up").action, vec!["up"]);
+        assert_eq!(words("compose --file a.yaml up").action, vec!["up"]);
+        assert_eq!(
+            words("compose --project x --file a.yaml show pipes").action,
+            vec!["show", "pipes"]
+        );
+        assert_eq!(words("compose --dry -v up").action, vec!["up"]);
+        // An unknown flag ends the action: its value is not an action word.
+        assert_eq!(
+            words("compose sync pipes -c sql:a").action,
+            vec!["sync", "pipes"]
+        );
+        assert_eq!(
+            words("compose -c sql:a sync pipes").action,
+            Vec::<String>::new()
+        );
+    }
+
+    #[test]
+    fn f_names_a_file_only_before_a_yaml_path() {
+        let w = words("compose up -f other.yaml");
+        assert_eq!(w.file, Some(PathBuf::from("other.yaml")));
+        assert!(!w.force);
+        assert_eq!(w.action, vec!["up"]);
+        let w = words("compose -f up");
+        assert_eq!(w.file, None);
+        assert!(w.force, "a bare -f still follows the logs");
+        let w = words("compose up -f");
+        assert!(w.force && w.file.is_none());
+        assert_eq!(
+            words("compose --file=x.yml up").file,
+            Some(PathBuf::from("x.yml"))
+        );
+        assert_eq!(
+            words("compose --compose-file x.yml up").file,
+            Some(PathBuf::from("x.yml"))
+        );
+    }
+
+    #[test]
+    fn compose_flags_are_read_from_the_command_line() {
+        let w = words("compose up --project weather --standalone --no-stagger");
+        assert_eq!(w.project.as_deref(), Some("weather"));
+        assert!(w.standalone && w.no_stagger);
+        assert_eq!(
+            words("compose up --project=a").project.as_deref(),
+            Some("a")
+        );
+    }
 }

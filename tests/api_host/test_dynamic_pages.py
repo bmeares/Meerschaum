@@ -56,7 +56,8 @@ def test_pages_registered_during_dash_initialization(sandbox):
 import json
 from starlette.testclient import TestClient
 from meerschaum.api.host import build_app
-from meerschaum.api.host.dash import get_dash_app
+from meerschaum.api.dash import dash_app
+from meerschaum.api.dash.callbacks.dashboard import _paths, _required_login
 from meerschaum.api.host._internal import web_page_registry
 from meerschaum import Plugin
 
@@ -67,49 +68,68 @@ client = TestClient(app)
 plugin = Plugin('latepages').module
 out = {'initializations': plugin.INITIALIZATIONS}
 out['registry'] = {page['path']: page for page in web_page_registry()}
-out['pages'] = list(get_dash_app('latepages')._mrsm_pages)
+out['paths'] = sorted(path for path in _paths if 'latepages' in path or 'pageonly' in path)
+out['required'] = sorted(path for path in _required_login if 'latepages' in path)
 out['fragment'] = client.get('/_pages/latepages/fragment').text
+out['framed'] = client.get('/_pages/latepages/fragment?frame=1').text
 out['page_only_fragment'] = client.get('/_pages/pageonly/fragment').text
-out['page_only_layout'] = client.get('/dash/pageonly/_dash-layout').status_code
 out['locked_anonymous'] = client.get('/_pages/latepages/locked').status_code
 sessions.set_session('dynamic-session', {'username': 'example'})
 client.cookies.set('mrsm-session-id', 'dynamic-session')
 out['locked_authenticated'] = client.get('/_pages/latepages/locked').status_code
-out['layout'] = client.get('/dash/latepages/_dash-layout').text
+out['layout'] = client.get('/dash/_dash-layout').text
 
-dash_app = get_dash_app('latepages')
-assert dash_app.callback_map
-callback = next(key for key in dash_app.callback_map if 'page-layout-div.children' in key)
-payload = {
-    'output': callback,
-    'outputs': [
-        {'id': 'page-layout-div', 'property': 'children'},
-        {'id': 'session-store', 'property': 'data'},
-        {'id': 'dbc-dark-store', 'property': 'data'},
-    ],
-    'inputs': [{'id': 'mrsm-location', 'property': 'pathname', 'value': '/dash/latepages/late'}],
-    'changedPropIds': ['mrsm-location.pathname'],
-    'state': [],
-}
-response = client.post('/dash/latepages/_dash-update-component', json=payload)
-out['route_status'] = response.status_code
-out['route_body'] = response.text
+def route(pathname):
+    callback = next(key for key in dash_app.callback_map if 'page-layout-div.children' in key)
+    outputs = []
+    for part in callback.strip('.').split('...'):
+        component_id, _, prop = part.partition('.')
+        outputs.append({'id': component_id, 'property': prop.split('@')[0]})
+    payload = {
+        'output': callback,
+        'outputs': outputs,
+        'inputs': [
+            {'id': 'mrsm-location', 'property': 'pathname', 'value': pathname},
+            {'id': 'session-store', 'property': 'data', 'value': {'session-id': 'dynamic-session'}},
+        ],
+        'changedPropIds': ['mrsm-location.pathname'],
+        'state': [{'id': 'mrsm-location', 'property': 'href', 'value': 'http://localhost' + pathname}],
+    }
+    response = client.post('/dash/_dash-update-component', json=payload)
+    return response.status_code, response.text
+
+out['route'] = route('/dash/latepages/late')
+out['fragment_route'] = route('/dash/latepages/fragment')
+out['page_only_route'] = route('/dash/pageonly/legacy')
 print('JSON:' + json.dumps(out))
 ''')
     assert result.returncode == 0, result.stderr[-4000:]
     line = next(line for line in reversed(result.stdout.splitlines()) if line.startswith('JSON:'))
     out = json.loads(line[5:])
     assert out['initializations'] == ['init']
-    assert out['pages'] == ['/dash/latepages/late']
+    ### Pages declared inside a `@dash_plugin` function are pages of the one console, at v4 paths.
+    assert out['paths'] == [
+        '/dash/latepages/fragment', '/dash/latepages/late', '/dash/latepages/locked',
+        '/dash/pageonly/fragment', '/dash/pageonly/legacy',
+    ]
+    assert out['required'] == ['/dash/latepages/locked']
     assert out['fragment'] == '<p>dynamic fragment</p>'
     assert out['page_only_fragment'] == '<p>page-only fragment</p>'
-    assert out['page_only_layout'] == 200
+    ### `?frame=1` is the document the console's iframe loads.
+    assert out['framed'].startswith('<!DOCTYPE html>') and '<p>dynamic fragment</p>' in out['framed']
+    assert '/static/contract/contract.js' in out['framed']
     assert out['locked_anonymous'] == 401
     assert out['locked_authenticated'] == 200
     assert out['registry']['/dash/latepages/late']['mode'] == 'dash'
     assert out['registry']['/dash/latepages/fragment']['mode'] == 'html'
     for component in ('session-store', 'mrsm-location', 'dbc-dark-store'):
         assert component in out['layout']
-    assert out['route_status'] == 200, out['route_body']
-    assert 'dynamic Dash layout' in out['route_body']
-    assert 'dynamic-session' in out['route_body']
+    status, body = out['route']
+    assert status == 200, body
+    assert 'dynamic Dash layout' in body
+    ### A page-contract page is an iframe of its document.
+    status, body = out['fragment_route']
+    assert status == 200 and 'frame=1' in body and 'mrsm-contract-frame' in body
+    assert 'latepages' in body and 'Iframe' in body
+    status, body = out['page_only_route']
+    assert status == 200 and 'page-only layout' in body

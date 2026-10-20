@@ -3,7 +3,7 @@
 # vim:fenc=utf-8
 
 """
-The Python session helpers share the Rust console's instance-backed store
+The Python session helpers share the Rust server's instance-backed session store
 (`crates/meerschaum-web/src/sessions.rs`, `InstanceSessions`): table `mrsm_sessions` with
 `session_id` (primary key), `data` (compact JSON string) and `expires` (Unix seconds).
 The tests read and write the table with raw SQL the way the Rust code does.

@@ -218,6 +218,7 @@ fn run_case(name: &str, expected: &Value, run_ix: usize, run: &Value) -> Vec<Str
         nopretty: flag("nopretty"),
         debug: flag("debug"),
         width: get(run, "width").as_i64().map(|w| w as usize),
+        ..ComposeArgs::default()
     };
 
     let mut runner = RecordingRunner::default();
@@ -286,11 +287,23 @@ fn run_case(name: &str, expected: &Value, run_ix: usize, run: &Value) -> Vec<Str
         ),
     }
 
+    // OVERLAY (v5, PARITY.md "compose explain is side-effect free"): `explain` no longer
+    // initializes the root directory, so the reference's `show version` command and "Initializing
+    // Meerschaum root directory" message are not expected.
+    let is_explain = strs(get(run, "action"))
+        .first()
+        .is_some_and(|a| a == "explain");
     // Commands.
     let exp_cmds: Vec<String> = get(run, "commands")
         .as_list()
         .unwrap()
         .iter()
+        .filter(|c| {
+            let sysargs = strs(get(c, "sysargs"));
+            !(is_explain
+                && (sysargs.starts_with(&["show".to_string(), "version".to_string()])
+                    || sysargs.starts_with(&["install".to_string(), "required".to_string()])))
+        })
         .map(|c| {
             format!(
                 "{:?} subprocess={} capture={} replace={}",
@@ -359,6 +372,12 @@ fn run_case(name: &str, expected: &Value, run_ix: usize, run: &Value) -> Vec<Str
         .iter()
         .filter_map(|m| {
             let l = m.as_list().unwrap();
+            if is_explain
+                && (py_str(&l[1]).starts_with("Initializing Meerschaum root directory")
+                    || py_str(&l[1]).starts_with("Installing required packages for plugins"))
+            {
+                return None;
+            }
             normalize_message(&py_str(&l[0]), &py_str(&l[1]))
         })
         .collect();

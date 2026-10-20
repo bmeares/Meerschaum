@@ -23,7 +23,7 @@ mrsm doctor --debug          # the time each check took
 
 In the SDK, importing `meerschaum.actions` initializes the action registry and discovers plugins before any action runs. A subsequent `actions['doctor'](...)` call is read-only from that point; `mrsm.entry(['doctor', ...])` also avoids that initial registry import.
 
-Every check is **PASS**, **WARN** (works, but look at it), **FAIL** (something is broken) or **SKIP** (not applicable here, the detail says why); each WARN or FAIL carries the exact command or setting that fixes it. The command fails (and exits `1`) only when a check FAILs. `--nopretty` always exits `0`, like every `mrsm` command, so a script reads `summary.ok` (and `summary.fail`) of the JSON document instead of the exit code. A sample on a machine with a Python plugin installed, where an old `meerschaum` 4.x in the user site shadows the one `mrsm` was built with:
+Every check is **PASS**, **WARN** (works, but look at it), **FAIL** (something is broken) or **SKIP** (not applicable here, the detail says why); each WARN or FAIL carries the exact command or setting that fixes it. The command fails (and exits `1`) only when a check FAILs. `--nopretty` exits `1` on a FAIL too (since 5.0.0rc2; v4 always exited `0` with `--nopretty`), and a script can also read `summary.ok` (and `summary.fail`) of the JSON document. A sample on a machine with a Python plugin installed, where an old `meerschaum` 4.x in the user site shadows the one `mrsm` was built with:
 
 ```text
 ┏━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓

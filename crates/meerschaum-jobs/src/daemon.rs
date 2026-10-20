@@ -15,6 +15,7 @@ use crate::properties::{self, merge_properties};
 use crate::remote::RemoteJobsResolver;
 use crate::rotating::{RotatingFile, RotatingFileOptions};
 use crate::runner::{ProcessRunner, SystemRunner};
+use crate::startup::{StartKind, StartupPolicy};
 use crate::stdin::StdinFile;
 use crate::supervisor::{Launcher, SupervisorOptions};
 
@@ -156,6 +157,8 @@ pub struct Daemon {
     /// Whether `target_args` came from `properties['target']` (Rust-written jobs).
     has_target: bool,
     label: String,
+    /// How the next [`Daemon::run`] is classified for the startup gate.
+    start_kind: StartKind,
 }
 
 impl Daemon {
@@ -187,6 +190,7 @@ impl Daemon {
             target_args,
             has_target,
             label,
+            start_kind: StartKind::default(),
         })
     }
 
@@ -209,7 +213,26 @@ impl Daemon {
             target_args: sysargs,
             has_target: true,
             label,
+            start_kind: StartKind::default(),
         }
+    }
+
+    /// How the next [`Daemon::run`] is classified for the startup gate (default
+    /// [`StartKind::Single`]).
+    pub fn set_start_kind(&mut self, kind: StartKind) {
+        self.start_kind = kind;
+    }
+
+    /// The startup gate of a start of `kind` (`None`: ungated): the configured limits patched
+    /// with this job's `startup` property.
+    pub fn startup_policy(&mut self, kind: StartKind) -> Option<StartupPolicy> {
+        let props = self.properties();
+        StartupPolicy::resolve(
+            &self.ctx.config.startup,
+            props.get("startup").and_then(Value::as_map),
+            kind,
+            &self.ctx.paths.jobs_dir,
+        )
     }
 
     /// The daemon's file layout.
@@ -768,6 +791,7 @@ impl Daemon {
             capture_stdin: logs.get("stdin").is_none_or(Value::truthy),
             cwd,
             command,
+            startup: self.startup_policy(self.start_kind),
         }
     }
 

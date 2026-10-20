@@ -1,5 +1,8 @@
-//! Boundaries needed when composing the console with the API.
+//! Boundaries needed when composing the console with the API, and the Dash console's entry
+//! (`/dash`, `/dash/*`): the Python API host serves the console (D21); the server proxies to it
+//! when it mounted it and shows a static pointer page otherwise.
 use crate::AppState;
+use crate::host::ConsoleStatus;
 use axum::{
     body::{Body, to_bytes},
     extract::{Request, State},
@@ -68,4 +71,69 @@ pub async fn protect_sessions(
         req = Request::from_parts(head, Body::from(bytes));
     }
     next.run(req).await
+}
+
+/// Whether `path` belongs to the console: `/dash` and everything under `/dash/`.
+pub fn is_console_path(path: &str) -> bool {
+    path == "/dash" || path.starts_with("/dash/")
+}
+
+/// The pointer page: what `/dash` shows when this server has no console to serve (no Python
+/// package with the `dash` extra, a host that did not mount it, `mrsm` standalone). `reason`
+/// says why (escaped here).
+pub fn pointer_page(reason: &str) -> String {
+    let reason = reason
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;");
+    format!(
+        "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\">\
+<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\
+<meta name=\"color-scheme\" content=\"light dark\"><title>Meerschaum</title>\
+<style>body{{font-family:system-ui,sans-serif;max-width:40rem;margin:4rem auto;padding:0 1rem;line-height:1.5}}\
+code{{background:rgba(127,127,127,.2);padding:.1rem .35rem;border-radius:.25rem}}\
+small{{opacity:.7}}</style></head><body>\
+<h1>Meerschaum</h1>\
+<p>The web console comes with the Python package: <code>pip install meerschaum[dash]</code></p>\
+<p>This server runs without it. The API is available (<a href=\"/docs\">/docs</a>).</p>\
+<p><small>{reason}</small></p>\
+</body></html>"
+    )
+}
+
+/// Serve a console path: proxy to the API host when it mounted the Dash console, else the
+/// pointer page (`200` for `/dash` and `/dash/`, `404` below them). Everything about the
+/// request reaches the host unchanged, so the Dash app sees the paths it was mounted at.
+pub async fn console_entry(state: AppState, req: Request) -> Response {
+    let path = req.uri().path().to_string();
+    if state.config.no_dash {
+        let mut resp = crate::error::ApiError::not_found().into_response();
+        resp.extensions_mut().insert(crate::routes::Unmatched);
+        return resp;
+    }
+    let status = match &state.host {
+        Some(host) => host.console(state.secret()).await,
+        None => ConsoleStatus::Unavailable("this server has no Python API host".into()),
+    };
+    match (status, &state.host) {
+        (ConsoleStatus::Mounted, Some(host)) => host.forward(req).await,
+        (status, _) => {
+            let reason = match status {
+                ConsoleStatus::Unavailable(reason) => reason,
+                _ => String::new(),
+            };
+            let root = matches!(path.as_str(), "/dash" | "/dash/");
+            let mut resp = if root {
+                axum::response::Html(pointer_page(&reason)).into_response()
+            } else {
+                StatusCode::NOT_FOUND.into_response()
+            };
+            resp.headers_mut().insert(
+                axum::http::header::CACHE_CONTROL,
+                axum::http::HeaderValue::from_static("no-store"),
+            );
+            resp
+        }
+    }
 }

@@ -299,6 +299,44 @@ pub fn print_pipes_results(
     }
 }
 
+/// Say which pipes a run did not sync because their definition changed and nobody approved the
+/// rebuild: never a silent stop. Pretty mode warns; `--nopretty` prints one `rebuild_pending:`
+/// line per pipe (and the way out) on stdout so a script or a job log sees it too.
+pub(in crate::native) fn report_rebuild_pending(
+    rt: &mut Runtime<'_>,
+    pending: &[meerschaum_engine::PendingRebuild],
+    nopretty: bool,
+) {
+    if pending.is_empty() {
+        return;
+    }
+    let how = meerschaum_engine::PendingRebuild::HOW_TO_APPROVE;
+    if nopretty {
+        let mut text = String::new();
+        for p in pending {
+            text.push_str(&format!(
+                "rebuild_pending: {}: {}\n",
+                p.pipe_ref.label(),
+                p.reason
+            ));
+        }
+        text.push_str(&format!("rebuild_pending: {how}\n"));
+        rt.print(&text);
+        return;
+    }
+    let mut text = format!(
+        "{} pipe{} {} NOT synced: the definition changed and the rebuild needs approval.",
+        pending.len(),
+        plural(pending.len()),
+        if pending.len() == 1 { "was" } else { "were" }
+    );
+    for p in pending {
+        text.push_str(&format!("\n  - {}: {}", p.pipe_ref.label(), p.reason));
+    }
+    text.push_str(&format!("\n{how}"));
+    warn(rt, &text);
+}
+
 /// Which `Pipe` method a lap calls (`_wrap_pipe`'s `sync_method`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LapMethod {
@@ -336,6 +374,7 @@ pub fn sync_pipes_with(args: &ArgsMap, rt: &mut Runtime<'_>, method: LapMethod) 
     loop {
         let lap_begin = Instant::now();
         let mut gantt_text: Option<String> = None;
+        let mut pending: Vec<meerschaum_engine::PendingRebuild> = Vec::new();
         let (inst, pipes) = super::pipes::selected_pipes(rt, args)?;
         let engine_results = if method == LapMethod::Sync {
             let traversal = flag(args, "parents") || flag(args, "children");
@@ -356,6 +395,7 @@ pub fn sync_pipes_with(args: &ArgsMap, rt: &mut Runtime<'_>, method: LapMethod) 
             for warning in &result.warnings {
                 warn(rt, warning);
             }
+            pending = result.rebuild_pending();
             if !result.success && result.outcomes.is_empty() {
                 return Ok(SuccessTuple::fail(result.message));
             }
@@ -472,12 +512,21 @@ pub fn sync_pipes_with(args: &ArgsMap, rt: &mut Runtime<'_>, method: LapMethod) 
             rt.print("\n");
             rt.print(&text);
         }
+        report_rebuild_pending(rt, &pending, nopretty);
         let total = success_count + failure_count;
         msg = format!(
             "It took {} to sync {total} pipe{}\n    ({success_count} succeeded, {failure_count} failed).",
             interval_str(lap_secs),
             plural(total)
         );
+        if !pending.is_empty() {
+            msg.push_str(&format!(
+                "\n    {} not synced: rebuild_pending.",
+                pending.len()
+            ));
+        }
+        // A job's startup slot (D23) is held until its first lap is done.
+        meerschaum_jobs::startup::signal_first_lap_done();
         if min_seconds > 0.0 && do_loop {
             rt.print("\n");
             let s = if min_seconds.abs() != 1.0 { "s" } else { "" };
@@ -793,6 +842,8 @@ fn listen(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
                 ));
             }
             Ok(LapEvent::LapFinished(summary)) => {
+                // A job's startup slot (D23) is held until its first lap is done.
+                meerschaum_jobs::startup::signal_first_lap_done();
                 rt.print("\n");
                 print_pipes_results(
                     rt,
@@ -802,6 +853,8 @@ fn listen(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
                     nopretty,
                 );
                 results.clear();
+                // Every lap says it again: an unattended `--loop` job must not stop quietly.
+                report_rebuild_pending(rt, &summary.rebuild_pending, nopretty);
                 result = SuccessTuple {
                     success: summary.v4_success(),
                     message: summary.v4_message(&interval_str(summary.duration.as_secs_f64())),

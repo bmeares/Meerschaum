@@ -252,6 +252,9 @@ pub struct Table<'a> {
     pub style: StyleRef,
     /// `show_lines`: a separator between rows.
     pub show_lines: bool,
+    /// The rows that end a section (`add_row(..., end_section=True)`): a separator follows
+    /// each one that is not the last row.
+    end_sections: Vec<usize>,
     rows: usize,
 }
 
@@ -272,7 +275,17 @@ impl<'a> Table<'a> {
             border_style: StyleRef::default(),
             style: StyleRef::Name("none".into()),
             show_lines: false,
+            end_sections: Vec::new(),
             rows: 0,
+        }
+    }
+
+    /// `end_section=True` on the row added last.
+    pub fn end_last_section(&mut self) {
+        if self.rows > 0 {
+            // The header is row 0 of the rendered rows.
+            self.end_sections
+                .push(self.rows - 1 + usize::from(self.show_header));
         }
     }
 
@@ -773,7 +786,7 @@ impl Table<'_> {
                 ));
                 out.push(Segment::line());
             } else if let Some(b) = &box_chars
-                && self.show_lines
+                && (self.show_lines || self.end_sections.contains(&row_index))
                 && !last
             {
                 out.push(Segment::new(

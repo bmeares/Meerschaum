@@ -91,3 +91,18 @@ def decode_internal_token(token: Optional[str]) -> Union[Dict[str, Any], None]:
     if not isinstance(claims, dict) or claims.get(TOKEN_CLAIM) != 'mcp':
         return None
     return claims
+
+
+def mint_internal_token(minutes: int = 5) -> str:
+    """
+    Return a token the Rust server accepts as the host's (`X-Mrsm-Host-Token`): an HS256 JWT signed
+    with the API secret whose `mrsm_host` claim is `mcp`, valid for `minutes`.
+    """
+    from datetime import timedelta
+    from meerschaum.api.host import TOKEN_CLAIM
+    from meerschaum.api._oauth2 import manager
+    return manager.create_access_token(
+        data={TOKEN_CLAIM: 'mcp'},
+        expires=timedelta(minutes=minutes),
+        scopes=['*'],
+    )

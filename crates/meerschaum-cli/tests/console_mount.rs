@@ -1,5 +1,7 @@
-//! `mrsm start api` mounts the `/dash` console next to the API: a temporary root and a SQLite
-//! instance, driven in-process (no sockets, no port).
+//! `mrsm start api` and the web console (D21): the Dash console is the Python API host's, so the
+//! server proxies `/dash` to it and, without a host that mounted it, shows the pointer page. The
+//! web terminal's assets and the native-page fragments stay Rust routes. A temporary root and a
+//! SQLite instance, driven in-process (no sockets, no port, no Python host).
 
 use std::sync::Arc;
 
@@ -42,7 +44,7 @@ fn app(flags: ServerFlags) -> Fixture {
     let state: AppState = AppState::builder(server_config, instance.conn())
         .build()
         .unwrap();
-    let console = meerschaum_cli::server::console(&state, &manifest, None, &mut rt).unwrap();
+    let console = meerschaum_cli::server::console(&state, &manifest, &mut rt).unwrap();
     let mcp = Arc::new(McpServer::for_state(&state));
     let app = meerschaum_server::app_with_mcp_and_console(state, mcp, console);
     // The runtime (and its worker pool) must outlive the in-process requests.
@@ -78,18 +80,26 @@ async fn get(app: &axum::Router, uri: &str) -> (StatusCode, Option<String>, Stri
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn console_is_mounted_beside_the_api() {
+async fn dash_shows_the_pointer_page_without_a_python_console() {
     let fixture = tokio::task::spawn_blocking(|| app(ServerFlags::default()))
         .await
         .unwrap();
     let app = &fixture.app;
-    let (status, _, body) = get(app, "/dash/login").await;
-    assert_eq!(status, StatusCode::OK);
-    assert!(body.to_lowercase().contains("password"), "{body}");
-    // `/dash` without a session redirects to the login page.
-    let (status, location, _) = get(app, "/dash").await;
-    assert_eq!(status, StatusCode::SEE_OTHER);
-    assert_eq!(location.as_deref(), Some("/dash/login"));
+    for path in ["/dash", "/dash/"] {
+        let (status, _, body) = get(app, path).await;
+        assert_eq!(status, StatusCode::OK, "{path}");
+        assert!(body.contains("pip install meerschaum[dash]"), "{body}");
+    }
+    // The Rust server has no console pages of its own any more.
+    for path in [
+        "/dash/login",
+        "/dash/pipes",
+        "/dash/pipelines",
+        "/dash/assets/xterm.js",
+    ] {
+        let (status, _, _) = get(app, path).await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{path}");
+    }
     // PARITY: v4's index redirects to the console.
     let (status, location, _) = get(app, "/").await;
     assert!(status.is_redirection());
@@ -97,6 +107,13 @@ async fn console_is_mounted_beside_the_api() {
     // The API routes are still served.
     let (status, _, body) = get(app, "/healthcheck").await;
     assert_eq!(status, StatusCode::OK, "{body}");
+    // The web terminal's bundle is served next to them (outside `/dash`, which is Dash's).
+    let (status, _, body) = get(app, "/webterm/assets/xterm.js").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(body.len() > 1000);
+    // The native-page fragments need the host's internal token.
+    let (status, _, _) = get(app, "/_mrsm/native-pages").await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "no native page, no route");
 }
 
 #[tokio::test(flavor = "multi_thread")]

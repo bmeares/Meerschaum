@@ -1,5 +1,6 @@
-//! The vendored console assets, embedded gzip-compressed (`build.rs`) and served from
-//! `/dash/assets/<name>`.
+//! The vendored xterm.js bundle (and the terminal's own script and style), embedded
+//! gzip-compressed (`build.rs`) and served from `/webterm/assets/<name>`. (`/dash/assets/` is the
+//! Dash console's.)
 //!
 //! A client that accepts gzip gets the embedded bytes as they are; any other client gets them
 //! inflated. Every response carries `Vary: Accept-Encoding`, an exact `Content-Length`, and a
@@ -78,7 +79,7 @@ pub(crate) fn inflate(asset: &Asset) -> Vec<u8> {
     raw
 }
 
-/// `GET /dash/assets/{name}`.
+/// `GET /webterm/assets/{name}`.
 pub(crate) async fn serve(req: Request) -> Response {
     let name = req.uri().path().rsplit('/').next().unwrap_or("");
     let Some(asset) = lookup(name) else {
@@ -168,7 +169,7 @@ mod tests {
 
     #[test]
     fn embedded_assets_round_trip_to_the_files_in_git() {
-        assert!(ASSETS.len() >= 14, "{} assets", ASSETS.len());
+        assert_eq!(ASSETS.len(), 6, "{} assets", ASSETS.len());
         for asset in ASSETS {
             let path = concat!(env!("CARGO_MANIFEST_DIR"), "/assets");
             let on_disk = std::fs::read(format!("{path}/{}", asset.name)).unwrap();

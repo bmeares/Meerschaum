@@ -5,7 +5,7 @@
 """
 Helpers for the v5 **page contract** (design §8.3): a plugin page is a function that returns an
 HTML fragment, and a chart in that fragment is Plotly figure JSON carried by a
-`data-mrsm-figure` attribute. The console renders every such element with its vendored Plotly.js,
+`data-mrsm-figure` attribute. The page's contract layer renders every such element with Plotly.js,
 on page load and after each HTMX swap.
 
 The figure JSON, not a library, is the charting contract (D19): a Rust plugin built with the

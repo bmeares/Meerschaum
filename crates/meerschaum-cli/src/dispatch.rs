@@ -100,6 +100,18 @@ pub trait Host {
         self.read_line(prompt)
     }
 
+    /// Like [`Host::read_line_prefilled`] with a dropdown of `items` which filters as the user
+    /// types (`bootstrap pipes`: connector, metric and location keys). Any text is accepted, not
+    /// only the items. Without a terminal it is a plain line.
+    fn read_line_suggesting(
+        &mut self,
+        prompt: &str,
+        _items: &[String],
+        prefill: &str,
+    ) -> Option<String> {
+        self.read_line_prefilled(prompt, prefill)
+    }
+
     /// Like [`Host::read_line`] with `prefill` already typed into the editable buffer
     /// (`prompt_toolkit.prompt(default=...)`). Without a terminal the typed line is appended to
     /// the prefill like `prompt_toolkit` does for piped input.
@@ -141,8 +153,19 @@ impl Host for SystemHost {
             cmd.stdout(std::process::Stdio::null());
             cmd.stderr(std::process::Stdio::null());
         }
-        let status = cmd.status()?;
-        Ok(status.code().unwrap_or(1))
+        // The program shares the terminal's foreground process group, so Ctrl-C reaches it
+        // directly; this process waits (see `shell::interrupt`). A second Ctrl-C within two
+        // seconds kills it, unless it is an interactive session.
+        let mut child = cmd.spawn()?;
+        let interactive = spec.args.is_empty()
+            || spec
+                .args
+                .iter()
+                .any(|a| a == "-i" || a == "ptpython" || a == "--interactive");
+        let scope = crate::shell::interrupt::ChildScope::enter(Some(child.id()), !interactive);
+        let status = child.wait();
+        drop(scope);
+        Ok(status?.code().unwrap_or(1))
     }
 
     fn read_line(&mut self, prompt: &str) -> Option<String> {
@@ -189,6 +212,21 @@ impl Host for SystemHost {
         } else {
             self.read_line(prompt)
         }
+    }
+
+    fn read_line_suggesting(
+        &mut self,
+        prompt: &str,
+        items: &[String],
+        prefill: &str,
+    ) -> Option<String> {
+        if std::io::IsTerminal::is_terminal(&std::io::stdin())
+            && std::io::IsTerminal::is_terminal(&std::io::stdout())
+        {
+            let ansi = std::env::var_os("NO_COLOR").is_none_or(|v| v.is_empty());
+            return crate::native::terminal::read_suggested(prompt, items, prefill, ansi);
+        }
+        self.read_line_prefilled(prompt, prefill)
     }
 
     fn read_line_prefilled(&mut self, prompt: &str, prefill: &str) -> Option<String> {
@@ -400,6 +438,8 @@ impl<'a> Runtime<'a> {
 
     /// Write to stdout.
     pub fn print(&mut self, text: &str) {
+        // A long loop that prints as it goes stops promptly after Ctrl-C.
+        crate::shell::interrupt::check();
         crate::format::progress::suspend();
         crate::native::api_warnings::flush(self);
         let _ = self.out.write_all(text.as_bytes());
@@ -409,6 +449,7 @@ impl<'a> Runtime<'a> {
 
     /// Write to stderr.
     pub fn eprint(&mut self, text: &str) {
+        crate::shell::interrupt::check();
         crate::format::progress::suspend();
         crate::native::api_warnings::flush(self);
         let _ = self.err.write_all(text.as_bytes());
@@ -444,6 +485,26 @@ pub fn main(sysargs: &[String], rt: &mut Runtime<'_>) -> i32 {
 }
 
 fn main_inner(sysargs: &[String], rt: &mut Runtime<'_>) -> i32 {
+    // `--version` and `--help` never start a Python worker: they are answered before the plugin
+    // trees are validated (which probes the interpreter and may import `meerschaum`), and help
+    // reads the plugin actions the last command cached instead of validating the trees.
+    if contains(sysargs, PRINT_ARG_SCHEMA_FLAG) {
+        let schema = serde_json::to_string_pretty(&schema::arg_schema()).unwrap_or_default();
+        let _ = writeln!(rt.out, "{schema}");
+        return 0;
+    }
+    if contains(sysargs, "--help") || contains(sysargs, "-h") {
+        let session = native::session(rt);
+        let was_cached_only = session.cached_manifest_only();
+        session.set_cached_manifest_only(true);
+        parse_help(sysargs, rt);
+        session.set_cached_manifest_only(was_cached_only);
+        return 0;
+    }
+    if contains(sysargs, "--version") || contains(sysargs, "-V") {
+        parse_version(sysargs, rt);
+        return 0;
+    }
     let progress = crate::format::progress::Progress::start_flags(
         rt,
         contains(sysargs, "--nopretty"),
@@ -452,25 +513,13 @@ fn main_inner(sysargs: &[String], rt: &mut Runtime<'_>) -> i32 {
     );
     let manifest = crate::python::manifest(rt);
     drop(progress);
-    if let Err(e) = manifest {
-        rt.eprint(&format!("Unable to load plugin manifest: {}\n", e.message));
-    }
-    if contains(sysargs, PRINT_ARG_SCHEMA_FLAG) {
-        let schema = serde_json::to_string_pretty(&schema::arg_schema()).unwrap_or_default();
-        let _ = writeln!(rt.out, "{schema}");
-        return 0;
-    }
-    if contains(sysargs, "--help") || contains(sysargs, "-h") {
-        parse_help(sysargs, rt);
-        return 0;
-    }
-    if contains(sysargs, "--version") || contains(sysargs, "-V") {
-        parse_version(sysargs, rt);
-        return 0;
-    }
+    let manifest_error = manifest.err().map(|e| e.message);
     let nopretty = contains(sysargs, "--nopretty");
     let in_job = (rt.env)(meerschaum_jobs::supervisor::RESULT_PATH_ENV).is_some();
     if (sysargs.is_empty() || contains(sysargs, "--shell")) && !in_job {
+        if let Some(message) = &manifest_error {
+            warn_manifest_error(rt, message);
+        }
         let sysargs: Vec<String> = sysargs
             .iter()
             .filter(|a| *a != "--shell")
@@ -481,6 +530,14 @@ fn main_inner(sysargs: &[String], rt: &mut Runtime<'_>) -> i32 {
         return 0;
     }
     let result = entry(sysargs, rt);
+    if let Some(message) = &manifest_error {
+        warn_manifest_error_unless_reported(rt, message, &result);
+    }
+    if crate::shell::interrupt::take_interrupted(&result) && !in_job {
+        // Ctrl-C ended the command: exit 130 like a program killed by SIGINT, with no traceback.
+        rt.eprint(&format!("\n{}\n", crate::shell::interrupt::MESSAGE));
+        return crate::shell::interrupt::EXIT_CODE;
+    }
     let stdio_mcp = parse_arguments(sysargs, &rt.dates)
         .map(|args| {
             crate::native::words(&args, "action").starts_with(&["start".into(), "mcp".into()])
@@ -504,9 +561,10 @@ fn main_inner(sysargs: &[String], rt: &mut Runtime<'_>) -> i32 {
         return if result.success { 0 } else { 1 };
     }
     // PARITY: v4 only sets a failing exit code when the tuple is printed, so `--nopretty`
-    // always exits 0 (`meerschaum/__main__.py` `main`).
+    // always exited 0 (`meerschaum/__main__.py` `main`). v5 exits 1 on failure (wave 18, D-10)
+    // so scripts can rely on the status; nothing is printed, as in v4.
     if nopretty {
-        return 0;
+        return if result.success { 0 } else { 1 };
     }
     let text = rt.with_formatter(|f| {
         f.print_tuple(
@@ -554,7 +612,7 @@ pub fn entry_with_patch(sysargs: &[String], patch: &ArgsMap, rt: &mut Runtime<'_
     }
 }
 
-/// Whether the first effective dispatched step is `doctor`, after chaining, pipeline rewriting
+/// Whether the first effective dispatched step is `doctor` or `compose explain`, after chaining, pipeline rewriting
 /// and argument patches. SDK hosts use this before loading plugins; the step itself owns the
 /// read-only mode, so later chained actions retain normal plugin discovery.
 /// A parsing error means no action can execute and also needs no eager plugin loading.
@@ -566,7 +624,7 @@ pub fn starts_with_doctor(
     let mut doctor = false;
     // Reuse the real parser, stopping before any action executes or later steps are parsed.
     run_chain_inner(sysargs, dates, patch_args, false, |args| {
-        doctor = action_words(&args).first().is_some_and(|a| a == "doctor");
+        doctor = is_read_only_action(&action_words(&args));
         SuccessTuple::fail("")
     })?;
     Ok(doctor)
@@ -764,6 +822,16 @@ fn action_words(args: &ArgsMap) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// The actions that promise to write nothing on a fresh root: `doctor`, and `compose explain`
+/// (side effect free by design: no `config/`, no `cache/`, no root initialization).
+fn is_read_only_action(words: &[String]) -> bool {
+    match words {
+        [first, ..] if first == "doctor" => true,
+        [first, second, ..] => first == "compose" && second == "explain",
+        _ => false,
+    }
+}
+
 fn end_doctor_mode(rt: &mut Runtime<'_>, config_created: bool) {
     native::session(rt).set_cached_manifest_only(false);
     if config_created {
@@ -778,7 +846,17 @@ fn end_doctor_mode(rt: &mut Runtime<'_>, config_created: bool) {
 /// next step validates the plugins again) and a registry the read-only start created is made
 /// writable again, as [`Runtime::config`] would have built it.
 pub fn entry_with_args(args: ArgsMap, rt: &mut Runtime<'_>, depth: usize) -> SuccessTuple {
-    if !action_words(&args).first().is_some_and(|a| a == "doctor") {
+    // Ctrl-C cancels this action (the whole `mrsm` program, or the shell's command) and nothing
+    // else: see `shell::interrupt`. A job worker keeps its stop-flag semantics.
+    let session = rt.native.clone();
+    let job = (rt.env)(meerschaum_jobs::supervisor::RESULT_PATH_ENV).is_some();
+    crate::shell::interrupt::guarded(session.as_ref(), job, || {
+        entry_with_args_doctor(args, rt, depth)
+    })
+}
+
+fn entry_with_args_doctor(args: ArgsMap, rt: &mut Runtime<'_>, depth: usize) -> SuccessTuple {
+    if !is_read_only_action(&action_words(&args)) {
         return entry_with_args_inner(args, rt, depth);
     }
     let session = native::session(rt);
@@ -883,6 +961,9 @@ fn entry_with_args_inner(mut args: ArgsMap, rt: &mut Runtime<'_>, depth: usize) 
         && !args.get("daemon").is_some_and(PyValue::is_truthy)
     {
         env::apply_env_arguments(&mut args, rt.env);
+        // The terminal gives the worker the Ctrl-C (its call raises `KeyboardInterrupt` and
+        // returns); a second one within two seconds drops the call, which kills the worker.
+        let _waiting = crate::shell::interrupt::ChildScope::enter(None, true);
         return crate::python::plugin_action(&args, rt)
             .unwrap_or_else(|e| SuccessTuple::fail(format!("{}: {}", e.class, e.message)));
     }
@@ -908,7 +989,12 @@ fn entry_with_args_inner(mut args: ArgsMap, rt: &mut Runtime<'_>, depth: usize) 
         && !skip_schedule
     {
         let schedule = schedule.py_str();
-        return crate::native::jobs::run_schedule(rt, &schedule, |rt| {
+        // `--jitter 30s` (v5): the schedule's fixed offset; `jobs.schedule.jitter_seconds` else.
+        let jitter = args
+            .get("jitter")
+            .map(PyValue::py_str)
+            .and_then(|v| meerschaum_jobs::schedule::parse_jitter_seconds(&v));
+        return crate::native::jobs::run_schedule_jittered(rt, &schedule, jitter, |rt| {
             run_action(&resolved, &args, rt, depth)
         });
     }
@@ -935,9 +1021,19 @@ fn run_action(
         "reload" => builtin::reload(args, rt),
         "compose" => crate::compose_action::compose_action(args, rt),
         "python" => builtin::python(args, rt),
-        "_start_api" => crate::server::start_api(args, rt),
-        "_start_mcp" => crate::server::start_mcp(args, rt),
-        "_start_webterm" => crate::server::start_webterm(args, rt),
+        // A server never finishes a "first lap": a job's startup slot (D23) is freed as it starts.
+        "_start_api" => {
+            meerschaum_jobs::startup::signal_first_lap_done();
+            crate::server::start_api(args, rt)
+        }
+        "_start_mcp" => {
+            meerschaum_jobs::startup::signal_first_lap_done();
+            crate::server::start_mcp(args, rt)
+        }
+        "_start_webterm" => {
+            meerschaum_jobs::startup::signal_first_lap_done();
+            crate::server::start_webterm(args, rt)
+        }
         "sh" => builtin::sh(args, rt),
         "clear" => builtin::clear(args, rt),
         other if native::residual::handles(other) => native::residual::run(other, args, rt)
@@ -1039,6 +1135,8 @@ fn run_pipeline(args: &ArgsMap, rt: &mut Runtime<'_>, depth: usize) -> ActionRes
             }
         };
         ran += 1;
+        // A job's startup slot (D23) is held until its first lap is done.
+        meerschaum_jobs::startup::signal_first_lap_done();
         // PARITY: v4 sleeps between attempts, including after failures, and `--loop`
         // overrides the finite `xN` count (`actions/start.py::_start_pipeline`).
         if !looping && count == 1 {
@@ -1203,10 +1301,11 @@ pub fn entry_child(args: &[String], rt: &mut Runtime<'_>) -> i32 {
     let Some((path, sysargs)) = args.split_first() else {
         return 1;
     };
-    if let Err(e) = crate::python::manifest(rt) {
-        rt.eprint(&format!("Unable to load plugin manifest: {}\n", e.message));
-    }
+    let manifest_error = crate::python::manifest(rt).err().map(|e| e.message);
     let result = entry(sysargs, rt);
+    if let Some(message) = &manifest_error {
+        warn_manifest_error_unless_reported(rt, message, &result);
+    }
     let mut options = std::fs::OpenOptions::new();
     options.write(true).create_new(true);
     #[cfg(unix)]
@@ -1279,6 +1378,20 @@ fn json_to_py(value: &serde_json::Value) -> PyValue {
     }
 }
 
+/// Print `Unable to load plugin manifest: <message>`.
+fn warn_manifest_error(rt: &mut Runtime<'_>, message: &str) {
+    rt.eprint(&format!("Unable to load plugin manifest: {message}\n"));
+}
+
+/// The manifest warning of a one-shot command, printed after the action ran: not at all when the
+/// action's own result already says it (a refused Python worker fails the manifest load and the
+/// action with the same text; one message is enough).
+fn warn_manifest_error_unless_reported(rt: &mut Runtime<'_>, message: &str, result: &SuccessTuple) {
+    if !result.message.contains(message) {
+        warn_manifest_error(rt, message);
+    }
+}
+
 /// `_do_action_wrapper`'s message when the action raises.
 fn action_failure(
     resolved: &Resolved,
@@ -1296,7 +1409,11 @@ fn action_failure(
     // PARITY: `kw.get('debug', True)`: the traceback is logged unless `--debug` was parsed
     // as False; the Rust CLI prints the exception line instead of a Python traceback.
     let log_traceback = args.get("debug").is_none_or(PyValue::is_truthy);
-    if log_traceback {
+    // A worker error (a refused or unstartable Python interpreter) has no v4 traceback to
+    // mirror: its text is printed once, by the result below (the start-up manifest warning of
+    // the same failure is dropped, see `warn_manifest_error_unless_reported`).
+    let is_worker_error = e.class == "WorkerError";
+    if log_traceback && !is_worker_error {
         rt.eprint(&format!("{}: {}\n", e.class, e.message));
     }
     let mut msg = format!(
@@ -1309,7 +1426,7 @@ fn action_failure(
     } else {
         msg.push_str(&format!(":\n\n{}", e.message));
     }
-    if !log_traceback {
+    if !log_traceback && !is_worker_error {
         msg.push_str("\n\nRun again with '--debug' to see a full stacktrace.");
     }
     SuccessTuple::fail(msg)
@@ -1448,12 +1565,15 @@ mod doctor_entry_tests {
             words(&["+", "doctor", "+", "show", "version"]),
             words(&["doctor", "--not-a-valid-flag"]),
             words(&["doctor", "--port", "not-a-number"]),
+            words(&["compose", "explain"]),
+            words(&["compose", "explain", "--file", "x.yaml"]),
         ] {
             assert!(starts_with_doctor(&args, &dates, None).unwrap(), "{args:?}");
         }
         for args in [
             words(&["show", "version", "+", "doctor"]),
             words(&["doctor", ":", "--name", "diagnostic"]),
+            words(&["compose", "up"]),
             words(&["start", "job", "diagnostic", "+", "doctor"]),
         ] {
             assert!(

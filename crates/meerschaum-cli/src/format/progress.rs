@@ -171,58 +171,28 @@ static STATE: Mutex<State> = Mutex::new(State {
     since: None,
 });
 
-/// Erase the spinner line when a signal ends the process while it is drawn.
+/// Make sure the process's signal watcher runs, so that a signal never leaves the spinner line on
+/// the terminal.
 ///
-/// Only a few long-running actions install a stop handler; everywhere else SIGINT / SIGTERM have
-/// their default action, which kills the process with the last frame still on the terminal. The
-/// first time a progress line is drawn in a process which owns its signals (the `mrsm` program:
-/// not an embedding host, not a server which waits on them itself), a watcher thread (`signal-hook`'s
-/// safe `Signals`, no `unsafe` here) is started and then stays for the life of the process: it
-/// is never unregistered, because unregistering leaves the library's handler installed without
-/// restoring the default action (the signals would then be ignored). On a signal it erases the
-/// line if one is drawn, then re-applies the default action (`emulate_default_handler`) so the
-/// exit status stays "killed by the signal", unless the stop handler of a long-running action is
-/// installed (it turns the first signal into a graceful stop, and ends the process on the second).
-#[cfg(unix)]
+/// The watcher is `shell::interrupt`'s (one thread for SIGINT and SIGTERM, started the first time
+/// a progress line is drawn or an action runs, and kept for the life of the process: unregistering
+/// a handler leaves the library's in place without restoring the default action). It erases the
+/// line ([`clear_for_signal`]) before it ends the process, cancels the running action or ignores
+/// the signal, depending on what is running. The spinner itself never re-raises a signal: Ctrl-C
+/// belongs to the action (decision 1 of wave 18), which is no longer killed with the last frame on
+/// the screen.
 mod guard {
-    use std::sync::Once;
-
-    use signal_hook::consts::{SIGINT, SIGTERM};
-    use signal_hook::iterator::Signals;
-
-    static START: Once = Once::new();
-
     /// Start the watcher (once per process).
     pub fn install() {
-        // Only the `mrsm` program owns its signals. An embedding host (`mrsm.entry()` in Python:
-        // Ctrl-C must raise `KeyboardInterrupt`, the interpreter must go on; the host's sink
-        // erases the line) and a server (it waits on the signals itself) keep theirs.
-        if crate::native::jobs::is_embedded() || crate::native::jobs::signals_owned() {
-            return;
-        }
-        START.call_once(|| {
-            let Ok(mut signals) = Signals::new([SIGINT, SIGTERM]) else {
-                return;
-            };
-            std::thread::spawn(move || {
-                for sig in signals.forever() {
-                    // Erase the line (the state lock is free: nothing holds it across a draw).
-                    super::state().clear_line_for_signal();
-                    if !crate::native::jobs::stop_handler_installed()
-                        && !crate::native::jobs::is_embedded()
-                        && !crate::native::jobs::signals_owned()
-                    {
-                        let _ = signal_hook::low_level::emulate_default_handler(sig);
-                    }
-                }
-            });
-        });
+        crate::shell::interrupt::install(None);
     }
 }
 
-#[cfg(not(unix))]
-mod guard {
-    pub fn install() {}
+/// Erase the spinner line, if one is drawn: a signal is about to end the process, cancel the action
+/// or be ignored, and nothing may be left on the terminal. Safe to call from any thread (the state
+/// lock is never held across a draw).
+pub(crate) fn clear_for_signal() {
+    state().clear_line_for_signal();
 }
 
 /// A Python worker was started in this process: its output goes straight to the inherited
@@ -264,7 +234,6 @@ impl State {
 
     /// Erase the line a signal is about to end the process with, and leave the state as if
     /// every stage had ended.
-    #[cfg(unix)]
     fn clear_line_for_signal(&mut self) {
         if self.drawn {
             self.sink.write(CLEAR);

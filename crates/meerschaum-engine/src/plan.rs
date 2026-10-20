@@ -861,13 +861,16 @@ pub async fn plan_node<S: StateSource>(
     let cap = caps.into_iter().min();
 
     // Rebuild takes precedence over everything but failures and streams.
-    if definition_changed(out.stored_definition_hash.as_deref(), &node.definition_hash) {
+    if definition_changed(
+        out.stored_definition_hash.as_deref(),
+        node.pipe.raw_parameters(),
+    ) {
         let cap_iv = if in_edges.is_empty() {
             Interval::full()
         } else {
             Interval::new(None, cap)
         };
-        let what = "definition changed (sql, fetch or dtypes)";
+        let what = "definition changed (sql, fetch, dtypes or columns)";
         if options.yes || options.auto_rebuild {
             out.bounds = Some(to_bounds(axis, &cap_iv));
             out.clear = true;
@@ -1301,6 +1304,52 @@ mod tests {
         };
         let p = plan_for(pair(), state, "c", options).await;
         assert_eq!(p.node(&r("c")).unwrap().action, Action::Skip);
+    }
+
+    #[tokio::test]
+    async fn a_columns_change_is_a_definition_change() {
+        let old =
+            Value::from_json_str(r#"{"columns": {"datetime": "ts"}, "sql": "SELECT 1"}"#).unwrap();
+        let mut state = MemoryStateData::default();
+        state.definition_hashes.insert(
+            r("p"),
+            crate::ledger::definition_hash(old.as_map().unwrap()),
+        );
+        let options = PlanOptions {
+            yes: true,
+            ..PlanOptions::default()
+        };
+        // The same definition: no rebuild.
+        let same = vec![rec(
+            "p",
+            r#"{"columns": {"datetime": "ts"}, "sql": "SELECT 1"}"#,
+        )];
+        let p = plan_for(same, state.clone(), "p", options.clone()).await;
+        assert_ne!(p.nodes[0].action, Action::Rebuild);
+        // The datetime column was renamed: rebuild.
+        let renamed = vec![rec(
+            "p",
+            r#"{"columns": {"datetime": "time"}, "sql": "SELECT 1"}"#,
+        )];
+        let p = plan_for(renamed, state.clone(), "p", options.clone()).await;
+        assert_eq!(p.nodes[0].action, Action::Rebuild);
+        assert!(
+            p.nodes[0].reason.contains("columns"),
+            "{}",
+            p.nodes[0].reason
+        );
+        // An rc1 hash (dtypes, fetch, sql only) of an unchanged definition is a baseline.
+        let mut legacy = MemoryStateData::default();
+        legacy.definition_hashes.insert(
+            r("p"),
+            crate::ledger::legacy_definition_hash(old.as_map().unwrap()),
+        );
+        let same = vec![rec(
+            "p",
+            r#"{"columns": {"datetime": "time"}, "sql": "SELECT 1"}"#,
+        )];
+        let p = plan_for(same, legacy, "p", options).await;
+        assert_ne!(p.nodes[0].action, Action::Rebuild);
     }
 
     #[tokio::test]

@@ -332,6 +332,34 @@ fn engine_arguments(sysargs: &[String]) -> Result<(Vec<String>, ArgsMap), PyExce
             args.insert(flag.trim_start_matches('-').into(), depth);
         } else if flag == "--chunk-pipelining" && attached.is_none() {
             args.insert("chunk_pipelining".into(), PyValue::Bool(true));
+        } else if flag == "--no-stagger" && attached.is_none() {
+            // Wave 18 (D23): start jobs without the startup jitter, load wait and slots.
+            args.insert("no_stagger".into(), PyValue::Bool(true));
+        } else if matches!(flag, "--startup-jitter" | "--jitter")
+            && (flag == "--startup-jitter" || has_schedule_flag(sysargs))
+        {
+            // Wave 18 (D23): `--startup-jitter 30s` bounds a job's startup delay, `--jitter 30s`
+            // its schedule's fixed offset (scoped to a schedule so plugin flags named `--jitter`
+            // still parse).
+            let value = attached
+                .or_else(|| sysargs.get(i + 1).map(String::as_str))
+                .filter(|v| meerschaum_jobs::schedule::parse_jitter_seconds(v).is_some())
+                .ok_or_else(|| {
+                    PyException::new(
+                        "InvalidArgumentException",
+                        format!("{flag} requires a duration like 30s, 5m or 1h"),
+                    )
+                })?;
+            args.insert(
+                flag.trim_start_matches('-').replace('-', "_"),
+                PyValue::Str(value.to_owned()),
+            );
+            if attached.is_none() {
+                i += 1;
+            }
+        } else if flag == "--all" && attached.is_none() && is_show_data(sysargs) {
+            // `show data --all` (v5-only): print every row and column untruncated.
+            args.insert("all".into(), PyValue::Bool(true));
         } else if flag == "--last" && is_show_runs(sysargs) {
             // `show runs --last N` (v5-only; scoped so plugin flags named `--last` still parse).
             let value = attached
@@ -371,6 +399,32 @@ fn engine_arguments(sysargs: &[String]) -> Result<(Vec<String>, ArgsMap), PyExce
     Ok((rest, args))
 }
 
+/// Whether the arguments carry a schedule (`-s`, `--schedule`, `--cron`).
+fn has_schedule_flag(sysargs: &[String]) -> bool {
+    sysargs
+        .iter()
+        .take_while(|a| *a != "--" && *a != "-A")
+        .any(|a| {
+            a == "-s"
+                || a == "--cron"
+                || a == "--schedule"
+                || a.starts_with("--schedule=")
+                || a.starts_with("--cron=")
+        })
+}
+
+/// Whether the command is `show data` (the two words may follow global options such as
+/// `-i sql:main`).
+fn is_show_data(sysargs: &[String]) -> bool {
+    sysargs
+        .iter()
+        .take_while(|s| s.as_str() != "--" && s.as_str() != "+")
+        .map(String::as_str)
+        .collect::<Vec<_>>()
+        .windows(2)
+        .any(|w| w == ["show", "data"])
+}
+
 /// Whether the words name `show run` / `show runs`.
 fn is_show_runs(sysargs: &[String]) -> bool {
     let words: Vec<&str> = sysargs
@@ -384,6 +438,26 @@ fn is_show_runs(sysargs: &[String]) -> bool {
 #[cfg(test)]
 mod engine_argument_tests {
     use super::*;
+
+    #[test]
+    fn all_is_a_show_data_flag_only() {
+        let words = ["show", "data", "60", "-m", "x", "--all"].map(str::to_owned);
+        let (rest, args) = engine_arguments(&words).unwrap();
+        assert_eq!(rest, ["show", "data", "60", "-m", "x"]);
+        assert_eq!(args["all"], PyValue::Bool(true));
+        // Global options may come first.
+        let leading = ["-i", "sql:x", "show", "data", "--all"].map(str::to_owned);
+        assert_eq!(
+            engine_arguments(&leading).unwrap().0,
+            ["-i", "sql:x", "show", "data"]
+        );
+        // Other actions keep `--all` for plugins and their own parsing.
+        let other = ["sync", "pipes", "--all"].map(str::to_owned);
+        let (rest, args) = engine_arguments(&other).unwrap();
+        assert_eq!(rest, other);
+        assert!(!args.contains_key("all"));
+    }
+
     #[test]
     fn graph_depths_and_resume_are_preserved() {
         let words = [
@@ -419,5 +493,37 @@ mod engine_argument_tests {
         assert_eq!(rest, words);
         assert!(!args.contains_key("last"));
         assert!(engine_arguments(&["show".into(), "runs".into(), "--last".into()]).is_err());
+    }
+
+    #[test]
+    fn job_stagger_and_jitter_flags() {
+        let words = [
+            "start",
+            "jobs",
+            "--no-stagger",
+            "--startup-jitter",
+            "5s",
+            "a",
+        ]
+        .map(str::to_owned);
+        let (rest, args) = engine_arguments(&words).unwrap();
+        assert_eq!(rest, ["start", "jobs", "a"]);
+        assert_eq!(args["no_stagger"], PyValue::Bool(true));
+        assert_eq!(args["startup_jitter"], PyValue::Str("5s".into()));
+
+        // `--jitter` is the schedule's, so it needs one; otherwise it belongs to a plugin.
+        let words = ["sync", "pipes", "-s", "daily", "--jitter=30s", "-d"].map(str::to_owned);
+        let (rest, args) = engine_arguments(&words).unwrap();
+        assert_eq!(rest, ["sync", "pipes", "-s", "daily", "-d"]);
+        assert_eq!(args["jitter"], PyValue::Str("30s".into()));
+        let words = ["myplugin", "--jitter", "3"].map(str::to_owned);
+        let (rest, args) = engine_arguments(&words).unwrap();
+        assert_eq!(rest, words);
+        assert!(!args.contains_key("jitter"));
+
+        // A value which is not a duration is an error, not a silent default.
+        let bad = ["sync", "pipes", "-s", "daily", "--jitter", "soon"].map(str::to_owned);
+        assert!(engine_arguments(&bad).is_err());
+        assert!(engine_arguments(&["--startup-jitter".into()]).is_err());
     }
 }

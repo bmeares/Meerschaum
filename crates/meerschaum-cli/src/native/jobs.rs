@@ -18,7 +18,7 @@ use meerschaum_jobs::config::{JobPaths, JobsConfig};
 use meerschaum_jobs::executor::get_filtered_jobs_for;
 use meerschaum_jobs::scheduler::RootScheduler;
 use meerschaum_jobs::{
-    Job, JobOptions, JobsContext, Launcher, MonitorControl, MonitorOptions, Status,
+    Job, JobOptions, JobsContext, Launcher, MonitorControl, MonitorOptions, StartKind, Status,
 };
 
 use crate::builtin::{ActionError, ActionResult};
@@ -41,7 +41,7 @@ static EMBEDDED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::
 
 /// Whether [`install_stop_handler`] turned SIGINT / SIGTERM into stop requests in this process.
 pub fn stop_handler_installed() -> bool {
-    HANDLER.load(Ordering::SeqCst)
+    HANDLER.load(Ordering::SeqCst) || crate::shell::interrupt::watching()
 }
 
 static OWN_SIGNALS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -124,50 +124,22 @@ pub fn reset_stop_request() {
 
 /// Turn the first SIGINT / SIGTERM into a stop request for long-running actions (laps,
 /// schedules, following logs); a second signal exits immediately (v4 raises `KeyboardInterrupt`
-/// at the next checkpoint).
+/// at the next checkpoint). In a shell the second signal cancels the action instead of ending
+/// the shell.
+///
+/// The signals are handled by the process-wide watcher of [`crate::shell::interrupt`]: this marks
+/// the running action as one that reads [`stop_requested_flag`] itself, so that the first Ctrl-C
+/// sets the flag and drops nothing (an action which never calls this is cancelled outright by the
+/// first Ctrl-C).
 pub fn install_stop_handler(session: &super::Session) {
     // An embedding host (the Python extension) owns the process's signals: it polls them
     // itself and sets the stop flag for the call it runs (see [`set_embedded`]).
-    if EMBEDDED.load(Ordering::SeqCst) || HANDLER.swap(true, Ordering::SeqCst) {
+    if EMBEDDED.load(Ordering::SeqCst) {
         return;
     }
-    let flag = process_stop_flag();
-    session.spawn(async move {
-        #[cfg(unix)]
-        {
-            use tokio::signal::unix::{SignalKind, signal};
-            let (Ok(mut int), Ok(mut term)) = (
-                signal(SignalKind::interrupt()),
-                signal(SignalKind::terminate()),
-            ) else {
-                return;
-            };
-            loop {
-                tokio::select! {
-                    _ = int.recv() => {},
-                    _ = term.recv() => {},
-                }
-                flag.store(true, Ordering::SeqCst);
-                if SIGNALS.fetch_add(1, Ordering::SeqCst) >= 1 {
-                    crate::format::progress::abandon();
-                    std::process::exit(130);
-                }
-            }
-        }
-        #[cfg(not(unix))]
-        {
-            loop {
-                if tokio::signal::ctrl_c().await.is_err() {
-                    return;
-                }
-                flag.store(true, Ordering::SeqCst);
-                if SIGNALS.fetch_add(1, Ordering::SeqCst) >= 1 {
-                    crate::format::progress::abandon();
-                    std::process::exit(130);
-                }
-            }
-        }
-    });
+    HANDLER.store(true, Ordering::SeqCst);
+    crate::shell::interrupt::install(Some(session));
+    crate::shell::interrupt::mark_cooperative();
 }
 
 /// Sleep up to `seconds`, waking early on a stop request. Returns whether a stop was requested.
@@ -508,6 +480,26 @@ fn is_action_name(word: &str) -> bool {
     crate::actions::CORE_ACTIONS.iter().any(|a| a.name == word)
 }
 
+/// How a `start jobs` is classified for the startup gate (D23): `--no-stagger` bypasses it,
+/// `$MRSM_JOB_START_KIND` (set by compose, which starts jobs one command at a time) names the
+/// kind, more than one job is a bulk start, and one job is an explicit start (no jitter).
+pub fn start_kind_of(args: &ArgsMap, rt: &mut Runtime<'_>, job_count: usize) -> StartKind {
+    if flag(args, "no_stagger") {
+        return StartKind::None;
+    }
+    if let Some(kind) = (rt.env)(meerschaum_jobs::startup::KIND_ENV)
+        .as_deref()
+        .and_then(StartKind::parse)
+    {
+        return kind;
+    }
+    if job_count > 1 {
+        StartKind::Bulk
+    } else {
+        StartKind::Single
+    }
+}
+
 /// `start jobs`.
 pub fn start_jobs(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     let action = words(args, "action");
@@ -663,7 +655,13 @@ pub fn start_jobs(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
 
     let compose_var = static_config().environment.compose_project.clone();
     let compose_project = (rt.env)(&compose_var).filter(|v| !v.is_empty());
+    // A job started from a root compose file also records the root (`compose_root` label).
+    let root_var = static_config().environment.compose_root.clone();
+    let compose_root = (rt.env)(&root_var).filter(|v| !v.is_empty());
     let (mut successes, mut failures) = (Vec::new(), Vec::new());
+    let start_kind = start_kind_of(args, rt, names.len());
+    let startup_jitter = string(args, "startup_jitter")
+        .and_then(|v| meerschaum_jobs::schedule::parse_jitter_seconds(&v));
     for n in names.clone() {
         let tup = if new_job {
             run_new_job(
@@ -676,8 +674,12 @@ pub fn start_jobs(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
                 rm,
                 compose_project
                     .as_ref()
-                    .map(|p| (compose_var.clone(), p.clone())),
+                    .map(|p| (compose_var.clone(), p.clone()))
+                    .into_iter()
+                    .chain(compose_root.as_ref().map(|r| (root_var.clone(), r.clone())))
+                    .collect(),
                 (force, yes, noask),
+                (start_kind, startup_jitter),
             )
         } else {
             let mut job = match jobs.shift_remove(&n) {
@@ -695,6 +697,7 @@ pub fn start_jobs(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
                     Err(e) => return Err(ActionError::new("ValueError", e.to_string())),
                 },
             };
+            job.set_start_kind(start_kind);
             job.start()
         };
         if !nopretty {
@@ -740,8 +743,9 @@ fn run_new_job(
     line: Option<&str>,
     executor_keys: Option<String>,
     rm: bool,
-    compose_env: Option<(String, String)>,
+    compose_env: Vec<(String, String)>,
     (force, yes, noask): (bool, bool, bool),
+    (start_kind, startup_jitter): (StartKind, Option<f64>),
 ) -> SuccessTuple {
     if sysargs.len() >= 2 && sysargs[0] == "start" && sysargs[1].starts_with("job") {
         return SuccessTuple::fail("Create a new job with `-d` / `--daemon`.");
@@ -756,21 +760,29 @@ fn run_new_job(
                 .collect::<Vec<_>>(),
         ),
     };
-    let env = compose_env.map(|(k, v)| {
-        let mut m = IndexMap::new();
-        m.insert(k, v);
-        m
+    let env =
+        (!compose_env.is_empty()).then(|| compose_env.into_iter().collect::<IndexMap<_, _>>());
+    // `--startup-jitter 30s` is this job's own startup jitter bound (persisted as the `startup`
+    // property, which compose's per-job settings also write).
+    let properties = startup_jitter.map(|seconds| {
+        let mut startup = meerschaum_core::value::Map::new();
+        startup.insert("jitter_seconds".into(), Value::Float(seconds));
+        let mut patch = meerschaum_core::value::Map::new();
+        patch.insert("startup".into(), Value::Map(startup));
+        patch
     });
     let opts = JobOptions {
         env,
         executor_keys,
         delete_after_completion: rm,
+        properties,
         ..Default::default()
     };
     let mut job = match Job::from_sysargs_str(name, &job_sysargs, opts, ctx) {
         Ok(j) => j,
         Err(e) => return SuccessTuple::fail(e.to_string()),
     };
+    job.set_start_kind(start_kind);
     for w in std::mem::take(&mut job.warnings) {
         warn(rt, &w);
     }
@@ -985,6 +997,12 @@ pub fn restart_jobs(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
         };
         if restart_jobs.is_empty() && !do_loop {
             return Ok(SuccessTuple::ok("No jobs need to be restarted."));
+        }
+        if flag(args, "no_stagger") {
+            // Restarts are bulk starts (D23); `--no-stagger` bypasses the startup gate.
+            for job in restart_jobs.values_mut() {
+                job.set_start_kind(StartKind::None);
+            }
         }
         let names: Vec<String> = restart_jobs.keys().cloned().collect();
         info(
@@ -1507,27 +1525,47 @@ pub fn show_logs(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
 pub fn run_schedule(
     rt: &mut Runtime<'_>,
     schedule: &str,
+    action: impl FnMut(&mut Runtime<'_>) -> SuccessTuple,
+) -> SuccessTuple {
+    run_schedule_jittered(rt, schedule, None, action)
+}
+
+/// [`run_schedule`] with the schedule's jitter (v5, D23): every fire time moves by a FIXED offset
+/// in `[0, jitter]` seconds, seeded by the job's name (the schedule text outside a job), so a
+/// job keeps its offset across fires and restarts and jobs with one cadence spread out. The
+/// bound is the schedule's own `jitter <n> <unit>` suffix, else `jitter` (`--jitter`), else
+/// `jobs.schedule.jitter_seconds` (default 0: no jitter).
+pub fn run_schedule_jittered(
+    rt: &mut Runtime<'_>,
+    schedule: &str,
+    jitter: Option<f64>,
     mut action: impl FnMut(&mut Runtime<'_>) -> SuccessTuple,
 ) -> SuccessTuple {
     let now = chrono::Utc::now().fixed_offset();
-    let mut trigger = match meerschaum_jobs::parse_schedule(schedule, now) {
+    // A job process (`MRSM_DAEMON_ID` is the job name) keeps its schedule per root: a restart
+    // resumes the recorded next fire time instead of re-anchoring the cadence. Foreground runs
+    // have no job name and keep nothing.
+    let job = (rt.env)(&meerschaum_core::static_config().environment.daemon_id)
+        .filter(|name| !name.is_empty());
+    let default_jitter =
+        jitter.unwrap_or_else(|| JobsConfig::from_config(rt.config()).schedule_jitter_seconds);
+    let spec = meerschaum_jobs::JitterSpec {
+        default_seconds: default_jitter,
+        seed: job.as_deref().unwrap_or(schedule),
+    };
+    let mut trigger = match meerschaum_jobs::parse_schedule_jittered(schedule, now, Some(spec)) {
         Ok(t) => t,
         Err(e) => return SuccessTuple::fail(e.py_message()),
     };
     install_stop_handler(&super::session(rt));
     let stop = stop_requested_flag();
     let start = Instant::now();
-    // A job process (`MRSM_DAEMON_ID` is the job name) keeps its schedule per root: a restart
-    // resumes the recorded next fire time instead of re-anchoring the cadence. Foreground runs
-    // have no job name and keep nothing.
-    let job = (rt.env)(&meerschaum_core::static_config().environment.daemon_id)
-        .filter(|name| !name.is_empty());
     let scheduler = job
         .as_ref()
         .map(|_| RootScheduler::for_root(&rt.config().paths().root_dir));
     let mut pending = match (&scheduler, &job) {
         (Some(scheduler), Some(job)) => scheduler
-            .next_fire(job, schedule, now)
+            .next_fire_jittered(job, schedule, now, default_jitter)
             .ok()
             .flatten()
             .filter(|next| {
@@ -1548,10 +1586,15 @@ pub fn run_schedule(
             finished = pending.is_none();
         }
         let wait = (next - now).num_microseconds().unwrap_or(0).max(0) as f64 / 1e6;
+        if wait >= 1.0 {
+            // Idle until the first fire: a job's startup slot (D23) is not needed for that.
+            meerschaum_jobs::startup::signal_first_lap_done();
+        }
         if sleep_unless_stopped(wait) {
             break;
         }
         let _ = action(rt);
+        meerschaum_jobs::startup::signal_first_lap_done();
         if !finished && pending.is_none() {
             pending = trigger.next();
         }

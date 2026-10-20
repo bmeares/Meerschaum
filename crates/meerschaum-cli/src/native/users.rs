@@ -12,6 +12,12 @@ use crate::value::ArgsMap;
 
 use super::{check_noask, flag, info, print_tuple, prompt, session, warn, words, yes_no};
 
+/// A password question: `*` per character on a terminal, nothing echoed otherwise (`None` when
+/// input ends or on Ctrl-C).
+fn secret_prompt(rt: &mut Runtime<'_>, question: &str) -> Option<String> {
+    super::ask::ask(rt, question, &super::ask::Ask::new().password()).ok()
+}
+
 /// `get_password(username, minimum_length)`; `None` when input ends (Python's `EOFError`).
 fn get_password(rt: &mut Runtime<'_>, username: &str, min_len: usize) -> Option<String> {
     // PARITY: with `--noask` v4 loops forever on the empty password; treat it as aborted.
@@ -19,7 +25,7 @@ fn get_password(rt: &mut Runtime<'_>, username: &str, min_len: usize) -> Option<
         return None;
     }
     loop {
-        let password = prompt(rt, &format!("Password for user '{username}':"), true, false)?;
+        let password = secret_prompt(rt, &format!("Password for user '{username}':"))?;
         if password.chars().count() < min_len {
             warn(
                 rt,
@@ -29,12 +35,7 @@ fn get_password(rt: &mut Runtime<'_>, username: &str, min_len: usize) -> Option<
             );
             continue;
         }
-        let confirm = prompt(
-            rt,
-            &format!("Confirm password for user '{username}':"),
-            true,
-            false,
-        )?;
+        let confirm = secret_prompt(rt, &format!("Confirm password for user '{username}':"))?;
         if password != confirm {
             warn(rt, "Passwords do not match! Please try again.");
             continue;

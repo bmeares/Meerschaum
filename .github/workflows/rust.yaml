@@ -136,7 +136,7 @@ jobs:
   # crates.io packaging dry-run (docs/design/v5-build.md "Publishing to crates.io"): `cargo package
   # --workspace --no-verify` writes every tarball (explicit `include` lists, lockstep `=<ver>` internal
   # dependencies, publish metadata) and scripts/rust/check_packages.py rejects an archive of 10 MB or
-  # more (`meerschaum-web` vendors the JS libraries) or one that ships tests, fixtures or benches.
+  # more or one that ships tests, fixtures or benches.
   # Nothing is compiled or uploaded, so it takes seconds. `--no-verify` skips compiling the tarballs:
   # the full build-from-tarball check is `scripts/rust/ci.sh publish-dry-run` (slow; it builds them
   # without the root `[patch.crates-io]`, which crates.io ignores, so with plain sqlx). Run it before

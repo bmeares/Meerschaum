@@ -2,7 +2,7 @@
 //! `cockroachdb`) over `sqlx::postgres`.
 
 use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, Utc};
-use sqlx::postgres::{PgColumn, PgConnectOptions, PgPool, PgPoolOptions, PgRow, PgSslMode};
+use sqlx::postgres::{PgColumn, PgConnectOptions, PgRow, PgSslMode};
 use sqlx::{Column, Postgres, Row, TypeInfo, ValueRef};
 
 use super::SqlValue;
@@ -66,14 +66,6 @@ pub(crate) fn connect_options(spec: &ConnectionSpec) -> Result<PgConnectOptions>
         }
     }
     Ok(opts)
-}
-
-pub(crate) async fn connect(spec: &ConnectionSpec) -> Result<PgPool> {
-    let opts = connect_options(spec)?;
-    Ok(PgPoolOptions::new()
-        .max_connections(spec.max_connections())
-        .connect_with(opts)
-        .await?)
 }
 
 /// Map a PostgreSQL type name to an Arrow column kind.

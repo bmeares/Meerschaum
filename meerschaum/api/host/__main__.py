@@ -3,7 +3,8 @@
 # vim:fenc=utf-8
 
 """
-`python -m meerschaum.api.host --socket PATH`: serve the Python API host on a Unix socket.
+`python -m meerschaum.api.host --socket PATH`: serve the Python API host on a Unix socket
+(`--tcp HOST:PORT` on Windows: loopback TCP, every request must carry `X-Mrsm-Host-Proxy-Token`).
 
 Host mode must be set before `meerschaum.api` is imported, and `-m` imports the parent packages
 first, so without `MRSM_API_HOST` set the process re-executes itself with it.
@@ -20,7 +21,15 @@ def main(argv=None) -> int:
         prog='python -m meerschaum.api.host',
         description="Serve Meerschaum's Python API host (API plugins, plugin Dash apps, plugin MCP tools).",
     )
-    parser.add_argument('--socket', required=True, help="The Unix socket to listen on.")
+    transport = parser.add_mutually_exclusive_group(required=True)
+    transport.add_argument('--socket', help="The Unix socket to listen on.")
+    transport.add_argument(
+        '--tcp',
+        help=(
+            "HOST:PORT to listen on (loopback TCP, used on Windows). Requests must carry the "
+            "`X-Mrsm-Host-Proxy-Token` header set to `MRSM_API_HOST_PROXY_TOKEN`."
+        ),
+    )
     parser.add_argument('--debug', action='store_true', help="Verbose logs.")
     args = parser.parse_args(argv)
 
@@ -32,6 +41,14 @@ def main(argv=None) -> int:
             [sys.executable, '-m', 'meerschaum.api.host'] + list(sys.argv[1:] if argv is None else argv),
             env,
         )
+
+    if args.tcp:
+        host, _, port = args.tcp.rpartition(':')
+        if not host or not port.isdigit():
+            parser.error("--tcp expects HOST:PORT.")
+        from meerschaum.api.host import run_tcp
+        run_tcp(host, int(port), debug=args.debug)
+        return 0
 
     from meerschaum.api.host import run
     run(args.socket, debug=args.debug)

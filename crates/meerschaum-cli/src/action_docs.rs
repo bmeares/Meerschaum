@@ -846,8 +846,8 @@ Use `-i` to check another instance; instances are read from the config (and `MRS
 so a connector registered only through Python (`mrsm.get_connector(...)` without a config entry) is
 not known to `doctor`. `--nopretty` prints one JSON document (`version`, `summary`,
 `checks`: `group`, `name`, `status`, `detail`, `fix`) to attach to a bug report; `--debug` adds
-the time each check took. The result fails (exit code 1) if any check FAILs; `--nopretty` always exits 0
-like every command, so scripts read `summary.ok` of the JSON document.
+the time each check took. The result fails (exit code 1) if any check FAILs, with or without `--nopretty`;
+scripts may also read `summary.ok` of the JSON document.
 
 Examples:
     - `doctor`

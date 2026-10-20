@@ -31,6 +31,8 @@ actions, the formatting toolkit, and the interactive shell. Design: `docs/design
 | `shell/editor.rs` | `PromptSession(complete_while_typing=True, reserve_space_for_menu=False)`: completion state, Tab / Shift-Tab / Up / Down, `ValidAutoSuggest`, reverse-i-search, the menu and toolbar rendering |
 | `shell/toolbar.rs` | `input_with_sigint.bottom_toolbar()` |
 | `shell/updates.rs` | `updates.py`: the version check thread and the update messages |
+| `shell/interrupt.rs` | (v5) Ctrl-C while an action runs: the signal watcher, cooperative cancellation (`Session::block_on` drops its future and unwinds; the dispatcher turns that into `Interrupted.`), the stop-flag and child-program regimes |
+| `shell/suggest.rs` | (v5) the filtering dropdown prompt of `bootstrap pipes` |
 
 ### How the toolbar and the completion menu are drawn
 

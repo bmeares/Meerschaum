@@ -380,7 +380,9 @@ fn render(plan: &Restore, project: &str) -> String {
     );
     out.push_str(
         "\nThe restored database is what the backup holds: everything written since then stays \
-         only in the current volume.\n",
+         only in the current volume. That includes the roles: a password changed since the \
+         backup (`POSTGRES_PASSWORD`, the `sql:main` password) is the backup's again, and the \
+         stack's services cannot log in until the role and the stack config agree.\n",
     );
     for w in &plan.warnings {
         out.push_str(&format!("\nWarning: {w}\n"));
@@ -419,7 +421,10 @@ pub(crate) fn restore(rt: &mut Runtime<'_>, opts: &Options, word: Option<&str>) 
     )? {
         return Ok(SuccessTuple::fail("Nothing was changed."));
     }
-    let mut undo = Undo::default();
+    let mut undo = Undo {
+        db_down_before: !plan.db_running,
+        ..Undo::default()
+    };
     let mut steps = Steps::new();
     let current_major = plan
         .current
@@ -434,6 +439,8 @@ pub(crate) fn restore(rt: &mut Runtime<'_>, opts: &Options, word: Option<&str>) 
         "meerschaum": crate::VERSION,
         "state": "started",
         "project": stack.compose.project,
+        // Whether the stack's `db` runs: a stopped one stays stopped when this run is put back.
+        "db_running": plan.db_running,
         "source": plan.source,
         "old": {
             "image": plan.image,
@@ -476,7 +483,7 @@ pub(crate) fn restore(rt: &mut Runtime<'_>, opts: &Options, word: Option<&str>) 
                 server: plan.current.as_ref().map(|(pg, _)| pg),
             };
             let problems = switch::put_back(rt, opts.debug, &stack, &old, &mut undo, &plan.run_id);
-            super::set_state(
+            let note = super::finish_state(
                 &plan.run_dir,
                 &mut manifest,
                 if problems.is_empty() {
@@ -509,6 +516,10 @@ pub(crate) fn restore(rt: &mut Runtime<'_>, opts: &Options, word: Option<&str>) 
                 for p in problems {
                     text.push_str(&format!("  - {p}\n"));
                 }
+            }
+            if let Some(note) = note {
+                text.push('\n');
+                text.push_str(&note);
             }
             Ok(SuccessTuple::fail(text))
         }
@@ -591,6 +602,7 @@ fn run(
         major: plan.target.major,
         run_dir: &plan.run_dir,
         db_running: plan.db_running,
+        old_stop: None,
     };
     switch::switch_over(rt, steps, stack, &to, undo, manifest)
 }

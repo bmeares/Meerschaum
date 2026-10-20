@@ -26,6 +26,7 @@
     "dash_plugins": {"$ref": "#/$defs/names", "description": "Plugins with @dash_plugin functions."},
     "web_pages": {"$ref": "#/$defs/names", "description": "Plugins with @web_page layouts."},
     "mcp_tools": {"$ref": "#/$defs/names", "description": "Plugins registering MCP tools, resources or prompts."},
+    "console": {"type": "boolean", "description": "The Dash web console is served: the API host runs for it even when no plugin needs it (written by the server's start-up probe, never by a worker)."},
     "pre_sync_hooks": {"$ref": "#/$defs/names"},
     "post_sync_hooks": {"$ref": "#/$defs/names"},
     "load_errors": {"type": "object", "additionalProperties": {"type": "string"}},

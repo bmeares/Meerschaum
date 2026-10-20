@@ -1,7 +1,11 @@
 //! The extension-host reverse proxy (§7.3): every request no Rust route matches is forwarded to
-//! the Python API host over a Unix socket with its method, path, query, headers, cookies and
-//! body unchanged. Bodies stream in both directions, and `Upgrade` requests (websockets) are
-//! bridged byte-for-byte after the host answers `101 Switching Protocols`.
+//! the Python API host over a Unix socket (TCP loopback with a per-start token on Windows) with
+//! its method, path, query, headers, cookies and body unchanged. Bodies stream in both
+//! directions, and `Upgrade` requests (websockets) are bridged byte-for-byte after the host
+//! answers `101 Switching Protocols`.
+//!
+//! The Dash web console (D21) is the host's: [`HostProxy::console`] says whether the host mounted
+//! it (`GET /_mrsm/host/status`), and `/dash/*` goes to the host only then.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -13,7 +17,8 @@ use axum::response::{IntoResponse, Response};
 use hyper_util::rt::TokioIo;
 
 use crate::error::ApiError;
-use crate::host::HostSupervisor;
+use crate::host::{ConsoleStatus, HostEndpoint, HostSupervisor, PROXY_TOKEN_HEADER, STATUS_PATH};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Hop-by-hop headers (RFC 9110 §7.6.1), dropped on both legs unless the request upgrades.
 const HOP_BY_HOP: &[&str] = &[
@@ -27,29 +32,93 @@ const HOP_BY_HOP: &[&str] = &[
     "upgrade",
 ];
 
-/// The connection to the API host: a Unix-domain stream.
-#[cfg(unix)]
-pub type HostStream = tokio::net::UnixStream;
-
-/// The connection to the API host (Unix sockets only for now; see [`connect_host`]).
-#[cfg(not(unix))]
-pub type HostStream = tokio::net::TcpStream;
-
-/// Connect to the API host's socket.
-#[cfg(unix)]
-pub async fn connect_host(socket: &Path) -> std::io::Result<HostStream> {
-    tokio::net::UnixStream::connect(socket).await
+/// The connection to the API host: a Unix-domain stream, or TCP on loopback.
+pub enum HostStream {
+    /// A Unix-domain stream.
+    #[cfg(unix)]
+    Unix(tokio::net::UnixStream),
+    /// A TCP stream to a loopback host (the Windows transport).
+    Tcp(tokio::net::TcpStream),
 }
 
-/// Connect to the API host's socket. The host listens on a Unix socket, which this platform's
-/// build does not support yet, so this always fails (the server then answers `502` for
-/// unmatched routes, and MCP federation reports the host as unavailable).
+impl tokio::io::AsyncRead for HostStream {
+    fn poll_read(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &mut tokio::io::ReadBuf<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        match self.get_mut() {
+            #[cfg(unix)]
+            HostStream::Unix(s) => std::pin::Pin::new(s).poll_read(cx, buf),
+            HostStream::Tcp(s) => std::pin::Pin::new(s).poll_read(cx, buf),
+        }
+    }
+}
+
+impl tokio::io::AsyncWrite for HostStream {
+    fn poll_write(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &[u8],
+    ) -> std::task::Poll<std::io::Result<usize>> {
+        match self.get_mut() {
+            #[cfg(unix)]
+            HostStream::Unix(s) => std::pin::Pin::new(s).poll_write(cx, buf),
+            HostStream::Tcp(s) => std::pin::Pin::new(s).poll_write(cx, buf),
+        }
+    }
+
+    fn poll_flush(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        match self.get_mut() {
+            #[cfg(unix)]
+            HostStream::Unix(s) => std::pin::Pin::new(s).poll_flush(cx),
+            HostStream::Tcp(s) => std::pin::Pin::new(s).poll_flush(cx),
+        }
+    }
+
+    fn poll_shutdown(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        match self.get_mut() {
+            #[cfg(unix)]
+            HostStream::Unix(s) => std::pin::Pin::new(s).poll_shutdown(cx),
+            HostStream::Tcp(s) => std::pin::Pin::new(s).poll_shutdown(cx),
+        }
+    }
+}
+
+/// Connect to the API host's Unix socket.
+#[cfg(unix)]
+pub async fn connect_host(socket: &Path) -> std::io::Result<HostStream> {
+    tokio::net::UnixStream::connect(socket)
+        .await
+        .map(HostStream::Unix)
+}
+
+/// Connect to the API host's Unix socket. This platform has none: it always fails (use the TCP
+/// endpoint, [`connect_endpoint`]).
 #[cfg(not(unix))]
 pub async fn connect_host(_socket: &Path) -> std::io::Result<HostStream> {
     Err(std::io::Error::new(
         std::io::ErrorKind::Unsupported,
-        "the Python API host is not supported on this platform yet (it needs Unix sockets)",
+        "the Python API host does not listen on a Unix socket on this platform",
     ))
+}
+
+/// Connect to the API host at `endpoint`.
+pub async fn connect_endpoint(endpoint: &HostEndpoint) -> std::io::Result<HostStream> {
+    match endpoint {
+        HostEndpoint::Unix(socket) => connect_host(socket).await,
+        HostEndpoint::Tcp { addr, .. } => {
+            let stream = tokio::net::TcpStream::connect(addr).await?;
+            stream.set_nodelay(true)?;
+            Ok(HostStream::Tcp(stream))
+        }
+    }
 }
 
 /// Forwards unmatched requests to the API host's Unix socket.
@@ -57,6 +126,10 @@ pub async fn connect_host(_socket: &Path) -> std::io::Result<HostStream> {
 pub struct HostProxy {
     socket: PathBuf,
     supervisor: Option<Arc<HostSupervisor>>,
+    /// The console status of an unsupervised host (a supervised one keeps it per process).
+    console: Arc<std::sync::Mutex<ConsoleStatus>>,
+    /// Whether the unavailable console was already reported in the log.
+    warned: Arc<AtomicBool>,
 }
 
 impl std::fmt::Debug for HostProxy {
@@ -101,6 +174,8 @@ impl HostProxy {
         HostProxy {
             socket: socket.into(),
             supervisor: None,
+            console: Arc::default(),
+            warned: Arc::default(),
         }
     }
 
@@ -109,6 +184,8 @@ impl HostProxy {
         HostProxy {
             socket: supervisor.socket().to_path_buf(),
             supervisor: Some(supervisor),
+            console: Arc::default(),
+            warned: Arc::default(),
         }
     }
 
@@ -129,16 +206,91 @@ impl HostProxy {
         &self.socket
     }
 
-    /// The host's plugin registry (`GET /_mrsm/host/registry`: MCP tools, routes and `web_pages`
-    /// for the console), fetched with an internal token signed by `secret`. This starts the host
-    /// when it is supervised and needed. `None` when the host is not needed or does not answer.
-    pub async fn registry(&self, secret: &[u8]) -> Option<serde_json::Value> {
-        if !self.is_active() {
-            return None;
+    /// Where the host listens now.
+    pub fn endpoint(&self) -> HostEndpoint {
+        match &self.supervisor {
+            Some(supervisor) => supervisor.endpoint(),
+            None => HostEndpoint::Unix(self.socket.clone()),
         }
+    }
+
+    /// Whether the host mounted the Dash console, as last reported for the current host process
+    /// ([`ConsoleStatus::Unknown`] until [`HostProxy::refresh_console`] ran, and again after the
+    /// host restarted).
+    pub fn console_status(&self) -> ConsoleStatus {
+        match &self.supervisor {
+            Some(supervisor) => supervisor.console_status(),
+            None => self
+                .console
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone(),
+        }
+    }
+
+    fn set_console_status(&self, status: ConsoleStatus) {
+        match &self.supervisor {
+            Some(supervisor) => supervisor.set_console_status(status),
+            None => {
+                *self
+                    .console
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner) = status
+            }
+        }
+    }
+
+    /// Ask the host whether it mounted the Dash console (`GET /_mrsm/host/status`, else the
+    /// registry's `console` object), starting the host when it is supervised and needed, and
+    /// remember the answer for this host process. An unavailable console is logged once.
+    pub async fn refresh_console(&self, secret: &[u8]) -> ConsoleStatus {
+        // No host to ask: nothing to remember (a plugin installed later makes the host needed,
+        // and the process that then starts is asked afresh) and nothing to warn about (the
+        // start-up probe already did).
+        if !self.is_active() {
+            return ConsoleStatus::Unavailable("no API host is running".into());
+        }
+        let status = self.ask_console(secret).await;
+        if let ConsoleStatus::Unavailable(reason) = &status
+            && !self.warned.swap(true, Ordering::SeqCst)
+        {
+            tracing::warn!(
+                "The web console is not served by the API host ({reason}); `/dash` shows a pointer page."
+            );
+        }
+        self.set_console_status(status.clone());
+        status
+    }
+
+    /// The console status, asking the host first when it was not asked yet.
+    pub async fn console(&self, secret: &[u8]) -> ConsoleStatus {
+        match self.console_status() {
+            ConsoleStatus::Unknown => self.refresh_console(secret).await,
+            known => known,
+        }
+    }
+
+    async fn ask_console(&self, secret: &[u8]) -> ConsoleStatus {
+        if let Some(document) = self.internal_get(STATUS_PATH, secret).await
+            && let Some(status) = ConsoleStatus::from_document(&document)
+        {
+            return status;
+        }
+        if let Some(document) = self.registry(secret).await
+            && let Some(status) = ConsoleStatus::from_document(&document)
+        {
+            return status;
+        }
+        ConsoleStatus::Unavailable(
+            "the API host did not report a console (is the meerschaum package up to date?)".into(),
+        )
+    }
+
+    /// `GET path` on the host with the internal token; the JSON body of a success.
+    async fn internal_get(&self, path: &str, secret: &[u8]) -> Option<serde_json::Value> {
         let request = Request::builder()
             .method(axum::http::Method::GET)
-            .uri(crate::mcp::federation::REGISTRY_PATH)
+            .uri(path)
             .header("host", "localhost")
             .header(
                 crate::mcp::federation::TOKEN_HEADER,
@@ -156,6 +308,17 @@ impl HostProxy {
         serde_json::from_slice(&bytes).ok()
     }
 
+    /// The host's plugin registry (`GET /_mrsm/host/registry`: MCP tools, routes and `web_pages`
+    /// for the console), fetched with an internal token signed by `secret`. This starts the host
+    /// when it is supervised and needed. `None` when the host is not needed or does not answer.
+    pub async fn registry(&self, secret: &[u8]) -> Option<serde_json::Value> {
+        if !self.is_active() {
+            return None;
+        }
+        self.internal_get(crate::mcp::federation::REGISTRY_PATH, secret)
+            .await
+    }
+
     /// Forward a request to the host and return its response.
     pub async fn forward(&self, mut req: Request) -> Response {
         if let Some(sup) = &self.supervisor
@@ -164,7 +327,8 @@ impl HostProxy {
             tracing::warn!("The API host is unavailable: {e}");
             return bad_gateway("The API host is unavailable.");
         }
-        let stream = match connect_host(&self.socket).await {
+        let endpoint = self.endpoint();
+        let stream = match connect_endpoint(&endpoint).await {
             Ok(s) => s,
             Err(e) => {
                 tracing::warn!("Failed to connect to the API host: {e}");
@@ -197,6 +361,14 @@ impl HostProxy {
             .parse::<Uri>()
             .unwrap_or_else(|_| Uri::from_static("/"));
         strip_hop_by_hop(&mut parts.headers, is_upgrade);
+        // The per-start token of the TCP transport is the proxy's alone: a client's copy is
+        // dropped, ours added.
+        parts.headers.remove(PROXY_TOKEN_HEADER);
+        if let Some(token) = endpoint.token()
+            && let Ok(v) = token.parse()
+        {
+            parts.headers.insert(PROXY_TOKEN_HEADER, v);
+        }
         if !parts.headers.contains_key(header::HOST)
             && let Ok(v) = "localhost".parse()
         {

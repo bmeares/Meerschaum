@@ -50,7 +50,7 @@ connection counts back to those of the fixed build (instance suites on MySQL: 49
 the fixed build opens 67). What remains: each empty read (zero rows) on MySQL/MariaDB still waits ~40 ms once,
 as do statements over 8 KiB or 128 parameters, so a read-heavy sync of mostly empty ranges is slower than on
 the fixed build (about 1.5x on small test suites). PostgreSQL shows no extra connections and only small
-latency differences. 5.0.0 final waits for sqlx 0.9.1.
+latency differences. 5.0.0 ships on sqlx 0.9.0; a 5.0.x release moves to sqlx 0.9.1 once it is published.
 
 The `lib.rs` documentation lists exactly which items are semver-stable. Every other
 `meerschaum-*` crate is **internal and may change in any minor release**; depend on `meerschaum`

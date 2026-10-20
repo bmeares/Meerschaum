@@ -541,3 +541,22 @@ to what a code path uses (`dtype-full`, `ipc`, `strings`, `temporal`, `timezones
 `json`, `parquet`, `object`) saves 1.25 MB of the stripped extension (LTO already dropped most unused code)
 and 40 of 517 normal-dependency packages from the build (`polars-lazy`, `-plan`, `-expr`, `-mem-engine`,
 `-stream`, `-json`, ...).
+
+## Wave 18 (PF): the instance round trips of a fresh `Pipe` and of the first read after a sync
+
+Release extensions built from one tree (`HEAD` against `HEAD` plus the PF changes), the same Python
+sources, TimescaleDB 2.x / PostgreSQL 18 on the loopback, 50-row pipe, median of 7 batches of 150 calls,
+alternated runs on the shared 40-core host (load 4-9). v4.1.4 is measured in the same sessions.
+
+| call | v4.1.4 | base | PF |
+|---|---|---|---|
+| fresh `Pipe(...).get_sync_time()` | 4.8 ms | 3.5-6.6 ms (bimodal under load) | 2.1-3.7 ms |
+| warm `pipe.get_sync_time()` | 1.7 ms | 1.3-1.5 ms | 0.65-1.2 ms |
+| PostgreSQL protocol round trips per fresh call (`Sync` messages) | 2 transactions | 10 | 6 |
+
+DuckDB (1,000 rows, the public Python driver), the first read after a 1% changed sync:
+`get_data()` 28.7 / 36.0 ms -> 14.4 / 16.9 ms (warm: 18.8 / 19.7 ms), `get_rowcount()` 13.7 / 17.1 -> 1.6 / 2.5 ms,
+`get_sync_time()` 17.8 -> 3.5 ms (two runs each; see `PARITY.md` W18-PF-001..003).
+
+Measured and not applied: the wave 17 raw-snapshot candidate (`get_parameters` without the Python getter) saves
+about 4 us of a 3.1 ms fresh call (`_core.get_parameters(pipe)` 37.3 -> 33.0 us), inside the run-to-run noise.

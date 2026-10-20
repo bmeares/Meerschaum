@@ -93,6 +93,11 @@ pub struct ServerConfig {
     pub routes_allowlist: Vec<String>,
     /// `api:permissions:rate_limits` by route-group pattern (new in v5).
     pub rate_limits: IndexMap<String, RateLimit>,
+    /// `api:permissions:log_streams:max`: log streams (`GET /logs/{name}/stream`) one server
+    /// follows at once (new in v5; default 32). Each follows a job on a thread of its own.
+    pub log_streams_max: usize,
+    /// `api:permissions:log_streams:per_user`: the same, per user or token (default 4).
+    pub log_streams_per_user: usize,
     /// `api:server:forwarded_allow_ips` (formerly `api:uvicorn:forwarded_allow_ips`).
     pub forwarded_allow_ips: Vec<String>,
     /// `api:server:proxy_headers`.
@@ -355,6 +360,20 @@ impl ServerConfig {
             .unwrap_or_else(|| vec!["*".into()]),
             routes_allowlist,
             rate_limits,
+            log_streams_max: usize::try_from(int_at(
+                cfg,
+                &["api", "permissions", "log_streams", "max"],
+                32,
+            ))
+            .unwrap_or(32)
+            .max(1),
+            log_streams_per_user: usize::try_from(int_at(
+                cfg,
+                &["api", "permissions", "log_streams", "per_user"],
+                4,
+            ))
+            .unwrap_or(4)
+            .max(1),
             forwarded_allow_ips,
             proxy_headers,
             max_response_row_limit: int_at(

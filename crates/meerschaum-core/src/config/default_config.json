@@ -708,7 +708,7 @@
           ]
         },
         "api": {
-          "image": "bmeares/meerschaum:api",
+          "image": "bmeares/meerschaum:{__MRSM_VERSION__}-full",
           "ports": [
             "MRSM{meerschaum:connectors:api:main:port}:MRSM{meerschaum:connectors:api:main:port}"
           ],

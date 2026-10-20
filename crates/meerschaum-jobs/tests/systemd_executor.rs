@@ -217,7 +217,18 @@ fn create_matches_the_reference() {
                         props_without_target(want.get("text").and_then(Value::as_str).unwrap());
                     assert_eq!(got_props, want_props, "{name}: {path}");
                 }
-                "text" => assert_eq!(got.get("text"), want.get("text"), "{name}: {path}"),
+                "text" => {
+                    // v5 adds `RestartSec=5` to units (D23, PARITY.md W18-JB-001); v4 has none.
+                    let got_text = got
+                        .get("text")
+                        .and_then(Value::as_str)
+                        .map(|t| t.replace("\nRestartSec=5\n", "\n"));
+                    assert_eq!(
+                        got_text.as_deref(),
+                        want.get("text").and_then(Value::as_str),
+                        "{name}: {path}"
+                    );
+                }
                 _ => {}
             }
         }

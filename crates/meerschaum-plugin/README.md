@@ -205,6 +205,7 @@ Server extensions use additive JSON methods through `LoadedPlugin::call_json`:
   the server's credentials unless `"public": true` or the server runs `--no-auth`; paths under
   `/dash`, `/webterm`, or a core route group are rejected.
 - Console pages are the manifest's `web_pages` entries; `page` receives
-  `{path, function, query, username}` and returns `{html, status?}` (a trusted fragment).
+  `{path, function, query, username}` and returns `{html, status?}` (a trusted fragment). The Dash console of the Python package fetches the fragment
+  from the server and frames it in its chrome; a standalone install shows no console, so the page is only reachable there.
 
 Request and response bodies of routes are UTF-8 text.

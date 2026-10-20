@@ -579,6 +579,156 @@ pub async fn forget_engine_state<C: InstanceConnector + ?Sized>(
     }
 }
 
+/// The separator of a remote-state marker key (see [`remote_state_key`]).
+pub const REMOTE_STATE_SEPARATOR: &str = "|remote|";
+
+/// The `definition_hash` value of a remote-state marker row.
+pub const REMOTE_STATE_HASH_PREFIX: &str = "remote:";
+
+/// The key of a *remote-state marker*: a row of the home instance's `engine_state` pipe that
+/// records that engine state of the pipe `pipe_ref` (its ledger entries and the edge cursors in
+/// which it is the parent) was written onto `state_instance`, another instance (a cross-instance
+/// child's, §5.1). A removed pipe's home instance reads the markers to find that state
+/// ([`forget_remote_engine_state`], GAP-002). A marker never equals a pipe's own key, so
+/// readers of the definition hash ignore it; it reuses `engine_state` so no table, column or
+/// route is added.
+pub fn remote_state_key(pipe_ref: &str, state_instance: &str) -> String {
+    format!("{pipe_ref}{REMOTE_STATE_SEPARATOR}{state_instance}")
+}
+
+/// The instances other than the pipe's own that hold engine state of `pipe`, from the markers on
+/// its home instance (`conn`). Empty when the instance has no engine state or no markers.
+pub async fn remote_state_instances<C: InstanceConnector + ?Sized>(
+    conn: &C,
+    pipe: &Pipe,
+) -> Vec<String> {
+    let Ok(Some(state_pipe)) = conn
+        .engine_state_pipe(pipe.instance_keys(), "engine_state")
+        .await
+    else {
+        return Vec::new();
+    };
+    if !conn.pipe_exists(&state_pipe).await.unwrap_or(false) {
+        return Vec::new();
+    }
+    let Ok(Some(frame)) = conn.get_pipe_data(&state_pipe, &DataQuery::default()).await else {
+        return Vec::new();
+    };
+    let prefix = format!("{}{REMOTE_STATE_SEPARATOR}", pipe.pipe_ref());
+    let mut out: Vec<String> = Vec::new();
+    for doc in frame_to_docs(&frame) {
+        let Some(KValue::Str(key)) = doc.get("pipe_ref") else {
+            continue;
+        };
+        if let Some(instance) = key.strip_prefix(&prefix)
+            && !instance.is_empty()
+            && !out.iter().any(|i| i == instance)
+        {
+            out.push(instance.to_string());
+        }
+    }
+    out
+}
+
+/// Forget the Syncing Engine's state of `pipe` that lives on **other instances** (GAP-002): its
+/// ledger entries and the edge cursors in which it is the parent, written onto the instances of
+/// its cross-instance children. The instances come from the remote-state markers on the pipe's
+/// home instance `conn` ([`remote_state_instances`]); `provider` reaches them. A marker is
+/// removed once its instance was cleaned. An instance that is not configured here or cannot be
+/// reached is reported in the result (the stale rows would make a pipe recreated under the same
+/// keys resume from a cursor of the old one) and its marker is kept, so a later removal retries.
+/// The pipe's state on its own instance is [`forget_engine_state`]'s.
+pub async fn forget_remote_engine_state<C: InstanceConnector + ?Sized>(
+    conn: &C,
+    provider: &dyn crate::template::InstanceProvider,
+    pipe: &Pipe,
+) -> SuccessTuple {
+    if pipe.connector_keys() == "mrsm" {
+        return SuccessTuple::success();
+    }
+    let instances = remote_state_instances(conn, pipe).await;
+    if instances.is_empty() {
+        return SuccessTuple::success();
+    }
+    let pipe_ref = pipe.pipe_ref();
+    let mut errors = Vec::new();
+    for instance in instances {
+        let Some(remote) = provider.instance(&instance) else {
+            errors.push(format!(
+                "{instance}: not configured on this host, so its engine state of {pipe} was kept"
+            ));
+            continue;
+        };
+        let mut failed = false;
+        for (metric, column) in [
+            ("engine_ledger", "pipe_ref"),
+            ("engine_cursors", "parent_ref"),
+        ] {
+            let Ok(Some(state_pipe)) = remote.engine_state_pipe(&instance, metric).await else {
+                continue;
+            };
+            match remote.pipe_exists(&state_pipe).await {
+                Ok(true) => {}
+                Ok(false) => continue,
+                Err(e) => {
+                    errors.push(format!("{instance}: {e}"));
+                    failed = true;
+                    break;
+                }
+            }
+            let mut params = Map::new();
+            params.insert(column.into(), Value::Str(pipe_ref.clone()));
+            let res = remote
+                .clear_pipe(
+                    &state_pipe,
+                    &DataQuery {
+                        params: Some(params),
+                        ..Default::default()
+                    },
+                )
+                .await;
+            if !res.success {
+                errors.push(format!("{instance}: {metric} ({column}): {}", res.message));
+                failed = true;
+            }
+        }
+        if failed {
+            continue;
+        }
+        // The instance is clean: drop its marker.
+        if let Ok(Some(state_pipe)) = conn
+            .engine_state_pipe(pipe.instance_keys(), "engine_state")
+            .await
+        {
+            let mut params = Map::new();
+            params.insert(
+                "pipe_ref".into(),
+                Value::Str(remote_state_key(&pipe_ref, &instance)),
+            );
+            let res = conn
+                .clear_pipe(
+                    &state_pipe,
+                    &DataQuery {
+                        params: Some(params),
+                        ..Default::default()
+                    },
+                )
+                .await;
+            if !res.success {
+                errors.push(format!("{instance}: marker: {}", res.message));
+            }
+        }
+    }
+    if errors.is_empty() {
+        SuccessTuple::success()
+    } else {
+        SuccessTuple::fail(format!(
+            "Could not forget the engine state of {pipe} on other instances:\n{}",
+            errors.join("\n")
+        ))
+    }
+}
+
 /// Whether a `clear_pipe` query removes every row (no bounds, no filter): a full clear forgets
 /// the pipe's engine state like a drop does.
 pub fn is_full_clear(query: &DataQuery) -> bool {

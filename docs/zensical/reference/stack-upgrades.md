@@ -213,7 +213,15 @@ exits immediately. Run long upgrades in tmux or screen. A forced kill or power l
 cleanup: the next upgrade or restore detects the run and offers to put it back first;
 `mrsm upgrade postgres rollback` also recovers an interrupted run. An interrupted rollback is
 completed on its requested old volume, keeping both database volumes. Backups only warn about
-unfinished recovery.
+unfinished recovery. A command that changes the stack waits (up to two minutes) for a
+`docker compose` command of the project that a killed run left running, before it reads the
+stack or puts it back. A `restore postgres` that began with the stack's `db` stopped leaves it
+stopped when it is put back (a stopped database is never started on a volume the plan promised not
+to modify).
+
+If the disk of `<root>/backups/postgres` fills up, a failed upgrade removes its own dump files so
+that its end can still be recorded (the stack is put back either way, and the result says so);
+free space and run it again.
 
 ### Downtime
 
@@ -223,6 +231,14 @@ the dump through the switch; the database process itself stops at the end of the
 database, tens of minutes for a large one. Stop the Meerschaum jobs and other clients that write
 to the database before you start (`mrsm stop jobs`), and start them again afterwards.
 
+While an upgrade, a restore or a rollback moves the database, `mrsm stack up`, `mrsm stack start`
+and `mrsm stack restart` of that stack are refused (a stopped old `db`, or a service that uses it,
+would write to the database being copied, and those writes would not be in the copy). Wait for the
+command to finish; `--force` bypasses the check. If the old `db` is started again anyway, the
+command notices before it switches, stops with "The old database ran again", puts the stack back
+and removes the new volume: nothing is lost, and you run it again once the clients are stopped. A
+backup only reads the database and never holds these commands back.
+
 ### Rollback and cleaning up
 
 `mrsm upgrade postgres rollback` (after its own plan and question) stops the stack's database and
@@ -230,6 +246,15 @@ the services that use it, puts `stack.yaml` back from the latest upgrade's (or r
 (the current one is kept next to it as `stack.yaml.before-rollback-<timestamp>`), and starts `db`
 on the old volume with the old image again. **What was written to the database after the upgrade
 is not in the old volume.** The new volume is kept.
+
+The roles and their passwords come with the data. After a rollback (or a `restore postgres` of an
+older backup) a password changed since then is the old one again, so the stack's services cannot
+log in until the role and the stack config agree. The command tries the stack's own login when it
+is done and says so when the server refuses it; set the role's password to the configured one
+(`ALTER ROLE ... PASSWORD ...`) or put the old password back in the config. If you edited
+`stack.yaml` after the upgrade (a port, a password, another service), the plan warns that the
+rollback puts the file from before the upgrade back, and the result names the copy of your
+current file: `stack.yaml.before-rollback-<timestamp>` next to the upgrade's backup.
 
 When you are satisfied with the new database, free the space of the old one, with the names the
 upgrade printed:
@@ -394,5 +419,8 @@ Before `mrsm stack up`, a PostgreSQL image whose major can be identified is chec
 `PG_VERSION` in existing named volumes through a read-only mount, without pulling an image.
 A mismatch refuses startup and explains how to pin the old image and run `mrsm upgrade postgres`.
 A database already running its configured image skips the check. `mrsm stack up --force` bypasses
-it; Compose does not receive that flag. Unknown image families and tags such as `latest` cannot
+it; Compose does not receive that flag. `mrsm stack start` and `mrsm stack restart` start the
+containers that exist with the image they were created from, so they skip this check; they, like
+`stack up`, wait for an upgrade, restore or rollback that is moving the database (see
+[Downtime](#downtime)). Unknown image families and tags such as `latest` cannot
 be checked this way.

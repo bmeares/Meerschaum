@@ -38,8 +38,14 @@ pub struct WorkerOptions {
     pub env_remove: Vec<String>,
     /// The working directory.
     pub current_dir: Option<PathBuf>,
-    /// How long to wait for the worker to connect and say hello.
+    /// How long to wait, in all, for the worker to connect and say hello (`MRSM_WORKER_STARTUP_TIMEOUT`
+    /// seconds in [`WorkerOptions::default`], 60 by default). A worker that is silent for longer is
+    /// killed and the interpreter is refused ([`WorkerError::Refused`]) for 10 seconds (a
+    /// timeout alone is never remembered longer or with a growing delay).
     pub startup_timeout: Duration,
+    /// How long the preflight check of the interpreter (`python -P -c ...`, reads files, imports
+    /// nothing) may take before the interpreter is declared hung.
+    pub preflight_timeout: Duration,
     /// Where to create the socket directory (default: the system temporary directory).
     pub socket_dir: Option<PathBuf>,
     /// Allow interactive CLI actions to read the host terminal. Servers leave this disabled.
@@ -58,32 +64,40 @@ pub const REFUSAL_DELAY_INITIAL: Duration = Duration::from_secs(10);
 /// See [`REFUSAL_DELAY_INITIAL`].
 pub const REFUSAL_DELAY_MAX: Duration = Duration::from_secs(300);
 
-/// Interpreters whose worker host refused to start ([`WorkerError::Refused`]): asking again at
-/// once would print the same refusal again and fail the same way, so each is left alone until its
-/// delay (10 s, doubling to 5 min, per consecutive refusal) passes, a `reload` or a pool recycle.
+/// Interpreters that cannot host a worker (the preflight or the host refused the `meerschaum`
+/// package, the interpreter would not start, or it never connected): asking again at once would
+/// fail the same way, slowly, for every caller. So each is left alone, and every caller gets the
+/// same message at once, until its delay (10 s, doubling to 5 min, per consecutive failure)
+/// passes, a `reload` or a pool recycle.
 #[derive(Debug, Default)]
 struct Refusals {
-    /// `(interpreter, no start before, the next delay)`.
-    entries: Vec<(PathBuf, Instant, Duration)>,
+    /// `(interpreter, no start before, the next delay, why)`.
+    entries: Vec<(PathBuf, Instant, Duration, String)>,
+    /// Interpreters whose preflight passed, with what it found (`meerschaum 5.0.0rc1 at ...`).
+    checked: Vec<(PathBuf, String)>,
 }
 
 impl Refusals {
-    /// How long `python` is still refused at `now` (`None`: it may be started).
-    fn remaining(&self, python: &Path, now: Instant) -> Option<Duration> {
+    /// How long `python` is still refused at `now` (`None`: it may be started), and why.
+    fn remaining(&self, python: &Path, now: Instant) -> Option<(Duration, &str)> {
         self.entries
             .iter()
-            .find(|(p, _, _)| p == python)
-            .and_then(|(_, until, _)| until.checked_duration_since(now))
-            .filter(|d| !d.is_zero())
+            .find(|(p, _, _, _)| p == python)
+            .and_then(|(_, until, _, why)| {
+                until.checked_duration_since(now).map(|d| (d, why.as_str()))
+            })
+            .filter(|(d, _)| !d.is_zero())
     }
 
     /// Remember a refusal at `now`; the delay before `python` is asked again.
-    fn note(&mut self, python: &Path, now: Instant) -> Duration {
-        match self.entries.iter_mut().find(|(p, _, _)| p == python) {
-            Some((_, until, delay)) => {
+    fn note(&mut self, python: &Path, now: Instant, why: &str) -> Duration {
+        self.checked.retain(|(p, _)| p != python);
+        match self.entries.iter_mut().find(|(p, _, _, _)| p == python) {
+            Some((_, until, delay, message)) => {
                 let this = *delay;
                 *until = now + this;
                 *delay = (this * 2).min(REFUSAL_DELAY_MAX);
+                *message = why.to_string();
                 this
             }
             None => {
@@ -91,24 +105,76 @@ impl Refusals {
                     python.to_path_buf(),
                     now + REFUSAL_DELAY_INITIAL,
                     (REFUSAL_DELAY_INITIAL * 2).min(REFUSAL_DELAY_MAX),
+                    why.to_string(),
                 ));
                 REFUSAL_DELAY_INITIAL
             }
         }
+    }
+
+    /// Remember that `python` did not answer in time: a slow host (a cold first import, a busy
+    /// disk, antivirus, a bulk start) is not a broken one, so this is remembered for
+    /// [`REFUSAL_DELAY_INITIAL`] only, never grows, and never shortens what a missing or stale
+    /// package refusal already remembered. What the preflight found stays valid.
+    fn note_timeout(&mut self, python: &Path, now: Instant, why: &str) {
+        match self.entries.iter_mut().find(|(p, _, _, _)| p == python) {
+            Some((_, until, _, message)) => {
+                let end = now + REFUSAL_DELAY_INITIAL;
+                if end > *until {
+                    *until = end;
+                    *message = why.to_string();
+                }
+            }
+            None => self.entries.push((
+                python.to_path_buf(),
+                now + REFUSAL_DELAY_INITIAL,
+                REFUSAL_DELAY_INITIAL,
+                why.to_string(),
+            )),
+        }
+    }
+
+    fn checked(&self, python: &Path) -> Option<&str> {
+        self.checked
+            .iter()
+            .find(|(p, _)| p == python)
+            .map(|(_, found)| found.as_str())
     }
 }
 
 fn refused() -> std::sync::MutexGuard<'static, Refusals> {
     static REFUSED: Mutex<Refusals> = Mutex::new(Refusals {
         entries: Vec::new(),
+        checked: Vec::new(),
     });
     REFUSED.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-/// Forget refusals, so the next start asks the interpreter again (`reload`, a pool recycle after
-/// a manifest change).
+/// Forget refusals and passed preflights, so the next start asks the interpreter again (`reload`,
+/// a pool recycle after a manifest change).
 pub fn clear_refusals() {
-    refused().entries.clear();
+    let mut r = refused();
+    r.entries.clear();
+    r.checked.clear();
+}
+
+/// The error for an interpreter that is still refused (`None`: it may be started).
+pub fn refusal(python: &Path) -> Option<WorkerError> {
+    refused()
+        .remaining(python, Instant::now())
+        .map(|(_, why)| WorkerError::Refused(why.to_string()))
+}
+
+/// A worker that did not answer in time: see [`Refusals::note_timeout`].
+fn refuse_timeout(python: &Path, why: String) -> WorkerError {
+    refused().note_timeout(python, Instant::now(), &why);
+    WorkerError::Refused(why)
+}
+
+/// Refuse `python` for a while and return the error that says why.
+fn refuse(python: &Path, why: String) -> WorkerError {
+    refused().note(python, Instant::now(), &why);
+    WorkerError::Refused(why)
 }
 
 /// The interpreter to use: `MRSM_PYTHON`, else `python3` (`python` on Windows).
@@ -121,6 +187,23 @@ pub fn default_python() -> PathBuf {
     PathBuf::from(if cfg!(windows) { "python" } else { "python3" })
 }
 
+/// The default of [`WorkerOptions::startup_timeout`]: a healthy worker connects in well under a
+/// second, a cold first start in a few, and one on a slow disk, a Raspberry Pi or behind
+/// real-time antivirus in tens of seconds (the rc1 limit, kept).
+pub const STARTUP_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// The default of [`WorkerOptions::preflight_timeout`].
+pub const PREFLIGHT_TIMEOUT: Duration = Duration::from_secs(10);
+
+fn startup_timeout_default() -> Duration {
+    std::env::var("MRSM_WORKER_STARTUP_TIMEOUT")
+        .ok()
+        .and_then(|v| v.trim().parse::<f64>().ok())
+        .filter(|s| s.is_finite() && *s > 0.0)
+        .map(Duration::from_secs_f64)
+        .unwrap_or(STARTUP_TIMEOUT)
+}
+
 impl Default for WorkerOptions {
     fn default() -> Self {
         WorkerOptions {
@@ -129,7 +212,8 @@ impl Default for WorkerOptions {
             env: Vec::new(),
             env_remove: Vec::new(),
             current_dir: None,
-            startup_timeout: Duration::from_secs(60),
+            startup_timeout: startup_timeout_default(),
+            preflight_timeout: PREFLIGHT_TIMEOUT,
             socket_dir: None,
             quiet: false,
             inherit_stdin: false,
@@ -287,6 +371,127 @@ pub fn spawn_refused() -> bool {
     IN_WORKER.load(Ordering::SeqCst) && PLUGIN_IMPORTS.load(Ordering::SeqCst) > 0
 }
 
+/// Check, before a worker is started, that `opts.python` can host one: it starts, finds a
+/// `meerschaum` this program works with (`python_guard`), and answers within
+/// [`WorkerOptions::preflight_timeout`]. Reads files only (nothing of `meerschaum` is imported)
+/// and costs one interpreter start per interpreter per program. A failure is ONE message that
+/// names the interpreter, the package found and the fix, shared by every caller (the
+/// interpreter is not asked again for 10 s, doubling), instead of a worker that never connects.
+async fn preflight(opts: &WorkerOptions) -> WorkerResult<()> {
+    // One check at a time: concurrent first calls share the answer instead of each paying
+    // (or timing out) for it.
+    static GATE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+    let _gate = GATE.lock().await;
+    if let Some(e) = refusal(&opts.python) {
+        return Err(e);
+    }
+    if refused().checked(&opts.python).is_some() {
+        return Ok(());
+    }
+    let python = opts.python.display().to_string();
+    let version = meerschaum_core::python_guard::expected_version();
+    let fix = format!(
+        "Install the matching release (`{python} -m pip install 'meerschaum=={version}'`) or set \
+         MRSM_PYTHON to an interpreter that has it."
+    );
+    let mut cmd = Command::new(&opts.python);
+    cmd.arg(meerschaum_core::self_exe::PYTHON_SAFE_PATH_FLAG)
+        .arg("-c")
+        .arg(format!(
+            "{}\n{}\n_mrsm_preflight()",
+            meerschaum_core::python_guard::SCRIPT,
+            include_str!("../python/preflight.py")
+        ))
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+    for k in &opts.env_remove {
+        cmd.env_remove(k);
+    }
+    cmd.envs(meerschaum_core::python_guard::expect_env());
+    cmd.envs(opts.env.iter().map(|(k, v)| (k, v)));
+    if let Some(dir) = &opts.current_dir {
+        cmd.current_dir(dir);
+    }
+    let child = cmd.spawn().map_err(|e| {
+        refuse(
+            &opts.python,
+            format!(
+                "The Python interpreter `{python}` could not be started ({e}). The `meerschaum` \
+                 program needs Python 3.11 or newer with the `meerschaum=={version}` package for \
+                 plugins, `plugin:` connectors and Python actions: install it, or set MRSM_PYTHON \
+                 to such an interpreter."
+            ),
+        )
+    })?;
+    let out = match tokio::time::timeout(opts.preflight_timeout, child.wait_with_output()).await {
+        Ok(Ok(out)) => out,
+        Ok(Err(e)) => return Err(WorkerError::Io(e)),
+        Err(_) => {
+            // `kill_on_drop` stopped it.
+            return Err(refuse(
+                &opts.python,
+                format!(
+                    "The Python interpreter `{python}` did not answer a start-up check within \
+                     {secs:.0} s (it hangs before running anything: a wrapper script, `.pth` file \
+                     or `sitecustomize` that blocks, or a stalled file system). Set MRSM_PYTHON to \
+                     a working interpreter that has `meerschaum=={version}`.",
+                    secs = opts.preflight_timeout.as_secs_f64(),
+                ),
+            ));
+        }
+    };
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    let stderr = stderr.trim();
+    if out.status.code() == Some(meerschaum_core::python_guard::REFUSED_EXIT_CODE) {
+        let why = if stderr.is_empty() {
+            format!(
+                "The Python package `meerschaum` found by `{python}` does not fit this program ({version}). {fix}"
+            )
+        } else {
+            stderr.to_string()
+        };
+        return Err(refuse(&opts.python, why));
+    }
+    if !out.status.success() {
+        let tail: Vec<&str> = stderr.lines().rev().take(3).collect();
+        let tail = tail.into_iter().rev().collect::<Vec<_>>().join(" | ");
+        return Err(refuse(
+            &opts.python,
+            format!(
+                "The Python interpreter `{python}` failed a start-up check ({}{}). The `meerschaum` \
+                 workers need Python 3.11 or newer. Use a newer interpreter that has \
+                 `meerschaum=={version}`: set MRSM_PYTHON to it.",
+                out.status,
+                if tail.is_empty() {
+                    String::new()
+                } else {
+                    format!(": {tail}")
+                },
+            ),
+        ));
+    }
+    let found: serde_json::Value = String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .last()
+        .and_then(|l| serde_json::from_str(l).ok())
+        .unwrap_or_default();
+    let found = format!(
+        "meerschaum {} at {}",
+        found
+            .get("version")
+            .and_then(|v| v.as_str())
+            .unwrap_or("(unknown version)"),
+        found
+            .get("directory")
+            .and_then(|v| v.as_str())
+            .unwrap_or("?"),
+    );
+    refused().checked.push((opts.python.clone(), found));
+    Ok(())
+}
+
 impl Worker {
     /// Start a worker and complete the handshake. Refused (`WorkerError::Spawn`) while
     /// [`spawn_refused`].
@@ -298,8 +503,11 @@ impl Worker {
                     .into(),
             ));
         }
-        if refused().remaining(&opts.python, Instant::now()).is_some() {
-            return Err(WorkerError::Refused);
+        if let Some(e) = refusal(&opts.python) {
+            return Err(e);
+        }
+        if opts.module == "meerschaum.worker" {
+            preflight(opts).await?;
         }
         if !opts.quiet
             && let Some(hook) = SPAWN_HOOK.get()
@@ -351,39 +559,73 @@ impl Worker {
             .spawn()
             .map_err(|e| WorkerError::Spawn(format!("{}: {e}", opts.python.display())))?;
 
+        // One deadline for the connection and the `hello` together.
+        let deadline = tokio::time::Instant::now() + opts.startup_timeout;
+        let silent = |what: &str| {
+            let found = refused()
+                .checked(&opts.python)
+                .map(|f| format!(" ({f})"))
+                .unwrap_or_default();
+            refuse_timeout(
+                &opts.python,
+                format!(
+                    "The Python worker started by `{python}`{found} {what} within {secs:.0} s, so it \
+                     was stopped (a worker normally connects in well under a second). Check that \
+                     `{python} -c 'import meerschaum'` returns quickly and that nothing in its \
+                     environment (a plugin, `sitecustomize`, a `.pth` file) blocks at start-up, or \
+                     set MRSM_PYTHON to another interpreter that has `meerschaum=={version}` \
+                     (`MRSM_WORKER_STARTUP_TIMEOUT` raises the limit).",
+                    python = opts.python.display(),
+                    secs = opts.startup_timeout.as_secs_f64(),
+                    version = meerschaum_core::python_guard::expected_version(),
+                ),
+            )
+        };
         let accepted = tokio::select! {
-            res = tokio::time::timeout(opts.startup_timeout, listener.accept()) => match res {
+            res = tokio::time::timeout_at(deadline, listener.accept()) => match res {
                 Ok(Ok(halves)) => halves,
                 Ok(Err(e)) => return Err(WorkerError::Io(e)),
                 Err(_) => {
                     let _ = child.kill().await;
-                    return Err(WorkerError::Handshake(format!(
-                        "no connection within {:?}", opts.startup_timeout
-                    )));
+                    return Err(silent("did not connect"));
                 }
             },
             status = child.wait() => {
                 if status.as_ref().is_ok_and(|s| {
                     s.code() == Some(meerschaum_core::python_guard::REFUSED_EXIT_CODE)
                 }) && opts.module == "meerschaum.worker" {
-                    // The host said why on stderr. Do not start another one for this
+                    // The host said why on stderr (the preflight normally catches this first,
+                    // with the message in the error). Do not start another one for this
                     // interpreter until `clear_refusals` (`reload`).
-                    refused().note(&opts.python, Instant::now());
-                    return Err(WorkerError::Refused);
+                    return Err(refuse(
+                        &opts.python,
+                        format!(
+                            "The Python worker host started by `{python}` refused to start \
+                             (its message is above): the `meerschaum` package it would import \
+                             does not fit this program ({version}). Install the matching \
+                             release (`{python} -m pip install 'meerschaum=={version}'`) or set \
+                             MRSM_PYTHON to an interpreter that has it.",
+                            python = opts.python.display(),
+                            version = meerschaum_core::python_guard::expected_version(),
+                        ),
+                    ));
                 }
                 return Err(WorkerError::Spawn(format!(
-                    "the worker exited before connecting ({})",
-                    status.map(|s| s.to_string()).unwrap_or_else(|e| e.to_string())
+                    "the worker started by `{python}` exited before connecting ({status}); its \
+                     output is above. Check that `{python} -c 'import meerschaum.worker'` works, \
+                     or set MRSM_PYTHON to an interpreter with `meerschaum=={version}`",
+                    python = opts.python.display(),
+                    status = status.map(|s| s.to_string()).unwrap_or_else(|e| e.to_string()),
+                    version = meerschaum_core::python_guard::expected_version(),
                 )));
             }
         };
         let (mut reader, writer): (ReadHalf, WriteHalf) = accepted;
-        let hello =
-            match tokio::time::timeout(opts.startup_timeout, read_envelope(&mut reader)).await {
-                Ok(Ok(env)) => hello_from(&env.msg),
-                Ok(Err(e)) => Err(WorkerError::Handshake(e.to_string())),
-                Err(_) => Err(WorkerError::Handshake("no `hello` received".into())),
-            };
+        let hello = match tokio::time::timeout_at(deadline, read_envelope(&mut reader)).await {
+            Ok(Ok(env)) => hello_from(&env.msg),
+            Ok(Err(e)) => Err(WorkerError::Handshake(e.to_string())),
+            Err(_) => Err(silent("connected but sent no `hello`")),
+        };
         let hello = match hello {
             Ok(h) => h,
             Err(e) => {
@@ -722,47 +964,81 @@ mod tests {
         let python = Path::new("/usr/bin/python3");
         let other = Path::new("/opt/python");
         let t0 = Instant::now();
+        let left = |r: &Refusals, p: &Path, t: Instant| r.remaining(p, t).map(|(d, _)| d);
         let mut r = Refusals::default();
-        assert_eq!(r.remaining(python, t0), None, "nothing refused yet");
+        assert_eq!(left(&r, python, t0), None, "nothing refused yet");
         // First refusal: 10 s.
-        assert_eq!(r.note(python, t0), Duration::from_secs(10));
-        assert_eq!(r.remaining(python, t0), Some(Duration::from_secs(10)));
-        assert!(r.remaining(python, t0 + Duration::from_secs(9)).is_some());
+        assert_eq!(r.note(python, t0, "why"), Duration::from_secs(10));
+        assert_eq!(left(&r, python, t0), Some(Duration::from_secs(10)));
+        assert_eq!(r.remaining(python, t0).map(|(_, why)| why), Some("why"));
+        assert!(left(&r, python, t0 + Duration::from_secs(9)).is_some());
         // Another interpreter is not refused.
-        assert_eq!(r.remaining(other, t0), None);
+        assert_eq!(left(&r, other, t0), None);
         // It recovers on its own once the delay passes.
-        assert_eq!(r.remaining(python, t0 + Duration::from_secs(10)), None);
+        assert_eq!(left(&r, python, t0 + Duration::from_secs(10)), None);
         // Refused again: 20 s, 40 s, ... capped at 5 min.
         let t1 = t0 + Duration::from_secs(11);
-        assert_eq!(r.note(python, t1), Duration::from_secs(20));
-        assert!(r.remaining(python, t1 + Duration::from_secs(19)).is_some());
-        assert_eq!(r.remaining(python, t1 + Duration::from_secs(20)), None);
+        assert_eq!(r.note(python, t1, "again"), Duration::from_secs(20));
+        assert_eq!(r.remaining(python, t1).map(|(_, why)| why), Some("again"));
+        assert!(left(&r, python, t1 + Duration::from_secs(19)).is_some());
+        assert_eq!(left(&r, python, t1 + Duration::from_secs(20)), None);
         let mut delay = Duration::ZERO;
         for _ in 0..10 {
-            delay = r.note(python, t1);
+            delay = r.note(python, t1, "again");
         }
         assert_eq!(delay, REFUSAL_DELAY_MAX);
         // `reload` (clear) forgets everything at once.
         r.entries.clear();
-        assert_eq!(r.remaining(python, t1), None);
-        assert_eq!(r.note(python, t1), REFUSAL_DELAY_INITIAL);
+        assert_eq!(left(&r, python, t1), None);
+        assert_eq!(r.note(python, t1, "why"), REFUSAL_DELAY_INITIAL);
+    }
+
+    #[test]
+    fn a_start_up_timeout_is_remembered_briefly_and_never_grows() {
+        use super::*;
+        let python = Path::new("/usr/bin/python3");
+        let t0 = Instant::now();
+        let left = |r: &Refusals, t: Instant| r.remaining(python, t).map(|(d, _)| d);
+        let mut r = Refusals::default();
+        r.checked
+            .push((python.to_path_buf(), "meerschaum 5".into()));
+        // Every timeout is remembered for 10 s, however many there were.
+        for _ in 0..8 {
+            r.note_timeout(python, t0, "slow");
+        }
+        assert_eq!(left(&r, t0), Some(Duration::from_secs(10)));
+        assert_eq!(left(&r, t0 + Duration::from_secs(10)), None);
+        r.note_timeout(python, t0 + Duration::from_secs(11), "slow again");
+        assert_eq!(
+            left(&r, t0 + Duration::from_secs(11)),
+            Some(Duration::from_secs(10))
+        );
+        // The preflight's finding stays: the interpreter is fine, just slow.
+        assert_eq!(r.checked(python), Some("meerschaum 5"));
+        // A refusal for a missing or stale package keeps its doubling memory, and a timeout
+        // never shortens it.
+        let t1 = t0 + Duration::from_secs(100);
+        assert_eq!(r.note(python, t1, "stale package"), Duration::from_secs(10));
+        assert_eq!(r.note(python, t1, "stale package"), Duration::from_secs(20));
+        r.note_timeout(python, t1, "slow");
+        assert_eq!(left(&r, t1), Some(Duration::from_secs(20)));
+        assert_eq!(
+            r.remaining(python, t1).map(|(_, why)| why),
+            Some("stale package")
+        );
     }
 
     #[test]
     fn the_process_wide_registry_is_cleared_by_clear_refusals() {
         let python = std::path::Path::new("/w17c/process-wide-registry-python");
-        super::refused().note(python, std::time::Instant::now());
-        assert!(
-            super::refused()
-                .remaining(python, std::time::Instant::now())
-                .is_some()
-        );
+        super::refused().note(python, std::time::Instant::now(), "why");
+        assert!(super::refusal(python).is_some());
+        super::refused()
+            .checked
+            .push((python.to_path_buf(), "found".into()));
         super::clear_refusals();
-        assert!(
-            super::refused()
-                .remaining(python, std::time::Instant::now())
-                .is_none()
-        );
+        assert!(super::refusal(python).is_none());
+        assert!(super::refused().checked(python).is_none());
     }
 
     use super::*;

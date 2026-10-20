@@ -48,20 +48,47 @@ fn to_i64(v: &FValue) -> i64 {
 
 impl FredBackend {
     /// Connect to `url` (`redis://`, `valkey://`, `rediss://`, ...) and wait for the connection.
+    /// `timeout` is the socket (command) timeout; the connection itself is bounded by
+    /// `connect_timeout` (`MRSM_CONNECT_TIMEOUT`, else 5 s).
     pub async fn connect(url: &str, timeout: Option<Duration>) -> BackendResult<FredBackend> {
+        Self::connect_with(
+            url,
+            timeout,
+            meerschaum_core::connect::connect_timeout(None),
+        )
+        .await
+    }
+
+    /// [`connect`](FredBackend::connect) with an explicit connection timeout: a refused
+    /// connection fails at once, an unresponsive host after `connect_timeout`.
+    pub async fn connect_with(
+        url: &str,
+        timeout: Option<Duration>,
+        connect_timeout: Duration,
+    ) -> BackendResult<FredBackend> {
         let config = Config::from_url(url).map_err(err)?;
         let mut builder = Builder::from_config(config);
-        if let Some(t) = timeout {
-            builder.with_connection_config(|c| {
-                c.connection_timeout = t;
+        builder.with_connection_config(|c| {
+            c.connection_timeout = connect_timeout;
+            if let Some(t) = timeout {
                 c.internal_command_timeout = t;
-            });
+            }
+        });
+        if let Some(t) = timeout {
             builder.with_performance_config(|p| {
                 p.default_command_timeout = t;
             });
         }
         let client = builder.build().map_err(err)?;
-        client.init().await.map_err(err)?;
+        match tokio::time::timeout(connect_timeout, client.init()).await {
+            Ok(result) => result.map_err(err)?,
+            Err(_) => {
+                return Err(BackendError(format!(
+                    "connection timed out after {} s",
+                    connect_timeout.as_secs_f64()
+                )));
+            }
+        };
         Ok(FredBackend { client })
     }
 

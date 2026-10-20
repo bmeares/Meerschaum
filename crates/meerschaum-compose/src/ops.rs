@@ -14,8 +14,57 @@ use meerschaum_core::value::{Map, Value};
 
 use crate::project::{Host, Project};
 
+/// The filters of `compose init -c/-m/-l/-t/-i`: which registered pipes to add to a new project.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct PipeFilters {
+    /// `-c` (a `_` prefix negates).
+    pub connector_keys: Vec<String>,
+    /// `-m`.
+    pub metric_keys: Vec<String>,
+    /// `-l` (`None` matches pipes without a location).
+    pub location_keys: Vec<Option<String>>,
+    /// `-t`.
+    pub tags: Vec<String>,
+    /// `-i`: the instance to read (default: the host's default instance).
+    pub instance: Option<String>,
+}
+
+impl PipeFilters {
+    /// Whether any filter is set.
+    pub fn is_empty(&self) -> bool {
+        self.connector_keys.is_empty()
+            && self.metric_keys.is_empty()
+            && self.location_keys.is_empty()
+            && self.tags.is_empty()
+            && self.instance.is_none()
+    }
+}
+
+fn key_matches(filter: &[String], value: &str) -> bool {
+    if filter.is_empty() {
+        return true;
+    }
+    let (negated, included): (Vec<&String>, Vec<&String>) =
+        filter.iter().partition(|f| f.starts_with('_'));
+    if negated.iter().any(|f| f[1..] == *value) {
+        return false;
+    }
+    included.is_empty() || included.iter().any(|f| *f == value)
+}
+
 /// Pipe registrations on instance connectors.
 pub trait InstanceOps {
+    /// Called by `compose init` before any project exists: the host's configuration scopes the
+    /// instance connectors. Fakes ignore it.
+    fn configure_host(&mut self, _host: &Host) {}
+
+    /// `mrsm.get_pipes(connector_keys=..., ...)` on the host instance, each pipe carrying its
+    /// registered parameters (`compose init` adds them to the new compose file). The default
+    /// has no instance and finds nothing.
+    fn get_pipes_matching(&mut self, _filters: &PipeFilters) -> Result<Vec<Pipe>, String> {
+        Ok(Vec::new())
+    }
+
     /// Called once the project is loaded and before any other method: the project's
     /// environment, root directory and `config:` block scope the instance connectors (Python
     /// swaps the config and environment for the duration of a subaction). Fakes ignore it.
@@ -138,6 +187,40 @@ pub struct InMemoryInstance {
 }
 
 impl InstanceOps for InMemoryInstance {
+    fn get_pipes_matching(&mut self, filters: &PipeFilters) -> Result<Vec<Pipe>, String> {
+        Ok(self
+            .pipes
+            .iter()
+            .filter(|r| {
+                filters
+                    .instance
+                    .as_ref()
+                    .is_none_or(|i| *i == r.instance_keys)
+                    && key_matches(&filters.connector_keys, &r.connector_keys)
+                    && key_matches(&filters.metric_keys, &r.metric_key)
+                    && (filters.location_keys.is_empty()
+                        || filters.location_keys.contains(&r.location_key))
+                    && (filters.tags.is_empty() || {
+                        let tags: Vec<String> = match r.parameters.get("tags") {
+                            Some(Value::List(l)) => {
+                                l.iter().map(meerschaum_core::pyfmt::py_str).collect()
+                            }
+                            _ => Vec::new(),
+                        };
+                        filters.tags.iter().any(|t| tags.contains(t))
+                    })
+            })
+            .filter_map(|r| {
+                Pipe::builder(&r.connector_keys, &r.metric_key)
+                    .location(r.location_key.as_deref())
+                    .instance(&r.instance_keys)
+                    .parameters(r.parameters.clone())
+                    .build()
+                    .ok()
+            })
+            .collect())
+    }
+
     fn build_connector(&mut self, keys: &str, _attributes: &Map) -> Result<(), String> {
         self.connectors.push(keys.to_string());
         Ok(())

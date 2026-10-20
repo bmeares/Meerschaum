@@ -36,6 +36,9 @@ pub fn sh_context(root: &Path) -> JobsContext {
         .join(".config")
         .join("systemd")
         .join("user");
+    // The startup gate (jitter, load check, slots) is tested in `startup.rs`; elsewhere a job's
+    // start must not depend on the host's load or on a random delay.
+    ctx.config.startup.enabled = false;
     ctx.with_launcher(Launcher {
         supervisor: vec![env!("CARGO_BIN_EXE_mrsm-job-supervisor").to_string()],
         program: vec!["/bin/sh".to_string()],

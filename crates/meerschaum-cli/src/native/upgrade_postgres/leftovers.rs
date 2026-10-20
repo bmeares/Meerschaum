@@ -65,6 +65,11 @@ impl Interrupted {
         self.manifest.get(key).and_then(Json::as_bool) == Some(true)
     }
 
+    /// The stack's `db` was down when the run began (only a restore records it).
+    fn db_down_before(&self) -> bool {
+        self.manifest.get("db_running").and_then(Json::as_bool) == Some(false)
+    }
+
     fn major(&self, side: &str) -> u32 {
         self.manifest
             .get(side)
@@ -191,11 +196,18 @@ pub(crate) fn describe(stack: &Stack, found: &Leftovers) -> String {
             continue;
         }
         out.push_str("  Put back as it was before that run:\n");
-        if run.flag("old_db_stopped") || !db_running {
+        if switch::recovery_starts_old_db(
+            run.flag("old_db_stopped"),
+            run.db_down_before(),
+            run.manifest.get("config").is_some(),
+            db_running,
+        ) {
             out.push_str(&format!(
                 "  - the stack's `db` is started on '{}'\n",
                 run.text(&["old", "volume"])
             ));
+        } else if run.db_down_before() {
+            out.push_str("  - the stack's `db` stays stopped, as it was before that run\n");
         }
         let stopped = run.list("stopped");
         if !stopped.is_empty() {
@@ -372,7 +384,13 @@ fn put_back_run(rt: &mut Runtime<'_>, stack: &Stack, run: &Interrupted) -> Vec<S
             .map(str::to_string),
         paused: run.list("paused"),
         new_volume: run.volume.clone(),
-        old_db_stopped: run.flag("old_db_stopped") || (config.is_some() && !db_running),
+        old_db_stopped: switch::recovery_starts_old_db(
+            run.flag("old_db_stopped"),
+            run.db_down_before(),
+            config.is_some(),
+            db_running,
+        ),
+        db_down_before: run.db_down_before(),
         config,
         new_volume_outcome: None,
     };

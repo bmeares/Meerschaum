@@ -86,8 +86,10 @@ fs4 = "1.1"
 # `timed_input`: poll stdin with a timeout (no reader thread that outlives the call);
 # `setsid` for the timed pipeline step; `fs` for `doctor` (`access`, `statvfs`).
 rustix = { version = "1", default-features = false, features = ["std", "event", "process", "fs"] }
-# The progress line's SIGINT / SIGTERM guard (`format/progress.rs`), a safe API.
-signal-hook = "0.4"
+# The SIGINT / SIGTERM watcher (`shell/interrupt.rs`, which also erases the progress line), a safe
+# API. `extended-siginfo` says whether a signal came from the terminal (Ctrl-C, which the programs
+# of the foreground process group got too) or from `kill` (which they did not: it is forwarded).
+signal-hook = { version = "0.4", features = ["extended-siginfo"] }
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }

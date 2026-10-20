@@ -10,14 +10,17 @@ and layering are in `crates/README.md`; the user-facing story is `docs/zensical/
 - **A Rust rewrite, clean break.** The core (`Pipe`, parameters, config, `{{ Pipe() }}` templating),
   the data kernel (Arrow/Polars dtype enforcement and the `filter_existing` diff), the `sql:` / `valkey:` /
   `api:` connectors, the dependency-aware Syncing Engine, jobs, compose, the `axum` HTTP API + MCP server,
-  the server-rendered `/dash` console and the `mrsm` CLI/shell are Rust crates under `crates/`.
+  and the `mrsm` CLI/shell are Rust crates under `crates/`. The web console is **not** Rust (D21): it is
+  v4's Plotly Dash app ported onto the façade (`meerschaum/api/dash`, extra `meerschaum[dash]`), served by
+  the API host; the Rust server keeps the web terminal, the job-log stream and a pointer page.
   No Python fallback ships in 5.0 and there is no v6 "to finish the port".
 - **Python stays as SDK + façade + one extension host.** The `meerschaum` wheel = the `_core` PyO3
   extension + a façade (`mrsm.Pipe`, connectors, `get_config`, actions dispatch) + the plugin SDK
   (`attempt_import`, `Venv`, `@make_action`, hooks, `warn`/`error`/`info`/`dprint`, ...) + the
-  **API host** (`python -m meerschaum.api.host`: `@api_plugin` routes, plugin MCP tools and
-  **plugin-owned Dash apps** mounted at `/dash/<plugin>/`, proxied by the Rust server, started only when
-  a plugin needs it) + the Python worker (`python -m meerschaum.worker`, what the Rust host runs plugins in).
+  **API host** (`python -m meerschaum.api.host`: `@api_plugin` routes, plugin MCP tools and the **one Dash
+  console app** at `/dash` that plugin `@dash_plugin` / Dash `@web_page` pages register into; proxied by the
+  Rust server, started only when a plugin needs it or the console is importable, over a Unix socket or, on
+  Windows, loopback TCP with a per-start token) + the Python worker (`python -m meerschaum.worker`, what the Rust host runs plugins in).
 - **Public surfaces do not change** (§11): pipe keys and every `parameters` key, config YAML layout,
   `MRSM_SQL_<LABEL>` env connectors, instance tables, the job directory layout, compose files, every HTTP
   route, and the Python public API. `SQLConnector.read/exec/value/to_sql/.engine/get_tables()` stay
@@ -160,15 +163,20 @@ MRSM_TEST_FLAVORS=sqlite ./scripts/test.sh db ""
 ### Console (Playwright) and API host tests
 
 ```bash
-cargo build -p meerschaum --bin mrsm                         # tests/console uses MRSM_TEST_BIN or target/debug/mrsm (version and age checked)
+cargo build -p meerschaum --bin mrsm                         # tests/console uses MRSM_TEST_BIN or target/debug/mrsm (version and age checked); the interpreter needs meerschaum[dash,sql,pandas] + Playwright's Chromium
 cargo build -p meerschaum-plugin && tests/console/build_native.sh <plugins-dir>   # the synthetic native page plugin
 MRSM_TEST_CONSOLE=1 PYTHONPATH=$(pwd) python -m pytest tests/console -v
 PYTHONPATH=$(pwd) MRSM_ROOT_DIR=./test_root MRSM_PLUGINS_DIR=./tests/plugins python -m pytest tests/api_host -v
 ```
 
 `tests/console` is opt-in (skipped without `MRSM_TEST_CONSOLE=1`): it starts real `mrsm start api`
-servers on random high ports with a temporary root, a SQLite instance and the `w7_pyfig` /
-`w7_dashapp` / `w7_native_fig` plugins, and drives them with Chromium. It never uses 8989 or a container.
+servers (the Rust server + the Python host serving the **Dash console**) on random high ports with a
+temporary root, a SQLite instance and the `w7_pyfig` / `w7_dashapp` / `w7_native_fig` plugins, and drives
+the Dash pages, the pipelines page, Exec through `POST /execute`, page-contract pages (in their frame),
+the webterm iframe and the pointer page with Chromium. It never uses 8989 or a container.
+`tests/api_host` covers the host and the console's support code in process (no browser). Tests that wait
+for jobs started through `compose up` or a bulk start must pass `--no-stagger` (the startup gate adds up to
+10 s of jitter there, see Gotchas).
 
 ### Parity fixtures, benchmarks, docs, release build
 
@@ -201,8 +209,8 @@ depends on (the front crate's default `cli` feature pulls `cli` in for the `mrsm
 | `meerschaum-engine` | graph (parents/children/`{{ Pipe() }}` edges), planner (`skip`/`incremental`/`backfill`/`rebuild`/`observe`/`root`), executor (HEFT priorities, leases, retries), dirty-range ledger + edge cursors + run history as `mrsm:engine_*` internal pipes, continuous mode (`--loop` laps, `--listen` streams), events, Gantt data |
 | `meerschaum-worker` | the Python worker pool + msgpack/Arrow-IPC wire protocol, `PythonConnector` adapter, callbacks (`pipe.sync()` from plugin code), supervised streams, the plugin manifest (`<root>/cache/plugins_manifest.json`, schema in `schema/manifest.schema.json`) |
 | `meerschaum-jobs` / `meerschaum-compose` | daemon supervision with v4's `jobs/<name>/` layout, `-s` schedule grammar, laps, per-root scheduler; the compose model, `.env`/envyaml, subactions, `explain` lint |
-| `meerschaum-server` | the `axum` API (every v4 route + `/engine/*`), OAuth2/JWT/tokens, rate limits, allowlist route groups, the API-host proxy over a Unix socket, MCP (`/mcp` + stdio) with federation of plugin tools |
-| `meerschaum-web` | the `/dash` console (askama + HTMX, vendored Plotly.js/MapLibre/Cytoscape/xterm.js, no CDN), sessions (`mrsm-session-id`, Valkey or the `mrsm_sessions` pipe), the plugin page contract (`data-mrsm-figure`, `data-mrsm-map`) |
+| `meerschaum-server` | the `axum` API (every v4 route + `/engine/*` + `POST /execute`), OAuth2/JWT/tokens, rate limits, allowlist route groups, the API-host proxy (Unix socket, or TCP + token on Windows) that forwards `/dash*` to the host when it reports `console.mounted` (`web.rs`, else the static pointer page for `pip install meerschaum[dash]`), MCP (`/mcp` + stdio) with federation of plugin tools |
+| `meerschaum-web` | what is left of the web side (D21: the console is Dash, not Rust): the web terminal (`/webterm/<session-id>` + vendored xterm.js at `/webterm/assets/*`), the job-log SSE stream (`GET /logs/{name}/stream`), native plugin pages served as fragments to the Dash console (`/_mrsm/native-pages`), console sessions (`mrsm-session-id`, Valkey or the `mrsm_sessions` pipe) |
 | `meerschaum-plugin` | the native plugin SDK: `Plugin` trait + `export_plugin!`, the C ABI (`mrsm_plugin_v1`, Arrow C stream), loader, discovery (`<name>/plugin.toml` + `lib<name>.so`), native manifest cache |
 | `meerschaum-cli` | the CLI library (internal; `run_main()` is the process entry shared by the `meerschaum` front crate's `mrsm` binary and `_native.main`; its own `mrsm-cli` bin runs its integration tests): clap spec/argparse parity, dispatch, every native action (`src/native/`), the reedline shell with prompt_toolkit parity (`src/shell/`), `start api`/`start mcp` (`server.rs`), venv accounting (`show`/`prune venvs`), engine views (`plan pipes`, `show graph`, `show runs`) |
 | `meerschaum-py` | PyO3 bindings -> `meerschaum._core` (`src/lib.rs`; `main_api.rs` = `_native.main`, the `mrsm` console script's entry; kernel, core, `SqlConnector`, `Pipe`, engine, verify and D14 APIs); `PARITY.md` logs every python-vs-rust discrepancy and its resolution, `PERF.md` the boundary benchmarks |
@@ -218,7 +226,8 @@ depends on (the front crate's default `cli` feature pulls `cli` in for the `mrsm
 | `connectors/` | façades; `SQLConnector._rust_method()` builds one `_core.SqlConnector` per Python connector (rebuilt when the PID changes); `read/exec/value/to_sql/.engine` stay SQLAlchemy |
 | `plugins/` | the SDK decorators, `_page.py` (`figure()` / `figure_json()` for the page contract) |
 | `worker/` | `python -m meerschaum.worker`: the v4 plugin machinery driven over the worker protocol |
-| `api/host/` | `python -m meerschaum.api.host`: the FastAPI host for `@api_plugin`, plugin MCP tools, and `host/dash.py` (the Dash shim mounting plugin apps at `/dash/<plugin>/`) |
+| `api/host/` | `python -m meerschaum.api.host`: the FastAPI host for `@api_plugin`, plugin MCP tools, and `host/dash.py` (mounts the one console app at `/dash`, reports `GET /_mrsm/host/status`, frames page-contract pages, redirects rc1's `/dash/<plugin>/` URLs) |
+| `api/dash/` | the Plotly Dash console, v4's pages/callbacks/components ported onto the façade (`build_dash_app()` builds the ONE app lazily; `_support.py` replaces deleted v4 internals; `execute.py` = Exec through the server; `engine.py` + `pages/pipelines.py` = the v5 pipelines page; `sessions.py` = plugin-facing session helpers). Plugins register into it; `tests/console` drives it |
 | `api/`, `actions/`, `utils/`, `config/` | what is left of the v4 packages: SDK helpers and façades over `_core` (`config` is the live dict plus `_core.get_config`; `utils.daemon.Daemon` and `jobs.Job` read and control the Rust supervisor; `actions.actions[<name>]` dispatches to the binary; `api/` keeps `host/` and the helpers the host uses). Everything else was deleted: see the D14 table at the end of `crates/meerschaum-py/PARITY.md` and "Removed in 5.0" in the migration guide |
 
 ### Façade pattern
@@ -305,14 +314,21 @@ plugins are reached from Rust **only** through the worker adapter; Rust never ca
 implementation of something it implements itself (D12). Plugins: `fetch` / `sync` / `register` /
 `setup` in `MRSM_PLUGINS_DIR`, `required` lists, per-plugin venvs, `@make_action`, `add_plugin_argument`,
 `@pre_sync_hook` / `@post_sync_hook`, `@api_plugin`, `@dash_plugin`, `@web_page` (returns HTML = page
-contract; returns a Dash layout = legacy Dash app), `meerschaum.mcp.tool` / `resource`.
+contract, framed by the console; returns a Dash layout = a page of the one console app),
+`meerschaum.mcp.tool` / `resource`.
 
 **Config.** `get_config('a', 'b')` over YAML under `MRSM_ROOT_DIR/config/`; `MRSM_SQL_<LABEL>` /
 `MRSM_API_<LABEL>` URIs define connectors; `MRSM_CONFIG` (JSON) patches config in tests; the engine's
 keys live under `system.engine.*` (`workers`, `python_workers`, `limits.connectors`, `auto_rebuild`,
 `implicit_edges`, `inclusive_cap`, `flat_ledger`, `state_flush_ms`, `run_history_days`,
 `debounce_seconds`, `chunk_pipelining`, `default_duration_seconds`). `MRSM_PYTHON` picks the
-interpreter the binary runs workers with (`tests/console` sets it to `sys.executable`).
+interpreter the binary runs workers with (`tests/console` sets it to `sys.executable`). Before the first
+worker starts the binary preflights the interpreter once (`python -P -c`, 10 s: it must import a
+`meerschaum` of the same major); a refusal is one message naming the interpreter and the fix, remembered
+for seconds-to-minutes, and a worker has `MRSM_WORKER_STARTUP_TIMEOUT` seconds (default 60) to connect.
+`connect_timeout` (connector attribute; `MRSM_CONNECT_TIMEOUT` overrides, default 5 s) bounds the first
+connection of a command to a SQL/API/Valkey server, and a refused connection, unknown host or bad
+credentials fail at once (`SqlDriver::ready()`; keep its slow path boxed, see Gotchas).
 
 ## Conventions
 
@@ -357,6 +373,16 @@ it is committed: `CLAUDE.md`, READMEs, fixtures and docs must never name private
 organizations, home directories, hostnames or credentials.
 
 ## Gotchas (verified)
+
+- **Jobs start through a per-root admission gate** (D23, `meerschaum-jobs/src/startup.rs`): file-lock slots
+  under `<root>/jobs/.startup/`, random jitter (`jobs.startup.jitter_seconds`, 30) and load/memory waits for
+  bulk starts (`compose up`, `restart jobs`, `start jobs` of several, systemd restarts). Compose sets
+  `MRSM_JOB_START_KIND=bulk` on its child `mrsm`; an explicit single `start job x` skips jitter but takes a
+  slot; **`--no-stagger` bypasses the gate**. Tests that start jobs and wait for them use `--no-stagger`
+  (or `jobs.startup.enabled: false`); a worker "stuck at starting" for ~10-30 s is the gate, not a hang.
+- **`SqlDriver::ready()` (the fail-fast connect gate) must stay tiny.** Its slow path is
+  `Box::pin(self.establish_first(..))`: an inline body made every driver future 8 KB and overflowed the
+  2 MiB tokio worker stack in debug builds (`sync pipes`). `driver::future_size_tests` guards it.
 
 - **Empty frames export no Arrow batches.** A zero-row pandas/Polars frame's `__arrow_c_stream__` has
   no batches; the boundary (`frame_from_arrow`) must import an empty batch carrying the schema or

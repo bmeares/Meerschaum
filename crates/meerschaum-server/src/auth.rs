@@ -562,28 +562,66 @@ pub async fn manager_unless_no_auth(
     manager(state, headers).await.map(Some)
 }
 
-/// `is_user_allowed_to_execute(user)`.
+/// Whether the caller is an administrator. Without a principal (`--no-auth`) everyone is.
+pub async fn is_admin(state: &AppState, principal: Option<&Principal>) -> bool {
+    let Some(principal) = principal else {
+        return true;
+    };
+    match principal {
+        Principal::User(u) => {
+            state
+                .instance()
+                .get_user_type(u)
+                .await
+                .ok()
+                .flatten()
+                .unwrap_or_default()
+                == "admin"
+        }
+        Principal::Token(_) => false,
+    }
+}
+
+/// `is_user_allowed_to_execute(user)`: the `/actions` and job routes, which read
+/// `system:api:permissions:actions:non_admin` (see [`is_user_allowed_to_execute_with`]).
 pub async fn is_user_allowed_to_execute(
     state: &AppState,
     principal: Option<&Principal>,
 ) -> SuccessTuple {
+    is_user_allowed_to_execute_with(state, principal, state.config.system_actions_non_admin).await
+}
+
+/// Who may run actions through the web console: `POST /execute` and the job-log stream
+/// (`GET /logs/{name}/stream`) both ask this one function, so they cannot disagree. It is the rule
+/// of v4's console (`api/dash/sessions.py`): administrators, and other users only when
+/// `api:permissions:actions:non_admin` is true (its default; `start api --secure` sets it false),
+/// plus the scopes `is_user_allowed_to_execute` asks of non-administrators. v4's other key,
+/// `system:api:permissions:actions:non_admin` (unset by default), gates `/actions` and the job
+/// routes and does not apply here.
+pub async fn is_user_allowed_to_execute_console(
+    state: &AppState,
+    principal: Option<&Principal>,
+) -> SuccessTuple {
+    is_user_allowed_to_execute_with(state, principal, state.config.actions_non_admin).await
+}
+
+/// `is_user_allowed_to_execute(user)` with the "non-administrators may run actions" switch given
+/// by the caller: `/actions` and the job routes pass `system:api:permissions:actions:non_admin`
+/// (v4's key, unset by default), the console's `POST /execute` passes
+/// `api:permissions:actions:non_admin` (`ServerConfig::actions_non_admin`, true by default,
+/// false under `--secure`).
+pub async fn is_user_allowed_to_execute_with(
+    state: &AppState,
+    principal: Option<&Principal>,
+    allow_non_admin: bool,
+) -> SuccessTuple {
     let Some(principal) = principal else {
         return SuccessTuple::success();
     };
-    let user_type = match principal {
-        Principal::User(u) => state
-            .instance()
-            .get_user_type(u)
-            .await
-            .ok()
-            .flatten()
-            .unwrap_or_default(),
-        Principal::Token(_) => "token".into(),
-    };
-    if user_type == "admin" {
+    if is_admin(state, Some(principal)).await {
         return SuccessTuple::success();
     }
-    if !state.config.system_actions_non_admin {
+    if !allow_non_admin {
         return SuccessTuple::fail(
             "The administrator for this server has not allowed users to perform actions.",
         );

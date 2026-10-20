@@ -257,6 +257,12 @@ pub struct ComposeFile {
     /// `daemon` (`false` appends `--no-daemon`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub daemon: Option<Value>,
+    /// `include` (v5): compose files, directories and globs this project includes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub include: Option<Value>,
+    /// `parent` (v5): the compose file or directory of the project that includes this one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent: Option<Value>,
     /// Unknown top-level keys (ignored by compose, reported by the lint).
     #[serde(flatten)]
     pub extra: IndexMap<String, Value>,

@@ -84,7 +84,7 @@ def root():
     check = _python(
         path,
         "import meerschaum.utils.venv as v; v.activate_venv('mrsm'); "
-        "import fastapi, uvicorn, dash, a2wsgi, jwt",
+        "import fastapi, uvicorn, dash, dash_bootstrap_components, dash_ace, a2wsgi, jwt",
     )
     if check.returncode != 0:
         shutil.rmtree(path, ignore_errors=True)
@@ -193,7 +193,7 @@ def test_plugin_registry_excludes_builtins():
 
 
 def test_host_mode_surface(root):
-    """`meerschaum.api` keeps its surface in host mode, without the core routes or console."""
+    """`meerschaum.api` keeps its surface in host mode, without the core routes."""
     code = """
 import json
 import meerschaum.api as api
@@ -205,7 +205,7 @@ from meerschaum.api._oauth2 import SECRET
 from meerschaum.api._tokens import get_token_from_authorization
 import meerschaum.api.models
 from meerschaum.api.host import build_app
-from meerschaum.api.host.dash import plugin_path
+from meerschaum.api.host.dash import plugin_path, redirect_target, console_status
 built = build_app()
 import meerschaum.api.dash as api_dash
 from meerschaum.api.dash.sessions import (
@@ -219,13 +219,21 @@ print(json.dumps({
     'paths': paths,
     'secret_len': len(SECRET),
     'instance': str(get_api_connector()),
-    'dash_surface': getattr(api_dash, '_mrsm_host_surface', False),
     'console_built': api_dash.dash_app is not None,
+    'console_status': console_status(),
     'plugin_paths': [
         plugin_path('demo', '/dash/demo/page'),
         plugin_path('demo', 'dash/other'),
         plugin_path('demo', '/dash/demo'),
         plugin_path('demo', '/dash/demonstration'),
+    ],
+    'redirects': [
+        redirect_target('/dash/hostdemo/page'),
+        redirect_target('/dash/hostdemo/pipes'),
+        redirect_target('/dash/hostdemo/pipes', 'a=1'),
+        redirect_target('/dash/pipes/demo/child'),
+        redirect_target('/dash/unknownplugin/pipes'),
+        redirect_target('/dash/hostdemo/nothing-like-it'),
     ],
 }))
 """
@@ -236,15 +244,22 @@ print(json.dumps({
     assert out['same_app'] is True
     assert out['secret_len'] > 0
     assert out['instance'] == 'sql:local'
-    assert out['dash_surface'] is True
-    assert out['console_built'] is False
+    ### One Dash app is the console, mounted at `/dash`.
+    assert out['console_built'] is True
+    assert out['console_status']['mounted'] is True
+    assert out['console_status']['reason'] is None
+    assert out['console_status']['dash_version']
     assert '/hostdemo/hello' in out['paths']
-    assert '/dash/hostdemo' in out['paths']
-    assert '/_mrsm/host/registry' in out['paths']
-    for core in ('/pipes/keys', '/login', '/mcp', '/version', '/dash'):
+    assert '/dash' in out['paths']
+    assert '/_mrsm/host/registry' in out['paths'] and '/_mrsm/host/status' in out['paths']
+    for core in ('/pipes/keys', '/login', '/mcp', '/version'):
         assert core not in out['paths'], core
     assert out['plugin_paths'] == [
         '/dash/demo/page', '/dash/demo/other', '/dash/demo', '/dash/demo/demonstration',
+    ]
+    ### rc1's per-plugin paths redirect to the v4 paths (the plugin's own pages keep theirs).
+    assert out['redirects'] == [
+        None, '/dash/pipes', '/dash/pipes?a=1', None, None, None,
     ]
 
 
@@ -353,14 +368,16 @@ def test_mcp_calls_run_with_the_forwarded_scopes(host):
     assert response.status_code == 202
 
 
+def _dependencies(client):
+    return client.get('/dash/_dash-dependencies').json()
+
+
 def _route(client, pathname):
     """
-    Fire the page-router callback. It is found through `_dash-dependencies`, because the output
-    id differs with the app class: `dash_extensions` (the `dash` extra) multiplexes the stores,
-    plain Dash marks them `allow_duplicate`.
+    Fire the console's page-router callback. It is found through `_dash-dependencies`, because the
+    output id differs with the app class (`dash_extensions` multiplexes the stores).
     """
-    dependencies = client.get('/dash/hostdemo/_dash-dependencies').json()
-    dependency = next(d for d in dependencies if 'page-layout-div' in d['output'])
+    dependency = next(d for d in _dependencies(client) if 'page-layout-div' in d['output'])
     outputs = []
     for part in dependency['output'].strip('.').split('...'):
         component_id, _, prop = part.partition('.')
@@ -368,29 +385,65 @@ def _route(client, pathname):
     payload = {
         'output': dependency['output'],
         'outputs': outputs,
-        'inputs': [{'id': 'mrsm-location', 'property': 'pathname', 'value': pathname}],
+        'inputs': [
+            {'id': 'mrsm-location', 'property': 'pathname', 'value': pathname},
+            {'id': 'session-store', 'property': 'data', 'value': {}},
+        ],
         'changedPropIds': ['mrsm-location.pathname'],
-        'state': [],
+        'state': [{'id': 'mrsm-location', 'property': 'href', 'value': 'http://localhost' + pathname}],
     }
-    response = client.post('/dash/hostdemo/_dash-update-component', json=payload)
+    response = client.post('/dash/_dash-update-component', json=payload)
     assert response.status_code == 200, response.text
     return response.json()['response']
 
 
-def test_plugin_dash_app(host):
+def test_the_console_is_one_dash_app(host):
     client, _ = host
-    html = client.get('/dash/hostdemo/').text
+    html = client.get('/dash/').text
     assert 'id="mrsm-theme-dark"' in html and 'id="mrsm-theme-light"' in html
-    assert '/dash/hostdemo/assets/hostdemo.css' in html
-    layout = client.get('/dash/hostdemo/_dash-layout').text
-    for component_id in ('session-store', 'mrsm-location', 'dbc-dark-store'):
+    assert '/dash/_dash-component-suites/' in html and 'Meerschaum Web' in html
+    layout = client.get('/dash/_dash-layout').text
+    for component_id in ('session-store', 'mrsm-location', 'dbc-dark-store', 'pages-offcanvas'):
         assert f'"{component_id}"' in layout
+    ### v4's assets are served by Dash itself; a plugin's `assets/` directory is served beside them
+    ### and its stylesheet is loaded by every page.
+    assert client.get('/dash/assets/ansi_up.js').status_code == 200
+    assert '/dash/_plugin-assets/hostdemo/hostdemo.css' in html
+    assert client.get('/dash/_plugin-assets/hostdemo/hostdemo.css').status_code == 200
+    assert client.get('/dash/_plugin-assets/hostdemo/missing.css').status_code == 404
+    assert client.get('/dash/_plugin-assets/nosuchplugin/hostdemo.css').status_code == 404
+    ### The plugin's `@dash_plugin` callback is registered on the core app.
+    assert any('hostdemo-session.children' in d['output'] for d in _dependencies(client))
 
+    ### A plugin's `@web_page` is a page of the console at its v4 path.
     response = _route(client, '/dash/hostdemo/page')
     page = json.dumps(response['page-layout-div'])
     assert 'Hostdemo' in page and 'hostdemo-session' in page
     assert 'Page not found' not in page
-    assert response['session-store'] == {'data': {}}
-    assert response['dbc-dark-store'] == {'data': True}
+    ### An unknown path is the console's dashboard, not a plugin page (v4's router).
+    assert 'Hostdemo' not in json.dumps(_route(client, '/dash/nope'))
 
-    assert 'Page not found' in json.dumps(_route(client, '/dash/hostdemo/nope'))
+
+def test_rc1_plugin_paths_redirect(host):
+    client, _ = host
+    response = client.get('/dash/hostdemo/pipes?a=1', follow_redirects=False)
+    assert response.status_code == 307
+    assert response.headers['location'] == '/dash/pipes?a=1'
+    ### The plugin's own page keeps its path.
+    assert client.get('/dash/hostdemo/page', follow_redirects=False).status_code == 200
+
+
+def test_host_status_route(host):
+    client, secret = host
+    assert client.get('/_mrsm/host/status').status_code == 403
+    response = client.get(
+        '/_mrsm/host/status', headers={INTERNAL_TOKEN_HEADER: internal_token(secret, [])},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body['console']['mounted'] is True and body['console']['reason'] is None
+    assert body['console']['dash_version'] and body['version']
+    registry = client.get(
+        '/_mrsm/host/registry', headers={INTERNAL_TOKEN_HEADER: internal_token(secret, [])},
+    ).json()
+    assert registry['console'] == body['console']

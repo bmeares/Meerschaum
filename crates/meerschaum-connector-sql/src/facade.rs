@@ -92,7 +92,17 @@ impl SqlConnector {
         let Some(sql) = self.get_pipe_rowcount_query(&sp, &state, query)? else {
             return Ok(None);
         };
-        Ok(self.value(&sql).await.and_then(|v| v.as_i64()))
+        // Without bounds or `params` the text only depends on the table: prepared once per
+        // pooled connection on PostgreSQL (see `SqlConnector::sync_time`).
+        let stable = query.begin.is_none()
+            && query.end.is_none()
+            && query.params.as_ref().is_none_or(|p| p.is_empty());
+        let value = if stable {
+            self.value_catalog(&sql).await
+        } else {
+            self.value(&sql).await
+        };
+        Ok(value.and_then(|v| v.as_i64()))
     }
 
     /// [`sync_pipe_result`](SqlConnector::sync_pipe_result), updating `pipe`'s in-memory

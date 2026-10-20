@@ -164,6 +164,59 @@ fn internal_key_length_error(sp: &SqlPipe, flavor: Flavor, df: &Frame) -> Option
     None
 }
 
+/// The most pipes whose post-sync columns types are held at once (consumed by the first
+/// [`take_synced_columns_types`](SqlConnector::take_synced_columns_types); a caller that never
+/// takes them, such as the CLI, must not grow the map without bound).
+const MAX_SYNCED_COLUMNS: usize = 512;
+
+/// The key of a pipe's post-sync columns types: its keys, which a caller has without resolving
+/// the pipe's parameters.
+fn synced_columns_key(pipe: &Pipe) -> String {
+    format!(
+        "{:?}",
+        (
+            pipe.connector_keys(),
+            pipe.metric_key(),
+            pipe.location_key()
+        )
+    )
+}
+
+impl SqlConnector {
+    fn forget_synced_columns(&self, key: &str) {
+        self.state.lock().expect("state").synced_columns.remove(key);
+    }
+
+    fn record_synced_columns(&self, key: &str, cols_types: &IndexMap<String, String>) {
+        if cols_types.is_empty() {
+            return;
+        }
+        let mut state = self.state.lock().expect("state");
+        if state.synced_columns.len() >= MAX_SYNCED_COLUMNS {
+            state.synced_columns.clear();
+        }
+        state
+            .synced_columns
+            .insert(key.to_string(), cols_types.clone());
+    }
+
+    /// The columns types `{column: DB TYPE}` of the pipe's table as the last successful
+    /// `sync_pipe` of this connector left them, handed out once (`None` when that sync created
+    /// the table, did not finish, or was already taken).
+    ///
+    /// A sync reflects the table's columns before it writes, and again after any DDL of its own,
+    /// so what it holds at the end is the table's layout. The Python façade adopts it as the
+    /// pipe's cached `get_columns_types()` instead of reflecting the table a second time on the
+    /// next read.
+    pub fn take_synced_columns_types(&self, pipe: &Pipe) -> Option<IndexMap<String, String>> {
+        self.state
+            .lock()
+            .expect("state")
+            .synced_columns
+            .remove(&synced_columns_key(pipe))
+    }
+}
+
 impl SqlConnector {
     /// `Pipe.sync(df)` essentials over this instance: enforce the pipe's dtypes on the input
     /// (a frame, documents or a dict of lists), add the autotime column, persist newly detected
@@ -353,6 +406,9 @@ impl SqlConnector {
         let mut check_existing = opts.check_existing;
         let cache_internal = pipe.temporary && sp0.is_static() && pipe.connector_keys() == "mrsm";
         let cache_key = self.pipe_table_name(&sp0);
+        // A sync that does not finish leaves no columns types behind.
+        let synced_key = synced_columns_key(pipe);
+        self.forget_synced_columns(&synced_key);
         let cached = internal.cached_state.clone().or_else(|| {
             if cache_internal {
                 self.state
@@ -607,6 +663,11 @@ impl SqlConnector {
         } else {
             result.inserted = unseen_count;
             result.updated = update_count;
+        }
+        if !is_new && !cache_internal && internal.columns_types.is_none() {
+            // The layout the sync worked against (reflected again after any `ADD COLUMN` /
+            // `ALTER COLUMN` it ran; inserts and updates do not change it).
+            self.record_synced_columns(&synced_key, &state.cols_types);
         }
         if cache_internal {
             if is_new {

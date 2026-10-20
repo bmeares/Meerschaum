@@ -7,8 +7,7 @@ Check the `.crate` archives `cargo package --workspace` wrote to `target/package
 
 For every archive:
 
-- the size is under crates.io's 10 MB limit (`--limit-mb`; `meerschaum-web`, which vendors Plotly,
-  MapLibre and Cytoscape, is the one that matters);
+- the size is under crates.io's 10 MB limit (`--limit-mb`);
 - it ships no tests, fixtures, benches, generators, `.github`, virtualenvs or build output (each
   crate declares an explicit `include`, so a path here means the list is too broad);
 - it carries a README, the root `LICENSE` and `NOTICE`, and a `Cargo.toml` with `description`, `license` and `repository`.

@@ -188,6 +188,9 @@ struct State {
     tables_ready: bool,
     leases_ready: bool,
     internal_pipe_states: HashMap<String, data::PipeState>,
+    /// The columns types a successful `sync_pipe` left behind, by table (see
+    /// `SqlConnector::take_synced_columns_types`).
+    synced_columns: HashMap<String, IndexMap<String, String>>,
     /// `db_version`.
     db_version: Option<String>,
     /// Executed statements, when the query log is enabled (tests record emitted DDL).
@@ -495,6 +498,31 @@ impl SqlConnector {
     /// Set the connectors cross-instance `{{ Pipe() }}` references resolve against.
     pub fn set_instance_provider(&self, provider: Arc<dyn InstanceProvider>) {
         *self.provider.lock().unwrap_or_else(|e| e.into_inner()) = Some(provider);
+    }
+
+    /// Forget the engine state of `pipe` that lives on **other** instances (GAP-002): its ledger
+    /// entries and the cursors in which it is the parent, written onto its cross-instance
+    /// children's instances. The pipe's state on this instance is
+    /// `pipe_ops::forget_engine_state`'s. Failures are reported in the result, never raised.
+    pub async fn forget_remote_engine_state(&self, pipe: &Pipe) -> meerschaum_core::SuccessTuple {
+        let provider = self.instance_provider();
+        meerschaum_connector::pipe_ops::forget_remote_engine_state(self, provider.as_ref(), pipe)
+            .await
+    }
+
+    /// The provider that reaches other instances: the one set with
+    /// [`set_instance_provider`](Self::set_instance_provider), else the `MRSM_SQL_<LABEL>`
+    /// environment connectors.
+    pub(crate) fn instance_provider(&self) -> Arc<dyn InstanceProvider> {
+        let provider = self
+            .provider
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
+        match provider {
+            Some(p) => p,
+            None => crate::instance::env_provider::EnvSqlProvider::shared(),
+        }
     }
 
     /// `pipe` with its parameters resolved against the registered state of every pipe it

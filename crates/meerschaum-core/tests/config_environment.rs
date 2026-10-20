@@ -108,3 +108,84 @@ fn initialization_still_applies_uris_before_config_and_patch() {
     );
     assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 0);
 }
+
+#[test]
+fn variables_of_unknown_connector_types_are_ignored() {
+    let root = tempfile::tempdir().unwrap();
+    let config = registry(root.path(), &[]);
+    let applied = config.apply_environment_uris(&env(&[
+        ("MRSM_SQL_REAL", "sqlite:///x.db"),
+        ("MRSM_DUCKDB_LIB", "/opt/libduckdb.so"),
+        ("MRSM_CI_MIN_FREE_GB", "10"),
+        ("MRSM_TEST_PG_URI", "postgresql://x"),
+        ("MRSM_MQTTDEMO_BROKER", r#"{"host":"localhost"}"#),
+    ]));
+    // Only the built-in type: no plugin registers `mqttdemo` here.
+    assert_eq!(applied, 1);
+    let notices = config.take_notices();
+    assert!(
+        notices
+            .iter()
+            .all(|n| matches!(n, meerschaum_core::config::Notice::Debug(_))),
+        "{notices:?}"
+    );
+    assert!(
+        config
+            .get(&["meerschaum", "connectors", "duckdb"])
+            .is_none()
+    );
+    assert!(config.get(&["meerschaum", "connectors", "ci"]).is_none());
+    assert!(config.get(&["meerschaum", "connectors", "test"]).is_none());
+    assert!(
+        config
+            .get(&["meerschaum", "connectors", "mqttdemo"])
+            .is_none()
+    );
+    assert!(
+        notices.iter().any(|n| matches!(n,
+            meerschaum_core::config::Notice::Debug(t) if t.contains("MRSM_DUCKDB_LIB"))),
+        "{notices:?}"
+    );
+}
+
+#[test]
+fn variables_of_plugin_connector_types_are_read() {
+    let root = tempfile::tempdir().unwrap();
+    let plugins = root.path().join("plugins");
+    std::fs::create_dir_all(plugins.join("mqttdemo")).unwrap();
+    std::fs::write(
+        plugins.join("mqttdemo/__init__.py"),
+        "from meerschaum.connectors import make_connector, Connector\n\n@make_connector\nclass MQTTDemoConnector(Connector):\n    pass\n",
+    )
+    .unwrap();
+    let config = registry(
+        root.path(),
+        &[("MRSM_PLUGINS_DIR", plugins.to_str().unwrap())],
+    );
+    // A type the cached manifest lists is known too, with no plugin source present.
+    std::fs::create_dir_all(root.path().join("cache")).unwrap();
+    std::fs::write(
+        root.path().join("cache/plugins_manifest.json"),
+        r#"{"connector_types":{"viamanifest":{"plugin":"p"}}}"#,
+    )
+    .unwrap();
+    let applied = config.apply_environment_uris(&env(&[
+        ("MRSM_MQTTDEMO_BROKER", r#"{"host":"localhost"}"#),
+        ("MRSM_VIAMANIFEST_X", r#"{"host":"h"}"#),
+        ("MRSM_NOTATYPE_X", r#"{"host":"h"}"#),
+    ]));
+    assert_eq!(applied, 2);
+    assert_eq!(
+        config.get(&["meerschaum", "connectors", "mqttdemo", "broker", "host"]),
+        Some(Value::from("localhost"))
+    );
+    assert_eq!(
+        config.get(&["meerschaum", "connectors", "viamanifest", "x", "host"]),
+        Some(Value::from("h"))
+    );
+    assert!(
+        config
+            .get(&["meerschaum", "connectors", "notatype"])
+            .is_none()
+    );
+}

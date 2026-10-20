@@ -623,10 +623,10 @@ fn path_like_job_names_never_touch_the_servers_root() {
 }
 
 /// `POST /jobs/{name}`: the job's environment is the server's; of what the client sends in
-/// `properties.env` only the Compose project stamp is kept (v4 replaces the client's `env`
-/// entirely and so loses the stamp).
+/// `properties.env` only the Compose stamps (project and root) are kept (v4 replaces the
+/// client's `env` entirely and so loses them).
 #[test]
-fn a_created_jobs_environment_is_the_servers_plus_the_compose_stamp() {
+fn a_created_jobs_environment_is_the_servers_plus_the_compose_stamps() {
     use std::io::{Read, Write};
     let server = Server::start(true);
     let script = server.home.script();
@@ -636,6 +636,7 @@ fn a_created_jobs_environment_is_the_servers_plus_the_compose_stamp() {
             "LD_PRELOAD": "/tmp/evil.so",
             "MRSM_TEST_CLIENT_ONLY": "1",
             "MRSM__COMPOSE_PROJECT": "stamped-project",
+            "MRSM__COMPOSE_ROOT": "/srv/stamped/mrsm-compose.yaml",
         }},
     })
     .to_string();
@@ -658,6 +659,7 @@ fn a_created_jobs_environment_is_the_servers_plus_the_compose_stamp() {
     .unwrap();
     let env = props["env"].as_object().unwrap();
     assert_eq!(env["MRSM__COMPOSE_PROJECT"], "stamped-project");
+    assert_eq!(env["MRSM__COMPOSE_ROOT"], "/srv/stamped/mrsm-compose.yaml");
     assert_eq!(env["MRSM_NONINTERACTIVE"], "1");
     assert!(!env.contains_key("LD_PRELOAD"), "{env:?}");
     assert!(!env.contains_key("MRSM_TEST_CLIENT_ONLY"), "{env:?}");
@@ -772,8 +774,14 @@ fn api_action_streams_the_remote_output_and_returns_the_remote_result() {
     assert!(out.status.success(), "{}", text(&out));
     assert!(
         server.job_names().is_empty()
+            // (`jobs/.startup` holds the startup slots of every job started on the root.)
             && std::fs::read_dir(server.home.jobs_dir())
-                .map(|d| d.flatten().count() == 0)
+                .map(|d| {
+                    d.flatten()
+                        .filter(|e| !e.file_name().to_string_lossy().starts_with('.'))
+                        .count()
+                        == 0
+                })
                 .unwrap_or(true),
         "temporary jobs were left on the server"
     );

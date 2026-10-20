@@ -9,8 +9,8 @@
 //!   `default_config.json`); falling back merges the defaults into the loaded key and, when
 //!   `patch` is set and the key's file is absent, writes the loaded config to disk.
 //! - `MRSM{a:b:c}` symlinks are substituted from other config values.
-//! - `MRSM_SQL_<LABEL>` / `MRSM_API_<LABEL>` (any `MRSM_<TYPE>_<LABEL>`) variables add connectors,
-//!   and `MRSM_CONFIG` / `MRSM_PATCH` patch the config, when the registry is created.
+//! - `MRSM_SQL_<LABEL>` / `MRSM_API_<LABEL>` (any `MRSM_<TYPE>_<LABEL>` of an existing connector
+//!   type, see [`connector_types`]) variables add connectors, and `MRSM_CONFIG` / `MRSM_PATCH` patch the config, when the registry is created.
 //! - `patch_config/` and `permanent_patch_config/` directories under the root are applied.
 //!
 //! Lookups that load files or fall back to defaults mutate the in-memory state exactly as the
@@ -27,6 +27,7 @@
 //! them on the right stream; Rust callers read [`Config::take_warnings`].
 
 pub mod backup;
+pub mod connector_types;
 pub mod lossless;
 pub mod paths;
 pub mod sync;
@@ -57,6 +58,12 @@ pub const DEFAULT_CONFIG_JSON: &str = include_str!("default_config.json");
 
 /// The marker substring replaced by the root directory in [`DEFAULT_CONFIG_JSON`].
 pub const ROOT_DIR_MARKER: &str = "{__MRSM_ROOT_DIR__}";
+
+/// The marker substring replaced by this release's version, as the Python package writes it
+/// (PEP 440, `5.0.0rc2`), in [`DEFAULT_CONFIG_JSON`]: the stack's `api` image tag
+/// (`bmeares/meerschaum:{__MRSM_VERSION__}-full`), so a root without a `stack.yaml` always runs the
+/// API server of the version that wrote the compose file (`PARITY.md` W18PK-001).
+pub const VERSION_MARKER: &str = "{__MRSM_VERSION__}";
 
 /// The header written at the top of `meerschaum.yaml` (`default_header_comment`).
 pub const DEFAULT_HEADER_COMMENT: &str = "
@@ -211,9 +218,10 @@ fn resolve_default_markers(value: Value, root: &str, cpu: i64, windows: bool) ->
                 .map(|v| resolve_default_markers(v, root, cpu, windows))
                 .collect(),
         ),
-        Value::Str(s) if s.contains(ROOT_DIR_MARKER) => {
-            Value::Str(s.replace(ROOT_DIR_MARKER, root))
-        }
+        Value::Str(s) if s.contains(ROOT_DIR_MARKER) || s.contains(VERSION_MARKER) => Value::Str(
+            s.replace(ROOT_DIR_MARKER, root)
+                .replace(VERSION_MARKER, &crate::python_guard::expected_version()),
+        ),
         other => other,
     }
 }
@@ -1622,12 +1630,30 @@ impl ConfigState {
         preserve_keys: bool,
     ) -> usize {
         let mut applied = 0;
+        // Plugin connector types, read lazily: only a variable of a non-built-in type needs them.
+        let mut plugin_types: Option<std::collections::BTreeSet<String>> = None;
         for var in get_connector_env_vars(env) {
             let Some((typ, label)) = parse_connector_env_var(&var) else {
                 continue;
             };
             if typ.is_empty() || label.is_empty() {
                 continue;
+            }
+            // PARITY: v4 read every `MRSM_<TYPE>_<LABEL>` as a connector (`MRSM_DUCKDB_LIB`
+            // became `duckdb:lib`). v5 ignores the variables of a type that does not exist.
+            if !connector_types::is_builtin_connector_type(&typ) {
+                let known = plugin_types.get_or_insert_with(|| {
+                    connector_types::plugin_connector_types(
+                        &self.paths.root_dir,
+                        &self.paths.plugins_dirs,
+                    )
+                });
+                if !known.contains(&typ) {
+                    self.debug(format!(
+                        "Ignoring environment variable {var}: '{typ}' is not a connector type."
+                    ));
+                    continue;
+                }
             }
             let uri = env
                 .iter()

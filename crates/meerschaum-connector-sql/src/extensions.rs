@@ -210,8 +210,21 @@ pub fn spec_for_database(spec: &ConnectionSpec, database: Option<&str>) -> Conne
 /// Open a dedicated connection (never from a pool). `sqlx` sends only the startup message (the
 /// configured runtime parameters): no statement runs before the caller's first one.
 async fn open(spec: &ConnectionSpec) -> Result<PgConnection> {
+    use crate::driver::connect::{self, ConnectErrorKind};
     let opts = crate::driver::pg_connect_options(spec)?;
-    Ok(PgConnection::connect_with(&opts).await?)
+    // One attempt (no pool retry), bounded by `connect_timeout` and classified like the pool's
+    // first connection: a refused connection or rejected credentials fail with a clear message.
+    let limit = connect::connect_timeout(spec);
+    match tokio::time::timeout(limit, PgConnection::connect_with(&opts)).await {
+        Ok(Ok(connection)) => Ok(connection),
+        Ok(Err(e)) => Err(connect::map_sqlx(spec, e, limit)),
+        Err(_) => Err(SqlError::Connect(connect::make_error(
+            spec,
+            ConnectErrorKind::Timeout,
+            "",
+            limit,
+        ))),
+    }
 }
 
 fn timeout_error(what: &str, timeout: Duration) -> SqlError {

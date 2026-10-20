@@ -1,6 +1,0 @@
-<!doctype html>
-<html lang="en" class="mrsm-theme-{{ theme }}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{{ title }} · Meerschaum</title>
-<link rel="stylesheet" href="/dash/assets/console.css"><link rel="stylesheet" href="/dash/assets/maplibre-gl.css">
-<script defer src="/dash/assets/htmx.min.js"></script><script defer src="/dash/assets/plotly.min.js"></script><script defer src="/dash/assets/cytoscape.min.js"></script><script defer src="/dash/assets/console.js"></script></head>
-<body><a href="#content" class="skip">Skip to content</a>{% if !skip_navbar %}<header><a href="/dash">Meerschaum</a><nav aria-label="Console">{% for link in links %}<a href="{{ link.0 }}">{{ link.1 }}</a> {% endfor %}</nav><button id="theme-toggle" type="button" aria-label="Toggle dark theme">Theme</button><form method="post" action="/dash/logout"><input type="hidden" name="csrf" value="{{ csrf }}"><button>Log out</button></form></header>{% endif %}
-<main id="content" tabindex="-1"><h1>{{ title }}</h1>{{ content|safe }}</main><footer>Meerschaum console</footer></body></html>

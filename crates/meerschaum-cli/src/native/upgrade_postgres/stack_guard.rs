@@ -45,11 +45,46 @@ fn capture(rt: &mut Runtime<'_>, base: &CommandSpec, args: &[&str]) -> Result<St
     Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
 
+/// What the guard checks. `stack up` checks both; `stack start` and `stack restart` start the
+/// containers that exist, with the image they were created from, so the image's major against the
+/// volume's is not theirs to check.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Check {
+    /// The moving-the-database check and the PostgreSQL major of the image against the volume's.
+    Up,
+    /// Only the moving-the-database check.
+    Start,
+}
+
+impl Check {
+    /// The check of a `stack` subcommand (`None`: it starts nothing the guard cares about).
+    pub(crate) fn of(subcommand: &str) -> Option<Check> {
+        match subcommand {
+            "up" => Some(Check::Up),
+            "start" | "restart" => Some(Check::Start),
+            _ => None,
+        }
+    }
+}
+
 pub(crate) fn stack_up_preflight(
     rt: &mut Runtime<'_>,
     project: &str,
     compose_path: &Path,
     env: &[(String, String)],
+    check: Check,
+) -> Result<(), String> {
+    stack_up_preflight_in(rt, project, compose_path, env, None, check)
+}
+
+/// [`stack_up_preflight`] with the directory the project locks live in (`None`: the user's).
+fn stack_up_preflight_in(
+    rt: &mut Runtime<'_>,
+    project: &str,
+    compose_path: &Path,
+    env: &[(String, String)],
+    lock_dir: Option<&Path>,
+    check: Check,
 ) -> Result<(), String> {
     let base = CommandSpec {
         program: "docker".into(),
@@ -76,6 +111,33 @@ pub(crate) fn stack_up_preflight(
     }
     let resolved: Json =
         serde_json::from_str(&config).map_err(|e| format!("Cannot read the stack config: {e}"))?;
+    // While `upgrade postgres` / `restore postgres` / `rollback` moves the database, a stopped
+    // old `db` (and the services that use it) must stay stopped: what they would write to it
+    // is not in the copy. (A backup only reads, and never holds `stack up` back.)
+    let name = resolved
+        .get("name")
+        .and_then(Json::as_str)
+        .unwrap_or(project)
+        .to_string();
+    let daemon = capture(rt, &base, &["info", "--format", "{{.ID}}"]).unwrap_or_default();
+    if !daemon.is_empty() && !daemon.contains("no value") {
+        let busy = match lock_dir {
+            Some(dir) => super::switching_run(dir, &name, &daemon),
+            None => super::switching_run_here(&name, &daemon),
+        };
+        if busy {
+            return Err(format!(
+                "`upgrade postgres`, `restore postgres` or `... rollback` is moving the database \
+                 of the stack project '{name}' right now: starting the stack's services would \
+                 write to the database being copied, and those writes would be lost. Wait for it \
+                 to finish (or stop it), then run the command again; `--force` bypasses this \
+                 check."
+            ));
+        }
+    }
+    if check == Check::Start {
+        return Ok(());
+    }
     let Some(db) = resolved.pointer("/services/db") else {
         return Ok(());
     };
@@ -219,6 +281,21 @@ mod tests {
     }
 
     fn probe(responses: Vec<(i32, String)>) -> (Result<(), String>, Vec<CommandSpec>) {
+        probe_in(responses, None)
+    }
+
+    fn probe_in(
+        responses: Vec<(i32, String)>,
+        lock_dir: Option<&Path>,
+    ) -> (Result<(), String>, Vec<CommandSpec>) {
+        probe_check(responses, lock_dir, Check::Up)
+    }
+
+    fn probe_check(
+        responses: Vec<(i32, String)>,
+        lock_dir: Option<&Path>,
+        check: Check,
+    ) -> (Result<(), String>, Vec<CommandSpec>) {
         let calls = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
         let mut output = Vec::new();
         let mut rt = Runtime::new(crate::types::DateContext::system(), 80, &mut output, |_| {
@@ -228,11 +305,13 @@ mod tests {
             responses: responses.into(),
             calls: calls.clone(),
         });
-        let result = stack_up_preflight(
+        let result = stack_up_preflight_in(
             &mut rt,
             "scratch",
             Path::new("/scratch/stack/docker-compose.yaml"),
             &[],
+            lock_dir,
+            check,
         );
         let calls = calls.borrow().clone();
         (result, calls)
@@ -246,6 +325,7 @@ mod tests {
     fn mismatch_refuses_with_a_read_only_probe_and_no_pull() {
         let (result, calls) = probe(vec![
             (0, config()),
+            (0, String::new()),
             (0, String::new()),
             (0, "scratch_data".into()),
             (0, "17\n".into()),
@@ -262,7 +342,12 @@ mod tests {
 
     #[test]
     fn missing_volume_is_not_created_or_mounted() {
-        let (result, calls) = probe(vec![(0, config()), (0, String::new()), (1, String::new())]);
+        let (result, calls) = probe(vec![
+            (0, config()),
+            (0, String::new()),
+            (0, String::new()),
+            (1, String::new()),
+        ]);
         assert!(result.is_ok());
         assert!(
             !calls
@@ -272,15 +357,101 @@ mod tests {
     }
 
     #[test]
+    fn stack_up_waits_while_the_database_is_being_moved() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = super::super::project_lock_path(dir.path(), "scratch", "daemon-1");
+        let held = super::super::lock_file(&path, "for the test").unwrap();
+        super::super::mark_lock(&held, super::super::MARK_SWITCHING);
+        // An upgrade, restore or rollback holds the project: nothing is started, and nothing
+        // beyond the config and the daemon's ID is asked of Docker.
+        let (result, calls) = probe_in(
+            vec![(0, config()), (0, "daemon-1".into())],
+            Some(dir.path()),
+        );
+        let error = result.unwrap_err();
+        assert!(
+            error.contains("moving the database") && error.contains("--force"),
+            "{error}"
+        );
+        assert_eq!(calls.len(), 2);
+        // Another Docker daemon (or project) is not held back.
+        let (result, _) = probe_in(
+            vec![
+                (0, config()),
+                (0, "daemon-2".into()),
+                (0, String::new()),
+                (1, String::new()),
+            ],
+            Some(dir.path()),
+        );
+        assert!(result.is_ok(), "{result:?}");
+        // A backup only reads: `stack up` goes on.
+        super::super::mark_lock(&held, super::super::MARK_BACKUP);
+        let (result, _) = probe_in(
+            vec![
+                (0, config()),
+                (0, "daemon-1".into()),
+                (0, String::new()),
+                (1, String::new()),
+            ],
+            Some(dir.path()),
+        );
+        assert!(result.is_ok(), "{result:?}");
+    }
+
+    #[test]
+    fn start_and_restart_wait_for_a_move_of_the_database_too() {
+        assert_eq!(Check::of("up"), Some(Check::Up));
+        assert_eq!(Check::of("start"), Some(Check::Start));
+        assert_eq!(Check::of("restart"), Some(Check::Start));
+        for other in ["down", "stop", "ps", "logs", "exec", "pull", ""] {
+            assert_eq!(Check::of(other), None, "{other}");
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let path = super::super::project_lock_path(dir.path(), "scratch", "daemon-1");
+        let held = super::super::lock_file(&path, "for the test").unwrap();
+        super::super::mark_lock(&held, super::super::MARK_SWITCHING);
+        let (result, calls) = probe_check(
+            vec![(0, config()), (0, "daemon-1".into())],
+            Some(dir.path()),
+            Check::Start,
+        );
+        let error = result.unwrap_err();
+        assert!(
+            error.contains("moving the database") && error.contains("--force"),
+            "{error}"
+        );
+        assert_eq!(calls.len(), 2);
+        // With no move going on, `start` only asks for the config and the daemon: it never
+        // inspects a volume or runs a probe container (the image it starts is the container's).
+        let (result, calls) = probe_check(
+            vec![(0, config()), (0, "daemon-2".into())],
+            Some(dir.path()),
+            Check::Start,
+        );
+        assert!(result.is_ok(), "{result:?}");
+        assert_eq!(calls.len(), 2);
+        // A backup does not hold `start` back either.
+        super::super::mark_lock(&held, super::super::MARK_BACKUP);
+        let (result, _) = probe_check(
+            vec![(0, config()), (0, "daemon-1".into())],
+            Some(dir.path()),
+            Check::Start,
+        );
+        assert!(result.is_ok(), "{result:?}");
+    }
+
+    #[test]
     fn matching_running_image_skips_volume_inspection() {
         let container = serde_json::json!({"Config": {"Image": "postgres:18", "Labels": {"com.docker.compose.project.config_files": "/scratch/stack/docker-compose.yaml"}}, "State": {"Running": true}});
         let (result, calls) = probe(vec![
             (0, config()),
+            (0, String::new()),
             (0, "scratch-db-1".into()),
             (0, container.to_string()),
         ]);
         assert!(result.is_ok());
-        assert_eq!(calls.len(), 3);
+        assert_eq!(calls.len(), 4);
     }
 
     #[test]
@@ -288,10 +459,11 @@ mod tests {
         let container = serde_json::json!({"Config": {"Image": "postgres:17", "Labels": {"com.docker.compose.project.config_files": "/another/stack/docker-compose.yaml"}}, "State": {"Running": false}});
         let (result, calls) = probe(vec![
             (0, config()),
+            (0, String::new()),
             (0, "scratch-db-1".into()),
             (0, container.to_string()),
         ]);
         assert!(result.unwrap_err().contains("not created from this root"));
-        assert_eq!(calls.len(), 3);
+        assert_eq!(calls.len(), 4);
     }
 }

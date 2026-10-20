@@ -14,13 +14,11 @@ use meerschaum_core::success::SuccessTuple;
 use meerschaum_core::template::TemplateResolver;
 use meerschaum_core::value::{Map, Value, apply_patch_maps};
 
-use crate::command::{
-    CommandRunner, MrsmCommand, RunOptions, build_command, execute, run_mrsm_command,
-};
+use crate::command::{CommandRunner, MrsmCommand, RunOptions, build_command, execute};
 use crate::error::{ComposeError, ErrorKind, Messages};
-use crate::jobs::{get_jobs_commands, get_project_job_names, job_project_name};
+use crate::jobs::{get_jobs_commands, get_project_job_names, job_compose_root, job_project_name};
 use crate::lint::{LintInput, LintWarning, lint};
-use crate::ops::{InstanceOps, JobInfo, JobOps, Prompter};
+use crate::ops::{InstanceOps, JobInfo, JobOps, PipeFilters, Prompter};
 use crate::pipes::{
     ProjectConfig, build_pipes, custom_connectors, get_defined_pipes_meta, instance_pipes,
     location_arg,
@@ -29,10 +27,17 @@ use crate::plugins::{
     check_and_install_plugins, get_installed_plugins, warn_if_compose_plugin_installed,
 };
 use crate::project::{
-    Host, Project, Session, config_has_changed, infer_compose_file_path, json_sorted_compact,
-    load_project, write_config_cache,
+    Host, LoadOptions, PipeKey, Project, Session, config_has_changed, infer_compose_file_path,
+    json_sorted_compact, write_config_cache,
 };
+use crate::refs::{self, PipeSource};
 use crate::render::{Renderable, Row, Table};
+use crate::tree::{Tree, TreeOptions, load_tree, parent_chain, pipe_key};
+
+/// The environment variable the startup admission gate reads to classify a start (D23, the
+/// jobs crate's `startup::KIND_ENV`): `bulk` when compose starts several jobs or projects
+/// together (the gate applies its jitter), `none` for `--no-stagger` (no gate at all).
+pub const START_KIND_VAR: &str = "MRSM_JOB_START_KIND";
 
 /// The subaction modules Python discovers (`get_subactions()`).
 pub const SUBACTIONS: &[&str] = &[
@@ -93,6 +98,22 @@ pub struct ComposeArgs {
     pub debug: bool,
     /// The console width for `explain`.
     pub width: Option<usize>,
+    /// `--standalone`: ignore the file's `parent:` and run it on its own.
+    pub standalone: bool,
+    /// `--project <name>`: limit the operation to one project of the tree.
+    pub project: Option<String>,
+    /// `--no-stagger`: start jobs without the startup jitter and slots.
+    pub no_stagger: bool,
+    /// `init -c`.
+    pub connector_keys: Vec<String>,
+    /// `init -m`.
+    pub metric_keys: Vec<String>,
+    /// `init -l`.
+    pub location_keys: Vec<Option<String>>,
+    /// `init -t`.
+    pub tags: Vec<String>,
+    /// `init -i`.
+    pub mrsm_instance: Option<String>,
 }
 
 /// The live services a subaction uses.
@@ -128,6 +149,51 @@ pub struct ComposeOutput {
     pub lint: Vec<LintWarning>,
     /// Files written (`init` creates the compose file).
     pub written_files: Vec<(PathBuf, String)>,
+    /// The projects that ran, in the order they ran, with their overrides applied.
+    pub projects: Vec<Project>,
+    /// The `explain` tables as data (one per project), for a renderer with colors.
+    pub explain_models: Vec<ExplainModel>,
+}
+
+/// One project's `explain` table as data.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ExplainModel {
+    /// The project name (the table title is `Pipes in '<name>'`).
+    pub project_name: String,
+    /// The console width.
+    pub width: usize,
+    /// The project's default instance (a pipe on it is shown without `instance=`).
+    pub default_instance: String,
+    /// The pipes grouped by instance.
+    pub instances: Vec<ExplainInstance>,
+}
+
+/// The defined pipes of one instance.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ExplainInstance {
+    /// The instance keys.
+    pub keys: String,
+    /// The pipes.
+    pub pipes: Vec<ExplainPipe>,
+}
+
+/// One defined pipe in `explain`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ExplainPipe {
+    /// Connector keys.
+    pub connector: String,
+    /// Metric key.
+    pub metric: String,
+    /// Location key.
+    pub location: Option<String>,
+    /// Instance keys.
+    pub instance: String,
+    /// The registration status (`✅ Up-to-date`, ...).
+    pub status: String,
+    /// The parameters in the compose file.
+    pub local: Map,
+    /// The registered parameters, when they differ.
+    pub remote: Option<Map>,
 }
 
 impl ComposeOutput {
@@ -142,6 +208,8 @@ impl ComposeOutput {
             explain: None,
             lint: Vec::new(),
             written_files: Vec::new(),
+            projects: Vec::new(),
+            explain_models: Vec::new(),
         }
     }
 }
@@ -172,6 +240,17 @@ struct Ctx<'a, 'b> {
     jobs: &'b mut dyn JobOps,
     prompter: &'b mut dyn Prompter,
     out: ComposeOutput,
+    /// The project being run is the primary one (the root, or the only one selected): its
+    /// pipes are what [`ComposeOutput::pipes`] reports.
+    primary: bool,
+    /// The run spans several projects.
+    multi: bool,
+    /// Root directories already initialized in this run.
+    initialized_roots: Vec<PathBuf>,
+    /// Start jobs as a bulk start (the startup gate applies its jitter).
+    bulk_start: bool,
+    /// Where each pipe of the project being run is defined, aligned with its pipes.
+    pipe_sources: Vec<PipeSource>,
 }
 
 impl Ctx<'_, '_> {
@@ -190,13 +269,22 @@ impl Ctx<'_, '_> {
         {
             self.out.messages.items.clear();
         }
-        run_mrsm_command(
-            args,
-            project,
-            opts,
-            &mut self.runner,
-            &mut self.out.messages,
-        )
+        let mut command = build_command(args, project, opts, &mut self.out.messages)?;
+        let mut extra: Vec<(&str, &str)> = Vec::new();
+        if self.args.no_stagger {
+            extra.push((START_KIND_VAR, "none"));
+        } else if self.bulk_start {
+            extra.push((START_KIND_VAR, "bulk"));
+        }
+        for (key, value) in extra {
+            for env in [command.env.as_mut(), command.inherited_env.as_mut()]
+                .into_iter()
+                .flatten()
+            {
+                env.insert(key.to_string(), Value::Str(value.to_string()));
+            }
+        }
+        Ok(execute(&command, &mut self.runner))
     }
 
     /// `get_jobs()` on the project's executor; a failed read is the failed result to return.
@@ -233,6 +321,34 @@ impl Ctx<'_, '_> {
             .ask(question, default_yes)
             .ok_or_else(|| ComposeError::new(ErrorKind::Os, "EOF when reading a line"))
     }
+
+    /// Jobs of `names` that were started from another root compose file: they are managed there.
+    /// Returns the names to leave alone (each warned about once), unless `--force`.
+    fn managed_elsewhere(
+        &mut self,
+        project: &Project,
+        jobs: &IndexMap<String, JobInfo>,
+        names: &[String],
+    ) -> Vec<String> {
+        if self.args.force {
+            return Vec::new();
+        }
+        let ours = project.compose_root.as_deref().map(crate::project::posix);
+        let mut skipped = Vec::new();
+        for name in names {
+            let Some(root) = jobs.get(name).and_then(job_compose_root) else {
+                continue;
+            };
+            if ours.as_deref() == Some(root.as_str()) {
+                continue;
+            }
+            self.out.messages.warn(format!(
+                "The job '{name}' is managed by the root compose at {root}; rerun from there or pass `--force`."
+            ));
+            skipped.push(name.clone());
+        }
+        skipped
+    }
 }
 
 /// `mrsm compose <action> ...`: run a subaction in the project.
@@ -263,6 +379,11 @@ pub fn compose(
         jobs,
         prompter,
         out: ComposeOutput::new(),
+        primary: true,
+        multi: false,
+        initialized_roots: Vec::new(),
+        bulk_start: false,
+        pipe_sources: Vec::new(),
     };
     warn_if_compose_plugin_installed(host, ctx.session, &mut ctx.out.messages);
     let subaction = args
@@ -277,6 +398,125 @@ pub fn compose(
     out
 }
 
+/// The projects a run covers.
+struct RunTree {
+    tree: Tree,
+    /// The pipes any project of the tree defines (for the `{{ Pipe() }}` lint).
+    tree_pipes: Vec<PipeKey>,
+    /// The projects to run, in the order they run.
+    selected: Vec<usize>,
+    /// The project whose pipes the output reports.
+    primary: usize,
+}
+
+/// Locate the compose file, follow `parent:` to the topmost file, load the tree and pick the
+/// projects the run covers.
+fn load_run_tree(
+    ctx: &mut Ctx,
+    file: Option<&Path>,
+    reverse: bool,
+    strict: bool,
+) -> Result<RunTree, ComposeError> {
+    let args = ctx.args;
+    let file = file.or(args.file.as_deref());
+    let Some(compose_file) = infer_compose_file_path(file, &ctx.host.cwd, &mut ctx.out.messages)
+    else {
+        return Err(ComposeError::new(
+            ErrorKind::FileNotFound,
+            "No compose file could be found.\n    \
+             Create a file mrsm-compose.yaml or specify a path with `--file`.",
+        ));
+    };
+    let chain = if args.standalone {
+        vec![compose_file.clone()]
+    } else {
+        parent_chain(&compose_file, &mut ctx.out.messages)
+    };
+    let redirected = chain.len() > 1;
+    let attach: Vec<(PathBuf, PathBuf)> = chain
+        .windows(2)
+        .map(|w| (w[0].clone(), w[1].clone()))
+        .collect();
+    let top = chain[0].clone();
+    let tree = load_tree(
+        ctx.host,
+        &TreeOptions {
+            load: LoadOptions {
+                file: Some(&top),
+                env_file: if redirected {
+                    None
+                } else {
+                    args.env_file.as_deref()
+                },
+                isolated: args.isolated,
+                ..LoadOptions::default()
+            },
+            attach,
+        },
+        &mut ctx.out.messages,
+    )?;
+    // Everything but `explain` touches jobs (or reports them): a tree it cannot tell apart or
+    // cannot fully read must not run, or one project's jobs are treated as another's stale ones
+    // and an included project is silently left running by `down`.
+    if strict && let Some(message) = tree.blocking_problems() {
+        return Err(ComposeError::value(message));
+    }
+
+    let mut selected: Vec<usize> = if redirected {
+        // The file has a parent: run from the parent's tree, touching only this project.
+        tree.by_file(chain.last().expect("a chain has a file"))
+            .into_iter()
+            .collect()
+    } else {
+        tree.order()
+    };
+    if let Some(name) = &args.project {
+        match tree.by_name(name) {
+            Some(ix) => selected = vec![ix],
+            None => {
+                let names: Vec<String> = tree
+                    .nodes
+                    .iter()
+                    .map(|n| format!("'{}'", n.project.project_name()))
+                    .collect();
+                return Err(ComposeError::value(format!(
+                    "No project named '{name}' in this compose project (projects: {}).",
+                    names.join(", ")
+                )));
+            }
+        }
+    }
+    if selected.is_empty() {
+        return Err(ComposeError::value(
+            "The compose file could not be found in its parent's project.",
+        ));
+    }
+    let primary = if selected.contains(&0) {
+        0
+    } else {
+        *selected.last().expect("non-empty")
+    };
+    if reverse {
+        selected.reverse();
+    }
+    ctx.out.projects = selected
+        .iter()
+        .map(|ix| tree.nodes[*ix].project.clone())
+        .collect();
+    ctx.out.project = Some(tree.nodes[primary].project.clone());
+    let tree_pipes = if tree.is_multi() {
+        tree.defined_pipe_keys(ctx.host)
+    } else {
+        Vec::new()
+    };
+    Ok(RunTree {
+        tree,
+        tree_pipes,
+        selected,
+        primary,
+    })
+}
+
 fn do_subaction(ctx: &mut Ctx, subaction: &str) -> Result<SuccessTuple, ComposeError> {
     let selected = if SUBACTIONS.contains(&subaction) {
         subaction
@@ -286,20 +526,103 @@ fn do_subaction(ctx: &mut Ctx, subaction: &str) -> Result<SuccessTuple, ComposeE
     if subaction == "init" {
         return compose_init(ctx);
     }
-    let project = init(ctx)?;
-    let pc = ProjectConfig::new(ctx.host, &project)?;
-    ctx.out.project = Some(project.clone());
+    let run = load_run_tree(ctx, None, selected == "down", selected != "explain")?;
+    ctx.multi = run.selected.len() > 1;
+    if selected == "explain" {
+        // The overrides of the projects this run covers (and the tree-wide problems).
+        let names: Vec<String> = run
+            .selected
+            .iter()
+            .map(|ix| run.tree.nodes[*ix].project.project_name())
+            .collect();
+        ctx.out.lint.extend(
+            run.tree
+                .findings
+                .iter()
+                .filter(|f| {
+                    names
+                        .iter()
+                        .any(|n| f.location == *n || f.location.starts_with(&format!("{n}:")))
+                })
+                .cloned(),
+        );
+    }
+    // A shell (a bare `compose`) opens in one project: the root, or the only one selected.
+    let ixs: Vec<usize> = if selected == "default" && ctx.args.action.is_empty() {
+        vec![run.primary]
+    } else {
+        run.selected.clone()
+    };
+    let mut results: Vec<(String, SuccessTuple)> = Vec::new();
+    for ix in &ixs {
+        let project = run.tree.nodes[*ix].project.clone();
+        ctx.primary = *ix == run.primary;
+        if ctx.multi {
+            ctx.out.messages.info(format!(
+                "Project '{}' ({})...",
+                project.project_name(),
+                project.file.display()
+            ));
+        }
+        let result = run_project(ctx, &run, *ix, &project, selected)?;
+        let keep_going = selected == "down" || selected == "explain";
+        let ok = result.success;
+        results.push((project.project_name(), result));
+        if !ok && !keep_going {
+            break;
+        }
+    }
+    Ok(combine_results(results, ctx.multi))
+}
+
+/// One result for a run over several projects: success only if every project succeeded.
+fn combine_results(results: Vec<(String, SuccessTuple)>, multi: bool) -> SuccessTuple {
+    if !multi {
+        return results
+            .into_iter()
+            .next()
+            .map(|(_, r)| r)
+            .unwrap_or_else(SuccessTuple::success);
+    }
+    let success = results.iter().all(|(_, r)| r.success);
+    let message = results
+        .iter()
+        .map(|(name, r)| format!("{name}: {}", r.message))
+        .collect::<Vec<_>>()
+        .join("\n");
+    SuccessTuple { success, message }
+}
+
+fn run_project(
+    ctx: &mut Ctx,
+    run: &RunTree,
+    ix: usize,
+    project: &Project,
+    selected: &str,
+) -> Result<SuccessTuple, ComposeError> {
+    let pc = ProjectConfig::new(ctx.host, project)?;
+    // A host connector the file references and this host does not define fails before the root
+    // is touched.
+    if matches!(selected, "up" | "run")
+        && let Some(message) = refs::blocking_message(&refs::findings(project, &pc, &[], &[]))
+    {
+        return Ok(SuccessTuple::fail(message));
+    }
+    // `explain` is side-effect free: no root initialization, no config cache.
+    if selected != "explain" {
+        init_root(ctx, project)?;
+    }
     ctx.instance
-        .try_configure(ctx.host, &project)
+        .try_configure(ctx.host, project)
         .map_err(ComposeError::value)?;
     ctx.jobs
-        .configure(ctx.host, &project)
+        .configure(ctx.host, project)
         .map_err(ComposeError::value)?;
     match selected {
-        "up" => compose_up(ctx, &project, &pc, UpMode::from_args(ctx.args)),
+        "up" => compose_up(ctx, project, &pc, UpMode::from_args(ctx.args)),
         "run" => compose_up(
             ctx,
-            &project,
+            project,
             &pc,
             UpMode {
                 no_jobs: true,
@@ -307,45 +630,42 @@ fn do_subaction(ctx: &mut Ctx, subaction: &str) -> Result<SuccessTuple, ComposeE
                 ..UpMode::from_args(ctx.args)
             },
         ),
-        "down" => compose_down(ctx, &project, &pc),
-        "explain" => compose_explain(ctx, &project, &pc),
-        "ps" => {
-            let mut a = vec!["show".to_string(), "jobs".to_string()];
+        "down" => compose_down(ctx, project, &pc),
+        "explain" => compose_explain(ctx, project, &pc, &run.tree_pipes),
+        "ps" | "logs" => {
+            let verb = if selected == "ps" { "jobs" } else { "logs" };
+            let mut a = vec!["show".to_string(), verb.to_string()];
+            if ctx.multi {
+                // Projects share one root: name the project's own jobs.
+                let jobs = match ctx.project_jobs() {
+                    Ok(jobs) => jobs,
+                    Err(failed) => return Ok(failed),
+                };
+                let names =
+                    get_project_job_names(&project.config, &[], &jobs, &mut ctx.out.messages)?;
+                if names.is_empty() {
+                    return Ok(SuccessTuple::ok(format!(
+                        "No jobs in compose project '{}'.",
+                        project.project_name()
+                    )));
+                }
+                a.extend(names);
+            }
             if ctx.args.nopretty {
                 a.push("--nopretty".into());
             }
+            // `logs` replaces the environment; `ps` does not (as in v4).
             ctx.run(
                 &a,
-                &project,
+                project,
                 RunOptions {
-                    replace: false,
+                    replace: selected != "ps",
                     ..RunOptions::default()
                 },
             )
         }
-        "logs" => {
-            let mut a = vec!["show".to_string(), "logs".to_string()];
-            if ctx.args.nopretty {
-                a.push("--nopretty".into());
-            }
-            ctx.run(&a, &project, RunOptions::default())
-        }
-        _ => compose_default(ctx, &project),
+        _ => compose_default(ctx, project, run, ix),
     }
-}
-
-/// `meerschaum.compose.utils.init()`: load the project and initialize its root directory.
-fn init(ctx: &mut Ctx) -> Result<Project, ComposeError> {
-    let project = load_project(
-        ctx.host,
-        ctx.args.file.as_deref(),
-        ctx.args.env_file.as_deref(),
-        ctx.args.isolated,
-        &mut ctx.out.messages,
-    )?;
-    ctx.out.project = Some(project.clone());
-    init_root(ctx, &project)?;
-    Ok(project)
 }
 
 /// `init_root(compose_config)`: create the root directory, run `show version` once, install
@@ -366,28 +686,35 @@ fn init_root(ctx: &mut Ctx, project: &Project) -> Result<bool, ComposeError> {
             root.display()
         ));
     }
-    let result = ctx.run(
-        &["show".into(), "version".into(), "--no-daemon".into()],
-        project,
-        RunOptions {
-            capture_output: true,
-            ..RunOptions::default()
-        },
-    )?;
-    if fresh && !get_installed_plugins(project)?.is_empty() {
-        ctx.out
-            .messages
-            .info("Installing required packages for plugins...");
-        ctx.run(
-            &["install".into(), "required".into()],
+    // Projects of a tree share a root: initialize it once per run.
+    let already = ctx.initialized_roots.contains(&root);
+    let mut success = true;
+    if !already {
+        ctx.initialized_roots.push(root.clone());
+        let result = ctx.run(
+            &["show".into(), "version".into(), "--no-daemon".into()],
             project,
-            RunOptions::default(),
+            RunOptions {
+                capture_output: true,
+                ..RunOptions::default()
+            },
         )?;
+        success = result.success;
+        if fresh && !get_installed_plugins(project)?.is_empty() {
+            ctx.out
+                .messages
+                .info("Installing required packages for plugins...");
+            ctx.run(
+                &["install".into(), "required".into()],
+                project,
+                RunOptions::default(),
+            )?;
+        }
     }
     if config_has_changed(project, ctx.session) {
         let _ = write_config_cache(project);
     }
-    Ok(result.success)
+    Ok(success)
 }
 
 fn defined_pipes(
@@ -396,11 +723,35 @@ fn defined_pipes(
     pc: &ProjectConfig,
 ) -> Result<Vec<Pipe>, ComposeError> {
     let metas = get_defined_pipes_meta(&project.config, pc, true, &mut ctx.out.messages)?;
-    if ctx.out.pipes_meta.is_none() {
+    if ctx.primary && ctx.out.pipes_meta.is_none() {
         ctx.out.pipes_meta = Some(metas.clone());
     }
-    let pipes = build_pipes(&metas, &pc.pipe_defaults())?;
-    if ctx.out.pipes.is_none() {
+    let all = build_pipes(&metas, &pc.pipe_defaults())?;
+    let entries = crate::lint::pipe_entries(&project.document);
+    let mut kept_metas = Vec::new();
+    let mut pipes = Vec::new();
+    let mut sources = Vec::new();
+    for (i, (meta, pipe)) in metas.into_iter().zip(all).enumerate() {
+        // An including project's definition of the same pipe replaces this project's.
+        if project.excluded_pipes.contains(&pipe_key(&pipe)) {
+            continue;
+        }
+        let label = entries
+            .get(i)
+            .map(|(section, ix, _)| format!("{section}[{ix}]"))
+            .unwrap_or_else(|| format!("pipes[{i}]"));
+        sources.push(PipeSource {
+            label,
+            meta: meta.clone(),
+        });
+        kept_metas.push(meta);
+        pipes.push(pipe);
+    }
+    ctx.pipe_sources = sources;
+    if ctx.primary && !project.excluded_pipes.is_empty() {
+        ctx.out.pipes_meta = Some(kept_metas);
+    }
+    if ctx.primary && ctx.out.pipes.is_none() {
         ctx.out.pipes = Some(pipes.clone());
     }
     Ok(pipes)
@@ -413,6 +764,12 @@ fn build_custom_connectors(ctx: &mut Ctx, project: &Project) -> Result<(), Compo
             .map_err(ComposeError::value)?;
     }
     Ok(())
+}
+
+/// The unresolved references of the project being run (see [`refs::findings`]).
+fn project_findings(ctx: &Ctx, project: &Project, pc: &ProjectConfig) -> Vec<LintWarning> {
+    let installed = get_installed_plugins(project).unwrap_or_default();
+    refs::findings(project, pc, &ctx.pipe_sources, &installed)
 }
 
 /// `mrsm.get_pipes(tags=tags, instance=...)`, raising when the instance cannot be reached.
@@ -558,6 +915,12 @@ fn compose_up(
             Vec::new()
         };
 
+    // A host connector the compose file references and this host does not define fails before
+    // anything is installed.
+    if let Some(message) = refs::blocking_message(&refs::findings(project, pc, &[], &[])) {
+        return Ok(SuccessTuple::fail(message));
+    }
+
     let result = check_and_install_plugins(
         project,
         pc,
@@ -572,6 +935,12 @@ fn compose_up(
 
     build_custom_connectors(ctx, project)?;
     let pipes = defined_pipes(ctx, project, pc)?;
+    // Refuse to start on a connector or plugin that is not there, naming it and where it is
+    // referenced (plugins listed under `plugins:` were installed above).
+    let findings = project_findings(ctx, project, pc);
+    if let Some(message) = refs::blocking_message(&findings) {
+        return Ok(SuccessTuple::fail(message));
+    }
     let groups = instance_pipes(&pipes);
     let project_name = project.project_name();
     let explicit_jobs = project.config.get("jobs").is_some_and(Value::truthy);
@@ -763,7 +1132,7 @@ fn compose_up(
         return Ok(SuccessTuple::ok(msg));
     }
 
-    let jobs_commands = get_jobs_commands(&project.config, &pipes, &mut ctx.out.messages)?;
+    let mut jobs_commands = get_jobs_commands(&project.config, &pipes, &mut ctx.out.messages)?;
     let existing = match ctx.project_jobs() {
         Ok(jobs) => jobs,
         Err(failed) => return Ok(failed),
@@ -785,6 +1154,13 @@ fn compose_up(
                 .join(", ")
         )));
     }
+    // Jobs a root compose started are managed from there.
+    let skipped = ctx.managed_elsewhere(project, &existing, &to_delete);
+    let to_delete: Vec<String> = to_delete
+        .into_iter()
+        .filter(|n| !skipped.contains(n))
+        .collect();
+    jobs_commands.retain(|name, _| !skipped.contains(name));
 
     for job_name in &to_delete {
         let r = ctx.run(
@@ -804,6 +1180,9 @@ fn compose_up(
         }
     }
 
+    // Several jobs (or several projects) starting together share the startup gate.
+    // Each job is started by its own command, but they are one bulk start for the gate.
+    ctx.bulk_start = !jobs_commands.is_empty();
     for (job_name, command) in &jobs_commands {
         ctx.out
             .messages
@@ -815,8 +1194,16 @@ fn compose_up(
                 replace: false,
                 ..RunOptions::default()
             },
-        )?;
+        );
+        let r = match r {
+            Ok(r) => r,
+            Err(e) => {
+                ctx.bulk_start = false;
+                return Err(e);
+            }
+        };
         if !r.success {
+            ctx.bulk_start = false;
             return Ok(SuccessTuple::fail(format!(
                 "Failed to start job '{job_name}':\n{}",
                 r.message
@@ -824,6 +1211,7 @@ fn compose_up(
         }
     }
 
+    ctx.bulk_start = false;
     if mode.force {
         let mut a = vec!["show".to_string(), "logs".to_string()];
         a.extend(jobs_commands.keys().cloned());
@@ -973,7 +1361,9 @@ fn compose_down(
         Ok(jobs) => jobs,
         Err(failed) => return Ok(failed),
     };
-    for job_name in get_project_job_names(&project.config, &[], &jobs, &mut ctx.out.messages)? {
+    let owned = get_project_job_names(&project.config, &[], &jobs, &mut ctx.out.messages)?;
+    let skipped = ctx.managed_elsewhere(project, &jobs, &owned);
+    for job_name in owned.into_iter().filter(|n| !skipped.contains(n)) {
         let r = ctx.run(
             &["delete".into(), "job".into(), job_name.clone(), "-f".into()],
             project,
@@ -1116,10 +1506,15 @@ fn json_rich(params: &Map) -> String {
 }
 
 /// `compose explain`: the defined pipes and their registration status, plus the lint.
+///
+/// Side-effect free: nothing is created or installed, the file is not cached and no plugin is
+/// fetched. An instance that cannot be reached, a connector that is not defined and a plugin
+/// that is not installed are findings, and the table is still printed.
 fn compose_explain(
     ctx: &mut Ctx,
     project: &Project,
     pc: &ProjectConfig,
+    tree_pipes: &[PipeKey],
 ) -> Result<SuccessTuple, ComposeError> {
     let defaults = pc.pipe_defaults();
     let default_instance = project
@@ -1129,27 +1524,64 @@ fn compose_explain(
         .and_then(|m| m.get("instance"))
         .map(py_str)
         .unwrap_or_else(|| defaults.instance_keys.clone());
-    ctx.out.lint = lint(
+    let mut findings = lint(
         &LintInput {
             document: &project.document,
             compose_file: &project.file,
             defaults: &defaults,
             default_instance: &default_instance,
+            also_defined: tree_pipes,
         },
         ctx.instance,
     );
 
     let project_name = project.project_name();
+    // The lint is reported even when the pipes cannot be built.
+    if ctx.multi {
+        for f in &mut findings {
+            f.location = format!("{project_name}: {}", f.location);
+        }
+    }
+    ctx.out.lint.append(&mut findings);
     build_custom_connectors(ctx, project)?;
     let pipes = defined_pipes(ctx, project, pc)?;
+    let mut findings = project_findings(ctx, project, pc);
+    if ctx.multi {
+        for f in &mut findings {
+            f.location = format!("{project_name}: {}", f.location);
+        }
+    }
     let groups = instance_pipes(&pipes);
     let tags = vec![project_name.clone()];
     let mut remote: IndexMap<String, Vec<Pipe>> = IndexMap::new();
+    let mut unreachable: IndexMap<String, String> = IndexMap::new();
     for inst in groups.keys() {
-        let r = get_pipes_or_raise(ctx, inst, &tags)?;
-        remote.insert(inst.clone(), r);
+        match ctx.instance.try_get_pipes(inst, &tags) {
+            Ok(r) => {
+                remote.insert(inst.clone(), r);
+            }
+            Err(e) => {
+                findings.push(LintWarning::warning(
+                    "unreachable-instance",
+                    format!("{project_name}: {inst}"),
+                    format!(
+                        "The instance '{inst}' cannot be reached, so registrations are unknown: {}",
+                        e.trim()
+                    ),
+                ));
+                unreachable.insert(inst.clone(), e);
+            }
+        }
     }
+    ctx.out.lint.extend(findings);
 
+    let width = ctx.args.width.unwrap_or(80);
+    let mut model = ExplainModel {
+        project_name: project_name.clone(),
+        width,
+        default_instance: default_instance.clone(),
+        instances: Vec::new(),
+    };
     let mut rows: Vec<(Vec<Renderable>, bool, bool)> = Vec::new();
     for (inst, idxs) in &groups {
         rows.push((
@@ -1164,8 +1596,13 @@ fn compose_explain(
             false,
             true,
         ));
+        let mut explained = ExplainInstance {
+            keys: inst.clone(),
+            pipes: Vec::new(),
+        };
         for (i, ix) in idxs.iter().enumerate() {
             let pipe = &pipes[*ix];
+            let is_unreachable = unreachable.contains_key(inst);
             let registered = remote.get(inst).is_some_and(|rs| {
                 rs.iter().any(|r| {
                     r.connector_keys() == pipe.connector_keys()
@@ -1173,10 +1610,17 @@ fn compose_explain(
                         && r.location_key() == pipe.location_key()
                 })
             });
-            let remote_params = ctx.instance.get_parameters(pipe).unwrap_or_default();
+            let remote_params = if is_unreachable {
+                Map::new()
+            } else {
+                ctx.instance.get_parameters(pipe).unwrap_or_default()
+            };
             let local_params = pipe.raw_parameters().clone();
-            let (status, include_remote) =
-                registration_status(pipe.temporary, registered, &local_params, &remote_params);
+            let (status, include_remote) = if is_unreachable && !pipe.temporary {
+                ("❔ Unknown (instance unreachable)", false)
+            } else {
+                registration_status(pipe.temporary, registered, &local_params, &remote_params)
+            };
             let end_section = i == idxs.len() - 1;
             rows.push((
                 vec![
@@ -1191,7 +1635,17 @@ fn compose_explain(
                 end_section,
                 true,
             ));
+            explained.pipes.push(ExplainPipe {
+                connector: pipe.connector_keys().to_string(),
+                metric: pipe.metric_key().to_string(),
+                location: pipe.location_key().map(String::from),
+                instance: pipe.instance_keys().to_string(),
+                status: status.to_string(),
+                local: local_params,
+                remote: include_remote.then_some(remote_params),
+            });
         }
+        model.instances.push(explained);
     }
 
     // PARITY: the instance rows carry an empty remote cell (not `None`), so the "Remote
@@ -1222,7 +1676,15 @@ fn compose_explain(
         headers,
         rows: table_rows,
     };
-    ctx.out.explain = Some(table.render(ctx.args.width.unwrap_or(80)));
+    let rendered = table.render(width);
+    match &mut ctx.out.explain {
+        Some(existing) => {
+            existing.push('\n');
+            existing.push_str(&rendered);
+        }
+        none => *none = Some(rendered),
+    }
+    ctx.out.explain_models.push(model);
     Ok(SuccessTuple::success())
 }
 
@@ -1234,26 +1696,37 @@ enum Scoped {
     Done(SuccessTuple),
 }
 
+/// The flags compose reads itself and the action must not see.
+const COMPOSE_VALUE_FLAGS: &[&str] = &["--file", "--env-file", "--project"];
+
 /// `_compose_default`: run any other action inside the project.
-fn compose_default(ctx: &mut Ctx, project: &Project) -> Result<SuccessTuple, ComposeError> {
+fn compose_default(
+    ctx: &mut Ctx,
+    project: &Project,
+    run: &RunTree,
+    ix: usize,
+) -> Result<SuccessTuple, ComposeError> {
     let project_name = project.project_name();
     let mut isolated: Vec<String> = Vec::new();
-    let mut found_file = false;
+    let mut skip_next = false;
     // PARITY: only `--file` and `--env-file` (not their aliases) are stripped
-    // (default.py:30).
+    // (default.py:30). The v5 flags `--project`, `--standalone` and `--no-stagger` are compose's.
     for arg in ctx.args.sysargs.iter().skip(1) {
-        if arg == "--file" || arg == "--env-file" {
-            found_file = true;
+        if skip_next {
+            skip_next = false;
             continue;
         }
-        if found_file {
-            found_file = false;
+        if COMPOSE_VALUE_FLAGS.contains(&arg.as_str()) {
+            skip_next = true;
+            continue;
+        }
+        if arg.starts_with("--project=") || arg == "--standalone" || arg == "--no-stagger" {
             continue;
         }
         isolated.push(arg.clone());
     }
     let action = ctx.args.action.clone();
-    let sysargs = match scope_job_action(ctx, project, &action, isolated)? {
+    let sysargs = match scope_job_action(ctx, project, &action, isolated, run, ix)? {
         Scoped::Run(s) => s,
         Scoped::Done(result) => return Ok(result),
     };
@@ -1270,7 +1743,15 @@ fn compose_default(ctx: &mut Ctx, project: &Project) -> Result<SuccessTuple, Com
             action.join(" ")
         ));
     }
-    ctx.run(
+    // Syncing against a host connector that is not defined fails here, naming it.
+    if action.first().is_some_and(|a| a == "sync" || a == "verify") {
+        let pc = ProjectConfig::new(ctx.host, project)?;
+        if let Some(message) = refs::blocking_message(&refs::findings(project, &pc, &[], &[])) {
+            ctx.bulk_start = false;
+            return Ok(SuccessTuple::fail(message));
+        }
+    }
+    let result = ctx.run(
         &sysargs,
         project,
         RunOptions {
@@ -1278,7 +1759,9 @@ fn compose_default(ctx: &mut Ctx, project: &Project) -> Result<SuccessTuple, Com
             replace: false,
             ..RunOptions::default()
         },
-    )
+    );
+    ctx.bulk_start = false;
+    result
 }
 
 fn filter_status(jobs: &IndexMap<String, JobInfo>, f: impl Fn(&JobInfo) -> bool) -> Vec<String> {
@@ -1288,11 +1771,52 @@ fn filter_status(jobs: &IndexMap<String, JobInfo>, f: impl Fn(&JobInfo) -> bool)
         .collect()
 }
 
+/// The project of the tree each named job belongs to: the project that owns the existing job,
+/// else the project that configures it, else the primary project. A name owned by a project
+/// outside the tree stays with the primary project (which refuses it).
+fn route_job_names(
+    ctx: &mut Ctx,
+    run: &RunTree,
+    jobs: &IndexMap<String, JobInfo>,
+    names: &[String],
+) -> Result<IndexMap<String, usize>, ComposeError> {
+    let mut configured: Vec<(usize, Vec<String>)> = Vec::new();
+    for ix in &run.selected {
+        let project = &run.tree.nodes[*ix].project;
+        let keys = match get_jobs_commands(&project.config, &[], &mut ctx.out.messages) {
+            Ok(commands) => commands.into_keys().collect(),
+            Err(_) => Vec::new(),
+        };
+        configured.push((*ix, keys));
+    }
+    let mut routes = IndexMap::new();
+    for name in names {
+        let owner = jobs.get(name).and_then(job_project_name).and_then(|p| {
+            run.selected
+                .iter()
+                .copied()
+                .find(|ix| run.tree.nodes[*ix].project.project_name() == p)
+        });
+        let target = owner
+            .or_else(|| {
+                configured
+                    .iter()
+                    .find(|(_, keys)| keys.contains(name))
+                    .map(|(ix, _)| *ix)
+            })
+            .unwrap_or(run.primary);
+        routes.insert(name.clone(), target);
+    }
+    Ok(routes)
+}
+
 fn scope_job_action(
     ctx: &mut Ctx,
     project: &Project,
     action: &[String],
     sysargs: Vec<String>,
+    run: &RunTree,
+    node: usize,
 ) -> Result<Scoped, ComposeError> {
     if action.len() < 2
         || !SCOPED_JOB_ACTIONS.contains(&action[0].as_str())
@@ -1306,8 +1830,39 @@ fn scope_job_action(
         Ok(jobs) => jobs,
         Err(failed) => return Ok(Scoped::Done(failed)),
     };
-    let job_names = &action[2..];
+    let mut job_names: Vec<String> = action[2..].to_vec();
+    let mut sysargs = sysargs;
     if !job_names.is_empty() {
+        if ctx.multi {
+            // Several projects share the command: each takes the jobs that are its own.
+            let routes = route_job_names(ctx, run, &jobs, &job_names)?;
+            let mine: Vec<String> = job_names
+                .iter()
+                .filter(|n| routes.get(*n) == Some(&node))
+                .cloned()
+                .collect();
+            if mine.is_empty() {
+                return Ok(Scoped::Done(SuccessTuple::ok(format!(
+                    "None of the named jobs belong to compose project '{project_name}'."
+                ))));
+            }
+            if mine.len() != job_names.len() {
+                // Keep only this project's names in the command.
+                for ix in 0..sysargs.len().saturating_sub(1) {
+                    if sysargs[ix..ix + 2] == action[..2]
+                        && sysargs.len() >= ix + 2 + job_names.len()
+                        && sysargs[ix + 2..ix + 2 + job_names.len()] == job_names[..]
+                    {
+                        let mut out: Vec<String> = sysargs[..ix + 2].to_vec();
+                        out.extend(mine.iter().cloned());
+                        out.extend(sysargs[ix + 2 + job_names.len()..].iter().cloned());
+                        sysargs = out;
+                        break;
+                    }
+                }
+            }
+            job_names = mine;
+        }
         let foreign: Vec<&String> = job_names
             .iter()
             .filter(|n| {
@@ -1326,12 +1881,39 @@ fn scope_job_action(
                     .join(", ")
             ))));
         }
+        let skipped = ctx.managed_elsewhere(project, &jobs, &job_names);
+        if !skipped.is_empty() {
+            let remaining: Vec<String> = job_names
+                .iter()
+                .filter(|n| !skipped.contains(n))
+                .cloned()
+                .collect();
+            if remaining.is_empty() {
+                return Ok(Scoped::Done(SuccessTuple::ok(format!(
+                    "No jobs to {verb} in compose project '{project_name}'."
+                ))));
+            }
+            for ix in 0..sysargs.len().saturating_sub(1) {
+                if sysargs[ix..ix + 2] == action[..2]
+                    && sysargs.len() >= ix + 2 + job_names.len()
+                    && sysargs[ix + 2..ix + 2 + job_names.len()] == job_names[..]
+                {
+                    let mut out: Vec<String> = sysargs[..ix + 2].to_vec();
+                    out.extend(remaining.iter().cloned());
+                    out.extend(sysargs[ix + 2 + job_names.len()..].iter().cloned());
+                    sysargs = out;
+                    break;
+                }
+            }
+        }
         return Ok(Scoped::Run(sysargs));
     }
 
     let names = get_project_job_names(&project.config, &[], &jobs, &mut ctx.out.messages)?;
+    let skipped = ctx.managed_elsewhere(project, &jobs, &names);
     let project_jobs: IndexMap<String, JobInfo> = names
         .iter()
+        .filter(|n| !skipped.contains(n))
         .filter_map(|n| jobs.get(n).map(|j| (n.clone(), j.clone())))
         .collect();
     if project_jobs.is_empty() {
@@ -1407,6 +1989,10 @@ fn scope_job_action(
         }
     }
 
+    // `start jobs` and `restart jobs` over the project's jobs are bulk starts.
+    if verb == "start" || verb == "restart" {
+        ctx.bulk_start = true;
+    }
     for ix in 0..sysargs.len().saturating_sub(1) {
         if sysargs[ix..ix + 2] == action[..2] {
             let mut out: Vec<String> = sysargs[..ix + 2].to_vec();
@@ -1455,6 +2041,24 @@ pub fn new_compose_file_text(project_name: &str, pipes: &[Map]) -> String {
     )
 }
 
+/// The `pipes:` entry `compose init` writes for a registered pipe.
+fn pipe_entry(pipe: &Pipe) -> Map {
+    let mut entry = Map::new();
+    entry.insert("connector".into(), Value::Str(pipe.connector_keys().into()));
+    entry.insert("metric".into(), Value::Str(pipe.metric_key().into()));
+    entry.insert(
+        "location".into(),
+        pipe.location_key()
+            .map_or(Value::Null, |l| Value::Str(l.into())),
+    );
+    entry.insert("instance".into(), Value::Str(pipe.instance_keys().into()));
+    entry.insert(
+        "parameters".into(),
+        Value::Map(pipe.raw_parameters().clone()),
+    );
+    entry
+}
+
 /// `compose init`: create a project (if none exists) and install its plugins' requirements.
 fn compose_init(ctx: &mut Ctx) -> Result<SuccessTuple, ComposeError> {
     let mut file = ctx.args.file.clone();
@@ -1481,18 +2085,54 @@ fn compose_init(ctx: &mut Ctx) -> Result<SuccessTuple, ComposeError> {
         if !create {
             return Ok(SuccessTuple::fail("No files were created."));
         }
-        // TODO(core-merge): `compose init -c/-m/-l/-t/-i` adds the matching pipes from the
-        // instance; filters are not wired through yet, so no pipes are added.
-        ctx.out
-            .messages
-            .info("Run `compose init` with filters (-c, -m, -l, -t, -i) to add pipes.");
+        // `-c/-m/-l/-t/-i` add the matching registered pipes.
+        let filters = PipeFilters {
+            connector_keys: ctx.args.connector_keys.clone(),
+            metric_keys: ctx.args.metric_keys.clone(),
+            location_keys: ctx.args.location_keys.clone(),
+            tags: ctx.args.tags.clone(),
+            instance: ctx.args.mrsm_instance.clone(),
+        };
+        let mut entries: Vec<Map> = Vec::new();
+        if filters.is_empty() {
+            ctx.out
+                .messages
+                .info("Run `compose init` with filters (-c, -m, -l, -t, -i) to add pipes.");
+        } else if ctx.yes_no(
+            "Add pipes from the given filters to the compose file?",
+            true,
+            false,
+        )? {
+            ctx.instance.configure_host(ctx.host);
+            let pipes = ctx
+                .instance
+                .get_pipes_matching(&filters)
+                .map_err(|e| ComposeError::new(ErrorKind::Exception, e))?;
+            ctx.out.messages.info(if pipes.is_empty() {
+                "No pipes match the given filters.".to_string()
+            } else {
+                format!(
+                    "Pipes matching the given filters:\n{}",
+                    pipes
+                        .iter()
+                        .map(|p| format!("  {p}"))
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                )
+            });
+            if ctx.yes_no("Add these pipes to the compose file?", true, false)? {
+                entries = pipes.iter().map(pipe_entry).collect();
+            } else {
+                ctx.out.messages.info("No pipes will be added.");
+            }
+        }
         if compose_path.exists() {
             return Err(ComposeError::new(
                 ErrorKind::FileExists,
                 format!("File '{}' already exists.", compose_path.display()),
             ));
         }
-        let text = new_compose_file_text(&dir_name, &[]);
+        let text = new_compose_file_text(&dir_name, &entries);
         if std::fs::write(&compose_path, &text).is_err() {
             return Ok(SuccessTuple::fail(format!(
                 "Failed to create file '{}'.",
@@ -1502,24 +2142,30 @@ fn compose_init(ctx: &mut Ctx) -> Result<SuccessTuple, ComposeError> {
         ctx.out.written_files.push((compose_path, text));
     }
 
-    let args = ComposeArgs {
-        file: file.clone(),
-        ..ctx.args.clone()
-    };
-    let project = load_project(
-        ctx.host,
-        args.file.as_deref(),
-        args.env_file.as_deref(),
-        args.isolated,
-        &mut ctx.out.messages,
-    )?;
-    ctx.out.project = Some(project.clone());
-    init_root(ctx, &project)?;
-    let pc = ProjectConfig::new(ctx.host, &project)?;
+    let run = load_run_tree(ctx, file.as_deref(), false, true)?;
+    ctx.multi = run.selected.len() > 1;
+    let mut results: Vec<(String, SuccessTuple)> = Vec::new();
+    for ix in &run.selected {
+        let project = run.tree.nodes[*ix].project.clone();
+        ctx.primary = *ix == run.primary;
+        let result = init_project(ctx, &project)?;
+        let ok = result.success;
+        results.push((project.project_name(), result));
+        if !ok {
+            break;
+        }
+    }
+    Ok(combine_results(results, ctx.multi))
+}
+
+/// `compose init` for one project of the run.
+fn init_project(ctx: &mut Ctx, project: &Project) -> Result<SuccessTuple, ComposeError> {
+    init_root(ctx, project)?;
+    let pc = ProjectConfig::new(ctx.host, project)?;
     let project_name = project.project_name();
-    let existing = get_installed_plugins(&project)?;
+    let existing = get_installed_plugins(project)?;
     let r = check_and_install_plugins(
-        &project,
+        project,
         &pc,
         Some(existing.clone()),
         ctx.args.debug,
@@ -1530,14 +2176,14 @@ fn compose_init(ctx: &mut Ctx) -> Result<SuccessTuple, ComposeError> {
         return Ok(r);
     }
     let installed = if existing.is_empty() {
-        get_installed_plugins(&project)?
+        get_installed_plugins(project)?
     } else {
         existing
     };
     if !installed.is_empty() {
         let r = ctx.run(
             &["install".into(), "required".into()],
-            &project,
+            project,
             RunOptions {
                 subprocess: Some(true),
                 ..RunOptions::default()
@@ -1551,7 +2197,7 @@ fn compose_init(ctx: &mut Ctx) -> Result<SuccessTuple, ComposeError> {
         }
         let r = ctx.run(
             &["setup".into(), "plugins".into()],
-            &project,
+            project,
             RunOptions {
                 subprocess: Some(true),
                 ..RunOptions::default()

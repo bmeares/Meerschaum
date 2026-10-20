@@ -7,8 +7,9 @@ use async_trait::async_trait;
 use meerschaum_core::config::{Config, ConfigOptions};
 use meerschaum_core::{Map, Pipe, SuccessTuple};
 use meerschaum_server::host::{
-    FileManifest, HostLauncher, HostManifest, HostProcess, HostSupervisor, PythonHostLauncher,
-    SupervisorOptions, default_socket_path, spawn_manifest_watcher,
+    FileManifest, HostEndpoint, HostLauncher, HostManifest, HostProcess, HostSupervisor,
+    PythonHostLauncher, SupervisorOptions, WithConsole, default_socket_path, probe_console,
+    spawn_manifest_watcher,
 };
 use meerschaum_server::mcp::{ConnectorRegister, McpBackend, McpServer, SqlReadError};
 use meerschaum_server::{AppState, ServerConfig, ServerFlags};
@@ -37,14 +38,21 @@ impl HostProcess for HostChild {
 #[async_trait]
 impl HostLauncher for StderrHostLauncher {
     async fn launch(&self, socket: &std::path::Path) -> std::io::Result<Box<dyn HostProcess>> {
+        self.launch_endpoint(&HostEndpoint::from(socket)).await
+    }
+
+    async fn launch_endpoint(
+        &self,
+        endpoint: &HostEndpoint,
+    ) -> std::io::Result<Box<dyn HostProcess>> {
         let mut child = tokio::process::Command::new(&self.0.python)
             .args([
                 meerschaum_core::self_exe::PYTHON_SAFE_PATH_FLAG,
                 "-m",
                 "meerschaum.api.host",
-                "--socket",
             ])
-            .arg(socket)
+            .args(PythonHostLauncher::endpoint_args(endpoint))
+            .envs(PythonHostLauncher::endpoint_env(endpoint))
             .envs(self.0.env.iter().map(|(key, value)| (key, value)))
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::piped())
@@ -131,8 +139,23 @@ fn start(args: &ArgsMap, rt: &mut Runtime<'_>, stdio: bool) -> ActionResult {
             .collect(),
     });
     let manifest_path = config.root_dir.join("cache/plugins_manifest.json");
-    let manifest = HostManifest::from_file(&manifest_path).map_err(io_error)?;
-    let launcher = PythonHostLauncher::for_config(&config, PythonHostLauncher::python_from_env());
+    let python = PythonHostLauncher::python_from_env();
+    // The Dash console is the Python host's (D21): the host runs for it when its modules import.
+    // One probe at start (about 30 ms); an unavailable console is one warning, and `/dash` is
+    // the pointer page.
+    let console_available = if stdio || config.no_dash {
+        false
+    } else {
+        let probe = probe_console(&python, &config.root_dir, &[]);
+        if !probe.available {
+            native::warn(rt, &probe.warning());
+        }
+        probe.available
+    };
+    let manifest = HostManifest::from_file(&manifest_path)
+        .map_err(io_error)?
+        .with_console(console_available);
+    let launcher = PythonHostLauncher::for_config(&config, python);
     let supervisor = HostSupervisor::new(
         &manifest,
         Arc::new(StderrHostLauncher(launcher)),
@@ -203,24 +226,31 @@ fn start(args: &ArgsMap, rt: &mut Runtime<'_>, stdio: bool) -> ActionResult {
         let console = if stdio {
             None
         } else {
-            // The host's registry (plugin pages with mode/route) is fetched once it is running.
-            let registry = match &host_proxy {
-                Some(host) if supervisor.is_needed() => host_registry(host, &state).await,
-                _ => None,
-            };
+            // Start the host in the background (it serves the Dash console and the plugins) and
+            // learn whether it mounted the console; serving does not wait for Python.
+            if let Some(host) = host_proxy.clone()
+                && supervisor.is_needed()
+            {
+                let secret = state.secret().to_vec();
+                tokio::spawn(async move {
+                    host.refresh_console(&secret).await;
+                });
+            }
             // Native plugin routes (no host process) are merged with the console's routes.
             let natives = session.native_plugins(rt.config())?;
             let (routes, notices) = crate::native_plugins::routes(&state, &natives);
             for notice in notices {
                 rt.eprint(&format!("{notice}\n"));
             }
-            Some(match console(&state, &plugin_manifest, registry, rt)? {
+            Some(match console(&state, &plugin_manifest, rt)? {
                 Some(console) => console.merge(routes),
                 None => routes,
             })
         };
         let watcher = spawn_manifest_watcher(
-            Arc::new(FileManifest(manifest_path)), supervisor.clone(), mcp.federation.clone(),
+            Arc::new(WithConsole(FileManifest(manifest_path), console_available)),
+            supervisor.clone(),
+            mcp.federation.clone(),
             Duration::from_secs(1),
         );
         let result = if stdio {
@@ -251,12 +281,13 @@ fn start(args: &ArgsMap, rt: &mut Runtime<'_>, stdio: bool) -> ActionResult {
     result
 }
 
-/// The `/dash` console router (v4 served it unless `--no-dash`), sharing the server's instance,
-/// secret and config. `None` with `--no-dash`. Plugin Dash apps and pages stay with the API host.
+/// The routes the Rust server keeps of the web console (v4 served it unless `--no-dash`): the
+/// web terminal, the job-log stream and native plugin pages as fragments. The Dash console
+/// itself is the Python API host's; the server proxies `/dash` to it (or shows the pointer page).
+/// `None` with `--no-dash`.
 pub fn console(
     state: &AppState,
     manifest: &meerschaum_worker::manifest::Manifest,
-    registry: Option<serde_json::Value>,
     rt: &mut Runtime<'_>,
 ) -> Result<Option<axum::Router>, ActionError> {
     if state.config.no_dash {
@@ -277,46 +308,17 @@ pub fn console(
     }
     let natives = native::session(rt).native_plugins(rt.config())?;
     web.pages = crate::native_plugins::pages(manifest, &natives);
-    let from_host = registry
-        .as_ref()
-        .is_some_and(|r| web.apply_host_registry(r).is_ok());
-    if !from_host {
-        // No running host registry: fall back to the manifest's Python plugin pages.
-        for plugin in manifest
-            .plugins
-            .values()
-            .filter(|p| !natives.contains(&p.name))
-        {
-            if !plugin.dash_plugins.is_empty() {
-                web.dash_plugins.push(plugin.name.clone());
-            }
-            for page in &plugin.web_pages {
-                web.legacy_pages
-                    .insert(page.path.clone(), plugin.name.clone());
-            }
-        }
-    }
     match meerschaum_web::router(state.clone(), web.clone()) {
         Ok(router) => Ok(Some(router)),
         Err(error) => {
-            // A plugin page colliding with the console namespace must not take the console down.
-            rt.eprint(&format!("Plugin console pages are disabled: {error}\n"));
-            web.dash_plugins.clear();
-            web.legacy_pages.clear();
+            // A native page with a bad path must not take the terminal down.
+            rt.eprint(&format!("Native plugin pages are disabled: {error}\n"));
             web.pages.clear();
             meerschaum_web::router(state.clone(), web)
                 .map(Some)
                 .map_err(io_error)
         }
     }
-}
-
-/// `GET /_mrsm/host/registry` from the running API host, with the server's internal token.
-async fn host_registry(
-    host: &meerschaum_server::proxy::HostProxy,
-    state: &AppState,
-) -> Option<serde_json::Value> {
-    host.registry(state.secret()).await
 }
 
 /// Own the subscriptions through serving and supervisor cleanup, independently of which

@@ -162,7 +162,13 @@ impl APIConnector {
         let url = format!("{protocol}://{host}{port}");
 
         let verify = !matches!(attributes.get("verify"), Some(Value::Bool(false)));
-        let mut builder = reqwest::Client::builder();
+        // A new connection fails after `connect_timeout` (the `connect_timeout` attribute,
+        // `MRSM_CONNECT_TIMEOUT`, else 5 s) instead of waiting for the operating system; a refused
+        // connection already fails at once (see `ApiConnector::connect_failure`).
+        let connect_timeout = meerschaum_core::connect::connect_timeout(
+            attributes.get("connect_timeout").map(attr_str).as_deref(),
+        );
+        let mut builder = reqwest::Client::builder().connect_timeout(connect_timeout);
         if !verify {
             builder = builder.danger_accept_invalid_certs(true);
         }
@@ -260,6 +266,54 @@ impl APIConnector {
         } else {
             "password"
         }
+    }
+
+    /// The connection timeout of this connector's HTTP client.
+    pub fn connect_timeout(&self) -> Duration {
+        meerschaum_core::connect::connect_timeout(
+            self.attributes
+                .get("connect_timeout")
+                .map(attr_str)
+                .as_deref(),
+        )
+    }
+
+    /// Describe a failed request when it failed while connecting: `api:main: cannot connect to
+    /// localhost:8000 (connection refused). Is the API server running?`. `None` for any other
+    /// failure (the server answered, or the request itself was malformed).
+    pub(crate) fn connect_failure(&self, error: &reqwest::Error) -> Option<String> {
+        use meerschaum_core::connect::{
+            ConnectErrorKind, ConnectTarget, classify_text, connect_error,
+        };
+        if !error.is_connect() {
+            return None;
+        }
+        let mut text = error.to_string();
+        let mut source = std::error::Error::source(error);
+        while let Some(s) = source {
+            text.push_str(&format!(": {s}"));
+            source = s.source();
+        }
+        let kind = if error.is_timeout() {
+            ConnectErrorKind::Timeout
+        } else {
+            classify_text(&text).unwrap_or(ConnectErrorKind::Other)
+        };
+        let host = self.attr("host").unwrap_or_default();
+        let address = match self.attributes.get("port").filter(|p| p.truthy()) {
+            Some(port) => format!("{host}:{}", attr_str(port)),
+            None => host,
+        };
+        let target = ConnectTarget {
+            connector: format!("api:{}", self.label),
+            address,
+            user: self
+                .attr("username")
+                .or_else(|| self.attr("client_id"))
+                .unwrap_or_default(),
+            noun: "API server",
+        };
+        Some(connect_error(&target, kind, &text, self.connect_timeout()).to_string())
     }
 
     /// Set the request timeout (default `STATIC_CONFIG['api']['default_timeout']`, 600 s).

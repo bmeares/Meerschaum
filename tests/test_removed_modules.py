@@ -28,11 +28,19 @@ def test_removed_module_names_its_replacement(module, replacement):
     assert raised.value.name == module
 
 
-def test_the_dash_assets_package_names_the_native_console():
-    ### (Importing it would first import `meerschaum.api.dash`, which needs the `api` extra.)
-    message = removal_message('meerschaum.api.dash.assets')
-    assert message is not None and 'native' in message
-    assert removal_message('meerschaum.api.dash.assets.webterm_keys') == message
+def test_the_restored_console_modules_are_not_reported_removed():
+    ### The Dash console came back (D21): its modules exist again, only the websocket plumbing
+    ### stays removed (the dashboard follows jobs over the server's event stream).
+    for module in (
+        'meerschaum.api.dash.assets',
+        'meerschaum.api.dash.callbacks',
+        'meerschaum.api.dash.pages',
+        'meerschaum.api.dash.jobs',
+        'meerschaum.api.dash.webterm',
+    ):
+        assert removal_message(module) is None, module
+    message = removal_message('meerschaum.api.dash.websockets')
+    assert message is not None and 'web console' in message
 
 
 def test_probing_the_new_entries_does_not_raise():

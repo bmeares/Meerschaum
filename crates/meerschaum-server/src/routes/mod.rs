@@ -20,6 +20,7 @@ pub mod actions;
 pub mod connectors;
 pub mod docs;
 pub mod engine;
+pub mod execute;
 pub mod jobs;
 pub mod login;
 pub mod misc;
@@ -51,7 +52,7 @@ pub fn route_group_of(path: &str) -> &'static str {
     match first {
         "" => "index",
         "pipes" | "metadata" => "pipes",
-        "actions" => "actions",
+        "actions" | "execute" => "actions",
         "connectors" => "connectors",
         "jobs" | "logs" => "jobs",
         "users" => "users",
@@ -104,6 +105,10 @@ impl FromRequestParts<AppState> for Ctx {
 pub struct Unmatched;
 
 async fn fallback(State(state): State<AppState>, req: Request) -> Response {
+    // The Dash console is the Python host's (D21): proxied when mounted, else the pointer page.
+    if crate::web::is_console_path(req.uri().path()) {
+        return crate::web::console_entry(state, req).await;
+    }
     if let Some(host) = state.host.clone()
         && host.is_active()
         && is_proxyable(&state.config, req.uri().path())
@@ -153,7 +158,10 @@ pub fn client_key(state: &AppState, req: &Request) -> String {
     peer.unwrap_or_else(|| "unknown".into())
 }
 
-async fn rate_limit(State(state): State<AppState>, req: Request, next: Next) -> Response {
+/// The rate limiter as a middleware (`api:permissions:rate_limits`): the router applies it to
+/// every route it serves, and the routes `meerschaum-web` merges in (the log stream, the
+/// terminal) must pass through it too.
+pub async fn rate_limit(State(state): State<AppState>, req: Request, next: Next) -> Response {
     let group = route_group_of(req.uri().path());
     if let Some(limit) = state.config.rate_limit_for(group) {
         let key = client_key(&state, &req);
@@ -175,6 +183,10 @@ async fn rate_limit(State(state): State<AppState>, req: Request, next: Next) -> 
 /// `api:permissions:routes:allowlist` cannot be bypassed by a plugin serving the same path.
 pub fn is_proxyable(cfg: &crate::config::ServerConfig, path: &str) -> bool {
     if path.starts_with(crate::mcp::federation::INTERNAL_PREFIX) {
+        return false;
+    }
+    // `--no-dash` serves no console and no plugin pages: nothing under `/dash` is forwarded.
+    if cfg.no_dash && crate::web::is_console_path(path) {
         return false;
     }
     let group = route_group_of(path);
@@ -202,8 +214,9 @@ pub fn router_with_mcp(state: AppState, mcp: std::sync::Arc<crate::mcp::McpServe
     let mut app: Router<AppState> = Router::new();
     // `/login` is always registered (`api/routes/__init__.py`).
     app = login::routes(app);
-    let groups: [(&str, AddRoutes); 11] = [
+    let groups: [(&str, AddRoutes); 12] = [
         ("actions", actions::routes),
+        ("actions", execute::routes),
         ("connectors", connectors::routes),
         ("index", misc::index_routes),
         ("jobs", jobs::routes),
@@ -225,7 +238,12 @@ pub fn router_with_mcp(state: AppState, mcp: std::sync::Arc<crate::mcp::McpServe
         app = crate::mcp::http::routes(app, mcp);
     }
     app = docs::routes(app, &cfg);
-    if let Some(static_path) = cfg.static_path.clone() {
+    // The host mounts `/static` too (`meerschaum.api`, and the Dash console's own files): when a
+    // host runs, its mount answers it (the server never shadows it); else the server serves the
+    // directory itself, as v4 did.
+    if let Some(static_path) = cfg.static_path.clone()
+        && !state.host.as_ref().is_some_and(|host| host.is_active())
+    {
         app = app.nest_service("/static", tower_http::services::ServeDir::new(static_path));
     }
     app.layer(axum::middleware::from_fn_with_state(
@@ -329,6 +347,25 @@ mod tests {
         assert_eq!(route_group_of("/plugin-route"), "other");
         assert_eq!(route_group_of("/mcp"), "mcp");
         assert_eq!(route_group_of("/_mrsm/host/mcp"), "internal");
+    }
+
+    #[test]
+    fn console_paths_are_proxyable_unless_no_dash() {
+        let root = tempfile::tempdir().unwrap();
+        let mut cfg = crate::config::ServerConfig::for_root("sql:main", root.path());
+        assert!(crate::web::is_console_path("/dash"));
+        assert!(crate::web::is_console_path("/dash/pipes"));
+        assert!(!crate::web::is_console_path("/dashboard"));
+        assert!(!crate::web::is_console_path("/dash-board/x"));
+        assert!(is_proxyable(&cfg, "/dash/pipes"));
+        // The host's internal routes and the terminal never go to the host.
+        assert!(!is_proxyable(&cfg, "/_mrsm/host/status"));
+        assert!(!is_proxyable(&cfg, "/webterm/abc"));
+        cfg.no_dash = true;
+        assert!(!is_proxyable(&cfg, "/dash"));
+        assert!(!is_proxyable(&cfg, "/dash/pipes"));
+        // Plugin routes are still the host's.
+        assert!(is_proxyable(&cfg, "/plugin-route"));
     }
 
     #[test]

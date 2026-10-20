@@ -3,21 +3,23 @@
 # vim:fenc=utf-8
 
 """
-Custom Dash components for plugin-owned Dash apps (the console itself is the native `/dash`).
+Custom components of the web console (v4's, on the v5 façade).
 """
 
 from __future__ import annotations
 
 from meerschaum.utils.packages import attempt_import, import_dcc, import_html
-from meerschaum.utils.typing import SuccessTuple, List
+from meerschaum.utils.typing import SuccessTuple, List, Optional
 from meerschaum._internal.static import STATIC_CONFIG
 from meerschaum.utils.misc import remove_ansi
-from meerschaum.api import CHECK_UPDATE
+from meerschaum.api.dash._support import get_shell_intro
+from meerschaum.api import endpoints, CHECK_UPDATE, docs_enabled, get_api_connector
 from meerschaum.connectors import instance_types, _load_builtin_custom_connectors
 from meerschaum.utils.misc import get_connector_labels
 from meerschaum.config import __doc__ as doc
 dbc = attempt_import('dash_bootstrap_components', lazy=False, check_update=CHECK_UPDATE)
 html, dcc = import_html(check_update=CHECK_UPDATE), import_dcc(check_update=CHECK_UPDATE)
+dex = attempt_import('dash_extensions', lazy=False, check_update=CHECK_UPDATE)
 dash_ace = attempt_import('dash_ace', lazy=False, check_update=CHECK_UPDATE)
 _load_builtin_custom_connectors()
 
@@ -71,6 +73,11 @@ bottom_buttons_content = dbc.Card(
         ])
     )
 )
+console_div = html.Div(
+    id='console-div',
+    children=[html.Pre(get_shell_intro(), id='console-pre')],
+)
+
 location = dcc.Location(id='mrsm-location', refresh=False)
 
 search_parameters_editor = dash_ace.DashAceEditor(
@@ -83,6 +90,11 @@ search_parameters_editor = dash_ace.DashAceEditor(
         'Simple dictionary format or JSON accepted.'
     ),
     style={'height': 100},
+)
+
+pages_offcanvas = dbc.Offcanvas(
+    title='',
+    id='pages-offcanvas',
 )
 
 download_dataframe = dcc.Download(id='download-dataframe-csv')
@@ -117,7 +129,7 @@ def build_logo_row():
         [
             dbc.Col(
                 html.Img(
-                    src="/static/ico/logo.ico",
+                    src=endpoints['dash'] + "/assets/logo_48x48.png",
                     title=doc,
                     alt="Meerschaum",
                     id="logo-img",
@@ -132,7 +144,9 @@ def build_logo_row():
 
 def build_pages_navbar():
     """
-    Return a fresh page-navigation navbar.
+    Return a fresh page-navigation navbar. `pages_offcanvas` is NOT included here —
+    it lives in the persistent top-level app layout (meerschaum/api/dash/__init__.py)
+    so its accordion isn't destroyed/recreated on navigation; the logo still toggles it.
     """
     return html.Div(
         [
@@ -232,3 +246,96 @@ def build_cards_grid(cards: List[dbc.Card], num_columns: int = 3) -> html.Div:
         rows.append(r)
         rows.append(html.Br())
     return html.Div(rows)
+
+
+def build_pages_offcanvas_children(active_path: Optional[str] = None):
+    """
+    Return the contents of the pages offcanvas.
+
+    Parameters
+    ----------
+    active_path: Optional[str]
+        The current page's path; the matching nav item is marked as selected and
+        its accordion group (if any) is expanded.
+    """
+    from meerschaum.api.dash.callbacks.dashboard import _pages
+    from meerschaum.api.dash.callbacks.custom import _plugin_endpoints_to_pages
+
+    norm_active = (active_path or '').rstrip('/')
+
+    def _is_active(href: str) -> bool:
+        return bool(norm_active) and norm_active == (href or '').rstrip('/')
+
+    def _nav_item(page_key: str, page_href: str):
+        item_kwargs = {'class_name': 'sidebar-nav-active'} if _is_active(page_href) else {}
+        return dbc.ListGroupItem(
+            dbc.Button(
+                ' '.join([word.capitalize() for word in page_key.split(' ')]),
+                style={
+                    'width': '100%',
+                    'text-align': 'left',
+                    'text-decoration': 'none',
+                    'padding-left': '0',
+                },
+                href=page_href,
+                color='dark',
+            ),
+            **item_kwargs,
+        )
+
+    pages_listgroup_items = []
+    custom_pages = []
+    for pages_dicts in _plugin_endpoints_to_pages.values():
+        for page_dict in pages_dicts.values():
+            custom_pages.append(page_dict['page_key'])
+
+    for page_key, page_href in _pages.items():
+        if page_key in custom_pages:
+            continue
+        pages_listgroup_items.append(_nav_item(page_key, page_href))
+
+    plugins_accordion_items = []
+    for page_group, pages_dicts in _plugin_endpoints_to_pages.items():
+        if len(pages_dicts) == 1:
+            page_href, page_dict = list(pages_dicts.items())[0]
+            if page_dict['page_key'].lower() == page_group.lower():
+                pages_listgroup_items.append(_nav_item(page_dict['page_key'], page_href))
+                continue
+
+        plugin_listgroup_items = [
+            _nav_item(page_dict['page_key'], page_href)
+            for page_href, page_dict in pages_dicts.items()
+        ]
+        plugin_listgroup = dbc.ListGroup(plugin_listgroup_items, flush=True)
+        plugin_accordion_item = dbc.AccordionItem(
+            plugin_listgroup,
+            title=(
+                page_group.capitalize()
+                if page_group and not page_group[0].isupper()
+                else page_group
+            ),
+            item_id=f'pages-offcanvas-accordion-{page_group}',
+            class_name='pages-offcanvas-accordion',
+        )
+        plugins_accordion_items.append(plugin_accordion_item)
+
+    if plugins_accordion_items:
+        ### Mirror the (crash-free) pipe accordion: single-open, start collapsed, no
+        ### always_open/active_item. always_open made dbc read item_id/`.join` off an
+        ### undefined active_item during the mount/unmount on navigation.
+        plugins_accordion = dbc.Accordion(
+            plugins_accordion_items,
+            start_collapsed=True,
+            flush=True,
+            id='pages-offcanvas-accordion',
+        )
+        pages_listgroup_items.append(plugins_accordion)
+
+    pages_children = dbc.Card(
+        dbc.ListGroup(
+            pages_listgroup_items,
+            flush=True,
+        ),
+        outline=True,
+    )
+    return pages_children

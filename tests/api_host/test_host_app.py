@@ -4,9 +4,9 @@
 
 """
 The API host app with a synthetic plugin: import surface, `api_plugin` ordering and identity,
-page manifest (page-contract and legacy Dash modes), and the Dash shim's session-store population
-from the `mrsm-session-id` cookie. Everything runs in a subprocess in host mode with a temporary
-root, plugins directory and SQLite instance.
+page manifest (page-contract and legacy Dash modes) and the plugin's page and callback in the one
+console app. Everything runs in a subprocess in host mode with a temporary root, plugins
+directory and SQLite instance.
 """
 
 import json
@@ -96,7 +96,7 @@ print('ok')
     assert result.stdout.strip().splitlines()[-1] == 'ok'
 
 
-def test_host_runs_plugins_manifest_and_shim(sandbox):
+def test_host_runs_plugins_manifest_and_console(sandbox):
     root, plugins = sandbox
     write_plugin(plugins, 'synth', PLUGIN)
     result = run_python(root, plugins, """
@@ -117,7 +117,7 @@ sessions.set_session('synth-session', {'username': 'zed'})
 r = client.get('/_pages/synth/locked', cookies={'mrsm-session-id': 'synth-session'})
 out['locked_authed'] = [r.status_code, r.text]
 out['registry'] = {p['path']: p for p in web_page_registry()}
-out['shim_layout'] = client.get('/dash/synth/_dash-layout').text
+out['console_layout'] = client.get('/dash/_dash-layout').text
 payload = {
     'output': 'synth-out.children',
     'outputs': {'id': 'synth-out', 'property': 'children'},
@@ -125,15 +125,8 @@ payload = {
     'changedPropIds': ['synth-btn.n_clicks'],
     'state': [{'id': 'session-store', 'property': 'data', 'value': {'session-id': 'abc'}}],
 }
-r = client.post('/dash/synth/_dash-update-component', json=payload)
+r = client.post('/dash/_dash-update-component', json=payload)
 out['callback'] = [r.status_code, r.text]
-from meerschaum.api.host.dash import session_store_data
-class Req:
-    cookies = {'mrsm-session-id': 'synth-session'}
-class Anon:
-    cookies = {}
-out['store_authed'] = session_store_data(Req)
-out['store_anon'] = session_store_data(Anon)
 print('JSON:' + json.dumps(out))
 """)
     assert result.returncode == 0, result.stderr[-4000:]
@@ -160,9 +153,7 @@ print('JSON:' + json.dumps(out))
     assert legacy['mode'] == 'dash' and legacy['page_group'] == 'synth'
     assert legacy['route'] == '/dash/synth/legacy'
 
-    layout = out['shim_layout']
+    layout = out['console_layout']
     for component_id in ('session-store', 'mrsm-location', 'dbc-dark-store'):
         assert f'"{component_id}"' in layout
     assert out['callback'][0] == 200 and 'session-id' in out['callback'][1]
-    assert out['store_authed'] == {'session-id': 'synth-session'}
-    assert out['store_anon'] == {}

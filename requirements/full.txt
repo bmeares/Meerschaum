@@ -16,5 +16,6 @@ PyJWT>=2.8.0
 websockets>=15.0.1
 dash>=4.1.0
 dash-bootstrap-components>=2.0.4
+dash-ace>=0.2.1
 dash-extensions>=2.0.5
 ptpython>=3.0.27

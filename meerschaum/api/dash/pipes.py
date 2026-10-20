@@ -18,10 +18,11 @@ from meerschaum.utils.misc import get_connector_labels
 from meerschaum.connectors import instance_types
 from meerschaum.utils.packages import attempt_import, import_dcc, import_html, import_pandas
 from meerschaum.utils.sql import get_pd_type, sql_item_name
+from meerschaum.utils.misc import _format_timespan
 from meerschaum.utils.yaml import yaml
 from meerschaum.utils.warnings import warn
 from meerschaum.utils.dataframe import to_json, to_simple_lines
-from meerschaum.connectors.sql._fetch import get_pipe_query
+from meerschaum.api.dash._support import get_pipe_query
 from meerschaum.api import CHECK_UPDATE, get_api_connector
 from meerschaum.api.dash import debug, _get_pipes
 from meerschaum.api.dash.connectors import get_web_connector
@@ -37,7 +38,6 @@ import meerschaum as mrsm
 dbc = attempt_import('dash_bootstrap_components', lazy=False, check_update=CHECK_UPDATE)
 dash_ace = attempt_import('dash_ace', lazy=False, check_update=CHECK_UPDATE)
 html, dcc = import_html(check_update=CHECK_UPDATE), import_dcc(check_update=CHECK_UPDATE)
-humanfriendly = attempt_import('humanfriendly', check_update=CHECK_UPDATE)
 pd = import_pandas()
 
 INDEX_PREFIX_EMOJI: Dict[str, str] = {
@@ -351,6 +351,7 @@ def accordion_items_from_pipe(
     if pipe.connector_keys.startswith('sql:'):
         items_titles['sql'] = '📃 SQL Query'
     items_titles.update({
+        'relations': '🕸️ Parents & Children',
         'recent-data': '🗃️ Recent Data',
         'query-data': '🔍 Query Data',
         'sync-data': '📝 Sync Documents',
@@ -528,7 +529,9 @@ def accordion_items_from_pipe(
         stats_rows = []
         if interval is not None and not isinstance(interval, int):
             stats_rows.append(
-                html.Tr([html.Td("Timespan"), html.Td(humanfriendly.format_timespan(interval))])
+                html.Tr([html.Td("Timespan"), html.Td(_format_timespan(
+                    interval.total_seconds() if hasattr(interval, 'total_seconds') else interval
+                ))])
             )
         if oldest_time is not None:
             stats_rows.append(html.Tr([html.Td("Oldest time"), html.Td(str(oldest_time))]))
@@ -772,9 +775,12 @@ def accordion_items_from_pipe(
 
     if 'recent-data' in active_items:
         try:
-            df = pipe.get_backtrack_data(backtrack_minutes=10, limit=10, debug=debug).astype(str)
-            table = dbc.Table.from_dataframe(df, bordered=False, hover=True)
-            items_bodies['recent-data'] = html.Div(table, style={'overflowX': 'auto'})
+            df = pipe.get_backtrack_data(backtrack_minutes=10, limit=10, debug=debug)
+            if df is None or len(df) == 0:
+                items_bodies['recent-data'] = html.P("No recent data.", className='text-muted')
+            else:
+                table = dbc.Table.from_dataframe(df.astype(str), bordered=False, hover=True)
+                items_bodies['recent-data'] = html.Div(table, style={'overflowX': 'auto'})
         except Exception as e:
             items_bodies['recent-data'] = html.P(f"Could not retrieve recent data:\n{e}")
 
@@ -898,10 +904,62 @@ def accordion_items_from_pipe(
             ]),
         ])
 
+    if 'relations' in active_items:
+        items_bodies['relations'] = build_relations_body(pipe)
+
     return [
         dbc.AccordionItem(items_bodies.get(item_id, ''), title=title, item_id=item_id)
         for item_id, title in items_titles.items()
     ]
+
+
+def build_relations_body(pipe: mrsm.Pipe) -> Any:
+    """
+    Return the Parents and Children tabs of a pipe card: the pipes it depends on and the pipes that
+    depend on it, with what the Syncing Engine would do with each (`meerschaum.api.dash.engine`).
+    """
+    from meerschaum.api.dash import engine as _engine
+    try:
+        relations = _engine.relations_of(pipe)
+    except Exception as e:
+        return html.P(f"The dependency graph is unavailable: {e}")
+
+    def _table(rows, empty: str):
+        if not rows:
+            return html.P(empty, className='text-muted', style={'margin-top': '1em'})
+        return dbc.Table(
+            [
+                html.Thead(html.Tr([html.Th('Pipe'), html.Th('Planned'), html.Th('Ledger lag')])),
+                html.Tbody([
+                    html.Tr([
+                        html.Td(html.A(row['label'], href=row['href'], target='_blank')),
+                        html.Td(row['action']),
+                        html.Td(row['reason'], className=('text-warning' if row['lagging'] else '')),
+                    ])
+                    for row in rows
+                ]),
+            ],
+            hover=True,
+            size='sm',
+            style={'margin-top': '1em'},
+        )
+
+    parents, children = relations['parents'], relations['children']
+    return dbc.Tabs(
+        [
+            dbc.Tab(
+                _table(parents, "This pipe has no parents."),
+                label=f"Parents ({len(parents)})",
+                tab_id='parents',
+            ),
+            dbc.Tab(
+                _table(children, "This pipe has no children."),
+                label=f"Children ({len(children)})",
+                tab_id='children',
+            ),
+        ],
+        active_tab='parents',
+    )
 
 
 def get_backtrack_text(

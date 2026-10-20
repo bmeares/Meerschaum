@@ -177,6 +177,7 @@ fn compose_args(action: &[&str], dry: bool) -> ComposeArgs {
         nopretty: false,
         debug: false,
         width: Some(100),
+        ..ComposeArgs::default()
     }
 }
 
@@ -392,13 +393,9 @@ fn check_registered_project(sandbox: &Sandbox, extra: &[(&str, String)], w9v: &s
     let (explain, commands) = run(&host, &["explain"], false);
     assert_same_explain(&explain, &scenario_run("main", "explain"));
     assert_eq!(warnings(&explain), Vec::<String>::new());
-    assert_eq!(
-        commands
-            .iter()
-            .map(|c| c.sysargs.clone())
-            .collect::<Vec<_>>(),
-        vec![vec!["show", "version", "--no-daemon", "--tags", "w9proj"]],
-    );
+    // v5 (D22, PARITY.md): `explain` is side-effect free, so it no longer runs v4's
+    // `show version` to initialize the root directory.
+    assert!(commands.is_empty(), "{commands:?}");
     // Explaining writes nothing.
     assert_registry(&registry(w9v), &scenario_run("main", "explain"));
 
@@ -541,6 +538,23 @@ fn explain_never_creates_the_database_of_a_file_instance() {
     assert!(!db.exists(), "up --dry created {}", db.display());
 }
 
+fn strip_ansi(s: &str) -> String {
+    let mut out = String::new();
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\u{1b}' && chars.peek() == Some(&'[') {
+            for c in chars.by_ref() {
+                if c.is_ascii_alphabetic() {
+                    break;
+                }
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
 fn walk(dir: &Path) -> Vec<PathBuf> {
     let mut out = Vec::new();
     for entry in std::fs::read_dir(dir).unwrap() {
@@ -567,12 +581,38 @@ fn an_unreachable_instance_raises_like_v4() {
     );
 
     let sandbox = Sandbox::new("unreachable");
-    for (action, dry) in [(&["explain"][..], false), (&["up"][..], true)] {
-        let (output, _) = run(&sandbox.host(&[]), action, dry);
-        let error = output.result.expect_err("an unreachable instance fails");
-        assert_eq!(error.kind, ErrorKind::Exception, "{error}");
-        assert!(error.message.starts_with("\n 🛑 "), "{}", error.message);
-    }
+    // v5 (PARITY.md): the pipe's `sql:w9v` is not defined on this host, so `up` refuses to
+    // start and names it; the instance is then never asked.
+    let (output, _) = run(&sandbox.host(&[]), &["up"], true);
+    let refused = output.result.expect("up reports the missing connector");
+    assert!(!refused.success);
+    assert_eq!(
+        refused.message,
+        "connector 'sql:w9v' is not defined on this host (referenced by pipes[0].connector)"
+    );
+    // With a connector the host defines, the unreachable instance raises like v4.
+    let file = sandbox.project.join("mrsm-compose.yaml");
+    let text = std::fs::read_to_string(&file).unwrap();
+    std::fs::write(&file, text.replace("sql:w9v", "sql:local")).unwrap();
+    let (output, _) = run(&sandbox.host(&[]), &["up"], true);
+    let error = output.result.expect_err("an unreachable instance fails");
+    assert_eq!(error.kind, ErrorKind::Exception, "{error}");
+    assert!(error.message.starts_with("\n 🛑 "), "{}", error.message);
+    // v5 (PARITY.md): `explain` keeps going: the instance is a finding and the registrations
+    // are reported as unknown.
+    let (output, _) = run(&sandbox.host(&[]), &["explain"], false);
+    assert!(output.result.expect("explain succeeds").success);
+    assert!(
+        output.lint.iter().any(|f| f.code == "unreachable-instance"),
+        "{:?}",
+        output.lint
+    );
+    assert!(
+        output
+            .explain
+            .unwrap()
+            .contains("Unknown (instance unreachable)")
+    );
 }
 
 #[test]
@@ -582,12 +622,13 @@ fn the_binary_serves_explain_and_registers_in_the_project_environment() {
     sandbox.register(&sqlite_env(&db), None);
 
     let explain = sandbox.mrsm(&["compose", "explain"], &[]);
-    let stdout = String::from_utf8_lossy(&explain.stdout).to_string();
+    let stdout = strip_ansi(&String::from_utf8_lossy(&explain.stdout));
     assert!(
         explain.status.success(),
         "{stdout}\n{}",
         String::from_utf8_lossy(&explain.stderr)
     );
+    // The table is v4's, in v4's colors (stripped here).
     assert_eq!(
         stdout.trim_end(),
         scenario_run("main", "explain")["explain"]

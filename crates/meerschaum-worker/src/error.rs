@@ -34,15 +34,15 @@ pub enum WorkerError {
     /// The worker started but never completed the handshake.
     #[error("the Python worker did not complete the handshake: {0}")]
     Handshake(String),
-    /// The worker host refused to start: the Python package `meerschaum` it would import is
-    /// another major version, looks like v4 or speaks another worker protocol. The host printed
-    /// why (once) and nothing was imported or installed; later starts fail at once for a delay (10 s,
-    /// doubling to 5 min) or until `reload`.
-    #[error(
-        "the Python worker was not started: the `meerschaum` package it would import does not fit \
-         this program (the message above says why)"
-    )]
-    Refused,
+    /// This interpreter cannot host a worker, and the message says why in one piece: it names
+    /// the interpreter, the `meerschaum` package found (or its absence), and the fix (install the
+    /// matching release into that interpreter, or set `MRSM_PYTHON`). Raised by the start-up
+    /// preflight (the package is missing, another major version, looks like v4, speaks another
+    /// worker protocol; the interpreter will not start or hangs) and for a worker that never
+    /// connects. Nothing was imported or installed. Later starts fail at once with the same
+    /// message for a delay (10 s, doubling to 5 min) or until `reload`; they never wait again.
+    #[error("{0}")]
+    Refused(String),
     /// The worker speaks another protocol version.
     #[error("the Python worker speaks protocol {got}, but this host speaks protocol {expected}")]
     ProtocolVersion {

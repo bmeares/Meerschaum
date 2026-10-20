@@ -139,7 +139,33 @@ pub fn format_dataframe(frame: &Frame, max_rows: Option<usize>) -> String {
         _ => n_rows,
     };
     let truncated = n_rows - render_rows;
+    let body = render_table(frame, render_rows).lines.join("\n");
+    let plural = |n: usize| if n != 1 { "s" } else { "" };
+    let footer = if truncated > 0 {
+        format!(
+            "\n[showing first {render_rows} of {n_rows} rows x {n_cols} column{}]",
+            plural(n_cols)
+        )
+    } else {
+        format!(
+            "\n[{n_rows} row{} x {n_cols} column{}]",
+            plural(n_rows),
+            plural(n_cols)
+        )
+    };
+    body + &footer
+}
 
+/// A rendered pipe table: its lines (header, separator, rows), and for each column its
+/// content width (without the one-space padding on each side) and whether it is left-aligned.
+pub(crate) struct RenderedTable {
+    pub lines: Vec<String>,
+    pub widths: Vec<usize>,
+    pub left: Vec<bool>,
+}
+
+/// The pipe table of the first `render_rows` rows of `frame` (no footer).
+pub(crate) fn render_table(frame: &Frame, render_rows: usize) -> RenderedTable {
     // `df.values`: a homogeneous numeric frame becomes float64 if any column is float.
     let dtypes: Vec<Dtype> = frame.columns.iter().map(|(_, v)| infer_dtype(v)).collect();
     let all_numeric = dtypes
@@ -298,21 +324,11 @@ pub fn format_dataframe(frame: &Frame, max_rows: Option<usize>) -> String {
                 .join("|")
         ));
     }
-    let body = lines.join("\n");
-    let plural = |n: usize| if n != 1 { "s" } else { "" };
-    let footer = if truncated > 0 {
-        format!(
-            "\n[showing first {render_rows} of {n_rows} rows x {n_cols} column{}]",
-            plural(n_cols)
-        )
-    } else {
-        format!(
-            "\n[{n_rows} row{} x {n_cols} column{}]",
-            plural(n_rows),
-            plural(n_cols)
-        )
-    };
-    body + &footer
+    RenderedTable {
+        lines,
+        widths,
+        left: aligns.iter().map(|a| *a == "left").collect(),
+    }
 }
 
 #[cfg(test)]

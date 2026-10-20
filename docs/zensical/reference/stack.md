@@ -14,11 +14,18 @@ The default stack starts 4 services:
 | Service | Description                                                                            | Image                                   |
 |---------|----------------------------------------------------------------------------------------|-----------------------------------------|
 | db      | TimescaleDB instance corresponding to `sql:main`.                                      | `timescale/timescaledb-ha:pg18`         |
-| api     | Production Meerschaum Web API server corresponding to `api:main`.                      | `bmeares/meerschaum:api`                |
+| api     | Production Meerschaum Web API server corresponding to `api:main`.                      | `bmeares/meerschaum:<version>-full`     |
 | valkey  | Valkey instance corresponding to `valkey:main`. Used for caching sessions in by `api`. | `valkey/valkey-bundle:latest`           |
 | grafana | Grafana instance connected to `sql:main`.                                              | `grafana/grafana:latest`                |
 
 You can edit the stack's Docker Compose file with `mrsm edit config stack`.
+
+The `api` service runs the `full` image of the same release as the `mrsm` that writes the compose file (for example `bmeares/meerschaum:5.0.0rc2-full`), so the API server and the client always speak the same version, API plugins and the Dash console work without further installs, and a release candidate never pulls the floating `:api` tag (which is the previous major version until 5.0.0 final). The image is built for `linux/amd64` and `linux/arm64`.
+
+!!! info "Upgrading an existing stack to 5.x"
+    Earlier versions of the stack ran `bmeares/meerschaum:api`. `mrsm stack` regenerates the compose file on every run: a root without `config/stack.yaml` takes the new image the next time you run `mrsm stack up -d`, which recreates only the `api` container (the volumes and the database are kept). After `pip install --upgrade meerschaum` the tag follows the new version in the same way, so run `mrsm stack up -d` after every upgrade (or `mrsm stack pull` first to fetch the image ahead of time).
+
+    A `config/stack.yaml` that has a `docker-compose.yaml` section keeps its own `api` image, because the defaults only fill in what is missing. To move it, edit `services:api:image` with `mrsm edit config stack` to `bmeares/meerschaum:<version>-full` (or delete the `api` service's `image` line so the default applies), then run `mrsm stack up -d`. `mrsm stack config` prints the compose file that will run.
 
 !!! tip "Entering the Meerschaum Docker image"
     Hop into a shell in the `api` service:
@@ -67,6 +74,12 @@ Images are tagged with the following scheme for each release:
   The `full` image pinned to a specific version.
 - `{version}-minimal`  
   The `minimal` image pinned to a specific version.
+- `{version}-slim` / `slim`  
+  The base wheel only (no extras).
+- `api`  
+  Deprecated alias of `latest`.
+
+Release candidates (`5.0.0rc2`) are only published with the version-qualified tags (`5.0.0rc2-full`, `5.0.0rc2-minimal`, `5.0.0rc2-slim`): they never move `latest`, `full`, `api` and the other floating tags. Every tag is a multi-architecture image for `linux/amd64` and `linux/arm64`; the architecture's own image is also tagged `{version}-{name}-amd64` / `{version}-{name}-arm64`.
 
 ## 🗒️ Requirements
 

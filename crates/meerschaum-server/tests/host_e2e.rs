@@ -1,8 +1,8 @@
 //! The Python API host end to end (§7.2, §7.3, §8.4): the Rust server supervises a real
 //! `python -m meerschaum.api.host` serving the synthetic plugin in `tests/host_plugin/hostdemo`
 //! and proxies to it: plugin routes (plain, scoped, streaming in both directions, websocket),
-//! the plugin's middleware (applied to proxied requests only), a static mount, the plugin-owned
-//! Dash app with the core stores, MCP federation (`tools/list` merges the plugin's tools and
+//! the plugin's middleware (applied to proxied requests only), a static mount, the console seam
+//! (`/dash/` is the host's when it reports the Dash console mounted, else the pointer page), MCP federation (`tools/list` merges the plugin's tools and
 //! `tools/call` forwards with the caller's scopes), JWTs issued by either side validating on the
 //! other, the allowlist and rate limits on proxied paths, and the manifest seam (restart, stop).
 //!
@@ -24,8 +24,8 @@ use common::{login, req, send};
 use futures_util::{SinkExt, StreamExt};
 use meerschaum_server::config::RateLimit;
 use meerschaum_server::host::{
-    FileManifest, HostManifest, HostSupervisor, PythonHostLauncher, SupervisorOptions,
-    default_socket_path, spawn_manifest_watcher,
+    ConsoleStatus, FileManifest, HostManifest, HostSupervisor, PythonHostLauncher,
+    SupervisorOptions, default_socket_path, spawn_manifest_watcher,
 };
 use meerschaum_server::mcp::McpServer;
 use meerschaum_server::proxy::HostProxy;
@@ -116,6 +116,7 @@ fn manifest(plugins: &[&str]) -> HostManifest {
         dash_plugins: names.clone(),
         web_pages: names.clone(),
         mcp_tools: names,
+        console: false,
     }
 }
 
@@ -282,26 +283,30 @@ async fn python_host_end_to_end() {
     let r = send(&app, req("GET", "/hostdemo/static/hello.txt", None, None)).await;
     assert_eq!(r.text(), "hello from a static mount\n");
 
-    // The plugin's Dash app, with the core stores and the plugin's assets.
-    let r = send(&app, req("GET", "/dash/hostdemo/", None, None)).await;
-    assert_eq!(r.status, StatusCode::OK);
-    let html = r.text();
-    assert!(html.contains("id=\"mrsm-theme-dark\""), "{html}");
-    assert!(
-        html.contains("/dash/hostdemo/assets/hostdemo.css"),
-        "{html}"
-    );
-    let r = send(&app, req("GET", "/dash/hostdemo/_dash-layout", None, None)).await;
-    let layout = r.text();
-    for id in ["session-store", "mrsm-location", "dbc-dark-store"] {
-        assert!(layout.contains(&format!("\"{id}\"")), "{id}: {layout}");
+    // The console seam (D21): the host says whether it mounted the Dash console
+    // (`/_mrsm/host/status`), and `/dash/` is the host's when it did, else the pointer page. The
+    // Dash app and its plugin pages are the Python tests' (`tests/api_host`, `tests/console`).
+    let r = send(&app, req("GET", "/dash/", None, None)).await;
+    match proxy.console_status() {
+        ConsoleStatus::Mounted => {
+            assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+            assert!(
+                !r.text().contains("pip install meerschaum[dash]"),
+                "{}",
+                r.text()
+            );
+        }
+        ConsoleStatus::Unavailable(reason) => {
+            eprintln!("The host did not mount the console: {reason}");
+            assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+            assert!(
+                r.text().contains("pip install meerschaum[dash]"),
+                "{}",
+                r.text()
+            );
+        }
+        ConsoleStatus::Unknown => panic!("the console status was not asked"),
     }
-    let r = send(
-        &app,
-        req("GET", "/dash/hostdemo/_dash-dependencies", None, None),
-    )
-    .await;
-    assert!(r.text().contains("hostdemo-session"), "{}", r.text());
 
     // JWTs issued by the Rust server validate in the host.
     let admin = login(&app, "admin", "pass", Some("hostdemo:read+pipes:read")).await;

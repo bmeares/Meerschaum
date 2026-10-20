@@ -13,13 +13,15 @@ use serde_json::{Value as Json, json};
 
 use super::{Ctx, body_bytes};
 use crate::auth::{
-    is_user_allowed_to_execute, jwt_decode, load_from_subject, scoped_auth,
+    Principal, is_admin, is_user_allowed_to_execute, jwt_decode, load_from_subject, scoped_auth,
     scoped_auth_with_aliases,
 };
 use crate::backends::{CreateJob, LogEvent};
 use crate::config::ServerConfig;
 use crate::error::{ApiError, ApiResult};
 use crate::json::{from_core, ok_json, py_isoformat_utc, to_core, tuple_response};
+use crate::redact::redact_job_meta;
+use crate::routes::execute::{JOB_PREFIX, job_visible_to, owner_label};
 use crate::routes::pipes::parse_json_body;
 use crate::state::AppState;
 
@@ -64,17 +66,57 @@ pub fn clean_sysargs(sysargs: &[String]) -> Vec<String> {
     out
 }
 
+/// Whether the caller may see the job `name`: an `execute-*` job (the console's) is its creator's
+/// and the administrators' (see [`job_visible_to`]); every other job is visible as before.
+async fn may_see(state: &AppState, principal: Option<&Principal>, name: &str) -> bool {
+    if !name.starts_with(JOB_PREFIX) {
+        return true;
+    }
+    if is_admin(state, principal).await {
+        return true;
+    }
+    match state.jobs.get(name).await {
+        // A job that does not exist is not hidden: the route answers as it always does.
+        None => true,
+        Some(meta) => job_visible_to(false, owner_label(principal).as_deref(), name, Some(&meta)),
+    }
+}
+
+/// The 404 of a job that is hidden from the caller (the same as one that does not exist).
+fn hidden(state: &AppState, name: &str) -> ApiError {
+    ApiError::new(404, format!("{} does not exist.", state.jobs.job_str(name)))
+}
+
 async fn get_jobs(ctx: Ctx) -> ApiResult {
-    scoped_auth(&ctx.state, &ctx.headers, &["jobs:read"]).await?;
-    let jobs = ctx.state.jobs.list().await;
+    let principal = scoped_auth(&ctx.state, &ctx.headers, &["jobs:read"]).await?;
+    let admin = is_admin(&ctx.state, principal.as_ref()).await;
+    let caller = owner_label(principal.as_ref());
+    let mut jobs = ctx.state.jobs.list().await;
+    jobs.retain(|name, meta| job_visible_to(admin, caller.as_deref(), name, Some(meta)));
+    // PARITY: v4 returns every job's environment (connector URIs with their passwords and the
+    // server's other secrets) to any `jobs:read` caller; v5 masks the credentials.
+    for meta in jobs.values_mut() {
+        redact_job_meta(meta);
+    }
     Ok(ok_json(&Json::Object(jobs.into_iter().collect())))
 }
 
 async fn get_job(ctx: Ctx, Path(name): Path<String>) -> ApiResult {
-    scoped_auth(&ctx.state, &ctx.headers, &["jobs:read"]).await?;
+    let principal = scoped_auth(&ctx.state, &ctx.headers, &["jobs:read"]).await?;
+    let admin = is_admin(&ctx.state, principal.as_ref()).await;
     match ctx.state.jobs.get(&name).await {
-        Some(meta) => Ok(ok_json(&meta)),
-        None => Err(ApiError::new(
+        Some(mut meta)
+            if job_visible_to(
+                admin,
+                owner_label(principal.as_ref()).as_deref(),
+                &name,
+                Some(&meta),
+            ) =>
+        {
+            redact_job_meta(&mut meta);
+            Ok(ok_json(&meta))
+        }
+        _ => Err(ApiError::new(
             404,
             format!("{} doesn't exist.", ctx.state.jobs.job_str(&name)),
         )),
@@ -174,6 +216,9 @@ where
     if !allowed.success {
         return Ok(tuple_response(&allowed));
     }
+    if !may_see(&ctx.state, principal.as_ref(), &name).await {
+        return Err(hidden(&ctx.state, &name));
+    }
     if check_exists && !ctx.state.jobs.exists(&name).await {
         return Err(ApiError::new(
             404,
@@ -225,13 +270,16 @@ async fn pause_job(ctx: Ctx, Path(name): Path<String>) -> ApiResult {
 }
 
 async fn get_job_exists(ctx: Ctx, Path(name): Path<String>) -> ApiResult {
-    scoped_auth(&ctx.state, &ctx.headers, &["jobs:read"]).await?;
-    Ok(ok_json(&json!(ctx.state.jobs.exists(&name).await)))
+    let principal = scoped_auth(&ctx.state, &ctx.headers, &["jobs:read"]).await?;
+    let exists =
+        may_see(&ctx.state, principal.as_ref(), &name).await && ctx.state.jobs.exists(&name).await;
+    Ok(ok_json(&json!(exists)))
 }
 
 async fn get_logs(ctx: Ctx, Path(name): Path<String>) -> ApiResult {
-    scoped_auth(&ctx.state, &ctx.headers, &["jobs:read", "logs:read"]).await?;
-    if !ctx.state.jobs.exists(&name).await {
+    let principal = scoped_auth(&ctx.state, &ctx.headers, &["jobs:read", "logs:read"]).await?;
+    if !may_see(&ctx.state, principal.as_ref(), &name).await || !ctx.state.jobs.exists(&name).await
+    {
         return Err(ApiError::new(
             404,
             format!("{} does not exist.", ctx.state.jobs.job_str(&name)),
@@ -241,21 +289,29 @@ async fn get_logs(ctx: Ctx, Path(name): Path<String>) -> ApiResult {
 }
 
 async fn get_stop_time(ctx: Ctx, Path(name): Path<String>) -> ApiResult {
-    scoped_auth(&ctx.state, &ctx.headers, &["jobs:read"]).await?;
-    let t = ctx.state.jobs.stop_time(&name).await;
+    let principal = scoped_auth(&ctx.state, &ctx.headers, &["jobs:read"]).await?;
+    let t = if may_see(&ctx.state, principal.as_ref(), &name).await {
+        ctx.state.jobs.stop_time(&name).await
+    } else {
+        None
+    };
     Ok(ok_json(&json!(t.map(|d| py_isoformat_utc(&d)))))
 }
 
 async fn get_is_blocking_on_stdin(ctx: Ctx, Path(name): Path<String>) -> ApiResult {
-    scoped_auth(&ctx.state, &ctx.headers, &["jobs:read"]).await?;
-    Ok(ok_json(&json!(
-        ctx.state.jobs.is_blocking_on_stdin(&name).await
-    )))
+    let principal = scoped_auth(&ctx.state, &ctx.headers, &["jobs:read"]).await?;
+    let blocking = may_see(&ctx.state, principal.as_ref(), &name).await
+        && ctx.state.jobs.is_blocking_on_stdin(&name).await;
+    Ok(ok_json(&json!(blocking)))
 }
 
 async fn get_prompt_kwargs(ctx: Ctx, Path(name): Path<String>) -> ApiResult {
-    scoped_auth(&ctx.state, &ctx.headers, &["jobs:read"]).await?;
-    let kwargs = ctx.state.jobs.prompt_kwargs(&name).await;
+    let principal = scoped_auth(&ctx.state, &ctx.headers, &["jobs:read"]).await?;
+    let kwargs = if may_see(&ctx.state, principal.as_ref(), &name).await {
+        ctx.state.jobs.prompt_kwargs(&name).await
+    } else {
+        Map::new()
+    };
     Ok(ok_json(&from_core(&meerschaum_core::Value::Map(kwargs))))
 }
 
@@ -285,10 +341,15 @@ async fn monitor_socket(state: AppState, name: String, mut socket: WebSocket) {
             },
             Err(_) => None,
         };
-        if user.is_none() {
+        let Some(principal) = user else {
             let _ = socket
                 .send(Message::Text("Invalid credentials.".into()))
                 .await;
+            let _ = socket.send(Message::Close(None)).await;
+            return;
+        };
+        // An `execute-*` job's output is its creator's and the administrators'.
+        if !may_see(&state, Some(&principal), &name).await {
             let _ = socket.send(Message::Close(None)).await;
             return;
         }

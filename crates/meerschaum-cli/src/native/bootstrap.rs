@@ -10,7 +10,7 @@ use crate::format::rich::pretty::PyObj;
 use crate::format::{OptionsArgs, TupleArgs};
 use crate::value::{ArgsMap, PyValue};
 
-use super::ask::{Ask, ask, choose, eof, interrupted, is_interrupt};
+use super::ask::{Ask, ask, choose, eof, interrupted, is_interrupt, is_secret_attribute};
 use super::pipes::{Selection, explicit_pipes};
 use super::{flag, info, items_str, pprint, print_tuple, session, string, warn, words, yes_no};
 
@@ -59,6 +59,113 @@ fn connector_labels(rt: &mut Runtime<'_>) -> Vec<String> {
         }
     }
     out.sort();
+    out
+}
+
+/// The connector keys the `bootstrap pipes` dropdown suggests: those in the configuration,
+/// `MRSM_<TYPE>_<LABEL>` environment connectors and `plugin:<name>` connectors.
+fn connector_suggestions(rt: &mut Runtime<'_>) -> Vec<String> {
+    let mut out = connector_labels(rt);
+    let mut types: Vec<String> = vec!["sql".into(), "api".into(), "valkey".into()];
+    if let Some(Value::Map(connectors)) = rt.config().get(&["meerschaum", "connectors"]) {
+        types.extend(connectors.keys().cloned());
+    }
+    if let Ok(manifest) = crate::python::manifest(rt) {
+        types.extend(manifest.connector_types.keys().cloned());
+    }
+    types.sort();
+    types.dedup();
+    out.extend(env_connector_keys(
+        std::env::vars().map(|(name, _)| name),
+        &types,
+    ));
+    out.sort();
+    out.dedup();
+    out
+}
+
+/// `type:label` of each `MRSM_<TYPE>_<LABEL>` variable whose type is one of `types`.
+fn env_connector_keys(names: impl Iterator<Item = String>, types: &[String]) -> Vec<String> {
+    let mut keys = Vec::new();
+    for name in names {
+        let Some(rest) = name.strip_prefix("MRSM_") else {
+            continue;
+        };
+        for typ in types {
+            let prefix = format!("{}_", typ.to_uppercase());
+            if let Some(label) = rest.strip_prefix(&prefix)
+                && !label.is_empty()
+            {
+                keys.push(format!("{typ}:{}", label.to_lowercase()));
+            }
+        }
+    }
+    keys
+}
+
+/// The pipes registered on the instance (no suggestions when it cannot be read).
+fn registered_keys(
+    rt: &mut Runtime<'_>,
+    inst: &super::Instance,
+) -> Vec<meerschaum_connector::PipeKeysEntry> {
+    let sess = session(rt);
+    match sess.block_on(
+        inst.conn()
+            .fetch_pipes_keys(&meerschaum_connector::PipesKeysQuery::default()),
+    ) {
+        Ok(meerschaum_connector::PipesKeys::List(entries)) => entries,
+        Ok(meerschaum_connector::PipesKeys::Dict(entries)) => entries.into_values().collect(),
+        Err(_) => Vec::new(),
+    }
+}
+
+/// The metric keys on the instance, those of the chosen connector first.
+fn metric_suggestions(
+    known: &[meerschaum_connector::PipeKeysEntry],
+    connector_keys: &str,
+) -> Vec<String> {
+    let mut ours: Vec<String> = known
+        .iter()
+        .filter(|e| e.connector_keys == connector_keys)
+        .map(|e| e.metric_key.clone())
+        .collect();
+    ours.sort();
+    let mut others: Vec<String> = known
+        .iter()
+        .filter(|e| e.connector_keys != connector_keys)
+        .map(|e| e.metric_key.clone())
+        .collect();
+    others.sort();
+    ours.extend(others);
+    ours
+}
+
+/// The location keys on the instance: those of the connector and metric, then those of the
+/// connector, then the rest.
+fn location_suggestions(
+    known: &[meerschaum_connector::PipeKeysEntry],
+    connector_keys: &str,
+    metric_key: &str,
+) -> Vec<String> {
+    let location = |e: &meerschaum_connector::PipeKeysEntry| {
+        e.location_key
+            .clone()
+            .filter(|l| !l.is_empty() && l != "None")
+    };
+    let mut out: Vec<String> = Vec::new();
+    for tier in 0..3 {
+        let mut tier_keys: Vec<String> = known
+            .iter()
+            .filter(|e| match tier {
+                0 => e.connector_keys == connector_keys && e.metric_key == metric_key,
+                1 => e.connector_keys == connector_keys && e.metric_key != metric_key,
+                _ => e.connector_keys != connector_keys,
+            })
+            .filter_map(location)
+            .collect();
+        tier_keys.sort();
+        out.extend(tier_keys);
+    }
     out
 }
 
@@ -273,6 +380,9 @@ pub fn bootstrap_connectors_wizard(
         if let Some(d) = default {
             options = options.default(d);
         }
+        if is_secret_attribute(r) {
+            options = options.password();
+        }
         let val = match ask(rt, &format!("Value for {r}:"), &options) {
             Ok(v) => v,
             Err(e) if is_interrupt(&e) => continue,
@@ -281,10 +391,14 @@ pub fn bootstrap_connectors_wizard(
         new_attributes.insert(r.clone(), int_or_str(val));
     }
     for o in &optional {
+        let mut options = Ask::new();
+        if is_secret_attribute(o) {
+            options = options.password();
+        }
         let val = match ask(
             rt,
             &format!("Value for {o} (optional; empty to omit):"),
-            &Ask::new(),
+            &options,
         ) {
             Ok(v) => v,
             Err(e) if is_interrupt(&e) => continue,
@@ -298,11 +412,11 @@ pub fn bootstrap_connectors_wizard(
         if new_attributes.contains_key(k) {
             continue;
         }
-        let val = match ask(
-            rt,
-            &format!("Value for {k}:"),
-            &Ask::new().default(v.py_str()),
-        ) {
+        let mut options = Ask::new().default(v.py_str());
+        if is_secret_attribute(k) {
+            options = options.password();
+        }
+        let val = match ask(rt, &format!("Value for {k}:"), &options) {
             Ok(v) => v,
             Err(e) if is_interrupt(&e) => continue,
             Err(e) => return Err(e),
@@ -315,11 +429,18 @@ pub fn bootstrap_connectors_wizard(
             "Failed to bootstrap connector '{typ}:{label}' with exception:\n{message}"
         ))));
     }
-    pprint(
-        rt,
-        &PyObj::from_value(&Value::Map(new_attributes.clone())),
-        false,
-    );
+    // The secrets were typed masked: they are not printed back (v4 printed them).
+    let shown: Map = new_attributes
+        .iter()
+        .map(|(k, v)| {
+            if is_secret_attribute(k) && !matches!(v, Value::Null) {
+                (k.clone(), Value::Str("********".into()))
+            } else {
+                (k.clone(), v.clone())
+            }
+        })
+        .collect();
+    pprint(rt, &PyObj::from_value(&Value::Map(shown)), false);
     let ok = if yes {
         true
     } else {
@@ -427,26 +548,41 @@ pub fn bootstrap_pipes(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
         }
     } else {
         let new_label = "New";
+        // The keys already registered on the instance (for the metric and location dropdowns).
+        let known = registered_keys(rt, &inst);
         info(
             rt,
             "To create a pipe without explicitly using a connector, use the `register pipes` command.\n",
         );
-        let mut choices = connector_labels(rt);
+        let mut choices = connector_suggestions(rt);
         choices.push(new_label.to_string());
         let connector_emoji = emoji(rt, "connector");
-        let Some(chosen) = interrupted(choose(
-            rt,
-            &format!(
-                "Where are the data coming from?\n\n    Please type the keys of a connector or enter '{new_label}'\n    to register a new connector.\n\n {connector_emoji} Connector:"
-            ),
-            &choices,
-            None,
-            false,
-        ))?
-        else {
-            return Ok(abort);
+        let question = format!(
+            "Where are the data coming from?\n\n    Please type the keys of a connector or enter '{new_label}'\n    to register a new connector.\n\n {connector_emoji} Connector:"
+        );
+        // The warning is shown on the metric question's screen: the screen is cleared between
+        // questions, which would wipe it here.
+        let mut unknown_connector: Option<String> = None;
+        let mut ck = loop {
+            let Some(typed) =
+                interrupted(ask(rt, &question, &Ask::new().suggestions(choices.clone())))?
+            else {
+                return Ok(abort);
+            };
+            let typed = typed.trim().to_string();
+            if typed.is_empty() {
+                warn(rt, "Please pick a connector.");
+                continue;
+            }
+            if typed != new_label && !choices.contains(&typed) {
+                // Any keys are accepted: the connector may be defined where this host cannot see
+                // it (a plugin installed later, a remote instance).
+                unknown_connector = Some(format!(
+                    "Connector '{typed}' is not configured on this host (it is not in the configuration, an `MRSM_<TYPE>_<LABEL>` environment variable or a plugin)."
+                ));
+            }
+            break typed;
         };
-        let mut ck = chosen.unwrap_or_default();
         if ck == new_label {
             clear_screen_if_enabled(rt, debug);
             loop {
@@ -469,13 +605,16 @@ pub fn bootstrap_pipes(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
 
         let mk = loop {
             clear_screen_if_enabled(rt, debug);
+            if let Some(message) = unknown_connector.take() {
+                warn(rt, &message);
+            }
             let metric_emoji = emoji(rt, "metric");
             let Some(mk) = interrupted(ask(
                 rt,
                 &format!(
                     "What kind of data is this?\n\n    The metric is the label for the contents of the pipe.\n    For example, 'weather' might be a metric for weather station data.\n\n {metric_emoji} Metric:"
                 ),
-                &Ask::new(),
+                &Ask::new().suggestions(metric_suggestions(&known, &ck)),
             ))?
             else {
                 return Ok(abort);
@@ -494,7 +633,7 @@ pub fn bootstrap_pipes(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
             &format!(
                 "Where are the data located?\n\n    You can build pipes that share a connector and metric\n    but are in different locations.\n\n    For example, you could create Pipe('{ck}', '{mk}', 'home') and\n    Pipe('{ck}', '{mk}', 'work'), which would share a connector\n    and metric, but may come from different tables.\n\n    In most cases, you can omit the location.\n\n {location_emoji} Location (Empty to omit):"
             ),
-            &Ask::new(),
+            &Ask::new().suggestions(location_suggestions(&known, &ck, &mk)),
         ))?
         else {
             return Ok(abort);

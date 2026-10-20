@@ -308,6 +308,17 @@ pub fn v5_additions(function: &str) -> Option<&'static str> {
     - `mrsm plan pipes` prints what a graph run would do, without syncing.
 "##
         }
+        "_start_jobs" | "_restart_jobs" => {
+            r##"    - `--no-stagger`
+        - Start the jobs without the startup gate (jitter, busy-host wait and slots,
+          `jobs:startup:*`). One explicit `start job x` already skips the jitter.
+    - `--startup-jitter 30s`
+        - Bound the random start delay of a new job (stored in its `startup` property).
+    - `--jitter 30s` (with `-s`)
+        - Move every fire time of the job's schedule by a fixed per-job offset of up to 30 s
+          (`-s 'every 5 minutes jitter 30 seconds'` is the same).
+"##
+        }
         "show" => {
             r##"    - `show graph`
         - Print the selected pipes and their dependencies as a DAG
@@ -319,6 +330,21 @@ pub fn v5_additions(function: &str) -> Option<&'static str> {
         - Print the Gantt chart of a recorded run.
     - `show drivers`
         - Print the native driver libraries (DuckDB, Oracle client): version, source, path.
+"##
+        }
+        "_show_data" => {
+            r##"    - In the default (pretty) output a long table is truncated like a pandas frame:
+      more than `formatting:dataframe:max_rows` (60) rows show `min_rows` (10) of them (the first
+      and the last), columns that do not fit the terminal are replaced by a `…` column, and a cell
+      longer than `max_colwidth` (50) characters ends in `…`. The footer gives the true row count.
+      Only the rows shown are read.
+    - `--all`
+        - Print every row, column and cell. `--nopretty` never truncates.
+"##
+        }
+        "_show_sizes" => {
+            r##"    - Pipes whose `target` is the same table are marked `shared xN`, and the total counts
+      each table once.
 "##
         }
         "install" => {

@@ -143,10 +143,11 @@ impl JobsBackend for LocalJobsBackend {
         blocking(move || {
             // The job runs with the server's environment (v4: `env={NONINTERACTIVE: '1',
             // **os.environ}` replaces whatever `properties.env` the client sent). PARITY
-            // (divergence): the one client variable kept is the Compose project stamp, so the
-            // ownership of a Compose project's jobs on a shared executor survives the trip;
-            // v4 drops it and every project then sees the other's jobs as unowned. Nothing
-            // else the client sends reaches the server's process environment.
+            // (divergence): the client variables kept are the Compose stamps (the project, and
+            // the root compose file of a tree), so the ownership of a Compose project's jobs
+            // on a shared executor survives the trip; v4 drops them and every project then
+            // sees the other's jobs as unowned. Nothing else the client sends reaches the
+            // server's process environment.
             let mut env: IndexMap<String, String> = IndexMap::new();
             env.insert(
                 meerschaum_core::static_config::static_config()
@@ -159,13 +160,13 @@ impl JobsBackend for LocalJobsBackend {
                 std::env::vars_os()
                     .filter_map(|(k, v)| Some((k.into_string().ok()?, v.into_string().ok()?))),
             );
-            let stamp = &meerschaum_core::static_config::static_config()
-                .environment
-                .compose_project;
-            if let Some(Value::Map(client_env)) = properties.as_ref().and_then(|p| p.get("env"))
-                && let Some(project) = client_env.get(stamp.as_str())
-            {
-                env.insert(stamp.clone(), project.py_str());
+            let stamps = &meerschaum_core::static_config::static_config().environment;
+            if let Some(Value::Map(client_env)) = properties.as_ref().and_then(|p| p.get("env")) {
+                for stamp in [&stamps.compose_project, &stamps.compose_root] {
+                    if let Some(value) = client_env.get(stamp.as_str()) {
+                        env.insert(stamp.clone(), value.py_str());
+                    }
+                }
             }
             let job = Job::new(
                 &name,

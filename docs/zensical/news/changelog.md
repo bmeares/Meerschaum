@@ -2,7 +2,7 @@
 
 ## 5.0.0 Releases
 
-Meerschaum 5 is a rewrite of the core in Rust: the data kernel, the `sql:` / `valkey:` / `api:` connectors, the Syncing Engine, jobs, compose, the HTTP API, the MCP server, the web console and the `mrsm` CLI and shell. The `meerschaum` Python package stays as the plugin SDK and a façade, so pipes, parameters, configuration, compose files, jobs, the HTTP API and the Python public API keep working. Read the [migration guide](/reference/migrating-to-v5/) before upgrading; v4.1.x stays installable and receives security fixes until 5.1.0.
+Meerschaum 5 is a rewrite of the core in Rust: the data kernel, the `sql:` / `valkey:` / `api:` connectors, the Syncing Engine, jobs, compose, the HTTP API, the MCP server and the `mrsm` CLI and shell. The `meerschaum` Python package stays as the plugin SDK, a façade and the host of the Plotly Dash web console, so pipes, parameters, configuration, compose files, jobs, the HTTP API and the Python public API keep working. Read the [migration guide](/reference/migrating-to-v5/) before upgrading; v4.1.x stays installable and receives security fixes until 5.1.0.
 
 ### v5.0.0
 
@@ -22,8 +22,8 @@ Meerschaum 5 is a rewrite of the core in Rust: the data kernel, the `sql:` / `va
 - **Rust plugins.**  
   A plugin can be a native library (`plugin.toml` plus `lib<name>.so`) built with the new `meerschaum-plugin` crate, or a Cargo crate that Meerschaum builds itself into `MRSM_ROOT_DIR/cache/native_build/` when `cargo` is on `PATH`. It can provide `fetch`, `sync`, actions, hooks, a connector or instance, HTTP routes and console pages, exchanging Arrow record batches. A Rust plugin replaces a Python plugin of the same name entirely. See [Rust plugins](/reference/plugins/rust-plugins/).
 
-- **A new console and the page contract.**  
-  `/dash` is rendered by the Rust server (HTMX, vendored Plotly.js, MapLibre GL JS, Cytoscape and xterm.js; no CDN), with a new `pipelines` page. Plugin pages return an HTML fragment and Plotly figure JSON (`meerschaum.plugins.figure()`, `data-mrsm-figure`, `data-mrsm-map`); `@dash_plugin` apps keep working at `/dash/<plugin>/`.
+- **The web console with pipelines pages, and the page contract.**  
+  The Plotly Dash console (`meerschaum[dash]`) is served by the Python API host behind the Rust server at the same `/dash` paths, with a new `pipelines` page (dependency graph, Gantt timeline, runs) and Parents/Children tabs on the pipe card. `@dash_plugin` and Dash `@web_page` pages register into it as before. Plugin pages may also return an HTML fragment and Plotly figure JSON (`meerschaum.plugins.figure()`, `data-mrsm-figure`, `data-mrsm-map`). The standalone binary serves the API without a console and points `/dash` to `pip install meerschaum[dash]`.
 
 - **The web terminal in Rust.**  
   `/webterm/<session id>` and `/dash/webterm` are served by the API server itself (a PTY bridge with the tmux session model and terminado's message format, xterm.js 6.0.0), with no Tornado process and no separate `start webterm`.
@@ -86,8 +86,8 @@ Meerschaum 5 is a rewrite of the core in Rust: the data kernel, the `sql:` / `va
 - **`--engine laps`, the CLI daemons, `pyoxidizer` builds and Python 3.10.**  
   `--loop` replaces laps, `start|stop|restart daemons` and `start worker` report that actions run natively, `pip install meerschaum` and `cargo install meerschaum` replace the portable archive, and the wheels require Python 3.11 or newer.
 
-- **Meerschaum's own Dash console and middleware over core routes.**  
-  The console is Rust; plugin Dash apps move under `/dash/<plugin>/`. Plugin middleware no longer sees core routes (use `api.permissions.rate_limits`, `api.permissions.routes.allowlist` or a reverse proxy), and a plugin cannot patch console pages.
+- **Middleware over core routes.**  
+  Plugin middleware no longer sees core routes (use `api.permissions.rate_limits`, `api.permissions.routes.allowlist` or a reverse proxy).
 
 #### Fixed
 

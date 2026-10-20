@@ -84,7 +84,9 @@ impl Drop for Sandbox {
 fn native_up_ps_logs_replacement_and_down_preserve_foreign_jobs() {
     let body = "jobs:\n  compose-smoke: show version";
     let sandbox = Sandbox::new(body);
-    sandbox.ok(&["compose", "up"]);
+    // Wave 18 (D23): `compose up` staggers its job starts (up to 10 s of jitter); this test waits
+    // for the job to finish, so it starts without the gate.
+    sandbox.ok(&["compose", "up", "--no-stagger"]);
     sandbox.wait_stopped("compose-smoke");
     let mut job = Job::open("compose-smoke", &sandbox.context()).unwrap();
     assert_eq!(
@@ -102,7 +104,7 @@ fn native_up_ps_logs_replacement_and_down_preserve_foreign_jobs() {
             .ok(&["compose", "logs", "--nopretty"])
             .contains("MRSM_JOB: compose-smoke")
     );
-    sandbox.ok(&["compose", "up"]);
+    sandbox.ok(&["compose", "up", "--no-stagger"]);
     sandbox.wait_stopped("compose-smoke");
 
     sandbox.project("other", body);

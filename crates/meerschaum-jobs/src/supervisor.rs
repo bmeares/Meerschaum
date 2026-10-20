@@ -28,6 +28,7 @@ use std::path::PathBuf;
 use std::process::Command;
 
 use crate::config::Seconds;
+use crate::startup::StartupPolicy;
 
 /// The first argument that turns a host binary into the supervisor
 /// (see [`run_if_requested`]).
@@ -109,6 +110,8 @@ pub struct SupervisorOptions {
     pub cwd: PathBuf,
     /// The worker command (program and sysargs).
     pub command: Vec<String>,
+    /// The startup gate the supervisor passes before it starts the worker (`None`: none).
+    pub startup: Option<StartupPolicy>,
 }
 
 impl SupervisorOptions {
@@ -143,8 +146,12 @@ impl SupervisorOptions {
             b(self.capture_stdin),
             "--cwd".into(),
             self.cwd.to_string_lossy().to_string(),
-            "--".into(),
         ];
+        if let Some(policy) = &self.startup {
+            args.push("--startup".into());
+            args.push(policy.to_arg());
+        }
+        args.push("--".into());
         args.extend(self.command.iter().cloned());
         args
     }
@@ -167,6 +174,7 @@ impl SupervisorOptions {
             capture_stdin: true,
             cwd: PathBuf::from("."),
             command: Vec::new(),
+            startup: None,
         };
         while let Some(arg) = it.next() {
             if arg == SUPERVISOR_ARG || arg.starts_with("daemon_id=") {
@@ -200,6 +208,7 @@ impl SupervisorOptions {
                 }
                 "--stdin" => opts.capture_stdin = value == "1",
                 "--cwd" => opts.cwd = value.into(),
+                "--startup" => opts.startup = Some(StartupPolicy::from_arg(&value)?),
                 other => return Err(format!("Unknown supervisor argument '{other}'.")),
             }
         }
@@ -408,6 +417,28 @@ mod imp {
         }
     }
 
+    /// Record the end of the run (`ended`), or remove the job and its logs when the output is not
+    /// kept (`cleanup()`).
+    fn finish(
+        opts: &SupervisorOptions,
+        paths: &JobPaths,
+        dpaths: &DaemonPaths,
+        props: &mut Props,
+        log: &Arc<Mutex<RotatingFile>>,
+    ) {
+        if opts.keep_output {
+            props.capture("ended");
+        } else {
+            if crate::names::is_direct_child(&paths.jobs_dir, &dpaths.dir, &opts.daemon_id) {
+                let _ = fs::remove_dir_all(&dpaths.dir);
+            }
+            if let Ok(mut l) = log.lock() {
+                l.delete(false);
+            }
+            let _ = fs::remove_file(&opts.log_offset_path);
+        }
+    }
+
     pub(super) fn supervise(opts: SupervisorOptions) -> i32 {
         let paths = JobPaths {
             jobs_dir: opts.jobs_dir.clone(),
@@ -468,6 +499,82 @@ mod imp {
             }
         };
 
+        // `process.pid`: under an exclusive `flock` for the job's lifetime. It names this
+        // supervisor while the startup gate holds the worker back (a stop signals it), then the
+        // worker.
+        let _ = fs::create_dir_all(&dpaths.dir);
+        let pid_lock = OpenOptions::new()
+            .create(true)
+            .truncate(true)
+            .write(true)
+            .open(&dpaths.pid)
+            .ok()
+            .and_then(|f| Flock::lock(f, FlockArg::LockExclusiveNonblock).ok());
+        let _ = fs::write(&dpaths.pid, std::process::id().to_string());
+
+        // Termination signals: before the worker exists they stop the wait at the startup gate;
+        // afterwards they are forwarded to the worker. `signals.0` is the worker's PID (0 until
+        // it runs), `signals.1` a signal which arrived before that.
+        let signals = Arc::new(Mutex::new((0i32, 0i32)));
+        let stopping = Arc::new(AtomicBool::new(false));
+        {
+            let signals = signals.clone();
+            let stopping = stopping.clone();
+            std::thread::spawn(move || {
+                loop {
+                    if let Ok(sig) = sigset.wait() {
+                        let Ok(mut state) = signals.lock() else {
+                            continue;
+                        };
+                        if state.0 > 0 {
+                            let _ = nix::sys::signal::kill(Pid::from_raw(state.0), sig);
+                        } else {
+                            state.1 = sig as i32;
+                            stopping.store(true, Ordering::SeqCst);
+                        }
+                    }
+                }
+            });
+        }
+
+        // The startup gate (see `crate::startup`): jitter, load and memory, then a slot.
+        let write_log_line = |msg: &str| {
+            if let Ok(mut l) = log.lock() {
+                let line = if opts.write_timestamps {
+                    format!("{}{msg}\n", l.get_timestamp_prefix_str())
+                } else {
+                    format!("{msg}\n")
+                };
+                let _ = l.write_raw(line.as_bytes());
+            }
+        };
+        let admission = match &opts.startup {
+            None => None,
+            Some(policy) => {
+                match crate::startup::admit(policy, &opts.daemon_id, &stopping, &mut |m| {
+                    write_log_line(m)
+                }) {
+                    Ok(admission) => Some(admission),
+                    Err(crate::startup::Stopped) => {
+                        write_log_line("Startup: stopped before the job started.");
+                        props.set(
+                            "result",
+                            Value::List(vec![
+                                Value::Bool(true),
+                                Value::Str(format!("Stopped daemon '{}'.", opts.daemon_id)),
+                            ]),
+                        );
+                        finish(&opts, &paths, &dpaths, &mut props, &log);
+                        drop(pid_lock);
+                        let _ = fs::remove_file(&dpaths.pid);
+                        let _ = fs::remove_file(&dpaths.stdin_block);
+                        return 0;
+                    }
+                }
+            }
+        };
+        let release_file = admission.as_ref().map(|a| a.release_file().to_path_buf());
+
         let result_path = dpaths.dir.join(RESULT_FILE_NAME);
         let _ = fs::remove_file(&result_path);
         let mut cmd = Command::new(&opts.command[0]);
@@ -477,6 +584,9 @@ mod imp {
             .stdout(Stdio::from(out_w))
             .stderr(Stdio::from(err_w))
             .env(RESULT_PATH_ENV, &result_path);
+        if let Some(a) = &admission {
+            cmd.env(crate::startup::RELEASE_ENV, a.release_env());
+        }
         {
             use std::os::unix::process::CommandExt;
             // SAFETY: runs in the forked worker before `exec`; `sigaction` (via `signal`) and
@@ -517,6 +627,9 @@ mod imp {
                     Value::List(vec![Value::Bool(false), Value::Str(msg)]),
                 );
                 props.capture("ended");
+                drop(admission);
+                drop(pid_lock);
+                let _ = fs::remove_file(&dpaths.pid);
                 return 1;
             }
         };
@@ -524,28 +637,46 @@ mod imp {
         drop(cmd);
         let pid = child.id() as i32;
 
-        // `process.pid`: the worker's PID, under an exclusive `flock` for the job's lifetime.
-        let _ = fs::create_dir_all(&dpaths.dir);
-        let pid_lock = OpenOptions::new()
-            .create(true)
-            .truncate(true)
-            .write(true)
-            .open(&dpaths.pid)
-            .ok()
-            .and_then(|f| Flock::lock(f, FlockArg::LockExclusiveNonblock).ok());
+        // `process.pid`: now the worker's PID (the `flock` taken above stays).
         let _ = fs::write(&dpaths.pid, pid.to_string());
 
         props.set("result", Value::Null);
         props.capture("began");
 
-        // Forward termination signals to the worker.
-        std::thread::spawn(move || {
-            loop {
-                if let Ok(sig) = sigset.wait() {
-                    let _ = nix::sys::signal::kill(Pid::from_raw(pid), sig);
-                }
+        // A signal which arrived while the worker was being started is forwarded now.
+        if let Ok(mut state) = signals.lock() {
+            state.0 = pid;
+            if state.1 != 0
+                && let Ok(sig) = Signal::try_from(state.1)
+            {
+                let _ = nix::sys::signal::kill(Pid::from_raw(pid), sig);
             }
-        });
+        }
+
+        // The slot is held until the worker's first lap is done, it exits, or the timeout.
+        let exited = Arc::new(AtomicBool::new(false));
+        if let Some(admission) = admission {
+            let exited = exited.clone();
+            let opts = opts.clone();
+            let log = log.clone();
+            let settle = Duration::from_secs_f64(
+                opts.startup
+                    .as_ref()
+                    .map_or(0.0, |p| p.settle_seconds.max(0.0)),
+            );
+            std::thread::spawn(move || {
+                admission.hold(&exited, Some((pid, settle)), &mut |m| {
+                    if let Ok(mut l) = log.lock() {
+                        let line = if opts.write_timestamps {
+                            format!("{}{m}\n", l.get_timestamp_prefix_str())
+                        } else {
+                            format!("{m}\n")
+                        };
+                        let _ = l.write_raw(line.as_bytes());
+                    }
+                });
+            });
+        }
 
         // Python reinstalls the interceptors on every log-refresh tick.
         let resets = [
@@ -604,6 +735,10 @@ mod imp {
         drop(tx);
 
         let status = child.wait();
+        exited.store(true, Ordering::SeqCst);
+        if let Some(file) = &release_file {
+            let _ = fs::remove_file(file);
+        }
         // Drain the remaining output (a background grandchild may keep the pipes open).
         for _ in 0..2 {
             if rx.recv_timeout(Duration::from_secs(2)).is_err() {
@@ -624,18 +759,7 @@ mod imp {
                 "result",
                 Value::List(vec![Value::Bool(success), Value::Str(msg)]),
             );
-            if opts.keep_output {
-                props.capture("ended");
-            } else {
-                // `cleanup()`: remove the job's directory and its logs.
-                if crate::names::is_direct_child(&paths.jobs_dir, &dpaths.dir, &opts.daemon_id) {
-                    let _ = fs::remove_dir_all(&dpaths.dir);
-                }
-                if let Ok(mut l) = log.lock() {
-                    l.delete(false);
-                }
-                let _ = fs::remove_file(&opts.log_offset_path);
-            }
+            finish(&opts, &paths, &dpaths, &mut props, &log);
         }
 
         // The PID file outlives a Python daemon until the next status check; remove it now if it
@@ -676,6 +800,16 @@ mod tests {
             capture_stdin: false,
             cwd: "/tmp".into(),
             command: vec!["mrsm".into(), "--".into(), "-x".into()],
+            startup: Some(StartupPolicy {
+                kind: crate::startup::StartKind::Bulk,
+                jitter_seconds: 1.5,
+                max_load: 1.5,
+                min_free_memory_percent: 10.0,
+                max_concurrent: 2,
+                slot_timeout_seconds: 300.0,
+                settle_seconds: 15.0,
+                dir: "/r/jobs/.startup".into(),
+            }),
         };
         let mut args = vec![SUPERVISOR_ARG.to_string()];
         args.extend(opts.to_args());

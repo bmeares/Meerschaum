@@ -35,6 +35,11 @@ pub enum SqlError {
     #[error(transparent)]
     Driver(#[from] sqlx::Error),
 
+    /// The first connection to the database failed (refused, unresolvable, unreachable, timed
+    /// out or rejected credentials); the message names the connector and the cause.
+    #[error("{0}")]
+    Connect(crate::driver::connect::ConnectError),
+
     /// An error from a native (non-`sqlx`) driver: `tiberius`, `duckdb` or `oracle`.
     #[error("{0}")]
     Database(String),

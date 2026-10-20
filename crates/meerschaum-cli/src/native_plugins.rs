@@ -793,7 +793,8 @@ fn html_escape(text: &str) -> String {
         .replace('>', "&gt;")
 }
 
-/// The console pages native plugins declare in their manifest (`web_pages`).
+/// The pages native plugins declare in their manifest (`web_pages`), served as fragments for the
+/// Dash console.
 pub fn pages(manifest: &Manifest, natives: &Arc<NativePlugins>) -> Vec<meerschaum_web::PluginPage> {
     let mut pages = Vec::new();
     for plugin in manifest
@@ -805,6 +806,7 @@ pub fn pages(manifest: &Manifest, natives: &Arc<NativePlugins>) -> Vec<meerschau
             let path = page.path.trim_matches('/');
             let path = path.strip_prefix("dash/").unwrap_or(path).to_string();
             pages.push(meerschaum_web::PluginPage {
+                plugin: plugin.name.clone(),
                 path: path.clone(),
                 page_group: page
                     .page_group

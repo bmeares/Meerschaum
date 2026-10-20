@@ -1,6 +1,7 @@
-//! The Python API host lifecycle (§7.3, D17): start `python -m meerschaum.api.host` on a Unix
-//! socket under the root directory only when the plugin manifest says an installed plugin needs
-//! it, supervise it like a job, and restart it with backoff when it crashes.
+//! The Python API host lifecycle (§7.3, D17, D21): start `python -m meerschaum.api.host` on a Unix
+//! socket under the root directory (TCP loopback with a per-start token on Windows) when an
+//! installed plugin needs it or the Dash web console is available, supervise it like a job, and
+//! restart it with backoff when it crashes.
 //!
 //! Launching is behind [`HostLauncher`] so tests (and embedders) can substitute a fake host.
 //!
@@ -40,15 +41,37 @@ pub struct HostManifest {
     /// Plugins registering MCP tools or resources.
     #[serde(default)]
     pub mcp_tools: Vec<String>,
+    /// The Dash web console is available (the `dash` extra imports, [`probe_console`]): the
+    /// host runs for it even when no plugin needs it (D21).
+    #[serde(default)]
+    pub console: bool,
 }
 
 impl HostManifest {
-    /// Whether any installed plugin needs the API host.
+    /// Whether the API host is needed: by an installed plugin or by the Dash console.
     pub fn needs_host(&self) -> bool {
-        !(self.api_plugins.is_empty()
-            && self.dash_plugins.is_empty()
-            && self.web_pages.is_empty()
-            && self.mcp_tools.is_empty())
+        !self.reasons().is_empty()
+    }
+
+    /// Why the host is needed (`api_plugins`, `dash_plugins`, `web_pages`, `mcp_tools`,
+    /// `console`); empty when it never starts.
+    pub fn reasons(&self) -> Vec<&'static str> {
+        [
+            ("api_plugins", !self.api_plugins.is_empty()),
+            ("dash_plugins", !self.dash_plugins.is_empty()),
+            ("web_pages", !self.web_pages.is_empty()),
+            ("mcp_tools", !self.mcp_tools.is_empty()),
+            ("console", self.console),
+        ]
+        .into_iter()
+        .filter_map(|(name, present)| present.then_some(name))
+        .collect()
+    }
+
+    /// The same manifest with the console reason set (the start-up probe's answer).
+    pub fn with_console(mut self, console: bool) -> HostManifest {
+        self.console = console;
+        self
     }
 
     /// Read a manifest JSON file (a missing file means no plugin needs the host).
@@ -87,6 +110,255 @@ pub struct StaticManifest(pub HostManifest);
 impl ManifestSource for StaticManifest {
     async fn load(&self) -> std::io::Result<HostManifest> {
         Ok(self.0.clone())
+    }
+}
+
+/// A manifest source with the console reason forced on or off: `console` is a property of the
+/// interpreter and flags of this process ([`probe_console`]), not of the plugin tree, so it is
+/// applied on top of whatever the manifest file says.
+#[derive(Debug, Clone)]
+pub struct WithConsole<S>(pub S, pub bool);
+
+#[async_trait]
+impl<S: ManifestSource> ManifestSource for WithConsole<S> {
+    async fn load(&self) -> std::io::Result<HostManifest> {
+        Ok(self.0.load().await?.with_console(self.1))
+    }
+}
+
+/// The Python modules the Dash console needs (the `dash` extra): [`probe_console`] looks for
+/// each of them in the interpreter's `sys.path` and in the `mrsm` virtual environment.
+pub const CONSOLE_MODULES: &[&str] = &["dash", "dash_bootstrap_components", "dash_ace", "a2wsgi"];
+
+/// What [`probe_console`] found.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConsoleProbe {
+    /// Whether every module of [`CONSOLE_MODULES`] is importable.
+    pub available: bool,
+    /// The modules that are not (or the reason the probe could not run, as one entry).
+    pub missing: Vec<String>,
+}
+
+impl ConsoleProbe {
+    /// The one-sentence warning for an unavailable console.
+    pub fn warning(&self) -> String {
+        format!(
+            "The web console is not available ({}): it comes with the Python package; install it with `pip install \"meerschaum[dash]\"`. `/dash` shows a pointer page.",
+            self.missing.join(", ")
+        )
+    }
+}
+
+const PROBE_SCRIPT: &str = r#"
+import importlib.util, json, os, sys
+root, mods = sys.argv[1], sys.argv[2].split(',')
+venvs = os.environ.get('MRSM_VENVS_DIR') or os.path.join(root, 'venvs')
+base = os.path.join(venvs, 'mrsm')
+if os.name == 'nt':
+    packages = os.path.join(base, 'Lib', 'site-packages')
+else:
+    packages = os.path.join(base, 'lib', 'python%d.%d' % sys.version_info[:2], 'site-packages')
+if os.path.isdir(packages):
+    sys.path.append(packages)
+missing = []
+for module in mods:
+    try:
+        found = importlib.util.find_spec(module) is not None
+    except Exception:
+        found = False
+    if not found:
+        missing.append(module)
+print(json.dumps(missing))
+"#;
+
+/// How long [`probe_console`] waits for the interpreter before it gives up on the console.
+pub const PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// Ask `python` whether the Dash console's modules ([`CONSOLE_MODULES`]) are importable, without
+/// importing them (about 30 ms): they may be in the interpreter's site-packages or in
+/// `<root>/venvs/mrsm`. A probe that cannot run (no interpreter) or does not answer within
+/// [`PROBE_TIMEOUT`] (a `sitecustomize` that blocks, a stalled network home) answers "not
+/// available": the server binds anyway and `/dash` is the pointer page.
+pub fn probe_console(python: &Path, root: &Path, env: &[(String, String)]) -> ConsoleProbe {
+    probe_console_within(python, root, env, PROBE_TIMEOUT)
+}
+
+/// [`probe_console`] with an explicit deadline.
+pub fn probe_console_within(
+    python: &Path,
+    root: &Path,
+    env: &[(String, String)],
+    timeout: std::time::Duration,
+) -> ConsoleProbe {
+    use std::io::Read;
+    let unavailable = |why: String| ConsoleProbe {
+        available: false,
+        missing: vec![why],
+    };
+    let spawned = std::process::Command::new(python)
+        .args([
+            meerschaum_core::self_exe::PYTHON_SAFE_PATH_FLAG,
+            "-c",
+            PROBE_SCRIPT,
+        ])
+        .arg(root)
+        .arg(CONSOLE_MODULES.join(","))
+        .envs(env.iter().map(|(k, v)| (k.as_str(), v.as_str())))
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn();
+    let mut child = match spawned {
+        Ok(child) => child,
+        Err(e) => {
+            return unavailable(format!("no Python interpreter ({}: {e})", python.display()));
+        }
+    };
+    let mut stdout = child.stdout.take();
+    let reader = std::thread::spawn(move || {
+        let mut text = String::new();
+        if let Some(out) = stdout.as_mut() {
+            let _ = out.read_to_string(&mut text);
+        }
+        text
+    });
+    let deadline = std::time::Instant::now() + timeout;
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if std::time::Instant::now() >= deadline => {
+                let _ = child.kill();
+                let _ = child.wait();
+                // The reader ends with the pipe; a grandchild holding it open must not hold us.
+                drop(reader);
+                return unavailable(format!(
+                    "the interpreter did not answer within {} seconds ({})",
+                    timeout.as_secs_f64().max(0.001),
+                    python.display()
+                ));
+            }
+            Ok(None) => std::thread::sleep(std::time::Duration::from_millis(5)),
+            Err(e) => return unavailable(format!("the interpreter could not be waited for: {e}")),
+        }
+    };
+    let text = reader.join().unwrap_or_default();
+    if !status.success() {
+        return unavailable(format!("the interpreter exited with {status}"));
+    }
+    match serde_json::from_slice::<Vec<String>>(text.trim().as_bytes()) {
+        Ok(missing) => ConsoleProbe {
+            available: missing.is_empty(),
+            missing,
+        },
+        Err(e) => unavailable(format!("the interpreter's answer was unreadable: {e}")),
+    }
+}
+
+/// How the host is reached.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HostEndpoint {
+    /// A Unix-domain socket (everywhere but Windows).
+    Unix(PathBuf),
+    /// TCP on loopback, with a per-start token every forwarded request carries in
+    /// [`PROXY_TOKEN_HEADER`] (Windows, where Unix sockets are not used; also
+    /// `MRSM_API_HOST_TRANSPORT=tcp` anywhere, for tests).
+    Tcp {
+        /// The loopback address.
+        addr: std::net::SocketAddr,
+        /// The token the host requires (`MRSM_API_HOST_PROXY_TOKEN`).
+        token: String,
+    },
+}
+
+impl From<PathBuf> for HostEndpoint {
+    fn from(socket: PathBuf) -> HostEndpoint {
+        HostEndpoint::Unix(socket)
+    }
+}
+
+impl From<&Path> for HostEndpoint {
+    fn from(socket: &Path) -> HostEndpoint {
+        HostEndpoint::Unix(socket.to_path_buf())
+    }
+}
+
+impl HostEndpoint {
+    /// The proxy token (TCP only).
+    pub fn token(&self) -> Option<&str> {
+        match self {
+            HostEndpoint::Unix(_) => None,
+            HostEndpoint::Tcp { token, .. } => Some(token),
+        }
+    }
+}
+
+/// The host's status route (`GET /_mrsm/host/status`, internal token): `{"console": {"mounted":
+/// bool, "reason": str|null, "dash_version": str|null}}`.
+pub const STATUS_PATH: &str = "/_mrsm/host/status";
+/// The identity check of a TCP host (`GET /_mrsm/host/proof?nonce=...`, answered without the
+/// token): the hex HMAC-SHA256 of the nonce keyed with the per-start token. The port is chosen
+/// before the host binds it, so a local process could take it in between; only the real host can
+/// answer, and the proxy forwards nothing (cookies, bearer tokens, the proxy token) before it did.
+pub const PROOF_PATH: &str = "/_mrsm/host/proof";
+/// The header carrying the per-start token on the TCP transport.
+pub const PROXY_TOKEN_HEADER: &str = "x-mrsm-host-proxy-token";
+/// The environment variable that gives the host its per-start token (TCP transport).
+pub const PROXY_TOKEN_ENV: &str = "MRSM_API_HOST_PROXY_TOKEN";
+/// `unix` or `tcp`: overrides the platform's default transport.
+pub const TRANSPORT_ENV: &str = "MRSM_API_HOST_TRANSPORT";
+
+/// Which transport the supervisor starts the host on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HostTransport {
+    /// A Unix-domain socket.
+    Unix,
+    /// TCP loopback with a token.
+    Tcp,
+}
+
+impl HostTransport {
+    /// Unix sockets, except on Windows (TCP loopback with a token); `MRSM_API_HOST_TRANSPORT`
+    /// (`unix`, `tcp`) overrides.
+    pub fn from_env() -> HostTransport {
+        match std::env::var(TRANSPORT_ENV).ok().as_deref() {
+            Some("tcp") => HostTransport::Tcp,
+            Some("unix") if cfg!(unix) => HostTransport::Unix,
+            _ if cfg!(windows) => HostTransport::Tcp,
+            _ => HostTransport::Unix,
+        }
+    }
+}
+
+/// Whether the host mounted the Dash console (`GET /_mrsm/host/status`), per host process.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum ConsoleStatus {
+    /// Not asked yet (or the host restarted since).
+    #[default]
+    Unknown,
+    /// The Dash app is mounted: `/dash/*` goes to the host.
+    Mounted,
+    /// It is not (the reason), or there is no host: `/dash/*` shows the pointer page.
+    Unavailable(String),
+}
+
+impl ConsoleStatus {
+    /// Parse the `console` object of the host's status (or registry) document.
+    pub fn from_document(document: &serde_json::Value) -> Option<ConsoleStatus> {
+        let console = document.get("console")?;
+        if console
+            .get("mounted")
+            .and_then(serde_json::Value::as_bool)?
+        {
+            return Some(ConsoleStatus::Mounted);
+        }
+        Some(ConsoleStatus::Unavailable(
+            console
+                .get("reason")
+                .and_then(serde_json::Value::as_str)
+                .filter(|r| !r.is_empty())
+                .unwrap_or("the API host did not mount the console")
+                .to_string(),
+        ))
     }
 }
 
@@ -141,6 +413,23 @@ pub trait HostProcess: Send {
 pub trait HostLauncher: Send + Sync {
     /// Start a host serving on `socket`.
     async fn launch(&self, socket: &Path) -> std::io::Result<Box<dyn HostProcess>>;
+
+    /// Start a host on `endpoint`. The default serves a Unix socket through [`launch`] and
+    /// refuses TCP (launchers that support the Windows transport override this).
+    ///
+    /// [`launch`]: HostLauncher::launch
+    async fn launch_endpoint(
+        &self,
+        endpoint: &HostEndpoint,
+    ) -> std::io::Result<Box<dyn HostProcess>> {
+        match endpoint {
+            HostEndpoint::Unix(socket) => self.launch(socket).await,
+            HostEndpoint::Tcp { .. } => Err(std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                "this launcher cannot serve the API host over TCP",
+            )),
+        }
+    }
 }
 
 /// Launches the API host, `python -m meerschaum.api.host --socket <path>` behind the version guard.
@@ -175,10 +464,17 @@ impl PythonHostLauncher {
             "production": cfg.production,
             "private": cfg.private,
             "debug": cfg.debug,
-            // The host serves plugin pages only as v4's console would.
+            // `no_dash`: mount no console and no plugin pages (v4's `--no-dash`).
             "no_dash": cfg.no_dash,
+            // The Dash console is the host's (D21): mount it unless `--no-dash`.
+            "console": !cfg.no_dash,
+            // The Rust server on loopback, for calls back into it (execute, native pages).
+            "server_url": format!("http://{}:{}", loopback_host(&cfg.host), cfg.port),
             // The terminal is served by the Rust server, never proxied to the host.
             "no_webterm": true,
+            // Whether the Rust server serves `/webterm/<session-id>` (the console shows the
+            // terminal page and its iframe only then).
+            "webterm": !cfg.no_dash && !cfg.no_webterm,
         });
         PythonHostLauncher {
             python,
@@ -188,6 +484,34 @@ impl PythonHostLauncher {
                 ("MRSM_API_HOST_CONFIG".into(), host_config.to_string()),
             ],
         }
+    }
+}
+
+/// The address a client on this machine uses for a server bound to `host`.
+fn loopback_host(host: &str) -> String {
+    match host {
+        "" | "0.0.0.0" => "127.0.0.1".to_string(),
+        "::" | "[::]" => "[::1]".to_string(),
+        h if h.contains(':') && !h.starts_with('[') => format!("[{h}]"),
+        h => h.to_string(),
+    }
+}
+
+impl PythonHostLauncher {
+    /// The arguments after `meerschaum.api.host` that bind `endpoint`.
+    pub fn endpoint_args(endpoint: &HostEndpoint) -> Vec<std::ffi::OsString> {
+        match endpoint {
+            HostEndpoint::Unix(socket) => vec!["--socket".into(), socket.as_os_str().to_owned()],
+            HostEndpoint::Tcp { addr, .. } => vec!["--tcp".into(), addr.to_string().into()],
+        }
+    }
+
+    /// The environment that goes with `endpoint` (the proxy token for TCP).
+    pub fn endpoint_env(endpoint: &HostEndpoint) -> Vec<(&'static str, String)> {
+        endpoint
+            .token()
+            .map(|token| vec![(PROXY_TOKEN_ENV, token.to_string())])
+            .unwrap_or_default()
     }
 }
 
@@ -227,6 +551,13 @@ impl HostProcess for ChildProcess {
 #[async_trait]
 impl HostLauncher for PythonHostLauncher {
     async fn launch(&self, socket: &Path) -> std::io::Result<Box<dyn HostProcess>> {
+        self.launch_endpoint(&HostEndpoint::from(socket)).await
+    }
+
+    async fn launch_endpoint(
+        &self,
+        endpoint: &HostEndpoint,
+    ) -> std::io::Result<Box<dyn HostProcess>> {
         // `python -c <guard> + runpy` instead of `python -m`: the guard refuses a `meerschaum`
         // this program cannot work with before anything of it is imported (importing a stale v4
         // would run its start-up), then the module runs as `-m` would run it.
@@ -239,9 +570,9 @@ impl HostLauncher for PythonHostLauncher {
                 meerschaum_core::self_exe::PYTHON_SAFE_PATH_FLAG,
                 "-c",
                 program.as_str(),
-                "--socket",
             ])
-            .arg(socket)
+            .args(PythonHostLauncher::endpoint_args(endpoint))
+            .envs(PythonHostLauncher::endpoint_env(endpoint))
             .envs(meerschaum_core::python_guard::expect_env())
             .env(meerschaum_core::python_guard::WARN_ENV, "1")
             .env(
@@ -279,7 +610,13 @@ impl Default for SupervisorOptions {
 /// Starts the host on demand, keeps it running, and restarts it on crash.
 pub struct HostSupervisor {
     launcher: Arc<dyn HostLauncher>,
+    /// The Unix socket path (also the host's identity under TCP, where it is unused).
     socket: PathBuf,
+    transport: HostTransport,
+    /// Where the current host process listens (renewed at every launch under TCP).
+    endpoint: std::sync::Mutex<HostEndpoint>,
+    /// Whether the current host process mounted the console.
+    console: std::sync::Mutex<ConsoleStatus>,
     opts: SupervisorOptions,
     started: Mutex<bool>,
     starts: AtomicUsize,
@@ -331,17 +668,75 @@ impl std::fmt::Debug for HostSupervisor {
     }
 }
 
-async fn socket_ready(socket: &Path, timeout: Duration) -> std::io::Result<()> {
+/// The proof a host that knows `token` gives for `nonce` ([`PROOF_PATH`]).
+pub fn host_proof(token: &str, nonce: &str) -> String {
+    use hmac::{Hmac, KeyInit, Mac};
+    let mut mac =
+        Hmac::<sha2::Sha256>::new_from_slice(token.as_bytes()).expect("HMAC takes any key length");
+    mac.update(nonce.as_bytes());
+    mac.finalize()
+        .into_bytes()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+
+/// Whether whatever listens at a TCP `endpoint` holds the per-start token (a Unix socket is
+/// private to its directory and needs no proof). Nothing secret is sent: the nonce is ours.
+pub async fn endpoint_proves_token(endpoint: &HostEndpoint) -> std::io::Result<bool> {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let HostEndpoint::Tcp { token, .. } = endpoint else {
+        return Ok(true);
+    };
+    let nonce = uuid::Uuid::new_v4().simple().to_string();
+    let attempt = async {
+        let mut stream = crate::proxy::connect_endpoint(endpoint).await?;
+        let request = format!(
+            "GET {PROOF_PATH}?nonce={nonce} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"
+        );
+        stream.write_all(request.as_bytes()).await?;
+        let mut answer = Vec::new();
+        // A host answers a few dozen bytes; anything long is not it.
+        stream.take(16 * 1024).read_to_end(&mut answer).await?;
+        Ok::<_, std::io::Error>(answer)
+    };
+    let answer = tokio::time::timeout(Duration::from_secs(3), attempt)
+        .await
+        .map_err(|_| std::io::Error::new(std::io::ErrorKind::TimedOut, "no proof in time"))??;
+    let text = String::from_utf8_lossy(&answer);
+    let ok = text.starts_with("HTTP/1.1 200")
+        && text
+            .split_once("\r\n\r\n")
+            .is_some_and(|(_, body)| body.trim() == host_proof(token, &nonce));
+    Ok(ok)
+}
+
+async fn endpoint_ready(supervisor: &HostSupervisor, timeout: Duration) -> std::io::Result<()> {
     let deadline = tokio::time::Instant::now() + timeout;
+    // Something answered on a TCP port but could not prove it is our host.
+    let mut impostor = false;
     loop {
-        if crate::proxy::connect_host(socket).await.is_ok() {
-            return Ok(());
+        let endpoint = supervisor.endpoint();
+        if crate::proxy::connect_endpoint(&endpoint).await.is_ok() {
+            match endpoint_proves_token(&endpoint).await {
+                Ok(true) => return Ok(()),
+                Ok(false) => impostor = true,
+                // The host accepts connections before its app answers: ask again.
+                Err(_) => {}
+            }
         }
         if tokio::time::Instant::now() >= deadline {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::TimedOut,
-                "the API host did not start listening in time",
-            ));
+            return Err(if impostor {
+                std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    "another process answers on the API host's loopback port and cannot prove it is the host; nothing was forwarded to it",
+                )
+            } else {
+                std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    "the API host did not start listening in time",
+                )
+            });
         }
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
@@ -369,9 +764,24 @@ impl HostSupervisor {
         socket: impl Into<PathBuf>,
         opts: SupervisorOptions,
     ) -> Arc<HostSupervisor> {
+        HostSupervisor::with_transport(manifest, launcher, socket, opts, HostTransport::from_env())
+    }
+
+    /// [`HostSupervisor::new`] on an explicit transport.
+    pub fn with_transport(
+        manifest: &HostManifest,
+        launcher: Arc<dyn HostLauncher>,
+        socket: impl Into<PathBuf>,
+        opts: SupervisorOptions,
+        transport: HostTransport,
+    ) -> Arc<HostSupervisor> {
+        let socket = socket.into();
         Arc::new(HostSupervisor {
             launcher,
-            socket: socket.into(),
+            transport,
+            endpoint: std::sync::Mutex::new(HostEndpoint::Unix(socket.clone())),
+            console: std::sync::Mutex::new(ConsoleStatus::Unknown),
+            socket,
             opts,
             started: Mutex::new(false),
             starts: AtomicUsize::new(0),
@@ -450,9 +860,38 @@ impl HostSupervisor {
             .filter(|d| !d.is_zero())
     }
 
-    /// The host's socket.
+    /// The host's socket (the Unix transport's path).
     pub fn socket(&self) -> &Path {
         &self.socket
+    }
+
+    /// Where the current host process listens.
+    pub fn endpoint(&self) -> HostEndpoint {
+        self.endpoint
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    /// The transport the host is started on.
+    pub fn transport(&self) -> HostTransport {
+        self.transport
+    }
+
+    /// Whether the current host process mounted the console, as last reported.
+    pub fn console_status(&self) -> ConsoleStatus {
+        self.console
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    /// Record the host's answer about the console.
+    pub fn set_console_status(&self, status: ConsoleStatus) {
+        *self
+            .console
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = status;
     }
 
     /// How many times the host has been started (1 + restarts).
@@ -460,12 +899,42 @@ impl HostSupervisor {
         self.starts.load(Ordering::SeqCst)
     }
 
-    async fn launch_once(&self) -> std::io::Result<Box<dyn HostProcess>> {
-        let _ = std::fs::remove_file(&self.socket);
-        if let Some(parent) = self.socket.parent() {
-            private_dir(parent)?;
+    /// A fresh endpoint for the next host process: the socket path, or a free loopback port
+    /// with a new token.
+    fn next_endpoint(&self) -> std::io::Result<HostEndpoint> {
+        match self.transport {
+            HostTransport::Unix => {
+                let _ = std::fs::remove_file(&self.socket);
+                if let Some(parent) = self.socket.parent() {
+                    private_dir(parent)?;
+                }
+                Ok(HostEndpoint::Unix(self.socket.clone()))
+            }
+            HostTransport::Tcp => {
+                // Bind port 0 to learn a free port, then release it for the host (a small race
+                // the readiness wait and the restart backoff absorb).
+                let listener = std::net::TcpListener::bind(("127.0.0.1", 0))?;
+                let addr = listener.local_addr()?;
+                drop(listener);
+                let token = format!(
+                    "{}{}",
+                    uuid::Uuid::new_v4().simple(),
+                    uuid::Uuid::new_v4().simple()
+                );
+                Ok(HostEndpoint::Tcp { addr, token })
+            }
         }
-        let proc = self.launcher.launch(&self.socket).await?;
+    }
+
+    async fn launch_once(&self) -> std::io::Result<Box<dyn HostProcess>> {
+        let endpoint = self.next_endpoint()?;
+        *self
+            .endpoint
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = endpoint.clone();
+        // A new process has not said anything about the console yet.
+        self.set_console_status(ConsoleStatus::Unknown);
+        let proc = self.launcher.launch_endpoint(&endpoint).await?;
         self.terminated.send_replace(false);
         self.starts.fetch_add(1, Ordering::SeqCst);
         Ok(proc)
@@ -498,7 +967,7 @@ impl HostSupervisor {
         let mut terminated = self.terminated.subscribe();
         tokio::select! {
             ready = async {
-                let ready = socket_ready(&self.socket, self.opts.ready_timeout).await;
+                let ready = endpoint_ready(self, self.opts.ready_timeout).await;
                 if ready.is_ok() {
                     self.ever_ready.store(true, Ordering::SeqCst);
                 }
@@ -590,10 +1059,7 @@ impl HostSupervisor {
                     }
                 }
             }
-            if socket_ready(&self.socket, self.opts.ready_timeout)
-                .await
-                .is_ok()
-            {
+            if endpoint_ready(&self, self.opts.ready_timeout).await.is_ok() {
                 self.ever_ready.store(true, Ordering::SeqCst);
                 backoff = self.opts.backoff_initial;
             }
@@ -665,6 +1131,80 @@ pub fn spawn_manifest_watcher(
 mod tests {
     use super::*;
 
+    /// Serve `body` as the answer to every request on a fresh loopback port.
+    async fn squatter(answer: String) -> std::net::SocketAddr {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            while let Ok((mut stream, _)) = listener.accept().await {
+                let answer = answer.clone();
+                tokio::spawn(async move {
+                    let mut seen = [0u8; 1024];
+                    let _ = stream.read(&mut seen).await;
+                    let _ = stream
+                        .write_all(
+                            format!(
+                                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{answer}",
+                                answer.len()
+                            )
+                            .as_bytes(),
+                        )
+                        .await;
+                });
+            }
+        });
+        addr
+    }
+
+    #[tokio::test]
+    async fn a_tcp_port_must_prove_it_holds_the_token() {
+        let proof = host_proof("secret-token", "abc");
+        // The value the Python host computes (`hmac.new(token, nonce, sha256).hexdigest()`).
+        assert_eq!(
+            proof,
+            "ab01d25807daceae7b41624d27e76ff480e9d529a2f43afbcd40817414c61eab"
+        );
+        assert_eq!(proof.len(), 64);
+        assert_ne!(proof, host_proof("other-token", "abc"));
+        assert_ne!(proof, host_proof("secret-token", "abd"));
+        // A process that took the port and answers anything (or a wrong proof) is refused ...
+        for answer in [
+            "hello".to_string(),
+            "{\"console\": {\"mounted\": true}}".to_string(),
+            proof.clone(),
+        ] {
+            // (the real proof is for another nonce, so it does not match either)
+            let addr = squatter(answer.clone()).await;
+            let endpoint = HostEndpoint::Tcp {
+                addr,
+                token: "secret-token".into(),
+            };
+            assert!(!endpoint_proves_token(&endpoint).await.unwrap(), "{answer}");
+        }
+        // ... a Unix endpoint needs none ...
+        assert!(
+            endpoint_proves_token(&HostEndpoint::Unix(PathBuf::from("/nowhere")))
+                .await
+                .unwrap()
+        );
+        // ... and nothing listening is an error to retry, not a proof.
+        let free = {
+            let l = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+            l.local_addr().unwrap()
+        };
+        assert!(
+            endpoint_proves_token(&HostEndpoint::Tcp {
+                addr: free,
+                token: "t".into()
+            })
+            .await
+            .is_err()
+        );
+    }
+
     #[test]
     fn manifest_flags() {
         assert!(!HostManifest::default().needs_host());
@@ -714,6 +1254,81 @@ mod tests {
         let config = host_config(&cfg);
         assert_eq!(config["no_dash"], true);
         assert_eq!(config["no_webterm"], true);
+        assert_eq!(config["console"], false);
+        assert_eq!(config["webterm"], false);
+    }
+
+    #[test]
+    fn host_config_names_the_console_and_the_server_to_call_back() {
+        let root = tempfile::tempdir().unwrap();
+        let mut cfg = crate::config::ServerConfig::for_root("sql:main", root.path());
+        cfg.host = "0.0.0.0".into();
+        cfg.port = 8123;
+        let config = host_config(&cfg);
+        assert_eq!(config["console"], true);
+        assert_eq!(config["webterm"], true);
+        assert_eq!(config["server_url"], "http://127.0.0.1:8123");
+        cfg.no_webterm = true;
+        assert_eq!(host_config(&cfg)["webterm"], false);
+        cfg.no_webterm = false;
+        cfg.host = "::".into();
+        assert_eq!(host_config(&cfg)["server_url"], "http://[::1]:8123");
+        cfg.host = "192.0.2.7".into();
+        assert_eq!(host_config(&cfg)["server_url"], "http://192.0.2.7:8123");
+        cfg.host = "fd00::1".into();
+        assert_eq!(host_config(&cfg)["server_url"], "http://[fd00::1]:8123");
+    }
+
+    #[test]
+    fn endpoints_become_host_arguments_and_environment() {
+        let unix = HostEndpoint::from(PathBuf::from("/r/host.sock"));
+        assert_eq!(
+            PythonHostLauncher::endpoint_args(&unix),
+            vec![
+                std::ffi::OsString::from("--socket"),
+                std::ffi::OsString::from("/r/host.sock")
+            ]
+        );
+        assert!(PythonHostLauncher::endpoint_env(&unix).is_empty());
+        let tcp = HostEndpoint::Tcp {
+            addr: "127.0.0.1:4242".parse().unwrap(),
+            token: "t0k".into(),
+        };
+        assert_eq!(
+            PythonHostLauncher::endpoint_args(&tcp),
+            vec![
+                std::ffi::OsString::from("--tcp"),
+                std::ffi::OsString::from("127.0.0.1:4242")
+            ]
+        );
+        assert_eq!(
+            PythonHostLauncher::endpoint_env(&tcp),
+            vec![(PROXY_TOKEN_ENV, "t0k".to_string())]
+        );
+    }
+
+    #[test]
+    fn the_transport_is_the_platforms_unless_overridden() {
+        // Only the pure parts: the environment is the process's, so no variable is set here.
+        if std::env::var_os(TRANSPORT_ENV).is_none() {
+            let expected = if cfg!(windows) {
+                HostTransport::Tcp
+            } else {
+                HostTransport::Unix
+            };
+            assert_eq!(HostTransport::from_env(), expected);
+        }
+    }
+
+    #[test]
+    fn manifest_reasons_include_the_console() {
+        assert!(HostManifest::default().reasons().is_empty());
+        let console = HostManifest::default().with_console(true);
+        assert!(console.needs_host());
+        assert_eq!(console.reasons(), vec!["console"]);
+        let m: HostManifest =
+            serde_json::from_str(r#"{"web_pages": ["a"], "console": true}"#).unwrap();
+        assert_eq!(m.reasons(), vec!["web_pages", "console"]);
     }
 
     /// A launched process that ignores nothing: it exits on SIGTERM, so shutdown returns promptly

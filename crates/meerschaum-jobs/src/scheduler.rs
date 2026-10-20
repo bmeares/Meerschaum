@@ -24,7 +24,7 @@ use std::time::Duration;
 use chrono::{DateTime, Utc};
 
 use crate::daemon::JobsContext;
-use crate::schedule::{Fire, ScheduleError, isoformat, parse_schedule};
+use crate::schedule::{Fire, JitterSpec, ScheduleError, isoformat, parse_schedule_jittered};
 
 /// Per-root schedule and debounce state.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -130,13 +130,30 @@ impl RootScheduler {
         schedule: &str,
         now: Fire,
     ) -> Result<Option<Fire>, ScheduleError> {
+        self.next_fire_jittered(name, schedule, now, 0.0)
+    }
+
+    /// [`RootScheduler::next_fire`] for a schedule with a default jitter: a fresh schedule is
+    /// parsed with `default_jitter_seconds` and the job's name as the seed of its fixed offset
+    /// (a `jitter` suffix in the text wins). A resumed time already carries its offset.
+    pub fn next_fire_jittered(
+        &self,
+        name: &str,
+        schedule: &str,
+        now: Fire,
+        default_jitter_seconds: f64,
+    ) -> Result<Option<Fire>, ScheduleError> {
         if let Some(state) = self.state(name)
             && state.schedule == schedule
             && let Some(next) = state.next_fire.filter(|n| *n > now)
         {
             return Ok(Some(next));
         }
-        let mut trigger = parse_schedule(schedule, now)?;
+        let spec = JitterSpec {
+            default_seconds: default_jitter_seconds,
+            seed: name,
+        };
+        let mut trigger = parse_schedule_jittered(schedule, now, Some(spec))?;
         Ok(trigger.next_after(now))
     }
 

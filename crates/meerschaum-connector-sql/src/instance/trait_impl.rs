@@ -515,6 +515,11 @@ async fn forget_engine_state_after(
         if !forgotten.success {
             tracing::warn!("{}", forgotten.message);
         }
+        // GAP-002: the cursors and ledger entries written onto other instances.
+        let remote = conn.forget_remote_engine_state(pipe).await;
+        if !remote.success {
+            tracing::warn!("{}", remote.message);
+        }
     }
     res
 }

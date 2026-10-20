@@ -716,8 +716,14 @@ pub fn stack(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     {
         return Ok(SuccessTuple::fail("Nothing was dropped."));
     }
-    let starting = sysargs.iter().skip(1).any(|a| a == "up");
-    if starting
+    // `up` is checked completely; `start` and `restart` (which also start a stopped `db`) only
+    // for an `upgrade postgres` / `restore postgres` / `rollback` moving the database right now.
+    let guard = sysargs
+        .iter()
+        .skip(1)
+        .find_map(|a| super::upgrade_postgres::StackCheck::of(a));
+    let starting = guard.is_some();
+    if let Some(check) = guard
         && !flag(args, "force")
         && !sysargs.iter().any(|a| a == "--force")
         && let Err(e) = super::upgrade_postgres::stack_up_preflight(
@@ -725,6 +731,7 @@ pub fn stack(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
             &project_name,
             &paths.path("STACK_COMPOSE_PATH"),
             &stack_env,
+            check,
         )
     {
         return Ok(SuccessTuple::fail(e));

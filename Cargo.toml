@@ -101,6 +101,10 @@ portable-pty = "0.9"
 # (MySQL: 152 connections vs 42 for the instance sync tests, `Too many connections`; PostgreSQL ~+10%).
 # Pinned to the fix commit, whose crates are still version 0.9.0. Delete this section once sqlx 0.9.1
 # (or later) is on crates.io and `cargo update -p sqlx` resolves to it.
+# Last checked 2026-10-19 (wave 18): crates.io's newest `sqlx` / `sqlx-core` is still 0.9.0 and upstream has no
+# `v0.9.1` tag (`git ls-remote --tags https://github.com/launchbadge/sqlx`), so the pin stays. 5.0.0 does not wait for 0.9.1
+# (user decision 2026-10-19): the PyPI wheels, Docker images and release binaries use this pin; crates.io builds
+# use plain 0.9.0 with the persistent-statement mitigation; a 5.0.x release drops the pin once 0.9.1 ships.
 [patch.crates-io]
 sqlx = { git = "https://github.com/launchbadge/sqlx", rev = "6e57d05490859f31aa364ca69fcb379f3a2995e6" }
 sqlx-core = { git = "https://github.com/launchbadge/sqlx", rev = "6e57d05490859f31aa364ca69fcb379f3a2995e6" }

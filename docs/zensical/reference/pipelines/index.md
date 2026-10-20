@@ -252,7 +252,7 @@ backfill  1 unconsumed ledger entry from sql:local/clean (seq 3); dirty ranges s
 
 Ledger ranges are recorded on the epoch-aligned chunk grid (`verify.chunk_minutes`), and a child backfills them on its own chunk grid. So under `--parents`, `--children` or a `Pipeline`, a plugin's `fetch(pipe, begin, end)` can receive a window that starts at a chunk edge, earlier than v4's `sync time − backtrack`. A bare `pipe.sync()` and a flat `sync pipes` keep v4's window. If your plugin **clears its window and recomputes** it (for example `pipe.clear(begin=begin, end=end)` followed by a rebuild from its parents), it must be able to rebuild the whole window it is given, not only the most recent part.
 
-Dropping, deleting or fully clearing a pipe (`pipe.drop()`, `pipe.delete()`, `pipe.clear()` without bounds, and the matching actions) forgets its engine state: its ledger entries, the edge cursors it is part of and its definition hash. A pipe recreated under the same keys is planned like a new one. Run history is kept. (Edges whose cursor lives on another instance keep it there.)
+Dropping, deleting or fully clearing a pipe (`pipe.drop()`, `pipe.delete()`, `pipe.clear()` without bounds, and the matching actions) forgets its engine state: its ledger entries, the edge cursors it is part of and its definition hash. A pipe recreated under the same keys is planned like a new one. Run history is kept. Cursors and ledger entries the pipe left on the instances of its cross-instance children are forgotten too (the pipe's own instance remembers where it wrote them); an instance that is not configured on this host or cannot be reached keeps them, and a warning names it.
 
 ### The capping rule
 
@@ -290,13 +290,13 @@ mrsm sync pipes -i sql:local --resume 01M4VCTF759XD89GSA6046KPHM
 
 ### Rebuilds
 
-When you change a pipe's `sql`, `fetch` config or `dtypes`, an engine run notices (the definition is hashed from the *unresolved* text, so reordering YAML keys never triggers it). Because a definition change can drop rows or columns that `filter_existing` would never remove, a `rebuild` clears the pipe and syncs it in full.
+When you change a pipe's `sql`, `fetch` config, `dtypes` or `columns` (a renamed or new `datetime`, `id` or `primary` column), an engine run notices (the definition is hashed from the *unresolved* text, so reordering YAML keys never triggers it). Because a definition change can drop rows or columns that `filter_existing` would never remove, a `rebuild` clears the pipe and syncs it in full.
 
 - **Interactively**, the plan asks you to confirm (or pass `--yes`). Declining leaves the pipe `rebuild_pending`.
 - **In a job, with `--loop`, or over the API** a rebuild without `--yes` never blocks: the node is marked `rebuild_pending`, its descendants run against the stale data, and a warning repeats on every run until someone confirms.
 - Set `system.engine.auto_rebuild: true` to rebuild without asking.
 
-The first engine run on a pipe has no stored hash, so it records a baseline rather than treating it as a change.
+The first engine run on a pipe has no stored hash, so it records a baseline rather than treating it as a change. A hash stored by 5.0.0rc1 (which did not cover `columns`) is compared the way rc1 computed it, so upgrading never rebuilds a pipe whose definition did not change; the next successful sync stores the new hash.
 
 ## ⚖️ Bare Syncs Stay v4
 

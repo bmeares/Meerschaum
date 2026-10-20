@@ -139,12 +139,85 @@ mod imp {
             }
         };
 
-        // Termination signals are forwarded to the child by a dedicated thread.
+        // Termination signals are forwarded to the child by a dedicated thread. Before the child
+        // exists they stop the wait at the startup gate instead.
         let mut sigset = SigSet::empty();
         for s in [Signal::SIGTERM, Signal::SIGINT, Signal::SIGHUP] {
             sigset.add(s);
         }
         let _ = sigset.thread_block();
+        // Inside a unit the service manager signals the whole control group (`systemctl kill`
+        // and the stop's `KillSignal=` reach the wrapper *and* the job), so the job already has
+        // the signal: forwarding it again would deliver a second SIGINT, which the job treats
+        // as "force quit" (exit 130 in the middle of a chunk). `INVOCATION_ID` is what systemd
+        // sets for every unit it runs; a hand-started wrapper has none and does forward.
+        let in_unit = std::env::var_os(INVOCATION_ID_ENV).is_some();
+        let forwarded = Arc::new(AtomicI32::new(0));
+        let child_pid = Arc::new(AtomicI32::new(0));
+        let stopping = Arc::new(AtomicBool::new(false));
+        {
+            let forwarded = forwarded.clone();
+            let child_pid = child_pid.clone();
+            let stopping = stopping.clone();
+            std::thread::spawn(move || {
+                loop {
+                    if let Ok(sig) = sigset.wait() {
+                        forwarded.store(sig as i32, Ordering::SeqCst);
+                        stopping.store(true, Ordering::SeqCst);
+                        let pid = child_pid.load(Ordering::SeqCst);
+                        if !in_unit && pid > 0 {
+                            let _ = nix::sys::signal::kill(Pid::from_raw(pid), sig);
+                        }
+                    }
+                }
+            });
+        }
+
+        // The startup gate (see `crate::startup`): every start of a unit is a bulk start unless
+        // an explicit `start job` left a hint (the unit cannot carry per-start environment). The
+        // per-job overrides live in the job's own properties (the hidden "sister" job).
+        let mut settle_seconds = 0.0f64;
+        let admission = match ctx.as_ref() {
+            Some(ctx) => {
+                let dir = ctx.paths.jobs_dir.join(crate::startup::STARTUP_DIR);
+                let kind = crate::startup::take_start_hint(&dir, &job.name)
+                    .or_else(crate::startup::StartKind::from_env)
+                    .unwrap_or(crate::startup::StartKind::Bulk);
+                let over = crate::properties::read_properties(
+                    &crate::config::DaemonPaths::new(&ctx.paths, &job.name).properties,
+                );
+                let policy = crate::startup::StartupPolicy::resolve(
+                    &ctx.config.startup,
+                    over.as_ref()
+                        .and_then(|p| p.get("startup"))
+                        .and_then(meerschaum_core::value::Value::as_map),
+                    kind,
+                    &ctx.paths.jobs_dir,
+                );
+                match policy {
+                    None => None,
+                    Some(policy) => {
+                        settle_seconds = policy.settle_seconds;
+                        let write = |msg: &str| {
+                            if let Ok(mut l) = log.lock() {
+                                let line = format!("{}{msg}\n", l.get_timestamp_prefix_str());
+                                let _ = l.write_raw(line.as_bytes());
+                            }
+                        };
+                        match crate::startup::admit(&policy, &job.name, &stopping, &mut |m| {
+                            write(m)
+                        }) {
+                            Ok(admission) => Some(admission),
+                            Err(crate::startup::Stopped) => {
+                                write("Startup: stopped before the job started.");
+                                return 0;
+                            }
+                        }
+                    }
+                }
+            }
+            None => None,
+        };
 
         // This program again: the binary itself, or `python -m meerschaum` in the extension.
         let (program, leading) = meerschaum_core::self_exe::self_program();
@@ -157,6 +230,9 @@ mod imp {
             .env(RESULT_PATH_ENV, &child_result)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+        if let Some(a) = &admission {
+            cmd.env(crate::startup::RELEASE_ENV, a.release_env());
+        }
         match job
             .stdin_path
             .as_ref()
@@ -199,24 +275,27 @@ mod imp {
             }
         };
         let pid = child.id() as i32;
-        let forwarded = Arc::new(AtomicI32::new(0));
-        // Inside a unit the service manager signals the whole control group (`systemctl kill`
-        // and the stop's `KillSignal=` reach the wrapper *and* the job), so the job already has
-        // the signal: forwarding it again would deliver a second SIGINT, which the job treats
-        // as "force quit" (exit 130 in the middle of a chunk). `INVOCATION_ID` is what systemd
-        // sets for every unit it runs; a hand-started wrapper has none and does forward.
-        let in_unit = std::env::var_os(INVOCATION_ID_ENV).is_some();
+        child_pid.store(pid, Ordering::SeqCst);
+        // A signal which arrived while the child was being started reaches it now.
+        if !in_unit
+            && forwarded.load(Ordering::SeqCst) != 0
+            && let Ok(sig) = Signal::try_from(forwarded.load(Ordering::SeqCst))
         {
-            let forwarded = forwarded.clone();
+            let _ = nix::sys::signal::kill(Pid::from_raw(pid), sig);
+        }
+        let exited = Arc::new(AtomicBool::new(false));
+        let release_file = admission.as_ref().map(|a| a.release_file().to_path_buf());
+        if let Some(admission) = admission {
+            let exited = exited.clone();
+            let log = log.clone();
+            let settle = Duration::from_secs_f64(settle_seconds.max(0.0));
             std::thread::spawn(move || {
-                loop {
-                    if let Ok(sig) = sigset.wait() {
-                        forwarded.store(sig as i32, Ordering::SeqCst);
-                        if !in_unit {
-                            let _ = nix::sys::signal::kill(Pid::from_raw(pid), sig);
-                        }
+                admission.hold(&exited, Some((pid, settle)), &mut |m| {
+                    if let Ok(mut l) = log.lock() {
+                        let line = format!("{}{m}\n", l.get_timestamp_prefix_str());
+                        let _ = l.write_raw(line.as_bytes());
                     }
-                }
+                });
             });
         }
 
@@ -252,6 +331,10 @@ mod imp {
         drop(tx);
 
         let status = child.wait();
+        exited.store(true, Ordering::SeqCst);
+        if let Some(file) = &release_file {
+            let _ = fs::remove_file(file);
+        }
         for _ in 0..2 {
             if rx.recv_timeout(Duration::from_secs(2)).is_err() {
                 break;

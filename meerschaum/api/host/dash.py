@@ -3,153 +3,64 @@
 # vim:fenc=utf-8
 
 """
-Plugin-owned Dash apps in the API host (v5 design §8.4).
+The web console in the API host (design D21).
 
-Meerschaum runs no Dash app of its own. Each plugin with `@dash_plugin` functions or legacy
-`@web_page` Dash layouts gets its own app, created by `make_dash_app()` with
-`requests_pathname_prefix='/dash/<plugin>/'` and mounted inside the host's FastAPI app with
-`a2wsgi`. The shim pre-populates the app's layout with the core component IDs plugin callbacks
-read and write:
+The host serves the Plotly Dash console (`meerschaum.api.dash`, v4's console on the v5 façade):
+ONE Dash app, mounted at `/dash` with `a2wsgi`, which the Rust server proxies every `/dash/*`
+request to. Plugins' `@dash_plugin` functions and `@web_page` layouts register into that app at
+their v4 paths (`/dash/<path>`); the per-plugin Dash apps of 5.0.0rc1 (`/dash/<plugin>/`) are
+gone, and their paths redirect to the v4 paths.
 
-- `mrsm-location` (`dcc.Location`),
-- `session-store` (`dcc.Store`, `{'session-id': ...}`), filled on page load from the shared
-  `mrsm-session-id` cookie through `meerschaum.api.dash.sessions`,
-- `dbc-dark-store` and the `mrsm-theme-dark` / `mrsm-theme-light` stylesheets.
+A `@web_page` that returns an HTML string (the page contract: figures are Plotly JSON in a
+`data-mrsm-figure` attribute) is served at `/_pages/<path>` as the bare fragment, and as a themed
+document at `/_pages/<path>?frame=1`, which the console embeds in an iframe so its navbar and theme
+stay around it.
 
-`index_string`, `external_stylesheets` and `assets/` belong to the plugin's app; a plugin's
-`assets/` directory is the app's assets folder.
-
-In the host, `meerschaum.api.dash` is a light package (`install_dash_surface()`): its submodules
-(`sessions`, ...) import as before, but importing it no longer builds the v4 console.
+`console_status()` tells the Rust server (through `/_mrsm/host/status` and the registry) whether
+the console mounted; if `dash` cannot be imported the host logs one warning, mounts nothing and
+`/dash` shows the pointer page.
 """
 
 from __future__ import annotations
 
 import os
 import sys
-import types
 import traceback
-import importlib.machinery
 
-from meerschaum.utils.typing import Any, Callable, Dict, List, Optional
+from meerschaum.utils.typing import Any, Dict, List, Optional
 
 DASH_PREFIX: str = '/dash'
-SESSION_STORE_ID: str = 'session-store'
-LOCATION_ID: str = 'mrsm-location'
-DARK_STORE_ID: str = 'dbc-dark-store'
-PAGE_DIV_ID: str = 'page-layout-div'
+PAGE_ROUTE_PREFIX: str = '/_pages'
+ASSETS_PREFIX: str = PAGE_ROUTE_PREFIX + '/_assets'
 
-CONSOLE_LINKS = (
-    ('Home', '/dash'),
-    ('Pipes', '/dash/pipes'),
-    ('Jobs', '/dash/jobs'),
-    ('Plugins', '/dash/plugins'),
-)
-
-INDEX_STRING: str = """<!DOCTYPE html>
-<html>
-    <head>
-        {%metas%}
-        <title>{%title%}</title>
-        {%favicon%}
-        <link rel="stylesheet" href="/static/css/bootstrap.min.css" id="mrsm-theme-dark">
-        <link rel="stylesheet" href="/static/css/bootstrap_light.min.css" id="mrsm-theme-light">
-        <script>document.getElementById('mrsm-theme-light').disabled = true;</script>
-        {%css%}
-    </head>
-    <body class="dbc_dark">
-        {%app_entry%}
-        <footer>
-            {%config%}
-            {%scripts%}
-            {%renderer%}
-        </footer>
-    </body>
-</html>"""
-
-_apps: Dict[str, Any] = {}
+#: The state of the console: `mounted`, why not, and the Dash version.
+_status: Dict[str, Any] = {'mounted': False, 'reason': 'not built', 'dash_version': None}
+_status_warned: Dict[str, bool] = {'warned': False}
 
 
-def install_dash_surface() -> types.ModuleType:
+def console_status() -> Dict[str, Any]:
     """
-    Make `meerschaum.api.dash` a light package in this process: submodules import from the real
-    directory, `make_dash_app` is the shim, and the v4 console is never built.
+    Return `{'mounted': bool, 'reason': str | None, 'dash_version': str | None}`: whether this
+    host serves the console at `/dash`, and if not why not.
     """
-    existing = sys.modules.get('meerschaum.api.dash')
-    if existing is not None and getattr(existing, '_mrsm_host_surface', False):
-        return existing
-    import meerschaum.api as api_pkg
-    real_dir = os.path.join(os.path.dirname(api_pkg.__file__), 'dash')
-    module = types.ModuleType(
-        'meerschaum.api.dash',
-        "The `meerschaum.api.dash` surface in the API host (plugin-owned Dash apps, §8.4).",
-    )
-    spec = importlib.machinery.ModuleSpec('meerschaum.api.dash', None, is_package=True)
-    spec.submodule_search_locations = [real_dir]
-    module.__spec__ = spec
-    module.__path__ = [real_dir]
-    module.__package__ = 'meerschaum.api.dash'
-    module.__file__ = os.path.join(real_dir, '__init__.py')
-    module._mrsm_host_surface = True
-    module.make_dash_app = make_dash_app
-    module.get_dash_app = get_dash_app
-    module.dash_app = None
-    ### The names the light `meerschaum.api.dash` package re-exports, which the helper modules
-    ### (`pipes`, `keys`, ...) import from it.
-    for name, source in (
-        ('debug', 'debug'),
-        ('_get_pipes', '_get_pipes'),
-        ('get_api_pipe', 'get_pipe'),
-        ('api_pipes', 'pipes'),
-        ('get_api_connector', 'get_api_connector'),
-        ('endpoints', 'endpoints'),
-    ):
-        setattr(module, name, getattr(api_pkg, source))
-    sys.modules['meerschaum.api.dash'] = module
-    setattr(api_pkg, 'dash', module)
-    return module
+    return dict(_status)
 
 
-def _dash_classes():
-    """
-    Return `(app_class, transforms, uses_multiplexer)`: `DashProxy` with v4's transforms when
-    `dash_extensions` is installed (plugins written for v4 use `Trigger` and duplicate outputs),
-    else plain `dash.Dash`.
-    """
-    from meerschaum.utils.packages import attempt_import
-    dash = attempt_import('dash', lazy=False, check_update=False)
-    try:
-        import warnings
-        with warnings.catch_warnings():
-            warnings.simplefilter('ignore')
-            enrich = attempt_import('dash_extensions.enrich', lazy=False, check_update=False)
-        return (
-            enrich.DashProxy,
-            [enrich.TriggerTransform(), enrich.MultiplexerTransform()],
-            True,
-        )
-    except Exception:
-        return dash.Dash, None, False
-
-
-def _plugin_assets_folder(plugin_name: str) -> Optional[str]:
-    import meerschaum as mrsm
-    try:
-        module = mrsm.Plugin(plugin_name).module
-        plugin_file = getattr(module, '__file__', None)
-    except Exception:
-        plugin_file = None
-    if not plugin_file:
-        return None
-    assets = os.path.join(os.path.dirname(plugin_file), 'assets')
-    return assets if os.path.isdir(assets) else None
+def _set_status(mounted: bool, reason: Optional[str] = None) -> None:
+    dash_version = None
+    if mounted:
+        try:
+            dash = sys.modules.get('dash')
+            dash_version = getattr(dash, '__version__', None)
+        except Exception:
+            dash_version = None
+    _status.update({'mounted': mounted, 'reason': reason, 'dash_version': dash_version})
 
 
 def plugin_path(plugin_name: str, page_str: str) -> str:
     """
-    Map a v4 page path (`/dash/foo/bar`) to its path in the plugin's app
-    (`/dash/<plugin>/foo/bar`). A path already under the plugin's name keeps it once
-    (`/dash/<plugin>/bar` stays `/dash/<plugin>/bar`), so those v4 URLs need no redirect.
+    The path 5.0.0rc1 served a plugin's page at (`/dash/<plugin>/<rest>`; a path already under the
+    plugin's name kept it once). `redirect_target()` maps these old paths to the v4 ones.
     """
     rest = page_str.lstrip('/')
     if rest == 'dash' or rest.startswith('dash/'):
@@ -159,186 +70,10 @@ def plugin_path(plugin_name: str, page_str: str) -> str:
     return f"{DASH_PREFIX}/{plugin_name}/{rest}".rstrip('/')
 
 
-def _core_layout(html, dcc, dark_theme: bool = True):
-    return html.Div([
-        dcc.Location(id=LOCATION_ID, refresh=False),
-        dcc.Store(id=SESSION_STORE_ID, storage_type='local', data={}),
-        dcc.Store(id=DARK_STORE_ID, data=dark_theme),
-        html.Div([], id=PAGE_DIV_ID),
-    ])
-
-
-def _navbar(html, plugin_name: str, pages: Dict[str, Dict[str, Any]]):
-    links = [html.A(label, href=href, style={'marginRight': '1em'}) for label, href in CONSOLE_LINKS]
-    links += [
-        html.A(page['page_key'], href=path, style={'marginRight': '1em'})
-        for path, page in pages.items()
-    ]
-    return html.Nav(links, id=f'mrsm-navbar-{plugin_name}', className='mrsm-plugin-navbar')
-
-
-def session_store_data(request) -> Dict[str, Any]:
-    """
-    The `session-store` data for a request: `{'session-id': ...}` when its `mrsm-session-id`
-    cookie names an active session, else `{}`.
-    """
-    from meerschaum.api.dash.sessions import get_session_id_from_request, is_session_active
-    session_id = get_session_id_from_request(request)
-    if session_id and is_session_active(session_id):
-        return {'session-id': session_id}
-    return {}
-
-
-def make_dash_app(plugin_name: str, pages: Optional[Dict[str, Dict[str, Any]]] = None, **kwargs: Any):
-    """
-    Create (once) the Dash app owned by `plugin_name`, mounted at `/dash/<plugin_name>/`, with
-    the core stores and the page router.
-
-    Parameters
-    ----------
-    plugin_name: str
-        The plugin owning the app.
-
-    pages: Optional[Dict[str, Dict[str, Any]]], default None
-        Layouts by path in the app (`/dash/<plugin>/...`), each a dict with `layout`,
-        `login_required`, `skip_navbar`, `page_key` and `dark_theme`.
-
-    kwargs: Any
-        Extra `dash.Dash` arguments.
-    """
-    if plugin_name in _apps:
-        return _apps[plugin_name]
-
-    from meerschaum.utils.packages import attempt_import
-    from meerschaum.api import no_auth
-    dash = attempt_import('dash', lazy=False, check_update=False)
-    html, dcc = dash.html, dash.dcc
-    app_class, transforms, multiplexer = _dash_classes()
-
-    app_kwargs: Dict[str, Any] = {
-        'title': kwargs.pop('title', f'{plugin_name} | Meerschaum'),
-        'requests_pathname_prefix': f'{DASH_PREFIX}/{plugin_name}/',
-        'suppress_callback_exceptions': True,
-        'update_title': None,
-    }
-    assets = _plugin_assets_folder(plugin_name)
-    if assets:
-        app_kwargs['assets_folder'] = assets
-    if transforms is not None:
-        app_kwargs['transforms'] = transforms
-    app_kwargs.update(kwargs)
-    dash_app = app_class(f'mrsm_plugin_{plugin_name}', **app_kwargs)
-    dash_app.index_string = INDEX_STRING
-    pages = dict(pages or {})
-    dash_app.layout = _core_layout(html, dcc)
-    dash_app._mrsm_plugin = plugin_name
-    dash_app._mrsm_pages = pages
-
-    Output, Input = dash.Output, dash.Input
-    store_output = (
-        Output(SESSION_STORE_ID, 'data')
-        if multiplexer
-        else Output(SESSION_STORE_ID, 'data', allow_duplicate=True)
-    )
-    dark_output = (
-        Output(DARK_STORE_ID, 'data')
-        if multiplexer
-        else Output(DARK_STORE_ID, 'data', allow_duplicate=True)
-    )
-    callback_kwargs = {} if multiplexer else {'prevent_initial_call': 'initial_duplicate'}
-
-    @dash_app.callback(
-        Output(PAGE_DIV_ID, 'children'),
-        store_output,
-        dark_output,
-        Input(LOCATION_ID, 'pathname'),
-        **callback_kwargs
-    )
-    def _route_page(pathname):
-        from flask import request
-        store = session_store_data(request)
-        path = (pathname or '').rstrip('/')
-        page = dash_app._mrsm_pages.get(path)
-        if page is None and dash_app._mrsm_pages and path == f'{DASH_PREFIX}/{plugin_name}':
-            page = next(iter(dash_app._mrsm_pages.values()))
-        if page is None:
-            layout = [
-                _navbar(html, plugin_name, dash_app._mrsm_pages),
-                html.H3('Page not found'),
-                html.P(f"No page of plugin '{plugin_name}' at {pathname}."),
-            ]
-            return html.Div(layout, key=f'page-content::{path}'), store, True
-        if page.get('login_required', True) and not no_auth and not store:
-            layout = [
-                html.H3('Login required'),
-                html.A('Log in', href='/dash/login'),
-            ]
-            return html.Div(layout, key=f'page-content::{path}'), store, True
-        layout = page['layout']
-        if not page.get('skip_navbar', False):
-            layout = (
-                [_navbar(html, plugin_name, dash_app._mrsm_pages)]
-                + (layout if isinstance(layout, list) else [layout])
-            )
-        return (
-            html.Div(layout, key=f'page-content::{path}'),
-            store,
-            bool(page.get('dark_theme', True)),
-        )
-
-    _apps[plugin_name] = dash_app
-    return dash_app
-
-
-def get_dash_app(plugin_name: str):
-    """
-    Return the Dash app owned by a plugin, if one was created.
-    """
-    return _apps.get(plugin_name, None)
-
-
-def collect_plugin_pages(debug: bool = False) -> Dict[str, Dict[str, Dict[str, Any]]]:
-    """
-    Return the legacy `@web_page` Dash layouts by plugin, keyed by their path in the plugin's app.
-    Layouts are built once at startup, as in v4. Pages returning HTML strings belong to the page
-    contract (§8.3) and are not mounted as Dash layouts.
-    """
-    from meerschaum.plugins import _plugin_endpoints_to_pages, _get_parent_plugin
-    from meerschaum.utils.warnings import warn
-    out: Dict[str, Dict[str, Dict[str, Any]]] = {}
-    for page_group, pages_dicts in list(_plugin_endpoints_to_pages.items()):
-        for page_str, page_dict in list(pages_dicts.items()):
-            function = page_dict['function']
-            plugin_name = _get_parent_plugin(function=function) or page_group
-            try:
-                layout = function()
-            except Exception:
-                warn(
-                    f"Failed to build the page '{page_str}' of plugin '{plugin_name}':\n"
-                    + traceback.format_exc(),
-                    stack=False,
-                )
-                continue
-            if isinstance(layout, (str, tuple)):
-                continue
-            out.setdefault(plugin_name, {})[plugin_path(plugin_name, page_str)] = {
-                'layout': layout,
-                'login_required': page_dict.get('login_required', True),
-                'skip_navbar': page_dict.get('skip_navbar', False),
-                'page_key': page_dict.get('page_key', page_str),
-                'dark_theme': page_dict.get('dark_theme', True),
-                'page_group': page_group,
-            }
-    return out
-
-
-PAGE_ROUTE_PREFIX: str = '/_pages'
-
-
 def page_route(page_str: str) -> str:
     """
-    Return the host route serving a page-contract `@web_page` (§8.3): `/dash/foo/bar` is served at
-    `/_pages/foo/bar`. The prefix avoids `/dash` and `/_mrsm`, which the console refuses to proxy.
+    Return the host route serving a page-contract `@web_page`: `/dash/foo/bar` is served at
+    `/_pages/foo/bar`. The prefix avoids `/dash` (the console) and `/_mrsm` (internal).
     """
     rest = page_str.lstrip('/')
     if rest == 'dash' or rest.startswith('dash/'):
@@ -398,19 +133,75 @@ def collect_page_contract_pages(debug: bool = False) -> Dict[str, Dict[str, Any]
     return out
 
 
+def _plotly_bundle() -> Optional[str]:
+    """
+    The path of the Plotly.js bundle shipped by the `plotly` package (a dependency of Dash).
+    """
+    try:
+        import importlib.util
+        spec = importlib.util.find_spec('plotly')
+        if spec is None or not spec.submodule_search_locations:
+            return None
+        path = os.path.join(list(spec.submodule_search_locations)[0], 'package_data', 'plotly.min.js')
+        return path if os.path.isfile(path) else None
+    except Exception:
+        return None
+
+
+#: Where a page document finds htmx, the figure/map script and MapLibre (the API host's `/static`).
+CONTRACT_STATIC: str = '/static/contract'
+
+
+def page_document(fragment: str, dark_theme: bool = True, title: str = '') -> str:
+    """
+    Wrap a page-contract fragment in a document with the console's theme, htmx and the script that
+    draws `data-mrsm-figure` and `data-mrsm-map` elements.
+    """
+    import html as html_lib
+    theme = 'bootstrap.min.css' if dark_theme else 'bootstrap_light.min.css'
+    return (
+        '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">'
+        '<meta name="viewport" content="width=device-width, initial-scale=1">'
+        f'<title>{html_lib.escape(title)}</title>'
+        f'<link rel="stylesheet" href="/static/css/{theme}">'
+        + ('<link rel="stylesheet" href="/static/css/dbc_dark.css">' if dark_theme else '')
+        + f'<link rel="stylesheet" href="{CONTRACT_STATIC}/contract.css">'
+        f'</head><body class="{"dbc_dark" if dark_theme else ""} mrsm-contract-page">'
+        f'<main>{fragment}</main>'
+        f'<script src="{CONTRACT_STATIC}/htmx.min.js"></script>'
+        f'<script src="{ASSETS_PREFIX}/plotly.min.js"></script>'
+        f'<script src="{CONTRACT_STATIC}/contract.js"></script>'
+        '</body></html>'
+    )
+
+
 def mount_page_contract_routes(fastapi_app, debug: bool = False) -> List[str]:
     """
-    Serve every page-contract `@web_page` at its `/_pages/...` route, returning an HTML fragment
-    that the Rust console wraps in its chrome. Requests to pages with `login_required` need an
-    active `mrsm-session-id` session (the console forwards the cookie).
+    Serve every page-contract `@web_page` at its `/_pages/...` route as a themed document (with
+    Plotly.js from the `plotly` package at `/_pages/_assets/plotly.min.js`). Requests to pages with `login_required`
+    need an active `mrsm-session-id` session (the browser sends the cookie).
 
     Returns
     -------
     The page paths served.
     """
-    from starlette.responses import HTMLResponse, Response
+    from starlette.responses import HTMLResponse, Response, FileResponse
     from starlette.concurrency import run_in_threadpool
     from meerschaum.api import no_auth
+
+    async def _plotly(request):
+        path = _plotly_bundle()
+        if path is None:
+            return Response(status_code=404)
+        return FileResponse(
+            path,
+            media_type='application/javascript',
+            headers={'Cache-Control': 'public, max-age=3600'},
+        )
+
+    fastapi_app.add_route(
+        ASSETS_PREFIX + '/plotly.min.js', _plotly, methods=['GET'], include_in_schema=False,
+    )
 
     # Dash initialization functions may register pages after an earlier registry lookup.
     # Mount the final startup registrations, rather than an incomplete cached snapshot.
@@ -419,8 +210,10 @@ def mount_page_contract_routes(fastapi_app, debug: bool = False) -> List[str]:
     for page_str, page in pages.items():
         function = page['function']
         login_required = bool(page.get('login_required', True))
+        dark_theme = bool(page.get('dark_theme', True))
+        title = str(page.get('page_key', page_str))
 
-        def _make(function=function, login_required=login_required):
+        def _make(function=function, login_required=login_required, dark_theme=dark_theme, title=title):
             async def _serve(request):
                 if login_required and not no_auth:
                     from meerschaum.api.dash.sessions import (
@@ -435,6 +228,10 @@ def mount_page_contract_routes(fastapi_app, debug: bool = False) -> List[str]:
                     traceback.print_exc()
                     return Response(status_code=500)
                 html, status = _normalize_page_result(result)
+                ### The console embeds the page as a document (`?frame=1`); the bare route is the
+                ### fragment itself, the page contract.
+                if request.query_params.get('frame'):
+                    html = page_document(html, dark_theme, title)
                 return HTMLResponse(html, status_code=status)
             return _serve
 
@@ -443,62 +240,243 @@ def mount_page_contract_routes(fastapi_app, debug: bool = False) -> List[str]:
     return served
 
 
-def mount_dash_apps(fastapi_app, debug: bool = False) -> List[str]:
+NATIVE_ROUTE_PREFIX: str = PAGE_ROUTE_PREFIX + '/native'
+
+#: The pages of native (Rust) plugins by console path, as the server lists them.
+_native_pages: Dict[str, Dict[str, Any]] = {}
+
+
+def _server_get(path: str, user: Optional[str] = None, timeout: float = 15.0):
     """
-    Create, initialize and mount each plugin's Dash app at `/dash/<plugin>/`.
+    `GET` a route of the server that runs this host, as the host (`X-Mrsm-Host-Token`), on behalf
+    of `user` if given. Return `(status, body_bytes)`; `(0, b'')` when there is no server.
+    """
+    import urllib.error
+    import urllib.request
+    from meerschaum.api.dash.execute import server_url
+    from meerschaum.api.host._auth import mint_internal_token
+    from meerschaum.api.host import TOKEN_HEADER
+    base_url = server_url()
+    if base_url is None:
+        return 0, b''
+    headers = {TOKEN_HEADER: mint_internal_token()}
+    if user:
+        headers['X-Mrsm-User'] = user
+    request = urllib.request.Request(base_url + path, headers=headers, method='GET')
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            return response.status, response.read()
+    except urllib.error.HTTPError as e:
+        return e.code, e.read()
+    except Exception:
+        return 0, b''
+
+
+def get_native_pages(refresh: bool = False) -> Dict[str, Dict[str, Any]]:
+    """
+    Return the pages native (Rust) plugins declare, by their console path (`/dash/<path>`), from the
+    server's `GET /_mrsm/native-pages`. Empty without a server or when no native plugin has pages.
+    """
+    import json
+    if refresh:
+        _native_pages.clear()
+    if _native_pages:
+        return _native_pages
+    status, body = _server_get('/_mrsm/native-pages')
+    if status != 200:
+        return _native_pages
+    try:
+        pages = json.loads(body.decode('utf-8'))
+    except ValueError:
+        return _native_pages
+    for page in pages if isinstance(pages, list) else []:
+        raw_path = str(page.get('path', '')).strip('/')
+        if not raw_path:
+            continue
+        console = raw_path if raw_path.startswith('dash') else f"dash/{raw_path}"
+        key = '/' + console
+        _native_pages[key] = {
+            **page,
+            'console_path': key,
+            'route': f"{NATIVE_ROUTE_PREFIX}/{raw_path.removeprefix('dash/')}",
+            'page_key': page.get('page_key') or ' '.join(
+                word.capitalize()
+                for word in raw_path.removeprefix('dash/').replace('-', ' ').replace('_', ' ').split()
+            ),
+        }
+    return _native_pages
+
+
+def mount_native_page_routes(fastapi_app) -> List[str]:
+    """
+    Serve the pages of native plugins at `/_pages/native/<path>` (the bare fragment; `?frame=1` is
+    the themed document the console's iframe loads): the host fetches each from the server with the
+    session's user, so the page's own login rule applies.
+    """
+    from starlette.responses import HTMLResponse, Response
+    from starlette.concurrency import run_in_threadpool
+    from meerschaum.api import no_auth
+
+    pages = get_native_pages()
+    if not pages:
+        return []
+
+    async def _serve(request):
+        from meerschaum.api.dash.sessions import (
+            get_session_id_from_request, is_session_active, get_username_from_session,
+        )
+        from urllib.parse import quote
+        rest = request.path_params['path']
+        page = next((p for p in pages.values() if p['route'] == f"{NATIVE_ROUTE_PREFIX}/{rest}"), None)
+        if page is None:
+            return Response(status_code=404)
+        user = None
+        session_id = get_session_id_from_request(request)
+        if session_id and await run_in_threadpool(is_session_active, session_id):
+            user = await run_in_threadpool(get_username_from_session, session_id)
+        if page.get('login_required', True) and not no_auth and user is None:
+            return Response(status_code=401)
+        query = '&'.join(
+            f"{quote(k)}={quote(v)}"
+            for k, v in request.query_params.multi_items()
+            if k != 'frame'
+        )
+        raw_path = str(page['path']).strip('/')
+        status, body = await run_in_threadpool(
+            _server_get,
+            f"/_mrsm/native-pages/{quote(raw_path, safe='/')}" + (('?' + query) if query else ''),
+            user,
+        )
+        if status == 0:
+            return Response(status_code=502)
+        html = body.decode('utf-8', errors='replace')
+        if status == 200 and request.query_params.get('frame'):
+            html = page_document(
+                html, bool(page.get('dark_theme', True)), str(page.get('page_key', '')),
+            )
+        return HTMLResponse(html, status_code=status)
+
+    fastapi_app.add_route(
+        NATIVE_ROUTE_PREFIX + '/{path:path}', _serve, methods=['GET'], include_in_schema=False,
+    )
+    return list(pages)
+
+
+def _plugin_names() -> List[str]:
+    """
+    The plugins with Dash functions or pages: the owners of rc1's `/dash/<plugin>/` paths.
+    """
+    from meerschaum.plugins import _dash_plugins, _plugin_endpoints_to_pages, _get_parent_plugin
+    from meerschaum.api.host._app import plugin_name_of
+    names = []
+    for module_name in list(_dash_plugins):
+        name = plugin_name_of(module_name)
+        if name and name not in names:
+            names.append(name)
+    for page_group, pages in list(_plugin_endpoints_to_pages.items()):
+        for page in pages.values():
+            name = _get_parent_plugin(function=page.get('function')) or page_group
+            if name and name not in names:
+                names.append(name)
+    return names
+
+
+def redirect_target(path: str, query: str = '') -> Optional[str]:
+    """
+    Return where a 5.0.0rc1 plugin path (`/dash/<plugin>/<rest>`) lives now (`/dash/<rest>`), or
+    `None` if `path` is not such a path (or already is a page of the console).
+    """
+    from meerschaum.api.dash.callbacks.dashboard import _paths
+    parts = path.rstrip('/').split('/')
+    if len(parts) < 3 or parts[1] != DASH_PREFIX.lstrip('/'):
+        return None
+    plugin = parts[2]
+    if plugin not in _plugin_names():
+        return None
+    ### A page that really is under the plugin's name keeps its path.
+    if path.rstrip('/') in _paths:
+        return None
+    rest = '/'.join(parts[3:])
+    target = f"{DASH_PREFIX}/{rest}".rstrip('/') or DASH_PREFIX
+    if target not in _paths and not (rest and f"{DASH_PREFIX}/{parts[3]}" in _paths):
+        return None
+    return target + (('?' + query) if query else '')
+
+
+class ConsoleApp:
+    """
+    The ASGI app mounted at `/dash`: redirects 5.0.0rc1 plugin paths to their v4 paths, and serves
+    the Dash console's WSGI app for everything else.
+    """
+
+    def __init__(self, wsgi_app: Any):
+        self.wsgi_app = wsgi_app
+
+    async def __call__(self, scope, receive, send):
+        if scope['type'] == 'http':
+            path = scope.get('path', '')
+            root_path = scope.get('root_path', '')
+            ### Starlette keeps the full path in `path` for a mounted app (older versions strip it).
+            full_path = path if path.startswith(DASH_PREFIX) else root_path + path
+            if not full_path.startswith(DASH_PREFIX):
+                full_path = DASH_PREFIX + path
+            query = (scope.get('query_string') or b'').decode('latin-1')
+            target = redirect_target(full_path, query)
+            if target is not None:
+                from starlette.responses import RedirectResponse
+                response = RedirectResponse(target, status_code=307)
+                await response(scope, receive, send)
+                return
+        await self.wsgi_app(scope, receive, send)
+
+
+def mount_console(fastapi_app, debug: bool = False) -> bool:
+    """
+    Build the Dash console and mount it at `/dash` (with the plugins' functions and pages).
+
+    If the console's packages cannot be imported, log one warning, mount nothing and report
+    `console_status()['mounted']` as `False` (`/dash` then shows the pointer page).
 
     Returns
     -------
-    The names of the plugins with a mounted Dash app.
+    Whether the console is mounted.
     """
-    from meerschaum.plugins import _dash_plugins
-    from meerschaum.api.host._app import plugin_name_of
     from meerschaum.utils.warnings import warn
-    from meerschaum.utils.packages import attempt_import
-
-    dash_functions: Dict[str, List[Callable[[Any], Any]]] = {}
-    for module_name, functions in list(_dash_plugins.items()):
-        dash_functions.setdefault(plugin_name_of(module_name), []).extend(functions)
-
-    # Initialize every plugin before collecting pages: v4 plugins commonly declare their
-    # @web_page functions inside @dash_plugin, where the app is available for callbacks.
-    for plugin_name, functions in dash_functions.items():
-        if not plugin_name:
-            continue
-        dash_app = make_dash_app(plugin_name)
-        initialized = getattr(dash_app, '_mrsm_initialized_functions', None)
-        if initialized is None:
-            initialized = []
-            dash_app._mrsm_initialized_functions = initialized
-        for function in functions:
-            if any(function is previous for previous in initialized):
-                continue
-            initialized.append(function)
-            try:
-                function(dash_app)
-            except Exception:
-                warn(
-                    f"Failed to load function '{function.__name__}' "
-                    + f"from plugin '{plugin_name}':\n"
-                    + traceback.format_exc(),
-                    stack=False,
-                )
-
-    pages_by_plugin = collect_plugin_pages(debug=debug)
-    plugin_names = [name for name in dash_functions if name]
-    plugin_names += [name for name in pages_by_plugin if name and name not in plugin_names]
-    if not plugin_names:
-        return []
-
-    a2wsgi = attempt_import('a2wsgi', lazy=False, check_update=False)
-    mounted = []
-    for plugin_name in plugin_names:
-        dash_app = make_dash_app(plugin_name, pages=pages_by_plugin.get(plugin_name, {}))
-        # make_dash_app reuses apps created during initialization; attach their pages now.
-        dash_app._mrsm_pages.update(pages_by_plugin.get(plugin_name, {}))
-        fastapi_app.mount(
-            f'{DASH_PREFIX}/{plugin_name}',
-            a2wsgi.WSGIMiddleware(dash_app.server),
+    try:
+        ### The host never installs the console's packages by itself: `pip install meerschaum[dash]`.
+        from meerschaum.api.dash import console_available
+        if not console_available():
+            raise ImportError("dash, dash-bootstrap-components, dash-ace and a2wsgi are required")
+        from meerschaum.utils.packages import attempt_import
+        a2wsgi = attempt_import('a2wsgi', lazy=False, check_update=False)
+        if a2wsgi is None:
+            raise ImportError("a2wsgi")
+        from meerschaum.api.dash import build_dash_app
+        dash_app = build_dash_app(debug=debug)
+    except ImportError as e:
+        _set_status(False, f"The web console's packages are not installed ({e}).")
+        if not _status_warned['warned']:
+            _status_warned['warned'] = True
+            warn(
+                "The web console is not available: install it with "
+                "`pip install \"meerschaum[dash]\"`. "
+                f"/dash shows a pointer page instead ({e}).",
+                stack=False,
+            )
+        return False
+    except Exception as e:
+        _set_status(False, f"The web console failed to build: {e}")
+        warn(
+            "The web console failed to build; /dash shows a pointer page instead:\n"
+            + traceback.format_exc(),
+            stack=False,
         )
-        mounted.append(plugin_name)
-    return mounted
+        return False
+
+    fastapi_app.mount(
+        DASH_PREFIX,
+        ConsoleApp(a2wsgi.WSGIMiddleware(dash_app.server)),
+        name='dash',
+    )
+    _set_status(True)
+    return True

@@ -192,6 +192,17 @@ For your convenience, common aliases are mapped to keywords:
  Weekdays (`mon`, `tue`, etc.) | Full names (e.g. `Monday`) and `tues`, `thurs` 
  Months (`jan`, etc.) | Full names (e.g. `January`) 
 
+### Jitter
+
+Jobs which share a cadence all fire at the same instant. Add `jitter` to give each job its own fixed offset of up to that long:
+
+```bash
+mrsm sync pipes -s 'every 5 minutes jitter 30 seconds' -d
+mrsm sync pipes -s 'every 5 minutes' --jitter 30s -d
+```
+
+The offset is seeded by the job's name, so a job fires at the same offset on every tick and after every restart, and different jobs spread out. Set `jobs:schedule:jitter_seconds` to give every scheduled job a default bound (it is `0`: no jitter). Units are `s`, `m` and `h` (or `seconds`, `minutes`, `hours`); a bare number is seconds.
+
 ### Verifying Schedules
 
 You may verify your schedules with the command `show schedule`:
@@ -231,6 +242,24 @@ Next 5 timestamps for schedule 'daily and mon-fri starting May 2, 2024':
     trigger.next()
     # datetime.datetime(2024, 1, 2, 0, 0, tzinfo=datetime.timezone.utc)
     ```
+
+## 🚦 Startup Stagger
+
+Starting many jobs at once (`compose up`, `restart jobs`, every systemd unit coming up after a reboot) used to start every worker together. Each job now passes a per-root gate before its worker starts, so a waiting job costs one idle process:
+
+1. **Jitter**: a random delay of up to `jobs:startup:jitter_seconds` (default `30`).
+2. **Busy host**: wait while the 1-minute load average is above `jobs:startup:max_load` times the CPU count (default `1.5`) or less than `jobs:startup:min_free_memory_percent` of memory is available (default `10`). Set either to `0` to turn the check off. Where the platform has no load average or memory report (memory outside Linux, Windows), the check passes.
+3. **Slot**: take one of `jobs:startup:max_concurrent` slots (default `max(2, CPUs / 2)`; `0` for no limit). Slots are lock files under `<root>/jobs/.startup/`, so they are shared by every process which starts jobs on the root (systemd, daemons, compose) and are freed if their holder dies.
+
+The slot is held until the job's first lap is done (`sync pipes --loop`, a `-s` schedule's first run, a pipeline's first pass, a server starting, or the job exiting), or `jobs:startup:slot_timeout_seconds` (default `300`) pass. A worker which never reports a lap (a plugin action with a loop of its own) is not left holding the slot for the whole timeout: on Linux the slot is also freed once the job and its child processes have used under 10% of one core for `jobs:startup:settle_seconds` (default `15`; `0` turns this off). The same timeout caps the wait: after it the job starts anyway. While a job waits it shows as running, has no `began` time yet and writes `Startup: ...` lines to its log; `stop jobs` stops it before it ever runs.
+
+| Start | Jitter and busy wait | Slot |
+|---|---|---|
+| `start jobs a b`, `restart jobs`, `compose up`, a systemd unit starting or restarting | Yes | Yes |
+| `start job a` (one job) | No | Yes |
+| any of the above with `--no-stagger` | No | No |
+
+Set `jobs:startup:enabled: false` to turn the gate off everywhere. A job may override the limits with a `startup` entry in its properties (for example `{"jitter_seconds": 5, "max_concurrent": 4}`), or `--startup-jitter 5s` when it is created. Generated systemd units carry `RestartSec=5`; the jitter applies on every restart.
 
 ## ⚙️ Executors
 

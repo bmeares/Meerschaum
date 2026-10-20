@@ -11,10 +11,12 @@ name: wheels
 # non-blocking job. It never gates a release: pyo3 0.30 ignores the `abi3` feature on a
 # free-threaded interpreter, and `_core` declares `gil_used = false`.
 # Platforms (docs/design/v5-build.md): Linux x86_64 and Linux arm64 (`ubuntu-24.04-arm`, a native
-# manylinux_2_28 build in the maturin-action container, no QEMU), macOS arm64 (`macos-latest`) and
-# Windows x86_64. Deferred, not built: macOS x86_64, musllinux, Windows arm64.
-# Also one standalone `mrsm` binary per platform (job `binaries`: the same four targets, manylinux_2_28
-# glibc floor on Linux) for the GitHub release assets.
+# manylinux_2_28 build in the maturin-action container, no QEMU), the same two for musl libc
+# (`musllinux_1_2`, Alpine: both cross-compiled on `ubuntu-latest` in the `rust-musl-cross` container,
+# the aarch64 wheel is smoke-tested natively on `ubuntu-24.04-arm`), macOS arm64 (`macos-latest`),
+# macOS x86_64 (`macos-15-intel`, the last Intel runner image) and Windows x86_64. Not built: Windows arm64.
+# Also one standalone `mrsm` binary per platform (job `binaries`: the same glibc/macOS/Windows targets,
+# manylinux_2_28 glibc floor on Linux, plus macOS x86_64) for the GitHub release assets.
 # Nothing here publishes anything: the wheels and binaries are workflow artifacts. Never `self-hosted`: the
 # self-hosted runner is reserved for rust.yaml / pytest.yaml (docs/design/v5-build.md).
 
@@ -40,6 +42,7 @@ on:
       - '.github/workflows/wheels.yaml'
       - 'scripts/check_packaging.py'
       - 'scripts/docker/smoke_facade.py'
+      - 'scripts/docker/smoke_wheel_alpine.sh'
 
 permissions:
   contents: read
@@ -62,7 +65,7 @@ jobs:
         run: python scripts/check_packaging.py
 
   build:
-    name: build (${{ matrix.os }}${{ matrix.freethreaded && ', cp314t, experimental' || '' }})
+    name: build (${{ matrix.os }}${{ matrix.musl && format(', musllinux {0}', matrix.wheel_arch) || '' }}${{ matrix.freethreaded && ', cp314t, experimental' || '' }})
     needs: metadata
     runs-on: ${{ matrix.os }}
     strategy:
@@ -75,7 +78,27 @@ jobs:
           # `quay.io/pypa/manylinux_2_28_aarch64` container on an aarch64 host.
           - os: ubuntu-24.04-arm
             manylinux: '2_28'
+          # musllinux_1_2 (Alpine and other musl distributions): maturin-action builds these in the
+          # `ghcr.io/rust-cross/rust-musl-cross:<target>` container, which cross-compiles on an
+          # x86_64 runner (the aarch64 wheel is not built on the arm runner). `wheel_arch` is the
+          # architecture the wheel must carry (the tag check below) and `artifact` its upload name.
+          - os: ubuntu-latest
+            manylinux: 'musllinux_1_2'
+            target: x86_64-unknown-linux-musl
+            musl: true
+            wheel_arch: x86_64
+            artifact: wheels-musllinux-x86_64
+          - os: ubuntu-latest
+            manylinux: 'musllinux_1_2'
+            target: aarch64-unknown-linux-musl
+            musl: true
+            wheel_arch: aarch64
+            artifact: wheels-musllinux-aarch64
           - os: macos-latest
+            manylinux: 'off'
+          # Intel Mac: the last GitHub-hosted x86_64 macOS image (`macos-13` was retired); built and
+          # smoke-tested natively, no Rosetta.
+          - os: macos-15-intel
             manylinux: 'off'
           - os: windows-latest
             manylinux: 'off'
@@ -98,6 +121,8 @@ jobs:
         with:
           command: build
           manylinux: ${{ matrix.manylinux }}
+          # Only the musllinux entries name a target (empty = the runner's own).
+          target: ${{ matrix.target }}
           # Free-threaded: an explicit interpreter, so maturin builds `cp314-cp314t` (the
           # manylinux container ships /opt/python/cp314-cp314t). The default entries build the
           # `cp311-abi3` wheel.
@@ -118,6 +143,9 @@ jobs:
         env:
           RUNNER_OS_NAME: ${{ runner.os }}
           RUNNER_ARCH_NAME: ${{ runner.arch }}
+          # The musllinux aarch64 wheel is built on an x86_64 runner: the matrix says which it is.
+          WHEEL_ARCH: ${{ matrix.wheel_arch }}
+          EXPECT_MUSL: ${{ matrix.musl && '1' || '' }}
           MAX_WHEEL_BYTES: '99614720'
         run: |
           python - <<'PY'
@@ -132,12 +160,23 @@ jobs:
               tags = [l.split(': ', 1)[1] for l in zf.read(name).decode().splitlines() if l.startswith('Tag: ')]
           print(f'{wheel.name}: {size / 1048576:.1f} MiB, tags {tags}')
           os_name = os.environ['RUNNER_OS_NAME']
-          arch = {'X64': 'x86_64', 'ARM64': 'aarch64'}[os.environ['RUNNER_ARCH_NAME']]
+          arch = os.environ['WHEEL_ARCH'] or {'X64': 'x86_64', 'ARM64': 'aarch64'}[os.environ['RUNNER_ARCH_NAME']]
+          musl = bool(os.environ['EXPECT_MUSL'])
           problems = []
           if size > int(os.environ['MAX_WHEEL_BYTES']):
               problems.append(f'{size} bytes is over the 95 MiB guard (PyPI refuses 100 MiB)')
           platforms = {t.rsplit('-', 1)[-1] for t in tags}
-          if os_name == 'Linux':
+          if os_name == 'Linux' and musl:
+              # Alpine and other musl distributions: `musllinux_1_2_<arch>` (musl 1.2), nothing newer.
+              for plat in platforms:
+                  m = re.fullmatch(r'musllinux_1_(\d+)_(\w+)', plat)
+                  if not m:
+                      problems.append(f'platform tag {plat!r} is not musllinux (PyPI rejects it)')
+                  elif m.group(2) != arch:
+                      problems.append(f'platform tag {plat!r} is not {arch}')
+                  elif int(m.group(1)) > 2:
+                      problems.append(f'platform tag {plat!r} needs a newer musl than musllinux_1_2')
+          elif os_name == 'Linux':
               for plat in platforms:
                   m = re.fullmatch(r'manylinux_2_(\d+)_(\w+)|manylinux2014_(\w+)', plat)
                   if not m:
@@ -157,7 +196,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: wheels-${{ matrix.os }}${{ matrix.freethreaded && '-cp314t' || '' }}
+          name: ${{ matrix.artifact || format('wheels-{0}{1}', matrix.os, matrix.freethreaded && '-cp314t' || '') }}
           path: dist/*.whl
           if-no-files-found: error
 
@@ -198,6 +237,7 @@ jobs:
           - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu, container_arch: x86_64 }
           - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu, container_arch: aarch64 }
           - { os: macos-latest, target: aarch64-apple-darwin }
+          - { os: macos-15-intel, target: x86_64-apple-darwin }
           - { os: windows-latest, target: x86_64-pc-windows-msvc, ext: '.exe' }
     defaults:
       run:
@@ -279,7 +319,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ ubuntu-latest, ubuntu-24.04-arm, macos-latest, windows-latest ]
+        os: [ ubuntu-latest, ubuntu-24.04-arm, macos-latest, macos-15-intel, windows-latest ]
         python: [ '3.11', '3.14' ]
     defaults:
       run:
@@ -416,6 +456,43 @@ jobs:
           # pip/setuptools/wheel (ensurepip) are not Meerschaum's; anything else is a leak.
           extra="$(grep -viE '^(pip|setuptools|wheel|meerschaum)$' "$RUNNER_TEMP/installed.txt" || true)"
           if [ -n "$extra" ]; then echo "unexpected dependencies: $extra" >&2; exit 1; fi
+
+  # The musllinux wheels, installed with the system Python of an Alpine container (musl libc), each on a
+  # runner of its own architecture (the aarch64 wheel is cross-compiled on x86_64 and first runs here,
+  # natively on `ubuntu-24.04-arm`). The wheel alone: no extras, no network access to PyPI
+  # (`--no-index`), `MRSM_NO_AUTO_INSTALL=1`. Not covered here: jobs (they need a real init) and the
+  # extras' compiled dependencies, which come from PyPI's own musllinux wheels.
+  smoke-musl:
+    name: smoke (musllinux ${{ matrix.arch }}, Alpine)
+    needs: build
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, arch: x86_64 }
+          - { os: ubuntu-24.04-arm, arch: aarch64 }
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          path: smoke-src
+          sparse-checkout: |
+            scripts/docker/smoke_facade.py
+            scripts/docker/smoke_wheel_alpine.sh
+          sparse-checkout-cone-mode: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: wheels-musllinux-${{ matrix.arch }}
+          path: dist
+      - name: Install the wheel in Alpine and run it
+        run: |
+          ls -l dist
+          docker run --rm \
+            -v "$PWD/dist:/dist:ro" \
+            -v "$PWD/smoke-src/scripts/docker/smoke_wheel_alpine.sh:/smoke.sh:ro" \
+            -v "$PWD/smoke-src/scripts/docker/smoke_facade.py:/smoke_facade.py:ro" \
+            alpine:3.22 sh /smoke.sh
 
   # EXPERIMENTAL (R8): install the free-threaded wheel on a free-threaded interpreter and check
   # that importing `_core` keeps the GIL disabled.

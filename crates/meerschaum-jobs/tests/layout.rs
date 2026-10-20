@@ -393,10 +393,11 @@ fn systemd_units_match() {
         assert_eq!(posix(executor.get_socket_path(name)), expect("socket_path"));
         assert_eq!(posix(executor.get_result_path(name)), expect("result_path"));
         // v5 pins the workers' interpreter with `Environment=MRSM_PYTHON=...` (tested in
-        // `systemd_executor.rs`); v4 has no such line.
+        // `systemd_executor.rs`) and spaces restarts with `RestartSec=5` (D23, PARITY.md
+        // W18-JB-001); v4 has neither line.
         let unit = norm(executor.get_service_file_text(name, &sysargs, "{PYTHON}", &process_env))
             .split('\n')
-            .filter(|l| !l.starts_with("Environment=MRSM_PYTHON="))
+            .filter(|l| !l.starts_with("Environment=MRSM_PYTHON=") && *l != "RestartSec=5")
             .collect::<Vec<_>>()
             .join("\n");
         assert_eq!(unit, expect("unit"), "{name}");

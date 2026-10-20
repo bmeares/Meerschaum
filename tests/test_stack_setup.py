@@ -93,6 +93,29 @@ print(json.dumps({'rust': rust, 'python': default_config['stack']}))
     assert datasource['jsonData']['postgresVersion'] == 1800
 
 
+def test_the_default_api_image_is_this_releases_full_image(tmp_path):
+    """
+    W18PK-001: the stack's `api` service runs `bmeares/meerschaum:<version>-full` (the image the
+    release publishes; a prerelease never moves the floating `:api` tag), in the façade's defaults
+    and in the Rust registry's alike, and the `:api` tag is not the default any more.
+    """
+    from meerschaum.config._version import __version__
+
+    result = run_python(
+        """
+import json
+from meerschaum.config import get_config
+from meerschaum.config._default import default_config
+rust = get_config('stack', 'docker-compose.yaml', 'services', 'api', 'image', patch=False, substitute=False, sync_files=False)
+python = default_config['stack']['docker-compose.yaml']['services']['api']['image']
+print(json.dumps({'rust': rust, 'python': python}))
+""",
+        tmp_path,
+    )
+    expected = f'bmeares/meerschaum:{__version__}-full'
+    assert result == {'rust': expected, 'python': expected}
+
+
 def test_the_test_stack_runs_the_same_setup():
     """The test stack's `timescaledb_ha` service keeps the v4 directory mount (the legacy style)
     and runs the same script."""

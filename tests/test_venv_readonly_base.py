@@ -21,7 +21,10 @@ def base_sites(tmp_path, monkeypatch):
     monkeypatch.setattr(os, 'geteuid', lambda: 1000, raising=False)
     monkeypatch.delenv('MRSM_RUNTIME', raising=False)
     monkeypatch.setattr(venvs, 'inside_venv', lambda: False)
-    monkeypatch.setattr(sys, 'path', [*sys.path, str(base)])
+    ### `activate_venv(None)` inserts after a first entry that is the working directory (or `''`),
+    ### which is what `python -m pytest` starts with: give the test a first entry of its own, so the
+    ### order does not depend on what ran before it on the same worker.
+    monkeypatch.setattr(sys, 'path', [str(tmp_path / 'first-entry'), *sys.path, str(base)])
     for name, value in (
         ('active_venvs', set()), ('active_venvs_counts', {}), ('active_venvs_order', []),
         ('threads_active_venvs', {}),

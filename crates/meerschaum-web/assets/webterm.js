@@ -3,17 +3,22 @@
   // The web terminal front end: xterm.js on the terminado websocket protocol served by
   // `meerschaum-server` (`["stdin", text]` / `["set_size", rows, cols, h, w]` to the server,
   // `["setup", {}]` / `["stdout", text]` / `["disconnect", 1]` back). It mounts on every
-  // `[data-mrsm-webterm]` element: `data-ws` is the websocket path, `data-mode` is `embedded`
-  // (inside the console, follows its theme, has the extra key row) or `standalone`
-  // (`/webterm/<session>`, always dark, as in v4).
+  // `[data-mrsm-webterm]` element: `data-ws` is the websocket path, `data-mode` is `standalone`
+  // (`/webterm/<session>`: dark as in v4, `?theme=light` for a light page; the Dash console embeds
+  // it in an iframe) or `embedded` (inside a page that has the extra key row and a
+  // `mrsm-theme-dark` class on `<html>`).
   const SEQUENCES = { esc: '\x1b', tab: '\t', up: '\x1b[A', down: '\x1b[B', right: '\x1b[C', left: '\x1b[D' };
   const DARK = { background: '#000000', foreground: '#e6e6e6', cursor: '#e6e6e6', selectionBackground: '#3b4a5a' };
   const LIGHT = { background: '#ffffff', foreground: '#1f2328', cursor: '#1f2328', selectionBackground: '#b6d4f5' };
   const FONT = '"DejaVu Sans Mono", "Liberation Mono", monospace';
   const sessions = new Set();
 
+  const LIGHT_PAGE = new URLSearchParams(location.search).get('theme') === 'light';
+  if (LIGHT_PAGE) document.documentElement.classList.add('mrsm-theme-light');
+
   function dark(mode) {
-    return mode === 'standalone' || document.documentElement.classList.contains('mrsm-theme-dark');
+    if (mode === 'standalone') return !LIGHT_PAGE;
+    return document.documentElement.classList.contains('mrsm-theme-dark');
   }
 
   function mount(el) {
@@ -204,6 +209,14 @@
     const session = [...sessions][0];
     if (!session) return;
     if (event.data.action === '__SEND_KEY') session.send(['stdin', event.data.key || '']);
+    // The console's "+" button: a new tmux window running `mrsm` (v4's `__TMUX_NEW_WINDOW`).
+    else if (event.data.action === '__TMUX_NEW_WINDOW') session.send(['new_window']);
+    // The console's instance selector: `instance <keys>` typed at the shell after a Ctrl-C that
+    // clears the line (what v4's page typed; `subaction_text` is v4's name for the keys).
+    else if (event.data.action === 'instance') {
+      const keys = event.data.instance || event.data.subaction_text;
+      if (typeof keys === 'string' && keys && !/[\x00-\x1f]/.test(keys)) session.send(['stdin', '\x03instance ' + keys + '\r']);
+    }
     else if (event.data.action === '__TOGGLE_MOD' && event.data.mod in session.mods) {
       session.mods[event.data.mod] = !!event.data.on;
       showMods(session);

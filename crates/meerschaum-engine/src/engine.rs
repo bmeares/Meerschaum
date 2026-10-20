@@ -231,6 +231,15 @@ impl EngineConfig {
 /// Asks the user to confirm rebuilds (interactive runs).
 pub type ConfirmFn = Arc<dyn Fn(&Plan) -> bool + Send + Sync>;
 
+/// Stops a [`StopToken`] when dropped (a run that is cancelled instead of finishing).
+struct StopOnDrop(StopToken);
+
+impl Drop for StopOnDrop {
+    fn drop(&mut self) {
+        self.0.stop();
+    }
+}
+
 /// One engine run's options (`sync pipes` flags, `pipe.sync(parents=...)`, `Pipeline.run`).
 #[derive(Clone, Default)]
 pub struct RunOptions {
@@ -354,6 +363,24 @@ impl RunResult {
         self.outcomes.iter().find(|o| o.pipe_ref == *pipe_ref)
     }
 
+    /// The pipes this run left `rebuild_pending`: their definition changed and the rebuild (clear
+    /// the table, re-sync the full range) was not approved. They were not synced.
+    pub fn rebuild_pending(&self) -> Vec<PendingRebuild> {
+        self.record
+            .as_ref()
+            .map(|r| {
+                r.nodes
+                    .iter()
+                    .filter(|n| n.status == NodeStatus::RebuildPending)
+                    .map(|n| PendingRebuild {
+                        pipe_ref: n.pipe_ref.clone(),
+                        reason: n.reason.clone(),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
     /// The v4 lap summary of this run.
     pub fn lap_summary(&self, lap: u64) -> LapSummary {
         let (ok, bad): (Vec<&NodeOutcome>, Vec<&NodeOutcome>) =
@@ -364,8 +391,24 @@ impl RunResult {
             failure_pipes: bad.iter().map(|o| o.pipe.clone()).collect(),
             duration: self.duration,
             aborted: self.record.is_none(),
+            rebuild_pending: self.rebuild_pending(),
         }
     }
+}
+
+/// A pipe a run did not sync because its definition changed and the rebuild was not approved
+/// (`--yes`, `system.engine.auto_rebuild`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingRebuild {
+    /// The pipe.
+    pub pipe_ref: PipeRef,
+    /// Why (what changed and how to approve it).
+    pub reason: String,
+}
+
+impl PendingRebuild {
+    /// How to approve the rebuilds, for the line printed under the list.
+    pub const HOW_TO_APPROVE: &'static str = "Approve the rebuild with `--yes` (it clears each table, then re-syncs the full range), or set `system.engine.auto_rebuild: true`.";
 }
 
 /// One lap of continuous mode, as v4 reports it.
@@ -381,6 +424,8 @@ pub struct LapSummary {
     pub duration: Duration,
     /// The lap could not start (v4: "Syncing was aborted.").
     pub aborted: bool,
+    /// Pipes the lap did not sync, waiting for a rebuild nobody approved (v5 only).
+    pub rebuild_pending: Vec<PendingRebuild>,
 }
 
 impl LapSummary {
@@ -390,12 +435,19 @@ impl LapSummary {
             return "Syncing was aborted.".into();
         }
         let n = self.success_pipes.len() + self.failure_pipes.len();
-        format!(
+        let mut message = format!(
             "It took {duration_text} to sync {n} pipe{}\n    ({} succeeded, {} failed).",
             if n != 1 { "s" } else { "" },
             self.success_pipes.len(),
             self.failure_pipes.len()
-        )
+        );
+        if !self.rebuild_pending.is_empty() {
+            message.push_str(&format!(
+                "\n    {} not synced: rebuild_pending.",
+                self.rebuild_pending.len()
+            ));
+        }
+        message
     }
 
     /// v4's action result: success when any pipe succeeded.
@@ -933,6 +985,9 @@ impl Engine {
 
         // Batched event persistence (`system.engine.state_flush_ms`).
         let flusher_stop = StopToken::new();
+        // A run dropped mid-way (Ctrl-C, a closed request) still ends its flusher: it writes
+        // what is buffered and returns, instead of waking every `state_flush_ms` for good.
+        let _flusher_guard = StopOnDrop(flusher_stop.clone());
         let flusher = persist.clone().map(|buf| {
             let state = self.state.clone();
             let stop = flusher_stop.clone();

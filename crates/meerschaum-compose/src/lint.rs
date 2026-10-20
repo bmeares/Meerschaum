@@ -23,13 +23,26 @@ use meerschaum_core::value::{Map, Value};
 use crate::ops::InstanceOps;
 use crate::project::{COMPOSE_KEYS, resolve_against};
 
+/// How serious a finding is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Severity {
+    /// Likely a mistake.
+    #[default]
+    Warning,
+    /// Information (an override, something `up` would install).
+    Info,
+}
+
 /// One lint finding.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LintWarning {
     /// A stable identifier for the check (`unknown-key`, `nested-pipes`, `missing-plugins-dir`,
     /// `misspelled-key`, `unknown-pipe-keyword`, `string-tags`, `unresolved-reference`,
-    /// `invalid-template`).
+    /// `invalid-template`, `unresolved-connector`, `unresolved-symlink`, `missing-plugin`,
+    /// `pending-plugin`, `unreachable-instance`, `include-*`, `override-*`).
     pub code: &'static str,
+    /// Warning or info.
+    pub severity: Severity,
     /// Where the finding is (`pipes[1].parameters.dtype`).
     pub location: String,
     /// The message.
@@ -52,9 +65,43 @@ pub const MISSPELLINGS: &[(&str, &str)] = &[
     ("params", "parameters"),
 ];
 
-/// Keys accepted at the top level of a compose file (the `COMPOSE_KEYS`).
+/// The top-level keys v5 adds: `include` and `parent` (read from the document, not kept in the
+/// resolved configuration).
+pub const V5_KEYS: &[&str] = &["include", "parent"];
+
+/// Keys accepted at the top level of a compose file (the `COMPOSE_KEYS` and [`V5_KEYS`]).
 pub fn is_known_top_level_key(key: &str) -> bool {
-    COMPOSE_KEYS.contains(&key)
+    COMPOSE_KEYS.contains(&key) || V5_KEYS.contains(&key)
+}
+
+impl LintWarning {
+    /// A warning finding.
+    pub fn warning(
+        code: &'static str,
+        location: impl Into<String>,
+        message: impl Into<String>,
+    ) -> LintWarning {
+        LintWarning {
+            code,
+            severity: Severity::Warning,
+            location: location.into(),
+            message: message.into(),
+        }
+    }
+
+    /// An informational finding.
+    pub fn info(
+        code: &'static str,
+        location: impl Into<String>,
+        message: impl Into<String>,
+    ) -> LintWarning {
+        LintWarning {
+            code,
+            severity: Severity::Info,
+            location: location.into(),
+            message: message.into(),
+        }
+    }
 }
 
 fn misspelling(key: &str) -> Option<&'static str> {
@@ -74,6 +121,9 @@ pub struct LintInput<'a> {
     pub defaults: &'a PipeDefaults,
     /// The project's default instance keys for pipes without one.
     pub default_instance: &'a str,
+    /// Pipes the other projects of the tree define: a `{{ Pipe() }}` reference to one of them
+    /// resolves.
+    pub also_defined: &'a [crate::project::PipeKey],
 }
 
 fn pipe_label(section: &str, ix: usize, meta: &Map) -> String {
@@ -82,7 +132,7 @@ fn pipe_label(section: &str, ix: usize, meta: &Map) -> String {
     format!("{section}[{ix}] ({ck}, {mk})")
 }
 
-fn pipe_entries(document: &Map) -> Vec<(String, usize, Map)> {
+pub(crate) fn pipe_entries(document: &Map) -> Vec<(String, usize, Map)> {
     let mut out = Vec::new();
     if let Some(Value::List(items)) = document
         .get("sync")
@@ -147,6 +197,7 @@ pub fn lint(input: &LintInput, instance: &mut dyn InstanceOps) -> Vec<LintWarnin
     for key in doc.keys() {
         if !is_known_top_level_key(key) {
             out.push(LintWarning {
+                severity: Severity::Warning,
                 code: "unknown-key",
                 location: key.clone(),
                 message: format!(
@@ -164,6 +215,7 @@ pub fn lint(input: &LintInput, instance: &mut dyn InstanceOps) -> Vec<LintWarnin
         && !nested.is_empty()
     {
         out.push(LintWarning {
+            severity: Severity::Warning,
             code: "nested-pipes",
             location: "sync.pipes".into(),
             message: format!(
@@ -193,6 +245,7 @@ pub fn lint(input: &LintInput, instance: &mut dyn InstanceOps) -> Vec<LintWarnin
         let path = resolve_against(&base, Path::new(s));
         if !path.exists() {
             out.push(LintWarning {
+                severity: Severity::Warning,
                 code: "missing-plugins-dir",
                 location: if matches!(doc.get("plugins_dir"), Some(Value::List(_))) {
                     format!("plugins_dir[{i}]")
@@ -218,6 +271,7 @@ pub fn lint(input: &LintInput, instance: &mut dyn InstanceOps) -> Vec<LintWarnin
         for key in meta.keys() {
             if let Some(right) = misspelling(key) {
                 out.push(LintWarning {
+                    severity: Severity::Warning,
                     code: "misspelled-key",
                     location: format!("{label}.{key}"),
                     message: format!(
@@ -226,6 +280,7 @@ pub fn lint(input: &LintInput, instance: &mut dyn InstanceOps) -> Vec<LintWarnin
                 });
             } else if !PIPE_INIT_PARAMS.contains(&key.as_str()) {
                 out.push(LintWarning {
+                    severity: Severity::Warning,
                     code: "unknown-pipe-keyword",
                     location: format!("{label}.{key}"),
                     message: format!("'{key}' is not a pipe keyword (`Pipe()` will raise)."),
@@ -236,6 +291,7 @@ pub fn lint(input: &LintInput, instance: &mut dyn InstanceOps) -> Vec<LintWarnin
             && !matches!(tags, Value::List(_))
         {
             out.push(LintWarning {
+                severity: Severity::Warning,
                 code: "string-tags",
                 location: format!("{label}.tags"),
                 message: format!(
@@ -248,6 +304,7 @@ pub fn lint(input: &LintInput, instance: &mut dyn InstanceOps) -> Vec<LintWarnin
             for key in params.keys() {
                 if let Some(right) = misspelling(key) {
                     out.push(LintWarning {
+                        severity: Severity::Warning,
                         code: "misspelled-key",
                         location: format!("{label}.parameters.{key}"),
                         message: format!(
@@ -260,6 +317,7 @@ pub fn lint(input: &LintInput, instance: &mut dyn InstanceOps) -> Vec<LintWarnin
                 && !matches!(tags, Value::List(_))
             {
                 out.push(LintWarning {
+                        severity: Severity::Warning,
                         code: "string-tags",
                         location: format!("{label}.parameters.tags"),
                         message: format!(
@@ -282,6 +340,7 @@ pub fn lint(input: &LintInput, instance: &mut dyn InstanceOps) -> Vec<LintWarnin
             for t in template::parse(text, false).templates {
                 if let TemplateTarget::Pipe { call: Err(e), .. } = &t.target {
                     out.push(LintWarning {
+                        severity: Severity::Warning,
                         code: "invalid-template",
                         location: path.clone(),
                         message: format!("Cannot parse the template {}: {e}", t.raw),
@@ -289,6 +348,7 @@ pub fn lint(input: &LintInput, instance: &mut dyn InstanceOps) -> Vec<LintWarnin
                 }
                 if let Err(e) = &t.chain {
                     out.push(LintWarning {
+                        severity: Severity::Warning,
                         code: "invalid-template",
                         location: path.clone(),
                         message: format!("Cannot parse the template {}: {e}", t.raw),
@@ -296,11 +356,13 @@ pub fn lint(input: &LintInput, instance: &mut dyn InstanceOps) -> Vec<LintWarnin
                 }
             }
             for r in template::referenced_pipes(text, Some(&self_pipe), input.defaults) {
-                let is_defined = defined.contains(&r.pipe);
+                let is_defined = defined.contains(&r.pipe)
+                    || input.also_defined.contains(&crate::tree::pipe_key(&r.pipe));
                 if is_defined || instance.get_id(&r.pipe).is_some() {
                     continue;
                 }
                 out.push(LintWarning {
+                    severity: Severity::Warning,
                     code: "unresolved-reference",
                     location: path.clone(),
                     message: format!(

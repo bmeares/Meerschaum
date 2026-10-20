@@ -25,7 +25,9 @@
 //!   client); [`systemd_job`] is what runs inside a unit;
 //! - [`rotating`], [`stdin`], [`properties`]: the file formats;
 //! - [`schedule`]: the `-s` grammar; [`laps`]: the lap loop; [`scheduler`]: per-root schedule
-//!   and debounce state.
+//!   and debounce state;
+//! - [`startup`]: the per-root startup admission gate (jitter, load and memory checks, file-lock
+//!   slots) every job passes before its worker starts.
 //!
 //! Behavior follows the Python implementation (v4.1.4); preserved quirks are marked `// PARITY:`.
 
@@ -47,6 +49,7 @@ pub mod runner;
 pub mod schedule;
 pub mod scheduler;
 pub mod shlex;
+pub mod startup;
 pub mod stdin;
 pub mod supervisor;
 pub mod systemd;
@@ -60,6 +63,7 @@ pub use laps::{LoopControl, LoopRunner, SleepFrom};
 pub use remote::{RemoteJobs, RemoteJobsResolver};
 pub use rotating::RotatingFile;
 pub use runner::{FakeSystemctl, ProcessRunner, SystemRunner};
-pub use schedule::{Trigger, parse_schedule};
+pub use schedule::{JitterSpec, Trigger, parse_schedule, parse_schedule_jittered};
 pub use scheduler::{RootScheduler, ScheduleState};
+pub use startup::{StartKind, StartupConfig, StartupPolicy};
 pub use supervisor::Launcher;

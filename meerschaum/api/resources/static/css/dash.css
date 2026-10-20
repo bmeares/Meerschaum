@@ -221,3 +221,23 @@ a {
   border-bottom-left-radius: 0;
   margin-left: -1px;
 }
+
+/* The output of `Exec` and `Follow logs` on the dashboard (v5). */
+#exec-view {
+  overflow-y: scroll;
+  max-height: 83vh;
+  height: 78vh;
+  color: white;
+  background-color: black;
+  padding: 0.5em;
+}
+#exec-view pre {
+  color: inherit;
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.exec-header {
+  padding: 0.25em 0.5em;
+  font-size: 0.9em;
+}

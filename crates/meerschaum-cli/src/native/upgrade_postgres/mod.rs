@@ -60,7 +60,7 @@ use crate::value::ArgsMap;
 
 use super::{flag, words};
 
-pub(crate) use stack_guard::stack_up_preflight;
+pub(crate) use stack_guard::{Check as StackCheck, stack_up_preflight};
 
 /// The stack's database service.
 pub(crate) const DB_SERVICE: &str = "db";
@@ -497,13 +497,18 @@ pub(crate) fn restore_config_file(
 pub(crate) fn write_manifest(dir: &Path, manifest: &Json) -> Result<(), String> {
     let text = serde_json::to_string_pretty(manifest).unwrap_or_default();
     let tmp = dir.join("manifest.json.tmp");
-    docker::write_private(&tmp, format!("{text}\n").as_bytes())
+    let written = docker::write_private(&tmp, format!("{text}\n").as_bytes())
         .map_err(|e| e.message)
         .and_then(|_| {
             std::fs::rename(&tmp, dir.join("manifest.json"))
                 .map_err(|e| format!("Cannot write the manifest in '{}': {e}", dir.display()))?;
             docker::sync_dir(dir).map_err(|e| e.message)
-        })
+        });
+    if written.is_err() {
+        // A partial temporary file must not take the room the next write needs.
+        let _ = std::fs::remove_file(&tmp);
+    }
+    written
 }
 
 pub(crate) fn read_manifest(dir: &Path) -> Option<Json> {
@@ -550,12 +555,83 @@ pub(crate) fn interrupted(manifest: &Json) -> bool {
 
 /// Set a manifest's state (and error) and write it.
 pub(crate) fn set_state(dir: &Path, manifest: &mut Json, state: &str, error: Option<&str>) {
+    let _ = finish_state(dir, manifest, state, error);
+}
+
+/// Whether a file of a run's directory is one of its dumps (the manifest, the copy of the stack
+/// config and anything else are not).
+fn is_dump_file(name: &str) -> bool {
+    name == "globals.sql" || name.ends_with(".dump")
+}
+
+/// Remove the dump files of a run's directory: `(files removed, bytes freed)`.
+fn free_dump_files(dir: &Path) -> (usize, u64) {
+    let (mut files, mut bytes) = (0, 0);
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return (files, bytes);
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let Ok(meta) = entry.metadata() else { continue };
+        if meta.is_file() && is_dump_file(&name) && std::fs::remove_file(entry.path()).is_ok() {
+            files += 1;
+            bytes += meta.len();
+        }
+    }
+    (files, bytes)
+}
+
+/// [`set_state`], and what it did when the record could not be written. A run that ended in
+/// `failed` has put the stack back: its own dump files are of no use any more, so when the
+/// manifest cannot be written (the disk is full) they are removed and the write is tried again;
+/// a manifest left in a state that is not final would have the next command put everything back
+/// a second time (and start a service the user stopped on purpose in between). Returns a note for
+/// the user when dump files were removed.
+pub(crate) fn finish_state(
+    dir: &Path,
+    manifest: &mut Json,
+    state: &str,
+    error: Option<&str>,
+) -> Option<String> {
+    finish_state_with(dir, manifest, state, error, &write_manifest)
+}
+
+fn finish_state_with(
+    dir: &Path,
+    manifest: &mut Json,
+    state: &str,
+    error: Option<&str>,
+    write: &dyn Fn(&Path, &Json) -> Result<(), String>,
+) -> Option<String> {
     manifest["state"] = json!(state);
     manifest["updated"] = json!(chrono::Utc::now().to_rfc3339());
     if let Some(error) = error {
         manifest["error"] = json!(error);
     }
-    let _ = write_manifest(dir, manifest);
+    // Only an upgrade's directory holds its own dumps (a restore reads a backup's, which are
+    // never touched here).
+    if write(dir, manifest).is_ok()
+        || state != "failed"
+        || manifest.get("kind").and_then(Json::as_str) != Some("upgrade")
+    {
+        return None;
+    }
+    let (files, bytes) = free_dump_files(dir);
+    if files == 0 {
+        return None;
+    }
+    manifest["dumps_removed"] = json!(true);
+    let recorded = write(dir, manifest).is_ok();
+    Some(format!(
+        "The disk is full: the run's {files} dump file{} ({}) were removed{}.",
+        if files == 1 { "" } else { "s" },
+        human_bytes(bytes as i64),
+        if recorded {
+            " so that its end could be recorded"
+        } else {
+            ", but its end could not be recorded either: the next command puts the stack back again"
+        }
+    ))
 }
 
 /// An exclusive lock of a file (`Err` when another process holds it).
@@ -648,8 +724,14 @@ pub(crate) struct Locks {
     _project: std::fs::File,
 }
 
+/// What the project lock's holder writes into the lock file: it moves the stack's database
+/// (`upgrade`, `restore`, `rollback`), as opposed to reading it (`backup`).
+const MARK_SWITCHING: &str = "switching";
+const MARK_BACKUP: &str = "backup";
+
 impl Locks {
-    pub fn take(stack: &Stack) -> Result<Locks, String> {
+    /// `switching`: the command moves the stack's database (so `mrsm stack up` waits for it).
+    pub fn take(stack: &Stack, switching: bool) -> Result<Locks, String> {
         let root = lock(&stack.backups)?;
         let daemon = docker::daemon_id().map_err(|e| e.message)?;
         let project = stack.project_label();
@@ -657,11 +739,56 @@ impl Locks {
             &project_lock_path(&lock_dir()?, &project, &daemon),
             &format!("for the stack project '{project}' on this Docker daemon"),
         )?;
+        mark_lock(
+            &project_lock,
+            if switching {
+                MARK_SWITCHING
+            } else {
+                MARK_BACKUP
+            },
+        );
         Ok(Locks {
             _root: root,
             _project: project_lock,
         })
     }
+}
+
+/// Write what the holder does into its lock file (best effort: the lock itself is what counts).
+fn mark_lock(file: &std::fs::File, text: &str) {
+    use std::io::{Seek, SeekFrom, Write};
+    let mut file = file;
+    let _ = file.set_len(0);
+    let _ = file.seek(SeekFrom::Start(0));
+    let _ = file.write_all(text.as_bytes());
+}
+
+/// Whether a command that moves the database of the Compose project `project` on `daemon` holds
+/// its lock right now (`mrsm stack up` must not start a stopped old `db`, or its dependents,
+/// while the database is copied: what they write would not be in the copy). A lock whose file
+/// does not say it is a read-only `backup` counts as moving it. Nothing is created or locked
+/// for good.
+pub(crate) fn switching_run(dir: &Path, project: &str, daemon: &str) -> bool {
+    let path = project_lock_path(dir, project, daemon);
+    let Ok(file) = std::fs::OpenOptions::new().read(true).open(&path) else {
+        return false;
+    };
+    match file.try_lock() {
+        Ok(()) => {
+            let _ = file.unlock();
+            false
+        }
+        Err(std::fs::TryLockError::WouldBlock) => {
+            let marked = std::fs::read_to_string(&path).unwrap_or_default();
+            marked.trim() != MARK_BACKUP
+        }
+        Err(std::fs::TryLockError::Error(_)) => false,
+    }
+}
+
+/// [`switching_run`] for the user's lock directory.
+pub(crate) fn switching_run_here(project: &str, daemon: &str) -> bool {
+    lock_dir().is_ok_and(|dir| switching_run(&dir, project, daemon))
 }
 
 /// Whether two paths name the same file or directory (resolved when they exist).
@@ -736,6 +863,55 @@ pub(crate) fn check_owner(stack: &Stack) -> Result<(), String> {
     ))
 }
 
+/// How long a command that changes the stack waits for a `docker compose` of the project that is
+/// still going on (what a killed run left behind).
+const COMPOSE_WAIT: Duration = Duration::from_secs(120);
+
+/// Wait until no `docker compose` command that changes containers of `project` is running. A
+/// run that was killed (`kill -9`) leaves its in-flight compose command behind: it goes on
+/// starting or stopping services for a while, and a command that reads the stack's state now (or
+/// puts it back) would race it. `Err` when it is still there after `wait`.
+fn settle_compose(rt: &mut Runtime<'_>, project: &str, wait: Duration) -> Result<(), String> {
+    settle_compose_until(rt, project, wait, &docker::stop_requested)
+}
+
+/// [`settle_compose`] with the stop request given (the process-wide one is state other code, and
+/// the tests of other modules, set).
+fn settle_compose_until(
+    rt: &mut Runtime<'_>,
+    project: &str,
+    wait: Duration,
+    stop_requested: &dyn Fn() -> bool,
+) -> Result<(), String> {
+    let started = Instant::now();
+    let mut said = false;
+    loop {
+        let Some(running) = docker::compose_commands_running(project) else {
+            return Ok(());
+        };
+        if running.is_empty() {
+            return Ok(());
+        }
+        if started.elapsed() >= wait || stop_requested() {
+            let (pid, command) = &running[0];
+            return Err(format!(
+                "A `docker compose` command of the stack project '{project}' is still running \
+                 (process {pid}: {command}). It may be what an earlier run that was killed left \
+                 behind: wait for it to finish (or stop that process), then run the command \
+                 again."
+            ));
+        }
+        if !said {
+            said = true;
+            rt.print(&format!(
+                "Waiting for a `docker compose` command of the stack project '{project}' to \
+                 finish (an earlier run may have left it behind)...\n"
+            ));
+        }
+        std::thread::sleep(Duration::from_millis(500));
+    }
+}
+
 /// What every command does first: Docker must answer, the stack is read, the locks are taken, and
 /// the stack's containers must be this root's.
 pub(crate) fn prologue(rt: &mut Runtime<'_>, editing: bool) -> Result<(Stack, Locks), String> {
@@ -743,14 +919,186 @@ pub(crate) fn prologue(rt: &mut Runtime<'_>, editing: bool) -> Result<(Stack, Lo
         return Err(NO_DOCKER.into());
     }
     let stack = Stack::load(rt, editing)?;
-    let locks = Locks::take(&stack)?;
+    let locks = Locks::take(&stack, editing)?;
     check_owner(&stack)?;
+    if editing {
+        settle_compose(rt, &stack.compose.project, COMPOSE_WAIT)?;
+    }
     Ok((stack, locks))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_failed_run_frees_its_dumps_when_its_end_cannot_be_recorded() {
+        use std::cell::Cell;
+        let dir = tempfile::tempdir().unwrap();
+        for (name, size) in [
+            ("globals.sql", 10),
+            ("01-meerschaum.dump", 100),
+            ("stack.yaml", 5),
+        ] {
+            std::fs::write(dir.path().join(name), vec![b'x'; size]).unwrap();
+        }
+        // A disk that takes the record only when the dumps made room.
+        let room = |dir: &Path, _: &Json| {
+            if dir.join("01-meerschaum.dump").exists() {
+                Err("No space left on device".to_string())
+            } else {
+                Ok(())
+            }
+        };
+        let mut manifest = json!({"kind": "upgrade", "state": "dumped"});
+        let note = finish_state_with(dir.path(), &mut manifest, "failed", None, &room)
+            .expect("dumps were removed");
+        assert!(
+            note.contains("2 dump files") && note.contains("recorded"),
+            "{note}"
+        );
+        assert!(!dir.path().join("globals.sql").exists());
+        assert!(!dir.path().join("01-meerschaum.dump").exists());
+        // The stack config copy (which a put-back may read) stays.
+        assert!(dir.path().join("stack.yaml").exists());
+        assert_eq!(manifest["state"], "failed");
+        assert_eq!(manifest["dumps_removed"], true);
+
+        // A disk with room: nothing is removed and nothing is said.
+        std::fs::write(dir.path().join("globals.sql"), "x").unwrap();
+        let writes = Cell::new(0);
+        let fine = |_: &Path, _: &Json| {
+            writes.set(writes.get() + 1);
+            Ok(())
+        };
+        let mut manifest = json!({"kind": "upgrade", "state": "dumped"});
+        assert!(finish_state_with(dir.path(), &mut manifest, "failed", None, &fine).is_none());
+        assert_eq!(writes.get(), 1);
+        assert!(dir.path().join("globals.sql").exists());
+
+        // Only a failed upgrade gives up its dumps: a run that could not be put back keeps
+        // them, and a restore's directory is never emptied.
+        let full = |_: &Path, _: &Json| Err("No space left on device".to_string());
+        let mut manifest = json!({"kind": "upgrade", "state": "dumped"});
+        assert!(
+            finish_state_with(dir.path(), &mut manifest, "recovery_failed", None, &full).is_none()
+        );
+        let mut manifest = json!({"kind": "restore", "state": "dumped"});
+        assert!(finish_state_with(dir.path(), &mut manifest, "failed", None, &full).is_none());
+        assert!(dir.path().join("globals.sql").exists());
+    }
+
+    #[test]
+    fn a_failed_manifest_write_leaves_no_temporary_file() {
+        let dir = tempfile::tempdir().unwrap();
+        // The target of the rename is a directory: the write fails after the temporary file
+        // was written.
+        std::fs::create_dir(dir.path().join("manifest.json")).unwrap();
+        assert!(write_manifest(dir.path(), &json!({"state": "x"})).is_err());
+        assert!(!dir.path().join("manifest.json.tmp").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_compose_command_left_behind_is_waited_for() {
+        use std::sync::{Arc, Mutex};
+
+        /// Kills the stand-in however the test ends.
+        struct Left(Option<std::process::Child>);
+        impl Drop for Left {
+            fn drop(&mut self) {
+                if let Some(mut child) = self.0.take() {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                }
+            }
+        }
+        #[derive(Clone, Default)]
+        struct Shared(Arc<Mutex<Vec<u8>>>);
+        impl std::io::Write for Shared {
+            fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+                self.0.lock().unwrap().extend_from_slice(buf);
+                Ok(buf.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+
+        // A process whose command line is a `docker compose ... up -d` of a unique project. It
+        // lives until the test ends it, so how long the machine takes decides nothing.
+        let project = format!("w18fx3unit{}", std::process::id());
+        let mut left = Left(Some(
+            std::process::Command::new("bash")
+                .args([
+                    "-c",
+                    &format!(
+                        "exec -a 'docker compose --project-name {project} up -d db' sleep 600"
+                    ),
+                ])
+                .spawn()
+                .unwrap(),
+        ));
+        // Poll until the process shows `exec -a`'s command line (the shell has to reach `exec`).
+        let deadline = Instant::now() + Duration::from_secs(60);
+        let mut seen = false;
+        while !seen && Instant::now() < deadline {
+            seen = docker::compose_commands_running(&project).is_some_and(|r| !r.is_empty());
+            if !seen {
+                std::thread::sleep(Duration::from_millis(50));
+            }
+        }
+        let shared = Shared::default();
+        let mut sink = shared.clone();
+        let mut rt = Runtime::new(crate::types::DateContext::system(), 80, &mut sink, |_| None);
+        let output = shared.0.clone();
+        if seen {
+            // Not given time: refused, naming the process.
+            let error =
+                settle_compose_until(&mut rt, &project, Duration::ZERO, &|| false).unwrap_err();
+            assert!(
+                error.contains("still running") && error.contains(&project),
+                "{error}"
+            );
+            // Given time: it waits until the command is gone. The command ends once the wait has
+            // said so (a sleep before the kill could end it before the first look).
+            let mut child = left.0.take().unwrap();
+            let seen_output = output.clone();
+            let ender = std::thread::spawn(move || {
+                let deadline = Instant::now() + Duration::from_secs(60);
+                while Instant::now() < deadline
+                    && !String::from_utf8_lossy(&seen_output.lock().unwrap())
+                        .contains("Waiting for a `docker compose`")
+                {
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+                let _ = child.kill();
+                let _ = child.wait();
+            });
+            let result =
+                settle_compose_until(&mut rt, &project, Duration::from_secs(120), &|| false);
+            ender.join().unwrap();
+            result.unwrap();
+            assert!(
+                docker::compose_commands_running(&project)
+                    .unwrap()
+                    .is_empty()
+            );
+            assert!(
+                String::from_utf8_lossy(&output.lock().unwrap())
+                    .contains("Waiting for a `docker compose`")
+            );
+        }
+        drop(left);
+        // Nothing running: no wait, nothing printed.
+        let before = output.lock().unwrap().len();
+        settle_compose_until(&mut rt, &project, Duration::ZERO, &|| false).unwrap();
+        assert_eq!(output.lock().unwrap().len(), before);
+        assert!(
+            seen,
+            "the process list never showed the stand-in compose command"
+        );
+    }
 
     #[test]
     fn sizes_are_human() {
@@ -799,12 +1147,54 @@ mod tests {
         assert!(!original.exists() && !other.exists());
     }
 
+    /// Waits (bounded) for `check`: a lock is gone when its last holder is, and a process another
+    /// test is spawning at this moment holds a copy of every open file until its `exec`.
+    fn eventually(what: &str, mut check: impl FnMut() -> bool) {
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while !check() {
+            assert!(Instant::now() < deadline, "{what}");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    #[test]
+    fn a_running_move_of_the_database_is_seen_by_the_stack_guard() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = project_lock_path(dir.path(), "scratch", "daemon-a");
+        // No lock file yet: nothing runs (and the check creates nothing).
+        assert!(!switching_run(dir.path(), "scratch", "daemon-a"));
+        assert!(!path.exists());
+        let held = lock_file(&path, "for the test").unwrap();
+        mark_lock(&held, MARK_SWITCHING);
+        assert!(switching_run(dir.path(), "scratch", "daemon-a"));
+        // Another project, or another daemon, has its own lock.
+        assert!(!switching_run(dir.path(), "other", "daemon-a"));
+        assert!(!switching_run(dir.path(), "scratch", "daemon-b"));
+        // A holder that does not say what it does counts as moving the database.
+        let _ = held.set_len(0);
+        assert!(switching_run(dir.path(), "scratch", "daemon-a"));
+        // A backup only reads: `stack up` is not held back by it.
+        mark_lock(&held, MARK_BACKUP);
+        assert!(!switching_run(dir.path(), "scratch", "daemon-a"));
+        // The check never keeps the lock: once the holder is gone, the next run can take it.
+        mark_lock(&held, MARK_SWITCHING);
+        drop(held);
+        eventually("the lock was not released", || {
+            !switching_run(dir.path(), "scratch", "daemon-a")
+        });
+        eventually("the lock could not be taken again", || {
+            lock_file(&path, "for the test").is_ok()
+        });
+    }
+
     #[test]
     fn a_second_run_cannot_take_the_lock() {
         let dir = tempfile::tempdir().unwrap();
         let first = lock(dir.path()).unwrap();
         assert!(lock(dir.path()).unwrap_err().contains("Another"));
         drop(first);
-        assert!(lock(dir.path()).is_ok());
+        eventually("the lock could not be taken again", || {
+            lock(dir.path()).is_ok()
+        });
     }
 }

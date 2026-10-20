@@ -409,7 +409,14 @@ fn python_writes_an_init_script_and_starts_the_interpreter() {
     let (r, _) = run(tmp.path(), &["python", "print(1)", "--noask"], env, &host);
     assert_eq!(r, SuccessTuple::success());
     let commands = host.0.borrow().commands.clone();
-    assert_eq!(commands.len(), 1);
+    assert_eq!(commands.len(), 2, "the import probe, then the interpreter");
+    assert_eq!(commands[0].program, "/opt/py/bin/python");
+    assert_eq!(
+        commands[0].args,
+        vec!["-c".to_string(), "import meerschaum".to_string()],
+        "the chosen interpreter is asked first"
+    );
+    let commands = &commands[1..];
     assert_eq!(commands[0].program, "/opt/py/bin/python");
     assert_eq!(
         commands[0].args.len(),
@@ -421,6 +428,26 @@ fn python_writes_an_init_script_and_starts_the_interpreter() {
         !Path::new(&commands[0].args[0]).exists(),
         "the script is removed"
     );
+
+    // An interpreter without the package: a failure naming the install, no REPL.
+    host.0.borrow_mut().commands.clear();
+    host.0.borrow_mut().exit_code = 1;
+    let (r, _) = run(tmp.path(), &["python", "print(1)", "--noask"], env, &host);
+    assert!(!r.success);
+    assert_eq!(
+        r.message,
+        format!(
+            "The meerschaum Python package is not installed for /opt/py/bin/python; install it \
+             with pip install meerschaum=={} to use mrsm python",
+            meerschaum_core::python_guard::expected_version()
+        )
+    );
+    assert_eq!(
+        host.0.borrow().commands.len(),
+        1,
+        "nothing but the probe ran"
+    );
+    host.0.borrow_mut().exit_code = 0;
 
     host.0.borrow_mut().commands.clear();
     host.0.borrow_mut().exit_code = 3;
@@ -470,16 +497,10 @@ fn compose_explain_and_native_down() {
     assert!(result.success, "{result:?}");
     let out = String::from_utf8(out).unwrap();
     assert!(out.contains("Pipes in 'demo'"), "{out}");
-    // `init_root` re-invokes `mrsm show version --no-daemon` with captured output.
+    // v5: `explain` is side-effect free; it does not re-invoke `mrsm show version` to
+    // initialize the root (v4 did).
     let commands = host.0.borrow().commands.clone();
-    assert!(
-        commands.iter().any(|c| c.args.starts_with(&[
-            "show".into(),
-            "version".into(),
-            "--no-daemon".into()
-        ]) && c.quiet),
-        "{commands:?}"
-    );
+    assert!(commands.is_empty(), "{commands:?}");
 
     let plugins = tmp.path().join("plugins");
     std::fs::create_dir_all(&plugins).unwrap();
@@ -549,5 +570,8 @@ fn assert_worker_dispatch(root: &Path, args: &[&str]) {
         String::from_utf8_lossy(&output.stderr)
     );
     assert!(!text.contains("is not implemented in Rust yet"), "{text}");
-    assert!(text.contains("failed to start the Python worker"), "{text}");
+    // The worker crate refuses the interpreter with one message (W18-FX2); the CLI prints it
+    // once, not once per layer (manifest warning, exception line, result).
+    assert_eq!(text.matches("could not be started").count(), 1, "{text}");
+    assert!(text.contains("WorkerError"), "{text}");
 }

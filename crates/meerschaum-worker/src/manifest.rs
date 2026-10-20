@@ -27,7 +27,10 @@
 //!
 //! The JSON schema is `schema/manifest.schema.json` in this crate. The top-level
 //! `api_plugins` / `dash_plugins` / `web_pages` / `mcp_tools` lists are the plugin names the
-//! server's `HostManifest` reads to decide whether the API host is needed.
+//! server's `HostManifest` reads to decide whether the API host is needed. The host is also
+//! needed for the Dash web console (the `console` reason, [`HostReason::Console`]): the Rust
+//! server hosts no console of its own, so whenever the `dash` extra is importable the host runs
+//! and mounts it, with or without plugins.
 
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
@@ -289,6 +292,34 @@ pub struct PluginManifest {
     pub fingerprint: Option<String>,
 }
 
+/// Why the API host is needed ([`Manifest::api_host_reasons`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HostReason {
+    /// A plugin registers `@api_plugin` functions.
+    ApiPlugins,
+    /// A plugin registers `@dash_plugin` functions.
+    DashPlugins,
+    /// A plugin registers `@web_page` layouts.
+    WebPages,
+    /// A plugin registers MCP tools, resources or prompts.
+    McpTools,
+    /// The Dash web console is served.
+    Console,
+}
+
+impl HostReason {
+    /// The manifest key (or reason name) of this reason.
+    pub fn name(self) -> &'static str {
+        match self {
+            HostReason::ApiPlugins => "api_plugins",
+            HostReason::DashPlugins => "dash_plugins",
+            HostReason::WebPages => "web_pages",
+            HostReason::McpTools => "mcp_tools",
+            HostReason::Console => "console",
+        }
+    }
+}
+
 /// The plugin manifest.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Manifest {
@@ -320,6 +351,10 @@ pub struct Manifest {
     /// Plugins registering MCP tools, resources or prompts.
     #[serde(default)]
     pub mcp_tools: Vec<String>,
+    /// The Dash web console is served (the `dash` extra imports): the API host runs for it even
+    /// when no plugin needs it. Written by the server's start-up probe, never by a worker.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub console: bool,
     /// Plugins with `@pre_sync_hook` functions.
     #[serde(default)]
     pub pre_sync_hooks: Vec<String>,
@@ -342,12 +377,26 @@ impl Manifest {
         !self.pre_sync_hooks.is_empty() || !self.post_sync_hooks.is_empty()
     }
 
-    /// Whether any plugin needs the API host (§7.3).
+    /// Whether the API host is needed (§7.3): by a plugin or by the Dash console.
     pub fn needs_api_host(&self) -> bool {
-        !(self.api_plugins.is_empty()
-            && self.dash_plugins.is_empty()
-            && self.web_pages.is_empty()
-            && self.mcp_tools.is_empty())
+        !self.api_host_reasons().is_empty()
+    }
+
+    /// Why the API host is needed, in a stable order (empty: it never starts).
+    pub fn api_host_reasons(&self) -> Vec<HostReason> {
+        let mut reasons = Vec::new();
+        for (reason, present) in [
+            (HostReason::ApiPlugins, !self.api_plugins.is_empty()),
+            (HostReason::DashPlugins, !self.dash_plugins.is_empty()),
+            (HostReason::WebPages, !self.web_pages.is_empty()),
+            (HostReason::McpTools, !self.mcp_tools.is_empty()),
+            (HostReason::Console, self.console),
+        ] {
+            if present {
+                reasons.push(reason);
+            }
+        }
+        reasons
     }
 
     /// The plugin defining `action` (exact name), if any.
@@ -1005,6 +1054,44 @@ mod tests {
         assert_eq!(fingerprint(&dirs), before);
         std::fs::write(package.join("mod.py"), "").unwrap();
         assert_ne!(fingerprint(&dirs), before);
+    }
+
+    #[test]
+    fn the_console_is_a_reason_for_the_api_host() {
+        let mut manifest = Manifest::default();
+        assert!(!manifest.needs_api_host());
+        assert!(manifest.api_host_reasons().is_empty());
+        manifest.console = true;
+        assert!(manifest.needs_api_host());
+        assert_eq!(manifest.api_host_reasons(), vec![HostReason::Console]);
+        manifest.mcp_tools = vec!["tools".into()];
+        manifest.api_plugins = vec!["routes".into()];
+        assert_eq!(
+            manifest.api_host_reasons(),
+            vec![
+                HostReason::ApiPlugins,
+                HostReason::McpTools,
+                HostReason::Console
+            ]
+        );
+        let names: Vec<_> = manifest
+            .api_host_reasons()
+            .into_iter()
+            .map(HostReason::name)
+            .collect();
+        assert_eq!(names, vec!["api_plugins", "mcp_tools", "console"]);
+        // The flag is written only when set (a worker never sets it), and read back.
+        let text = serde_json::to_string(&manifest).unwrap();
+        assert!(text.contains("\"console\":true"));
+        assert!(
+            !serde_json::to_string(&Manifest::default())
+                .unwrap()
+                .contains("console")
+        );
+        let back: Manifest = serde_json::from_str(&text).unwrap();
+        assert!(back.console);
+        let schema: serde_json::Value = serde_json::from_str(MANIFEST_JSON_SCHEMA).unwrap();
+        assert_eq!(schema["properties"]["console"]["type"], "boolean");
     }
 
     #[test]

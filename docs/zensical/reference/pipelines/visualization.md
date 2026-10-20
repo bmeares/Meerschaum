@@ -58,14 +58,14 @@ run                         started (UTC)        status     wall  ok/nodes  targ
 
 ## 🌐 In the web console
 
-Start the API (`mrsm start api`) and open **`/dash/pipelines`**. It reads the same instance-backed engine state described in [Engine State](/reference/pipelines/state/) and never writes.
+Start the API (`mrsm start api`) and open **`/dash/pipelines`** (the console needs `pip install meerschaum[dash]`). It reads the same instance-backed engine state described in [Engine State](/reference/pipelines/state/) and never writes.
 
-- **DAG view.** The dependency graph of your pipes, with each node's status and the ledger lag on each edge (how many unconsumed entries a child still has to process).
+- **Dependency graph.** Your pipes as a Plotly figure, each node colored by the action the engine plans for it (`skip`, `incremental`, `backfill`, `rebuild`, ...), with an edge table showing the ledger lag (how many unconsumed entries a child still has to process).
 - **Gantt chart per run.** Planned and actual bars side by side (planned bars end after the planned duration described above), plus a table of each node's action, status and planned and actual start. (The plan's critical path and slack are recorded with each run and are drawn in the terminal Gantt chart.)
 - **Runs table.** Filter by run ID, pipe and status.
-- **Parents / Children tabs** on every pipe card on the pipes page.
+- **Parents / Children tabs** in the "Parents & Children" section of every pipe card on the pipes page.
 
-The page updates itself (it re-requests its graph panel about every 15 seconds, and the console streams engine events to open pages). Select a run with the link in the runs table (`/dash/pipelines?run_id=…`) to see its Gantt chart. State lives in the URL, so a run or filter is shareable.
+The page updates itself (it refreshes about every 15 seconds). Select a run with the link in the runs table (`/dash/pipelines?run_id=…`) to see its Gantt chart. State lives in the URL, so a run or filter is shareable.
 
 The console is available through `mrsm start api` and is covered in [Web Console](/reference/api-instance/web-console/).
 

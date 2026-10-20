@@ -142,6 +142,7 @@ delegates to it). Cursors kept on another instance (cross-instance edges) are no
 | `tests/crash.rs` | Crashes between ledger write and data commit, and between data commit and cursor advance; `--resume`. |
 | `tests/crash_restart.rs` | The same two points as real process deaths (a child process `exit`s inside the fault hook) followed by a restart, on SQLite and PostgreSQL-family (`MRSM_TEST_PG_URI`, schema `w9_engine`): the ledger holds the interrupted run's entry, no cursor moved, no run record, and the next run converges with every row exactly once. |
 | `tests/forget_state.rs` | Drop, delete and full clear forget a pipe's ledger, cursors and hash (partial clears keep them); a reset chain plans like a first run. |
+| `tests/w18_remote_state.rs` | Dropping a parent also forgets its ledger entries and parent cursors on its cross-instance children's instances (found through remote-state markers in `mrsm:engine_state`, GAP-002); an unreachable instance keeps its marker and is reported. |
 | `tests/pg_state.rs` | On PostgreSQL-family (`MRSM_TEST_POSTGIS_URI`, schema `w9s_state`), a second graph run sees the first run's history, hashes, cursors and watermarks. |
 | `tests/legacy_flush.rs` | A v4-pattern (`LegacyStream`) connector's callback syncs are `callback` flushes: events with rows and bounds, ledger entries, children triggered; syncs of pipes outside the graph stay bare. |
 | `tests/leases.rs` | Lease contention across two processes on one SQLite instance (engine run level). |

@@ -9,7 +9,16 @@ fn static_toml_matches_python() {
     let fixture = common::load_fixture("static_config.json");
     let cpu = fixture.get("__cpu_count__").and_then(|v| v.as_i64());
     let expected = fixture.get("static_config").expect("static_config key");
-    let actual = parse_static_toml(STATIC_TOML, cpu).expect("valid static.toml");
+    let mut actual = parse_static_toml(STATIC_TOML, cpu).expect("valid static.toml");
+    // Overlay: the keys v5 adds to the v4 table (never edit the generated fixture). W18-FX4-001:
+    // `environment.compose_root`, the `MRSM__COMPOSE_ROOT` label of jobs started from a root
+    // compose file.
+    let environment = actual
+        .as_map_mut()
+        .and_then(|m| m.get_mut("environment"))
+        .and_then(|e| e.as_map_mut())
+        .expect("environment table");
+    assert!(environment.shift_remove("compose_root").is_some());
     common::assert_same(&actual, expected, "static.toml");
 }
 

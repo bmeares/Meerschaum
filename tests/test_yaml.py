@@ -506,8 +506,12 @@ def _v4_stack(value):
     side is `crates/meerschaum-core/tests/common::v4_stack_text`): the `db` setup FILE mount, the
     TCP healthcheck and its `start_period`, and Grafana's `postgresVersion: 1800`.
     """
+    from meerschaum.config._version import __version__ as mrsm_version
     if isinstance(value, str):
+        ### W18PK-001: the `api` service runs this release's `full` image, not `:api`.
         value = value.replace(
+            f'bmeares/meerschaum:{mrsm_version}-full', 'bmeares/meerschaum:api',
+        ).replace(
             '/db/initdb/create-extensions.sql:/docker-entrypoint-initdb.d/100_meerschaum.sql:z,ro',
             '/db/initdb:/docker-entrypoint-initdb.d:z,ro',
         ).replace(

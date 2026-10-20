@@ -198,7 +198,7 @@ impl SystemdExecutor {
             .join("\n");
         let service_name = self.get_service_name(name);
         format!(
-            "[Unit]\nDescription=Run the job '{name}'\n\n[Service]\nExecStart={python} -m meerschaum {sysargs}\nKillSignal=SIGTERM\nRestart=always\nRestartPreventExitStatus=0\nSyslogIdentifier={service_name}\n{environment}\n\n[Install]\nWantedBy=default.target\n",
+            "[Unit]\nDescription=Run the job '{name}'\n\n[Service]\nExecStart={python} -m meerschaum {sysargs}\nKillSignal=SIGTERM\nRestart=always\nRestartSec=5\nRestartPreventExitStatus=0\nSyslogIdentifier={service_name}\n{environment}\n\n[Install]\nWantedBy=default.target\n",
             sysargs = crate::shlex::join(sysargs),
         )
     }

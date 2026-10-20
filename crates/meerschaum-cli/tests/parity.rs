@@ -706,7 +706,8 @@ fn dispatch_skeleton() {
         .unwrap();
     assert!(!output.status.success());
     let text = String::from_utf8_lossy(&output.stdout);
-    assert!(text.contains("failed to start the Python worker"), "{text}");
+    // The worker crate refuses the interpreter with one message (W18-FX2); the result carries it.
+    assert!(text.contains("could not be started"), "{text}");
     assert_eq!(
         dispatch::entry(&s(&["show", "pipe", "-i", "sql:memory"]), &mut rt),
         SuccessTuple::ok("No pipes to show.")
@@ -761,12 +762,14 @@ fn dispatch_skeleton() {
         dispatch::main(&s(&["show", "config", "synthetic_missing_key"]), &mut rt),
         1
     );
+    // PARITY (W18-SW-005): v4 exits 0 here (`--nopretty` skips the code that sets the status);
+    // v5 exits 1 when the command fails (wave 18, decision 10).
     assert_eq!(
         dispatch::main(
             &s(&["show", "config", "synthetic_missing_key", "--nopretty"]),
             &mut rt
         ),
-        0
+        1
     );
     assert_eq!(dispatch::main(&s(&["show", "version"]), &mut rt), 0);
     assert_eq!(dispatch::main(&s(&["--help"]), &mut rt), 0);

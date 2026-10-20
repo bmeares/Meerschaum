@@ -5,7 +5,7 @@
 """
 A synthetic plugin exercising every extension point of the Python API host (v5 design §7.3,
 §8.4, §7.2): API routes (plain, scoped, streaming, websocket), an HTTP middleware, a static
-mount, a plugin-owned Dash app (`@dash_plugin` and a legacy `@web_page` layout), and an MCP
+mount, Dash console registrations (`@dash_plugin` and a `@web_page` Dash layout), and an MCP
 tool, resource and prompt.
 
 Used by `crates/meerschaum-server/tests/host_e2e.rs` (through the Rust server) and

@@ -203,7 +203,14 @@ fn actions_match_v4_transcripts() {
                         step["stderr"].as_str().unwrap()
                     ));
                 }
-                if compare.iter().any(|c| c == "rc") && Some(rc) != step["rc"].as_i64() {
+                // Intended wave-18 difference (PARITY W18-SW-005): `--nopretty` exits 1 when the
+                // result is a failure; v4 exited 0 whatever the command returned. The overlay
+                // names each affected step; nothing else may differ.
+                let expected_rc = match args.join(" ").as_str() {
+                    "show tags -i sql:local --nopretty" => Some(1),
+                    _ => step["rc"].as_i64(),
+                };
+                if compare.iter().any(|c| c == "rc") && Some(rc) != expected_rc {
                     diffs.push(format!("  rc: v4={} rust={rc}", step["rc"]));
                 }
                 if !diffs.is_empty() {

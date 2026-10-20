@@ -2,7 +2,7 @@
 
 You can use Meerschaum from its web interface. From within a `mrsm` shell, type to commands below to see how:
 
-1. Start the Web API server.
+1. Install the web console (`pip install meerschaum[dash]`; it is part of `meerschaum[full]` and the `full` Docker image) and start the Web API server. A standalone binary without the console shows a pointer page at `/dash`.
 
     ```bash
     start api

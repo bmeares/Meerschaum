@@ -285,6 +285,11 @@ impl WorkerPool {
         if self.inner.closed.load(Ordering::SeqCst) {
             return Err(WorkerError::ShuttingDown);
         }
+        // An interpreter that cannot host a worker answers at once with its message, whatever
+        // the backoff of earlier failures says: waiting would not change the answer.
+        if let Some(e) = crate::worker::refusal(&self.inner.config.worker.python) {
+            return Err(e);
+        }
         let not_before = self
             .inner
             .backoff
@@ -299,6 +304,8 @@ impl WorkerPool {
                 self.inner.spawned.fetch_add(1, Ordering::SeqCst);
                 Ok(w)
             }
+            // Not a flaky start: the message is the same every time, so no backoff builds up.
+            Err(e @ WorkerError::Refused(_)) => Err(e),
             Err(e) => {
                 self.record_failure();
                 Err(e)

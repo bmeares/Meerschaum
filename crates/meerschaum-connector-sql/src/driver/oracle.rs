@@ -41,10 +41,18 @@ pub(crate) fn connect_string(spec: &ConnectionSpec) -> String {
         .map(|(_, v)| v.clone())
         .or_else(|| spec.database.clone().filter(|d| !d.is_empty()))
         .unwrap_or_default();
+    // EZConnect Plus timeouts: the TCP connect and the whole connect are bounded by
+    // `connect_timeout`, so an abandoned attempt (the blocking thread outlives a cancelled
+    // future) ends with the deadline.
+    let limit = super::connect::connect_timeout(spec)
+        .as_secs_f64()
+        .ceil()
+        .max(1.0) as u64;
+    let timeouts = format!("?transport_connect_timeout={limit}&connect_timeout={limit}");
     if service.is_empty() {
-        format!("//{host}:{port}")
+        format!("//{host}:{port}{timeouts}")
     } else {
-        format!("//{host}:{port}/{service}")
+        format!("//{host}:{port}/{service}{timeouts}")
     }
 }
 
@@ -382,6 +390,9 @@ mod tests {
     fn connect_strings() {
         let spec = ConnectionSpec::from_uri("oracle://system:oracle@localhost:1529/xe", None, None)
             .unwrap();
-        assert_eq!(connect_string(&spec), "//localhost:1529/xe");
+        assert_eq!(
+            connect_string(&spec),
+            "//localhost:1529/xe?transport_connect_timeout=5&connect_timeout=5"
+        );
     }
 }

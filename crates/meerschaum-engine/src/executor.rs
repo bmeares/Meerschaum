@@ -861,6 +861,85 @@ fn merge_results(first: SyncResult, second: SyncResult) -> SyncResult {
     out
 }
 
+/// Leases taken by node attempts of this process and not handed back yet.
+static HELD_LEASES: AtomicUsize = AtomicUsize::new(0);
+
+/// Wait (up to `timeout`) until every lease a node attempt of this process took has been handed
+/// back to its instance.
+///
+/// Dropping a run (Ctrl-C in the CLI, a closed API request, a Python `KeyboardInterrupt`) drops
+/// its node attempts mid-sync; each hands its lease back in a task of its own (see
+/// [`LeaseHold`]). A process that is about to exit awaits this first, or the leases stay held
+/// until their TTL runs out and the next run waits for them. Counted from the moment a lease is
+/// taken, so an attempt the runtime has not dropped yet is waited for too.
+pub async fn drain_lease_releases(timeout: Duration) {
+    let deadline = tokio::time::Instant::now() + timeout;
+    while HELD_LEASES.load(Ordering::SeqCst) > 0 && tokio::time::Instant::now() < deadline {
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
+
+/// A held lease of a node attempt: released by the attempt itself, or, when the attempt is
+/// dropped before it got there (the run was cancelled), by a task spawned from [`Drop`].
+struct LeaseHold<L: LeaseSource> {
+    leases: Arc<L>,
+    pipe_ref: PipeRef,
+    holder: String,
+    armed: bool,
+}
+
+impl<L: LeaseSource> LeaseHold<L> {
+    /// Count a lease that was just taken.
+    fn new(leases: Arc<L>, pipe_ref: PipeRef, holder: String) -> Self {
+        HELD_LEASES.fetch_add(1, Ordering::SeqCst);
+        LeaseHold {
+            leases,
+            pipe_ref,
+            holder,
+            armed: true,
+        }
+    }
+
+    /// The attempt handed the lease back itself.
+    fn disarm(&mut self) {
+        if std::mem::replace(&mut self.armed, false) {
+            HELD_LEASES.fetch_sub(1, Ordering::SeqCst);
+        }
+    }
+}
+
+/// Uncounts a lease when dropped (the release task finished, or never got to run).
+struct Uncount;
+
+impl Drop for Uncount {
+    fn drop(&mut self) {
+        HELD_LEASES.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+impl<L: LeaseSource> Drop for LeaseHold<L> {
+    fn drop(&mut self) {
+        if !self.armed {
+            return;
+        }
+        // The count moves to the release task (or ends here when there is no runtime to run it:
+        // it is shutting down, and the TTL expires the lease).
+        let uncount = Uncount;
+        let Ok(runtime) = tokio::runtime::Handle::try_current() else {
+            return;
+        };
+        let (leases, pipe_ref, holder) = (
+            self.leases.clone(),
+            self.pipe_ref.clone(),
+            self.holder.clone(),
+        );
+        runtime.spawn(async move {
+            let _uncount = uncount;
+            let _ = leases.release(&pipe_ref, &holder).await;
+        });
+    }
+}
+
 /// Spawn one node attempt (leases, heartbeat, the sync) on the join set.
 #[allow(clippy::too_many_arguments)]
 fn spawn_sync<E: SyncExecutor, L: LeaseSource>(
@@ -923,6 +1002,7 @@ fn spawn_sync<E: SyncExecutor, L: LeaseSource>(
                 }
             }
             let pipe_ref = request.pipe_ref.clone();
+            let mut hold = LeaseHold::new(leases.clone(), pipe_ref.clone(), holder.clone());
             let result = {
                 let sync = executor.sync(request);
                 tokio::pin!(sync);
@@ -943,6 +1023,7 @@ fn spawn_sync<E: SyncExecutor, L: LeaseSource>(
                 }
             }; // Drop the cancelled sync future before releasing its lease.
             let _ = leases.release(&pipe_ref, &holder).await;
+            hold.disarm();
             TaskOutput::Done {
                 early,
                 pipe_ref,

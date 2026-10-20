@@ -166,10 +166,12 @@ mod imp {
 mod imp {
     use super::{ProcState, Sig};
 
+    /// Signals are not supported on this platform.
     pub fn send_signal(_pid: i32, _sig: Sig) -> Result<(), String> {
         Err("Signals are not supported on this platform.".to_string())
     }
 
+    /// Every process reads as gone on this platform.
     pub fn proc_state(_pid: i32) -> ProcState {
         ProcState::Gone
     }

@@ -1,7 +1,7 @@
-//! The web terminal in the console: the `/dash/webterm` page embeds xterm.js in the console
-//! chrome, and `/webterm/{session_id}` (+ its websocket) is the standalone page v4 served. The PTY
-//! bridge and its authentication live in `meerschaum_server::webterm`; this module gives it the
-//! console's session store and the pages.
+//! The web terminal of the console: `/webterm/{session_id}` (+ its websocket) is the standalone
+//! page v4 served, which the Dash console embeds in an iframe (D21). The PTY bridge and its
+//! authentication live in `meerschaum_server::webterm`; this module gives it the console's
+//! session store, the page and the assets (`/webterm/assets/{name}`).
 use super::*;
 use meerschaum_server::webterm::{SessionLookup, WebtermConfig};
 
@@ -25,6 +25,14 @@ impl WebtermSettings {
             use_tmux: None,
         }
     }
+}
+
+fn escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#39;")
 }
 
 /// A URL path segment: everything but RFC 3986's unreserved characters is escaped (a session id
@@ -84,7 +92,7 @@ const SCRIPTS: [&str; 4] = [
 fn scripts() -> String {
     SCRIPTS
         .iter()
-        .map(|name| format!("<script defer src=\"/dash/assets/{name}\"></script>"))
+        .map(|name| format!("<script defer src=\"/webterm/assets/{name}\"></script>"))
         .collect()
 }
 
@@ -94,64 +102,12 @@ pub(crate) fn standalone_page(session_id: &str) -> String {
         "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\">\
 <meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\
 <meta name=\"referrer\" content=\"no-referrer\"><title>Meerschaum Shell</title>\
-<link rel=\"stylesheet\" href=\"/dash/assets/xterm.css\">\
-<link rel=\"stylesheet\" href=\"/dash/assets/webterm.css\"></head>\
+<link rel=\"stylesheet\" href=\"/webterm/assets/xterm.css\">\
+<link rel=\"stylesheet\" href=\"/webterm/assets/webterm.css\"></head>\
 <body class=\"mrsm-webterm-standalone\">\
 <div class=\"mrsm-webterm-screen\" id=\"xterm-div\" data-mrsm-webterm data-mode=\"standalone\" data-ws=\"/websocket/{id}\"></div>\
 {scripts}</body></html>",
         id = escape(&segment(session_id)),
-        scripts = scripts(),
-    )
-}
-
-fn key(name: &str, label: &str, title: &str, area: &str) -> String {
-    format!(
-        "<button type=\"button\" class=\"mrsm-webterm-key\" data-key=\"{name}\" title=\"{title}\" aria-label=\"{title}\"{area}>{label}</button>"
-    )
-}
-
-/// The `/dash/webterm` page content: the terminal inside the console, with v4's extra key row
-/// (ESC / CTRL / SHIFT / TAB and the arrows; CTRL and SHIFT are sticky) and its controls.
-pub(crate) fn embedded_content(state: &WebState, session_id: &str) -> String {
-    let id = escape(&segment(session_id));
-    let mods = [
-        ("esc", "ESC", "Escape"),
-        ("ctrl", "CTRL", "Control (sticky: applies to the next key)"),
-        ("shift", "SHIFT", "Shift (sticky: applies to the next key)"),
-        ("tab", "TAB", "Tab"),
-    ]
-    .iter()
-    .map(|(name, label, title)| key(name, label, title, ""))
-    .collect::<String>();
-    let arrows = [
-        ("up", "\u{2191}", "Up arrow"),
-        ("left", "\u{2190}", "Left arrow"),
-        ("down", "\u{2193}", "Down arrow"),
-        ("right", "\u{2192}", "Right arrow"),
-    ]
-    .iter()
-    .map(|(name, label, title)| key(name, label, title, &format!(" style=\"grid-area:{name}\"")))
-    .collect::<String>();
-    let control = |action: &str, label: &str, title: &str| {
-        format!(
-            "<button type=\"button\" class=\"mrsm-webterm-control\" data-webterm-action=\"{action}\" title=\"{title}\" aria-label=\"{title}\">{label}</button>"
-        )
-    };
-    let mut controls = control("refresh", "\u{27F3}", "Refresh terminal")
-        + &control("fullscreen", "\u{26F6}", "Toggle fullscreen");
-    if state.webterm_tmux {
-        controls += &control("new-window", "<b>+</b>", "New terminal window");
-    }
-    format!(
-        "<link rel=\"stylesheet\" href=\"/dash/assets/xterm.css\">\
-<link rel=\"stylesheet\" href=\"/dash/assets/webterm.css\">\
-<div class=\"mrsm-webterm\">\
-<div class=\"mrsm-webterm-bar\">\
-<div class=\"mrsm-webterm-keys\" role=\"toolbar\" aria-label=\"Extra keys\"><div class=\"mrsm-webterm-mods\">{mods}</div><div class=\"mrsm-webterm-arrows\">{arrows}</div></div>\
-<div class=\"mrsm-webterm-controls\">{controls}</div></div>\
-<div class=\"mrsm-webterm-screen\" data-mrsm-webterm data-mode=\"embedded\" data-ws=\"/websocket/{id}\" aria-label=\"Terminal\"></div>\
-<p class=\"mrsm-webterm-note\"><a href=\"/webterm/{id}\">Open the terminal in its own page</a></p>\
-</div>{scripts}",
         scripts = scripts(),
     )
 }

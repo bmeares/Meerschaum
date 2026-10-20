@@ -156,7 +156,7 @@ Arguments reach `context.kwargs` exactly as they reach a Python plugin's `**kwar
 | **Hooks** | List names under `pre_sync_hooks` / `post_sync_hooks`; they receive the same kwargs as Python's `@pre_sync_hook` and `@post_sync_hook` (`success_tuple`, `sync_timestamp`, `sync_duration`, ...). |
 | A whole **connector** or **instance** | List it under `connectors` / `connector_types` (set `is_instance`), and answer the instance methods (`register_pipe`, `sync_pipe`, `get_pipe_data`, `fetch_pipes_keys`, ...). A method you do not implement returns `Error::Unsupported`, which the host maps to "not implemented" and lets the engine fall back (for example to file-based leases). |
 | **HTTP routes** | List `api_plugins`; answer `routes` with `[{"method", "path", "public"?}]` and `route` with `{status, content_type, body}`. Routes require the caller's credentials unless `"public": true` or the server runs with `--no-auth`. Paths under `/dash`, `/webterm` or a core route group are rejected. |
-| A **console page** | List it under `web_pages`; answer `page` with `{html, status?}`. The console wraps your fragment in its chrome. See the [page contract](/reference/migrating-to-v5/#option-b-the-page-contract-recommended-for-new-pages). |
+| A **console page** | List it under `web_pages`; answer `page` with `{html, status?}`. The Python web console (`meerschaum[dash]`) fetches your fragment from the server (`/_mrsm/native-pages`) and frames it in its chrome; a standalone install without the console does not show it. See the [page contract](/reference/migrating-to-v5/#option-b-the-page-contract-recommended-for-new-pages). |
 
 Data always crosses the boundary as an **Arrow C stream** (`FFI_ArrowArrayStream`), never JSON. The SDK handles that for you: you return a `Frame`, and the host imports it without copying through Python.
 
@@ -272,7 +272,7 @@ cargo test -p meerschaum-plugin                       # the SDK and loader
 cargo test -p meerschaum-cli --test native_plugins    # the `mrsm` binary: actions, flags, a native source
 cargo test -p meerschaum-cli --test native_e2e        # hooks, routes, shadowing, rejection, cache
 cargo test -p meerschaum-cli --test native_source_plugin   # a Cargo crate built, cached and rebuilt by mrsm (compiles the SDK: slow the first time)
-MRSM_TEST_CONSOLE=1 PYTHONPATH=$(pwd) python -m pytest tests/console -k rust_pages   # a native console page in Chromium
+MRSM_TEST_CONSOLE=1 PYTHONPATH=$(pwd) python -m pytest tests/console -k native_page   # a native console page in Chromium
 ```
 
 | Capability | Covered by |
@@ -286,7 +286,7 @@ MRSM_TEST_CONSOLE=1 PYTHONPATH=$(pwd) python -m pytest tests/console -k rust_pag
 | Corrupt library and wrong ABI skipped, manifest cache follows the directory | `native_e2e.rs`; discovery details in `native.rs` |
 | `plan pipes` / `show graph` with a native source | `native_e2e.rs` |
 | A source crate built by `mrsm`, reused on the next run, rebuilt after an edit; a mismatched crate name and a missing `cargo` skipped | `native_source_plugin.rs` (real `cargo`); stamp, fingerprint and failure handling in `meerschaum-plugin/tests/source.rs` |
-| A console page rendered in the browser, identical to the Python page | `tests/console/test_console.py` |
+| A console page rendered in the Dash console's frame, identical to the Python page | `tests/console/test_console.py` |
 
 ## 🔬 The ABI in one page
 

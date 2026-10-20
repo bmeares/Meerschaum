@@ -618,6 +618,44 @@ pub fn container_state(id: &str) -> Res<State> {
     })
 }
 
+/// What identifies one stop of a container: its ID and when it last started and stopped. An
+/// exited container that is started again (by `mrsm stack up`, a restart policy after a Docker
+/// restart, ...) no longer matches the marks taken when it was stopped, and one that was removed
+/// and created again has another ID.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RunMarks {
+    pub id: String,
+    pub status: String,
+    pub started: String,
+    pub finished: String,
+}
+
+pub fn container_run_marks(container: &str) -> Res<RunMarks> {
+    let done = Docker::new(&[
+        "container",
+        "inspect",
+        "--format",
+        "{{.Id}} {{.State.Status}} {{.State.StartedAt}} {{.State.FinishedAt}}",
+        container,
+    ])
+    .check("Reading a container's start and stop times")?;
+    let text = done.stdout_text();
+    let mut parts = text.split_whitespace().map(str::to_string);
+    let (Some(id), Some(status), Some(started), Some(finished)) =
+        (parts.next(), parts.next(), parts.next(), parts.next())
+    else {
+        return Err(StepError::new(format!(
+            "Cannot read the start and stop times of '{container}'."
+        )));
+    };
+    Ok(RunMarks {
+        id,
+        status,
+        started,
+        finished,
+    })
+}
+
 /// The image a container was created from (as the compose file names it).
 pub fn container_image(id: &str) -> Res<String> {
     let done = Docker::new(&["container", "inspect", "--format", "{{.Config.Image}}", id])
@@ -838,6 +876,18 @@ impl Compose {
         Ok(())
     }
 
+    /// `create` for the services: their containers exist, stopped, as the config says.
+    pub fn create(&self, services: &[String]) -> Res<()> {
+        if services.is_empty() {
+            return Ok(());
+        }
+        let mut args = vec!["create"];
+        args.extend(services.iter().map(String::as_str));
+        self.docker(&args)
+            .check(&format!("Creating {}", services.join(", ")))?;
+        Ok(())
+    }
+
     /// `up -d` for the services (Compose also starts what they depend on).
     pub fn up(&self, services: &[String]) -> Res<()> {
         if services.is_empty() {
@@ -851,6 +901,91 @@ impl Compose {
     }
 }
 
+/// `docker compose` subcommands that change containers (an attached `up`, `logs -f` and the like
+/// change nothing by themselves and are never waited for).
+const COMPOSE_CHANGING: &[&str] = &[
+    "up", "start", "restart", "stop", "create", "down", "kill", "rm",
+];
+
+/// The `docker compose` commands of `project` that change containers, in the output of
+/// `ps -A -o pid=,args=` (pid, then the command line): `(pid, command line)`, never `own_pid`'s.
+/// A killed `mrsm` leaves the compose command it was running behind (its children have their own
+/// process group), and it goes on changing containers for a while.
+pub fn compose_in_flight(ps: &str, project: &str, own_pid: u32) -> Vec<(u32, String)> {
+    let mut found = Vec::new();
+    for line in ps.lines() {
+        let line = line.trim();
+        let Some((pid, command)) = line.split_once(char::is_whitespace) else {
+            continue;
+        };
+        let Ok(pid) = pid.parse::<u32>() else {
+            continue;
+        };
+        let tokens: Vec<&str> = command.split_whitespace().collect();
+        let Some(at) = tokens.iter().position(|t| *t == "compose") else {
+            continue;
+        };
+        // `docker compose ...` or the plugin's `<path>/docker-compose compose ...`: the program
+        // itself, not an editor or a shell that has the words in its arguments.
+        if pid == own_pid
+            || at != 1
+            || !tokens[0]
+                .rsplit('/')
+                .next()
+                .is_some_and(|name| matches!(name, "docker" | "docker.exe" | "docker-compose"))
+        {
+            continue;
+        }
+        let (mut named, mut subcommand, mut i) = (None, None, at + 1);
+        while i < tokens.len() {
+            let token = tokens[i];
+            if token == "--project-name" || token == "-p" {
+                named = tokens.get(i + 1).copied();
+                i += 2;
+            } else if let Some(value) = token.strip_prefix("--project-name=") {
+                named = Some(value);
+                i += 1;
+            } else if token.starts_with('-') {
+                i += 1;
+            } else {
+                subcommand = Some(token);
+                break;
+            }
+        }
+        let (Some(named), Some(subcommand)) = (named, subcommand) else {
+            continue;
+        };
+        if named != project || !COMPOSE_CHANGING.contains(&subcommand) {
+            continue;
+        }
+        let detached = tokens[i..].iter().any(|t| *t == "-d" || *t == "--detach");
+        if subcommand == "up" && !detached {
+            continue;
+        }
+        found.push((pid, command.to_string()));
+    }
+    found
+}
+
+/// The `docker compose` commands of `project` running now (`None`: the process list cannot be
+/// read here, e.g. on Windows).
+pub fn compose_commands_running(project: &str) -> Option<Vec<(u32, String)>> {
+    let out = std::process::Command::new("ps")
+        .args(["-A", "-o", "pid=,args="])
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    Some(compose_in_flight(
+        &String::from_utf8_lossy(&out.stdout),
+        project,
+        std::process::id(),
+    ))
+}
+
 // --- PostgreSQL inside a container -------------------------------------------------------------
 
 /// Run a client tool inside a container as the database superuser the image created
@@ -859,6 +994,12 @@ impl Compose {
 const PG_ENV: &str = "export PGUSER=\"${PGUSER:-${POSTGRES_USER:-postgres}}\"; \
 if [ -z \"${PGPASSWORD:-}\" ] && [ -n \"${POSTGRES_PASSWORD:-}\" ]; then \
 export PGPASSWORD=\"$POSTGRES_PASSWORD\"; fi; exec \"$@\"";
+
+/// The server's refusal of a login, from the end of `psql`'s stderr (`None`: it worked, or
+/// failed for a reason that says nothing about the credentials).
+pub fn login_refusal(succeeded: bool, stderr: &str) -> Option<String> {
+    (!succeeded && stderr.contains("authentication failed")).then(|| stderr.trim().to_string())
+}
 
 /// A `dbname='...'` connection string (a bare `-d` value with `=` would be read as one).
 pub fn conninfo(database: &str) -> String {
@@ -937,6 +1078,22 @@ impl PgContainer {
             )));
         }
         Ok(done.stdout_text())
+    }
+
+    /// What the server says when the stack's own login (`POSTGRES_USER` with `POSTGRES_PASSWORD`
+    /// from the container's environment) is refused over TCP from the container's own
+    /// (non-loopback) address, the way the stack's services connect. `None`: it works, or the
+    /// check could not be made (nothing is claimed then). A restored or rolled-back volume
+    /// carries the roles' passwords of its own time, which the stack config may no longer say.
+    pub fn refused_login(&self) -> Option<String> {
+        const SCRIPT: &str = "export PGUSER=\"${POSTGRES_USER:-postgres}\" \
+             PGPASSWORD=\"${POSTGRES_PASSWORD:-}\" PGCONNECT_TIMEOUT=10; \
+             host=$(hostname -i 2>/dev/null | cut -d' ' -f1); [ -n \"$host\" ] || exit 0; \
+             exec psql -X -At -h \"$host\" -d template1 -c 'SELECT 1'";
+        let done = Docker::new(&["exec", &self.container, "sh", "-c", SCRIPT])
+            .run()
+            .ok()?;
+        login_refusal(done.ok(), &done.stderr_tail(3))
     }
 
     /// One JSON value from a query that returns it (the last non-empty line of the output).
@@ -1169,10 +1326,51 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_compose_command_left_behind_is_found_by_its_project() {
+        let ps = "\
+  101 /usr/bin/python3 -m meerschaum stack ps
+  202 docker compose --project-name w18x up -d holder
+  203 /usr/libexec/docker/cli-plugins/docker-compose compose --project-name w18x up -d holder
+  204 docker compose --project-name w18x up
+  205 docker compose --project-name w18x logs -f db
+  206 docker compose --project-name other up -d db
+  207 docker compose --project-name=w18x stop --timeout 60 db
+  208 docker compose --project-name w18xy up -d db
+  209 docker compose --project-name w18x ps
+  210 vim docker compose --project-name w18x up -d
+  211 docker compose --project-name w18x restart db
+  bad line
+";
+        let found = compose_in_flight(ps, "w18x", 0);
+        let pids: Vec<u32> = found.iter().map(|(p, _)| *p).collect();
+        // Detached `up`, `stop`, `restart` change containers; an attached `up`, `logs`, `ps`,
+        // another project, a project of a longer name and an editor are not waited for.
+        assert_eq!(pids, vec![202, 203, 207, 211], "{found:?}");
+        // The command of this very process is never its own obstacle.
+        let own = compose_in_flight(ps, "w18x", 202);
+        assert!(own.iter().all(|(p, _)| *p != 202));
+        assert!(compose_in_flight("", "w18x", 0).is_empty());
+    }
+
+    #[test]
     fn connection_strings_quote_any_database_name() {
         assert_eq!(conninfo("meerschaum"), "dbname='meerschaum'");
         assert_eq!(conninfo("a=b c"), "dbname='a=b c'");
         assert_eq!(conninfo("it's\\"), "dbname='it\\'s\\\\'");
+    }
+
+    #[test]
+    fn only_a_refused_password_says_something_about_the_credentials() {
+        let refused = "psql: error: connection to server at \"172.18.0.2\", port 5432 failed: FATAL:  password authentication failed for user \"mrsm\"";
+        assert_eq!(login_refusal(false, refused).as_deref(), Some(refused));
+        // It worked, or it failed for another reason (no route, starting up, no such tool).
+        assert_eq!(login_refusal(true, ""), None);
+        assert_eq!(login_refusal(true, refused), None);
+        assert_eq!(
+            login_refusal(false, "psql: error: connection refused"),
+            None
+        );
+        assert_eq!(login_refusal(false, "sh: psql: not found"), None);
     }
 
     #[test]
