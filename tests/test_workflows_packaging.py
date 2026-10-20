@@ -331,6 +331,14 @@ def test_nextest_runs_the_tests_and_doc_tests_still_run():
     assert 'else' in body and 'cargo test --workspace\n' in body, 'plain cargo test without nextest'
 
 
+def test_the_cargo_tests_build_the_v4_reference_before_running():
+    """Each self-hosted runner has its own workspace: `.venv-ref/` exists only where `parity` ran."""
+    script = (REPO / 'scripts' / 'rust' / 'ci.sh').read_text(encoding='utf-8')
+    body = script[script.index('step_test()'):script.index('step_build()')]
+    assert 'scripts/parity/setup_reference.sh' in body
+    assert body.index('setup_reference.sh') < body.index('cargo nextest run')
+
+
 def test_the_ci_tools_are_pinned_by_checksum():
     script = (REPO / 'scripts' / 'rust' / 'ci_tools.sh').read_text(encoding='utf-8')
     shas = re.findall(r'^[A-Z]+_SHA_(?:X86_64|AARCH64)="([0-9a-f]+)"$', script, re.M)

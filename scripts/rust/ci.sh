@@ -14,7 +14,8 @@
 #   test         cargo nextest run --workspace (when nextest is installed: `ci_tools.sh`, self-hosted runner) plus
 #                cargo test --workspace --doc; plain `cargo test --workspace` without nextest. With DuckDB's shared
 #                library from the persistent cache (`duckdb-lib`) and the DuckDB integration tests enabled
-#                (MRSM_TEST_DUCKDB_PATH). MRSM_CI_NEXTEST=0 forces `cargo test`.
+#                (MRSM_TEST_DUCKDB_PATH). MRSM_CI_NEXTEST=0 forces `cargo test`. Creates `.venv-ref/` first (the
+#                cross-implementation tests need it) unless MRSM_TEST_PYTHON is set.
 #   duckdb-platform  The DuckDB loader on the platform running it (the hosted Linux arm64 / macOS / Windows
 #                legs): the loader unit tests, then `--test duckdb_install` (downloads the pinned library of
 #                this platform with the installer, SHA-256 verified, into a temporary root, loads it, runs a
@@ -208,6 +209,13 @@ step_test()   {
     MRSM_TEST_DUCKDB_PATH="$(mktemp -d "${RUNNER_TEMP:-$HOME/.cache}/mrsm-duckdb-tests.XXXXXX")"
     export MRSM_TEST_DUCKDB_PATH
     trap "rm -rf '$MRSM_TEST_DUCKDB_PATH'" EXIT
+  fi
+  # The cross-implementation tests (worker `plugins`, `compose_execution`, `wiring_parity`, ...) run the
+  # released v4 from `.venv-ref/`, which exists only on a runner that already ran the `parity` job: each
+  # runner has its own workspace, so build it here (idempotent: a no-op when it is current) instead of
+  # depending on which runner picked the job. MRSM_TEST_PYTHON pins another interpreter explicitly.
+  if [ -z "${MRSM_TEST_PYTHON:-}" ]; then
+    "$REPO/scripts/parity/setup_reference.sh"
   fi
   if ci_have_nextest; then
     # nextest runs every test in its own process (and does not run doc tests: those follow).
