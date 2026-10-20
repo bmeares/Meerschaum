@@ -8,7 +8,7 @@ semver-stable surface and keeps the implementation crates (`meerschaum-core`, `-
 
 ```toml
 [dependencies]
-# Use the exact pre-release version (e.g. "5.0.0-rc.1") until 5.0.0 is out: a bare "5" does not match one.
+# Use the exact pre-release version (e.g. "5.0.0-rc.2") until 5.0.0 is out: a bare "5" does not match one.
 meerschaum = { version = "5", default-features = false, features = ["sql", "engine"] }
 ```
 
@@ -38,7 +38,7 @@ extension first (see the migration guide for numbers).
 | `plugin` | the native plugin SDK |
 | `full` | all of the above except `oracle` |
 
-## Known issue in 5.0.0-rc.1: sqlx 0.9.0 and TCP latency (crates.io builds)
+## Known issue: sqlx 0.9.0 and TCP latency (crates.io builds)
 
 Meerschaum's workspace pins a fixed sqlx, but crates.io ignores a `[patch]`, so `cargo install meerschaum`
 and library users build against sqlx 0.9.0, which does not set `TCP_NODELAY` (sqlx #4335). The PyPI wheel and
