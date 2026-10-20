@@ -86,7 +86,7 @@ jobs:
 
       # Release skill §5.7: the base wheel must serve its public operations offline, on a read-only
       # filesystem, with installs disabled (scripts/docker/smoke_facade.py exits nonzero otherwise).
-      # The slim rootfs ships `python3` and `bash` only (no `python` alias).
+      # The slim rootfs ships `python3` (also as `python`) and `bash`.
       - name: Facade smoke (slim)
         if: ${{ !inputs.v4_only }}
         env:

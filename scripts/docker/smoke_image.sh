@@ -3,7 +3,7 @@
 #
 # Smoke test of built Meerschaum images (run by scripts/docker/buildx.sh after a local build):
 #   - every image has `curl` (the stack's API healthcheck is
-#     `["CMD", "curl", "--fail", "http://localhost:<port>/healthcheck"]`) and a working `mrsm`;
+#     `["CMD", "curl", "--fail", "http://localhost:<port>/healthcheck"]`) a `python` command (scripts and plugins call `python`, not only `python3`) and a working `mrsm`;
 #   - the full image also has `git` (plugins may require `git+https://...` packages) and `ssh`;
 #   - the full image runs that healthcheck for real: `mrsm start api --production` on a scratch SQLite
 #     instance (no web console, no terminal, a random port) and `curl --fail` against it in the same
@@ -87,11 +87,13 @@ exit 1
 for image in "${slim_images[@]}"; do
   echo "== $image"
   check "curl" "$image" curl --version
+  check "python" "$image" python --version
   check "mrsm" "$image" mrsm --version
 done
 for image in "${full_images[@]}"; do
   echo "== $image (full)"
   check "curl" "$image" curl --version
+  check "python" "$image" python --version
   check "git" "$image" git --version
   check "ssh" "$image" ssh -V
   check "mrsm" "$image" mrsm --version

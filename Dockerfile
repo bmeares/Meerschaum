@@ -163,7 +163,7 @@ ARG mrsm_user=meerschaum \
 
 RUN dnf install -y --installroot=/rootfs --use-host-config --releasever=44 \
       --setopt=install_weak_deps=False --nodocs \
-      python3 bash coreutils-single ca-certificates tzdata libstdc++ curl-minimal libcurl-minimal \
+      python3 python-unversioned-command bash coreutils-single ca-certificates tzdata libstdc++ curl-minimal libcurl-minimal \
   && dnf --installroot=/rootfs --use-host-config clean all \
   && rm -rf /rootfs/var/cache/* /rootfs/var/log/* /rootfs/var/lib/dnf /rootfs/usr/share/locale/* \
   && rm -rf /rootfs/usr/share/pki/ca-trust-source /rootfs/usr/share/zoneinfo/right \
@@ -191,7 +191,7 @@ COPY --from=duckdb-driver /out/ /rootfs/
 
 
 ### ---------------------------------------------------------------------------------------------
-### slim: python3 and the wheel (no extras) on the slim-rootfs. Size gate: ≤ 250 MB.
+### slim: python3 (also as `python`) and the wheel (no extras) on the slim-rootfs. Size gate: ≤ 250 MB.
 FROM scratch AS slim
 
 ARG duckdb_driver= \
