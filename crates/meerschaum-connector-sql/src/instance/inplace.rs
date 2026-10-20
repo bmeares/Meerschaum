@@ -378,7 +378,7 @@ impl SqlConnector {
             ));
         }
 
-        let mut tx: Option<SqlTransaction> = match self.driver().begin().await {
+        let mut tx: Option<SqlTransaction> = match self.driver().begin_write().await {
             Ok(t) => Some(t),
             Err(e) => return SuccessTuple::fail(e.to_string()),
         };
@@ -413,35 +413,39 @@ impl SqlConnector {
             ($query:expr) => {{
                 if let Some(o) = observer {
                     let query: String = $query;
-                    let read = if flavor.driver_family() == DriverFamily::Sqlite {
+                    if flavor.driver_family() == DriverFamily::Sqlite {
                         if let Some(t) = tx.take() {
                             if let Err(e) = t.commit().await {
                                 fail!(e.to_string());
                             }
                         }
-                        let read = self
-                            .driver()
-                            .read_frame(&query)
-                            .await
-                            .map_err(|e| e.to_string());
-                        tx = match self.driver().begin().await {
+                        let delta = match self.driver().read_frame(&query).await {
+                            Ok(delta) => delta,
+                            Err(e) => fail!(e.to_string()),
+                        };
+                        if let Err(e) = o.before_merge(&delta).await {
+                            fail!(e);
+                        }
+                        // The next session takes the write lock when it begins, so it begins only
+                        // after the observer: the observer's own writes go through another
+                        // connection and would wait for that lock for as long as the session holds it.
+                        tx = match self.driver().begin_write().await {
                             Ok(t) => Some(t),
                             Err(e) => fail!(e.to_string()),
                         };
-                        read
                     } else {
-                        match tx.as_mut() {
+                        let read = match tx.as_mut() {
                             Some(t) => t.read_frame(&query).await.map_err(|e| e.to_string()),
                             None => Err("The session was rolled back.".to_string()),
-                        }
-                    };
-                    match read {
-                        Ok(delta) => {
-                            if let Err(e) = o.before_merge(&delta).await {
-                                fail!(e);
+                        };
+                        match read {
+                            Ok(delta) => {
+                                if let Err(e) = o.before_merge(&delta).await {
+                                    fail!(e);
+                                }
                             }
+                            Err(e) => fail!(e),
                         }
-                        Err(e) => fail!(e),
                     }
                 }
             }};
@@ -558,7 +562,7 @@ impl SqlConnector {
         };
         let state = self.pipe_state(&sp).await;
         if sqlite {
-            tx = match self.driver().begin().await {
+            tx = match self.driver().begin_write().await {
                 Ok(t) => Some(t),
                 Err(e) => fail!(e.to_string()),
             };

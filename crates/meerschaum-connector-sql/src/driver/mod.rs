@@ -950,6 +950,24 @@ impl SqlDriver {
         Ok(SqlTransaction { inner })
     }
 
+    /// [`SqlDriver::begin`] for a transaction that is going to write. On SQLite the
+    /// transaction takes the write lock up front (`BEGIN IMMEDIATE`, waiting for it up to the
+    /// busy timeout). A deferred `BEGIN` that reads first and writes later holds a read lock when it
+    /// asks for the write lock: if another connection holds it, SQLite fails that request with
+    /// `SQLITE_BUSY` at once, without waiting, because waiting could deadlock the two. Every other
+    /// driver begins as usual.
+    pub async fn begin_write(&self) -> Result<SqlTransaction> {
+        match &self.pool {
+            Pool::Sqlite(p) => {
+                self.ready().await?;
+                Ok(SqlTransaction {
+                    inner: TxInner::Sqlite(p.begin_with("BEGIN IMMEDIATE").await?),
+                })
+            }
+            _ => self.begin().await,
+        }
+    }
+
     /// Close every pooled connection.
     pub async fn close(&self) {
         match &self.pool {
