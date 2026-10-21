@@ -4,6 +4,14 @@ The engine emits one typed event per transition, and everything you see is drawn
 
 `run_started`, `node_planned`, `node_started`, `chunk_started`, `chunk_finished`, `node_finished`, `node_failed`, `node_skipped`, `node_rebuild_pending`, `watermark_advanced`, `stream_flushed`, `children_triggered`, `stream_restarted`, `run_finished`.
 
+## Running a pipeline in the console
+
+Open `/dash/pipelines` and click a pipeline's name inside its dashed boundary. Its details show the saved membership and a **Run now** button. Shared pipes may appear in more than one named group. Clicking a pipe opens its stage inspector; **Open pipe** opens the full pipe page in a new tab.
+
+**Run now** starts a single sync through the API's authenticated execution endpoint. The page follows its exact run ID, shows command output, and refreshes the Gantt chart and stage completion counts every two seconds while it runs. Running bars extend to the current time; planned bars use historical duration estimates. **Sync activity** shows the engine's recorded events and sync results, with a stage selector to focus one pipe. The selected pipeline's history remains available while a run is active.
+
+**Manage pipeline** edits the saved definition and creates recurring scheduled jobs. A saved definition stores membership; a job supplies the schedule and execution settings. **Planned action** in a stage inspector describes what the next sync would do, rather than a scheduled execution time. Hover over a stage's status icon to read its planned action.
+
 ## 🖥️ In the terminal
 
 `mrsm sync pipes` prints each node's result as it finishes and a summary of the run (the output shown throughout this section). A run with `--parents` / `--children` and more than one node ends with a static **Gantt chart** of the actual run and the plan (a plain `sync pipes` keeps v4's output, so it prints none, and neither does `--nopretty`). On a terminal the run also prints one progress line per node as it starts and finishes (`▶`, `✔`, `✘`, `○`). `mrsm show run <id>` draws the chart of any recorded run:

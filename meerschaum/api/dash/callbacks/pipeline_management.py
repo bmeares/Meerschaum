@@ -37,6 +37,9 @@ def read_selection(pathname, name, refresh, session):
     _require_session(session)
     instance = engine.get_instance()
     definitions = initialize_pipelines(lambda: engine.plan_graph(instance), instance)
+    if dash.ctx.triggered_id == 'pipeline-saved-name':
+        dash.set_props('pipelines-location', {'search': ''})
+    dash.set_props('pipeline-definitions', {'data': definitions})
     return ([{'label': key, 'value': key} for key in sorted(definitions)],
             definitions.get(name), name or '')
 
@@ -162,3 +165,115 @@ def copy_job_settings(clicks, pipeline, session):
     ], color='info', class_name='mt-2')
     return (settings['name'], settings['schedule'], settings['workers'], settings['retries'],
             settings['force'], notice)
+
+
+@dash_app.callback(
+    Output('pipeline-run-alert', 'children'),
+    Input({'type': 'pipeline-group', 'index': ALL}, 'n_clicks'),
+    Input('pipeline-run-now', 'n_clicks', allow_optional=True),
+    State('pipeline-saved-name', 'value'), State('session-store', 'data'),
+    prevent_initial_call=True,
+)
+def select_or_run_pipeline(groups, run_clicks, name, session):
+    _require_session(session)
+    trigger = dash.ctx.triggered_id
+    if isinstance(trigger, dict):
+        if not any(groups or []):
+            raise PreventUpdate
+        dash.set_props('pipeline-saved-name', {'value': trigger['index']})
+        return []
+    if not run_clicks or not name:
+        raise PreventUpdate
+    from meerschaum.api.dash.execute import run_action
+    from meerschaum.api.dash.sessions import get_username_from_session
+    from meerschaum.core.Pipeline._saved import validate_name
+    try:
+        validate_name(name)
+        result = run_action(['sync', 'pipeline', name, '-i', str(engine.get_instance()),
+                             '--nopretty'],
+                            get_username_from_session((session or {}).get('session-id')))
+        if result['success']:
+            dash.set_props('pipelines-location', {'search': ''})
+            dash.set_props('pipeline-live-run', {'data': {
+                'pipeline': name, 'job': result['job'], 'stream': result['stream'],
+                'status': 'running',
+            }})
+            dash.set_props('pipelines-interval', {'interval': 2000})
+        return alert_from_success_tuple((result['success'], result['msg']))
+    except Exception as exc:
+        return alert_from_success_tuple((False, str(exc)))
+
+
+@dash_app.callback(
+    Output('pipeline-summary', 'children'),
+    Input('pipeline-definition', 'data'),
+)
+def pipeline_summary(definition):
+    if not definition:
+        return html.P('Select a pipeline’s name to inspect and run it.', className='text-muted')
+    return dbc.Card(dbc.CardBody([
+        html.H4(definition['name']),
+        html.P(f"{len(definition.get('targets', []))} member pipes"),
+        dbc.Button('Run now', id='pipeline-run-now', n_clicks=0, size='sm'),
+        html.Details([html.Summary('Member pipes'), html.Ul([
+            html.Li(html.Code(engine.ref_label(ref))) for ref in definition.get('targets', [])
+        ])]),
+    ]), class_name='mb-3')
+
+
+dash_app.clientside_callback(
+    """
+    function(store, definition) {
+        const name = definition && definition.name;
+        if (!store || !store.stream || store.pipeline !== name) {
+            if (window._mrsmPipelineSource) window._mrsmPipelineSource.close();
+            window._mrsmPipelineSource = null;
+            window._mrsmPipelineJob = null;
+            const output = document.getElementById('pipeline-command-output');
+            if (output) output.textContent = '';
+            return dash_clientside.no_update;
+        }
+        if (window._mrsmPipelineSource && window._mrsmPipelineJob === store.job)
+            return dash_clientside.no_update;
+        if (window._mrsmPipelineSource) window._mrsmPipelineSource.close();
+        window._mrsmPipelineJob = store.job;
+        const source = new EventSource(store.stream);
+        window._mrsmPipelineSource = source;
+        let current = {...store}, lines = [];
+        const initial = document.getElementById('pipeline-command-output');
+        if (initial) initial.textContent = '';
+        function visible() { return window._mrsmPipelineSource === source; }
+        source.onmessage = function(e) {
+            if (!visible()) return;
+            const line = e.data.replace(/\\n$/, '');
+            lines.push(line);
+            if (lines.length > 1000) lines.shift();
+            const view = document.getElementById('pipeline-command-output');
+            if (view) {
+                const follow = view.scrollHeight - view.scrollTop - view.clientHeight < 40;
+                view.textContent = lines.join('\\n');
+                if (follow) view.scrollTop = view.scrollHeight;
+            }
+            const match = line.match(/(?:^|\\|\\s*)Run: ([A-Za-z0-9_.:-]+)/);
+            if (match && current.run_id !== match[1]) {
+                current = {...current, run_id: match[1]};
+                dash_clientside.set_props('pipeline-live-run', {data: current});
+            }
+        };
+        source.addEventListener('stopped', function() {
+            source.close();
+            if (!visible()) return;
+            current = {...current, status: 'stopped'};
+            dash_clientside.set_props('pipeline-live-run', {data: current});
+        });
+        source.onerror = function() {
+            if (source.readyState === 2) {
+                current = {...current, status: 'disconnected'};
+                dash_clientside.set_props('pipeline-live-run', {data: current});
+            }
+        };
+        return dash_clientside.no_update;
+    }
+    """,
+    Output('pipeline-run-stream-dummy', 'children'), Input('pipeline-live-run', 'data'), Input('pipeline-definition', 'data'),
+)

@@ -324,7 +324,7 @@ The wheel contains the native core and has no required Python dependencies. Whee
     `pip install meerschaum` is the whole product: the `mrsm` command it installs runs the native command line from inside the package. If you would rather have a standalone binary (it starts in about 10 ms and needs no Python until you use a Python plugin or connector), build the same command line with Cargo:
 
     ```bash
-    cargo install meerschaum --locked            # during the release candidates: --version 5.0.0-rc.4
+    cargo install meerschaum --locked            # during the release candidates: --version 5.0.0-rc.5
     ```
 
     This needs Rust 1.95 or newer. `--locked` builds with the dependency versions Meerschaum was tested with (without it Cargo may pick newer ones, which can break the build on Windows). Prebuilt standalone binaries (Linux x86_64 and arm64, macOS arm64 and x86_64, Windows x86_64) are attached to each GitHub release, with a SHA-256 file for each.
@@ -3043,7 +3043,7 @@ mrsm sync pipeline daily-totals -i sql:main
 mrsm sync pipeline daily-totals -i sql:main --schedule 'every 5 minutes' -d -n daily-sync
 ```
 
-On the Pipelines page, select a saved pipeline and open **Save / schedule** to create a
+On the Pipelines page, select a saved pipeline and open **Manage pipeline** to create a
 Job with its own name, interval, workers, retries, and rebuild permission. A Job reads the
 pipeline's current membership each time it runs. Several Jobs may use the same pipeline
 with different schedules or options. The same panel shows their status and start/stop
@@ -3292,6 +3292,14 @@ Source: https://meerschaum.io/reference/pipelines/visualization/
 The engine emits one typed event per transition, and everything you see is drawn from that stream or from the recorded run:
 
 `run_started`, `node_planned`, `node_started`, `chunk_started`, `chunk_finished`, `node_finished`, `node_failed`, `node_skipped`, `node_rebuild_pending`, `watermark_advanced`, `stream_flushed`, `children_triggered`, `stream_restarted`, `run_finished`.
+
+## Running a pipeline in the console
+
+Open `/dash/pipelines` and click a pipeline's name inside its dashed boundary. Its details show the saved membership and a **Run now** button. Shared pipes may appear in more than one named group. Clicking a pipe opens its stage inspector; **Open pipe** opens the full pipe page in a new tab.
+
+**Run now** starts a single sync through the API's authenticated execution endpoint. The page follows its exact run ID, shows command output, and refreshes the Gantt chart and stage completion counts every two seconds while it runs. Running bars extend to the current time; planned bars use historical duration estimates. **Sync activity** shows the engine's recorded events and sync results, with a stage selector to focus one pipe. The selected pipeline's history remains available while a run is active.
+
+**Manage pipeline** edits the saved definition and creates recurring scheduled jobs. A saved definition stores membership; a job supplies the schedule and execution settings. **Planned action** in a stage inspector describes what the next sync would do, rather than a scheduled execution time. Hover over a stage's status icon to read its planned action.
 
 ## 🖥️ In the terminal
 
@@ -11424,6 +11432,20 @@ Source: https://meerschaum.io/news/changelog/
 ## 5.0.0 Releases
 
 Meerschaum 5 is a rewrite of the core in Rust: the data kernel, the `sql:` / `valkey:` / `api:` connectors, the Syncing Engine, jobs, compose, the HTTP API, the MCP server and the `mrsm` CLI and shell. The `meerschaum` Python package stays as the plugin SDK, a façade and the host of the Plotly Dash web console, so pipes, parameters, configuration, compose files, jobs, the HTTP API and the Python public API keep working. Read the [migration guide](/reference/migrating-to-v5/) before upgrading; v4.1.x stays installable and receives security fixes until 5.1.0.
+
+### v5.0.0rc5
+
+- **Run and watch named pipelines from the console.**
+  Named pipeline groups have dashed boundaries and clickable names. Select a pipeline to inspect its membership or run it immediately through the API's authenticated execution endpoint. The page follows that run's command output, per-stage sync activity, completion counts, and live Gantt progress. Pipeline history is scoped by exact name, including pipelines with older runs.
+
+- **Clarify pipeline controls and planned actions.**
+  “Manage pipeline” opens the pipeline definition and schedule form. Planned actions include readable descriptions, source-fetch labels appear on icon hover, and “Open pipe” uses a new tab. Stage queries have SQL syntax highlighting, and sync bounds appear in aligned rows. Live polling preserves the canvas without showing a loading spinner.
+
+- **Keep interactive prompts quiet until typing begins.**
+  Selection prompts hide suggestions while empty, including after clearing the input. Configuration editing no longer prints the redundant Rust CLI reload message.
+
+- **Repair the Docker web terminal configuration.**
+  The bundled tmux configuration contains only tmux commands and loads without syntax errors.
 
 ### v5.0.0rc4
 

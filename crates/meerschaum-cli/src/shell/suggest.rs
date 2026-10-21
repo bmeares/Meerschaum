@@ -82,6 +82,9 @@ impl Suggest {
     /// The suggestions which contain the typed text, ignoring case: those which start with it
     /// first, the rest after, each group in the order given.
     pub fn matches(&self) -> Vec<&str> {
+        if self.buffer.is_empty() {
+            return Vec::new();
+        }
         let needle = self.text().to_lowercase();
         let (mut starts, mut contains) = (Vec::new(), Vec::new());
         for item in &self.items {
@@ -469,7 +472,10 @@ mod tests {
     #[test]
     fn the_dropdown_filters_as_the_user_types_prefix_matches_first() {
         let mut s = Suggest::new(&items(), "");
-        assert_eq!(s.matches().len(), 5, "everything before anything is typed");
+        assert!(s.matches().is_empty(), "wait until the user types");
+        assert!(s.frame(80, false).rows.is_empty());
+        s.apply(key(KeyCode::Down));
+        assert_eq!(s.selected(), None);
         type_text(&mut s, "ma");
         assert_eq!(
             s.matches(),
@@ -489,6 +495,15 @@ mod tests {
             vec!["plugin:noaa", "api:main"],
             "those starting with the text first"
         );
+    }
+
+    #[test]
+    fn clearing_input_hides_the_dropdown_again() {
+        let mut s = Suggest::new(&items(), "s");
+        assert!(!s.frame(80, false).rows.is_empty());
+        s.apply(key(KeyCode::Backspace));
+        assert!(s.frame(80, false).rows.is_empty());
+        assert_eq!(s.apply(key(KeyCode::Enter)), Outcome::Submit(String::new()));
     }
 
     #[test]
@@ -625,7 +640,7 @@ mod tests {
                 "abcdefghijklmnop".to_string(),
                 "abcdefghijklmnop".to_string(),
             ],
-            "",
+            "a",
         );
         let frame = s.frame(8, false);
         assert_eq!(frame.rows, vec!["  abcde".to_string()]);

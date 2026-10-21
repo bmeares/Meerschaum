@@ -57,7 +57,7 @@ impl SqlConnector {
         // The v4 renderer always emits datetime/id DDL, even for existing indices.
         // Cold internal readiness checks run against already initialized tables too;
         // skip those ordinary indices at runtime while retaining missing unique keys.
-        if sp.pipe().temporary && sp.is_static() && sp.pipe().connector_keys() == "mrsm" {
+        if sp.pipe().temporary && sp.pipe().connector_keys() == "mrsm" {
             let names = get_pipe_index_names(&self.ctx(), sp);
             for role in ["datetime", "id"] {
                 if role == "datetime" && self.flavor.is_timescaledb() && sp.hypertable() {

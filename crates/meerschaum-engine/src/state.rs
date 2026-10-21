@@ -132,7 +132,7 @@ pub trait StateWriter: Send + Sync {
         through_seq: i64,
     ) -> impl Future<Output = Result<usize, StateError>> + Send;
 
-    /// Persist a run and its per-node rows (`mrsm:engine_runs`, `mrsm:engine_nodes`).
+    /// Upsert a run and the supplied node rows; omitted nodes remain unchanged.
     fn record_run(&self, run: &RunRecord) -> impl Future<Output = Result<(), StateError>> + Send;
 }
 
@@ -344,8 +344,26 @@ impl StateWriter for MemoryState {
 
     async fn record_run(&self, run: &RunRecord) -> Result<(), StateError> {
         let mut data = self.lock();
-        data.runs.retain(|r| r.run.run_id != run.run.run_id);
-        data.runs.push(run.clone());
+        if let Some(existing) = data
+            .runs
+            .iter_mut()
+            .find(|r| r.run.run_id == run.run.run_id)
+        {
+            existing.run = run.run.clone();
+            for row in &run.nodes {
+                if let Some(stored) = existing
+                    .nodes
+                    .iter_mut()
+                    .find(|n| n.pipe_ref == row.pipe_ref)
+                {
+                    *stored = row.clone();
+                } else {
+                    existing.nodes.push(row.clone());
+                }
+            }
+        } else {
+            data.runs.push(run.clone());
+        }
         Ok(())
     }
 }

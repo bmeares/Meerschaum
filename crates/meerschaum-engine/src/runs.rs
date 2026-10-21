@@ -284,6 +284,19 @@ pub fn new_named_run_id(name: &str) -> String {
     )
 }
 
+/// Match a complete pipeline name before the generated timestamp and collision suffix.
+pub fn run_has_name(run_id: &str, name: &str) -> bool {
+    let Some(rest) = run_id.strip_prefix(&format!("{name}-")) else {
+        return false;
+    };
+    let Some((timestamp, suffix)) = rest.rsplit_once('-') else {
+        return false;
+    };
+    suffix.len() == 8
+        && suffix.bytes().all(|b| b.is_ascii_hexdigit())
+        && chrono::NaiveDateTime::parse_from_str(timestamp, "%Y-%m-%dT%H-%M-%S%.6fZ").is_ok()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -328,5 +341,8 @@ mod tests {
         assert!(a.contains('T') && a.contains('Z'));
         assert!(new_named_run_id("daily totals").starts_with("daily-totals-"));
         assert_ne!(a, new_run_id());
+        let named = new_named_run_id("daily-totals");
+        assert!(run_has_name(&named, "daily-totals"));
+        assert!(!run_has_name(&named, "daily"));
     }
 }

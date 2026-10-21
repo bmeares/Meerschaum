@@ -233,12 +233,8 @@ fn unreachable(instance: &str, e: impl std::fmt::Display) -> StateError {
     }
 }
 
-/// Rows of `mrsm:engine_nodes` as documents.
-///
-/// `started` is the pipe's datetime (and partition) column, so a node that never started is
-/// stored with the run's start (`run_started`): a NULL partition key has no partition and
-/// defeats the `(started, run_id, pipe_ref)` upsert key. [`node_from_doc`] reads it back as
-/// `None` for a node with no attempt and no finish.
+/// Rows of `mrsm:engine_nodes` as documents. The partition key stays at the run's
+/// start across progress updates; `actual_started` records the first sync attempt.
 pub fn node_doc(row: &NodeRow, run_started: DateTime<Utc>) -> Doc {
     [
         ("run_id", kv_str(&row.run_id)),
@@ -258,7 +254,8 @@ pub fn node_doc(row: &NodeRow, run_started: DateTime<Utc>) -> Doc {
         ("end", kv_json(row.end.as_ref())),
         ("num_chunks", KValue::Int(row.num_chunks as i64)),
         ("attempts", KValue::Int(row.attempts as i64)),
-        ("started", kv_dt(row.started.unwrap_or(run_started))),
+        ("started", kv_dt(run_started)),
+        ("actual_started", kv_opt_dt(row.started)),
         ("finished", kv_opt_dt(row.finished)),
         ("duration_seconds", kv_float(row.duration_seconds)),
         ("inserted", KValue::Int(row.inserted as i64)),
@@ -289,11 +286,16 @@ pub fn node_from_doc(doc: &Doc) -> Option<NodeRow> {
     row.end = doc_bound(doc, "end");
     row.num_chunks = doc_int(doc, "num_chunks").unwrap_or(0).max(0) as usize;
     row.attempts = doc_int(doc, "attempts").unwrap_or(0).max(0) as u32;
-    row.started = doc_dt(doc, "started");
+    row.started = if doc.contains_key("actual_started") {
+        doc_dt(doc, "actual_started")
+            .or_else(|| (row.attempts > 0).then(|| doc_dt(doc, "started")).flatten())
+    } else {
+        doc_dt(doc, "started")
+    };
     row.finished = doc_dt(doc, "finished");
     // (Only when the row was read with those columns: history reads select a subset.)
     if doc.contains_key("attempts") && row.attempts == 0 && row.finished.is_none() {
-        // Stored with the run's start (see `node_doc`): the node never started.
+        // Legacy rows without an actual start use the run’s partition timestamp.
         row.started = None;
     }
     row.duration_seconds = doc_float(doc, "duration_seconds");
@@ -470,9 +472,14 @@ impl InstanceState {
             return Ok(());
         }
         let conn = self.conn(instance)?;
-        let pipe = engine_pipe_on(conn.as_ref(), instance, kind)
+        let mut pipe = engine_pipe_on(conn.as_ref(), instance, kind)
             .await
             .map_err(|e| unreachable(instance, e))?;
+        if kind == EnginePipe::Nodes {
+            // Allow the declared progress columns to be added to older internal tables.
+            pipe.parameters_mut()
+                .insert("static".into(), Value::Bool(false));
+        }
         let df = engine_frame(kind, docs)?;
         let upsert = pipe.upsert();
         let mut extra = Map::new();
@@ -595,19 +602,6 @@ impl InstanceState {
             .map_err(|e| unreachable(&self.home, e))?;
         let q = DataQuery {
             params: Some(str_map(&[("status", Value::Str("succeeded".into()))])),
-            select_columns: Some(
-                [
-                    "run_id",
-                    "pipe_ref",
-                    "action",
-                    "status",
-                    "duration_seconds",
-                    "started",
-                ]
-                .iter()
-                .map(|c| c.to_string())
-                .collect(),
-            ),
             begin: since.map(DateBound::utc),
             ..Default::default()
         };

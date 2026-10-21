@@ -1079,7 +1079,9 @@ pub fn sync_pipeline(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
             .with_children(depth(&options_args, "children"))
             .with_graph(true),
     );
-    options.run_id = Some(meerschaum_engine::runs::new_named_run_id(name));
+    let run_id = meerschaum_engine::runs::new_named_run_id(name);
+    rt.print(&format!("Run: {run_id}\n"));
+    options.run_id = Some(run_id);
     let result = if rt.live && !flag(args, "nopretty") {
         run_live(rt, &session, engine, options)
     } else {
@@ -1087,9 +1089,6 @@ pub fn sync_pipeline(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     };
     for warning in &result.warnings {
         warn(rt, warning);
-    }
-    if let Some(id) = result.run_id() {
-        rt.print(&format!("Run: {id}\n"));
     }
     Ok(SuccessTuple {
         success: result.success,

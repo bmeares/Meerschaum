@@ -405,7 +405,8 @@ impl SqlConnector {
         }
 
         let mut check_existing = opts.check_existing;
-        let cache_internal = pipe.temporary && sp0.is_static() && pipe.connector_keys() == "mrsm";
+        let internal_table = pipe.temporary && pipe.connector_keys() == "mrsm";
+        let cache_internal = internal_table && sp0.is_static();
         let cache_key = self.pipe_table_name(&sp0);
         // A sync that does not finish leaves no columns types behind.
         let synced_key = synced_columns_key(pipe);
@@ -426,7 +427,7 @@ impl SqlConnector {
         // still be creating its unique constraint. Inspect metadata only after taking
         // the database lock, and retain it through index creation and the first write.
         // Warm internal writes use the cached readiness and retain their one-DML cost.
-        let _initialization_guard = if cache_internal && cached.is_none() {
+        let _initialization_guard = if internal_table && cached.is_none() {
             self.driver
                 .lock_internal_initialization(&sp0.target, schema.as_deref())
                 .await
@@ -434,7 +435,7 @@ impl SqlConnector {
         } else {
             None
         };
-        let initializing_internal = cache_internal && cached.is_none();
+        let initializing_internal = internal_table && cached.is_none();
         let mut state = match cached {
             Some(state) => state,
             None => self.pipe_state(&sp0).await,

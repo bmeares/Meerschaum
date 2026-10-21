@@ -508,6 +508,7 @@ pub fn engine_runs(py: Python<'_>, request: &str) -> PyResult<String> {
     };
     let filter = RunFilter {
         run_id: str_field(&request, "run_id").map(str::to_owned),
+        run_name: str_field(&request, "run_name").map(str::to_owned),
         status,
         pipe: str_field(&request, "pipe").map(str::to_owned),
         since: None,

@@ -44,6 +44,8 @@ layout = [
             html.Div(id='pipelines-alert-div'),
             build_pipeline_controls(),
             dcc.Store(id='pipeline-visible-refs', data=[]),
+            dcc.Store(id='pipeline-stage-statuses', data={}),
+            html.Div(id='pipeline-stage-status-dummy', hidden=True),
             html.Div([
                 html.Details([
                     html.Summary('Find a pipe’s pipeline'),
@@ -63,7 +65,7 @@ layout = [
             ], className='pipeline-filter-toolbar'),
             dcc.Store(id='pipeline-focus-options', data=[]),
             html.Div([
-                dcc.Loading(html.Div(id='pipelines-graph-div'), type='circle', delay_show=1000),
+                html.Div(id='pipelines-graph-div'),
                 html.Aside(id='pipeline-inspector', hidden=True),
             ], className='pipeline-workspace', id='pipeline-workspace'),
             html.H4('Sync history'),
@@ -123,7 +125,9 @@ layout = [
             html.H4('Runs'),
             html.Div(id='pipelines-runs-div'),
             html.Br(),
-            html.H4('Events'),
+            html.H4('Sync activity'),
+            dcc.Dropdown(id='pipeline-log-stage', options=[], value='',
+                         placeholder='All stages', clearable=True),
             html.Pre('', id='pipelines-events-pre', className='pipelines-events'),
             dcc.Store(id='pipelines-events-store', data={}),
             html.Br(),

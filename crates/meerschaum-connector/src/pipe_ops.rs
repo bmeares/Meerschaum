@@ -495,7 +495,7 @@ pub fn engine_state_parameters(metric_key: &str) -> Option<Map> {
                     "dtypes": {"run_id": "string", "pipe_ref": "string", "action": "string",
                                "status": "string", "reason": "string", "begin": "json",
                                "end": "json", "num_chunks": "int", "attempts": "int",
-                               "started": "datetime", "finished": "datetime",
+                               "started": "datetime", "actual_started": "datetime", "finished": "datetime",
                                "duration_seconds": "float", "inserted": "int", "updated": "int",
                                "upserted": "int", "deleted": "int", "message": "string",
                                "planned_start_seconds": "float", "slack_seconds": "float"},

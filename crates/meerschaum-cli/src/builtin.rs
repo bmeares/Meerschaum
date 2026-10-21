@@ -426,18 +426,6 @@ pub fn reload(_args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     Ok(SuccessTuple::success())
 }
 
-/// What `edit config` reports after the editor exits (v4 ran `reload`).
-fn reload_config(rt: &mut Runtime<'_>) -> ActionResult {
-    let text = rt.with_formatter(|f| {
-        f.info(
-            "Nothing to reload: the Rust CLI reads the configuration on every command.",
-            true,
-        )
-    });
-    rt.print(&text);
-    Ok(SuccessTuple::success())
-}
-
 /// `get_possible_keys()`: the default keys and the files in the config directory, sorted.
 pub fn possible_config_keys(rt: &mut Runtime<'_>) -> Vec<String> {
     possible_config_keys_of(rt.config())
@@ -597,7 +585,7 @@ pub fn edit_config(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
             }
         }
     }
-    reload_config(rt)
+    Ok(SuccessTuple::success())
 }
 
 /// `clear` without a subaction: clear the screen (`clear pipes` needs an instance).

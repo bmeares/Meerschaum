@@ -61,6 +61,8 @@ impl RunStatus {
 pub struct RunFilter {
     /// Exactly this run.
     pub run_id: Option<String>,
+    /// Only runs with this exact pipeline name.
+    pub run_name: Option<String>,
     /// Only runs with this status.
     pub status: Option<RunStatus>,
     /// Only runs that target or contain a node whose ref contains this text.
@@ -252,10 +254,21 @@ impl EngineReader {
         // Over-read so the filters below still fill the page.
         for run in self
             .state
-            .recent_runs(limit.saturating_mul(4).max(limit))
+            .recent_runs(if filter.run_name.is_some() {
+                usize::MAX
+            } else {
+                limit.saturating_mul(4).max(limit)
+            })
             .await?
         {
             if filter.run_id.as_ref().is_some_and(|id| *id != run.run_id) {
+                continue;
+            }
+            if filter
+                .run_name
+                .as_ref()
+                .is_some_and(|name| !crate::runs::run_has_name(&run.run_id, name))
+            {
                 continue;
             }
             if filter.since.is_some_and(|s| run.started < s) {

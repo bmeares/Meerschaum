@@ -336,7 +336,7 @@ mrsm sync pipeline daily-totals -i sql:main
 mrsm sync pipeline daily-totals -i sql:main --schedule 'every 5 minutes' -d -n daily-sync
 ```
 
-On the Pipelines page, select a saved pipeline and open **Save / schedule** to create a
+On the Pipelines page, select a saved pipeline and open **Manage pipeline** to create a
 Job with its own name, interval, workers, retries, and rebuild permission. A Job reads the
 pipeline's current membership each time it runs. Several Jobs may use the same pipeline
 with different schedules or options. The same panel shows their status and start/stop

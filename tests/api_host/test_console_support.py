@@ -476,3 +476,106 @@ focused = focus_graph({'nodes': nodes, 'edges': edges, 'warnings': []}, 'selecte
 print('JSON:' + json.dumps([node['pipe_ref'] for node in focused['nodes']]))
 '''))
     assert out == ['source', 'selected', 'output']
+
+
+def test_pipeline_groups_and_live_timeline(sandbox):
+    root, plugins = sandbox
+    out = _json(run_python(root, plugins, '''
+import json
+from datetime import datetime, timezone, timedelta
+from meerschaum.api.dash import build_dash_app
+app = build_dash_app()
+from meerschaum.api.dash.callbacks.pipelines import build_graph_children, build_data_range
+from meerschaum.api.dash import engine
+refs = ['sql:apihosttest|test|a|None', 'sql:apihosttest|test|b|None', 'sql:apihosttest|test|c|None']
+graph = {'nodes': [{'pipe_ref': ref, 'label': engine.ref_label(ref), 'action': 'skip', 'status': 'caught_up'} for ref in refs],
+         'edges': [{'parent': refs[0], 'child': refs[1]}, {'parent': refs[1], 'child': refs[2]}], 'warnings': []}
+definitions = {'first': {'targets': refs[:2]}, 'second': {'targets': refs[1:]}}
+children = build_graph_children(graph, [], definitions)
+world = children[0].children[1].children
+stages = [card for card in world.children if card.className == 'pipeline-stage']
+groups = [card for card in world.children if card.className == 'pipeline-group']
+assert len(stages) == 4 and len(groups) == 2
+assert len({card.id['index'] for card in stages}) == 4
+assert len(json.loads(world.to_plotly_json()['props']['data-edges'])) == 2
+# A cross-membership dependency stays visible even with disjoint target sets.
+children = build_graph_children(graph, [], {'first': {'targets': refs[:1]}, 'second': {'targets': refs[1:]}})
+world = children[0].children[1].children
+assert len(json.loads(world.to_plotly_json()['props']['data-edges'])) == 2
+now = datetime.now(timezone.utc)
+bar = {'pipe_ref': refs[0], 'status': 'pending', 'actual_start': (now - timedelta(seconds=2)).isoformat(),
+       'actual_end': None, 'planned_start': now.isoformat(), 'planned_end': (now + timedelta(seconds=30)).isoformat()}
+figure = engine.gantt_figure({'bars': [bar], 'summary': {'run': {'run_id': 'test'}}})
+assert figure['data'][1]['x'][0] >= 2000
+assert figure['data'][1]['customdata'] == ['running']
+assert figure['layout']['uirevision'] == 'test'
+icon = engine.action_indicator('root').to_plotly_json()['props']
+assert icon['title'] == 'Fetch source data' and len(icon['children']) == 1
+range_view = build_data_range({'begin': 10, 'end': 20})
+rows = range_view.children[1].children.children
+assert [row.children[0].children for row in rows] == ['From', 'To']
+assert [row.children[2].children.children for row in rows] == ['10', '20']
+assert engine.run_belongs_to_pipeline({'run': {'run_id': 'daily-totals-2026-10-21T10-00-00.123456Z-abcdef01'}}, 'daily-totals')
+assert not engine.run_belongs_to_pipeline({'run': {'run_id': 'daily-totals-2026-10-21T10-00-00.123456Z-abcdef01'}}, 'daily')
+print('JSON:' + json.dumps({'groups': len(groups), 'stages': len(stages)}))
+'''))
+    assert out == {'groups': 2, 'stages': 4}
+
+
+def test_pipeline_live_selection_keeps_history_and_rejects_other_pipeline_runs(sandbox):
+    root, plugins = sandbox
+    out = _json(run_python(root, plugins, '''
+import json
+from types import SimpleNamespace
+import dash
+from meerschaum.api.dash import build_dash_app
+build_dash_app()
+from meerschaum.api.dash.callbacks import pipelines as page
+from meerschaum.api.dash.callbacks import pipeline_management as management
+from meerschaum.api.dash import execute, sessions
+from dash.exceptions import PreventUpdate
+updates = {}
+dash.ctx = SimpleNamespace(triggered_id='pipelines-interval')
+dash.set_props = lambda id, props: updates.setdefault(str(id), {}).update(props)
+page.is_session_authenticated = lambda session: True
+page._engine.get_instance = lambda: 'sql:apihosttest'
+ids = ['daily-2026-10-21T10-00-00.123456Z-abcdef01', 'daily-2026-10-20T10-00-00.123456Z-abcdef01']
+runs = [{'run': {'run_id': id}, 'status': 'succeeded', 'counts': {}} for id in ids]
+requests = []
+def get_runs(*args, **kwargs):
+    requests.append(kwargs)
+    return runs
+page._engine.get_runs = get_runs
+page._engine.get_run_detail = lambda instance, id: {'summary': {'run': {'run_id': id}, 'status': 'succeeded'}, 'bars': []}
+def render(search):
+    return page.render_pipelines('/dash/pipelines', search,
+        {'name': 'daily', 'targets': []}, {'pipeline': 'daily', 'run_id': ids[0]},
+        0, 0, {}, 'sql:apihosttest|test|old-stage|None', {'session-id': 'test'})
+result = render('')
+assert result[-1]['run_id'] == ids[0]
+assert requests[-1]['run_id'] is None and requests[-1]['run_name'] == 'daily'
+result = render('?run_id=' + ids[1])
+assert result[-1]['run_id'] == ids[1]
+result = render('?run_id=weekly-2026-10-21T10-00-00.123456Z-abcdef01')
+assert result[-1].get('run_id') is None
+assert updates['pipeline-run-status']['children'] == ''
+assert updates['pipeline-log-stage']['value'] is None
+# Mutations always require an authorized session, then delegate to the server policy.
+management.is_state_authenticated = lambda data: False
+calls = []
+execute.run_action = lambda *args: calls.append(args) or {'success': True, 'job': 'job', 'stream': '/logs/job/stream', 'msg': 'started'}
+dash.ctx = SimpleNamespace(triggered_id='pipeline-run-now')
+try:
+    management.select_or_run_pipeline([], 1, 'daily', {})
+    raise AssertionError('Unauthorized run was accepted')
+except PreventUpdate:
+    pass
+assert calls == []
+management.is_state_authenticated = lambda data: True
+sessions.get_username_from_session = lambda session: 'testuser'
+management.select_or_run_pipeline([], 1, 'daily', {'session-id': 'test'})
+assert calls == [(['sync', 'pipeline', 'daily', '-i', 'sql:apihosttest', '--nopretty'], 'testuser')]
+assert updates['pipeline-live-run']['data']['pipeline'] == 'daily'
+print('JSON:' + json.dumps({'scoped': True, 'authorized': True}))
+'''))
+    assert out == {'scoped': True, 'authorized': True}

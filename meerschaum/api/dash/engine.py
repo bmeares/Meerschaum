@@ -15,7 +15,7 @@ writes. Every function takes the instance (the API instance by default) and retu
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 import meerschaum as mrsm
 from meerschaum.utils.typing import Any, Dict, List, Optional, Tuple
@@ -71,7 +71,6 @@ def action_indicator(action: str, failed: bool = False) -> Any:
     }.get(action, '◌')
     return html.Span([
         html.Span(symbol, **{'aria-hidden': 'true'}),
-        html.Span(' Fetch source data') if action == 'root' and not failed else None,
     ], className='pipeline-stage-status', title=label, **{'aria-label': label})
 
 
@@ -269,12 +268,20 @@ def focus_graph(graph: Dict[str, Any], selected: str) -> Dict[str, Any]:
     }
 
 
+def run_belongs_to_pipeline(run: Dict[str, Any], name: str) -> bool:
+    """Match the complete name before the engine's timestamp and collision suffix."""
+    import re
+    run_id = run.get('run', {}).get('run_id', '')
+    return bool(re.fullmatch(re.escape(name) + r'-\d{4}-\d\d-\d\dT\d\d-\d\d-\d\d\.\d{6}Z-[a-f0-9]{8}', run_id))
+
+
 def get_runs(
     instance: Any = None,
     run_id: Optional[str] = None,
     pipe: Optional[str] = None,
     status: Optional[str] = None,
     limit: int = 100,
+    run_name: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """
     Recent runs, newest first (`{run, status, duration_seconds, counts}` each). `run_id` selects
@@ -283,6 +290,8 @@ def get_runs(
     instance = instance if instance is not None else get_instance()
     request = _request(instance)
     request['limit'] = limit
+    if run_name:
+        request['run_name'] = run_name
     if status:
         request['status'] = status
     if run_id:
@@ -330,12 +339,24 @@ def gantt_figure(detail: Dict[str, Any]) -> Dict[str, Any]:
     """
     traces = []
     for name, color, planned in (('Planned', '#9aa5b1', True), ('Actual', '#3486bd', False)):
-        ys, bases, xs = [], [], []
+        ys, bases, xs, colors, statuses = [], [], [], [], []
         for bar in detail.get('bars', []):
             start = _parse_ts(bar.get('planned_start' if planned else 'actual_start'))
             end = _parse_ts(bar.get('planned_end' if planned else 'actual_end'))
-            if start is None or end is None:
+            if start is None:
                 continue
+            status = bar.get('status', '')
+            if not planned and end is None:
+                end = datetime.now(timezone.utc) if start.tzinfo else datetime.now()
+                status = 'running'
+            if end is None:
+                continue
+            colors.append(color if planned else {
+                'running': '#3486bd', 'succeeded': '#2e9e5b', 'failed': '#d1495b',
+                'upstream_failed': '#d1495b', 'skipped': '#9aa5b1',
+                'rebuild_pending': '#e0a526',
+            }.get(status, color))
+            statuses.append(status)
             ys.append(ref_label(bar['pipe_ref']))
             bases.append(start.isoformat())
             xs.append(max(int((end - start).total_seconds() * 1000), 1))
@@ -346,7 +367,9 @@ def gantt_figure(detail: Dict[str, Any]) -> Dict[str, Any]:
             'y': ys,
             'base': bases,
             'x': xs,
-            'marker': {'color': color},
+            'marker': {'color': colors},
+            'customdata': statuses,
+            'hovertemplate': '%{y}<br>%{customdata}<extra>%{fullData.name}</extra>',
         })
     run_id = (detail.get('summary', {}).get('run', {}) or {}).get('run_id', '')
     return {
@@ -354,10 +377,12 @@ def gantt_figure(detail: Dict[str, Any]) -> Dict[str, Any]:
         'layout': {
             'title': {'text': f"Run {run_id}"},
             'xaxis': {'type': 'date'},
-            'yaxis': {'autorange': 'reversed', 'automargin': True,
-                      'tickfont': {'family': 'monospace', 'size': 12}},
             'margin': {'l': 30, 'r': 30, 't': 60, 'b': 60},
             'barmode': 'group',
+            'uirevision': run_id,
+            'yaxis': {'autorange': 'reversed', 'automargin': True,
+                      'categoryorder': 'array',
+                      'categoryarray': [ref_label(bar['pipe_ref']) for bar in detail.get('bars', [])]},
             'height': max(260, 120 + 60 * len({t for t in traces[0]['y']} if traces else [])),
             'paper_bgcolor': 'rgba(0,0,0,0)',
             'plot_bgcolor': 'rgba(0,0,0,0)',

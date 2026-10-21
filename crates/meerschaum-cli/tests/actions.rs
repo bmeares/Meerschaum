@@ -346,7 +346,7 @@ fn edit_config_opens_the_editor_then_reloads() {
     let path = std::path::PathBuf::from(&commands[0].args[0]);
     assert_eq!(path.file_name().unwrap(), "system.json");
     assert!(path.exists(), "the key's file is created before editing");
-    assert!(out.contains("Nothing to reload"), "{out}");
+    assert!(!out.contains("Nothing to reload"), "{out}");
 }
 
 #[test]

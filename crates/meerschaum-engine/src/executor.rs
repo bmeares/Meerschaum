@@ -486,6 +486,7 @@ struct Dispatcher<'a, 'c, S, E, L> {
     cached: CachedState<'a, S>,
     planned: HashMap<PipeRef, PlannedNode>,
     rows: IndexMap<PipeRef, NodeRow>,
+    persisted_rows: HashMap<PipeRef, NodeRow>,
     outcome: HashMap<PipeRef, ParentState>,
     indegree: HashMap<PipeRef, usize>,
     children: HashMap<PipeRef, Vec<PipeRef>>,
@@ -512,6 +513,33 @@ where
     E: SyncExecutor,
     L: LeaseSource,
 {
+    async fn persist_progress(&mut self, run: &RunRow) {
+        let record = RunRecord {
+            run: run.clone(),
+            nodes: self
+                .rows
+                .values()
+                .filter(|row| self.persisted_rows.get(&row.pipe_ref) != Some(*row))
+                .cloned()
+                .collect(),
+        };
+        if record.nodes.is_empty() {
+            return;
+        }
+        if let Err(error) = self.ctx.state.record_run(&record).await {
+            let warning = format!("cannot record run progress: {error}");
+            if !self.state_warnings.contains(&warning) {
+                self.state_warnings.push(warning);
+            }
+        } else {
+            self.state_warnings
+                .retain(|warning| !warning.starts_with("cannot record run progress:"));
+            for row in record.nodes {
+                self.persisted_rows.insert(row.pipe_ref.clone(), row);
+            }
+        }
+    }
+
     fn finish(&mut self, r: &PipeRef, status: NodeStatus, message: Option<String>) {
         self.outcome.insert(
             r.clone(),
@@ -1110,6 +1138,7 @@ where
             .map(|n| (n.pipe_ref.clone(), n.clone()))
             .collect(),
         rows,
+        persisted_rows: HashMap::new(),
         outcome: HashMap::new(),
         indegree,
         children,
@@ -1126,6 +1155,21 @@ where
         early_seen: HashMap::new(),
         early_plans: HashMap::new(),
     };
+
+    let running = RunRow {
+        run_id: run_id.clone(),
+        started,
+        finished: None,
+        success: None,
+        message: None,
+        targets: targets.clone(),
+        workers: options.workers,
+        num_nodes: plan.nodes.len(),
+        resumed_from: options.plan.resumed_from.clone(),
+        holder: options.holder.clone(),
+        selection: options.selection.clone(),
+    };
+    d.persist_progress(&running).await;
 
     let global = Arc::new(Semaphore::new(options.workers));
     let sems = |m: &HashMap<String, usize>| -> HashMap<String, Arc<Semaphore>> {
@@ -1222,6 +1266,12 @@ where
                     attempt,
                 },
             );
+            if let Some(row) = d.rows.get_mut(&r) {
+                row.started.get_or_insert_with(Utc::now);
+                row.finished = None;
+                row.attempts = attempt;
+            }
+            d.persist_progress(&running).await;
             spawn_sync(
                 &mut join,
                 ctx.executor.clone(),
@@ -1234,6 +1284,9 @@ where
             );
         }
         ready = deferred;
+        if progressed {
+            d.persist_progress(&running).await;
+        }
         if !d.newly_ready.is_empty() {
             ready.append(&mut d.newly_ready);
             continue;
@@ -1305,6 +1358,11 @@ where
                         attempt: 1,
                     },
                 );
+                if let Some(row) = d.rows.get_mut(&c) {
+                    row.started.get_or_insert_with(Utc::now);
+                    row.attempts = 1;
+                }
+                d.persist_progress(&running).await;
                 d.early_running.insert(c.clone());
                 d.early_plans.insert(c.clone(), node);
                 spawn_sync(
@@ -1461,6 +1519,7 @@ where
                 ready.append(&mut d.newly_ready);
             }
         }
+        d.persist_progress(&running).await;
     }
 
     let count = |s: NodeStatus| d.rows.values().filter(|r| r.status == s).count();

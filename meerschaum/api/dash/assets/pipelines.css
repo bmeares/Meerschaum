@@ -49,3 +49,16 @@
     .pipeline-find { width: 100%; }
 }
 @media(max-width: 600px) { .pipeline-key-filters { grid-template-columns: 1fr; } }
+
+.pipeline-group { position: absolute; border: 2px dashed #71889c; border-radius: 12px; cursor: pointer; }
+.pipeline-group:hover { border-color: #a9d9fc; }
+.pipeline-group-title { position: absolute; top: 8px; left: 16px; border: 0; background: #17212b; color: #dceaf6; font-weight: 600; padding: 4px 10px; border-radius: 4px; }
+.pipeline-group-title:focus-visible { outline: 2px solid #85caff; }
+#pipeline-command-output, .pipelines-events { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 320px; overflow: auto; }
+
+.pipeline-data-range { margin: 12px 0; overflow-x: auto; }
+.pipeline-data-range th { font-weight: normal; padding: 4px 14px 4px 0; white-space: nowrap; }
+.pipeline-data-range td { padding: 4px 0; }
+#pipeline-inspector .pipeline-data-range pre { margin: 0; padding: 0; background: transparent; white-space: pre; }
+
+.pipeline-data-range td + td { padding-left: 10px; }

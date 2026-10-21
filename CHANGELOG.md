@@ -4,6 +4,20 @@
 
 Meerschaum 5 is a rewrite of the core in Rust: the data kernel, the `sql:` / `valkey:` / `api:` connectors, the Syncing Engine, jobs, compose, the HTTP API, the MCP server and the `mrsm` CLI and shell. The `meerschaum` Python package stays as the plugin SDK, a façade and the host of the Plotly Dash web console, so pipes, parameters, configuration, compose files, jobs, the HTTP API and the Python public API keep working. Read the [migration guide](/reference/migrating-to-v5/) before upgrading; v4.1.x stays installable and receives security fixes until 5.1.0.
 
+### v5.0.0rc5
+
+- **Run and watch named pipelines from the console.**
+  Named pipeline groups have dashed boundaries and clickable names. Select a pipeline to inspect its membership or run it immediately through the API's authenticated execution endpoint. The page follows that run's command output, per-stage sync activity, completion counts, and live Gantt progress. Pipeline history is scoped by exact name, including pipelines with older runs.
+
+- **Clarify pipeline controls and planned actions.**
+  “Manage pipeline” opens the pipeline definition and schedule form. Planned actions include readable descriptions, source-fetch labels appear on icon hover, and “Open pipe” uses a new tab. Stage queries have SQL syntax highlighting, and sync bounds appear in aligned rows. Live polling preserves the canvas without showing a loading spinner.
+
+- **Keep interactive prompts quiet until typing begins.**
+  Selection prompts hide suggestions while empty, including after clearing the input. Configuration editing no longer prints the redundant Rust CLI reload message.
+
+- **Repair the Docker web terminal configuration.**
+  The bundled tmux configuration contains only tmux commands and loads without syntax errors.
+
 ### v5.0.0rc4
 
 - **Make concurrent plugin environment startup safe.**  
