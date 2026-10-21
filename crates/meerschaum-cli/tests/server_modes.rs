@@ -58,6 +58,9 @@ impl Sandbox {
             .env("MRSM_ROOT_DIR", self.root.path())
             .env("MRSM_PLUGINS_DIR", self.plugins.path())
             .env("MRSM_NOASK", "1")
+            // These process tests exercise routing and startup warnings, never installers.
+            // A source checkout makes the facade discoverable even without Dash dependencies.
+            .env("MRSM_NO_AUTO_INSTALL", "1")
             .env(
                 "PYTHONPATH",
                 std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -453,6 +456,10 @@ fn startup_stderr(extra: &[&str]) -> String {
                 break;
             }
             if serves_http(port) {
+                assert!(
+                    !sandbox.root.path().join("venvs/mrsm").exists(),
+                    "startup warning checks must not create a dependency environment"
+                );
                 return std::fs::read_to_string(&log).unwrap_or_default();
             }
             assert!(

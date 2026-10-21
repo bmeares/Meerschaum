@@ -115,15 +115,20 @@ fn completions_match_v4() {
                 )
             })
             .collect();
-        // Overlay (v5 addition, PARITY.md "W17C-CP"): `show completions` is a v5-only subaction,
-        // so `show c` also completes it. The v4 fixture has no such word; nothing else differs.
-        // Overlay (v5 addition, PARITY.md "W17C-PG-001"): likewise `upgrade postgres` for
-        // `upgrade p`.
+        // Prefixes also offer v5 subactions (e.g. `sync p` offers `pipeline`). Exclude only
+        // these registered additions while comparing against the unchanged v4 fixture.
+        // Restrict this to the subaction position so later argument values are compared intact.
+        let words: Vec<&str> = input.split_whitespace().collect();
+        let subaction_parent =
+            (words.len() == 2 && !input.ends_with(char::is_whitespace)).then(|| words[0]);
         let got: Vec<(String, i64, String, usize)> = data
             .get_completions(input, &dates)
             .into_iter()
-            .filter(|c| !(input == "show c" && c.text == "completions"))
-            .filter(|c| !(input == "upgrade p" && c.text == "postgres"))
+            .filter(|c| {
+                !subaction_parent.is_some_and(|action| {
+                    meerschaum_cli::actions::is_v5_only_subaction(action, &c.text)
+                })
+            })
             .map(|c| (c.text, c.start_position, c.display, c.highlight))
             .collect();
         if got != expected {
@@ -148,6 +153,20 @@ fn completions_match_v4() {
         fx["cases"].as_array().unwrap().len(),
         failures.join("\n")
     );
+}
+
+#[test]
+fn sync_pipeline_completion_is_exposed_in_v5() {
+    let data = shell::completer::CompletionData::default();
+    let completions = data.get_completions("sync p", &DateContext::system());
+    let pipeline = completions
+        .iter()
+        .find(|c| c.text == "pipeline")
+        .expect("the interactive shell offers the v5 pipeline subaction");
+    assert_eq!(pipeline.start_position, -1);
+    assert_eq!(pipeline.display, "pipeline");
+    assert_eq!(pipeline.highlight, 1);
+    assert!(completions.iter().any(|c| c.text == "pipes"));
 }
 
 /// v5-only: `install driver`, `uninstall driver` and `show drivers` complete driver names (not
