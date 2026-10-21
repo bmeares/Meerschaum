@@ -215,13 +215,19 @@ def _delete(*patterns: str) -> None:
 def conn():
     if not FLAVOR_SELECTED:
         pytest.skip("set MRSM_TEST_FLAVORS to include valkey")
-    connection = _valkey('w16s_valkey', host='localhost', port=PORT)
-    try:
-        assert connection.test_connection() is True
-    except ConnectionError:
-        pytest.skip("the Valkey container on 6399 is not running")
-    yield connection
-    _delete('w16s*', 'mrsm_pipe:w16s:*', 'mrsm_user:*w16s*', 'mrsm_plugin:w16s*')
+    from meerschaum.utils.locks import InterProcessLock
+    ### These tests clear a shared namespace, including between v4 and v5 comparisons.
+    ### Hold the lock through teardown so another xdist worker cannot delete active test data.
+    with InterProcessLock(pathlib.Path(_scratch()) / 'valkey-tests.lock'):
+        connection = _valkey('w16s_valkey', host='localhost', port=PORT)
+        try:
+            assert connection.test_connection() is True
+        except ConnectionError:
+            pytest.skip("the Valkey container on 6399 is not running")
+        try:
+            yield connection
+        finally:
+            _delete('w16s*', 'mrsm_pipe:w16s:*', 'mrsm_user:*w16s*', 'mrsm_plugin:w16s*')
 
 
 def _pipe(conn, name=None, **kw):
