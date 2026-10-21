@@ -19,6 +19,7 @@ import copy
 import json
 import os
 import uuid
+from pathlib import Path
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -137,7 +138,11 @@ def instance(request, tmp_path):
         assert conn is not None, "the w15l_custom plugin did not import"
         yield conn
     else:
-        yield mrsm.get_connector('valkey', 'w15l2_valkey', host='localhost', port=6399)
+        from meerschaum.utils.locks import InterProcessLock
+        ### The cleanup test clears this module's namespace; it must not run while another
+        ### xdist worker is using one of those pipes.
+        with InterProcessLock(Path.home() / '.cache' / 'mrsm-w15l2-valkey.lock'):
+            yield mrsm.get_connector('valkey', 'w15l2_valkey', host='localhost', port=6399)
 
 
 @pytest.fixture
