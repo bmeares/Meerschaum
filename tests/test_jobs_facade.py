@@ -241,6 +241,31 @@ def test_job_from_pid(local_jobs):
         Job.from_pid(2 ** 22 + 12345)
 
 
+@pytest.mark.skipif(not pathlib.Path('/proc/self/status').exists(), reason='Requires Linux /proc.')
+def test_job_from_pid_preserves_supervisor_identity(local_jobs):
+    job = local_jobs(LOOP)
+    assert job.start()[0]
+    pid_path = job.daemon.path / 'process.pid'
+
+    def worker_pid():
+        try:
+            return int(pid_path.read_text().strip())
+        except (FileNotFoundError, ValueError):
+            return None
+
+    pid = _wait_for(worker_pid)
+    assert pid is not None
+    # Once the worker PID is recorded, the old supervisor PID no longer matches job.pid.
+    # A caller which read that PID before the handoff must still find the same Job.
+    status = pathlib.Path('/proc', str(pid), 'status').read_text()
+    supervisor_pid = int(next(line.split()[1] for line in status.splitlines()
+                              if line.startswith('PPid:')))
+    assert supervisor_pid != pid
+    found = Job.from_pid(supervisor_pid)
+    assert found.name == job.name
+    assert found.sysargs == job.sysargs
+
+
 def test_rotating_file_and_stdin_file(tmp_path):
     from meerschaum.utils.daemon import RotatingFile, StdinFile
     log = RotatingFile(tmp_path / 'w16sf.log', num_files_to_keep=2, max_file_size=100)

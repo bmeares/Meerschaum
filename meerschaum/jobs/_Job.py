@@ -188,7 +188,8 @@ class Job:
             pass
 
         native = _native.core()
-        for daemon_id in native.jobs_daemon_ids():
+        daemon_ids = native.jobs_daemon_ids()
+        for daemon_id in daemon_ids:
             job = Job(daemon_id, executor_keys=executor_keys)
             if job.pid == pid:
                 return job
@@ -202,6 +203,20 @@ class Job:
             for arg in cmdline_path.read_bytes().decode('utf-8', errors='replace').split('\0')
             if arg
         ]
+        # During startup the PID may change from the supervisor to its worker between
+        # the caller's PID read and the registry lookup above. The supervisor's persistent
+        # marker still identifies the registered Job; do not invent a new name for it.
+        for arg in command_args:
+            if arg.startswith("daemon_id='") and arg.endswith("'"):
+                daemon_id = arg[len("daemon_id='"):-1]
+                if daemon_id in daemon_ids:
+                    return Job(daemon_id, executor_keys=executor_keys)
+        if '__mrsm_job_supervisor__' in command_args or '__mrsm_run_daemon__' in command_args:
+            if '--daemon-id' in command_args:
+                index = command_args.index('--daemon-id') + 1
+                if index < len(command_args) and command_args[index] in daemon_ids:
+                    return Job(command_args[index], executor_keys=executor_keys)
+
         if len(command_args) > 1 and command_args[1] == '-c':
             raise EnvironmentError(f"Is process {pid} a running job?")
 
