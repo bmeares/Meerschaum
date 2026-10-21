@@ -241,10 +241,7 @@ def test_job_from_pid(local_jobs):
         Job.from_pid(2 ** 22 + 12345)
 
 
-@pytest.mark.skipif(not pathlib.Path('/proc/self/status').exists(), reason='Requires Linux /proc.')
-def test_job_from_pid_preserves_supervisor_identity(local_jobs):
-    job = local_jobs(LOOP)
-    assert job.start()[0]
+def _supervisor_pid(job):
     pid_path = job.daemon.path / 'process.pid'
 
     def worker_pid():
@@ -255,15 +252,35 @@ def test_job_from_pid_preserves_supervisor_identity(local_jobs):
 
     pid = _wait_for(worker_pid)
     assert pid is not None
-    # Once the worker PID is recorded, the old supervisor PID no longer matches job.pid.
-    # A caller which read that PID before the handoff must still find the same Job.
     status = pathlib.Path('/proc', str(pid), 'status').read_text()
     supervisor_pid = int(next(line.split()[1] for line in status.splitlines()
                               if line.startswith('PPid:')))
     assert supervisor_pid != pid
-    found = Job.from_pid(supervisor_pid)
+    return supervisor_pid
+
+
+@pytest.mark.skipif(not pathlib.Path('/proc/self/status').exists(), reason='Requires Linux /proc.')
+def test_job_from_pid_preserves_supervisor_identity(local_jobs):
+    job = local_jobs(LOOP)
+    assert job.start()[0]
+    # Once the worker PID is recorded, the old supervisor PID no longer matches job.pid.
+    # A caller which read that PID before the handoff must still find the same Job.
+    found = Job.from_pid(_supervisor_pid(job))
     assert found.name == job.name
     assert found.sysargs == job.sysargs
+
+
+@pytest.mark.skipif(not pathlib.Path('/proc/self/status').exists(), reason='Requires Linux /proc.')
+def test_job_from_pid_rejects_another_roots_same_name(local_jobs, tmp_path):
+    from meerschaum.config._paths import replace_root_dir
+    job = local_jobs(LOOP)
+    assert job.start()[0]
+    with replace_root_dir(tmp_path / 'other-root'):
+        foreign = local_jobs(LOOP, name=job.name)
+        assert foreign.start()[0]
+        foreign_supervisor = _supervisor_pid(foreign)
+    with pytest.raises(EnvironmentError, match='another Meerschaum jobs directory'):
+        Job.from_pid(foreign_supervisor)
 
 
 def test_rotating_file_and_stdin_file(tmp_path):
