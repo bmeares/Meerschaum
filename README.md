@@ -57,7 +57,7 @@ mrsm stack up -d
 mrsm bootstrap pipes
 ```
 
-Meerschaum 5 is a Rust core with a Python SDK. While it is in release candidates, install it with `pip install --pre meerschaum`; for a standalone `mrsm` binary run `cargo install meerschaum --locked` (Rust 1.95 or newer; add `--version 5.0.0-rc.3` for the candidate). Upgrading from 4.x? Read the [migration guide](https://meerschaum.io/reference/migrating-to-v5/).
+Meerschaum 5 is a Rust core with a Python SDK. While it is in release candidates, install it with `pip install --pre meerschaum`; for a standalone `mrsm` binary run `cargo install meerschaum --locked` (Rust 1.95 or newer; add `--version 5.0.0-rc.4` for the candidate). Upgrading from 4.x? Read the [migration guide](https://meerschaum.io/reference/migrating-to-v5/).
 
 ## Usage
 Visit [meerschaum.io](https://meerschaum.io) for setup, usage, and troubleshooting information. You can find technical documentation at [docs.meerschaum.io](https://docs.meerschaum.io).

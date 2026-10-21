@@ -53,11 +53,26 @@ def ref_label(pipe_ref: str) -> str:
 def action_label(action: str) -> str:
     """Describe the next sync without exposing engine bookkeeping."""
     return {
-        'root': 'Fetch source data', 'incremental': 'New parent data available',
-        'backfill': 'Reprocess changed data', 'skip': 'Up to date',
+        'root': 'Fetch source data', 'incremental': 'Needs sync',
+        'backfill': 'Reprocess changed data', 'skip': 'Up-to-date',
         'rebuild': 'Rebuild required', 'rebuild_pending': 'Rebuild needs approval',
         'observe': 'Outside this selection',
     }.get(action, action.replace('_', ' ').capitalize())
+
+
+def action_indicator(action: str, failed: bool = False) -> Any:
+    """An accessible icon whose sync status label appears on hover."""
+    from meerschaum.utils.packages import import_html
+    html = import_html()
+    label = 'Last run failed' if failed else action_label(action)
+    symbol = '!' if failed else {
+        'root': '☁', 'skip': '✓', 'incremental': '↻', 'backfill': '↻',
+        'rebuild': '⚠', 'rebuild_pending': '⚠', 'observe': '◌',
+    }.get(action, '◌')
+    return html.Span([
+        html.Span(symbol, **{'aria-hidden': 'true'}),
+        html.Span(' Fetch source data') if action == 'root' and not failed else None,
+    ], className='pipeline-stage-status', title=label, **{'aria-label': label})
 
 
 def pipe_href(pipe_ref: str) -> str:
@@ -93,7 +108,7 @@ def _request(instance: Any, **kwargs: Any) -> Dict[str, Any]:
 def _instance_pipes(instance: Any) -> List[mrsm.Pipe]:
     from meerschaum.utils.pipes import flatten_pipes_dict
     pipes_dict = mrsm.get_pipes(instance=instance, as_list=False)
-    return flatten_pipes_dict(pipes_dict)
+    return [pipe for pipe in flatten_pipes_dict(pipes_dict) if pipe.connector_keys != 'mrsm']
 
 
 def plan_graph(
@@ -120,6 +135,8 @@ def plan_graph(
         parents=True if pipes is None and parents is None else parents,
         children=children,
     )
+    # Preserve dependencies inside the selected membership without adding outside pipes.
+    request['graph'] = True
     plan = Plan(_call('engine_plan', request))
     nodes = []
     by_ref = {}

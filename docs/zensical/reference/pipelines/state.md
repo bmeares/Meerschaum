@@ -76,7 +76,7 @@ run_id                      success  message                                    
 
 A node row has its `action`, `status`, the planner's `reason`, the window it synced (`begin`, `end`), `num_chunks`, `attempts`, timings and the counts (`inserted`, `updated`, `upserted`, `deleted`), plus `planned_start_seconds` and `slack_seconds` from the critical-path calculation that [the Gantt chart](/reference/pipelines/visualization/) draws. The planner's duration estimates are an exponentially weighted moving average per `(pipe, action)` over past runs (30 seconds for a pipe that has never run).
 
-Run IDs are sortable ULIDs. Retention is `clear_pipe(end=now − run_history_days)` on runs, nodes and events (default 30 days); consumed ledger entries are pruned alongside. Unconsumed entries are never pruned by age.
+New run IDs contain the pipeline name, readable UTC start time, and a collision suffix. Earlier ULID run IDs remain valid. Retention is `clear_pipe(end=now − run_history_days)` on runs, nodes and events (default 30 days); consumed ledger entries are pruned alongside. Unconsumed entries are never pruned by age.
 
 From Python, read it through a `Pipeline` (or `meerschaum.core.Pipeline.get_runs()` for every run on an instance):
 

@@ -320,6 +320,21 @@ fn dropdown_rows(term: &Term) -> Vec<String> {
 }
 
 #[test]
+fn edit_config_suggests_keys_before_typing_and_filters_them() {
+    let setup = Setup::new("edit-config");
+    let mut term = Term::spawn(&setup.env, &setup.base, &["edit", "config"]);
+    term.wait_screen("the configuration dropdown", 60, |s| {
+        s.contains("Configuration key:") && s.contains("... ")
+    });
+    term.send("stac");
+    term.wait_screen("the filtered YAML key", 10, |s| {
+        s.lines().any(|line| line.trim() == "stack") && !s.contains("more")
+    });
+    term.send("\x03");
+    assert!(!term.wait_exit(30).success());
+}
+
+#[test]
 fn a_password_prompt_echoes_a_star_per_character() {
     let setup = Setup::new("password");
     let mut term = Term::spawn(

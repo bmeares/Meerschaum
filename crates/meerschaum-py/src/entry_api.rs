@@ -255,6 +255,37 @@ impl Host for PyHost {
         // Like `prompt_toolkit` without a terminal: the typed line is appended to the prefill.
         py_input(prompt).map(|line| format!("{prefill}{line}"))
     }
+
+    fn read_line_suggesting(
+        &mut self,
+        prompt: &str,
+        items: &[String],
+        prefill: &str,
+    ) -> Option<String> {
+        if !py_isatty("stdin") || !py_isatty("stdout") {
+            return self.read_line_prefilled(prompt, prefill);
+        }
+        if meerschaum_cli::native::jobs::stop_requested_flag().load(Ordering::SeqCst) {
+            return None;
+        }
+        Python::attach(|py| -> PyResult<Option<String>> {
+            let read = py
+                .import("meerschaum.utils.prompt")?
+                .getattr("_read_suggested")?;
+            match read.call1((prompt, items.to_vec(), prefill)) {
+                Ok(line) => Ok(Some(line.extract::<String>()?)),
+                Err(e)
+                    if e.is_instance_of::<PyEOFError>(py)
+                        || e.is_instance_of::<PyKeyboardInterrupt>(py) =>
+                {
+                    Ok(None)
+                }
+                Err(e) => Err(e),
+            }
+        })
+        .ok()
+        .flatten()
+    }
 }
 
 /// Run `f` on a runtime on the façade session printing to Python's streams, with the live config

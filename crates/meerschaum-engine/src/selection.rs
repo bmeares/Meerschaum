@@ -2,10 +2,11 @@
 //!
 //! A [`Pipeline`] is a [`Selection`] over the implicit graph: a set of target pipes plus
 //! traversal depths. `parents` / `children` mean transitive ancestors / descendants, limited by
-//! an optional depth. A pipeline is not stored as its own entity. Resolving it yields the
+//! an optional depth. Named selections may be stored as instance metadata. Resolving one yields the
 //! induced [`Subgraph`] in dependency order.
 //!
-//! A selection without traversal (`parents` and `children` both unset) is **flat**: the CLI's
+//! A selection without traversal (`parents` and `children` both unset) is **flat** unless
+//! `graph` is set (named pipelines preserve induced dependencies): the CLI's
 //! `sync pipes -c/-m/-l/-t` without `--parents` / `--children`, which keeps v4 semantics.
 
 use std::collections::{BTreeSet, HashMap, VecDeque};
@@ -183,6 +184,9 @@ pub enum Targets {
 pub struct Selection {
     /// The targets.
     pub targets: Targets,
+    /// Respect dependencies between selected nodes even without traversal (saved pipelines).
+    #[serde(default)]
+    pub graph: bool,
     /// Ancestors to include.
     #[serde(default)]
     pub parents: Option<Depth>,
@@ -198,6 +202,7 @@ impl Selection {
             targets: Targets::Refs(targets.into_iter().collect()),
             parents: None,
             children: None,
+            graph: false,
         }
     }
 
@@ -207,6 +212,7 @@ impl Selection {
             targets: Targets::Filter(filter),
             parents: None,
             children: None,
+            graph: false,
         }
     }
 
@@ -222,9 +228,16 @@ impl Selection {
         self
     }
 
+    /// Builder-style: preserve dependencies without expanding membership.
+    pub fn with_graph(mut self, graph: bool) -> Selection {
+        self.graph = graph;
+        self
+    }
+
     /// Whether no traversal was requested (v4 semantics, §5.3 R1).
     pub fn is_flat(&self) -> bool {
-        !matches!(self.parents, Some(Depth::All) | Some(Depth::N(1..)))
+        !self.graph
+            && !matches!(self.parents, Some(Depth::All) | Some(Depth::N(1..)))
             && !matches!(self.children, Some(Depth::All) | Some(Depth::N(1..)))
     }
 }

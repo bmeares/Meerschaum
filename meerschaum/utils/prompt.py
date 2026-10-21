@@ -13,6 +13,25 @@ import meerschaum as mrsm
 from meerschaum.utils.typing import Any, Union, Optional, Tuple, List
 
 
+def _read_suggested(question: str, items: List[str], prefill: str = '') -> str:
+    """Read a native action's already-formatted prompt with a filtering dropdown."""
+    from meerschaum.utils.packages import attempt_import
+    toolkit = attempt_import('prompt_toolkit', lazy=False)
+    completion = attempt_import('prompt_toolkit.completion', lazy=False)
+
+    def show_suggestions():
+        toolkit.application.current.get_app().current_buffer.start_completion(select_first=False)
+
+    return toolkit.prompt(
+        toolkit.formatted_text.ANSI(question),
+        default=prefill,
+        completer=completion.WordCompleter(items, ignore_case=True, match_middle=True),
+        complete_while_typing=True,
+        reserve_space_for_menu=min(len(items), 8),
+        pre_run=show_suggestions,
+    )
+
+
 def prompt(
     question: str = '',
     *,

@@ -27,7 +27,8 @@ use crate::dispatch::Runtime;
 use crate::format::rich::pretty::PyObj;
 use crate::value::{ArgsMap, PyValue};
 
-use super::packages_table::{self, ALL_PACKAGES, GROUPS};
+pub(crate) use super::packages_table::ALL_PACKAGES;
+use super::packages_table::{self, GROUPS};
 use super::pip::{PipEnv, PipInstall, install_name_no_version, pip_install};
 use super::venvs::normalize;
 use super::{flag, items_str, pprint, string, warn, words, yes_no};

@@ -112,6 +112,32 @@ pub fn start_mcp(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     start(args, rt, true)
 }
 
+/// Only repair known dependencies when the Python facade is present. A missing interpreter,
+/// failed probe, or a Rust-only installation must remain a usable standalone API server.
+fn console_dependencies(probe: &meerschaum_server::host::ConsoleProbe) -> Vec<String> {
+    if probe.available || probe.missing.iter().any(|name| name == "meerschaum") {
+        return Vec::new();
+    }
+    if probe
+        .missing
+        .iter()
+        .any(|name| !meerschaum_server::host::CONSOLE_MODULES.contains(&name.as_str()))
+    {
+        return Vec::new();
+    }
+    probe
+        .missing
+        .iter()
+        .filter_map(|name| {
+            native::packages::ALL_PACKAGES
+                .iter()
+                .rev()
+                .find(|(import, _)| import == name)
+                .map(|(_, install)| (*install).to_string())
+        })
+        .collect()
+}
+
 fn start(args: &ArgsMap, rt: &mut Runtime<'_>, stdio: bool) -> ActionResult {
     // The server waits on SIGINT / SIGTERM itself (`ShutdownSignal`): the spinner of its startup
     // must not take them.
@@ -141,12 +167,33 @@ fn start(args: &ArgsMap, rt: &mut Runtime<'_>, stdio: bool) -> ActionResult {
     let manifest_path = config.root_dir.join("cache/plugins_manifest.json");
     let python = PythonHostLauncher::python_from_env();
     // The Dash console is the Python host's (D21): the host runs for it when its modules import.
-    // One probe at start (about 30 ms); an unavailable console is one warning, and `/dash` is
-    // the pointer page.
+    // Repair missing Python dependencies in the shared environment unless installs are
+    // disabled. An unavailable console is one warning, and `/dash` is the pointer page.
     let console_available = if stdio || config.no_dash {
         false
     } else {
-        let probe = probe_console(&python, &config.root_dir, &[]);
+        let mut probe = probe_console(&python, &config.root_dir, &[]);
+        let env = native::pip::PipEnv::new(rt);
+        let missing = console_dependencies(&probe);
+        if env.auto_install && !missing.is_empty() {
+            native::info(
+                rt,
+                "Installing web console dependencies into the shared mrsm environment...",
+            );
+            native::pip::pip_install(
+                &env,
+                rt,
+                &native::pip::PipInstall {
+                    names: missing,
+                    venv: "mrsm".into(),
+                    debug: native::flag(args, "debug"),
+                    // Install missing requirements without upgrading existing dependencies.
+                    args: Some(Vec::new()),
+                    ..Default::default()
+                },
+            );
+            probe = probe_console(&python, &config.root_dir, &[]);
+        }
         if !probe.available {
             native::warn(rt, &probe.warning());
         }
@@ -590,6 +637,28 @@ impl McpBackend for NativeBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn console_repairs_only_missing_dependencies_with_python_package_present() {
+        use meerschaum_server::host::ConsoleProbe;
+        let probe = |names: &[&str]| ConsoleProbe {
+            available: names.is_empty(),
+            missing: names.iter().map(|s| (*s).into()).collect(),
+        };
+        assert_eq!(
+            console_dependencies(&probe(&["dash", "jwt"])),
+            vec!["dash>=4.1.0", "PyJWT>=2.8.0"]
+        );
+        assert!(console_dependencies(&probe(&["meerschaum", "dash"])).is_empty());
+        assert!(console_dependencies(&probe(&["no Python interpreter"])).is_empty());
+        assert!(console_dependencies(&probe(&[])).is_empty());
+        for name in meerschaum_server::host::CONSOLE_MODULES
+            .iter()
+            .filter(|n| **n != "meerschaum")
+        {
+            assert_eq!(console_dependencies(&probe(&[name])).len(), 1, "{name}");
+        }
+    }
 
     #[cfg(unix)]
     #[test]

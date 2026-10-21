@@ -128,7 +128,22 @@ impl<S: ManifestSource> ManifestSource for WithConsole<S> {
 
 /// The Python modules the Dash console needs (the `dash` extra): [`probe_console`] looks for
 /// each of them in the interpreter's `sys.path` and in the `mrsm` virtual environment.
-pub const CONSOLE_MODULES: &[&str] = &["dash", "dash_bootstrap_components", "dash_ace", "a2wsgi"];
+pub const CONSOLE_MODULES: &[&str] = &[
+    "meerschaum",
+    "dash",
+    "dash_bootstrap_components",
+    "dash_ace",
+    "dash_extensions",
+    "a2wsgi",
+    "fastapi",
+    "uvicorn",
+    "multipart",
+    "jwt",
+    "websockets",
+    "pandas",
+    "pyarrow",
+    "yaml",
+];
 
 /// What [`probe_console`] found.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -367,33 +382,53 @@ impl ConsoleStatus {
 pub const MAX_SOCKET_PATH: usize = 100;
 
 /// The host's socket for a root directory: `<root>/api/host/host.sock`, or, when that path is
-/// too long for a Unix socket, a per-root name under `$XDG_RUNTIME_DIR` (else the temporary
-/// directory).
+/// too long or its directory cannot be made private by this user, a per-user, per-root name
+/// under `$XDG_RUNTIME_DIR` (else the temporary directory). Existing foreign ownership is
+/// never changed; mounted roots may have been initialized by a different container UID.
 ///
 /// The socket's directory is private (`0700`, see [`HostSupervisor`]): uvicorn makes the socket
 /// itself world-writable, and a local process that could connect to it would bypass the
 /// server's authentication, allowlist and rate limits.
 pub fn default_socket_path(root: &Path) -> PathBuf {
     let p = root.join("api").join("host").join("host.sock");
-    if p.as_os_str().len() <= MAX_SOCKET_PATH {
+    if p.as_os_str().len() <= MAX_SOCKET_PATH && private_dir(p.parent().unwrap()).is_ok() {
         return p;
     }
     use std::hash::{Hash, Hasher};
     let mut h = std::collections::hash_map::DefaultHasher::new();
     root.hash(&mut h);
+    #[cfg(unix)]
+    rustix::process::geteuid().as_raw().hash(&mut h);
     let base = std::env::var_os("XDG_RUNTIME_DIR")
         .map(PathBuf::from)
         .filter(|d| d.is_dir())
         .unwrap_or_else(std::env::temp_dir);
-    base.join(format!("mrsm-host-{:016x}", h.finish()))
-        .join("host.sock")
+    let dirname = format!("mrsm-host-{:016x}", h.finish());
+    let mut dir = base.join(&dirname);
+    if dir.join("host.sock").as_os_str().len() > MAX_SOCKET_PATH {
+        dir = std::env::temp_dir().join(&dirname);
+    }
+    if private_dir(&dir).is_err() {
+        // An unrelated process may have reserved the predictable name. Never reuse an
+        // untrusted directory or socket; choose a fresh private name instead.
+        dir = std::env::temp_dir().join(format!("mrsm-host-{}", uuid::Uuid::new_v4().simple()));
+        let _ = private_dir(&dir);
+    }
+    dir.join("host.sock")
 }
 
 fn private_dir(dir: &Path) -> std::io::Result<()> {
     std::fs::create_dir_all(dir)?;
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+        let metadata = std::fs::symlink_metadata(dir)?;
+        if !metadata.is_dir() || metadata.uid() != rustix::process::geteuid().as_raw() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "the API host socket directory is not owned by this user",
+            ));
+        }
         std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))?;
     }
     Ok(())
@@ -1220,13 +1255,51 @@ mod tests {
 
     #[test]
     fn socket_paths() {
-        let short = default_socket_path(Path::new("/srv/mrsm"));
-        assert_eq!(short, PathBuf::from("/srv/mrsm/api/host/host.sock"));
+        let root = tempfile::tempdir().unwrap();
+        let short = default_socket_path(root.path());
+        assert_eq!(short, root.path().join("api/host/host.sock"));
         let long_root = PathBuf::from(format!("/{}", "x".repeat(200)));
         let long = default_socket_path(&long_root);
         assert!(long.as_os_str().len() < 108, "{long:?}");
         assert_eq!(long, default_socket_path(&long_root));
         assert!(long.ends_with("host.sock"));
+        std::fs::remove_dir(long.parent().unwrap()).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn socket_path_avoids_inaccessible_or_foreign_directories() {
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+        let root = tempfile::tempdir().unwrap();
+        let api = root.path().join("api");
+        std::fs::create_dir(&api).unwrap();
+        // A regular file obstructs the parent for every UID, including root in CI.
+        std::fs::write(api.join("host"), "leave this alone").unwrap();
+        let fallback = default_socket_path(root.path());
+        assert!(!fallback.starts_with(root.path()));
+        assert_eq!(fallback, default_socket_path(root.path()));
+        assert_eq!(
+            std::fs::read_to_string(api.join("host")).unwrap(),
+            "leave this alone"
+        );
+        let metadata = std::fs::metadata(fallback.parent().unwrap()).unwrap();
+        assert_eq!(metadata.permissions().mode() & 0o777, 0o700);
+        assert_eq!(metadata.uid(), rustix::process::geteuid().as_raw());
+        std::fs::remove_dir(fallback.parent().unwrap()).unwrap();
+
+        // Real permission denial as an ordinary user; root bypasses mode checks.
+        if rustix::process::geteuid().as_raw() != 0 {
+            std::fs::remove_file(api.join("host")).unwrap();
+            std::fs::set_permissions(&api, std::fs::Permissions::from_mode(0o500)).unwrap();
+            let fallback = default_socket_path(root.path());
+            assert!(!fallback.starts_with(root.path()));
+            assert_eq!(
+                std::fs::metadata(&api).unwrap().permissions().mode() & 0o777,
+                0o500
+            );
+            std::fs::set_permissions(&api, std::fs::Permissions::from_mode(0o700)).unwrap();
+            std::fs::remove_dir(fallback.parent().unwrap()).unwrap();
+        }
     }
 
     fn host_config(cfg: &crate::config::ServerConfig) -> serde_json::Value {

@@ -265,7 +265,7 @@ pub fn choose(
             )
         });
         rt.print(&text);
-        let mut options_ask = Ask::new().noask(noask);
+        let mut options_ask = Ask::new().noask(noask).suggestions(choices.to_vec());
         if let Some((shown, label)) = &default_tuple {
             options_ask = options_ask.default(shown.clone());
             options_ask.default_label = label.clone();

@@ -349,6 +349,31 @@ fn edit_config_opens_the_editor_then_reloads() {
     assert!(out.contains("Nothing to reload"), "{out}");
 }
 
+#[test]
+fn edit_config_keeps_yaml_and_accepts_its_filename() {
+    fn env(k: &str) -> Option<String> {
+        (k == "EDITOR").then(|| "my-editor".into())
+    }
+    for key in ["stack", "stack.yaml"] {
+        let tmp = tempfile::tempdir().unwrap();
+        let config_dir = tmp.path().join("config");
+        std::fs::create_dir_all(&config_dir).unwrap();
+        let path = config_dir.join("stack.yaml");
+        let original = "project_name: example\n";
+        std::fs::write(&path, original).unwrap();
+        let host = SharedHost::default();
+        let (r, out) = run(tmp.path(), &["edit", "config", key], env, &host);
+        assert_eq!(r, SuccessTuple::success(), "{out}");
+        assert_eq!(
+            host.0.borrow().commands[0].args.last().unwrap().as_str(),
+            path.to_str().unwrap()
+        );
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), original);
+        assert!(!config_dir.join("stack.yaml.json").exists());
+        assert!(!config_dir.join("stack.json").exists());
+    }
+}
+
 /// v4 pops the key from the in-memory config before `get_config(key, write_missing=True)`, so a
 /// key an `MRSM_CONFIG` patch already put in memory still gets its file created from the
 /// defaults (and the edit does not report an unparseable, empty file).

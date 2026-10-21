@@ -7,7 +7,7 @@
 //!
 //! ```toml
 //! [dependencies]
-//! # Use the exact pre-release version (e.g. "5.0.0-rc.3") until 5.0.0 is out: a bare "5" does not match one.
+//! # Use the exact pre-release version (e.g. "5.0.0-rc.4") until 5.0.0 is out: a bare "5" does not match one.
 //! meerschaum = { version = "5", default-features = false, features = ["sql", "engine"] }
 //! ```
 //!
@@ -115,5 +115,5 @@ pub mod prelude {
     pub use crate::{Pipeline, RunOptions};
 }
 
-/// The crate version (the single workspace version, Cargo form, e.g. `5.0.0-rc.3`).
+/// The crate version (the single workspace version, Cargo form, e.g. `5.0.0-rc.4`).
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

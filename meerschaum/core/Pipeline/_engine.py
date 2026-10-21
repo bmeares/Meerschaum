@@ -21,7 +21,7 @@ from meerschaum.utils.typing import Any, Dict, List, Optional, Union
 #: Keyword arguments of `Pipe.sync()` the engine consumes itself.
 ENGINE_KEYWORDS = frozenset({
     'begin', 'end', 'force', 'retries', 'min_seconds', 'check_existing', 'enforce_dtypes',
-    'chunksize', 'workers', 'params', 'yes', 'run_id', 'resume', 'on_event',
+    'chunksize', 'workers', 'params', 'yes', 'run_id', 'run_name', 'graph', 'resume', 'on_event',
 })
 
 #: Keyword arguments of `Pipe.sync()` with no meaning for an engine run.
@@ -184,7 +184,7 @@ def build_request(
     request['sync'] = sync
     request['begin'] = _bound(kwargs.get('begin', None))
     request['end'] = _bound(kwargs.get('end', None))
-    for key in ('workers', 'yes', 'run_id', 'resume'):
+    for key in ('workers', 'yes', 'run_id', 'run_name', 'graph', 'resume'):
         if kwargs.get(key, None) is not None:
             request[key] = kwargs[key]
     if kwargs.get('force', False) and 'yes' not in request:

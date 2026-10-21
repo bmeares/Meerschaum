@@ -112,7 +112,7 @@ def _run(*args, stdin=''):
 
 @pytest.mark.parametrize('args', [
     ('--event', 'workflow_dispatch'),
-    ('--event', 'push', '--ref', 'refs/tags/v5.0.0rc3'),
+    ('--event', 'push', '--ref', 'refs/tags/v5.0.0rc4'),
     ('--event', 'schedule'),
 ])
 def test_a_dispatch_a_tag_or_a_schedule_runs_everything(args):

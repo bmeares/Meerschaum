@@ -20,7 +20,7 @@ members = [
 ]
 
 [workspace.package]
-version = "5.0.0-rc.3"
+version = "5.0.0-rc.4"
 edition = "2024"
 license = "Apache-2.0"
 repository = "https://github.com/bmeares/Meerschaum"
@@ -36,21 +36,21 @@ rust-version = "1.95"
 [workspace.dependencies]
 # Workspace crates are versioned in lockstep: every `version = "=X"` below must equal
 # `[workspace.package] version` (scripts/check_packaging.py checks it; cargo cannot inherit it here).
-meerschaum-core = { path = "crates/meerschaum-core", version = "=5.0.0-rc.3" }
-meerschaum-kernel = { path = "crates/meerschaum-kernel", version = "=5.0.0-rc.3" }
-meerschaum-connector = { path = "crates/meerschaum-connector", version = "=5.0.0-rc.3" }
-meerschaum-connector-sql = { path = "crates/meerschaum-connector-sql", version = "=5.0.0-rc.3" }
-meerschaum-connector-valkey = { path = "crates/meerschaum-connector-valkey", version = "=5.0.0-rc.3" }
-meerschaum-connector-api = { path = "crates/meerschaum-connector-api", version = "=5.0.0-rc.3", default-features = false }
-meerschaum-engine = { path = "crates/meerschaum-engine", version = "=5.0.0-rc.3" }
-meerschaum-jobs = { path = "crates/meerschaum-jobs", version = "=5.0.0-rc.3" }
-meerschaum-compose = { path = "crates/meerschaum-compose", version = "=5.0.0-rc.3" }
-meerschaum-server = { path = "crates/meerschaum-server", version = "=5.0.0-rc.3" }
-meerschaum-web = { path = "crates/meerschaum-web", version = "=5.0.0-rc.3" }
-meerschaum-plugin = { path = "crates/meerschaum-plugin", version = "=5.0.0-rc.3" }
-meerschaum-worker = { path = "crates/meerschaum-worker", version = "=5.0.0-rc.3" }
+meerschaum-core = { path = "crates/meerschaum-core", version = "=5.0.0-rc.4" }
+meerschaum-kernel = { path = "crates/meerschaum-kernel", version = "=5.0.0-rc.4" }
+meerschaum-connector = { path = "crates/meerschaum-connector", version = "=5.0.0-rc.4" }
+meerschaum-connector-sql = { path = "crates/meerschaum-connector-sql", version = "=5.0.0-rc.4" }
+meerschaum-connector-valkey = { path = "crates/meerschaum-connector-valkey", version = "=5.0.0-rc.4" }
+meerschaum-connector-api = { path = "crates/meerschaum-connector-api", version = "=5.0.0-rc.4", default-features = false }
+meerschaum-engine = { path = "crates/meerschaum-engine", version = "=5.0.0-rc.4" }
+meerschaum-jobs = { path = "crates/meerschaum-jobs", version = "=5.0.0-rc.4" }
+meerschaum-compose = { path = "crates/meerschaum-compose", version = "=5.0.0-rc.4" }
+meerschaum-server = { path = "crates/meerschaum-server", version = "=5.0.0-rc.4" }
+meerschaum-web = { path = "crates/meerschaum-web", version = "=5.0.0-rc.4" }
+meerschaum-plugin = { path = "crates/meerschaum-plugin", version = "=5.0.0-rc.4" }
+meerschaum-worker = { path = "crates/meerschaum-worker", version = "=5.0.0-rc.4" }
 # The CLI library: the front crate's `cli` feature (`cargo install meerschaum`) and `meerschaum-py`. Its features are chosen by the dependent.
-meerschaum-cli = { path = "crates/meerschaum-cli", version = "=5.0.0-rc.3", default-features = false }
+meerschaum-cli = { path = "crates/meerschaum-cli", version = "=5.0.0-rc.4", default-features = false }
 
 anyhow = "1"
 thiserror = "2"

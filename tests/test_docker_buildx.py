@@ -53,7 +53,7 @@ def test_a_local_build_loads_for_the_builders_platform(tmp_path):
         assert _platform(command) is None, 'a loaded image cannot be a manifest list'
     assert [_tags(c) for c in commands] == [
         [f'{IMAGE}:5.0.0rc2-minimal'],
-        [f'{IMAGE}:5.0.0rc2-full'],
+        [f'{IMAGE}:5.0.0rc2-full', f'{IMAGE}:5.0.0rc2-api'],
         [f'{IMAGE}:5.0.0rc2-slim'],
     ]
 
@@ -90,7 +90,8 @@ def test_the_merge_of_a_prerelease_makes_only_version_tags(tmp_path):
     assert result.returncode == 0, result.stderr
     assert commands == [
         f'docker buildx imagetools create -t {IMAGE}:5.0.0rc2-{name} '
-        f'{IMAGE}:5.0.0rc2-{name}-amd64'
+        + (f'-t {IMAGE}:5.0.0rc2-api ' if name == 'full' else '')
+        + f'{IMAGE}:5.0.0rc2-{name}-amd64'
         for name in ('minimal', 'full', 'slim')
     ]
 
@@ -101,8 +102,8 @@ def test_the_merge_of_a_release_moves_the_floating_tags(tmp_path):
     by_name = {c.split('-t ')[1].split(' ')[0].rsplit('-', 1)[-1]: c for c in commands}
     assert set(by_name) == {'minimal', 'full', 'slim'}
     assert _tags(by_name['full']) == [
-        f'{IMAGE}:5.0.0-full', f'{IMAGE}:full', f'{IMAGE}:latest', f'{IMAGE}:5.0.0',
-        f'{IMAGE}:api', f'{IMAGE}:5.0.0-api',
+        f'{IMAGE}:5.0.0-full', f'{IMAGE}:5.0.0-api', f'{IMAGE}:full', f'{IMAGE}:latest',
+        f'{IMAGE}:5.0.0', f'{IMAGE}:api',
     ]
     assert _tags(by_name['minimal']) == [f'{IMAGE}:5.0.0-minimal', f'{IMAGE}:minimal']
     assert _tags(by_name['slim']) == [f'{IMAGE}:5.0.0-slim', f'{IMAGE}:slim']

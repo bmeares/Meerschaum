@@ -10,6 +10,7 @@ events. The data is the Syncing Engine's (`meerschaum.api.dash.engine`).
 from meerschaum.api import CHECK_UPDATE
 from meerschaum.utils.packages import import_html, import_dcc
 from meerschaum.api.dash.components import build_pages_navbar
+from meerschaum.api.dash.pipeline_management import build_pipeline_controls
 html, dcc = import_html(check_update=CHECK_UPDATE), import_dcc(check_update=CHECK_UPDATE)
 import dash_bootstrap_components as dbc
 
@@ -41,18 +42,30 @@ layout = [
                 ],
             ),
             html.Div(id='pipelines-alert-div'),
-            html.P('Follow data from source to output. Select a stage to inspect its query, dependencies, and syncs.',
-                     className='text-muted'),
-            dcc.Dropdown(id='pipeline-focus', options=[], placeholder='Find a pipe and focus its pipeline…',
-                         className='pipeline-focus', clearable=True),
-            dbc.Checkbox(id='pipeline-standalone', label='Include standalone pipes', value=False,
-                         className='mt-2'),
+            build_pipeline_controls(),
+            dcc.Store(id='pipeline-visible-refs', data=[]),
+            html.Div([
+                html.Details([
+                    html.Summary('Find a pipe’s pipeline'),
+                    html.Div([
+                        dcc.Dropdown(id='pipeline-focus-connector', options=[],
+                                     placeholder='Connector keys', clearable=True),
+                        dcc.Dropdown(id='pipeline-focus-metric', options=[],
+                                     placeholder='Metric keys', clearable=True),
+                        dcc.Dropdown(id='pipeline-focus-location', options=[],
+                                     placeholder='Location keys', clearable=True),
+                    ], className='pipeline-key-filters'),
+                    dcc.Dropdown(id='pipeline-focus', options=[],
+                                 placeholder='Select a pipe to focus its pipeline',
+                                 className='pipeline-focus', clearable=True),
+                ], className='pipeline-find'),
+                dbc.Checkbox(id='pipeline-standalone', label='Include standalone pipes', value=False),
+            ], className='pipeline-filter-toolbar'),
+            dcc.Store(id='pipeline-focus-options', data=[]),
             html.Div([
                 dcc.Loading(html.Div(id='pipelines-graph-div'), type='circle', delay_show=1000),
-                html.Aside([
-                    html.H4('Stage details'), html.P('Select a pipe on the canvas to inspect it.'),
-                ], id='pipeline-inspector'),
-            ], className='pipeline-workspace'),
+                html.Aside(id='pipeline-inspector', hidden=True),
+            ], className='pipeline-workspace', id='pipeline-workspace'),
             html.H4('Sync history'),
             dbc.Card(
                 dbc.CardBody(

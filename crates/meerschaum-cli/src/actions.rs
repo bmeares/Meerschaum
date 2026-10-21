@@ -55,6 +55,7 @@ pub const V5_ONLY_ACTIONS: &[&str] = &["prune", "plan", "doctor", "backup", "res
 /// core subaction, and complete once a prefix is typed, but the empty `show <TAB>` list and the
 /// registry parity test keep v4's contents.
 pub const V5_ONLY_SUBACTIONS: &[(&str, &str)] = &[
+    ("sync", "pipeline"),
     ("show", "graph"),
     ("show", "runs"),
     ("show", "drivers"),
@@ -162,7 +163,13 @@ pub static CORE_ACTIONS: &[ActionDef] = &[
             sub("required", "_install_required"),
         ],
     ),
-    action("sync", &[sub("pipes", "_sync_pipes")]),
+    action(
+        "sync",
+        &[
+            sub("pipes", "_sync_pipes"),
+            sub("pipeline", "_sync_pipeline"),
+        ],
+    ),
     action("api", &[sub("start", "_api_start")]),
     action(
         "bootstrap",

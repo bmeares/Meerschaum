@@ -23,6 +23,8 @@ from meerschaum.utils.typing import Dict, Any, Optional, PipesDict
 from meerschaum.config import get_config
 from meerschaum._internal.static import STATIC_CONFIG, SERVER_ID
 from meerschaum.utils.packages import attempt_import
+from meerschaum.utils.venv import ensure_default_venvs
+ensure_default_venvs()
 from meerschaum.utils import get_pipes as _get_pipes
 from meerschaum.plugins import _api_plugins
 from meerschaum.utils.warnings import warn, dprint

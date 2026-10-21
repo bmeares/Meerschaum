@@ -137,7 +137,7 @@ run = pipe.sync(children=True, on_event=lambda e: print(e['event'], e['pipe_ref'
 
 All the usual `sync` options (`begin`, `end`, `workers`, `force`, `retries`, `check_existing`, `chunksize`, `params`, ...) apply to every node, with the engine's rules: roots take `begin` / `end` as given, every other node is clamped to them. `''` and `None` leave the window to the planner.
 
-`mrsm.Pipeline` selects a set of target pipes with traversal depths and is not stored anywhere. A saved pipeline is just a [job](/reference/background-jobs/) whose arguments include `--parents` / `--children` (and `mrsm compose sync pipes --parents` works the same inside a compose project):
+`mrsm.Pipeline` selects target pipes with traversal depths. Call `save(name)` to persist its membership on the instance, then use `Pipeline.load(name, instance=...)` or `mrsm sync pipeline <name>` to resolve it later. [Jobs](/reference/background-jobs/) provide schedules for saved pipelines or ordinary `sync pipes --parents` commands:
 
 ```python
 pipeline = mrsm.Pipeline(pipe, parents=True, children=False)   # or Pipeline([p1, p2]) / Pipeline(tags=['demo'])
@@ -155,6 +155,7 @@ pipeline.pipes                   # every pipe the selection resolves to, in depe
 | `pipes` | A `Pipe`, or a list of `Pipe` objects and `(connector_keys, metric_key[, location_key])` tuples. All must share one instance (the engine's home instance); pass `instance=` to choose it. |
 | `tags`, `connector_keys`, `metric_keys`, `location_keys` | Select the targets with the `-t`, `-c`, `-m`, `-l` filters (`_` negates) instead of listing pipes. |
 | `parents`, `children` | `True` or a number of generations. |
+| `name` | Optional name used in run IDs. Named selections respect dependencies between their members even without traversal. |
 
 `Pipeline.sync(**kwargs)` accepts the `sync` options above plus `yes=True` (confirm `rebuild` actions), `resume='<run_id>'` (re-plan only the nodes that failed or never ran in that run) and `on_event=callable` (the [live event stream](/reference/pipelines/visualization/#live-events-in-python)).
 
@@ -314,3 +315,34 @@ The first engine run on a pipe has no stored hash, so it records a baseline rath
 By default a child starts after its parents finish. With `--chunk-pipelining` (or `system.engine.chunk_pipelining: true`) a child of a parent that syncs several chunks (an `incremental` or `backfill` node with two or more chunks) can start early: whenever the parent has finished a chunk, the child plans again against what the parent has *committed* and syncs those ranges while the parent keeps going. The child's edge cursor advances only as far as committed ledger entries, so nothing is skipped; when the parent finishes, the child makes one final pass for the rest. The child's `node_started` event appears once per pass, and its row in the run history sums the passes.
 
 Pipelining goes one level deep (a child overlaps its parents, not its grandchildren), needs the native executor, never applies to flat selections, and never starts a `rebuild` early. The resulting tables are identical to a run without it.
+
+## Saved pipelines and scheduled Jobs
+
+A named pipeline stores an exact selection on its instance. Its metadata uses an internal
+`mrsm` registration and is excluded from the data graph. Saving a selection never changes
+its member pipes. Existing graph components receive generated names the first time an
+authenticated user opens the Pipelines page; the page's name field lets you save a selection
+under a chosen name. Saving an existing name replaces its membership.
+
+```python
+pipeline = mrsm.Pipeline([raw, daily], parents=True, name='daily-totals')
+pipeline.save()
+loaded = mrsm.Pipeline.load('daily-totals', instance='sql:main')
+result = loaded.sync(workers=4)
+```
+
+```bash
+mrsm sync pipeline daily-totals -i sql:main
+mrsm sync pipeline daily-totals -i sql:main --schedule 'every 5 minutes' -d -n daily-sync
+```
+
+On the Pipelines page, select a saved pipeline and open **Save / schedule** to create a
+Job with its own name, interval, workers, retries, and rebuild permission. A Job reads the
+pipeline's current membership each time it runs. Several Jobs may use the same pipeline
+with different schedules or options. The same panel shows their status and start/stop
+controls; the Jobs page provides logs and other Job controls. Deleting a saved selection
+does not delete its member pipes or its Jobs.
+
+New run IDs use the pipeline name followed by a readable UTC timestamp and collision
+suffix, for example `daily-totals-2026-10-21T14-30-00.123456Z-a1b2c3d4`. Unnamed selections
+use `pipeline` as their prefix. Earlier run IDs remain valid for history and resume.

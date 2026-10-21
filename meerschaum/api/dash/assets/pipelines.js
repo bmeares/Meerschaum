@@ -11,23 +11,28 @@
         svg.setAttribute('height', world.style.height);
         svg.style.cssText = 'position:absolute;pointer-events:none;overflow:visible';
         svg.setAttribute('aria-hidden', 'true');
-        const defs = document.createElementNS(ns, 'defs');
-        const marker = document.createElementNS(ns, 'marker');
-        Object.entries({id:'pipeline-arrow',viewBox:'0 0 10 10',refX:'9',refY:'5',markerWidth:'6',markerHeight:'6',orient:'auto-start-reverse'}).forEach(([k,v])=>marker.setAttribute(k,v));
-        const arrow = document.createElementNS(ns, 'path');
-        arrow.setAttribute('d', 'M 0 0 L 10 5 L 0 10 z'); arrow.setAttribute('fill', '#809aad');
-        marker.appendChild(arrow); defs.appendChild(marker); svg.appendChild(defs);
         const cards = new Map(Array.from(world.querySelectorAll('.pipeline-stage')).map(el=>[el.dataset.ref,el]));
         for (const edge of JSON.parse(world.dataset.edges || '[]')) {
             const a = cards.get(edge.parent), b = cards.get(edge.child);
             if (!a || !b) continue;
             const x = a.offsetLeft + a.offsetWidth, y = a.offsetTop + a.offsetHeight/2;
-            const u = b.offsetLeft - 6, v = b.offsetTop + b.offsetHeight/2;
+            const u = b.offsetLeft - 8, v = b.offsetTop + b.offsetHeight/2;
             const path = document.createElementNS(ns, 'path');
-            path.setAttribute('d', `M${x},${y} C${(x+u)/2},${y} ${(x+u)/2},${v} ${u},${v}`);
+            // End the curve before a straight landing, so its tangent never crosses the arrow.
+            const landing = u - 16, middle = (x + landing) / 2;
+            path.setAttribute('d', `M${x},${y} C${middle},${y} ${middle},${v} ${landing},${v} L${u-7},${v}`);
             path.setAttribute('fill', 'none'); path.setAttribute('stroke', '#809aad');
-            path.setAttribute('stroke-width', '2'); path.setAttribute('marker-end', 'url(#pipeline-arrow)');
+            path.setAttribute('stroke-width', '2');
+            path.setAttribute('stroke-linecap', 'round');
             svg.appendChild(path);
+            const arrow = document.createElementNS(ns, 'path');
+            arrow.setAttribute('d', `M${u-8},${v-5} L${u},${v} L${u-8},${v+5}`);
+            arrow.setAttribute('fill', 'none');
+            arrow.setAttribute('stroke', '#a7c8df');
+            arrow.setAttribute('stroke-width', '2');
+            arrow.setAttribute('stroke-linecap', 'round');
+            arrow.setAttribute('stroke-linejoin', 'round');
+            svg.appendChild(arrow);
         }
         world.prepend(svg);
         let scale = 1, x = 0, y = 0, drag;
@@ -73,6 +78,11 @@
         // Keep labels readable; Fit provides a complete overview on demand.
         draw();
     }
+    document.addEventListener('click', e => {
+        if (e.target.closest('#pipeline-inspector-close')) {
+            document.querySelectorAll('.pipeline-stage').forEach(card => card.setAttribute('aria-pressed', 'false'));
+        }
+    });
     new MutationObserver(mount).observe(document.documentElement, {childList:true, subtree:true});
     document.addEventListener('DOMContentLoaded', mount);
 })();

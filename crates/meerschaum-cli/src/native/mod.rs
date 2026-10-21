@@ -77,6 +77,7 @@ use crate::builtin::ActionResult;
 /// native).
 pub fn run(function: &str, args: &ArgsMap, rt: &mut Runtime<'_>) -> Option<ActionResult> {
     Some(match function {
+        "_sync_pipeline" => sync::sync_pipeline(args, rt),
         "_show_pipes" => show::show_pipes(args, rt),
         "_show_connectors" => show::show_connectors(args, rt),
         "_show_columns" => show::show_columns(args, rt),

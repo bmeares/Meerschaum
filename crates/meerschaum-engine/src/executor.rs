@@ -410,7 +410,7 @@ pub struct ExecutorOptions {
     pub lease_poll: Duration,
     /// `--chunk-pipelining` (R6). Not implemented in this wave; ignored.
     pub chunk_pipelining: bool,
-    /// Use this run ID instead of a fresh ULID.
+    /// Use this run ID instead of a generated readable UTC ID.
     pub run_id: Option<String>,
     /// The planner options used to re-plan provisional nodes (must match the plan's).
     pub plan: PlanOptions,

@@ -28,3 +28,24 @@
 .pipeline-stage code { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 
 .pipeline-timeline-scroll { max-height: 520px; overflow: auto; }
+
+.pipeline-workspace { grid-template-columns: minmax(0, 1fr); }
+.pipeline-workspace.pipeline-has-selection { grid-template-columns: minmax(0, 3fr) minmax(320px, 2fr); }
+#pipeline-inspector[hidden] { display: none; }
+.pipeline-filter-toolbar { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; margin-top: 12px; }
+.pipeline-filter-toolbar .form-check { flex-shrink: 0; margin-top: 3px; }
+.pipeline-find { width: min(760px, 75%); }
+.pipeline-find summary { cursor: pointer; padding: 3px 0 8px; }
+.pipeline-key-filters { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 8px 0 12px; }
+.pipeline-inspector-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.pipeline-inspector-header h4 { min-width: 0; font-size: 18px; }
+#pipeline-inspector-close { border: 0; border-radius: 4px; background: transparent; color: inherit; font-size: 25px; line-height: 1; padding: 0 4px; }
+#pipeline-inspector-close:hover { background: #405062; }
+.pipeline-stage-status { font-size: 16px; cursor: help; }
+.pipeline-stage-status > span + span { font-size: 12px; }
+@media(max-width: 1000px) {
+    .pipeline-workspace.pipeline-has-selection { grid-template-columns: 1fr; }
+    .pipeline-filter-toolbar { flex-wrap: wrap; }
+    .pipeline-find { width: 100%; }
+}
+@media(max-width: 600px) { .pipeline-key-filters { grid-template-columns: 1fr; } }

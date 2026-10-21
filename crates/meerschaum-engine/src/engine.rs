@@ -788,6 +788,7 @@ impl Engine {
             }
             selection = Selection {
                 targets: Targets::Refs(refs),
+                graph: selection.graph,
                 parents: selection.parents,
                 children: selection.children,
             };

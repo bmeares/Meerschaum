@@ -6,7 +6,7 @@
 #     `["CMD", "curl", "--fail", "http://localhost:<port>/healthcheck"]`) a `python` command (scripts and plugins call `python`, not only `python3`) and a working `mrsm`;
 #   - the full image also has `git` (plugins may require `git+https://...` packages) and `ssh`;
 #   - the full image runs that healthcheck for real: `mrsm start api --production` on a scratch SQLite
-#     instance (no web console, no terminal, a random port) and `curl --fail` against it in the same
+#     instance (with the web console, no terminal, a random port) and `curl --fail` against it in the same
 #     container, which must answer within 90 seconds.
 #
 #   --full-image IMAGE   checked as a full image (curl, git, ssh, mrsm, the API healthcheck).
@@ -64,14 +64,26 @@ set -u
 port=$((20000 + RANDOM % 20000))
 root="$(mktemp -d)"
 mkdir -p "$root/root" "$root/plugins"
+if [ "${1:-}" = blocked ]; then
+  # Exercise the private socket fallback, including when smoke tests run as root.
+  mkdir -p "$root/root/api"
+  touch "$root/root/api/host"
+fi
 export MRSM_ROOT_DIR="$root/root" MRSM_PLUGINS_DIR="$root/plugins" MRSM_NO_AUTO_INSTALL=1
 export MRSM_SQL_SMOKE="sqlite:///$root/smoke.db"
-mrsm start api --production --port "$port" -i sql:smoke --no-dash --no-webterm >"$root/api.log" 2>&1 &
+mrsm start api --production --port "$port" -i sql:smoke --no-webterm >"$root/api.log" 2>&1 &
 api=$!
 for _ in $(seq 1 90); do
   if curl --fail --silent "http://localhost:$port/healthcheck" 2>/dev/null; then
+    if ! curl --fail --silent "http://localhost:$port/dash/_dash-layout" >"$root/layout.json" 2>/dev/null; then
+      sleep 1
+      continue
+    fi
+    if ! python -c "import json,sys; data=json.load(open(sys.argv[1])); assert isinstance(data,dict) and data.get(\"props\")" "$root/layout.json"; then
+      break
+    fi
     echo
-    echo "curl --fail http://localhost:$port/healthcheck answered"
+    echo "API healthcheck and Dash layout answered without network access"
     kill "$api" 2>/dev/null; wait "$api" 2>/dev/null
     exit 0
   fi
@@ -97,7 +109,9 @@ for image in "${full_images[@]}"; do
   check "git" "$image" git --version
   check "ssh" "$image" ssh -V
   check "mrsm" "$image" mrsm --version
-  check "API healthcheck" "$image" bash -c "$api_healthcheck_script"
+  check "Python full dependencies" "$image" python -c "import meerschaum, dash, dash_bootstrap_components, dash_ace, dash_extensions, fastapi, uvicorn, a2wsgi, pandas, pyarrow; print(meerschaum.__version__)"
+  check "API healthcheck and Dash" "$image" bash -c "$api_healthcheck_script"
+  check "Dash with blocked root socket directory" "$image" bash -c "$api_healthcheck_script" -- blocked
 done
 
 if [ "$failures" -gt 0 ]; then

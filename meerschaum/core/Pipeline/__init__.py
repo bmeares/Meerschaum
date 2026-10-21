@@ -5,7 +5,7 @@
 """
 A `Pipeline` is a **selection** over the implicit pipe graph (design §5.2, D4, D5): a set of
 target pipes plus how many generations of parents and children to pull in. It is not stored
-anywhere. The Rust Syncing Engine plans it (`Pipeline.plan()`), runs it (`Pipeline.sync()`)
+unless saved with a name. The Rust Syncing Engine plans it (`Pipeline.plan()`), runs it (`Pipeline.sync()`)
 and records every run (`Pipeline.get_runs()`).
 
 ```python
@@ -409,11 +409,13 @@ class Pipeline:
         metric_keys: Union[str, List[str], None] = None,
         location_keys: Union[str, List[str], None] = None,
         instance: Union[str, Any, None] = None,
+        name: Optional[str] = None,
     ):
         if isinstance(pipes, mrsm.Pipe):
             pipes = [pipes]
         elif pipes is not None and isinstance(pipes, tuple) and pipes and isinstance(pipes[0], str):
             pipes = [pipes]
+        self.name = name
         self._targets: List[Any] = list(pipes or [])
         self.parents = get_depth(parents)
         self.children = get_depth(children)
@@ -429,6 +431,23 @@ class Pipeline:
         pipe_targets = [target for target in self._targets if isinstance(target, mrsm.Pipe)]
         self.instance = _instance_of(pipe_targets, instance)
 
+    @classmethod
+    def load(cls, name: str, instance=None) -> 'Pipeline':
+        """Load a named selection from its instance registry."""
+        from meerschaum.core.Pipeline._saved import load_pipeline
+        return load_pipeline(name, instance)
+
+    def save(self, name: Optional[str] = None) -> Dict[str, Any]:
+        """Save this selection's current target membership on its instance."""
+        from meerschaum.core.Pipeline._saved import save_pipeline
+        name = name or self.name
+        if not name:
+            raise ValueError('Provide a pipeline name.')
+        targets = self._targets or [p.pipe_ref for p in self.plan().nodes]
+        definition = save_pipeline(name, targets, self.instance, self.parents, self.children)
+        self.name = name
+        return definition
+
     @property
     def targets(self) -> List[Any]:
         """The pipes (or keys) the selection starts from."""
@@ -443,6 +462,9 @@ class Pipeline:
         return self.plan().pipes
 
     def _request(self, **kwargs: Any) -> Dict[str, Any]:
+        if self.name:
+            kwargs.setdefault("run_name", self.name)
+            kwargs.setdefault("graph", True)
         return build_request(
             self.instance,
             targets=self._targets,

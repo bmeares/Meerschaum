@@ -483,10 +483,13 @@ pub fn edit_config(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
                 f.print_options_plain(&keys, &opts)
             });
             rt.print(&menu);
-            let answer = rt
-                .host
-                .read_line(" ❓ [default: meerschaum] ")
-                .unwrap_or_default();
+            let answer = crate::native::ask::ask(
+                rt,
+                "Configuration key:",
+                &crate::native::ask::Ask::new()
+                    .default("meerschaum")
+                    .suggestions(keys.clone()),
+            )?;
             let answer = answer.trim().to_string();
             if answer.is_empty() {
                 "meerschaum".into()
@@ -497,6 +500,16 @@ pub fn edit_config(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
             }
         };
         action = vec![choice];
+    }
+    // Accept the filename shown by editors and file completion as well as a bare key.
+    // Otherwise `stack.yaml` is treated as a new key and becomes `stack.yaml.json`.
+    for key in &mut action {
+        for suffix in [".yaml", ".yml", ".json"] {
+            if let Some(stem) = key.strip_suffix(suffix) {
+                *key = stem.to_string();
+                break;
+            }
+        }
     }
     for key in &action {
         // Snapshot the pristine file before any edits so `edit config --rollback` can restore it.

@@ -113,6 +113,10 @@ fi
 final_tags() {
   local tag="$1"
   echo "$image:$mrsm_version-$tag"
+  # The versioned API alias always points at the full Python/Dash image, including RCs.
+  if [ "$tag" == "$latest_alias" ]; then
+    echo "$image:$mrsm_version-api"
+  fi
   if [ -z "$prerelease" ]; then
     echo "$image:$tag"
     if [ "$tag" == "$latest_alias" ]; then
@@ -120,7 +124,6 @@ final_tags() {
       echo "$image:latest"
       echo "$image:$mrsm_version"
       echo "$image:api"
-      echo "$image:$mrsm_version-api"
     fi
   fi
 }

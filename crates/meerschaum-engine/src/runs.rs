@@ -48,7 +48,7 @@ impl NodeStatus {
 /// One row of `mrsm:engine_runs` (datetime `started`, primary key `run_id`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RunRow {
-    /// The run ID (a ULID: sortable by start time).
+    /// The run ID (name, UTC start time, and collision suffix).
     pub run_id: String,
     /// When the run started.
     pub started: DateTime<Utc>,
@@ -252,17 +252,36 @@ impl EnginePipe {
     }
 }
 
-const CROCKFORD: &[u8; 32] = b"0123456789ABCDEFGHJKMNPQRSTVWXYZ";
-
-/// A new run ID: a ULID (48-bit millisecond timestamp + 80 random bits, Crockford base32).
+/// A readable UTC run ID for an unnamed selection.
 pub fn new_run_id() -> String {
-    let millis = Utc::now().timestamp_millis().max(0) as u128 & ((1 << 48) - 1);
-    let random = uuid::Uuid::new_v4().as_u128() & ((1 << 80) - 1);
-    let value = (millis << 80) | random;
-    (0..26)
-        .rev()
-        .map(|i| CROCKFORD[((value >> (i * 5)) & 0x1f) as usize] as char)
-        .collect()
+    new_named_run_id("pipeline")
+}
+
+/// Name + UTC timestamp + a short collision suffix. Microseconds keep runs sortable;
+/// random entropy prevents collisions across processes and hosts sharing an instance.
+pub fn new_named_run_id(name: &str) -> String {
+    let slug: String = name
+        .chars()
+        .take(128)
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || "-_.".contains(c) {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    let slug = if slug.trim_matches('-').is_empty() {
+        "pipeline"
+    } else {
+        &slug
+    };
+    format!(
+        "{}-{}-{}",
+        slug,
+        Utc::now().format("%Y-%m-%dT%H-%M-%S%.6fZ"),
+        &uuid::Uuid::new_v4().simple().to_string()[..8]
+    )
 }
 
 #[cfg(test)]
@@ -303,10 +322,11 @@ mod tests {
     }
 
     #[test]
-    fn run_ids_are_ulids() {
+    fn run_ids_are_readable_and_unique() {
         let a = new_run_id();
-        assert_eq!(a.len(), 26);
-        assert!(a.chars().all(|c| CROCKFORD.contains(&(c as u8))));
+        assert!(a.starts_with("pipeline-20"));
+        assert!(a.contains('T') && a.contains('Z'));
+        assert!(new_named_run_id("daily totals").starts_with("daily-totals-"));
         assert_ne!(a, new_run_id());
     }
 }

@@ -261,7 +261,13 @@ fn selection(request: &Json, instance_keys: &str) -> PyResult<Option<Selection>>
     };
     Ok(Some(
         base.with_parents(depth_field(request, "parents"))
-            .with_children(depth_field(request, "children")),
+            .with_children(depth_field(request, "children"))
+            .with_graph(
+                request
+                    .get("graph")
+                    .and_then(Json::as_bool)
+                    .unwrap_or(false),
+            ),
     ))
 }
 
@@ -313,7 +319,9 @@ fn run_options(request: &Json, instance_keys: &str) -> PyResult<RunOptions> {
             .filter(|w| *w > 0)
             .map(|w| w as usize),
         sync: node,
-        run_id: str_field(request, "run_id").map(str::to_owned),
+        run_id: str_field(request, "run_id").map(str::to_owned).or_else(|| {
+            str_field(request, "run_name").map(meerschaum_engine::runs::new_named_run_id)
+        }),
         ..Default::default()
     })
 }

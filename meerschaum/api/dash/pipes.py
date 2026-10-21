@@ -925,9 +925,9 @@ def build_relations_body(pipe: mrsm.Pipe) -> Any:
                 html.Thead(html.Tr([html.Th('Pipe'), html.Th('Next sync'), html.Th('Details')])),
                 html.Tbody([
                     html.Tr([
-                        html.Td(html.A(html.Code(row['label']), href=row['href'], className='pipe-link')),
-                        html.Td(_engine.action_label(row['action'])),
-                        html.Td(html.Details([html.Summary('Why?'), html.P(row['reason'])])),
+                        html.Td(html.A(html.Code(row['label']), href=row['href'], target='_blank', rel='noopener noreferrer', className='pipe-link')),
+                        html.Td(_engine.action_indicator(row['action'])),
+                        html.Td(html.Details([html.Summary('Show'), html.P(row['reason'])])),
                     ])
                     for row in rows
                 ]),

@@ -7,7 +7,7 @@
 ### Targets:
 ###   (default) `docker build .`           the `full` image; `--build-arg dep_group=` selects the
 ###                                        extras: `full` (default: `[full]`), `api`
-###                                        (`[api,sql,pandas]`) or `minimal` (the base wheel, no extras).
+###                                        (`[full]`) or `minimal` (the base wheel, no extras).
 ###   --target full                        the same image (kept so `buildx.sh` can name the target).
 ###                                        Size gate: < 900 MB.
 ###   --target slim                        the wheel, no extras. Size gate: ≤ 250 MB.
@@ -105,7 +105,7 @@ RUN --mount=type=bind,from=rust-builder,source=/out/wheels,target=/wheels \
     --mount=type=bind,source=scripts/docker/trim_install.sh,target=/trim_install.sh \
     case "$dep_group" in \
       minimal) extras="" ;; \
-      api)     extras="[api,sql,pandas]" ;; \
+      api)     extras="[full]" ;; \
       *)       extras="[full]" ;; \
     esac \
   && wheel="$(ls /wheels/meerschaum-[0-9]*.whl)" \
@@ -203,6 +203,7 @@ ARG duckdb_driver= \
 ENV MRSM_DUCKDB_LIB=${duckdb_driver:+/usr/local/lib/meerschaum/duckdb/libduckdb.so} \
     MRSM_USER=$mrsm_user \
     MRSM_DEP_GROUP=slim \
+    MRSM_NO_AUTO_INSTALL=1 \
     MRSM_UID=$mrsm_uid \
     MRSM_GID=$mrsm_gid \
     MRSM_ROOT_DIR=$mrsm_root_dir \

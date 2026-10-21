@@ -4,6 +4,20 @@
 
 Meerschaum 5 is a rewrite of the core in Rust: the data kernel, the `sql:` / `valkey:` / `api:` connectors, the Syncing Engine, jobs, compose, the HTTP API, the MCP server and the `mrsm` CLI and shell. The `meerschaum` Python package stays as the plugin SDK, a façade and the host of the Plotly Dash web console, so pipes, parameters, configuration, compose files, jobs, the HTTP API and the Python public API keep working. Read the [migration guide](/reference/migrating-to-v5/) before upgrading; v4.1.x stays installable and receives security fixes until 5.1.0.
 
+### v5.0.0rc4
+
+- **Restore interactive configuration and connector suggestions.**  
+  Configuration editing opens existing YAML files, including filenames entered with their extensions. Config-key, connector, and other selection prompts show suggestions through both CLI entry points.
+
+- **Start the Dash console automatically with the Python API.**  
+  API startup installs missing console dependencies into the shared environment unless `--no-dash` or `MRSM_NO_AUTO_INSTALL` is set. The full image (including the legacy API dependency group) includes the Python package and full dependencies, and Docker smoke checks verify the mounted console. Host sockets fall back to a private user directory when the default host socket directory is inaccessible.
+
+- **Save and schedule named pipelines.**  
+  Pipelines store their names and exact pipe membership on the instance. Existing connected components receive editable generated names on first opening the page. Save a selection with `Pipeline.save(name)`, load it with `Pipeline.load(name, instance=...)`, or run `mrsm sync pipeline <name>`. The Pipelines page creates ordinary scheduled Jobs with worker, retry, and rebuild options and provides start/stop controls. Jobs resolve the saved membership on each run.
+
+- **Use readable run IDs and a more compact pipeline canvas.**  
+  New run IDs include the pipeline name and UTC start time, with a collision suffix. Existing history remains accessible. The canvas fills the page until a pipe is selected; its inspector can be dismissed. Status icons, three-key pipe filters in a collapsible panel, revised arrows, and pipe links that open in new tabs keep the graph easier to inspect.
+
 ### v5.0.0rc3
 
 - **Share console sessions with the web terminal.**  
