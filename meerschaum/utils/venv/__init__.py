@@ -312,6 +312,49 @@ def is_venv_active(
 
 
 verified_venvs = set()
+_venv_mutation_locks = {}
+_venv_mutation_locks_guard = RLock()
+
+
+def _locked_venv_mutation(func):
+    """Serialize creation and verification, including recursive repair, for each environment."""
+    from functools import wraps
+    from inspect import signature
+    call_signature = signature(func)
+
+    @wraps(func)
+    def locked(*args, **kwargs):
+        import meerschaum.config.paths as paths
+        from meerschaum.utils.locks import InterProcessLock
+
+        arguments = call_signature.bind(*args, **kwargs)
+        arguments.apply_defaults()
+        venv = arguments.arguments['venv']
+        # Already-verified activation performs no mutations and must keep working even
+        # when its cache directory has become read-only.
+        if (
+            func.__name__ == 'init_venv'
+            and not arguments.arguments['force']
+            and venv in verified_venvs
+        ):
+            return func(*args, **kwargs)
+
+        # Keep this distinct from the legacy existence-marker `<venv>.lock`: file locks
+        # persist after release. Share the same object for recursive init / verify calls.
+        lock_path = paths.VENVS_CACHE_RESOURCES_PATH / (venv + '.mutation.lock')
+        lock_key = str(lock_path.absolute())
+        with _venv_mutation_locks_guard:
+            thread_lock, process_lock = _venv_mutation_locks.setdefault(
+                lock_key, (RLock(), InterProcessLock(lock_path)),
+            )
+        with thread_lock:
+            with process_lock:
+                return func(*args, **kwargs)
+
+    return locked
+
+
+@_locked_venv_mutation
 def verify_venv(
     venv: str,
     debug: bool = False,
@@ -321,7 +364,6 @@ def verify_venv(
     """
     import platform
     import os
-    import shutil
     import sys
 
     import meerschaum.config.paths as paths
@@ -363,6 +405,7 @@ def verify_venv(
         """
         Return the version for the python binary at the given path.
         """
+        proc = None
         try:
             ### It might be a broken symlink, so skip on errors.
             if debug:
@@ -374,8 +417,12 @@ def verify_venv(
             )
             stdout, stderr = proc.communicate(timeout=1.0)
         except Exception as e:
-            ### E.g. the symlink may be broken.
-            if is_symlink(python_path):
+            # A loaded host may exceed the probe timeout with a valid interpreter. Reap
+            # that child, and only remove aliases whose targets are actually missing.
+            if proc is not None and proc.poll() is None:
+                proc.kill()
+                proc.communicate()
+            if is_symlink(python_path) and not python_path.exists():
                 try:
                     python_path.unlink()
                 except Exception as _e:
@@ -421,13 +468,22 @@ def verify_venv(
             if python_path == real_path:
                 continue
 
+            # Already-normalized aliases need no mutation. For indirect aliases, replace
+            # atomically so another process may keep executing this interpreter throughout.
+            if python_path.is_symlink() and python_path.readlink() == real_path:
+                continue
+            import uuid
+            temporary_path = python_path.with_name('.' + filename + '.' + uuid.uuid4().hex)
             try:
-                python_path.unlink()
-            except Exception:
-                pass
-            success, msg = make_symlink(real_path, python_path)
-            if not success:
-                warn(msg, color=False)
+                success, msg = make_symlink(real_path, temporary_path)
+                if success:
+                    os.replace(temporary_path, python_path)
+                else:
+                    warn(msg, color=False)
+            except OSError as e:
+                warn(str(e), color=False)
+            finally:
+                temporary_path.unlink(missing_ok=True)
             continue
 
         python_versioned_path = bin_path / python_versioned_name
@@ -435,11 +491,11 @@ def verify_venv(
             ### Avoid circular symlinks.
             if get_python_version(python_versioned_path) == version:
                 continue
-            python_versioned_path.unlink()
-        shutil.move(python_path, python_versioned_path)
+        os.replace(python_path, python_versioned_path)
 
 
 tried_virtualenv = False
+@_locked_venv_mutation
 def init_venv(
     venv: str = 'mrsm',
     verify: bool = True,
@@ -555,7 +611,6 @@ def init_venv(
 
     wait_for_lock()
     update_lock(True)
-
     try:
         if rename_vtp:
             if debug:
@@ -658,12 +713,10 @@ def init_venv(
             if debug:
                 print(f"Cleanup: move '{temp_vtp}' back to '{vtp}'.")
             shutil.move(temp_vtp, vtp)
-
     finally:
         update_lock(False)
 
-    # Verification can recreate an incompatible environment. Release the creation lock
-    # first so that the recursive init does not wait on our own lock for 30 seconds.
+    # The mutation lock is reentrant: verification may recreate an incompatible environment.
     if verify:
         verify_venv(venv, debug=debug)
         verified_venvs.add(venv)

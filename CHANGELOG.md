@@ -6,6 +6,9 @@ Meerschaum 5 is a rewrite of the core in Rust: the data kernel, the `sql:` / `va
 
 ### v5.0.0rc4
 
+- **Make concurrent plugin environment startup safe.**  
+  Virtual-environment creation and verification serialize across processes, preserve working interpreter aliases during repairs, and reap timed-out probes without deleting valid links.
+
 - **Restore interactive configuration and connector suggestions.**  
   Configuration editing opens existing YAML files, including filenames entered with their extensions. Config-key, connector, and other selection prompts show suggestions through both CLI entry points.
 
