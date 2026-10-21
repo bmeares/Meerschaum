@@ -21,7 +21,7 @@ SESSION_COOKIE_NAME: str = 'mrsm-session-id'
 EXPIRES_SECONDS: int = get_config('api', 'cache', 'session_expires_minutes') * 60
 _active_sessions: Dict[str, Dict[str, Any]] = {}
 
-### Without a cache connector, the API host (which serves the console) keeps sessions in the instance,
+### The API host always keeps sessions in the instance, including when Valkey is configured,
 ### where the Rust server's terminal reads them too (`crates/meerschaum-server/src/webterm.rs`): rows
 ### of `session_id` (primary key), `data` (compact JSON string) and `expires` (Unix seconds)
 ### in the temporary pipe `mrsm_sessions`.
@@ -66,7 +66,7 @@ def _cache_drop(session_id: Any) -> None:
 
 def _use_instance_store() -> bool:
     """
-    Return whether sessions live in the instance (API host without a cache connector).
+    Return whether sessions live in the instance (API host, shared with the Rust terminal).
     """
     import meerschaum.api as _api
     return bool(getattr(_api, '_host_mode', False))
@@ -210,7 +210,7 @@ def set_session(session_id: str, session_data: Dict[str, Any]):
     Set a `session_id` to a dictionary.
     """
     _cache_drop(session_id)
-    conn = get_cache_connector()
+    conn = None if _use_instance_store() else get_cache_connector()
     if conn is None and _use_instance_store():
         _instance_set(str(session_id), json.dumps(session_data, separators=(',', ':')))
         return
@@ -262,7 +262,7 @@ def _get_session_data(session_id: Optional[str]) -> Union[Dict[str, Any], None]:
     """
     if debug:
         dprint(f"Getting session data for {session_id=}")
-    conn = get_cache_connector()
+    conn = None if _use_instance_store() else get_cache_connector()
     if conn is None and _use_instance_store():
         return _instance_get(str(session_id))
     if conn is None:
@@ -316,7 +316,7 @@ def delete_session(session_id: str):
     if debug:
         dprint(f"Deleting {session_id=}")
     _cache_drop(session_id)
-    conn = get_cache_connector()
+    conn = None if _use_instance_store() else get_cache_connector()
     if conn is None and _use_instance_store():
         _instance_delete(str(session_id))
         return

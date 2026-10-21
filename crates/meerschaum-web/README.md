@@ -46,7 +46,8 @@ and duplicates are refused when the router is built.
 
 `InstanceSessions` and `ValkeySessions` implement the protocol `meerschaum/api/dash/sessions.py`
 writes (rows `session_id` primary key, `data` compact JSON, `expires` Unix seconds in the temporary
-pipe `mrsm_sessions`; or `mrsm_session_id:<uuid>` with `EX` in Valkey). Rust no longer creates or
+pipe `mrsm_sessions`; or `mrsm_session_id:<uuid>` with `EX` in Valkey). The hosted console always uses `InstanceSessions`, even when a Valkey cache is configured.
+Rust no longer creates or
 deletes console sessions: login, logout, registration and password reset are Dash's. The server
 guards `mrsm_sessions` against pipe aliases like its other internal tables.
 

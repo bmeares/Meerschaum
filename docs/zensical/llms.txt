@@ -51,7 +51,7 @@
 - [🚀 Repositories](https://meerschaum.io/reference/plugins/repositories/): Meerschaum gives you the ability to easily install and create plugins. Refer to the guide below on how to install, write, and publish plugins.
 - [🌳 Environment Variables](https://meerschaum.io/reference/environment/): You can manage the behavior of Meerschaum and emulate multiple installations with environment variables.
 - [🩺 Troubleshooting](https://meerschaum.io/reference/troubleshooting/): A symptom-driven guide to the most common Meerschaum issues. Each entry follows Symptom → Cause → Fix.
-- [⬆️ Migrating to v5](https://meerschaum.io/reference/migrating-to-v5/): This guide follows the v5.0.0 design spec and has been checked against the pre-release builds (the console, plugin-owned Dash apps, the native plugin loader, venv accounting and the Syncing Engine are
+- [⬆️ Migrating to v5](https://meerschaum.io/reference/migrating-to-v5/): This guide follows the v5.0.0 design spec and has been checked against the pre-release builds (the Dash console, the native plugin loader, venv accounting and the Syncing Engine are implemented). Anyt
 - [📖 Glossary](https://meerschaum.io/reference/glossary/): This page defines the core Meerschaum domain terms in one place. Each entry links to its reference documentation where one exists. Other pages can deep-link to any term by its heading anchor, e.g. #up
 - [💼 Portable](https://meerschaum.io/reference/meerschaum-portable/): The standalone "portable" archive (mrsm-full- / mrsm-minimal-, built with pyoxidizer) is no longer produced. This page remains so old links keep working.
 
@@ -59,7 +59,7 @@
 - [📚 Tutorials](https://meerschaum.io/tutorials/): Want to learn Meerschaum hands-on? Follow the written, end-to-end walkthrough below, or scroll down to the video tutorials if you're more of a visual learner.
 
 ## News
-- [🪵 Changelog](https://meerschaum.io/news/changelog/): Meerschaum 5 is a rewrite of the core in Rust: the data kernel, the sql: / valkey: / api: connectors, the Syncing Engine, jobs, compose, the HTTP API, the MCP server, the web console and the mrsm CLI 
+- [🪵 Changelog](https://meerschaum.io/news/changelog/): Meerschaum 5 is a rewrite of the core in Rust: the data kernel, the sql: / valkey: / api: connectors, the Syncing Engine, jobs, compose, the HTTP API, the MCP server and the mrsm CLI and shell. The me
 - [📢 Announcements](https://meerschaum.io/news/announcements/): > 27 June 2022
 - [🌠 To-Do / Wish List](https://meerschaum.io/news/to-do/): Below are some ongoing tasks I have planned for Meerschaum. This is not an exhaustive list, and if you would like to contribute a feature idea or point out a bug, please start a discussion or open an 
 - [🤗 Acknowledgements](https://meerschaum.io/news/acknowledgements/): Meerschaum is built with the help of many incredible open source libraries. In the spirit of open source, I've chosen to release the project under the permissive Apache 2.0 license.

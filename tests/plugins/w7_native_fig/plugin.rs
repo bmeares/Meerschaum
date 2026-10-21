@@ -16,7 +16,7 @@ impl Plugin for Fig {
     const NAME: &'static str = "w7_native_fig";
     const VERSION: &'static str = "1.0.0";
     fn manifest(&self) -> Value {
-        json!({"schema_version":meerschaum_plugin::MANIFEST_SCHEMA_VERSION,"meerschaum_version":"5.0.0-rc.2","python_version":"","fingerprint":null,
+        json!({"schema_version":meerschaum_plugin::MANIFEST_SCHEMA_VERSION,"meerschaum_version":"5.0.0-rc.3","python_version":"","fingerprint":null,
           "plugins":{"w7_native_fig":{"name":"w7_native_fig","version":"1.0.0","data_functions":[],"actions":[],"arguments":[],"pre_sync_hooks":[],"post_sync_hooks":[],"connectors":[],"api_plugins":[],"web_pages":[{"path":"/dash/w7-native-figure","page_group":"W7 Rust","page_key":"w7-native-figure","login_required":true,"function":"page","mode":"html"}]}},
           "connector_types":{},"pre_sync_hooks":[],"post_sync_hooks":[]})
     }

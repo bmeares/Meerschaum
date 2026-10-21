@@ -149,7 +149,10 @@ fn plan_pipes_prints_the_plan_without_syncing() {
     eprintln!("{out}");
     assert!(out.starts_with("node"), "{out}");
     for metric in ["raw", "clean", "daily"] {
-        assert!(out.contains(&format!("sql:local/{metric}")), "{out}");
+        assert!(
+            out.contains(&format!("Pipe('sql:local', '{metric}')")),
+            "{out}"
+        );
     }
     assert!(out.contains("root"), "{out}");
     assert!(out.contains("Nothing was synced."), "{out}");
@@ -216,8 +219,8 @@ fn show_graph_draws_the_dag() {
         "{out}"
     );
     let tree: Vec<&str> = lines[2..5].to_vec();
-    assert!(tree[0].ends_with("sql:local/raw"), "{out}");
-    assert!(tree[1].ends_with("sql:local/clean"), "{out}");
+    assert!(tree[0].ends_with("Pipe('sql:local', 'raw')"), "{out}");
+    assert!(tree[1].ends_with("Pipe('sql:local', 'clean')"), "{out}");
     // The chain is built from `{{ Pipe() }}` references, so the edges are drawn dashed.
     assert!(
         ["\u{2514}\u{2504}\u{2504} ", "`~~ "]
@@ -226,7 +229,7 @@ fn show_graph_draws_the_dag() {
         "{out}"
     );
     assert!(out.contains("implicit {{ Pipe() }} edge"), "{out}");
-    assert!(tree[2].contains("sql:local/daily"), "{out}");
+    assert!(tree[2].contains("Pipe('sql:local', 'daily')"), "{out}");
     assert!(
         tree[2].contains('\u{2605}') || tree[2].contains('*'),
         "the selected pipe is marked: {out}"
@@ -261,7 +264,7 @@ fn show_graph_draws_a_cycle_instead_of_flattening_it() {
     }
     let out = env.ok(&["show", "graph", "-t", "loop"]);
     assert!(out.contains("2 pipes, 2 edges"), "the real edges: {out}");
-    assert!(out.contains("cycle: sql:local/"), "{out}");
+    assert!(out.contains("cycle: Pipe('sql:local',"), "{out}");
     assert!(!out.contains("Not connected"), "{out}");
     let json = env.ok(&["show", "graph", "-t", "loop", "--nopretty"]);
     let graph: serde_json::Value = serde_json::from_str(json.trim()).unwrap();
@@ -527,14 +530,14 @@ fn gantt_draws_planned_bars_with_end_times_under_the_actual_ones() {
     assert_eq!(text, GOLDEN_GANTT, "\n{text}");
 }
 
-const GOLDEN_GANTT: &str = r#"run 01JW9GANTT  4 nodes  4 workers  wall 1m40s  planned 1m15s  critical path: raw → clean
-raw    ██████████████████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░  40s    +12,301 ins                  ✔
-       ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒                                        30s    planned
-clean  ░░░░░░░░░░░░░░░░░░░░░░███████████████████████████░░░░░  50s    +12,290 ins  ~11 upd         ✔
-                       ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒               45s    planned
-geo    ░░░░░░░░░░░░░░░░░░░░░░████                              9s     error: connection reset      ✘
-                       ▒▒▒▒▒▒▒▒▒▒▒                             20s    planned
-daily  ·                                                              skip                         ○
+const GOLDEN_GANTT: &str = r#"run 01JW9GANTT  4 nodes  4 workers  wall 1m40s  planned 1m15s  critical path: Pipe('sql:local', 'raw') → Pipe('sql:local', 'clean')
+Pipe('sql:local', 'raw')    █████████████░░░░░░░░░░░░░░░░░░░░  40s    +12,301 ins                  ✔
+                            ▒▒▒▒▒▒▒▒▒▒                         30s    planned
+Pipe('sql:local', 'clean')  ░░░░░░░░░░░░░█████████████████░░░  50s    +12,290 ins  ~11 upd         ✔
+                                      ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒          45s    planned
+Pipe('sql:local', 'geo')    ░░░░░░░░░░░░░███                   9s     error: connection reset      ✘
+                                      ▒▒▒▒▒▒▒                  20s    planned
+Pipe('sql:local', 'daily')  ·                                         skip                         ○
 █ actual  ▒ planned
 "#;
 
@@ -551,11 +554,11 @@ fn gantt_scales_to_a_planned_makespan_longer_than_the_run() {
         n.duration_seconds = Some((f - s) as f64);
     }
     let text = meerschaum_cli::native::engine_views::gantt(&run, 60);
-    let golden = r#"run 01JW9GANTT  2 nodes  4 workers  wall 10s  planned 1m15s  critical path: raw → clean
-raw    █░░░░░░░░░░░░░  4s     +12,301 ins                  ✔
-       ▒▒▒▒▒▒          30s    planned
-clean  ░█░░░░░░░░░░░░  6s     +12,290 ins  ~11 upd         ✔
-             ▒▒▒▒▒▒▒▒  45s    planned
+    let golden = r#"run 01JW9GANTT  2 nodes  4 workers  wall 10s  planned 1m15s  critical path: Pipe('sql:local', 'raw') → Pipe('sql:local', 'clean')
+Pipe('sql:local', 'raw')    █░░░░░░░░░  4s     +12,301 ins                  ✔
+                            ▒▒▒▒        30s    planned
+Pipe('sql:local', 'clean')  ░█░░░░░░░░  6s     +12,290 ins  ~11 upd         ✔
+                                ▒▒▒▒▒▒  45s    planned
 █ actual  ▒ planned
 "#;
     assert_eq!(text, golden, "\n{text}");

@@ -32,7 +32,6 @@ from meerschaum.api.dash.sessions import (
 from meerschaum.api.dash.components import alert_from_success_tuple
 from meerschaum.api.dash.callbacks.dashboard import keys_state
 from meerschaum.api.dash.keys import build_flags_options
-from meerschaum.api.dash.webterm import get_webterm
 from meerschaum.api.dash import execute as _execute
 import dash
 dbc = attempt_import('dash_bootstrap_components', lazy=False, check_update=CHECK_UPDATE)
@@ -368,28 +367,3 @@ dash_app.clientside_callback(
     Output('exec-dummy-2', 'children'),
     Input('exec-div', 'style'),
 )
-
-
-@dash_app.callback(
-    Output('webterm-page-div', 'children'),
-    Input('session-store', 'data'),
-)
-def render_terminal_page(session_store_data):
-    """
-    Show the terminal on its own page (`/dash/webterm`).
-    """
-    session_id = (session_store_data or {}).get('session-id', None)
-    if not session_id:
-        raise PreventUpdate
-    if not is_session_authenticated(str(session_id)):
-        return [
-            html.Br(),
-            alert_from_success_tuple((
-                False,
-                "This Meerschaum instance only allows administrators to access the Webterm.",
-            )),
-        ]
-    content, alerts = get_webterm(
-        {'session-store.data': session_store_data}, fullscreen_button=False,
-    )
-    return [html.Br()] + (content if isinstance(content, list) else [content]) + alerts

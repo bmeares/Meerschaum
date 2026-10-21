@@ -52,16 +52,16 @@
        "bounds": {"begin": null, "end": null}, "ranges": [{"begin": null, "end": null}], "chunks": [],
        "provisional": true,
        "consumes": [{"parent_ref": "sql:main|plugin:gis|parcels_raw|None", "state_instance": "sql:main", "seq": 3}],
-       "reason_contains": ["1 unconsumed ledger entry from plugin:gis/parcels_raw (seq 3)", "no datetime column: full re-sync"]},
+       "reason_contains": ["1 unconsumed ledger entry from Pipe('plugin:gis', 'parcels_raw') (seq 3)", "no datetime column: full re-sync"]},
       {"node": "sql:main|sql:main|parcels_joined|None", "action": "skip", "bounds": null, "provisional": true,
-       "reason_contains": ["sql:main/parcels_clean unchanged since its cursor"]},
+       "reason_contains": ["Pipe('sql:main', 'parcels_clean') unchanged since its cursor"]},
       {"node": "sql:main|sql:main|zoning_overlay|None", "action": "backfill",
        "bounds": {"begin": null, "end": null}, "ranges": [{"begin": null, "end": null}], "provisional": true,
        "consumes": [{"parent_ref": "sql:main|sql:main|parcels_joined|None", "state_instance": "sql:main", "seq": 4}],
-       "reason_contains": ["no cursor on the edge from sql:main/parcels_joined (first engine run); 1 unconsumed ledger entry (seq 4)"]},
+       "reason_contains": ["no cursor on the edge from Pipe('sql:main', 'parcels_joined') (first engine run); 1 unconsumed ledger entry (seq 4)"]},
       {"node": "sql:main|sql:main|districts|None", "action": "backfill",
        "bounds": {"begin": null, "end": null}, "ranges": [{"begin": null, "end": null}], "provisional": true,
-       "reason_contains": ["1 unconsumed ledger entry from sql:main/zoning_overlay (seq 3)"]},
+       "reason_contains": ["1 unconsumed ledger entry from Pipe('sql:main', 'zoning_overlay') (seq 3)"]},
       {"node": "sql:main|sql:main|district_summary|None", "action": "skip", "bounds": null, "provisional": true}
     ]
   }

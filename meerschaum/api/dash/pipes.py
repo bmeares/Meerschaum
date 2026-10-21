@@ -237,17 +237,10 @@ def build_pipe_card(
 
     ]
 
-    query_params = {}
-    default_instance = get_config('meerschaum', 'instance')
-    if pipe.instance_keys != default_instance:
-        query_params['instance'] = pipe.instance_keys
-    pipe_url = (
-        "/dash/pipes/"
-        + f"{pipe.connector_keys}/"
-        + f"{pipe.metric_key}/"
-        + (f"{pipe.location_key}" if pipe.location_key is not None else '')
-        + (f"?{urlencode(query_params)}" if query_params else "")
-    )
+    from meerschaum.api.dash.engine import pipe_href
+    pipe_url = pipe_href('|'.join(map(str, (
+        pipe.instance_keys, pipe.connector_keys, pipe.metric_key, pipe.location_key,
+    ))))
 
     card_header_children = dbc.Row(
         [
@@ -929,12 +922,12 @@ def build_relations_body(pipe: mrsm.Pipe) -> Any:
             return html.P(empty, className='text-muted', style={'margin-top': '1em'})
         return dbc.Table(
             [
-                html.Thead(html.Tr([html.Th('Pipe'), html.Th('Planned'), html.Th('Ledger lag')])),
+                html.Thead(html.Tr([html.Th('Pipe'), html.Th('Next sync'), html.Th('Details')])),
                 html.Tbody([
                     html.Tr([
-                        html.Td(html.A(row['label'], href=row['href'], target='_blank')),
-                        html.Td(row['action']),
-                        html.Td(row['reason'], className=('text-warning' if row['lagging'] else '')),
+                        html.Td(html.A(html.Code(row['label']), href=row['href'], className='pipe-link')),
+                        html.Td(_engine.action_label(row['action'])),
+                        html.Td(html.Details([html.Summary('Why?'), html.P(row['reason'])])),
                     ])
                     for row in rows
                 ]),

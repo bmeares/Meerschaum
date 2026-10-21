@@ -25,7 +25,7 @@ FIGURE = {
 
 CORE_PAGES = (
     '/dash', '/dash/pipes', '/dash/jobs', '/dash/plugins', '/dash/users', '/dash/tokens',
-    '/dash/pipelines', '/dash/webterm', '/dash/password-reset',
+    '/dash/pipelines', '/dash/password-reset',
 )
 
 
@@ -739,12 +739,14 @@ def test_pipelines_page_graph_gantt_and_runs(server, tab):
 
     tab.login()
     tab.goto('/dash/pipelines', '#pipelines-graph-div')
-    ### The dependency graph (a Plotly figure) with its edge table.
-    tab.page.wait_for_selector('#pipelines-graph .scatterlayer .point', timeout=60000)
-    assert tab.page.locator('#pipelines-graph .scatterlayer .point').count() == 2
-    tab.page.wait_for_selector('#pipelines-edges-table tbody tr')
-    row = tab.page.inner_text('#pipelines-edges-table tbody tr')
-    assert 'w7parent' in row and 'w7child' in row
+    tab.page.wait_for_selector('.pipeline-stage', timeout=60000)
+    assert tab.page.locator('.pipeline-stage').count() == 2
+    assert "Pipe(" in tab.page.inner_text('.pipeline-stage >> nth=0')
+    tab.page.locator('.pipeline-stage').first.click()
+    _wait_text(tab.page, '#pipeline-inspector', 'Query')
+    assert tab.page.locator('#pipeline-inspector a', has_text='Open pipe').count() == 1
+    tab.page.locator('#pipeline-fit').click()
+    assert tab.page.locator('#pipeline-canvas svg path[marker-end]').count() == 1
     ### The Gantt chart of the latest run, and its nodes.
     tab.page.wait_for_selector('#pipelines-gantt .barlayer .point', timeout=60000)
     assert tab.page.locator('#pipelines-gantt .barlayer .point').count() >= 2
@@ -773,12 +775,12 @@ def test_pipelines_page_graph_gantt_and_runs(server, tab):
     assert _errors(tab) == [], _errors(tab)
 
 
-def test_the_terminal_page_embeds_the_servers_terminal(webterm_server, context):
+def test_the_console_embeds_the_servers_terminal(webterm_server, context):
     base = webterm_server.base_url
     tab = Tab(context.new_page(), base)
     tab.login()
     cookie = [c for c in context.cookies() if c['name'] == 'mrsm-session-id'][0]['value']
-    tab.goto('/dash/webterm', '#webterm-iframe')
+    tab.goto('/dash', '#webterm-iframe')
     assert tab.page.get_attribute('#webterm-iframe', 'src') == f"/webterm/{cookie}"
     response = tab.page.request.get(f"{base}/webterm/{cookie}")
     assert response.status == 200, response.status
@@ -798,6 +800,6 @@ def test_without_the_terminal_the_dashboard_shows_the_banner(server, tab):
     tab.page.wait_for_selector('#console-pre')
     assert 'v' in tab.page.inner_text('#console-pre')
     assert tab.page.locator('#webterm-iframe').count() == 0
-    tab.goto('/dash/webterm', '#webterm-page-div')
+    tab.goto('/dash/webterm', '#go-button')
     assert tab.page.locator('#webterm-iframe').count() == 0
     assert _errors(tab) == [], _errors(tab)

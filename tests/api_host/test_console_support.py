@@ -164,16 +164,18 @@ graph = engine.plan_graph(instance)
 out['nodes'] = sorted(n['label'] for n in graph['nodes'])
 out['edges'] = sorted((engine.ref_label(e['parent']), engine.ref_label(e['child'])) for e in graph['edges'])
 out['statuses'] = {n['label']: n['status'] for n in graph['nodes']}
-figure = engine.graph_figure(graph)
-out['figure_points'] = len(figure['data'][0]['x'])
-out['figure_arrows'] = len(figure['layout']['annotations'])
-out['x_by_label'] = dict(zip(figure['data'][0]['text'], figure['data'][0]['x']))
+out['dependent_actions'] = [n['action'] for n in graph['nodes'] if n['pipe_ref'] != str(src.instance_connector) + '|dp|src|None']
+positions = engine.canvas_positions(graph)
+out['canvas_cards'] = len(positions)
+out['canvas_edges'] = len(graph['edges'])
+out['x_by_label'] = {engine.ref_label(ref): pos[0] for ref, pos in positions.items()}
 
 runs = engine.get_runs(instance)
 out['runs'] = len(runs)
 out['run_status'] = runs[0]['status']
 out['filtered'] = len(engine.get_runs(instance, status='failed'))
 out['by_pipe'] = len(engine.get_runs(instance, pipe='dp|leaf'))
+out['by_ancestor_label'] = len(engine.get_runs(instance, pipe=str(src)))
 out['by_id'] = len(engine.get_runs(instance, run_id=runs[0]['run']['run_id']))
 detail = engine.get_run_detail(instance, runs[0]['run']['run_id'])
 gantt = engine.gantt_figure(detail)
@@ -193,21 +195,23 @@ out['unregistered'] = engine.relations_of(mrsm.Pipe('dp', 'ghost', instance=inst
 print('JSON:' + json.dumps(out))
 '''))
     assert out['run_success'] is True
-    assert out['nodes'] == ['dp/leaf/loc', 'dp/mid', 'dp/src']
-    assert out['edges'] == [['dp/mid', 'dp/leaf/loc'], ['dp/src', 'dp/mid']]
-    assert out['statuses']['dp/src'] == 'root'
-    assert out['figure_points'] == 3 and out['figure_arrows'] == 2
+    assert all(action != 'root' for action in out['dependent_actions'])
+    assert out['nodes'] == ["Pipe('dp', 'leaf', 'loc', instance='sql:apihosttest')", "Pipe('dp', 'mid', instance='sql:apihosttest')", "Pipe('dp', 'src', instance='sql:apihosttest')"]
+    assert out['edges'] == [["Pipe('dp', 'mid', instance='sql:apihosttest')", "Pipe('dp', 'leaf', 'loc', instance='sql:apihosttest')"], ["Pipe('dp', 'src', instance='sql:apihosttest')", "Pipe('dp', 'mid', instance='sql:apihosttest')"]]
+    assert out['statuses']["Pipe('dp', 'src', instance='sql:apihosttest')"] == 'root'
+    assert out['canvas_cards'] == 3 and out['canvas_edges'] == 2
     ### Columns by depth: a parent is left of its child.
     xs = out['x_by_label']
-    assert xs['dp/src'] < xs['dp/mid'] < xs['dp/leaf/loc']
+    assert xs["Pipe('dp', 'src', instance='sql:apihosttest')"] < xs["Pipe('dp', 'mid', instance='sql:apihosttest')"] < xs["Pipe('dp', 'leaf', 'loc', instance='sql:apihosttest')"]
     assert out['runs'] >= 1 and out['run_status'] == 'succeeded'
     assert out['filtered'] == 0 and out['by_pipe'] >= 1 and out['by_id'] == 1
+    assert out['by_ancestor_label'] >= 1
     assert out['gantt_traces'] == ['Planned', 'Actual']
     ### Every node has a planned bar; a node that did not run has no actual one.
     assert out['gantt_planned'] == 3 and 1 <= out['gantt_actual'] <= 3
     assert out['unknown_run'] is None
     assert out['event_lines'][0].startswith('run_started')
-    assert out['mid_parents'] == ['dp/src'] and out['mid_children'] == ['dp/leaf/loc']
+    assert out['mid_parents'] == ["Pipe('dp', 'src', instance='sql:apihosttest')"] and out['mid_children'] == ["Pipe('dp', 'leaf', 'loc', instance='sql:apihosttest')"]
     assert out['href'] == '/dash/pipes/dp/leaf/loc?instance=sql%3Aapihosttest'
     assert out['unregistered'] == {'parents': [], 'children': []}
 
@@ -232,7 +236,7 @@ out = {
 print('JSON:' + json.dumps(out))
 '''))
     assert out['count'] == 3 and out['isolated_column'] == 0.0
-    assert out['label'] == 'conn/metric/loc' and out['label_no_loc'] == 'conn/metric'
+    assert out['label'] == "Pipe('conn', 'metric', 'loc', instance='i')" and out['label_no_loc'] == "Pipe('conn', 'metric', instance='i')"
     assert out['split'] == ['i', 'conn', 'metric', None]
     assert out['status'] == ['caught_up', 'pending', 'pending', 'rebuild', 'root', 'observe']
 
@@ -429,3 +433,46 @@ def test_the_host_needs_one_transport(sandbox):
             env=make_env(root, plugins), cwd=str(root), capture_output=True, text=True, timeout=120,
         )
         assert result.returncode == 2, (argv, result.stderr[-500:])
+
+
+def test_pipe_links_round_trip_each_encoded_key(sandbox):
+    root, plugins = sandbox
+    out = _json(run_python(root, plugins, '''
+import json
+from urllib.parse import urlsplit
+from unittest.mock import patch
+import meerschaum as mrsm
+from meerschaum.api.dash import engine
+from meerschaum.api.dash.callbacks import pipes
+
+seen = []
+def card(pipe, **kw):
+    seen.append([pipe.connector_keys, pipe.metric_key, pipe.location_key, pipe.instance_keys])
+    return 'card'
+with patch.object(pipes, 'build_pipe_card', card), patch.object(pipes, 'build_pipes_navbar', lambda *a, **k: []):
+    for metric, location in [('counts', 'bytes'), ('a/b + c', '%3A'), ('café', None)]:
+        ref = '|'.join(map(str, ('sql:apihosttest', 'sql:main', metric, location)))
+        url = urlsplit(engine.pipe_href(ref))
+        pipes.render_pipe_page_from_url(url.path, '?' + url.query, {})
+print('JSON:' + json.dumps(seen))
+'''))
+    assert out == [
+        ['sql:main', 'counts', 'bytes', 'sql:apihosttest'],
+        ['sql:main', 'a/b + c', '%3A', 'sql:apihosttest'],
+        ['sql:main', 'café', None, 'sql:apihosttest'],
+    ]
+
+
+def test_pipeline_focus_keeps_ancestors_and_descendants(sandbox):
+    root, plugins = sandbox
+    out = _json(run_python(root, plugins, '''
+import json
+from meerschaum.api.dash.engine import focus_graph
+nodes = [{'pipe_ref': ref} for ref in ('source', 'selected', 'output', 'sibling', 'other')]
+edges = [{'parent': a, 'child': b} for a, b in [
+    ('source', 'selected'), ('selected', 'output'), ('source', 'sibling'),
+]]
+focused = focus_graph({'nodes': nodes, 'edges': edges, 'warnings': []}, 'selected')
+print('JSON:' + json.dumps([node['pipe_ref'] for node in focused['nodes']]))
+'''))
+    assert out == ['source', 'selected', 'output']

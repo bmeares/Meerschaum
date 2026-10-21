@@ -79,18 +79,27 @@ impl PipeRef {
         self.parts().instance_keys
     }
 
-    /// A short human label without the instance: `connector/metric[/location]`.
+    /// The official Pipe representation without the instance.
     pub fn label(&self) -> String {
-        let p = self.parts();
-        match p.location_key {
-            Some(loc) => format!("{}/{}/{loc}", p.connector_keys, p.metric_key),
-            None => format!("{}/{}", p.connector_keys, p.metric_key),
-        }
+        self.display_label(false)
     }
 
-    /// [`PipeRef::label`] followed by `@instance`.
+    /// The official Pipe representation including its instance.
     pub fn label_with_instance(&self) -> String {
-        format!("{}@{}", self.label(), self.instance_keys())
+        self.display_label(true)
+    }
+
+    fn display_label(&self, with_instance: bool) -> String {
+        let p = self.parts();
+        let mut label = format!("Pipe('{}', '{}'", p.connector_keys, p.metric_key);
+        if let Some(location) = p.location_key {
+            label.push_str(&format!(", '{location}'"));
+        }
+        if with_instance {
+            label.push_str(&format!(", instance='{}'", p.instance_keys));
+        }
+        label.push(')');
+        label
     }
 }
 
@@ -262,7 +271,7 @@ mod tests {
         let r = PipeRef::new("sql:main", "sql:main", "raw", None);
         assert_eq!(r.as_str(), "sql:main|sql:main|raw|None");
         assert_eq!(r.parts().location_key, None);
-        assert_eq!(r.label(), "sql:main/raw");
+        assert_eq!(r.label(), "Pipe('sql:main', 'raw')");
         let r = PipeRef::new("sql:main", "plugin:noaa", "weather", Some("us"));
         assert_eq!(r.parts().location_key, Some("us"));
         let pipe = PipeRecord::new("sql:main", "plugin:noaa", "weather", Some("us"))

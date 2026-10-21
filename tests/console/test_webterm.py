@@ -7,8 +7,9 @@ End-to-end checks of the web terminal (opt-in, see `conftest.py`).
 
 The Rust server serves the terminal itself (`meerschaum_server::webterm`) at `/webterm/<session>`
 (and its websocket at `/websocket/<session>`, which bridges the tab to a PTY running
-`mrsm -i <instance>`); the Dash console embeds that page in an iframe, on the dashboard and at
-`/dash/webterm`, with v4's controls (refresh, fullscreen, new tmux window) and the mobile key row,
+`mrsm -i <instance>`); the Dash console embeds that page in an iframe on the dashboard
+(also reached through the old `/dash/webterm` URL), with v4's controls (refresh, fullscreen,
+new tmux window) and the mobile key row,
 which talk to the terminal over `postMessage`. The terminal tests run twice when `tmux` is
 installed: once on the tmux path (`api.webterm.tmux.enabled`, the default; reloads and second tabs
 reattach to the user's tmux session) and once on the plain path (one shell per tab). `tmux` runs
@@ -22,6 +23,7 @@ import os
 import pathlib
 import re
 import shutil
+import shlex
 import subprocess
 import tempfile
 
@@ -59,10 +61,20 @@ def term_server(request):
     )
     instance.path = 'tmux' if use_tmux else 'plain'
     ### A private tmux server: its socket directory lives under a short temporary path.
-    tmux_dir = tempfile.mkdtemp(prefix='mt-', dir='/tmp')
+    tmux_dir = tempfile.mkdtemp(prefix='mt-')
     instance.env['TMUX_TMPDIR'] = tmux_dir
     ### Every tmux command the tests run addresses this socket explicitly (`-S`).
-    instance.tmux_socket = str(pathlib.Path(tmux_dir) / f"tmux-{os.getuid()}" / 'default')
+    instance.tmux_socket = str(pathlib.Path(tmux_dir) / 'socket')
+    if use_tmux:
+        bin_dir = pathlib.Path(tmux_dir) / 'bin'
+        bin_dir.mkdir()
+        wrapper = bin_dir / 'tmux'
+        wrapper.write_text(
+            '#!/bin/sh\nexec ' + shlex.quote(shutil.which('tmux'))
+            + ' -S ' + shlex.quote(instance.tmux_socket) + ' "$@"\n'
+        )
+        wrapper.chmod(0o700)
+        instance.env['PATH'] = str(bin_dir) + os.pathsep + instance.env['PATH']
     if request.param == 'no-tmux-binary':
         bin_dir = pathlib.Path(tmux_dir) / 'bin'
         bin_dir.mkdir()
@@ -115,6 +127,7 @@ def _open_terminal(page, base: str, path: str = '/dash/webterm'):
         frame = page.main_frame
     else:
         page.wait_for_selector('#webterm-iframe', timeout=60000)
+        page.locator('#webterm-iframe').scroll_into_view_if_needed()
         frame = page.query_selector('#webterm-iframe').content_frame()
     frame.wait_for_selector('.xterm .xterm-screen', timeout=30000)
     frame.wait_for_selector('.xterm-rows > div', timeout=30000)
@@ -178,7 +191,7 @@ def test_without_the_flag_there_is_no_terminal(server, context):
     cookie = [c for c in context.cookies() if c['name'] == 'mrsm-session-id'][0]['value']
     assert page.request.get(f"{server.base_url}/webterm/{cookie}").status == 404
     assert page.request.get(f"{server.base_url}/websocket/{cookie}").status == 404
-    tab.goto('/dash/webterm', '#webterm-page-div')
+    tab.goto('/dash/webterm', '#go-button')
     assert page.locator('#webterm-iframe').count() == 0
     ### v4's banner takes the terminal's place on the dashboard.
     tab.goto('/dash', '#go-button')
@@ -219,7 +232,7 @@ def test_show_version_in_the_console_terminal(term_server, context):
         assert frame.evaluate("window.terminal.term.unicode.activeVersion") == '11'
         assert frame.locator('.mrsm-webterm-screen').get_attribute('data-ws') == f"/websocket/{cookie}"
         ### The terminal sits in the console's chrome, with its navbar.
-        assert page.locator('#pages-navbar-div #logo-img').count() == 1
+        assert page.locator('#logo-img').count() == 1
         ### Typed keys leave through the socket as terminado `["stdin", ...]` frames.
         frame.evaluate(
             "window.__sent = []; const s = window.terminal.socket; const o = s.send.bind(s);"
@@ -342,8 +355,8 @@ def test_the_key_row_is_hidden_with_room_for_a_keyboard(term_server, context):
     page.set_viewport_size({'width': 1280, 'height': 800})
     _open_terminal(page, term_server.base_url)
     assert not page.locator('.webterm-key-btn').first.is_visible()
-    ### The terminal's page has no side column to take over: fullscreen is the dashboard's.
-    assert page.locator('#webterm-fullscreen-button').count() == 0
+    ### The legacy terminal URL now opens the console, including its fullscreen control.
+    assert page.locator('#webterm-fullscreen-button').count() == 1
     ### The new-window control is the tmux path's.
     assert (page.locator('#webterm-new-tab-button').count() == 1) == (term_server.path == 'tmux')
     ### Refresh reloads the terminal's page: it comes back with its shell.

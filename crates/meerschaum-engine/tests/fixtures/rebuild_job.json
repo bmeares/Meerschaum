@@ -149,7 +149,7 @@
         ],
         "provisional": false,
         "reason_contains": [
-          "sql:main/orders_clean watermark advanced 2026-10-12 08:00 → 2026-10-12 09:00"
+          "Pipe('sql:main', 'orders_clean') watermark advanced 2026-10-12 08:00 → 2026-10-12 09:00"
         ]
       }
     ]

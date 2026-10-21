@@ -111,3 +111,19 @@ print(json.dumps({'first': first, 'second': second, 'after': s.get_session_data(
     finally:
         conn.close()
     assert count == 0
+
+
+def test_host_sessions_use_shared_instance_even_with_valkey_configured(sandbox):
+    root, plugins = sandbox
+    result = run_python(root, plugins, PRELUDE + """
+def unexpected_cache():
+    raise AssertionError('Hosted sessions must use the same store as the Rust terminal')
+s.get_cache_connector = unexpected_cache
+s.set_session('shared-with-terminal', {'username': 'alice'})
+assert s.get_session_data('shared-with-terminal', use_cache=False)['username'] == 'alice'
+s.update_session('shared-with-terminal', {'admin': True})
+assert s.get_session_data('shared-with-terminal', use_cache=False)['admin'] is True
+s.delete_session('shared-with-terminal')
+assert s.get_session_data('shared-with-terminal', use_cache=False) is None
+""")
+    assert result.returncode == 0, result.stderr[-3000:]

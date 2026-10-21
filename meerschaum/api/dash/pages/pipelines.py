@@ -3,7 +3,7 @@
 
 """
 The pipelines page (`/dash/pipelines`, new in v5): the dependency graph with each pipe's planned
-action and ledger lag, a Gantt per run (planned against actual), the runs table and a run's
+action and dependencies, a Gantt per run (planned against actual), the runs table and a run's
 events. The data is the Syncing Engine's (`meerschaum.api.dash.engine`).
 """
 
@@ -41,6 +41,19 @@ layout = [
                 ],
             ),
             html.Div(id='pipelines-alert-div'),
+            html.P('Follow data from source to output. Select a stage to inspect its query, dependencies, and syncs.',
+                     className='text-muted'),
+            dcc.Dropdown(id='pipeline-focus', options=[], placeholder='Find a pipe and focus its pipeline…',
+                         className='pipeline-focus', clearable=True),
+            dbc.Checkbox(id='pipeline-standalone', label='Include standalone pipes', value=False,
+                         className='mt-2'),
+            html.Div([
+                dcc.Loading(html.Div(id='pipelines-graph-div'), type='circle', delay_show=1000),
+                html.Aside([
+                    html.H4('Stage details'), html.P('Select a pipe on the canvas to inspect it.'),
+                ], id='pipeline-inspector'),
+            ], className='pipeline-workspace'),
+            html.H4('Sync history'),
             dbc.Card(
                 dbc.CardBody(
                     dbc.Row(
@@ -58,7 +71,7 @@ layout = [
                             dbc.Col(
                                 dbc.Input(
                                     id='pipelines-pipe-input',
-                                    placeholder='Pipe (connector|metric|location)',
+                                    placeholder="Find a pipe, e.g. Pipe('sql:main', 'counts')",
                                     type='text',
                                     debounce=True,
                                     size='sm',
@@ -89,14 +102,6 @@ layout = [
                         className='g-2',
                     ),
                 ),
-            ),
-            html.Br(),
-            html.H4('Pipeline dependencies'),
-            dcc.Loading(
-                html.Div(id='pipelines-graph-div'),
-                id='pipelines-graph-loading',
-                type='circle',
-                delay_show=1000,
             ),
             html.Br(),
             html.H4('Timeline'),

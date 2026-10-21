@@ -100,12 +100,11 @@ _paths = {
         '/dash/pipes'   : pages.pipes.layout,
         '/dash/jobs'    : pages.jobs.layout,
         '/dash/pipelines': pages.pipelines.layout,
-        '/dash/webterm' : pages.terminal.layout,
     } if _console_pages_allowed else {}),
 }
 _required_login = {
     '', '/dash', '/dash/', '/dash/tokens', '/dash/jobs', '/dash/pipes',
-    '/dash/pipelines', '/dash/webterm',
+    '/dash/pipelines',
 }
 ### Endpoints (plugin pages with `@web_page(dark_theme=False)`) that opt out of the
 ### `dbc_dark` component theme; populated by `add_plugin_pages`.
@@ -118,7 +117,6 @@ _pages = {
     'Tokens': '/dash/tokens',
     'Jobs': '/dash/jobs',
     'Pipelines': '/dash/pipelines',
-    'Terminal': '/dash/webterm',
 } if _console_pages_allowed else {}
 
 

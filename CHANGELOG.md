@@ -4,6 +4,23 @@
 
 Meerschaum 5 is a rewrite of the core in Rust: the data kernel, the `sql:` / `valkey:` / `api:` connectors, the Syncing Engine, jobs, compose, the HTTP API, the MCP server and the `mrsm` CLI and shell. The `meerschaum` Python package stays as the plugin SDK, a façade and the host of the Plotly Dash web console, so pipes, parameters, configuration, compose files, jobs, the HTTP API and the Python public API keep working. Read the [migration guide](/reference/migrating-to-v5/) before upgrading; v4.1.x stays installable and receives security fixes until 5.1.0.
 
+### v5.0.0rc3
+
+- **Share console sessions with the web terminal.**  
+  Hosted console logins always use the instance session store, so the Rust terminal and log stream recognize them when Valkey caching is configured. Existing Valkey-backed sessions require a new login after upgrading.
+
+- **Decode linked pipe keys correctly.**  
+  Links from Parents & Children and pipeline stages preserve colons, slashes, Unicode, and literal percent characters in pipe keys.
+
+- **Explore pipelines as connected stages.**  
+  The Pipelines page now has a pan-and-zoom canvas of selectable pipe cards, dependency focus, and a stage inspector for queries, parameters, data timestamps, planned sync ranges, dependencies, and recent runs. Connected pipelines appear first, with an option to include standalone pipes.
+
+- **Use familiar pipe labels and clear sync status.**  
+  Web and CLI pipeline views use `Pipe(...)` labels. The misleading "Ledger lag" column is replaced by next-sync descriptions, with planner details available on demand. Run filters also match pipe labels and stages reached through dependencies.
+
+- **Keep the terminal in the Web Console.**  
+  The dedicated Terminal page and navigation entry are removed; its old URL opens the Web Console.
+
 ### v5.0.0
 
 *Unreleased: the entry is complete for the current pre-release series (`5.0.0-a1`), and the release date goes here.*
@@ -26,7 +43,7 @@ Meerschaum 5 is a rewrite of the core in Rust: the data kernel, the `sql:` / `va
   The Plotly Dash console (`meerschaum[dash]`) is served by the Python API host behind the Rust server at the same `/dash` paths, with a new `pipelines` page (dependency graph, Gantt timeline, runs) and Parents/Children tabs on the pipe card. `@dash_plugin` and Dash `@web_page` pages register into it as before. Plugin pages may also return an HTML fragment and Plotly figure JSON (`meerschaum.plugins.figure()`, `data-mrsm-figure`, `data-mrsm-map`). The standalone binary serves the API without a console and points `/dash` to `pip install meerschaum[dash]`.
 
 - **The web terminal in Rust.**  
-  `/webterm/<session id>` and `/dash/webterm` are served by the API server itself (a PTY bridge with the tmux session model and terminado's message format, xterm.js 6.0.0), with no Tornado process and no separate `start webterm`.
+  `/webterm/<session id>` is embedded in the Web Console and served by the API server itself (a PTY bridge with the tmux session model and terminado's message format, xterm.js 6.0.0), with no Tornado process and no separate `start webterm`.
 
 - **One wheel with no dependencies, extras, and `cargo install meerschaum`.**  
   `pip install meerschaum` installs one wheel with nothing else: its `mrsm` (and `meerschaum`) console script runs the CLI inside the wheel's extension, and jobs, compose steps and `systemd` units re-run it as `python -P -m meerschaum`. There is no `meerschaum-cli` package. Heavier libraries are extras (`pandas`, `polars`, `geo`, `sql`, `sql-mssql`, `sql-oracle`, `sql-duckdb`, `sql-cockroachdb`, `api`, `dash`, `shell`, `gui`, `cli-tools`, `full`), imported only when used. `cargo install meerschaum` (the front crate's default `cli` feature; libraries use `default-features = false`), and release binaries run the same CLI as a standalone binary, without an interpreter until a Python plugin is installed. The `bmeares/meerschaum:slim` image is the base wheel (no extras) on a minimal Python.

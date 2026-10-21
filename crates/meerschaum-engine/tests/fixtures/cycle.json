@@ -10,6 +10,6 @@
   ],
   "selection": {"targets": {"refs": ["sql:main|sql:main|a|None"]}, "parents": "all"},
   "expected": {
-    "error": "cycle in the pipe graph: sql:main/a → sql:main/b → sql:main/c → sql:main/a"
+    "error": "cycle in the pipe graph: Pipe('sql:main', 'a') → Pipe('sql:main', 'b') → Pipe('sql:main', 'c') → Pipe('sql:main', 'a')"
   }
 }

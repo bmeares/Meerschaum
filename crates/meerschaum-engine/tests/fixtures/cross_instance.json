@@ -43,7 +43,7 @@
        ],
        "provisional": true,
        "consumes": [{"parent_ref": "sql:landing|plugin:sensors|readings|None", "state_instance": "sql:warehouse", "seq": 7}],
-       "reason_contains": ["1 unconsumed ledger entry from plugin:sensors/readings@sql:landing (seq 7)"]}
+       "reason_contains": ["1 unconsumed ledger entry from Pipe('plugin:sensors', 'readings', instance='sql:landing') (seq 7)"]}
     ]
   }
 }

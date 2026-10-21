@@ -10,7 +10,7 @@ Python API host (`meerschaum/api/host/`), which builds and mounts this package's
 api/dash/
 ├── __init__.py        # build_dash_app(): the one Dash app (built on first use, not on import)
 ├── pages/             # the layouts: dashboard, pipes, jobs, plugins, users, tokens, login,
-│                      #   register, password-reset (a `@web_page`), pipelines (new), terminal (new)
+│                      #   register, password-reset (a `@web_page`), pipelines (new)
 ├── callbacks/         # the callbacks of those pages; custom.py registers the plugins'
 │                      #   `@dash_plugin` functions and `@web_page` pages (and their assets)
 ├── components.py      # navbar, buttons, build_cards_grid, alert_from_success_tuple, ...
@@ -36,6 +36,11 @@ api/dash/
   and polls the log. A pipe card's destructive Manage actions (delete, drop, clear) ask first.
 - **Pipelines** (`/dash/pipelines`) and the **Parents & Children** tabs of a pipe card read the
   engine through `meerschaum.core.Pipeline`'s bindings (the functions behind `/engine/*`).
+  Pipelines draws connected stage cards with pan, zoom and dependency focus. Selecting a stage
+  opens its query, parameters, next sync range and recent runs. All labels use `Pipe(...)`.
+- **Sessions.** The hosted console always stores sessions in the instance database, matching the
+  Rust terminal and log stream even when a Valkey cache is configured.
+- **Terminal.** The terminal is embedded in the Web Console; `/dash/webterm` falls back to it.
 - Removed in 5.0 (importing them raises a `ModuleNotFoundError` naming the replacement,
   `meerschaum/_internal/_removed.py`): `websockets` and `sync`.
 

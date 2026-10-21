@@ -6,12 +6,12 @@
 //! ```text
 //! Pipe graph on sql:main: 6 pipes, 6 edges, 1 root, depth 3
 //!
-//! ● sql:main/raw_events
-//! ├── ◆ sql:main/events_clean  lookback 7d
-//! │   ├── ◆ sql:main/daily  (2 parents)
-//! │   │   └── ○ sql:main/report ★
-//! │   └── ○ sql:main/hourly
-//! └┄┄ ↗ sql:main/daily (shown above)
+//! ● Pipe('sql:main', 'raw_events')
+//! ├── ◆ Pipe('sql:main', 'events_clean')  lookback 7d
+//! │   ├── ◆ Pipe('sql:main', 'daily')  (2 parents)
+//! │   │   └── ○ Pipe('sql:main', 'report') ★
+//! │   └── ○ Pipe('sql:main', 'hourly')
+//! └┄┄ ↗ Pipe('sql:main', 'daily') (shown above)
 //! ```
 //!
 //! - A pipe that has several parents is drawn once in full, under the first parent the walk
@@ -76,9 +76,9 @@ pub struct GraphTheme {
     pub metric: Style,
     /// Location keys.
     pub location: Style,
-    /// `/` and `@` between the keys.
+    /// The Pipe constructor and punctuation between keys.
     pub punctuation: Style,
-    /// `@instance`.
+    /// The instance key.
     pub instance: Style,
     /// Tree guides, back-references, edge options (`formatting:pipes:ansi:styles:guide`).
     pub dim: Style,
@@ -334,18 +334,20 @@ impl Painter<'_> {
             }
         };
         let mut parts = vec![
-            (p.connector_keys.to_string(), bolded(t.connector)),
-            ("/".to_string(), t.punctuation),
-            (p.metric_key.to_string(), bolded(t.metric)),
+            ("Pipe(".to_string(), t.punctuation),
+            (format!("'{}'", p.connector_keys), bolded(t.connector)),
+            (", ".to_string(), t.punctuation),
+            (format!("'{}'", p.metric_key), bolded(t.metric)),
         ];
         if let Some(location) = p.location_key {
-            parts.push(("/".to_string(), t.punctuation));
-            parts.push((location.to_string(), bolded(t.location)));
+            parts.push((", ".to_string(), t.punctuation));
+            parts.push((format!("'{location}'"), bolded(t.location)));
         }
         if self.show_instance || p.instance_keys != self.default_instance {
-            parts.push(("@".to_string(), t.punctuation));
-            parts.push((p.instance_keys.to_string(), t.instance));
+            parts.push((", instance=".to_string(), t.punctuation));
+            parts.push((format!("'{}'", p.instance_keys), t.instance));
         }
+        parts.push((")".to_string(), t.punctuation));
         parts
             .into_iter()
             .map(|(text, style)| Seg {
@@ -848,9 +850,9 @@ mod tests {
         let expected = "\
 Pipe graph on sql:main: 3 pipes, 2 edges, 1 root, depth 3
 
-● sql:main/raw
-└── ◆ sql:main/clean
-    └── ○ sql:main/report ★
+● Pipe('sql:main', 'raw')
+└── ◆ Pipe('sql:main', 'clean')
+    └── ○ Pipe('sql:main', 'report') ★
 
 ● root   ◆ has children   ○ leaf   ★ selected
 ";
@@ -873,11 +875,11 @@ Pipe graph on sql:main: 3 pipes, 2 edges, 1 root, depth 3
         let expected = "\
 Pipe graph on sql:main: 4 pipes, 4 edges, 1 root, depth 3
 
-● sql:main/a
-├── ◆ sql:main/b
-│   └── ○ sql:main/d  (2 parents)
-└── ◆ sql:main/c
-    └── ↗ sql:main/d (shown above)
+● Pipe('sql:main', 'a')
+├── ◆ Pipe('sql:main', 'b')
+│   └── ○ Pipe('sql:main', 'd')  (2 parents)
+└── ◆ Pipe('sql:main', 'c')
+    └── ↗ Pipe('sql:main', 'd') (shown above)
 
 ● root   ◆ has children   ○ leaf   ↗ shown above
 ";
@@ -896,13 +898,13 @@ Pipe graph on sql:main: 4 pipes, 4 edges, 1 root, depth 3
             text.contains("Showing 11 of 51 pipes; --full lists every pipe."),
             "{text}"
         );
-        assert!(text.contains("├── ○ sql:main/leaf09"), "{text}");
+        assert!(text.contains("├── ○ Pipe('sql:main', 'leaf09')"), "{text}");
         assert!(!text.contains("leaf10"), "{text}");
         assert!(text.contains("└── … and 40 more children"), "{text}");
         let mut all = opts(true, 80);
         all.full = true;
         let text = render(&m, &GraphTheme::plain(), &all);
-        assert!(text.contains("└── ○ sql:main/leaf49"), "{text}");
+        assert!(text.contains("└── ○ Pipe('sql:main', 'leaf49')"), "{text}");
         assert!(!text.contains("more children"), "{text}");
         assert!(!text.contains("Showing"), "{text}");
     }
@@ -923,7 +925,8 @@ Pipe graph on sql:main: 4 pipes, 4 edges, 1 root, depth 3
         let text = plain(&m, true, 100);
         assert!(!text.contains("shown above"), "{text}");
         assert!(
-            text.contains("└── ○ sql:main/shared") || text.contains("├── ○ sql:main/shared"),
+            text.contains("└── ○ Pipe('sql:main', 'shared')")
+                || text.contains("├── ○ Pipe('sql:main', 'shared')"),
             "{text}"
         );
     }
@@ -939,9 +942,9 @@ Pipe graph on sql:main: 4 pipes, 4 edges, 1 root, depth 3
         let expected = "\
 Pipe graph on sql:main: 3 pipes, 2 edges, 1 root, depth 2
 
-@ sql:main/a
-|-- o sql:main/b
-`-- o sql:main/c *
+@ Pipe('sql:main', 'a')
+|-- o Pipe('sql:main', 'b')
+`-- o Pipe('sql:main', 'c') *
 
 @ root   o leaf   * selected
 ";
@@ -975,15 +978,15 @@ Pipe graph on sql:main: 3 pipes, 2 edges, 1 root, depth 2
         let expected = "\
 Pipe graph on sql:main: 6 pipes, 2 edges, 4 roots, depth 2
 
-● sql:main/a
-└── ○ sql:main/b
+● Pipe('sql:main', 'a')
+└── ○ Pipe('sql:main', 'b')
 
-● sql:main/x
-└── ○ sql:main/y
+● Pipe('sql:main', 'x')
+└── ○ Pipe('sql:main', 'y')
 
 Not connected to the rest (2)
-● sql:main/lone1
-● sql:main/lone2
+● Pipe('sql:main', 'lone1')
+● Pipe('sql:main', 'lone2')
 
 ● root   ○ leaf
 ";
@@ -1003,10 +1006,10 @@ Not connected to the rest (2)
         let m = model(&["a", "b", "c"], vec![lookback, implicit], &[]);
         let text = plain(&m, true, 100);
         assert!(
-            text.contains("├── ○ sql:main/b  lookback 7d, lookahead 90m"),
+            text.contains("├── ○ Pipe('sql:main', 'b')  lookback 7d, lookahead 90m"),
             "{text}"
         );
-        assert!(text.contains("└┄┄ ○ sql:main/c"), "{text}");
+        assert!(text.contains("└┄┄ ○ Pipe('sql:main', 'c')"), "{text}");
         assert!(text.contains("┄┄ implicit {{ Pipe() }} edge"), "{text}");
     }
 
@@ -1039,8 +1042,14 @@ Not connected to the rest (2)
         };
         let text = plain(&m, true, 100);
         assert!(text.contains("Pipe graph on 2 instances"), "{text}");
-        assert!(text.contains("● sql:main/a@sql:main"), "{text}");
-        assert!(text.contains("○ sql:other/events@sql:other"), "{text}");
+        assert!(
+            text.contains("● Pipe('sql:main', 'a', instance='sql:main')"),
+            "{text}"
+        );
+        assert!(
+            text.contains("○ Pipe('sql:other', 'events', instance='sql:other')"),
+            "{text}"
+        );
     }
 
     #[test]
@@ -1051,14 +1060,14 @@ Not connected to the rest (2)
         let expected = "\
 Pipe graph on sql:main: 3 pipes, 2 edges, 1 root, depth 2
 
-⟲ sql:main/e  (cycle)
-└── ⟲ sql:main/f  (cycle)
-    └── ↗ sql:main/e (shown above)
+⟲ Pipe('sql:main', 'e')  (cycle)
+└── ⟲ Pipe('sql:main', 'f')  (cycle)
+    └── ↗ Pipe('sql:main', 'e') (shown above)
 
 Not connected to the rest (1)
-● sql:main/z
+● Pipe('sql:main', 'z')
 
-⟲ cycle: sql:main/e → sql:main/f → sql:main/e
+⟲ cycle: Pipe('sql:main', 'e') → Pipe('sql:main', 'f') → Pipe('sql:main', 'e')
 
 ● root   ↗ shown above   ⟲ in a cycle
 ";

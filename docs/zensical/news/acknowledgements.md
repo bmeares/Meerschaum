@@ -167,6 +167,7 @@ I've included a list of the dynamic dependencies below to credit the open source
 
   - [https://www.duckdb.org](https://www.duckdb.org)
   - License: MIT
+  - The native `mrsm` and `meerschaum._core` load DuckDB's own release build (`libduckdb`) at run time and download it from the DuckDB project's GitHub releases on first use; Meerschaum does not compile it in or redistribute it.
 
 ### duckdb_engine
 

@@ -15,7 +15,6 @@ writes. Every function takes the instance (the API instance by default) and retu
 
 from __future__ import annotations
 
-import json
 from datetime import datetime
 
 import meerschaum as mrsm
@@ -46,12 +45,19 @@ def split_ref(pipe_ref: str) -> Tuple[str, str, str, Optional[str]]:
 
 
 def ref_label(pipe_ref: str) -> str:
-    """
-    The short label of a pipe: `connector/metric[/location]`.
-    """
-    _, connector_keys, metric_key, location_key = split_ref(pipe_ref)
-    label = f"{connector_keys}/{metric_key}"
-    return label if location_key is None else f"{label}/{location_key}"
+    """The official Pipe representation, including a non-default instance."""
+    instance, connector, metric, location = split_ref(pipe_ref)
+    return str(mrsm.Pipe(connector, metric, location, instance=instance))
+
+
+def action_label(action: str) -> str:
+    """Describe the next sync without exposing engine bookkeeping."""
+    return {
+        'root': 'Fetch source data', 'incremental': 'New parent data available',
+        'backfill': 'Reprocess changed data', 'skip': 'Up to date',
+        'rebuild': 'Rebuild required', 'rebuild_pending': 'Rebuild needs approval',
+        'observe': 'Outside this selection',
+    }.get(action, action.replace('_', ' ').capitalize())
 
 
 def pipe_href(pipe_ref: str) -> str:
@@ -111,7 +117,7 @@ def plan_graph(
     request = _request(
         instance,
         targets=selected,
-        parents=parents,
+        parents=True if pipes is None and parents is None else parents,
         children=children,
     )
     plan = Plan(_call('engine_plan', request))
@@ -123,6 +129,7 @@ def plan_graph(
             'label': ref_label(planned.pipe_ref),
             'action': planned.action,
             'reason': planned.reason,
+            'bounds': planned.bounds,
             'provisional': planned.provisional,
             'status': node_status(planned.action),
         }
@@ -136,7 +143,7 @@ def plan_graph(
             'parent': parent_ref,
             'child': child_ref,
             'label': (
-                f"{child.get('action', '')}: {child.get('reason', '')}" if lagging else 'caught up'
+                action_label(child.get('action', ''))
             ),
             'lagging': lagging,
         })
@@ -197,73 +204,51 @@ def layered_positions(
     return positions
 
 
-def graph_figure(graph: Dict[str, Any], failed_refs: Optional[List[str]] = None) -> Dict[str, Any]:
-    """
-    A Plotly figure of a graph: nodes colored by status, edges as arrows (amber when the child is
-    behind its parent). `failed_refs` are the nodes that failed in the latest run.
-    """
-    failed_refs = set(failed_refs or [])
-    nodes = graph['nodes']
-    edges = graph['edges']
-    positions = layered_positions(
-        [node['pipe_ref'] for node in nodes],
-        [(edge['parent'], edge['child']) for edge in edges],
-    )
-    xs, ys, labels, colors, hovers = [], [], [], [], []
-    for node in nodes:
-        x, y = positions[node['pipe_ref']]
-        xs.append(x)
-        ys.append(y)
-        labels.append(node['label'])
-        status = 'failed' if node['pipe_ref'] in failed_refs else node['status']
-        colors.append(STATUS_COLORS.get(status, STATUS_COLORS['never_run']))
-        hovers.append(
-            f"<b>{node['label']}</b><br>planned: {node['action']}"
-            + ('*' if node['provisional'] else '')
-            + f"<br>{node['reason']}"
-        )
+def canvas_positions(graph: Dict[str, Any]) -> Dict[str, Tuple[float, float]]:
+    """Lay out each connected pipeline separately, with sources on the left."""
+    refs = {node['pipe_ref'] for node in graph['nodes']}
+    neighbours = {ref: set() for ref in refs}
+    edges = [(edge['parent'], edge['child']) for edge in graph['edges']]
+    for parent, child in edges:
+        if parent in refs and child in refs:
+            neighbours[parent].add(child)
+            neighbours[child].add(parent)
+    positions = {}
+    offset = 0.0
+    while refs:
+        first = min(refs, key=lambda ref: (not neighbours[ref], ref_label(ref)))
+        component, pending = set(), {first}
+        while pending:
+            ref = pending.pop()
+            component.add(ref)
+            pending.update(neighbours[ref] - component)
+        refs.difference_update(component)
+        local = layered_positions(sorted(component), edges)
+        top = max(y for _, y in local.values())
+        bottom = min(y for _, y in local.values())
+        positions.update({ref: (x, offset + top - y) for ref, (x, y) in local.items()})
+        offset += top - bottom + 1.5
+    return positions
 
-    annotations = []
-    for edge in edges:
-        if edge['parent'] not in positions or edge['child'] not in positions:
-            continue
-        x0, y0 = positions[edge['parent']]
-        x1, y1 = positions[edge['child']]
-        annotations.append({
-            'x': x1, 'y': y1, 'ax': x0, 'ay': y0,
-            'xref': 'x', 'yref': 'y', 'axref': 'x', 'ayref': 'y',
-            'showarrow': True, 'arrowhead': 2, 'arrowsize': 1.2, 'arrowwidth': 2 if edge['lagging'] else 1,
-            'arrowcolor': STATUS_COLORS['pending'] if edge['lagging'] else '#9aa5b1',
-            'standoff': 10, 'startstandoff': 10,
-            'hovertext': edge['label'],
-        })
 
-    data = [{
-        'type': 'scatter',
-        'mode': 'markers+text',
-        'x': xs,
-        'y': ys,
-        'text': labels,
-        'textposition': 'bottom center',
-        'hovertext': hovers,
-        'hoverinfo': 'text',
-        'marker': {'size': 22, 'color': colors, 'line': {'width': 1, 'color': '#ffffff'}},
-        'textfont': {'color': '#d0d6dc'},
-    }]
-    height = max(260, 90 + 70 * max((len({round(p[1], 3) for p in positions.values()}) or 1), 1))
+def focus_graph(graph: Dict[str, Any], selected: str) -> Dict[str, Any]:
+    """Show the selected pipe's ancestors and descendants."""
+    visible = {selected}
+    for forward in (True, False):
+        found = {selected}
+        while True:
+            added = {
+                edge['child' if forward else 'parent'] for edge in graph['edges']
+                if edge['parent' if forward else 'child'] in found
+            } - found
+            if not added:
+                break
+            found.update(added)
+        visible.update(found)
     return {
-        'data': data,
-        'layout': {
-            'height': min(height, 700),
-            'margin': {'l': 20, 'r': 20, 't': 20, 'b': 40},
-            'showlegend': False,
-            'xaxis': {'visible': False, 'range': [-0.5, max([p[0] for p in positions.values()] or [0]) + 0.5]},
-            'yaxis': {'visible': False},
-            'annotations': annotations,
-            'paper_bgcolor': 'rgba(0,0,0,0)',
-            'plot_bgcolor': 'rgba(0,0,0,0)',
-            'font': {'color': '#d0d6dc'},
-        },
+        **graph,
+        'nodes': [node for node in graph['nodes'] if node['pipe_ref'] in visible],
+        'edges': [edge for edge in graph['edges'] if edge['parent'] in visible and edge['child'] in visible],
     }
 
 
@@ -276,23 +261,18 @@ def get_runs(
 ) -> List[Dict[str, Any]]:
     """
     Recent runs, newest first (`{run, status, duration_seconds, counts}` each). `run_id` selects
-    one run; `pipe` is a `pipe_ref` (or its start) a run's targets must contain.
+    one run; `pipe` matches a Pipe label or reference in the targets or executed stages.
     """
     instance = instance if instance is not None else get_instance()
     request = _request(instance)
     request['limit'] = limit
     if status:
         request['status'] = status
-    runs = _call('engine_runs', request)
     if run_id:
-        runs = [run for run in runs if run['run']['run_id'] == run_id]
+        request['run_id'] = run_id
     if pipe:
-        needle = pipe.strip()
-        runs = [
-            run for run in runs
-            if any(needle in str(target) for target in (run['run'].get('targets') or []))
-        ]
-    return runs
+        request['pipe'] = pipe.strip()
+    return _call('engine_runs', request)
 
 
 def get_run_detail(instance: Any, run_id: str) -> Optional[Dict[str, Any]]:
@@ -357,7 +337,9 @@ def gantt_figure(detail: Dict[str, Any]) -> Dict[str, Any]:
         'layout': {
             'title': {'text': f"Run {run_id}"},
             'xaxis': {'type': 'date'},
-            'yaxis': {'autorange': 'reversed'},
+            'yaxis': {'autorange': 'reversed', 'automargin': True,
+                      'tickfont': {'family': 'monospace', 'size': 12}},
+            'margin': {'l': 30, 'r': 30, 't': 60, 'b': 60},
             'barmode': 'group',
             'height': max(260, 120 + 60 * len({t for t in traces[0]['y']} if traces else [])),
             'paper_bgcolor': 'rgba(0,0,0,0)',
@@ -427,7 +409,7 @@ def relations_of(pipe: mrsm.Pipe) -> Dict[str, List[Dict[str, Any]]]:
             'label': ref_label(neighbour),
             'href': pipe_href(neighbour),
             'action': node.get('action', ''),
-            'reason': edge['label'],
+            'reason': node.get('reason', ''),
             'lagging': edge['lagging'],
         })
     return out

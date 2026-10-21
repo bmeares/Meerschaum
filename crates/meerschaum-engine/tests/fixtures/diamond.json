@@ -61,7 +61,7 @@
        ],
        "provisional": true,
        "consumes": [{"parent_ref": "sql:main|plugin:orders|orders|None", "state_instance": "sql:main", "seq": 21}],
-       "reason_contains": ["1 unconsumed ledger entry from plugin:orders/orders (seq 21), watermark advanced 2026-10-12 11:00 → 2026-10-12 12:00", "before the tail (2026-10-12 10:00)"]},
+       "reason_contains": ["1 unconsumed ledger entry from Pipe('plugin:orders', 'orders') (seq 21), watermark advanced 2026-10-12 11:00 → 2026-10-12 12:00", "before the tail (2026-10-12 10:00)"]},
       {"node": "sql:main|sql:main|orders_by_sku|None", "action": "skip", "bounds": null, "provisional": true},
       {"node": "sql:main|sql:main|store_sku_join|None", "action": "incremental",
        "bounds": {"begin": "2026-10-12T09:00:00Z", "end": "2026-10-12T11:00:00Z"},
@@ -71,7 +71,7 @@
          {"parent_ref": "sql:main|sql:main|orders_by_store|None", "state_instance": "sql:main", "seq": 30},
          {"parent_ref": "sql:main|sql:main|orders_by_sku|None", "state_instance": "sql:main", "seq": 15}
        ],
-       "reason_contains": ["sql:main/orders_by_sku watermark advanced 2026-10-12 11:00 → 2026-10-12 12:00 since its cursor", "to min parent watermark"]}
+       "reason_contains": ["Pipe('sql:main', 'orders_by_sku') watermark advanced 2026-10-12 11:00 → 2026-10-12 12:00 since its cursor", "to min parent watermark"]}
     ]
   }
 }

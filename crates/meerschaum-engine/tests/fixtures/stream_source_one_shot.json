@@ -47,7 +47,7 @@
          {"begin": "2026-10-12T00:00:00Z", "end": "2026-10-12T09:59:30Z"}
        ],
        "consumes": [{"parent_ref": "sql:main|mqtt:broker|telemetry|None", "state_instance": "sql:main", "seq": 103}],
-       "reason_contains": ["2 unconsumed ledger entries from mqtt:broker/telemetry (seq 102–103)", "before the tail (2026-10-12 09:15)"]}
+       "reason_contains": ["2 unconsumed ledger entries from Pipe('mqtt:broker', 'telemetry') (seq 102–103)", "before the tail (2026-10-12 09:15)"]}
     ]
   }
 }

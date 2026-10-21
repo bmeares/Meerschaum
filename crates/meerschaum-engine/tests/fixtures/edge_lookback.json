@@ -40,7 +40,7 @@
        "chunk_count": 8,
        "provisional": true,
        "consumes": [{"parent_ref": "sql:main|plugin:sensors|raw_events|None", "state_instance": "sql:main", "seq": 50}],
-       "reason_contains": ["1 unconsumed ledger entry from plugin:sensors/raw_events (seq 50)"]}
+       "reason_contains": ["1 unconsumed ledger entry from Pipe('plugin:sensors', 'raw_events') (seq 50)"]}
     ]
   }
 }

@@ -67,7 +67,7 @@ pub fn render_gantt(run: &RunRecord, critical_path: &[PipeRef], width: usize) ->
     let mut out = String::new();
     let path = critical_path
         .iter()
-        .map(|r| r.parts().metric_key.to_string())
+        .map(|r| r.label())
         .collect::<Vec<_>>()
         .join(" → ");
     let _ = write!(
@@ -88,7 +88,7 @@ pub fn render_gantt(run: &RunRecord, critical_path: &[PipeRef], width: usize) ->
     let label_w = run
         .nodes
         .iter()
-        .map(|n| n.pipe_ref.parts().metric_key.chars().count())
+        .map(|n| n.pipe_ref.label().chars().count())
         .max()
         .unwrap_or(4);
     let cell_of = |secs: f64| -> usize {
@@ -100,7 +100,7 @@ pub fn render_gantt(run: &RunRecord, critical_path: &[PipeRef], width: usize) ->
         cell_of((t - start).num_milliseconds().max(0) as f64 / 1000.0)
     };
     for n in &run.nodes {
-        let label = n.pipe_ref.parts().metric_key;
+        let label = n.pipe_ref.label();
         let pad = label_w - label.chars().count();
         let (bar, dur, summary, mark) = match (n.status, n.started, n.finished) {
             (NodeStatus::Succeeded | NodeStatus::Failed, Some(s), Some(f)) => {

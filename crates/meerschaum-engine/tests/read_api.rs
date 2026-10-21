@@ -52,6 +52,20 @@ async fn reader_shows_runs_gantt_events_and_edge_lag() {
         .await
         .unwrap();
     assert_eq!(by_pipe.len(), 1);
+    // The selected target is c_hourly; its ancestor must be searchable by its display label.
+    for label in [
+        env.pipe_ref("b_clean").label(),
+        env.pipe_ref("b_clean").label_with_instance(),
+    ] {
+        let by_label = reader
+            .runs(&RunFilter {
+                pipe: Some(label),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        assert_eq!(by_label.len(), 1);
+    }
 
     let run_id = runs[0].run.run_id.clone();
     let detail = reader.run_detail(&run_id).await.unwrap().unwrap();

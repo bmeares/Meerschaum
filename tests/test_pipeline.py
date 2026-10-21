@@ -232,7 +232,7 @@ def test_pipeline_plan_is_a_dry_run(chain):
     text = str(plan)
     assert 'node' in text and 'action' in text and 'w8_clean' in text
     rows = plan.to_dicts()
-    assert [r['node'].split('/')[1] for r in rows] == ['w8_raw', 'w8_clean', 'w8_daily']
+    assert [r['node'] for r in rows] == [str(pipe) for pipe in (raw, clean, daily)]
     assert plan.to_dataframe()['action'].tolist()[0] == 'root'
     assert plan.node(clean).pipe_ref.endswith('|w8_clean|None')
     assert [p.metric_key for p in pipeline.pipes] == ['w8_raw', 'w8_clean', 'w8_daily']

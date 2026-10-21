@@ -5,7 +5,7 @@
 Define callbacks for the `/dash/pipes/` page.
 """
 
-from urllib.parse import parse_qs, quote_plus
+from urllib.parse import parse_qs, quote_plus, unquote
 from typing import List, Optional, Dict, Any
 
 import dash
@@ -66,7 +66,7 @@ def render_pipe_page_from_url(
     if isinstance(location_keys, str):
         location_keys = location_keys.split(',')
 
-    keys = pathname.replace('/dash/pipes', '').lstrip('/').rstrip('/').split('/')
+    keys = [unquote(part) for part in pathname[len('/dash/pipes'):].strip('/').split('/')]
     instance_connector = mrsm.get_connector(instance)
     viewing_single_pipe = len(keys) in (2, 3)
     if instance_connector is None:

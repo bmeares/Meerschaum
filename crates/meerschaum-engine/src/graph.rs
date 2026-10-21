@@ -940,7 +940,7 @@ mod tests {
         assert_eq!(path, &vec![r("a"), r("b"), r("c"), r("a")]);
         assert_eq!(
             err.to_string(),
-            "cycle in the pipe graph: sql:main/a → sql:main/b → sql:main/c → sql:main/a"
+            "cycle in the pipe graph: Pipe('sql:main', 'a') → Pipe('sql:main', 'b') → Pipe('sql:main', 'c') → Pipe('sql:main', 'a')"
         );
         let sub: BTreeSet<PipeRef> = [r("a"), r("b")].into_iter().collect();
         assert_eq!(g.topo_order(&sub).unwrap(), vec![r("a"), r("b")]);

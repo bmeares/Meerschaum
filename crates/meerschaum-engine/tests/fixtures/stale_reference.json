@@ -32,8 +32,8 @@
   },
   "expected": {
     "warnings": [
-      "stale reference: sql:main/report references sql:main/legacy_feed@sql:main (parents)",
-      "stale reference: sql:main/report references sql:main/customers_v1@sql:main (template)"
+      "stale reference: Pipe('sql:main', 'report') references Pipe('sql:main', 'legacy_feed', instance='sql:main') (parents)",
+      "stale reference: Pipe('sql:main', 'report') references Pipe('sql:main', 'customers_v1', instance='sql:main') (template)"
     ],
     "nodes": [
       {"node": "sql:main|plugin:shop|orders|None", "action": "root", "bounds": {"begin": "", "end": null}},
@@ -44,7 +44,7 @@
          {"begin": "2026-10-12T00:00:00Z", "end": "2026-10-12T06:00:00Z"}
        ],
        "provisional": true,
-       "reason_contains": ["plugin:shop/orders watermark advanced 2026-10-12 05:00 → 2026-10-12 06:00 since its cursor"]}
+       "reason_contains": ["Pipe('plugin:shop', 'orders') watermark advanced 2026-10-12 05:00 → 2026-10-12 06:00 since its cursor"]}
     ]
   }
 }

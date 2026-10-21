@@ -32,11 +32,11 @@ The header adds the planned makespan (`planned 1m15s`) next to the actual wall t
 ```text
 Pipe graph on sql:local: 4 pipes, 4 edges, 1 root, depth 3
 
-● sql:local/a
-├── ◆ sql:local/b
-│   └── ○ sql:local/d  (2 parents)
-└── ◆ sql:local/c
-    └── ↗ sql:local/d (shown above)
+● Pipe('sql:local', 'a')
+├── ◆ Pipe('sql:local', 'b')
+│   └── ○ Pipe('sql:local', 'd')  (2 parents)
+└── ◆ Pipe('sql:local', 'c')
+    └── ↗ Pipe('sql:local', 'd') (shown above)
 
 ● root   ◆ has children   ○ leaf   ↗ shown above
 ```
@@ -47,7 +47,7 @@ Pipes use the colors `Pipe(...)` has in `show pipes` (connector, metric, locatio
 
 ```text
 run                         started (UTC)        status     wall  ok/nodes  targets
-01M4VPBBSG8NMTDT2NJYE98D2Q  2026-10-13 22:32:53  succeeded  0s    3/3       sql:local/daily
+01M4VPBBSG8NMTDT2NJYE98D2Q  2026-10-13 22:32:53  succeeded  0s    3/3       Pipe('sql:local', 'daily')
 ```
 
 `--nopretty` prints JSON for `plan pipes`, `show graph`, `show runs` and `show run`.
@@ -60,12 +60,16 @@ run                         started (UTC)        status     wall  ok/nodes  targ
 
 Start the API (`mrsm start api`) and open **`/dash/pipelines`** (the console needs `pip install meerschaum[dash]`). It reads the same instance-backed engine state described in [Engine State](/reference/pipelines/state/) and never writes.
 
-- **Dependency graph.** Your pipes as a Plotly figure, each node colored by the action the engine plans for it (`skip`, `incremental`, `backfill`, `rebuild`, ...), with an edge table showing the ledger lag (how many unconsumed entries a child still has to process).
+- **Pipeline canvas.** Connected cards show how data moves from sources to outputs. Each card uses the familiar `Pipe(...)` representation and describes its next sync. Drag the canvas to pan, use the zoom buttons or Fit, and search for a pipe to focus on its ancestors and descendants. Connected pipelines are shown first; enable **Include standalone pipes** to show isolated sources too.
+- **Stage inspection.** Select a card to read its query, parameters, latest data timestamp, next sync range, dependencies and recent runs. Open the pipe for its complete information and data tools. Detailed planner explanations are available under **Planner details**.
+
 - **Gantt chart per run.** Planned and actual bars side by side (planned bars end after the planned duration described above), plus a table of each node's action, status and planned and actual start. (The plan's critical path and slack are recorded with each run and are drawn in the terminal Gantt chart.)
 - **Runs table.** Filter by run ID, pipe and status.
 - **Parents / Children tabs** in the "Parents & Children" section of every pipe card on the pipes page.
 
-The page updates itself (it refreshes about every 15 seconds). Select a run with the link in the runs table (`/dash/pipelines?run_id=…`) to see its Gantt chart. State lives in the URL, so a run or filter is shareable.
+The engine's *ledger* is its record of changed parent data, used to find updates a child still needs to process, including changes to older rows. It remains part of syncing; it is not a separate lag metric on the page. A *watermark* is the latest value of a pipe's datetime or ordering column. Without a previous dependency-sync record, the engine compares parent and child watermarks. When a parent is ahead, the child reads from its own latest value minus its backtrack window, up to the earliest parent watermark. The canvas calls this **New parent data available**.
+
+Sync history refreshes about every 15 seconds. Use the refresh button to update the pipeline canvas. Select a run with the link in the runs table (`/dash/pipelines?run_id=…`) to see its Gantt chart. State lives in the URL, so a run or filter is shareable.
 
 The console is available through `mrsm start api` and is covered in [Web Console](/reference/api-instance/web-console/).
 

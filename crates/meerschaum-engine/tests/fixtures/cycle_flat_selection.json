@@ -10,7 +10,7 @@
   ],
   "selection": {"targets": {"filter": {"connector_keys": ["sql:main"]}}},
   "expected": {
-    "warnings": ["cycle in the pipe graph: sql:main/a → sql:main/b → sql:main/c → sql:main/a; syncing in registration order"],
+    "warnings": ["cycle in the pipe graph: Pipe('sql:main', 'a') → Pipe('sql:main', 'b') → Pipe('sql:main', 'c') → Pipe('sql:main', 'a'); syncing in registration order"],
     "nodes": [
       {"node": "sql:main|sql:main|a|None", "action": "root", "bounds": {"begin": "", "end": null}, "reason_contains": ["flat selection"]},
       {"node": "sql:main|sql:main|b|None", "action": "root", "bounds": {"begin": "", "end": null}},

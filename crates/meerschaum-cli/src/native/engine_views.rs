@@ -339,7 +339,7 @@ pub fn gantt(record: &RunRecord, columns: usize) -> String {
     let label_w = record
         .nodes
         .iter()
-        .map(|n| n.pipe_ref.parts().metric_key.chars().count())
+        .map(|n| n.pipe_ref.label().chars().count())
         .max()
         .unwrap_or(4);
     // `label  bar  dur summary(28) mark`: 2 + 2 + 7 + 29 + 1 columns around the bar.

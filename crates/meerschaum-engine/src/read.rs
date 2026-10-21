@@ -271,13 +271,14 @@ impl EngineReader {
                 .map(|r| r.nodes)
                 .unwrap_or_default();
             if let Some(text) = &filter.pipe {
-                let hit = run
-                    .targets
-                    .iter()
-                    .any(|t| t.as_str().contains(text.as_str()))
-                    || nodes
-                        .iter()
-                        .any(|n| n.pipe_ref.as_str().contains(text.as_str()));
+                let label = text.to_lowercase();
+                let matches = |pipe: &PipeRef| {
+                    pipe.as_str().contains(text.as_str())
+                        || pipe.label().to_lowercase().contains(&label)
+                        || pipe.label_with_instance().to_lowercase().contains(&label)
+                };
+                let hit =
+                    run.targets.iter().any(matches) || nodes.iter().any(|n| matches(&n.pipe_ref));
                 if !hit {
                     continue;
                 }

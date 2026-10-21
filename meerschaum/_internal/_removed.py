@@ -32,7 +32,7 @@ _SERVER = (
 _SHELL = (
     "The interactive shell is the native shell (`mrsm`): run `mrsm`, or use "
     "`meerschaum._internal.entry.get_shell().cmdloop()`, which starts it. The web terminal is part "
-    "of `mrsm start api` (the console's Terminal page at `/dash/webterm`; the terminal itself is "
+    "of `mrsm start api` (embedded in the web console at `/dash`; the terminal itself is "
     "served at `/webterm/<session id>`), and there is no separate `start webterm`."
 )
 
@@ -45,6 +45,7 @@ REMOVED: Dict[str, str] = {
     'meerschaum.api._chunks': _SERVER,
     'meerschaum.api.dash.websockets': _SERVER,
     'meerschaum.api.dash.sync': _SERVER,
+    'meerschaum.api.dash.pages.terminal': _SHELL,
     'meerschaum._internal.term': _SHELL,
     'meerschaum._internal.cli': (
         "The CLI daemons are not used in Meerschaum 5: actions run natively in `mrsm`."

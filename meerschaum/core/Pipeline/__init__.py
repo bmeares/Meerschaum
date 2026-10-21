@@ -119,12 +119,8 @@ class PlannedNode:
 
     def to_dict(self) -> Dict[str, Any]:
         """The plan table row of this node."""
-        instance_keys, connector_keys, metric_key, location_key = self.pipe_ref.split('|', 3)
-        label = f"{connector_keys}/{metric_key}"
-        if location_key != 'None':
-            label += f"/{location_key}"
         return {
-            'node': label,
+            'node': str(self.pipe),
             'pipe_ref': self.pipe_ref,
             'action': self.action + ('*' if self.provisional else ''),
             'bounds': _bounds_text(self.bounds),
