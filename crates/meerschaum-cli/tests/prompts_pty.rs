@@ -320,12 +320,13 @@ fn dropdown_rows(term: &Term) -> Vec<String> {
 }
 
 #[test]
-fn edit_config_suggests_keys_before_typing_and_filters_them() {
+fn edit_config_suggests_keys_only_after_typing_and_filters_them() {
     let setup = Setup::new("edit-config");
     let mut term = Term::spawn(&setup.env, &setup.base, &["edit", "config"]);
-    term.wait_screen("the configuration dropdown", 60, |s| {
-        s.contains("Configuration key:") && s.contains("... ")
+    term.wait_screen("the configuration question", 60, |s| {
+        s.contains("Configuration key:")
     });
+    assert!(!term.screen().lines().any(|line| line.trim() == "stack"));
     term.send("stac");
     term.wait_screen("the filtered YAML key", 10, |s| {
         s.lines().any(|line| line.trim() == "stack") && !s.contains("more")
@@ -387,10 +388,7 @@ fn bootstrap_pipes_suggests_connectors_metrics_and_accepts_unknown_keys() {
         &["bootstrap", "pipes", "-i", "sql:w18sh"],
     );
     term.wait_screen("the connector question", 60, |s| s.contains("Connector:"));
-    // Everything is suggested before anything is typed (the rows past the eighth are counted).
-    term.wait_screen("the dropdown", 10, |s| {
-        s.contains("sql:w18sh") && s.contains("... 1 more")
-    });
+    assert!(!term.screen().contains("... 1 more"));
     term.send("w18");
     term.pump(Duration::from_millis(600));
     assert_eq!(
@@ -407,14 +405,18 @@ fn bootstrap_pipes_suggests_connectors_metrics_and_accepts_unknown_keys() {
     term.send("\x1b[B");
     term.send("\r");
     term.wait_screen("the metric question", 30, |s| s.contains("Metric:"));
-    // The metrics registered on the instance, those of the connector first.
+    assert!(!term.screen().lines().any(|line| line.trim() == "fast"));
+    term.send("s");
     term.wait_screen("the metric dropdown", 10, |s| {
         s.contains("fast") && s.contains("slow")
     });
     let rows = dropdown_rows(&term);
     let fast = rows.iter().position(|r| r == "fast").expect("fast");
     let slow = rows.iter().position(|r| r == "slow").expect("slow");
-    assert!(fast < slow, "{rows:?}");
+    assert!(
+        slow < fast,
+        "prefix matches precede substring matches: {rows:?}"
+    );
     term.send("\x03");
     let status = term.wait_exit(30);
     assert!(!status.success(), "{status:?}");

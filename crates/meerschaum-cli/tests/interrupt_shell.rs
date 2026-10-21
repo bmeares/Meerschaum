@@ -381,8 +381,14 @@ fn ctrl_c_at_an_idle_prompt_clears_the_line_and_only_exit_leaves() {
         "Ctrl-C at the prompt ended the shell:\n{}",
         term.screen()
     );
-    term.send("show version\r");
-    term.wait_screen("the version", 30, |s| s.contains("Meerschaum v"));
+    term.send("show version --nopretty\r");
+    term.wait_screen("the version and the next prompt", 30, |screen| {
+        let lines: Vec<_> = screen.lines().collect();
+        lines
+            .iter()
+            .position(|line| line.trim() == env!("CARGO_PKG_VERSION"))
+            .is_some_and(|row| lines[row + 1..].iter().any(|line| line.contains('➤')))
+    });
     term.send("\x04");
     let status = term.wait_exit(30);
     assert!(status.success(), "{status:?}");

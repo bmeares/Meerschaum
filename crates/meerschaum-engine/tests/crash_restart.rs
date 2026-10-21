@@ -468,10 +468,14 @@ async fn scenario(backend: Backend, point: Point) {
 
     // After the restart.
     let state = engine().state().clone();
-    assert!(
-        state.load_run(&run_id).await.unwrap().is_none(),
-        "an interrupted run leaves no run record"
-    );
+    let interrupted = state
+        .load_run(&run_id)
+        .await
+        .unwrap()
+        .expect("live run checkpoint");
+    assert!(interrupted.run.finished.is_none());
+    assert!(interrupted.run.success.is_none());
+    assert!(interrupted.nodes.iter().any(|node| node.started.is_some()));
     assert_eq!(
         state.cursor(KEYS, &b, &c).await.unwrap(),
         Some(cursor_bc.clone())
