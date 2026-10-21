@@ -30,9 +30,9 @@
 ###
 ### Requires BuildKit (`docker buildx build`).
 ###
-### Multi-architecture: every stage is architecture-neutral (Fedora 44 and the wheels' dependencies ship
-### `linux/amd64` and `linux/arm64`), so the images are built natively on each (`scripts/docker/buildx.sh
-### --platform linux/arm64 ...`, `.github/workflows/docker-build.yaml`) and joined with `buildx.sh --merge`.
+### Every stage supports linux/amd64 and linux/arm64. Docker CI uses self-hosted x86_64 runners:
+### amd64 natively, arm64 under QEMU, with persistent caches per architecture. Prereleases select only
+### amd64; finals build both and join them with `buildx.sh --merge`.
 
 ### ---------------------------------------------------------------------------------------------
 ### rust-builder: `maturin build --release` for the `meerschaum` wheel.

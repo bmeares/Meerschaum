@@ -1,6 +1,6 @@
 """
 `scripts/docker/buildx.sh` plans (W18PK): the commands it would run for a local build, for a
-per-architecture push from a native runner, and for the merge into the multi-architecture tags.
+per-architecture push from a self-hosted runner, and for the merge into the multi-architecture tags.
 
 `BUILDX_DRY_RUN=1` makes the script print its docker commands instead of running them (no Docker,
 no network, nothing pulled or pushed); `PYTHON_BIN` points at a stub that prints the version, so a
@@ -58,10 +58,17 @@ def test_a_local_build_loads_for_the_builders_platform(tmp_path):
     ]
 
 
-def test_a_push_builds_both_architectures_by_default(tmp_path):
-    result, commands = _buildx(tmp_path, '5.0.0rc2', '--push')
+@pytest.mark.parametrize('version,platforms', [
+    ('5.0.0rc4', 'linux/amd64'),
+    ('5.0.0a1', 'linux/amd64'),
+    ('5.0.0b1', 'linux/amd64'),
+    ('5.0.0.dev1', 'linux/amd64'),
+    ('5.0.0', 'linux/amd64,linux/arm64'),
+])
+def test_a_push_selects_the_release_platforms(tmp_path, version, platforms):
+    result, commands = _buildx(tmp_path, version, '--push')
     assert result.returncode == 0, result.stderr
-    assert {_platform(c) for c in commands} == {'linux/amd64,linux/arm64'}
+    assert {_platform(c) for c in commands} == {platforms}
 
 
 @pytest.mark.parametrize('platform,arch', [('linux/arm64', 'arm64'), ('linux/amd64', 'amd64')])
@@ -83,7 +90,7 @@ def test_the_merge_of_a_prerelease_makes_only_version_tags(tmp_path):
     assert result.returncode == 0, result.stderr
     assert commands == [
         f'docker buildx imagetools create -t {IMAGE}:5.0.0rc2-{name} '
-        f'{IMAGE}:5.0.0rc2-{name}-amd64 {IMAGE}:5.0.0rc2-{name}-arm64'
+        f'{IMAGE}:5.0.0rc2-{name}-amd64'
         for name in ('minimal', 'full', 'slim')
     ]
 
@@ -126,6 +133,6 @@ def test_a_v4_version_is_never_pushed(tmp_path):
         assert 'refusing to push' in result.stderr
 
 
-def test_the_published_platforms_are_amd64_and_arm64():
+def test_the_final_release_platforms_are_amd64_and_arm64():
     text = (REPO / 'scripts' / 'config.sh').read_text()
     assert 'export platforms="linux/amd64,linux/arm64"' in text

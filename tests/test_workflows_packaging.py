@@ -2,12 +2,14 @@
 Wave 18 (PK): the packaging workflows' structure and the wheel tag guard.
 
 `.github/workflows/wheels.yaml` builds the musllinux and macOS x86_64 wheels and `docker-build.yaml`
-builds both Docker architectures natively; nothing here runs a workflow. The tests parse the YAML
+builds on self-hosted runners; nothing here runs a workflow. The tests parse the YAML
 (with the extension's native loader, no PyYAML needed) and run the wheel tag/size guard script that
 `wheels.yaml` embeds against fabricated wheels, so a regex mistake shows up before a CI run.
 """
 
 import os
+import json
+import runpy
 import subprocess
 import sys
 import zipfile
@@ -17,6 +19,20 @@ import pytest
 
 REPO = Path(__file__).resolve().parents[1]
 WORKFLOWS = REPO / '.github' / 'workflows'
+RELEASE_MATRIX = REPO / 'scripts' / 'ci' / 'release_matrix.py'
+release_matrices = runpy.run_path(str(RELEASE_MATRIX))['release_matrices']
+
+
+def _matrix(workflow, job, name, version='5.0.0'):
+    """Resolve the workflow's matrix output through the same version policy CI executes."""
+    assert workflow['jobs'][job]['strategy']['matrix'] == (
+        '${{ fromJSON(needs.metadata.outputs.' + name + ') }}'
+    )
+    metadata = workflow['jobs']['metadata']
+    assert metadata['outputs'][name] == '${{ steps.matrix.outputs.' + name + ' }}'
+    step = next(s for s in metadata['steps'] if s.get('id') == 'matrix')
+    assert 'scripts/ci/release_matrix.py --github-output "$GITHUB_OUTPUT"' in step['run']
+    return release_matrices(version)[name]['include']
 
 
 def _load(name):
@@ -47,7 +63,7 @@ def _artifact(entry):
 
 
 def test_the_wheel_matrix_covers_musllinux_and_intel_macos(wheels):
-    include = wheels['jobs']['build']['strategy']['matrix']['include']
+    include = _matrix(wheels, 'build', 'wheels')
     musl = {e['wheel_arch']: e for e in include if e.get('musl')}
     assert set(musl) == {'x86_64', 'aarch64'}
     for arch, entry in musl.items():
@@ -66,12 +82,12 @@ def test_the_wheel_matrix_covers_musllinux_and_intel_macos(wheels):
 
 def test_every_wheel_is_smoke_tested_where_it_runs(wheels):
     jobs = wheels['jobs']
-    smoke_os = set(jobs['smoke']['strategy']['matrix']['os'])
+    smoke_os = {e['os'] for e in _matrix(wheels, 'smoke', 'smoke')}
     assert smoke_os >= {'ubuntu-latest', 'ubuntu-24.04-arm', 'macos-latest', 'macos-15-intel',
                         'windows-latest'}
     musl = jobs['smoke-musl']
-    assert musl['needs'] == 'build'
-    runs = {(e['os'], e['arch']) for e in musl['strategy']['matrix']['include']}
+    assert set(musl['needs']) == {'metadata', 'build'}
+    runs = {(e['os'], e['arch']) for e in _matrix(wheels, 'smoke-musl', 'smoke_musl')}
     assert runs == {('ubuntu-latest', 'x86_64'), ('ubuntu-24.04-arm', 'aarch64')}, (
         'each musllinux wheel must first run on a runner of its own architecture'
     )
@@ -92,7 +108,7 @@ def test_every_wheel_is_smoke_tested_where_it_runs(wheels):
 
 
 def test_the_binaries_include_intel_macos(wheels):
-    include = wheels['jobs']['binaries']['strategy']['matrix']['include']
+    include = _matrix(wheels, 'binaries', 'binaries')
     targets = {e['target']: e['os'] for e in include}
     assert targets['x86_64-apple-darwin'] == 'macos-15-intel'
     assert set(targets) == {
@@ -101,24 +117,91 @@ def test_the_binaries_include_intel_macos(wheels):
     }
 
 
-def test_docker_images_build_natively_per_architecture(docker_build):
+def test_docker_images_build_on_self_hosted_runners(docker_build):
     job = docker_build['jobs']['buildx']
-    include = job['strategy']['matrix']['include']
-    assert {(e['arch'], e['runner'], e['platform']) for e in include} == {
-        ('amd64', 'ubuntu-latest', 'linux/amd64'),
-        ('arm64', 'ubuntu-24.04-arm', 'linux/arm64'),
+    include = _matrix(docker_build, 'buildx', 'docker')
+    assert {(e['arch'], e['platform']) for e in include} == {
+        ('amd64', 'linux/amd64'), ('arm64', 'linux/arm64'),
     }
-    assert not any('qemu' in str(s.get('uses', '')) for s in job['steps']), 'no QEMU: too slow'
+    assert job['runs-on'] == ['self-hosted', 'Linux', 'X64']
+    assert job['strategy']['max-parallel'] == 1
+    assert docker_build['concurrency']['cancel-in-progress'] is False
+    qemu = next(s for s in job['steps'] if 'setup-qemu-action' in s.get('uses', ''))
+    assert qemu['if'] == "matrix.arch == 'arm64'"
+    assert qemu['with']['platforms'] == 'arm64'
+    setup = next(s for s in job['steps'] if 'setup-buildx-action' in s.get('uses', ''))
+    assert setup['with']['keep-state'] is True
+    assert setup['with']['use'] is False
+    assert setup['with']['name'] == job['env']['BUILDX_BUILDER']
+    assert 'matrix.arch' in setup['with']['name']
+    isolate = _step(job, 'Isolate Docker configuration')['run']
+    assert 'mktemp -d "$RUNNER_TEMP/mrsm-docker.' in isolate
+    assert 'DOCKER_CONFIG=$docker_config' in isolate
+    assert job['env']['DOCKER_DEFAULT_PLATFORM'] == '${{ matrix.platform }}'
+    assert 'memory=' in setup['with']['driver-opts']
+    build = _step(job, 'Build Docker images')
+    assert '--platform ${{ matrix.platform }}' in build['run']
     push = next(s for s in job['steps'] if 'arch-tags' in str(s.get('run', '')))
     assert push['if'] == 'inputs.publish'
     assert '--push --arch-tags --platform ${{ matrix.platform }}' in push['run']
 
     publish = docker_build['jobs']['publish']
-    assert publish['needs'] == 'buildx', 'merge only after both architectures pushed'
+    assert set(publish['needs']) == {'metadata', 'buildx'}
+    assert publish['runs-on'] == job['runs-on']
     assert 'inputs.publish' in publish['if']
+    assert publish['env']['EXPECTED_PLATFORMS'] == '${{ needs.metadata.outputs.platforms }}'
     runs = '\n'.join(str(s.get('run', '')) for s in publish['steps'])
     assert 'buildx.sh --merge' in runs
-    assert 'linux/amd64' in runs and 'linux/arm64' in runs, 'the manifest list must hold both'
+    assert 'platforms == expected' in runs
+
+
+@pytest.mark.parametrize('version', ['5.0.0-rc.4', '5.0.0-alpha.1', '5.0.0-beta.1', '5.0.0-dev.1'])
+def test_prereleases_only_build_linux_x86_64(version, wheels, docker_build):
+    matrices = release_matrices(version)
+    assert matrices['prerelease'] is True
+    assert matrices['docker_platforms'] == 'linux/amd64'
+    assert _matrix(docker_build, 'buildx', 'docker', version) == [
+        {'arch': 'amd64', 'platform': 'linux/amd64'},
+    ]
+    builds = _matrix(wheels, 'build', 'wheels', version)
+    assert len(builds) == 3  # glibc abi3, musl abi3, experimental glibc cp314t
+    assert all(e['os'] == 'ubuntu-latest' for e in builds)
+    assert {e.get('target', 'x86_64-unknown-linux-gnu') for e in builds} == {
+        'x86_64-unknown-linux-gnu', 'x86_64-unknown-linux-musl',
+    }
+    assert [e['target'] for e in _matrix(wheels, 'binaries', 'binaries', version)] == [
+        'x86_64-unknown-linux-gnu',
+    ]
+    assert {e['os'] for e in _matrix(wheels, 'smoke', 'smoke', version)} == {'ubuntu-latest'}
+    assert _matrix(wheels, 'smoke-musl', 'smoke_musl', version) == [
+        {'os': 'ubuntu-latest', 'arch': 'x86_64'},
+    ]
+    assert wheels['jobs']['sdist']['needs'] == 'metadata'
+
+
+@pytest.mark.parametrize('version', ['5.0.0-rc.4', '5.0.0', '5.0.0+build-1'])
+def test_every_selected_smoke_job_has_a_built_artifact(version):
+    matrix = release_matrices(version)
+    builds = {_artifact(entry) for entry in matrix['wheels']['include']}
+    downloads = {'wheels-' + entry['os'] for entry in matrix['smoke']['include']}
+    downloads |= {'wheels-musllinux-' + entry['arch'] for entry in matrix['smoke_musl']['include']}
+    downloads.add('wheels-ubuntu-latest-cp314t')
+    assert builds == downloads
+    assert matrix['prerelease'] == ('-rc.' in version)
+
+
+def test_release_matrix_cli_emits_actions_outputs(tmp_path):
+    output = tmp_path / 'outputs'
+    result = subprocess.run(
+        [sys.executable, '-I', str(RELEASE_MATRIX), '--version', '5.0.0-rc.4',
+         '--github-output', str(output)], capture_output=True, text=True, check=True,
+    )
+    matrix = json.loads(result.stdout)
+    outputs = dict(line.split('=', 1) for line in output.read_text().splitlines())
+    assert outputs['prerelease'] == 'true'
+    assert outputs['docker_platforms'] == 'linux/amd64'
+    for key in ('wheels', 'binaries', 'smoke', 'smoke_musl', 'docker'):
+        assert json.loads(outputs[key]) == matrix[key]
 
 
 def test_nothing_publishes_without_the_input(docker_build):

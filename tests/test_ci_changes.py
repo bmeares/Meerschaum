@@ -89,6 +89,7 @@ def test_the_workflows_and_ci_scripts_are_inputs(changes):
     assert {'rust', 'rust_test', 'pytest'} <= _on(changes, 'scripts/ci/changes.py')
     assert 'pytest' in _on(changes, '.github/workflows/wheels.yaml')  # tests/test_workflows_packaging.py
     assert 'rust' not in _on(changes, '.github/workflows/wheels.yaml')
+    assert _on(changes, 'scripts/ci/release_matrix.py') == {'pytest'}
     assert {'rust', 'parity'} <= _on(changes, '.github/workflows/rust.yaml')
 
 

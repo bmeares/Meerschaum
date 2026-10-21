@@ -70,7 +70,7 @@ RUST = (
     '.cargo/**',
     '.config/nextest.toml',
     'scripts/rust/**',
-    'scripts/ci/**',
+    'scripts/ci/changes.py',
     'scripts/check_packaging.py',
     '.github/workflows/rust.yaml',
 )

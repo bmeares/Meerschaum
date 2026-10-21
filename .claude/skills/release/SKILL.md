@@ -23,7 +23,14 @@ Versions have two spellings that must agree (`scripts/check_packaging.py` enforc
 `meerschaum==5.0.0rc1`) and `cargo install meerschaum --locked --version 5.0.0-rc.1` (cargo never picks a
 pre-release without the explicit version). `rc2` is `5.0.0-rc.2` / `5.0.0rc2`.
 
-Platforms of the wheels (`.github/workflows/wheels.yaml`, GitHub-hosted runners only): Linux x86_64 and
+**Platform policy (releases after rc3): prereleases publish Linux x86_64 artifacts only.**
+This applies to Docker (`linux/amd64`), Python wheels (glibc and musl, plus experimental cp314t if
+its checks pass), and the standalone CLI binary (`x86_64-unknown-linux-gnu`). The sdist and all
+15 crates.io packages remain platform independent. Final releases retain the complete platform
+matrix below. `scripts/ci/release_matrix.py` reads the Cargo version for both workflows, including
+manual dispatches; do not manually re-enable other prerelease architectures.
+
+Final-release wheel platforms (`.github/workflows/wheels.yaml`, GitHub-hosted runners only): Linux x86_64 and
 Linux arm64 (`manylinux_2_28`, native `ubuntu-24.04-arm`), the same two for musl libc (`musllinux_1_2`, built
 in the `rust-musl-cross` containers on `ubuntu-latest`, the aarch64 one smoke-tested natively on
 `ubuntu-24.04-arm` in an Alpine container), macOS arm64, macOS x86_64 (`macos-15-intel`), Windows x86_64, all one
@@ -31,9 +38,9 @@ in the `rust-musl-cross` containers on `ubuntu-latest`, the aarch64 one smoke-te
 sdist. Standalone `mrsm` binaries (the `cargo install meerschaum` program) are built for five targets
 (`x86_64-unknown-linux-gnu` and `aarch64-unknown-linux-gnu` in `manylinux_2_28` containers, so the glibc floor is 2.28;
 `aarch64-apple-darwin` and `x86_64-apple-darwin`; `x86_64-pc-windows-msvc`) as GitHub release assets, not on PyPI.
-**Not built:** Windows arm64, Linux arm64 free-threaded, musl standalone binaries. Docker images are multi-architecture
-(`linux/amd64` + `linux/arm64`, `scripts/config.sh` `platforms`): each architecture is built natively on its own runner
-by `docker-build.yaml` and joined by `buildx.sh --merge` (5.7).
+**Not built:** Windows arm64, Linux arm64 free-threaded, musl standalone binaries. Docker builds run
+on self-hosted Linux x86_64 runners: AMD64 natively, ARM64 under QEMU for final releases. Each has a
+persistent BuildKit cache. `buildx.sh --merge` joins the selected platforms (5.7).
 
 ## 5.1 Prepare the release commit
 
@@ -111,7 +118,7 @@ gh run list --branch v5 --limit 6 --json databaseId,workflowName,status,conclusi
 
 Every run must have `headSha == $SHA` and `conclusion == success`. The self-hosted jobs share this host's
 containers, ports and `target/`: never run a local `scripts/test.sh` or `cargo` build at the same time.
-`wheels.yaml` jobs: `packaging metadata`; `build (ubuntu-latest | ubuntu-24.04-arm | ubuntu-latest, musllinux x86_64 | ubuntu-latest, musllinux aarch64 | macos-latest | macos-15-intel |
+`wheels.yaml` selects the prerelease subset or the full final-release matrix. Full matrix jobs: `packaging metadata`; `build (ubuntu-latest | ubuntu-24.04-arm | ubuntu-latest, musllinux x86_64 | ubuntu-latest, musllinux aarch64 | macos-latest | macos-15-intel |
 windows-latest)`, which run `check_packaging.py --wheels dist` and a tag/size guard (Linux wheels must be
 `manylinux_2_28` or older (musl: `musllinux_1_2` or older) and the right architecture, a wheel over 95 MiB fails, PyPI refuses 100 MiB);
 `build (sdist)`; `binary (<target>)` x5 (a release `mrsm` per platform, glibc floor check, `--version` and
@@ -133,7 +140,11 @@ find "$REL/dl" -name '*.whl' -o -name '*.tar.gz' | grep -v cp314t | xargs -I{} c
 ls -l "$REL/dist"
 ```
 
-Expected: `meerschaum-<ver>-cp311-abi3-manylinux_2_28_x86_64.whl`, `...manylinux_2_28_aarch64.whl`,
+For a prerelease, expect two abi3 wheels (`manylinux_2_28_x86_64`, `musllinux_1_2_x86_64`)
+and the sdist: three files, or four with a passing experimental cp314t wheel. Expect only the
+`x86_64-unknown-linux-gnu` standalone binary and its checksum.
+
+For a final release, expect: `meerschaum-<ver>-cp311-abi3-manylinux_2_28_x86_64.whl`, `...manylinux_2_28_aarch64.whl`,
 `...musllinux_1_2_x86_64.whl`, `...musllinux_1_2_aarch64.whl`, `...macosx_*_arm64.whl`, `...macosx_*_x86_64.whl`,
 `...win_amd64.whl` and `meerschaum-<ver>.tar.gz` (eight files).
 
@@ -143,8 +154,8 @@ The artifact zip drops the executable bit:
 
 ```bash
 mkdir "$REL/bin"; cp "$REL"/dl/mrsm-*/mrsm-* "$REL/bin/"
-(cd "$REL/bin" && chmod +x mrsm-*-linux-gnu mrsm-*-apple-darwin && cat *.sha256 > SHA256SUMS && sha256sum -c SHA256SUMS)
-ls -l "$REL/bin"       # 5 binaries, 5 .sha256, SHA256SUMS
+(cd "$REL/bin" && find . -maxdepth 1 -type f ! -name '*.sha256' -exec chmod +x {} + && cat *.sha256 > SHA256SUMS && sha256sum -c SHA256SUMS)
+ls -l "$REL/bin"       # rc: 1 binary + checksum; final: 5 binaries + checksums; SHA256SUMS
 ```
 
 **The free-threaded `cp314t` wheel** (`wheels-ubuntu-latest-cp314t`) is uploaded only if both its `build`
@@ -230,11 +241,12 @@ After PyPI and crates.io succeeded, on the exact release commit:
 ```bash
 git tag -m "v5.0.0rc1" v5.0.0rc1 "$SHA"      # -m required: git config forces annotated tags
 git push origin v5.0.0rc1                     # triggers wheels.yaml on the tag (builds only)
+mapfile -t release_assets < <(find "$REL/bin" -maxdepth 1 -type f ! -name '*.sha256' -print)
 gh release create v5.0.0rc1 --prerelease --verify-tag --title "v5.0.0rc1" --notes-file <notes> \
-  "$REL"/bin/mrsm-*-linux-gnu "$REL"/bin/mrsm-*-apple-darwin "$REL"/bin/mrsm-*.exe "$REL"/bin/SHA256SUMS
+  "${release_assets[@]}"
 ```
 
-The five binaries (built on the release commit by `wheels.yaml`) and `SHA256SUMS` are attached as the release
+The selected binaries (one for a prerelease, five for a final; built on the release commit by `wheels.yaml`) and `SHA256SUMS` are attached as the release
 assets. Say in the notes that the macOS binary is not signed or notarized (Gatekeeper asks once:
 `xattr -d com.apple.quarantine mrsm-...`, documented under Setup in the docs), that `cargo install meerschaum --locked` (Rust 1.95 or newer) and
 `pip install meerschaum` are the supported installs, and that the Linux binaries need glibc 2.28 or newer.
@@ -266,33 +278,37 @@ docker buildx imagetools inspect bmeares/meerschaum:latest   # unchanged by an r
 
 The build only creates its own images; it never touches other containers on the host (the build host may run
 production services: never `docker system prune` or remove images you did not create). Multi-architecture
-images (adding `linux/arm64`) come from the workflow route below, which builds each architecture natively.
+images for final releases (adding `linux/arm64`) come from the self-hosted workflow route below.
 
-**Workflow route (multi-architecture).** `docker-build.yaml` (`workflow_dispatch`, `publish: true` pushes with the repository's
-DockerHub secrets). `docker-build.yaml` builds `minimal`, `full` and `slim` natively per architecture
-(`buildx (amd64)` on `ubuntu-latest`, `buildx (arm64)` on `ubuntu-24.04-arm`, no QEMU: each loads, size-gates and
-smoke-tests its own images), and with `publish: true` pushes the `<version>-<tag>-<arch>` images
-(`buildx.sh --push --arch-tags --platform linux/<arch>`) and the `publish` job joins them into the multi-architecture
-tags with `buildx.sh --merge` (`docker buildx imagetools create`), then checks that `<version>-full` lists both
-platforms. Locally, `scripts/docker/buildx.sh` builds the host's platform only (a manifest list cannot be
-loaded); a local `--push` builds both with QEMU (very slow). **A
-pre-release (`rc`, `aN`, `bN`, `dev`) gets only version-qualified tags** (`bmeares/meerschaum:5.0.0rc1-minimal`,
-`-full`, `-slim`) and never moves `latest`, `full`, `slim`, `minimal` or `api`. Before pushing:
+**Workflow route (self-hosted).** Dispatch `docker-build.yaml` with `publish: true` to use
+repository Docker Hub secrets. The workflow derives its matrix from the Cargo version: AMD64 only
+for a prerelease; AMD64 and ARM64 for a final release. All image builds run on the existing
+self-hosted Linux x86_64 runners; ARM64 uses QEMU and may take much longer on its first build.
+
+The workflow serializes Docker release jobs and runs, keeps separate named BuildKit caches for each
+architecture, and limits each builder to 16 CPUs / 64 GiB RAM. Builder state persists across runs;
+its cache GC is capped at 100 GB with 30 GB minimum free space. Docker configuration is private to
+the job, so publishing does not change the user's login or selected builder. Do not prune the shared
+Docker daemon or interfere with unrelated containers, images or builders.
+
+Each job loads and smoke-tests its images, enforces size limits, and runs the offline facade smoke
+before pushing its architecture-qualified tags. The publish job merges only the selected release
+platforms and verifies every variant's manifest. These checks are mandatory; a failed facade smoke
+blocks publication. Prereleases publish only version-qualified tags and never move `latest`,
+`full`, `slim`, `minimal` or `api`.
 
 ```bash
-./scripts/docker/buildx.sh                         # --load, no push
-./scripts/docker/size_gate.sh --slim-image bmeares/meerschaum:5.0.0rc1-slim --full-image bmeares/meerschaum:5.0.0rc1-full --slim-max 250 --full-max 900
-# the façade smoke inside the slim image (no network, read-only, no implicit installs, scratch root/plugins)
-docker run --rm --network none --read-only --tmpfs /scratch -e MRSM_NO_AUTO_INSTALL=1 \
-  -e MRSM_ROOT_DIR=/scratch/root -e MRSM_PLUGINS_DIR=/scratch/plugins \
-  -v "$PWD/scripts/docker/smoke_facade.py:/smoke_facade.py:ro" --entrypoint sh bmeares/meerschaum:5.0.0rc1-slim \
-  -c 'mkdir -p /scratch/root /scratch/plugins && exec python3 -I /smoke_facade.py'     # must exit 0, install_requests []
-gh workflow run docker-build.yaml --ref v5 -f publish=true   # the authorized step (both architectures, then the merge job)
-docker buildx imagetools inspect bmeares/meerschaum:latest   # still the previous release: unchanged
+# Capture the current latest digest before dispatch; verify it is unchanged for a prerelease.
+docker buildx imagetools inspect bmeares/meerschaum:latest
+gh workflow run docker-build.yaml --ref v5 -f publish=true -f size_gate=enforce
+# Wait for every job to succeed on the exact release SHA, then inspect minimal/full/slim tags.
+docker buildx imagetools inspect bmeares/meerschaum:<ver>-full
+docker buildx imagetools inspect bmeares/meerschaum:latest
 ```
 
-Any failed check of `smoke_facade.py` is a release blocker, on either route. The `-amd64` / `-arm64` tags of every image stay in the
-registry as the architectures' own images (a release candidate publishes only version-qualified tags).
+The `-amd64` / `-arm64` tags of selected architectures stay in the registry. `tests/test_docker_buildx.py`
+and `tests/test_workflows_packaging.py` verify prerelease/final selection, matching smoke jobs and
+manifest command plans.
 
 ## 5.8 Docs
 
@@ -318,10 +334,10 @@ in the release commit (5.1), not after the tag.
 - [ ] Versions bumped (Cargo, lockstep pins, Cargo.lock, `_version.py`, literals), classifier right for rc/final
 - [ ] `check_packaging.py`, `ci.sh package`, `publish-dry-run`, fixture hygiene pass
 - [ ] `wheels`, `rust`, `pytest` runs green on the release commit (`headSha` checked)
-- [ ] `dist/`: 4 platform wheels (+ `cp314t` only if build and smoke passed) + sdist from that run, `twine check` ok
+- [ ] `dist/`: rc: 2 Linux x86_64 abi3 wheels; final: 7 platform wheels (+ `cp314t` only if build and smoke passed) + sdist from that run, `twine check` ok
 - [ ] **PyPI** uploaded (authorized), verified in a clean venv with `--pre`
 - [ ] **crates.io** `cargo publish --workspace --exclude meerschaum-py` done (authorized), `cargo install meerschaum --locked --version ...` verified
-- [ ] **Tag** `v5.0.0rc1` pushed and **GitHub pre-release** created with the 5 binaries + `SHA256SUMS` attached (authorized)
+- [ ] **Tag** `v5.0.0rc1` pushed and **GitHub pre-release** created with the selected binaries + `SHA256SUMS` attached (authorized)
 - [ ] **Docker** (separately authorized), built and pushed from the build host (or `docker-build.yaml` for multi-arch): version-qualified tags only for an rc; `latest` unchanged
 - [ ] Docs rebuilt
 

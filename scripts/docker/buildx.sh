@@ -11,18 +11,18 @@
 #   --push        push to the registry instead of loading locally.
 #   --v4-only     build every dep group on the default target only (no `slim`).
 #   --platform P  build for P only (`linux/amd64`, `linux/arm64`). Default: the builder's own platform
-#                 when loading, `$platforms` (scripts/config.sh: amd64 and arm64) when pushing.
+#                 when loading; the release platforms when pushing (rc: amd64; final: amd64 and arm64).
 #   --arch-tags   push only the architecture-qualified tag `$image:<version>-<tag>-<arch>` of every image
 #                 (needs --push and --platform with one platform): what each per-architecture job of
-#                 .github/workflows/docker-build.yaml pushes, from a runner of that architecture (the Rust
-#                 release build is far too slow under QEMU).
+#                 .github/workflows/docker-build.yaml pushes after its build and smoke checks.
 #   --merge       build nothing: join the `-<arch>` tags of every `$platforms` architecture into the
 #                 multi-architecture tags (the version-qualified ones, and `latest`, `full`, `slim`,
 #                 `minimal`, `api` for a release) with `docker buildx imagetools create`. Run it after
 #                 every `--push --arch-tags` job succeeded. The `-<arch>` tags stay in the registry as
 #                 the architectures' own images.
 #
-# Pre-release versions (dev, rc, aN, bN) only get version-qualified tags, never `latest`/`full`/`slim`.
+# Pre-release versions (dev, rc, aN, bN) default to amd64 and only get version-qualified tags,
+# never `latest`/`full`/`slim`. Final releases include both amd64 and arm64.
 # Pushing requires a 5.x version (the wheels' version, from the Cargo workspace).
 # When $GITHUB_OUTPUT is set, writes `slim_image` and `full_image` (the version-qualified tags).
 # Experimental features must be enabled and docker buildx must be installed (see scripts/setup.sh).
@@ -97,6 +97,12 @@ prerelease=""
 case "$mrsm_version" in
   *dev*|*rc*|*a[0-9]*|*b[0-9]*) prerelease=1 ;;
 esac
+
+# Prerelease distribution is Linux x86_64 only. Explicit per-architecture builds remain
+# available for testing; the default push and manifest merge follow the release policy.
+if [ -n "$prerelease" ]; then
+  platforms="linux/amd64"
+fi
 
 if { [ "$push" = "--push" ] || [ -n "$merge" ]; } && [ "${mrsm_version%%.*}" -lt 5 ]; then
   echo "buildx.sh: refusing to push version $mrsm_version (the wheels are 5.x)." >&2

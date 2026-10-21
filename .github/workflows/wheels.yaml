@@ -22,8 +22,10 @@ name: wheels
 # and the Docker images are `--release`). Swatinem/rust-cache restores the dependencies' build between
 # dispatches (saved from `v5`; GitHub's cache storage is capped at 10 GB per repository, least recently
 # used evicted first, so check `gh cache list` if release builds turn cold).
-# Nothing here publishes anything: the wheels and binaries are workflow artifacts. Never `self-hosted`: the
-# self-hosted runner is reserved for rust.yaml / pytest.yaml (docs/design/v5-build.md).
+# Prereleases build Linux x86_64 only (glibc, musl and experimental cp314t); finals use every
+# platform above. scripts/ci/release_matrix.py selects matching build and smoke matrices from Cargo's
+# version, including on manual dispatches. The platform-independent sdist is always built.
+# Nothing here publishes anything: the wheels and binaries are artifacts on GitHub-hosted runners.
 
 on:
   workflow_dispatch:
@@ -41,6 +43,11 @@ concurrency:
 jobs:
   metadata:
     name: packaging metadata
+    outputs:
+      wheels: ${{ steps.matrix.outputs.wheels }}
+      binaries: ${{ steps.matrix.outputs.binaries }}
+      smoke: ${{ steps.matrix.outputs.smoke }}
+      smoke_musl: ${{ steps.matrix.outputs.smoke_musl }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -50,6 +57,9 @@ jobs:
           python-version: '3.13'
       - name: Cargo version, pyproject pins and extras agree
         run: python scripts/check_packaging.py
+      - name: Select release platforms
+        id: matrix
+        run: python scripts/ci/release_matrix.py --github-output "$GITHUB_OUTPUT"
 
   build:
     name: build (${{ matrix.os }}${{ matrix.musl && format(', musllinux {0}', matrix.wheel_arch) || '' }}${{ matrix.freethreaded && ', cp314t, experimental' || '' }})
@@ -57,42 +67,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            manylinux: '2_28'
-          # Native arm64 (hosted runner, free for public repositories): maturin-action picks the
-          # `quay.io/pypa/manylinux_2_28_aarch64` container on an aarch64 host.
-          - os: ubuntu-24.04-arm
-            manylinux: '2_28'
-          # musllinux_1_2 (Alpine and other musl distributions): maturin-action builds these in the
-          # `ghcr.io/rust-cross/rust-musl-cross:<target>` container, which cross-compiles on an
-          # x86_64 runner (the aarch64 wheel is not built on the arm runner). `wheel_arch` is the
-          # architecture the wheel must carry (the tag check below) and `artifact` its upload name.
-          - os: ubuntu-latest
-            manylinux: 'musllinux_1_2'
-            target: x86_64-unknown-linux-musl
-            musl: true
-            wheel_arch: x86_64
-            artifact: wheels-musllinux-x86_64
-          - os: ubuntu-latest
-            manylinux: 'musllinux_1_2'
-            target: aarch64-unknown-linux-musl
-            musl: true
-            wheel_arch: aarch64
-            artifact: wheels-musllinux-aarch64
-          - os: macos-latest
-            manylinux: 'off'
-          # Intel Mac: the last GitHub-hosted x86_64 macOS image (`macos-13` was retired); built and
-          # smoke-tested natively, no Rosetta.
-          - os: macos-15-intel
-            manylinux: 'off'
-          - os: windows-latest
-            manylinux: 'off'
-          # EXPERIMENTAL (R8): the free-threaded `cp314t` wheel. Non-blocking.
-          - os: ubuntu-latest
-            manylinux: '2_28'
-            freethreaded: true
+      matrix: ${{ fromJSON(needs.metadata.outputs.wheels) }}
     # A failed experimental entry must not fail the workflow (or the jobs that need `build`).
     continue-on-error: ${{ matrix.freethreaded == true }}
     steps:
@@ -224,13 +199,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu, container_arch: x86_64 }
-          - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu, container_arch: aarch64 }
-          - { os: macos-latest, target: aarch64-apple-darwin }
-          - { os: macos-15-intel, target: x86_64-apple-darwin }
-          - { os: windows-latest, target: x86_64-pc-windows-msvc, ext: '.exe' }
+      matrix: ${{ fromJSON(needs.metadata.outputs.binaries) }}
     defaults:
       run:
         shell: bash
@@ -311,13 +280,11 @@ jobs:
 
   smoke:
     name: smoke (${{ matrix.os }}, py${{ matrix.python }})
-    needs: build
+    needs: [metadata, build]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
-      matrix:
-        os: [ ubuntu-latest, ubuntu-24.04-arm, macos-latest, macos-15-intel, windows-latest ]
-        python: [ '3.11', '3.14' ]
+      matrix: ${{ fromJSON(needs.metadata.outputs.smoke) }}
     defaults:
       run:
         shell: bash
@@ -461,14 +428,11 @@ jobs:
   # extras' compiled dependencies, which come from PyPI's own musllinux wheels.
   smoke-musl:
     name: smoke (musllinux ${{ matrix.arch }}, Alpine)
-    needs: build
+    needs: [metadata, build]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - { os: ubuntu-latest, arch: x86_64 }
-          - { os: ubuntu-24.04-arm, arch: aarch64 }
+      matrix: ${{ fromJSON(needs.metadata.outputs.smoke_musl) }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -495,7 +459,7 @@ jobs:
   # that importing `_core` keeps the GIL disabled.
   smoke-freethreaded:
     name: smoke (free-threaded, py3.14t)
-    needs: build
+    needs: [metadata, build]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     continue-on-error: true

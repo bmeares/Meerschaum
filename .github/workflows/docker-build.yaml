@@ -5,12 +5,11 @@ name: buildx
 #   maturin wheel; `mrsm` is its console script), and slim (`--target slim`: the base wheel only),
 #   then runs the §12.1 size gate (slim ≤ 250 MB, full < 900 MB).
 #
-# Two architectures, `linux/amd64` and `linux/arm64`, each built NATIVELY on a runner of its own
-# architecture (`ubuntu-latest`, `ubuntu-24.04-arm`): the Rust release build (thin LTO, one codegen
-# unit) is far too slow under QEMU. Every architecture builds, size-gates and smoke-tests its own
-# images; a publish pushes each architecture's `<version>-<tag>-<arch>` image and the `publish` job then
-# joins them into the multi-architecture tags (`buildx.sh --merge`: `docker buildx imagetools create`).
-# A pre-release only gets version-qualified tags; the `-<arch>` tags stay in the registry.
+# All Docker builds run on self-hosted Linux x86_64 runners. Prereleases build amd64 only;
+# finals also build arm64 under QEMU. Each architecture has a persistent, resource-limited
+# BuildKit cache. Jobs and runs are serialized because the runners share a Docker daemon.
+# The publish job merges exactly the architectures selected from the Cargo version.
+# Prereleases only get version-qualified tags; floating tags remain unchanged.
 #
 # The size gate ENFORCES by default (5.0.0rc1 requires it, §13): the job fails when `slim`
 # exceeds 250 MB or `full` exceeds 900 MB (uncompressed, `docker image inspect`). `warn` only
@@ -41,34 +40,88 @@ on:
 permissions:
   contents: read
 
+# Shared daemon, image tags and persistent builders: never overlap two release builds.
+concurrency:
+  group: mrsm-docker-release
+  cancel-in-progress: false
+
 jobs:
+  metadata:
+    name: Docker release platforms
+    runs-on: ubuntu-latest
+    outputs:
+      docker: ${{ steps.matrix.outputs.docker }}
+      platforms: ${{ steps.matrix.outputs.docker_platforms }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { persist-credentials: false }
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+      - name: Select release platforms
+        id: matrix
+        run: python scripts/ci/release_matrix.py --github-output "$GITHUB_OUTPUT"
+
   buildx:
     name: buildx (${{ matrix.arch }})
-    runs-on: ${{ matrix.runner }}
-    # A release build of the wheel on a 4-core hosted runner takes a while; the default is 6 hours.
-    timeout-minutes: 300
+    needs: metadata
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 720
+    env:
+      # Keep login credentials and builder selection out of the user's Docker config.
+      BUILDX_BUILDER: meerschaum-release-${{ matrix.arch }}
+      DOCKER_DEFAULT_PLATFORM: ${{ matrix.platform }}
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - { arch: amd64, runner: ubuntu-latest, platform: linux/amd64 }
-          - { arch: arm64, runner: ubuntu-24.04-arm, platform: linux/arm64 }
+      max-parallel: 1
+      matrix: ${{ fromJSON(needs.metadata.outputs.docker) }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          clean: false
+
+      - name: Clean the build context, preserving other CI caches
+        run: git clean -ffdx -e /target -e /.venv-ref -e /.venv-test
+
+      - name: Isolate Docker configuration
+        run: |
+          docker_config="$(mktemp -d "$RUNNER_TEMP/mrsm-docker.XXXXXX")"
+          echo "DOCKER_CONFIG=$docker_config" >> "$GITHUB_ENV"
 
       - name: Install python3
         uses: actions/setup-python@v5
         with:
           python-version: '3.14'
 
+      - name: Set up ARM64 emulation
+        if: matrix.arch == 'arm64'
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
       - name: Set Up Docker Buildx
         uses: docker/setup-buildx-action@v3
+        with:
+          name: meerschaum-release-${{ matrix.arch }}
+          use: false
+          keep-state: true
+          driver-opts: |
+            memory=64g
+            cpu-period=100000
+            cpu-quota=1600000
+          buildkitd-config-inline: |
+            [worker.oci]
+              max-parallelism = 16
+              reservedSpace = "10GB"
+              maxUsedSpace = "100GB"
+              minFreeSpace = "30GB"
 
-      # Loads this architecture's images into the runner's daemon (no QEMU, no manifest list).
+      # Load and test the requested architecture, including under QEMU for arm64.
       - name: Build Docker images
         id: build
-        run: ./scripts/docker/buildx.sh ${{ inputs.v4_only && '--v4-only' || '' }}
+        run: ./scripts/docker/buildx.sh --platform ${{ matrix.platform }} ${{ inputs.v4_only && '--v4-only' || '' }}
 
       - name: Size gate
         if: ${{ !inputs.v4_only && inputs.size_gate != 'skip' }}
@@ -131,12 +184,20 @@ jobs:
   # every architecture built, passed its gates and pushed.
   publish:
     name: publish (multi-architecture tags)
-    needs: buildx
+    needs: [metadata, buildx]
     if: ${{ inputs.publish }}
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64]
+    env:
+      EXPECTED_PLATFORMS: ${{ needs.metadata.outputs.platforms }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with: { persist-credentials: false, clean: false }
+
+      - name: Isolate Docker configuration
+        run: |
+          docker_config="$(mktemp -d "$RUNNER_TEMP/mrsm-docker.XXXXXX")"
+          echo "DOCKER_CONFIG=$docker_config" >> "$GITHUB_ENV"
 
       - name: Install python3
         uses: actions/setup-python@v5
@@ -145,6 +206,8 @@ jobs:
 
       - name: Set Up Docker Buildx
         uses: docker/setup-buildx-action@v3
+        with:
+          use: false
 
       - name: Login to DockerHub
         uses: docker/login-action@v3
@@ -155,10 +218,26 @@ jobs:
       - name: Create the multi-architecture tags
         run: ./scripts/docker/buildx.sh --merge ${{ inputs.v4_only && '--v4-only' || '' }}
 
-      # Both architectures must be in the version-qualified full image's manifest list.
-      - name: Check the manifest list
+      - name: Check the published platforms
+        env:
+          V4_ONLY: ${{ inputs.v4_only }}
         run: |
           version="$(python scripts/check_packaging.py --version)"
-          docker buildx imagetools inspect "bmeares/meerschaum:$version-full" | tee manifest.txt
-          grep -q 'linux/amd64' manifest.txt
-          grep -q 'linux/arm64' manifest.txt
+          groups="minimal full"
+          if [ "$V4_ONLY" != true ]; then groups="$groups slim"; fi
+          for group in $groups; do
+            docker buildx imagetools inspect --raw "bmeares/meerschaum:$version-$group" > manifest.json
+            python - <<'PY'
+          import json, os
+          with open('manifest.json') as stream:
+              manifest = json.load(stream)
+          platforms = {
+              p['os'] + '/' + p['architecture']
+              for m in manifest['manifests']
+              if (p := m.get('platform', {})).get('os') == 'linux'
+          }
+          expected = set(os.environ['EXPECTED_PLATFORMS'].split(','))
+          assert platforms == expected, (platforms, expected)
+          print('Verified platforms:', ', '.join(sorted(platforms)))
+          PY
+          done
