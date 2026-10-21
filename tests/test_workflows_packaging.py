@@ -124,6 +124,8 @@ def test_docker_images_build_on_self_hosted_runners(docker_build):
         ('amd64', 'linux/amd64'), ('arm64', 'linux/arm64'),
     }
     assert job['runs-on'] == ['self-hosted', 'Linux', 'X64']
+    assert job['env']['PYTHON_BIN'] == 'python3'
+    assert not any('setup-python' in step.get('uses', '') for step in job['steps'])
     assert job['strategy']['max-parallel'] == 1
     assert docker_build['concurrency']['cancel-in-progress'] is False
     qemu = next(s for s in job['steps'] if 'setup-qemu-action' in s.get('uses', ''))

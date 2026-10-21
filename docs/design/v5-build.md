@@ -271,8 +271,8 @@ remain platform independent. The complete wheel and binary matrix is retained fo
 
 Each Docker architecture uses its own named BuildKit cache (`meerschaum-release-<arch>`), preserved
 between jobs with `keep-state: true`. The builder is limited to 16 CPUs and 64 GiB RAM, with cache
-GC budgets of 100 GB maximum use and 30 GB minimum free space. The workflow serializes runs and
-architecture jobs because runners share a daemon and loaded image tags. It uses a temporary Docker
+GC budgets of 100 GB maximum use and 30 GB minimum free space. The orchestration uses the host's Python 3.11 or newer (no downloaded Ubuntu interpreter); the images build their own Python.
+The workflow serializes runs and architecture jobs because runners share a daemon and loaded image tags. It uses a temporary Docker
 configuration so registry login and builder selection do not change the user's configuration.
 The normal test-suite containers, deployed services and other builders are left alone.
 

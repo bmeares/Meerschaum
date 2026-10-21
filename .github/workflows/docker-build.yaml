@@ -69,6 +69,7 @@ jobs:
     timeout-minutes: 720
     env:
       # Keep login credentials and builder selection out of the user's Docker config.
+      PYTHON_BIN: python3
       BUILDX_BUILDER: meerschaum-release-${{ matrix.arch }}
       DOCKER_DEFAULT_PLATFORM: ${{ matrix.platform }}
     strategy:
@@ -90,10 +91,10 @@ jobs:
           docker_config="$(mktemp -d "$RUNNER_TEMP/mrsm-docker.XXXXXX")"
           echo "DOCKER_CONFIG=$docker_config" >> "$GITHUB_ENV"
 
-      - name: Install python3
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.14'
+      # setup-python's downloaded interpreters do not support every self-hosted Linux distro.
+      # The orchestration scripts use only the standard library; the image builds its own Python.
+      - name: Check host Python
+        run: python3 -c 'import sys, tomllib; assert sys.version_info >= (3, 11); print(sys.version)'
 
       - name: Set up ARM64 emulation
         if: matrix.arch == 'arm64'
@@ -188,6 +189,7 @@ jobs:
     if: ${{ inputs.publish }}
     runs-on: [self-hosted, Linux, X64]
     env:
+      PYTHON_BIN: python3
       EXPECTED_PLATFORMS: ${{ needs.metadata.outputs.platforms }}
     steps:
       - name: Checkout code
@@ -199,10 +201,10 @@ jobs:
           docker_config="$(mktemp -d "$RUNNER_TEMP/mrsm-docker.XXXXXX")"
           echo "DOCKER_CONFIG=$docker_config" >> "$GITHUB_ENV"
 
-      - name: Install python3
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.14'
+      # setup-python's downloaded interpreters do not support every self-hosted Linux distro.
+      # The orchestration scripts use only the standard library; the image builds its own Python.
+      - name: Check host Python
+        run: python3 -c 'import sys, tomllib; assert sys.version_info >= (3, 11); print(sys.version)'
 
       - name: Set Up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -222,12 +224,12 @@ jobs:
         env:
           V4_ONLY: ${{ inputs.v4_only }}
         run: |
-          version="$(python scripts/check_packaging.py --version)"
+          version="$(python3 scripts/check_packaging.py --version)"
           groups="minimal full"
           if [ "$V4_ONLY" != true ]; then groups="$groups slim"; fi
           for group in $groups; do
             docker buildx imagetools inspect --raw "bmeares/meerschaum:$version-$group" > manifest.json
-            python - <<'PY'
+            python3 - <<'PY'
           import json, os
           with open('manifest.json') as stream:
               manifest = json.load(stream)
