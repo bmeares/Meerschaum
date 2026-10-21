@@ -281,6 +281,7 @@ def test_manage_menu_syncs_a_pipe_and_confirms_destructive_actions(server, tab):
     tab.page.click('.dropdown-menu.show .dropdown-item:text-is("Clear")')
     tab.page.wait_for_selector('.modal.show')
     assert 'clear' in tab.page.inner_text('#manage-confirm-body')
+    assert "Pipe(" in tab.page.inner_text('#manage-confirm-body')
     tab.page.click('#manage-cancel-button')
     tab.page.wait_for_selector('.modal.show', state='detached')
     rows = server.python(ROWCOUNT)

@@ -3,8 +3,7 @@
 # vim:fenc=utf-8
 
 """
-Callbacks of the dashboard's Exec button, the pipe cards' "Manage" menu, "Follow logs", and the
-terminal page.
+Callbacks of the dashboard's Exec button, the pipe cards' "Manage" menu, and "Follow logs".
 
 See `meerschaum.api.dash.execute` for how an action runs: always through the server's `/execute`
 (there is no local run). The output pane (`exec-div`) follows the job's log over the server's event
@@ -241,16 +240,17 @@ def confirm_manage_pipe(manage_clicks, cancel_clicks, confirm_clicks):
         meta = json.loads(trigger_id['index'])
     except ValueError:
         raise PreventUpdate
-    pipe_label = f"{meta.get('connector_keys')}:{meta.get('metric_key')}" + (
-        f":{meta['location_key']}" if meta.get('location_key') else ''
-    )
+    pipe_label = str(mrsm.Pipe(
+        meta['connector_keys'], meta['metric_key'], meta.get('location_key'),
+        instance=meta.get('instance_keys'),
+    ))
     return (
         True,
         {'meta': meta, 'action': action_name},
         [
             html.P([
                 "Are you sure you want to ", html.B(action_name),
-                " the pipe ", html.B(pipe_label), "?",
+                " the pipe ", html.Code(pipe_label), "?",
             ]),
             html.P(html.B("This action cannot be undone!")),
         ],
