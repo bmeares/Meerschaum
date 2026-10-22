@@ -244,18 +244,26 @@ def test_job_from_pid(local_jobs):
 def _supervisor_pid(job):
     pid_path = job.daemon.path / 'process.pid'
 
-    def worker_pid():
+    def supervisor_after_worker_handoff():
         try:
-            return int(pid_path.read_text().strip())
-        except (FileNotFoundError, ValueError):
+            worker_pid = int(pid_path.read_text().strip())
+            status = pathlib.Path('/proc', str(worker_pid), 'status').read_text()
+            supervisor_pid = int(next(line.split()[1] for line in status.splitlines()
+                                      if line.startswith('PPid:')))
+            command_args = pathlib.Path('/proc', str(supervisor_pid), 'cmdline').read_bytes().split(b'\0')
+        except (FileNotFoundError, ProcessLookupError, ValueError, StopIteration):
             return None
+        # Startup first writes the supervisor itself into process.pid. Its parent
+        # is init or a subreaper, so wait until the file names the actual worker.
+        if (
+            b'__mrsm_job_supervisor__' not in command_args
+            or f"daemon_id='{job.name}'".encode() not in command_args
+        ):
+            return None
+        return supervisor_pid
 
-    pid = _wait_for(worker_pid)
-    assert pid is not None
-    status = pathlib.Path('/proc', str(pid), 'status').read_text()
-    supervisor_pid = int(next(line.split()[1] for line in status.splitlines()
-                              if line.startswith('PPid:')))
-    assert supervisor_pid != pid
+    supervisor_pid = _wait_for(supervisor_after_worker_handoff)
+    assert supervisor_pid is not None, 'Worker PID did not hand off to the expected supervisor.'
     return supervisor_pid
 
 
