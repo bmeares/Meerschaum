@@ -55,6 +55,22 @@ Use the native fetch example below as the starting implementation for `acme_data
 and sync that Pipe before opening the page. Moving the fetch implementation does not require
 rewriting the page or changing its session handling.
 
+For a fetch plugin, first list the operations it performs on its Python `pipe` argument.
+The native `Request` carries JSON snapshots of the Pipe's keys and parameters, plus the
+requested bounds; it does not carry a live Python Pipe or callbacks into the host.
+Calls such as `pipe.get_sync_time()`, `pipe.instance_connector.read()`, and importing a
+helper from another Python plugin therefore need an explicit replacement. A self-contained
+HTTP source or transformation can use the supplied parameters and bounds directly. Keep
+database orchestration in Python or declarative SQL Pipes until its Rust implementation
+provides the required connector access; listing a Python plugin in `required` does not
+make its functions callable from Rust.
+
+Validate a port under a separate plugin name and scratch root before changing existing
+Pipe connector keys. Compare its rows, nulls, dtypes, bound handling, empty responses, and
+errors with the Python implementation using recorded or synthetic inputs. Then sync the
+native plugin through `mrsm` into a disposable instance to check discovery, the Arrow
+boundary, and repeated-sync behavior together.
+
 The current native HTTP adapter accepts static paths outside reserved core namespaces. Do not
 assume it reproduces parameterized FastAPI routes, full scoped-principal context, custom
 request/response headers and cookies, redirects, or arbitrary binary responses. Audit those
@@ -76,7 +92,7 @@ edition = "2024"
 crate-type = ["cdylib"]
 
 [dependencies]
-meerschaum-plugin = "=5.0.0-rc.7"   # prerelease versions require an exact prerelease requirement
+meerschaum-plugin = "=5.0.0-rc.8"   # prerelease versions require an exact prerelease requirement
 
 [profile.release]
 panic = "unwind"      # required: the SDK catches panics at the boundary

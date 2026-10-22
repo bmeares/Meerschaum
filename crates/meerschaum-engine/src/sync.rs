@@ -215,6 +215,14 @@ fn fail(message: impl Into<String>) -> SyncResult {
     SyncResult::new(false, message)
 }
 
+fn fetch_failed(pipe: &Pipe, connector_keys: &str, error: &ConnectorError) -> SyncResult {
+    let detail = format!("Failed to fetch data from {connector_keys}:\n    {error}");
+    tracing::warn!("{detail}");
+    // Diagnostic improvement over v4: embedded callers may not receive tracing output.
+    // Keep the familiar failure prefix and return the source's explanation as well.
+    fail(format!("No data were fetched for {pipe}.\n{detail}"))
+}
+
 /// Whether any string in a parameters tree contains a template opener.
 fn has_templates(v: &Value) -> bool {
     match v {
@@ -605,11 +613,7 @@ async fn sync_inner(
             {
                 Ok(b) => b,
                 Err(e) => {
-                    tracing::warn!(
-                        "Failed to fetch data from {}:\n    {e}",
-                        source.connector_keys()
-                    );
-                    return fail(format!("No data were fetched for {pipe}."));
+                    return fetch_failed(&pipe, &source.connector_keys(), &e);
                 }
             };
             let query = DataQuery {
@@ -627,11 +631,7 @@ async fn sync_inner(
                 }
                 Ok(None) => {}
                 Err(e) => {
-                    tracing::warn!(
-                        "Failed to fetch data from {}:\n    {e}",
-                        source.connector_keys()
-                    );
-                    return fail(format!("No data were fetched for {pipe}."));
+                    return fetch_failed(&pipe, &source.connector_keys(), &e);
                 }
             }
             match source.fetch(&pipe, &query).await {
@@ -645,21 +645,8 @@ async fn sync_inner(
                 }
                 Ok(Some(df)) => PipeInput::Frame(df),
                 Ok(None) => return fail(format!("No data were fetched for {pipe}.")),
-                Err(ConnectorError::NotImplemented(_)) => {
-                    tracing::warn!(
-                        "No `fetch()` function defined for connector '{}'",
-                        source.connector_keys()
-                    );
-                    return fail(format!("No data were fetched for {pipe}."));
-                }
                 Err(e) => {
-                    // PARITY: v4 prints the exception and returns the generic message
-                    // (`core/Pipe/_sync.py`, `msg` is overwritten by the `df is None` branch).
-                    tracing::warn!(
-                        "Failed to fetch data from {}:\n    {e}",
-                        source.connector_keys()
-                    );
-                    return fail(format!("No data were fetched for {pipe}."));
+                    return fetch_failed(&pipe, &source.connector_keys(), &e);
                 }
             }
         }

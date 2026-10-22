@@ -84,7 +84,6 @@ async def optional_user(request: Request) -> Optional[User]:
     """
     if no_auth:
         return None
-    return await manager(request)
     try:
         return await manager(request)
     except HTTPException:
@@ -110,7 +109,7 @@ async def load_user_or_token(
     if not authorization.startswith('mrsm-key:'):
         if not users:
             raise HTTPException(
-                status=status.HTTP_401_UNAUTHORIZED,
+                status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Users not authenticated for this endpoint.",
             )
 

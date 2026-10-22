@@ -264,24 +264,29 @@ async fn get_token(conn: &Arc<dyn InstanceConnector>, id: &Uuid) -> Option<Token
     }
 }
 
-/// `load_user_or_token_from_manager(sub)`: a token when `sub` is a UUID, else the user (with the
-/// user ID from the process cache or the instance; a missing user still loads).
+/// `load_user_or_token_from_manager(sub)`: a current token when `sub` is a UUID, else a user
+/// that still exists on the instance. Deleted users cannot retain access through an old JWT.
 pub async fn load_from_subject(state: &AppState, sub: &str) -> Option<Principal> {
     let conn = state.instance();
     if is_uuid(sub) {
         let id = Uuid::parse_str(sub.trim()).ok()?;
-        return get_token(&conn, &id).await.map(Principal::Token);
+        // A JWT is an access credential for its backing token, not a way to outlive the
+        // token's revocation or expiry. API keys enforce these checks on every request too.
+        return get_token(&conn, &id)
+            .await
+            .filter(|token| {
+                token.is_valid
+                    && token
+                        .expiration
+                        .is_none_or(|expiration| expiration > Utc::now())
+            })
+            .map(Principal::Token);
     }
     let mut user = User::new(sub, None);
     user.instance_keys = Some(conn.connector_keys());
-    if let Some(cached) = state.cached_user_id(sub) {
-        user.user_id = Some(cached);
-        return Some(Principal::User(user));
-    }
-    if let Ok(Some(user_id)) = conn.get_user_id(&user).await {
-        state.cache_user_id(sub, user_id.clone());
-        user.user_id = Some(user_id);
-    }
+    // An indefinitely cached ID would let a deleted user keep the scopes in an existing JWT.
+    // Resolve existence on each request, including when another process deleted the account.
+    user.user_id = Some(conn.get_user_id(&user).await.ok().flatten()?);
     Some(Principal::User(user))
 }
 

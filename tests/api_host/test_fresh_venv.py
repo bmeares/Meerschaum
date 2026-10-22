@@ -59,7 +59,12 @@ def fresh_routes(app):
     ### As in the docs: the API imports live inside the function, so that importing the plugin
     ### (the worker does, before the host exists) never needs FastAPI.
     import fastapi
-    from meerschaum.api import manager
+    from meerschaum.api import get_api_connector, manager
+    from meerschaum.core import User
+
+    ### A signed JWT authenticates an existing user, including in a fresh install.
+    instance = get_api_connector()
+    assert instance.register_user(User('bob', 'probe-password', instance=instance))[0]
 
     @app.get('/freshhost/ping')
     def ping():

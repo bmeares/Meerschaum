@@ -119,6 +119,44 @@ fn strings(v: &J) -> Vec<String> {
 }
 
 #[tokio::test]
+async fn filter_keyword_rewriting_preserves_identifiers_and_values() {
+    let conn = conn(Flavor::Sqlite);
+    let pipe = Pipe::builder("test", "param_literals")
+        .parameters(core_map(&serde_json::json!({
+            "columns": {"datetime": "id"},
+            "dtypes": {"id": "int", "someWHERE": "str"},
+        })))
+        .build()
+        .unwrap();
+    let sp = conn.sql_pipe(&pipe).unwrap();
+    let cols_types = str_map(&serde_json::json!({"id": "BIGINT", "someWHERE": "TEXT"}));
+    let state = PipeState {
+        exists: true,
+        dtypes: pipe_dtypes(&sp, &cols_types, true),
+        explicit_dtypes: pipe_dtypes(&sp, &cols_types, false),
+        cols_types,
+    };
+    for begin in [None, Some(DateBound::Int(0))] {
+        let query = DataQuery {
+            begin,
+            params: Some(core_map(&serde_json::json!({"someWHERE": "someWHERE"}))),
+            ..Default::default()
+        };
+        let read = conn
+            .build_data_query(&sp, &state, &query, &Default::default())
+            .await
+            .unwrap();
+        let count = conn
+            .get_pipe_rowcount_query(&sp, &state, &query)
+            .unwrap()
+            .unwrap();
+        for sql in [read, count] {
+            assert!(sql.contains("\"someWHERE\" = 'someWHERE'"), "{sql}");
+        }
+    }
+}
+
+#[tokio::test]
 async fn instance_queries_match_python() {
     let fx = fixture();
     let mut conns: BTreeMap<String, SqlConnector> = BTreeMap::new();

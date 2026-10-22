@@ -89,6 +89,41 @@ fn no_env(_: &str) -> Option<String> {
 }
 
 #[test]
+fn invalid_duration_arguments_fail_before_an_action_runs() {
+    let tmp = tempfile::tempdir().unwrap();
+    let host = SharedHost::default();
+    for (option, value, expected) in [
+        ("--min-seconds", "inf", "--min-seconds"),
+        ("--cooldown", "NaN", "--min-seconds"),
+        ("--min-seconds", "1e300", "--min-seconds"),
+        ("--timeout", "inf", "--timeout-seconds"),
+        ("--timeout-seconds", "NaN", "--timeout-seconds"),
+        ("--timeout-seconds", "1e300", "--timeout-seconds"),
+    ] {
+        let (result, output) = run(
+            tmp.path(),
+            &["restart", "jobs", "--loop", option, value],
+            no_env,
+            &host,
+        );
+        assert!(!result.success, "{option} {value}: {result:?}");
+        assert!(result.message.contains(expected), "{}", result.message);
+        assert!(result.message.contains("finite"), "{}", result.message);
+        assert!(!output.contains("Checking jobs"), "{output}");
+    }
+    // Normal durations still pass, including the existing negative-value clamping behavior.
+    for value in ["0", "0.25", "-1"] {
+        let (result, _) = run(
+            tmp.path(),
+            &["show", "version", "--min-seconds", value],
+            no_env,
+            &host,
+        );
+        assert!(result.success, "{value}: {result:?}");
+    }
+}
+
+#[test]
 fn show_version_and_config() {
     let tmp = tempfile::tempdir().unwrap();
     let host = SharedHost::default();

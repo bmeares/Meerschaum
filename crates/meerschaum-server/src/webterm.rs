@@ -120,6 +120,8 @@ impl ShellCommand {
 pub struct TmuxSettings {
     /// The tmux executable.
     pub binary: String,
+    /// An explicit tmux server socket (`-S`). Tests always use their own private socket.
+    pub socket: Option<PathBuf>,
     /// Appended to the user name (`api:webterm:tmux:session_suffix`).
     pub session_suffix: String,
     /// The directory of the shell's environment file (created `0700`).
@@ -163,6 +165,7 @@ impl WebtermConfig {
             (state.config.webterm_tmux_enabled && tmux_available("tmux", &shell.env)).then(|| {
                 TmuxSettings {
                     binary: "tmux".into(),
+                    socket: None,
                     session_suffix: state.config.webterm_tmux_session_suffix.clone(),
                     env_dir: state.config.webterm_resources_path.clone(),
                     config_file: None,
@@ -193,6 +196,8 @@ pub fn tmux_available(binary: &str, env: &[(String, String)]) -> bool {
     std::process::Command::new(binary)
         .arg("-V")
         .envs(env.iter().map(|(k, v)| (k, v)))
+        .env_remove("TMUX")
+        .env_remove("TMUX_PANE")
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
@@ -690,7 +695,11 @@ fn shell_state(
         .1
         .clone();
     let pid = if let (Some(tmux), Some(session)) = (&config.tmux, session) {
-        let output = std::process::Command::new(&tmux.binary)
+        let mut command = std::process::Command::new(&tmux.binary);
+        if let Some(socket) = &tmux.socket {
+            command.arg("-S").arg(socket);
+        }
+        let output = command
             .args(["display-message", "-p", "-t", session, "#{pane_pid}"])
             .envs(config.shell.env.iter().map(|(k, v)| (k, v)))
             .env_remove("TMUX")
@@ -750,6 +759,10 @@ fn launch(config: &WebtermConfig, term_name: &str) -> std::io::Result<(Pty, Opti
             let name = tmux_session_name(term_name, &tmux.session_suffix);
             let wrapped = tmux_shell_argv(tmux, &config.shell)?;
             builder = CommandBuilder::new(&tmux.binary);
+            if let Some(socket) = &tmux.socket {
+                builder.arg("-S");
+                builder.arg(socket);
+            }
             // `-u`: the websocket is UTF-8 whatever the server's locale says.
             builder.arg("-u");
             if let Some(file) = &tmux.config_file {
@@ -757,8 +770,6 @@ fn launch(config: &WebtermConfig, term_name: &str) -> std::io::Result<(Pty, Opti
             }
             builder.args(["new-session", "-A", "-s", &name]);
             builder.args(&wrapped);
-            builder.env_remove("TMUX");
-            builder.env_remove("TMUX_PANE");
             session = Some(name);
         }
         None => {
@@ -769,6 +780,10 @@ fn launch(config: &WebtermConfig, term_name: &str) -> std::io::Result<(Pty, Opti
     for (key, value) in &config.shell.env {
         builder.env(key, value);
     }
+    // A caller's shell overrides must not reconnect a scratch or web terminal to the
+    // enclosing user's tmux server. Strip these after applying the overrides too.
+    builder.env_remove("TMUX");
+    builder.env_remove("TMUX_PANE");
     builder.env("TERM", "xterm-256color");
     builder.env("COLORTERM", "truecolor");
     // PARITY: v4's shell command pops `COLUMNS` and `LINES` so the PTY's size wins.
@@ -879,11 +894,15 @@ fn tmux_new_window(
 ) -> std::io::Result<()> {
     let argv = tmux_shell_argv(tmux, shell)?;
     let mut command = std::process::Command::new(&tmux.binary);
+    if let Some(socket) = &tmux.socket {
+        command.arg("-S").arg(socket);
+    }
     command
         .args(["new-window", "-t", &format!("{session}:")])
         .args(&argv)
         .envs(shell.env.iter().map(|(k, v)| (k, v)))
         .env_remove("TMUX")
+        .env_remove("TMUX_PANE")
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null());
@@ -988,6 +1007,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("mrsm-webterm-env-{}", std::process::id()));
         let tmux = TmuxSettings {
             binary: "tmux".into(),
+            socket: None,
             session_suffix: "_t".into(),
             env_dir: dir.clone(),
             config_file: None,

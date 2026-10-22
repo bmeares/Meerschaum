@@ -144,12 +144,21 @@ async fn login(ctx: Ctx, body: Body) -> ApiResult {
             let token_id =
                 Uuid::parse_str(client_id.trim()).map_err(|_| ApiError::invalid_credentials())?;
             let correct = no_auth || {
-                let hash = conn
-                    .get_token_secret_hash(&token_id)
+                let token = conn
+                    .get_token_model(&token_id)
                     .await
-                    .map_err(|e| ApiError::exception("get_token_secret_hash", e))?
-                    .unwrap_or_else(|| "None".into());
-                verify_password(&py_str(&data.client_secret), &hash).unwrap_or(false)
+                    .map_err(|e| ApiError::exception("get_token_model", e))?;
+                // Client-credentials login must enforce the same lifecycle as direct API
+                // keys; otherwise an invalidated or expired key could mint fresh JWTs.
+                token.is_some_and(|token| {
+                    token.is_valid
+                        && token
+                            .expiration
+                            .is_none_or(|expiration| expiration > Utc::now())
+                        && token.secret_hash.is_some_and(|hash| {
+                            verify_password(&py_str(&data.client_secret), &hash).unwrap_or(false)
+                        })
+                })
             };
             if !correct {
                 return Err(ApiError::invalid_credentials());

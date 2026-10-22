@@ -686,12 +686,10 @@ fn short_tmp() -> tempfile::TempDir {
         .unwrap()
 }
 
-/// The socket of the private tmux server a test started under `TMUX_TMPDIR=<dir>`
-/// (`<dir>/tmux-<uid>/default`); every tmux command the test runs addresses it with `-S`.
+/// Every tmux command, including the terminal's launch and new-window requests, addresses
+/// this private socket with `-S`.
 fn tmux_socket(dir: &Path) -> std::path::PathBuf {
-    use std::os::unix::fs::MetadataExt;
-    let uid = std::fs::metadata(dir).expect("tmux dir").uid();
-    dir.join(format!("tmux-{uid}")).join("default")
+    dir.join("server.sock")
 }
 
 /// Kills the test's private tmux server (by its socket, never the default one) even when an
@@ -712,7 +710,11 @@ impl Drop for PrivateTmux {
 
 #[tokio::test]
 async fn tmux_sessions_survive_reconnects_and_carry_the_environment() {
-    let probe = std::process::Command::new("tmux").arg("-V").output();
+    let probe = std::process::Command::new("tmux")
+        .arg("-V")
+        .env_remove("TMUX")
+        .env_remove("TMUX_PANE")
+        .output();
     if !probe.is_ok_and(|o| o.status.success()) {
         eprintln!("SKIP tmux_sessions_survive_reconnects_and_carry_the_environment: no tmux");
         return;
@@ -723,16 +725,14 @@ async fn tmux_sessions_survive_reconnects_and_carry_the_environment() {
     let env_dir = root.path().join("webterm");
     let state = state(root.path());
     let mut shell = sh();
-    // A private tmux server (the user's own is never touched) and an MRSM variable the
-    // shell must receive through the environment file even when the server already runs.
-    shell
-        .env
-        .push(("TMUX_TMPDIR".into(), tmux_dir.path().display().to_string()));
+    // An MRSM variable the shell must receive through the environment file even when the
+    // explicitly selected private tmux server already runs.
     shell
         .env
         .push(("MRSM_WEBTERM_TEST".into(), "it's=ok $HOME".into()));
     let tmux = TmuxSettings {
         binary: "tmux".into(),
+        socket: Some(tmux_socket(tmux_dir.path())),
         session_suffix: "_t".into(),
         env_dir: env_dir.clone(),
         // Never the developer's `~/.tmux.conf` (plugins, status line, extra sessions).

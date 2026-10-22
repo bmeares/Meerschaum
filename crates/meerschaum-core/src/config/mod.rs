@@ -60,7 +60,7 @@ pub const DEFAULT_CONFIG_JSON: &str = include_str!("default_config.json");
 pub const ROOT_DIR_MARKER: &str = "{__MRSM_ROOT_DIR__}";
 
 /// The marker substring replaced by this release's version, as the Python package writes it
-/// (PEP 440, `5.0.0rc7`), in [`DEFAULT_CONFIG_JSON`]: the stack's `api` image tag
+/// (PEP 440, `5.0.0rc8`), in [`DEFAULT_CONFIG_JSON`]: the stack's `api` image tag
 /// (`bmeares/meerschaum:{__MRSM_VERSION__}-full`), so a root without a `stack.yaml` always runs the
 /// API server of the version that wrote the compose file (`PARITY.md` W18PK-001).
 pub const VERSION_MARKER: &str = "{__MRSM_VERSION__}";

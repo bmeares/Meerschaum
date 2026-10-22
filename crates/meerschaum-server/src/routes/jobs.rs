@@ -5,16 +5,15 @@ use axum::Router;
 use axum::body::Body;
 use axum::extract::Path;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
+use axum::http::{HeaderMap, header};
 use axum::response::IntoResponse;
 use axum::routing::{get, post};
-use chrono::Utc;
 use meerschaum_core::{Map, SuccessTuple};
 use serde_json::{Value as Json, json};
 
 use super::{Ctx, body_bytes};
 use crate::auth::{
-    Principal, is_admin, is_user_allowed_to_execute, jwt_decode, load_from_subject, scoped_auth,
-    scoped_auth_with_aliases,
+    Principal, is_admin, is_user_allowed_to_execute, scoped_auth, scoped_auth_with_aliases,
 };
 use crate::backends::{CreateJob, LogEvent};
 use crate::config::ServerConfig;
@@ -324,7 +323,7 @@ async fn logs_websocket(
         .into_response()
 }
 
-/// The websocket protocol of `logs_websocket`: the first client message is a JWT; then the
+/// The websocket protocol of `logs_websocket`: the first client message is a JWT or API key; then the
 /// server streams log text, sends `MRSM_STDIN` when the job wants input (the next client
 /// message is forwarded), and `MRSM_STOP` followed by the JSON result when the job stops.
 async fn monitor_socket(state: AppState, name: String, mut socket: WebSocket) {
@@ -332,26 +331,23 @@ async fn monitor_socket(state: AppState, name: String, mut socket: WebSocket) {
         Some(Ok(Message::Text(t))) => t.to_string(),
         _ => return,
     };
-    if !state.config.no_auth {
-        let user = match jwt_decode(&token, state.secret(), Utc::now()) {
-            Ok(payload) => match payload.get("sub").and_then(Json::as_str) {
-                Some(sub) => load_from_subject(&state, sub).await,
-                None => None,
-            },
-            Err(_) => None,
-        };
-        let Some(principal) = user else {
-            let _ = socket
-                .send(Message::Text("Invalid credentials.".into()))
-                .await;
-            let _ = socket.send(Message::Close(None)).await;
-            return;
-        };
-        // An `execute-*` job's output is its creator's and the administrators'.
-        if !may_see(&state, Some(&principal), &name).await {
-            let _ = socket.send(Message::Close(None)).await;
+    let mut headers = HeaderMap::new();
+    if let Ok(value) = format!("Bearer {token}").parse() {
+        headers.insert(header::AUTHORIZATION, value);
+    }
+    // The websocket exposes the same logs as GET /logs/{name}, so it must enforce the
+    // same scopes. Reuse the HTTP authenticator to support API keys and JWTs alike.
+    let principal = match scoped_auth(&state, &headers, &["jobs:read", "logs:read"]).await {
+        Ok(principal) => principal,
+        Err(error) => {
+            socket_error(&mut socket, error).await;
             return;
         }
+    };
+    // An `execute-*` job's output is its creator's and the administrators'.
+    if !may_see(&state, principal.as_ref(), &name).await {
+        let _ = socket.send(Message::Close(None)).await;
+        return;
     }
     let Some(mut monitor) = state.jobs.monitor_logs(&name).await else {
         let _ = socket.send(Message::Close(None)).await;
@@ -392,6 +388,23 @@ async fn monitor_socket(state: AppState, name: String, mut socket: WebSocket) {
             },
             msg = socket.recv() => match msg {
                 Some(Ok(Message::Text(t))) => {
+                    // Reading a job's output must not grant control of its prompts. Check
+                    // the submitted credential again, including expiry and current API-key
+                    // scopes, before allowing input to change a running job's behavior.
+                    let principal = match scoped_auth(
+                        &state, &headers, &["actions:execute", "jobs:execute"],
+                    ).await {
+                        Ok(principal) => principal,
+                        Err(error) => {
+                            socket_error(&mut socket, error).await;
+                            return;
+                        }
+                    };
+                    let allowed = is_user_allowed_to_execute(&state, principal.as_ref()).await;
+                    if !allowed.success {
+                        socket_error(&mut socket, ApiError::new(403, allowed.message)).await;
+                        return;
+                    }
                     let _ = monitor.input.send(t.to_string()).await;
                 }
                 Some(Ok(Message::Close(_))) | None | Some(Err(_)) => return,
@@ -399,6 +412,20 @@ async fn monitor_socket(state: AppState, name: String, mut socket: WebSocket) {
             },
         }
     }
+}
+
+/// Keep the existing invalid-credentials handshake text; explain missing scopes to callers.
+async fn socket_error(socket: &mut WebSocket, error: ApiError) {
+    let message = if error.status == axum::http::StatusCode::FORBIDDEN {
+        error
+            .detail
+            .and_then(|detail| detail.as_str().map(String::from))
+    } else {
+        None
+    }
+    .unwrap_or_else(|| "Invalid credentials.".into());
+    let _ = socket.send(Message::Text(message.into())).await;
+    let _ = socket.send(Message::Close(None)).await;
 }
 
 #[cfg(test)]

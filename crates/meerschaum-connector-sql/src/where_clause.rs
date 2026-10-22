@@ -25,10 +25,22 @@ pub fn negation_prefix() -> &'static str {
 /// The words that make `build_where` give up (`utils/sql.py:1134`).
 const BAD_WORDS: [&str; 3] = ["drop ", "--", ";"];
 
+/// Quote a parameter value without depending on MySQL's session escape mode.
+/// Ordinary literals keep the v4 spelling; a backslash needs a hex literal because
+/// quote doubling alone can turn `\\'` into the end of a MySQL string literal.
+fn string_literal(value: &str, flavor: Flavor) -> String {
+    if matches!(flavor, Flavor::Mysql | Flavor::Mariadb) && value.contains('\\') {
+        // An introducer keeps literal collation coercibility (a CONVERT expression does not).
+        format!("_utf8mb4 X'{}'", hex::encode(value))
+    } else {
+        format!("'{}'", value.replace('\'', "''"))
+    }
+}
+
 /// Build the `WHERE` clause for `params` (`with_where` adds the leading `WHERE`).
 ///
-/// Returns an empty string (and logs a warning, as Python does) when the serialized params
-/// contain a banned word.
+/// Returns a false predicate (and logs a warning) when the serialized params contain a
+/// banned word. Rejecting a filter must never silently broaden a query.
 pub fn build_where(params: &IndexMap<String, Value>, flavor: Flavor, with_where: bool) -> String {
     build_where_with(params, flavor, with_where, WhereStyle::default())
 }
@@ -57,7 +69,12 @@ pub fn build_where_with(
     for word in BAD_WORDS {
         if params_json.contains(word) {
             tracing::warn!("Aborting build_where() due to possible SQL injection.");
-            return String::new();
+            return if with_where {
+                "\nWHERE\n    1 = 0"
+            } else {
+                "1 = 0"
+            }
+            .into();
         }
     }
 
@@ -108,7 +125,7 @@ pub fn build_where_with(
                     where_.push_str(&format!("{open}{key_name} IN ("));
                     let quoted: Vec<String> = not_null_includes
                         .iter()
-                        .map(|item| format!("'{}'", item.py_str().replace('\'', "''")))
+                        .map(|item| string_literal(&item.py_str(), flavor))
                         .collect();
                     where_.push_str(&quoted.join(", "));
                     where_.push(')');
@@ -132,7 +149,7 @@ pub fn build_where_with(
                     where_.push_str(&format!("{open}{key_name} NOT IN ("));
                     let quoted: Vec<String> = not_null_excludes
                         .iter()
-                        .map(|item| format!("'{}'", item.py_str().replace('\'', "''")))
+                        .map(|item| string_literal(&item.py_str(), flavor))
                         .collect();
                     where_.push_str(&quoted.join(", "));
                     where_.push(')');
@@ -151,8 +168,8 @@ pub fn build_where_with(
             // Search a dictionary.
             Value::Map(_) => {
                 where_.push_str(&format!(
-                    "{leading_and}CAST({key_name} AS TEXT) = '{}'",
-                    value.json_dumps()
+                    "{leading_and}CAST({key_name} AS TEXT) = {}",
+                    string_literal(&value.json_dumps(), flavor)
                 ));
             }
             _ => {
@@ -186,8 +203,8 @@ pub fn build_where_with(
                 match value {
                     None => where_.push_str(&format!("{leading_and}{key_name} {is_null}")),
                     Some(v) => where_.push_str(&format!(
-                        "{leading_and}{key_name} {eq_sign} '{}'",
-                        v.replace('\'', "''")
+                        "{leading_and}{key_name} {eq_sign} {}",
+                        string_literal(&v, flavor)
                     )),
                 }
             }
@@ -251,10 +268,86 @@ mod tests {
     }
 
     #[test]
-    fn injection() {
+    fn rejected_filters_match_no_rows() {
+        for value in [
+            "x; drop table y",
+            "ordinary;value",
+            "a -- comment",
+            "DROP table",
+        ] {
+            let params = IndexMap::from([("a".into(), Value::Str(value.into()))]);
+            assert_eq!(
+                build_where(&params, Flavor::Sqlite, true),
+                "\nWHERE\n    1 = 0"
+            );
+            assert_eq!(build_where(&params, Flavor::Sqlite, false), "1 = 0");
+        }
+    }
+
+    #[test]
+    fn json_values_escape_quotes() {
         assert_eq!(
-            build_where(&params(r#"{"a": "x; drop table y"}"#), Flavor::Sqlite, true),
-            ""
+            build_where(
+                &params(r#"{"payload": {"value": "O'Brien"}}"#),
+                Flavor::Sqlite,
+                false,
+            ),
+            "CAST(\"payload\" AS TEXT) = '{\"value\": \"O''Brien\"}'"
         );
+        assert_eq!(
+            build_where(
+                &params(r#"{"payload": {"value": "a' OR 1 = 1 OR 'b"}}"#),
+                Flavor::Postgresql,
+                false,
+            ),
+            "CAST(\"payload\" AS TEXT) = '{\"value\": \"a'' OR 1 = 1 OR ''b\"}'"
+        );
+    }
+
+    #[tokio::test]
+    async fn mysql_backslashes_remain_literal_in_every_filter_form() {
+        use sqlx::{Connection, Row};
+
+        for (flavor, variable) in [
+            (Flavor::Mysql, "MRSM_TEST_MYSQL_URI"),
+            (Flavor::Mariadb, "MRSM_TEST_MARIADB_URI"),
+        ] {
+            let Ok(uri) = std::env::var(variable) else {
+                continue;
+            };
+            let uri = uri.replacen("mariadb:", "mysql:", 1);
+            let mut connection = sqlx::MySqlConnection::connect(&uri).await.unwrap();
+            for mode in ["", "NO_BACKSLASH_ESCAPES"] {
+                sqlx::query("SET SESSION sql_mode = ?")
+                    .bind(mode)
+                    .execute(&mut connection)
+                    .await
+                    .unwrap();
+                for value in [r"C:\new\file", r"\' OR 1 = 1 #", "trailing\\", "é\\n"] {
+                    for (param, excluded) in [
+                        (Value::Str(value.into()), false),
+                        (Value::List(vec![Value::Str(value.into())]), false),
+                        (Value::Str(format!("_{value}")), true),
+                        (Value::List(vec![Value::Str(format!("_{value}"))]), true),
+                    ] {
+                        let predicate =
+                            build_where(&IndexMap::from([("value".into(), param)]), flavor, false);
+                        let sql = format!(
+                            "SELECT {predicate} AS matched FROM (SELECT ? AS value) fixture"
+                        );
+                        for (stored, equal) in [(value, true), ("other", false)] {
+                            // Exercise the generated predicate; the fixture value stays bound.
+                            let row = sqlx::query(sqlx::AssertSqlSafe(sql.as_str()))
+                                .bind(stored)
+                                .fetch_one(&mut connection)
+                                .await
+                                .unwrap();
+                            let matched: i64 = row.get("matched");
+                            assert_eq!(matched != 0, equal != excluded, "{mode}: {sql}");
+                        }
+                    }
+                }
+            }
+        }
     }
 }

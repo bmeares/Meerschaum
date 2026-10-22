@@ -496,6 +496,21 @@ async fn the_job_log_stream_serves_sse_to_a_bearer() {
     )
     .await;
     assert_eq!(r.status, StatusCode::FORBIDDEN, "{}", r.text());
+
+    // A credential may hold jobs:read while withholding logs:read, even for an admin.
+    let restricted = common::login(&app, "admin", "pass", Some("jobs:read")).await;
+    let r = send(
+        &app,
+        common::req(
+            "GET",
+            "/logs/execute-abc12345/stream",
+            Some(&restricted),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN, "{}", r.text());
+    assert!(r.text().contains("logs:read"), "{}", r.text());
 }
 
 #[tokio::test]

@@ -151,6 +151,22 @@ async fn scopes_and_api_keys() {
     let r = send(&app, req("GET", "/pipes/keys", Some(&key), None)).await;
     assert_eq!(r.status, StatusCode::UNAUTHORIZED);
     assert_eq!(r.json()["detail"], "Invalid or revoked token.");
+    let r = send(&app, req("POST", "/login", Some(&basic), None)).await;
+    assert_eq!(
+        r.status,
+        StatusCode::UNAUTHORIZED,
+        "revoked keys cannot mint JWTs"
+    );
+    let r = send(
+        &app,
+        req("GET", "/pipes/keys", Some(&format!("Bearer {jwt}")), None),
+    )
+    .await;
+    assert_eq!(
+        r.status,
+        StatusCode::UNAUTHORIZED,
+        "revocation also ends existing JWT access"
+    );
 
     let r = send(
         &app,
@@ -163,6 +179,65 @@ async fn scopes_and_api_keys() {
         "json.dumps style: {}",
         r.text()
     );
+}
+
+#[tokio::test]
+async fn expired_api_tokens_cannot_log_in_or_use_existing_jwts() {
+    let (app, _dir) = default_app();
+    let admin = login(&app, "admin", "pass", None).await;
+    let (key, token) = register_token_with(&app, &admin, "expiring", r#"["pipes:read"]"#).await;
+    let r = send(&app, req("POST", "/login", Some(&key), None)).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+    let jwt = format!("Bearer {}", r.json()["access_token"].as_str().unwrap());
+    let id = token["id"].as_str().unwrap();
+    let model = send(
+        &app,
+        req("GET", &format!("/tokens/{id}"), Some(&admin), None),
+    )
+    .await
+    .json();
+    // Move the backing token's expiry into the past after issuing a JWT. This exercises
+    // expiry independently of the JWT's own exp and without relying on wall-clock sleeps.
+    let r = send(
+        &app,
+        req(
+            "POST",
+            &format!("/tokens/{id}/edit"),
+            Some(&admin),
+            Some((
+                "application/json",
+                json!({
+                "creation": model["creation"],
+                    "expiration": "2000-01-01T00:00:00Z",
+                    "label": "expiring",
+                })
+                .to_string()
+                .into_bytes(),
+            )),
+        ),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+    assert_eq!(r.json()[0], true, "{}", r.text());
+    let r = send(&app, req("GET", "/pipes/keys", Some(&jwt), None)).await;
+    assert_eq!(r.status, StatusCode::UNAUTHORIZED);
+    let r = send(&app, req("POST", "/login", Some(&key), None)).await;
+    assert_eq!(r.status, StatusCode::UNAUTHORIZED, "{}", r.text());
+}
+
+#[tokio::test]
+async fn deleting_a_user_ends_existing_jwt_access_even_after_repeated_requests() {
+    let (app, _instance, _dir) = jobs_scope_app();
+    let admin = login(&app, "admin", "pass", None).await;
+    let eve = login(&app, "eve", "pass", None).await;
+    for _ in 0..2 {
+        let r = send(&app, req("GET", "/pipes/keys", Some(&eve), None)).await;
+        assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+    }
+    let r = send(&app, req("DELETE", "/users/eve", Some(&admin), None)).await;
+    assert_eq!(r.json()[0], true, "{}", r.text());
+    let r = send(&app, req("GET", "/pipes/keys", Some(&eve), None)).await;
+    assert_eq!(r.status, StatusCode::UNAUTHORIZED, "{}", r.text());
 }
 
 #[tokio::test]
@@ -743,6 +818,89 @@ async fn jobs_backend_and_logs_websocket() {
     ws.send(Message::Text("not a jwt".into())).await.unwrap();
     let first = ws.next().await.unwrap().unwrap();
     assert_eq!(first, Message::Text("Invalid credentials.".into()));
+}
+
+#[tokio::test]
+async fn logs_websocket_requires_read_scopes_and_separate_execution_scopes_for_input() {
+    use tokio_tungstenite::tungstenite::Message;
+
+    let (app, _instance, _dir) = jobs_scope_app();
+    let admin = login(&app, "admin", "pass", None).await;
+    let reader = login(&app, "eve", "pass", Some("jobs:read logs:read")).await;
+    let missing_logs = login(&app, "eve", "pass", Some("jobs:read")).await;
+    let missing_jobs = login(&app, "eve", "pass", Some("logs:read")).await;
+    let read_key =
+        register_token_with(&app, &admin, "logs-reader", r#"["jobs:read", "logs:read"]"#)
+            .await
+            .0;
+    let execute_key = register_token_with(
+        &app,
+        &admin,
+        "logs-operator",
+        r#"["jobs:read", "logs:read", "actions:execute", "jobs:execute"]"#,
+    )
+    .await
+    .0;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+    for (credentials, expected) in [
+        (&missing_logs, "Missing required scope: 'logs:read'"),
+        (&missing_jobs, "Missing required scope: 'jobs:read'"),
+    ] {
+        let (mut ws, _) = tokio_tungstenite::connect_async(format!("ws://{addr}/logs/j/ws"))
+            .await
+            .unwrap();
+        ws.send(Message::Text(
+            credentials.trim_start_matches("Bearer ").into(),
+        ))
+        .await
+        .unwrap();
+        let first = tokio::time::timeout(Duration::from_secs(5), ws.next())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert_eq!(first, Message::Text(expected.into()));
+        assert!(matches!(ws.next().await, Some(Ok(Message::Close(_)))));
+    }
+
+    // Both JWTs and API keys may follow logs with only the read scopes, but cannot answer
+    // a prompt. An operator key holding execution scopes may still interact normally.
+    for (credentials, may_answer) in [(&reader, false), (&read_key, false), (&execute_key, true)] {
+        let (mut ws, _) = tokio_tungstenite::connect_async(format!("ws://{addr}/logs/j/ws"))
+            .await
+            .unwrap();
+        ws.send(Message::Text(
+            credentials.trim_start_matches("Bearer ").into(),
+        ))
+        .await
+        .unwrap();
+        let next = tokio::time::timeout(Duration::from_secs(5), ws.next())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert_eq!(next, Message::Text("line 1\n".into()));
+        assert_eq!(
+            ws.next().await.unwrap().unwrap(),
+            Message::Text("MRSM_STDIN".into())
+        );
+        ws.send(Message::Text("yes".into())).await.unwrap();
+        let next = tokio::time::timeout(Duration::from_secs(5), ws.next())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        let expected = if may_answer {
+            "got yes\n"
+        } else {
+            "Missing required scope: 'actions:execute'"
+        };
+        assert_eq!(next, Message::Text(expected.into()));
+    }
+    server.abort();
 }
 
 #[tokio::test]

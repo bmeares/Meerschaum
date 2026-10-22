@@ -4,6 +4,29 @@
 
 Meerschaum 5 is a rewrite of the core in Rust: the data kernel, the `sql:` / `valkey:` / `api:` connectors, the Syncing Engine, jobs, compose, the HTTP API, the MCP server and the `mrsm` CLI and shell. The `meerschaum` Python package stays as the plugin SDK, a façade and the host of the Plotly Dash web console, so pipes, parameters, configuration, compose files, jobs, the HTTP API and the Python public API keep working. Read the [migration guide](/reference/migrating-to-v5/) before upgrading; v4.1.x stays installable and receives security fixes until 5.1.0.
 
+### v5.0.0rc8
+
+- **Keep SQL filter values literal.**
+  JSON values containing apostrophes and MySQL/MariaDB values containing backslashes stay within their filter expression. Reading and counting with a column or value containing `WHERE` preserves that text instead of rewriting it as SQL syntax. Rejected filters match no rows instead of dropping the restriction or producing invalid SQL.
+
+- **Keep MySQL index metadata within its database.**
+  MySQL and MariaDB index discovery uses the active database. An identically named table in another database no longer prevents required indexes from being created or causes duplicate engine progress rows.
+
+- **Honor token revocation and log permissions.**
+  Revoked or expired API tokens cannot obtain access tokens, and their existing JWTs are rejected by both the native server and Python plugin host. Deleted users lose access immediately. Job-log websockets and event streams require the same read scopes as ordinary log requests; sending job input also requires execution permission.
+
+- **Report invalid timer values before running actions.**
+  Infinite, NaN, and out-of-range timeout or loop intervals return an actionable error before changing jobs or starting an action.
+
+- **Explain failed source fetches.**
+  Sync failures include the source connector's error after the existing failure message, so native plugin configuration errors and unavailable sources remain visible in embedded CLI and Python calls.
+
+- **Preserve optional authentication in plugin routes.**
+  Optional user authentication returns no user for missing or invalid credentials, and user-disallowed routes return an authentication error instead of an internal exception.
+
+- **Clarify native plugin migration.**
+  The Rust plugin guide explains which host operations require an explicit replacement and how to compare a port with its Python implementation through isolated, repeated syncs. The upgrade guide covers plugin requirements after changing Python versions and database isolation during upgrade testing.
+
 ### v5.0.0rc7
 
 - **Make the Pipeline canvas the main workspace.**  

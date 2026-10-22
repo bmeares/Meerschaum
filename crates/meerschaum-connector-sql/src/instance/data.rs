@@ -597,8 +597,11 @@ impl SqlConnector {
                     sqlite_no_index_on_lists: is_dt_bound,
                 };
                 let w = crate::where_clause::build_where_with(&valid, flavor, true, style);
-                let w = meerschaum_core::pyfmt::py_lstrip(&w)
-                    .replace("WHERE", if is_dt_bound { "    AND" } else { "    " });
+                let w = meerschaum_core::pyfmt::py_lstrip(&w).replacen(
+                    "WHERE",
+                    if is_dt_bound { "    AND" } else { "    " },
+                    1,
+                );
                 where_.push_str("    ");
                 where_.push_str(&w);
             }
@@ -1231,13 +1234,14 @@ impl SqlConnector {
                 .map(|(k, v)| (k.clone(), v.clone()))
                 .collect();
             if !valid.is_empty() {
-                let w = build_where(&valid, flavor, true).replace(
+                let w = build_where(&valid, flavor, true).replacen(
                     "WHERE",
                     if begin.is_some() || end.is_some() {
                         "AND"
                     } else {
                         "WHERE"
                     },
+                    1,
                 );
                 sql.push_str(&w);
             }

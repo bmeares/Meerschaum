@@ -26,6 +26,12 @@ static frame is intentionally only a small demonstration, not a general instance
 The SDK imposes no async runtime. Native calls are synchronous; async applications should
 schedule potentially blocking calls on their blocking executor.
 
+`Request` contains JSON values, not live host objects. The ABI has no callbacks for reading
+another Pipe, obtaining its sync time, resolving a host connector, or calling a Python
+plugin helper. Ports that need those operations must supply their own connector access or
+keep that orchestration in Python or declarative SQL Pipes. A `required` dependency does
+not expose Python functions to native code.
+
 Build the example with `cargo build -p meerschaum-plugin --example native_demo`. Install the
 result in a configured plugin directory:
 

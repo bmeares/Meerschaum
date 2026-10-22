@@ -1583,3 +1583,48 @@ Pipe's SQL referenced its own table. Nested target/schema reads now use a contex
 parameter snapshot instead of re-entering the Rust resolver. Resolution stays in Rust and
 raw SQL is preserved; the native depth-limit warning behavior remains unchanged. The console
 availability probe no longer requires PyYAML, because v5's YAML codec is native.
+
+## SQL parameter review (2026-10-22)
+
+SQL filters escape apostrophes inside dictionary/JSON values as they already do for scalar
+and list values. MySQL/MariaDB filter values containing backslashes use UTF-8 hex literals
+so their interpretation is independent of `NO_BACKSLASH_ESCAPES`. These deliberately fix
+unsafe literal interpolation inherited from v4: values must never change the predicate.
+Joining a generated filter to datetime bounds replaces only its leading `WHERE` keyword,
+preserving that word inside quoted identifiers and values. Existing golden query output is
+unchanged for ordinary values. Regression coverage: `tests/test_sql_param_literals.py` and
+the SQL crate's `where_clause` / `instance_golden` tests.
+
+Rejected filters containing `;`, `--`, or `drop ` now produce an explicit false predicate.
+The v4 empty-string result could silently omit the restriction from a row count or produce
+invalid SQL in reads and clears. Rejection must match no rows. The exact rejected-input
+golden cases assert this deliberate safety correction; their v4 recordings remain intact.
+
+**Preserved v4 null-marker caveat:** a string ID whose literal value is `'None'` is ambiguous
+with the public null-filter grammar. With `columns: {id: id}`, `dtypes: {id: str}`, syncing
+`[{id: 'None', value: 1}]` once stores the literal string; the second identical sync adds a
+SQL NULL ID; the third sync adds nothing. Released v4.1.4, Python v5, and native-plugin v5
+reproduce the same result. This review preserves those null-marker semantics; use actual
+nulls for missing IDs or explicit non-null identifiers instead of stringifying missing
+values. `test_null_marker_identifiers_preserve_v4_sync_behavior` records the synthetic case.
+
+## Fetch diagnostics review (2026-10-22)
+
+The engine retains source errors in the failed sync result after its existing
+`No data were fetched for ...` prefix, including failures while determining the fetch bounds,
+starting a chunked fetch, and fetching a frame. This deliberately improves v4's generic
+returned message: an embedded CLI or Python caller may not receive the tracing warning that
+explains an invalid API key or unavailable source. The source connector and original error
+are returned as the worker path already does. A source returning no data without an error
+keeps the original message. Synthetic regression: `meerschaum-engine/tests/fetch_errors.rs`.
+
+## MySQL index discovery review (2026-10-22)
+
+Runtime MySQL/MariaDB index discovery restricts the catalog to the selected database, or
+the explicitly supplied schema. The v4 query and row-conversion fixtures remain unchanged,
+but runtime discovery deliberately stops borrowing indexes from same-named tables in other
+databases. An unindexed engine state table previously appeared to have another database's
+unique key, so progress updates appended duplicate rows. The filter runs in SQL before the
+legacy empty-result fallback; explicit database names are bound parameters. Regression:
+`meerschaum-connector-sql/tests/index_database_scope.rs` (two disposable databases) and
+`meerschaum-engine/tests/internal_schema.rs::mysql_latin1_database_keeps_unicode_state`.

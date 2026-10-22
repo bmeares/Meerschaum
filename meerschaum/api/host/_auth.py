@@ -13,54 +13,36 @@ not serve, so the host installs the same loader here.
 
 from __future__ import annotations
 
-import uuid
+from datetime import datetime, timezone
 
 from meerschaum.utils.typing import Any, Dict, Optional, Union
 
-_active_user_ids: Dict[str, Any] = {}
 _installed = {'loader': False}
 
 
 def load_user_or_token_from_manager(username_or_token_id: str):
     """
-    The manager's user loader (`routes/_login.py`): a `Token` for a UUID subject, else a `User`
-    with its ID from the cache or the instance.
+    Resolve the JWT's current principal, rejecting deleted users and invalid tokens.
     """
-    import meerschaum as mrsm
     from meerschaum.core import User
-    from meerschaum.api import get_api_connector, get_cache_connector
-    from meerschaum.utils.misc import is_uuid, is_int
+    from meerschaum.api import get_api_connector
+    from meerschaum.utils.misc import is_uuid
 
-    cache_conn = get_cache_connector()
     api_conn = get_api_connector()
 
     if is_uuid(username_or_token_id):
-        return api_conn.get_token(username_or_token_id)
+        token = api_conn.get_token(username_or_token_id)
+        if token is None or not token.is_valid:
+            return None
+        if token.expiration is not None and token.expiration <= datetime.now(timezone.utc):
+            return None
+        return token
 
-    username = username_or_token_id
-    cached_user_id = (
-        _active_user_ids.get(username)
-        if cache_conn is None
-        else cache_conn.get(f'mrsm:users:{username}:id')
-    )
-    if isinstance(cached_user_id, str):
-        if is_int(cached_user_id):
-            cached_user_id = int(cached_user_id)
-        elif is_uuid(cached_user_id):
-            cached_user_id = uuid.UUID(cached_user_id)
-
-    user = User(username, instance=api_conn, user_id=cached_user_id)
-    if cached_user_id is not None:
-        return user
-
+    user = User(username_or_token_id, instance=api_conn)
     user_id = api_conn.get_user_id(user)
-    if user_id is not None:
-        user._user_id = user_id
-        expires_seconds = mrsm.get_config('api', 'cache', 'session_expires_minutes') * 60
-        if cache_conn is not None:
-            cache_conn.set(f'mrsm:users:{username}:id', str(user_id), ex=expires_seconds)
-        else:
-            _active_user_ids[username] = user_id
+    if user_id is None:
+        return None
+    user._user_id = user_id
     return user
 
 

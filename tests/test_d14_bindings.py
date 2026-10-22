@@ -4,7 +4,7 @@ D14 runway parity (wave 8): the Rust implementations of the formerly Python-core
 Each test runs a call in Rust and compares the result with what the parity-phase Python mode
 returned (`tests/oracle/test_d14_bindings.json`: a recording of that mode, not v4.1.4 output, see
 `tests/_oracle.py`). The SQL text of `sql_item_name`, `build_where` and
-`get_pipe_metadef` must match v4 exactly, per flavor.
+`get_pipe_metadef` match v4 per flavor, except the documented rejected-filter safety fix.
 """
 
 import builtins
@@ -97,6 +97,12 @@ def test_build_where_matches_python(flavor, with_where):
     expected, actual = both(render)
     assert len(actual) == len(expected) == len(PARAMS)
     for params, want, got in zip(PARAMS, expected, actual):
+        if params in ({'a': 'DROP TABLE x'}, {'a': 'x;y'}, {'a': '--x'}):
+            # Intentional safety correction: these exact v4 cases dropped the filter.
+            # Keep the oracle recording intact and require a predicate matching no rows.
+            assert want == '', (flavor, params, want)
+            assert got == ('\nWHERE\n    1 = 0' if with_where else '1 = 0')
+            continue
         assert got == want, (flavor, params)
 
 
@@ -114,7 +120,7 @@ def test_build_where_injection_warns():
     import warnings
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter('always')
-        assert build_where({'a': 'x; drop table y'}) == ''
+        assert build_where({'a': 'x; drop table y'}) == '\nWHERE\n    1 = 0'
     assert any('SQL injection' in str(w.message) for w in caught)
 
 

@@ -91,7 +91,6 @@ pub struct Inner {
     pub rate_limiter: RateLimiter,
     /// Serialize worker expiration and promotion.
     pub(crate) execution_maintenance: tokio::sync::Mutex<()>,
-    user_ids: Mutex<HashMap<String, Value>>,
     pipes: tokio::sync::Mutex<HashMap<String, Arc<PipesDict>>>,
     instances: Mutex<HashMap<String, Arc<dyn InstanceConnector>>>,
 }
@@ -165,7 +164,6 @@ impl AppStateBuilder {
             host: self.host,
             rate_limiter,
             execution_maintenance: tokio::sync::Mutex::new(()),
-            user_ids: Mutex::new(HashMap::new()),
             pipes: tokio::sync::Mutex::new(HashMap::new()),
             instances: Mutex::new(HashMap::new()),
         })))
@@ -209,23 +207,6 @@ impl AppState {
     /// The JWT secret.
     pub fn secret(&self) -> &[u8] {
         &self.0.secret
-    }
-
-    /// The process-lifetime username → user ID cache of the user loader.
-    pub fn cached_user_id(&self, username: &str) -> Option<Value> {
-        self.user_ids
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .get(username)
-            .cloned()
-    }
-
-    /// Remember a user ID.
-    pub fn cache_user_id(&self, username: &str, user_id: Value) {
-        self.user_ids
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .insert(username.to_string(), user_id);
     }
 
     /// `get_api_connector(instance_keys)`.

@@ -112,7 +112,7 @@ PyPI wheel, not on crates.io) is published, in lockstep at the workspace version
   `full`, `oracle`; DuckDB is part of `sql`: its library is loaded at run time). It holds no logic; its `lib.rs` says which items are semver-stable.
   Every other `meerschaum-*` crate is internal and says so in its `lib.rs` and README (`meerschaum-plugin`,
   the native plugin SDK, is the one other public crate).
-- **Versions.** Cargo `5.0.0-rc.7` <-> PEP 440 `5.0.0rc7` (use the dot form: Cargo sorts `rc.10` after
+- **Versions.** Cargo `5.0.0-rc.8` <-> PEP 440 `5.0.0rc8` (use the dot form: Cargo sorts `rc.10` after
   `rc.2` but `rc10` before `rc2`). Internal dependencies are `version = "=<ver>"` plus `path` in the root
   `[workspace.dependencies]`; `scripts/check_packaging.py` checks the lockstep and the publish metadata.
 - **Package contents** are an explicit `include` per crate (`src/**`, the assets the crate embeds with
@@ -147,7 +147,7 @@ PyPI wheel, not on crates.io) is published, in lockstep at the workspace version
   them and `cargo publish` verifies the dev-dependencies. Recompute with `cargo metadata --no-deps` if a dependency changes.
 - **Installing.** `cargo install meerschaum --locked` (Rust 1.95 or newer, the workspace `rust-version`): without `--locked`
   Cargo may resolve newer dependencies than the tested ones (on Windows a newer `aws-lc-sys` than our
-  prebuilt-NASM pin). A pre-release is ignored unless `--version 5.0.0-rc.7` is given.
+  prebuilt-NASM pin). A pre-release is ignored unless `--version 5.0.0-rc.8` is given.
   The full release procedure (PyPI, crates.io, tag, GitHub release, Docker) is
   `.agents/skills/release/SKILL.md`, section "Meerschaum 5.x".
   sqlx 0.9.0 no longer sets `TCP_NODELAY` (upstream #4335, fixed by #4336) and has no API to set it, so

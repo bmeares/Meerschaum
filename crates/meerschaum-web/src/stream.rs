@@ -124,10 +124,11 @@ pub(crate) async fn logs(
             Err(status) => return status.into_response(),
         }
     };
-    let principal = match auth::scoped_auth(&state.server, &auth_headers, &["jobs:read"]).await {
-        Ok(principal) => principal,
-        Err(e) => return e.into_response(),
-    };
+    let principal =
+        match auth::scoped_auth(&state.server, &auth_headers, &["jobs:read", "logs:read"]).await {
+            Ok(principal) => principal,
+            Err(e) => return e.into_response(),
+        };
     // The rule of running the action from the console (`POST /execute`, one shared function):
     // administrators, and other users only when `api:permissions:actions:non_admin` allows them,
     // so a user who could not have started a job cannot read its output.

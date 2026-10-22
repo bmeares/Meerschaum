@@ -324,7 +324,7 @@ The wheel contains the native core and has no required Python dependencies. Whee
     `pip install meerschaum` is the whole product: the `mrsm` command it installs runs the native command line from inside the package. If you would rather have a standalone binary (it starts in about 10 ms and needs no Python until you use a Python plugin or connector), build the same command line with Cargo:
 
     ```bash
-    cargo install meerschaum --locked            # during the release candidates: --version 5.0.0-rc.7
+    cargo install meerschaum --locked            # during the release candidates: --version 5.0.0-rc.8
     ```
 
     This needs Rust 1.95 or newer. `--locked` builds with the dependency versions Meerschaum was tested with (without it Cargo may pick newer ones, which can break the build on Windows). Prebuilt standalone binaries (Linux x86_64 and arm64, macOS arm64 and x86_64, Windows x86_64) are attached to each GitHub release, with a SHA-256 file for each.
@@ -9594,6 +9594,22 @@ Use the native fetch example below as the starting implementation for `acme_data
 and sync that Pipe before opening the page. Moving the fetch implementation does not require
 rewriting the page or changing its session handling.
 
+For a fetch plugin, first list the operations it performs on its Python `pipe` argument.
+The native `Request` carries JSON snapshots of the Pipe's keys and parameters, plus the
+requested bounds; it does not carry a live Python Pipe or callbacks into the host.
+Calls such as `pipe.get_sync_time()`, `pipe.instance_connector.read()`, and importing a
+helper from another Python plugin therefore need an explicit replacement. A self-contained
+HTTP source or transformation can use the supplied parameters and bounds directly. Keep
+database orchestration in Python or declarative SQL Pipes until its Rust implementation
+provides the required connector access; listing a Python plugin in `required` does not
+make its functions callable from Rust.
+
+Validate a port under a separate plugin name and scratch root before changing existing
+Pipe connector keys. Compare its rows, nulls, dtypes, bound handling, empty responses, and
+errors with the Python implementation using recorded or synthetic inputs. Then sync the
+native plugin through `mrsm` into a disposable instance to check discovery, the Arrow
+boundary, and repeated-sync behavior together.
+
 The current native HTTP adapter accepts static paths outside reserved core namespaces. Do not
 assume it reproduces parameterized FastAPI routes, full scoped-principal context, custom
 request/response headers and cookies, redirects, or arbitrary binary responses. Audit those
@@ -9615,7 +9631,7 @@ edition = "2024"
 crate-type = ["cdylib"]
 
 [dependencies]
-meerschaum-plugin = "=5.0.0-rc.7"   # prerelease versions require an exact prerelease requirement
+meerschaum-plugin = "=5.0.0-rc.8"   # prerelease versions require an exact prerelease requirement
 
 [profile.release]
 panic = "unwind"      # required: the SDK catches panics at the boundary
@@ -10958,6 +10974,14 @@ In v5 the `mrsm` venv starts out holding only the extras you installed. To keep 
 
 4. **Pin what matters.** With `dash`, `pandas` and friends no longer pinned by Meerschaum, add lower bounds in `required` for anything your plugin is sensitive to.
 
+5. **Reinstall requirements when changing Python versions.** A plugin venv's packages belong
+   to its Python minor version. Upgrading Python 3.13 to 3.14 creates a separate package
+   directory; packages installed for 3.13 are not automatically available to 3.14. Run
+   `mrsm install required <plugin>` with the new interpreter before resuming its Pipes or
+   Jobs. Reinstall the shared extras you use with that interpreter as well. `mrsm doctor`
+   reports stale plugin environments. Keep the Python version fixed when testing the
+   Meerschaum upgrade alone.
+
 - **`MRSM_NO_AUTO_INSTALL=1` now disables every implicit install**, including the dependency prechecks that v4 ran anyway (v4 still downloaded `semver` for the version check even with the variable set, and the API imported `uv` at startup). `attempt_import`, `is_installed`, the version checks, the `uv`/`pip`/`wheel` bootstraps and the API host install nothing; when no version parser is available the check compares versions natively and, failing that, assumes the requirement is met. Installs you ask for (`pip_install(...)` from your own code, `mrsm install packages`, `install required`) still run. `uv` is only used if it is already on `PATH`.
 
 - **MCP tools** registered with `meerschaum.mcp.tool(...)` / `resource(...)` keep working. The Rust MCP server lists them alongside the built-in tools and forwards calls to your plugin with the caller's scopes. `get_tools`, `get_resources` and `meerschaum.mcp._registry.get_tools` stay for duplicate-registration guards.
@@ -11188,7 +11212,7 @@ A plugin directory may contain both a Rust library and a Python module; the Rust
 
 ## 🧪 How to upgrade safely
 
-1. **Try v5 in a copy.** `MRSM_ROOT_DIR=/tmp/v5-root mrsm ...` against the same instance. v5 writes no new files into an instance until an engine run happens, and engine state lives in internal `mrsm_engine_*` tables under `_mrsm_internal` (on PostgreSQL and MSSQL; on MySQL, MariaDB, SQLite, DuckDB and Oracle beside your instance tables).
+1. **Try v5 with copied configuration and a disposable instance.** Create a scratch root, for example `mkdir -p ~/.cache/mrsm-v5-review`, and set `MRSM_ROOT_DIR` and `MRSM_PLUGINS_DIR` explicitly. Point copied connectors at a test database or a restored copy of your data before syncing. A separate root alone does not isolate database writes. Engine runs add internal `mrsm_engine_*` tables under `_mrsm_internal` (on PostgreSQL and MSSQL; on MySQL, MariaDB, SQLite, DuckDB and Oracle beside your instance tables).
 2. **Lint your compose files:** `mrsm compose explain` now warns about unresolved `{{ Pipe() }}` references, `dtype:` typos (for `dtypes:`) and string-typed `tags`. It never changes behavior.
 3. **Dry-run the engine:** `mrsm plan pipes -t <tag>` prints what an engine run would do without moving data.
 4. **Import every plugin:** `mrsm show plugins` on v5 imports each plugin and reports `ImportError`s from removed internals, with the replacement named in the message.
@@ -11621,6 +11645,29 @@ Source: https://meerschaum.io/news/changelog/
 ## 5.0.0 Releases
 
 Meerschaum 5 is a rewrite of the core in Rust: the data kernel, the `sql:` / `valkey:` / `api:` connectors, the Syncing Engine, jobs, compose, the HTTP API, the MCP server and the `mrsm` CLI and shell. The `meerschaum` Python package stays as the plugin SDK, a façade and the host of the Plotly Dash web console, so pipes, parameters, configuration, compose files, jobs, the HTTP API and the Python public API keep working. Read the [migration guide](/reference/migrating-to-v5/) before upgrading; v4.1.x stays installable and receives security fixes until 5.1.0.
+
+### v5.0.0rc8
+
+- **Keep SQL filter values literal.**
+  JSON values containing apostrophes and MySQL/MariaDB values containing backslashes stay within their filter expression. Reading and counting with a column or value containing `WHERE` preserves that text instead of rewriting it as SQL syntax. Rejected filters match no rows instead of dropping the restriction or producing invalid SQL.
+
+- **Keep MySQL index metadata within its database.**
+  MySQL and MariaDB index discovery uses the active database. An identically named table in another database no longer prevents required indexes from being created or causes duplicate engine progress rows.
+
+- **Honor token revocation and log permissions.**
+  Revoked or expired API tokens cannot obtain access tokens, and their existing JWTs are rejected by both the native server and Python plugin host. Deleted users lose access immediately. Job-log websockets and event streams require the same read scopes as ordinary log requests; sending job input also requires execution permission.
+
+- **Report invalid timer values before running actions.**
+  Infinite, NaN, and out-of-range timeout or loop intervals return an actionable error before changing jobs or starting an action.
+
+- **Explain failed source fetches.**
+  Sync failures include the source connector's error after the existing failure message, so native plugin configuration errors and unavailable sources remain visible in embedded CLI and Python calls.
+
+- **Preserve optional authentication in plugin routes.**
+  Optional user authentication returns no user for missing or invalid credentials, and user-disallowed routes return an authentication error instead of an internal exception.
+
+- **Clarify native plugin migration.**
+  The Rust plugin guide explains which host operations require an explicit replacement and how to compare a port with its Python implementation through isolated, repeated syncs. The upgrade guide covers plugin requirements after changing Python versions and database isolation during upgrade testing.
 
 ### v5.0.0rc7
 

@@ -1014,6 +1014,27 @@ fn run_action(
     rt: &mut Runtime<'_>,
     depth: usize,
 ) -> SuccessTuple {
+    // Python's float parser accepts NaN, infinity and values too large for a native timer.
+    // Keep that parser contract, but fail before performing an action rather than panic in
+    // Duration::from_secs_f64 (or Instant addition) after a job has already been changed.
+    if resolved.function_name() != "_show_arguments" {
+        for key in ["min_seconds", "timeout_seconds"] {
+            let Some(seconds) = native::float(args, key) else {
+                continue;
+            };
+            let valid = seconds.is_finite()
+                && std::time::Duration::try_from_secs_f64(seconds.max(0.0))
+                    .ok()
+                    .and_then(|duration| Instant::now().checked_add(duration))
+                    .is_some();
+            if !valid {
+                return SuccessTuple::fail(format!(
+                    "Invalid value for --{}: use a finite number of seconds within the supported timer range.",
+                    key.replace('_', "-")
+                ));
+            }
+        }
+    }
     native::drivers::register_install_reporter(args, rt);
     let result: ActionResult = match resolved.function_name() {
         "_start_pipeline" => run_pipeline(args, rt, depth),

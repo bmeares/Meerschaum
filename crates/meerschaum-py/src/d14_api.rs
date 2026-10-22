@@ -72,8 +72,9 @@ pub fn build_where(
     if ["drop ", "--", ";"].iter().any(|w| dumped.contains(w)) {
         let warn = py.import("meerschaum.utils.warnings")?.getattr("warn")?;
         warn.call1(("Aborting build_where() due to possible SQL injection.",))?;
-        return Ok(String::new());
     }
+    // The shared builder returns a false predicate for rejected filters; keep its safety
+    // behavior for this public helper as well as the Pipe methods.
     // PARITY: an unknown flavor key falls back to the `default` quoting like Python does.
     let flavor = flavor_opt(flavor).unwrap_or(Flavor::Postgresql);
     Ok(meerschaum_connector_sql::where_clause::build_where(

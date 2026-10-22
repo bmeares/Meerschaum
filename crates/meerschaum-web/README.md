@@ -28,7 +28,7 @@ parent page for the touch key row.
 ## The job-log stream
 
 `GET /logs/{name}/stream` follows a job's log over Server-Sent Events. It authenticates by bearer
-token (`jobs:read`) or, for the browser's `EventSource`, by the session cookie (the user's own scopes
+token (`jobs:read` and `logs:read`) or, for the browser's `EventSource`, by the session cookie (the user's own scopes
 apply, a session of a user that no longer exists is refused with a 401, never a redirect). One `data:`
 event per log chunk, `event: stdin` when the job waits for input, `event: stopped` with the final
 message, then the stream ends. Jobs come from `POST /execute` (`meerschaum-server`): the Dash

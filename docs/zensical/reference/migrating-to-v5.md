@@ -287,6 +287,14 @@ In v5 the `mrsm` venv starts out holding only the extras you installed. To keep 
 
 4. **Pin what matters.** With `dash`, `pandas` and friends no longer pinned by Meerschaum, add lower bounds in `required` for anything your plugin is sensitive to.
 
+5. **Reinstall requirements when changing Python versions.** A plugin venv's packages belong
+   to its Python minor version. Upgrading Python 3.13 to 3.14 creates a separate package
+   directory; packages installed for 3.13 are not automatically available to 3.14. Run
+   `mrsm install required <plugin>` with the new interpreter before resuming its Pipes or
+   Jobs. Reinstall the shared extras you use with that interpreter as well. `mrsm doctor`
+   reports stale plugin environments. Keep the Python version fixed when testing the
+   Meerschaum upgrade alone.
+
 - **`MRSM_NO_AUTO_INSTALL=1` now disables every implicit install**, including the dependency prechecks that v4 ran anyway (v4 still downloaded `semver` for the version check even with the variable set, and the API imported `uv` at startup). `attempt_import`, `is_installed`, the version checks, the `uv`/`pip`/`wheel` bootstraps and the API host install nothing; when no version parser is available the check compares versions natively and, failing that, assumes the requirement is met. Installs you ask for (`pip_install(...)` from your own code, `mrsm install packages`, `install required`) still run. `uv` is only used if it is already on `PATH`.
 
 - **MCP tools** registered with `meerschaum.mcp.tool(...)` / `resource(...)` keep working. The Rust MCP server lists them alongside the built-in tools and forwards calls to your plugin with the caller's scopes. `get_tools`, `get_resources` and `meerschaum.mcp._registry.get_tools` stay for duplicate-registration guards.
@@ -517,7 +525,7 @@ A plugin directory may contain both a Rust library and a Python module; the Rust
 
 ## 🧪 How to upgrade safely
 
-1. **Try v5 in a copy.** `MRSM_ROOT_DIR=/tmp/v5-root mrsm ...` against the same instance. v5 writes no new files into an instance until an engine run happens, and engine state lives in internal `mrsm_engine_*` tables under `_mrsm_internal` (on PostgreSQL and MSSQL; on MySQL, MariaDB, SQLite, DuckDB and Oracle beside your instance tables).
+1. **Try v5 with copied configuration and a disposable instance.** Create a scratch root, for example `mkdir -p ~/.cache/mrsm-v5-review`, and set `MRSM_ROOT_DIR` and `MRSM_PLUGINS_DIR` explicitly. Point copied connectors at a test database or a restored copy of your data before syncing. A separate root alone does not isolate database writes. Engine runs add internal `mrsm_engine_*` tables under `_mrsm_internal` (on PostgreSQL and MSSQL; on MySQL, MariaDB, SQLite, DuckDB and Oracle beside your instance tables).
 2. **Lint your compose files:** `mrsm compose explain` now warns about unresolved `{{ Pipe() }}` references, `dtype:` typos (for `dtypes:`) and string-typed `tags`. It never changes behavior.
 3. **Dry-run the engine:** `mrsm plan pipes -t <tag>` prints what an engine run would do without moving data.
 4. **Import every plugin:** `mrsm show plugins` on v5 imports each plugin and reports `ImportError`s from removed internals, with the replacement named in the message.

@@ -1252,11 +1252,26 @@ fn golden_queries_match_python() {
             Err(_) => Outcome::Error("panicked".into()),
         };
         // A Python `None` result deserializes as a missing `result`.
-        let expected = case.result.clone().or(if case.error.is_none() {
+        let mut expected = case.result.clone().or(if case.error.is_none() {
             Some(Value::Null)
         } else {
             None
         });
+        // Intentional safety correction: v4 drops these rejected filters entirely. Keep the
+        // recordings intact, but require an explicit false predicate for these exact cases.
+        if func == "build_where"
+            && matches!(
+                get(&args, "params").get("bad"),
+                Some(Value::Str(s)) if s == "x; drop table y" || s == "x -- y"
+            )
+            && expected == Some(Value::Str(String::new()))
+        {
+            expected = Some(v_str(if b(&args, "with_where") {
+                "\nWHERE\n    1 = 0"
+            } else {
+                "1 = 0"
+            }));
+        }
         let matched = match (&outcome, &expected, &case.error) {
             (Outcome::Value(got), Some(exp), None) => {
                 let exp = exp.json_dumps();

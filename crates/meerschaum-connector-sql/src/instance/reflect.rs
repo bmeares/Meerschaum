@@ -449,7 +449,27 @@ impl SqlConnector {
     ) -> IndexMap<String, Vec<IndexDoc>> {
         let ischema = introspection_schema(self.flavor, schema);
         let query = get_table_cols_indices_query(table, self.flavor, ischema.as_deref());
-        let Ok(df) = self.read_catalog(&query).await else {
+        // MySQL catalogs span databases. Filter before converting rows: v4's converter
+        // falls back to all rows when a schema has no matches, which can borrow a unique
+        // key from another database and silently turn upserts into duplicate inserts.
+        let result = if self.flavor.driver_family() == DriverFamily::Mysql {
+            match schema.filter(|s| !s.is_empty()) {
+                Some(database) => {
+                    self.read_params_catalog(
+                        &format!("{query} AND TABLE_SCHEMA = ?"),
+                        &[crate::driver::SqlParam::Text(database.to_string())],
+                    )
+                    .await
+                }
+                None => {
+                    self.read_catalog(&format!("{query} AND TABLE_SCHEMA = DATABASE()"))
+                        .await
+                }
+            }
+        } else {
+            self.read_catalog(&query).await
+        };
+        let Ok(df) = result else {
             return IndexMap::new();
         };
         let rows: Vec<ColumnIndexRow> = frame_docs(&df)
