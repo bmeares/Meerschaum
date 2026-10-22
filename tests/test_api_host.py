@@ -97,6 +97,14 @@ def root():
 def host(root):
     """Serve the host on a Unix socket and yield an `httpx` client over it."""
     httpx = pytest.importorskip('httpx')
+    ### A valid user JWT must name a principal in this host's own instance.
+    setup = _python(root, """
+from meerschaum import get_connector
+from meerschaum.core import User
+instance = get_connector('sql:local')
+assert instance.register_user(User('admin', 'probe-password', instance=instance))[0]
+""")
+    assert setup.returncode == 0, setup.stderr[-4000:]
     sock_dir = pathlib.Path(tempfile.mkdtemp(prefix='mh'))
     if len(str(sock_dir)) > 90:
         shutil.rmtree(sock_dir, ignore_errors=True)
