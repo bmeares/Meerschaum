@@ -154,6 +154,9 @@ def route_group_is_allowed(route_group: str) -> bool:
     Return whether a group of core routes (or the console's own pages, group `dash`) may be served,
     according to the patterns in `api:permissions:routes:allowlist`.
     """
+    if any(fnmatch(route_group, pattern) for pattern in permissions_config.get(
+        'routes', {}).get('disabled', [])):
+        return False
     return any(
         fnmatch(route_group, pattern)
         for pattern in _allowed_route_group_patterns

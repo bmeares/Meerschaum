@@ -6,7 +6,7 @@ A plain `mrsm sync pipes` still works exactly as it did in v4: every selected pi
 
 !!! note "Not the same as `start pipeline`"
 
-    A *pipeline* here is a slice of the pipe graph. The `start pipeline` action, which chains several actions with `:`, is unrelated and unchanged.
+    A Pipeline is a registered selection over the Pipe dependency graph. Its registration belongs to an instance, while its member Pipes may belong to several instances. The `start pipeline` action, which chains several actions with `:`, is unrelated and unchanged.
 
 The pipe parameters that configure the engine are `parents` / `children` (the edges), `retry`, `schedule`, `min_seconds` and `stream`; each is documented in the [Parameters reference](/reference/pipes/parameters/) and used on the pages below. The CLI surface is `sync pipes --parents / --children / --resume / --loop / --listen`, `plan pipes`, `show graph`, `show runs` and `show run <id>`; the Python surface is `pipe.sync(parents=, children=)` and `mrsm.Pipeline`. Moving from v4? See the [migration guide](/reference/migrating-to-v5/#the-syncing-engine).
 
@@ -16,6 +16,38 @@ The pipe parameters that configure the engine are `parents` / `children` (the ed
 | [Engine State](/reference/pipelines/state/) | Run history, the dirty-range ledger, cursors, leases and the `system.engine.*` settings |
 | [Continuous Mode and Streams](/reference/pipelines/continuous/) | `--loop`, `--listen`, micro-batching and triggering children |
 | [Visualization](/reference/pipelines/visualization/) | The Gantt chart, the DAG view and the `/dash/pipelines` page |
+
+## Registered Pipelines
+
+Pipelines have instance-local names, stable identities and revisions. A definition stores exact
+instance-qualified Pipe references, traversal settings and execution defaults. Selecting its
+registry with `-i` does not change the instances of its members. Shared Pipes may belong to
+several Pipelines; dependencies continue to come from their Pipe parameters and SQL references.
+
+```bash
+mrsm show pipelines -i sql:local
+mrsm register pipelines daily -i sql:local -c sql:local -m daily
+mrsm analyze pipelines daily -i sql:local
+mrsm plan pipelines daily -i sql:local
+mrsm sync pipelines daily -i sql:local --parents
+```
+
+`show pipelines` reads saved state. `analyze pipelines` resolves members and configured traversal,
+reports missing references and shared membership, and previews tagging explicit and detected
+traversal Pipes with `pipeline-daily`. Approve its proposal to edit tags, or pass `--yes` to
+approve the displayed proposal in a batch command. Without approval, analysis changes nothing.
+Saving, planning, ordinary syncing and opening the console never silently tag Pipes or register
+suggested connected components. Tags are indexes; the Pipeline registration owns membership.
+
+Use `bootstrap pipelines` for guided creation, `edit pipelines` to change the definition,
+`copy pipelines daily daily-copy` to reference the same members under a new identity, and
+`delete pipelines daily` to remove a definition while preserving member registrations and data.
+Scheduled Jobs referencing a Pipeline must be removed or reassigned before deletion.
+
+`drop pipelines` drops the explicit members' tables and `clear pipelines` clears their data
+using the normal bounds. Both preview exact instances and shared membership before confirmation;
+they do not implicitly expand traversal. Shared Pipe data affects every Pipeline using it.
+Schedule a Pipeline with an ordinary Job running `sync pipelines NAME -i REGISTRY`.
 
 ## 🌳 The Pipe Graph
 
@@ -320,9 +352,10 @@ Pipelining goes one level deep (a child overlaps its parents, not its grandchild
 
 A named pipeline stores an exact selection on its instance. Its metadata uses an internal
 `mrsm` registration and is excluded from the data graph. Saving a selection never changes
-its member pipes. Existing graph components receive generated names the first time an
-authenticated user opens the Pipelines page; the page's name field lets you save a selection
-under a chosen name. Saving an existing name replaces its membership.
+its members' tags. Opening the Pipelines page does not register connected components.
+Choose members in the draft editor and save a named definition explicitly. Editing an existing
+definition checks its revision, while registering or importing a new definition refuses an
+accidental overwrite. Shared Pipe parameter edits are separate, explicitly staged changes.
 
 ```python
 pipeline = mrsm.Pipeline([raw, daily], parents=True, name='daily-totals')
@@ -341,8 +374,30 @@ Job with its own name, interval, workers, retries, and rebuild permission. A Job
 pipeline's current membership each time it runs. Several Jobs may use the same pipeline
 with different schedules or options. The same panel shows their status and start/stop
 controls; the Jobs page provides logs and other Job controls. Deleting a saved selection
-does not delete its member pipes or its Jobs.
+preserves its member Pipes and data. Referencing scheduled Jobs must be removed or reassigned
+before the definition can be deleted.
 
-New run IDs use the pipeline name followed by a readable UTC timestamp and collision
-suffix, for example `daily-totals-2026-10-21T14-30-00.123456Z-a1b2c3d4`. Unnamed selections
-use `pipeline` as their prefix. Earlier run IDs remain valid for history and resume.
+By default, named Pipeline run IDs use the Pipeline name followed by a UTC timestamp and
+collision suffix, for example `daily-totals-2026-10-21T14-30-00.123456Z-a1b2c3d4`. Unnamed selections
+use `pipeline` as their prefix. The console allocates an exact execution ID before admission
+with `--run-id`; saved definition identity and revision are recorded independently of its spelling.
+Earlier run IDs remain valid for history and resume.
+
+Traversal discovery reads the Pipeline registry, explicit members' instances, and instances named
+by their dependency references. A child stored only on an otherwise unknown instance cannot be
+inferred from its parent; add it explicitly or declare the parent's cross-instance child reference.
+Analysis reports missing or unreachable references rather than silently dropping them.
+
+Pipeline registries may also be API instances: use `-i api:registry` or
+`Pipeline.load('daily-totals', instance='api:registry')`. Exact member references retain their
+own instances. The API uses a separate `pipelines` route group for definition metadata:
+`GET /pipelines`, `GET /pipelines/keys`, and `/pipelines/{name}/{register,edit,delete,id,attributes}`.
+Read operations require `pipes:read`, registration/edit/metadata leases require `pipes:write`,
+and deletion requires `pipes:delete`. These endpoints transport raw registration metadata;
+use the CLI or SDK for lifecycle operations that reconcile owned tags and check scheduled Jobs.
+They do not expose arbitrary internal `mrsm` Pipes or data-table operations.
+
+Schedule guards check Jobs available on the client and registry server. Server-side schedules
+should use the server's own instance keys, such as `sql:main`, rather than an HTTP alias pointing
+back to that server: the server cannot infer that arbitrary client aliases name its own registry.
+Jobs on unrelated executors are not discoverable automatically.

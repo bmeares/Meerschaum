@@ -89,6 +89,8 @@ pub struct Inner {
     pub host: Option<Arc<HostProxy>>,
     /// Per-route-group rate limits.
     pub rate_limiter: RateLimiter,
+    /// Serialize worker expiration and promotion.
+    pub(crate) execution_maintenance: tokio::sync::Mutex<()>,
     user_ids: Mutex<HashMap<String, Value>>,
     pipes: tokio::sync::Mutex<HashMap<String, Arc<PipesDict>>>,
     instances: Mutex<HashMap<String, Arc<dyn InstanceConnector>>>,
@@ -162,6 +164,7 @@ impl AppStateBuilder {
             resolver: self.resolver,
             host: self.host,
             rate_limiter,
+            execution_maintenance: tokio::sync::Mutex::new(()),
             user_ids: Mutex::new(HashMap::new()),
             pipes: tokio::sync::Mutex::new(HashMap::new()),
             instances: Mutex::new(HashMap::new()),
@@ -178,6 +181,12 @@ pub fn normalize_location(location_key: Option<&str>) -> Option<String> {
 }
 
 impl AppState {
+    /// Weak handle for background maintenance; does not keep a stopped server alive.
+    pub(crate) fn weak_upgrade(&self) -> impl Fn() -> Option<Self> + Send + Sync + 'static {
+        let weak = Arc::downgrade(&self.0);
+        move || weak.upgrade().map(Self)
+    }
+
     /// Start building a state for `instance`.
     pub fn builder(config: ServerConfig, instance: Arc<dyn InstanceConnector>) -> AppStateBuilder {
         AppStateBuilder {

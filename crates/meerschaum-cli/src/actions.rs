@@ -46,16 +46,25 @@ impl ActionDef {
     }
 }
 
-/// Actions that exist only in v5. They resolve, have help and complete like any core action, but
-/// `show actions` and the unknown-action help table keep v4's listing (the parity fixtures are
-/// recorded from v4), and the registry parity test ignores them.
+/// Additive v5 actions, visible in help, action listings and completion. Legacy v4 parity
+/// comparisons exclude these entries; dedicated v5 tests verify their public exposure.
 pub const V5_ONLY_ACTIONS: &[&str] = &["prune", "plan", "doctor", "backup", "restore"];
 
-/// Subactions that exist only in v5 (`(action, subaction)`). They resolve and run like any
-/// core subaction, and complete once a prefix is typed, but the empty `show <TAB>` list and the
-/// registry parity test keep v4's contents.
+/// Additive v5 subactions (`(action, subaction)`), visible like every core subaction.
+/// Only legacy parity comparisons exclude this list.
 pub const V5_ONLY_SUBACTIONS: &[(&str, &str)] = &[
     ("sync", "pipeline"),
+    ("show", "pipelines"),
+    ("analyze", "pipelines"),
+    ("register", "pipelines"),
+    ("bootstrap", "pipelines"),
+    ("edit", "pipelines"),
+    ("plan", "pipelines"),
+    ("sync", "pipelines"),
+    ("delete", "pipelines"),
+    ("drop", "pipelines"),
+    ("clear", "pipelines"),
+    ("copy", "pipelines"),
     ("show", "graph"),
     ("show", "runs"),
     ("show", "drivers"),
@@ -116,7 +125,11 @@ pub static CORE_ACTIONS: &[ActionDef] = &[
     ),
     action(
         "clear",
-        &[sub("cache", "_clear_cache"), sub("pipes", "_clear_pipes")],
+        &[
+            sub("cache", "_clear_cache"),
+            sub("pipes", "_clear_pipes"),
+            sub("pipelines", "_clear_pipelines"),
+        ],
     ),
     action("deduplicate", &[sub("pipes", "_deduplicate_pipes")]),
     action("login", &[]),
@@ -127,6 +140,7 @@ pub static CORE_ACTIONS: &[ActionDef] = &[
         &[
             sub("connectors", "_register_connectors"),
             sub("pipes", "_register_pipes"),
+            sub("pipelines", "_register_pipelines"),
             sub("plugins", "_register_plugins"),
             sub("tokens", "_register_tokens"),
             sub("users", "_register_users"),
@@ -167,6 +181,7 @@ pub static CORE_ACTIONS: &[ActionDef] = &[
         "sync",
         &[
             sub("pipes", "_sync_pipes"),
+            sub("pipelines", "_sync_pipelines"),
             sub("pipeline", "_sync_pipeline"),
         ],
     ),
@@ -177,12 +192,17 @@ pub static CORE_ACTIONS: &[ActionDef] = &[
             sub("connectors", "_bootstrap_connectors"),
             sub_e("jobs", "_bootstrap_jobs"),
             sub("pipes", "_bootstrap_pipes"),
+            sub("pipelines", "_bootstrap_pipelines"),
             sub("plugins", "_bootstrap_plugins"),
         ],
     ),
     action(
         "drop",
-        &[sub("indices", "_drop_indices"), sub("pipes", "_drop_pipes")],
+        &[
+            sub("indices", "_drop_indices"),
+            sub("pipes", "_drop_pipes"),
+            sub("pipelines", "_drop_pipelines"),
+        ],
     ),
     action(
         "flush",
@@ -208,7 +228,13 @@ pub static CORE_ACTIONS: &[ActionDef] = &[
     action("vacuum", &[sub("pipes", "_vacuum_pipes")]),
     // v5 only (D20): not in v4's registry.
     action("prune", &[sub("venvs", "_prune_venvs")]),
-    action("plan", &[sub("pipes", "_plan_pipes")]),
+    action(
+        "plan",
+        &[
+            sub("pipes", "_plan_pipes"),
+            sub("pipelines", "_plan_pipelines"),
+        ],
+    ),
     action("doctor", &[]),
     action("backup", &[sub("postgres", "_backup_postgres")]),
     action("restore", &[sub("postgres", "_restore_postgres")]),
@@ -232,6 +258,7 @@ pub static CORE_ACTIONS: &[ActionDef] = &[
             sub("packages", "_show_packages"),
             sub("partitions", "_show_partitions"),
             sub("pipes", "_show_pipes"),
+            sub("pipelines", "_show_pipelines"),
             sub("plugins", "_show_plugins"),
             sub("rowcounts", "_show_rowcounts"),
             sub("runs", "_show_runs"),
@@ -253,6 +280,7 @@ pub static CORE_ACTIONS: &[ActionDef] = &[
             sub("connectors", "_delete_connectors"),
             sub_e("jobs", "_delete_jobs"),
             sub("pipes", "_delete_pipes"),
+            sub("pipelines", "_delete_pipelines"),
             sub("plugins", "_delete_plugins"),
             sub("users", "_delete_users"),
             sub("venvs", "_delete_venvs"),
@@ -273,13 +301,20 @@ pub static CORE_ACTIONS: &[ActionDef] = &[
             sub("worker", "_start_worker"),
         ],
     ),
-    action("analyze", &[sub("pipes", "_analyze_pipes")]),
+    action(
+        "analyze",
+        &[
+            sub("pipes", "_analyze_pipes"),
+            sub("pipelines", "_analyze_pipelines"),
+        ],
+    ),
     action("compress", &[sub("pipes", "_compress_pipes")]),
     action(
         "copy",
         &[
             sub("connectors", "_copy_connectors"),
             sub("pipes", "_copy_pipes"),
+            sub("pipelines", "_copy_pipelines"),
         ],
     ),
     action("decompress", &[sub("pipes", "_decompress_pipes")]),
@@ -290,6 +325,7 @@ pub static CORE_ACTIONS: &[ActionDef] = &[
             sub("definition", "_edit_definition"),
             sub_e("jobs", "_edit_jobs"),
             sub("pipes", "_edit_pipes"),
+            sub("pipelines", "_edit_pipelines"),
             sub("plugins", "_edit_plugins"),
             sub("tokens", "_edit_tokens"),
             sub("users", "_edit_users"),

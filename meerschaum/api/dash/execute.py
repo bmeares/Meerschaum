@@ -3,25 +3,10 @@
 # vim:fenc=utf-8
 
 """
-Run actions from the dashboard and show their output (design decision 33).
-
-v4's "Exec" button typed the chosen action into the terminal beside it. The terminal of v5 is the
-Rust server's (`/webterm/<session id>`), which a Dash callback cannot type into, so "Exec" runs the
-action through the server instead: the host `POST`s the argument list to the server's `/execute`
-route with a short-lived bearer for the session's user (so the server applies the same permissions
-as for any API call), the server starts it as a job, and the browser follows the job's log over the
-server's Server-Sent Events stream (`/logs/<job>/stream`, authenticated by the session cookie).
-
-**There is no local fallback.** The host never runs an action itself: if there is no server to call
-(`server_url` is not in the host configuration), the server cannot be reached, the server has no
-`/execute` route (the route allowlist `api:permissions:routes:allowlist` left out the `actions`
-group), or the server refuses the action, the console shows the server's own message and nothing
-runs. Authorization (who may run actions at all, and which actions and flags a non-administrator
-may use) belongs to the server's `/execute` and is not re-implemented here
-(`GET /execute/policy` publishes its lists for the UI).
-
-Only sessions that may run actions (`is_state_authenticated()`) can start one; the dashboard offers
-only the actions and flags of its own lists, which is a convenience, not a boundary.
+Compose console commands and authorize them through the native server. Exec types a command
+exactly once into the existing terminal using the readiness/acknowledgment protocol. Pipe
+management and Pipeline runs use `/execute` workers and follow their server log streams.
+The host never runs an action locally. Server policy remains authoritative for authorization.
 """
 
 from __future__ import annotations
@@ -244,7 +229,7 @@ def omit_flags() -> frozenset:
     return frozenset(get_policy().get('omit_flags') or [])
 
 
-def post_execute(sysargs: List[str], username: Optional[str]) -> Tuple[Dict[str, Any], str]:
+def post_execute(sysargs: List[str], username: Optional[str], metadata=None) -> Tuple[Dict[str, Any], str]:
     """
     `POST /execute` to the server. Return `(response, message)`; `response` is
     `{'success', 'msg', 'job', 'stream'}`-like. When the server cannot be asked the response is a
@@ -268,7 +253,8 @@ def post_execute(sysargs: List[str], username: Optional[str]) -> Tuple[Dict[str,
         headers['Authorization'] = f"Bearer {token}"
     request = urllib.request.Request(
         base_url + '/execute',
-        data=json.dumps({'sysargs': list(sysargs)}).encode('utf-8'),
+        data=json.dumps({'sysargs': list(sysargs), **{key: value for key, value in (metadata or {}).items()
+                         if key in ('pipeline', 'run_id', 'parent_job')}}).encode('utf-8'),
         headers=headers,
         method='POST',
     )
@@ -300,7 +286,7 @@ def post_execute(sysargs: List[str], username: Optional[str]) -> Tuple[Dict[str,
     return body, ''
 
 
-def run_action(sysargs: List[str], username: Optional[str]) -> Dict[str, Any]:
+def run_action(sysargs: List[str], username: Optional[str], metadata=None) -> Dict[str, Any]:
     """
     Run an action through the server's `/execute` (never in this process).
 
@@ -309,7 +295,7 @@ def run_action(sysargs: List[str], username: Optional[str]) -> Dict[str, Any]:
     `{'success', 'msg', 'job', 'stream'}`; `stream` is the SSE path of the job's log. A failure
     carries the server's message (or why the server could not be asked).
     """
-    response, _ = post_execute(sysargs, username)
+    response, _ = post_execute(sysargs, username, metadata=metadata)
     success = bool(response.get('success', False))
     job = response.get('job', None)
     stream = response.get('stream', None) or (f"/logs/{job}/stream" if job else None)
@@ -319,3 +305,30 @@ def run_action(sysargs: List[str], username: Optional[str]) -> Dict[str, Any]:
         'job': job,
         'stream': stream,
     }
+
+
+def execution_request(path, username, method='GET', body=None):
+    """Ask the authenticated server for retained summaries or worker promotion."""
+    import json
+    import urllib.request
+    import urllib.error
+    base = server_url()
+    if not base:
+        return None
+    headers = {'Accept': 'application/json'}
+    token = mint_bearer(username)
+    if token:
+        headers['Authorization'] = f'Bearer {token}'
+    if body is not None:
+        headers['Content-Type'] = 'application/json'
+    request = urllib.request.Request(base + path, headers=headers, method=method,
+        data=json.dumps(body).encode('utf-8') if body is not None else None)
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            return json.loads(response.read().decode('utf-8'))
+    except urllib.error.HTTPError as exc:
+        try:
+            detail = json.loads(exc.read().decode('utf-8')).get('detail', str(exc))
+        except Exception:
+            detail = str(exc)
+        raise ValueError(str(detail)) from exc

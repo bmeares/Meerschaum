@@ -196,6 +196,45 @@ pub struct Selection {
 }
 
 impl Selection {
+    /// Instances named by explicit targets, regardless of the registry holding a selection.
+    pub fn target_instances(&self) -> BTreeSet<String> {
+        match &self.targets {
+            Targets::Refs(refs) => refs
+                .iter()
+                .map(|r| r.parts().instance_keys.to_string())
+                .collect(),
+            Targets::Filter(filter) => filter.instance_keys.iter().cloned().collect(),
+        }
+    }
+
+    /// Instances needed to resolve references declared by reachable nodes. Discovery is
+    /// bounded by the selected traversal; unrelated registered nodes do not open connections.
+    pub fn referenced_instances(&self, graph: &Graph) -> BTreeSet<String> {
+        let targets: Vec<_> = match &self.targets {
+            Targets::Refs(refs) => refs.clone(),
+            Targets::Filter(filter) => graph
+                .nodes()
+                .filter(|n| filter.matches(&n.record))
+                .map(|n| n.pipe_ref.clone())
+                .collect(),
+        };
+        let reachable = graph.reach(targets, self.parents, self.children);
+        graph
+            .warnings()
+            .iter()
+            .filter_map(|warning| {
+                if let crate::graph::GraphWarning::StaleReference { node, missing, .. } = warning
+                    && reachable.contains(node)
+                    && (self.graph || self.parents.is_some() || self.children.is_some())
+                {
+                    Some(missing.parts().instance_keys.to_string())
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
     /// Explicit targets.
     pub fn refs(targets: impl IntoIterator<Item = PipeRef>) -> Selection {
         Selection {

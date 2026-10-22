@@ -43,11 +43,11 @@ def get_pipe_query(
 
     if (parameters.get('fetch', None) or {}).get('definition', None):
         definition = parameters['fetch']['definition']
-    elif pipe.parameters.get('definition', None):
+    elif parameters.get('definition', None):
         definition = parameters['definition']
-    elif pipe.parameters.get('query', None):
+    elif parameters.get('query', None):
         definition = parameters['query']
-    elif pipe.parameters.get('sql', None):
+    elif parameters.get('sql', None):
         definition = parameters['sql']
     else:
         if warn:
@@ -58,7 +58,7 @@ def get_pipe_query(
         return None
 
     if apply_symlinks:
-        definition = replace_pipes_syntax(definition)
+        definition = replace_pipes_syntax(definition, _pipe=pipe)
 
     return textwrap.dedent(definition.lstrip().rstrip())
 

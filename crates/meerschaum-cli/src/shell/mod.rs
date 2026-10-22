@@ -883,8 +883,53 @@ pub fn completion_data(state: &ShellState, rt: &mut Runtime<'_>) -> completer::C
             })
             .collect()
     };
+    // Capture read-only config once; query registry names only when completing a Pipeline.
+    let snapshot = rt.config().snapshot();
+    let paths = rt.config().paths();
+    let mut opts = meerschaum_core::config::ConfigOptions::with_env(vec![
+        (
+            "MRSM_ROOT_DIR".into(),
+            paths.root_dir.to_string_lossy().into_owned(),
+        ),
+        (
+            "MRSM_CONFIG".into(),
+            meerschaum_core::Value::Map(snapshot).to_json_string(),
+        ),
+    ]);
+    opts.allow_writes = false;
+    let completion_config = meerschaum_core::Config::new(opts).ok();
+    let pipeline_session = crate::native::session(rt);
+    let pipelines = move |keys: &str| -> Vec<String> {
+        let Some(config) = completion_config.as_ref() else {
+            return Vec::new();
+        };
+        let Ok(instance) = pipeline_session.instance(keys, config) else {
+            return Vec::new();
+        };
+        let query = meerschaum_connector::PipesKeysQuery {
+            connector_keys: vec!["mrsm".into()],
+            metric_keys: vec!["pipeline".into()],
+            ..Default::default()
+        };
+        let Ok(rows) = pipeline_session.block_on(instance.conn().fetch_pipes_keys(&query)) else {
+            return Vec::new();
+        };
+        let rows: Vec<_> = match rows {
+            meerschaum_connector::PipesKeys::List(rows) => rows,
+            meerschaum_connector::PipesKeys::Dict(rows) => rows.into_values().collect(),
+        };
+        let mut names: Vec<_> = rows
+            .into_iter()
+            .filter_map(|row| row.location_key)
+            .collect();
+        names.sort();
+        names.dedup();
+        names
+    };
     let mut data = completer::CompletionData {
         connectors,
+        instance_keys: remove_ansi(&state.instance_keys),
+        pipelines: Some(std::sync::Arc::new(pipelines)),
         data_plugins: Vec::new(),
         plugin_names,
         config_keys,
@@ -1081,7 +1126,11 @@ pub fn run(sysargs: &[String], instance: Option<&str>, rt: &mut Runtime<'_>) {
         let prompt = editor::ShellPrompt {
             shared: shared.clone(),
         };
-        match editor.read_line(&prompt) {
+        // OSC 133 is consumed by terminal integrations; never emitted to plain streams.
+        rt.print("\x1b]133;A\x07");
+        let signal = editor.read_line(&prompt);
+        rt.print("\x1b]133;C\x07");
+        match signal {
             Ok(reedline::Signal::Success(line)) => {
                 // `Buffer.append_to_history`: any non-empty text, unless it repeats the last
                 // entry.

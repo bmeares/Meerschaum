@@ -344,7 +344,13 @@ pub fn gantt(record: &RunRecord, columns: usize) -> String {
         .unwrap_or(4);
     // `label  bar  dur summary(28) mark`: 2 + 2 + 7 + 29 + 1 columns around the bar.
     let width = columns.saturating_sub(label_w + 41).clamp(10, 60);
-    let mut text = viz::render_gantt(record, &critical_path(record), width);
+    // The observed timeline must not be stretched by a cold-start forecast (30 s/node).
+    // Keep forecast fields in history / JSON and use them for priority and plan views.
+    let mut actual = record.clone();
+    for node in &mut actual.nodes {
+        node.planned_duration_seconds = None;
+    }
+    let mut text = viz::render_gantt(&actual, &critical_path(record), width);
     if record
         .nodes
         .iter()

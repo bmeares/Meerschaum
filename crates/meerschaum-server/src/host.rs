@@ -142,7 +142,6 @@ pub const CONSOLE_MODULES: &[&str] = &[
     "websockets",
     "pandas",
     "pyarrow",
-    "yaml",
 ];
 
 /// What [`probe_console`] found.

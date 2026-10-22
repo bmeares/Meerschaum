@@ -159,6 +159,35 @@ fn prepare(py: Python<'_>, context: Option<&Bound<'_, PyDict>>) -> PyResult<Prep
             .map(|a| a.cast_into::<PyDict>())
             .transpose()?;
         let attribute_maps = crate::sync_api::attribute_maps(attributes.as_ref())?;
+        // Action routing and external clients read connector metadata without opening a
+        // connection. Include ad hoc attributes in this call's private snapshot as well
+        // as the session; never write them to Python's live registry or config files.
+        config.with_state(|state| {
+            use meerschaum_core::config::lossless::apply_patch_maps;
+            use meerschaum_core::{Map, Value};
+            let mut connectors = Map::new();
+            for (keys, attributes) in &attribute_maps {
+                let (typ, label) = meerschaum_cli::native::session::split_keys(keys);
+                let labels = connectors
+                    .entry(typ)
+                    .or_insert_with(|| Value::Map(Map::new()));
+                if let Value::Map(labels) = labels {
+                    labels.insert(label, Value::Map(attributes.clone()));
+                }
+            }
+            let patch = Map::from_iter([(
+                "meerschaum".into(),
+                Value::Map(Map::from_iter([(
+                    "connectors".into(),
+                    Value::Map(connectors),
+                )])),
+            )]);
+            let patched = apply_patch_maps(
+                state.config_lossless(),
+                &meerschaum_core::config::ConfigValue::map_from_value(&patch),
+            );
+            state.set_config_lossless(patched);
+        });
         // The pool is created lazily and workers start on first use: telling it about the
         // connectors costs nothing, and a plugin action (or a plugin source) builds the same
         // connectors by keys in its worker.

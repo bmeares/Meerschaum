@@ -14,6 +14,26 @@ def test_import_uses_working_tree():
     assert Path(mrsm.__file__).resolve().parent == Path(__file__).resolve().parents[1] / 'meerschaum'
 
 
+@pytest.mark.parametrize('target', [None, 'explicit_self_table'])
+def test_self_table_templates_do_not_reenter_parameter_resolution(tmp_path, target):
+    conn = mrsm.get_connector('sql', 'self_' + uuid.uuid4().hex,
+                              flavor='sqlite', database=str(tmp_path / 'self.db'))
+    raw_sql = "SELECT MAX(id) FROM {{ Pipe('test', 'incremental') }}"
+    parameters = {'sql': raw_sql, 'columns': {'id': 'id'}}
+    if target:
+        parameters['target'] = target
+    pipe = mrsm.Pipe('test', 'incremental', instance=conn, parameters=parameters, cache=False)
+    ok, message = pipe.register()
+    assert ok, message
+    for candidate in (pipe, mrsm.Pipe('test', 'incremental', instance=conn, cache=False)):
+        resolved = candidate.get_parameters()
+        assert '{{' not in resolved['sql']
+        assert (target or 'test_incremental') in resolved['sql']
+        assert candidate.target == (target or 'test_incremental')
+        assert candidate.get_parameters(apply_symlinks=False)['sql'] == raw_sql
+        assert candidate.get_parameters()['sql'] == resolved['sql']
+
+
 @pytest.fixture
 def registered_pipe(tmp_path):
     conn = mrsm.get_connector('sql', 'attrs_' + uuid.uuid4().hex,

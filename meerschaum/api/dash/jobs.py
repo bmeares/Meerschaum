@@ -32,6 +32,32 @@ STATUS_EMOJI: Dict[str, str] = {
 EXECUTOR_KEYS: str = get_executor_keys_from_context()
 
 
+def is_automatic_job(job):
+    """Explicit worker metadata takes precedence; support pre-rc6 execution workers."""
+    try:
+        properties = (job.daemon.properties if hasattr(job, 'daemon')
+                      else job.get_daemon_properties())
+        metadata = properties.get('mrsm_execution', {})
+    except Exception:
+        metadata = {}
+    metadata = metadata if isinstance(metadata, dict) else {}
+    kind = metadata.get('kind')
+    return kind == 'temporary_execution' if kind else getattr(job, 'name', '').startswith('execute-')
+
+
+
+def job_visible_to_session(job, session_id):
+    """Automatic workers belong to their creator and administrators, including local reads."""
+    if not is_automatic_job(job):
+        return True
+    from meerschaum.api.dash.sessions import session_is_admin, get_username_from_session
+    from meerschaum.api import no_auth
+    if no_auth or session_is_admin(session_id):
+        return True
+    properties = job.daemon.properties
+    owner = properties.get('mrsm_owner')
+    return bool(owner and owner == get_username_from_session(session_id))
+
 def get_jobs_cards(state: WebState):
     """
     Build cards and alerts lists for jobs.
@@ -43,10 +69,36 @@ def get_jobs_cards(state: WebState):
     cards = []
 
     for name, job in jobs.items():
+        if is_automatic_job(job):
+            continue
         cards.append(build_job_card(job, authenticated=is_authenticated))
 
     return cards, []
 
+
+
+def build_archived_run_card(record):
+    """Show retained execution identity after its output expires."""
+    import json
+    from urllib.parse import urlencode
+    metadata = record.get('metadata', {})
+    execution = metadata.get('daemon', {}).get('properties', {}).get('mrsm_execution', {})
+    execution = execution if isinstance(execution, dict) else {}
+    pipeline = execution.get('pipeline') or {}
+    pipeline_link = (html.A(pipeline.get('name', 'Pipeline'),
+        href='/dash/pipelines?' + urlencode({'pipeline': pipeline.get('name', ''),
+                                            'instance': pipeline.get('registry', '')}))
+                     if isinstance(pipeline, dict) and pipeline.get('name') else None)
+    return dbc.Card(dbc.CardBody([
+        html.H5(record['name']), pipeline_link,
+        html.P('Run: ' + str(execution.get('run_id', 'legacy'))),
+        html.P('Completed: ' + str(record.get('ended', ''))),
+        html.P('Output retention expired; execution summary retained.'),
+        html.Details([html.Summary('Execution details'),
+            html.Pre(json.dumps({'result': metadata.get('result'),
+                                 'sysargs': metadata.get('sysargs'),
+                                 'pipeline': pipeline}, indent=2))]),
+    ]))
 
 def build_job_card(
     job: Job,
@@ -203,8 +255,11 @@ def build_manage_job_buttons(job: Job):
         },
     )
     buttons = []
+    if is_automatic_job(job) and job.status == 'stopped':
+        buttons.append(dbc.Button('Keep as Job', size='sm', color='info',
+            id={'type': 'retain-run-button', 'index': job.name}))
     status = job.status
-    if status in ('stopped', 'paused'):
+    if status == 'paused' or (status == 'stopped' and not is_automatic_job(job)):
         buttons.append(start_button)
     if status == 'stopped':
         buttons.append(delete_button)

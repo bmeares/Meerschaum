@@ -110,6 +110,11 @@ pub trait JobsBackend: Send + Sync {
     /// Create and start a job with cleaned `sysargs` and optional properties.
     async fn create(&self, name: &str, sysargs: Vec<String>, properties: Option<Map>) -> CreateJob;
 
+    /// Promote an automatic execution to a persistent user-managed Job.
+    async fn promote(&self, _name: &str) -> SuccessTuple {
+        SuccessTuple::fail("This jobs backend does not support promotion.")
+    }
+
     /// `job.delete()`.
     async fn delete(&self, name: &str) -> SuccessTuple;
 
@@ -127,6 +132,11 @@ pub trait JobsBackend: Send + Sync {
 
     /// `job.stop_time`.
     async fn stop_time(&self, name: &str) -> Option<DateTime<Utc>>;
+
+    /// Natural completion timestamp, falling back to a manual stop for legacy backends.
+    async fn completion_time(&self, name: &str) -> Option<DateTime<Utc>> {
+        self.stop_time(name).await
+    }
 
     /// `job.is_blocking_on_stdin()`.
     async fn is_blocking_on_stdin(&self, name: &str) -> bool;

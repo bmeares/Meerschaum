@@ -128,6 +128,17 @@ impl std::fmt::Debug for Job {
     }
 }
 
+fn mark_persistent_job(properties: &mut Map) {
+    properties
+        .entry("mrsm_execution".into())
+        .or_insert_with(|| {
+            let mut metadata = Map::new();
+            metadata.insert("kind".into(), Value::Str("persistent_job".into()));
+            metadata.insert("origin".into(), Value::Str("user_job".into()));
+            Value::Map(metadata)
+        });
+}
+
 impl Job {
     /// `Job(name, sysargs, ...)`.
     pub fn new(
@@ -167,6 +178,11 @@ impl Job {
         };
 
         let mut patch = opts.properties.clone().unwrap_or_default();
+        // New user Jobs are persistent regardless of their name. Do not rewrite an
+        // existing legacy record; automatic API workers provide their explicit kind.
+        if executor_keys == "local" && daemon.is_none() {
+            mark_persistent_job(&mut patch);
+        }
         if opts.externally_managed {
             patch.insert("externally_managed".into(), Value::Bool(true));
         }
@@ -297,7 +313,8 @@ impl Job {
             match ex.try_get_job_exists(&self.name) {
                 Err(e) => return SuccessTuple::fail(e),
                 Ok(false) => {
-                    let props = self.daemon().memory_properties();
+                    let mut props = self.daemon().memory_properties();
+                    mark_persistent_job(&mut props);
                     let created = ex.create_job(&self.name, &self.sysargs.clone(), Some(&props));
                     self.warnings.extend(ex.take_warnings());
                     return created;
@@ -1074,5 +1091,74 @@ mod tests {
         assert_eq!(get_executor_keys_from_context(&ctx), expected);
         ctx.config.executor = Some("api:other".into());
         assert_eq!(get_executor_keys_from_context(&ctx), "api:other");
+    }
+}
+
+#[cfg(test)]
+mod rc6_kind_tests {
+    use super::*;
+    #[test]
+    fn new_manual_execute_name_is_persistent_but_legacy_and_automatic_kinds_survive() {
+        let root = tempfile::tempdir().unwrap();
+        let ctx = JobsContext::for_root(root.path());
+        let mut manual = Job::new(
+            "execute-manual",
+            Some(vec!["show".into(), "version".into()]),
+            JobOptions {
+                executor_keys: Some("local".into()),
+                ..Default::default()
+            },
+            &ctx,
+        )
+        .unwrap();
+        assert_eq!(
+            manual.properties()["mrsm_execution"]
+                .get("kind")
+                .unwrap()
+                .as_str(),
+            Some("persistent_job")
+        );
+        let mut automatic = Job::new(
+            "execute-automatic",
+            Some(vec!["show".into(), "version".into()]),
+            JobOptions {
+                executor_keys: Some("local".into()),
+                properties: Some(
+                    Value::from_json_str(r#"{"mrsm_execution":{"kind":"temporary_execution"}}"#)
+                        .unwrap()
+                        .to_map(),
+                ),
+                ..Default::default()
+            },
+            &ctx,
+        )
+        .unwrap();
+        assert_eq!(
+            automatic.properties()["mrsm_execution"]
+                .get("kind")
+                .unwrap()
+                .as_str(),
+            Some("temporary_execution")
+        );
+        // A pre-rc6 on-disk record keeps the legacy prefix classification.
+        let mut daemon = Daemon::new(
+            "execute-legacy",
+            vec!["show".into(), "version".into()],
+            None,
+            Map::new(),
+            &ctx,
+        );
+        assert!(daemon.write_properties().success);
+        let mut legacy = Job::new(
+            "execute-legacy",
+            None,
+            JobOptions {
+                executor_keys: Some("local".into()),
+                ..Default::default()
+            },
+            &ctx,
+        )
+        .unwrap();
+        assert!(!legacy.properties().contains_key("mrsm_execution"));
     }
 }

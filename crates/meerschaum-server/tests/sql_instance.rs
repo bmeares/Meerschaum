@@ -480,3 +480,140 @@ async fn server_flavors_create_metadata_is_idempotent() {
         );
     }
 }
+
+#[tokio::test]
+async fn pipeline_metadata_transport_is_narrow_and_preserves_exact_references() {
+    use meerschaum_connector::PipesKeysQuery;
+    use serde_json::json;
+    let (served, _db) = sqlite().await;
+    let target = "sql:elsewhere|sql:source|raw|None";
+    let mut pipeline = Pipe::builder("mrsm", "pipeline").location(Some("api-daily"))
+        .instance("api:w17bs").parameters(Value::from_json_str(&json!({"pipeline": {
+            "schema_version":2, "name":"api-daily", "id":"stable-identity", "revision":1,
+            "registry":"api:w17bs", "targets":[target], "parents":true,
+            "children":null, "description":"Original {{ literal SQL }}", "defaults":{}, "tag_associations":[]
+        }}).to_string()).unwrap().to_map()).build().unwrap();
+    assert!(served.client.register_pipe(&pipeline).await.success);
+    assert!(
+        served
+            .client
+            .get_pipe_id(&pipeline)
+            .await
+            .unwrap()
+            .is_some()
+    );
+    assert!(
+        !served.conn.pipe_exists(&pipeline).await.unwrap(),
+        "metadata registration must not create a data table"
+    );
+    let attrs = served.client.get_pipe_attributes(&pipeline).await.unwrap();
+    assert_eq!(
+        attrs["parameters"]
+            .get("pipeline")
+            .unwrap()
+            .get("targets")
+            .unwrap(),
+        &Value::List(vec![Value::Str(target.into())])
+    );
+    let keys = served
+        .client
+        .fetch_pipes_keys(&PipesKeysQuery {
+            connector_keys: vec!["mrsm".into()],
+            metric_keys: vec!["pipeline".into()],
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(keys.entries().len(), 1);
+    assert_eq!(keys.entries()[0].location_key.as_deref(), Some("api-daily"));
+    let mut params = pipeline.raw_parameters().clone();
+    params
+        .get_mut("pipeline")
+        .unwrap()
+        .as_map_mut()
+        .unwrap()
+        .insert(
+            "description".into(),
+            Value::Str("Changed {{ Pipe('sql:x','y') }}".into()),
+        );
+    pipeline.set_parameters(params);
+    assert!(served.client.edit_pipe(&pipeline, false).await.success);
+    let attrs = served.client.get_pipe_attributes(&pipeline).await.unwrap();
+    assert_eq!(
+        attrs["parameters"]
+            .get("pipeline")
+            .unwrap()
+            .get("description")
+            .unwrap()
+            .as_str(),
+        Some("Changed {{ Pipe('sql:x','y') }}")
+    );
+    // Metadata has a dedicated transport; generic internal data/registration endpoints remain denied.
+    let response = served
+        .client
+        .get("/pipes/mrsm/pipeline/api-daily/data", Default::default())
+        .await
+        .unwrap();
+    assert!(!response.ok());
+    let lease = meerschaum_connector::InstanceConnector::acquire_pipe_lease(
+        &served.client,
+        &pipeline,
+        "metadata-owner",
+        std::time::Duration::from_secs(30),
+    )
+    .await
+    .unwrap();
+    assert!(lease);
+    assert!(
+        meerschaum_connector::InstanceConnector::release_pipe_lease(
+            &served.client,
+            &pipeline,
+            "metadata-owner"
+        )
+        .await
+        .unwrap()
+    );
+    assert!(served.client.delete_pipe(&pipeline).await.success);
+    assert!(
+        served
+            .client
+            .get_pipe_id(&pipeline)
+            .await
+            .unwrap()
+            .is_none()
+    );
+}
+
+#[tokio::test]
+async fn api_full_edit_removes_last_pipeline_owner_without_resurrecting_raw_parameters() {
+    use serde_json::json;
+    let (served, _db) = sqlite().await;
+    let sql = "SELECT * FROM {{ Pipe('sql:remote', 'raw') }}";
+    let mut pipe = Pipe::builder("sql:source", "owned-tags")
+        .instance("api:w17bs")
+        .parameters(
+            Value::from_json_str(
+                &json!({"sql":sql, "tags":["pipeline-daily"],
+            "_pipeline_tags":{"pipeline-daily":{"preexisting":false,"owners":["pipeline-id"]}}})
+                .to_string(),
+            )
+            .unwrap()
+            .to_map(),
+        )
+        .build()
+        .unwrap();
+    assert!(served.client.register_pipe(&pipe).await.success);
+    // Populate the client's metadata cache, then remove the last owner with a full edit.
+    let _ = served.client.pipe_parameters(&pipe).await;
+    pipe.set_parameters(
+        Value::from_json_str(&json!({"sql":sql,"tags":[]}).to_string())
+            .unwrap()
+            .to_map(),
+    );
+    assert!(served.client.edit_pipe(&pipe, false).await.success);
+    let attributes = served.client.get_pipe_attributes(&pipe).await.unwrap();
+    let parameters = attributes["parameters"].as_map().unwrap();
+    assert!(!parameters.contains_key("_pipeline_tags"));
+    assert_eq!(parameters["sql"].as_str(), Some(sql));
+    assert_eq!(parameters["tags"].to_json_string(), "[]");
+}

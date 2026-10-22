@@ -352,7 +352,10 @@ impl ConnectionSpec {
         let mut options = attrs.options.clone();
         let mut params: IndexMap<String, String> = IndexMap::new();
         for (k, v) in &attrs.extra {
-            params.insert(k.clone(), v.clone());
+            // The interactive-client preference belongs to Meerschaum, not the SQL driver.
+            if k != "cli" {
+                params.insert(k.clone(), v.clone());
+            }
         }
 
         if let Some(raw_uri) = attrs.uri.as_deref() {
@@ -740,6 +743,22 @@ fn resolve_sqlite_path(value: &str) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn interactive_client_preference_is_not_a_driver_option() {
+        let spec = ConnectionSpec::from_attributes(&ConnectorAttributes {
+            uri: Some("postgresql://alice@localhost/db?sslmode=require".into()),
+            extra: vec![("cli".into(), "rainfrog".into())],
+            ..Default::default()
+        })
+        .unwrap();
+        assert!(!spec.params.contains_key("cli"));
+        assert_eq!(
+            spec.params.get("sslmode").map(String::as_str),
+            Some("require")
+        );
+        assert!(!spec.engine_str().unwrap().contains("cli="));
+    }
 
     #[test]
     fn quote_helpers() {

@@ -60,7 +60,6 @@ COPIED_PLUGINS = ('w7_pyfig', 'w7_dashapp')
 #: callback's inputs are re-rendered in the same round, which every page of v4's console does.
 IGNORED_CONSOLE_ERRORS = (
     'Failed to load resource',
-    'A nonexistent object was used in an `Input` of a Dash callback',
     '{index,type:',
     ### A page navigation cancels the callbacks in flight.
     'Callback failed: the server did not respond',
@@ -252,8 +251,10 @@ class Server:
         env: dict | None = None,
     ):
         self.name = name
-        self.root = pathlib.Path(tempfile.mkdtemp(prefix=f'mrsm-w7-{name}-'))
-        self.plugins = pathlib.Path(tempfile.mkdtemp(prefix=f'mrsm-w7-plugins-{name}-'))
+        scratch = pathlib.Path.home() / '.cache' / 'mrsm-console-tests'
+        scratch.mkdir(parents=True, exist_ok=True)
+        self.root = pathlib.Path(tempfile.mkdtemp(prefix=f'mrsm-w7-{name}-', dir=scratch))
+        self.plugins = pathlib.Path(tempfile.mkdtemp(prefix=f'mrsm-w7-plugins-{name}-', dir=scratch))
         self.port = free_port()
         self.base_url = f"http://127.0.0.1:{self.port}"
         self.env = base_env(self.root, self.plugins, config)

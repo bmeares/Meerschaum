@@ -166,6 +166,13 @@ fn props_without_target(text: &str) -> Value {
     let mut v = Value::from_json_str(text).unwrap();
     if let Some(m) = v.as_map_mut() {
         m.shift_remove("target");
+        // Additive rc6 Job identity metadata is outside the v4 comparison.
+        if let Some(execution) = m.shift_remove("mrsm_execution") {
+            assert_eq!(
+                execution.get("kind").and_then(Value::as_str),
+                Some("persistent_job")
+            );
+        }
     }
     v
 }
@@ -451,6 +458,12 @@ fn status_pid_timestamps_results_match() {
         .unwrap();
     props.shift_remove("label");
     props.shift_remove("target");
+    // rc6 adds explicit kind metadata to new Jobs; v4 has no such field.
+    assert_eq!(
+        props["mrsm_execution"].get("kind").and_then(Value::as_str),
+        Some("persistent_job")
+    );
+    props.shift_remove("mrsm_execution");
     assert_eq!(&Value::Map(meta.clone()), &Value::Map(want.clone()));
     assert_eq!(
         strings(fx.get("sysargs").unwrap()),

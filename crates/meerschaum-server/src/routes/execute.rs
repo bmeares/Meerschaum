@@ -1,31 +1,18 @@
-//! `POST /execute` (v5, D21): run an action line as an ephemeral job. The Dash console's Execute
-//! box calls it (server side, with the user's bearer) and the browser then follows the job's log
-//! over Server-Sent Events (`GET /logs/{name}/stream`, served by `meerschaum-web`).
+//! Automatic execution workers (`POST /execute`), terminal Exec validation, and retained runs.
 //!
-//! The body is `{"sysargs": ["sync", "pipes", ...]}` (an optional `"name"` picks the job name,
-//! else `execute-<8 hex>`). The job is an ordinary v5 job (`show jobs` lists it) started through
-//! the same [`JobsBackend`](crate::backends::JobsBackend) as `POST /jobs/{name}`, with the
-//! server's environment and `NONINTERACTIVE=1` (jobs never ask a question nobody can answer).
+//! Pipe management and Pipeline runs create jobs through the shared supervisor and follow SSE
+//! logs. Dashboard Exec instead validates policy at `/execute/validate` and types into its
+//! existing terminal. It never starts a second worker.
 //!
-//! A finished job is **kept** for [`KEEP_FINISHED`], not deleted on completion: the browser opens
-//! the log stream after the response, and a quick action would be gone (with its output) before
-//! it connects. Each call removes the `execute-*` jobs that stopped longer ago than that.
-//!
-//! Authorization is that of creating a job to run an action: `actions:execute`, `jobs:execute`
-//! and `jobs:write`, plus the rule of who may run actions at all:
-//! administrators always; other users only when `api:permissions:actions:non_admin` is true (its
-//! default; `start api --secure` sets it false), the same key the console's own session check and
-//! the terminal read. (v4's `/actions/{action}` and job routes read the unset
-//! `system:api:permissions:actions:non_admin` instead; see PARITY.md.)
-//!
-//! What a non-administrator may run is limited to what the console offers
-//! ([`execute_policy`](crate::execute_policy), published at `GET /execute/policy`); an
-//! administrator keeps v4's `/actions` latitude. A job started here records its creator
-//! (`properties.mrsm_owner`) and an `execute-*` job is visible to its creator and to
-//! administrators only (`GET /jobs*`, `/logs/*`, the job actions; see [`job_visible_to`]).
+//! Explicit `mrsm_execution` metadata identifies temporary workers independently of their names.
+//! Creator/administrator visibility applies to metadata and every log transport. Legacy
+//! `execute-*` records retain that visibility rule. Successful output lasts 24 hours, failed
+//! output 7 days, and archived summaries 30 days by default. Startup and periodic cleanup leave
+//! active work untouched; a completed worker may be promoted into a persistent Job.
 
 use axum::Router;
 use axum::body::Body;
+use axum::extract::Path;
 use axum::routing::{get, post};
 use meerschaum_core::{Map, Value};
 use serde_json::{Value as Json, json};
@@ -46,6 +33,9 @@ use crate::state::AppState;
 pub fn routes(app: Router<AppState>, _cfg: &ServerConfig) -> Router<AppState> {
     app.route("/execute", post(execute))
         .route("/execute/policy", get(policy))
+        .route("/execute/validate", post(validate_terminal_command))
+        .route("/execute/runs", get(run_summaries))
+        .route("/execute/runs/{name}/retain", post(retain_run))
 }
 
 /// The job property that records who started an `execute-*` job.
@@ -71,7 +61,12 @@ pub fn owner_label(principal: Option<&Principal>) -> Option<String> {
 /// visible as before. A job created before the owner was recorded has no owner and stays with the
 /// administrators.
 pub fn job_visible_to(admin: bool, caller: Option<&str>, name: &str, meta: Option<&Json>) -> bool {
-    if admin || !name.starts_with(JOB_PREFIX) {
+    let temporary = meta
+        .and_then(|m| m.pointer("/daemon/properties/mrsm_execution/kind"))
+        .and_then(Json::as_str)
+        .map(|k| k == "temporary_execution")
+        .unwrap_or_else(|| name.starts_with(JOB_PREFIX));
+    if admin || !temporary {
         return true;
     }
     let owner = meta
@@ -87,8 +82,97 @@ async fn policy(ctx: Ctx) -> ApiResult {
     Ok(ok_json(&crate::execute_policy::policy_json()))
 }
 
-/// How long a finished `execute-*` job (and its log) is kept.
-pub const KEEP_FINISHED: std::time::Duration = std::time::Duration::from_secs(3600);
+/// Authorize terminal Exec without starting another execution worker.
+async fn validate_terminal_command(ctx: Ctx, body: Body) -> ApiResult {
+    let principal = scoped_auth(
+        &ctx.state,
+        &ctx.headers,
+        &["actions:execute", "jobs:execute", "jobs:write"],
+    )
+    .await?;
+    let allowed = is_user_allowed_to_execute_console(&ctx.state, principal.as_ref()).await;
+    if !allowed.success {
+        return Ok(tuple_response(&allowed));
+    }
+    let body = parse_json_body(&body_bytes(body).await?)?.unwrap_or(Json::Null);
+    let items = body
+        .get("sysargs")
+        .and_then(Json::as_array)
+        .ok_or_else(|| ApiError::missing(&["body", "sysargs"]))?;
+    let args = items
+        .iter()
+        .map(|value| value.as_str().map(str::to_string))
+        .collect::<Option<Vec<_>>>()
+        .ok_or_else(|| ApiError::new(422, "sysargs must contain strings"))?;
+    if args.is_empty() {
+        return Err(ApiError::new(422, "sysargs is empty"));
+    }
+    if !is_admin(&ctx.state, principal.as_ref()).await {
+        crate::execute_policy::check_non_admin(&args)
+            .map_err(|message| ApiError::new(403, message))?;
+    }
+    Ok(tuple_response(&meerschaum_core::SuccessTuple::success()))
+}
+
+/// Retained summaries are owner filtered and redact the same secrets as Job metadata.
+async fn run_summaries(ctx: Ctx) -> ApiResult {
+    let principal = scoped_auth(&ctx.state, &ctx.headers, &["jobs:read"]).await?;
+    let admin = is_admin(&ctx.state, principal.as_ref()).await;
+    let caller = owner_label(principal.as_ref());
+    let mut records = Vec::new();
+    if let Ok(files) = std::fs::read_dir(ctx.state.config.root_dir.join("runs")) {
+        for file in files.flatten() {
+            if file.path().extension().and_then(|v| v.to_str()) != Some("json") {
+                continue;
+            }
+            let Some(mut record) = std::fs::read(file.path())
+                .ok()
+                .and_then(|v| serde_json::from_slice::<Json>(&v).ok())
+            else {
+                continue;
+            };
+            let Some(name) = record["name"].as_str() else {
+                continue;
+            };
+            if !job_visible_to(admin, caller.as_deref(), name, record.get("metadata")) {
+                continue;
+            }
+            if let Some(meta) = record.get_mut("metadata") {
+                crate::redact::redact_job_meta(meta);
+            }
+            records.push(record);
+        }
+    }
+    records.sort_by(|a, b| b["ended"].as_str().cmp(&a["ended"].as_str()));
+    Ok(ok_json(&json!(records)))
+}
+
+async fn retain_run(ctx: Ctx, Path(name): Path<String>) -> ApiResult {
+    let _maintenance = ctx.state.execution_maintenance.lock().await;
+    let principal = scoped_auth(&ctx.state, &ctx.headers, &["jobs:write"]).await?;
+    let admin = is_admin(&ctx.state, principal.as_ref()).await;
+    let meta = ctx
+        .state
+        .jobs
+        .get(&name)
+        .await
+        .ok_or_else(ApiError::not_found)?;
+    if !job_visible_to(
+        admin,
+        owner_label(principal.as_ref()).as_deref(),
+        &name,
+        Some(&meta),
+    ) {
+        return Err(ApiError::not_found());
+    }
+    if meta["status"] != "stopped" {
+        return Err(ApiError::new(
+            409,
+            "Wait until the execution finishes before promoting it.",
+        ));
+    }
+    Ok(tuple_response(&ctx.state.jobs.promote(&name).await))
+}
 
 /// The longest job name accepted from a client.
 const MAX_NAME: usize = 64;
@@ -105,21 +189,89 @@ fn invalid(loc: &[&str], kind: &str, message: &str, input: Json) -> ApiError {
     ApiError::validation(vec![ApiError::field_error(kind, loc, message, input, None)])
 }
 
-/// Delete the `execute-*` jobs that stopped more than [`KEEP_FINISHED`] ago.
-async fn prune_finished(state: &AppState) {
-    let cutoff = chrono::Utc::now() - KEEP_FINISHED;
+/// Explicit execution metadata, with compatibility for legacy console workers.
+pub fn is_temporary(name: &str, meta: &Json) -> bool {
+    meta.pointer("/daemon/properties/mrsm_execution/kind")
+        .and_then(Json::as_str)
+        .map(|kind| kind == "temporary_execution")
+        .unwrap_or_else(|| name.starts_with(JOB_PREFIX))
+}
+
+/// Archive output before removing a completed worker. Active and paused work never expires.
+pub async fn prune_finished(state: &AppState) {
+    let _maintenance = state.execution_maintenance.lock().await;
+    let now = chrono::Utc::now();
+    let archive = state.config.root_dir.join("runs");
+    if let Err(error) = std::fs::create_dir_all(&archive) {
+        tracing::warn!(%error, "Unable to create execution archive");
+        return;
+    }
     for (name, meta) in state.jobs.list().await {
-        if !name.starts_with("execute-") || meta["status"] != "stopped" {
+        if !is_temporary(&name, &meta) || meta["status"] != "stopped" || !valid_name(&name) {
             continue;
         }
-        if state
-            .jobs
-            .stop_time(&name)
-            .await
-            .is_some_and(|stopped| stopped < cutoff)
+        // The listing may precede a restart or promotion. Re-read under maintenance lock.
+        let Some(meta) = state.jobs.get(&name).await else {
+            continue;
+        };
+        if meta["status"] != "stopped" || !is_temporary(&name, &meta) {
+            continue;
+        }
+        let Some(stopped) = state.jobs.completion_time(&name).await else {
+            continue;
+        };
+        // Keep the worker until its output expires. Summaries outlive worker deletion.
+        let success = meta
+            .pointer("/result/0")
+            .and_then(Json::as_bool)
+            .or_else(|| meta.pointer("/result/success").and_then(Json::as_bool))
+            .unwrap_or(false);
+        let keep = state.config.execution_retention[usize::from(!success)];
+        let age = (now - stopped).num_seconds().max(0) as u64;
+        if age < keep {
+            continue;
+        }
+        let record = json!({"name": name, "metadata": meta, "ended": stopped,
+            "summary_expires": stopped.timestamp().saturating_add(state.config.execution_retention[2] as i64)});
+        let path = archive.join(format!("{name}.json"));
+        let temporary = archive.join(format!("{name}.json.tmp"));
+        if std::fs::write(&temporary, record.to_string()).is_ok()
+            && std::fs::rename(&temporary, &path).is_ok()
         {
             let _ = state.jobs.delete(&name).await;
         }
+    }
+    if let Ok(files) = std::fs::read_dir(&archive) {
+        for file in files.flatten() {
+            if file.path().extension().and_then(|v| v.to_str()) != Some("json") {
+                continue;
+            }
+            let record = std::fs::read(file.path())
+                .ok()
+                .and_then(|v| serde_json::from_slice::<Json>(&v).ok());
+            if record
+                .as_ref()
+                .and_then(|v| v["summary_expires"].as_i64())
+                .is_some_and(|v| v <= now.timestamp())
+            {
+                let _ = std::fs::remove_file(file.path());
+            }
+        }
+    }
+}
+
+/// Run immediately at server startup and periodically, independently of new executions.
+pub fn start_cleanup(state: &AppState) {
+    if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+        let upgrade = state.weak_upgrade();
+        runtime.spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
+            loop {
+                interval.tick().await;
+                let Some(state) = upgrade() else { break };
+                prune_finished(&state).await;
+            }
+        });
     }
 }
 
@@ -202,15 +354,28 @@ async fn execute(ctx: Ctx, body: Body) -> ApiResult {
         }
     }
     prune_finished(&ctx.state).await;
-    let properties = owner_label(principal.as_ref()).map(|owner| {
-        let mut properties = Map::new();
-        properties.insert(OWNER_KEY.into(), Value::Str(owner));
-        properties
+    let mut properties = Map::new();
+    let owner = owner_label(principal.as_ref());
+    if let Some(owner) = &owner {
+        properties.insert(OWNER_KEY.into(), Value::Str(owner.clone()));
+    }
+    let execution_id = uuid::Uuid::new_v4().to_string();
+    let metadata = json!({
+        "kind": "temporary_execution", "origin": "api_execute", "owner": owner,
+        "pipeline": object.get("pipeline"), "run_id": object.get("run_id").cloned().unwrap_or_else(|| json!(execution_id)),
+        "parent_job": object.get("parent_job"),
+        "retention": {"success_seconds": ctx.state.config.execution_retention[0],
+            "failure_seconds": ctx.state.config.execution_retention[1],
+            "summary_seconds": ctx.state.config.execution_retention[2]}
     });
+    properties.insert(
+        "mrsm_execution".into(),
+        Value::from_json_str(&metadata.to_string()).unwrap_or(Value::Null),
+    );
     match ctx
         .state
         .jobs
-        .create(&name, sysargs.clone(), properties)
+        .create(&name, sysargs.clone(), Some(properties))
         .await
     {
         CreateJob::Exists => Err(ApiError::new(
@@ -224,5 +389,36 @@ async fn execute(ctx: Ctx, body: Body) -> ApiResult {
             "sysargs": sysargs,
             "stream": format!("/logs/{name}/stream"),
         }))),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn execution_kind_and_owner_do_not_depend_on_name() {
+        let temporary = json!({"daemon": {"properties": {
+            "mrsm_owner": "alice", "mrsm_execution": {"kind": "temporary_execution"}
+        }}});
+        assert!(is_temporary("custom-name", &temporary));
+        assert!(!job_visible_to(
+            false,
+            Some("bob"),
+            "custom-name",
+            Some(&temporary)
+        ));
+        assert!(job_visible_to(
+            false,
+            Some("alice"),
+            "custom-name",
+            Some(&temporary)
+        ));
+        assert!(job_visible_to(true, None, "custom-name", Some(&temporary)));
+        let kept =
+            json!({"daemon": {"properties": {"mrsm_execution": {"kind": "persistent_job"}}}});
+        assert!(!is_temporary("execute-kept", &kept));
+        assert!(is_temporary("execute-legacy", &json!({})));
+        assert!(!is_temporary("user-job", &json!({})));
     }
 }

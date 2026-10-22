@@ -41,8 +41,6 @@ def _filters_from_search(search: Optional[str]) -> Dict[str, str]:
 
 def build_graph_children(graph: Dict[str, Any], failed_refs: List[str], definitions=None) -> List[Any]:
     """Named membership groups with independently selectable pipe cards."""
-    if not graph['nodes']:
-        return [html.P("No pipes are registered.")]
     visible = {node['pipe_ref'] for node in graph['nodes']}
     groups = []
     covered = set()
@@ -88,11 +86,14 @@ def build_graph_children(graph: Dict[str, Any], failed_refs: List[str], definiti
             cards.append(html.Button([
                 _engine.action_indicator(node['action'], failed=ref in failed_refs),
                 html.Code(node['label']),
+                html.Small(_engine.split_ref(ref)[0], className='pipeline-instance-badge'),
+                html.Small(' · explicit member' if ref in (definitions or {}).get(name, {}).get('targets', [])
+                           else ' · detected traversal' if name else ' · unsaved selection'),
             ], id={'type': 'pipeline-stage', 'index': key}, n_clicks=0,
                 className='pipeline-stage', title=node['label'],
                 style={'left': f'{32 + x * 380}px', 'top': f'{offset + 64 + y * 190}px',
                        '--stage-color': _engine.STATUS_COLORS.get(status, '#9aa5b1')},
-                **{'data-ref': ref, 'data-node': key, 'aria-label': f"Inspect {node['label']}"}))
+                **{'data-ref': ref, 'data-node': key, 'data-grouped': 'true' if name else 'false', 'aria-label': f"Inspect {node['label']}"}))
         connections.extend({'parent': json.dumps([name, e['parent']]),
                             'child': json.dumps([name, e['child']])} for e in subset['edges'])
         width = max(width, group_width)
@@ -107,6 +108,7 @@ def build_graph_children(graph: Dict[str, Any], failed_refs: List[str], definiti
                    and json.loads(e['child'])[1] == edge['child'] for e in connections):
             if edge['parent'] in node_keys and edge['child'] in node_keys:
                 connections.append({'parent': node_keys[edge['parent']], 'child': node_keys[edge['child']]})
+    plan_positions = _engine.canvas_positions(graph)
     return [
         html.Div([
             html.Div([
@@ -115,14 +117,36 @@ def build_graph_children(graph: Dict[str, Any], failed_refs: List[str], definiti
                     html.Button('−', id='pipeline-zoom-out', title='Zoom out'),
                     html.Button('+', id='pipeline-zoom-in', title='Zoom in'),
                     html.Button('Fit', id='pipeline-fit', title='Fit pipeline to view'),
+                    html.Button('Center selected', id='pipeline-center', title='Center selected Pipe'),
+                    html.Button('Fullscreen', id='pipeline-fullscreen', title='Toggle fullscreen workspace'),
+                    html.Button('Add Pipe', id='pipeline-add-node', title='Add a Pipe to the draft'),
+                    html.Button('Collapse groups', id='pipeline-collapse-groups', title='Toggle Pipeline groups', disabled=not any(name for name, refs in groups)),
+                    dbc.Input(id='pipeline-canvas-search', placeholder='Find Pipe', type='search', size='sm', style={'width':'160px'}),
+                    html.Select([html.Option(label, value=value) for label, value in [
+                        ('All statuses', ''), ('Queued', 'pending'), ('Running', 'running'),
+                        ('Succeeded', 'succeeded'), ('Failed', 'failed'), ('Skipped', 'skipped'),
+                        ('Blocked', 'upstream_failed'),
+                    ]], id='pipeline-canvas-status'),
                 ], className='pipeline-canvas-controls'),
             ], className='pipeline-canvas-toolbar'),
             html.Div(html.Div(cards, id='pipeline-canvas-world', key=json.dumps([graph, definitions], sort_keys=True), style={
                 'width': f'{width}px', 'height': f'{offset}px',
-            }, **{'data-edges': json.dumps(connections), 'data-focus': graph.get('focus', '')}),
+            }, **{'data-edges': json.dumps(connections), 'data-focus': graph.get('focus', ''),
+                  'data-layout': json.dumps((next(iter((definitions or {}).values()), {}).get('layout') or {})
+                                            if len(definitions or {}) == 1 else {}),
+                  'data-pipeline': next(iter(definitions or {}), '') if len(definitions or {}) == 1 else ''}),
                 id='pipeline-canvas', tabIndex=0,
                 **{'aria-label': 'Pipeline stages. Drag to pan; use the zoom controls.'}),
         ], className='pipeline-canvas-shell'),
+        html.P('No Pipes in this selection. Use Add Pipe to choose members.') if not visible else None,
+        html.Details([html.Summary('Plan · dependency order and readiness'),
+            html.P('Actions and bounds are evaluated again when each Pipe becomes ready. Worker limits constrain actual concurrency.'),
+            dbc.Table([html.Thead(html.Tr([html.Th('Pipe'), html.Th('Action'), html.Th('Readiness / reason'), html.Th('Bounds')])),
+                html.Tbody([html.Tr([html.Td(html.Code(node['pipe_ref'])),
+                    html.Td(_engine.action_label(node['action'])), html.Td(node.get('reason', '')),
+                    html.Td(str(node.get('bounds') or 'Source defaults'))])
+                    for node in sorted(graph['nodes'], key=lambda node: plan_positions.get(node['pipe_ref'], (0, 0)))])], size='sm'),
+        ], id='pipeline-plan-view'),
         *[html.P(message, className='text-warning') for message in graph['warnings']],
     ]
 
@@ -174,8 +198,8 @@ def inspect_stage(clicks, focus, definition, close_clicks, session_data):
     if triggered in ('pipeline-inspector-close', 'pipeline-definition'):
         if triggered == 'pipeline-inspector-close' and not close_clicks:
             raise PreventUpdate
+        dash.set_props('pipeline-selection', {'data': None})
         dash.set_props('pipeline-inspector', {'hidden': True})
-        dash.set_props('pipeline-workspace', {'className': 'pipeline-workspace'})
         if triggered == 'pipeline-definition':
             dash.set_props('pipeline-focus', {'value': None})
         return []
@@ -186,51 +210,175 @@ def inspect_stage(clicks, focus, definition, close_clicks, session_data):
     else:
         raise PreventUpdate
     dash.set_props('pipeline-inspector', {'hidden': False})
-    dash.set_props('pipeline-workspace', {'className': 'pipeline-workspace pipeline-has-selection'})
-    dash.set_props('pipeline-log-stage', {'value': ref})
+    import uuid
+    selection = {'ref': ref, 'token': uuid.uuid4().hex}
+    dash.set_props('pipeline-selection', {'data': selection})
+    return [
+        html.Div([html.H4(html.Code(_engine.ref_label(ref))),
+                  html.Button('×', id='pipeline-inspector-close', n_clicks=0,
+                              title='Close pipe details')], className='pipeline-inspector-header'),
+        html.Small(_engine.split_ref(ref)[0], className='pipeline-instance-badge'),
+        html.A('Open pipe', href=_engine.pipe_href(ref), target='_blank', rel='noopener noreferrer'),
+        html.Div([
+            dbc.Button('Sync this Pipe', id='pipeline-node-sync', size='sm'),
+            dcc.Dropdown(id='pipeline-node-scope', value='this', clearable=False, options=[
+                {'label': 'This Pipe only', 'value': 'this'},
+                {'label': 'Include all parents', 'value': 'parents'},
+                {'label': 'Include all children', 'value': 'children'},
+            ]),
+            dbc.Input(id='pipeline-node-begin', placeholder='Begin (default: current watermark)', size='sm'),
+            dbc.Input(id='pipeline-node-end', placeholder='End (default: available data)', size='sm'),
+            dbc.Button('View output', id='pipeline-node-view-output', size='sm', color='secondary'),
+        ], className='pipeline-node-actions'),
+        dbc.Tabs(id='pipeline-inspector-section', active_tab='query', children=[
+            dbc.Tab(label='Query', tab_id='query'), dbc.Tab(label='Data / Plan', tab_id='plan'),
+            dbc.Tab(label='Dependencies', tab_id='relations'),
+            dbc.Tab(label='Recent syncs', tab_id='runs'), dbc.Tab(label='Parameters', tab_id='parameters'),
+            dbc.Tab(label='Edit shared Pipe', tab_id='edit'),
+        ]),
+        dbc.Switch(id='pipeline-resolve-symlinks', label='Resolve symlinks', value=True),
+        dbc.Button('Reload section', id='pipeline-inspector-retry', size='sm', color='secondary'),
+        html.Div('Loading Pipe details…', id='pipeline-inspector-body', role='status'),
+    ]
+
+
+@dash_app.callback(
+    Output('pipeline-inspector-result', 'data'),
+    Input('pipeline-selection', 'data'),
+    Input('pipeline-inspector-section', 'active_tab', allow_optional=True),
+    Input('pipeline-resolve-symlinks', 'value', allow_optional=True),
+    Input('pipeline-inspector-retry', 'n_clicks', allow_optional=True),
+    State('session-store', 'data'), prevent_initial_call=True,
+)
+def load_inspector_section(selection, section, resolve, retry, session):
+    """Only fetch the selected section. Token checks on the client reject stale responses."""
+    if not selection or not is_session_authenticated((session or {}).get('session-id')):
+        raise PreventUpdate
+    ref = selection['ref']
     instance, connector, metric, location = _engine.split_ref(ref)
     pipe = mrsm.Pipe(connector, metric, location, instance=instance)
     try:
-        parameters = pipe.parameters
-        from meerschaum.api.dash._support import get_pipe_query
-        query = get_pipe_query(pipe, apply_symlinks=False, warn=False)
-        sync_time = pipe.get_sync_time()
-        runs = _engine.get_runs(pipe.instance_connector, pipe=ref, limit=100)
-        graph = _engine.plan_graph(pipe.instance_connector, [pipe], parents=1)
-        planned = next((node for node in graph['nodes'] if node['pipe_ref'] == ref), {})
-        bounds = planned.get('bounds') if planned.get('action') != 'root' else None
-        from meerschaum.api.dash.pipes import build_relations_body
-        from meerschaum.utils.packages import attempt_import
-        dash_ace = attempt_import('dash_ace', lazy=False, check_update=False)
-        return [
-            html.Div([
-                html.H4(html.Code(str(pipe)), className='pipeline-inspector-title'),
-                html.Button('×', id='pipeline-inspector-close', n_clicks=0,
-                            title='Close pipe details', **{'aria-label': 'Close pipe details'}),
-            ], className='pipeline-inspector-header'),
-            html.P(['Latest data: ', html.Strong(str(sync_time) if sync_time is not None else 'No data yet')]),
-            html.A('Open pipe', href=_engine.pipe_href(ref), target='_blank', rel='noopener noreferrer', className='btn btn-secondary btn-sm'),
-            html.H5('Planned action'),
-            html.P([_engine.action_indicator(planned.get('action', '')), ' ',
-                    _engine.action_label(planned.get('action', ''))]),
-            build_data_range(bounds) if bounds else None,
-            html.P('This range is recalculated after the parents finish syncing.', className='text-muted')
-            if planned.get('provisional') else None,
-            html.Details([html.Summary('Planner details'), html.P(planned.get('reason', ''))]),
-            html.H5('Query'),
-            dash_ace.DashAceEditor(
+        if section == 'query' or not section:
+            from meerschaum.api.dash._support import get_pipe_query
+            query = get_pipe_query(pipe, apply_symlinks=True if resolve is None else resolve, warn=False)
+            from meerschaum.utils.packages import attempt_import
+            dash_ace = attempt_import('dash_ace', lazy=False, check_update=False)
+            body = [dash_ace.DashAceEditor(
                 id='pipeline-query-view', value=query, mode='sql', theme='twilight',
                 width='100%', height=f'{min(400, max(120, 20 * len(query.splitlines()) + 24))}px',
                 readOnly=True, showGutter=True, showPrintMargin=False,
                 highlightActiveLine=False, wrapEnabled=True, tabSize=4,
             ) if query else html.P('This source uses a connector or plugin to fetch data.'),
-            html.H5('Dependencies'), build_relations_body(pipe),
-            html.H5('Recent syncs'), build_runs_table(runs, table_id='pipeline-stage-runs-table'),
-            html.Details([html.Summary('Parameters'), html.Pre(json.dumps(parameters, indent=2, default=str))]),
-        ]
+                    html.A('Open Pipe editor', href=_engine.pipe_href(ref), target='_blank')]
+        elif section == 'edit':
+            from meerschaum.api.dash.pipeline_editing import fingerprint, raw_query
+            parameters = dict(pipe.get_parameters(apply_symlinks=False))
+            body = [
+                html.P('These edits change shared Pipe facts in every Pipeline. Stage them, review the draft, then Save pipeline. Inferred edges are edited through their SQL references.'),
+                dcc.Store(id='pipeline-edit-baseline', data={'ref': ref, 'parameters': parameters, 'baseline': fingerprint(parameters)}),
+                html.Label('Explicit parents (JSON Pipe references)'),
+                dbc.Textarea(id='pipeline-edit-parents', value=json.dumps(parameters.get('parents', parameters.get('parent', [])), indent=2)),
+                html.Label('Explicit children (JSON Pipe references)'),
+                dbc.Textarea(id='pipeline-edit-children', value=json.dumps(parameters.get('children', parameters.get('child', [])), indent=2)),
+                html.Label('Raw SQL definition (inferred dependencies)'),
+                dbc.Textarea(id='pipeline-edit-query', value=raw_query(parameters), style={'minHeight': '180px'}),
+                dbc.Button('Stage shared Pipe changes', id='pipeline-stage-edit', size='sm'),
+                html.Div(id='pipeline-stage-edit-alert'),
+            ]
+        elif section == 'parameters':
+            body = html.Pre(json.dumps(pipe.parameters, indent=2, default=str))
+        elif section == 'relations':
+            from meerschaum.api.dash.pipes import build_relations_body
+            body = build_relations_body(pipe)
+        elif section == 'runs':
+            body = build_runs_table(_engine.get_runs(pipe.instance_connector, pipe=ref, limit=30),
+                                    table_id='pipeline-stage-runs-table', registry=str(pipe.instance_connector))
+        else:
+            graph = _engine.plan_graph(pipe.instance_connector, [pipe], parents=1)
+            planned = next((node for node in graph['nodes'] if node['pipe_ref'] == ref), {})
+            body = [html.P(['Latest data: ', str(pipe.get_sync_time())]),
+                    html.P(_engine.action_label(planned.get('action', ''))),
+                    html.P(planned.get('reason', '')),
+                    build_data_range(planned['bounds']) if planned.get('bounds') else None]
+        # Dash serializes component trees in a Store exactly as it does callback children.
+        return {'token': selection['token'], 'section': section or 'query',
+                'resolve': True if resolve is None else resolve, 'children': body}
     except Exception as exc:
-        return [html.Button('×', id='pipeline-inspector-close', n_clicks=0, title='Close pipe details'),
-                html.H4(_engine.ref_label(ref)), html.P(f"Could not inspect this pipe: {exc}")]
+        return {'token': selection['token'], 'section': section or 'query',
+                'resolve': True if resolve is None else resolve,
+                'children': html.P(f'Could not load this section: {exc}. Use Reload section to retry.')}
+
+
+dash_app.clientside_callback(
+    """function(result, selection, section, resolve) {
+        if (!result || !selection || result.token !== selection.token ||
+            result.section !== (section || 'query') || result.resolve !== (resolve == null ? true : resolve))
+            return dash_clientside.no_update;
+        dash_clientside.set_props('pipeline-inspector-body', {children: result.children, style: {opacity: 1}});
+        const inspector = document.getElementById('pipeline-inspector');
+        if (inspector) inspector.removeAttribute('aria-busy');
+        return dash_clientside.no_update;
+    }""",
+    Output('pipeline-inspector-guard', 'children'),
+    Input('pipeline-inspector-result', 'data'), State('pipeline-selection', 'data'),
+    State('pipeline-inspector-section', 'active_tab', allow_optional=True),
+    State('pipeline-resolve-symlinks', 'value', allow_optional=True),
+)
+
+
+@dash_app.callback(
+    Output('pipeline-node-alert', 'children'),
+    Input('pipeline-node-sync', 'n_clicks', allow_optional=True),
+    Input('pipeline-context', 'data'),
+    State('pipeline-selection', 'data'),
+    State('pipeline-node-scope', 'value', allow_optional=True),
+    State('pipeline-node-begin', 'value', allow_optional=True),
+    State('pipeline-node-end', 'value', allow_optional=True),
+    State('pipeline-saved-name', 'value'), State('pipeline-definition', 'data'),
+    State('session-store', 'data'),
+    prevent_initial_call=True,
+)
+def sync_selected_pipe(clicks, context, selection, scope, begin, end, pipeline, definition, session):
+    if not is_session_authenticated((session or {}).get('session-id')):
+        raise PreventUpdate
+    if dash.ctx.triggered_id == 'pipeline-context':
+        if not context or context.get('action') != 'sync':
+            raise PreventUpdate
+        ref, scope = context['ref'], context.get('scope', 'this')
+        if not selection or selection.get('ref') != ref:
+            begin, end = None, None
+    elif clicks and selection:
+        ref = selection['ref']
+    else:
+        raise PreventUpdate
+    from meerschaum.api.dash.execute import run_action
+    from meerschaum.api.dash.sessions import get_username_from_session
+    try:
+        instance, connector, metric, location = _engine.split_ref(ref)
+        args = ['sync', 'pipes', '-i', instance, '-c', connector, '-m', metric,
+                '-l', location if location is not None else 'None', '--nopretty']
+        if scope in ('parents', 'children'):
+            args.append('--' + scope)
+        for flag, value in (('--begin', begin), ('--end', end)):
+            if value:
+                args.extend([flag, value])
+        import uuid
+        run_id = 'canvas-' + uuid.uuid4().hex
+        args.extend(['--run-id', run_id])
+        result = run_action(args, get_username_from_session((session or {}).get('session-id')),
+                            metadata={'run_id': run_id, **({'pipeline': {key: definition.get(key)
+                                for key in ('name', 'registry', 'id', 'revision')}}
+                                if definition and definition.get('name') == pipeline else {})})
+        if result['success']:
+            dash.set_props('pipeline-node-run', {'data': {
+                'ref': ref, 'scope': scope, 'run_id': run_id, 'instance': instance,
+                'session_id': (session or {}).get('session-id'), 'begin': begin, 'end': end,
+                'job': result['job'], 'stream': result['stream']}})
+            dash.set_props('pipeline-node-run-label', {'children': f"{ref} · {scope} · {begin or 'current watermark'} → {end or 'available data'} · {run_id} · {result['job']}"})
+            dash.set_props('pipelines-interval', {'interval': 2000})
+        return alert_from_success_tuple((result['success'], result['msg']))
+    except Exception as exc:
+        return alert_from_success_tuple((False, str(exc)))
 
 
 def build_data_range(bounds):
@@ -250,7 +398,7 @@ def build_data_range(bounds):
                     className='pipeline-data-range')
 
 
-def build_runs_table(runs: List[Dict[str, Any]], table_id='pipelines-runs-table') -> Any:
+def build_runs_table(runs: List[Dict[str, Any]], table_id='pipelines-runs-table', registry=None, pipeline=None) -> Any:
     """
     The runs table: each run's ID links to its timeline.
     """
@@ -264,7 +412,8 @@ def build_runs_table(runs: List[Dict[str, Any]], table_id='pipelines-runs-table'
             html.Td(
                 html.A(
                     record['run_id'],
-                    href='/dash/pipelines?' + urlencode({'run_id': record['run_id']}),
+                    href='/dash/pipelines?' + urlencode({key: value for key, value in {'run_id': record['run_id'],
+                        'instance': registry, 'pipeline': pipeline}.items() if value}),
                     className='pipeline-run-link',
                 )
             ),
@@ -303,7 +452,7 @@ def build_gantt_children(detail: Optional[Dict[str, Any]]) -> List[Any]:
             html.Td(bar.get('action', '')),
             html.Td('running' if bar.get('actual_start') and not bar.get('actual_end')
                     else bar.get('status', '')),
-            html.Td(t(bar.get('planned_start'))),
+            html.Td('Started' if bar.get('actual_start') else 'Waiting / skipped'),
             html.Td(t(bar.get('actual_start'))),
             html.Td(t(bar.get('actual_end'))),
         ])
@@ -313,13 +462,13 @@ def build_gantt_children(detail: Optional[Dict[str, Any]]) -> List[Any]:
         html.Div(dcc.Graph(
             figure=_engine.gantt_figure(detail),
             id='pipelines-gantt',
-            config={'displaylogo': False},
+            config={'displaylogo': False, 'modeBarButtonsToRemove': ['toImage']},
             style={'minWidth': '1000px'},
         ), className='pipeline-timeline-scroll'),
         dbc.Table(
             [html.Thead(html.Tr([
                 html.Th('Pipe'), html.Th('Action'), html.Th('Status'),
-                html.Th('Planned start'), html.Th('Actual start'), html.Th('Actual end'),
+                html.Th('Readiness'), html.Th('Actual start'), html.Th('Actual end'),
             ]))] + [html.Tbody(rows)],
             hover=True,
             size='sm',
@@ -357,11 +506,13 @@ def apply_filters(n_clicks, run_submit, pipe_submit, run_id, pipe, status, curre
     """
     Put the filters in the URL.
     """
-    query = {
+    query = {key: values[0] for key, values in parse_qs((current_search or '').lstrip('?')).items()
+             if key in ('pipeline', 'instance')}
+    query.update({
         key: value
         for key, value in (('run_id', run_id), ('pipe', pipe), ('status', status))
         if value and value != 'any'
-    }
+    })
     search = ('?' + urlencode(query)) if query else ''
     if search == (current_search or ''):
         raise PreventUpdate
@@ -375,36 +526,46 @@ def apply_filters(n_clicks, run_submit, pipe_submit, run_id, pipe, status, curre
     Input('pipeline-standalone', 'value'),
     Input('pipeline-definition', 'data'),
     Input('pipeline-definitions', 'data'),
+    Input('pipeline-draft', 'data'),
     Input('pipelines-refresh-button', 'n_clicks'),
-    State('session-store', 'data'),
+    State('pipelines-location', 'search'), State('session-store', 'data'),
 )
-def render_pipeline_graph(pathname, focus, standalone, definition, definitions, refresh, session_data):
+def render_pipeline_graph(pathname, focus, standalone, definition, definitions, draft, refresh, search, session_data):
     """Only selection changes and explicit refreshes rebuild the canvas."""
     if not str(pathname).startswith('/dash/pipelines'):
         raise PreventUpdate
     if not is_session_authenticated(str((session_data or {}).get('session-id'))):
         raise PreventUpdate
-    instance = _engine.get_instance()
+    instance = _engine.get_instance(parse_qs((search or '').lstrip('?')).get('instance', [None])[0])
     name = (definition or {}).get('name')
     try:
         graph = _engine.plan_graph(instance)
         options = [{'label': node['label'], 'value': node['pipe_ref']} for node in graph['nodes']]
-        if definition and definition.get('targets'):
+        if definition is not None or (draft and draft.get('active')):
+            valid_draft = draft and draft.get('definition_id') == (definition or {}).get('id', (definition or {}).get('name'))
+            selection = draft if valid_draft else definition or {}
             selected_pipes = []
-            for ref in definition['targets']:
+            for ref in selection.get('targets', []):
                 instance_keys, connector, metric, location = _engine.split_ref(ref)
                 selected_pipes.append(mrsm.Pipe(connector, metric, location, instance=instance_keys))
             graph = _engine.plan_graph(instance, selected_pipes,
-                                       parents=definition.get('parents'),
-                                       children=definition.get('children'))
+                                       parents=selection.get('parents'),
+                                       children=selection.get('children'))
+        if draft and draft.get('pipe_edits'):
+            from meerschaum.api.dash.pipeline_editing import validate_edits
+            edges = validate_edits(draft['pipe_edits'], draft.get('targets', []))
+            visible = {node['pipe_ref'] for node in graph['nodes']}
+            graph = {**graph, 'edges': [{'parent': parent, 'child': child}
+                for parent, child in edges if parent in visible and child in visible],
+                'warnings': graph.get('warnings', []) + [
+                    'Draft dependencies are validated. Planned actions and bounds are refreshed after Save pipeline.']}
         if focus:
             graph = {**_engine.focus_graph(graph, focus), 'focus': focus}
         elif graph['edges'] and not standalone and not definition:
             connected = {edge[key] for edge in graph['edges'] for key in ('parent', 'child')}
             graph = {**graph, 'nodes': [node for node in graph['nodes'] if node['pipe_ref'] in connected]}
-        group_definitions = ({name: {**definition, 'targets': [
-            node['pipe_ref'] for node in graph['nodes']
-        ]}} if name else definitions)
+        group_definitions = ({name: {**definition, **{key: (selection or {}).get(key) for key in ('targets', 'parents', 'children')}}}
+                             if name else definitions)
         graph_children = build_graph_children(graph, [], group_definitions)
         dash.set_props('pipeline-focus-options', {'data': options})
         dash.set_props('pipeline-visible-refs', {
@@ -446,7 +607,7 @@ def render_pipelines(pathname, search, definition, live_run, n_intervals, n_clic
     filters = _filters_from_search(search)
     name = (definition or {}).get('name')
     try:
-        instance = _engine.get_instance()
+        instance = _engine.get_instance(parse_qs((search or '').lstrip('?')).get('instance', [None])[0])
         runs = _engine.get_runs(
             instance,
             run_id=filters['run_id'] or None,
@@ -455,7 +616,7 @@ def render_pipelines(pathname, search, definition, live_run, n_intervals, n_clic
             run_name=name,
         )
         if name:
-            runs = [run for run in runs if _engine.run_belongs_to_pipeline(run, name)]
+            runs = [run for run in runs if _engine.run_belongs_to_pipeline(run, name, definition)]
         all_runs = runs
     except Exception as e:
         warn(f"Could not read the engine state: {e}", stack=False)
@@ -466,8 +627,10 @@ def render_pipelines(pathname, search, definition, live_run, n_intervals, n_clic
             {},
         )
 
-    live_id = ((live_run or {}).get('run_id')
-               if (live_run or {}).get('pipeline') == name else None)
+    live_matches = bool(live_run and live_run.get('pipeline') == name
+        and (not (definition or {}).get('id') or live_run.get('pipeline_id') == definition['id'])
+        and (not (definition or {}).get('registry') or live_run.get('registry') == definition['registry']))
+    live_id = (live_run or {}).get('run_id') if live_matches else None
     selected_id = filters['run_id'] or live_id or (
         runs[0]['run']['run_id'] if runs else (all_runs[0]['run']['run_id'] if all_runs else None)
     )
@@ -477,7 +640,7 @@ def render_pipelines(pathname, search, definition, live_run, n_intervals, n_clic
         warn(f"Could not read run '{selected_id}': {e}", stack=False)
         detail = None
 
-    if detail and name and not _engine.run_belongs_to_pipeline(detail.get('summary') or {}, name):
+    if detail and name and not _engine.run_belongs_to_pipeline(detail.get('summary') or {}, name, definition):
         detail = None
         selected_id = None
     stage_refs = {bar['pipe_ref'] for bar in (detail or {}).get('bars', [])}
@@ -493,7 +656,7 @@ def render_pipelines(pathname, search, definition, live_run, n_intervals, n_clic
         for bar in (detail or {}).get('bars', [])
     ]})
     active = bool(detail and (detail.get('summary') or {}).get('status') == 'running')
-    if live_run and live_run.get('pipeline') == name and not detail:
+    if live_matches and not detail:
         active = live_run.get('status') == 'running'
     dash.set_props('pipelines-interval', {'interval': 2000 if active else 15000})
     if not detail:
@@ -517,7 +680,7 @@ def render_pipelines(pathname, search, definition, live_run, n_intervals, n_clic
         store = {'run_id': selected_id}
     return (
         build_gantt_children(detail),
-        build_runs_table(runs),
+        build_runs_table(runs, registry=str(instance), pipeline=name),
         [],
         store,
     )
@@ -528,9 +691,9 @@ def render_pipelines(pathname, search, definition, live_run, n_intervals, n_clic
     Input('pipelines-events-store', 'data'),
     Input('pipelines-interval', 'n_intervals'),
     Input('pipeline-log-stage', 'value'),
-    State('session-store', 'data'),
+    State('pipelines-location', 'search'), State('session-store', 'data'),
 )
-def render_events(store, n_intervals, stage, session_data):
+def render_events(store, n_intervals, stage, search, session_data):
     """
     The selected run's events, oldest first.
     """
@@ -539,7 +702,8 @@ def render_events(store, n_intervals, stage, session_data):
     if not run_id or not is_session_authenticated(str(session_id)):
         return ''
     try:
-        rows = _engine.get_run_events(_engine.get_instance(), run_id)
+        rows = _engine.get_run_events(_engine.get_instance(
+            parse_qs((search or '').lstrip('?')).get('instance', [None])[0]), run_id)
     except Exception as e:
         return f"Events unavailable: {e}"
     lines = [_engine.describe_event(row) for row in rows
@@ -549,11 +713,153 @@ def render_events(store, n_intervals, stage, session_data):
 
 dash_app.clientside_callback(
     """
-    function(statuses) {
-        window._mrsmPipelineStatuses = statuses || {};
-        if (window.mrsmPaintPipelineStatuses) window.mrsmPaintPipelineStatuses(statuses);
+    function(statuses, nodeStatuses) {
+        const merged = {...(statuses || {}), ...(nodeStatuses || {})};
+        window._mrsmPipelineStatuses = merged;
+        if (window.mrsmPaintPipelineStatuses) window.mrsmPaintPipelineStatuses(merged);
         return dash_clientside.no_update;
     }
     """,
     Output('pipeline-stage-status-dummy', 'children'), Input('pipeline-stage-statuses', 'data'),
+    Input('pipeline-node-statuses', 'data'),
 )
+
+
+dash_app.clientside_callback(
+    r"""function(run, selected, events, session) {
+        const cache = window._mrsmNodeOutput = window._mrsmNodeOutput || new Map();
+        const sessionId = (session || {})['session-id'] || null;
+        if (window._mrsmNodeOutputSession !== sessionId) {
+            cache.forEach(item => item.source?.close()); cache.clear();
+            window._mrsmNodeOutputSession = sessionId; window._mrsmNodeOutputSelected = null;
+            dash_clientside.set_props('pipeline-node-run', {data:null});
+            dash_clientside.set_props('pipeline-node-runs', {data:[]});
+            dash_clientside.set_props('pipeline-output-tab', {options:[], value:null});
+            dash_clientside.set_props('pipeline-node-output', {children:''});
+            dash_clientside.set_props('pipeline-node-run-label', {children:''});
+            return dash_clientside.no_update;
+        }
+        if (run && run.session_id !== sessionId) return dash_clientside.no_update;
+        if (run && run.job && !cache.has(run.job)) {
+            const item = {...run, lines: []}; cache.set(run.job, item);
+            document.getElementById('pipeline-output-dock')?.classList.remove('pipeline-output-empty');
+            dash_clientside.set_props('pipeline-node-runs', {data: Array.from(cache.values()).map(r => ({
+                job:r.job, run_id:r.run_id, ref:r.ref, instance:r.instance, scope:r.scope}))});
+            const source = new EventSource(run.stream); item.source = source;
+            function paint() {
+                const target = document.getElementById('pipeline-node-output');
+                const active = window._mrsmNodeOutputSelected;
+                if (target && active === run.job) target.textContent = item.lines.join('\n');
+            }
+            if (run.scope === 'this') source.onmessage = function(event) {
+                item.lines.push(event.data.replace(/\n$/, '').replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, ''));
+                if (item.lines.length > 1000) item.lines.shift(); paint();
+            };
+            else item.lines.push('Waiting for attributed Pipe events…');
+            source.addEventListener('stopped', function() { source.close(); item.lines.push('[Execution finished]'); paint(); });
+            source.onerror = function() { if (source.readyState === 2) { item.lines.push('[Output disconnected]'); paint(); } };
+            dash_clientside.set_props('pipeline-output-tab', {options: Array.from(cache.values()).map(r => ({label:r.ref + ' · ' + r.run_id, value:r.job})), value:run.job});
+            selected = run.job;
+        }
+        for (const event of (events || [])) {
+            if (cache.has(event.job)) {
+                const item = cache.get(event.job);
+                if (item.scope !== 'this' && event.run_id === item.run_id) item.lines = event.lines || [];
+            }
+        }
+        if (!selected && cache.size) {
+            selected = window._mrsmNodeOutputSelected || Array.from(cache.keys()).at(-1);
+            dash_clientside.set_props('pipeline-output-tab', {options:Array.from(cache.values()).map(r => ({label:r.ref + ' · ' + r.run_id, value:r.job})), value:selected});
+            dash_clientside.set_props('pipeline-node-runs', {data:Array.from(cache.values()).map(r => ({job:r.job, run_id:r.run_id, ref:r.ref, instance:r.instance, scope:r.scope}))});
+        }
+        if (selected && cache.has(selected)) {
+            document.getElementById('pipeline-output-dock')?.classList.remove('pipeline-output-empty');
+            window._mrsmNodeOutputSelected = selected;
+            const item = cache.get(selected);
+            dash_clientside.set_props('pipeline-node-run-label', {children:item.ref + ' · ' + item.scope + ' · ' + (item.begin || 'current watermark') + ' → ' + (item.end || 'available data') + ' · ' + item.run_id + ' · ' + item.job});
+            dash_clientside.set_props('pipeline-node-output', {children:item.lines.join('\n')});
+        }
+        return dash_clientside.no_update;
+    }""",
+    Output('pipeline-node-stream-dummy', 'children'),
+    Input('pipeline-node-run', 'data'), Input('pipeline-output-tab', 'value'),
+    Input('pipeline-node-events', 'data'), Input('session-store', 'data'),
+)
+
+
+@dash_app.callback(
+    Output('pipeline-node-events', 'data'), Output('pipeline-node-statuses', 'data'),
+    Input('pipeline-node-runs', 'data'), Input('pipelines-interval', 'n_intervals'),
+    State('session-store', 'data'),
+)
+def node_events(runs, ticks, session):
+    """Poll every retained execution by its exact identity, including older active tabs."""
+    if not runs or not is_session_authenticated((session or {}).get('session-id')):
+        raise PreventUpdate
+    events, statuses = [], {}
+    for run in runs:
+        if not run.get('run_id'):
+            continue
+        statuses.setdefault(run['ref'], 'pending')
+        try:
+            from meerschaum.api.dash._support import get_job
+            from meerschaum.api.dash.jobs import job_visible_to_session
+            job = get_job(run['job'])
+            metadata = job.daemon.properties.get('mrsm_execution') or {}
+            if (not metadata or not job_visible_to_session(job, (session or {}).get('session-id'))
+                    or metadata.get('run_id') != run['run_id']):
+                raise ValueError('This execution is unavailable or belongs to another session.')
+            rows = _engine.get_run_events(_engine.get_instance(run['instance']), run['run_id'])
+            for row in rows:
+                ref, event = row.get('pipe_ref'), row.get('event')
+                if not ref:
+                    continue
+                status = {'node_planned': 'pending', 'node_started': 'running',
+                          'node_skipped': 'skipped', 'node_failed': 'failed',
+                          'node_rebuild_pending': 'upstream_failed'}.get(event)
+                if event == 'node_finished':
+                    status = 'failed' if (row.get('payload') or {}).get('result', {}).get('success') is False else 'succeeded'
+                if status:
+                    statuses[ref] = status
+            lines = [f"[{row.get('seq', '')} / attempt {(row.get('payload') or {}).get('attempt', '')}] "
+                     + _engine.describe_event(row)
+                     for row in rows if row.get('pipe_ref') == run['ref']][-MAX_EVENT_LINES:]
+        except Exception as exc:
+            lines = [f'Events unavailable: {exc}']
+        events.append({'job': run['job'], 'run_id': run['run_id'], 'lines': lines})
+    return events, statuses
+
+
+@dash_app.callback(
+    Output('pipeline-cancel-alert', 'children'),
+    Input('pipeline-cancel-node-run', 'n_clicks'),
+    Input('pipeline-cancel-current', 'n_clicks', allow_optional=True),
+    State('pipeline-live-run', 'data'),
+    State('pipeline-node-runs', 'data'), State('pipeline-output-tab', 'value'),
+    State('session-store', 'data'), prevent_initial_call=True,
+)
+def cancel_node_execution(clicks, pipeline_clicks, live_run, runs, selected, session):
+    session_id = (session or {}).get('session-id')
+    if not is_session_authenticated(session_id):
+        raise PreventUpdate
+    run = next((run for run in (runs or []) if run.get('job') == selected), None)
+    if dash.ctx.triggered_id == 'pipeline-cancel-current':
+        if not pipeline_clicks:
+            raise PreventUpdate
+        run = live_run
+        selected = (run or {}).get('job')
+    elif not clicks:
+        raise PreventUpdate
+    try:
+        if not run or selected != run.get('job'):
+            raise ValueError('Select a Pipe execution to cancel it. Historical outputs remain available.')
+        from meerschaum.api.dash._support import get_job
+        from meerschaum.api.dash.jobs import job_visible_to_session
+        job = get_job(run['job'])
+        metadata = job.daemon.properties.get('mrsm_execution') or {}
+        if (not metadata or not job_visible_to_session(job, session_id)
+                or metadata.get('run_id') != run.get('run_id')):
+            raise ValueError('This execution is unavailable or belongs to another session.')
+        return alert_from_success_tuple(job.stop())
+    except Exception as exc:
+        return alert_from_success_tuple((False, str(exc)))

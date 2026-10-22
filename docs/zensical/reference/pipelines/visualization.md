@@ -4,36 +4,62 @@ The engine emits one typed event per transition, and everything you see is drawn
 
 `run_started`, `node_planned`, `node_started`, `chunk_started`, `chunk_finished`, `node_finished`, `node_failed`, `node_skipped`, `node_rebuild_pending`, `watermark_advanced`, `stream_flushed`, `children_triggered`, `stream_restarted`, `run_finished`.
 
-## Running a pipeline in the console
+## Running a Pipeline in the console
 
-Open `/dash/pipelines` and click a pipeline's name inside its dashed boundary. Its details show the saved membership and a **Run now** button. Shared pipes may appear in more than one named group. Clicking a pipe opens its stage inspector; **Open pipe** opens the full pipe page in a new tab.
+Open `/dash/pipelines` and select a registered Pipeline or click its named boundary. Shared Pipes
+may appear in several groups. Select a Pipe to open its inspector immediately; Query, Data / Plan,
+Dependencies, Recent syncs and Parameters load independently. **Resolve symlinks** changes displayed
+SQL in the selected Pipe's instance context, preserving the stored definition.
 
-**Run now** starts a single sync through the API's authenticated execution endpoint. The page follows its exact run ID, shows command output, and refreshes the Gantt chart and stage completion counts every two seconds while it runs. Running bars extend to the current time; planned bars use historical duration estimates. **Sync activity** shows the engine's recorded events and sync results, with a stage selector to focus one pipe. The selected pipeline's history remains available while a run is active.
+**Fullscreen** keeps the canvas, inspector, editor and output dock together. Escape returns to
+the page. Drag the background to pan without selecting page text; zoom, Fit and Center selected
+provide keyboard-accessible controls. Search and status filters highlight matching Pipes, and
+Collapse groups provides an overview. Ctrl/Cmd/Shift-click selects several cards. Alt-drag a Pipe
+to arrange it, then **Save shared layout** in **Edit Pipeline draft / add Pipe** persists coordinates with revision checks. Zoom and pan
+remain personal to the browser session.
 
-**Manage pipeline** edits the saved definition and creates recurring scheduled jobs. A saved definition stores membership; a job supplies the schedule and execution settings. **Planned action** in a stage inspector describes what the next sync would do, rather than a scheduled execution time. Hover over a stage's status icon to read its planned action.
+Right-click a Pipe or use its inspector to **Sync this Pipe**, include parents, or include children.
+Inspector bounds apply to that operation. These controls launch one execution through the same
+authenticated server endpoint; they do not run the entire registered Pipeline implicitly.
+The output dock keeps tabs for completed single-Pipe executions. Expanded scopes use exact
+run/Pipe engine event identities rather than assigning interleaved stdout by matching text.
+Arbitrary plugin stdout from a concurrent Pipeline run remains in **Pipeline command output**;
+per-Pipe panes provide structured events and results. Run an individual Pipe for its dedicated
+stdout stream.
+**Run now** executes the saved Pipeline and follows its allocated run ID. History remains
+separate from editable current state.
+
+**Edit Pipeline draft / add Pipe** manages explicit membership. Find existing Pipes on an explicit
+instance, or register a new Pipe and add it to the draft. Registration is an explicit separate
+mutation. Draft membership and traversal edits support Undo, Redo, Discard and Save. The inspector's
+**Edit shared Pipe** tab stages explicit dependencies and raw SQL changes. These change shared Pipe
+facts in every Pipeline using that Pipe. Inferred edges are changed by editing their SQL references.
+The editor validates the proposed dependency graph before writing and checks shared Pipe baselines
+and Pipeline revisions; cross-instance failures report individual results.
+
+**Analyze** detects traversal members, shared Pipes and proposed `pipeline-{name}` tag changes.
+Review the proposal, then explicitly **Apply proposed tags**. Stale proposals require analysis and
+approval again. Ordinary saves and syncs do not apply tags.
+
+The canvas's **Plan** describes dependency order, readiness, actions and bounds without a time axis.
+The **Actual execution timeline** uses observed starts and finishes, extends live running bars and
+shows overlap and elapsed time. It omits forecast bars and the image-download control. Engine
+estimates may use prior durations or a 30-second default; these are scheduling hints, not deadlines.
+The Runs table and Sync activity retain their run/Pipe filters. **Manage pipeline** also creates
+ordinary scheduled Jobs with their own execution settings.
 
 ## 🖥️ In the terminal
 
-`mrsm sync pipes` prints each node's result as it finishes and a summary of the run (the output shown throughout this section). A run with `--parents` / `--children` and more than one node ends with a static **Gantt chart** of the actual run and the plan (a plain `sync pipes` keeps v4's output, so it prints none, and neither does `--nopretty`). On a terminal the run also prints one progress line per node as it starts and finishes (`▶`, `✔`, `✘`, `○`). `mrsm show run <id>` draws the chart of any recorded run:
+`mrsm sync pipes` prints each node's result and a run summary. Graph selections also report
+node transitions as they start and finish. `mrsm show run <id>` reads the recorded run; actual
+elapsed time and observed execution intervals are the primary Timeline view. `plan pipes` and
+`plan pipelines` explain the next actions and bounds independently of that execution history.
+`--nopretty` prints machine-readable plan and run information.
 
-```text
-run 01JW9GANTT  4 nodes  4 workers  wall 1m40s  planned 1m15s  critical path: raw → clean
-raw    ██████████████████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░  40s    +12,301 ins                  ✔
-       ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒                                        30s    planned
-clean  ░░░░░░░░░░░░░░░░░░░░░░███████████████████████████░░░░░  50s    +12,290 ins  ~11 upd         ✔
-                       ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒               45s    planned
-geo    ░░░░░░░░░░░░░░░░░░░░░░████                              9s     error: connection reset      ✘
-                       ▒▒▒▒▒▒▒▒▒▒▒                             20s    planned
-daily  ·                                                              skip                         ○
-█ actual  ▒ planned
-```
-
-Each node has two lanes on one time axis (which spans the longer of the run's wall time and the planned makespan):
-
-- **Actual** (first line): `█` is when the node ran, `░` the time around it, `·` a node that did not run (`skip`, `upstream_failed`, `rebuild_pending`, `observe` or never ran). The right-hand columns are the duration, a count summary (`+N ins`, `~N upd`, `+N ups`, `-N del`) or `error: …`, and ✔ / ✘ / ○.
-- **Planned** (second line, `▒`): the bar the plan drew before the run started. It starts at the node's earliest start in the critical-path schedule and **ends** after its planned duration: the moving average (EWMA, `alpha` 0.3) of the node's earlier successful runs with the same action, else of all its earlier successful runs, else **`system.engine.default_duration_seconds` (30 seconds)**. A node planned not to sync (a `skip`) has no planned lane; a child planned against parents that are about to change (a provisional `skip`) is planned as an `incremental`, because it usually syncs once its parents finish.
-
-The header adds the planned makespan (`planned 1m15s`) next to the actual wall time. A first run has no history, so every planned bar is 30 seconds long. For a run read back from the instance (`show run <id>`, the console), the planned duration is recomputed from the history before that run (the run's own rows store the planned start and slack, not the duration).
+Scheduling forecasts can use a per-action historical moving average (alpha 0.3), other successful
+action history, or `system.engine.default_duration_seconds` (30 seconds). These estimates omit
+worker contention and can greatly exceed a fast first run. They are planning hints; the console
+therefore does not overlay them on the actual-time chart.
 
 `mrsm show graph` draws a selection as a top-down tree (a pipe with several parents is drawn once, under the first parent the walk reaches, and referred to elsewhere):
 
@@ -66,18 +92,14 @@ run                         started (UTC)        status     wall  ok/nodes  targ
 
 ## 🌐 In the web console
 
-Start the API (`mrsm start api`) and open **`/dash/pipelines`** (the console needs `pip install meerschaum[dash]`). It reads the same instance-backed engine state described in [Engine State](/reference/pipelines/state/) and never writes.
-
-- **Pipeline canvas.** Connected cards show how data moves from sources to outputs. Each card uses the familiar `Pipe(...)` representation and describes its next sync. Drag the canvas to pan, use the zoom buttons or Fit, and search for a pipe to focus on its ancestors and descendants. Connected pipelines are shown first; enable **Include standalone pipes** to show isolated sources too.
-- **Stage inspection.** Select a card to read its query, parameters, latest data timestamp, next sync range, dependencies and recent runs. Open the pipe for its complete information and data tools. Detailed planner explanations are available under **Planner details**.
-
-- **Gantt chart per run.** Planned and actual bars side by side (planned bars end after the planned duration described above), plus a table of each node's action, status and planned and actual start. (The plan's critical path and slack are recorded with each run and are drawn in the terminal Gantt chart.)
-- **Runs table.** Filter by run ID, pipe and status.
-- **Parents / Children tabs** in the "Parents & Children" section of every pipe card on the pipes page.
+Start the API (`mrsm start api`) and open **`/dash/pipelines`**. The console needs
+`pip install meerschaum[dash]`. The workspace reads [Engine State](/reference/pipelines/state/)
+and writes definitions or shared Pipe facts only through explicitly named controls described above.
+The Pipe cards on the Pipes page retain their Parents / Children tabs.
 
 The engine's *ledger* is its record of changed parent data, used to find updates a child still needs to process, including changes to older rows. It remains part of syncing; it is not a separate lag metric on the page. A *watermark* is the latest value of a pipe's datetime or ordering column. Without a previous dependency-sync record, the engine compares parent and child watermarks. When a parent is ahead, the child reads from its own latest value minus its backtrack window, up to the earliest parent watermark. The canvas calls this **New parent data available**.
 
-Sync history refreshes about every 15 seconds. Use the refresh button to update the pipeline canvas. Select a run with the link in the runs table (`/dash/pipelines?run_id=…`) to see its Gantt chart. State lives in the URL, so a run or filter is shareable.
+Sync history refreshes about every 15 seconds. Use the refresh button to update the pipeline canvas. Select a run with the link in the runs table (`/dash/pipelines?run_id=…`) to see its actual execution timeline. State lives in the URL, so a run or filter is shareable.
 
 The console is available through `mrsm start api` and is covered in [Web Console](/reference/api-instance/web-console/).
 

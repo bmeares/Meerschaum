@@ -118,16 +118,24 @@ fn completions_match_v4() {
         // Prefixes also offer v5 subactions (e.g. `sync p` offers `pipeline`). Exclude only
         // these registered additions while comparing against the unchanged v4 fixture.
         // Restrict this to the subaction position so later argument values are compared intact.
-        let words: Vec<&str> = input.split_whitespace().collect();
-        let subaction_parent =
-            (words.len() == 2 && !input.ends_with(char::is_whitespace)).then(|| words[0]);
+        let words: Vec<&str> = input
+            .rsplit('+')
+            .next()
+            .unwrap_or(input)
+            .split_whitespace()
+            .collect();
+        let subaction_parent = ((words.len() == 2 && !input.ends_with(char::is_whitespace))
+            || (words.len() == 1 && input.ends_with(char::is_whitespace)))
+        .then(|| words[0]);
         let got: Vec<(String, i64, String, usize)> = data
             .get_completions(input, &dates)
             .into_iter()
             .filter(|c| {
-                !subaction_parent.is_some_and(|action| {
-                    meerschaum_cli::actions::is_v5_only_subaction(action, &c.text)
-                })
+                !((words.is_empty() || (words.len() == 1 && !input.ends_with(char::is_whitespace)))
+                    && meerschaum_cli::actions::V5_ONLY_ACTIONS.contains(&c.text.as_str()))
+                    && !subaction_parent.is_some_and(|action| {
+                        meerschaum_cli::actions::is_v5_only_subaction(action, &c.text)
+                    })
             })
             .map(|c| (c.text, c.start_position, c.display, c.highlight))
             .collect();
@@ -211,4 +219,48 @@ fn driver_names_complete() {
     assert_eq!(texts("uninstall driver "), vec!["duckdb"]);
     assert_eq!(texts("show drivers "), vec!["duckdb", "oracle"]);
     assert_eq!(texts("show drivers o"), vec!["oracle"]);
+}
+
+#[test]
+fn registered_pipeline_names_complete_on_the_selected_registry() {
+    use meerschaum_cli::shell::completer::CompletionData;
+    let data = CompletionData {
+        instance_keys: "sql:local".into(),
+        pipelines: Some(std::sync::Arc::new(|registry| {
+            if registry == "sql:remote" {
+                vec!["remote-daily".into()]
+            } else {
+                vec!["daily".into(), "weekly".into()]
+            }
+        })),
+        ..Default::default()
+    };
+    let dates = DateContext::system();
+    assert!(
+        data.get_completions("show ", &dates)
+            .iter()
+            .any(|c| c.text == "pipelines")
+    );
+    assert!(
+        data.get_completions("p", &dates)
+            .iter()
+            .any(|c| c.text == "plan")
+    );
+    let names: Vec<_> = data
+        .get_completions("sync pipelines d", &dates)
+        .into_iter()
+        .map(|c| c.text)
+        .collect();
+    assert_eq!(names, vec!["daily"]);
+    let names: Vec<_> = data
+        .get_completions("show pipelines -i sql:remote r", &dates)
+        .into_iter()
+        .map(|c| c.text)
+        .collect();
+    assert_eq!(
+        names,
+        vec!["remote-daily"],
+        "parsed: {:?}",
+        meerschaum_cli::parse::parse_line("show pipelines -i sql:remote r", &dates)
+    );
 }

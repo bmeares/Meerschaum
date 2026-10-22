@@ -4,7 +4,7 @@
 
     Meerschaum 5 is installed the same way as before (`pip install meerschaum`), and most users keep writing Python plugins, which work unchanged. Rust plugins are an option, not a requirement: use one for the native performance path (the Rust core, kernel and Syncing Engine) or to run on the lean `slim` image (the base wheel, no extras). Everything on this page is about that option.
 
-> New in v5. A Rust plugin is a native shared library that Meerschaum loads in-process. It can do everything a [Python plugin](/reference/plugins/types-of-plugins/) can: fetch or sync data, add actions and arguments, run hooks around syncs, provide a whole connector, serve HTTP routes and add console pages. Python plugins are unchanged, and the two kinds live side by side in the same plugins directory.
+> New in v5. A Rust plugin is a native shared library that Meerschaum loads in-process. It can fetch or sync data, add actions and arguments, run hooks around syncs, provide a connector, serve supported native HTTP routes and add page-contract console pages. Python Dash callbacks and arbitrary FastAPI customization remain Python-host capabilities. Python plugins are unchanged, and the two kinds live side by side in the same plugins directory.
 
 Choose a Rust plugin when you want no Python interpreter at runtime (the standalone `mrsm` binary of `cargo install meerschaum`), predictable performance on large frames, or a single binary artifact. Keep writing Python for everything else.
 
@@ -36,6 +36,31 @@ The library name is always `lib<name>.<ext>`, with the `lib` prefix on Windows t
 
 A directory that contains both a `plugin.toml` and Python files is a Rust plugin. If a Rust plugin and a Python plugin have the same name, **the Rust plugin replaces the Python plugin entirely**: its actions, hooks, connectors, routes and pages disappear from the merged manifest, and nothing falls back to the Python module, even for functions the library does not implement. Python plugins with other names are unaffected and keep working beside the native one. To port a plugin gradually, split it: move one capability into a Rust plugin with a new name and keep the rest in Python (the two may depend on each other through `required`).
 
+### Gradual migration
+
+Keep a Python plugin such as `acme_ui` for `@dash_plugin`, custom login layouts, and FastAPI
+handlers, and put the data capability into a differently named Rust plugin, `acme_data`.
+For example, the native plugin can implement `fetch` and the existing Python page can read
+its registered Pipe through the normal SDK:
+
+```python
+import meerschaum as mrsm
+
+readings = mrsm.Pipe('plugin:acme_data', 'readings', instance='sql:local')
+# The page continues to use its existing Dash callbacks and data formatting.
+data = readings.get_data()
+```
+
+Use the native fetch example below as the starting implementation for `acme_data`. Register
+and sync that Pipe before opening the page. Moving the fetch implementation does not require
+rewriting the page or changing its session handling.
+
+The current native HTTP adapter accepts static paths outside reserved core namespaces. Do not
+assume it reproduces parameterized FastAPI routes, full scoped-principal context, custom
+request/response headers and cookies, redirects, or arbitrary binary responses. Audit those
+requirements before porting an API plugin. Same-name native plugins replace the complete
+Python plugin rather than individual capabilities.
+
 ## 🔧 Writing one
 
 Create a library crate:
@@ -51,7 +76,7 @@ edition = "2024"
 crate-type = ["cdylib"]
 
 [dependencies]
-meerschaum-plugin = "5"   # or a path/git dependency on crates/meerschaum-plugin until it is published
+meerschaum-plugin = "=5.0.0-rc.6"   # prerelease versions require an exact prerelease requirement
 
 [profile.release]
 panic = "unwind"      # required: the SDK catches panics at the boundary

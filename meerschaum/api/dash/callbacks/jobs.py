@@ -23,6 +23,9 @@ from meerschaum.utils.packages import attempt_import, import_dcc, import_html
 from meerschaum.api.dash.components import alert_from_success_tuple, build_cards_grid
 from meerschaum.api.dash.jobs import (
     build_job_card,
+    build_archived_run_card,
+    is_automatic_job,
+    job_visible_to_session,
     build_manage_job_buttons_div_children,
     build_status_children,
     build_process_timestamps_children,
@@ -67,7 +70,7 @@ def download_job_logs(n_clicks, session_store_data):
         job = _get_job(job_name)
     except Exception:
         job = None
-    if job is None or not job.exists():
+    if job is None or not job.exists() or not job_visible_to_session(job, (session_store_data or {}).get('session-id')):
         raise PreventUpdate
 
     now = datetime.now(timezone.utc)
@@ -122,7 +125,7 @@ def manage_job_button_click(
         job = _get_job(job_name, job_label.replace('\n', ' ') if job_label else None)
     except Exception:
         job = None
-    if job is None or not job.exists():
+    if job is None or not job.exists() or not job_visible_to_session(job, session_id):
         raise PreventUpdate
 
     manage_functions = {
@@ -204,7 +207,7 @@ def job_delete_modal(
         job = _get_job(job_name, job_label.replace('\n', ' ') if job_label else None)
     except Exception:
         job = None
-    if job is None or not job.exists():
+    if job is None or not job.exists() or not job_visible_to_session(job, session_id):
         return False, no_update
 
     try:
@@ -247,6 +250,7 @@ def refresh_jobs_on_interval(
 
     ### NOTE: The job may have been deleted, but the card may still exist.
     jobs = [_get_job(name) for name in job_names]
+    jobs = [job if job_visible_to_session(job, session_id) else None for job in jobs]
 
     return (
         [
@@ -280,23 +284,34 @@ def render_job_page_from_url(
     """
     Load the `/dash/jobs/{name}` page.
     """
-    if not str(pathname).startswith('/dash/jobs'):
+    is_runs = str(pathname).startswith('/dash/runs')
+    if not (str(pathname).startswith('/dash/jobs') or is_runs):
         return no_update
 
     session_id = (session_data or {}).get('session-id', None)
     authenticated = is_session_authenticated(str(session_id))
 
-    job_name = pathname.replace('/dash/jobs', '').lstrip('/').rstrip('/')
+    job_name = pathname.replace('/dash/runs' if is_runs else '/dash/jobs', '').lstrip('/').rstrip('/')
     if not job_name:
         jobs = get_jobs(executor_keys='local', combine_local_and_systemd=True)
         cards = [
             build_job_card(job, authenticated=authenticated, include_follow=False)
             for job in jobs.values()
+            if is_automatic_job(job) == is_runs and job_visible_to_session(job, session_id)
         ]
-        return [html.Br(), build_cards_grid(cards, 3), html.Br()]
+        if is_runs and authenticated:
+            from meerschaum.api.dash.execute import execution_request
+            try:
+                records = execution_request('/execute/runs', get_username_from_session(session_id)) or []
+                cards.extend(build_archived_run_card(record) for record in records)
+            except Exception as exc:
+                cards.append(alert_from_success_tuple((False, f'Unable to load retained summaries: {exc}')))
+        return [html.Br(), html.H3('Runs' if is_runs else 'Jobs'),
+                html.A('Jobs' if is_runs else 'Runs', href='/dash/jobs' if is_runs else '/dash/runs'),
+                build_cards_grid(cards, 3), html.Br()]
 
     job = _get_job(job_name)
-    if not job.exists():
+    if not job.exists() or not job_visible_to_session(job, session_id):
         return [
             html.Br(),
             html.H2("404: Job does not exist."),
@@ -307,3 +322,25 @@ def render_job_page_from_url(
         build_job_card(job, authenticated=authenticated, include_follow=False),
         html.Br(),
     ]
+
+
+@dash_app.callback(
+    Output({'type': 'manage-job-alert-div', 'index': MATCH}, 'children', allow_duplicate=True),
+    Input({'type': 'retain-run-button', 'index': MATCH}, 'n_clicks'),
+    State('session-store', 'data'), prevent_initial_call=True,
+)
+def retain_automatic_run(clicks, session):
+    if not clicks or not is_state_authenticated(session):
+        raise PreventUpdate
+    from meerschaum.api.dash.execute import execution_request
+    from urllib.parse import quote
+    name = dash.callback_context.triggered_id['index']
+    try:
+        result = execution_request('/execute/runs/' + quote(name, safe='') + '/retain',
+            get_username_from_session((session or {}).get('session-id')), method='POST')
+        if result and result[0]:
+            return [alert_from_success_tuple((True, 'Kept as a persistent Job.')),
+                    html.A('Open Jobs', href='/dash/jobs')]
+        return alert_from_success_tuple(tuple(result))
+    except Exception as exc:
+        return alert_from_success_tuple((False, str(exc)))

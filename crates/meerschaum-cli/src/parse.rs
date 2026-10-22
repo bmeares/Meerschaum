@@ -376,7 +376,7 @@ fn engine_arguments(sysargs: &[String]) -> Result<(Vec<String>, ArgsMap), PyExce
             if attached.is_none() {
                 i += 1;
             }
-        } else if flag == "--resume" {
+        } else if matches!(flag, "--resume" | "--run-id") {
             let value = attached
                 .or_else(|| {
                     sysargs
@@ -385,9 +385,27 @@ fn engine_arguments(sysargs: &[String]) -> Result<(Vec<String>, ArgsMap), PyExce
                         .filter(|s| !s.starts_with('-'))
                 })
                 .ok_or_else(|| {
-                    PyException::new("InvalidArgumentException", "--resume requires a run ID")
+                    PyException::new(
+                        "InvalidArgumentException",
+                        format!("{flag} requires a run ID"),
+                    )
                 })?;
-            args.insert("resume".into(), PyValue::Str(value.to_owned()));
+            if flag == "--run-id"
+                && (value.is_empty()
+                    || value.len() > 200
+                    || !value
+                        .bytes()
+                        .all(|c| c.is_ascii_alphanumeric() || b"_.:-".contains(&c)))
+            {
+                return Err(PyException::new(
+                    "InvalidArgumentException",
+                    "Invalid --run-id; use letters, numbers, dots, colons, underscores or hyphens.",
+                ));
+            }
+            args.insert(
+                flag.trim_start_matches('-').replace('-', "_"),
+                PyValue::Str(value.to_owned()),
+            );
             if attached.is_none() {
                 i += 1;
             }

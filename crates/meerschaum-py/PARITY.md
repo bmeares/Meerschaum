@@ -1555,3 +1555,31 @@ standard Arrow C stream; checked with an old `native_demo` build against the new
 | W18-FX7-001 | rc2 development (W18-DP-002): without a server to call, or when `POST /execute` was unreachable or not routed, the console's Exec ran the action as a hidden job in the host process (`_dash_exec_<id>`) with no permission check, and polled its log (`poll_exec`, which read any job named in a client-held store without checking the session) | There is no local run. Exec and Manage always `POST /execute` with the session user's bearer; with no `server_url`, an unreachable server, a missing route (the `actions` group left out of `api:permissions:routes:allowlist`) or a refusal the console shows the server's message and nothing runs; "Follow logs" needs the server's stream too. The polling callback and its `exec-raw` / `exec-interval` components are gone. Supersedes the "Without a server to call ... polls its log" sentence of W18-DP-002 | review RV2 #1 (any logged-in user to arbitrary code as the server's OS user); `tests/api_host/test_exec_security.py` |
 | W18-FX7-002 | v4 has no `/execute` (rc2 development: any caller with `actions:execute` + `jobs:execute` + `jobs:write` could run any `sysargs`, and the omit list and flag list lived in the Python UI only) | `POST /execute` checks who may run actions with `api:permissions:actions:non_admin` (`ServerConfig::actions_non_admin`: true by default, false under `--secure`; the key the console's session check and the terminal read), not the unset `system:` key `/actions` and the job routes read (see the terminal row above); `GET /logs/{name}/stream` asks the same function (`is_user_allowed_to_execute_console`, so the two cannot disagree) and shows an `execute-*` job to its creator and administrators only; for a caller who is not an administrator it also enforces `execute_policy.rs`: the console's omit list (`api`, `sh`, `os`, `sql`, `stack`, `reload`, `repo`, `instance`) plus the actions that run code or edit the server (`python`, `start`, `install`, `uninstall`, `upgrade`, `compose`, `setup`, `bootstrap`, `login`), the subactions that show or change configuration, environment, other jobs' logs, plugins, tokens and users (`show config`, `edit config`, `register users`, ...), every step of a `+` chain, the flags the console does not offer (`--shell`, `--use-bash`, `--allow-shell-job`, `--gui`, `--trace`, `--version`, `--help`, their abbreviations, `-h`, `-V`), an action that does not come first, and a job name outside `execute-*`; refused with 403 and a message. Administrators (and `--no-auth`) keep v4's `/actions` latitude. The console reads the lists at `GET /execute/policy` (built-in copy if unreachable, pinned by a test) | v5-only route, so nothing to reproduce; the policy is stricter than the console's UI on purpose (the UI is not a boundary); `crates/meerschaum-server/tests/fx7_exec_policy.rs`, `execute_policy.rs` unit tests |
 | W18-FX7-003 | v4 `GET /jobs` and `GET /jobs/{name}` return each job's `daemon.properties` as it is, including `env` (the environment of the server when the job was created: every `MRSM_SQL_*` / `MRSM_API_*` connector URI with its password and the process's other secrets) to any `jobs:read` caller (`api/routes/_jobs.py`, `get_jobs`) | Every job metadata response is redacted: the password of a connector URI (`scheme://user:****@host`) and of `password=` / `token=` / ... query parameters, the value of any key named like a credential (`*_PASSWORD`, `*_TOKEN`, `*_SECRET*`, a `KEY` / `AUTH` / `PASS` word), and the same inside the JSON of a string (`MRSM_CONFIG`, `-P '{...}'`); the rest of `env` is kept. An `execute-*` job (and any job `/execute` started) records its creator in `properties.mrsm_owner` and is visible (`GET /jobs*`, `/logs/{name}`, `/logs/{name}/ws`, start / stop / pause / delete) to its creator and to administrators only; others see it as absent (404). Other jobs keep v4's visibility | review RV2 #3; the jobs a v4 client lists keep their shape (same keys; masked values); `jobs_never_expose_credentials`, `execute_jobs_are_visible_to_their_creator_and_administrators_only`, `redact.rs` tests |
+
+## Approved rc6 behavior changes (2026-10-21)
+
+The maintainer approved these additive or changed behaviors in
+`docs/design/v5.0.0rc6.md`; v4 recordings remain the oracle for unaffected behavior.
+
+- Registered cross-instance Pipelines and their lifecycle/analysis actions are visible in
+  action listings and completion. Parity assertions may exclude documented v5 additions at
+  their comparison boundary; production discovery must not hide them.
+- Custom-named Compose files derive implicit project names from their filename, while
+  conventional `mrsm-compose.yaml` / `.yml` files retain their directory name (including dots).
+  Explicit names remain authoritative. Existing golden fixtures are not regenerated for this.
+- Interactive SQL prefers installed Rainfrog for supported flavors, honors configured client
+  preferences, and uses plain clients with `--nopretty`; credentials stay outside argv and
+  a failing interactive client fails the action.
+- Terminal and console execution timelines default to actual elapsed time, without planned
+  duration overlays stretching the axis. Forecast metadata remains available in run history.
+- Console Exec returns to the existing terminal session. Background Pipeline operations keep
+  their structured execution/run interface; temporary workers do not populate default Jobs cards.
+- New manual Jobs carry explicit `mrsm_execution.kind = persistent_job` metadata, including
+  names beginning with `execute-`. Legacy records are preserved. Systemd fixture comparisons
+  exclude this additive field after checking its value; recorded v4 fixtures remain unchanged.
+
+The rc6 workspace regression checks also uncovered a Python façade recursion crash when a
+Pipe's SQL referenced its own table. Nested target/schema reads now use a context-local raw
+parameter snapshot instead of re-entering the Rust resolver. Resolution stays in Rust and
+raw SQL is preserved; the native depth-limit warning behavior remains unchanged. The console
+availability probe no longer requires PyYAML, because v5's YAML codec is native.

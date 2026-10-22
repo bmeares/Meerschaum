@@ -44,7 +44,8 @@
     const session = { term, fit, el, root, mode, socket: null, mods: { ctrl: false, shift: false }, disposed: false, timer: null, fitting: false, reconnects: 0 };
     sessions.add(session);
 
-    const send = (frame) => {
+    const send = (frame, userInput = true) => {
+      if (userInput && frame[0] === 'stdin') session.lineDirty = true;
       const socket = session.socket;
       if (socket && socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(frame));
     };
@@ -63,7 +64,24 @@
     };
     session.scheduleFit = scheduleFit;
     term.onResize(sendSize);
-    term.onData((data) => send(['stdin', data]));
+    session.idle = false;
+    session.lineDirty = false;
+    session.requests = new Map();
+    term.parser.registerOscHandler(133, (data) => {
+      if (data === 'A') { session.idle = true; session.lineDirty = false; }
+      if (data === 'C') session.idle = false;
+      return true;
+    });
+    // This pinned xterm bundle distinguishes real input from automatic terminal replies.
+    // onData alone includes reedline's cursor-position/device queries at an idle prompt.
+    const core = term._core && term._core.coreService;
+    const userInput = core && typeof core.onUserInput === 'function'
+      ? core.onUserInput(() => { session.lineDirty = true; }) : null;
+    term.onData((data) => {
+      const terminalReply = /^(?:\x1b\[[?>]?[\d;]+[Rcn])+$/.test(data);
+      if (!userInput && !terminalReply) session.lineDirty = true;
+      send(['stdin', data], false);
+    });
 
     const connect = () => {
       if (session.disposed) return;
@@ -71,6 +89,7 @@
       const socket = new WebSocket(protocol + '://' + location.host + el.dataset.ws);
       session.socket = socket;
       socket.onopen = () => {
+        session.idle = false;
         if (session.reconnects) term.reset();
         try { fit.fit(); } catch (_) { /* hidden */ }
         sendSize();
@@ -103,6 +122,7 @@
       }
       resizer.disconnect();
       themes.disconnect();
+      if (userInput) userInput.dispose();
       term.dispose();
       el.textContent = '';
       delete el.dataset.rendered;
@@ -208,14 +228,38 @@
     if (!event.isTrusted || event.origin !== location.origin || !event.data) return;
     const session = [...sessions][0];
     if (!session) return;
-    if (event.data.action === '__SEND_KEY') session.send(['stdin', event.data.key || '']);
+    if (event.data.action === '__EXEC') {
+      const id = event.data.request_id;
+      let result = session.requests.get(id);
+      if (!result) {
+        const connected = session.socket && session.socket.readyState === WebSocket.OPEN;
+        const valid = typeof event.data.command === 'string' && !/[\x00-\x1f]/.test(event.data.command);
+        const accepted = connected && session.idle && !session.lineDirty && valid;
+        result = {action: '__EXEC_ACK', request_id: id, accepted,
+          message: !connected ? 'Terminal is disconnected. Reconnect and submit again.' :
+            !accepted ? 'Terminal is busy or has unfinished input. Finish it before submitting.' : ''};
+        session.requests.set(id, result);
+        if (accepted) {
+          session.idle = false;
+          session.send(['stdin', event.data.command + '\r']);
+          session.term.focus();
+        }
+      }
+      event.source.postMessage(result, event.origin);
+    }
+    else if (event.data.action === '__SEND_KEY') session.send(['stdin', event.data.key || '']);
     // The console's "+" button: a new tmux window running `mrsm` (v4's `__TMUX_NEW_WINDOW`).
     else if (event.data.action === '__TMUX_NEW_WINDOW') session.send(['new_window']);
     // The console's instance selector: `instance <keys>` typed at the shell after a Ctrl-C that
     // clears the line (what v4's page typed; `subaction_text` is v4's name for the keys).
     else if (event.data.action === 'instance') {
       const keys = event.data.instance || event.data.subaction_text;
-      if (typeof keys === 'string' && keys && !/[\x00-\x1f]/.test(keys)) session.send(['stdin', '\x03instance ' + keys + '\r']);
+      if (typeof keys === 'string' && keys && !/[\x00-\x1f]/.test(keys)) {
+        if (session.idle && !session.lineDirty) {
+          session.idle = false;
+          session.send(['stdin', 'instance ' + keys + '\r']);
+        }
+      }
     }
     else if (event.data.action === '__TOGGLE_MOD' && event.data.mod in session.mods) {
       session.mods[event.data.mod] = !!event.data.on;

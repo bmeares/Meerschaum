@@ -133,12 +133,29 @@ impl APIConnector {
     }
 
     async fn lease_request(&self, method: Method, req: &LeaseRequest) -> ConnectorResult<bool> {
+        let parts: Vec<_> = req.pipe_ref.splitn(4, '|').collect();
+        let pipeline_metadata = parts.len() == 4
+            && parts[1] == "mrsm"
+            && ["pipeline", "pipeline_registry"].contains(&parts[2]);
+        let route = if pipeline_metadata {
+            "/pipelines/leases"
+        } else {
+            routes::ENGINE_LEASES
+        };
         let r = self
             .make_request(
                 method,
-                routes::ENGINE_LEASES,
+                route,
                 RequestOptions {
                     body: Body::Json(serde_json::to_string(req)?),
+                    query: if pipeline_metadata {
+                        vec![(
+                            "instance_keys".into(),
+                            QueryValue::opt(self.instance_keys()),
+                        )]
+                    } else {
+                        vec![]
+                    },
                     ..Default::default()
                 },
             )

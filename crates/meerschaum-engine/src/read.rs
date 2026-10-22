@@ -267,7 +267,7 @@ impl EngineReader {
             if filter
                 .run_name
                 .as_ref()
-                .is_some_and(|name| !crate::runs::run_has_name(&run.run_id, name))
+                .is_some_and(|name| !run.belongs_to_pipeline(name))
             {
                 continue;
             }

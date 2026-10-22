@@ -384,9 +384,18 @@ fn argument_spec_matches_python_parser() {
         .iter()
         .map(|a| a["dest"].as_str().unwrap())
         .collect();
+    // Additive engine flags are outside the v4 schema fixture, but must remain discoverable.
+    for (dest, flag) in [("run_id", "--run-id"), ("resume", "--resume")] {
+        assert!(
+            rs_args.iter().any(
+                |arg| arg["dest"] == dest && arg["option_strings"] == serde_json::json!([flag])
+            )
+        );
+    }
     let rs_dests: Vec<&str> = rs_args
         .iter()
         .map(|a| a["dest"].as_str().unwrap())
+        .filter(|dest| !["run_id", "resume"].contains(dest))
         .collect();
     if py_dests != rs_dests {
         failures.push(format!(

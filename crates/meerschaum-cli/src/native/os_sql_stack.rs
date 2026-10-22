@@ -2,8 +2,8 @@
 //!
 //! - `os <command ...>` runs a subprocess and returns its captured output.
 //! - `sql` reads / executes queries on a `sql:` connector, or opens the flavor's interactive
-//!   client (`pgcli` / `mycli` / `litecli` from the `cli-tools` extra, else `psql` / `mysql` /
-//!   `sqlite3` / `sqlcmd` / `duckdb` from `PATH`; nothing is installed implicitly).
+//!   client (Rainfrog first, configurable per connector/flavor, then the Python and plain
+//!   clients; `--nopretty` forces the plain client; nothing is installed implicitly).
 //! - `stack <docker compose args>` writes the Docker Compose stack project from the `stack`
 //!   config and runs `docker compose` against it.
 
@@ -111,6 +111,23 @@ fn fallback_cli(flavor: &str) -> Option<&'static str> {
 
 /// `SQLConnector.cli()`: launch the flavor's interactive client.
 pub fn open_cli(rt: &mut Runtime<'_>, label: &str) -> ActionResult {
+    open_cli_with_options(rt, label, false)
+}
+
+fn rainfrog_driver(flavor: &str) -> Option<&'static str> {
+    match flavor {
+        "postgresql" | "postgis" | "timescaledb" | "timescaledb-ha" | "cockroachdb" | "citus" => {
+            Some("postgres")
+        }
+        "mysql" | "mariadb" | "percona" => Some("mysql"),
+        "sqlite" | "geopackage" => Some("sqlite"),
+        "duckdb" => Some("duckdb"),
+        "oracle" => Some("oracle"),
+        _ => None,
+    }
+}
+
+fn open_cli_with_options(rt: &mut Runtime<'_>, label: &str, nopretty: bool) -> ActionResult {
     let keys = format!("sql:{label}");
     let failed = |message: String| {
         Ok(SuccessTuple::fail(format!(
@@ -128,8 +145,40 @@ pub fn open_cli(rt: &mut Runtime<'_>, label: &str) -> ActionResult {
         Err(message) => return failed(message),
     };
     let flavor = spec.flavor.to_string();
-    let Some(cli) = flavor_cli(&flavor) else {
-        return failed(format!("No CLI available for flavor '{flavor}'."));
+    let configured = attrs
+        .get("cli")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .or_else(|| {
+            rt.config()
+                .get(&["system", "connectors", "sql", "cli", &flavor])
+                .and_then(|v| v.as_str().map(str::to_string))
+        });
+    let mut candidates = Vec::new();
+    if !nopretty {
+        if let Some(preferred) = configured.filter(|s| !s.is_empty()) {
+            candidates.push(preferred);
+        } else if rainfrog_driver(&flavor).is_some() {
+            candidates.push("rainfrog".into());
+        }
+        if let Some(python) = flavor_cli(&flavor) {
+            candidates.push(python.into());
+        }
+    }
+    if let Some(plain) = fallback_cli(&flavor) {
+        candidates.push(plain.into());
+    }
+    let path = rt.config().paths();
+    let selected = candidates
+        .iter()
+        .find_map(|name| find_program(rt, name, &path).map(|program| (name.clone(), program)));
+    let Some((cli, program)) = selected else {
+        return failed(format!(
+            "Cannot find a SQL client for '{flavor}' (tried {}). Install Rainfrog with \
+             `cargo install rainfrog --locked`, install `meerschaum[cli-tools]`, or add the \
+             plain flavor client to PATH.",
+            candidates.join(", ")
+        ));
     };
     let is_file = matches!(flavor.as_str(), "sqlite" | "duckdb" | "geopackage");
     let database = spec
@@ -158,29 +207,36 @@ pub fn open_cli(rt: &mut Runtime<'_>, label: &str) -> ActionResult {
         password = password.take().or(from_url);
         url
     };
-    let path = rt.config().paths();
-    let (program, args) = match find_program(rt, cli, &path) {
-        Some(program) => (program, vec![target.clone()]),
-        None => {
-            let Some(fallback) = fallback_cli(&flavor).and_then(|p| find_program(rt, p, &path))
-            else {
-                return failed(format!(
-                    "Cannot find '{cli}' (install the `cli-tools` extra or add it to PATH)."
-                ));
+    let args = match cli.as_str() {
+        "rainfrog" => {
+            let Some(driver) = rainfrog_driver(&flavor) else {
+                return failed(format!("Rainfrog does not support flavor '{flavor}'."));
             };
-            let args = match flavor.as_str() {
-                "mysql" | "mariadb" | "percona" => mysql_args(&spec),
-                "mssql" => mssql_args(&spec),
-                _ => vec![target.clone()],
-            };
-            (fallback, args)
+            vec!["--driver".into(), driver.into()]
         }
+        "mysql" => mysql_args(&spec),
+        "sqlcmd" => mssql_args(&spec),
+        _ => vec![target.clone()],
     };
     let mut command = CommandSpec {
         program,
         args,
         ..CommandSpec::default()
     };
+    if cli == "rainfrog" {
+        // Rainfrog reads DATABASE_URL itself. Keep the full URL (including TLS/query options
+        // and credentials) out of argv; do not inherit an unrelated DATABASE_URL.
+        let url = if is_file {
+            format!("{}://{target}", rainfrog_driver(&flavor).unwrap())
+        } else {
+            strip_driver(
+                &spec
+                    .engine_str()
+                    .map_err(|e| ActionError::new("ValueError", e.to_string()))?,
+            )
+        };
+        command.env.push(("DATABASE_URL".into(), url));
+    }
     if let Some(password) = password.filter(|p| !p.is_empty()) {
         for name in password_variables(&flavor) {
             command.env.push((name.to_string(), password.clone()));
@@ -192,7 +248,8 @@ pub fn open_cli(rt: &mut Runtime<'_>, label: &str) -> ActionResult {
             .push(("DOTNET_SYSTEM_GLOBALIZATION_INVARIANT".into(), "1".into()));
     }
     match rt.host.run(&command) {
-        Ok(_) => {}
+        Ok(0) => {}
+        Ok(code) => return failed(format!("SQL client exited with status {code}.")),
         Err(e) => return failed(e.to_string()),
     }
     let text = rt.with_formatter(|f| {
@@ -338,7 +395,7 @@ pub fn sql(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
         return Ok(SuccessTuple::fail("Query must not be empty."));
     }
     if action.is_empty() {
-        return open_cli(rt, "main");
+        return open_cli_with_options(rt, "main", nopretty);
     }
     let sql_section = rt
         .config()
@@ -359,7 +416,7 @@ pub fn sql(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     let keys = format!("sql:{label}");
     // `sql <label>` only opens the client, which connects on its own (the database may be down).
     if query == label {
-        return open_cli(rt, &label);
+        return open_cli_with_options(rt, &label, nopretty);
     }
     let sess = session(rt);
     let conn = match sess.instance(&keys, rt.config()) {

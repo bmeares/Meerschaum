@@ -844,13 +844,27 @@ pub fn get_project_name(config: &Map, msgs: &mut Messages) -> Result<Value, Comp
             "Could not determine the project name. Is `project_name` set?",
         ));
     };
-    // PARITY: the default is the parent directory's *stem* (`my.project` -> `my`).
-    let dir_name = file
-        .parent()
-        .and_then(|p| p.file_name())
-        .map(|n| n.to_string_lossy().to_string())
-        .unwrap_or_default();
-    Ok(Value::Str(py_stem(&dir_name)))
+    // rc6: custom files identify independent projects in a shared directory. Conventional
+    // filenames retain directory identity, including dots in the directory's name.
+    let filename = file.file_name().and_then(|n| n.to_str()).unwrap_or("");
+    let name = if DEFAULT_COMPOSE_FILE_CANDIDATES.contains(&filename) {
+        file.parent()
+            .and_then(|p| p.file_name())
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default()
+    } else {
+        filename
+            .strip_suffix(".yaml")
+            .or_else(|| filename.strip_suffix(".yml"))
+            .unwrap_or(filename)
+            .to_string()
+    };
+    if name.is_empty() {
+        return Err(ComposeError::value(
+            "Could not determine the project name. Set `project_name` explicitly.",
+        ));
+    }
+    Ok(Value::Str(name))
 }
 
 /// `ensure_project_name(compose_config)`.
@@ -1198,6 +1212,30 @@ mod tests {
         assert_eq!(py_stem("my.project"), "my");
         assert_eq!(py_stem(".hidden"), ".hidden");
         assert_eq!(py_stem("plain"), "plain");
+    }
+
+    #[test]
+    fn project_defaults_follow_custom_files_and_conventional_directories() {
+        for (file, expected) in [
+            ("/projects/acme/metrics.yaml", "metrics"),
+            ("/projects/acme/analytics.yml", "analytics"),
+            ("/projects/acme/metrics.prod.yaml", "metrics.prod"),
+            ("/projects/acme/mrsm-compose.yaml", "acme"),
+            ("/projects/acme.prod/mrsm-compose.yml", "acme.prod"),
+        ] {
+            let mut config = Map::new();
+            config.insert("__file__".into(), Value::Str(file.into()));
+            assert_eq!(
+                get_project_name(&config, &mut Messages::default()).unwrap(),
+                Value::Str(expected.into()),
+                "{file}"
+            );
+            config.insert("project_name".into(), Value::Str("explicit".into()));
+            assert_eq!(
+                get_project_name(&config, &mut Messages::default()).unwrap(),
+                Value::Str("explicit".into())
+            );
+        }
     }
 
     #[test]

@@ -164,6 +164,28 @@ const ROOT_WITH_INCLUDES: &str = "project_name: top\nroot_dir: ./root\ninclude:\
 // ---- include: forms, order and identity ------------------------------------------------------
 
 #[test]
+fn unnamed_includes_use_their_own_filenames_and_conventional_directory() {
+    let s = sandbox(&[
+        (
+            "top/mrsm-compose.yaml",
+            "include: [extract.yaml, load.yml, reporting.prod/]\n",
+        ),
+        ("top/extract.yaml", "pipes: []\n"),
+        ("top/load.yml", "pipes: []\n"),
+        ("top/reporting.prod/mrsm-compose.yaml", "pipes: []\n"),
+    ]);
+    let run = go(&s, "top", &["explain"]);
+    assert!(
+        run.out.result.as_ref().unwrap().success,
+        "{}",
+        run.message()
+    );
+    let mut names = run.names();
+    names.sort();
+    assert_eq!(names, vec!["extract", "load", "reporting.prod", "top"]);
+}
+
+#[test]
 fn include_takes_files_directories_globs_and_optional_paths() {
     let s = sandbox(&[
         (

@@ -85,6 +85,31 @@ success, msg = job.start()
     job.delete()
     ```
 
+## Automatic Runs
+
+The Web Console separates persistent **Jobs** from automatic **Runs**. Clicking a Pipeline's
+Run or a Pipe's Sync action creates a temporary execution worker, which appears in Runs and
+its Pipeline rather than filling the default Jobs cards. A manually created one-shot Job
+remains in Jobs. After an automatic execution finishes, choose **Keep as Job** to promote
+it into a persistent Job. Repeating that request is safe.
+
+Automatic successful output is retained for 24 hours, failed output for 7 days, and archived
+summaries for 30 days. The server cleans up at startup and periodically, without requiring
+another execution request; active and paused work do not expire. Unknown completion results
+use the failure retention period. The worker and its output links remain available until its
+output expires; Runs then shows an archived summary with the result and exact Pipeline/run
+identity, explicitly marking the output as expired. These settings govern automatic worker
+records and do not prune the engine's separate execution-history store. Configure durations in seconds:
+
+```yaml
+api:
+  execute:
+    retention:
+      success_seconds: 86400
+      failure_seconds: 604800
+      summary_seconds: 2592000
+```
+
 ## ⏲️ Schedules
 
 Meerschaum includes its own small schedule engine, so scheduled jobs do not require a separate

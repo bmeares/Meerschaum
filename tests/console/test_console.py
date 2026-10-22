@@ -205,27 +205,49 @@ def test_pipe_card_shows_parents_and_children(server, tab):
     assert _errors(tab) == [], _errors(tab)
 
 
-def test_exec_runs_an_action_through_the_server(server, tab):
+def test_exec_runs_once_in_existing_terminal(webterm_server, context):
+    from tests.console.test_webterm import _open_terminal, _rows, _wait_for_text
+    server = webterm_server
+    page = context.new_page()
+    from tests.console.conftest import Tab
+    tab = Tab(page, server.base_url)
     result = server.python(SETUP_PIPES)
     assert result.returncode == 0, result.stderr[-2000:]
     tab.login()
-    ### `show pipes` is the dashboard's default selection.
-    tab.page.click('#go-button')
-    tab.page.wait_for_selector('#exec-div', state='visible')
-    _wait_text(tab.page, '#exec-view', 'w7parent', timeout=60000)
-    _wait_text(tab.page, '#exec-header', 'show pipes')
-    _wait_text(tab.page, '#exec-header', 'stopped')
-    ### The terminal makes way for the output; `Term` brings it back.
-    assert not tab.page.locator('#webterm-div').is_visible()
-    tab.page.click('#show-webterm-button')
-    tab.page.wait_for_selector('#exec-div', state='hidden')
+    frame = _open_terminal(page, server.base_url, '/dash')
+    frame.wait_for_function('window.terminal.session.idle === true')
+    frame_identity = frame.evaluate('window._rc6Identity = Math.random()')
+    requests = []
+    page.on('request', lambda request: requests.append(request.url))
+    page.click('#go-button')
+    page.wait_for_function("() => { const id = window._mrsmExecSubmitted; const frame = document.getElementById('webterm-iframe'); return !!(id && frame?.contentWindow?.terminal?.session.requests.has(id)); }")
+    acknowledgment = page.evaluate("document.getElementById('webterm-iframe').contentWindow.terminal.session.requests.get(window._mrsmExecSubmitted)")
+    assert acknowledgment['accepted'], acknowledgment
+    _wait_for_text(frame, 'w7parent')
+    frame.wait_for_function('window.terminal.session.idle === true')
+    assert frame.evaluate('window._rc6Identity') == frame_identity
+    assert page.locator('#webterm-div').is_visible()
+    assert not page.locator('#exec-div').is_visible()
+    assert not any(url.endswith('/execute') for url in requests)
+    # Duplicate delivery is acknowledged without typing another command.
+    store = page.evaluate("window._mrsmExecSubmitted")
+    before = _rows(frame).count('show pipes')
+    page.evaluate("id => document.getElementById('webterm-iframe').contentWindow.postMessage({action:'__EXEC', request_id:id, command:'show pipes'}, location.origin)", store)
+    page.wait_for_timeout(200)
+    assert _rows(frame).count('show pipes') == before
+    frame.evaluate("window.terminal.term.input('unfinished')")
+    page.click('#go-button')
+    _wait_text(page, '#terminal-exec-status', 'unfinished input')
+    assert frame.evaluate('window._rc6Identity') == frame_identity
+    frame.evaluate("window.terminal.term.input('\\x15\\r')")
     assert _errors(tab) == [], _errors(tab)
+    page.close()
 
 
 def test_exec_refuses_what_the_dashboard_does_not_offer(server, tab):
     tab.login()
     tab.page.click('#go-button')
-    tab.page.wait_for_selector('#exec-div', state='visible')
+    _wait_text(tab.page, '#terminal-exec-status', 'Terminal is unavailable')
     ### The server applies the action's permissions itself: a non-admin user is refused.
     anonymous = tab.page.request.post(
         f"{server.base_url}/execute", data=json.dumps({'sysargs': ['show', 'version']}),
@@ -249,7 +271,7 @@ assert success, msg
     ### An action the server keeps from non-administrators (it runs code): refused, with the reason.
     tab.page.select_option('#action-dropdown', 'python')
     tab.page.click('#go-button')
-    _wait_text(tab.page, '#exec-alert-div', 'cannot be run by non-administrators', timeout=30000)
+    _wait_text(tab.page, '#exec-alert-div', 'server refused this command', timeout=30000)
     ### The dashboard's own omit list comes from the server (`GET /execute/policy`).
     options = tab.page.locator('#action-dropdown option').all_inner_texts()
     assert 'show' in options and 'sh' not in options and 'stack' not in options
@@ -257,8 +279,7 @@ assert success, msg
     ### `api:permissions:actions:non_admin` (true by default) for `/execute`, as the console does.
     tab.page.select_option('#action-dropdown', 'show')
     tab.page.click('#go-button')
-    tab.page.wait_for_selector('#exec-div', state='visible')
-    _wait_text(tab.page, '#exec-header', 'stopped', timeout=60000)
+    _wait_text(tab.page, '#terminal-exec-status', 'Terminal is unavailable', timeout=60000)
     assert _errors(tab) == [], _errors(tab)
 
 
@@ -678,8 +699,7 @@ def test_no_auth_console_needs_no_login(noauth_server, context):
     tab.wait_for_dashboard()
     ### Everything the login gates is open, including the pages that list and run things.
     tab.page.click('#go-button')
-    tab.page.wait_for_selector('#exec-div', state='visible')
-    _wait_text(tab.page, '#exec-view', 'No pipes to show', timeout=60000)
+    _wait_text(tab.page, '#terminal-exec-status', 'Terminal is unavailable', timeout=60000)
     for path in ('/dash/pipes', '/dash/jobs', '/dash/tokens', '/dash/pipelines'):
         tab.goto(path)
         assert tab.page.locator('#username-input').count() == 0, path
@@ -747,7 +767,7 @@ def test_pipelines_page_graph_gantt_and_runs(server, tab):
     _wait_text(tab.page, '#pipeline-inspector', 'Query')
     assert tab.page.locator('#pipeline-inspector a', has_text='Open pipe').count() == 1
     tab.page.locator('#pipeline-fit').click()
-    assert tab.page.locator('#pipeline-canvas svg path[marker-end]').count() == 1
+    assert tab.page.locator('#pipeline-canvas svg path').count() == 2
     ### The Gantt chart of the latest run, and its nodes.
     tab.page.wait_for_selector('#pipelines-gantt .barlayer .point', timeout=60000)
     assert tab.page.locator('#pipelines-gantt .barlayer .point').count() >= 2
@@ -790,8 +810,10 @@ def test_the_console_embeds_the_servers_terminal(webterm_server, context):
     tab.goto('/dash', '#go-button')
     tab.page.wait_for_selector('#webterm-iframe')
     assert tab.page.get_attribute('#webterm-iframe', 'src') == f"/webterm/{cookie}"
-    ### No separate terminal process listens anywhere (`tests/console/test_webterm.py` drives it).
-    assert not webterm_server.port_is_open(webterm_server.webterm_port)
+    ### The terminal shares the native API listener; no separate terminal service is started.
+    assert webterm_server.port_is_open(webterm_server.port)
+    if webterm_server.webterm_port != webterm_server.port:
+        assert not webterm_server.port_is_open(webterm_server.webterm_port)
     assert _errors(tab) == [], _errors(tab)
 
 

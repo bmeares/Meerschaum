@@ -91,6 +91,10 @@ pub struct ServerConfig {
     /// `api:permissions:routes:allowlist` (fnmatch patterns over route groups). A missing key
     /// (or `null`) means `['*']`; an explicitly empty list serves no core group.
     pub routes_allowlist: Vec<String>,
+    /// Explicitly disabled route groups; overrides the allowlist, including login.
+    pub routes_disabled: Vec<String>,
+    /// Automatic execution retention (success output, failure output, summaries), seconds.
+    pub execution_retention: [u64; 3],
     /// `api:permissions:rate_limits` by route-group pattern (new in v5).
     pub rate_limits: IndexMap<String, RateLimit>,
     /// `api:permissions:log_streams:max`: log streams (`GET /logs/{name}/stream`) one server
@@ -266,6 +270,9 @@ impl ServerConfig {
             v => str_list(v).unwrap_or_default(),
         };
 
+        let routes_disabled =
+            str_list(get(cfg, &["api", "permissions", "routes", "disabled"])).unwrap_or_default();
+
         let mut rate_limits = IndexMap::new();
         if let Some(Value::Map(m)) = get(cfg, &["api", "permissions", "rate_limits"]) {
             for (group, spec) in m {
@@ -359,6 +366,18 @@ impl ServerConfig {
             ))
             .unwrap_or_else(|| vec!["*".into()]),
             routes_allowlist,
+            routes_disabled,
+            execution_retention: [
+                ("success_seconds", 86400),
+                ("failure_seconds", 604800),
+                ("summary_seconds", 2592000),
+            ]
+            .map(|(key, default)| {
+                get(cfg, &["api", "execute", "retention", key])
+                    .and_then(meerschaum_core::pyfmt::py_int)
+                    .and_then(|v| u64::try_from(v).ok())
+                    .unwrap_or(default)
+            }),
             rate_limits,
             log_streams_max: usize::try_from(int_at(
                 cfg,
@@ -479,7 +498,8 @@ impl ServerConfig {
 
     /// Whether a core route group is served (`route_group_is_allowed`).
     pub fn route_group_is_allowed(&self, group: &str) -> bool {
-        self.routes_allowlist.iter().any(|p| fnmatch(group, p))
+        !self.routes_disabled.iter().any(|p| fnmatch(group, p))
+            && self.routes_allowlist.iter().any(|p| fnmatch(group, p))
     }
 
     /// The rate limit for a route group (the first matching pattern).

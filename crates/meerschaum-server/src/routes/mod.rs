@@ -1,7 +1,7 @@
 //! The HTTP routes (`meerschaum/api/routes/*`), grouped by the route groups that
 //! `api:permissions:routes:allowlist` restricts (`api/routes/__init__.py`).
 //!
-//! `/login` is always served. Unmatched requests fall through to the extension-host proxy
+//! `/login` is served unless explicitly disabled. Unmatched requests fall through to the extension-host proxy
 //! (§7.3) when one is configured, else `404 {"detail": "Not Found"}`.
 
 use axum::Router;
@@ -24,6 +24,7 @@ pub mod execute;
 pub mod jobs;
 pub mod login;
 pub mod misc;
+pub mod pipelines;
 pub mod pipes;
 pub mod plugins;
 pub mod tokens;
@@ -39,6 +40,7 @@ pub const CORE_ROUTE_GROUPS: &[&str] = &[
     "jobs",
     "misc",
     "pipes",
+    "pipelines",
     "plugins",
     "tokens",
     "users",
@@ -52,6 +54,7 @@ pub fn route_group_of(path: &str) -> &'static str {
     match first {
         "" => "index",
         "pipes" | "metadata" => "pipes",
+        "pipelines" => "pipelines",
         "actions" | "execute" => "actions",
         "connectors" => "connectors",
         "jobs" | "logs" => "jobs",
@@ -195,6 +198,13 @@ pub fn is_proxyable(cfg: &crate::config::ServerConfig, path: &str) -> bool {
     if group == "webterm" {
         return false;
     }
+    if cfg
+        .routes_disabled
+        .iter()
+        .any(|p| crate::config::fnmatch(group, p))
+    {
+        return false;
+    }
     let core = CORE_ROUTE_GROUPS.contains(&group) || group == "mcp";
     !(core && !cfg.route_group_is_allowed(group))
 }
@@ -212,9 +222,16 @@ pub fn router(state: AppState) -> Router {
 pub fn router_with_mcp(state: AppState, mcp: std::sync::Arc<crate::mcp::McpServer>) -> Router {
     let cfg = state.config.clone();
     let mut app: Router<AppState> = Router::new();
-    // `/login` is always registered (`api/routes/__init__.py`).
-    app = login::routes(app);
-    let groups: [(&str, AddRoutes); 12] = [
+    // Login is independent of the allowlist for compatibility; explicit disabling wins.
+    if !cfg
+        .routes_disabled
+        .iter()
+        .any(|p| crate::config::fnmatch("login", p))
+    {
+        app = login::routes(app);
+    }
+    execute::start_cleanup(&state);
+    let groups: [(&str, AddRoutes); 13] = [
         ("actions", actions::routes),
         ("actions", execute::routes),
         ("connectors", connectors::routes),
@@ -222,6 +239,7 @@ pub fn router_with_mcp(state: AppState, mcp: std::sync::Arc<crate::mcp::McpServe
         ("jobs", jobs::routes),
         ("misc", misc::routes),
         ("pipes", pipes::routes),
+        ("pipelines", pipelines::routes),
         ("plugins", plugins::routes),
         ("tokens", tokens::routes),
         ("users", users::routes),

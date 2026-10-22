@@ -73,6 +73,33 @@ pub struct RunRow {
     pub selection: Option<String>,
 }
 
+impl RunRow {
+    /// Definition snapshots admitted to this run. Older rows have no snapshots.
+    pub fn pipeline_definitions(&self) -> Vec<serde_json::Value> {
+        self.selection
+            .as_deref()
+            .and_then(|text| serde_json::from_str::<serde_json::Value>(text).ok())
+            .and_then(|value| {
+                value
+                    .get("pipeline_definitions")
+                    .and_then(|v| v.as_array())
+                    .cloned()
+            })
+            .unwrap_or_default()
+    }
+
+    /// Match stored Pipeline identity metadata, with name parsing only for legacy history.
+    pub fn belongs_to_pipeline(&self, name: &str) -> bool {
+        let definitions = self.pipeline_definitions();
+        if definitions.is_empty() {
+            return run_has_name(&self.run_id, name);
+        }
+        definitions
+            .iter()
+            .any(|definition| definition["name"].as_str() == Some(name))
+    }
+}
+
 /// One row of `mrsm:engine_nodes` (datetime `started`, ids `run_id`, `pipe_ref`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct NodeRow {

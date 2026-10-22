@@ -30,6 +30,7 @@ get_items_menu = dbc.DropdownMenu(
         dbc.DropdownMenuItem("Plugins", id='get-plugins-button'),
         dbc.DropdownMenuItem("Users", id='get-users-button'),
         dbc.DropdownMenuItem("Graphs", id='get-graphs-button'),
+        dbc.DropdownMenuItem("Runs", href="/dash/runs"),
     ],
     style={'width': '100%', 'font-size': '0.5em'},
     menu_variant='dark',
@@ -61,13 +62,16 @@ show_webterm_button = dbc.Button(
     color='dark',
     style={'width': '100%', 'background-color': 'black'},
 )
+show_pipelines_button = dbc.Button('Pipelines', id='get-pipelines-button',
+                                    color='info', style={'width': '100%'})
 bottom_buttons_content = dbc.Card(
     dbc.CardBody(
         dbc.Row([
             dbc.Col(go_button, xl=2, lg=3, md=3, sm=12),
             dbc.Col(show_pipes_button, xl=2, lg=3, md=3, sm=12),
             dbc.Col(show_jobs_button, xl=2, lg=3, md=3, sm=12),
-            dbc.Col(show_webterm_button, xl=2, lg=3, md=3, sm=12),
+            dbc.Col(show_pipelines_button, xl=2, lg=3, md=3, sm=8),
+            dbc.Col(show_webterm_button, xl=1, lg=2, md=2, sm=4),
             dbc.Col(lg=True, md=False, sm=False),
             dbc.Col(get_items_menu, xl=2, lg=12, md=12, sm=12),
         ])

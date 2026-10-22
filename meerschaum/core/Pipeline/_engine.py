@@ -21,7 +21,7 @@ from meerschaum.utils.typing import Any, Dict, List, Optional, Union
 #: Keyword arguments of `Pipe.sync()` the engine consumes itself.
 ENGINE_KEYWORDS = frozenset({
     'begin', 'end', 'force', 'retries', 'min_seconds', 'check_existing', 'enforce_dtypes',
-    'chunksize', 'workers', 'params', 'yes', 'run_id', 'run_name', 'graph', 'resume', 'on_event',
+    'chunksize', 'workers', 'params', 'yes', 'pipeline_definitions', 'run_id', 'run_name', 'graph', 'resume', 'on_event',
 })
 
 #: Keyword arguments of `Pipe.sync()` with no meaning for an engine run.
@@ -151,6 +151,9 @@ def build_request(
                 source_attributes = None
             if source_attributes is not None:
                 connectors.setdefault(target.connector_keys, source_attributes)
+            instance_attributes = connector_attributes(target.instance_connector)
+            if instance_attributes is not None:
+                connectors.setdefault(target.instance_keys, instance_attributes)
         else:
             keys = list(target)
             if len(keys) == 2:
@@ -166,6 +169,8 @@ def build_request(
             for key, value in filters.items()
             if value
         }
+    elif targets is not None:
+        request['targets'] = []
 
     sync = {}
     for key in (
@@ -184,7 +189,7 @@ def build_request(
     request['sync'] = sync
     request['begin'] = _bound(kwargs.get('begin', None))
     request['end'] = _bound(kwargs.get('end', None))
-    for key in ('workers', 'yes', 'run_id', 'run_name', 'graph', 'resume'):
+    for key in ('workers', 'yes', 'pipeline_definitions', 'run_id', 'run_name', 'graph', 'resume'):
         if kwargs.get(key, None) is not None:
             request[key] = kwargs[key]
     if kwargs.get('force', False) and 'yes' not in request:

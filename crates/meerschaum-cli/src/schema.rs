@@ -70,6 +70,28 @@ pub fn arg_schema() -> Value {
             "group": arg.get_help_heading(),
         }));
     }
+    // Additive engine arguments are parsed before the frozen v4 argument table.
+    for (dest, flag, help) in [
+        (
+            "run_id",
+            "--run-id",
+            "Unique execution id for structured run correlation.",
+        ),
+        (
+            "resume",
+            "--resume",
+            "Resume a prior run under a new execution id.",
+        ),
+    ] {
+        arguments.push(
+            json!({"dest":dest,"positional":false,"option_strings":[flag],
+            "long":flag.trim_start_matches('-'),"short":null,"aliases":[],"short_aliases":[],
+            "action":"store","action_class":"_StoreAction","nargs":null,
+            "num_args":{"min":1,"max":1},"type":"str","default":null,"const":null,
+            "choices":null,"required":false,"help":help,"metavar":null,"value_name":"RUN_ID",
+            "group":"Syncing Engine"}),
+        );
+    }
     json!({
         "schema_version": SCHEMA_VERSION,
         "mrsm_version": env!("CARGO_PKG_VERSION"),

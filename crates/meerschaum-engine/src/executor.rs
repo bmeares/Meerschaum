@@ -909,7 +909,7 @@ pub async fn drain_lease_releases(timeout: Duration) {
 
 /// A held lease of a node attempt: released by the attempt itself, or, when the attempt is
 /// dropped before it got there (the run was cancelled), by a task spawned from [`Drop`].
-struct LeaseHold<L: LeaseSource> {
+pub(crate) struct LeaseHold<L: LeaseSource> {
     leases: Arc<L>,
     pipe_ref: PipeRef,
     holder: String,
@@ -918,7 +918,7 @@ struct LeaseHold<L: LeaseSource> {
 
 impl<L: LeaseSource> LeaseHold<L> {
     /// Count a lease that was just taken.
-    fn new(leases: Arc<L>, pipe_ref: PipeRef, holder: String) -> Self {
+    pub(crate) fn new(leases: Arc<L>, pipe_ref: PipeRef, holder: String) -> Self {
         HELD_LEASES.fetch_add(1, Ordering::SeqCst);
         LeaseHold {
             leases,

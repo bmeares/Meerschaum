@@ -9,6 +9,8 @@ pub const FAVICON: &str = "/favicon.ico";
 pub const PLUGINS: &str = "/plugins";
 /// `/pipes`
 pub const PIPES: &str = "/pipes";
+/// Registered Pipeline metadata only; arbitrary internal Pipe data remains protected.
+pub const PIPELINES: &str = "/pipelines";
 /// `/metadata`
 pub const METADATA: &str = "/metadata";
 /// `/actions`

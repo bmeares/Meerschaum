@@ -4,6 +4,32 @@
 
 Meerschaum 5 is a rewrite of the core in Rust: the data kernel, the `sql:` / `valkey:` / `api:` connectors, the Syncing Engine, jobs, compose, the HTTP API, the MCP server and the `mrsm` CLI and shell. The `meerschaum` Python package stays as the plugin SDK, a façade and the host of the Plotly Dash web console, so pipes, parameters, configuration, compose files, jobs, the HTTP API and the Python public API keep working. Read the [migration guide](/reference/migrating-to-v5/) before upgrading; v4.1.x stays installable and receives security fixes until 5.1.0.
 
+### v5.0.0rc6
+
+- **Manage registered Pipelines across instances.**  
+  Pipeline lifecycle actions are visible in help and completion. Registered definitions preserve exact member identities, revisions, traversal settings, and execution defaults. `show pipelines` reads saved state; `analyze pipelines` discovers dependencies and previews `pipeline-{name}` tag edits for approval. Shared and pre-existing tags retain ownership, and unavailable members remain visible errors.
+
+- **Build and inspect Pipelines in an interactive workspace.**  
+  Fullscreen includes the canvas, inspector, and output dock. Add existing or new Pipes, stage membership and dependency/query edits, save shared layouts, and use search and status controls. Selection opens details immediately and loads sections lazily. The Query pane includes Resolve symlinks, and individual Pipe syncs and scoped output are available inside the workspace.
+
+- **Separate execution plans from observed time.**  
+  Dependency plans show work and ordering. Timelines display actual elapsed execution without cold-start duration estimates stretching the axis. Historical forecast metadata remains available; the chart image-download control is removed.
+
+- **Keep automatic Runs separate from persistent Jobs.**  
+  Temporary execution workers have explicit ownership and lifecycle metadata and do not fill default Jobs cards. Runs retain configurable output and summaries, clean up in the background, and can be kept as Jobs. The Web Console adds Pipeline cards and a Pipelines button alongside a smaller Term button.
+
+- **Restore Exec inside the existing web terminal.**  
+  Exec submits the composed command once to the iframe terminal after validating authorization and readiness. It preserves the terminal and reports busy or disconnected sessions. Direct Pipe navigation also tolerates filter controls absent from its layout.
+
+- **Prefer Rainfrog for interactive SQL.**  
+  Supported flavors prefer an installed Rainfrog TUI, with configurable client choices and existing Python/plain fallbacks. `--nopretty` selects the plain database client. Credentials stay outside command-line arguments, and a nonzero client exit status fails the action.
+
+- **Derive custom Compose project names from filenames.**  
+  A custom file such as `metrics.yaml` defaults to project `metrics`; conventional `mrsm-compose.yaml` and `.yml` retain their directory name, including dots. Explicit names take precedence. Set `project_name` explicitly to preserve an older implicit identity.
+
+- **Make native endpoint disabling explicit.**  
+  `api.permissions.routes.disabled` overrides route allowlists and can disable native `/login` without restoring it through host fallback. Custom Dash login pages and namespaced plugin APIs remain supported. Migration documentation explains Python route-stripping limits and gradual adoption of separately named Rust plugins.
+
 ### v5.0.0rc5
 
 - **Run and watch named pipelines from the console.**

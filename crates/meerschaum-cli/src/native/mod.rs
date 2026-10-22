@@ -35,6 +35,7 @@ pub mod os_sql_stack;
 pub mod packages;
 mod packages_table;
 pub mod pip;
+pub mod pipelines;
 pub mod pipes;
 pub mod plugin_admin;
 pub mod plugin_files;
@@ -78,6 +79,18 @@ use crate::builtin::ActionResult;
 pub fn run(function: &str, args: &ArgsMap, rt: &mut Runtime<'_>) -> Option<ActionResult> {
     Some(match function {
         "_sync_pipeline" => sync::sync_pipeline(args, rt),
+        "_show_pipelines" => pipelines::run("show", args, rt),
+        "_analyze_pipelines" => pipelines::run("analyze", args, rt),
+        "_register_pipelines" => pipelines::run("register", args, rt),
+        "_bootstrap_pipelines" => pipelines::run("bootstrap", args, rt),
+        "_edit_pipelines" => pipelines::run("edit", args, rt),
+        "_plan_pipelines" => pipelines::run("plan", args, rt),
+        "_sync_pipelines" => pipelines::run("sync", args, rt),
+        "_delete_pipelines" => pipelines::run("delete", args, rt),
+        "_drop_pipelines" => pipelines::run("drop", args, rt),
+        "_clear_pipelines" => pipelines::run("clear", args, rt),
+        "_copy_pipelines" => pipelines::run("copy", args, rt),
+
         "_show_pipes" => show::show_pipes(args, rt),
         "_show_connectors" => show::show_connectors(args, rt),
         "_show_columns" => show::show_columns(args, rt),

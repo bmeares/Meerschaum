@@ -60,6 +60,7 @@ layout = html.Div(
                                 ],
                                 width={'size': 8, 'offset': 2}
                             ),
+                            html.Div(id='terminal-exec-status', role='status'),
                             html.Div(id='webterm-div'),
                             ### The output of `Exec` and `Follow logs` (`callbacks/execute.py`).
                             html.Div(

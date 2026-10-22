@@ -140,7 +140,7 @@ pub(crate) async fn logs(
     }
     // An `execute-*` job's output is its creator's and the administrators' (the job metadata
     // routes apply the same rule); anyone else sees it as absent.
-    if name.starts_with(meerschaum_server::routes::execute::JOB_PREFIX) {
+    {
         let admin = auth::is_admin(&state.server, principal.as_ref()).await;
         let meta = state.server.jobs.get(&name).await;
         let caller = meerschaum_server::routes::execute::owner_label(principal.as_ref());

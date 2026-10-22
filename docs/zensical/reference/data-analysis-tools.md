@@ -137,7 +137,30 @@ The `sql` command lets you quickly interact with your databases.
 
 <asciinema-player src="/assets/casts/sql-cli.cast" autoplay="true" loop="true" size="small" preload="true"></asciinema-player>
 
-For certain flavors, Meerschaum is integrated with tools from the [dbcli](https://www.dbcli.com/) project that let you drop into an interactive SQL database environment.
+For PostgreSQL, MySQL, SQLite, DuckDB, and Oracle flavors, Meerschaum first looks for
+[Rainfrog](https://github.com/achristmascarl/rainfrog), a Rust terminal interface with a query
+editor, highlighting, history, and schema navigation. Install it separately with
+`cargo install rainfrog --locked`. Oracle requires its client libraries, and Rainfrog's DuckDB
+driver is unavailable in some builds. Meerschaum does not install a SQL client implicitly.
+
+If Rainfrog is absent, Meerschaum tries the existing Python flavor client (`pgcli`, `mycli`,
+`litecli`, or `gadwall`) and then the plain database client. MSSQL retains `mssqlcli` / `sqlcmd`.
+`mrsm sql LABEL --nopretty` always selects the plain client (`psql`, `mysql`, `sqlite3`,
+`duckdb`, or `sqlcmd`). A nonzero client exit status fails the action.
+
+Set a connector's `cli` attribute to choose an installed executable explicitly, or configure
+`system:connectors:sql:cli:FLAVOR` for a flavor-wide preference. For example:
+
+```yaml
+system:
+  connectors:
+    sql:
+      cli:
+        postgresql: pgcli
+        sqlite: rainfrog
+```
+
+Connection credentials are passed in the child environment rather than command-line arguments.
 
 The `sql` command also lets you read from tables or execute queries on any of your databases directly from the command line.
 

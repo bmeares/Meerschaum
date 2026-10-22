@@ -9,11 +9,14 @@ Fetch and manipulate Pipes' attributes
 from __future__ import annotations
 
 import uuid
+from contextvars import ContextVar
 from datetime import timezone
 
 import meerschaum as mrsm
 from meerschaum.utils.typing import Tuple, Dict, Any, Union, Optional, List
 from meerschaum.utils.warnings import warn, dprint
+
+_PARAMETER_RESOLUTION_STACK = ContextVar('pipe_parameter_resolution_stack', default=())
 
 
 @property
@@ -140,6 +143,16 @@ def get_parameters(
     if not apply_symlinks:
         return raw_parameters
 
+    # Resolving a self-table template asks the Python connector for this Pipe's target
+    # and schema. Those access parameters again; use the current raw snapshot for that
+    # nested metadata read rather than recursively re-entering the native resolver.
+    # Context-local keys also cover fresh wrappers for the same Pipe without affecting
+    # concurrent readers or caching an incompletely resolved result.
+    resolution_key = (self.instance_keys, self.connector_keys, self.metric_key, self.location_key)
+    resolution_stack = _PARAMETER_RESOLUTION_STACK.get()
+    if resolution_key in resolution_stack:
+        return deepcopy(raw_parameters)
+
     ### Resolving references + `{{ Pipe() }}` / `MRSM{}` symlinks (in Rust) is expensive (it walks
     ### reference pipes and may build connectors), and `get_parameters` is a hot path hit by
     ### `.dtypes`, `.columns`, `.precision`, etc. Memoize the resolved result, keyed on the
@@ -178,7 +191,11 @@ def get_parameters(
 
     ### References, `{{ Pipe() }}` and `MRSM{}` (against the live config registry) resolve in
     ### `meerschaum_core`; the Rust call also returns the `_symlinks` v4 records on the pipe.
-    resolved_parameters, self._symlinks = _core.get_parameters(self)
+    resolution_token = _PARAMETER_RESOLUTION_STACK.set((*resolution_stack, resolution_key))
+    try:
+        resolved_parameters, self._symlinks = _core.get_parameters(self)
+    finally:
+        _PARAMETER_RESOLUTION_STACK.reset(resolution_token)
 
     if can_memoize:
         ### Stash the symlinks captured above alongside the resolved result.

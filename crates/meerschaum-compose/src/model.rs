@@ -218,7 +218,7 @@ pub struct SyncSpec {
 /// A compose file.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct ComposeFile {
-    /// `project_name` (defaults to the directory's stem).
+    /// `project_name` (custom file stem, or directory name for `mrsm-compose.yaml` / `.yml`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub project_name: Option<Value>,
     /// `root_dir` (default `./root`).

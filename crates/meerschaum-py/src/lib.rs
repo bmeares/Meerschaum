@@ -106,6 +106,8 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
 
     // meerschaum-engine (Syncing Engine, §5)
     m.add_function(wrap_pyfunction!(engine_api::engine_plan, m)?)?;
+    m.add_function(wrap_pyfunction!(engine_api::extract_pipe_references, m)?)?;
+    m.add_function(wrap_pyfunction!(engine_api::pipeline_mutation_lock, m)?)?;
     m.add_function(wrap_pyfunction!(engine_api::engine_run, m)?)?;
     m.add_function(wrap_pyfunction!(engine_api::engine_runs, m)?)?;
     m.add_function(wrap_pyfunction!(engine_api::engine_run_detail, m)?)?;

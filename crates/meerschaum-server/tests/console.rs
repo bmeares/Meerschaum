@@ -689,6 +689,7 @@ struct RecordingJobs {
     deleted: Mutex<Vec<String>>,
     listing: Mutex<Vec<(String, &'static str)>>,
     stopped: Mutex<Vec<(String, chrono::DateTime<chrono::Utc>)>>,
+    success: std::sync::atomic::AtomicBool,
 }
 
 #[async_trait]
@@ -698,11 +699,12 @@ impl JobsBackend for RecordingJobs {
             .lock()
             .unwrap()
             .iter()
-            .map(|(name, status)| (name.clone(), json!({"status": status})))
+            .map(|(name, status)| (name.clone(), json!({"status": status, "result": [self.success.load(Ordering::SeqCst), "finished"]})))
             .collect()
     }
-    async fn get(&self, _name: &str) -> Option<Json> {
-        None
+    async fn get(&self, name: &str) -> Option<Json> {
+        self.listing.lock().unwrap().iter().find(|(n, _)| n == name)
+            .map(|(_, status)| json!({"status": status, "result": [self.success.load(Ordering::SeqCst), "finished"]}))
     }
     async fn exists(&self, name: &str) -> bool {
         self.created
@@ -723,6 +725,7 @@ impl JobsBackend for RecordingJobs {
     }
     async fn delete(&self, name: &str) -> SuccessTuple {
         self.deleted.lock().unwrap().push(name.into());
+        self.listing.lock().unwrap().retain(|(n, _)| n != name);
         SuccessTuple::success()
     }
     async fn start(&self, _name: &str) -> SuccessTuple {
@@ -828,7 +831,7 @@ async fn execute_starts_an_ephemeral_job() {
 
 #[tokio::test]
 async fn execute_prunes_only_old_finished_execute_jobs() {
-    let (app, jobs, _root) = jobs_app();
+    let (app, jobs, root) = jobs_app();
     let admin = common::login(&app, "admin", "pass", None).await;
     let now = chrono::Utc::now();
     let hour = chrono::Duration::hours(1);
@@ -840,7 +843,7 @@ async fn execute_prunes_only_old_finished_execute_jobs() {
         ("execute-nostop04".into(), "stopped"),
     ];
     *jobs.stopped.lock().unwrap() = vec![
-        ("execute-old00001".into(), now - hour * 2),
+        ("execute-old00001".into(), now - chrono::Duration::days(8)),
         (
             "execute-new00002".into(),
             now - chrono::Duration::minutes(5),
@@ -858,9 +861,12 @@ async fn execute_prunes_only_old_finished_execute_jobs() {
     )
     .await;
     assert_eq!(r.status, StatusCode::OK, "{}", r.text());
-    // Only a stopped `execute-*` job that stopped over an hour ago goes; a running one, a recent
+    // Only a stopped automatic worker beyond its failed/unknown retention goes; a running one, a recent
     // one, one that is not ours and one without a stop time stay.
     assert_eq!(*jobs.deleted.lock().unwrap(), vec!["execute-old00001"]);
+    assert!(root.path().join("runs/execute-old00001.json").exists());
+    let summaries = send(&app, req("GET", "/execute/runs", Some(&admin), None)).await;
+    assert_eq!(summaries.json()[0]["name"], "execute-old00001");
 }
 
 #[tokio::test]
@@ -948,4 +954,140 @@ async fn execute_follows_the_actions_allowlist() {
     .await;
     // No `actions` group, no route.
     assert_eq!(r.status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn rc6_disabled_native_routes_do_not_reappear() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = Arc::new(common::MemoryInstance::new("fixture"));
+    let mut cfg = common::config(dir.path());
+    cfg.no_auth = true;
+    cfg.routes_disabled = vec!["login".into(), "pipes".into()];
+    assert!(!meerschaum_server::routes::is_proxyable(&cfg, "/login"));
+    assert!(!meerschaum_server::routes::is_proxyable(
+        &cfg,
+        "/pipes/a/b/c"
+    ));
+    assert!(meerschaum_server::routes::is_proxyable(
+        &cfg,
+        "/synthetic/login"
+    ));
+    let state = AppState::builder(cfg, instance)
+        .secret(SECRET.to_vec())
+        .build()
+        .unwrap();
+    let app = meerschaum_server::app(state);
+    assert_eq!(
+        send(&app, post_json("/login", None, json!({})))
+            .await
+            .status,
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        send(&app, req("GET", "/pipes", None, None)).await.status,
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        send(&app, req("GET", "/version", None, None)).await.status,
+        StatusCode::OK
+    );
+}
+
+#[tokio::test]
+async fn rc6_terminal_validation_never_starts_a_worker() {
+    let (app, jobs, _root) = jobs_app();
+    let admin = common::login(&app, "admin", "pass", None).await;
+    let allowed = send(
+        &app,
+        post_json(
+            "/execute/validate",
+            Some(&admin),
+            json!({"sysargs": ["show", "version"]}),
+        ),
+    )
+    .await;
+    assert_eq!(allowed.status, StatusCode::OK);
+    assert_eq!(allowed.json()[0], true);
+    assert!(jobs.created.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn rc6_cleanup_runs_without_an_execute_request() {
+    let root = tempfile::tempdir().unwrap();
+    let instance = Arc::new(common::MemoryInstance::new("fixture"));
+    let jobs = Arc::new(RecordingJobs::default());
+    jobs.listing
+        .lock()
+        .unwrap()
+        .push(("execute-expired".into(), "stopped"));
+    jobs.stopped.lock().unwrap().push((
+        "execute-expired".into(),
+        chrono::Utc::now() - chrono::Duration::days(8),
+    ));
+    let state = AppState::builder(common::config(root.path()), instance)
+        .secret(SECRET.to_vec())
+        .jobs(jobs.clone())
+        .build()
+        .unwrap();
+    let _app = meerschaum_server::app(state);
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while jobs.deleted.lock().unwrap().is_empty() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    assert!(root.path().join("runs/execute-expired.json").exists());
+}
+
+#[tokio::test]
+async fn rc6_successful_output_lasts_24_hours_and_failures_last_seven_days() {
+    let (app, jobs, root) = jobs_app();
+    let admin = common::login(&app, "admin", "pass", None).await;
+    jobs.success.store(true, Ordering::SeqCst);
+    *jobs.listing.lock().unwrap() = vec![
+        ("execute-success-old".into(), "stopped"),
+        ("execute-success-recent".into(), "stopped"),
+    ];
+    *jobs.stopped.lock().unwrap() = vec![
+        (
+            "execute-success-old".into(),
+            chrono::Utc::now() - chrono::Duration::hours(25),
+        ),
+        (
+            "execute-success-recent".into(),
+            chrono::Utc::now() - chrono::Duration::hours(23),
+        ),
+    ];
+    let response = send(
+        &app,
+        post_json(
+            "/execute",
+            Some(&admin),
+            json!({"sysargs": ["show", "version"]}),
+        ),
+    )
+    .await;
+    assert_eq!(response.status, StatusCode::OK);
+    assert_eq!(*jobs.deleted.lock().unwrap(), vec!["execute-success-old"]);
+    assert!(root.path().join("runs/execute-success-old.json").exists());
+    assert!(
+        !root
+            .path()
+            .join("runs/execute-success-recent.json")
+            .exists()
+    );
+    jobs.success.store(false, Ordering::SeqCst);
+    // The remaining 23-hour worker now has failure status and still must be retained.
+    let response = send(
+        &app,
+        post_json(
+            "/execute",
+            Some(&admin),
+            json!({"sysargs": ["show", "version"]}),
+        ),
+    )
+    .await;
+    assert_eq!(response.status, StatusCode::OK);
+    assert_eq!(jobs.deleted.lock().unwrap().len(), 1);
 }

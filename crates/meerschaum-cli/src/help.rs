@@ -297,6 +297,7 @@ pub fn v5_additions(function: &str) -> Option<&'static str> {
             r##"    - `--parents [N]`, `--children [N]`
         - Also sync the ancestors (or descendants) of the selected pipes, in dependency order.
           `N` limits how many generations (`--parents 1` is the direct parents).
+    - `--run-id RUN_ID` (unique execution identity)
     - `--resume RUN_ID`
         - Re-plan only the nodes that failed or never ran in the run `RUN_ID` (see `show runs`).
     - `--chunk-pipelining`

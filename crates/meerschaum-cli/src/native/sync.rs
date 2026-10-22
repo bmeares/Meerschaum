@@ -628,6 +628,7 @@ pub(in crate::native) fn run_options(
         yes: flag(args, "yes") || flag(args, "force"),
         resume,
         chunk_pipelining: flag(args, "chunk_pipelining").then_some(true),
+        run_id: super::string(args, "run_id"),
         sync: meerschaum_engine::NodeSyncOptions {
             check_existing: sync_args.check_existing,
             retries: super::int(args, "retries")
@@ -664,7 +665,7 @@ fn sleeping_message(args: &ArgsMap, seconds: f64, message: String) -> String {
 
 /// Run a graph selection on the session's runtime while printing one progress line per node
 /// transition (the terminal's live view; the Gantt chart follows once the run ends).
-fn run_live(
+pub(super) fn run_live(
     rt: &mut Runtime<'_>,
     session: &Session,
     engine: meerschaum_engine::Engine,
@@ -983,117 +984,7 @@ fn print_chunk_progress(rt: &mut Runtime<'_>, message: &str) {
 /// Resolve a saved pipeline from instance metadata and execute its exact membership.
 /// Jobs call this action on every scheduled lap, so membership edits take effect immediately.
 pub fn sync_pipeline(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
-    use crate::builtin::ActionError;
-    use crate::value::PyValue;
-    use meerschaum_core::Value;
-    use meerschaum_engine::{PipeRef, Selection};
-    let words = super::words(args, "action");
-    let Some(name) = words.first() else {
-        return Ok(SuccessTuple::fail(
-            "Provide a saved pipeline name: sync pipeline <name>.",
-        ));
-    };
-    let inst = super::get_instance(args, rt)?;
-    let session = session(rt);
-    let metadata = super::pipes::build_pipe(
-        "mrsm",
-        "pipeline",
-        Some(name),
-        &inst.keys(),
-        None,
-        &super::pipes::defaults(rt),
-    )?;
-    let attributes = session
-        .block_on(inst.conn().get_pipe_attributes(&metadata))
-        .map_err(|e| ActionError::new("ValueError", e.to_string()))?;
-    let definition = attributes
-        .get("parameters")
-        .and_then(Value::as_map)
-        .and_then(|p| p.get("pipeline"))
-        .and_then(Value::as_map)
-        .ok_or_else(|| {
-            ActionError::new(
-                "ValueError",
-                format!("Pipeline '{name}' does not exist on '{}'.", inst.keys()),
-            )
-        })?;
-    let targets = definition
-        .get("targets")
-        .and_then(Value::as_list)
-        .ok_or_else(|| ActionError::new("ValueError", "Saved pipeline has no membership."))?;
-    let mut refs = Vec::new();
-    for value in targets {
-        let text = value.as_str().ok_or_else(|| {
-            ActionError::new(
-                "ValueError",
-                "Pipeline membership must contain pipe references.",
-            )
-        })?;
-        let parts: Vec<_> = text.splitn(4, '|').collect();
-        if parts.len() != 4 || parts[..3].iter().any(|key| key.is_empty()) || parts[1] == "mrsm" {
-            return Err(ActionError::new(
-                "ValueError",
-                format!("Invalid pipeline pipe reference: {text}"),
-            ));
-        }
-        refs.push(PipeRef::from_string(text));
-    }
-    if refs.is_empty() {
-        return Ok(SuccessTuple::fail("Saved pipeline has no target pipes."));
-    }
-    let mut selected = Vec::new();
-    for target in &refs {
-        let parts = target.parts();
-        let pipe = super::pipes::build_pipe(
-            parts.connector_keys,
-            parts.metric_key,
-            parts.location_key,
-            parts.instance_keys,
-            None,
-            &super::pipes::defaults(rt),
-        )?;
-        selected.push(SelectedPipe {
-            pipe,
-            id: None,
-            hydrated: false,
-        });
-    }
-    let mut options_args = args.clone();
-    for key in ["parents", "children"] {
-        if !options_args.contains_key(key)
-            && let Some(value) = definition.get(key)
-        {
-            let value = match value {
-                Value::Bool(b) => PyValue::Bool(*b),
-                Value::Int(n) => PyValue::Int((*n).into()),
-                _ => PyValue::None,
-            };
-            options_args.insert(key.into(), value);
-        }
-    }
-    let engine = engine::build(rt, &session, &inst, &selected, false, false, None)?;
-    let mut options = run_options(&options_args, &inst, &selected, &SyncArgs::from_args(args));
-    options.selection = Some(
-        Selection::refs(refs)
-            .with_parents(depth(&options_args, "parents"))
-            .with_children(depth(&options_args, "children"))
-            .with_graph(true),
-    );
-    let run_id = meerschaum_engine::runs::new_named_run_id(name);
-    rt.print(&format!("Run: {run_id}\n"));
-    options.run_id = Some(run_id);
-    let result = if rt.live && !flag(args, "nopretty") {
-        run_live(rt, &session, engine, options)
-    } else {
-        session.block_on(engine.run(options))
-    };
-    for warning in &result.warnings {
-        warn(rt, warning);
-    }
-    Ok(SuccessTuple {
-        success: result.success,
-        message: result.message,
-    })
+    super::pipelines::run("sync", args, rt)
 }
 
 #[cfg(test)]

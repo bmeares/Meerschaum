@@ -106,6 +106,22 @@ async fn blocking<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> 
 
 #[async_trait]
 impl JobsBackend for LocalJobsBackend {
+    async fn promote(&self, name: &str) -> SuccessTuple {
+        self.run(name, |job| {
+            let mut properties = job.daemon().properties();
+            if let Some(Value::Map(execution)) = properties.get_mut("mrsm_execution") {
+                execution.insert("kind".into(), Value::Str("persistent_job".into()));
+            } else {
+                let mut execution = Map::new();
+                execution.insert("kind".into(), Value::Str("persistent_job".into()));
+                properties.insert("mrsm_execution".into(), Value::Map(execution));
+            }
+            job.daemon().update_properties(&properties);
+            job.daemon().write_properties()
+        })
+        .await
+    }
+
     async fn list(&self) -> IndexMap<String, Json> {
         let ctx = self.ctx.clone();
         blocking(move || {
@@ -226,6 +242,16 @@ impl JobsBackend for LocalJobsBackend {
             .flatten()
     }
 
+    async fn completion_time(&self, name: &str) -> Option<DateTime<Utc>> {
+        let (ctx, name) = (self.ctx.clone(), name.to_string());
+        blocking(move || {
+            let mut job = open_job(&ctx, &name, None)?;
+            job.ended().or_else(|| job.stop_time()).map(utc)
+        })
+        .await
+        .flatten()
+    }
+
     async fn is_blocking_on_stdin(&self, name: &str) -> bool {
         let (ctx, name) = (self.ctx.clone(), name.to_string());
         blocking(move || open_job(&ctx, &name, None).is_some_and(|mut j| j.is_blocking_on_stdin()))
@@ -317,5 +343,48 @@ impl LocalJobsBackend {
         })
         .await
         .unwrap_or_else(|| SuccessTuple::fail("The job request was interrupted."))
+    }
+}
+
+#[cfg(test)]
+mod rc6_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn promotion_persists_kind_and_preserves_owner() {
+        let root = tempfile::tempdir().unwrap();
+        let ctx = JobsContext::for_root(root.path());
+        let props = Value::from_json_str(r#"{"mrsm_owner":"alice","mrsm_execution":{"kind":"temporary_execution","run_id":"run-1"},"process":{"ended":"2026-10-01T12:00:00+00:00"}}"#).unwrap();
+        let mut job = Job::new(
+            "execute-retained",
+            Some(vec!["show".into(), "version".into()]),
+            JobOptions {
+                executor_keys: Some("local".into()),
+                properties: props.as_map().cloned(),
+                ..Default::default()
+            },
+            &ctx,
+        )
+        .unwrap();
+        assert!(job.daemon().write_properties().success);
+        let backend = LocalJobsBackend::new(ctx);
+        assert!(backend.completion_time("execute-retained").await.is_some());
+        assert!(backend.stop_time("execute-retained").await.is_none());
+        assert!(backend.promote("execute-retained").await.success);
+        assert!(backend.promote("execute-retained").await.success);
+        let meta = backend.get("execute-retained").await.unwrap();
+        assert_eq!(
+            meta["daemon"]["properties"]["mrsm_execution"]["kind"],
+            "persistent_job"
+        );
+        assert_eq!(
+            meta["daemon"]["properties"]["mrsm_execution"]["run_id"],
+            "run-1"
+        );
+        assert_eq!(meta["daemon"]["properties"]["mrsm_owner"], "alice");
+        assert!(!meerschaum_server::routes::execute::is_temporary(
+            "execute-retained",
+            &meta
+        ));
     }
 }

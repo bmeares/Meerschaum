@@ -26,7 +26,7 @@ async fn forget_engine_state_after(
     pipe: &Pipe,
     res: SuccessTuple,
 ) -> SuccessTuple {
-    if res.success {
+    if res.success && !(pipe.connector_keys() == "mrsm" && pipe.metric_key() == "pipeline") {
         let forgotten = crate::pipe_ops::forget_engine_state(conn, pipe).await;
         if !forgotten.success {
             tracing::warn!("{}", forgotten.message);

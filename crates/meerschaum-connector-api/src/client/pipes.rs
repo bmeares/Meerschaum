@@ -184,6 +184,19 @@ impl APIConnector {
         )
     }
 
+    /// Metadata transport is narrowly reserved for registered Pipeline definitions.
+    fn metadata_r_url(pipe: &Pipe) -> String {
+        if pipe.connector_keys() == "mrsm" && pipe.metric_key() == "pipeline" {
+            format!(
+                "{}/{}",
+                routes::PIPELINES,
+                crate::wire::quote_plus(pipe.location_key().unwrap_or(""))
+            )
+        } else {
+            Self::pipe_r_url(pipe)
+        }
+    }
+
     /// `get_pipe_instance_keys(pipe)`: `parameters['instance_keys']` if set, else the
     /// connector's `instance_keys`.
     pub fn get_pipe_instance_keys(&self, pipe: &Pipe) -> Option<String> {
@@ -337,7 +350,7 @@ impl APIConnector {
 
     /// `register_pipe(pipe)`: `POST /pipes/{keys}/register` with the in-memory parameters.
     pub async fn register_pipe(&self, pipe: &Pipe) -> SuccessTuple {
-        let r_url = Self::pipe_r_url(pipe) + "/register";
+        let r_url = Self::metadata_r_url(pipe) + "/register";
         let opts = RequestOptions {
             query: vec![self.instance_query(pipe, "instance_keys")],
             body: Body::Json(py_json(&Value::Map(pipe.raw_parameters().clone()))),
@@ -358,8 +371,12 @@ impl APIConnector {
 
     /// `edit_pipe(pipe, patch)`: `PATCH /pipes/{keys}/edit` with `pipe.get_parameters()`.
     pub async fn edit_pipe(&self, pipe: &Pipe, patch: bool) -> SuccessTuple {
-        let parameters = self.pipe_parameters(pipe).await;
-        let r_url = Self::pipe_r_url(pipe) + "/edit";
+        let parameters = if patch {
+            self.pipe_parameters(pipe).await
+        } else {
+            pipe.raw_parameters().clone()
+        };
+        let r_url = Self::metadata_r_url(pipe) + "/edit";
         let opts = RequestOptions {
             query: vec![
                 ("patch".into(), QueryValue::bool(patch)),
@@ -400,8 +417,13 @@ impl APIConnector {
             ("instance_keys", QueryValue::opt(self.instance_keys())),
             ("as_dict", QueryValue::bool(true)),
         ]);
+        let base = if query.connector_keys == ["mrsm"] && query.metric_keys == ["pipeline"] {
+            routes::PIPELINES
+        } else {
+            routes::PIPES
+        };
         let j = self
-            .get(&format!("{}/keys", routes::PIPES), opts)
+            .get(&format!("{base}/keys"), opts)
             .await?
             .json_or_detail()?;
         let entry = |v: &serde_json::Value| -> Option<PipeKeysEntry> {
@@ -561,7 +583,7 @@ impl APIConnector {
 
     /// `delete_pipe(pipe)`: `DELETE /pipes/{keys}/delete`.
     pub async fn delete_pipe(&self, pipe: &Pipe) -> SuccessTuple {
-        let r_url = Self::pipe_r_url(pipe) + "/delete";
+        let r_url = Self::metadata_r_url(pipe) + "/delete";
         let response = match self
             .delete(
                 &r_url,
@@ -719,7 +741,7 @@ impl APIConnector {
     ///
     /// PARITY: a string ID is returned as the raw response text (with its JSON quotes).
     pub async fn get_pipe_id(&self, pipe: &Pipe) -> ConnectorResult<Option<PipeId>> {
-        let r_url = Self::pipe_r_url(pipe) + "/id";
+        let r_url = Self::metadata_r_url(pipe) + "/id";
         let response = self
             .get(
                 &r_url,
@@ -743,7 +765,7 @@ impl APIConnector {
 
     /// `get_pipe_attributes(pipe)`: `GET /pipes/{keys}/attributes` (errors raise).
     pub async fn get_pipe_attributes(&self, pipe: &Pipe) -> ConnectorResult<Map> {
-        let r_url = Self::pipe_r_url(pipe) + "/attributes";
+        let r_url = Self::metadata_r_url(pipe) + "/attributes";
         let response = self
             .get(
                 &r_url,

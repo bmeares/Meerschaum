@@ -302,15 +302,14 @@ fn graph_sync_ends_with_a_gantt_and_runs_are_listed() {
     assert!(table.contains("3/3"), "{table}");
     let last_one = env.ok(&["show", "runs", "--last", "1"]);
     assert!(last_one.contains(&run_id), "{last_one}");
-    // Planned bars with end times (a first run plans every node at the 30 s default).
-    assert!(out.contains("planned 1m30s"), "{out}");
-    assert_eq!(out.matches("30s    planned").count(), 3, "{out}");
+    // A first run's 30 s default forecast must not stretch its actual timeline.
+    assert!(!out.contains("30s    planned"), "{out}");
     // `show run <id>` draws the same chart.
     let gantt = env.ok(&["show", "run", &run_id]);
     assert!(gantt.starts_with(&format!("run {run_id}")), "{gantt}");
     assert!(gantt.contains("critical path"), "{gantt}");
     assert!(
-        gantt.contains("\u{2592}") && gantt.contains("planned"),
+        !gantt.contains('\u{2592}') && !gantt.contains("planned"),
         "{gantt}"
     );
     let detail = env.ok(&["show", "run", &run_id, "--nopretty"]);
@@ -442,10 +441,11 @@ fn sync_help_lists_v5_flags_after_the_v4_text() {
 }
 
 #[test]
-fn v5_only_actions_stay_out_of_v4_listings() {
+fn additive_v5_actions_are_visible_in_action_listings() {
     let env = chain();
     let actions = env.ok(&["show", "actions", "--nopretty"]);
-    assert!(!actions.lines().any(|l| l == "plan"), "{actions}");
+    assert!(actions.lines().any(|l| l == "plan"), "{actions}");
+    assert!(actions.lines().any(|l| l == "analyze"), "{actions}");
 }
 
 /// A recorded run with fixed times: a chain with one failed branch and one skipped node.
@@ -525,24 +525,20 @@ fn recorded_run() -> meerschaum_engine::RunRecord {
 }
 
 #[test]
-fn gantt_draws_planned_bars_with_end_times_under_the_actual_ones() {
+fn gantt_shows_observed_bars_without_forecast_overlays() {
     let text = meerschaum_cli::native::engine_views::gantt(&recorded_run(), 100);
     assert_eq!(text, GOLDEN_GANTT, "\n{text}");
 }
 
-const GOLDEN_GANTT: &str = r#"run 01JW9GANTT  4 nodes  4 workers  wall 1m40s  planned 1m15s  critical path: Pipe('sql:local', 'raw') → Pipe('sql:local', 'clean')
+const GOLDEN_GANTT: &str = r#"run 01JW9GANTT  4 nodes  4 workers  wall 1m40s  critical path: Pipe('sql:local', 'raw') → Pipe('sql:local', 'clean')
 Pipe('sql:local', 'raw')    █████████████░░░░░░░░░░░░░░░░░░░░  40s    +12,301 ins                  ✔
-                            ▒▒▒▒▒▒▒▒▒▒                         30s    planned
 Pipe('sql:local', 'clean')  ░░░░░░░░░░░░░█████████████████░░░  50s    +12,290 ins  ~11 upd         ✔
-                                      ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒          45s    planned
 Pipe('sql:local', 'geo')    ░░░░░░░░░░░░░███                   9s     error: connection reset      ✘
-                                      ▒▒▒▒▒▒▒                  20s    planned
 Pipe('sql:local', 'daily')  ·                                         skip                         ○
-█ actual  ▒ planned
 "#;
 
 #[test]
-fn gantt_scales_to_a_planned_makespan_longer_than_the_run() {
+fn gantt_scales_to_actual_time_when_forecast_is_longer() {
     use chrono::TimeDelta;
     let mut run = recorded_run();
     run.nodes.truncate(2);
@@ -554,12 +550,9 @@ fn gantt_scales_to_a_planned_makespan_longer_than_the_run() {
         n.duration_seconds = Some((f - s) as f64);
     }
     let text = meerschaum_cli::native::engine_views::gantt(&run, 60);
-    let golden = r#"run 01JW9GANTT  2 nodes  4 workers  wall 10s  planned 1m15s  critical path: Pipe('sql:local', 'raw') → Pipe('sql:local', 'clean')
-Pipe('sql:local', 'raw')    █░░░░░░░░░  4s     +12,301 ins                  ✔
-                            ▒▒▒▒        30s    planned
-Pipe('sql:local', 'clean')  ░█░░░░░░░░  6s     +12,290 ins  ~11 upd         ✔
-                                ▒▒▒▒▒▒  45s    planned
-█ actual  ▒ planned
+    let golden = r#"run 01JW9GANTT  2 nodes  4 workers  wall 10s  critical path: Pipe('sql:local', 'raw') → Pipe('sql:local', 'clean')
+Pipe('sql:local', 'raw')    ████░░░░░░  4s     +12,301 ins                  ✔
+Pipe('sql:local', 'clean')  ░░░░██████  6s     +12,290 ins  ~11 upd         ✔
 "#;
     assert_eq!(text, golden, "\n{text}");
 }

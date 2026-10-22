@@ -62,7 +62,18 @@ fn completed_job_layout_and_logs() {
     let keys: Vec<&str> = props.as_map().unwrap().keys().map(String::as_str).collect();
     // `process` is created by `run()` recording `process.launched` (as v4.1.5 does), before the
     // supervisor records `result`.
-    assert_eq!(keys, ["label", "target", "process", "result"]);
+    assert_eq!(
+        keys,
+        ["mrsm_execution", "label", "target", "process", "result"]
+    );
+    assert_eq!(
+        props
+            .get("mrsm_execution")
+            .unwrap()
+            .get("kind")
+            .and_then(Value::as_str),
+        Some("persistent_job"),
+    );
     assert_eq!(
         props.get("target").unwrap().json_dumps(),
         r#"{"name": "entry", "module": "meerschaum._internal.entry", "args": [["-c", "echo hello; echo oops >&2; sleep 0.3"]], "kw": {}}"#

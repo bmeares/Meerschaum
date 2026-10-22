@@ -30,7 +30,9 @@ use tokio::sync::broadcast;
 mod triggers;
 
 use crate::events::{Event, EventKind, EventRow, EventSink};
-use crate::executor::{ExecuteContext, ExecutorOptions, Limits, Priority, execute};
+use crate::executor::{
+    ExecuteContext, ExecutorOptions, LeaseHold, LeaseSource, Limits, Priority, execute,
+};
 use crate::graph::{Graph, GraphOptions};
 use crate::instance_state::InstanceState;
 use crate::leases::InstanceLeases;
@@ -265,6 +267,8 @@ pub struct RunOptions {
     pub sync: NodeSyncOptions,
     /// Use this run ID.
     pub run_id: Option<String>,
+    /// Frozen registered definitions admitted to this run (identity and revision).
+    pub pipeline_definitions: Vec<serde_json::Value>,
     /// Nodes to leave out of a flat selection (stream sources handled by continuous mode).
     pub exclude: BTreeSet<PipeRef>,
     /// Nodes held back from this run, with every descendant of theirs (any selection): used by
@@ -571,6 +575,17 @@ impl EventSink for RunSink {
     }
 }
 
+/// Own a run-id admission lease until the run finishes or is cancelled.
+struct RunAdmission {
+    _lease: LeaseHold<InstanceLeases>,
+    heartbeat: tokio::task::JoinHandle<()>,
+}
+impl Drop for RunAdmission {
+    fn drop(&mut self) {
+        self.heartbeat.abort();
+    }
+}
+
 /// The Syncing Engine.
 pub struct Engine {
     registry: Arc<dyn ConnectorRegistry>,
@@ -742,7 +757,7 @@ impl Engine {
         &self,
         opts: &RunOptions,
     ) -> Result<(Arc<Graph>, Subgraph, Selection), String> {
-        let instances = self.instances(opts);
+        let mut instances = self.instances(opts);
         let mut selection = opts
             .selection
             .clone()
@@ -757,6 +772,11 @@ impl Engine {
                 .and_then(|s| serde_json::from_str(s).ok())
         {
             selection = s;
+        }
+        for instance in selection.target_instances() {
+            if !instances.contains(&instance) {
+                instances.push(instance);
+            }
         }
         let flat = selection.is_flat();
         let mut records = Vec::new();
@@ -808,14 +828,30 @@ impl Engine {
                     .collect(),
             );
         }
-        let graph = Graph::build(
-            records,
-            &GraphOptions {
-                defaults: self.config.defaults.clone(),
-                implicit_edges: self.config.implicit_edges,
-                default_backtrack_minutes: self.config.default_backtrack_minutes as f64,
-            },
-        );
+        let graph_options = GraphOptions {
+            defaults: self.config.defaults.clone(),
+            implicit_edges: self.config.implicit_edges,
+            default_backtrack_minutes: self.config.default_backtrack_minutes as f64,
+        };
+        let mut visited: BTreeSet<String> = instances.into_iter().collect();
+        let graph = loop {
+            let graph = Graph::build(records.clone(), &graph_options);
+            let missing: Vec<_> = selection
+                .referenced_instances(&graph)
+                .difference(&visited)
+                .cloned()
+                .collect();
+            if missing.is_empty() {
+                break graph;
+            }
+            for instance in missing {
+                visited.insert(instance.clone());
+                records.extend(
+                    self.fetch_records(&instance, &PipesKeysQuery::default())
+                        .await?,
+                );
+            }
+        };
         let mut sub = Pipeline::new(selection.clone())
             .resolve(&graph)
             .map_err(|e| e.to_string())?;
@@ -910,6 +946,72 @@ impl Engine {
         on_lap: Option<Arc<dyn Fn(LapEvent) + Send + Sync>>,
     ) -> RunResult {
         let t0 = Instant::now();
+        // A caller-supplied id is an immutable execution identity, never an upsert key.
+        // Serialize admission across processes before checking persisted history.
+        let _admission = if let Some(run_id) = opts.run_id.as_ref() {
+            if run_id.is_empty()
+                || run_id.len() > 200
+                || !run_id
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b"_.:-".contains(&b))
+            {
+                return RunResult::failed("Invalid run id.", t0.elapsed());
+            }
+            let key = PipeRef::new(
+                &self.config.home_instance,
+                "mrsm",
+                "engine_run_admission",
+                Some(run_id),
+            );
+            let holder = crate::runs::new_run_id();
+            let ttl = Duration::from_secs(300);
+            match self.leases.acquire(&key, &holder, ttl).await {
+                Ok(true) => {}
+                Ok(false) => {
+                    return RunResult::failed(
+                        format!("Run id '{run_id}' is already in use."),
+                        t0.elapsed(),
+                    );
+                }
+                Err(e) => {
+                    return RunResult::failed(
+                        format!("Cannot reserve run id '{run_id}': {e}"),
+                        t0.elapsed(),
+                    );
+                }
+            }
+            let lease = LeaseHold::new(self.leases.clone(), key.clone(), holder.clone());
+            match self.state.load_run(run_id).await {
+                Ok(None) => {}
+                Ok(Some(_)) => {
+                    return RunResult::failed(
+                        format!("Run id '{run_id}' already exists; choose a new run id."),
+                        t0.elapsed(),
+                    );
+                }
+                Err(e) => {
+                    return RunResult::failed(
+                        format!("Cannot check run id '{run_id}': {e}"),
+                        t0.elapsed(),
+                    );
+                }
+            }
+            let leases = self.leases.clone();
+            let heartbeat = tokio::spawn(async move {
+                loop {
+                    tokio::time::sleep(Duration::from_secs(30)).await;
+                    if !leases.renew(&key, &holder, ttl).await.unwrap_or(false) {
+                        break;
+                    }
+                }
+            });
+            Some(RunAdmission {
+                _lease: lease,
+                heartbeat,
+            })
+        } else {
+            None
+        };
         let (graph, sub, selection) = match self.resolve(&opts).await {
             Ok(x) => x,
             Err(e) => return RunResult::failed(e, t0.elapsed()),
@@ -1022,7 +1124,11 @@ impl Engine {
                 .unwrap_or(self.config.chunk_pipelining),
             run_id: opts.run_id.clone(),
             plan: plan_opts.clone(),
-            selection: serde_json::to_string(&selection).ok(),
+            selection: serde_json::to_value(&selection).ok().map(|mut snapshot| {
+                snapshot["pipeline_definitions"] = serde_json::json!(opts.pipeline_definitions);
+                snapshot["resolved_targets"] = serde_json::json!(sub.order);
+                snapshot.to_string()
+            }),
             priority: if sub.flat {
                 Priority::PlanOrder
             } else {
@@ -1247,6 +1353,10 @@ impl Engine {
                 }
             }
             lap += 1;
+            // A configured first-lap correlation id must not overwrite later laps.
+            if lap > 1 {
+                lap_opts.run_id = None;
+            }
             let mut result = self.run_inner(lap_opts, Some(on_lap.clone())).await;
             if let Some(t) = triggers.as_mut() {
                 t.note_ran(result.outcomes.iter().map(|o| &o.pipe_ref));

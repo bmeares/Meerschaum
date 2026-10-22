@@ -324,7 +324,7 @@ The wheel contains the native core and has no required Python dependencies. Whee
     `pip install meerschaum` is the whole product: the `mrsm` command it installs runs the native command line from inside the package. If you would rather have a standalone binary (it starts in about 10 ms and needs no Python until you use a Python plugin or connector), build the same command line with Cargo:
 
     ```bash
-    cargo install meerschaum --locked            # during the release candidates: --version 5.0.0-rc.5
+    cargo install meerschaum --locked            # during the release candidates: --version 5.0.0-rc.6
     ```
 
     This needs Rust 1.95 or newer. `--locked` builds with the dependency versions Meerschaum was tested with (without it Cargo may pick newer ones, which can break the build on Windows). Prebuilt standalone binaries (Linux x86_64 and arm64, macOS arm64 and x86_64, Windows x86_64) are attached to each GitHub release, with a SHA-256 file for each.
@@ -2713,7 +2713,7 @@ A plain `mrsm sync pipes` still works exactly as it did in v4: every selected pi
 
 !!! note "Not the same as `start pipeline`"
 
-    A *pipeline* here is a slice of the pipe graph. The `start pipeline` action, which chains several actions with `:`, is unrelated and unchanged.
+    A Pipeline is a registered selection over the Pipe dependency graph. Its registration belongs to an instance, while its member Pipes may belong to several instances. The `start pipeline` action, which chains several actions with `:`, is unrelated and unchanged.
 
 The pipe parameters that configure the engine are `parents` / `children` (the edges), `retry`, `schedule`, `min_seconds` and `stream`; each is documented in the [Parameters reference](/reference/pipes/parameters/) and used on the pages below. The CLI surface is `sync pipes --parents / --children / --resume / --loop / --listen`, `plan pipes`, `show graph`, `show runs` and `show run <id>`; the Python surface is `pipe.sync(parents=, children=)` and `mrsm.Pipeline`. Moving from v4? See the [migration guide](/reference/migrating-to-v5/#the-syncing-engine).
 
@@ -2723,6 +2723,38 @@ The pipe parameters that configure the engine are `parents` / `children` (the ed
 | [Engine State](/reference/pipelines/state/) | Run history, the dirty-range ledger, cursors, leases and the `system.engine.*` settings |
 | [Continuous Mode and Streams](/reference/pipelines/continuous/) | `--loop`, `--listen`, micro-batching and triggering children |
 | [Visualization](/reference/pipelines/visualization/) | The Gantt chart, the DAG view and the `/dash/pipelines` page |
+
+## Registered Pipelines
+
+Pipelines have instance-local names, stable identities and revisions. A definition stores exact
+instance-qualified Pipe references, traversal settings and execution defaults. Selecting its
+registry with `-i` does not change the instances of its members. Shared Pipes may belong to
+several Pipelines; dependencies continue to come from their Pipe parameters and SQL references.
+
+```bash
+mrsm show pipelines -i sql:local
+mrsm register pipelines daily -i sql:local -c sql:local -m daily
+mrsm analyze pipelines daily -i sql:local
+mrsm plan pipelines daily -i sql:local
+mrsm sync pipelines daily -i sql:local --parents
+```
+
+`show pipelines` reads saved state. `analyze pipelines` resolves members and configured traversal,
+reports missing references and shared membership, and previews tagging explicit and detected
+traversal Pipes with `pipeline-daily`. Approve its proposal to edit tags, or pass `--yes` to
+approve the displayed proposal in a batch command. Without approval, analysis changes nothing.
+Saving, planning, ordinary syncing and opening the console never silently tag Pipes or register
+suggested connected components. Tags are indexes; the Pipeline registration owns membership.
+
+Use `bootstrap pipelines` for guided creation, `edit pipelines` to change the definition,
+`copy pipelines daily daily-copy` to reference the same members under a new identity, and
+`delete pipelines daily` to remove a definition while preserving member registrations and data.
+Scheduled Jobs referencing a Pipeline must be removed or reassigned before deletion.
+
+`drop pipelines` drops the explicit members' tables and `clear pipelines` clears their data
+using the normal bounds. Both preview exact instances and shared membership before confirmation;
+they do not implicitly expand traversal. Shared Pipe data affects every Pipeline using it.
+Schedule a Pipeline with an ordinary Job running `sync pipelines NAME -i REGISTRY`.
 
 ## 🌳 The Pipe Graph
 
@@ -3027,9 +3059,10 @@ Pipelining goes one level deep (a child overlaps its parents, not its grandchild
 
 A named pipeline stores an exact selection on its instance. Its metadata uses an internal
 `mrsm` registration and is excluded from the data graph. Saving a selection never changes
-its member pipes. Existing graph components receive generated names the first time an
-authenticated user opens the Pipelines page; the page's name field lets you save a selection
-under a chosen name. Saving an existing name replaces its membership.
+its members' tags. Opening the Pipelines page does not register connected components.
+Choose members in the draft editor and save a named definition explicitly. Editing an existing
+definition checks its revision, while registering or importing a new definition refuses an
+accidental overwrite. Shared Pipe parameter edits are separate, explicitly staged changes.
 
 ```python
 pipeline = mrsm.Pipeline([raw, daily], parents=True, name='daily-totals')
@@ -3048,11 +3081,33 @@ Job with its own name, interval, workers, retries, and rebuild permission. A Job
 pipeline's current membership each time it runs. Several Jobs may use the same pipeline
 with different schedules or options. The same panel shows their status and start/stop
 controls; the Jobs page provides logs and other Job controls. Deleting a saved selection
-does not delete its member pipes or its Jobs.
+preserves its member Pipes and data. Referencing scheduled Jobs must be removed or reassigned
+before the definition can be deleted.
 
-New run IDs use the pipeline name followed by a readable UTC timestamp and collision
-suffix, for example `daily-totals-2026-10-21T14-30-00.123456Z-a1b2c3d4`. Unnamed selections
-use `pipeline` as their prefix. Earlier run IDs remain valid for history and resume.
+By default, named Pipeline run IDs use the Pipeline name followed by a UTC timestamp and
+collision suffix, for example `daily-totals-2026-10-21T14-30-00.123456Z-a1b2c3d4`. Unnamed selections
+use `pipeline` as their prefix. The console allocates an exact execution ID before admission
+with `--run-id`; saved definition identity and revision are recorded independently of its spelling.
+Earlier run IDs remain valid for history and resume.
+
+Traversal discovery reads the Pipeline registry, explicit members' instances, and instances named
+by their dependency references. A child stored only on an otherwise unknown instance cannot be
+inferred from its parent; add it explicitly or declare the parent's cross-instance child reference.
+Analysis reports missing or unreachable references rather than silently dropping them.
+
+Pipeline registries may also be API instances: use `-i api:registry` or
+`Pipeline.load('daily-totals', instance='api:registry')`. Exact member references retain their
+own instances. The API uses a separate `pipelines` route group for definition metadata:
+`GET /pipelines`, `GET /pipelines/keys`, and `/pipelines/{name}/{register,edit,delete,id,attributes}`.
+Read operations require `pipes:read`, registration/edit/metadata leases require `pipes:write`,
+and deletion requires `pipes:delete`. These endpoints transport raw registration metadata;
+use the CLI or SDK for lifecycle operations that reconcile owned tags and check scheduled Jobs.
+They do not expose arbitrary internal `mrsm` Pipes or data-table operations.
+
+Schedule guards check Jobs available on the client and registry server. Server-side schedules
+should use the server's own instance keys, such as `sql:main`, rather than an HTTP alias pointing
+back to that server: the server cannot infer that arbitrary client aliases name its own registry.
+Jobs on unrelated executors are not discoverable automatically.
 
 
 ---
@@ -3293,36 +3348,62 @@ The engine emits one typed event per transition, and everything you see is drawn
 
 `run_started`, `node_planned`, `node_started`, `chunk_started`, `chunk_finished`, `node_finished`, `node_failed`, `node_skipped`, `node_rebuild_pending`, `watermark_advanced`, `stream_flushed`, `children_triggered`, `stream_restarted`, `run_finished`.
 
-## Running a pipeline in the console
+## Running a Pipeline in the console
 
-Open `/dash/pipelines` and click a pipeline's name inside its dashed boundary. Its details show the saved membership and a **Run now** button. Shared pipes may appear in more than one named group. Clicking a pipe opens its stage inspector; **Open pipe** opens the full pipe page in a new tab.
+Open `/dash/pipelines` and select a registered Pipeline or click its named boundary. Shared Pipes
+may appear in several groups. Select a Pipe to open its inspector immediately; Query, Data / Plan,
+Dependencies, Recent syncs and Parameters load independently. **Resolve symlinks** changes displayed
+SQL in the selected Pipe's instance context, preserving the stored definition.
 
-**Run now** starts a single sync through the API's authenticated execution endpoint. The page follows its exact run ID, shows command output, and refreshes the Gantt chart and stage completion counts every two seconds while it runs. Running bars extend to the current time; planned bars use historical duration estimates. **Sync activity** shows the engine's recorded events and sync results, with a stage selector to focus one pipe. The selected pipeline's history remains available while a run is active.
+**Fullscreen** keeps the canvas, inspector, editor and output dock together. Escape returns to
+the page. Drag the background to pan without selecting page text; zoom, Fit and Center selected
+provide keyboard-accessible controls. Search and status filters highlight matching Pipes, and
+Collapse groups provides an overview. Ctrl/Cmd/Shift-click selects several cards. Alt-drag a Pipe
+to arrange it, then **Save shared layout** in **Edit Pipeline draft / add Pipe** persists coordinates with revision checks. Zoom and pan
+remain personal to the browser session.
 
-**Manage pipeline** edits the saved definition and creates recurring scheduled jobs. A saved definition stores membership; a job supplies the schedule and execution settings. **Planned action** in a stage inspector describes what the next sync would do, rather than a scheduled execution time. Hover over a stage's status icon to read its planned action.
+Right-click a Pipe or use its inspector to **Sync this Pipe**, include parents, or include children.
+Inspector bounds apply to that operation. These controls launch one execution through the same
+authenticated server endpoint; they do not run the entire registered Pipeline implicitly.
+The output dock keeps tabs for completed single-Pipe executions. Expanded scopes use exact
+run/Pipe engine event identities rather than assigning interleaved stdout by matching text.
+Arbitrary plugin stdout from a concurrent Pipeline run remains in **Pipeline command output**;
+per-Pipe panes provide structured events and results. Run an individual Pipe for its dedicated
+stdout stream.
+**Run now** executes the saved Pipeline and follows its allocated run ID. History remains
+separate from editable current state.
+
+**Edit Pipeline draft / add Pipe** manages explicit membership. Find existing Pipes on an explicit
+instance, or register a new Pipe and add it to the draft. Registration is an explicit separate
+mutation. Draft membership and traversal edits support Undo, Redo, Discard and Save. The inspector's
+**Edit shared Pipe** tab stages explicit dependencies and raw SQL changes. These change shared Pipe
+facts in every Pipeline using that Pipe. Inferred edges are changed by editing their SQL references.
+The editor validates the proposed dependency graph before writing and checks shared Pipe baselines
+and Pipeline revisions; cross-instance failures report individual results.
+
+**Analyze** detects traversal members, shared Pipes and proposed `pipeline-{name}` tag changes.
+Review the proposal, then explicitly **Apply proposed tags**. Stale proposals require analysis and
+approval again. Ordinary saves and syncs do not apply tags.
+
+The canvas's **Plan** describes dependency order, readiness, actions and bounds without a time axis.
+The **Actual execution timeline** uses observed starts and finishes, extends live running bars and
+shows overlap and elapsed time. It omits forecast bars and the image-download control. Engine
+estimates may use prior durations or a 30-second default; these are scheduling hints, not deadlines.
+The Runs table and Sync activity retain their run/Pipe filters. **Manage pipeline** also creates
+ordinary scheduled Jobs with their own execution settings.
 
 ## 🖥️ In the terminal
 
-`mrsm sync pipes` prints each node's result as it finishes and a summary of the run (the output shown throughout this section). A run with `--parents` / `--children` and more than one node ends with a static **Gantt chart** of the actual run and the plan (a plain `sync pipes` keeps v4's output, so it prints none, and neither does `--nopretty`). On a terminal the run also prints one progress line per node as it starts and finishes (`▶`, `✔`, `✘`, `○`). `mrsm show run <id>` draws the chart of any recorded run:
+`mrsm sync pipes` prints each node's result and a run summary. Graph selections also report
+node transitions as they start and finish. `mrsm show run <id>` reads the recorded run; actual
+elapsed time and observed execution intervals are the primary Timeline view. `plan pipes` and
+`plan pipelines` explain the next actions and bounds independently of that execution history.
+`--nopretty` prints machine-readable plan and run information.
 
-```text
-run 01JW9GANTT  4 nodes  4 workers  wall 1m40s  planned 1m15s  critical path: raw → clean
-raw    ██████████████████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░  40s    +12,301 ins                  ✔
-       ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒                                        30s    planned
-clean  ░░░░░░░░░░░░░░░░░░░░░░███████████████████████████░░░░░  50s    +12,290 ins  ~11 upd         ✔
-                       ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒               45s    planned
-geo    ░░░░░░░░░░░░░░░░░░░░░░████                              9s     error: connection reset      ✘
-                       ▒▒▒▒▒▒▒▒▒▒▒                             20s    planned
-daily  ·                                                              skip                         ○
-█ actual  ▒ planned
-```
-
-Each node has two lanes on one time axis (which spans the longer of the run's wall time and the planned makespan):
-
-- **Actual** (first line): `█` is when the node ran, `░` the time around it, `·` a node that did not run (`skip`, `upstream_failed`, `rebuild_pending`, `observe` or never ran). The right-hand columns are the duration, a count summary (`+N ins`, `~N upd`, `+N ups`, `-N del`) or `error: …`, and ✔ / ✘ / ○.
-- **Planned** (second line, `▒`): the bar the plan drew before the run started. It starts at the node's earliest start in the critical-path schedule and **ends** after its planned duration: the moving average (EWMA, `alpha` 0.3) of the node's earlier successful runs with the same action, else of all its earlier successful runs, else **`system.engine.default_duration_seconds` (30 seconds)**. A node planned not to sync (a `skip`) has no planned lane; a child planned against parents that are about to change (a provisional `skip`) is planned as an `incremental`, because it usually syncs once its parents finish.
-
-The header adds the planned makespan (`planned 1m15s`) next to the actual wall time. A first run has no history, so every planned bar is 30 seconds long. For a run read back from the instance (`show run <id>`, the console), the planned duration is recomputed from the history before that run (the run's own rows store the planned start and slack, not the duration).
+Scheduling forecasts can use a per-action historical moving average (alpha 0.3), other successful
+action history, or `system.engine.default_duration_seconds` (30 seconds). These estimates omit
+worker contention and can greatly exceed a fast first run. They are planning hints; the console
+therefore does not overlay them on the actual-time chart.
 
 `mrsm show graph` draws a selection as a top-down tree (a pipe with several parents is drawn once, under the first parent the walk reaches, and referred to elsewhere):
 
@@ -3355,18 +3436,14 @@ run                         started (UTC)        status     wall  ok/nodes  targ
 
 ## 🌐 In the web console
 
-Start the API (`mrsm start api`) and open **`/dash/pipelines`** (the console needs `pip install meerschaum[dash]`). It reads the same instance-backed engine state described in [Engine State](/reference/pipelines/state/) and never writes.
-
-- **Pipeline canvas.** Connected cards show how data moves from sources to outputs. Each card uses the familiar `Pipe(...)` representation and describes its next sync. Drag the canvas to pan, use the zoom buttons or Fit, and search for a pipe to focus on its ancestors and descendants. Connected pipelines are shown first; enable **Include standalone pipes** to show isolated sources too.
-- **Stage inspection.** Select a card to read its query, parameters, latest data timestamp, next sync range, dependencies and recent runs. Open the pipe for its complete information and data tools. Detailed planner explanations are available under **Planner details**.
-
-- **Gantt chart per run.** Planned and actual bars side by side (planned bars end after the planned duration described above), plus a table of each node's action, status and planned and actual start. (The plan's critical path and slack are recorded with each run and are drawn in the terminal Gantt chart.)
-- **Runs table.** Filter by run ID, pipe and status.
-- **Parents / Children tabs** in the "Parents & Children" section of every pipe card on the pipes page.
+Start the API (`mrsm start api`) and open **`/dash/pipelines`**. The console needs
+`pip install meerschaum[dash]`. The workspace reads [Engine State](/reference/pipelines/state/)
+and writes definitions or shared Pipe facts only through explicitly named controls described above.
+The Pipe cards on the Pipes page retain their Parents / Children tabs.
 
 The engine's *ledger* is its record of changed parent data, used to find updates a child still needs to process, including changes to older rows. It remains part of syncing; it is not a separate lag metric on the page. A *watermark* is the latest value of a pipe's datetime or ordering column. Without a previous dependency-sync record, the engine compares parent and child watermarks. When a parent is ahead, the child reads from its own latest value minus its backtrack window, up to the earliest parent watermark. The canvas calls this **New parent data available**.
 
-Sync history refreshes about every 15 seconds. Use the refresh button to update the pipeline canvas. Select a run with the link in the runs table (`/dash/pipelines?run_id=…`) to see its Gantt chart. State lives in the URL, so a run or filter is shareable.
+Sync history refreshes about every 15 seconds. Use the refresh button to update the pipeline canvas. Select a run with the link in the runs table (`/dash/pipelines?run_id=…`) to see its actual execution timeline. State lives in the URL, so a run or filter is shareable.
 
 The console is available through `mrsm start api` and is covered in [Web Console](/reference/api-instance/web-console/).
 
@@ -6340,7 +6417,7 @@ You have complete control of your Meerschaum instance via the webterm, an intera
 
 <img src="/assets/screenshots/web-console-webterm.png" alt="Webterm">
 
-Run actions by clicking `Exec`, which uses the values of your currently selected dropdowns (i.e. `-c` for connectors, `-t` for tags, etc.). Exec, a pipe card's **Manage** menu and **Follow logs** run through the API server as an ordinary job (`POST /execute`) and stream its log into the page (`GET /logs/<job>/stream`); they are for administrators (the rule of `POST /execute`: other users only when `system.api.permissions.actions.non_admin` is set), and drop, delete and clear confirm first. Log streams follow the `jobs` rate limit and are capped (`api.permissions.log_streams.max`, default 32 per server, and `per_user`, default 4; the next one gets `429`), and a stream ends when its session does. Alternatively, click the webterm and type your commands directly into the shell session (the choice is yours!).
+Run actions by clicking **Exec**, which uses your selected filters and flags. Exec validates the command and submits it once into the existing webterm iframe; it keeps the terminal visible and reports a busy or disconnected session. You can also type directly into the same shell. Pipe-card **Manage** actions and Pipeline sync controls run as authenticated background executions through `POST /execute`, following their output over `GET /logs/<job>/stream`. Destructive actions confirm first. Automatic executions appear under **Runs**, while manually managed and scheduled **Jobs** retain their own view. The **Pipelines** button renders registered Pipeline cards, with a smaller **Term** button beside it.
 
 <img src="/assets/screenshots/web-console-execute-action-button.png" alt="Execute actions via the webterm">
 
@@ -7178,8 +7255,8 @@ Below are the supported top-level keys in a Compose file. Note that all keys are
   Govern the behavior of the syncing process. See **The `sync` Key** section below.
 - **`jobs`**  
   If provided, `compose up` will start the defined jobs. See **The `jobs` Key** below.
-- **`project_name`** (default to directory name)  
-  The tag given to all pipes in this project. Defaults to the current directory. If you're using multiple compose files, make sure each file has a unique project name.
+- **`project_name`** (default derived from the file path)
+  The tag given to all pipes in this project. Conventional `mrsm-compose.yaml` and `mrsm-compose.yml` files default to their containing directory's name. Other files default to their filename without the final `.yaml` or `.yml` suffix: `/projects/acme/metrics.yaml` becomes `metrics`. Each included file derives its own name. Explicit names (including effective environment values) take precedence. Set `project_name` explicitly to preserve an older directory-based identity for a custom-named file. Every project in a composition must have a unique name.
 - **`root_dir`** (default `./root/`)  
   A path to the root directory; see [`MRSM_ROOT_DIR`](/reference/environment/#mrsm_root_dir).
 - **`plugins_dir`** (default `./plugins/`)  
@@ -7778,6 +7855,31 @@ success, msg = job.start()
     job.delete()
     ```
 
+## Automatic Runs
+
+The Web Console separates persistent **Jobs** from automatic **Runs**. Clicking a Pipeline's
+Run or a Pipe's Sync action creates a temporary execution worker, which appears in Runs and
+its Pipeline rather than filling the default Jobs cards. A manually created one-shot Job
+remains in Jobs. After an automatic execution finishes, choose **Keep as Job** to promote
+it into a persistent Job. Repeating that request is safe.
+
+Automatic successful output is retained for 24 hours, failed output for 7 days, and archived
+summaries for 30 days. The server cleans up at startup and periodically, without requiring
+another execution request; active and paused work do not expire. Unknown completion results
+use the failure retention period. The worker and its output links remain available until its
+output expires; Runs then shows an archived summary with the result and exact Pipeline/run
+identity, explicitly marking the output as expired. These settings govern automatic worker
+records and do not prune the engine's separate execution-history store. Configure durations in seconds:
+
+```yaml
+api:
+  execute:
+    retention:
+      success_seconds: 86400
+      failure_seconds: 604800
+      summary_seconds: 2592000
+```
+
 ## ⏲️ Schedules
 
 Meerschaum includes its own small schedule engine, so scheduled jobs do not require a separate
@@ -8188,7 +8290,30 @@ The `sql` command lets you quickly interact with your databases.
 
 <asciinema-player src="/assets/casts/sql-cli.cast" autoplay="true" loop="true" size="small" preload="true"></asciinema-player>
 
-For certain flavors, Meerschaum is integrated with tools from the [dbcli](https://www.dbcli.com/) project that let you drop into an interactive SQL database environment.
+For PostgreSQL, MySQL, SQLite, DuckDB, and Oracle flavors, Meerschaum first looks for
+[Rainfrog](https://github.com/achristmascarl/rainfrog), a Rust terminal interface with a query
+editor, highlighting, history, and schema navigation. Install it separately with
+`cargo install rainfrog --locked`. Oracle requires its client libraries, and Rainfrog's DuckDB
+driver is unavailable in some builds. Meerschaum does not install a SQL client implicitly.
+
+If Rainfrog is absent, Meerschaum tries the existing Python flavor client (`pgcli`, `mycli`,
+`litecli`, or `gadwall`) and then the plain database client. MSSQL retains `mssqlcli` / `sqlcmd`.
+`mrsm sql LABEL --nopretty` always selects the plain client (`psql`, `mysql`, `sqlite3`,
+`duckdb`, or `sqlcmd`). A nonzero client exit status fails the action.
+
+Set a connector's `cli` attribute to choose an installed executable explicitly, or configure
+`system:connectors:sql:cli:FLAVOR` for a flavor-wide preference. For example:
+
+```yaml
+system:
+  connectors:
+    sql:
+      cli:
+        postgresql: pgcli
+        sqlite: rainfrog
+```
+
+Connection credentials are passed in the child environment rather than command-line arguments.
 
 The `sql` command also lets you read from tables or execute queries on any of your databases directly from the command line.
 
@@ -9390,7 +9515,7 @@ Source: https://meerschaum.io/reference/plugins/rust-plugins/
 
     Meerschaum 5 is installed the same way as before (`pip install meerschaum`), and most users keep writing Python plugins, which work unchanged. Rust plugins are an option, not a requirement: use one for the native performance path (the Rust core, kernel and Syncing Engine) or to run on the lean `slim` image (the base wheel, no extras). Everything on this page is about that option.
 
-> New in v5. A Rust plugin is a native shared library that Meerschaum loads in-process. It can do everything a [Python plugin](/reference/plugins/types-of-plugins/) can: fetch or sync data, add actions and arguments, run hooks around syncs, provide a whole connector, serve HTTP routes and add console pages. Python plugins are unchanged, and the two kinds live side by side in the same plugins directory.
+> New in v5. A Rust plugin is a native shared library that Meerschaum loads in-process. It can fetch or sync data, add actions and arguments, run hooks around syncs, provide a connector, serve supported native HTTP routes and add page-contract console pages. Python Dash callbacks and arbitrary FastAPI customization remain Python-host capabilities. Python plugins are unchanged, and the two kinds live side by side in the same plugins directory.
 
 Choose a Rust plugin when you want no Python interpreter at runtime (the standalone `mrsm` binary of `cargo install meerschaum`), predictable performance on large frames, or a single binary artifact. Keep writing Python for everything else.
 
@@ -9422,6 +9547,31 @@ The library name is always `lib<name>.<ext>`, with the `lib` prefix on Windows t
 
 A directory that contains both a `plugin.toml` and Python files is a Rust plugin. If a Rust plugin and a Python plugin have the same name, **the Rust plugin replaces the Python plugin entirely**: its actions, hooks, connectors, routes and pages disappear from the merged manifest, and nothing falls back to the Python module, even for functions the library does not implement. Python plugins with other names are unaffected and keep working beside the native one. To port a plugin gradually, split it: move one capability into a Rust plugin with a new name and keep the rest in Python (the two may depend on each other through `required`).
 
+### Gradual migration
+
+Keep a Python plugin such as `acme_ui` for `@dash_plugin`, custom login layouts, and FastAPI
+handlers, and put the data capability into a differently named Rust plugin, `acme_data`.
+For example, the native plugin can implement `fetch` and the existing Python page can read
+its registered Pipe through the normal SDK:
+
+```python
+import meerschaum as mrsm
+
+readings = mrsm.Pipe('plugin:acme_data', 'readings', instance='sql:local')
+# The page continues to use its existing Dash callbacks and data formatting.
+data = readings.get_data()
+```
+
+Use the native fetch example below as the starting implementation for `acme_data`. Register
+and sync that Pipe before opening the page. Moving the fetch implementation does not require
+rewriting the page or changing its session handling.
+
+The current native HTTP adapter accepts static paths outside reserved core namespaces. Do not
+assume it reproduces parameterized FastAPI routes, full scoped-principal context, custom
+request/response headers and cookies, redirects, or arbitrary binary responses. Audit those
+requirements before porting an API plugin. Same-name native plugins replace the complete
+Python plugin rather than individual capabilities.
+
 ## 🔧 Writing one
 
 Create a library crate:
@@ -9437,7 +9587,7 @@ edition = "2024"
 crate-type = ["cdylib"]
 
 [dependencies]
-meerschaum-plugin = "5"   # or a path/git dependency on crates/meerschaum-plugin until it is published
+meerschaum-plugin = "=5.0.0-rc.6"   # prerelease versions require an exact prerelease requirement
 
 [profile.release]
 panic = "unwind"      # required: the SDK catches panics at the boundary
@@ -10543,7 +10693,7 @@ Everything below is deliberate, and each item links to the section with the deta
 | CLI daemons | `start|stop|restart|show daemons` managed a warm interpreter | There is nothing to keep warm: `show daemons` reports none and `start daemons` / `start worker` explain that actions run natively. [Deployment](#deployment) |
 | Editors | `$EDITOR`, else installed `pyvim` | `$VISUAL`, else `$EDITOR`, else `vi`. Nothing is installed to open an editor. [Deployment](#deployment) |
 | Scopes | `*` entered in `edit tokens` / `edit users` was expanded to the built-in scope list; stopping a job over the API required the misspelled scope `josb:stop`; any user could register a token with any scopes, `*` included | `*` is stored literally and grants every scope, custom and future ones included; `POST /jobs/{name}/stop` requires `jobs:stop` (a token that holds the legacy `josb:stop` is still accepted); **a token carries at most its owner's scopes** (asking for more is refused with a `403` naming them), and only a token's owner or an administrator may edit, invalidate or delete it (only an administrator may make an invalidated token valid again). [Tokens](/reference/api-instance/tokens/#scopes) |
-| `sql <label>` | Passed the connection URL with the password to `pgcli` / `mycli` | Passes the URL without the password and sets `PGPASSWORD` / `MYSQL_PWD` for the client, so the password never shows in `ps`. |
+| `sql <label>` | Passed the connection URL with the password to `pgcli` / `mycli` | Prefers installed Rainfrog for supported flavors; keeps Python/plain fallbacks and configurable preferences. Credentials travel through the child environment, outside argv. `--nopretty` forces the plain client. |
 | `sql <label> "<query>"` | The query went to the driver in one call: SQLite (`sqlite3`) and MySQL / MariaDB (`pymysql`) refused a string holding several statements (`a; b`) with a driver error and ran none of them | The text is sent as written, so `CREATE TABLE t (a INT); INSERT INTO t (a) VALUES (5)` runs on SQLite, MySQL and MariaDB like it already did on PostgreSQL and MSSQL (Oracle still takes one statement per call). Only SQL you type is affected |
 | `sql <label> "<query>"` that contains `select` but changes data | v4 sends any text containing `select` through `read()`, which fails after the statement ran and, on most flavors, rolled it back silently: `INSERT ... SELECT` kept its rows only on MSSQL, and `CREATE VIEW ... AS SELECT` was kept on MSSQL, MySQL, MariaDB, Oracle and SQLite but not on PostgreSQL or DuckDB | The statement runs and is **committed** on every flavor, and the action still prints `None` after "This result object does not return rows" (DuckDB prints its `Count` table). |
 | DuckDB | The Python `duckdb` package, or (v5 pre-releases) a C++ library built into `mrsm` | Python hosts share the optional Python driver between Pipe operations and SQLAlchemy. Standalone and base-only installs load `libduckdb` at run time, downloading it when needed. Explicit `MRSM_DUCKDB_LIB` selects the native C API and refuses mixed SQLAlchemy access. [Installing and running](#installing-and-running) |
@@ -10622,7 +10772,7 @@ Core actions behave the same and take the same flags. `mrsm --help` is diffed ag
 - **The environment of a job created over the API is the server's.** As in 4.1, `POST /jobs/{name}` replaces whatever `properties.env` the client sent with the server's environment. The one exception is the Compose project stamp, which is kept so that projects sharing one remote executor still own their jobs (4.1 loses it). A client cannot set other environment variables of a remote job.
 - **Systemd units pin the Python interpreter.** The unit runs the `mrsm` binary and carries `Environment=MRSM_PYTHON=<absolute path>`: the `MRSM_PYTHON` (else the first `python3` on `PATH`) of the process which created the job. Plugins run under that interpreter however the unit is started later. `systemctl --user stop` of a job asks it to stop once; it stops at its next checkpoint, as with a single Ctrl+C.
 
-**`GET /jobs` redacts credentials, and the console's jobs are private.** 4.1 returned every job's `daemon.properties.env` (the server's environment when the job was created: each `MRSM_SQL_*` / `MRSM_API_*` connector URI with its password, and any other secret the process held) to every caller with `jobs:read`. 5.0 masks the password of connector URIs and the value of credential-named variables (`*_PASSWORD`, `*_TOKEN`, `*_SECRET*`, ...), also inside JSON values such as `MRSM_CONFIG`, in `GET /jobs` and `GET /jobs/{name}`; the other variables are unchanged. The jobs the console's Exec box starts (`execute-*`) are visible to the user who started them and to administrators only.
+**`GET /jobs` redacts credentials, and the console's jobs are private.** 4.1 returned every job's `daemon.properties.env` (the server's environment when the job was created: each `MRSM_SQL_*` / `MRSM_API_*` connector URI with its password, and any other secret the process held) to every caller with `jobs:read`. 5.0 masks the password of connector URIs and the value of credential-named variables (`*_PASSWORD`, `*_TOKEN`, `*_SECRET*`, ...), also inside JSON values such as `MRSM_CONFIG`, in `GET /jobs` and `GET /jobs/{name}`; the other variables are unchanged. Automatic workers created by Pipe management and Pipeline runs are visible to their creator and administrators only. rc6 records their kind and owner explicitly, including workers with custom names; older `execute-*` records retain the same visibility restriction. The Exec button uses the existing terminal and does not create an automatic worker.
 
 **Jobs start staggered (new in 5.0.0rc2).** In 4.1 every job started the moment it was asked to, so `compose up`, `restart jobs` or a reboot bringing all your systemd units up at once started every worker, imported every plugin and ran every first lap on top of each other. In v5 each job passes a per-root startup gate first: a random delay of up to `jobs.startup.jitter_seconds` (default 30), a wait while the machine is busy (`jobs.startup.max_load` x CPUs, `jobs.startup.min_free_memory_percent`), and a slot (`jobs.startup.max_concurrent`, default `max(2, CPUs / 2)`) held until the job's first lap is done, the job goes idle (`jobs.startup.settle_seconds`, default 15) or `jobs.startup.slot_timeout_seconds` (default 300) pass. An explicit `mrsm start job x` skips the delay and the busy check (it still waits for a free slot), and `--no-stagger` skips the gate altogether. Bulk starts, `restart jobs` and unit restarts get all of it, so a job may begin a few seconds after you start it. Generated units also carry `RestartSec=5`. `-s` schedules take an optional fixed per-job offset: `-s 'every 5 minutes jitter 30 seconds'`, `--jitter 30s` or `jobs.schedule.jitter_seconds` (default 0).
 
@@ -10827,7 +10977,18 @@ api:
       allowlist: [mcp, version]
 ```
 
-The allowlist is a list of `fnmatch` patterns over the **core route groups**: `actions`, `connectors`, `index`, `jobs`, `misc`, `pipes`, `plugins`, `tokens`, `users`, `version`, `engine`, `mcp` and `dash` (the console's own pages). The default is `['*']`. `/login` is always served so that issued tokens keep authenticating plugin routes, and routes added by `@api_plugin` or `@web_page` are never filtered by it. A core group that is not allowed is not registered, and the Rust server never forwards its paths to your host either, so a plugin cannot serve a path of a stripped group by accident. There is no `denylist`: list what you want to keep.
+The allowlist is a list of `fnmatch` patterns over the **core route groups**: `actions`, `connectors`, `index`, `jobs`, `misc`, `pipes`, `pipelines`, `plugins`, `tokens`, `users`, `version`, `engine`, `mcp` and `dash` (the console's own pages). The default is `['*']`. A core group that is not allowed is not registered, and its paths are not forwarded to the Python host.
+
+Starting with rc6, `api.permissions.routes.disabled` explicitly disables matching route groups and overrides the allowlist. Native `/login` is enabled by default, independently of the allowlist; disable it explicitly with:
+
+```yaml
+api:
+  permissions:
+    routes:
+      disabled: [login]
+```
+
+The disabled login route cannot reappear through host fallback. A namespaced plugin login such as `/acme/login` remains a separate route. Registering a FastAPI handler for `/login` does not replace the native route; exact core-route replacement is not supported. Custom Dash login layouts registered with `web_page('login', ...)` remain supported and are independent of login API routing. Verify your external endpoint surface after migrating Python route-stripping hooks.
 
 ### Background threads and startup hooks
 
@@ -11432,6 +11593,32 @@ Source: https://meerschaum.io/news/changelog/
 ## 5.0.0 Releases
 
 Meerschaum 5 is a rewrite of the core in Rust: the data kernel, the `sql:` / `valkey:` / `api:` connectors, the Syncing Engine, jobs, compose, the HTTP API, the MCP server and the `mrsm` CLI and shell. The `meerschaum` Python package stays as the plugin SDK, a façade and the host of the Plotly Dash web console, so pipes, parameters, configuration, compose files, jobs, the HTTP API and the Python public API keep working. Read the [migration guide](/reference/migrating-to-v5/) before upgrading; v4.1.x stays installable and receives security fixes until 5.1.0.
+
+### v5.0.0rc6
+
+- **Manage registered Pipelines across instances.**  
+  Pipeline lifecycle actions are visible in help and completion. Registered definitions preserve exact member identities, revisions, traversal settings, and execution defaults. `show pipelines` reads saved state; `analyze pipelines` discovers dependencies and previews `pipeline-{name}` tag edits for approval. Shared and pre-existing tags retain ownership, and unavailable members remain visible errors.
+
+- **Build and inspect Pipelines in an interactive workspace.**  
+  Fullscreen includes the canvas, inspector, and output dock. Add existing or new Pipes, stage membership and dependency/query edits, save shared layouts, and use search and status controls. Selection opens details immediately and loads sections lazily. The Query pane includes Resolve symlinks, and individual Pipe syncs and scoped output are available inside the workspace.
+
+- **Separate execution plans from observed time.**  
+  Dependency plans show work and ordering. Timelines display actual elapsed execution without cold-start duration estimates stretching the axis. Historical forecast metadata remains available; the chart image-download control is removed.
+
+- **Keep automatic Runs separate from persistent Jobs.**  
+  Temporary execution workers have explicit ownership and lifecycle metadata and do not fill default Jobs cards. Runs retain configurable output and summaries, clean up in the background, and can be kept as Jobs. The Web Console adds Pipeline cards and a Pipelines button alongside a smaller Term button.
+
+- **Restore Exec inside the existing web terminal.**  
+  Exec submits the composed command once to the iframe terminal after validating authorization and readiness. It preserves the terminal and reports busy or disconnected sessions. Direct Pipe navigation also tolerates filter controls absent from its layout.
+
+- **Prefer Rainfrog for interactive SQL.**  
+  Supported flavors prefer an installed Rainfrog TUI, with configurable client choices and existing Python/plain fallbacks. `--nopretty` selects the plain database client. Credentials stay outside command-line arguments, and a nonzero client exit status fails the action.
+
+- **Derive custom Compose project names from filenames.**  
+  A custom file such as `metrics.yaml` defaults to project `metrics`; conventional `mrsm-compose.yaml` and `.yml` retain their directory name, including dots. Explicit names take precedence. Set `project_name` explicitly to preserve an older implicit identity.
+
+- **Make native endpoint disabling explicit.**  
+  `api.permissions.routes.disabled` overrides route allowlists and can disable native `/login` without restoring it through host fallback. Custom Dash login pages and namespaced plugin APIs remain supported. Migration documentation explains Python route-stripping limits and gradual adoption of separately named Rust plugins.
 
 ### v5.0.0rc5
 

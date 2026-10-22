@@ -180,8 +180,7 @@ out['by_id'] = len(engine.get_runs(instance, run_id=runs[0]['run']['run_id']))
 detail = engine.get_run_detail(instance, runs[0]['run']['run_id'])
 gantt = engine.gantt_figure(detail)
 out['gantt_traces'] = [t['name'] for t in gantt['data']]
-out['gantt_planned'] = len(gantt['data'][0]['y'])
-out['gantt_actual'] = len(gantt['data'][1]['y'])
+out['gantt_actual'] = len(gantt['data'][0]['y'])
 out['unknown_run'] = engine.get_run_detail(instance, 'no-such-run')
 events = engine.get_run_events(instance, runs[0]['run']['run_id'])
 lines = [engine.describe_event(e) for e in events]
@@ -206,9 +205,8 @@ print('JSON:' + json.dumps(out))
     assert out['runs'] >= 1 and out['run_status'] == 'succeeded'
     assert out['filtered'] == 0 and out['by_pipe'] >= 1 and out['by_id'] == 1
     assert out['by_ancestor_label'] >= 1
-    assert out['gantt_traces'] == ['Planned', 'Actual']
-    ### Every node has a planned bar; a node that did not run has no actual one.
-    assert out['gantt_planned'] == 3 and 1 <= out['gantt_actual'] <= 3
+    assert out['gantt_traces'] == ['Actual']
+    assert 1 <= out['gantt_actual'] <= 3
     assert out['unknown_run'] is None
     assert out['event_lines'][0].startswith('run_started')
     assert out['mid_parents'] == ["Pipe('dp', 'src', instance='sql:apihosttest')"] and out['mid_children'] == ["Pipe('dp', 'leaf', 'loc', instance='sql:apihosttest')"]
@@ -506,8 +504,8 @@ now = datetime.now(timezone.utc)
 bar = {'pipe_ref': refs[0], 'status': 'pending', 'actual_start': (now - timedelta(seconds=2)).isoformat(),
        'actual_end': None, 'planned_start': now.isoformat(), 'planned_end': (now + timedelta(seconds=30)).isoformat()}
 figure = engine.gantt_figure({'bars': [bar], 'summary': {'run': {'run_id': 'test'}}})
-assert figure['data'][1]['x'][0] >= 2000
-assert figure['data'][1]['customdata'] == ['running']
+assert figure['data'][0]['x'][0] >= 2000
+assert figure['data'][0]['customdata'] == ['running']
 assert figure['layout']['uirevision'] == 'test'
 icon = engine.action_indicator('root').to_plotly_json()['props']
 assert icon['title'] == 'Fetch source data' and len(icon['children']) == 1
@@ -538,7 +536,7 @@ updates = {}
 dash.ctx = SimpleNamespace(triggered_id='pipelines-interval')
 dash.set_props = lambda id, props: updates.setdefault(str(id), {}).update(props)
 page.is_session_authenticated = lambda session: True
-page._engine.get_instance = lambda: 'sql:apihosttest'
+page._engine.get_instance = lambda *args: 'sql:apihosttest'
 ids = ['daily-2026-10-21T10-00-00.123456Z-abcdef01', 'daily-2026-10-20T10-00-00.123456Z-abcdef01']
 runs = [{'run': {'run_id': id}, 'status': 'succeeded', 'counts': {}} for id in ids]
 requests = []
@@ -563,18 +561,24 @@ assert updates['pipeline-log-stage']['value'] is None
 # Mutations always require an authorized session, then delegate to the server policy.
 management.is_state_authenticated = lambda data: False
 calls = []
-execute.run_action = lambda *args: calls.append(args) or {'success': True, 'job': 'job', 'stream': '/logs/job/stream', 'msg': 'started'}
+execute.run_action = lambda *args, **kwargs: calls.append((args, kwargs)) or {'success': True, 'job': 'job', 'stream': '/logs/job/stream', 'msg': 'started'}
 dash.ctx = SimpleNamespace(triggered_id='pipeline-run-now')
 try:
-    management.select_or_run_pipeline([], 1, 'daily', {})
+    management.select_or_run_pipeline([], 1, 'daily', '', {})
     raise AssertionError('Unauthorized run was accepted')
 except PreventUpdate:
     pass
 assert calls == []
 management.is_state_authenticated = lambda data: True
 sessions.get_username_from_session = lambda session: 'testuser'
-management.select_or_run_pipeline([], 1, 'daily', {'session-id': 'test'})
-assert calls == [(['sync', 'pipeline', 'daily', '-i', 'sql:apihosttest', '--nopretty'], 'testuser')]
+management.list_pipelines = lambda *args: {'daily': {'name':'daily','revision':1,'id':'definition'}}
+management.select_or_run_pipeline([], 1, 'daily', '', {'session-id': 'test'})
+assert len(calls) == 1
+args, kwargs = calls[0]
+assert args[0][:6] == ['sync', 'pipelines', 'daily', '-i', 'sql:apihosttest', '--nopretty']
+assert args[0][6] == '--run-id' and args[1] == 'testuser'
+assert kwargs['metadata']['run_id'] == updates['pipeline-live-run']['data']['run_id']
+assert kwargs['metadata']['pipeline']['revision'] == 1
 assert updates['pipeline-live-run']['data']['pipeline'] == 'daily'
 print('JSON:' + json.dumps({'scoped': True, 'authorized': True}))
 '''))

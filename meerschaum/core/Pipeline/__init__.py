@@ -42,6 +42,8 @@ from meerschaum.core.Pipeline._engine import (
 )
 from meerschaum.core.Pipeline._events import EVENT_KEYS, EVENT_NAMES, EventCallback, decode_event
 
+_UNSET_BOUND = object()
+
 __all__ = (
     'Pipeline', 'Plan', 'PlannedNode', 'RunResult', 'get_runs', 'sync_with_graph',
     'EVENT_KEYS', 'EVENT_NAMES', 'decode_event',
@@ -426,7 +428,7 @@ class Pipeline:
             'location_keys': location_keys,
         }
         self._filters = {k: ([v] if isinstance(v, str) else v) for k, v in self._filters.items() if v}
-        if not self._targets and not self._filters:
+        if not self._targets and not self._filters and not name:
             raise ValueError("A Pipeline needs target pipes or a tags / keys filter.")
         pipe_targets = [target for target in self._targets if isinstance(target, mrsm.Pipe)]
         self.instance = _instance_of(pipe_targets, instance)
@@ -444,7 +446,12 @@ class Pipeline:
         if not name:
             raise ValueError('Provide a pipeline name.')
         targets = self._targets or [p.pipe_ref for p in self.plan().nodes]
-        definition = save_pipeline(name, targets, self.instance, self.parents, self.children)
+        previous = getattr(self, 'definition', None)
+        definition = save_pipeline(
+            name, targets, self.instance, self.parents, self.children,
+            expected_revision=(previous['revision'] if previous and previous['name'] == name else None),
+        )
+        self.definition = definition
         self.name = name
         return definition
 
@@ -462,16 +469,21 @@ class Pipeline:
         return self.plan().pipes
 
     def _request(self, **kwargs: Any) -> Dict[str, Any]:
+        if getattr(self, 'definition', None):
+            from meerschaum.core.Pipeline._saved import validate_execution_defaults
+            kwargs = {**validate_execution_defaults(self.definition.get('defaults', {})), **kwargs}
+            kwargs["pipeline_definitions"] = [self.definition]
         if self.name:
             kwargs.setdefault("run_name", self.name)
             kwargs.setdefault("graph", True)
+        parents = kwargs.pop('parents', self.parents)
+        children = kwargs.pop('children', self.children)
+        for reserved in ('instance', 'targets', 'filters'):
+            if reserved in kwargs:
+                raise ValueError(f"Set Pipeline {reserved} on the definition, not as an execution option.")
         return build_request(
-            self.instance,
-            targets=self._targets,
-            filters=self._filters,
-            parents=self.parents,
-            children=self.children,
-            **kwargs
+            self.instance, targets=self._targets, filters=self._filters,
+            parents=parents, children=children, **kwargs,
         )
 
     def _register_targets(self) -> Optional[SuccessTuple]:
@@ -480,6 +492,8 @@ class Pipeline:
             if not isinstance(target, mrsm.Pipe) or target.temporary:
                 continue
             if target.get_id() is None:
+                if self.name:
+                    return False, f"Missing registered Pipeline member: {target} on {target.instance_keys}."
                 success, message = target.register()
                 if not success:
                     return False, message
@@ -487,8 +501,8 @@ class Pipeline:
 
     def plan(
         self,
-        begin: Any = None,
-        end: Any = None,
+        begin: Any = _UNSET_BOUND,
+        end: Any = _UNSET_BOUND,
         expected: bool = False,
         **kwargs: Any
     ) -> Plan:
@@ -516,7 +530,8 @@ class Pipeline:
         failure = self._register_targets()
         if failure is not None:
             raise ValueError(failure[1])
-        options = {'begin': begin, 'end': end, **kwargs}
+        options = {key: value for key, value in {'begin': begin, 'end': end, **kwargs}.items()
+                   if value is not _UNSET_BOUND}
         request = self._request(**options)
         if expected:
             request['expected'] = True
@@ -527,7 +542,7 @@ class Pipeline:
             if value not in (None, '')
         })
 
-    def sync(self, begin: Any = '', end: Any = None, **kwargs: Any) -> RunResult:
+    def sync(self, begin: Any = _UNSET_BOUND, end: Any = _UNSET_BOUND, **kwargs: Any) -> RunResult:
         """
         Plan and run the selection.
 
@@ -564,7 +579,9 @@ class Pipeline:
         failure = self._register_targets()
         if failure is not None:
             return RunResult(*failure)
-        request = self._request(begin=begin, end=end, **kwargs)
+        options = {key: value for key, value in {'begin': begin, 'end': end, **kwargs}.items()
+                   if value is not _UNSET_BOUND}
+        request = self._request(**options)
         callback = EventCallback(on_event) if on_event is not None else None
         if callback is None:
             data = call('engine_run', request)
@@ -578,7 +595,7 @@ class Pipeline:
             run.callback_error = callback.error
         return run
 
-    def run(self, begin: Any = '', end: Any = None, **kwargs: Any) -> RunResult:
+    def run(self, begin: Any = _UNSET_BOUND, end: Any = _UNSET_BOUND, **kwargs: Any) -> RunResult:
         """An alias of `Pipeline.sync()`."""
         return self.sync(begin=begin, end=end, **kwargs)
 

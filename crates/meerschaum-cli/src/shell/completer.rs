@@ -134,6 +134,8 @@ pub struct JobEntry {
 
 /// Lists the jobs of an executor.
 pub type JobLister = Arc<dyn Fn(&str) -> Vec<JobEntry> + Send + Sync>;
+/// Read Pipeline names from a selected registry on demand.
+pub type PipelineLister = Arc<dyn Fn(&str) -> Vec<String> + Send + Sync>;
 
 /// The seam for plugin-defined completers (`complete_<action>` in a plugin module).
 pub trait PluginCompleter: Send + Sync {
@@ -162,15 +164,16 @@ pub struct CompletionData {
     pub executor_keys: String,
     /// Lists the jobs of an executor (`get_jobs(executor_keys, include_hidden=False)`).
     pub jobs: Option<JobLister>,
+    /// Default registry and lazy name lookup for registered Pipeline completions.
+    pub instance_keys: String,
+    pub pipelines: Option<PipelineLister>,
     /// Actions declared by installed Python plugins.
     pub plugin_actions: Vec<meerschaum_worker::manifest::ActionManifest>,
     /// Plugin argument declarations.
     pub plugin_arguments: Vec<meerschaum_worker::manifest::ArgumentManifest>,
     /// Plugin completers.
     pub plugins: Option<Arc<dyn PluginCompleter>>,
-    /// Offer the v5-only subactions in the bare `<action> <TAB>` list. The interactive shell
-    /// keeps v4's lists (they complete once a prefix is typed); the program's shell completions
-    /// (`mrsm show completions`) list them all.
+    /// Retained for source compatibility; additive v5 subactions are always offered.
     pub include_v5_only: bool,
     /// Plugin connector types that can be an instance (`IS_INSTANCE`), for `-i` values.
     pub instance_types: Vec<String>,
@@ -200,6 +203,8 @@ impl Default for CompletionData {
             config_keys: Vec::new(),
             executor_keys: "local".into(),
             jobs: None,
+            instance_keys: "sql:main".into(),
+            pipelines: None,
             plugins: None,
             plugin_actions: Vec::new(),
             plugin_arguments: Vec::new(),
@@ -212,12 +217,8 @@ impl Default for CompletionData {
 /// The sorted `do_` names for an action registry (actions, shell commands, `help`, `exit`,
 /// `pass`).
 pub fn default_do_names(actions: &[ActionDef]) -> Vec<String> {
-    // v5-only actions stay out of the top-level list so the v4 completion fixtures hold.
-    let mut names: Vec<String> = actions
-        .iter()
-        .filter(|a| !crate::actions::V5_ONLY_ACTIONS.contains(&a.name))
-        .map(|a| a.name.to_string())
-        .collect();
+    // Additive v5 actions are public; fixture exclusions belong in parity tests.
+    let mut names: Vec<String> = actions.iter().map(|a| a.name.to_string()).collect();
     names.extend(SHELL_METHODS.iter().map(|s| s.to_string()));
     names.sort();
     names.dedup();
@@ -440,6 +441,32 @@ impl CompletionData {
             }
             return out;
         }
+        if action
+            .get(1)
+            .is_some_and(|word| matches!(word.as_str(), "pipeline" | "pipelines"))
+            && (tokens.len() > 2 || current_action_line.ends_with(char::is_whitespace))
+            && !last_space_word(current_action_line).starts_with('-')
+            && let Some(pipelines) = self.pipelines.as_ref()
+        {
+            let value_flag = if current_action_line.ends_with(char::is_whitespace) {
+                tokens.last().copied()
+            } else {
+                tokens.iter().rev().nth(1).copied()
+            };
+            if !value_flag.is_some_and(|word| word.starts_with('-')) {
+                let registry = args
+                    .get("mrsm_instance")
+                    .map(PyValue::py_str)
+                    .unwrap_or_else(|| self.instance_keys.clone());
+                let partial = last_space_word(current_action_line);
+                let n = chars(partial);
+                return pipelines(&registry)
+                    .into_iter()
+                    .filter(|name| name.starts_with(partial))
+                    .map(|name| Completion::new(name, n, n))
+                    .collect();
+            }
+        }
         if actions::get_action(&action, self.actions).is_none() {
             return out;
         }
@@ -558,12 +585,6 @@ impl CompletionData {
         let sub = action.get(1).map(String::as_str).unwrap_or("");
         let mut out: Vec<String> = actions::get_subactions(self.actions, first)
             .iter()
-            // v5-only subactions complete once a prefix is typed (the bare list is v4's).
-            .filter(|s| {
-                !sub.is_empty()
-                    || self.include_v5_only
-                    || !actions::is_v5_only_subaction(first, s.name)
-            })
             .map(|s| s.name.to_string())
             .filter(|s| s.starts_with(sub) && s != sub)
             .collect();

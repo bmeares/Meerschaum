@@ -5,9 +5,8 @@
 """
 Callbacks of the dashboard's Exec button, the pipe cards' "Manage" menu, and "Follow logs".
 
-See `meerschaum.api.dash.execute` for how an action runs: always through the server's `/execute`
-(there is no local run). The output pane (`exec-div`) follows the job's log over the server's event
-stream (`store['stream']`, drawn by the clientside callback below).
+Exec validates server policy and submits to the mounted terminal. Management actions use
+server execution workers; the output pane follows their logs over the event stream.
 """
 
 from __future__ import annotations
@@ -40,6 +39,7 @@ html, dcc = import_html(check_update=CHECK_UPDATE), import_dcc(check_update=CHEC
 HIDING_TRIGGERS = (
     'get-pipes-button',
     'get-jobs-button',
+    'get-pipelines-button',
     'show-webterm-button',
     'get-plugins-button',
     'get-users-button',
@@ -194,6 +194,18 @@ def start_exec(
     if sysargs is None:
         return _failure(message)
 
+    if trigger_id == 'go-button':
+        try:
+            allowed = _execute.execution_request('/execute/validate', username, method='POST',
+                                                 body={'sysargs': sysargs})
+            if not allowed or not allowed[0]:
+                return _failure(allowed[1] if allowed else 'The server cannot authorize this command.')
+        except Exception as exc:
+            return _failure(f'The server refused this command: {exc}')
+        import shlex
+        return ({'terminal': True, 'command': shlex.join(sysargs),
+                 'request_id': f'{session_id}:{started}:{go_clicks}', 'started': started}, [])
+
     try:
         result = _execute.run_action(sysargs, username)
     except Exception as e:
@@ -269,6 +281,7 @@ dash_app.clientside_callback(
             }
             return {display: 'none'};
         }
+        if (store && store.terminal) return {display: 'none'};
         if (store && (store.job || store.visible)){ return {display: 'block'}; }
         return dash_clientside.no_update;
     }
@@ -357,8 +370,8 @@ dash_app.clientside_callback(
 
 dash_app.clientside_callback(
     """
-    function(style){
-        if (style && style.display === 'block'){
+    function(style, store){
+        if (style && style.display === 'block' && store && store.job){
             dash_clientside.set_props('webterm-div', {style: {display: 'none'}});
         }
         return dash_clientside.no_update;
@@ -366,4 +379,36 @@ dash_app.clientside_callback(
     """,
     Output('exec-dummy-2', 'children'),
     Input('exec-div', 'style'),
+    State('exec-store', 'data'),
+)
+
+
+# Submit only from a deliberate Exec click. No queue or automatic reconnect replay.
+dash_app.clientside_callback(
+    """
+    function(store) {
+        if (!store || !store.terminal) return dash_clientside.no_update;
+        if (window._mrsmExecSubmitted === store.request_id) return dash_clientside.no_update;
+        window._mrsmExecSubmitted = store.request_id;
+        const frame = document.getElementById('webterm-iframe');
+        if (!frame) return 'Terminal is unavailable. Open Term and try again.';
+        const request = store.request_id;
+        function receive(event) {
+            if (event.origin !== location.origin || event.source !== frame.contentWindow) return;
+            if (!event.data || event.data.request_id !== request || event.data.action !== '__EXEC_ACK') return;
+            window.removeEventListener('message', receive);
+            clearTimeout(timer);
+            dash_clientside.set_props('terminal-exec-status', {children: event.data.accepted ? '' : event.data.message});
+        }
+        const timer = setTimeout(function() {
+            window.removeEventListener('message', receive);
+            dash_clientside.set_props('terminal-exec-status', {children: 'Terminal did not acknowledge this command. Check the terminal before submitting again.'});
+        }, 3000);
+        window.addEventListener('message', receive);
+        frame.contentWindow.postMessage({action: '__EXEC', request_id: request, command: store.command}, location.origin);
+        return 'Submitting to terminal…';
+    }
+    """,
+    Output('terminal-exec-status', 'children'),
+    Input('exec-store', 'data'),
 )

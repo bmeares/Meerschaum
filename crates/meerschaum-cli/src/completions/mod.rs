@@ -375,6 +375,35 @@ pub fn load_data(vars: &[(String, String)]) -> CompletionData {
         }
         scan_jobs(&jobs_dir)
     }));
+    data.instance_keys = config
+        .get(&["meerschaum", "instance"])
+        .map(|v| v.py_str())
+        .unwrap_or_else(|| "sql:main".into());
+    data.pipelines = Some(std::sync::Arc::new(move |keys: &str| {
+        let session = crate::native::Session::new();
+        let Ok(instance) = session.instance(keys, &config) else {
+            return Vec::new();
+        };
+        let query = meerschaum_connector::PipesKeysQuery {
+            connector_keys: vec!["mrsm".into()],
+            metric_keys: vec!["pipeline".into()],
+            ..Default::default()
+        };
+        let Ok(rows) = session.block_on(instance.conn().fetch_pipes_keys(&query)) else {
+            return Vec::new();
+        };
+        let rows: Vec<_> = match rows {
+            meerschaum_connector::PipesKeys::List(rows) => rows,
+            meerschaum_connector::PipesKeys::Dict(rows) => rows.into_values().collect(),
+        };
+        let mut names: Vec<_> = rows
+            .into_iter()
+            .filter_map(|row| row.location_key)
+            .collect();
+        names.sort();
+        names.dedup();
+        names
+    }));
     data
 }
 

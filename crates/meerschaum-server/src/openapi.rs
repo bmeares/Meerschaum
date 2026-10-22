@@ -840,6 +840,105 @@ pub fn operations() -> Vec<Operation> {
             UnlessPrivate,
         ),
     ];
+    ops.extend([
+        op(
+            "post",
+            "/execute/validate",
+            "actions",
+            &["Actions"],
+            "Validate Terminal Command",
+            &[],
+            Some((&[JSON_BODY], true)),
+            Never,
+        ),
+        op(
+            "get",
+            "/execute/runs",
+            "actions",
+            &["Runs"],
+            "Get Retained Execution Summaries",
+            &[],
+            None,
+            Never,
+        ),
+        op(
+            "post",
+            "/execute/runs/{name}/retain",
+            "actions",
+            &["Runs"],
+            "Keep Completed Execution As Job",
+            &[NAME],
+            None,
+            Never,
+        ),
+        op(
+            "get",
+            "/pipelines",
+            "pipelines",
+            &["Pipelines: Metadata"],
+            "List Registered Pipeline Definitions",
+            &[IK],
+            None,
+            Never,
+        ),
+        op(
+            "get",
+            "/pipelines/keys",
+            "pipelines",
+            &["Pipelines: Metadata"],
+            "Get Pipeline Registration Keys",
+            &[
+                IK,
+                ("location_keys", "query", false, "null|string"),
+                ("tags", "query", false, "null|string"),
+                PARAMS,
+            ],
+            None,
+            Never,
+        ),
+    ]);
+    for (method, suffix, summary, body) in [
+        ("post", "register", "Register Pipeline Metadata", true),
+        ("patch", "edit", "Edit Raw Pipeline Metadata", true),
+        ("delete", "delete", "Delete Pipeline Metadata", false),
+        ("get", "id", "Get Pipeline Registration Id", false),
+        (
+            "get",
+            "attributes",
+            "Get Raw Pipeline Registration Attributes",
+            false,
+        ),
+    ] {
+        let mut params = vec![NAME, IK];
+        if suffix == "edit" {
+            params.push(("patch", "query", false, "boolean"));
+        }
+        ops.push(op(
+            method,
+            &format!("/pipelines/{{name}}/{suffix}"),
+            "pipelines",
+            &["Pipelines: Metadata"],
+            summary,
+            &params,
+            body.then_some((&[JSON_BODY][..], true)),
+            Never,
+        ));
+    }
+    for (method, summary) in [
+        ("post", "Acquire Pipeline Metadata Lease"),
+        ("delete", "Release Pipeline Metadata Lease"),
+    ] {
+        ops.push(op(
+            method,
+            "/pipelines/leases",
+            "pipelines",
+            &["Pipelines: Metadata"],
+            summary,
+            &[IK],
+            Some((&[JSON_BODY], true)),
+            Never,
+        ));
+    }
     let engine = [
         ("post", "/engine/ledger", "Post Engine Ledger", vec![], true),
         (
@@ -979,7 +1078,11 @@ pub fn optional_operations(cfg: &ServerConfig) -> Vec<Operation> {
 /// Whether an operation is served under this configuration.
 pub fn is_served(op: &Operation, cfg: &ServerConfig) -> bool {
     match op.group {
-        "login" | "docs" => true,
+        "login" => !cfg
+            .routes_disabled
+            .iter()
+            .any(|pattern| crate::config::fnmatch("login", pattern)),
+        "docs" => true,
         g => cfg.route_group_is_allowed(g),
     }
 }

@@ -9,6 +9,8 @@ def build_pipeline_controls():
         dbc.Row([
             dbc.Col(dcc.Dropdown(id='pipeline-saved-name', options=[], clearable=True,
                                 placeholder='All pipelines'), md=5),
+            dbc.Col(dbc.Button('Analyze', id='pipeline-analyze', size='sm'), width='auto'),
+            dbc.Col(dbc.Button('Apply proposed tags', id='pipeline-apply-tags', color='warning', size='sm', disabled=True), width='auto'),
             dbc.Col(dbc.Button('Manage pipeline', id='pipeline-manage-toggle', size='sm',
                               color='secondary'), width='auto'),
         ], className='g-2 align-items-center mb-2'),
@@ -47,6 +49,5 @@ def build_pipeline_controls():
         html.Div(id='pipeline-run-alert'),
         html.Div(id='pipeline-run-stream-dummy', hidden=True),
         html.Div(id='pipeline-run-status'),
-        html.Details([html.Summary('Command output'),
-                      html.Pre(id='pipeline-command-output', className='pipelines-events')]),
+
     ])

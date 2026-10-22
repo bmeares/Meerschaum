@@ -152,26 +152,52 @@ pub fn registry_with(
         native = native.with_plugin_sync(&inst.keys(), Arc::new(Inplace(sql.clone())));
     }
     let engine_defaults = EngineConfig::from_config(config_ref, Some(&config_ref.paths().root_dir));
-    let home_only = StaticRegistry::new().with_instance(&inst.keys(), inst.conn());
-    let records = session
-        .block_on(meerschaum_engine::engine::fetch_records(
-            &home_only,
-            &engine_defaults.defaults,
-            &inst.keys(),
-            &PipesKeysQuery::default(),
-        ))
-        .unwrap_or_default();
-    let graph = meerschaum_engine::Graph::build(
-        records.clone(),
-        &meerschaum_engine::GraphOptions {
-            defaults: engine_defaults.defaults.clone(),
-            implicit_edges: engine_defaults.implicit_edges,
-            default_backtrack_minutes: engine_defaults.default_backtrack_minutes as f64,
-        },
-    );
+    let graph_options = meerschaum_engine::GraphOptions {
+        defaults: engine_defaults.defaults.clone(),
+        implicit_edges: engine_defaults.implicit_edges,
+        default_backtrack_minutes: engine_defaults.default_backtrack_minutes as f64,
+    };
+    let mut visited = BTreeSet::new();
+    let mut pending = selection.target_instances();
+    pending.insert(inst.keys());
+    let mut records = Vec::new();
+    let graph = loop {
+        for keys in std::mem::take(&mut pending) {
+            if !visited.insert(keys.clone()) {
+                continue;
+            }
+            let conn = resolve(&keys).ok_or_else(|| {
+                ActionError::new(
+                    "ValueError",
+                    format!("Cannot resolve Pipeline instance '{keys}'."),
+                )
+            })?;
+            let one = StaticRegistry::new().with_instance(&keys, conn.conn());
+            records.extend(
+                session
+                    .block_on(meerschaum_engine::engine::fetch_records(
+                        &one,
+                        &engine_defaults.defaults,
+                        &keys,
+                        &PipesKeysQuery::default(),
+                    ))
+                    .map_err(|error| ActionError::new("ValueError", error))?,
+            );
+        }
+        let graph = meerschaum_engine::Graph::build(records.clone(), &graph_options);
+        pending = selection
+            .referenced_instances(&graph)
+            .difference(&visited)
+            .cloned()
+            .collect();
+        if pending.is_empty() {
+            break graph;
+        }
+    };
     let mut wanted =
         reachable_connector_keys(&graph, &records, &selection, &engine_defaults.defaults);
     wanted.extend(overrides.keys().cloned());
+    wanted.extend(visited);
     wanted.insert(inst.keys());
     let mut sql_instances = HashMap::new();
     for keys in wanted {

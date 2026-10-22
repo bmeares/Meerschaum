@@ -268,9 +268,25 @@ def focus_graph(graph: Dict[str, Any], selected: str) -> Dict[str, Any]:
     }
 
 
-def run_belongs_to_pipeline(run: Dict[str, Any], name: str) -> bool:
+def run_belongs_to_pipeline(run: Dict[str, Any], name: str, definition=None) -> bool:
     """Match the complete name before the engine's timestamp and collision suffix."""
     import re
+    record = run.get('run', {})
+    selection = record.get('selection')
+    if selection:
+        import json
+        try:
+            selection = json.loads(selection) if isinstance(selection, str) else selection
+            definitions = selection.get('pipeline_definitions') or []
+            if definitions:
+                return any(snapshot.get('name') == name
+                           and (not definition or not definition.get('id')
+                                or snapshot.get('id') == definition['id'])
+                           and (not definition or not definition.get('registry')
+                                or snapshot.get('registry') == definition['registry'])
+                           for snapshot in definitions)
+        except (ValueError, TypeError, AttributeError):
+            pass
     run_id = run.get('run', {}).get('run_id', '')
     return bool(re.fullmatch(re.escape(name) + r'-\d{4}-\d\d-\d\dT\d\d-\d\d-\d\d\.\d{6}Z-[a-f0-9]{8}', run_id))
 
@@ -335,10 +351,10 @@ def _parse_ts(text: Optional[str]) -> Optional[datetime]:
 
 def gantt_figure(detail: Dict[str, Any]) -> Dict[str, Any]:
     """
-    A Plotly figure of a run's Gantt: the planned and the actual bar of each node.
+    A Plotly figure of observed execution intervals, including live running nodes.
     """
     traces = []
-    for name, color, planned in (('Planned', '#9aa5b1', True), ('Actual', '#3486bd', False)):
+    for name, color, planned in (('Actual', '#3486bd', False),):
         ys, bases, xs, colors, statuses = [], [], [], [], []
         for bar in detail.get('bars', []):
             start = _parse_ts(bar.get('planned_start' if planned else 'actual_start'))

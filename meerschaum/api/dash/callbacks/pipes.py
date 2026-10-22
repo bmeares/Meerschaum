@@ -167,12 +167,12 @@ def render_pipe_page_from_url(
 
 @dash_app.callback(
     Output('pipes-location', 'search'),
-    Input('pipes-connector-keys-dropdown', 'value'),
-    Input('pipes-metric-keys-dropdown', 'value'),
-    Input('pipes-location-keys-dropdown', 'value'),
-    Input('pipes-tags-dropdown', 'value'),
+    Input('pipes-connector-keys-dropdown', 'value', allow_optional=True),
+    Input('pipes-metric-keys-dropdown', 'value', allow_optional=True),
+    Input('pipes-location-keys-dropdown', 'value', allow_optional=True),
+    Input('pipes-tags-dropdown', 'value', allow_optional=True),
     Input('pipes-instance-select', 'value'),
-    Input('pipes-clear-all-button', 'n_clicks'),
+    Input('pipes-clear-all-button', 'n_clicks', allow_optional=True),
     prevent_initial_call=True,
 )
 def update_location_on_pipes_filter_change(
@@ -187,6 +187,8 @@ def update_location_on_pipes_filter_change(
     Update the URL parameters when clicking the dropdowns.
     """
     ctx = dash.callback_context.triggered
+    if connector_keys is None and metric_keys is None and location_keys is None and tags is None:
+        raise PreventUpdate
     if len(ctx) != 1:
         raise PreventUpdate
 

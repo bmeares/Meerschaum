@@ -1759,6 +1759,10 @@ fn sql_passes_the_password_in_the_environment_not_on_the_command_line() {
     );
     let home = Home::new()
         .with_env("PATH", path)
+        .with_env(
+            "MRSM_PATCH",
+            r#"{"system":{"connectors":{"sql":{"cli":{"postgresql":"pgcli","mysql":"mycli"}}}}}"#,
+        )
         .with_env("MRSM_SQL_PG", "postgresql://alice:s%40cret@127.0.0.1:1/db")
         .with_env("MRSM_SQL_MY", "mysql://bob:p%2Bw@127.0.0.1:1/db");
     // The databases are down: the client is started anyway and reports its own errors.
@@ -1781,6 +1785,72 @@ fn sql_passes_the_password_in_the_environment_not_on_the_command_line() {
         my.text
     );
     assert!(my.text.contains("MYSQL_PWD=p+w"), "{}", my.text);
+}
+
+#[test]
+fn sql_prefers_rainfrog_and_nopretty_forces_plain_client() {
+    use std::os::unix::fs::PermissionsExt;
+    let bin = tempfile::tempdir().unwrap();
+    for (name, body) in [
+        (
+            "rainfrog",
+            "echo RAINFROG_ARGS: \"$@\"; case \"$DATABASE_URL\" in *s%40cret*) echo PRIVATE_URL_RECEIVED;; esac",
+        ),
+        ("psql", "echo PLAIN_ARGS: \"$@\""),
+        ("pgcli", "echo PYTHON_CLIENT"),
+    ] {
+        let program = bin.path().join(name);
+        std::fs::write(&program, format!("#!/bin/sh\n{body}\n")).unwrap();
+        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let home = Home::new()
+        .with_env("PATH", bin.path().display().to_string())
+        .with_env(
+            "MRSM_SQL_PG",
+            "postgresql://alice:s%40cret@127.0.0.1:1/db?sslmode=require",
+        );
+    let pretty = home.run(&["sql", "pg"]);
+    assert_eq!(pretty.code, 0, "{}", pretty.text);
+    assert!(
+        pretty.text.contains("RAINFROG_ARGS: --driver postgres"),
+        "{}",
+        pretty.text
+    );
+    assert!(
+        pretty.text.contains("PRIVATE_URL_RECEIVED"),
+        "{}",
+        pretty.text
+    );
+    assert!(!pretty.text.contains("PYTHON_CLIENT"), "{}", pretty.text);
+    assert!(!pretty.text.contains("s%40cret"), "{}", pretty.text);
+    let plain = home.run(&["sql", "pg", "--nopretty"]);
+    assert_eq!(plain.code, 0, "{}", plain.text);
+    assert!(
+        plain.text.contains("PLAIN_ARGS: postgresql://alice@"),
+        "{}",
+        plain.text
+    );
+    assert!(!plain.text.contains("RAINFROG_ARGS"), "{}", plain.text);
+    assert!(!plain.text.contains("s%40cret"), "{}", plain.text);
+}
+
+#[test]
+fn sql_propagates_interactive_client_failure() {
+    use std::os::unix::fs::PermissionsExt;
+    let bin = tempfile::tempdir().unwrap();
+    let program = bin.path().join("rainfrog");
+    std::fs::write(&program, "#!/bin/sh\nexit 7\n").unwrap();
+    std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let home = Home::new()
+        .with_env("PATH", bin.path().display().to_string())
+        .with_env("MRSM_SQL_PG", "postgresql://alice@127.0.0.1:1/db");
+    let result = home.run(&["sql", "pg"]);
+    assert_eq!(result.code, 1, "{}", result.text);
+    assert!(
+        result.text.contains("SQL client exited with status 7"),
+        "{}",
+        result.text
+    );
 }
 
 #[test]

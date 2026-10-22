@@ -72,8 +72,10 @@ def write_plugin(plugins: pathlib.Path, name: str, source: str) -> None:
 @pytest.fixture(scope='module')
 def sandbox():
     """A temporary root and plugins directory, skipped when the host dependencies are missing."""
-    root = pathlib.Path(tempfile.mkdtemp(prefix='mrsm-apihost-'))
-    plugins = pathlib.Path(tempfile.mkdtemp(prefix='mrsm-apihost-plugins-'))
+    scratch = pathlib.Path.home() / '.cache' / 'mrsm-api-host-tests'
+    scratch.mkdir(parents=True, exist_ok=True)
+    root = pathlib.Path(tempfile.mkdtemp(prefix='mrsm-apihost-', dir=scratch))
+    plugins = pathlib.Path(tempfile.mkdtemp(prefix='mrsm-apihost-plugins-', dir=scratch))
     import shutil
     try:
         check = run_python(

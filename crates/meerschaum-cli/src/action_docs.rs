@@ -10,6 +10,40 @@
 /// `function.__doc__` for a core action function, by its v4 name.
 pub fn docstring(function: &str) -> Option<&'static str> {
     Some(match function {
+        "_show_pipelines" => {
+            "Read registered Pipeline definitions without graph discovery or edits."
+        }
+        "_analyze_pipelines" => {
+            "Resolve exact members and configured traversal, diagnose missing references and cycles, and preview pipeline-NAME membership tags. Approval or --yes applies the preview; noninteractive analysis without --yes reports only."
+        }
+        "_register_pipelines" => {
+            "Register a Pipeline: register pipelines NAME --params JSON (targets, parents, children, description, defaults, layout). Existing names are refused. Without targets, selects registered Pipes by the supplied keys."
+        }
+        "_bootstrap_pipelines" => {
+            "Create a registered Pipeline with guided member selection. Members use instance|connector|metric|location references. Tags require a separate analyze pipelines approval."
+        }
+        "_edit_pipelines" => {
+            "Edit a Pipeline definition in the editor, or use --params JSON including its expected revision. Membership edits never tag or delete Pipes."
+        }
+        "_plan_pipelines" => {
+            "Preview registered Pipeline actions, dependencies and bounds without writes."
+        }
+        "_sync_pipelines" => {
+            "Run named Pipeline selections, deduplicating shared members. -i chooses the registry; member instance references are preserved. --run-id supplies an execution correlation ID."
+        }
+        "_delete_pipelines" => {
+            "Delete Pipeline definitions and owned tags, preserving members and data. Scheduled Jobs referring to a definition must first be removed or reassigned."
+        }
+        "_drop_pipelines" => {
+            "Preview and drop only explicit member tables, preserving Pipe registrations and Pipeline definitions. Traversal never expands this destructive selection."
+        }
+        "_clear_pipelines" => {
+            "Preview and clear explicit members within --begin / --end, preserving definitions. Traversal never expands this destructive selection."
+        }
+        "_copy_pipelines" => {
+            "Copy a definition: copy pipelines NAME NEW_NAME. The new identity refers to the same Pipes; no data is copied."
+        }
+        "_sync_pipeline" => "Run a registered Pipeline (alias of sync pipelines).",
         "_analyze_pipes" => {
             r##"
 Analyze the target tables for the selected pipes.

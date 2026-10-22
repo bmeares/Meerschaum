@@ -21,7 +21,7 @@ use crate::config::ServerConfig;
 use crate::error::{ApiError, ApiResult};
 use crate::json::{from_core, ok_json, py_isoformat_utc, to_core, tuple_response};
 use crate::redact::redact_job_meta;
-use crate::routes::execute::{JOB_PREFIX, job_visible_to, owner_label};
+use crate::routes::execute::{job_visible_to, owner_label};
 use crate::routes::pipes::parse_json_body;
 use crate::state::AppState;
 
@@ -69,9 +69,6 @@ pub fn clean_sysargs(sysargs: &[String]) -> Vec<String> {
 /// Whether the caller may see the job `name`: an `execute-*` job (the console's) is its creator's
 /// and the administrators' (see [`job_visible_to`]); every other job is visible as before.
 async fn may_see(state: &AppState, principal: Option<&Principal>, name: &str) -> bool {
-    if !name.starts_with(JOB_PREFIX) {
-        return true;
-    }
     if is_admin(state, principal).await {
         return true;
     }
@@ -236,6 +233,8 @@ async fn delete_job(ctx: Ctx, Path(name): Path<String>) -> ApiResult {
 }
 
 async fn start_job(ctx: Ctx, Path(name): Path<String>) -> ApiResult {
+    let state = ctx.state.clone();
+    let _maintenance = state.execution_maintenance.lock().await;
     guarded(ctx, &["jobs:execute"], name, true, |s, n| async move {
         s.jobs.start(&n).await
     })

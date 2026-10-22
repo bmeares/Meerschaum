@@ -16,6 +16,89 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
+/// Parse draft SQL references with the same native template parser as the engine.
+/// This constructs no connectors and performs no reads or writes.
+#[pyo3::pyfunction]
+#[pyo3(signature = (text, instance_keys, connector_keys=None, metric_key=None, location_key=None))]
+pub fn extract_pipe_references(
+    text: &str,
+    instance_keys: &str,
+    connector_keys: Option<&str>,
+    metric_key: Option<&str>,
+    location_key: Option<&str>,
+) -> pyo3::PyResult<Vec<String>> {
+    let context = meerschaum_core::Pipe::builder(
+        connector_keys.unwrap_or("sql:placeholder"),
+        metric_key.unwrap_or("draft"),
+    )
+    .location(location_key)
+    .instance(instance_keys)
+    .build()
+    .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
+    Ok(meerschaum_core::template::referenced_pipes(
+        text,
+        Some(&context),
+        &meerschaum_core::pipe::PipeDefaults::default(),
+    )
+    .into_iter()
+    .map(|reference| meerschaum_engine::PipeRef::from_pipe(&reference.pipe).to_string())
+    .collect())
+}
+
+/// Backend lease used by SDK Pipeline revision and ownership edits.
+#[pyo3::pyclass]
+pub struct PipelineMutationLease {
+    lease: Option<meerschaum_cli::native::pipelines::MutationLease>,
+}
+
+#[pyo3::pymethods]
+impl PipelineMutationLease {
+    fn check(&self, py: pyo3::Python<'_>) -> pyo3::PyResult<()> {
+        let lease = self
+            .lease
+            .as_ref()
+            .ok_or_else(|| runtime_err("Mutation lease is closed."))?;
+        py.detach(|| lease.check())
+            .map_err(|error| runtime_err(error.message))
+    }
+
+    fn close(&mut self, py: pyo3::Python<'_>) {
+        let lease = self.lease.take();
+        py.detach(|| drop(lease));
+    }
+}
+
+/// Acquire the same renewable backend lease that standalone Pipeline mutations use.
+#[pyo3::pyfunction]
+pub fn pipeline_mutation_lock(
+    py: pyo3::Python<'_>,
+    request: &str,
+    pipe_ref: &str,
+) -> pyo3::PyResult<PipelineMutationLease> {
+    let session = crate::facade::worker_session();
+    let request = parse_request(request)?;
+    let built = build(py, &session, &request)?;
+    let reference = meerschaum_engine::PipeRef::from_string(pipe_ref);
+    let parts = reference.parts();
+    let pipe = meerschaum_core::Pipe::builder(parts.connector_keys, parts.metric_key)
+        .location(parts.location_key)
+        .instance(parts.instance_keys)
+        .build()
+        .map_err(|error| value_err(error.to_string()))?;
+    let instance = Instance::Other(
+        built
+            .registry
+            .instance(parts.instance_keys)
+            .map_err(runtime_err)?,
+    );
+    let lease = py
+        .detach(|| {
+            meerschaum_cli::native::pipelines::MutationLease::acquire(session, instance, pipe)
+        })
+        .map_err(|error| runtime_err(error.message))?;
+    Ok(PipelineMutationLease { lease: Some(lease) })
+}
+
 use chrono::{DateTime, Utc};
 use meerschaum_cli::native::session::ConfiguredSqlProvider;
 use meerschaum_cli::native::{EngineRegistry, Instance, RegistryOptions, Session, registry_with};
@@ -232,9 +315,7 @@ fn build(py: Python<'_>, session: &Session, request: &Json) -> PyResult<Built> {
 }
 
 fn selection(request: &Json, instance_keys: &str) -> PyResult<Option<Selection>> {
-    let base = if let Some(Json::Array(targets)) = request.get("targets")
-        && !targets.is_empty()
-    {
+    let base = if let Some(Json::Array(targets)) = request.get("targets") {
         let mut refs = Vec::new();
         for target in targets {
             let part = |i: usize| target.get(i).and_then(Json::as_str);
@@ -319,6 +400,11 @@ fn run_options(request: &Json, instance_keys: &str) -> PyResult<RunOptions> {
             .filter(|w| *w > 0)
             .map(|w| w as usize),
         sync: node,
+        pipeline_definitions: request
+            .get("pipeline_definitions")
+            .and_then(Json::as_array)
+            .cloned()
+            .unwrap_or_default(),
         run_id: str_field(request, "run_id").map(str::to_owned).or_else(|| {
             str_field(request, "run_name").map(meerschaum_engine::runs::new_named_run_id)
         }),

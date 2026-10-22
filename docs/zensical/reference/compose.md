@@ -175,8 +175,8 @@ Below are the supported top-level keys in a Compose file. Note that all keys are
   Govern the behavior of the syncing process. See **The `sync` Key** section below.
 - **`jobs`**  
   If provided, `compose up` will start the defined jobs. See **The `jobs` Key** below.
-- **`project_name`** (default to directory name)  
-  The tag given to all pipes in this project. Defaults to the current directory. If you're using multiple compose files, make sure each file has a unique project name.
+- **`project_name`** (default derived from the file path)
+  The tag given to all pipes in this project. Conventional `mrsm-compose.yaml` and `mrsm-compose.yml` files default to their containing directory's name. Other files default to their filename without the final `.yaml` or `.yml` suffix: `/projects/acme/metrics.yaml` becomes `metrics`. Each included file derives its own name. Explicit names (including effective environment values) take precedence. Set `project_name` explicitly to preserve an older directory-based identity for a custom-named file. Every project in a composition must have a unique name.
 - **`root_dir`** (default `./root/`)  
   A path to the root directory; see [`MRSM_ROOT_DIR`](/reference/environment/#mrsm_root_dir).
 - **`plugins_dir`** (default `./plugins/`)  
