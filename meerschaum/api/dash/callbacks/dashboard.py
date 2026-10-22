@@ -36,6 +36,7 @@ from meerschaum.api.dash.pipes import (
 )
 from meerschaum.api.dash.jobs import get_jobs_cards
 from meerschaum.api.dash.pipeline_cards import get_pipeline_cards
+from meerschaum.api.dash.jobs import get_run_cards
 from meerschaum.api.dash.plugins import get_plugins_cards
 from meerschaum.api.dash.users import get_users_cards
 from meerschaum.api.dash.graphs import get_graphs_cards
@@ -114,12 +115,12 @@ _paths_without_dbc_dark = set()
 _pages = {
     'Web Console': '/dash/',
     'Pipes': '/dash/pipes',
+    'Pipelines': '/dash/pipelines',
     'Plugins': '/dash/plugins',
     'Users': '/dash/users',
     'Tokens': '/dash/tokens',
     'Jobs': '/dash/jobs',
     'Runs': '/dash/runs',
-    'Pipelines': '/dash/pipelines',
 } if _console_pages_allowed else {}
 
 
@@ -232,6 +233,7 @@ dash_app.clientside_callback(
     Input('get-pipes-button', 'n_clicks'),
     Input('get-jobs-button', 'n_clicks'),
     Input('get-pipelines-button', 'n_clicks'),
+    Input('get-runs-button', 'n_clicks'),
     Input('show-webterm-button', 'n_clicks'),
     Input('get-plugins-button', 'n_clicks'),
     Input('get-users-button', 'n_clicks'),
@@ -276,6 +278,7 @@ def update_content(*args):
         'get-pipes-button': get_pipes_cards,
         'get-jobs-button': get_jobs_cards,
         'get-pipelines-button': get_pipeline_cards,
+        'get-runs-button': get_run_cards,
         'get-plugins-button': get_plugins_cards,
         'get-users-button': get_users_cards,
         'get-graphs-button': get_graphs_cards,
@@ -285,6 +288,8 @@ def update_content(*args):
     trigger_num_cols = {
         'get-graphs-button': 1,
         'get-pipes-button': 1,
+        'get-pipelines-button': 1,
+        'get-runs-button': 2,
         'get-jobs-button': 2,
     }
 
@@ -296,6 +301,7 @@ def update_content(*args):
         **filter_keywords(triggers[trigger], session_data=session_data)
     )
     content, alerts = result[0], result[1]
+    dash.set_props('content-div-right', {'style': {'display': 'block' if trigger.startswith('get-') else 'none'}})
     ### Exec uses the mounted terminal; server management actions have their own output pane.
     webterm_style = {
         'display': (
@@ -1285,25 +1291,37 @@ def calculate_rowcount_button_click(n_clicks: int, session_store_data):
 
 
 @dash_app.callback(
-    Output({'type': 'sync-pipeline-card-result', 'name': MATCH, 'instance': MATCH}, 'children'),
-    Input({'type': 'sync-pipeline-card', 'name': MATCH, 'instance': MATCH}, 'n_clicks'),
+    Output({'type': 'pipeline-card-details', 'index': MATCH}, 'children'),
+    Input({'type': 'pipeline-card-accordion', 'index': MATCH}, 'active_item'),
     State('session-store', 'data'), prevent_initial_call=True,
 )
-def sync_pipeline_card(clicks, session):
-    if not clicks or not is_state_authenticated(session):
+def expand_pipeline_card(active, session):
+    if not active or not is_state_authenticated(session):
         raise PreventUpdate
+    from meerschaum.api.dash import engine
+    from meerschaum.api.dash.callbacks.pipelines import build_runs_table
+    meta = json.loads(dash.ctx.triggered_id['index'])
+    return build_runs_table(engine.get_runs(engine.get_instance(meta['instance']),
+        limit=20, run_name=meta['name']), table_id='pipeline-card-history-' + meta['name'],
+        registry=meta['instance'], pipeline=meta['name'])
+
+
+@dash_app.callback(
+    Output('exec-store', 'data', allow_duplicate=True),
+    Input({'type': 'manage-pipeline-card', 'name': ALL, 'instance': ALL, 'action': ALL}, 'n_clicks'),
+    State('session-store', 'data'), prevent_initial_call=True,
+)
+def manage_pipeline_card(clicks, session):
+    if not any(clicks or []) or not is_state_authenticated(session):
+        raise PreventUpdate
+    import shlex
+    import time
     from meerschaum.api.dash import execute
     from meerschaum.api.dash.sessions import get_username_from_session
-    trigger = dash.callback_context.triggered_id
-    args = ['sync', 'pipelines', trigger['name']]
-    if trigger['instance']:
-        args += ['-i', trigger['instance']]
-    from meerschaum.core.Pipeline._saved import list_pipelines
-    definition = list_pipelines(trigger['instance'])[trigger['name']]
-    run_id = 'pipeline-' + uuid.uuid4().hex
-    args += ['--run-id', run_id]
-    result = execute.run_action(args, get_username_from_session((session or {}).get('session-id')),
-        metadata={'run_id': run_id, 'pipeline': {'id': definition['id'], 'name': trigger['name'],
-            'registry': trigger['instance'], 'revision': definition['revision']}})
-    return [alert_from_success_tuple((result['success'], result['msg'])),
-            html.A('Open execution', href='/dash/jobs/' + result['job'])] if result.get('job') else alert_from_success_tuple((False, result['msg']))
+    trigger = dash.ctx.triggered_id
+    args = [trigger['action'], 'pipelines', trigger['name'], '-i', trigger['instance']]
+    allowed = execute.execution_request('/execute/validate',
+        get_username_from_session((session or {}).get('session-id')), method='POST', body={'sysargs': args})
+    if not allowed or not allowed[0]:
+        raise PreventUpdate
+    return {'terminal': True, 'command': shlex.join(args), 'request_id': str(uuid.uuid4()), 'started': time.time()}

@@ -76,7 +76,7 @@ edition = "2024"
 crate-type = ["cdylib"]
 
 [dependencies]
-meerschaum-plugin = "=5.0.0-rc.6"   # prerelease versions require an exact prerelease requirement
+meerschaum-plugin = "=5.0.0-rc.7"   # prerelease versions require an exact prerelease requirement
 
 [profile.release]
 panic = "unwind"      # required: the SDK catches panics at the boundary

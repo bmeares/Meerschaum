@@ -1032,6 +1032,7 @@ impl Highlighter for ShellHighlighter {
     fn highlight(&self, line: &str, _cursor: usize) -> StyledText {
         let mut out = StyledText::new();
         let s = lock(&self.shared);
+        super::webterm::update(true, line.is_empty() && s.search.is_none());
         let span = s.search.as_ref().and_then(|search| {
             let (_, pos) = search.found?;
             let start = byte_of(line, pos);

@@ -341,8 +341,11 @@ pub fn prompt(rt: &mut Runtime<'_>, question: &str, icon: bool, noask: bool) -> 
     }
     let q = question_text(rt, question, icon);
     crate::format::progress::suspend();
-    let answer = rt.host.read_line(&q);
+    let answer = rt.host.read_line_interruptible(&q);
     crate::format::progress::resume(true);
+    if terminal::take_interrupt() {
+        std::panic::resume_unwind(Box::new(crate::shell::interrupt::Interrupted));
+    }
     answer
 }
 

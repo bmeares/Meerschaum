@@ -220,6 +220,30 @@ pub fn abandon() {
     st.generation += 1;
 }
 
+/// Coordinate Python worker output with the shell's progress line.
+pub fn forward_shell_worker_output() {
+    meerschaum_worker::worker::set_output_hook(write_worker_output);
+    WORKERS.store(false, Ordering::SeqCst);
+}
+
+fn write_worker_output(stderr: bool, bytes: &[u8]) {
+    use std::io::Write;
+    let mut st = state();
+    st.clear();
+    if stderr {
+        let mut writer = std::io::stderr().lock();
+        let _ = writer.write_all(bytes);
+        let _ = writer.flush();
+    } else {
+        let mut writer = std::io::stdout().lock();
+        let _ = writer.write_all(bytes);
+        let _ = writer.flush();
+    }
+    if !bytes.is_empty() {
+        st.held = !bytes.ends_with(b"\n");
+    }
+}
+
 fn state() -> MutexGuard<'static, State> {
     STATE.lock().unwrap_or_else(|e| e.into_inner())
 }
@@ -787,6 +811,26 @@ mod tests {
         progress.inc();
         drop(progress);
         assert_eq!(*out.lock().unwrap(), after);
+    }
+
+    #[test]
+    fn forwarded_worker_lines_clear_and_resume_the_spinner() {
+        let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        WORKERS.store(false, Ordering::SeqCst);
+        let (sink, out) = capture();
+        let progress = Progress::begin(sink, PLAIN, false, "Syncing Pipes".into());
+        progress.set_total(2);
+        std::thread::sleep(Duration::from_millis(500));
+        write_worker_output(false, b"worker partial");
+        assert!(state().held);
+        assert!(out.lock().unwrap().ends_with(CLEAR));
+        write_worker_output(false, b" line\n");
+        assert!(!state().held);
+        let after = out.lock().unwrap().len();
+        progress.inc();
+        std::thread::sleep(Duration::from_millis(250));
+        assert!(out.lock().unwrap()[after..].contains("1/2"));
+        drop(progress);
     }
 
     #[test]

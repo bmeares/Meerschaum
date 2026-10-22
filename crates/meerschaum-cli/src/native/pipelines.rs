@@ -379,26 +379,7 @@ fn resolve(
     definition: &Definition,
     args: &ArgsMap,
 ) -> Result<Vec<String>, ActionError> {
-    if definition.targets.is_empty() {
-        return Ok(Vec::new());
-    }
-    let pipes = selected(rt, &definition.targets)?;
-    let session = session(rt);
-    let engine = super::sync::engine::build(rt, &session, instance, &pipes, true, false, None)?;
-    let effective = effective_args(args, definition)?;
-    let mut opts = super::sync::run_options(
-        &effective,
-        instance,
-        &pipes,
-        &super::sync::SyncArgs::from_args(&effective),
-    );
-    opts.selection = Some(
-        Selection::refs(definition.targets.iter().map(PipeRef::from_string))
-            .with_parents(super::sync::depth(&effective, "parents"))
-            .with_children(super::sync::depth(&effective, "children"))
-            .with_graph(true),
-    );
-    let (_, sub, _) = session.block_on(engine.resolve(&opts)).map_err(error)?;
+    let sub = resolve_graph(rt, instance, definition, args)?;
     if !sub.cycles.is_empty() {
         return Err(error(format!("Dependency cycle: {:?}", sub.cycles)));
     }
@@ -421,6 +402,217 @@ fn resolve(
         member(rt, reference)?;
     }
     Ok(refs)
+}
+
+/// Read dependency metadata without planning a sync or applying membership tags.
+fn resolve_graph(
+    rt: &mut Runtime<'_>,
+    instance: &Instance,
+    definition: &Definition,
+    args: &ArgsMap,
+) -> Result<meerschaum_engine::selection::Subgraph, ActionError> {
+    if definition.targets.is_empty() {
+        return Ok(Default::default());
+    }
+    let pipes = selected(rt, &definition.targets)?;
+    let session = session(rt);
+    let engine = super::sync::engine::build(rt, &session, instance, &pipes, true, false, None)?;
+    let effective = effective_args(args, definition)?;
+    let mut opts = super::sync::run_options(
+        &effective,
+        instance,
+        &pipes,
+        &super::sync::SyncArgs::from_args(&effective),
+    );
+    opts.selection = Some(
+        Selection::refs(definition.targets.iter().map(PipeRef::from_string))
+            .with_parents(super::sync::depth(&effective, "parents"))
+            .with_children(super::sync::depth(&effective, "children"))
+            .with_graph(true),
+    );
+    let (_, sub, _) = session.block_on(engine.resolve(&opts)).map_err(error)?;
+    Ok(sub)
+}
+
+fn show_grid(rt: &mut Runtime<'_>, instance: &Instance, definitions: &[Definition], rows: &[Json]) {
+    let text = rt.with_formatter(|formatter| {
+        use crate::format::{
+            PipeKeys,
+            rich::{
+                table::{Column, SIMPLE, Table},
+                text::Text,
+            },
+        };
+        let mut table = Table::new();
+        table.expand = true;
+        table.box_chars = if formatter.settings.unicode {
+            Some(SIMPLE)
+        } else {
+            None
+        };
+        for label in ["Pipeline", "Members", "Latest run"] {
+            table.add_column(Column {
+                header: Text::plain_text(label),
+                ..Default::default()
+            });
+        }
+        for (definition, row) in definitions.iter().zip(rows) {
+            let suffix = if instance.keys() == formatter.default_instance() {
+                String::new()
+            } else {
+                format!(
+                    ", instance={}",
+                    crate::value::PyValue::str(instance.keys()).py_repr()
+                )
+            };
+            let label = format!(
+                "Pipeline({}{suffix})",
+                crate::value::PyValue::str(&definition.name).py_repr()
+            );
+            let mut members = Text::plain_text(&format!(
+                "{} members · {} instances\n",
+                definition.targets.len(),
+                row["instance_count"]
+            ));
+            if definition.targets.is_empty() {
+                members.append_text(&Text::plain_text("No member pipes."));
+            }
+            for reference in &definition.targets {
+                let parts: Vec<_> = reference.splitn(4, '|').collect();
+                if parts.len() != 4 {
+                    continue;
+                }
+                let keys = PipeKeys {
+                    connector: parts[1].into(),
+                    metric: parts[2].into(),
+                    location: if parts[3] == "None" {
+                        None
+                    } else {
+                        Some(parts[3].into())
+                    },
+                    instance: Some(parts[0].into()),
+                };
+                members.append_text(&formatter.pipe_repr_text(&keys));
+                members.append_text(&Text::plain_text("\n"));
+            }
+            let status = row["latest_run"]["status"]
+                .as_str()
+                .unwrap_or("No runs yet");
+            let (symbol, color) = match status {
+                "running" => ("▶", "cyan"),
+                "succeeded" => ("✔", "green"),
+                "failed" => ("✘", "red"),
+                _ => ("○", "dim"),
+            };
+            let status = format!(
+                "{} {status}",
+                if formatter.settings.unicode {
+                    symbol
+                } else {
+                    "•"
+                }
+            );
+            table.add_row(vec![
+                Some(Box::new(Text::new(
+                    &format!(
+                        "{label}{}",
+                        if definition.description.is_empty() {
+                            String::new()
+                        } else {
+                            format!("\n{}", definition.description)
+                        }
+                    ),
+                    if formatter.settings.ansi {
+                        "bold cyan"
+                    } else {
+                        ""
+                    },
+                ))),
+                Some(Box::new(members)),
+                Some(Box::new(Text::new(
+                    &status,
+                    if formatter.settings.ansi { color } else { "" },
+                ))),
+            ]);
+        }
+        formatter.console().print(&table)
+    });
+    rt.print(&text);
+}
+
+fn show_summary(
+    rt: &mut Runtime<'_>,
+    instance: &Instance,
+    definition: &Definition,
+    row: &Json,
+    args: &ArgsMap,
+    detail: bool,
+) {
+    let _ = args;
+    let status = row["latest_run"]["status"]
+        .as_str()
+        .unwrap_or("No runs yet");
+    let text = rt.with_formatter(|formatter| {
+        let symbol = match (status, formatter.settings.unicode) {
+            ("running", true) => "▶",
+            ("succeeded", true) => "✔",
+            ("failed", true) => "✘",
+            ("running", false) => ">",
+            ("succeeded", false) => "+",
+            ("failed", false) => "x",
+            (_, true) => "○",
+            _ => "-",
+        };
+        let suffix = if instance.keys() == formatter.default_instance() {
+            String::new()
+        } else {
+            format!(
+                ", instance={}",
+                crate::value::PyValue::str(instance.keys()).py_repr()
+            )
+        };
+        let label = format!(
+            "Pipeline({}{suffix})",
+            crate::value::PyValue::str(&definition.name).py_repr()
+        );
+        let color = if formatter.settings.ansi {
+            match status {
+                "succeeded" => "green",
+                "failed" => "red",
+                "running" => "cyan",
+                _ => "dim",
+            }
+        } else {
+            ""
+        };
+        formatter.colored(
+            &format!(
+                "{symbol} {label}  · {} members · {} instances · {status}",
+                definition.targets.len(),
+                row["instance_count"]
+            ),
+            color,
+        )
+    });
+    rt.print(&format!("{text}\n"));
+    if !definition.description.is_empty() {
+        rt.print(&format!("  {}\n", definition.description));
+    }
+    if detail {
+        rt.print(&format!(
+            "  ID: {}\n  Revision: {}\n  Parents: {} | Children: {}\n",
+            definition.id, definition.revision, definition.parents, definition.children
+        ));
+        for reference in &definition.targets {
+            rt.print(&format!("  • {reference}\n"));
+        }
+    }
+    if definition.targets.is_empty() {
+        rt.print("  No member pipes.\n");
+    }
+    if let Some(message) = row["status_error"].as_str() {
+        rt.print(&format!("  Run history unavailable: {message}\n"));
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -808,14 +1000,39 @@ fn names(
     args: &ArgsMap,
     all: bool,
 ) -> Result<Vec<Definition>, ActionError> {
-    let names = words(args, "action");
-    if names.is_empty() && all {
+    let requested = words(args, "action");
+    if requested.is_empty() && all {
         return list(rt, instance);
     }
-    if names.is_empty() {
+    if requested.is_empty() {
         return Err(error("Provide a registered Pipeline name."));
     }
-    names.iter().map(|name| read(rt, instance, name)).collect()
+    let mut available: BTreeMap<_, _> = list(rt, instance)?
+        .into_iter()
+        .map(|d| (d.name.clone(), d))
+        .collect();
+    let mut selected = Vec::new();
+    let mut seen = BTreeSet::new();
+    for name in requested {
+        if !seen.insert(name.clone()) {
+            continue;
+        }
+        if let Some(definition) = available.remove(&name) {
+            selected.push(definition);
+        } else {
+            super::warn(
+                rt,
+                &format!(
+                    "Pipeline '{name}' does not exist on '{}'; skipping.",
+                    instance.keys()
+                ),
+            );
+        }
+    }
+    if selected.is_empty() {
+        return Err(error("No valid Pipeline names were selected."));
+    }
+    Ok(selected)
 }
 
 /// All lifecycle entry points share exact-reference storage and preview semantics.
@@ -829,7 +1046,7 @@ pub fn run(action: &str, args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     match action {
         "show" => {
             let definitions = names(rt, &instance, args, true)?;
-            // History reads use only the registry connector; no dependency graph is built.
+            // Machine-readable output reads only the saved state and registry history.
             let registry = meerschaum_engine::registry::StaticRegistry::new()
                 .with_instance(&instance.keys(), instance.conn());
             let root_dir = rt.config().paths().root_dir;
@@ -858,12 +1075,42 @@ pub fn run(action: &str, args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
                 };
                 row
             }).collect();
-            rt.print(&format!(
-                "{}\n",
-                serde_json::to_string_pretty(&rows).map_err(error)?
-            ));
-            if !flag(args, "nopretty") {
-                rt.print("Run analyze pipelines to discover traversal members and approve membership tags.\n");
+            if flag(args, "nopretty") {
+                rt.print(&format!(
+                    "{}\n",
+                    serde_json::to_string_pretty(&rows).map_err(error)?
+                ));
+            } else {
+                if definitions.is_empty() {
+                    rt.print(&format!(
+                        "No pipelines registered on {}.\n",
+                        instance.keys()
+                    ));
+                }
+                let detail = definitions.len() == 1 && !words(args, "action").is_empty();
+                if detail {
+                    show_summary(rt, &instance, &definitions[0], &rows[0], args, true);
+                } else if !definitions.is_empty() {
+                    show_grid(rt, &instance, &definitions, &rows);
+                }
+                if !definitions.is_empty() {
+                    let key = rt.with_formatter(|formatter| {
+                        use crate::format::rich::{panel::Panel, text::Text};
+                        let legend = if formatter.settings.unicode {
+                            "▶ running   ✔ succeeded   ✘ failed   ○ no runs"
+                        } else {
+                            "> running   + succeeded   x failed   - no runs"
+                        };
+                        let mut panel = Panel::new(Box::new(Text::plain_text(legend)));
+                        panel.title = Some(Text::plain_text("Keys"));
+                        if !formatter.settings.unicode {
+                            panel.box_chars = crate::format::rich::table::ASCII;
+                        }
+                        formatter.console().print(&panel)
+                    });
+                    rt.print(&key);
+                    rt.print("Run analyze pipelines NAME to inspect traversal and approve membership tags.\n");
+                }
             }
             Ok(SuccessTuple::success())
         }
@@ -898,11 +1145,32 @@ pub fn run(action: &str, args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
                 message: "Pipeline analysis complete.".into(),
             })
         }
-        "register" | "bootstrap" | "edit" | "copy" => {
+        "edit" => {
+            let definitions = names(rt, &instance, args, true)?;
+            if definitions.is_empty() {
+                return Ok(SuccessTuple::fail("No Pipelines to edit."));
+            }
+            for definition in definitions {
+                let mut selected = args.clone();
+                selected.insert(
+                    "action".into(),
+                    crate::value::PyValue::str_list(&[definition.name]),
+                );
+                let result = save(action, &selected, rt, &instance, lease.as_ref().unwrap())?;
+                if !result.success {
+                    return Ok(result);
+                }
+            }
+            Ok(SuccessTuple::success())
+        }
+        "register" | "bootstrap" | "copy" => {
             save(action, args, rt, &instance, lease.as_ref().unwrap())
         }
         "delete" => {
-            let definitions = names(rt, &instance, args, false)?;
+            let definitions = names(rt, &instance, args, true)?;
+            if definitions.is_empty() {
+                return Ok(SuccessTuple::fail("No Pipelines to delete."));
+            }
             for definition in &definitions {
                 let jobs = referenced_jobs(rt, &instance, &definition.name)?;
                 if !jobs.is_empty() {
@@ -1042,10 +1310,14 @@ fn save(
         }
         let directory = rt.config().paths().root_dir.join("cache");
         std::fs::create_dir_all(&directory).map_err(error)?;
-        let path = directory.join(format!("pipeline-edit-{}.json", uuid::Uuid::new_v4()));
+        let path = directory.join(format!("pipeline-edit-{}.yaml", uuid::Uuid::new_v4()));
         std::fs::write(
             &path,
-            serde_json::to_vec_pretty(&definition).map_err(error)?,
+            meerschaum_core::yaml::dump(
+                &serde_json::from_value::<Value>(serde_json::to_value(&definition).map_err(error)?)
+                    .map_err(error)?,
+            )
+            .map_err(error)?,
         )
         .map_err(error)?;
         let edited = super::editor::edit_file(rt, &path).map_err(error)?;
@@ -1054,7 +1326,9 @@ fn save(
         if !edited {
             return Ok(SuccessTuple::fail("Editor cancelled."));
         }
-        let edited: Definition = serde_json::from_slice(&data).map_err(error)?;
+        let yaml = meerschaum_core::yaml::load(std::str::from_utf8(&data).map_err(error)?)
+            .map_err(error)?;
+        let edited: Definition = serde_json::from_str(&yaml.to_json_string()).map_err(error)?;
         if edited.revision != definition.revision {
             return Err(error("Do not change the revision field."));
         }
@@ -1174,7 +1448,7 @@ fn destructive(
     rt: &mut Runtime<'_>,
     instance: &Instance,
 ) -> ActionResult {
-    let definitions = names(rt, instance, args, false)?;
+    let definitions = names(rt, instance, args, true)?;
     let targets: BTreeSet<_> = definitions
         .iter()
         .flat_map(|d| d.targets.iter().cloned())
@@ -1266,7 +1540,7 @@ fn execute(
     rt: &mut Runtime<'_>,
     instance: &Instance,
 ) -> ActionResult {
-    let definitions = names(rt, instance, args, false)?;
+    let definitions = names(rt, instance, args, true)?;
     let default_keys: BTreeSet<_> = definitions
         .iter()
         .flat_map(|definition| definition.defaults.keys())
@@ -1332,7 +1606,7 @@ fn execute(
     rt.print(&format!("Run: {run_id}\n"));
     options.run_id = Some(run_id);
     let result = if rt.live && !flag(args, "nopretty") {
-        super::sync::run_live(rt, &session, engine, options)
+        super::sync::run_live(rt, &session, engine, options, true)
     } else {
         session.block_on(engine.run(options))
     };

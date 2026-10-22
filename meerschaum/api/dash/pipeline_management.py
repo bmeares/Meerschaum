@@ -4,16 +4,26 @@ import dash_bootstrap_components as dbc
 html, dcc = import_html(), import_dcc()
 
 
-def build_pipeline_controls():
+def build_pipeline_controls(find_controls=None):
     return html.Div([
-        dbc.Row([
-            dbc.Col(dcc.Dropdown(id='pipeline-saved-name', options=[], clearable=True,
-                                placeholder='All pipelines'), md=5),
-            dbc.Col(dbc.Button('Analyze', id='pipeline-analyze', size='sm'), width='auto'),
-            dbc.Col(dbc.Button('Apply proposed tags', id='pipeline-apply-tags', color='warning', size='sm', disabled=True), width='auto'),
-            dbc.Col(dbc.Button('Manage pipeline', id='pipeline-manage-toggle', size='sm',
-                              color='secondary'), width='auto'),
-        ], className='g-2 align-items-center mb-2'),
+        html.Div([
+            html.Div([html.Label('Pipeline', htmlFor='pipeline-saved-name'),
+                dcc.Dropdown(id='pipeline-saved-name', options=[], clearable=True,
+                             placeholder='All pipelines')], className='pipeline-selector'),
+            dbc.Button('Manage', id='pipeline-manage-toggle', size='sm', color='secondary'),
+            html.Details([
+                html.Summary('Tools'),
+                html.Div([
+                html.Div([
+                    dbc.Button('Analyze', id='pipeline-analyze', size='sm'),
+                    dbc.Button('Apply proposed tags', id='pipeline-apply-tags', color='warning', size='sm', disabled=True),
+                ], className='pipeline-tool-actions'),
+                find_controls,
+                html.Div(id='pipeline-analysis-alert'),
+                html.Div(id='pipeline-analysis-preview'),
+                ], className='pipeline-tools-body'),
+            ], className='pipeline-tools'),
+        ], className='pipeline-context-row'),
         dbc.Collapse(dbc.Card(dbc.CardBody([
             html.H5('Pipeline definition'),
             html.P('Save the visible pipes under a name. Select a pipeline to edit its definition.',
@@ -42,12 +52,13 @@ def build_pipeline_controls():
             ], className='g-2 mt-1 mb-3'),
             html.Div(id='pipeline-jobs'),
         ])), id='pipeline-manage-collapse', is_open=False, class_name='mb-2'),
+        dcc.ConfirmDialog(id='pipeline-delete-confirm'),
+        dcc.Store(id='pipeline-delete-target'),
         dcc.Store(id='pipeline-definition', data=None),
         dcc.Store(id='pipeline-definitions', data={}),
         dcc.Store(id='pipeline-live-run', data=None),
         html.Div(id='pipeline-summary'),
         html.Div(id='pipeline-run-alert'),
         html.Div(id='pipeline-run-stream-dummy', hidden=True),
-        html.Div(id='pipeline-run-status'),
 
-    ])
+    ], className='pipeline-context')

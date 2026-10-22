@@ -1,6 +1,49 @@
 /* Local, accessible stage cards remain Dash controls; SVG only draws their connections. */
 (function () {
+    function setView(view) {
+        const page = document.getElementById('pipelines-page');
+        if (!page) return;
+        page.dataset.view = view;
+        for (const value of ['workspace', 'runs']) document.getElementById('pipeline-view-' + value)?.setAttribute('aria-selected', String(value === view));
+        if (view === 'runs') requestAnimationFrame(() => {
+            document.querySelectorAll('#pipeline-runs-panel .js-plotly-plot').forEach(plot => {
+                if (window.Plotly) window.Plotly.Plots.resize(plot);
+            });
+        });
+    }
+    function setPane(pane) {
+        const workspace = document.getElementById('pipeline-workspace');
+        if (!workspace) return;
+        workspace.dataset.pane = pane;
+        document.querySelectorAll('.pipeline-mobile-tabs [data-pane]').forEach(button => button.setAttribute('aria-selected', String(button.dataset.pane === pane)));
+        if (pane === 'graph') requestAnimationFrame(() => document.getElementById('pipeline-fit')?.click());
+    }
+    function exitFullscreen() {
+        if (document.fullscreenElement?.id === 'pipeline-workspace') document.exitFullscreen().catch(() => {});
+        document.getElementById('pipeline-workspace')?.classList.remove('pipeline-fullscreen');
+    }
+    window.mrsmClosePipelineOutput = function () {
+        window._mrsmOutputDismissed = true;
+        document.getElementById('pipeline-output-dock')?.classList.add('pipeline-output-empty');
+        setPane('graph');
+    };
+    window.mrsmShowPipelineOutput = function (store) {
+        if (!store) return;
+        window._mrsmOutputDismissed = false;
+        const dock = document.getElementById('pipeline-output-dock');
+        dock?.classList.remove('pipeline-output-empty');
+        if (dock) dock.dataset.outputMode = 'pipeline';
+        setView('workspace');
+        setPane('output');
+        requestAnimationFrame(() => dock?.scrollIntoView({block:'nearest'}));
+    };
     function showOutput(ref) {
+        const dock = document.getElementById('pipeline-output-dock');
+        if (dock) dock.dataset.outputMode = 'pipe';
+        setView('workspace');
+        window._mrsmOutputDismissed = false;
+        document.getElementById('pipeline-output-dock')?.classList.remove('pipeline-output-empty');
+        setPane('output');
         const rows = Array.from((window._mrsmNodeOutput || new Map()).values()).filter(item => item.ref === ref);
         if (rows.length) window.dash_clientside.set_props('pipeline-output-tab', {value: rows.at(-1).job});
         else {
@@ -11,10 +54,11 @@
     }
     window.mrsmPaintPipelineStatuses = function (statuses) {
         const colors = {running:'#3486bd', succeeded:'#2e9e5b', failed:'#d1495b',
-                        upstream_failed:'#d1495b', skipped:'#9aa5b1', pending:'#e0a526'};
+                        upstream_failed:'#d1495b', cancelled:'#9aa5b1', skipped:'#9aa5b1', pending:'#e0a526'};
         document.querySelectorAll('.pipeline-stage').forEach(card => {
             if (!card.dataset.plannedColor) card.dataset.plannedColor = card.style.getPropertyValue('--stage-color');
             const status = (statuses || {})[card.dataset.ref];
+            card.dataset.status = status || '';
             let badge = card.querySelector('.pipeline-live-status');
             if (!status) {
                 card.style.setProperty('--stage-color', card.dataset.plannedColor);
@@ -30,6 +74,15 @@
         if (filter && filter.onchange) filter.dispatchEvent(new Event('change'));
     };
     function mount() {
+        const page = document.getElementById('pipelines-page');
+        if (page && page._mrsmViewSearch !== location.search) {
+            const previous = page._mrsmViewSearch === undefined ? null : new URLSearchParams(page._mrsmViewSearch);
+            page._mrsmViewSearch = location.search;
+            const query = new URLSearchParams(location.search);
+            const changedPipeline = previous && ['pipeline', 'instance'].some(key => previous.get(key) !== query.get(key));
+            if (query.has('run_id') || ['status', 'pipe'].some(key => query.has(key))) setView('runs');
+            else if (!previous || changedPipeline) setView('workspace');
+        }
         const workspace = document.getElementById('pipeline-workspace');
         const inspector = document.getElementById('pipeline-inspector');
         if (workspace && inspector) workspace.classList.toggle('pipeline-has-selection', !inspector.hidden);
@@ -105,6 +158,15 @@
             y = (canvas.clientHeight-(maxY-minY)*scale)/2-minY*scale; draw();
         };
         document.getElementById('pipeline-fit').onclick = fit;
+        canvas._mrsmResizeObserver?.disconnect();
+        let lastWidth = 0, lastHeight = 0;
+        canvas._mrsmResizeObserver = new ResizeObserver(entries => {
+            const {width, height} = entries[0].contentRect;
+            if (!width || !height || (width === lastWidth && height === lastHeight)) return;
+            lastWidth = width; lastHeight = height;
+            requestAnimationFrame(fit);
+        });
+        canvas._mrsmResizeObserver.observe(canvas);
         document.getElementById('pipeline-fullscreen').onclick = async () => {
             const workspace = document.getElementById('pipeline-workspace');
             try {
@@ -151,13 +213,13 @@
             menu.style.left = Math.min(e.clientX, innerWidth - 230) + 'px';
             menu.style.top = Math.min(e.clientY, innerHeight - 220) + 'px';
             const button = (label, fn) => {
-                const b = document.createElement('button'); b.textContent = label; b.setAttribute('role', 'menuitem');
+                const b = document.createElement('button'); b.textContent = ({'Inspect Pipe':'ⓘ ', 'View output':'▤ ', 'Remove membership in draft':'− ', 'Add existing / register new Pipe':'+ '}[label] || '▶ ') + label; b.setAttribute('role', 'menuitem');
                 b.onclick = () => { menu.remove(); fn(); }; menu.appendChild(b);
             };
             if (node) {
                 button('Inspect Pipe', () => node.click());
                 for (const [scope, label] of [['this', 'Sync this Pipe'], ['parents', 'Sync with all parents'], ['children', 'Sync with all children']])
-                    button(label, () => window.dash_clientside.set_props('pipeline-context', {data:{action:'sync', ref:node.dataset.ref, scope, token:Date.now()}}));
+                    button(label, () => { setPane('output'); window.dash_clientside.set_props('pipeline-context', {data:{action:'sync', ref:node.dataset.ref, scope, token:Date.now()}}); });
                 button('View output', () => { node.click(); showOutput(node.dataset.ref); });
                 button('Remove membership in draft', () => {
                     window.dash_clientside.set_props('pipeline-context', {data:{action:'remove', ref:node.dataset.ref, token:Date.now()}}); add();
@@ -204,6 +266,7 @@
             if (group && !e.target.closest('button')) group.querySelector('button').click();
             const selected = e.target.closest('.pipeline-stage');
             if (selected) {
+                setPane('details');
                 window._mrsmPipelineSelectedRef = selected.dataset.ref;
                 if (e.ctrlKey || e.metaKey || e.shiftKey) selected.classList.toggle('pipeline-multi-selected');
                 else cards.forEach(card => card.classList.remove('pipeline-multi-selected'));
@@ -227,21 +290,46 @@
         draw();
     }
     document.addEventListener('keydown', e => {
+        if (e.target.matches('.pipeline-node-output-icon') && ['Enter', ' '].includes(e.key)) { e.preventDefault(); e.target.click(); }
         if (e.key === 'Escape') {
-            if (document.fullscreenElement?.id === 'pipeline-workspace') document.exitFullscreen().catch(() => {});
+            exitFullscreen();
             document.querySelectorAll('.pipeline-context-menu').forEach(el => el.remove());
             document.getElementById('pipeline-workspace')?.classList.remove('pipeline-fullscreen');
         }
     });
     document.addEventListener('click', e => {
-        if (e.target.closest('#pipeline-output-expand')) document.getElementById('pipeline-output-dock')?.classList.toggle('pipeline-output-expanded');
+        const runLink = e.target.closest('.pipeline-run-link[data-run-id]');
+        if (runLink) { e.preventDefault(); window.dash_clientside.set_props('pipeline-selected-run', {data:runLink.dataset.runId}); return; }
+        const outputIcon = e.target.closest('.pipeline-node-output-icon');
+        if (outputIcon) { e.preventDefault(); e.stopPropagation(); showOutput(outputIcon.closest('.pipeline-stage').dataset.ref); return; }
+        if (e.target.closest('#pipeline-recent-runs')) {
+            window.dash_clientside.set_props('pipeline-selected-run', {data:null});
+            const query = new URLSearchParams(location.search); query.delete('run_id');
+            window.dash_clientside.set_props('pipelines-location', {search:query.size ? '?' + query : ''});
+        }
+        if (e.target.closest('#pipeline-view-output')) window.mrsmShowPipelineOutput(window._mrsmPipelineRun);
+        if (e.target.closest('#pipeline-node-sync')) { const dock = document.getElementById('pipeline-output-dock'); if (dock) dock.dataset.outputMode = 'pipe'; }
+        if (e.target.closest('#pipeline-output-close')) window.mrsmClosePipelineOutput();
+        const viewButton = e.target.closest('#pipeline-view-workspace, #pipeline-view-runs');
+        if (viewButton) setView(viewButton.id === 'pipeline-view-runs' ? 'runs' : 'workspace');
+        const paneButton = e.target.closest('.pipeline-mobile-tabs [data-pane]');
+        if (paneButton) setPane(paneButton.dataset.pane);
+        if (e.target.closest('#pipeline-exit-fullscreen')) exitFullscreen();
+        if (e.target.closest('#pipeline-node-sync')) { window._mrsmOutputDismissed = false; setPane('output'); }
+        if (e.target.closest('.pipeline-group-title')) { setView('workspace'); setPane('graph'); }
+
         if (!e.target.closest('.pipeline-context-menu')) document.querySelectorAll('.pipeline-context-menu').forEach(el => el.remove());
         if (e.target.closest('#pipeline-node-view-output')) showOutput(window._mrsmPipelineSelectedRef);
         if (e.target.closest('#pipeline-inspector-close')) {
+            setPane('graph');
             window._mrsmPipelineSelectedRef = null;
             document.querySelectorAll('.pipeline-stage').forEach(card => card.setAttribute('aria-pressed', 'false'));
         }
     });
+    document.addEventListener('click', e => {
+        const icon = e.target.closest('.pipeline-node-output-icon');
+        if (icon) { e.preventDefault(); e.stopPropagation(); showOutput(icon.closest('.pipeline-stage').dataset.ref); }
+    }, true);
     new MutationObserver(mount).observe(document.documentElement, {childList:true, subtree:true, attributes:true, attributeFilter:['hidden']});
     document.addEventListener('DOMContentLoaded', mount);
 })();

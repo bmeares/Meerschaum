@@ -29,6 +29,7 @@ pub mod interrupt;
 pub mod suggest;
 pub mod toolbar;
 pub mod updates;
+mod webterm;
 
 use std::io::Write;
 use std::path::PathBuf;
@@ -1043,6 +1044,7 @@ pub fn intro_with_updates(rt: &mut Runtime<'_>) -> String {
 /// `mrsm --shell`).
 pub fn run(sysargs: &[String], instance: Option<&str>, rt: &mut Runtime<'_>) {
     rt.in_shell = true;
+    crate::format::progress::forward_shell_worker_output();
     let mut state = ShellState::new(rt, instance);
     let noninteractive = crate::env::noninteractive(rt.env);
     let interactive = !noninteractive && std::io::IsTerminal::is_terminal(&std::io::stdin());
@@ -1065,6 +1067,8 @@ pub fn run(sysargs: &[String], instance: Option<&str>, rt: &mut Runtime<'_>) {
         return;
     }
 
+    let _webterm_state = webterm::Guard;
+    webterm::update(false, false);
     let history_path = rt.config().paths().path("SHELL_HISTORY_PATH");
     let max_history = rt
         .config()
@@ -1129,6 +1133,7 @@ pub fn run(sysargs: &[String], instance: Option<&str>, rt: &mut Runtime<'_>) {
         // OSC 133 is consumed by terminal integrations; never emitted to plain streams.
         rt.print("\x1b]133;A\x07");
         let signal = editor.read_line(&prompt);
+        webterm::update(false, false);
         rt.print("\x1b]133;C\x07");
         match signal {
             Ok(reedline::Signal::Success(line)) => {

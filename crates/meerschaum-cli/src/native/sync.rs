@@ -387,9 +387,13 @@ pub fn sync_pipes_with(args: &ArgsMap, rt: &mut Runtime<'_>, method: LapMethod) 
             let opts = run_options(args, &inst, &pipes, &sync_args);
             let graph_run = traversal || args.contains_key("resume");
             let result = if graph_run && !nopretty && rt.live {
-                run_live(rt, &session, engine, opts)
+                run_live(rt, &session, engine, opts, true)
             } else {
-                session.block_on(engine.run(opts))
+                if rt.in_shell && !nopretty && !flag(args, "debug") {
+                    run_live(rt, &session, engine, opts, false)
+                } else {
+                    session.block_on(engine.run(opts))
+                }
             };
             print_hook_results(rt, &session);
             for warning in &result.warnings {
@@ -670,19 +674,51 @@ pub(super) fn run_live(
     session: &Session,
     engine: meerschaum_engine::Engine,
     opts: meerschaum_engine::RunOptions,
+    show_nodes: bool,
 ) -> meerschaum_engine::RunResult {
     use meerschaum_engine::EventKind;
     use std::sync::mpsc;
     use tokio::sync::broadcast::error::TryRecvError;
+    let progress = if rt.in_shell {
+        crate::format::progress::Progress::start_flags(rt, false, false, "Syncing Pipes")
+    } else {
+        crate::format::progress::Progress::disabled()
+    };
+    progress.set_total(
+        opts.selection
+            .as_ref()
+            .map_or(0, |selection| match &selection.targets {
+                meerschaum_engine::Targets::Refs(refs) => refs.len(),
+                _ => 0,
+            }),
+    );
+    let counter = progress.counter();
     let mut events = engine.subscribe();
     let (sender, receiver) = mpsc::channel();
     session.spawn(async move {
         let _ = sender.send(engine.run(opts).await);
     });
     let line = |rt: &mut Runtime<'_>, event: meerschaum_engine::Event| {
+        if let EventKind::RunStarted { nodes, .. } = &event.kind {
+            progress.set_total(*nodes);
+        }
         let Some(node) = event.pipe_ref.as_ref().map(|r| r.label()) else {
             return;
         };
+        if matches!(
+            &event.kind,
+            EventKind::NodeFinished { .. }
+                | EventKind::NodeFailed {
+                    will_retry: false,
+                    ..
+                }
+                | EventKind::NodeSkipped { .. }
+        ) {
+            counter.inc();
+        }
+        if !show_nodes {
+            return;
+        }
         let text = match &event.kind {
             EventKind::NodeStarted { action, .. } => format!("  \u{25b6} {node} ({action})"),
             EventKind::NodeFinished { result } => format!(

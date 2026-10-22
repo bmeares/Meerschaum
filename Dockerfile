@@ -104,13 +104,12 @@ RUN dnf install -y --setopt=install_weak_deps=False --nodocs python3 python3-pip
 RUN --mount=type=bind,from=rust-builder,source=/out/wheels,target=/wheels \
     --mount=type=bind,source=scripts/docker/trim_install.sh,target=/trim_install.sh \
     case "$dep_group" in \
-      minimal) extras="" ;; \
-      api)     extras="[full]" ;; \
-      *)       extras="[full]" ;; \
+      minimal) extras=""; set -- ;; \
+      *)       extras="[full]"; set -- 'pgcli>=3.1.0' 'litecli>=1.5.0' ;; \
     esac \
   && wheel="$(ls /wheels/meerschaum-[0-9]*.whl)" \
   && python3 -m pip install --find-links /wheels --no-cache-dir --no-compile --ignore-installed \
-      --root-user-action=ignore --prefix=/install "$wheel$extras" PyYAML \
+      --root-user-action=ignore --prefix=/install "$wheel$extras" PyYAML "$@" \
   && /trim_install.sh /install \
   && ls -l /install/bin
 
@@ -163,8 +162,9 @@ ARG mrsm_user=meerschaum \
 
 RUN dnf install -y --installroot=/rootfs --use-host-config --releasever=44 \
       --setopt=install_weak_deps=False --nodocs \
-      python3 python-unversioned-command bash coreutils-single ca-certificates tzdata libstdc++ curl-minimal libcurl-minimal \
+      python3 python-unversioned-command bash coreutils-single ca-certificates tzdata vim-minimal libstdc++ curl-minimal libcurl-minimal \
   && dnf --installroot=/rootfs --use-host-config clean all \
+  && ln -sf vi /rootfs/usr/bin/vim \
   && rm -rf /rootfs/var/cache/* /rootfs/var/log/* /rootfs/var/lib/dnf /rootfs/usr/share/locale/* \
   && rm -rf /rootfs/usr/share/pki/ca-trust-source /rootfs/usr/share/zoneinfo/right \
             /rootfs/usr/share/zoneinfo/posix /rootfs/etc/pki/ca-trust/extracted/java \
@@ -239,8 +239,9 @@ ARG mrsm_user=meerschaum \
 RUN dnf install -y --installroot=/rootfs --use-host-config --releasever=44 \
       --setopt=install_weak_deps=False --nodocs \
       python3 python-unversioned-command bash coreutils-single ca-certificates tzdata \
-      libstdc++ python3-pip ncurses tmux less htop openssl curl-minimal libcurl-minimal git-core \
+      vim-minimal libstdc++ python3-pip ncurses tmux less htop openssl curl-minimal libcurl-minimal git-core postgresql \
   && dnf --installroot=/rootfs --use-host-config clean all \
+  && ln -sf vi /rootfs/usr/bin/vim \
   && rm -rf /rootfs/var/cache/* /rootfs/var/log/* /rootfs/var/lib/dnf /rootfs/usr/share/locale/* \
   && rm -rf /rootfs/usr/share/pki/ca-trust-source /rootfs/usr/share/zoneinfo/right \
             /rootfs/usr/share/zoneinfo/posix /rootfs/etc/pki/ca-trust/extracted/java \

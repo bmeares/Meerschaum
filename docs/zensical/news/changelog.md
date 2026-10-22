@@ -4,6 +4,20 @@
 
 Meerschaum 5 is a rewrite of the core in Rust: the data kernel, the `sql:` / `valkey:` / `api:` connectors, the Syncing Engine, jobs, compose, the HTTP API, the MCP server and the `mrsm` CLI and shell. The `meerschaum` Python package stays as the plugin SDK, a façade and the host of the Plotly Dash web console, so pipes, parameters, configuration, compose files, jobs, the HTTP API and the Python public API keep working. Read the [migration guide](/reference/migrating-to-v5/) before upgrading; v4.1.x stays installable and receives security fixes until 5.1.0.
 
+### v5.0.0rc7
+
+- **Make the Pipeline canvas the main workspace.**  
+  Full-width controls, node output icons and syncing spinners, readable Pipe details and plans, and expanded ANSI output keep inspection and execution on the canvas. Run now opens its command output immediately; View output reopens it. History links retain the requested run, and Runs provides a shared timeline with local selection and no drag-to-zoom or download controls.
+
+- **Simplify Pipeline management and discovery.**  
+  Instance dropdowns and a draft membership editor reduce setup friction. Manage sits beside the selector, with confirmed deletion that preserves member Pipes and data. Pipeline cards load history lazily in one column, and their Manage actions use the web terminal. Runs cards use two columns and share the console's exclusive content/terminal switching.
+
+- **Restore CLI and web terminal behavior.**  
+  Pipe card actions execute in the existing terminal. Shell syncs show progress, elapsed time, and spinners; Ctrl+C aborts prompts. Pipeline editing uses YAML, bulk lifecycle actions mirror Pipes, and unknown names warn and skip. Compact Pipeline grids show saved membership without traversing dependencies; analyze performs discovery explicitly. Pipeline representations include non-default instances.
+
+- **Reconcile canceled executions and include interactive Docker tools.**  
+  Stopped workers clear stale node spinners and cancel controls. Logs follow new output while respecting manual scrolling. Full Docker images include PostgreSQL clients and pgcli; Docker images provide Vim for editing. Opening the page no longer creates singleton Pipeline registrations automatically; existing definitions remain intact.
+
 ### v5.0.0rc6
 
 - **Manage registered Pipelines across instances.**  

@@ -6,7 +6,12 @@ The engine emits one typed event per transition, and everything you see is drawn
 
 ## Running a Pipeline in the console
 
-Open `/dash/pipelines` and select a registered Pipeline or click its named boundary. Shared Pipes
+Open `/dash/pipelines` and select a registered Pipeline. **Workspace** contains the editable graph;
+**Runs** contains execution history, the selected timeline and its horizontally scrollable stages table.
+The two views keep their state when switched. On phones, **Graph**, **Pipe details** and **Output**
+switch between workspace panes; selecting a node opens its details. **Tools** groups analysis and
+registration controls, while **Find pipes**, **Pipeline members** and **View options** reveal less frequent
+actions. You may also select a Pipeline by clicking its named boundary. Shared Pipes
 may appear in several groups. Select a Pipe to open its inspector immediately; Query, Data / Plan,
 Dependencies, Recent syncs and Parameters load independently. **Resolve symlinks** changes displayed
 SQL in the selected Pipe's instance context, preserving the stored definition.
@@ -15,13 +20,15 @@ SQL in the selected Pipe's instance context, preserving the stored definition.
 the page. Drag the background to pan without selecting page text; zoom, Fit and Center selected
 provide keyboard-accessible controls. Search and status filters highlight matching Pipes, and
 Collapse groups provides an overview. Ctrl/Cmd/Shift-click selects several cards. Alt-drag a Pipe
-to arrange it, then **Save shared layout** in **Edit Pipeline draft / add Pipe** persists coordinates with revision checks. Zoom and pan
+to arrange it, then **Save layout** in the canvas toolbar persists coordinates with revision checks. Zoom and pan
 remain personal to the browser session.
 
-Right-click a Pipe or use its inspector to **Sync this Pipe**, include parents, or include children.
-Inspector bounds apply to that operation. These controls launch one execution through the same
+Right-click a Pipe or use its inspector to **Sync this Pipe**. **Sync options** chooses parent or
+child traversal and optional bounds for that operation. These controls launch one execution through the same
 authenticated server endpoint; they do not run the entire registered Pipeline implicitly.
-The output dock keeps tabs for completed single-Pipe executions. Expanded scopes use exact
+The canvas output drawer opens from each node’s output icon and keeps completed single-Pipe executions.
+It opens at full size, renders ANSI colors, and follows new output until you scroll upward.
+Close it with the button on the right. **Cancel sync** appears only for a running or paused execution. Expanded scopes use exact
 run/Pipe engine event identities rather than assigning interleaved stdout by matching text.
 Arbitrary plugin stdout from a concurrent Pipeline run remains in **Pipeline command output**;
 per-Pipe panes provide structured events and results. Run an individual Pipe for its dedicated
@@ -29,13 +36,11 @@ stdout stream.
 **Run now** executes the saved Pipeline and follows its allocated run ID. History remains
 separate from editable current state.
 
-**Edit Pipeline draft / add Pipe** manages explicit membership. Find existing Pipes on an explicit
-instance, or register a new Pipe and add it to the draft. Registration is an explicit separate
-mutation. Draft membership and traversal edits support Undo, Redo, Discard and Save. The inspector's
-**Edit shared Pipe** tab stages explicit dependencies and raw SQL changes. These change shared Pipe
-facts in every Pipeline using that Pipe. Inferred edges are changed by editing their SQL references.
-The editor validates the proposed dependency graph before writing and checks shared Pipe baselines
-and Pipeline revisions; cross-instance failures report individual results.
+**Pipeline members** manages explicit membership. Choose a configured instance from the dropdown
+and select existing Pipes, or open the separate new-Pipe registration form. Draft membership and
+traversal edits support Undo, Redo, Discard and Save. Use **Open Pipe editor** in the inspector to
+change shared Pipe parameters. The inspector’s section selector loads Query, Data / Plan,
+Dependencies, Recent syncs and Parameters independently.
 
 **Analyze** detects traversal members, shared Pipes and proposed `pipeline-{name}` tag changes.
 Review the proposal, then explicitly **Apply proposed tags**. Stale proposals require analysis and
@@ -45,7 +50,10 @@ The canvas's **Plan** describes dependency order, readiness, actions and bounds 
 The **Actual execution timeline** uses observed starts and finishes, extends live running bars and
 shows overlap and elapsed time. It omits forecast bars and the image-download control. Engine
 estimates may use prior durations or a 30-second default; these are scheduling hints, not deadlines.
-The Runs table and Sync activity retain their run/Pipe filters. **Manage pipeline** also creates
+In **Runs**, **Filters** and **Sync activity** reveal run/Pipe filters and recorded events.
+A stopped execution worker cannot always persist its final engine event; retained Job metadata
+reconciles unfinished runs to their actual stop time, including after reloading the page.
+**Tools → Manage pipeline** also creates
 ordinary scheduled Jobs with their own execution settings.
 
 ## 🖥️ In the terminal
@@ -153,3 +161,12 @@ A bound (`begin`, `end`, `from`, `to`) is `{"Datetime": "2024-01-01T00:00:00Z"}`
 **Errors.** If the callback raises an `Exception`, the run is **not** stopped: the exception is reported once with `warnings.warn` (including its traceback), the callback receives no further events, the run result carries it as `run.callback_error`, and `run.warnings` gets a line about it. A `KeyboardInterrupt` (raised in the callback, or CTRL-C while the run waits) **cancels** the run: in-flight node syncs are dropped as if the process had crashed (the engine's write ordering keeps every table and cursor consistent, and the next run picks up where it stopped), and the `KeyboardInterrupt` propagates.
 
 `run.events()` (and `Pipeline.get_events(run_id)`) still read a run's *persisted* events back from the instance after the fact, at the granularity of `system.engine.events`; those rows are shaped `{ts, run_id, seq, pipe_ref, event, payload}`.
+
+
+After selecting a saved Pipeline, **Run now** opens its command output directly in the
+canvas. **View output** reopens that execution's retained logs after closing the drawer.
+Use node output icons for individual Pipe executions and **Runs** for historical timelines.
+
+**Manage**, beside the Pipeline selector, contains definition and schedule controls.
+Deleting a Pipeline asks you to confirm its name and registry. Member Pipes, their data,
+and execution history are kept; remove referencing scheduled Jobs before deleting a definition.

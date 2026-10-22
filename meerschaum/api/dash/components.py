@@ -30,7 +30,7 @@ get_items_menu = dbc.DropdownMenu(
         dbc.DropdownMenuItem("Plugins", id='get-plugins-button'),
         dbc.DropdownMenuItem("Users", id='get-users-button'),
         dbc.DropdownMenuItem("Graphs", id='get-graphs-button'),
-        dbc.DropdownMenuItem("Runs", href="/dash/runs"),
+        dbc.DropdownMenuItem("Runs", id="get-runs-button"),
     ],
     style={'width': '100%', 'font-size': '0.5em'},
     menu_variant='dark',
@@ -51,19 +51,19 @@ show_jobs_button = dbc.Button(
     style={'width': '100%'},
 )
 cancel_button = dbc.Button(
-    'Term',
+    html.Span('>_', role='img', **{'aria-label': 'Terminal'}),
     id='cancel-button',
     color='dark',
     style={'width': '100%', 'background-color': 'black', 'display': 'none'},
 )
 show_webterm_button = dbc.Button(
-    'Term',
+    html.Span('>_', role='img', **{'aria-label': 'Terminal'}),
     id='show-webterm-button',
     color='dark',
     style={'width': '100%', 'background-color': 'black'},
 )
 show_pipelines_button = dbc.Button('Pipelines', id='get-pipelines-button',
-                                    color='info', style={'width': '100%'})
+                                    color='warning', style={'width': '100%'})
 bottom_buttons_content = dbc.Card(
     dbc.CardBody(
         dbc.Row([
@@ -173,7 +173,7 @@ def build_pages_navbar():
                             is_open=False,
                             navbar=True,
                         ),
-                    ]
+                    ], style={'max-width': '96%'},
                 ),
                 dark=True,
                 color='dark'

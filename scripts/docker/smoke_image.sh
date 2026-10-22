@@ -99,13 +99,17 @@ exit 1
 for image in "${slim_images[@]}"; do
   echo "== $image"
   check "curl" "$image" curl --version
+  check "Vim editor" "$image" vim --version
   check "python" "$image" python --version
   check "mrsm" "$image" mrsm --version
 done
 for image in "${full_images[@]}"; do
   echo "== $image (full)"
   check "curl" "$image" curl --version
+  check "Vim editor" "$image" vim --version
   check "python" "$image" python --version
+  check "PostgreSQL client" "$image" psql --version
+  check "pgcli" "$image" pgcli --version
   check "git" "$image" git --version
   check "ssh" "$image" ssh -V
   check "mrsm" "$image" mrsm --version

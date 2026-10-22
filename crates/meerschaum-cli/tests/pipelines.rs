@@ -168,6 +168,59 @@ fn registered_lifecycle_is_native_and_does_not_apply_tags_on_reads() {
 }
 
 #[test]
+fn show_pipelines_reads_saved_members_without_traversal() {
+    let env = Env::new();
+    env.register_pipe("source", "sql:remote", json!({"sql":"SELECT 1 AS id"}));
+    env.register_pipe("report", "sql:local", json!({"parents":[{"connector":"sql:local","metric":"source","instance":"sql:remote"}],"sql":"SELECT 1 AS id"}));
+    env.register_pipeline("daily", json!({"description":"Daily reports", "targets":["sql:local|sql:local|report|None"],"parents":true}));
+    let before = env.definitions();
+    let output = env.ok(&["show", "pipelines"]);
+    assert!(output.contains("Pipeline('daily')"), "{output}");
+    assert!(output.contains("Daily reports"), "{output}");
+    assert!(output.contains("1 members"), "{output}");
+    assert!(
+        !output.contains("source"),
+        "show must not traverse: {output}"
+    );
+    assert!(output.contains("Keys"), "{output}");
+    assert!(!output.contains("schema_version"), "{output}");
+    assert!(!output.contains("Revision:"), "{output}");
+    let detail = env.ok(&["show", "pipeline", "daily"]);
+    assert!(
+        detail.contains("Revision: 1") && detail.contains("Parents: true"),
+        "{detail}"
+    );
+    assert_eq!(env.definitions(), before);
+    assert!(env.pipe_parameters("source", "sql:remote")["tags"].is_null());
+    assert!(env.pipe_parameters("report", "sql:local")["tags"].is_null());
+    let runs = env.ok(&["show", "runs", "--nopretty"]);
+    assert_eq!(serde_json::from_str::<Value>(&runs).unwrap(), json!([]));
+}
+
+#[test]
+fn show_pipelines_keeps_missing_members_visible_and_handles_empty_registries() {
+    let env = Env::new();
+    assert!(
+        env.ok(&["show", "pipelines"])
+            .contains("No pipelines registered on sql:local.")
+    );
+    env.register_pipeline(
+        "missing",
+        json!({"targets":["sql:remote|sql:local|absent|None"]}),
+    );
+    env.register_pipeline("empty", json!({"targets":[]}));
+    let output = env.ok(&["show", "pipelines"]);
+    assert!(!output.contains("Connections unavailable:"), "{output}");
+    assert!(
+        env.ok(&["show", "pipeline", "missing"])
+            .contains("sql:remote|sql:local|absent|None"),
+        "{output}"
+    );
+    assert!(output.contains("No member pipes."), "{output}");
+    assert_eq!(env.definitions().as_array().unwrap().len(), 2);
+}
+
+#[test]
 fn cross_instance_same_triples_and_preexisting_tags_survive() {
     let env = Env::new();
     env.register_pipe(
@@ -326,4 +379,31 @@ fn importing_an_exported_definition_creates_a_new_identity() {
     assert_eq!(imported["revision"], json!(1));
     assert_eq!(imported["targets"], exported["targets"]);
     assert_eq!(imported["layout"], exported["layout"]);
+}
+
+#[test]
+fn delete_pipeline_selection_skips_missing_names_and_bare_delete_selects_all() {
+    let env = Env::new();
+    env.register_pipe("kept", "sql:local", json!({}));
+    env.register_pipeline(
+        "first",
+        json!({"targets":["sql:local|sql:local|kept|None"]}),
+    );
+    env.register_pipeline("second", json!({"targets":[]}));
+    let missing = env.run(&["delete", "pipelines", "missing", "--yes"]);
+    assert!(!missing.status.success());
+    assert!(String::from_utf8_lossy(&missing.stderr).contains("No valid Pipeline"));
+    assert_eq!(env.definitions().as_array().unwrap().len(), 2);
+    let mixed = env.run(&["delete", "pipelines", "missing", "first", "--yes"]);
+    assert!(
+        mixed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&mixed.stderr)
+    );
+    assert!(String::from_utf8_lossy(&mixed.stderr).contains("skipping"));
+    assert_eq!(env.definitions().as_array().unwrap().len(), 1);
+    env.ok(&["delete", "pipelines", "--yes"]);
+    assert_eq!(env.definitions(), json!([]));
+    assert!(env.pipe_parameters("kept", "sql:local").is_object());
+    assert!(!env.run(&["delete", "pipelines", "--yes"]).status.success());
 }

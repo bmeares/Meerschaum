@@ -34,6 +34,7 @@ from __future__ import annotations
 from datetime import datetime
 
 import meerschaum as mrsm
+from meerschaum.connectors.parse import parse_instance_keys
 from meerschaum.utils.typing import (
     Any, Callable, Dict, Iterable, List, Optional, SuccessTuple, Tuple, Union,
 )
@@ -357,7 +358,7 @@ def _decode_events(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 def _instance_of(pipes: List[mrsm.Pipe], instance: Optional[Any]) -> Any:
     if instance is not None:
-        return mrsm.connectors.parse_instance_keys(instance) if isinstance(instance, str) else instance
+        return parse_instance_keys(instance) if isinstance(instance, str) else instance
     if pipes:
         instances = {pipe.instance_keys for pipe in pipes}
         if len(instances) > 1:
@@ -366,7 +367,7 @@ def _instance_of(pipes: List[mrsm.Pipe], instance: Optional[Any]) -> Any:
                 f"got {sorted(instances)}. Pass `instance=` to choose one."
             )
         return pipes[0].instance_connector
-    return mrsm.connectors.parse_instance_keys(None)
+    return parse_instance_keys(None)
 
 
 class Pipeline:
@@ -663,6 +664,10 @@ class Pipeline:
         return _decode_events(call('engine_run_events', request))
 
     def __repr__(self) -> str:
+        if self.name:
+            from meerschaum.config import get_config
+            suffix = f', instance={str(self.instance)!r}' if str(self.instance) != get_config('meerschaum', 'instance') else ''
+            return f'Pipeline({self.name!r}{suffix})'
         parts = [repr(self._targets)] if self._targets else [repr(self._filters)]
         if self.parents:
             parts.append(f"parents={self.parents!r}")
@@ -681,7 +686,7 @@ def get_runs(
     See `Pipeline.get_runs()`.
     """
     connector = (
-        mrsm.connectors.parse_instance_keys(instance)
+        parse_instance_keys(instance)
         if isinstance(instance, (str, type(None)))
         else instance
     )

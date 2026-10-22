@@ -274,13 +274,49 @@ def test_the_dashboard_embeds_the_same_terminal(term_server, context):
     assert page.get_attribute('#webterm-iframe', 'src') == f"/webterm/{cookie}"
     frame = page.query_selector('#webterm-iframe').content_frame()
     frame.wait_for_selector('.xterm .xterm-screen', timeout=30000)
-    ### `Exec` makes way for the output pane and `Term` shows the terminal again.
+    ### `Exec` submits into this existing terminal.
     page.click('#go-button')
-    page.wait_for_selector('#exec-div', state='visible')
-    assert not page.locator('#webterm-div').is_visible()
-    page.click('#show-webterm-button')
     page.wait_for_selector('#webterm-div', state='visible')
+    assert not page.locator('#exec-div').is_visible()
     assert tab.errors == [], tab.errors
+
+
+def test_exec_accepts_an_idle_terminal_after_reattaching(term_server, context):
+    """A visible idle prompt stays executable through tmux and iframe refreshes."""
+    page, tab, _ = _login(context, term_server)
+    frame = _open_terminal(page, term_server.base_url, '/dash')
+    try:
+        frame.wait_for_function(
+            'window.terminal.session.idle && !window.terminal.session.lineDirty',
+            timeout=10000,
+        )
+    except Exception:
+        state = frame.evaluate('({idle: terminal.session.idle, dirty: terminal.session.lineDirty})')
+        pytest.fail(f'Idle terminal rejected: {state}; rows: {_rows(frame)}')
+    page.click('#go-button')
+    page.wait_for_function("() => { const id = window._mrsmExecSubmitted; const s = document.getElementById('webterm-iframe')?.contentWindow?.terminal?.session; return s?.requests.get(id)?.accepted; }")
+    frame.wait_for_function('window.terminal.session.idle && !window.terminal.session.lineDirty')
+    page.click('#webterm-refresh-button')
+    frame = page.query_selector('#webterm-iframe').content_frame()
+    frame.wait_for_function('window.terminal?.session.idle && !window.terminal.session.lineDirty')
+    page.click('#go-button')
+    page.wait_for_function("() => { const id = window._mrsmExecSubmitted; const s = document.getElementById('webterm-iframe')?.contentWindow?.terminal?.session; return s?.requests.get(id)?.accepted; }")
+    frame.wait_for_function('window.terminal.session.idle && !window.terminal.session.lineDirty')
+    # Real unfinished input remains untouched by Exec, including after reattachment.
+    frame.evaluate("window.terminal.term.input('unfinished')")
+    page.click('#go-button')
+    page.wait_for_function("document.getElementById('terminal-exec-status').innerText.includes('unfinished input')")
+    assert 'unfinished' in _rows(frame)
+    # Erasing the entire buffer restores readiness without submitting a blank command.
+    frame.evaluate("window.terminal.term.input('\\x15')")
+    frame.wait_for_function('window.terminal.session.idle && !window.terminal.session.lineDirty')
+    page.click('#go-button')
+    page.wait_for_function("() => { const id = window._mrsmExecSubmitted; const s = document.getElementById('webterm-iframe')?.contentWindow?.terminal?.session; return s?.requests.get(id)?.accepted; }")
+    frame.wait_for_function('window.terminal.session.idle && !window.terminal.session.lineDirty')
+    frame.evaluate("window.terminal.term.input('cancelled\\x03')")
+    frame.wait_for_function('window.terminal.session.idle && !window.terminal.session.lineDirty')
+    assert tab.errors == [], tab.errors
+    page.close()
 
 
 def test_standalone_page_matches_the_v4_route(term_server, context):

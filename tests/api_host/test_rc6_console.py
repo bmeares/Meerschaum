@@ -87,7 +87,7 @@ print('JSON:true')
     assert result.returncode == 0, result.stderr
 
 
-def test_pipeline_cards_show_registry_counts_latest_and_schedule_without_discovery(sandbox):
+def test_pipeline_cards_load_definitions_without_history_or_discovery(sandbox):
     root, plugins = sandbox
     result = run_python(root, plugins, '''
 from types import SimpleNamespace
@@ -95,7 +95,7 @@ from meerschaum.api.dash import pipeline_cards, engine
 import meerschaum.jobs
 pipeline_cards.list_pipelines = lambda instance: {'daily': {'name': 'daily', 'id': 'pipeline-1',
     'revision': 2, 'targets': ['sql:source|sql:source|raw|None', 'sql:dest|sql:source|clean|None']}}
-engine.get_runs = lambda instance, **kwargs: [{'run': {'run_id': 'run-1'}, 'status': 'succeeded'}]
+engine.get_runs = lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError('Card read attempted history fetch'))
 engine.run_belongs_to_pipeline = lambda run, name, definition: name == 'daily' and definition['id'] == 'pipeline-1'
 engine.plan_graph = lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError('Card read attempted graph discovery'))
 meerschaum.jobs.get_jobs = lambda **kwargs: {'daily-scheduled': SimpleNamespace(
@@ -103,7 +103,7 @@ meerschaum.jobs.get_jobs = lambda **kwargs: {'daily-scheduled': SimpleNamespace(
 cards, alerts = pipeline_cards.get_pipeline_cards({'instance-select.value': 'sql:apihosttest'})
 assert not alerts and len(cards) == 1
 text = str(cards[0])
-for expected in ('Registry: sql:apihosttest', '2 members across 2 instances', 'succeeded', 'daily-scheduled', 'Open / Manage', 'Sync'):
+for expected in ('Pipeline(', 'sql:apihosttest', '2 members · 2 instances', 'Execution history', 'Manage', 'Sync'):
     assert expected in text, text
 print('JSON:true')
 ''')

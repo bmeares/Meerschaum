@@ -324,7 +324,7 @@ The wheel contains the native core and has no required Python dependencies. Whee
     `pip install meerschaum` is the whole product: the `mrsm` command it installs runs the native command line from inside the package. If you would rather have a standalone binary (it starts in about 10 ms and needs no Python until you use a Python plugin or connector), build the same command line with Cargo:
 
     ```bash
-    cargo install meerschaum --locked            # during the release candidates: --version 5.0.0-rc.6
+    cargo install meerschaum --locked            # during the release candidates: --version 5.0.0-rc.7
     ```
 
     This needs Rust 1.95 or newer. `--locked` builds with the dependency versions Meerschaum was tested with (without it Cargo may pick newer ones, which can break the build on Windows). Prebuilt standalone binaries (Linux x86_64 and arm64, macOS arm64 and x86_64, Windows x86_64) are attached to each GitHub release, with a SHA-256 file for each.
@@ -2739,17 +2739,26 @@ mrsm plan pipelines daily -i sql:local
 mrsm sync pipelines daily -i sql:local --parents
 ```
 
-`show pipelines` reads saved state. `analyze pipelines` resolves members and configured traversal,
+`show pipelines` uses a column-based overview of registered definitions, explicit member Pipes,
+and latest run status. It reads saved state without traversing dependencies. Select one name
+(`show pipelines daily`) for its identity, revision, traversal settings, and exact member references.
+Use `show pipelines --nopretty` for saved definitions and run status as JSON. Neither view syncs
+data or applies tags.
+
+`analyze pipelines` resolves members and configured traversal,
 reports missing references and shared membership, and previews tagging explicit and detected
 traversal Pipes with `pipeline-daily`. Approve its proposal to edit tags, or pass `--yes` to
 approve the displayed proposal in a batch command. Without approval, analysis changes nothing.
 Saving, planning, ordinary syncing and opening the console never silently tag Pipes or register
 suggested connected components. Tags are indexes; the Pipeline registration owns membership.
 
-Use `bootstrap pipelines` for guided creation, `edit pipelines` to change the definition,
+Use `bootstrap pipelines` for guided creation, `edit pipelines [NAME ...]` to edit YAML definitions,
 `copy pipelines daily daily-copy` to reference the same members under a new identity, and
 `delete pipelines daily` to remove a definition while preserving member registrations and data.
-Scheduled Jobs referencing a Pipeline must be removed or reassigned before deletion.
+Bare `delete pipelines` selects all definitions and asks for confirmation. Unknown names warn and
+are skipped; an explicitly named selection with no valid names fails. Ctrl+C aborts a confirmation
+and returns to the shell. Scheduled Jobs referencing a Pipeline must be removed or reassigned
+before deletion.
 
 `drop pipelines` drops the explicit members' tables and `clear pipelines` clears their data
 using the normal bounds. Both preview exact instances and shared membership before confirmation;
@@ -3076,7 +3085,9 @@ mrsm sync pipeline daily-totals -i sql:main
 mrsm sync pipeline daily-totals -i sql:main --schedule 'every 5 minutes' -d -n daily-sync
 ```
 
-On the Pipelines page, select a saved pipeline and open **Manage pipeline** to create a
+On the Pipelines page, **Workspace** contains the graph and editor; **Runs** contains history,
+actual execution time and a scrollable stages table. Phone layouts provide **Graph**, **Pipe details**
+and **Output** workspace panes. Select a saved pipeline and open **Tools → Manage pipeline** to create a
 Job with its own name, interval, workers, retries, and rebuild permission. A Job reads the
 pipeline's current membership each time it runs. Several Jobs may use the same pipeline
 with different schedules or options. The same panel shows their status and start/stop
@@ -3350,7 +3361,12 @@ The engine emits one typed event per transition, and everything you see is drawn
 
 ## Running a Pipeline in the console
 
-Open `/dash/pipelines` and select a registered Pipeline or click its named boundary. Shared Pipes
+Open `/dash/pipelines` and select a registered Pipeline. **Workspace** contains the editable graph;
+**Runs** contains execution history, the selected timeline and its horizontally scrollable stages table.
+The two views keep their state when switched. On phones, **Graph**, **Pipe details** and **Output**
+switch between workspace panes; selecting a node opens its details. **Tools** groups analysis and
+registration controls, while **Find pipes**, **Pipeline members** and **View options** reveal less frequent
+actions. You may also select a Pipeline by clicking its named boundary. Shared Pipes
 may appear in several groups. Select a Pipe to open its inspector immediately; Query, Data / Plan,
 Dependencies, Recent syncs and Parameters load independently. **Resolve symlinks** changes displayed
 SQL in the selected Pipe's instance context, preserving the stored definition.
@@ -3359,13 +3375,15 @@ SQL in the selected Pipe's instance context, preserving the stored definition.
 the page. Drag the background to pan without selecting page text; zoom, Fit and Center selected
 provide keyboard-accessible controls. Search and status filters highlight matching Pipes, and
 Collapse groups provides an overview. Ctrl/Cmd/Shift-click selects several cards. Alt-drag a Pipe
-to arrange it, then **Save shared layout** in **Edit Pipeline draft / add Pipe** persists coordinates with revision checks. Zoom and pan
+to arrange it, then **Save layout** in the canvas toolbar persists coordinates with revision checks. Zoom and pan
 remain personal to the browser session.
 
-Right-click a Pipe or use its inspector to **Sync this Pipe**, include parents, or include children.
-Inspector bounds apply to that operation. These controls launch one execution through the same
+Right-click a Pipe or use its inspector to **Sync this Pipe**. **Sync options** chooses parent or
+child traversal and optional bounds for that operation. These controls launch one execution through the same
 authenticated server endpoint; they do not run the entire registered Pipeline implicitly.
-The output dock keeps tabs for completed single-Pipe executions. Expanded scopes use exact
+The canvas output drawer opens from each node’s output icon and keeps completed single-Pipe executions.
+It opens at full size, renders ANSI colors, and follows new output until you scroll upward.
+Close it with the button on the right. **Cancel sync** appears only for a running or paused execution. Expanded scopes use exact
 run/Pipe engine event identities rather than assigning interleaved stdout by matching text.
 Arbitrary plugin stdout from a concurrent Pipeline run remains in **Pipeline command output**;
 per-Pipe panes provide structured events and results. Run an individual Pipe for its dedicated
@@ -3373,13 +3391,11 @@ stdout stream.
 **Run now** executes the saved Pipeline and follows its allocated run ID. History remains
 separate from editable current state.
 
-**Edit Pipeline draft / add Pipe** manages explicit membership. Find existing Pipes on an explicit
-instance, or register a new Pipe and add it to the draft. Registration is an explicit separate
-mutation. Draft membership and traversal edits support Undo, Redo, Discard and Save. The inspector's
-**Edit shared Pipe** tab stages explicit dependencies and raw SQL changes. These change shared Pipe
-facts in every Pipeline using that Pipe. Inferred edges are changed by editing their SQL references.
-The editor validates the proposed dependency graph before writing and checks shared Pipe baselines
-and Pipeline revisions; cross-instance failures report individual results.
+**Pipeline members** manages explicit membership. Choose a configured instance from the dropdown
+and select existing Pipes, or open the separate new-Pipe registration form. Draft membership and
+traversal edits support Undo, Redo, Discard and Save. Use **Open Pipe editor** in the inspector to
+change shared Pipe parameters. The inspector’s section selector loads Query, Data / Plan,
+Dependencies, Recent syncs and Parameters independently.
 
 **Analyze** detects traversal members, shared Pipes and proposed `pipeline-{name}` tag changes.
 Review the proposal, then explicitly **Apply proposed tags**. Stale proposals require analysis and
@@ -3389,7 +3405,10 @@ The canvas's **Plan** describes dependency order, readiness, actions and bounds 
 The **Actual execution timeline** uses observed starts and finishes, extends live running bars and
 shows overlap and elapsed time. It omits forecast bars and the image-download control. Engine
 estimates may use prior durations or a 30-second default; these are scheduling hints, not deadlines.
-The Runs table and Sync activity retain their run/Pipe filters. **Manage pipeline** also creates
+In **Runs**, **Filters** and **Sync activity** reveal run/Pipe filters and recorded events.
+A stopped execution worker cannot always persist its final engine event; retained Job metadata
+reconciles unfinished runs to their actual stop time, including after reloading the page.
+**Tools → Manage pipeline** also creates
 ordinary scheduled Jobs with their own execution settings.
 
 ## 🖥️ In the terminal
@@ -3497,6 +3516,15 @@ A bound (`begin`, `end`, `from`, `to`) is `{"Datetime": "2024-01-01T00:00:00Z"}`
 **Errors.** If the callback raises an `Exception`, the run is **not** stopped: the exception is reported once with `warnings.warn` (including its traceback), the callback receives no further events, the run result carries it as `run.callback_error`, and `run.warnings` gets a line about it. A `KeyboardInterrupt` (raised in the callback, or CTRL-C while the run waits) **cancels** the run: in-flight node syncs are dropped as if the process had crashed (the engine's write ordering keeps every table and cursor consistent, and the next run picks up where it stopped), and the `KeyboardInterrupt` propagates.
 
 `run.events()` (and `Pipeline.get_events(run_id)`) still read a run's *persisted* events back from the instance after the fact, at the granularity of `system.engine.events`; those rows are shaped `{ts, run_id, seq, pipe_ref, event, payload}`.
+
+
+After selecting a saved Pipeline, **Run now** opens its command output directly in the
+canvas. **View output** reopens that execution's retained logs after closing the drawer.
+Use node output icons for individual Pipe executions and **Runs** for historical timelines.
+
+**Manage**, beside the Pipeline selector, contains definition and schedule controls.
+Deleting a Pipeline asks you to confirm its name and registry. Member Pipes, their data,
+and execution history are kept; remove referencing scheduled Jobs before deleting a definition.
 
 
 ---
@@ -9587,7 +9615,7 @@ edition = "2024"
 crate-type = ["cdylib"]
 
 [dependencies]
-meerschaum-plugin = "=5.0.0-rc.6"   # prerelease versions require an exact prerelease requirement
+meerschaum-plugin = "=5.0.0-rc.7"   # prerelease versions require an exact prerelease requirement
 
 [profile.release]
 panic = "unwind"      # required: the SDK catches panics at the boundary
@@ -10728,7 +10756,7 @@ Everything below is deliberate, and each item links to the section with the deta
 
 - **DuckDB uses an optional Python driver or a native library.** In Python, install `meerschaum[sql-duckdb]` and leave `MRSM_DUCKDB_LIB` unset so Pipe operations and SQLAlchemy share one driver. The standalone binary and base-only Python installs use DuckDB's own shared library, `libduckdb` (v1.5.6, MIT, published by the DuckDB project; Meerschaum does not redistribute it). When no cached or system library is available, the first native connection downloads the release asset for your platform (about 41 MB) into `MRSM_ROOT_DIR/drivers/duckdb/<version>/`, after checking it against a SHA-256 pinned in Meerschaum. Later native runs reuse it. `mrsm install driver duckdb` does the download on purpose (`--force` repeats it), `mrsm uninstall driver duckdb` removes it, and `mrsm show drivers` reports each driver's version, source (`env`, `cache`, `system` or `missing`) and path. **Behind a TLS-intercepting proxy** the download trusts the operating system's certificate store as well as its bundled roots, and honors `HTTPS_PROXY`; if it still cannot reach GitHub, run `mrsm install driver duckdb` on a machine that can and copy the library. **Air-gapped hosts:** copy a DuckDB library (v1.4 or newer) there and set `MRSM_DUCKDB_LIB` to its path, or put it on the system library path; `MRSM_NO_AUTO_INSTALL=1` forbids the implicit download and a missing library then fails with a message naming both fixes. In Docker, `--build-arg duckdb_driver=1` bakes it into the image's root. On Linux the library needs the C++ runtime (`libstdc++`), which both Docker images ship. Native Pipe sessions run in UTC (the official build bundles ICU, whose default is the host's zone), aware timestamp parameters keep their instant, and nested, interval and enum values read as the text DuckDB prints.
 - **No Python at all** is an option: `cargo install meerschaum --locked` (Rust 1.95 or newer) or a release binary runs without an interpreter as long as no Python plugin, custom Python connector, API plugin or Dash plugin is used. Point `MRSM_PYTHON` at an interpreter when you add one.
-- **Windows limits.** The Python API host is reached over loopback TCP with a per-start token on Windows (a Unix socket elsewhere), so `@api_plugin` routes, the Dash console and plugin pages work. Background jobs (`-d`) are still refused, so the console's Exec box and Manage menu (which run actions as jobs) report the refusal. Run those in Docker or WSL.
+- **Windows limits.** The Python API host is reached over loopback TCP with a per-start token on Windows (a Unix socket elsewhere), so `@api_plugin` routes, the Dash console and plugin pages work. Background jobs (`-d`), including Pipe management and Pipeline workers, are still refused; run those in Docker or WSL. Dashboard Exec submits into the existing terminal and does not require a background job.
 - **Removed:** `pyoxidizer` builds and the standalone "portable" archive. `pip install meerschaum` and the standalone binary (`cargo install meerschaum`, release archives) replace them.
 
 ## ⚙️ Configuration
@@ -11014,8 +11042,8 @@ Checklist:
 1. **Install `meerschaum[dash]`** wherever the server runs (and `[api]`, which it includes). Without Dash importable the host logs one warning and `/dash` shows the pointer page; plugin Dash pages are not served.
 2. **Packages you declared stay yours.** `meerschaum[dash]` installs `dash`, `dash-bootstrap-components`, `dash-ace`, `dash-extensions` and `a2wsgi`. It does not install `dash-daq`, `Flask-Compress`, `terminado` or `tornado` any more (the terminal is the Rust server's): declare `dash-daq` in your plugin's `required` if you use it.
 3. **`session-store` and logins work as in v4.** Callbacks that wrote `session-store` to log a user in should still call `meerschaum.api.dash.sessions.set_session`, which the console and the Rust web terminal both read.
-4. **Pages for the Rust terminal and Execute.** The dashboard's Exec box, a pipe card's Manage menu and "Follow logs" run through the server (`POST /execute`, then `GET /logs/<job>/stream`) instead of v4's websocket. A plugin that reused the v4 websocket callbacks must follow the new route. The console never runs an action itself: with no server to call, or when the server refuses, it shows the server's message. `POST /execute` lets administrators run what `/actions` allowed; any other user (when `api:permissions:actions:non_admin` is true, the default; `start api --secure` turns it off) runs only what the console offers, with a `403` naming what is refused (`GET /execute/policy` lists it).
-5. **Windows.** The host answers over loopback TCP with a per-start token, so the console and plugin pages load. Exec needs background jobs, which Windows still refuses.
+4. **Terminal Exec and background execution.** Dashboard Exec validates the command with the server (`POST /execute/validate`) and submits it once into the existing terminal iframe. Its output stays in that terminal. The shell confirms an empty prompt before submission, including with tmux and after refreshing the iframe. If a persisted tmux shell predates this readiness update, open a new terminal window once. Finish, erase, or cancel unfinished terminal input before submitting; reconnecting never replays a command automatically. Pipe management, Pipeline runs and "Follow logs" use background execution (`POST /execute`, then `GET /logs/<job>/stream`). Plugins that reused the former background-output websocket should use those routes. The server enforces action permissions and returns a `403` naming a refused action (`GET /execute/policy` lists the policy).
+5. **Windows.** The host answers over loopback TCP with a per-start token, so the console and plugin pages load. Dashboard Exec uses the terminal; background workers still require Docker or WSL.
 
 ### Option B: the page contract (recommended for new pages)
 
@@ -11593,6 +11621,20 @@ Source: https://meerschaum.io/news/changelog/
 ## 5.0.0 Releases
 
 Meerschaum 5 is a rewrite of the core in Rust: the data kernel, the `sql:` / `valkey:` / `api:` connectors, the Syncing Engine, jobs, compose, the HTTP API, the MCP server and the `mrsm` CLI and shell. The `meerschaum` Python package stays as the plugin SDK, a façade and the host of the Plotly Dash web console, so pipes, parameters, configuration, compose files, jobs, the HTTP API and the Python public API keep working. Read the [migration guide](/reference/migrating-to-v5/) before upgrading; v4.1.x stays installable and receives security fixes until 5.1.0.
+
+### v5.0.0rc7
+
+- **Make the Pipeline canvas the main workspace.**  
+  Full-width controls, node output icons and syncing spinners, readable Pipe details and plans, and expanded ANSI output keep inspection and execution on the canvas. Run now opens its command output immediately; View output reopens it. History links retain the requested run, and Runs provides a shared timeline with local selection and no drag-to-zoom or download controls.
+
+- **Simplify Pipeline management and discovery.**  
+  Instance dropdowns and a draft membership editor reduce setup friction. Manage sits beside the selector, with confirmed deletion that preserves member Pipes and data. Pipeline cards load history lazily in one column, and their Manage actions use the web terminal. Runs cards use two columns and share the console's exclusive content/terminal switching.
+
+- **Restore CLI and web terminal behavior.**  
+  Pipe card actions execute in the existing terminal. Shell syncs show progress, elapsed time, and spinners; Ctrl+C aborts prompts. Pipeline editing uses YAML, bulk lifecycle actions mirror Pipes, and unknown names warn and skip. Compact Pipeline grids show saved membership without traversing dependencies; analyze performs discovery explicitly. Pipeline representations include non-default instances.
+
+- **Reconcile canceled executions and include interactive Docker tools.**  
+  Stopped workers clear stale node spinners and cancel controls. Logs follow new output while respecting manual scrolling. Full Docker images include PostgreSQL clients and pgcli; Docker images provide Vim for editing. Opening the page no longer creates singleton Pipeline registrations automatically; existing definitions remain intact.
 
 ### v5.0.0rc6
 

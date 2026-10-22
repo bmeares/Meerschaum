@@ -32,17 +32,26 @@ mrsm plan pipelines daily -i sql:local
 mrsm sync pipelines daily -i sql:local --parents
 ```
 
-`show pipelines` reads saved state. `analyze pipelines` resolves members and configured traversal,
+`show pipelines` uses a column-based overview of registered definitions, explicit member Pipes,
+and latest run status. It reads saved state without traversing dependencies. Select one name
+(`show pipelines daily`) for its identity, revision, traversal settings, and exact member references.
+Use `show pipelines --nopretty` for saved definitions and run status as JSON. Neither view syncs
+data or applies tags.
+
+`analyze pipelines` resolves members and configured traversal,
 reports missing references and shared membership, and previews tagging explicit and detected
 traversal Pipes with `pipeline-daily`. Approve its proposal to edit tags, or pass `--yes` to
 approve the displayed proposal in a batch command. Without approval, analysis changes nothing.
 Saving, planning, ordinary syncing and opening the console never silently tag Pipes or register
 suggested connected components. Tags are indexes; the Pipeline registration owns membership.
 
-Use `bootstrap pipelines` for guided creation, `edit pipelines` to change the definition,
+Use `bootstrap pipelines` for guided creation, `edit pipelines [NAME ...]` to edit YAML definitions,
 `copy pipelines daily daily-copy` to reference the same members under a new identity, and
 `delete pipelines daily` to remove a definition while preserving member registrations and data.
-Scheduled Jobs referencing a Pipeline must be removed or reassigned before deletion.
+Bare `delete pipelines` selects all definitions and asks for confirmation. Unknown names warn and
+are skipped; an explicitly named selection with no valid names fails. Ctrl+C aborts a confirmation
+and returns to the shell. Scheduled Jobs referencing a Pipeline must be removed or reassigned
+before deletion.
 
 `drop pipelines` drops the explicit members' tables and `clear pipelines` clears their data
 using the normal bounds. Both preview exact instances and shared membership before confirmation;
@@ -369,7 +378,9 @@ mrsm sync pipeline daily-totals -i sql:main
 mrsm sync pipeline daily-totals -i sql:main --schedule 'every 5 minutes' -d -n daily-sync
 ```
 
-On the Pipelines page, select a saved pipeline and open **Manage pipeline** to create a
+On the Pipelines page, **Workspace** contains the graph and editor; **Runs** contains history,
+actual execution time and a scrollable stages table. Phone layouts provide **Graph**, **Pipe details**
+and **Output** workspace panes. Select a saved pipeline and open **Tools → Manage pipeline** to create a
 Job with its own name, interval, workers, retries, and rebuild permission. A Job reads the
 pipeline's current membership each time it runs. Several Jobs may use the same pipeline
 with different schedules or options. The same panel shows their status and start/stop

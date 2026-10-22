@@ -45,7 +45,7 @@
     sessions.add(session);
 
     const send = (frame, userInput = true) => {
-      if (userInput && frame[0] === 'stdin') session.lineDirty = true;
+      if (userInput && frame[0] === 'stdin') session.markInput();
       const socket = session.socket;
       if (socket && socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(frame));
     };
@@ -66,20 +66,41 @@
     term.onResize(sendSize);
     session.idle = false;
     session.lineDirty = false;
+    session.inputGeneration = 0;
+    session.markInput = () => { session.lineDirty = true; session.inputGeneration += 1; };
     session.requests = new Map();
+    session.pendingExecutions = new Set();
+    session.probes = new Map();
+    session.probeCounter = 0;
+    session.queryState = () => new Promise((resolve) => {
+      if (!session.socket || session.socket.readyState !== WebSocket.OPEN) { resolve(null); return; }
+      const id = String(++session.probeCounter), generation = session.inputGeneration;
+      const timer = setTimeout(() => { session.probes.delete(id); resolve(null); }, 2000);
+      session.probes.set(id, (state) => {
+        clearTimeout(timer);
+        if (generation !== session.inputGeneration) { resolve(null); return; }
+        if (state) { session.idle = !!state.idle; session.lineDirty = !state.empty; }
+        resolve(state);
+      });
+      send(['shell_state', id], false);
+    });
+    const scheduleState = () => {
+      clearTimeout(session.stateTimer);
+      session.stateTimer = setTimeout(() => session.queryState(), 75);
+    };
     term.parser.registerOscHandler(133, (data) => {
-      if (data === 'A') { session.idle = true; session.lineDirty = false; }
-      if (data === 'C') session.idle = false;
+      // Presentation markers are not readiness: tmux consumes them, and a reconnect
+      // may repaint an existing prompt without replaying its original marker.
       return true;
     });
     // This pinned xterm bundle distinguishes real input from automatic terminal replies.
     // onData alone includes reedline's cursor-position/device queries at an idle prompt.
     const core = term._core && term._core.coreService;
     const userInput = core && typeof core.onUserInput === 'function'
-      ? core.onUserInput(() => { session.lineDirty = true; }) : null;
+      ? core.onUserInput(() => session.markInput()) : null;
     term.onData((data) => {
       const terminalReply = /^(?:\x1b\[[?>]?[\d;]+[Rcn])+$/.test(data);
-      if (!userInput && !terminalReply) session.lineDirty = true;
+      if (!userInput && !terminalReply) session.markInput();
       send(['stdin', data], false);
     });
 
@@ -97,11 +118,20 @@
       socket.onmessage = (event) => {
         let message;
         try { message = JSON.parse(event.data); } catch (_) { return; }
-        if (message[0] === 'stdout') term.write(message[1]);
+        if (message[0] === 'stdout') { term.write(message[1]); scheduleState(); }
+        else if (message[0] === 'setup') scheduleState();
+        else if (message[0] === 'shell_state') {
+          const probe = session.probes.get(message[1]);
+          session.probes.delete(message[1]);
+          if (probe) probe(message[2]);
+        }
         else if (message[0] === 'disconnect') term.write('\r\n\r\n[CLOSED]\r\n');
       };
       socket.onclose = (event) => {
         if (session.disposed || session.socket !== socket) return;
+        session.idle = false;
+        for (const probe of session.probes.values()) probe(null);
+        session.probes.clear();
         // An unclean close (the server went away) reconnects; the shell ending or the
         // server refusing the session (clean closes) does not.
         if (!event.wasClean && event.code !== 1005) {
@@ -115,6 +145,9 @@
     session.dispose = () => {
       session.disposed = true;
       clearTimeout(session.timer);
+      clearTimeout(session.stateTimer);
+      for (const probe of session.probes.values()) probe(null);
+      session.probes.clear();
       const socket = session.socket;
       if (socket) {
         socket.onopen = socket.onmessage = socket.onclose = socket.onerror = null;
@@ -230,22 +263,28 @@
     if (!session) return;
     if (event.data.action === '__EXEC') {
       const id = event.data.request_id;
-      let result = session.requests.get(id);
-      if (!result) {
+      const previous = session.requests.get(id);
+      if (previous) { event.source.postMessage(previous, event.origin); return; }
+      if (session.pendingExecutions.has(id)) return;
+      session.pendingExecutions.add(id);
+      const generation = session.inputGeneration;
+      session.queryState().then((state) => {
         const connected = session.socket && session.socket.readyState === WebSocket.OPEN;
         const valid = typeof event.data.command === 'string' && !/[\x00-\x1f]/.test(event.data.command);
-        const accepted = connected && session.idle && !session.lineDirty && valid;
-        result = {action: '__EXEC_ACK', request_id: id, accepted,
+        const accepted = !!(connected && state?.idle && state?.empty && generation === session.inputGeneration && valid);
+        const result = {action: '__EXEC_ACK', request_id: id, accepted,
           message: !connected ? 'Terminal is disconnected. Reconnect and submit again.' :
+            !state ? 'Terminal readiness is unavailable. Open a new terminal window and submit again.' :
             !accepted ? 'Terminal is busy or has unfinished input. Finish it before submitting.' : ''};
         session.requests.set(id, result);
+        session.pendingExecutions.delete(id);
         if (accepted) {
           session.idle = false;
           session.send(['stdin', event.data.command + '\r']);
           session.term.focus();
         }
-      }
-      event.source.postMessage(result, event.origin);
+        event.source.postMessage(result, event.origin);
+      });
     }
     else if (event.data.action === '__SEND_KEY') session.send(['stdin', event.data.key || '']);
     // The console's "+" button: a new tmux window running `mrsm` (v4's `__TMUX_NEW_WINDOW`).

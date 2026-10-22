@@ -40,6 +40,7 @@ HIDING_TRIGGERS = (
     'get-pipes-button',
     'get-jobs-button',
     'get-pipelines-button',
+    'get-runs-button',
     'show-webterm-button',
     'get-plugins-button',
     'get-users-button',
@@ -194,7 +195,7 @@ def start_exec(
     if sysargs is None:
         return _failure(message)
 
-    if trigger_id == 'go-button':
+    if trigger_id == 'go-button' or is_manage or trigger_id == 'manage-confirm-button':
         try:
             allowed = _execute.execution_request('/execute/validate', username, method='POST',
                                                  body={'sysargs': sysargs})
@@ -392,6 +393,8 @@ dash_app.clientside_callback(
         window._mrsmExecSubmitted = store.request_id;
         const frame = document.getElementById('webterm-iframe');
         if (!frame) return 'Terminal is unavailable. Open Term and try again.';
+        dash_clientside.set_props('content-div-right', {style: {display: 'none'}});
+        dash_clientside.set_props('webterm-div', {style: {display: 'block'}});
         const request = store.request_id;
         function receive(event) {
             if (event.origin !== location.origin || event.source !== frame.contentWindow) return;

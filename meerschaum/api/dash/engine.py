@@ -291,6 +291,42 @@ def run_belongs_to_pipeline(run: Dict[str, Any], name: str, definition=None) -> 
     return bool(re.fullmatch(re.escape(name) + r'-\d{4}-\d\d-\d\dT\d\d-\d\d-\d\d\.\d{6}Z-[a-f0-9]{8}', run_id))
 
 
+def stopped_execution_times(instance):
+    """Correlate unfinished engine records with stopped local execution workers.
+
+    A killed worker cannot persist run_finished. Its retained Job identity provides the
+    actual stop time, including after a page reload. Never infer completion from a missing Job.
+    """
+    from meerschaum.jobs import get_jobs
+    ended = {}
+    for job in get_jobs(executor_keys='local', include_hidden=True, combine_local_and_systemd=False).values():
+        try:
+            metadata = job.daemon.properties.get('mrsm_execution') or {}
+            run_id = metadata.get('run_id')
+            args = job.sysargs
+            registry = args[args.index('-i') + 1] if '-i' in args else str(get_instance())
+            if run_id and registry == str(instance) and job.status == 'stopped' and job.ended:
+                finished = job.ended
+                ended[run_id] = finished.replace(tzinfo=finished.tzinfo or timezone.utc).isoformat()
+        except Exception:
+            continue
+    return ended
+
+
+def reconcile_stopped_run(summary, ended):
+    """Use a known worker termination time without changing successful or failed runs."""
+    if summary.get('status') != 'running' or not ended:
+        return False
+    summary['status'] = 'stopped'
+    summary['run']['finished'] = ended
+    start, finish = _parse_ts(summary['run'].get('started')), _parse_ts(ended)
+    if start and finish:
+        start = start.replace(tzinfo=start.tzinfo or timezone.utc)
+        finish = finish.replace(tzinfo=finish.tzinfo or timezone.utc)
+        summary['duration_seconds'] = max(0, (finish-start).total_seconds())
+    return True
+
+
 def get_runs(
     instance: Any = None,
     run_id: Optional[str] = None,
@@ -314,7 +350,12 @@ def get_runs(
         request['run_id'] = run_id
     if pipe:
         request['pipe'] = pipe.strip()
-    return _call('engine_runs', request)
+    runs = _call('engine_runs', request)
+    if any(run.get('status') == 'running' for run in runs):
+        ended = stopped_execution_times(instance)
+        for run in runs:
+            reconcile_stopped_run(run, ended.get(run['run']['run_id']))
+    return runs
 
 
 def get_run_detail(instance: Any, run_id: str) -> Optional[Dict[str, Any]]:
@@ -324,7 +365,16 @@ def get_run_detail(instance: Any, run_id: str) -> Optional[Dict[str, Any]]:
     instance = instance if instance is not None else get_instance()
     request = _request(instance)
     request['run_id'] = run_id
-    return _call('engine_run_detail', request)
+    detail = _call('engine_run_detail', request)
+    if detail and (detail.get('summary') or {}).get('status') == 'running':
+        ended = stopped_execution_times(instance).get(run_id)
+        if reconcile_stopped_run(detail['summary'], ended):
+            for bar in detail.get('bars', []):
+                if bar.get('status') in ('running', 'pending'):
+                    bar['status'] = 'stopped'
+                    if bar.get('actual_start') and not bar.get('actual_end'):
+                        bar['actual_end'] = ended
+    return detail
 
 
 def get_run_events(instance: Any, run_id: str, after_seq: Optional[int] = None) -> List[Dict[str, Any]]:
@@ -369,6 +419,7 @@ def gantt_figure(detail: Dict[str, Any]) -> Dict[str, Any]:
                 continue
             colors.append(color if planned else {
                 'running': '#3486bd', 'succeeded': '#2e9e5b', 'failed': '#d1495b',
+                'stopped': '#9aa5b1', 'cancelled': '#9aa5b1',
                 'upstream_failed': '#d1495b', 'skipped': '#9aa5b1',
                 'rebuild_pending': '#e0a526',
             }.get(status, color))
@@ -392,11 +443,12 @@ def gantt_figure(detail: Dict[str, Any]) -> Dict[str, Any]:
         'data': traces,
         'layout': {
             'title': {'text': f"Run {run_id}"},
-            'xaxis': {'type': 'date'},
+            'dragmode': False,
+            'xaxis': {'type': 'date', 'fixedrange': True},
             'margin': {'l': 30, 'r': 30, 't': 60, 'b': 60},
             'barmode': 'group',
             'uirevision': run_id,
-            'yaxis': {'autorange': 'reversed', 'automargin': True,
+            'yaxis': {'fixedrange': True, 'autorange': 'reversed', 'automargin': True,
                       'categoryorder': 'array',
                       'categoryarray': [ref_label(bar['pipe_ref']) for bar in detail.get('bars', [])]},
             'height': max(260, 120 + 60 * len({t for t in traces[0]['y']} if traces else [])),

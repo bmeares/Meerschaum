@@ -244,6 +244,44 @@ def test_exec_runs_once_in_existing_terminal(webterm_server, context):
     page.close()
 
 
+def test_exec_preserves_input_typed_while_readiness_is_in_flight(webterm_server, context):
+    from tests.console.test_webterm import _open_terminal, _rows
+    from tests.console.conftest import Tab
+    page = context.new_page()
+    tab = Tab(page, webterm_server.base_url)
+    tab.login()
+    frame = _open_terminal(page, webterm_server.base_url, '/dash')
+    frame.wait_for_function('window.terminal.session.idle && !window.terminal.session.lineDirty')
+    frame.evaluate("""() => {
+        const socket = terminal.socket, original = socket.onmessage;
+        window._heldReadiness = [];
+        socket.onmessage = event => {
+            if (JSON.parse(event.data)[0] === 'shell_state') window._heldReadiness.push(event);
+            else original.call(socket, event);
+        };
+        window._releaseReadiness = () => {
+            socket.onmessage = original;
+            for (const event of window._heldReadiness) original.call(socket, event);
+        };
+    }""")
+    page.evaluate("document.getElementById('webterm-iframe').contentWindow.postMessage({action:'__EXEC', request_id:'input-race', command:'show version'}, location.origin)")
+    frame.wait_for_function("terminal.session.pendingExecutions.has('input-race') && window._heldReadiness.length > 0")
+    frame.evaluate("terminal.term.input('retained-input'); window._releaseReadiness()")
+    frame.wait_for_function("terminal.session.requests.has('input-race')")
+    assert frame.evaluate("terminal.session.requests.get('input-race').accepted") is False
+    frame.wait_for_function("document.querySelector('.xterm-rows').innerText.includes('retained-input')")
+    assert 'retained-input' in _rows(frame)
+    frame.evaluate("terminal.term.input('\\x15')")
+    frame.wait_for_function('terminal.session.idle && !terminal.session.lineDirty')
+    snapshots = list(webterm_server.root.rglob('shell-state/*.json'))
+    assert snapshots, 'The shell did not publish readiness.'
+    frame.evaluate("terminal.term.input('exit\\r')")
+    frame.wait_for_function("document.querySelector('.xterm-rows').innerText.includes('[CLOSED]')")
+    assert all(not path.exists() for path in snapshots), 'Exited shell retained stale readiness.'
+    assert _errors(tab) == [], _errors(tab)
+    page.close()
+
+
 def test_exec_refuses_what_the_dashboard_does_not_offer(server, tab):
     tab.login()
     tab.page.click('#go-button')
@@ -283,18 +321,29 @@ assert success, msg
     assert _errors(tab) == [], _errors(tab)
 
 
-def test_manage_menu_syncs_a_pipe_and_confirms_destructive_actions(server, tab):
+def test_manage_menu_syncs_a_pipe_and_confirms_destructive_actions(webterm_server, context):
+    from tests.console.test_webterm import _open_terminal, _wait_for_text
+    server = webterm_server
+    tab = Tab(context.new_page(), server.base_url)
     result = server.python(SETUP_PIPES)
     assert result.returncode == 0, result.stderr[-2000:]
     tab.login()
+    frame = _open_terminal(tab.page, server.base_url, '/dash')
+    frame.wait_for_function('window.terminal.session.idle === true')
     tab.page.click('#get-pipes-button')
     tab.page.wait_for_selector('.card-title:has-text("w7parent")')
     card = tab.page.locator('.card:has(.card-title:has-text("w7parent"))').first
     card.locator('.dropdown-toggle:has-text("Manage")').click()
     tab.page.click('.dropdown-menu.show .dropdown-item:text-is("Sync")')
-    tab.page.wait_for_selector('#exec-div', state='visible')
-    _wait_text(tab.page, '#exec-view', 'w7parent', timeout=60000)
+    _wait_for_text(frame, 'w7parent')
+    frame.wait_for_function('window.terminal.session.idle === true')
+    assert tab.page.locator('#webterm-div').is_visible()
+    assert not tab.page.locator('#exec-div').is_visible()
 
+    assert not tab.page.locator('#content-div-right').is_visible()
+    tab.page.click('#get-pipes-button')
+    card.wait_for(state='visible')
+    assert not tab.page.locator('#webterm-div').is_visible()
     ### Clear asks first: cancel leaves the data alone.
     before_rows = server.python(ROWCOUNT).stdout.strip()
     assert before_rows.isdigit() and int(before_rows) >= 2, before_rows
@@ -768,6 +817,8 @@ def test_pipelines_page_graph_gantt_and_runs(server, tab):
     assert tab.page.locator('#pipeline-inspector a', has_text='Open pipe').count() == 1
     tab.page.locator('#pipeline-fit').click()
     assert tab.page.locator('#pipeline-canvas svg path').count() == 2
+    ### Runs are a separate mounted view, with the latest execution beneath the list.
+    tab.page.locator('#pipeline-view-runs').click()
     ### The Gantt chart of the latest run, and its nodes.
     tab.page.wait_for_selector('#pipelines-gantt .barlayer .point', timeout=60000)
     assert tab.page.locator('#pipelines-gantt .barlayer .point').count() >= 2
@@ -777,6 +828,7 @@ def test_pipelines_page_graph_gantt_and_runs(server, tab):
     ### The runs table and the run's events.
     assert tab.page.locator('#pipelines-runs-table tbody tr').count() >= 1
     assert 'succeeded' in tab.page.inner_text('#pipelines-runs-table tbody tr')
+    tab.page.locator('.pipeline-activity > summary').click()
     _wait_text(tab.page, '#pipelines-events-pre', 'run_started', timeout=30000)
     events = tab.page.inner_text('#pipelines-events-pre')
     assert 'w7parent' in events and 'w7child' in events
@@ -826,3 +878,42 @@ def test_without_the_terminal_the_dashboard_shows_the_banner(server, tab):
     tab.goto('/dash/webterm', '#go-button')
     assert tab.page.locator('#webterm-iframe').count() == 0
     assert _errors(tab) == [], _errors(tab)
+
+
+def test_pipeline_cards_lazy_manage_terminal_and_runs_stay_in_console(webterm_server, context):
+    from tests.console.test_webterm import _open_terminal, _wait_for_text
+    server = webterm_server
+    setup = server.python(SETUP_PIPES + "\nfrom meerschaum.core.Pipeline._saved import save_pipeline\nsave_pipeline('console-list', ['sql:w7console|sql:w7console|w7parent|None', 'sql:w7console|sql:w7console|w7child|None'], 'sql:w7console')\n")
+    assert setup.returncode == 0, setup.stderr[-2000:]
+    automatic = server.mrsm('show', 'version', '-d', '--name', 'execute-console-run', '--yes', '--nopretty')
+    assert automatic.returncode == 0, automatic.stderr[-2000:]
+    metadata = server.python("from meerschaum.jobs import Job; j=Job('execute-console-run', executor_keys='local'); d=j.daemon; p=dict(d.properties); p['mrsm_execution']={'kind':'temporary_execution'}; p['mrsm_owner']='alice'; d.properties=p; assert d.write_properties()[0]")
+    assert metadata.returncode == 0, metadata.stderr[-2000:]
+    tab = Tab(context.new_page(), server.base_url)
+    tab.login()
+    frame = _open_terminal(tab.page, server.base_url, '/dash')
+    frame.wait_for_function('window.terminal.session.idle === true')
+    tab.page.click('#get-pipelines-button')
+    card = tab.page.locator('.card:has(.card-header code:text-is("Pipeline(\'console-list\')"))').first
+    card.wait_for()
+    assert card.locator('table').count() == 0
+    card.locator('.accordion-button').click()
+    _wait_text(tab.page, '[id*="pipeline-card-details"]', 'No runs match')
+    card.locator('.dropdown-toggle:has-text("Manage")').click()
+    card.locator('.dropdown-item:text-is("Sync")').click()
+    _wait_for_text(frame, 'console-list')
+    frame.wait_for_function('window.terminal.session.idle === true')
+    assert tab.page.locator('#webterm-div').is_visible()
+    assert not tab.page.locator('#exec-div').is_visible()
+    assert not tab.page.locator('#content-div-right').is_visible()
+    tab.page.click('#get-pipelines-button')
+    card.wait_for(state='visible')
+    assert not tab.page.locator('#webterm-div').is_visible()
+    original_url = tab.page.url
+    tab.page.locator('#get-items-menu .dropdown-toggle').click()
+    tab.page.locator('#get-runs-button').click()
+    _wait_text(tab.page, '#content-div-right', 'execute-console-run')
+    assert tab.page.locator('#content-div-right .col-lg-6').count() >= 2
+    assert tab.page.url == original_url
+    assert _errors(tab) == [], _errors(tab)
+    tab.page.close()

@@ -27,26 +27,30 @@ def toggle_management(clicks, opened):
 
 @dash_app.callback(
     Output('pipeline-saved-name', 'options'),
+    Output('pipeline-saved-name', 'value'),
     Output('pipeline-definition', 'data'),
     Output('pipeline-name-input', 'value'),
     Input('pipelines-location', 'pathname'), Input('pipeline-saved-name', 'value'),
     Input('pipelines-location', 'search'),
     Input('pipelines-refresh-button', 'n_clicks'), State('session-store', 'data'),
-    State('pipeline-definition', 'data'),
+    State('pipeline-definition', 'data'), State('pipeline-saved-name', 'options'),
 )
-def read_selection(pathname, name, search, refresh, session, current=None):
+def read_selection(pathname, name, search, refresh, session, current=None, current_options=None):
     if not str(pathname).startswith('/dash/pipelines'):
         raise PreventUpdate
     _require_session(session)
     query = parse_qs((search or '').lstrip('?'))
     instance = engine.get_instance(query.get('instance', [None])[0])
-    if dash.ctx.triggered_id in ('pipelines-location', None):
-        requested = query.get('pipeline', [name])[0]
+    if current is None and dash.ctx.triggered_id in ('pipelines-location', None):
+        dash.set_props('pipeline-add-instance', {'value': str(instance)})
+    if (dash.ctx.triggered_id in ('pipelines-location', None)
+            or (current is None and not name and not current_options and query.get('pipeline'))):
+        requested = query.get('pipeline', [None])[0]
         if requested != name:
             name = requested
-            dash.set_props('pipeline-saved-name', {'value': name})
     definitions = list_pipelines(instance)
-    if dash.ctx.triggered_id == 'pipeline-saved-name':
+    if (dash.ctx.triggered_id == 'pipeline-saved-name'
+            and name != query.get('pipeline', [None])[0]):
         if name:
             query['pipeline'] = [name]
         else:
@@ -62,36 +66,77 @@ def read_selection(pathname, name, search, refresh, session, current=None):
         dash.set_props('pipeline-analysis', {'data': None})
         dash.set_props('pipeline-analysis-preview', {'children': []})
         dash.set_props('pipeline-apply-tags', {'disabled': True})
-    return ([{'label': key, 'value': key} for key in sorted(definitions)],
+    options = [{'label': key, 'value': key} for key in sorted(definitions)]
+    if name and name not in definitions:
+        options.append({'label': f'{name} (unavailable)', 'value': name})
+    return (options, name,
             dash.no_update if unchanged else definition,
             dash.no_update if unchanged else name or '')
 
 
 @dash_app.callback(
+    Output('pipeline-delete', 'disabled'),
+    Input('pipeline-definition', 'data'),
+)
+def disable_delete(definition):
+    return not bool(definition)
+
+
+@dash_app.callback(
+    Output('pipeline-delete-confirm', 'displayed'),
+    Output('pipeline-delete-confirm', 'message'),
+    Output('pipeline-delete-target', 'data'),
+    Input('pipeline-delete', 'n_clicks'),
+    State('pipeline-definition', 'data'), State('session-store', 'data'),
+    prevent_initial_call=True,
+)
+def confirm_delete(clicks, definition, session):
+    _require_session(session)
+    if not clicks or not definition:
+        raise PreventUpdate
+    return True, (
+        f"Delete Pipeline '{definition['name']}' on {definition['registry']}? "
+        "Member Pipes, their data, and execution history will be kept."
+    ), {key: definition.get(key) for key in ('name', 'registry', 'id', 'revision')}
+
+
+@dash_app.callback(
     Output('pipeline-manage-alert', 'children'),
-    Input('pipeline-save', 'n_clicks'), Input('pipeline-delete', 'n_clicks'),
+    Input('pipeline-save', 'n_clicks'), Input('pipeline-delete-confirm', 'submit_n_clicks'),
     Input('pipeline-draft-save', 'n_clicks'),
     State('pipeline-name-input', 'value'), State('pipeline-saved-name', 'value'),
     State('pipeline-draft', 'data'), State('pipeline-definition', 'data'), State('pipelines-location', 'search'), State('session-store', 'data'),
     State('pipeline-draft-members', 'value'), State('pipeline-draft-parents', 'value'),
-    State('pipeline-draft-children', 'value'),
+    State('pipeline-draft-children', 'value'), State('pipeline-delete-target', 'data'),
     prevent_initial_call=True,
 )
 def manage_selection(save_clicks, delete_clicks, draft_save, name, selected, draft, current, search, session,
-                     members=..., parents=..., children=...):
+                     members=..., parents=..., children=..., delete_target=None):
     _require_session(session)
     completed = []
     try:
         instance = engine.get_instance(parse_qs((search or '').lstrip('?')).get('instance', [None])[0])
         from meerschaum.core.Pipeline._saved import _mutation_lock, validate_name
         with _mutation_lock(instance):
-            validate_name(name or selected)
-            if dash.ctx.triggered_id == 'pipeline-delete':
+            validate_name(selected if dash.ctx.triggered_id == 'pipeline-delete-confirm' else name or selected)
+            if dash.ctx.triggered_id == 'pipeline-delete-confirm':
                 if not selected:
                     raise ValueError('Select a saved pipeline to delete.')
+                saved = list_pipelines(instance).get(selected) or {}
+                expected = {key: saved.get(key) for key in ('name', 'registry', 'id', 'revision')}
+                if not delete_target or delete_target != expected:
+                    raise ValueError('Pipeline selection changed. Review and confirm deletion again.')
                 result = delete_pipeline(selected, instance)
                 if result[0]:
+                    result = True, f"Deleted Pipeline '{selected}' on {instance}. Member Pipes, data, and history were kept."
                     dash.set_props('pipeline-saved-name', {'value': None})
+                    dash.set_props('pipeline-definition', {'data': None})
+                    dash.set_props('pipeline-selected-run', {'data': None})
+                    dash.set_props('pipeline-live-run', {'data': None})
+                    query = parse_qs((search or '').lstrip('?'))
+                    query.pop('pipeline', None)
+                    query.pop('run_id', None)
+                    dash.set_props('pipelines-location', {'search': '?' + urlencode(query, doseq=True) if query else ''})
             else:
                 if selected and name != selected:
                     from meerschaum.core.Pipeline._saved import rename_pipeline
@@ -132,6 +177,7 @@ def manage_selection(save_clicks, delete_clicks, draft_save, name, selected, dra
                 result = True, f"Saved pipeline '{name}' ({len(definition['targets'])} pipes). Run analyze pipelines to detect traversals and approve tagging untagged Pipes."
                 dash.set_props('pipeline-saved-name', {'value': name})
                 dash.set_props('pipeline-definition', {'data': definition})
+                dash.set_props('pipeline-draft-editor', {'open': False})
             dash.set_props('pipelines-refresh-button', {'n_clicks': __import__('time').time_ns()})
             return alert_from_success_tuple(result)
     except Exception as exc:
@@ -262,7 +308,7 @@ def select_or_run_pipeline(groups, run_clicks, name, search, session):
             raise ValueError('Pipeline registration is missing.')
         run_id = 'pipeline-' + uuid.uuid4().hex
         result = run_action(['sync', 'pipelines', name, '-i', str(instance),
-                             '--nopretty', '--run-id', run_id],
+                             '--run-id', run_id],
                             get_username_from_session((session or {}).get('session-id')),
                             metadata={'run_id': run_id, 'pipeline': {
                                 'name': name, 'registry': str(instance),
@@ -270,6 +316,7 @@ def select_or_run_pipeline(groups, run_clicks, name, search, session):
         if result['success']:
             query = parse_qs((search or '').lstrip('?'))
             query.pop('run_id', None)
+            dash.set_props('pipeline-selected-run', {'data': run_id})
             dash.set_props('pipelines-location', {'search': '?' + urlencode(query, doseq=True) if query else ''})
             dash.set_props('pipeline-live-run', {'data': {
                 'pipeline': name, 'registry': str(instance), 'pipeline_id': definition.get('id'),
@@ -278,27 +325,31 @@ def select_or_run_pipeline(groups, run_clicks, name, search, session):
                 'status': 'running',
             }})
             dash.set_props('pipelines-interval', {'interval': 2000})
-        return alert_from_success_tuple((result['success'], result['msg']))
+        return alert_from_success_tuple((result['success'],
+            f"Started Pipeline '{name}'. Output is shown on the canvas." if result['success'] else result['msg']))
     except Exception as exc:
         return alert_from_success_tuple((False, str(exc)))
 
 
 @dash_app.callback(
     Output('pipeline-summary', 'children'),
-    Input('pipeline-definition', 'data'),
+    Input('pipeline-definition', 'data'), Input('pipeline-live-run', 'data'),
+    Input('pipeline-saved-name', 'value'),
 )
-def pipeline_summary(definition):
+def pipeline_summary(definition, live_run=None, selected=None):
     if not definition:
-        return html.P('Select a pipeline’s name to inspect and run it.', className='text-muted')
-    return dbc.Card(dbc.CardBody([
-        html.H4(definition['name']),
-        html.P(f"{len(definition.get('targets', []))} member pipes"),
+        return html.P(f"Pipeline '{selected}' is unavailable on the selected instance. Choose another Pipeline."
+                      if selected else 'Select a pipeline’s name to inspect and run it.', className='text-muted')
+    return html.Div([
+        html.Span(definition['name'], className='visually-hidden'),
+        html.Span(f"{len(definition.get('targets', []))} member " + ('pipe' if len(definition.get('targets', [])) == 1 else 'pipes')),
         dbc.Button('Run now', id='pipeline-run-now', n_clicks=0, size='sm', class_name='me-2'),
-        dbc.Button('Cancel active run', id='pipeline-cancel-current', n_clicks=0, size='sm', color='danger', outline=True),
+        dbc.Button('View output', id='pipeline-view-output', size='sm', color='secondary', disabled=not bool(live_run and live_run.get('pipeline_id') == definition.get('id')), class_name='me-2'),
+        dbc.Button('Cancel active run', id='pipeline-cancel-current', n_clicks=0, size='sm', color='danger', outline=True, style={'display': '' if live_run and live_run.get('status') == 'running' and live_run.get('pipeline_id') == definition.get('id') else 'none'}),
         html.Details([html.Summary('Member pipes'), html.Ul([
             html.Li(html.Code(engine.ref_label(ref))) for ref in definition.get('targets', [])
         ])]),
-    ]), class_name='mb-3')
+    ], className='pipeline-selection-summary')
 
 
 dash_app.clientside_callback(
@@ -320,20 +371,25 @@ dash_app.clientside_callback(
             if (window._mrsmPipelineSource) window._mrsmPipelineSource.close();
             window._mrsmPipelineSource = null;
             window._mrsmPipelineJob = null;
+            window._mrsmPipelineRun = null;
+            if (document.getElementById('pipeline-output-dock')?.dataset.outputMode === 'pipeline') window.mrsmClosePipelineOutput?.();
             const output = document.getElementById('pipeline-command-output');
             if (output) output.textContent = '';
             return dash_clientside.no_update;
         }
+        window._mrsmPipelineRun = store;
+        const label = document.getElementById('pipeline-command-label');
+        if (label) label.textContent = `Pipeline('${store.pipeline}') · ${store.run_id} · ${store.status === 'stopped' ? 'execution finished' : store.status}`;
         if (window._mrsmPipelineSource && window._mrsmPipelineJob === store.job)
             return dash_clientside.no_update;
         if (window._mrsmPipelineSource) window._mrsmPipelineSource.close();
         window._mrsmPipelineJob = store.job;
-        document.getElementById('pipeline-output-dock')?.classList.remove('pipeline-output-empty');
+        window.mrsmShowPipelineOutput?.(store);
         const source = new EventSource(store.stream);
         window._mrsmPipelineSource = source;
         let current = {...store}, lines = [];
         const initial = document.getElementById('pipeline-command-output');
-        if (initial) initial.textContent = '';
+        if (initial) { initial.textContent = ''; initial._mrsmText = null; initial._mrsmFollow = true; }
         function visible() { return window._mrsmPipelineSource === source; }
         source.onmessage = function(e) {
             if (!visible()) return;
@@ -343,15 +399,15 @@ dash_app.clientside_callback(
             const view = document.getElementById('pipeline-command-output');
             if (view) {
                 const follow = view.scrollHeight - view.scrollTop - view.clientHeight < 40;
-                view.textContent = lines.join('\\n');
-                if (follow) view.scrollTop = view.scrollHeight;
+                if (window.mrsmRenderPipelineOutput) window.mrsmRenderPipelineOutput(view, lines.join('\\n'));
+                else { view.textContent = lines.join('\\n'); if (follow) view.scrollTop = view.scrollHeight; }
             }
 
         };
         source.addEventListener('stopped', function() {
             source.close();
             if (!visible()) return;
-            current = {...current, status: 'stopped'};
+            current = {...current, status: 'stopped', ended: new Date().toISOString()};
             dash_clientside.set_props('pipeline-live-run', {data: current});
         });
         source.onerror = function() {
@@ -417,14 +473,16 @@ def analyze_selection(analyze, apply, name, proposal, search, session):
     Output('pipeline-draft', 'data'),
     Output('pipeline-draft-members', 'value'),
     Output('pipeline-draft-parents', 'value'), Output('pipeline-draft-children', 'value'),
+    Output('pipeline-draft-members', 'options'),
     Output('pipeline-draft-notice', 'children'),
     Input('pipeline-definition', 'data'), Input('pipeline-draft-members', 'value'),
     Input('pipeline-draft-parents', 'value'), Input('pipeline-draft-children', 'value'),
     Input('pipeline-draft-discard', 'n_clicks'), Input('pipeline-draft-undo', 'n_clicks'),
     Input('pipeline-draft-redo', 'n_clicks'), Input('pipeline-context', 'data'),
+    Input('pipeline-member-options', 'data'),
     State('pipeline-draft', 'data'), State('session-store', 'data'), prevent_initial_call=True,
 )
-def edit_draft(definition, members, parents, children, discard, undo, redo, context, draft, session):
+def edit_draft(definition, members, parents, children, discard, undo, redo, context, available, draft, session):
     _require_session(session)
     from copy import deepcopy
     trigger = dash.ctx.triggered_id
@@ -437,7 +495,14 @@ def edit_draft(definition, members, parents, children, discard, undo, redo, cont
     else:
         state = deepcopy(draft)
         old = snapshot(state)
-        if trigger == 'pipeline-draft-undo' and state.get('undo'):
+        if trigger == 'pipeline-member-options':
+            ref = (available or {}).get('add')
+            if ref and ref not in state['targets']:
+                state.setdefault('undo', []).append(old)
+                state['undo'] = state['undo'][-50:]
+                state['redo'] = []
+                state['targets'] = state['targets'] + [ref]
+        elif trigger == 'pipeline-draft-undo' and state.get('undo'):
             state.setdefault('redo', []).append(old)
             state.update(state['undo'].pop())
         elif trigger == 'pipeline-draft-redo' and state.get('redo'):
@@ -465,30 +530,35 @@ def edit_draft(definition, members, parents, children, discard, undo, redo, cont
     dirty = snapshot(state) != baseline
     state['active'] = bool(definition) or dirty
     state['definition_id'] = (definition or {}).get('id', (definition or {}).get('name'))
-    return (state, state['targets'], bool(state['parents']), bool(state['children']),
+    # Options and values must hydrate atomically. Retain unavailable members too.
+    options = {row['value']: row for row in (available or {}).get('options', [])}
+    for ref in state['targets']:
+        options.setdefault(ref, {'label': engine.ref_label(ref), 'value': ref})
+    return (state if state != draft else dash.no_update,
+            state['targets'], bool(state['parents']), bool(state['children']), list(options.values()),
             'Unsaved membership changes. Use Save pipeline to apply.' if dirty else 'Draft matches saved membership.')
 
 
 @dash_app.callback(
-    Output('pipeline-draft-members', 'options'), Output('pipeline-add-alert', 'children'),
-    Input('pipeline-focus-options', 'data'), Input('pipeline-add-find', 'n_clicks'),
+    Output('pipeline-member-options', 'data'), Output('pipeline-add-alert', 'children'),
+    Input('pipeline-add-find', 'n_clicks'),
     Input('pipeline-add-register', 'n_clicks'),
-    State('pipeline-add-instance', 'value'), State('pipeline-add-connector', 'value'),
+    Input('pipeline-add-instance', 'value'), State('pipeline-add-connector', 'value'),
     State('pipeline-add-metric', 'value'), State('pipeline-add-location', 'value'),
-    State('pipeline-add-parameters', 'value'), State('pipeline-draft-members', 'options'),
-    State('pipeline-draft-members', 'value'), State('session-store', 'data'),
+    State('pipeline-add-parameters', 'value'), State('pipeline-member-options', 'data'),
+    State('session-store', 'data'),
 )
-def add_draft_pipe(visible, find, register, instance, connector, metric, location, parameters,
-                   existing, members, session):
+def add_draft_pipe(find, register, instance, connector, metric, location, parameters,
+                   existing, session):
     _require_session(session)
     import json
     import meerschaum as mrsm
-    options = {row['value']: row for row in (existing or []) + (visible or [])}
+    options = {row['value']: row for row in (existing or {}).get('options', [])}
+    added = None
     try:
         trigger = dash.ctx.triggered_id
-        if trigger in ('pipeline-add-find', 'pipeline-add-register'):
-            if not instance:
-                raise ValueError('Choose the target instance explicitly.')
+        if trigger in ('pipeline-add-find', 'pipeline-add-register', 'pipeline-add-instance', None):
+            instance = instance or str(engine.get_instance())
             if trigger == 'pipeline-add-register':
                 if not connector or not metric:
                     raise ValueError('Connector and metric keys are required.')
@@ -503,15 +573,15 @@ def add_draft_pipe(visible, find, register, instance, connector, metric, locatio
                     raise ValueError(result[1])
                 ref = '|'.join((str(pipe.instance_keys), connector, metric, location or 'None'))
                 options[ref] = {'label': ref, 'value': ref}
-                dash.set_props('pipeline-draft-members', {'value': list(dict.fromkeys((members or []) + [ref]))})
+                added = ref
             else:
                 for pipe in engine._instance_pipes(engine.get_instance(instance)):
                     ref = '|'.join((str(pipe.instance_keys), pipe.connector_keys,
                                     pipe.metric_key, pipe.location_key or 'None'))
                     options[ref] = {'label': ref, 'value': ref}
-        return list(options.values()), []
+        return {'options': list(options.values()), 'add': added}, []
     except Exception as exc:
-        return list(options.values()), alert_from_success_tuple((False, str(exc)))
+        return {'options': list(options.values())}, alert_from_success_tuple((False, str(exc)))
 
 
 @dash_app.callback(

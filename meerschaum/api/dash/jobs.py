@@ -362,3 +362,19 @@ def build_process_timestamps_children(job: Job) -> List[dbc.Row]:
             )
         )
     return children
+
+
+def get_run_cards(state):
+    """Automatic execution workers and retained summaries in the Web Console."""
+    session_id = (state.get('session-store.data') or {}).get('session-id')
+    authenticated = is_session_authenticated(session_id)
+    jobs = get_jobs(executor_keys='local', combine_local_and_systemd=True)
+    cards = [build_job_card(job, authenticated=authenticated, include_follow=False)
+             for job in jobs.values()
+             if is_automatic_job(job) and job_visible_to_session(job, session_id)]
+    if authenticated:
+        from meerschaum.api.dash.execute import execution_request
+        from meerschaum.api.dash.sessions import get_username_from_session
+        records = execution_request('/execute/runs', get_username_from_session(session_id)) or []
+        cards.extend(build_archived_run_card(record) for record in records)
+    return cards, []

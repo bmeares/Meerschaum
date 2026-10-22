@@ -150,8 +150,15 @@ impl WebtermConfig {
         state: &AppState,
         sessions: Arc<dyn SessionLookup>,
         page: PageRenderer,
-        shell: ShellCommand,
+        mut shell: ShellCommand,
     ) -> WebtermConfig {
+        let state_dir = state.config.webterm_resources_path.join("shell-state");
+        if create_private_dir(&state_dir).is_ok() {
+            shell.env.push((
+                "MRSM_WEBTERM_STATE_DIR".into(),
+                state_dir.to_string_lossy().into_owned(),
+            ));
+        }
         let tmux =
             (state.config.webterm_tmux_enabled && tmux_available("tmux", &shell.env)).then(|| {
                 TmuxSettings {
@@ -378,6 +385,7 @@ async fn run(config: WebtermConfig, term_name: String, mut socket: WebSocket) {
     };
     let _guard = guard;
     let Pty {
+        process_id,
         master,
         input,
         mut output,
@@ -448,6 +456,15 @@ async fn run(config: WebtermConfig, term_name: String, mut socket: WebSocket) {
                                 .await;
                             }
                         }
+                        Some(ClientMessage::ShellState(request)) => {
+                            let (config, session) = (config.clone(), tmux_session.clone());
+                            let snapshot = tokio::task::spawn_blocking(move || {
+                                shell_state(&config, session.as_deref(), process_id)
+                            }).await.ok().flatten();
+                            if tx.send(text(json!(["shell_state", request, snapshot]))).await.is_err() {
+                                break;
+                            }
+                        }
                         None => {}
                     }
                 }
@@ -485,6 +502,7 @@ enum ClientMessage {
     Stdin(String),
     SetSize(PtySize),
     NewWindow,
+    ShellState(String),
 }
 
 /// Decode terminado's JSON arrays; anything else is ignored, as terminado does.
@@ -508,6 +526,10 @@ fn parse_client_message(raw: &str) -> Option<ClientMessage> {
             }))
         }
         "new_window" => Some(ClientMessage::NewWindow),
+        "shell_state" => {
+            let request = items.get(1)?.as_str()?;
+            (request.len() <= 128).then(|| ClientMessage::ShellState(request.to_string()))
+        }
         _ => None,
     }
 }
@@ -581,6 +603,7 @@ impl Utf8Stream {
 
 /// A running PTY: output arrives on `output`, input goes through `input`.
 struct Pty {
+    process_id: Option<u32>,
     master: Box<dyn MasterPty + Send>,
     input: std::sync::mpsc::SyncSender<Vec<u8>>,
     output: mpsc::Receiver<Vec<u8>>,
@@ -604,6 +627,7 @@ fn spawn_pty(builder: CommandBuilder) -> std::io::Result<Pty> {
         .openpty(PtySize::default())
         .map_err(pty_error)?;
     let mut child = pair.slave.spawn_command(builder).map_err(pty_error)?;
+    let process_id = child.process_id();
     // The child holds the slave end now; ours must close for EOF to reach the reader.
     drop(pair.slave);
     let killer = KillOnDrop(child.clone_killer());
@@ -643,11 +667,68 @@ fn spawn_pty(builder: CommandBuilder) -> std::io::Result<Pty> {
         let _ = exited_rx.recv_timeout(Duration::from_secs(5));
     });
     Ok(Pty {
+        process_id,
         master: pair.master,
         input,
         output,
         killer,
     })
+}
+
+/// Read the selected shell's buffer status; tmux itself never forwards OSC 133 reliably.
+/// The target is this authenticated terminal's own session, never a process-table scan.
+fn shell_state(
+    config: &WebtermConfig,
+    session: Option<&str>,
+    process_id: Option<u32>,
+) -> Option<Value> {
+    let dir = config
+        .shell
+        .env
+        .iter()
+        .find(|(key, _)| key == "MRSM_WEBTERM_STATE_DIR")?
+        .1
+        .clone();
+    let pid = if let (Some(tmux), Some(session)) = (&config.tmux, session) {
+        let output = std::process::Command::new(&tmux.binary)
+            .args(["display-message", "-p", "-t", session, "#{pane_pid}"])
+            .envs(config.shell.env.iter().map(|(k, v)| (k, v)))
+            .env_remove("TMUX")
+            .env_remove("TMUX_PANE")
+            .output()
+            .ok()?;
+        if !output.status.success() {
+            return None;
+        }
+        String::from_utf8(output.stdout)
+            .ok()?
+            .trim()
+            .parse::<u32>()
+            .ok()?
+    } else {
+        process_id?
+    };
+    read_shell_state(Path::new(&dir), pid)
+}
+
+fn read_shell_state(dir: &Path, pid: u32) -> Option<Value> {
+    let path = dir.join(format!("{pid}.json"));
+    let snapshot: Value = serde_json::from_slice(&std::fs::read(path).ok()?).ok()?;
+    if snapshot.get("pid")?.as_u64()? != u64::from(pid) {
+        return None;
+    }
+    // A crashed shell's old file must never authorize a reused PID.
+    #[cfg(target_os = "linux")]
+    {
+        let process = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+        let start = process.rsplit_once(") ")?.1.split_whitespace().nth(19)?;
+        if snapshot.get("start")?.as_str()? != start {
+            return None;
+        }
+    }
+    Some(
+        json!({"idle": snapshot.get("idle")?.as_bool()?, "empty": snapshot.get("empty")?.as_bool()?}),
+    )
 }
 
 /// The tmux session name for a terminal: tmux rejects `.` and `:` in names.
@@ -857,6 +938,49 @@ mod tests {
     #[test]
     fn tmux_session_names_avoid_reserved_characters() {
         assert_eq!(tmux_session_name("a.b:c", "_mrsm"), "a_b_c_mrsm");
+    }
+
+    #[test]
+    fn readiness_uses_the_exact_live_process_and_actual_buffer_state() {
+        let dir = tempfile::tempdir().unwrap();
+        let pid = std::process::id();
+        let path = dir.path().join(format!("{pid}.json"));
+        assert!(read_shell_state(dir.path(), pid).is_none());
+        let start = std::fs::read_to_string("/proc/self/stat")
+            .ok()
+            .and_then(|text| {
+                text.rsplit_once(") ")
+                    .and_then(|(_, fields)| fields.split_whitespace().nth(19))
+                    .map(str::to_string)
+            })
+            .unwrap_or_default();
+        let mut state = json!({"pid": pid, "start": start, "idle": true, "empty": false});
+        std::fs::write(&path, state.to_string()).unwrap();
+        assert_eq!(
+            read_shell_state(dir.path(), pid),
+            Some(json!({"idle": true, "empty": false}))
+        );
+        state["empty"] = json!(true);
+        std::fs::write(&path, state.to_string()).unwrap();
+        assert_eq!(
+            read_shell_state(dir.path(), pid),
+            Some(json!({"idle": true, "empty": true}))
+        );
+        state["idle"] = json!(false);
+        std::fs::write(&path, state.to_string()).unwrap();
+        assert_eq!(read_shell_state(dir.path(), pid).unwrap()["idle"], false);
+        state["pid"] = json!(pid + 1);
+        std::fs::write(&path, state.to_string()).unwrap();
+        assert!(read_shell_state(dir.path(), pid).is_none());
+        #[cfg(target_os = "linux")]
+        {
+            state["pid"] = json!(pid);
+            state["start"] = json!("stale-process");
+            std::fs::write(&path, state.to_string()).unwrap();
+            assert!(read_shell_state(dir.path(), pid).is_none());
+        }
+        std::fs::remove_file(&path).unwrap();
+        assert!(read_shell_state(dir.path(), pid).is_none());
     }
 
     #[test]

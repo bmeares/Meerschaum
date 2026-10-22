@@ -354,6 +354,29 @@ pub fn plugin_import_end() {
 }
 
 static SPAWN_HOOK: std::sync::OnceLock<fn()> = std::sync::OnceLock::new();
+static OUTPUT_HOOK: std::sync::OnceLock<fn(bool, &[u8])> = std::sync::OnceLock::new();
+
+/// Forward non-quiet worker output through a host writer. The boolean selects stderr.
+/// Install before spawning workers. Interactive shells use this to clear live progress before
+/// writing worker bytes and resume it only after a complete line.
+pub fn set_output_hook(hook: fn(bool, &[u8])) {
+    let _ = OUTPUT_HOOK.set(hook);
+}
+
+async fn forward_output(
+    mut reader: impl tokio::io::AsyncRead + Unpin,
+    stderr: bool,
+    hook: fn(bool, &[u8]),
+) {
+    use tokio::io::AsyncReadExt;
+    let mut buffer = [0u8; 8192];
+    loop {
+        match reader.read(&mut buffer).await {
+            Ok(0) | Err(_) => break,
+            Ok(count) => hook(stderr, &buffer[..count]),
+        }
+    }
+}
 
 /// Register a function that runs just before every non-quiet worker starts (once per process;
 /// later calls are ignored). A worker's output goes straight to the inherited terminal, so the
@@ -510,6 +533,7 @@ impl Worker {
             preflight(opts).await?;
         }
         if !opts.quiet
+            && OUTPUT_HOOK.get().is_none()
             && let Some(hook) = SPAWN_HOOK.get()
         {
             hook();
@@ -539,6 +563,9 @@ impl Worker {
             .kill_on_drop(true);
         if opts.quiet {
             cmd.stdout(Stdio::null()).stderr(Stdio::null());
+        } else if OUTPUT_HOOK.get().is_some() {
+            cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
+            cmd.env("PYTHONUNBUFFERED", "1");
         }
         for k in &opts.env_remove {
             cmd.env_remove(k);
@@ -558,6 +585,14 @@ impl Worker {
         let mut child = cmd
             .spawn()
             .map_err(|e| WorkerError::Spawn(format!("{}: {e}", opts.python.display())))?;
+        if let Some(&hook) = OUTPUT_HOOK.get() {
+            if let Some(stdout) = child.stdout.take() {
+                tokio::spawn(forward_output(stdout, false, hook));
+            }
+            if let Some(stderr) = child.stderr.take() {
+                tokio::spawn(forward_output(stderr, true, hook));
+            }
+        }
 
         // One deadline for the connection and the `hello` together.
         let deadline = tokio::time::Instant::now() + opts.startup_timeout;

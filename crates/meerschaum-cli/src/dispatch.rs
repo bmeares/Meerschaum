@@ -169,6 +169,13 @@ impl Host for SystemHost {
     }
 
     fn read_line(&mut self, prompt: &str) -> Option<String> {
+        if std::io::IsTerminal::is_terminal(&std::io::stdin()) {
+            let answer = crate::native::terminal::read_prefilled(prompt, "");
+            if crate::native::terminal::take_interrupt() {
+                std::panic::resume_unwind(Box::new(crate::shell::interrupt::Interrupted));
+            }
+            return answer;
+        }
         print!("{prompt}");
         let _ = std::io::stdout().flush();
         let mut line = String::new();
