@@ -672,7 +672,44 @@ fn unknown_action_help_matches_python() {
         rt.format = Some(test_settings());
         dispatch::main(&["foo".to_string(), "--help".to_string()], &mut rt);
     }
-    assert_eq!(String::from_utf8(buf).unwrap(), expected);
+    let actual = String::from_utf8(buf).unwrap();
+    // Additive v5 actions change the table's column widths and row count. Keep the v4
+    // fixture immutable, and compare its vocabulary plus the explicitly approved additions.
+    let words = |text: &str| {
+        let mut words: Vec<String> = text.split_whitespace().map(str::to_owned).collect();
+        words.sort();
+        words
+    };
+    let mut expected_words = words(&expected);
+    expected_words.extend(
+        meerschaum_cli::actions::V5_ONLY_ACTIONS
+            .iter()
+            .map(|s| (*s).to_owned()),
+    );
+    expected_words.sort();
+    // At 80 columns the larger table abbreviates a few labels. Each abbreviation must
+    // identify exactly one expected action; missing or duplicate actions still fail.
+    let mut actual_words = words(&actual);
+    for word in &mut actual_words {
+        if let Some(prefix) = word.strip_suffix('…') {
+            let matches: Vec<_> = expected_words
+                .iter()
+                .filter(|candidate| candidate.starts_with(prefix))
+                .collect();
+            assert_eq!(matches.len(), 1, "ambiguous or unknown action {word}");
+            *word = matches[0].clone();
+        }
+    }
+    actual_words.sort();
+    assert_eq!(actual_words, expected_words);
+    let mut listed = Vec::new();
+    {
+        let mut rt = Runtime::new(ctx(&fixture), 80, &mut listed, |_| None);
+        rt.config = Some(test_config(tmp.path()));
+        rt.format = Some(test_settings());
+        dispatch::main(&["show".to_string(), "actions".to_string()], &mut rt);
+    }
+    assert_eq!(actual, String::from_utf8(listed).unwrap());
 }
 
 #[test]

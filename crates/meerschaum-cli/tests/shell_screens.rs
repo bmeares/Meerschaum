@@ -19,6 +19,9 @@
 //!    (the status icon is counted as one column but is two wide). prompt_toolkit draws the icon
 //!    half off the edge; v5 clips it, so the icon and the cells after column 97 are not compared
 //!    in `no_ansi`.
+//! 5. **Additive v5 actions.** Five menu/help scenarios use explicit row overlays from
+//!    `fixtures/shell_screens_v5_actions.json` for the changed vocabulary and resulting
+//!    geometry. All other cells still compare against the unchanged v4 recording.
 //!
 //! The harness emulates pyte's resize (shrinking deletes lines at the top and keeps the cursor
 //! row) so both shells are measured against the same terminal model.
@@ -507,6 +510,28 @@ fn compare(name: &str, label: &str, v4: &Snapshot, v5: &Snapshot, searching: boo
     diffs
 }
 
+/// Apply reviewed v5 menu/help differences without changing or ignoring the v4 recording.
+fn with_v5_actions(name: &str, label: &str, mut expected: Snapshot) -> Snapshot {
+    let overlays: Json =
+        serde_json::from_str(include_str!("fixtures/shell_screens_v5_actions.json")).unwrap();
+    let Some(overlay) = overlays[name][label].as_object() else {
+        return expected;
+    };
+    assert!(matches!(
+        name,
+        "ctrl_c" | "menu_scroll" | "long_output" | "menu_subactions" | "menu_space"
+    ));
+    for (row, replacement) in overlay["rows"].as_object().unwrap() {
+        let row: usize = row.parse().unwrap();
+        expected.lines[row] = replacement["line"].as_str().unwrap().to_owned();
+        expected.styles[row] = serde_json::from_value(replacement["styles"].clone()).unwrap();
+    }
+    if let Some(cursor) = overlay.get("cursor") {
+        expected.cursor = serde_json::from_value(cursor.clone()).unwrap();
+    }
+    expected
+}
+
 fn check(name: &str) {
     let fx = fixture();
     let scenario = fx["scenarios"]
@@ -529,7 +554,8 @@ fn check(name: &str) {
         if step["send"] == "\u{12}" {
             searching = true;
         }
-        let diffs = compare(name, label, &fixture_snapshot(v4), v5, searching);
+        let expected = with_v5_actions(name, label, fixture_snapshot(v4));
+        let diffs = compare(name, label, &expected, v5, searching);
         if step["send"] == "\r" {
             searching = false;
         }
@@ -548,6 +574,40 @@ fn check(name: &str) {
         }
     }
     assert!(failures.is_empty(), "{name}:\n{}", failures.join("\n"));
+}
+
+/// The immutable v4 script tabs through only 24 subactions. Exercise the full v5 list too,
+/// so the additive-action overlays cannot silently remove wrap / reverse-wrap coverage.
+#[test]
+fn additive_actions_menu_wraps() {
+    let fx = fixture();
+    let mut scenario = fx["scenarios"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["name"] == "menu_scroll")
+        .unwrap()
+        .clone();
+    let additions = meerschaum_cli::actions::V5_ONLY_SUBACTIONS
+        .iter()
+        .filter(|(action, _)| *action == "show")
+        .count();
+    let old_keys = scenario["steps"][3]["send"].as_str().unwrap();
+    scenario["steps"][3]["send"] = Json::String(format!("{old_keys}{}", "\t".repeat(additions)));
+    let screens = run(&scenario, &fx["paths"]);
+    let prompt = |screen: &Snapshot| {
+        screen
+            .lines
+            .iter()
+            .find(|line| line.contains('➤'))
+            .unwrap()
+            .clone()
+    };
+    assert!(prompt(&screens[3]).ends_with("show version"));
+    assert_eq!(prompt(&screens[4]), prompt(&screens[1]));
+    assert_eq!(screens[4].cursor, screens[1].cursor);
+    assert_eq!(prompt(&screens[5]), prompt(&screens[3]));
+    assert_eq!(screens[5].cursor, screens[3].cursor);
 }
 
 macro_rules! scenarios {

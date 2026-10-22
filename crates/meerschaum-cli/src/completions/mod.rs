@@ -1054,8 +1054,11 @@ mod tests {
 
     #[test]
     fn flag_values_do_not_count_as_action_words() {
-        // `-i sql:main` and the switch are skipped: `pipes` is still the second word.
-        assert_eq!(texts(&run("mrsm show -i sql:main --yes pi")), ["pipes"]);
+        // `-i sql:main` and the switch are skipped: both `pi` subactions remain.
+        assert_eq!(
+            texts(&run("mrsm show -i sql:main --yes pi")),
+            ["pipelines", "pipes"]
+        );
         // A `+` starts the next action.
         assert_eq!(texts(&run("mrsm sync pipes + sh")), ["sh", "show"]);
         // An executor given earlier selects the job list.
@@ -1124,7 +1127,7 @@ mod tests {
         // A switch takes no value: the next word is positional again.
         assert_eq!(
             texts(&complete(&words("mrsm show --shout pi"), &d, &dates)),
-            ["pipes"]
+            ["pipelines", "pipes"]
         );
     }
 

@@ -187,6 +187,10 @@ The screen comparison is exact except for these, each applied only where named i
    status icon is counted as one column but is two wide); prompt_toolkit draws the icon half off
    the edge and v5 clips it, so the icon and the cells after column 97 are not compared in
    `no_ansi`.
+5. **Additive v5 actions.** The five affected menu/help scenarios (`ctrl_c`, `menu_scroll`,
+   `long_output`, `menu_subactions`, `menu_space`) apply reviewed text, style and cursor overrides
+   from `shell_screens_v5_actions.json`. These assert the visible v5 actions and menu geometry;
+   every other cell still compares to the unchanged v4 recording.
 
 The harness emulates pyte's resize (shrinking deletes lines at the top and keeps the cursor row) so
 both shells are measured against the same terminal model.

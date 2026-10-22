@@ -328,7 +328,7 @@ fn completion_candidates() {
             .collect()
     };
     assert_eq!(texts("syn"), vec!["sync"]);
-    assert_eq!(texts("show pi"), vec!["pipes"]);
+    assert_eq!(texts("show pi"), vec!["pipelines", "pipes"]);
     assert_eq!(texts("show pipes -i sql:l"), vec!["sql:local"]);
     assert!(texts("sync pipes --lo").contains(&"--loop".to_string()));
     assert_eq!(texts("show config sys"), vec!["system"]);
