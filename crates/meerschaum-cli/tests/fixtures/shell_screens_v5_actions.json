@@ -23,9 +23,12 @@
     },
     "enter": {
       "rows": {
-        "0": {"line": "[]", "styles": []},
-        "1": {"line": "Run analyze pipelines to discover traversal members and approve membership tags.", "styles": []}
-      }
+        "0": {"line": "No pipelines registered on sql:local.", "styles": []},
+        "1": {"line": "", "styles": []},
+        "2": {"line": " [ (no username)@sql:local ] ➤", "styles": [[0, 3, "green", "default", ""], [3, 16, "white", "default", ""], [16, 17, "green", "default", ""], [17, 26, "cyan", "default", ""], [26, 31, "green", "default", ""]]},
+        "3": {"line": "", "styles": []}
+      },
+      "cursor": [2, 31]
     }
   },
   "menu_space": {

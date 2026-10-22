@@ -677,8 +677,6 @@ pub(super) fn run_live(
     show_nodes: bool,
 ) -> meerschaum_engine::RunResult {
     use meerschaum_engine::EventKind;
-    use std::sync::mpsc;
-    use tokio::sync::broadcast::error::TryRecvError;
     let progress = if rt.in_shell {
         crate::format::progress::Progress::start_flags(rt, false, false, "Syncing Pipes")
     } else {
@@ -694,10 +692,6 @@ pub(super) fn run_live(
     );
     let counter = progress.counter();
     let mut events = engine.subscribe();
-    let (sender, receiver) = mpsc::channel();
-    session.spawn(async move {
-        let _ = sender.send(engine.run(opts).await);
-    });
     let line = |rt: &mut Runtime<'_>, event: meerschaum_engine::Event| {
         if let EventKind::RunStarted { nodes, .. } = &event.kind {
             progress.set_total(*nodes);
@@ -738,40 +732,33 @@ pub(super) fn run_live(
         };
         rt.print(&format!("{text}\n"));
     };
-    loop {
+    // Keep the run inside the cancellable future. Detaching it while waiting on a
+    // blocking receiver bypasses Session's Ctrl-C cleanup and can leave a sync running.
+    session.block_on(async {
+        let mut run = Box::pin(engine.run(opts));
+        let mut events_open = true;
         loop {
-            match events.try_recv() {
-                Ok(event) => {
+            tokio::select! {
+                result = &mut run => {
                     print_hook_results(rt, session);
-                    line(rt, event);
+                    while let Ok(event) = events.try_recv() {
+                        line(rt, event);
+                    }
+                    return result;
                 }
-                Err(TryRecvError::Lagged(_)) => continue,
-                Err(_) => break,
+                event = events.recv(), if events_open => {
+                    match event {
+                        Ok(event) => {
+                            print_hook_results(rt, session);
+                            line(rt, event);
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => events_open = false,
+                    }
+                }
             }
         }
-        match receiver.recv_timeout(std::time::Duration::from_millis(50)) {
-            Ok(result) => {
-                print_hook_results(rt, session);
-                while let Ok(event) = events.try_recv() {
-                    line(rt, event);
-                }
-                return result;
-            }
-            Err(mpsc::RecvTimeoutError::Timeout) => {}
-            Err(mpsc::RecvTimeoutError::Disconnected) => {
-                return meerschaum_engine::RunResult {
-                    success: false,
-                    message: "The engine run ended without a result.".into(),
-                    plan: None,
-                    record: None,
-                    outcomes: Vec::new(),
-                    critical_path: Vec::new(),
-                    warnings: Vec::new(),
-                    duration: std::time::Duration::ZERO,
-                };
-            }
-        }
-    }
+    })
 }
 
 /// Keep the engine's subscriptions alive and render its lap events on the CLI thread.

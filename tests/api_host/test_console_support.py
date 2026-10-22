@@ -548,7 +548,7 @@ page._engine.get_run_detail = lambda instance, id: {'summary': {'run': {'run_id'
 def render(search):
     return page.render_pipelines('/dash/pipelines', search,
         {'name': 'daily', 'targets': []}, {'pipeline': 'daily', 'run_id': ids[0]},
-        0, 0, {}, 'sql:apihosttest|test|old-stage|None', {'session-id': 'test'})
+        None, [], 0, 0, {}, 'sql:apihosttest|test|old-stage|None', {'session-id': 'test'})
 result = render('')
 assert result[-1]['run_id'] == ids[0]
 assert requests[-1]['run_id'] is None and requests[-1]['run_name'] == 'daily'
@@ -575,8 +575,8 @@ management.list_pipelines = lambda *args: {'daily': {'name':'daily','revision':1
 management.select_or_run_pipeline([], 1, 'daily', '', {'session-id': 'test'})
 assert len(calls) == 1
 args, kwargs = calls[0]
-assert args[0][:6] == ['sync', 'pipelines', 'daily', '-i', 'sql:apihosttest', '--nopretty']
-assert args[0][6] == '--run-id' and args[1] == 'testuser'
+assert args[0][:5] == ['sync', 'pipelines', 'daily', '-i', 'sql:apihosttest']
+assert args[0][5] == '--run-id' and args[1] == 'testuser'
 assert kwargs['metadata']['run_id'] == updates['pipeline-live-run']['data']['run_id']
 assert kwargs['metadata']['pipeline']['revision'] == 1
 assert updates['pipeline-live-run']['data']['pipeline'] == 'daily'
