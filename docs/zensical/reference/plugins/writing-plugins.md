@@ -1,5 +1,7 @@
 # ✍️ Writing Your Own Plugins
 
+For Rust data plugins, a single `.rs` file with `fetch()` or `sync()` is enough. See [Rust plugins](/reference/plugins/rust-plugins/) for typed Pipe arguments, bounds and host operations. The examples below use Python.
+
 > This tutorial explains how to extend Meerschaum with plugins. For general information, consult the [Types of Plugins reference page](/reference/plugins/types-of-plugins/).
 
 Meerschaum's plugin system is designed to be simple so you can get your plugins working quickly. Plugins are Python packages defined in the Meerschaum configuration `plugins` directory and are imported at startup under the global namespace `plugins`.

@@ -5,13 +5,16 @@
 //! See the crate README for ownership, threading and wire contracts.
 #![deny(unsafe_op_in_unsafe_fn)]
 pub mod abi;
+pub mod callbacks;
 pub mod discovery;
 pub mod host;
 pub mod registry;
 pub mod sdk;
 pub mod source;
 pub use arrow;
+pub use callbacks::{Bound, HostServices, Pipe};
 pub use host::{LoadedPlugin, NativeConnector};
+pub use meerschaum_core::SuccessTuple;
 pub use meerschaum_kernel::Frame;
 pub use registry::NativePlugins;
 pub use sdk::{Plugin, Reply, Request};
@@ -37,6 +40,16 @@ pub(crate) fn error(e: impl std::fmt::Display) -> Error {
 #[macro_export]
 macro_rules! export_plugin {
     ($plugin:ty) => {
+        #[unsafe(no_mangle)]
+        pub unsafe extern "C" fn mrsm_plugin_invoke_host_v1(
+            bytes: $crate::abi::Bytes,
+            input: *mut $crate::arrow::ffi_stream::FFI_ArrowArrayStream,
+            output: *mut $crate::arrow::ffi_stream::FFI_ArrowArrayStream,
+            host: *const $crate::abi::HostV1,
+        ) -> $crate::abi::CallResult {
+            // SAFETY: forwarded synchronous extension ABI contract.
+            unsafe { $crate::sdk::Export::<$plugin>::invoke_with_host(bytes, input, output, host) }
+        }
         #[unsafe(no_mangle)]
         pub extern "C" fn mrsm_plugin_v1() -> *const $crate::abi::MrsmPluginV1 {
             &$crate::sdk::Export::<$plugin>::VTABLE

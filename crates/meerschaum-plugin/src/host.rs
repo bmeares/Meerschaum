@@ -20,10 +20,21 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+thread_local! { static ACTIVE: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(Vec::new()) }; }
+struct ActiveCall;
+impl Drop for ActiveCall {
+    fn drop(&mut self) {
+        ACTIVE.with(|active| {
+            active.borrow_mut().pop();
+        });
+    }
+}
+
 pub struct LoadedPlugin {
     // Library must remain alive through all callbacks and imported Arrow buffers.
     _library: Library,
     table: &'static MrsmPluginV1,
+    invoke_host: Option<InvokeWithHost>,
     gate: Mutex<()>,
     pub name: String,
     pub version: String,
@@ -75,9 +86,14 @@ impl LoadedPlugin {
         if manifest["plugins"][&name]["name"] != name {
             return Err(error("manifest plugin name mismatch"));
         }
+        // Optional extension: old libraries continue to use the original v1 entry point.
+        let invoke_host = unsafe { library.get::<InvokeWithHost>(HOST_ENTRY_POINT) }
+            .ok()
+            .map(|symbol| *symbol);
         Ok(Arc::new(Self {
             _library: library,
             table,
+            invoke_host,
             gate: Mutex::new(()),
             name,
             version,
@@ -87,10 +103,35 @@ impl LoadedPlugin {
 
     /// Serialized call; JSON config and context are preserved, data travels only through Arrow.
     pub fn invoke(&self, request: &Request, data: Option<&Frame>) -> Result<Reply> {
-        let _guard = self
-            .gate
-            .lock()
-            .map_err(|_| error("plugin call lock poisoned"))?;
+        self.invoke_with_host(request, data, None)
+    }
+
+    /// Invoke with call-scoped host services when the library exports the optional extension.
+    pub fn invoke_with_host(
+        &self,
+        request: &Request,
+        data: Option<&Frame>,
+        host: Option<&dyn crate::HostServices>,
+    ) -> Result<Reply> {
+        let nested = ACTIVE.with(|active| !active.borrow().is_empty());
+        if ACTIVE.with(|active| active.borrow().contains(&self.name)) {
+            return Err(error(format!(
+                "recursive call into native plugin '{}'",
+                self.name
+            )));
+        }
+        // Nested calls must never wait for a plugin held by another host-call chain.
+        let _guard = if nested {
+            self.gate
+                .try_lock()
+                .map_err(|_| error("native plugin is busy during a host callback"))?
+        } else {
+            self.gate
+                .lock()
+                .map_err(|_| error("plugin call lock poisoned"))?
+        };
+        ACTIVE.with(|active| active.borrow_mut().push(self.name.clone()));
+        let _active = ActiveCall;
         let bytes = serde_json::to_vec(request).map_err(error)?;
         let mut input = data
             .map(sdk::stream)
@@ -99,8 +140,20 @@ impl LoadedPlugin {
         let mut output = FFI_ArrowArrayStream::empty();
         // SAFETY: table is validated and pinned; borrowed bytes and exclusive streams live
         // through the call. Remaining streams are released on success and all error paths.
-        let result =
-            unsafe { (self.table.invoke)(Bytes::borrowed(&bytes), &mut input, &mut output) };
+        let result = if let (Some(invoke), Some(services)) = (self.invoke_host, host) {
+            let mut context = crate::callbacks::HostContext { services, request };
+            let table = HostV1 {
+                abi_version: 1,
+                struct_size: std::mem::size_of::<HostV1>() as u32,
+                context: (&mut context as *mut crate::callbacks::HostContext<'_>).cast(),
+                invoke: crate::callbacks::invoke_host,
+                free_bytes: sdk::free_bytes,
+            };
+            // SAFETY: all callback state lives through this synchronous invocation.
+            unsafe { invoke(Bytes::borrowed(&bytes), &mut input, &mut output, &table) }
+        } else {
+            unsafe { (self.table.invoke)(Bytes::borrowed(&bytes), &mut input, &mut output) }
+        };
         // SAFETY: result belongs to this table and is consumed exactly once.
         let value = unsafe { decode(self.table, result) }?;
         Ok(Reply {
@@ -117,6 +170,7 @@ impl LoadedPlugin {
             label: self.name.clone(),
             config,
             fetch_kwargs: Value::Null,
+            host: None,
         }
     }
     pub fn connector(
@@ -137,6 +191,7 @@ impl LoadedPlugin {
             label: label.into(),
             config,
             fetch_kwargs: Value::Null,
+            host: None,
         })
     }
     /// A JSON-only call of an extension method (`routes`, `route`, `pages`, `page`, ...):
@@ -204,6 +259,12 @@ pub fn validate_manifest(manifest: &Value) -> Result<()> {
     validator.validate(manifest).map_err(error)
 }
 unsafe fn decode(table: &MrsmPluginV1, result: CallResult) -> Result<Value> {
+    unsafe { decode_with(table.free_bytes, result) }
+}
+pub(crate) unsafe fn decode_with(
+    free: unsafe extern "C" fn(OwnedBytes),
+    result: CallResult,
+) -> Result<Value> {
     let bytes = if result.payload.len == 0 {
         Vec::new()
     } else {
@@ -214,7 +275,7 @@ unsafe fn decode(table: &MrsmPluginV1, result: CallResult) -> Result<Value> {
         unsafe { std::slice::from_raw_parts(result.payload.ptr, result.payload.len) }.to_vec()
     };
     // SAFETY: return allocation to the exporting library exactly once.
-    unsafe { (table.free_bytes)(result.payload) };
+    unsafe { free(result.payload) };
     if result.status == 3 {
         return Err(crate::Error::Unsupported(
             String::from_utf8_lossy(&bytes).into_owned(),
@@ -233,8 +294,14 @@ pub struct NativeConnector {
     label: String,
     config: Value,
     fetch_kwargs: Value,
+    host: Option<Arc<dyn crate::HostServices>>,
 }
 impl NativeConnector {
+    pub fn with_host_services(mut self, host: Arc<dyn crate::HostServices>) -> Self {
+        self.host = Some(host);
+        self
+    }
+
     /// Extra keyword arguments for `fetch`, delivered to the plugin as `context.kwargs`: the
     /// sync's CLI and plugin flags and its `check_existing`, `enforce`, `workers`, ... settings,
     /// as a Python plugin's `fetch(pipe, **kw)` receives them. `begin`, `end` and `params`
@@ -263,7 +330,7 @@ impl NativeConnector {
         data: Option<&Frame>,
     ) -> ConnectorResult<Reply> {
         self.plugin
-            .invoke(
+            .invoke_with_host(
                 &Request {
                     method: method.into(),
                     connector_type: self.connector_type.clone(),
@@ -272,6 +339,7 @@ impl NativeConnector {
                     context,
                 },
                 data,
+                self.host.as_deref(),
             )
             .map_err(|e| match e {
                 crate::Error::Unsupported(message) => ConnectorError::NotImplemented(message),
@@ -330,7 +398,10 @@ impl Connector for NativeConnector {
         if self.fetch_kwargs.as_object().is_some_and(|o| !o.is_empty()) {
             context["kwargs"] = self.fetch_kwargs.clone();
         }
-        Ok(self.call("fetch", context, None)?.data)
+        let connector = self.clone();
+        tokio::task::spawn_blocking(move || connector.call("fetch", context, None).map(|r| r.data))
+            .await
+            .map_err(|e| ConnectorError::Backend(e.to_string()))?
     }
 }
 #[async_trait]

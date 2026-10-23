@@ -38,7 +38,12 @@ pub fn merge(python: &Manifest, native: &NativePlugins) -> Manifest {
     // Native manifests may omit argparse fields the worker manifest always lists.
     if let Some(plugins) = raw["plugins"].as_object_mut() {
         for plugin in plugins.values_mut() {
-            for argument in plugin["arguments"].as_array_mut().into_iter().flatten() {
+            for argument in plugin
+                .get_mut("arguments")
+                .and_then(serde_json::Value::as_array_mut)
+                .into_iter()
+                .flatten()
+            {
                 for key in ["nargs", "const", "default", "choices", "metavar"] {
                     if argument.get(key).is_none() {
                         argument[key] = serde_json::Value::Null;
@@ -316,6 +321,7 @@ fn pipe_json(pipe: &Pipe) -> Value {
         pipe.location_key().map(String::from).into(),
     );
     map.insert("instance_keys".into(), pipe.instance_keys().into());
+    map.insert("temporary".into(), pipe.temporary.into());
     map.insert(
         "parameters".into(),
         Value::Map(pipe.raw_parameters().clone()),
@@ -411,12 +417,15 @@ impl SyncHooks for NativeHooks {
 }
 
 /// A native plugin's own `sync()`.
-struct NativeSync(meerschaum_plugin::NativeConnector);
+struct NativeSync(meerschaum_plugin::NativeConnector, NativeRegistry);
 
 #[async_trait]
 impl PluginSync for NativeSync {
     async fn sync(&self, pipe: &Pipe, args: &SyncArgs) -> SyncResult {
-        let connector = self.0.clone();
+        let connector = self.0.clone().with_host_services(Arc::new(NativePipeHost {
+            registry: self.1.clone(),
+            args: args.clone(),
+        }));
         let context = sync_kwargs(pipe, args);
         tokio::task::spawn_blocking(move || {
             connector
@@ -441,8 +450,10 @@ impl PluginSync for NativeSync {
 }
 
 /// Resolves native connectors, `sync()` functions and sync hooks before the wrapped registry.
+#[derive(Clone)]
 pub struct NativeRegistry {
     natives: Arc<NativePlugins>,
+    engine_config: meerschaum_engine::EngineConfig,
     /// `meerschaum:connectors` (connector attributes by type and label).
     connectors: Map,
     inner: Arc<dyn ConnectorRegistry>,
@@ -473,6 +484,7 @@ impl NativeRegistry {
     ) -> Arc<Self> {
         Arc::new(Self {
             natives,
+            engine_config: meerschaum_engine::EngineConfig::from_config(config, None),
             connectors: config
                 .get(&["meerschaum", "connectors"])
                 .map(|v| v.to_map())
@@ -487,15 +499,95 @@ impl NativeRegistry {
     ) -> Option<Result<meerschaum_plugin::NativeConnector, String>> {
         let (kind, label) = keys.split_once(':')?;
         if kind == "plugin" {
-            return self
-                .natives
-                .source(label)
-                .map(|r| r.map_err(|e| e.to_string()));
+            return self.natives.source(label).map(|r| {
+                r.map(|c| {
+                    c.with_host_services(Arc::new(NativePipeHost {
+                        registry: self.clone(),
+                        args: SyncArgs::default(),
+                    }))
+                })
+                .map_err(|e| e.to_string())
+            });
         }
         let attributes = attributes(&self.connectors, kind, label);
         self.natives
             .connector(kind, label, config_json(&attributes))
-            .map(|r| r.map_err(|e| e.to_string()))
+            .map(|r| {
+                r.map(|c| {
+                    c.with_host_services(Arc::new(NativePipeHost {
+                        registry: self.clone(),
+                        args: SyncArgs::default(),
+                    }))
+                })
+                .map_err(|e| e.to_string())
+            })
+    }
+}
+
+struct NativePipeHost {
+    registry: NativeRegistry,
+    args: SyncArgs,
+}
+impl meerschaum_plugin::HostServices for NativePipeHost {
+    fn call(
+        &self,
+        request: &meerschaum_plugin::Request,
+        method: &str,
+        data: Option<meerschaum_plugin::Frame>,
+    ) -> meerschaum_plugin::Result<serde_json::Value> {
+        use meerschaum_plugin::Error;
+        let fail = |e: String| Error::Message(e);
+        let metadata = &request.context["pipe"];
+        let mut state = metadata.get("keys").unwrap_or(metadata).clone();
+        state["parameters"] = metadata
+            .get("parameters")
+            .cloned()
+            .unwrap_or_else(|| serde_json::json!({}));
+        let state: Map = serde_json::from_value(state).map_err(|e| fail(e.to_string()))?;
+        let mut pipe = Pipe::from_state(&state, &self.registry.engine_config.defaults)
+            .map_err(|e| fail(e.to_string()))?;
+        pipe.temporary = metadata["temporary"].as_bool().unwrap_or(false);
+        let runtime = tokio::runtime::Handle::try_current().map_err(|e| fail(e.to_string()))?;
+        // Native fetch and sync execute on blocking threads. Their runtime stays free to
+        // service SQL/network operations while this synchronous callback waits.
+        runtime.block_on(async {
+            match method {
+                "get_sync_time" => {
+                    let instance = self.registry.instance(pipe.instance_keys()).map_err(fail)?;
+                    let bound = instance
+                        .get_sync_time(&pipe, None, true)
+                        .await
+                        .map_err(|e| fail(e.to_string()))?;
+                    Ok(bound
+                        .map(|b| match b {
+                            meerschaum_connector::DateBound::Int(i) => serde_json::json!(i),
+                            other => serde_json::json!(other.isoformat()),
+                        })
+                        .unwrap_or(serde_json::Value::Null))
+                }
+                "sync" => {
+                    let Some(data) = data else {
+                        return Ok(serde_json::json!([true, "No data to sync."]));
+                    };
+                    let engine = meerschaum_engine::Engine::new(
+                        Arc::new(self.registry.clone()),
+                        self.registry.engine_config.clone(),
+                    );
+                    // Supplying input bypasses plugin_sync and fetch; no recursive plugin call.
+                    let result = engine
+                        .sync_pipe(
+                            &pipe,
+                            Some(meerschaum_kernel::enforce::PipeInput::Frame(data)),
+                            &self.args,
+                        )
+                        .await;
+                    Ok(serde_json::json!([result.success, result.message]))
+                }
+                _ => Err(Error::Unsupported(format!(
+                    "unsupported Pipe host operation: {method}"
+                ))),
+            }
+        })
     }
 }
 
@@ -529,7 +621,14 @@ impl ConnectorRegistry for NativeRegistry {
             Some(result) => {
                 // The same fetch kwargs a Python plugin's `fetch(pipe, **kw)` receives.
                 let kwargs = meerschaum_engine::sync::sync_kwargs(args);
-                Ok(Some(Arc::new(result?.with_fetch_kwargs(&kwargs))))
+                Ok(Some(Arc::new(
+                    result?
+                        .with_fetch_kwargs(&kwargs)
+                        .with_host_services(Arc::new(NativePipeHost {
+                            registry: self.clone(),
+                            args: args.clone(),
+                        })),
+                )))
             }
             None => self.inner.source_for_sync(keys, args),
         }
@@ -539,8 +638,12 @@ impl ConnectorRegistry for NativeRegistry {
         if let Some(("plugin", name)) = keys.split_once(':')
             && self.natives.has_data_function(name, "sync")
         {
-            let connector = self.natives.source(name).and_then(Result::ok)?;
-            return Some(Arc::new(NativeSync(connector)));
+            let connector = self
+                .natives
+                .plugin(name)
+                .ok()?
+                .source(serde_json::Value::Null);
+            return Some(Arc::new(NativeSync(connector, self.clone())));
         }
         self.inner.plugin_sync(keys)
     }

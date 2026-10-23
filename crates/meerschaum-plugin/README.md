@@ -26,11 +26,11 @@ static frame is intentionally only a small demonstration, not a general instance
 The SDK imposes no async runtime. Native calls are synchronous; async applications should
 schedule potentially blocking calls on their blocking executor.
 
-`Request` contains JSON values, not live host objects. The ABI has no callbacks for reading
-another Pipe, obtaining its sync time, resolving a host connector, or calling a Python
-plugin helper. Ports that need those operations must supply their own connector access or
-keep that orchestration in Python or declarative SQL Pipes. A `required` dependency does
-not expose Python functions to native code.
+`Request` is the low-level dispatch envelope. Its `pipe()` method provides a typed Pipe
+view; the optional host-call ABI extension supports `get_sync_time()` and `sync(data)`
+for the current Pipe during source fetch and sync calls. Host writes use the normal
+sync engine with supplied input, avoiding recursive plugin dispatch. Arbitrary connector
+access, other Pipe construction and Python helper imports are not exposed.
 
 Build the example with `cargo build -p meerschaum-plugin --example native_demo`. Install the
 result in a configured plugin directory:
@@ -215,3 +215,35 @@ Server extensions use additive JSON methods through `LoadedPlugin::call_json`:
   from the server and frames it in its chrome; a standalone install shows no console, so the page is only reachable there.
 
 Request and response bodies of routes are UTF-8 text.
+
+### Single-file source plugins
+
+Place `readings.rs` directly in `MRSM_PLUGINS_DIR`:
+
+```rust
+fn fetch(pipe: &Pipe, end: Option<Bound>) -> Result<Vec<Value>> {
+    let last = pipe.get_sync_time()?;
+    Ok(vec![json!({"id": 1, "previous": last, "end": end})])
+}
+```
+
+The generated adapter accepts any subset of named `pipe: &Pipe`, `begin: Option<Bound>`
+and `end: Option<Bound>` arguments, in any order, including no arguments. `sync` additionally
+accepts `data: Option<Frame>`. Leading underscores are allowed. Unsupported names and async,
+unsafe, conditional or generic entry points produce discovery errors. `Request` is not part
+of the single-file author interface.
+
+Fetch returns rows (`Vec<Value>`), `Frame` or `Option<Frame>`, optionally wrapped in `Result`.
+Sync returns `SuccessTuple` or `(bool, String)` / `(bool, &str)`, optionally wrapped in
+`Result`. Both functions may exist; sync overrides fetch in the engine. `Pipe`, `Bound`,
+`SuccessTuple`, JSON `Value`, `json!`, `Frame`, `Result` and `Error` are implicitly imported.
+
+`pipe.get_sync_time()` reads the newest axis value; `pipe.sync(rows)` writes supplied rows
+through the host's sync engine and returns `Result<SuccessTuple>`. A zero-argument Pipe sync
+is not provided, to avoid recursively invoking the same plugin. Callback state is scoped
+to the current call; Pipe views cannot move to other threads. Recursive plugin calls fail
+instead of blocking on the library's serialized call lock.
+
+Meerschaum generates the crate, manifest and ABI adapter under the root's build cache.
+Cargo is required to compile it; unchanged builds are reused. Use a full crate for extra
+dependencies or capabilities beyond fetch and sync.

@@ -299,6 +299,168 @@ pub fn build_failed_before(target_dir: &Path, fingerprint: &str) -> bool {
         .is_ok_and(|stamp| stamp.trim() == fingerprint)
 }
 
+/// Generate a fetch plugin crate in the cache, leaving the user's `.rs` file untouched.
+/// The SDK requirement is exact because the generated adapter belongs to this SDK version.
+pub fn prepare_single_file(file: &Path, name: &str, directory: &Path) -> Result<()> {
+    let source = std::fs::read_to_string(file).map_err(error)?;
+    let manifest = format!(
+        r#"[package]
+name = {name:?}
+version = "0.0.0"
+edition = "2024"
+[workspace]
+[lib]
+path = "lib.rs"
+crate-type = ["cdylib"]
+[dependencies]
+meerschaum-plugin = "={version}"
+[profile.release]
+panic = "unwind"
+"#,
+        version = env!("CARGO_PKG_VERSION")
+    );
+    let parsed =
+        syn::parse_file(&source).map_err(|e| error(format!("invalid Rust plugin: {e}")))?;
+    let mut functions = Vec::new();
+    let mut adapters = String::new();
+    let mut methods = String::new();
+    for item in &parsed.items {
+        let syn::Item::Fn(function) = item else {
+            continue;
+        };
+        let name = function.sig.ident.to_string();
+        if name != "fetch" && name != "sync" {
+            continue;
+        }
+        if functions.contains(&name) {
+            return Err(error(format!("duplicate {name} function")));
+        }
+        if function.sig.asyncness.is_some()
+            || function.sig.unsafety.is_some()
+            || function.sig.abi.is_some()
+            || !function.sig.generics.params.is_empty()
+            || function.sig.generics.where_clause.is_some()
+            || function.sig.variadic.is_some()
+        {
+            return Err(error(format!(
+                "{name} must be a synchronous, safe, non-generic Rust function"
+            )));
+        }
+        if function
+            .attrs
+            .iter()
+            .any(|a| a.path().is_ident("cfg") || a.path().is_ident("cfg_attr"))
+        {
+            return Err(error(format!(
+                "conditional {name} functions are unsupported"
+            )));
+        }
+        let mut args = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        let mut needs_pipe = false;
+        for arg in &function.sig.inputs {
+            let syn::FnArg::Typed(arg) = arg else {
+                return Err(error("plugin functions cannot have self parameters"));
+            };
+            let syn::Pat::Ident(ident) = arg.pat.as_ref() else {
+                return Err(error(format!(
+                    "{name} parameters must be named pipe, begin, end{}",
+                    if name == "sync" { ", or data" } else { "" }
+                )));
+            };
+            let param = ident.ident.to_string();
+            let param = param.trim_start_matches('_');
+            if !seen.insert(param.to_owned()) {
+                return Err(error(format!("duplicate {name} parameter '{param}'")));
+            }
+            args.push(match param {
+                "pipe" => {
+                    needs_pipe = true;
+                    "&__mrsm_pipe".to_owned()
+                }
+                "begin" | "end" => format!("__mrsm_request.bound({param:?})?"),
+                "data" if name == "sync" => "__mrsm_data".to_owned(),
+                _ => {
+                    return Err(error(format!(
+                        "unsupported {name} parameter '{param}'; use pipe, begin, end{}",
+                        if name == "sync" { ", or data" } else { "" }
+                    )));
+                }
+            });
+        }
+        let pipe = if needs_pipe {
+            "let __mrsm_pipe = __mrsm_request.pipe()?;"
+        } else {
+            ""
+        };
+        let (output, convert) = if name == "fetch" {
+            (
+                "Option<meerschaum_plugin::Frame>",
+                "FetchOutput::into_frame",
+            )
+        } else {
+            (
+                "meerschaum_plugin::serde_json::Value",
+                "SyncOutput::into_success",
+            )
+        };
+        adapters.push_str(&format!(r#"
+    pub(super) fn __mrsm_{name}(__mrsm_request: &meerschaum_plugin::Request, __mrsm_data: Option<meerschaum_plugin::Frame>) -> meerschaum_plugin::Result<{output}> {{
+        {pipe}
+        meerschaum_plugin::sdk::{convert}({name}({args}))
+    }}
+"#, args = args.join(", ")));
+        if name == "fetch" {
+            methods.push_str("fn fetch(&self, request: &meerschaum_plugin::Request) -> meerschaum_plugin::Result<Option<meerschaum_plugin::Frame>> { user::__mrsm_fetch(request, None) }\n");
+        } else {
+            methods.push_str("fn sync(&self, request: &meerschaum_plugin::Request, data: Option<meerschaum_plugin::Frame>) -> meerschaum_plugin::Result<meerschaum_plugin::serde_json::Value> { user::__mrsm_sync(request, data) }\n");
+        }
+        functions.push(name);
+    }
+    if functions.is_empty() {
+        return Err(error("a single-file plugin must define fetch and/or sync"));
+    }
+    let functions = serde_json::to_string(&functions).map_err(error)?;
+    let wrapper = format!(
+        r#"
+mod user {{
+    #[allow(unused_imports)]
+    use meerschaum_plugin::sdk::fetch_prelude::*;
+    include!("user.rs");
+    {adapters}
+}}
+#[derive(Default)]
+struct SingleFilePlugin;
+impl meerschaum_plugin::Plugin for SingleFilePlugin {{
+    const NAME: &'static str = {name:?};
+    const VERSION: &'static str = "0.0.0";
+    fn manifest(&self) -> meerschaum_plugin::serde_json::Value {{
+        meerschaum_plugin::serde_json::json!({{
+            "schema_version": meerschaum_plugin::MANIFEST_SCHEMA_VERSION,
+            "meerschaum_version": {version:?}, "python_version": "", "fingerprint": null,
+            "plugins": {{ {name:?}: {{"name": {name:?}, "version": "0.0.0", "data_functions": {functions}}} }}
+        }})
+    }}
+    {methods}
+}}
+meerschaum_plugin::export_plugin!(SingleFilePlugin);
+"#,
+        version = env!("CARGO_PKG_VERSION")
+    );
+    std::fs::create_dir_all(directory).map_err(error)?;
+    for (filename, contents) in [
+        ("Cargo.toml", manifest),
+        ("lib.rs", wrapper),
+        ("user.rs", source),
+    ] {
+        let path = directory.join(filename);
+        if std::fs::read_to_string(&path).ok().as_ref() != Some(&contents) {
+            std::fs::write(path, contents).map_err(error)?;
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

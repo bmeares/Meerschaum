@@ -132,6 +132,38 @@ fn read_candidate(
     seen: &HashSet<String>,
     build_root: &BuildRoot<'_>,
 ) -> std::result::Result<Option<Candidate>, Skip> {
+    if directory.is_file() && directory.extension().is_some_and(|ext| ext == "rs") {
+        let name = directory.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+        if name.is_empty()
+            || !name
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+        {
+            return Err(Skip::invalid("invalid Rust plugin filename"));
+        }
+        if seen.contains(name) {
+            return Ok(None);
+        }
+        let generated = build_root
+            .resolve()
+            .map_err(Skip::invalid)?
+            .join(name)
+            .join("source");
+        source::prepare_single_file(directory, name, &generated).map_err(Skip::invalid)?;
+        let mut candidate = source_candidate(
+            &generated,
+            Descriptor {
+                name: name.into(),
+                version: "0.0.0".into(),
+            },
+            generated.join(library_name(name)),
+            build_root,
+        )?;
+        if let Some(candidate) = &mut candidate {
+            candidate.directory = directory.to_path_buf();
+        }
+        return Ok(candidate);
+    }
     let descriptor = directory.join("plugin.toml");
     if !descriptor.is_file() {
         return Ok(None);

@@ -4,6 +4,20 @@
 
 Meerschaum 5 is a rewrite of the core in Rust: the data kernel, the `sql:` / `valkey:` / `api:` connectors, the Syncing Engine, jobs, compose, the HTTP API, the MCP server and the `mrsm` CLI and shell. The `meerschaum` Python package stays as the plugin SDK, a façade and the host of the Plotly Dash web console, so pipes, parameters, configuration, compose files, jobs, the HTTP API and the Python public API keep working. Read the [migration guide](/reference/migrating-to-v5/) before upgrading; v4.1.x stays installable and receives security fixes until 5.1.0.
 
+### v5.0.0rc9
+
+- **Write Rust data plugins as a single file.**  
+  Place a `.rs` file directly in the plugins directory. Meerschaum generates its Cargo crate, manifest and native adapter in the build cache, compiles it on first use, and rebuilds after edits. No descriptor, trait implementation or export macro is required.
+
+- **Accept minimal fetch and sync signatures.**  
+  Rust entry points accept any subset of named `pipe`, `begin` and `end` parameters in any order, including no arguments. Sync also accepts optional frame data. Fetch returns rows or frames, and sync returns success tuples; both support fallible results. The single-file interface uses typed arguments rather than a request envelope.
+
+- **Call Pipe operations from Rust plugins.**  
+  `pipe.get_sync_time()` reads the current Pipe's newest axis value, and `pipe.sync(data)` writes supplied rows through the normal host sync engine. Host callbacks preserve the existing native ABI, contain errors and panics, and reject recursive calls instead of deadlocking.
+
+- **Load sync-only plugins and document the authoring paths.**  
+  Native sync overrides no longer require a fetch function, and minimal manifests may omit argument declarations. The Rust plugin guide covers accepted signatures, bounds, return types, host operations, cache behavior and when to use a full Cargo crate.
+
 ### v5.0.0rc8
 
 - **Keep SQL filter values literal.**

@@ -41,7 +41,7 @@ impl Plugin for Probe {
     const NAME: &'static str = "native_probe";
     const VERSION: &'static str = "1.0.0";
     fn manifest(&self) -> Value {
-        json!({"schema_version": meerschaum_plugin::MANIFEST_SCHEMA_VERSION, "meerschaum_version": "5.0.0-rc.8",
+        json!({"schema_version": meerschaum_plugin::MANIFEST_SCHEMA_VERSION, "meerschaum_version": "5.0.0-rc.9",
           "python_version": "", "fingerprint": null,
           "plugins": {"native_probe": {"name": "native_probe", "version": "1.0.0",
             "data_functions": ["fetch"],

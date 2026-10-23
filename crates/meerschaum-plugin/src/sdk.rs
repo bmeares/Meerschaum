@@ -90,7 +90,7 @@ pub(crate) fn frame(stream: FFI_ArrowArrayStream) -> Result<Option<Frame>> {
         .map_err(error)
 }
 
-fn boundary(f: impl FnOnce() -> Result<Value>) -> CallResult {
+pub(crate) fn boundary(f: impl FnOnce() -> Result<Value>) -> CallResult {
     let (status, bytes) = match catch_unwind(AssertUnwindSafe(|| {
         f().and_then(|v| serde_json::to_vec(&v).map_err(error))
     })) {
@@ -121,6 +121,23 @@ impl<P: Plugin> Export<P> {
             "abi_version": ABI_VERSION, "manifest": P::default().manifest()}))
         })
     }
+    /// Optional host-call entry point used by `export_plugin!`.
+    /// # Safety
+    /// The input/output ABI contract is identical to invoke; host must point to a valid
+    /// HostV1 table whose callbacks and context live through this synchronous call.
+    pub unsafe extern "C" fn invoke_with_host(
+        bytes: Bytes,
+        input: *mut FFI_ArrowArrayStream,
+        output: *mut FFI_ArrowArrayStream,
+        host: *const HostV1,
+    ) -> CallResult {
+        // SAFETY: the extension caller supplies a readable table and live callback context.
+        match unsafe { crate::callbacks::enter(host) } {
+            Ok(_scope) => unsafe { Self::invoke(bytes, input, output) },
+            Err(e) => boundary(|| Err(e)),
+        }
+    }
+
     unsafe extern "C" fn invoke(
         bytes: Bytes,
         input: *mut FFI_ArrowArrayStream,
@@ -147,7 +164,7 @@ impl<P: Plugin> Export<P> {
     }
 }
 
-unsafe extern "C" fn free_bytes(bytes: OwnedBytes) {
+pub(crate) unsafe extern "C" fn free_bytes(bytes: OwnedBytes) {
     let _ = catch_unwind(AssertUnwindSafe(|| {
         if !bytes.ptr.is_null() {
             // SAFETY: bytes was allocated by OwnedBytes::new in this library and is freed once.
@@ -218,5 +235,107 @@ mod tests {
             empty.to_record_batch().unwrap().schema().field(0).name(),
             "id"
         );
+    }
+}
+
+/// Types made available to single-file fetch plugins. Explicit user imports may override them.
+pub mod fetch_prelude {
+    pub use crate::{Bound, Error, Frame, Pipe, Result, SuccessTuple};
+    pub use serde_json::{Value, json};
+}
+
+/// Return types accepted by a single-file plugin's `fetch(&Request)` function.
+/// Rows are converted to an Arrow-backed frame before crossing the native boundary.
+pub trait FetchOutput {
+    fn into_frame(self) -> Result<Option<Frame>>;
+}
+
+impl FetchOutput for Vec<Value> {
+    fn into_frame(self) -> Result<Option<Frame>> {
+        if self.is_empty() {
+            return Ok(None);
+        }
+        let mut names = indexmap::IndexSet::new();
+        for row in &self {
+            let row = row
+                .as_object()
+                .ok_or_else(|| error("fetch rows must be JSON objects"))?;
+            names.extend(row.keys().cloned());
+        }
+        let columns = names
+            .into_iter()
+            .map(|name| {
+                let values = self
+                    .iter()
+                    .map(|row| {
+                        let value: meerschaum_core::Value =
+                            serde_json::from_value(row[&name].clone()).map_err(error)?;
+                        Ok(meerschaum_kernel::Value::from(value))
+                    })
+                    .collect::<Result<Vec<_>>>()?;
+                Ok((name, values))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        Frame::from_object_columns(columns).map(Some).map_err(error)
+    }
+}
+
+impl FetchOutput for Frame {
+    fn into_frame(self) -> Result<Option<Frame>> {
+        Ok(Some(self))
+    }
+}
+
+impl FetchOutput for Option<Frame> {
+    fn into_frame(self) -> Result<Option<Frame>> {
+        Ok(self)
+    }
+}
+
+impl<T: FetchOutput> FetchOutput for Result<T> {
+    fn into_frame(self) -> Result<Option<Frame>> {
+        self?.into_frame()
+    }
+}
+
+/// Accepted results of a single-file `sync` function.
+pub trait SyncOutput {
+    fn into_success(self) -> Result<Value>;
+}
+impl SyncOutput for crate::SuccessTuple {
+    fn into_success(self) -> Result<Value> {
+        serde_json::to_value(self).map_err(error)
+    }
+}
+impl<S: Into<String>> SyncOutput for (bool, S) {
+    fn into_success(self) -> Result<Value> {
+        crate::SuccessTuple {
+            success: self.0,
+            message: self.1.into(),
+        }
+        .into_success()
+    }
+}
+impl<T: SyncOutput> SyncOutput for Result<T> {
+    fn into_success(self) -> Result<Value> {
+        self?.into_success()
+    }
+}
+
+impl Request {
+    /// A typed Pipe view with host operations available during this invocation.
+    pub fn pipe(&self) -> Result<crate::Pipe<'_>> {
+        crate::Pipe::from_request(self)
+    }
+    /// Bounds are nested under query for fetch and top-level for sync.
+    pub fn bound(&self, name: &str) -> Result<Option<crate::Bound>> {
+        let value = self.context.get("query").unwrap_or(&self.context).get(name);
+        match value {
+            None | Some(Value::Null) => Ok(None),
+            Some(Value::String(s)) if s.is_empty() => Ok(None),
+            Some(value) => serde_json::from_value(value.clone())
+                .map(Some)
+                .map_err(error),
+        }
     }
 }

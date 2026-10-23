@@ -71,3 +71,25 @@ pub struct MrsmPluginV1 {
     ) -> CallResult,
     pub free_bytes: unsafe extern "C" fn(OwnedBytes),
 }
+
+/// Optional, synchronous host-call extension. The original v1 plugin table is unchanged.
+/// `context` and this table live only through InvokeWithHost. Callbacks may not be retained
+/// or invoked on background threads. The host owns result bytes and frees them itself.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct HostV1 {
+    pub abi_version: u32,
+    pub struct_size: u32,
+    pub context: *mut std::ffi::c_void,
+    pub invoke:
+        unsafe extern "C" fn(*mut std::ffi::c_void, Bytes, *mut FFI_ArrowArrayStream) -> CallResult,
+    pub free_bytes: unsafe extern "C" fn(OwnedBytes),
+}
+
+pub const HOST_ENTRY_POINT: &[u8] = b"mrsm_plugin_invoke_host_v1\0";
+pub type InvokeWithHost = unsafe extern "C" fn(
+    Bytes,
+    *mut FFI_ArrowArrayStream,
+    *mut FFI_ArrowArrayStream,
+    *const HostV1,
+) -> CallResult;

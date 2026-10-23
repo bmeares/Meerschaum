@@ -12,6 +12,104 @@ Choose a Rust plugin when you want no Python interpreter at runtime (the standal
 
     A plugin is arbitrary native code running inside the `mrsm` process. The ABI is a compatibility contract, **not a sandbox**. Install only plugins you trust. (A sandboxed WebAssembly host for the same interface is planned for v5.x.)
 
+## Single-file plugins
+
+Drop `readings.rs` directly into your Meerschaum plugins directory:
+
+```rust
+fn fetch() -> Vec<Value> {
+    vec![json!({"id": 1, "temperature": 21.5})]
+}
+```
+
+That is the entire file. Meerschaum discovers it as `plugin:readings`, generates the
+Cargo crate, manifest and native export adapter in its cache, and compiles it on first
+use. No `Cargo.toml`, `plugin.toml`, trait implementation or export macro is needed.
+A Rust toolchain (`cargo` on `PATH`) is required for the first build and after edits;
+the first build downloads and compiles the SDK dependencies and may take minutes.
+
+### Accepted signatures
+
+Define `fetch`, `sync`, or both. Each function may accept any subset of these **named**
+parameters, in any order:
+
+| Parameter | Type | Meaning |
+|---|---|---|
+| `pipe` | `&Pipe` | Pipe metadata and operations on its host instance |
+| `begin` | `Option<Bound>` | Inclusive lower bound, or `None` when not supplied / unbounded |
+| `end` | `Option<Bound>` | Exclusive upper bound, or `None` when unbounded |
+| `data` (sync only) | `Option<Frame>` | Input frame if the caller supplied one |
+
+For example, `fetch(pipe: &Pipe)`, `fetch(end: Option<Bound>)`, and
+`fetch(pipe: &Pipe, begin: Option<Bound>, end: Option<Bound>)` are all valid.
+Leading underscores are allowed (`_pipe`, `_begin`); use a named parameter rather than
+`_`. Names distinguish `begin` from `end`, whose types are identical. Functions must be
+synchronous, safe, non-generic Rust functions, declared at the file's top level.
+`Request` is an internal dispatch envelope, not an accepted single-file parameter.
+
+`Pipe`, `Bound`, `SuccessTuple`, JSON `Value`, `json!`, `Frame`, `Result`, and `Error`
+are available without imports. `Bound` is either `Bound::Int(i64)` or
+`Bound::Datetime(String)` (an ISO timestamp). Fetch receives the engine's resolved
+bounds; an unspecified default begin in a sync override is `None`.
+
+Fetch may return `Vec<Value>` containing JSON objects, `Frame`, `Option<Frame>`, or
+any of those wrapped in `Result`. Missing row fields become null cells; an empty vector
+means no data. Rows cross the native boundary as Arrow, not JSON.
+Sync may return `SuccessTuple`, `(bool, String)`, `(bool, &str)`, or a `Result` of those.
+If both functions exist, the engine uses `sync` as the override, as with Python plugins.
+A normal engine-invoked sync override receives `data = None`; explicit input is written
+by the engine without invoking the override again.
+
+### Pipe operations
+
+`pipe.connector_keys()`, `metric_key()`, `location_key()`, `instance_keys()`, `keys()`,
+and `parameters()` expose the current Pipe's metadata. Host operations are fallible:
+
+- `pipe.get_sync_time()?` returns `Option<Bound>`, reading the newest axis value from
+  this Pipe's instance. An empty target returns `None`.
+- `pipe.sync(rows)?` or `pipe.sync(frame)?` writes supplied data through the host's normal
+  sync engine, including dtype enforcement and existing-row checks. It returns a
+  `SuccessTuple` and inherits the surrounding sync options. Empty rows are a successful
+  no-op. Supply data explicitly; a zero-argument sync would recursively invoke the plugin.
+
+An integer-axis sync plugin can therefore be just:
+
+```rust
+fn sync(pipe: &Pipe) -> Result<SuccessTuple> {
+    let next = match pipe.get_sync_time()? {
+        Some(Bound::Int(last)) => last + 1,
+        None => 1,
+        _ => return Err(Error::Message("Expected an integer axis".into())),
+    };
+    pipe.sync(vec![json!({"id": next})])
+}
+```
+
+Register an integer axis for this example:
+
+```bash
+mrsm register pipe -c plugin:readings -m readings -i sql:local --params '{"columns":{"datetime":"id"},"dtypes":{"id":"int"}}'
+mrsm sync pipes -c plugin:readings -i sql:local
+```
+
+Host operations are synchronous and scoped to the current invocation. A `Pipe` cannot
+be sent to background threads. Re-entering the same native library through a callback
+returns an error instead of waiting on its own call lock. These operations apply to the
+current Pipe; arbitrary connector access, other Pipe construction and Python helper
+imports are not exposed.
+
+### Builds and dependencies
+
+The filename supplies the plugin name, and the generated version is `0.0.0`.
+Sources and build output stay under `<root>/cache/native_build/<name>/`; nothing is
+written beside the original `.rs` file. Unchanged builds are reused, edits trigger
+recompilation, and failed builds are remembered until an edit or cache deletion.
+The generated crate pins the SDK to the running Meerschaum version.
+
+Use the full crate layout below for extra Cargo dependencies, multiple source files,
+relative included assets, actions, hooks and other capabilities. Relative paths in a
+shorthand file resolve from its generated copy in the cache.
+
 ## 📁 Layout
 
 A native plugin is a directory in `MRSM_PLUGINS_DIR` (the existing multi-directory path list works too) holding a descriptor and the library:
@@ -56,14 +154,12 @@ and sync that Pipe before opening the page. Moving the fetch implementation does
 rewriting the page or changing its session handling.
 
 For a fetch plugin, first list the operations it performs on its Python `pipe` argument.
-The native `Request` carries JSON snapshots of the Pipe's keys and parameters, plus the
-requested bounds; it does not carry a live Python Pipe or callbacks into the host.
-Calls such as `pipe.get_sync_time()`, `pipe.instance_connector.read()`, and importing a
-helper from another Python plugin therefore need an explicit replacement. A self-contained
-HTTP source or transformation can use the supplied parameters and bounds directly. Keep
-database orchestration in Python or declarative SQL Pipes until its Rust implementation
-provides the required connector access; listing a Python plugin in `required` does not
-make its functions callable from Rust.
+Single-file plugins provide `pipe.get_sync_time()` and `pipe.sync(data)` through the host.
+Full SDK plugins can obtain the same typed view with `request.pipe()?` when invoked by
+a host with the optional callback extension. Other operations, such as
+`pipe.instance_connector.read()` or importing helpers from Python plugins, still need
+an explicit replacement. Listing a Python plugin in `required` does not make its
+functions callable from Rust.
 
 Validate a port under a separate plugin name and scratch root before changing existing
 Pipe connector keys. Compare its rows, nulls, dtypes, bound handling, empty responses, and
@@ -92,7 +188,7 @@ edition = "2024"
 crate-type = ["cdylib"]
 
 [dependencies]
-meerschaum-plugin = "=5.0.0-rc.8"   # prerelease versions require an exact prerelease requirement
+meerschaum-plugin = "=5.0.0-rc.9"   # prerelease versions require an exact prerelease requirement
 
 [profile.release]
 panic = "unwind"      # required: the SDK catches panics at the boundary
@@ -341,6 +437,12 @@ The library exports a single symbol, `mrsm_plugin_v1`, which returns a static `#
 | `free_bytes(bytes)` | Releases every payload the plugin allocated. |
 
 Every result carries a status: `0` success (JSON), `1` error (UTF-8 message), `2` caught panic, `3` unsupported method. Memory a plugin allocates is always released by that plugin's `free_bytes`; the host never frees it.
+
+The optional `mrsm_plugin_invoke_host_v1` symbol accepts the original request and Arrow
+streams plus a versioned host callback table. Its context is valid only during the call;
+result bytes are freed by the host that allocated them. Older libraries use the original
+v1 entry point unchanged. New plugins loaded by an older host can still run, but attempting
+a Pipe host operation returns an unavailable-services error.
 
 The ABI version is checked at load. A breaking change would ship as a new `mrsm_plugin_v2` symbol, and the host keeps loading v1 for at least one major release. The same interface is also written as WIT (`crates/meerschaum-plugin/wit/plugin.wit`) for the future WebAssembly host.
 
