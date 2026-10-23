@@ -9,6 +9,7 @@ pub mod callbacks;
 pub mod discovery;
 pub mod host;
 pub mod registry;
+pub mod rows_abi;
 pub mod sdk;
 pub mod source;
 pub use arrow;

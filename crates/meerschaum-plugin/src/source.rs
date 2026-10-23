@@ -26,6 +26,9 @@ pub struct SourceBuild {
     pub manifest_path: PathBuf,
     /// The Cargo target directory (`<root>/cache/native_build/<name>`).
     pub target_dir: PathBuf,
+    /// Shared dependency cache for generated single-file plugins.
+    #[serde(default)]
+    pub shared_target: Option<PathBuf>,
     /// The source fingerprint to stamp after a successful build.
     pub fingerprint: String,
 }
@@ -35,7 +38,7 @@ pub const BUILD_DIR_NAME: &str = "native_build";
 
 const STAMP_NAME: &str = "mrsm-source-fingerprint";
 const FAILED_NAME: &str = "mrsm-build-failed";
-const FAILURE_TAIL_LINES: usize = 20;
+const FAILURE_TAIL_LINES: usize = 80;
 
 /// Whether `directory` is a Cargo crate (it has a `Cargo.toml`).
 pub fn is_source_crate(directory: &Path) -> bool {
@@ -240,10 +243,12 @@ pub fn build(
             write_stamp(&spec.target_dir, STAMP_NAME, &fingerprint)
                 .map_err(|e| format!("could not write the build stamp: {e}"))?;
             let _ = std::fs::remove_file(spec.target_dir.join(FAILED_NAME));
+            let _ = std::fs::remove_file(spec.target_dir.join("mrsm-build-error.txt"));
             Ok(fingerprint)
         }
         Err(reason) => {
             // Remember the failure so the next runs skip the plugin instead of rebuilding.
+            let _ = write_stamp(&spec.target_dir, "mrsm-build-error.txt", &reason);
             let _ = write_stamp(&spec.target_dir, FAILED_NAME, &fingerprint);
             Err(reason)
         }
@@ -256,7 +261,7 @@ fn run_cargo(name: &str, spec: &SourceBuild, library: &Path) -> std::result::Res
         .args(["build", "--release", "--manifest-path"])
         .arg(&spec.manifest_path)
         .arg("--target-dir")
-        .arg(&spec.target_dir)
+        .arg(spec.shared_target.as_ref().unwrap_or(&spec.target_dir))
         .env("CARGO_INCREMENTAL", "0")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -271,6 +276,18 @@ fn run_cargo(name: &str, spec: &SourceBuild, library: &Path) -> std::result::Res
             "`cargo build --release` failed ({}):\n{tail}",
             output.status
         ));
+    }
+    if let Some(shared) = &spec.shared_target {
+        let built = shared
+            .join("release")
+            .join(library.file_name().ok_or("missing library name")?);
+        std::fs::create_dir_all(&spec.target_dir).map_err(|e| e.to_string())?;
+        std::fs::create_dir_all(library.parent().ok_or("missing library parent")?)
+            .map_err(|e| e.to_string())?;
+        let temp = library.with_extension(format!("{}.tmp", std::process::id()));
+        std::fs::copy(&built, &temp)
+            .and_then(|_| std::fs::rename(&temp, library))
+            .map_err(|e| format!("could not install built plugin: {e}"))?;
     }
     if !library.is_file() {
         return Err(format!(
@@ -300,7 +317,7 @@ pub fn build_failed_before(target_dir: &Path, fingerprint: &str) -> bool {
 }
 
 /// Generate a fetch plugin crate in the cache, leaving the user's `.rs` file untouched.
-/// The SDK requirement is exact because the generated adapter belongs to this SDK version.
+/// Embed the host-matched row runtime; do not compile the host SDK into simple plugins.
 pub fn prepare_single_file(file: &Path, name: &str, directory: &Path) -> Result<()> {
     let source = std::fs::read_to_string(file).map_err(error)?;
     let manifest = format!(
@@ -313,11 +330,14 @@ edition = "2024"
 path = "lib.rs"
 crate-type = ["cdylib"]
 [dependencies]
-meerschaum-plugin = "={version}"
+serde = "1"
+serde_json = {{ version = "1", features = ["preserve_order", "float_roundtrip"] }}
 [profile.release]
 panic = "unwind"
-"#,
-        version = env!("CARGO_PKG_VERSION")
+opt-level = 0
+debug = false
+strip = "debuginfo"
+"#
     );
     let parsed =
         syn::parse_file(&source).map_err(|e| error(format!("invalid Rust plugin: {e}")))?;
@@ -423,6 +443,17 @@ panic = "unwind"
     let functions = serde_json::to_string(&functions).map_err(error)?;
     let wrapper = format!(
         r#"
+#![deny(unsafe_op_in_unsafe_fn)]
+extern crate self as meerschaum_plugin;
+pub use serde_json;
+#[allow(dead_code)]
+mod abi;
+#[allow(dead_code)]
+mod rows_abi;
+#[allow(dead_code)]
+mod runtime;
+pub use runtime::*;
+pub const MANIFEST_SCHEMA_VERSION: u32 = {schema};
 mod user {{
     #[allow(unused_imports)]
     use meerschaum_plugin::sdk::fetch_prelude::*;
@@ -443,15 +474,35 @@ impl meerschaum_plugin::Plugin for SingleFilePlugin {{
     }}
     {methods}
 }}
-meerschaum_plugin::export_plugin!(SingleFilePlugin);
+#[unsafe(no_mangle)]
+pub extern "C" fn mrsm_plugin_v1() -> *const abi::MrsmPluginV1 {{
+    &runtime::Export::<SingleFilePlugin>::VTABLE
+}}
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mrsm_plugin_invoke_rows_v1(bytes: abi::Bytes, host: *const rows_abi::RowsHostV1) -> abi::CallResult {{
+    unsafe {{ runtime::Export::<SingleFilePlugin>::invoke(bytes, host) }}
+}}
 "#,
-        version = env!("CARGO_PKG_VERSION")
+        version = env!("CARGO_PKG_VERSION"),
+        schema = crate::MANIFEST_SCHEMA_VERSION,
     );
     std::fs::create_dir_all(directory).map_err(error)?;
     for (filename, contents) in [
         ("Cargo.toml", manifest),
         ("lib.rs", wrapper),
         ("user.rs", source),
+        (
+            "runtime.rs",
+            include_str!("single_file_runtime.rs").to_owned(),
+        ),
+        ("rows_abi.rs", include_str!("rows_abi.rs").to_owned()),
+        (
+            "abi.rs",
+            include_str!("abi.rs").replace(
+                "use arrow::ffi_stream::FFI_ArrowArrayStream;",
+                "#[allow(non_camel_case_types)]\ntype FFI_ArrowArrayStream = std::ffi::c_void;",
+            ),
+        ),
     ] {
         let path = directory.join(filename);
         if std::fs::read_to_string(&path).ok().as_ref() != Some(&contents) {

@@ -145,7 +145,9 @@ pub(super) fn plugin_is_native(rt: &mut Runtime<'_>, name: &str) -> bool {
 
 /// The installed plugin names and which of them are native.
 fn is_installed(rt: &mut Runtime<'_>, ctx: &Context, name: &str) -> bool {
-    is_native(rt, name) || plugin_files::plugin_file(&ctx.plugins_dirs, name).is_some()
+    plugin_files::native_plugin_path(&ctx.plugins_dirs, name).is_some()
+        || is_native(rt, name)
+        || plugin_files::plugin_file(&ctx.plugins_dirs, name).is_some()
 }
 
 fn is_native(rt: &mut Runtime<'_>, name: &str) -> bool {
@@ -774,6 +776,7 @@ fn install_archive(
     for dir in &ctx.plugins_dirs {
         tracked.push(dir.join(name));
         tracked.push(dir.join(format!("{name}.py")));
+        tracked.push(dir.join(format!("{name}.rs")));
     }
     tracked.push(venvs_dir.join(name));
     let mut rollback = Rollback::new(name, &ctx.temp_dir, tracked)
@@ -815,11 +818,12 @@ fn install_archive(
         [("debug".to_string(), meerschaum_core::Value::Bool(ctx.debug))]
             .into_iter()
             .collect();
-    let setup = if is_native(rt, name) {
-        native_setup(rt, name, &kwargs)?
-    } else {
-        python_setup(rt, name, &kwargs)?
-    };
+    let setup =
+        if plugin_files::native_plugin_path(std::slice::from_ref(&install_dir), name).is_some() {
+            native_setup(rt, name, &kwargs).unwrap_or_else(|e| SuccessTuple::fail(e.message))
+        } else {
+            python_setup(rt, name, &kwargs)?
+        };
     let result = if setup.success {
         SuccessTuple::ok(success_msg)
     } else {
@@ -900,9 +904,13 @@ fn place_archive(
     let _cleanup = RemoveOnDrop(temp_dir.clone());
 
     // The version of what is installed now.
-    let old_version = plugin_files::plugin_file(&ctx.plugins_dirs, name)
-        .and_then(|file| std::fs::read_to_string(file).ok())
-        .and_then(|text| plugin_files::declared_version(&text).ok().flatten())
+    let old_version = plugin_files::native_plugin_path(&ctx.plugins_dirs, name)
+        .and_then(|path| plugin_files::native_version(&path))
+        .or_else(|| {
+            plugin_files::plugin_file(&ctx.plugins_dirs, name)
+                .and_then(|file| std::fs::read_to_string(file).ok())
+                .and_then(|text| plugin_files::declared_version(&text).ok().flatten())
+        })
         .unwrap_or_default();
 
     if let Err(error) = plugin_files::extract_archive(archive, &temp_dir) {
@@ -924,35 +932,43 @@ fn place_archive(
     };
     let is_dir = if first == name {
         true
-    } else if first == format!("{name}.py") {
+    } else if first == format!("{name}.py") || first == format!("{name}.rs") {
         false
     } else {
         return Err(exception(format!(
             "Unknown format encountered for plugin '{name}'."
         )));
     };
-    let mut version_file = temp_dir.join(&first);
-    if is_dir {
-        version_file = version_file.join("__init__.py");
-    }
-    let init_text = std::fs::read_to_string(&version_file).map_err(|_| {
-        ActionError::new(
-            "FileNotFoundError",
-            format!(
-                "[Errno 2] No such file or directory: '{}'",
-                version_file.display()
-            ),
-        )
-    })?;
-    let new_version = plugin_files::declared_version(&init_text)
-        .map_err(|e| ActionError::new("ValueError", e))?
-        .filter(|v| !v.is_empty());
-    if new_version.is_none() {
-        warn(
-            rt,
-            &format!("No `__version__` defined for plugin '{name}'. Assuming new version..."),
-        );
-    }
+    let native =
+        first == format!("{name}.rs") || plugin_files::is_native_plugin_dir(&temp_dir.join(&first));
+    let new_version = if native {
+        plugin_files::native_version(&temp_dir.join(&first))
+    } else {
+        let mut version_file = temp_dir.join(&first);
+        if is_dir {
+            version_file = version_file.join("__init__.py");
+        }
+        let init_text = std::fs::read_to_string(&version_file).map_err(|_| {
+            ActionError::new(
+                "FileNotFoundError",
+                format!(
+                    "[Errno 2] No such file or directory: '{}'",
+                    version_file.display()
+                ),
+            )
+        })?;
+        let new_version = plugin_files::declared_version(&init_text)
+            .map_err(|e| ActionError::new("ValueError", e))?
+            .filter(|v| !v.is_empty());
+        if new_version.is_none() {
+            warn(
+                rt,
+                &format!("No `__version__` defined for plugin '{name}'. Assuming new version..."),
+            );
+        }
+
+        new_version
+    };
 
     let (is_new_version, is_same_version) = compare_versions(&old_version, new_version.as_deref());
 
@@ -970,7 +986,10 @@ fn place_archive(
             );
             continue;
         }
-        if dir.join(name).exists() || dir.join(format!("{name}.py")).exists() {
+        if dir.join(name).exists()
+            || dir.join(format!("{name}.py")).exists()
+            || dir.join(format!("{name}.rs")).exists()
+        {
             install_dir = dir.clone();
             break;
         }
@@ -1005,6 +1024,7 @@ fn place_archive(
             for existing in [
                 install_dir.join(name),
                 install_dir.join(format!("{name}.py")),
+                install_dir.join(format!("{name}.rs")),
             ] {
                 plugin_files::remove_path(&existing)?;
             }
@@ -1033,7 +1053,9 @@ fn place_archive(
     let _ = std::fs::remove_dir_all(&temp_dir);
 
     // Reload the plugin: the venv, then the plugin trees.
-    ctx.env.init_venv(rt, name, true, ctx.debug);
+    if !native {
+        ctx.env.init_venv(rt, name, true, ctx.debug);
+    }
     refresh(rt);
 
     if abort {
@@ -1044,7 +1066,7 @@ fn place_archive(
     }
 
     // Dependencies.
-    let installed = skip_deps || install_dependencies(rt, ctx, name, force)?;
+    let installed = native || skip_deps || install_dependencies(rt, ctx, name, force)?;
     if !installed {
         return Ok(Placed::Done(SuccessTuple::fail(format!(
             "Failed to install dependencies for plugin '{name}'."

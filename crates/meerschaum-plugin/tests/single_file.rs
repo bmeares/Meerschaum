@@ -170,11 +170,14 @@ fn compiled_entry(
             .parent()
             .unwrap()
             .join("lib.rs");
-        let code = std::fs::read_to_string(&wrapper).unwrap().replace(
-            "meerschaum_plugin::export_plugin!(SingleFilePlugin);",
+        let original = std::fs::read_to_string(&wrapper).unwrap();
+        let body = &original
+            [original.find("mod user {").unwrap()..original.find("#[unsafe(no_mangle)]").unwrap()];
+        let code = format!(
+            "{body}\n{}",
             r#"#[unsafe(no_mangle)] pub extern "C" fn mrsm_plugin_v1() -> *const meerschaum_plugin::abi::MrsmPluginV1 {
-                &meerschaum_plugin::sdk::Export::<SingleFilePlugin>::VTABLE
-            }"#,
+            &meerschaum_plugin::sdk::Export::<SingleFilePlugin>::VTABLE
+        }"#
         );
         std::fs::write(wrapper, code).unwrap();
     }
@@ -250,7 +253,9 @@ fn sync_only_plugin_accepts_data_and_tuple_results() {
     let (_root, plugin) = compiled(
         r#"
         fn sync(data: Option<Frame>, _pipe: &Pipe) -> Result<(bool, String)> {
-            Ok((true, format!("rows={}", data.unwrap().height())))
+            let frame = data.unwrap();
+            assert_eq!(frame.rows()[0], json!({"id": 1, "flag": true, "value": 1.25, "nested": {"x": 2}}));
+            Ok((true, format!("rows={}", frame.height())))
         }
     "#,
     );
@@ -258,7 +263,10 @@ fn sync_only_plugin_accepts_data_and_tuple_results() {
         plugin.manifest["plugins"]["minimal"]["data_functions"],
         json!(["sync"])
     );
-    let frame = vec![json!({"id": 1})].into_frame().unwrap().unwrap();
+    let frame = vec![json!({"id": 1, "flag": true, "value": 1.25, "nested": {"x": 2}})]
+        .into_frame()
+        .unwrap()
+        .unwrap();
     assert_eq!(
         plugin.invoke(&request("sync"), Some(&frame)).unwrap().value,
         json!([true, "rows=1"])
@@ -407,4 +415,156 @@ fn libraries_without_the_optional_host_extension_still_load_and_run() {
             .height(),
         1
     );
+}
+
+#[test]
+fn cargo_builds_are_lightweight_shared_and_keep_failure_diagnostics() {
+    use meerschaum_plugin::source;
+    let root = tempfile::tempdir().unwrap();
+    let plugins = root.path().join("plugins");
+    let builds = root.path().join("builds");
+    std::fs::create_dir(&plugins).unwrap();
+    let file = plugins.join("first.rs");
+    std::fs::write(
+        &file,
+        "fn fetch() -> Vec<Value> { vec![json!({\"id\": 1})]; }",
+    )
+    .unwrap();
+    let discover = || discovery::discover_report_in(std::slice::from_ref(&plugins), &builds);
+    std::fs::write(
+        &file,
+        "fn fetch() -> Vec<Value> { vec![json!({\"id\": 1})] }",
+    )
+    .unwrap();
+    let cold = discover();
+    let candidate = &cold.candidates[0];
+    let start = std::time::Instant::now();
+    source::build(
+        &candidate.name,
+        candidate.build.as_ref().unwrap(),
+        &candidate.library,
+    )
+    .unwrap();
+    eprintln!("Cold valid plugin build: {:?}", start.elapsed());
+    std::fs::write(
+        &file,
+        "fn fetch() -> Vec<Value> { vec![json!({\"id\": 1})]; }",
+    )
+    .unwrap();
+    let found = discover();
+    let first = &found.candidates[0];
+    let start = std::time::Instant::now();
+    let reason =
+        source::build(&first.name, first.build.as_ref().unwrap(), &first.library).unwrap_err();
+    eprintln!("Invalid edit diagnostic: {:?}", start.elapsed());
+    assert!(reason.contains("remove this semicolon"), "{reason}");
+    let failed = discover();
+    assert!(failed.skipped[0].reason.contains("remove this semicolon"));
+    std::fs::write(
+        &file,
+        "fn fetch() -> Vec<Value> { /* corrected */ vec![json!({\"id\": 1})] }",
+    )
+    .unwrap();
+    let found = discover();
+    let first = &found.candidates[0];
+    let start = std::time::Instant::now();
+    source::build(&first.name, first.build.as_ref().unwrap(), &first.library).unwrap();
+    eprintln!(
+        "Fixed plugin build: {:?}; library {} bytes",
+        start.elapsed(),
+        first.library.metadata().unwrap().len()
+    );
+    let lock = std::fs::read_to_string(builds.join("first/source/Cargo.lock")).unwrap();
+    for heavy in ["meerschaum", "polars", "arrow", "tokio"] {
+        assert!(!lock.contains(heavy), "unexpected dependency {heavy}");
+    }
+    assert!(!builds.join("first/mrsm-build-error.txt").exists());
+    assert!(discover().candidates[0].build.is_none());
+    let shared = first
+        .build
+        .as_ref()
+        .unwrap()
+        .shared_target
+        .as_ref()
+        .unwrap();
+    let dependency = std::fs::read_dir(shared.join("release/deps"))
+        .unwrap()
+        .flatten()
+        .map(|e| e.path())
+        .find(|p| {
+            p.file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with("libserde_json-")
+                && p.extension().is_some_and(|e| e == "rlib")
+        })
+        .unwrap();
+    let modified = dependency.metadata().unwrap().modified().unwrap();
+    std::fs::write(
+        plugins.join("second.rs"),
+        "fn fetch() -> Vec<Value> { vec![json!({\"id\": 2})] }",
+    )
+    .unwrap();
+    let found = discover();
+    let second = found
+        .candidates
+        .iter()
+        .find(|c| c.name == "second")
+        .unwrap();
+    assert_eq!(
+        second.build.as_ref().unwrap().shared_target.as_ref(),
+        Some(shared)
+    );
+    let start = std::time::Instant::now();
+    source::build(
+        &second.name,
+        second.build.as_ref().unwrap(),
+        &second.library,
+    )
+    .unwrap();
+    eprintln!("Second plugin build: {:?}", start.elapsed());
+    assert_eq!(dependency.metadata().unwrap().modified().unwrap(), modified);
+    for (candidate, id) in [(first, 1), (second, 2)] {
+        let plugin = unsafe { meerschaum_plugin::LoadedPlugin::load(&candidate.library) }.unwrap();
+        assert_eq!(
+            plugin
+                .invoke(&request("fetch"), None)
+                .unwrap()
+                .data
+                .unwrap()
+                .row(0)[0],
+            meerschaum_kernel::Value::Int(id)
+        );
+    }
+}
+
+#[test]
+fn lightweight_bounds_serialize_and_plugin_panics_are_contained() {
+    let (_root, plugin) = compiled(
+        r#"
+        fn fetch(begin: Option<Bound>, end: Option<Bound>) -> Vec<Value> {
+            vec![json!({"begin": begin, "end": end})]
+        }
+        fn sync() -> SuccessTuple { panic!("plugin panic fixture") }
+    "#,
+    );
+    let frame = plugin
+        .invoke(&request("fetch"), None)
+        .unwrap()
+        .data
+        .unwrap();
+    assert_eq!(frame.row(0)[0], meerschaum_kernel::Value::Int(2));
+    assert_eq!(
+        frame.row(0)[1],
+        meerschaum_kernel::Value::Str("2026-01-01T00:00:00Z".into())
+    );
+    assert!(
+        plugin
+            .invoke(&request("sync"), None)
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("native plugin panicked")
+    );
+    assert!(plugin.invoke(&request("fetch"), None).is_ok());
 }

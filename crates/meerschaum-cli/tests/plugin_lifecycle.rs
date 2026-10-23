@@ -917,3 +917,165 @@ fn install_packages_skips_every_bootstrap_while_auto_install_is_disabled() {
         );
     }
 }
+
+#[test]
+fn install_rust_plugins_builds_without_python_and_rolls_back_failed_updates() {
+    let home = Home::new();
+    let repo = Repo::start();
+    let (key, value) = repo.connector("loop");
+    let user_home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .unwrap();
+    let cargo_home = std::env::var("CARGO_HOME").unwrap_or_else(|_| format!("{user_home}/.cargo"));
+    let rustup_home =
+        std::env::var("RUSTUP_HOME").unwrap_or_else(|_| format!("{user_home}/.rustup"));
+    let run = |args: &[&str]| {
+        home.run_with(
+            args,
+            &[
+                (key.as_str(), value.as_str()),
+                NO_PYTHON,
+                ("CARGO_HOME", &cargo_home),
+                ("RUSTUP_HOME", &rustup_home),
+                ("CARGO_NET_OFFLINE", "true"),
+            ],
+        )
+    };
+    let good = "fn fetch() -> Vec<Value> { vec![json!({\"id\": 1})] }";
+    repo.publish("rusty", archive(&[("rusty.rs", good)]));
+    let installed = run(&["install", "plugins", "rusty", "-r", "api:loop"]);
+    assert!(
+        installed
+            .text()
+            .contains("Successfully installed plugin 'rusty'"),
+        "{}",
+        installed.text()
+    );
+    assert_eq!(
+        std::fs::read_to_string(home.plugins.join("rusty.rs")).unwrap(),
+        good
+    );
+    assert!(!home.root.join("venvs/rusty").exists());
+    let origins = std::fs::read_to_string(home.plugins.join(".mrsm_origins.json")).unwrap();
+    assert!(origins.contains("api:loop"));
+
+    repo.publish(
+        "rusty",
+        archive(&[("rusty.rs", "fn fetch() -> Vec<Value> { vec![]; }")]),
+    );
+    let failed = run(&["install", "plugins", "rusty", "-r", "api:loop"]);
+    assert!(
+        !failed
+            .text()
+            .contains("Successfully installed plugin 'rusty'"),
+        "{}",
+        failed.text()
+    );
+    assert!(
+        failed.text().contains("remove this semicolon"),
+        "{}",
+        failed.text()
+    );
+    assert_eq!(
+        std::fs::read_to_string(home.plugins.join("rusty.rs")).unwrap(),
+        good
+    );
+    assert_eq!(
+        std::fs::read_to_string(home.plugins.join(".mrsm_origins.json")).unwrap(),
+        origins
+    );
+
+    // A full Cargo directory has a descriptor and its own version; it needs no __init__.py.
+    let generated = home.root.join("generated");
+    meerschaum_plugin::source::prepare_single_file(
+        &home.plugins.join("rusty.rs"),
+        "rusty",
+        &generated,
+    )
+    .unwrap();
+    std::fs::write(
+        generated.join("plugin.toml"),
+        "name = \"rusty\"\nversion = \"0.0.0\"\n",
+    )
+    .unwrap();
+    let files: Vec<(String, String)> = std::fs::read_dir(&generated)
+        .unwrap()
+        .flatten()
+        .map(|entry| {
+            (
+                format!("rusty/{}", entry.file_name().to_string_lossy()),
+                std::fs::read_to_string(entry.path()).unwrap(),
+            )
+        })
+        .collect();
+    repo.publish(
+        "rusty",
+        archive(
+            &files
+                .iter()
+                .map(|(n, s)| (n.as_str(), s.as_str()))
+                .collect::<Vec<_>>(),
+        ),
+    );
+    let installed = run(&["install", "plugins", "rusty", "-r", "api:loop"]);
+    assert!(
+        installed
+            .text()
+            .contains("Successfully installed plugin 'rusty'"),
+        "{}",
+        installed.text()
+    );
+    assert!(home.plugins.join("rusty/plugin.toml").exists());
+    assert!(!home.plugins.join("rusty.rs").exists());
+    assert!(!home.root.join("venvs/rusty").exists());
+    let same = run(&["install", "plugins", "rusty", "-r", "api:loop"]);
+    assert!(same.text().contains("up-to-date"), "{}", same.text());
+    // Prebuilt archives use the same install path, without a compiler or Python environment.
+    let library = meerschaum_plugin::source::built_library(
+        &home.root.join("cache/native_build/rusty"),
+        "rusty",
+    );
+    let binary = std::fs::read(&library).unwrap();
+    let descriptor = b"name = \"rusty\"\nversion = \"0.0.0\"\n";
+    let mut tar = tar::Builder::new(Vec::new());
+    let library_member = format!("rusty/{}", library.file_name().unwrap().to_string_lossy());
+    for (name, data) in [
+        ("rusty/plugin.toml", descriptor.as_slice()),
+        (library_member.as_str(), binary.as_slice()),
+    ] {
+        let mut header = tar::Header::new_gnu();
+        header.set_size(data.len() as u64);
+        header.set_mode(0o644);
+        header.set_cksum();
+        tar.append_data(&mut header, name, data).unwrap();
+    }
+    let mut gzip = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+    std::io::Write::write_all(&mut gzip, &tar.into_inner().unwrap()).unwrap();
+    repo.publish("rusty", gzip.finish().unwrap());
+    let prebuilt = run(&["install", "plugins", "rusty", "-r", "api:loop", "--force"]);
+    assert!(
+        prebuilt
+            .text()
+            .contains("Successfully installed plugin 'rusty'"),
+        "{}",
+        prebuilt.text()
+    );
+    assert!(!home.plugins.join("rusty/Cargo.toml").exists());
+    assert!(!prebuilt.text().contains("Building native plugin"));
+    let removed = run(&["uninstall", "plugins", "rusty", "--force"]);
+    assert!(removed.success, "{}", removed.text());
+    assert!(!home.plugins.join("rusty").exists());
+
+    repo.publish("rusty", archive(&[("rusty.rs", good)]));
+    let installed = run(&["install", "plugins", "rusty", "-r", "api:loop"]);
+    assert!(
+        installed
+            .text()
+            .contains("Successfully installed plugin 'rusty'"),
+        "{}",
+        installed.text()
+    );
+    let removed = run(&["uninstall", "plugins", "rusty", "--force"]);
+    assert!(removed.success, "{}", removed.text());
+    assert!(!home.plugins.join("rusty.rs").exists());
+}

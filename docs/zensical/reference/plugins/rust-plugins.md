@@ -26,7 +26,10 @@ That is the entire file. Meerschaum discovers it as `plugin:readings`, generates
 Cargo crate, manifest and native export adapter in its cache, and compiles it on first
 use. No `Cargo.toml`, `plugin.toml`, trait implementation or export macro is needed.
 A Rust toolchain (`cargo` on `PATH`) is required for the first build and after edits;
-the first build downloads and compiles the SDK dependencies and may take minutes.
+the generated runtime depends only on Serde and `serde_json` and its small dependency set. It does
+not compile Meerschaum, Polars, Arrow, connectors or an async runtime. Dependencies are
+shared across single-file plugins, and builds favor low compilation latency (`opt-level = 0`).
+The first build may need network access to download dependencies.
 
 ### Accepted signatures
 
@@ -54,7 +57,10 @@ bounds; an unspecified default begin in a sync override is `None`.
 
 Fetch may return `Vec<Value>` containing JSON objects, `Frame`, `Option<Frame>`, or
 any of those wrapped in `Result`. Missing row fields become null cells; an empty vector
-means no data. Rows cross the native boundary as Arrow, not JSON.
+means no data. Single-file plugins exchange JSON rows over a versioned C ABI; the host
+converts them to its native frames. `Frame` here is a lightweight row container with
+`from_rows`, `rows`, `into_rows` and `height`, not the full SDK's Arrow-backed frame.
+Use a Cargo plugin for typed Arrow data, preserved frame schemas, or optimized bulk processing.
 Sync may return `SuccessTuple`, `(bool, String)`, `(bool, &str)`, or a `Result` of those.
 If both functions exist, the engine uses `sync` as the override, as with Python plugins.
 A normal engine-invoked sync override receives `data = None`; explicit input is written
@@ -104,7 +110,14 @@ The filename supplies the plugin name, and the generated version is `0.0.0`.
 Sources and build output stay under `<root>/cache/native_build/<name>/`; nothing is
 written beside the original `.rs` file. Unchanged builds are reused, edits trigger
 recompilation, and failed builds are remembered until an edit or cache deletion.
-The generated crate pins the SDK to the running Meerschaum version.
+The small runtime is embedded by the running host; there is no published SDK dependency.
+Shared Cargo dependencies live in `<root>/cache/native_build/.single_file_target/`; each
+plugin has its own copied library and build stamp. Compiler diagnostics are saved in
+`<root>/cache/native_build/<name>/mrsm-build-error.txt` and shown again for failed builds.
+
+Rust returns the final expression of a function. In the example above, do **not** put
+a semicolon after `vec![...]`: that would discard the rows and return `()` instead of
+`Vec<Value>`.
 
 Use the full crate layout below for extra Cargo dependencies, multiple source files,
 relative included assets, actions, hooks and other capabilities. Relative paths in a
@@ -188,7 +201,7 @@ edition = "2024"
 crate-type = ["cdylib"]
 
 [dependencies]
-meerschaum-plugin = "=5.0.0-rc.9"   # prerelease versions require an exact prerelease requirement
+meerschaum-plugin = "=5.0.0-rc.10"   # prerelease versions require an exact prerelease requirement
 
 [profile.release]
 panic = "unwind"      # required: the SDK catches panics at the boundary
@@ -438,6 +451,12 @@ The library exports a single symbol, `mrsm_plugin_v1`, which returns a static `#
 
 Every result carries a status: `0` success (JSON), `1` error (UTF-8 message), `2` caught panic, `3` unsupported method. Memory a plugin allocates is always released by that plugin's `free_bytes`; the host never frees it.
 
+Single-file plugins additionally export `mrsm_plugin_invoke_rows_v1`. This extension
+exchanges JSON request, result and row bytes, with call-scoped host callbacks; it does
+not change the original Arrow ABI. Host and plugin always free their own allocations.
+JSON rows trade conversion overhead and schema fidelity for small builds; full Cargo
+plugins retain the Arrow path below.
+
 The optional `mrsm_plugin_invoke_host_v1` symbol accepts the original request and Arrow
 streams plus a versioned host callback table. Its context is valid only during the call;
 result bytes are freed by the host that allocated them. Older libraries use the original
@@ -448,7 +467,19 @@ The ABI version is checked at load. A breaking change would ship as a new `mrsm_
 
 ## 📦 Distribution
 
-Today a native plugin is distributed as a directory you copy into `MRSM_PLUGINS_DIR` (a prebuilt `plugin.toml` + `lib<name>.<ext>` for the target OS and CPU, or a source crate that Meerschaum builds, see [Source plugins](#source-plugins)). Python plugins keep using `required`, `plugin:name@api:repo` entries and `.mrsm_origins.json` unchanged, and a Python plugin may depend on a Rust plugin and vice versa. Planned: a plugin repository that stores per-target-triple artifacts plus a source tarball, with `install plugin` choosing the matching triple and falling back to `cargo build --release` when none matches.
+`mrsm install plugins readings -r api:repo` accepts a repository tar.gz archive containing
+`readings.rs`, or a `readings/` directory with `plugin.toml` and either Cargo sources or
+a prebuilt library for the host OS and CPU. Source plugins are built and validated during
+installation. Native installs skip Python virtual environments and Python dependency
+installation, run an optional native setup hook, record `.mrsm_origins.json`, and restore
+the previous plugin if compilation, loading or setup fails. `uninstall plugins` removes
+single-file Rust sources as well as native directories. A descriptor supplies the version
+for normal up-to-date checks; single `.rs` files have no author version and are replaced
+on each install. `--skip-deps` does not skip the Rust build needed to validate a source plugin.
+
+You may also copy these files directly into `MRSM_PLUGINS_DIR`. Native archive upload through
+the Python plugin packaging API and automatic target-triple selection are not implemented;
+the repository must supply an archive appropriate for the host (or portable Rust sources).
 
 !!! note "Status in this pre-release"
 

@@ -81,6 +81,13 @@ fn uninstall_plugin(rt: &mut Runtime<'_>, args: &ArgsMap, name: &str) -> Success
             }
         }
         for dir in &dirs {
+            let source = dir.join(format!("{name}.rs"));
+            if source.is_file() {
+                removed = true;
+                if let Err(e) = std::fs::remove_file(&source) {
+                    failure.get_or_insert(e.to_string());
+                }
+            }
             let native = dir.join(name);
             if is_native_plugin_dir(&native) {
                 removed = true;

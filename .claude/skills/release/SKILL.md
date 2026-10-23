@@ -82,8 +82,9 @@ NEW_CARGO=5.0.0-rc.1 NEW_PEP=5.0.0rc1      # final: 5.0.0 and 5.0.0
    above it). Also re-read `requires-python` (`>=3.11`), the `Programming Language :: Python :: 3.x`
    classifiers (3.11 to 3.15; the smoke matrix covers 3.11 and 3.14), and `license = "Apache-2.0"` with
    `license-files` (PEP 639; `twine check` validates it).
-3. **Changelog.** Edit `docs/zensical/news/changelog.md` (source of truth) in the style of the v4 section
-   below, then run `./scripts/docs.sh` (it regenerates root `CHANGELOG.md`, which is committed; `./scripts/build.sh`
+3. **Changelog.** Edit `docs/zensical/news/changelog.md` (source of truth). Keep all 5.0.0 development
+   changes under one `v5.0.0` entry explicitly marked **Unreleased** until the final release. Do not add
+   release-candidate changelog entries. Then run `./scripts/docs.sh` (it regenerates root `CHANGELOG.md`, which is committed; `./scripts/build.sh`
    also runs it). The maintainer owns the 5.0.0 wording.
 4. **Local checks.**
 
@@ -251,7 +252,8 @@ assets. Say in the notes that the macOS binary is not signed or notarized (Gatek
 `xattr -d com.apple.quarantine mrsm-...`, documented under Setup in the docs), that `cargo install meerschaum --locked` (Rust 1.95 or newer) and
 `pip install meerschaum` are the supported installs, and that the Linux binaries need glibc 2.28 or newer.
 
-Notes = the changelog notes of this version with the heading demoted to one `#`. For an rc **always**
+For an rc, write release-specific GitHub notes separately; the changelog keeps its single unreleased
+`v5.0.0` entry. For a final, use the changelog notes with the heading demoted to one `#`. For an rc **always**
 pass `--prerelease` (and not `--latest`). Do not `git push origin --tags` (it would push unrelated tags).
 
 ## 5.7 Docker **[needs explicit user authorization, separate from 5.4 to 5.6]**

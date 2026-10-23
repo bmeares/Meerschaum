@@ -120,7 +120,7 @@ for every connector method; this deliberately refines the illustrative per-metho
 * The input and output `FFI_ArrowArrayStream` pointers are valid, exclusive and non-null.
   Output initially has no release callback. The receiver moves input, leaving an empty stream.
   On every outcome the caller releases any remaining input/output stream.
-* Data never uses JSON: stream callbacks exchange `FFI_ArrowArray` and `FFI_ArrowSchema`, with
+* Full SDK frame data never uses JSON: stream callbacks exchange `FFI_ArrowArray` and `FFI_ArrowSchema`, with
   their standard producer-owned release callbacks. SDK output is an eager, one-batch stream;
   arbitrary conforming C plugins may return multiple batches. SDK callbacks contain only
   Arrow-owned schema/array operations over already materialized frames, not author code.
@@ -247,3 +247,18 @@ instead of blocking on the library's serialized call lock.
 Meerschaum generates the crate, manifest and ABI adapter under the root's build cache.
 Cargo is required to compile it; unchanged builds are reused. Use a full crate for extra
 dependencies or capabilities beyond fetch and sync.
+
+### Lightweight single-file builds
+
+The generated single-file crate embeds a small runtime with only Serde and `serde_json` as
+dependencies. It uses the optional `mrsm_plugin_invoke_rows_v1` C ABI extension: request,
+result and row JSON bytes, plus call-scoped host callbacks for Pipe operations. Host
+conversion owns the full data kernel. No Polars, Arrow, connector, loader or async runtime
+dependency is compiled into these plugins. The original v1 Arrow ABI is unchanged.
+
+Single-file `Frame` is a JSON row container (`from_rows`, `rows`, `into_rows`, `height`),
+not the full SDK's typed frame. JSON loses frame schemas and converts special scalar
+values to their JSON representations; choose a full Cargo plugin for typed Arrow
+interchange and optimized data processing. Simple builds use `opt-level = 0` and
+share a Cargo target cache across plugins; the installed libraries and stamps remain
+separate. Saved compiler diagnostics survive failure caching.

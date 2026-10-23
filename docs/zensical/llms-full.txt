@@ -324,7 +324,7 @@ The wheel contains the native core and has no required Python dependencies. Whee
     `pip install meerschaum` is the whole product: the `mrsm` command it installs runs the native command line from inside the package. If you would rather have a standalone binary (it starts in about 10 ms and needs no Python until you use a Python plugin or connector), build the same command line with Cargo:
 
     ```bash
-    cargo install meerschaum --locked            # during the release candidates: --version 5.0.0-rc.9
+    cargo install meerschaum --locked            # during the release candidates: --version 5.0.0-rc.10
     ```
 
     This needs Rust 1.95 or newer. `--locked` builds with the dependency versions Meerschaum was tested with (without it Cargo may pick newer ones, which can break the build on Windows). Prebuilt standalone binaries (Linux x86_64 and arm64, macOS arm64 and x86_64, Windows x86_64) are attached to each GitHub release, with a SHA-256 file for each.
@@ -9567,7 +9567,10 @@ That is the entire file. Meerschaum discovers it as `plugin:readings`, generates
 Cargo crate, manifest and native export adapter in its cache, and compiles it on first
 use. No `Cargo.toml`, `plugin.toml`, trait implementation or export macro is needed.
 A Rust toolchain (`cargo` on `PATH`) is required for the first build and after edits;
-the first build downloads and compiles the SDK dependencies and may take minutes.
+the generated runtime depends only on Serde and `serde_json` and its small dependency set. It does
+not compile Meerschaum, Polars, Arrow, connectors or an async runtime. Dependencies are
+shared across single-file plugins, and builds favor low compilation latency (`opt-level = 0`).
+The first build may need network access to download dependencies.
 
 ### Accepted signatures
 
@@ -9595,7 +9598,10 @@ bounds; an unspecified default begin in a sync override is `None`.
 
 Fetch may return `Vec<Value>` containing JSON objects, `Frame`, `Option<Frame>`, or
 any of those wrapped in `Result`. Missing row fields become null cells; an empty vector
-means no data. Rows cross the native boundary as Arrow, not JSON.
+means no data. Single-file plugins exchange JSON rows over a versioned C ABI; the host
+converts them to its native frames. `Frame` here is a lightweight row container with
+`from_rows`, `rows`, `into_rows` and `height`, not the full SDK's Arrow-backed frame.
+Use a Cargo plugin for typed Arrow data, preserved frame schemas, or optimized bulk processing.
 Sync may return `SuccessTuple`, `(bool, String)`, `(bool, &str)`, or a `Result` of those.
 If both functions exist, the engine uses `sync` as the override, as with Python plugins.
 A normal engine-invoked sync override receives `data = None`; explicit input is written
@@ -9645,7 +9651,14 @@ The filename supplies the plugin name, and the generated version is `0.0.0`.
 Sources and build output stay under `<root>/cache/native_build/<name>/`; nothing is
 written beside the original `.rs` file. Unchanged builds are reused, edits trigger
 recompilation, and failed builds are remembered until an edit or cache deletion.
-The generated crate pins the SDK to the running Meerschaum version.
+The small runtime is embedded by the running host; there is no published SDK dependency.
+Shared Cargo dependencies live in `<root>/cache/native_build/.single_file_target/`; each
+plugin has its own copied library and build stamp. Compiler diagnostics are saved in
+`<root>/cache/native_build/<name>/mrsm-build-error.txt` and shown again for failed builds.
+
+Rust returns the final expression of a function. In the example above, do **not** put
+a semicolon after `vec![...]`: that would discard the rows and return `()` instead of
+`Vec<Value>`.
 
 Use the full crate layout below for extra Cargo dependencies, multiple source files,
 relative included assets, actions, hooks and other capabilities. Relative paths in a
@@ -9729,7 +9742,7 @@ edition = "2024"
 crate-type = ["cdylib"]
 
 [dependencies]
-meerschaum-plugin = "=5.0.0-rc.9"   # prerelease versions require an exact prerelease requirement
+meerschaum-plugin = "=5.0.0-rc.10"   # prerelease versions require an exact prerelease requirement
 
 [profile.release]
 panic = "unwind"      # required: the SDK catches panics at the boundary
@@ -9979,6 +9992,12 @@ The library exports a single symbol, `mrsm_plugin_v1`, which returns a static `#
 
 Every result carries a status: `0` success (JSON), `1` error (UTF-8 message), `2` caught panic, `3` unsupported method. Memory a plugin allocates is always released by that plugin's `free_bytes`; the host never frees it.
 
+Single-file plugins additionally export `mrsm_plugin_invoke_rows_v1`. This extension
+exchanges JSON request, result and row bytes, with call-scoped host callbacks; it does
+not change the original Arrow ABI. Host and plugin always free their own allocations.
+JSON rows trade conversion overhead and schema fidelity for small builds; full Cargo
+plugins retain the Arrow path below.
+
 The optional `mrsm_plugin_invoke_host_v1` symbol accepts the original request and Arrow
 streams plus a versioned host callback table. Its context is valid only during the call;
 result bytes are freed by the host that allocated them. Older libraries use the original
@@ -9989,7 +10008,19 @@ The ABI version is checked at load. A breaking change would ship as a new `mrsm_
 
 ## 📦 Distribution
 
-Today a native plugin is distributed as a directory you copy into `MRSM_PLUGINS_DIR` (a prebuilt `plugin.toml` + `lib<name>.<ext>` for the target OS and CPU, or a source crate that Meerschaum builds, see [Source plugins](#source-plugins)). Python plugins keep using `required`, `plugin:name@api:repo` entries and `.mrsm_origins.json` unchanged, and a Python plugin may depend on a Rust plugin and vice versa. Planned: a plugin repository that stores per-target-triple artifacts plus a source tarball, with `install plugin` choosing the matching triple and falling back to `cargo build --release` when none matches.
+`mrsm install plugins readings -r api:repo` accepts a repository tar.gz archive containing
+`readings.rs`, or a `readings/` directory with `plugin.toml` and either Cargo sources or
+a prebuilt library for the host OS and CPU. Source plugins are built and validated during
+installation. Native installs skip Python virtual environments and Python dependency
+installation, run an optional native setup hook, record `.mrsm_origins.json`, and restore
+the previous plugin if compilation, loading or setup fails. `uninstall plugins` removes
+single-file Rust sources as well as native directories. A descriptor supplies the version
+for normal up-to-date checks; single `.rs` files have no author version and are replaced
+on each install. `--skip-deps` does not skip the Rust build needed to validate a source plugin.
+
+You may also copy these files directly into `MRSM_PLUGINS_DIR`. Native archive upload through
+the Python plugin packaging API and automatic target-triple selection are not implemented;
+the repository must supply an archive appropriate for the host (or portable Rust sources).
 
 !!! note "Status in this pre-release"
 
@@ -11746,14 +11777,21 @@ Source: https://meerschaum.io/news/changelog/
 
 # 🪵 Changelog
 
-## 5.0.0 Releases
+## 5.0.0 (Unreleased)
 
 Meerschaum 5 is a rewrite of the core in Rust: the data kernel, the `sql:` / `valkey:` / `api:` connectors, the Syncing Engine, jobs, compose, the HTTP API, the MCP server and the `mrsm` CLI and shell. The `meerschaum` Python package stays as the plugin SDK, a façade and the host of the Plotly Dash web console, so pipes, parameters, configuration, compose files, jobs, the HTTP API and the Python public API keep working. Read the [migration guide](/reference/migrating-to-v5/) before upgrading; v4.1.x stays installable and receives security fixes until 5.1.0.
 
-### v5.0.0rc9
+### v5.0.0
+
+*Unreleased.*
+
+#### Highlights
 
 - **Write Rust data plugins as a single file.**  
-  Place a `.rs` file directly in the plugins directory. Meerschaum generates its Cargo crate, manifest and native adapter in the build cache, compiles it on first use, and rebuilds after edits. No descriptor, trait implementation or export macro is required.
+  Place a `.rs` file directly in the plugins directory. Meerschaum generates its Cargo crate, manifest and native adapter in the build cache, compiles it on first use, and rebuilds after edits. Simple plugins embed a small row runtime, share dependency builds, and leave Polars and Arrow processing in the host. No descriptor, trait implementation or export macro is required.
+
+- **Install Rust plugins from repository archives.**  
+  `install plugins` accepts single `.rs` files and native plugin directories, validates builds and setup without a Python environment, records repository origins, and restores the previous plugin after a failure. Single-file Rust plugins are included in lifecycle discovery and uninstall.
 
 - **Accept minimal fetch and sync signatures.**  
   Rust entry points accept any subset of named `pipe`, `begin` and `end` parameters in any order, including no arguments. Sync also accepts optional frame data. Fetch returns rows or frames, and sync returns success tuples; both support fallible results. The single-file interface uses typed arguments rather than a request envelope.
@@ -11763,8 +11801,6 @@ Meerschaum 5 is a rewrite of the core in Rust: the data kernel, the `sql:` / `va
 
 - **Load sync-only plugins and document the authoring paths.**  
   Native sync overrides no longer require a fetch function, and minimal manifests may omit argument declarations. The Rust plugin guide covers accepted signatures, bounds, return types, host operations, cache behavior and when to use a full Cargo crate.
-
-### v5.0.0rc8
 
 - **Keep SQL filter values literal.**
   JSON values containing apostrophes and MySQL/MariaDB values containing backslashes stay within their filter expression. Reading and counting with a column or value containing `WHERE` preserves that text instead of rewriting it as SQL syntax. Rejected filters match no rows instead of dropping the restriction or producing invalid SQL.
@@ -11787,8 +11823,6 @@ Meerschaum 5 is a rewrite of the core in Rust: the data kernel, the `sql:` / `va
 - **Clarify native plugin migration.**
   The Rust plugin guide explains which host operations require an explicit replacement and how to compare a port with its Python implementation through isolated, repeated syncs. The upgrade guide covers plugin requirements after changing Python versions and database isolation during upgrade testing.
 
-### v5.0.0rc7
-
 - **Make the Pipeline canvas the main workspace.**  
   Full-width controls, node output icons and syncing spinners, readable Pipe details and plans, and expanded ANSI output keep inspection and execution on the canvas. Run now opens its command output immediately; View output reopens it. History links retain the requested run, and Runs provides a shared timeline with local selection and no drag-to-zoom or download controls.
 
@@ -11800,8 +11834,6 @@ Meerschaum 5 is a rewrite of the core in Rust: the data kernel, the `sql:` / `va
 
 - **Reconcile canceled executions and include interactive Docker tools.**  
   Stopped workers clear stale node spinners and cancel controls. Logs follow new output while respecting manual scrolling. Full Docker images include PostgreSQL clients and pgcli; Docker images provide Vim for editing. Opening the page no longer creates singleton Pipeline registrations automatically; existing definitions remain intact.
-
-### v5.0.0rc6
 
 - **Manage registered Pipelines across instances.**  
   Pipeline lifecycle actions are visible in help and completion. Registered definitions preserve exact member identities, revisions, traversal settings, and execution defaults. `show pipelines` reads saved state; `analyze pipelines` discovers dependencies and previews `pipeline-{name}` tag edits for approval. Shared and pre-existing tags retain ownership, and unavailable members remain visible errors.
@@ -11827,8 +11859,6 @@ Meerschaum 5 is a rewrite of the core in Rust: the data kernel, the `sql:` / `va
 - **Make native endpoint disabling explicit.**  
   `api.permissions.routes.disabled` overrides route allowlists and can disable native `/login` without restoring it through host fallback. Custom Dash login pages and namespaced plugin APIs remain supported. Migration documentation explains Python route-stripping limits and gradual adoption of separately named Rust plugins.
 
-### v5.0.0rc5
-
 - **Run and watch named pipelines from the console.**
   Named pipeline groups have dashed boundaries and clickable names. Select a pipeline to inspect its membership or run it immediately through the API's authenticated execution endpoint. The page follows that run's command output, per-stage sync activity, completion counts, and live Gantt progress. Pipeline history is scoped by exact name, including pipelines with older runs.
 
@@ -11840,8 +11870,6 @@ Meerschaum 5 is a rewrite of the core in Rust: the data kernel, the `sql:` / `va
 
 - **Repair the Docker web terminal configuration.**
   The bundled tmux configuration contains only tmux commands and loads without syntax errors.
-
-### v5.0.0rc4
 
 - **Make concurrent plugin environment startup safe.**  
   Virtual-environment creation and verification serialize across processes, preserve working interpreter aliases during repairs, and reap timed-out probes without deleting valid links.
@@ -11858,8 +11886,6 @@ Meerschaum 5 is a rewrite of the core in Rust: the data kernel, the `sql:` / `va
 - **Use readable run IDs and a more compact pipeline canvas.**  
   New run IDs include the pipeline name and UTC start time, with a collision suffix. Existing history remains accessible. The canvas fills the page until a pipe is selected; its inspector can be dismissed. Status icons, three-key pipe filters in a collapsible panel, revised arrows, and pipe links that open in new tabs keep the graph easier to inspect.
 
-### v5.0.0rc3
-
 - **Share console sessions with the web terminal.**  
   Hosted console logins always use the instance session store, so the Rust terminal and log stream recognize them when Valkey caching is configured. Existing Valkey-backed sessions require a new login after upgrading.
 
@@ -11875,10 +11901,6 @@ Meerschaum 5 is a rewrite of the core in Rust: the data kernel, the `sql:` / `va
 - **Keep the terminal in the Web Console.**  
   The dedicated Terminal page and navigation entry are removed; its old URL opens the Web Console.
 
-### v5.0.0
-
-*Unreleased: the entry is complete for the current pre-release series (`5.0.0-a1`), and the release date goes here.*
-
 #### Added
 
 - **The Syncing Engine and `mrsm.Pipeline`.**  
@@ -11891,7 +11913,7 @@ Meerschaum 5 is a rewrite of the core in Rust: the data kernel, the `sql:` / `va
   `pipe.sync()` returns a `tuple` subclass equal to `(success, message)` with `inserted`, `updated`, `upserted`, `deleted`, `changed_intervals`, `duration`, `begin` and `end`, so `success, msg = pipe.sync()` still unpacks. Every kind of input syncs in Rust: no data (a `sql:`, `api:` or `valkey:` source, a plugin, a `@make_connector` connector), documents, dictionaries of lists, DataFrames, Arrow tables, strings, generators of chunks, temporary pipes, and pipes with `reference`s, `{{ }}` templates or `MRSM{}` symlinks, on every SQL flavor (`mssql`, `oracle`, `duckdb` and in-memory SQLite included), `api:`, `valkey:` and custom instances.
 
 - **Rust plugins.**  
-  A plugin can be a native library (`plugin.toml` plus `lib<name>.so`) built with the new `meerschaum-plugin` crate, or a Cargo crate that Meerschaum builds itself into `MRSM_ROOT_DIR/cache/native_build/` when `cargo` is on `PATH`. It can provide `fetch`, `sync`, actions, hooks, a connector or instance, HTTP routes and console pages, exchanging Arrow record batches. A Rust plugin replaces a Python plugin of the same name entirely. See [Rust plugins](/reference/plugins/rust-plugins/).
+  A data plugin can be a single `.rs` file with typed `fetch` or `sync` arguments and host-backed Pipe operations. It can also be a native library (`plugin.toml` plus `lib<name>.so`) built with the new `meerschaum-plugin` crate, or a Cargo crate that Meerschaum builds itself into `MRSM_ROOT_DIR/cache/native_build/` when `cargo` is on `PATH`. It can provide `fetch`, `sync`, actions, hooks, a connector or instance, HTTP routes and console pages, exchanging Arrow record batches. A Rust plugin replaces a Python plugin of the same name entirely. See [Rust plugins](/reference/plugins/rust-plugins/).
 
 - **The web console with pipelines pages, and the page contract.**  
   The Plotly Dash console (`meerschaum[dash]`) is served by the Python API host behind the Rust server at the same `/dash` paths, with a new `pipelines` page (dependency graph, Gantt timeline, runs) and Parents/Children tabs on the pipe card. `@dash_plugin` and Dash `@web_page` pages register into it as before. Plugin pages may also return an HTML fragment and Plotly figure JSON (`meerschaum.plugins.figure()`, `data-mrsm-figure`, `data-mrsm-map`). The standalone binary serves the API without a console and points `/dash` to `pip install meerschaum[dash]`.

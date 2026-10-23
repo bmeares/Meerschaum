@@ -94,7 +94,7 @@ impl Fixture {
             .join(if fail { "cargo-fail" } else { "cargo-ok" });
         let log = self.root.path().join("cargo.log");
         let body = if fail {
-            "echo 'Compiling native_demo'; for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30; do echo \"noise $i\" >&2; done; echo 'error[E0425]: cannot find value `boom`' >&2; exit 101".to_owned()
+            "echo 'Compiling native_demo'; for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49 50 51 52 53 54 55 56 57 58 59 60 61 62 63 64 65 66 67 68 69 70 71 72 73 74 75 76 77 78 79 80 81 82 83 84 85 86 87 88 89 90 91 92 93 94 95 96 97 98 99 100; do echo \"noise $i\" >&2; done; echo 'error[E0425]: cannot find value `boom`' >&2; exit 101".to_owned()
         } else {
             format!(
                 "td=''\nwhile [ $# -gt 0 ]; do if [ \"$1\" = --target-dir ]; then td=\"$2\"; fi; if [ \"$1\" = --manifest-path ]; then mp=\"$2\"; fi; shift; done\n# Like cargo, resolve and write Cargo.lock next to the manifest.\necho '# resolved' > \"$(dirname \"$mp\")/Cargo.lock\"\nmkdir -p \"$td/release\"\ncp '{}' \"$td/release/libnative_demo.so\"\n",
@@ -273,7 +273,7 @@ fn failed_build_prints_the_cargo_tail_and_leaves_other_plugins_loading() {
         message.contains("error[E0425]: cannot find value `boom`"),
         "{message}"
     );
-    assert!(message.contains("noise 30"), "{message}");
+    assert!(message.contains("noise 100"), "{message}");
     assert!(
         !message.contains("noise 1\n"),
         "only the tail is kept: {message}"
@@ -322,7 +322,7 @@ fn a_failed_build_is_remembered_until_the_sources_change_or_the_build_dir_is_rem
     assert!(first.candidates.is_empty());
     assert_eq!(fx.builds(), 1);
 
-    // The next run skips the plugin with a one-line warning and does not invoke cargo.
+    // The next run repeats the saved compiler diagnostic without invoking cargo.
     let mut second = fx.scan(Some(&working));
     assert!(second.candidates.is_empty());
     second.build_pending();
@@ -332,7 +332,7 @@ fn a_failed_build_is_remembered_until_the_sources_change_or_the_build_dir_is_rem
         message.starts_with("Skipping native plugin at ")
             && message.contains("the last build failed; edit the sources or delete '")
             && message.contains("to retry")
-            && !message.contains('\n'),
+            && message.contains("error[E0425]"),
         "{message}"
     );
     assert!(message.contains(&fx.build_dir().join("native_demo").display().to_string()));

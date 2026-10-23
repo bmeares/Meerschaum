@@ -37,6 +37,25 @@ pub fn is_native_plugin_dir(path: &Path) -> bool {
     path.is_dir() && path.join("plugin.toml").is_file()
 }
 
+/// Native source or library directory, without compiling or loading it.
+pub fn native_plugin_path(dirs: &[PathBuf], name: &str) -> Option<PathBuf> {
+    dirs.iter().find_map(|dir| {
+        let package = dir.join(name);
+        if is_native_plugin_dir(&package) {
+            return Some(package);
+        }
+        let file = dir.join(format!("{name}.rs"));
+        file.is_file().then_some(file)
+    })
+}
+
+/// Native descriptors carry versions without importing the plugin; single files are unversioned.
+pub fn native_version(path: &Path) -> Option<String> {
+    let text = std::fs::read_to_string(path.join("plugin.toml")).ok()?;
+    let descriptor: toml::Value = toml::from_str(&text).ok()?;
+    descriptor.get("version")?.as_str().map(str::to_owned)
+}
+
 /// The installed Python plugin names (v4's rule, see the module docs), in directory order with
 /// each directory's entries sorted by name (v4 lists the farm in file-system order).
 pub fn python_plugin_names(dirs: &[PathBuf]) -> Vec<String> {
@@ -91,7 +110,10 @@ pub fn installed_plugin_names(dirs: &[PathBuf]) -> Vec<String> {
             // A native directory and a Python package directory both name the plugin after it.
             let name = if path.is_dir() {
                 item.clone()
-            } else if let Some(stem) = item.strip_suffix(".py") {
+            } else if let Some(stem) = item
+                .strip_suffix(".py")
+                .or_else(|| item.strip_suffix(".rs"))
+            {
                 stem.to_string()
             } else {
                 continue;
@@ -99,7 +121,7 @@ pub fn installed_plugin_names(dirs: &[PathBuf]) -> Vec<String> {
             if names.contains(&name) {
                 continue;
             }
-            if is_native_plugin_dir(&path) || plugin_file(dirs, &name).is_some() {
+            if native_plugin_path(dirs, &name).is_some() || plugin_file(dirs, &name).is_some() {
                 names.push(name);
             }
         }

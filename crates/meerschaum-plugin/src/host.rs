@@ -35,6 +35,7 @@ pub struct LoadedPlugin {
     _library: Library,
     table: &'static MrsmPluginV1,
     invoke_host: Option<InvokeWithHost>,
+    invoke_rows: Option<crate::rows_abi::InvokeRows>,
     gate: Mutex<()>,
     pub name: String,
     pub version: String,
@@ -90,10 +91,16 @@ impl LoadedPlugin {
         let invoke_host = unsafe { library.get::<InvokeWithHost>(HOST_ENTRY_POINT) }
             .ok()
             .map(|symbol| *symbol);
+        let invoke_rows = unsafe {
+            library.get::<crate::rows_abi::InvokeRows>(crate::rows_abi::ROWS_ENTRY_POINT)
+        }
+        .ok()
+        .map(|symbol| *symbol);
         Ok(Arc::new(Self {
             _library: library,
             table,
             invoke_host,
+            invoke_rows,
             gate: Mutex::new(()),
             name,
             version,
@@ -132,6 +139,9 @@ impl LoadedPlugin {
         };
         ACTIVE.with(|active| active.borrow_mut().push(self.name.clone()));
         let _active = ActiveCall;
+        if let Some(invoke) = self.invoke_rows {
+            return self.invoke_rows(invoke, request, data, host);
+        }
         let bytes = serde_json::to_vec(request).map_err(error)?;
         let mut input = data
             .map(sdk::stream)
@@ -159,6 +169,36 @@ impl LoadedPlugin {
         Ok(Reply {
             value,
             data: sdk::frame(output)?,
+        })
+    }
+    fn invoke_rows(
+        &self,
+        invoke: crate::rows_abi::InvokeRows,
+        request: &Request,
+        data: Option<&Frame>,
+        host: Option<&dyn crate::HostServices>,
+    ) -> Result<Reply> {
+        let bytes = serde_json::to_vec(&json!({"request": request, "data": data.map(frame_rows)}))
+            .map_err(error)?;
+        let mut context = host.map(|services| crate::callbacks::HostContext { services, request });
+        let table = context.as_mut().map(|context| crate::rows_abi::RowsHostV1 {
+            abi_version: 1,
+            struct_size: std::mem::size_of::<crate::rows_abi::RowsHostV1>() as u32,
+            context: (context as *mut crate::callbacks::HostContext<'_>).cast(),
+            invoke: invoke_rows_host,
+            free_bytes: sdk::free_bytes,
+        });
+        // SAFETY: library and context remain pinned through this synchronous call.
+        let result = unsafe {
+            invoke(
+                Bytes::borrowed(&bytes),
+                table.as_ref().map_or(std::ptr::null(), |t| t),
+            )
+        };
+        let reply = unsafe { decode(self.table, result) }?;
+        Ok(Reply {
+            value: reply["value"].clone(),
+            data: rows_frame(&reply["data"])?,
         })
     }
     /// Source adapter for the standard `plugin:<name>` connector, even when no custom
@@ -240,6 +280,61 @@ impl LoadedPlugin {
         )?;
         serde_json::from_value(reply.value).map_err(error)
     }
+}
+fn frame_rows(frame: &Frame) -> Vec<Value> {
+    (0..frame.height())
+        .map(|i| {
+            Value::Object(
+                frame
+                    .columns()
+                    .iter()
+                    .zip(frame.row(i))
+                    .map(|(column, value)| {
+                        (
+                            column.name.clone(),
+                            match &value {
+                                meerschaum_kernel::Value::Bool(v) => json!(v),
+                                meerschaum_kernel::Value::Int(v) => json!(v),
+                                meerschaum_kernel::Value::Float(v) => json!(v),
+                                meerschaum_kernel::Value::Json(v) => v.clone(),
+                                _ => meerschaum_kernel::serialize::json_serialize_value(&value),
+                            },
+                        )
+                    })
+                    .collect(),
+            )
+        })
+        .collect()
+}
+fn rows_frame(value: &Value) -> Result<Option<Frame>> {
+    use sdk::FetchOutput;
+    if value.is_null() {
+        return Ok(None);
+    }
+    if value.as_array().is_some_and(Vec::is_empty) {
+        return Frame::from_object_columns(Vec::new())
+            .map(Some)
+            .map_err(error);
+    }
+    serde_json::from_value::<Vec<Value>>(value.clone())
+        .map_err(error)?
+        .into_frame()
+}
+unsafe extern "C" fn invoke_rows_host(context: *mut std::ffi::c_void, bytes: Bytes) -> CallResult {
+    sdk::boundary(|| {
+        if context.is_null() || (bytes.len != 0 && bytes.ptr.is_null()) {
+            return Err(error("null rows host argument"));
+        }
+        // SAFETY: caller is inside the synchronous scope that owns this context and bytes.
+        let context = unsafe { &*context.cast::<crate::callbacks::HostContext<'_>>() };
+        let call: Value = serde_json::from_slice(unsafe { bytes.as_slice() }).map_err(error)?;
+        let method = call["method"]
+            .as_str()
+            .ok_or_else(|| error("missing host method"))?;
+        context
+            .services
+            .call(context.request, method, rows_frame(&call["data"])?)
+    })
 }
 pub fn validate_header(version: u32, size: u32) -> Result<()> {
     if version != ABI_VERSION {

@@ -161,6 +161,14 @@ fn read_candidate(
         )?;
         if let Some(candidate) = &mut candidate {
             candidate.directory = directory.to_path_buf();
+            if let Some(build) = &mut candidate.build {
+                build.shared_target = Some(
+                    build_root
+                        .resolve()
+                        .map_err(Skip::invalid)?
+                        .join(".single_file_target"),
+                );
+            }
         }
         return Ok(candidate);
     }
@@ -253,8 +261,9 @@ fn source_candidate(
     }
     if source::build_failed_before(&target_dir, &candidate.fingerprint) {
         return Err(Skip::source(format!(
-            "the last build failed; edit the sources or delete '{}' to retry",
-            target_dir.display()
+            "the last build failed; edit the sources or delete '{}' to retry\n{}",
+            target_dir.display(),
+            std::fs::read_to_string(target_dir.join("mrsm-build-error.txt")).unwrap_or_default()
         )));
     }
     match source::find_cargo() {
@@ -263,6 +272,7 @@ fn source_candidate(
                 cargo,
                 manifest_path: directory.join("Cargo.toml"),
                 target_dir,
+                shared_target: None,
                 fingerprint: candidate.fingerprint.clone(),
             });
             Ok(Some(candidate))
