@@ -198,6 +198,18 @@ step_duckdb_platform() {
 }
 step_duckdb_lib() { log "DuckDB shared library"; scripts/rust/duckdb_lib.sh; }
 step_test()   {
+  # Test processes need an isolated root; ordinary cargo commands use normal runtime paths.
+  local test_scratch
+  test_scratch="$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/mrsm-rust-tests.XXXXXX")"
+  trap "rm -rf '$test_scratch'" EXIT
+  if [ -z "${MRSM_ROOT_DIR+x}" ]; then
+    mkdir -p "$test_scratch/root"
+    export MRSM_ROOT_DIR="$test_scratch/root"
+  fi
+  if [ -z "${MRSM_PLUGINS_DIR+x}" ]; then
+    mkdir -p "$test_scratch/plugins"
+    export MRSM_PLUGINS_DIR="$test_scratch/plugins"
+  fi
   # DuckDB is not compiled in: its own library is loaded at run time. Tests run with
   # `MRSM_NO_AUTO_INSTALL=1` in CI, so provide it from the persistent cache (one download per
   # DuckDB version on the runner, never per run) unless the caller already set MRSM_DUCKDB_LIB.
@@ -206,9 +218,9 @@ step_test()   {
     export MRSM_DUCKDB_LIB
   fi
   if [ -z "${MRSM_TEST_DUCKDB_PATH+x}" ]; then
-    MRSM_TEST_DUCKDB_PATH="$(mktemp -d "${RUNNER_TEMP:-$HOME/.cache}/mrsm-duckdb-tests.XXXXXX")"
+    MRSM_TEST_DUCKDB_PATH="$test_scratch/duckdb"
+    mkdir -p "$MRSM_TEST_DUCKDB_PATH"
     export MRSM_TEST_DUCKDB_PATH
-    trap "rm -rf '$MRSM_TEST_DUCKDB_PATH'" EXIT
   fi
   # The cross-implementation tests (worker `plugins`, `compose_execution`, `wiring_parity`, ...) run the
   # released v4 from `.venv-ref/`, which exists only on a runner that already ran the `parity` job: each
