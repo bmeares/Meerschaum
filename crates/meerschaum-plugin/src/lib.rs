@@ -11,6 +11,7 @@ pub mod host;
 pub mod registry;
 pub mod rows_abi;
 pub mod sdk;
+mod single_file;
 pub mod source;
 pub use arrow;
 pub use callbacks::{Bound, HostServices, Pipe};

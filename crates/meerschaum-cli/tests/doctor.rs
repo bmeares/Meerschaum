@@ -954,34 +954,41 @@ fn a_broken_plugin_is_a_warning() {
     assert_eq!(check(&doc, "plugins", "installed")["status"], "PASS");
 }
 
-/// v4 reads an empty `MRSM_ROOT_DIR`, `MRSM_CONFIG_DIR` or `MRSM_VENVS_DIR` as the working
-/// directory (`Path('').resolve()`), which once made a development build write `cache/`, `config/`
-/// and `pipes.json` into a repository root. Development builds refuse them, naming the variable;
-/// release builds keep v4's behavior.
+/// Empty path overrides have the same working-directory semantics in every build.
 #[test]
-fn empty_path_variables_are_refused_by_development_builds_only() {
+fn empty_path_variables_are_accepted_in_every_build() {
     for var in ["MRSM_ROOT_DIR", "MRSM_CONFIG_DIR", "MRSM_VENVS_DIR"] {
         let env = Env::new();
         let cwd = env.root.parent().unwrap().join("cwd");
         std::fs::create_dir_all(&cwd).unwrap();
-        let mut cmd = env.command(&["show", "version", "--nopretty"]);
-        cmd.env(var, "").current_dir(&cwd);
-        let out = cmd.output().unwrap();
-        let files = std::fs::read_dir(&cwd).unwrap().count();
-        if cfg!(debug_assertions) {
-            let shown = text(&out);
-            assert!(!out.status.success(), "{var}: {shown}");
-            assert!(
-                shown.contains(&format!("{var} is set but empty")),
-                "{var}: {shown}"
-            );
-            assert!(!shown.contains("MRSM_ALLOW_DEFAULT_ROOT"), "{var}: {shown}");
-            assert_eq!(
-                files, 0,
-                "{var}: a development build wrote into the working directory"
-            );
-        } else {
-            assert!(out.status.success(), "{var}: {}", text(&out));
-        }
+        let output = env
+            .command(&["show", "version", "--nopretty"])
+            .env(var, "")
+            .current_dir(&cwd)
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{var}: {}", text(&output));
     }
+}
+
+#[test]
+fn a_local_binary_uses_the_default_root_without_an_opt_in() {
+    let env = Env::new();
+    let home = env.root.parent().unwrap().join("home");
+    let xdg = home.join(".config");
+    std::fs::create_dir_all(&xdg).unwrap();
+    let output = env
+        .command(&["show", "config", "--nopretty"])
+        .env_remove("MRSM_ROOT_DIR")
+        .env_remove("MRSM_CONFIG_DIR")
+        .env("HOME", &home)
+        .env("XDG_CONFIG_HOME", &xdg)
+        .current_dir(&home)
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{}", text(&output));
+    assert!(
+        xdg.join("meerschaum/config").is_dir(),
+        "the CLI should use its normal default root"
+    );
 }

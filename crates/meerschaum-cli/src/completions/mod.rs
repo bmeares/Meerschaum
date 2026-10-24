@@ -509,7 +509,12 @@ pub(crate) fn cached_manifest(root: &std::path::Path) -> meerschaum_worker::mani
         // The native manifest may omit argparse fields the worker manifest always lists.
         if let Some(plugins) = raw["plugins"].as_object_mut() {
             for plugin in plugins.values_mut() {
-                for argument in plugin["arguments"].as_array_mut().into_iter().flatten() {
+                for argument in plugin
+                    .get_mut("arguments")
+                    .and_then(serde_json::Value::as_array_mut)
+                    .into_iter()
+                    .flatten()
+                {
                     for key in ["nargs", "const", "default", "choices", "metavar"] {
                         if argument.get(key).is_none() {
                             argument[key] = serde_json::Value::Null;

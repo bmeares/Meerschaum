@@ -10,8 +10,17 @@ Meerschaum 5 is a rewrite of the core in Rust: the data kernel, the `sql:` / `va
 
 #### Highlights
 
-- **Write Rust data plugins as a single file.**  
-  Place a `.rs` file directly in the plugins directory. Meerschaum generates its Cargo crate, manifest and native adapter in the build cache, compiles it on first use, and rebuilds after edits. Simple plugins embed a small row runtime, share dependency builds, and leave Polars and Arrow processing in the host. No descriptor, trait implementation or export macro is required.
+- **Write Rust plugins as single files.**  
+  Place a `.rs` file directly in the plugins directory. Use `#[make_action]` for commands and `#[make_connector]` for source connector modules, alongside ordinary fetch, sync, register, and helper functions. Meerschaum generates the Cargo project, manifest, and native adapter, compiles on first use, and rebuilds after edits. Simple plugins use a lightweight runtime and share dependency builds. No descriptor, trait implementation, or export macro is required.
+
+- **Declare Rust dependencies in the same file.**  
+  An optional Cargo block in the source's opening doc comments accepts dependency versions, features, aliases, Git sources, and local paths. The generated lockfile and builds stay in the cache. The Rust quickstart leads with short, runnable examples; packaging and SDK details have their own advanced page.
+
+- **Bootstrap native Pipes and keep prompt cursors aligned.**  
+  Pipe bootstrap and registration call native registration hooks without falling back to Python. Connector defaults are merged under explicit Pipe parameters. Input prompts measure terminal display cells, so the cursor stays after typed text when the question icon or input contains wide Unicode characters.
+
+- **Use normal root-directory behavior in local builds.**  
+  Debug builds use the default root without an opt-in, and Cargo no longer substitutes a scratch root automatically. Empty root, configuration, and venv path overrides resolve to the working directory, matching release builds.
 
 - **Install Rust plugins from repository archives.**  
   `install plugins` accepts single `.rs` files and native plugin directories, validates builds and setup without a Python environment, records repository origins, and restores the previous plugin after a failure. Single-file Rust plugins are included in lifecycle discovery and uninstall.

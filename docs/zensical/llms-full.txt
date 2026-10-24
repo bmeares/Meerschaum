@@ -324,7 +324,7 @@ The wheel contains the native core and has no required Python dependencies. Whee
     `pip install meerschaum` is the whole product: the `mrsm` command it installs runs the native command line from inside the package. If you would rather have a standalone binary (it starts in about 10 ms and needs no Python until you use a Python plugin or connector), build the same command line with Cargo:
 
     ```bash
-    cargo install meerschaum --locked            # during the release candidates: --version 5.0.0-rc.10
+    cargo install meerschaum --locked            # during the release candidates: --version 5.0.0-rc.11
     ```
 
     This needs Rust 1.95 or newer. `--locked` builds with the dependency versions Meerschaum was tested with (without it Cargo may pick newer ones, which can break the build on Windows). Prebuilt standalone binaries (Linux x86_64 and arm64, macOS arm64 and x86_64, Windows x86_64) are attached to each GitHub release, with a SHA-256 file for each.
@@ -8371,11 +8371,9 @@ Run `bootstrap plugin` to get started:
 mrsm bootstrap plugin
 ```
 
-!!! tip "New in v5: Rust plugins"
+!!! tip "Rust plugins"
 
-    Meerschaum v5 is still a Python package, and most plugins are still Python modules that work unchanged. Rust plugins are optional and target the native core, kernel and engine path.
-
-    Prefer a native library over a Python module? [Rust plugins](/reference/plugins/rust-plugins/) can do everything Python plugins can, load in-process without a Python interpreter, and sit side by side with Python plugins in the same directory.
+    Prefer Rust? [Create a single-file plugin](/reference/plugins/rust-plugins/) to add actions, data sources, and connectors. Python and Rust plugins can share the same plugins directory. The [advanced Rust guide](/reference/plugins/rust-plugins/advanced/) covers packaging and other native extensions.
 
 !!! question "What can I do with plugins?"
 
@@ -8442,7 +8440,7 @@ Source: https://meerschaum.io/reference/plugins/writing-plugins/
 
 # ✍️ Writing Your Own Plugins
 
-For Rust data plugins, a single `.rs` file with `fetch()` or `sync()` is enough. See [Rust plugins](/reference/plugins/rust-plugins/) for typed Pipe arguments, bounds and host operations. The examples below use Python.
+Rust plugins can be a single `.rs` file for actions, data sources, or connectors. See the [Rust quickstart](/reference/plugins/rust-plugins/) to get started, or the [advanced guide](/reference/plugins/rust-plugins/advanced/) for packaging and the full SDK. The examples below use Python.
 
 > This tutorial explains how to extend Meerschaum with plugins. For general information, consult the [Types of Plugins reference page](/reference/plugins/types-of-plugins/).
 
@@ -9385,7 +9383,7 @@ Source: https://meerschaum.io/reference/plugins/types-of-plugins/
 
 > This page introduces the different types of Meerschaum plugins. For technical information, consult the [Writing Your Own Plugins tutorial](/reference/plugins/writing-plugins/).
 
-Plugins are Python modules, and in v5 they may also be native [Rust plugins](/reference/plugins/rust-plugins/), which support data sources, actions and supported native API extensions. A Rust data plugin can be a single `.rs` file defining `fetch` or `sync`. There are three main kinds of Meerschaum plugin: those which **provide data**, **perform actions**, or **extend the API**, and you may choose to use any or all of the three purposes. You may also create [library plugins](#library-plugins) to contain utilities for other plugins.
+Plugins are Python modules, and in v5 they may also be native [Rust plugins](/reference/plugins/rust-plugins/), which support data sources, actions and supported native API extensions. A Rust plugin can be a single `.rs` file defining `fetch` or `sync`, marking actions with `#[make_action]`, or defining source connector modules with `#[make_connector]`. There are three main kinds of Meerschaum plugin: those which **provide data**, **perform actions**, or **extend the API**, and you may choose to use any or all of the three purposes. You may also create [library plugins](#library-plugins) to contain utilities for other plugins.
 
 ## 📈 Data Plugins
 
@@ -9541,128 +9539,140 @@ Source: https://meerschaum.io/reference/plugins/rust-plugins/
 
 # 🦀 Rust Plugins
 
-!!! info "v5 is still a Python package"
+A Rust plugin can be one `.rs` file. Add a command, return rows of data, or create a
+connector with a few functions. Meerschaum handles building and loading it.
 
-    Meerschaum 5 is installed the same way as before (`pip install meerschaum`), and most users keep writing Python plugins, which work unchanged. Rust plugins are an option, not a requirement: use one for the native performance path (the Rust core, kernel and Syncing Engine) or to run on the lean `slim` image (the base wheel, no extras). Everything on this page is about that option.
+Save your files in the plugins directory (normally `~/.config/meerschaum/plugins`;
+see [custom paths](../environment.md#mrsm_plugins_dir)). You need a Rust toolchain
+with `cargo` available for the first build and after edits. The first build may
+download dependencies; later runs reuse the compiled plugin.
 
-> New in v5. A Rust plugin is a native shared library that Meerschaum loads in-process. It can fetch or sync data, add actions and arguments, run hooks around syncs, provide a connector, serve supported native HTTP routes and add page-contract console pages. Python Dash callbacks and arbitrary FastAPI customization remain Python-host capabilities. Python plugins are unchanged, and the two kinds live side by side in the same plugins directory.
+## Add a command
 
-Choose a Rust plugin when you want no Python interpreter at runtime (the standalone `mrsm` binary of `cargo install meerschaum`), predictable performance on large frames, or a single binary artifact. Keep writing Python for everything else.
+Save this as `greetings.rs`:
 
-!!! warning "Trust"
+```rust
+/// Say hello.
+#[make_action]
+fn greet() {
+    println!("Hello from Rust!");
+}
+```
 
-    A plugin is arbitrary native code running inside the `mrsm` process. The ABI is a compatibility contract, **not a sandbox**. Install only plugins you trust. (A sandboxed WebAssembly host for the same interface is planned for v5.x.)
+Run it:
 
-## Single-file plugins
+```bash
+mrsm greet
+```
 
-Drop `readings.rs` directly into your Meerschaum plugins directory:
+The function name becomes the command. The `///` comment becomes its help text.
+To accept names from the command line, replace the function with:
+
+```rust
+#[make_action]
+fn greet(action: Vec<String>) -> (bool, String) {
+    (true, format!("Hello, {}!", action.join(", ")))
+}
+```
+
+`mrsm greet Alice Bob` returns `Hello, Alice, Bob!`. The returned pair contains
+whether the command succeeded (`true` or `false`) and a message.
+
+## Provide data
+
+Save this as `readings.rs`. Each `json!` object is one row:
 
 ```rust
 fn fetch() -> Vec<Value> {
     vec![json!({"id": 1, "temperature": 21.5})]
 }
-```
 
-That is the entire file. Meerschaum discovers it as `plugin:readings`, generates the
-Cargo crate, manifest and native export adapter in its cache, and compiles it on first
-use. No `Cargo.toml`, `plugin.toml`, trait implementation or export macro is needed.
-A Rust toolchain (`cargo` on `PATH`) is required for the first build and after edits;
-the generated runtime depends only on Serde and `serde_json` and its small dependency set. It does
-not compile Meerschaum, Polars, Arrow, connectors or an async runtime. Dependencies are
-shared across single-file plugins, and builds favor low compilation latency (`opt-level = 0`).
-The first build may need network access to download dependencies.
-
-### Accepted signatures
-
-Define `fetch`, `sync`, or both. Each function may accept any subset of these **named**
-parameters, in any order:
-
-| Parameter | Type | Meaning |
-|---|---|---|
-| `pipe` | `&Pipe` | Pipe metadata and operations on its host instance |
-| `begin` | `Option<Bound>` | Inclusive lower bound, or `None` when not supplied / unbounded |
-| `end` | `Option<Bound>` | Exclusive upper bound, or `None` when unbounded |
-| `data` (sync only) | `Option<Frame>` | Input frame if the caller supplied one |
-
-For example, `fetch(pipe: &Pipe)`, `fetch(end: Option<Bound>)`, and
-`fetch(pipe: &Pipe, begin: Option<Bound>, end: Option<Bound>)` are all valid.
-Leading underscores are allowed (`_pipe`, `_begin`); use a named parameter rather than
-`_`. Names distinguish `begin` from `end`, whose types are identical. Functions must be
-synchronous, safe, non-generic Rust functions, declared at the file's top level.
-`Request` is an internal dispatch envelope, not an accepted single-file parameter.
-
-`Pipe`, `Bound`, `SuccessTuple`, JSON `Value`, `json!`, `Frame`, `Result`, and `Error`
-are available without imports. `Bound` is either `Bound::Int(i64)` or
-`Bound::Datetime(String)` (an ISO timestamp). Fetch receives the engine's resolved
-bounds; an unspecified default begin in a sync override is `None`.
-
-Fetch may return `Vec<Value>` containing JSON objects, `Frame`, `Option<Frame>`, or
-any of those wrapped in `Result`. Missing row fields become null cells; an empty vector
-means no data. Single-file plugins exchange JSON rows over a versioned C ABI; the host
-converts them to its native frames. `Frame` here is a lightweight row container with
-`from_rows`, `rows`, `into_rows` and `height`, not the full SDK's Arrow-backed frame.
-Use a Cargo plugin for typed Arrow data, preserved frame schemas, or optimized bulk processing.
-Sync may return `SuccessTuple`, `(bool, String)`, `(bool, &str)`, or a `Result` of those.
-If both functions exist, the engine uses `sync` as the override, as with Python plugins.
-A normal engine-invoked sync override receives `data = None`; explicit input is written
-by the engine without invoking the override again.
-
-### Pipe operations
-
-`pipe.connector_keys()`, `metric_key()`, `location_key()`, `instance_keys()`, `keys()`,
-and `parameters()` expose the current Pipe's metadata. Host operations are fallible:
-
-- `pipe.get_sync_time()?` returns `Option<Bound>`, reading the newest axis value from
-  this Pipe's instance. An empty target returns `None`.
-- `pipe.sync(rows)?` or `pipe.sync(frame)?` writes supplied data through the host's normal
-  sync engine, including dtype enforcement and existing-row checks. It returns a
-  `SuccessTuple` and inherits the surrounding sync options. Empty rows are a successful
-  no-op. Supply data explicitly; a zero-argument sync would recursively invoke the plugin.
-
-An integer-axis sync plugin can therefore be just:
-
-```rust
-fn sync(pipe: &Pipe) -> Result<SuccessTuple> {
-    let next = match pipe.get_sync_time()? {
-        Some(Bound::Int(last)) => last + 1,
-        None => 1,
-        _ => return Err(Error::Message("Expected an integer axis".into())),
-    };
-    pipe.sync(vec![json!({"id": next})])
+fn register() -> Value {
+    json!({"columns": {"id": "id"}})
 }
 ```
 
-Register an integer axis for this example:
+`fetch` supplies the data. The optional `register` function supplies Pipe settings;
+here, `id` identifies each row. Register a Pipe, then sync it:
 
 ```bash
-mrsm register pipe -c plugin:readings -m readings -i sql:local --params '{"columns":{"datetime":"id"},"dtypes":{"id":"int"}}'
+mrsm register pipe -c plugin:readings -m readings -i sql:local
 mrsm sync pipes -c plugin:readings -i sql:local
 ```
 
-Host operations are synchronous and scoped to the current invocation. A `Pipe` cannot
-be sent to background threads. Re-entering the same native library through a callback
-returns an error instead of waiting on its own call lock. These operations apply to the
-current Pipe; arbitrary connector access, other Pipe construction and Python helper
-imports are not exposed.
+The filename supplies the plugin name: `readings.rs` becomes `plugin:readings`.
+`Value` and `json!` are available without imports. Return the final expression
+without a trailing semicolon, as shown above.
 
-### Builds and dependencies
+## Create a connector
 
-The filename supplies the plugin name, and the generated version is `0.0.0`.
-Sources and build output stay under `<root>/cache/native_build/<name>/`; nothing is
-written beside the original `.rs` file. Unchanged builds are reused, edits trigger
-recompilation, and failed builds are remembered until an edit or cache deletion.
-The small runtime is embedded by the running host; there is no published SDK dependency.
-Shared Cargo dependencies live in `<root>/cache/native_build/.single_file_target/`; each
-plugin has its own copied library and build stamp. Compiler diagnostics are saved in
-`<root>/cache/native_build/<name>/mrsm-build-error.txt` and shown again for failed builds.
+To provide your own connector type, put its functions in a marked module:
 
-Rust returns the final expression of a function. In the example above, do **not** put
-a semicolon after `vec![...]`: that would discard the rows and return `()` instead of
-`Vec<Value>`.
+```rust
+#[make_connector]
+mod readings {
+    fn fetch(connector: &Connector) -> Vec<Value> {
+        vec![json!({"id": 1, "source": connector.label()})]
+    }
+}
+```
 
-Use the full crate layout below for extra Cargo dependencies, multiple source files,
-relative included assets, actions, hooks and other capabilities. Relative paths in a
-shorthand file resolve from its generated copy in the cache.
+This creates `readings:<label>` connectors. For example:
+
+```bash
+mrsm register pipe -c readings:office -m readings -i sql:local
+mrsm sync pipes -c readings:office -i sql:local
+```
+
+The label is `office` in this example. Use `connector.config()` to read its
+configuration. You can add `register` inside the module to supply Pipe settings.
+One file may contain several actions, connector modules, and helper functions.
+
+## Add dependencies
+
+To use another Rust crate, put a Cargo dependency block at the top of your file:
+
+```rust
+//! ```cargo
+//! [dependencies]
+//! regex = "1"
+//! ```
+```
+
+Then import it normally, for example `use regex::Regex;`. Versions and features
+use standard Cargo syntax. Meerschaum builds the dependencies and keeps the
+lockfile in its cache; no separate `Cargo.toml` is needed.
+
+## Learn more
+
+Run `mrsm show plugins` to check discovery, or `mrsm greet --help` for an action's
+help. Editing a file triggers a rebuild on the next command that loads plugins.
+Only run plugins you trust.
+
+See the [single-file reference](rust-plugins/advanced.md#single-file-reference)
+for optional arguments, Pipe operations, sync overrides, and dependency details.
+The [advanced guide](rust-plugins/advanced.md) covers Cargo packaging, the full SDK,
+hooks, web extensions, testing, and distribution.
+
+
+---
+
+# Advanced
+
+Source: https://meerschaum.io/reference/plugins/rust-plugins/advanced/
+
+# Advanced Rust Plugins
+
+Start with the [single-file Rust plugin guide](../rust-plugins.md) for actions,
+data sources, connectors, and inline dependencies. This page covers Cargo packaging,
+the full SDK, deployment, and detailed single-file behavior.
+
+Use a Cargo plugin for multiple source files, typed Arrow data, custom instances,
+command-line flags, sync hooks, HTTP routes, or console pages. Rust plugins support
+these native extensions; Python Dash callbacks and arbitrary FastAPI customization
+remain Python-host capabilities.
+
+Only build and load plugins you trust: native plugins run inside the Meerschaum process.
 
 ## 📁 Layout
 
@@ -9742,7 +9752,7 @@ edition = "2024"
 crate-type = ["cdylib"]
 
 [dependencies]
-meerschaum-plugin = "=5.0.0-rc.10"   # prerelease versions require an exact prerelease requirement
+meerschaum-plugin = "=5.0.0-rc.11"   # prerelease versions require an exact prerelease requirement
 
 [profile.release]
 panic = "unwind"      # required: the SDK catches panics at the boundary
@@ -9836,6 +9846,63 @@ The part for your plugin lives under `plugins.<name>`:
 ```
 
 Arguments reach `context.kwargs` exactly as they reach a Python plugin's `**kwargs`, which is v4's rule: an argument that was not given is **absent** (never `false` or `null`), a flag that was given is `true`, and a `store_false` flag is present (as `true`) only while it is not given. Declare `"default": "None"` to receive an explicit `null`. Read flags with a fallback (`kwargs.get("native_demo").and_then(Value::as_bool).unwrap_or(false)`).
+
+### Equivalents of `@make_action` and `@make_connector`
+
+Single-file plugins use `#[make_action]` on a function and `#[make_connector]` on a
+module, as shown in the [single-file guide](../rust-plugins.md). The generator writes their manifests and dispatchers for you.
+
+For packaged Cargo plugins, use declarations in `manifest()` and handlers in
+`Plugin::call()`, as described here.
+
+For Python's `@make_action`, add an entry to the plugin's `actions` array:
+
+```json
+"actions": [{"name": "hello", "doc": "Return a greeting."}]
+```
+
+Then handle the action in `call()`:
+
+```rust
+"action" if request.context["name"] == "hello" => {
+    Ok(Reply::json(json!([true, "Hello!"])))
+}
+```
+
+This registers `mrsm hello`; parsed options arrive in `request.context["kwargs"]`.
+
+For Python's `@make_connector`, list the type in the plugin entry's `connectors`
+array and declare it in the manifest's top-level `connector_types` object:
+
+```json
+"connector_types": {
+  "my_source": {
+    "type": "my_source", "plugin": "native_demo", "class_name": "Demo",
+    "is_instance": false, "is_thread_safe": false,
+    "methods": ["fetch", "register"]
+  }
+}
+```
+
+With `"connectors": ["my_source"]` in `plugins.native_demo`, this provides
+`my_source:<label>` connectors. Dispatch by `request.method`; the connector type,
+label and configuration are in `request.connector_type`, `request.label` and
+`request.config`. Set `is_instance` to `true` and implement instance operations
+when the connector should also be usable with `-i`.
+
+The optional source `register` handler returns a JSON object of default Pipe
+parameters (or `null`), with the Pipe in `request.context["pipe"]`. For
+`plugin:<name>`, also list `register` under `data_functions`. Bootstrap uses these
+defaults; ordinary registration merges explicitly supplied parameters over them.
+This source hook differs from `register_pipe`, which persists a Pipe on an instance.
+
+Rust plugins cover actions, arguments, hooks, fetch/sync, custom connectors and
+instances, supported HTTP routes, and console page fragments. They do **not** have
+complete Python plugin parity: arbitrary Python helper imports and connector
+access, Dash callbacks, unrestricted FastAPI customization, native streaming
+`subscribe`, repository upload, and live library reload are not available.
+The Pipe helper surface is described in the [single-file reference](#single-file-reference), and HTTP adapter limits are described above; see the
+status note below for further limits.
 
 ## 🧩 What a plugin can provide
 
@@ -9996,7 +10063,7 @@ Single-file plugins additionally export `mrsm_plugin_invoke_rows_v1`. This exten
 exchanges JSON request, result and row bytes, with call-scoped host callbacks; it does
 not change the original Arrow ABI. Host and plugin always free their own allocations.
 JSON rows trade conversion overhead and schema fidelity for small builds; full Cargo
-plugins retain the Arrow path below.
+plugins use the Arrow path described above.
 
 The optional `mrsm_plugin_invoke_host_v1` symbol accepts the original request and Arrow
 streams plus a versioned host callback table. Its context is valid only during the call;
@@ -10025,6 +10092,144 @@ the repository must supply an archive appropriate for the host (or portable Rust
 !!! note "Status in this pre-release"
 
     Source plugins (a Cargo crate built by Meerschaum into the root's cache) work when `cargo` is on `PATH`; the prebuilt `lib<name>.<ext>` remains the contract for the slim image. Discovery, the manifest cache, actions, arguments, hooks, source `fetch`/`sync`, custom connectors, routes and pages are implemented, and each is exercised through the `mrsm` binary by the tests listed under [Testing your plugin](#testing-your-plugin). The deepest instance operations (reads, rowcounts, maintenance) are exercised only at the library level; through the binary the example instance proves resolution, `fetch_pipes_keys`, `sync_pipe` and the lease fallback. Not yet available: `subscribe` for continuous streams from a native plugin (it needs a reader/sink SDK beyond the current eager `Frame` API), repository upload and target-triple selection by `install plugin`, and live reload of an already-open library (replace a plugin while `mrsm` is not running).
+
+## Single-file reference
+
+These details apply to the [single-file format](../rust-plugins.md), without a Cargo project.
+
+### Accepted signatures
+
+For data sources, define `fetch`, `sync`, or both. Each function may accept any subset of these **named**
+parameters, in any order:
+
+| Parameter | Type | Meaning |
+|---|---|---|
+| `pipe` | `&Pipe` | Pipe metadata and operations on its host instance |
+| `connector` | `&Connector` | Current connector type, label, and resolved configuration |
+| `kwargs` | `&Value` | Options passed to the handler |
+| `begin` | `Option<Bound>` | Inclusive lower bound, or `None` when not supplied / unbounded |
+| `end` | `Option<Bound>` | Exclusive upper bound, or `None` when unbounded |
+| `data` (sync only) | `Option<Frame>` | Input frame if the caller supplied one |
+
+For example, `fetch(pipe: &Pipe)`, `fetch(end: Option<Bound>)`, and
+`fetch(pipe: &Pipe, begin: Option<Bound>, end: Option<Bound>)` are all valid.
+Leading underscores are allowed (`_pipe`, `_begin`); use a named parameter rather than
+`_`. Names distinguish `begin` from `end`, whose types are identical. Functions must be
+synchronous, safe, non-generic Rust functions, declared at the file's top level or inside a marked connector module.
+`Request` is an internal dispatch envelope, not an accepted single-file parameter.
+
+`Pipe`, `Connector`, `Bound`, `SuccessTuple`, JSON `Value`, `json!`, `Frame`, `Result`, and `Error`
+are available without imports. `Bound` is either `Bound::Int(i64)` or
+`Bound::Datetime(String)` (an ISO timestamp). Fetch receives the engine's resolved
+bounds; an unspecified default begin in a sync override is `None`.
+
+Fetch may return `Vec<Value>` containing JSON objects, `Frame`, `Option<Frame>`, or
+any of those wrapped in `Result`. Missing row fields become null cells; an empty vector
+means no data. Single-file plugins exchange JSON rows over a versioned C ABI; the host
+converts them to its native frames. `Frame` here is a lightweight row container with
+`from_rows`, `rows`, `into_rows` and `height`, not the full SDK's Arrow-backed frame.
+Use a Cargo plugin for typed Arrow data, preserved frame schemas, or optimized bulk processing.
+Sync may return `SuccessTuple`, `(bool, String)`, `(bool, &str)`, or a `Result` of those.
+If both functions exist, the engine uses `sync` as the override, as with Python plugins.
+A normal engine-invoked sync override receives `data = None`; explicit input is written
+by the engine without invoking the override again.
+
+### Pipe operations
+
+`pipe.connector_keys()`, `metric_key()`, `location_key()`, `instance_keys()`, `keys()`,
+and `parameters()` expose the current Pipe's metadata. Host operations are fallible:
+
+- `pipe.get_sync_time()?` returns `Option<Bound>`, reading the newest axis value from
+  this Pipe's instance. An empty target returns `None`.
+- `pipe.sync(rows)?` or `pipe.sync(frame)?` writes supplied data through the host's normal
+  sync engine, including dtype enforcement and existing-row checks. It returns a
+  `SuccessTuple` and inherits the surrounding sync options. Empty rows are a successful
+  no-op. Supply data explicitly; a zero-argument sync would recursively invoke the plugin.
+
+An integer-axis sync plugin can therefore be just:
+
+```rust
+fn sync(pipe: &Pipe) -> Result<SuccessTuple> {
+    let next = match pipe.get_sync_time()? {
+        Some(Bound::Int(last)) => last + 1,
+        None => 1,
+        _ => return Err(Error::Message("Expected an integer axis".into())),
+    };
+    pipe.sync(vec![json!({"id": next})])
+}
+```
+
+Register an integer axis for this example:
+
+```bash
+mrsm register pipe -c plugin:readings -m readings -i sql:local --params '{"columns":{"datetime":"id"},"dtypes":{"id":"int"}}'
+mrsm sync pipes -c plugin:readings -i sql:local
+```
+
+Host operations are synchronous and scoped to the current invocation. A `Pipe` cannot
+be sent to background threads. Re-entering the same native library through a callback
+returns an error instead of waiting on its own call lock. These operations apply to the
+current Pipe; arbitrary connector access, other Pipe construction and Python helper
+imports are not exposed.
+
+### Dependencies
+
+The standard library and shorthand types need no declarations. To use an external
+crate, add one optional Cargo block at the **top of the same file**:
+
+```rust
+//! ```cargo
+//! [dependencies]
+//! regex = "1"
+//! ```
+
+use regex::Regex;
+
+#[make_action]
+fn count_words(action: Vec<String>) -> (bool, String) {
+    let words = Regex::new(r"\w+").unwrap();
+    let count = words.find_iter(&action.join(" ")).count();
+    (true, format!("{count} words"))
+}
+```
+
+Run `mrsm count words hello world`. Cargo versions, feature lists, renamed dependencies,
+Git dependencies, and local `path` dependencies use their normal Cargo syntax.
+Local dependency paths resolve relative to the original `.rs` file, rather than the cache.
+You can enable Serde features, for example `serde = { version = "1", features = ["derive"] }`;
+`serde_json` keeps the features required by the runtime.
+
+Meerschaum generates the Cargo project and keeps its `Cargo.lock` in the build cache.
+Unchanged plugins reuse the built library; editing a dependency declaration triggers a
+rebuild. Dependencies are compiled into the plugin, so Cargo is needed for builds but
+not to use an already-built library. First builds may download crates. Nothing is
+installed into a Python virtual environment.
+
+Only `[dependencies]` is supported in the inline block. Use a packaged Cargo plugin for
+workspace settings, build dependencies, custom profiles, or publishing a lockfile.
+Changes to external path dependencies are not fingerprinted: edit the `.rs` file or
+remove its build cache after changing such a dependency. Relative `include_str!` and
+other source paths still resolve from the cached source; use a Cargo plugin for assets.
+
+### Single-file build cache
+
+The filename supplies the plugin name, and the generated version is `0.0.0`.
+Sources and build output stay under `<root>/cache/native_build/<name>/`; nothing is
+written beside the original `.rs` file. Unchanged builds are reused, edits trigger
+recompilation, and failed builds are remembered until an edit or cache deletion.
+The small runtime is embedded by the running host; there is no published SDK dependency.
+Shared Cargo dependencies live in `<root>/cache/native_build/.single_file_target/`; each
+plugin has its own copied library and build stamp. Compiler diagnostics are saved in
+`<root>/cache/native_build/<name>/mrsm-build-error.txt` and shown again for failed builds.
+
+Rust returns the final expression of a function. In the example above, do **not** put
+a semicolon after `vec![...]`: that would discard the rows and return `()` instead of
+`Vec<Value>`.
+
+Use the full crate layout above for multiple source files, relative included assets,
+instance connectors, custom arguments, hooks, routes, pages, and other SDK capabilities. Relative paths in a
+shorthand file resolve from its generated copy in the cache.
+
 
 
 ---
@@ -10119,7 +10324,6 @@ All Meerschaum environment variables begin with the prefix `MRSM_`. The most com
 | `MRSM_BIN` | Run a standalone `mrsm` binary instead of the in-process CLI of the Python package. | _(unset)_ |
 | `MRSM_PYTHON` | The Python interpreter the binary runs plugin workers and `upgrade meerschaum` with. | _(auto-detected)_ |
 | `MRSM_WORKER_STARTUP_TIMEOUT` | Seconds a Python worker may take to connect and say hello before it is killed and refused (for 10 s only). | `60` |
-| `MRSM_ALLOW_DEFAULT_ROOT` | Let a debug build use the default root directory. | _(unset)_ |
 
 !!! tip "Inspecting your environment"
     Run `mrsm show environment` to list every currently set `MRSM_` variable. Run `mrsm show config` to inspect the resolved configuration after all patches and connectors have been applied.
@@ -10323,11 +10527,6 @@ names the interpreter, what it found and the fix (`pip install meerschaum==<vers
 the refusal is remembered for a few seconds, so many pipes do not each wait. A worker has
 `MRSM_WORKER_STARTUP_TIMEOUT` seconds (default 60, for connecting and the hello together) before it is
 killed; raise it for a legitimately slow cold start.
-
-## **`MRSM_ALLOW_DEFAULT_ROOT`**
-
-Debug builds of the binary refuse to start without `MRSM_ROOT_DIR` so development never touches the
-real root. Release builds and the published packages are unaffected. Prefer setting `MRSM_ROOT_DIR`.
 
 ## Internal Variables
 
@@ -11306,7 +11505,7 @@ impl Plugin for Acme {
 meerschaum_plugin::export_plugin!(Acme);
 ```
 
-A plugin directory may contain both a Rust library and a Python module; the Rust plugin replaces a Python plugin of the same name entirely, with no per-function fallback. Python plugins can depend on Rust plugins and vice versa through `required`. The [Rust plugin guide](/reference/plugins/rust-plugins/) covers the layout, source plugins, the manifest, the C ABI, building and loading an example, how to test a plugin, and what is not available yet. A native plugin's console pages return the same HTML fragments and Plotly figure JSON as a Python page-contract page.
+A plugin directory may contain both a Rust library and a Python module; the Rust plugin replaces a Python plugin of the same name entirely, with no per-function fallback. Python plugins can depend on Rust plugins and vice versa through `required`. Start with the [single-file Rust plugin guide](/reference/plugins/rust-plugins/); the [advanced guide](/reference/plugins/rust-plugins/advanced/) covers packaging, the SDK manifest, the C ABI, testing, and current limitations. A native plugin's console pages return the same HTML fragments and Plotly figure JSON as a Python page-contract page.
 
 ## 🚢 Deployment
 
@@ -11787,8 +11986,17 @@ Meerschaum 5 is a rewrite of the core in Rust: the data kernel, the `sql:` / `va
 
 #### Highlights
 
-- **Write Rust data plugins as a single file.**  
-  Place a `.rs` file directly in the plugins directory. Meerschaum generates its Cargo crate, manifest and native adapter in the build cache, compiles it on first use, and rebuilds after edits. Simple plugins embed a small row runtime, share dependency builds, and leave Polars and Arrow processing in the host. No descriptor, trait implementation or export macro is required.
+- **Write Rust plugins as single files.**  
+  Place a `.rs` file directly in the plugins directory. Use `#[make_action]` for commands and `#[make_connector]` for source connector modules, alongside ordinary fetch, sync, register, and helper functions. Meerschaum generates the Cargo project, manifest, and native adapter, compiles on first use, and rebuilds after edits. Simple plugins use a lightweight runtime and share dependency builds. No descriptor, trait implementation, or export macro is required.
+
+- **Declare Rust dependencies in the same file.**  
+  An optional Cargo block in the source's opening doc comments accepts dependency versions, features, aliases, Git sources, and local paths. The generated lockfile and builds stay in the cache. The Rust quickstart leads with short, runnable examples; packaging and SDK details have their own advanced page.
+
+- **Bootstrap native Pipes and keep prompt cursors aligned.**  
+  Pipe bootstrap and registration call native registration hooks without falling back to Python. Connector defaults are merged under explicit Pipe parameters. Input prompts measure terminal display cells, so the cursor stays after typed text when the question icon or input contains wide Unicode characters.
+
+- **Use normal root-directory behavior in local builds.**  
+  Debug builds use the default root without an opt-in, and Cargo no longer substitutes a scratch root automatically. Empty root, configuration, and venv path overrides resolve to the working directory, matching release builds.
 
 - **Install Rust plugins from repository archives.**  
   `install plugins` accepts single `.rs` files and native plugin directories, validates builds and setup without a Python environment, records repository origins, and restores the previous plugin after a failure. Single-file Rust plugins are included in lifecycle discovery and uninstall.

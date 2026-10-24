@@ -12,6 +12,7 @@
 //! face (Ctrl-C bookkeeping included).
 
 use std::io::Write;
+use unicode_width::UnicodeWidthStr;
 
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
@@ -324,7 +325,7 @@ fn fit(text: &str, width: usize) -> String {
     let mut out = String::new();
     let mut used = 0;
     for c in text.chars() {
-        let w = crate::format::string_width(&c.to_string());
+        let w = c.to_string().width();
         if used + w > width {
             break;
         }
@@ -352,13 +353,8 @@ fn draw(
     if *below > 0 {
         write!(out, "\u{1b}[{}A", *below)?;
     }
-    let column = prefix_width
-        + frame
-            .line
-            .chars()
-            .take(frame.cursor)
-            .map(|c| crate::format::string_width(&c.to_string()))
-            .sum::<usize>();
+    let before_cursor: String = frame.line.chars().take(frame.cursor).collect();
+    let column = prefix_width + before_cursor.width();
     write!(out, "\r")?;
     if column > 0 {
         write!(out, "\u{1b}[{column}C")?;
@@ -390,7 +386,7 @@ pub fn read(prompt: &str, items: &[String], prefill: &str, ansi: bool) -> Option
     if let Some(head) = head {
         let _ = write!(out, "{}\r\n", head.replace('\n', "\r\n"));
     }
-    let prefix_width = crate::format::string_width(&crate::format::remove_ansi(last));
+    let prefix_width = crate::format::remove_ansi(last).width();
     let mut state = Suggest::new(items, prefill);
     let mut below = 0usize;
     let answer = loop {
@@ -644,6 +640,28 @@ mod tests {
         );
         let frame = s.frame(8, false);
         assert_eq!(frame.rows, vec!["  abcde".to_string()]);
+    }
+
+    #[test]
+    fn cursor_uses_display_cells_for_wide_and_combining_text() {
+        let prompt = " ❓ Connector: ";
+        for input in ["", "x", "界", "e\u{301}", "👩‍💻"] {
+            let state = Suggest::new(&[], input);
+            let mut output = Vec::new();
+            draw(
+                &mut output,
+                prompt,
+                prompt.width(),
+                &state.frame(60, false),
+                &mut 0,
+            )
+            .unwrap();
+            let output = String::from_utf8(output).unwrap();
+            assert!(
+                output.ends_with(&format!("\r\x1b[{}C", prompt.width() + input.width())),
+                "{output:?}"
+            );
+        }
     }
 
     #[test]

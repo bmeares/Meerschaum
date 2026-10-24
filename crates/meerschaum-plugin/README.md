@@ -245,13 +245,65 @@ to the current call; Pipe views cannot move to other threads. Recursive plugin c
 instead of blocking on the library's serialized call lock.
 
 Meerschaum generates the crate, manifest and ABI adapter under the root's build cache.
-Cargo is required to compile it; unchanged builds are reused. Use a full crate for extra
-dependencies or capabilities beyond fetch and sync.
+Cargo is required to compile it; unchanged builds are reused.
+
+Actions need only an annotated function, with optional named `action: Vec<String>` and
+`kwargs: &Value` parameters:
+
+```rust
+/// Greet the supplied names.
+#[make_action]
+fn greet(action: Vec<String>) -> (bool, String) {
+    (true, format!("Hello, {}!", action.join(", ")))
+}
+```
+
+`mrsm greet Alice Bob` invokes it. Actions may return `()`, a success tuple,
+`SuccessTuple`, or `Result` of those. `#[make_action(name = "hello", daemon = false)]`
+overrides the command name and daemon setting. The generator derives help from doc comments.
+
+Source connectors use annotated modules:
+
+```rust
+#[make_connector]
+mod readings {
+    fn register() -> Value {
+        json!({"columns": {"datetime": "id"}, "dtypes": {"id": "int"}})
+    }
+    fn fetch(connector: &Connector) -> Vec<Value> {
+        vec![json!({"id": 1, "source": connector.label()})]
+    }
+}
+```
+
+This provides `readings:<label>`. The module may define `fetch`, `sync`, `register`, and
+ordinary helpers. Named `connector: &Connector` and `kwargs: &Value` parameters are also
+accepted by data handlers. The connector view exposes `label()`, `connector_type()`, and
+`config()`. `register` returns a JSON object or null, optionally wrapped in `Option` or
+`Result`; its default parameters are merged under explicit parameters. Top-level `register`
+provides the same hook for `plugin:<filename>`. Multiple actions, connectors, and top-level
+data functions may share a file. Source connector sync overrides are honored by the engine.
+Instance connectors and other extension capabilities still use the packaged SDK.
+
+An optional top-of-file doc-comment fence supplies normal Cargo dependencies:
+
+```rust
+//! ```cargo
+//! [dependencies]
+//! regex = "1"
+//! ```
+```
+
+Versions, features, renamed dependencies, Git sources and local paths are passed to Cargo;
+local paths resolve relative to the original file. Only `[dependencies]` is accepted.
+The generated `Cargo.lock` stays in the cache. External path dependency edits require an
+edit to the plugin or cache deletion to force rebuilding. The shorthand annotations are
+processed by Meerschaum, not exported procedural macros for packaged plugins.
 
 ### Lightweight single-file builds
 
-The generated single-file crate embeds a small runtime with only Serde and `serde_json` as
-dependencies. It uses the optional `mrsm_plugin_invoke_rows_v1` C ABI extension: request,
+By default, the generated single-file crate embeds a small runtime with only Serde and
+`serde_json` as direct dependencies; inline Cargo blocks may add dependencies. It uses the optional `mrsm_plugin_invoke_rows_v1` C ABI extension: request,
 result and row JSON bytes, plus call-scoped host callbacks for Pipe operations. Host
 conversion owns the full data kernel. No Polars, Arrow, connector, loader or async runtime
 dependency is compiled into these plugins. The original v1 Arrow ABI is unchanged.

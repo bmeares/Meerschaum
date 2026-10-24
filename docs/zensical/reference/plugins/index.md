@@ -15,11 +15,9 @@ Run `bootstrap plugin` to get started:
 mrsm bootstrap plugin
 ```
 
-!!! tip "New in v5: Rust plugins"
+!!! tip "Rust plugins"
 
-    Meerschaum v5 is still a Python package, and most plugins are still Python modules that work unchanged. Rust plugins are optional and target the native core, kernel and engine path.
-
-    Prefer a native library over a Python module? [Rust plugins](/reference/plugins/rust-plugins/) can do everything Python plugins can, load in-process without a Python interpreter, and sit side by side with Python plugins in the same directory.
+    Prefer Rust? [Create a single-file plugin](/reference/plugins/rust-plugins/) to add actions, data sources, and connectors. Python and Rust plugins can share the same plugins directory. The [advanced Rust guide](/reference/plugins/rust-plugins/advanced/) covers packaging and other native extensions.
 
 !!! question "What can I do with plugins?"
 

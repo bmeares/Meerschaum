@@ -3,7 +3,7 @@
 //! The plugin is the SDK example (`crates/meerschaum-plugin/examples/native_demo.rs`).
 
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::{Command, Output, Stdio};
 use std::sync::OnceLock;
 
 fn demo_library() -> PathBuf {
@@ -18,6 +18,8 @@ fn demo_library() -> PathBuf {
                 "meerschaum-plugin",
                 "--example",
                 "native_demo",
+                "--example",
+                "native_probe",
             ])
             .env("MRSM_ROOT_DIR", root.path())
             .env("MRSM_PLUGINS_DIR", plugins.path())
@@ -165,6 +167,160 @@ fn native_plugin_sync_runs_through_the_engine() {
     // PARITY: a plugin that defines `sync()` runs it instead of fetching (the demo's `sync()`
     // keeps the frame in its own in-memory store), so the engine reports its success tuple.
     assert!(out.contains("Success"), "{out}");
+}
+
+#[test]
+fn native_register_parameters_are_merged_under_explicit_parameters() {
+    let home = Home::new();
+    let output = home.run(&[
+        "register",
+        "pipes",
+        "-c",
+        "plugin:native_demo",
+        "-m",
+        "registered",
+        "-i",
+        "sql:local",
+        "--params",
+        r#"{"columns":{"id":"other"}}"#,
+        "--noask",
+    ]);
+    assert!(output.status.success(), "{}", text(&output));
+    let shown = home.run(&[
+        "show",
+        "pipes",
+        "-m",
+        "registered",
+        "-i",
+        "sql:local",
+        "--nopretty",
+    ]);
+    let out = text(&shown);
+    let pipe: serde_json::Value =
+        serde_json::from_str(out.lines().find(|l| l.starts_with('{')).unwrap()).unwrap();
+    assert_eq!(
+        pipe["parameters"]["columns"],
+        serde_json::json!({"datetime": "id", "id": "other"})
+    );
+    assert_eq!(pipe["parameters"]["dtypes"]["id"], "int");
+}
+
+#[test]
+fn bootstrap_native_pipe_uses_its_register_hook_without_python_fallback() {
+    let home = Home::new();
+    let output = bootstrap(
+        &home,
+        "plugin:native_demo\nbootstrapped\nNone\n\n\n\nn\nn\n",
+    );
+    let out = text(&output);
+    assert!(output.status.success(), "{out}");
+    assert!(out.contains("(1 succeeded, 0 failed)"), "{out}");
+    assert!(
+        !out.contains("cannot be found") && !out.contains("Traceback"),
+        "{out}"
+    );
+    assert!(
+        !out.contains("Please enter index columns"),
+        "native register supplies the axis: {out}"
+    );
+    let shown = home.run(&[
+        "show",
+        "pipes",
+        "-m",
+        "bootstrapped",
+        "-i",
+        "sql:local",
+        "--nopretty",
+    ]);
+    let out = text(&shown);
+    let pipe: serde_json::Value =
+        serde_json::from_str(out.lines().find(|l| l.starts_with('{')).unwrap()).unwrap();
+    assert_eq!(pipe["parameters"]["columns"]["datetime"], "id");
+}
+
+fn bootstrap(home: &Home, input: &str) -> Output {
+    use std::io::Write;
+    let mut child = Command::new(env!("CARGO_BIN_EXE_mrsm-cli"))
+        .args(["bootstrap", "pipes", "-i", "sql:local"])
+        .env_clear()
+        .env("PATH", std::env::var_os("PATH").unwrap_or_default())
+        .env("HOME", home.root.path())
+        .env("MRSM_ROOT_DIR", home.root.path())
+        .env("MRSM_PLUGINS_DIR", home.plugins.path())
+        .env("MRSM_NO_UPDATE_CHECK", "1")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(input.as_bytes())
+        .unwrap();
+    child.wait_with_output().unwrap()
+}
+
+#[test]
+fn bootstrap_native_pipe_without_register_does_not_fall_back_to_python() {
+    let home = Home::new();
+    let dir = home.plugins.path().join("native_probe");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("plugin.toml"),
+        "name = \"native_probe\"\nversion = \"1.0.0\"\n",
+    )
+    .unwrap();
+    std::fs::copy(
+        demo_library().with_file_name(meerschaum_plugin::discovery::library_name("native_probe")),
+        dir.join(meerschaum_plugin::discovery::library_name("native_probe")),
+    )
+    .unwrap();
+    // A Python plugin of the same name must never provide the missing hook.
+    std::fs::write(home.plugins.path().join("native_probe.py"),
+        "def fetch(**kw): return []\ndef register(**kw): raise RuntimeError('PYTHON_REGISTER_CALLED')\n").unwrap();
+    let output = bootstrap(
+        &home,
+        "plugin:native_probe\nno_hook\nNone\ndt\nid\nn\n\n\n\nn\nn\n",
+    );
+    let out = text(&output);
+    assert!(output.status.success(), "{out}");
+    assert!(out.contains("(1 succeeded, 0 failed)"), "{out}");
+    for bad in ["cannot be found", "Traceback", "PYTHON_REGISTER_CALLED"] {
+        assert!(!out.contains(bad), "{out}");
+    }
+    assert!(out.contains("Please enter index columns"), "{out}");
+}
+
+#[test]
+fn native_custom_connector_register_parameters_are_used() {
+    let home = Home::new();
+    let output = home.run(&[
+        "register",
+        "pipes",
+        "-c",
+        "native_demo:source",
+        "-m",
+        "custom",
+        "-i",
+        "sql:local",
+        "--noask",
+    ]);
+    assert!(output.status.success(), "{}", text(&output));
+    let shown = home.run(&[
+        "show",
+        "pipes",
+        "-m",
+        "custom",
+        "-i",
+        "sql:local",
+        "--nopretty",
+    ]);
+    let out = text(&shown);
+    let pipe: serde_json::Value =
+        serde_json::from_str(out.lines().find(|l| l.starts_with('{')).unwrap()).unwrap();
+    assert_eq!(pipe["parameters"]["columns"]["datetime"], "id");
 }
 
 #[test]

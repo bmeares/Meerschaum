@@ -32,7 +32,7 @@ pub fn validate_indices(pipe: &Pipe) -> SuccessTuple {
 /// (`self.parameters = apply_patch_to_config(params, self.parameters)`), so what was given on the
 /// command line or already set on the pipe wins. A connector without `register()` changes
 /// nothing; one that raises is reported by the worker and treated as `None`; a return value
-/// that is not a dict is a warning and changes nothing. The hook needs the Python worker: a
+/// that is not a dict is a warning and changes nothing. Native hooks run in-process; a Python
 /// connector the worker cannot build is skipped (v4 swallows the error of `Pipe.connector`).
 fn apply_connector_register(rt: &mut Runtime<'_>, pipe: &mut Pipe) {
     let keys = pipe.connector_keys().to_string();
@@ -55,14 +55,69 @@ fn apply_connector_register(rt: &mut Runtime<'_>, pipe: &mut Pipe) {
 }
 
 /// Ask the `plugin:` or custom connector of `pipe` for its `register(pipe)` parameters through
-/// the Python worker. `None`: nothing was asked (an SQL, API or Valkey connector, no worker, a
+/// its native library or the Python worker. `None`: nothing was asked (a built-in connector, a
 /// connector the worker cannot build, or one without `register()`).
 pub(crate) fn ask_connector_register(
     session: &super::Session,
     config: &meerschaum_core::config::Config,
     pipe: &Pipe,
-) -> Option<Result<meerschaum_worker::connector::RegisterOutcome, meerschaum_worker::WorkerError>> {
-    if !super::pipes::is_python_connector(pipe.connector_keys()) || !session.worker_enabled() {
+) -> Option<Result<meerschaum_worker::connector::RegisterOutcome, String>> {
+    if !super::pipes::is_python_connector(pipe.connector_keys()) {
+        return None;
+    }
+    let natives = match session.native_plugins(config) {
+        Ok(natives) => natives,
+        Err(error) => return Some(Err(error.message)),
+    };
+    let (typ, label) = super::session::split_keys(pipe.connector_keys());
+    let native_owner = if typ == "plugin" {
+        natives.contains(&label)
+    } else {
+        natives.connector_plugin(&typ).is_some()
+    };
+    if native_owner {
+        // Native ownership is exclusive, including plugins without a register hook.
+        if !manifest_may_register(session, config, pipe.connector_keys()) {
+            return None;
+        }
+        let connector = if typ == "plugin" {
+            natives
+                .plugin(&label)
+                .map(|plugin| plugin.source(serde_json::Value::Null))
+        } else {
+            let connectors = config
+                .get(&["meerschaum", "connectors"])
+                .map(|v| v.to_map())
+                .unwrap_or_default();
+            let attributes = crate::native_plugins::attributes(&connectors, &typ, &label);
+            natives.connector(&typ, &label, serde_json::json!(attributes))?
+        };
+        return (|| {
+            let connector = connector.map_err(|e| e.to_string())?;
+            let reply = match connector.call(
+                "register",
+                serde_json::json!({
+                    "pipe": {"keys": pipe.keys(), "parameters": pipe.raw_parameters(),
+                             "temporary": pipe.temporary}
+                }),
+                None,
+            ) {
+                Ok(reply) => reply,
+                Err(meerschaum_connector::ConnectorError::NotImplemented(_)) => {
+                    return Ok(None);
+                }
+                Err(e) => return Err(e.to_string()),
+            };
+            Ok(Some(meerschaum_worker::connector::RegisterOutcome {
+                parameters: serde_json::from_value(reply.value.clone()).unwrap_or_default(),
+                valid: reply.value.is_null() || reply.value.is_object(),
+                defined: true,
+                repr: reply.value.to_string(),
+            }))
+        })()
+        .transpose();
+    }
+    if !session.worker_enabled() {
         return None;
     }
     if !manifest_may_register(session, config, pipe.connector_keys()) {
@@ -78,7 +133,11 @@ pub(crate) fn ask_connector_register(
     if !connector.info().has_register {
         return None;
     }
-    Some(session.block_on(connector.register(pipe)))
+    Some(
+        session
+            .block_on(connector.register(pipe))
+            .map_err(|e| e.to_string()),
+    )
 }
 
 /// Whether the plugin manifest leaves open that the connector of `keys` implements

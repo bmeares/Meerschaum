@@ -60,7 +60,7 @@ pub const DEFAULT_CONFIG_JSON: &str = include_str!("default_config.json");
 pub const ROOT_DIR_MARKER: &str = "{__MRSM_ROOT_DIR__}";
 
 /// The marker substring replaced by this release's version, as the Python package writes it
-/// (PEP 440, `5.0.0rc10`), in [`DEFAULT_CONFIG_JSON`]: the stack's `api` image tag
+/// (PEP 440, `5.0.0rc11`), in [`DEFAULT_CONFIG_JSON`]: the stack's `api` image tag
 /// (`bmeares/meerschaum:{__MRSM_VERSION__}-full`), so a root without a `stack.yaml` always runs the
 /// API server of the version that wrote the compose file (`PARITY.md` W18PK-001).
 pub const VERSION_MARKER: &str = "{__MRSM_VERSION__}";
@@ -139,22 +139,6 @@ pub enum ConfigError {
         file: String,
         /// The exception.
         error: LoadError,
-    },
-    /// A path variable (`MRSM_ROOT_DIR`, `MRSM_CONFIG_DIR`, `MRSM_VENVS_DIR`) is set but empty.
-    /// v4 reads that as the working directory; a development build refuses it.
-    #[error("{var} is set but empty: set it to a directory, or unset it.")]
-    EmptyPath {
-        /// The environment variable.
-        var: String,
-    },
-    /// A development build refused to fall back to the real default root.
-    #[error(
-        "Refusing to use the default root '{path}' from a development build. \
-         Set MRSM_ROOT_DIR to a scratch directory, or set MRSM_ALLOW_DEFAULT_ROOT=1 to use the real root."
-    )]
-    DefaultRootRefused {
-        /// The default root that would have been used.
-        path: String,
     },
     /// An I/O error.
     #[error(transparent)]

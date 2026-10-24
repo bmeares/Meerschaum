@@ -62,13 +62,11 @@ pub struct Settings {
 impl Settings {
     /// Read the settings through an environment lookup.
     ///
-    /// Without `MRSM_ROOT_DIR` the root is the default one, except that a debug build refuses it
-    /// (as the `mrsm` binary does) unless `MRSM_ALLOW_DEFAULT_ROOT` is set.
+    /// Without `MRSM_ROOT_DIR`, use the normal default root in every build.
     pub fn from_env(env: &dyn Fn(&str) -> Option<String>) -> Settings {
         let set = |name: &str| env(name).filter(|v| !v.is_empty());
-        let root = match set("MRSM_ROOT_DIR") {
+        let root = match env("MRSM_ROOT_DIR") {
             Some(r) => Some(meerschaum_core::config::paths::resolve_path(Path::new(&r))),
-            None if cfg!(debug_assertions) && set("MRSM_ALLOW_DEFAULT_ROOT").is_none() => None,
             None => {
                 let base = meerschaum_core::config::Paths::process_dot_config_dir();
                 Some(base.join(if cfg!(windows) {
@@ -99,7 +97,7 @@ impl Settings {
     fn root(&self) -> Result<&Path, SqlError> {
         self.root.as_deref().ok_or_else(|| {
             unavailable(
-                "the Meerschaum root is not known here (a debug build refuses the default root); \
+                "the Meerschaum root is not known here; \
                  set MRSM_ROOT_DIR, or set MRSM_DUCKDB_LIB to the path of the library"
                     .into(),
             )
@@ -506,6 +504,23 @@ mod tests {
         ]));
         assert!(!s.no_auto_install);
         assert!(s.lib.is_none());
+    }
+
+    #[test]
+    fn settings_use_normal_roots_without_a_development_opt_in() {
+        let settings = Settings::from_env(&|_| None);
+        let expected =
+            meerschaum_core::config::Paths::process_dot_config_dir().join(if cfg!(windows) {
+                "Meerschaum"
+            } else {
+                "meerschaum"
+            });
+        assert_eq!(settings.root, Some(expected));
+        let settings = Settings::from_env(&env_of(&[("MRSM_ROOT_DIR", "")]));
+        assert_eq!(
+            settings.root,
+            Some(meerschaum_core::config::paths::resolve_path(Path::new("")))
+        );
     }
 
     #[test]

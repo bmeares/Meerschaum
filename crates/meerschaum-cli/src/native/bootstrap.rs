@@ -876,10 +876,8 @@ fn ask_for_parameters(
         }
         "plugin" => {
             let sess = session(rt);
-            if let Ok(connector) = sess.block_on(meerschaum_worker::PythonConnector::connect(
-                pipe.connector_keys(),
-                sess.pool(rt.config()),
-            )) && let Ok(outcome) = sess.block_on(connector.register(pipe))
+            if let Some(Ok(outcome)) =
+                super::manage::ask_connector_register(&sess, rt.config(), pipe)
                 && outcome.defined
             {
                 if outcome.valid {

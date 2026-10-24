@@ -103,7 +103,7 @@ cargo test -p <crate>            # one crate; `cargo test --workspace` is the CI
 scripts/rust/ci.sh               # = fmt clippy test build (test = cargo nextest when installed + `cargo test --doc`; MRSM_CI_ACCEL=1 enables sccache/nextest locally)
 scripts/rust/ci.sh parity        # regenerate every crates/*/tests/fixtures/gen_*.py with v4.1.4 and diff
 scripts/parity/check_fixture_hygiene.sh [PATH ...]   # run before every commit that touches fixtures (and on any new public file)
-python scripts/check_packaging.py            # Cargo version (`5.0.0-rc.10` <-> PEP 440 `5.0.0rc10`) == _version.py; console scripts `mrsm`/`meerschaum`; no `dependencies`, no second wheel; extras == _packages.py == requirements/ == extras.rs; lockstep workspace dep versions; crates.io metadata
+python scripts/check_packaging.py            # Cargo version (`5.0.0-rc.11` <-> PEP 440 `5.0.0rc11`) == _version.py; console scripts `mrsm`/`meerschaum`; no `dependencies`, no second wheel; extras == _packages.py == requirements/ == extras.rs; lockstep workspace dep versions; crates.io metadata
 scripts/rust/ci.sh frontcrate                # the `meerschaum` front crate: no default features, each feature alone, `full` tests (CI job `frontcrate`)
 scripts/rust/ci.sh package                   # cargo package --workspace --no-verify + contents/size checks (CI job `package`); `publish-dry-run` also builds the tarballs (it mutates the shared `target/` and `$CARGO_HOME`, see `crates/README.md` "Publishing"; publish from Linux/macOS because LICENSE/NOTICE are symlinks)
 python scripts/check_packaging.py --write    # regenerate requirements/<extra>.txt and crates/meerschaum-cli/src/extras.rs
@@ -193,7 +193,7 @@ scripts/transition/run.sh [--flavors sqlite,postgis,...] [--wheel <whl>]   # v4 
 
 ## Architecture map
 
-### Crates (`crates/`, Cargo workspace, edition 2024, version `5.0.0-rc.10` is the single source of truth)
+### Crates (`crates/`, Cargo workspace, edition 2024, version `5.0.0-rc.11` is the single source of truth)
 
 Dependencies point down only; `meerschaum-core` is a leaf; `cli` and `py` are the top layer no library
 depends on (the front crate's default `cli` feature pulls `cli` in for the `mrsm` binary only). Verify with `cargo tree -p <crate> -e normal --depth 1`.

@@ -379,6 +379,24 @@ fn a_password_prompt_echoes_a_star_per_character() {
     );
 }
 
+/// Compare the cursor to terminal cells, including the wide question icon.
+fn assert_prompt_cursor(term: &Term, question: &str, input: &str) {
+    use unicode_width::UnicodeWidthStr;
+    let screen = term.screen();
+    let (row, line) = screen
+        .lines()
+        .enumerate()
+        .find(|(_, l)| l.contains(question))
+        .unwrap();
+    let prefix = line.split_once(question).unwrap().0;
+    let expected = format!("{prefix}{question} {input}");
+    assert_eq!(
+        term.parser.screen().cursor_position(),
+        (row as u16, expected.width() as u16),
+        "cursor should follow {expected:?}:\n{screen}"
+    );
+}
+
 #[test]
 fn bootstrap_pipes_suggests_connectors_metrics_and_accepts_unknown_keys() {
     let setup = Setup::new("bootstrap");
@@ -389,6 +407,13 @@ fn bootstrap_pipes_suggests_connectors_metrics_and_accepts_unknown_keys() {
     );
     term.wait_screen("the connector question", 60, |s| s.contains("Connector:"));
     assert!(!term.screen().contains("... 1 more"));
+    assert_prompt_cursor(&term, "Connector:", "");
+    term.send("x");
+    term.pump(Duration::from_millis(300));
+    assert_prompt_cursor(&term, "Connector:", "x");
+    term.send("\x7f");
+    term.pump(Duration::from_millis(300));
+    assert_prompt_cursor(&term, "Connector:", "");
     term.send("w18");
     term.pump(Duration::from_millis(600));
     assert_eq!(

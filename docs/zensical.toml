@@ -63,7 +63,10 @@ nav = [
       "reference/plugins/index.md",
       {"✍️ Writing Your Own" = "reference/plugins/writing-plugins.md"},
       {"🤔 Types of Plugins" = "reference/plugins/types-of-plugins.md"},
-      {"🦀 Rust Plugins" = "reference/plugins/rust-plugins.md"},
+      {"🦀 Rust Plugins" = [
+        "reference/plugins/rust-plugins.md",
+        {"Advanced" = "reference/plugins/rust-plugins/advanced.md"},
+      ]},
       {"🚀 Repositories" = "reference/plugins/repositories.md"},
     ]},
     {"🌳 Environment Variables" = "reference/environment.md"},

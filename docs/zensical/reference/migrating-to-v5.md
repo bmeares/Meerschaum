@@ -484,7 +484,7 @@ impl Plugin for Acme {
 meerschaum_plugin::export_plugin!(Acme);
 ```
 
-A plugin directory may contain both a Rust library and a Python module; the Rust plugin replaces a Python plugin of the same name entirely, with no per-function fallback. Python plugins can depend on Rust plugins and vice versa through `required`. The [Rust plugin guide](/reference/plugins/rust-plugins/) covers the layout, source plugins, the manifest, the C ABI, building and loading an example, how to test a plugin, and what is not available yet. A native plugin's console pages return the same HTML fragments and Plotly figure JSON as a Python page-contract page.
+A plugin directory may contain both a Rust library and a Python module; the Rust plugin replaces a Python plugin of the same name entirely, with no per-function fallback. Python plugins can depend on Rust plugins and vice versa through `required`. Start with the [single-file Rust plugin guide](/reference/plugins/rust-plugins/); the [advanced guide](/reference/plugins/rust-plugins/advanced/) covers packaging, the SDK manifest, the C ABI, testing, and current limitations. A native plugin's console pages return the same HTML fragments and Plotly figure JSON as a Python page-contract page.
 
 ## 🚢 Deployment
 

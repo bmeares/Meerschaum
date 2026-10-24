@@ -137,3 +137,153 @@ fn sync_writes_through_the_engine_without_recursing() {
     "#,
     );
 }
+
+fn prepared(source: &str) -> (tempfile::TempDir, tempfile::TempDir) {
+    let root = tempfile::tempdir().unwrap();
+    let plugins = tempfile::tempdir().unwrap();
+    std::fs::write(plugins.path().join("typed.rs"), source).unwrap();
+    let builds = root.path().join("cache/native_build");
+    let found = meerschaum_plugin::discovery::discover_report_in(&[plugins.path().into()], &builds);
+    assert!(found.skipped.is_empty(), "{:?}", found.skipped);
+    let candidate = &found.candidates[0];
+    compile_single_file::compile(candidate);
+    std::fs::write(
+        builds.join("typed/mrsm-source-fingerprint"),
+        &candidate.fingerprint,
+    )
+    .unwrap();
+    (root, plugins)
+}
+
+#[test]
+fn single_file_actions_run_and_appear_in_help_without_rebuilding() {
+    let (root, plugins) = prepared(
+        r#"
+        /// Greet the supplied names from a single Rust file.
+        #[make_action]
+        fn greet(action: Vec<String>, kwargs: &Value) -> (bool, String) {
+            assert_eq!(kwargs["debug"], true);
+            (true, format!("Hello, {}!", action.join(", ")))
+        }
+        #[make_action]
+        fn count_words(action: Vec<String>) -> (bool, String) {
+            (true, format!("{} words", action.len()))
+        }
+        #[make_action(name = "salute", daemon = false)]
+        fn renamed() -> (bool, &'static str) { (true, "renamed action") }
+    "#,
+    );
+    for (args, expected) in [
+        (
+            vec!["greet", "Alice", "Bob", "--debug"],
+            "Hello, Alice, Bob!",
+        ),
+        (vec!["salute"], "renamed action"),
+        (vec!["count_words", "Alice", "Bob"], "2 words"),
+        (vec!["count", "words", "Alice", "Bob"], "2 words"),
+        (
+            vec!["greet", "--help"],
+            "Greet the supplied names from a single Rust file.",
+        ),
+        (vec!["show", "actions", "--nopretty"], "greet"),
+        (
+            vec!["--help"],
+            "Greet the supplied names from a single Rust file.",
+        ),
+    ] {
+        let output = run(root.path(), plugins.path(), &args);
+        let text = text(&output);
+        assert!(output.status.success(), "{text}");
+        assert!(text.contains(expected), "{text}");
+        assert!(!text.contains("Building native plugin"), "{text}");
+    }
+}
+
+#[test]
+fn single_file_source_connectors_register_fetch_sync_and_receive_configuration() {
+    let (root, plugins) = prepared(
+        r#"
+        #[make_connector]
+        mod readings {
+            fn register(connector: &Connector) -> Value {
+                assert_eq!(connector.label(), "office");
+                json!({"columns": {"datetime": "id"}, "dtypes": {"id": "int"}})
+            }
+            fn fetch(connector: &Connector) -> Vec<Value> {
+                vec![json!({"id": 1, "station": connector.config()["station"]})]
+            }
+        }
+        #[make_connector]
+        mod writer {
+            fn register() -> Value {
+                json!({"columns": {"datetime": "id"}, "dtypes": {"id": "int"}})
+            }
+            fn sync(pipe: &Pipe, connector: &Connector, kwargs: &Value) -> Result<SuccessTuple> {
+                assert_eq!(connector.label(), "office");
+                assert!(kwargs["check_existing"].is_boolean());
+                pipe.sync(vec![json!({"id": 2})])
+            }
+        }
+    "#,
+    );
+    // Configuration uses the same default/label merge as packaged native connectors.
+    std::fs::create_dir_all(root.path().join("config")).unwrap();
+    std::fs::write(root.path().join("config/meerschaum.yaml"),
+        "instance: sql:local\nconnectors:\n  readings:\n    default:\n      station: default\n    office:\n      station: north\n").unwrap();
+    for connector in ["readings:office", "writer:office"] {
+        let output = run(
+            root.path(),
+            plugins.path(),
+            &[
+                "register",
+                "pipes",
+                "-c",
+                connector,
+                "-m",
+                "reading",
+                "-i",
+                "sql:local",
+                "--noask",
+                "--nopretty",
+            ],
+        );
+        assert!(output.status.success(), "{}", text(&output));
+        let output = run(
+            root.path(),
+            plugins.path(),
+            &[
+                "sync",
+                "pipes",
+                "-c",
+                connector,
+                "-i",
+                "sql:local",
+                "--nopretty",
+            ],
+        );
+        let out = text(&output);
+        assert!(output.status.success(), "{out}");
+        assert!(out.contains("Inserted 1, updated 0 rows."), "{out}");
+        assert!(
+            !out.contains("cannot be found") && !out.contains("Traceback"),
+            "{out}"
+        );
+    }
+    let shown = run(
+        root.path(),
+        plugins.path(),
+        &[
+            "show",
+            "data",
+            "-c",
+            "readings:office",
+            "-m",
+            "reading",
+            "-i",
+            "sql:local",
+            "--nopretty",
+        ],
+    );
+    assert!(shown.status.success(), "{}", text(&shown));
+    assert!(text(&shown).contains("north"), "{}", text(&shown));
+}

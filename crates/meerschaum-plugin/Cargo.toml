@@ -28,6 +28,8 @@ hex = { workspace = true }
 toml = { workspace = true }
 thiserror = { workspace = true }
 syn = { version = "2", features = ["full"] }
+proc-macro2 = { version = "1", features = ["span-locations"] }
+quote = "1"
 tokio = { workspace = true }
 jsonschema = { version = "0.59", default-features = false }
 

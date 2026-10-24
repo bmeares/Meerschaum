@@ -1,4 +1,3 @@
-# Throwaway Meerschaum root for processes launched by cargo (see .cargo/config.toml [env]).
-# Tracked so the directory always exists; everything written here is ignored.
+# Ignore artifacts left by older Cargo development builds.
 *
 !.gitignore

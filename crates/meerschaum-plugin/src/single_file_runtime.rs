@@ -126,14 +126,61 @@ impl Frame {
 }
 pub struct Request {
     pub method: String,
+    pub connector_type: String,
+    pub label: String,
+    pub config: Value,
     pub context: Value,
+    kwargs: Value,
 }
 impl Request {
+    pub fn connector(&self) -> Connector<'_> {
+        Connector { request: self }
+    }
+    pub fn kwargs(&self) -> &Value {
+        &self.kwargs
+    }
+    pub fn action(&self) -> Result<Vec<String>> {
+        let value = &self.kwargs()["action"];
+        if value.is_null() {
+            return Ok(Vec::new());
+        }
+        serde_json::from_value(value.clone()).map_err(error)
+    }
     pub fn bound(&self, name: &str) -> Result<Option<Bound>> {
         bound(&self.context.get("query").unwrap_or(&self.context)[name])
     }
     pub fn pipe(&self) -> Result<Pipe<'_>> {
         Pipe::from_request(self)
+    }
+}
+/// The resolved connector for this call; no constructor or owned state is needed.
+pub struct Connector<'a> {
+    request: &'a Request,
+}
+impl Connector<'_> {
+    pub fn connector_type(&self) -> &str {
+        &self.request.connector_type
+    }
+    pub fn label(&self) -> &str {
+        &self.request.label
+    }
+    pub fn config(&self) -> &Value {
+        &self.request.config
+    }
+}
+pub struct Reply {
+    pub value: Value,
+    pub data: Option<Frame>,
+}
+impl Reply {
+    pub fn json(value: Value) -> Self {
+        Self { value, data: None }
+    }
+    pub fn data(data: Option<Frame>) -> Self {
+        Self {
+            value: Value::Null,
+            data,
+        }
     }
 }
 #[derive(Clone, Copy)]
@@ -223,6 +270,13 @@ pub trait Plugin: Default {
     const NAME: &'static str;
     const VERSION: &'static str;
     fn manifest(&self) -> Value;
+    fn call(&self, request: &Request, data: Option<Frame>) -> Result<Reply> {
+        match request.method.as_str() {
+            "fetch" => self.fetch(request).map(Reply::data),
+            "sync" | "sync_pipe" => self.sync(request, data).map(Reply::json),
+            _ => Err(Error::Unsupported(request.method.clone())),
+        }
+    }
     fn fetch(&self, _: &Request) -> Result<Option<Frame>> {
         Err(Error::Unsupported("fetch is not implemented".into()))
     }
@@ -233,7 +287,7 @@ pub trait Plugin: Default {
 pub mod sdk {
     use super::*;
     pub mod fetch_prelude {
-        pub use super::super::{Bound, Error, Frame, Pipe, Result, SuccessTuple};
+        pub use super::super::{Bound, Connector, Error, Frame, Pipe, Result, SuccessTuple};
         pub use serde_json::{Value, json};
     }
     pub trait FetchOutput {
@@ -283,6 +337,51 @@ pub mod sdk {
     impl<T: SyncOutput> SyncOutput for Result<T> {
         fn into_success(self) -> Result<Value> {
             self?.into_success()
+        }
+    }
+    pub trait ActionOutput {
+        fn into_action(self) -> Result<Value>;
+    }
+    impl ActionOutput for () {
+        fn into_action(self) -> Result<Value> {
+            Ok(json!([true, "Success"]))
+        }
+    }
+    impl ActionOutput for SuccessTuple {
+        fn into_action(self) -> Result<Value> {
+            SyncOutput::into_success(self)
+        }
+    }
+    impl<S: Into<String>> ActionOutput for (bool, S) {
+        fn into_action(self) -> Result<Value> {
+            SyncOutput::into_success(self)
+        }
+    }
+    impl<T: ActionOutput> ActionOutput for Result<T> {
+        fn into_action(self) -> Result<Value> {
+            self?.into_action()
+        }
+    }
+    pub trait RegisterOutput {
+        fn into_parameters(self) -> Result<Value>;
+    }
+    impl RegisterOutput for Value {
+        fn into_parameters(self) -> Result<Value> {
+            if self.is_null() || self.is_object() {
+                Ok(self)
+            } else {
+                Err(error("register must return a JSON object or null"))
+            }
+        }
+    }
+    impl RegisterOutput for Option<Value> {
+        fn into_parameters(self) -> Result<Value> {
+            self.unwrap_or(Value::Null).into_parameters()
+        }
+    }
+    impl<T: RegisterOutput> RegisterOutput for Result<T> {
+        fn into_parameters(self) -> Result<Value> {
+            self?.into_parameters()
         }
     }
 }
@@ -382,33 +481,39 @@ impl<P: Plugin> Export<P> {
             let _scope = Scope(HOST.with(|h| h.replace(active)));
             let envelope: Value =
                 serde_json::from_slice(unsafe { bytes.as_slice() }).map_err(error)?;
+            let method = envelope["request"]["method"]
+                .as_str()
+                .ok_or_else(|| error("missing method"))?
+                .to_owned();
+            let context = envelope["request"]["context"].clone();
+            let kwargs = context.get("kwargs").cloned().unwrap_or_else(|| {
+                if method == "sync" || method == "sync_pipe" {
+                    context.clone()
+                } else {
+                    json!({})
+                }
+            });
             let request = Request {
-                method: envelope["request"]["method"]
+                method,
+                connector_type: envelope["request"]["connector_type"]
                     .as_str()
-                    .ok_or_else(|| error("missing method"))?
+                    .unwrap_or("")
                     .into(),
-                context: envelope["request"]["context"].clone(),
+                label: envelope["request"]["label"].as_str().unwrap_or("").into(),
+                config: envelope["request"]["config"].clone(),
+                context,
+                kwargs,
             };
             let plugin = P::default();
-            match request.method.as_str() {
-                "fetch" => Ok(
-                    json!({"value": null, "data": plugin.fetch(&request)?.map(Frame::into_rows)}),
-                ),
-                "sync" | "sync_pipe" => {
-                    let data = if envelope["data"].is_null() {
-                        None
-                    } else {
-                        Some(Frame::from_rows(
-                            serde_json::from_value(envelope["data"].clone()).map_err(error)?,
-                        )?)
-                    };
-                    Ok(json!({"value": plugin.sync(&request, data)?, "data": null}))
-                }
-                _ => Err(Error::Unsupported(format!(
-                    "{} is not implemented",
-                    request.method
-                ))),
-            }
+            let data = if envelope["data"].is_null() {
+                None
+            } else {
+                Some(Frame::from_rows(
+                    serde_json::from_value(envelope["data"].clone()).map_err(error)?,
+                )?)
+            };
+            let reply = plugin.call(&request, data)?;
+            Ok(json!({"value": reply.value, "data": reply.data.map(Frame::into_rows)}))
         })
     }
 }

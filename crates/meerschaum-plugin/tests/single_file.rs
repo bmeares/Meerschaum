@@ -271,6 +271,13 @@ fn sync_only_plugin_accepts_data_and_tuple_results() {
         plugin.invoke(&request("sync"), Some(&frame)).unwrap().value,
         json!([true, "rows=1"])
     );
+    assert_eq!(
+        plugin
+            .invoke(&request("sync_pipe"), Some(&frame))
+            .unwrap()
+            .value,
+        json!([true, "rows=1"])
+    );
 }
 
 #[test]
@@ -458,6 +465,10 @@ fn cargo_builds_are_lightweight_shared_and_keep_failure_diagnostics() {
         source::build(&first.name, first.build.as_ref().unwrap(), &first.library).unwrap_err();
     eprintln!("Invalid edit diagnostic: {:?}", start.elapsed());
     assert!(reason.contains("remove this semicolon"), "{reason}");
+    assert!(
+        reason.contains(&format!("{}:1:", file.display())),
+        "compiler should point to the user's source: {reason}"
+    );
     let failed = discover();
     assert!(failed.skipped[0].reason.contains("remove this semicolon"));
     std::fs::write(
@@ -567,4 +578,265 @@ fn lightweight_bounds_serialize_and_plugin_panics_are_contained() {
             .contains("native plugin panicked")
     );
     assert!(plugin.invoke(&request("fetch"), None).is_ok());
+}
+
+#[test]
+fn actions_are_discovered_and_receive_arguments_without_a_fetch_function() {
+    let (_root, plugin) = compiled(
+        r#"
+        /// Greet the supplied names.
+        #[make_action(name = "greet", daemon = false)]
+        fn greeting(kwargs: &Value, action: Vec<String>) -> Result<(bool, String)> {
+            assert_eq!(kwargs["debug"], true);
+            Ok((true, format!("Hello, {}!", action.join(", "))))
+        }
+        #[make_action]
+        fn quiet(kwargs: &Value) { assert!(kwargs.as_object().unwrap().is_empty()); }
+        #[make_action]
+        fn fail() -> SuccessTuple { SuccessTuple::fail("expected failure") }
+        #[make_action]
+        fn panic_action() { panic!("contained action panic") }
+        fn helper() -> usize { 1 }
+    "#,
+    );
+    assert_eq!(
+        plugin.manifest["plugins"]["minimal"]["data_functions"],
+        json!([])
+    );
+    let actions = &plugin.manifest["plugins"]["minimal"]["actions"];
+    assert_eq!(actions[0]["name"], "greet");
+    assert_eq!(actions[0]["daemon"], false);
+    assert_eq!(actions[0]["doc"], "Greet the supplied names.");
+    assert_eq!(actions.as_array().unwrap().len(), 4);
+    assert_eq!(
+        plugin
+            .action("greet", json!({"action": ["Alice", "Bob"], "debug": true}))
+            .unwrap()
+            .message,
+        "Hello, Alice, Bob!"
+    );
+    assert!(plugin.action("quiet", json!({})).unwrap().success);
+    assert!(!plugin.action("fail", json!({})).unwrap().success);
+    assert!(plugin.action("panic_action", json!({})).is_err());
+    assert!(plugin.action("quiet", json!({})).unwrap().success);
+    assert!(matches!(
+        plugin.invoke(&request("unknown"), None),
+        Err(meerschaum_plugin::Error::Unsupported(_))
+    ));
+}
+
+#[test]
+fn connector_modules_dispatch_private_methods_and_keep_helpers_private() {
+    let (_root, plugin) = compiled(
+        r#"
+        fn fetch() -> Vec<Value> { vec![json!({"id": 9})] }
+        fn register() -> Option<Value> { None }
+        #[make_action]
+        fn hello() -> (bool, &'static str) { (true, "hello") }
+        /// Synthetic station readings.
+        #[make_connector(name = "readings")]
+        mod station {
+            fn helper() -> i64 { 3 }
+            fn register(connector: &Connector) -> Result<Value> {
+                assert_eq!(connector.label(), "office");
+                assert_eq!(connector.connector_type(), "readings");
+                Ok(json!({"columns": {"datetime": "id"}}))
+            }
+            fn fetch(connector: &Connector, pipe: &Pipe, begin: Option<Bound>, kwargs: &Value) -> Vec<Value> {
+                assert_eq!(pipe.metric_key(), "reading");
+                assert_eq!(begin, Some(Bound::Int(2)));
+                assert_eq!(kwargs["rows"], 1);
+                vec![json!({"id": helper(), "station": connector.config()["station"]})]
+            }
+            fn sync(data: Option<Frame>) -> (bool, String) {
+                (true, format!("rows={}", data.unwrap().height()))
+            }
+        }
+        #[make_connector]
+        mod second {
+            fn fetch() -> Vec<Value> { vec![json!({"id": 4})] }
+        }
+    "#,
+    );
+    let descriptor = &plugin.manifest["connector_types"]["readings"];
+    assert_eq!(descriptor["plugin"], "minimal");
+    assert_eq!(descriptor["is_instance"], false);
+    assert_eq!(descriptor["doc"], "Synthetic station readings.");
+    assert_eq!(descriptor["methods"], json!(["register", "fetch", "sync"]));
+    let mut req = request("register");
+    req.connector_type = "readings".into();
+    req.label = "office".into();
+    req.config = json!({"station": "north"});
+    req.context["kwargs"] = json!({"rows": 1});
+    assert_eq!(
+        plugin.invoke(&req, None).unwrap().value,
+        json!({"columns": {"datetime": "id"}})
+    );
+    req.method = "fetch".into();
+    let frame = plugin.invoke(&req, None).unwrap().data.unwrap();
+    assert_eq!(frame.row(0)[0], meerschaum_kernel::Value::Int(3));
+    assert_eq!(
+        frame.row(0)[1],
+        meerschaum_kernel::Value::Str("north".into())
+    );
+    req.method = "sync".into();
+    assert_eq!(
+        plugin.invoke(&req, Some(&frame)).unwrap().value,
+        json!([true, "rows=1"])
+    );
+    req.method = "helper".into();
+    assert!(matches!(
+        plugin.invoke(&req, None),
+        Err(meerschaum_plugin::Error::Unsupported(_))
+    ));
+    req.connector_type = "second".into();
+    req.method = "fetch".into();
+    assert_eq!(
+        plugin.invoke(&req, None).unwrap().data.unwrap().row(0)[0],
+        meerschaum_kernel::Value::Int(4)
+    );
+    assert_eq!(
+        plugin.invoke(&request("register"), None).unwrap().value,
+        json!(null)
+    );
+    assert_eq!(
+        plugin
+            .invoke(&request("fetch"), None)
+            .unwrap()
+            .data
+            .unwrap()
+            .row(0)[0],
+        meerschaum_kernel::Value::Int(9)
+    );
+}
+
+#[test]
+fn shorthand_errors_report_original_file_and_line() {
+    let root = tempfile::tempdir().unwrap();
+    let file = root.path().join("minimal.rs");
+    for (source, message) in [
+        (
+            "#[make_action]\nfn hello(action: &Value) {}",
+            "must have type Vec<String>",
+        ),
+        ("#[make_action]\nasync fn hello() {}", "synchronous"),
+        ("#[make_action]\nfn hello(pipe: &Pipe) {}", "actions accept"),
+        (
+            "#[make_action]\n#[make_action]\nfn hello() {}",
+            "only one plugin annotation",
+        ),
+        (
+            "#[make_action(name=\"x\")] fn one() {}\n#[make_action(name=\"x\")] fn two() {}",
+            "duplicate action",
+        ),
+        ("#[make_connector] mod sql { fn fetch() {} }", "reserved"),
+        (
+            "#[make_connector(instance)] mod db { fn fetch() {} }",
+            "packaged plugin",
+        ),
+        ("#[make_connector] mod data;", "inline module"),
+        (
+            "#[make_connector] mod data { fn helper() {} }",
+            "fetch and/or sync",
+        ),
+        (
+            "#[make_connector] mod data { #[make_action] fn hello() {} }",
+            "top-level",
+        ),
+        ("#[make_connector] struct Data;", "inline module"),
+        (
+            "#[make_connector(name=\"x\")] mod one {fn fetch(){}}\n#[make_connector(name=\"x\")] mod two {fn fetch(){}}",
+            "duplicate connector",
+        ),
+        ("#[make_action]\nfn fetch() {}", "reserved plugin functions"),
+    ] {
+        std::fs::write(&file, source).unwrap();
+        let error = meerschaum_plugin::source::prepare_single_file(
+            &file,
+            "minimal",
+            &root.path().join("generated"),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains(message), "expected {message:?}: {error}");
+        assert!(error.contains(&file.display().to_string()), "{error}");
+    }
+    std::fs::write(
+        &file,
+        "// an introductory comment\n#[make_action]\nfn hello(kwargs: usize) {}\n",
+    )
+    .unwrap();
+    let error = meerschaum_plugin::source::prepare_single_file(
+        &file,
+        "minimal",
+        &root.path().join("generated"),
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(error.contains("minimal.rs:3:"), "{error}");
+}
+
+#[test]
+fn cargo_dependency_blocks_build_relative_crates_with_features_and_are_cached() {
+    use meerschaum_plugin::source;
+    let root = tempfile::tempdir().unwrap();
+    let plugins = root.path().join("plugins");
+    let helper = plugins.join("helper");
+    std::fs::create_dir_all(helper.join("src")).unwrap();
+    std::fs::write(helper.join("Cargo.toml"), "[package]\nname = 'helper'\nversion = '0.1.0'\nedition = '2024'\n[features]\ngreeting = []\n").unwrap();
+    std::fs::write(
+        helper.join("src/lib.rs"),
+        "#[cfg(feature = \"greeting\")] pub fn greeting() -> &'static str { \"dependency works\" }",
+    )
+    .unwrap();
+    let file = plugins.join("minimal.rs");
+    let content = r#"//! ```cargo
+//! [dependencies]
+//! greeting_lib = { package = "helper", path = "helper", features = ["greeting"] }
+//! serde = { version = "1", features = ["derive"] }
+//! serde_json = "1"
+//! ```
+#[derive(serde::Serialize)]
+struct Greeting { message: &'static str }
+#[make_action]
+fn hello() -> (bool, String) {
+    let data = serde_json::to_value(Greeting { message: greeting_lib::greeting() }).unwrap();
+    (true, data["message"].as_str().unwrap().to_owned())
+}
+"#;
+    std::fs::write(&file, content).unwrap();
+    let builds = root.path().join("build");
+    let found = discovery::discover_report_in(std::slice::from_ref(&plugins), &builds);
+    assert!(found.skipped.is_empty(), "{:?}", found.skipped);
+    let candidate = &found.candidates[0];
+    source::build(
+        &candidate.name,
+        candidate.build.as_ref().unwrap(),
+        &candidate.library,
+    )
+    .unwrap();
+    let library = unsafe { meerschaum_plugin::LoadedPlugin::load(&candidate.library) }.unwrap();
+    assert_eq!(
+        library.action("hello", json!({})).unwrap().message,
+        "dependency works"
+    );
+    let cached = discovery::discover_report_in(std::slice::from_ref(&plugins), &builds);
+    assert!(cached.candidates[0].build.is_none());
+    assert!(builds.join("minimal/source/Cargo.lock").is_file());
+    assert!(!plugins.join("Cargo.lock").exists());
+    assert!(!plugins.join("Cargo.toml").exists());
+    std::fs::write(
+        &file,
+        content.replace(
+            "features = [\"greeting\"]",
+            "features = [\"greeting\"], default-features = false",
+        ),
+    )
+    .unwrap();
+    let changed = discovery::discover_report_in(&[plugins], &builds);
+    assert!(changed.candidates[0].build.is_some());
+    assert_ne!(
+        changed.candidates[0].fingerprint,
+        cached.candidates[0].fingerprint
+    );
 }

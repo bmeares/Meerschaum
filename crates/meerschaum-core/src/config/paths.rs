@@ -406,35 +406,6 @@ pub fn dedupe_plugins_dirs(mut paths: Vec<PathBuf>) -> Vec<PathBuf> {
     paths
 }
 
-/// Whether a development build must refuse the real default root.
-///
-/// Debug builds (`cargo build`, `maturin develop`) refuse to fall back to `~/.config/meerschaum`
-/// unless `MRSM_ROOT_DIR` is set (in `env` or in the process) or `MRSM_ALLOW_DEFAULT_ROOT` is set
-/// in the process. Manual runs of `target/debug/mrsm` during development once modified a
-/// developer's real root; release builds are unaffected. Lookups with an injected environment
-/// (unit tests) are allowed whenever the process itself has a root, as `cargo test` always does.
-fn default_root_refused(env: &dyn Fn(&str) -> Option<String>) -> bool {
-    if !cfg!(debug_assertions) || env("MRSM_ROOT_DIR").is_some() {
-        return false;
-    }
-    let allowed = |key: &str| std::env::var_os(key).is_some_and(|v| !v.is_empty());
-    !(allowed("MRSM_ROOT_DIR") || allowed("MRSM_ALLOW_DEFAULT_ROOT"))
-}
-
-/// A path variable that is set but empty. v4 does `Path(os.environ[VAR]).resolve()` for
-/// `MRSM_ROOT_DIR`, `MRSM_CONFIG_DIR` and `MRSM_VENVS_DIR`, so an empty value is the working
-/// directory there, and release builds keep that. A development build refuses it (an empty
-/// `MRSM_ROOT_DIR` once made a debug `mrsm` write `cache/` and `config/` into the repository root).
-/// `MRSM_PLUGINS_DIR` needs no such rule: an empty value is already an error in v4 and here.
-fn reject_empty(var: &str, value: &str) -> Result<(), ConfigError> {
-    if value.is_empty() && cfg!(debug_assertions) {
-        return Err(ConfigError::EmptyPath {
-            var: var.to_string(),
-        });
-    }
-    Ok(())
-}
-
 impl Paths {
     /// Derive the paths from environment variables, like importing `meerschaum.config._paths`.
     ///
@@ -472,7 +443,6 @@ impl Paths {
 
         let root_dir = match env("MRSM_ROOT_DIR") {
             Some(r) => {
-                reject_empty("MRSM_ROOT_DIR", &r)?;
                 let p = resolve_path(Path::new(&r));
                 if !p.exists() {
                     return Err(ConfigError::InvalidPath {
@@ -482,19 +452,11 @@ impl Paths {
                 }
                 p
             }
-            None => {
-                if default_root_refused(env) {
-                    return Err(ConfigError::DefaultRootRefused {
-                        path: posix(&default_root),
-                    });
-                }
-                default_root
-            }
+            None => default_root,
         };
 
         let config_dir = match env("MRSM_CONFIG_DIR") {
             Some(c) => {
-                reject_empty("MRSM_CONFIG_DIR", &c)?;
                 let p = resolve_path(Path::new(&c));
                 if !p.exists() {
                     return Err(ConfigError::InvalidPath {
@@ -514,7 +476,6 @@ impl Paths {
 
         let venvs_dir = match env("MRSM_VENVS_DIR") {
             Some(v) => {
-                reject_empty("MRSM_VENVS_DIR", &v)?;
                 let p = resolve_path(Path::new(&v));
                 if allow_writes && !p.exists() && std::fs::create_dir_all(&p).is_err() {
                     Some(resolve_path(&root_dir.join("venvs")))
@@ -673,15 +634,24 @@ mod tests {
         assert_eq!(paths.dot_config_dir, Paths::process_dot_config_dir());
     }
 
-    /// An empty path variable is the working directory in v4 (`Path('').resolve()`): release
-    /// builds keep that; development builds refuse it, naming the variable (and not the default
-    /// root, which an empty value does not select).
     #[test]
-    fn empty_path_variables_are_refused_by_development_builds_only() {
+    fn default_root_is_accepted_in_every_build() {
+        let home = tempfile::tempdir().unwrap();
+        let paths = Paths::from_env(&|_| None, home.path(), false, None).unwrap();
+        assert_eq!(paths.root_dir, home.path().join(".config/meerschaum"));
+        assert_eq!(paths.config_dir, paths.root_dir.join("config"));
+        assert!(
+            !paths.root_dir.exists(),
+            "path resolution does not create the root"
+        );
+    }
+
+    /// Empty path overrides resolve to the working directory, like Python's Path('').resolve().
+    #[test]
+    fn empty_path_variables_resolve_to_the_working_directory_in_every_build() {
         let tmp = std::env::temp_dir().to_string_lossy().into_owned();
         for var in ["MRSM_ROOT_DIR", "MRSM_CONFIG_DIR", "MRSM_VENVS_DIR"] {
-            let tmp = tmp.clone();
-            let env = move |name: &str| {
+            let env = |name: &str| {
                 if name == var {
                     Some(String::new())
                 } else if name == "MRSM_ROOT_DIR" {
@@ -690,27 +660,12 @@ mod tests {
                     None
                 }
             };
-            let result = Paths::from_env(&env, Path::new("/home/u"), false, None);
-            if cfg!(debug_assertions) {
-                let err = result.unwrap_err();
-                assert!(
-                    matches!(&err, ConfigError::EmptyPath { var: v } if v == var),
-                    "{var}: {err:?}"
-                );
-                let text = err.to_string();
-                assert!(
-                    text.contains(var) && text.contains("set but empty"),
-                    "{text}"
-                );
-                assert!(!text.contains("MRSM_ALLOW_DEFAULT_ROOT"), "{text}");
-            } else {
-                let paths = result.unwrap();
-                let cwd = resolve_path(Path::new(""));
-                match var {
-                    "MRSM_ROOT_DIR" => assert_eq!(paths.root_dir, cwd),
-                    "MRSM_CONFIG_DIR" => assert_eq!(paths.config_dir, cwd),
-                    _ => assert_eq!(paths.venvs_dir, Some(cwd)),
-                }
+            let paths = Paths::from_env(&env, Path::new("/home/u"), false, None).unwrap();
+            let cwd = resolve_path(Path::new(""));
+            match var {
+                "MRSM_ROOT_DIR" => assert_eq!(paths.root_dir, cwd),
+                "MRSM_CONFIG_DIR" => assert_eq!(paths.config_dir, cwd),
+                _ => assert_eq!(paths.venvs_dir, Some(cwd)),
             }
         }
     }

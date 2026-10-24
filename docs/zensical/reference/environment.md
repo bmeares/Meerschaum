@@ -28,7 +28,6 @@ All Meerschaum environment variables begin with the prefix `MRSM_`. The most com
 | `MRSM_BIN` | Run a standalone `mrsm` binary instead of the in-process CLI of the Python package. | _(unset)_ |
 | `MRSM_PYTHON` | The Python interpreter the binary runs plugin workers and `upgrade meerschaum` with. | _(auto-detected)_ |
 | `MRSM_WORKER_STARTUP_TIMEOUT` | Seconds a Python worker may take to connect and say hello before it is killed and refused (for 10 s only). | `60` |
-| `MRSM_ALLOW_DEFAULT_ROOT` | Let a debug build use the default root directory. | _(unset)_ |
 
 !!! tip "Inspecting your environment"
     Run `mrsm show environment` to list every currently set `MRSM_` variable. Run `mrsm show config` to inspect the resolved configuration after all patches and connectors have been applied.
@@ -232,11 +231,6 @@ names the interpreter, what it found and the fix (`pip install meerschaum==<vers
 the refusal is remembered for a few seconds, so many pipes do not each wait. A worker has
 `MRSM_WORKER_STARTUP_TIMEOUT` seconds (default 60, for connecting and the hello together) before it is
 killed; raise it for a legitimately slow cold start.
-
-## **`MRSM_ALLOW_DEFAULT_ROOT`**
-
-Debug builds of the binary refuse to start without `MRSM_ROOT_DIR` so development never touches the
-real root. Release builds and the published packages are unaffected. Prefer setting `MRSM_ROOT_DIR`.
 
 ## Internal Variables
 

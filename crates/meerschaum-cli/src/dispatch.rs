@@ -396,28 +396,21 @@ impl<'a> Runtime<'a> {
             options.allow_writes = allow_writes;
             Config::new(options).unwrap_or_else(|e| {
                 use meerschaum_core::config::ConfigError;
-                match &e {
-                    ConfigError::DefaultRootRefused { .. } | ConfigError::EmptyPath { .. } => {
-                        eprintln!("{e}");
-                        std::process::exit(1);
+                // PARITY: `config/_paths.py` prints this and exits 1 for a missing
+                // `MRSM_ROOT_DIR` (and the other `MRSM_*` path variables).
+                if let ConfigError::InvalidPath { var, path } = &e {
+                    match var.as_str() {
+                        "MRSM_ROOT_DIR" => eprintln!(
+                            "Invalid root directory '{path}' set for environment variable \
+                             '{var}'.\nPlease enter a valid path for {var}."
+                        ),
+                        "MRSM_CONFIG_DIR" => eprintln!(
+                            "Invalid configuration directory '{path}' set for environment \
+                             variable '{var}'\nPlease enter a valid path for {var}."
+                        ),
+                        _ => eprintln!("{e}\nPlease enter a valid path for {var}."),
                     }
-                    // PARITY: `config/_paths.py` prints this and exits 1 for a missing
-                    // `MRSM_ROOT_DIR` (and the other `MRSM_*` path variables).
-                    ConfigError::InvalidPath { var, path } => {
-                        match var.as_str() {
-                            "MRSM_ROOT_DIR" => eprintln!(
-                                "Invalid root directory '{path}' set for environment variable \
-                                 '{var}'.\nPlease enter a valid path for {var}."
-                            ),
-                            "MRSM_CONFIG_DIR" => eprintln!(
-                                "Invalid configuration directory '{path}' set for environment \
-                                 variable '{var}'\nPlease enter a valid path for {var}."
-                            ),
-                            _ => eprintln!("{e}\nPlease enter a valid path for {var}."),
-                        }
-                        std::process::exit(1);
-                    }
-                    _ => {}
+                    std::process::exit(1);
                 }
                 let mut opts = ConfigOptions::from_process();
                 opts.allow_writes = false;

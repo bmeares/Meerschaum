@@ -133,8 +133,10 @@ pub fn run_action(
         .map_err(|e| ActionError::new("ImportError", e.to_string()))?;
     let mut args = args.clone();
     // The words after the action name are its subaction arguments, like v4's `action` list.
-    let consumed = action.split('_').count();
     let words = native::words(&args, "action");
+    let consumed = (1..=words.len())
+        .find(|&count| words[..count].join("_") == action)
+        .unwrap_or_else(|| action.split('_').count());
     args.insert(
         "action".into(),
         PyValue::str_list(words.get(consumed..).unwrap_or_default()),
@@ -460,7 +462,7 @@ pub struct NativeRegistry {
 }
 
 /// `meerschaum:connectors:<type>:default` patched with the label's section.
-fn attributes(connectors: &Map, kind: &str, label: &str) -> Map {
+pub(crate) fn attributes(connectors: &Map, kind: &str, label: &str) -> Map {
     let section = |key: &str| {
         connectors
             .get(kind)
@@ -635,15 +637,27 @@ impl ConnectorRegistry for NativeRegistry {
     }
 
     fn plugin_sync(&self, keys: &str) -> Option<Arc<dyn PluginSync>> {
-        if let Some(("plugin", name)) = keys.split_once(':')
-            && self.natives.has_data_function(name, "sync")
-        {
-            let connector = self
-                .natives
-                .plugin(name)
-                .ok()?
-                .source(serde_json::Value::Null);
-            return Some(Arc::new(NativeSync(connector, self.clone())));
+        if let Some((kind, label)) = keys.split_once(':') {
+            let overrides_sync = if kind == "plugin" {
+                self.natives.has_data_function(label, "sync")
+            } else {
+                self.natives.connector_plugin(kind).is_some()
+                    && self.natives.manifest()["connector_types"][kind]["methods"]
+                        .as_array()
+                        .is_some_and(|methods| methods.iter().any(|m| m == "sync"))
+            };
+            if overrides_sync {
+                let connector = if kind == "plugin" {
+                    // A sync-only plugin has no fetch source in the registry.
+                    self.natives
+                        .plugin(label)
+                        .ok()?
+                        .source(serde_json::Value::Null)
+                } else {
+                    self.source_connector(keys)?.ok()?
+                };
+                return Some(Arc::new(NativeSync(connector, self.clone())));
+            }
         }
         self.inner.plugin_sync(keys)
     }
