@@ -21,7 +21,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use meerschaum_connector_sql::instance::unique_keys::{
-    Duplicate, KeyStatus, PIPES_KEY, UNIQUE_KEYS, UniqueKey,
+    Duplicate, KeyStatus, PIPES_KEY, PLUGINS_KEY, UNIQUE_KEYS, UniqueKey,
 };
 use meerschaum_connector_sql::{Flavor, SqlConnector, driver::DuckdbHostDiagnostic};
 use meerschaum_core::SuccessTuple;
@@ -376,7 +376,7 @@ fn extension_checks(ctx: &InstanceContext) -> Vec<Check> {
     super::extensions::doctor_checks(&status, &ctx.keys, ctx.stack_db, ctx.stack_telemetry_off)
 }
 
-/// The unique keys of the instance tables (5.0: pipe keys, usernames), read-only.
+/// The unique keys of the instance tables (5.0: pipe keys, usernames, plugin names), read-only.
 fn unique_key_checks(ctx: &InstanceContext) -> Vec<Check> {
     let Some(sql) = &ctx.sql else {
         return vec![Check::skip(
@@ -1578,7 +1578,7 @@ pub fn unique_key_check_name(key: &UniqueKey) -> String {
 }
 
 /// An instance table has its unique key (5.0: `mrsm_pipes` on the pipe keys, `mrsm_users` on the
-/// username). A table created by v4 gets it the first time 5.0 writes to the instance, unless a
+/// username, `mrsm_plugins` on the plugin name). A table created by v4 gets it the first time 5.0 writes to the instance, unless a
 /// key value is held by more than one row.
 pub fn judge_unique_key(
     key: &UniqueKey,
@@ -1590,6 +1590,12 @@ pub fn judge_unique_key(
             "the pipe keys",
             "pipe(s) are registered",
             "the parameters you want",
+        )
+    } else if *key == PLUGINS_KEY {
+        (
+            "the plugin name",
+            "plugin(s) are registered",
+            "the version and owner you want",
         )
     } else {
         (

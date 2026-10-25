@@ -1,12 +1,15 @@
-//! The unique keys of the instance tables (5.0, `instance/unique_keys.rs`): a pipe or a username
-//! cannot be registered twice, and an existing table with duplicate rows is left as it is until
-//! they are removed.
+//! The unique keys of the instance tables (5.0, `instance/unique_keys.rs`): a pipe, a username or
+//! a plugin name cannot be registered twice, and an existing table with duplicate rows is left as
+//! it is until they are removed.
 mod common;
 use common::*;
+use meerschaum_connector::PluginRecord;
 use meerschaum_connector_sql::driver::SqlParam;
 use meerschaum_connector_sql::driver::params::placeholders;
 use meerschaum_connector_sql::instance::tables::instance_table_ddl;
-use meerschaum_connector_sql::instance::unique_keys::{KeyStatus, PIPES_KEY, USERS_KEY, UniqueKey};
+use meerschaum_connector_sql::instance::unique_keys::{
+    KeyStatus, PIPES_KEY, PLUGINS_KEY, USERS_KEY, UniqueKey,
+};
 use meerschaum_core::Pipe;
 use meerschaum_core::users::User;
 
@@ -75,6 +78,71 @@ flavor_tests!(a_pipe_cannot_be_registered_twice, |c: Ctx| async move {
         }
     }
 });
+
+/// Insert a row for plugin `name` owned by `user_id` directly, as a second process would.
+async fn insert_plugin_row(c: &Ctx, name: &str, user_id: i64) -> bool {
+    let table = c.conn.instance_table_name("mrsm_plugins");
+    let query = format!(
+        "INSERT INTO {table} (plugin_name, user_id) VALUES ({})",
+        placeholders(c.conn.flavor(), 1, 2)
+    );
+    c.conn
+        .exec_params(
+            &query,
+            &[SqlParam::Text(name.to_string()), SqlParam::Int(user_id)],
+        )
+        .await
+        .is_some()
+}
+
+flavor_tests!(
+    a_plugin_name_cannot_be_registered_twice,
+    |c: Ctx| async move {
+        let mut owner = User::new(&format!("{}_owner", c.prefix), Some("test1234"));
+        let res = c.conn.register_user(&mut owner).await;
+        assert!(res.success, "{}", res.message);
+        let user_id = c.conn.get_user_id(&owner).await.unwrap().unwrap();
+        let plugin = PluginRecord {
+            name: format!("{}_plugin", c.prefix),
+            version: Some("1.0.0".into()),
+            user_id: Some(user_id.clone()),
+            attributes: Default::default(),
+        };
+
+        // Registered at once by several processes: one row, and the others take the update path
+        // (refused here: the version is not greater), never "Failed to register".
+        let results =
+            futures_util::future::join_all((0..6).map(|_| c.conn.register_plugin(&plugin, false)))
+                .await;
+        assert!(results.iter().any(|r| r.success), "{results:?}");
+        for res in &results {
+            assert!(
+                res.success
+                    || res
+                        .message
+                        .contains("must be greater than existing version"),
+                "{}: {}",
+                c.flavor,
+                res.message
+            );
+        }
+        assert!(
+            c.conn.unique_key_exists(&PLUGINS_KEY).await.unwrap(),
+            "{}",
+            c.flavor
+        );
+        assert!(
+            !insert_plugin_row(&c, &plugin.name, user_id.as_i64().unwrap()).await,
+            "{}: a duplicate plugin",
+            c.flavor
+        );
+
+        let res = c.conn.delete_plugin(&plugin).await;
+        assert!(res.success, "{}", res.message);
+        let res = c.conn.delete_user(&owner).await;
+        assert!(res.success, "{}", res.message);
+    }
+);
 
 flavor_tests!(a_username_cannot_be_registered_twice, |c: Ctx| async move {
     let username = format!("{}_user", c.prefix);
@@ -160,6 +228,27 @@ flavor_tests!(
             let username = format!("{}_dup", c.prefix);
             check_existing_duplicates(&c, &USERS_KEY, async || {
                 insert_user_row(&c, &username).await
+            })
+            .await;
+            let user_id = c
+                .conn
+                .get_user_id(&User::new(&username, None))
+                .await
+                .unwrap()
+                .and_then(|id| id.as_i64())
+                .expect("the remaining user");
+            // (Looking the user up ensured the instance tables, keys included: start again from a
+            // table as v4 created it.)
+            let plugins = c.conn.instance_table_name("mrsm_plugins");
+            assert!(
+                c.conn
+                    .exec(&format!("DROP TABLE {plugins}"))
+                    .await
+                    .is_some()
+            );
+            let name = format!("{}_dup_plugin", c.prefix);
+            check_existing_duplicates(&c, &PLUGINS_KEY, async || {
+                insert_plugin_row(&c, &name, user_id).await
             })
             .await;
         });

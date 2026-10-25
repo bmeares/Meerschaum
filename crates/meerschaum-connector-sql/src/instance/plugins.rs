@@ -77,6 +77,12 @@ impl SqlConnector {
         };
         match self.exec_params(&query, &params).await {
             Some(_) => SuccessTuple::ok(format!("Successfully registered plugin '{plugin}'.")),
+            // Another process registered the plugin after the check above (the unique key
+            // refused the second row; `unique_keys.rs`): register again, as an update with its
+            // version check. That call finds the row, so it never comes back here.
+            None if old_id.is_none() && matches!(self.get_plugin_id(plugin).await, Ok(Some(_))) => {
+                Box::pin(self.register_plugin(plugin, force)).await
+            }
             None => SuccessTuple::fail(format!("Failed to register plugin '{plugin}'.")),
         }
     }

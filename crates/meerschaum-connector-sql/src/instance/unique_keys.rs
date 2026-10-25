@@ -1,8 +1,9 @@
-//! Unique keys on the instance tables (new in 5.0): a pipe's keys in `mrsm_pipes` and a
-//! username in `mrsm_users`.
+//! Unique keys on the instance tables (new in 5.0): a pipe's keys in `mrsm_pipes`, a username in
+//! `mrsm_users` and a plugin name in `mrsm_plugins`.
 //!
-//! v4 creates these tables without them, so two processes registering the same pipe or user at
-//! once can both pass the existence check (`get_pipe_id`, `get_user_id`) and insert two rows.
+//! v4 creates these tables without them, so two processes registering the same pipe, user or
+//! plugin at once can both pass the existence check (`get_pipe_id`, `get_user_id`,
+//! `get_plugin_id`) and insert two rows.
 //! Every instance gets the unique indexes of [`UNIQUE_KEYS`] the first time a connector ensures
 //! the instance tables (registering, syncing, editing or looking up a pipe or user; listing pipes
 //! does not), whether the tables were created by v4 or by 5.0. The `CREATE TABLE` text stays
@@ -67,8 +68,17 @@ pub const USERS_KEY: UniqueKey = UniqueKey {
     nullable: None,
 };
 
+/// A plugin name in `mrsm_plugins`.
+pub const PLUGINS_KEY: UniqueKey = UniqueKey {
+    table: "mrsm_plugins",
+    index: "uq_mrsm_plugins_plugin_name",
+    id_column: "plugin_id",
+    columns: &["plugin_name"],
+    nullable: None,
+};
+
 /// Every unique key 5.0 adds to the instance tables.
-pub const UNIQUE_KEYS: [UniqueKey; 2] = [PIPES_KEY, USERS_KEY];
+pub const UNIQUE_KEYS: [UniqueKey; 3] = [PIPES_KEY, USERS_KEY, PLUGINS_KEY];
 
 /// A key value held by more than one row.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -398,6 +408,18 @@ mod tests {
                 "{f:?}"
             );
         }
+    }
+
+    #[test]
+    fn the_plugins_key_is_the_plugin_name() {
+        assert_eq!(
+            PLUGINS_KEY.ddl(Flavor::Postgresql, "mrsm_plugins"),
+            vec!["CREATE UNIQUE INDEX uq_mrsm_plugins_plugin_name ON mrsm_plugins (plugin_name)"]
+        );
+        assert_eq!(
+            PLUGINS_KEY.ddl(Flavor::Oracle, "mrsm_plugins")[1],
+            "ALTER TABLE mrsm_plugins ADD CONSTRAINT uq_mrsm_plugins_plugin_name UNIQUE (plugin_name) USING INDEX ix_mrsm_plugins_plugin_name"
+        );
     }
 
     #[test]
