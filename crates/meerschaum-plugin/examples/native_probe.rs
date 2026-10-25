@@ -69,14 +69,13 @@ impl Plugin for Probe {
             "action" => Ok(Reply::json(json!([true, "Hello from native_probe"]))),
             "pre_sync_hook" => Ok(record(
                 "pre",
-                format!("pre metric={}", r.context["kwargs"]["pipe"]["metric_key"]),
+                format!("pre metric={}", r.context["pipe"]["metric_key"]),
             )),
             "post_sync_hook" => Ok(record(
                 "post",
                 format!(
                     "post metric={} success={}",
-                    r.context["kwargs"]["pipe"]["metric_key"],
-                    r.context["kwargs"]["success_tuple"][0]
+                    r.context["pipe"]["metric_key"], r.context["kwargs"]["success_tuple"][0]
                 ),
             )),
             _ => Err(Error::Unsupported(format!(

@@ -234,6 +234,25 @@ pub struct ConnectorTypeManifest {
     pub doc: Option<String>,
 }
 
+/// A job executor type of a native plugin (`meerschaum_plugin::executor`).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct ExecutorTypeManifest {
+    /// The type (`procs` for `procs:<label>`).
+    #[serde(rename = "type")]
+    pub executor_type: String,
+    /// The plugin declaring it.
+    pub plugin: String,
+    /// The implementing type's name.
+    #[serde(default)]
+    pub class_name: Option<String>,
+    /// The executor methods the plugin implements (informational).
+    #[serde(default)]
+    pub methods: Vec<String>,
+    /// The description.
+    #[serde(default)]
+    pub doc: Option<String>,
+}
+
 /// One plugin's entry.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct PluginManifest {
@@ -339,6 +358,10 @@ pub struct Manifest {
     /// Custom connector types by type.
     #[serde(default)]
     pub connector_types: IndexMap<String, ConnectorTypeManifest>,
+    /// Job executor types (`<type>:<label>` executor keys) of native plugins; Python workers
+    /// never write it (an `@make_executor` class is reached only from Python).
+    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
+    pub executor_types: IndexMap<String, ExecutorTypeManifest>,
     /// Plugins with `@api_plugin` functions (read by the server's `HostManifest`).
     #[serde(default)]
     pub api_plugins: Vec<String>,
@@ -680,6 +703,10 @@ pub async fn build_manifest(
             ..Manifest::default()
         });
     }
+    meerschaum_core::dprint!(
+        "Building the plugin manifest: {} plugin(s) in {plugins_dirs:?}, entry points {entry_points:?}.",
+        per_plugin.len()
+    );
     let worker = pool.spawn_worker().await?;
     let reply = worker
         .call(

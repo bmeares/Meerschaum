@@ -80,7 +80,8 @@ pub fn enforce_dtypes<'py>(
     as_polars: bool,
     debug: bool,
 ) -> PyResult<Bound<'py, PyAny>> {
-    let _ = (safe_copy, debug);
+    let _ = safe_copy;
+    let _debug = crate::sync_api::DebugGuard::new(debug);
     if df.is_none() {
         return Ok(df);
     }
@@ -316,7 +317,8 @@ pub fn filter_unseen_df<'py>(
     coerce_mixed_numerics: bool,
     debug: bool,
 ) -> PyResult<Bound<'py, PyAny>> {
-    let _ = (safe_copy, include_unchanged_columns, debug);
+    let _ = (safe_copy, include_unchanged_columns);
+    let _debug = crate::sync_api::DebugGuard::new(debug);
     // PARITY: `if old_df is None: return new_df` returns the very same object.
     if old_df.is_none() {
         return Ok(new_df);
@@ -518,7 +520,8 @@ pub fn query_df<'py>(
     coerce_types: bool,
     debug: bool,
 ) -> PyResult<Bound<'py, PyAny>> {
-    let _ = (inplace, debug);
+    let _ = inplace;
+    let _debug = crate::sync_api::DebugGuard::new(debug);
     let ctx = PyCtx::new(py)?;
     let input = frame_from_py(&ctx, &df, ColumnMode::Full)?;
     let mut param_map = IndexMap::new();

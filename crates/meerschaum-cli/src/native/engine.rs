@@ -16,6 +16,8 @@ use crate::dispatch::Runtime;
 pub struct EngineRegistry {
     pub python: Arc<meerschaum_engine::python::PythonRegistry>,
     pub registry: Arc<dyn meerschaum_engine::ConnectorRegistry>,
+    /// The native plugins' layer of `registry` (sync hook reporting).
+    pub native: Arc<crate::native_plugins::NativeRegistry>,
     pub config: EngineConfig,
 }
 
@@ -237,7 +239,8 @@ pub fn registry_with(
     );
     Ok(EngineRegistry {
         python,
-        registry,
+        registry: registry.clone(),
+        native: registry,
         config,
     })
 }
@@ -363,14 +366,19 @@ pub fn build(
     let EngineRegistry {
         python,
         registry,
+        native,
         config,
     } = registry(rt.config(), session, inst, pipes, inplace)?;
     let output = session.clone();
-    python.set_hook_reporter(Arc::new(move |result| output.report_hook_result(result)));
+    let reporter: meerschaum_engine::python::HookReporter =
+        Arc::new(move |result| output.report_hook_result(result));
+    python.set_hook_reporter(reporter.clone());
+    native.set_hook_reporter(reporter);
     if listen {
         python.enable_legacy_streams();
     }
     if let Some(kwargs) = stream_kwargs {
+        native.set_stream_kwargs(kwargs.clone());
         python.set_stream_kwargs(kwargs);
     }
     Ok(Engine::new(registry, config).with_cadence(Arc::new(JobsCadence)))

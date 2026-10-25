@@ -262,6 +262,8 @@ pub struct Shared {
     pub above: Vec<(usize, String)>,
     /// A fixed terminal size (tests); the terminal is asked otherwise.
     pub size_override: Option<(u16, u16)>,
+    /// `shell:keybindings`: keys that run a command line (F2 `watch run`, F3 `watch jobs`).
+    pub keybindings: Vec<crate::tui::keys::Binding>,
 }
 
 /// The shared state handle.
@@ -291,6 +293,7 @@ impl Shared {
             toolbar: ToolbarModel::default(),
             above: Vec::new(),
             size_override: None,
+            keybindings: Vec::new(),
         }
     }
 
@@ -321,6 +324,34 @@ impl Shared {
             size,
             cleared: false,
         };
+    }
+
+    /// The screen row the prompt starts on, measured from the cursor (which reedline leaves in
+    /// the input when it hands over a key binding's command). `None` off a terminal.
+    pub fn prompt_top_row(&self) -> Option<u16> {
+        let (_, row) = crossterm::cursor::position().ok()?;
+        let cols = self.term_size().0.max(1) as usize;
+        let prompt_plain = remove_ansi(&self.prompt);
+        let lines: Vec<&str> = prompt_plain.split('\n').collect();
+        let last = lines.last().copied().unwrap_or("");
+        let above: usize = lines[..lines.len() - 1]
+            .iter()
+            .map(|l| 1 + wrap_position(&[l], cols).1)
+            .sum();
+        let cursor_rows =
+            above + resolve_wrap(wrap_position(&[last, self.doc.before()], cols), cols).1;
+        Some((row as usize).saturating_sub(cursor_rows) as u16)
+    }
+
+    /// Re-anchor the prompt after a key binding's command ([`Shared::begin_line`]), keeping the
+    /// line being edited (the shell hands it to the new editor).
+    pub fn resume_line(&mut self) {
+        let doc = self.doc.clone();
+        self.begin_line();
+        if let Some(line) = self.working.last_mut() {
+            *line = doc.text.clone();
+        }
+        self.doc = doc;
     }
 
     fn term_size(&self) -> (u16, u16) {
@@ -920,6 +951,13 @@ impl EditMode for ShellEditMode {
         };
         if searching {
             return self.search_key(&key, event);
+        }
+        // A bound key runs its command and comes back to this line as it was (v4 bound no
+        // function keys, so its recorded screens never see one).
+        if let Some(command) =
+            crate::tui::keys::lookup(&lock(&self.shared).keybindings, key.code, key.modifiers)
+        {
+            return ReedlineEvent::ExecuteHostCommand(command.to_string());
         }
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         let none = key.modifiers.is_empty();

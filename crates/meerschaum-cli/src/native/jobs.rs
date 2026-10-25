@@ -163,16 +163,34 @@ pub fn sleep_unless_stopped(seconds: f64) -> bool {
 pub fn jobs_context(rt: &mut Runtime<'_>) -> JobsContext {
     let session = super::session(rt);
     let config = rt.config();
+    // `<type>:<label>` executors of native plugins (none: the context resolves no other types).
+    let natives = session.native_plugins(config).ok();
     let resolver = super::remote_jobs::CliRemoteResolver::new(
         session,
         super::remote_jobs::CliRemoteResolver::section(config),
     );
-    JobsContext::new(
+    let context = JobsContext::new(
         JobPaths::from_config(config),
         JobsConfig::from_config(config),
         Launcher::from_env(),
     )
-    .with_remote(Arc::new(resolver))
+    .with_remote(Arc::new(resolver));
+    match natives.filter(|n| !n.executor_types().is_empty()) {
+        Some(natives) => context.with_executors(Arc::new(
+            crate::native_executors::NativeExecutors::new(natives, config),
+        )),
+        None => context,
+    }
+}
+
+/// A failed operation on a job of a native plugin's executor shows the executor's reason
+/// (``"`pause_job` is not supported by the 'procs:main' executor."``); the built-in executors
+/// keep v4's summary-only output.
+fn warn_custom_executor_failure(rt: &mut Runtime<'_>, job: &Job, result: &SuccessTuple) {
+    let kind = job.executor_keys.split(':').next().unwrap_or_default();
+    if !result.success && !matches!(kind, "local" | "systemd" | "api" | "None" | "") {
+        warn(rt, &result.message);
+    }
 }
 
 fn executor_keys(args: &ArgsMap) -> Option<String> {
@@ -874,6 +892,7 @@ pub fn stop_jobs(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
         for w in std::mem::take(&mut job.warnings) {
             warn(rt, &w);
         }
+        warn_custom_executor_failure(rt, job, &res);
         if res.success {
             ok += 1;
         } else {
@@ -938,7 +957,9 @@ pub fn pause_jobs(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     let (mut successes, mut fails) = (Vec::new(), Vec::new());
     for n in &to_pause {
         let Some(job) = jobs.get_mut(n) else { continue };
-        if job.pause(None).success {
+        let res = job.pause(None);
+        warn_custom_executor_failure(rt, job, &res);
+        if res.success {
             successes.push(n.clone());
         } else {
             fails.push(n.clone());
@@ -1099,7 +1120,11 @@ pub fn delete_jobs(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     let mut deleted = Vec::new();
     for n in &to_delete {
         let res = match jobs.get_mut(n) {
-            Some(j) => j.delete(),
+            Some(j) => {
+                let res = j.delete();
+                warn_custom_executor_failure(rt, j, &res);
+                res
+            }
             None => SuccessTuple::fail(format!("Job '{n}' does not exist.")),
         };
         if !res.success {

@@ -157,9 +157,15 @@ impl ValkeyConnector {
                 .map(attr_str)
                 .as_deref(),
         );
+        let started = std::time::Instant::now();
+        meerschaum_core::dprint!(
+            "Connecting valkey:{label} ({}).",
+            meerschaum_core::debug::redact_uris(&url)
+        );
         let backend = FredBackend::connect_with(&url, timeout, connect_timeout)
             .await
             .map_err(|e| connect_failure(label, &url, &probe.attributes, e, connect_timeout))?;
+        meerschaum_core::dprint!("Connected valkey:{label} in {:?}.", started.elapsed());
         Ok(ValkeyConnector {
             backend: Arc::new(backend),
             ..probe

@@ -48,15 +48,20 @@ use crate::state::{StateSource, StateWriter};
 use crate::stream::{SinkOptions, StopToken, StreamConfig, SuperviseOptions, run_sink, supervise};
 use crate::sync::{SyncArgs, SyncEnv};
 
-/// Which events are persisted to `mrsm:engine_events`.
+/// Which events are persisted to `mrsm:engine_events` (`system.engine.events`, default `all`).
+///
+/// `all` keeps the chunk-level events (`chunk_started`, `chunk_finished`, `node_planned`,
+/// `stream_flushed`) that the console's live run view and `GET /engine/runs/{run_id}/events/stream`
+/// replay; they roughly double the rows of a run whose nodes sync one chunk each. Retention
+/// (`system.engine.run_history_days`) prunes them with the rest of the run's history.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum EventGranularity {
     /// None.
     Off,
     /// Run and node transitions (no `node_planned`, `chunk_*` or `stream_flushed`).
-    #[default]
     Nodes,
     /// Every event.
+    #[default]
     All,
 }
 
@@ -146,7 +151,7 @@ impl Default for EngineConfig {
             inclusive_cap: true,
             flat_ledger: true,
             persist_runs: true,
-            events: EventGranularity::Nodes,
+            events: EventGranularity::All,
             state_flush: Duration::from_millis(500),
             run_history_days: 30,
             lease_ttl: Duration::from_secs(60),
@@ -205,6 +210,7 @@ impl EngineConfig {
                 .map(|v| meerschaum_core::pyfmt::py_str(&v))
             {
                 Some(s) if s == "all" => EventGranularity::All,
+                Some(s) if s == "nodes" => EventGranularity::Nodes,
                 Some(s) if s == "off" || s == "False" => EventGranularity::Off,
                 _ => d.events,
             },
@@ -571,8 +577,30 @@ impl EventSink for RunSink {
         if let Some(sink) = &self.on_event {
             sink.emit(event.clone());
         }
+        for sink in PROCESS_SINKS
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .iter()
+        {
+            sink.emit(event.clone());
+        }
         let _ = self.broadcast.send(event);
     }
+}
+
+/// Sinks that receive the events of every run in this process ([`add_process_event_sink`]).
+static PROCESS_SINKS: std::sync::RwLock<Vec<Arc<dyn EventSink>>> =
+    std::sync::RwLock::new(Vec::new());
+
+/// Also deliver the events of every engine run in this process to `sink` (whatever started
+/// the run). `mrsm start api` installs one so the runs its actions start in the server
+/// process (`POST /actions/sync`, MCP action tools) stream live to
+/// `GET /engine/runs/{run_id}/events/stream`. `emit` must not block.
+pub fn add_process_event_sink(sink: Arc<dyn EventSink>) {
+    PROCESS_SINKS
+        .write()
+        .unwrap_or_else(|e| e.into_inner())
+        .push(sink);
 }
 
 /// Own a run-id admission lease until the run finishes or is cancelled.
@@ -1027,6 +1055,20 @@ impl Engine {
                 _ => the_plan.decline_rebuilds(),
             }
         }
+        if meerschaum_core::debug::enabled() {
+            for n in &the_plan.nodes {
+                meerschaum_core::dprint!(
+                    "Plan {}: {:?} ({}); bounds {:?}; {} chunk(s) {:?}{}",
+                    n.pipe_ref.label(),
+                    n.action,
+                    n.reason,
+                    n.bounds,
+                    n.chunks.len(),
+                    n.chunks.iter().take(3).collect::<Vec<_>>(),
+                    if n.chunks.len() > 3 { " ..." } else { "" }
+                );
+            }
+        }
         let mut warnings: Vec<String> = the_plan.warnings.clone();
         for n in &the_plan.nodes {
             warnings.extend(
@@ -1096,14 +1138,40 @@ impl Engine {
             let stop = flusher_stop.clone();
             let every = self.config.state_flush.max(Duration::from_millis(10));
             tokio::spawn(async move {
+                // A failed write (a SQLite instance busy with a node's long statement) keeps
+                // its rows for the next flush, so a run's first events are not lost; a write
+                // that keeps failing gives them up after `MAX_FAILURES` flushes.
+                const MAX_FAILURES: u32 = 20;
+                let mut failures = 0u32;
                 loop {
                     let stopped = stop.sleep(every).await;
                     let rows: Vec<EventRow> =
                         std::mem::take(&mut *buf.lock().unwrap_or_else(|e| e.into_inner()));
-                    if !rows.is_empty()
-                        && let Err(e) = state.write_events(&rows).await
-                    {
-                        tracing::debug!("Cannot persist engine events: {e}");
+                    let mut pending = rows;
+                    // At the end, a few quick retries before giving up.
+                    let attempts = if stopped { 4 } else { 1 };
+                    for attempt in 0..attempts {
+                        if pending.is_empty() {
+                            break;
+                        }
+                        match state.write_events(&pending).await {
+                            Ok(()) => {
+                                pending.clear();
+                                failures = 0;
+                            }
+                            Err(e) => {
+                                failures += 1;
+                                tracing::debug!("Cannot persist engine events: {e}");
+                                if attempt + 1 < attempts {
+                                    tokio::time::sleep(Duration::from_millis(250)).await;
+                                }
+                            }
+                        }
+                    }
+                    if !pending.is_empty() && !stopped && failures < MAX_FAILURES {
+                        let mut guard = buf.lock().unwrap_or_else(|e| e.into_inner());
+                        pending.append(&mut guard);
+                        *guard = pending;
                     }
                     if stopped {
                         return;

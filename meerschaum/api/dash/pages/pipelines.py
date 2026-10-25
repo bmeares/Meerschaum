@@ -56,6 +56,12 @@ layout = [
             dcc.Store(id='pipeline-analysis'),
             dcc.Store(id='pipeline-stage-statuses', data={}),
             html.Div(id='pipeline-stage-status-dummy', hidden=True),
+            ### Live runs: the run to follow over `/engine/runs/{run_id}/events/stream`, which
+            ### runs stream (`assets/pipeline_events.js`), and the refresh its events ask for.
+            dcc.Store(id='pipeline-run-follow', data=None),
+            dcc.Store(id='pipeline-run-streams', data={}),
+            dcc.Store(id='pipeline-run-tick', data=0),
+            html.Div(id='pipeline-run-follow-dummy', hidden=True),
             dcc.Store(id='pipeline-focus-options', data=[]),
             build_pipeline_controls(html.Div([
                 html.Details([

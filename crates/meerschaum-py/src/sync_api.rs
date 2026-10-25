@@ -30,7 +30,6 @@
 //! turn into a DataFrame (the façade reports it as v4 does).
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
 
 use indexmap::IndexMap;
 use meerschaum_connector::{DateBound, InstanceConnector};
@@ -59,26 +58,13 @@ pub enum NativeInput {
     Invalid(String),
 }
 
-/// How many `debug=True` syncs are running: while one is, the `tracing` sink prints the
-/// engine's `debug` events (see [`crate::logging`]).
-pub static DEBUG_SYNCS: AtomicUsize = AtomicUsize::new(0);
-
-pub(crate) struct DebugGuard(bool);
+/// A binding called with `debug=True`: debug output is on while it runs (see
+/// `meerschaum_core::debug::guard` and [`crate::logging`]).
+pub(crate) struct DebugGuard(#[allow(dead_code)] meerschaum_core::debug::DebugGuard);
 
 impl DebugGuard {
     pub(crate) fn new(on: bool) -> Self {
-        if on {
-            DEBUG_SYNCS.fetch_add(1, Ordering::SeqCst);
-        }
-        DebugGuard(on)
-    }
-}
-
-impl Drop for DebugGuard {
-    fn drop(&mut self) {
-        if self.0 {
-            DEBUG_SYNCS.fetch_sub(1, Ordering::SeqCst);
-        }
+        DebugGuard(meerschaum_core::debug::guard(on))
     }
 }
 

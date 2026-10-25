@@ -128,11 +128,18 @@ def _quietly(func: Callable[[], Any], suppressed: List[str]) -> Any:
     return result
 
 
+### Set by the call loop (`_server.py`) for a call the host made with `--debug` on.
+CALL_DEBUG: bool = False
+
+
 def _kwargs(args: Dict[str, Any]) -> Dict[str, Any]:
     kwargs = args.get('kwargs', None) or {}
     if not isinstance(kwargs, dict):
         raise BadRequest("`kwargs` must be a map.")
-    return {str(k): v for k, v in kwargs.items()}
+    kwargs = {str(k): v for k, v in kwargs.items()}
+    if CALL_DEBUG:
+        kwargs['debug'] = True
+    return kwargs
 
 
 def _clean_kwargs(kw: Dict[str, Any]) -> Dict[str, Any]:
@@ -595,7 +602,7 @@ def op_post_sync_hook(conn, call_id, args, frames) -> Result:
 
 def op_build_manifest(conn, call_id, args, frames) -> Result:
     from meerschaum.worker._manifest import build_manifest
-    return build_manifest(debug=bool(args.get('debug', False))), []
+    return build_manifest(debug=bool(args.get('debug', False)) or CALL_DEBUG), []
 
 
 def op_instance(conn, call_id, args, frames) -> Result:

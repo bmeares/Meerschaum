@@ -451,6 +451,80 @@ pub struct EngineEvent {
     pub payload: Value,
 }
 
+/// One event of `GET /engine/runs/{run_id}/events/stream` (the SSE `data:`; the SSE `event:` is
+/// [`event`](Self::event) and the SSE `id:` is [`seq`](Self::seq)).
+///
+/// The shape is the engine's typed event (`meerschaum_engine::Event`): the envelope (`run_id`,
+/// `seq`, `ts`, `pipe_ref`, `event`) with the kind's fields flattened in, so
+/// `serde_json::from_value::<meerschaum_engine::Event>` reads it back.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct EngineRunEvent {
+    /// The run ID.
+    pub run_id: String,
+    /// The per-run sequence number (the SSE `id`, and what `Last-Event-ID` resumes after).
+    pub seq: i64,
+    /// When the event happened.
+    pub ts: DateTime<Utc>,
+    /// The node, for node-level events.
+    #[serde(default)]
+    pub pipe_ref: Option<String>,
+    /// The event name (`run_started`, `chunk_finished`, ..., `run_finished`).
+    pub event: String,
+    /// The kind's own fields (`action`, `chunk`, `rows`, `result`, ...).
+    #[serde(flatten)]
+    pub fields: IndexMap<String, serde_json::Value>,
+}
+
+impl EngineRunEvent {
+    /// An event from a persisted row's columns; `payload` is the kind's JSON (an object whose
+    /// `event` tag, if any, is dropped in favor of `event`).
+    pub fn from_row(
+        run_id: &str,
+        seq: i64,
+        ts: DateTime<Utc>,
+        pipe_ref: Option<String>,
+        event: &str,
+        payload: serde_json::Value,
+    ) -> EngineRunEvent {
+        let payload = match payload {
+            serde_json::Value::String(s) => serde_json::from_str(&s).unwrap_or_default(),
+            other => other,
+        };
+        let mut fields = IndexMap::new();
+        if let serde_json::Value::Object(map) = payload {
+            for (k, v) in map {
+                if !["event", "run_id", "seq", "ts", "pipe_ref"].contains(&k.as_str()) {
+                    fields.insert(k, v);
+                }
+            }
+        }
+        EngineRunEvent {
+            run_id: run_id.to_string(),
+            seq,
+            ts,
+            pipe_ref,
+            event: event.to_string(),
+            fields,
+        }
+    }
+
+    /// Whether this is the run's last event (`run_finished`).
+    pub fn is_run_finished(&self) -> bool {
+        self.event == "run_finished"
+    }
+
+    /// Whether this is the server's synthetic `run_closed`: the stream ends because the run
+    /// will not send `run_finished` (`reason`: `interrupted`, `holder_gone` or `idle`).
+    pub fn is_run_closed(&self) -> bool {
+        self.event == "run_closed"
+    }
+
+    /// Whether a stream ends after this event (`run_finished` or `run_closed`).
+    pub fn is_terminal(&self) -> bool {
+        self.is_run_finished() || self.is_run_closed()
+    }
+}
+
 /// Body of `POST /engine/leases` (acquire or extend) and `DELETE /engine/leases` (release;
 /// `ttl_ms` ignored).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

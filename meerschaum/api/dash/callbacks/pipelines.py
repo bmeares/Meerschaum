@@ -30,6 +30,22 @@ html, dcc = import_html(check_update=CHECK_UPDATE), import_dcc(check_update=CHEC
 #: The most lines of events the page shows.
 MAX_EVENT_LINES: int = 500
 
+#: How often the page polls (ms) while every live run streams its events (or none runs): the
+#: streams' events refresh the views (`pipeline-run-tick`) as they happen.
+STREAM_POLL_MS: int = 15000
+#: How often the page polls (ms) a live run that has no event stream (the server refused it).
+FALLBACK_POLL_MS: int = 5000
+#: How long (seconds) a canvas sync's stream waits for its job to start the run.
+NODE_RUN_STREAM_WAIT: int = 30
+
+
+def poll_interval(active: bool, streaming: bool) -> int:
+    """
+    The page's poll interval (ms): slow while the live run streams its events, faster for a live
+    run without a stream (the fallback), slow when nothing runs.
+    """
+    return FALLBACK_POLL_MS if active and not streaming else STREAM_POLL_MS
+
 
 def _filters_from_search(search: Optional[str]) -> Dict[str, str]:
     query = parse_qs((search or '').lstrip('?'))
@@ -384,9 +400,11 @@ def sync_selected_pipe(clicks, context, selection, scope, begin, end, pipeline, 
             dash.set_props('pipeline-node-run', {'data': {
                 'ref': ref, 'scope': scope, 'run_id': run_id, 'instance': instance,
                 'session_id': (session or {}).get('session-id'), 'begin': begin, 'end': end,
-                'job': result['job'], 'stream': result['stream']}})
+                'job': result['job'], 'stream': result['stream'],
+                'events_stream': _engine.run_events_stream_path(
+                    run_id, instance, wait=NODE_RUN_STREAM_WAIT)}})
             dash.set_props('pipeline-node-run-label', {'children': f"{ref} · {scope} · {begin or 'current watermark'} → {end or 'available data'} · {run_id} · {result['job']}"})
-            dash.set_props('pipelines-interval', {'interval': 2000})
+            dash.set_props('pipelines-interval', {'interval': FALLBACK_POLL_MS})
         return alert_from_success_tuple((result['success'], result['msg']))
     except Exception as exc:
         return alert_from_success_tuple((False, str(exc)))
@@ -606,10 +624,14 @@ def render_pipeline_graph(pathname, focus, standalone, definition, definitions, 
     State('pipelines-events-store', 'data'),
     State('pipeline-log-stage', 'value'),
     State('session-store', 'data'),
+    Input('pipeline-run-tick', 'data'),
+    State('pipeline-run-streams', 'data'),
 )
-def render_pipelines(pathname, search, definition, live_run, selected_run, node_execution_events, n_intervals, n_clicks, events_store, log_stage, session_data):
+def render_pipelines(pathname, search, definition, live_run, selected_run, node_execution_events, n_intervals, n_clicks, events_store, log_stage, session_data, run_tick=None, run_streams=None):
     """
-    Render run details and history independently of the canvas.
+    Render run details and history independently of the canvas. A live selected run is followed
+    over its event stream (`pipeline-run-follow`), whose events re-render this (`pipeline-run-tick`);
+    without a stream the page polls every `FALLBACK_POLL_MS`.
     """
     if not str(pathname).startswith('/dash/pipelines'):
         raise PreventUpdate
@@ -704,7 +726,13 @@ def render_pipelines(pathname, search, definition, live_run, selected_run, node_
                 summary['status'] = 'stopped'
                 summary['run']['finished'] = ended
         active = False
-    dash.set_props('pipelines-interval', {'interval': 2000 if active else 15000})
+    streaming = bool(active and (run_streams or {}).get(selected_id) in ('open', 'connecting'))
+    dash.set_props('pipelines-interval', {'interval': poll_interval(active, streaming)})
+    dash.set_props('pipeline-run-follow', {'data': (
+        {'run_id': selected_id, 'path': _engine.run_events_stream_path(
+            selected_id, instance, wait=(None if detail else NODE_RUN_STREAM_WAIT))}
+        if active and selected_id else None
+    )})
     if not detail:
         dash.set_props('pipeline-run-status', {'children': ''})
         dash.set_props('pipeline-stage-statuses', {'data': {}})
@@ -744,8 +772,9 @@ def render_pipelines(pathname, search, definition, live_run, selected_run, node_
     Input('pipelines-interval', 'n_intervals'),
     Input('pipeline-log-stage', 'value'),
     State('pipelines-location', 'search'), State('session-store', 'data'),
+    Input('pipeline-run-tick', 'data'),
 )
-def render_events(store, n_intervals, stage, search, session_data):
+def render_events(store, n_intervals, stage, search, session_data, run_tick=None):
     """
     The selected run's events, oldest first.
     """
@@ -768,7 +797,10 @@ dash_app.clientside_callback(
     function(statuses, nodeStatuses) {
         const merged = {...(statuses || {}), ...(nodeStatuses || {})};
         window._mrsmPipelineStatuses = merged;
-        if (window.mrsmPaintPipelineStatuses) window.mrsmPaintPipelineStatuses(merged);
+        // Live runs' streamed statuses are newer than the persisted ones.
+        const live = window.mrsmLiveRunStatuses ? window.mrsmLiveRunStatuses() : {};
+        if (window.mrsmPaintPipelineStatuses) window.mrsmPaintPipelineStatuses({...merged, ...live});
+        if (window.mrsmDecorateChunkProgress) window.mrsmDecorateChunkProgress();
         return dash_clientside.no_update;
     }
     """,
@@ -811,7 +843,7 @@ dash_app.clientside_callback(
                 if (item.lines.length > 1000) item.lines.shift(); paint();
             };
             else item.lines.push('Waiting for attributed Pipe events…');
-            source.addEventListener('stopped', function() { source.close(); item.status = 'stopped'; item.lines.push('[Execution finished]'); if (window.mrsmFinishNodeOutput) window.mrsmFinishNodeOutput(item); paint(); });
+            source.addEventListener('stopped', function() { source.close(); item.status = 'stopped'; item.lines.push('[Execution finished]'); if (window.mrsmUnfollowEngineRun) window.mrsmUnfollowEngineRun(item.run_id, 'node'); if (window.mrsmFinishNodeOutput) window.mrsmFinishNodeOutput(item); paint(); });
             source.onerror = function() { if (source.readyState === 2) { item.lines.push('[Output disconnected]'); paint(); } };
             dash_clientside.set_props('pipeline-output-tab', {options: Array.from(cache.values()).map(r => ({label:r.ref + ' · ' + r.run_id, value:r.job})), value:run.job});
             selected = run.job;
@@ -820,6 +852,9 @@ dash_app.clientside_callback(
             if (cache.has(event.job)) {
                 const item = cache.get(event.job);
                 item.status = event.status || item.status;
+                // An ended execution's live run statuses must not outlive it.
+                if (event.ended && !['running', 'paused'].includes(event.status) && window.mrsmUnfollowEngineRun)
+                    window.mrsmUnfollowEngineRun(item.run_id, 'node');
                 if (item.scope !== 'this' && event.run_id === item.run_id) item.lines = event.lines || [];
                 if (window.mrsmUpdateOutputCancel) window.mrsmUpdateOutputCancel();
             }
@@ -846,12 +881,34 @@ dash_app.clientside_callback(
 )
 
 
+dash_app.clientside_callback(
+    """function(follow, nodeRun, session) {
+        // Follow the selected live run and the latest canvas sync over their event streams
+        // (`assets/pipeline_events.js`); a new session drops every stream.
+        if (!window.mrsmFollowEngineRun) return dash_clientside.no_update;
+        const sessionId = (session || {})['session-id'] || null;
+        if (window._mrsmRunFollowSession !== sessionId) {
+            window.mrsmUnfollowAllEngineRuns();
+            window._mrsmRunFollowSession = sessionId;
+        }
+        window.mrsmFollowOnly('selected', follow && follow.run_id, follow && follow.path);
+        if (nodeRun && nodeRun.session_id === sessionId && nodeRun.run_id && nodeRun.events_stream)
+            window.mrsmFollowEngineRun(nodeRun.run_id, nodeRun.events_stream, 'node');
+        return dash_clientside.no_update;
+    }""",
+    Output('pipeline-run-follow-dummy', 'children'),
+    Input('pipeline-run-follow', 'data'), Input('pipeline-node-run', 'data'),
+    Input('session-store', 'data'),
+)
+
+
 @dash_app.callback(
     Output('pipeline-node-events', 'data'), Output('pipeline-node-statuses', 'data'),
     Input('pipeline-node-runs', 'data'), Input('pipelines-interval', 'n_intervals'),
     State('session-store', 'data'),
+    Input('pipeline-run-tick', 'data'),
 )
-def node_events(runs, ticks, session):
+def node_events(runs, ticks, session, run_tick=None):
     """Poll every retained execution by its exact identity, including older active tabs."""
     if not runs or not is_session_authenticated((session or {}).get('session-id')):
         raise PreventUpdate

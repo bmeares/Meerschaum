@@ -511,13 +511,16 @@ class Job:
     def executor(self) -> Union[Executor, None]:
         """
         If the job is not local, return the connector to its executor
-        (the remote API instance or `systemd`).
+        (the remote API instance, `systemd`, a plugin's executor).
         """
-        return (
-            mrsm.get_connector(self.executor_keys)
-            if self.executor_keys != 'local'
-            else None
-        )
+        if self.executor_keys == 'local':
+            return None
+        from meerschaum.jobs._native import is_python_executor_type
+        if is_python_executor_type(self.executor_keys.split(':', maxsplit=1)[0]):
+            return mrsm.get_connector(self.executor_keys)
+        ### An executor type of a native (Rust) plugin: no Python connector exists.
+        from meerschaum.jobs._NativeExecutor import NativeExecutor
+        return NativeExecutor(self.executor_keys)
 
     @property
     def status(self) -> str:

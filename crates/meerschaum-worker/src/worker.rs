@@ -755,11 +755,24 @@ impl Worker {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .insert(id, tx);
-        let msg = Msg::new()
+        let mut msg = Msg::new()
             .set("t", "call")
             .set("id", id)
             .set("op", op)
             .set("args", Wire::from(args));
+        // `--debug` reaches the Python side: the call's `kwargs` get `debug=True`
+        // (`meerschaum/worker/_ops.py`), so plugin `dprint()`s print too.
+        let debug = meerschaum_core::debug::enabled();
+        let started = std::time::Instant::now();
+        if debug {
+            msg = msg.set("debug", true);
+            meerschaum_core::dprint!(
+                "Worker {} call '{op}' ({} frame(s), {} bytes).",
+                self.pid(),
+                frames.len(),
+                frames.iter().map(Vec::len).sum::<usize>()
+            );
+        }
         if let Err(e) = self.shared.send(msg, &frames).await {
             self.forget(id);
             return Err(match e {
@@ -806,6 +819,21 @@ impl Worker {
             },
             None => wait.await,
         };
+        if debug {
+            meerschaum_core::dprint!(
+                "Worker {} call '{op}' finished in {:?} ({}).",
+                self.pid(),
+                started.elapsed(),
+                match &outcome {
+                    Ok(reply) => format!(
+                        "{} frame(s), {} chunk(s)",
+                        reply.frames.len(),
+                        reply.chunks.len()
+                    ),
+                    Err(_) => "failed".into(),
+                }
+            );
+        }
         match outcome {
             Ok(reply) => Ok(reply),
             Err(Some(e)) => Err(e),

@@ -28,13 +28,9 @@ pub fn run(sysargs: &[String]) -> i32 {
     }
     meerschaum_jobs::supervisor::run_if_requested_with(sysargs);
     meerschaum_jobs::systemd_job::run_if_requested_with(sysargs);
-    // Library diagnostics (`tracing`) go to stderr only when `RUST_LOG` asks for them.
-    if std::env::var_os("RUST_LOG").is_some() {
-        let _ = tracing_subscriber::fmt()
-            .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-            .with_writer(std::io::stderr)
-            .try_init();
-    }
+    // Debug output (`--debug`, the shell's `debug` toggle) and `RUST_LOG` diagnostics go to
+    // stderr through this subscriber (see `debug_log`).
+    crate::debug_log::install();
     // The client's warnings are printed by this process's runtime.
     crate::native::api_warnings::install();
     let mut out = std::io::stdout();

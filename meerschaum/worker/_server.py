@@ -173,6 +173,7 @@ def serve(address: str) -> int:
     signal.signal(signal.SIGINT, interrupt_active_call)
 
     import meerschaum as mrsm
+    from meerschaum.worker import _ops
     from meerschaum.worker._ops import HANDLERS, error_message
     from meerschaum.worker._msgpack import USING_FALLBACK
     from meerschaum.utils.venv import ensure_default_venvs
@@ -214,6 +215,7 @@ def serve(address: str) -> int:
         try:
             try:
                 interruptible = True
+                _ops.CALL_DEBUG = bool(message.get('debug', False))
                 ### v4 plugin code always saw the shared `mrsm` venv (see `ensure_default_venvs`);
                 ### a previous call may have deactivated it (`op_action` ends by deactivating
                 ### every venv, as v4's `entry_with_args()` does before the process exits).
@@ -222,6 +224,7 @@ def serve(address: str) -> int:
                 value, out_frames = handler(conn, call_id, args, frames)
             finally:
                 interruptible = False
+                _ops.CALL_DEBUG = False
             conn.send({'t': 'result', 'id': call_id, 'value': value}, out_frames)
         except (Exception, KeyboardInterrupt) as e:
             try:

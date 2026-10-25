@@ -21,6 +21,7 @@ meerschaum-connector = { workspace = true }
 arrow = { workspace = true, features = ["ffi"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
+base64 = "0.23"
 indexmap = { workspace = true }
 libloading = "0.9"
 sha2 = { workspace = true }
@@ -47,4 +48,16 @@ crate-type = ["cdylib"]
 
 [[example]]
 name = "native_probe"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "native_executor"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "native_stream"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "native_api"
 crate-type = ["cdylib"]

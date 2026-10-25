@@ -20,7 +20,7 @@ use meerschaum_connector::pipe_ops::{Doc, frame_to_docs};
 use meerschaum_connector::{ConnectorError, DataQuery, DateBound, InstanceConnector, SyncOptions};
 use meerschaum_connector_api::engine_pipes::{self, EnginePipeQuery};
 use meerschaum_connector_api::models::{
-    EdgeCursor, EngineEvent, EngineState, LedgerEntry, RunRecord,
+    EdgeCursor, EngineEvent, EngineRunEvent, EngineState, LedgerEntry, RunRecord,
 };
 use meerschaum_core::{Map, Pipe, SuccessTuple, Value};
 use meerschaum_kernel::Frame;
@@ -570,6 +570,34 @@ impl EngineBackend for InstanceEngine {
         } else {
             res
         }
+    }
+
+    async fn run_events(
+        &self,
+        run_id: &str,
+        after_seq: Option<i64>,
+        since: Option<DateTime<Utc>>,
+    ) -> Result<Vec<EngineRunEvent>, EngineStoreError> {
+        let df = self
+            .read(
+                "engine_events",
+                DataQuery {
+                    params: Some(str_params(&[("run_id", Value::Str(run_id.to_string()))])),
+                    begin: since.map(DateBound::utc),
+                    ..Default::default()
+                },
+            )
+            .await?;
+        let mut events: Vec<EngineRunEvent> = df
+            .map(|df| frame_to_docs(&df))
+            .unwrap_or_default()
+            .iter()
+            .filter_map(crate::engine_stream::event_from_doc)
+            .filter(|e| after_seq.is_none_or(|s| e.seq > s))
+            .collect();
+        events.sort_by_key(|e| e.seq);
+        events.dedup_by_key(|e| e.seq);
+        Ok(events)
     }
 
     async fn acquire_lease(&self, pipe_ref: &str, holder: &str, ttl: Duration) -> bool {

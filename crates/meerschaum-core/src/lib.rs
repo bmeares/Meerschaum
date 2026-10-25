@@ -20,6 +20,7 @@
 //! - [`template`]: `{{ Pipe() }}` templating as a parser, an AST and a resolver trait.
 //! - [`success`]: `SuccessTuple` and `SyncResult`.
 //! - [`users`]: `User` and `Token` types and passlib-compatible password hashing.
+//! - [`debug`]: the [`dprint!`] macro and the process-wide debug switch.
 //!
 //! Behavior follows the Python implementation (v4.1.4). Deliberately preserved Python quirks
 //! are marked in the source with `// PARITY:` comments.
@@ -29,6 +30,7 @@
 
 pub mod config;
 pub mod connect;
+pub mod debug;
 pub mod dtypes;
 pub mod pipe;
 pub mod process_env;

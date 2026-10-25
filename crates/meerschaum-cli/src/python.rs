@@ -296,7 +296,8 @@ pub fn arguments(
         .collect();
     if !native_plugins.is_empty() {
         let sysargs = native::words(args, "sysargs");
-        crate::native_plugins::arguments(args, &native_plugins, &sysargs);
+        crate::native_plugins::arguments(args, &native_plugins, &sysargs)
+            .map_err(|e| ActionError::new("InvalidArgumentException", e))?;
     }
     let python_arguments: Vec<&ArgumentManifest> = manifest
         .plugins

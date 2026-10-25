@@ -18,7 +18,7 @@ use meerschaum_connector::InstanceConnector;
 use meerschaum_connector::pipe_ops::Doc;
 use meerschaum_connector_api::engine_pipes::EnginePipeQuery;
 use meerschaum_connector_api::models::{
-    EdgeCursor, EngineEvent, EngineState, LedgerEntry, RunRecord,
+    EdgeCursor, EngineEvent, EngineRunEvent, EngineState, LedgerEntry, RunRecord,
 };
 use meerschaum_core::{Map, SuccessTuple};
 use meerschaum_kernel::Frame;
@@ -258,6 +258,17 @@ pub trait EngineBackend: Send + Sync {
         let _ = metric;
         Err(EngineStoreError::Unavailable)
     }
+    /// The persisted events of a run with `seq > after_seq`, at or after `since` (their `ts`),
+    /// ordered by `seq`: what `GET /engine/runs/{run_id}/events/stream` tails.
+    async fn run_events(
+        &self,
+        run_id: &str,
+        after_seq: Option<i64>,
+        since: Option<DateTime<Utc>>,
+    ) -> Result<Vec<EngineRunEvent>, EngineStoreError> {
+        let _ = (run_id, after_seq, since);
+        Err(EngineStoreError::Unavailable)
+    }
 }
 
 /// Why an engine-pipe primitive could not run.
@@ -381,6 +392,35 @@ impl EngineBackend for MemoryEngine {
         let n = events.len();
         self.lock().events.extend(events);
         SuccessTuple::ok(format!("Recorded {n} events."))
+    }
+
+    /// A run's events are numbered from 1 in the order they were recorded (as
+    /// [`crate::engine_store::InstanceEngine`] numbers `POST /engine/events`).
+    async fn run_events(
+        &self,
+        run_id: &str,
+        after_seq: Option<i64>,
+        since: Option<DateTime<Utc>>,
+    ) -> Result<Vec<EngineRunEvent>, EngineStoreError> {
+        Ok(self
+            .lock()
+            .events
+            .iter()
+            .filter(|e| e.run_id == run_id)
+            .enumerate()
+            .map(|(i, e)| {
+                EngineRunEvent::from_row(
+                    &e.run_id,
+                    i as i64 + 1,
+                    e.created,
+                    e.pipe_ref.clone(),
+                    &e.event,
+                    serde_json::to_value(&e.payload).unwrap_or(Json::Null),
+                )
+            })
+            .filter(|e| after_seq.is_none_or(|s| e.seq > s))
+            .filter(|e| since.is_none_or(|t| e.ts >= t))
+            .collect())
     }
 
     async fn acquire_lease(&self, pipe_ref: &str, holder: &str, ttl: Duration) -> bool {

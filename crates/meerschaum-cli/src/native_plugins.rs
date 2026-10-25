@@ -5,6 +5,7 @@
 //! (a directory with a `plugin.toml` and `lib<name>.so`). A native plugin shadows a Python
 //! plugin of the same name. See `crates/meerschaum-plugin/README.md`.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use meerschaum_connector::{Connector, InstanceConnector, async_trait};
@@ -84,6 +85,11 @@ pub fn merge(python: &Manifest, native: &NativePlugins) -> Manifest {
     for (kind, connector) in parsed.connector_types {
         if native.contains(&connector.plugin) {
             merged.connector_types.insert(kind, connector);
+        }
+    }
+    for (kind, executor) in parsed.executor_types {
+        if native.contains(&executor.plugin) {
+            merged.executor_types.insert(kind, executor);
         }
     }
     merged
@@ -177,83 +183,182 @@ fn destination(argument: &ArgumentManifest) -> Option<String> {
     })
 }
 
+/// argparse's name for an argument in its errors: its option strings joined by `/`.
+fn argument_name(argument: &ArgumentManifest) -> String {
+    argument.option_strings.join("/")
+}
+
+/// Convert a given value with the argument's `type` and check its `choices`, with argparse's
+/// error messages.
+fn convert_argument(argument: &ArgumentManifest, text: &str) -> Result<PyValue, String> {
+    let invalid = |kind: &str| {
+        format!(
+            "argument {}: invalid {kind} value: '{text}'",
+            argument_name(argument)
+        )
+    };
+    let value = match argument.type_name.as_deref() {
+        Some("int") => PyValue::Int(text.trim().parse::<i128>().map_err(|_| invalid("int"))?),
+        Some("float") => PyValue::Float(text.trim().parse::<f64>().map_err(|_| invalid("float"))?),
+        _ => PyValue::Str(text.into()),
+    };
+    if let Some(choices) = argument.choices.as_array()
+        && !choices.iter().any(|choice| json_to_py(choice) == value)
+    {
+        return Err(format!(
+            "argument {}: invalid choice: {} (choose from {})",
+            argument_name(argument),
+            value.py_repr(),
+            choices
+                .iter()
+                .map(|c| json_to_py(c).py_repr())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
+    Ok(value)
+}
+
 /// Populate the flags native plugins declared (`add_plugin_argument` equivalents) from the
-/// raw sysargs. Supports the common argparse actions and a single value (`nargs` unset).
-pub fn arguments(args: &mut ArgsMap, plugins: &[&PluginManifest], sysargs: &[String]) {
-    for argument in plugins.iter().flat_map(|p| &p.arguments) {
-        let Some(dest) = destination(argument) else {
-            continue;
-        };
-        let mut found: Vec<Option<String>> = Vec::new();
-        let mut index = 0;
-        while index < sysargs.len() {
-            let word = &sysargs[index];
-            let hit = argument.option_strings.iter().find_map(|option| {
-                if word == option {
-                    Some(None)
-                } else {
-                    word.strip_prefix(&format!("{option}="))
-                        .map(|v| Some(v.to_string()))
-                }
-            });
-            match hit {
-                Some(Some(value)) => found.push(Some(value)),
-                Some(None) => match normalize_action(&argument.action).as_str() {
-                    "store_true" | "store_false" | "store_const" | "count" | "append_const" => {
-                        found.push(None)
-                    }
-                    _ => {
-                        if let Some(value) = sysargs.get(index + 1) {
-                            found.push(Some(value.clone()));
-                            index += 1;
-                        }
-                    }
-                },
-                None => {}
+/// raw sysargs. Supports the common argparse actions and a single value (`nargs` unset), and
+/// enforces `type` and `choices` with argparse's messages. A `required` flag is required when
+/// one of its plugin's actions runs. PARITY: as v4's `add_plugin_argument`, a flag whose option
+/// string is already taken (by the built-in CLI or another plugin) is a warning and is skipped.
+pub fn arguments(
+    args: &mut ArgsMap,
+    plugins: &[&PluginManifest],
+    sysargs: &[String],
+) -> Result<(), String> {
+    let action_name = crate::native::words(args, "action").into_iter().next();
+    let mut taken: HashSet<&str> = crate::spec::ARGUMENTS
+        .iter()
+        .flat_map(|a| a.option_strings.iter().copied())
+        .collect();
+    let mut missing = Vec::new();
+    for plugin in plugins {
+        let runs_action = action_name
+            .as_deref()
+            .is_some_and(|name| plugin.actions.iter().any(|a| a.name == name));
+        for argument in &plugin.arguments {
+            if let Some(option) = argument
+                .option_strings
+                .iter()
+                .find(|o| taken.contains(o.as_str()))
+            {
+                tracing_warn(&format!(
+                    "argument {}: conflicting option string: {option} (plugin '{}')",
+                    argument_name(argument),
+                    plugin.name
+                ));
+                continue;
             }
-            index += 1;
-        }
-        let convert = |text: &str| -> PyValue {
-            match argument.type_name.as_deref() {
-                Some("int") => text
-                    .parse::<i128>()
-                    .map(PyValue::Int)
-                    .unwrap_or_else(|_| PyValue::Str(text.into())),
-                Some("float") => text
-                    .parse::<f64>()
-                    .map(PyValue::Float)
-                    .unwrap_or_else(|_| PyValue::Str(text.into())),
-                _ => PyValue::Str(text.into()),
+            taken.extend(argument.option_strings.iter().map(String::as_str));
+            argument_value(args, argument, sysargs)?;
+            if argument.required && runs_action && !mentioned(argument, sysargs) {
+                missing.push(argument_name(argument));
             }
-        };
-        let action = normalize_action(&argument.action);
-        let given = match action.as_str() {
-            "store_true" if !found.is_empty() => Some(PyValue::Bool(true)),
-            "store_false" if !found.is_empty() => Some(PyValue::Bool(false)),
-            "count" if !found.is_empty() => Some(PyValue::Int(found.len() as i128)),
-            "store_const" if !found.is_empty() => Some(json_to_py(&argument.const_value)),
-            "append" => (!found.is_empty())
-                .then(|| PyValue::List(found.iter().flatten().map(|v| convert(v)).collect())),
-            "store" | "" => found.last().and_then(|v| v.as_deref()).map(convert),
-            _ => None,
-        };
-        let value = match given {
-            Some(value) => Some(value),
-            None if !args.contains_key(&dest) => Some(match action.as_str() {
-                // `argparse`: `store_false` defaults to `True` unless a default was declared.
-                "store_false" if argument.default.is_null() => PyValue::Bool(true),
-                _ => json_to_py(&argument.default),
-            }),
-            None => None,
-        };
-        // PARITY: the keyword arguments of a plugin action go through v4's `parse_arguments`,
-        // which pops every `False` and every `None` (a flag that was not given is absent, and
-        // `kwargs.get('flag')` is `None`) and turns the string `'None'` into `None`. Native
-        // plugins get the same keyword arguments as Python plugins.
-        if let Some(value) = value.and_then(v4_argument_value) {
-            args.insert(dest, value);
         }
     }
+    if !missing.is_empty() {
+        return Err(format!(
+            "the following arguments are required: {}",
+            missing.join(", ")
+        ));
+    }
+    Ok(())
+}
+
+/// Whether `sysargs` gives the argument (`--flag`, `--flag value` or `--flag=value`).
+fn mentioned(argument: &ArgumentManifest, sysargs: &[String]) -> bool {
+    sysargs.iter().any(|word| {
+        argument
+            .option_strings
+            .iter()
+            .any(|o| word == o || word.starts_with(&format!("{o}=")))
+    })
+}
+
+/// Parse one argument from `sysargs` into `args`.
+fn argument_value(
+    args: &mut ArgsMap,
+    argument: &ArgumentManifest,
+    sysargs: &[String],
+) -> Result<(), String> {
+    let Some(dest) = destination(argument) else {
+        return Ok(());
+    };
+    let action = normalize_action(&argument.action);
+    let mut found: Vec<Option<String>> = Vec::new();
+    let mut index = 0;
+    while index < sysargs.len() {
+        let word = &sysargs[index];
+        let hit = argument.option_strings.iter().find_map(|option| {
+            if word == option {
+                Some(None)
+            } else {
+                word.strip_prefix(&format!("{option}="))
+                    .map(|v| Some(v.to_string()))
+            }
+        });
+        match hit {
+            Some(Some(value)) => found.push(Some(value)),
+            Some(None) => match action.as_str() {
+                "store_true" | "store_false" | "store_const" | "count" | "append_const" => {
+                    found.push(None)
+                }
+                _ => match sysargs.get(index + 1) {
+                    Some(value) => {
+                        found.push(Some(value.clone()));
+                        index += 1;
+                    }
+                    None => {
+                        return Err(format!(
+                            "argument {}: expected one argument",
+                            argument_name(argument)
+                        ));
+                    }
+                },
+            },
+            None => {}
+        }
+        index += 1;
+    }
+    let given = match action.as_str() {
+        "store_true" if !found.is_empty() => Some(PyValue::Bool(true)),
+        "store_false" if !found.is_empty() => Some(PyValue::Bool(false)),
+        "count" if !found.is_empty() => Some(PyValue::Int(found.len() as i128)),
+        "store_const" if !found.is_empty() => Some(json_to_py(&argument.const_value)),
+        "append" if !found.is_empty() => Some(PyValue::List(
+            found
+                .iter()
+                .flatten()
+                .map(|v| convert_argument(argument, v))
+                .collect::<Result<_, _>>()?,
+        )),
+        "store" | "" => found
+            .last()
+            .and_then(|v| v.as_deref())
+            .map(|v| convert_argument(argument, v))
+            .transpose()?,
+        _ => None,
+    };
+    let value = match given {
+        Some(value) => Some(value),
+        None if !args.contains_key(&dest) => Some(match action.as_str() {
+            // `argparse`: `store_false` defaults to `True` unless a default was declared.
+            "store_false" if argument.default.is_null() => PyValue::Bool(true),
+            _ => json_to_py(&argument.default),
+        }),
+        None => None,
+    };
+    // PARITY: the keyword arguments of a plugin action go through v4's `parse_arguments`,
+    // which pops every `False` and every `None` (a flag that was not given is absent, and
+    // `kwargs.get('flag')` is `None`) and turns the string `'None'` into `None`. Native
+    // plugins get the same keyword arguments as Python plugins.
+    if let Some(value) = value.and_then(v4_argument_value) {
+        args.insert(dest, value);
+    }
+    Ok(())
 }
 
 /// What v4's `parse_arguments` leaves of a parsed argument: nothing for `False` and `None` (the
@@ -331,7 +436,7 @@ fn pipe_json(pipe: &Pipe) -> Value {
     Value::Map(map)
 }
 
-/// The keyword arguments v4 passes to `sync()` and the sync hooks.
+/// The keyword arguments v4 passes to `sync()` (the hooks get `hook_kwargs`).
 fn sync_kwargs(pipe: &Pipe, args: &SyncArgs) -> serde_json::Value {
     let mut map = args.extra.clone();
     map.insert("pipe".into(), pipe_json(pipe));
@@ -354,40 +459,130 @@ fn sync_kwargs(pipe: &Pipe, args: &SyncArgs) -> serde_json::Value {
     serde_json::to_value(map).unwrap_or(serde_json::Value::Null)
 }
 
+/// The keyword arguments a sync hook receives: `sync_kwargs` without `pipe`, which Python
+/// passes positionally (native hooks find it in `context.pipe`).
+fn hook_kwargs(pipe: &Pipe, args: &SyncArgs) -> serde_json::Value {
+    let mut kwargs = sync_kwargs(pipe, args);
+    if let Some(map) = kwargs.as_object_mut() {
+        map.remove("pipe");
+    }
+    kwargs
+}
+
+/// Where the CLI collects sync hook results to print them (shared with the Python hooks).
+type HookReporterSlot = Arc<std::sync::RwLock<Option<meerschaum_engine::python::HookReporter>>>;
+
 struct NativeHooks {
     natives: Arc<NativePlugins>,
     inner: Option<Arc<dyn SyncHooks>>,
+    reporter: HookReporterSlot,
+    /// Serves the hooks' `Pipe` calls (`get_sync_time`, `sync`).
+    registry: NativeRegistry,
+}
+
+/// One native hook's outcome: its result, and whether it raised (an error, not a tuple).
+struct HookOutcome {
+    plugin: String,
+    hook: String,
+    result: SuccessTuple,
+    raised: bool,
+}
+
+/// Run one plugin's hooks in order. PARITY: as v4's `call_sync_hook`, an error is the tuple
+/// `(False, "Failed to execute sync hook '<hook>' from plugin '<plugin>':\n<error>")`.
+fn run_plugin_hooks(
+    natives: &NativePlugins,
+    name: &str,
+    hooks: Vec<String>,
+    post: bool,
+    kwargs: &serde_json::Value,
+    pipe: &serde_json::Value,
+    host: &NativePipeHost,
+) -> Vec<HookOutcome> {
+    let failed = |hook: &str, error: &dyn std::fmt::Display| {
+        SuccessTuple::fail(format!(
+            "Failed to execute sync hook '{hook}' from plugin '{name}':\n{error}"
+        ))
+    };
+    let plugin = match natives.plugin(name) {
+        Ok(plugin) => plugin,
+        Err(error) => {
+            return hooks
+                .into_iter()
+                .map(|hook| HookOutcome {
+                    result: failed(&hook, &error),
+                    plugin: name.to_string(),
+                    hook,
+                    raised: true,
+                })
+                .collect();
+        }
+    };
+    hooks
+        .into_iter()
+        .map(|hook| {
+            let (result, raised) =
+                match plugin.sync_hook(post, &hook, kwargs.clone(), pipe.clone(), Some(host)) {
+                    Ok(tuple) => (tuple, false),
+                    Err(error) => (failed(&hook, &error), true),
+                };
+            HookOutcome {
+                plugin: name.to_string(),
+                hook,
+                result,
+                raised,
+            }
+        })
+        .collect()
 }
 
 impl NativeHooks {
-    async fn run(&self, post: bool, kwargs: serde_json::Value) {
+    async fn run(&self, post: bool, pipe: &Pipe, args: &SyncArgs, kwargs: serde_json::Value) {
+        // PARITY: v4 runs hooks from `actions/sync.py`, around `pipe.sync()`; a `pipe.sync()`
+        // inside a hook runs no hooks.
+        let mut host_args = args.clone();
+        host_args.extra.insert("skip_hooks".into(), true.into());
+        let host = Arc::new(NativePipeHost {
+            registry: self.registry.clone(),
+            args: host_args,
+        });
+        let pipe = serde_json::to_value(pipe_json(pipe)).unwrap_or_default();
+        let reporter = self
+            .reporter
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
         for (name, hooks) in self.natives.hooks(post) {
             let natives = self.natives.clone();
-            let kwargs = kwargs.clone();
-            let outcome = tokio::task::spawn_blocking(move || {
-                let plugin = natives.plugin(&name).map_err(|e| e.to_string())?;
-                let mut failures = Vec::new();
-                for hook in hooks {
-                    match plugin.hook(post, &hook, kwargs.clone()) {
-                        Ok(tuple) if !tuple.success => {
-                            failures.push(format!("{hook}: {}", tuple.message))
-                        }
-                        Ok(_) => {}
-                        Err(e) => failures.push(format!("{hook}: {e}")),
-                    }
-                }
-                Ok::<_, String>((name, failures))
+            let (kwargs, pipe, host) = (kwargs.clone(), pipe.clone(), host.clone());
+            let outcomes = tokio::task::spawn_blocking(move || {
+                run_plugin_hooks(&natives, &name, hooks, post, &kwargs, &pipe, &host)
             })
-            .await;
-            // PARITY: hook failures are warnings, never fatal.
-            match outcome {
-                Ok(Ok((name, failures))) => {
-                    for failure in failures {
-                        tracing_warn(&format!("Native plugin '{name}' hook failed: {failure}"));
-                    }
+            .await
+            .unwrap_or_else(|error| {
+                vec![HookOutcome {
+                    plugin: String::new(),
+                    hook: String::new(),
+                    result: SuccessTuple::fail(format!("Native plugin hook failed: {error}")),
+                    raised: true,
+                }]
+            });
+            // PARITY: hook failures are never fatal. v4 warns about a hook that raised and
+            // prints every hook's tuple, successful or not (`actions/sync.py`).
+            for outcome in outcomes {
+                if outcome.raised {
+                    tracing_warn(&outcome.result.message);
                 }
-                Ok(Err(error)) => tracing_warn(&format!("Native plugin hook failed: {error}")),
-                Err(error) => tracing_warn(&format!("Native plugin hook failed: {error}")),
+                match &reporter {
+                    Some(report) => report(outcome.result),
+                    None if !outcome.result.success && !outcome.raised => {
+                        tracing_warn(&format!(
+                            "Native plugin '{}' hook failed: {}: {}",
+                            outcome.plugin, outcome.hook, outcome.result.message
+                        ));
+                    }
+                    None => {}
+                }
             }
         }
     }
@@ -400,18 +595,19 @@ fn tracing_warn(message: &str) {
 #[async_trait]
 impl SyncHooks for NativeHooks {
     async fn pre_sync(&self, pipe: &Pipe, args: &SyncArgs) {
-        self.run(false, sync_kwargs(pipe, args)).await;
+        self.run(false, pipe, args, hook_kwargs(pipe, args)).await;
         if let Some(inner) = &self.inner {
             inner.pre_sync(pipe, args).await;
         }
     }
 
     async fn post_sync(&self, pipe: &Pipe, args: &SyncArgs, result: &SyncResult) {
-        let mut kwargs = sync_kwargs(pipe, args);
+        let mut kwargs = hook_kwargs(pipe, args);
         kwargs["success_tuple"] = serde_json::json!([result.success, result.message]);
         kwargs["sync_duration"] =
             serde_json::json!(result.duration.map(|d| d.as_secs_f64()).unwrap_or_default());
-        self.run(true, kwargs).await;
+        kwargs["sync_complete_timestamp"] = chrono::Utc::now().to_rfc3339().into();
+        self.run(true, pipe, args, kwargs).await;
         if let Some(inner) = &self.inner {
             inner.post_sync(pipe, args, result).await;
         }
@@ -459,6 +655,9 @@ pub struct NativeRegistry {
     /// `meerschaum:connectors` (connector attributes by type and label).
     connectors: Map,
     inner: Arc<dyn ConnectorRegistry>,
+    hook_reporter: HookReporterSlot,
+    /// The sync's keyword arguments for streaming connectors' `subscribe` (`--listen`).
+    stream_kwargs: Arc<std::sync::RwLock<Map>>,
 }
 
 /// `meerschaum:connectors:<type>:default` patched with the label's section.
@@ -492,6 +691,33 @@ impl NativeRegistry {
                 .map(|v| v.to_map())
                 .unwrap_or_default(),
             inner,
+            hook_reporter: HookReporterSlot::default(),
+            stream_kwargs: Arc::default(),
+        })
+    }
+
+    /// The keyword arguments streaming native connectors' `subscribe` receives (the same map
+    /// `PythonRegistry::set_stream_kwargs` gives Python `subscribe` sources).
+    pub fn set_stream_kwargs(&self, kwargs: Map) {
+        *self
+            .stream_kwargs
+            .write()
+            .unwrap_or_else(|e| e.into_inner()) = kwargs;
+    }
+
+    /// Print native sync hook results the way the Python hooks' results are printed
+    /// (`PythonRegistry::set_hook_reporter`). Without a reporter, failures are warnings.
+    pub fn set_hook_reporter(&self, reporter: meerschaum_engine::python::HookReporter) {
+        *self
+            .hook_reporter
+            .write()
+            .unwrap_or_else(|e| e.into_inner()) = Some(reporter);
+    }
+
+    fn pipe_host(&self) -> Arc<NativePipeHost> {
+        Arc::new(NativePipeHost {
+            registry: self.clone(),
+            args: SyncArgs::default(),
         })
     }
 
@@ -663,6 +889,26 @@ impl ConnectorRegistry for NativeRegistry {
     }
 
     fn stream_source(&self, keys: &str) -> Option<Arc<dyn StreamSource>> {
+        if let Some((kind, label)) = keys.split_once(':') {
+            // A streaming native connector (pull-model `subscribe`, see `native_streams`).
+            let connector = if kind == "plugin" {
+                self.natives
+                    .stream_source(label)
+                    .and_then(Result::ok)
+                    .map(|c| c.with_host_services(self.pipe_host()))
+            } else {
+                self.source_connector(keys).and_then(Result::ok)
+            };
+            if let Some(connector) = connector.filter(|c| c.is_streaming()) {
+                let kwargs = serde_json::to_value(
+                    &*self.stream_kwargs.read().unwrap_or_else(|e| e.into_inner()),
+                )
+                .unwrap_or_default();
+                return Some(Arc::new(crate::native_streams::NativeStreamSource::new(
+                    connector, kwargs,
+                )));
+            }
+        }
         self.inner.stream_source(keys)
     }
 
@@ -687,6 +933,8 @@ impl ConnectorRegistry for NativeRegistry {
         Some(Arc::new(NativeHooks {
             natives: self.natives.clone(),
             inner,
+            reporter: self.hook_reporter.clone(),
+            registry: self.clone(),
         }))
     }
 
@@ -699,46 +947,52 @@ impl ConnectorRegistry for NativeRegistry {
 // Server extensions: native routes (`@api_plugin` equivalent) and console pages (`@web_page`).
 // ---------------------------------------------------------------------------------------------
 
-/// Paths a native route may not take: the console, the host's internals and the core API.
-fn route_path_allowed(path: &str) -> bool {
-    path.starts_with('/')
-        && !path.starts_with("//")
-        && !path.contains(['{', '}', '*', '?', '#', '%', '\\'])
-        && !path.split('/').any(|s| s == ".." || s == ".")
-        && !path.starts_with("/dash")
-        && !path.starts_with("/webterm")
-        && !path.starts_with("/websocket")
-        && meerschaum_server::routes::route_group_of(path) == "other"
-}
-
-/// The router serving the routes native plugins export (`routes` / `route` methods). A route
-/// requires the same credentials as the core API unless the plugin marks it `"public": true`
-/// (or the server runs with `--no-auth`). Colliding or reserved paths are skipped and reported.
-pub fn routes(
-    state: &meerschaum_server::AppState,
-    natives: &Arc<NativePlugins>,
-) -> (axum::Router, Vec<String>) {
-    use axum::http::Method;
-    let mut router = axum::Router::new();
-    let mut notices = Vec::new();
-    let mut taken = std::collections::HashSet::new();
+/// The routes the native plugins declare: their manifest's `api_routes` (served by the
+/// `api_route` call kind), or, for plugins written before those existed, the routes a plugin
+/// lists from its `routes` method when its manifest names an `api_plugins` entry (served by the
+/// `route` call kind with the original text-body context).
+fn declared_routes(
+    natives: &NativePlugins,
+    notices: &mut Vec<String>,
+) -> (
+    Vec<meerschaum_server::native::NativeRoute>,
+    std::collections::HashSet<String>,
+) {
+    use meerschaum_server::native::NativeRoute;
+    let mut routes = Vec::new();
+    let mut legacy = std::collections::HashSet::new();
     for name in natives.names() {
-        if !natives.plugin_entry(&name)["api_plugins"]
+        let entry = natives.plugin_entry(&name);
+        match meerschaum_plugin::api::routes_of(entry) {
+            Ok(specs) if !specs.is_empty() => {
+                routes.extend(specs.into_iter().map(|spec| NativeRoute {
+                    plugin: name.clone(),
+                    name: spec.name,
+                    method: spec.method,
+                    path: spec.path,
+                    scopes: spec.scopes,
+                    public: spec.public,
+                }));
+                continue;
+            }
+            Ok(_) => {}
+            Err(error) => {
+                notices.push(format!(
+                    "Native plugin '{name}' routes are disabled: invalid `api_routes`: {error}"
+                ));
+                continue;
+            }
+        }
+        if !entry["api_plugins"]
             .as_array()
             .is_some_and(|a| !a.is_empty())
         {
             continue;
         }
-        let plugin = match natives.plugin(&name) {
-            Ok(plugin) => plugin,
-            Err(error) => {
-                notices.push(format!(
-                    "Native plugin '{name}' routes are disabled: {error}"
-                ));
-                continue;
-            }
-        };
-        let listed = match plugin.call_json("routes", serde_json::json!({})) {
+        let listed = natives
+            .plugin(&name)
+            .and_then(|plugin| plugin.call_json("routes", serde_json::json!({})));
+        let listed = match listed {
             Ok(listed) => listed,
             Err(error) => {
                 notices.push(format!(
@@ -747,110 +1001,446 @@ pub fn routes(
                 continue;
             }
         };
+        legacy.insert(name.clone());
         for entry in listed.as_array().cloned().unwrap_or_default() {
             let path = entry["path"].as_str().unwrap_or_default().to_string();
-            let method = entry["method"]
-                .as_str()
-                .unwrap_or("GET")
-                .to_ascii_uppercase();
-            let Ok(verb) = method.parse::<Method>() else {
-                notices.push(format!(
-                    "Native plugin '{name}': invalid method '{method}'."
-                ));
-                continue;
-            };
-            if !route_path_allowed(&path) || !taken.insert((method.clone(), path.clone())) {
-                notices.push(format!(
-                    "Native plugin '{name}': route {method} {path} is not allowed."
-                ));
-                continue;
-            }
-            let public = entry["public"].as_bool().unwrap_or(false);
-            let handler = {
-                let plugin = plugin.clone();
-                let state = state.clone();
-                move |req: axum::extract::Request| {
-                    let plugin = plugin.clone();
-                    let state = state.clone();
-                    async move { serve_route(plugin, state, public, req).await }
-                }
-            };
-            let filter = match verb {
-                Method::GET => axum::routing::get(handler),
-                Method::POST => axum::routing::post(handler),
-                Method::PUT => axum::routing::put(handler),
-                Method::PATCH => axum::routing::patch(handler),
-                Method::DELETE => axum::routing::delete(handler),
-                _ => {
-                    notices.push(format!(
-                        "Native plugin '{name}': unsupported method '{method}'."
-                    ));
-                    continue;
-                }
-            };
-            router = router.route(&path, filter);
+            let method = entry["method"].as_str().unwrap_or("GET").to_string();
+            routes.push(NativeRoute {
+                plugin: name.clone(),
+                name: format!("{method} {path}"),
+                method,
+                // The original routes had no path parameters.
+                public: entry["public"].as_bool().unwrap_or(false),
+                scopes: Vec::new(),
+                path,
+            });
         }
     }
+    (routes, legacy)
+}
+
+/// The router serving the routes native plugins declare (see `declared_routes` and
+/// `meerschaum_server::native`). Refused routes (a core route they would shadow, a conflict,
+/// bad syntax) are skipped; each is one notice.
+pub fn routes(
+    state: &meerschaum_server::AppState,
+    natives: &Arc<NativePlugins>,
+) -> (axum::Router, Vec<String>) {
+    let mut notices = Vec::new();
+    let (routes, legacy) = declared_routes(natives, &mut notices);
+    if routes.is_empty() {
+        return (axum::Router::new(), notices);
+    }
+    let handler = Arc::new(RouteHandler {
+        natives: natives.clone(),
+        legacy,
+        limits: CallLimits::default(),
+    });
+    let (router, refused) = meerschaum_server::native::native_router(state, routes, handler);
+    notices.extend(refused);
     (router, notices)
 }
 
-async fn serve_route(
-    plugin: Arc<meerschaum_plugin::LoadedPlugin>,
-    state: meerschaum_server::AppState,
-    public: bool,
-    req: axum::extract::Request,
-) -> axum::response::Response {
-    use axum::response::IntoResponse;
-    let (parts, body) = req.into_parts();
-    let mut user = serde_json::Value::Null;
-    if !public {
-        match meerschaum_server::auth::manager_unless_no_auth(&state, &parts.headers).await {
-            Ok(Some(principal)) => {
-                user = serde_json::json!(principal.username());
-            }
-            Ok(None) => {}
-            Err(error) => return error.into_response(),
+struct RouteHandler {
+    natives: Arc<NativePlugins>,
+    /// Plugins served through the original `route` call kind.
+    legacy: std::collections::HashSet<String>,
+    limits: CallLimits,
+}
+
+/// The most server calls (`api_route`, `mcp_*`) one native plugin runs at once. They run in
+/// parallel, each on a blocking thread; more wait up to [`CALL_QUEUE_TIMEOUT`] for a slot, so a
+/// slow or stuck handler holds at most this many threads and then answers `503` instead of piling
+/// up threads and buffered bodies.
+const MAX_CONCURRENT_CALLS: usize = 32;
+/// How long a server call waits for one of its plugin's [`MAX_CONCURRENT_CALLS`] slots.
+const CALL_QUEUE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// One semaphore of [`MAX_CONCURRENT_CALLS`] slots per native plugin.
+#[derive(Default, Clone)]
+struct CallLimits(
+    Arc<std::sync::Mutex<std::collections::HashMap<String, Arc<tokio::sync::Semaphore>>>>,
+);
+
+impl CallLimits {
+    /// A slot of `plugin`'s calls, or the message to answer when none frees up in time.
+    async fn acquire(&self, plugin: &str) -> Result<tokio::sync::OwnedSemaphorePermit, String> {
+        let semaphore = self
+            .0
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .entry(plugin.to_string())
+            .or_insert_with(|| Arc::new(tokio::sync::Semaphore::new(MAX_CONCURRENT_CALLS)))
+            .clone();
+        match tokio::time::timeout(CALL_QUEUE_TIMEOUT, semaphore.acquire_owned()).await {
+            Ok(Ok(permit)) => Ok(permit),
+            _ => Err(format!(
+                "Native plugin '{plugin}' is busy ({MAX_CONCURRENT_CALLS} calls in progress)."
+            )),
         }
     }
-    let Ok(bytes) = axum::body::to_bytes(body, 16 * 1024 * 1024).await else {
-        return axum::http::StatusCode::PAYLOAD_TOO_LARGE.into_response();
+}
+
+/// The reply of an original `route` call, parsed as before `api_route` existed: an invalid or
+/// missing `status` is `200`, `content_type` defaults to `text/plain; charset=utf-8` and `body`
+/// is text.
+fn legacy_route_response(reply: &serde_json::Value) -> meerschaum_plugin::api::RouteResponse {
+    let status = reply["status"]
+        .as_u64()
+        .and_then(|s| u16::try_from(s).ok())
+        .and_then(|s| axum::http::StatusCode::from_u16(s).ok())
+        .map_or(200, |s| s.as_u16());
+    let content_type = reply["content_type"]
+        .as_str()
+        .unwrap_or("text/plain; charset=utf-8");
+    meerschaum_plugin::api::RouteResponse::bytes(
+        content_type,
+        reply["body"]
+            .as_str()
+            .unwrap_or_default()
+            .as_bytes()
+            .to_vec(),
+    )
+    .with_status(status)
+}
+
+#[async_trait]
+impl meerschaum_server::native::NativeRouteHandler for RouteHandler {
+    async fn handle(
+        &self,
+        route: &meerschaum_server::native::NativeRoute,
+        request: meerschaum_server::native::NativeRouteRequest,
+    ) -> Result<meerschaum_server::native::NativeRouteResponse, String> {
+        use meerschaum_plugin::api::{RouteRequest, RouteResponse};
+        let natives = self.natives.clone();
+        let plugin = route.plugin.clone();
+        let legacy = self.legacy.contains(&route.plugin);
+        let name = route.name.clone();
+        let route_path = route.path.clone();
+        let permit = match self.limits.acquire(&route.plugin).await {
+            Ok(permit) => permit,
+            Err(message) => {
+                let busy = RouteResponse::error(503, message).header("retry-after", "1");
+                return Ok(meerschaum_server::native::NativeRouteResponse {
+                    status: busy.status,
+                    headers: busy.headers,
+                    body: busy.body,
+                });
+            }
+        };
+        let reply = tokio::task::spawn_blocking(move || -> meerschaum_plugin::Result<_> {
+            // The slot is held until the plugin returns, even when the client has gone.
+            let _permit = permit;
+            let plugin = natives.plugin(&plugin)?;
+            if legacy {
+                let context = serde_json::json!({
+                    "method": request.method,
+                    "path": request.path,
+                    "query": request.query,
+                    "body": String::from_utf8_lossy(&request.body),
+                    "user": request.principal.get("username").cloned().unwrap_or_default(),
+                });
+                // Serialized with the plugin's other calls, as the original adapter was.
+                return Ok(legacy_route_response(&plugin.call_json("route", context)?));
+            }
+            let principal = serde_json::from_value(request.principal).unwrap_or_default();
+            plugin.api_route(&RouteRequest {
+                name,
+                method: request.method,
+                path: request.path,
+                route_path,
+                path_params: request.path_params,
+                query: request.query,
+                query_params: request.query_params,
+                headers: request.headers,
+                body: request.body,
+                principal,
+                scopes: request.scopes,
+            })
+        })
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())?;
+        Ok(meerschaum_server::native::NativeRouteResponse {
+            status: reply.status,
+            headers: reply.headers,
+            body: reply.body,
+        })
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// MCP: native tools, resources and prompts (`mcp_tools`, `mcp_resources`, `mcp_prompts`).
+// ---------------------------------------------------------------------------------------------
+
+/// The MCP entries of the native plugins, or `None` when no plugin declares any. Invalid entries
+/// are reported in `notices` and skipped.
+pub fn mcp(
+    natives: &Arc<NativePlugins>,
+    notices: &mut Vec<String>,
+) -> Option<Arc<dyn meerschaum_server::mcp::NativeMcp>> {
+    let mut entries = NativeMcpEntries {
+        natives: natives.clone(),
+        limits: CallLimits::default(),
+        tools: Vec::new(),
+        resources: Vec::new(),
+        prompts: Vec::new(),
     };
-    let context = serde_json::json!({
-        "method": parts.method.as_str(),
-        "path": parts.uri.path(),
-        "query": parts.uri.query().unwrap_or(""),
-        "body": String::from_utf8_lossy(&bytes),
-        "user": user,
-    });
-    let reply = tokio::task::spawn_blocking(move || plugin.call_json("route", context)).await;
-    match reply {
-        Ok(Ok(reply)) => {
-            let status = reply["status"]
-                .as_u64()
-                .and_then(|s| u16::try_from(s).ok())
-                .and_then(|s| axum::http::StatusCode::from_u16(s).ok())
-                .unwrap_or(axum::http::StatusCode::OK);
-            let content_type = reply["content_type"]
-                .as_str()
-                .unwrap_or("text/plain; charset=utf-8");
-            let body = reply["body"].as_str().unwrap_or_default().to_string();
-            (
-                status,
-                [(axum::http::header::CONTENT_TYPE, content_type.to_string())],
-                body,
-            )
-                .into_response()
+    let builtin = meerschaum_server::mcp::registry::builtin();
+    for name in natives.names() {
+        match meerschaum_plugin::mcp::entries_of(natives.plugin_entry(&name)) {
+            Ok(found) => {
+                // An entry never shadows a built-in or an earlier plugin's entry: each one hidden
+                // is a notice, like a refused route.
+                let mut hidden = |kind: &str, entry: &str, by: String| {
+                    notices.push(format!(
+                        "Native plugin '{name}': MCP {kind} '{entry}' is hidden: {by}."
+                    ))
+                };
+                for tool in found.tools {
+                    if builtin.tools.iter().any(|b| b.name == tool.name) {
+                        hidden("tool", &tool.name, "a built-in tool has that name".into());
+                    } else if let Some((other, _)) =
+                        entries.tools.iter().find(|(_, t)| t.name == tool.name)
+                    {
+                        hidden("tool", &tool.name, format!("plugin '{other}' declares it"));
+                    } else {
+                        entries.tools.push((name.clone(), tool));
+                    }
+                }
+                for resource in found.resources {
+                    let uri = |u: &Option<String>, t: &Option<String>| {
+                        u.clone().or_else(|| t.clone()).unwrap_or_default()
+                    };
+                    let this = uri(&resource.uri, &resource.uri_template);
+                    if builtin
+                        .resources
+                        .iter()
+                        .any(|b| uri(&b.uri, &b.uri_template) == this)
+                    {
+                        hidden("resource", &this, "a built-in resource has that URI".into());
+                    } else if let Some((other, _)) = entries.resources.iter().find(|(_, r)| {
+                        r.name == resource.name || uri(&r.uri, &r.uri_template) == this
+                    }) {
+                        hidden(
+                            "resource",
+                            &this,
+                            format!("plugin '{other}' declares that name or URI"),
+                        );
+                    } else {
+                        entries.resources.push((name.clone(), resource));
+                    }
+                }
+                for prompt in found.prompts {
+                    if builtin.prompts.iter().any(|b| b.name == prompt.name) {
+                        hidden(
+                            "prompt",
+                            &prompt.name,
+                            "a built-in prompt has that name".into(),
+                        );
+                    } else if let Some((other, _)) =
+                        entries.prompts.iter().find(|(_, p)| p.name == prompt.name)
+                    {
+                        hidden(
+                            "prompt",
+                            &prompt.name,
+                            format!("plugin '{other}' declares it"),
+                        );
+                    } else {
+                        entries.prompts.push((name.clone(), prompt));
+                    }
+                }
+            }
+            Err(error) => notices.push(format!(
+                "Native plugin '{name}' MCP entries are disabled: {error}"
+            )),
         }
-        Ok(Err(error)) => (
-            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-            error.to_string(),
-        )
-            .into_response(),
-        Err(error) => (
-            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-            error.to_string(),
-        )
-            .into_response(),
+    }
+    if entries.tools.is_empty() && entries.resources.is_empty() && entries.prompts.is_empty() {
+        return None;
+    }
+    Some(Arc::new(entries))
+}
+
+struct NativeMcpEntries {
+    natives: Arc<NativePlugins>,
+    limits: CallLimits,
+    tools: Vec<(String, meerschaum_plugin::mcp::ToolSpec)>,
+    resources: Vec<(String, meerschaum_plugin::mcp::ResourceSpec)>,
+    prompts: Vec<(String, meerschaum_plugin::mcp::PromptSpec)>,
+}
+
+fn core_value(json: serde_json::Value) -> Value {
+    serde_json::from_value(json).unwrap_or_default()
+}
+
+fn caller_context(
+    caller: &meerschaum_server::mcp::Caller,
+) -> (Option<meerschaum_plugin::api::Principal>, Vec<String>) {
+    let principal = serde_json::from_value(meerschaum_server::native::principal_json(
+        caller.principal.as_ref(),
+    ))
+    .ok();
+    (principal, caller.scope_list())
+}
+
+impl NativeMcpEntries {
+    /// Run a plugin call off the async runtime.
+    async fn call<T: Send + 'static>(
+        &self,
+        plugin: &str,
+        f: impl FnOnce(&meerschaum_plugin::LoadedPlugin) -> meerschaum_plugin::Result<T>
+        + Send
+        + 'static,
+    ) -> Result<T, String> {
+        let permit = self.limits.acquire(plugin).await?;
+        let natives = self.natives.clone();
+        let plugin = plugin.to_string();
+        tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            f(&*natives.plugin(&plugin)?)
+        })
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())
+    }
+}
+
+#[async_trait]
+impl meerschaum_server::mcp::NativeMcp for NativeMcpEntries {
+    fn tools(&self) -> Vec<meerschaum_server::mcp::registry::Tool> {
+        use meerschaum_server::mcp::registry::{Source, Tool};
+        self.tools
+            .iter()
+            .filter_map(|(_, t)| {
+                let entry = serde_json::json!({
+                    "name": t.name,
+                    "description": t.description,
+                    "title": t.title,
+                    "scopes": t.scopes,
+                    "read_only": t.hint("readOnlyHint"),
+                    "destructive": t.hint("destructiveHint"),
+                    "idempotent": t.hint("idempotentHint"),
+                    "open_world": t.hint("openWorldHint"),
+                    "input_schema": t.input_schema,
+                    "output_schema": t.output_schema,
+                });
+                Tool::from_value(&core_value(entry), Source::Native)
+            })
+            .collect()
+    }
+
+    fn resources(&self) -> Vec<meerschaum_server::mcp::registry::Resource> {
+        use meerschaum_server::mcp::registry::{Resource, Source};
+        self.resources
+            .iter()
+            .filter_map(|(_, r)| {
+                let entry = core_value(serde_json::to_value(r).unwrap_or_default());
+                Resource::from_value(&entry, Source::Native)
+            })
+            .collect()
+    }
+
+    fn prompts(&self) -> Vec<meerschaum_server::mcp::registry::Prompt> {
+        use meerschaum_server::mcp::registry::{Prompt, Source};
+        self.prompts
+            .iter()
+            .filter_map(|(_, p)| {
+                let entry = core_value(serde_json::to_value(p).unwrap_or_default());
+                Prompt::from_value(&entry, Source::Native)
+            })
+            .collect()
+    }
+
+    async fn call_tool(
+        &self,
+        name: &str,
+        arguments: &Map,
+        caller: &meerschaum_server::mcp::Caller,
+    ) -> Result<Value, String> {
+        let Some((plugin, spec)) = self.tools.iter().find(|(_, t)| t.name == name) else {
+            return Err(format!("Unknown tool: '{name}'."));
+        };
+        let arguments = serde_json::to_value(arguments).map_err(|e| e.to_string())?;
+        spec.validate(&arguments)
+            .map_err(|e| format!("Invalid arguments for '{name}': {e}"))?;
+        let (principal, scopes) = caller_context(caller);
+        let call = meerschaum_plugin::mcp::ToolCall {
+            name: name.to_string(),
+            arguments: match arguments {
+                serde_json::Value::Object(map) => map,
+                _ => Default::default(),
+            },
+            principal,
+            scopes,
+        };
+        self.call(plugin, move |p| p.mcp_tool(&call))
+            .await
+            .map(core_value)
+    }
+
+    async fn read_resource(
+        &self,
+        name: &str,
+        uri: &str,
+        variables: &Map,
+        caller: &meerschaum_server::mcp::Caller,
+    ) -> Result<meerschaum_server::mcp::NativeResource, String> {
+        use meerschaum_plugin::mcp::{ResourceContents, ResourceRead};
+        use meerschaum_server::mcp::{NativeResource, NativeResourceContents};
+        let Some((plugin, _)) = self.resources.iter().find(|(_, r)| r.name == name) else {
+            return Err(format!("Resource not found: {uri}"));
+        };
+        let (principal, scopes) = caller_context(caller);
+        let read = ResourceRead {
+            name: name.to_string(),
+            uri: uri.to_string(),
+            variables: match serde_json::to_value(variables) {
+                Ok(serde_json::Value::Object(map)) => map,
+                _ => Default::default(),
+            },
+            principal,
+            scopes,
+        };
+        let contents = self.call(plugin, move |p| p.mcp_resource(&read)).await?;
+        Ok(match contents {
+            ResourceContents::Text { text, mime_type } => NativeResource {
+                contents: NativeResourceContents::Text(text),
+                mime_type,
+            },
+            blob @ ResourceContents::Blob { .. } => {
+                let wire = blob.to_json();
+                NativeResource {
+                    contents: NativeResourceContents::Blob(
+                        wire["blob_base64"].as_str().unwrap_or_default().to_string(),
+                    ),
+                    mime_type: wire["mime_type"].as_str().map(str::to_owned),
+                }
+            }
+        })
+    }
+
+    async fn get_prompt(
+        &self,
+        name: &str,
+        arguments: &Map,
+        caller: &meerschaum_server::mcp::Caller,
+    ) -> Result<(Option<String>, Vec<Value>), String> {
+        let Some((plugin, _)) = self.prompts.iter().find(|(_, p)| p.name == name) else {
+            return Err(format!("Unknown prompt: '{name}'."));
+        };
+        let (principal, scopes) = caller_context(caller);
+        let get = meerschaum_plugin::mcp::PromptGet {
+            name: name.to_string(),
+            arguments: match serde_json::to_value(arguments) {
+                Ok(serde_json::Value::Object(map)) => map,
+                _ => Default::default(),
+            },
+            principal,
+            scopes,
+        };
+        let (description, messages) = self.call(plugin, move |p| p.mcp_prompt(&get)).await?;
+        Ok((description, messages.into_iter().map(core_value).collect()))
     }
 }
 
@@ -942,4 +1532,31 @@ pub fn pages(manifest: &Manifest, natives: &Arc<NativePlugins>) -> Vec<meerschau
         }
     }
     pages
+}
+
+#[cfg(test)]
+mod legacy_route_tests {
+    use super::legacy_route_response;
+    use serde_json::json;
+
+    #[test]
+    fn legacy_route_replies_parse_as_before() {
+        // An invalid or missing status is 200; the content type defaults to text.
+        for status in [json!("201"), json!(0), json!(70000), json!(null)] {
+            let r = legacy_route_response(&json!({"status": status, "body": "ok"}));
+            assert_eq!(r.status, 200, "{status}");
+            assert_eq!(
+                r.headers,
+                vec![(
+                    "content-type".to_string(),
+                    "text/plain; charset=utf-8".to_string()
+                )]
+            );
+            assert_eq!(r.body, b"ok");
+        }
+        let r = legacy_route_response(&json!({"status": 404, "content_type": "text/html"}));
+        assert_eq!(r.status, 404);
+        assert_eq!(r.headers[0].1, "text/html");
+        assert!(r.body.is_empty());
+    }
 }

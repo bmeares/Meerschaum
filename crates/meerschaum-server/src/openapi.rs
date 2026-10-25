@@ -971,6 +971,18 @@ pub fn operations() -> Vec<Operation> {
             ],
             false,
         ),
+        (
+            "get",
+            "/engine/runs/{run_id}/events/stream",
+            "Stream Engine Run Events",
+            vec![
+                ("run_id", "path", true, "string"),
+                ("after_seq", "query", false, "integer|null"),
+                ("wait", "query", false, "null|number"),
+                ("instance_keys", "query", false, "null|string"),
+            ],
+            false,
+        ),
         ("post", "/engine/events", "Post Engine Events", vec![], true),
         (
             "post",

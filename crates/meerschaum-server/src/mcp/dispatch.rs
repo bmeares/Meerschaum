@@ -1,8 +1,8 @@
 //! Transport-independent JSON-RPC dispatch (`meerschaum/mcp/_dispatch.py`).
 //!
 //! Both transports call [`McpServer::handle_payload`]; only the [`Caller`] differs. Built-in
-//! entries run here; entries from the Python API host are forwarded to it
-//! ([`super::federation`]).
+//! entries run here; native plugin entries are called through [`super::NativeMcp`]; entries from
+//! the Python API host are forwarded to it ([`super::federation`]).
 
 use meerschaum_core::pyfmt::{JsonStyle, json_dumps};
 use meerschaum_core::{Map, Value};
@@ -16,9 +16,17 @@ use super::tools::{self, ToolCx};
 use super::{Caller, McpServer, prompts, resources};
 use crate::state::AppState;
 
-/// Every tool: the built-ins, then the host's (a host tool never shadows a built-in).
+/// Every tool: the built-ins, the native plugins', then the host's (an entry never shadows an
+/// earlier one of the same name).
 pub async fn all_tools(server: &McpServer) -> Vec<Tool> {
     let mut out = builtin().tools.clone();
+    if let Some(native) = &server.native {
+        for t in native.tools() {
+            if !out.iter().any(|b| b.name == t.name) {
+                out.push(t);
+            }
+        }
+    }
     if let Some(f) = &server.federation {
         let reg = f.registry().await;
         for t in &reg.tools {
@@ -30,18 +38,28 @@ pub async fn all_tools(server: &McpServer) -> Vec<Tool> {
     out
 }
 
-/// Every resource and template: the built-ins, then the host's.
+/// Every resource and template: the built-ins, the native plugins', then the host's.
 pub async fn all_resources(server: &McpServer) -> Vec<Resource> {
     let mut out = builtin().resources.clone();
+    if let Some(native) = &server.native {
+        out.extend(native.resources());
+    }
     if let Some(f) = &server.federation {
         out.extend(f.registry().await.resources.iter().cloned());
     }
     out
 }
 
-/// Every prompt: the built-ins, then the host's.
+/// Every prompt: the built-ins, the native plugins', then the host's.
 pub async fn all_prompts(server: &McpServer) -> Vec<Prompt> {
     let mut out = builtin().prompts.clone();
+    if let Some(native) = &server.native {
+        for p in native.prompts() {
+            if !out.iter().any(|b| b.name == p.name) {
+                out.push(p);
+            }
+        }
+    }
     if let Some(f) = &server.federation {
         let reg = f.registry().await;
         for p in &reg.prompts {
@@ -289,19 +307,36 @@ impl McpServer {
         if tool.source == Source::Host {
             return self.forward(message, caller, id).await;
         }
-        let cx = ToolCx {
-            server: self,
-            state,
-            caller,
-        };
-        let value = match tools::call(&name, &arguments, &cx).await {
-            Ok(v) => v,
-            Err(e) if e.kind == "TypeError" => {
-                return tool_error(id, format!("Invalid arguments for '{name}': {}", e.message));
+        let value = if tool.source == Source::Native {
+            let Some(native) = &self.native else {
+                return tool_error(id, format!("Unknown tool: '{name}'."));
+            };
+            match native.call_tool(&name, &arguments, caller).await {
+                Ok(v) => v,
+                Err(e) => return tool_error(id, e),
             }
-            Err(e) => return tool_error(id, format!("{}: {}", e.kind, e.message)),
+        } else {
+            let cx = ToolCx {
+                server: self,
+                state,
+                caller,
+            };
+            match tools::call(&name, &arguments, &cx).await {
+                Ok(v) => v,
+                Err(e) if e.kind == "TypeError" => {
+                    return tool_error(
+                        id,
+                        format!("Invalid arguments for '{name}': {}", e.message),
+                    );
+                }
+                Err(e) => return tool_error(id, format!("{}: {}", e.kind, e.message)),
+            }
         };
-        let text = json_dumps(&value, JsonStyle::Indent(2), true);
+        // A native tool's text result is sent as is; other results as indented JSON.
+        let text = match (&value, tool.source) {
+            (Value::Str(text), Source::Native) => text.clone(),
+            _ => json_dumps(&value, JsonStyle::Indent(2), true),
+        };
         let mut r = map_of([
             (
                 "content",
@@ -337,6 +372,11 @@ impl McpServer {
             };
             if res.source == Source::Host {
                 return self.forward(message, caller, id).await;
+            }
+            if res.source == Source::Native {
+                return self
+                    .read_native_resource(&res, &uri, &vars, caller, id)
+                    .await;
             }
             let cx = ToolCx {
                 server: self,
@@ -421,6 +461,24 @@ impl McpServer {
         if prompt.source == Source::Host {
             return self.forward(message, caller, id).await;
         }
+        if prompt.source == Source::Native {
+            let Some(native) = &self.native else {
+                return error(id, INVALID_PARAMS, format!("Unknown prompt: '{name}'."));
+            };
+            return match native.get_prompt(&name, &arguments, caller).await {
+                Ok((description, messages)) => result(
+                    id,
+                    Value::Map(map_of([
+                        (
+                            "description",
+                            s(description.unwrap_or_else(|| prompt.description.clone())),
+                        ),
+                        ("messages", Value::List(messages)),
+                    ])),
+                ),
+                Err(e) => error(id, INTERNAL_ERROR, e),
+            };
+        }
         match prompts::render(&name, &arguments) {
             Some(messages) => result(
                 id,
@@ -430,6 +488,42 @@ impl McpServer {
                 ])),
             ),
             None => error(id, INVALID_PARAMS, format!("Unknown prompt: '{name}'.")),
+        }
+    }
+
+    async fn read_native_resource(
+        &self,
+        res: &Resource,
+        uri: &str,
+        vars: &Map,
+        caller: &Caller,
+        id: Value,
+    ) -> Value {
+        let Some(native) = &self.native else {
+            return error(id, INVALID_PARAMS, format!("Resource not found: {uri}"));
+        };
+        match native.read_resource(&res.name, uri, vars, caller).await {
+            Ok(read) => {
+                let (key, contents) = match read.contents {
+                    super::NativeResourceContents::Text(text) => ("text", text),
+                    super::NativeResourceContents::Blob(blob) => ("blob", blob),
+                };
+                result(
+                    id,
+                    Value::Map(map_of([(
+                        "contents",
+                        Value::List(vec![Value::Map(map_of([
+                            ("uri", s(uri)),
+                            (
+                                "mimeType",
+                                s(read.mime_type.unwrap_or_else(|| res.mime_type.clone())),
+                            ),
+                            (key, s(contents)),
+                        ]))]),
+                    )])),
+                )
+            }
+            Err(e) => error(id, INTERNAL_ERROR, e),
         }
     }
 

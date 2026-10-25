@@ -47,6 +47,7 @@ impl LoadedPlugin {
     /// Loading a library executes arbitrary native code. The library must obey ABI v1,
     /// including valid pointers, ownership, no unwinding, and no background use after unload.
     pub unsafe fn load(path: impl AsRef<Path>) -> Result<Arc<Self>> {
+        meerschaum_core::dprint!("Loading native plugin {}.", path.as_ref().display());
         // SAFETY: trust and ABI conformance are the caller's responsibility.
         let library = unsafe { Library::new(path.as_ref()) }.map_err(error)?;
         // SAFETY: entry symbol has the documented C signature.
@@ -137,6 +138,45 @@ impl LoadedPlugin {
                 .lock()
                 .map_err(|_| error("plugin call lock poisoned"))?
         };
+        self.invoke_entered(request, data, host)
+    }
+
+    /// A call of a stream method (`next_batch`, `ack_batches`, `close_subscription`,
+    /// `executor.next_logs`, `executor.close_logs`): not serialized with the plugin's other
+    /// calls, so a blocking `next_batch` holds up neither `fetch` nor another stream. The plugin
+    /// locks each handle itself (the SDK does). No host services are available.
+    pub fn invoke_stream(&self, request: &Request) -> Result<Reply> {
+        if ACTIVE.with(|active| active.borrow().contains(&self.name)) {
+            return Err(error(format!(
+                "recursive call into native plugin '{}'",
+                self.name
+            )));
+        }
+        self.invoke_entered(request, None, None)
+    }
+
+    /// A JSON-only call of a server call kind (`api_route`, `mcp_tool`, `mcp_resource`,
+    /// `mcp_prompt`): like [`invoke_stream`](Self::invoke_stream), it is not serialized with the
+    /// plugin's other calls, so concurrent HTTP requests and MCP calls run in parallel (as
+    /// FastAPI serves `@api_plugin` routes). The plugin must be thread-safe for these call kinds;
+    /// the SDK builds a fresh `P::default()` per call. No host services are available.
+    pub fn call_json_concurrent(&self, method: &str, context: Value) -> Result<Value> {
+        self.invoke_stream(&Request {
+            method: method.into(),
+            connector_type: String::new(),
+            label: String::new(),
+            config: Value::Null,
+            context,
+        })
+        .map(|reply| reply.value)
+    }
+
+    fn invoke_entered(
+        &self,
+        request: &Request,
+        data: Option<&Frame>,
+        host: Option<&dyn crate::HostServices>,
+    ) -> Result<Reply> {
         ACTIVE.with(|active| active.borrow_mut().push(self.name.clone()));
         let _active = ActiveCall;
         if let Some(invoke) = self.invoke_rows {
@@ -234,6 +274,25 @@ impl LoadedPlugin {
             host: None,
         })
     }
+    /// The executor `<executor_type>:<label>` (a manifest `executor_types` entry).
+    pub fn executor(
+        self: &Arc<Self>,
+        executor_type: &str,
+        label: &str,
+        config: Value,
+    ) -> Result<crate::executor::NativeExecutor> {
+        if !self.manifest["executor_types"][executor_type].is_object() {
+            return Err(error(format!(
+                "unknown native executor type: {executor_type}"
+            )));
+        }
+        Ok(crate::executor::NativeExecutor::new(
+            self.clone(),
+            executor_type,
+            label,
+            config,
+        ))
+    }
     /// A JSON-only call of an extension method (`routes`, `route`, `pages`, `page`, ...):
     /// `context` goes in, the reply's JSON value comes out.
     pub fn call_json(&self, method: &str, context: Value) -> Result<Value> {
@@ -263,7 +322,23 @@ impl LoadedPlugin {
         serde_json::from_value(reply.value).map_err(error)
     }
     pub fn hook(&self, post: bool, name: &str, kwargs: Value) -> Result<SuccessTuple> {
-        let reply = self.invoke(
+        self.sync_hook(post, name, kwargs, Value::Null, None)
+    }
+    /// A sync hook with the synced Pipe in `context.pipe` (as for pipe operations; omitted
+    /// when `pipe` is null) and the host services the hook's `Pipe` calls go through.
+    pub fn sync_hook(
+        &self,
+        post: bool,
+        name: &str,
+        kwargs: Value,
+        pipe: Value,
+        host: Option<&dyn crate::HostServices>,
+    ) -> Result<SuccessTuple> {
+        let mut context = json!({"name":name,"kwargs":kwargs});
+        if !pipe.is_null() {
+            context["pipe"] = pipe;
+        }
+        let reply = self.invoke_with_host(
             &Request {
                 method: if post {
                     "post_sync_hook"
@@ -274,9 +349,10 @@ impl LoadedPlugin {
                 connector_type: String::new(),
                 label: String::new(),
                 config: Value::Null,
-                context: json!({"name":name,"kwargs":kwargs}),
+                context,
             },
             None,
+            host,
         )?;
         serde_json::from_value(reply.value).map_err(error)
     }
@@ -410,6 +486,48 @@ impl NativeConnector {
         }
         self.fetch_kwargs = value;
         self
+    }
+
+    /// Whether this connector is a pull-model stream source: a custom type declaring
+    /// `is_streaming` with `subscribe` in its `methods`, or `plugin:<name>` whose
+    /// `data_functions` list `subscribe` (see [`crate::subscribe`]).
+    pub fn is_streaming(&self) -> bool {
+        let manifest = &self.plugin.manifest;
+        let listed = |list: &Value| {
+            list.as_array()
+                .is_some_and(|items| items.iter().any(|m| m == "subscribe"))
+        };
+        if self.connector_type == "plugin" {
+            return listed(&manifest["plugins"][&self.plugin.name]["data_functions"]);
+        }
+        let desc = &manifest["connector_types"][&self.connector_type];
+        desc["is_streaming"].as_bool().unwrap_or(false) && listed(&desc["methods"])
+    }
+
+    /// Open a subscription for `pipe` (blocking; run it on a blocking thread). `kwargs` are the
+    /// sync's keyword arguments, as `fetch` receives them.
+    pub fn subscribe(
+        &self,
+        pipe: &Pipe,
+        kwargs: Value,
+    ) -> ConnectorResult<crate::subscribe::NativeSubscription> {
+        let mut context = pipe_context(pipe);
+        context["kwargs"] = kwargs;
+        let reply = self.call("subscribe", context, None)?;
+        let handle = reply.value["handle"]
+            .as_u64()
+            .ok_or_else(|| ConnectorError::Invalid("subscribe returned no handle".into()))?;
+        Ok(crate::subscribe::NativeSubscription::new(
+            self.plugin.clone(),
+            Request {
+                method: String::new(),
+                connector_type: self.connector_type.clone(),
+                label: self.label.clone(),
+                config: self.config.clone(),
+                context: Value::Null,
+            },
+            handle,
+        ))
     }
 
     pub fn is_instance(&self) -> bool {

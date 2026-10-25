@@ -3,7 +3,7 @@
 mod compile_single_file;
 mod plugin_lifecycle_support;
 
-use plugin_lifecycle_support::{Home, Repo, install_native_demo};
+use plugin_lifecycle_support::{Home, Repo, archive, install_native_demo};
 use std::io::Read;
 
 const NO_PYTHON: (&str, &str) = ("MRSM_PYTHON", "/nonexistent/mrsm-test-python");
@@ -68,7 +68,7 @@ fn bootstrap_rust_generates_runnable_fetch_action_and_connector() {
     );
     let source = std::fs::read_to_string(home.plugins.join("readings.rs")).unwrap();
     assert!(
-        source.contains("#[make_action(name = \"say_hello\")]"),
+        source.contains("#[make_action]\nfn say_hello(action: Vec<String>)"),
         "{source}"
     );
     assert!(
@@ -266,5 +266,55 @@ fn register_rust_uploads_sources_and_keeps_dependency_metadata() {
         run.success && run.text().contains("native_demo"),
         "{}",
         run.text()
+    );
+}
+
+#[test]
+fn rust_version_and_required_drive_install_plugins_and_install_required() {
+    let home = Home::new();
+    let repo = Repo::start();
+    let parent = "const VERSION: &str = \"1.2.0\";\nconst REQUIRED: &[&str] = &[\"plugin:child@api:loop\"];\n#[make_action]\nfn go() {}\n";
+    let child = "const VERSION: &str = \"0.1.0\";\n#[make_action]\nfn kid() {}\n";
+    home.write_plugin("parent.rs", parent);
+    home.write_plugin("child.rs", child);
+    prepare(&home);
+    let (key, value) = repo.connector("loop");
+    let env = [(key.as_str(), value.as_str()), NO_PYTHON];
+
+    // PARITY: `VERSION` is `__version__`: the same version is up to date, an older one refused.
+    repo.publish("parent", archive(&[("parent.rs", parent)]));
+    let run = home.run_with(&["install", "plugins", "parent", "-r", "api:loop"], &env);
+    assert!(run.success, "{}", run.text());
+    assert!(
+        run.flat()
+            .contains("Plugin 'parent' is up-to-date (version 1.2.0)."),
+        "{}",
+        run.text()
+    );
+    let older = parent.replace("1.2.0", "1.1.0");
+    repo.publish("parent", archive(&[("parent.rs", &older)]));
+    let run = home.run_with(&["install", "plugins", "parent", "-r", "api:loop"], &env);
+    assert!(
+        run.flat().contains(
+            "Your installed version of plugin 'parent' (1.2.0) is higher than attempted version 1.1.0."
+        ),
+        "{}",
+        run.text()
+    );
+    assert_eq!(
+        std::fs::read_to_string(home.plugins.join("parent.rs")).unwrap(),
+        parent
+    );
+
+    // `REQUIRED` is `required`: `install required` installs the plugins it names.
+    repo.publish("child", archive(&[("child.rs", child)]));
+    let run = home.run_with(&["install", "required", "parent", "-r", "api:loop"], &env);
+    assert!(run.success, "{}", run.text());
+    // The required plugin was fetched from the repository named in the requirement; its
+    // installed `VERSION` matches, so it is kept (a successful required install prints nothing).
+    assert_eq!(repo.count("/plugins/child"), 1, "{:?}", repo.requests());
+    assert_eq!(
+        std::fs::read_to_string(home.plugins.join("child.rs")).unwrap(),
+        child
     );
 }

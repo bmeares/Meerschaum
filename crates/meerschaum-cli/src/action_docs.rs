@@ -853,6 +853,58 @@ Examples:
     - `plan pipes -m daily --nopretty`
 "##
         }
+        "watch" => {
+            r##"
+Watch something change, full-screen (v5): a monitor, where `show` prints once.
+
+Command:
+    `watch {option}`
+
+Example:
+    `watch run`
+
+The views take the whole terminal (the alternate screen) and give it back as it was. `q` or
+Esc leaves a view, `?` lists its keys. In the shell, F2 opens `watch run` and F3 `watch jobs`
+(`shell:keybindings`). Off a terminal, with `--nopretty` or `MRSM_NONINTERACTIVE`, each view
+prints its line output instead.
+
+    Options:
+        `watch [jobs, runs]`"##
+        }
+        "_watch_runs" => {
+            r##"
+Monitor a run of the Syncing Engine (v5): a live Gantt chart, the nodes (state, action, chunk
+progress, rows inserted and updated, rows per second, attempts, duration) and the event log.
+
+Give a run ID (`watch run RUN_ID`); without one, the newest running run is shown, else the
+newest run. The run may be in this process or any other one, on any host: the monitor reads the
+events the engine persists on the instance (`system.engine.events`). Enter shows the selected
+node's details.
+
+Off a terminal (or with `--nopretty`), the run's events are printed one per line (JSON lines
+with `--nopretty`) until the run ends; the result is the run's.
+
+Examples:
+    - `watch run`
+    - `watch run 01JA...`
+    - `watch run --nopretty`
+"##
+        }
+        "_watch_jobs" => {
+            r##"
+Monitor jobs (v5): the jobs of an executor (status, began, ended, schedule, executor) and the
+selected job's log as it is written. `s` starts (or resumes), `x` stops and `p` pauses the
+selected job, each after a confirmation.
+
+Give job names to watch only those. Off a terminal (or with `--nopretty`) this prints
+`show jobs`.
+
+Examples:
+    - `watch jobs`
+    - `watch jobs -e systemd`
+    - `watch jobs my-job`
+"##
+        }
         "doctor" => {
             r##"
 Check this installation and print what is wrong with it, and how to fix it (v5).

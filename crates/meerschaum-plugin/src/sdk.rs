@@ -47,22 +47,92 @@ pub trait Plugin: Default + Send + 'static {
     const VERSION: &'static str;
     /// Full worker manifest, including `plugins` and `connector_types`.
     fn manifest(&self) -> Value;
+    /// The executor for `request.connector_type` / `label` / `config` (a manifest
+    /// `executor_types` entry), or `None` for a type this plugin does not provide. The SDK
+    /// routes every `executor.*` method here (see [`crate::executor`]); they never reach `call`.
+    fn executor(&self, _request: &Request) -> Option<Box<dyn crate::executor::Executor>> {
+        None
+    }
+    /// Open a subscription of a streaming connector (see [`crate::subscribe`]). `request.context`
+    /// carries `pipe` (as for `fetch`, with host services) and the sync's `kwargs`. The SDK
+    /// routes `subscribe`, `next_batch`, `ack_batches` and `close_subscription`; they never
+    /// reach `call`.
+    fn subscribe(&self, _request: &Request) -> Result<Box<dyn crate::subscribe::Subscription>> {
+        Err(crate::Error::Unsupported(
+            "subscribe is not implemented".into(),
+        ))
+    }
     fn fetch(&self, _request: &Request) -> Result<Option<Frame>> {
         Err(crate::Error::Unsupported("fetch is not implemented".into()))
     }
     fn sync(&self, _request: &Request, _data: Option<Frame>) -> Result<Value> {
         Err(crate::Error::Unsupported("sync is not implemented".into()))
     }
+    /// Serve one of the routes declared in the manifest's `api_routes` (see [`crate::api`]).
+    fn api_route(&self, _request: &crate::api::RouteRequest) -> Result<crate::api::RouteResponse> {
+        Err(crate::Error::Unsupported(
+            "api_route is not implemented".into(),
+        ))
+    }
+    /// Call one of the manifest's `mcp_tools` (see [`crate::mcp`]); the value is the result.
+    fn mcp_tool(&self, _call: &crate::mcp::ToolCall) -> Result<Value> {
+        Err(crate::Error::Unsupported(
+            "mcp_tool is not implemented".into(),
+        ))
+    }
+    /// Read one of the manifest's `mcp_resources`.
+    fn mcp_resource(
+        &self,
+        _read: &crate::mcp::ResourceRead,
+    ) -> Result<crate::mcp::ResourceContents> {
+        Err(crate::Error::Unsupported(
+            "mcp_resource is not implemented".into(),
+        ))
+    }
+    /// Render one of the manifest's `mcp_prompts` (see [`crate::mcp::prompt_reply`]).
+    fn mcp_prompt(&self, _get: &crate::mcp::PromptGet) -> Result<Value> {
+        Err(crate::Error::Unsupported(
+            "mcp_prompt is not implemented".into(),
+        ))
+    }
     fn call(&self, request: &Request, data: Option<Frame>) -> Result<Reply> {
         match request.method.as_str() {
             "fetch" => self.fetch(request).map(Reply::data),
             "sync" | "sync_pipe" => self.sync(request, data).map(Reply::json),
+            "api_route" | "mcp_tool" | "mcp_resource" | "mcp_prompt" => {
+                call_server_extension(self, request)
+            }
             _ => Err(crate::Error::Unsupported(format!(
                 "{} is not implemented",
                 request.method
             ))),
         }
     }
+}
+
+/// The default handling of the server call kinds (`api_route`, `mcp_tool`, `mcp_resource`,
+/// `mcp_prompt`): decode the context, call the typed trait method, encode the reply. A plugin
+/// that overrides [`Plugin::call`] can forward these methods here.
+pub fn call_server_extension<P: Plugin>(plugin: &P, request: &Request) -> Result<Reply> {
+    fn context<T: serde::de::DeserializeOwned>(request: &Request) -> Result<T> {
+        serde_json::from_value(request.context.clone()).map_err(error)
+    }
+    let value = match request.method.as_str() {
+        "api_route" => serde_json::to_value(plugin.api_route(&context(request)?)?),
+        "mcp_tool" => return plugin.mcp_tool(&context(request)?).map(Reply::json),
+        "mcp_resource" => {
+            return Ok(Reply::json(
+                plugin.mcp_resource(&context(request)?)?.to_json(),
+            ));
+        }
+        "mcp_prompt" => return plugin.mcp_prompt(&context(request)?).map(Reply::json),
+        other => {
+            return Err(crate::Error::Unsupported(format!(
+                "{other} is not implemented"
+            )));
+        }
+    };
+    value.map(Reply::json).map_err(error)
 }
 
 pub(crate) fn stream(frame: &Frame) -> Result<FFI_ArrowArrayStream> {
@@ -152,7 +222,13 @@ impl<P: Plugin> Export<P> {
                 serde_json::from_slice(unsafe { bytes.as_slice() }).map_err(error)?;
             // SAFETY: input is moved once and replaced with an empty stream.
             let data = frame(unsafe { FFI_ArrowArrayStream::from_raw(input) })?;
-            let reply = P::default().call(&request, data)?;
+            // Executors and subscriptions are routed by the SDK, not by `call`.
+            let reply = match crate::subscribe::dispatch::<P>(&request)
+                .or_else(|| crate::executor::dispatch::<P>(&request))
+            {
+                Some(reply) => reply?,
+                None => P::default().call(&request, data)?,
+            };
             if let Some(data) = reply.data {
                 // SAFETY: caller supplies a valid empty output stream.
                 unsafe {

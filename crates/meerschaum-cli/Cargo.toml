@@ -77,6 +77,8 @@ reedline = "0.52"
 # The versions reedline 0.52 uses (already in the lock file): key events, styles, graphemes.
 crossterm = "0.29"
 nu-ansi-term = "0.50"
+# Full-screen views (`watch run`, `watch jobs`, shell F2/F3): ratatui over the same crossterm.
+ratatui = { version = "0.30.2", default-features = false, features = ["crossterm_0_29", "layout-cache", "underline-color"] }
 unicode-segmentation = "1"
 # `install plugins`: plugin archives are gzip-compressed tarballs.
 tar = { version = "0.4", default-features = false }
@@ -87,8 +89,9 @@ fs4 = "1.1"
 
 [target.'cfg(unix)'.dependencies]
 # `timed_input`: poll stdin with a timeout (no reader thread that outlives the call);
-# `setsid` for the timed pipeline step; `fs` for `doctor` (`access`, `statvfs`).
-rustix = { version = "1", default-features = false, features = ["std", "event", "process", "fs"] }
+# `setsid` for the timed pipeline step; `fs` for `doctor` (`access`, `statvfs`); `termios` for
+# the single key presses of the inline live view of graph runs (`format/live.rs`).
+rustix = { version = "1", default-features = false, features = ["std", "event", "process", "fs", "termios"] }
 # The SIGINT / SIGTERM watcher (`shell/interrupt.rs`, which also erases the progress line), a safe
 # API. `extended-siginfo` says whether a signal came from the terminal (Ctrl-C, which the programs
 # of the foreground process group got too) or from `kill` (which they did not: it is forwarded).

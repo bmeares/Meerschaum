@@ -22,6 +22,11 @@
       "type": "object",
       "additionalProperties": {"$ref": "#/$defs/connector_type"}
     },
+    "executor_types": {
+      "description": "Job executor types (`<type>:<label>` executor keys) provided by native plugins.",
+      "type": "object",
+      "additionalProperties": {"$ref": "#/$defs/executor_type"}
+    },
     "api_plugins": {"$ref": "#/$defs/names", "description": "Plugins with @api_plugin functions."},
     "dash_plugins": {"$ref": "#/$defs/names", "description": "Plugins with @dash_plugin functions."},
     "web_pages": {"$ref": "#/$defs/names", "description": "Plugins with @web_page layouts."},
@@ -55,6 +60,7 @@
         "pre_sync_hooks": {"$ref": "#/$defs/names"},
         "post_sync_hooks": {"$ref": "#/$defs/names"},
         "api_plugins": {"$ref": "#/$defs/names"},
+        "api_routes": {"description": "Routes of a native plugin, served by the `api_route` call kind.", "type": "array", "items": {"$ref": "#/$defs/api_route"}},
         "dash_plugins": {"$ref": "#/$defs/names"},
         "web_pages": {"type": "array", "items": {"$ref": "#/$defs/web_page"}},
         "mcp_tools": {"type": "array", "items": {"$ref": "#/$defs/mcp_tool"}},
@@ -132,6 +138,18 @@
         "annotations": {"type": "object"}
       }
     },
+    "api_route": {
+      "type": "object",
+      "required": ["name", "path"],
+      "properties": {
+        "name": {"type": "string"},
+        "method": {"type": "string", "description": "An HTTP method or `*` (default `GET`)."},
+        "path": {"type": "string", "description": "Starlette syntax: one `{name}` (or `{name:int|float|uuid|str}`) parameter per segment with an optional static prefix and suffix, and a final `{*rest}` or `{rest:path}` catch-all."},
+        "scopes": {"$ref": "#/$defs/names"},
+        "public": {"type": "boolean", "description": "Served without credentials; a public route may not declare `scopes`."},
+        "description": {"$ref": "#/$defs/nullable_string"}
+      }
+    },
     "mcp_resource": {
       "type": "object",
       "required": ["name", "description"],
@@ -148,7 +166,31 @@
     "mcp_prompt": {
       "type": "object",
       "required": ["name"],
-      "properties": {"name": {"type": "string"}, "description": {"$ref": "#/$defs/nullable_string"}}
+      "properties": {
+        "name": {"type": "string"},
+        "description": {"$ref": "#/$defs/nullable_string"},
+        "title": {"$ref": "#/$defs/nullable_string"},
+        "scopes": {"$ref": "#/$defs/names"},
+        "arguments": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name"],
+            "properties": {"name": {"type": "string"}, "description": {"$ref": "#/$defs/nullable_string"}, "required": {"type": "boolean"}}
+          }
+        }
+      }
+    },
+    "executor_type": {
+      "type": "object",
+      "required": ["type", "plugin"],
+      "properties": {
+        "type": {"type": "string"},
+        "plugin": {"type": "string"},
+        "class_name": {"$ref": "#/$defs/nullable_string"},
+        "methods": {"$ref": "#/$defs/names"},
+        "doc": {"$ref": "#/$defs/nullable_string"}
+      }
     },
     "connector_type": {
       "type": "object",

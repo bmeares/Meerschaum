@@ -495,6 +495,13 @@ impl SqlConnector {
             (df.clone(), None, df)
         };
         crate::facade::trace("sql: filter existing", filter_start);
+        meerschaum_core::dprint!(
+            "Filtered {} in {:?}: {} unseen, {} updated rows (check_existing={check_existing}, upsert={upsert}).",
+            sp.target,
+            filter_start.elapsed(),
+            unseen_df.height(),
+            update_df.as_ref().map_or(0, |u| u.height())
+        );
         if upsert {
             unseen_df = delta_df.clear();
             update_df = Some(delta_df.clone());
@@ -577,6 +584,7 @@ impl SqlConnector {
 
         let mut success = true;
         let mut msg = String::new();
+        let write_start = std::time::Instant::now();
         if unseen_df.height() > 0 {
             let dtype = self.get_to_sql_dtype(&sp, &unseen_df, &state, true);
             let identity_insert = flavor == Flavor::Mssql
@@ -635,6 +643,11 @@ impl SqlConnector {
             }
         }
 
+        meerschaum_core::dprint!(
+            "Wrote {} in {:?} (success={success}).",
+            sp.target,
+            write_start.elapsed()
+        );
         if !success {
             return Ok(SyncResult::new(false, msg));
         }

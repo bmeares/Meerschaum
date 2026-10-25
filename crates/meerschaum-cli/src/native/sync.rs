@@ -2,6 +2,8 @@
 
 #[path = "engine.rs"]
 pub mod engine;
+#[path = "sync_live.rs"]
+mod live;
 
 use std::time::Instant;
 
@@ -365,6 +367,11 @@ pub fn sync_pipes_with(args: &ArgsMap, rt: &mut Runtime<'_>, method: LapMethod) 
     };
     let session = session(rt);
     let sync_args = SyncArgs::from_args(args);
+    if method == LapMethod::Sync
+        && (flag(args, "parents") || flag(args, "children") || args.contains_key("resume"))
+    {
+        prepare_live(rt, args);
+    }
     let stop = crate::native::jobs::stop_requested_flag();
     if do_loop || flag(args, "listen") {
         crate::native::jobs::install_stop_handler(&session);
@@ -387,10 +394,14 @@ pub fn sync_pipes_with(args: &ArgsMap, rt: &mut Runtime<'_>, method: LapMethod) 
             let opts = run_options(args, &inst, &pipes, &sync_args);
             let graph_run = traversal || args.contains_key("resume");
             let result = if graph_run && !nopretty && rt.live {
-                run_live(rt, &session, engine, opts, true)
+                let view = LiveView::Nodes {
+                    instance: &inst,
+                    args,
+                };
+                run_live(rt, &session, engine, opts, view)
             } else {
                 if rt.in_shell && !nopretty && !flag(args, "debug") {
-                    run_live(rt, &session, engine, opts, false)
+                    run_live(rt, &session, engine, opts, LiveView::Spinner)
                 } else {
                     session.block_on(engine.run(opts))
                 }
@@ -667,9 +678,53 @@ fn sleeping_message(args: &ArgsMap, seconds: f64, message: String) -> String {
     }
 }
 
-/// Run a graph selection on the session's runtime while printing one progress line per node
-/// transition (the terminal's live view; the Gantt chart follows once the run ends).
+/// What [`run_live`] shows while the run goes on.
+#[derive(Clone, Copy)]
+pub(super) enum LiveView<'a> {
+    /// The shell's spinner only (flat runs in the shell).
+    Spinner,
+    /// The nodes of a graph run: the inline live region on a terminal that takes it
+    /// (`sync_live.rs`), else one line per node transition.
+    Nodes {
+        /// The run's instance (the run monitor reads it).
+        instance: &'a Instance,
+        /// The action's arguments.
+        args: &'a ArgsMap,
+    },
+}
+
+/// Call before the engine of a run shown with [`LiveView::Nodes`] is built (see
+/// `sync_live::prepare`).
+pub(super) fn prepare_live(rt: &mut Runtime<'_>, args: &ArgsMap) {
+    live::prepare(rt, args);
+}
+
+/// Run a graph selection on the session's runtime while showing its progress (the terminal's
+/// live view; the Gantt chart follows once the run ends).
 pub(super) fn run_live(
+    rt: &mut Runtime<'_>,
+    session: &Session,
+    engine: meerschaum_engine::Engine,
+    opts: meerschaum_engine::RunOptions,
+    view: LiveView<'_>,
+) -> meerschaum_engine::RunResult {
+    if let LiveView::Nodes { instance, args } = view
+        && live::possible(rt, args)
+    {
+        return live::run(rt, session, engine, opts, instance, args);
+    }
+    run_lines(
+        rt,
+        session,
+        engine,
+        opts,
+        matches!(view, LiveView::Nodes { .. }),
+    )
+}
+
+/// [`run_live`] without the inline region: one line per node transition (`show_nodes`), or the
+/// shell's spinner alone.
+fn run_lines(
     rt: &mut Runtime<'_>,
     session: &Session,
     engine: meerschaum_engine::Engine,
@@ -769,6 +824,7 @@ fn listen(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     super::jobs::install_stop_handler(&session);
     let signal = super::jobs::stop_requested_flag();
     let stop = StopToken::default();
+    live::prepare(rt, args);
     let (inst, pipes) = super::pipes::selected_pipes(rt, args)?;
     let sync_args = SyncArgs::from_args(args);
     let mut stream_kwargs = sync_args.extra.clone();
@@ -816,6 +872,10 @@ fn listen(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
         stop: stop.clone(),
         ..Default::default()
     };
+    // The running rows under the laps' lines, from the engine's events (a terminal only).
+    let mut rows = live::possible(rt, args)
+        .then(|| engine.subscribe())
+        .map(|events| live::LoopView::start(rt, args, &session, events));
     let (sender, receiver) = mpsc::channel();
     session.spawn(async move {
         engine
@@ -902,7 +962,11 @@ fn listen(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
             Err(mpsc::RecvTimeoutError::Timeout) => {}
         }
         print_hook_results(rt, &session);
+        if let Some(rows) = rows.as_mut() {
+            rows.poll(rt, &inst);
+        }
     }
+    drop(rows);
     Ok(result)
 }
 

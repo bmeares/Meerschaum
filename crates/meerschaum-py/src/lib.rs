@@ -70,6 +70,7 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("__version__", build_info::VERSION)?;
     m.add("HAS_STATIC_CONFIG", static_config::STATIC_TOML.is_some())?;
 
+    m.add_class::<logging::Debugging>()?;
     m.add_function(wrap_pyfunction!(build_info::py_build_info, m)?)?;
     m.add_function(wrap_pyfunction!(static_config::py_static_config, m)?)?;
 

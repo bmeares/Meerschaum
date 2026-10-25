@@ -1,45 +1,22 @@
 //! The extension's `tracing` sink: the engine, the worker adapter and the SQL driver report
 //! warnings through `tracing` (the `mrsm` binary prints them with its subscriber); in the Python
 //! process they reach `meerschaum.utils.warnings.warn()` (what v4's `warn()` calls print), and
-//! the `debug` events of a `Pipe.sync(debug=True)` reach `meerschaum.utils.debug.dprint()`.
+//! the debug output (`dprint!` and the other `DEBUG` / `INFO` events, see
+//! `meerschaum_core::debug`) of any binding called with `debug=True` (or inside
+//! `_core.debugging(True)`) reaches `meerschaum.utils.debug.dprint()` with the Rust module and
+//! line as its header.
 //!
 //! Only events from the Meerschaum crates are forwarded (`meerschaum_*` targets); dependency
 //! chatter (`sqlx`, `hyper`, ...) never reaches the user. The sink installs itself once, as the
 //! global default, unless another subscriber already is one (`cargo test` harnesses).
 
-use std::fmt::Write as _;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use pyo3::prelude::*;
-use tracing::field::{Field, Visit};
 use tracing::span::{Attributes, Id, Record};
 use tracing::subscriber::Interest;
 use tracing::{Event, Level, Metadata, Subscriber};
-
-use crate::sync_api::DEBUG_SYNCS;
-
-struct MessageVisitor {
-    message: String,
-}
-
-impl Visit for MessageVisitor {
-    fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
-        if field.name() == "message" {
-            let _ = write!(self.message, "{value:?}");
-        } else {
-            let _ = write!(self.message, " {}={value:?}", field.name());
-        }
-    }
-
-    fn record_str(&mut self, field: &Field, value: &str) {
-        if field.name() == "message" {
-            self.message.push_str(value);
-        } else {
-            let _ = write!(self.message, " {}={value}", field.name());
-        }
-    }
-}
 
 struct PythonSink {
     next_span: AtomicU64,
@@ -64,8 +41,8 @@ impl PythonSink {
 }
 
 /// What `_native.main` (the `mrsm` console script) runs on instead of Python's `warn()`: the
-/// binary's own behavior, which prints `tracing` events (to stderr) only when `RUST_LOG` asks for
-/// them. `None` once CLI mode is on and `RUST_LOG` is unset: every event is dropped.
+/// binary's own subscriber (`meerschaum_cli::debug_log`), which prints debug output while
+/// `--debug` is on and `tracing` events when `RUST_LOG` asks for them, both on stderr.
 type CliSink = Option<Box<dyn Subscriber + Send + Sync>>;
 
 static CLI_SINK: OnceLock<CliSink> = OnceLock::new();
@@ -81,16 +58,7 @@ fn cli_mode() -> Option<&'static CliSink> {
 
 /// The CLI sink (built once, from `RUST_LOG` as it is when the sink is installed or first needed).
 fn cli_sink() -> &'static CliSink {
-    CLI_SINK.get_or_init(|| {
-        std::env::var_os("RUST_LOG").map(|_| {
-            Box::new(
-                tracing_subscriber::fmt()
-                    .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-                    .with_writer(std::io::stderr)
-                    .finish(),
-            ) as Box<dyn Subscriber + Send + Sync>
-        })
-    })
+    CLI_SINK.get_or_init(|| Some(meerschaum_cli::debug_log::subscriber()))
 }
 
 /// Switch the sink to the standalone binary's behavior (`_native.main`, the `mrsm` console
@@ -106,7 +74,7 @@ pub fn leave_cli_mode() {
 }
 
 impl Subscriber for PythonSink {
-    /// Whether a call site is enabled changes at run time (`DEBUG_SYNCS`, CLI mode, `RUST_LOG`), so
+    /// Whether a call site is enabled changes at run time (the debug switch, CLI mode), so
     /// the default (`always` / `never`, remembered per call site) would keep an answer given the
     /// first time a site was hit: a site first reached inside `_native.main` without `RUST_LOG`
     /// is "never" for good, and its warnings would no longer reach `warn()` in the REPL afterwards.
@@ -118,7 +86,7 @@ impl Subscriber for PythonSink {
         if let Some(cli) = cli_mode() {
             return cli.as_ref().is_some_and(|sub| sub.enabled(metadata));
         }
-        if !metadata.target().starts_with("meerschaum_") {
+        if !meerschaum_core::debug::is_meerschaum_target(metadata.target()) {
             return false;
         }
         // Probes of the engine's own state pipes (`mrsm:` keys) on an API instance have no v4
@@ -128,7 +96,7 @@ impl Subscriber for PythonSink {
         }
         match *metadata.level() {
             Level::ERROR | Level::WARN => true,
-            Level::INFO | Level::DEBUG => DEBUG_SYNCS.load(Ordering::SeqCst) > 0,
+            Level::INFO | Level::DEBUG => meerschaum_core::debug::enabled(),
             Level::TRACE => false,
         }
     }
@@ -159,12 +127,10 @@ impl Subscriber for PythonSink {
             }
             return;
         }
-        let mut visitor = MessageVisitor {
-            message: String::new(),
-        };
-        event.record(&mut visitor);
-        let level = *event.metadata().level();
-        let message = visitor.message;
+        let metadata = event.metadata();
+        let level = *metadata.level();
+        let message = meerschaum_cli::debug_log::event_message(event);
+        let module = metadata.module_path().unwrap_or(metadata.target());
         // `try_attach`: an event from a runtime thread while the interpreter shuts down is
         // dropped (pyo3 0.30's `attach` panics during finalization on Python 3.13+).
         let _ = Python::try_attach(|py| -> PyResult<()> {
@@ -175,7 +141,10 @@ impl Subscriber for PythonSink {
                 warn.call((message,), Some(&kwargs))?;
             } else {
                 let dprint = py.import("meerschaum.utils.debug")?.getattr("dprint")?;
-                dprint.call1((message,))?;
+                let kwargs = pyo3::types::PyDict::new(py);
+                kwargs.set_item("_package", module)?;
+                kwargs.set_item("_lineno", metadata.line())?;
+                dprint.call((message,), Some(&kwargs))?;
             }
             Ok(())
         });
@@ -210,6 +179,44 @@ impl Subscriber for PythonSink {
     }
 }
 
+/// `_core.debugging(on=True)`: a context manager turning the extension's debug output on (when
+/// `on`) for the bindings called inside it, as if each had been given `debug=True`. For façade
+/// code whose bindings take no `debug` argument.
+#[pyclass(module = "meerschaum._core", name = "debugging", frozen)]
+pub struct Debugging {
+    on: bool,
+    /// The active guards (one per `__enter__`, so a re-entered manager stays balanced).
+    guards: std::sync::Mutex<Vec<meerschaum_core::debug::DebugGuard>>,
+}
+
+#[pymethods]
+impl Debugging {
+    #[new]
+    #[pyo3(signature = (on=true))]
+    fn new(on: bool) -> Self {
+        Debugging {
+            on,
+            guards: std::sync::Mutex::new(Vec::new()),
+        }
+    }
+
+    fn __enter__(slf: Py<Self>) -> Py<Self> {
+        let guard = meerschaum_core::debug::guard(slf.get().on);
+        slf.get()
+            .guards
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(guard);
+        slf
+    }
+
+    #[pyo3(signature = (*_args))]
+    fn __exit__(&self, _args: &Bound<'_, pyo3::types::PyTuple>) -> bool {
+        self.guards.lock().unwrap_or_else(|e| e.into_inner()).pop();
+        false
+    }
+}
+
 /// Install the sink as the global `tracing` subscriber (once; a failure means another
 /// subscriber is installed and is left alone).
 pub fn install() {
@@ -223,7 +230,7 @@ mod tests {
 
     #[test]
     fn a_callsite_is_asked_every_time() {
-        // Answers change with `DEBUG_SYNCS` and CLI mode: `always` / `never` would be cached.
+        // Answers change with the debug switch and CLI mode: `always` / `never` would be cached.
         static CALLSITE: tracing::callsite::DefaultCallsite =
             tracing::callsite::DefaultCallsite::new(&tracing::metadata::Metadata::new(
                 "test",

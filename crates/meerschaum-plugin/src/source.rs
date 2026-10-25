@@ -332,7 +332,14 @@ pub fn build_failed_before(target_dir: &Path, fingerprint: &str) -> bool {
 /// Generate a single-file plugin crate in the cache, leaving the user's source untouched.
 /// Embed the host-matched row runtime; do not compile the host SDK into simple plugins.
 pub fn prepare_single_file(file: &Path, name: &str, directory: &Path) -> Result<()> {
-    crate::single_file::prepare(file, name, directory)
+    crate::single_file::prepare(file, name, directory).map(|_| ())
+}
+
+pub use crate::single_file::SingleFileMetadata;
+
+/// A single-file plugin's `const VERSION` and `const REQUIRED`, read without building it.
+pub fn single_file_metadata(file: &Path) -> Result<SingleFileMetadata> {
+    crate::single_file::metadata(file)
 }
 
 #[cfg(test)]

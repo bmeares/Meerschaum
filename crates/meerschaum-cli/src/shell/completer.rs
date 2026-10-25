@@ -177,6 +177,9 @@ pub struct CompletionData {
     pub include_v5_only: bool,
     /// Plugin connector types that can be an instance (`IS_INSTANCE`), for `-i` values.
     pub instance_types: Vec<String>,
+    /// Executor types declared by native plugins (`executor_types`), for `-e` values and the
+    /// shell's `executor` command.
+    pub executor_types: Vec<String>,
 }
 
 impl std::fmt::Debug for CompletionData {
@@ -210,6 +213,7 @@ impl Default for CompletionData {
             plugin_arguments: Vec::new(),
             include_v5_only: false,
             instance_types: Vec::new(),
+            executor_types: Vec::new(),
         }
     }
 }
@@ -327,6 +331,29 @@ impl CompletionData {
             .filter(|c| c.starts_with(search_term) && !(ignore_exact_match && c == search_term))
             .collect();
         out.sort();
+        out
+    }
+
+    /// Executor keys starting with `search_term`: the configured labels of the built-in executor
+    /// types and of the native plugins' executor types (`<type>:main` when a native type has no
+    /// configured label), plus `additional`.
+    pub fn executor_candidates(&self, search_term: &str, additional: &[&str]) -> Vec<String> {
+        let mut types: Vec<&str> = EXECUTOR_TYPES.to_vec();
+        types.extend(self.executor_types.iter().map(String::as_str));
+        let defaults: Vec<String> = self
+            .executor_types
+            .iter()
+            .filter(|t| {
+                self.connectors
+                    .get(*t)
+                    .is_none_or(|labels| labels.is_empty())
+            })
+            .map(|t| format!("{t}:main"))
+            .collect();
+        let mut additional: Vec<&str> = additional.to_vec();
+        additional.extend(defaults.iter().map(String::as_str));
+        let mut out = self.connector_labels(&types, search_term, true, &additional);
+        out.dedup();
         out
     }
 
@@ -514,11 +541,12 @@ impl CompletionData {
                 .into_iter()
                 .filter(|r| r.starts_with("api:"))
                 .collect(),
-            "executor" => self
-                .complete_instance(line, dates, true, &["local"])
-                .into_iter()
-                .filter(|r| EXECUTOR_TYPES.contains(&r.split(':').next().unwrap_or("")))
-                .collect(),
+            "executor" => {
+                let args = parse_line(line, dates);
+                let action = action_words(&args);
+                let text = action.get(1).map(String::as_str).unwrap_or("");
+                self.executor_candidates(text, &["local"])
+            }
             // `debug` and `daemon` are added to `_actions` after the completers are inserted,
             // so the shell has no `complete_debug` / `complete_daemon`.
             "debug" | "daemon" => Vec::new(),
@@ -1018,6 +1046,13 @@ impl CompletionData {
                 }
                 None => default_for("restart", &action),
             },
+            "watch" => match dispatch(&["job", "jobs"], true) {
+                Some(_) => {
+                    action.remove(0);
+                    self.complete_jobs(&action, kw, &[])
+                }
+                None => default_for("watch", &action),
+            },
             "compose" => meerschaum_compose::subactions::complete_compose(&action),
             _ => default_for(main, &action),
         }
@@ -1043,6 +1078,8 @@ const CUSTOM_COMPLETERS: &[&str] = &[
     "start",
     "restart",
     "compose",
+    // v5: `watch jobs <name>`.
+    "watch",
 ];
 
 /// The keyword arguments a completer reads besides `action`.
@@ -1123,6 +1160,23 @@ mod tests {
         );
         assert!(d.get_completions("", &dates).is_empty());
         assert!(d.get_completions("foo", &dates).is_empty());
+    }
+
+    #[test]
+    fn executor_completions_include_native_executor_types() {
+        let mut d = data();
+        d.executor_types = vec!["procs".into(), "queue".into()];
+        d.connectors.insert("procs".into(), vec!["a".into()]);
+        assert_eq!(
+            d.executor_candidates("", &["local"]),
+            vec!["api:mrsm", "local", "procs:a", "queue:main"]
+        );
+        assert_eq!(d.executor_candidates("pro", &[]), vec!["procs:a"]);
+        let dates = DateContext::system();
+        assert_eq!(
+            d.complete_action("executor", "", "executor q", &dates),
+            vec!["queue:main"]
+        );
     }
 
     #[test]

@@ -1598,6 +1598,9 @@ fn execute(
     let refs: Vec<_> = refs.into_iter().collect();
     let pipes = selected(rt, &refs)?;
     let session = session(rt);
+    if action != "plan" {
+        super::sync::prepare_live(rt, args);
+    }
     let engine = super::sync::engine::build(rt, &session, instance, &pipes, true, false, None)?;
     let effective = effective_args(args, &definitions[0])?;
     let mut options = super::sync::run_options(
@@ -1636,7 +1639,8 @@ fn execute(
     rt.print(&format!("Run: {run_id}\n"));
     options.run_id = Some(run_id);
     let result = if rt.live && !flag(args, "nopretty") {
-        super::sync::run_live(rt, &session, engine, options, true)
+        let view = super::sync::LiveView::Nodes { instance, args };
+        super::sync::run_live(rt, &session, engine, options, view)
     } else {
         session.block_on(engine.run(options))
     };

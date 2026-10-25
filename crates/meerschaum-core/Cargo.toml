@@ -36,6 +36,8 @@ blake2 = { workspace = true }
 ripemd = { workspace = true }
 sm3 = { workspace = true }
 getrandom = "0.4"
+# `dprint!` (`debug.rs`): debug output is a `tracing` event.
+tracing = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"

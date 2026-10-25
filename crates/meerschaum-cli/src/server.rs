@@ -68,6 +68,19 @@ impl HostLauncher for StderrHostLauncher {
     }
 }
 
+/// Forwards the events of the engine runs in the server process to its run event streams.
+struct LiveRunEvents(AppState);
+
+impl meerschaum_engine::EventSink for LiveRunEvents {
+    fn emit(&self, event: meerschaum_engine::Event) {
+        if self.0.engine_streams.is_followed()
+            && let Ok(json) = serde_json::to_value(&event)
+        {
+            self.0.engine_streams.publish_json(&json);
+        }
+    }
+}
+
 fn io_error(error: impl std::fmt::Display) -> ActionError {
     ActionError::new("OSError", error.to_string())
 }
@@ -254,7 +267,21 @@ fn start(args: &ArgsMap, rt: &mut Runtime<'_>, stdio: bool) -> ActionResult {
         .build()
         .map_err(io_error)?;
     let host_proxy = state.host.clone();
-    let mcp = Arc::new(McpServer::for_state(&state).with_backend(backend));
+    // Engine runs this process starts (`POST /actions/sync`, MCP action tools) reach
+    // `GET /engine/runs/{run_id}/events/stream` live, not only through the persisted tail.
+    meerschaum_engine::add_process_event_sink(Arc::new(LiveRunEvents(state.clone())));
+    // Native plugins' MCP tools, resources and prompts are served in-process (both transports).
+    let mut mcp_notices = Vec::new();
+    let native_mcp =
+        crate::native_plugins::mcp(&session.native_plugins(rt.config())?, &mut mcp_notices);
+    for notice in mcp_notices {
+        rt.eprint(&format!("{notice}\n"));
+    }
+    let mcp = Arc::new(
+        McpServer::for_state(&state)
+            .with_backend(backend)
+            .with_native(native_mcp),
+    );
     let mut builder = tokio::runtime::Builder::new_multi_thread();
     if let Some(workers) = native::int(args, "workers") {
         if workers < 1 {
@@ -544,7 +571,11 @@ impl meerschaum_server::backends::ActionsBackend for NativeBackend {
             let mut words = vec![action];
             words.extend(native::words(&args, "action"));
             args.insert("action".into(), PyValue::str_list(&words));
-            crate::dispatch::entry_with_args(args, &mut runtime, 0)
+            // A client's `debug` reaches the action, but does not switch on debug output (and
+            // `debug=True` for worker calls) for every request the server is handling.
+            meerschaum_core::debug::without_scopes(|| {
+                crate::dispatch::entry_with_args(args, &mut runtime, 0)
+            })
         })
         .await
         .unwrap_or_else(|error| SuccessTuple::fail(error.to_string()))

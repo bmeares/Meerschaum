@@ -205,6 +205,15 @@ pub fn parse_executor_keys(keys: &str) -> Result<PyValue, ConvError> {
     if keys.to_lowercase() == "none" {
         return Ok(PyValue::str("local"));
     }
+    // `<type>:<label>` of an executor type a native plugin declares (Meerschaum 5).
+    if let Some((kind, label)) = keys.split_once(':')
+        && !kind.is_empty()
+        && !label.is_empty()
+        && kind != "api"
+        && crate::native_executors::is_native_executor_type(kind)
+    {
+        return Ok(PyValue::str(keys));
+    }
     if !keys.starts_with("api:") {
         // PARITY: the typo "exectutor" is in the v4 message (`_parser.py` `parse_executor_keys`).
         return Err(ConvError::Raise(PyException::new(

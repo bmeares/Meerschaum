@@ -482,7 +482,9 @@ pub fn main(sysargs: &[String], rt: &mut Runtime<'_>) -> i32 {
             rt.doctor_startup = Some(config_created);
         }
     }
+    let debug = debug_scope(rt, contains(sysargs, "--debug"));
     let code = main_inner(sysargs, rt);
+    drop(debug);
     // Parse errors, help, version and schema output can return before a doctor step consumes
     // startup ownership. Always release it, including when this runtime is reused by a host.
     if let Some(config_created) = rt.doctor_startup.take() {
@@ -929,6 +931,8 @@ fn entry_with_args_inner(mut args: ArgsMap, rt: &mut Runtime<'_>, depth: usize) 
     {
         return SuccessTuple::fail(format!("Invalid arguments:\n    {}", e.message));
     }
+    let _debug = debug_scope(rt, args.get("debug").is_some_and(PyValue::is_truthy));
+    meerschaum_core::dprint!("Parsed arguments:\n{}", redacted_args(&args));
     let mut skip_schedule = false;
     let executor_keys = args
         .get("executor_keys")
@@ -958,6 +962,7 @@ fn entry_with_args_inner(mut args: ArgsMap, rt: &mut Runtime<'_>, depth: usize) 
             crate::native_plugins::action_owner(&action, &manifest, &natives)
     {
         // Native (C-ABI) plugin actions run in-process; they shadow Python plugin actions.
+        meerschaum_core::dprint!("Action {action:?} -> native plugin action '{name}'.");
         env::apply_env_arguments(&mut args, rt.env);
         args.insert("action".into(), PyValue::str_list(&action));
         return crate::native_plugins::run_action(&plugin, &name, &args, &natives)
@@ -967,6 +972,7 @@ fn entry_with_args_inner(mut args: ArgsMap, rt: &mut Runtime<'_>, depth: usize) 
         && crate::python::action_name(&action, &manifest).is_some()
         && !args.get("daemon").is_some_and(PyValue::is_truthy)
     {
+        meerschaum_core::dprint!("Action {action:?} -> Python plugin action.");
         env::apply_env_arguments(&mut args, rt.env);
         // The terminal gives the worker the Ctrl-C (its call raises `KeyboardInterrupt` and
         // returns); a second one within two seconds drops the call, which kills the worker.
@@ -989,6 +995,11 @@ fn entry_with_args_inner(mut args: ArgsMap, rt: &mut Runtime<'_>, depth: usize) 
         skip_schedule = true;
     }
     let remaining = actions::remove_leading_action(&action, CORE_ACTIONS);
+    meerschaum_core::dprint!(
+        "Action {action:?} -> `{}` ({}), sub-actions {remaining:?}.",
+        resolved.display_name(),
+        resolved.function_name()
+    );
     args.insert("action".into(), PyValue::str_list(&remaining));
     env::apply_env_arguments(&mut args, rt.env);
 
@@ -1460,6 +1471,80 @@ fn action_failure(
     SuccessTuple::fail(msg)
 }
 
+/// Turn the debug switch on for `--debug` (see `meerschaum_core::debug`) until the returned scope
+/// is dropped, with the debug header drawn from this runtime's formatting settings. Never turns
+/// it off: a nested action without `--debug` keeps an enclosing `--debug` or the shell toggle.
+pub fn debug_scope(rt: &mut Runtime<'_>, on: bool) -> Option<meerschaum_core::debug::DebugScope> {
+    if !on {
+        return None;
+    }
+    rt.with_formatter(crate::debug_log::configure);
+    Some(meerschaum_core::debug::scope(true))
+}
+
+/// [`format_args_map`] for debug output: secret values (`--password`, tokens, ...), at any depth
+/// of dicts and lists (`--params`), and URI passwords, secret query parameters and secrets inside
+/// JSON text or one word (`--sub-args '--password x'`) are replaced with `***`.
+pub fn redacted_args(args: &ArgsMap) -> String {
+    use meerschaum_core::debug::{is_secret_key, redact_uris};
+    fn hide(value: &mut PyValue) {
+        if !matches!(value, PyValue::None) {
+            *value = PyValue::Str("***".into());
+        }
+    }
+    fn walk(value: &mut PyValue) {
+        match value {
+            PyValue::Dict(items) => {
+                for (key, value) in items.iter_mut() {
+                    if matches!(key, PyValue::Str(k) if is_secret_key(k)) {
+                        hide(value);
+                    } else {
+                        walk(value);
+                    }
+                }
+            }
+            PyValue::List(words) | PyValue::Tuple(words) | PyValue::Set(words) => {
+                // `sysargs`, `filtered_sysargs`, `sub_args`: the word after a secret flag.
+                let mut hide_next = false;
+                for word in words.iter_mut() {
+                    if std::mem::take(&mut hide_next) {
+                        hide(word);
+                        continue;
+                    }
+                    let PyValue::Str(text) = word else {
+                        walk(word);
+                        continue;
+                    };
+                    let Some(flag) = text.strip_prefix("--") else {
+                        continue;
+                    };
+                    let (name, inline) = match flag.split_once('=') {
+                        Some((name, _)) => (name, true),
+                        None => (flag, false),
+                    };
+                    if is_secret_key(name) && !name.contains(char::is_whitespace) {
+                        if inline {
+                            *word = PyValue::Str(format!("--{name}=***"));
+                        } else {
+                            hide_next = true;
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut args = args.clone();
+    for (key, value) in args.iter_mut() {
+        if is_secret_key(key) {
+            hide(value);
+        } else {
+            walk(value);
+        }
+    }
+    redact_uris(&format_args_map(&args))
+}
+
 /// Render the arguments map as a Python `dict` literal, one key per line.
 pub fn format_args_map(args: &ArgsMap) -> String {
     if args.is_empty() {
@@ -1518,6 +1603,67 @@ pub fn parse_version(sysargs: &[String], rt: &mut Runtime<'_>) {
     } else {
         writeln!(rt.out, "Meerschaum v{version}")
     };
+}
+
+#[cfg(test)]
+mod debug_tests {
+    use super::*;
+
+    #[test]
+    fn redacted_args_hide_secrets() {
+        let mut args = ArgsMap::new();
+        args.insert("action".into(), PyValue::str_list(&["login".to_string()]));
+        args.insert("password".into(), PyValue::Str("hunter2".into()));
+        args.insert(
+            "sysargs".into(),
+            PyValue::str_list(&[
+                "login".to_string(),
+                "--password".to_string(),
+                "hunter2".to_string(),
+                "--api-key=hunter2".to_string(),
+                "--client-secret".to_string(),
+                "hunter2".to_string(),
+            ]),
+        );
+        args.insert(
+            "uri".into(),
+            PyValue::Str("postgresql://user:hunter2@localhost/db".into()),
+        );
+        args.insert(
+            "params".into(),
+            PyValue::Dict(vec![
+                (PyValue::str("password"), PyValue::str("hunter2")),
+                (
+                    PyValue::str("fetch"),
+                    PyValue::Dict(vec![
+                        (
+                            PyValue::str("uri"),
+                            PyValue::str("postgresql://h/db?password=hunter2"),
+                        ),
+                        (PyValue::str("client_secret"), PyValue::str("hunter2")),
+                    ]),
+                ),
+            ]),
+        );
+        args.insert(
+            "filtered_sysargs".into(),
+            PyValue::str_list(&[
+                "--params".to_string(),
+                r#"{"password": "hunter2"}"#.to_string(),
+                "--sub-args".to_string(),
+                "--password hunter2".to_string(),
+            ]),
+        );
+        let text = redacted_args(&args);
+        assert!(!text.contains("hunter2"), "{text}");
+        assert!(text.contains("'fetch'"), "{text}");
+        assert!(text.contains("'login'"), "{text}");
+        assert!(text.contains("--api-key=***"), "{text}");
+        assert!(
+            text.contains("postgresql://user:***@localhost/db"),
+            "{text}"
+        );
+    }
 }
 
 #[cfg(test)]

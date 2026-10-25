@@ -65,8 +65,14 @@ pub fn native_source(path: &Path) -> Option<PathBuf> {
     source.is_file().then_some(source)
 }
 
-/// Native descriptors carry versions without importing the plugin; single files are unversioned.
+/// Native descriptors carry versions without importing the plugin; a single `.rs` file declares
+/// `const VERSION: &str = "...";` (none when it does not).
 pub fn native_version(path: &Path) -> Option<String> {
+    if path.is_file() {
+        return meerschaum_plugin::source::single_file_metadata(path)
+            .ok()?
+            .version;
+    }
     let text = std::fs::read_to_string(path.join("plugin.toml")).ok()?;
     let descriptor: toml::Value = toml::from_str(&text).ok()?;
     descriptor.get("version")?.as_str().map(str::to_owned)
@@ -676,6 +682,20 @@ mod tests {
         assert!(static_required("x = 1\n").unwrap().is_empty());
         assert!(static_required("\nrequired = []\n").unwrap().is_empty());
         assert!(static_required("\nrequired = ['a'\n").is_err());
+    }
+
+    #[test]
+    fn single_file_rust_plugins_declare_their_version() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("rusty.rs");
+        std::fs::write(
+            &file,
+            "const VERSION: &str = \"2.0.1\";\n#[make_action]\nfn go() {}\n",
+        )
+        .unwrap();
+        assert_eq!(native_version(&file), Some("2.0.1".into()));
+        std::fs::write(&file, "#[make_action]\nfn go() {}\n").unwrap();
+        assert_eq!(native_version(&file), None);
     }
 
     #[test]

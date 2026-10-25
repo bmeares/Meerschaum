@@ -12,12 +12,15 @@
 //!   session store ([`sessions`]);
 //! - the job-log stream `GET /logs/{name}/stream` (Server-Sent Events) that follows jobs started
 //!   by `POST /execute`, authenticated by bearer token or console session (`stream`);
+//! - console-session authentication for the server's run event stream
+//!   `GET /engine/runs/{run_id}/events/stream`, which the Pipelines page follows (`engine_auth`);
 //! - native (Rust source) plugin pages as HTML fragments for the Dash console
 //!   (`/_mrsm/native-pages`, [`native_pages`]).
 //!
 //! Compose with [`app`] (or [`router`] + `meerschaum_server::app_with_mcp_and_console`).
 #![deny(unsafe_code)]
 mod assets;
+mod engine_auth;
 pub mod native_pages;
 pub mod sessions;
 mod stream;
@@ -87,6 +90,12 @@ pub fn router(server: AppState, config: WebConfig) -> Result<Router, String> {
     }
     let webterm = webterm::config(&server, &config);
     let server_state = server.clone();
+    // The Pipelines page follows live runs (`/engine/runs/{run_id}/events/stream`) by cookie.
+    server
+        .engine_streams
+        .set_browser_auth(Arc::new(engine_auth::ConsoleSessionAuth {
+            config: config.clone(),
+        }));
     let state = WebState {
         server,
         config: config.clone(),

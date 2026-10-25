@@ -431,25 +431,55 @@ fn get_quoted_dt_col_name(rt: &mut Runtime<'_>) -> String {
     }
 }
 
+/// Rust keywords: an action named after one is spelled as a raw identifier (`fn r#type`).
+const RUST_KEYWORDS: &[&str] = &[
+    "abstract", "as", "async", "await", "become", "box", "break", "const", "continue", "do", "dyn",
+    "else", "enum", "extern", "false", "final", "fn", "for", "gen", "if", "impl", "in", "let",
+    "loop", "macro", "match", "mod", "move", "mut", "override", "priv", "pub", "ref", "return",
+    "static", "struct", "trait", "true", "try", "type", "typeof", "unsafe", "unsized", "use",
+    "virtual", "where", "while", "yield",
+];
+
+/// The Rust function an action is named after: `#[make_action] fn <action>` is `mrsm <action>`.
+fn rust_action_ident(action: &str) -> Result<String, ActionError> {
+    let valid = action
+        .chars()
+        .next()
+        .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+        && action
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_')
+        && !matches!(action, "_" | "self" | "super" | "crate");
+    if !valid {
+        return Err(ActionError::new(
+            "ValueError",
+            "Rust action names must start with a letter and contain only letters, digits, or underscores.",
+        ));
+    }
+    if matches!(action, "fetch" | "sync" | "register" | "setup") {
+        return Err(ActionError::new(
+            "ValueError",
+            format!("'{action}' is a plugin function name; choose another action name."),
+        ));
+    }
+    Ok(if RUST_KEYWORDS.contains(&action) {
+        format!("r#{action}")
+    } else {
+        action.to_string()
+    })
+}
+
 /// Single-file shorthand: no manifest, SDK imports, or ABI boilerplate.
 fn rust_scaffold(name: &str, features: &[String], action: &str) -> Result<String, ActionError> {
     let has = |feature: &str| features.iter().any(|f| f == feature);
-    let mut body = format!("//! {name} plugin.\n\n");
+    let mut body = format!("//! {name} plugin.\n\nconst VERSION: &str = \"0.0.1\";\n\n");
     if has("fetch") {
         body.push_str("fn fetch() -> Vec<Value> {\n    vec![json!({\"id\": 1, \"value\": 42})]\n}\n\nfn register() -> Value {\n    json!({\"columns\": {\"id\": \"id\"}})\n}\n\n");
     }
     if has("action") {
-        if action.is_empty()
-            || !action
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || c == '_')
-        {
-            return Err(ActionError::new(
-                "ValueError",
-                "Rust action names must contain only letters, digits, or underscores.",
-            ));
-        }
-        body.push_str(&format!("/// Run my action.\n#[make_action(name = {action:?})]\nfn run(action: Vec<String>) -> (bool, String) {{\n    (true, format!(\"Hello, {{}}!\", action.join(\", \")))\n}}\n\n"));
+        let function = rust_action_ident(action)?;
+        let spaces = action.replace('_', " ");
+        body.push_str(&format!("/// Run `mrsm {spaces}` to trigger.\n#[make_action]\nfn {function}(action: Vec<String>) -> (bool, String) {{\n    (true, format!(\"Hello, {{}}!\", action.join(\", \")))\n}}\n\n"));
     }
     if has("connector") {
         let connector = name.replace('-', "_");
@@ -498,5 +528,42 @@ mod tests {
             assert!(!out.contains("{plugin_name"), "{key}: {out}");
         }
         assert_eq!(feature_choices().len(), 6);
+    }
+
+    fn scaffold(action: &str) -> Result<String, ActionError> {
+        let features = ["fetch", "action", "connector"].map(String::from);
+        rust_scaffold("demo", &features, action)
+    }
+
+    #[test]
+    fn rust_actions_are_named_after_their_function() {
+        let body = scaffold("sing_song").unwrap();
+        assert!(
+            body.contains("/// Run `mrsm sing song` to trigger.\n#[make_action]\nfn sing_song(action: Vec<String>)"),
+            "{body}"
+        );
+        assert!(!body.contains("#[make_action("), "{body}");
+        assert!(body.contains("const VERSION: &str = \"0.0.1\";"), "{body}");
+        assert!(scaffold("type").unwrap().contains("fn r#type("));
+        for invalid in ["", "1st", "sing-song", "self", "fetch", "setup"] {
+            assert!(scaffold(invalid).is_err(), "{invalid}");
+        }
+    }
+
+    #[test]
+    fn rust_scaffolds_generate_valid_plugins() {
+        let dir = tempfile::tempdir().unwrap();
+        for action in ["sing_song", "type"] {
+            let file = dir.path().join("demo.rs");
+            std::fs::write(&file, scaffold(action).unwrap()).unwrap();
+            let generated = dir.path().join(action);
+            meerschaum_plugin::source::prepare_single_file(&file, "demo", &generated).unwrap();
+            let lib = std::fs::read_to_string(generated.join("lib.rs")).unwrap();
+            assert!(lib.contains(&format!(r#"\"name\":\"{action}\""#)), "{lib}");
+            assert!(
+                lib.contains(r#"const VERSION: &'static str = "0.0.1";"#),
+                "{lib}"
+            );
+        }
     }
 }

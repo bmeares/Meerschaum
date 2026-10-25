@@ -38,6 +38,9 @@ pub struct JobsContext {
     /// Resolves `api:<label>` executor keys to a jobs client (`None`: remote executors report an
     /// error). Installed by the host; see [`crate::remote`].
     pub remote: Option<Arc<dyn RemoteJobsResolver>>,
+    /// Resolves executor keys of other types (`<type>:<label>` executors of native plugins;
+    /// `None`: only `local`, `systemd` and `api:`). See [`crate::executor::CustomExecutors`].
+    pub executors: Option<Arc<dyn crate::executor::CustomExecutors>>,
     /// The environment a `systemd` unit is written from (`None`: this process's). Tests pin it.
     pub process_env: Option<Vec<(String, String)>>,
     /// Reads the children of a process ([`process::children`]); tests inject a reader.
@@ -53,6 +56,7 @@ impl JobsContext {
             launcher,
             process: Arc::new(SystemRunner),
             remote: None,
+            executors: None,
             process_env: None,
             children: process::children,
         }
@@ -98,6 +102,15 @@ impl JobsContext {
     /// Read the children of a process with `reader` (tests simulate a kernel without them).
     pub fn with_children_reader(mut self, reader: fn(i32) -> Option<Vec<i32>>) -> JobsContext {
         self.children = reader;
+        self
+    }
+
+    /// Install the resolver for executor types beyond `local`, `systemd` and `api`.
+    pub fn with_executors(
+        mut self,
+        resolver: Arc<dyn crate::executor::CustomExecutors>,
+    ) -> JobsContext {
+        self.executors = Some(resolver);
         self
     }
 

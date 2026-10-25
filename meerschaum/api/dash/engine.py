@@ -390,6 +390,29 @@ def get_run_events(instance: Any, run_id: str, after_seq: Optional[int] = None) 
     return _decode_events(_call('engine_run_events', request))
 
 
+def run_events_stream_path(
+    run_id: str,
+    instance: Any = None,
+    wait: Optional[float] = None,
+) -> str:
+    """
+    The same-origin path of a run's live event stream on the Rust server
+    (`GET /engine/runs/{run_id}/events/stream`, Server-Sent Events of the typed engine events).
+    `instance` names the instance that keeps the run's history; `wait` (seconds) lets the stream
+    wait for a run that has not started yet (a job that was just launched).
+    """
+    from urllib.parse import quote, urlencode
+    params = {}
+    if instance is not None:
+        params['instance_keys'] = str(instance)
+    if wait:
+        params['wait'] = str(wait)
+    return (
+        '/engine/runs/' + quote(str(run_id), safe='') + '/events/stream'
+        + ('?' + urlencode(params) if params else '')
+    )
+
+
 def _parse_ts(text: Optional[str]) -> Optional[datetime]:
     if not text:
         return None

@@ -252,7 +252,24 @@ impl SqlConnector {
         spec: ConnectionSpec,
         settings: InstanceSettings,
     ) -> Result<Self> {
+        let started = std::time::Instant::now();
+        meerschaum_core::dprint!("Connecting sql:{label} ({}).", {
+            // The password is never printed.
+            let port = spec.port.map(|p| p.to_string());
+            [
+                ("flavor", Some(spec.flavor.as_str())),
+                ("host", spec.host.as_deref()),
+                ("port", port.as_deref()),
+                ("database", spec.database.as_deref()),
+                ("username", spec.username.as_deref()),
+            ]
+            .iter()
+            .filter_map(|(k, v)| v.map(|v| format!("{k}={v}")))
+            .collect::<Vec<_>>()
+            .join(", ")
+        });
         let driver = SqlDriver::connect(&spec).await?;
+        meerschaum_core::dprint!("Connected sql:{label} in {:?}.", started.elapsed());
         let flavor = spec.flavor;
         // `SQLConnector.schema`: the configured schema, else the database's default schema
         // (`sqlalchemy.inspect(engine).default_schema_name`), `None` on schema-less flavors.
@@ -640,6 +657,7 @@ impl SqlConnector {
     }
 
     fn log(&self, sql: &str) {
+        // Debug output for the statement comes from the driver (every statement passes it).
         if let Some(log) = self.state.lock().expect("state").query_log.as_mut() {
             log.push(sql.to_string());
         }

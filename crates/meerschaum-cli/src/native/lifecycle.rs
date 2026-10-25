@@ -341,6 +341,14 @@ fn plugin_requirements(rt: &mut Runtime<'_>, ctx: &Context, name: &str) -> Vec<S
     {
         return entry.required.clone();
     }
+    // A single-file Rust plugin declares `const REQUIRED: &[&str] = &[...];`.
+    if let Some(file) =
+        plugin_files::native_plugin_path(&ctx.plugins_dirs, name).filter(|path| path.is_file())
+    {
+        return meerschaum_plugin::source::single_file_metadata(&file)
+            .map(|metadata| metadata.required)
+            .unwrap_or_default();
+    }
     let Some(file) = plugin_files::plugin_file(&ctx.plugins_dirs, name) else {
         return Vec::new();
     };

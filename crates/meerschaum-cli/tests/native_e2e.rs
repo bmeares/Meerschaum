@@ -212,7 +212,7 @@ fn native_hooks_fire_around_each_real_sync_and_the_builtin_sync_writes_the_rows(
 }
 
 #[test]
-fn a_failing_native_hook_warns_and_never_fails_the_sync() {
+fn a_failing_native_hook_is_printed_and_never_fails_the_sync() {
     let home = Home::new();
     home.install("native_probe", "native_probe");
     home.register("plugin:native_probe", "probe");
@@ -224,12 +224,13 @@ fn a_failing_native_hook_warns_and_never_fails_the_sync() {
         );
         let out = text(&output);
         assert!(output.status.success(), "{out}");
+        // PARITY: like a Python hook's, the failed tuple is printed (v4 `actions/sync.py`),
+        // and the other hook's success message too.
+        let other = if phase == "pre" { "POST" } else { "PRE" };
         assert!(
-            out.contains(&format!(
-                "Warning: Native plugin 'native_probe' hook failed: {hook}: PROBE_{}_FAILED",
-                phase.to_uppercase()
-            )),
-            "{out}"
+            out.contains(&format!("PROBE_{}_FAILED", phase.to_uppercase()))
+                && out.contains(&format!("PROBE_{other}_OK")),
+            "{hook}: {out}"
         );
     }
     // Both hooks ran on both syncs (the failure of one never skips the other).

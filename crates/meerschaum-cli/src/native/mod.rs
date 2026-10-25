@@ -78,6 +78,10 @@ use crate::builtin::ActionResult;
 /// Run a native instance or job action by its v4 function name (`None` when the action is not
 /// native).
 pub fn run(function: &str, args: &ArgsMap, rt: &mut Runtime<'_>) -> Option<ActionResult> {
+    // `watch` and its full-screen views (`crate::tui`).
+    if let Some(result) = crate::tui::watch::run(function, args, rt) {
+        return Some(result);
+    }
     Some(match function {
         "_sync_pipeline" => sync::sync_pipeline(args, rt),
         "_show_pipelines" => pipelines::run("show", args, rt),

@@ -52,6 +52,22 @@ def api_attributes(executor_keys: Optional[str]) -> Optional[Dict[str, Dict[str,
     return {str(executor_keys): attributes} if attributes else None
 
 
+def is_python_executor_type(executor_type: str) -> bool:
+    """
+    Whether `executor_type` has a Python connector (`api`, `systemd`, a `@make_executor` class of a
+    Python plugin), as opposed to an executor type a native plugin declares.
+    """
+    if executor_type in ('api', 'systemd', 'local'):
+        return True
+    import meerschaum.connectors as connectors
+    with connectors._locks['_loaded_plugin_connectors']:
+        if not connectors._loaded_plugin_connectors:
+            connectors.load_plugin_connectors()
+            connectors._load_builtin_custom_connectors()
+            connectors._loaded_plugin_connectors = True
+    return executor_type in connectors.types or executor_type in connectors.connectors
+
+
 def emit_warnings(messages) -> None:
     """Show the warnings the native operations collected."""
     if not messages:

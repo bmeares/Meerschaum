@@ -242,9 +242,22 @@ impl fmt::Debug for SqlTransaction {
     }
 }
 
+/// Debug output for a statement about to run (`--debug`, see `meerschaum_core::dprint!`): every
+/// statement the connector runs goes through one of the driver's entry points below. Expands to
+/// one atomic load while debugging is off.
+macro_rules! debug_sql {
+    ($sql:expr) => {
+        meerschaum_core::dprint!("{}", $sql)
+    };
+    ($sql:expr, $params:expr) => {
+        meerschaum_core::dprint!("{}\n({} bound parameters)", $sql, $params.len())
+    };
+}
+
 impl SqlTransaction {
     /// Execute one or more statements, returning the rows affected.
     pub async fn exec(&mut self, sql: &str) -> Result<u64> {
+        debug_sql!(sql);
         match &mut self.inner {
             TxInner::Postgres(tx) => backend::pg_tx::tx_exec(tx, sql).await,
             TxInner::Mysql(tx) => backend::mysql_tx::tx_exec(tx, sql).await,
@@ -256,6 +269,7 @@ impl SqlTransaction {
 
     /// Run a query and collect the result as a kernel [`Frame`].
     pub async fn read_frame(&mut self, sql: &str) -> Result<Frame> {
+        debug_sql!(sql);
         let batches = match &mut self.inner {
             TxInner::Postgres(tx) => backend::pg_tx::tx_read(tx, sql).await?,
             TxInner::Mysql(tx) => backend::mysql_tx::tx_read(tx, sql).await?,
@@ -627,6 +641,7 @@ impl SqlDriver {
         persistent: bool,
         collect: bool,
     ) -> Result<RecordBatchStream> {
+        debug_sql!(sql);
         self.ready().await?;
         let chunksize = chunksize.max(1);
         let sql = sql.to_string();
@@ -700,6 +715,7 @@ impl SqlDriver {
     /// Execute one or more statements (simple-query protocol, like SQLAlchemy `text()`),
     /// returning the number of rows affected.
     pub async fn exec(&self, sql: &str) -> Result<u64> {
+        debug_sql!(sql);
         self.ready().await?;
         let sql = sql.to_string();
         on_native!(self.pool, p => p.exec(&sql).await);
@@ -713,6 +729,7 @@ impl SqlDriver {
     pub async fn read_docs_frame(&self, sql: &str) -> Result<Frame> {
         // PARITY: v4 get_docs uses result.mappings(): SQLite timestamps remain raw text.
         if let Pool::Sqlite(pool) = &self.pool {
+            debug_sql!(sql);
             return sqlite::read_docs_frame(pool, sql).await;
         }
         self.read_frame(sql).await
@@ -758,6 +775,7 @@ impl SqlDriver {
         break_on_error: bool,
         rollback: bool,
     ) -> Result<Vec<Option<u64>>> {
+        queries.iter().for_each(|q| debug_sql!(q));
         self.ready().await?;
         let queries = queries.to_vec();
         on_native!(self.pool, p => p.exec_queries(&queries, break_on_error, rollback).await);
@@ -768,6 +786,7 @@ impl SqlDriver {
     /// (`SQLConnector._run_in_autocommit`, `_maintenance.py:54`; required for `VACUUM`).
     /// Returns whether every statement succeeded.
     pub async fn exec_autocommit(&self, queries: &[String]) -> Result<bool> {
+        queries.iter().for_each(|q| debug_sql!(q));
         self.ready().await?;
         let queries = queries.to_vec();
         on_native!(self.pool, p => p.exec_autocommit(&queries).await);
@@ -799,6 +818,7 @@ impl SqlDriver {
     }
 
     async fn value_once(&self, sql: &str, persistent: bool) -> Result<Option<SqlValue>> {
+        debug_sql!(sql);
         self.ready().await?;
         let sql = sql.to_string();
         on_native!(self.pool, p => p.value_with(&sql, &[]).await);
@@ -807,6 +827,7 @@ impl SqlDriver {
 
     /// Execute one statement with bound parameters, returning the rows affected.
     pub async fn exec_with(&self, sql: &str, params: &[SqlParam]) -> Result<u64> {
+        debug_sql!(sql, params);
         self.ready().await?;
         let (sql, params) = (sql.to_string(), params.to_vec());
         on_native!(self.pool, p => p.exec_with(&sql, &params).await);
@@ -819,6 +840,7 @@ impl SqlDriver {
         &self,
         statements: &[(String, Vec<SqlParam>)],
     ) -> Result<Vec<Option<u64>>> {
+        statements.iter().for_each(|(q, p)| debug_sql!(q, p));
         self.ready().await?;
         let statements = statements.to_vec();
         on_native!(self.pool, p => p.exec_many_with(&statements).await);
@@ -865,6 +887,7 @@ impl SqlDriver {
         params: &[SqlParam],
         persistent: bool,
     ) -> Result<Vec<RecordBatch>> {
+        debug_sql!(sql, params);
         self.ready().await?;
         let (sql, params) = (sql.to_string(), params.to_vec());
         on_native!(self.pool, p => p.read_with(&sql, &params).await);
@@ -908,6 +931,7 @@ impl SqlDriver {
         params: &[SqlParam],
         persistent: bool,
     ) -> Result<Option<SqlValue>> {
+        debug_sql!(sql, params);
         self.ready().await?;
         let (sql, params) = (sql.to_string(), params.to_vec());
         on_native!(self.pool, p => p.value_with(&sql, &params).await);
@@ -917,6 +941,7 @@ impl SqlDriver {
     /// PostgreSQL `COPY ... FROM STDIN` with a pre-encoded payload, in its own transaction
     /// (`psql_insert_copy`, `_sql.py:1109`). Returns the number of rows copied.
     pub async fn copy_in(&self, copy_sql: &str, data: Vec<u8>) -> Result<u64> {
+        meerschaum_core::dprint!("{copy_sql}\n({} bytes)", data.len());
         self.ready().await?;
         match &self.pool {
             Pool::Postgres(p) => {

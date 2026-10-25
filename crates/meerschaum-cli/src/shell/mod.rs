@@ -440,6 +440,11 @@ pub fn shell_command(
         }
         "debug" => {
             state.debug = toggle(state.debug, action, rt);
+            // Debug output for the shell's own work too (each command also gets `--debug`).
+            if state.debug {
+                rt.with_formatter(crate::debug_log::configure);
+            }
+            meerschaum_core::debug::set_enabled(state.debug);
             info(
                 rt,
                 &format!("Debug mode is {}.", if state.debug { "on" } else { "off" }),
@@ -619,8 +624,24 @@ pub fn precmd(line: &str, state: &mut ShellState, rt: &mut Runtime<'_>) -> Contr
 }
 
 fn run_line(line: &str, state: &mut ShellState, rt: &mut Runtime<'_>) -> Control {
+    run_line_with(line, state, rt, true)
+}
+
+/// A key binding's command (`shell:keybindings`): run like a typed line, but without clearing
+/// the screen or entering the history, then back to the line being edited.
+pub fn run_key_command(line: &str, state: &mut ShellState, rt: &mut Runtime<'_>) -> Control {
+    let control = run_line_with(line, state, rt, false);
+    if let Some(session) = &rt.native {
+        session.invalidate_manifest();
+    }
+    control
+}
+
+fn run_line_with(line: &str, state: &mut ShellState, rt: &mut Runtime<'_>, clear: bool) -> Control {
     let line = line.replace("\\\n", " ");
-    clear_screen(rt, state.debug);
+    if clear {
+        clear_screen(rt, state.debug);
+    }
     if line.trim().is_empty() {
         return Control::Continue;
     }
@@ -963,6 +984,7 @@ pub fn completion_data(state: &ShellState, rt: &mut Runtime<'_>) -> completer::C
             })
             .map(|p| format!("plugin:{}", p.name))
             .collect();
+        data.executor_types = manifest.executor_types.keys().cloned().collect();
         let session = crate::native::session(rt);
         let pool = session.pool(rt.config());
         data.plugins = Some(std::sync::Arc::new(crate::python::Completer::new(
@@ -1046,6 +1068,10 @@ pub fn run(sysargs: &[String], instance: Option<&str>, rt: &mut Runtime<'_>) {
     rt.in_shell = true;
     crate::format::progress::forward_shell_worker_output();
     let mut state = ShellState::new(rt, instance);
+    // `mrsm --shell --debug` starts with debug on (commands get `--debug` too) and the `debug`
+    // toggle owns the switch from here; both are put back when the shell exits.
+    let _debug = meerschaum_core::debug::take_over();
+    state.debug = meerschaum_core::debug::forced();
     let noninteractive = crate::env::noninteractive(rt.env);
     let interactive = !noninteractive && std::io::IsTerminal::is_terminal(&std::io::stdin());
     // Between commands a Ctrl-C is the editor's; while a command runs it cancels that command.
@@ -1097,24 +1123,15 @@ pub fn run(sysargs: &[String], instance: Option<&str>, rt: &mut Runtime<'_>) {
     let shared: editor::SharedRef = std::sync::Arc::new(std::sync::Mutex::new(
         editor::Shared::new(completion_data(&state, rt), dates),
     ));
-    let mut editor = reedline::Reedline::create()
-        .with_history(Box::new(
-            reedline::FileBackedHistory::new(max_history).unwrap_or_default(),
-        ))
-        .with_edit_mode(Box::new(editor::ShellEditMode::new(shared.clone())))
-        .with_hinter(Box::new(editor::ShellHinter {
-            shared: shared.clone(),
-        }))
-        .with_highlighter(Box::new(editor::ShellHighlighter {
-            shared: shared.clone(),
-        }))
-        .with_quick_completions(true)
-        .with_partial_completions(false)
-        .with_ansi_colors(true)
-        .use_bracketed_paste(true);
-    for menu in editor::HookMenu::all(&shared) {
-        editor = editor.with_menu(menu);
+    let (keybindings, binding_warnings) = crate::tui::keys::bindings(rt.config());
+    for warning in binding_warnings {
+        let text = rt.with_formatter(|f| f.warn(&warning));
+        rt.eprint(&text);
     }
+    shared.lock().unwrap_or_else(|e| e.into_inner()).keybindings = keybindings;
+    // The last line was left for a key binding's command: resume it instead of a new one.
+    let mut resumed = false;
+    let mut editor = new_editor(&shared, max_history);
     loop {
         let prompt_text = current_prompt(&state, rt);
         let data = completion_data(&state, rt);
@@ -1125,8 +1142,21 @@ pub fn run(sysargs: &[String], instance: Option<&str>, rt: &mut Runtime<'_>) {
             s.toolbar = toolbar;
             s.prompt = prompt_text;
             s.history = history.clone();
-            s.begin_line();
+            if resumed {
+                s.resume_line();
+                // The new editor starts empty: give it the kept line back.
+                editor.run_edit_commands(&[
+                    reedline::EditCommand::InsertString(s.doc.text.clone()),
+                    reedline::EditCommand::MoveToPosition {
+                        position: s.doc.cursor,
+                        select: false,
+                    },
+                ]);
+            } else {
+                s.begin_line();
+            }
         }
+        resumed = false;
         let prompt = editor::ShellPrompt {
             shared: shared.clone(),
         };
@@ -1153,6 +1183,30 @@ pub fn run(sysargs: &[String], instance: Option<&str>, rt: &mut Runtime<'_>) {
                     break;
                 }
             }
+            Ok(reedline::Signal::HostCommand(command)) => {
+                // A key binding (F2 `watch run`, F3 `watch jobs`): the typed line is kept.
+                resumed = true;
+                // Erase the prompt's rows (the line, a menu, the toolbar): the command's
+                // output, or the prompt again after a full-screen view, starts where the
+                // prompt was.
+                let top = shared
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .prompt_top_row();
+                if rt.live
+                    && let Some(top) = top
+                {
+                    rt.print(&format!("\x1b[{};1H\x1b[J", u32::from(top) + 1));
+                }
+                let control = run_key_command(&command, &mut state, rt);
+                // reedline puts a resumed prompt back on its old rows whenever the cursor is
+                // still among them, which would erase short output: a new editor starts the
+                // prompt at the cursor instead (below the output, or in place after a view).
+                editor = new_editor(&shared, max_history);
+                if control == Control::Exit || rt.restart_requested {
+                    break;
+                }
+            }
             Ok(reedline::Signal::CtrlC) => {
                 // `KeyboardInterrupt`: print `^C` and run `pass` (which clears the screen).
                 rt.print("^C\n");
@@ -1171,6 +1225,29 @@ pub fn run(sysargs: &[String], instance: Option<&str>, rt: &mut Runtime<'_>) {
         }
     }
     close(rt);
+}
+
+/// The shell's line editor over `shared` (see [`editor`]).
+fn new_editor(shared: &editor::SharedRef, max_history: usize) -> reedline::Reedline {
+    let mut editor = reedline::Reedline::create()
+        .with_history(Box::new(
+            reedline::FileBackedHistory::new(max_history).unwrap_or_default(),
+        ))
+        .with_edit_mode(Box::new(editor::ShellEditMode::new(shared.clone())))
+        .with_hinter(Box::new(editor::ShellHinter {
+            shared: shared.clone(),
+        }))
+        .with_highlighter(Box::new(editor::ShellHighlighter {
+            shared: shared.clone(),
+        }))
+        .with_quick_completions(true)
+        .with_partial_completions(false)
+        .with_ansi_colors(true)
+        .use_bracketed_paste(true);
+    for menu in editor::HookMenu::all(shared) {
+        editor = editor.with_menu(menu);
+    }
+    editor
 }
 
 /// `postloop`: print the close message.

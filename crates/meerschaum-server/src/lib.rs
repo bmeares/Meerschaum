@@ -20,6 +20,7 @@
 //! | [`serialize`] | `to_json` / `to_csv` / documents for pipe data |
 //! | [`openapi`] | The OpenAPI document (`utoipa`) and its operation table |
 //! | [`backends`] | Traits for actions, jobs, engine state and extra instances, with defaults |
+//! | [`engine_stream`] | `GET /engine/runs/{run_id}/events/stream`: a run's events as SSE |
 //! | [`ratelimit`] | `api:permissions:rate_limits` token buckets |
 //! | [`proxy`], [`host`] | The Python API host: reverse proxy over a Unix socket, supervision |
 //! | [`webterm`] | `/webterm/{session_id}` and its websocket: the PTY bridge (`portable-pty`, tmux) |
@@ -33,11 +34,13 @@ pub mod auth;
 pub mod backends;
 pub mod config;
 pub mod engine_store;
+pub mod engine_stream;
 pub mod error;
 pub mod execute_policy;
 pub mod host;
 pub mod json;
 pub mod mcp;
+pub mod native;
 pub mod openapi;
 pub mod pipe_methods;
 pub mod proxy;

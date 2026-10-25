@@ -60,6 +60,44 @@ impl ComposeJobs {
     }
 }
 
+/// The project's native plugin executors, opened the first time a `<type>:<label>` executor
+/// is resolved.
+struct LazyNativeExecutors {
+    session: crate::native::Session,
+    project: std::sync::Arc<ProjectConfig>,
+    executors: std::sync::OnceLock<Option<crate::native_executors::NativeExecutors>>,
+}
+
+impl std::fmt::Debug for LazyNativeExecutors {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LazyNativeExecutors")
+            .field("executors", &self.executors.get())
+            .finish()
+    }
+}
+
+impl meerschaum_jobs::executor::CustomExecutors for LazyNativeExecutors {
+    fn resolve(
+        &self,
+        executor_keys: &str,
+    ) -> Option<Result<Box<dyn meerschaum_jobs::executor::JobExecutor>, String>> {
+        self.executors
+            .get_or_init(|| {
+                let config = self.project.registry();
+                let natives = self
+                    .session
+                    .native_plugins(config)
+                    .ok()
+                    .filter(|n| !n.executor_types().is_empty())?;
+                Some(crate::native_executors::NativeExecutors::new(
+                    natives, config,
+                ))
+            })
+            .as_ref()?
+            .resolve(executor_keys)
+    }
+}
+
 impl JobOps for ComposeJobs {
     fn configure(
         &mut self,
@@ -74,7 +112,7 @@ impl JobOps for ComposeJobs {
             .get_or_insert_with(crate::native::Session::new)
             .clone();
         let resolver = crate::native::remote_jobs::CliRemoteResolver::new(
-            session,
+            session.clone(),
             crate::native::remote_jobs::CliRemoteResolver::section(config),
         );
         let mut context = meerschaum_jobs::JobsContext::new(
@@ -83,6 +121,13 @@ impl JobOps for ComposeJobs {
             meerschaum_jobs::Launcher::from_env(),
         )
         .with_remote(std::sync::Arc::new(resolver));
+        // `<type>:<label>` executors of native plugins, opened on first use: `compose explain`
+        // resolves no executor and must not build the plugin manifest under the root.
+        context = context.with_executors(std::sync::Arc::new(LazyNativeExecutors {
+            session,
+            project: std::sync::Arc::new(project),
+            executors: std::sync::OnceLock::new(),
+        }));
         if let Some(runner) = &self.process {
             context = context.with_process_runner(runner.clone());
         }

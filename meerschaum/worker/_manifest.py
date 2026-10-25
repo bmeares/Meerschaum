@@ -232,13 +232,20 @@ def build_manifest(debug: bool = False) -> Dict[str, Any]:
     builtin_types = set(connectors_module.custom_types)
 
     plugin_names = list(get_plugins_names())
+    if debug:
+        from meerschaum.utils.debug import dprint
+        dprint(f"Building the plugin manifest for {len(plugin_names)} plugin(s): {plugin_names}")
     manifest_plugins: Dict[str, Dict[str, Any]] = {name: _empty_plugin(name) for name in plugin_names}
 
     load_errors: Dict[str, str] = {}
+    import time
+    load_started = time.perf_counter()
     try:
         load_plugins(skip_if_loaded=True, debug=debug)
     except Exception:
         load_errors['__all__'] = traceback.format_exc()
+    if debug:
+        dprint(f"Loaded plugins in {time.perf_counter() - load_started:.3f} s.")
 
     from meerschaum.actions import actions, _plugins_actions, get_subactions
 
@@ -254,6 +261,13 @@ def build_manifest(debug: bool = False) -> Dict[str, Any]:
         )
         if error is not None:
             info['import_error'] = f"{type(error).__name__}: {error}"
+        if debug:
+            dprint(
+                f"Plugin '{name}': "
+                + (info['import_error'] if error is not None else (
+                    "not loaded" if module is None else f"{getattr(module, '__file__', None)}"
+                ))
+            )
         if module is None:
             continue
         info['version'] = getattr(module, '__version__', None)

@@ -65,6 +65,11 @@ pub const ENGINE_STATE: &str = "/engine/state";
 pub const ENGINE_RUNS: &str = "/engine/runs";
 /// `/engine/events`
 pub const ENGINE_EVENTS: &str = "/engine/events";
+
+/// `/engine/runs/{run_id}/events/stream`: a run's events as Server-Sent Events.
+pub fn engine_run_events_stream_path(run_id: &str) -> String {
+    format!("{ENGINE_RUNS}/{run_id}/events/stream")
+}
 /// `/engine/leases`
 pub const ENGINE_LEASES: &str = "/engine/leases";
 /// `/engine/pipes`: the engine's state pipes (`/engine/pipes/{metric}/{read,write,clear,exists}`).

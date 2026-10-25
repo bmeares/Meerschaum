@@ -193,6 +193,7 @@ mod guard {
 /// lock is never held across a draw).
 pub(crate) fn clear_for_signal() {
     state().clear_line_for_signal();
+    super::live::clear_for_signal();
 }
 
 /// A Python worker was started in this process: its output goes straight to the inherited
@@ -212,6 +213,7 @@ fn workers_started() {
 /// handles keep working but find nothing to draw. Call it without holding the GIL when the sink
 /// writes through Python.
 pub fn abandon() {
+    super::live::clear_for_signal();
     let mut st = state();
     st.clear();
     st.frames.clear();
@@ -227,9 +229,25 @@ pub fn forward_shell_worker_output() {
 }
 
 fn write_worker_output(stderr: bool, bytes: &[u8]) {
+    // Held while the run monitor owns the terminal; written once it returns.
+    if super::live::hold_or_pass(stderr, bytes) {
+        return;
+    }
+    emit_worker_output(stderr, bytes);
+}
+
+/// Write forwarded worker output now, around the progress line and the inline live region.
+pub(crate) fn emit_worker_output(stderr: bool, bytes: &[u8]) {
     use std::io::Write;
+    let ended = bytes.is_empty() || bytes.ends_with(b"\n");
     let mut st = state();
     st.clear();
+    // The inline live view of a graph run is erased too, and drawn again after a full line.
+    super::live::suspend();
+    if !ended {
+        // A prompt (`input()`): the terminal goes back to the worker before the prompt shows.
+        super::live::worker_prompt(true);
+    }
     if stderr {
         let mut writer = std::io::stderr().lock();
         let _ = writer.write_all(bytes);
@@ -240,8 +258,12 @@ fn write_worker_output(stderr: bool, bytes: &[u8]) {
         let _ = writer.flush();
     }
     if !bytes.is_empty() {
-        st.held = !bytes.ends_with(b"\n");
+        st.held = !ended;
+        if ended {
+            super::live::worker_prompt(false);
+        }
     }
+    super::live::resume(ended);
 }
 
 fn state() -> MutexGuard<'static, State> {
@@ -478,8 +500,10 @@ fn tick_loop(generation: u64) {
 }
 
 /// Erase the line and keep it off while output is written (called around every
-/// `Runtime::print` / `eprint` and by the prompts). Pair with [`resume`].
+/// `Runtime::print` / `eprint` and by the prompts). Pair with [`resume`]. The inline live region
+/// of a graph run ([`super::live`]) is suspended and resumed with it.
 pub fn suspend() {
+    super::live::suspend();
     let mut st = state();
     if st.frames.is_empty() {
         return;
@@ -491,6 +515,7 @@ pub fn suspend() {
 /// Let the line come back after output was written: `ended_with_newline` is whether the cursor
 /// is at the start of a line (a partial line keeps the spinner off until a newline is written).
 pub fn resume(ended_with_newline: bool) {
+    super::live::resume(ended_with_newline);
     let mut st = state();
     if st.frames.is_empty() {
         return;

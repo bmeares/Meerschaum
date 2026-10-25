@@ -20,6 +20,9 @@
 //! fetches the host's registry at startup and on manifest change and merges it into the lists;
 //! calls to a plugin tool are forwarded to the host with the caller's scopes.
 //!
+//! **Native plugins.** Entries of Rust plugins are called in-process through [`NativeMcp`]
+//! (implemented by the CLI); they are listed after the built-ins and before the host's.
+//!
 //! Operations the server cannot perform on its own instance connector (syncing from a source
 //! connector, verification, user SQL) go through [`McpBackend`], whose default answers like a
 //! server without those capabilities. The CLI wires the real implementation.
@@ -28,6 +31,7 @@ pub mod dispatch;
 pub mod docs;
 pub mod federation;
 pub mod http;
+pub mod native;
 pub mod prompts;
 pub mod protocol;
 pub mod registry;
@@ -45,6 +49,7 @@ use crate::auth::{Principal, Scopes};
 use crate::state::AppState;
 
 pub use federation::Federation;
+pub use native::{NativeMcp, NativeResource, NativeResourceContents};
 
 /// The default `api:mcp:actions:denylist`: the actions that execute arbitrary code or SQL on the
 /// API host (`config/_default.py`).
@@ -235,6 +240,8 @@ pub struct McpServer {
     pub backend: Arc<dyn McpBackend>,
     /// Plugin tools hosted by the Python API host.
     pub federation: Option<Arc<Federation>>,
+    /// Tools, resources and prompts of native plugins.
+    pub native: Option<Arc<dyn NativeMcp>>,
 }
 
 impl std::fmt::Debug for McpServer {
@@ -242,6 +249,7 @@ impl std::fmt::Debug for McpServer {
         f.debug_struct("McpServer")
             .field("config", &self.config)
             .field("federation", &self.federation.is_some())
+            .field("native", &self.native.is_some())
             .finish()
     }
 }
@@ -253,6 +261,7 @@ impl McpServer {
             config,
             backend: Arc::new(NoBackend),
             federation: None,
+            native: None,
         }
     }
 
@@ -269,6 +278,12 @@ impl McpServer {
     /// Use this backend.
     pub fn with_backend(mut self, backend: Arc<dyn McpBackend>) -> McpServer {
         self.backend = backend;
+        self
+    }
+
+    /// Serve these native plugin entries (or none).
+    pub fn with_native(mut self, native: Option<Arc<dyn NativeMcp>>) -> McpServer {
+        self.native = native;
         self
     }
 

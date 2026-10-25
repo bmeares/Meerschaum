@@ -166,12 +166,16 @@ fn build_ctx(py: Python<'_>, api_attributes: Option<&Bound<'_, PyDict>>) -> PyRe
         section.insert(label, Value::Map(patched));
     }
     let resolver = resolver_for(section);
-    let jobs = JobsContext::new(
+    let mut jobs = JobsContext::new(
         JobPaths::from_config(&config),
         JobsConfig::from_config(&config),
         launcher,
     )
     .with_remote(resolver);
+    // `<type>:<label>` executors of native plugins.
+    if let Some(executors) = meerschaum_cli::native_executors::from_config(&config) {
+        jobs = jobs.with_executors(executors);
+    }
     let ctx = Ctx { jobs };
     if let Some(fingerprint) = fingerprint {
         *CACHE.lock().unwrap_or_else(|e| e.into_inner()) = Some((fingerprint, ctx.clone()));

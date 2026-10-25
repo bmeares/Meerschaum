@@ -6,6 +6,9 @@
 //!   drives `systemctl --user` through the context's [`crate::runner::ProcessRunner`].
 //! - [`ApiExecutor`] (`api:<label>`) manages jobs on a remote API through the client the
 //!   context's [`crate::remote::RemoteJobsResolver`] provides (see [`crate::remote`]).
+//! - Any other `<type>:<label>` is resolved by the context's [`CustomExecutors`] (the host
+//!   installs one over the executor types of native plugins); unresolved keys fall through to
+//!   [`ApiExecutor`], whose resolver rejects them.
 
 use indexmap::IndexMap;
 use meerschaum_core::pyfmt::PyDateTime;
@@ -108,6 +111,108 @@ pub trait JobExecutor {
     }
 }
 
+/// Resolves executor keys of types the jobs crate does not implement (`<type>:<label>`
+/// executors of native plugins), installed with [`JobsContext::with_executors`].
+pub trait CustomExecutors: Send + Sync + std::fmt::Debug {
+    /// The executor for `executor_keys`; `None` when the type is not one of these executors,
+    /// `Some(Err(..))` when it is but cannot be built.
+    fn resolve(&self, executor_keys: &str) -> Option<Result<Box<dyn JobExecutor>, String>>;
+}
+
+/// An executor that cannot be built: every operation reports why.
+#[derive(Debug, Clone)]
+pub struct UnavailableExecutor {
+    keys: String,
+    error: String,
+}
+
+impl UnavailableExecutor {
+    /// An executor for `keys` failing with `error`.
+    pub fn new(keys: &str, error: impl Into<String>) -> UnavailableExecutor {
+        UnavailableExecutor {
+            keys: keys.into(),
+            error: error.into(),
+        }
+    }
+}
+
+impl JobExecutor for UnavailableExecutor {
+    fn executor_keys(&self) -> String {
+        self.keys.clone()
+    }
+    fn get_job_names(&self) -> Vec<String> {
+        Vec::new()
+    }
+    fn get_job_exists(&self, _name: &str) -> bool {
+        false
+    }
+    fn get_job_metadata(&self, _name: &str) -> Map {
+        Map::new()
+    }
+    fn get_job_properties(&self, _name: &str) -> Map {
+        Map::new()
+    }
+    fn get_job_status(&self, _name: &str) -> String {
+        "stopped".into()
+    }
+    fn get_job_began(&self, _name: &str) -> Option<String> {
+        None
+    }
+    fn get_job_ended(&self, _name: &str) -> Option<String> {
+        None
+    }
+    fn get_job_paused(&self, _name: &str) -> Option<String> {
+        None
+    }
+    fn create_job(&self, _: &str, _: &[String], _: Option<&Map>) -> SuccessTuple {
+        SuccessTuple::fail(self.error.clone())
+    }
+    fn start_job(&self, _name: &str) -> SuccessTuple {
+        SuccessTuple::fail(self.error.clone())
+    }
+    fn stop_job(&self, _name: &str) -> SuccessTuple {
+        SuccessTuple::fail(self.error.clone())
+    }
+    fn pause_job(&self, _name: &str) -> SuccessTuple {
+        SuccessTuple::fail(self.error.clone())
+    }
+    fn delete_job(&self, _name: &str) -> SuccessTuple {
+        SuccessTuple::fail(self.error.clone())
+    }
+    fn get_logs(&self, _name: &str) -> Option<String> {
+        None
+    }
+    fn get_job_stop_time(&self, _name: &str) -> Option<PyDateTime> {
+        None
+    }
+    fn monitor_logs(
+        &self,
+        _name: &str,
+        _callback: &mut dyn FnMut(&str) -> MonitorControl,
+        _opts: MonitorOptions<'_>,
+    ) -> SuccessTuple {
+        SuccessTuple::fail(self.error.clone())
+    }
+    fn get_job_is_blocking_on_stdin(&self, _name: &str) -> bool {
+        false
+    }
+    fn get_job_prompt_kwargs(&self, _name: &str) -> Map {
+        Map::new()
+    }
+    fn try_get_job_names(&self) -> Result<Vec<String>, String> {
+        Err(self.error.clone())
+    }
+    fn try_get_job_exists(&self, _name: &str) -> Result<bool, String> {
+        Err(self.error.clone())
+    }
+    fn try_get_job_metadata(&self, _name: &str) -> Result<Option<Map>, String> {
+        Err(self.error.clone())
+    }
+    fn try_get_logs(&self, _name: &str) -> Result<Option<String>, String> {
+        Err(self.error.clone())
+    }
+}
+
 /// Build the executor for `executor_keys`.
 pub fn make_executor(executor_keys: &str, ctx: &JobsContext) -> Box<dyn JobExecutor> {
     let typ = executor_keys.split(':').next().unwrap_or("");
@@ -120,7 +225,16 @@ pub fn make_executor(executor_keys: &str, ctx: &JobsContext) -> Box<dyn JobExecu
             })
         }
         "local" | "None" | "" => Box::new(LocalExecutor::new(ctx.clone())),
-        _ => Box::new(ApiExecutor::new(executor_keys, ctx.remote.clone())),
+        "api" => Box::new(ApiExecutor::new(executor_keys, ctx.remote.clone())),
+        _ => match ctx
+            .executors
+            .as_ref()
+            .and_then(|r| r.resolve(executor_keys))
+        {
+            Some(Ok(executor)) => executor,
+            Some(Err(error)) => Box::new(UnavailableExecutor::new(executor_keys, error)),
+            None => Box::new(ApiExecutor::new(executor_keys, ctx.remote.clone())),
+        },
     }
 }
 

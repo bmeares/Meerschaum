@@ -143,6 +143,46 @@ impl NativePlugins {
         )
     }
 
+    /// The plugin that declares the executor type `executor_type` (manifest `executor_types`).
+    pub fn executor_plugin(&self, executor_type: &str) -> Option<String> {
+        let plugin = self.manifest["executor_types"][executor_type]["plugin"].as_str()?;
+        self.contains(plugin).then(|| plugin.to_owned())
+    }
+
+    /// The executor types the native plugins declare.
+    pub fn executor_types(&self) -> Vec<String> {
+        self.manifest["executor_types"]
+            .as_object()
+            .map(|types| {
+                types
+                    .keys()
+                    .filter(|t| self.executor_plugin(t).is_some())
+                    .cloned()
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// The executor `<executor_type>:<label>` from a native plugin, if one declares the type.
+    pub fn executor(
+        &self,
+        executor_type: &str,
+        label: &str,
+        config: Value,
+    ) -> Option<Result<crate::executor::NativeExecutor>> {
+        let name = self.executor_plugin(executor_type)?;
+        Some(
+            self.plugin(&name)
+                .and_then(|plugin| plugin.executor(executor_type, label, config)),
+        )
+    }
+
+    /// A stream source `plugin:<name>`: a native plugin whose `data_functions` list `subscribe`.
+    pub fn stream_source(&self, name: &str) -> Option<Result<NativeConnector>> {
+        self.has_data_function(name, "subscribe")
+            .then(|| self.plugin(name).map(|plugin| plugin.source(Value::Null)))
+    }
+
     /// The source connector `plugin:<name>` if `name` is a native plugin with a `fetch`.
     pub fn source(&self, name: &str) -> Option<Result<NativeConnector>> {
         if !self.contains(name) {

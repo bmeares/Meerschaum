@@ -17,6 +17,8 @@ pub enum Source {
     Builtin,
     /// A Python plugin, hosted by the API host.
     Host,
+    /// A native (Rust) plugin, called in-process ([`super::native`]).
+    Native,
 }
 
 fn strings(v: Option<&Value>) -> Vec<String> {

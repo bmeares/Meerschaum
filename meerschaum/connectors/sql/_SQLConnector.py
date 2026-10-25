@@ -633,9 +633,25 @@ class SQLConnector(InstanceConnector):
         """
         rust = self._core_connector()
         try:
-            return getattr(rust, name)
+            method = getattr(rust, name)
         except AttributeError:
             raise AttributeError(f"`_core.SqlConnector` has no method '{name}'.") from None
+        ### A façade method called with `debug=True` shows the Rust core's debug output for
+        ### the binding it calls, whether or not it passes `debug` on.
+        try:
+            import sys
+            debug = sys._getframe(1).f_locals.get('debug', False) is True
+        except Exception:
+            debug = False
+        if not debug:
+            return method
+
+        def _debug_call(*args, **kwargs):
+            from meerschaum._core import debugging
+            with debugging():
+                return method(*args, **kwargs)
+
+        return _debug_call
 
     def __setstate__(self, d):
         self.__dict__.update(d)

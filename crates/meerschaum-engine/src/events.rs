@@ -374,6 +374,14 @@ impl Emitter {
 
     /// Emit an event.
     pub fn emit(&self, pipe_ref: Option<&PipeRef>, kind: EventKind) {
+        // Debug output: chunk boundaries and node outcomes as the executor reaches them.
+        meerschaum_core::dprint!(
+            "{}{}: {kind:?}",
+            kind.name(),
+            pipe_ref
+                .map(|r| format!(" {}", r.label()))
+                .unwrap_or_default()
+        );
         let seq = self.seq.fetch_add(1, Ordering::SeqCst);
         self.sink.emit(Event {
             run_id: self.run_id.clone(),

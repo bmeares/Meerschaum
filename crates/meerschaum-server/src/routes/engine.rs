@@ -7,6 +7,9 @@
 //! (`mrsm:engine_*`) to an `APIConnector`, whose engine keeps its state through them: reads
 //! need `pipes:read`, writes `pipes:write`; any other metric is a `404` (no generic access to
 //! `mrsm` keys). Rows travel as `orient='records'` JSON.
+//!
+//! `GET /engine/runs/{run_id}/events/stream` follows a run's events as Server-Sent Events
+//! ([`crate::engine_stream`]).
 
 use std::time::Duration;
 
@@ -39,6 +42,10 @@ pub fn routes(app: Router<AppState>, _cfg: &ServerConfig) -> Router<AppState> {
         .route("/engine/cursors", axum::routing::put(put_cursors))
         .route("/engine/state", get(get_state).put(put_state))
         .route("/engine/runs", post(post_runs).get(get_runs))
+        .route(
+            "/engine/runs/{run_id}/events/stream",
+            get(stream_run_events),
+        )
         .route("/engine/events", post(post_events))
         .route("/engine/leases", post(acquire_lease).delete(release_lease))
         // The bodies are read by `body_json` with `ENGINE_BODY_LIMIT` (raw-body handlers are not
@@ -130,13 +137,25 @@ async fn write_pipe(ctx: Ctx, Path(metric): Path<String>, body: Body) -> ApiResu
         return Err(ApiError::missing(&["body"]));
     };
     let docs = engine_pipes::docs_from_records(items);
+    // An engine on an `api:` instance flushes its events here: its runs' streams get them live.
+    let events = (metric == "engine_events").then(|| docs.clone());
     let res = ctx
         .state
         .engine
         .write_pipe(&metric, docs)
         .await
         .map_err(store_error)?;
+    if let Some(docs) = events
+        && res.success
+    {
+        ctx.state.engine_streams.publish_docs(&docs);
+    }
     Ok(tuple_response(&res))
+}
+
+/// `GET /engine/runs/{run_id}/events/stream` ([`crate::engine_stream`]).
+async fn stream_run_events(ctx: Ctx, Path(run_id): Path<String>) -> ApiResult {
+    crate::engine_stream::serve(ctx, run_id).await
 }
 
 async fn clear_pipe(ctx: Ctx, Path(metric): Path<String>, body: Body) -> ApiResult {

@@ -83,6 +83,8 @@ pub struct Inner {
     pub jobs: Arc<dyn JobsBackend>,
     /// `/engine/*`.
     pub engine: Arc<dyn EngineBackend>,
+    /// The live side of `GET /engine/runs/{run_id}/events/stream`.
+    pub engine_streams: crate::engine_stream::EngineStreams,
     /// Extra instances.
     pub resolver: Arc<dyn InstanceResolver>,
     /// The extension-host proxy for unmatched routes.
@@ -160,6 +162,7 @@ impl AppStateBuilder {
             actions: self.actions,
             jobs: self.jobs,
             engine: self.engine,
+            engine_streams: Default::default(),
             resolver: self.resolver,
             host: self.host,
             rate_limiter,

@@ -723,7 +723,11 @@ fn shorthand_errors_report_original_file_and_line() {
         ("#[make_action]\nfn hello(pipe: &Pipe) {}", "actions accept"),
         (
             "#[make_action]\n#[make_action]\nfn hello() {}",
-            "only one plugin annotation",
+            "duplicate #[make_action]",
+        ),
+        (
+            "#[make_connector]\n#[make_connector]\nmod data { fn fetch() {} }",
+            "duplicate #[make_connector]",
         ),
         (
             "#[make_action(name=\"x\")] fn one() {}\n#[make_action(name=\"x\")] fn two() {}",
@@ -732,12 +736,16 @@ fn shorthand_errors_report_original_file_and_line() {
         ("#[make_connector] mod sql { fn fetch() {} }", "reserved"),
         (
             "#[make_connector(instance)] mod db { fn fetch() {} }",
-            "packaged plugin",
+            "an instance connector must define its instance methods",
+        ),
+        (
+            "#[make_connector(kind = \"x\")] mod db { fn fetch() {} }",
+            "expected name or instance",
         ),
         ("#[make_connector] mod data;", "inline module"),
         (
             "#[make_connector] mod data { fn helper() {} }",
-            "fetch and/or sync",
+            "fetch, sync and/or subscribe",
         ),
         (
             "#[make_connector] mod data { #[make_action] fn hello() {} }",
@@ -839,4 +847,322 @@ fn hello() -> (bool, String) {
         changed.candidates[0].fingerprint,
         cached.candidates[0].fingerprint
     );
+}
+
+#[test]
+fn hooks_setup_arguments_version_and_required_reach_the_manifest_and_dispatch() {
+    let root = tempfile::tempdir().unwrap();
+    let plugins = root.path().join("plugins");
+    std::fs::create_dir(&plugins).unwrap();
+    let file = plugins.join("minimal.rs");
+    std::fs::write(
+        &file,
+        r#"#![add_plugin_argument("--station", "-s", type = str, choices = ["north", "south"], help = "Pick a station.")]
+const VERSION: &str = "1.2.3";
+const REQUIRED: &[&str] = &["plugin:other", "requests>=2"];
+
+#[pre_sync_hook]
+fn before(pipe: &Pipe, kwargs: &Value) -> (bool, String) {
+    (true, format!("before {} {}", pipe.metric_key(), kwargs["check_existing"]))
+}
+
+#[post_sync_hook]
+fn after(success_tuple: SuccessTuple, sync_duration: f64, pipe: &Pipe) -> SuccessTuple {
+    SuccessTuple::ok(format!("after {} {} {}", pipe.connector_keys(), success_tuple.message, sync_duration))
+}
+
+#[post_sync_hook]
+fn quiet() {}
+
+#[post_sync_hook]
+fn broken() -> Result<SuccessTuple> {
+    Err(Error::Message("hook error".into()))
+}
+
+fn setup(kwargs: &Value) -> Result<(bool, String)> {
+    Ok((kwargs["force"] == true, "set up".into()))
+}
+
+#[add_plugin_argument("--loud", action = "store_true", help = "Shout.")]
+#[add_plugin_argument("--times", type = int, default = 1, metavar = "N")]
+#[make_action]
+fn r#type(kwargs: &Value) -> (bool, String) {
+    (true, format!("loud={} times={}", kwargs["loud"], kwargs["times"]))
+}
+"#,
+    )
+    .unwrap();
+    assert_eq!(
+        meerschaum_plugin::source::single_file_metadata(&file).unwrap(),
+        meerschaum_plugin::source::SingleFileMetadata {
+            version: Some("1.2.3".into()),
+            required: vec!["plugin:other".into(), "requests>=2".into()],
+        }
+    );
+    let found = discovery::discover_report_in(&[plugins], &root.path().join("build"));
+    assert!(found.skipped.is_empty(), "{:?}", found.skipped);
+    assert_eq!(found.candidates[0].version, "1.2.3");
+    compile(&found.candidates[0]);
+    let plugin =
+        unsafe { meerschaum_plugin::LoadedPlugin::load(&found.candidates[0].library) }.unwrap();
+    assert_eq!(plugin.version, "1.2.3");
+    let entry = &plugin.manifest["plugins"]["minimal"];
+    assert_eq!(entry["version"], "1.2.3");
+    assert_eq!(entry["required"], json!(["plugin:other", "requests>=2"]));
+    assert_eq!(entry["data_functions"], json!(["setup"]));
+    assert_eq!(entry["pre_sync_hooks"], json!(["before"]));
+    assert_eq!(
+        entry["post_sync_hooks"],
+        json!(["after", "quiet", "broken"])
+    );
+    assert_eq!(entry["actions"][0]["name"], "type");
+    assert_eq!(plugin.manifest["pre_sync_hooks"], json!(["minimal"]));
+    assert_eq!(plugin.manifest["post_sync_hooks"], json!(["minimal"]));
+    let arguments = entry["arguments"].as_array().unwrap();
+    assert_eq!(arguments.len(), 3);
+    assert_eq!(arguments[0]["option_strings"], json!(["--station", "-s"]));
+    assert_eq!(arguments[0]["dest"], "station");
+    assert_eq!(arguments[0]["action"], "_StoreAction");
+    assert_eq!(arguments[0]["type"], "str");
+    assert_eq!(arguments[0]["choices"], json!(["north", "south"]));
+    assert_eq!(arguments[1]["action"], "_StoreTrueAction");
+    assert_eq!(arguments[1]["default"], false);
+    assert_eq!(arguments[1]["help"], "Shout.");
+    assert_eq!(arguments[2]["type"], "int");
+    assert_eq!(arguments[2]["default"], 1);
+    assert_eq!(arguments[2]["metavar"], "N");
+
+    // Hooks receive the kwargs the CLI sends (`pipe` among them).
+    let kwargs = json!({
+        "pipe": {"connector_keys": "plugin:minimal", "metric_key": "reading", "location_key": null,
+                 "instance_keys": "sql:local", "parameters": {}},
+        "check_existing": true, "success_tuple": [true, "synced"], "sync_duration": 1.5,
+    });
+    let hook = |post: bool, name: &str| plugin.hook(post, name, kwargs.clone());
+    assert_eq!(
+        hook(false, "before").unwrap().message,
+        "before reading true"
+    );
+    assert_eq!(
+        hook(true, "after").unwrap().message,
+        "after plugin:minimal synced 1.5"
+    );
+    let quiet = hook(true, "quiet").unwrap();
+    assert!(quiet.success && quiet.message == "Success");
+    assert!(
+        hook(true, "broken")
+            .unwrap_err()
+            .to_string()
+            .contains("hook error")
+    );
+    // `setup` gets `{"args": [], "kwargs": {...}}` from `setup plugins`.
+    assert_eq!(
+        plugin
+            .call_json("setup", json!({"args": [], "kwargs": {"force": true}}))
+            .unwrap(),
+        json!([true, "set up"])
+    );
+    assert_eq!(
+        plugin
+            .action("type", json!({"loud": true, "times": 2}))
+            .unwrap()
+            .message,
+        "loud=true times=2"
+    );
+}
+
+#[test]
+fn setup_returning_a_bool_and_no_version_keep_python_defaults() {
+    let (_root, plugin) = compiled("fn setup() -> bool { false }");
+    assert_eq!(plugin.version, "0.0.0");
+    let entry = &plugin.manifest["plugins"]["minimal"];
+    assert_eq!(entry["required"], json!([]));
+    assert_eq!(entry["arguments"], json!([]));
+    assert_eq!(plugin.call_json("setup", json!({})).unwrap(), json!(false));
+}
+
+#[test]
+fn hook_setup_argument_and_metadata_errors_are_reported_at_their_lines() {
+    let root = tempfile::tempdir().unwrap();
+    let file = root.path().join("minimal.rs");
+    for (source, message) in [
+        (
+            "#[pre_sync_hook]\nfn hook(success_tuple: SuccessTuple) {}",
+            "pre-sync hooks accept",
+        ),
+        (
+            "#[post_sync_hook]\nfn hook(sync_duration: i64) {}",
+            "must have type f64",
+        ),
+        (
+            "#[post_sync_hook]\nfn hook(connector: &Connector) {}",
+            "post-sync hooks accept",
+        ),
+        (
+            "#[pre_sync_hook(name = \"x\")]\nfn hook() {}",
+            "takes no options",
+        ),
+        (
+            "#[pre_sync_hook]\n#[pre_sync_hook]\nfn hook() {}",
+            "duplicate #[pre_sync_hook]",
+        ),
+        (
+            "#[pre_sync_hook]\nfn fetch() {}",
+            "reserved plugin functions",
+        ),
+        ("#[make_action]\nfn setup() {}", "reserved plugin functions"),
+        (
+            "#[pre_sync_hook]\nstruct Hook;",
+            "belongs on a top-level function",
+        ),
+        (
+            "#[make_connector]\nmod data { fn fetch() {} #[post_sync_hook] fn hook() {} }",
+            "belongs on a top-level function",
+        ),
+        ("fn setup() {}", "setup must return bool"),
+        (
+            "const VERSION: &str = concat!(\"1\", \".0\");\nfn setup() -> bool { true }",
+            "VERSION must be",
+        ),
+        (
+            "const VERSION: &str = \"\";\nfn setup() -> bool { true }",
+            "VERSION must be",
+        ),
+        (
+            "const REQUIRED: &[&str] = &[NAME];\nfn setup() -> bool { true }",
+            "REQUIRED must be",
+        ),
+        (
+            "#[add_plugin_argument(\"flag\")]\n#[make_action]\nfn go() {}",
+            "option strings",
+        ),
+        (
+            "#[add_plugin_argument(\"--a\", nargs = \"+\")]\n#[make_action]\nfn go() {}",
+            "nargs is unsupported",
+        ),
+        (
+            "#[add_plugin_argument(\"--a\", action = \"extend\")]\n#[make_action]\nfn go() {}",
+            "unsupported action",
+        ),
+        (
+            "#[add_plugin_argument(\"--a\", type = bool)]\n#[make_action]\nfn go() {}",
+            "type must be",
+        ),
+        (
+            "#[add_plugin_argument(\"--a\", colour = \"red\")]\n#[make_action]\nfn go() {}",
+            "unknown option 'colour'",
+        ),
+        (
+            "#[add_plugin_argument(\"--a\", action = \"store_true\", type = int)]\n#[make_action]\nfn go() {}",
+            "value-taking action",
+        ),
+        (
+            "#[add_plugin_argument(\"--a\", action = \"store_const\")]\n#[make_action]\nfn go() {}",
+            "const is required",
+        ),
+        (
+            "#[add_plugin_argument(\"--a\")]\n#[add_plugin_argument(\"--a\")]\n#[make_action]\nfn go() {}",
+            "duplicate plugin argument",
+        ),
+        (
+            "#[add_plugin_argument(\"--a\")]\nstruct Flags;\n#[make_action]\nfn go() {}",
+            "at the top of the file",
+        ),
+        (
+            "#[add_plugin_argument()]\n#[make_action]\nfn go() {}",
+            "at least one flag",
+        ),
+    ] {
+        std::fs::write(&file, source).unwrap();
+        let error = meerschaum_plugin::source::prepare_single_file(
+            &file,
+            "minimal",
+            &root.path().join("generated"),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains(message), "expected {message:?}: {error}");
+        assert!(error.contains(&file.display().to_string()), "{error}");
+    }
+    // Diagnostics point at the offending token in the user's file (line:column).
+    for (source, position) in [
+        (
+            "#[pre_sync_hook]\nfn hook(success_tuple: SuccessTuple) {}",
+            "2:9",
+        ),
+        ("fn setup() {}", "1:1"),
+        (
+            "\nconst VERSION: &str = \"\";\nfn setup() -> bool { true }",
+            "2:23",
+        ),
+        (
+            "//! A plugin.\n#![add_plugin_argument(\"--a\", nargs = \"+\")]\n#[pre_sync_hook]\nfn go() {}",
+            "2:31",
+        ),
+        (
+            "#[make_action]\nfn go() {}\n\n#[add_plugin_argument(\"--b\", type = bool)]\n#[make_action]\nfn two() {}",
+            "4:37",
+        ),
+    ] {
+        std::fs::write(&file, source).unwrap();
+        let error = meerschaum_plugin::source::prepare_single_file(
+            &file,
+            "minimal",
+            &root.path().join("generated"),
+        )
+        .unwrap_err()
+        .to_string();
+        let expected = format!("{}:{position}:", file.display());
+        assert!(error.starts_with(&expected), "expected {expected}: {error}");
+    }
+}
+
+#[test]
+fn reserved_names_with_other_types_or_signatures_stay_helpers() {
+    // Plugins written before VERSION, REQUIRED and setup had a meaning keep loading.
+    let (_root, plugin) = compiled(
+        "const VERSION: u32 = 3;\nconst REQUIRED: bool = false;\nfn setup(level: u32) -> u32 { level + VERSION }\n#[make_action]\nfn go() -> (bool, String) { (!REQUIRED, setup(1).to_string()) }",
+    );
+    assert_eq!(plugin.version, "0.0.0");
+    let entry = &plugin.manifest["plugins"]["minimal"];
+    assert_eq!(entry["required"], json!([]));
+    assert_eq!(entry["data_functions"], json!([]));
+    assert_eq!(plugin.action("go", json!({})).unwrap().message, "4");
+}
+
+#[test]
+fn stacked_markers_register_one_function_as_an_action_and_both_hooks() {
+    let (_root, plugin) = compiled(
+        "#[make_action]\n#[pre_sync_hook]\n#[post_sync_hook]\nfn note(kwargs: &Value) -> (bool, String) { (true, format!(\"note {}\", kwargs[\"n\"])) }",
+    );
+    let entry = &plugin.manifest["plugins"]["minimal"];
+    assert_eq!(entry["actions"][0]["name"], "note");
+    assert_eq!(entry["pre_sync_hooks"], json!(["note"]));
+    assert_eq!(entry["post_sync_hooks"], json!(["note"]));
+    for post in [false, true] {
+        assert_eq!(
+            plugin.hook(post, "note", json!({"n": 1})).unwrap().message,
+            "note 1"
+        );
+    }
+    assert_eq!(
+        plugin.action("note", json!({"n": 2})).unwrap().message,
+        "note 2"
+    );
+}
+
+#[test]
+fn a_hooks_only_plugin_strips_its_markers_and_keeps_lines() {
+    let root = tempfile::tempdir().unwrap();
+    let file = root.path().join("minimal.rs");
+    std::fs::write(
+        &file,
+        "#![add_plugin_argument(\"--x\")]\n#[pre_sync_hook]\nfn log() {}\n",
+    )
+    .unwrap();
+    let output = root.path().join("generated");
+    meerschaum_plugin::source::prepare_single_file(&file, "minimal", &output).unwrap();
+    let user = std::fs::read_to_string(output.join("user.rs")).unwrap();
+    assert!(!user.contains("add_plugin_argument") && !user.contains("pre_sync_hook"));
+    assert!(user.lines().nth(2).unwrap().starts_with("fn log"));
 }

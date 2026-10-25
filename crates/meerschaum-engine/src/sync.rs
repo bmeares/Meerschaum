@@ -625,6 +625,13 @@ async fn sync_inner(
             // Sources whose `fetch()` may return a generator, hook results, `True` or `None`
             // (Python plugins and custom connectors) are consumed the way v4's `_sync` does.
             let sync_chunks = args.extra.get("sync_chunks").is_none_or(|v| v.truthy());
+            let fetch_started = std::time::Instant::now();
+            meerschaum_core::dprint!(
+                "Fetching {pipe} from {} (begin={:?}, end={:?}).",
+                source.connector_keys(),
+                query.begin,
+                query.end
+            );
             match source.fetch_chunked(&pipe, &query, sync_chunks).await {
                 Ok(Some(chunked)) => {
                     return sync_chunked_source(env, &pipe, chunked, args, observer).await;
@@ -643,7 +650,14 @@ async fn sync_inner(
                         .unwrap_or_else(|| env.registry.fetch_chunksize(pipe.connector_keys()));
                     return sync_fetched_chunks(env, &pipe, df, args, observer, size.max(1)).await;
                 }
-                Ok(Some(df)) => PipeInput::Frame(df),
+                Ok(Some(df)) => {
+                    meerschaum_core::dprint!(
+                        "Fetched {} rows for {pipe} in {:?}.",
+                        df.height(),
+                        fetch_started.elapsed()
+                    );
+                    PipeInput::Frame(df)
+                }
                 Ok(None) => return fail(format!("No data were fetched for {pipe}.")),
                 Err(e) => {
                     return fetch_failed(&pipe, &source.connector_keys(), &e);
@@ -658,10 +672,17 @@ async fn sync_inner(
         Err(e) => return fail(e.to_string()),
     };
     ctx.enforce = ctx.enforce && args.enforce_dtypes;
+    let enforce_started = std::time::Instant::now();
     let mut df = match pipe_enforce_dtypes(input, &ctx) {
         Ok(df) => df,
         Err(e) => return fail(format!("Failed to enforce dtypes:\n{e}")),
     };
+    meerschaum_core::dprint!(
+        "Enforced dtypes on {} rows for {pipe} in {:?} (enforce={}).",
+        df.height(),
+        enforce_started.elapsed(),
+        ctx.enforce
+    );
     let mut check_existing = args.check_existing;
     if pipe.autotime() {
         let dt_col = pipe.column("datetime");
@@ -709,6 +730,7 @@ async fn sync_inner(
         } else {
             df
         };
+        meerschaum_core::dprint!("Filtered {pipe}: {} new or changed rows.", delta.height());
         if let Err(e) = obs.before_commit(&pipe, &delta).await {
             return fail(e);
         }
@@ -732,7 +754,18 @@ async fn sync_inner(
     };
     let mut attempt = 1;
     let result = loop {
+        let write_started = std::time::Instant::now();
+        meerschaum_core::dprint!(
+            "Writing {} rows to {pipe} (attempt {attempt}, check_existing={}).",
+            df.height(),
+            opts.check_existing
+        );
         let res = instance.sync_pipe(&pipe, df.clone(), &opts).await;
+        meerschaum_core::dprint!(
+            "Wrote {pipe} in {:?}: {}",
+            write_started.elapsed(),
+            res.message
+        );
         attempt += 1;
         if res.success || !args.force || attempt > args.retries {
             if !res.success && args.force && attempt > args.retries {
@@ -868,6 +901,11 @@ async fn sync_fetched_chunks(
         let chunk = df.take(&(start..(start + size).min(df.height())).collect::<Vec<_>>());
         let label = fetched_chunk_label(&chunk, pipe.column("datetime").as_deref());
         let rows = chunk.height();
+        meerschaum_core::dprint!(
+            "Fetched chunk {} of {pipe}: {rows} rows ({}).",
+            results.len(),
+            label.trim()
+        );
         let info = {
             let (begin, end) = fetched_chunk_bounds(&chunk, pipe.column("datetime").as_deref());
             FetchChunk {
@@ -987,6 +1025,7 @@ async fn sync_chunked_source(
             Err(e) => return fetch_failed(e),
             Ok(FetchedKind::Data { generator: false }) => {
                 // One DataFrame (or one list of documents): the ordinary flow.
+                meerschaum_core::dprint!("Fetched {} rows for {pipe}.", input_rows(&first));
                 if matches!(&first, PipeInput::Docs(docs) if docs.is_empty()) {
                     return SyncResult::new(true, format!("No new rows were returned for {pipe}."));
                 }
@@ -1058,6 +1097,10 @@ async fn sync_generator_chunks(
                 },
             ),
         };
+        meerschaum_core::dprint!(
+            "Fetched chunk {index} of {pipe}: {rows} rows ({}).",
+            label.trim()
+        );
         if let Some(o) = observer {
             o.chunk_started(&info);
         }

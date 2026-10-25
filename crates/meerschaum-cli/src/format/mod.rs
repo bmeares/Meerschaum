@@ -15,6 +15,7 @@
 
 pub mod dataframe;
 pub mod graph;
+pub mod live;
 pub mod pprintpp;
 pub mod progress;
 pub mod rich;

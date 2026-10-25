@@ -31,6 +31,8 @@ tokio = { workspace = true }
 async-trait = "0.1"
 # Crate-private: the HTTP stack.
 axum = { version = "0.8", features = ["ws", "multipart"] }
+# Crate-private: conflict checks of native plugin routes (the matcher axum itself uses).
+matchit = "0.8"
 tower = { version = "0.5", features = ["util"] }
 tower-http = { version = "0.7", features = ["fs"] }
 hyper = { version = "1", features = ["client", "http1"] }

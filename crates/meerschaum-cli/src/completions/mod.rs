@@ -45,8 +45,7 @@ use indexmap::IndexMap;
 
 use crate::actions::CORE_ACTIONS;
 use crate::shell::completer::{
-    Completion, CompletionData, EXECUTOR_TYPES, INSTANCE_TYPES, cli_do_names,
-    connectors_from_config,
+    Completion, CompletionData, INSTANCE_TYPES, cli_do_names, connectors_from_config,
 };
 use crate::spec::{self, ArgType, Nargs};
 use crate::types::DateContext;
@@ -368,6 +367,7 @@ pub fn load_data(vars: &[(String, String)]) -> CompletionData {
         .filter(|c| c.is_instance)
         .map(|c| c.connector_type.clone())
         .collect();
+    data.executor_types = manifest.executor_types.keys().cloned().collect();
     let jobs_dir = meerschaum_jobs::JobPaths::from_config(&config).jobs_dir;
     data.jobs = Some(std::sync::Arc::new(move |executor_keys: &str| {
         if executor_keys != "local" {
@@ -526,6 +526,7 @@ pub(crate) fn cached_manifest(root: &std::path::Path) -> meerschaum_worker::mani
         if let Ok(parsed) = serde_json::from_value::<Manifest>(raw) {
             manifest.plugins.extend(parsed.plugins);
             manifest.connector_types.extend(parsed.connector_types);
+            manifest.executor_types.extend(parsed.executor_types);
         }
     }
     manifest
@@ -786,9 +787,7 @@ fn flag_values(flag: &Flag, prefix: &str, data: &CompletionData) -> Answer {
                 data.connector_labels(&types, prefix, true, &[])
             }
             "repository" => data.connector_labels(&["api"], prefix, true, &[]),
-            "executor_keys" => {
-                data.connector_labels(EXECUTOR_TYPES, prefix, true, &["local", "systemd"])
-            }
+            "executor_keys" => data.executor_candidates(prefix, &["local", "systemd"]),
             _ => Vec::new(),
         }
     };

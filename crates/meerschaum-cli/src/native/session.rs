@@ -328,7 +328,16 @@ impl Session {
     /// an unchanged cache.
     pub fn manifest(&self, config: &Config) -> Result<Arc<Manifest>, ActionError> {
         let mut state = self.manifests.lock().unwrap_or_else(|e| e.into_inner());
+        let started = std::time::Instant::now();
+        let validated = state.validated;
         self.validate_manifests(&mut state, config, false)?;
+        if !validated {
+            meerschaum_core::dprint!(
+                "Validated the plugin manifest in {:?} (cached_only={}).",
+                started.elapsed(),
+                state.cached_only
+            );
+        }
         Ok(state.merged.clone().expect("validated manifest"))
     }
 

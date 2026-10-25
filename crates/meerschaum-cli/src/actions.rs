@@ -48,7 +48,7 @@ impl ActionDef {
 
 /// Additive v5 actions, visible in help, action listings and completion. Legacy v4 parity
 /// comparisons exclude these entries; dedicated v5 tests verify their public exposure.
-pub const V5_ONLY_ACTIONS: &[&str] = &["prune", "plan", "doctor", "backup", "restore"];
+pub const V5_ONLY_ACTIONS: &[&str] = &["prune", "plan", "doctor", "backup", "restore", "watch"];
 
 /// Additive v5 subactions (`(action, subaction)`), visible like every core subaction.
 /// Only legacy parity comparisons exclude this list.
@@ -75,6 +75,8 @@ pub const V5_ONLY_SUBACTIONS: &[(&str, &str)] = &[
     ("uninstall", "completions"),
     ("upgrade", "extensions"),
     ("upgrade", "postgres"),
+    ("watch", "jobs"),
+    ("watch", "runs"),
 ];
 
 /// Whether `(action, subaction)` is v5-only.
@@ -238,6 +240,11 @@ pub static CORE_ACTIONS: &[ActionDef] = &[
     action("doctor", &[]),
     action("backup", &[sub("postgres", "_backup_postgres")]),
     action("restore", &[sub("postgres", "_restore_postgres")]),
+    // The full-screen monitors (`crate::tui::VIEWS`).
+    action(
+        "watch",
+        &[sub("jobs", "_watch_jobs"), sub("runs", "_watch_runs")],
+    ),
     action(
         "show",
         &[

@@ -5,14 +5,19 @@
 //! See the crate README for ownership, threading and wire contracts.
 #![deny(unsafe_op_in_unsafe_fn)]
 pub mod abi;
+pub mod api;
 pub mod callbacks;
 pub mod discovery;
+pub mod executor;
+mod handles;
 pub mod host;
+pub mod mcp;
 pub mod registry;
 pub mod rows_abi;
 pub mod sdk;
 mod single_file;
 pub mod source;
+pub mod subscribe;
 pub use arrow;
 pub use callbacks::{Bound, HostServices, Pipe};
 pub use host::{LoadedPlugin, NativeConnector};

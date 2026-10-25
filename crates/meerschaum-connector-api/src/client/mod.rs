@@ -36,6 +36,7 @@ use meerschaum_core::{Map, Value};
 
 use crate::traits::{ConnectorError, ConnectorResult};
 
+pub use engine::{EngineRunEventStream, FollowRunOptions};
 pub use jobs::LogsMonitor;
 pub use login::parse_expires;
 pub use request::{ApiResponse, Body, Method, RequestOptions};
@@ -160,6 +161,10 @@ impl APIConnector {
             .map(|p| format!(":{}", attr_str(p)))
             .unwrap_or_default();
         let url = format!("{protocol}://{host}{port}");
+        meerschaum_core::dprint!(
+            "Creating api:{label} ({url}, username={}).",
+            attributes.get("username").map(attr_str).unwrap_or_default()
+        );
 
         let verify = !matches!(attributes.get("verify"), Some(Value::Bool(false)));
         // A new connection fails after `connect_timeout` (the `connect_timeout` attribute,

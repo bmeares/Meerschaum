@@ -149,12 +149,13 @@ fn read_candidate(
             .map_err(Skip::invalid)?
             .join(name)
             .join("source");
-        source::prepare_single_file(directory, name, &generated).map_err(Skip::invalid)?;
+        let declared =
+            crate::single_file::prepare(directory, name, &generated).map_err(Skip::invalid)?;
         let mut candidate = source_candidate(
             &generated,
             Descriptor {
                 name: name.into(),
-                version: "0.0.0".into(),
+                version: declared.version.unwrap_or_else(|| "0.0.0".into()),
             },
             generated.join(library_name(name)),
             build_root,
@@ -341,15 +342,27 @@ fn scan(directories: &[PathBuf], build_root: &BuildRoot<'_>) -> Discovery {
             let directory = entry.path();
             match read_candidate(&directory, &seen, build_root) {
                 Ok(Some(candidate)) => {
+                    meerschaum_core::dprint!(
+                        "Discovered native plugin '{}' in {}.",
+                        candidate.name,
+                        directory.display()
+                    );
                     seen.insert(candidate.name.clone());
                     found.candidates.push(candidate);
                 }
                 Ok(None) => {}
-                Err(skip) => found.skipped.push(Skipped {
-                    directory,
-                    reason: skip.reason,
-                    source_crate: skip.source_crate,
-                }),
+                Err(skip) => {
+                    meerschaum_core::dprint!(
+                        "Skipped plugin {}: {}",
+                        directory.display(),
+                        skip.reason
+                    );
+                    found.skipped.push(Skipped {
+                        directory,
+                        reason: skip.reason,
+                        source_crate: skip.source_crate,
+                    })
+                }
             }
         }
     }
@@ -519,11 +532,13 @@ pub(crate) unsafe fn manifest_for(
     if let Ok(bytes) = std::fs::read(cache)
         && let Ok(v) = serde_json::from_slice::<Value>(&bytes)
         && v["fingerprint"] == key
+        // Caches written before executor types were aggregated are rebuilt.
+        && v["executor_types"].is_object()
         && validate_manifest(&v).is_ok()
     {
         return Ok((v, skipped));
     }
-    let mut result = json!({"schema_version":crate::MANIFEST_SCHEMA_VERSION,"meerschaum_version":env!("CARGO_PKG_VERSION"),"python_version":"","python_executable":null,"fingerprint":key,"plugins":{},"connector_types":{},"pre_sync_hooks":[],"post_sync_hooks":[],"load_errors":{}});
+    let mut result = json!({"schema_version":crate::MANIFEST_SCHEMA_VERSION,"meerschaum_version":env!("CARGO_PKG_VERSION"),"python_version":"","python_executable":null,"fingerprint":key,"plugins":{},"connector_types":{},"executor_types":{},"pre_sync_hooks":[],"post_sync_hooks":[],"load_errors":{}});
     for candidate in candidates {
         // SAFETY: forwarded trust requirement from this function's caller.
         let plugin = match unsafe { LoadedPlugin::load(&candidate.library) } {
@@ -556,6 +571,11 @@ pub(crate) unsafe fn manifest_for(
         if let Some(map) = plugin.manifest["connector_types"].as_object() {
             for (key, value) in map {
                 result["connector_types"][key] = value.clone();
+            }
+        }
+        if let Some(map) = plugin.manifest["executor_types"].as_object() {
+            for (key, value) in map {
+                result["executor_types"][key] = value.clone();
             }
         }
         for field in ["pre_sync_hooks", "post_sync_hooks"] {
