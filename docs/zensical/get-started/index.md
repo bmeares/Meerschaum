@@ -13,8 +13,8 @@
 python -m pip install --upgrade meerschaum
 ```
 
-!!! note "Release candidates"
-    While 5.0 is in release candidates, `pip install meerschaum` still installs the latest 4.x release. Install the candidate with `python -m pip install --pre meerschaum` (see the [migration guide](/reference/migrating-to-v5/) for what changed).
+!!! note "Upgrading from 4.x?"
+    Read the [migration guide](/reference/migrating-to-v5/) for what changed in 5.0.
 
 The wheel contains the native core and has no required Python dependencies. Wheels are published for Linux (x86_64 and arm64, for glibc distributions and for musl ones such as Alpine), macOS (arm64 and x86_64) and Windows (x86_64), for Python 3.11 or newer.
 
@@ -22,7 +22,7 @@ The wheel contains the native core and has no required Python dependencies. Whee
     `pip install meerschaum` is the whole product: the `mrsm` command it installs runs the native command line from inside the package. If you would rather have a standalone binary (it starts in about 10 ms and needs no Python until you use a Python plugin or connector), build the same command line with Cargo:
 
     ```bash
-    cargo install meerschaum --locked            # during the release candidates: --version 5.0.0-rc.11
+    cargo install meerschaum --locked
     ```
 
     This needs Rust 1.95 or newer. `--locked` builds with the dependency versions Meerschaum was tested with (without it Cargo may pick newer ones, which can break the build on Windows). Prebuilt standalone binaries (Linux x86_64 and arm64, macOS arm64 and x86_64, Windows x86_64) are attached to each GitHub release, with a SHA-256 file for each.
@@ -41,10 +41,10 @@ The wheel contains the native core and has no required Python dependencies. Whee
         A file downloaded with `curl` or `gh release download` is not quarantined and needs only `chmod +x`. `pip install meerschaum` and `cargo install meerschaum` are not affected: pip and Cargo do not set the flag.
 
 ??? info "Docker"
-    The official images are `bmeares/meerschaum` (the default image, with `meerschaum[full]`), `bmeares/meerschaum:api` and `bmeares/meerschaum:slim` (the base wheel only). They are published for `linux/amd64` and `linux/arm64`. See the [migration guide](/reference/migrating-to-v5/) for how they changed in v5.
+    The official image is `bmeares/meerschaum`, published for `linux/amd64` and `linux/arm64`. The default tag (`latest`, also `full`) has `meerschaum[full]`; `rust` and `rust-full` have the native CLI without Python; `slim` has only the base wheel; `api` is a deprecated alias of `full`. See [Docker Images](/reference/stack/#docker-images) for the variants and the [migration guide](/reference/migrating-to-v5/) for how they changed in v5.
 
 ??? warning "Windows"
-    Everything runs on Windows except one thing. The Python API host (`@api_plugin` routes, the Dash web console and plugin pages) is reached over loopback TCP with a per-start token on Windows. Background jobs are refused on Windows, so `-d` and `start jobs` do not work (and neither do the console's Exec box and Manage menu, which run actions as jobs): run the command in the foreground, use Task Scheduler or a service wrapper, or run Meerschaum in Docker or WSL.
+    Everything runs on Windows except one thing. The Python API host (`@api_plugin` routes, the Dash web console and plugin pages) is reached over loopback TCP with a per-start token on Windows. Background jobs are refused on Windows, so `-d` and `start jobs` do not work (and neither does the console's Manage menu, which runs actions as jobs; the Exec box runs in the web terminal and works): run the command in the foreground, use Task Scheduler or a service wrapper, or run Meerschaum in Docker or WSL.
 
 
 ??? info "Installing dependencies"
@@ -56,7 +56,7 @@ The wheel contains the native core and has no required Python dependencies. Whee
     python -m meerschaum upgrade packages api -y
     ```
 
-    To install the packages into your environment (e.g. you're already using a virtual environment) by adding the name of the [dependency group](https://github.com/bmeares/Meerschaum/blob/main/meerschaum/utils/packages/_packages.py), e.g. `api`:
+    To install the packages into your environment (e.g. you're already using a virtual environment) by adding the name of an [extra](/reference/migrating-to-v5/#installing-and-running), e.g. `api`:
 
     ```bash
     python -m pip install --upgrade meerschaum[api]

@@ -52,7 +52,14 @@ pub fn run(sysargs: &[String]) -> i32 {
     if let Some(session) = &rt.native {
         session.shutdown();
     }
-    rc
+    if rt.restart_requested {
+        RESTART_SHELL
+    } else if rc == RESTART_SHELL {
+        // Reserved for the restart request: a passed-through status never reopens a shell.
+        1
+    } else {
+        rc
+    }
 }
 
 /// The exit status of `rc` as a process exit code (anything outside `0..=255` is `1`).
@@ -118,8 +125,27 @@ fn take_entry_child_env() {
 
 /// [`run`] on this process's own arguments, as an [`ExitCode`]: the whole of `fn main` for a
 /// standalone `mrsm`.
+/// Internal launcher result: start a fresh shell after replacing the engine.
+pub const RESTART_SHELL: i32 = 75;
+
 pub fn run_main() -> ExitCode {
     drop_handover_guard();
     take_entry_child_env();
-    exit_code(run(&process_args()))
+    let code = run(&process_args());
+    if code == RESTART_SHELL {
+        let (program, leading) = meerschaum_core::self_exe::self_program();
+        let mut command = std::process::Command::new(program);
+        command.args(leading).arg("--shell");
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            eprintln!("Unable to restart Meerschaum: {}", command.exec());
+            return exit_code(1);
+        }
+        #[cfg(not(unix))]
+        {
+            return exit_code(command.status().ok().and_then(|s| s.code()).unwrap_or(1));
+        }
+    }
+    exit_code(code)
 }

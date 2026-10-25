@@ -20,7 +20,7 @@ The default stack starts 4 services:
 
 You can edit the stack's Docker Compose file with `mrsm edit config stack`.
 
-The `api` service runs the `full` image of the same release as the `mrsm` that writes the compose file (for example `bmeares/meerschaum:5.0.0rc2-full`), so the API server and the client always speak the same version, API plugins and the Dash console work without further installs, and a release candidate never pulls the floating `:api` tag (which is the previous major version until 5.0.0 final). The image is built for `linux/amd64` and `linux/arm64`.
+The `api` service runs the `full` image of the same release as the `mrsm` that writes the compose file (for example `bmeares/meerschaum:5.0.0-full`) instead of a floating tag, so the API server and the client always speak the same version, and API plugins and the Dash console work without further installs. The image is built for `linux/amd64` and `linux/arm64`.
 
 !!! info "Upgrading an existing stack to 5.x"
     Earlier versions of the stack ran `bmeares/meerschaum:api`. `mrsm stack` regenerates the compose file on every run: a root without `config/stack.yaml` takes the new image the next time you run `mrsm stack up -d`, which recreates only the `api` container (the volumes and the database are kept). After `pip install --upgrade meerschaum` the tag follows the new version in the same way, so run `mrsm stack up -d` after every upgrade (or `mrsm stack pull` first to fetch the image ahead of time).
@@ -62,24 +62,37 @@ The `db` healthcheck asks the server over TCP (`pg_isready -h 127.0.0.1 -p 5432 
 
 ### Docker Images
 
-The Docker image [`bmeares/meerschaum:latest`](https://hub.docker.com/r/bmeares/meerschaum) (alias tag `full`) contains the PostgreSQL driver and other dependencies to run the API server.
+Choose a variant of [`bmeares/meerschaum`](https://hub.docker.com/r/bmeares/meerschaum):
 
-Images are tagged with the following scheme for each release:
+| Tag | Included | Best suited to |
+|---|---|---|
+| `full` / `latest` | Native CLI, Python SDK and all extras (including Dash/API), Cargo, rustc, C/C++ build tools, pip, Git and interactive tools | First-time users and plugin development |
+| `rust` | Native CLI, core API/MCP, database connectors and runtime libraries; no Python or compilers | Small native deployments and prebuilt Rust plugins |
+| `rust-full` | Everything in `rust`, plus Cargo, rustc, Git and native build tools; no Python | Building Rust source plugins without a Python installation |
+| `slim` / `minimal` | Python and the base wheel; no optional extras or Rust toolchain | Small Python installations where dependencies are supplied separately |
+| `api` | Deprecated alias of `full` | Existing deployments |
 
-- `latest` / `full`  
-  Contains database drivers and dependencies to run an API instance.
-- `minimal`  
-  Contains the PostgreSQL driver but no Python packages.
-- `{version}-full`  
-  The `full` image pinned to a specific version.
-- `{version}-minimal`  
-  The `minimal` image pinned to a specific version.
-- `{version}-slim` / `slim`  
-  The base wheel only (no extras).
-- `api`  
-  Deprecated alias of `latest`.
+Every variant runs the same Rust engine and uses the same configuration and plugin formats.
+The Dash console and Python plugins require a Python variant. A `.rs` source plugin needs
+Cargo for its first build and after edits; use `rust-full` or `full`, or ship a prebuilt plugin
+with `rust`. The toolchain variants also cache the base dependencies for single-file Rust plugins,
+so a minimal Rust plugin can build offline. Additional plugin dependencies use normal Cargo
+downloads. Native-only deployments never need a Python host. Mount `/home/meerschaum/.cargo`
+when you want dependency downloads to persist across `rust-full` or `full` containers.
 
-Release candidates (`5.0.0rc2`) are only published with the version-qualified tags (`5.0.0rc2-full`, `5.0.0rc2-minimal`, `5.0.0rc2-slim`): they never move `latest`, `full`, `api` and the other floating tags. Every tag is a multi-architecture image for `linux/amd64` and `linux/arm64`; the architecture's own image is also tagged `{version}-{name}-amd64` / `{version}-{name}-arm64`.
+Pin a version with `{version}-{variant}`, for example `5.0.1-rust` or
+`5.0.1-full`. Releases publish `linux/amd64` and `linux/arm64` and update the floating tags;
+pre-releases publish only version-qualified tags, for `linux/amd64`.
+`{version}-api` continues to alias `{version}-full`.
+
+Build locally with `docker buildx build --target rust --load -t mrsm:rust .` (replace
+`rust` with `rust-full`, `slim`, or `full`). A plain `docker build .` produces `full`.
+`full` intentionally has a larger size budget because it includes both language toolchains.
+Native drivers may still require vendor libraries, such as Oracle Instant Client.
+
+Containers are upgraded by pulling the desired image and recreating the service, preserving
+the mounted Meerschaum root. `mrsm upgrade mrsm` inside a container reports this ownership
+rather than changing packages in the running image.
 
 ## 🗒️ Requirements
 

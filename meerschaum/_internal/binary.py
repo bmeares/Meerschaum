@@ -170,6 +170,14 @@ def main(sysargs: list[str] | None = None) -> None:
             sys.exit(subprocess.call([binary, *args], env=env))
         os.execve(binary, [binary, *args], env)
     rc = _extension().main(args)
+    if rc == 75:  # Rust's RESTART_SHELL; replace the old in-process engine.
+        sys.stdout.flush()
+        sys.stderr.flush()
+        command = [sys.executable, *PYTHON_FLAGS, '-m', 'meerschaum', '--shell']
+        if os.name == 'nt':
+            import subprocess
+            sys.exit(subprocess.call(command))
+        os.execv(sys.executable, command)
     ### A process exit status is 0-255 (`meerschaum_cli::run::exit_code`: anything else is 1).
     rc = rc if 0 <= rc <= 255 else 1
     sys.stdout.flush()

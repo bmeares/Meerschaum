@@ -89,7 +89,7 @@ edition = "2024"
 crate-type = ["cdylib"]
 
 [dependencies]
-meerschaum-plugin = "=5.0.0-rc.11"   # prerelease versions require an exact prerelease requirement
+meerschaum-plugin = "5.0"
 
 [profile.release]
 panic = "unwind"      # required: the SDK catches panics at the boundary
@@ -161,7 +161,7 @@ Bounds (`begin`, `end`) are integers, ISO timestamp strings or `null`. Results a
 
 `manifest()` returns the same JSON document the Python plugin manifest uses, as a whole: the top-level keys `schema_version` (use the SDK constant `meerschaum_plugin::MANIFEST_SCHEMA_VERSION`; native plugins and Python workers share manifest schema `5`), `meerschaum_version`, `python_version` (`""`), `fingerprint` (`null`) and `plugins`, plus `connector_types`, `pre_sync_hooks` and `post_sync_hooks` when you provide them (the shipped example is the reference). The host validates it against the bundled JSON schema (`crates/meerschaum-plugin/schema/manifest.schema.json`) at load time, so `--help`, tab completion and the server can learn what your plugin offers **without loading the library**: it is cached by a fingerprint of the plugin directory and rebuilt when a file changes.
 
-Rebuild prerelease native libraries that export manifest schema `3` with the current SDK. Stale manifest caches are regenerated automatically. The native ABI and worker protocol remain at version `1`.
+Native libraries built with a 5.0 pre-release SDK (manifest schema `3`) must be rebuilt with the current SDK. Stale manifest caches are regenerated automatically. The native ABI and worker protocol remain at version `1`.
 
 The part for your plugin lives under `plugins.<name>`:
 
@@ -237,7 +237,7 @@ Rust plugins cover actions, arguments, hooks, fetch/sync, custom connectors and
 instances, supported HTTP routes, and console page fragments. They do **not** have
 complete Python plugin parity: arbitrary Python helper imports and connector
 access, Dash callbacks, unrestricted FastAPI customization, native streaming
-`subscribe`, repository upload, and live library reload are not available.
+`subscribe` and live library reload are not available.
 The Pipe helper surface is described in the [single-file reference](#single-file-reference), and HTTP adapter limits are described above; see the
 status note below for further limits.
 
@@ -422,13 +422,21 @@ single-file Rust sources as well as native directories. A descriptor supplies th
 for normal up-to-date checks; single `.rs` files have no author version and are replaced
 on each install. `--skip-deps` does not skip the Rust build needed to validate a source plugin.
 
-You may also copy these files directly into `MRSM_PLUGINS_DIR`. Native archive upload through
-the Python plugin packaging API and automatic target-triple selection are not implemented;
-the repository must supply an archive appropriate for the host (or portable Rust sources).
+Upload either format with `mrsm register plugins readings -r api:repo`. Single-file uploads
+retain the inline dependency block. Packaged uploads retain Cargo sources, manifests,
+lockfiles, assets, `.cargo` configuration, and any shipped library; build output, other
+hidden files, symlinks, and files matched by `.gitignore` are excluded. Local path dependencies
+must be included inside a packaged plugin or replaced with registry or Git dependencies
+before sharing; uploading a single `.rs` file does not upload its neighboring files.
 
-!!! note "Status in this pre-release"
+You may also copy these files directly into `MRSM_PLUGINS_DIR`. Automatic target-triple
+selection is not implemented; a prebuilt library must match the host OS and CPU.
+`mrsm edit plugins readings` opens the `.rs` file or the Cargo library entry point
+(`[lib].path`, default `src/lib.rs`). Binary-only packages must include sources to be edited.
 
-    Source plugins (a Cargo crate built by Meerschaum into the root's cache) work when `cargo` is on `PATH`; the prebuilt `lib<name>.<ext>` remains the contract for the slim image. Discovery, the manifest cache, actions, arguments, hooks, source `fetch`/`sync`, custom connectors, routes and pages are implemented, and each is exercised through the `mrsm` binary by the tests listed under [Testing your plugin](#testing-your-plugin). The deepest instance operations (reads, rowcounts, maintenance) are exercised only at the library level; through the binary the example instance proves resolution, `fetch_pipes_keys`, `sync_pipe` and the lease fallback. Not yet available: `subscribe` for continuous streams from a native plugin (it needs a reader/sink SDK beyond the current eager `Frame` API), repository upload and target-triple selection by `install plugin`, and live reload of an already-open library (replace a plugin while `mrsm` is not running).
+!!! note "Status in 5.0"
+
+    Source plugins (a Cargo crate built by Meerschaum into the root's cache) work when `cargo` is on `PATH`; the prebuilt `lib<name>.<ext>` remains the contract for the slim image. Discovery, the manifest cache, actions, arguments, hooks, source `fetch`/`sync`, custom connectors, routes and pages are implemented, and each is exercised through the `mrsm` binary by the tests listed under [Testing your plugin](#testing-your-plugin). The deepest instance operations (reads, rowcounts, maintenance) are exercised only at the library level; through the binary the example instance proves resolution, `fetch_pipes_keys`, `sync_pipe` and the lease fallback. Not yet available: `subscribe` for continuous streams from a native plugin (it needs a reader/sink SDK beyond the current eager `Frame` API), target-triple selection by `install plugin`, and live reload of an already-open library (replace a plugin while `mrsm` is not running).
 
 ## Single-file reference
 

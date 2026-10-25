@@ -116,7 +116,7 @@ MRSM_SQL_FOO='{"flavor": "sqlite", "database": "/tmp/temp.db"}' \
     Names that match the reserved Meerschaum variables (e.g. `MRSM_ROOT_DIR`, `MRSM_CONFIG`) are *not* interpreted as connectors.
 
 !!! note "Only real connector types"
-    Since v5.0.0rc2, only a variable whose `<TYPE>` is a connector type that exists becomes a connector: the built-in types (`sql`, `api`, `valkey`, `plugin`, `systemd`) and the types your plugins register with `@make_connector`. Any other `MRSM_<X>_<Y>` variable (`MRSM_DUCKDB_LIB`, `MRSM_TEST_PG_URI`, a variable a plugin reads itself) is ignored instead of turning into a connector such as `duckdb:lib`.
+    Only a variable whose `<TYPE>` is a connector type that exists becomes a connector: the built-in types (`sql`, `api`, `valkey`, `plugin`, `systemd`) and the types your plugins register with `@make_connector`. Any other `MRSM_<X>_<Y>` variable (`MRSM_DUCKDB_LIB`, `MRSM_TEST_PG_URI`, a variable a plugin reads itself) is ignored instead of turning into a connector such as `duckdb:lib` (as it did in v4).
 
 ## **`MRSM_CONNECT_TIMEOUT`**
 

@@ -7,9 +7,25 @@ description: Meerschaum release process. Two sections - 5.x (the Rust/maturin tr
 
 **Nothing in this section publishes by itself, and nothing may be published without the user's explicit
 authorization for that exact step** (PyPI, crates.io, DockerHub, a pushed git tag, a GitHub release). Steps
-that publish are marked **[needs explicit user authorization]**. For 5.0.0rc1 the user authorized PyPI,
-crates.io and a GitHub pre-release; DockerHub is a separate authorization. Agents stage and verify; the
-maintainer (or an agent the maintainer tells to) runs the marked steps.
+that publish are marked **[needs explicit user authorization]**; DockerHub is always a separate
+authorization. Agents stage and verify; the maintainer (or an agent the maintainer tells to) runs the
+marked steps.
+
+## Local settings (`.env`)
+
+Credentials and host-specific values never appear in this skill or in any tracked file. They live in the
+repository's gitignored `.env`, which the steps below load with `set -a; source .env; set +a`. Never print,
+`cat`, copy or commit it; check that a variable is set with `[ -n "$NAME" ] && echo set`. Ask the
+maintainer to add a missing one.
+
+| Variable | Used in | Meaning |
+|---|---|---|
+| `PYPI_TOKEN` | 5.4, v4 §5 | PyPI API token |
+| `CRATES_IO_TOKEN` | 5.5 | crates.io API token (`cargo login` reads it from stdin) |
+| `DOCKER_USERNAME` | 5.7, v4 §7 | the Docker Hub account that pushes `bmeares/meerschaum` |
+| `MRSM_DOCS_SSH` | 5.8, v4 §7 | the `ssh` arguments that reach the host serving the docs site (`-p <port> <user>@<host>`) |
+| `MRSM_DOCS_DIR` | 5.8, v4 §7 | the Meerschaum checkout on that host (absolute, or relative to the login directory) |
+| `MRSM_RUNNER_DIR` | v4 §4 | the directory of the self-hosted GitHub Actions runner |
 
 State at the end of an rc: one commit on `v5` (no PR to `main`; `main` is merged only for 5.0.0 final)
 carrying the bumped versions; that commit's CI green; `dist/` holding the wheels built by CI for that
@@ -189,7 +205,7 @@ points sqlx at a git revision. A pre-release `pip install` of a wheel never comp
 ## 5.4 PyPI **[needs explicit user authorization]**
 
 ```bash
-source .env     # PYPI_TOKEN (never printed, never committed)
+set -a; source .env; set +a     # PYPI_TOKEN (never printed, never committed)
 TWINE_USERNAME=__token__ TWINE_PASSWORD="$PYPI_TOKEN" "$REL/tw/bin/twine" upload "$REL"/dist/*
 ```
 
@@ -201,8 +217,8 @@ clean venv: `pip install --pre --no-cache-dir meerschaum==5.0.0rc1 && mrsm --ver
 ## 5.5 crates.io **[needs explicit user authorization]**
 
 Publish from Linux or macOS (the crates' `LICENSE`/`NOTICE` are symlinks). `meerschaum-py` is
-`publish = false` (the extension ships in the PyPI wheel). Log in once (`cargo login`, token never
-printed), then **primary command**, which publishes the 15 crates in dependency order and waits for the
+`publish = false` (the extension ships in the PyPI wheel). Log in once
+(`set -a; source .env; set +a; printf '%s' "$CRATES_IO_TOKEN" | cargo login`, token never printed), then **primary command**, which publishes the 15 crates in dependency order and waits for the
 index between them:
 
 ```bash
@@ -259,11 +275,11 @@ pass `--prerelease` (and not `--latest`). Do not `git push origin --tags` (it wo
 ## 5.7 Docker **[needs explicit user authorization, separate from 5.4 to 5.6]**
 
 Docker images are built and pushed **from the maintainer's build host** (this repository's checkout at the
-release commit) or from `docker-build.yaml`; the production VPS is no longer used for releases (it ran out
-of memory on the native Rust build). Prerequisites: `docker login -u bmeares` on the build host with a
-Docker Hub personal access token (Read & Write; run it in a real terminal: `docker login` refuses a non-TTY,
+release commit) or from `docker-build.yaml`; the docs host is not used for image builds (the native Rust
+build needs far more memory than it has). Prerequisites: `docker login -u "$DOCKER_USERNAME"` on the build
+host with a Docker Hub personal access token (Read & Write; run it in a real terminal: `docker login` refuses a non-TTY,
 or use `--password-stdin` from a file only the user can read), and, for the workflow route, the same token in
-the `DOCKER_PASSWORD` repository secret (`gh secret set DOCKER_PASSWORD`; `DOCKER_USERNAME` is `bmeares`).
+the `DOCKER_PASSWORD` repository secret (`gh secret set DOCKER_PASSWORD`; the `DOCKER_USERNAME` secret matches `.env`).
 Agents never read, print or copy the token; check the login with `docker info | grep Username`.
 
 **Build host route (release candidates: `linux/amd64` only).** Build and load, gate, then push exactly the
@@ -272,9 +288,10 @@ images that passed, by their version-qualified tags:
 ```bash
 git rev-parse HEAD                                   # must be the release commit ($SHA), clean tracked tree
 ./scripts/docker/buildx.sh                           # --load for the host's platform (linux/amd64), smoke-tested
-./scripts/docker/size_gate.sh --slim-image bmeares/meerschaum:<ver>-slim --full-image bmeares/meerschaum:<ver>-full --slim-max 250 --full-max 900
+./scripts/docker/size_gate.sh --slim-image bmeares/meerschaum:<ver>-slim --full-image bmeares/meerschaum:<ver>-full \
+  --rust-image bmeares/meerschaum:<ver>-rust --rust-full-image bmeares/meerschaum:<ver>-rust-full   # D25 budgets: 250 / 2500 / 250 / 1600 MB
 # the façade smoke inside the slim image (as below), must exit 0 with install_requests []
-for t in full minimal slim; do docker push bmeares/meerschaum:<ver>-$t; done
+for t in full minimal slim rust rust-full; do docker push bmeares/meerschaum:<ver>-$t; done
 docker buildx imagetools inspect bmeares/meerschaum:latest   # unchanged by an rc
 ```
 
@@ -303,7 +320,7 @@ blocks publication. Prereleases publish only version-qualified tags and never mo
 # Capture the current latest digest before dispatch; verify it is unchanged for a prerelease.
 docker buildx imagetools inspect bmeares/meerschaum:latest
 gh workflow run docker-build.yaml --ref v5 -f publish=true -f size_gate=enforce
-# Wait for every job to succeed on the exact release SHA, then inspect minimal/full/slim tags.
+# Wait for every job to succeed on the exact release SHA, then inspect the full/minimal/slim/rust/rust-full tags.
 docker buildx imagetools inspect bmeares/meerschaum:<ver>-full
 docker buildx imagetools inspect bmeares/meerschaum:latest
 ```
@@ -315,8 +332,9 @@ manifest command plans.
 ## 5.8 Docs
 
 `./scripts/docs.sh` (also run by `./scripts/build.sh`) rebuilds the site docs and regenerates root
-`CHANGELOG.md`. The public docs site is still rebuilt where it is served (the docs part of the v4 step 7
-below; never its Docker part, which 5.7 replaces). Commit the regenerated `CHANGELOG.md` and `requirements/*.txt`
+`CHANGELOG.md`. The public docs site is rebuilt on the host that serves it **[needs explicit user
+authorization]**: `ssh $MRSM_DOCS_SSH` (from `.env`), `cd "$MRSM_DOCS_DIR"`, check out the release tag and
+run `./scripts/docs.sh`. Never build or run Docker images there. Commit the regenerated `CHANGELOG.md` and `requirements/*.txt`
 in the release commit (5.1), not after the tag.
 
 ## 5.9 Final release (5.0.0) differences
@@ -327,7 +345,7 @@ in the release commit (5.1), not after the tag.
   green, merge, then run 5.2 to 5.6 on the merged commit. The tag is `v5.0.0` and the GitHub release is
   created without `--prerelease` (with `--latest`).
 - `pip install meerschaum` (no `--pre`) and `cargo install meerschaum --locked` now resolve to 5.0.0.
-- Docker: only now do `latest`, `full`, `minimal`, `slim` and `api` move (`buildx.sh --merge`, run by the `publish` job of
+- Docker: only now do `latest`, `full`, `minimal`, `slim`, `rust`, `rust-full` and `api` move (`buildx.sh --merge`, run by the `publish` job of
   `docker-build.yaml`, does it for a non-pre-release version): needs its own authorization and a passing size gate and façade smoke.
 - Re-run the full gate: all flavors, parity, packaging, `publish-dry-run`.
 
@@ -387,7 +405,7 @@ Push and open a PR from `dev` to `main`:
 
 ## 4. CI
 
-The PR triggers `.github/workflows/pytest.yaml` on a self-hosted runner (`~/actions-runner/run.sh` on this machine). It runs `./scripts/test.sh db` with `MRSM_TEST_FLAVORS=all` against the databases in `tests/docker-compose.yaml`.
+The PR triggers `.github/workflows/pytest.yaml` on a self-hosted runner (`$MRSM_RUNNER_DIR/run.sh`, from `.env`). It runs `./scripts/test.sh db` with `MRSM_TEST_FLAVORS=all` against the databases in `tests/docker-compose.yaml`.
 
 If tests fail unexpectedly (stale DB state), reset the test databases:
 
@@ -413,7 +431,7 @@ git checkout main && git pull
 Publish (token in `.env` as `PYPI_TOKEN`):
 
 ```bash
-source .env
+set -a; source .env; set +a
 TWINE_USERNAME=__token__ TWINE_PASSWORD="$PYPI_TOKEN" twine upload dist/*
 ```
 
@@ -429,18 +447,19 @@ Create a GitHub release for the tag (`gh release create vX.Y.Z --title "<same as
 ## 7. Docker images and docs
 
 Docker images are built and pushed from the build host (logged in to Docker Hub with a personal access token,
-see 5.7), not from the VPS: `./scripts/docker/buildx.sh --push` from a checkout of the release tag.
+see 5.7), not from the docs host: `./scripts/docker/buildx.sh --push` from a checkout of the release tag.
 
-The docs site is still rebuilt on the VPS that serves it:
+The docs site is rebuilt on the host that serves it (variables from `.env`):
 
 ```bash
-ssh -p 2269 meerschaum@mrsm.io
-cd ~/docs/Meerschaum
+set -a; source .env; set +a
+ssh $MRSM_DOCS_SSH          # then, on that host:
+cd "$MRSM_DOCS_DIR"
 git pull
 ./scripts/build.sh                  # rebuild on Ubuntu/older Python (catches last-minute bugs); calls docs.sh which rebuilds the website docs
 ```
 
-Optionally run `./scripts/setup.sh` (locally and on the VPS) to ensure latest dev packages before building.
+Optionally run `./scripts/setup.sh` (locally and on the docs host) to ensure latest dev packages before building.
 
 ## Checklist
 
@@ -451,4 +470,4 @@ Optionally run `./scripts/setup.sh` (locally and on the VPS) to ensure latest de
 - [ ] Wheel/sdist built from `main` and uploaded to PyPI via twine
 - [ ] `vX.Y.Z` tag pushed; GitHub release created with same notes
 - [ ] Docker images built and pushed from the build host
-- [ ] Docs rebuilt on prod VPS
+- [ ] Docs rebuilt on the docs host

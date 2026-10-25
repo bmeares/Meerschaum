@@ -2678,7 +2678,7 @@ dependencies = [
 
 [[package]]
 name = "meerschaum"
-version = "5.0.0-rc.11"
+version = "5.0.0-rc.12"
 dependencies = [
  "meerschaum-cli",
  "meerschaum-connector",
@@ -2694,7 +2694,7 @@ dependencies = [
 
 [[package]]
 name = "meerschaum-cli"
-version = "5.0.0-rc.11"
+version = "5.0.0-rc.12"
 dependencies = [
  "async-trait",
  "axum",
@@ -2723,6 +2723,7 @@ dependencies = [
  "portable-pty",
  "reedline",
  "regex",
+ "reqwest 0.13.5",
  "rmpv",
  "rust_decimal",
  "rustix 1.1.5",
@@ -2746,7 +2747,7 @@ dependencies = [
 
 [[package]]
 name = "meerschaum-compose"
-version = "5.0.0-rc.11"
+version = "5.0.0-rc.12"
 dependencies = [
  "glob",
  "indexmap",
@@ -2762,7 +2763,7 @@ dependencies = [
 
 [[package]]
 name = "meerschaum-connector"
-version = "5.0.0-rc.11"
+version = "5.0.0-rc.12"
 dependencies = [
  "async-trait",
  "chrono",
@@ -2778,7 +2779,7 @@ dependencies = [
 
 [[package]]
 name = "meerschaum-connector-api"
-version = "5.0.0-rc.11"
+version = "5.0.0-rc.12"
 dependencies = [
  "aws-lc-sys",
  "base64 0.23.1",
@@ -2804,7 +2805,7 @@ dependencies = [
 
 [[package]]
 name = "meerschaum-connector-sql"
-version = "5.0.0-rc.11"
+version = "5.0.0-rc.12"
 dependencies = [
  "arrow",
  "async-trait",
@@ -2841,7 +2842,7 @@ dependencies = [
 
 [[package]]
 name = "meerschaum-connector-valkey"
-version = "5.0.0-rc.11"
+version = "5.0.0-rc.12"
 dependencies = [
  "chrono",
  "fred",
@@ -2859,7 +2860,7 @@ dependencies = [
 
 [[package]]
 name = "meerschaum-core"
-version = "5.0.0-rc.11"
+version = "5.0.0-rc.12"
 dependencies = [
  "blake2",
  "chrono",
@@ -2887,7 +2888,7 @@ dependencies = [
 
 [[package]]
 name = "meerschaum-engine"
-version = "5.0.0-rc.11"
+version = "5.0.0-rc.12"
 dependencies = [
  "chrono",
  "fs4",
@@ -2910,7 +2911,7 @@ dependencies = [
 
 [[package]]
 name = "meerschaum-jobs"
-version = "5.0.0-rc.11"
+version = "5.0.0-rc.12"
 dependencies = [
  "chrono",
  "getrandom 0.4.3",
@@ -2927,7 +2928,7 @@ dependencies = [
 
 [[package]]
 name = "meerschaum-kernel"
-version = "5.0.0-rc.11"
+version = "5.0.0-rc.12"
 dependencies = [
  "arrow",
  "base64 0.23.1",
@@ -2947,7 +2948,7 @@ dependencies = [
 
 [[package]]
 name = "meerschaum-plugin"
-version = "5.0.0-rc.11"
+version = "5.0.0-rc.12"
 dependencies = [
  "arrow",
  "hex",
@@ -2971,7 +2972,7 @@ dependencies = [
 
 [[package]]
 name = "meerschaum-py"
-version = "5.0.0-rc.11"
+version = "5.0.0-rc.12"
 dependencies = [
  "arrow",
  "async-trait",
@@ -3006,7 +3007,7 @@ dependencies = [
 
 [[package]]
 name = "meerschaum-server"
-version = "5.0.0-rc.11"
+version = "5.0.0-rc.12"
 dependencies = [
  "async-trait",
  "axum",
@@ -3043,7 +3044,7 @@ dependencies = [
 
 [[package]]
 name = "meerschaum-web"
-version = "5.0.0-rc.11"
+version = "5.0.0-rc.12"
 dependencies = [
  "async-trait",
  "axum",
@@ -3070,7 +3071,7 @@ dependencies = [
 
 [[package]]
 name = "meerschaum-worker"
-version = "5.0.0-rc.11"
+version = "5.0.0-rc.12"
 dependencies = [
  "arrow",
  "chrono",

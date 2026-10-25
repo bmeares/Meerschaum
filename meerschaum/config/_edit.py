@@ -52,7 +52,7 @@ def edit_config(
 
             edit_file(get_keyfile_path(key, create_new=True))
 
-            ### TODO: verify that the file is valid. Retry if not.
+            ### Parse the edited file; offer the backup when it does not parse.
             try:
                 new_key_config = read_config(
                     paths.CONFIG_DIR_PATH,

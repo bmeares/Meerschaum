@@ -158,7 +158,7 @@ Isolation between concurrent jobs:
 | Shared resource | Handling |
 |---|---|
 | `tests-*` containers (`tests/docker-compose.yaml`), the test API on port 8989, the `mrsm` Docker stack, port 8000, the production processes | only `pytest.yaml`'s `tests` job touches the test containers and 8989, and it carries `concurrency: {group: mrsm-test-services, cancel-in-progress: false}`: one at a time per repository, whichever runner takes it (a queued second run waits; a newer one replaces a waiting one). The Docker release workflow also uses the daemon, with its own builders and isolated smoke containers; it never uses 8989, 8000 or the deployed stack. |
-| `target/`, `.venv-ref`, `.venv-test`, `test_root`, `.mrsm-cargo-root`, the build lock `target/.build-py.lock` | per workspace (per runner): no sharing, no locking between runners |
+| `target/`, `.venv-ref`, `.venv-test`, `test_root`, the build lock `target/.build-py.lock` | per workspace (per runner): no sharing, no locking between runners |
 | the compile work of dependencies | shared through sccache (one server per user, same `SCCACHE_DIR`): a second runner's cold build is mostly cache hits |
 | `~/.cargo` (registry, git checkouts), the `rustup` toolchain | cargo and rustup take their own locks; safe |
 | `${MRSM_CI_CACHE}/duckdb`, `/bin`, `/sccache` | written by atomic `mv` (`duckdb_lib.sh`, `ci_tools.sh`); sccache is concurrent by design |
@@ -244,24 +244,26 @@ There is no `setup.py`, `setup.cfg` or `MANIFEST.in` any more. One distribution 
 
 | `docker buildx build ...` | Image | Contents |
 |---|---|---|
-| `.` (default, last stage) | `full` with selected extras | Installs the locally built maturin wheel; `dep_group=full` (default), `api` or `minimal` selects the extras. Entrypoint `mrsm`. |
-| `--target full` | full runtime | Fedora 44 installroot plus the wheel, selected extras, plugin-install tooling and interactive tools. Entrypoint `mrsm`. |
-| `--target slim` | base runtime | Fedora 44 installroot plus the base wheel, with no package manager or compiler. Entrypoint `mrsm`. |
+| `.` / `--target full` | Complete runtime and build environment | Native CLI, base wheel + all extras, Cargo/rustc, C/C++ tools and Python development headers. |
+| `--target slim` | Small Python runtime | Base wheel, no extras or compiler; also tagged minimal. |
+| `--target rust` | Native runtime | Native binary, OS libraries, no Python or compiler. |
+| `--target rust-full` | Native development | Native binary + Cargo/rustc and C/C++ tools, no Python. |
 
 The Fedora 44 `rust-builder` stage builds the wheel with maturin and the repository's Rust
 toolchain. BuildKit cache mounts share the Rust artifacts between builds. The `py-slim` and
-`py-full` stages install into a prefix and trim development files before copying into the
-runtime installroots. Full still explicitly includes PyYAML while public Python config I/O
+`py-full` stages install into a prefix before copying into the runtime installroots.
+Slim trims development headers; full retains them for building dependencies. Full still explicitly includes PyYAML while public Python config I/O
 requires it; that is an outstanding D20 dependency, not part of the declared extras.
 
 `scripts/docker/buildx.sh [--push] [--v4-only] [--platform P] [--arch-tags] [--merge]` builds the following images:
 
-- `minimal` on the default target with no selected extras.
+- `minimal` on `--target slim`, retained as a compatibility tag.
 - `full` on `--target full`.
 - `slim`, tagged `<version>-slim`, plus `slim` for releases.
+- `rust` and `rust-full`, with matching version-qualified and stable floating tags.
 
 Pre-releases (`dev`, `rc`, `aN`, `bN`) get only version-qualified tags. The script refuses to push the
-Rust targets for a version below 5. The legacy `--v4-only` option selects default-target images and omits `slim`; the current
+Rust targets for a version below 5. The legacy `--v4-only` option selects default-target images and omits the slim/native targets; the current
 Dockerfile still installs the v5 wheels.
 Docker release builds run on the existing **self-hosted Linux x86_64 runners**. Prereleases
 select only `linux/amd64`; final releases also select `linux/arm64`.
@@ -284,9 +286,9 @@ same size, CLI, API and offline facade checks before upload. The explicit `--pla
 platforms, and CI checks every published variant's manifest. Prereleases never move floating tags.
 `tests/test_docker_buildx.py` checks command plans; `tests/test_workflows_packaging.py` checks both
 release policies and that each smoke job has a corresponding artifact.
-`scripts/docker/size_gate.sh [--warn-only] [--slim-max 250] [--full-max 900] [--slim-image I] [--full-image I]`
+`scripts/docker/size_gate.sh [--warn-only] [--slim-max 250] [--full-max 2500] [--rust-max 250] [--rust-full-max 1600] [--slim-image I] [--full-image I]`
 measures the uncompressed size from `docker image inspect` in decimal MB and fails over the limit.
-The maintainer raised the slim limit to 250 MB on 2026-10-15; full remains 900 MB.
+D25 expands the image matrix: rust/slim are limited to 250 MB, rust-full to 1600 MB, and full to 2500 MB because full now includes both language build toolchains.
 Comparisons use exact bytes, with rounding only for display.
 In `docker-build.yaml` the gate defaults to `enforce`. A passing size gate alone does not
 establish dependency-free operation: run `scripts/docker/smoke_facade.py` in the installed

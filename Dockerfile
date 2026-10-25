@@ -1,45 +1,11 @@
-### Meerschaum images (docs/design/v5-build.md, docs/design/v5.0.0.md §12.1).
-###
-### Every image installs the one maturin wheel built from this tree: `meerschaum` (the Python
-### package + the `meerschaum._core` extension). Its `mrsm` console script runs the CLI in-process
-### from the extension (D8, revised), so the image's `mrsm` is that script.
-###
-### Targets:
-###   (default) `docker build .`           the `full` image; `--build-arg dep_group=` selects the
-###                                        extras: `full` (default: `[full]`), `api`
-###                                        (`[full]`) or `minimal` (the base wheel, no extras).
-###   --target full                        the same image (kept so `buildx.sh` can name the target).
-###                                        Size gate: < 900 MB.
-###   --target slim                        the wheel, no extras. Size gate: ≤ 250 MB.
-###   --target rust-builder / py-slim / py-full / slim-rootfs / full-rootfs   build stages only.
-###   --build-arg duckdb_driver=1          pre-install DuckDB's shared library at
-###                                        /usr/local/lib/meerschaum/duckdb/libduckdb.so and set
-###                                        MRSM_DUCKDB_LIB to it (outside the root volume, which hides
-###                                        anything baked into it). Default: downloaded on first use
-###                                        into the root (`mrsm install driver duckdb`).
-###
-### Both images are assembled the same way, so neither carries a package manager or a toolchain:
-###   1. `rust-builder` compiles the wheel once (BuildKit cache mounts keep `target/`).
-###   2. `py-slim` / `py-full` `pip install` the wheels (and the extras, for `full`) into a prefix
-###      with `--no-compile`, then `scripts/docker/trim_install.sh` drops tests, headers, byte code
-###      and debug symbols (the `[full]` extras are ~890 MB untrimmed).
-###   3. `slim-rootfs` / `full-rootfs` are Fedora 44 root filesystems made with `dnf --installroot`
-###      (python3 and its libraries only; no dnf, rpm tooling, compilers or pip) with the prefix
-###      copied into /usr/local.
-###   4. `slim` / `full` are `FROM scratch` + that rootfs.
-###
-### Requires BuildKit (`docker buildx build`).
-###
-### Every stage supports linux/amd64 and linux/arm64. Docker CI uses self-hosted x86_64 runners:
-### amd64 natively, arm64 under QEMU, with persistent caches per architecture. Prereleases select only
-### amd64; finals build both and join them with `buildx.sh --merge`.
+### Meerschaum runtime variants (all use the same Rust engine).
+###   rust: native binary, no Python or toolchain.
+###   rust-full: native binary + Cargo/rustc and native build tools, no Python.
+###   slim: Python base wheel, no extras or toolchain (minimal compatibility variant).
+###   full/default: native binary, Python SDK + all extras, Cargo/rustc and build tools.
+### BuildKit is required. `api` remains an alias of full; it is not a separate build.
 
-### ---------------------------------------------------------------------------------------------
-### rust-builder: `maturin build --release` for the `meerschaum` wheel.
-### Fedora 44 (not rust:1-slim) so the extension links against the same glibc and Python
-### as the Fedora 44 runtimes. rust-toolchain.toml is honored through rustup. The release profile
-### is the workspace's (Cargo.toml `[profile.release]`), the same as the PyPI wheels'.
-FROM fedora:44 AS rust-builder
+FROM fedora:44 AS rust-toolchain
 
 ENV RUSTUP_HOME=/usr/local/rustup \
     CARGO_HOME=/usr/local/cargo \
@@ -49,19 +15,42 @@ ENV RUSTUP_HOME=/usr/local/rustup \
 
 RUN dnf install -y --setopt=install_weak_deps=False --nodocs \
       gcc gcc-c++ make pkgconf-pkg-config \
-      python3 python3-pip git curl patchelf \
+      git curl binutils \
   && dnf clean all \
-  && python3 -m pip install --no-cache-dir 'maturin>=1.9,<2.0' \
   && curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
      | sh -s -- -y --profile minimal --default-toolchain none --no-modify-path
 
 WORKDIR /src
 COPY rust-toolchain.toml ./
-RUN rustup toolchain install && rustc --version
+RUN rustup toolchain install && rustup default stable && rustc --version
+
+### Seed only the small dependency set needed by single-file Rust plugins. Other crates
+### still use the normal Cargo registry. No vendor override or build artifacts are shipped.
+FROM rust-toolchain AS plugin-dependencies
+RUN mkdir -p /plugin/src \
+  && printf '%s\n' '[package]' 'name = "mrsm-plugin-dependencies"' 'version = "0.0.0"' 'edition = "2024"' \
+       '[dependencies]' 'serde = { version = "1", features = ["derive"] }' \
+       'serde_json = { version = "1", features = ["preserve_order", "arbitrary_precision", "raw_value"] }' \
+       > /plugin/Cargo.toml \
+  && touch /plugin/src/lib.rs \
+  && CARGO_HOME=/plugin-cargo cargo fetch --manifest-path /plugin/Cargo.toml
+
+FROM rust-toolchain AS source-builder
 
 COPY Cargo.toml Cargo.lock ./
 COPY .cargo ./.cargo
 COPY crates ./crates
+FROM source-builder AS native-builder
+RUN --mount=type=cache,id=mrsm-v5-cargo-registry,target=/usr/local/cargo/registry \
+    --mount=type=cache,id=mrsm-v5-cargo-target,target=/src/target,sharing=locked \
+    cargo build --release --locked -p meerschaum --bin mrsm \
+  && install -D target/release/mrsm /out/mrsm \
+  && strip --strip-unneeded /out/mrsm
+
+FROM source-builder AS rust-builder
+RUN dnf install -y --setopt=install_weak_deps=False --nodocs python3 python3-pip patchelf \
+  && dnf clean all \
+  && python3 -m pip install --no-cache-dir 'maturin>=1.9,<2.0'
 COPY pyproject.toml README.md LICENSE NOTICE _meerschaum_mrsm.py ./
 COPY meerschaum ./meerschaum
 ### `target/` and the registry live in BuildKit cache mounts, so this layer only holds /out/wheels.
@@ -105,12 +94,12 @@ RUN --mount=type=bind,from=rust-builder,source=/out/wheels,target=/wheels \
     --mount=type=bind,source=scripts/docker/trim_install.sh,target=/trim_install.sh \
     case "$dep_group" in \
       minimal) extras=""; set -- ;; \
-      *)       extras="[full]"; set -- 'pgcli>=3.1.0' 'litecli>=1.5.0' ;; \
+      *)       extras="[full,cli-tools,gui,sql-mssql,sql-oracle,sql-duckdb,sql-cockroachdb]"; set -- ;; \
     esac \
   && wheel="$(ls /wheels/meerschaum-[0-9]*.whl)" \
   && python3 -m pip install --find-links /wheels --no-cache-dir --no-compile --ignore-installed \
       --root-user-action=ignore --prefix=/install "$wheel$extras" PyYAML "$@" \
-  && /trim_install.sh /install \
+  && MRSM_KEEP_HEADERS=1 /trim_install.sh /install \
   && ls -l /install/bin
 
 
@@ -142,6 +131,15 @@ RUN --mount=type=bind,source=scripts/rust/duckdb_lib.sh,target=/scripts/rust/duc
 
 
 ### ---------------------------------------------------------------------------------------------
+### Full images include DuckDB without forcing Python callers away from their Python driver.
+### Install the C API on the system library path; do not set an explicit driver override.
+FROM fedora:44 AS full-duckdb-driver
+RUN --mount=type=bind,source=scripts/rust/duckdb_lib.sh,target=/scripts/rust/duckdb_lib.sh \
+    --mount=type=bind,source=crates/meerschaum-connector-sql/src/duckdb_lib,target=/crates/meerschaum-connector-sql/src/duckdb_lib \
+    dnf install -y --setopt=install_weak_deps=False --nodocs python3 curl-minimal \
+  && lib="$(MRSM_CI_CACHE=/tmp/duckdb-cache bash /scripts/rust/duckdb_lib.sh)" \
+  && install -D -m 0755 "$lib" /out/usr/local/lib/libduckdb.so
+
 ### slim-rootfs: a Fedora 44 root filesystem with only python3 and its runtime libraries (and
 ### `curl`, which the stack's API healthcheck runs: `curl --fail http://localhost:<port>/healthcheck`;
 ### `curl-minimal` + `libcurl-minimal` add ~6 MB, the full `libcurl` twice that), installed
@@ -209,8 +207,8 @@ ENV MRSM_DUCKDB_LIB=${duckdb_driver:+/usr/local/lib/meerschaum/duckdb/libduckdb.
     MRSM_ROOT_DIR=$mrsm_root_dir \
     MRSM_WORK_DIR=$mrsm_root_dir \
     MRSM_RUNTIME=docker \
-    MRSM_HOME=/home/meerschaum \
-    HOME=/home/meerschaum \
+    MRSM_HOME=/home/$mrsm_user \
+    HOME=/home/$mrsm_user \
     PATH=/usr/local/bin:/usr/bin \
     LANG=C.UTF-8
 
@@ -239,14 +237,15 @@ ARG mrsm_user=meerschaum \
 RUN dnf install -y --installroot=/rootfs --use-host-config --releasever=44 \
       --setopt=install_weak_deps=False --nodocs \
       python3 python-unversioned-command bash coreutils-single ca-certificates tzdata \
-      vim-minimal libstdc++ python3-pip ncurses tmux less htop openssl curl-minimal libcurl-minimal git-core postgresql \
+      vim-minimal libstdc++ python3-pip python3-devel ncurses tmux less htop openssl curl-minimal libcurl-minimal git-core postgresql \
+      gcc gcc-c++ make cmake pkgconf-pkg-config openssl-devel libffi-devel unixODBC unixODBC-devel \
   && dnf --installroot=/rootfs --use-host-config clean all \
   && ln -sf vi /rootfs/usr/bin/vim \
   && rm -rf /rootfs/var/cache/* /rootfs/var/log/* /rootfs/var/lib/dnf /rootfs/usr/share/locale/* \
   && rm -rf /rootfs/usr/share/pki/ca-trust-source /rootfs/usr/share/zoneinfo/right \
             /rootfs/usr/share/zoneinfo/posix /rootfs/etc/pki/ca-trust/extracted/java \
             /rootfs/etc/pki/ca-trust/extracted/edk2 /rootfs/usr/lib64/ossl-modules/fips.so \
-            /rootfs/usr/lib64/python3*/pydoc_data /rootfs/usr/lib64/python3*/config-3* \
+            /rootfs/usr/lib64/python3*/pydoc_data \
             /rootfs/usr/share/pki/rpm-gpg /rootfs/etc/pki/rpm-gpg \
   && find /rootfs/usr/lib64/python3* -name '*.opt-[12].pyc' -delete \
   && echo "$mrsm_user:x:$mrsm_gid:" >> /rootfs/etc/group \
@@ -257,6 +256,13 @@ RUN dnf install -y --installroot=/rootfs --use-host-config --releasever=44 \
 COPY --chown=$mrsm_uid:$mrsm_gid scripts/docker/bashrc /rootfs/home/$mrsm_user/.bashrc
 COPY --chown=$mrsm_uid:$mrsm_gid scripts/docker/tmux.conf /rootfs/home/$mrsm_user/.tmux.conf
 COPY --from=py-full /install/ /rootfs/usr/local/
+COPY --from=native-builder /out/mrsm /rootfs/usr/local/bin/mrsm
+COPY --from=rust-toolchain /usr/local/rustup/ /rootfs/usr/local/rustup/
+COPY --from=rust-toolchain /usr/local/cargo/bin/ /rootfs/usr/local/cargo/bin/
+RUN install -d -o "$mrsm_uid" -g "$mrsm_gid" "/rootfs/home/$mrsm_user/.cargo"
+COPY --chown=$mrsm_uid:$mrsm_gid --from=plugin-dependencies /plugin-cargo/registry/ /rootfs/home/$mrsm_user/.cargo/registry/
+
+
 ### The image sets PYTHONPYCACHEPREFIX, and with it Python reads byte code only from that directory (the
 ### interpreter's own library included), so a fresh container compiled the standard library and the
 ### launcher's modules at every start (measured: about 130 ms against 35 ms for `mrsm show version`).
@@ -268,13 +274,14 @@ RUN mkdir -p /rootfs/tmp/mrsm-warm/root /rootfs/tmp/mrsm-warm/plugins \
   && chroot --userspec="$mrsm_uid:$mrsm_gid" /rootfs env HOME="/home/$mrsm_user" \
        PYTHONPYCACHEPREFIX="/home/$mrsm_user/.cache/pycache" \
        MRSM_ROOT_DIR=/tmp/mrsm-warm/root MRSM_PLUGINS_DIR=/tmp/mrsm-warm/plugins MRSM_NO_AUTO_INSTALL=1 \
-       PATH=/usr/local/bin:/usr/bin mrsm --version >/dev/null; \
+       PATH=/usr/local/bin:/usr/bin python3 -P -m meerschaum --version >/dev/null; \
   status=$?; rm -rf /rootfs/tmp/mrsm-warm; exit $status
 COPY --from=duckdb-driver /out/ /rootfs/
+COPY --from=full-duckdb-driver /out/ /rootfs/
 
 
 ### ---------------------------------------------------------------------------------------------
-### full: the wheels and their extras (`dep_group`) on the full-rootfs. Size gate: < 900 MB.
+### full: native CLI, Python SDK + extras, and Rust/native build toolchains.
 ###
 ### The packages are installed without byte code (it is ~125 MB for `[full]`). Python compiles
 ### each module on first import and caches the result under $PYTHONPYCACHEPREFIX (user-owned, so
@@ -292,16 +299,18 @@ ARG dep_group=full \
 ENV MRSM_DUCKDB_LIB=${duckdb_driver:+/usr/local/lib/meerschaum/duckdb/libduckdb.so} \
     MRSM_USER=$mrsm_user \
     MRSM_DEP_GROUP=$dep_group \
+    RUSTUP_HOME=/usr/local/rustup \
+    CARGO_HOME=/home/$mrsm_user/.cargo \
     MRSM_UID=$mrsm_uid \
     MRSM_GID=$mrsm_gid \
     MRSM_ROOT_DIR=$mrsm_root_dir \
     MRSM_WORK_DIR=$mrsm_root_dir \
     MRSM_RUNTIME=docker \
-    MRSM_HOME=/home/meerschaum \
-    MRSM_SRC=/home/meerschaum/src \
-    HOME=/home/meerschaum \
-    PATH=/usr/local/bin:/usr/bin:/home/meerschaum/.local/bin \
-    PYTHONPYCACHEPREFIX=/home/meerschaum/.cache/pycache \
+    MRSM_HOME=/home/$mrsm_user \
+    MRSM_SRC=/home/$mrsm_user/src \
+    HOME=/home/$mrsm_user \
+    PATH=/usr/local/cargo/bin:/usr/local/bin:/usr/bin:/home/$mrsm_user/.local/bin \
+    PYTHONPYCACHEPREFIX=/home/$mrsm_user/.cache/pycache \
     LANG=C.UTF-8
 
 COPY --from=full-rootfs /rootfs/ /
@@ -313,5 +322,60 @@ ENTRYPOINT ["mrsm"]
 
 
 ### ---------------------------------------------------------------------------------------------
-### The last stage is what `docker build .` produces: the `full` image.
+### Native runtimes. The final root filesystems never receive the builder's Python.
+FROM fedora:44 AS rust-rootfs
+ARG mrsm_user=meerschaum mrsm_root_dir=/meerschaum mrsm_uid=1000 mrsm_gid=1000
+RUN dnf install -y --installroot=/rootfs --use-host-config --releasever=44 \
+      --setopt=install_weak_deps=False --nodocs \
+      bash coreutils-single ca-certificates tzdata libstdc++ curl-minimal vim-minimal \
+  && dnf --installroot=/rootfs --use-host-config clean all \
+  && rm -rf /rootfs/var/cache/* /rootfs/var/log/* /rootfs/usr/share/locale/* \
+  && ln -sf vi /rootfs/usr/bin/vim \
+  && echo "$mrsm_user:x:$mrsm_gid:" >> /rootfs/etc/group \
+  && echo "$mrsm_user:x:$mrsm_uid:$mrsm_gid::/home/$mrsm_user:/bin/bash" >> /rootfs/etc/passwd \
+  && install -d -o "$mrsm_uid" -g "$mrsm_gid" "/rootfs/home/$mrsm_user" "/rootfs$mrsm_root_dir"
+COPY --from=native-builder /out/mrsm /rootfs/usr/local/bin/mrsm
+COPY --from=duckdb-driver /out/ /rootfs/
+
+FROM rust-rootfs AS rust-full-rootfs
+RUN dnf install -y --installroot=/rootfs --use-host-config --releasever=44 \
+      --setopt=install_weak_deps=False --nodocs \
+      gcc gcc-c++ make cmake pkgconf-pkg-config openssl-devel git-core \
+  && dnf --installroot=/rootfs --use-host-config clean all \
+  && rm -rf /rootfs/var/cache/* /rootfs/var/log/* /rootfs/usr/share/locale/*
+COPY --from=rust-toolchain /usr/local/rustup/ /rootfs/usr/local/rustup/
+COPY --from=rust-toolchain /usr/local/cargo/bin/ /rootfs/usr/local/cargo/bin/
+RUN install -d -o "$mrsm_uid" -g "$mrsm_gid" "/rootfs/home/$mrsm_user/.cargo"
+COPY --chown=$mrsm_uid:$mrsm_gid --from=plugin-dependencies /plugin-cargo/registry/ /rootfs/home/$mrsm_user/.cargo/registry/
+
+
+FROM scratch AS rust
+ARG duckdb_driver= mrsm_user=meerschaum mrsm_root_dir=/meerschaum mrsm_uid=1000 mrsm_gid=1000
+ENV MRSM_DUCKDB_LIB=${duckdb_driver:+/usr/local/lib/meerschaum/duckdb/libduckdb.so} \
+    MRSM_USER=$mrsm_user MRSM_DEP_GROUP=rust MRSM_NO_AUTO_INSTALL=1 \
+    MRSM_UID=$mrsm_uid MRSM_GID=$mrsm_gid MRSM_ROOT_DIR=$mrsm_root_dir \
+    MRSM_WORK_DIR=$mrsm_root_dir MRSM_RUNTIME=docker \
+    HOME=/home/$mrsm_user MRSM_HOME=/home/$mrsm_user PATH=/usr/local/bin:/usr/bin LANG=C.UTF-8
+COPY --from=rust-rootfs /rootfs/ /
+USER $MRSM_UID:$MRSM_GID
+WORKDIR $MRSM_ROOT_DIR
+VOLUME $MRSM_ROOT_DIR
+ENTRYPOINT ["mrsm"]
+
+FROM scratch AS rust-full
+ARG duckdb_driver= mrsm_user=meerschaum mrsm_root_dir=/meerschaum mrsm_uid=1000 mrsm_gid=1000
+ENV MRSM_DUCKDB_LIB=${duckdb_driver:+/usr/local/lib/meerschaum/duckdb/libduckdb.so} \
+    MRSM_USER=$mrsm_user MRSM_DEP_GROUP=rust-full MRSM_NO_AUTO_INSTALL=1 \
+    MRSM_UID=$mrsm_uid MRSM_GID=$mrsm_gid MRSM_ROOT_DIR=$mrsm_root_dir \
+    MRSM_WORK_DIR=$mrsm_root_dir MRSM_RUNTIME=docker \
+    HOME=/home/$mrsm_user MRSM_HOME=/home/$mrsm_user \
+    RUSTUP_HOME=/usr/local/rustup CARGO_HOME=/home/$mrsm_user/.cargo \
+    PATH=/usr/local/cargo/bin:/usr/local/bin:/usr/bin LANG=C.UTF-8
+COPY --from=rust-full-rootfs /rootfs/ /
+USER $MRSM_UID:$MRSM_GID
+WORKDIR $MRSM_ROOT_DIR
+VOLUME $MRSM_ROOT_DIR
+ENTRYPOINT ["mrsm"]
+
+### `docker build .` remains the complete, beginner-friendly image.
 FROM full AS default

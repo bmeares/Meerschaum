@@ -47,7 +47,7 @@ def _platform(command):
 def test_a_local_build_loads_for_the_builders_platform(tmp_path):
     result, commands = _buildx(tmp_path, '5.0.0rc2')
     assert result.returncode == 0, result.stderr
-    assert len(commands) == 3
+    assert len(commands) == 5
     for command in commands:
         assert ' --load ' in command and '--push' not in command
         assert _platform(command) is None, 'a loaded image cannot be a manifest list'
@@ -55,6 +55,8 @@ def test_a_local_build_loads_for_the_builders_platform(tmp_path):
         [f'{IMAGE}:5.0.0rc2-minimal'],
         [f'{IMAGE}:5.0.0rc2-full', f'{IMAGE}:5.0.0rc2-api'],
         [f'{IMAGE}:5.0.0rc2-slim'],
+        [f'{IMAGE}:5.0.0rc2-rust'],
+        [f'{IMAGE}:5.0.0rc2-rust-full'],
     ]
 
 
@@ -79,7 +81,7 @@ def test_a_per_architecture_push_pushes_only_the_architecture_tags(tmp_path, pla
         )
         assert result.returncode == 0, result.stderr
         assert [_tags(c) for c in commands] == [
-            [f'{IMAGE}:{version}-{name}-{arch}'] for name in ('minimal', 'full', 'slim')
+            [f'{IMAGE}:{version}-{name}-{arch}'] for name in ('minimal', 'full', 'slim', 'rust', 'rust-full')
         ], 'a release must not move latest/full/slim/api from one architecture'
         assert {_platform(c) for c in commands} == {platform}
         assert all(' --push ' in c for c in commands)
@@ -92,21 +94,23 @@ def test_the_merge_of_a_prerelease_makes_only_version_tags(tmp_path):
         f'docker buildx imagetools create -t {IMAGE}:5.0.0rc2-{name} '
         + (f'-t {IMAGE}:5.0.0rc2-api ' if name == 'full' else '')
         + f'{IMAGE}:5.0.0rc2-{name}-amd64'
-        for name in ('minimal', 'full', 'slim')
+        for name in ('minimal', 'full', 'slim', 'rust', 'rust-full')
     ]
 
 
 def test_the_merge_of_a_release_moves_the_floating_tags(tmp_path):
     result, commands = _buildx(tmp_path, '5.0.0', '--merge')
     assert result.returncode == 0, result.stderr
-    by_name = {c.split('-t ')[1].split(' ')[0].rsplit('-', 1)[-1]: c for c in commands}
-    assert set(by_name) == {'minimal', 'full', 'slim'}
+    by_name = {c.split('-t ')[1].split(' ')[0].split(':5.0.0-', 1)[1]: c for c in commands}
+    assert set(by_name) == {'minimal', 'full', 'slim', 'rust', 'rust-full'}
     assert _tags(by_name['full']) == [
         f'{IMAGE}:5.0.0-full', f'{IMAGE}:5.0.0-api', f'{IMAGE}:full', f'{IMAGE}:latest',
         f'{IMAGE}:5.0.0', f'{IMAGE}:api',
     ]
     assert _tags(by_name['minimal']) == [f'{IMAGE}:5.0.0-minimal', f'{IMAGE}:minimal']
     assert _tags(by_name['slim']) == [f'{IMAGE}:5.0.0-slim', f'{IMAGE}:slim']
+    for variant in ('rust', 'rust-full'):
+        assert _tags(by_name[variant]) == [f'{IMAGE}:5.0.0-{variant}', f'{IMAGE}:{variant}']
     for command in commands:
         assert command.split(' ')[-2].endswith('-amd64') and command.split(' ')[-1].endswith('-arm64')
 

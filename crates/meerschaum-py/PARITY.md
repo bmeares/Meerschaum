@@ -1558,8 +1558,8 @@ standard Arrow C stream; checked with an old `native_demo` build against the new
 
 ## Approved rc6 behavior changes (2026-10-21)
 
-The maintainer approved these additive or changed behaviors in
-`docs/design/v5.0.0rc6.md`; v4 recordings remain the oracle for unaffected behavior.
+The maintainer approved these additive or changed behaviors (D24 in `docs/design/v5.0.0.md`);
+v4 recordings remain the oracle for unaffected behavior.
 
 - Registered cross-instance Pipelines and their lifecycle/analysis actions are visible in
   action listings and completion. Parity assertions may exclude documented v5 additions at

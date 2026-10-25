@@ -15,7 +15,7 @@
 //!   plugins as imported when the SDK opened them, and reads a failing plugin's error from the
 //!   manifest. v4 imports in the CLI process.
 //! - A native (C-ABI) plugin is installed, uninstalled and verified like a Python one; its source
-//!   cannot be edited (`edit plugins` says so).
+//!   can be edited when its Rust source is present.
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -35,7 +35,8 @@ use super::lifecycle::{
     all_plugin_names, exception, plugin_installed, plugin_is_native, refresh, repo_connector,
 };
 use super::plugin_files::{
-    declared_version, is_native_plugin_dir, plugin_file, remove_origin, split_repo,
+    declared_version, is_native_plugin_dir, native_plugin_path, native_source, native_version,
+    plugin_file, remove_origin, split_repo,
 };
 use super::{flag, info, items_str, plural, print_tuple, session, warn, words, yes_no};
 
@@ -248,12 +249,18 @@ pub fn edit_plugins(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     let dirs = plugins_dirs(rt);
     for requested in action {
         let name = plugin_name(&requested)?;
-        let Some(file) = plugin_file(&dirs, &name) else {
-            if plugin_is_native(rt, &name) {
+        let native = native_plugin_path(&dirs, &name);
+        let file = if let Some(path) = &native {
+            let Some(source) = native_source(path) else {
                 return Ok(SuccessTuple::fail(format!(
-                    "Plugin '{name}' is a native plugin; edit its source and rebuild it."
+                    "Plugin '{name}' has no editable Rust source. Install its source package to edit it."
                 )));
-            }
+            };
+            Some(source)
+        } else {
+            plugin_file(&dirs, &name)
+        };
+        let Some(file) = file else {
             warn(rt, &format!("Plugin '{name}' is not installed."));
             let create = yes_no(
                 rt,
@@ -492,18 +499,37 @@ pub fn register_uploads(
         record.attributes = session
             .block_on(connector.get_plugin_attributes(&record))
             .map_err(|e| ActionError::new("Exception", e.to_string()))?;
-        let file = plugin_file(&dirs, name);
+        let native = native_plugin_path(&dirs, name);
+        let file = if let Some(path) = &native {
+            native_source(path)
+        } else {
+            plugin_file(&dirs, name)
+        };
         let source = file
             .as_ref()
             .and_then(|f| std::fs::read_to_string(f).ok())
             .unwrap_or_default();
-        record.version = declared_version(&source).ok().flatten();
+        record.version = if let Some(path) = &native {
+            native_version(path)
+        } else {
+            declared_version(&source).ok().flatten()
+        };
         let existing = record
             .attributes
             .get("description")
             .map(pyfmt::py_str)
             .unwrap_or_default();
-        let doc = file.as_deref().map(plugin_docstring).unwrap_or_default();
+        let doc = if native.is_some() {
+            source
+                .lines()
+                .take_while(|line| line.trim().starts_with("//!") || line.trim().is_empty())
+                .filter_map(|line| line.trim().strip_prefix("//!"))
+                .map(str::trim)
+                .collect::<Vec<_>>()
+                .join("\n")
+        } else {
+            file.as_deref().map(plugin_docstring).unwrap_or_default()
+        };
         let mut desc: Option<String> = Some(if existing.is_empty() { doc } else { existing });
 
         let current = desc.clone().unwrap_or_default();
@@ -569,7 +595,10 @@ pub fn register_uploads(
 /// `Plugin.make_tar()`: compress the plugin's sources into `<archives>/<name>.tar.gz`.
 fn make_tar(rt: &mut Runtime<'_>, name: &str, debug: bool) -> Result<PathBuf, ActionError> {
     let dirs = plugins_dirs(rt);
-    let file = plugin_file(&dirs, name)
+    let native = native_plugin_path(&dirs, name);
+    let file = native
+        .clone()
+        .or_else(|| plugin_file(&dirs, name))
         .ok_or_else(|| exception(format!("Could not find file for plugin '{name}'.")))?;
     let archive_path = {
         let paths = rt.config().paths();
@@ -585,7 +614,7 @@ fn make_tar(rt: &mut Runtime<'_>, name: &str, debug: bool) -> Result<PathBuf, Ac
             })
             .join(format!("{name}.tar.gz"))
     };
-    let is_dir = file.file_name().is_some_and(|n| n == "__init__.py");
+    let is_dir = file.is_dir() || file.file_name().is_some_and(|n| n == "__init__.py");
     let real = std::fs::canonicalize(&file).unwrap_or(file.clone());
     let write = || -> std::io::Result<()> {
         if let Some(parent) = archive_path.parent() {
@@ -599,26 +628,39 @@ fn make_tar(rt: &mut Runtime<'_>, name: &str, debug: bool) -> Result<PathBuf, Ac
         builder.follow_symlinks(false);
         if !is_dir {
             let plain = real.clone();
-            builder.append_path_with_name(&plain, format!("{name}.py"))?;
+            let extension = if native.is_some() { "rs" } else { "py" };
+            builder.append_path_with_name(&plain, format!("{name}.{extension}"))?;
         } else {
-            let root = real.parent().unwrap_or(&real).to_path_buf();
-            let ignored = patterns_to_ignore(&root);
+            let root = if native.is_some() {
+                real.clone()
+            } else {
+                real.parent().unwrap_or(&real).to_path_buf()
+            };
+            let ignored = patterns_to_ignore(&root, native.is_some());
             if debug {
                 let mut shown: Vec<&String> = ignored.iter().collect();
                 shown.sort();
                 eprintln!("Patterns to ignore:\n{shown:?}");
             }
             let mut files = Vec::new();
-            walk_files(&root, "", &mut files);
+            walk_files_inner(&root, "", &mut files, native.is_some());
             files.sort();
             for relative in files {
                 let member = format!("{name}/{relative}");
                 let base = relative.rsplit('/').next().unwrap_or_default();
                 // PARITY: `if pattern in str(fp) or f.startswith('.')` runs inside the loop over
                 // the patterns, so a plugin whose patterns match nothing keeps its dotfiles.
-                let skip = ignored
-                    .iter()
-                    .any(|pattern| member.contains(pattern.as_str()) || base.starts_with('.'));
+                let skip = if native.is_some() && root.join(".gitignore").is_file() {
+                    ignored.contains(&relative)
+                } else if native.is_some() {
+                    ignored
+                        .iter()
+                        .any(|pattern| member.contains(pattern.as_str()))
+                } else {
+                    ignored
+                        .iter()
+                        .any(|pattern| member.contains(pattern.as_str()) || base.starts_with('.'))
+                };
                 if skip {
                     continue;
                 }
@@ -639,12 +681,19 @@ fn make_tar(rt: &mut Runtime<'_>, name: &str, debug: bool) -> Result<PathBuf, Ac
 
 /// Files below `dir` as `/`-joined relative paths (`os.walk` with `followlinks=False`: a
 /// symlink to a directory is listed but not entered, and is not a file).
-fn walk_files(dir: &Path, prefix: &str, out: &mut Vec<String>) {
+fn walk_files_inner(dir: &Path, prefix: &str, out: &mut Vec<String>, native: bool) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };
     for entry in entries.flatten() {
         let name = entry.file_name().to_string_lossy().into_owned();
+        if native
+            && (matches!(name.as_str(), "target" | "__pycache__")
+                || (name.starts_with('.') && name != ".cargo")
+                || entry.file_type().is_ok_and(|t| t.is_symlink()))
+        {
+            continue;
+        }
         let relative = if prefix.is_empty() {
             name.clone()
         } else {
@@ -654,7 +703,7 @@ fn walk_files(dir: &Path, prefix: &str, out: &mut Vec<String>) {
         let is_link = entry.file_type().is_ok_and(|t| t.is_symlink());
         if path.is_dir() {
             if !is_link {
-                walk_files(&path, &relative, out);
+                walk_files_inner(&path, &relative, out, native);
             }
         } else {
             out.push(relative);
@@ -664,7 +713,7 @@ fn walk_files(dir: &Path, prefix: &str, out: &mut Vec<String>) {
 
 /// `parse_gitignore()`: the default patterns themselves without a `.gitignore`, else the set of
 /// files below `root` that `default_patterns + .gitignore` match (`PathSpec.match_tree`).
-fn patterns_to_ignore(root: &Path) -> BTreeSet<String> {
+fn patterns_to_ignore(root: &Path, native: bool) -> BTreeSet<String> {
     const DEFAULTS: [&str; 5] = [".pyc", "__pycache__/", "eggs/", "__pypackages__/", ".git"];
     let gitignore = root.join(".gitignore");
     let Ok(text) = std::fs::read_to_string(&gitignore) else {
@@ -677,7 +726,7 @@ fn patterns_to_ignore(root: &Path) -> BTreeSet<String> {
         .filter_map(GitPattern::new)
         .collect();
     let mut files = Vec::new();
-    walk_files(root, "", &mut files);
+    walk_files_inner(root, "", &mut files, native);
     files
         .into_iter()
         .filter(|file| {

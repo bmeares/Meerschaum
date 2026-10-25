@@ -40,6 +40,8 @@ default = ["oracle"]
 oracle = ["meerschaum-connector-sql/oracle"]
 
 [dependencies]
+reqwest = { workspace = true }
+tempfile = "3"
 toml = { workspace = true }
 meerschaum-core = { workspace = true }
 meerschaum-compose = { workspace = true }

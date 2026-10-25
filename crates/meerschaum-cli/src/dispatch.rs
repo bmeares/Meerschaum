@@ -306,6 +306,8 @@ pub struct Runtime<'a> {
     pub cwd: Option<PathBuf>,
     /// Running inside the interactive shell.
     pub in_shell: bool,
+    /// Exit the old engine after self-upgrade; the CLI launcher starts a fresh shell.
+    pub restart_requested: bool,
     /// The connectors and Tokio runtime the native instance actions use (built on first use).
     pub native: Option<crate::native::Session>,
     /// Stdout is a terminal: graph runs print live progress lines before the Gantt chart. Only
@@ -344,6 +346,7 @@ impl<'a> Runtime<'a> {
             host: Box::new(SystemHost),
             cwd: None,
             in_shell: false,
+            restart_requested: false,
             native: None,
             live: std::io::IsTerminal::is_terminal(&std::io::stdout()),
             progress: crate::format::progress::ProgressSink::stderr_if_tty(),
@@ -371,6 +374,7 @@ impl<'a> Runtime<'a> {
             host: Box::new(RecordingHost::default()),
             cwd: None,
             in_shell: false,
+            restart_requested: false,
             native: None,
             live: false,
             progress: crate::format::progress::ProgressSink::Off,
@@ -459,7 +463,10 @@ impl<'a> Runtime<'a> {
 }
 
 fn contains(sysargs: &[String], flag: &str) -> bool {
-    sysargs.iter().any(|a| a == flag)
+    sysargs
+        .iter()
+        .take_while(|a| !matches!(a.as_str(), "--" | "-A" | "--sub-args"))
+        .any(|a| a == flag)
 }
 
 /// `meerschaum.__main__.main`: returns the process exit code.

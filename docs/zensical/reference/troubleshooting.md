@@ -23,22 +23,22 @@ mrsm doctor --debug          # the time each check took
 
 In the SDK, importing `meerschaum.actions` initializes the action registry and discovers plugins before any action runs. A subsequent `actions['doctor'](...)` call is read-only from that point; `mrsm.entry(['doctor', ...])` also avoids that initial registry import.
 
-Every check is **PASS**, **WARN** (works, but look at it), **FAIL** (something is broken) or **SKIP** (not applicable here, the detail says why); each WARN or FAIL carries the exact command or setting that fixes it. The command fails (and exits `1`) only when a check FAILs. `--nopretty` exits `1` on a FAIL too (since 5.0.0rc2; v4 always exited `0` with `--nopretty`), and a script can also read `summary.ok` (and `summary.fail`) of the JSON document. A sample on a machine with a Python plugin installed, where an old `meerschaum` 4.x in the user site shadows the one `mrsm` was built with:
+Every check is **PASS**, **WARN** (works, but look at it), **FAIL** (something is broken) or **SKIP** (not applicable here, the detail says why); each WARN or FAIL carries the exact command or setting that fixes it. The command fails (and exits `1`) only when a check FAILs. `--nopretty` exits `1` on a FAIL too (v4 always exited `0` with `--nopretty`), and a script can also read `summary.ok` (and `summary.fail`) of the JSON document. A sample on a machine with a Python plugin installed, where an old `meerschaum` 4.x in the user site shadows the one `mrsm` was built with:
 
 ```text
 ┏━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
 ┃ Group      ┃ Check              ┃ Status ┃ Detail                                                ┃
 ┡━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
-│ install    │ meerschaum         │ PASS   │ 5.0.0rc1; Python extension, in-process                │
+│ install    │ meerschaum         │ PASS   │ 5.0.0; Python extension, in-process                   │
 │            │ worker python      │ PASS   │ Python 3.13.1 at /usr/bin/python3                     │
 │            │ meerschaum package │ FAIL   │ /usr/bin/python3 imports `meerschaum` 4.1.4 from      │
 │            │                    │        │ /home/user/.local/lib/python3.13/site-packages/       │
 │            │                    │        │ meerschaum (the user site), but this program is       │
-│            │                    │        │ 5.0.0rc1                                              │
+│            │                    │        │ 5.0.0                                                 │
 │            │                    │        │ Fix: remove or upgrade the stale copy                 │
 │            │                    │        │ (`/usr/bin/python3 -m pip install --upgrade           │
 │            │                    │        │ meerschaum`, or delete that directory), or set        │
-│            │                    │        │ MRSM_PYTHON to the interpreter that has 5.0.0rc1      │
+│            │                    │        │ MRSM_PYTHON to the interpreter that has 5.0.0         │
 │ paths      │ root               │ PASS   │ /home/user/.config/meerschaum (writable)              │
 │            │ disk: root         │ PASS   │ /home/user/.config/meerschaum: 11.3 GB free of        │
 │            │                    │        │ 214.9 GB, inodes 90% free                             │

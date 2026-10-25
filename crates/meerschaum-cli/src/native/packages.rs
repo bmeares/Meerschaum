@@ -245,59 +245,19 @@ fn docker_available() -> bool {
         .is_ok_and(|s| s.success())
 }
 
-/// `upgrade meerschaum [groups]` (alias `mrsm`): upgrade the wheels in the interpreter that runs
-/// plugins (`pip_install('meerschaum[groups]', venv=None)`), pull the Docker images when Docker
-/// answers, optionally bring the stack up, then reload.
+/// Upgrade the active installation, then optionally refresh its Docker stack.
 pub fn upgrade_meerschaum(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
-    let action = words(args, "action");
-    let (force, yes, noask) = (flag(args, "force"), flag(args, "yes"), flag(args, "noask"));
-    let debug = flag(args, "debug");
-    let restart_stack = force
-        || (docker_available()
-            && yes_no(rt, "Bring up the stack after upgrading?", "n", yes, noask)?);
-    let dependencies = (action != [String::new()])
-        .then(|| action.first().cloned())
-        .flatten()
-        .filter(|d| !d.is_empty());
-    let install_name = format!(
-        "meerschaum{}",
-        dependencies
-            .as_ref()
-            .map(|d| format!("[{}]", d.split(',').collect::<Vec<_>>().join(",")))
-            .unwrap_or_default()
-    );
-    let mut env = PipEnv::new(rt);
-    match upgrade_interpreter(rt) {
-        Ok(python) => env.python = python,
-        Err(message) => return Ok(SuccessTuple::fail(message)),
-    }
-    // The user's installer arguments (`--break-system-packages`, `--pre`, ...) follow
-    // `--upgrade`; nothing is added implicitly.
-    let mut installer_args = vec!["--upgrade".to_string()];
-    installer_args.extend(words(args, "sub_args"));
-    // The `meerschaum-cli` wheel is pinned to the same version by `meerschaum` itself.
-    if !pip_install(
-        &env,
-        rt,
-        &PipInstall {
-            names: vec![install_name],
-            args: Some(installer_args),
-            host: true,
-            debug,
-            ..PipInstall::default()
-        },
-    ) {
-        return Ok(SuccessTuple::fail("Failed to upgrade Meerschaum via pip."));
-    }
-    if docker_available() {
+    let result = super::self_upgrade::upgrade(args, rt)?;
+    if result.success && docker_available() {
+        let (force, yes, noask) = (flag(args, "force"), flag(args, "yes"), flag(args, "noask"));
+        let debug = flag(args, "debug");
         run_stack(rt, &["pull"], debug);
-        if restart_stack {
-            // The offer below prints the extensions hint once (not `stack up` too).
+        if force || yes_no(rt, "Bring up the stack after upgrading?", "n", yes, noask)? {
             super::extensions::without_stack_hint(|| run_stack(rt, &["up", "-d"], debug));
             offer_extension_upgrade(rt, yes, noask, debug);
         }
     }
-    crate::builtin::reload(args, rt)
+    Ok(result)
 }
 
 /// v5: once the stack is up again, wait (bounded) for its database to be healthy and offer
@@ -382,68 +342,6 @@ fn wait_for_stack_db(rt: &mut Runtime<'_>, limit: std::time::Duration) -> bool {
         }
         std::thread::sleep(std::time::Duration::from_secs(2));
     }
-}
-
-/// The interpreter `upgrade meerschaum` installs into: `MRSM_PYTHON`, else the one that sits next
-/// to this binary (`<prefix>/bin/python3` for `<prefix>/bin/mrsm`: a `pipx`, `uv tool` or `pip`
-/// environment), which must have the `meerschaum` distribution installed. Anything else is
-/// refused: v5 never upgrades whatever `python3` happens to be on `PATH`.
-pub fn upgrade_interpreter(rt: &mut Runtime<'_>) -> Result<String, String> {
-    let explicit = (rt.env)("MRSM_PYTHON").filter(|p| !p.trim().is_empty());
-    let python = match explicit {
-        Some(python) => python,
-        None => sibling_interpreter().ok_or_else(|| {
-            "Cannot tell which Python environment Meerschaum is installed in: no interpreter \
-             sits next to this `mrsm` binary. Set `MRSM_PYTHON` to the interpreter that has \
-             `meerschaum` installed and run `upgrade meerschaum` again."
-                .to_string()
-        })?,
-    };
-    const CHECK: &str = "\
-import importlib.metadata, sys
-try:
-    importlib.metadata.version('meerschaum')
-except Exception:
-    sys.exit(3)
-";
-    let installed = Command::new(&python)
-        // Ignore `PYTHON*` variables and exclude the current directory: source-tree metadata
-        // must not make an empty environment look installed. Keep legitimate user-site installs.
-        .args(["-E", "-P", "-c", CHECK])
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status();
-    match installed {
-        Ok(status) if status.success() => Ok(python),
-        Ok(_) => Err(format!(
-            "Meerschaum is not installed in the Python environment '{python}', so it will not \
-             be upgraded there. Set `MRSM_PYTHON` to the interpreter that has `meerschaum` \
-             installed."
-        )),
-        Err(e) => Err(format!(
-            "Unable to run the Python interpreter '{python}': {e}"
-        )),
-    }
-}
-
-/// The interpreter of the environment which has `meerschaum`: the running interpreter inside the
-/// Python extension, else `<dir>/python3` (`python`, `python.exe`) next to the running binary,
-/// after resolving symlinks (`pipx` exposes `mrsm` through a link into the environment).
-fn sibling_interpreter() -> Option<String> {
-    // Inside the Python extension (`pip install meerschaum`) the interpreter running the CLI is
-    // the environment which has `meerschaum`; `current_exe()` would resolve a venv's `python`
-    // symlink to the base interpreter.
-    if meerschaum_core::self_exe::runs_in_python() {
-        return meerschaum_core::self_exe::self_command().into_iter().next();
-    }
-    let exe = std::env::current_exe().ok()?.canonicalize().ok()?;
-    let dir = exe.parent()?;
-    ["python3", "python", "python3.exe", "python.exe"]
-        .iter()
-        .map(|name| dir.join(name))
-        .find(|candidate| candidate.is_file())
-        .map(|candidate| candidate.to_string_lossy().into_owned())
 }
 
 /// `actions['stack'](words, debug=debug)`; the result is ignored, as in v4.

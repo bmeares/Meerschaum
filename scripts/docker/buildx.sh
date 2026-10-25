@@ -1,10 +1,10 @@
 #! /usr/bin/env bash
 # Usage: scripts/docker/buildx.sh [--push] [--v4-only] [--platform P] [--arch-tags] [--merge]
 #
-# Builds the Meerschaum images (see the Dockerfile header and docs/design/v5-build.md):
-#   - one image per dep group in $tags (scripts/config.sh): `minimal` uses the default (v4) target,
-#     `full` uses `--target full` (`meerschaum[full]`; its `mrsm` is the console script);
-#   - `--target slim`, tagged `$image:<version>-slim` (and `$image:slim` for releases).
+# Builds the image variants (Dockerfile, docs/design/v5-build.md):
+#   minimal/slim: base Python wheel; full: Python extras and both build toolchains;
+#   rust: native runtime without Python; rust-full: native runtime + Rust build toolchain.
+#   api remains an alias of full, never a separate dependency group.
 # Images are loaded into the local daemon unless --push is given; loaded images are then smoke-tested
 # (scripts/docker/smoke_image.sh: curl, git in full, the stack's API healthcheck; SKIP_SMOKE=1 skips it).
 #
@@ -16,7 +16,7 @@
 #                 (needs --push and --platform with one platform): what each per-architecture job of
 #                 .github/workflows/docker-build.yaml pushes after its build and smoke checks.
 #   --merge       build nothing: join the `-<arch>` tags of every `$platforms` architecture into the
-#                 multi-architecture tags (the version-qualified ones, and `latest`, `full`, `slim`,
+#                 multi-architecture tags (the version-qualified ones, and `latest`, `full`, `rust`, `rust-full`, `slim`,
 #                 `minimal`, `api` for a release) with `docker buildx imagetools create`. Run it after
 #                 every `--push --arch-tags` job succeeded. The `-<arch>` tags stay in the registry as
 #                 the architectures' own images.
@@ -132,7 +132,7 @@ final_tags() {
 image_groups() {
   local tag
   for tag in "${tags[@]}"; do echo "$tag"; done
-  if [ -z "$v4_only" ]; then echo "slim"; fi
+  if [ -z "$v4_only" ]; then printf '%s\n' slim rust rust-full; fi
 }
 
 if [ -n "$merge" ]; then
@@ -194,8 +194,8 @@ tags_for() {
 
 for tag in "${tags[@]}"; do
   target=""
-  if [ -z "$v4_only" ] && [ "$tag" == "full" ]; then
-    target="full"
+  if [ -z "$v4_only" ]; then
+    case "$tag" in full) target=full ;; minimal) target=slim ;; esac
   fi
   specific_tags=()
   while IFS= read -r t; do specific_tags+=("$t"); done < <(tags_for "$tag")
@@ -203,14 +203,11 @@ for tag in "${tags[@]}"; do
 done
 
 if [ -z "$v4_only" ]; then
-  slim_tags=()
-  if [ -n "$arch_tags" ]; then
-    while IFS= read -r t; do slim_tags+=("$t"); done < <(tags_for slim)
-  else
-    slim_tags=("$image:$mrsm_version-slim")
-    [ -z "$prerelease" ] && slim_tags+=("$image:slim")
-  fi
-  build "slim" "minimal" "${slim_tags[@]}"
+  for variant in slim rust rust-full; do
+    variant_tags=()
+    while IFS= read -r t; do variant_tags+=("$t"); done < <(tags_for "$variant")
+    build "$variant" minimal "${variant_tags[@]}"
+  done
 fi
 
 ### Smoke-test the images that were loaded locally (scripts/docker/smoke_image.sh): `curl` in every
@@ -225,11 +222,15 @@ if [ "$push" = "--load" ] && [ -z "${SKIP_SMOKE:-}" ] && [ -z "$dry_run" ]; then
       smoke_args+=(--image "$image:$mrsm_version-$tag")
     fi
   done
-  [ -z "$v4_only" ] && smoke_args+=(--slim-image "$image:$mrsm_version-slim")
+  if [ -z "$v4_only" ]; then
+    smoke_args+=(--slim-image "$image:$mrsm_version-slim" --rust-image "$image:$mrsm_version-rust" --rust-full-image "$image:$mrsm_version-rust-full")
+  fi
   ./scripts/docker/smoke_image.sh "${smoke_args[@]}"
 fi
 
 if [ -n "${GITHUB_OUTPUT:-}" ]; then
   echo "slim_image=$image:$mrsm_version-slim" >> "$GITHUB_OUTPUT"
   echo "full_image=$image:$mrsm_version-full" >> "$GITHUB_OUTPUT"
+  echo "rust_image=$image:$mrsm_version-rust" >> "$GITHUB_OUTPUT"
+  echo "rust_full_image=$image:$mrsm_version-rust-full" >> "$GITHUB_OUTPUT"
 fi

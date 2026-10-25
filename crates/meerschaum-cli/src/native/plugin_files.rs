@@ -49,6 +49,22 @@ pub fn native_plugin_path(dirs: &[PathBuf], name: &str) -> Option<PathBuf> {
     })
 }
 
+/// Editable native entry point. A binary-only package has no source to edit.
+pub fn native_source(path: &Path) -> Option<PathBuf> {
+    if path.is_file() {
+        return Some(path.to_path_buf());
+    }
+    let manifest = std::fs::read_to_string(path.join("Cargo.toml")).ok()?;
+    let cargo: toml::Value = toml::from_str(&manifest).ok()?;
+    let relative = cargo
+        .get("lib")
+        .and_then(|lib| lib.get("path"))
+        .and_then(toml::Value::as_str)
+        .unwrap_or("src/lib.rs");
+    let source = path.join(relative);
+    source.is_file().then_some(source)
+}
+
 /// Native descriptors carry versions without importing the plugin; single files are unversioned.
 pub fn native_version(path: &Path) -> Option<String> {
     let text = std::fs::read_to_string(path.join("plugin.toml")).ok()?;
@@ -537,6 +553,28 @@ impl Drop for Rollback {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn native_edit_source_respects_cargo_library_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        write(
+            &root.join("plugin.toml"),
+            "name = 'demo'\nversion = '1.0.0'\n",
+        );
+        assert_eq!(native_source(root), None);
+        write(&root.join("Cargo.toml"), "[package]\nname = 'demo'\n");
+        write(&root.join("src/lib.rs"), "");
+        assert_eq!(native_source(root), Some(root.join("src/lib.rs")));
+        write(&root.join("Cargo.toml"), "[lib]\npath = 'custom.rs'\n");
+        assert_eq!(native_source(root), None);
+        write(&root.join("custom.rs"), "");
+        assert_eq!(native_source(root), Some(root.join("custom.rs")));
+        assert_eq!(
+            native_source(&root.join("custom.rs")),
+            Some(root.join("custom.rs"))
+        );
+    }
 
     fn write(path: &Path, text: &str) {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();

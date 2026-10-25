@@ -406,8 +406,8 @@ fn metadef_impl(flavor: Flavor, args: &MetadefArgs<'_>, execution: bool) -> Resu
         }
     }
 
-    // TODO(port): the experimental `join_fetch` path (`_join_fetch_query`) is not ported;
-    // `system.experimental.join_fetch` defaults to `False`.
+    // The experimental `join_fetch` path (`_join_fetch_query`) is not ported: the setting
+    // `system.experimental.join_fetch` is ignored (`PARITY.md` W16P1-005; `mrsm doctor` flags it).
     let mut meta_def = format_cte_subquery(
         &definition,
         flavor,

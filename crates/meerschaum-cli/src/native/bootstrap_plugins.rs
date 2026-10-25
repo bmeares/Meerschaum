@@ -131,7 +131,7 @@ fn clear_screen(rt: &mut Runtime<'_>, args: &ArgsMap) {
 
 /// `bootstrap_plugin(plugin_name)`.
 fn bootstrap_plugin(args: &ArgsMap, rt: &mut Runtime<'_>, plugin_name: &str) -> ActionResult {
-    // The name becomes `<plugins>/<name>.py`.
+    // The name becomes `<plugins>/<name>.py` or `<plugins>/<name>.rs`.
     if let Err(message) = super::plugin_files::validate_plugin_name(plugin_name) {
         return Ok(SuccessTuple::fail(message));
     }
@@ -168,7 +168,15 @@ fn bootstrap_plugin(args: &ArgsMap, rt: &mut Runtime<'_>, plugin_name: &str) -> 
         clear_screen(rt, args);
     }
 
-    let features = choose_features(rt)?;
+    let language = choose(
+        rt,
+        "Which language would you like to use for your plugin?",
+        &["Python".into(), "Rust".into()],
+        Some("Python"),
+        true,
+    )?;
+    let rust = language.as_deref() == Some("Rust");
+    let features = choose_features(rt, rust)?;
     clear_screen(rt, args);
 
     let mut action_name = String::new();
@@ -179,7 +187,7 @@ fn bootstrap_plugin(args: &ArgsMap, rt: &mut Runtime<'_>, plugin_name: &str) -> 
     let action_spaces = action_name.replace('_', " ");
 
     let mut dt_col_name = "None".to_string();
-    if features.iter().any(|f| f == "fetch") {
+    if !rust && features.iter().any(|f| f == "fetch") {
         dt_col_name = get_quoted_dt_col_name(rt);
         clear_screen(rt, args);
     }
@@ -206,54 +214,60 @@ fn bootstrap_plugin(args: &ArgsMap, rt: &mut Runtime<'_>, plugin_name: &str) -> 
         ("action_spaces", &action_spaces),
         ("dt_col_name", &dt_col_name),
     ];
-    let has = |feature: &str| features.iter().any(|f| f == feature);
-    let imports = |key: &str| py_format(line("imports_lines", key), &labels);
-    let feature = |key: &str| py_format(line("feature_lines", key), &labels);
+    let body = if rust {
+        rust_scaffold(plugin_name, &features, &action_name)?
+    } else {
+        let has = |feature: &str| features.iter().any(|f| f == feature);
+        let imports = |key: &str| py_format(line("imports_lines", key), &labels);
+        let feature = |key: &str| py_format(line("feature_lines", key), &labels);
 
-    let mut body = String::new();
-    body.push_str(&feature("header"));
-    body.push_str(&imports("stdlib"));
-    body.push_str(&imports("default"));
-    if has("connector") && !has("instance-connector") {
-        body.push_str(&imports("connector"));
-    }
-    if has("instance-connector") {
-        body.push_str(&imports("instance-connector"));
-    }
-    if has("action") {
-        body.push_str(&imports("action"));
-    }
-    if has("api") && has("web") {
-        body.push_str(&imports("api+web"));
-    } else if has("api") {
-        body.push_str(&imports("api"));
-    } else if has("web") {
-        body.push_str(&imports("web"));
-    }
-    body.push('\n');
-    body.push_str(&feature("default"));
-    body.push_str(&feature("setup"));
-    if has("fetch") {
-        body.push_str(&feature("register"));
-        body.push_str(&feature("fetch"));
-    }
-    if has("connector") && !has("instance-connector") {
-        body.push_str(&feature("connector"));
-    }
-    if has("instance-connector") {
-        body.push_str(&feature("instance-connector"));
-    }
-    if has("action") {
-        body.push_str(&feature("action"));
-    }
-    if has("api") {
-        body.push_str(&feature("api"));
-    }
-    if has("web") {
-        body.push_str(&feature("web"));
-    }
+        let mut body = String::new();
+        body.push_str(&feature("header"));
+        body.push_str(&imports("stdlib"));
+        body.push_str(&imports("default"));
+        if has("connector") && !has("instance-connector") {
+            body.push_str(&imports("connector"));
+        }
+        if has("instance-connector") {
+            body.push_str(&imports("instance-connector"));
+        }
+        if has("action") {
+            body.push_str(&imports("action"));
+        }
+        if has("api") && has("web") {
+            body.push_str(&imports("api+web"));
+        } else if has("api") {
+            body.push_str(&imports("api"));
+        } else if has("web") {
+            body.push_str(&imports("web"));
+        }
+        body.push('\n');
+        body.push_str(&feature("default"));
+        body.push_str(&feature("setup"));
+        if has("fetch") {
+            body.push_str(&feature("register"));
+            body.push_str(&feature("fetch"));
+        }
+        if has("connector") && !has("instance-connector") {
+            body.push_str(&feature("connector"));
+        }
+        if has("instance-connector") {
+            body.push_str(&feature("instance-connector"));
+        }
+        if has("action") {
+            body.push_str(&feature("action"));
+        }
+        if has("api") {
+            body.push_str(&feature("api"));
+        }
+        if has("web") {
+            body.push_str(&feature("web"));
+        }
 
-    let plugin_path = plugins_dir.join(format!("{plugin_name}.py"));
+        body
+    };
+    let extension = if rust { "rs" } else { "py" };
+    let plugin_path = plugins_dir.join(format!("{plugin_name}.{extension}"));
     if let Err(e) = std::fs::write(&plugin_path, body.trim_end()) {
         return Ok(SuccessTuple::fail(format!(
             "Failed to write file '{}':\n{e}",
@@ -310,8 +324,11 @@ fn plugins_dir_path(rt: &mut Runtime<'_>) -> Result<PathBuf, ActionError> {
 
 /// `choose(..., FEATURE_CHOICES.items(), default='fetch', multiple=True, as_indices=True)`:
 /// the keys of the features picked, by number or key, separated by commas.
-fn choose_features(rt: &mut Runtime<'_>) -> Result<Vec<String>, ActionError> {
-    let choices = feature_choices();
+fn choose_features(rt: &mut Runtime<'_>, rust: bool) -> Result<Vec<String>, ActionError> {
+    let choices: Vec<_> = feature_choices()
+        .into_iter()
+        .filter(|(key, _)| !rust || matches!(key.as_str(), "fetch" | "action" | "connector"))
+        .collect();
     let question = "Which of the following features would you like to add to your plugin?\n    Enter your choices, separated by ','.\n";
     let default = "fetch";
     let noask = check_noask(rt, false);
@@ -412,6 +429,43 @@ fn get_quoted_dt_col_name(rt: &mut Runtime<'_>) -> String {
         Ok(name) if name.contains(['"', '\'']) => format!("\"\"\"{name}\"\"\""),
         Ok(name) => format!("\"{name}\""),
     }
+}
+
+/// Single-file shorthand: no manifest, SDK imports, or ABI boilerplate.
+fn rust_scaffold(name: &str, features: &[String], action: &str) -> Result<String, ActionError> {
+    let has = |feature: &str| features.iter().any(|f| f == feature);
+    let mut body = format!("//! {name} plugin.\n\n");
+    if has("fetch") {
+        body.push_str("fn fetch() -> Vec<Value> {\n    vec![json!({\"id\": 1, \"value\": 42})]\n}\n\nfn register() -> Value {\n    json!({\"columns\": {\"id\": \"id\"}})\n}\n\n");
+    }
+    if has("action") {
+        if action.is_empty()
+            || !action
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_')
+        {
+            return Err(ActionError::new(
+                "ValueError",
+                "Rust action names must contain only letters, digits, or underscores.",
+            ));
+        }
+        body.push_str(&format!("/// Run my action.\n#[make_action(name = {action:?})]\nfn run(action: Vec<String>) -> (bool, String) {{\n    (true, format!(\"Hello, {{}}!\", action.join(\", \")))\n}}\n\n"));
+    }
+    if has("connector") {
+        let connector = name.replace('-', "_");
+        if !connector
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_')
+            || ["plugin", "sql", "api", "valkey"].contains(&connector.as_str())
+        {
+            return Err(ActionError::new(
+                "ValueError",
+                "Choose a plugin name usable as a connector type (letters, digits, underscores; no built-in connector names).",
+            ));
+        }
+        body.push_str(&format!("#[make_connector(name = {connector:?})]\nmod source {{\n    fn fetch(connector: &Connector) -> Vec<Value> {{\n        vec![json!({{\"id\": 1, \"source\": connector.label()}})]\n    }}\n}}\n"));
+    }
+    Ok(body)
 }
 
 #[cfg(test)]

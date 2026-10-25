@@ -286,33 +286,9 @@ pub fn show_config(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     }
 }
 
-/// The installed plugins, by scanning the plugins directories (`get_plugins_names()`): a
-/// `<name>.py` file or a `<name>/` package with an `__init__.py`.
+/// Installed Python and Rust plugin names, without importing or compiling them.
 pub fn plugin_names(dirs: &[PathBuf]) -> Vec<String> {
-    let mut names: Vec<String> = Vec::new();
-    for dir in dirs {
-        let Ok(entries) = std::fs::read_dir(dir) else {
-            continue;
-        };
-        for entry in entries.filter_map(|e| e.ok()) {
-            let name = entry.file_name().to_string_lossy().into_owned();
-            if name.starts_with('.') || name == "__pycache__" || name == "__init__.py" {
-                continue;
-            }
-            let path = entry.path();
-            let plugin = if path.is_dir() {
-                path.join("__init__.py").exists().then(|| name.clone())
-            } else {
-                name.strip_suffix(".py").map(str::to_string)
-            };
-            if let Some(p) = plugin
-                && !names.contains(&p)
-            {
-                names.push(p);
-            }
-        }
-    }
-    // PARITY: v4 lists plugins in `os.listdir` order of its symlink directory; sorted here.
+    let mut names = crate::native::plugin_files::installed_plugin_names(dirs);
     names.sort();
     names
 }

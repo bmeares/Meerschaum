@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # Usage: scripts/docker/size_gate.sh [--warn-only] [--slim-max MB] [--full-max MB]
 #                                    [--slim-image IMAGE] [--full-image IMAGE]
+#                                    [--rust-image IMAGE] [--rust-full-image IMAGE]
+#                                    [--rust-max MB] [--rust-full-max MB]
 #
 # Docker image size gate (docs/design/v5.0.0.md §12.1): fails if the `slim` image exceeds
-# --slim-max (default 250) MB or the `full` image exceeds --full-max (default 900) MB.
+# --slim-max (default 250) MB or the `full` image exceeds --full-max (default 2500) MB.
 # Sizes are the uncompressed image size from `docker image inspect` in decimal MB (10^6 bytes),
 # the same unit `docker images` prints. The images must already be loaded locally.
 #
@@ -17,15 +19,23 @@ set -euo pipefail
 
 warn_only=""
 slim_max=250
-full_max=900
+full_max=2500
 slim_image="bmeares/meerschaum:slim"
 full_image="bmeares/meerschaum:full"
+rust_max=250
+rust_full_max=1600
+rust_image=""
+rust_full_image=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --warn-only)  warn_only=1; shift ;;
     --slim-max)   slim_max="$2"; shift 2 ;;
     --full-max)   full_max="$2"; shift 2 ;;
+    --rust-max) rust_max="$2"; shift 2 ;;
+    --rust-full-max) rust_full_max="$2"; shift 2 ;;
+    --rust-image) rust_image="$2"; shift 2 ;;
+    --rust-full-image) rust_full_image="$2"; shift 2 ;;
     --slim-image) slim_image="$2"; shift 2 ;;
     --full-image) full_image="$2"; shift 2 ;;
     -h|--help)    sed -n '2,16p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
@@ -61,6 +71,8 @@ check() {
 
 check slim "$slim_image" "$slim_max"
 check full "$full_image" "$full_max"
+check rust "$rust_image" "$rust_max"
+check rust-full "$rust_full_image" "$rust_full_max"
 
 if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
   {

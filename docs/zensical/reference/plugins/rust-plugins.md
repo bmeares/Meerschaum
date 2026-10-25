@@ -8,6 +8,11 @@ see [custom paths](../environment.md#mrsm_plugins_dir)). You need a Rust toolcha
 with `cargo` available for the first build and after edits. The first build may
 download dependencies; later runs reuse the compiled plugin.
 
+To create a starter file, run `mrsm bootstrap plugins greetings` and choose **Rust**
+when the wizard asks which language to use.
+Use `mrsm edit plugins greetings` to reopen it. Upload it to a repository with
+`mrsm register plugins greetings -r api:your-repo`, just as you would a Python plugin.
+
 ## Add a command
 
 Save this as `greetings.rs`:

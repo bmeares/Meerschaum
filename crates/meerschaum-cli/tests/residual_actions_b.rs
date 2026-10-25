@@ -459,15 +459,12 @@ fn upgrade_meerschaum_never_guesses_an_interpreter() {
     let home = Home::new();
     let path = path_without_docker(&home);
 
-    // No `MRSM_PYTHON` and no interpreter next to the binary (`target/debug/mrsm`): refused, and
-    // the `python3` on `PATH` is never touched.
+    // A development binary is upgraded by rebuilding its checkout, regardless of interpreters
+    // on PATH or the selected Python plugin host.
     let run = home.run_with(&["upgrade", "meerschaum", "--yes"], &[("PATH", &path)]);
     let text = flat(&run.text());
     assert!(!run.success, "{text}");
-    assert!(
-        text.contains("Cannot tell which Python environment Meerschaum is installed in"),
-        "{text}"
-    );
+    assert!(text.contains("source checkout"), "{text}");
 
     // An interpreter without `meerschaum` is refused too.
     let Some(python) = scratch_venv(&home, "bare-venv") else {
@@ -479,10 +476,7 @@ fn upgrade_meerschaum_never_guesses_an_interpreter() {
     );
     let text = flat(&run.text());
     assert!(!run.success, "{text}");
-    assert!(
-        text.contains("Meerschaum is not installed in the Python environment"),
-        "{text}"
-    );
+    assert!(text.contains("source checkout"), "{text}");
     assert!(dist_version(&python, "meerschaum").is_none());
 }
 
@@ -515,15 +509,12 @@ fn upgrade_meerschaum_ignores_source_metadata_in_the_working_directory() {
         plugin_lifecycle_support::run_binary(&["upgrade", "meerschaum", "--yes"], &env, Some(&cwd));
     let text = flat(&run.text());
     assert!(!run.success, "{text}");
-    assert!(
-        text.contains("Meerschaum is not installed in the Python environment"),
-        "{text}"
-    );
+    assert!(text.contains("source checkout"), "{text}");
     assert!(dist_version(&python, "meerschaum").is_none());
 }
 
 #[test]
-fn upgrade_meerschaum_upgrades_the_environment_that_has_it_and_adds_no_system_flag() {
+fn standalone_upgrade_does_not_use_the_plugin_host_as_its_installation() {
     if !python_available() || !installer_available() {
         return;
     }
@@ -532,7 +523,7 @@ fn upgrade_meerschaum_upgrades_the_environment_that_has_it_and_adds_no_system_fl
     let Some(python) = scratch_venv(&home, "mrsm-venv") else {
         return;
     };
-    // Version 1.0.0 is installed; 2.0.0 is offered by the offline wheel directory.
+    // The selected plugin host contains 1.0.0; self-upgrade must leave it alone.
     plugin_lifecycle_support::write_wheel(&home.wheels, "meerschaum", "1.0.0");
     let installed = std::process::Command::new(&python)
         .args([
@@ -569,18 +560,14 @@ fn upgrade_meerschaum_upgrades_the_environment_that_has_it_and_adds_no_system_fl
     );
     let text = flat(&run.text());
     assert!(!text.contains("--break-system-packages"), "{text}");
-    assert!(
-        !text.contains("Failed to upgrade Meerschaum via pip."),
-        "{text}"
-    );
+    assert!(!run.success && text.contains("source checkout"), "{text}");
     assert_eq!(
         dist_version(&python, "meerschaum").as_deref(),
-        Some("2.0.0"),
+        Some("1.0.0"),
         "{text}"
     );
 
-    // An installer that cannot find the requested version fails with v4's message, and the
-    // user's own arguments are passed through (nothing is added behind their back).
+    // Supplying extras does not change installation ownership.
     let run = home.run_with(
         &[
             "upgrade",
@@ -776,10 +763,10 @@ fn edit_plugins_opens_the_editor_for_an_installed_plugin_only() {
 #[test]
 fn bootstrap_plugins_writes_the_scaffold_from_v4s_templates() {
     let home = Home::new();
-    // Feature 1 (fetch), then the editor prompt is answered with Enter.
+    // Accept Python, pick feature 1 (fetch), then answer the remaining prompts.
     let run = home.run_input(
         &["bootstrap", "plugins", "scaffolded"],
-        "1\n\n",
+        "\n1\n\n",
         &[NO_EDITOR, NO_PYTHON],
     );
     let text = flat(&run.text());
@@ -796,7 +783,7 @@ fn bootstrap_plugins_writes_the_scaffold_from_v4s_templates() {
     // An invalid choice asks again.
     let run = home.run_input(
         &["bootstrap", "plugins", "second"],
-        "zzz\n1\n\n",
+        "\nzzz\n1\n\n",
         &[NO_EDITOR, NO_PYTHON],
     );
     let text = flat(&run.text());
@@ -880,7 +867,7 @@ fn an_editor_that_cannot_start_is_an_error_everywhere() {
 
     let run = home.run_input(
         &["bootstrap", "plugins", "fresh"],
-        "1\n\n\n",
+        "\n1\n\n\n",
         &[bad, NO_PYTHON],
     );
     let text = flat(&run.text());
@@ -912,11 +899,11 @@ fn an_editor_that_cannot_start_is_an_error_everywhere() {
 fn creating_a_plugin_from_edit_plugins_reports_the_wizard_failure() {
     let home = Home::new();
     let bad = ("EDITOR", "/nonexistent/mrsm-test-editor");
-    // `y` creates it, `1` picks the fetch feature, the next two lines answer the column and the
+    // `y` creates it, Enter accepts Python, `1` picks fetch; the next two lines answer the column and the
     // "open it" prompt; the editor cannot be started, which is the action's result.
     let run = home.run_input(
         &["edit", "plugins", "brandnew"],
-        "y\n1\n\n\n",
+        "y\n\n1\n\n\n",
         &[bad, NO_PYTHON],
     );
     let text = flat(&run.text());

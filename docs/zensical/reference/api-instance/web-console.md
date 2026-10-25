@@ -4,7 +4,7 @@ The Meerschaum Web Console provides a graphical interface for managing your Meer
 
 !!! note "The console comes with the Python package"
 
-    The Web Console is the Plotly Dash app of the Python package: install it with `pip install meerschaum[dash]` (also part of `meerschaum[full]` and the `full` Docker image). The Python API host serves it and the Rust API server proxies `/dash` to it. A standalone install (`cargo install meerschaum`, the minimal Docker image) serves the API, `/docs`, `/engine/*`, MCP and the web terminal, and shows a pointer page at `/dash` that names this command. `--no-dash` turns the console off.
+    The Web Console is the Plotly Dash app of the Python package: install it with `pip install meerschaum[dash]` (also part of `meerschaum[full]` and the `full` Docker image). The Python API host serves it and the Rust API server proxies `/dash` to it. A standalone install (`cargo install meerschaum`, the `rust` Docker image) serves the API, `/docs`, `/engine/*`, MCP and the web terminal, and shows a pointer page at `/dash` that names this command. `--no-dash` turns the console off.
 
 <img src="/assets/screenshots/web-console.png" alt="Meerschaum Web Console Dashboard">
 

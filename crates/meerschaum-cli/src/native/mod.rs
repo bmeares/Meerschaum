@@ -42,6 +42,7 @@ pub mod plugin_files;
 pub mod remote_jobs;
 pub mod residual;
 pub mod rich_json;
+pub mod self_upgrade;
 pub mod session;
 pub mod show;
 pub mod subactions;

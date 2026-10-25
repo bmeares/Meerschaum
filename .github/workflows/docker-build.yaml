@@ -1,9 +1,8 @@
 name: buildx
 
-# Builds the Docker images with scripts/docker/buildx.sh (docs/design/v5-build.md):
-#   minimal and full (the default target with `meerschaum` and `meerschaum[full]` installed from the
-#   maturin wheel; `mrsm` is its console script), and slim (`--target slim`: the base wheel only),
-#   then runs the §12.1 size gate (slim ≤ 250 MB, full < 900 MB).
+# Builds slim/minimal (base Python wheel), full (native CLI, Python extras, both toolchains),
+# rust (Python-free runtime), and rust-full (Python-free with the Rust toolchain), then runs
+# native/offline runtime smokes and size gates for all four targets. api aliases full.
 #
 # All Docker builds run on self-hosted Linux x86_64 runners. Prereleases build amd64 only;
 # finals also build arm64 under QEMU. Each architecture has a persistent, resource-limited
@@ -12,7 +11,7 @@ name: buildx
 # Prereleases only get version-qualified tags; floating tags remain unchanged.
 #
 # The size gate ENFORCES by default (5.0.0rc1 requires it, §13): the job fails when `slim`
-# exceeds 250 MB or `full` exceeds 900 MB (uncompressed, `docker image inspect`). `warn` only
+# exceeds 250 MB or `full` exceeds 2500 MB (uncompressed, `docker image inspect`). `warn` only
 # reports (use it to look at a branch that is over budget); `skip` does not measure.
 
 on:
@@ -27,7 +26,7 @@ on:
         type: boolean
         default: false
       size_gate:
-        description: 'Size gate mode (slim ≤ 250 MB, full < 900 MB): enforce fails the run, warn only reports.'
+        description: 'Size gate mode (slim ≤ 250 MB, full ≤ 2500 MB; rust ≤ 250 MB; rust-full ≤ 1600 MB): enforce fails the run, warn only reports.'
         type: choice
         options: [ enforce, warn, skip ]
         default: enforce
@@ -131,8 +130,10 @@ jobs:
           SIZE_GATE_MODE: ${{ inputs.size_gate || 'enforce' }}
           SLIM_IMAGE: ${{ steps.build.outputs.slim_image }}
           FULL_IMAGE: ${{ steps.build.outputs.full_image }}
+          RUST_IMAGE: ${{ steps.build.outputs.rust_image }}
+          RUST_FULL_IMAGE: ${{ steps.build.outputs.rust_full_image }}
         run: |
-          args=(--slim-image "$SLIM_IMAGE" --full-image "$FULL_IMAGE" --slim-max 250 --full-max 900)
+          args=(--slim-image "$SLIM_IMAGE" --full-image "$FULL_IMAGE" --slim-max 250 --full-max 2500 --rust-image "$RUST_IMAGE" --rust-full-image "$RUST_FULL_IMAGE" --rust-max 250 --rust-full-max 1600)
           if [ "$SIZE_GATE_MODE" = "warn" ]; then
             args+=(--warn-only)
           fi
@@ -226,7 +227,7 @@ jobs:
         run: |
           version="$(python3 scripts/check_packaging.py --version)"
           groups="minimal full"
-          if [ "$V4_ONLY" != true ]; then groups="$groups slim"; fi
+          if [ "$V4_ONLY" != true ]; then groups="$groups slim rust rust-full"; fi
           for group in $groups; do
             docker buildx imagetools inspect --raw "bmeares/meerschaum:$version-$group" > manifest.json
             python3 - <<'PY'

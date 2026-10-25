@@ -1607,7 +1607,7 @@ fn config_opts() -> GetOptions {
     }
 }
 
-fn probe_python(python: &str) -> Result<PyProbe, String> {
+pub(super) fn probe_python(python: &str) -> Result<PyProbe, String> {
     let modules: Vec<Json> = PROBE_MODULES.iter().map(|(m, d)| json!([m, d])).collect();
     let spec = CommandSpec {
         program: python.to_string(),
@@ -2784,6 +2784,11 @@ pub fn doctor(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
             check.millis = None;
         }
     }
+    report.checks.push(Check::pass(
+        "installation",
+        "upgrade owner",
+        super::self_upgrade::current_installation(rt).to_string(),
+    ));
     render(rt, &report, nopretty, debug);
     Ok(report.tuple())
 }

@@ -5,7 +5,7 @@
 
 Use one of these instead:
 
-- **`pip install meerschaum`** (or `pipx install meerschaum` / `uv tool install meerschaum`). The wheel contains the native core and has no required Python dependencies. During the 5.0 release candidates add `--pre`: `pip install --pre meerschaum`. See [Getting Started](/get-started).
+- **`pip install meerschaum`** (or `pipx install meerschaum` / `uv tool install meerschaum`). The wheel contains the native core and has no required Python dependencies. See [Getting Started](/get-started).
 - **A standalone `mrsm` binary**, with no Python needed for the core: `cargo install meerschaum --locked`, or the binaries attached to each GitHub release.
 - **Docker**: the official `bmeares/meerschaum` image.
 

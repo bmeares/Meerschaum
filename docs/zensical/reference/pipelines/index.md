@@ -338,7 +338,7 @@ When you change a pipe's `sql`, `fetch` config, `dtypes` or `columns` (a renamed
 - **In a job, with `--loop`, or over the API** a rebuild without `--yes` never blocks: the node is marked `rebuild_pending`, its descendants run against the stale data, and a warning repeats on every run until someone confirms.
 - Set `system.engine.auto_rebuild: true` to rebuild without asking.
 
-The first engine run on a pipe has no stored hash, so it records a baseline rather than treating it as a change. A hash stored by 5.0.0rc1 (which did not cover `columns`) is compared the way rc1 computed it, so upgrading never rebuilds a pipe whose definition did not change; the next successful sync stores the new hash.
+The first engine run on a pipe has no stored hash, so it records a baseline rather than treating it as a change: upgrading from 4.x never rebuilds a pipe. A hash stored by an earlier 5.0 pre-release is compared the way that release computed it, so upgrading never rebuilds a pipe whose definition did not change; the next successful sync stores the new hash.
 
 ## ⚖️ Bare Syncs Stay v4
 

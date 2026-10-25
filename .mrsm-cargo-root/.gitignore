@@ -1,3 +1,0 @@
-# Ignore artifacts left by older Cargo development builds.
-*
-!.gitignore

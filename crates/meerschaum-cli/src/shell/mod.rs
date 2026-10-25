@@ -1062,7 +1062,7 @@ pub fn run(sysargs: &[String], instance: Option<&str>, rt: &mut Runtime<'_>) {
     let flags: Vec<String> = sysargs.to_vec();
     if flags.is_empty() {
         rt.print(&format!("{intro}\n"));
-    } else if precmd(&flags.join(" "), &mut state, rt) == Control::Exit {
+    } else if precmd(&flags.join(" "), &mut state, rt) == Control::Exit || rt.restart_requested {
         close(rt);
         return;
     }
@@ -1084,7 +1084,7 @@ pub fn run(sysargs: &[String], instance: Option<&str>, rt: &mut Runtime<'_>) {
             let Some(line) = rt.host.read_line(&prompt) else {
                 break;
             };
-            if precmd(&line, &mut state, rt) == Control::Exit {
+            if precmd(&line, &mut state, rt) == Control::Exit || rt.restart_requested {
                 break;
             }
         }
@@ -1149,7 +1149,7 @@ pub fn run(sysargs: &[String], instance: Option<&str>, rt: &mut Runtime<'_>) {
                 if line.trim().is_empty() {
                     clear_screen(rt, state.debug);
                 }
-                if precmd(&line, &mut state, rt) == Control::Exit {
+                if precmd(&line, &mut state, rt) == Control::Exit || rt.restart_requested {
                     break;
                 }
             }

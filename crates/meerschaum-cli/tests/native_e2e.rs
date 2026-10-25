@@ -305,9 +305,11 @@ fn a_corrupt_or_wrong_abi_library_is_skipped_and_the_rest_keep_working() {
     assert!(out.contains("Hello from native_demo"), "{out}");
     assert!(out.contains("Skipping invalid native plugin"), "{out}");
     assert!(out.contains("ABI 99"), "{out}");
+    // Listing never loads a library: an invalid plugin is still installed (as a broken Python
+    // plugin is), so `uninstall plugins` can name it.
     let plugins =
         String::from_utf8_lossy(&home.run(&["show", "plugins", "--nopretty"]).stdout).into_owned();
-    assert_eq!(plugins, "native_demo\n");
+    assert_eq!(plugins, "bad_abi\ncorrupt\nnative_demo\n");
 }
 
 #[test]
