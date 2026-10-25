@@ -6,7 +6,7 @@
 //!
 //! 1. `MRSM_DUCKDB_LIB`: an explicit file path (air-gapped hosts; a failure to load it is an error);
 //! 2. the cache `<root>/drivers/duckdb/<version>/libduckdb.{so,dylib}` / `duckdb.dll`;
-//! 3. the system loader path (`libduckdb.so`, ...), if it is [`ffi::MIN_VERSION`] or newer;
+//! 3. the system loader path (`libduckdb.so`, ...), if it is `ffi::MIN_VERSION` or newer;
 //! 4. a download of the official release asset, checked against a SHA-256 pinned in this crate,
 //!    unless `MRSM_NO_AUTO_INSTALL` is set.
 //!

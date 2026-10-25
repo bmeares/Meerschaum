@@ -1111,7 +1111,7 @@ pub fn config_has_changed(project: &Project, session: &mut Session) -> bool {
 }
 
 /// `meerschaum.compose.utils.init(file, env_file, isolated)` without `init_root` (see
-/// [`crate::subactions::init_root`]): locate, load and resolve the project.
+/// `subactions::init_root`): locate, load and resolve the project.
 pub fn load_project(
     host: &Host,
     file: Option<&Path>,

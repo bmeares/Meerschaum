@@ -4,7 +4,7 @@
 //! (`pip_uninstall`, `get_prerelease_dependencies`, `need_update`, `manually_import_module`).
 //!
 //! The installers run through [`super::pip`] (`uv pip` / `pip`); the dependency groups are the
-//! generated [`super::packages_table`].
+//! generated `super::packages_table`.
 //!
 //! # Differences from v4
 //!

@@ -11,6 +11,8 @@
 #                MRSM_CI_MIN_FREE_GB (default 10). Self-hosted runner safety valve.
 #   fmt          cargo fmt --all --check
 #   clippy       cargo clippy --all-targets -- -D warnings
+#   doc          RUSTDOCFLAGS="-D warnings" cargo doc --workspace --exclude meerschaum-py --no-deps --all-features
+#                (broken or private intra-doc links fail here instead of on docs.rs after a publish)
 #   test         cargo nextest run --workspace (when nextest is installed: `ci_tools.sh`, self-hosted runner) plus
 #                cargo test --workspace --doc; plain `cargo test --workspace` without nextest. With DuckDB's shared
 #                library from the persistent cache (`duckdb-lib`) and the DuckDB integration tests enabled
@@ -178,6 +180,11 @@ step_disk_guard() {
 
 step_fmt()    { log "cargo fmt --all --check"; cargo fmt --all --check; }
 step_clippy() { log "cargo clippy --all-targets -- -D warnings"; cargo clippy --all-targets -- -D warnings; }
+step_doc() {
+  log "cargo doc --workspace --no-deps --all-features (-D warnings)"
+  RUSTDOCFLAGS="${RUSTDOCFLAGS:+$RUSTDOCFLAGS }-D warnings" \
+    cargo doc --workspace --exclude meerschaum-py --no-deps --all-features
+}
 step_duckdb_platform() {
   local root
   root="${MRSM_ROOT_DIR:-}"
@@ -386,6 +393,7 @@ for s in "${steps[@]}"; do
     disk-guard) step_disk_guard ;;
     fmt)        step_fmt ;;
     clippy)     step_clippy ;;
+    doc)        step_doc ;;
     test)       step_test ;;
     duckdb-lib) step_duckdb_lib ;;
     duckdb-platform) step_duckdb_platform ;;
@@ -403,7 +411,7 @@ for s in "${steps[@]}"; do
         [ -n "${!v:-}" ] && printf 'export %s=%q\n' "$v" "${!v}"
       done
       ;;
-    -h|--help)  sed -n '2,63p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help)  sed -n '2,65p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "ci.sh: unknown step '$s' (see --help)" >&2; exit 2 ;;
   esac
 done

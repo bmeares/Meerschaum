@@ -1,5 +1,5 @@
 //! The native `Pipe.sync()` flow (`meerschaum/core/Pipe/_sync.py`, `_fetch.py`), written
-//! against the [`InstanceConnector`] / [`Connector`] traits so that SQL, Valkey, API and the
+//! against the [`InstanceConnector`] / [`Connector`](meerschaum_connector::Connector) traits so that SQL, Valkey, API and the
 //! Python adapter's connectors all run through it.
 //!
 //! The observable flow is v4's:

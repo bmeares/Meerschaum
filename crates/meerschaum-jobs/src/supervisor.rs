@@ -9,7 +9,7 @@
 //!    on two pipes;
 //! 2. writes the worker's PID into `process.pid` (holding an `flock` on it, like Python's
 //!    `pidfile=InterProcessLock(...)`), and records `result: null` and `process.began`;
-//! 3. copies the worker's output into the rotating log, through one [`Interceptor`] per stream
+//! 3. copies the worker's output into the rotating log, through one [`Interceptor`](crate::rotating::Interceptor) per stream
 //!    (the timestamp prefixes), reinstalling the interceptors every `refresh_files_seconds` like
 //!    Python's log-refresh timer;
 //! 4. forwards `SIGTERM` / `SIGINT` / `SIGHUP` it receives to the worker;

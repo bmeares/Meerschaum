@@ -123,7 +123,7 @@ impl JobOps for ComposeJobs {
 }
 
 /// Runs compose's commands by re-invoking `mrsm` (the current executable), except the
-/// in-process `register pipes` commands, which run in this process ([`MrsmRunner::run_in_process`]).
+/// in-process `register pipes` commands, which run in this process (`MrsmRunner::run_in_process`).
 pub struct MrsmRunner<'r, 'a> {
     rt: &'r RefCell<&'r mut Runtime<'a>>,
     /// The project view in-process commands run under, by project environment: its config

@@ -9,7 +9,7 @@
 //! |---|---|---|
 //! | idle at the shell prompt | ignored (the editor reads the key) | |
 //! | idle, not in a shell | the default action (the process dies) | |
-//! | an action runs | cooperative cancellation: [`Session::block_on`] drops its future and unwinds with [`Interrupted`]; [`check`] does the same between awaits; the dispatcher ([`guarded`]) turns the unwind into `Interrupted.` | `mrsm <action>`: exit 130 at once; in a shell, only when the action is still running two seconds later |
+//! | an action runs | cooperative cancellation: [`Session::block_on`](crate::native::session::Session::block_on) drops its future and unwinds with [`Interrupted`]; [`check`] does the same between awaits; the dispatcher ([`guarded`]) turns the unwind into `Interrupted.` | `mrsm <action>`: exit 130 at once; in a shell, only when the action is still running two seconds later |
 //! | the action handles the stop flag itself (laps, `--loop`, `sync --loop`, followed logs: [`mark_cooperative`]) | sets the stop flag, nothing is dropped | exit 130 (`mrsm <action>`) or forced cancellation as above (shell) |
 //! | a foreground program runs (`sh`, `python`: [`ChildScope`]) | nothing: the terminal already delivered it to the program's own process group | within two seconds: SIGKILL the program (not an interactive REPL) |
 //! | a Python worker runs the action (`@make_action`) | nothing (its call raises `KeyboardInterrupt` and returns) | within two seconds: the call is dropped, which kills the worker |

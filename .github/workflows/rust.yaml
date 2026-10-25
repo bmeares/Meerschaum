@@ -5,7 +5,7 @@
 # What runs: the `changes` job (scripts/ci/changes.py) reads the diff of the push or pull request and
 # switches jobs on, so a docs-only push runs nothing heavy and a Python-only push skips Rust:
 #
-#   fmt (hosted), clippy, test, check (hosted, 3 OS)  any Rust input (crates/, Cargo.*, toolchain, scripts/rust/, ...);
+#   fmt (hosted), clippy (+ doc), test, check (3 OS) any Rust input (crates/, Cargo.*, toolchain, scripts/rust/, ...);
 #                                                     `test` also for the few Python files the cargo tests read or import
 #   parity                                            only generators, fixtures, scripts/parity/ (v4.1.4 regenerates them;
 #                                                     the Rust sources cannot change the result: the comparison is `test`)
@@ -108,6 +108,8 @@ jobs:
         run: scripts/rust/ci.sh disk-guard
       - name: cargo clippy --all-targets -- -D warnings
         run: scripts/rust/ci.sh clippy
+      - name: cargo doc --workspace --no-deps --all-features (-D warnings)
+        run: scripts/rust/ci.sh doc
 
   test:
     needs: [ changes, fmt ]

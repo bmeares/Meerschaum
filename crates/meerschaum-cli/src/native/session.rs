@@ -17,7 +17,7 @@
 //! process). With nothing registered and the defaults, the config path is unchanged.
 //!
 //! **The plugin manifest is cached in memory per session.** The first [`Session::manifest`]
-//! validates the plugin trees (one fingerprint walk, [`stale_plugins`]) and rebuilds the Python
+//! validates the plugin trees (one fingerprint walk, [`stale_plugins`](meerschaum_worker::manifest::stale_plugins)) and rebuilds the Python
 //! manifest in a fresh worker only when something changed; later calls return the same `Arc`
 //! without touching the disk. [`Session::invalidate_manifest`] re-arms the single validation
 //! the next call performs: the shell does it after every command, so a plugin edited while the

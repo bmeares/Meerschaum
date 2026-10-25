@@ -77,6 +77,7 @@ export CARGO_INCREMENTAL=0                 # what CI uses; optional locally
 ```bash
 cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
+scripts/rust/ci.sh doc           # rustdoc with -D warnings (broken intra-doc links; docs.rs builds after publish)
 cargo test -p <crate>            # `cargo test --workspace` is the CI job (CI uses nextest + `cargo test --doc`)
 scripts/rust/ci.sh               # fmt clippy test build
 scripts/rust/ci.sh parity        # regenerate every crates/*/tests/fixtures/gen_*.py with v4.1.4 and diff

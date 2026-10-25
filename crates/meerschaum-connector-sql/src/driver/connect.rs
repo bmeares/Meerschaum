@@ -11,7 +11,7 @@
 //!
 //! Only the first attempt is gated. Once a connection was established the pool keeps its own
 //! reconnect behavior, so a long-running job that loses its database still retries as in v4.
-//! A timeout and rejected credentials are remembered for [`FAILURE_TTL`], so a command that tries
+//! A timeout and rejected credentials are remembered for `FAILURE_TTL`, so a command that tries
 //! many pipes against a dead host does not wait `connect_timeout` (nor log in wrongly) once per
 //! pipe; a refused connection is retried every time, since the server may come up in between.
 

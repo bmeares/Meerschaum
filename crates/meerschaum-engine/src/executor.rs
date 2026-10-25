@@ -897,7 +897,7 @@ static HELD_LEASES: AtomicUsize = AtomicUsize::new(0);
 ///
 /// Dropping a run (Ctrl-C in the CLI, a closed API request, a Python `KeyboardInterrupt`) drops
 /// its node attempts mid-sync; each hands its lease back in a task of its own (see
-/// [`LeaseHold`]). A process that is about to exit awaits this first, or the leases stay held
+/// `LeaseHold`). A process that is about to exit awaits this first, or the leases stay held
 /// until their TTL runs out and the next run waits for them. Counted from the moment a lease is
 /// taken, so an attempt the runtime has not dropped yet is waited for too.
 pub async fn drain_lease_releases(timeout: Duration) {

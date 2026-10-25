@@ -3,7 +3,7 @@
 //! `index`, the maintenance family, `tag`, `copy` and the job actions, ported from
 //! `meerschaum/actions/*.py` (v4.1.4) over the `InstanceConnector` trait and `meerschaum-jobs`.
 //!
-//! - [`session`]: the Tokio runtime and the instance / source connectors.
+//! - [`session`](mod@session): the Tokio runtime and the instance / source connectors.
 //! - [`compose_instance`]: the instance connector `mrsm compose` reads pipe registrations from.
 //! - [`pipes`]: `get_pipes` and the pipe helpers the actions share.
 //! - [`sync`]: the sync seam (`Pipe.sync` for `sql:` source pipes; the engine replaces it).

@@ -1358,7 +1358,7 @@ pub fn read_entry_child_result(path: &std::path::Path) -> Option<SuccessTuple> {
     })
 }
 
-/// The child of [`timed_pipeline_step`]: run `line` with the patch arguments and print the result
+/// The child of `timed_pipeline_step`: run `line` with the patch arguments and print the result
 /// between the fences.
 pub fn pipeline_child(args: &[String], rt: &mut Runtime<'_>) -> i32 {
     let line = args.first().cloned().unwrap_or_default();

@@ -1,5 +1,5 @@
 //! `--help` rendering: a port of CPython 3.14 `argparse.HelpFormatter` (and the parts of
-//! `textwrap` it uses) over the clap [`Command`](clap::Command) built from the argument table,
+//! `textwrap` it uses) over the clap [`Command`] built from the argument table,
 //! so `mrsm --help` matches v4's `parser.format_help()` byte for byte at the same width.
 
 use clap::Command;

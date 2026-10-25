@@ -11,7 +11,7 @@
 //!   vendored xterm.js bundle at `/webterm/assets/{name}`, authenticated through the console's
 //!   session store ([`sessions`]);
 //! - the job-log stream `GET /logs/{name}/stream` (Server-Sent Events) that follows jobs started
-//!   by `POST /execute`, authenticated by bearer token or console session ([`stream`]);
+//!   by `POST /execute`, authenticated by bearer token or console session (`stream`);
 //! - native (Rust source) plugin pages as HTML fragments for the Dash console
 //!   (`/_mrsm/native-pages`, [`native_pages`]).
 //!

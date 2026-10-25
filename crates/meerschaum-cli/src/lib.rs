@@ -15,7 +15,7 @@
 //! - [`types`], [`dateutil`], [`pyjson`], [`pyliteral`], [`shlex`]: the `type=` callables and
 //!   the Python behaviors they depend on.
 //! - [`schema`]: the JSON schema (`mrsm --print-arg-schema`).
-//! - [`actions`], [`dispatch`], [`env`]: action resolution and the entry point.
+//! - [`actions`], [`dispatch`], [`env`](mod@env): action resolution and the entry point.
 //! - [`native`]: the instance and job actions (`show`/`sync`/`verify`/... pipes, users, jobs).
 #![deny(unsafe_code)]
 

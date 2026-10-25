@@ -1,24 +1,24 @@
 //! The stack's database across PostgreSQL majors, and its backups (v5):
 //!
 //! - `upgrade postgres [<major> | <image> | rollback]` moves the stack's database to another
-//!   PostgreSQL major ([`upgrade`]).
-//! - `backup postgres` takes an online backup of it ([`backup`]).
+//!   PostgreSQL major (`upgrade`).
+//! - `backup postgres` takes an online backup of it (`backup`).
 //! - `restore postgres [<timestamp> | <path> | rollback]` puts a backup into a new volume and
-//!   switches to it ([`restore_cmd`]).
+//!   switches to it (`restore_cmd`).
 //!
 //! A new major cannot read the old data directory, and the stack's images ship one PostgreSQL
 //! major each (no old binaries for `pg_upgrade`), so the upgrade is a dump and a restore, done the
 //! way TimescaleDB requires (the same TimescaleDB version on both sides,
 //! `timescaledb_pre_restore()` / `timescaledb_post_restore()`). The three commands share:
 //!
-//! - [`dump`]: `pg_dumpall --globals-only` and `pg_dump -Fc --create` of every database, each of a
+//! - `dump`: `pg_dumpall --globals-only` and `pg_dump -Fc --create` of every database, each of a
 //!   snapshot a session exports, with the database's fingerprint taken in the same snapshot,
 //!   every file hashed and listed with `pg_restore --list`, into `<root>/backups/postgres/<UTC
 //!   timestamp>/` (0700 directories, 0600 files);
-//! - [`restore`]: a NEW volume set up by the target image in a temporary container (no network,
+//! - `restore`: a NEW volume set up by the target image in a temporary container (no network,
 //!   no published port), the restore, the server settings, the verification against the
 //!   fingerprints and the extension updates;
-//! - [`switch`]: `stack.yaml` copied byte for byte into the run's directory, only the `db` image,
+//! - `switch`: `stack.yaml` copied byte for byte into the run's directory, only the `db` image,
 //!   its data volume and that volume's declaration edited, the stack brought up, and the undo of
 //!   all of it when anything fails.
 //!

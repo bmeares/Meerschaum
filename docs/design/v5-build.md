@@ -9,7 +9,7 @@ Conventions for the crates themselves are in `crates/README.md`.
 |---|---|---|---|---|
 | `rust` / `changes` | GitHub-hosted | `scripts/ci/changes.py`: which jobs this diff needs | always | n/a |
 | `rust` / `fmt` | GitHub-hosted | `cargo fmt --all --check` | Rust inputs | yes |
-| `rust` / `clippy` | self-hosted | `cargo clippy --all-targets -- -D warnings` | Rust inputs | yes |
+| `rust` / `clippy` | self-hosted | `cargo clippy --all-targets -- -D warnings`, then `cargo doc --workspace --no-deps --all-features` with `-D warnings` | Rust inputs | yes |
 | `rust` / `test` | self-hosted | debug `_core` extension, `cargo nextest run --workspace` (all tests, one process each), `cargo test --workspace --doc` | Rust inputs, or the Python the cargo tests read / import | yes |
 | `rust` / `frontcrate` | self-hosted | the `meerschaum` front crate's feature matrix | front crate / manifests, dispatch, tag | yes |
 | `rust` / `package` | self-hosted | `check_packaging.py`, `cargo package --workspace --no-verify` + checks | manifests / packaging files, dispatch, tag | yes |
