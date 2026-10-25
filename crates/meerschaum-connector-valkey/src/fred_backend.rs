@@ -132,6 +132,13 @@ impl ValkeyBackend for FredBackend {
         Ok(())
     }
 
+    async fn set_nx(&self, key: &str, value: &str) -> BackendResult<bool> {
+        let v = self
+            .call("SET", vec![key.into(), value.into(), "NX".into()])
+            .await?;
+        Ok(!v.is_null())
+    }
+
     async fn set_nx_px(&self, key: &str, value: &str, ms: u64) -> BackendResult<bool> {
         let v = self
             .call(

@@ -100,6 +100,11 @@ impl SqlConnector {
         ];
         bump_metadata_epoch(match self.exec_params(&query, &params).await {
             Some(_) => SuccessTuple::ok(format!("Successfully registered {pipe}.")),
+            // Another process registered it after the check above (the unique key refused the
+            // second row; `unique_keys.rs`).
+            None if matches!(self.get_pipe_id(pipe).await, Ok(Some(_))) => {
+                SuccessTuple::fail(format!("{pipe} is already registered."))
+            }
             None => SuccessTuple::fail(format!("Failed to register {pipe}.")),
         })
     }

@@ -261,6 +261,8 @@ impl SqlConnector {
             }
         }
         if ok {
+            // 5.0: the unique keys on pipe keys and usernames, for new and existing (v4) tables.
+            self.ensure_unique_keys().await;
             self.mark_tables_ready();
         }
         ok

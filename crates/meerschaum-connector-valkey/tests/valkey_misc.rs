@@ -308,3 +308,106 @@ async fn register_and_edit_persist_raw_templates() {
     assert_eq!(stored["target"], Value::Str("{{ self.metric }}_tbl".into()));
     assert!(stored.contains_key("tags"));
 }
+
+/// Of several connections registering the same pipe at once, one registers it and the others
+/// are told it is already registered (one row in the pipes table).
+async fn check_concurrent_registration(conn: Arc<ValkeyConnector>) {
+    let name = format!("race_{}", uuid::Uuid::new_v4().simple());
+    let pipe = Pipe::builder("plugin:race", &name)
+        .instance("valkey:race")
+        .build()
+        .unwrap();
+    let tasks: Vec<_> = (0..8)
+        .map(|_| {
+            let conn = conn.clone();
+            let pipe = pipe.clone();
+            tokio::spawn(async move { conn.register_pipe(&pipe).await })
+        })
+        .collect();
+    let mut successes = 0;
+    for task in tasks {
+        let res = task.await.unwrap();
+        if res.success {
+            successes += 1;
+        } else {
+            assert!(
+                res.message.ends_with("is already registered."),
+                "{}",
+                res.message
+            );
+        }
+    }
+    assert_eq!(successes, 1);
+    assert!(conn.get_pipe_id(&pipe).await.unwrap().is_some());
+    let query = meerschaum_connector::PipesKeysQuery {
+        metric_keys: vec![name.clone()],
+        ..Default::default()
+    };
+    assert_eq!(conn.fetch_pipes_keys(&query).await.unwrap().len(), 1);
+    assert!(conn.delete_pipe(&pipe).await.success);
+}
+
+/// Of several connections registering the same username at once, one registers it and the
+/// others are told it exists; the winner's password is the one stored.
+async fn check_concurrent_user_registration(conn: Arc<ValkeyConnector>) {
+    let username = format!("race_{}", &uuid::Uuid::new_v4().simple().to_string()[..12]);
+    let tasks: Vec<_> = (0..8)
+        .map(|i| {
+            let conn = conn.clone();
+            let username = username.clone();
+            tokio::spawn(async move {
+                let mut user = User::new(&username, Some(&format!("password{i}")));
+                (i, conn.valkey_register_user(&mut user).await)
+            })
+        })
+        .collect();
+    let mut winners = Vec::new();
+    for task in tasks {
+        let (i, res) = task.await.unwrap();
+        if res.success {
+            winners.push(i);
+        } else {
+            assert!(res.message.ends_with("already exists."), "{}", res.message);
+        }
+    }
+    assert_eq!(winners.len(), 1);
+    let user = User::new(&username, None);
+    assert!(conn.valkey_get_user_id(&user).await.is_some());
+    let hash = conn.valkey_get_user_password_hash(&user).await.unwrap();
+    assert!(
+        meerschaum_core::users::verify_password(&format!("password{}", winners[0]), &hash).unwrap()
+    );
+    assert!(conn.valkey_delete_user(&user).await.success);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_pipe_registered_concurrently_is_registered_once() {
+    let conn = Arc::new(ValkeyConnector::in_memory("race"));
+    check_concurrent_registration(conn.clone()).await;
+    check_concurrent_user_registration(conn).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_pipe_registered_concurrently_is_registered_once_live() {
+    let url = std::env::var("MRSM_VALKEY_TEST_URL")
+        .unwrap_or_else(|_| "redis://localhost:6399/12".to_string());
+    let backend = match tokio::time::timeout(
+        Duration::from_secs(3),
+        FredBackend::connect(&url, Some(Duration::from_secs(3))),
+    )
+    .await
+    {
+        Ok(Ok(b)) => b,
+        _ => {
+            eprintln!("SKIPPED: no Valkey server reachable at {url}");
+            return;
+        }
+    };
+    let conn = Arc::new(ValkeyConnector::with_backend(
+        "race",
+        Map::new(),
+        Arc::new(backend),
+    ));
+    check_concurrent_registration(conn.clone()).await;
+    check_concurrent_user_registration(conn).await;
+}

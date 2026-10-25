@@ -20,6 +20,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use meerschaum_connector_sql::instance::unique_keys::{
+    Duplicate, KeyStatus, PIPES_KEY, UNIQUE_KEYS, UniqueKey,
+};
 use meerschaum_connector_sql::{Flavor, SqlConnector, driver::DuckdbHostDiagnostic};
 use meerschaum_core::SuccessTuple;
 use meerschaum_core::config::{Config, GetOptions};
@@ -371,6 +374,34 @@ fn extension_checks(ctx: &InstanceContext) -> Vec<Check> {
         .map_err(|_| "the database did not answer in time".to_string())
         .and_then(|r| r.map_err(|e| e.to_string()));
     super::extensions::doctor_checks(&status, &ctx.keys, ctx.stack_db, ctx.stack_telemetry_off)
+}
+
+/// The unique keys of the instance tables (5.0: pipe keys, usernames), read-only.
+fn unique_key_checks(ctx: &InstanceContext) -> Vec<Check> {
+    let Some(sql) = &ctx.sql else {
+        return vec![Check::skip(
+            "instance",
+            "unique keys",
+            "the instance is not a reachable SQL instance",
+        )];
+    };
+    UNIQUE_KEYS
+        .iter()
+        .map(|key| {
+            let status = ctx.session.block_on(async {
+                tokio::time::timeout(PROBE_TIMEOUT, sql.unique_key_status(key))
+                    .await
+                    .map_err(|_| "the database did not answer in time".to_string())
+                    .and_then(|r| r.map_err(|e| e.to_string()))
+            });
+            let table = sql.instance_table_name(key.table);
+            Check::from_verdict(
+                "instance",
+                unique_key_check_name(key),
+                judge_unique_key(key, &status, &table),
+            )
+        })
+        .collect()
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1538,6 +1569,101 @@ pub fn judge_api_version(server: Option<&str>, client: &str) -> Verdict {
             format!("the server runs {v}, this client is {client}"),
             "upgrade the older side so both run the same release",
         ),
+    }
+}
+
+/// The doctor's name for the check of `key` (`pipes key`, `users key`).
+pub fn unique_key_check_name(key: &UniqueKey) -> String {
+    format!("{} key", key.table.trim_start_matches("mrsm_"))
+}
+
+/// An instance table has its unique key (5.0: `mrsm_pipes` on the pipe keys, `mrsm_users` on the
+/// username). A table created by v4 gets it the first time 5.0 writes to the instance, unless a
+/// key value is held by more than one row.
+pub fn judge_unique_key(
+    key: &UniqueKey,
+    status: &Result<KeyStatus, String>,
+    table: &str,
+) -> Verdict {
+    let (what, rows, keep) = if *key == PIPES_KEY {
+        (
+            "the pipe keys",
+            "pipe(s) are registered",
+            "the parameters you want",
+        )
+    } else {
+        (
+            "the username",
+            "user(s) are registered",
+            "the password and plugins you want",
+        )
+    };
+    match status {
+        Ok(KeyStatus::Present) => {
+            Verdict::pass(format!("{} has a unique key on {what}", key.table))
+        }
+        Ok(KeyStatus::NoTable) => {
+            Verdict::skip(format!("the instance has no {} table yet", key.table))
+        }
+        Ok(KeyStatus::Missing { duplicates }) if duplicates.is_empty() => Verdict::warn(
+            format!("{} has no unique key on {what} yet", key.table),
+            "it is added the next time Meerschaum registers, syncs or edits a pipe or user on the instance with permission to create indexes",
+        ),
+        Ok(KeyStatus::Missing { duplicates }) => {
+            let shown: Vec<String> = duplicates
+                .iter()
+                .take(5)
+                .map(|d| describe_duplicate(key, d))
+                .collect();
+            let more = duplicates.len().saturating_sub(shown.len());
+            let extra: Vec<String> = duplicates
+                .iter()
+                .flat_map(|d| d.ids.iter().skip(1))
+                .map(i64::to_string)
+                .collect();
+            Verdict::warn(
+                format!(
+                    "{} {rows} more than once, so {} has no unique key on {what}: {}{}",
+                    duplicates.len(),
+                    key.table,
+                    shown.join("; "),
+                    if more > 0 {
+                        format!("; and {more} more")
+                    } else {
+                        String::new()
+                    },
+                ),
+                format!(
+                    "keep one row of each and delete the others (rows other than the first: `DELETE FROM {table} WHERE {} IN ({})`; check which row holds {keep} first); the key is added the next time a pipe or user is registered, synced or edited",
+                    key.id_column,
+                    extra.join(", ")
+                ),
+            )
+        }
+        Err(e) => Verdict::warn(
+            format!("could not check {} for its unique key: {e}", key.table),
+            "re-run `mrsm doctor` once the instance is reachable",
+        ),
+    }
+}
+
+fn describe_duplicate(key: &UniqueKey, d: &Duplicate) -> String {
+    let ids: Vec<String> = d.ids.iter().map(i64::to_string).collect();
+    let ids = format!("({} {})", key.id_column, ids.join(", "));
+    let text = |v: &Option<String>| v.clone().unwrap_or_default();
+    if *key == PIPES_KEY {
+        let location = match d.values.get(2) {
+            Some(Some(lk)) => format!(", '{lk}'"),
+            _ => String::new(),
+        };
+        format!(
+            "Pipe('{}', '{}'{location}) {ids}",
+            d.values.first().map(text).unwrap_or_default(),
+            d.values.get(1).map(text).unwrap_or_default(),
+        )
+    } else {
+        let values: Vec<String> = d.values.iter().map(|v| format!("'{}'", text(v))).collect();
+        format!("{} {ids}", values.join(", "))
     }
 }
 
@@ -2960,6 +3086,7 @@ fn run_checks(args: &ArgsMap, rt: &mut Runtime<'_>) -> Report {
             stack_telemetry_off,
         };
         report.extend(timed(|| extension_checks(&ctx)));
+        report.extend(timed(|| unique_key_checks(&ctx)));
         report.extend(stack_handle.join().unwrap_or_default());
     });
     report
@@ -3029,6 +3156,72 @@ mod tests {
         "meerschaum": {"found": true, "dir": "/site/meerschaum", "version": "5.0.0rc1",
                        "copies": [{"dir": "/site/meerschaum", "version": "5.0.0rc1"}],
                        "user_site": "/home/u/.local/lib/python3.13/site-packages"}}"#;
+
+    #[test]
+    fn a_missing_unique_key_names_the_duplicates_and_the_rows_to_delete() {
+        use meerschaum_connector_sql::instance::unique_keys::USERS_KEY;
+        let ok = |status| judge_unique_key(&PIPES_KEY, &Ok(status), "mrsm_pipes");
+        assert_eq!(ok(KeyStatus::Present).status, Status::Pass);
+        assert_eq!(ok(KeyStatus::NoTable).status, Status::Skip);
+        let pending = ok(KeyStatus::Missing { duplicates: vec![] });
+        assert_eq!(pending.status, Status::Warn);
+        let dup = |values: &[Option<&str>], ids: &[i64]| Duplicate {
+            values: values.iter().map(|v| v.map(str::to_string)).collect(),
+            ids: ids.to_vec(),
+        };
+        let v = ok(KeyStatus::Missing {
+            duplicates: vec![
+                dup(&[Some("sql:a"), Some("m"), None], &[3, 7, 9]),
+                dup(&[Some("sql:a"), Some("m"), Some("x")], &[4, 8]),
+            ],
+        });
+        assert_eq!(v.status, Status::Warn);
+        assert!(
+            v.detail
+                .starts_with("2 pipe(s) are registered more than once, so mrsm_pipes"),
+            "{}",
+            v.detail
+        );
+        assert!(
+            v.detail.contains("Pipe('sql:a', 'm') (pipe_id 3, 7, 9)"),
+            "{}",
+            v.detail
+        );
+        assert!(
+            v.detail.contains("Pipe('sql:a', 'm', 'x') (pipe_id 4, 8)"),
+            "{}",
+            v.detail
+        );
+        let fix = v.fix.unwrap();
+        assert!(
+            fix.contains("DELETE FROM mrsm_pipes WHERE pipe_id IN (7, 9, 8)"),
+            "{fix}"
+        );
+        let users = judge_unique_key(
+            &USERS_KEY,
+            &Ok(KeyStatus::Missing {
+                duplicates: vec![dup(&[Some("alice")], &[2, 5])],
+            }),
+            "mrsm_users",
+        );
+        assert!(
+            users
+                .detail
+                .contains("1 user(s) are registered more than once, so mrsm_users has no unique key on the username: 'alice' (user_id 2, 5)"),
+            "{}",
+            users.detail
+        );
+        assert!(
+            users
+                .fix
+                .unwrap()
+                .contains("DELETE FROM mrsm_users WHERE user_id IN (5)")
+        );
+        assert_eq!(unique_key_check_name(&PIPES_KEY), "pipes key");
+        assert_eq!(unique_key_check_name(&USERS_KEY), "users key");
+        let err = judge_unique_key(&PIPES_KEY, &Err("timeout".into()), "mrsm_pipes");
+        assert_eq!(err.status, Status::Warn);
+    }
 
     #[test]
     fn statuses_print_and_sort() {

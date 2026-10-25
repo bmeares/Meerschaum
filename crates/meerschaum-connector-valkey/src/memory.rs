@@ -198,6 +198,16 @@ impl ValkeyBackend for MemoryBackend {
         })
     }
 
+    async fn set_nx(&self, key: &str, value: &str) -> BackendResult<bool> {
+        self.with(|m| {
+            if m.contains_key(key) {
+                return Ok(false);
+            }
+            m.insert(key.to_string(), (Entry::Str(value.to_string()), None));
+            Ok(true)
+        })
+    }
+
     async fn set_nx_px(&self, key: &str, value: &str, ms: u64) -> BackendResult<bool> {
         self.with(|m| {
             if m.contains_key(key) {

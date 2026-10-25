@@ -70,6 +70,8 @@ pub trait ValkeyBackend: Send + Sync {
     async fn set(&self, key: &str, value: &str) -> BackendResult<()>;
     /// `SET key value EX seconds`.
     async fn set_ex(&self, key: &str, value: &str, seconds: i64) -> BackendResult<()>;
+    /// `SET key value NX`: `true` if the key was set.
+    async fn set_nx(&self, key: &str, value: &str) -> BackendResult<bool>;
     /// `SET key value NX PX ms`: `true` if the key was set.
     async fn set_nx_px(&self, key: &str, value: &str, ms: u64) -> BackendResult<bool>;
     /// Atomically extend the TTL of `key` to `ms` if its value is `value`.

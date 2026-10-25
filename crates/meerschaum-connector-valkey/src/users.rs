@@ -106,6 +106,23 @@ impl ValkeyConnector {
                 return SuccessTuple::fail(format!("Failed to register '{}':\n{e}", user.username));
             }
         };
+        // Claim the username atomically: of two processes registering it at once, only one
+        // writes the user (v4 wrote over an existing user's keys here).
+        let claimed = match get_user_key(&user.username, "user_id", true) {
+            Ok(key) => self.backend.set_nx(&key, &user_id_str(user)).await,
+            Err(e) => {
+                return SuccessTuple::fail(format!("Failed to register '{}':\n{e}", user.username));
+            }
+        };
+        match claimed {
+            Ok(true) => {}
+            Ok(false) => {
+                return SuccessTuple::fail(format!("User '{}' already exists.", user.username));
+            }
+            Err(e) => {
+                return SuccessTuple::fail(format!("Failed to register '{}':\n{e}", user.username));
+            }
+        }
         let users_pipe = self.valkey_users_pipe();
         let doc: Doc = [
             ("user_id".to_string(), KValue::Str(user_id_str(user))),
@@ -115,6 +132,8 @@ impl ValkeyConnector {
         .collect();
         let res = pipe_ops::sync_docs(self, &users_pipe, vec![doc], false).await;
         if !res.success {
+            let keys: Vec<String> = keys_vals.keys().cloned().collect();
+            let _ = self.backend.del(&keys).await;
             return res;
         }
         let mut result = SuccessTuple::success();

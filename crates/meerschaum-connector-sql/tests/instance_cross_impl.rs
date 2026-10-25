@@ -15,6 +15,7 @@ use std::process::Command;
 
 use meerschaum_connector::{DataQuery, SyncOptions};
 use meerschaum_connector_sql::SqlConnector;
+use meerschaum_connector_sql::instance::unique_keys::UNIQUE_KEYS;
 use meerschaum_core::{Pipe, Value};
 use meerschaum_kernel::enforce::PipeInput;
 use meerschaum_kernel::value::{DateTimeValue, Value as KValue};
@@ -290,12 +291,37 @@ async fn rust_read_conn(conn: &SqlConnector, sc: &J) -> J {
 /// by iterating Python `set`s, so the order depends on `PYTHONHASHSEED`; Rust keeps the
 /// `columns` order (see `queries/index.rs`). Index objects are compared with their column
 /// lists sorted.
+///
+/// PARITY V4-003: 5.0 adds unique keys to `mrsm_pipes` and `mrsm_users` (`UNIQUE_KEYS`), which v4
+/// never creates; they are left out of the comparison (`instance_unique_keys.rs` tests them). The
+/// MSSQL dump lists indexed columns rather than index names, so there the key columns are left
+/// out (v4 indexes them on the other flavors, where the objects are compared by name).
 fn stable_dump(mut d: J) -> J {
     if let Some(t) = d["tables"].get_mut("mrsm_temp_tables") {
         t["rows"] = J::Null;
         t["count"] = J::Null;
     }
+    for key in &UNIQUE_KEYS {
+        if let Some(indices) = d["tables"][key.table]["indices"].as_array_mut() {
+            let columns: Vec<String> = key
+                .key_columns()
+                .iter()
+                .map(|c| format!("{c}:INDEX"))
+                .collect();
+            indices.retain(|ix| {
+                !ix.as_str()
+                    .is_some_and(|ix| columns.iter().any(|c| c == ix))
+            });
+        }
+    }
     if let Some(objects) = d["objects"].as_array_mut() {
+        objects.retain(|obj| {
+            !obj[1].as_str().is_some_and(|name| {
+                UNIQUE_KEYS
+                    .iter()
+                    .any(|key| name.eq_ignore_ascii_case(key.index))
+            })
+        });
         for obj in objects.iter_mut() {
             if obj[0] != "index" {
                 continue;

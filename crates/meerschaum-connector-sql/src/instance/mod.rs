@@ -26,6 +26,7 @@ pub mod reflect;
 pub mod sync;
 pub mod tables;
 mod trait_impl;
+pub mod unique_keys;
 pub mod users;
 pub mod values;
 

@@ -151,6 +151,18 @@ impl ValkeyConnector {
                 ))));
             }
             let pipe_id = self.backend.incr(PIPES_COUNTER).await.map_err(be)?;
+            // Claim the pipe's key atomically: of two processes registering it at once, only one
+            // writes its row (the check above alone let both through).
+            if !self
+                .backend
+                .set_nx(&pipe_key, &pipe_id.to_string())
+                .await
+                .map_err(be)?
+            {
+                return Ok(Some(SuccessTuple::fail(format!(
+                    "{pipe} is already registered."
+                ))));
+            }
             let doc: Doc = [
                 ("pipe_id".to_string(), KValue::Int(pipe_id)),
                 (
@@ -168,8 +180,10 @@ impl ValkeyConnector {
             ]
             .into_iter()
             .collect();
-            self.push_docs(&[doc], PIPES_TABLE, Some("pipe_id")).await?;
-            self.set(&pipe_key, &pipe_id.to_string()).await?;
+            if let Err(e) = self.push_docs(&[doc], PIPES_TABLE, Some("pipe_id")).await {
+                let _ = self.backend.del(std::slice::from_ref(&pipe_key)).await;
+                return Err(e);
+            }
             self.set(&parameters_key, &parameters_str).await?;
             Ok(None)
         }
