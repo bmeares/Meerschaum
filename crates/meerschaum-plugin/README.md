@@ -126,7 +126,8 @@ for every connector method; this deliberately refines the illustrative per-metho
   Arrow-owned schema/array operations over already materialized frames, not author code.
 * The host consumes streams and materializes kernel frames while the library is alive.
   No borrowed callback or imported Arrow allocation escapes the call. The loader retains a
-  library handle in every adapter and serializes calls through its mutex. Plugins must not
+  library handle in every adapter and serializes calls through its mutex (except the stream
+  calls and the server calls `api_route` / `mcp_*`, which run concurrently). Plugins must not
   leave background threads or callbacks running after their last owner drops.
 * `LoadedPlugin::load` and `cached_manifest` are unsafe because executing arbitrary native
   code requires trust and ABI conformance. All SDK author methods and loaded-plugin calls
@@ -143,7 +144,8 @@ The control context for pipe operations is `{ "pipe": { "keys": ..., "parameters
 "temporary": ... } }`. Reads add `query` with every `DataQuery` field. Sync adds `options`
 with every `SyncOptions` field. Bounds are integers, ISO timestamp strings or null. Other
 method arguments retain their Rust/Python names as top-level context fields; lease TTL is
-`ttl_seconds`. Action/hook context is `{ "name": ..., "kwargs": ... }`. Results use ordinary
+`ttl_seconds`. Action context is `{ "name": ..., "kwargs": ... }`; hook context adds the synced
+`pipe` (`LoadedPlugin::sync_hook`, which also passes host services for the hook's Pipe calls). Results use ordinary
 JSON, including `[bool, string]` success tuples, null missing values, list/dict pipe keys,
 and integer/string IDs. Data results use only the output stream.
 
@@ -188,10 +190,11 @@ end (actions, hooks around a real sync, routes served by `start api`, a native p
 Python plugin of the same name, rejection of corrupt or wrong-ABI libraries, the manifest cache),
 and `tests/console/test_console.py` renders a native page in Chromium. Examples: `native_demo` (source,
 instance, action, hooks, routes, page), `native_probe` (a plain fetch source whose hooks append to
-`NATIVE_PROBE_LOG`, for asserting the built-in sync path) and `bad_abi`. `tests/source.rs` covers source plugins with a stand-in `cargo`;
+`NATIVE_PROBE_LOG`, for asserting the built-in sync path), `native_api` (`api_routes` and MCP
+tools, resources and prompts; `tests/api_mcp.rs`, `meerschaum-cli/tests/native_api_mcp.rs`) and `bad_abi`. `tests/source.rs` covers source plugins with a stand-in `cargo`;
 `crates/meerschaum-cli/tests/native_source_plugin.rs` builds a real crate. Not yet available: repository
-artifact upload, target-triple selection and installation (the installer's job), and continuous
-`subscribe` / lazy streaming, which need a reader/sink SDK beyond the current eager frame API. The future wasm contract is sketched in
+artifact upload, target-triple selection and installation (the installer's job), and lazy
+(multi-batch) `fetch` streaming. Continuous `subscribe` is the pull-model subscription below. The future wasm contract is sketched in
 `wit/plugin.wit` (not compiled); it replaces native Arrow pointers with Arrow IPC bytes.
 
 ## Hosting (wave 6)
@@ -203,18 +206,49 @@ loads each library lazily (`plugin(name)`, `connector(type, label, config)`, `so
 a Python plugin of the same name), dispatches native actions in-process, resolves native
 connectors and `sync()` for the engine, and runs native sync hooks.
 
-Server extensions use additive JSON methods through `LoadedPlugin::call_json`:
+Server extensions are declared in the manifest entry and served through call kinds of the one
+`invoke` entry point (no ABI change; see `docs/zensical/reference/plugins/rust-plugins/routes-and-mcp.md`):
 
-- `routes` (no context) returns `[{"method", "path", "public"?}]`; the manifest entry must list
-  at least one name in `api_plugins` so the host knows to ask. `route` receives
-  `{method, path, query, body, user}` and returns `{status, content_type, body}`. Routes need
-  the server's credentials unless `"public": true` or the server runs `--no-auth`; paths under
-  `/dash`, `/webterm`, or a core route group are rejected.
+- `api_routes`: `[{"name", "method", "path", "scopes"?, "public"?}]`; any method or `*`,
+  Starlette paths (one `{param}` per segment with an optional prefix, suffix and
+  `int`/`float`/`uuid`/`str` converter, and a final `{*rest}` or `{rest:path}`); a public route
+  may not declare scopes. Each request is an `api_route` call whose context is
+  `api::RouteRequest` (method, path, `path_params`, `query_params`, headers without
+  `authorization` or the console's session cookie,
+  `body_base64`, `principal`, `scopes`); the reply is `api::RouteResponse`
+  (`{status, headers, body_base64}`, or the `json` / `body` / `content_type` shorthands). The
+  server (`meerschaum_server::native`) checks credentials and scopes first and refuses, at
+  startup, routes that would shadow a core route or conflict with an earlier one. Typed
+  `Plugin::api_route`; host side `LoadedPlugin::api_route`. Server calls run concurrently
+  (`LoadedPlugin::call_json_concurrent`, not serialized with the plugin's other calls); the CLI
+  bounds them at 32 per plugin with a 30 s queue that then answers `503`.
+- `mcp_tools` / `mcp_resources` / `mcp_prompts` (`mcp::ToolSpec`, `ResourceSpec`, `PromptSpec`):
+  served by `/mcp` and `mrsm start mcp` through `mcp_tool` (`mcp::ToolCall`, reply: any JSON),
+  `mcp_resource` (`mcp::ResourceRead`, reply: `mcp::ResourceContents`) and `mcp_prompt`
+  (`mcp::PromptGet`, reply: a string, messages, or `{description?, messages}`). The server
+  (`meerschaum_server::mcp::NativeMcp`, implemented by the CLI) filters them by scope and
+  read-only mode like built-in tools and validates tool arguments against `input_schema`.
+- Plugins that override `Plugin::call` can forward these four methods to
+  `sdk::call_server_extension`. Single-file plugins spell them `#[api_route(METHOD, "/path",
+  scopes = [...], public = .., name = ..)]`, `#[mcp_tool(description = .., input_schema =
+  r#"{...}"#, read_only = .., ..)]`, `#[mcp_resource(uri | uri_template = .., ..)]` and
+  `#[mcp_prompt(arguments = [..], ..)]` on top-level functions; `single_file.rs` writes the
+  same manifest entries (checking JSON options, schemas, public-with-scopes and the route path
+  at generation; `api::check_route_path` mirrors the server's startup check, and
+  `meerschaum-cli/tests/single_file_parity.rs` asserts that the two agree)
+  and the runtime's `api` / `mcp` modules mirror `RouteRequest`, `RouteResponse`, `ToolCall`,
+  `ResourceRead`, `ResourceContents`, `PromptGet` and the `Into*` return conversions.
+- Legacy routes: a manifest naming an `api_plugins` entry and no `api_routes` is asked for
+  `routes` (`[{"method", "path", "public"?}]`, static paths) and served by `route`
+  (`{method, path, query, body, user}` with a text body; reply `{status, content_type, body}`,
+  parsed leniently as before: an invalid status is 200, the content type defaults to text).
 - Console pages are the manifest's `web_pages` entries; `page` receives
   `{path, function, query, username}` and returns `{html, status?}` (a trusted fragment). The Dash console of the Python package fetches the fragment
   from the server and frames it in its chrome; a standalone install shows no console, so the page is only reachable there.
-
-Request and response bodies of routes are UTF-8 text.
+  Single-file plugins spell a page `#[web_page("my/page", login_required = .., skip_navbar = ..,
+  page_group = .., dark_theme = ..)]` on a top-level function taking `page: &PageRequest` and
+  returning HTML (`String`, `&str`, `(u16, T)`, `Result`); the entry's `function` routes the
+  `page` call, and the path follows Python's `@web_page` (`/dash/<path>`, `page_key`).
 
 ### Single-file source plugins
 
@@ -283,7 +317,28 @@ accepted by data handlers. The connector view exposes `label()`, `connector_type
 `Result`; its default parameters are merged under explicit parameters. Top-level `register`
 provides the same hook for `plugin:<filename>`. Multiple actions, connectors, and top-level
 data functions may share a file. Source connector sync overrides are honored by the engine.
-Instance connectors and other extension capabilities still use the packaged SDK.
+`#[make_connector(instance)]` (or `instance = true`) makes the module an instance connector
+(`is_instance`): its functions named after `host.rs`'s instance methods (`INSTANCE_METHODS` in
+`single_file.rs`) answer them, with parameters bound by name (`pipe`, `connector`, `data:
+Option<Frame> | Vec<Value>`, `context`, and any field of the call's context, `query` or `options`,
+read through the runtime's `Request::field`), success methods returning a success tuple,
+`get_pipe_data` rows or a frame, and the others any serializable value. Routes, MCP entries,
+console pages, executors and streams have single-file spellings too (below and in the executors
+section).
+
+Python's other plugin surfaces have single-file spellings too. `#[pre_sync_hook]` and
+`#[post_sync_hook]` mark hook functions (named `pipe: &Pipe` and `kwargs: &Value`, plus
+`success_tuple: SuccessTuple` and `sync_duration: f64` for post hooks; `()` returns
+`(true, "Success")`); markers stack, so one function may be an action and both hooks. A
+top-level `fn setup(kwargs: &Value)` answers `setup` with a bool or success tuple (a `setup`
+with other parameters stays a helper). `#[add_plugin_argument("--flag", action = "store_true", help = "...")]` on a
+top-level function (or `#![add_plugin_argument(...)]` on the file) records an argparse
+manifest entry. `const VERSION: &str = "1.0.0";` sets the plugin version (otherwise
+`0.0.0`) and `const REQUIRED: &[&str] = &[...];` the manifest's `required` list;
+`source::single_file_metadata` reads both without building (constants of other types are
+ordinary constants). The CLI enforces `type`, `choices` and `required` and skips (with a
+warning) a flag whose option string the built-in CLI or another plugin already takes. Each marker has its own
+recognizer in `single_file.rs` (`ITEM_MARKERS`, `Generated::hook`, `Generated::argument`).
 
 An optional top-of-file doc-comment fence supplies normal Cargo dependencies:
 
@@ -314,3 +369,94 @@ values to their JSON representations; choose a full Cargo plugin for typed Arrow
 interchange and optimized data processing. Simple builds use `opt-level = 0` and
 share a Cargo target cache across plugins; the installed libraries and stamps remain
 separate. Saved compiler diagnostics survive failure caching.
+
+## Executors and subscriptions
+
+Both are additive JSON methods over `invoke`; the SDK routes them before `Plugin::call` (they
+never reach it), so `call` overrides keep working. User guide:
+`docs/zensical/reference/plugins/rust-plugins/executors-and-streams.md`.
+
+**Executors** (`executor.rs`). The manifest's top-level `executor_types`
+(`{"<type>": {"type", "plugin", "class_name"?, "methods"?, "doc"?}}`, in both schema copies and
+aggregated into the native manifest cache) declares `<type>:<label>` executor keys.
+`Plugin::executor(&Request) -> Option<Box<dyn Executor>>` returns the implementation for
+`request.connector_type` / `label` / `config`. `Executor` mirrors `meerschaum/jobs/_Executor.py`;
+every method defaults to `Error::Unsupported` except those derived from others (`get_job_exists`,
+`get_jobs`, `get_job_properties`, `get_job_status`, `get_job_began/ended/paused`). JSON methods
+are `executor.<name>` with `{name, sysargs, properties}` contexts; `executor.monitor_logs`
+returns a handle followed with `executor.next_logs {handle, timeout_ms}` (`{"status": "lines" |
+"timeout" | "end", "lines", "result"}`) and `executor.close_logs`. Every executor context carries
+`mrsm` (`meerschaum_core::self_exe::self_command()`), which `executor::mrsm_command()` returns
+inside the call. Host side: `LoadedPlugin::executor` / `NativePlugins::executor` return a
+`NativeExecutor` (`call`, `monitor_logs` -> `NativeLogStream`). The CLI adapts it to
+`meerschaum_jobs::JobExecutor` (`meerschaum-cli/src/native_executors.rs`) and installs it in
+every jobs context through `JobsContext::with_executors` (CLI actions, compose, the Python jobs
+API); `parse_executor_keys` accepts the declared types. Unsupported methods become
+``"`<method>` is not supported by the '<keys>' executor."``.
+
+**Subscriptions** (`subscribe.rs`). A connector type with `is_streaming: true` and `subscribe` in
+`methods` (or `plugin:<name>` with `subscribe` in `data_functions`) is a stream source
+(`NativeConnector::is_streaming`). `Plugin::subscribe(&Request) -> Result<Box<dyn
+Subscription>>`; `Subscription::next_batch(timeout) -> Batch` (`Data { frame, ack, redelivered }`,
+`Timeout`, `End`), `ack(&[u64])`, `close()`. `ChannelSubscription::new(capacity)` wraps a bounded
+`sync_channel` for producer threads. JSON methods: `subscribe {pipe, kwargs}` -> `{"handle"}`,
+`next_batch {handle, timeout_ms}` -> `{"status": "batch" | "timeout" | "end", "ack",
+"redelivered"}` with the rows in the output Arrow stream, `ack_batches {handle, tokens}`,
+`close_subscription {handle}` (idempotent). Host side: `NativeConnector::subscribe` ->
+`NativeSubscription` (`next_batch`, `ack`, `close`; closes on drop). The CLI's
+`native_streams::NativeStreamSource` implements the engine's `StreamSource` over it (polling 250 ms
+per `next_batch` on a blocking thread, sending each batch into the sink before pulling again) and
+`NativeRegistry::stream_source` returns it, so `--listen` and the supervised streams treat native
+sources exactly like Python `subscribe` sources: `subscribe` receives the same listen `kwargs`
+(`NativeRegistry::set_stream_kwargs`, set next to `PythonRegistry::set_stream_kwargs`). The source
+hands the sink its own ack tokens mapped to (subscription generation, plugin token), so a token
+flushed after its subscription ended is dropped instead of acknowledged on the next subscription;
+an empty batch that carries a token is still sent to the sink (acknowledged with the next flush).
+
+**Serialization.** `subscribe` and `executor.*` calls take the plugin's call lock like any other
+call. `next_batch`, `ack_batches`, `close_subscription`, `executor.next_logs` and
+`executor.close_logs` go through `LoadedPlugin::invoke_stream`, which skips the lock (and has no
+host services); the SDK locks each handle (`handles.rs`). A rows-ABI (single-file) runtime must
+answer the same methods with the same JSON shapes (rows in `data`).
+
+**Executor context.** Every `executor.*` context carries `mrsm` (the host's command) and, from the
+CLI, compose and Python hosts, `root_dir` (the root the jobs belong to; compose manages project
+roots from the host's process, so an executor keys file state on it, not on `MRSM_ROOT_DIR`).
+`executor.write_stdin {name, data}` answers a prompt: `NativeJobExecutor::monitor_logs` asks
+`get_job_is_blocking_on_stdin` on each idle poll while `accept_input` is set and sends the input
+callback's line. Display getters warn on failures other than "not supported".
+
+**Single-file spellings** (`single_file.rs`; user guide in the single-file reference of
+`docs/zensical/reference/plugins/rust-plugins/advanced.md`): `#[make_executor] mod <type> { fn
+start_job(name: &str) -> (bool, String) { ... } ... }` declares the executor type `<type>`
+(`(name = "...")` overrides; `local`, `systemd`, `api`, `none` are reserved), each function being the
+`Executor` method of the same name with parameters bound by name (`executor: &ExecutorInfo`,
+`name`, `sysargs`, `properties`, `data`, `strip_timestamps`, `stop_on_exit`). Missing methods
+are unsupported except the derived ones, which the runtime derives as the SDK does.
+`monitor_logs` returns a `FnMut(Duration) -> LogEvent` closure, a `LogStream` or a
+`Box<dyn LogStream>`. `fn subscribe(pipe, connector, kwargs)` inside a `#[make_connector] mod` (or
+at the top level, for `plugin:<name>`) returns a `FnMut(Duration) -> Batch` closure, a
+`Subscription`, a `Box<dyn Subscription>` (the runtime implements both traits for the boxes)
+or a `ChannelSubscription` (`Batch::{Rows, RowsAck, Data, Timeout, End}`), with an optional
+module-level `fn ack(tokens: &[u64])`; the generator adds `+ use<>` to an `impl` return type so
+the closure captures no parameter lifetime. A `subscribe` is the streaming one only when its
+parameters are among those three and its return type is syntactically a subscription
+(`subscription_return`: `impl FnMut`/`impl Subscription`, `Box<dyn ...>`, or a type the file
+implements `Subscription` for, optionally in `Result`); any other `subscribe` stays a helper, as
+in rc12. The runtime keeps the subscription and log-monitor handle tables
+(`streams` module, one lock per handle) and answers `next_batch`, `ack_batches`,
+`close_subscription`, `executor.next_logs` and `executor.close_logs` before the plugin's
+dispatch, since the host calls them without the plugin's call lock. Tests:
+`tests/single_file_server.rs` (every attribute at the ABI, plus their diagnostics) and
+`meerschaum-cli/tests/single_file_server.rs` (`start api` routes and `/mcp`, an executor running
+a job, and a `subscribe` stream feeding `sync pipes --listen`). `tests/single_file_parity.rs` and
+`meerschaum-cli/tests/single_file_parity.rs` cover instance connectors (an instance serving
+`register` / `sync` / `show pipes` / `delete pipes`), console pages (served to the console's
+`/_mrsm/native-pages`), a top-level `subscribe` under `--listen`, the SDK's boxed return types,
+`ChannelSubscription`, `mcp::message` and the helpers named `subscribe`.
+
+Tests: `tests/executor_subscribe.rs` (ABI level, over the `native_executor` and `native_stream`
+examples), `meerschaum-jobs/tests/custom_executor.rs`,
+`meerschaum-cli/tests/native_executor_stream.rs` (`mrsm` end to end: `-e procs:<label>` jobs, the
+shell's `executor` command, a compose project on a plugin executor, and a `--listen` sync into
+SQLite with listen kwargs, a filtered empty batch and its acknowledgement) and `tests/test_native_executor.py` (the Python `Job` façade).

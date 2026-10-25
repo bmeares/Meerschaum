@@ -288,6 +288,7 @@ Run servers, control jobs, and connect to remote instances.
 | `pause` | Pause running background jobs. |
 | `login` | Log into a Meerschaum API instance to authenticate the connector. |
 | `attach` | Attach to a running background job's logs / interactive session. |
+| `watch` | Full-screen monitors (v5): `watch run` (a live engine run), `watch jobs` (jobs and their logs). See [Watch and Shell Shortcuts](watch.md). |
 
 ### Utility & Shell
 

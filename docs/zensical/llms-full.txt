@@ -3144,7 +3144,7 @@ The first engine run creates them. Graphs, watermarks and duration estimates are
 
 !!! info "API instances"
 
-    Engine state travels over the dedicated `/engine` route family: the engine reads and writes its state tables through `/engine/pipes/{metric}/read`, `/write`, `/clear` and `/exists` (reads need the `pipes:read` scope, writes `pipes:write`), and leases go through `/engine/leases`; `/engine/ledger`, `/engine/cursors`, `/engine/state`, `/engine/runs` and `/engine/events` expose the same rows by shape (`pipes:write`). The server keeps all of it on its own instance (in `_mrsm_internal` on a PostgreSQL or MSSQL instance), so it survives a server restart. The generic pipe routes refuse the `mrsm` connector keys. On a read-only instance the engine runs degraded: watermarks only, no ledger-driven backfill, no persisted history, with a warning.
+    Engine state travels over the dedicated `/engine` route family: the engine reads and writes its state tables through `/engine/pipes/{metric}/read`, `/write`, `/clear` and `/exists` (reads need the `pipes:read` scope, writes `pipes:write`), and leases go through `/engine/leases`; `/engine/ledger`, `/engine/cursors`, `/engine/state`, `/engine/runs` and `/engine/events` expose the same rows by shape (`pipes:write`), and `GET /engine/runs/{run_id}/events/stream` follows a run's events live as Server-Sent Events ([Following a run over HTTP](/reference/pipelines/visualization/#following-a-run-over-http)). The server keeps all of it on its own instance (in `_mrsm_internal` on a PostgreSQL or MSSQL instance), so it survives a server restart. The generic pipe routes refuse the `mrsm` connector keys. On a read-only instance the engine runs degraded: watermarks only, no ledger-driven backfill, no persisted history, with a warning.
 
 ## 📒 The Dirty-Range Ledger
 
@@ -3195,7 +3195,7 @@ Before syncing a pipe the executor acquires a **lease** on it, so two jobs never
 
 ## 📜 Run History
 
-Every engine run is recorded: one row in `mrsm_engine_runs`, one row per node in `mrsm_engine_nodes`, and (depending on `system.engine.events`) rows in `mrsm_engine_events`.
+Every engine run is recorded: one row in `mrsm_engine_runs`, one row per node in `mrsm_engine_nodes`, and (with the default `system.engine.events: all`) one row per event in `mrsm_engine_events`, chunk progress included, so a run can be replayed or followed live after the fact.
 
 ```text
 run_id                      success  message                                                             workers  num_nodes  selection
@@ -3217,7 +3217,7 @@ pipeline.get_run(run_id)               # one run: node rows plus the planned-vs-
 pipeline.get_events(run_id)            # the persisted events, in order (also `run.events()` on a `RunResult`)
 ```
 
-By default `Pipeline.get_runs()` returns the runs that targeted or contained the pipeline's single target pipe; pass `all_runs=True` for every run on the instance. Events are read after the run from the instance (granularity set by `system.engine.events`); live streaming is not exposed to Python in this build.
+By default `Pipeline.get_runs()` returns the runs that targeted or contained the pipeline's single target pipe; pass `all_runs=True` for every run on the instance. Events are read after the run from the instance (granularity set by `system.engine.events`). To follow another process's run as it happens, an API server streams its events over HTTP ([Following a run over HTTP](/reference/pipelines/visualization/#following-a-run-over-http)); `on_event` follows your own run from Python.
 
 !!! tip "Reading the history"
 
@@ -3238,7 +3238,7 @@ All keys live under `system.engine` in your configuration (`mrsm edit config sys
 | `inclusive_cap` | `true` | Cap children at the parents' watermark plus one unit (`false`: half-open) |
 | `flat_ledger` | `true` | Write ledger entries for flat (non-graph) syncs too |
 | `persist_runs` | `true` | `false` keeps runs, nodes and events in memory only |
-| `events` | `nodes` | Persisted event granularity: `off`, `nodes` (run and node transitions) or `all` |
+| `events` | `all` | Persisted event granularity: `all` (every event, including `node_planned`, `chunk_started`, `chunk_finished` and `stream_flushed`), `nodes` (run and node transitions) or `off` |
 | `state_flush_ms` | `500` | In continuous mode, how often buffered ledger entries and events are flushed |
 | `run_history_days` | `30` | Retention for runs, nodes and events |
 | `debounce_seconds` | unset | Minimum time between triggered runs of a stream child (see [Continuous Mode](/reference/pipelines/continuous/)) |
@@ -3258,6 +3258,8 @@ system:
 ## 💸 What it costs
 
 The write path is deliberately small. Per user sync the engine adds **one ledger insert** (before the data commit, parents only) and **one cursor upsert** (after the sync succeeds; a single statement for all of a node's edges). State pipes are written without existence checks or dtype enforcement, and ledger entries and events are batched. Reads and metadata queries are not counted in that budget.
+
+**Event history.** With the default `events: all`, a node that syncs one chunk writes about 6 event rows (`node_planned`, `node_started`, `chunk_started`, `chunk_finished`, `watermark_advanced`, `node_finished`; about 1.5 KB of payload) instead of 3 with `events: nodes` (about 0.7 KB), and each further chunk adds 2 rows (about 0.6 KB); every run adds `run_started` and `run_finished`. The rows are written in the same batches (one insert per `state_flush_ms`), and retention removes them with the rest of the run's history after `run_history_days`. For scale: a `--loop` job syncing 50 single-chunk pipes every minute keeps about 430,000 event rows a day (roughly 100 MB of payload before indexes) and so about 13 million rows at the default 30 days of retention. For such high-frequency loops, set `events: nodes` (the console and the event stream then show node transitions without chunk progress) or shorten `run_history_days`.
 
 
 ---
@@ -3413,11 +3415,53 @@ ordinary scheduled Jobs with their own execution settings.
 
 ## 🖥️ In the terminal
 
-`mrsm sync pipes` prints each node's result and a run summary. Graph selections also report
-node transitions as they start and finish. `mrsm show run <id>` reads the recorded run; actual
+`mrsm sync pipes` prints each node's result and a run summary. Graph selections also show the
+run as it goes (see [Live view of a run](#live-view-of-a-run) below). `mrsm show run <id>` reads the recorded run; actual
 elapsed time and observed execution intervals are the primary Timeline view. `plan pipes` and
 `plan pipelines` explain the next actions and bounds independently of that execution history.
 `--nopretty` prints machine-readable plan and run information.
+
+### Live view of a run
+
+`sync pipes` with `--parents`, `--children` or `--resume`, and `sync pipelines`, keep a small
+live region at the bottom of the terminal while the run goes on. It has a header and one row per
+running Pipe:
+
+```text
+  · Pipe('sql:main', 'daily') incremental: new rows upstream
+  ✔ Pipe('sql:main', 'raw') +1204 ins ~0 upd +0 ups
+⠹ Syncing 1/4 pipes · 2 running  12s  w: watch
+  Pipe('sql:main', 'daily')   incremental  3/10 chunks  +3.6k ins ~12 upd +0 ups  1.2k rows/s  8.4s
+  Pipe('sql:main', 'weekly')  backfill · attempt 2  1 chunk  +0 ins ~0 upd +0 ups  1.1s
+```
+
+- A row shows the action, the chunks done (`3/10 chunks` when the plan knows the total, else the
+  chunks fetched so far), the rows inserted / updated / upserted so far, the throughput, the
+  attempt when it is not the first (`retrying` between attempts) and the time the attempt has run.
+- Above the region, into the scrollback: each plan decision (`·`), each failed attempt that will
+  be retried (`↻`), and one permanent line per finished Pipe: `✔` with its row counts, `✘` with
+  the error's first line, `○` for a skipped Pipe or a pending rebuild. The run summary and the
+  Gantt chart follow when the run ends, and the region is gone.
+- The region redraws about ten times a second with cursor movement (no alternate screen, so the
+  scrollback keeps everything). It fits the terminal: details drop out on a narrow one, the rows
+  of a short one end with `… and N more running`, and a resized terminal is redrawn at the new
+  size. Other output (warnings, plugin output) is printed above it.
+- Typing is not echoed while the region is shown. Press **`w`** to open the full-screen run
+  monitor of this run; leaving it (or quitting it) brings the inline view back, and the run keeps
+  going either way. Plugin output written while the monitor is open is printed into the
+  scrollback when it closes. **Ctrl-C** cancels the run as before. **Ctrl-Z** erases the region
+  and gives the shell a normal terminal; `fg` draws it again.
+- A Python plugin can still ask for input (`input()`, a prompt without a newline): the region
+  steps aside and typing is echoed until the plugin prints a full line again.
+- Every event of the run reaches the view (none is dropped while the terminal is busy). A Pipe
+  whose last line never printed (the run was cut short) gets it from the run's results at the
+  end.
+- `sync pipes --loop` and `--listen` show the same running rows under each lap's usual output.
+
+The region needs a terminal that takes ANSI cursor movement. `--nopretty`, `--debug`, output to
+a pipe or file, `formatting:ansi: false` and `TERM=dumb` keep the plain output: one
+`▶` / `✔` / `✘` / `○` line per Pipe on a terminal without ANSI, and none at all with
+`--nopretty` or when piped.
 
 Scheduling forecasts can use a per-action historical moving average (alpha 0.3), other successful
 action history, or `system.engine.default_duration_seconds` (30 seconds). These estimates omit
@@ -3449,9 +3493,9 @@ run                         started (UTC)        status     wall  ok/nodes  targ
 
 `--nopretty` prints JSON for `plan pipes`, `show graph`, `show runs` and `show run`.
 
-!!! note "No full-screen view yet"
+!!! note "Inline and full-screen"
 
-    The terminal view is line-oriented: progress lines while the run is going and the Gantt chart at the end. A full-screen live chart is not part of this build.
+    The live region is inline: progress rows while the run is going and the Gantt chart at the end, all in the scrollback. Press `w` during a run for the full-screen monitor.
 
 ## 🌐 In the web console
 
@@ -3462,7 +3506,7 @@ The Pipe cards on the Pipes page retain their Parents / Children tabs.
 
 The engine's *ledger* is its record of changed parent data, used to find updates a child still needs to process, including changes to older rows. It remains part of syncing; it is not a separate lag metric on the page. A *watermark* is the latest value of a pipe's datetime or ordering column. Without a previous dependency-sync record, the engine compares parent and child watermarks. When a parent is ahead, the child reads from its own latest value minus its backtrack window, up to the earliest parent watermark. The canvas calls this **New parent data available**.
 
-Sync history refreshes about every 15 seconds. Use the refresh button to update the pipeline canvas. Select a run with the link in the runs table (`/dash/pipelines?run_id=…`) to see its actual execution timeline. State lives in the URL, so a run or filter is shareable.
+A running run is followed live: the page opens the server's [run event stream](#following-a-run-over-http) (`GET /engine/runs/{run_id}/events/stream`, authorized by your console session) and paints each stage's status and chunk progress (for example *running · chunk 3/10 · 4200 rows*) as the events arrive, refreshing the timeline, stages table and **Sync activity** after each node or chunk transition. Canvas syncs (**Sync this Pipe**) are followed the same way. A run that stops without finishing (its process was killed, or a canvas sync's execution ended) is no longer followed, and its stages show their recorded state. A run the server will not stream (the `engine` route group is not allowed, your user lacks the `pipes:write` scope, or the run lives on an instance the server does not serve) falls back to reading its recorded state every 5 seconds. Otherwise sync history refreshes about every 15 seconds. Use the refresh button to update the pipeline canvas. Select a run with the link in the runs table (`/dash/pipelines?run_id=…`) to see its actual execution timeline. State lives in the URL, so a run or filter is shareable.
 
 The console is available through `mrsm start api` and is covered in [Web Console](/reference/api-instance/web-console/).
 
@@ -3515,7 +3559,40 @@ A bound (`begin`, `end`, `from`, `to`) is `{"Datetime": "2024-01-01T00:00:00Z"}`
 
 **Errors.** If the callback raises an `Exception`, the run is **not** stopped: the exception is reported once with `warnings.warn` (including its traceback), the callback receives no further events, the run result carries it as `run.callback_error`, and `run.warnings` gets a line about it. A `KeyboardInterrupt` (raised in the callback, or CTRL-C while the run waits) **cancels** the run: in-flight node syncs are dropped as if the process had crashed (the engine's write ordering keeps every table and cursor consistent, and the next run picks up where it stopped), and the `KeyboardInterrupt` propagates.
 
-`run.events()` (and `Pipeline.get_events(run_id)`) still read a run's *persisted* events back from the instance after the fact, at the granularity of `system.engine.events`; those rows are shaped `{ts, run_id, seq, pipe_ref, event, payload}`.
+`run.events()` (and `Pipeline.get_events(run_id)`) still read a run's *persisted* events back from the instance after the fact, at the granularity of `system.engine.events` (every event by default); those rows are shaped `{ts, run_id, seq, pipe_ref, event, payload}`.
+
+## 📡 Following a run over HTTP
+
+An API server streams any run whose history it can read as [Server-Sent Events](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events):
+
+```text
+GET /engine/runs/{run_id}/events/stream[?instance_keys=sql:main][&after_seq=4][&wait=30][&idle_timeout=900]
+```
+
+Each engine event is one SSE event: `event:` is its name, `id:` its `seq` and `data:` the same JSON as the `on_event` dicts above (the envelope plus the event's own fields; `ts` is an ISO string). The stream always ends with a terminal event: `run_finished`, or `run_closed` when the run will not send one (see below).
+
+```text
+event: chunk_finished
+id: 4
+data: {"run_id":"pipeline-2026-…","seq":4,"ts":"2026-01-01T00:00:04Z","pipe_ref":"sql:main|sql:main|daily|None","event":"chunk_finished","chunk":0,"success":true,"message":"…","source":"fetch","rows":5,"inserted":5,"updated":0,"upserted":0}
+```
+
+- **Resuming.** Reconnect with `Last-Event-ID: <seq>` (browsers' `EventSource` does this by itself) or `?after_seq=<seq>` to continue after that event.
+- **Where events come from.** Runs the server executes itself (`POST /actions/sync`, the MCP action tools) and engines on an `api:` instance that flush their events to it are delivered as the events happen. Otherwise the server tails the run's persisted events (`mrsm_engine_events` on the instance that keeps its history: the server's own, or `instance_keys`) every half second, so it follows runs of jobs and of other processes sharing the instance.
+- **Runs that never finish.** A run whose process was killed sends no `run_finished`. The stream then ends with a synthetic `run_closed` event (no `id:`; its `seq` repeats the last event's) whose `reason` says why, and which also carries `finished` (whether the run's record was closed), `success` and `message` from the run's record:
+
+    | `reason` | When |
+    |---|---|
+    | `interrupted` | The run's record was closed without `run_finished` (a few seconds after it closed). |
+    | `holder_gone` | The run's holder (`mrsm:<pid>`) is not a running process on the server's machine and the run has sent nothing for 2 minutes. A run on another machine or container that shares the instance can be closed this way too; its events are still persisted, so reconnecting resumes it. |
+    | `idle` | The run has sent nothing for `idle_timeout` seconds (default 900, from 10 to 86400). The run may still be going: a single long chunk sends nothing until it finishes. |
+
+- **Waiting for a run.** `wait` (seconds, at most 60) keeps the request open until a run that was just launched appears; without it an unknown run is a `404`.
+- **Authorization** is that of `GET /engine/runs`: the `pipes:write` scope, by bearer token or the console's session cookie. Comments (`: keep-alive`) every 15 seconds keep proxies from closing a quiet stream; with nginx in front, the server already sends `X-Accel-Buffering: no`. Open streams are bounded like log streams (`api:permissions:log_streams`).
+- **Order.** Events are delivered once, in `seq` order. With `system.engine.events: nodes` the chunk events of a run in another process are not persisted, so when the stream meets a missing `seq` it waits up to a second, once for every event it has received by then, before moving on: the delay does not add up across gaps.
+- **Limits.** Open streams count against `api:permissions:log_streams` (`max` for the server, `per_user` per user or token). Waiting for a run (`wait`) does not hold a stream. On a `--no-auth` server, streams are counted per console session, and requests without a console cookie count only against `max`.
+
+From Rust, `APIConnector::follow_engine_run(run_id, after_seq, instance_keys)` returns the same events as an async stream. `follow_engine_run_with(run_id, FollowRunOptions { wait, idle_timeout, .. })` sets the other parameters. The client resumes a dropped connection with `Last-Event-ID`. It retries a failed reconnect (a restarting server, a `429` or a `5xx`) with a growing pause, up to 5 failures in a row, and ends the stream after `run_finished` or `run_closed` (`EngineRunEvent::is_terminal`).
 
 
 After selecting a saved Pipeline, **Run now** opens its command output directly in the
@@ -6458,7 +6535,7 @@ You have complete control of your Meerschaum instance via the webterm, an intera
 
 <img src="/assets/screenshots/web-console-webterm.png" alt="Webterm">
 
-Run actions by clicking **Exec**, which uses your selected filters and flags. Exec validates the command and submits it once into the existing webterm iframe; it keeps the terminal visible and reports a busy or disconnected session. You can also type directly into the same shell. Pipe-card **Manage** actions and Pipeline sync controls run as authenticated background executions through `POST /execute`, following their output over `GET /logs/<job>/stream`. Destructive actions confirm first. Automatic executions appear under **Runs**, while manually managed and scheduled **Jobs** retain their own view. The **Pipelines** button renders registered Pipeline cards, with a smaller **Term** button beside it.
+Run actions by clicking **Exec**, which uses your selected filters and flags. Exec validates the command and submits it once into the existing webterm iframe; it keeps the terminal visible and reports a busy or disconnected session. You can also type directly into the same shell. Pipe-card **Manage** actions and Pipeline sync controls run as authenticated background executions through `POST /execute`, following their output over `GET /logs/<job>/stream`; the Pipelines page follows a running engine run's events over `GET /engine/runs/<run_id>/events/stream` (live stage statuses, chunk progress and timeline), which needs the `engine` route group and the `pipes:write` scope, and otherwise polls every few seconds. Destructive actions confirm first. Automatic executions appear under **Runs**, while manually managed and scheduled **Jobs** retain their own view. The **Pipelines** button renders registered Pipeline cards, with a smaller **Term** button beside it.
 
 <img src="/assets/screenshots/web-console-execute-action-button.png" alt="Execute actions via the webterm">
 
@@ -6605,6 +6682,8 @@ curl -H "Authorization: Bearer mrsm-key:..." https://your-api-host/mcp
 **Prompts** — guided workflows the client surfaces as commands: `bootstrap_pipe`, `diagnose_sync_failure`, and `explain_pipe`.
 
 Every tool carries MCP annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`), so a well-behaved client asks before it deletes anything.
+
+**Plugin entries** — plugins add their own tools, resources and prompts next to these: Python plugins with `meerschaum.mcp.tool(...)` (served through the API host), and Rust plugins by declaring them in their manifest (served in-process, over HTTP and stdio alike; see [Routes and MCP in Rust plugins](../plugins/rust-plugins/routes-and-mcp.md)). Plugin entries obey the same scopes and read-only mode, and never replace a built-in tool.
 
 ## Configuration
 
@@ -7776,6 +7855,7 @@ Run servers, control jobs, and connect to remote instances.
 | `pause` | Pause running background jobs. |
 | `login` | Log into a Meerschaum API instance to authenticate the connector. |
 | `attach` | Attach to a running background job's logs / interactive session. |
+| `watch` | Full-screen monitors (v5): `watch run` (a live engine run), `watch jobs` (jobs and their logs). See [Watch and Shell Shortcuts](watch.md). |
 
 ### Utility & Shell
 
@@ -7802,6 +7882,106 @@ mrsm sql local exec "INSERT INTO t (id) VALUES (1)"
 
 !!! danger "Arbitrary execution"
     `sql`, `os`, `sh`, and `python` run **arbitrary** SQL, shell commands, and Python code with the privileges of the Meerschaum process. They are intended for trusted, interactive use only — never expose them to untrusted input, and be cautious enabling them on shared or networked instances.
+
+---
+
+# 📺 Watch and Shell Shortcuts
+
+Source: https://meerschaum.io/reference/actions/watch/
+
+# 📺 Watch and Shell Shortcuts
+
+`show` prints something once; `watch` keeps it on screen as it changes. Each `watch` subaction is a full-screen view (new in v5) that takes the whole terminal and gives it back as it was when you leave.
+
+| Command | Shell key | What it shows |
+|---|---|---|
+| `watch run [RUN_ID]` | <kbd>F2</kbd> | An engine run: a live Gantt chart, its nodes and its events. |
+| `watch jobs [NAME ...]` | <kbd>F3</kbd> | Background jobs and the selected job's log, with keys to start, stop and pause them. |
+
+Every view shares these keys:
+
+| Key | Does |
+|---|---|
+| <kbd>q</kbd>, <kbd>Esc</kbd>, <kbd>Ctrl</kbd>+<kbd>C</kbd> | Leave the view. |
+| <kbd>?</kbd> | List the view's keys. |
+| <kbd>↑</kbd> <kbd>↓</kbd> (<kbd>k</kbd> <kbd>j</kbd>) | Select a row. |
+| <kbd>PgUp</kbd> <kbd>PgDn</kbd>, <kbd>End</kbd> | Scroll the log, follow the newest lines again. |
+
+## `watch run`
+
+```bash
+mrsm watch run                # the newest run (by start time)
+mrsm watch run 01JA...        # one run (IDs are listed by `show runs`)
+```
+
+Without a `RUN_ID`, `watch run` opens the run that started last, finished or not. To watch an older run that is still going, pass its ID from `show runs`.
+
+The monitor reads the events the Syncing Engine persists on the instance (`system.engine.events`, every event by default), so the run can be in any process on any host: a `sync pipes` in another terminal, a job, a compose project or an API server. It shows:
+
+- **A header**: the run's status, wall time, node count, workers and how many nodes are running, done, failed and waiting.
+- **The timeline**: one bar per node on the run's observed time axis (`█` while it syncs, `░` while it waited). It is the live form of the chart `show run RUN_ID` prints. <kbd>p</kbd> shades each node's forecast (`▒`, the average of its earlier runs); forecasts never stretch the axis.
+- **The nodes**: state (`planned`, `running`, `retrying`, `succeeded`, `failed`, `skipped`, `upstream_failed`, `rebuild_pending`, `observed`), action (`root`, `incremental`, `backfill`, `rebuild`, ...), chunk progress (`3/8` planned windows, or the fetched chunks), rows inserted and updated, rows per second, attempts (with retries) and duration.
+- **The events**: `node_started`, `chunk_finished`, `node_failed`, ... as they happen.
+
+<kbd>Enter</kbd> opens the selected node's details (its reason, window, counts, timestamps and the sync's message or error); <kbd>Tab</kbd> moves the arrow keys to the event log.
+
+When a `sync pipes` in the same process opens the monitor itself, it reads the engine's events directly and <kbd>d</kbd> returns to its inline output.
+
+A run whose process was killed (`kill -9`, out of memory, a lost host) is never marked finished and keeps saying `running`. When a running run has had no new events for 10 minutes, the footer says its process may have died.
+
+## `watch jobs`
+
+```bash
+mrsm watch jobs               # the jobs of the default executor
+mrsm watch jobs -e systemd
+mrsm watch jobs my-job other-job
+```
+
+The list shows each job's status, when its process began and ended (UTC), its schedule (`-s` / `--schedule`), its executor and its command; it is re-read every two seconds. The lower pane follows the selected job's log as it is written, the same lines `show logs` prints.
+
+| Key | Does |
+|---|---|
+| <kbd>s</kbd> | Start the selected job (or resume it when paused). |
+| <kbd>x</kbd> | Stop the selected job. |
+| <kbd>p</kbd> | Pause the selected job. |
+| <kbd>r</kbd> | Read the list again now. |
+
+Each command asks first (`Stop job 'my-job'? [y/N]`); its result is shown at the bottom.
+
+## Without a terminal
+
+A view needs a terminal on stdin and stdout. When there is none (a pipe, a file, a job, CI), with `--nopretty`, `MRSM_NONINTERACTIVE` or `formatting:ansi` off, `watch` prints lines instead:
+
+- `watch run` prints the run's events one per line (`HH:MM:SS  node  event`) until the run ends, and its result is the run's (the exit code is 1 for a failed run). With `--nopretty` every line is the event as JSON.
+- If the run has had no new events for 10 minutes and is still not finished, `watch run` gives up and fails: the run's process may have died. `--timeout SECONDS` sets that limit (`--timeout 0` waits for good). A long node that syncs one big chunk can be quiet for a while; give it a larger `--timeout`.
+- `watch jobs` prints `show jobs`.
+
+```bash
+mrsm watch run --nopretty | jq -c 'select(.event == "node_failed")'
+```
+
+`NO_COLOR` keeps the views and draws them without colors; `formatting:unicode: false` draws them with ASCII borders and bars.
+
+## Shell shortcuts
+
+In the shell, <kbd>F2</kbd> opens `watch run` and <kbd>F3</kbd> `watch jobs`. The line you were typing is kept: leave the view and carry on where you were. The views run on the shell's instance (`instance sql:other`) and executor.
+
+Bind other keys, or other commands, under `shell:keybindings` (`mrsm edit config shell`):
+
+```yaml
+shell:
+  keybindings:
+    f2: watch run          # the default
+    f3: null               # remove a default
+    ctrl-g: watch jobs -e systemd
+    f5: show pipes         # any command line
+```
+
+Keys are `f1` to `f24` or a character with `ctrl-` or `alt-` (`c-`, `a-`), optionally with `shift-`. A command that is not a view runs as if typed, but without clearing the screen or entering the history: its output (or its error, such as `watch run` on an instance with no runs) is printed where the prompt was, and the prompt comes back below it with your line.
+
+!!! tip "Terminals"
+    The views use the alternate screen and raw mode through crossterm, as the shell does. They are tested in a pseudo-terminal and inside tmux on Linux. The web console's terminal (`/webterm`, xterm.js), screen, and the Windows terminals support the same features, but have not been tested yet. Some terminals take <kbd>F2</kbd> / <kbd>F3</kbd> for themselves: bind other keys, or type `watch run` / `watch jobs`.
+
 
 ---
 
@@ -8183,7 +8363,7 @@ sync pipes -i sql:local -e api:main
 
 
 !!! note "Custom executors"
-    You can implement a custom executor with the [`#!python @make_executor` decorator](). See [`Executor`](https://docs.meerschaum.io/meerschaum/jobs.html#Executor) and [`SystemdExecutor`](https://docs.meerschaum.io/meerschaum/jobs/systemd.html) for an example implementation.
+    You can implement a custom executor with the [`#!python @make_executor` decorator](). See [`Executor`](https://docs.meerschaum.io/meerschaum/jobs.html#Executor) and [`SystemdExecutor`](https://docs.meerschaum.io/meerschaum/jobs/systemd.html) for an example implementation. A Rust plugin can provide an executor type too (`-e <type>:<label>`); see [Executors and Streams](plugins/rust-plugins/executors-and-streams.md).
 
 
 ---
@@ -9561,7 +9741,8 @@ with `cargo` available for the first build and after edits. The first build may
 download dependencies; later runs reuse the compiled plugin.
 
 To create a starter file, run `mrsm bootstrap plugins greetings` and choose **Rust**
-when the wizard asks which language to use.
+when the wizard asks which language to use. If you pick an action, say `sing song`,
+the starter defines `#[make_action] fn sing_song(...)`, which `mrsm sing song` runs.
 Use `mrsm edit plugins greetings` to reopen it. Upload it to a repository with
 `mrsm register plugins greetings -r api:your-repo`, just as you would a Python plugin.
 
@@ -9646,6 +9827,161 @@ The label is `office` in this example. Use `connector.config()` to read its
 configuration. You can add `register` inside the module to supply Pipe settings.
 One file may contain several actions, connector modules, and helper functions.
 
+## Run code around syncs
+
+Mark functions with `#[pre_sync_hook]` or `#[post_sync_hook]` to run them before or
+after every sync, like Python's sync hooks:
+
+```rust
+#[post_sync_hook]
+fn report(pipe: &Pipe, success_tuple: SuccessTuple, sync_duration: f64) -> (bool, String) {
+    (true, format!("{} took {sync_duration:.1}s: {}", pipe.metric_key(), success_tuple.message))
+}
+```
+
+`mrsm sync pipes` prints each hook's message. A failing hook never stops the sync.
+
+## Add flags, a version, and setup
+
+Give your commands their own flags with `#[add_plugin_argument(...)]`, which takes the
+same arguments as Python's `add_plugin_argument` (except `nargs`; pick flags the built-in
+CLI does not already use, see `mrsm --help`):
+
+```rust
+const VERSION: &str = "1.0.0";
+
+#[add_plugin_argument("--loud", action = "store_true", help = "Shout.")]
+#[make_action]
+fn greet(kwargs: &Value) -> (bool, String) {
+    let text = if kwargs["loud"] == true { "HELLO!" } else { "Hello!" };
+    (true, text.to_string())
+}
+
+fn setup() -> (bool, String) {
+    (true, "Ready.".into())
+}
+```
+
+`mrsm greet --loud` returns `HELLO!`. `VERSION` is the plugin's version when you
+share it through a repository, and `setup` runs during `mrsm setup plugins greetings`.
+List Python packages or other plugins your plugin needs in
+`const REQUIRED: &[&str] = &["plugin:other"];`, like Python's `required`.
+
+## Serve HTTP routes and MCP tools
+
+Mark a function with `#[api_route(...)]` to serve it from `mrsm start api`, next to the
+core API, like Python's `@api_plugin`:
+
+```rust
+/// One item.
+#[api_route(GET, "/greetings/items/{id}", scopes = ["pipes:read"])]
+fn item(request: &RouteRequest) -> Value {
+    json!({"id": request.path_param("id"), "user": request.principal})
+}
+```
+
+Callers need the API's credentials and every listed scope; add `public = true` (and no
+scopes) for a route anyone may call. Return JSON, text, bytes or a `RouteResponse`.
+
+Mark functions with `#[mcp_tool]`, `#[mcp_resource]` or `#[mcp_prompt]` to offer them
+to AI agents through `/mcp` and `mrsm start mcp`:
+
+```rust
+/// Add two integers.
+#[mcp_tool(input_schema = r#"{"type": "object", "properties": {"a": {"type": "integer"}, "b": {"type": "integer"}}}"#)]
+fn add(arguments: &Value) -> Value {
+    json!({"sum": arguments["a"].as_i64().unwrap_or(0) + arguments["b"].as_i64().unwrap_or(0)})
+}
+```
+
+The `///` comment is the tool's description.
+
+## Run jobs and stream data
+
+Mark a module with `#[make_executor]` to run Meerschaum jobs your own way: the jobs of
+`-e procs:<label>` (for example `mrsm sync pipes -d -e procs:main`) go to its functions,
+which are the executor's methods. Leave out the ones you do not need:
+
+```rust
+#[make_executor]
+mod procs {
+    fn get_job_names() -> Vec<String> {
+        vec![]
+    }
+    fn create_job(name: &str, sysargs: Vec<String>) -> (bool, String) {
+        (true, format!("Would run `mrsm {}` as '{name}'.", sysargs.join(" ")))
+    }
+}
+```
+
+Add `fn subscribe` to a connector module to stream rows into `mrsm sync pipes --listen`
+as they arrive. It returns a closure the host calls for each batch:
+
+```rust
+#[make_connector]
+mod ticker {
+    fn subscribe() -> impl FnMut(Duration) -> Batch {
+        let mut next = 0;
+        move |_timeout| {
+            next += 1;
+            std::thread::sleep(Duration::from_secs(1));
+            Batch::Rows(vec![json!({"id": next})])
+        }
+    }
+}
+```
+
+## Store pipes and add console pages
+
+Add `instance` to a connector module to make it a Meerschaum instance: `-i memory:main`
+then registers, syncs and lists pipes through the functions named after the instance
+methods (`register_pipe`, `sync_pipe`, `get_pipe_data`, `fetch_pipes_keys`, ...):
+
+```rust
+#[make_connector(instance)]
+mod memory {
+    fn register_pipe(pipe: &Pipe) -> SuccessTuple {
+        SuccessTuple::ok(format!("Registered {}.", pipe.metric_key()))
+    }
+    fn sync_pipe(pipe: &Pipe, data: Vec<Value>) -> (bool, String) {
+        (true, format!("Received {} rows.", data.len()))
+    }
+}
+```
+
+Mark a function with `#[web_page]` to add a page to the web console
+(`pip install meerschaum[dash]`), as Python's `@web_page` does:
+
+```rust
+#[web_page("readings/report", login_required = false)]
+fn report(page: &PageRequest) -> String {
+    format!("<h3>Readings</h3><p>Hello, {}.</p>", page.username.as_deref().unwrap_or("guest"))
+}
+```
+
+## Every attribute
+
+| Attribute or function | Python equivalent | Example |
+|---|---|---|
+| `#[make_action]` | `@make_action` | `#[make_action] fn greet(action: Vec<String>) -> (bool, String)` |
+| `#[make_connector]` module | `@make_connector` | `#[make_connector] mod readings { fn fetch() -> Vec<Value> { ... } }` |
+| `#[make_connector(instance)]` module | `@make_connector` with `IS_INSTANCE = True` | `#[make_connector(instance)] mod memory { fn sync_pipe(pipe: &Pipe, data: Vec<Value>) -> SuccessTuple { ... } }` |
+| `fn fetch` / `fn sync` / `fn register` | `fetch` / `sync` / `register` | `fn fetch(pipe: &Pipe) -> Vec<Value>` |
+| `fn subscribe` (top level or in a connector) | an `IS_STREAMING` connector's `subscribe` | `fn subscribe(pipe: &Pipe) -> impl FnMut(Duration) -> Batch` (or `Box<dyn Subscription>`) |
+| `fn setup` | `setup` | `fn setup() -> bool { true }` |
+| `#[pre_sync_hook]` / `#[post_sync_hook]` | `@pre_sync_hook` / `@post_sync_hook` | `#[post_sync_hook] fn report(success_tuple: SuccessTuple)` |
+| `#[add_plugin_argument(...)]` | `add_plugin_argument` | `#[add_plugin_argument("--loud", action = "store_true")]` |
+| `const VERSION` / `const REQUIRED` | `__version__` / `required` | `const VERSION: &str = "1.0.0";` |
+| `#[api_route(...)]` | `@api_plugin` routes | `#[api_route(POST, "/my/items", scopes = ["pipes:write"])]` |
+| `#[mcp_tool(...)]` | MCP tools | `#[mcp_tool(description = "Count the items.", read_only = true)] fn count() -> Value` |
+| `#[mcp_resource(...)]` | MCP resources | `#[mcp_resource(uri_template = "my://items/{id}", description = "One item.")] fn item(resource: &ResourceRead) -> String` |
+| `#[mcp_prompt(...)]` | MCP prompts | `#[mcp_prompt(arguments = ["who"])] fn greet(prompt: &PromptGet) -> String` |
+| `#[make_executor]` module | `@make_executor` | `#[make_executor] mod procs { fn start_job(name: &str) -> (bool, String) { ... } }` |
+| `#[web_page(...)]` | `@web_page` | `#[web_page("my/page", login_required = false)] fn page(page: &PageRequest) -> String` |
+
+The [single-file reference](rust-plugins/advanced.md#single-file-reference) lists every
+parameter, option and return type.
+
 ## Add dependencies
 
 To use another Rust crate, put a Cargo dependency block at the top of your file:
@@ -9668,9 +10004,10 @@ help. Editing a file triggers a rebuild on the next command that loads plugins.
 Only run plugins you trust.
 
 See the [single-file reference](rust-plugins/advanced.md#single-file-reference)
-for optional arguments, Pipe operations, sync overrides, and dependency details.
+for optional arguments, hooks, flags, setup, routes, MCP entries, executors, streams,
+Pipe operations, sync overrides, and dependency details.
 The [advanced guide](rust-plugins/advanced.md) covers Cargo packaging, the full SDK,
-hooks, web extensions, testing, and distribution.
+web extensions, testing, and distribution.
 
 
 ---
@@ -9685,8 +10022,11 @@ Start with the [single-file Rust plugin guide](../rust-plugins.md) for actions,
 data sources, connectors, and inline dependencies. This page covers Cargo packaging,
 the full SDK, deployment, and detailed single-file behavior.
 
-Use a Cargo plugin for multiple source files, typed Arrow data, custom instances,
-command-line flags, sync hooks, HTTP routes, or console pages. Rust plugins support
+Single files cover every plugin feature a Cargo plugin has: actions, source and instance
+connectors, sync hooks, `setup`, plugin command-line flags, a version, `required` packages,
+HTTP routes, MCP tools, resources and prompts, console pages, job executors, and streaming
+connectors. Use a Cargo plugin for multiple source files, typed Arrow data, or full control
+of the manifest and the ABI. Rust plugins support
 these native extensions; Python Dash callbacks and arbitrary FastAPI customization
 remain Python-host capabilities.
 
@@ -9749,11 +10089,12 @@ errors with the Python implementation using recorded or synthetic inputs. Then s
 native plugin through `mrsm` into a disposable instance to check discovery, the Arrow
 boundary, and repeated-sync behavior together.
 
-The current native HTTP adapter accepts static paths outside reserved core namespaces. Do not
-assume it reproduces parameterized FastAPI routes, full scoped-principal context, custom
-request/response headers and cookies, redirects, or arbitrary binary responses. Audit those
-requirements before porting an API plugin. Same-name native plugins replace the complete
-Python plugin rather than individual capabilities.
+Native routes take path parameters (Starlette syntax, converters included), any method, required
+scopes, the caller's principal, request and response headers (cookies and redirects included) and
+byte bodies, and serve requests concurrently; see
+[Routes and MCP](routes-and-mcp.md). They are not FastAPI: there is no dependency injection,
+OpenAPI entry or request validation beyond what your handler does. Same-name native plugins
+replace the complete Python plugin rather than individual capabilities.
 
 ## 🔧 Writing one
 
@@ -9824,7 +10165,7 @@ The complete, tested version is [`crates/meerschaum-plugin/examples/native_demo.
 Things to know:
 
 - **Stateless handlers.** The SDK builds `Default::default()` for every call. Keep shared state in a synchronized `static` (a `Mutex`) or a database, keyed by connector label.
-- **Synchronous calls.** The SDK imposes no async runtime. Calls into one loaded plugin are serialized by the host. Schedule blocking work on your own executor if you need one.
+- **Synchronous calls.** The SDK imposes no async runtime. Calls into one loaded plugin are serialized by the host, except stream calls (`next_batch`, ...) and the server calls (`api_route`, `mcp_tool`, `mcp_resource`, `mcp_prompt`), which run concurrently and must be thread-safe (see [Routes and MCP](routes-and-mcp.md#how-calls-run)). Schedule blocking work on your own executor if you need one.
 - **Panics are contained.** Constructors and calls run inside `catch_unwind` and surface as an error (`native plugin panicked`). An aborting panic, `process::exit` or memory fault cannot be recovered. Build with `panic = "unwind"`.
 - **Same OS and architecture.** The host and the plugin do not need the same Rust compiler version, since only `extern "C"` and the Arrow C interfaces cross the boundary, but they must target the same OS and CPU.
 
@@ -9832,9 +10173,9 @@ Things to know:
 
 | Field | Meaning |
 |---|---|
-| `method` | The operation: `fetch`, `sync`, `action`, `pre_sync_hook`, `post_sync_hook`, `routes`, `route`, `page`, `register_pipe`, `get_pipe_data`, and so on |
+| `method` | The operation: `fetch`, `sync`, `action`, `pre_sync_hook`, `post_sync_hook`, `api_route`, `mcp_tool`, `mcp_resource`, `mcp_prompt`, `routes`, `route`, `page`, `register_pipe`, `get_pipe_data`, and so on |
 | `connector_type`, `label`, `config` | Which connector instance the call is for, and its configuration |
-| `context` | A JSON object. For pipe operations, `{"pipe": {"keys": ..., "parameters": ..., "temporary": ...}}`; reads add `query`, syncs add `options`; actions and hooks use `{"name": ..., "kwargs": ...}` |
+| `context` | A JSON object. For pipe operations, `{"pipe": {"keys": ..., "parameters": ..., "temporary": ...}}`; reads add `query`, syncs add `options`; actions use `{"name": ..., "kwargs": ...}`, and hooks `{"name": ..., "kwargs": ..., "pipe": ...}` |
 
 Bounds (`begin`, `end`) are integers, ISO timestamp strings or `null`. Results are plain JSON: success tuples as `[true, "message"]`, missing values as `null`.
 
@@ -9868,7 +10209,12 @@ Arguments reach `context.kwargs` exactly as they reach a Python plugin's `**kwar
 ### Equivalents of `@make_action` and `@make_connector`
 
 Single-file plugins use `#[make_action]` on a function and `#[make_connector]` on a
-module, as shown in the [single-file guide](../rust-plugins.md). The generator writes their manifests and dispatchers for you.
+module, as shown in the [single-file guide](../rust-plugins.md), `#[pre_sync_hook]`,
+`#[post_sync_hook]` and `#[add_plugin_argument(...)]` for hooks and flags, `#[api_route]`,
+`#[mcp_tool]`, `#[mcp_resource]` and `#[mcp_prompt]` for server extensions,
+`#[make_connector(instance)]` for instances, `#[web_page]` for console pages,
+`#[make_executor]` for executors, and `fn subscribe` for streams (see the
+[single-file reference](#single-file-reference)). The generator writes their manifests and dispatchers for you.
 
 For packaged Cargo plugins, use declarations in `manifest()` and handlers in
 `Plugin::call()`, as described here.
@@ -9917,8 +10263,8 @@ This source hook differs from `register_pipe`, which persists a Pipe on an insta
 Rust plugins cover actions, arguments, hooks, fetch/sync, custom connectors and
 instances, supported HTTP routes, and console page fragments. They do **not** have
 complete Python plugin parity: arbitrary Python helper imports and connector
-access, Dash callbacks, unrestricted FastAPI customization, native streaming
-`subscribe` and live library reload are not available.
+access, Dash callbacks, unrestricted FastAPI customization and live library reload are not
+available.
 The Pipe helper surface is described in the [single-file reference](#single-file-reference), and HTTP adapter limits are described above; see the
 status note below for further limits.
 
@@ -9929,14 +10275,17 @@ status note below for further limits.
 | A **fetch source** for `plugin:<name>` pipes | Implement `fetch`, list `fetch` under `data_functions`. The engine passes `begin`, `end`, `params` and the pipe's keys and parameters in `context`. |
 | A **sync override** | Implement `sync`; it receives optional data and returns a success tuple, like a Python `sync(pipe, **kw)`. |
 | An **action** (`mrsm hello`) | Add it to `actions` and answer the `action` method (`context.name`, `context.kwargs`). Add flags with `arguments`. |
-| **Hooks** | List names under `pre_sync_hooks` / `post_sync_hooks`; they receive the same kwargs as Python's `@pre_sync_hook` and `@post_sync_hook` (`success_tuple`, `sync_timestamp`, `sync_duration`, ...). |
+| **Hooks** | List names under `pre_sync_hooks` / `post_sync_hooks`; they receive the same kwargs as Python's `@pre_sync_hook` and `@post_sync_hook` (`sync_timestamp`, plus `success_tuple`, `sync_duration` and `sync_complete_timestamp` after the sync, ...), and the synced Pipe in `context.pipe` (Python passes it positionally, so it is not among the kwargs). |
 | A whole **connector** or **instance** | List it under `connectors` / `connector_types` (set `is_instance`), and answer the instance methods (`register_pipe`, `sync_pipe`, `get_pipe_data`, `fetch_pipes_keys`, ...). A method you do not implement returns `Error::Unsupported`, which the host maps to "not implemented" and lets the engine fall back (for example to file-based leases). |
-| **HTTP routes** | List `api_plugins`; answer `routes` with `[{"method", "path", "public"?}]` and `route` with `{status, content_type, body}`. Routes require the caller's credentials unless `"public": true` or the server runs with `--no-auth`. Paths under `/dash`, `/webterm` or a core route group are rejected. |
+| **HTTP routes** | Declare `api_routes` (`{name, method, path, scopes?, public?}`, with `{param}` path segments) and implement `api_route`, which receives the whole request (path and query parameters, headers, body bytes, principal, scopes) and returns a status, headers and body bytes. Routes require the caller's credentials and declared scopes unless `"public": true` or the server runs with `--no-auth`. A route that would shadow a core route is refused at startup. See [Routes and MCP](routes-and-mcp.md). |
+| **MCP tools, resources, prompts** | Declare `mcp_tools`, `mcp_resources`, `mcp_prompts` and implement `mcp_tool`, `mcp_resource`, `mcp_prompt`. They are served by `/mcp` and `mrsm start mcp` with the same scope and read-only filtering as built-in tools; tool arguments are validated against your input schema. See [Routes and MCP](routes-and-mcp.md). |
+| A **job executor** (`-e <type>:<label>`) | Declare it under the top-level `executor_types` and return an `Executor` from `Plugin::executor`; methods you leave out answer "not supported". See [Executors and Streams](executors-and-streams.md). |
+| A **streaming connector** (`sync pipes --listen`) | Mark the connector type `is_streaming` with `subscribe` in its `methods` (or list `subscribe` under `data_functions`) and return a `Subscription` from `Plugin::subscribe`; the host pulls Arrow batches with `next_batch` and acknowledges them after they commit. See [Executors and Streams](executors-and-streams.md). |
 | A **console page** | List it under `web_pages`; answer `page` with `{html, status?}`. The Python web console (`meerschaum[dash]`) fetches your fragment from the server (`/_mrsm/native-pages`) and frames it in its chrome; a standalone install without the console does not show it. See the [page contract](/reference/migrating-to-v5/#option-b-the-page-contract-recommended-for-new-pages). |
 
 Data always crosses the boundary as an **Arrow C stream** (`FFI_ArrowArrayStream`), never JSON. The SDK handles that for you: you return a `Frame`, and the host imports it without copying through Python.
 
-Hooks run around every sync that goes through the sync engine (`sync pipes`, jobs, compose). A failing hook never fails the sync: the host prints `Warning: Native plugin '<plugin>' hook failed: <hook>: <message>` on stderr and carries on with the remaining hooks. A hook that succeeds prints nothing, whereas the messages of Python hooks are shown in the sync output.
+Hooks run around every sync that goes through the sync engine (`sync pipes`, jobs, compose). As with Python hooks, `sync pipes` prints every hook's success tuple (successful or not) in order, and a failing hook never fails the sync. A hook that returns an error (instead of a tuple) is reported as `Failed to execute sync hook '<hook>' from plugin '<plugin>':` followed by the error, both as a warning and as a failed tuple, like a Python hook that raised; the remaining hooks still run. Native hooks run before Python hooks.
 
 ## 🏗️ Build, install, load
 
@@ -10041,12 +10390,13 @@ mrsm start api -i sql:local --host 127.0.0.1 -p 8224 --no-dash        # your rou
 
 ### What the repository tests
 
-These suites build the example plugins in `crates/meerschaum-plugin/examples/` (`native_demo`, `native_probe`, `bad_abi`) and load them as real shared libraries; all data is synthetic. Run each with a temporary `MRSM_ROOT_DIR` and `MRSM_PLUGINS_DIR`:
+These suites build the example plugins in `crates/meerschaum-plugin/examples/` (`native_demo`, `native_probe`, `native_api`, `bad_abi`) and load them as real shared libraries; all data is synthetic. Run each with a temporary `MRSM_ROOT_DIR` and `MRSM_PLUGINS_DIR`:
 
 ```bash
 cargo test -p meerschaum-plugin                       # the SDK and loader
 cargo test -p meerschaum-cli --test native_plugins    # the `mrsm` binary: actions, flags, a native source
 cargo test -p meerschaum-cli --test native_e2e        # hooks, routes, shadowing, rejection, cache
+cargo test -p meerschaum-cli --test native_api_mcp    # routes with parameters, scopes and bytes; MCP over HTTP and stdio
 cargo test -p meerschaum-cli --test native_source_plugin   # a Cargo crate built, cached and rebuilt by mrsm (compiles the SDK: slow the first time)
 MRSM_TEST_CONSOLE=1 PYTHONPATH=$(pwd) python -m pytest tests/console -k native_page   # a native console page in Chromium
 ```
@@ -10057,6 +10407,7 @@ MRSM_TEST_CONSOLE=1 PYTHONPATH=$(pwd) python -m pytest tests/console -k native_p
 | Action dispatch, `show plugins`/`show actions`, flags, panic containment, a sync from a native source | `native_plugins.rs` |
 | Native hooks around real syncs, the built-in sync writing a native fetch, failing hooks as warnings | `native_e2e.rs` |
 | Routes (public, authenticated, `--no-auth`) served by `mrsm start api` | `native_e2e.rs` |
+| `api_routes` (path parameters, headers, bytes, scopes, a refused shadowing route) and MCP tools, resources and prompts over `/mcp` and stdio | `native_api_mcp.rs`; the server side in `meerschaum-server/tests/native_extensions.rs`, the ABI in `meerschaum-plugin/tests/api_mcp.rs` |
 | A native plugin replacing a Python plugin of the same name | `native_e2e.rs` (needs a Python environment; skipped without one) |
 | A custom instance (`-i native_demo:memory`): pipes listed and synced, file-lock fallback for leases | `native_e2e.rs` |
 | Corrupt library and wrong ABI skipped, manifest cache follows the directory | `native_e2e.rs`; discovery details in `native.rs` |
@@ -10076,6 +10427,11 @@ The library exports a single symbol, `mrsm_plugin_v1`, which returns a static `#
 | `free_bytes(bytes)` | Releases every payload the plugin allocated. |
 
 Every result carries a status: `0` success (JSON), `1` error (UTF-8 message), `2` caught panic, `3` unsupported method. Memory a plugin allocates is always released by that plugin's `free_bytes`; the host never frees it.
+
+The host serializes a plugin's calls, except the stream methods (`next_batch`, `ack_batches`,
+`close_subscription`, `executor.next_logs`, `executor.close_logs`): those may run while another
+call is in progress, so one blocking `next_batch` never holds up the rest of the plugin. The SDK
+locks each open handle itself.
 
 Single-file plugins additionally export `mrsm_plugin_invoke_rows_v1`. This extension
 exchanges JSON request, result and row bytes, with call-scoped host callbacks; it does
@@ -10117,7 +10473,7 @@ selection is not implemented; a prebuilt library must match the host OS and CPU.
 
 !!! note "Status in 5.0"
 
-    Source plugins (a Cargo crate built by Meerschaum into the root's cache) work when `cargo` is on `PATH`; the prebuilt `lib<name>.<ext>` remains the contract for the slim image. Discovery, the manifest cache, actions, arguments, hooks, source `fetch`/`sync`, custom connectors, routes and pages are implemented, and each is exercised through the `mrsm` binary by the tests listed under [Testing your plugin](#testing-your-plugin). The deepest instance operations (reads, rowcounts, maintenance) are exercised only at the library level; through the binary the example instance proves resolution, `fetch_pipes_keys`, `sync_pipe` and the lease fallback. Not yet available: `subscribe` for continuous streams from a native plugin (it needs a reader/sink SDK beyond the current eager `Frame` API), target-triple selection by `install plugin`, and live reload of an already-open library (replace a plugin while `mrsm` is not running).
+    Source plugins (a Cargo crate built by Meerschaum into the root's cache) work when `cargo` is on `PATH`; the prebuilt `lib<name>.<ext>` remains the contract for the slim image. Discovery, the manifest cache, actions, arguments, hooks, source `fetch`/`sync`, custom connectors, routes and pages are implemented, and each is exercised through the `mrsm` binary by the tests listed under [Testing your plugin](#testing-your-plugin). The deepest instance operations (reads, rowcounts, maintenance) are exercised only at the library level; through the binary the example instance proves resolution, `fetch_pipes_keys`, `sync_pipe` and the lease fallback. Job executors and streaming connectors (`subscribe`, pulled batch by batch) are covered in [Executors and Streams](executors-and-streams.md). Not yet available: target-triple selection by `install plugin`, and live reload of an already-open library (replace a plugin while `mrsm` is not running).
 
 ## Single-file reference
 
@@ -10160,6 +10516,121 @@ If both functions exist, the engine uses `sync` as the override, as with Python 
 A normal engine-invoked sync override receives `data = None`; explicit input is written
 by the engine without invoking the override again.
 
+### Sync hooks
+
+Mark a top-level function with `#[pre_sync_hook]` or `#[post_sync_hook]`, the
+equivalents of Python's `@pre_sync_hook` and `@post_sync_hook`. The function name is
+the hook's name; a file may define several hooks of each kind, which run in file order.
+
+```rust
+#[pre_sync_hook]
+fn announce(pipe: &Pipe) -> (bool, String) {
+    (true, format!("Syncing {}", pipe.metric_key()))
+}
+
+#[post_sync_hook]
+fn report(pipe: &Pipe, success_tuple: SuccessTuple, sync_duration: f64) -> (bool, String) {
+    (true, format!("{} took {sync_duration:.1}s: {}", pipe.metric_key(), success_tuple.message))
+}
+```
+
+| Parameter | Type | Meaning |
+|---|---|---|
+| `pipe` | `&Pipe` | The synced Pipe, with its [operations](#pipe-operations) (`get_sync_time`, `sync`) |
+| `kwargs` | `&Value` | The keyword arguments Python hooks receive (`begin`, `end`, `params`, `sync_timestamp`, and after the sync `success_tuple`, `sync_duration`, `sync_complete_timestamp`, ...) |
+| `success_tuple` (post only) | `SuccessTuple` | The sync's result |
+| `sync_duration` (post only) | `f64` | Seconds the sync took |
+
+A hook may return `()`, `SuccessTuple`, `(bool, String)` / `(bool, &str)`, or a `Result`
+of those. `()` counts as `(true, "Success")`, as a Python hook returning `None` does.
+The results are printed by `sync pipes` and never fail the sync (see
+[What a plugin can provide](#what-a-plugin-can-provide)). As in Python, a `pipe.sync(...)`
+inside a hook runs no hooks.
+
+Markers stack like Python's decorators: one function may carry `#[make_action]`,
+`#[pre_sync_hook]` and `#[post_sync_hook]` together, and is registered once for each
+(its parameters must suit every role, so `kwargs: &Value` is the usual choice).
+
+### Setup
+
+A top-level `fn setup` runs during `mrsm setup plugins <name>` and after
+`mrsm install plugins`, like Python's `setup(**kwargs)`. It may accept `kwargs: &Value`
+and returns `bool`, `SuccessTuple`, `(bool, String)`, or a `Result` of those (an `Err`
+is a failed setup). A bare `true` or `false` gets the message "Setup for Plugin '<name>'
+did not return a message." A setup function must return a value: Python fails a
+`setup()` that returns `None`, so `fn setup()` without a return type is rejected. A
+top-level `setup` with parameters other than `kwargs` is an ordinary helper function,
+as it was before single-file plugins had a setup.
+
+```rust
+fn setup(kwargs: &Value) -> (bool, String) {
+    (true, format!("Ready (force = {})", kwargs["force"]))
+}
+```
+
+### Plugin arguments
+
+`#[add_plugin_argument(...)]` takes the arguments of Python's `add_plugin_argument`
+(argparse's `add_argument`): the quoted flags first, then `key = value` options. Put it
+on a top-level function, or at the top of the file as an inner attribute. Flags belong
+to the whole plugin either way, as in Python, and every action receives them in `kwargs`.
+
+```rust
+#![add_plugin_argument("--times", "-n", type = int, default = 1, help = "Repeat the greeting.")]
+
+#[add_plugin_argument("--loud", action = "store_true", help = "Shout.")]
+#[make_action]
+fn greet(action: Vec<String>, kwargs: &Value) -> (bool, String) {
+    let mut text = format!("Hello, {}!", action.join(", "));
+    if kwargs["loud"] == true {
+        text = text.to_uppercase();
+    }
+    (true, text.repeat(kwargs["times"].as_u64().unwrap_or(1) as usize))
+}
+```
+
+`mrsm greet Alice --loud -n 2` prints `HELLO, ALICE!HELLO, ALICE!`. Supported options:
+
+| Option | Values |
+|---|---|
+| `action` | `"store"` (default), `"store_true"`, `"store_false"`, `"store_const"`, `"append"`, `"append_const"`, `"count"` |
+| `type` | `int`, `float` or `str` (bare or quoted), for `store` and `append` |
+| `default`, `const` | A string, number or bool literal (`const` only with `store_const` / `append_const`) |
+| `choices` | An array of literals, e.g. `choices = ["north", "south"]` |
+| `help`, `metavar`, `dest` | Strings. `dest` defaults to the first long flag with dashes as underscores (`--dry-run` is `kwargs["dry_run"]`) |
+| `required` | `true` or `false` |
+
+`nargs` is not supported; use `action = "append"` to collect a flag given several times.
+As with Python plugins, a flag that was not given (or is `false`) is absent from `kwargs`,
+and a declared `default` is filled in. Values are checked as argparse checks them: a value
+that is not a valid `int` / `float` or not one of the `choices` fails the command with
+argparse's message (`argument --times/-n: invalid int value: 'x'`). A `required` flag is
+required when one of the plugin's own actions runs (other commands are unaffected).
+
+A flag may not reuse an option string that is already taken, by the built-in CLI (`-t`
+is `--tags`, `-d` is `--debug`, ...) or by another plugin: as Python's
+`add_plugin_argument` does, Meerschaum warns (`conflicting option string`) and ignores
+that flag. Run `mrsm --help` to see the built-in flags.
+
+### Version and requirements
+
+Declare a version and requirements with top-level constants, the Rust spelling of
+Python's `__version__` and `required`:
+
+```rust
+const VERSION: &str = "1.2.0";
+const REQUIRED: &[&str] = &["plugin:noaa", "requests>=2"];
+```
+
+Both must be literals with exactly these types (`&str` and `&[&str]`); Meerschaum reads
+them from the source without building the plugin. A `VERSION` or `REQUIRED` constant of
+another type (say `const VERSION: u32`) is an ordinary constant and declares nothing. `VERSION` is the plugin's version (`0.0.0` when omitted): `register plugins`
+uploads it, and `install plugins` skips a repository plugin whose version matches the
+installed one, as it does for Python plugins. `REQUIRED` lists Python packages and
+`plugin:` requirements that `install required` (and `install plugins`) install into the
+plugin's virtual environment, exactly like a Python plugin's `required` list. Rust crates
+belong in the [Cargo block](#dependencies), not in `REQUIRED`.
+
 ### Pipe operations
 
 `pipe.connector_keys()`, `metric_key()`, `location_key()`, `instance_keys()`, `keys()`,
@@ -10197,6 +10668,321 @@ be sent to background threads. Re-entering the same native library through a cal
 returns an error instead of waiting on its own call lock. These operations apply to the
 current Pipe; arbitrary connector access, other Pipe construction and Python helper
 imports are not exposed.
+
+### API routes
+
+`#[api_route(...)]` on a top-level function serves it from `mrsm start api`, the native
+counterpart of an `@api_plugin` route (the [routes guide](routes-and-mcp.md#routes) has the
+server's rules). The method comes first (an identifier such as `GET` or a string such as
+`"post"`; `"*"` is any method, and it defaults to `GET` when only the path is given),
+then the path, then options:
+
+```rust
+/// One item; the doc comment is the route's description.
+#[api_route(GET, "/readings/items/{id:int}", scopes = ["pipes:read"])]
+fn item(request: &RouteRequest) -> Result<Value> {
+    let id: i64 = request.path_param("id").unwrap_or("0").parse().map_err(|e| Error::Message(format!("{e}")))?;
+    Ok(json!({"id": id, "q": request.query_param("q"), "user": request.principal}))
+}
+
+#[api_route(POST, "/readings/upload/{*name}", scopes = ["pipes:write"], name = "upload")]
+fn upload_file(request: &RouteRequest) -> (u16, String) {
+    (201, format!("{} bytes for {}", request.body.len(), request.path_param("name").unwrap_or_default()))
+}
+
+#[api_route("/readings/health", public = true)]
+fn health() -> RouteResponse {
+    RouteResponse::text("ok").header("cache-control", "no-store")
+}
+```
+
+| Option | Meaning |
+|---|---|
+| `scopes = ["..."]` | Scopes the caller must hold (with the API's credentials) |
+| `public = true` | Served without credentials; a public route may not list scopes |
+| `name = "..."` | The route's name (default: the function's name) |
+| `description = "..."` | Overrides the doc comment |
+
+Paths use the [Starlette syntax](routes-and-mcp.md#paths) (`{id}`, `{name}.json`,
+`{n:int}`, a final `{*rest}` or `{rest:path}`). The function may take
+`request: &RouteRequest`: `method`, `path`, `route_path`, `path_params`, `query`,
+`query_params`, `headers` (lowercase names, without `authorization`), `body` (bytes),
+`principal` (`Option<Principal>` with `kind`, `username`, `user_id`, `user_type`,
+`token_id`, `label`) and `scopes`, with the helpers `path_param`, `query_param`, `header`,
+`cookie`, `text`, `json::<T>()` and `has_scope`. It returns a `RouteResponse` (`json`,
+`text`, `bytes`, `empty`, `error`, then `with_status`, `header`, `with_body`), a JSON
+`Value` (`application/json`), a `String` or `&str` (`text/plain`), `Vec<u8>`
+(`application/octet-stream`), `(u16, T)` to set the status, or any of these in a `Result`
+(an `Err` is a `500 {"detail": message}`). Route functions run concurrently, so they may not
+use `pipe`, and shared state needs a `Mutex`.
+
+The path is checked when the plugin is built, with the rules `mrsm start api` applies: bad
+syntax (`"/a/{x:float32}"`, a `{*rest}` that is not last) or a path that would shadow a core
+route (a parameter in the first segment, a core route group such as `/pipes`, `/dash`,
+`/_pages`, `/static`, `/_mrsm`) is an error at the path's line, not a notice at server
+startup.
+
+### MCP tools, resources and prompts
+
+`#[mcp_tool]`, `#[mcp_resource]` and `#[mcp_prompt]` on top-level functions expose them
+through `/mcp` and `mrsm start mcp` (see the [MCP guide](routes-and-mcp.md#mcp-tools-resources-and-prompts)).
+The doc comment is the description unless `description = "..."` is given; tools and
+resources need one. Every entry takes `name = "..."` (default: the function's name),
+`title = "..."` and `scopes = ["..."]`. JSON options are string literals, usually raw
+strings.
+
+```rust
+/// Count the rows of a synthetic table.
+#[mcp_tool(read_only = true, input_schema = r#"{"type": "object", "properties": {"table": {"type": "string"}}, "required": ["table"]}"#)]
+fn count_rows(call: &ToolCall) -> Result<Value> {
+    let table = call.argument("table").and_then(Value::as_str).unwrap_or_default();
+    Ok(json!({"table": table, "rows": 0, "caller": call.principal}))
+}
+
+/// One reading.
+#[mcp_resource(uri_template = "readings://items/{id}", scopes = ["pipes:read"])]
+fn reading(resource: &ResourceRead) -> ResourceContents {
+    ResourceContents::json(&json!({"id": resource.variable("id")}))
+}
+
+/// Summarize a station.
+#[mcp_prompt(arguments = ["station"])]
+fn summarize(prompt: &PromptGet) -> String {
+    format!("Summarize the readings of {}.", prompt.argument("station").unwrap_or("?"))
+}
+```
+
+| Attribute | Options | Parameters | Returns |
+|---|---|---|---|
+| `#[mcp_tool]` | `input_schema` (a JSON Schema object, checked when the plugin is built; default: no arguments), `output_schema`, `read_only = true` (`readOnlyHint`, so read-only servers still offer it), `annotations` (a JSON object) | `call: &ToolCall` (`name`, `arguments`, `principal`, `scopes`, `argument(name)`, `arguments::<T>()`), `arguments: &Value` | any serializable value in a `Result`, a JSON `Value` or a `String` |
+| `#[mcp_resource]` | `uri` or `uri_template` (exactly one), `mime_type` | `resource: &ResourceRead` (`name`, `uri`, `variables`, `variable(name)`, `principal`, `scopes`) | `ResourceContents` (`text`, `json`, `blob`), a `String`, a JSON `Value`, or a `Result` of those |
+| `#[mcp_prompt]` | `arguments`: `["name", ...]` (required arguments) or a JSON array of `{"name", "description"?, "required"?}` | `prompt: &PromptGet` (`name`, `arguments`, `argument(name)`, `principal`, `scopes`), `arguments: &Value` | a `String` (one user message), `Vec<Value>` messages, a JSON `Value` `{"description"?, "messages"}`, or a `Result` of those |
+
+Tool arguments are validated against `input_schema` before your function runs. Like
+routes, these functions run concurrently and without `pipe`. A prompt message with another
+role is `meerschaum_plugin::mcp::message("assistant", text)`, as in the Cargo SDK.
+
+### Executors
+
+`#[make_executor]` on a top-level inline module declares the executor type named after
+the module (`#[make_executor(name = "procs")]` to choose another; `local`, `systemd`, `api`
+and `none` are reserved). Its functions named after the [executor methods](executors-and-streams.md#the-methods)
+answer them; others are helpers. A method you leave out answers "not supported", except
+those derived from others, exactly as in the Cargo SDK: `get_job_exists` and `get_jobs`
+from `get_job_names` and `get_job_metadata`, and `get_job_properties`, `get_job_status`
+and `get_job_began` / `_ended` / `_paused` from the metadata.
+
+```rust
+/// Run each job as a local process.
+#[make_executor]
+mod procs {
+    fn get_job_names(executor: &ExecutorInfo) -> Vec<String> { /* list the jobs' directories */ vec![] }
+    fn get_job_metadata(executor: &ExecutorInfo, name: &str) -> Result<Value> { /* null when missing */ Ok(Value::Null) }
+    fn create_job(executor: &ExecutorInfo, name: &str, sysargs: Vec<String>, properties: &Value) -> Result<SuccessTuple> {
+        // Start `executor.mrsm` + `sysargs` under `executor.root_dir`, then report it.
+        Ok(SuccessTuple::ok(format!("Started job '{name}'.")))
+    }
+    fn stop_job(name: &str) -> (bool, String) { (true, format!("Stopped job '{name}'.")) }
+    fn monitor_logs(name: &str, stop_on_exit: bool) -> impl FnMut(Duration) -> LogEvent {
+        let mut done = false;
+        move |_timeout| if std::mem::replace(&mut done, true) { LogEvent::End(None) } else { LogEvent::Lines(vec!["started".into()]) }
+    }
+}
+```
+
+Every method may take `executor: &ExecutorInfo` (`executor_type`, `label`, `config` (the
+connector configuration of `<type>:<label>`), `root_dir` (the root the jobs belong to, a
+compose project's root for its jobs; key file state on it), `mrsm` (the command that
+runs this Meerschaum: start a job as `mrsm` followed by its `sysargs`) and `keys()`), and
+`name: &str` where the method has a job. `create_job` also takes `sysargs: Vec<String>` (or
+`&[String]`, without `-d` / `-e`) and `properties: &Value` (or `Value`), `write_stdin` takes
+`data: &str`, and `monitor_logs` takes `strip_timestamps: bool` and `stop_on_exit: bool`.
+
+| Method | Returns |
+|---|---|
+| `get_job_names` | `Vec<String>` |
+| `get_job_exists`, `get_job_is_blocking_on_stdin` | `bool` |
+| `get_jobs`, `get_job_metadata`, `get_job_properties`, `get_job_prompt_kwargs` | `Value` |
+| `get_job_status` | `String` or `&str` (`running`, `paused` or `stopped`) |
+| `get_job_began`, `_ended`, `_paused`, `get_logs`, `get_job_stop_time` | `Option<String>` |
+| `create_job`, `start_job`, `stop_job`, `pause_job`, `delete_job` | `(bool, String)`, `(bool, &str)` or `SuccessTuple` |
+| `write_stdin` | `()` |
+| `monitor_logs` | a closure `FnMut(Duration) -> LogEvent` (or `-> Result<LogEvent>`) called for each poll, a type implementing `LogStream` (`next_lines`, optional `close`), or `Box<dyn LogStream>` (the Cargo SDK's type) |
+
+Any of these may be wrapped in `Result` (an `Err` is reported as the executor's failure).
+`LogEvent` is `Lines(Vec<String>)`, `Timeout` or `End(Option<SuccessTuple>)`; the closure may
+block up to the timeout it receives, and it is dropped when the host stops following.
+`show logs` follows a job through `monitor_logs`; an executor without it shows its logs only
+with `show logs --nopretty`, which reads `get_logs`.
+
+### Streaming connectors
+
+`fn subscribe` inside a `#[make_connector]` module makes the connector type a stream source
+for `sync pipes --listen` and the engine's supervised streams, the counterpart of an
+`IS_STREAMING` connector's `subscribe`. A top-level `fn subscribe` does the same for
+`plugin:<name>`. `subscribe` may take `pipe: &Pipe` (with its
+[operations](#pipe-operations)), `connector: &Connector` and `kwargs: &Value` (the sync's
+keyword arguments, as Python's `subscribe` receives them) and returns, optionally in a
+`Result`, a closure `impl FnMut(Duration) -> Batch` (or `-> Result<Batch>`), an
+`impl Subscription`, a `Box<dyn Subscription>` (the Cargo SDK's type), or a type the file
+implements `Subscription` for. A function named `subscribe` with other parameters or another
+return type is an ordinary helper, at the top level and in a connector module, as it was
+before streaming connectors (a connector module whose only function is such a `subscribe`
+is an error that says why).
+
+```rust
+/// Readings as they arrive.
+#[make_connector]
+mod ticker {
+    fn subscribe(pipe: &Pipe, kwargs: &Value) -> Result<impl FnMut(Duration) -> Batch> {
+        let station = pipe.parameters()["fetch"]["station"].as_str().unwrap_or("a").to_owned();
+        let mut next = 0;
+        // Inside `Ok(...)`, Rust needs the closure's parameter type spelled out.
+        Ok(move |timeout: Duration| {
+            std::thread::sleep(timeout.min(Duration::from_secs(1)));
+            next += 1;
+            Batch::RowsAck(vec![json!({"id": next, "station": station})], next)
+        })
+    }
+
+    // Optional: the tokens of batches whose rows committed.
+    fn ack(tokens: &[u64]) -> Result<()> {
+        Ok(())
+    }
+}
+```
+
+The host calls the closure for each batch, with the longest time it may block, and only
+after the previous batch reached the sink, so a slow sink slows the source down. `Batch` is
+`Rows(rows)`, `RowsAck(rows, token)` (acknowledge `token` once the rows committed; empty rows
+still get their token acknowledged), `Data { rows, ack, redelivered }` (`redelivered` forces
+`check_existing`), `Timeout` or `End` (the host closes the subscription and subscribes again
+after a backoff). Rows are JSON objects, as `fetch` returns them. The optional module-level
+`fn ack(tokens: &[u64])` (it may also take `connector: &Connector`) runs after the
+subscription's own `ack`; a type implementing `Subscription` may instead override
+`ack(&mut self, tokens)` and `close(&mut self)`. The returned closure lives beyond the call,
+so it cannot borrow `pipe` or `kwargs`: copy what it needs, as `station` above (Meerschaum adds
+`+ use<>` to an `impl` return type for you, so a borrow is reported at your line).
+
+A producer thread can feed a `ChannelSubscription`, as in the Cargo SDK: a full channel blocks
+the producer, and the subscription ends when every sender is dropped.
+
+```rust
+#[make_connector]
+mod feed {
+    fn subscribe(pipe: &Pipe) -> Result<Box<dyn Subscription>> {
+        let count = pipe.parameters()["fetch"]["count"].as_u64().unwrap_or(3);
+        let (sender, subscription) = ChannelSubscription::new(1);
+        std::thread::spawn(move || {
+            for id in 0..count {
+                let rows = Frame::from_rows(vec![json!({"id": id})]).unwrap();
+                if sender.send(rows).is_err() {
+                    return;
+                }
+            }
+        });
+        Ok(Box::new(subscription))
+    }
+}
+```
+
+### Instance connectors
+
+`#[make_connector(instance)]` (or `instance = true`) makes the module's connector type an
+instance, the counterpart of a Python connector with `IS_INSTANCE = True`: `-i <type>:<label>`
+then registers, syncs, lists and deletes pipes through it. Its functions named after the
+instance methods answer them; others are helpers. A method you leave out is "not
+implemented", so the host falls back where it can (file-based leases, for example). The module
+may also define `fetch`, `sync` and `subscribe`, as a source connector does.
+
+```rust
+/// Pipes and rows in memory.
+#[make_connector(instance)]
+mod memory {
+    use std::collections::BTreeMap;
+    use std::sync::Mutex;
+    static ROWS: Mutex<BTreeMap<String, Vec<Value>>> = Mutex::new(BTreeMap::new());
+
+    fn key(pipe: &Pipe) -> String { format!("{}|{}", pipe.connector_keys(), pipe.metric_key()) }
+
+    fn register_pipe(pipe: &Pipe) -> SuccessTuple {
+        ROWS.lock().unwrap().entry(key(pipe)).or_default();
+        SuccessTuple::success()
+    }
+    fn pipe_exists(pipe: &Pipe) -> bool { ROWS.lock().unwrap().contains_key(&key(pipe)) }
+    fn sync_pipe(pipe: &Pipe, data: Vec<Value>) -> (bool, String) {
+        let count = data.len();
+        ROWS.lock().unwrap().entry(key(pipe)).or_default().extend(data);
+        (true, format!("Inserted {count} rows."))
+    }
+    fn get_pipe_data(pipe: &Pipe, begin: Option<Bound>, params: &Value) -> Vec<Value> {
+        ROWS.lock().unwrap().get(&key(pipe)).cloned().unwrap_or_default()
+    }
+    fn get_sync_time(pipe: &Pipe, newest: bool) -> Option<i64> { None }
+    fn fetch_pipes_keys(query: &Value) -> Value {
+        Value::Array(ROWS.lock().unwrap().keys().map(|k| {
+            let (c, m) = k.split_once('|').unwrap();
+            json!([c, m, null])
+        }).collect())
+    }
+}
+```
+
+| Method | Returns |
+|---|---|
+| `register_pipe`, `delete_pipe`, `drop_pipe`, `edit_pipe`, `sync_pipe`, `clear_pipe`, `deduplicate_pipe`, `drop_pipe_indices`, `create_pipe_indices`, `compress_pipe`, `decompress_pipe`, `analyze_pipe`, `vacuum_pipe`, `partition_pipe` | `SuccessTuple`, `(bool, String)` or `(bool, &str)` |
+| `get_pipe_data` | `Vec<Value>` rows, `Frame` or `Option<Frame>` |
+| `test_connection`, `pipe_exists`, `acquire_pipe_lease`, `release_pipe_lease` | `bool` |
+| `fetch_pipes_keys` | `[[connector_keys, metric_key, location_key], ...]` (or a map of pipe IDs to those lists) |
+| `get_pipe_id`, `get_pipe_rowcount`, `get_pipe_size` | `Option<i64>` (or `i64`) |
+| `get_sync_time` | an integer, an ISO timestamp string, or `None` |
+| `get_pipe_attributes`, `get_pipe_columns_types`, `get_pipe_index_names`, `get_pipe_columns_indices` | a JSON object (`Value`, or any serializable map) |
+
+Any of these may be wrapped in `Result`; the value methods may return any serializable type.
+Parameters bind by name: `pipe: &Pipe`, `connector: &Connector`, `data: Option<Frame>` or
+`data: Vec<Value>` (the rows of `sync_pipe`), `context: &Value` (the call's whole JSON context,
+as `NativeConnector` sends it), and any field of the call: `query`, `options`
+and `params` (`&Value`), `begin` / `end` (`Option<Bound>`), `select_columns`, `omit_columns`,
+`limit`, `order`, `check_existing`, `chunksize`, `extra`, `newest`, `patch`, `no_policy`,
+`full`, `chunk_minutes`, `holder` (`&str`) and `ttl_seconds`. A field is read from the context,
+then from its `query`, then from its `options`; declare it as `&Value`, `&str`, or any owned
+type it deserializes into (`bool`, `f64`, `Option<i64>`, `Option<Vec<String>>`, ...).
+
+### Console pages
+
+`#[web_page]` on a top-level function serves it as a page of the web console
+(`meerschaum[dash]`), the counterpart of Python's `@web_page`. The path defaults to the
+function's name and is served under `/dash/`; the options are Python's:
+
+```rust
+/// A report of the readings.
+#[web_page("readings/report", login_required = false, page_group = "Readings")]
+fn report(page: &PageRequest) -> String {
+    let station = page.query_param("station").unwrap_or_default();
+    format!("<h3>Readings for {station}</h3><p>Viewed by {}.</p>", page.username.as_deref().unwrap_or("a guest"))
+}
+
+#[web_page]
+fn status() -> (u16, String) {
+    (503, "<p>Not ready yet.</p>".into())
+}
+```
+
+| Option | Meaning |
+|---|---|
+| a path (first) | `"readings/report"` is served at `/dash/readings/report` (a leading `/dash/` is accepted); default: the function's name |
+| `login_required = false` | Served without a console session (default `true`) |
+| `skip_navbar = true` | Hide the console's navigation bar (default `false`) |
+| `page_group = "..."` | The navigation group (default: the plugin's name) |
+| `dark_theme = false` | Opt out of the console's dark component theme (default `true`) |
+
+The function may take `page: &PageRequest` (`path`, the raw `query`, `query_param(name)`, and
+`username`, `None` for a guest) and returns the page's HTML as a `String` or `&str`, `(u16, T)`
+to set the status, or a `Result` of those (an `Err` is a `500` page showing its message). The HTML
+follows the [page contract](/reference/migrating-to-v5/#option-b-the-page-contract-recommended-for-new-pages)
+(`data-mrsm-figure` / `data-mrsm-map` elements). The path is checked when the plugin is built:
+relative segments of letters, digits, `-` and `_`, no wildcards. Pages are fixed when the
+server starts.
 
 ### Dependencies
 
@@ -10239,7 +11025,7 @@ other source paths still resolve from the cached source; use a Cargo plugin for 
 
 ### Single-file build cache
 
-The filename supplies the plugin name, and the generated version is `0.0.0`.
+The filename supplies the plugin name; the version is `VERSION` (`0.0.0` when omitted).
 Sources and build output stay under `<root>/cache/native_build/<name>/`; nothing is
 written beside the original `.rs` file. Unchanged builds are reused, edits trigger
 recompilation, and failed builds are remembered until an edit or cache deletion.
@@ -10252,10 +11038,630 @@ Rust returns the final expression of a function. In the example above, do **not*
 a semicolon after `vec![...]`: that would discard the rows and return `()` instead of
 `Vec<Value>`.
 
-Use the full crate layout above for multiple source files, relative included assets,
-instance connectors, custom arguments, hooks, routes, pages, and other SDK capabilities. Relative paths in a
+Use the full crate layout above for multiple source files, relative included assets, typed
+Arrow frames, or a hand-written manifest. Relative paths in a
 shorthand file resolve from its generated copy in the cache.
 
+
+
+---
+
+# Routes and MCP
+
+Source: https://meerschaum.io/reference/plugins/rust-plugins/routes-and-mcp/
+
+# Routes and MCP in Rust Plugins
+
+A Rust plugin can serve **HTTP routes** next to the core API (the native counterpart of
+`@api_plugin`) and expose **MCP tools, resources and prompts** to agents (the counterpart of
+`meerschaum.mcp.tool(...)`). Both are declared in the plugin's manifest, so `mrsm start api` and
+`mrsm start mcp` know them without loading the library, and both run in-process: no Python API
+host is started for them.
+
+The complete, tested example is
+[`crates/meerschaum-plugin/examples/native_api.rs`](https://github.com/bmeares/Meerschaum/blob/v5/crates/meerschaum-plugin/examples/native_api.rs).
+
+## 🛣️ Routes
+
+Declare each route under `api_routes` in your plugin's manifest entry and implement
+`Plugin::api_route`:
+
+```rust
+use meerschaum_plugin::{
+    Plugin, Result,
+    api::{RouteRequest, RouteResponse, RouteSpec},
+    serde_json::{Value, json},
+};
+
+#[derive(Default)]
+struct Items;
+
+impl Plugin for Items {
+    const NAME: &'static str = "items";
+    const VERSION: &'static str = "1.0.0";
+
+    fn manifest(&self) -> Value {
+        let routes = [
+            RouteSpec::new("get_item", "GET", "/items/{id}").scopes(["pipes:read"]),
+            RouteSpec::new("upload", "PUT", "/items/files/{*key}").scopes(["pipes:write"]),
+            RouteSpec::new("health", "GET", "/items-health").public(),
+        ];
+        json!({
+            "schema_version": meerschaum_plugin::MANIFEST_SCHEMA_VERSION,
+            "meerschaum_version": "5.0.0", "python_version": "", "fingerprint": null,
+            "plugins": {"items": {
+                "name": "items", "version": "1.0.0",
+                "api_routes": routes.iter().map(RouteSpec::to_json).collect::<Vec<_>>(),
+            }}
+        })
+    }
+
+    fn api_route(&self, request: &RouteRequest) -> Result<RouteResponse> {
+        Ok(match request.name.as_str() {
+            "get_item" => RouteResponse::json(&json!({
+                "id": request.path_param("id"),
+                "fields": request.query_params.get("field"),
+                "caller": request.principal,
+            })),
+            "upload" => RouteResponse::empty(204).header("x-stored", request.body.len().to_string()),
+            _ => RouteResponse::text("ok"),
+        })
+    }
+}
+
+meerschaum_plugin::export_plugin!(Items);
+```
+
+### Declaring a route
+
+| Key | Meaning |
+|---|---|
+| `name` | The route's name within the plugin; the request carries it back (`request.name`). |
+| `method` | Any HTTP method (`GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `OPTIONS`, or an extension method such as `PROPFIND`), or `*` for every method. Default `GET`. Several routes may share a path with different methods; another method is a `405` with an `Allow` header, and `HEAD` falls back to the `GET` route (without a body). |
+| `path` | A path with parameters (see [Paths](#paths)). |
+| `scopes` | Scopes the caller must hold, such as `pipes:read`. A caller holding `*` holds all of them. |
+| `public` | Serve without credentials. When the caller sends valid credentials anyway, the principal is still passed. A public route may not declare `scopes` (it is refused at startup). |
+| `description` | Optional text for people reading the manifest. |
+
+#### Paths
+
+Paths follow Starlette's syntax (what `@api_plugin` routes use), one parameter per segment:
+
+| Segment | Matches |
+|---|---|
+| `items` | The literal text. |
+| `{id}` or `{id:str}` | Any non-empty segment. |
+| `{id}.json`, `v{n}` | A parameter with a static prefix or suffix (`/docs/{name}.json` matches `/docs/a.b.json` with `name = "a.b"`). |
+| `{n:int}`, `{x:float}`, `{u:uuid}` | Digits; digits with an optional fraction; a hyphenated UUID. Values still arrive as strings. |
+| `{*rest}` or `{rest:path}` | The rest of the path, slashes included (last segment only, not empty). |
+
+Values are percent-decoded. When several routes of a plugin match the same request (for example
+`/docs/{name}.json` and `/docs/{n:int}`), each is tried in declaration order and the first one
+that matches the path and the method serves it. A path that matches no route is a `404`.
+
+A route needs the core API's credentials (a login token or an API key) and every scope it
+declares, with the same `401` and `403 {"detail": "Missing required scope: '<scope>'"}`
+answers as the core routes. Under `--no-auth`, every route is open and the caller holds `*`.
+
+### Refused routes
+
+When the server starts, it refuses (and skips, with one line on stderr naming the plugin, the
+route and the reason) any route that:
+
+- would **shadow a core route**: a core route group (`/pipes`, `/users`, `/actions`, `/jobs`,
+  `/engine`, `/mcp`, `/login`, `/docs`, `/`, ...), the console (`/dash`) and its page routes
+  (`/_pages`, which serve plugin pages and their assets), `/static`, the web terminal, or the
+  server's internal `/_mrsm/` routes;
+- has a parameter in its first segment (`/{x}/...`, `/x{id}`), which would capture unmatched paths;
+- conflicts with a route another native plugin mounted first, or repeats a method on the same
+  path (`/a/{id}` and `/a/{other}` are the same path);
+- is `public` and declares `scopes`;
+- belongs to a route group that `api:permissions:routes` disables;
+- has invalid syntax (`:id` instead of `{id}`, two parameters in one segment, an unknown
+  converter, a catch-all that is not last or not a whole segment, `..`, `%`).
+
+```text
+Native plugin 'items': route GET /pipes/items is refused: it would shadow the core route group 'pipes'.
+```
+
+The rest of the plugin's routes are still served.
+
+### The request
+
+`RouteRequest` is the whole HTTP request:
+
+| Field | Contents |
+|---|---|
+| `name`, `route_path` | The matched route's name and declared path. |
+| `method`, `path` | The request method (uppercase) and path. |
+| `path_params` | `{"id": "42"}`, percent-decoded. `request.path_param("id")`. |
+| `query`, `query_params` | The raw query string, and every decoded value of each key in order (`{"q": ["a", "b"]}`). `request.query_param("q")` returns the first. |
+| `headers` | Lowercase names to every value. `authorization` is removed (the server already authenticated the caller), and so is the console's session cookie (`mrsm-session-id`) from `cookie`; other cookies are kept. `request.header("X-Name")` is case-insensitive and `request.cookie("theme")` reads one cookie. |
+| `body` | The body as bytes (up to 64 MiB: a larger body is a `413`, one that cannot be read a `400`). `request.text()` and `request.json::<T>()` decode it. |
+| `principal` | `None` when anonymous, else `{"kind": "user", "username", "user_id", "user_type"}` or `{"kind": "token", "token_id", "label", "user_id"}`. No secrets. |
+| `scopes` | The caller's granted scopes (`["*"]` under `--no-auth`). `request.has_scope("x")`. |
+
+### The response
+
+`RouteResponse` carries a status, headers (several values of one name are kept, such as two
+`set-cookie` headers) and body bytes:
+
+```rust
+RouteResponse::json(&value)                         // 200 application/json
+RouteResponse::text("hello")                        // 200 text/plain; charset=utf-8
+RouteResponse::bytes("image/png", png_bytes)        // any content type
+RouteResponse::empty(204)
+RouteResponse::error(404, "No such item.")          // {"detail": "No such item."}, like the core API
+RouteResponse::text("moved").with_status(307).header("location", "/items/1")
+```
+
+An `Err` from `api_route` becomes `500 {"detail": "<message>"}`.
+
+## ⚙️ How calls run
+
+- **Concurrently.** Like FastAPI with `@api_plugin`, the server runs requests in parallel: each
+  `api_route`, `mcp_tool`, `mcp_resource` and `mcp_prompt` call runs on its own thread and is
+  not serialized with the plugin's other calls, so a slow route holds up neither the plugin's
+  other routes nor its MCP entries. These methods must therefore be thread-safe; the SDK builds a
+  fresh `P::default()` for every call, so a plugin with no shared state needs nothing more.
+  Host services (`Pipe` calls back into Meerschaum) are not available in these calls.
+- **Bounded.** At most 32 server calls of one plugin run at once (routes and MCP entries are
+  counted separately). Further requests wait up to 30 seconds for a free slot, then answer
+  `503 {"detail": "Native plugin '<name>' is busy ..."}` with `Retry-After: 1` (an MCP call
+  returns that message as its error). A call that never returns keeps its slot, so a stuck
+  handler degrades into `503`s rather than unbounded threads and memory.
+- **Fixed at startup.** Routes and MCP entries are read from the manifests when `mrsm start api`
+  (or `mrsm start mcp`) starts. Installing, updating or removing a native plugin takes effect
+  after a restart; unlike Python plugins, the running server does not pick it up.
+
+## 🤖 MCP tools, resources and prompts
+
+Declare entries under `mcp_tools`, `mcp_resources` and `mcp_prompts` and implement the matching
+`Plugin` methods:
+
+```rust
+use meerschaum_plugin::mcp::{
+    PromptGet, ResourceContents, ResourceRead, ToolCall, ToolSpec, message,
+};
+
+// In `manifest()`, inside the plugin's entry:
+//   "mcp_tools": [ToolSpec::new("count_items", "Count the items of a kind.")
+//       .input_schema(json!({"type": "object",
+//           "properties": {"kind": {"type": "string"}}, "required": ["kind"]}))
+//       .scopes(["pipes:read"])
+//       .read_only()
+//       .to_json()],
+//   "mcp_resources": [{"name": "item", "description": "One item.",
+//       "uri_template": "items://{id}", "scopes": ["pipes:read"]}],
+//   "mcp_prompts": [{"name": "summarize", "description": "Summarize an item.",
+//       "arguments": [{"name": "id", "required": true}]}],
+
+fn mcp_tool(&self, call: &ToolCall) -> Result<Value> {
+    let kind = call.argument("kind").and_then(Value::as_str).unwrap_or_default();
+    Ok(json!({"kind": kind, "count": 3}))
+}
+
+fn mcp_resource(&self, read: &ResourceRead) -> Result<ResourceContents> {
+    Ok(ResourceContents::json(&json!({"id": read.variable("id")})))
+}
+
+fn mcp_prompt(&self, get: &PromptGet) -> Result<Value> {
+    Ok(json!({"messages": [message("user", format!("Summarize item {}.", get.argument("id").unwrap_or("?")))]}))
+}
+```
+
+| Entry | Keys | Called with | Returns |
+|---|---|---|---|
+| `mcp_tools` | `name`, `description`, `input_schema` (JSON Schema), `output_schema`?, `scopes`, `title`?, `annotations`? (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`) | `ToolCall {name, arguments, principal, scopes}` | Any JSON value. A string is sent as the text content as is; anything else as indented JSON, and also as `structuredContent` when the tool declares an `output_schema` and the value is an object. |
+| `mcp_resources` | `name`, `description`, `uri` or `uri_template` (`{var}` matches one path segment), `mime_type`? (default `application/json`), `scopes`, `title`? | `ResourceRead {name, uri, variables, principal, scopes}` | `ResourceContents::text`, `::json` or `::blob` (sent base64-encoded). |
+| `mcp_prompts` | `name`, `description`?, `title`?, `arguments` (`[{name, description?, required?}]`), `scopes` | `PromptGet {name, arguments, principal, scopes}` | A string (one user message), a list of messages, or `{"description"?, "messages"}`. |
+
+Native entries follow the same rules as built-in and Python plugin entries:
+
+- An entry whose `scopes` the caller does not hold is **hidden** from the lists and refused if
+  called. Over stdio (`mrsm start mcp`) the caller holds `*`.
+- A read-only server (`api:mcp:read_only`) hides tools without `readOnlyHint: true`, and prompts
+  whose scopes end in `:write`, `:delete`, `:drop` or `:execute`.
+- Tool arguments are **validated against `input_schema`** before your method runs; a violation
+  is a tool error (`Invalid arguments for '<tool>': ...`) that the model sees. Prompt arguments
+  are checked against the declared `arguments`.
+- A native tool or prompt never replaces a built-in one of the same name, and a native resource
+  never takes a built-in resource's URI: such an entry is hidden, with one line on stderr at
+  startup (`Native plugin 'items': MCP tool 'list_pipes' is hidden: a built-in tool has that
+  name.`), as is an entry whose name another native plugin declared first. A native tool or
+  prompt replaces a Python plugin's tool or prompt of the same name.
+- An `Err` from a tool is a tool error (`isError: true`) with your message; from a resource or a
+  prompt, a JSON-RPC error.
+
+## 🧱 Without the typed methods
+
+Plugins that implement `Plugin::call` themselves receive these call kinds as `request.method`
+with JSON contexts, and can forward them with `meerschaum_plugin::sdk::call_server_extension`:
+
+| Method | Context | Reply |
+|---|---|---|
+| `api_route` | `RouteRequest` as JSON; the body is `body_base64` | `{"status"?, "headers"?: {"name": ["v", ...]}, "body_base64"?}`; the host also accepts `"json": <value>`, `"body": "<text>"` and `"content_type"` |
+| `mcp_tool` | `{"name", "arguments", "principal", "scopes"}` | the result value |
+| `mcp_resource` | `{"name", "uri", "variables", "principal", "scopes"}` | a string, `{"text", "mime_type"?}` or `{"blob_base64", "mime_type"?}` |
+| `mcp_prompt` | `{"name", "arguments", "principal", "scopes"}` | a string, a list of messages, or `{"description"?, "messages"}` |
+
+These travel through the same `invoke` entry point as every other method: the ABI version is
+unchanged, and plugins built before these call kinds existed keep loading.
+
+### Plugins with `routes` and `route`
+
+The first native route adapter asked a plugin whose manifest lists a name under `api_plugins`
+for `routes` (`[{"method", "path", "public"?}]`) and served each request through `route`
+(`{method, path, query, body, user}` with a text body; reply `{status, content_type, body}`).
+Such plugins keep working unchanged, with static paths: their replies are parsed as before (an
+invalid or missing `status` is `200`, `content_type` defaults to `text/plain; charset=utf-8`),
+and their `route` calls stay serialized with the plugin's other calls. They now authenticate
+like the core routes, so an API key works on a non-public route as well as a login token.
+Declare `api_routes` instead to get path parameters, scopes, headers, byte bodies and concurrent
+calls; a plugin that declares `api_routes` is never asked for `routes`.
+
+## 📄 Single-file plugins
+
+A single `.rs` file declares routes and MCP entries with attributes on top-level functions;
+Meerschaum writes the manifest entries and the dispatch for you:
+
+```rust
+/// One item (the doc comment is the route's description).
+#[api_route(GET, "/items/{id:int}", scopes = ["pipes:read"])]
+fn item(request: &RouteRequest) -> Value {
+    json!({"id": request.path_param("id"), "user": request.principal})
+}
+
+/// Add two integers.
+#[mcp_tool(read_only = true, input_schema = r#"{"type": "object", "properties": {"a": {"type": "integer"}, "b": {"type": "integer"}}, "required": ["a", "b"]}"#)]
+fn add(arguments: &Value) -> Value {
+    json!({"sum": arguments["a"].as_i64().unwrap_or(0) + arguments["b"].as_i64().unwrap_or(0)})
+}
+
+/// One item as a resource.
+#[mcp_resource(uri_template = "items://{id}")]
+fn item_resource(resource: &ResourceRead) -> ResourceContents {
+    ResourceContents::json(&json!({"id": resource.variable("id")}))
+}
+
+#[mcp_prompt(description = "Greet someone.", arguments = ["who"])]
+fn greet(prompt: &PromptGet) -> String {
+    format!("Say hello to {}.", prompt.argument("who").unwrap_or("nobody"))
+}
+```
+
+`#[api_route]` takes the method (`GET`, `"post"`, `"*"`; `GET` when only the path is given),
+the path and `scopes`, `public`, `name` and `description`. The MCP attributes take `name`,
+`description` (default: the doc comment), `title` and `scopes`, plus `input_schema`,
+`output_schema`, `read_only` and `annotations` for tools, `uri` or `uri_template` and
+`mime_type` for resources, and `arguments` for prompts. The request, call, read and prompt
+types and the accepted return types match the SDK's; the
+[single-file reference](advanced.md#api-routes) lists them. The same server rules apply:
+calls run concurrently, a public route may not require scopes, a path must follow the
+[path rules](#paths) and may not shadow a core route (the plugin then fails to build with the
+message, at the path's line, instead of the server refusing the route at startup), and routes
+and entries are fixed when the server starts. A prompt message with another role is
+`meerschaum_plugin::mcp::message("assistant", text)`.
+
+## 🧪 Testing
+
+```bash
+cargo test -p meerschaum-plugin --test api_mcp           # the call kinds through the ABI
+cargo test -p meerschaum-server --test native_extensions  # mounting, auth, refusals, MCP dispatch
+cargo test -p meerschaum-cli --test native_api_mcp        # `mrsm start api` and `mrsm start mcp`
+```
+
+To try your own plugin, start a server on a scratch root and call a route and a tool:
+
+```bash
+mrsm start api -i sql:local --host 127.0.0.1 -p 8224 --no-dash
+curl -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8224/items/42?field=a
+curl -H "Authorization: Bearer $TOKEN" -H 'Accept: application/json, text/event-stream' \
+  -H 'Content-Type: application/json' http://127.0.0.1:8224/mcp \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"count_items","arguments":{"kind":"a"}}}'
+```
+
+
+---
+
+# Executors and Streams
+
+Source: https://meerschaum.io/reference/plugins/rust-plugins/executors-and-streams/
+
+# Executors and Streaming Connectors in Rust Plugins
+
+A Rust plugin can provide a **job executor** (the native counterpart of `@make_executor`) and
+**streaming connectors** whose data `mrsm sync pipes --listen` lands as it arrives (the
+counterpart of an `IS_STREAMING` connector's `subscribe`). Both run in-process; no Python worker
+is started for them.
+
+The complete, tested examples are
+[`native_executor.rs`](https://github.com/bmeares/Meerschaum/blob/v5/crates/meerschaum-plugin/examples/native_executor.rs)
+(a `procs:<label>` executor that runs each job as a local process) and
+[`native_stream.rs`](https://github.com/bmeares/Meerschaum/blob/v5/crates/meerschaum-plugin/examples/native_stream.rs)
+(a `ticker:<label>` streaming connector and a plugin-level `subscribe`).
+
+## 👷 Executors
+
+An executor manages [background jobs](../../background-jobs.md#executors) by name. Declare its
+type under the manifest's top-level `executor_types` and return it from `Plugin::executor`:
+
+```rust
+use meerschaum_plugin::{
+    Plugin, Request, Result, SuccessTuple,
+    executor::{Executor, mrsm_command},
+    serde_json::{Value, json},
+};
+
+#[derive(Default)]
+struct Procs;
+
+impl Plugin for Procs {
+    const NAME: &'static str = "procs_plugin";
+    const VERSION: &'static str = "1.0.0";
+
+    fn manifest(&self) -> Value {
+        json!({
+            "schema_version": meerschaum_plugin::MANIFEST_SCHEMA_VERSION,
+            "meerschaum_version": "5.0.0", "python_version": "", "fingerprint": null,
+            "plugins": {"procs_plugin": {"name": "procs_plugin", "version": "1.0.0"}},
+            "executor_types": {"procs": {"type": "procs", "plugin": "procs_plugin",
+                "doc": "Run jobs as local processes."}},
+        })
+    }
+
+    fn executor(&self, request: &Request) -> Option<Box<dyn Executor>> {
+        // `request.label` is the label of `procs:<label>`, `request.config` its configuration,
+        // `request.context["root_dir"]` the Meerschaum root the jobs belong to.
+        (request.connector_type == "procs").then(|| Box::new(ProcsExecutor) as _)
+    }
+}
+
+struct ProcsExecutor;
+
+impl Executor for ProcsExecutor {
+    fn get_job_names(&self) -> Result<Vec<String>> { /* ... */ Ok(vec![]) }
+    fn get_job_metadata(&self, name: &str) -> Result<Value> { /* ... */ Ok(Value::Null) }
+    fn create_job(&self, name: &str, sysargs: &[String], properties: &Value) -> Result<SuccessTuple> {
+        // Start `mrsm <sysargs>` with `mrsm_command()` (the host's own `mrsm`), then report.
+        Ok(SuccessTuple::ok(format!("Started job '{name}'.")))
+    }
+    // start_job, stop_job, delete_job, get_logs, monitor_logs, ...
+}
+
+meerschaum_plugin::export_plugin!(Procs);
+```
+
+Then use `procs:<label>` wherever executor keys are accepted:
+
+```bash
+mrsm sync pipes -c plugin:noaa -d -e procs:main --name noaa
+mrsm show jobs -e procs:main
+mrsm show logs noaa -e procs:main
+mrsm stop jobs noaa -e procs:main
+```
+
+The shell's `executor procs:main` command, `meerschaum:executor` in your configuration (also
+in a compose project's `config`) and `mrsm.Job(..., executor_keys='procs:main')` in Python work
+the same way; in Python, `job.executor` is a `NativeExecutor` with the methods of
+`meerschaum.jobs.Executor`. Shell and command-line completion suggest the declared types
+(`procs:main`, or the configured labels). The executor's configuration is the connector
+configuration of `procs:<label>` (`meerschaum:connectors:procs:<label>` in `edit config`, or
+`MRSM_PROCS_<LABEL>`).
+
+The API server's `/jobs` routes (and the web console and MCP job tools) manage the server's
+local jobs only, as in v4; plugin executors are reached from the command line, the shell,
+configuration, compose and Python.
+
+### The methods
+
+`Executor` mirrors Python's `meerschaum.jobs.Executor`. Every method has a default, so you
+implement only what your executor supports:
+
+| Method | Returns | Default |
+|---|---|---|
+| `get_job_names()` | every job, hidden ones included | not supported |
+| `get_job_exists(name)` | `bool` | `name` in `get_job_names()` |
+| `get_jobs()` | `{name: metadata}` | `get_job_names()` + `get_job_metadata()` |
+| `get_job_metadata(name)` | metadata, or `Value::Null` when the job does not exist | not supported |
+| `get_job_properties(name)` | the job's properties | `metadata.daemon.properties` |
+| `get_job_status(name)` | `running`, `paused` or `stopped` | `metadata.daemon.status` |
+| `get_job_began` / `get_job_ended` / `get_job_paused(name)` | ISO timestamps | `properties.process.began` / `ended` / `paused` |
+| `create_job(name, sysargs, properties)` | success tuple (create **and** start) | not supported |
+| `start_job` / `stop_job` / `pause_job` / `delete_job(name)` | success tuple | not supported |
+| `get_logs(name)` | the log text | not supported |
+| `get_job_stop_time(name)` | ISO timestamp of a manual stop | not supported |
+| `monitor_logs(name, options)` | a `LogStream` (see below) | not supported |
+| `get_job_is_blocking_on_stdin(name)` | `bool` | not supported |
+| `get_job_prompt_kwargs(name)` | the pending prompt's keyword arguments | not supported |
+| `write_stdin(name, data)` | write one answer line to the job's stdin | not supported |
+
+Metadata has the shape the local and `api:` executors report:
+
+```json
+{"sysargs": ["sync", "pipes"], "result": [true, "Success"], "restart": false,
+ "daemon": {"status": "running", "pid": 4242,
+            "properties": {"process": {"began": "2026-01-01T00:00:00+00:00", "ended": null}}}}
+```
+
+A method you leave out is reported to the user as
+`` `pause_job` is not supported by the 'procs:main' executor. `` (actions fail with that message;
+listings show such a job as `stopped` without timestamps). Any other error from a method (an I/O
+error, a panic) is printed as a warning naming the executor and the method, so a broken executor
+is never silently shown as a stopped job. The `sysargs` given to `create_job`
+never contain `-d` or `-e` / `--executor-keys`.
+
+**Starting a job.** A job runs `mrsm <sysargs>`. Use `executor::mrsm_command()` for the program:
+it is the host's own command (the `mrsm` binary, or `python -P -m meerschaum` when Meerschaum runs
+from the Python package), so the job uses the same installation and environment.
+
+**State.** A new executor value is built for every call, so keep job state outside it: in files
+(as the example does under `<root_dir>/procs_jobs/<label>/`), a database, or a static map keyed by
+label. Key file state on `request.context["root_dir"]`, not on `MRSM_ROOT_DIR`: one process may
+manage the jobs of several roots (`mrsm compose` runs in the host's root and manages the jobs of
+each project's root).
+
+**Following logs.** `monitor_logs` returns a `LogStream`; the host calls
+`next_lines(timeout)` until you return `LogEvent::End(result)` (only when
+`options.stop_on_exit` is set and the job stopped) or the user stops watching:
+
+```rust
+impl LogStream for Tail {
+    fn next_lines(&mut self, timeout: Duration) -> Result<LogEvent> {
+        // Return LogEvent::Lines(new_lines), LogEvent::Timeout after `timeout`,
+        // or LogEvent::End(Some(result)).
+    }
+}
+```
+
+**Prompts.** While the host follows a job's log with input accepted (`show logs`, or `start job`
+in the foreground), each `LogEvent::Timeout` makes it ask `get_job_is_blocking_on_stdin`; when
+that is `true`, it reads the user's answer and calls `write_stdin(name, data)` (one line, ending
+in `\n`). Executors without those two methods never receive input.
+
+## 📡 Streaming connectors
+
+A streaming connector pushes rows as they arrive instead of answering `fetch`. Mark the
+connector type `"is_streaming": true` with `"subscribe"` in its `methods` (or list `subscribe`
+under the plugin's `data_functions` for `plugin:<name>`) and implement `Plugin::subscribe`:
+
+```rust
+use meerschaum_plugin::subscribe::{Batch, ChannelSubscription, Subscription};
+
+fn subscribe(&self, request: &Request) -> Result<Box<dyn Subscription>> {
+    // `request.context["pipe"]` is the pipe, `request.context["kwargs"]` the sync's keyword
+    // arguments (`begin`, `end`, `params`, `chunksize`, `check_existing`, plugin flags, ...),
+    // the same ones a Python `subscribe(pipe, ..., **kwargs)` receives.
+    let topic = request.context["pipe"]["parameters"]["fetch"]["topic"].clone();
+    // A producer thread feeds a bounded channel: `send` blocks while the host is busy.
+    let (sender, subscription) = ChannelSubscription::new(16);
+    std::thread::spawn(move || {
+        for frame in read_messages(topic) {
+            if sender.send(frame).is_err() {
+                return; // the host closed the subscription
+            }
+        }
+    });
+    Ok(Box::new(subscription))
+}
+```
+
+Then listen:
+
+```bash
+mrsm register pipe -c ticker:office -m readings -i sql:local
+mrsm sync pipes -c ticker:office -i sql:local --listen
+```
+
+The host **pulls**: it calls `next_batch(timeout)` on your subscription, hands each batch to the
+engine's micro-batching sink (`parameters['stream']`: `idle_ms`, `max_latency_ms`, `max_rows`,
+`max_bytes`) and asks again only once the sink accepted it, so a slow instance slows your source
+down instead of filling memory. `next_batch` may block (on a channel, a socket, a sleep) up to the
+timeout:
+
+| Return | Meaning |
+|---|---|
+| `Batch::data(frame)` | rows to sync |
+| `Batch::with_ack(frame, token)` | rows whose `token` your `ack(tokens)` receives once they committed (acknowledge-after-commit, like MQTT QoS 1 or Kafka offsets). An empty frame with a token (a filtered message) is acknowledged with the next committed flush |
+| `Batch::Timeout` | nothing new yet |
+| `Batch::End` | the source ended; the engine subscribes again after a backoff |
+
+An error from `next_batch` (or `subscribe`) closes the subscription and the engine resubscribes
+with exponential backoff, emitting `stream_restarted`. Tokens belong to the subscription that
+returned them: `ack` only ever receives tokens of its own subscription. Batches still buffered when
+a subscription ended are never acknowledged on the next one (their source redelivers them), so a
+token may be reused across subscriptions (MQTT packet ids, per-session offsets). `close()` is called once when the listener
+stops. Committed flushes trigger the stream's children (`--listen --children`) exactly like a
+Python `subscribe` stream. A subscription may implement `Subscription` directly instead of using
+`ChannelSubscription`; the example's `ticker` does, with no thread at all.
+
+`next_batch`, `ack` and `close` are not serialized with your plugin's other calls (one blocking
+`next_batch` never holds up a `fetch` or another subscription), so share state between them only
+through synchronized types. `subscribe` itself is an ordinary call with the Pipe helpers
+(`pipe.get_sync_time()`), so a source can resume from the pipe's newest row.
+
+## 🔌 The wire contract
+
+Executors and subscriptions are ordinary JSON methods of the plugin ABI; data crosses as an Arrow
+C stream like `fetch`. The SDK implements them for you; a plugin written against the C ABI
+directly answers:
+
+| Method | Context | Reply |
+|---|---|---|
+| `executor.<method>` (every method above) | `{name?, sysargs?, properties?, mrsm, root_dir?}` | the method's JSON value; status 3 when unsupported |
+| `executor.write_stdin` | `{name, data, mrsm, root_dir?}` | `null` |
+| `executor.monitor_logs` | `{name, strip_timestamps, stop_on_exit, mrsm, root_dir?}` | `{"handle": u64}` |
+| `executor.next_logs` | `{handle, timeout_ms}` | `{"status": "lines" \| "timeout" \| "end", "lines": [...], "result": [bool, str] \| null}` |
+| `executor.close_logs` | `{handle}` | `null` |
+| `subscribe` | `{pipe, kwargs}` | `{"handle": u64}` |
+| `next_batch` | `{handle, timeout_ms}` | `{"status": "batch" \| "timeout" \| "end", "ack": u64 \| null, "redelivered": bool}`, rows in the output stream |
+| `ack_batches` | `{handle, tokens}` | `null` |
+| `close_subscription` | `{handle}` | `null` |
+
+For `executor.*` calls, the request's `connector_type` and `label` are the executor keys and
+`config` is the executor's configuration. `mrsm` is the host's command (see above) and `root_dir`
+the root the jobs belong to. For `subscribe`, `kwargs` are the sync's keyword arguments. A
+`next_batch` reply with status `batch`, an `ack` and no rows is an empty batch whose token is
+still acknowledged.
+
+## 📄 Single-file plugins
+
+A single `.rs` file declares both without a Cargo project. An executor is a module marked
+`#[make_executor]`, named after the executor type (`#[make_executor(name = "...")]` to choose
+another). Its functions are the methods of the table above with the same names; a method you
+leave out answers "not supported", and the derived ones (`get_job_exists`, `get_jobs`,
+`get_job_properties`, `get_job_status`, `get_job_began` / `_ended` / `_paused`) fall back on the
+others as in the SDK:
+
+```rust
+#[make_executor]
+mod procs {
+    // Any function may take `executor: &ExecutorInfo`: `executor.label`, `executor.config`,
+    // `executor.root_dir` (the root the jobs belong to) and `executor.mrsm` (the command that
+    // starts `mrsm <sysargs>`).
+    fn get_job_names(executor: &ExecutorInfo) -> Vec<String> { /* ... */ }
+    fn get_job_metadata(executor: &ExecutorInfo, name: &str) -> Value { /* null when missing */ }
+    fn create_job(executor: &ExecutorInfo, name: &str, sysargs: Vec<String>, properties: &Value) -> (bool, String) { /* ... */ }
+    fn stop_job(name: &str) -> (bool, String) { /* ... */ }
+    fn get_logs(executor: &ExecutorInfo, name: &str) -> Option<String> { /* ... */ }
+    fn write_stdin(name: &str, data: &str) -> Result<()> { /* ... */ }
+    // Each call is one `next_logs`. `show logs` follows a job through this method; without
+    // it, only `show logs --nopretty` (which reads `get_logs`) shows the logs.
+    fn monitor_logs(name: &str, stop_on_exit: bool) -> impl FnMut(Duration) -> LogEvent { /* ... */ }
+}
+```
+
+Every function may also return a `Result` of its type, and `SuccessTuple` is accepted wherever
+`(bool, String)` is.
+
+A streaming connector is a `fn subscribe` inside a `#[make_connector]` module (or at the top
+level, for `plugin:<name>`). It receives the pipe, the connector and the sync's keyword arguments
+and returns a closure the host calls for each `next_batch`, a value of a type implementing
+`Subscription`, or the SDK's `Box<dyn Subscription>` (a `ChannelSubscription` fed by a producer
+thread works too). A `subscribe` with other parameters or another return type is an ordinary
+helper:
+
+```rust
+#[make_connector]
+mod ticker {
+    fn subscribe(pipe: &Pipe, kwargs: &Value) -> Result<impl FnMut(Duration) -> Batch> {
+        let mut next = 0;
+        Ok(move |_timeout: Duration| {
+            next += 1;
+            // Batch::Rows(rows), Batch::RowsAck(rows, token), Batch::Data { rows, ack,
+            // redelivered }, Batch::Timeout or Batch::End.
+            Batch::RowsAck(vec![json!({"id": next})], next)
+        })
+    }
+    // Optional: called with the committed tokens.
+    fn ack(tokens: &[u64]) -> Result<()> { Ok(()) }
+}
+```
+
+Rows are JSON objects (`Vec<Value>`) as `fetch` returns them; the rows ABI carries them in the
+`next_batch` reply's `data`, with the same `status`, `ack` and `redelivered` fields as the table
+above. The closure may block up to its timeout. Dropping it closes the subscription. The
+[single-file reference](advanced.md#executors) lists every parameter and return type.
 
 
 ---
@@ -11000,7 +12406,7 @@ Verify with `import meerschaum; print(meerschaum.__file__, meerschaum.__version_
 
 ## Debugging tips
 
-- **`--debug`** — add to any action to print resolved SQL, sync windows, and dtype enforcement. The single most useful diagnostic.
+- **`--debug`** — add to any action to print resolved SQL, sync windows, and dtype enforcement. The single most useful diagnostic. See [Debug output](#debug-output) below for what it prints and where.
 
     ```bash
     mrsm sync pipes -c plugin:foo -m bar --debug
@@ -11026,6 +12432,71 @@ Verify with `import meerschaum; print(meerschaum.__file__, meerschaum.__version_
 - **`mrsm show columns` / `mrsm show rowcounts`** — confirm the stored schema and row counts match expectations.
 
 - **`pipe.get_data(begin=..., end=..., params=...)`** — pull a sample directly to see what's actually stored.
+
+### Debug output
+
+`--debug` works on every action, and the shell's `debug on` toggle turns it on for every command
+you type (and for the shell itself) until `debug off`. Each message starts with a header naming
+the time (UTC) and the code that printed it, like v4's `dprint()`:
+
+```text
+ 🐞 14:03:07.512 | meerschaum_cli::dispatch:935
+Action ["sync", "pipes"] -> `sync pipes` (_sync_pipes), sub-actions [].
+ 🐞 14:03:07.519 | meerschaum_connector_sql::driver:707
+SELECT name FROM sqlite_master WHERE type IN ('table', 'view') AND name = 'mrsm_pipes'
+```
+
+Rust code names its module (`meerschaum_connector_sql::driver`), Python code its module
+(`meerschaum.connectors.sql._pipes`) or your plugin's. With `--debug` you see:
+
+- the action the words resolved to and the parsed arguments. Secrets are printed as `***`:
+  values of keys or flags named like `password`, `secret`, `token` or `api_key` (also inside
+  `--params` and other JSON), URI passwords and secret query parameters (`?password=`);
+- each connection opened (`sql:`, `api:` and `valkey:`: flavor, host, port, database, username;
+  never the password);
+- every SQL statement the native SQL connector runs (with the number of bound parameters);
+- the sync stages with row counts and timings: fetch (each fetched chunk with its bounds, for
+  chunked and generator sources too), dtype enforcement, the filter against existing rows
+  (unseen vs. updated) and the write;
+- the Syncing Engine's plan (action, reason, bounds and chunks per pipe) and each event as the
+  run reaches it: nodes starting and finishing, every chunk with its bounds, row counts and
+  duration;
+- each call to a Python worker (operation, payload size, duration). `--debug` is forwarded to
+  the worker, so `debug=True` reaches your plugin's `fetch()` / `sync()` / actions and their
+  `dprint()` output appears too;
+- plugin discovery and loading (native plugins, and Python plugins when the plugin manifest is
+  rebuilt).
+
+While a full-screen view (`watch run`, `watch jobs`, the shell's F2 / F3) is shown, debug output
+is held back and printed when you leave the view (the last 2000 messages). `mrsm --debug` (or
+`mrsm --shell --debug`) starts the shell with `debug` on; `debug off` turns it off.
+
+Debug output goes to **stderr**, never stdout, so `mrsm ... --debug > out.txt` keeps the command's
+real output clean, and job logs (which capture both streams) include it. In v5 Python's
+`meerschaum.utils.debug.dprint()` also prints to stderr (v4 printed to stdout). The header is
+colored with `formatting:debug` (`mrsm edit config`); `formatting:ansi: false` or `NO_COLOR`
+removes the colors and `formatting:unicode: false` replaces the icon with `DEBUG`.
+
+From Python, `debug=True` on a pipe or connector method of a SQL instance (`pipe.sync(debug=True)`,
+`pipe.get_data(debug=True)`, `pipe.clear(debug=True)`, `mrsm.get_pipes(debug=True)`, ...) shows
+the Rust core's debug output for that call through `dprint()`. For any other call, wrap it in
+`meerschaum._core.debugging()`:
+
+```python
+import meerschaum as mrsm
+from meerschaum._core import debugging
+
+with debugging():
+    print(mrsm.Pipe('sql:main', 'demo').exists())
+```
+
+Debug output is on for the whole process while any `--debug` action, `debug=True` call or
+`debugging()` block runs, so work running at the same time in other threads prints too. The API
+server is the exception: an action a client runs with `debug` passes `debug=True` to the action
+but does not turn on debug output for the server's other requests.
+
+`RUST_LOG` is unrelated to `--debug`: it still prints the Rust `tracing` events its filter selects
+(dependencies included) in the `tracing` format, for developers.
 
 ---
 
@@ -11067,7 +12538,7 @@ v4.1.x stays installable and receives security fixes until 5.1.0 ships. There is
 - **Pipes.** Keys, `parameters`, every parameter key (`columns`, `dtypes`, `indices`, `tags`, `fetch`, `verify`, `sql`, `target`, `upsert`, `static`, `autoincrement`, `autotime`, `hypertable`, `compress`, `precision`, `null_indices`, `mixed_numerics`, `reference`, `parents`, `children`, `source`), role-keyed `dtypes`, pandas-style dtype strings, every `geometry[...]` notation, integer datetime axes, and the `schema.target` table naming.
 - **Templating.** `{{ Pipe() }}` substitution and attribute chains into parameters (`{{ Pipe('sql:main', 'x').columns }}`), `{{ self.* }}`, `MRSM{...}` symlinks, compose `'{sql:label}'` references, `{MRSM_ROOT_DIR}` and `${ENV}` interpolation.
 - **Config.** The YAML files and their layout under `MRSM_ROOT_DIR/config/`, `MRSM_SQL_<LABEL>` and `MRSM_API_<LABEL>` environment connectors, `connectors.yaml` URIs, `plugins.json`.
-- **Instances.** Existing tables, the internal `_mrsm_internal` schema, user tables and password hashes, token tables, plugin registrations. v5 reads a v4.1 instance as is. No migration script runs on your data.
+- **Instances.** Existing tables, the internal `_mrsm_internal` schema, user tables and password hashes, token tables, plugin registrations. v5 reads a v4.1 instance as is. No migration script runs on your data; the only additions are unique indexes on the pipe keys of `mrsm_pipes`, the usernames of `mrsm_users` and the plugin names of `mrsm_plugins` (see below).
 - **Compose.** Every key and subaction (`up`, `down`, `ps`, `logs`, `run`, `explain`, `init`, `sync pipes`, `start jobs`, ...), `--file`, `--env-file`, `--dry`, `isolation: subprocess`, `plugins: ['name@api:repo']`, `sync.schedule`.
 - **Jobs.** The on-disk layout under `MRSM_ROOT_DIR/jobs/`, so jobs created on 4.1 are picked up by 5.0. `-d`, `--name`, `-s` cron schedules, `--loop --min-seconds`, `-w`, `+` and `:` chaining, `show logs`, `attach`, `pause`, `stop`, `delete jobs`, the systemd and `api:` executors.
 - **The HTTP API.** Every route, path, method, scope and body shape. JWTs issued by 4.1 validate on 5.0 because the secret file is shared. `--production`, `--secure`, `--host`, `--port`, `api.permissions.*`.
@@ -11099,7 +12570,9 @@ Everything below is deliberate, and each item links to the section with the deta
 | DuckDB | The Python `duckdb` package | Python hosts share the optional Python driver between Pipe operations and SQLAlchemy. Standalone and base-only installs load `libduckdb` at run time, downloading it when needed. Explicit `MRSM_DUCKDB_LIB` selects the native C API and refuses mixed SQLAlchemy access. [Installing and running](#installing-and-running) |
 | Time zone objects | `ZoneInfo('Etc/UTC')` from psycopg | `datetime.timezone.utc` (equal values). [Python users](#python-library-users-and-scripts) |
 | An unreachable database, API or Valkey server | The first query waited for the driver's own timeouts (30 s of retries for a refused PostgreSQL / MySQL connection, minutes for a host that never answers) | The first connection of a command fails at once with `sql:main: cannot connect to localhost:5432 (connection refused). Is the database running?` (also unknown host, rejected credentials), and a host that does not answer fails after `connect_timeout` (5 s). [Configuration](#configuration) |
+| `--debug` and `dprint()` | `dprint()` printed to stdout; `--debug` showed the Python code's messages | Debug output goes to **stderr** (Python's `dprint()` too), so redirected output stays clean; job logs still include it. `--debug` and the shell's `debug on` also show the Rust core's messages (dispatch, connections, every SQL statement, sync stages, engine plans and chunks, worker calls, plugin loading) in the same format, with secrets redacted. [Troubleshooting](troubleshooting.md#debug-output) |
 | `MRSM_<TYPE>_<LABEL>` variables of an unknown type | Every such variable became a connector (`MRSM_DUCKDB_LIB` became `duckdb:lib`) | Ignored: only the built-in connector types and the types your plugins register are read. [Configuration](#configuration) |
+| Registering a pipe, user or plugin twice | `mrsm_pipes`, `mrsm_users` and `mrsm_plugins` had no unique keys: two processes registering the same pipe, username or plugin at once could both insert a row (on Valkey, a second registration overwrote the user's password) | The first time 5.0 registers, syncs, edits or looks up a pipe or user, it adds the unique indexes `uq_mrsm_pipes_keys` (connector, metric and location keys; a missing location key counts as one, except on MySQL 5.7 and MariaDB) `uq_mrsm_users_username` and `uq_mrsm_plugins_plugin_name` (constraints on Oracle), and the second registration gets "is already registered." / "already exists." (a plugin is updated instead). If a pipe, username or plugin is already registered twice, nothing is deleted and that index waits until you remove the extra rows: `mrsm doctor` lists them and the `DELETE` that removes them. v4.1 works with the indexes. Valkey instances register pipes and users atomically. |
 | Changing a pipe's `columns` | Not tracked | A changed `datetime` / `id` / `primary` column is a definition change: an engine run marks the pipe for `rebuild`. [The Syncing Engine](#the-syncing-engine) |
 
 ## 📦 Installing and running
@@ -12037,7 +13510,7 @@ The notes below are written for someone upgrading from 4.1. Everything that beha
 #### Rust core
 
 - **The core is Rust, and your pipes do not change.**  
-  Pipe parameters and templating, configuration (`get_config` and `MRSM{}` over a lossless registry), the data kernel (`enforce_dtypes`, `filter_existing`, special-column handling), `SQLConnector` instance methods, jobs, compose, the CLI and shell, the HTTP API and MCP server are Rust crates. Public surfaces are unchanged: pipe keys and every `parameters` key, the YAML config layout, `MRSM_SQL_<LABEL>` connectors, instance tables, the `jobs/` layout, compose files, every HTTP route and the Python public API. A v4.1 instance is read as is; no migration runs on your data. `SQLConnector.read/exec/value/to_sql/.engine/get_tables()` stay SQLAlchemy (extra `meerschaum[sql]`).
+  Pipe parameters and templating, configuration (`get_config` and `MRSM{}` over a lossless registry), the data kernel (`enforce_dtypes`, `filter_existing`, special-column handling), `SQLConnector` instance methods, jobs, compose, the CLI and shell, the HTTP API and MCP server are Rust crates. Public surfaces are unchanged: pipe keys and every `parameters` key, the YAML config layout, `MRSM_SQL_<LABEL>` connectors, instance tables, the `jobs/` layout, compose files, every HTTP route and the Python public API. A v4.1 instance is read as is; no migration runs on your data, and the only changes made to a v4.1 instance are three unique indexes, on the pipe keys of `mrsm_pipes`, the usernames of `mrsm_users` and the plugin names of `mrsm_plugins` (below). `SQLConnector.read/exec/value/to_sql/.engine/get_tables()` stay SQLAlchemy (extra `meerschaum[sql]`).
 
 - **Every kind of sync runs in Rust, and `pipe.sync()` returns a `SyncResult`.**  
   `mrsm.SyncResult` is a `tuple` subclass equal to `(success, message)` with `inserted`, `updated`, `upserted`, `deleted`, `changed_intervals`, `duration`, `begin` and `end`, so `success, msg = pipe.sync()` still unpacks. No data (a `sql:`, `api:` or `valkey:` source, a plugin, a `@make_connector` connector), documents, dictionaries of lists, DataFrames, Arrow tables, strings, generators of chunks, temporary pipes, and pipes with `reference`s, `{{ }}` templates or `MRSM{}` symlinks all sync natively, on every SQL flavor (`mssql`, `oracle`, `duckdb` and in-memory SQLite included), `api:`, `valkey:` and custom instances.
@@ -12074,6 +13547,12 @@ The notes below are written for someone upgrading from 4.1. Everything that beha
 - **A Pipelines workspace in the web console.**  
   `/dash/pipelines` is a pan-and-zoom canvas of Pipe cards grouped by Pipeline, with dependency focus, search and status filters, and a fullscreen mode with an inspector and output dock. Select a Pipe for its query (SQL highlighting, resolved symlinks), parameters, data timestamps, planned sync ranges, dependencies and recent runs; stage membership and dependency edits and save shared layouts. Run a Pipeline or a single Pipe and follow its command output, per-stage activity and a live Gantt timeline of actual elapsed time; the Runs view lists history across Pipelines. Pipe cards gain Parents and Children tabs.
 
+- **Watch data move through a pipeline.**  
+  On a terminal, graph runs (`sync pipes --parents/--children/--resume`, `sync pipelines`) and `--loop` / `--listen` laps show an inline live region with one row per running pipe: chunk progress, rows inserted, updated and upserted so far, rows/s and the attempt. Plan decisions, retries and finished pipes scroll above it, and the Gantt chart follows at the end. Press `w` to open the full-screen run monitor and leave it to return to the inline view while the run keeps going. `--nopretty`, `--debug` and piped output keep line output.
+
+- **Engine events stream over Server-Sent Events.**  
+  `GET /engine/runs/{run_id}/events/stream` streams a run's typed events (`event` = kind, `id` = `seq`), resumes with `Last-Event-ID` or `?after_seq=`, can wait for a run that has just launched, and always ends with `run_finished` or a `run_closed` event naming why (`interrupted`, `holder_gone`, `idle`). It requires `pipes:write`. The console's Pipelines page follows runs and canvas syncs over this stream instead of polling every 2 seconds, and Rust clients follow an `api:` run with `APIConnector::follow_engine_run`. `system.engine.events` now defaults to `all`, so chunk progress is stored with each run's history (set `events: nodes` for very frequent loops).
+
 - **Automatic runs stay separate from your jobs.**  
   The workers that Pipe management and Pipeline runs start have explicit ownership metadata, are visible only to their creator and administrators, keep configurable output and summaries, clean up in the background, and do not fill the Jobs cards. A run can be kept as a job.
 
@@ -12084,6 +13563,12 @@ The notes below are written for someone upgrading from 4.1. Everything that beha
 
 - **New actions.**  
   `mrsm doctor` is a read-only health check that names the fix for every problem it finds (interpreter, stale packages, directories and free space, config, the instance, drivers, plugin venvs, failed jobs, the Docker stack). `mrsm install completions [bash|zsh|fish|powershell]` installs shell completions. `mrsm upgrade extensions`, `mrsm upgrade postgres`, `mrsm backup postgres` and `mrsm restore postgres` maintain the stack's database, and `mrsm stack up` refuses to start a PostgreSQL image of another major version on an existing volume. See [Upgrading the stack](/reference/stack-upgrades/).
+
+- **`watch`: full-screen monitors.**  
+  `show` prints once; the new `watch` action follows. `watch run [RUN_ID]` shows a live timeline, a node table (state, action, chunk progress, rows, rows/s, attempts, duration) and an event log for an engine run in any process or on any host. `watch jobs` lists jobs and follows the selected job's log, with confirmed start, stop and pause keys. In the shell, F2 opens `watch run` and F3 `watch jobs` without losing the line being typed; bind other keys under `shell:keybindings`. Off a terminal or with `--nopretty`, `watch run` prints the run's events line by line (JSON lines with `--nopretty`) and exits with the run's status. The views use ratatui, honor `NO_COLOR` and `formatting:unicode`, and restore the terminal on exit, panic and Ctrl-C.
+
+- **`--debug` traces Rust and Python.**  
+  `--debug` (and the shell's `debug on`) prints the Rust core's debug output in v4's `dprint` format: the resolved action and its arguments, connections opened, every SQL statement, sync stages with row counts and timings, engine plans and events, Python worker calls, and plugin discovery and loading. `--debug` reaches Python plugin code run by workers, so `debug=True` and `dprint()` work there too. From Python, a pipe or SQL connector method called with `debug=True` shows the Rust output for that call, and `meerschaum._core.debugging()` does so for any block. Passwords, tokens, API keys and URI passwords print as `***`.
 
 - **A friendlier shell.**  
   Ctrl+C cancels the running action (or a prompt) and returns to the prompt; `mrsm <action>` exits with status 130. Secret prompts echo `*`. Selection prompts suggest config keys, connectors, metrics and locations as you type and stay quiet while empty, and the cursor stays aligned after wide Unicode characters. Shell syncs show progress, elapsed time and spinners. Infinite, NaN or out-of-range timeout and loop intervals are refused before anything runs.
@@ -12098,7 +13583,7 @@ The notes below are written for someone upgrading from 4.1. Everything that beha
   Bulk starts (`compose up`, `restart jobs`, a reboot bringing up systemd units) pass a per-root startup gate with random jitter, load and memory checks and a limited number of slots (`jobs.startup.*`), so workers no longer all start on top of each other. An explicit `start job` skips the jitter, and `--no-stagger` skips the gate. `-s` schedules accept a per-job `jitter`.
 
 - **Job executors and status in Rust.**  
-  The `api:<label>` and `systemd` executors, executor-aware compose and `mrsm api <label> <action>` run natively. Systemd units run the `mrsm` binary with `Environment=MRSM_PYTHON=<absolute path>`, and `systemctl --user stop` asks the job to stop once. Job listings and status read PID files instead of scanning the process table: an idle supervisor pass over 50 completed jobs dropped from 1773 ms to 5 ms of CPU (also in v4.1.5). Remote executor reads that fail now fail the action, so a failed `compose down` cannot silently leave jobs running.
+  The `api:<label>` and `systemd` executors, executor-aware compose and `mrsm api <label> <action>` run natively. Systemd units run the `mrsm` binary with `Environment=MRSM_PYTHON=<absolute path>`, and `systemctl --user stop` asks the job to stop once. Job listings and status read PID files instead of scanning the process table: an idle supervisor pass over 50 completed jobs dropped from 1773 ms to 5 ms of CPU (also in v4.1.5). A job found by name without its PID file matches only processes of its own root, so a v4 job of the same name under another `MRSM_ROOT_DIR` is never stopped by mistake (also in v4.1.6). Remote executor reads that fail now fail the action, so a failed `compose down` cannot silently leave jobs running.
 
 - **Compose: `include:` and `parent:`, and a side-effect-free `explain`.**  
   A root compose file can include other files, directories or globs, and every command spans the tree. `compose explain` creates, installs and fetches nothing, and lists every unresolved connector, plugin, `MRSM{}` symlink and `{{ Pipe() }}` reference; `up`, `run` and `sync pipes` name a missing connector instead of raising a `TypeError`. New flags: `--project`, `--standalone`, `--no-stagger`.
@@ -12126,10 +13611,13 @@ The notes below are written for someone upgrading from 4.1. Everything that beha
   Python plugins, custom connectors, hooks, `@api_plugin` routes and MCP tools run in a worker process (`python -m meerschaum.worker`) or the API host (started only when an installed plugin needs it), driven by a cached plugin manifest. The worker refuses a `meerschaum` package of another major version with one message naming the fix.
 
 - **Rust plugins, starting from a single file.**  
-  Put a `.rs` file in the plugins directory: Meerschaum generates the Cargo project, compiles it on first use and rebuilds it after edits. `fetch` and `sync` take any subset of typed `pipe`, `begin` and `end` arguments and return rows, frames or success tuples; `#[make_action]` adds commands and `#[make_connector]` source connectors. Dependencies go in an optional Cargo block in the file's opening doc comments. A plugin can call `pipe.get_sync_time()` and `pipe.sync(data)` on the host. See [Rust plugins](/reference/plugins/rust-plugins/).
+  Put a `.rs` file in the plugins directory: Meerschaum generates the Cargo project, compiles it on first use and rebuilds it after edits. `fetch` and `sync` take any subset of typed `pipe`, `begin` and `end` arguments and return rows, frames or success tuples. A single file has every feature a packaged plugin has: `#[make_action]` commands (named however you like; `bootstrap plugins` names the function after the action), `#[make_connector]` source connectors and `#[make_connector(instance)]` instances, `#[pre_sync_hook]` / `#[post_sync_hook]`, `fn setup`, `#[add_plugin_argument(...)]`, `const VERSION` and `const REQUIRED`, `#[api_route]`, `#[mcp_tool]` / `#[mcp_resource]` / `#[mcp_prompt]`, `#[make_executor]`, streaming `subscribe` and `#[web_page]`. Dependencies go in an optional Cargo block in the file's opening doc comments. A plugin can call `pipe.get_sync_time()` and `pipe.sync(data)` on the host. See [Rust plugins](/reference/plugins/rust-plugins/).
 
 - **Rust plugins as crates or prebuilt libraries.**  
   A plugin can also be a native library (`plugin.toml` plus `lib<name>.so`) built with the `meerschaum-plugin` crate, or a Cargo crate Meerschaum builds into `MRSM_ROOT_DIR/cache/native_build/`, providing `fetch`, `sync`, actions, hooks, registration, a connector or instance, HTTP routes and console pages over Arrow record batches. A Rust plugin replaces a Python plugin of the same name entirely; the guide explains how to port gradually under a new name and compare the results.
+
+- **Rust plugins serve routes, MCP tools, executors and streams.**  
+  Rust plugins mirror `@api_plugin`: routes take any method, Starlette paths with converters and `{*rest}`, required scopes, and receive the full request (parameters, headers, body bytes, the caller's principal and scopes); a route that would shadow a core route is refused with the reason. They expose MCP tools, resources and prompts with the same scope and read-only filtering as built-in tools. They provide job executors (`-e <type>:<label>` for jobs, logs, compose and `mrsm.Job`) and streaming connectors pulled batch by batch by `--listen` and the engine, with acknowledgement after commit. Sync hooks receive Python's hook arguments, plugin flags are checked as argparse checks them, and the native plugin ABI (`mrsm_plugin_v1`) is unchanged.
 
 - **Install Rust plugins like any other.**  
   `install plugins` accepts single `.rs` files and native plugin directories from repositories, validates the build and setup without a Python environment, and restores the previous version if anything fails. `bootstrap pipes` and registration call native registration hooks.
@@ -12190,12 +13678,20 @@ Read the [migration guide](/reference/migrating-to-v5/) for the details of each 
 - **Custom compose files name their project.**  
   A file such as `metrics.yaml` defaults to project `metrics`; `mrsm-compose.yaml` and `.yml` keep their directory's name. Set `project_name` explicitly to keep an older implicit identity.
 
+- **A pipe, username or plugin name can be registered only once.**  
+  `mrsm_pipes` gets a unique index on the pipe keys (`uq_mrsm_pipes_keys`), `mrsm_users` one on the username (`uq_mrsm_users_username`) and `mrsm_plugins` one on the plugin name (`uq_mrsm_plugins_plugin_name`; on Oracle the last two are unique constraints) the first time 5.0 registers, syncs, edits or looks up a pipe or user on an instance, so two processes registering the same pipe, user or plugin at once can no longer insert two rows; the second gets "is already registered." or "already exists.", and a plugin registered twice at once is updated (with its version check) instead. A missing location key counts as one location (on MySQL 5.7 and MariaDB, which cannot index an expression, only pipes with a location key are covered). An instance where a pipe, username or plugin is already registered twice is left as it is: no row is deleted and that index is not added until the extra rows are gone, and `mrsm doctor` lists them with the statement that removes them. v4.1 keeps working against an instance with the indexes. Valkey instances register pipes and users atomically as well; registering an existing username there no longer overwrites that user's password.
+
 - **Smaller behavior changes.**  
-  Edit actions open `$VISUAL`, else `$EDITOR`, else `vi` (nothing is installed). `MRSM_<TYPE>_<LABEL>` variables of unknown connector types are ignored. Job names must be one path component, and a job created over the API takes the server's environment. A changed `datetime`, `id` or `primary` column marks a pipe for rebuild in engine runs. Time zones read back as `datetime.timezone.utc`. `upgrade meerschaum` upgrades the installation `mrsm` belongs to, never a guessed `python3`.
+  Edit actions open `$VISUAL`, else `$EDITOR`, else `vi` (nothing is installed). `MRSM_<TYPE>_<LABEL>` variables of unknown connector types are ignored. Job names must be one path component, and a job created over the API takes the server's environment. A changed `datetime`, `id` or `primary` column marks a pipe for rebuild in engine runs. Time zones read back as `datetime.timezone.utc`. Debug output, Python's `dprint()` included, goes to stderr (v4 printed to stdout), so redirected output stays clean; job logs still include it. `upgrade meerschaum` upgrades the installation `mrsm` belongs to, never a guessed `python3`.
 
 ## 4.1.0 Releases
 
 The 4.1 series receives security fixes until 5.1.0 ships.
+
+### v4.1.7
+
+- **Fix starting the API with FastAPI 0.145 or newer.**  
+  The API passed its tag descriptions to `FastAPI()` under the misspelled keyword `open_api_tags`. Older FastAPI versions silently ignored unknown keywords, but FastAPI 0.145 removed that catch-all, so `start api` failed with "FastAPI.__init__() got an unexpected keyword argument 'open_api_tags'". The keyword is now `openapi_tags`, which also restores the tag descriptions on the API documentation pages.
 
 ### v4.1.6
 

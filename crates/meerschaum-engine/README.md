@@ -64,6 +64,7 @@ engine.state().load_events(&run_id).await?;
 | `Engine::run(RunOptions) -> RunResult` | One engine run: build the graph (one `fetch_pipes_keys` per instance), resolve the selection, plan, execute under leases, persist the run, compact the ledger. |
 | `Engine::plan` | The plan only. |
 | `Engine::subscribe() -> broadcast::Receiver<Event>` | The live event stream (`run_started` … `run_finished`, `stream_flushed`, `stream_restarted`). |
+| `add_process_event_sink(Arc<dyn EventSink>)` | Also deliver every run's events in this process to a sink, whatever started the run (`mrsm start api` forwards its actions' runs to `GET /engine/runs/{run_id}/events/stream`). |
 | `Engine::sync_pipe` | A bare `pipe.sync()` (R1). |
 | `Engine::run_loop` | Continuous mode; reports `LapEvent`s in v4's output order. |
 | `Engine::state()` | `InstanceState`: the `mrsm:engine_*` pipes (run history, ledger, cursors, hashes). |
@@ -121,7 +122,9 @@ engine.state().load_events(&run_id).await?;
 Every durable row lives on an instance as a `temporary`, `static` internal pipe keyed on
 `pipe_ref` (R5, R13): `mrsm:engine_state` (definition hashes, the pipe's instance),
 `mrsm:engine_ledger` and `mrsm:engine_cursors` (the child's instance), `mrsm:engine_runs`,
-`mrsm:engine_nodes` and `mrsm:engine_events` (the home instance). Writes go through
+`mrsm:engine_nodes` and `mrsm:engine_events` (the home instance; every event by default,
+`system.engine.events: all`, so chunk progress can be replayed and streamed by the server's
+`GET /engine/runs/{run_id}/events/stream`). Writes go through
 `sync_pipe(check_existing=False, enforce=False, _check_temporary_tables=False)`. Per user sync
 the engine adds one ledger insert (before the data commit, parents only) and one cursor upsert
 for all of a node's edges (after the sync succeeds); `tests/state_cost.rs` measures this.

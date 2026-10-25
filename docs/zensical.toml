@@ -56,7 +56,10 @@ nav = [
       {"Security" = "reference/mcp/security.md"},
     ]},
     {"🎼 Compose" = "reference/compose.md"},
-    {"⏯️ Actions" = "reference/actions/index.md"},
+    {"⏯️ Actions" = [
+      "reference/actions/index.md",
+      {"📺 Watch and Shell Shortcuts" = "reference/actions/watch.md"},
+    ]},
     {"👷 Background Jobs" = "reference/background-jobs.md"},
     {"🔧 Data Analysis Tools" = "reference/data-analysis-tools.md"},
     {"➕ Plugins" = [
@@ -66,6 +69,8 @@ nav = [
       {"🦀 Rust Plugins" = [
         "reference/plugins/rust-plugins.md",
         {"Advanced" = "reference/plugins/rust-plugins/advanced.md"},
+        {"Routes and MCP" = "reference/plugins/rust-plugins/routes-and-mcp.md"},
+        {"Executors and Streams" = "reference/plugins/rust-plugins/executors-and-streams.md"},
       ]},
       {"🚀 Repositories" = "reference/plugins/repositories.md"},
     ]},

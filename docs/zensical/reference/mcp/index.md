@@ -79,6 +79,8 @@ curl -H "Authorization: Bearer mrsm-key:..." https://your-api-host/mcp
 
 Every tool carries MCP annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`), so a well-behaved client asks before it deletes anything.
 
+**Plugin entries** — plugins add their own tools, resources and prompts next to these: Python plugins with `meerschaum.mcp.tool(...)` (served through the API host), and Rust plugins by declaring them in their manifest (served in-process, over HTTP and stdio alike; see [Routes and MCP in Rust plugins](../plugins/rust-plugins/routes-and-mcp.md)). Plugin entries obey the same scopes and read-only mode, and never replace a built-in tool.
+
 ## Configuration
 
 ```yaml

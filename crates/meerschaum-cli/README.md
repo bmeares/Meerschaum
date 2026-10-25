@@ -81,11 +81,55 @@ contents for the parity fixtures.
   flags; `--nopretty` prints JSON.
 - A graph `sync pipes` run (`--parents`, `--children`, `--resume`) with more than one node ends
   with the Gantt chart; on a terminal (`Runtime::live`, set only by `Runtime::system`) it also
-  prints one progress line per node transition. Flat runs and `--nopretty` keep v4's output.
+  shows the run inline while it goes (below). Flat runs and `--nopretty` keep v4's output.
+
+### Inline live view of graph runs (`src/format/live.rs`, `src/native/sync_live.rs`)
+
+Graph `sync pipes` runs and `sync pipelines` on an ANSI terminal (not `--nopretty` / `--debug`)
+keep a region at the bottom of the terminal: a header and one row per running node (chunks, rows so
+far, rows/s, attempt). `LiveRun` is the pure model (engine `Event`s in, permanent lines and region
+lines out; unit-tested with synthetic event sequences); `Region` is the process-wide painter,
+erased and redrawn around every `Runtime::print` / `eprint`, prompt and forwarded worker output
+through the hooks in `progress.rs` (`suspend` / `resume`), and cleared by the signal watcher. The
+run itself goes on in a Tokio task; `sync_live::run` waits in short interruptible `block_on`
+steps (Ctrl-C aborts the task before the lease drain), so it can open `tui::run_monitor` on `w`
+between steps. The events come through a `RunOptions::on_event` sink into an unbounded channel
+(`--loop` / `--listen` drain their broadcast receiver on a task), so nothing is lost while the
+monitor is open; a lag there hides the rows until their next event, and the final lines are
+resynced from `RunResult::outcomes` and `RunResult::record`. Overlapping writers nest
+`suspend` / `resume` (the region is drawn when the last one is done). `Keys` turns off canonical
+input and echo only (never raw mode: SIGINT still works; blocking reads so a worker never reads
+end-of-file) and takes them again after something gave them back. Python workers started for such
+a run forward their output through this process (like in the shell), so it is printed above the
+region; output that ends without a newline (an `input()` prompt) gives the terminal back to the
+worker until it writes a full line, and output written while the monitor is open is held (1 MiB)
+and printed when it closes. SIGTSTP erases the region, restores the terminal and stops the
+process. `--loop` / `--listen` show the rows only (`LoopView`), under the laps' v4 lines.
+Terminals without ANSI keep one line per node transition.
+`tests/live_sync_pty.rs` drives it in a pseudo-terminal.
 - `--chunk-pipelining` and `--last N` (only for `show run[s]`) are parsed by
   `parse::engine_arguments` like `--parents`. `parameters['schedule']` reaches the engine through
   a `Cadence` built on `meerschaum-jobs` (`native/engine.rs`).
 - `show plugins` lists native (C-ABI) plugins as `name (native)` (bare names with `--nopretty`).
+
+### Full-screen views (`src/tui/`)
+
+`watch run` and `watch jobs` (v5, `docs/zensical/reference/actions/watch.md`) and the shell's F2 /
+F3 keys draw full-screen views with `ratatui` on the same `crossterm` as `reedline`.
+
+| Module | Role |
+|---|---|
+| `tui/mod.rs` | `VIEWS` (the registry: a view is a `watch` subaction plus an optional default shell key), `available`, `run_monitor` / `RunFeed` / `MonitorExit` (what `sync_live` opens on `w`) |
+| `tui/app.rs` | the shared loop: alternate screen and raw mode (restored on return, panic and Ctrl-C), resize, title and footer, `q` / Esc, `?` help, yes/no confirmations; `draw_frame` renders without a terminal for unit tests |
+| `tui/theme.rs` | colors and glyphs from `FormatSettings` (`NO_COLOR`: monochrome, `formatting:unicode: false`: ASCII) |
+| `tui/run_view.rs` | `RunState`, a reducer over engine `Event`s (live broadcast or persisted rows read with `after_seq`; late older events never move a node back, the log stays in `seq` order), and the run monitor (timeline, nodes, events, details). A live feed holds broadcast events back until the persisted ones reach them (`SEED_WAIT` at most) |
+| `tui/jobs_view.rs` | the jobs monitor: listing, log follower and job commands on background threads |
+| `tui/watch.rs` | the `watch` action and its line output off a terminal |
+| `tui/keys.rs` | `shell:keybindings` (default F2 `watch run`, F3 `watch jobs`); the shell runs a bound command through `reedline`'s `ExecuteHostCommand`: it erases the prompt's rows first, then starts a new editor with the typed line (reedline would put a resumed prompt back on its old rows, over short output) |
+
+Adding a view: a `ViewDef` in `VIEWS`, its subaction in `actions.rs` (`CORE_ACTIONS` and
+`V5_ONLY_SUBACTIONS`) and its docstring in `action_docs.rs` (a unit test checks they agree).
+`tests/tui_pty.rs` drives the views and the shell keys in a pseudo-terminal.
 
 ### Waiting feedback (`src/format/progress.rs`)
 

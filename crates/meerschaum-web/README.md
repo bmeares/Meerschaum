@@ -34,6 +34,12 @@ event per log chunk, `event: stdin` when the job waits for input, `event: stoppe
 message, then the stream ends. Jobs come from `POST /execute` (`meerschaum-server`): the Dash
 dashboard's Execute console.
 
+The server's run event stream `GET /engine/runs/{run_id}/events/stream` (`meerschaum-server`'s
+`engine_stream`) accepts the same session cookie: `router` installs a `BrowserAuth` over the session
+store, so the Dash Pipelines page's `EventSource` is authorized as the session's user (who still
+needs `pipes:write`), and a logout ends the stream within seconds. On a `--no-auth` server the
+cookie keys the per-user stream limit, as for the log stream.
+
 ## Native plugin pages
 
 A native (Rust source) plugin's `web_pages` are served as HTML fragments for the Dash console:

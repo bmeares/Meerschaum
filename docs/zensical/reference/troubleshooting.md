@@ -367,7 +367,7 @@ Verify with `import meerschaum; print(meerschaum.__file__, meerschaum.__version_
 
 ## Debugging tips
 
-- **`--debug`** — add to any action to print resolved SQL, sync windows, and dtype enforcement. The single most useful diagnostic.
+- **`--debug`** — add to any action to print resolved SQL, sync windows, and dtype enforcement. The single most useful diagnostic. See [Debug output](#debug-output) below for what it prints and where.
 
     ```bash
     mrsm sync pipes -c plugin:foo -m bar --debug
@@ -393,6 +393,71 @@ Verify with `import meerschaum; print(meerschaum.__file__, meerschaum.__version_
 - **`mrsm show columns` / `mrsm show rowcounts`** — confirm the stored schema and row counts match expectations.
 
 - **`pipe.get_data(begin=..., end=..., params=...)`** — pull a sample directly to see what's actually stored.
+
+### Debug output
+
+`--debug` works on every action, and the shell's `debug on` toggle turns it on for every command
+you type (and for the shell itself) until `debug off`. Each message starts with a header naming
+the time (UTC) and the code that printed it, like v4's `dprint()`:
+
+```text
+ 🐞 14:03:07.512 | meerschaum_cli::dispatch:935
+Action ["sync", "pipes"] -> `sync pipes` (_sync_pipes), sub-actions [].
+ 🐞 14:03:07.519 | meerschaum_connector_sql::driver:707
+SELECT name FROM sqlite_master WHERE type IN ('table', 'view') AND name = 'mrsm_pipes'
+```
+
+Rust code names its module (`meerschaum_connector_sql::driver`), Python code its module
+(`meerschaum.connectors.sql._pipes`) or your plugin's. With `--debug` you see:
+
+- the action the words resolved to and the parsed arguments. Secrets are printed as `***`:
+  values of keys or flags named like `password`, `secret`, `token` or `api_key` (also inside
+  `--params` and other JSON), URI passwords and secret query parameters (`?password=`);
+- each connection opened (`sql:`, `api:` and `valkey:`: flavor, host, port, database, username;
+  never the password);
+- every SQL statement the native SQL connector runs (with the number of bound parameters);
+- the sync stages with row counts and timings: fetch (each fetched chunk with its bounds, for
+  chunked and generator sources too), dtype enforcement, the filter against existing rows
+  (unseen vs. updated) and the write;
+- the Syncing Engine's plan (action, reason, bounds and chunks per pipe) and each event as the
+  run reaches it: nodes starting and finishing, every chunk with its bounds, row counts and
+  duration;
+- each call to a Python worker (operation, payload size, duration). `--debug` is forwarded to
+  the worker, so `debug=True` reaches your plugin's `fetch()` / `sync()` / actions and their
+  `dprint()` output appears too;
+- plugin discovery and loading (native plugins, and Python plugins when the plugin manifest is
+  rebuilt).
+
+While a full-screen view (`watch run`, `watch jobs`, the shell's F2 / F3) is shown, debug output
+is held back and printed when you leave the view (the last 2000 messages). `mrsm --debug` (or
+`mrsm --shell --debug`) starts the shell with `debug` on; `debug off` turns it off.
+
+Debug output goes to **stderr**, never stdout, so `mrsm ... --debug > out.txt` keeps the command's
+real output clean, and job logs (which capture both streams) include it. In v5 Python's
+`meerschaum.utils.debug.dprint()` also prints to stderr (v4 printed to stdout). The header is
+colored with `formatting:debug` (`mrsm edit config`); `formatting:ansi: false` or `NO_COLOR`
+removes the colors and `formatting:unicode: false` replaces the icon with `DEBUG`.
+
+From Python, `debug=True` on a pipe or connector method of a SQL instance (`pipe.sync(debug=True)`,
+`pipe.get_data(debug=True)`, `pipe.clear(debug=True)`, `mrsm.get_pipes(debug=True)`, ...) shows
+the Rust core's debug output for that call through `dprint()`. For any other call, wrap it in
+`meerschaum._core.debugging()`:
+
+```python
+import meerschaum as mrsm
+from meerschaum._core import debugging
+
+with debugging():
+    print(mrsm.Pipe('sql:main', 'demo').exists())
+```
+
+Debug output is on for the whole process while any `--debug` action, `debug=True` call or
+`debugging()` block runs, so work running at the same time in other threads prints too. The API
+server is the exception: an action a client runs with `debug` passes `debug=True` to the action
+but does not turn on debug output for the server's other requests.
+
+`RUST_LOG` is unrelated to `--debug`: it still prints the Rust `tracing` events its filter selects
+(dependencies included) in the `tracing` format, for developers.
 
 ---
 

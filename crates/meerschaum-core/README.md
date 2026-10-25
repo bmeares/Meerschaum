@@ -44,3 +44,14 @@ Tests must run with fresh `MRSM_ROOT_DIR` and empty `MRSM_PLUGINS_DIR`. Generate
 matrix using `scripts/parity/run.sh crates/meerschaum-core/tests/fixtures/gen_parameter_resolution.py`.
 It uses in-memory instance stubs and never connects to a database. See `PARAMETER_CALL_SITES.md`
 for the audited consumer locations and required integration changes in other crates.
+
+`debug::dprint!` prints debug output: a `tracing` `DEBUG` event targeted at the caller's module,
+emitted only while `debug::enabled()` (`--debug`, the shell's `debug` toggle, or a Python binding
+called with `debug=True`), so the arguments are not even formatted otherwise. `debug::scope` (one
+`--debug` action) and `debug::guard` (one `debug=True` call) are counted, so overlapping holders
+leave the switch off once the last one ends; `debug::without_scopes` makes `scope` a no-op on a
+thread (the API server's action requests) and `debug::take_over` hands an enclosing `--debug` to the
+shell's toggle. Redact secrets with `debug::redact_uris` (URI passwords, secret query parameters,
+quoted secret keys in JSON or `repr` text, secret flags inside a word) and `debug::is_secret_key`
+before printing them. The CLI and the Python
+extension own the subscribers that print these events.

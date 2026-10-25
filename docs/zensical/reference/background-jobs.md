@@ -372,4 +372,4 @@ sync pipes -i sql:local -e api:main
 
 
 !!! note "Custom executors"
-    You can implement a custom executor with the [`#!python @make_executor` decorator](). See [`Executor`](https://docs.meerschaum.io/meerschaum/jobs.html#Executor) and [`SystemdExecutor`](https://docs.meerschaum.io/meerschaum/jobs/systemd.html) for an example implementation.
+    You can implement a custom executor with the [`#!python @make_executor` decorator](). See [`Executor`](https://docs.meerschaum.io/meerschaum/jobs.html#Executor) and [`SystemdExecutor`](https://docs.meerschaum.io/meerschaum/jobs/systemd.html) for an example implementation. A Rust plugin can provide an executor type too (`-e <type>:<label>`); see [Executors and Streams](plugins/rust-plugins/executors-and-streams.md).

@@ -58,11 +58,53 @@ ordinary scheduled Jobs with their own execution settings.
 
 ## 🖥️ In the terminal
 
-`mrsm sync pipes` prints each node's result and a run summary. Graph selections also report
-node transitions as they start and finish. `mrsm show run <id>` reads the recorded run; actual
+`mrsm sync pipes` prints each node's result and a run summary. Graph selections also show the
+run as it goes (see [Live view of a run](#live-view-of-a-run) below). `mrsm show run <id>` reads the recorded run; actual
 elapsed time and observed execution intervals are the primary Timeline view. `plan pipes` and
 `plan pipelines` explain the next actions and bounds independently of that execution history.
 `--nopretty` prints machine-readable plan and run information.
+
+### Live view of a run
+
+`sync pipes` with `--parents`, `--children` or `--resume`, and `sync pipelines`, keep a small
+live region at the bottom of the terminal while the run goes on. It has a header and one row per
+running Pipe:
+
+```text
+  · Pipe('sql:main', 'daily') incremental: new rows upstream
+  ✔ Pipe('sql:main', 'raw') +1204 ins ~0 upd +0 ups
+⠹ Syncing 1/4 pipes · 2 running  12s  w: watch
+  Pipe('sql:main', 'daily')   incremental  3/10 chunks  +3.6k ins ~12 upd +0 ups  1.2k rows/s  8.4s
+  Pipe('sql:main', 'weekly')  backfill · attempt 2  1 chunk  +0 ins ~0 upd +0 ups  1.1s
+```
+
+- A row shows the action, the chunks done (`3/10 chunks` when the plan knows the total, else the
+  chunks fetched so far), the rows inserted / updated / upserted so far, the throughput, the
+  attempt when it is not the first (`retrying` between attempts) and the time the attempt has run.
+- Above the region, into the scrollback: each plan decision (`·`), each failed attempt that will
+  be retried (`↻`), and one permanent line per finished Pipe: `✔` with its row counts, `✘` with
+  the error's first line, `○` for a skipped Pipe or a pending rebuild. The run summary and the
+  Gantt chart follow when the run ends, and the region is gone.
+- The region redraws about ten times a second with cursor movement (no alternate screen, so the
+  scrollback keeps everything). It fits the terminal: details drop out on a narrow one, the rows
+  of a short one end with `… and N more running`, and a resized terminal is redrawn at the new
+  size. Other output (warnings, plugin output) is printed above it.
+- Typing is not echoed while the region is shown. Press **`w`** to open the full-screen run
+  monitor of this run; leaving it (or quitting it) brings the inline view back, and the run keeps
+  going either way. Plugin output written while the monitor is open is printed into the
+  scrollback when it closes. **Ctrl-C** cancels the run as before. **Ctrl-Z** erases the region
+  and gives the shell a normal terminal; `fg` draws it again.
+- A Python plugin can still ask for input (`input()`, a prompt without a newline): the region
+  steps aside and typing is echoed until the plugin prints a full line again.
+- Every event of the run reaches the view (none is dropped while the terminal is busy). A Pipe
+  whose last line never printed (the run was cut short) gets it from the run's results at the
+  end.
+- `sync pipes --loop` and `--listen` show the same running rows under each lap's usual output.
+
+The region needs a terminal that takes ANSI cursor movement. `--nopretty`, `--debug`, output to
+a pipe or file, `formatting:ansi: false` and `TERM=dumb` keep the plain output: one
+`▶` / `✔` / `✘` / `○` line per Pipe on a terminal without ANSI, and none at all with
+`--nopretty` or when piped.
 
 Scheduling forecasts can use a per-action historical moving average (alpha 0.3), other successful
 action history, or `system.engine.default_duration_seconds` (30 seconds). These estimates omit
@@ -94,9 +136,9 @@ run                         started (UTC)        status     wall  ok/nodes  targ
 
 `--nopretty` prints JSON for `plan pipes`, `show graph`, `show runs` and `show run`.
 
-!!! note "No full-screen view yet"
+!!! note "Inline and full-screen"
 
-    The terminal view is line-oriented: progress lines while the run is going and the Gantt chart at the end. A full-screen live chart is not part of this build.
+    The live region is inline: progress rows while the run is going and the Gantt chart at the end, all in the scrollback. Press `w` during a run for the full-screen monitor.
 
 ## 🌐 In the web console
 
@@ -107,7 +149,7 @@ The Pipe cards on the Pipes page retain their Parents / Children tabs.
 
 The engine's *ledger* is its record of changed parent data, used to find updates a child still needs to process, including changes to older rows. It remains part of syncing; it is not a separate lag metric on the page. A *watermark* is the latest value of a pipe's datetime or ordering column. Without a previous dependency-sync record, the engine compares parent and child watermarks. When a parent is ahead, the child reads from its own latest value minus its backtrack window, up to the earliest parent watermark. The canvas calls this **New parent data available**.
 
-Sync history refreshes about every 15 seconds. Use the refresh button to update the pipeline canvas. Select a run with the link in the runs table (`/dash/pipelines?run_id=…`) to see its actual execution timeline. State lives in the URL, so a run or filter is shareable.
+A running run is followed live: the page opens the server's [run event stream](#following-a-run-over-http) (`GET /engine/runs/{run_id}/events/stream`, authorized by your console session) and paints each stage's status and chunk progress (for example *running · chunk 3/10 · 4200 rows*) as the events arrive, refreshing the timeline, stages table and **Sync activity** after each node or chunk transition. Canvas syncs (**Sync this Pipe**) are followed the same way. A run that stops without finishing (its process was killed, or a canvas sync's execution ended) is no longer followed, and its stages show their recorded state. A run the server will not stream (the `engine` route group is not allowed, your user lacks the `pipes:write` scope, or the run lives on an instance the server does not serve) falls back to reading its recorded state every 5 seconds. Otherwise sync history refreshes about every 15 seconds. Use the refresh button to update the pipeline canvas. Select a run with the link in the runs table (`/dash/pipelines?run_id=…`) to see its actual execution timeline. State lives in the URL, so a run or filter is shareable.
 
 The console is available through `mrsm start api` and is covered in [Web Console](/reference/api-instance/web-console/).
 
@@ -160,7 +202,40 @@ A bound (`begin`, `end`, `from`, `to`) is `{"Datetime": "2024-01-01T00:00:00Z"}`
 
 **Errors.** If the callback raises an `Exception`, the run is **not** stopped: the exception is reported once with `warnings.warn` (including its traceback), the callback receives no further events, the run result carries it as `run.callback_error`, and `run.warnings` gets a line about it. A `KeyboardInterrupt` (raised in the callback, or CTRL-C while the run waits) **cancels** the run: in-flight node syncs are dropped as if the process had crashed (the engine's write ordering keeps every table and cursor consistent, and the next run picks up where it stopped), and the `KeyboardInterrupt` propagates.
 
-`run.events()` (and `Pipeline.get_events(run_id)`) still read a run's *persisted* events back from the instance after the fact, at the granularity of `system.engine.events`; those rows are shaped `{ts, run_id, seq, pipe_ref, event, payload}`.
+`run.events()` (and `Pipeline.get_events(run_id)`) still read a run's *persisted* events back from the instance after the fact, at the granularity of `system.engine.events` (every event by default); those rows are shaped `{ts, run_id, seq, pipe_ref, event, payload}`.
+
+## 📡 Following a run over HTTP
+
+An API server streams any run whose history it can read as [Server-Sent Events](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events):
+
+```text
+GET /engine/runs/{run_id}/events/stream[?instance_keys=sql:main][&after_seq=4][&wait=30][&idle_timeout=900]
+```
+
+Each engine event is one SSE event: `event:` is its name, `id:` its `seq` and `data:` the same JSON as the `on_event` dicts above (the envelope plus the event's own fields; `ts` is an ISO string). The stream always ends with a terminal event: `run_finished`, or `run_closed` when the run will not send one (see below).
+
+```text
+event: chunk_finished
+id: 4
+data: {"run_id":"pipeline-2026-…","seq":4,"ts":"2026-01-01T00:00:04Z","pipe_ref":"sql:main|sql:main|daily|None","event":"chunk_finished","chunk":0,"success":true,"message":"…","source":"fetch","rows":5,"inserted":5,"updated":0,"upserted":0}
+```
+
+- **Resuming.** Reconnect with `Last-Event-ID: <seq>` (browsers' `EventSource` does this by itself) or `?after_seq=<seq>` to continue after that event.
+- **Where events come from.** Runs the server executes itself (`POST /actions/sync`, the MCP action tools) and engines on an `api:` instance that flush their events to it are delivered as the events happen. Otherwise the server tails the run's persisted events (`mrsm_engine_events` on the instance that keeps its history: the server's own, or `instance_keys`) every half second, so it follows runs of jobs and of other processes sharing the instance.
+- **Runs that never finish.** A run whose process was killed sends no `run_finished`. The stream then ends with a synthetic `run_closed` event (no `id:`; its `seq` repeats the last event's) whose `reason` says why, and which also carries `finished` (whether the run's record was closed), `success` and `message` from the run's record:
+
+    | `reason` | When |
+    |---|---|
+    | `interrupted` | The run's record was closed without `run_finished` (a few seconds after it closed). |
+    | `holder_gone` | The run's holder (`mrsm:<pid>`) is not a running process on the server's machine and the run has sent nothing for 2 minutes. A run on another machine or container that shares the instance can be closed this way too; its events are still persisted, so reconnecting resumes it. |
+    | `idle` | The run has sent nothing for `idle_timeout` seconds (default 900, from 10 to 86400). The run may still be going: a single long chunk sends nothing until it finishes. |
+
+- **Waiting for a run.** `wait` (seconds, at most 60) keeps the request open until a run that was just launched appears; without it an unknown run is a `404`.
+- **Authorization** is that of `GET /engine/runs`: the `pipes:write` scope, by bearer token or the console's session cookie. Comments (`: keep-alive`) every 15 seconds keep proxies from closing a quiet stream; with nginx in front, the server already sends `X-Accel-Buffering: no`. Open streams are bounded like log streams (`api:permissions:log_streams`).
+- **Order.** Events are delivered once, in `seq` order. With `system.engine.events: nodes` the chunk events of a run in another process are not persisted, so when the stream meets a missing `seq` it waits up to a second, once for every event it has received by then, before moving on: the delay does not add up across gaps.
+- **Limits.** Open streams count against `api:permissions:log_streams` (`max` for the server, `per_user` per user or token). Waiting for a run (`wait`) does not hold a stream. On a `--no-auth` server, streams are counted per console session, and requests without a console cookie count only against `max`.
+
+From Rust, `APIConnector::follow_engine_run(run_id, after_seq, instance_keys)` returns the same events as an async stream. `follow_engine_run_with(run_id, FollowRunOptions { wait, idle_timeout, .. })` sets the other parameters. The client resumes a dropped connection with `Last-Event-ID`. It retries a failed reconnect (a restarting server, a `429` or a `5xx`) with a growing pause, up to 5 failures in a row, and ends the stream after `run_finished` or `run_closed` (`EngineRunEvent::is_terminal`).
 
 
 After selecting a saved Pipeline, **Run now** opens its command output directly in the

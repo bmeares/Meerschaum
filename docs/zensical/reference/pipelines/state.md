@@ -15,7 +15,7 @@ The first engine run creates them. Graphs, watermarks and duration estimates are
 
 !!! info "API instances"
 
-    Engine state travels over the dedicated `/engine` route family: the engine reads and writes its state tables through `/engine/pipes/{metric}/read`, `/write`, `/clear` and `/exists` (reads need the `pipes:read` scope, writes `pipes:write`), and leases go through `/engine/leases`; `/engine/ledger`, `/engine/cursors`, `/engine/state`, `/engine/runs` and `/engine/events` expose the same rows by shape (`pipes:write`). The server keeps all of it on its own instance (in `_mrsm_internal` on a PostgreSQL or MSSQL instance), so it survives a server restart. The generic pipe routes refuse the `mrsm` connector keys. On a read-only instance the engine runs degraded: watermarks only, no ledger-driven backfill, no persisted history, with a warning.
+    Engine state travels over the dedicated `/engine` route family: the engine reads and writes its state tables through `/engine/pipes/{metric}/read`, `/write`, `/clear` and `/exists` (reads need the `pipes:read` scope, writes `pipes:write`), and leases go through `/engine/leases`; `/engine/ledger`, `/engine/cursors`, `/engine/state`, `/engine/runs` and `/engine/events` expose the same rows by shape (`pipes:write`), and `GET /engine/runs/{run_id}/events/stream` follows a run's events live as Server-Sent Events ([Following a run over HTTP](/reference/pipelines/visualization/#following-a-run-over-http)). The server keeps all of it on its own instance (in `_mrsm_internal` on a PostgreSQL or MSSQL instance), so it survives a server restart. The generic pipe routes refuse the `mrsm` connector keys. On a read-only instance the engine runs degraded: watermarks only, no ledger-driven backfill, no persisted history, with a warning.
 
 ## 📒 The Dirty-Range Ledger
 
@@ -66,7 +66,7 @@ Before syncing a pipe the executor acquires a **lease** on it, so two jobs never
 
 ## 📜 Run History
 
-Every engine run is recorded: one row in `mrsm_engine_runs`, one row per node in `mrsm_engine_nodes`, and (depending on `system.engine.events`) rows in `mrsm_engine_events`.
+Every engine run is recorded: one row in `mrsm_engine_runs`, one row per node in `mrsm_engine_nodes`, and (with the default `system.engine.events: all`) one row per event in `mrsm_engine_events`, chunk progress included, so a run can be replayed or followed live after the fact.
 
 ```text
 run_id                      success  message                                                             workers  num_nodes  selection
@@ -88,7 +88,7 @@ pipeline.get_run(run_id)               # one run: node rows plus the planned-vs-
 pipeline.get_events(run_id)            # the persisted events, in order (also `run.events()` on a `RunResult`)
 ```
 
-By default `Pipeline.get_runs()` returns the runs that targeted or contained the pipeline's single target pipe; pass `all_runs=True` for every run on the instance. Events are read after the run from the instance (granularity set by `system.engine.events`); live streaming is not exposed to Python in this build.
+By default `Pipeline.get_runs()` returns the runs that targeted or contained the pipeline's single target pipe; pass `all_runs=True` for every run on the instance. Events are read after the run from the instance (granularity set by `system.engine.events`). To follow another process's run as it happens, an API server streams its events over HTTP ([Following a run over HTTP](/reference/pipelines/visualization/#following-a-run-over-http)); `on_event` follows your own run from Python.
 
 !!! tip "Reading the history"
 
@@ -109,7 +109,7 @@ All keys live under `system.engine` in your configuration (`mrsm edit config sys
 | `inclusive_cap` | `true` | Cap children at the parents' watermark plus one unit (`false`: half-open) |
 | `flat_ledger` | `true` | Write ledger entries for flat (non-graph) syncs too |
 | `persist_runs` | `true` | `false` keeps runs, nodes and events in memory only |
-| `events` | `nodes` | Persisted event granularity: `off`, `nodes` (run and node transitions) or `all` |
+| `events` | `all` | Persisted event granularity: `all` (every event, including `node_planned`, `chunk_started`, `chunk_finished` and `stream_flushed`), `nodes` (run and node transitions) or `off` |
 | `state_flush_ms` | `500` | In continuous mode, how often buffered ledger entries and events are flushed |
 | `run_history_days` | `30` | Retention for runs, nodes and events |
 | `debounce_seconds` | unset | Minimum time between triggered runs of a stream child (see [Continuous Mode](/reference/pipelines/continuous/)) |
@@ -129,3 +129,5 @@ system:
 ## 💸 What it costs
 
 The write path is deliberately small. Per user sync the engine adds **one ledger insert** (before the data commit, parents only) and **one cursor upsert** (after the sync succeeds; a single statement for all of a node's edges). State pipes are written without existence checks or dtype enforcement, and ledger entries and events are batched. Reads and metadata queries are not counted in that budget.
+
+**Event history.** With the default `events: all`, a node that syncs one chunk writes about 6 event rows (`node_planned`, `node_started`, `chunk_started`, `chunk_finished`, `watermark_advanced`, `node_finished`; about 1.5 KB of payload) instead of 3 with `events: nodes` (about 0.7 KB), and each further chunk adds 2 rows (about 0.6 KB); every run adds `run_started` and `run_finished`. The rows are written in the same batches (one insert per `state_flush_ms`), and retention removes them with the rest of the run's history after `run_history_days`. For scale: a `--loop` job syncing 50 single-chunk pipes every minute keeps about 430,000 event rows a day (roughly 100 MB of payload before indexes) and so about 13 million rows at the default 30 days of retention. For such high-frequency loops, set `events: nodes` (the console and the event stream then show node transitions without chunk progress) or shorten `run_history_days`.
