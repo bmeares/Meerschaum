@@ -468,3 +468,46 @@ fn an_unknown_connector_is_accepted_with_a_warning() {
     let status = term.wait_exit(30);
     assert!(!status.success(), "{status:?}");
 }
+
+#[test]
+fn bootstrap_pipelines_without_a_name_asks_for_one() {
+    let setup = Setup::new("pipeline_name");
+    let mut term = Term::spawn(
+        &setup.env,
+        &setup.base,
+        &["bootstrap", "pipelines", "-i", "sql:w18sh"],
+    );
+    term.wait_screen("the name question", 60, |s| s.contains("Pipeline name:"));
+    // An invalid name is explained and asked again.
+    term.send("bad name!\r");
+    term.wait_screen("the validation message", 30, |s| {
+        s.contains("Use 1–128 letters") && s.matches("Pipeline name:").count() >= 2
+    });
+    // A valid name moves on to the rest of the wizard.
+    term.send("w18_pipeline\r");
+    term.wait_screen("the next question", 30, |s| {
+        s.contains("Create a new Pipe with the native Pipe wizard?")
+    });
+    term.send("\x03");
+    term.wait_exit(30);
+    term.no_crash_text();
+}
+
+#[test]
+fn bootstrap_pipelines_without_a_name_and_noask_still_needs_one() {
+    let setup = Setup::new("pipeline_noask");
+    let mut command = Command::new(BIN);
+    command
+        .env_clear()
+        .args(["bootstrap", "pipelines", "-i", "sql:w18sh", "--noask"]);
+    for (k, v) in &setup.env {
+        command.env(k, v);
+    }
+    let out = command.output().unwrap();
+    let text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(text.contains("Provide a Pipeline name."), "{text}");
+}

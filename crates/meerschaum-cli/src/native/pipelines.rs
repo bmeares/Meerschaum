@@ -1216,6 +1216,29 @@ pub fn run(action: &str, args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     }
 }
 
+/// Ask for the name of a new Pipeline until it is valid and not taken (`bootstrap pipelines`
+/// without a name). An empty answer or Ctrl-D cancels.
+fn prompt_new_name(rt: &mut Runtime<'_>, instance: &Instance) -> Result<String, ActionError> {
+    let taken: BTreeSet<String> = list(rt, instance)?.into_iter().map(|d| d.name).collect();
+    loop {
+        let answer = super::prompt(rt, "Pipeline name:", true, false)
+            .ok_or_else(|| error("Creation cancelled."))?;
+        let name = answer.trim().to_string();
+        if name.is_empty() {
+            return Err(error("Creation cancelled."));
+        }
+        if let Err(e) = validate_name(&name) {
+            rt.print(&format!("{}\n", e.message));
+            continue;
+        }
+        if taken.contains(&name) {
+            rt.print(&format!("Pipeline '{name}' already exists.\n"));
+            continue;
+        }
+        return Ok(name);
+    }
+}
+
 fn save(
     action: &str,
     args: &ArgsMap,
@@ -1224,9 +1247,16 @@ fn save(
     lease: &MutationLease,
 ) -> ActionResult {
     let words = words(args, "action");
-    let name = words
-        .first()
-        .ok_or_else(|| error("Provide a Pipeline name."))?;
+    // `bootstrap` is a wizard: without a name on the command line it asks for one.
+    let prompted;
+    let name = match words.first() {
+        Some(name) => name,
+        None if action == "bootstrap" && rt.live && !flag(args, "noask") => {
+            prompted = prompt_new_name(rt, instance)?;
+            &prompted
+        }
+        None => return Err(error("Provide a Pipeline name.")),
+    };
     validate_name(name)?;
     let existing = list(rt, instance)?.into_iter().find(|d| &d.name == name);
     if ["register", "bootstrap"].contains(&action) && existing.is_some() {

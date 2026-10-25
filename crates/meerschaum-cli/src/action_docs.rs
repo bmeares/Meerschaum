@@ -20,7 +20,7 @@ pub fn docstring(function: &str) -> Option<&'static str> {
             "Register a Pipeline: register pipelines NAME --params JSON (targets, parents, children, description, defaults, layout). Existing names are refused. Without targets, selects registered Pipes by the supplied keys."
         }
         "_bootstrap_pipelines" => {
-            "Create a registered Pipeline with guided member selection. Members use instance|connector|metric|location references. Tags require a separate analyze pipelines approval."
+            "Create a registered Pipeline with guided member selection (asks for the NAME when it is not given). Members use instance|connector|metric|location references. Tags require a separate analyze pipelines approval."
         }
         "_edit_pipelines" => {
             "Edit a Pipeline definition in the editor, or use --params JSON including its expected revision. Membership edits never tag or delete Pipes."
