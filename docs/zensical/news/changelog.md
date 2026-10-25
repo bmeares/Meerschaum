@@ -74,7 +74,7 @@ The notes below are written for someone upgrading from 4.1. Everything that beha
   Bulk starts (`compose up`, `restart jobs`, a reboot bringing up systemd units) pass a per-root startup gate with random jitter, load and memory checks and a limited number of slots (`jobs.startup.*`), so workers no longer all start on top of each other. An explicit `start job` skips the jitter, and `--no-stagger` skips the gate. `-s` schedules accept a per-job `jitter`.
 
 - **Job executors and status in Rust.**  
-  The `api:<label>` and `systemd` executors, executor-aware compose and `mrsm api <label> <action>` run natively. Systemd units run the `mrsm` binary with `Environment=MRSM_PYTHON=<absolute path>`, and `systemctl --user stop` asks the job to stop once. Job listings and status read PID files instead of scanning the process table: an idle supervisor pass over 50 completed jobs dropped from 1773 ms to 5 ms of CPU (also in v4.1.5). Remote executor reads that fail now fail the action, so a failed `compose down` cannot silently leave jobs running.
+  The `api:<label>` and `systemd` executors, executor-aware compose and `mrsm api <label> <action>` run natively. Systemd units run the `mrsm` binary with `Environment=MRSM_PYTHON=<absolute path>`, and `systemctl --user stop` asks the job to stop once. Job listings and status read PID files instead of scanning the process table: an idle supervisor pass over 50 completed jobs dropped from 1773 ms to 5 ms of CPU (also in v4.1.5). A job found by name without its PID file matches only processes of its own root, so a v4 job of the same name under another `MRSM_ROOT_DIR` is never stopped by mistake (also in v4.1.6). Remote executor reads that fail now fail the action, so a failed `compose down` cannot silently leave jobs running.
 
 - **Compose: `include:` and `parent:`, and a side-effect-free `explain`.**  
   A root compose file can include other files, directories or globs, and every command spans the tree. `compose explain` creates, installs and fetches nothing, and lists every unresolved connector, plugin, `MRSM{}` symlink and `{{ Pipe() }}` reference; `up`, `run` and `sync pipes` name a missing connector instead of raising a `TypeError`. New flags: `--project`, `--standalone`, `--no-stagger`.
@@ -172,6 +172,36 @@ Read the [migration guide](/reference/migrating-to-v5/) for the details of each 
 ## 4.1.0 Releases
 
 The 4.1 series receives security fixes until 5.1.0 ships.
+
+### v4.1.7
+
+- **Fix starting the API with FastAPI 0.145 or newer.**  
+  The API passed its tag descriptions to `FastAPI()` under the misspelled keyword `open_api_tags`. Older FastAPI versions silently ignored unknown keywords, but FastAPI 0.145 removed that catch-all, so `start api` failed with "FastAPI.__init__() got an unexpected keyword argument 'open_api_tags'". The keyword is now `openapi_tags`, which also restores the tag descriptions on the API documentation pages.
+
+### v4.1.6
+
+- **Let tokens with `jobs:stop` stop jobs over the API.**  
+  The stop route required the misspelled scope `josb:stop`, which is not a scope, so only `*` tokens and administrators could stop a job through the API. `POST /jobs/{name}/stop` now requires `jobs:execute` and `jobs:stop`, and a token which explicitly holds the old `josb:stop` is still accepted in place of `jobs:stop`. A refused request names `jobs:stop`.
+
+- **Store `*` literally so it grants every scope.**  
+  `edit tokens` and `edit users` replaced a typed `*` with the built-in scope list, so an "all scopes" token or user lacked custom (plugin) scopes and any scope added later. `*` is now stored as `*`, which every scope check already honored. The prompts say "`*` grants all scopes, including custom and future scopes", and the "Grant all scopes" switch in the web console's token form registers `*`. `register tokens --scopes '*'` and the token registration route already kept a literal `*`. A token or user created without scopes still gets the built-in list.
+
+- **Let `*` execute actions and jobs for non-admins.**  
+  The check for permission to run actions and jobs looked for `actions:execute` and `jobs:execute` in the granted scopes, so a non-admin whose scopes were `*` was refused with "Missing scope 'actions:execute'". A literal `*` now satisfies it.
+
+- **Keep `*` when editing a token in the web console.**  
+  The edit form listed only the built-in scopes, so a token holding `*` showed an empty checklist and saving it replaced `*` with nothing. The form now has the same "Grant all scopes" switch as the registration form, turned on (with the checklist hidden) for a token which holds `*`, and saving keeps `*` unless the switch is turned off.
+
+- **Fix `register tokens --nopretty`.**  
+  Printing the new token as JSON failed with "Object of type UUID is not JSON serializable". The token's ID and timestamps are now serialized, so the command prints the token and its secret as JSON.
+
+- **Match detached jobs only within their own root directory.**  
+  When a job's PID file is lost, its process is found by the job's name in the command line. A job with the same name under another `MRSM_ROOT_DIR` matched too, so stopping or killing a job without a PID file could end another root's job. Processes are now matched only if their `MRSM_ROOT_DIR` is this root (unset means the default root). If a process's environment cannot be read, or its root is a relative path, it is still matched as before.
+
+### v4.1.5
+
+- **Stop scanning the process table for completed jobs.**  
+  When a job has no `process.pid` file, reading its PID searched every running process's command line for the job's name, in case a detached job had lost its PID file. Completed jobs never have a PID file, and a single supervisor pass read the PID of every job many times (while building jobs, checking status and restarts, and formatting), so a production API with retained completed jobs spent most of a CPU core walking the process table every second. A job which recorded that its last run ended is now known to be stopped without any search, constructing a job and formatting it never search the process table, and a search that is needed (a job which began but never recorded an end) is shared by all jobs for two seconds and not repeated for a job which was not found for a minute. Starting, stopping, pausing, resuming, or deleting a job (or recording a new launch from another process) discards the remembered results. A running job which lost its PID file is still found, reported as running, and stoppable: its PID file is written again so later reads are cheap, and processes which started after the job recorded that it began (a reused PID) are ignored. With 20 completed jobs, five supervisor passes with status reads dropped from 3000 process-table scans (108 seconds) to none (under 1 second).
 
 ### v4.1.4
 

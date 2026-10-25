@@ -15,6 +15,9 @@
 //!   indexed by `(daemon_id, jobs_dir)`; a job which was not found is not looked for again for
 //!   [`NEGATIVE_TTL`] unless its recorded timestamps change.
 //! - Starting, stopping, pausing, resuming and deleting a job forget what is cached for it.
+//! - A Python (v4) daemon has no `--jobs-dir` on its command line, so it matches only when the
+//!   `MRSM_ROOT_DIR` it was started with is this root (unset: the default root): two roots may run
+//!   jobs with the same name. An unreadable environment or a relative root still matches (v4.1.6).
 //! - A recovered process must have started no later than the job's `began` (plus a small slack),
 //!   so a reused PID is not mistaken for it.
 //!
@@ -179,8 +182,10 @@ pub fn resolve_supervisor(
 struct Entry {
     pid: i32,
     daemon_id: String,
-    /// `--jobs-dir <dir>` of a Rust supervisor; a Python daemon has none (and matches by name).
+    /// `--jobs-dir <dir>` of a Rust supervisor; a Python daemon has none.
     jobs_dir: Option<String>,
+    /// A Python daemon's root directory, from its environment (`None`: unknown, matches any root).
+    root: Option<PathBuf>,
 }
 
 #[derive(Debug)]
@@ -210,15 +215,20 @@ fn entries_of(pid: i32, args: &[String]) -> Vec<Entry> {
         .and_then(|i| args.get(i + 1))
         .cloned();
     let mut out = Vec::new();
+    let mut root = None;
     for arg in args {
         let mut rest = arg.as_str();
         while let Some(at) = rest.find(PREFIX) {
             rest = &rest[at + PREFIX.len()..];
             if let Some(end) = rest.find('\'') {
+                if jobs_dir.is_none() && root.is_none() {
+                    root = Some(process::process_environ(pid).and_then(|env| legacy_root(&env)));
+                }
                 out.push(Entry {
                     pid,
                     daemon_id: rest[..end].to_string(),
                     jobs_dir: jobs_dir.clone(),
+                    root: root.clone().flatten(),
                 });
             }
         }
@@ -241,9 +251,26 @@ fn scan() -> Index {
     }
 }
 
-fn same_dir(a: &str, b: &Path) -> bool {
-    let a = Path::new(a);
+fn same_dir(a: &Path, b: &Path) -> bool {
     a == b || matches!((a.canonicalize(), b.canonicalize()), (Ok(x), Ok(y)) if x == y)
+}
+
+/// The root directory a Python daemon was started with: its absolute `MRSM_ROOT_DIR`, or the
+/// default root (`$XDG_CONFIG_HOME/meerschaum`, `~/.config/meerschaum`) when unset. `None` for a
+/// relative root (it depends on the directory the daemon was started from) or no home directory.
+fn legacy_root(env: &[(String, String)]) -> Option<PathBuf> {
+    let var = |name: &str| {
+        env.iter()
+            .find(|(k, _)| k == name)
+            .map(|(_, v)| PathBuf::from(v))
+    };
+    if let Some(root) = var("MRSM_ROOT_DIR") {
+        return root.is_absolute().then_some(root);
+    }
+    let dot_config = var("XDG_CONFIG_HOME")
+        .filter(|p| p.is_absolute())
+        .or_else(|| var("HOME").map(|home| home.join(".config")))?;
+    Some(dot_config.join("meerschaum"))
 }
 
 /// A process which references a job on its command line.
@@ -283,7 +310,12 @@ pub fn find_pids(
         .iter()
         .flat_map(|i| i.entries.iter())
         .filter(|e| {
-            e.daemon_id == daemon_id && e.jobs_dir.as_deref().is_none_or(|d| same_dir(d, jobs_dir))
+            e.daemon_id == daemon_id
+                && match (&e.jobs_dir, &e.root) {
+                    (Some(d), _) => same_dir(Path::new(d), jobs_dir),
+                    (None, Some(root)) => same_dir(&root.join("jobs"), jobs_dir),
+                    (None, None) => true,
+                }
         })
         .map(|e| Found {
             pid: e.pid,
@@ -454,5 +486,32 @@ mod tests {
             (e[0].daemon_id.as_str(), e[0].jobs_dir.as_deref()),
             ("x", None)
         );
+    }
+
+    #[test]
+    fn a_python_daemons_root_comes_from_its_environment() {
+        let env = |pairs: &[(&str, &str)]| -> Vec<(String, String)> {
+            pairs
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect()
+        };
+        let root = |pairs: &[(&str, &str)]| legacy_root(&env(pairs));
+        assert_eq!(
+            root(&[("MRSM_ROOT_DIR", "/a/root"), ("HOME", "/home/u")]),
+            Some(PathBuf::from("/a/root"))
+        );
+        // A relative root depends on where the daemon started: unknown.
+        assert_eq!(root(&[("MRSM_ROOT_DIR", "rel/root")]), None);
+        // Unset: the default root.
+        assert_eq!(
+            root(&[("HOME", "/home/u")]),
+            Some(PathBuf::from("/home/u/.config/meerschaum"))
+        );
+        assert_eq!(
+            root(&[("XDG_CONFIG_HOME", "/xdg"), ("HOME", "/home/u")]),
+            Some(PathBuf::from("/xdg/meerschaum"))
+        );
+        assert_eq!(root(&[]), None);
     }
 }

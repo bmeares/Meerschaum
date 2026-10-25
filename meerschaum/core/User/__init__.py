@@ -47,6 +47,10 @@ def is_user_allowed_to_execute(
 
     if hasattr(user, 'get_scopes'):
         scopes = user.get_scopes(refresh=True, debug=debug)
+        ### A literal `*` grants every scope.
+        if '*' in scopes:
+            return True, "Success"
+
         for necessary_scope in NECESSARY_SCOPES:
             if necessary_scope not in scopes:
                 return False, f"Missing scope '{necessary_scope}'."

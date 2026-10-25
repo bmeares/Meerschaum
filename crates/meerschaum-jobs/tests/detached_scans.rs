@@ -623,3 +623,46 @@ fn without_children_files_a_job_which_lost_its_pid_file_still_reads_running() {
     let mut job = Job::open("nokids", &finishing).unwrap();
     assert_eq!(job.status(), Status::Stopped);
 }
+
+/// A stand-in for a Python (v4) daemon: no `--jobs-dir`, the marker in its command line.
+fn python_daemon(daemon_id: &str, root: &Path) -> Child {
+    Command::new("sh")
+        .args(["-c", "sleep 30; :", &format!("daemon_id='{daemon_id}'")])
+        .env("MRSM_ROOT_DIR", root)
+        .spawn()
+        .unwrap()
+}
+
+#[test]
+fn a_python_daemon_matches_only_the_root_it_was_started_with() {
+    let _guard = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    meerschaum_jobs::detached::reset();
+    let a = tempfile::tempdir().unwrap();
+    let b = tempfile::tempdir().unwrap();
+    let name = format!("w_root_scope_{}", std::process::id());
+    let mut in_a = python_daemon(&name, a.path());
+    let mut in_b = python_daemon(&name, b.path());
+    // Both are in the process table before the scan.
+    assert!(common::wait_for(5.0, || {
+        meerschaum_jobs::process::process_cmdlines()
+            .iter()
+            .filter(|(_, args)| args.iter().any(|x| x.contains(&name)))
+            .count()
+            >= 2
+    }));
+    let limits = meerschaum_jobs::detached::Limits::default();
+    let found = |root: &Path| -> Vec<i32> {
+        meerschaum_jobs::detached::find_pids(&name, &root.join("jobs"), &limits, None, true)
+            .into_iter()
+            .map(|f| f.pid)
+            .collect()
+    };
+    let found_a = found(a.path());
+    let found_b = found(b.path());
+    let _ = in_a.kill();
+    let _ = in_b.kill();
+    let _ = in_a.wait();
+    let _ = in_b.wait();
+    assert_eq!(found_a, vec![in_a.id() as i32]);
+    assert_eq!(found_b, vec![in_b.id() as i32]);
+}

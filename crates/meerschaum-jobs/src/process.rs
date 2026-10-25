@@ -256,6 +256,28 @@ pub fn process_start_time(_pid: i32) -> Option<chrono::NaiveDateTime> {
     None
 }
 
+/// The environment a process was started with, from `/proc/<pid>/environ`. `None` when it cannot
+/// be read (not Linux, another user's process, or the process is gone).
+#[cfg(target_os = "linux")]
+pub fn process_environ(pid: i32) -> Option<Vec<(String, String)>> {
+    let raw = std::fs::read(format!("/proc/{pid}/environ")).ok()?;
+    Some(
+        raw.split(|b| *b == 0)
+            .filter_map(|kv| {
+                let kv = String::from_utf8_lossy(kv);
+                let (k, v) = kv.split_once('=')?;
+                Some((k.to_string(), v.to_string()))
+            })
+            .collect(),
+    )
+}
+
+/// See the Linux version.
+#[cfg(not(target_os = "linux"))]
+pub fn process_environ(_pid: i32) -> Option<Vec<(String, String)>> {
+    None
+}
+
 /// The command-line marker identifying a daemon's process: `daemon_id='<id>'`.
 pub fn daemon_marker(daemon_id: &str) -> String {
     format!("daemon_id='{daemon_id}'")
