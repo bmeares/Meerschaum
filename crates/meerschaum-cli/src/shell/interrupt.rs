@@ -298,6 +298,7 @@ fn install_panic_hook() {
 /// Print `Interrupted.` and end the process with status 130 (the cancellation did not work).
 fn exit_now() -> ! {
     crate::format::progress::abandon();
+    crate::tui::app::restore_for_exit();
     {
         use std::io::Write;
         let _ = writeln!(std::io::stderr(), "\n{MESSAGE}");
@@ -310,6 +311,7 @@ fn exit_now() -> ! {
 #[cfg(unix)]
 fn die_by_default(signal: i32) {
     crate::format::progress::clear_for_signal();
+    crate::tui::app::restore_for_exit();
     let _ = signal_hook::low_level::emulate_default_handler(signal);
 }
 
@@ -457,6 +459,7 @@ fn on_sigterm(signal: i32) {
         jobs::stop_requested_flag().store(true, Ordering::SeqCst);
         if PRESSES.fetch_add(1, Ordering::SeqCst) >= 1 {
             crate::format::progress::abandon();
+            crate::tui::app::restore_for_exit();
             std::process::exit(EXIT_CODE);
         }
         return;

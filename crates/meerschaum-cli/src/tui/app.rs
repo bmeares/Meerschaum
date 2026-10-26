@@ -271,6 +271,71 @@ pub fn guarded<T>(work: impl FnOnce() -> T) -> Result<T, String> {
     })
 }
 
+/// Held by the view's loop while it writes a frame, so that [`restore_for_exit`] on another
+/// thread never interleaves its escape sequences with half a frame, and no frame is drawn over
+/// the main screen afterwards.
+static DRAW: Mutex<()> = Mutex::new(());
+
+/// The process is about to end (a signal's default action, a forced exit after Ctrl-C, SIGHUP):
+/// give the terminal back if a full-screen view holds it. Safe from any thread and idempotent;
+/// every exit path that bypasses the view's guard calls it (`shell::interrupt`, the SIGHUP
+/// watcher below).
+///
+/// From another thread it waits (briefly) for the frame being drawn, restores, and keeps the
+/// view from drawing again: the process does not go on.
+pub fn restore_for_exit() {
+    if !ACTIVE.load(Ordering::SeqCst) {
+        return;
+    }
+    let owner = *OWNER.lock().unwrap_or_else(|e| e.into_inner());
+    if owner.is_none_or(|id| id == std::thread::current().id()) {
+        // The view's own thread (a panic mid-frame may hold `DRAW` already).
+        restore_terminal();
+        return;
+    }
+    let deadline = Instant::now() + Duration::from_millis(500);
+    let held = loop {
+        match DRAW.try_lock() {
+            Ok(guard) => break Some(guard),
+            Err(std::sync::TryLockError::Poisoned(e)) => break Some(e.into_inner()),
+            Err(std::sync::TryLockError::WouldBlock) if Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(2));
+            }
+            Err(std::sync::TryLockError::WouldBlock) => break None,
+        }
+    };
+    restore_terminal();
+    // Never released: the view's next frame would land on the main screen.
+    std::mem::forget(held);
+}
+
+/// SIGHUP (the terminal closed, or `kill -HUP`) while a view is up: restore, then end the
+/// process as the default action does. Watched from the first view on (an unregistered
+/// `signal-hook` handler would leave the signal ignored, so it stays); not in an embedding host,
+/// which owns the signals.
+#[cfg(unix)]
+fn watch_sighup() {
+    static START: Once = Once::new();
+    if crate::native::jobs::is_embedded() {
+        return;
+    }
+    START.call_once(|| {
+        use signal_hook::consts::SIGHUP;
+        let Ok(mut signals) = signal_hook::iterator::Signals::new([SIGHUP]) else {
+            return;
+        };
+        let _ = std::thread::Builder::new()
+            .name("mrsm-tui-hup".into())
+            .spawn(move || {
+                for signal in signals.forever() {
+                    crate::format::progress::clear_for_signal();
+                    restore_for_exit();
+                    let _ = signal_hook::low_level::emulate_default_handler(signal);
+                }
+            });
+    });
+}
+
 /// Leave raw mode and the alternate screen if a view entered them (idempotent).
 pub fn restore_terminal() {
     if ACTIVE.swap(false, Ordering::SeqCst) {
@@ -303,6 +368,8 @@ impl TerminalGuard {
                 previous(info);
             }));
         });
+        #[cfg(unix)]
+        watch_sighup();
         crate::debug_log::hold_output(true);
         if let Err(error) = terminal::enable_raw_mode() {
             crate::debug_log::hold_output(false);
@@ -345,15 +412,21 @@ pub fn run(view: &mut dyn View, theme: &Theme) -> io::Result<Exit> {
     let mut overlay = Overlay::None;
     let mut dirty = true;
     let mut last_draw = Instant::now();
+    // A stop request (the first SIGTERM / SIGINT of an action that reads the flag itself, such as
+    // a sync whose run this view follows) made while the view is up ends the view, as Ctrl-C does.
+    let stop = crate::native::jobs::stop_requested_flag();
+    let stopped_before = stop.load(Ordering::SeqCst);
     loop {
         // A SIGINT from outside the terminal (raw mode turns the terminal's Ctrl-C into a key).
-        if crate::shell::interrupt::requested() {
+        if crate::shell::interrupt::requested() || (!stopped_before && stop.load(Ordering::SeqCst))
+        {
             return Ok(Exit::Quit);
         }
         if view.tick() {
             dirty = true;
         }
         if dirty || last_draw.elapsed() >= REDRAW_EVERY {
+            let _drawing = DRAW.lock().unwrap_or_else(|e| e.into_inner());
             guard
                 .terminal
                 .draw(|frame| draw_frame(view, &overlay, theme, frame))?;
@@ -372,6 +445,7 @@ pub fn run(view: &mut dyn View, theme: &Theme) -> io::Result<Exit> {
                 }
             }
             Event::Resize(..) => {
+                let _drawing = DRAW.lock().unwrap_or_else(|e| e.into_inner());
                 guard.terminal.autoresize()?;
                 dirty = true;
             }

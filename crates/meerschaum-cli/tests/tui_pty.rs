@@ -504,6 +504,72 @@ fn watch_run_ctrl_c_restores_the_terminal() {
     term.no_crash_text();
 }
 
+/// Send `signal` (a `kill` name: `TERM`, `INT`, `HUP`) to the process in the terminal.
+fn signal(term: &Term, signal: &str) {
+    let pid = term.child.process_id().expect("the child's pid");
+    let status = Command::new("kill")
+        .args([&format!("-{signal}"), &pid.to_string()])
+        .status()
+        .unwrap();
+    assert!(status.success(), "kill -{signal} {pid}");
+}
+
+impl Term {
+    /// The terminal is back in cooked mode (canonical input and echo), as `stty` reads it.
+    fn assert_cooked(&self) {
+        let tty = self.master.tty_name().expect("the pty's name");
+        let out = Command::new("stty")
+            .arg("-F")
+            .arg(&tty)
+            .arg("-a")
+            .output()
+            .unwrap();
+        let modes = String::from_utf8_lossy(&out.stdout);
+        let words: Vec<&str> = modes.split_whitespace().collect();
+        for mode in ["icanon", "echo", "isig"] {
+            assert!(words.contains(&mode), "{mode} is off:\n{modes}");
+        }
+    }
+}
+
+/// `watch run` full-screen, ended by `signals` sent from outside (each `(signal, pause)`):
+/// whatever ends it, the terminal is left on the main screen, the cursor shown, in cooked mode.
+fn watch_run_ended_by(name: &str, signals: &[(&str, u64)]) -> portable_pty::ExitStatus {
+    let setup = Setup::new(name);
+    let run_id = setup.run();
+    let mut term = Term::spawn(&setup.env, &setup.base, &["watch", "run", &run_id]);
+    term.wait_screen("the run monitor", 60, |s| s.contains("Timeline"));
+    assert!(term.alternate());
+    for (name, pause) in signals {
+        signal(&term, name);
+        std::thread::sleep(Duration::from_millis(*pause));
+    }
+    let status = term.wait_exit(20);
+    term.assert_restored();
+    term.assert_cooked();
+    term.no_crash_text();
+    status
+}
+
+#[test]
+fn watch_run_sigterm_restores_the_terminal() {
+    let status = watch_run_ended_by("sigterm", &[("TERM", 0)]);
+    assert!(!status.success());
+}
+
+#[test]
+fn watch_run_sighup_restores_the_terminal() {
+    let status = watch_run_ended_by("sighup", &[("HUP", 0)]);
+    assert!(!status.success());
+}
+
+#[test]
+fn watch_run_forced_sigint_restores_the_terminal() {
+    // Two SIGINTs back to back: the second one forces the exit (`Interrupted.`, status 130)
+    // unless the view already quit on the first.
+    watch_run_ended_by("sigint2", &[("INT", 0), ("INT", 0)]);
+}
+
 #[test]
 fn watch_jobs_lists_follows_logs_and_confirms() {
     let setup = Setup::new("jobs");
