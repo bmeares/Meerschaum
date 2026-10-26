@@ -256,26 +256,160 @@ pub fn process_start_time(_pid: i32) -> Option<chrono::NaiveDateTime> {
     None
 }
 
-/// The environment a process was started with, from `/proc/<pid>/environ`. `None` when it cannot
-/// be read (not Linux, another user's process, or the process is gone).
+/// What could be learned about the environment a process was started with.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Environ {
+    /// Its variables.
+    Read(Vec<(String, String)>),
+    /// Reading it was refused (another user's process) or the process is gone: psutil's
+    /// `AccessDenied` / `NoSuchProcess`.
+    Denied,
+    /// This platform has no way to read it here, or what was read could not be parsed.
+    Unknown,
+}
+
+/// The environment a process was started with: `/proc/<pid>/environ` on Linux,
+/// `sysctl(KERN_PROCARGS2)` on macOS, `sysctl(KERN_PROC_ENV)` on FreeBSD (what psutil's
+/// `Process.environ()` reads); [`Environ::Unknown`] elsewhere.
 #[cfg(target_os = "linux")]
-pub fn process_environ(pid: i32) -> Option<Vec<(String, String)>> {
-    let raw = std::fs::read(format!("/proc/{pid}/environ")).ok()?;
-    Some(
-        raw.split(|b| *b == 0)
-            .filter_map(|kv| {
-                let kv = String::from_utf8_lossy(kv);
-                let (k, v) = kv.split_once('=')?;
-                Some((k.to_string(), v.to_string()))
-            })
-            .collect(),
-    )
+pub fn process_environ(pid: i32) -> Environ {
+    match std::fs::read(format!("/proc/{pid}/environ")) {
+        Ok(raw) => Environ::Read(parse_nul_environ(&raw)),
+        Err(_) => Environ::Denied,
+    }
 }
 
 /// See the Linux version.
-#[cfg(not(target_os = "linux"))]
-pub fn process_environ(_pid: i32) -> Option<Vec<(String, String)>> {
-    None
+#[cfg(target_os = "macos")]
+pub fn process_environ(pid: i32) -> Environ {
+    let mut mib = [libc::CTL_KERN, libc::KERN_ARGMAX];
+    let mut argmax: libc::c_int = 0;
+    let mut size = std::mem::size_of::<libc::c_int>();
+    // SAFETY: `mib` names 2 integers; `argmax` is a writable `c_int` and `size` holds its size.
+    let rc = unsafe {
+        libc::sysctl(
+            mib.as_mut_ptr(),
+            2,
+            (&mut argmax as *mut libc::c_int).cast(),
+            &mut size,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    if rc != 0 || argmax <= 0 {
+        return Environ::Unknown;
+    }
+    let mut buf = vec![0u8; argmax as usize];
+    let mut size = buf.len();
+    let mut mib = [libc::CTL_KERN, libc::KERN_PROCARGS2, pid];
+    // SAFETY: `mib` names 3 integers; `buf` is writable for `size` bytes, which the kernel
+    // updates to the number of bytes written.
+    let rc = unsafe {
+        libc::sysctl(
+            mib.as_mut_ptr(),
+            3,
+            buf.as_mut_ptr().cast(),
+            &mut size,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    if rc != 0 {
+        // EINVAL: another user's process, a zombie or a gone process (psutil's `AccessDenied`).
+        return Environ::Denied;
+    }
+    buf.truncate(size.min(buf.len()));
+    parse_procargs2(&buf).map_or(Environ::Unknown, Environ::Read)
+}
+
+/// See the Linux version.
+#[cfg(target_os = "freebsd")]
+pub fn process_environ(pid: i32) -> Environ {
+    let mib = [libc::CTL_KERN, libc::KERN_PROC, libc::KERN_PROC_ENV, pid];
+    let mut size: libc::size_t = 0;
+    // SAFETY: `mib` names 4 integers; a null buffer asks only for the size, written to `size`.
+    let rc = unsafe {
+        libc::sysctl(
+            mib.as_ptr(),
+            4,
+            std::ptr::null_mut(),
+            &mut size,
+            std::ptr::null(),
+            0,
+        )
+    };
+    if rc != 0 {
+        return Environ::Denied;
+    }
+    // Room for an environment which grew between the two calls.
+    let mut buf = vec![0u8; size + 4096];
+    let mut size = buf.len();
+    // SAFETY: `buf` is writable for `size` bytes, which the kernel updates to the bytes written.
+    let rc = unsafe {
+        libc::sysctl(
+            mib.as_ptr(),
+            4,
+            buf.as_mut_ptr().cast(),
+            &mut size,
+            std::ptr::null(),
+            0,
+        )
+    };
+    if rc != 0 {
+        return Environ::Denied;
+    }
+    buf.truncate(size.min(buf.len()));
+    Environ::Read(parse_nul_environ(&buf))
+}
+
+/// See the Linux version.
+#[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "freebsd")))]
+pub fn process_environ(_pid: i32) -> Environ {
+    Environ::Unknown
+}
+
+/// `KEY=value` strings separated by NUL bytes (`/proc/<pid>/environ`, FreeBSD's
+/// `KERN_PROC_ENV`); strings without `=` are skipped.
+pub fn parse_nul_environ(raw: &[u8]) -> Vec<(String, String)> {
+    raw.split(|b| *b == 0)
+        .filter_map(|kv| {
+            let kv = String::from_utf8_lossy(kv);
+            let (k, v) = kv.split_once('=')?;
+            Some((k.to_string(), v.to_string()))
+        })
+        .collect()
+}
+
+/// The environment in macOS's `KERN_PROCARGS2` buffer: a native-endian `int` argc, the executable
+/// path, NUL padding, `argc` NUL-terminated arguments, then the NUL-terminated environment up to
+/// an empty string (as psutil reads it). `None` when the buffer is shorter than its own argc
+/// says (truncated or not this layout).
+pub fn parse_procargs2(buf: &[u8]) -> Option<Vec<(String, String)>> {
+    let argc = i32::from_ne_bytes(buf.get(..4)?.try_into().ok()?);
+    if argc < 0 {
+        return None;
+    }
+    let mut rest = &buf[4..];
+    // The executable path, then its padding.
+    let end = rest.iter().position(|b| *b == 0)?;
+    rest = &rest[end..];
+    let start = rest.iter().position(|b| *b != 0)?;
+    rest = &rest[start..];
+    for _ in 0..argc {
+        let end = rest.iter().position(|b| *b == 0)?;
+        rest = &rest[end + 1..];
+    }
+    let mut env = Vec::new();
+    for item in rest.split(|b| *b == 0) {
+        if item.is_empty() {
+            break;
+        }
+        let kv = String::from_utf8_lossy(item);
+        if let Some((k, v)) = kv.split_once('=') {
+            env.push((k.to_string(), v.to_string()));
+        }
+    }
+    Some(env)
 }
 
 /// The command-line marker identifying a daemon's process: `daemon_id='<id>'`.
@@ -294,5 +428,70 @@ pub fn wait_gone(pid: i32, timeout: std::time::Duration) -> bool {
             return false;
         }
         std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn pairs(items: &[(&str, &str)]) -> Vec<(String, String)> {
+        items
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect()
+    }
+
+    fn procargs2(argc: i32, body: &[u8]) -> Vec<u8> {
+        let mut buf = argc.to_ne_bytes().to_vec();
+        buf.extend_from_slice(body);
+        buf
+    }
+
+    #[test]
+    fn nul_separated_environments() {
+        assert_eq!(
+            parse_nul_environ(b"HOME=/home/u\0NOEQ\0MRSM_ROOT_DIR=/a b/r=1\0"),
+            pairs(&[("HOME", "/home/u"), ("MRSM_ROOT_DIR", "/a b/r=1")])
+        );
+        assert_eq!(parse_nul_environ(b""), pairs(&[]));
+    }
+
+    #[test]
+    fn macos_procargs2_environments() {
+        let body = b"/usr/bin/python3\0\0\0\0python3\0-c\0daemon_id='x'\0\
+            HOME=/Users/u\0NOEQ\0MRSM_ROOT_DIR=/a b/root\0\0ptr_munge=\0";
+        assert_eq!(
+            parse_procargs2(&procargs2(3, body)),
+            Some(pairs(&[
+                ("HOME", "/Users/u"),
+                ("MRSM_ROOT_DIR", "/a b/root")
+            ]))
+        );
+        // No environment at all.
+        assert_eq!(
+            parse_procargs2(&procargs2(1, b"/bin/sh\0\0sh\0")),
+            Some(Vec::new())
+        );
+        // An argument containing spaces is not split.
+        assert_eq!(
+            parse_procargs2(&procargs2(1, b"/bin/sh\0sh -c x\0A=1\0")),
+            Some(pairs(&[("A", "1")]))
+        );
+        // Fewer arguments than argc says, a negative argc, no padding end, too short.
+        assert_eq!(parse_procargs2(&procargs2(5, b"/bin/sh\0\0sh\0")), None);
+        assert_eq!(parse_procargs2(&procargs2(-1, b"/bin/sh\0\0sh\0")), None);
+        assert_eq!(parse_procargs2(&procargs2(1, b"/bin/sh\0\0\0")), None);
+        assert_eq!(parse_procargs2(b"\x01\0"), None);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn this_process_environment_is_readable() {
+        let Environ::Read(env) = process_environ(std::process::id() as i32) else {
+            panic!("unreadable");
+        };
+        assert!(env.iter().any(|(k, _)| k == "PATH"));
+        assert_eq!(process_environ(i32::MAX), Environ::Denied);
     }
 }

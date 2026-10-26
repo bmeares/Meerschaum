@@ -17,7 +17,9 @@
 //! - Starting, stopping, pausing, resuming and deleting a job forget what is cached for it.
 //! - A Python (v4) daemon has no `--jobs-dir` on its command line, so it matches only when the
 //!   `MRSM_ROOT_DIR` it was started with is this root (unset: the default root): two roots may run
-//!   jobs with the same name. An unreadable environment or a relative root still matches (v4.1.6).
+//!   jobs with the same name. A relative root, or an environment whose reading was refused
+//!   (another user's process), still matches (v4.1.6). An environment this platform cannot read
+//!   matches only the default root.
 //! - A recovered process must have started no later than the job's `began` (plus a small slack),
 //!   so a reused PID is not mistaken for it.
 //!
@@ -184,8 +186,60 @@ struct Entry {
     daemon_id: String,
     /// `--jobs-dir <dir>` of a Rust supervisor; a Python daemon has none.
     jobs_dir: Option<String>,
-    /// A Python daemon's root directory, from its environment (`None`: unknown, matches any root).
-    root: Option<PathBuf>,
+    /// A Python daemon's root directory, from its environment (unused with `jobs_dir`).
+    root: DaemonRoot,
+}
+
+/// What is known of the root directory a Python daemon was started with.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum DaemonRoot {
+    /// Its absolute `MRSM_ROOT_DIR`, or the default root when the variable is unset.
+    Known(PathBuf),
+    /// Its environment was read but the root cannot be resolved (a relative `MRSM_ROOT_DIR`, no
+    /// home directory): matches any root (v4.1.6).
+    Unresolved,
+    /// Reading its environment was refused (psutil's `AccessDenied`) or the process is gone:
+    /// matches any root (v4.1.6).
+    Denied,
+    /// Its environment cannot be read on this platform or was not parsed: matches only when
+    /// this is the default root.
+    Unknown,
+}
+
+impl DaemonRoot {
+    fn of(env: process::Environ) -> DaemonRoot {
+        match env {
+            process::Environ::Read(env) => {
+                legacy_root(&env).map_or(DaemonRoot::Unresolved, DaemonRoot::Known)
+            }
+            process::Environ::Denied => DaemonRoot::Denied,
+            process::Environ::Unknown => DaemonRoot::Unknown,
+        }
+    }
+}
+
+/// The default root's jobs directory, for this process's home (`None` without one).
+fn default_jobs_dir() -> Option<PathBuf> {
+    let env: Vec<(String, String)> = std::env::vars()
+        .filter(|(k, _)| k != "MRSM_ROOT_DIR")
+        .collect();
+    legacy_root(&env).map(|root| root.join("jobs"))
+}
+
+/// Whether an entry (`--jobs-dir` of a Rust supervisor, else a Python daemon's root) belongs to
+/// `jobs_dir`. `default_jobs_dir` is computed only for a daemon whose root is unknown.
+fn entry_matches(
+    entry_jobs_dir: Option<&str>,
+    root: &DaemonRoot,
+    jobs_dir: &Path,
+    default_jobs_dir: impl FnOnce() -> Option<PathBuf>,
+) -> bool {
+    match (entry_jobs_dir, root) {
+        (Some(d), _) => same_dir(Path::new(d), jobs_dir),
+        (None, DaemonRoot::Known(root)) => same_dir(&root.join("jobs"), jobs_dir),
+        (None, DaemonRoot::Unresolved | DaemonRoot::Denied) => true,
+        (None, DaemonRoot::Unknown) => default_jobs_dir().is_some_and(|d| same_dir(&d, jobs_dir)),
+    }
 }
 
 #[derive(Debug)]
@@ -222,13 +276,13 @@ fn entries_of(pid: i32, args: &[String]) -> Vec<Entry> {
             rest = &rest[at + PREFIX.len()..];
             if let Some(end) = rest.find('\'') {
                 if jobs_dir.is_none() && root.is_none() {
-                    root = Some(process::process_environ(pid).and_then(|env| legacy_root(&env)));
+                    root = Some(DaemonRoot::of(process::process_environ(pid)));
                 }
                 out.push(Entry {
                     pid,
                     daemon_id: rest[..end].to_string(),
                     jobs_dir: jobs_dir.clone(),
-                    root: root.clone().flatten(),
+                    root: root.clone().unwrap_or(DaemonRoot::Unresolved),
                 });
             }
         }
@@ -311,11 +365,7 @@ pub fn find_pids(
         .flat_map(|i| i.entries.iter())
         .filter(|e| {
             e.daemon_id == daemon_id
-                && match (&e.jobs_dir, &e.root) {
-                    (Some(d), _) => same_dir(Path::new(d), jobs_dir),
-                    (None, Some(root)) => same_dir(&root.join("jobs"), jobs_dir),
-                    (None, None) => true,
-                }
+                && entry_matches(e.jobs_dir.as_deref(), &e.root, jobs_dir, default_jobs_dir)
         })
         .map(|e| Found {
             pid: e.pid,
@@ -513,5 +563,70 @@ mod tests {
             Some(PathBuf::from("/xdg/meerschaum"))
         );
         assert_eq!(root(&[]), None);
+    }
+
+    #[test]
+    fn unset_denied_and_unknown_roots_are_told_apart() {
+        let read = |pairs: &[(&str, &str)]| {
+            DaemonRoot::of(process::Environ::Read(
+                pairs
+                    .iter()
+                    .map(|(k, v)| (k.to_string(), v.to_string()))
+                    .collect(),
+            ))
+        };
+        assert_eq!(
+            read(&[("HOME", "/home/u")]),
+            DaemonRoot::Known(PathBuf::from("/home/u/.config/meerschaum"))
+        );
+        assert_eq!(read(&[("MRSM_ROOT_DIR", "rel")]), DaemonRoot::Unresolved);
+        assert_eq!(read(&[]), DaemonRoot::Unresolved);
+        assert_eq!(DaemonRoot::of(process::Environ::Denied), DaemonRoot::Denied);
+        assert_eq!(
+            DaemonRoot::of(process::Environ::Unknown),
+            DaemonRoot::Unknown
+        );
+    }
+
+    #[test]
+    fn entries_match_their_own_root() {
+        let a = Path::new("/roots/a/jobs");
+        let default = || Some(PathBuf::from("/home/u/.config/meerschaum/jobs"));
+        let default_jobs = Path::new("/home/u/.config/meerschaum/jobs");
+        let no_default = || None;
+        let known = |p: &str| DaemonRoot::Known(PathBuf::from(p));
+        // A Rust supervisor: its `--jobs-dir`, whatever its environment.
+        assert!(entry_matches(
+            Some("/roots/a/jobs"),
+            &DaemonRoot::Unknown,
+            a,
+            default
+        ));
+        assert!(!entry_matches(
+            Some("/roots/b/jobs"),
+            &known("/roots/a"),
+            a,
+            default
+        ));
+        // A Python daemon with a readable environment: its root.
+        assert!(entry_matches(None, &known("/roots/a"), a, default));
+        assert!(!entry_matches(None, &known("/roots/b"), a, default));
+        // Unresolved or refused: any root (v4.1.6).
+        assert!(entry_matches(None, &DaemonRoot::Unresolved, a, default));
+        assert!(entry_matches(None, &DaemonRoot::Denied, a, default));
+        // Unknown: only the default root.
+        assert!(!entry_matches(None, &DaemonRoot::Unknown, a, default));
+        assert!(entry_matches(
+            None,
+            &DaemonRoot::Unknown,
+            default_jobs,
+            default
+        ));
+        assert!(!entry_matches(
+            None,
+            &DaemonRoot::Unknown,
+            default_jobs,
+            no_default
+        ));
     }
 }
