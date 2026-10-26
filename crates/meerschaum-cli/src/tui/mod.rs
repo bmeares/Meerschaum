@@ -79,6 +79,13 @@ pub static VIEWS: &[ViewDef] = &[
         action: watch::watch_jobs,
     },
     ViewDef {
+        name: "logs",
+        function: "_watch_logs",
+        summary: "jobs' logs as they are written (`show logs`)",
+        shell_key: None,
+        action: crate::native::jobs::show_logs,
+    },
+    ViewDef {
         name: "runs",
         function: "_watch_runs",
         summary: "an engine run: live Gantt chart, nodes and events",

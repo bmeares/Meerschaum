@@ -869,7 +869,7 @@ Esc leaves a view, `?` lists its keys. In the shell, F2 opens `watch run` and F3
 prints its line output instead.
 
     Options:
-        `watch [jobs, runs]`"##
+        `watch [jobs, logs, runs]`"##
         }
         "_watch_runs" => {
             r##"
@@ -888,6 +888,18 @@ Examples:
     - `watch run`
     - `watch run 01JA...`
     - `watch run --nopretty`
+"##
+        }
+        "_watch_logs" => {
+            r##"
+Follow the logs of jobs as they are written: the same as `show logs` (v5 alias).
+
+Give job names to follow only those; without names, every job's log is followed. Ctrl+C stops
+following. With `--nopretty`, the logs are printed once.
+
+Examples:
+    - `watch logs`
+    - `watch logs syncing-engine`
 "##
         }
         "_watch_jobs" => {

@@ -76,6 +76,7 @@ pub const V5_ONLY_SUBACTIONS: &[(&str, &str)] = &[
     ("upgrade", "extensions"),
     ("upgrade", "postgres"),
     ("watch", "jobs"),
+    ("watch", "logs"),
     ("watch", "runs"),
 ];
 
@@ -243,7 +244,11 @@ pub static CORE_ACTIONS: &[ActionDef] = &[
     // The full-screen monitors (`crate::tui::VIEWS`).
     action(
         "watch",
-        &[sub("jobs", "_watch_jobs"), sub("runs", "_watch_runs")],
+        &[
+            sub("jobs", "_watch_jobs"),
+            sub_e("logs", "_watch_logs"),
+            sub("runs", "_watch_runs"),
+        ],
     ),
     action(
         "show",

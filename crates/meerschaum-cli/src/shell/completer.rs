@@ -1046,7 +1046,7 @@ impl CompletionData {
                 }
                 None => default_for("restart", &action),
             },
-            "watch" => match dispatch(&["job", "jobs"], true) {
+            "watch" => match dispatch(&["job", "jobs", "log", "logs"], true) {
                 Some(_) => {
                     action.remove(0);
                     self.complete_jobs(&action, kw, &[])

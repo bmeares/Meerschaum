@@ -1,11 +1,12 @@
 # 📺 Watch and Shell Shortcuts
 
-`show` prints something once; `watch` keeps it on screen as it changes. Each `watch` subaction is a full-screen view (new in v5) that takes the whole terminal and gives it back as it was when you leave.
+`show` prints something once; `watch` keeps it on screen as it changes. `watch run` and `watch jobs` are full-screen views (new in v5) that take the whole terminal and give it back as it was when you leave; `watch logs` is another name for `show logs`.
 
 | Command | Shell key | What it shows |
 |---|---|---|
 | `watch run [RUN_ID]` | <kbd>F2</kbd> | An engine run: a live Gantt chart, its nodes and its events. |
 | `watch jobs [NAME ...]` | <kbd>F3</kbd> | Background jobs and the selected job's log, with keys to start, stop and pause them. |
+| `watch logs [NAME ...]` | | The logs of jobs as they are written, in the terminal's own scrollback: the same as `show logs`. |
 
 Every view shares these keys:
 
