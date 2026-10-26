@@ -6,7 +6,7 @@ use fred::prelude::*;
 use fred::types::Value as FValue;
 use meerschaum_connector::traits::async_trait;
 
-use crate::backend::{BackendError, BackendResult, ScoreBound, ValkeyBackend};
+use crate::backend::{BackendError, BackendResult, ScoreBound, ValkeyBackend, WriteOp};
 
 /// Lua: extend the TTL of `KEYS[1]` if it holds `ARGV[1]`.
 const CAS_PEXPIRE: &str = "if redis.call('get', KEYS[1]) == ARGV[1] then \
@@ -14,6 +14,36 @@ const CAS_PEXPIRE: &str = "if redis.call('get', KEYS[1]) == ARGV[1] then \
 /// Lua: delete `KEYS[1]` if it holds `ARGV[1]`.
 const CAS_DELETE: &str = "if redis.call('get', KEYS[1]) == ARGV[1] then \
      return redis.call('del', KEYS[1]) else return 0 end";
+
+/// Lua: claim `KEYS[1]` with `ARGV[1]` and apply one write per further key; operation `j`
+/// (`KEYS[j + 1]`) reads `ARGV[3j - 1]` (`set` / `zadd` / `sadd`), `ARGV[3j]` and
+/// `ARGV[3j + 1]`. Types are checked before the first write: a script stopped by an error keeps
+/// the writes it made, so nothing may fail after the claim.
+const CLAIM_AND_WRITE: &str = r#"
+if redis.call('EXISTS', KEYS[1]) == 1 then return 0 end
+local want = {zadd = 'zset', sadd = 'set'}
+for j = 1, #KEYS - 1 do
+  local need = want[ARGV[3 * j - 1]]
+  if need then
+    local t = redis.call('TYPE', KEYS[j + 1]).ok
+    if t ~= 'none' and t ~= need then
+      return redis.error_reply('WRONGTYPE Operation against a key holding the wrong kind of value')
+    end
+  end
+end
+redis.call('SET', KEYS[1], ARGV[1])
+for j = 1, #KEYS - 1 do
+  local kind, a, b = ARGV[3 * j - 1], ARGV[3 * j], ARGV[3 * j + 1]
+  if kind == 'set' then
+    redis.call('SET', KEYS[j + 1], a)
+  elseif kind == 'zadd' then
+    redis.call('ZADD', KEYS[j + 1], a, b)
+  else
+    redis.call('SADD', KEYS[j + 1], a)
+  end
+end
+return 1
+"#;
 
 /// A Valkey connection through `fred`.
 pub struct FredBackend {
@@ -178,6 +208,39 @@ impl ValkeyBackend for FredBackend {
                 vec![CAS_DELETE.into(), "1".into(), key.into(), value.into()],
             )
             .await?;
+        Ok(to_i64(&v) == 1)
+    }
+
+    async fn claim_and_write(
+        &self,
+        claim_key: &str,
+        claim_value: &str,
+        ops: &[WriteOp],
+    ) -> BackendResult<bool> {
+        let mut keys = vec![claim_key.to_string()];
+        let mut argv = vec![claim_value.to_string()];
+        for op in ops {
+            keys.push(op.key().to_string());
+            match op {
+                WriteOp::Set { value, .. } => {
+                    argv.extend(["set".into(), value.clone(), String::new()]);
+                }
+                WriteOp::ZAdd { member, score, .. } => {
+                    argv.extend([
+                        "zadd".into(),
+                        ScoreBound::Value(*score).to_arg(),
+                        member.clone(),
+                    ]);
+                }
+                WriteOp::SAdd { member, .. } => {
+                    argv.extend(["sadd".into(), member.clone(), String::new()]);
+                }
+            }
+        }
+        let mut args = vec![CLAIM_AND_WRITE.to_string(), keys.len().to_string()];
+        args.extend(keys);
+        args.extend(argv);
+        let v = self.call("EVAL", args).await?;
         Ok(to_i64(&v) == 1)
     }
 

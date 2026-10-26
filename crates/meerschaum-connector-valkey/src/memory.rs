@@ -4,13 +4,13 @@
 //! test double for crates that need an instance without a server.
 
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use indexmap::IndexMap;
 use meerschaum_connector::traits::async_trait;
 
-use crate::backend::{BackendError, BackendResult, ScoreBound, ValkeyBackend};
+use crate::backend::{BackendError, BackendResult, ScoreBound, ValkeyBackend, WriteOp};
 
 #[derive(Debug, Clone)]
 enum Entry {
@@ -33,10 +33,26 @@ impl Entry {
     }
 }
 
+/// A test hook called with `(command, key)` before the in-memory backend runs a write
+/// (`SET`, `ZADD`, `SADD`, `SREM`, `ZREM`, `DEL`, `INCR`, and each part of
+/// [`ValkeyBackend::claim_and_write`]): returning `Some(message)` fails the command with that
+/// message and changes nothing.
+pub type FaultHook = Arc<dyn Fn(&str, &str) -> Option<String> + Send + Sync>;
+
+#[derive(Default)]
+struct FaultSlot(Mutex<Option<FaultHook>>);
+
+impl std::fmt::Debug for FaultSlot {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("FaultSlot")
+    }
+}
+
 /// The in-memory backend.
 #[derive(Debug, Default)]
 pub struct MemoryBackend {
     data: Mutex<HashMap<String, (Entry, Option<Instant>)>>,
+    fault: FaultSlot,
 }
 
 const WRONGTYPE: &str = "WRONGTYPE Operation against a key holding the wrong kind of value";
@@ -94,6 +110,24 @@ impl MemoryBackend {
     /// An empty backend.
     pub fn new() -> MemoryBackend {
         MemoryBackend::default()
+    }
+
+    /// Install (or with `None`, remove) a [`FaultHook`] (tests inject failures with it).
+    pub fn set_fault_hook(&self, hook: Option<FaultHook>) {
+        *self.fault.0.lock().unwrap_or_else(|e| e.into_inner()) = hook;
+    }
+
+    fn fault(&self, command: &str, key: &str) -> BackendResult<()> {
+        let hook = self
+            .fault
+            .0
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
+        match hook.and_then(|h| h(command, key)) {
+            Some(msg) => Err(BackendError(msg)),
+            None => Ok(()),
+        }
     }
 
     fn with<R>(&self, f: impl FnOnce(&mut HashMap<String, (Entry, Option<Instant>)>) -> R) -> R {
@@ -184,6 +218,7 @@ impl ValkeyBackend for MemoryBackend {
     }
 
     async fn set(&self, key: &str, value: &str) -> BackendResult<()> {
+        self.fault("SET", key)?;
         self.with(|m| {
             m.insert(key.to_string(), (Entry::Str(value.to_string()), None));
             Ok(())
@@ -199,6 +234,7 @@ impl ValkeyBackend for MemoryBackend {
     }
 
     async fn set_nx(&self, key: &str, value: &str) -> BackendResult<bool> {
+        self.fault("SET", key)?;
         self.with(|m| {
             if m.contains_key(key) {
                 return Ok(false);
@@ -239,7 +275,58 @@ impl ValkeyBackend for MemoryBackend {
         })
     }
 
+    async fn claim_and_write(
+        &self,
+        claim_key: &str,
+        claim_value: &str,
+        ops: &[WriteOp],
+    ) -> BackendResult<bool> {
+        self.fault("SET", claim_key)?;
+        for op in ops {
+            self.fault(op.command(), op.key())?;
+        }
+        self.with(|m| {
+            if m.contains_key(claim_key) {
+                return Ok(false);
+            }
+            for op in ops {
+                if let (Some(need), Some((entry, _))) = (op.required_type(), m.get(op.key()))
+                    && entry.type_name() != need
+                {
+                    return wrongtype();
+                }
+            }
+            m.insert(
+                claim_key.to_string(),
+                (Entry::Str(claim_value.to_string()), None),
+            );
+            for op in ops {
+                match op {
+                    WriteOp::Set { key, value } => {
+                        m.insert(key.clone(), (Entry::Str(value.clone()), None));
+                    }
+                    WriteOp::ZAdd { key, member, score } => {
+                        let z = Self::zset_mut(m, key, true)?.expect("created");
+                        z.retain(|(mem, _)| mem != member);
+                        z.push((member.clone(), *score));
+                        z.sort_by(zcmp);
+                    }
+                    WriteOp::SAdd { key, member } => {
+                        let set = Self::set_mut(m, key, true)?.expect("created");
+                        if !set.iter().any(|x| x == member) {
+                            set.push(member.clone());
+                        }
+                    }
+                }
+            }
+            Ok(true)
+        })
+    }
+
     async fn del(&self, keys: &[String]) -> BackendResult<i64> {
+        for key in keys {
+            self.fault("DEL", key)?;
+        }
         self.with(|m| Ok(keys.iter().filter(|k| m.remove(*k).is_some()).count() as i64))
     }
 
@@ -248,6 +335,7 @@ impl ValkeyBackend for MemoryBackend {
     }
 
     async fn incr(&self, key: &str) -> BackendResult<i64> {
+        self.fault("INCR", key)?;
         self.with(|m| {
             let current = match m.get(key) {
                 None => 0,
@@ -285,6 +373,7 @@ impl ValkeyBackend for MemoryBackend {
     }
 
     async fn zadd(&self, key: &str, member: &str, score: f64) -> BackendResult<()> {
+        self.fault("ZADD", key)?;
         self.with(|m| {
             let z = Self::zset_mut(m, key, true)?.expect("created");
             z.retain(|(mem, _)| mem != member);
@@ -295,6 +384,7 @@ impl ValkeyBackend for MemoryBackend {
     }
 
     async fn zrem(&self, key: &str, member: &str) -> BackendResult<i64> {
+        self.fault("ZREM", key)?;
         self.with(|m| {
             let removed = match Self::zset_mut(m, key, false)? {
                 None => 0,
@@ -353,6 +443,7 @@ impl ValkeyBackend for MemoryBackend {
     }
 
     async fn sadd(&self, key: &str, member: &str) -> BackendResult<()> {
+        self.fault("SADD", key)?;
         self.with(|m| {
             let s = Self::set_mut(m, key, true)?.expect("created");
             if !s.iter().any(|x| x == member) {
@@ -363,6 +454,7 @@ impl ValkeyBackend for MemoryBackend {
     }
 
     async fn srem(&self, key: &str, member: &str) -> BackendResult<i64> {
+        self.fault("SREM", key)?;
         self.with(|m| {
             let removed = match Self::set_mut(m, key, false)? {
                 None => 0,

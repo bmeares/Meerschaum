@@ -25,7 +25,7 @@ pub mod pipes;
 pub mod pyjson;
 pub mod users;
 
-pub use backend::{BackendError, ScoreBound, ValkeyBackend};
+pub use backend::{BackendError, ScoreBound, ValkeyBackend, WriteOp};
 pub use connector::ValkeyConnector;
 pub use fred_backend::FredBackend;
-pub use memory::MemoryBackend;
+pub use memory::{FaultHook, MemoryBackend};

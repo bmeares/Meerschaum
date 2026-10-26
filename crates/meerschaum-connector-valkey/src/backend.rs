@@ -58,6 +58,62 @@ impl ScoreBound {
     }
 }
 
+/// One write of [`ValkeyBackend::claim_and_write`].
+#[derive(Debug, Clone, PartialEq)]
+pub enum WriteOp {
+    /// `SET key value`.
+    Set {
+        /// The key.
+        key: String,
+        /// The value.
+        value: String,
+    },
+    /// `ZADD key score member`.
+    ZAdd {
+        /// The sorted set.
+        key: String,
+        /// The member.
+        member: String,
+        /// The score.
+        score: f64,
+    },
+    /// `SADD key member`.
+    SAdd {
+        /// The set.
+        key: String,
+        /// The member.
+        member: String,
+    },
+}
+
+impl WriteOp {
+    /// The key this operation writes.
+    pub fn key(&self) -> &str {
+        match self {
+            WriteOp::Set { key, .. } | WriteOp::ZAdd { key, .. } | WriteOp::SAdd { key, .. } => key,
+        }
+    }
+
+    /// The Valkey command name (`SET`, `ZADD`, `SADD`).
+    pub fn command(&self) -> &'static str {
+        match self {
+            WriteOp::Set { .. } => "SET",
+            WriteOp::ZAdd { .. } => "ZADD",
+            WriteOp::SAdd { .. } => "SADD",
+        }
+    }
+
+    /// The `TYPE` the key must have (or `none`) for the write to succeed (`None`: any, as `SET`
+    /// replaces a key of any type).
+    pub fn required_type(&self) -> Option<&'static str> {
+        match self {
+            WriteOp::Set { .. } => None,
+            WriteOp::ZAdd { .. } => Some("zset"),
+            WriteOp::SAdd { .. } => Some("set"),
+        }
+    }
+}
+
 /// The Valkey commands used by `ValkeyConnector`. String values are UTF-8 (the Python connector
 /// decodes everything as UTF-8).
 #[async_trait]
@@ -78,6 +134,17 @@ pub trait ValkeyBackend: Send + Sync {
     async fn compare_and_pexpire(&self, key: &str, value: &str, ms: u64) -> BackendResult<bool>;
     /// Atomically delete `key` if its value is `value`.
     async fn compare_and_delete(&self, key: &str, value: &str) -> BackendResult<bool>;
+    /// Atomically claim `claim_key` and write `ops`: if `claim_key` does not exist, set it to
+    /// `claim_value` (no expiry) and apply every operation, returning `true`; if it exists,
+    /// write nothing and return `false`. An operation against a key of the wrong type is an
+    /// error, checked before anything is written, so an error also writes nothing. Keys must
+    /// be distinct from `claim_key` and from each other's types.
+    async fn claim_and_write(
+        &self,
+        claim_key: &str,
+        claim_value: &str,
+        ops: &[WriteOp],
+    ) -> BackendResult<bool>;
     /// `DEL key [key ...]`: the number of keys removed.
     async fn del(&self, keys: &[String]) -> BackendResult<i64>;
     /// `EXISTS key`.

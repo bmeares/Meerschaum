@@ -9,8 +9,11 @@ use meerschaum_core::users::User;
 use meerschaum_core::{Map, Pipe, SuccessTuple, Value};
 use meerschaum_kernel::value::Value as KValue;
 
+use crate::backend::WriteOp;
 use crate::connector::{ValkeyConnector, be};
-use crate::keys::{PLUGINS_TABLE, USERS_TABLE, get_plugin_key, get_user_key};
+use crate::keys::{
+    PLUGINS_TABLE, USERS_TABLE, get_document_key, get_plugin_key, get_user_key, quote_table,
+};
 
 /// The `valkey-py` error for setting `None` (`DataError`).
 const NONE_VALUE_ERROR: &str =
@@ -106,51 +109,117 @@ impl ValkeyConnector {
                 return SuccessTuple::fail(format!("Failed to register '{}':\n{e}", user.username));
             }
         };
-        // Claim the username atomically: of two processes registering it at once, only one
-        // writes the user (v4 wrote over an existing user's keys here).
-        let claimed = match get_user_key(&user.username, "user_id", true) {
-            Ok(key) => self.backend.set_nx(&key, &user_id_str(user)).await,
+        let claim_key = match get_user_key(&user.username, "user_id", true) {
+            Ok(key) => key,
             Err(e) => {
                 return SuccessTuple::fail(format!("Failed to register '{}':\n{e}", user.username));
             }
         };
-        match claimed {
-            Ok(true) => {}
-            Ok(false) => {
-                return SuccessTuple::fail(format!("User '{}' already exists.", user.username));
-            }
-            Err(e) => {
-                return SuccessTuple::fail(format!("Failed to register '{}':\n{e}", user.username));
-            }
+        let user_id = user_id_str(user);
+        let fail = |e: &dyn std::fmt::Display| {
+            SuccessTuple::fail(format!("Failed to register '{}':\n{e}", user.username))
+        };
+        let exists = || SuccessTuple::fail(format!("User '{}' already exists.", user.username));
+        match self.get(&claim_key).await {
+            Ok(Some(_)) => return exists(),
+            Ok(None) => {}
+            Err(e) => return fail(&e),
         }
+        // The row goes in first, under this attempt's new `user_id`; the username key (the claim)
+        // and the field keys are then written in one atomic step. Of two processes registering
+        // the username at once only one claims it (v4 wrote over an existing user's keys
+        // here), and a failure removes this attempt's row. A row without its claim (a process
+        // that died in between) is not listed and is removed by the next registration.
         let users_pipe = self.valkey_users_pipe();
         let doc: Doc = [
-            ("user_id".to_string(), KValue::Str(user_id_str(user))),
+            ("user_id".to_string(), KValue::Str(user_id.clone())),
             ("username".to_string(), KValue::Str(user.username.clone())),
         ]
         .into_iter()
         .collect();
         let res = pipe_ops::sync_docs(self, &users_pipe, vec![doc], false).await;
         if !res.success {
-            let keys: Vec<String> = keys_vals.keys().cloned().collect();
-            let _ = self.backend.del(&keys).await;
+            self.remove_user_row(&user_id).await;
             return res;
         }
-        let mut result = SuccessTuple::success();
-        for (key, val) in &keys_vals {
-            if let Some(val) = val
-                && let Err(e) = self.set(key, val).await
+        let ops: Vec<WriteOp> = keys_vals
+            .iter()
+            .filter(|(key, _)| **key != claim_key)
+            .filter_map(|(key, val)| {
+                val.as_ref().map(|v| WriteOp::Set {
+                    key: key.clone(),
+                    value: v.clone(),
+                })
+            })
+            .collect();
+        match self
+            .backend
+            .claim_and_write(&claim_key, &user_id, &ops)
+            .await
+        {
+            Ok(true) => {}
+            Ok(false) => {
+                self.remove_user_row(&user_id).await;
+                return exists();
+            }
+            Err(e) => match self.get(&claim_key).await {
+                // A reply lost after the script ran (e.g. a timeout) still registered the user.
+                Ok(Some(v)) if v == user_id => {}
+                // Not claimed by this attempt: drop its row.
+                Ok(_) => {
+                    self.remove_user_row(&user_id).await;
+                    return fail(&e);
+                }
+                // Unknown: keep the row (unlisted without its claim) rather than orphan a claim.
+                Err(_) => return fail(&e),
+            },
+        }
+        self.remove_unclaimed_user_rows(&user.username, &user_id)
+            .await;
+        SuccessTuple::success()
+    }
+
+    /// Remove the `mrsm_users` row of `user_id` (its index member and its document key), even
+    /// if only part of it was written. Best effort.
+    async fn remove_user_row(&self, user_id: &str) {
+        let table_name = quote_table(USERS_TABLE);
+        let indices = vec!["user_id".to_string()];
+        let doc: Doc = [("user_id".to_string(), KValue::Str(user_id.to_string()))]
+            .into_iter()
+            .collect();
+        let _ = self
+            .backend
+            .srem(&table_name, &get_document_key(&doc, &indices, None))
+            .await;
+        let _ = self
+            .backend
+            .del(&[get_document_key(&doc, &indices, Some(&table_name))])
+            .await;
+    }
+
+    /// Remove the `mrsm_users` rows of `username` other than `user_id`'s (left by registrations
+    /// which wrote their row but never claimed the username). Best effort.
+    async fn remove_unclaimed_user_rows(&self, username: &str, user_id: &str) {
+        let users_pipe = self.valkey_users_pipe();
+        let mut params = Map::new();
+        params.insert("username".into(), Value::Str(username.to_string()));
+        let query = DataQuery {
+            params: Some(params),
+            ..Default::default()
+        };
+        let Ok(docs) = pipe_ops::get_docs(self, &users_pipe, &query).await else {
+            return;
+        };
+        for doc in docs {
+            let Some(other) = doc.get("user_id").map(|v| v.py_str()) else {
+                continue;
+            };
+            if other != user_id
+                && doc.get("username").map(|v| v.py_str()).as_deref() == Some(username)
             {
-                result =
-                    SuccessTuple::fail(format!("Failed to register '{}':\n{e}", user.username));
-                break;
+                self.remove_user_row(&other).await;
             }
         }
-        if !result.success {
-            let keys: Vec<String> = keys_vals.keys().cloned().collect();
-            let _ = self.backend.del(&keys).await;
-        }
-        result
     }
 
     /// Return the ID for a user (`mrsm_user:username:{username}:user_id`), or `None`.
@@ -289,11 +358,23 @@ impl ValkeyConnector {
     pub async fn valkey_get_users(&self) -> ConnectorResult<Vec<String>> {
         let users_pipe = self.valkey_users_pipe();
         let docs = pipe_ops::get_docs(self, &users_pipe, &DataQuery::default()).await?;
-        Ok(docs
-            .iter()
-            .filter_map(|d| d.get("username"))
-            .map(|v| v.py_str())
-            .collect())
+        let mut users = Vec::new();
+        for doc in &docs {
+            let Some(username) = doc.get("username").map(|v| v.py_str()) else {
+                continue;
+            };
+            // A row whose username is not claimed by its `user_id` is a registration that
+            // never finished (see `valkey_register_user`).
+            let user_id = doc.get("user_id").map(|v| v.py_str());
+            let claimed = match get_user_key(&username, "user_id", true) {
+                Ok(key) => self.get(&key).await?,
+                Err(_) => None,
+            };
+            if claimed.is_some() && claimed == user_id {
+                users.push(username);
+            }
+        }
+        Ok(users)
     }
 
     async fn user_field(&self, user: &User, sub_key: &str) -> Option<String> {

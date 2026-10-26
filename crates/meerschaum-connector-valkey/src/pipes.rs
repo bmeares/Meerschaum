@@ -14,12 +14,13 @@ use meerschaum_kernel::enforce::{PipeInput, pandas_astype, pipe_enforce_dtypes};
 use meerschaum_kernel::query::{QueryOptions, query_df};
 use meerschaum_kernel::value::Value as KValue;
 
+use crate::backend::WriteOp;
 use crate::connector::{ValkeyConnector, be, docs_frame};
 use crate::keys::{
-    COLON, PIPES_COUNTER, PIPES_TABLE, get_document_key, get_pipe_key, get_pipe_parameters_key,
-    quote_table,
+    COLON, PIPES_COUNTER, PIPES_TABLE, get_datetime_column_key, get_document_key, get_pipe_key,
+    get_pipe_parameters_key, quote_table,
 };
-use crate::pyjson::{loads_doc, serialize_document};
+use crate::pyjson::{dumps_doc, loads_doc, serialize_document};
 
 /// `pipe.target` on a Valkey instance (no per-flavor truncation).
 pub fn pipe_target(pipe: &Pipe) -> String {
@@ -151,18 +152,6 @@ impl ValkeyConnector {
                 ))));
             }
             let pipe_id = self.backend.incr(PIPES_COUNTER).await.map_err(be)?;
-            // Claim the pipe's key atomically: of two processes registering it at once, only one
-            // writes its row (the check above alone let both through).
-            if !self
-                .backend
-                .set_nx(&pipe_key, &pipe_id.to_string())
-                .await
-                .map_err(be)?
-            {
-                return Ok(Some(SuccessTuple::fail(format!(
-                    "{pipe} is already registered."
-                ))));
-            }
             let doc: Doc = [
                 ("pipe_id".to_string(), KValue::Int(pipe_id)),
                 (
@@ -180,11 +169,44 @@ impl ValkeyConnector {
             ]
             .into_iter()
             .collect();
-            if let Err(e) = self.push_docs(&[doc], PIPES_TABLE, Some("pipe_id")).await {
-                let _ = self.backend.del(std::slice::from_ref(&pipe_key)).await;
-                return Err(e);
+            // The writes of `push_docs([doc], PIPES_TABLE, datetime_column='pipe_id')` and the
+            // parameters key, applied with the claim of the pipe's key in one atomic step: of
+            // two processes registering the pipe at once only one writes its row, and a
+            // failure (or a dropped future) leaves either everything or nothing.
+            let ops = [
+                WriteOp::ZAdd {
+                    key: quote_table(PIPES_TABLE),
+                    member: dumps_doc(&doc, true),
+                    score: pipe_id as f64,
+                },
+                WriteOp::Set {
+                    key: get_datetime_column_key(PIPES_TABLE),
+                    value: "pipe_id".into(),
+                },
+                WriteOp::Set {
+                    key: parameters_key.clone(),
+                    value: parameters_str.clone(),
+                },
+            ];
+            let pipe_id_str = pipe_id.to_string();
+            match self
+                .backend
+                .claim_and_write(&pipe_key, &pipe_id_str, &ops)
+                .await
+            {
+                Ok(true) => {}
+                Ok(false) => {
+                    return Ok(Some(SuccessTuple::fail(format!(
+                        "{pipe} is already registered."
+                    ))));
+                }
+                // A reply lost after the script ran (e.g. a timeout) still registered the pipe.
+                Err(e) => {
+                    if self.backend.get(&pipe_key).await.ok().flatten() != Some(pipe_id_str) {
+                        return Err(be(e));
+                    }
+                }
             }
-            self.set(&parameters_key, &parameters_str).await?;
             Ok(None)
         }
         .await;
