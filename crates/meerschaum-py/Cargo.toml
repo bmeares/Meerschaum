@@ -50,6 +50,8 @@ libc = "0.2"
 tokio = { workspace = true }
 # Only this crate depends on the CLI library (top layer, see crates/README.md "Crate layering").
 meerschaum-cli = { path = "../meerschaum-cli", default-features = false }
+# `_core.native_plugin_names` / `native_connector_register` (`native_plugin_api.rs`).
+meerschaum-plugin = { workspace = true }
 # `meerschaum.compose.utils` delegates its configuration helpers (`compose_api.rs`).
 meerschaum-compose = { workspace = true }
 # pyo3, arrow and polars are workspace dependencies that move together (README "Dependency pins").

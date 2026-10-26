@@ -41,6 +41,7 @@ pub mod jobs_api;
 pub mod kernel_api;
 pub mod logging;
 pub mod main_api;
+pub mod native_plugin_api;
 pub mod pandas_bridge;
 pub mod pipe_api;
 pub mod pipe_bridge;
@@ -126,6 +127,11 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // Pipe.verify() and the façade session (wave 9)
     m.add_function(wrap_pyfunction!(verify_api::verify_pipe, m)?)?;
     m.add_function(wrap_pyfunction!(verify_api::register_connector, m)?)?;
+    m.add_function(wrap_pyfunction!(native_plugin_api::native_plugin_names, m)?)?;
+    m.add_function(wrap_pyfunction!(
+        native_plugin_api::native_connector_register,
+        m
+    )?)?;
     m.add_function(wrap_pyfunction!(verify_api::unregister_connector, m)?)?;
 
     // The native action dispatcher from Python (wave 16, P2)

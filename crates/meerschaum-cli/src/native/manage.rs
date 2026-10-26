@@ -7,6 +7,7 @@
 use meerschaum_connector::DataQuery;
 use meerschaum_core::value::{Map, Value, apply_patch_maps};
 use meerschaum_core::{Pipe, SuccessTuple};
+use meerschaum_plugin::NativePlugins;
 
 use crate::builtin::ActionResult;
 use crate::dispatch::Runtime;
@@ -69,53 +70,12 @@ pub(crate) fn ask_connector_register(
         Ok(natives) => natives,
         Err(error) => return Some(Err(error.message)),
     };
-    let (typ, label) = super::session::split_keys(pipe.connector_keys());
-    let native_owner = if typ == "plugin" {
-        natives.contains(&label)
-    } else {
-        natives.connector_plugin(&typ).is_some()
-    };
-    if native_owner {
+    if owns_connector(&natives, pipe.connector_keys()) {
         // Native ownership is exclusive, including plugins without a register hook.
         if !manifest_may_register(session, config, pipe.connector_keys()) {
             return None;
         }
-        let connector = if typ == "plugin" {
-            natives
-                .plugin(&label)
-                .map(|plugin| plugin.source(serde_json::Value::Null))
-        } else {
-            let connectors = config
-                .get(&["meerschaum", "connectors"])
-                .map(|v| v.to_map())
-                .unwrap_or_default();
-            let attributes = crate::native_plugins::attributes(&connectors, &typ, &label);
-            natives.connector(&typ, &label, serde_json::json!(attributes))?
-        };
-        return (|| {
-            let connector = connector.map_err(|e| e.to_string())?;
-            let reply = match connector.call(
-                "register",
-                serde_json::json!({
-                    "pipe": {"keys": pipe.keys(), "parameters": pipe.raw_parameters(),
-                             "temporary": pipe.temporary}
-                }),
-                None,
-            ) {
-                Ok(reply) => reply,
-                Err(meerschaum_connector::ConnectorError::NotImplemented(_)) => {
-                    return Ok(None);
-                }
-                Err(e) => return Err(e.to_string()),
-            };
-            Ok(Some(meerschaum_worker::connector::RegisterOutcome {
-                parameters: serde_json::from_value(reply.value.clone()).unwrap_or_default(),
-                valid: reply.value.is_null() || reply.value.is_object(),
-                defined: true,
-                repr: reply.value.to_string(),
-            }))
-        })()
-        .transpose();
+        return native_connector_register(&natives, config, pipe);
     }
     if !session.worker_enabled() {
         return None;
@@ -138,6 +98,66 @@ pub(crate) fn ask_connector_register(
             .block_on(connector.register(pipe))
             .map_err(|e| e.to_string()),
     )
+}
+
+/// Whether a native plugin owns the connector of `keys` (`plugin:<native plugin>` or a type
+/// declared by a native plugin's `#[make_connector]`).
+pub fn owns_connector(natives: &NativePlugins, keys: &str) -> bool {
+    let (typ, label) = super::session::split_keys(keys);
+    if typ == "plugin" {
+        natives.contains(&label)
+    } else {
+        natives.connector_plugin(&typ).is_some()
+    }
+}
+
+/// The `register(pipe)` parameters of a connector a native plugin owns, called in-process.
+/// `None`: not native-owned, or the plugin defines no `register`.
+pub fn native_connector_register(
+    natives: &NativePlugins,
+    config: &meerschaum_core::config::Config,
+    pipe: &Pipe,
+) -> Option<Result<meerschaum_worker::connector::RegisterOutcome, String>> {
+    if !owns_connector(natives, pipe.connector_keys()) {
+        return None;
+    }
+    let (typ, label) = super::session::split_keys(pipe.connector_keys());
+    let connector = if typ == "plugin" {
+        natives
+            .plugin(&label)
+            .map(|plugin| plugin.source(serde_json::Value::Null))
+    } else {
+        let connectors = config
+            .get(&["meerschaum", "connectors"])
+            .map(|v| v.to_map())
+            .unwrap_or_default();
+        let attributes = crate::native_plugins::attributes(&connectors, &typ, &label);
+        natives.connector(&typ, &label, serde_json::json!(attributes))?
+    };
+    (|| {
+        let connector = connector.map_err(|e| e.to_string())?;
+        let reply = match connector.call(
+            "register",
+            serde_json::json!({
+                "pipe": {"keys": pipe.keys(), "parameters": pipe.raw_parameters(),
+                         "temporary": pipe.temporary}
+            }),
+            None,
+        ) {
+            Ok(reply) => reply,
+            Err(meerschaum_connector::ConnectorError::NotImplemented(_)) => {
+                return Ok(None);
+            }
+            Err(e) => return Err(e.to_string()),
+        };
+        Ok(Some(meerschaum_worker::connector::RegisterOutcome {
+            parameters: serde_json::from_value(reply.value.clone()).unwrap_or_default(),
+            valid: reply.value.is_null() || reply.value.is_object(),
+            defined: true,
+            repr: reply.value.to_string(),
+        }))
+    })()
+    .transpose()
 }
 
 /// Whether the plugin manifest leaves open that the connector of `keys` implements

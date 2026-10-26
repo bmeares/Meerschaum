@@ -3185,6 +3185,7 @@ dependencies = [
  "meerschaum-engine",
  "meerschaum-jobs",
  "meerschaum-kernel",
+ "meerschaum-plugin",
  "meerschaum-worker",
  "num-bigint 0.5.1",
  "polars",
