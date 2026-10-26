@@ -7,7 +7,7 @@ use axum::extract::{DefaultBodyLimit, FromRequest, Multipart, Path, Request};
 use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::IntoResponse;
 use axum::routing::{get, post};
-use meerschaum_connector::PluginRecord;
+use meerschaum_connector::{PluginRecord, pipe_ops};
 use meerschaum_core::{Map, Value};
 use serde_json::json;
 
@@ -115,7 +115,15 @@ async fn register_plugin(ctx: Ctx, Path(name): Path<String>, req: Request) -> Ap
         ));
     }
     plugin.user_id = curr_user_id;
-    let res = conn.register_plugin(&plugin, false).await;
+    // The check above is not atomic with the write: `register_plugin_as_owner` refuses a row
+    // another user registered after it (v4's `register_plugin` would move it to this user).
+    let res = conn.register_plugin_as_owner(&plugin, false).await;
+    if !res.success && res.message == pipe_ops::plugin_owner_conflict(&plugin).message {
+        return Ok(tuple(
+            false,
+            format!("User '{}' cannot edit plugin '{name}'.", user.username),
+        ));
+    }
     if res.success {
         let path = archive_path(&state, &name);
         let tmp = PathBuf::from(format!("{}.tmp", path.display()));

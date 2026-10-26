@@ -903,6 +903,28 @@ pub trait InstanceConnector: Connector {
         pipe_ops::default_register_plugin(self, plugin).await
     }
 
+    /// New in 5.0: [`Self::register_plugin`] for a caller which verified that `plugin.user_id`
+    /// may edit the plugin (the API's plugin upload route): an existing registration owned by
+    /// another user (or `plugin.user_id` being `None` while it has an owner) is refused with
+    /// [`pipe_ops::plugin_owner_conflict`] instead of moving to `plugin.user_id`.
+    ///
+    /// This default checks the owner and then registers, which is not atomic; instances whose
+    /// `register_plugin` can change an owner (SQL, Valkey) override it to check while writing.
+    /// It is a separate method because v4's `register_plugin` changes owners on purpose.
+    async fn register_plugin_as_owner(&self, plugin: &PluginRecord, force: bool) -> SuccessTuple {
+        match self.get_plugin_user_id(plugin).await {
+            Ok(owner)
+                if owner.as_ref().is_some_and(|v| !v.is_null())
+                    && !pipe_ops::same_plugin_owner(owner.as_ref(), plugin.user_id.as_ref()) =>
+            {
+                return pipe_ops::plugin_owner_conflict(plugin);
+            }
+            Ok(_) => {}
+            Err(e) => return SuccessTuple::fail(e.to_string()),
+        }
+        self.register_plugin(plugin, force).await
+    }
+
     /// Return a plugin's ID (its name if registered).
     async fn get_plugin_id(&self, plugin: &PluginRecord) -> ConnectorResult<Option<String>> {
         Ok(self

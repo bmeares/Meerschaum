@@ -29,6 +29,29 @@ impl SqlConnector {
     /// another user than `plugin.user_id`. An update only applies to the row as it was read
     /// (same id and owner), and a row which keeps changing fails the call after a few attempts.
     pub async fn register_plugin(&self, plugin: &PluginRecord, force: bool) -> SuccessTuple {
+        self.register_plugin_with(plugin, force, false).await
+    }
+
+    /// [`Self::register_plugin`] for a caller which verified the owner (the API's plugin upload
+    /// route): an existing row is only updated while its owner is `plugin.user_id`, so a row
+    /// another user registers after the caller's check keeps its owner. The refusal is
+    /// [`meerschaum_connector::pipe_ops::plugin_owner_conflict`].
+    pub async fn register_plugin_as_owner(
+        &self,
+        plugin: &PluginRecord,
+        force: bool,
+    ) -> SuccessTuple {
+        self.register_plugin_with(plugin, force, true).await
+    }
+
+    // `keep_owner` is opt-in rather than the default: v4's `register_plugin` (and so the public
+    // Python `SQLConnector.register_plugin`) moves an existing row to `plugin.user_id`.
+    async fn register_plugin_with(
+        &self,
+        plugin: &PluginRecord,
+        force: bool,
+        keep_owner: bool,
+    ) -> SuccessTuple {
         let _ = self.ensure_instance_tables(true).await;
         let table = self.instance_table_name("mrsm_plugins");
         let f = self.flavor;
@@ -45,8 +68,7 @@ impl SqlConnector {
             SqlParam::Int(i) => Some(*i),
             _ => None,
         };
-        let another_user =
-            || SuccessTuple::fail(format!("Plugin '{plugin}' was registered by another user."));
+        let another_user = || meerschaum_connector::pipe_ops::plugin_owner_conflict(plugin);
         // The owner of the row when this call first saw it.
         let mut seen_owner: Option<Option<i64>> = None;
         // Whether this call's insert lost to another process's.
@@ -59,6 +81,9 @@ impl SqlConnector {
             let mut owner = None;
             if old_id.is_some() {
                 owner = self.get_plugin_user_id(plugin).await.ok().flatten();
+                if keep_owner && owner.is_some() && owner != requested_owner {
+                    return another_user();
+                }
                 match seen_owner {
                     // Registered by another process after this call found no row: it may only
                     // update a row of its own user.
@@ -109,7 +134,7 @@ impl SqlConnector {
                             params.push(SqlParam::Int(owner));
                             format!(" AND {table}.user_id = {}", placeholder(f, 6))
                         }
-                        None => String::new(),
+                        None => format!(" AND {table}.user_id IS NULL"),
                     };
                     format!(
                         "UPDATE {table} SET plugin_name={}, version={}, attributes={}, user_id={} WHERE {table}.plugin_id = {}{owner_clause}",

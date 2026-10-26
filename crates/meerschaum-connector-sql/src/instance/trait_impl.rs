@@ -443,6 +443,13 @@ impl InstanceConnector for SqlConnector {
         SqlConnector::register_plugin(self, plugin, force).await
     }
 
+    async fn register_plugin_as_owner(&self, plugin: &PluginRecord, force: bool) -> SuccessTuple {
+        if let Err(e) = self.require_schema().await {
+            return SuccessTuple::fail(e.to_string());
+        }
+        SqlConnector::register_plugin_as_owner(self, plugin, force).await
+    }
+
     async fn get_plugin_id(&self, plugin: &PluginRecord) -> ConnectorResult<Option<String>> {
         self.require_schema().await?;
         Ok(SqlConnector::get_plugin_id(self, plugin)

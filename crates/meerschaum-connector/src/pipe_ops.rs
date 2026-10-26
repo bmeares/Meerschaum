@@ -964,6 +964,22 @@ pub async fn plugin_field<C: InstanceConnector + ?Sized>(
     get_value(conn, &pipe, field, &params).await
 }
 
+/// The refusal of [`InstanceConnector::register_plugin_as_owner`] (and of a lost insert race on
+/// SQL): the plugin is registered to another user than `plugin.user_id`.
+pub fn plugin_owner_conflict(plugin: &PluginRecord) -> SuccessTuple {
+    SuccessTuple::fail(format!("Plugin '{plugin}' was registered by another user."))
+}
+
+/// Whether two plugin owners (`user_id` values, `None` / `Null` for no owner) are the same user.
+/// Compared by their text, since instances return integers or strings.
+pub fn same_plugin_owner(a: Option<&Value>, b: Option<&Value>) -> bool {
+    let text = |v: Option<&Value>| {
+        v.filter(|v| !v.is_null())
+            .map(meerschaum_core::pyfmt::py_str)
+    };
+    text(a) == text(b)
+}
+
 /// `InstanceConnector.register_plugin()`.
 pub async fn default_register_plugin<C: InstanceConnector + ?Sized>(
     conn: &C,

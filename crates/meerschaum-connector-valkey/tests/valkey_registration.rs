@@ -268,3 +268,85 @@ async fn claims_and_unclaimed_rows_live() {
     let conn = ValkeyConnector::with_backend("reg", Map::new(), backend);
     check_unclaimed_user_row(&conn).await;
 }
+
+/// `register_plugin_as_owner` (the API's upload route, after its own owner check): a plugin
+/// another user registered after that check is refused and keeps its owner; `register_plugin`
+/// keeps v4's unchecked overwrite.
+async fn check_register_plugin_as_owner(conn: &ValkeyConnector) {
+    use meerschaum_connector::{InstanceConnector, PluginRecord};
+    use meerschaum_core::Value;
+
+    let name = unique("plugin");
+    let record = |user_id: Option<&str>, version: &str| PluginRecord {
+        name: name.clone(),
+        version: Some(version.into()),
+        user_id: user_id.map(|u| Value::Str(u.into())),
+        attributes: Map::new(),
+    };
+    let probe = record(None, "");
+    let owner = || async { conn.get_plugin_user_id(&probe).await.unwrap() };
+
+    let res = conn
+        .register_plugin(&record(Some("1"), "1.0.0"), false)
+        .await;
+    assert!(res.success, "{}", res.message);
+    for user_id in [Some("2"), None] {
+        let res = conn
+            .register_plugin_as_owner(&record(user_id, "2.0.0"), false)
+            .await;
+        assert!(!res.success);
+        assert_eq!(
+            res.message,
+            format!("Plugin '{name}' was registered by another user.")
+        );
+    }
+    assert_eq!(owner().await, Some(Value::Str("1".into())));
+    assert_eq!(
+        conn.get_plugin_version(&probe).await.unwrap().as_deref(),
+        Some("1.0.0")
+    );
+
+    // The owner may update it.
+    let res = conn
+        .register_plugin_as_owner(&record(Some("1"), "1.1.0"), false)
+        .await;
+    assert!(res.success, "{}", res.message);
+    assert_eq!(
+        conn.get_plugin_version(&probe).await.unwrap().as_deref(),
+        Some("1.1.0")
+    );
+
+    // A new plugin is claimed by its first registration.
+    let res = conn.delete_plugin(&probe).await;
+    assert!(res.success, "{}", res.message);
+    let res = conn
+        .register_plugin_as_owner(&record(Some("2"), "1.0.0"), false)
+        .await;
+    assert!(res.success, "{}", res.message);
+    assert_eq!(owner().await, Some(Value::Str("2".into())));
+
+    // PARITY: v4's `register_plugin` overwrites the owner.
+    let res = conn
+        .register_plugin(&record(Some("1"), "1.0.0"), false)
+        .await;
+    assert!(res.success, "{}", res.message);
+    assert_eq!(owner().await, Some(Value::Str("1".into())));
+
+    let res = conn.delete_plugin(&probe).await;
+    assert!(res.success, "{}", res.message);
+}
+
+#[tokio::test]
+async fn register_plugin_as_owner_keeps_another_users_plugin_in_memory() {
+    let conn = ValkeyConnector::in_memory("reg");
+    check_register_plugin_as_owner(&conn).await;
+}
+
+#[tokio::test]
+async fn register_plugin_as_owner_keeps_another_users_plugin_live() {
+    let Some(backend) = live_backend().await else {
+        return;
+    };
+    let conn = ValkeyConnector::with_backend("reg", Map::new(), backend);
+    check_register_plugin_as_owner(&conn).await;
+}

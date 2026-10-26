@@ -264,6 +264,10 @@ impl InstanceConnector for ValkeyConnector {
         self.valkey_register_plugin(plugin).await
     }
 
+    async fn register_plugin_as_owner(&self, plugin: &PluginRecord, _force: bool) -> SuccessTuple {
+        self.valkey_register_plugin_as_owner(plugin).await
+    }
+
     async fn get_plugin_version(&self, plugin: &PluginRecord) -> ConnectorResult<Option<String>> {
         Ok(self.valkey_get_plugin_version(plugin).await)
     }

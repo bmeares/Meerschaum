@@ -474,6 +474,67 @@ impl ValkeyConnector {
         result
     }
 
+    /// New in 5.0: [`Self::valkey_register_plugin`] for a caller which verified the owner (the
+    /// API's plugin upload route; `InstanceConnector::register_plugin_as_owner`). The owner key
+    /// is claimed with `SET NX` before anything is written, so a registration owned by another
+    /// user, including one which appears after the caller's check, is refused and keeps its
+    /// owner. `register_plugin` itself keeps v4's unchecked overwrite.
+    pub async fn valkey_register_plugin_as_owner(&self, plugin: &PluginRecord) -> SuccessTuple {
+        let owner_key = match get_plugin_key(&plugin.name, "user_id") {
+            Ok(key) => key,
+            Err(e) => {
+                return SuccessTuple::fail(format!(
+                    "Failed to register plugin '{}':\n{e}",
+                    plugin.name
+                ));
+            }
+        };
+        let requested = plugin
+            .user_id
+            .as_ref()
+            .filter(|v| !v.is_null())
+            .map(meerschaum_core::pyfmt::py_str);
+        let conflict = || pipe_ops::plugin_owner_conflict(plugin);
+        let failed = |e: String| {
+            SuccessTuple::fail(format!("Failed to register plugin '{}':\n{e}", plugin.name))
+        };
+        match requested {
+            Some(requested) => {
+                let mut claimed = false;
+                // The owner key is only deleted with the plugin: a few attempts cover a delete
+                // between the `SET NX` and the read.
+                for _ in 0..3 {
+                    match self.backend.set_nx(&owner_key, &requested).await {
+                        Ok(true) => {
+                            claimed = true;
+                            break;
+                        }
+                        Ok(false) => {}
+                        Err(e) => return failed(e.to_string()),
+                    }
+                    match self.get(&owner_key).await {
+                        Ok(Some(owner)) if owner == requested => {
+                            claimed = true;
+                            break;
+                        }
+                        Ok(Some(_)) => return conflict(),
+                        Ok(None) => {}
+                        Err(e) => return failed(e.to_string()),
+                    }
+                }
+                if !claimed {
+                    return failed("its owner kept changing.".into());
+                }
+            }
+            None => match self.get(&owner_key).await {
+                Ok(Some(_)) => return conflict(),
+                Ok(None) => {}
+                Err(e) => return failed(e.to_string()),
+            },
+        }
+        self.valkey_register_plugin(plugin).await
+    }
+
     async fn plugin_field(&self, plugin: &PluginRecord, sub_key: &str) -> Option<String> {
         let key = get_plugin_key(&plugin.name, sub_key).ok()?;
         self.get(&key).await.ok().flatten()

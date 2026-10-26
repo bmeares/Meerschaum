@@ -245,3 +245,73 @@ flavor_tests!(test_tokens_roundtrip, |c: Ctx| async move {
 
 // test_login_preserves_custom_user_scopes / test_login_treats_admin_as_wildcard_scope:
 // skipped — the password grant is served by the API flavor only.
+
+// The API's upload route checks the owner and then calls `register_plugin_as_owner`: when
+// another user's row appears after that check (simulated by registering it first), the
+// registration is refused and the row keeps its owner. `register_plugin` keeps v4's owner change.
+flavor_tests!(
+    test_register_plugin_as_owner_keeps_another_users_row,
+    |c: Ctx| async move {
+        let mut users = Vec::new();
+        for tag in ["owner_a", "owner_b"] {
+            let mut user = User::new(&unique(tag), Some("test1234"));
+            ok(c.conn.register_user(&mut user).await);
+            let id = c.conn.get_user_id(&user).await.unwrap().unwrap();
+            users.push((user, id));
+        }
+        let (a, b) = (users[0].1.clone(), users[1].1.clone());
+        let name = unique("plugin");
+        let record = |user_id: Option<Value>, version: &str| PluginRecord {
+            name: name.clone(),
+            version: Some(version.into()),
+            user_id,
+            attributes: Default::default(),
+        };
+        ok(c.conn
+            .register_plugin(&record(Some(a.clone()), "1.0.0"), false)
+            .await);
+
+        for user_id in [Some(b.clone()), None] {
+            let res = InstanceConnector::register_plugin_as_owner(
+                &c.conn,
+                &record(user_id, "2.0.0"),
+                false,
+            )
+            .await;
+            assert!(!res.success, "{}", c.flavor);
+            assert_eq!(
+                res.message,
+                format!("Plugin '{name}' was registered by another user.")
+            );
+        }
+        let probe = record(None, "");
+        assert_eq!(c.conn.get_plugin_user_id(&probe).await.unwrap(), a.as_i64());
+        assert_eq!(
+            c.conn.get_plugin_version(&probe).await.unwrap().as_deref(),
+            Some("1.0.0")
+        );
+
+        // The owner itself may update it, with the version check.
+        ok(InstanceConnector::register_plugin_as_owner(
+            &c.conn,
+            &record(Some(a.clone()), "1.1.0"),
+            false,
+        )
+        .await);
+        assert_eq!(
+            c.conn.get_plugin_version(&probe).await.unwrap().as_deref(),
+            Some("1.1.0")
+        );
+
+        // PARITY: v4's `register_plugin` moves the row to the new owner.
+        ok(c.conn
+            .register_plugin(&record(Some(b.clone()), "1.2.0"), false)
+            .await);
+        assert_eq!(c.conn.get_plugin_user_id(&probe).await.unwrap(), b.as_i64());
+
+        ok(c.conn.delete_plugin(&probe).await);
+        for (user, _) in &users {
+            ok(c.conn.delete_user(user).await);
+        }
+    }
+);
