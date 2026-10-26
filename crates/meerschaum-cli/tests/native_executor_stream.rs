@@ -526,3 +526,71 @@ fn listen_lands_native_stream_batches_as_they_arrive() {
         assert!(kw.get("check_existing").is_some(), "{kw}");
     }
 }
+
+#[test]
+fn listen_acknowledges_a_filtered_first_batch_under_a_one_message_window() {
+    // The source keeps one message in flight: until the empty (filtered) first batch is
+    // acknowledged, nothing else arrives.
+    let home = Home::new(&["native_stream"]);
+    let acks = home.root.path().join("acks.log");
+    let params = r#"{"fetch": {"count": 3, "interval_ms": 100, "skip": [1], "max_unacked": 1}, "columns": {"datetime": "id"}, "dtypes": {"id": "int", "value": "float"}}"#;
+    let registered = home.run(&[
+        "register",
+        "pipes",
+        "-c",
+        "ticker:window",
+        "-m",
+        "readings",
+        "-i",
+        "sql:local",
+        "--params",
+        params,
+    ]);
+    assert!(
+        registered.contains("Successfully registered"),
+        "{registered}"
+    );
+
+    let log_path = home.root.path().join("listen.log");
+    let log = std::fs::File::create(&log_path).unwrap();
+    let mut child = home
+        .command()
+        .env("NATIVE_STREAM_ACK_LOG", &acks)
+        .args([
+            "sync",
+            "pipes",
+            "-c",
+            "ticker:window",
+            "-i",
+            "sql:local",
+            "--listen",
+        ])
+        .stdout(log.try_clone().unwrap())
+        .stderr(log)
+        .spawn()
+        .unwrap();
+
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let conn = sqlite(&rt, home.root.path());
+    let pipe = Pipe::builder("ticker:window", "readings")
+        .instance("sql:local")
+        .build()
+        .unwrap();
+    let acked = || -> Vec<u64> {
+        std::fs::read_to_string(&acks)
+            .unwrap_or_default()
+            .lines()
+            .map(|l| l.parse().unwrap())
+            .collect()
+    };
+    let landed = wait_for(Duration::from_secs(60), || {
+        rowcount(&rt, &conn, &pipe) >= 2 && acked().len() >= 3
+    });
+    let rows = rowcount(&rt, &conn, &pipe);
+    stop(&mut child);
+    let output = std::fs::read_to_string(&log_path).unwrap_or_default();
+    assert!(landed, "rows: {rows}, acked: {:?}\n{output}", acked());
+    assert_eq!(rows, 2, "{output}");
+    // Each token is acknowledged once, in order: the window admits one message at a time.
+    assert_eq!(acked(), vec![1, 2, 3], "{output}");
+}

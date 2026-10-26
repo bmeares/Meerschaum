@@ -146,8 +146,11 @@ impl Request {
         }
         serde_json::from_value(value.clone()).map_err(error)
     }
+    /// A `begin` / `end` bound, wherever the host put it: top-level (a plugin's `sync`),
+    /// `context.query` (`fetch`, `get_pipe_data`, `clear_pipe`, ...) or `context.options`
+    /// (`sync_pipe`). See [`Request::field`].
     pub fn bound(&self, name: &str) -> Result<Option<Bound>> {
-        bound(&self.context.get("query").unwrap_or(&self.context)[name])
+        bound(self.field(name))
     }
     /// A field of an instance call's context: `context[name]`, else `context.query[name]`, else
     /// `context.options[name]` (`null` when none has it).

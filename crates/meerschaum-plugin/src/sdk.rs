@@ -267,6 +267,31 @@ mod tests {
     }
 
     #[test]
+    fn bounds_are_found_at_the_top_level_in_query_and_in_options() {
+        let request = |context: Value| Request {
+            method: "m".into(),
+            connector_type: String::new(),
+            label: String::new(),
+            config: Value::Null,
+            context,
+        };
+        let int = Some(crate::Bound::Int(2));
+        let dt = Some(crate::Bound::Datetime("2026-01-01T00:00:00Z".into()));
+        for context in [
+            json!({"begin": 2, "end": "2026-01-01T00:00:00Z"}),
+            json!({"query": {"begin": 2, "end": "2026-01-01T00:00:00Z"}}),
+            json!({"options": {"begin": 2, "end": "2026-01-01T00:00:00Z"}}),
+        ] {
+            let r = request(context);
+            assert_eq!(r.bound("begin").unwrap(), int);
+            assert_eq!(r.bound("end").unwrap(), dt);
+        }
+        let r = request(json!({"options": {"begin": null, "end": ""}}));
+        assert_eq!(r.bound("begin").unwrap(), None);
+        assert_eq!(r.bound("end").unwrap(), None);
+    }
+
+    #[test]
     fn manifest_panic_is_error_status() {
         // SAFETY: SDK-owned static vtable, freed by its matching allocator.
         unsafe {
@@ -403,15 +428,28 @@ impl Request {
     pub fn pipe(&self) -> Result<crate::Pipe<'_>> {
         crate::Pipe::from_request(self)
     }
-    /// Bounds are nested under query for fetch and top-level for sync.
+    /// A `begin` / `end` bound, wherever the host put it: top-level (a plugin's `sync`),
+    /// `context.query` (`fetch`, `get_pipe_data`, `clear_pipe`, ...) or `context.options`
+    /// (`sync_pipe`). See [`Request::field`].
     pub fn bound(&self, name: &str) -> Result<Option<crate::Bound>> {
-        let value = self.context.get("query").unwrap_or(&self.context).get(name);
-        match value {
-            None | Some(Value::Null) => Ok(None),
-            Some(Value::String(s)) if s.is_empty() => Ok(None),
-            Some(value) => serde_json::from_value(value.clone())
+        match self.field(name) {
+            Value::Null => Ok(None),
+            Value::String(s) if s.is_empty() => Ok(None),
+            value => serde_json::from_value(value.clone())
                 .map(Some)
                 .map_err(error),
         }
+    }
+    /// A field of a call's context: `context[name]`, else `context.query[name]`, else
+    /// `context.options[name]` (`null` when none has it).
+    pub fn field(&self, name: &str) -> &Value {
+        [
+            &self.context[name],
+            &self.context["query"][name],
+            &self.context["options"][name],
+        ]
+        .into_iter()
+        .find(|v| !v.is_null())
+        .unwrap_or(&Value::Null)
     }
 }

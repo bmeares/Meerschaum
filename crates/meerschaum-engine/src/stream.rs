@@ -416,6 +416,46 @@ struct Buffer {
     redelivered: bool,
 }
 
+impl Buffer {
+    /// Buffer a message: its rows, its token and its redelivery flag. A message without rows
+    /// (a batch the source filtered to nothing) adds only its token and does not touch the
+    /// batcher's timers.
+    fn absorb(
+        &mut self,
+        m: StreamMessage,
+        batcher: &mut MicroBatcher,
+        now_ms: u64,
+    ) -> Option<FlushTrigger> {
+        if let Some(t) = m.ack {
+            self.tokens.push(t);
+        }
+        if m.docs.is_empty() {
+            return None;
+        }
+        let n = m.docs.len() as u64;
+        self.docs.extend(m.docs);
+        self.redelivered |= m.redelivered;
+        batcher.push(now_ms, n, m.bytes)
+    }
+}
+
+/// Acknowledge `tokens` (whose rows, if any, have committed).
+async fn ack_tokens(
+    pipe: &Pipe,
+    tokens: Vec<AckToken>,
+    source: &dyn StreamSource,
+    stats: &mut SinkStats,
+) {
+    if tokens.is_empty() {
+        return;
+    }
+    let n = tokens.len() as u64;
+    match source.ack(tokens).await {
+        Ok(()) => stats.acked += n,
+        Err(e) => tracing::warn!("Failed to acknowledge messages for {pipe}: {e}"),
+    }
+}
+
 /// The engine-provided micro-batching sink: receive from `rx` until the channel closes or
 /// `stop`, flushing on the [`MicroBatcher`] triggers and acknowledging only after a commit.
 /// On stop, the buffer is flushed (and acknowledged) before returning.
@@ -459,6 +499,9 @@ pub async fn run_sink(
         stats: &mut SinkStats,
     ) -> bool {
         if buf.docs.is_empty() {
+            // Token-only messages (empty batches) with no uncommitted rows before them: nothing
+            // to sync, but the source waits for their acknowledgement.
+            ack_tokens(pipe, std::mem::take(&mut buf.tokens), source, stats).await;
             return true;
         }
         let (rows, bytes) = batcher.buffered();
@@ -480,13 +523,7 @@ pub async fn run_sink(
         let tokens = std::mem::take(&mut buf.tokens);
         buf.docs.clear();
         buf.redelivered = false;
-        if !tokens.is_empty() {
-            let n = tokens.len() as u64;
-            match source.ack(tokens).await {
-                Ok(()) => stats.acked += n,
-                Err(e) => tracing::warn!("Failed to acknowledge messages for {pipe}: {e}"),
-            }
-        }
+        ack_tokens(pipe, tokens, source, stats).await;
         if let Some(em) = emitter {
             em.emit(
                 Some(pipe_ref),
@@ -520,28 +557,21 @@ pub async fn run_sink(
             _ = stop.stopped() => {
                 // Messages already delivered to the channel are part of the final flush.
                 while let Ok(m) = rx.try_recv() {
-                    let n = m.docs.len() as u64;
-                    buf.docs.extend(m.docs);
-                    if let Some(t) = m.ack {
-                        buf.tokens.push(t);
-                    }
-                    buf.redelivered |= m.redelivered;
-                    batcher.push(now_ms(), n, m.bytes);
+                    buf.absorb(m, &mut batcher, now_ms());
                 }
                 trigger = Some(FlushTrigger::Shutdown);
             }
             msg = rx.recv(), if !closed => match msg {
                 Some(m) => {
-                    let n = m.docs.len() as u64;
-                    buf.docs.extend(m.docs);
-                    if let Some(t) = m.ack {
-                        buf.tokens.push(t);
-                    }
-                    buf.redelivered |= m.redelivered;
-                    if let Some(t) = batcher.push(now_ms(), n, m.bytes)
+                    if let Some(t) = buf.absorb(m, &mut batcher, now_ms())
                         && retry_at.is_none_or(|r| now_ms() >= r) {
                             trigger = Some(t);
                         }
+                    // A token with no uncommitted rows before it is acknowledged now; behind
+                    // buffered rows it waits for their commit (acknowledgements keep order).
+                    if buf.docs.is_empty() {
+                        ack_tokens(pipe, std::mem::take(&mut buf.tokens), source, &mut stats).await;
+                    }
                 }
                 None => {
                     closed = true;
@@ -985,6 +1015,139 @@ mod tests {
         assert_eq!(*recorder.flushes.lock().unwrap(), vec![(2, true)]);
         assert_eq!(source.acked(), vec![1, 2]);
         assert_eq!(stats.flushes, 1);
+    }
+
+    /// A message the source filtered to no rows: only its token.
+    fn empty(i: u64) -> StreamMessage {
+        StreamMessage {
+            docs: Vec::new(),
+            bytes: 0,
+            ack: Some(i),
+            redelivered: false,
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn sink_acks_a_token_only_first_batch_at_once() {
+        // With one unacknowledged message in flight, the source sends nothing more until the
+        // empty first batch is acknowledged.
+        let recorder = Recorder::default();
+        let source = MemorySource::default();
+        let (tx, rx) = mpsc::channel(64);
+        let stop = StopToken::new();
+        let p = pipe();
+        let driver = async {
+            tx.send(empty(1)).await.unwrap();
+            tokio::time::sleep(Duration::from_millis(1)).await;
+            assert_eq!(source.acked(), vec![1], "acknowledged without a flush");
+            tx.send(msg(2, false)).await.unwrap();
+            tokio::time::sleep(Duration::from_millis(1000)).await;
+            stop.stop();
+        };
+        let (stats, ()) = tokio::join!(
+            run_sink(
+                &p,
+                StreamConfig::default(),
+                SinkOptions::default(),
+                rx,
+                &source,
+                &recorder,
+                None,
+                &stop
+            ),
+            driver
+        );
+        assert_eq!(source.acked(), vec![1, 2]);
+        assert_eq!(*recorder.flushes.lock().unwrap(), vec![(1, true)]);
+        assert_eq!(stats.flushes, 1);
+        assert_eq!(stats.acked, 2);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn sink_acks_a_token_only_batch_behind_rows_only_after_their_commit() {
+        // The first flush fails: neither token may be acknowledged until the retry commits.
+        let recorder = Recorder {
+            fail: std::sync::Mutex::new(1),
+            ..Default::default()
+        };
+        let source = MemorySource::default();
+        let config = StreamConfig {
+            idle: IdleWindow::Fixed(100),
+            ..StreamConfig::default()
+        };
+        let options = SinkOptions {
+            retry_delay: Duration::from_millis(300),
+            ..SinkOptions::default()
+        };
+        let (tx, rx) = mpsc::channel(64);
+        let stop = StopToken::new();
+        let p = pipe();
+        let driver = async {
+            tx.send(msg(1, false)).await.unwrap();
+            tx.send(empty(2)).await.unwrap();
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            assert!(source.acked().is_empty(), "before the idle flush");
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            assert!(source.acked().is_empty(), "after the failed flush");
+            tokio::time::sleep(Duration::from_millis(400)).await;
+            assert_eq!(source.acked(), vec![1, 2], "after the retry commits");
+            stop.stop();
+        };
+        let (stats, ()) = tokio::join!(
+            run_sink(&p, config, options, rx, &source, &recorder, None, &stop),
+            driver
+        );
+        assert_eq!(stats.failed_flushes, 1);
+        assert_eq!(*recorder.flushes.lock().unwrap(), vec![(1, true)]);
+        assert_eq!(source.acked(), vec![1, 2]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn sink_acks_pending_token_only_batches_on_shutdown() {
+        let source = MemorySource::default();
+        let config = StreamConfig {
+            idle: IdleWindow::Fixed(10_000),
+            max_latency_ms: 60_000,
+            ..StreamConfig::default()
+        };
+        // Only token-only messages, still in the channel when the stop arrives.
+        let recorder = Recorder::default();
+        let (tx, rx) = mpsc::channel(64);
+        tx.send(empty(1)).await.unwrap();
+        tx.send(empty(2)).await.unwrap();
+        let stop = StopToken::new();
+        stop.stop();
+        let stats = run_sink(
+            &pipe(),
+            config,
+            SinkOptions::default(),
+            rx,
+            &source,
+            &recorder,
+            None,
+            &stop,
+        )
+        .await;
+        assert_eq!(source.acked(), vec![1, 2]);
+        assert!(recorder.flushes.lock().unwrap().is_empty());
+        assert_eq!((stats.flushes, stats.acked), (0, 2));
+
+        // A token-only message behind buffered rows is acknowledged with the shutdown flush.
+        let source = MemorySource::default();
+        let recorder = Recorder::default();
+        let messages = vec![(0, msg(1, false)), (0, empty(2)), (0, msg(3, false))];
+        let stats = run(
+            config,
+            SinkOptions::default(),
+            messages,
+            &recorder,
+            &source,
+            100,
+        )
+        .await;
+        assert_eq!(*recorder.flushes.lock().unwrap(), vec![(2, true)]);
+        assert_eq!(source.acked(), vec![1, 2, 3]);
+        assert_eq!(stats.acked, 3);
     }
 
     #[tokio::test(start_paused = true)]

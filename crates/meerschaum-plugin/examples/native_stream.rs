@@ -3,7 +3,9 @@
 //! then waits (timeouts) until the host closes it. The pipe's `parameters.fetch` sets `count`
 //! (default 5), `interval_ms` (default 200) and `start` (the first `id`, default 1).
 //! `ticker` batches carry acknowledgement tokens (the `id`); ids listed in `fetch.skip` are
-//! "filtered": they arrive as empty batches that still carry their token. When
+//! "filtered": they arrive as empty batches that still carry their token. `fetch.max_unacked`
+//! (a broker's in-flight window) holds the next batch back while that many tokens await their
+//! acknowledgement. When
 //! `NATIVE_STREAM_ACK_LOG` is set, every acknowledged token is appended to that file; when
 //! `NATIVE_STREAM_KWARGS_LOG` is set, each `subscribe` appends the sync's `kwargs` (one JSON line).
 //! All data is synthetic.
@@ -61,6 +63,8 @@ impl Plugin for Stream {
                     .as_array()
                     .map(|ids| ids.iter().filter_map(Value::as_i64).collect())
                     .unwrap_or_default(),
+                max_unacked: fetch["max_unacked"].as_u64().map(|n| n as usize),
+                unacked: Vec::new(),
                 interval,
                 due: Instant::now() + interval,
             }));
@@ -112,6 +116,8 @@ struct Ticker {
     next: i64,
     end: i64,
     skip: Vec<i64>,
+    max_unacked: Option<usize>,
+    unacked: Vec<u64>,
     interval: Duration,
     due: Instant,
 }
@@ -119,7 +125,8 @@ struct Ticker {
 impl Subscription for Ticker {
     fn next_batch(&mut self, timeout: Duration) -> Result<Batch> {
         let deadline = Instant::now() + timeout;
-        if self.next >= self.end || self.due > deadline {
+        let window_full = self.max_unacked.is_some_and(|n| self.unacked.len() >= n);
+        if self.next >= self.end || self.due > deadline || window_full {
             std::thread::sleep(timeout);
             return Ok(Batch::Timeout);
         }
@@ -132,9 +139,11 @@ impl Subscription for Ticker {
         } else {
             row(id)?
         };
+        self.unacked.push(id as u64);
         Ok(Batch::with_ack(frame, id as u64))
     }
     fn ack(&mut self, tokens: &[u64]) -> Result<()> {
+        self.unacked.retain(|t| !tokens.contains(t));
         if let Some(path) = std::env::var_os("NATIVE_STREAM_ACK_LOG") {
             let mut file = std::fs::OpenOptions::new()
                 .create(true)
