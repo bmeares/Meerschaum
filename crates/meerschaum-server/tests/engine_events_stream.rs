@@ -140,12 +140,12 @@ async fn record_run(app: &axum::Router, token: &str, run_id: &str, finished: boo
         token,
         run_id,
         finished,
-        &format!("mrsm:{}", std::process::id()),
+        &meerschaum_core::holder::process_holder(),
     )
     .await;
 }
 
-/// [`record_run`] with the run's lease holder (`mrsm:<pid>`).
+/// [`record_run`] with the run's lease holder (`mrsm:<host>:<pid>`).
 async fn record_run_held(
     app: &axum::Router,
     token: &str,
@@ -367,7 +367,12 @@ async fn live_events_arrive_while_the_run_executes() {
         for key in ["run_id", "seq", "ts", "pipe_ref"] {
             event[key] = r[key].clone();
         }
-        assert!(state.engine_streams.publish_json(&event));
+        // The same run ID on another instance is another run: not delivered here.
+        let mut other = event.clone();
+        other["event"] = json!("node_failed");
+        assert!(state.engine_streams.publish_json("sql:elsewhere", &other));
+        let own = &meerschaum_server::engine_stream::own_instance_names(&state)[0];
+        assert!(state.engine_streams.publish_json(own, &event));
     }
     let (got, ended) = reading.await.unwrap();
     assert!(ended, "{got:?}");
@@ -375,6 +380,7 @@ async fn live_events_arrive_while_the_run_executes() {
     let ids: Vec<&str> = got.iter().map(|f| f.1.as_str()).collect();
     assert_eq!(ids, ["0", "1", "2", "3", "4", "5", "6"]);
     assert_eq!(got[6].0, "run_finished");
+    assert!(!names(&got).contains(&"node_failed"), "{got:?}");
     assert_eq!(state.engine_streams.open_streams(), 0);
 }
 
@@ -466,13 +472,15 @@ async fn abandoned_runs_end_with_run_closed() {
     let app = meerschaum_server::app(state.clone());
     let admin = login(&app, "admin", "pass", None).await;
     let rows = run_rows("killed");
-    if cfg!(unix) {
+    if cfg!(unix)
+        && let Some(host) = meerschaum_core::holder::host_name()
+    {
         record_run_held(
             &app,
             &admin,
             "killed",
             false,
-            &format!("mrsm:{}", dead_pid()),
+            &format!("mrsm:{host}:{}", dead_pid()),
         )
         .await;
         // Its last event was minutes ago.
@@ -496,6 +504,30 @@ async fn abandoned_runs_end_with_run_closed() {
         assert_eq!(got[3].2["reason"], "holder_gone");
         assert_eq!(got[3].2["finished"], false);
         assert_eq!(got[3].2["success"], Json::Null);
+    }
+
+    // A dead PID of another host (or a release candidate's `mrsm:<pid>`, whose host is unknown)
+    // proves nothing on this one: the run is left to the idle timeout, not `holder_gone`.
+    let pid = dead_pid();
+    for (run_id, holder) in [
+        ("remote", format!("mrsm:another-host:{pid}")),
+        ("legacy", format!("mrsm:{pid}")),
+    ] {
+        record_run_held(&app, &admin, run_id, false, &holder).await;
+        let mut old = run_rows(run_id)[..2].to_vec();
+        for (i, r) in old.iter_mut().enumerate() {
+            r["ts"] = json!(format!("2026-01-01T00:00:0{i}+00:00"));
+        }
+        write_events(&app, &admin, &old).await;
+        let (_, _, body) = open(
+            &app,
+            &format!("/engine/runs/{run_id}/events/stream?idle_timeout=10"),
+            &[("authorization", &admin)],
+        )
+        .await;
+        let (got, ended) = frames(body, 100, Duration::from_secs(15)).await;
+        assert!(ended, "{run_id}: {got:?}");
+        assert_eq!(got.last().unwrap().2["reason"], "idle", "{run_id}: {got:?}");
     }
 
     // A holder that is alive (this process), quiet for longer than `?idle_timeout=`.
@@ -825,4 +857,25 @@ async fn persisted_tail_on_postgresql() {
         .await;
         assert_eq!(r.status, StatusCode::OK, "{}", r.text());
     }
+}
+
+/// An enormous `?wait=` (or `?idle_timeout=`) is clamped, not a panic.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn huge_waits_are_clamped() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = state(dir.path(), &dir.path().join("store.db")).await;
+    let app = meerschaum_server::app(state);
+    let admin = login(&app, "admin", "pass", None).await;
+    record_run(&app, &admin, "huge", true).await;
+    write_events(&app, &admin, &run_rows("huge")).await;
+    let (status, _, body) = open(
+        &app,
+        "/engine/runs/huge/events/stream?wait=1e100&idle_timeout=1e300",
+        &[("authorization", &admin)],
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (got, ended) = frames(body, 100, Duration::from_secs(10)).await;
+    assert!(ended, "{got:?}");
+    assert_eq!(got.len(), 7);
 }

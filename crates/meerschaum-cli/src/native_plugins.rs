@@ -1049,35 +1049,100 @@ struct RouteHandler {
 }
 
 /// The most server calls (`api_route`, `mcp_*`) one native plugin runs at once. They run in
-/// parallel, each on a blocking thread; more wait up to [`CALL_QUEUE_TIMEOUT`] for a slot, so a
-/// slow or stuck handler holds at most this many threads and then answers `503` instead of piling
-/// up threads and buffered bodies.
+/// parallel, each on a blocking thread; up to [`MAX_QUEUED_CALLS`] more wait up to
+/// [`CALL_QUEUE_TIMEOUT`] for a slot and any beyond that are answered `503` at once, so a slow or
+/// stuck handler holds at most this many threads and buffered route bodies (a route's body is read
+/// only once it holds a slot) instead of piling them up.
 const MAX_CONCURRENT_CALLS: usize = 32;
+/// How many server calls may wait for one of a plugin's [`MAX_CONCURRENT_CALLS`] slots.
+const MAX_QUEUED_CALLS: usize = 16;
 /// How long a server call waits for one of its plugin's [`MAX_CONCURRENT_CALLS`] slots.
 const CALL_QUEUE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
-/// One semaphore of [`MAX_CONCURRENT_CALLS`] slots per native plugin.
-#[derive(Default, Clone)]
-struct CallLimits(
-    Arc<std::sync::Mutex<std::collections::HashMap<String, Arc<tokio::sync::Semaphore>>>>,
-);
+/// One plugin's call slots and the number of calls waiting for one.
+#[derive(Clone)]
+struct PluginSlots {
+    semaphore: Arc<tokio::sync::Semaphore>,
+    waiting: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+/// Leaves a plugin's wait queue when dropped (including when the waiting request is cancelled).
+struct Waiting(Arc<std::sync::atomic::AtomicUsize>);
+
+impl Drop for Waiting {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+/// One semaphore of [`MAX_CONCURRENT_CALLS`] slots per native plugin, with a wait queue of at most
+/// [`MAX_QUEUED_CALLS`].
+#[derive(Clone)]
+struct CallLimits {
+    plugins: Arc<std::sync::Mutex<std::collections::HashMap<String, PluginSlots>>>,
+    slots: usize,
+    queue: usize,
+    timeout: std::time::Duration,
+}
+
+impl Default for CallLimits {
+    fn default() -> Self {
+        Self::new(MAX_CONCURRENT_CALLS, MAX_QUEUED_CALLS, CALL_QUEUE_TIMEOUT)
+    }
+}
 
 impl CallLimits {
-    /// A slot of `plugin`'s calls, or the message to answer when none frees up in time.
+    fn new(slots: usize, queue: usize, timeout: std::time::Duration) -> Self {
+        Self {
+            plugins: Default::default(),
+            slots,
+            queue,
+            timeout,
+        }
+    }
+
+    /// A slot of `plugin`'s calls, or the message to answer when the queue is full or no slot
+    /// frees up in time.
     async fn acquire(&self, plugin: &str) -> Result<tokio::sync::OwnedSemaphorePermit, String> {
-        let semaphore = self
-            .0
+        use std::sync::atomic::Ordering;
+        let slots = self
+            .plugins
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .entry(plugin.to_string())
-            .or_insert_with(|| Arc::new(tokio::sync::Semaphore::new(MAX_CONCURRENT_CALLS)))
+            .or_insert_with(|| PluginSlots {
+                semaphore: Arc::new(tokio::sync::Semaphore::new(self.slots)),
+                waiting: Default::default(),
+            })
             .clone();
-        match tokio::time::timeout(CALL_QUEUE_TIMEOUT, semaphore.acquire_owned()).await {
-            Ok(Ok(permit)) => Ok(permit),
-            _ => Err(format!(
-                "Native plugin '{plugin}' is busy ({MAX_CONCURRENT_CALLS} calls in progress)."
-            )),
+        let busy = || {
+            format!(
+                "Native plugin '{plugin}' is busy ({} calls in progress).",
+                self.slots
+            )
+        };
+        if let Ok(permit) = slots.semaphore.clone().try_acquire_owned() {
+            return Ok(permit);
         }
+        let queued = slots.waiting.fetch_add(1, Ordering::SeqCst);
+        let _waiting = Waiting(slots.waiting.clone());
+        if queued >= self.queue {
+            return Err(busy());
+        }
+        match tokio::time::timeout(self.timeout, slots.semaphore.acquire_owned()).await {
+            Ok(Ok(permit)) => Ok(permit),
+            _ => Err(busy()),
+        }
+    }
+}
+
+fn busy_response(message: String) -> meerschaum_server::native::NativeRouteResponse {
+    let busy =
+        meerschaum_plugin::api::RouteResponse::error(503, message).header("retry-after", "1");
+    meerschaum_server::native::NativeRouteResponse {
+        status: busy.status,
+        headers: busy.headers,
+        body: busy.body,
     }
 }
 
@@ -1106,31 +1171,45 @@ fn legacy_route_response(reply: &serde_json::Value) -> meerschaum_plugin::api::R
 
 #[async_trait]
 impl meerschaum_server::native::NativeRouteHandler for RouteHandler {
+    async fn admit(
+        &self,
+        route: &meerschaum_server::native::NativeRoute,
+    ) -> Result<
+        meerschaum_server::native::NativeAdmission,
+        meerschaum_server::native::NativeRouteResponse,
+    > {
+        self.limits
+            .acquire(&route.plugin)
+            .await
+            .map(meerschaum_server::native::NativeAdmission::new)
+            .map_err(busy_response)
+    }
+
     async fn handle(
         &self,
         route: &meerschaum_server::native::NativeRoute,
         request: meerschaum_server::native::NativeRouteRequest,
     ) -> Result<meerschaum_server::native::NativeRouteResponse, String> {
-        use meerschaum_plugin::api::{RouteRequest, RouteResponse};
+        use meerschaum_plugin::api::RouteRequest;
         let natives = self.natives.clone();
         let plugin = route.plugin.clone();
         let legacy = self.legacy.contains(&route.plugin);
         let name = route.name.clone();
         let route_path = route.path.clone();
-        let permit = match self.limits.acquire(&route.plugin).await {
-            Ok(permit) => permit,
-            Err(message) => {
-                let busy = RouteResponse::error(503, message).header("retry-after", "1");
-                return Ok(meerschaum_server::native::NativeRouteResponse {
-                    status: busy.status,
-                    headers: busy.headers,
-                    body: busy.body,
-                });
+        // The body was read under this admission (see `admit`); a request that reaches `handle`
+        // without one (a direct call) takes its slot now.
+        let mut request = request;
+        let admission = if request.admission.is_held() {
+            std::mem::take(&mut request.admission)
+        } else {
+            match self.limits.acquire(&route.plugin).await {
+                Ok(permit) => meerschaum_server::native::NativeAdmission::new(permit),
+                Err(message) => return Ok(busy_response(message)),
             }
         };
         let reply = tokio::task::spawn_blocking(move || -> meerschaum_plugin::Result<_> {
             // The slot is held until the plugin returns, even when the client has gone.
-            let _permit = permit;
+            let _admission = admission;
             let plugin = natives.plugin(&plugin)?;
             if legacy {
                 let context = serde_json::json!({
@@ -1558,5 +1637,61 @@ mod legacy_route_tests {
         assert_eq!(r.status, 404);
         assert_eq!(r.headers[0].1, "text/html");
         assert!(r.body.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod call_limit_tests {
+    use super::CallLimits;
+    use std::time::Duration;
+
+    #[tokio::test]
+    async fn the_wait_queue_is_bounded_and_excess_calls_are_refused_at_once() {
+        let limits = CallLimits::new(2, 1, Duration::from_secs(30));
+        let a = limits.acquire("p").await.unwrap();
+        let _b = limits.acquire("p").await.unwrap();
+        // The third waits in the queue (its one place).
+        let waiter = {
+            let limits = limits.clone();
+            tokio::spawn(async move { limits.acquire("p").await })
+        };
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        // The fourth finds the queue full: refused without waiting for the timeout.
+        let started = std::time::Instant::now();
+        let refused = limits.acquire("p").await.unwrap_err();
+        assert!(started.elapsed() < Duration::from_secs(1));
+        assert!(refused.contains("busy"), "{refused}");
+        // Another plugin has its own slots.
+        let _other = limits.acquire("q").await.unwrap();
+        // A freed slot goes to the waiter, and the queue frees its place.
+        drop(a);
+        let _c = waiter.await.unwrap().unwrap();
+        let queued = {
+            let limits = limits.clone();
+            tokio::spawn(async move { limits.acquire("p").await.map(|_| ()) })
+        };
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(!queued.is_finished());
+        queued.abort();
+        let _ = queued.await;
+        // A cancelled waiter leaves the queue.
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        let next = {
+            let limits = limits.clone();
+            tokio::spawn(async move { limits.acquire("p").await.map(|_| ()) })
+        };
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(
+            !next.is_finished(),
+            "a cancelled waiter must not keep its place"
+        );
+        next.abort();
+    }
+
+    #[tokio::test]
+    async fn a_queued_call_times_out() {
+        let limits = CallLimits::new(1, 4, Duration::from_millis(50));
+        let _a = limits.acquire("p").await.unwrap();
+        assert!(limits.acquire("p").await.is_err());
     }
 }

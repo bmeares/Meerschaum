@@ -400,7 +400,7 @@ pub struct ExecutorOptions {
     pub workers: usize,
     /// Per-connector, per-instance and Python limits.
     pub limits: Limits,
-    /// The lease holder name (the job name or `hostname:pid`).
+    /// The lease holder name (the job name or `mrsm:<host>:<pid>`).
     pub holder: String,
     /// Lease time-to-live; renewed every third of it while syncing.
     pub lease_ttl: Duration,
@@ -435,7 +435,7 @@ impl Default for ExecutorOptions {
         ExecutorOptions {
             workers: 4,
             limits: Limits::default(),
-            holder: format!("mrsm:{}", std::process::id()),
+            holder: meerschaum_core::holder::process_holder(),
             lease_ttl: Duration::from_secs(60),
             lease_wait: Duration::from_secs(30),
             lease_poll: Duration::from_millis(500),

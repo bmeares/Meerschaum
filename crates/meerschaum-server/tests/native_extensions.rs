@@ -16,7 +16,8 @@ use meerschaum_server::mcp::{
     Caller, McpServer, NativeMcp, NativeResource, NativeResourceContents,
 };
 use meerschaum_server::native::{
-    NativeRoute, NativeRouteHandler, NativeRouteRequest, NativeRouteResponse, native_router,
+    NativeAdmission, NativeRoute, NativeRouteHandler, NativeRouteRequest, NativeRouteResponse,
+    native_router,
 };
 use serde_json::json;
 
@@ -244,6 +245,97 @@ async fn no_auth_opens_every_route_with_every_scope() {
     let r = send(&app, req("GET", "/demo/1", None, None)).await;
     assert_eq!(r.status.as_u16(), 299);
     assert_eq!(r.json()["scopes"], json!(["*"]));
+}
+
+/// Admits one request at a time and refuses the rest with `503`.
+struct OneAtATime {
+    slot: Arc<tokio::sync::Semaphore>,
+}
+
+#[async_trait]
+impl NativeRouteHandler for OneAtATime {
+    async fn admit(&self, _route: &NativeRoute) -> Result<NativeAdmission, NativeRouteResponse> {
+        match self.slot.clone().try_acquire_owned() {
+            Ok(permit) => Ok(NativeAdmission::new(permit)),
+            Err(_) => Err(NativeRouteResponse {
+                status: 503,
+                headers: vec![("retry-after".into(), "1".into())],
+                body: b"busy".to_vec(),
+            }),
+        }
+    }
+
+    async fn handle(
+        &self,
+        _route: &NativeRoute,
+        request: NativeRouteRequest,
+    ) -> Result<NativeRouteResponse, String> {
+        assert!(request.admission.is_held());
+        assert_eq!(
+            self.slot.available_permits(),
+            0,
+            "the slot is held while handling"
+        );
+        Ok(NativeRouteResponse {
+            status: 200,
+            headers: vec![],
+            body: request.body,
+        })
+    }
+}
+
+#[tokio::test]
+async fn admission_is_decided_before_the_body_is_read() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let root = tempfile::tempdir().unwrap();
+    let (state, _) = state_with(config(root.path()));
+    let slot = Arc::new(tokio::sync::Semaphore::new(1));
+    let (native, notices) = native_router(
+        &state,
+        vec![route("up", "POST", "/demo/up", &[], true)],
+        Arc::new(OneAtATime { slot: slot.clone() }),
+    );
+    assert!(notices.is_empty());
+    let app = meerschaum_server::app(state).merge(native);
+
+    // Admitted: the body is read and handled, and the slot is released afterwards.
+    let r = send(
+        &app,
+        req(
+            "POST",
+            "/demo/up",
+            None,
+            Some(("text/plain", b"hi".to_vec())),
+        ),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK);
+    assert_eq!(&r.body[..], b"hi");
+    assert_eq!(slot.available_permits(), 1);
+
+    // Busy: refused without polling the body at all.
+    let held = slot.clone().try_acquire_owned().unwrap();
+    let polled = Arc::new(AtomicBool::new(false));
+    let flag = polled.clone();
+    let stream = futures_util::stream::poll_fn(move |_| {
+        flag.store(true, Ordering::SeqCst);
+        std::task::Poll::Ready(Some(Ok::<_, std::io::Error>(bytes::Bytes::from_static(
+            b"x",
+        ))))
+    });
+    let request = axum::http::Request::builder()
+        .method("POST")
+        .uri("/demo/up")
+        .body(axum::body::Body::from_stream(stream))
+        .unwrap();
+    let r = send(&app, request).await;
+    assert_eq!(r.status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(r.headers["retry-after"], "1");
+    assert!(
+        !polled.load(Ordering::SeqCst),
+        "a refused request's body was read"
+    );
+    drop(held);
 }
 
 struct Entries;

@@ -32,6 +32,7 @@ pub mod config;
 pub mod connect;
 pub mod debug;
 pub mod dtypes;
+pub mod holder;
 pub mod pipe;
 pub mod process_env;
 pub mod pyfmt;

@@ -11,7 +11,9 @@
 //!   the batches an engine on an `api:` instance writes to this server
 //!   (`POST /engine/pipes/engine_events/write`), and the engine runs inside the server
 //!   process (`POST /actions/sync`, MCP action tools), which `mrsm start api` forwards with
-//!   `meerschaum_engine::add_process_event_sink` and [`EngineStreams::publish_json`].
+//!   `meerschaum_engine::add_process_event_sink` and [`EngineStreams::publish_json`]. Each
+//!   carries the instance that keeps its run, and a stream takes only its own instance's events
+//!   (run IDs are unique per instance, not across instances).
 //! - **Persisted**: otherwise (a run of a job, or of a `mrsm` process on another machine that
 //!   shares the instance) the stream tails the instance's `mrsm_engine_events` rows after the
 //!   last delivered `seq` every [`POLL`] until `run_finished`.
@@ -25,8 +27,9 @@
 //! Every stream ends with a terminal event: `run_finished`, or a synthetic `run_closed` (no
 //! `id:`; `seq` repeats the last delivered one) when the run will not send `run_finished`. Its
 //! `reason` is `interrupted` (the run's record closed without `run_finished`), `holder_gone`
-//! (the run's holder `mrsm:<pid>` is not a live process on the server's host and the run has
-//! been quiet for [`HOLDER_GRACE`]: a killed process) or `idle` (no event for `?idle_timeout=`
+//! (the run's holder `mrsm:<host>:<pid>` names the server's host and a process that is gone, and
+//! the run has been quiet for [`HOLDER_GRACE`]: a killed process; a holder of another host, or a
+//! release candidate's `mrsm:<pid>`, is left to the idle timeout) or `idle` (no event for `?idle_timeout=`
 //! seconds, default [`IDLE_TIMEOUT`]; the run may still be going). It also carries `finished`
 //! (whether the record closed), `success` and `message` from the run's record.
 //!
@@ -114,10 +117,19 @@ pub trait BrowserAuth: Send + Sync {
     }
 }
 
+/// An event published live, with the keys of the instance that keeps its run.
+#[derive(Debug, Clone)]
+pub struct LiveRunEvent {
+    /// The instance that keeps the run (`sql:main`).
+    pub instance: Arc<str>,
+    /// The event.
+    pub event: EngineRunEvent,
+}
+
 /// The live side of the run event streams, one per server
 /// ([`Inner::engine_streams`](crate::state::Inner::engine_streams)).
 pub struct EngineStreams {
-    tx: broadcast::Sender<EngineRunEvent>,
+    tx: broadcast::Sender<LiveRunEvent>,
     browser_auth: OnceLock<Arc<dyn BrowserAuth>>,
     open: Arc<Mutex<(usize, HashMap<String, usize>)>>,
 }
@@ -141,33 +153,42 @@ impl std::fmt::Debug for EngineStreams {
 }
 
 impl EngineStreams {
-    /// Deliver an event to the open streams of its run now (it is persisted separately).
-    pub fn publish(&self, event: EngineRunEvent) {
-        let _ = self.tx.send(event);
+    /// Deliver an event of a run kept on `instance` (its keys) to the open streams of that run
+    /// now (it is persisted separately).
+    pub fn publish(&self, instance: &str, event: EngineRunEvent) {
+        let _ = self.tx.send(LiveRunEvent {
+            instance: instance.into(),
+            event,
+        });
     }
 
     /// [`publish`](Self::publish) an engine event given as its JSON (`serde_json::to_value` of a
     /// `meerschaum_engine::Event`): how a host that runs an engine in the server process forwards
-    /// `Engine::subscribe()`. `false` if the JSON is not an event.
-    pub fn publish_json(&self, event: &Json) -> bool {
+    /// its process events (`instance` is the engine's home instance, which keeps its runs).
+    /// `false` if the JSON is not an event.
+    pub fn publish_json(&self, instance: &str, event: &Json) -> bool {
         match serde_json::from_value::<EngineRunEvent>(event.clone()) {
             Ok(e) => {
-                self.publish(e);
+                self.publish(instance, e);
                 true
             }
             Err(_) => false,
         }
     }
 
-    /// [`publish`](Self::publish) the rows of a `mrsm_engine_events` write.
-    pub fn publish_docs(&self, docs: &[Doc]) {
+    /// [`publish`](Self::publish) the rows of a `mrsm_engine_events` write to `instance`.
+    pub fn publish_docs(&self, instance: &str, docs: &[Doc]) {
         if self.tx.receiver_count() == 0 {
             return;
         }
+        let instance: Arc<str> = instance.into();
         let mut events: Vec<EngineRunEvent> = docs.iter().filter_map(event_from_doc).collect();
         events.sort_by_key(|e| e.seq);
-        for e in events {
-            self.publish(e);
+        for event in events {
+            let _ = self.tx.send(LiveRunEvent {
+                instance: instance.clone(),
+                event,
+            });
         }
     }
 
@@ -177,7 +198,7 @@ impl EngineStreams {
     }
 
     /// A receiver of the published events.
-    pub fn subscribe(&self) -> broadcast::Receiver<EngineRunEvent> {
+    pub fn subscribe(&self) -> broadcast::Receiver<LiveRunEvent> {
         self.tx.subscribe()
     }
 
@@ -310,20 +331,32 @@ fn slot_key(principal: Option<&crate::auth::Principal>, session: Option<&str>) -
 }
 
 /// The store that keeps the run's history: the server's engine store, or (`instance_keys`
-/// naming another instance the server may use) that instance's state pipes.
-fn store_for(ctx: &Ctx) -> Result<Arc<dyn EngineBackend>, ApiError> {
+/// naming another instance the server may use) that instance's state pipes. Also the keys
+/// under which that instance's runs are published live ([`own_instance_names`] for the server's).
+fn store_for(ctx: &Ctx) -> Result<(Arc<dyn EngineBackend>, Vec<String>), ApiError> {
     match ctx.instance_keys() {
         Some(keys)
             if keys != ctx.state.config.instance_keys
                 && keys != ctx.state.instance().connector_keys() =>
         {
             let conn = ctx.state.get_api_connector(Some(&keys))?;
-            Ok(Arc::new(crate::engine_store::InstanceEngine::new(
-                conn, &keys,
-            )))
+            Ok((
+                Arc::new(crate::engine_store::InstanceEngine::new(conn, &keys)),
+                vec![keys],
+            ))
         }
-        _ => Ok(ctx.state.engine.clone()),
+        _ => Ok((ctx.state.engine.clone(), own_instance_names(&ctx.state))),
     }
+}
+
+/// The names of the server's own instance (the configured keys and the connector's keys).
+pub fn own_instance_names(state: &AppState) -> Vec<String> {
+    let mut names = vec![state.config.instance_keys.clone()];
+    let keys = state.instance().connector_keys();
+    if !names.contains(&keys) {
+        names.push(keys);
+    }
+    names
 }
 
 /// Whether the store knows the run (a run record or any event).
@@ -378,7 +411,10 @@ pub async fn serve(ctx: Ctx, run_id: String) -> Result<Response, ApiError> {
         .get("wait")
         .and_then(|w| w.trim().parse::<f64>().ok())
         .filter(|w| w.is_finite() && *w > 0.0)
-        .map_or(Duration::ZERO, |w| Duration::from_secs_f64(w).min(MAX_WAIT));
+        // Clamped before converting: `from_secs_f64` panics past `Duration::MAX`.
+        .map_or(Duration::ZERO, |w| {
+            Duration::from_secs_f64(w.min(MAX_WAIT.as_secs_f64()))
+        });
     let idle_timeout = ctx
         .query
         .get("idle_timeout")
@@ -388,7 +424,7 @@ pub async fn serve(ctx: Ctx, run_id: String) -> Result<Response, ApiError> {
             Duration::from_secs_f64(w.min(MAX_IDLE_TIMEOUT.as_secs_f64()))
                 .clamp(MIN_IDLE_TIMEOUT, MAX_IDLE_TIMEOUT)
         });
-    let store = store_for(&ctx)?;
+    let (store, instances) = store_for(&ctx)?;
     // Subscribe before the first read, so no event falls between the two.
     let hub = state.engine_streams.subscribe();
     // Waiting for a run to appear holds no stream slot (it is bounded by `MAX_WAIT`).
@@ -434,6 +470,7 @@ pub async fn serve(ctx: Ctx, run_id: String) -> Result<Response, ApiError> {
     let mut tail = Tail {
         state,
         store,
+        instances,
         run_id,
         last: after,
         since: None,
@@ -476,6 +513,9 @@ pub async fn serve(ctx: Ctx, run_id: String) -> Result<Response, ApiError> {
 struct Tail {
     state: AppState,
     store: Arc<dyn EngineBackend>,
+    /// The keys of the instance that keeps the run (live events of other instances are not
+    /// this run's, even under the same run ID).
+    instances: Vec<String>,
     run_id: String,
     /// The last delivered `seq`.
     last: Option<i64>,
@@ -485,14 +525,14 @@ struct Tail {
     pending: BTreeMap<i64, EngineRunEvent>,
     /// Since when the next event has waited for a gap.
     gap_since: Option<Instant>,
-    hub: Option<broadcast::Receiver<EngineRunEvent>>,
+    hub: Option<broadcast::Receiver<LiveRunEvent>>,
     poll: tokio::time::Interval,
     next_status_check: Instant,
     /// When the run's record was first seen finished.
     closed_at: Option<Instant>,
     /// The run's record, as of the last status check.
     record: Option<RunRecord>,
-    /// Whether the run's holder (`mrsm:<pid>`) is not a live process on this host.
+    /// Whether the run's holder (`mrsm:<host>:<pid>`) is a gone process of this host.
     holder_gone: bool,
     /// When the stream opened.
     opened: DateTime<Utc>,
@@ -589,7 +629,11 @@ impl Tail {
             };
             tokio::select! {
                 received = received => match received {
-                    Some(Ok(event)) => self.insert(event),
+                    Some(Ok(live)) => {
+                        if self.instances.iter().any(|i| **i == *live.instance) {
+                            self.insert(live.event);
+                        }
+                    }
                     // Missed live events are read back from the instance on the next poll.
                     Some(Err(broadcast::error::RecvError::Lagged(_))) => {}
                     Some(Err(broadcast::error::RecvError::Closed)) | None => self.hub = None,
@@ -688,13 +732,16 @@ impl Tail {
 /// The name of the synthetic terminal event.
 pub const RUN_CLOSED: &str = "run_closed";
 
-/// Whether a run holder names a process of this host that is gone (`mrsm:<pid>`; any other
-/// holder, or a platform without the check, is presumed alive).
+/// Whether a run holder names a process of this host that is gone (`mrsm:<host>:<pid>` with
+/// this host's name). Any other holder (a job name, another host, a release candidate's
+/// `mrsm:<pid>` whose host is unknown), or a platform without the check, is presumed alive.
 fn holder_gone(holder: &str) -> bool {
-    let Some(pid) = holder
-        .strip_prefix("mrsm:")
-        .and_then(|p| p.parse::<i32>().ok())
+    let meerschaum_core::holder::HolderProcess::Local(pid) =
+        meerschaum_core::holder::holder_process(holder)
     else {
+        return false;
+    };
+    let Ok(pid) = i32::try_from(pid) else {
         return false;
     };
     if pid <= 0 || pid as u32 == std::process::id() {

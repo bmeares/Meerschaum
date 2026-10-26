@@ -227,7 +227,7 @@ data: {"run_id":"pipeline-2026-…","seq":4,"ts":"2026-01-01T00:00:04Z","pipe_re
     | `reason` | When |
     |---|---|
     | `interrupted` | The run's record was closed without `run_finished` (a few seconds after it closed). |
-    | `holder_gone` | The run's holder (`mrsm:<pid>`) is not a running process on the server's machine and the run has sent nothing for 2 minutes. A run on another machine or container that shares the instance can be closed this way too; its events are still persisted, so reconnecting resumes it. |
+    | `holder_gone` | The run's holder (`mrsm:<host>:<pid>`) names the server's machine and a process that is no longer running, and the run has sent nothing for 2 minutes. A run on another machine or container (or one recorded by a 5.0 release candidate as `mrsm:<pid>`) is never closed this way; it ends as `idle` instead. |
     | `idle` | The run has sent nothing for `idle_timeout` seconds (default 900, from 10 to 86400). The run may still be going: a single long chunk sends nothing until it finishes. |
 
 - **Waiting for a run.** `wait` (seconds, at most 60) keeps the request open until a run that was just launched appears; without it an unknown run is a `404`.

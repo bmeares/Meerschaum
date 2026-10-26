@@ -14,6 +14,8 @@
 //!   scope it declares, checked like the core routes' `ScopedAuth`; `public` routes need none
 //!   (and may not declare scopes).
 //!   Under `--no-auth` every route is open and the caller holds `*`.
+//! - **Admission** ([`NativeRouteHandler::admit`]) runs after authentication and before the body
+//!   is read, so a handler that bounds its concurrency also bounds the bodies buffered for it.
 //! - The handler receives the full request ([`NativeRouteRequest`]) and returns a full response.
 
 use std::collections::BTreeMap;
@@ -71,6 +73,40 @@ pub struct NativeRouteRequest {
     pub principal: serde_json::Value,
     /// The granted scopes (`["*"]` under `--no-auth`).
     pub scopes: Vec<String>,
+    /// What [`NativeRouteHandler::admit`] returned for this request (held until it is dropped).
+    pub admission: NativeAdmission,
+}
+
+/// An admission granted by [`NativeRouteHandler::admit`]: an opaque guard (e.g. a semaphore
+/// permit) that the handler keeps for as long as the request occupies its slot. It carries no
+/// request data, so clones share the guard and every admission compares equal.
+#[derive(Clone, Default)]
+pub struct NativeAdmission(Option<Arc<dyn std::any::Any + Send + Sync>>);
+
+impl NativeAdmission {
+    /// An admission holding `guard` until the last clone is dropped.
+    pub fn new<T: Send + Sync + 'static>(guard: T) -> Self {
+        Self(Some(Arc::new(guard)))
+    }
+
+    /// Whether this admission holds a guard.
+    pub fn is_held(&self) -> bool {
+        self.0.is_some()
+    }
+}
+
+impl std::fmt::Debug for NativeAdmission {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("NativeAdmission")
+            .field(&self.is_held())
+            .finish()
+    }
+}
+
+impl PartialEq for NativeAdmission {
+    fn eq(&self, _other: &Self) -> bool {
+        true
+    }
 }
 
 /// The response of a native route.
@@ -87,6 +123,14 @@ pub struct NativeRouteResponse {
 /// Serves native routes (implemented by the CLI over its loaded plugins).
 #[async_trait]
 pub trait NativeRouteHandler: Send + Sync + 'static {
+    /// Admit a request to `route` before its body is read, or answer it at once (e.g. `503` when
+    /// the plugin is busy). The returned admission is passed in [`NativeRouteRequest::admission`].
+    /// The default admits every request.
+    async fn admit(&self, route: &NativeRoute) -> Result<NativeAdmission, NativeRouteResponse> {
+        let _ = route;
+        Ok(NativeAdmission::default())
+    }
+
     /// Serve `request` with `route`. An `Err` is a `500 {"detail": message}`.
     async fn handle(
         &self,
@@ -625,6 +669,12 @@ async fn serve(
         Ok(auth) => auth,
         Err(error) => return error.into_response(),
     };
+    let head = parts.method == Method::HEAD;
+    // Admitted before the body is read: a request waiting for (or refused) a slot buffers nothing.
+    let admission = match handler.admit(route).await {
+        Ok(admission) => admission,
+        Err(reply) => return respond(reply, head),
+    };
     let body = match axum::body::to_bytes(body, MAX_BODY_BYTES).await {
         Ok(body) => body.to_vec(),
         Err(error) if is_length_limit(&error) => {
@@ -657,7 +707,6 @@ async fn serve(
             .or_default()
             .push(value);
     }
-    let head = parts.method == Method::HEAD;
     let request = NativeRouteRequest {
         method: parts.method.as_str().to_string(),
         path,
@@ -668,6 +717,7 @@ async fn serve(
         body,
         principal: principal_json(principal.as_ref()),
         scopes,
+        admission,
     };
     match handler.handle(route, request).await {
         Ok(reply) => respond(reply, head),

@@ -71,12 +71,12 @@ impl HostLauncher for StderrHostLauncher {
 /// Forwards the events of the engine runs in the server process to its run event streams.
 struct LiveRunEvents(AppState);
 
-impl meerschaum_engine::EventSink for LiveRunEvents {
-    fn emit(&self, event: meerschaum_engine::Event) {
+impl meerschaum_engine::ProcessEventSink for LiveRunEvents {
+    fn emit(&self, home_instance: &str, event: meerschaum_engine::Event) {
         if self.0.engine_streams.is_followed()
             && let Ok(json) = serde_json::to_value(&event)
         {
-            self.0.engine_streams.publish_json(&json);
+            self.0.engine_streams.publish_json(home_instance, &json);
         }
     }
 }
@@ -269,7 +269,10 @@ fn start(args: &ArgsMap, rt: &mut Runtime<'_>, stdio: bool) -> ActionResult {
     let host_proxy = state.host.clone();
     // Engine runs this process starts (`POST /actions/sync`, MCP action tools) reach
     // `GET /engine/runs/{run_id}/events/stream` live, not only through the persisted tail.
-    meerschaum_engine::add_process_event_sink(Arc::new(LiveRunEvents(state.clone())));
+    // Registered for as long as this function serves: dropping the registration (on return,
+    // including an early error) releases the sink and the server state it holds.
+    let _live_events =
+        meerschaum_engine::add_process_event_sink(Arc::new(LiveRunEvents(state.clone())));
     // Native plugins' MCP tools, resources and prompts are served in-process (both transports).
     let mut mcp_notices = Vec::new();
     let native_mcp =

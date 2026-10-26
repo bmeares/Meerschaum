@@ -122,7 +122,8 @@ pub struct EngineConfig {
     pub lease_poll: Duration,
     /// Where machine-local fallback lease files live (`{root}/cache/engine_leases`).
     pub lease_dir: PathBuf,
-    /// The lease holder name (a job name, else `mrsm:<pid>`).
+    /// The lease holder name (a job name, else `mrsm:<host>:<pid>`,
+    /// [`meerschaum_core::holder::process_holder`]).
     pub holder: String,
     /// EWMA smoothing of durations.
     pub ewma_alpha: f64,
@@ -158,7 +159,7 @@ impl Default for EngineConfig {
             lease_wait: Duration::from_secs(30),
             lease_poll: Duration::from_millis(500),
             lease_dir: std::env::temp_dir().join("mrsm_engine_leases"),
-            holder: format!("mrsm:{}", std::process::id()),
+            holder: meerschaum_core::holder::process_holder(),
             ewma_alpha: 0.3,
             default_duration: Duration::from_secs(30),
             chunk_pipelining: false,
@@ -537,6 +538,8 @@ struct RunSink {
     outcomes: Mutex<Vec<NodeOutcome>>,
     on_lap: Option<Arc<dyn Fn(LapEvent) + Send + Sync>>,
     on_event: Option<Arc<dyn EventSink>>,
+    /// The instance that keeps the run (for the process sinks).
+    home_instance: String,
 }
 
 impl EventSink for RunSink {
@@ -577,30 +580,68 @@ impl EventSink for RunSink {
         if let Some(sink) = &self.on_event {
             sink.emit(event.clone());
         }
-        for sink in PROCESS_SINKS
+        for (_, sink) in PROCESS_SINKS
             .read()
             .unwrap_or_else(|e| e.into_inner())
             .iter()
         {
-            sink.emit(event.clone());
+            sink.emit(&self.home_instance, event.clone());
         }
         let _ = self.broadcast.send(event);
     }
 }
 
-/// Sinks that receive the events of every run in this process ([`add_process_event_sink`]).
-static PROCESS_SINKS: std::sync::RwLock<Vec<Arc<dyn EventSink>>> =
+/// A consumer of the events of every engine run in this process ([`add_process_event_sink`]).
+/// `emit` must not block.
+pub trait ProcessEventSink: Send + Sync {
+    /// Receive one event of a run kept on `home_instance` (its keys, `sql:main`): run IDs are
+    /// unique per instance, so the instance and the run ID together name the run.
+    fn emit(&self, home_instance: &str, event: Event);
+}
+
+/// Sinks that receive the events of every run in this process ([`add_process_event_sink`]),
+/// by registration ID.
+static PROCESS_SINKS: std::sync::RwLock<Vec<(u64, Arc<dyn ProcessEventSink>)>> =
     std::sync::RwLock::new(Vec::new());
 
 /// Also deliver the events of every engine run in this process to `sink` (whatever started
-/// the run). `mrsm start api` installs one so the runs its actions start in the server
-/// process (`POST /actions/sync`, MCP action tools) stream live to
-/// `GET /engine/runs/{run_id}/events/stream`. `emit` must not block.
-pub fn add_process_event_sink(sink: Arc<dyn EventSink>) {
+/// the run) until the returned registration is dropped. `mrsm start api` installs one for as
+/// long as it serves, so the runs its actions start in the server process
+/// (`POST /actions/sync`, MCP action tools) stream live to
+/// `GET /engine/runs/{run_id}/events/stream`.
+#[must_use = "the sink is removed when the registration is dropped"]
+pub fn add_process_event_sink(sink: Arc<dyn ProcessEventSink>) -> ProcessEventSinkRegistration {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    let id = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     PROCESS_SINKS
         .write()
         .unwrap_or_else(|e| e.into_inner())
-        .push(sink);
+        .push((id, sink));
+    ProcessEventSinkRegistration { id }
+}
+
+/// The number of registered process event sinks (for tests).
+pub fn process_event_sinks() -> usize {
+    PROCESS_SINKS
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .len()
+}
+
+/// A sink registered with [`add_process_event_sink`]; dropping it removes the sink (and the
+/// process's reference to it).
+#[derive(Debug)]
+pub struct ProcessEventSinkRegistration {
+    id: u64,
+}
+
+impl Drop for ProcessEventSinkRegistration {
+    fn drop(&mut self) {
+        PROCESS_SINKS
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .retain(|(id, _)| *id != self.id);
+    }
 }
 
 /// Own a run-id admission lease until the run finishes or is cancelled.
@@ -1126,6 +1167,7 @@ impl Engine {
             outcomes: Mutex::new(Vec::new()),
             on_lap,
             on_event: opts.on_event.clone(),
+            home_instance: self.config.home_instance.clone(),
         });
 
         // Batched event persistence (`system.engine.state_flush_ms`).

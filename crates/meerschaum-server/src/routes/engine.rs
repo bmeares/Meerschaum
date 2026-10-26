@@ -148,7 +148,9 @@ async fn write_pipe(ctx: Ctx, Path(metric): Path<String>, body: Body) -> ApiResu
     if let Some(docs) = events
         && res.success
     {
-        ctx.state.engine_streams.publish_docs(&docs);
+        // `/engine/pipes/*` keep their rows on the server's own instance.
+        let instance = ctx.state.instance().connector_keys();
+        ctx.state.engine_streams.publish_docs(&instance, &docs);
     }
     Ok(tuple_response(&res))
 }

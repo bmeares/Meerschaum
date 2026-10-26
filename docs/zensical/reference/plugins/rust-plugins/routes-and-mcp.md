@@ -154,10 +154,12 @@ An `Err` from `api_route` becomes `500 {"detail": "<message>"}`.
   fresh `P::default()` for every call, so a plugin with no shared state needs nothing more.
   Host services (`Pipe` calls back into Meerschaum) are not available in these calls.
 - **Bounded.** At most 32 server calls of one plugin run at once (routes and MCP entries are
-  counted separately). Further requests wait up to 30 seconds for a free slot, then answer
+  counted separately). Up to 16 further requests wait up to 30 seconds for a free slot; any
+  beyond those, and any that wait too long, answer
   `503 {"detail": "Native plugin '<name>' is busy ..."}` with `Retry-After: 1` (an MCP call
-  returns that message as its error). A call that never returns keeps its slot, so a stuck
-  handler degrades into `503`s rather than unbounded threads and memory.
+  returns that message as its error). A route's request body is read only once it holds a slot,
+  so waiting and refused requests buffer nothing. A call that never returns keeps its slot, so a
+  stuck handler degrades into `503`s rather than unbounded threads and memory.
 - **Fixed at startup.** Routes and MCP entries are read from the manifests when `mrsm start api`
   (or `mrsm start mcp`) starts. Installing, updating or removing a native plugin takes effect
   after a restart; unlike Python plugins, the running server does not pick it up.

@@ -236,14 +236,17 @@ async fn chunk_events_persist_by_default() {
 async fn process_sinks_see_every_run() {
     use std::sync::{Arc, Mutex};
 
-    struct Collect(Mutex<Vec<meerschaum_engine::Event>>);
-    impl meerschaum_engine::EventSink for Collect {
-        fn emit(&self, event: meerschaum_engine::Event) {
-            self.0.lock().unwrap().push(event);
+    struct Collect(Mutex<Vec<(String, meerschaum_engine::Event)>>);
+    impl meerschaum_engine::ProcessEventSink for Collect {
+        fn emit(&self, home_instance: &str, event: meerschaum_engine::Event) {
+            self.0
+                .lock()
+                .unwrap()
+                .push((home_instance.to_string(), event));
         }
     }
     let sink = Arc::new(Collect(Mutex::new(Vec::new())));
-    meerschaum_engine::add_process_event_sink(sink.clone());
+    let registration = meerschaum_engine::add_process_event_sink(sink.clone());
 
     let env = env("chunk_events_process_sink").await;
     env.exec("CREATE TABLE src (ts TEXT, id INTEGER, v REAL)")
@@ -276,8 +279,10 @@ async fn process_sinks_see_every_run() {
         .lock()
         .unwrap()
         .iter()
-        .filter(|e| e.run_id == run_id)
-        .map(|e| {
+        .filter(|(_, e)| e.run_id == run_id)
+        .map(|(instance, e)| {
+            // The instance that keeps the run comes with each event.
+            assert_eq!(instance, &env.engine().config().home_instance);
             serde_json::to_value(e).unwrap()["event"]
                 .as_str()
                 .unwrap()
@@ -295,4 +300,9 @@ async fn process_sinks_see_every_run() {
         "{seen:?}"
     );
     assert!(seen.iter().any(|e| e == "chunk_finished"), "{seen:?}");
+
+    // Dropping the registration removes the sink and the process's reference to it.
+    let held = Arc::strong_count(&sink);
+    drop(registration);
+    assert_eq!(Arc::strong_count(&sink), held - 1);
 }

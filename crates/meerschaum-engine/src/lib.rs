@@ -64,7 +64,8 @@ pub use axis::{Axis, AxisKind, Interval};
 pub use cadence::{Cadence, PipeSchedules, Timer};
 pub use engine::{
     Engine, EngineConfig, EventGranularity, LapEvent, LapSummary, LoopOptions, LoopResult,
-    NodeOutcome, PendingRebuild, PlannedRun, RunOptions, RunResult, add_process_event_sink,
+    NodeOutcome, PendingRebuild, PlannedRun, ProcessEventSink, ProcessEventSinkRegistration,
+    RunOptions, RunResult, add_process_event_sink, process_event_sinks,
 };
 pub use events::{ChunkSource, Event, EventKind, EventSink};
 pub use executor::{

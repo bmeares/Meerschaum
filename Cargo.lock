@@ -3068,6 +3068,7 @@ dependencies = [
  "pep440_rs",
  "regex",
  "ripemd",
+ "rustix 1.1.5",
  "serde",
  "serde_json",
  "sha1 0.11.0",
