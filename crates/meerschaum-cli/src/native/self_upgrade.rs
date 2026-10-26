@@ -102,11 +102,16 @@ pub fn detect(command: &[String], executable: &Path, docker: bool) -> Installati
     Installation::Binary(executable)
 }
 
-/// Whether `path` is under a Cargo target directory (any profile; a symlinked `target/` too):
-/// an ancestor named `target` holding Cargo's `CACHEDIR.TAG`.
+/// Whether `path` is under a Cargo target directory, whatever its name or profile (`target/` may be
+/// a symlink, and `current_exe()` resolves it): an ancestor holding the `CACHEDIR.TAG` Cargo writes.
 fn in_cargo_target(path: &Path) -> bool {
-    path.ancestors()
-        .any(|a| a.file_name().is_some_and(|n| n == "target") && a.join("CACHEDIR.TAG").is_file())
+    let text = path.to_string_lossy();
+    // A binary rebuilt while it runs reads back as `<path> (deleted)` on Linux.
+    let path = Path::new(text.strip_suffix(" (deleted)").unwrap_or(&text));
+    path.ancestors().any(|a| {
+        std::fs::read_to_string(a.join("CACHEDIR.TAG"))
+            .is_ok_and(|tag| tag.contains("created by cargo"))
+    })
 }
 
 fn cargo_owns(prefix: &Path) -> bool {
@@ -792,6 +797,34 @@ fn replace_binary(executable: &Path, staged: tempfile::TempPath) -> Result<(), S
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn a_binary_in_any_cargo_target_directory_is_a_source_checkout() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("ci-cache-v5");
+        std::fs::create_dir_all(target.join("debug")).unwrap();
+        std::fs::write(
+            target.join("CACHEDIR.TAG"),
+            "Signature: 8a477f597d28d172789f06886806bc55\n# This file is a cache directory tag created by cargo.\n",
+        )
+        .unwrap();
+        let binary = target.join("debug").join("mrsm");
+        std::fs::write(&binary, "binary").unwrap();
+        let command = vec![binary.to_string_lossy().into_owned()];
+        assert!(matches!(
+            detect(&command, &binary, false),
+            Installation::Managed(m) if m.contains("source checkout")
+        ));
+        let deleted = format!("{} (deleted)", binary.display());
+        assert!(in_cargo_target(Path::new(&deleted)));
+        // Another program's cache tag is not Cargo's.
+        std::fs::write(
+            target.join("CACHEDIR.TAG"),
+            "Signature: 8a477f597d28d172789f06886806bc55\n",
+        )
+        .unwrap();
+        assert!(!in_cargo_target(&binary));
+    }
 
     #[test]
     fn an_embedding_interpreter_is_never_the_binary_to_replace() {
