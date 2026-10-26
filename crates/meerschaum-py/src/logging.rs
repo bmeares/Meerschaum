@@ -129,7 +129,8 @@ impl Subscriber for PythonSink {
         }
         let metadata = event.metadata();
         let level = *metadata.level();
-        let message = meerschaum_cli::debug_log::event_message(event);
+        let message =
+            meerschaum_core::debug::redact_uris(&meerschaum_cli::debug_log::event_message(event));
         let module = metadata.module_path().unwrap_or(metadata.target());
         // `try_attach`: an event from a runtime thread while the interpreter shuts down is
         // dropped (pyo3 0.30's `attach` panics during finalization on Python 3.13+).
