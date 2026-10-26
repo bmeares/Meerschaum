@@ -22,7 +22,7 @@ from meerschaum.api.dash import dash_app
 from meerschaum.api.dash import engine as _engine
 from meerschaum.api.dash.components import alert_from_success_tuple
 from meerschaum.api.dash.sessions import is_session_authenticated
-from meerschaum.api.dash.pipeline_management import pipeline_title, count_label
+from meerschaum.api.dash.pipeline_management import pipeline_title, count_label, runs_placeholder
 from meerschaum.utils.packages import import_html, import_dcc
 html, dcc = import_html(check_update=CHECK_UPDATE), import_dcc(check_update=CHECK_UPDATE)
 
@@ -105,7 +105,8 @@ def build_list_cards(registry: str) -> List[Any]:
             dbc.CardBody([
                 html.P(facts_row, className='pipeline-card-facts'),
                 dbc.Accordion([dbc.AccordionItem(
-                    html.Div(id={'type': 'pipeline-card-details', 'index': identity}),
+                    html.Div(runs_placeholder(), id={'type': 'pipeline-card-details', 'index': identity},
+                             className='pipeline-card-runs'),
                     title='Runs', item_id='history')],
                     id={'type': 'pipeline-card-accordion', 'index': identity}, active_item=None,
                     start_collapsed=True),

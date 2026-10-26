@@ -820,6 +820,15 @@ def render_pipelines(pathname, search, definition, live_run, selected_run, node_
     store = dict(events_store or {})
     if store.get('run_id') != selected_id:
         store = {'run_id': selected_id}
+    ### Polling re-renders the views only when what they show changed (a live run always does):
+    ### replacing an unchanged timeline and table would flash the Runs tab.
+    import hashlib
+    fingerprint = hashlib.sha256(json.dumps(
+        [runs, detail, selected_id, wrong_pipeline, filters, str(instance)], sort_keys=True, default=str,
+    ).encode()).hexdigest()
+    if not active and store.get('fingerprint') == fingerprint:
+        return dash.no_update, dash.no_update, [], dash.no_update
+    store['fingerprint'] = fingerprint
     return (
         (build_gantt_children(detail) if detail else [html.P(
             (f"Run '{selected_id or filters['run_id']}' belongs to another Pipeline on {instance}." if wrong_pipeline

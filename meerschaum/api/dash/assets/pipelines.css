@@ -310,3 +310,6 @@
     .pipeline-workspace.pipeline-has-selection #pipelines-graph-div { margin-right: min(432px, 40%); }
     .pipeline-workspace.pipeline-has-selection #pipeline-inspector { width: min(420px, calc(40% - 12px)); }
 }
+/* A card's Runs load into a fixed-height slot, swapped in place. */
+.pipeline-runs-placeholder { height: 120px; display: flex; align-items: center; justify-content: center; }
+.pipeline-card-runs { min-height: 120px; }

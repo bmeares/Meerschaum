@@ -27,6 +27,12 @@ def pipeline_title(name, registry=None, link=False):
     return parts
 
 
+def runs_placeholder():
+    """A card's Runs before they load: a fixed-height slot, replaced in place."""
+    return html.Div(dbc.Spinner(size='sm', color='secondary'), className='pipeline-runs-placeholder',
+                    role='status', **{'aria-label': 'Loading runs'})
+
+
 def count_label(count, noun):
     """`1 member`, `2 members`."""
     return f"{count} {noun}" + ('' if count == 1 else 's')

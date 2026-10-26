@@ -119,7 +119,9 @@ def list_layout(registry):
                              className='pipelines-find-pipe', clearable=True),
             ], className='pipelines-list-header'),
             html.Div(id='pipelines-list-alert'),
-            dcc.Loading(html.Div(id='pipelines-list', className='pipelines-list'), type='dot'),
+            ### Only the list itself shows the loading state: a card's lazy Runs never hides the page.
+            dcc.Loading(html.Div(id='pipelines-list', className='pipelines-list'), type='dot',
+                        target_components={'pipelines-list': 'children'}),
         ], id='pipelines-list-page', className='pipeline-page', **{'data-registry': registry}),
     ]
 
@@ -166,7 +168,8 @@ def new_layout(registry, query):
                 ], className='g-3'),
             ], className='pipeline-new-step', **{'data-step': 'traversal'}),
             html.Section([
-                dcc.Loading(html.Div(id='pipeline-new-review'), type='dot'),
+                dcc.Loading(html.Div(id='pipeline-new-review'), type='dot',
+                            target_components={'pipeline-new-review': 'children'}),
             ], className='pipeline-new-step', **{'data-step': 'review'}),
             html.Div(id='pipeline-new-alert'),
             html.Div([
@@ -194,6 +197,7 @@ def explore_layout(registry, query):
                 dbc.Button('Save as Pipeline', id='pipeline-explore-save', size='sm', href='/dash/pipelines/new'),
             ], className='pipelines-list-header'),
             dcc.Loading(html.Div(id='pipeline-explore-graph', className='pipeline-workspace pipeline-explore'),
+                        target_components={'pipeline-explore-graph': 'children'},
                         type='dot'),
         ], id='pipeline-explore-page', className='pipeline-page', **{'data-registry': registry}),
     ]
