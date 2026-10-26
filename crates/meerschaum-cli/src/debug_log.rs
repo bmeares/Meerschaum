@@ -265,7 +265,8 @@ impl<S: Subscriber> Layer<S> for DprintLayer {
             chrono::Utc::now().time(),
             module,
             metadata.line(),
-            &event_message(event),
+            // A last line of defense: a URI password or a quoted secret in any message.
+            &meerschaum_core::debug::redact_uris(&event_message(event)),
         );
         (self.write)(&text);
     }

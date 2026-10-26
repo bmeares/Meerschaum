@@ -187,17 +187,28 @@ macro_rules! dprint {
     };
 }
 
+/// A key or flag name that holds a secret (see [`is_secret_key`]), as a regex fragment.
+const SECRET: &str =
+    r"[A-Za-z0-9_\-]*(?:password|passwd|secret|token|api[_\-]?key|private[_\-]?key)[A-Za-z0-9_\-]*";
+
+/// A value after a secret key in text that is not parsed: a quoted string, a flat list or
+/// object, or a bare scalar (a number, `true`).
+const ANY_VALUE: &str =
+    r#"(?:"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|\[[^\]]*\]|\{[^}]*\}|[^\s,}\])]+)"#;
+
+/// What replaces a secret in debug output.
+pub const MASK: &str = "***";
+
 /// `text` with the secrets it shows replaced with `***`, wherever they appear (the rest is
 /// unchanged):
 ///
 /// - a URI's password (`postgresql://user:***@host/db`);
 /// - a secret query parameter (`?password=***`, `&api_key=***`);
-/// - a quoted secret key's quoted value, as JSON or a Python `repr` prints it
-///   (`"password": "***"`, `'token': '***'`);
+/// - a quoted secret key's value, as JSON or a Python `repr` prints it, whatever its type
+///   (`"password": "***"`, `'token': '***'`, `"api_key": '***'` for `"api_key": ["k"]`);
 /// - the value after a secret flag inside one word (`'--password ***'`, `--api-key=***`).
 pub fn redact_uris(text: &str) -> String {
     use std::sync::LazyLock;
-    const SECRET: &str = r"[A-Za-z0-9_\-]*(?:password|passwd|secret|token|api[_\-]?key|private[_\-]?key)[A-Za-z0-9_\-]*";
     static URI_PASSWORD: LazyLock<regex::Regex> = LazyLock::new(|| {
         regex::Regex::new(r"(?P<lead>[A-Za-z][A-Za-z0-9+.\-]*://[^:/@\s]*:)\S+@")
             .expect("valid regex")
@@ -208,7 +219,7 @@ pub fn redact_uris(text: &str) -> String {
     });
     static QUOTED: LazyLock<regex::Regex> = LazyLock::new(|| {
         regex::Regex::new(&format!(
-            r#"(?i)(?P<lead>["']{SECRET}["']\s*:\s*)(?:"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')"#
+            r#"(?i)(?P<lead>["']{SECRET}["']\s*:\s*)(?P<value>{ANY_VALUE})"#
         ))
         .expect("valid regex")
     });
@@ -218,7 +229,13 @@ pub fn redact_uris(text: &str) -> String {
     });
     let text = URI_PASSWORD.replace_all(text, "${lead}***@");
     let text = QUERY.replace_all(&text, "${lead}***");
-    let text = QUOTED.replace_all(&text, "${lead}'***'");
+    let text = QUOTED.replace_all(&text, |caps: &regex::Captures<'_>| {
+        // An already masked value keeps its quotes (`{"token":"***"}` from `redact_json`).
+        match &caps["value"] {
+            v @ ("\"***\"" | "'***'") => format!("{}{v}", &caps["lead"]),
+            _ => format!("{}'***'", &caps["lead"]),
+        }
+    });
     FLAG.replace_all(&text, "${lead}***").into_owned()
 }
 
@@ -237,6 +254,104 @@ pub fn is_secret_key(key: &str) -> bool {
     ]
     .iter()
     .any(|s| key.contains(s))
+}
+
+/// Redact a parsed JSON value in place: the value of every secret key (see [`is_secret_key`]) at
+/// any depth, whatever its type (a number, a list, an object), becomes `"***"` (`null` stays);
+/// every string goes through [`redact_text`]. Returns whether anything changed.
+pub fn redact_json(value: &mut serde_json::Value) -> bool {
+    use serde_json::Value as Json;
+    match value {
+        Json::Object(map) => {
+            let mut changed = false;
+            for (key, value) in map.iter_mut() {
+                if is_secret_key(key) {
+                    if !value.is_null() && value.as_str() != Some(MASK) {
+                        *value = Json::String(MASK.into());
+                        changed = true;
+                    }
+                } else {
+                    changed |= redact_json(value);
+                }
+            }
+            changed
+        }
+        Json::Array(items) => items
+            .iter_mut()
+            .fold(false, |changed, item| redact_json(item) | changed),
+        Json::String(text) => {
+            let redacted = redact_text(text);
+            if redacted == *text {
+                false
+            } else {
+                *text = redacted;
+                true
+            }
+        }
+        _ => false,
+    }
+}
+
+/// One command-line word (or any string an argument holds) with its secrets replaced, for
+/// debug output:
+///
+/// - a JSON object or list (`--params '{"token": 123, "api_key": ["k"]}'`) is parsed, redacted
+///   with [`redact_json`] and written back compactly;
+/// - `key:value` / `key=value` pairs (`--params token:123,id:1`, a Python `dict` literal) hide the
+///   value of a secret key;
+/// - then everything [`redact_uris`] hides (URI passwords, secret query parameters, ...).
+pub fn redact_text(text: &str) -> String {
+    use std::sync::LazyLock;
+    static PAIRS: LazyLock<regex::Regex> = LazyLock::new(|| {
+        regex::Regex::new(&format!(
+            r#"(?i)(?P<lead>(?:^|[,\s{{])["']?{SECRET}["']?\s*[:=]\s*){ANY_VALUE}"#
+        ))
+        .expect("valid regex")
+    });
+    let trimmed = text.trim();
+    if (trimmed.starts_with('{') || trimmed.starts_with('['))
+        && let Ok(mut parsed) = serde_json::from_str::<serde_json::Value>(trimmed)
+    {
+        return if redact_json(&mut parsed) {
+            parsed.to_string()
+        } else {
+            text.to_string()
+        };
+    }
+    redact_uris(&PAIRS.replace_all(text, format!("${{lead}}{MASK}")))
+}
+
+/// A SQL statement as debug output prints it (the statement that runs is unchanged): the
+/// literal compared to (or assigned to) a column whose name is a secret (see [`is_secret_key`])
+/// becomes `'***'`, in every flavor's identifier quoting:
+///
+/// - `"password" = 'x'`, `` `token` <> 'x' ``, `[api_key] != N'x'`, `secret = 123`;
+/// - `"token" IN ('a', 'b')`, `"token" NOT IN (...)`, `"token" LIKE 'x%'`;
+/// - `CAST("password" AS TEXT) = '...'`, MySQL's `_utf8mb4 X'...'` literals;
+///
+/// and everything [`redact_uris`] hides (URI passwords anywhere, quoted secret keys in JSON text).
+pub fn redact_sql(sql: &str) -> String {
+    use std::sync::LazyLock;
+    static COMPARISON: LazyLock<regex::Regex> = LazyLock::new(|| {
+        let column = format!(r#"(?:"{SECRET}"|`{SECRET}`|\[{SECRET}\]|\b{SECRET}\b)"#);
+        let cast = r"(?:\s+AS\s+\w+(?:\s*\(\s*\d+(?:\s*,\s*\d+)?\s*\))?\s*\))?";
+        let op = r"(?:=|!=|<>|<=|>=|<|>|(?:NOT\s+)?(?:I?LIKE|IN)\b)";
+        let literal = r"(?:_utf8mb4\s+)?[NnXx]?'(?:[^']|'')*'";
+        let value = format!(r"(?:\((?:[^()']|{literal})*\)|{literal}|-?\d+(?:\.\d+)?)");
+        regex::Regex::new(&format!(
+            r"(?i)(?P<lead>{column}{cast}\s*{op}\s*)(?P<value>{value})"
+        ))
+        .expect("valid regex")
+    });
+    let sql = COMPARISON.replace_all(sql, |caps: &regex::Captures<'_>| {
+        let mask = if caps["value"].starts_with('(') {
+            format!("('{MASK}')")
+        } else {
+            format!("'{MASK}'")
+        };
+        format!("{}{mask}", &caps["lead"])
+    });
+    redact_uris(&sql)
 }
 
 #[cfg(test)]
@@ -358,5 +473,97 @@ mod tests {
         for key in ["username", "host", "action", "debug"] {
             assert!(!is_secret_key(key), "{key}");
         }
+    }
+
+    #[test]
+    fn json_words_are_redacted_structurally() {
+        let word = r#"{"token":123456789,"api_key":["live-secret"],"fetch":{"client_secret":{"a":1},"uri":"postgresql://u:hunter2@h/db"},"id":5,"password":null}"#;
+        let out = redact_text(word);
+        for secret in ["123456789", "live-secret", "hunter2", r#""a""#] {
+            assert!(!out.contains(secret), "{out}");
+        }
+        assert!(out.contains(r#""id":5"#), "{out}");
+        assert!(out.contains(r#""password":null"#), "{out}");
+        assert!(out.contains("postgresql://u:***@h/db"), "{out}");
+        let list = r#"[{"secret": true}, 1]"#;
+        assert_eq!(redact_text(list), r#"[{"secret":"***"},1]"#);
+        // Nothing to hide: the word is unchanged (not re-serialized).
+        assert_eq!(redact_text(r#"{"id": 1}"#), r#"{"id": 1}"#);
+    }
+
+    #[test]
+    fn pairs_and_unparsed_json_are_redacted() {
+        assert_eq!(redact_text("token:123,id:1"), "token:***,id:1");
+        assert_eq!(redact_text("id:1,api_key:abc"), "id:1,api_key:***");
+        assert_eq!(redact_text("password=hunter2"), "password=***");
+        assert_eq!(
+            redact_text("{'token': 123, 'id': 1}"),
+            "{'token': '***', 'id': 1}"
+        );
+        // Text that is not JSON (`redact_uris`): any value type after a quoted secret key.
+        let out = redact_uris(r#"x {"token": 123, "api_key": ["live-secret"], "id": 2"#);
+        assert!(
+            !out.contains("123") && !out.contains("live-secret"),
+            "{out}"
+        );
+        assert!(out.contains(r#""id": 2"#), "{out}");
+        // Pipe keys and connector keys are not pairs.
+        assert_eq!(redact_text("sql:main"), "sql:main");
+        assert_eq!(redact_text("api:token_service"), "api:token_service");
+        assert_eq!(
+            redact_text("postgresql://u:hunter2@h/db"),
+            "postgresql://u:***@h/db"
+        );
+    }
+
+    #[test]
+    fn sql_literals_of_secret_columns_are_redacted() {
+        let cases = [
+            (
+                r#"WHERE "password" = 'hunter2'"#,
+                r#"WHERE "password" = '***'"#,
+            ),
+            ("WHERE `token` != 'hunter2'", "WHERE `token` != '***'"),
+            ("WHERE [api_key] <> N'hunter2'", "WHERE [api_key] <> '***'"),
+            ("WHERE secret = 123", "WHERE secret = '***'"),
+            (
+                r#"WHERE t."client_secret" IN ('hunter2', 'it''s')"#,
+                r#"WHERE t."client_secret" IN ('***')"#,
+            ),
+            (
+                r#"AND ("token" NOT IN ('hunter2')) = 1"#,
+                r#"AND ("token" NOT IN ('***')) = 1"#,
+            ),
+            (
+                r#"CAST("password" AS TEXT) = '{"a": "hunter2"}'"#,
+                r#"CAST("password" AS TEXT) = '***'"#,
+            ),
+            (
+                "WHERE `password` = _utf8mb4 X'68756e74657232'",
+                "WHERE `password` = '***'",
+            ),
+            (
+                r#"UPDATE "users" SET "password_hash" = 'hunter2' WHERE "username" = 'bob'"#,
+                r#"UPDATE "users" SET "password_hash" = '***' WHERE "username" = 'bob'"#,
+            ),
+            (
+                r#"WHERE "token" LIKE 'hun%'"#,
+                r#"WHERE "token" LIKE '***'"#,
+            ),
+        ];
+        for (sql, expected) in cases {
+            assert_eq!(redact_sql(sql), expected);
+        }
+        // Other columns, NULL checks and the rest of the statement are untouched.
+        let sql = r#"SELECT "id", "password" FROM "t" WHERE "id" = 'x' AND "password" IS NULL"#;
+        assert_eq!(redact_sql(sql), sql);
+        assert_eq!(
+            redact_sql("ATTACH 'postgresql://u:hunter2@h/db' AS x"),
+            "ATTACH 'postgresql://u:***@h/db' AS x"
+        );
+        assert_eq!(
+            redact_sql(r#"WHERE CAST("params" AS TEXT) = '{"token": 42}'"#),
+            r#"WHERE CAST("params" AS TEXT) = '{"token": '***'}'"#
+        );
     }
 }

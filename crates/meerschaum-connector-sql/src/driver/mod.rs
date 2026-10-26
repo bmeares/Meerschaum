@@ -245,12 +245,18 @@ impl fmt::Debug for SqlTransaction {
 /// Debug output for a statement about to run (`--debug`, see `meerschaum_core::dprint!`): every
 /// statement the connector runs goes through one of the driver's entry points below. Expands to
 /// one atomic load while debugging is off.
+/// The statement is printed through `meerschaum_core::debug::redact_sql` (secret columns' literals
+/// and URI passwords hidden); the statement that runs is unchanged.
 macro_rules! debug_sql {
     ($sql:expr) => {
-        meerschaum_core::dprint!("{}", $sql)
+        meerschaum_core::dprint!("{}", meerschaum_core::debug::redact_sql($sql))
     };
     ($sql:expr, $params:expr) => {
-        meerschaum_core::dprint!("{}\n({} bound parameters)", $sql, $params.len())
+        meerschaum_core::dprint!(
+            "{}\n({} bound parameters)",
+            meerschaum_core::debug::redact_sql($sql),
+            $params.len()
+        )
     };
 }
 
@@ -941,7 +947,11 @@ impl SqlDriver {
     /// PostgreSQL `COPY ... FROM STDIN` with a pre-encoded payload, in its own transaction
     /// (`psql_insert_copy`, `_sql.py:1109`). Returns the number of rows copied.
     pub async fn copy_in(&self, copy_sql: &str, data: Vec<u8>) -> Result<u64> {
-        meerschaum_core::dprint!("{copy_sql}\n({} bytes)", data.len());
+        meerschaum_core::dprint!(
+            "{}\n({} bytes)",
+            meerschaum_core::debug::redact_sql(copy_sql),
+            data.len()
+        );
         self.ready().await?;
         match &self.pool {
             Pool::Postgres(p) => {

@@ -201,3 +201,92 @@ fn a_shell_started_with_debug_starts_with_the_toggle_on() {
     assert!(stdout.contains("Debug mode is off."), "stdout: {stdout}");
     assert!(!stderr.contains("-> `show tags`"), "stderr: {stderr}");
 }
+
+#[test]
+fn raw_params_arguments_never_print_secrets() {
+    let dir = tempfile::tempdir().unwrap();
+    // JSON numbers and lists, `key:value` pairs and URI passwords, in every argv representation
+    // (`sysargs`, `filtered_sysargs`, `sub_args`).
+    let (_, stderr) = run(
+        dir.path(),
+        &[
+            "show",
+            "pipes",
+            "-i",
+            "sql:dbgtest",
+            "--debug",
+            "--params",
+            r#"{"token":123456789,"api_key":["live-secret"],"nested":{"client_secret":{"x":424242}}}"#,
+            "--sub-args",
+            "-P token:987654321 mysql://u:hunter2@h/db",
+        ],
+    );
+    assert!(stderr.contains("Parsed arguments:"), "stderr: {stderr}");
+    for secret in ["123456789", "live-secret", "424242", "987654321", "hunter2"] {
+        assert!(!stderr.contains(secret), "{secret} in stderr: {stderr}");
+    }
+    let (_, stderr) = run(
+        dir.path(),
+        &[
+            "show",
+            "pipes",
+            "-i",
+            "sql:dbgtest",
+            "--debug",
+            "-P",
+            "token:555666777,id:1",
+        ],
+    );
+    assert!(stderr.contains("Parsed arguments:"), "stderr: {stderr}");
+    assert!(!stderr.contains("555666777"), "stderr: {stderr}");
+}
+
+#[test]
+fn sql_filters_on_secret_columns_are_redacted() {
+    let dir = tempfile::tempdir().unwrap();
+    run(
+        dir.path(),
+        &[
+            "sql",
+            "dbgtest",
+            "exec",
+            "CREATE TABLE sql_dbgtest_t (id INTEGER, password TEXT, token TEXT)",
+        ],
+    );
+    run(
+        dir.path(),
+        &[
+            "register",
+            "pipes",
+            "-c",
+            "sql:dbgtest",
+            "-m",
+            "t",
+            "-i",
+            "sql:dbgtest",
+        ],
+    );
+    let (_, stderr) = run(
+        dir.path(),
+        &[
+            "show",
+            "data",
+            "-c",
+            "sql:dbgtest",
+            "-m",
+            "t",
+            "-i",
+            "sql:dbgtest",
+            "--debug",
+            "--params",
+            r#"{"password":"hunter2","token":["s3cr3t-a","s3cr3t-b"],"id":7}"#,
+        ],
+    );
+    // The query ran with the filter (the statement is printed redacted).
+    assert!(stderr.contains(r#""password" = '***'"#), "stderr: {stderr}");
+    assert!(stderr.contains(r#""token" IN ('***')"#), "stderr: {stderr}");
+    assert!(stderr.contains(r#""id" = '7'"#), "stderr: {stderr}");
+    for secret in ["hunter2", "s3cr3t-a", "s3cr3t-b"] {
+        assert!(!stderr.contains(secret), "{secret} in stderr: {stderr}");
+    }
+}

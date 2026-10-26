@@ -996,9 +996,12 @@ fn entry_with_args_inner(mut args: ArgsMap, rt: &mut Runtime<'_>, depth: usize) 
     }
     let remaining = actions::remove_leading_action(&action, CORE_ACTIONS);
     meerschaum_core::dprint!(
-        "Action {action:?} -> `{}` ({}), sub-actions {remaining:?}.",
-        resolved.display_name(),
-        resolved.function_name()
+        "{}",
+        meerschaum_core::debug::redact_uris(&format!(
+            "Action {action:?} -> `{}` ({}), sub-actions {remaining:?}.",
+            resolved.display_name(),
+            resolved.function_name()
+        ))
     );
     args.insert("action".into(), PyValue::str_list(&remaining));
     env::apply_env_arguments(&mut args, rt.env);
@@ -1486,7 +1489,7 @@ pub fn debug_scope(rt: &mut Runtime<'_>, on: bool) -> Option<meerschaum_core::de
 /// of dicts and lists (`--params`), and URI passwords, secret query parameters and secrets inside
 /// JSON text or one word (`--sub-args '--password x'`) are replaced with `***`.
 pub fn redacted_args(args: &ArgsMap) -> String {
-    use meerschaum_core::debug::{is_secret_key, redact_uris};
+    use meerschaum_core::debug::{is_secret_key, redact_text, redact_uris};
     fn hide(value: &mut PyValue) {
         if !matches!(value, PyValue::None) {
             *value = PyValue::Str("***".into());
@@ -1516,6 +1519,8 @@ pub fn redacted_args(args: &ArgsMap) -> String {
                         continue;
                     };
                     let Some(flag) = text.strip_prefix("--") else {
+                        // `--params '{"token": 1}'`, `-P token:1`, a URI with a password.
+                        walk(word);
                         continue;
                     };
                     let (name, inline) = match flag.split_once('=') {
@@ -1529,6 +1534,12 @@ pub fn redacted_args(args: &ArgsMap) -> String {
                             hide_next = true;
                         }
                     }
+                }
+            }
+            PyValue::Str(text) => {
+                let redacted = redact_text(text);
+                if redacted != *text {
+                    *text = redacted;
                 }
             }
             _ => {}
@@ -1654,8 +1665,19 @@ mod debug_tests {
                 "--password hunter2".to_string(),
             ]),
         );
+        args.insert(
+            "sub_args".into(),
+            PyValue::str_list(&[
+                "-P".to_string(),
+                r#"{"token":123456789,"api_key":["live-secret"]}"#.to_string(),
+                "token:987654321,id:1".to_string(),
+                "mysql://u:hunter2@h/db".to_string(),
+            ]),
+        );
         let text = redacted_args(&args);
-        assert!(!text.contains("hunter2"), "{text}");
+        for secret in ["hunter2", "123456789", "987654321", "live-secret"] {
+            assert!(!text.contains(secret), "{text}");
+        }
         assert!(text.contains("'fetch'"), "{text}");
         assert!(text.contains("'login'"), "{text}");
         assert!(text.contains("--api-key=***"), "{text}");

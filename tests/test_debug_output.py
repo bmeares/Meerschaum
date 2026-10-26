@@ -149,3 +149,23 @@ def test_overlapping_debug_actions_leave_debug_off(sqlite_conn, capfd):
     assert pipe.get_rowcount() == 1
     out, err = capfd.readouterr()
     assert 'meerschaum_' not in out + err, err
+
+
+def test_debug_sql_hides_secret_filters(sqlite_conn, capfd):
+    """
+    The SQL that `debug=True` prints hides the literals compared to secret columns (the query that
+    runs is unchanged).
+    """
+    import meerschaum as mrsm
+    pipe = mrsm.Pipe('a', 'secret', instance=sqlite_conn, columns={'datetime': 'dt'})
+    success, msg = pipe.sync([{'dt': '2024-01-01', 'password': 'other', 'token': 'x'}])
+    assert success, msg
+    capfd.readouterr()
+
+    df = pipe.get_data(params={'password': 'hunter2', 'token': ['s3cr3t-a']}, debug=True)
+    assert df is not None and len(df) == 0
+    out, err = capfd.readouterr()
+    assert 'meerschaum_connector_sql' in err, err
+    assert '"password" = \'***\'' in err, err
+    for secret in ('hunter2', 's3cr3t-a'):
+        assert secret not in out + err, err
