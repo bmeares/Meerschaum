@@ -395,3 +395,64 @@ def test_native_instance_connector_from_python(tmp_path):
     assert result['pipes'] == ["Pipe('demo', 'readings', instance='jsonstore:main')"], result
     assert result['delete'][0] is True, result
     assert result['exists_after'] is False, result
+
+
+EMPTY_ROWS = textwrap.dedent(
+    """
+    fn fetch() -> Vec<Value> {
+        vec![]
+    }
+
+    #[make_connector]
+    mod maybe {
+        use super::*;
+
+        fn fetch(connector: &Connector) -> Option<Vec<Value>> {
+            (connector.label() == "empty").then(Vec::new)
+        }
+    }
+    """
+)
+
+EMPTY_PY = textwrap.dedent(
+    """
+    __version__ = '0.0.1'
+
+    def fetch(pipe, **kwargs):
+        return []
+    """
+)
+
+EMPTY_SCRIPT = textwrap.dedent(
+    """
+    import json, sys
+    import meerschaum as mrsm
+
+    out = {}
+    for keys in ('plugin:' + sys.argv[1], 'plugin:emptypy', 'maybe:empty', 'maybe:none'):
+        out[keys] = list(mrsm.Pipe(keys, 'm', instance='sql:local').sync())
+    print('RESULT ' + json.dumps(out))
+    """
+)
+
+
+@pytest.mark.skipif(not os.path.exists(CARGO), reason="single-file plugins need cargo")
+def test_native_empty_rows_are_zero_rows_and_none_is_no_data(tmp_path):
+    """
+    v4's `_sync`: a `fetch()` returning `[]` is "No new rows were returned" (success), `None`
+    is "No data were fetched" (failure). A Rust `Vec<Value>` that is empty matches a Python
+    plugin returning `[]`; `Option<Vec<Value>>` expresses `None`.
+    """
+    plugins = tmp_path / 'plugins'
+    plugins.mkdir()
+    (plugins / 'emptyrs.rs').write_text(EMPTY_ROWS)
+    (plugins / 'emptypy.py').write_text(EMPTY_PY)
+    result, output = _run(tmp_path, 'emptyrs', EMPTY_SCRIPT)
+    assert 'Traceback' not in output, output
+    for keys in ('plugin:emptyrs', 'plugin:emptypy', 'maybe:empty'):
+        assert result[keys] == [
+            True, f"No new rows were returned for Pipe('{keys}', 'm', instance='sql:local')."
+        ], result
+    assert result['maybe:none'] == [
+        False, "No data were fetched for Pipe('maybe:none', 'm', instance='sql:local')."
+    ], result

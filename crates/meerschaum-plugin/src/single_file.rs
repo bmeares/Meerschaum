@@ -2664,6 +2664,20 @@ mod runtime;
 mod tests {
     use super::*;
 
+    /// An empty `Vec` is zero rows (`[]` on the rows ABI); only an `Option` input's `None` is
+    /// no data (`null`), as v4 tells a `fetch()` returning `[]` from one returning `None`.
+    #[test]
+    fn runtime_empty_rows_are_zero_rows_and_none_is_no_data() {
+        use runtime::sdk::FetchOutput;
+        let empty = Vec::<Value>::new().into_frame().unwrap().unwrap();
+        assert_eq!(empty.height(), 0);
+        let some = Some(Vec::<Value>::new()).into_frame().unwrap();
+        assert_eq!(some.map(|f| f.height()), Some(0));
+        assert!(None::<Vec<Value>>.into_frame().unwrap().is_none());
+        assert!(None::<runtime::Frame>.into_frame().unwrap().is_none());
+        assert!(Some(vec![json!(1)]).into_frame().is_err());
+    }
+
     #[test]
     fn dependency_blocks_accept_cargo_forms_and_ignore_code_strings() {
         let parsed = syn::parse_file(

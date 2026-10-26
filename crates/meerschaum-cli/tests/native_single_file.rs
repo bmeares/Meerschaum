@@ -347,3 +347,80 @@ fn single_file_rows_sync_with_python_plugin_dtypes() {
         );
     }
 }
+
+/// v4's `_sync`: a `fetch()` returning an empty list is "No new rows were returned" (success),
+/// while `None` is "No data were fetched" (failure). An empty `Vec<Value>` from a single-file
+/// plugin is zero rows, and an `Option<Vec<Value>>` expresses `None`, for `plugin:<name>` and
+/// `#[make_connector]` types alike. A `sync()` calling `pipe.sync(vec![])` syncs zero rows, as
+/// a Python plugin's `pipe.sync([])` does ("Inserted 0, updated 0 rows." once the pipe's
+/// columns are known).
+#[test]
+fn single_file_empty_rows_are_zero_rows_and_none_is_no_data() {
+    let (root, plugins) = prepared(
+        r#"
+        fn fetch() -> Vec<Value> { vec![] }
+        #[make_connector]
+        mod readings {
+            fn fetch() -> Vec<Value> { vec![] }
+        }
+        #[make_connector]
+        mod maybe {
+            fn fetch(connector: &Connector) -> Option<Vec<Value>> {
+                (connector.label() == "empty").then(Vec::new)
+            }
+        }
+        #[make_connector]
+        mod writer {
+            fn sync(pipe: &Pipe) -> Result<SuccessTuple> { pipe.sync(vec![]) }
+        }
+    "#,
+    );
+    for (connector, success, expected) in [
+        (
+            "plugin:typed",
+            true,
+            "No new rows were returned for Pipe('plugin:typed', 'm', instance='sql:local').",
+        ),
+        (
+            "readings:office",
+            true,
+            "No new rows were returned for Pipe('readings:office', 'm', instance='sql:local').",
+        ),
+        (
+            "maybe:empty",
+            true,
+            "No new rows were returned for Pipe('maybe:empty', 'm', instance='sql:local').",
+        ),
+        (
+            "maybe:none",
+            false,
+            "No data were fetched for Pipe('maybe:none', 'm', instance='sql:local').",
+        ),
+        ("writer:office", true, "Inserted 0, updated 0 rows."),
+    ] {
+        let args = ["-c", connector, "-m", "m", "-i", "sql:local", "--nopretty"];
+        let params = r#"{"columns": {"datetime": "id"}, "dtypes": {"id": "int"}}"#;
+        let output = run(
+            root.path(),
+            plugins.path(),
+            &[
+                &["register", "pipes", "--noask", "--params", params],
+                &args[..],
+            ]
+            .concat(),
+        );
+        assert!(output.status.success(), "{}", text(&output));
+        let output = run(
+            root.path(),
+            plugins.path(),
+            &[&["sync", "pipes"], &args[..]].concat(),
+        );
+        let out = text(&output);
+        assert_eq!(output.status.success(), success, "{connector}: {out}");
+        assert!(out.contains(expected), "{connector}: {out}");
+        assert!(
+            !out.contains("No data were fetched") || !success,
+            "{connector}: {out}"
+        );
+    }
+}

@@ -262,6 +262,8 @@ impl<'a> Pipe<'a> {
     pub fn get_sync_time(&self) -> Result<Option<Bound>> {
         bound(&self.call("get_sync_time", None)?)
     }
+    /// Sync rows through the host's engine, like a Python plugin's `pipe.sync(docs)`: an empty
+    /// `Vec` syncs zero rows, `None` (an `Option` input) syncs nothing.
     pub fn sync(&self, data: impl sdk::FetchOutput) -> Result<SuccessTuple> {
         let v = self.call("sync", data.into_frame()?)?;
         Ok(SuccessTuple {
@@ -324,13 +326,17 @@ pub mod sdk {
     pub trait FetchOutput {
         fn into_frame(self) -> Result<Option<Frame>>;
     }
+    /// Rows, possibly none: an empty `Vec` is zero rows (v4's empty `fetch()` list, "No new
+    /// rows were returned"), not "no data". Return `Option<Vec<Value>>` (`None`) for no data.
     impl FetchOutput for Vec<Value> {
         fn into_frame(self) -> Result<Option<Frame>> {
-            if self.is_empty() {
-                Ok(None)
-            } else {
-                Frame::from_rows(self).map(Some)
-            }
+            Frame::from_rows(self).map(Some)
+        }
+    }
+    /// `None` is no data (v4's `fetch()` returning `None`: "No data were fetched").
+    impl FetchOutput for Option<Vec<Value>> {
+        fn into_frame(self) -> Result<Option<Frame>> {
+            self.map(Frame::from_rows).transpose()
         }
     }
     impl FetchOutput for Frame {

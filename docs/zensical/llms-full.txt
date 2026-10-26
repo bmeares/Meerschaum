@@ -10505,9 +10505,13 @@ are available without imports. `Bound` is either `Bound::Int(i64)` or
 `Bound::Datetime(String)` (an ISO timestamp). Fetch receives the engine's resolved
 bounds; an unspecified default begin in a sync override is `None`.
 
-Fetch may return `Vec<Value>` containing JSON objects, `Frame`, `Option<Frame>`, or
-any of those wrapped in `Result`. Missing row fields become null cells; an empty vector
-means no data. Single-file plugins exchange JSON rows over a versioned C ABI; the host
+Fetch may return `Vec<Value>` containing JSON objects, `Option<Vec<Value>>`, `Frame`,
+`Option<Frame>`, or any of those wrapped in `Result`. Missing row fields become null cells.
+As with a Python plugin's `fetch()`, an empty vector is zero rows (the sync succeeds with
+"No new rows were returned") and `None` is no data (the sync fails with "No data were
+fetched"); the same holds for an instance connector's `get_pipe_data` (an empty frame vs
+`None`), and `pipe.sync(vec![])` syncs zero rows like `pipe.sync([])`. Single-file plugins
+exchange JSON rows over a versioned C ABI; the host
 converts them to its native frames. `Frame` here is a lightweight row container with
 `from_rows`, `rows`, `into_rows` and `height`, not the full SDK's Arrow-backed frame.
 Use a Cargo plugin for typed Arrow data, preserved frame schemas, or optimized bulk processing.
