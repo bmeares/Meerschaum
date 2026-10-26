@@ -2,19 +2,20 @@
 # vim:fenc=utf-8
 
 """
-Generate the default configuration data file and its parity fixture.
+Generate the parity fixture of v4's default configuration.
 
 Run from the repository root:
 
     PYTHONPATH=$(pwd) python crates/meerschaum-core/tests/fixtures/gen_default_config.py
 
-Writes:
-- `crates/meerschaum-core/src/config/default_config.json`: `meerschaum.config._default.default_config`
-  with the machine-dependent values replaced by markers, embedded by the Rust config registry.
-- `crates/meerschaum-core/tests/fixtures/default_config.json`: the raw Python value for a known
-  root directory and CPU count, which the Rust test reproduces by resolving the markers.
+Writes `crates/meerschaum-core/tests/fixtures/default_config.json`: v4's
+`meerschaum.config._default.default_config` for a known root directory and CPU count.
+`config_parity.rs::default_config_matches_python` resolves the Rust defaults for the same root and CPU
+count and compares them with it, reading the intentional v5 differences (PARITY.md) as v4's.
 
-Markers:
+The Rust defaults themselves, `crates/meerschaum-core/src/config/default_config.json`, are maintained by
+hand: they are where v5 changes a default, and this generator never writes them (it once created them
+from v4.1.4). They hold the machine-dependent values as markers, resolved at run time:
 - `{"__mrsm_dynamic__": "cpu_count*3"}`: `multiprocessing.cpu_count() * 3`
 - `{"__mrsm_dynamic__": "max(cpu_count/2,1)"}`: `max(int(multiprocessing.cpu_count() / 2), 1)`
 - `{"__mrsm_dynamic__": "not_windows"}`: `platform.system() != 'Windows'`
@@ -31,8 +32,6 @@ import sys
 import tempfile
 
 HERE = pathlib.Path(__file__).parent
-CRATE = HERE.parent.parent
-ROOT_MARKER = '{__MRSM_ROOT_DIR__}'
 FIXTURE_ROOT = '/mrsm-fixture-root'
 
 
@@ -89,14 +88,6 @@ def main():
     root = doc['root']
     cpu = doc['cpu_count']
     cfg = doc['default_config']
-
-    data = replace_root(cfg, root, ROOT_MARKER)
-    data['system']['cli']['max_daemons'] = {'__mrsm_dynamic__': 'cpu_count*3'}
-    data['api']['uvicorn']['workers'] = {'__mrsm_dynamic__': 'max(cpu_count/2,1)'}
-    data['formatting']['unicode'] = {'__mrsm_dynamic__': 'not_windows'}
-    with open(CRATE / 'src' / 'config' / 'default_config.json', 'w', encoding='utf-8') as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
-        f.write('\n')
 
     fixture = {
         'root': FIXTURE_ROOT,

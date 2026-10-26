@@ -5,8 +5,9 @@
 //!
 //! - Each top-level key is one file under `CONFIG_DIR_PATH` (`<key>.yaml`, `.yml` or `.json`),
 //!   read the first time the key is requested.
-//! - Missing keys fall back to the defaults (`meerschaum/config/_default.py`, embedded as
-//!   `default_config.json`); falling back merges the defaults into the loaded key and, when
+//! - Missing keys fall back to the defaults (v4's `meerschaum/config/_default.py`, embedded as
+//!   `default_config.json`, which is edited by hand where v5 changes a default; the
+//!   `tests/fixtures/default_config.json` parity fixture keeps v4's values); falling back merges the defaults into the loaded key and, when
 //!   `patch` is set and the key's file is absent, writes the loaded config to disk.
 //! - `MRSM{a:b:c}` symlinks are substituted from other config values.
 //! - `MRSM_SQL_<LABEL>` / `MRSM_API_<LABEL>` (any `MRSM_<TYPE>_<LABEL>` of an existing connector
