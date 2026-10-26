@@ -200,7 +200,10 @@ def _native_context(self, debug: bool = False) -> Tuple[Optional[Dict[str, Any]]
             instance_connector._rust_client()
         except Exception:
             pass
-    context['attributes'][str(instance_connector)] = _connector_attributes(instance_connector)
+    ### A native plugin's connector type is resolved by the core's native registry from the
+    ### config, never by a Python worker: it is not passed on.
+    if not getattr(instance_connector, 'IS_NATIVE', False):
+        context['attributes'][str(instance_connector)] = _connector_attributes(instance_connector)
 
     ### The source: connectors this process already holds are shared with the native flow
     ### (a SQL source keeps its pool); every other source is built by keys, from the
@@ -209,7 +212,11 @@ def _native_context(self, debug: bool = False) -> Tuple[Optional[Dict[str, Any]]
     if ':' in connector_keys and connector_keys != str(instance_connector):
         source_type, source_label = connector_keys.split(':', maxsplit=1)
         held = mrsm.connectors.connectors.get(source_type, {}).get(source_label, None)
-        if held is not None and source_type != 'plugin':
+        if (
+            held is not None
+            and source_type != 'plugin'
+            and not getattr(held, 'IS_NATIVE', False)
+        ):
             if source_type == 'sql':
                 try:
                     context['connectors'][connector_keys] = held._core_connector()

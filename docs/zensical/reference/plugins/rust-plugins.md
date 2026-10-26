@@ -95,6 +95,10 @@ The label is `office` in this example. Use `connector.config()` to read its
 configuration. You can add `register` inside the module to supply Pipe settings.
 One file may contain several actions, connector modules, and helper functions.
 
+Python sees the same types: `mrsm.get_connector('readings:office')` returns a connector
+whose `fetch()`, `register()` and other module functions run in Rust, and
+`mrsm.Pipe('readings:office', 'readings', instance='sql:local')` syncs from it.
+
 ## Run code around syncs
 
 Mark functions with `#[pre_sync_hook]` or `#[post_sync_hook]` to run them before or
@@ -216,6 +220,8 @@ mod memory {
     }
 }
 ```
+
+From Python, pass `instance='memory:main'` to `mrsm.Pipe()` or `mrsm.get_pipes()`.
 
 Mark a function with `#[web_page]` to add a page to the web console
 (`pip install meerschaum[dash]`), as Python's `@web_page` does:

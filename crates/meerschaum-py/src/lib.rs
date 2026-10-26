@@ -132,6 +132,11 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
         native_plugin_api::native_connector_register,
         m
     )?)?;
+    m.add_function(wrap_pyfunction!(
+        native_plugin_api::native_connector_types,
+        m
+    )?)?;
+    m.add_class::<native_plugin_api::PyNativeConnector>()?;
     m.add_function(wrap_pyfunction!(verify_api::unregister_connector, m)?)?;
 
     // The native action dispatcher from Python (wave 16, P2)

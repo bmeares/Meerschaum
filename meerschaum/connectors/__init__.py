@@ -54,6 +54,7 @@ _locks: Dict[str, RLock] = {
     'plugins_types'            : RLock(),
     '_loaded_plugin_connectors': RLock(),
     'instance_types'           : RLock(),
+    'native_types'             : RLock(),
 }
 
 ### Fill this with objects only when connectors are first referenced.
@@ -62,6 +63,12 @@ custom_types: set = set()
 plugins_types: Dict[str, List[str]] = {}
 _known_custom_types: set = set()
 _loaded_plugin_connectors: bool = False
+
+### Connector types declared by native (Rust) plugins: `{type: info}` from the core, read on the
+### first lookup of a type Python does not know, and the plugin of each type registered here.
+_native_types: Optional[Dict[str, Dict[str, Any]]] = None
+_native_types_refresh: bool = False
+_native_type_plugins: Dict[str, str] = {}
 
 
 def get_connector(
@@ -138,6 +145,10 @@ def get_connector(
     ### NOTE: the default instance connector may not be main.
     ### Only fall back to 'main' if the type is provided by the label is omitted.
     label = label if label is not None else STATIC_CONFIG['connectors']['default_label']
+
+    ### A type declared by a native (Rust) plugin is registered on first use.
+    if type not in connectors and _load_plugins and isinstance(type, str):
+        _load_native_connector_type(type)
 
     ### type might actually be a label. Check if so and raise a warning.
     if type not in connectors:
@@ -396,6 +407,7 @@ def unload_plugin_connectors(
     custom_types.clear()
     custom_types.update(_known_custom_types)
     _loaded_plugin_connectors = False
+    _unload_native_connector_types()
 
 
 def get_connector_plugin(
@@ -415,6 +427,9 @@ def get_connector_plugin(
     A Plugin, 'mrsm', or None.
     """
     if not hasattr(connector, 'type'):
+        return None
+    ### A native plugin has no virtual environment.
+    if getattr(connector, 'IS_NATIVE', False):
         return None
     plugin_name = (
         connector.__module__.replace('plugins.', '').split('.')[0]
@@ -436,3 +451,80 @@ def _load_builtin_custom_connectors():
     import meerschaum.connectors.valkey
     _known_custom_types.add('valkey')
     _known_custom_types.add('systemd')
+
+
+def get_native_connector_types(refresh: bool = False) -> Dict[str, Dict[str, Any]]:
+    """
+    Return the connector types declared by native (Rust) plugins in the plugins directories,
+    as `{type: {'plugin', 'is_instance', 'is_streaming', 'is_thread_safe', 'methods'}}`.
+    Read once per process (like Python plugins' connector types) until
+    `unload_plugin_connectors()` or `refresh=True`.
+    """
+    global _native_types, _native_types_refresh
+    with _locks['native_types']:
+        if _native_types is not None and not refresh:
+            return _native_types
+        from meerschaum import _core
+        try:
+            _native_types = {
+                str(typ): dict(info)
+                for typ, info in _core.native_connector_types(
+                    refresh or _native_types_refresh
+                ).items()
+            }
+        except Exception as e:
+            from meerschaum.utils.debug import dprint
+            dprint(f"Could not read the native plugins' connector types: {e}")
+            _native_types = {}
+        _native_types_refresh = False
+        return _native_types
+
+
+def _load_native_connector_type(typ: str) -> bool:
+    """
+    Register the native connector type `typ` (a `NativeConnector` class) if a native plugin
+    declares it. Return whether `typ` is now a known type.
+    """
+    info = get_native_connector_types().get(typ, None)
+    if not info:
+        return False
+    from meerschaum.connectors.native import make_native_connector_class
+    cls = make_native_connector_class(typ, info)
+    plugin_name = str(info.get('plugin', ''))
+    with _locks['types']:
+        if typ in types:
+            return True
+        types[typ] = cls
+    with _locks['custom_types']:
+        custom_types.add(typ)
+    with _locks['plugins_types']:
+        plugins_types.setdefault(plugin_name, []).append(typ)
+    _native_type_plugins[typ] = plugin_name
+    with _locks['connectors']:
+        if typ not in connectors:
+            connectors[typ] = {}
+    if getattr(cls, 'IS_INSTANCE', False):
+        with _locks['instance_types']:
+            if typ not in instance_types:
+                instance_types.append(typ)
+    return True
+
+
+def _unload_native_connector_types() -> None:
+    """
+    Forget the native connector types (re-read from the core on the next unknown type).
+    """
+    global _native_types, _native_types_refresh
+    with _locks['native_types']:
+        for typ, plugin_name in list(_native_type_plugins.items()):
+            _ = types.pop(typ, None)
+            _ = connectors.pop(typ, None)
+            custom_types.discard(typ)
+            if typ in instance_types:
+                instance_types.remove(typ)
+            plugin_types = plugins_types.get(plugin_name, [])
+            if typ in plugin_types:
+                plugin_types.remove(typ)
+            _ = _native_type_plugins.pop(typ, None)
+        _native_types = None
+        _native_types_refresh = True
