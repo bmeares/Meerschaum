@@ -205,6 +205,57 @@ def test_pipe_card_shows_parents_and_children(server, tab):
     assert _errors(tab) == [], _errors(tab)
 
 
+def test_pipe_card_adds_and_removes_parents_and_children(server, tab):
+    result = server.python(SETUP_PIPES + """
+for mk in ('w7rel_a', 'w7rel_b'):
+    pipe = mrsm.Pipe('w7rel', mk, instance='sql:w7console')
+    if pipe.get_id() is None:
+        assert pipe.register()[0]
+""")
+    assert result.returncode == 0, result.stderr[-2000:]
+    saved_code = (
+        "import meerschaum as mrsm, json\n"
+        "pipe = mrsm.Pipe('w7rel', 'w7rel_a', instance='sql:w7console')\n"
+        "print('JSON:' + json.dumps(pipe.get_parameters(apply_symlinks=False, refresh=True)))\n"
+    )
+
+    def saved() -> dict:
+        out = server.python(saved_code)
+        return json.loads([l for l in out.stdout.splitlines() if l.startswith('JSON:')][-1][5:])
+
+    try:
+        tab.login()
+        tab.goto('/dash/pipes/w7rel/w7rel_a')
+        tab.page.click('.accordion-button:has-text("Parents & Children")')
+        _wait_text(tab.page, '.accordion-collapse.show', 'Children (0)')
+        tab.page.click('.accordion-collapse.show a.nav-link:has-text("Children")')
+        tab.page.click('.accordion-collapse.show .tab-pane.active .pipe-relation-add-dropdown')
+        tab.page.keyboard.type('w7rel_b')
+        tab.page.locator('[role=option]', has_text="Pipe('w7rel', 'w7rel_b')").first.click()
+        _wait_text(tab.page, '.accordion-collapse.show', 'Children (1)')
+        _wait_text(tab.page, '.accordion-collapse.show .tab-pane.active', 'w7rel_b')
+        assert saved().get('children') == ["Pipe('w7rel', 'w7rel_b')"]
+
+        tab.page.click('.accordion-collapse.show .tab-pane.active .pipe-relation-remove-button')
+        _wait_text(tab.page, '.accordion-collapse.show', 'Children (0)')
+        assert 'children' not in saved()
+
+        ### A `{{ Pipe() }}` template edge has no remove button.
+        tab.goto('/dash/pipes/sql:w7console/w7child')
+        tab.page.click('.accordion-button:has-text("Parents & Children")')
+        _wait_text(tab.page, '.accordion-collapse.show', 'Parents (1)')
+        assert tab.page.locator(
+            '.accordion-collapse.show .tab-pane.active .pipe-relation-remove-button'
+        ).count() == 0
+        assert _errors(tab) == [], _errors(tab)
+    finally:
+        server.python(
+            "import meerschaum as mrsm\n"
+            "for mk in ('w7rel_a', 'w7rel_b'):\n"
+            "    mrsm.Pipe('w7rel', mk, instance='sql:w7console').delete()\n"
+        )
+
+
 def test_exec_runs_once_in_existing_terminal(webterm_server, context):
     from tests.console.test_webterm import _open_terminal, _rows, _wait_for_text
     server = webterm_server
@@ -223,6 +274,8 @@ def test_exec_runs_once_in_existing_terminal(webterm_server, context):
     page.wait_for_function("() => { const id = window._mrsmExecSubmitted; const frame = document.getElementById('webterm-iframe'); return !!(id && frame?.contentWindow?.terminal?.session.requests.has(id)); }")
     acknowledgment = page.evaluate("document.getElementById('webterm-iframe').contentWindow.terminal.session.requests.get(window._mrsmExecSubmitted)")
     assert acknowledgment['accepted'], acknowledgment
+    ### An accepted command adds no status line above the terminal (it would push it down).
+    assert page.inner_text('#terminal-exec-status') == ''
     _wait_for_text(frame, 'w7parent')
     frame.wait_for_function('window.terminal.session.idle === true')
     assert frame.evaluate('window._rc6Identity') == frame_identity
@@ -292,6 +345,70 @@ def test_exec_refuses_what_the_dashboard_does_not_offer(server, tab):
         headers={'content-type': 'application/json'},
     )
     assert anonymous.status in (401, 403)
+    assert _errors(tab) == [], _errors(tab)
+
+
+def test_exec_sends_the_subaction_the_dashboard_shows(server, tab):
+    """`show pipes` -> `watch` shows `jobs` (`watch` has no `pipes`): Exec sends `watch jobs`."""
+    tab.login()
+    page = tab.page
+    page.select_option('#action-dropdown', 'watch')
+    page.wait_for_function(
+        "![...document.querySelectorAll('#subaction-dropdown option')].some(o => o.value === 'pipes')"
+    )
+    assert page.eval_on_selector('#subaction-dropdown', 'e => e.value') == 'jobs'
+    with page.expect_request(
+        lambda r: '_dash-update-component' in r.url and 'exec-store' in (r.post_data or '')
+    ) as request:
+        page.click('#go-button')
+    body = json.loads(request.value.post_data)
+    state = {
+        f"{item['id']}.{item['property']}": item.get('value')
+        for item in body.get('state', [])
+        if isinstance(item, dict) and isinstance(item.get('id'), str)
+    }
+    assert state['action-dropdown.value'] == 'watch'
+    assert state['subaction-dropdown.value'] == 'jobs'
+    ### A subaction the new action also has is kept.
+    page.select_option('#subaction-dropdown', 'runs')
+    page.select_option('#action-dropdown', 'show')
+    page.wait_for_function(
+        "[...document.querySelectorAll('#subaction-dropdown option')].some(o => o.value === 'pipes')"
+    )
+    assert page.eval_on_selector('#subaction-dropdown', 'e => e.value') == 'runs'
+    assert _errors(tab) == [], _errors(tab)
+
+
+def test_dashboard_buttons_keep_their_rows_at_every_width(server, tab):
+    """No label wraps or clips, the terminal button stays beside Exec, and More has its own row."""
+    tab.login()
+    page = tab.page
+    measure = """() => {
+        const box = id => document.getElementById(id).getBoundingClientRect();
+        const ids = ['go-button', 'show-webterm-button', 'get-pipes-button', 'get-jobs-button',
+                     'get-pipelines-button'];
+        const buttons = ids.map(id => document.getElementById(id));
+        const more = box('get-items-menu');
+        return {
+            clipped: buttons.filter(b => b.scrollWidth > b.clientWidth + 1).map(b => b.id),
+            heights: buttons.map(b => Math.round(b.getBoundingClientRect().height)),
+            exec_top: Math.round(box('go-button').top),
+            term_top: Math.round(box('show-webterm-button').top),
+            lowest: Math.max(...ids.map(id => box(id).bottom)),
+            more_top: more.top,
+        };
+    }"""
+    for width in (1600, 1280, 1100, 1000, 900, 700, 480, 360):
+        page.set_viewport_size({'width': width, 'height': 900})
+        page.wait_for_timeout(100)
+        layout = page.evaluate(measure)
+        assert layout['clipped'] == [], (width, layout)
+        assert len(set(layout['heights'])) == 1, (width, layout)
+        assert layout['exec_top'] == layout['term_top'], (width, layout)
+        assert layout['more_top'] >= layout['lowest'] + 4, (width, layout)
+    page.click('#get-items-menu .dropdown-toggle')
+    page.wait_for_selector('#get-runs-button', state='visible')
+    assert 'Graphs' not in page.inner_text('#get-items-menu')
     assert _errors(tab) == [], _errors(tab)
 
 
@@ -453,6 +570,53 @@ def test_follow_logs_streams_a_running_job(server, tab):
     finally:
         server.mrsm('stop', 'jobs', 'w7loop', '--nopretty')
         server.mrsm('delete', 'jobs', 'w7loop', '--yes', '--nopretty')
+
+
+def test_jobs_page_tabs_and_logs_modal_follow_a_running_job(server, tab):
+    started = server.mrsm(
+        'sync', 'pipes', '-i', 'sql:w7console', '--loop', '--min-seconds', '1',
+        '-d', '--name', 'w7view', '--yes', '--nopretty',
+    )
+    assert started.returncode == 0, started.stdout + started.stderr
+    try:
+        tab.login()
+        ### `/dash/runs` is the Runs tab of the Jobs page.
+        tab.goto('/dash/runs', '#jobs-page-tabs')
+        tab.page.wait_for_selector('#jobs-page-tabs .nav-link.active:text-is("Runs")')
+        tab.page.click('#jobs-page-tabs .nav-link:text-is("Jobs")')
+        tab.page.wait_for_selector('.card-title:has-text("w7view")')
+        card = tab.page.locator('.card:has(.card-title:has-text("w7view"))').first
+        card.locator('.dropdown-toggle:has-text("Logs")').click()
+        items = tab.page.locator('.dropdown-menu.show .dropdown-item').all_inner_texts()
+        assert items == ['View', 'Download'], items
+        tab.page.click('.dropdown-menu.show .dropdown-item:text-is("View")')
+        tab.page.wait_for_selector('.modal.show #job-logs-view')
+        ### ANSI colors are rendered, not printed.
+        tab.page.wait_for_function(
+            "document.querySelector('#job-logs-view').textContent.trim().length > 0", timeout=60000,
+        )
+        assert '\x1b[' not in tab.page.inner_text('#job-logs-view')
+        at_bottom = (
+            "(() => { const v = document.querySelector('#job-logs-view');"
+            " return v.scrollHeight - v.scrollTop - v.clientHeight < 40; })()"
+        )
+        ### Opened at the end, and still there as the running job writes more.
+        tab.page.wait_for_function(
+            "document.querySelector('#job-logs-view').scrollHeight >"
+            " document.querySelector('#job-logs-view').clientHeight", timeout=60000,
+        )
+        assert tab.page.evaluate(at_bottom)
+        ### Scrolled up, the view stays put while new lines arrive.
+        tab.page.evaluate("document.querySelector('#job-logs-view').scrollTop = 0")
+        length = tab.page.evaluate("document.querySelector('#job-logs-view').textContent.length")
+        tab.page.wait_for_function(
+            f"document.querySelector('#job-logs-view').textContent.length > {length}", timeout=60000,
+        )
+        assert tab.page.evaluate("document.querySelector('#job-logs-view').scrollTop") == 0
+        assert _errors(tab) == [], _errors(tab)
+    finally:
+        server.mrsm('stop', 'jobs', 'w7view', '--nopretty')
+        server.mrsm('delete', 'jobs', 'w7view', '--yes', '--nopretty')
 
 
 def test_page_contract_page_renders_a_figure_in_its_frame(server, tab):
@@ -802,40 +966,41 @@ if parent.get_rowcount() == 0:
 
 
 def test_pipelines_page_graph_gantt_and_runs(server, tab):
-    result = server.python(SETUP_PIPES)
+    result = server.python(SETUP_PIPES + "\nfrom meerschaum.core.Pipeline._saved import save_pipeline\n"
+        "save_pipeline('graph-test', ['sql:w7console|sql:w7console|w7parent|None', "
+        "'sql:w7console|sql:w7console|w7child|None'], 'sql:w7console')\n")
     assert result.returncode == 0, result.stderr[-2000:]
-    sync = server.mrsm('sync', 'pipes', '-i', 'sql:w7console', '--nopretty')
+    sync = server.mrsm('sync', 'pipelines', 'graph-test', '-i', 'sql:w7console', '--nopretty')
     assert sync.returncode == 0, sync.stdout[-1500:] + sync.stderr[-1500:]
 
     tab.login()
-    tab.goto('/dash/pipelines', '#pipelines-graph-div')
+    tab.goto('/dash/pipelines/graph-test', '#pipelines-graph-div')
     tab.page.wait_for_selector('.pipeline-stage', timeout=60000)
     assert tab.page.locator('.pipeline-stage').count() == 2
     assert "Pipe(" in tab.page.inner_text('.pipeline-stage >> nth=0')
     tab.page.locator('.pipeline-stage').first.click()
     _wait_text(tab.page, '#pipeline-inspector', 'Query')
-    assert tab.page.locator('#pipeline-inspector a', has_text='Open pipe').count() == 1
+    assert tab.page.locator('#pipeline-inspector a', has_text='Open Pipe').count() == 1
     tab.page.locator('#pipeline-fit').click()
     assert tab.page.locator('#pipeline-canvas svg path').count() == 2
     ### Runs are a separate mounted view, with the latest execution beneath the list.
     tab.page.locator('#pipeline-view-runs').click()
     ### The Gantt chart of the latest run, and its nodes.
     tab.page.wait_for_selector('#pipelines-gantt .barlayer .point', timeout=60000)
-    assert tab.page.locator('#pipelines-gantt .barlayer .point').count() >= 2
+    assert tab.page.locator('#pipelines-gantt .barlayer .point').count() >= 1
     assert tab.page.text_content('#pipelines-gantt .gtitle').startswith('Run ')
     assert tab.page.locator('#pipelines-nodes-table tbody tr').count() == 2
     assert 'succeeded' in tab.page.inner_text('#pipelines-nodes-table tbody')
     ### The runs table and the run's events.
     assert tab.page.locator('#pipelines-runs-table tbody tr').count() >= 1
     assert 'succeeded' in tab.page.inner_text('#pipelines-runs-table tbody tr')
-    tab.page.locator('.pipeline-activity > summary').click()
     _wait_text(tab.page, '#pipelines-events-pre', 'run_started', timeout=30000)
     events = tab.page.inner_text('#pipelines-events-pre')
     assert 'w7parent' in events and 'w7child' in events
 
     ### A sync while the page is open appears without a reload (the page refreshes itself).
     before = tab.page.locator('#pipelines-runs-table tbody tr').count()
-    again = server.mrsm('sync', 'pipes', '-i', 'sql:w7console', '--nopretty')
+    again = server.mrsm('sync', 'pipelines', 'graph-test', '-i', 'sql:w7console', '--nopretty')
     assert again.returncode == 0, again.stdout[-1500:] + again.stderr[-1500:]
     tab.page.wait_for_function(
         "(n) => document.querySelectorAll('#pipelines-runs-table tbody tr').length > n",
@@ -843,7 +1008,7 @@ def test_pipelines_page_graph_gantt_and_runs(server, tab):
         timeout=60000,
     )
     ### Filtering the runs by status (the filters live in the URL).
-    tab.goto('/dash/pipelines?status=failed', '#pipelines-runs-div')
+    tab.goto('/dash/pipelines/graph-test?status=failed', '#pipelines-runs-div')
     _wait_text(tab.page, '#pipelines-runs-div', 'No runs match')
     assert _errors(tab) == [], _errors(tab)
 

@@ -665,7 +665,11 @@ class Pipeline:
 
     def __repr__(self) -> str:
         if self.name:
+            import sys
             from meerschaum.config import get_config
+            if hasattr(sys, 'ps1'):
+                from meerschaum.utils.formatting._pipes import pipeline_repr
+                return pipeline_repr(self.name, str(self.instance))
             suffix = f', instance={str(self.instance)!r}' if str(self.instance) != get_config('meerschaum', 'instance') else ''
             return f'Pipeline({self.name!r}{suffix})'
         parts = [repr(self._targets)] if self._targets else [repr(self._filters)]

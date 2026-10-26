@@ -23,6 +23,7 @@ from meerschaum.api.dash.components import (
     download_logs,
     refresh_jobs_interval,
 )
+from meerschaum.api.dash.jobs import job_logs_modal
 from meerschaum.api.dash.keys import (
     keys_lists_content,
     dropdown_tab_content,
@@ -34,6 +35,7 @@ layout = html.Div(
         keys_lists_content,
         download_dataframe,
         download_logs,
+        job_logs_modal,
         refresh_jobs_interval,
         navbar,
         html.Div(

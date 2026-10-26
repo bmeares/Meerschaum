@@ -22,6 +22,7 @@ from meerschaum.api.dash.sessions import get_username_from_session
 from meerschaum.utils.packages import attempt_import, import_dcc, import_html
 from meerschaum.api.dash.components import alert_from_success_tuple, build_cards_grid
 from meerschaum.api.dash.jobs import (
+    STATUS_EMOJI,
     build_job_card,
     build_archived_run_card,
     is_automatic_job,
@@ -272,6 +273,10 @@ def refresh_jobs_on_interval(
     )
 
 
+#: The tabs of the Jobs page (`/dash/runs` opens `runs`).
+JOBS_PAGE_TABS = ('jobs', 'runs')
+
+
 @dash_app.callback(
     Output('job-output-div', 'children'),
     Input('job-location', 'pathname'),
@@ -282,7 +287,8 @@ def render_job_page_from_url(
     session_data: Optional[Dict[str, Any]],
 ):
     """
-    Load the `/dash/jobs/{name}` page.
+    Load the Jobs page (`/dash/jobs`, or `/dash/runs` for its Runs tab) or one job's card
+    (`/dash/jobs/{name}`).
     """
     is_runs = str(pathname).startswith('/dash/runs')
     if not (str(pathname).startswith('/dash/jobs') or is_runs):
@@ -293,22 +299,17 @@ def render_job_page_from_url(
 
     job_name = pathname.replace('/dash/runs' if is_runs else '/dash/jobs', '').lstrip('/').rstrip('/')
     if not job_name:
-        jobs = get_jobs(executor_keys='local', combine_local_and_systemd=True)
-        cards = [
-            build_job_card(job, authenticated=authenticated, include_follow=False)
-            for job in jobs.values()
-            if is_automatic_job(job) == is_runs and job_visible_to_session(job, session_id)
+        return [
+            html.Br(),
+            dbc.Tabs(
+                [dbc.Tab(label='Jobs', tab_id='jobs'), dbc.Tab(label='Runs', tab_id='runs')],
+                id='jobs-page-tabs',
+                active_tab=('runs' if is_runs else 'jobs'),
+            ),
+            html.Br(),
+            html.Div(id='jobs-page-tab-content'),
+            html.Br(),
         ]
-        if is_runs and authenticated:
-            from meerschaum.api.dash.execute import execution_request
-            try:
-                records = execution_request('/execute/runs', get_username_from_session(session_id)) or []
-                cards.extend(build_archived_run_card(record) for record in records)
-            except Exception as exc:
-                cards.append(alert_from_success_tuple((False, f'Unable to load retained summaries: {exc}')))
-        return [html.Br(), html.H3('Runs' if is_runs else 'Jobs'),
-                html.A('Jobs' if is_runs else 'Runs', href='/dash/jobs' if is_runs else '/dash/runs'),
-                build_cards_grid(cards, 3), html.Br()]
 
     job = _get_job(job_name)
     if not job.exists() or not job_visible_to_session(job, session_id):
@@ -322,6 +323,175 @@ def render_job_page_from_url(
         build_job_card(job, authenticated=authenticated, include_follow=False),
         html.Br(),
     ]
+
+
+@dash_app.callback(
+    Output('jobs-page-tab-content', 'children'),
+    Input('jobs-page-tabs', 'active_tab'),
+    State('session-store', 'data'),
+)
+def render_jobs_page_tab(active_tab: Optional[str], session_data: Optional[Dict[str, Any]]):
+    """
+    Build the cards of the Jobs page's active tab.
+    """
+    if active_tab not in JOBS_PAGE_TABS:
+        raise PreventUpdate
+    return build_jobs_tab(active_tab == 'runs', (session_data or {}).get('session-id', None))
+
+
+def build_jobs_tab(is_runs: bool, session_id: Optional[str]):
+    """
+    The cards of persistent jobs, or of the console's runs (automatic execution workers and the
+    summaries retained after their output expired).
+    """
+    authenticated = is_session_authenticated(str(session_id))
+    jobs = get_jobs(executor_keys='local', combine_local_and_systemd=True)
+    cards = [
+        build_job_card(job, authenticated=authenticated, include_follow=False)
+        for job in jobs.values()
+        if is_automatic_job(job) == is_runs and job_visible_to_session(job, session_id)
+    ]
+    if is_runs and authenticated:
+        from meerschaum.api.dash.execute import execution_request
+        try:
+            records = execution_request('/execute/runs', get_username_from_session(session_id)) or []
+            cards.extend(build_archived_run_card(record) for record in records)
+        except Exception as exc:
+            cards.append(alert_from_success_tuple((False, f'Unable to load retained summaries: {exc}')))
+    if not cards:
+        return html.P('No runs.' if is_runs else 'No jobs.', className='text-muted')
+    return build_cards_grid(cards, 3)
+
+
+def _read_job_logs(job_name: str, session_id: Optional[str]) -> Optional[Dict[str, Any]]:
+    """The logs and status of a job the session may read, or `None`."""
+    try:
+        job = _get_job(job_name)
+    except Exception:
+        return None
+    if job is None or not job.exists() or not job_visible_to_session(job, session_id):
+        return None
+    text = job.get_logs() or ''
+    return {'job': job_name, 'text': text, 'status': job.status, 'digest': _digest(text)}
+
+
+def _digest(text: str) -> str:
+    """Tell whether the logs changed (a rotated log may keep its length)."""
+    import hashlib
+    return hashlib.sha1(text.encode('utf-8', 'replace')).hexdigest()
+
+
+@dash_app.callback(
+    Output('job-logs-modal', 'is_open'),
+    Output('job-logs-modal-title', 'children'),
+    Output('job-logs-meta', 'data'),
+    Output('job-logs-text', 'data'),
+    Output('job-logs-interval', 'disabled'),
+    Input({'type': 'job-view-logs-button', 'index': ALL}, 'n_clicks'),
+    Input('job-logs-interval', 'n_intervals'),
+    Input('job-logs-modal', 'is_open'),
+    State('job-logs-meta', 'data'),
+    State('session-store', 'data'),
+    prevent_initial_call=True,
+)
+def view_job_logs(view_clicks, n_intervals, is_open, meta, session_store_data):
+    """
+    "Logs" > "View": open the logs modal on the job's logs, and re-read them while the job runs
+    (only what changed is sent; the browser keeps its scroll position unless it follows the end).
+    """
+    ctx = dash.callback_context
+    return job_logs_outputs(
+        ctx.triggered_id,
+        ctx.triggered[0]['value'] if ctx.triggered else None,
+        is_open,
+        meta,
+        session_store_data,
+    )
+
+
+def job_logs_outputs(trigger_id, triggered_value, is_open, meta, session_store_data):
+    """
+    The outputs of `view_job_logs`: the modal's state, title, the meta and text stores, and
+    whether the refresh interval is disabled.
+    """
+    if trigger_id == 'job-logs-modal':
+        if is_open:
+            raise PreventUpdate
+        return no_update, no_update, None, None, True
+
+    ### Job logs may contain connector URIs and query text.
+    if not is_state_authenticated(session_store_data):
+        raise PreventUpdate
+    session_id = (session_store_data or {}).get('session-id')
+
+    if isinstance(trigger_id, dict):
+        ### A card appeared (no click).
+        if not triggered_value:
+            raise PreventUpdate
+        logs = _read_job_logs(trigger_id['index'], session_id)
+        if logs is None:
+            raise PreventUpdate
+        status = logs['status']
+        return (
+            True,
+            build_logs_modal_title(logs['job'], status),
+            {'job': logs['job'], 'status': status, 'digest': logs['digest']},
+            {'job': logs['job'], 'text': logs['text'], 'opened': time.time()},
+            status not in ('running', 'paused'),
+        )
+
+    if not is_open or not meta:
+        return no_update, no_update, no_update, no_update, True
+    logs = _read_job_logs(meta['job'], session_id)
+    if logs is None:
+        return no_update, no_update, no_update, no_update, True
+    status, digest = logs['status'], logs['digest']
+    if status == meta.get('status') and digest == meta.get('digest'):
+        raise PreventUpdate
+    return (
+        no_update,
+        build_logs_modal_title(logs['job'], status) if status != meta.get('status') else no_update,
+        {'job': logs['job'], 'status': status, 'digest': digest},
+        {'job': logs['job'], 'text': logs['text']} if digest != meta.get('digest') else no_update,
+        status not in ('running', 'paused'),
+    )
+
+
+def build_logs_modal_title(job_name: str, status: str):
+    """The logs modal's title: the job's status emoji and name."""
+    emoji = STATUS_EMOJI.get(status, STATUS_EMOJI['stopped'])
+    return [html.Span(emoji, title=str(status).capitalize()), ' ', html.B(job_name)]
+
+
+### Render the logs with their ANSI colors through the Pipelines page's output renderer
+### (`assets/pipeline_output.js`): it opens at the end and follows new lines only while the
+### view is scrolled to the bottom, so scrolling up to read history is never interrupted.
+dash_app.clientside_callback(
+    """
+    function(data){
+        if (!data) return dash_clientside.no_update;
+        function render(attempt){
+            const view = document.getElementById('job-logs-view');
+            // The modal mounts its body as it opens.
+            if (!view){
+                if (attempt < 40) setTimeout(() => render(attempt + 1), 25);
+                return;
+            }
+            if (data.opened && view._mrsmOpened !== data.opened){
+                view._mrsmOpened = data.opened;
+                view._mrsmText = null;
+                view._mrsmFollow = true;
+            }
+            if (window.mrsmRenderPipelineOutput) window.mrsmRenderPipelineOutput(view, data.text);
+            else { view.textContent = data.text; view.scrollTop = view.scrollHeight; }
+        }
+        render(0);
+        return dash_clientside.no_update;
+    }
+    """,
+    Output('job-logs-dummy', 'children'),
+    Input('job-logs-text', 'data'),
+)
 
 
 @dash_app.callback(

@@ -2,19 +2,29 @@
 # vim:fenc=utf-8
 
 """
-The Pipeline workspace and run history, backed by the Syncing Engine.
+The Pipelines pages, backed by the Syncing Engine:
+
+- `/dash/pipelines`: the Pipelines registered on the console's global instance (the registry);
+- `/dash/pipelines/new`: the New pipeline stepper (Name, Members, Traversal, Review);
+- `/dash/pipelines/explore?pipe=…`: the connected graph of one Pipe, read-only;
+- `/dash/pipelines/<name>`: one Pipeline (Canvas and Runs, read-only until Edit).
+
+Each is built per request (`route`), so it carries its registry and name.
 """
+
+from urllib.parse import parse_qs, urlparse, unquote, urlencode, quote
 
 from meerschaum.api import CHECK_UPDATE
 from meerschaum.utils.packages import import_html, import_dcc
 from meerschaum.api.dash.components import build_pages_navbar
-from meerschaum.api.dash.pipeline_management import build_pipeline_controls
+from meerschaum.api.dash.pipeline_management import (
+    build_member_panel, build_detail_header, build_manage_dialogs,
+)
 html, dcc = import_html(check_update=CHECK_UPDATE), import_dcc(check_update=CHECK_UPDATE)
 import dash_bootstrap_components as dbc
 
 from meerschaum.connectors import instance_types
 from meerschaum.utils.misc import get_connector_labels
-from meerschaum.api.dash.engine import get_instance
 
 STATUS_OPTIONS = [
     {'label': 'Any status', 'value': 'any'},
@@ -23,193 +33,289 @@ STATUS_OPTIONS = [
     {'label': 'Failed', 'value': 'failed'},
 ]
 
-layout = [
-    build_pages_navbar(),
-    dcc.Location('pipelines-location', refresh=False),
-    dcc.Interval(id='pipelines-interval', interval=(15 * 1000), n_intervals=0),
-    html.Main(
-        [
-            html.Div(
-                [
-                    html.H3('Pipelines', style={'display': 'inline-block'}),
-                    dbc.Button(
-                        'Refresh',
-                        color='black',
-                        size='sm',
-                        id='pipelines-refresh-button',
-                        title='Refresh',
-                        style={'margin-left': '10px'},
-                    ),
-                ],
-            ),
-            html.Div(id='pipelines-alert-div'),
-            dcc.Store(id='pipeline-visible-refs', data=[]),
-            dcc.Store(id='pipeline-selection'),
-            dcc.Store(id='pipeline-selected-run'),
-            dcc.Store(id='pipeline-inspector-result'),
-            html.Div(id='pipeline-inspector-guard', hidden=True),
-            dcc.Store(id='pipeline-context'),
-            dcc.Store(id='pipeline-node-run'),
-            dcc.Store(id='pipeline-node-runs', data=[]),
-            dcc.Store(id='pipeline-node-events'),
-            dcc.Store(id='pipeline-node-statuses', data={}),
-            dcc.Store(id='pipeline-analysis'),
-            dcc.Store(id='pipeline-stage-statuses', data={}),
-            html.Div(id='pipeline-stage-status-dummy', hidden=True),
-            ### Live runs: the run to follow over `/engine/runs/{run_id}/events/stream`, which
-            ### runs stream (`assets/pipeline_events.js`), and the refresh its events ask for.
-            dcc.Store(id='pipeline-run-follow', data=None),
-            dcc.Store(id='pipeline-run-streams', data={}),
-            dcc.Store(id='pipeline-run-tick', data=0),
-            html.Div(id='pipeline-run-follow-dummy', hidden=True),
-            dcc.Store(id='pipeline-focus-options', data=[]),
-            build_pipeline_controls(html.Div([
-                html.Details([
-                    html.Summary('Find pipes'),
-                    html.Div([
-                        dcc.Dropdown(id='pipeline-focus-connector', options=[],
-                                     placeholder='Connector keys', clearable=True),
-                        dcc.Dropdown(id='pipeline-focus-metric', options=[],
-                                     placeholder='Metric keys', clearable=True),
-                        dcc.Dropdown(id='pipeline-focus-location', options=[],
-                                     placeholder='Location keys', clearable=True),
-                    ], className='pipeline-key-filters'),
-                    dcc.Dropdown(id='pipeline-focus', options=[],
-                                 placeholder='Select a pipe to focus its pipeline',
-                                 className='pipeline-focus', clearable=True),
-                    dbc.Checkbox(id='pipeline-standalone', label='Include standalone pipes', value=False),
-                ], className='pipeline-find'),
-            ], className='pipeline-filter-toolbar')),
+#: Path segments that are pages, not Pipeline names.
+RESERVED = ('new', 'explore')
+
+
+def _query(href):
+    return parse_qs(urlparse(href or '').query)
+
+
+def _registry(query):
+    from meerschaum.api.dash.engine import get_instance
+    return str(get_instance(query.get('instance', [None])[0]))
+
+
+def _instance_options():
+    return [{'label': key, 'value': key} for key in get_connector_labels(*instance_types)]
+
+
+def _navbar(registry):
+    navbar = build_pages_navbar(instance_select=True)
+    for component in _walk(navbar):
+        if getattr(component, 'id', None) == 'pages-instance-select':
+            component.value = registry
+    return navbar
+
+
+def _walk(node):
+    if isinstance(node, (list, tuple)):
+        for child in node:
+            yield from _walk(child)
+        return
+    if node is None or isinstance(node, (str, int, float)):
+        return
+    yield node
+    yield from _walk(getattr(node, 'children', None))
+
+
+def route(pathname, href=None):
+    """The layout of a Pipelines path. Legacy `?pipeline=` / `?name=` links redirect."""
+    query = _query(href)
+    rest = (pathname or '')[len('/dash/pipelines'):].strip('/')
+    if not rest:
+        legacy = (query.get('pipeline') or query.get('name') or [None])[0]
+        if legacy:
+            keep = {key: values[0] for key, values in query.items()
+                    if key in ('instance', 'run_id', 'run') and values and values[0]}
+            if 'run' in keep:
+                keep['run_id'] = keep.pop('run')
+            target = '/dash/pipelines/' + quote(legacy, safe='') + (('?' + urlencode(keep)) if keep else '')
+            return [html.Div(**{'data-mrsm-redirect': target})]
+    registry = _registry(query)
+    if not rest:
+        layout = list_layout(registry)
+    elif rest == 'new':
+        layout = new_layout(registry, query)
+    elif rest == 'explore':
+        layout = explore_layout(registry, query)
+    else:
+        layout = detail_layout(unquote(rest.split('/', 1)[0]), registry)
+    return _with_instance_alert(layout, query)
+
+
+def _with_instance_alert(layout, query):
+    """A refused (or invalid) requested or global instance is named above the page."""
+    from meerschaum.api.dash.engine import instance_problem
+    problem = instance_problem(query.get('instance', [None])[0])
+    if not problem:
+        return layout
+    main = layout[-1]
+    main.children = [dbc.Alert(problem, color='danger', id='pipelines-instance-alert',
+                               className='pipelines-instance-alert')] + list(main.children)
+    return layout
+
+
+def list_layout(registry):
+    """One-column cards of the registry's Pipelines, with New pipeline and Find Pipe above."""
+    return [
+        _navbar(registry),
+        dcc.Location('pipelines-list-location', refresh=False),
+        html.Main([
             html.Div([
-                html.Button('Workspace', id='pipeline-view-workspace', role='tab', **{'aria-selected':'true'}),
-                html.Button('Runs', id='pipeline-view-runs', role='tab', **{'aria-selected':'false'}),
-            ], className='pipeline-view-tabs', role='tablist', **{'aria-label':'Pipeline views'}),
+                html.H3('Pipelines'),
+                dbc.Button('New pipeline', href='/dash/pipelines/new', size='sm', id='pipelines-new-button'),
+                dcc.Dropdown(id='pipelines-find-pipe', options=[], placeholder='Find Pipe',
+                             className='pipelines-find-pipe', clearable=True),
+            ], className='pipelines-list-header'),
+            html.Div(id='pipelines-list-alert'),
+            dcc.Loading(html.Div(id='pipelines-list', className='pipelines-list'), type='dot'),
+        ], id='pipelines-list-page', className='pipeline-page', **{'data-registry': registry}),
+    ]
+
+
+def new_layout(registry, query):
+    """The New pipeline stepper; nothing is saved before Create."""
+    members = [ref for value in query.get('members', []) for ref in value.split(',') if ref]
+    steps = [('name', 'Name'), ('members', 'Members'), ('traversal', 'Traversal'), ('review', 'Review')]
+    return [
+        _navbar(registry),
+        dcc.Location('pipeline-new-location', refresh=False),
+        dcc.Store(id='pipelines-navigate'),
+        dcc.Store(id='pipeline-new-prefill', data={'members': members, 'registry': registry}),
+        dcc.Store(id='pipeline-new-drafts', storage_type='local'),
+        dcc.Store(id='pipeline-new-draft', data=None),
+        html.Main([
+            html.Div([
+                html.H3('New pipeline'),
+                dbc.Badge(registry, color='secondary', className='pipeline-registry-badge'),
+            ], className='pipelines-list-header'),
+            html.Div([
+                dbc.Button('Resume draft', id='pipeline-new-resume', size='sm', color='warning'),
+                dbc.Button('Start over', id='pipeline-new-start-over', size='sm', color='secondary'),
+            ], id='pipeline-new-restore', className='pipeline-draft-restore', hidden=True),
+            html.Ol([
+                html.Li(html.Button(label, id={'type': 'pipeline-new-step', 'index': key}, n_clicks=0),
+                        **{'data-step': key})
+                for key, label in steps
+            ], className='pipeline-stepper', id='pipeline-new-stepper'),
             html.Section([
-                html.Div([
+                dbc.Input(id='pipeline-new-name', placeholder='Pipeline name', size='sm', debounce=False),
+            ], className='pipeline-new-step', **{'data-step': 'name'}),
+            html.Section([
+                build_member_panel('pipeline-new', registry, _instance_options()),
+            ], className='pipeline-new-step', **{'data-step': 'members'}),
+            html.Section([
+                dbc.Row([
+                    dbc.Col([dbc.Checkbox(id='pipeline-new-parents', label='Include parents', value=False),
+                             dbc.Input(id='pipeline-new-parents-depth', type='number', min=1, step=1,
+                                       placeholder='All levels', size='sm')], md=6),
+                    dbc.Col([dbc.Checkbox(id='pipeline-new-children', label='Include children', value=False),
+                             dbc.Input(id='pipeline-new-children-depth', type='number', min=1, step=1,
+                                       placeholder='All levels', size='sm')], md=6),
+                ], className='g-3'),
+            ], className='pipeline-new-step', **{'data-step': 'traversal'}),
+            html.Section([
+                dcc.Loading(html.Div(id='pipeline-new-review'), type='dot'),
+            ], className='pipeline-new-step', **{'data-step': 'review'}),
+            html.Div(id='pipeline-new-alert'),
+            html.Div([
+                dbc.Button('Back', id='pipeline-new-back', size='sm', color='secondary'),
+                dbc.Button('Next', id='pipeline-new-next', size='sm'),
+                dbc.Checkbox(id='pipeline-new-apply-tags', label='Apply these tags', value=True,
+                             className='pipeline-new-review-only'),
+                dbc.Button('Create', id='pipeline-new-create', size='sm', color='success',
+                           className='pipeline-new-review-only'),
+            ], className='pipeline-new-actions'),
+        ], id='pipeline-new-page', className='pipeline-page', **{'data-step': 'name', 'data-registry': registry}),
+    ]
+
+
+def explore_layout(registry, query):
+    """One Pipe's connected graph, read-only, with Save as Pipeline."""
+    ref = (query.get('pipe') or [''])[0]
+    return [
+        _navbar(registry),
+        dcc.Location('pipeline-explore-location', refresh=False),
+        dcc.Store(id='pipeline-explore-ref', data=ref),
+        html.Main([
+            html.Div([
+                html.H3(id='pipeline-explore-title'),
+                dbc.Button('Save as Pipeline', id='pipeline-explore-save', size='sm', href='/dash/pipelines/new'),
+            ], className='pipelines-list-header'),
+            dcc.Loading(html.Div(id='pipeline-explore-graph', className='pipeline-workspace pipeline-explore'),
+                        type='dot'),
+        ], id='pipeline-explore-page', className='pipeline-page', **{'data-registry': registry}),
+    ]
+
+
+def detail_layout(name, registry):
+    """One Pipeline: header, Canvas | Runs, Edit mode, output and Manage dialogs."""
+    return [
+        _navbar(registry),
+        dcc.Location('pipelines-location', refresh=False),
+        dcc.Store(id='pipelines-navigate'),
+        dcc.Interval(id='pipelines-interval', interval=(15 * 1000), n_intervals=0),
+        html.Main(
+            [
+                build_detail_header(name, registry),
+                html.Div(id='pipelines-alert-div'),
+                html.Div(id='pipeline-run-alert'),
+                html.Div(id='pipeline-manage-alert'),
+                html.Div(id='pipeline-edit-alert'),
+                ### Compatibility: the selected Pipeline and its saved name, fixed by the path.
+                dcc.Dropdown(id='pipeline-saved-name', options=[{'label': name, 'value': name}],
+                             value=name, clearable=False, style={'display': 'none'}),
+                dbc.Input(id='pipeline-name-input', value=name, type='hidden'),
+                dcc.Store(id='pipeline-definition', data=None),
+                dcc.Store(id='pipeline-definitions', data={}),
+                dcc.Store(id='pipeline-live-run', data=None),
+                html.Div(id='pipeline-run-stream-dummy', hidden=True),
+                dcc.Store(id='pipeline-edit-mode', data=False),
+                html.Div(id='pipeline-edit-mode-dummy', hidden=True),
+                dcc.Store(id='pipeline-edge-proposal', data=None),
+                dcc.Store(id='pipeline-canvas-prefs', storage_type='local'),
+                dcc.Store(id='pipeline-visible-refs', data=[]),
+                dcc.Store(id='pipeline-selection'),
+                dcc.Store(id='pipeline-selected-run'),
+                dcc.Store(id='pipeline-inspector-result'),
+                html.Div(id='pipeline-inspector-guard', hidden=True),
+                dcc.Store(id='pipeline-context'),
+                dcc.Store(id='pipeline-node-run'),
+                dcc.Store(id='pipeline-node-runs', data=[]),
+                dcc.Store(id='pipeline-node-events'),
+                ### The selected run of this Pipeline: its members' outputs are scoped to it.
+                dcc.Store(id='pipeline-current-run', data=None),
+                dcc.Store(id='pipeline-member-output', data=None),
+                html.Div(id='pipeline-current-run-dummy', hidden=True),
+                dcc.Store(id='pipeline-node-statuses', data={}),
+                dcc.Store(id='pipeline-analysis'),
+                dcc.Store(id='pipeline-stage-statuses', data={}),
+                html.Div(id='pipeline-stage-status-dummy', hidden=True),
+                ### Live runs: the run to follow over `/engine/runs/{run_id}/events/stream`, which
+                ### runs stream (`assets/pipeline_events.js`), and the refresh its events ask for.
+                dcc.Store(id='pipeline-run-follow', data=None),
+                dcc.Store(id='pipeline-run-streams', data={}),
+                dcc.Store(id='pipeline-run-tick', data=0),
+                html.Div(id='pipeline-run-follow-dummy', hidden=True),
                 html.Div([
                     html.Div([
-                        html.Button(label, id='pipeline-mobile-' + value, role='tab',
-                                    **{'data-pane':value, 'aria-selected':str(value == 'graph').lower()})
-                        for value, label in [('graph','Graph'),('details','Pipe details'),('output','Output')]
-                    ], className='pipeline-mobile-tabs', role='tablist', **{'aria-label':'Workspace panels'}),
-                    html.Button('Exit fullscreen', id='pipeline-exit-fullscreen', className='pipeline-exit-fullscreen'),
-                ], className='pipeline-workspace-management'),
-                html.Details([
-                    html.Summary('Pipeline members'),
-                    html.P('Select existing Pipes, then save membership.'),
-                    dcc.Dropdown(id='pipeline-draft-members', options=[], multi=True, closeOnSelect=True,
-                                 placeholder='Explicit members (instance-qualified)'),
-                    dbc.Row([
-                        dbc.Col(dbc.Checkbox(id='pipeline-draft-parents', label='Include all parents', value=False)),
-                        dbc.Col(dbc.Checkbox(id='pipeline-draft-children', label='Include all children', value=False)),
-                    ]),
-                    dbc.Button('Undo', id='pipeline-draft-undo', size='sm', class_name='me-2'),
-                    dbc.Button('Redo', id='pipeline-draft-redo', size='sm', class_name='me-2'),
-                    dbc.Button('Save draft', id='pipeline-draft-save', size='sm', class_name='me-2'),
-                    dbc.Button('Discard draft', id='pipeline-draft-discard', size='sm', color='secondary'),
-                    html.Div(id='pipeline-draft-notice'),
+                        html.Button('Canvas', id='pipeline-view-workspace', role='tab', **{'aria-selected': 'true'}),
+                        html.Button('Runs', id='pipeline-view-runs', role='tab', **{'aria-selected': 'false'}),
+                    ], className='pipeline-view-tabs', role='tablist', **{'aria-label': 'Pipeline views'}),
+                    dbc.Button('Output', id='pipeline-view-output', size='sm', color='secondary', disabled=True),
+                ], className='pipeline-tabs-row'),
+                html.Section([
+                    html.Div([
+                        html.Details([
+                            html.Summary('Add Pipe', title='Close'),
+                            build_member_panel('pipeline', registry, _instance_options()),
+                            dbc.Row([
+                                dbc.Col(dbc.Checkbox(id='pipeline-draft-parents', label='Include parents', value=False)),
+                                dbc.Col(dbc.Checkbox(id='pipeline-draft-children', label='Include children', value=False)),
+                            ]),
+                        ], id='pipeline-draft-editor'),
+                        dcc.Store(id='pipeline-draft'),
+                        dcc.Store(id='pipeline-layout-draft'),
+                        html.Div(id='pipelines-graph-div'),
+                        html.Aside(id='pipeline-inspector', hidden=True),
+                        html.Div([
+                            html.Div([
+                                dbc.Button('Cancel sync', id='pipeline-cancel-node-run', color='danger', outline=True,
+                                           size='sm', style={'display': 'none'}),
+                                html.Button('×', id='pipeline-output-close', title='Close output'),
+                            ], className='pipeline-output-header'),
+                            html.Div([
+                                dcc.Dropdown(id='pipeline-output-tab', options=[], placeholder='Pipe output',
+                                             clearable=False),
+                                html.Div(id='pipeline-node-run-label'),
+                                html.Div(id='pipeline-cancel-alert'),
+                                html.Div(id='pipeline-node-stream-dummy', hidden=True),
+                                html.Pre(id='pipeline-node-output', className='pipelines-events'),
+                                html.Div(id='pipeline-node-alert'),
+                            ], id='pipeline-pipe-output'),
+                            html.Div([html.Div(id='pipeline-command-label'),
+                                      html.Pre(id='pipeline-command-output', className='pipelines-events')],
+                                     id='pipeline-whole-output'),
+                        ], id='pipeline-output-dock', className='pipeline-output-empty pipeline-output-expanded'),
+                    ], className='pipeline-workspace', id='pipeline-workspace',
+                        **{'data-pane': 'graph', 'data-edit': 'false', 'data-dirty': 'false'}),
+                ], id='pipeline-workspace-panel', role='tabpanel', **{'aria-labelledby': 'pipeline-view-workspace'}),
+                html.Section([
+                    html.Details([html.Summary('Filters'), dbc.Card(dbc.CardBody(dbc.Row([
+                        dbc.Col(dbc.Input(id='pipelines-run-id-input', placeholder='Run ID', type='text',
+                                          debounce=True, size='sm'), md=4),
+                        dbc.Col(dbc.Input(id='pipelines-pipe-input', placeholder="Pipe('sql:main', 'counts')",
+                                          type='text', debounce=True, size='sm'), md=4),
+                        dbc.Col(dbc.Select(id='pipelines-status-select', options=STATUS_OPTIONS, value='any',
+                                           size='sm', class_name='dbc_dark custom-select custom-select-sm'), md=2),
+                        dbc.Col(dbc.Button('Filter runs', id='pipelines-filter-button', size='sm',
+                                           color='primary', style={'width': '100%'}), md=2),
+                    ], className='g-2')))], className='pipeline-run-filters'),
+                    html.Div(id='pipelines-runs-div'),
+                    html.Div(id='pipeline-run-status'),
+                    html.Div(id='pipelines-gantt-div'),
                     html.Details([
-                        html.Summary('Find Pipes on another instance'),
-                        dcc.Dropdown(id='pipeline-add-instance', options=[{'label': key, 'value': key} for key in get_connector_labels(*instance_types)], value=str(get_instance()), clearable=False, placeholder='Instance'),
-                        dbc.Button('Find existing Pipes', id='pipeline-add-find', size='sm'),
-                        html.Details([html.Summary('Register a new Pipe'),
-                        dbc.Input(id='pipeline-add-connector', placeholder='Connector keys', size='sm'),
-                        dbc.Input(id='pipeline-add-metric', placeholder='Metric key', size='sm'),
-                        dbc.Input(id='pipeline-add-location', placeholder='Location key (optional)', size='sm'),
-                        dbc.Textarea(id='pipeline-add-parameters', value='{}', placeholder='Parameters JSON'),
-                        dbc.Button('Register new Pipe and add to draft', id='pipeline-add-register', size='sm'),
-                        ]),
-                        html.Div(id='pipeline-add-alert'),
-                    ]),
-                ], id='pipeline-draft-editor'),
-                dcc.Store(id='pipeline-draft'),
-                dcc.Store(id='pipeline-member-options', data={'options': []}),
-                dcc.Store(id='pipeline-layout-draft'),
-                html.Div(id='pipelines-graph-div'),
-                html.Aside(id='pipeline-inspector', hidden=True),
-                html.Div([
-                    html.Div([
-                        dbc.Button('Cancel sync', id='pipeline-cancel-node-run', color='danger', outline=True, size='sm', style={'display': 'none'}),
-                        html.Button('×', id='pipeline-output-close', title='Close output'),
-                    ], className='pipeline-output-header'),
-                    html.Div([
-                    dcc.Dropdown(id='pipeline-output-tab', options=[], placeholder='Select Pipe output', clearable=False),
-                    html.Div(id='pipeline-node-run-label'),
-                    html.Div(id='pipeline-cancel-alert'),
-                    html.Div(id='pipeline-node-stream-dummy', hidden=True),
-                    html.Pre(id='pipeline-node-output', className='pipelines-events'),
-                    html.Div(id='pipeline-node-alert'),
-                    ], id='pipeline-pipe-output'),
-                    html.Div([html.Div(id='pipeline-command-label'),
-                        html.Pre(id='pipeline-command-output', className='pipelines-events')], id='pipeline-whole-output'),
-                ], id='pipeline-output-dock', className='pipeline-output-empty pipeline-output-expanded'),
-                ], className='pipeline-workspace', id='pipeline-workspace', **{'data-pane':'graph'}),
-            ], id='pipeline-workspace-panel', role='tabpanel', **{'aria-labelledby':'pipeline-view-workspace'}),
-            html.Section([
-                html.H4('Runs'),
-                html.Details([html.Summary('Filters'), dbc.Card(
-                dbc.CardBody(
-                    dbc.Row(
-                        [
-                            dbc.Col(
-                                dbc.Input(
-                                    id='pipelines-run-id-input',
-                                    placeholder='Run ID',
-                                    type='text',
-                                    debounce=True,
-                                    size='sm',
-                                ),
-                                md=4,
-                            ),
-                            dbc.Col(
-                                dbc.Input(
-                                    id='pipelines-pipe-input',
-                                    placeholder="Find a pipe, e.g. Pipe('sql:main', 'counts')",
-                                    type='text',
-                                    debounce=True,
-                                    size='sm',
-                                ),
-                                md=4,
-                            ),
-                            dbc.Col(
-                                dbc.Select(
-                                    id='pipelines-status-select',
-                                    options=STATUS_OPTIONS,
-                                    value='any',
-                                    size='sm',
-                                    class_name='dbc_dark custom-select custom-select-sm',
-                                ),
-                                md=2,
-                            ),
-                            dbc.Col(
-                                dbc.Button(
-                                    'Filter runs',
-                                    id='pipelines-filter-button',
-                                    size='sm',
-                                    color='primary',
-                                    style={'width': '100%'},
-                                ),
-                                md=2,
-                            ),
-                        ],
-                        className='g-2',
-                    ),
-                ),
-            )], className='pipeline-run-filters'),
-                html.Div(id='pipelines-runs-div'),
-                html.H5('Selected run'),
-                html.Div(id='pipeline-run-status'),
-                html.Div(id='pipelines-gantt-div'),
-                html.Details([
-                    html.Summary('Sync activity'),
-                    dcc.Dropdown(id='pipeline-log-stage', options=[], value='',
-                                 placeholder='All stages', clearable=True),
-                    html.Pre('', id='pipelines-events-pre', className='pipelines-events'),
-                ], className='pipeline-activity'),
-            ], id='pipeline-runs-panel', role='tabpanel', **{'aria-labelledby':'pipeline-view-runs'}),
-            dcc.Store(id='pipelines-events-store', data={}),
-            html.Br(),
-        ],
-        id='pipelines-page', className='pipeline-page', **{'data-view':'workspace'},
-    ),
-]
+                        html.Summary('Output'),
+                        dcc.Dropdown(id='pipeline-log-stage', options=[], value='',
+                                     placeholder='All members', clearable=True),
+                        html.Pre('', id='pipelines-events-pre', className='pipelines-events'),
+                    ], className='pipeline-activity', open=True),
+                ], id='pipeline-runs-panel', role='tabpanel', **{'aria-labelledby': 'pipeline-view-runs'}),
+                dcc.Store(id='pipelines-events-store', data={}),
+                build_manage_dialogs(),
+            ],
+            id='pipelines-page', className='pipeline-page pipeline-detail-page',
+            **{'data-view': 'workspace', 'data-pipeline': name, 'data-registry': registry},
+        ),
+    ]

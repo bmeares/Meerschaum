@@ -204,6 +204,30 @@ fn reader(
     Ok((inst, session, reader))
 }
 
+/// The newest run IDs on the instance `keys` (shell completion for `show run` / `watch run`).
+pub fn recent_run_ids(
+    config: &meerschaum_core::config::Config,
+    session: &super::Session,
+    keys: &str,
+    limit: usize,
+) -> Vec<String> {
+    let Ok(inst) = session.instance(keys, config) else {
+        return Vec::new();
+    };
+    let Ok(bundle) = engine::registry(config, session, &inst, &[], false) else {
+        return Vec::new();
+    };
+    let reader = EngineReader::new(bundle.registry, bundle.config);
+    let filter = RunFilter {
+        limit: Some(limit),
+        ..Default::default()
+    };
+    session
+        .block_on(reader.runs(&filter))
+        .map(|runs| runs.into_iter().map(|r| r.run.run_id).collect())
+        .unwrap_or_default()
+}
+
 /// `show runs` (the run history) or `show run <id>` (one run's Gantt chart).
 pub fn show_runs(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     let nopretty = flag(args, "nopretty");

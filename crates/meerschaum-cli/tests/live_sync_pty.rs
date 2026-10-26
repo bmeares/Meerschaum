@@ -510,6 +510,12 @@ fn mask(text: &str) -> String {
                 .skip(1)
                 .collect();
             format!("{label}  <BARS>  <T>  {}", words.join(" "))
+        } else if line.contains("syncing Pipe(")
+            && let Some((head, tail)) = line.rsplit_once(" in ")
+            && let Some(count) = tail.rsplit_once(" (").map(|(_, c)| c)
+        {
+            // A block of a run of several pipes: `... in 1.2 seconds (1/2):`.
+            format!("{head} in <T> ({count}")
         } else if let Some((before, after)) = line.split_once("It took ") {
             let after = after
                 .split_once(" to sync")
@@ -531,12 +537,12 @@ fn mask(text: &str) -> String {
 /// lines, the summary and the Gantt chart; no live output.
 const PIPED: &str = concat!(
     "\n",
-    " + Finished syncing Pipe('sql:lv', 'src'):\n",
+    " + Finished syncing Pipe('sql:lv', 'src') in <T> (1/2):\n",
     "    Inserted 1, updated 0 rows.\n",
     "    \n",
     "\n",
     "\n",
-    " + Finished syncing Pipe('sql:lv', 'chain'):\n",
+    " + Finished syncing Pipe('sql:lv', 'chain') in <T> (2/2):\n",
     "    Inserted 1, updated 0 rows.\n",
     "    \n",
     "\n",
@@ -561,6 +567,7 @@ const PIPED: &str = concat!(
     "\n",
     " + It took <T> to sync 2 pipes\n",
     "    (2 succeeded, 0 failed).\n",
+    "    Rows: 2 inserted, 0 updated.\n",
     "\n",
 );
 

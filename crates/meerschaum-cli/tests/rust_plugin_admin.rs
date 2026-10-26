@@ -49,10 +49,10 @@ fn uploaded_entries(repo: &Repo, name: &str) -> Vec<(String, String)> {
 #[test]
 fn bootstrap_rust_generates_runnable_fetch_action_and_connector() {
     let home = Home::new();
-    // Retry an invalid language, choose Rust, then select features.
+    // Retry an invalid language, choose Rust and a single file, then select features.
     let run = home.run_input(
         &["bootstrap", "plugins", "readings"],
-        "unknown\n2\nfetch,connector,action\nsay hello\n\n",
+        "unknown\n2\n\nfetch,connector,action\nsay hello\n\n",
         &[("EDITOR", "true"), NO_PYTHON],
     );
     assert!(run.success, "{}", run.text());

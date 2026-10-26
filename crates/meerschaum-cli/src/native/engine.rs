@@ -202,11 +202,27 @@ pub fn registry_with(
     wanted.extend(visited);
     wanted.insert(inst.keys());
     let mut sql_instances = HashMap::new();
+    let plugins_dirs = config_ref.paths().plugins_dirs.clone();
     for keys in wanted {
         if !matches!(keys.split(':').next(), Some("sql" | "api" | "valkey")) {
+            // Plugins and custom types resolve in the Python and native layers; this reason is
+            // only reported when neither of them provides the keys.
+            if let Some(reason) = unavailable_reason(&plugins_dirs, &keys) {
+                native = native.with_unavailable(&keys, reason);
+            }
             continue;
         }
-        if let Some(conn) = resolve(&keys) {
+        let conn = match overrides.get(&keys) {
+            Some(conn) => Some(conn.clone()),
+            None => match session.instance(&keys, config_ref) {
+                Ok(conn) => Some(conn),
+                Err(error) => {
+                    native = native.with_unavailable(&keys, error.message);
+                    None
+                }
+            },
+        };
+        if let Some(conn) = conn {
             native = native
                 .with_instance(&keys, conn.conn())
                 .with_source(&keys, conn.conn());
@@ -242,6 +258,28 @@ pub fn registry_with(
         registry: registry.clone(),
         native: registry,
         config,
+    })
+}
+
+/// Why no layer of the registry provides `keys` when a sync asks for them (`None` for keys
+/// without a connector type, which never fetch).
+fn unavailable_reason(plugins_dirs: &[std::path::PathBuf], keys: &str) -> Option<String> {
+    use crate::native::plugin_files::{native_plugin_path, plugin_file};
+    let (typ, label) = keys.split_once(':')?;
+    Some(if typ == "plugin" {
+        if plugin_file(plugins_dirs, label).is_some()
+            || native_plugin_path(plugins_dirs, label).is_some()
+        {
+            format!(
+                "plugin '{label}' is installed but could not be loaded.\nPerhaps {keys} has a syntax error?"
+            )
+        } else {
+            format!(
+                "plugin '{label}' is not installed.\nInstall it with `mrsm install plugin {label}`."
+            )
+        }
+    } else {
+        format!("no installed plugin provides the connector type '{typ}'.")
     })
 }
 

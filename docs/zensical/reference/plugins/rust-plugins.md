@@ -11,6 +11,9 @@ download dependencies; later runs reuse the compiled plugin.
 To create a starter file, run `mrsm bootstrap plugins greetings` and choose **Rust**
 when the wizard asks which language to use. If you pick an action, say `sing song`,
 the starter defines `#[make_action] fn sing_song(...)`, which `mrsm sing song` runs.
+The wizard offers the same features as for Python plugins. Keep the default **Single file**
+for a `greetings.rs` like the ones below, or choose **Package** for a Cargo crate on the
+full SDK (`greetings/Cargo.toml`, see the [advanced guide](rust-plugins/advanced.md)).
 Use `mrsm edit plugins greetings` to reopen it. Upload it to a repository with
 `mrsm register plugins greetings -r api:your-repo`, just as you would a Python plugin.
 

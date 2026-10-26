@@ -24,7 +24,7 @@ impl Plugin for Procs {
     const VERSION: &'static str = "1.0.0";
     fn manifest(&self) -> Value {
         json!({"schema_version": meerschaum_plugin::MANIFEST_SCHEMA_VERSION,
-            "meerschaum_version": "5.0.0-rc.13", "python_version": "", "fingerprint": null,
+            "meerschaum_version": "5.0.0-rc.14", "python_version": "", "fingerprint": null,
             "plugins": {"native_executor": {"name": "native_executor", "version": "1.0.0"}},
             "executor_types": {"procs": {"type": "procs", "plugin": "native_executor",
                 "class_name": "ProcsExecutor",

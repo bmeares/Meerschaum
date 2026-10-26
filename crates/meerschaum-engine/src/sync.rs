@@ -211,11 +211,32 @@ impl TemplateResolver for EngineResolver<'_> {
     }
 }
 
+/// v4's `{pipe} does not have a valid connector.` and why: the connector is unavailable (its
+/// plugin is not installed, or it failed to load), never a bare "No data were fetched".
+pub fn unavailable_message(pipe: &Pipe, reason: &str) -> String {
+    let keys = pipe.connector_keys();
+    let reason = reason.trim();
+    let reason = if reason.starts_with("Connector '") {
+        reason.to_string()
+    } else {
+        format!("Connector '{keys}' is unavailable: {reason}")
+    };
+    format!(
+        "{pipe} does not have a valid connector.\n    {}",
+        reason.replace('\n', "\n    ")
+    )
+}
+
 fn fail(message: impl Into<String>) -> SyncResult {
     SyncResult::new(false, message)
 }
 
 fn fetch_failed(pipe: &Pipe, connector_keys: &str, error: &ConnectorError) -> SyncResult {
+    let text = error.to_string();
+    if text.starts_with(&format!("Connector '{connector_keys}' is unavailable")) {
+        tracing::warn!("{text}");
+        return fail(unavailable_message(pipe, &text));
+    }
     let detail = format!("Failed to fetch data from {connector_keys}:\n    {error}");
     tracing::warn!("{detail}");
     // Diagnostic improvement over v4: embedded callers may not receive tracing output.
@@ -570,17 +591,7 @@ async fn sync_inner(
                         format!("{pipe} does not support fetching; nothing to do."),
                     );
                 }
-                Err(e) => {
-                    tracing::debug!("{e}");
-                    let mut msg = format!("{pipe} does not have a valid connector.");
-                    if pipe.connector_keys().starts_with("plugin:") {
-                        msg.push_str(&format!(
-                            "\n    Perhaps {} has a syntax error?",
-                            pipe.connector_keys()
-                        ));
-                    }
-                    return fail(msg);
-                }
+                Err(e) => return fail(unavailable_message(&pipe, &e)),
             };
             // `begin, end = self.parse_date_bounds(begin, end)` (`core/Pipe/_fetch.py:78`).
             let dtypes = match pipe_ops::get_dtypes(instance, &pipe, pipe.parameters(), true).await
@@ -992,13 +1003,7 @@ async fn sync_chunked_source(
     observer: Option<&dyn DeltaObserver>,
 ) -> SyncResult {
     let mut chunks = chunked.chunks;
-    let fetch_failed = |e: ConnectorError| {
-        tracing::warn!(
-            "Failed to fetch data from {}:\n    {e}",
-            pipe.connector_keys()
-        );
-        fail(format!("No data were fetched for {pipe}."))
-    };
+    let fetch_failed = |e: ConnectorError| fetch_failed(pipe, pipe.connector_keys(), &e);
     let first = match chunks.next_chunk().await {
         Ok(first) => first,
         Err(e) => return fetch_failed(e),

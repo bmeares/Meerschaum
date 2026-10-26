@@ -45,6 +45,9 @@ REMOVED: Dict[str, str] = {
     'meerschaum.api._chunks': _SERVER,
     'meerschaum.api.dash.websockets': _SERVER,
     'meerschaum.api.dash.sync': _SERVER,
+    'meerschaum.api.dash.graphs': (
+        "The console's Graphs view was removed in 5.0.0rc14: plugin pages (`@web_page`) own charts."
+    ),
     'meerschaum.api.dash.pages.terminal': _SHELL,
     'meerschaum._internal.term': _SHELL,
     'meerschaum._internal.cli': (

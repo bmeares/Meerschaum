@@ -379,6 +379,12 @@ pub fn load_data(vars: &[(String, String)]) -> CompletionData {
         .get(&["meerschaum", "instance"])
         .map(|v| v.py_str())
         .unwrap_or_else(|| "sql:main".into());
+    let config = std::sync::Arc::new(config);
+    let runs_config = config.clone();
+    data.runs = Some(std::sync::Arc::new(move |keys: &str| {
+        let session = crate::native::Session::new();
+        crate::native::engine_views::recent_run_ids(&runs_config, &session, keys, 20)
+    }));
     data.pipelines = Some(std::sync::Arc::new(move |keys: &str| {
         let session = crate::native::Session::new();
         let Ok(instance) = session.instance(keys, &config) else {

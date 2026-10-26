@@ -13,7 +13,7 @@ from textwrap import dedent
 from urllib.parse import urlencode
 
 from meerschaum.utils import fetch_pipes_keys
-from meerschaum.utils.typing import List, Optional, Dict, Any, Tuple, Union
+from meerschaum.utils.typing import List, Optional, Dict, Any, Tuple, Union, SuccessTuple
 from meerschaum.utils.misc import get_connector_labels
 from meerschaum.connectors import instance_types
 from meerschaum.utils.packages import attempt_import, import_dcc, import_html, import_pandas
@@ -898,7 +898,7 @@ def accordion_items_from_pipe(
         ])
 
     if 'relations' in active_items:
-        items_bodies['relations'] = build_relations_body(pipe)
+        items_bodies['relations'] = build_relations_body(pipe, authenticated=authenticated)
 
     return [
         dbc.AccordionItem(items_bodies.get(item_id, ''), title=title, item_id=item_id)
@@ -906,28 +906,280 @@ def accordion_items_from_pipe(
     ]
 
 
-def build_relations_body(pipe: mrsm.Pipe) -> Any:
+RELATION_KEYS: Dict[str, Tuple[str, str]] = {
+    'parents': ('parents', 'parent'),
+    'children': ('children', 'child'),
+}
+INVERSE_RELATIONS: Dict[str, str] = {'parents': 'children', 'children': 'parents'}
+EDGE_OPTION_PREFIXES: Tuple[str, ...] = ('lookback', 'lookahead', 'axis')
+
+
+def _pipe_identity(pipe: mrsm.Pipe) -> Tuple[str, str, str, Optional[str]]:
+    """
+    The keys which identify a pipe across instances (the engine's `pipe_ref` order).
+    """
+    return (
+        str(pipe.instance_keys),
+        str(pipe.connector_keys),
+        str(pipe.metric_key),
+        (str(pipe.location_key) if pipe.location_key is not None else None),
+    )
+
+
+def _declared_relation_values(parameters: Dict[str, Any], relation: str) -> Tuple[str, List[Any]]:
+    """
+    Return the parameters key in use (plural before singular, as the engine reads them)
+    and the declared values as a list.
+    """
+    plural, singular = RELATION_KEYS[relation]
+    key = plural if plural in parameters else (singular if singular in parameters else plural)
+    values = parameters.get(key, None) or []
+    if not isinstance(values, list):
+        values = [values]
+    return key, list(values)
+
+
+def _pipe_from_relation_value(value: Any, owner: mrsm.Pipe) -> Optional[mrsm.Pipe]:
+    """
+    Resolve a declared parent or child (a `Pipe(...)` string or a dictionary of keys, which may
+    carry edge options like `lookback_days` or `axis`) relative to the declaring pipe.
+    """
+    from meerschaum.utils.pipes import get_pipe_from_value
+    if isinstance(value, dict):
+        value = {
+            key: val
+            for key, val in value.items()
+            if not str(key).startswith(EDGE_OPTION_PREFIXES)
+        }
+    try:
+        return get_pipe_from_value(value, _pipe=owner)
+    except Exception:
+        return None
+
+
+def declared_relations(pipe: mrsm.Pipe, relation: str) -> List[mrsm.Pipe]:
+    """
+    Return the pipes declared under a pipe's `parents` or `children` parameter.
+    """
+    parameters = pipe.get_parameters(apply_symlinks=False, refresh=True) or {}
+    _, values = _declared_relation_values(parameters, relation)
+    return [
+        other
+        for other in (_pipe_from_relation_value(value, pipe) for value in values)
+        if other is not None
+    ]
+
+
+def relation_reference_string(other: mrsm.Pipe, owner: mrsm.Pipe) -> str:
+    """
+    The `Pipe(...)` string to persist for `other` in `owner`'s parameters.
+    The instance is omitted when it matches the owner's (references resolve relative to it).
+    """
+    args = [repr(str(other.connector_keys)), repr(str(other.metric_key))]
+    if other.location_key is not None:
+        args.append(repr(str(other.location_key)))
+    if str(other.instance_keys) != str(owner.instance_keys):
+        args.append(f"instance={str(other.instance_keys)!r}")
+    return f"Pipe({', '.join(args)})"
+
+
+def _remove_declared(owner: mrsm.Pipe, relation: str, other: mrsm.Pipe) -> Tuple[bool, SuccessTuple]:
+    """
+    Remove every entry matching `other` from `owner`'s declared `relation`.
+    Return whether anything was removed and the result of persisting.
+    """
+    from copy import deepcopy
+    parameters = deepcopy(owner.get_parameters(apply_symlinks=False, refresh=True) or {})
+    key, values = _declared_relation_values(parameters, relation)
+    other_identity = _pipe_identity(other)
+    kept = []
+    for value in values:
+        resolved = _pipe_from_relation_value(value, owner)
+        if resolved is not None and _pipe_identity(resolved) == other_identity:
+            continue
+        kept.append(value)
+
+    if len(kept) == len(values):
+        return False, (True, "Nothing to remove.")
+
+    if kept:
+        parameters[key] = kept
+    else:
+        parameters.pop(key, None)
+    owner.parameters = parameters
+    return True, owner.edit(debug=debug)
+
+
+def add_pipe_relation(pipe: mrsm.Pipe, relation: str, other: mrsm.Pipe) -> SuccessTuple:
+    """
+    Declare `other` as a parent or child of `pipe` (`relation` is `'parents'` or `'children'`)
+    by appending it to `pipe`'s parameters. Existing entries and their edge options are kept.
+    """
+    from copy import deepcopy
+    if relation not in RELATION_KEYS:
+        return False, f"Invalid relation '{relation}'."
+    noun = 'parent' if relation == 'parents' else 'child'
+    if _pipe_identity(other) == _pipe_identity(pipe):
+        return False, f"A pipe cannot be its own {noun}."
+
+    parameters = deepcopy(pipe.get_parameters(apply_symlinks=False, refresh=True) or {})
+    key, values = _declared_relation_values(parameters, relation)
+    other_identity = _pipe_identity(other)
+    for value in values:
+        resolved = _pipe_from_relation_value(value, pipe)
+        if resolved is not None and _pipe_identity(resolved) == other_identity:
+            return False, f"{other} is already a {noun} of {pipe}."
+
+    inverse_noun = 'child' if relation == 'parents' else 'parent'
+    try:
+        inverse_declared = declared_relations(other, INVERSE_RELATIONS[relation])
+    except Exception:
+        inverse_declared = []
+    if any(_pipe_identity(p) == _pipe_identity(pipe) for p in inverse_declared):
+        return False, f"{other} already declares {pipe} as its {inverse_noun}."
+
+    plural, singular = RELATION_KEYS[relation]
+    if key == singular:
+        parameters.pop(singular, None)
+    parameters[plural] = values + [relation_reference_string(other, pipe)]
+    pipe.parameters = parameters
+    success, msg = pipe.edit(debug=debug)
+    if not success:
+        return False, msg
+    return True, f"Added {other} as a {noun} of {pipe}."
+
+
+def remove_pipe_relation(pipe: mrsm.Pipe, relation: str, other: mrsm.Pipe) -> SuccessTuple:
+    """
+    Remove the edge between `pipe` and its parent or child `other`, wherever it is declared:
+    in `pipe`'s `parents` / `children` or in `other`'s inverse key.
+    """
+    if relation not in RELATION_KEYS:
+        return False, f"Invalid relation '{relation}'."
+    noun = 'parent' if relation == 'parents' else 'child'
+
+    removed_here, (success, msg) = _remove_declared(pipe, relation, other)
+    if not success:
+        return False, msg
+
+    removed_there = False
+    if other.get_id() is not None:
+        removed_there, (success, msg) = _remove_declared(other, INVERSE_RELATIONS[relation], pipe)
+        if not success:
+            return False, msg
+
+    if not removed_here and not removed_there:
+        return False, (
+            f"{other} is not declared as a {noun} of {pipe}. "
+            "It is likely an implicit edge from a `{{ Pipe() }}` template in the definition; "
+            "edit the definition to remove it."
+        )
+    return True, f"Removed {other} as a {noun} of {pipe}."
+
+
+def _relation_rows(pipe: mrsm.Pipe) -> Dict[str, List[Dict[str, Any]]]:
+    """
+    Merge the engine's view of a pipe's edges with the declared (possibly unregistered) parents
+    and children. Each row is `{pipe, label, href, action, reason, removable}`.
+    """
+    from meerschaum.api.dash import engine as _engine
+    relations = _engine.relations_of(pipe)
+    this_identity = _pipe_identity(pipe)
+    out: Dict[str, List[Dict[str, Any]]] = {}
+    for relation in RELATION_KEYS:
+        declared = {
+            _pipe_identity(other): other
+            for other in declared_relations(pipe, relation)
+        }
+        rows, seen = [], set()
+        for row in relations[relation]:
+            instance_keys, connector_keys, metric_key, location_key = _engine.split_ref(row['pipe_ref'])
+            other = mrsm.Pipe(connector_keys, metric_key, location_key, instance=instance_keys)
+            identity = _pipe_identity(other)
+            if identity in seen:
+                continue
+            seen.add(identity)
+            removable = identity in declared
+            if not removable:
+                try:
+                    removable = any(
+                        _pipe_identity(p) == this_identity
+                        for p in declared_relations(other, INVERSE_RELATIONS[relation])
+                    )
+                except Exception:
+                    removable = False
+            rows.append({**row, 'pipe': other, 'removable': removable})
+
+        for identity, other in declared.items():
+            if identity in seen:
+                continue
+            seen.add(identity)
+            rows.append({
+                'pipe': other,
+                'label': str(other),
+                'href': _engine.pipe_href('|'.join(str(part) for part in identity)),
+                'action': '',
+                'reason': (
+                    f"{other} is not registered."
+                    if other.get_id() is None
+                    else "The Syncing Engine ignores this entry; check its edge options."
+                ),
+                'removable': True,
+            })
+        out[relation] = rows
+    return out
+
+
+def build_relations_body(
+    pipe: mrsm.Pipe,
+    authenticated: bool = False,
+    active_tab: str = 'parents',
+    feedback: Optional[SuccessTuple] = None,
+) -> Any:
     """
     Return the Parents and Children tabs of a pipe card: the pipes it depends on and the pipes that
     depend on it, with what the Syncing Engine would do with each (`meerschaum.api.dash.engine`).
+    Authenticated sessions may add and remove parents and children.
     """
     from meerschaum.api.dash import engine as _engine
+    pipe_meta_str = json.dumps(pipe.meta, sort_keys=True)
     try:
-        relations = _engine.relations_of(pipe)
+        rows_by_relation = _relation_rows(pipe)
     except Exception as e:
         return html.P(f"The dependency graph is unavailable: {e}")
 
-    def _table(rows, empty: str):
+    def _remove_button(relation: str, row: Dict[str, Any]):
+        if not authenticated or not row['removable']:
+            return ''
+        return dbc.Button(
+            '×',
+            id={
+                'type': 'pipe-relation-remove-button',
+                'index': pipe_meta_str,
+                'relation': relation,
+                'other': json.dumps(row['pipe'].meta, sort_keys=True),
+            },
+            color='link',
+            size='sm',
+            className='pipe-relation-remove-button',
+            title=f"Remove {row['label']}",
+            style={'text-decoration': 'none', 'padding': '0 0.5em'},
+        )
+
+    def _table(relation: str, rows: List[Dict[str, Any]], empty: str):
         if not rows:
             return html.P(empty, className='text-muted', style={'margin-top': '1em'})
         return dbc.Table(
             [
-                html.Thead(html.Tr([html.Th('Pipe'), html.Th('Next sync'), html.Th('Details')])),
+                html.Thead(html.Tr([
+                    html.Th('Pipe'), html.Th('Next sync'), html.Th('Details'), html.Th(''),
+                ])),
                 html.Tbody([
                     html.Tr([
                         html.Td(html.A(html.Code(row['label']), href=row['href'], target='_blank', rel='noopener noreferrer', className='pipe-link')),
-                        html.Td(_engine.action_indicator(row['action'])),
+                        html.Td(_engine.action_indicator(row['action']) if row['action'] else ''),
                         html.Td(html.Details([html.Summary('Show'), html.P(row['reason'])])),
+                        html.Td(_remove_button(relation, row), style={'text-align': 'right'}),
                     ])
                     for row in rows
                 ]),
@@ -937,22 +1189,65 @@ def build_relations_body(pipe: mrsm.Pipe) -> Any:
             style={'margin-top': '1em'},
         )
 
-    parents, children = relations['parents'], relations['children']
-    return dbc.Tabs(
-        [
-            dbc.Tab(
-                _table(parents, "This pipe has no parents."),
-                label=f"Parents ({len(parents)})",
-                tab_id='parents',
-            ),
-            dbc.Tab(
-                _table(children, "This pipe has no children."),
-                label=f"Children ({len(children)})",
-                tab_id='children',
-            ),
-        ],
-        active_tab='parents',
-    )
+    def _add_dropdown(relation: str, rows: List[Dict[str, Any]]):
+        if not authenticated:
+            return ''
+        excluded = {_pipe_identity(pipe)} | {_pipe_identity(row['pipe']) for row in rows}
+        instance_keys = str(pipe.instance_keys)
+        try:
+            all_keys = fetch_pipes_keys('registered', pipe.instance_connector)
+        except Exception:
+            all_keys = []
+        if isinstance(all_keys, dict):
+            all_keys = list(all_keys.values())
+        options = []
+        for keys in all_keys:
+            connector_keys, metric_key, location_key = keys[0], keys[1], keys[2]
+            other = mrsm.Pipe(connector_keys, metric_key, location_key, instance=instance_keys)
+            if _pipe_identity(other) in excluded:
+                continue
+            options.append({
+                'label': relation_reference_string(other, pipe),
+                'value': json.dumps(other.meta, sort_keys=True),
+            })
+        options.sort(key=lambda option: option['label'])
+        return dcc.Dropdown(
+            id={'type': 'pipe-relation-add-dropdown', 'index': pipe_meta_str, 'relation': relation},
+            options=options,
+            value=None,
+            searchable=True,
+            clearable=False,
+            placeholder=("Add parent…" if relation == 'parents' else "Add child…"),
+            className='pipe-relation-add-dropdown',
+            style={'margin-top': '0.5em'},
+        )
+
+    parents, children = rows_by_relation['parents'], rows_by_relation['children']
+    return html.Div([
+        (alert_from_success_tuple(feedback) if feedback is not None else html.Div()),
+        dbc.Tabs(
+            [
+                dbc.Tab(
+                    html.Div([
+                        _table('parents', parents, "This pipe has no parents."),
+                        _add_dropdown('parents', parents),
+                    ]),
+                    label=f"Parents ({len(parents)})",
+                    tab_id='parents',
+                ),
+                dbc.Tab(
+                    html.Div([
+                        _table('children', children, "This pipe has no children."),
+                        _add_dropdown('children', children),
+                    ]),
+                    label=f"Children ({len(children)})",
+                    tab_id='children',
+                ),
+            ],
+            id={'type': 'pipe-relations-tabs', 'index': pipe_meta_str},
+            active_tab=active_tab,
+        ),
+    ], id={'type': 'pipe-relations-div', 'index': pipe_meta_str})
 
 
 def get_backtrack_text(

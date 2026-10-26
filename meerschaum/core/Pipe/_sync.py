@@ -167,6 +167,33 @@ def _no_rust_driver(role: str, error: Any = None) -> str:
     return str(error).rstrip('.') if error else f"{role} has no usable Rust driver"
 
 
+def _missing_plugin_reason(self) -> Optional[str]:
+    """
+    Why a `plugin:` source cannot fetch because its plugin is not installed (the CLI's wording),
+    or `None` when the source is not a plugin or the plugin is installed.
+    """
+    connector_keys = str(self.connector_keys)
+    if not connector_keys.startswith('plugin:'):
+        return None
+    label = connector_keys.split(':', maxsplit=1)[1]
+    from meerschaum.core import Plugin
+    from meerschaum.plugins import _FIRST_PARTY_PLUGIN_MODULES
+    from meerschaum.connectors.plugin.PluginConnector import _is_native_plugin
+    try:
+        if (
+            label in _FIRST_PARTY_PLUGIN_MODULES
+            or Plugin(label).is_installed()
+            or _is_native_plugin(label)
+        ):
+            return None
+    except Exception:
+        return None
+    return (
+        f"Connector '{connector_keys}' is unavailable: plugin '{label}' is not installed.\n"
+        f"    Install it with `mrsm install plugin {label}`."
+    )
+
+
 def _native_context(self, debug: bool = False) -> Tuple[Optional[Dict[str, Any]], str]:
     """
     Return `(context, '')` with the connectors `_core.sync_pipe` needs, or `(None, reason)` when
@@ -368,6 +395,14 @@ def _sync_native(
         return SyncResult(False, f"Cannot sync {self}: {reason}.")
 
     infer = df is InferFetch or hasattr(df, 'MRSM_INFER_FETCH')
+    if infer:
+        unavailable = _missing_plugin_reason(self)
+        if unavailable:
+            self._invalidate_cache(debug=debug)
+            return SyncResult(
+                False,
+                f"{self} does not have a valid connector.\n    {unavailable}",
+            )
     if (callback is not None or error_callback is not None) and blocking:
         warn("Callback functions are only executed when blocking = False. Ignoring...")
 

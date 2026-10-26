@@ -5,11 +5,12 @@
 Define callbacks for the `/dash/pipes/` page.
 """
 
+import json
 from urllib.parse import parse_qs, quote_plus, unquote
 from typing import List, Optional, Dict, Any
 
 import dash
-from dash.dependencies import Input, Output, State
+from dash.dependencies import Input, Output, State, ALL, MATCH
 from dash.exceptions import PreventUpdate
 import dash_bootstrap_components as dbc
 
@@ -24,10 +25,13 @@ from meerschaum.api.dash.pipes import (
     build_pipes_dropdown_keys_row,
     build_pipes_tags_dropdown,
     build_pipes_navbar,
+    build_relations_body,
+    add_pipe_relation,
+    remove_pipe_relation,
 )
 from meerschaum.api import CHECK_UPDATE, get_api_connector
 from meerschaum.utils.packages import import_html, import_dcc
-from meerschaum.api.dash.sessions import is_session_authenticated
+from meerschaum.api.dash.sessions import is_session_authenticated, is_state_authenticated
 html, dcc = import_html(check_update=CHECK_UPDATE), import_dcc(check_update=CHECK_UPDATE)
 
 
@@ -235,3 +239,57 @@ def update_location_on_pipes_filter_change(
             search_str += "instance=" + quote_plus(instance_keys)
 
     return ('?' + search_str) if search_str else ''
+
+
+@dash_app.callback(
+    Output({'type': 'pipe-relations-div', 'index': MATCH}, 'children'),
+    Input({'type': 'pipe-relation-add-dropdown', 'index': MATCH, 'relation': ALL}, 'value'),
+    Input(
+        {'type': 'pipe-relation-remove-button', 'index': MATCH, 'relation': ALL, 'other': ALL},
+        'n_clicks',
+    ),
+    State({'type': 'pipe-relations-tabs', 'index': MATCH}, 'active_tab'),
+    State('session-store', 'data'),
+    prevent_initial_call=True,
+)
+def edit_pipe_relations(
+    add_values: List[Optional[str]],
+    remove_n_clicks: List[Optional[int]],
+    active_tab: Optional[str],
+    session_store_data: Optional[Dict[str, Any]],
+):
+    """
+    Add or remove a parent or child from a pipe card's Parents & Children tabs.
+    """
+    triggered = dash.callback_context.triggered
+    triggered_id = dash.callback_context.triggered_id
+    if not triggered or not triggered_id or not any(trigger.get('value') for trigger in triggered):
+        raise PreventUpdate
+
+    pipe = mrsm.Pipe(**json.loads(triggered_id['index']))
+    relation = triggered_id['relation']
+    authenticated = is_state_authenticated(session_store_data)
+    if not authenticated:
+        feedback = (False, "You are not authenticated.")
+    else:
+        try:
+            if triggered_id['type'] == 'pipe-relation-add-dropdown':
+                value = next(
+                    (trigger['value'] for trigger in triggered if trigger.get('value')),
+                    None,
+                )
+                other = mrsm.Pipe(**json.loads(value))
+                feedback = add_pipe_relation(pipe, relation, other)
+            else:
+                other = mrsm.Pipe(**json.loads(triggered_id['other']))
+                feedback = remove_pipe_relation(pipe, relation, other)
+        except Exception as e:
+            feedback = (False, f"Failed to edit the {relation} of {pipe}:\n{e}")
+
+    body = build_relations_body(
+        pipe,
+        authenticated=authenticated,
+        active_tab=(active_tab or relation),
+        feedback=feedback,
+    )
+    return getattr(body, 'children', [body])

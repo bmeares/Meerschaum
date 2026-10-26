@@ -97,8 +97,14 @@ def _get_connector(keys: str, quiet: bool = False):
     else:
         conn = mrsm.get_connector(keys)
     if conn is None:
-        detail = ''.join(f"\n{line}" for line in suppressed)
-        raise BadRequest(f"Could not build connector '{keys}'.{detail}")
+        ### The host reports a sync of this connector's pipes as "connector unavailable"
+        ### (`meerschaum_engine::sync::unavailable_message`), not as an empty fetch.
+        detail = ''.join(
+            f"\n{line.strip()}"
+            for line in suppressed
+            if line.strip() and line.strip() != "Here's a stacktrace:"
+        )
+        raise BadRequest(f"Connector '{keys}' is unavailable: it could not be built.{detail}")
     return conn
 
 

@@ -46,6 +46,9 @@ def split_ref(pipe_ref: str) -> Tuple[str, str, str, Optional[str]]:
 
 def ref_label(pipe_ref: str) -> str:
     """The official Pipe representation, including a non-default instance."""
+    if pipe_ref.count('|') < 3:
+        ### A canvas placeholder (`__upstream__`), not a Pipe.
+        return pipe_ref
     instance, connector, metric, location = split_ref(pipe_ref)
     return str(mrsm.Pipe(connector, metric, location, instance=instance))
 
@@ -86,12 +89,74 @@ def pipe_href(pipe_ref: str) -> str:
     )
 
 
-def get_instance(instance_keys: Optional[str] = None):
+#: The cookie holding the console's global instance (the instance selector), shared by pages.
+INSTANCE_COOKIE: str = 'mrsm-instance'
+
+
+def global_instance_keys() -> Optional[str]:
     """
-    The instance connector (the API's by default).
+    The console's global instance, as the instance selector last set it (`INSTANCE_COOKIE`),
+    or `None` outside a request or before it was ever chosen.
+    """
+    keys = None
+    try:
+        import dash
+        keys = (dash.callback_context.cookies or {}).get(INSTANCE_COOKIE)
+    except Exception:
+        try:
+            import flask
+            keys = flask.request.cookies.get(INSTANCE_COOKIE) if flask.has_request_context() else None
+        except Exception:
+            return None
+    if not keys:
+        return None
+    from urllib.parse import unquote
+    keys = unquote(keys)
+    try:
+        from meerschaum.connectors.parse import parse_instance_keys
+        parse_instance_keys(keys)
+    except Exception:
+        return None
+    return keys
+
+
+def resolve_instance(instance_keys: Optional[str] = None) -> Tuple[Any, Optional[str]]:
+    """
+    The instance connector to use and, when one was asked for but refused, its keys.
+
+    `instance_keys` (a `?instance=` deep link), else the console's global instance, must pass the
+    API's instance permissions (`allow_multiple_instances`, `allowed_instance_keys`) and be valid;
+    otherwise the API's own instance is used and the refused keys are returned with it.
     """
     from meerschaum.api import get_api_connector
-    return get_api_connector(instance_keys) if instance_keys is None else mrsm.get_connector(instance_keys)
+    requested = instance_keys or global_instance_keys()
+    if requested:
+        try:
+            return get_api_connector(str(requested)), None
+        except Exception:
+            return get_api_connector(), str(requested)
+    return get_api_connector(), None
+
+
+def get_instance(instance_keys: Optional[str] = None, strict: bool = False):
+    """
+    The instance connector: `instance_keys` (a `?instance=` deep link), else the console's global
+    instance, else the API's. A refused instance is never used: the API's instance is returned
+    instead (`instance_problem` says so), or with `strict` (the instance of a member or a run,
+    where another instance would be the wrong data) a `PermissionError` is raised.
+    """
+    instance, refused = resolve_instance(instance_keys)
+    if refused and strict:
+        raise PermissionError(f"Instance '{refused}' is not available to this API.")
+    return instance
+
+
+def instance_problem(instance_keys: Optional[str] = None) -> Optional[str]:
+    """Why the requested (or global) instance is not the one shown, or `None`."""
+    instance, refused = resolve_instance(instance_keys)
+    if not refused:
+        return None
+    return f"Instance '{refused}' is not available; showing {instance} instead."
 
 
 def _call(name: str, request: Dict[str, Any]) -> Any:

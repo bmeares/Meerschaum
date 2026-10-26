@@ -483,22 +483,17 @@ import json
 from datetime import datetime, timezone, timedelta
 from meerschaum.api.dash import build_dash_app
 app = build_dash_app()
-from meerschaum.api.dash.callbacks.pipelines import build_graph_children, build_data_range
+from meerschaum.api.dash.callbacks.pipelines import build_pipeline_canvas, build_data_range
 from meerschaum.api.dash import engine
 refs = ['sql:apihosttest|test|a|None', 'sql:apihosttest|test|b|None', 'sql:apihosttest|test|c|None']
 graph = {'nodes': [{'pipe_ref': ref, 'label': engine.ref_label(ref), 'action': 'skip', 'status': 'caught_up'} for ref in refs],
          'edges': [{'parent': refs[0], 'child': refs[1]}, {'parent': refs[1], 'child': refs[2]}], 'warnings': []}
-definitions = {'first': {'targets': refs[:2]}, 'second': {'targets': refs[1:]}}
-children = build_graph_children(graph, [], definitions)
+children = build_pipeline_canvas(graph, refs, {}, None)
 world = children[0].children[1].children
 stages = [card for card in world.children if card.className == 'pipeline-stage']
 groups = [card for card in world.children if card.className == 'pipeline-group']
-assert len(stages) == 4 and len(groups) == 2
-assert len({card.id['index'] for card in stages}) == 4
-assert len(json.loads(world.to_plotly_json()['props']['data-edges'])) == 2
-# A cross-membership dependency stays visible even with disjoint target sets.
-children = build_graph_children(graph, [], {'first': {'targets': refs[:1]}, 'second': {'targets': refs[1:]}})
-world = children[0].children[1].children
+assert len(stages) == 3 and len(groups) == 0
+assert len({card.id['index'] for card in stages}) == 3
 assert len(json.loads(world.to_plotly_json()['props']['data-edges'])) == 2
 now = datetime.now(timezone.utc)
 bar = {'pipe_ref': refs[0], 'status': 'pending', 'actual_start': (now - timedelta(seconds=2)).isoformat(),
@@ -517,7 +512,7 @@ assert engine.run_belongs_to_pipeline({'run': {'run_id': 'daily-totals-2026-10-2
 assert not engine.run_belongs_to_pipeline({'run': {'run_id': 'daily-totals-2026-10-21T10-00-00.123456Z-abcdef01'}}, 'daily')
 print('JSON:' + json.dumps({'groups': len(groups), 'stages': len(stages)}))
 '''))
-    assert out == {'groups': 2, 'stages': 4}
+    assert out == {'groups': 0, 'stages': 3}
 
 
 def test_pipeline_live_selection_keeps_history_and_rejects_other_pipeline_runs(sandbox):
@@ -536,7 +531,7 @@ updates = {}
 dash.ctx = SimpleNamespace(triggered_id='pipelines-interval')
 dash.set_props = lambda id, props: updates.setdefault(str(id), {}).update(props)
 page.is_session_authenticated = lambda session: True
-page._engine.get_instance = lambda *args: 'sql:apihosttest'
+page._engine.get_instance = lambda *args, **kwargs: 'sql:apihosttest'
 ids = ['daily-2026-10-21T10-00-00.123456Z-abcdef01', 'daily-2026-10-20T10-00-00.123456Z-abcdef01']
 runs = [{'run': {'run_id': id}, 'status': 'succeeded', 'counts': {}} for id in ids]
 requests = []
@@ -564,7 +559,7 @@ calls = []
 execute.run_action = lambda *args, **kwargs: calls.append((args, kwargs)) or {'success': True, 'job': 'job', 'stream': '/logs/job/stream', 'msg': 'started'}
 dash.ctx = SimpleNamespace(triggered_id='pipeline-run-now')
 try:
-    management.select_or_run_pipeline([], 1, 'daily', '', {})
+    management.select_or_run_pipeline(1, 'daily', '', {})
     raise AssertionError('Unauthorized run was accepted')
 except PreventUpdate:
     pass
@@ -572,7 +567,7 @@ assert calls == []
 management.is_state_authenticated = lambda data: True
 sessions.get_username_from_session = lambda session: 'testuser'
 management.list_pipelines = lambda *args: {'daily': {'name':'daily','revision':1,'id':'definition'}}
-management.select_or_run_pipeline([], 1, 'daily', '', {'session-id': 'test'})
+management.select_or_run_pipeline(1, 'daily', '', {'session-id': 'test'})
 assert len(calls) == 1
 args, kwargs = calls[0]
 assert args[0][:5] == ['sync', 'pipelines', 'daily', '-i', 'sql:apihosttest']

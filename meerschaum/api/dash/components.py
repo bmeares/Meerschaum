@@ -29,7 +29,6 @@ get_items_menu = dbc.DropdownMenu(
     label='More', id='get-items-menu', children=[
         dbc.DropdownMenuItem("Plugins", id='get-plugins-button'),
         dbc.DropdownMenuItem("Users", id='get-users-button'),
-        dbc.DropdownMenuItem("Graphs", id='get-graphs-button'),
         dbc.DropdownMenuItem("Runs", id="get-runs-button"),
     ],
     style={'width': '100%', 'font-size': '0.5em'},
@@ -60,21 +59,29 @@ show_webterm_button = dbc.Button(
     html.Span('>_', role='img', **{'aria-label': 'Terminal'}),
     id='show-webterm-button',
     color='dark',
-    style={'width': '100%', 'background-color': 'black'},
+    title='Terminal',
+    style={'background-color': 'black'},
 )
 show_pipelines_button = dbc.Button('Pipelines', id='get-pipelines-button',
                                     color='warning', style={'width': '100%'})
+### A grid sized by its card (`.console-actions` in `dash.css`): four columns, then two, then one,
+### so a label never wraps and the terminal button stays beside Exec.
 bottom_buttons_content = dbc.Card(
     dbc.CardBody(
-        dbc.Row([
-            dbc.Col(go_button, xl=2, lg=3, md=3, sm=12),
-            dbc.Col(show_pipes_button, xl=2, lg=3, md=3, sm=12),
-            dbc.Col(show_jobs_button, xl=2, lg=3, md=3, sm=12),
-            dbc.Col(show_pipelines_button, xl=2, lg=3, md=3, sm=8),
-            dbc.Col(show_webterm_button, xl=1, lg=2, md=2, sm=4),
-            dbc.Col(lg=True, md=False, sm=False),
-            dbc.Col(get_items_menu, xl=2, lg=12, md=12, sm=12),
-        ])
+        html.Div(
+            [
+                dbc.ButtonGroup(
+                    [go_button, show_webterm_button],
+                    className='console-actions-exec',
+                ),
+                show_pipes_button,
+                show_jobs_button,
+                show_pipelines_button,
+                html.Div(get_items_menu, className='console-actions-more'),
+            ],
+            className='console-actions',
+        ),
+        className='console-actions-card',
     )
 )
 console_div = html.Div(
@@ -146,11 +153,31 @@ def build_logo_row():
     )
 
 
-def build_pages_navbar():
+def build_pages_instance_select():
+    """
+    The console's global instance selector on a page other than the web console
+    (`pages-instance-select`). Its value is filled per request (the `mrsm-instance` cookie, see
+    `meerschaum.api.dash.engine.global_instance_keys`); choosing an instance rewrites that cookie
+    (`assets/global_instance.js`), exactly as the web console's selector does.
+    """
+    return dbc.Select(
+        id='pages-instance-select',
+        size='sm',
+        options=[
+            {'label': (i[:32] + '…') if len(i) > 32 else i, 'value': i}
+            for i in get_connector_labels(*instance_types)
+        ],
+        class_name='dbc_dark custom-select custom-select-sm instance-select',
+    )
+
+
+def build_pages_navbar(instance_select: bool = False):
     """
     Return a fresh page-navigation navbar. `pages_offcanvas` is NOT included here —
     it lives in the persistent top-level app layout (meerschaum/api/dash/__init__.py)
     so its accordion isn't destroyed/recreated on navigation; the logo still toggles it.
+
+    With `instance_select`, the navbar carries the global instance selector.
     """
     return html.Div(
         [
@@ -161,10 +188,12 @@ def build_pages_navbar():
                         dbc.NavbarToggler(id="navbar-toggler", n_clicks=0),
                         dbc.Collapse(
                             dbc.Row(
-                                [
+                                ([dbc.Col(build_pages_instance_select(), width='auto',
+                                          className='ms-auto')] if instance_select else []) + [
                                     dbc.Col(
                                         build_sign_out_button(),
-                                        className="ms-auto",
+                                        className=('' if instance_select else 'ms-auto'),
+                                        width=('auto' if instance_select else None),
                                     ),
                                 ],
                                 className="g-0 ms-auto flex-nowrap mt-3 mt-md-0",

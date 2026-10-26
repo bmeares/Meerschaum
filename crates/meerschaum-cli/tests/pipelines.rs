@@ -177,7 +177,10 @@ fn show_pipelines_reads_saved_members_without_traversal() {
     let output = env.ok(&["show", "pipelines"]);
     assert!(output.contains("Pipeline('daily')"), "{output}");
     assert!(output.contains("Daily reports"), "{output}");
-    assert!(output.contains("1 members"), "{output}");
+    assert!(
+        output.contains("1 member") && !output.contains("1 members"),
+        "{output}"
+    );
     assert!(
         !output.contains("source"),
         "show must not traverse: {output}"

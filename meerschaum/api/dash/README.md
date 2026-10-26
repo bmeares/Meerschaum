@@ -14,7 +14,7 @@ api/dash/
 ├── callbacks/         # the callbacks of those pages; custom.py registers the plugins'
 │                      #   `@dash_plugin` functions and `@web_page` pages (and their assets)
 ├── components.py      # navbar, buttons, build_cards_grid, alert_from_success_tuple, ...
-├── keys.py, pipes.py, jobs.py, plugins.py, tokens.py, users.py, graphs.py, connectors.py
+├── keys.py, pipes.py, jobs.py, plugins.py, tokens.py, users.py, connectors.py
 ├── execute.py         # what the Exec button, a pipe's Manage menu and "Follow logs" run
 ├── engine.py          # the Syncing Engine's graph, runs, Gantt bars and events (pipelines page)
 ├── sessions.py        # the session store shared with the Rust server's terminal (5 s cache)
@@ -36,8 +36,12 @@ api/dash/
   and polls the log. A pipe card's destructive Manage actions (delete, drop, clear) ask first.
 - **Pipelines** (`/dash/pipelines`) and the **Parents & Children** tabs of a pipe card read the
   engine through `meerschaum.core.Pipeline`'s bindings (the functions behind `/engine/*`).
-  Pipelines draws connected stage cards with pan, zoom and dependency focus. Selecting a stage
-  opens its query, parameters, next sync range and recent runs. All labels use `Pipe(...)`.
+  `pages/pipelines.py::route` builds each Pipelines page per request: the registry's list,
+  `/dash/pipelines/new` (the stepper, `callbacks/pipeline_pages.py`), `/dash/pipelines/explore`
+  and `/dash/pipelines/<name>` (header, Canvas | Runs, Edit mode; `callbacks/pipelines.py` and
+  `callbacks/pipeline_management.py`). The registry is the console's global instance: the
+  `mrsm-instance` cookie written by either instance selector (`assets/global_instance.js`, read by
+  `engine.global_instance_keys`); `?instance=` overrides it. All labels use `Pipe(...)`.
 - **Sessions.** The hosted console always stores sessions in the instance database, matching the
   Rust terminal and log stream even when a Valkey cache is configured.
 - **Terminal.** The terminal is embedded in the Web Console; `/dash/webterm` falls back to it.

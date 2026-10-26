@@ -54,7 +54,7 @@ def walk(node):
     if getattr(node, 'id', None):
         ids.add(node.id)
     walk(getattr(node, 'children', None) or [])
-walk(layout_page.layout)
+walk(layout_page.detail_layout('daily', 'sql:apihosttest'))
 for key in ('pipeline-run-follow', 'pipeline-run-streams', 'pipeline-run-tick',
             'pipeline-run-follow-dummy', 'pipelines-interval'):
     assert key in ids, key
@@ -82,7 +82,7 @@ from meerschaum.api.dash import build_dash_app
 build_dash_app()
 from meerschaum.api.dash.callbacks import pipelines as page
 page.is_session_authenticated = lambda _: True
-page._engine.get_instance = lambda *a: 'sql:apihosttest'
+page._engine.get_instance = lambda *a, **k: 'sql:apihosttest'
 status = {'value': 'running'}
 def summary():
     return {'status': status['value'], 'counts': {}, 'run': {'run_id': 'live-run'}}
@@ -134,7 +134,7 @@ ref = 'sql:apihosttest|sql:src|m|None'
 page.sync_selected_pipe(0, {'action': 'sync', 'ref': ref, 'scope': 'children'}, {'ref': ref},
                         'children', None, None, None, None, {'session-id': 'current'})
 run = updates['pipeline-node-run']['data']
-assert run['run_id'].startswith('canvas-')
+assert '-canvas-' in run['run_id']
 assert run['events_stream'] == (
     '/engine/runs/' + run['run_id'] + '/events/stream?instance_keys=sql%3Aapihosttest&wait='
     + str(page.NODE_RUN_STREAM_WAIT)), run

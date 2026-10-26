@@ -58,7 +58,7 @@ def call(trigger, draft=None, members=None):
 state, members, *rest = call('pipeline-definition')
 assert members == saved['targets']
 changed, members, *rest = call('pipeline-draft-members', state, ['sql:b|x|b|None'])
-assert changed['targets'] == ['sql:b|x|b|None'] and 'Unsaved' in rest[-1]
+assert changed['targets'] == ['sql:b|x|b|None'] and rest[-1] == '2 unsaved changes', rest[-1]
 undone, members, *rest = call('pipeline-draft-undo', changed)
 assert members == saved['targets']
 redone, members, *rest = call('pipeline-draft-redo', undone)
@@ -72,10 +72,23 @@ unchanged, members, parents, children, options, notice = page.edit_draft(
     saved, None, False, False, 0, 0, 0, None, {'options':[]}, discarded, {})
 assert unchanged is dash.no_update
 assert members == saved['targets'] and options[0]['value'] == members[0]
-# Registration adds a member through the same atomic callback and supports undo.
+# A new Pipe joins the draft through the same atomic callback (registered on Save) and supports undo.
 changed, members, *rest = page.edit_draft(saved, members, False, False, 0, 0, 0, None,
-    {'options':[], 'add':'sql:b|x|new|None'}, discarded, {})
+    {'options':[], 'add':'sql:b|x|new|None', 'new': {'sql:b|x|new|None': {'columns': {}}}}, discarded, {})
 assert members == saved['targets'] + ['sql:b|x|new|None'] and changed['undo']
+assert changed['new_pipes'] == {'sql:b|x|new|None': {'columns': {}}} and rest[-1] == '1 unsaved change'
+# A browser-kept draft is restored only onto the revision it was made from.
+dash.ctx = SimpleNamespace(triggered_id='pipeline-context')
+restored, members, *rest = page.edit_draft(saved, members, False, False, 0, 0, 0,
+    {'action': 'restore', 'revision': 3, 'draft': {'targets': ['sql:c|x|c|None']}}, {'options':[]}, discarded, {})
+assert members == ['sql:c|x|c|None']
+from dash.exceptions import PreventUpdate
+try:
+    page.edit_draft(saved, members, False, False, 0, 0, 0,
+        {'action': 'restore', 'revision': 2, 'draft': {'targets': []}}, {'options':[]}, discarded, {})
+    raise AssertionError('restored a draft of another revision')
+except PreventUpdate:
+    pass
 
 '''))
 
@@ -89,36 +102,34 @@ from meerschaum.api.dash import build_dash_app
 build_dash_app()
 from meerschaum.api.dash.callbacks import pipeline_management as page
 page._require_session = lambda _: None
-page.engine.get_instance = lambda *args: 'sql:apihosttest'
+page.engine.get_instance = lambda *args, **kwargs: 'sql:apihosttest'
 page.engine.plan_graph = lambda *a: (_ for _ in ()).throw(AssertionError('discovery on load'))
 page.initialize_pipelines = lambda *a: (_ for _ in ()).throw(AssertionError('initialization on load'))
 page.list_pipelines = lambda *a: {'saved': {'name':'saved','targets':[]}}
 dash.ctx = SimpleNamespace(triggered_id='pipelines-location')
 dash.set_props = lambda *a: None
-options, selected, definition, name = page.read_selection('/dash/pipelines', 'saved', '?pipeline=saved', 0, {})
-assert definition['name'] == 'saved' and name == 'saved'
+# The Pipeline comes from its path.
+options, selected, definition, name = page.read_selection('/dash/pipelines/saved', 'saved', '', 0, {})
+assert definition['name'] == 'saved' and name == 'saved' and selected == 'saved'
 assert options == [{'label':'saved','value':'saved'}]
 # Filtering history must not reset the inspector or an unsaved membership draft.
-dash.ctx = SimpleNamespace(triggered_id='pipelines-location')
-_, selected, unchanged, unchanged_name = page.read_selection('/dash/pipelines', 'saved', '?pipeline=saved&run_id=historic', 0, {}, definition)
+_, selected, unchanged, unchanged_name = page.read_selection('/dash/pipelines/saved', 'saved', '?run_id=historic', 0, {}, definition)
 assert unchanged is dash.no_update and unchanged_name is dash.no_update
-# Dropdown hydration must preserve a deep-linked run; only intentional changes clear it.
+# Hydration never rewrites the URL, so a deep-linked run is kept.
 updates = {}
 dash.set_props = lambda key, value: updates.update({key:value})
 dash.ctx = SimpleNamespace(triggered_id='pipeline-saved-name')
-page.read_selection('/dash/pipelines', 'saved', '?pipeline=saved&run_id=historic', 0, {}, definition)
+page.read_selection('/dash/pipelines/saved', 'saved', '?run_id=historic', 0, {}, definition)
 assert 'pipelines-location' not in updates, updates
-page.read_selection('/dash/pipelines', None, '?pipeline=saved&run_id=historic', 0, {}, definition)
-assert 'run_id' not in updates['pipelines-location']['search']
+# A Pipeline missing from its registry says so.
 dash.ctx = SimpleNamespace(triggered_id='pipelines-location')
-_, selected, definition, _ = page.read_selection('/dash/pipelines', 'saved', '', 0, {}, definition)
-assert selected is None and definition is None
-# A deleted registration's deep link stays readable and can be cleared, without hydration loops.
-options, selected, definition, _ = page.read_selection('/dash/pipelines', None, '?pipeline=missing', 0, {})
-assert selected == 'missing' and options[-1]['value'] == 'missing'
-dash.ctx = SimpleNamespace(triggered_id='pipeline-saved-name')
-_, selected, _, _ = page.read_selection('/dash/pipelines', None, '?pipeline=missing', 0, {}, None, options)
-assert selected is None
+options, selected, definition, _ = page.read_selection('/dash/pipelines/missing', None, '', 0, {})
+assert selected == 'missing' and definition in (None, dash.no_update) and options[-1]['value'] == 'missing'
+assert updates['pipelines-alert-div']['children'], updates
+# Legacy `?pipeline=` links still name their Pipeline.
+assert page.name_from_path('/dash/pipelines', '?pipeline=saved') == 'saved'
+assert page.name_from_path('/dash/pipelines/a%20b') == 'a b'
+assert page.name_from_path('/dash/pipelines/new') is None
 
 
 
@@ -200,7 +211,7 @@ a, b = 'sql:a|source|a|None', 'sql:b|source|b|None'
 page.sync_selected_pipe(0, {'action':'sync','ref':b,'scope':'parents'}, {'ref':a}, 'this', '2020-01-01', '2021-01-01', None, None, {'session-id':'current'})
 assert '-i' in calls[0][0] and calls[0][0][3] == 'sql:b'
 assert '--parents' in calls[0][0] and '--begin' not in calls[0][0] and '--end' not in calls[0][0]
-assert calls[0][2]['metadata']['run_id'].startswith('canvas-')
+assert '-canvas-' in calls[0][2]['metadata']['run_id']
 page.sync_selected_pipe(0, {'action':'sync','ref':b,'scope':'this'}, {'ref':b}, 'this', '2020-01-01', '2021-01-01', None, None, {'session-id':'current'})
 assert '--begin' in calls[1][0] and '--end' in calls[1][0]
 '''))
@@ -220,7 +231,7 @@ jobs.job_visible_to_session = lambda *a: True
 runs = [{'job':'job-a','run_id':'run-a','ref':'sql:a|x|a|None','instance':'sql:a','scope':'parents'},
         {'job':'job-b','run_id':'run-b','ref':'sql:b|x|b|None','instance':'sql:b','scope':'children'}]
 _support.get_job = lambda name: SimpleNamespace(status='running', ended=None, daemon=SimpleNamespace(properties={'mrsm_execution':{'run_id':'run-' + name[-1]}}))
-page._engine.get_instance = lambda instance: instance
+page._engine.get_instance = lambda instance, **kwargs: instance
 calls = []
 def events(instance, run_id):
     calls.append((instance,run_id))
@@ -248,7 +259,7 @@ from meerschaum.api.dash.callbacks import pipeline_management as page
 from meerschaum.core.Pipeline import _saved
 from meerschaum.api.dash import pipeline_editing
 page._require_session = lambda _: None
-page.engine.get_instance = lambda *a: 'sql:apihosttest'
+page.engine.get_instance = lambda *a, **k: 'sql:apihosttest'
 updates = {}
 dash.set_props = lambda key, value: updates.update({key:value})
 proposal = {'definition':{'name':'daily'}, 'resolved':[{'pipe_ref':'sql:a|x|a|None','reason':'explicit member'}],
@@ -267,9 +278,9 @@ _saved._mutation_lock = lambda *a: nullcontext()
 page.list_pipelines = lambda *a: {'daily': {'name':'daily','revision':1}}
 page.save_pipeline = lambda *a, **k: (_ for _ in ()).throw(AssertionError('definition saved despite partial Pipe failure'))
 pipeline_editing.apply_edits = lambda *a: [('good',True,'saved'),('failed',False,'offline')]
-dash.ctx = SimpleNamespace(triggered_id='pipeline-save')
+dash.ctx = SimpleNamespace(triggered_id='pipeline-draft-save')
 draft = {'targets':['good','failed'],'pipe_edits':{'good':{'baseline':'a'},'failed':{'baseline':'b'}},'undo':[{}],'redo':[]}
-page.manage_selection(1, 0, 0, 'daily', 'daily', draft, {'revision':1}, '', {})
+page.manage_selection(0, 1, 'daily', 'daily', draft, {'revision':1}, '', {})
 assert updates['pipeline-draft']['data']['pipe_edits'] == {'failed': {'baseline':'b'}}
 assert updates['pipeline-draft']['data']['undo'] == []
 '''))
@@ -285,7 +296,7 @@ cb.is_session_authenticated = lambda session: True
 jobs.job_visible_to_session = lambda job, session: True
 job = SimpleNamespace(status='stopped', ended=None, daemon=SimpleNamespace(properties={'mrsm_execution':{'run_id':'cancelled-run'}}))
 _support.get_job = lambda name: job
-cb._engine.get_instance = lambda instance: instance
+cb._engine.get_instance = lambda instance, **kwargs: instance
 cb._engine.get_run_events = lambda *args: [{'event':'node_started','pipe_ref':'sql:test|sql:test|slow|None','payload':{}}]
 run = {'job':'execute-test', 'run_id':'cancelled-run', 'instance':'sql:test', 'ref':'sql:test|sql:test|slow|None'}
 events, statuses = cb.node_events([run], 1, {'session-id':'test'})
@@ -317,7 +328,7 @@ saved = save_pipeline('delete-me', [instance + '|rc7|member|None'], instance)
 dash.ctx = SimpleNamespace(triggered_id='pipeline-delete-confirm')
 dash.set_props = lambda *a: None
 target = {key:saved.get(key) for key in ('name','registry','id','revision')}
-args = (0, 1, 0, 'delete-me', 'delete-me', {}, saved, '?instance=sql%3Aapihosttest', {})
+args = (1, 0, 'delete-me', 'delete-me', {}, saved, '?instance=sql%3Aapihosttest', {})
 page.manage_selection(*args, delete_target={**target, 'id':'different'})
 assert 'delete-me' in list_pipelines(instance)
 page.manage_selection(*args, delete_target=target)
@@ -336,7 +347,7 @@ build_dash_app()
 from meerschaum.api.dash.callbacks import pipelines as page
 from meerschaum.api.dash import _support
 page.is_session_authenticated = lambda _: True
-page._engine.get_instance = lambda *a: 'sql:apihosttest'
+page._engine.get_instance = lambda *a, **k: 'sql:apihosttest'
 summary = {'status':'running', 'counts':{}, 'run':{'run_id':'old-run'}}
 detail = {'summary':summary, 'bars':[{'pipe_ref':'sql:a|c|m|None','status':'running','actual_start':'2026-10-22T00:00:00Z'}]}
 page._engine.get_runs = lambda *a, **k: [summary]

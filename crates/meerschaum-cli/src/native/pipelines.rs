@@ -457,22 +457,17 @@ fn show_grid(rt: &mut Runtime<'_>, instance: &Instance, definitions: &[Definitio
             });
         }
         for (definition, row) in definitions.iter().zip(rows) {
-            let suffix = if instance.keys() == formatter.default_instance() {
-                String::new()
-            } else {
-                format!(
-                    ", instance={}",
-                    crate::value::PyValue::str(instance.keys()).py_repr()
-                )
-            };
-            let label = format!(
-                "Pipeline({}{suffix})",
-                crate::value::PyValue::str(&definition.name).py_repr()
-            );
+            let mut label = formatter.pipeline_repr_text(&definition.name, &instance.keys());
+            if !definition.description.is_empty() {
+                label.append_text(&Text::plain_text(&format!("\n{}", definition.description)));
+            }
             let mut members = Text::plain_text(&format!(
-                "{} members · {} instances\n",
-                definition.targets.len(),
-                row["instance_count"]
+                "{} · {}\n",
+                count_noun(definition.targets.len(), "member"),
+                count_noun(
+                    row["instance_count"].as_u64().unwrap_or_default() as usize,
+                    "instance"
+                ),
             ));
             if definition.targets.is_empty() {
                 members.append_text(&Text::plain_text("No member pipes."));
@@ -513,21 +508,7 @@ fn show_grid(rt: &mut Runtime<'_>, instance: &Instance, definitions: &[Definitio
                 }
             );
             table.add_row(vec![
-                Some(Box::new(Text::new(
-                    &format!(
-                        "{label}{}",
-                        if definition.description.is_empty() {
-                            String::new()
-                        } else {
-                            format!("\n{}", definition.description)
-                        }
-                    ),
-                    if formatter.settings.ansi {
-                        "bold cyan"
-                    } else {
-                        ""
-                    },
-                ))),
+                Some(Box::new(label)),
                 Some(Box::new(members)),
                 Some(Box::new(Text::new(
                     &status,
@@ -538,6 +519,15 @@ fn show_grid(rt: &mut Runtime<'_>, instance: &Instance, definitions: &[Definitio
         formatter.console().print(&table)
     });
     rt.print(&text);
+}
+
+/// `"1 member"` / `"2 members"`.
+fn count_noun(count: usize, noun: &str) -> String {
+    if count == 1 {
+        format!("{count} {noun}")
+    } else {
+        format!("{count} {noun}s")
+    }
 }
 
 fn show_summary(
@@ -553,6 +543,7 @@ fn show_summary(
         .as_str()
         .unwrap_or("No runs yet");
     let text = rt.with_formatter(|formatter| {
+        use crate::format::rich::text::Text;
         let symbol = match (status, formatter.settings.unicode) {
             ("running", true) => "▶",
             ("succeeded", true) => "✔",
@@ -563,18 +554,6 @@ fn show_summary(
             (_, true) => "○",
             _ => "-",
         };
-        let suffix = if instance.keys() == formatter.default_instance() {
-            String::new()
-        } else {
-            format!(
-                ", instance={}",
-                crate::value::PyValue::str(instance.keys()).py_repr()
-            )
-        };
-        let label = format!(
-            "Pipeline({}{suffix})",
-            crate::value::PyValue::str(&definition.name).py_repr()
-        );
         let color = if formatter.settings.ansi {
             match status {
                 "succeeded" => "green",
@@ -585,14 +564,21 @@ fn show_summary(
         } else {
             ""
         };
-        formatter.colored(
-            &format!(
-                "{symbol} {label}  · {} members · {} instances · {status}",
-                definition.targets.len(),
-                row["instance_count"]
+        let mut text = Text::plain_text(&format!("{symbol} "));
+        if !color.is_empty() {
+            text.stylize(color, 0, None);
+        }
+        text.append_text(&formatter.pipeline_repr_text(&definition.name, &instance.keys()));
+        text.append_text(&Text::plain_text(&format!(
+            "  · {} · {} · ",
+            count_noun(definition.targets.len(), "member"),
+            count_noun(
+                row["instance_count"].as_u64().unwrap_or_default() as usize,
+                "instance"
             ),
-            color,
-        )
+        )));
+        text.append_text(&Text::new(status, color));
+        formatter.text_to_str(&text)
     });
     rt.print(&format!("{text}\n"));
     if !definition.description.is_empty() {
@@ -1638,18 +1624,16 @@ fn execute(
         .unwrap_or_else(|| meerschaum_engine::runs::new_named_run_id(name));
     rt.print(&format!("Run: {run_id}\n"));
     options.run_id = Some(run_id);
-    let result = if rt.live && !flag(args, "nopretty") {
-        let view = super::sync::LiveView::Nodes { instance, args };
-        super::sync::run_live(rt, &session, engine, options, view)
-    } else {
-        session.block_on(engine.run(options))
-    };
+    // Each member's block prints as it ends (a job's log too), then the totals.
+    let view = super::sync::LiveView::Nodes { instance, args };
+    let (result, summary) =
+        super::sync::run_reported(rt, &session, engine, options, view, flag(args, "nopretty"));
     for warning in result.warnings {
         super::warn(rt, &warning);
     }
     Ok(SuccessTuple {
         success: result.success,
-        message: result.message,
+        message: format!("{}{summary}", result.message),
     })
 }
 

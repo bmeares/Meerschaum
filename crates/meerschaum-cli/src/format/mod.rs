@@ -372,6 +372,32 @@ impl<'c> Formatter<'c> {
         text
     }
 
+    /// `Pipeline('name'[, instance='...'])`, styled like `pipe_repr`: the brackets take the `Pipe`
+    /// style, the name the metric style and a non-default instance the instance style.
+    pub fn pipeline_repr_text(&self, name: &str, instance: &str) -> Text {
+        let style = |key: &str| -> String {
+            if self.settings.ansi {
+                self.formatting_str(&["pipes", "__repr__", "ansi", "styles", key])
+            } else {
+                String::new()
+            }
+        };
+        let quoted = |s: &str| crate::value::PyValue::str(s).py_repr();
+        // A span, not the base style: the base style of the first piece would cover the rest.
+        let mut text = Text::plain_text("Pipeline(");
+        let pipe_style = style("Pipe");
+        if !pipe_style.is_empty() {
+            text.stylize(pipe_style.as_str(), 0, None);
+        }
+        text.append_text(&Text::new(&quoted(name), style("metric").as_str()));
+        if instance != self.default_instance {
+            text.append_text(&Text::new(", instance=", style("punctuation").as_str()));
+            text.append_text(&Text::new(&quoted(instance), style("instance").as_str()));
+        }
+        text.append_text(&Text::new(")", style("Pipe").as_str()));
+        text
+    }
+
     /// `pipe_repr(pipe)`.
     pub fn pipe_repr(&self, pipe: &PipeKeys) -> String {
         self.text_to_str(&self.pipe_repr_text(pipe))

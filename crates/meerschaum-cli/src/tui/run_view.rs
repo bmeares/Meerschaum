@@ -1351,7 +1351,11 @@ impl RunMonitor {
                 if let Some(node) = &l.node {
                     spans.push(Span::raw(format!("{node}  ")));
                 }
-                spans.push(Span::styled(l.text.clone(), theme.style(l.tone)));
+                spans.extend(super::theme::ansi_spans(
+                    &l.text,
+                    theme.style(l.tone),
+                    theme.color,
+                ));
                 Line::from(spans)
             })
             .collect();

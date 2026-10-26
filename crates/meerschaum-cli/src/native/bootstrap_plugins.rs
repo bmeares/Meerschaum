@@ -176,7 +176,13 @@ fn bootstrap_plugin(args: &ArgsMap, rt: &mut Runtime<'_>, plugin_name: &str) -> 
         true,
     )?;
     let rust = language.as_deref() == Some("Rust");
-    let features = choose_features(rt, rust)?;
+    if rust && let Err(message) = rust_plugin_name(plugin_name) {
+        return Ok(SuccessTuple::fail(message));
+    }
+    clear_screen(rt, args);
+    let package = choose_packaging(rt, plugin_name, rust)?;
+    clear_screen(rt, args);
+    let features = choose_features(rt)?;
     clear_screen(rt, args);
 
     let mut action_name = String::new();
@@ -186,11 +192,12 @@ fn bootstrap_plugin(args: &ArgsMap, rt: &mut Runtime<'_>, plugin_name: &str) -> 
     }
     let action_spaces = action_name.replace('_', " ");
 
-    let mut dt_col_name = "None".to_string();
-    if !rust && features.iter().any(|f| f == "fetch") {
-        dt_col_name = get_quoted_dt_col_name(rt);
+    let mut dt_col = None;
+    if features.iter().any(|f| f == "fetch") {
+        dt_col = get_dt_col_name(rt);
         clear_screen(rt, args);
     }
+    let dt_col_name = quoted_dt_col_name(dt_col.as_deref());
 
     let capitalized = {
         let first = plugin_name
@@ -214,9 +221,7 @@ fn bootstrap_plugin(args: &ArgsMap, rt: &mut Runtime<'_>, plugin_name: &str) -> 
         ("action_spaces", &action_spaces),
         ("dt_col_name", &dt_col_name),
     ];
-    let body = if rust {
-        rust_scaffold(plugin_name, &features, &action_name)?
-    } else {
+    let python_body = || {
         let has = |feature: &str| features.iter().any(|f| f == feature);
         let imports = |key: &str| py_format(line("imports_lines", key), &labels);
         let feature = |key: &str| py_format(line("feature_lines", key), &labels);
@@ -263,24 +268,67 @@ fn bootstrap_plugin(args: &ArgsMap, rt: &mut Runtime<'_>, plugin_name: &str) -> 
         if has("web") {
             body.push_str(&feature("web"));
         }
-
-        body
+        body.trim_end().to_string()
     };
-    let extension = if rust { "rs" } else { "py" };
-    let plugin_path = plugins_dir.join(format!("{plugin_name}.{extension}"));
-    if let Err(e) = std::fs::write(&plugin_path, body.trim_end()) {
-        return Ok(SuccessTuple::fail(format!(
-            "Failed to write file '{}':\n{e}",
-            plugin_path.display()
-        )));
+    let scaffold = Scaffold {
+        name: plugin_name,
+        features: &features,
+        action: &action_name,
+        dt_col: dt_col.as_deref(),
+    };
+    let files: Vec<(PathBuf, String)> = match (rust, package) {
+        (false, false) => vec![(format!("{plugin_name}.py").into(), python_body())],
+        (false, true) => vec![(
+            PathBuf::from(plugin_name).join("__init__.py"),
+            python_body(),
+        )],
+        (true, false) => vec![(
+            format!("{plugin_name}.rs").into(),
+            rust_scaffold(&scaffold)?.trim_end().to_string(),
+        )],
+        (true, true) => rust_package(&scaffold)?
+            .into_iter()
+            .map(|(path, text)| (PathBuf::from(plugin_name).join(path), text))
+            .collect(),
+    };
+    if package {
+        let directory = plugins_dir.join(plugin_name);
+        if directory.exists() {
+            return Ok(SuccessTuple::fail(format!(
+                "Directory '{}' already exists.",
+                directory.display()
+            )));
+        }
     }
+    for (relative, text) in &files {
+        let path = plugins_dir.join(relative);
+        let written = match path.parent() {
+            Some(parent) => std::fs::create_dir_all(parent),
+            None => Ok(()),
+        }
+        .and_then(|_| std::fs::write(&path, text));
+        if let Err(e) = written {
+            return Ok(SuccessTuple::fail(format!(
+                "Failed to write file '{}':\n{e}",
+                path.display()
+            )));
+        }
+    }
+    // The file to edit: the module or the crate's `src/lib.rs` (the last file written).
+    let plugin_path = plugins_dir.join(&files[if rust && package { files.len() - 1 } else { 0 }].0);
+    let created = if package {
+        plugins_dir.join(plugin_name)
+    } else {
+        plugin_path.clone()
+    };
 
     clear_screen(rt, args);
     print_tuple(
         rt,
         &SuccessTuple::ok(format!(
-            "Successfully created file '{}'.",
-            plugin_path.display()
+            "Successfully created {} '{}'.",
+            if package { "package" } else { "file" },
+            created.display()
         )),
         TupleArgs::default(),
     );
@@ -324,11 +372,8 @@ fn plugins_dir_path(rt: &mut Runtime<'_>) -> Result<PathBuf, ActionError> {
 
 /// `choose(..., FEATURE_CHOICES.items(), default='fetch', multiple=True, as_indices=True)`:
 /// the keys of the features picked, by number or key, separated by commas.
-fn choose_features(rt: &mut Runtime<'_>, rust: bool) -> Result<Vec<String>, ActionError> {
-    let choices: Vec<_> = feature_choices()
-        .into_iter()
-        .filter(|(key, _)| !rust || matches!(key.as_str(), "fetch" | "action" | "connector"))
-        .collect();
+fn choose_features(rt: &mut Runtime<'_>) -> Result<Vec<String>, ActionError> {
+    let choices = feature_choices();
     let question = "Which of the following features would you like to add to your plugin?\n    Enter your choices, separated by ','.\n";
     let default = "fetch";
     let noask = check_noask(rt, false);
@@ -418,16 +463,63 @@ fn get_action_name(rt: &mut Runtime<'_>) -> Result<String, ActionError> {
     }
 }
 
-/// `_get_quoted_dt_col_name()`: the answer as a Python string literal (`None` to skip).
-fn get_quoted_dt_col_name(rt: &mut Runtime<'_>) -> String {
-    match ask(
+/// `_get_quoted_dt_col_name()`'s question: the datetime column, `None` to skip.
+fn get_dt_col_name(rt: &mut Runtime<'_>) -> Option<String> {
+    ask(
         rt,
         "Enter the datetime column name ([CTRL+C] to skip):",
         &Ask::new(),
-    ) {
-        Err(_) => "None".into(),
-        Ok(name) if name.contains(['"', '\'']) => format!("\"\"\"{name}\"\"\""),
-        Ok(name) => format!("\"{name}\""),
+    )
+    .ok()
+    .filter(|name| !name.is_empty())
+}
+
+/// The datetime column as a Python string literal (`None` to skip).
+fn quoted_dt_col_name(name: Option<&str>) -> String {
+    match name {
+        None => "None".into(),
+        Some(name) if name.contains(['"', '\'']) => format!("\"\"\"{name}\"\"\""),
+        Some(name) => format!("\"{name}\""),
+    }
+}
+
+/// Single-file module (default) or a package directory: `<name>/__init__.py` for Python, a
+/// Cargo crate (`plugin.toml`, `Cargo.toml`, `src/lib.rs`) for Rust.
+fn choose_packaging(rt: &mut Runtime<'_>, name: &str, rust: bool) -> Result<bool, ActionError> {
+    let (single, package) = if rust {
+        (
+            format!("Single file ({name}.rs)"),
+            format!("Package ({name}/Cargo.toml)"),
+        )
+    } else {
+        (
+            format!("Single file ({name}.py)"),
+            format!("Package ({name}/__init__.py)"),
+        )
+    };
+    let choice = choose(
+        rt,
+        "How would you like to package your plugin?",
+        &[single.clone(), package.clone()],
+        Some(&single),
+        true,
+    )?;
+    Ok(choice.as_deref() == Some(package.as_str()))
+}
+
+/// A Rust plugin's name is its crate, connector type and page path: letters, digits, `_` and
+/// `-`, starting with a letter.
+fn rust_plugin_name(name: &str) -> Result<(), String> {
+    let valid = name.chars().next().is_some_and(|c| c.is_ascii_alphabetic())
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-');
+    if valid {
+        Ok(())
+    } else {
+        Err(format!(
+            "Rust plugin names must start with a letter and contain only letters, digits, '_' or '-' (got '{name}')."
+        ))
     }
 }
 
@@ -469,20 +561,22 @@ fn rust_action_ident(action: &str) -> Result<String, ActionError> {
     })
 }
 
-/// Single-file shorthand: no manifest, SDK imports, or ABI boilerplate.
-fn rust_scaffold(name: &str, features: &[String], action: &str) -> Result<String, ActionError> {
-    let has = |feature: &str| features.iter().any(|f| f == feature);
-    let mut body = format!("//! {name} plugin.\n\nconst VERSION: &str = \"0.0.1\";\n\n");
-    if has("fetch") {
-        body.push_str("fn fetch() -> Vec<Value> {\n    vec![json!({\"id\": 1, \"value\": 42})]\n}\n\nfn register() -> Value {\n    json!({\"columns\": {\"id\": \"id\"}})\n}\n\n");
+/// What the Rust scaffolds are generated from.
+struct Scaffold<'a> {
+    name: &'a str,
+    features: &'a [String],
+    action: &'a str,
+    dt_col: Option<&'a str>,
+}
+
+impl Scaffold<'_> {
+    fn has(&self, feature: &str) -> bool {
+        self.features.iter().any(|f| f == feature)
     }
-    if has("action") {
-        let function = rust_action_ident(action)?;
-        let spaces = action.replace('_', " ");
-        body.push_str(&format!("/// Run `mrsm {spaces}` to trigger.\n#[make_action]\nfn {function}(action: Vec<String>) -> (bool, String) {{\n    (true, format!(\"Hello, {{}}!\", action.join(\", \")))\n}}\n\n"));
-    }
-    if has("connector") {
-        let connector = name.replace('-', "_");
+
+    /// The connector type `#[make_connector]` defines (the plugin name with `-` as `_`).
+    fn connector_type(&self) -> Result<String, ActionError> {
+        let connector = self.name.replace('-', "_");
         if !connector
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '_')
@@ -493,9 +587,401 @@ fn rust_scaffold(name: &str, features: &[String], action: &str) -> Result<String
                 "Choose a plugin name usable as a connector type (letters, digits, underscores; no built-in connector names).",
             ));
         }
-        body.push_str(&format!("#[make_connector(name = {connector:?})]\nmod source {{\n    fn fetch(connector: &Connector) -> Vec<Value> {{\n        vec![json!({{\"id\": 1, \"source\": connector.label()}})]\n    }}\n}}\n"));
+        Ok(connector)
+    }
+
+    /// One example row (with the datetime column when one was given).
+    fn example_row(&self, extra: &str) -> String {
+        match self.dt_col {
+            Some(dt) => {
+                format!("json!({{{dt:?}: \"2025-01-01T00:00:00+00:00\", \"id\": 1, {extra}}})")
+            }
+            None => format!("json!({{\"id\": 1, {extra}}})"),
+        }
+    }
+
+    /// The default parameters `register` returns.
+    fn register_value(&self) -> String {
+        match self.dt_col {
+            Some(dt) => format!("json!({{\"columns\": {{\"datetime\": {dt:?}, \"id\": \"id\"}}}})"),
+            None => "json!({\"columns\": {\"id\": \"id\"}})".into(),
+        }
+    }
+}
+
+/// The instance methods a single-file instance connector module answers, with stubs to fill in
+/// (the same set as the Python template's `InstanceConnector`).
+const RUST_INSTANCE_METHODS: &str = r#"    /// Insert the pipe's keys and parameters into your pipes table.
+    fn register_pipe(_pipe: &Pipe) -> SuccessTuple {
+        // TODO store `_pipe.connector_keys()`, `_pipe.metric_key()`, `_pipe.location_key()`
+        // and `_pipe.parameters()`.
+        SuccessTuple::success()
+    }
+
+    /// The pipe's stored attributes (keys and `parameters`).
+    fn get_pipe_attributes(_pipe: &Pipe) -> Value {
+        // TODO read the pipe's row from your pipes table.
+        json!({})
+    }
+
+    /// The pipe's ID, if it is registered.
+    fn get_pipe_id(_pipe: &Pipe) -> Option<i64> {
+        // TODO look up the ID mapped to this pipe.
+        None
+    }
+
+    /// Persist the pipe's in-memory parameters.
+    fn edit_pipe(_pipe: &Pipe) -> SuccessTuple {
+        // TODO update the pipe's row with `_pipe.parameters()`.
+        SuccessTuple::success()
+    }
+
+    /// Delete the pipe's registration.
+    fn delete_pipe(_pipe: &Pipe) -> SuccessTuple {
+        // TODO delete the pipe's row from your pipes table.
+        SuccessTuple::success()
+    }
+
+    /// The registered pipes' keys that match `query` (`connector_keys`, `metric_keys`,
+    /// `location_keys`, `tags`; a `_` prefix negates a value).
+    fn fetch_pipes_keys(_query: &Value) -> Value {
+        // TODO return `[[connector_keys, metric_key, location_key], ...]`.
+        json!([])
+    }
+
+    /// Whether the pipe's target table exists.
+    fn pipe_exists(_pipe: &Pipe) -> bool {
+        // TODO check whether `_pipe.target()` exists.
+        false
+    }
+
+    /// Drop the pipe's target table.
+    fn drop_pipe(_pipe: &Pipe) -> SuccessTuple {
+        // TODO drop `_pipe.target()`.
+        SuccessTuple::success()
+    }
+
+    /// Upsert new rows into the pipe's target table.
+    fn sync_pipe(_pipe: &Pipe, data: Vec<Value>) -> (bool, String) {
+        // TODO write `data` to `_pipe.target()`.
+        (true, format!("Received {} rows.", data.len()))
+    }
+
+    /// Delete the rows within `begin`, `end` and `params`.
+    fn clear_pipe(_pipe: &Pipe, _begin: Option<Bound>, _end: Option<Bound>, _params: &Value) -> SuccessTuple {
+        // TODO delete the matching rows.
+        SuccessTuple::success()
+    }
+
+    /// The pipe's rows within `begin`, `end` and `params`.
+    fn get_pipe_data(_pipe: &Pipe, _begin: Option<Bound>, _end: Option<Bound>, _params: &Value) -> Vec<Value> {
+        // TODO read the matching rows from `_pipe.target()`.
+        vec![]
+    }
+
+    /// The newest (or oldest) value of the datetime axis.
+    fn get_sync_time(_pipe: &Pipe, _newest: bool, _params: &Value) -> Option<String> {
+        // TODO return the largest datetime as an ISO timestamp (the smallest if not `_newest`).
+        None
+    }
+
+    /// The target table's columns and their types.
+    fn get_pipe_columns_types(_pipe: &Pipe) -> Value {
+        // TODO map each column to its type, e.g. `{"id": "int"}`.
+        json!({})
+    }
+
+    /// How many rows the target table has within `begin`, `end` and `params`.
+    fn get_pipe_rowcount(_pipe: &Pipe, _begin: Option<Bound>, _end: Option<Bound>, _params: &Value) -> Option<i64> {
+        // TODO count the matching rows.
+        Some(0)
+    }
+"#;
+
+/// Single-file shorthand: no manifest, SDK imports, or ABI boilerplate.
+fn rust_scaffold(scaffold: &Scaffold<'_>) -> Result<String, ActionError> {
+    let name = scaffold.name;
+    let mut body = format!(
+        "//! Implement the plugin '{name}'.\n//!\n//! See the Rust Plugins guide for more information:\n//! https://meerschaum.io/reference/plugins/rust-plugins/\n\nconst VERSION: &str = \"0.0.1\";\n\n/// Executed during installation and `mrsm setup plugin {name}`.\nfn setup() -> (bool, String) {{\n    (true, \"Success\".into())\n}}\n\n"
+    );
+    if scaffold.has("fetch") {
+        body.push_str(&format!(
+            "/// Return the default parameters for a new pipe.\nfn register() -> Value {{\n    {}\n}}\n\n/// Return the new rows (each `json!` object is one row).\nfn fetch(_pipe: &Pipe, _begin: Option<Bound>, _end: Option<Bound>) -> Vec<Value> {{\n    vec![{}]\n}}\n\n",
+            scaffold.register_value(),
+            scaffold.example_row("\"value\": 42"),
+        ));
+    }
+    if scaffold.has("connector") || scaffold.has("instance-connector") {
+        let connector = scaffold.connector_type()?;
+        let instance = scaffold.has("instance-connector");
+        body.push_str(&format!(
+            "/// Implement '{connector}' connectors.\n#[make_connector(name = {connector:?}{})]\nmod {connector}_connector {{\n    /// Return or yield rows.\n    fn fetch(connector: &Connector, _pipe: &Pipe, _begin: Option<Bound>, _end: Option<Bound>) -> Vec<Value> {{\n        vec![json!({{\"id\": 1, \"source\": connector.label()}})]\n    }}\n",
+            if instance { ", instance" } else { "" },
+        ));
+        if instance {
+            body.push('\n');
+            body.push_str(RUST_INSTANCE_METHODS);
+        }
+        body.push_str("}\n\n");
+    }
+    if scaffold.has("action") {
+        let function = rust_action_ident(scaffold.action)?;
+        let spaces = scaffold.action.replace('_', " ");
+        body.push_str(&format!("/// Run `mrsm {spaces}` to trigger.\n#[make_action]\nfn {function}(action: Vec<String>) -> (bool, String) {{\n    (true, format!(\"Hello, {{}}!\", action.join(\", \")))\n}}\n\n"));
+    }
+    if scaffold.has("api") {
+        body.push_str(&format!("/// Add a new endpoint to the API at `/{name}`.\n#[api_route(GET, \"/{name}\")]\nfn get_my_endpoint(request: &RouteRequest) -> Value {{\n    json!({{\"message\": \"Hello from plugin '{name}'!\", \"user\": request.principal}})\n}}\n\n"));
+    }
+    if scaffold.has("web") {
+        body.push_str(&format!("/// A new page of the web console at `/dash/{name}`.\n#[web_page({name:?}, login_required = false)]\nfn page_layout(page: &PageRequest) -> String {{\n    format!(\n        \"<h1>Hello from plugin '{name}', {{}}!</h1>\",\n        page.username.as_deref().unwrap_or(\"guest\")\n    )\n}}\n\n"));
     }
     Ok(body)
+}
+
+/// The SDK requirement of a generated Cargo plugin: this release exactly while it is a
+/// pre-release, else its minor series.
+fn sdk_requirement() -> String {
+    let version = env!("CARGO_PKG_VERSION");
+    if version.contains('-') {
+        format!("={version}")
+    } else {
+        version
+            .rsplitn(2, '.')
+            .last()
+            .unwrap_or(version)
+            .to_string()
+    }
+}
+
+/// `UpperCamelCase` for the plugin's struct.
+fn camel_case(name: &str) -> String {
+    name.split(['-', '_'])
+        .filter(|part| !part.is_empty())
+        .map(|part| {
+            let mut chars = part.chars();
+            chars
+                .next()
+                .map(|c| c.to_ascii_uppercase().to_string() + chars.as_str())
+                .unwrap_or_default()
+        })
+        .collect()
+}
+
+/// A Cargo plugin crate on the full SDK: `(relative path, contents)` of `plugin.toml`,
+/// `Cargo.toml` and `src/lib.rs` (last).
+fn rust_package(scaffold: &Scaffold<'_>) -> Result<Vec<(String, String)>, ActionError> {
+    let name = scaffold.name;
+    let has = |feature: &str| scaffold.has(feature);
+    let plugin_struct = camel_case(name);
+    let plugin_toml = format!("name = {name:?}\nversion = \"0.0.1\"\n");
+    let cargo_toml = format!(
+        "[package]\nname = {name:?}\nversion = \"0.0.1\"\nedition = \"2024\"\n\n# Built on its own, even inside another Cargo workspace.\n[workspace]\n\n[lib]\ncrate-type = [\"cdylib\"]\n\n[dependencies]\nmeerschaum-plugin = \"{}\"\n\n[profile.release]\n# Required: the SDK catches panics at the plugin boundary.\npanic = \"unwind\"\n",
+        sdk_requirement()
+    );
+
+    let mut imports = vec!["Error", "Frame", "Plugin", "Reply", "Request", "Result"];
+    if has("fetch") || has("connector") || has("instance-connector") {
+        imports.push("sdk::FetchOutput");
+    }
+    if has("api") {
+        imports.push("api::{RouteRequest, RouteResponse, RouteSpec}");
+    }
+    imports.push("serde_json::{Value, json}");
+
+    let mut entry = vec![
+        format!("\"name\": {name:?}"),
+        "\"version\": VERSION".to_string(),
+    ];
+    let mut data_functions = Vec::new();
+    if has("fetch") {
+        data_functions.extend(["\"fetch\"", "\"register\""]);
+    }
+    if !data_functions.is_empty() {
+        entry.push(format!(
+            "\"data_functions\": [{}]",
+            data_functions.join(", ")
+        ));
+    }
+    let mut connector_types = String::new();
+    let connector = if has("connector") || has("instance-connector") {
+        Some(scaffold.connector_type()?)
+    } else {
+        None
+    };
+    if let Some(connector) = &connector {
+        let instance = has("instance-connector");
+        let methods = if instance {
+            "\"fetch\", \"register_pipe\", \"get_pipe_attributes\", \"get_pipe_id\", \"edit_pipe\", \"delete_pipe\", \"fetch_pipes_keys\", \"pipe_exists\", \"drop_pipe\", \"sync_pipe\", \"clear_pipe\", \"get_pipe_data\", \"get_sync_time\", \"get_pipe_columns_types\", \"get_pipe_rowcount\""
+        } else {
+            "\"fetch\""
+        };
+        entry.push(format!("\"connectors\": [{connector:?}]"));
+        connector_types = format!(
+            ",\n            \"connector_types\": {{\n                {connector:?}: {{\n                    \"type\": {connector:?},\n                    \"plugin\": {name:?},\n                    \"class_name\": \"{plugin_struct}\",\n                    \"is_instance\": {instance},\n                    \"is_thread_safe\": false,\n                    \"methods\": [{methods}]\n                }}\n            }}"
+        );
+    }
+    let action = if has("action") {
+        rust_action_ident(scaffold.action)?;
+        let spaces = scaffold.action.replace('_', " ");
+        entry.push(format!(
+            "\"actions\": [{{\"name\": {:?}, \"doc\": \"Run `mrsm {spaces}` to trigger.\"}}]",
+            scaffold.action
+        ));
+        Some(scaffold.action)
+    } else {
+        None
+    };
+    if has("api") {
+        entry.push(format!(
+            "\"api_routes\": [RouteSpec::new(\"get_my_endpoint\", \"GET\", \"/{name}\").to_json()]"
+        ));
+    }
+    if has("web") {
+        entry.push(format!(
+            "\"web_pages\": [{{\n                        \"path\": \"/dash/{name}\",\n                        \"page_group\": {name:?},\n                        \"page_key\": {name:?},\n                        \"login_required\": false,\n                        \"function\": \"page_layout\",\n                        \"mode\": \"html\"\n                    }}]"
+        ));
+    }
+    let entry = entry
+        .iter()
+        .map(|line| format!("                    {line}"))
+        .collect::<Vec<_>>()
+        .join(",\n");
+
+    let mut arms = Vec::new();
+    arms.push(
+        "            // Executed during installation and `mrsm setup plugin <name>`.\n            \"setup\" => Ok(Reply::json(json!([true, \"Success\"]))),".to_string(),
+    );
+    if has("fetch") {
+        arms.push(format!(
+            "            // The default parameters for a new pipe.\n            \"register\" => Ok(Reply::json({})),",
+            scaffold.register_value()
+        ));
+    }
+    if has("fetch") || connector.is_some() {
+        arms.push("            \"fetch\" => self.fetch(request).map(Reply::data),".to_string());
+    }
+    if has("instance-connector") {
+        arms.push(r#"            // Instance methods: the pipe is `request.pipe()?`, bounds `request.bound("begin")?`,
+            // other arguments `request.field("params")`. Fill in the TODOs.
+            "register_pipe" | "edit_pipe" | "delete_pipe" | "drop_pipe" | "clear_pipe" => {
+                let _pipe = request.pipe()?;
+                // TODO store, update or remove the pipe or its rows.
+                Ok(Reply::json(json!([true, "Success"])))
+            }
+            "sync_pipe" => {
+                let rows = data.map(|frame| frame.height()).unwrap_or(0);
+                // TODO write `data` to the pipe's target table.
+                Ok(Reply::json(json!([true, format!("Received {rows} rows.")])))
+            }
+            // TODO return the matching rows.
+            "get_pipe_data" => Ok(Reply::data(None)),
+            // TODO return `[[connector_keys, metric_key, location_key], ...]`.
+            "fetch_pipes_keys" => Ok(Reply::json(json!([]))),
+            "pipe_exists" => Ok(Reply::json(json!(false))),
+            "get_pipe_attributes" | "get_pipe_columns_types" => Ok(Reply::json(json!({}))),
+            "get_pipe_id" | "get_sync_time" => Ok(Reply::json(Value::Null)),
+            "get_pipe_rowcount" => Ok(Reply::json(json!(0))),"#
+            .to_string());
+    }
+    if let Some(action) = action {
+        let spaces = action.replace('_', " ");
+        arms.push(format!(
+            "            // `mrsm {spaces}`: the words after the action are `context.kwargs.action`.\n            \"action\" if request.context[\"name\"] == {action:?} => {{\n                let words: Vec<&str> = request.context[\"kwargs\"][\"action\"]\n                    .as_array()\n                    .map(|words| words.iter().filter_map(Value::as_str).collect())\n                    .unwrap_or_default();\n                Ok(Reply::json(json!([true, format!(\"Hello, {{}}!\", words.join(\", \"))])))\n            }}"
+        ));
+    }
+    if has("api") {
+        arms.push("            \"api_route\" => meerschaum_plugin::sdk::call_server_extension(self, request),".to_string());
+    }
+    if has("web") {
+        arms.push(format!(
+            "            // The page's HTML (`context.username` is `null` for a guest).\n            \"page\" => Ok(Reply::json(json!({{\n                \"html\": format!(\n                    \"<h1>Hello from plugin '{name}', {{}}!</h1>\",\n                    request.context[\"username\"].as_str().unwrap_or(\"guest\")\n                )\n            }}))),"
+        ));
+    }
+
+    let mut methods = String::new();
+    if has("fetch") || connector.is_some() {
+        let source_row = if let Some(connector) = &connector {
+            format!(
+                "        if request.connector_type == {connector:?} {{\n            // A `{connector}:<label>` connector; its attributes are in `request.config`.\n            return vec![json!({{\"id\": 1, \"source\": request.label}})].into_frame();\n        }}\n"
+            )
+        } else {
+            String::new()
+        };
+        let plugin_rows = if has("fetch") {
+            format!(
+                "        // `plugin:{name}` pipes: fetch the rows between these bounds.\n        let _begin = request.bound(\"begin\")?;\n        let _end = request.bound(\"end\")?;\n        vec![{}].into_frame()\n",
+                scaffold.example_row("\"value\": 42")
+            )
+        } else {
+            "        Ok(None)\n".to_string()
+        };
+        methods.push_str(&format!(
+            "\n    /// Return the new rows (each `json!` object is one row).\n    fn fetch(&self, request: &Request) -> Result<Option<Frame>> {{\n{source_row}{plugin_rows}    }}\n"
+        ));
+    }
+    if has("api") {
+        methods.push_str(&format!(
+            "\n    /// Serve the routes declared under `api_routes`.\n    fn api_route(&self, request: &RouteRequest) -> Result<RouteResponse> {{\n        match request.name.as_str() {{\n            \"get_my_endpoint\" => Ok(RouteResponse::json(&json!({{\n                \"message\": \"Hello from plugin '{name}'!\",\n                \"user\": request.principal,\n            }}))),\n            other => Err(Error::Unsupported(format!(\"unknown route {{other}}\"))),\n        }}\n    }}\n"
+        ));
+    }
+    let data_param = if has("instance-connector") {
+        "data"
+    } else {
+        "_data"
+    };
+    let lib = format!(
+        r#"//! Implement the plugin '{name}'.
+//!
+//! See the Rust Plugins guide for more information:
+//! https://meerschaum.io/reference/plugins/rust-plugins/advanced/
+
+use meerschaum_plugin::{{
+    {imports},
+}};
+
+const VERSION: &str = "0.0.1";
+
+#[derive(Default)]
+struct {plugin_struct};
+
+impl Plugin for {plugin_struct} {{
+    const NAME: &'static str = {name:?};
+    const VERSION: &'static str = VERSION;
+
+    /// What this plugin provides (read without loading the library).
+    fn manifest(&self) -> Value {{
+        json!({{
+            "schema_version": meerschaum_plugin::MANIFEST_SCHEMA_VERSION,
+            "meerschaum_version": {mrsm_version:?},
+            "python_version": "",
+            "fingerprint": null,
+            "plugins": {{
+                {name:?}: {{
+{entry}
+                }}
+            }}{connector_types}
+        }})
+    }}
+{methods}
+    fn call(&self, request: &Request, {data_param}: Option<Frame>) -> Result<Reply> {{
+        match request.method.as_str() {{
+{arms}
+            other => Err(Error::Unsupported(format!("{{other}} is not implemented"))),
+        }}
+    }}
+}}
+
+meerschaum_plugin::export_plugin!({plugin_struct});
+"#,
+        imports = imports.join(",\n    "),
+        mrsm_version = env!("CARGO_PKG_VERSION"),
+        arms = arms.join("\n"),
+    );
+    Ok(vec![
+        ("plugin.toml".into(), plugin_toml),
+        ("Cargo.toml".into(), cargo_toml),
+        ("src/lib.rs".into(), lib),
+    ])
 }
 
 #[cfg(test)]
@@ -530,9 +1016,42 @@ mod tests {
         assert_eq!(feature_choices().len(), 6);
     }
 
+    const ALL_FEATURES: [&str; 6] = [
+        "fetch",
+        "connector",
+        "instance-connector",
+        "action",
+        "api",
+        "web",
+    ];
+
+    fn scaffold_with(
+        features: &[&str],
+        action: &str,
+        dt_col: Option<&str>,
+    ) -> Result<String, ActionError> {
+        let features: Vec<String> = features.iter().map(|f| f.to_string()).collect();
+        rust_scaffold(&Scaffold {
+            name: "demo",
+            features: &features,
+            action,
+            dt_col,
+        })
+    }
+
     fn scaffold(action: &str) -> Result<String, ActionError> {
-        let features = ["fetch", "action", "connector"].map(String::from);
-        rust_scaffold("demo", &features, action)
+        scaffold_with(&["fetch", "action", "connector"], action, None)
+    }
+
+    #[test]
+    fn rust_offers_every_python_feature() {
+        assert_eq!(
+            feature_choices()
+                .iter()
+                .map(|(key, _)| key.as_str())
+                .collect::<Vec<_>>(),
+            ALL_FEATURES
+        );
     }
 
     #[test]
@@ -553,17 +1072,127 @@ mod tests {
     #[test]
     fn rust_scaffolds_generate_valid_plugins() {
         let dir = tempfile::tempdir().unwrap();
-        for action in ["sing_song", "type"] {
+        let mut cases: Vec<(Vec<&str>, Option<&str>)> = ALL_FEATURES
+            .iter()
+            .map(|feature| (vec![*feature], None))
+            .collect();
+        cases.push((ALL_FEATURES.to_vec(), Some("timestamp")));
+        cases.push((vec!["fetch", "connector"], Some("dt")));
+        for (i, (features, dt_col)) in cases.into_iter().enumerate() {
+            let body = scaffold_with(&features, "sing_song", dt_col).unwrap();
             let file = dir.path().join("demo.rs");
-            std::fs::write(&file, scaffold(action).unwrap()).unwrap();
-            let generated = dir.path().join(action);
-            meerschaum_plugin::source::prepare_single_file(&file, "demo", &generated).unwrap();
+            std::fs::write(&file, &body).unwrap();
+            let generated = dir.path().join(i.to_string());
+            meerschaum_plugin::source::prepare_single_file(&file, "demo", &generated)
+                .unwrap_or_else(|e| panic!("{features:?}: {e}\n{body}"));
             let lib = std::fs::read_to_string(generated.join("lib.rs")).unwrap();
-            assert!(lib.contains(&format!(r#"\"name\":\"{action}\""#)), "{lib}");
             assert!(
                 lib.contains(r#"const VERSION: &'static str = "0.0.1";"#),
                 "{lib}"
             );
+            if features.contains(&"action") {
+                assert!(lib.contains(r#"\"name\":\"sing_song\""#), "{lib}");
+            }
+        }
+    }
+
+    #[test]
+    fn rust_packages_are_cargo_plugin_crates() {
+        let features: Vec<String> = ALL_FEATURES.iter().map(|f| f.to_string()).collect();
+        let files = rust_package(&Scaffold {
+            name: "my-demo",
+            features: &features,
+            action: "sing_song",
+            dt_col: Some("ts"),
+        })
+        .unwrap();
+        let paths: Vec<&str> = files.iter().map(|(p, _)| p.as_str()).collect();
+        assert_eq!(paths, ["plugin.toml", "Cargo.toml", "src/lib.rs"]);
+        assert!(files[0].1.contains("name = \"my-demo\""));
+        assert!(files[1].1.contains("crate-type = [\"cdylib\"]"));
+        assert!(files[1].1.contains("panic = \"unwind\""));
+        assert!(
+            files[1]
+                .1
+                .contains(&format!("meerschaum-plugin = \"{}\"", sdk_requirement()))
+        );
+        let lib = &files[2].1;
+        assert!(lib.contains("struct MyDemo;"), "{lib}");
+        assert!(
+            lib.contains("meerschaum_plugin::export_plugin!(MyDemo);"),
+            "{lib}"
+        );
+        for needle in [
+            "\"connector_types\"",
+            "\"is_instance\": true",
+            "\"actions\": [{\"name\": \"sing_song\"",
+            "RouteSpec::new(\"get_my_endpoint\", \"GET\", \"/my-demo\")",
+            "\"web_pages\"",
+            "\"sync_pipe\" =>",
+            "\"page\" =>",
+        ] {
+            assert!(lib.contains(needle), "{needle}\n{lib}");
+        }
+    }
+
+    #[test]
+    fn packaging_names_and_versions() {
+        assert!(rust_plugin_name("my-plugin_2").is_ok());
+        for invalid in ["2nd", "my plugin", "a.b", ""] {
+            assert!(rust_plugin_name(invalid).is_err(), "{invalid}");
+        }
+        assert_eq!(camel_case("my-demo_plugin"), "MyDemoPlugin");
+        let requirement = sdk_requirement();
+        assert!(requirement.starts_with('=') || !requirement.contains('-'));
+        assert_eq!(quoted_dt_col_name(None), "None");
+        assert_eq!(quoted_dt_col_name(Some("ts")), "\"ts\"");
+    }
+}
+
+#[cfg(test)]
+mod dump_tmp {
+    use super::*;
+    #[test]
+    #[ignore]
+    fn dump() {
+        let out = std::path::PathBuf::from(std::env::var("DUMP_DIR").unwrap());
+        let all = [
+            "fetch",
+            "connector",
+            "instance-connector",
+            "action",
+            "api",
+            "web",
+        ];
+        let mut cases: Vec<(String, Vec<&str>, Option<&str>)> = all
+            .iter()
+            .map(|f| (f.replace('-', "_"), vec![*f], None))
+            .collect();
+        cases.push(("all".into(), all.to_vec(), Some("ts")));
+        for (label, features, dt) in cases {
+            let features: Vec<String> = features.iter().map(|f| f.to_string()).collect();
+            let name = format!("demo_{label}");
+            let s = Scaffold {
+                name: &name,
+                features: &features,
+                action: "sing_song",
+                dt_col: dt,
+            };
+            let single = out.join("single");
+            std::fs::create_dir_all(&single).unwrap();
+            let file = single.join(format!("{name}.rs"));
+            std::fs::write(&file, rust_scaffold(&s).unwrap()).unwrap();
+            meerschaum_plugin::source::prepare_single_file(
+                &file,
+                &name,
+                &out.join("gen").join(&name),
+            )
+            .unwrap();
+            for (path, text) in rust_package(&s).unwrap() {
+                let p = out.join("pkg").join(&name).join(path);
+                std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+                std::fs::write(p, text).unwrap();
+            }
         }
     }
 }

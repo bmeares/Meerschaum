@@ -24,12 +24,13 @@
     window.mrsmUpdateOutputCancel = function () {
         const item = window._mrsmNodeOutput?.get(window._mrsmNodeOutputSelected);
         const button = document.getElementById('pipeline-cancel-node-run');
-        if (button) button.style.display = item && ['running', 'paused'].includes(item.status) ? '' : 'none';
+        // A Pipeline member's run is cancelled with its Pipeline (`Cancel active run`).
+        if (button) button.style.display = item && item.scope !== 'pipeline' && ['running', 'paused'].includes(item.status) ? '' : 'none';
     };
     window.mrsmFinishNodeOutput = function (item) {
         window.mrsmUpdateOutputCancel();
         const items = Array.from((window._mrsmNodeOutput || new Map()).values()).filter(row => row.ref === item.ref);
-        if (items.at(-1)?.job === item.job) {
+        if ((items.at(-1)?.key || items.at(-1)?.job) === (item.key || item.job)) {
             const statuses = {...(window._mrsmPipelineStatuses || {})};
             if (['running', 'pending'].includes(statuses[item.ref])) statuses[item.ref] = 'stopped';
             window._mrsmPipelineStatuses = statuses;

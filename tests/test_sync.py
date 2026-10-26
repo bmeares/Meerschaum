@@ -1548,3 +1548,17 @@ def test_parametrized_sync_time(flavor: str):
     assert sync_time_a is not None
     assert sync_time_b is not None
     assert sync_time_a < sync_time_b
+
+
+@pytest.mark.parametrize("flavor", get_flavors())
+def test_sync_names_a_plugin_that_is_not_installed(flavor: str):
+    """
+    Syncing a pipe whose plugin is not installed says so instead of "No data were fetched".
+    """
+    conn = conns[flavor]
+    pipe = mrsm.Pipe('plugin:_mrsm_test_not_installed', 'unavailable', instance=conn)
+    success, msg = pipe.sync(debug=debug)
+    assert not success
+    assert "does not have a valid connector" in msg
+    assert "plugin '_mrsm_test_not_installed' is not installed" in msg
+    assert "No data were fetched" not in msg

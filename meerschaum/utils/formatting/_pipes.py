@@ -385,6 +385,50 @@ def pipe_repr(
 
 
 
+def pipeline_repr(
+    name: str,
+    instance_keys: str,
+    ansi: Optional[bool] = None,
+) -> str:
+    """
+    Return a formatted string for representing a named `meerschaum.Pipeline`,
+    styled like `pipe_repr()` (the name takes the metric style).
+    """
+    from meerschaum.utils.formatting import ANSI, colored, rich_text_to_str
+    from meerschaum.utils.packages import import_rich, attempt_import
+
+    plain_instance = (
+        f", instance={instance_keys!r}"
+        if instance_keys != get_config('meerschaum', 'instance')
+        else ''
+    )
+    _ = import_rich(lazy=False)
+    rich_text = attempt_import('rich.text', lazy=False)
+    if rich_text is None or not ANSI or ansi is False:
+        return f"Pipeline({name!r}{plain_instance})"
+
+    styles = get_config('formatting', 'pipes', '__repr__', 'ansi', 'styles')
+    Text = rich_text.Text
+    prefix, suffix = (
+        (f"[{styles['Pipe']}]", f"[/{styles['Pipe']}]") if styles['Pipe']
+        else ('', '')
+    )
+    text_obj = (
+        Text.from_markup(prefix + 'Pipeline(' + suffix)
+        + colored(repr(name), style=styles['metric'], as_rich_text=True)
+        + (
+            (
+                colored(', instance=', style=styles['punctuation'], as_rich_text=True)
+                + colored(repr(instance_keys), style=styles['instance'], as_rich_text=True)
+            ) if plain_instance
+            else colored('', style='', as_rich_text=True)
+        )
+        + Text.from_markup(prefix + ')' + suffix)
+    )
+    return rich_text_to_str(text_obj).replace('\n', '')
+
+
+
 def highlight_pipes(message: str) -> str:
     """
     Add syntax highlighting to an info message containing stringified `meerschaum.Pipe` objects.

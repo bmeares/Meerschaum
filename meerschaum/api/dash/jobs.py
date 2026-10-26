@@ -116,12 +116,16 @@ def build_job_card(
         "Follow logs",
         id={'type': 'follow-logs-button', 'index': job.name},
     )
+    view_logs_button = dbc.DropdownMenuItem(
+        "View",
+        id={'type': 'job-view-logs-button', 'index': job.name},
+    )
     download_logs_button = dbc.DropdownMenuItem(
-        "Download logs",
+        "Download",
         id={'type': 'job-download-logs-button', 'index': job.name},
     )
     logs_menu_children = (
-        ([follow_logs_button] if include_follow else []) + [download_logs_button]
+        [view_logs_button] + ([follow_logs_button] if include_follow else []) + [download_logs_button]
         if authenticated
         else []
     )
@@ -192,21 +196,41 @@ def build_manage_job_buttons_div_children(job: Job):
     """
     Return the children for the manage job buttons div.
     """
-    buttons = build_manage_job_buttons(job)
-    if not buttons:
+    if job is None:
         return []
-    return [
+    buttons = build_manage_job_buttons(job)
+    deletable = job.status == 'stopped'
+    delete_button = dbc.Button(
+        'Delete',
+        size='sm',
+        color='danger',
+        style={'width': '100%'},
+        id={
+            'type': 'job-delete-button',
+            'index': job.name,
+        },
+    )
+    if deletable:
+        buttons.append(delete_button)
+    children = [
         html.Br(),
         dbc.Row([
             dbc.Col(button, width=6)
             for button in buttons
         ])
-    ]
+    ] if buttons else []
+    ### The delete button stays mounted (hidden) while the job cannot be deleted: it is an Input
+    ### of the confirmation modal's MATCH callback, whose outputs stay on the card, and Dash
+    ### refuses a MATCH callback that loses an Input.
+    if not deletable:
+        children.append(html.Div(delete_button, hidden=True))
+    return children
 
 
 def build_manage_job_buttons(job: Job):
     """
-    Return the currently available job management buttons for a given Job.
+    Return the currently available job management buttons for a given Job (besides Delete, see
+    `build_manage_job_buttons_div_children`).
     """
     if job is None:
         return []
@@ -244,16 +268,6 @@ def build_manage_job_buttons(job: Job):
             'index': job.name,
         },
     )
-    delete_button = dbc.Button(
-        'Delete',
-        size='sm',
-        color='danger',
-        style={'width': '100%'},
-        id={
-            'type': 'job-delete-button',
-            'index': job.name,
-        },
-    )
     buttons = []
     if is_automatic_job(job) and job.status == 'stopped':
         buttons.append(dbc.Button('Keep as Job', size='sm', color='info',
@@ -261,8 +275,6 @@ def build_manage_job_buttons(job: Job):
     status = job.status
     if status == 'paused' or (status == 'stopped' and not is_automatic_job(job)):
         buttons.append(start_button)
-    if status == 'stopped':
-        buttons.append(delete_button)
     if status in ('running',):
         buttons.append(pause_button)
     if status in ('running', 'paused'):
@@ -378,3 +390,26 @@ def get_run_cards(state):
         records = execution_request('/execute/runs', get_username_from_session(session_id)) or []
         cards.extend(build_archived_run_card(record) for record in records)
     return cards, []
+
+
+#: How often (ms) the logs modal re-reads a running job's logs.
+JOB_LOGS_REFRESH_MS: int = 1500
+
+#: The logs modal ("Logs" > "View" on a job card): the job's logs rendered with their ANSI
+#: colors, opened at the bottom and following new lines while the job runs (see
+#: `callbacks/jobs.py`). One per page that shows job cards.
+job_logs_modal = html.Div([
+    dbc.Modal(
+        [
+            dbc.ModalHeader(dbc.ModalTitle(id='job-logs-modal-title')),
+            dbc.ModalBody(html.Pre(id='job-logs-view', className='job-logs-view')),
+        ],
+        id='job-logs-modal',
+        size='xl',
+        is_open=False,
+    ),
+    dcc.Store(id='job-logs-meta', data=None),
+    dcc.Store(id='job-logs-text', data=None),
+    dcc.Interval(id='job-logs-interval', interval=JOB_LOGS_REFRESH_MS, disabled=True),
+    html.Div(id='job-logs-dummy', hidden=True),
+])

@@ -39,7 +39,6 @@ from meerschaum.api.dash.pipeline_cards import get_pipeline_cards
 from meerschaum.api.dash.jobs import get_run_cards
 from meerschaum.api.dash.plugins import get_plugins_cards
 from meerschaum.api.dash.users import get_users_cards
-from meerschaum.api.dash.graphs import get_graphs_cards
 from meerschaum.api.dash.webterm import get_webterm
 from meerschaum.api.dash.components import (
     alert_from_success_tuple,
@@ -102,7 +101,8 @@ _paths = {
         '/dash/pipes'   : pages.pipes.layout,
         '/dash/jobs'    : pages.jobs.layout,
         '/dash/runs'    : pages.jobs.layout,
-        '/dash/pipelines': pages.pipelines.layout,
+        ### Pipelines pages are built per request (`pages.pipelines.route`).
+        '/dash/pipelines': pages.pipelines.route,
     } if _console_pages_allowed else {}),
 }
 _required_login = {
@@ -120,7 +120,6 @@ _pages = {
     'Users': '/dash/users',
     'Tokens': '/dash/tokens',
     'Jobs': '/dash/jobs',
-    'Runs': '/dash/runs',
 } if _console_pages_allowed else {}
 
 
@@ -191,6 +190,10 @@ def update_page_layout_div(
     )
     layout = _paths.get(path, pages.error.layout)
     apply_dbc_dark = path not in _paths_without_dbc_dark
+    if callable(layout):
+        layout = layout(pathname, location_href)
+        ### Each Pipeline (and the list, wizard and explorer) is its own page.
+        path = pathname.rstrip('/')
 
     ### Wrap the page in a path-keyed container so React fully remounts the page on
     ### navigation. React reconciles by type + position (not by Dash id), so without a
@@ -237,7 +240,6 @@ dash_app.clientside_callback(
     Input('show-webterm-button', 'n_clicks'),
     Input('get-plugins-button', 'n_clicks'),
     Input('get-users-button', 'n_clicks'),
-    Input('get-graphs-button', 'n_clicks'),
     Input('instance-select', 'value'),
     State('mrsm-location', 'href'),
     State('session-store', 'data'),
@@ -281,12 +283,10 @@ def update_content(*args):
         'get-runs-button': get_run_cards,
         'get-plugins-button': get_plugins_cards,
         'get-users-button': get_users_cards,
-        'get-graphs-button': get_graphs_cards,
         'instance-select': lambda x: ([], []),
     }
     ### Defaults to 3 if not in dict.
     trigger_num_cols = {
-        'get-graphs-button': 1,
         'get-pipes-button': 1,
         'get-pipelines-button': 1,
         'get-runs-button': 2,
@@ -369,8 +369,10 @@ def update_actions(action: str, subaction: str):
         }
         for sa, f in get_subactions(action).items()
     ], key=lambda k: k['label'])
-    _subactions = [o['label'] for o in _subactions_options]
-    if subaction is None:
+    _subactions = [o['value'] for o in _subactions_options]
+    ### A subaction the new action does not offer (`watch` has no `pipes`) becomes its first one,
+    ### so Exec sends what the dropdown shows, not the previous action's subaction.
+    if subaction not in _subactions:
         subaction = _subactions[0] if _subactions else ''
 
     return (
@@ -446,7 +448,9 @@ def update_keys_options(
     if not instance_keys:
         ### NOTE: Set to `session_instance` to restore the last used session.
         ###       Choosing not to do this in order to keep the dashboard and webterm in sync.
-        instance_keys = str(get_api_connector())
+        ### The console's global instance (chosen on any page) comes first.
+        from meerschaum.api.dash.engine import global_instance_keys
+        instance_keys = global_instance_keys() or str(get_api_connector())
         update_instance_keys = True
 
     if not trigger and not update_instance_keys:
@@ -1301,7 +1305,7 @@ def expand_pipeline_card(active, session):
     from meerschaum.api.dash import engine
     from meerschaum.api.dash.callbacks.pipelines import build_runs_table
     meta = json.loads(dash.ctx.triggered_id['index'])
-    return build_runs_table(engine.get_runs(engine.get_instance(meta['instance']),
+    return build_runs_table(engine.get_runs(engine.get_instance(meta['instance'], strict=True),
         limit=20, run_name=meta['name']), table_id='pipeline-card-history-' + meta['name'],
         registry=meta['instance'], pipeline=meta['name'])
 

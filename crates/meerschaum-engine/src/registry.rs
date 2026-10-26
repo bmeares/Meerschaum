@@ -237,6 +237,7 @@ pub struct StaticRegistry {
     hooks: Option<Arc<dyn SyncHooks>>,
     table_refs: Option<TableRefFn>,
     registered: Arc<RegisteredCache>,
+    unavailable: HashMap<String, String>,
 }
 
 impl std::fmt::Debug for StaticRegistry {
@@ -263,6 +264,13 @@ impl StaticRegistry {
     /// Register a source connector under its keys.
     pub fn with_source(mut self, keys: &str, conn: Arc<dyn Connector>) -> Self {
         self.sources.insert(keys.to_string(), conn);
+        self
+    }
+
+    /// Say why the connector `keys` could not be built (a plugin that is not installed, a
+    /// connector without attributes): a sync of a pipe with these keys reports it.
+    pub fn with_unavailable(mut self, keys: &str, reason: impl Into<String>) -> Self {
+        self.unavailable.insert(keys.to_string(), reason.into());
         self
     }
 
@@ -325,7 +333,12 @@ impl ConnectorRegistry for StaticRegistry {
         if let Some(c) = self.sources.get(keys) {
             return Ok(Some(c.clone()));
         }
-        Err(format!("No connector is registered for '{keys}'."))
+        Err(match self.unavailable.get(keys) {
+            Some(reason) => format!("Connector '{keys}' is unavailable: {reason}"),
+            None => {
+                format!("Connector '{keys}' is unavailable: no connector is registered for it.")
+            }
+        })
     }
 
     fn plugin_sync(&self, keys: &str) -> Option<Arc<dyn PluginSync>> {

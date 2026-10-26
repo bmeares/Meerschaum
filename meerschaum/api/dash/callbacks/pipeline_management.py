@@ -1,6 +1,6 @@
-"""Authenticated persistence and Job controls for the Pipelines page."""
+"""Authenticated persistence, Edit mode, Manage dialogs and Job controls of one Pipeline's page."""
 import dash
-from urllib.parse import parse_qs, urlencode
+from urllib.parse import parse_qs, urlencode, quote, unquote
 from dash import Input, Output, State, ALL, html
 from dash.exceptions import PreventUpdate
 import dash_bootstrap_components as dbc
@@ -18,11 +18,34 @@ def _require_session(data):
         raise PreventUpdate
 
 
-@dash_app.callback(Output('pipeline-manage-collapse', 'is_open'),
-                   Input('pipeline-manage-toggle', 'n_clicks'),
-                   State('pipeline-manage-collapse', 'is_open'), prevent_initial_call=True)
-def toggle_management(clicks, opened):
-    return not opened
+def pipeline_path(name):
+    """The detail page of a Pipeline."""
+    return '/dash/pipelines/' + quote(str(name), safe='')
+
+
+def name_from_path(pathname, search=''):
+    """The Pipeline of `/dash/pipelines/<name>` (or a legacy `?pipeline=` link)."""
+    rest = str(pathname or '')[len('/dash/pipelines'):].strip('/')
+    if rest and rest.split('/', 1)[0] not in ('new', 'explore'):
+        return unquote(rest.split('/', 1)[0])
+    return parse_qs((search or '').lstrip('?')).get('pipeline', [None])[0]
+
+
+def _instance(search):
+    return engine.get_instance(parse_qs((search or '').lstrip('?')).get('instance', [None])[0])
+
+
+def _draft_changes(draft, definition, layout=None):
+    """How many changes an Edit-mode draft holds against its saved definition."""
+    draft, definition = draft or {}, definition or {}
+    saved, current = set(definition.get('targets', [])), set(draft.get('targets', []))
+    count = len(saved ^ current)
+    count += sum(bool(draft.get(key) != definition.get(key) and (draft.get(key) or definition.get(key)))
+                 for key in ('parents', 'children'))
+    count += len(draft.get('pipe_edits') or {})
+    if layout and layout != (definition.get('layout') or {}):
+        count += 1
+    return count
 
 
 @dash_app.callback(
@@ -41,26 +64,16 @@ def read_selection(pathname, name, search, refresh, session, current=None, curre
     _require_session(session)
     query = parse_qs((search or '').lstrip('?'))
     instance = engine.get_instance(query.get('instance', [None])[0])
-    if current is None and dash.ctx.triggered_id in ('pipelines-location', None):
-        dash.set_props('pipeline-add-instance', {'value': str(instance)})
-    if (dash.ctx.triggered_id in ('pipelines-location', None)
-            or (current is None and not name and not current_options and query.get('pipeline'))):
-        requested = query.get('pipeline', [None])[0]
-        if requested != name:
-            name = requested
+    requested = name_from_path(pathname, search)
+    if requested and dash.ctx.triggered_id in ('pipelines-location', None):
+        name = requested
+    elif not name and requested:
+        name = requested
     definitions = list_pipelines(instance)
-    if (dash.ctx.triggered_id == 'pipeline-saved-name'
-            and name != query.get('pipeline', [None])[0]):
-        if name:
-            query['pipeline'] = [name]
-        else:
-            query.pop('pipeline', None)
-        query.pop('run_id', None)
-        updated = ('?' + urlencode(query, doseq=True)) if query else ''
-        if updated != (search or ''):
-            dash.set_props('pipelines-location', {'search': updated})
     dash.set_props('pipeline-definitions', {'data': definitions})
     definition = definitions.get(name)
+    dash.set_props('pipelines-alert-div', {'children': [] if definition or not name else
+        alert_from_success_tuple((False, f"Pipeline '{name}' is not registered on {instance}."))})
     unchanged = current == definition
     if not unchanged:
         dash.set_props('pipeline-analysis', {'data': None})
@@ -102,16 +115,17 @@ def confirm_delete(clicks, definition, session):
 
 @dash_app.callback(
     Output('pipeline-manage-alert', 'children'),
-    Input('pipeline-save', 'n_clicks'), Input('pipeline-delete-confirm', 'submit_n_clicks'),
+    Input('pipeline-delete-confirm', 'submit_n_clicks'),
     Input('pipeline-draft-save', 'n_clicks'),
     State('pipeline-name-input', 'value'), State('pipeline-saved-name', 'value'),
     State('pipeline-draft', 'data'), State('pipeline-definition', 'data'), State('pipelines-location', 'search'), State('session-store', 'data'),
     State('pipeline-draft-members', 'value'), State('pipeline-draft-parents', 'value'),
     State('pipeline-draft-children', 'value'), State('pipeline-delete-target', 'data'),
+    State('pipeline-layout-draft', 'data'),
     prevent_initial_call=True,
 )
-def manage_selection(save_clicks, delete_clicks, draft_save, name, selected, draft, current, search, session,
-                     members=..., parents=..., children=..., delete_target=None):
+def manage_selection(delete_clicks, draft_save, name, selected, draft, current, search, session,
+                     members=..., parents=..., children=..., delete_target=None, layout=None):
     _require_session(session)
     completed = []
     try:
@@ -129,23 +143,11 @@ def manage_selection(save_clicks, delete_clicks, draft_save, name, selected, dra
                 result = delete_pipeline(selected, instance)
                 if result[0]:
                     result = True, f"Deleted Pipeline '{selected}' on {instance}. Member Pipes, data, and history were kept."
-                    dash.set_props('pipeline-saved-name', {'value': None})
                     dash.set_props('pipeline-definition', {'data': None})
                     dash.set_props('pipeline-selected-run', {'data': None})
                     dash.set_props('pipeline-live-run', {'data': None})
-                    query = parse_qs((search or '').lstrip('?'))
-                    query.pop('pipeline', None)
-                    query.pop('run_id', None)
-                    dash.set_props('pipelines-location', {'search': '?' + urlencode(query, doseq=True) if query else ''})
+                    dash.set_props('pipelines-navigate', {'data': '/dash/pipelines'})
             else:
-                if selected and name != selected:
-                    from meerschaum.core.Pipeline._saved import rename_pipeline
-                    renamed = rename_pipeline(selected, name, instance,
-                        expected_revision=(current or {}).get('revision'))
-                    completed.append(f"Renamed Pipeline '{selected}' to '{name}'")
-                    selected = name
-                    current = renamed
-                    dash.set_props('pipeline-saved-name', {'value': name})
                 draft = dict(draft or {})
                 # The form can be ahead of its asynchronous draft/history callback.
                 if members is not ...:
@@ -161,6 +163,16 @@ def manage_selection(save_clicks, delete_clicks, draft_save, name, selected, dra
                 previous = definitions.get(selected) if selected else None
                 if selected and (previous or {}).get('revision') != (current or {}).get('revision'):
                     raise ValueError('Pipeline revision changed; reload before saving.')
+                for ref, parameters in sorted((draft.get('new_pipes') or {}).items()):
+                    if ref not in draft.get('targets', []):
+                        continue
+                    from meerschaum.api.dash.pipeline_editing import make_pipe
+                    pipe = make_pipe(ref, parameters)
+                    if pipe.get_id() is None:
+                        registered, message = pipe.register()
+                        if not registered:
+                            raise ValueError(f'Could not register {pipe}: {message}')
+                        completed.append(f'Registered {pipe}')
                 results = apply_edits(edits, draft.get('targets', [])) if edits else []
                 completed.extend(f'Saved shared Pipe {ref}' for ref, success, message in results if success)
                 if results:
@@ -173,15 +185,29 @@ def manage_selection(save_clicks, delete_clicks, draft_save, name, selected, dra
                         f'{ref}: {"saved" if success else message}' for ref, success, message in results)))
                 definition = save_pipeline(name, draft.get('targets', []), instance,
                     parents=draft.get('parents'), children=draft.get('children'),
-                    expected_revision=(current or {}).get('revision'), create=not bool(selected))
-                result = True, f"Saved pipeline '{name}' ({len(definition['targets'])} pipes). Run analyze pipelines to detect traversals and approve tagging untagged Pipes."
-                dash.set_props('pipeline-saved-name', {'value': name})
+                    expected_revision=(current or {}).get('revision'), create=not bool(selected),
+                    layout=_clean_layout(layout) if layout else None)
+                result = True, f"Saved Pipeline('{name}')."
                 dash.set_props('pipeline-definition', {'data': definition})
+                dash.set_props('pipeline-layout-draft', {'data': None})
                 dash.set_props('pipeline-draft-editor', {'open': False})
+                dash.set_props('pipeline-edit-mode', {'data': False})
             dash.set_props('pipelines-refresh-button', {'n_clicks': __import__('time').time_ns()})
             return alert_from_success_tuple(result)
     except Exception as exc:
         return alert_from_success_tuple((False, str(exc) + ('. Already applied: ' + '; '.join(completed) if completed else '')))
+
+
+def _clean_layout(layout):
+    """Shared node positions, validated before they are saved."""
+    import math
+    clean = {}
+    for key, position in (layout or {}).items():
+        x, y = float(position['x']), float(position['y'])
+        if not math.isfinite(x) or not math.isfinite(y) or max(abs(x), abs(y)) > 100000:
+            raise ValueError('Layout coordinates are outside the supported range.')
+        clean[key] = {'x': x, 'y': y}
+    return clean
 
 
 @dash_app.callback(
@@ -197,7 +223,7 @@ def manage_selection(save_clicks, delete_clicks, draft_save, name, selected, dra
 def manage_jobs(pipeline, ticks, create, starts, stops, name, schedule, workers, retries, force, search, session):
     _require_session(session)
     if not pipeline:
-        return html.P('Select a saved pipeline to manage its Jobs.', className='text-muted')
+        raise PreventUpdate
     from meerschaum.jobs import Job, get_jobs
     message = None
     try:
@@ -281,19 +307,12 @@ def copy_job_settings(clicks, pipeline, search, session):
 
 @dash_app.callback(
     Output('pipeline-run-alert', 'children'),
-    Input({'type': 'pipeline-group', 'index': ALL}, 'n_clicks'),
-    Input('pipeline-run-now', 'n_clicks', allow_optional=True),
+    Input('pipeline-run-now', 'n_clicks'),
     State('pipeline-saved-name', 'value'), State('pipelines-location', 'search'), State('session-store', 'data'),
     prevent_initial_call=True,
 )
-def select_or_run_pipeline(groups, run_clicks, name, search, session):
+def select_or_run_pipeline(run_clicks, name, search, session):
     _require_session(session)
-    trigger = dash.ctx.triggered_id
-    if isinstance(trigger, dict):
-        if not any(groups or []):
-            raise PreventUpdate
-        dash.set_props('pipeline-saved-name', {'value': trigger['index']})
-        return []
     if not run_clicks or not name:
         raise PreventUpdate
     from meerschaum.api.dash.execute import run_action
@@ -301,12 +320,12 @@ def select_or_run_pipeline(groups, run_clicks, name, search, session):
     from meerschaum.core.Pipeline._saved import validate_name
     try:
         validate_name(name)
-        import uuid
         instance = engine.get_instance(parse_qs((search or '').lstrip('?')).get('instance', [None])[0])
         definition = list_pipelines(instance).get(name)
         if not definition:
             raise ValueError('Pipeline registration is missing.')
-        run_id = 'pipeline-' + uuid.uuid4().hex
+        from meerschaum.api.dash.callbacks.pipelines import new_console_run_id
+        run_id = new_console_run_id('pipeline')
         result = run_action(['sync', 'pipelines', name, '-i', str(instance),
                              '--run-id', run_id],
                             get_username_from_session((session or {}).get('session-id')),
@@ -325,31 +344,23 @@ def select_or_run_pipeline(groups, run_clicks, name, search, session):
                 'status': 'running',
             }})
             dash.set_props('pipelines-interval', {'interval': 2000})
-        return alert_from_success_tuple((result['success'],
-            f"Started Pipeline '{name}'. Output is shown on the canvas." if result['success'] else result['msg']))
+        return [] if result['success'] else alert_from_success_tuple((False, result['msg']))
     except Exception as exc:
         return alert_from_success_tuple((False, str(exc)))
 
 
 @dash_app.callback(
-    Output('pipeline-summary', 'children'),
+    Output('pipeline-cancel-current', 'style'),
+    Output('pipeline-run-now', 'disabled'),
+    Output('pipeline-view-output', 'disabled'),
     Input('pipeline-definition', 'data'), Input('pipeline-live-run', 'data'),
-    Input('pipeline-saved-name', 'value'),
+    Input('pipeline-node-runs', 'data'),
 )
-def pipeline_summary(definition, live_run=None, selected=None):
-    if not definition:
-        return html.P(f"Pipeline '{selected}' is unavailable on the selected instance. Choose another Pipeline."
-                      if selected else 'Select a pipeline’s name to inspect and run it.', className='text-muted')
-    return html.Div([
-        html.Span(definition['name'], className='visually-hidden'),
-        html.Span(f"{len(definition.get('targets', []))} member " + ('pipe' if len(definition.get('targets', [])) == 1 else 'pipes')),
-        dbc.Button('Run now', id='pipeline-run-now', n_clicks=0, size='sm', class_name='me-2'),
-        dbc.Button('View output', id='pipeline-view-output', size='sm', color='secondary', disabled=not bool(live_run and live_run.get('pipeline_id') == definition.get('id')), class_name='me-2'),
-        dbc.Button('Cancel active run', id='pipeline-cancel-current', n_clicks=0, size='sm', color='danger', outline=True, style={'display': '' if live_run and live_run.get('status') == 'running' and live_run.get('pipeline_id') == definition.get('id') else 'none'}),
-        html.Details([html.Summary('Member pipes'), html.Ul([
-            html.Li(html.Code(engine.ref_label(ref))) for ref in definition.get('targets', [])
-        ])]),
-    ], className='pipeline-selection-summary')
+def pipeline_summary(definition, live_run=None, node_runs=None):
+    """Cancel only while this Pipeline's own run is active; Output reopens retained output."""
+    own = bool(definition and live_run and live_run.get('pipeline_id') == definition.get('id'))
+    active = own and live_run.get('status') == 'running'
+    return {'display': '' if active else 'none'}, not bool(definition), not (own or bool(node_runs))
 
 
 dash_app.clientside_callback(
@@ -451,19 +462,16 @@ def analyze_selection(analyze, apply, name, proposal, search, session):
         for change in proposal.get('changes', []):
             changes.setdefault(change['pipe_ref'], []).append(f"{change['action']} {change['tag']}")
         rows = [html.Tr([
-            html.Td(html.Code(ref)), html.Td(reasons.get(ref, 'No longer selected')),
+            html.Td(html.Code(engine.ref_label(ref))), html.Td(reasons.get(ref, 'No longer selected')),
             html.Td('; '.join(changes.get(ref, [])) or 'No tag change'),
             html.Td(', '.join(proposal.get('shared', {}).get(ref, [])) or '—'),
         ]) for ref in sorted(set(reasons) | set(changes))]
         preview = [
-            html.P('Review detected traversal Pipes and proposed tag edits. Apply proposed tags explicitly approves these edits.'),
-            dbc.Table([html.Thead(html.Tr([html.Th('Pipe / instance'), html.Th('Inclusion'),
+            dbc.Table([html.Thead(html.Tr([html.Th('Pipe'), html.Th('Inclusion'),
                 html.Th('Proposed tag edit'), html.Th('Also in Pipelines')])), html.Tbody(rows)], size='sm'),
             *[dbc.Alert(message, color='warning') for message in proposal.get('errors', [])],
         ]
         dash.set_props('pipeline-apply-tags', {'disabled': not bool(changes)})
-        if changes:
-            preview.append(dbc.Alert('Untagged Pipes were detected. Apply this proposal here, or run analyze pipelines to detect traversals and approve editing their tags.', color='info'))
         return preview, proposal, []
     except Exception as exc:
         return dash.no_update, dash.no_update, alert_from_success_tuple((False, str(exc)))
@@ -487,8 +495,8 @@ def edit_draft(definition, members, parents, children, discard, undo, redo, cont
     from copy import deepcopy
     trigger = dash.ctx.triggered_id
     def snapshot(value):
-        return {key: deepcopy((value or {}).get(key, [] if key == 'targets' else {} if key == 'pipe_edits' else None))
-                for key in ('targets', 'parents', 'children', 'pipe_edits')}
+        return {key: deepcopy((value or {}).get(key, [] if key == 'targets' else {} if key in ('pipe_edits', 'new_pipes') else None))
+                for key in ('targets', 'parents', 'children', 'pipe_edits', 'new_pipes')}
     baseline = snapshot(definition)
     if trigger in ('pipeline-definition', 'pipeline-draft-discard') or draft is None:
         state = {**baseline, 'undo': [], 'redo': []}
@@ -502,6 +510,15 @@ def edit_draft(definition, members, parents, children, discard, undo, redo, cont
                 state['undo'] = state['undo'][-50:]
                 state['redo'] = []
                 state['targets'] = state['targets'] + [ref]
+                if (available or {}).get('new'):
+                    state['new_pipes'] = {**(state.get('new_pipes') or {}), **available['new']}
+        elif trigger == 'pipeline-context' and (context or {}).get('action') == 'restore':
+            restored = (context or {}).get('draft') or {}
+            if (context or {}).get('revision') != (definition or {}).get('revision'):
+                raise PreventUpdate
+            state.setdefault('undo', []).append(old)
+            state['redo'] = []
+            state.update(snapshot(restored))
         elif trigger == 'pipeline-draft-undo' and state.get('undo'):
             state.setdefault('redo', []).append(old)
             state.update(state['undo'].pop())
@@ -512,7 +529,8 @@ def edit_draft(definition, members, parents, children, discard, undo, redo, cont
             new = {'targets': members or [],
                    'parents': (parents or None) if trigger == 'pipeline-draft-parents' else state.get('parents'),
                    'children': (children or None) if trigger == 'pipeline-draft-children' else state.get('children'),
-                   'pipe_edits': deepcopy(state.get('pipe_edits') or {})}
+                   'pipe_edits': deepcopy(state.get('pipe_edits') or {}),
+                   'new_pipes': deepcopy(state.get('new_pipes') or {})}
             if trigger == 'pipeline-context':
                 if not context:
                     raise PreventUpdate
@@ -534,54 +552,63 @@ def edit_draft(definition, members, parents, children, discard, undo, redo, cont
     options = {row['value']: row for row in (available or {}).get('options', [])}
     for ref in state['targets']:
         options.setdefault(ref, {'label': engine.ref_label(ref), 'value': ref})
+    changes = _draft_changes(state, definition)
     return (state if state != draft else dash.no_update,
             state['targets'], bool(state['parents']), bool(state['children']), list(options.values()),
-            'Unsaved membership changes. Use Save pipeline to apply.' if dirty else 'Draft matches saved membership.')
+            (f"{changes} unsaved change" + ('' if changes == 1 else 's')) if dirty else '')
 
 
-@dash_app.callback(
-    Output('pipeline-member-options', 'data'), Output('pipeline-add-alert', 'children'),
-    Input('pipeline-add-find', 'n_clicks'),
-    Input('pipeline-add-register', 'n_clicks'),
-    Input('pipeline-add-instance', 'value'), State('pipeline-add-connector', 'value'),
-    State('pipeline-add-metric', 'value'), State('pipeline-add-location', 'value'),
-    State('pipeline-add-parameters', 'value'), State('pipeline-member-options', 'data'),
-    State('session-store', 'data'),
-)
-def add_draft_pipe(find, register, instance, connector, metric, location, parameters,
-                   existing, session):
-    _require_session(session)
+def find_or_add_pipe(trigger, instance, connector, metric, location, parameters, existing, prefix):
+    """
+    The member panel: `Find Pipes` lists an instance's Pipes; `Add new Pipe` proposes a new
+    Pipe, registered only when the draft is saved (Edit mode) or created (New pipeline).
+    """
     import json
     import meerschaum as mrsm
     options = {row['value']: row for row in (existing or {}).get('options', [])}
-    added = None
     try:
-        trigger = dash.ctx.triggered_id
-        if trigger in ('pipeline-add-find', 'pipeline-add-register', 'pipeline-add-instance', None):
-            instance = instance or str(engine.get_instance())
-            if trigger == 'pipeline-add-register':
-                if not connector or not metric:
-                    raise ValueError('Connector and metric keys are required.')
-                values = json.loads(parameters or '{}')
-                if not isinstance(values, dict):
-                    raise ValueError('Parameters must be a JSON object.')
-                pipe = mrsm.Pipe(connector, metric, location or None, instance=instance, parameters=values)
-                if pipe.get_id() is not None:
-                    raise ValueError('That Pipe already exists. Use Find existing Pipes.')
-                result = pipe.register()
-                if not result[0]:
-                    raise ValueError(result[1])
-                ref = '|'.join((str(pipe.instance_keys), connector, metric, location or 'None'))
-                options[ref] = {'label': ref, 'value': ref}
-                added = ref
-            else:
-                for pipe in engine._instance_pipes(engine.get_instance(instance)):
-                    ref = '|'.join((str(pipe.instance_keys), pipe.connector_keys,
-                                    pipe.metric_key, pipe.location_key or 'None'))
-                    options[ref] = {'label': ref, 'value': ref}
-        return {'options': list(options.values()), 'add': added}, []
+        instance = instance or str(engine.get_instance())
+        if trigger == f'{prefix}-add-register':
+            if not connector or not metric:
+                raise ValueError('Connector and metric keys are required.')
+            values = json.loads(parameters or '{}')
+            if not isinstance(values, dict):
+                raise ValueError('Parameters must be a JSON object.')
+            pipe = mrsm.Pipe(connector, metric, location or None, instance=instance, parameters=values)
+            if pipe.get_id() is not None:
+                raise ValueError(f'{pipe} already exists. Use Find Pipes.')
+            ref = '|'.join((str(pipe.instance_keys), connector, metric, location or 'None'))
+            options[ref] = {'label': engine.ref_label(ref) + ' (new)', 'value': ref}
+            return {'options': list(options.values()), 'add': ref, 'new': {ref: values}}, []
+        for pipe in engine._instance_pipes(engine.get_instance(instance, strict=True)):
+            ref = '|'.join((str(pipe.instance_keys), pipe.connector_keys,
+                            pipe.metric_key, pipe.location_key or 'None'))
+            options[ref] = {'label': engine.ref_label(ref), 'value': ref}
+        return {'options': list(options.values()), 'add': None}, []
     except Exception as exc:
         return {'options': list(options.values())}, alert_from_success_tuple((False, str(exc)))
+
+
+def _register_member_panel(prefix):
+    @dash_app.callback(
+        Output(f'{prefix}-member-options', 'data'), Output(f'{prefix}-add-alert', 'children'),
+        Input(f'{prefix}-add-find', 'n_clicks'),
+        Input(f'{prefix}-add-register', 'n_clicks'),
+        Input(f'{prefix}-add-instance', 'value'), State(f'{prefix}-add-connector', 'value'),
+        State(f'{prefix}-add-metric', 'value'), State(f'{prefix}-add-location', 'value'),
+        State(f'{prefix}-add-parameters', 'value'), State(f'{prefix}-member-options', 'data'),
+        State('session-store', 'data'),
+    )
+    def add_draft_pipe(find, register, instance, connector, metric, location, parameters,
+                       existing, session):
+        _require_session(session)
+        return find_or_add_pipe(dash.ctx.triggered_id, instance, connector, metric, location,
+                                parameters, existing, prefix)
+    return add_draft_pipe
+
+
+add_draft_pipe = _register_member_panel('pipeline')
+add_new_pipeline_pipe = _register_member_panel('pipeline-new')
 
 
 @dash_app.callback(
@@ -618,41 +645,6 @@ def stage_pipe_edit(clicks, baseline, parents, children, query, draft, session):
         return alert_from_success_tuple((False, str(exc)))
 
 
-@dash_app.callback(
-    Output('pipeline-layout-alert', 'children'),
-    Input('pipeline-save-layout', 'n_clicks', allow_optional=True),
-    State('pipeline-layout-draft', 'data'), State('pipeline-definition', 'data'),
-    State('pipeline-draft', 'data'),
-    State('pipelines-location', 'search'), State('session-store', 'data'), prevent_initial_call=True,
-)
-def save_shared_layout(clicks, layout, definition, draft, search, session):
-    _require_session(session)
-    if not clicks:
-        raise PreventUpdate
-    try:
-        if not definition:
-            raise ValueError('Select a registered Pipeline before saving its layout.')
-        if draft and (any(draft.get(key) != definition.get(key) for key in ('targets', 'parents', 'children')) or draft.get('pipe_edits')):
-            raise ValueError('Save or discard membership and shared Pipe edits before saving the layout.')
-        if not layout:
-            raise ValueError('Alt-drag a Pipe to arrange the layout first.')
-        clean = {}
-        for key, position in layout.items():
-            x, y = float(position['x']), float(position['y'])
-            import math
-            if not math.isfinite(x) or not math.isfinite(y) or max(abs(x), abs(y)) > 100000:
-                raise ValueError('Layout coordinates are outside the supported range.')
-            clean[key] = {'x': x, 'y': y}
-        instance = engine.get_instance(parse_qs((search or '').lstrip('?')).get('instance', [None])[0])
-        saved = save_pipeline(definition['name'], definition['targets'], instance,
-            parents=definition.get('parents'), children=definition.get('children'),
-            expected_revision=definition['revision'], layout=clean)
-        dash.set_props('pipeline-definition', {'data': saved})
-        return alert_from_success_tuple((True, 'Shared layout saved. Your zoom and pan remain personal.'))
-    except Exception as exc:
-        return alert_from_success_tuple((False, str(exc)))
-
-
 dash_app.clientside_callback(
     """function(session) {
         const id = (session || {})['session-id'] || null;
@@ -683,3 +675,275 @@ dash_app.clientside_callback(
     }""",
     Output('session-store', 'clear_data'), Input('session-store', 'data'),
 )
+
+
+@dash_app.callback(
+    Output('pipeline-edit-mode', 'data'),
+    Input('pipeline-edit-toggle', 'n_clicks'), Input('pipeline-draft-discard', 'n_clicks'),
+    State('pipeline-definition', 'data'), State('session-store', 'data'), prevent_initial_call=True,
+)
+def toggle_edit_mode(edit, discard, definition, session):
+    """A Pipeline is read-only until Edit; Discard (or Save) leaves Edit mode."""
+    _require_session(session)
+    if dash.ctx.triggered_id == 'pipeline-edit-toggle':
+        if not edit or not definition:
+            raise PreventUpdate
+        return True
+    if not discard:
+        raise PreventUpdate
+    dash.set_props('pipeline-layout-draft', {'data': None})
+    dash.set_props('pipeline-draft-editor', {'open': False})
+    return False
+
+
+dash_app.clientside_callback(
+    """function(edit, draft, definition, layout) {
+        // Edit mode shows its own controls; a dirty draft is kept in the browser
+        // (Resume draft / Start over) and asks before the page is left.
+        const page = document.getElementById('pipelines-page');
+        const workspace = document.getElementById('pipeline-workspace');
+        if (!page || !definition) return dash_clientside.no_update;
+        page.dataset.loaded = 'true';
+        // Unsaved moves stay in place when the canvas re-renders (`assets/pipelines.js`).
+        if (!layout && window._mrsmLayoutDraft) document.getElementById('pipeline-canvas')?._mrsmResetLayout?.();
+        window._mrsmLayoutDraft = layout ? {key: definition.registry + '|' + definition.name, layout: layout} : null;
+        const key = 'mrsm-pipeline-draft:' + definition.registry + '|' + definition.name;
+        const pick = value => ({targets: (value || {}).targets || [], parents: (value || {}).parents || null,
+            children: (value || {}).children || null, pipe_edits: (value || {}).pipe_edits || {},
+            new_pipes: (value || {}).new_pipes || {}});
+        const dirty = !!edit && (JSON.stringify(pick(draft)) !== JSON.stringify(pick(definition)) || !!layout);
+        for (const node of [page, workspace]) if (node) {
+            node.dataset.edit = String(!!edit);
+            node.dataset.dirty = String(dirty);
+        }
+        let stored = null;
+        try { stored = JSON.parse(localStorage.getItem(key) || 'null'); } catch (_) {}
+        if (edit && dirty) {
+            try { localStorage.setItem(key, JSON.stringify({revision: definition.revision, draft: pick(draft), layout: layout || null})); } catch (_) {}
+            stored = null;
+        } else if (!edit) {
+            const restore = document.getElementById('pipeline-draft-restore');
+            if (restore) restore.hidden = true;
+        }
+        if (edit && !dirty && stored && !window._mrsmDraftOffered) {
+            window._mrsmDraftOffered = key;
+            const restore = document.getElementById('pipeline-draft-restore');
+            if (restore) {
+                restore.hidden = false;
+                const resume = document.getElementById('pipeline-draft-resume');
+                if (resume) resume.hidden = stored.revision !== definition.revision;
+            }
+        }
+        return dash_clientside.no_update;
+    }""",
+    Output('pipeline-edit-mode-dummy', 'children'),
+    Input('pipeline-edit-mode', 'data'), Input('pipeline-draft', 'data'),
+    Input('pipeline-definition', 'data'), Input('pipeline-layout-draft', 'data'),
+)
+
+
+dash_app.clientside_callback(
+    """function(resume, startOver, definition) {
+        const triggered = (dash_clientside.callback_context.triggered || []).map(t => t.prop_id);
+        if (!definition) return dash_clientside.no_update;
+        const key = 'mrsm-pipeline-draft:' + definition.registry + '|' + definition.name;
+        const restore = document.getElementById('pipeline-draft-restore');
+        if (restore) restore.hidden = true;
+        if (triggered.includes('pipeline-draft-resume.n_clicks') && resume) {
+            let stored = null;
+            try { stored = JSON.parse(localStorage.getItem(key) || 'null'); } catch (_) {}
+            if (stored && stored.revision === definition.revision) {
+                dash_clientside.set_props('pipeline-context', {data: {action: 'restore', draft: stored.draft,
+                    revision: stored.revision, token: Date.now()}});
+                if (stored.layout) dash_clientside.set_props('pipeline-layout-draft', {data: stored.layout});
+            }
+            return dash_clientside.no_update;
+        }
+        if (triggered.includes('pipeline-draft-start-over.n_clicks') && startOver) {
+            try { localStorage.removeItem(key); } catch (_) {}
+        }
+        return dash_clientside.no_update;
+    }""",
+    Output('pipeline-draft-restore', 'title'),
+    Input('pipeline-draft-resume', 'n_clicks'), Input('pipeline-draft-start-over', 'n_clicks'),
+    State('pipeline-definition', 'data'), prevent_initial_call=True,
+)
+
+
+dash_app.clientside_callback(
+    """function(plan, analyze, schedule, copy, rename) {
+        const triggered = (dash_clientside.callback_context.triggered || []).map(t => t.prop_id.split('.')[0]);
+        const open = id => triggered.includes(id);
+        if (!triggered.length) return Array(5).fill(dash_clientside.no_update);
+        return [
+            open('pipeline-plan-open') ? true : dash_clientside.no_update,
+            open('pipeline-analyze') ? true : dash_clientside.no_update,
+            open('pipeline-manage-schedule') ? true : dash_clientside.no_update,
+            open('pipeline-manage-copy') ? true : dash_clientside.no_update,
+            open('pipeline-manage-rename') ? true : dash_clientside.no_update,
+        ];
+    }""",
+    Output('pipeline-plan-modal', 'is_open'), Output('pipeline-analyze-modal', 'is_open'),
+    Output('pipeline-schedule-modal', 'is_open'), Output('pipeline-copy-modal', 'is_open'),
+    Output('pipeline-rename-modal', 'is_open'),
+    Input('pipeline-plan-open', 'n_clicks'), Input('pipeline-analyze', 'n_clicks'),
+    Input('pipeline-manage-schedule', 'n_clicks'), Input('pipeline-manage-copy', 'n_clicks'),
+    Input('pipeline-manage-rename', 'n_clicks'), prevent_initial_call=True,
+)
+
+
+@dash_app.callback(
+    Output('pipeline-plan-body', 'children'),
+    Input('pipeline-plan-modal', 'is_open'),
+    Input('pipeline-definition', 'data'), State('pipelines-location', 'search'), State('session-store', 'data'),
+    prevent_initial_call=True,
+)
+def render_plan(is_open, definition, search, session):
+    """The plan of the saved Pipeline: dependency order, actions, readiness and bounds."""
+    _require_session(session)
+    if not is_open or not definition:
+        raise PreventUpdate
+    from meerschaum.api.dash.callbacks.pipelines import build_plan_table
+    try:
+        from meerschaum.api.dash.pipeline_editing import make_pipe
+        graph = engine.plan_graph(_instance(search), [make_pipe(ref) for ref in definition.get('targets', [])],
+                                  parents=definition.get('parents'), children=definition.get('children'))
+        return [build_plan_table(graph), *[dbc.Alert(str(message), color='warning') for message in graph['warnings']]]
+    except Exception as exc:
+        return alert_from_success_tuple((False, f'Could not plan this Pipeline: {exc}'))
+
+
+@dash_app.callback(
+    Output('pipeline-copy-alert', 'children'),
+    Input('pipeline-copy-confirm', 'n_clicks'),
+    State('pipeline-copy-name', 'value'), State('pipeline-definition', 'data'),
+    State('pipelines-location', 'search'), State('session-store', 'data'), prevent_initial_call=True,
+)
+def copy_selection(clicks, new_name, definition, search, session):
+    _require_session(session)
+    if not clicks or not definition:
+        raise PreventUpdate
+    from meerschaum.core.Pipeline._saved import copy_pipeline, validate_name
+    try:
+        validate_name(new_name or '')
+        copy_pipeline(definition['name'], new_name, _instance(search))
+        dash.set_props('pipeline-copy-modal', {'is_open': False})
+        dash.set_props('pipelines-navigate', {'data': pipeline_path(new_name)})
+        return []
+    except Exception as exc:
+        return alert_from_success_tuple((False, str(exc)))
+
+
+@dash_app.callback(
+    Output('pipeline-rename-alert', 'children'),
+    Input('pipeline-rename-confirm', 'n_clicks'),
+    State('pipeline-rename-name', 'value'), State('pipeline-definition', 'data'),
+    State('pipelines-location', 'search'), State('session-store', 'data'), prevent_initial_call=True,
+)
+def rename_selection(clicks, new_name, definition, search, session):
+    _require_session(session)
+    if not clicks or not definition:
+        raise PreventUpdate
+    from meerschaum.core.Pipeline._saved import rename_pipeline, validate_name
+    try:
+        validate_name(new_name or '')
+        rename_pipeline(definition['name'], new_name, _instance(search),
+                        expected_revision=definition.get('revision'))
+        dash.set_props('pipeline-rename-modal', {'is_open': False})
+        dash.set_props('pipelines-navigate', {'data': pipeline_path(new_name)})
+        return []
+    except Exception as exc:
+        return alert_from_success_tuple((False, str(exc)))
+
+
+@dash_app.callback(
+    Output('pipeline-destructive-confirm', 'displayed'),
+    Output('pipeline-destructive-confirm', 'message'),
+    Output('pipeline-destructive-action', 'data'),
+    Input('pipeline-manage-clear', 'n_clicks'), Input('pipeline-manage-drop', 'n_clicks'),
+    State('pipeline-definition', 'data'), State('session-store', 'data'), prevent_initial_call=True,
+)
+def confirm_destructive(clear, drop, definition, session):
+    """Clear and Drop name what they touch: the explicit members' data, never registrations."""
+    _require_session(session)
+    action = {'pipeline-manage-clear': 'clear', 'pipeline-manage-drop': 'drop'}.get(dash.ctx.triggered_id)
+    if not action or not definition or not (clear or drop):
+        raise PreventUpdate
+    members = definition.get('targets', [])
+    verb = 'Delete the rows of' if action == 'clear' else 'Drop the tables of'
+    return True, (
+        f"{verb} the {len(members)} explicit member" + ('' if len(members) == 1 else 's')
+        + f" of Pipeline('{definition['name']}') on {definition['registry']}? "
+        + "Registrations and the Pipeline are kept."
+    ), {'action': action, **{key: definition.get(key) for key in ('name', 'registry', 'revision')}}
+
+
+@dash_app.callback(
+    Output('pipeline-edit-alert', 'children'),
+    Input('pipeline-destructive-confirm', 'submit_n_clicks'),
+    Input('pipeline-edge-proposal', 'data'),
+    State('pipeline-destructive-action', 'data'), State('pipeline-definition', 'data'),
+    State('pipeline-draft', 'data'), State('session-store', 'data'), prevent_initial_call=True,
+)
+def run_destructive_or_propose_edge(submit, proposal, target, definition, draft, session):
+    _require_session(session)
+    if dash.ctx.triggered_id == 'pipeline-edge-proposal':
+        return propose_edge(proposal, draft)
+    if not submit or not target or not definition:
+        raise PreventUpdate
+    from meerschaum.api.dash.execute import run_action
+    from meerschaum.api.dash.sessions import get_username_from_session
+    try:
+        if target.get('revision') != definition.get('revision') or target.get('name') != definition.get('name'):
+            raise ValueError('The Pipeline changed; review again.')
+        result = run_action([target['action'], 'pipelines', target['name'], '-i', target['registry'], '--yes'],
+                            get_username_from_session((session or {}).get('session-id')))
+        if not result['success']:
+            return alert_from_success_tuple((False, result['msg']))
+        return dbc.Alert([f"Started {target['action']} as ", html.A(result['job'], href='/dash/jobs'), '.'],
+                         color='info', dismissable=True)
+    except Exception as exc:
+        return alert_from_success_tuple((False, str(exc)))
+
+
+def propose_edge(proposal, draft):
+    """
+    Dragging from one node to another proposes `parent -> child`: the child's `parents` gain the
+    parent, staged in the draft and applied on Save.
+    """
+    if not proposal or not proposal.get('parent') or not proposal.get('child'):
+        raise PreventUpdate
+    from copy import deepcopy
+    from meerschaum.api.dash.pipeline_editing import (
+        make_pipe, fingerprint, validate_edits, dependencies,
+    )
+    parent, child = proposal['parent'], proposal['child']
+    try:
+        if parent == child:
+            raise ValueError('A Pipe cannot be its own parent.')
+        edits = deepcopy((draft or {}).get('pipe_edits') or {})
+        pipe = make_pipe(child)
+        if pipe.get_id() is None:
+            raise ValueError(f'{pipe} is not registered yet; save it first.')
+        actual = dict(pipe.get_parameters(apply_symlinks=False))
+        edit = edits.get(child) or {'baseline': fingerprint(actual), 'parameters': deepcopy(actual)}
+        parameters = edit['parameters']
+        if (parent, child) in dependencies(child, parameters):
+            raise ValueError(f'{engine.ref_label(parent)} is already a parent of {engine.ref_label(child)}.')
+        instance, connector, metric, location = engine.split_ref(parent)
+        reference = {'connector_keys': connector, 'metric_key': metric}
+        if location is not None:
+            reference['location_key'] = location
+        if instance != str(pipe.instance_keys):
+            reference['instance'] = instance
+        existing = parameters.pop('parent', None)
+        values = parameters.get('parents', existing if existing is not None else [])
+        values = [values] if isinstance(values, (str, dict)) else list(values or [])
+        parameters['parents'] = values + [reference]
+        edits[child] = edit
+        validate_edits(edits, (draft or {}).get('targets', []))
+        dash.set_props('pipeline-context', {'data': {'action': 'edit_pipe', 'ref': child, 'edit': edit,
+                                                   'token': __import__('time').time_ns()}})
+        return []
+    except Exception as exc:
+        return alert_from_success_tuple((False, str(exc)))

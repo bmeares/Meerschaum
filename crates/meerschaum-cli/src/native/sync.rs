@@ -266,6 +266,219 @@ pub fn format_pipe_success_tuple(
     })
 }
 
+/// v4's per-pipe lap block (`Finished syncing {pipe}:` / `Error while syncing {pipe}:` and the
+/// message); `suffix` goes after the pipe (the duration and count of a run of several pipes).
+fn print_pipe_block(rt: &mut Runtime<'_>, pipe: &str, tup: &SuccessTuple, suffix: &str) {
+    let header = if tup.success {
+        format!("Finished syncing {pipe}{suffix}:\n")
+    } else {
+        format!("Error while syncing {pipe}{suffix}:\n")
+    };
+    print_tuple(
+        rt,
+        &SuccessTuple {
+            success: tup.success,
+            message: format!("{header}{}\n", tup.message),
+        },
+        TupleArgs {
+            calm: true,
+            ..TupleArgs::default()
+        },
+    );
+}
+
+/// Reports a run of `sync pipes` pipe by pipe: each pipe's block prints the moment its node
+/// ends (v4 printed each one as its worker finished) and, when the run has several pipes, says
+/// how long the pipe took and how far the run is (`in 1.2 seconds (3/10)`). A run of one pipe
+/// keeps v4's block byte for byte. [`PipeReport::summary`] adds the totals to the lap message.
+pub(super) struct PipeReport {
+    defaults: meerschaum_core::pipe::PipeDefaults,
+    total: usize,
+    done: usize,
+    started: std::collections::HashMap<meerschaum_engine::PipeRef, Instant>,
+    /// How long each ended pipe took and its place in the run (`3` of `3/10`).
+    ended: std::collections::HashMap<meerschaum_engine::PipeRef, (std::time::Duration, usize)>,
+    printed: std::collections::HashSet<meerschaum_engine::PipeRef>,
+}
+
+impl PipeReport {
+    pub(super) fn new(defaults: meerschaum_core::pipe::PipeDefaults) -> PipeReport {
+        PipeReport {
+            defaults,
+            total: 0,
+            done: 0,
+            started: Default::default(),
+            ended: Default::default(),
+            printed: Default::default(),
+        }
+    }
+
+    /// Take in one event; `true` when it ended a node and its block was printed (`print`: the
+    /// node lines of a terminal without the live region say it in one line instead).
+    fn observe(
+        &mut self,
+        rt: &mut Runtime<'_>,
+        event: &meerschaum_engine::Event,
+        print: bool,
+    ) -> bool {
+        use meerschaum_engine::EventKind;
+        let ended = match (&event.kind, &event.pipe_ref) {
+            (EventKind::RunStarted { nodes, .. }, _) => {
+                self.total = *nodes;
+                return false;
+            }
+            (EventKind::NodeStarted { .. }, Some(r)) => {
+                self.started.entry(r.clone()).or_insert_with(Instant::now);
+                return false;
+            }
+            (EventKind::NodeFinished { result }, Some(r)) => (
+                r,
+                SuccessTuple {
+                    success: result.success,
+                    message: result.message.clone(),
+                },
+                result.duration,
+            ),
+            (
+                EventKind::NodeFailed {
+                    error,
+                    will_retry: false,
+                    ..
+                },
+                Some(r),
+            ) => (r, SuccessTuple::fail(error.clone()), None),
+            _ => return false,
+        };
+        let (pipe_ref, tup, duration) = ended;
+        let duration = duration
+            .or_else(|| self.started.get(pipe_ref).map(Instant::elapsed))
+            .unwrap_or_default();
+        self.done += 1;
+        self.ended.insert(pipe_ref.clone(), (duration, self.done));
+        if !print {
+            return false;
+        }
+        let parts = pipe_ref.parts();
+        let Ok(pipe) = super::pipes::build_pipe(
+            parts.connector_keys,
+            parts.metric_key,
+            parts.location_key,
+            parts.instance_keys,
+            None,
+            &self.defaults,
+        ) else {
+            return false;
+        };
+        print_chunk_progress(rt, &tup.message);
+        let suffix = self.suffix(pipe_ref);
+        print_pipe_block(rt, &pipe.to_string(), &tup, &suffix);
+        self.printed.insert(pipe_ref.clone());
+        true
+    }
+
+    /// ` (1.2 seconds)`: how long an ended pipe took (a node line's tail).
+    fn took(&self, pipe_ref: &meerschaum_engine::PipeRef) -> Option<String> {
+        let (duration, _) = self.ended.get(pipe_ref)?;
+        Some(format!(
+            " ({})",
+            interval_str(round_seconds(duration.as_secs_f64()))
+        ))
+    }
+
+    /// Whether the run already printed this pipe's block.
+    fn printed(&self, pipe_ref: &meerschaum_engine::PipeRef) -> bool {
+        self.printed.contains(pipe_ref)
+    }
+
+    /// ` in 1.2 seconds (3/10)` for a run of several pipes (empty for one pipe: v4's block).
+    fn suffix(&self, pipe_ref: &meerschaum_engine::PipeRef) -> String {
+        if self.total <= 1 {
+            return String::new();
+        }
+        let Some((duration, position)) = self.ended.get(pipe_ref) else {
+            return String::new();
+        };
+        format!(
+            " in {} ({position}/{})",
+            interval_str(round_seconds(duration.as_secs_f64())),
+            self.total
+        )
+    }
+
+    /// The lines a lap of several pipes adds under `It took ... to sync N pipes`: the rows the
+    /// run changed, the slowest pipes and every failure (empty for one pipe: its block says it).
+    pub(super) fn summary(&self, outcomes: &[meerschaum_engine::NodeOutcome]) -> String {
+        if outcomes.len() <= 1 {
+            return String::new();
+        }
+        let mut text = String::new();
+        let (inserted, updated, upserted) = outcomes.iter().fold((0, 0, 0), |acc, o| {
+            (
+                acc.0 + o.result.inserted,
+                acc.1 + o.result.updated,
+                acc.2 + o.result.upserted,
+            )
+        });
+        text.push_str(&format!(
+            "\n    Rows: {inserted} inserted, {updated} updated{}.",
+            if upserted > 0 {
+                format!(", {upserted} upserted")
+            } else {
+                String::new()
+            }
+        ));
+        let mut timed: Vec<(&meerschaum_engine::NodeOutcome, std::time::Duration)> = outcomes
+            .iter()
+            .filter_map(|o| {
+                self.ended
+                    .get(&o.pipe_ref)
+                    .map(|(d, _)| *d)
+                    .or(o.result.duration)
+                    .map(|d| (o, d))
+            })
+            .collect();
+        if timed.len() > 2 {
+            timed.sort_by_key(|t| std::cmp::Reverse(t.1));
+            text.push_str("\n    Slowest:");
+            for (o, d) in timed.iter().take(3) {
+                text.push_str(&format!(
+                    "\n      - {} ({})",
+                    o.pipe,
+                    interval_str(round_seconds(d.as_secs_f64()))
+                ));
+            }
+        }
+        let failed: Vec<&meerschaum_engine::NodeOutcome> =
+            outcomes.iter().filter(|o| !o.result.success).collect();
+        if !failed.is_empty() {
+            text.push_str("\n    Failed:");
+            for o in failed {
+                let reason = o
+                    .result
+                    .message
+                    .lines()
+                    .map(str::trim)
+                    .find(|l| !l.is_empty() && !l.contains(o.pipe.as_str()))
+                    .or_else(|| {
+                        o.result
+                            .message
+                            .lines()
+                            .map(str::trim)
+                            .find(|l| !l.is_empty())
+                    })
+                    .unwrap_or_default();
+                text.push_str(&format!("\n      - {}: {reason}", o.pipe));
+            }
+        }
+        text
+    }
+}
+
+/// Seconds to two decimals (a duration for people, not a benchmark).
+fn round_seconds(seconds: f64) -> f64 {
+    (seconds * 100.0).round() / 100.0
+}
+
 /// `print_pipes_results(results, success_header, failure_header, nopretty)`.
 pub fn print_pipes_results(
     rt: &mut Runtime<'_>,
@@ -382,6 +595,8 @@ pub fn sync_pipes_with(args: &ArgsMap, rt: &mut Runtime<'_>, method: LapMethod) 
         let lap_begin = Instant::now();
         let mut gantt_text: Option<String> = None;
         let mut pending: Vec<meerschaum_engine::PendingRebuild> = Vec::new();
+        let mut report = PipeReport::new(super::pipes::defaults(rt));
+        let mut summary_extra = String::new();
         let (inst, pipes) = super::pipes::selected_pipes(rt, args)?;
         let engine_results = if method == LapMethod::Sync {
             let traversal = flag(args, "parents") || flag(args, "children");
@@ -393,18 +608,27 @@ pub fn sync_pipes_with(args: &ArgsMap, rt: &mut Runtime<'_>, method: LapMethod) 
             let engine = engine?;
             let opts = run_options(args, &inst, &pipes, &sync_args);
             let graph_run = traversal || args.contains_key("resume");
-            let result = if graph_run && !nopretty && rt.live {
+            let result = if nopretty {
+                session.block_on(engine.run(opts))
+            } else if graph_run && rt.live && live::possible(rt, args) {
                 let view = LiveView::Nodes {
                     instance: &inst,
                     args,
                 };
                 run_live(rt, &session, engine, opts, view)
             } else {
-                if rt.in_shell && !nopretty && !flag(args, "debug") {
-                    run_live(rt, &session, engine, opts, LiveView::Spinner)
-                } else {
-                    session.block_on(engine.run(opts))
-                }
+                // Each pipe's block prints as its node ends, not after the whole run.
+                let spinner = rt.in_shell && !flag(args, "debug");
+                let show_nodes = graph_run && rt.live;
+                run_lines(
+                    rt,
+                    &session,
+                    engine,
+                    opts,
+                    show_nodes,
+                    spinner,
+                    Some(&mut report),
+                )
             };
             print_hook_results(rt, &session);
             for warning in &result.warnings {
@@ -414,6 +638,7 @@ pub fn sync_pipes_with(args: &ArgsMap, rt: &mut Runtime<'_>, method: LapMethod) 
             if !result.success && result.outcomes.is_empty() {
                 return Ok(SuccessTuple::fail(result.message));
             }
+            summary_extra = report.summary(&result.outcomes);
             // §5.9: a graph run with several nodes ends with the Gantt chart. A flat run keeps
             // v4's output byte for byte (`show run <id>` still draws it).
             if graph_run
@@ -475,30 +700,16 @@ pub fn sync_pipes_with(args: &ArgsMap, rt: &mut Runtime<'_>, method: LapMethod) 
                     super::verify::deduplicate_pipe(rt, &session, &inst, &mut sp, args)
                 }
             };
-            if method == LapMethod::Sync {
-                print_chunk_progress(rt, &tup.message);
-            }
-            if !nopretty {
-                let m = format!(
-                    "{}{}\n",
-                    if tup.success {
-                        format!("Finished syncing {}:\n", sp.pipe)
-                    } else {
-                        format!("Error while syncing {}:\n", sp.pipe)
-                    },
-                    tup.message
-                );
-                print_tuple(
-                    rt,
-                    &SuccessTuple {
-                        success: tup.success,
-                        message: m,
-                    },
-                    TupleArgs {
-                        calm: true,
-                        ..TupleArgs::default()
-                    },
-                );
+            let pipe_ref = meerschaum_engine::PipeRef::from_pipe(&sp.pipe);
+            // A block the run already printed as its node ended is not printed again.
+            if !report.printed(&pipe_ref) {
+                if method == LapMethod::Sync {
+                    print_chunk_progress(rt, &tup.message);
+                }
+                if !nopretty {
+                    let suffix = report.suffix(&pipe_ref);
+                    print_pipe_block(rt, &sp.pipe.to_string(), &tup, &suffix);
+                }
             }
             results.push((sp.pipe.clone(), tup));
             if stop.load(std::sync::atomic::Ordering::SeqCst) {
@@ -534,6 +745,7 @@ pub fn sync_pipes_with(args: &ArgsMap, rt: &mut Runtime<'_>, method: LapMethod) 
             interval_str(lap_secs),
             plural(total)
         );
+        msg.push_str(&summary_extra);
         if !pending.is_empty() {
             msg.push_str(&format!(
                 "\n    {} not synced: rebuild_pending.",
@@ -681,8 +893,6 @@ fn sleeping_message(args: &ArgsMap, seconds: f64, message: String) -> String {
 /// What [`run_live`] shows while the run goes on.
 #[derive(Clone, Copy)]
 pub(super) enum LiveView<'a> {
-    /// The shell's spinner only (flat runs in the shell).
-    Spinner,
     /// The nodes of a graph run: the inline live region on a terminal that takes it
     /// (`sync_live.rs`), else one line per node transition.
     Nodes {
@@ -708,31 +918,63 @@ pub(super) fn run_live(
     opts: meerschaum_engine::RunOptions,
     view: LiveView<'_>,
 ) -> meerschaum_engine::RunResult {
-    if let LiveView::Nodes { instance, args } = view
-        && live::possible(rt, args)
-    {
+    let LiveView::Nodes { instance, args } = view;
+    if live::possible(rt, args) {
         return live::run(rt, session, engine, opts, instance, args);
     }
-    run_lines(
-        rt,
-        session,
-        engine,
-        opts,
-        matches!(view, LiveView::Nodes { .. }),
-    )
+    let spinner = rt.in_shell;
+    run_lines(rt, session, engine, opts, true, spinner, None)
 }
 
-/// [`run_live`] without the inline region: one line per node transition (`show_nodes`), or the
-/// shell's spinner alone.
+/// Run a graph selection and report it pipe by pipe: the terminal's live view when there is
+/// one, else each pipe's block as its node ends (job logs, pipes, the console's run output) and
+/// the shell's spinner. Returns the result and the summary lines for its message
+/// ([`PipeReport::summary`]). `--nopretty` prints nothing while the run goes on.
+pub(super) fn run_reported(
+    rt: &mut Runtime<'_>,
+    session: &Session,
+    engine: meerschaum_engine::Engine,
+    opts: meerschaum_engine::RunOptions,
+    view: LiveView<'_>,
+    nopretty: bool,
+) -> (meerschaum_engine::RunResult, String) {
+    let LiveView::Nodes { instance, args } = view;
+    let mut report = PipeReport::new(super::pipes::defaults(rt));
+    let result = if nopretty {
+        session.block_on(engine.run(opts))
+    } else if rt.live && live::possible(rt, args) {
+        live::run(rt, session, engine, opts, instance, args)
+    } else {
+        let spinner = rt.in_shell && !flag(args, "debug");
+        let show_nodes = rt.live;
+        run_lines(
+            rt,
+            session,
+            engine,
+            opts,
+            show_nodes,
+            spinner,
+            Some(&mut report),
+        )
+    };
+    print_hook_results(rt, session);
+    let summary = report.summary(&result.outcomes);
+    (result, summary)
+}
+
+/// [`run_live`] without the inline region: one line per node transition (`show_nodes`), the
+/// shell's spinner (`spinner`), and each pipe's block as its node ends (`report`).
 fn run_lines(
     rt: &mut Runtime<'_>,
     session: &Session,
     engine: meerschaum_engine::Engine,
     opts: meerschaum_engine::RunOptions,
     show_nodes: bool,
+    spinner: bool,
+    mut report: Option<&mut PipeReport>,
 ) -> meerschaum_engine::RunResult {
     use meerschaum_engine::EventKind;
-    let progress = if rt.in_shell {
+    let progress = if spinner {
         crate::format::progress::Progress::start_flags(rt, false, false, "Syncing Pipes")
     } else {
         crate::format::progress::Progress::disabled()
@@ -747,10 +989,14 @@ fn run_lines(
     );
     let counter = progress.counter();
     let mut events = engine.subscribe();
-    let line = |rt: &mut Runtime<'_>, event: meerschaum_engine::Event| {
+    let mut line = |rt: &mut Runtime<'_>, event: meerschaum_engine::Event| {
         if let EventKind::RunStarted { nodes, .. } = &event.kind {
             progress.set_total(*nodes);
         }
+        let reported = match report.as_deref_mut() {
+            Some(report) => report.observe(rt, &event, !show_nodes),
+            None => false,
+        };
         let Some(node) = event.pipe_ref.as_ref().map(|r| r.label()) else {
             return;
         };
@@ -768,10 +1014,16 @@ fn run_lines(
         if !show_nodes {
             return;
         }
+        let took = event
+            .pipe_ref
+            .as_ref()
+            .and_then(|r| report.as_deref().and_then(|report| report.took(r)))
+            .unwrap_or_default();
         let text = match &event.kind {
             EventKind::NodeStarted { action, .. } => format!("  \u{25b6} {node} ({action})"),
+            EventKind::NodeFinished { .. } | EventKind::NodeFailed { .. } if reported => return,
             EventKind::NodeFinished { result } => format!(
-                "  \u{2714} {node} +{} ins ~{} upd +{} ups",
+                "  \u{2714} {node} +{} ins ~{} upd +{} ups{took}",
                 result.inserted, result.updated, result.upserted
             ),
             EventKind::NodeFailed {
@@ -795,17 +1047,18 @@ fn run_lines(
         loop {
             tokio::select! {
                 result = &mut run => {
-                    print_hook_results(rt, session);
                     while let Ok(event) = events.try_recv() {
                         line(rt, event);
                     }
+                    print_hook_results(rt, session);
                     return result;
                 }
                 event = events.recv(), if events_open => {
                     match event {
                         Ok(event) => {
-                            print_hook_results(rt, session);
+                            // A pipe's block first, then what its hooks returned.
                             line(rt, event);
+                            print_hook_results(rt, session);
                         }
                         Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
                         Err(tokio::sync::broadcast::error::RecvError::Closed) => events_open = false,

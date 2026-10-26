@@ -44,7 +44,6 @@ HIDING_TRIGGERS = (
     'show-webterm-button',
     'get-plugins-button',
     'get-users-button',
-    'get-graphs-button',
 )
 
 _VISIBLE = {'display': 'block'}
@@ -409,7 +408,7 @@ dash_app.clientside_callback(
         }, 3000);
         window.addEventListener('message', receive);
         frame.contentWindow.postMessage({action: '__EXEC', request_id: request, command: store.command}, location.origin);
-        return 'Submitting to terminal…';
+        return '';
     }
     """,
     Output('terminal-exec-status', 'children'),

@@ -1,9 +1,16 @@
-/* Local, accessible stage cards remain Dash controls; SVG only draws their connections. */
+/* The Pipeline canvas: stage cards remain Dash controls; SVG only draws their connections.
+ *
+ * A Pipeline is read-only until Edit (`#pipelines-page[data-edit=true]`): then dragging a card
+ * moves it (the shared layout, saved with Save), dragging from a card's handle to another card
+ * proposes a parent -> child edge, and the menus offer Add Pipe and Remove from Pipeline. Zoom
+ * and pan are remembered per Pipeline in this browser. */
 (function () {
+    function page() { return document.getElementById('pipelines-page'); }
+    function editing() { return page()?.dataset.edit === 'true'; }
     function setView(view) {
-        const page = document.getElementById('pipelines-page');
-        if (!page) return;
-        page.dataset.view = view;
+        const element = page();
+        if (!element) return;
+        element.dataset.view = view;
         for (const value of ['workspace', 'runs']) document.getElementById('pipeline-view-' + value)?.setAttribute('aria-selected', String(value === view));
         if (view === 'runs') requestAnimationFrame(() => {
             document.querySelectorAll('#pipeline-runs-panel .js-plotly-plot').forEach(plot => {
@@ -15,12 +22,23 @@
         const workspace = document.getElementById('pipeline-workspace');
         if (!workspace) return;
         workspace.dataset.pane = pane;
-        document.querySelectorAll('.pipeline-mobile-tabs [data-pane]').forEach(button => button.setAttribute('aria-selected', String(button.dataset.pane === pane)));
         if (pane === 'graph') requestAnimationFrame(() => document.getElementById('pipeline-fit')?.click());
     }
     function exitFullscreen() {
         if (document.fullscreenElement?.id === 'pipeline-workspace') document.exitFullscreen().catch(() => {});
         document.getElementById('pipeline-workspace')?.classList.remove('pipeline-fullscreen');
+    }
+    function closeInspector() {
+        const inspector = document.getElementById('pipeline-inspector');
+        if (inspector) inspector.hidden = true;
+        document.getElementById('pipeline-workspace')?.classList.remove('pipeline-has-selection');
+        window._mrsmPipelineSelectedRef = null;
+        document.querySelectorAll('.pipeline-stage').forEach(card => card.setAttribute('aria-pressed', 'false'));
+        setPane('graph');
+    }
+    function openEditor() {
+        const editor = document.getElementById('pipeline-draft-editor');
+        if (editor && editing()) editor.open = true;
     }
     window.mrsmClosePipelineOutput = function () {
         window._mrsmOutputDismissed = true;
@@ -28,34 +46,37 @@
         setPane('graph');
     };
     window.mrsmShowPipelineOutput = function (store) {
-        if (!store) return;
-        window._mrsmOutputDismissed = false;
         const dock = document.getElementById('pipeline-output-dock');
-        dock?.classList.remove('pipeline-output-empty');
-        if (dock) dock.dataset.outputMode = 'pipeline';
+        if (!dock) return;
+        window._mrsmOutputDismissed = false;
+        dock.classList.remove('pipeline-output-empty');
+        dock.dataset.outputMode = store ? 'pipeline' : 'pipe';
         setView('workspace');
         setPane('output');
-        requestAnimationFrame(() => dock?.scrollIntoView({block:'nearest'}));
+        requestAnimationFrame(() => dock.scrollIntoView({block: 'nearest'}));
     };
     function showOutput(ref) {
         const dock = document.getElementById('pipeline-output-dock');
-        if (dock) dock.dataset.outputMode = 'pipe';
+        if (!dock) return;
+        dock.dataset.outputMode = 'pipe';
         setView('workspace');
         window._mrsmOutputDismissed = false;
-        document.getElementById('pipeline-output-dock')?.classList.remove('pipeline-output-empty');
+        dock.classList.remove('pipeline-output-empty');
         setPane('output');
+        // A member of this Pipeline's selected run shows its part of that run.
+        const current = window._mrsmCurrentPipelineRun;
         const rows = Array.from((window._mrsmNodeOutput || new Map()).values()).filter(item => item.ref === ref);
-        if (rows.length) window.dash_clientside.set_props('pipeline-output-tab', {value: rows.at(-1).job});
-        else {
-            document.getElementById('pipeline-output-dock')?.classList.remove('pipeline-output-empty');
-            window.dash_clientside.set_props('pipeline-node-alert', {children:'No open execution output for this Pipe. Sync it or inspect its recent syncs.'});
-        }
-        document.getElementById('pipeline-output-dock')?.scrollIntoView({block:'nearest'});
+        if (current && current.labels && current.labels[ref]) window.dash_clientside.set_props('pipeline-member-output', {data: {
+            key: 'run:' + current.run_id + '|' + ref, ref, label: current.labels[ref], run_id: current.run_id,
+            instance: current.instance, job: current.job, pipeline: current.pipeline, scope: 'pipeline', token: Date.now()}});
+        else if (rows.length) window.dash_clientside.set_props('pipeline-output-tab', {value: rows.at(-1).key || rows.at(-1).job});
+        else window.dash_clientside.set_props('pipeline-node-alert', {children: 'No output for this Pipe yet.'});
+        dock.scrollIntoView({block: 'nearest'});
     }
     window.mrsmPaintPipelineStatuses = function (statuses) {
         const colors = {running:'#3486bd', succeeded:'#2e9e5b', failed:'#d1495b',
                         upstream_failed:'#d1495b', cancelled:'#9aa5b1', skipped:'#9aa5b1', pending:'#e0a526'};
-        document.querySelectorAll('.pipeline-stage').forEach(card => {
+        document.querySelectorAll('.pipeline-stage:not(.pipeline-placeholder)').forEach(card => {
             if (!card.dataset.plannedColor) card.dataset.plannedColor = card.style.getPropertyValue('--stage-color');
             const status = (statuses || {})[card.dataset.ref];
             card.dataset.status = status || '';
@@ -66,23 +87,27 @@
                 return;
             }
             card.style.setProperty('--stage-color', colors[status] || '#9aa5b1');
-            card.title = card.querySelector('code').textContent + ' — ' + status;
+            const label = card.querySelector('code');
+            if (label) card.title = label.textContent + ' — ' + status;
             if (!badge) { badge = document.createElement('small'); badge.className = 'pipeline-live-status'; card.appendChild(badge); }
             badge.textContent = status.replaceAll('_', ' ');
         });
-        const filter = document.getElementById('pipeline-canvas-status');
-        if (filter && filter.onchange) filter.dispatchEvent(new Event('change'));
+        document.getElementById('pipeline-canvas')?._mrsmFilter?.();
     };
+    // Canvas tools are delegated (see the document listeners below), so a re-rendered button
+    // works at once and always acts on the canvas mounted now.
+    function on(id, handler) {
+        const canvas = document.getElementById('pipeline-canvas');
+        if (canvas) (canvas._mrsmActions = canvas._mrsmActions || {})[id] = handler;
+    }
     function mount() {
-        const page = document.getElementById('pipelines-page');
-        if (page && page._mrsmViewSearch !== location.search) {
-            const previous = page._mrsmViewSearch === undefined ? null : new URLSearchParams(page._mrsmViewSearch);
-            page._mrsmViewSearch = location.search;
+        const element = page();
+        if (element && element._mrsmViewSearch !== location.search) {
+            element._mrsmViewSearch = location.search;
             const query = new URLSearchParams(location.search);
-            const changedPipeline = previous && ['pipeline', 'instance'].some(key => previous.get(key) !== query.get(key));
             if (query.has('run_id') || ['status', 'pipe'].some(key => query.has(key))) setView('runs');
-            else if (!previous || changedPipeline) setView('workspace');
         }
+        openRequested();
         const workspace = document.getElementById('pipeline-workspace');
         const inspector = document.getElementById('pipeline-inspector');
         if (workspace && inspector) workspace.classList.toggle('pipeline-has-selection', !inspector.hidden);
@@ -93,53 +118,86 @@
         if (world._mrsmMountedCards && currentCards.length === world._mrsmMountedCards.length
             && currentCards.every((card, index) => card === world._mrsmMountedCards[index])) return;
         world._mrsmMountedCards = currentCards;
-        world.querySelectorAll(':scope > svg').forEach(element => element.remove());
+        world.querySelectorAll(':scope > svg').forEach(svgElement => svgElement.remove());
         const ns = 'http://www.w3.org/2000/svg';
         const svg = document.createElementNS(ns, 'svg');
         svg.setAttribute('width', world.style.width);
         svg.setAttribute('height', world.style.height);
         svg.style.cssText = 'position:absolute;pointer-events:none;overflow:visible';
         svg.setAttribute('aria-hidden', 'true');
-        const cards = new Map(Array.from(world.querySelectorAll('.pipeline-stage')).map(el=>[el.dataset.node,el]));
-        const layout = JSON.parse(world.dataset.layout || '{}');
+        const cards = new Map(currentCards.map(card => [card.dataset.node, card]));
+        // The saved shared layout, under Edit mode's unsaved moves (kept across re-renders).
+        const draftLayout = window._mrsmLayoutDraft;
+        const layout = Object.assign(JSON.parse(world.dataset.layout || '{}'),
+            draftLayout && draftLayout.key === (world.dataset.registry + '|' + world.dataset.pipeline) ? draftLayout.layout : {});
         cards.forEach((card, key) => {
+            card.dataset.homeLeft = card.style.left; card.dataset.homeTop = card.style.top;
             const position = layout[card.dataset.ref] || layout[key];
             if (position) { card.style.left = position.x + 'px'; card.style.top = position.y + 'px'; }
         });
+        let proposal = null;
         function drawEdges() {
-        svg.replaceChildren();
-        for (const edge of JSON.parse(world.dataset.edges || '[]')) {
-            const a = cards.get(edge.parent), b = cards.get(edge.child);
-            if (!a || !b) continue;
-            const x = a.offsetLeft + a.offsetWidth, y = a.offsetTop + a.offsetHeight/2;
-            const u = b.offsetLeft - 8, v = b.offsetTop + b.offsetHeight/2;
-            const path = document.createElementNS(ns, 'path');
-            // End the curve before a straight landing, so its tangent never crosses the arrow.
-            const landing = u - 16, middle = (x + landing) / 2;
-            path.setAttribute('d', `M${x},${y} C${middle},${y} ${middle},${v} ${landing},${v} L${u-7},${v}`);
-            path.setAttribute('fill', 'none'); path.setAttribute('stroke', '#809aad');
-            path.setAttribute('stroke-width', '2');
-            path.setAttribute('stroke-linecap', 'round');
-            svg.appendChild(path);
-            const arrow = document.createElementNS(ns, 'path');
-            arrow.setAttribute('d', `M${u-8},${v-5} L${u},${v} L${u-8},${v+5}`);
-            arrow.setAttribute('fill', 'none');
-            arrow.setAttribute('stroke', '#a7c8df');
-            arrow.setAttribute('stroke-width', '2');
-            arrow.setAttribute('stroke-linecap', 'round');
-            arrow.setAttribute('stroke-linejoin', 'round');
-            svg.appendChild(arrow);
-        }
+            svg.replaceChildren();
+            const curve = (x, y, u, v, color, dashed) => {
+                const path = document.createElementNS(ns, 'path');
+                // End the curve before a straight landing, so its tangent never crosses the arrow.
+                const landing = u - 16, middle = (x + landing) / 2;
+                path.setAttribute('d', `M${x},${y} C${middle},${y} ${middle},${v} ${landing},${v} L${u-7},${v}`);
+                path.setAttribute('fill', 'none'); path.setAttribute('stroke', color);
+                path.setAttribute('stroke-width', '2');
+                path.setAttribute('stroke-linecap', 'round');
+                if (dashed) path.setAttribute('stroke-dasharray', '6 5');
+                svg.appendChild(path);
+                const arrow = document.createElementNS(ns, 'path');
+                arrow.setAttribute('d', `M${u-8},${v-5} L${u},${v} L${u-8},${v+5}`);
+                arrow.setAttribute('fill', 'none');
+                arrow.setAttribute('stroke', dashed ? color : '#a7c8df');
+                arrow.setAttribute('stroke-width', '2');
+                arrow.setAttribute('stroke-linecap', 'round');
+                arrow.setAttribute('stroke-linejoin', 'round');
+                svg.appendChild(arrow);
+            };
+            for (const edge of JSON.parse(world.dataset.edges || '[]')) {
+                const a = cards.get(edge.parent), b = cards.get(edge.child);
+                if (!a || !b) continue;
+                curve(a.offsetLeft + a.offsetWidth, a.offsetTop + a.offsetHeight/2,
+                      b.offsetLeft - 8, b.offsetTop + b.offsetHeight/2, '#809aad', false);
+            }
+            if (proposal) curve(proposal.x, proposal.y, proposal.u, proposal.v, '#e0a526', true);
         }
         drawEdges();
         world.prepend(svg);
-        const viewportKey = 'mrsm-pipeline-viewport:' + location.pathname + ':' + (new URLSearchParams(location.search).get('instance') || '') + ':' + world.dataset.pipeline;
+        // Discarding unsaved moves puts every card back where the saved layout has it.
+        canvas._mrsmResetLayout = () => {
+            const shared = JSON.parse(world.dataset.layout || '{}');
+            for (const key of Object.keys(layout)) delete layout[key];
+            Object.assign(layout, shared);
+            cards.forEach((card, key) => {
+                const position = shared[card.dataset.ref] || shared[key];
+                card.style.left = position ? position.x + 'px' : card.dataset.homeLeft;
+                card.style.top = position ? position.y + 'px' : card.dataset.homeTop;
+            });
+            drawEdges();
+        };
+        const viewportKey = 'mrsm-pipeline-viewport:' + (world.dataset.registry || '') + '|' + (world.dataset.pipeline || world.dataset.focus || location.pathname);
         let saved = {};
-        try { saved = JSON.parse(sessionStorage.getItem(viewportKey) || '{}'); } catch (_) {}
-        let scale = saved.scale || 1, x = saved.x || 0, y = saved.y || 0, drag, moved = false, pressedGroup;
+        try { saved = JSON.parse(localStorage.getItem(viewportKey) || '{}'); } catch (_) {}
+        let scale = saved.scale || 1, x = saved.x || 0, y = saved.y || 0;
+        // A gesture outlives a re-render (an edit's draft re-renders the canvas, sometimes the
+        // canvas element itself): it lives on the page, and a replaced card is found by its Pipe.
+        const g = window._mrsmCanvasGesture = window._mrsmCanvasGesture || {drag: null, moved: false};
+        if (g.drag) {
+            if (g.drag.node && !g.drag.node.isConnected) g.drag.node = currentCards.find(card => card.dataset.ref === g.drag.ref) || null;
+            if (g.drag.handle && !g.drag.handle.isConnected) g.drag.handle = currentCards.find(card => card.dataset.ref === g.drag.ref) || null;
+        }
+        // A card being dragged keeps its live position through a re-render.
+        if (g.drag && g.drag.ref && g.drag.lastLeft !== undefined) {
+            const dragged = currentCards.find(card => card.dataset.ref === g.drag.ref);
+            if (dragged) { dragged.style.left = g.drag.lastLeft + 'px'; dragged.style.top = g.drag.lastTop + 'px'; }
+        }
         const draw = () => {
             world.style.transform = `translate(${x}px,${y}px) scale(${scale})`;
-            try { sessionStorage.setItem(viewportKey, JSON.stringify({scale, x, y})); } catch (_) {}
+            try { localStorage.setItem(viewportKey, JSON.stringify({scale, x, y})); } catch (_) {}
         };
         const zoom = factor => {
             const next = Math.max(.15, Math.min(2, scale * factor));
@@ -157,25 +215,26 @@
             x = (canvas.clientWidth-(maxX-minX)*scale)/2-minX*scale;
             y = (canvas.clientHeight-(maxY-minY)*scale)/2-minY*scale; draw();
         };
-        document.getElementById('pipeline-fit').onclick = fit;
+        on('pipeline-fit', fit);
         canvas._mrsmResizeObserver?.disconnect();
-        let lastWidth = 0, lastHeight = 0;
+        let lastWidth = 0, lastHeight = 0, fitted = !!saved.scale;
         canvas._mrsmResizeObserver = new ResizeObserver(entries => {
             const {width, height} = entries[0].contentRect;
             if (!width || !height || (width === lastWidth && height === lastHeight)) return;
             lastWidth = width; lastHeight = height;
-            requestAnimationFrame(fit);
+            if (!fitted) { fitted = true; requestAnimationFrame(fit); }
         });
         canvas._mrsmResizeObserver.observe(canvas);
-        document.getElementById('pipeline-fullscreen').onclick = async () => {
-            const workspace = document.getElementById('pipeline-workspace');
+        on('pipeline-fullscreen', async () => {
+            const target = document.getElementById('pipeline-workspace');
+            if (!target) return;
             try {
                 if (document.fullscreenElement) await document.exitFullscreen();
-                else if (workspace.requestFullscreen) await workspace.requestFullscreen();
-                else workspace.classList.toggle('pipeline-fullscreen');
-            } catch (_) { workspace.classList.toggle('pipeline-fullscreen'); }
-        };
-        document.getElementById('pipeline-center').onclick = () => {
+                else if (target.requestFullscreen) await target.requestFullscreen();
+                else target.classList.toggle('pipeline-fullscreen');
+            } catch (_) { target.classList.toggle('pipeline-fullscreen'); }
+        });
+        on('pipeline-center', () => {
             const selected = Array.from(cards.values()).filter(card => card.getAttribute('aria-pressed') === 'true');
             if (selected.length) {
                 const left = Math.min(...selected.map(card => card.offsetLeft));
@@ -186,34 +245,30 @@
                 x = canvas.clientWidth/2 - (left+right)/2*scale;
                 y = canvas.clientHeight/2 - (top+bottom)/2*scale; draw();
             }
-        };
-        const add = () => {
-            const editor = document.getElementById('pipeline-draft-editor');
-            if (editor) { editor.open = true; const picker = editor.querySelector('details'); if (picker) picker.open = true; editor.scrollIntoView({block: 'nearest'}); }
-        };
-        document.getElementById('pipeline-add-node').onclick = add;
-        const search = document.getElementById('pipeline-canvas-search');
-        const statusFilter = document.getElementById('pipeline-canvas-status');
+        });
+        on('pipeline-add-node', openEditor);
         const filter = () => cards.forEach(card => {
-            const text = search.value.toLowerCase();
-            const wanted = statusFilter.value;
+            const text = (document.getElementById('pipeline-canvas-search')?.value || '').toLowerCase();
+            const wanted = document.getElementById('pipeline-canvas-status')?.value;
             const status = (window._mrsmPipelineStatuses || {})[card.dataset.ref];
             card.classList.toggle('pipeline-search-hidden', !card.textContent.toLowerCase().includes(text) || !!(wanted && wanted !== status));
         });
-        search.oninput = filter; statusFilter.onchange = filter;
-        document.getElementById('pipeline-collapse-groups').onclick = () => {
-            world.classList.toggle('pipeline-groups-collapsed');
-        };
+        canvas._mrsmFilter = filter;
+        on('pipeline-collapse-groups', () => world.classList.toggle('pipeline-groups-collapsed'));
+        const readOnlyCanvas = !document.getElementById('pipeline-inspector');
         canvas.oncontextmenu = e => {
+            if (readOnlyCanvas) return;
             e.preventDefault();
-            document.querySelectorAll('.pipeline-context-menu').forEach(el => el.remove());
-            const node = e.target.closest('.pipeline-stage');
+            openMenu(e.target.closest('.pipeline-stage:not(.pipeline-placeholder)'), e.clientX, e.clientY);
+        };
+        function openMenu(node, left, top) {
+            document.querySelectorAll('.pipeline-context-menu').forEach(menuElement => menuElement.remove());
             const menu = document.createElement('div'); menu.className = 'pipeline-context-menu';
             menu.setAttribute('role', 'menu');
-            menu.style.left = Math.min(e.clientX, innerWidth - 230) + 'px';
-            menu.style.top = Math.min(e.clientY, innerHeight - 220) + 'px';
+            menu.style.left = Math.min(left, innerWidth - 230) + 'px';
+            menu.style.top = Math.min(top, innerHeight - 220) + 'px';
             const button = (label, fn) => {
-                const b = document.createElement('button'); b.textContent = ({'Inspect Pipe':'ⓘ ', 'View output':'▤ ', 'Remove membership in draft':'− ', 'Add existing / register new Pipe':'+ '}[label] || '▶ ') + label; b.setAttribute('role', 'menuitem');
+                const b = document.createElement('button'); b.textContent = ({'Inspect Pipe':'ⓘ ', 'View output':'▤ ', 'Remove from Pipeline':'− ', 'Add Pipe':'+ '}[label] || '▶ ') + label; b.setAttribute('role', 'menuitem');
                 b.onclick = () => { menu.remove(); fn(); }; menu.appendChild(b);
             };
             if (node) {
@@ -221,38 +276,83 @@
                 for (const [scope, label] of [['this', 'Sync this Pipe'], ['parents', 'Sync with all parents'], ['children', 'Sync with all children']])
                     button(label, () => { setPane('output'); window.dash_clientside.set_props('pipeline-context', {data:{action:'sync', ref:node.dataset.ref, scope, token:Date.now()}}); });
                 button('View output', () => { node.click(); showOutput(node.dataset.ref); });
-                button('Remove membership in draft', () => {
-                    window.dash_clientside.set_props('pipeline-context', {data:{action:'remove', ref:node.dataset.ref, token:Date.now()}}); add();
+                if (editing()) button('Remove from Pipeline', () => {
+                    window.dash_clientside.set_props('pipeline-context', {data:{action:'remove', ref:node.dataset.ref, token:Date.now()}});
                 });
-            } else button('Add existing / register new Pipe', add);
+            } else if (editing()) button('Add Pipe', openEditor);
+            if (!menu.children.length) return;
             document.getElementById('pipeline-workspace').appendChild(menu);
             menu.querySelector('button').focus();
-        };
-        document.getElementById('pipeline-zoom-in').onclick = () => zoom(1.25);
-        document.getElementById('pipeline-zoom-out').onclick = () => zoom(.8);
+        }
+        canvas._mrsmOpenMenu = openMenu;
+        on('pipeline-zoom-in', () => zoom(1.25));
+        on('pipeline-zoom-out', () => zoom(.8));
         canvas.onpointerdown = e => {
             const node = e.target.closest('.pipeline-stage');
-            if (e.target.closest('button') && !(node && e.altKey)) return;
+            const handle = e.target.closest('.pipeline-edge-handle');
+            const edit = editing();
+            if (e.target.closest('a')) return;
+            if (!handle && e.target.closest('button') && !(node && edit)) return;
+            if (node?.classList.contains('pipeline-placeholder')) return;
             e.preventDefault();
             window.getSelection()?.removeAllRanges();
-            moved = false;
-            pressedGroup = e.target.closest('.pipeline-group');
-            drag = {node, x:e.clientX-x, y:e.clientY-y, startX:e.clientX, startY:e.clientY, left:node?.offsetLeft, top:node?.offsetTop}; canvas.setPointerCapture(e.pointerId);
+            g.moved = false;
+            g.drag = {node: edit ? node : null, handle: edit && handle ? node : null, x:e.clientX-x, y:e.clientY-y,
+                    startX:e.clientX, startY:e.clientY, left:node?.offsetLeft, top:node?.offsetTop, pointer:e.pointerId, ref:node?.dataset.ref};
+            // Capture only once it is a drag, so a plain click still reaches its card.
+            if (!g.drag.node && !g.drag.handle) canvas.setPointerCapture(e.pointerId);
         };
-        canvas.onpointermove = e => {if (drag) {moved = moved || Math.hypot(e.clientX-drag.startX, e.clientY-drag.startY) > 5;if (drag.node) {
-            drag.node.style.left = (drag.left + (e.clientX-drag.startX)/scale) + 'px';
-            drag.node.style.top = (drag.top + (e.clientY-drag.startY)/scale) + 'px';
-            drawEdges();
-        } else { x=e.clientX-drag.x;y=e.clientY-drag.y;draw(); }}};
-        canvas.onpointerup = canvas.onpointercancel = () => {
-            if (drag?.node && moved) {
+        const worldPoint = e => {
+            const box = canvas.getBoundingClientRect();
+            return {px: (e.clientX - box.left - x) / scale, py: (e.clientY - box.top - y) / scale};
+        };
+        canvas.onpointermove = e => {
+            // A press that landed on a card while it was being replaced never reached the canvas:
+            // the gesture starts from here instead of being lost.
+            if (g.drag && !(e.buttons & 1)) { g.drag = null; return; }
+            if (!g.drag && (e.buttons & 1) && !e.target.closest?.('a')) canvas.onpointerdown(e);
+            if (!g.drag) return;
+            const wasMoved = g.moved;
+            g.moved = g.moved || Math.hypot(e.clientX-g.drag.startX, e.clientY-g.drag.startY) > 5;
+            if (g.moved && !wasMoved && (g.drag.node || g.drag.handle)) { try { canvas.setPointerCapture(g.drag.pointer); } catch (_) {} }
+            if (!g.moved && (g.drag.node || g.drag.handle)) return;
+            if (g.drag.handle) {
+                const {px, py} = worldPoint(e);
+                proposal = {x: g.drag.handle.offsetLeft + g.drag.handle.offsetWidth, y: g.drag.handle.offsetTop + g.drag.handle.offsetHeight/2, u: px, v: py};
+                drawEdges();
+            } else if (g.drag.node) {
+                g.drag.lastLeft = g.drag.left + (e.clientX-g.drag.startX)/scale;
+                g.drag.lastTop = g.drag.top + (e.clientY-g.drag.startY)/scale;
+                g.drag.node.style.left = g.drag.lastLeft + 'px';
+                g.drag.node.style.top = g.drag.lastTop + 'px';
+                drawEdges();
+            } else { x=e.clientX-g.drag.x; y=e.clientY-g.drag.y; draw(); }
+        };
+        canvas.onpointerup = canvas.onpointercancel = e => {
+            if (g.drag?.handle && g.moved) {
+                const target = document.elementsFromPoint(e.clientX, e.clientY)
+                    .map(element => element.closest('.pipeline-stage:not(.pipeline-placeholder)')).find(Boolean);
+                if (target && target !== g.drag.handle)
+                    window.dash_clientside.set_props('pipeline-edge-proposal', {data: {parent: g.drag.handle.dataset.ref, child: target.dataset.ref, token: Date.now()}});
+                proposal = null; drawEdges();
+            } else if ((g.drag?.node || g.drag?.lastLeft !== undefined) && g.moved) {
                 cards.forEach((card, key) => { layout[card.dataset.ref] = {x:card.offsetLeft, y:card.offsetTop}; });
-                window.dash_clientside.set_props('pipeline-layout-draft', {data:layout});
+                if (g.drag.lastLeft !== undefined) layout[g.drag.ref] = {x: g.drag.lastLeft, y: g.drag.lastTop};
+                // Known at once, so a re-render arriving before the store updates keeps the move.
+                window._mrsmLayoutDraft = {key: world.dataset.registry + '|' + world.dataset.pipeline, layout: Object.assign({}, layout)};
+                window.dash_clientside.set_props('pipeline-layout-draft', {data: Object.assign({}, layout)});
             }
-            drag=null;
+            g.drag = null;
         };
         canvas.onwheel = e => {if (e.ctrlKey || e.metaKey) {e.preventDefault();zoom(e.deltaY<0?1.1:1/1.1);}};
         canvas.onkeydown = e => {
+            const node = e.target.closest?.('.pipeline-stage:not(.pipeline-placeholder)');
+            if (node && (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10'))) {
+                e.preventDefault();
+                const box = node.getBoundingClientRect();
+                openMenu(node, box.left + 24, box.top + 24);
+                return;
+            }
             if (e.target !== canvas) return;
             if (e.key === '+' || e.key === '=') zoom(1.25);
             else if (e.key === '-') zoom(.8);
@@ -260,76 +360,115 @@
             else if (e.key.startsWith('Arrow')) {e.preventDefault();x += e.key==='ArrowLeft'?40:e.key==='ArrowRight'?-40:0;y += e.key==='ArrowUp'?40:e.key==='ArrowDown'?-40:0;draw();}
         };
         canvas.onclick = e => {
-            if (moved) { moved = false; e.preventDefault(); e.stopPropagation(); return; }
-            const group = pressedGroup || e.target.closest('.pipeline-group');
-            pressedGroup = null;
-            if (group && !e.target.closest('button')) group.querySelector('button').click();
-            const selected = e.target.closest('.pipeline-stage');
+            if (g.moved) { g.moved = false; e.preventDefault(); e.stopPropagation(); return; }
+            if (readOnlyCanvas) return;
+            const selected = e.target.closest('.pipeline-stage:not(.pipeline-placeholder)');
             if (selected) {
                 setPane('details');
                 window._mrsmPipelineSelectedRef = selected.dataset.ref;
                 if (e.ctrlKey || e.metaKey || e.shiftKey) selected.classList.toggle('pipeline-multi-selected');
                 else cards.forEach(card => card.classList.remove('pipeline-multi-selected'));
-                cards.forEach(card=>card.setAttribute('aria-pressed', String(card===selected || card.classList.contains('pipeline-multi-selected'))));
-                const inspector = document.getElementById('pipeline-inspector');
-                inspector.hidden = false;
-                inspector.setAttribute('aria-busy', 'true');
+                cards.forEach(card => card.setAttribute('aria-pressed', String(card === selected || card.classList.contains('pipeline-multi-selected'))));
+                const inspectorElement = document.getElementById('pipeline-inspector');
+                if (inspectorElement) {
+                    inspectorElement.hidden = false;
+                    inspectorElement.setAttribute('aria-busy', 'true');
+                }
                 const body = document.getElementById('pipeline-inspector-body');
                 if (body) body.style.opacity = '.4';
-                document.getElementById('pipeline-workspace').classList.add('pipeline-has-selection');
+                document.getElementById('pipeline-workspace')?.classList.add('pipeline-has-selection');
             }
         };
         const focused = Array.from(cards.values()).find(card => card.dataset.ref === (world.dataset.focus || window._mrsmPipelineSelectedRef));
-        if (focused) {
+        if (focused && !saved.scale) {
             x = canvas.clientWidth/2 - (focused.offsetLeft + focused.offsetWidth/2)*scale;
             y = canvas.clientHeight/2 - (focused.offsetTop + focused.offsetHeight/2)*scale;
             focused.setAttribute('aria-pressed', 'true');
         }
         window.mrsmPaintPipelineStatuses(window._mrsmPipelineStatuses);
-        // Keep labels readable; Fit provides a complete overview on demand.
         draw();
+        // These cards are wired up (tests wait for it after a re-render).
+        world.dataset.mounted = 'true';
     }
+    // `?open=plan|analyze|schedule|copy|rename|clear|drop|delete` (from the list's cards) opens
+    // that dialog once the Pipeline is loaded.
+    function openRequested() {
+        const element = page();
+        if (!element || element.dataset.loaded !== 'true') return;
+        const query = new URLSearchParams(location.search);
+        const requested = query.get('open');
+        if (!requested) return;
+        const ids = {plan: 'pipeline-plan-open', analyze: 'pipeline-analyze', schedule: 'pipeline-manage-schedule',
+                     copy: 'pipeline-manage-copy', rename: 'pipeline-manage-rename', clear: 'pipeline-manage-clear',
+                     drop: 'pipeline-manage-drop', delete: 'pipeline-delete'};
+        query.delete('open');
+        window.history.replaceState({}, '', location.pathname + (query.size ? '?' + query : ''));
+        element._mrsmViewSearch = location.search;
+        document.getElementById(ids[requested])?.click();
+    }
+    // Leaving a dirty Edit-mode draft asks first (it also stays in this browser to resume).
+    function dirty() { return page()?.dataset.dirty === 'true'; }
+    window.addEventListener('beforeunload', e => { if (dirty()) { e.preventDefault(); e.returnValue = ''; } });
+    document.addEventListener('click', e => {
+        const link = e.target.closest('a[href]');
+        if (!link || !dirty() || link.target === '_blank' || link.closest('#pipelines-page .pipeline-workspace')) return;
+        if (!window.confirm('Leave this Pipeline with unsaved changes?')) { e.preventDefault(); e.stopImmediatePropagation(); }
+    }, true);
     document.addEventListener('keydown', e => {
-        if (e.target.matches('.pipeline-node-output-icon') && ['Enter', ' '].includes(e.key)) { e.preventDefault(); e.target.click(); }
+        if (e.target.matches?.('.pipeline-node-output-icon') && ['Enter', ' '].includes(e.key)) { e.preventDefault(); e.target.click(); }
         if (e.key === 'Escape') {
+            const editor = document.getElementById('pipeline-draft-editor');
+            if (editor?.open) { editor.open = false; return; }
+            if (document.querySelector('.pipeline-context-menu')) {
+                document.querySelectorAll('.pipeline-context-menu').forEach(menu => menu.remove());
+                return;
+            }
+            const inspector = document.getElementById('pipeline-inspector');
+            if (inspector && !inspector.hidden && !document.fullscreenElement) { document.getElementById('pipeline-inspector-close')?.click(); return; }
             exitFullscreen();
-            document.querySelectorAll('.pipeline-context-menu').forEach(el => el.remove());
-            document.getElementById('pipeline-workspace')?.classList.remove('pipeline-fullscreen');
         }
+    });
+    document.addEventListener('click', e => {
+        const tool = e.target.closest('button[id]');
+        const action = tool && document.getElementById('pipeline-canvas')?._mrsmActions?.[tool.id];
+        if (action) { action(); return; }
+    });
+    for (const type of ['input', 'change']) document.addEventListener(type, e => {
+        if (['pipeline-canvas-search', 'pipeline-canvas-status'].includes(e.target.id))
+            document.getElementById('pipeline-canvas')?._mrsmFilter?.();
     });
     document.addEventListener('click', e => {
         const runLink = e.target.closest('.pipeline-run-link[data-run-id]');
         if (runLink) { e.preventDefault(); window.dash_clientside.set_props('pipeline-selected-run', {data:runLink.dataset.runId}); return; }
-        const outputIcon = e.target.closest('.pipeline-node-output-icon');
-        if (outputIcon) { e.preventDefault(); e.stopPropagation(); showOutput(outputIcon.closest('.pipeline-stage').dataset.ref); return; }
         if (e.target.closest('#pipeline-recent-runs')) {
             window.dash_clientside.set_props('pipeline-selected-run', {data:null});
             const query = new URLSearchParams(location.search); query.delete('run_id');
             window.dash_clientside.set_props('pipelines-location', {search:query.size ? '?' + query : ''});
         }
-        if (e.target.closest('#pipeline-view-output')) window.mrsmShowPipelineOutput(window._mrsmPipelineRun);
-        if (e.target.closest('#pipeline-node-sync')) { const dock = document.getElementById('pipeline-output-dock'); if (dock) dock.dataset.outputMode = 'pipe'; }
+        if (e.target.closest('#pipeline-view-output')) {
+            if (window._mrsmPipelineRun) window.mrsmShowPipelineOutput(window._mrsmPipelineRun);
+            else window.mrsmShowPipelineOutput(null);
+        }
+        if (e.target.closest('#pipeline-node-sync')) {
+            const dock = document.getElementById('pipeline-output-dock'); if (dock) dock.dataset.outputMode = 'pipe';
+            window._mrsmOutputDismissed = false; setPane('output');
+        }
+        if (e.target.closest('#pipeline-run-now')) setView('workspace');
         if (e.target.closest('#pipeline-output-close')) window.mrsmClosePipelineOutput();
         const viewButton = e.target.closest('#pipeline-view-workspace, #pipeline-view-runs');
         if (viewButton) setView(viewButton.id === 'pipeline-view-runs' ? 'runs' : 'workspace');
-        const paneButton = e.target.closest('.pipeline-mobile-tabs [data-pane]');
-        if (paneButton) setPane(paneButton.dataset.pane);
-        if (e.target.closest('#pipeline-exit-fullscreen')) exitFullscreen();
-        if (e.target.closest('#pipeline-node-sync')) { window._mrsmOutputDismissed = false; setPane('output'); }
-        if (e.target.closest('.pipeline-group-title')) { setView('workspace'); setPane('graph'); }
-
-        if (!e.target.closest('.pipeline-context-menu')) document.querySelectorAll('.pipeline-context-menu').forEach(el => el.remove());
+        if (!e.target.closest('.pipeline-context-menu')) document.querySelectorAll('.pipeline-context-menu').forEach(menu => menu.remove());
         if (e.target.closest('#pipeline-node-view-output')) showOutput(window._mrsmPipelineSelectedRef);
-        if (e.target.closest('#pipeline-inspector-close')) {
-            setPane('graph');
-            window._mrsmPipelineSelectedRef = null;
-            document.querySelectorAll('.pipeline-stage').forEach(card => card.setAttribute('aria-pressed', 'false'));
-        }
+        if (e.target.closest('#pipeline-inspector-close')) closeInspector();
     });
     document.addEventListener('click', e => {
         const icon = e.target.closest('.pipeline-node-output-icon');
         if (icon) { e.preventDefault(); e.stopPropagation(); showOutput(icon.closest('.pipeline-stage').dataset.ref); }
     }, true);
-    new MutationObserver(mount).observe(document.documentElement, {childList:true, subtree:true, attributes:true, attributeFilter:['hidden']});
+    document.addEventListener('toggle', e => {
+        if (e.target.id === 'pipeline-draft-editor')
+            document.getElementById('pipeline-add-node')?.setAttribute('aria-expanded', String(e.target.open));
+    }, true);
+    new MutationObserver(mount).observe(document.documentElement, {childList:true, subtree:true, attributes:true, attributeFilter:['hidden', 'data-loaded']});
     document.addEventListener('DOMContentLoaded', mount);
 })();

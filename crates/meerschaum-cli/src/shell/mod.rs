@@ -919,8 +919,19 @@ pub fn completion_data(state: &ShellState, rt: &mut Runtime<'_>) -> completer::C
         ),
     ]);
     opts.allow_writes = false;
-    let completion_config = meerschaum_core::Config::new(opts).ok();
+    let completion_config = meerschaum_core::Config::new(opts)
+        .ok()
+        .map(std::sync::Arc::new);
     let pipeline_session = crate::native::session(rt);
+    let runs = {
+        let config = completion_config.clone();
+        let session = pipeline_session.clone();
+        move |keys: &str| -> Vec<String> {
+            config.as_ref().map_or_else(Vec::new, |config| {
+                crate::native::engine_views::recent_run_ids(config, &session, keys, 20)
+            })
+        }
+    };
     let pipelines = move |keys: &str| -> Vec<String> {
         let Some(config) = completion_config.as_ref() else {
             return Vec::new();
@@ -952,6 +963,7 @@ pub fn completion_data(state: &ShellState, rt: &mut Runtime<'_>) -> completer::C
         connectors,
         instance_keys: remove_ansi(&state.instance_keys),
         pipelines: Some(std::sync::Arc::new(pipelines)),
+        runs: Some(std::sync::Arc::new(runs)),
         data_plugins: Vec::new(),
         plugin_names,
         config_keys,

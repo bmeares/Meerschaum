@@ -867,7 +867,7 @@ fn an_editor_that_cannot_start_is_an_error_everywhere() {
 
     let run = home.run_input(
         &["bootstrap", "plugins", "fresh"],
-        "\n1\n\n\n",
+        "\n\n1\n\n\n",
         &[bad, NO_PYTHON],
     );
     let text = flat(&run.text());
@@ -899,11 +899,11 @@ fn an_editor_that_cannot_start_is_an_error_everywhere() {
 fn creating_a_plugin_from_edit_plugins_reports_the_wizard_failure() {
     let home = Home::new();
     let bad = ("EDITOR", "/nonexistent/mrsm-test-editor");
-    // `y` creates it, Enter accepts Python, `1` picks fetch; the next two lines answer the column and the
+    // `y` creates it, Enter accepts Python and a single file, `1` picks fetch; the next two lines answer the column and the
     // "open it" prompt; the editor cannot be started, which is the action's result.
     let run = home.run_input(
         &["edit", "plugins", "brandnew"],
-        "y\n\n1\n\n\n",
+        "y\n\n\n1\n\n\n",
         &[bad, NO_PYTHON],
     );
     let text = flat(&run.text());

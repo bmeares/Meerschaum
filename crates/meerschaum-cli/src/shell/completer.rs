@@ -167,6 +167,8 @@ pub struct CompletionData {
     /// Default registry and lazy name lookup for registered Pipeline completions.
     pub instance_keys: String,
     pub pipelines: Option<PipelineLister>,
+    /// Lists the newest engine run IDs of a registry (`show run <id>`, `watch run <id>`).
+    pub runs: Option<PipelineLister>,
     /// Actions declared by installed Python plugins.
     pub plugin_actions: Vec<meerschaum_worker::manifest::ActionManifest>,
     /// Plugin argument declarations.
@@ -208,6 +210,7 @@ impl Default for CompletionData {
             jobs: None,
             instance_keys: "sql:main".into(),
             pipelines: None,
+            runs: None,
             plugins: None,
             plugin_actions: Vec::new(),
             plugin_arguments: Vec::new(),
@@ -494,6 +497,33 @@ impl CompletionData {
                     .collect();
             }
         }
+        if matches!(action.first().map(String::as_str), Some("show" | "watch"))
+            && action
+                .get(1)
+                .is_some_and(|word| matches!(word.as_str(), "run" | "runs"))
+            && (tokens.len() > 2 || current_action_line.ends_with(char::is_whitespace))
+            && !last_space_word(current_action_line).starts_with('-')
+            && let Some(runs) = self.runs.as_ref()
+        {
+            let value_flag = if current_action_line.ends_with(char::is_whitespace) {
+                tokens.last().copied()
+            } else {
+                tokens.iter().rev().nth(1).copied()
+            };
+            if !value_flag.is_some_and(|word| word.starts_with('-')) {
+                let registry = args
+                    .get("mrsm_instance")
+                    .map(PyValue::py_str)
+                    .unwrap_or_else(|| self.instance_keys.clone());
+                let partial = last_space_word(current_action_line);
+                let n = chars(partial);
+                return runs(&registry)
+                    .into_iter()
+                    .filter(|id| id.starts_with(partial))
+                    .map(|id| Completion::new(id, n, n))
+                    .collect();
+            }
+        }
         if actions::get_action(&action, self.actions).is_none() {
             return out;
         }
@@ -505,12 +535,21 @@ impl CompletionData {
         if !parsed_text.replace(main, "").starts_with('_') {
             return out;
         }
-        let possibilities = self.complete_action(
+        let mut possibilities = self.complete_action(
             main,
             last_space_word(current_action_line),
             current_action_line,
             dates,
         );
+        // A finished subaction word (`show run ` is a prefix of `runs`) is not completed again.
+        if current_action_line.ends_with(char::is_whitespace)
+            && let Some(typed) = action.get(1)
+        {
+            let subactions = actions::get_subactions(self.actions, main);
+            possibilities.retain(|p| {
+                !(p.starts_with(typed.as_str()) && subactions.iter().any(|s| s.name == p))
+            });
+        }
         if !possibilities.is_empty() {
             let last_word_len = chars(last_space_word(text));
             out.extend(
@@ -1160,6 +1199,30 @@ mod tests {
         );
         assert!(d.get_completions("", &dates).is_empty());
         assert!(d.get_completions("foo", &dates).is_empty());
+    }
+
+    #[test]
+    fn finished_subaction_prefix_completes_its_values() {
+        let mut d = data();
+        let dates = DateContext::system();
+        assert_eq!(texts(&d.get_completions("show run", &dates)), vec!["runs"]);
+        assert_eq!(texts(&d.get_completions("show run ", &dates)), vec![""]);
+        d.runs = Some(Arc::new(|keys: &str| {
+            assert_eq!(keys, "sql:main");
+            vec!["sync-a1".into(), "pipeline-b2".into()]
+        }));
+        assert_eq!(
+            texts(&d.get_completions("show run ", &dates)),
+            vec!["sync-a1", "pipeline-b2"]
+        );
+        assert_eq!(
+            texts(&d.get_completions("watch runs p", &dates)),
+            vec!["pipeline-b2"]
+        );
+        assert_eq!(
+            texts(&d.get_completions("show runs --last ", &dates)),
+            Vec::<&str>::new()
+        );
     }
 
     #[test]

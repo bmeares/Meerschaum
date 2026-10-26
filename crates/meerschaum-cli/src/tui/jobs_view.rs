@@ -20,6 +20,7 @@ use meerschaum_jobs::executor::get_filtered_jobs_for;
 use meerschaum_jobs::{Job, JobOptions, JobsContext, MonitorControl, MonitorOptions, Status};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table};
 
@@ -328,7 +329,8 @@ impl JobsMonitor {
         if self.selected.as_deref() != Some(name) {
             return;
         }
-        let clean = crate::format::remove_ansi(line).replace('\t', "    ");
+        // The colors stay: the pane renders them (`ansi_spans`).
+        let clean = line.replace('\t', "    ");
         for part in clean.trim_end_matches('\n').split('\n') {
             self.log.push_back(part.trim_end_matches('\r').to_string());
             if self.log_scroll > 0 {
@@ -675,7 +677,7 @@ impl View for JobsMonitor {
         let lines: Vec<Line> = self
             .log
             .range(start..end)
-            .map(|l| Line::from(l.clone()))
+            .map(|l| Line::from(super::theme::ansi_spans(l, Style::default(), theme.color)))
             .collect();
         frame.render_widget(Paragraph::new(lines), inner);
     }
@@ -800,7 +802,7 @@ mod tests {
         assert_eq!(m.selected.as_deref(), Some("c"));
         assert!(m.log.is_empty());
         m.apply_log("c", "\u{1b}[31mred\u{1b}[0m\tline\r\n");
-        assert_eq!(m.log, ["red    line"]);
+        assert_eq!(m.log, ["\u{1b}[31mred\u{1b}[0m    line"]);
     }
 
     #[test]
