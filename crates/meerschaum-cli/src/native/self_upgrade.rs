@@ -63,6 +63,7 @@ pub fn detect(command: &[String], executable: &Path, docker: bool) -> Installati
                 .into(),
         );
     }
+    let launched = executable.to_path_buf();
     let executable = executable
         .canonicalize()
         .unwrap_or_else(|_| executable.into());
@@ -78,7 +79,12 @@ pub fn detect(command: &[String], executable: &Path, docker: bool) -> Installati
         };
     }
     let text = executable.to_string_lossy().replace('\\', "/");
-    if text.contains("/target/debug/") || text.contains("/target/release/") {
+    if [&launched, &executable]
+        .into_iter()
+        .any(|p| in_cargo_target(p))
+        || text.contains("/target/debug/")
+        || text.contains("/target/release/")
+    {
         return Installation::Managed(
             "source checkout; rebuild with Cargo (the development binary will not replace itself)"
                 .into(),
@@ -94,6 +100,13 @@ pub fn detect(command: &[String], executable: &Path, docker: bool) -> Installati
         );
     }
     Installation::Binary(executable)
+}
+
+/// Whether `path` is under a Cargo target directory (any profile; a symlinked `target/` too):
+/// an ancestor named `target` holding Cargo's `CACHEDIR.TAG`.
+fn in_cargo_target(path: &Path) -> bool {
+    path.ancestors()
+        .any(|a| a.file_name().is_some_and(|n| n == "target") && a.join("CACHEDIR.TAG").is_file())
 }
 
 fn cargo_owns(prefix: &Path) -> bool {
