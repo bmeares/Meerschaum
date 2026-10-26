@@ -287,3 +287,63 @@ fn single_file_source_connectors_register_fetch_sync_and_receive_configuration()
     assert!(shown.status.success(), "{}", text(&shown));
     assert!(text(&shown).contains("north"), "{}", text(&shown));
 }
+
+/// The rows every plugin below returns: one column per inferred dtype.
+const TYPED_ROWS: &str = r#"vec![
+    json!({"id": 1, "f": 1.5, "b": true, "dt": "2024-01-01 00:00:00", "s": "a", "n": null, "ni": null, "mix": 1}),
+    json!({"id": 2, "f": 2.5, "b": false, "dt": "2024-01-02 00:00:00", "s": "b", "n": 3, "ni": 1.5, "mix": 2.5}),
+]"#;
+
+/// Rows from a single-file plugin get the column types the same rows get from a Python
+/// plugin's `fetch()` / `pipe.sync(docs)` (v4: `pd.DataFrame(docs)` + `parse_df_datetimes`),
+/// not one `TEXT` column each: through `plugin:<name>`'s `fetch`, a `#[make_connector]`
+/// type's `fetch` and a `sync()` calling `pipe.sync(rows)`.
+#[test]
+fn single_file_rows_sync_with_python_plugin_dtypes() {
+    let source = format!(
+        r#"
+        fn fetch() -> Vec<Value> {{ {TYPED_ROWS} }}
+        #[make_connector]
+        mod readings {{
+            fn fetch() -> Vec<Value> {{ {TYPED_ROWS} }}
+        }}
+        #[make_connector]
+        mod writer {{
+            fn sync(pipe: &Pipe) -> Result<SuccessTuple> {{ pipe.sync({TYPED_ROWS}) }}
+        }}
+    "#
+    );
+    let (root, plugins) = prepared(&source);
+    for connector in ["plugin:typed", "readings:office", "writer:office"] {
+        let args = ["-c", connector, "-m", "m", "-i", "sql:local", "--nopretty"];
+        let output = run(
+            root.path(),
+            plugins.path(),
+            &[&["register", "pipes", "--noask"], &args[..]].concat(),
+        );
+        assert!(output.status.success(), "{}", text(&output));
+        let output = run(
+            root.path(),
+            plugins.path(),
+            &[&["sync", "pipes"], &args[..]].concat(),
+        );
+        let out = text(&output);
+        assert!(output.status.success(), "{out}");
+        assert!(out.contains("Inserted 2, updated 0 rows."), "{out}");
+        let shown = run(
+            root.path(),
+            plugins.path(),
+            &[&["show", "columns"], &args[..]].concat(),
+        );
+        let out = text(&shown);
+        assert!(shown.status.success(), "{out}");
+        // What `mrsm sync pipes -c plugin:<python plugin>` creates for the same documents
+        // (SQLite stores booleans as FLOAT; the null-leading int column is BIGINT).
+        assert!(
+            out.contains(
+                r#"{"id": "BIGINT", "f": "FLOAT", "b": "FLOAT", "dt": "DATETIME", "s": "TEXT", "n": "BIGINT", "ni": "FLOAT", "mix": "FLOAT"}"#
+            ),
+            "{connector}: {out}"
+        );
+    }
+}

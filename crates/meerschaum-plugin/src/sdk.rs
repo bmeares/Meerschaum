@@ -4,6 +4,7 @@ use arrow::{
     ffi_stream::{ArrowArrayStreamReader, FFI_ArrowArrayStream},
     record_batch::{RecordBatch, RecordBatchIterator, RecordBatchReader},
 };
+use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -351,33 +352,40 @@ pub trait FetchOutput {
     fn into_frame(self) -> Result<Option<Frame>>;
 }
 
+/// JSON rows as documents (`list[dict]`), the way a Python plugin's `fetch()` returns them.
+pub type Docs = Vec<IndexMap<String, meerschaum_kernel::Value>>;
+
+/// Convert JSON object rows into documents. A key a row does not have is absent from its
+/// document (`pd.DataFrame(docs)` fills it with `NaN`).
+pub fn rows_to_docs(rows: Vec<Value>) -> Result<Docs> {
+    rows.into_iter()
+        .map(|row| match row {
+            Value::Object(object) => object
+                .into_iter()
+                .map(|(key, value)| {
+                    let value: meerschaum_core::Value =
+                        serde_json::from_value(value).map_err(error)?;
+                    Ok((key, meerschaum_kernel::Value::from(value)))
+                })
+                .collect(),
+            _ => Err(error("fetch rows must be JSON objects")),
+        })
+        .collect()
+}
+
+/// Documents as a frame with the dtypes a Python plugin's documents get:
+/// `pd.DataFrame(docs).convert_dtypes()` ([`meerschaum_kernel::docs::frame_from_docs`]), so
+/// integer, float, bool and string columns are typed rather than `object`.
+pub fn docs_to_frame(docs: &[IndexMap<String, meerschaum_kernel::Value>]) -> Result<Frame> {
+    meerschaum_kernel::docs::frame_from_docs(docs).map_err(error)
+}
+
 impl FetchOutput for Vec<Value> {
     fn into_frame(self) -> Result<Option<Frame>> {
         if self.is_empty() {
             return Ok(None);
         }
-        let mut names = indexmap::IndexSet::new();
-        for row in &self {
-            let row = row
-                .as_object()
-                .ok_or_else(|| error("fetch rows must be JSON objects"))?;
-            names.extend(row.keys().cloned());
-        }
-        let columns = names
-            .into_iter()
-            .map(|name| {
-                let values = self
-                    .iter()
-                    .map(|row| {
-                        let value: meerschaum_core::Value =
-                            serde_json::from_value(row[&name].clone()).map_err(error)?;
-                        Ok(meerschaum_kernel::Value::from(value))
-                    })
-                    .collect::<Result<Vec<_>>>()?;
-                Ok((name, values))
-            })
-            .collect::<Result<Vec<_>>>()?;
-        Frame::from_object_columns(columns).map(Some).map_err(error)
+        docs_to_frame(&rows_to_docs(self)?).map(Some)
     }
 }
 

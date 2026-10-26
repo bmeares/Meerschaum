@@ -13,6 +13,7 @@ use meerschaum_connector::{
     PipeKeysEntry, PipesKeys, PipesKeysQuery, SyncOptions, async_trait,
 };
 use meerschaum_core::{Map, Pipe, SuccessTuple};
+use meerschaum_kernel::enforce::PipeInput;
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 use std::{
@@ -121,6 +122,22 @@ impl LoadedPlugin {
         data: Option<&Frame>,
         host: Option<&dyn crate::HostServices>,
     ) -> Result<Reply> {
+        let (value, data) = self.invoke_input(request, data, host)?;
+        Ok(Reply {
+            value,
+            data: data.map(input_frame).transpose()?,
+        })
+    }
+
+    /// [`invoke_with_host`](Self::invoke_with_host) with the reply's data as the plugin sent
+    /// it: an Arrow frame, or the documents of a rows-ABI (single-file) plugin, which a sync
+    /// treats like a Python plugin's `list[dict]` (`parse_df_datetimes` with the pipe's dtypes).
+    pub fn invoke_input(
+        &self,
+        request: &Request,
+        data: Option<&Frame>,
+        host: Option<&dyn crate::HostServices>,
+    ) -> Result<(Value, Option<PipeInput>)> {
         let nested = ACTIVE.with(|active| !active.borrow().is_empty());
         if ACTIVE.with(|active| active.borrow().contains(&self.name)) {
             return Err(error(format!(
@@ -153,6 +170,12 @@ impl LoadedPlugin {
             )));
         }
         self.invoke_entered(request, None, None)
+            .and_then(|(value, data)| {
+                Ok(Reply {
+                    value,
+                    data: data.map(input_frame).transpose()?,
+                })
+            })
     }
 
     /// A JSON-only call of a server call kind (`api_route`, `mcp_tool`, `mcp_resource`,
@@ -176,7 +199,7 @@ impl LoadedPlugin {
         request: &Request,
         data: Option<&Frame>,
         host: Option<&dyn crate::HostServices>,
-    ) -> Result<Reply> {
+    ) -> Result<(Value, Option<PipeInput>)> {
         ACTIVE.with(|active| active.borrow_mut().push(self.name.clone()));
         let _active = ActiveCall;
         if let Some(invoke) = self.invoke_rows {
@@ -206,10 +229,7 @@ impl LoadedPlugin {
         };
         // SAFETY: result belongs to this table and is consumed exactly once.
         let value = unsafe { decode(self.table, result) }?;
-        Ok(Reply {
-            value,
-            data: sdk::frame(output)?,
-        })
+        Ok((value, sdk::frame(output)?.map(PipeInput::Frame)))
     }
     fn invoke_rows(
         &self,
@@ -217,7 +237,7 @@ impl LoadedPlugin {
         request: &Request,
         data: Option<&Frame>,
         host: Option<&dyn crate::HostServices>,
-    ) -> Result<Reply> {
+    ) -> Result<(Value, Option<PipeInput>)> {
         let bytes = serde_json::to_vec(&json!({"request": request, "data": data.map(frame_rows)}))
             .map_err(error)?;
         let mut context = host.map(|services| crate::callbacks::HostContext { services, request });
@@ -235,11 +255,15 @@ impl LoadedPlugin {
                 table.as_ref().map_or(std::ptr::null(), |t| t),
             )
         };
-        let reply = unsafe { decode(self.table, result) }?;
-        Ok(Reply {
-            value: reply["value"].clone(),
-            data: rows_frame(&reply["data"])?,
-        })
+        let mut reply = unsafe { decode(self.table, result) }?;
+        let docs = rows_docs(reply["data"].take())?;
+        Ok((reply["value"].take(), docs.map(PipeInput::Docs)))
+    }
+
+    /// Whether this plugin returns data as JSON rows (the rows ABI of single-file plugins)
+    /// rather than as typed Arrow frames.
+    pub fn returns_rows(&self) -> bool {
+        self.invoke_rows.is_some()
     }
     /// Source adapter for the standard `plugin:<name>` connector, even when no custom
     /// connector types are declared in the manifest.
@@ -382,19 +406,25 @@ fn frame_rows(frame: &Frame) -> Vec<Value> {
         })
         .collect()
 }
-fn rows_frame(value: &Value) -> Result<Option<Frame>> {
-    use sdk::FetchOutput;
+/// The rows of a rows-ABI payload as documents (`null` is no data, `[]` no rows).
+fn rows_docs(value: Value) -> Result<Option<sdk::Docs>> {
     if value.is_null() {
         return Ok(None);
     }
-    if value.as_array().is_some_and(Vec::is_empty) {
-        return Frame::from_object_columns(Vec::new())
-            .map(Some)
-            .map_err(error);
+    let rows = serde_json::from_value::<Vec<Value>>(value).map_err(error)?;
+    sdk::rows_to_docs(rows).map(Some)
+}
+
+/// Reply data as a frame. Documents get the dtypes a Python plugin's documents get
+/// (`pd.DataFrame(docs).convert_dtypes()`), never all-`object` columns.
+pub(crate) fn input_frame(input: PipeInput) -> Result<Frame> {
+    match input {
+        PipeInput::Frame(frame) => Ok(frame),
+        PipeInput::Docs(docs) => sdk::docs_to_frame(&docs),
+        PipeInput::Columns(columns) => {
+            meerschaum_kernel::docs::frame_from_columns(&columns).map_err(error)
+        }
     }
-    serde_json::from_value::<Vec<Value>>(value.clone())
-        .map_err(error)?
-        .into_frame()
 }
 unsafe extern "C" fn invoke_rows_host(context: *mut std::ffi::c_void, bytes: Bytes) -> CallResult {
     sdk::boundary(|| {
@@ -403,13 +433,14 @@ unsafe extern "C" fn invoke_rows_host(context: *mut std::ffi::c_void, bytes: Byt
         }
         // SAFETY: caller is inside the synchronous scope that owns this context and bytes.
         let context = unsafe { &*context.cast::<crate::callbacks::HostContext<'_>>() };
-        let call: Value = serde_json::from_slice(unsafe { bytes.as_slice() }).map_err(error)?;
+        let mut call: Value = serde_json::from_slice(unsafe { bytes.as_slice() }).map_err(error)?;
+        let docs = rows_docs(call["data"].take())?;
         let method = call["method"]
             .as_str()
             .ok_or_else(|| error("missing host method"))?;
         context
             .services
-            .call(context.request, method, rows_frame(&call["data"])?)
+            .call_input(context.request, method, docs.map(PipeInput::Docs))
     })
 }
 pub fn validate_header(version: u32, size: u32) -> Result<()> {
@@ -542,8 +573,26 @@ impl NativeConnector {
         context: Value,
         data: Option<&Frame>,
     ) -> ConnectorResult<Reply> {
+        let (value, data) = self.call_input(method, context, data)?;
+        Ok(Reply {
+            value,
+            data: data
+                .map(input_frame)
+                .transpose()
+                .map_err(|e| ConnectorError::Invalid(e.to_string()))?,
+        })
+    }
+
+    /// [`call`](Self::call) with the reply's data as the plugin sent it (see
+    /// [`LoadedPlugin::invoke_input`]).
+    pub fn call_input(
+        &self,
+        method: &str,
+        context: Value,
+        data: Option<&Frame>,
+    ) -> ConnectorResult<(Value, Option<PipeInput>)> {
         self.plugin
-            .invoke_with_host(
+            .invoke_input(
                 &Request {
                     method: method.into(),
                     connector_type: self.connector_type.clone(),
@@ -575,6 +624,38 @@ impl NativeConnector {
         }
     }
 }
+impl NativeConnector {
+    fn fetch_context(&self, pipe: &Pipe, q: &DataQuery) -> Value {
+        let mut context = query_context(pipe, q);
+        if self.fetch_kwargs.as_object().is_some_and(|o| !o.is_empty()) {
+            context["kwargs"] = self.fetch_kwargs.clone();
+        }
+        context
+    }
+}
+
+/// One `fetch()` result as a chunk sequence (`FetchedKind::Data` without a generator, or
+/// `Nothing` when the plugin returned no data).
+struct SingleChunk {
+    chunk: Option<PipeInput>,
+    fetched: bool,
+}
+
+#[async_trait]
+impl meerschaum_connector::ChunkStream for SingleChunk {
+    async fn next_chunk(&mut self) -> ConnectorResult<Option<PipeInput>> {
+        Ok(self.chunk.take())
+    }
+
+    async fn finish(&mut self) -> ConnectorResult<meerschaum_connector::FetchedKind> {
+        Ok(if self.fetched {
+            meerschaum_connector::FetchedKind::Data { generator: false }
+        } else {
+            meerschaum_connector::FetchedKind::Nothing
+        })
+    }
+}
+
 fn pipe_context(pipe: &Pipe) -> Value {
     json!({"pipe": {"keys":pipe.keys(), "parameters":pipe.raw_parameters(), "temporary":pipe.temporary}})
 }
@@ -607,14 +688,41 @@ impl Connector for NativeConnector {
         self.value("test_connection", json!({}))
     }
     async fn fetch(&self, pipe: &Pipe, q: &DataQuery) -> ConnectorResult<Option<Frame>> {
-        let mut context = query_context(pipe, q);
-        if self.fetch_kwargs.as_object().is_some_and(|o| !o.is_empty()) {
-            context["kwargs"] = self.fetch_kwargs.clone();
-        }
+        let context = self.fetch_context(pipe, q);
         let connector = self.clone();
         tokio::task::spawn_blocking(move || connector.call("fetch", context, None).map(|r| r.data))
             .await
             .map_err(|e| ConnectorError::Backend(e.to_string()))?
+    }
+
+    /// A rows-ABI (single-file) plugin's `fetch()` returns documents, as a Python plugin's
+    /// `fetch()` returning `list[dict]` does, so a sync receives them as documents: the pipe's
+    /// `enforce_dtypes` then parses ISO datetime strings with the pipe's dtypes and timezone
+    /// (v4's `parse_df_datetimes`). Plugins that return Arrow frames use [`Connector::fetch`].
+    async fn fetch_chunked(
+        &self,
+        pipe: &Pipe,
+        q: &DataQuery,
+        _sync_chunks: bool,
+    ) -> ConnectorResult<Option<meerschaum_connector::ChunkedFetch>> {
+        if !self.plugin.returns_rows() {
+            return Ok(None);
+        }
+        let context = self.fetch_context(pipe, q);
+        let connector = self.clone();
+        let data = tokio::task::spawn_blocking(move || {
+            connector
+                .call_input("fetch", context, None)
+                .map(|(_, data)| data)
+        })
+        .await
+        .map_err(|e| ConnectorError::Backend(e.to_string()))??;
+        Ok(Some(meerschaum_connector::ChunkedFetch {
+            chunks: Box::new(SingleChunk {
+                fetched: data.is_some(),
+                chunk: data,
+            }),
+        }))
     }
 }
 #[async_trait]

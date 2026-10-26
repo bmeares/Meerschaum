@@ -16,6 +16,7 @@ use meerschaum_engine::{
     stream::{LegacyStream, StreamSource},
     sync::{DeltaObserver, SyncEnv},
 };
+use meerschaum_kernel::enforce::PipeInput;
 use meerschaum_plugin::NativePlugins;
 use meerschaum_worker::manifest::{ArgumentManifest, Manifest, PluginManifest};
 
@@ -763,6 +764,17 @@ impl meerschaum_plugin::HostServices for NativePipeHost {
         method: &str,
         data: Option<meerschaum_plugin::Frame>,
     ) -> meerschaum_plugin::Result<serde_json::Value> {
+        self.call_input(request, method, data.map(PipeInput::Frame))
+    }
+
+    /// A single-file plugin's `pipe.sync(rows)` syncs its rows as documents, like a Python
+    /// plugin's `pipe.sync(docs)`.
+    fn call_input(
+        &self,
+        request: &meerschaum_plugin::Request,
+        method: &str,
+        data: Option<PipeInput>,
+    ) -> meerschaum_plugin::Result<serde_json::Value> {
         use meerschaum_plugin::Error;
         let fail = |e: String| Error::Message(e);
         let metadata = &request.context["pipe"];
@@ -802,13 +814,7 @@ impl meerschaum_plugin::HostServices for NativePipeHost {
                         self.registry.engine_config.clone(),
                     );
                     // Supplying input bypasses plugin_sync and fetch; no recursive plugin call.
-                    let result = engine
-                        .sync_pipe(
-                            &pipe,
-                            Some(meerschaum_kernel::enforce::PipeInput::Frame(data)),
-                            &self.args,
-                        )
-                        .await;
+                    let result = engine.sync_pipe(&pipe, Some(data), &self.args).await;
                     Ok(serde_json::json!([result.success, result.message]))
                 }
                 _ => Err(Error::Unsupported(format!(

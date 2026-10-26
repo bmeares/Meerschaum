@@ -58,6 +58,8 @@ SCRIPT = textwrap.dedent(
     out['parameters'] = mrsm.Pipe('plugin:' + name, 'm', instance='sql:local').parameters
     out['sync'] = list(pipe.sync())
     out['rowcount'] = pipe.get_rowcount()
+    df = pipe.get_data()
+    out['data'] = df.to_dict(orient='records') if df is not None else None
     print('RESULT ' + json.dumps(out))
     """
 )
@@ -120,6 +122,8 @@ def test_register_single_file_native_plugin(tmp_path):
     assert result['parameters']['columns'] == {'id': 'id'}, result
     assert result['sync'][0] is True, result
     assert result['rowcount'] == 1, result
+    # Typed columns, as for a Python plugin's documents (not `'1'` / `'21.5'` from `TEXT`).
+    assert result['data'] == [{'id': 1, 'temperature': 21.5}], result
 
 
 @pytest.mark.skipif(not os.path.exists(CARGO), reason="single-file plugins need cargo")
@@ -225,7 +229,8 @@ def test_native_connector_type_from_python(tmp_path):
     assert result['parameters']['columns'] == {'id': 'id'}, result
     assert result['sync'][0] is True, result
     assert result['rowcount'] == 1, result
-    assert [row['source'] for row in result['data']] == ['office'], result
+    # The integer `id` is an integer column (not `TEXT`), as for a Python plugin's documents.
+    assert result['data'] == [{'id': 1, 'source': 'office'}], result
     assert result['fetch'] == [{'id': 1, 'source': 'office'}], result
     assert result['unknown'] is None, result
     assert "Cannot create Connector of type 'nosuchtype'." in output, output

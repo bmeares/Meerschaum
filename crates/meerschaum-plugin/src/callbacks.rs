@@ -17,6 +17,23 @@ pub enum Bound {
 /// Host implementation, bound to the request's Pipe. No Rust trait crosses the ABI.
 pub trait HostServices: Send + Sync {
     fn call(&self, request: &Request, method: &str, data: Option<Frame>) -> Result<Value>;
+
+    /// [`call`](Self::call) with the data as the plugin sent it: the documents of a rows-ABI
+    /// (single-file) plugin stay documents, so a host that syncs them can treat them like a
+    /// Python plugin's `pipe.sync(docs)`. The default builds the frame a Python plugin's
+    /// documents become (`pd.DataFrame(docs).convert_dtypes()`) and calls `call`.
+    fn call_input(
+        &self,
+        request: &Request,
+        method: &str,
+        data: Option<meerschaum_kernel::enforce::PipeInput>,
+    ) -> Result<Value> {
+        self.call(
+            request,
+            method,
+            data.map(crate::host::input_frame).transpose()?,
+        )
+    }
 }
 
 #[derive(Clone, Copy)]

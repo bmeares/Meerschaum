@@ -30,6 +30,41 @@ fn rows_handle_missing_cells_empty_data_and_errors() {
     );
 }
 
+/// JSON rows infer dtypes like a Python plugin's documents (`pd.DataFrame(docs)
+/// .convert_dtypes()`), not one `object` column each (which a SQL instance created as `TEXT`).
+#[test]
+fn rows_infer_python_document_dtypes() {
+    let frame = vec![
+        json!({"id": 1, "f": 1.5, "b": true, "s": "a", "dt": "2024-01-01 00:00:00", "n": null, "ni": null, "mix": 1, "obj": {"a": 1}}),
+        json!({"id": 2, "f": 2.5, "b": false, "s": "b", "dt": "2024-01-02 00:00:00", "n": 3, "ni": 1.5, "mix": 2.5, "obj": {"a": 2}}),
+    ]
+    .into_frame()
+    .unwrap()
+    .unwrap();
+    let dtypes: Vec<(String, String)> = frame
+        .columns()
+        .iter()
+        .map(|c| (c.name.clone(), c.data.dtype_str()))
+        .collect();
+    assert_eq!(
+        dtypes,
+        [
+            ("id", "int64"),
+            ("f", "float64"),
+            ("b", "bool"),
+            ("s", "string"),
+            // ISO strings stay strings here; a sync parses them with the pipe's dtypes.
+            ("dt", "string"),
+            ("n", "int64"),
+            ("ni", "float64"),
+            ("mix", "float64"),
+            ("obj", "object"),
+        ]
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+    );
+    assert_eq!(frame.row(0)[0], meerschaum_kernel::Value::Int(1));
+}
+
 #[test]
 fn single_file_is_discovered_compiled_loaded_and_invalidated() {
     let root = tempfile::tempdir().unwrap();
@@ -72,6 +107,22 @@ fn fetch(pipe: &Pipe) -> Vec<Value> {
     let frame = reply.data.unwrap();
     assert_eq!(frame.height(), 1);
     assert_eq!(frame.row(0)[0], meerschaum_kernel::Value::Int(1));
+    assert_eq!(frame.columns()[0].data.dtype_str(), "int64");
+    // A sync receives the rows as documents, as it does a Python plugin's `list[dict]`.
+    let (_, input) = connector
+        .call_input(
+            "fetch",
+            json!({"pipe": {"keys": {"connector_keys": "plugin:minimal", "metric_key": "readings"}}}),
+            None,
+        )
+        .unwrap();
+    match input {
+        Some(meerschaum_kernel::enforce::PipeInput::Docs(docs)) => {
+            assert_eq!(docs.len(), 1);
+            assert_eq!(docs[0]["id"], meerschaum_kernel::Value::Int(1));
+        }
+        _ => panic!("rows-ABI fetch data should be documents"),
+    }
     assert_eq!(
         frame.row(0)[1],
         meerschaum_kernel::Value::Str("readings".into())
