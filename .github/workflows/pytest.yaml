@@ -35,9 +35,11 @@ on:
 permissions:
   contents: read
 
-# A newer push supersedes a running push; a dispatch (the release gate) is never cancelled.
+# Pushes and pull requests of the same branch share a group: a newer one supersedes the running one
+# (a release push and its pull request are the same commit). A dispatch (the release gate) has its
+# own group and is never cancelled; the `tests` job is serialized per host (`mrsm-test-services`).
 concurrency:
-  group: pytest-${{ github.event_name }}-${{ github.ref }}
+  group: pytest-${{ (github.event_name == 'push' || github.event_name == 'pull_request') && 'auto' || github.event_name }}-${{ github.head_ref || github.ref_name }}
   cancel-in-progress: ${{ github.event_name == 'push' || github.event_name == 'pull_request' }}
 
 jobs:

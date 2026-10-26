@@ -395,8 +395,20 @@ def test_rust_jobs_follow_the_changes_job(rust):
 def test_a_dispatch_or_push_does_not_cancel_the_other(rust, pytest_workflow):
     for workflow in (rust, pytest_workflow):
         group = workflow['concurrency']['group']
-        assert 'github.event_name' in group and 'github.ref' in group
-    assert 'workflow_dispatch' not in rust['concurrency']['cancel-in-progress'], 'a dispatch is the release gate'
+        ### A push and a pull request of one branch share a group (the same commit runs once);
+        ### a dispatch keeps its own group, so it is never cancelled by either.
+        assert "&& 'auto' || github.event_name" in group, group
+        assert 'github.head_ref || github.ref_name' in group, group
+        assert 'workflow_dispatch' not in workflow['concurrency']['cancel-in-progress'], 'a dispatch is the release gate'
+
+
+def test_self_hosted_jobs_sharing_host_state_never_overlap(rust, pytest_workflow):
+    ### A dispatched release run waits for these instead of racing a push or pull request run.
+    for job, group in (('test', 'mrsm-rust-test'), ('parity', 'mrsm-rust-parity')):
+        assert rust['jobs'][job]['concurrency'] == {'group': group, 'cancel-in-progress': False}, job
+    assert pytest_workflow['jobs']['tests']['concurrency'] == {
+        'group': 'mrsm-test-services', 'cancel-in-progress': False,
+    }
 
 
 def test_rust_cache_is_pinned_by_commit_everywhere():

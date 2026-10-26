@@ -39,9 +39,12 @@ on:
 permissions:
   contents: read
 
-# A newer push supersedes a running push; a dispatch (the release gate) or a tag is never cancelled.
+# Branch pushes and pull requests of the same branch share a group: a newer one supersedes the
+# running one (a release push and its pull request are the same commit). A dispatch (the release
+# gate) or a tag has its own group and is never cancelled; the self-hosted jobs that share host
+# state (`test`, `parity`) are serialized per host below, so a dispatch waits for them instead of racing.
 concurrency:
-  group: rust-${{ github.event_name }}-${{ github.ref }}
+  group: rust-${{ (github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref_type == 'branch')) && 'auto' || github.event_name }}-${{ github.head_ref || github.ref_name }}
   cancel-in-progress: ${{ github.event_name == 'push' && github.ref_type == 'branch' || github.event_name == 'pull_request' }}
 
 env:
@@ -115,6 +118,9 @@ jobs:
     needs: [ changes, fmt ]
     if: ${{ !cancelled() && needs.changes.outputs.rust_test == 'true' && needs.fmt.result != 'failure' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
     runs-on: self-hosted
+    concurrency:
+      group: mrsm-rust-test
+      cancel-in-progress: false
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
@@ -216,6 +222,9 @@ jobs:
     needs: [ changes ]
     if: ${{ !cancelled() && needs.changes.outputs.parity == 'true' && vars.MRSM_SKIP_PARITY != 'true' && (github.event_name != 'workflow_dispatch' || inputs.parity) && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
     runs-on: self-hosted
+    concurrency:
+      group: mrsm-rust-parity
+      cancel-in-progress: false
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4

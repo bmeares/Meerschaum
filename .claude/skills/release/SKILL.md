@@ -122,8 +122,11 @@ Dispatch the workflows on the branch and wait for the commit's runs. `wheels.yam
 dispatch (`wheels.yaml` also on a `v5*` tag push), never on a push or pull request. `rust.yaml` and `pytest.yaml` also run on
 pushes to `v5`, but a push runs only the jobs its diff needs (`scripts/ci/changes.py`; pytest runs just the sqlite and timescaledb
 flavors); a **dispatch or a tag runs every job** (release-profile `build`, `parity`, `frontcrate`, `package`, the 4-OS DuckDB matrix;
-pytest: all flavors), so the dispatched runs below are the release gate and the push runs are not a substitute for them. Check
-`gh run list` before dispatching a duplicate:
+pytest: all flavors), so the dispatched runs below are the release gate and the push runs are not a substitute for them.
+The push run and the pull request run of `v5` share a concurrency group (the newer supersedes the older), and the
+self-hosted jobs that share host state (`rust` `test` and `parity`, `pytest` `tests`) are serialized per host, so a
+dispatch waits for them instead of racing them; do not cancel them by hand (a job killed mid-run can leave host state
+behind). Check `gh run list` before dispatching a duplicate:
 
 ```bash
 SHA=$(git rev-parse HEAD)
