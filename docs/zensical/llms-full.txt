@@ -7891,12 +7891,13 @@ Source: https://meerschaum.io/reference/actions/watch/
 
 # 📺 Watch and Shell Shortcuts
 
-`show` prints something once; `watch` keeps it on screen as it changes. Each `watch` subaction is a full-screen view (new in v5) that takes the whole terminal and gives it back as it was when you leave.
+`show` prints something once; `watch` keeps it on screen as it changes. `watch run` and `watch jobs` are full-screen views (new in v5) that take the whole terminal and give it back as it was when you leave; `watch logs` is another name for `show logs`.
 
 | Command | Shell key | What it shows |
 |---|---|---|
 | `watch run [RUN_ID]` | <kbd>F2</kbd> | An engine run: a live Gantt chart, its nodes and its events. |
 | `watch jobs [NAME ...]` | <kbd>F3</kbd> | Background jobs and the selected job's log, with keys to start, stop and pause them. |
+| `watch logs [NAME ...]` | | The logs of jobs as they are written, in the terminal's own scrollback: the same as `show logs`. |
 
 Every view shares these keys:
 
@@ -9827,6 +9828,10 @@ The label is `office` in this example. Use `connector.config()` to read its
 configuration. You can add `register` inside the module to supply Pipe settings.
 One file may contain several actions, connector modules, and helper functions.
 
+Python sees the same types: `mrsm.get_connector('readings:office')` returns a connector
+whose `fetch()`, `register()` and other module functions run in Rust, and
+`mrsm.Pipe('readings:office', 'readings', instance='sql:local')` syncs from it.
+
 ## Run code around syncs
 
 Mark functions with `#[pre_sync_hook]` or `#[post_sync_hook]` to run them before or
@@ -9948,6 +9953,8 @@ mod memory {
     }
 }
 ```
+
+From Python, pass `instance='memory:main'` to `mrsm.Pipe()` or `mrsm.get_pipes()`.
 
 Mark a function with `#[web_page]` to add a page to the web console
 (`pip install meerschaum[dash]`), as Python's `@web_page` does:
@@ -13571,7 +13578,7 @@ The notes below are written for someone upgrading from 4.1. Everything that beha
   `mrsm doctor` is a read-only health check that names the fix for every problem it finds (interpreter, stale packages, directories and free space, config, the instance, drivers, plugin venvs, failed jobs, the Docker stack). `mrsm install completions [bash|zsh|fish|powershell]` installs shell completions. `mrsm upgrade extensions`, `mrsm upgrade postgres`, `mrsm backup postgres` and `mrsm restore postgres` maintain the stack's database, and `mrsm stack up` refuses to start a PostgreSQL image of another major version on an existing volume. See [Upgrading the stack](/reference/stack-upgrades/).
 
 - **`watch`: full-screen monitors.**  
-  `show` prints once; the new `watch` action follows. `watch run [RUN_ID]` shows a live timeline, a node table (state, action, chunk progress, rows, rows/s, attempts, duration) and an event log for an engine run in any process or on any host. `watch jobs` lists jobs and follows the selected job's log, with confirmed start, stop and pause keys. In the shell, F2 opens `watch run` and F3 `watch jobs` without losing the line being typed; bind other keys under `shell:keybindings`. Off a terminal or with `--nopretty`, `watch run` prints the run's events line by line (JSON lines with `--nopretty`) and exits with the run's status. The views use ratatui, honor `NO_COLOR` and `formatting:unicode`, and restore the terminal on exit, panic and Ctrl-C.
+  `show` prints once; the new `watch` action follows. `watch run [RUN_ID]` shows a live timeline, a node table (state, action, chunk progress, rows, rows/s, attempts, duration) and an event log for an engine run in any process or on any host. `watch jobs` lists jobs and follows the selected job's log, with confirmed start, stop and pause keys. `watch logs` is another name for `show logs`. In the shell, F2 opens `watch run` and F3 `watch jobs` without losing the line being typed; bind other keys under `shell:keybindings`. Off a terminal or with `--nopretty`, `watch run` prints the run's events line by line (JSON lines with `--nopretty`) and exits with the run's status. The views use ratatui, honor `NO_COLOR` and `formatting:unicode`, and restore the terminal on exit, panic and Ctrl-C.
 
 - **`--debug` traces Rust and Python.**  
   `--debug` (and the shell's `debug on`) prints the Rust core's debug output in v4's `dprint` format: the resolved action and its arguments, connections opened, every SQL statement, sync stages with row counts and timings, engine plans and events, Python worker calls, and plugin discovery and loading. `--debug` reaches Python plugin code run by workers, so `debug=True` and `dprint()` work there too. From Python, a pipe or SQL connector method called with `debug=True` shows the Rust output for that call, and `meerschaum._core.debugging()` does so for any block. Passwords, tokens, API keys and URI passwords print as `***`.
@@ -13589,7 +13596,7 @@ The notes below are written for someone upgrading from 4.1. Everything that beha
   Bulk starts (`compose up`, `restart jobs`, a reboot bringing up systemd units) pass a per-root startup gate with random jitter, load and memory checks and a limited number of slots (`jobs.startup.*`), so workers no longer all start on top of each other. An explicit `start job` skips the jitter, and `--no-stagger` skips the gate. `-s` schedules accept a per-job `jitter`.
 
 - **Job executors and status in Rust.**  
-  The `api:<label>` and `systemd` executors, executor-aware compose and `mrsm api <label> <action>` run natively. Systemd units run the `mrsm` binary with `Environment=MRSM_PYTHON=<absolute path>`, and `systemctl --user stop` asks the job to stop once. Job listings and status read PID files instead of scanning the process table: an idle supervisor pass over 50 completed jobs dropped from 1773 ms to 5 ms of CPU (also in v4.1.5). A job found by name without its PID file matches only processes of its own root, so a v4 job of the same name under another `MRSM_ROOT_DIR` is never stopped by mistake (also in v4.1.6). Remote executor reads that fail now fail the action, so a failed `compose down` cannot silently leave jobs running.
+  The `api:<label>` and `systemd` executors, executor-aware compose and `mrsm api <label> <action>` run natively. Systemd units run the `mrsm` binary with `Environment=MRSM_PYTHON=<absolute path>`, and `systemctl --user stop` asks the job to stop once. Job listings and status read PID files instead of scanning the process table: an idle supervisor pass over 50 completed jobs dropped from 1773 ms to 5 ms of CPU (also in v4.1.5). A job found by name without its PID file matches only processes of its own root, so a v4 job of the same name under another `MRSM_ROOT_DIR` is never stopped by mistake (also in v4.1.6). The environment is read on Linux, macOS and FreeBSD; on other systems such a process matches only under the default root. Remote executor reads that fail now fail the action, so a failed `compose down` cannot silently leave jobs running.
 
 - **Compose: `include:` and `parent:`, and a side-effect-free `explain`.**  
   A root compose file can include other files, directories or globs, and every command spans the tree. `compose explain` creates, installs and fetches nothing, and lists every unresolved connector, plugin, `MRSM{}` symlink and `{{ Pipe() }}` reference; `up`, `run` and `sync pipes` name a missing connector instead of raising a `TypeError`. New flags: `--project`, `--standalone`, `--no-stagger`.
@@ -13623,7 +13630,7 @@ The notes below are written for someone upgrading from 4.1. Everything that beha
   A plugin can also be a native library (`plugin.toml` plus `lib<name>.so`) built with the `meerschaum-plugin` crate, or a Cargo crate Meerschaum builds into `MRSM_ROOT_DIR/cache/native_build/`, providing `fetch`, `sync`, actions, hooks, registration, a connector or instance, HTTP routes and console pages over Arrow record batches. A Rust plugin replaces a Python plugin of the same name entirely; the guide explains how to port gradually under a new name and compare the results.
 
 - **Rust plugins serve routes, MCP tools, executors and streams.**  
-  Rust plugins mirror `@api_plugin`: routes take any method, Starlette paths with converters and `{*rest}`, required scopes, and receive the full request (parameters, headers, body bytes, the caller's principal and scopes); a route that would shadow a core route is refused with the reason. They expose MCP tools, resources and prompts with the same scope and read-only filtering as built-in tools. They provide job executors (`-e <type>:<label>` for jobs, logs, compose and `mrsm.Job`) and streaming connectors pulled batch by batch by `--listen` and the engine, with acknowledgement after commit. Sync hooks receive Python's hook arguments, plugin flags are checked as argparse checks them, and the native plugin ABI (`mrsm_plugin_v1`) is unchanged.
+  Rust plugins mirror `@api_plugin`: routes take any method, Starlette paths with converters and `{*rest}`, required scopes, and receive the full request (parameters, headers, body bytes, the caller's principal and scopes); a route that would shadow a core route is refused with the reason. They expose MCP tools, resources and prompts with the same scope and read-only filtering as built-in tools. They provide job executors (`-e <type>:<label>` for jobs, logs, compose and `mrsm.Job`) and streaming connectors pulled batch by batch by `--listen` and the engine, with acknowledgement after commit. Their connector types work from Python too (`mrsm.get_connector('readings:office')`, `Pipe(..., instance='store:main')`). Sync hooks receive Python's hook arguments, plugin flags are checked as argparse checks them, and the native plugin ABI (`mrsm_plugin_v1`) is unchanged.
 
 - **Install Rust plugins like any other.**  
   `install plugins` accepts single `.rs` files and native plugin directories from repositories, validates the build and setup without a Python environment, and restores the previous version if anything fails. `bootstrap pipes` and registration call native registration hooks.
@@ -13685,7 +13692,7 @@ Read the [migration guide](/reference/migrating-to-v5/) for the details of each 
   A file such as `metrics.yaml` defaults to project `metrics`; `mrsm-compose.yaml` and `.yml` keep their directory's name. Set `project_name` explicitly to keep an older implicit identity.
 
 - **A pipe, username or plugin name can be registered only once.**  
-  `mrsm_pipes` gets a unique index on the pipe keys (`uq_mrsm_pipes_keys`), `mrsm_users` one on the username (`uq_mrsm_users_username`) and `mrsm_plugins` one on the plugin name (`uq_mrsm_plugins_plugin_name`; on Oracle the last two are unique constraints) the first time 5.0 registers, syncs, edits or looks up a pipe or user on an instance, so two processes registering the same pipe, user or plugin at once can no longer insert two rows; the second gets "is already registered." or "already exists.", and a plugin registered twice at once is updated (with its version check) instead. A missing location key counts as one location (on MySQL 5.7 and MariaDB, which cannot index an expression, only pipes with a location key are covered). An instance where a pipe, username or plugin is already registered twice is left as it is: no row is deleted and that index is not added until the extra rows are gone, and `mrsm doctor` lists them with the statement that removes them. v4.1 keeps working against an instance with the indexes. Valkey instances register pipes and users atomically as well; registering an existing username there no longer overwrites that user's password.
+  `mrsm_pipes` gets a unique index on the pipe keys (`uq_mrsm_pipes_keys`), `mrsm_users` one on the username (`uq_mrsm_users_username`) and `mrsm_plugins` one on the plugin name (`uq_mrsm_plugins_plugin_name`; on Oracle the last two are unique constraints) the first time 5.0 registers, syncs, edits or looks up a pipe or user on an instance, so two processes registering the same pipe, user or plugin at once can no longer insert two rows; the second gets "is already registered." or "already exists.", and a plugin registered twice at once is updated (with its version check) instead, or refused with "was registered by another user." when another user registered it first. A missing location key counts as one location (on MySQL 5.7 and MariaDB, which cannot index an expression, only pipes with a location key are covered). An instance where a pipe, username or plugin is already registered twice (compared as the database compares them: `Alice` and `alice` are one username under a case-insensitive collation, as on MySQL, MariaDB and MSSQL by default) is left as it is: no row is deleted and that index is not added until the extra rows are gone, and `mrsm doctor` lists them with the statement that removes them. v4.1 keeps working against an instance with the indexes. Valkey instances register pipes and users atomically as well (a registration that fails or is interrupted leaves no name claimed without its row); registering an existing username there no longer overwrites that user's password.
 
 - **Smaller behavior changes.**  
   Edit actions open `$VISUAL`, else `$EDITOR`, else `vi` (nothing is installed). `MRSM_<TYPE>_<LABEL>` variables of unknown connector types are ignored. Job names must be one path component, and a job created over the API takes the server's environment. A changed `datetime`, `id` or `primary` column marks a pipe for rebuild in engine runs. Time zones read back as `datetime.timezone.utc`. Debug output, Python's `dprint()` included, goes to stderr (v4 printed to stdout), so redirected output stays clean; job logs still include it. `upgrade meerschaum` upgrades the installation `mrsm` belongs to, never a guessed `python3`.
