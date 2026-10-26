@@ -22,8 +22,6 @@
 //! - The check is one catalog read per key, connector and process; an index is built only when
 //!   it is missing (no lock is taken on an instance that already has it).
 
-use std::collections::HashMap;
-
 use meerschaum_connector::ConnectorResult;
 
 use crate::driver::SqlParam;
@@ -228,25 +226,114 @@ impl UniqueKey {
     }
 }
 
-/// Group `(id, key values)` rows (ordered by id) into the key values held by more than one row,
-/// in the order of their first row. `NULL`s compare equal.
-pub fn find_duplicates(rows: &[(i64, Vec<Option<String>>)]) -> Vec<Duplicate> {
-    let mut order: Vec<Vec<Option<String>>> = Vec::new();
-    let mut ids: HashMap<Vec<Option<String>>, Vec<i64>> = HashMap::new();
-    for (id, values) in rows {
-        let entry = ids.entry(values.clone()).or_default();
-        if entry.is_empty() {
-            order.push(values.clone());
+impl UniqueKey {
+    /// The query listing the rows whose key value is held by more than one row, compared by the
+    /// database (its collation decides, as it does for the index): `dup_first` (the lowest id of
+    /// the group), `dup_id` (the row) and the key columns (the group's values; a missing value
+    /// of the nullable column reads as `'[None]'`), ordered by group and id. `table` is the
+    /// quoted table name.
+    pub fn duplicates_query(&self, table: &str) -> String {
+        let id = self.id_column;
+        let null_key = |col: &str, alias: &str| format!("COALESCE({alias}{col}, '{NULL_VALUE}')");
+        let mut group_by: Vec<String> = self.columns.iter().map(|c| c.to_string()).collect();
+        let mut select: Vec<String> = group_by.clone();
+        let mut join: Vec<String> = self
+            .columns
+            .iter()
+            .map(|c| format!("t.{c} = g.{c}"))
+            .collect();
+        if let Some(n) = self.nullable {
+            group_by.push(null_key(n, ""));
+            select.push(format!("{} AS {n}", null_key(n, "")));
+            join.push(format!("{} = g.{n}", null_key(n, "t.")));
         }
-        entry.push(*id);
+        let values: Vec<String> = self
+            .key_columns()
+            .iter()
+            .map(|c| format!("g.{c}"))
+            .collect();
+        format!(
+            "SELECT g.dup_first, t.{id} AS dup_id, {values} FROM {table} t INNER JOIN (SELECT {select}, MIN({id}) AS dup_first FROM {table} GROUP BY {group_by} HAVING COUNT(*) > 1) g ON {join} ORDER BY g.dup_first, t.{id}",
+            values = values.join(", "),
+            select = select.join(", "),
+            group_by = group_by.join(", "),
+            join = join.join(" AND "),
+        )
     }
-    order
-        .into_iter()
-        .filter_map(|values| {
-            let ids = ids.remove(&values)?;
-            (ids.len() > 1).then_some(Duplicate { values, ids })
-        })
+}
+
+/// Group the rows of [`UniqueKey::duplicates_query`] (`(group, id, values)`, ordered by group
+/// and id) into duplicates. The nullable column's [`NULL_VALUE`] reads as `None`.
+fn group_duplicates(key: &UniqueKey, rows: Vec<(i64, i64, Vec<Option<String>>)>) -> Vec<Duplicate> {
+    let nullable_at = key.nullable.map(|_| key.columns.len());
+    let mut out: Vec<(i64, Duplicate)> = Vec::new();
+    for (group, id, mut values) in rows {
+        match out.last_mut() {
+            Some((g, dup)) if *g == group => dup.ids.push(id),
+            _ => {
+                if let Some(i) = nullable_at
+                    && values.get(i).and_then(|v| v.as_deref()) == Some(NULL_VALUE)
+                {
+                    values[i] = None;
+                }
+                out.push((
+                    group,
+                    Duplicate {
+                        values,
+                        ids: vec![id],
+                    },
+                ));
+            }
+        }
+    }
+    out.into_iter()
+        .map(|(_, dup)| dup)
+        .filter(|dup| dup.ids.len() > 1)
         .collect()
+}
+
+/// Whether a failed `CREATE UNIQUE INDEX` from [`UniqueKey::ddl`] may fall back to the next
+/// statement: only when the database cannot build that form of the key, never because of the
+/// table's rows (a duplicate entry), a lock or a lost connection. `number` is the MySQL error
+/// number when the driver reports one; `message` the error text.
+///
+/// - MySQL before 8.0.13 (and a MariaDB server behind the `mysql` flavor) refuses the functional
+///   key part as a syntax error (1064, `ER_PARSE_ERROR`); MySQL 8 refuses some expressions with
+///   a functional index error (3753 to 3762, `ER_FUNCTIONAL_INDEX_*`).
+/// - Oracle refuses a second index on the columns of v4's index (ORA-01408).
+pub fn ddl_fallback_allowed(flavor: Flavor, number: Option<u16>, message: &str) -> bool {
+    match flavor.driver_family() {
+        DriverFamily::Mysql => {
+            let number = number.or_else(|| {
+                // "1064 (42000): You have an error ..." when only the text is left.
+                let digits: String = message
+                    .trim_start()
+                    .chars()
+                    .take_while(char::is_ascii_digit)
+                    .collect();
+                digits.parse().ok()
+            });
+            match number {
+                Some(n) => n == 1064 || (3753..=3762).contains(&n),
+                None => {
+                    let lower = message.to_lowercase();
+                    lower.contains("error in your sql syntax") || lower.contains("functional index")
+                }
+            }
+        }
+        _ if flavor == Flavor::Oracle => message.contains("ORA-01408"),
+        _ => false,
+    }
+}
+
+/// The MySQL error number of a driver error, if it is one.
+fn mysql_error_number(error: &crate::error::SqlError) -> Option<u16> {
+    match error {
+        crate::error::SqlError::Driver(sqlx::Error::Database(db)) => db
+            .try_downcast_ref::<sqlx::mysql::MySqlDatabaseError>()
+            .map(|e| e.number()),
+        _ => None,
+    }
 }
 
 impl SqlConnector {
@@ -266,26 +353,23 @@ impl SqlConnector {
         Ok(count.and_then(|v| v.as_i64()).unwrap_or(0) > 0)
     }
 
-    /// The values of `key` held by more than one row of its table.
+    /// The values of `key` held by more than one row of its table, as the database compares
+    /// them (a case-insensitive collation makes `Alice` and `alice` one value, as it does for the
+    /// index).
     pub async fn unique_key_duplicates(&self, key: &UniqueKey) -> ConnectorResult<Vec<Duplicate>> {
         let table = self.instance_table_name(key.table);
         let columns = key.key_columns();
-        let sql = format!(
-            "SELECT {}, {} FROM {table} ORDER BY {}",
-            key.id_column,
-            columns.join(", "),
-            key.id_column
-        );
-        let df = self.read(&sql).await.map_err(be)?;
-        let rows: Vec<(i64, Vec<Option<String>>)> = frame_docs(&df)
+        let df = self.read(&key.duplicates_query(&table)).await.map_err(be)?;
+        let rows = frame_docs(&df)
             .iter()
             .filter_map(|doc| {
-                let id = kv_int(doc.get(key.id_column))?;
+                let group = kv_int(doc.get("dup_first"))?;
+                let id = kv_int(doc.get("dup_id"))?;
                 let values = columns.iter().map(|c| kv_str(doc.get(*c))).collect();
-                Some((id, values))
+                Some((group, id, values))
             })
             .collect();
-        Ok(find_duplicates(&rows))
+        Ok(group_duplicates(key, rows))
     }
 
     /// Whether the table of `key` has its unique index (read-only; `mrsm doctor`).
@@ -333,7 +417,14 @@ impl SqlConnector {
             self.log(&ddl);
             match self.driver.exec(&ddl).await {
                 Ok(_) => return,
-                Err(e) => last_error = e.to_string(),
+                Err(e) => {
+                    last_error = e.to_string();
+                    // A weaker form of the key must not stand in for one refused over the rows
+                    // (e.g. a duplicate inserted after the check above).
+                    if !ddl_fallback_allowed(self.flavor, mysql_error_number(&e), &last_error) {
+                        break;
+                    }
+                }
             }
         }
         // Another process may have added it first.
@@ -354,27 +445,98 @@ impl SqlConnector {
 mod tests {
     use super::*;
 
-    fn row(id: i64, values: &[Option<&str>]) -> (i64, Vec<Option<String>>) {
-        (id, values.iter().map(|v| v.map(str::to_string)).collect())
+    fn row(group: i64, id: i64, values: &[Option<&str>]) -> (i64, i64, Vec<Option<String>>) {
+        (
+            group,
+            id,
+            values.iter().map(|v| v.map(str::to_string)).collect(),
+        )
     }
 
     #[test]
-    fn duplicates_group_a_null_as_one_value() {
-        let rows = [
-            row(1, &[Some("sql:a"), Some("m"), None]),
-            row(2, &[Some("sql:a"), Some("m"), Some("x")]),
-            row(3, &[Some("sql:b"), Some("m"), None]),
-            row(4, &[Some("sql:a"), Some("m"), None]),
-            row(5, &[Some("sql:a"), Some("m"), Some("x")]),
-            row(6, &[Some("sql:a"), Some("m"), None]),
+    fn duplicates_group_by_the_lowest_id_and_read_a_missing_location_as_null() {
+        let rows = vec![
+            row(1, 1, &[Some("sql:a"), Some("m"), Some("[None]")]),
+            row(1, 4, &[Some("sql:a"), Some("m"), Some("[None]")]),
+            row(1, 6, &[Some("sql:a"), Some("m"), Some("[None]")]),
+            row(2, 2, &[Some("sql:A"), Some("m"), Some("x")]),
+            row(2, 5, &[Some("sql:A"), Some("m"), Some("x")]),
+            row(3, 3, &[Some("sql:b"), Some("m"), Some("y")]),
         ];
-        let dups = find_duplicates(&rows);
+        let dups = group_duplicates(&PIPES_KEY, rows);
         assert_eq!(dups.len(), 2);
-        assert_eq!(dups[0].values[2], None);
+        assert_eq!(
+            dups[0].values,
+            vec![Some("sql:a".into()), Some("m".into()), None]
+        );
         assert_eq!(dups[0].ids, vec![1, 4, 6]);
         assert_eq!(dups[1].values[2].as_deref(), Some("x"));
         assert_eq!(dups[1].ids, vec![2, 5]);
-        assert!(find_duplicates(&rows[..3]).is_empty());
+        // Only the nullable column's spelling of a missing value reads as `None`.
+        let users = group_duplicates(
+            &USERS_KEY,
+            vec![row(7, 7, &[Some("[None]")]), row(7, 9, &[Some("[None]")])],
+        );
+        assert_eq!(users[0].values, vec![Some("[None]".into())]);
+    }
+
+    #[test]
+    fn duplicates_are_compared_by_the_database() {
+        assert_eq!(
+            PIPES_KEY.duplicates_query("mrsm_pipes"),
+            "SELECT g.dup_first, t.pipe_id AS dup_id, g.connector_keys, g.metric_key, g.location_key FROM mrsm_pipes t INNER JOIN (SELECT connector_keys, metric_key, COALESCE(location_key, '[None]') AS location_key, MIN(pipe_id) AS dup_first FROM mrsm_pipes GROUP BY connector_keys, metric_key, COALESCE(location_key, '[None]') HAVING COUNT(*) > 1) g ON t.connector_keys = g.connector_keys AND t.metric_key = g.metric_key AND COALESCE(t.location_key, '[None]') = g.location_key ORDER BY g.dup_first, t.pipe_id"
+        );
+    }
+
+    #[test]
+    fn only_an_unsupported_key_form_falls_back() {
+        let mysql = |n, m| ddl_fallback_allowed(Flavor::Mysql, n, m);
+        // MySQL 5.7 / MariaDB: no functional key parts.
+        assert!(mysql(Some(1064), "You have an error in your SQL syntax"));
+        assert!(mysql(
+            None,
+            "1064 (42000): You have an error in your SQL syntax; check the manual"
+        ));
+        assert!(mysql(None, "You have an error in your SQL syntax"));
+        assert!(mysql(
+            Some(3757),
+            "Cannot create a functional index on an expression"
+        ));
+        // A duplicate inserted after the check, a lock wait, a lost connection: stop.
+        assert!(!mysql(
+            Some(1062),
+            "Duplicate entry 'sql:a-m-[None]' for key 'uq_mrsm_pipes_keys'"
+        ));
+        assert!(!mysql(
+            None,
+            "1062 (23000): Duplicate entry 'sql:a-m-[None]' for key"
+        ));
+        assert!(!mysql(Some(1205), "Lock wait timeout exceeded"));
+        assert!(!mysql(
+            None,
+            "error communicating with database: Connection reset by peer"
+        ));
+        assert!(!ddl_fallback_allowed(
+            Flavor::Mariadb,
+            Some(1062),
+            "Duplicate entry"
+        ));
+        // Oracle: v4's index already covers the column.
+        assert!(ddl_fallback_allowed(
+            Flavor::Oracle,
+            None,
+            "ORA-01408: such column list already indexed"
+        ));
+        assert!(!ddl_fallback_allowed(
+            Flavor::Oracle,
+            None,
+            "ORA-01452: cannot CREATE UNIQUE INDEX; duplicate keys found"
+        ));
+        assert!(!ddl_fallback_allowed(
+            Flavor::Postgresql,
+            None,
+            "syntax error"
+        ));
     }
 
     #[test]

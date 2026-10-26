@@ -15,32 +15,21 @@ pub fn version_ge(a: &str, b: &str) -> bool {
     meerschaum_core::version::version_ge(a, b)
 }
 
+/// How many times [`SqlConnector::register_plugin`] reads and writes the plugin's row before it
+/// gives up because another process keeps changing it.
+const REGISTER_ATTEMPTS: usize = 3;
+
 impl SqlConnector {
     /// `register_plugin(plugin, force)`: insert or update the plugin's row. Without `force`,
     /// the new version must be greater than the registered one.
+    ///
+    /// New in 5.0 (the unique key on `plugin_name`, `unique_keys.rs`): when another process
+    /// registers the plugin between the existence check and the insert, the registration
+    /// becomes an update of that row (with its version check), refused when the row belongs to
+    /// another user than `plugin.user_id`. An update only applies to the row as it was read
+    /// (same id and owner), and a row which keeps changing fails the call after a few attempts.
     pub async fn register_plugin(&self, plugin: &PluginRecord, force: bool) -> SuccessTuple {
         let _ = self.ensure_instance_tables(true).await;
-        let old_id = match self.get_plugin_id(plugin).await {
-            Ok(id) => id,
-            Err(e) => return SuccessTuple::fail(e.to_string()),
-        };
-        if old_id.is_some() && !force {
-            let old_version = self
-                .get_plugin_version(plugin)
-                .await
-                .ok()
-                .flatten()
-                .unwrap_or_default();
-            let new_version = plugin.version.clone().unwrap_or_default();
-            if !old_version.is_empty()
-                && !new_version.is_empty()
-                && version_ge(&old_version, &new_version)
-            {
-                return SuccessTuple::fail(format!(
-                    "Version '{new_version}' of plugin '{plugin}' must be greater than existing version '{old_version}'."
-                ));
-            }
-        }
         let table = self.instance_table_name("mrsm_plugins");
         let f = self.flavor;
         let user_id = match &plugin.user_id {
@@ -52,39 +41,107 @@ impl SqlConnector {
                 .map(SqlParam::Int)
                 .unwrap_or_else(|_| SqlParam::Text(other.py_str())),
         };
-        let mut params = vec![
-            SqlParam::Text(plugin.name.clone()),
-            SqlParam::opt_text(plugin.version.as_deref()),
-            self.json_param(&plugin.attributes),
-            user_id,
-        ];
-        let query = match old_id {
-            None => format!(
-                "INSERT INTO {table} (plugin_name, version, attributes, user_id) VALUES ({})",
-                placeholders(f, 1, 4)
-            ),
-            Some(id) => {
-                params.push(SqlParam::Int(id));
-                format!(
-                    "UPDATE {table} SET plugin_name={}, version={}, attributes={}, user_id={} WHERE {table}.plugin_id = {}",
-                    placeholder(f, 1),
-                    placeholder(f, 2),
-                    placeholder(f, 3),
-                    placeholder(f, 4),
-                    placeholder(f, 5)
-                )
-            }
+        let requested_owner = match &user_id {
+            SqlParam::Int(i) => Some(*i),
+            _ => None,
         };
-        match self.exec_params(&query, &params).await {
-            Some(_) => SuccessTuple::ok(format!("Successfully registered plugin '{plugin}'.")),
-            // Another process registered the plugin after the check above (the unique key
-            // refused the second row; `unique_keys.rs`): register again, as an update with its
-            // version check. That call finds the row, so it never comes back here.
-            None if old_id.is_none() && matches!(self.get_plugin_id(plugin).await, Ok(Some(_))) => {
-                Box::pin(self.register_plugin(plugin, force)).await
+        let another_user =
+            || SuccessTuple::fail(format!("Plugin '{plugin}' was registered by another user."));
+        // The owner of the row when this call first saw it.
+        let mut seen_owner: Option<Option<i64>> = None;
+        // Whether this call's insert lost to another process's.
+        let mut lost_insert = false;
+        for _ in 0..REGISTER_ATTEMPTS {
+            let old_id = match self.get_plugin_id(plugin).await {
+                Ok(id) => id,
+                Err(e) => return SuccessTuple::fail(e.to_string()),
+            };
+            let mut owner = None;
+            if old_id.is_some() {
+                owner = self.get_plugin_user_id(plugin).await.ok().flatten();
+                match seen_owner {
+                    // Registered by another process after this call found no row: it may only
+                    // update a row of its own user.
+                    None if lost_insert
+                        && requested_owner.is_some()
+                        && owner != requested_owner =>
+                    {
+                        return another_user();
+                    }
+                    None => seen_owner = Some(owner),
+                    Some(seen) if seen != owner => return another_user(),
+                    Some(_) => {}
+                }
+                if !force {
+                    let old_version = self
+                        .get_plugin_version(plugin)
+                        .await
+                        .ok()
+                        .flatten()
+                        .unwrap_or_default();
+                    let new_version = plugin.version.clone().unwrap_or_default();
+                    if !old_version.is_empty()
+                        && !new_version.is_empty()
+                        && version_ge(&old_version, &new_version)
+                    {
+                        return SuccessTuple::fail(format!(
+                            "Version '{new_version}' of plugin '{plugin}' must be greater than existing version '{old_version}'."
+                        ));
+                    }
+                }
             }
-            None => SuccessTuple::fail(format!("Failed to register plugin '{plugin}'.")),
+            let mut params = vec![
+                SqlParam::Text(plugin.name.clone()),
+                SqlParam::opt_text(plugin.version.as_deref()),
+                self.json_param(&plugin.attributes),
+                user_id.clone(),
+            ];
+            let query = match old_id {
+                None => format!(
+                    "INSERT INTO {table} (plugin_name, version, attributes, user_id) VALUES ({})",
+                    placeholders(f, 1, 4)
+                ),
+                Some(id) => {
+                    params.push(SqlParam::Int(id));
+                    // Only the row as it was read: not one whose owner changed since.
+                    let owner_clause = match owner {
+                        Some(owner) => {
+                            params.push(SqlParam::Int(owner));
+                            format!(" AND {table}.user_id = {}", placeholder(f, 6))
+                        }
+                        None => String::new(),
+                    };
+                    format!(
+                        "UPDATE {table} SET plugin_name={}, version={}, attributes={}, user_id={} WHERE {table}.plugin_id = {}{owner_clause}",
+                        placeholder(f, 1),
+                        placeholder(f, 2),
+                        placeholder(f, 3),
+                        placeholder(f, 4),
+                        placeholder(f, 5)
+                    )
+                }
+            };
+            match self.exec_params(&query, &params).await {
+                Some(n) if old_id.is_none() || n > 0 => {
+                    return SuccessTuple::ok(format!("Successfully registered plugin '{plugin}'."));
+                }
+                // The row was deleted or changed owner after it was read: read it again.
+                Some(_) => {}
+                // Another process registered the plugin after the check above (the unique key
+                // refused the second row): read its row and update it.
+                None if old_id.is_none()
+                    && matches!(self.get_plugin_id(plugin).await, Ok(Some(_))) =>
+                {
+                    lost_insert = true;
+                }
+                None => {
+                    return SuccessTuple::fail(format!("Failed to register plugin '{plugin}'."));
+                }
+            }
         }
+        SuccessTuple::fail(format!(
+            "Failed to register plugin '{plugin}': its registration kept changing during {REGISTER_ATTEMPTS} attempts."
+        ))
     }
 
     async fn plugin_value(

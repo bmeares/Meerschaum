@@ -261,3 +261,165 @@ flavor_tests!(
         }
     }
 );
+
+/// Whether the flavor's default collation compares `Alice` and `alice` as equal.
+fn case_insensitive(flavor: &str) -> bool {
+    matches!(flavor, "mysql" | "mariadb" | "mssql")
+}
+
+flavor_tests!(
+    duplicates_are_found_as_the_database_compares_them,
+    |c: Ctx| async move {
+        // A table of the test's own with a key like the pipes' (one plain, one nullable column).
+        let name: &'static str = Box::leak(format!("{}_uk", c.prefix).into_boxed_str());
+        let key = UniqueKey {
+            table: name,
+            index: Box::leak(format!("uq_{name}").into_boxed_str()),
+            id_column: "row_id",
+            columns: &["name"],
+            nullable: Some("loc"),
+        };
+        let table = c.conn.instance_table_name(name);
+        let vc = if c.flavor == "oracle" {
+            "VARCHAR2(256)"
+        } else {
+            "VARCHAR(256)"
+        };
+        let create = format!(
+            "CREATE TABLE {table} (row_id INTEGER NOT NULL PRIMARY KEY, name {vc} NOT NULL, loc {vc} NULL)"
+        );
+        assert!(c.conn.exec(&create).await.is_some(), "{create}");
+        let rows = [
+            (1, "Alice", None),
+            (2, "alice", None),
+            (3, "Bob", Some("here")),
+            (4, "BOB", Some("HERE")),
+            (5, "Carol", None),
+            (6, "Alice", None),
+        ];
+        for (id, n, loc) in rows {
+            let loc = loc.map_or("NULL".to_string(), |l| format!("'{l}'"));
+            let insert =
+                format!("INSERT INTO {table} (row_id, name, loc) VALUES ({id}, '{n}', {loc})");
+            assert!(c.conn.exec(&insert).await.is_some(), "{insert}");
+        }
+        let outcome = std::panic::AssertUnwindSafe(async {
+            let dups = c.conn.unique_key_duplicates(&key).await.unwrap();
+            let ids: Vec<Vec<i64>> = dups.iter().map(|d| d.ids.clone()).collect();
+            if case_insensitive(c.flavor) {
+                assert_eq!(
+                    ids,
+                    vec![vec![1, 2, 6], vec![3, 4]],
+                    "{}: {dups:?}",
+                    c.flavor
+                );
+            } else {
+                assert_eq!(ids, vec![vec![1, 6]], "{}: {dups:?}", c.flavor);
+            }
+            assert_eq!(dups[0].values[1], None, "{}", c.flavor);
+            assert_eq!(
+                dups[0].values[0]
+                    .as_deref()
+                    .map(str::to_lowercase)
+                    .as_deref(),
+                Some("alice")
+            );
+            // Over duplicates, the key is not added, whatever form it would take.
+            c.conn.ensure_unique_key(&key).await;
+            assert!(
+                !c.conn.unique_key_exists(&key).await.unwrap(),
+                "{}",
+                c.flavor
+            );
+        });
+        let outcome = futures_util::FutureExt::catch_unwind(outcome).await;
+        let _ = c.conn.exec(&format!("DROP TABLE {table}")).await;
+        if let Err(panic) = outcome {
+            std::panic::resume_unwind(panic);
+        }
+    }
+);
+
+flavor_tests!(
+    a_plugin_registered_by_another_user_first_stays_theirs,
+    |c: Ctx| async move {
+        // An uncommitted row holds the plugin name: the registration below finds no row, and its
+        // insert waits for the transaction and then loses to it. (SQLite, DuckDB and GeoPackage
+        // have no row locks, and MSSQL's read waits for the row: the race cannot be staged.)
+        if !matches!(
+            c.flavor,
+            "postgresql" | "timescaledb" | "postgis" | "mysql" | "mariadb" | "oracle"
+        ) {
+            return;
+        }
+        let mut users = Vec::new();
+        for who in ["first", "second"] {
+            let mut user = User::new(&format!("{}_{who}", c.prefix), Some("test1234"));
+            let res = c.conn.register_user(&mut user).await;
+            assert!(res.success, "{}", res.message);
+            let id = c.conn.get_user_id(&user).await.unwrap().unwrap();
+            users.push((user, id.as_i64().unwrap()));
+        }
+        let (first, second) = (users[0].1, users[1].1);
+        let name = format!("{}_plugin", c.prefix);
+        let record = |user_id: i64, version: &str| PluginRecord {
+            name: name.clone(),
+            version: Some(version.into()),
+            user_id: Some(user_id.into()),
+            attributes: Default::default(),
+        };
+        let table = c.conn.instance_table_name("mrsm_plugins");
+
+        let mut tx = c.conn.driver().begin().await.unwrap();
+        tx.exec(&format!(
+            "INSERT INTO {table} (plugin_name, version, user_id) VALUES ('{name}', '1.0.0', {first})"
+        ))
+        .await
+        .unwrap();
+        let racing = record(second, "2.0.0");
+        let (res, committed) = tokio::join!(c.conn.register_plugin(&racing, false), async {
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            tx.commit().await
+        });
+        committed.unwrap();
+        assert!(!res.success, "{}", c.flavor);
+        assert_eq!(
+            res.message,
+            format!("Plugin '{name}' was registered by another user."),
+            "{}",
+            c.flavor
+        );
+        assert_eq!(
+            c.conn.get_plugin_user_id(&record(first, "")).await.unwrap(),
+            Some(first),
+            "{}",
+            c.flavor
+        );
+        assert_eq!(
+            c.conn
+                .get_plugin_version(&record(first, ""))
+                .await
+                .unwrap()
+                .as_deref(),
+            Some("1.0.0")
+        );
+
+        // The owner's own registrations keep the version check.
+        let res = c.conn.register_plugin(&record(first, "1.0.0"), false).await;
+        assert!(
+            res.message
+                .contains("must be greater than existing version"),
+            "{}",
+            res.message
+        );
+        let res = c.conn.register_plugin(&record(first, "1.1.0"), false).await;
+        assert!(res.success, "{}", res.message);
+
+        let res = c.conn.delete_plugin(&record(first, "")).await;
+        assert!(res.success, "{}", res.message);
+        for (user, _) in &users {
+            let res = c.conn.delete_user(user).await;
+            assert!(res.success, "{}", res.message);
+        }
+    }
+);
