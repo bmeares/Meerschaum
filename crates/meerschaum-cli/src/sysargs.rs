@@ -173,6 +173,9 @@ pub fn parse_dict_to_sysargs(args: &ArgsMap) -> Result<Vec<String>, PyException>
     if let Some(PyValue::List(action)) = args.get("action") {
         sysargs.extend(action.iter().map(PyValue::py_str));
     }
+    // v5-only flags (`--parents`, `--resume`, ...) come from the same spec `parse_arguments`
+    // reads; they go before any `-A` / `--` sub-arguments, which end engine parsing.
+    sysargs.extend(crate::parse::engine_options_to_sysargs(args));
     let allow_none = ["location_keys", "begin", "end", "executor_keys"];
 
     for spec in ARGUMENTS {
@@ -258,5 +261,67 @@ mod tests {
             split_pipeline_sysargs(&v(&["a", ":", "b", ":", "-d"])),
             (v(&["a", "b"]), v(&["-d"]))
         );
+    }
+
+    /// Every v5-only option survives `parse_arguments` -> `parse_dict_to_sysargs` ->
+    /// `parse_arguments` (the shell's round trip), in each value shape it accepts.
+    #[test]
+    fn engine_options_round_trip() {
+        use crate::parse::{ENGINE_OPTIONS, parse_arguments};
+        let ctx = crate::types::DateContext::system();
+        let cases: &[(&str, &[&str])] = &[
+            ("parents", &["sync", "pipes", "-m", "x", "--parents"]),
+            ("parents", &["sync", "pipes", "-m", "x", "--parents", "2"]),
+            ("children", &["sync", "pipes", "--children", "-m", "x"]),
+            ("children", &["sync", "pipes", "--children=0", "-m", "x"]),
+            ("chunk_pipelining", &["sync", "pipes", "--chunk-pipelining"]),
+            ("no_stagger", &["start", "jobs", "a", "--no-stagger"]),
+            (
+                "startup_jitter",
+                &["start", "jobs", "a", "--startup-jitter", "5s"],
+            ),
+            (
+                "jitter",
+                &["sync", "pipes", "-s", "daily", "--jitter", "30s"],
+            ),
+            ("all", &["show", "data", "-m", "x", "--all"]),
+            ("last", &["show", "runs", "--last", "3"]),
+            ("resume", &["sync", "pipes", "--resume", "run-1"]),
+            ("run_id", &["sync", "pipes", "--run-id", "abc:1.2_3"]),
+        ];
+        for opt in ENGINE_OPTIONS {
+            assert!(
+                cases.iter().any(|(dest, _)| *dest == opt.dest),
+                "no round-trip case for {}",
+                opt.flag
+            );
+        }
+        for (dest, words) in cases {
+            let first = parse_arguments(&v(words), &ctx).unwrap();
+            assert!(first.contains_key(*dest), "{words:?} did not parse {dest}");
+            let mut kwargs = first.clone();
+            // The shell rebuilds the line from the dictionary alone.
+            kwargs.shift_remove("sysargs");
+            kwargs.shift_remove("filtered_sysargs");
+            let rebuilt = parse_dict_to_sysargs(&kwargs).unwrap();
+            let second = parse_arguments(&rebuilt, &ctx).unwrap();
+            for opt in ENGINE_OPTIONS {
+                assert_eq!(
+                    first.get(opt.dest),
+                    second.get(opt.dest),
+                    "{} lost in {words:?} -> {rebuilt:?}",
+                    opt.dest
+                );
+            }
+            assert_eq!(first.get("action"), second.get("action"), "{rebuilt:?}");
+            assert_eq!(first.get("metric_keys"), second.get("metric_keys"));
+        }
+
+        // Sub-arguments after `-A` stay after the engine flags.
+        let first = parse_arguments(&v(&["sync", "pipes", "--parents", "-A", "x"]), &ctx).unwrap();
+        let rebuilt = parse_dict_to_sysargs(&first).unwrap();
+        let second = parse_arguments(&rebuilt, &ctx).unwrap();
+        assert_eq!(second.get("parents"), Some(&PyValue::Bool(true)));
+        assert_eq!(first.get("sub_args"), second.get("sub_args"));
     }
 }

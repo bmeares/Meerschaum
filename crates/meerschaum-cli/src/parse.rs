@@ -293,6 +293,76 @@ pub fn parse_line(line: &str, ctx: &DateContext) -> ArgsMap {
     }
 }
 
+/// One v5-only option parsed by `engine_arguments` (outside the frozen v4 [`ARGUMENTS`]).
+#[derive(Debug, Clone, Copy)]
+pub struct EngineOption {
+    /// The key in the arguments dictionary.
+    pub dest: &'static str,
+    /// The long flag, e.g. `--parents`.
+    pub flag: &'static str,
+}
+
+/// Every v5-only option `engine_arguments` accepts. It is the single list both directions read:
+/// `engine_arguments` stores a flag only under its `dest` here, and
+/// [`engine_options_to_sysargs`] (used by `parse_dict_to_sysargs`) writes each `dest` back, so a new
+/// flag cannot be dropped when the shell rebuilds a command line.
+pub const ENGINE_OPTIONS: &[EngineOption] = &[
+    EngineOption {
+        dest: "parents",
+        flag: "--parents",
+    },
+    EngineOption {
+        dest: "children",
+        flag: "--children",
+    },
+    EngineOption {
+        dest: "chunk_pipelining",
+        flag: "--chunk-pipelining",
+    },
+    EngineOption {
+        dest: "no_stagger",
+        flag: "--no-stagger",
+    },
+    EngineOption {
+        dest: "startup_jitter",
+        flag: "--startup-jitter",
+    },
+    EngineOption {
+        dest: "jitter",
+        flag: "--jitter",
+    },
+    EngineOption {
+        dest: "all",
+        flag: "--all",
+    },
+    EngineOption {
+        dest: "last",
+        flag: "--last",
+    },
+    EngineOption {
+        dest: "resume",
+        flag: "--resume",
+    },
+    EngineOption {
+        dest: "run_id",
+        flag: "--run-id",
+    },
+];
+
+/// The command-line words for the [`ENGINE_OPTIONS`] present in `args` (the reverse of
+/// `engine_arguments`). Values are attached (`--children=2`) so they never read as positionals.
+pub fn engine_options_to_sysargs(args: &ArgsMap) -> Vec<String> {
+    let mut out = Vec::new();
+    for opt in ENGINE_OPTIONS {
+        match args.get(opt.dest) {
+            None | Some(PyValue::None) | Some(PyValue::Bool(false)) => {}
+            Some(PyValue::Bool(true)) => out.push(opt.flag.to_string()),
+            Some(value) => out.push(format!("{}={}", opt.flag, value.py_str())),
+        }
+    }
+    out
+}
+
 /// v5-only graph options are separate from the frozen v4 argument schema.
 fn engine_arguments(sysargs: &[String]) -> Result<(Vec<String>, ArgsMap), PyException> {
     let mut rest = Vec::new();
@@ -307,110 +377,115 @@ fn engine_arguments(sysargs: &[String]) -> Result<(Vec<String>, ArgsMap), PyExce
         let (flag, attached) = token
             .split_once('=')
             .map_or((token.as_str(), None), |(a, b)| (a, Some(b)));
-        if matches!(flag, "--parents" | "--children") {
-            let value = attached.or_else(|| {
-                sysargs
-                    .get(i + 1)
-                    .map(String::as_str)
-                    .filter(|s| s.parse::<i128>().is_ok())
-            });
-            let depth = match value {
-                None => PyValue::Bool(true),
-                Some(s) => {
-                    let n = s.parse::<i128>().ok().filter(|n| *n >= 0).ok_or_else(|| {
-                        PyException::new(
-                            "InvalidArgumentException",
-                            format!("{flag} requires a non-negative depth"),
-                        )
-                    })?;
-                    if attached.is_none() {
-                        i += 1;
-                    }
-                    PyValue::Int(n)
-                }
-            };
-            args.insert(flag.trim_start_matches('-').into(), depth);
-        } else if flag == "--chunk-pipelining" && attached.is_none() {
-            args.insert("chunk_pipelining".into(), PyValue::Bool(true));
-        } else if flag == "--no-stagger" && attached.is_none() {
-            // Wave 18 (D23): start jobs without the startup jitter, load wait and slots.
-            args.insert("no_stagger".into(), PyValue::Bool(true));
-        } else if matches!(flag, "--startup-jitter" | "--jitter")
-            && (flag == "--startup-jitter" || has_schedule_flag(sysargs))
-        {
-            // Wave 18 (D23): `--startup-jitter 30s` bounds a job's startup delay, `--jitter 30s`
-            // its schedule's fixed offset (scoped to a schedule so plugin flags named `--jitter`
-            // still parse).
-            let value = attached
-                .or_else(|| sysargs.get(i + 1).map(String::as_str))
-                .filter(|v| meerschaum_jobs::schedule::parse_jitter_seconds(v).is_some())
-                .ok_or_else(|| {
-                    PyException::new(
-                        "InvalidArgumentException",
-                        format!("{flag} requires a duration like 30s, 5m or 1h"),
-                    )
-                })?;
-            args.insert(
-                flag.trim_start_matches('-').replace('-', "_"),
-                PyValue::Str(value.to_owned()),
-            );
-            if attached.is_none() {
-                i += 1;
-            }
-        } else if flag == "--all" && attached.is_none() && is_show_data(sysargs) {
-            // `show data --all` (v5-only): print every row and column untruncated.
-            args.insert("all".into(), PyValue::Bool(true));
-        } else if flag == "--last" && is_show_runs(sysargs) {
-            // `show runs --last N` (v5-only; scoped so plugin flags named `--last` still parse).
-            let value = attached
-                .or_else(|| sysargs.get(i + 1).map(String::as_str))
-                .and_then(|s| s.parse::<i128>().ok())
-                .filter(|n| *n >= 0)
-                .ok_or_else(|| {
-                    PyException::new(
-                        "InvalidArgumentException",
-                        "--last requires a non-negative integer",
-                    )
-                })?;
-            args.insert("last".into(), PyValue::Int(value));
-            if attached.is_none() {
-                i += 1;
-            }
-        } else if matches!(flag, "--resume" | "--run-id") {
-            let value = attached
-                .or_else(|| {
+        let Some(opt) = ENGINE_OPTIONS.iter().find(|o| o.flag == flag) else {
+            rest.push(token.clone());
+            i += 1;
+            continue;
+        };
+        let value = match opt.dest {
+            "parents" | "children" => {
+                let value = attached.or_else(|| {
                     sysargs
                         .get(i + 1)
                         .map(String::as_str)
-                        .filter(|s| !s.starts_with('-'))
-                })
-                .ok_or_else(|| {
-                    PyException::new(
-                        "InvalidArgumentException",
-                        format!("{flag} requires a run ID"),
-                    )
-                })?;
-            if flag == "--run-id"
-                && (value.is_empty()
-                    || value.len() > 200
-                    || !value
-                        .bytes()
-                        .all(|c| c.is_ascii_alphanumeric() || b"_.:-".contains(&c)))
+                        .filter(|s| s.parse::<i128>().is_ok())
+                });
+                match value {
+                    None => Some(PyValue::Bool(true)),
+                    Some(s) => {
+                        let n = s.parse::<i128>().ok().filter(|n| *n >= 0).ok_or_else(|| {
+                            PyException::new(
+                                "InvalidArgumentException",
+                                format!("{flag} requires a non-negative depth"),
+                            )
+                        })?;
+                        if attached.is_none() {
+                            i += 1;
+                        }
+                        Some(PyValue::Int(n))
+                    }
+                }
+            }
+            // Wave 18 (D23): start jobs without the startup jitter, load wait and slots.
+            "chunk_pipelining" | "no_stagger" if attached.is_none() => Some(PyValue::Bool(true)),
+            // Wave 18 (D23): `--startup-jitter 30s` bounds a job's startup delay, `--jitter 30s`
+            // its schedule's fixed offset (scoped to a schedule so plugin flags named `--jitter`
+            // still parse).
+            "startup_jitter" | "jitter"
+                if opt.dest == "startup_jitter" || has_schedule_flag(sysargs) =>
             {
-                return Err(PyException::new(
-                    "InvalidArgumentException",
-                    "Invalid --run-id; use letters, numbers, dots, colons, underscores or hyphens.",
-                ));
+                let value = attached
+                    .or_else(|| sysargs.get(i + 1).map(String::as_str))
+                    .filter(|v| meerschaum_jobs::schedule::parse_jitter_seconds(v).is_some())
+                    .ok_or_else(|| {
+                        PyException::new(
+                            "InvalidArgumentException",
+                            format!("{flag} requires a duration like 30s, 5m or 1h"),
+                        )
+                    })?;
+                if attached.is_none() {
+                    i += 1;
+                }
+                Some(PyValue::Str(value.to_owned()))
             }
-            args.insert(
-                flag.trim_start_matches('-').replace('-', "_"),
-                PyValue::Str(value.to_owned()),
-            );
-            if attached.is_none() {
-                i += 1;
+            // `show data --all` (v5-only): print every row and column untruncated.
+            "all" if attached.is_none() && is_show_data(sysargs) => Some(PyValue::Bool(true)),
+            // `show runs --last N` (v5-only; scoped so plugin flags named `--last` still parse).
+            "last" if is_show_runs(sysargs) => {
+                let value = attached
+                    .or_else(|| sysargs.get(i + 1).map(String::as_str))
+                    .and_then(|s| s.parse::<i128>().ok())
+                    .filter(|n| *n >= 0)
+                    .ok_or_else(|| {
+                        PyException::new(
+                            "InvalidArgumentException",
+                            "--last requires a non-negative integer",
+                        )
+                    })?;
+                if attached.is_none() {
+                    i += 1;
+                }
+                Some(PyValue::Int(value))
             }
-        } else {
-            rest.push(token.clone());
+            "resume" | "run_id" => {
+                let value = attached
+                    .or_else(|| {
+                        sysargs
+                            .get(i + 1)
+                            .map(String::as_str)
+                            .filter(|s| !s.starts_with('-'))
+                    })
+                    .ok_or_else(|| {
+                        PyException::new(
+                            "InvalidArgumentException",
+                            format!("{flag} requires a run ID"),
+                        )
+                    })?;
+                if opt.dest == "run_id"
+                    && (value.is_empty()
+                        || value.len() > 200
+                        || !value
+                            .bytes()
+                            .all(|c| c.is_ascii_alphanumeric() || b"_.:-".contains(&c)))
+                {
+                    return Err(PyException::new(
+                        "InvalidArgumentException",
+                        "Invalid --run-id; use letters, numbers, dots, colons, underscores or hyphens.",
+                    ));
+                }
+                if attached.is_none() {
+                    i += 1;
+                }
+                Some(PyValue::Str(value.to_owned()))
+            }
+            // Out of scope (e.g. a plugin's own `--all`): leave it for the v4 parser.
+            _ => None,
+        };
+        match value {
+            Some(value) => {
+                args.insert(opt.dest.into(), value);
+            }
+            None => rest.push(token.clone()),
         }
         i += 1;
     }

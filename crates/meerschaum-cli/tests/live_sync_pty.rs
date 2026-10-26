@@ -999,3 +999,28 @@ fn ctrl_z_gives_the_terminal_back_and_fg_draws_the_region_again() {
     assert!(status.success(), "{}", term.screen());
     assert!(term.transcript().contains("It took"));
 }
+
+/// The shell rebuilds each line from the parsed arguments: `--parents` must survive that, so a
+/// shell graph run shows the same live region and syncs every parent (not one flat pipe).
+#[test]
+fn a_shell_graph_run_shows_the_live_region() {
+    let setup = Setup::new("shell", r#"{"ansi":true,"unicode":true}"#);
+    let mut term = Term::spawn(&setup, &[]);
+    term.wait_screen("the shell prompt", 60, |s| s.contains("@sql:lv ] "));
+    term.send("sync pipes -c sql:lv -m leaf --parents\r");
+    term.wait_screen("the live region", 120, |s| {
+        s.contains("Syncing 0/4 pipes") && s.contains(&format!("  {}  ", label("src")))
+    });
+    term.wait_screen("the run's end", 180, |s| {
+        s.contains("4 succeeded, 0 failed")
+    });
+    term.send("exit\r");
+    let status = term.wait_exit(60);
+    term.no_crash_text();
+    assert!(status.success(), "{}", term.screen());
+    let transcript = term.transcript();
+    for metric in ["src", "mid_a", "mid_b", "leaf"] {
+        let line = format!("  ✔ {} +1 ins ~0 upd +0 ups", label(metric));
+        assert!(transcript.contains(&line), "{line}:\n{transcript}");
+    }
+}
