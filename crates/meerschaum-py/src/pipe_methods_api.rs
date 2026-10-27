@@ -160,7 +160,7 @@ fn columns_types_of(context: &Bound<'_, PyDict>) -> PyResult<Option<IndexMap<Str
 /// Open a call (module docs). `full_registry`: build the whole registry (a call that reads
 /// sources, resolves references on other instances or syncs); otherwise a Rust SQL instance is
 /// reached directly and nothing is read from the config files.
-fn open(
+pub(crate) fn open(
     py: Python<'_>,
     pipe: &Bound<'_, PyAny>,
     context: &Bound<'_, PyDict>,
@@ -786,10 +786,13 @@ pub fn pipe_get_sync_time<'py>(
 }
 
 /// `_core.pipe_get_rowcount(pipe, context, begin=None, end=None, params=None, remote=False,
-/// debug=False)`: the number of rows (`0` for a missing table; `remote`: the source's count of
-/// the fetch definition).
+/// estimate=False, debug=False)`: the number of rows (`0` for a missing table; `remote`: the
+/// source's count of the fetch definition; `estimate`: the database's estimate from catalog
+/// statistics, exact where there is none or the table is small). Database errors raise.
 #[pyfunction]
-#[pyo3(signature = (pipe, context, begin=None, end=None, params=None, remote=false, debug=false))]
+#[pyo3(signature = (
+    pipe, context, begin=None, end=None, params=None, remote=false, estimate=false, debug=false
+))]
 #[allow(clippy::too_many_arguments)]
 pub fn pipe_get_rowcount<'py>(
     py: Python<'py>,
@@ -799,6 +802,7 @@ pub fn pipe_get_rowcount<'py>(
     end: Option<&Bound<'py, PyAny>>,
     params: Option<&Bound<'py, PyAny>>,
     remote: bool,
+    estimate: bool,
     debug: bool,
 ) -> PyResult<Bound<'py, PyAny>> {
     let _debug = DebugGuard::new(debug);
@@ -809,7 +813,13 @@ pub fn pipe_get_rowcount<'py>(
     let core = opened.core.clone();
     let count = facade::spawn_block_on(py, async move {
         let reader = opened.reader()?;
-        reader.get_rowcount(&core, begin, end, params, remote).await
+        if estimate {
+            reader
+                .get_rowcount_estimate(&core, begin, end, params, remote)
+                .await
+        } else {
+            reader.get_rowcount(&core, begin, end, params, remote).await
+        }
     })
     .map_err(run_err)?;
     Ok(count.into_pyobject(py)?.into_any())

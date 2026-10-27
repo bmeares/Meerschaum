@@ -411,8 +411,10 @@ def test_the_console_is_one_dash_app(host):
     assert 'id="mrsm-theme-dark"' in html and 'id="mrsm-theme-light"' in html
     assert '/dash/_dash-component-suites/' in html and 'Meerschaum Web' in html
     layout = client.get('/dash/_dash-layout').text
-    for component_id in ('session-store', 'mrsm-location', 'dbc-dark-store', 'pages-offcanvas'):
+    for component_id in ('session-store', 'mrsm-location', 'dbc-dark-store', 'page-layout-div'):
         assert f'"{component_id}"' in layout
+    ### The top navigation replaced v4's logo menu (each page carries it).
+    assert '"pages-offcanvas"' not in layout
     ### v4's assets are served by Dash itself; a plugin's `assets/` directory is served beside them
     ### and its stylesheet is loaded by every page.
     assert client.get('/dash/assets/ansi_up.js').status_code == 200

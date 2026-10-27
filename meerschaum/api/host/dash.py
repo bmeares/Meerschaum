@@ -152,21 +152,37 @@ def _plotly_bundle() -> Optional[str]:
 CONTRACT_STATIC: str = '/static/contract'
 
 
-def page_document(fragment: str, dark_theme: bool = True, title: str = '') -> str:
+def page_document(
+    fragment: str,
+    dark_theme: bool = True,
+    title: str = '',
+    theme: Optional[str] = None,
+    head: Optional[List[str]] = None,
+) -> str:
     """
     Wrap a page-contract fragment in a document with the console's theme, htmx and the script that
     draws `data-mrsm-figure` and `data-mrsm-map` elements.
+
+    `theme` is the page's `@web_page(theme=...)` (`'dark'`, `'light'` or a stylesheet URL; one
+    theme stylesheet is loaded), `head` its `head=[...]` tags (HTML), after those of `add_head()`.
     """
     import html as html_lib
-    theme = 'bootstrap.min.css' if dark_theme else 'bootstrap_light.min.css'
+    from meerschaum.plugins import get_console_head
+    if theme in (None, 'dark', 'light'):
+        dark = dark_theme if theme is None else theme == 'dark'
+        theme_href = '/static/css/' + ('bootstrap.min.css' if dark else 'bootstrap_light.min.css')
+    else:
+        theme_href = str(theme)
+    extra_head = ''.join(list(get_console_head()) + list(head or []))
     return (
         '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">'
         '<meta name="viewport" content="width=device-width, initial-scale=1">'
         f'<title>{html_lib.escape(title)}</title>'
-        f'<link rel="stylesheet" href="/static/css/{theme}">'
+        f'<link rel="stylesheet" href="{html_lib.escape(theme_href, quote=True)}">'
         + ('<link rel="stylesheet" href="/static/css/dbc_dark.css">' if dark_theme else '')
         + f'<link rel="stylesheet" href="{CONTRACT_STATIC}/contract.css">'
-        f'</head><body class="{"dbc_dark" if dark_theme else ""} mrsm-contract-page">'
+        + extra_head
+        + f'</head><body class="{"dbc_dark" if dark_theme else ""} mrsm-contract-page">'
         f'<main>{fragment}</main>'
         f'<script src="{CONTRACT_STATIC}/htmx.min.js"></script>'
         f'<script src="{ASSETS_PREFIX}/plotly.min.js"></script>'
@@ -212,8 +228,17 @@ def mount_page_contract_routes(fastapi_app, debug: bool = False) -> List[str]:
         login_required = bool(page.get('login_required', True))
         dark_theme = bool(page.get('dark_theme', True))
         title = str(page.get('page_key', page_str))
+        theme = page.get('theme', None)
+        head = list(page.get('head', None) or [])
 
-        def _make(function=function, login_required=login_required, dark_theme=dark_theme, title=title):
+        def _make(
+            function=function,
+            login_required=login_required,
+            dark_theme=dark_theme,
+            title=title,
+            theme=theme,
+            head=head,
+        ):
             async def _serve(request):
                 if login_required and not no_auth:
                     from meerschaum.api.dash.sessions import (
@@ -231,7 +256,7 @@ def mount_page_contract_routes(fastapi_app, debug: bool = False) -> List[str]:
                 ### The console embeds the page as a document (`?frame=1`); the bare route is the
                 ### fragment itself, the page contract.
                 if request.query_params.get('frame'):
-                    html = page_document(html, dark_theme, title)
+                    html = page_document(html, dark_theme, title, theme=theme, head=head)
                 return HTMLResponse(html, status_code=status)
             return _serve
 
@@ -472,6 +497,13 @@ def mount_console(fastapi_app, debug: bool = False) -> bool:
             stack=False,
         )
         return False
+
+    ### Callbacks need a console session unless public (`_callbacks`); plugin pages' themes and
+    ### head tags (`_page_heads`). Both before the first request, when Dash registers the callbacks.
+    from meerschaum.api.host._callbacks import secure_console
+    from meerschaum.api.host._page_heads import install_page_heads
+    secure_console(dash_app)
+    install_page_heads(dash_app)
 
     fastapi_app.mount(
         DASH_PREFIX,

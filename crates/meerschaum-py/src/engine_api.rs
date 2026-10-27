@@ -189,6 +189,30 @@ fn bound_field(request: &Json, key: &str) -> PyResult<Option<Bound>> {
     }
 }
 
+/// The run history's `since`: an ISO 8601 timestamp (UTC when naive). `''` and `null` are no
+/// filter.
+fn since_field(request: &Json) -> PyResult<Option<DateTime<Utc>>> {
+    let invalid = |text: &dyn std::fmt::Display| {
+        value_err(format!("`since` must be an ISO 8601 datetime, got {text}."))
+    };
+    match request.get("since") {
+        None | Some(Json::Null) => Ok(None),
+        Some(Json::String(s)) if s.trim().is_empty() => Ok(None),
+        Some(Json::String(s)) => {
+            let text = s.trim();
+            DateTime::parse_from_rfc3339(text)
+                .map(|d| d.with_timezone(&Utc))
+                .or_else(|_| {
+                    chrono::NaiveDateTime::parse_from_str(text, "%Y-%m-%dT%H:%M:%S%.f")
+                        .map(|d| d.and_utc())
+                })
+                .map(Some)
+                .map_err(|_| invalid(&format!("'{s}'")))
+        }
+        Some(other) => Err(invalid(other)),
+    }
+}
+
 fn sql_attributes(
     label: &str,
     attrs: &serde_json::Map<String, Json>,
@@ -580,7 +604,8 @@ fn reader(py: Python<'_>, request: &Json) -> PyResult<(Session, EngineReader)> {
     Ok((session, EngineReader::new(built.registry, built.config)))
 }
 
-/// `engine_runs(request) -> json`: run history, newest first (`limit`, `status`, `pipe`).
+/// `engine_runs(request) -> json`: run history, newest first (`limit`, `status`, `pipe`,
+/// `run_name`, `run_id`, `since`).
 #[pyfunction]
 pub fn engine_runs(py: Python<'_>, request: &str) -> PyResult<String> {
     let request = parse_request(request)?;
@@ -597,7 +622,7 @@ pub fn engine_runs(py: Python<'_>, request: &str) -> PyResult<String> {
         run_name: str_field(&request, "run_name").map(str::to_owned),
         status,
         pipe: str_field(&request, "pipe").map(str::to_owned),
-        since: None,
+        since: since_field(&request)?,
         limit: request
             .get("limit")
             .and_then(Json::as_u64)
@@ -660,6 +685,27 @@ mod tests {
         let aware = bound(json!("2024-01-02T03:04:05+00:00")).unwrap();
         assert_eq!(naive, aware);
         assert!(bound_field(&json!({ "begin": "not a date" }), "begin").is_err());
+    }
+
+    #[test]
+    fn since_is_an_iso_timestamp_or_nothing() {
+        let since = |v: Json| since_field(&json!({ "since": v })).unwrap();
+        assert_eq!(since_field(&json!({})).unwrap(), None);
+        assert_eq!(since(Json::Null), None);
+        assert_eq!(since(json!(" ")), None);
+        let naive = since(json!("2024-01-02T03:04:05")).unwrap();
+        let aware = since(json!("2024-01-02T05:04:05+02:00")).unwrap();
+        assert_eq!(naive, aware);
+        assert_eq!(naive.to_rfc3339(), "2024-01-02T03:04:05+00:00");
+        assert_eq!(
+            since(json!("2024-01-02T03:04:05.250000+00:00"))
+                .unwrap()
+                .timestamp_millis()
+                % 1000,
+            250
+        );
+        assert!(since_field(&json!({ "since": "yesterday" })).is_err());
+        assert!(since_field(&json!({ "since": 5 })).is_err());
     }
 
     #[test]

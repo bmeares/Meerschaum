@@ -20,6 +20,10 @@ Each event is a plain `dict` (see `EVENT_KEYS` and "Live events in Python" in
 }
 ```
 
+A node result's `duration` (`event['result']['duration']`) is in float seconds, like
+`SyncResult.duration`: the engine's JSON spells it `{'secs': ..., 'nanos': ...}`, which
+`decode_event()` converts (as `RunResult.outcomes` and `run.events()` do).
+
 The callback runs on the thread that called `sync()`, between events; the engine syncs on its
 own threads without the GIL, so a slow callback only delays later callbacks (events queue up,
 nothing is dropped) and never the sync work.
@@ -65,9 +69,40 @@ def _parse_ts(value: Any) -> Any:
     return parsed.astimezone(timezone.utc)
 
 
+def _seconds(value: Any) -> Any:
+    """
+    A duration in float seconds. The engine's JSON spells a Rust `Duration` (the `duration` of
+    a node's result) as `{'secs': 1, 'nanos': 500000000}`; any other value is returned as is.
+    """
+    if (
+        isinstance(value, dict)
+        and len(value) == 2
+        and isinstance(value.get('secs', None), int)
+        and isinstance(value.get('nanos', None), int)
+    ):
+        return value['secs'] + value['nanos'] / 1_000_000_000
+    return value
+
+
+def with_seconds(fields: Any) -> Any:
+    """
+    Return `fields` (an event, an event's payload or a run outcome) with the `duration` of its
+    `result` in float seconds: a copy when it changes, else `fields` itself.
+    """
+    if not isinstance(fields, dict):
+        return fields
+    result = fields.get('result', None)
+    if not isinstance(result, dict) or 'duration' not in result:
+        return fields
+    seconds = _seconds(result['duration'])
+    if seconds is result['duration']:
+        return fields
+    return {**fields, 'result': {**result, 'duration': seconds}}
+
+
 def decode_event(text: str) -> Dict[str, Any]:
     """Decode one event from the engine's JSON text into the documented `dict`."""
-    event = json.loads(text)
+    event = with_seconds(json.loads(text))
     event['ts'] = _parse_ts(event.get('ts', None))
     return event
 

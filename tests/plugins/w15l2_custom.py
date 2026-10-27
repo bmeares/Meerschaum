@@ -212,7 +212,9 @@ class W15l2backConnector(InstanceConnector):
         import pandas as pd
         self._record_marker(kwargs)
         delay = float(self.__dict__.get('delay', 0) or 0)
-        if delay:
+        ### Meerschaum's own pipes on this instance (the per-pipe sync status a sync records in
+        ### the background, `mrsm:engine_sync_status`) are not the chunks being counted.
+        if delay and pipe.connector_keys != 'mrsm':
             ### Record how many reads are in flight at once (the test reads the maximum).
             with _locked(self.label):
                 path = _inflight_path(self.label)

@@ -212,6 +212,24 @@ class Connector(metaclass=abc.ABCMeta):
 
 
     @property
+    def protected(self) -> bool:
+        """
+        Whether the connector is protected (`protected: true` in its attributes, or
+        `?protected=true` on its URI): every write through it is refused unless writes to
+        protected connectors are allowed (`--allow-protected`, `MRSM_ALLOW_PROTECTED=1`, or
+        `meerschaum.connectors.allow_protected()`). Reads are never blocked.
+        """
+        from meerschaum.connectors import is_protected_value, uri_marks_protected
+        return (
+            is_protected_value(self.__dict__.get('protected', False))
+            or uri_marks_protected(self.__dict__.get('uri', None))
+        )
+
+    @protected.setter
+    def protected(self, value: Any) -> None:
+        self.__dict__['protected'] = value
+
+    @property
     def type(self) -> str:
         """
         Return the type for this connector.

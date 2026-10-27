@@ -308,6 +308,11 @@ def build_manifest(debug: bool = False) -> Dict[str, Any]:
                 pass
             manifest_plugins[plugin_name]['actions'].append({
                 'name': action_name,
+                ### The words that run it: `@make_action(name='weather wait')`, else the name split
+                ### on `_` (`weather_wait` runs as `mrsm weather wait`).
+                'words': list(plugins_module._action_words.get(action_name, None) or [
+                    word for word in action_name.split('_') if word
+                ] or [action_name]),
                 'doc': _doc(func),
                 'daemon': plugins_module._actions_daemon_enabled.get(action_name, True),
                 'subactions': subactions,

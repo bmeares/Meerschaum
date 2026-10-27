@@ -225,3 +225,59 @@ def get_bound_time(self, debug: bool = False) -> Union[datetime, int, None]:
         if bound_time > oldest_sync_time or extreme_sync_times_delta
         else None
     )
+
+
+def verify_schema(
+    self,
+    apply: bool = False,
+    dry_run: bool = False,
+    debug: bool = False,
+) -> SuccessTuple:
+    """
+    Compare the pipe's table with its declared dtypes (`dtypes`, the `columns` roles, geometry
+    notations) and, with `apply=True`, bring the table in line.
+
+    Added columns and safe widenings (`int` to `bigint`, `int` to `float`, `float` to `numeric`,
+    `varchar(n)` to `text`, `text` to `json`) keep every value; other type changes may fail on
+    existing values or change them. Columns are never dropped, and static pipes are included.
+    The command line equivalent is `mrsm verify schema`.
+
+    Parameters
+    ----------
+    apply: bool, default False
+        If `True`, apply every change the plan lists. Otherwise nothing is written.
+
+    dry_run: bool, default False
+        If `True`, return the SQL the plan would run (and write nothing).
+
+    debug: bool, default False
+        Verbosity toggle.
+
+    Returns
+    -------
+    A `SuccessTuple`: the message is the plan (a table of the columns that change), the SQL
+    with `dry_run=True`, or the plan and what changed with `apply=True`. A protected instance
+    refuses `apply=True` unless writes are allowed (`meerschaum.connectors.allow_protected()`).
+
+    Examples
+    --------
+    >>> pipe = mrsm.Pipe('plugin:noaa', 'weather', dtypes={'temperature': 'float'})
+    >>> success, plan = pipe.verify_schema()
+    >>> print(plan)
+    >>> success, msg = pipe.verify_schema(apply=True)
+    """
+    from meerschaum import _core
+    from meerschaum.core.Pipe._data import _rust_context
+    context = _rust_context(self, debug=debug)
+    success, message = _core.pipe_verify_schema(
+        self,
+        context,
+        apply=(apply and not dry_run),
+        dry_run=dry_run,
+        debug=debug,
+    )
+    if apply and not dry_run:
+        ### The table's columns changed: forget the cached columns types.
+        self._clear_cache_key('_columns_types', debug=debug)
+        self._clear_cache_key('_columns_types_timestamp', debug=debug)
+    return success, message

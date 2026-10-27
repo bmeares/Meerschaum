@@ -143,24 +143,81 @@ def test_executor_types_include_the_builtins():
 def test_systemd_executor_paths_and_unit_text():
     from meerschaum.jobs.systemd import SystemdExecutor
     from meerschaum._internal.static import STATIC_CONFIG
+    import meerschaum.config.paths as paths
     executor = SystemdExecutor('systemd')
-    assert executor.get_service_name('a b') == 'mrsm-a-b.service'
+    ### The tests' scratch root is not the default root: its units are scoped by a short hash of
+    ### the root (`mrsm-<hash>.<job>.service`); the default root keeps `mrsm-<job>.service`.
+    service = executor.get_service_name('a b')
+    assert service.startswith('mrsm-') and service.endswith('.a-b.service'), service
+    assert len(service.split('.')[0]) == len('mrsm-') + 8, service
+    x_service = executor.get_service_name('x')
+    assert x_service.endswith('.x.service') and x_service.split('.')[0] == service.split('.')[0]
     service_file = executor.get_service_file_path('x')
-    assert service_file.name == 'mrsm-x.service'
+    assert service_file.name == x_service
     assert service_file.parent == executor.get_service_job_path('x')
-    assert executor.get_socket_path('x').name == 'mrsm-x.service.stdin'
-    assert executor.get_result_path('x').name == 'mrsm-x.service.result.json'
-    assert executor.get_service_logs_path('x').name == 'mrsm-x.service.log'
+    assert executor.get_socket_path('x').name == f'{x_service}.stdin'
+    assert executor.get_result_path('x').name == f'{x_service}.result.json'
+    assert executor.get_service_logs_path('x').name == f'{x_service}.log'
 
     text = executor.get_service_file_text('x', ['show', 'version'])
     assert '[Service]' in text
     assert ' -P -m meerschaum show version\n' in text
     assert f"Environment={STATIC_CONFIG['environment']['daemon_id']}=x\n" in text
     assert 'Restart=always' in text
+    ### A unit of another root finds its root after a reboot.
+    root = pathlib.Path(paths.ROOT_DIR_PATH).as_posix()
+    assert f"Environment={STATIC_CONFIG['environment']['root']}=" in text
+    assert root in text
 
     socket_text = executor.get_socket_file_text('x')
-    assert 'BindsTo=mrsm-x.service' in socket_text
+    assert f'BindsTo={x_service}' in socket_text
     assert f"ListenFIFO={executor.get_socket_path('x').as_posix()}" in socket_text
+
+
+# --- Job health ---------------------------------------------------------------------------------
+
+
+def test_job_health_reports_the_laps_of_a_loop(local_jobs):
+    """`job.health` (C3): the laps a looping job records, as a plain dict."""
+    job = local_jobs(['show', 'version', '--loop', '--min-seconds', '0.2'])
+    health = job.health
+    assert set(health) == {
+        'state', 'last_success', 'last_lap', 'consecutive_failures',
+        'expected_interval_seconds', 'message',
+    }
+    assert health['state'] == 'stopped', health
+    assert job.start()[0]
+    assert _wait_for(lambda: job.health['state'] == 'healthy', timeout=60), job.health
+    health = job.health
+    assert health['message'].startswith('last good run'), health
+    assert health['consecutive_failures'] == 0
+    assert health['expected_interval_seconds'] >= 0.2
+    assert health['last_success'].endswith('+00:00'), health
+    assert job.stop()[0]
+    assert _wait_for(lambda: job.health['state'] == 'stopped'), job.health
+
+
+def test_a_job_that_does_not_lap_has_unknown_health(local_jobs):
+    job = local_jobs(['sh', 'sleep', '30'])
+    assert job.start()[0]
+    assert _wait_for(lambda: job.status == 'running')
+    assert job.health['state'] == 'unknown'
+    assert job.health['message'] == 'no laps recorded'
+
+
+# --- Action chains ---------------------------------------------------------------------------
+
+
+def test_chains_serialize_under_the_chain_action_and_v4_jobs_still_compress():
+    from meerschaum._internal.arguments import compress_pipeline_sysargs, get_pipeline_sysargs
+    serialized = get_pipeline_sysargs(['show', 'version', '+', 'show', 'arguments'], ['--loop'])
+    assert serialized[:3] == ['chain', '--loop', '-P'], serialized
+    typed = ['show', 'version', '+', 'show', 'arguments', ':', '--loop']
+    assert compress_pipeline_sysargs(serialized) == typed
+    ### Meerschaum 4.1 wrote the same payload under `start pipeline`.
+    assert compress_pipeline_sysargs(['start', 'pipeline'] + serialized[1:]) == typed
+    ### `start pipeline NAME` (a saved Pipeline) is not a chain.
+    assert compress_pipeline_sysargs(['start', 'pipeline', 'daily']) == ['start', 'pipeline', 'daily']
 
 
 # --- The daemon façade ------------------------------------------------------------------------

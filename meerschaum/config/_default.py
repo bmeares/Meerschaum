@@ -217,6 +217,8 @@ default_api_config = {
     ### authentication of its own, because it is served from inside the Dash WSGI
     ### app where the API's token auth does not apply.
     'dash': {
+        ### Console callbacks answer only signed-in visitors unless public (rc15).
+        'callbacks_require_session': True,
         'mcp': {
             'enabled': False,
         },

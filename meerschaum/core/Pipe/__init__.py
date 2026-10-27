@@ -177,6 +177,7 @@ class Pipe:
     )
     from ._verify import (
         verify,
+        verify_schema,
         get_bound_interval,
         get_bound_time,
     )
@@ -190,6 +191,7 @@ class Pipe:
     from ._bootstrap import bootstrap
     from ._dtypes import enforce_dtypes, infer_dtypes
     from ._copy import copy_to
+    from ._status import get_sync_status
 
     def __init__(
         self,
@@ -227,6 +229,7 @@ class Pipe:
         location_key: Optional[str] = None,
         instance_keys: Optional[str] = None,
         indexes: Union[Dict[str, str], List[str], None] = None,
+        hypercore: Optional[bool] = None,
         debug: bool = False,
     ):
         """
@@ -307,10 +310,11 @@ class Pipe:
             automatically on sync. A dictionary may override `segmentby`, `orderby`, and `after`.
             Defaults to `False`.
 
-        hypercore: bool, default True
-            For TimescaleDB hypertables, enable the Hypercore columnstore at table creation
-            (declaring `segmentby`/`orderby` in `CREATE TABLE`), which causes TimescaleDB to
-            auto-create a columnstore policy. Set to `False` for a plain row-store hypertable.
+        hypercore: Optional[bool], default None
+            Set `hypercore` in the parameters. For TimescaleDB hypertables, the Hypercore
+            columnstore is enabled at table creation by default (declaring
+            `segmentby`/`orderby` in `CREATE TABLE`), which causes TimescaleDB to auto-create a
+            columnstore policy. Set to `False` for a plain row-store hypertable.
             Has no effect unless the pipe is a hypertable (`hypertable`, default `True`).
 
         temporary: bool, default False
@@ -491,6 +495,9 @@ class Pipe:
 
         if isinstance(compress, (bool, dict)):
             self._attributes['parameters']['compress'] = compress
+
+        if isinstance(hypercore, bool):
+            self._attributes['parameters']['hypercore'] = hypercore
 
         self._cache_locks = collections.defaultdict(lambda: threading.RLock())
         self._attributes_lock = threading.RLock()

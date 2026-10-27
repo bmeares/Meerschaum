@@ -26,6 +26,14 @@ def _iterate_chunks(chunks: Iterator[Any]) -> Iterator[Any]:
     yield from chunks
 
 
+def _silent_chunks(chunks: Iterator[Any]) -> Iterator[Any]:
+    """`chunks`, ending quietly at a read error (`get_data(as_iterator=True, silent=True)`)."""
+    try:
+        yield from chunks
+    except Exception:
+        return
+
+
 def _rust_context(
     self,
     debug: bool = False,
@@ -71,6 +79,7 @@ def get_data(
     order: Optional[str] = 'asc',
     limit: Optional[int] = None,
     fresh: bool = False,
+    silent: bool = False,
     debug: bool = False,
     **kw: Any
 ) -> Union['pd.DataFrame', Iterator['pd.DataFrame'], None]:
@@ -92,13 +101,22 @@ def get_data(
         Defaults to `None`.
 
     end: Union[datetime, int, str, None], default None
-        Upper bound datetime to stop searching for data (inclusive).
+        Upper bound datetime to stop searching for data (exclusive).
         Translates to a `WHERE` clause like `WHERE datetime < end`.
         Defaults to `None`.
 
     params: Optional[Dict[str, Any]], default None
-        Filter the retrieved data by a dictionary of parameters.
-        See `meerschaum.utils.sql.build_where` for more details. 
+        Filter the rows by column values (a `WHERE` clause), e.g.
+        `params={'station': 'KATL'}`:
+
+        - a value is `=`: `{'station': 'KATL'}`;
+        - a list is `IN`: `{'station': ['KATL', 'KGMU']}`;
+        - a leading `_` negates: `{'station': '_KATL'}` is `!=`, `{'station': ['_KATL']}`
+          is `NOT IN`;
+        - `None` (or `'None'`) is `IS NULL` and `'_None'` is `IS NOT NULL`;
+        - a dictionary value is compared as JSON text.
+
+        See `meerschaum.utils.sql.build_where` for more details.
 
     as_docs: bool, default False
         If `True`, return a list of dictionaries rather than a DataFrame.
@@ -115,12 +133,13 @@ def get_data(
         When combined with `as_docs=True`, yields `List[Dict]` per chunk instead of DataFrames.
 
     as_dask: bool, default False
-        If `True`, return a `dask.DataFrame`
-        (which may be loaded into a Pandas DataFrame with `df.compute()`).
+        Not supported in Meerschaum 5: `True` raises a `TypeError`.
+        Read the data in chunks with `as_iterator=True` (or as one Polars frame with
+        `as_polars=True`) instead.
 
     as_polars: bool, default False
         If `True`, return a `polars.DataFrame`. When combined with `as_iterator=True`,
-        yield Polars DataFrames. This may not be combined with `as_docs` or `as_dask`.
+        yield Polars DataFrames. This may not be combined with `as_docs`.
 
     add_missing_columns: bool, default False
         If `True`, add any missing columns from `Pipe.dtypes` to the dataframe.
@@ -143,9 +162,21 @@ def get_data(
     fresh: bool, default False
         If `True`, skip local cache and directly query the instance connector.
 
+    silent: bool, default False
+        If `True`, return `None` instead of raising when the instance cannot be read
+        (Meerschaum 4's behavior). By default, database errors raise; a pipe whose table
+        does not exist yet returns `None` either way.
+
     debug: bool, default False
         Verbosity toggle.
         Defaults to `False`.
+
+    kw: Any
+        Other keyword arguments are passed on to the instance connector (a SQL instance
+        reads `begin_add_minutes`, `end_add_minutes`, `replace_nulls` and
+        `skip_existing_cols_check`; a custom instance connector may read its own). A keyword
+        that nothing reads is ignored with a warning that suggests the parameter you probably
+        meant (`start` → `begin`, `where` or `filters` → `params`).
 
     Returns
     -------
@@ -157,6 +188,8 @@ def get_data(
 
     """
     from meerschaum import _core
+    from meerschaum.core.Pipe._keywords import warn_unknown_get_data_keywords
+    warn_unknown_get_data_keywords(self, kw, as_docs=as_docs)
     if as_polars and (as_docs or as_dask):
         raise ValueError("`as_polars` may not be combined with `as_docs` or `as_dask`.")
     if as_dask:
@@ -164,10 +197,28 @@ def get_data(
             "Dask is not supported in Meerschaum 5. Use `as_iterator=True` for chunks "
             "or `as_polars=True`. See the migration guide: reference/migrating-to-v5."
         )
-    context = _rust_context(self, debug=debug)
-    begin, end = self.parse_date_bounds(begin, end, debug=debug)
-    if as_iterator or as_chunks:
-        return _iterate_chunks(_core.pipe_get_data_chunks(
+    try:
+        context = _rust_context(self, debug=debug)
+        begin, end = self.parse_date_bounds(begin, end, debug=debug)
+        if as_iterator or as_chunks:
+            chunks = _iterate_chunks(_core.pipe_get_data_chunks(
+                self,
+                context,
+                select_columns=select_columns,
+                omit_columns=omit_columns,
+                begin=begin,
+                end=end,
+                params=params,
+                as_docs=as_docs,
+                as_polars=as_polars,
+                chunk_interval=chunk_interval,
+                order=order,
+                limit=limit,
+                kwargs=kw,
+                debug=debug,
+            ))
+            return _silent_chunks(chunks) if silent else chunks
+        return _core.pipe_get_data(
             self,
             context,
             select_columns=select_columns,
@@ -177,28 +228,17 @@ def get_data(
             params=params,
             as_docs=as_docs,
             as_polars=as_polars,
-            chunk_interval=chunk_interval,
+            add_missing_columns=add_missing_columns,
             order=order,
             limit=limit,
             kwargs=kw,
             debug=debug,
-        ))
-    return _core.pipe_get_data(
-        self,
-        context,
-        select_columns=select_columns,
-        omit_columns=omit_columns,
-        begin=begin,
-        end=end,
-        params=params,
-        as_docs=as_docs,
-        as_polars=as_polars,
-        add_missing_columns=add_missing_columns,
-        order=order,
-        limit=limit,
-        kwargs=kw,
-        debug=debug,
-    )
+        )
+    except Exception:
+        ### Database errors raise; `silent=True` keeps Meerschaum 4's `None`.
+        if silent:
+            return None
+        raise
 
 
 def get_backtrack_data(
@@ -248,17 +288,22 @@ def get_backtrack_data(
     debug: bool default False
         Verbosity toggle.
 
+    **kw: Any
+        Also `end` (exclusive), `select_columns`, `omit_columns`, `order` (default `'desc'`),
+        `as_docs`, `as_polars` and `add_missing_columns`, as in `get_data()`. Other keywords
+        go to the instance connector; a keyword nothing reads is ignored with a warning that
+        suggests the parameter you probably meant.
+
     Returns
     -------
     A `pd.DataFrame` for the pipe's data corresponding to the provided parameters. Backtrack data
     is a convenient way to get a pipe's data "backtracked" from the most recent datetime.
     """
     from meerschaum import _core
+    from meerschaum.core.Pipe._keywords import BACKTRACK_KEYWORDS, warn_unknown_backtrack_keywords
+    warn_unknown_backtrack_keywords(self, kw)
     context = _rust_context(self, debug=debug)
-    named = (
-        'select_columns', 'omit_columns', 'end', 'as_docs', 'as_polars',
-        'add_missing_columns', 'order',
-    )
+    named = BACKTRACK_KEYWORDS
     end = kw.get('end', None)
     return _core.pipe_get_backtrack_data(
         self,
@@ -285,6 +330,8 @@ def get_rowcount(
     end: Union[datetime, int, None] = None,
     params: Optional[Dict[str, Any]] = None,
     remote: bool = False,
+    estimate: bool = False,
+    silent: bool = False,
     debug: bool = False
 ) -> int:
     """
@@ -293,14 +340,25 @@ def get_rowcount(
     Parameters
     ----------
     begin: Optional[datetime], default None
-        Count rows where datetime > begin.
+        Count rows where datetime >= begin (inclusive).
 
     end: Optional[datetime], default None
-        Count rows where datetime < end.
+        Count rows where datetime < end (exclusive).
 
     remote: bool, default False
         Count rows from a pipe's remote source.
         **NOTE**: This is experimental!
+
+    estimate: bool, default False
+        If `True`, return the database's estimate of the number of rows from its catalog
+        statistics (PostgreSQL, TimescaleDB, MySQL / MariaDB, MSSQL, Oracle) instead of
+        counting them: instant on large tables, and close (the statistics trail recent
+        writes). The count is exact where the database has no estimate (SQLite, DuckDB), for
+        small tables, and with `begin`, `end`, `params` or `remote`.
+
+    silent: bool, default False
+        If `True`, return 0 instead of raising when the instance cannot be read
+        (Meerschaum 4's behavior).
 
     debug: bool, default False
         Verbosity toggle.
@@ -308,20 +366,27 @@ def get_rowcount(
     Returns
     -------
     An `int` of the number of rows in the pipe corresponding to the provided parameters.
-    Returned 0 if the pipe does not exist.
+    Returned 0 if the pipe does not exist. Raises the database error if the instance cannot
+    be read (0 with `silent=True`).
     """
     from meerschaum import _core
-    context = _rust_context(self, debug=debug)
-    begin, end = self.parse_date_bounds(begin, end, debug=debug)
-    return _core.pipe_get_rowcount(
-        self,
-        context,
-        begin=begin,
-        end=end,
-        params=params,
-        remote=remote,
-        debug=debug,
-    )
+    try:
+        context = _rust_context(self, debug=debug)
+        begin, end = self.parse_date_bounds(begin, end, debug=debug)
+        return _core.pipe_get_rowcount(
+            self,
+            context,
+            begin=begin,
+            end=end,
+            params=params,
+            remote=remote,
+            estimate=estimate,
+            debug=debug,
+        )
+    except Exception:
+        if silent:
+            return 0
+        raise
 
 
 def get_size(

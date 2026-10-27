@@ -13,7 +13,9 @@ server for every request it does not match itself:
   mounts, background threads);
 - the web console: the Plotly Dash app of v4 (`meerschaum.api.dash`, design D21), mounted at `/dash`
   with the plugins' `@dash_plugin` functions and `@web_page` pages at their v4 paths
-  (`meerschaum.api.host.dash`);
+  (`meerschaum.api.host.dash`); its callbacks answer only a console session unless public
+  (`meerschaum.api.host._callbacks`), and plugin pages' themes and head tags are added to its
+  `<head>` (`meerschaum.api.host._page_heads`);
 - MCP tools, resources and prompts registered by plugins with `meerschaum.mcp.tool(...)`,
   federated into the Rust MCP server through two internal routes (`/_mrsm/host/registry`,
   `/_mrsm/host/mcp`) that require a token signed with the API secret.

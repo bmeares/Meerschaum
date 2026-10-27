@@ -932,10 +932,41 @@ impl PyValkeyConnector {
         } else {
             sync_frame(py, df)?
         };
-        let opts = SyncOptions {
+        // `replace=True` (rc15): the rows replace the window `[begin, end)` matching `params`; a
+        // bound that is not given is the rows' own datetime range, as for `pipe.sync`.
+        let kw_item = |key: &str| -> PyResult<Option<Bound<'py, PyAny>>> {
+            match _kw {
+                Some(kw) => Ok(kw.get_item(key)?.filter(|v| !v.is_none())),
+                None => Ok(None),
+            }
+        };
+        let replace = kw_item("replace")?
+            .map(|v| v.is_truthy())
+            .transpose()?
+            .unwrap_or(false);
+        let mut opts = SyncOptions {
             check_existing,
             ..Default::default()
         };
+        if replace {
+            use meerschaum_connector::replace::{WindowBound, resolve_window};
+            let begin = date_bound(&ctx, kw_item("begin")?.as_ref())?;
+            let end = date_bound(&ctx, kw_item("end")?.as_ref())?;
+            match resolve_window(
+                &p,
+                &frame,
+                WindowBound::given_or_from_rows(begin),
+                WindowBound::given_or_from_rows(end),
+            ) {
+                Ok((b, e)) => (opts.begin, opts.end) = (b, e),
+                Err(e) => return success_to_py(py, &SuccessTuple::fail(e)),
+            }
+            opts.replace = true;
+            opts.params = match kw_item("params")? {
+                Some(params) => py_to_core(&params)?.as_map().cloned(),
+                None => None,
+            };
+        }
         let c = self.conn(py)?;
         let before = p.parameters().get("valkey").cloned();
         let (res, after) = block_on(py, async move {
@@ -1111,7 +1142,8 @@ impl PyValkeyConnector {
     ) -> PyResult<Bound<'py, PyAny>> {
         let u = core_user(user)?;
         let c = self.conn(py)?;
-        let id = block_on(py, async move { c.valkey_get_user_id(&u).await });
+        // A failed read raises (as the SQL connector's does), never `None` ("no such user").
+        let id = block_on(py, async move { c.valkey_get_user_id(&u).await }).map_err(conn_err)?;
         opt_string_out(py, id)
     }
 
@@ -1137,7 +1169,9 @@ impl PyValkeyConnector {
     ) -> PyResult<Bound<'py, PyAny>> {
         let u = core_user(user)?;
         let c = self.conn(py)?;
-        let attrs = block_on(py, async move { c.valkey_get_user_attributes(&u).await });
+        // A failed read raises: `None` means "no attributes", which grants every scope.
+        let attrs = block_on(py, async move { c.valkey_get_user_attributes(&u).await })
+            .map_err(conn_err)?;
         match attrs {
             Some(m) => core_to_py(py, &Value::Map(m)),
             None => Ok(py.None().into_bound(py)),
@@ -1172,7 +1206,8 @@ impl PyValkeyConnector {
     ) -> PyResult<Bound<'py, PyAny>> {
         let u = core_user(user)?;
         let c = self.conn(py)?;
-        let h = block_on(py, async move { c.valkey_get_user_password_hash(&u).await });
+        let h = block_on(py, async move { c.valkey_get_user_password_hash(&u).await })
+            .map_err(conn_err)?;
         opt_string_out(py, h)
     }
 
@@ -1185,7 +1220,7 @@ impl PyValkeyConnector {
     ) -> PyResult<Bound<'py, PyAny>> {
         let u = core_user(user)?;
         let c = self.conn(py)?;
-        let t = block_on(py, async move { c.valkey_get_user_type(&u).await });
+        let t = block_on(py, async move { c.valkey_get_user_type(&u).await }).map_err(conn_err)?;
         opt_string_out(py, t)
     }
 

@@ -63,7 +63,7 @@ def test_the_facade_reaches_the_stack_database_actions():
         subactions = get_subactions(action)
         assert 'postgres' in subactions, (action, list(subactions))
         assert subactions['postgres'].__name__ == function
-        assert '(v5)' in (subactions['postgres'].__doc__ or '')
+        assert 'PostgreSQL' in (subactions['postgres'].__doc__ or '')
     # A call reaches the native subaction (it refuses an extra word before touching Docker).
     success, message = actions['backup'](['postgres', 'extra'])
     assert not success and 'takes no word' in message, message

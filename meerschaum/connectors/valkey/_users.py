@@ -106,7 +106,8 @@ def get_user_id(
     debug: bool = False
 ) -> Union[str, None]:
     """
-    Return the user ID for a username.
+    Return the user ID for a username (`None` if it is not registered).
+    A read that fails raises `ConnectionError`.
     """
     return self._rust_client().get_user_id(user)
 
@@ -129,7 +130,9 @@ def get_user_attributes(
     debug: bool = False
 ) -> Union[Dict[str, Any], None]:
     """
-    Return the user's attributes.
+    Return the user's attributes (`None` if there are none).
+    A read that fails raises `ConnectionError`: it never reads as "no attributes",
+    which grants every scope.
     """
     return self._rust_client().get_user_attributes(user)
 
@@ -163,7 +166,8 @@ def get_user_password_hash(
     **kw: Any
 ) -> Union[str, None]:
     """
-    Return the password hash for a user.
+    Return the password hash for a user (`None` if there is none).
+    A read that fails raises `ConnectionError`.
     """
     return self._rust_client().get_user_password_hash(user)
 
@@ -175,6 +179,7 @@ def get_user_type(
     **kw: Any
 ) -> Union[str, None]:
     """
-    Return the user's type.
+    Return the user's type (`None` if there is none).
+    A read that fails raises `ConnectionError`.
     """
     return self._rust_client().get_user_type(user)

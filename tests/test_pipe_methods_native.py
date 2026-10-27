@@ -1085,8 +1085,9 @@ def _edge_docs(case):
 def test_deduplicate_honors_workers(case, w15l2_plugin, native_calls):
     """
     The chunks run concurrently on a thread-safe instance (the instance records how many
-    `get_pipe_data()` calls are in flight at once) and no chunk loses or gains a row, with rows
-    on the chunk edges. The test instance serializes its writes with a file lock, as an
+    `get_pipe_data()` calls of the test's pipes are in flight at once, not the background reads
+    of the sync status a chunk's sync records) and no chunk loses or gains a row, with rows on
+    the chunk edges. The test instance serializes its writes with a file lock, as an
     `IS_THREAD_SAFE` connector must.
     """
     from meerschaum.utils.dataframe import parse_df_datetimes

@@ -46,6 +46,47 @@ def load_user_or_token_from_manager(username_or_token_id: str):
     return user
 
 
+def principal_from_authorization(authorization: Optional[str]) -> Any:
+    """
+    Return the user or token an `Authorization` header authenticates, or `None`: a user's JWT
+    (`Bearer <jwt>`, from `/login`) or an API token (`Bearer mrsm-key:...`, `Basic mrsm-key:...`
+    or bare `mrsm-key:...`). The host's internal tokens name no principal and do not count.
+    """
+    if not authorization or not isinstance(authorization, str):
+        return None
+    scheme, _, credentials = authorization.strip().partition(' ')
+    if not credentials:
+        scheme, credentials = '', scheme
+    credentials = credentials.strip()
+    if scheme and scheme.lower() not in ('bearer', 'basic'):
+        return None
+    if credentials.startswith('mrsm-key:'):
+        from meerschaum.api._tokens import get_token_from_authorization
+        try:
+            return get_token_from_authorization(credentials)
+        except Exception:
+            return None
+    if scheme.lower() != 'bearer':
+        return None
+    from meerschaum.api._oauth2 import decode_jwt
+    try:
+        claims = decode_jwt(credentials)
+    except Exception:
+        return None
+    if not isinstance(claims, dict):
+        return None
+    from meerschaum.api.host import TOKEN_CLAIM
+    if claims.get(TOKEN_CLAIM, None) is not None:
+        return None
+    subject = claims.get('sub', None)
+    if not subject:
+        return None
+    try:
+        return load_user_or_token_from_manager(str(subject))
+    except Exception:
+        return None
+
+
 def install_user_loader() -> None:
     """
     Register the user loader on `meerschaum.api._oauth2.manager` (once).

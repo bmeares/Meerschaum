@@ -13,7 +13,7 @@ Requests and results cross as JSON text.
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import date, datetime, time, timedelta, timezone
 
 import meerschaum as mrsm
 from meerschaum.utils.typing import Any, Dict, List, Optional, Union
@@ -86,6 +86,38 @@ def _bound(value: Union[datetime, int, str, None]) -> Union[str, int, None]:
     if value.tzinfo is not None:
         value = value.astimezone(timezone.utc).replace(tzinfo=None)
     return value.isoformat()
+
+
+def since_text(value: Union[datetime, date, timedelta, str, None]) -> Optional[str]:
+    """
+    Encode the `since` filter of the run history as ISO 8601 UTC text: a `datetime` (naive
+    means UTC), a `date` (its midnight, UTC), a `timedelta` (that long ago) or a string a
+    `datetime` can be parsed from. `None` and `''` are no filter.
+    """
+    if value is None or value == '':
+        return None
+    if isinstance(value, bool):
+        raise ValueError("`since` must be a datetime, a date, a timedelta or an ISO 8601 string.")
+    if isinstance(value, timedelta):
+        value = datetime.now(timezone.utc) - value
+    elif isinstance(value, str):
+        dateutil_parser = mrsm.attempt_import('dateutil.parser')
+        try:
+            value = dateutil_parser.parse(value)
+        except (ValueError, OverflowError):
+            raise ValueError(f"`since` must be a datetime, got {value!r}.") from None
+    if hasattr(value, 'to_pydatetime'):
+        value = value.to_pydatetime()
+    if isinstance(value, date) and not isinstance(value, datetime):
+        value = datetime.combine(value, time(), tzinfo=timezone.utc)
+    if not isinstance(value, datetime):
+        raise ValueError(
+            "`since` must be a datetime, a date, a timedelta or an ISO 8601 string "
+            f"(got {value!r})."
+        )
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc).isoformat()
 
 
 def connector_attributes(connector: Any) -> Optional[Dict[str, Any]]:

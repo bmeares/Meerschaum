@@ -436,7 +436,8 @@ pub(crate) fn attribute_maps(
 /// `_core.sync_pipe(pipe, connector, df, begin=None, end=None, check_existing=True,
 /// enforce_dtypes=True, chunksize=-1, infer=False, params=None, force=False, retries=10,
 /// min_seconds=1.0, workers=None, kwargs=None, connectors=None, attributes=None, inplace=True,
-/// debug=False)`: sync the data into the pipe's table through the engine's ordinary flow
+/// replace=False, debug=False)`: sync the data into the pipe's table through the engine's
+/// ordinary flow (`replace`: the rows replace the window `[begin, end)`, rc15)
 /// (module docs). `connector` is the pipe instance's `_core.SqlConnector` (`None` for an
 /// instance that is not SQL: `api:`, `valkey:`, custom); `infer` syncs from the pipe's source
 /// instead of `df` (v4's `pipe.sync()` without data); `connectors` maps keys to the other
@@ -447,7 +448,8 @@ pub(crate) fn attribute_maps(
 #[pyo3(signature = (
     pipe, connector, df=None, begin=None, end=None, check_existing=true, enforce_dtypes=true,
     chunksize=Some(-1), infer=false, params=None, force=false, retries=10, min_seconds=1.0,
-    workers=None, kwargs=None, connectors=None, attributes=None, inplace=true, debug=false
+    workers=None, kwargs=None, connectors=None, attributes=None, inplace=true, replace=false,
+    debug=false
 ))]
 #[allow(clippy::too_many_arguments)]
 pub fn sync_pipe<'py>(
@@ -470,6 +472,7 @@ pub fn sync_pipe<'py>(
     connectors: Option<&Bound<'py, PyDict>>,
     attributes: Option<&Bound<'py, PyDict>>,
     inplace: bool,
+    replace: bool,
     debug: bool,
 ) -> PyResult<Bound<'py, PyDict>> {
     let out = PyDict::new(py);
@@ -518,6 +521,7 @@ pub fn sync_pipe<'py>(
         min_seconds,
         workers,
         extra,
+        replace,
         ..Default::default()
     };
     // The raw parameters: the engine resolves them against the registered ones.

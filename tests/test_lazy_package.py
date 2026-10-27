@@ -22,7 +22,8 @@ REPO = pathlib.Path(__file__).resolve().parent.parent
 
 ### What the package namespace held once the eager `__init__` had run.
 EAGER_NAMES = (
-    'atexit', 'SuccessTuple', 'attempt_import', 'Pipe', 'SyncResult', 'Pipeline', 'Plugin', 'Venv',
+    'atexit', 'SuccessTuple', 'attempt_import', 'Pipe', 'SyncResult', 'Pipeline', 'Plan',
+    'RunResult', 'get_pipelines', 'get_runs', 'Plugin', 'Venv',
     'Job', 'make_executor', 'get_connector', 'Connector', 'InstanceConnector', 'make_connector',
     'get_pipes', 'pprint', '__version__', 'get_config', 'entry', '_close_pools', '__pdoc__',
     '__all__', 'actions', 'config', 'connectors', 'jobs', 'plugins', 'utils',

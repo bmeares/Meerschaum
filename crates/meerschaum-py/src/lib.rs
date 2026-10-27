@@ -37,6 +37,7 @@ pub mod entry_api;
 pub mod facade;
 pub mod ffi_export;
 pub mod ffi_import;
+pub mod instance_features_api;
 pub mod jobs_api;
 pub mod kernel_api;
 pub mod logging;
@@ -51,6 +52,7 @@ pub mod polars_bridge;
 pub mod runtime;
 pub mod sql_api;
 pub mod static_config;
+pub mod status_api;
 pub mod sync_api;
 pub mod trace;
 pub mod valkey_api;
@@ -160,6 +162,12 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
 
     // `Pipe` methods over an instance: get_data, filter_existing, deduplicate, ... (wave 15, L2)
     pipe_methods_api::register(m)?;
+
+    // Protected connectors and `Pipe.verify_schema()` (rc15, Q20 / Q32)
+    instance_features_api::register(m)?;
+
+    // Per-pipe sync status: `pipe.get_sync_status()`, `mrsm.get_sync_statuses()` (rc15, C2)
+    status_api::register(m)?;
 
     // `meerschaum.jobs.Job`, the executors and `utils.daemon.Daemon` over `meerschaum-jobs` (wave 16, S)
     m.add_function(wrap_pyfunction!(main_api::main, m)?)?;

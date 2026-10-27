@@ -565,6 +565,35 @@ class Job:
         """
         return self._core.sysargs
 
+    @property
+    def health(self) -> Dict[str, Any]:
+        """
+        Return how the job's laps go (a job that repeats its work: `--loop`, `-s`, `--listen`).
+
+        Returns
+        -------
+        A dictionary with the keys:
+
+        - `state`: `'healthy'` (the last lap succeeded), `'failing'` (the last lap failed),
+          `'stalled'` (no lap for three times the expected interval, and at least a minute;
+          an hour without a sync for `--listen`; at least an hour for a first lap),
+          `'stopped'` (not running, or paused) or `'unknown'` (nothing recorded yet, e.g.
+          `'first sync in progress'`).
+        - `last_success`, `last_lap`: ISO-8601 UTC timestamps (or `None`).
+        - `consecutive_failures`: laps that failed in a row.
+        - `expected_interval_seconds`: how often laps are expected (`--min-seconds`, the
+          schedule's period, an hour for `--listen`), or `None`.
+        - `message`: what to show next to the state, e.g. `'last good sync 2 min ago'`.
+
+        Examples
+        --------
+        >>> job = Job('weather', 'sync pipes -c plugin:noaa --loop')
+        >>> success, msg = job.start()
+        >>> job.health['state']  # Before its first lap ends.
+        'unknown'
+        """
+        return self._core.health()
+
     def get_daemon_properties(self) -> Dict[str, Any]:
         """
         Return the `properties` dictionary for the job's daemon.

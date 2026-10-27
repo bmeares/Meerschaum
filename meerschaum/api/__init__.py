@@ -6,7 +6,8 @@
 Meerschaum API backend. Start an API instance with `start api`.
 
 The API server is the native `mrsm` server (Rust). This package is the Python side of it: the
-helpers `@api_plugin` functions import (`app`, `get_api_connector`, `get_pipe`, `ScopedAuth`, ...)
+helpers `@api_plugin` functions import (`app`, `get_api_connector`, `get_pipe`, `ScopedAuth`,
+`session_user`, `optional_session_user`, `mount_static`, ...)
 and the API host (`meerschaum.api.host`), which serves what only Python can: `@api_plugin` routes,
 plugin MCP tools and the Dash web console with the plugin pages that register into it.
 """
@@ -148,19 +149,40 @@ _allowed_route_group_patterns = permissions_config.get('routes', {}).get('allowl
 if _allowed_route_group_patterns is None:
     _allowed_route_group_patterns = ['*']
 
+### The public preset (`api:permissions:preset: public`, or `start api --public` through the
+### host configuration): only login, health, version, plugin routes and plugin pages are served,
+### so the console's own pages are not (the login page and plugin pages still are).
+public_preset = bool(get_uvicorn_config().get('public', False)) or (
+    str(permissions_config.get('preset', None) or '').strip().lower() == 'public'
+)
+_PUBLIC_ROUTE_GROUPS = ('version', 'misc')
+
 
 def route_group_is_allowed(route_group: str) -> bool:
     """
     Return whether a group of core routes (or the console's own pages, group `dash`) may be served,
-    according to the patterns in `api:permissions:routes:allowlist`.
+    according to the patterns in `api:permissions:routes:allowlist`. Under the public preset only
+    the public groups are, plus the ones the allowlist names explicitly (any pattern but `*`).
     """
     if any(fnmatch(route_group, pattern) for pattern in permissions_config.get(
         'routes', {}).get('disabled', [])):
         return False
+    if public_preset:
+        return route_group in _PUBLIC_ROUTE_GROUPS or any(
+            fnmatch(route_group, pattern)
+            for pattern in _allowed_route_group_patterns
+            if pattern != '*'
+        )
     return any(
         fnmatch(route_group, pattern)
         for pattern in _allowed_route_group_patterns
     )
+
+
+### The public preset serves no API docs, nor the schema they read, unless the allowlist names
+### the `docs` group (as on the Rust server, which never forwards those paths to the host then).
+openapi_enabled = (not public_preset) or route_group_is_allowed('docs')
+docs_enabled = docs_enabled and openapi_enabled
 
 
 ### Meerschaum's own MCP server at `/mcp`, authenticated per-tool by OAuth2 scope.
@@ -366,7 +388,7 @@ app = fastapi.FastAPI(
     },
     docs_url=(None if not docs_enabled else endpoints['docs']),
     redoc_url=(None if not docs_enabled else endpoints['redoc']),
-    openapi_url=endpoints['openapi'],
+    openapi_url=(endpoints['openapi'] if openapi_enabled else None),
     openapi_tags=[
         {
             'name': 'Pipes',
@@ -434,6 +456,8 @@ def __getattr__(name: str):
 
 ### Import everything else within the API.
 from meerschaum.api._oauth2 import manager, ScopedAuth, CurrentScopes
+### For `@api_plugin` routes: the web console's signed-in user and static directories.
+from meerschaum.api._plugin_helpers import session_user, optional_session_user, mount_static
 
 ### Execute the API plugins functions (the API host runs them itself, in plugin order).
 for module_name, functions_list in ({} if _host_mode else _api_plugins).items():

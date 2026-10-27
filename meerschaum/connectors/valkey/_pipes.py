@@ -260,11 +260,25 @@ def sync_pipe(
     check_existing: bool, default True
         If `False`, do not check the documents against existing data and instead insert directly.
 
+    kwargs: Any
+        `replace=True` clears the pipe's documents of `[begin, end)` (matching `params`), then
+        writes the rows of `df` (a bound that is not given is the rows' own datetime range).
+
     Returns
     -------
     A `SuccessTuple` indicating success.
     """
-    return self._rust_client().sync_pipe(pipe, df, check_existing=check_existing)
+    replace_kw = (
+        {
+            'replace': True,
+            'begin': kwargs.get('begin', None),
+            'end': kwargs.get('end', None),
+            'params': kwargs.get('params', None),
+        }
+        if kwargs.get('replace', False)
+        else {}
+    )
+    return self._rust_client().sync_pipe(pipe, df, check_existing=check_existing, **replace_kw)
 
 
 def get_pipe_columns_types(

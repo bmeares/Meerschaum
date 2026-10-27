@@ -353,7 +353,8 @@ def stop_check_jobs_thread():
 def get_executor_keys_from_context() -> str:
     """
     Return the configured executor (`meerschaum:executor`).
-    If we are running on the host with the default root, default to `'systemd'`.
+    Otherwise, on a host with `systemd`, return `'systemd'` (for any root directory) unless
+    Meerschaum runs from a source checkout or a development build.
     Otherwise return `'local'`.
     """
     return _native.core().jobs_executor_keys_from_context()

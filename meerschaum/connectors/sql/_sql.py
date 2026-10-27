@@ -7,6 +7,8 @@ This module contains SQLConnector functions for executing SQL queries.
 
 from __future__ import annotations
 
+import contextlib
+
 import meerschaum as mrsm
 from meerschaum.utils.typing import (
     Union, List, Dict, SuccessTuple, Optional, Any, Iterable, Callable,
@@ -30,6 +32,115 @@ _bulk_flavors = {
 _disallow_chunks_flavors = ['duckdb']
 _max_chunks_flavors = {'sqlite': 1000, 'geopackage': 1000}
 SKIP_READ_TRANSACTION_FLAVORS: list[str] = ['mssql']
+
+### How a read on a protected connector (without the allowance) keeps the database from changing:
+### a read-only transaction, or SQLite's `query_only` (its Python driver runs DDL outside
+### transactions). Every flavor also rolls the read's transaction back. (Oracle's read-only
+### transactions cannot read a table altered in the last few seconds, ORA-01466: the rollback
+### and the statement check keep its reads from writing.)
+_SET_READ_ONLY_FLAVORS = {
+    'postgresql', 'postgis', 'timescaledb', 'timescaledb-ha', 'citus', 'cockroachdb',
+}
+_START_READ_ONLY_FLAVORS = {'mysql', 'mariadb'}
+_QUERY_ONLY_FLAVORS = {'sqlite', 'geopackage'}
+
+
+def _read_guard(self, query: Any) -> Tuple[bool, Optional[str]]:
+    """
+    How a read of the caller's `query` runs on this connector.
+
+    Returns `(False, None)` normally. On a protected connector without the allowance
+    (`--allow-protected`, `MRSM_ALLOW_PROTECTED=1`, `allow_protected()`), returns `(True, None)`
+    when `query` is one read statement (it then runs read-only, see `_read_only_connection()`),
+    else `(True, refusal)`.
+    """
+    from meerschaum.connectors import protected_refusal
+    refusal = protected_refusal(self, 'execute SQL')
+    if refusal is None:
+        return False, None
+    from meerschaum import _core
+    if _core.sql_is_read_statement(str(query), self.flavor):
+        return True, None
+    return True, refusal
+
+
+@contextlib.contextmanager
+def _read_only_connection(self):
+    """
+    Yield a new connection for one read on a protected connector: its transaction is read-only
+    on PostgreSQL and MySQL / MariaDB, SQLite refuses writes (`PRAGMA query_only`), and the
+    transaction is rolled back at the end.
+    """
+    connection = self.engine.connect()
+    query_only = self.flavor in _QUERY_ONLY_FLAVORS
+    try:
+        statement = (
+            'PRAGMA query_only = ON'
+            if query_only
+            else (
+                'START TRANSACTION READ ONLY'
+                if self.flavor in _START_READ_ONLY_FLAVORS
+                else (
+                    'SET TRANSACTION READ ONLY'
+                    if self.flavor in _SET_READ_ONLY_FLAVORS
+                    else None
+                )
+            )
+        )
+        if statement is not None:
+            try:
+                connection.exec_driver_sql(statement)
+            except Exception:
+                ### The rollback at the end still undoes the read's writes.
+                connection.rollback()
+                if query_only:
+                    raise
+        yield connection
+    finally:
+        try:
+            connection.rollback()
+        except Exception:
+            pass
+        if query_only:
+            try:
+                connection.exec_driver_sql('PRAGMA query_only = OFF')
+                connection.rollback()
+            except Exception:
+                ### Never return a read-only connection to the pool.
+                connection.invalidate()
+        connection.close()
+
+
+class _HeldIterator:
+    """
+    Iterate over a read's chunks, then close the read-only connection they come from (also
+    when the iterator is dropped before its end, so a SQLite connection never goes back to the
+    pool with `query_only` on).
+    """
+
+    def __init__(self, iterator: Iterable[Any], stack: contextlib.ExitStack):
+        self._iterator = iter(iterator)
+        self._stack = stack
+
+    def __iter__(self) -> '_HeldIterator':
+        return self
+
+    def __next__(self) -> Any:
+        try:
+            return next(self._iterator)
+        except BaseException:
+            self.close()
+            raise
+
+    def close(self) -> None:
+        """Close the connection the chunks come from."""
+        self._stack.close()
+
+    def __del__(self) -> None:
+        try:
+            self.close()
+        except Exception:
+            pass
 
 
 def read(
@@ -121,13 +232,17 @@ def read(
         If omitted, a Pandas DataFrame will be fetched and converted to a Dask DataFrame.
 
     silent: bool, default False
-        If `True`, don't raise warnings in case of errors.
-        Defaults to `False`.
+        If `True`, return `None` instead of raising when the query fails, without a warning
+        (Meerschaum 4's behavior). By default, database errors raise.
 
     Returns
     -------
-    A `pd.DataFrame` (default case), or an iterator, or a list of dataframes / iterators,
-    or `None` if something breaks.
+    A `pd.DataFrame` (default case), or an iterator, or a list of dataframes / iterators.
+    Raises the database error if the query fails (`None` with `silent=True`).
+    On a protected connector (`protected: true`) without the allowance (`--allow-protected`,
+    `MRSM_ALLOW_PROTECTED=1`, `meerschaum.connectors.allow_protected()`), the query must be one
+    read statement (else `PermissionError`), and it runs in a transaction that is rolled back
+    (read-only on PostgreSQL and MySQL / MariaDB).
 
     """
     if chunks is not None and chunks <= 0:
@@ -227,6 +342,13 @@ def read(
         else format_sql_query_for_dask(str_query)
     )
 
+    ### A protected connector (without `--allow-protected`) reads one read statement, read-only.
+    read_only, refusal = _read_guard(self, str_query)
+    if refusal is not None:
+        if silent:
+            return None
+        raise PermissionError(refusal)
+
     def _get_chunk_args_kwargs(_chunk):
         return filter_arguments(
             chunk_hook,
@@ -320,7 +442,25 @@ def read(
                     )
                     return chunk_generator, to_return
 
-                if self.flavor in SKIP_READ_TRANSACTION_FLAVORS:
+                if read_only:
+                    ### The read-only connection stays open while the chunks are read: an
+                    ### iterator holds it until it ends, other reads take their chunks here.
+                    stack = contextlib.ExitStack()
+                    held = False
+                    try:
+                        connection = stack.enter_context(_read_only_connection(self))
+                        connection.execution_options(stream_results=stream_results)
+                        chunk_generator, to_return = get_chunk_generator(connection)
+                        if to_return is not None and as_iterator:
+                            held = True
+                            return _HeldIterator(to_return, stack)
+                        if to_return is None and chunksize is not None:
+                            import itertools
+                            chunk_generator = list(itertools.islice(chunk_generator, chunks))
+                    finally:
+                        if not held:
+                            stack.close()
+                elif self.flavor in SKIP_READ_TRANSACTION_FLAVORS:
                     chunk_generator, to_return = get_chunk_generator(self.engine)
                 else:
                     with self.engine.begin() as transaction:
@@ -332,16 +472,13 @@ def read(
                 if to_return is not None:
                     return to_return
 
-    except Exception as e:
+    except Exception:
         if debug:
             dprint(f"[{self}] Failed to execute query:\n\n{query_or_table}\n\n")
-        if not silent:
-            warn(str(e), stacklevel=3)
-        from meerschaum.utils.formatting import print_exception
-        if not silent:
-            print_exception()
-
-        return None
+        ### Database errors raise; `silent=True` returns `None` without a warning (v4's result).
+        if silent:
+            return None
+        raise
 
     if is_dask and dd is not None:
         ddf = ddf.reset_index()
@@ -364,11 +501,9 @@ def read(
                 read_chunks += 1
                 if chunks is not None and read_chunks >= chunks:
                     break
-        except Exception as e:
-            warn(f"[{self}] Failed to retrieve query results:\n" + str(e), stacklevel=3)
-            from meerschaum.utils.formatting import print_exception
+        except Exception:
             if not silent:
-                print_exception()
+                raise
 
     ### If no chunks returned, read without chunks
     ### to get columns
@@ -376,7 +511,9 @@ def read(
         with warnings.catch_warnings():
             warnings.filterwarnings('ignore', 'case sensitivity issues')
             _ = read_sql_query_kwargs.pop('chunksize', None)
-            with self.engine.begin() as connection:
+            with (
+                _read_only_connection(self) if read_only else self.engine.begin()
+            ) as connection:
                 chunk_list.append(
                     pd.read_sql_query(
                         formatted_query,
@@ -440,46 +577,82 @@ def value(
         **NOTE:** This is always `True` for DuckDB.
 
     **kw: Any
-        See `args`.
+        See `args`. `silent=True` returns `None` instead of raising when the query fails.
 
     Returns
     -------
-    Any value returned from the query.
+    Any value returned from the query (`None` when it returns no rows).
+    Raises the database error if the query fails (`None` with `silent=True`).
+    On a protected connector without the allowance, the query must be one read statement
+    (else `PermissionError`), and it runs read-only, as in `read()`.
 
     """
     ### A missing `sql` extra is an `ImportError`, not a swallowed failure.
     import_sqlalchemy()
+    silent = kw.get('silent', False)
     if self.flavor == 'duckdb':
         use_pandas = True
     if use_pandas:
         import_pandas_for_sql()
+        df = self.read(query, *args, **kw)
+        if df is None:
+            return None
         try:
-            return self.read(query, *args, **kw).iloc[0, 0]
-        except Exception:
+            return df.iloc[0, 0]
+        except IndexError:
             return None
 
-    _close = kw.get('close', True)
-    _commit = kw.get('commit', (self.flavor != 'mssql'))
+    _close = kw.pop('close', True)
+    _commit = kw.pop('commit', (self.flavor != 'mssql'))
 
+    ### A protected connector (without `--allow-protected`) reads one read statement, read-only.
+    read_only, refusal = _read_guard(self, query)
+    if refusal is not None:
+        if silent:
+            return None
+        raise PermissionError(refusal)
+    if read_only:
+        try:
+            with _read_only_connection(self) as connection:
+                result = self.exec(
+                    query,
+                    *args,
+                    close=False,
+                    commit=False,
+                    _connection=connection,
+                    _skip_protected=True,
+                    **kw
+                )
+                first = result.first() if result is not None else None
+                return first[0] if first is not None else None
+        except Exception:
+            if not silent:
+                raise
+            return None
+
+    ### Database errors raise; `silent=True` returns `None` without a warning (v4's result).
+    result, connection = self.exec(
+        query,
+        *args,
+        with_connection=True,
+        close=False,
+        commit=_commit,
+        _skip_protected=True,
+        **kw
+    )
     try:
-        result, connection = self.exec(
-            query,
-            *args,
-            with_connection=True,
-            close=False,
-            commit=_commit,
-            **kw
-        )
         first = result.first() if result is not None else None
         _val = first[0] if first is not None else None
-    except Exception as e:
-        warn(e, stacklevel=3)
-        return None
-    if _close:
-        try:
-            connection.close()
-        except Exception as e:
-            warn("Failed to close connection with exception:\n" + str(e))
+    except Exception:
+        if not silent:
+            raise
+        _val = None
+    finally:
+        if _close and connection is not None:
+            try:
+                connection.close()
+            except Exception as e:
+                warn("Failed to close connection with exception:\n" + str(e))
     return _val
 
 
@@ -528,7 +701,8 @@ def exec(
         Arguments passed to `sqlalchemy.engine.execute`.
 
     silent: bool, default False
-        If `True`, suppress warnings.
+        If `True`, return `None` instead of raising when the query fails, without a warning
+        (Meerschaum 4's behavior). By default, database errors raise.
 
     commit: Optional[bool], default None
         If `True`, commit the changes after execution.
@@ -547,6 +721,9 @@ def exec(
     Returns
     -------
     The `sqlalchemy` result object, or a tuple with the connection if `with_connection` is provided.
+    Raises the database error if the query fails (`None` with `silent=True`), and
+    `PermissionError` on a protected connector unless writes are allowed
+    (`--allow-protected`, `MRSM_ALLOW_PROTECTED=1`, `meerschaum.connectors.allow_protected()`).
 
     """
     if isinstance(query, (list, tuple)):
@@ -557,6 +734,16 @@ def exec(
             debug=debug,
             **kw
         )
+
+    ### A protected connector refuses raw SQL unless writes are allowed
+    ### (`--allow-protected`, `MRSM_ALLOW_PROTECTED=1`, `allow_protected()`).
+    if not kw.pop('_skip_protected', False):
+        from meerschaum.connectors import protected_refusal
+        refusal = protected_refusal(self, 'execute SQL')
+        if refusal is not None:
+            if silent:
+                return (None, None) if with_connection else None
+            raise PermissionError(refusal)
 
     from meerschaum.utils.packages import attempt_import
     sqlalchemy = import_sqlalchemy()
@@ -601,14 +788,20 @@ def exec(
     except Exception as e:
         if debug:
             dprint(f"[{self}] Failed to execute query:\n\n{query}\n\n{e}")
-        if not silent:
-            warn(str(e), stacklevel=3)
         result = None
         if _commit:
             if debug:
                 dprint(f"[{self}] Rolling back failed transaction...")
             transaction.rollback()
             connection = self.get_connection(rebuild=True)
+        ### Database errors raise; `silent=True` returns `None` without a warning (v4's result).
+        if not silent:
+            if _connection is None and not _close:
+                try:
+                    connection.close()
+                except Exception:
+                    pass
+            raise
     finally:
         if _close:
             connection.close()
@@ -667,6 +860,12 @@ def exec_queries(
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.packages import attempt_import
+    from meerschaum.connectors import protected_refusal
+    refusal = protected_refusal(self, 'execute SQL')
+    if refusal is not None:
+        if silent:
+            return []
+        raise PermissionError(refusal)
     sqlalchemy, sqlalchemy_orm = import_sqlalchemy('sqlalchemy', 'sqlalchemy.orm')
     session = sqlalchemy_orm.Session(self.engine)
 
@@ -799,6 +998,15 @@ def to_sql(
 
     if name is None:
         error(f"Name must not be `None` to insert data into {self}.")
+
+    from meerschaum.connectors import protected_refusal
+    refusal = protected_refusal(self, f"write to table '{name}'")
+    if refusal is not None:
+        if not silent:
+            warn(refusal, stack=False)
+        if as_dict:
+            return {'success': False, 'msg': refusal, 'target': name}
+        return (False, refusal) if as_tuple else False
 
     ### We're requiring `name` to be positional, and sometimes it's passed in from background jobs.
     kw.pop('name', None)

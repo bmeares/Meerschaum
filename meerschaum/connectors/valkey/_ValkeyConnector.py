@@ -150,7 +150,11 @@ class ValkeyConnector(InstanceConnector):
             return self._client
 
         if 'uri' in self.__dict__:
-            self._client = valkey.Valkey.from_url(self.__dict__.get('uri'))
+            ### `?protected=true` is Meerschaum's (`Connector.protected`), not the client's.
+            from meerschaum.connectors.sql._SQLConnector import _strip_uri_param
+            self._client = valkey.Valkey.from_url(
+                _strip_uri_param(self.__dict__.get('uri'), 'protected')
+            )
             return self._client
 
         optional_kwargs = {

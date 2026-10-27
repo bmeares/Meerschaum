@@ -919,6 +919,7 @@ impl PyApiConnector {
             begin: None,
             end: None,
             extra,
+            ..Default::default()
         };
         let c = self.conn();
         let res = block_on(py, async move { c.sync_pipe(&p, frame, &opts).await });

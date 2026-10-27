@@ -11,6 +11,7 @@ from __future__ import annotations
 import contextlib
 import os
 import sys
+import threading
 import traceback
 
 from meerschaum.utils.typing import Any, Dict, List, Optional
@@ -103,6 +104,26 @@ def run_api_plugins(app, debug: bool = False) -> List[str]:
     return ran
 
 
+def probe_plugin_cache() -> Optional[threading.Thread]:
+    """
+    When a plugin uses `meerschaum.utils.cache`, ask its Valkey connector (`api:cache:connector`)
+    in the background, so that the console warns once at startup when it does not answer.
+    """
+    if 'meerschaum.utils.cache' not in sys.modules:
+        return None
+
+    def _probe():
+        try:
+            from meerschaum.utils.cache import probe
+            probe()
+        except Exception:
+            pass
+
+    thread = threading.Thread(target=_probe, name='mrsm-cache-probe', daemon=True)
+    thread.start()
+    return thread
+
+
 def build_app(load_plugins: bool = True, debug: bool = False):
     """
     Build the host app once: install the user loader, import the plugins, run the API plugins,
@@ -127,6 +148,7 @@ def build_app(load_plugins: bool = True, debug: bool = False):
     ### The internal routes come first so a plugin cannot shadow them.
     _internal.register(app)
     run_api_plugins(app, debug=debug)
+    probe_plugin_cache()
     ### PARITY: v4's `--no-dash` serves no console and no plugin pages (no Dash app is mounted).
     if dash_enabled():
         with _keep_venv_order():

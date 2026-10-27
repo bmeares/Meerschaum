@@ -76,7 +76,41 @@ fn is_program(path: &std::path::Path) -> bool {
 /// and re-evaluated on every call so that a changed `MRSM_BIN` is seen.
 pub fn ensure_self_command(py: Python<'_>) -> PyResult<()> {
     meerschaum_core::self_exe::set_self_command(python_self_command(py)?);
+    note_source_checkout(py);
     Ok(())
+}
+
+/// A `meerschaum` package imported from a source checkout (the repository's `meerschaum/` next to
+/// its `Cargo.toml` and `crates/`, `PYTHONPATH` or an editable install) is a development install:
+/// its jobs never choose the `systemd` executor by themselves (`meerschaum_jobs::job::
+/// is_development_install`), so the test suites never install units on a developer's or a CI
+/// host's systemd. A wheel installed in `site-packages` is not one.
+fn note_source_checkout(py: Python<'_>) {
+    static NOTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    if NOTED.load(std::sync::atomic::Ordering::SeqCst) {
+        return;
+    }
+    {
+        // The package as already imported (never imported from here: no re-entry).
+        let file: Option<String> = py
+            .import("sys")
+            .and_then(|sys| sys.getattr("modules"))
+            .and_then(|modules| modules.get_item("meerschaum"))
+            .and_then(|m| m.getattr("__file__"))
+            .and_then(|f| f.extract())
+            .ok();
+        let Some(file) = file else {
+            return;
+        };
+        NOTED.store(true, std::sync::atomic::Ordering::SeqCst);
+        let checkout = std::path::Path::new(&file)
+            .parent()
+            .and_then(std::path::Path::parent)
+            .is_some_and(|repo| repo.join("Cargo.toml").is_file() && repo.join("crates").is_dir());
+        if checkout {
+            meerschaum_jobs::job::set_development_install(true);
+        }
+    }
 }
 
 /// The OS-level handlers of SIGINT and SIGTERM which the CLI's runtime installed in an earlier run.

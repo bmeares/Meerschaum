@@ -52,15 +52,30 @@ pub fn native_connector_register<'py>(
 ) -> PyResult<Option<Bound<'py, PyTuple>>> {
     let core = core_pipe(pipe, ParamsView::Raw)?;
     let config = crate::facade::publish_live_config(py)?;
+    let allow_writes = config_writes_allowed(py);
     let outcome = py.detach(move || {
         let paths = config.paths();
-        let natives = NativePlugins::open(
-            &paths.plugins_dirs,
-            &meerschaum_cli::native_plugins::cache_path(&paths.root_dir),
+        let natives = Arc::new(
+            NativePlugins::open(
+                &paths.plugins_dirs,
+                &meerschaum_cli::native_plugins::cache_path(&paths.root_dir),
+            )
+            .map_err(|e| e.to_string())?,
+        );
+        // The hook's host calls (`host::plugin_config()`, ...), with this process's trust.
+        let host = facade_host_with(
+            &config,
+            natives.clone(),
+            allow_writes,
+            Some(core.instance_keys().to_string()),
+        );
+        meerschaum_cli::native::manage::native_connector_register_with_host(
+            &natives,
+            &config,
+            &core,
+            Some(host),
         )
-        .map_err(|e| e.to_string())?;
-        meerschaum_cli::native::manage::native_connector_register(&natives, &config, &core)
-            .transpose()
+        .transpose()
     });
     match outcome.map_err(PyRuntimeError::new_err)? {
         None => Ok(None),
@@ -161,6 +176,96 @@ pub fn native_connector_types(py: Python<'_>, refresh: bool) -> PyResult<Bound<'
 pub struct PyNativeConnector {
     inner: Arc<meerschaum_plugin::NativeConnector>,
     keys: String,
+}
+
+impl PyNativeConnector {
+    /// The connector with host services for this call (`host::pipe(...)`, `host::read_sql(...)`,
+    /// `host::plugin_config()`), over the worker session's connectors and the process's live
+    /// config as of now.
+    fn hosted(&self, py: Python<'_>) -> PyResult<meerschaum_plugin::NativeConnector> {
+        let config = crate::facade::publish_live_config(py)?;
+        let natives = py
+            .detach(|| cached_natives(&config, false))
+            .map_err(PyRuntimeError::new_err)?;
+        let host = facade_host(py, &config, natives);
+        Ok(self.inner.as_ref().clone().with_host_services(host))
+    }
+}
+
+/// Whether host calls may write config files as Python's `write_plugin_config()` does: not
+/// inside `replace_config()` (`meerschaum.config._allow_write_missing`).
+pub(crate) fn config_writes_allowed(py: Python<'_>) -> bool {
+    py.import("meerschaum.config")
+        .and_then(|m| m.getattr("_allow_write_missing"))
+        .and_then(|v| v.extract::<bool>())
+        .unwrap_or(true)
+}
+
+/// Host services with the trust of this Python process, over the worker session and a copy of
+/// `config` (the live config's snapshot, which is read-only) that writes as Python would.
+pub(crate) fn facade_host(
+    py: Python<'_>,
+    config: &meerschaum_core::config::Config,
+    natives: Arc<NativePlugins>,
+) -> Arc<dyn meerschaum_plugin::HostServices> {
+    facade_host_with(config, natives, config_writes_allowed(py), None)
+}
+
+/// [`facade_host`] without the interpreter (`allow_writes` read beforehand); `instance` is the
+/// default instance of `host::pipe(...)`.
+fn facade_host_with(
+    config: &meerschaum_core::config::Config,
+    natives: Arc<NativePlugins>,
+    allow_writes: bool,
+    instance: Option<String>,
+) -> Arc<dyn meerschaum_plugin::HostServices> {
+    let config = meerschaum_cli::native_plugins::host_config(config);
+    config.with_state(|s| s.set_allow_writes(allow_writes));
+    meerschaum_cli::native_plugins::local_host(meerschaum_cli::native_plugins::HostEnv::new(
+        crate::facade::worker_session(),
+        config,
+        natives,
+        instance,
+    ))
+}
+
+/// Take the plugin config sections native plugins wrote through host calls into the live
+/// config dictionary (`meerschaum.config.config['plugins'][<name>]`) and into `config`, a
+/// snapshot of it: Python's `get_plugin_config()` and the next native call see them, and
+/// Python's own `write_plugin_config()` does not write the old sections back.
+pub(crate) fn absorb_plugin_config_writes(
+    py: Python<'_>,
+    config: &meerschaum_core::config::Config,
+) -> PyResult<()> {
+    let written = meerschaum_cli::native_plugins::take_written_plugin_configs(config);
+    if written.is_empty() {
+        return Ok(());
+    }
+    let store = crate::config_api::store(py);
+    // A `plugins` section Python never loaded is read from its file when it is first used.
+    let plugins = match store.get_item("plugins")? {
+        Some(plugins) if plugins.is_instance_of::<PyDict>() => plugins.cast_into::<PyDict>()?,
+        _ => return Ok(()),
+    };
+    config.with_state(|s| {
+        use meerschaum_core::config::ConfigValue;
+        let mut in_memory = s.take_config_lossless();
+        if let Some(section) = in_memory
+            .get_mut("plugins")
+            .and_then(ConfigValue::as_map_mut)
+        {
+            for (plugin, value) in &written {
+                if let Ok(value) = serde_json::from_value::<meerschaum_core::Value>(value.clone()) {
+                    section.insert(plugin.clone(), ConfigValue::from_value(&value));
+                }
+            }
+        }
+        s.set_config_lossless(in_memory);
+    });
+    for (plugin, value) in written {
+        plugins.set_item(plugin, json_to_py(py, &value)?)?;
+    }
+    Ok(())
 }
 
 fn not_implemented_or<'py>(
@@ -273,7 +378,7 @@ impl PyNativeConnector {
         if let Some(kwargs) = kwargs.filter(|k| !k.is_none()) {
             context["kwargs"] = crate::convert::py_to_json(kwargs)?;
         }
-        let connector = self.inner.clone();
+        let connector = self.hosted(py)?;
         let method_name = method.to_string();
         let reply = py.detach(move || connector.call(&method_name, context, None));
         match reply {
@@ -291,7 +396,7 @@ impl PyNativeConnector {
     /// `test_connection()`: the module's `test_connection`, `True` when it has none.
     #[pyo3(signature = (**_kw))]
     fn test_connection(&self, py: Python<'_>, _kw: Option<&Bound<'_, PyDict>>) -> PyResult<bool> {
-        let connector = self.inner.clone();
+        let connector = self.hosted(py)?;
         match block_on(py, async move { connector.test_connection().await }) {
             Ok(ok) => Ok(ok),
             Err(ConnectorError::NotImplemented(_)) => Ok(true),
@@ -309,7 +414,7 @@ impl PyNativeConnector {
         pipe: Option<&Bound<'py, PyAny>>,
         kw: Option<&Bound<'py, PyDict>>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        let c = self.inner.clone();
+        let c = Arc::new(self.hosted(py)?);
         if method == "fetch_pipes_keys" {
             let query = crate::api_client_api::keys_query(
                 kwarg(kw, "connector_keys")?.as_ref(),
@@ -404,6 +509,7 @@ impl PyNativeConnector {
                     begin: None,
                     end: None,
                     extra: Map::new(),
+                    ..Default::default()
                 };
                 tuple(block_on(
                     py,

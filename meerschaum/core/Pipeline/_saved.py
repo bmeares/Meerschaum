@@ -96,9 +96,14 @@ def list_pipelines(instance=None):
     """Read registered definitions; legacy metadata is normalized without writing it."""
     pipes = mrsm.get_pipes(connector_keys=['mrsm'], metric_keys=['pipeline'],
                            instance=instance, as_list=True)
-    return {pipe.location_key: _normalize(dict(pipe.get_parameters(apply_symlinks=False)['pipeline']),
-                                         pipe.location_key, pipe.instance_keys)
-            for pipe in pipes if isinstance(pipe.get_parameters(apply_symlinks=False).get('pipeline'), dict)}
+    definitions = {}
+    for pipe in pipes:
+        definition = pipe.get_parameters(apply_symlinks=False).get('pipeline')
+        if isinstance(definition, dict):
+            definitions[pipe.location_key] = _normalize(
+                dict(definition), pipe.location_key, pipe.instance_keys,
+            )
+    return definitions
 
 
 def _read(name, instance=None):
@@ -404,13 +409,12 @@ def copy_pipeline(name, new_name, instance=None):
 
 
 def load_pipeline(name, instance=None):
-    from meerschaum.core.Pipeline import Pipeline, _pipe_from_ref
+    """The saved Pipeline `name` (`mrsm.Pipeline(name, instance=instance)`)."""
+    from meerschaum.core.Pipeline import Pipeline
     definition = _read(name, instance)
-    pipeline = Pipeline([_pipe_from_ref(ref) for ref in definition['targets']],
-                        instance=registration(name, instance).instance_connector, name=name,
-                        parents=definition.get('parents'), children=definition.get('children'))
-    pipeline.definition = definition
-    return pipeline
+    return Pipeline._from_definitions(
+        [definition], registration(name, instance).instance_connector,
+    )
 
 
 def initialize_pipelines(graph=None, instance=None):

@@ -68,9 +68,14 @@ def parse_connector_keys(
     _get_connector_kw.update(kw)
 
     if construct:
-        conn = get_connector(**_get_connector_kw)
+        conn = get_connector(**_get_connector_kw, _warn_undefined=False)
         if conn is None:
-            error(f"Unable to parse connector keys '{keys}'", stack=False)
+            from meerschaum.connectors import _undefined_connector_message
+            attributes = {key: val for key, val in kw.items() if key != 'debug'}
+            undefined = _undefined_connector_message(_type, _label, attributes)
+            ### v4's sentence, then why (a connector defined nowhere).
+            message = f"Unable to parse connector keys '{keys}'"
+            error(f"{message}. {undefined}" if undefined else message, stack=False)
     else:
         connectors_config = get_config('meerschaum', 'connectors', patch=True)
         ### invalid type

@@ -373,6 +373,7 @@ def _sync_native(
     debug: bool,
     inplace: bool,
     kw: Dict[str, Any],
+    replace: bool = False,
 ) -> SyncResult:
     """Run `Pipe.sync()` through `_core.sync_pipe`."""
     if df is None:
@@ -444,6 +445,7 @@ def _sync_native(
             connectors=context['connectors'],
             attributes=context['attributes'],
             inplace=inplace,
+            replace=replace,
             debug=debug,
         )
         if 'declined' in out:
@@ -478,6 +480,9 @@ def _sync_native(
         ### PARITY: v4 treats a tuple as a chunk generator and raises `TypeError` (`next(tuple)`);
         ### pandas accepts it as rows, so it is data here.
         if df_is_chunk_generator(df) and not isinstance(df, tuple):
+            if replace:
+                ### A replaced window is written in one transaction: every chunk at once.
+                return _call(_concat_chunks(list(df)))
             return _sync_generator_native(
                 self,
                 df,
@@ -523,6 +528,31 @@ def _sync_native(
 
     self._invalidate_cache(debug=debug)
     return SyncResult(True, f"Spawned asyncronous sync for {self}.")
+
+
+def _concat_chunks(chunks: List[Any]) -> Any:
+    """
+    One input from the chunks of a generator (for `replace=True`, which writes its window in one
+    transaction): lists of documents are joined, pandas and Polars frames concatenated.
+    """
+    if not chunks:
+        return []
+    if all(isinstance(chunk, list) for chunk in chunks):
+        return [doc for chunk in chunks for doc in chunk]
+    module = type(chunks[0]).__module__.split('.', maxsplit=1)[0]
+    if module in ('pandas', 'geopandas'):
+        pd = mrsm.attempt_import('pandas')
+        return pd.concat(chunks, ignore_index=True)
+    if module == 'polars':
+        pl = mrsm.attempt_import('polars')
+        return pl.concat(chunks, how='diagonal_relaxed')
+    if len(chunks) == 1:
+        return chunks[0]
+    raise TypeError(
+        "Cannot replace a window with chunks of "
+        f"'{type(chunks[0]).__module__}.{type(chunks[0]).__qualname__}': "
+        "pass lists of documents, pandas or Polars DataFrames, or one chunk."
+    )
 
 
 class _Declined(Exception):
@@ -726,6 +756,7 @@ def sync(
     sync_chunks: bool = True,
     parents: Union[bool, int, None] = None,
     children: Union[bool, int, None] = None,
+    replace: bool = False,
     debug: bool = False,
     _inplace: bool = True,
     **kw: Any
@@ -802,6 +833,18 @@ def sync(
         generations. Combine with `parents` for the whole connected slice.
         See `meerschaum.Pipeline` to plan the run first and read the run history.
 
+    replace: bool, default False
+        If `True`, the rows you sync replace the pipe's rows in `[begin, end)` instead of being
+        merged into them: in one transaction, the rows of that window (matching `params`, if
+        given) are deleted and the new rows inserted, so rows missing from the new data are
+        removed. When you pass data, `begin` defaults to the earliest datetime in the data and
+        `end` to just after the latest one, and rows outside `[begin, end)` are not written
+        (the message says how many were skipped). An empty frame with `begin` and `end` clears
+        the window. Without data (a fetch), the window is the fetch's own `[begin, end)`; set
+        `fetch: {replace: true}` in the parameters to do this on every sync. A pipe without a
+        datetime column has one window: the whole table. Valkey instances clear the window
+        then write the rows (no transaction).
+
     on_event: Optional[Callable[[Dict[str, Any]], Any]], default None
         Only with `parents` or `children`: called on this thread with every event of the engine
         run as it happens (`run_started`, `node_started`, `chunk_finished`, `node_finished`,
@@ -821,6 +864,8 @@ def sync(
     With `parents` or `children`, a `meerschaum.core.Pipeline.RunResult` (a `SuccessTuple`
     with the run's `run_id`, `plan`, `outcomes` and `events()`).
     """
+    if replace:
+        kw['replace'] = True
     if parents or children:
         from meerschaum.core.Pipeline import sync_with_graph
         return sync_with_graph(
@@ -865,6 +910,7 @@ def sync(
             and bool(mrsm.get_config('system', 'experimental', 'inplace_sync'))
         ),
         kw=kw,
+        replace=bool(replace),
     )
 
 
@@ -875,6 +921,7 @@ def get_sync_time(
     apply_backtrack_interval: bool = False,
     remote: bool = False,
     round_down: bool = False,
+    silent: bool = False,
     debug: bool = False
 ) -> Union['datetime', int, None]:
     """
@@ -900,27 +947,37 @@ def get_sync_time(
     round_down: bool, default False
         If `True`, round down the datetime value to the nearest minute.
 
+    silent: bool, default False
+        If `True`, return `None` instead of raising when the database cannot be read
+        (Meerschaum 4's behavior).
+
     debug: bool, default False
         Verbosity toggle.
 
     Returns
     -------
-    A `datetime` or int, if the pipe exists, otherwise `None`.
+    A `datetime` or int, if the pipe exists, otherwise `None` (a pipe that was never synced
+    has no sync time). Raises the database error if the instance cannot be read.
 
     """
     from meerschaum import _core
     from meerschaum.core.Pipe._data import _rust_context
-    context = _rust_context(self, debug=debug)
-    return _core.pipe_get_sync_time(
-        self,
-        context,
-        params=params,
-        newest=newest,
-        apply_backtrack_interval=apply_backtrack_interval,
-        remote=remote,
-        round_down=round_down,
-        debug=debug,
-    )
+    try:
+        context = _rust_context(self, debug=debug)
+        return _core.pipe_get_sync_time(
+            self,
+            context,
+            params=params,
+            newest=newest,
+            apply_backtrack_interval=apply_backtrack_interval,
+            remote=remote,
+            round_down=round_down,
+            debug=debug,
+        )
+    except Exception:
+        if silent:
+            return None
+        raise
 
 
 def exists(

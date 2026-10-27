@@ -71,7 +71,7 @@ def test_saved_pipeline_metadata_not_in_engine_graph(saved_members):
 def test_saved_pipeline_run_id_and_execution(saved_members):
     conn, name, pipes = saved_members
     pipeline = mrsm.Pipeline([pipes[0], pipes[3]], instance=conn)
-    pipeline.save(name)
+    assert pipeline.save(name)[0]
     result = mrsm.Pipeline.load(name, conn).sync(force=True, yes=True)
     assert result.success, result.message
     assert re.fullmatch(re.escape(name) + r'-\d{4}-\d\d-\d\dT\d\d-\d\d-\d\d\.\d{6}Z-[a-f0-9]{8}', result.run_id)
@@ -85,7 +85,9 @@ def test_saved_pipeline_accepts_supported_key_tuples(saved_members):
     target = pipes[0]
     pipeline = mrsm.Pipeline([(target.connector_keys, target.metric_key, target.location_key)],
                              instance=conn)
-    definition = pipeline.save(name)
+    success, message = pipeline.save(name)
+    assert success, message
+    definition = pipeline.definition
     assert definition['targets'] == [_pipe_ref(target)]
     assert {_pipe_ref(pipe) for pipe in mrsm.Pipeline.load(name, conn).targets} == {_pipe_ref(target)}
 

@@ -212,10 +212,13 @@ def serve(address: str) -> int:
         if op == 'shutdown':
             conn.send({'t': 'result', 'id': call_id, 'value': True})
             break
+        allow_protected = bool(message.get('allow_protected', False))
         try:
             try:
                 interruptible = True
                 _ops.CALL_DEBUG = bool(message.get('debug', False))
+                if allow_protected:
+                    _allow_protected(True)
                 ### v4 plugin code always saw the shared `mrsm` venv (see `ensure_default_venvs`);
                 ### a previous call may have deactivated it (`op_action` ends by deactivating
                 ### every venv, as v4's `entry_with_args()` does before the process exits).
@@ -225,6 +228,8 @@ def serve(address: str) -> int:
             finally:
                 interruptible = False
                 _ops.CALL_DEBUG = False
+                if allow_protected:
+                    _allow_protected(False)
             conn.send({'t': 'result', 'id': call_id, 'value': value}, out_frames)
         except (Exception, KeyboardInterrupt) as e:
             try:
@@ -243,6 +248,18 @@ def serve(address: str) -> int:
     finally:
         os._exit(0)
     return 0
+
+
+def _allow_protected(enter: bool) -> None:
+    """
+    Enter (or leave) the host's `--allow-protected` allowance for one call: the plugin code
+    the call runs may write to protected connectors.
+    """
+    from meerschaum import _core
+    if enter:
+        _core.allow_protected_enter()
+    else:
+        _core.allow_protected_exit()
 
 
 def release_multiprocessing(timeout: float = 1.5) -> None:

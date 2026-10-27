@@ -33,6 +33,8 @@ _attrs = {
 }
 __all__ = sorted([
     'ANSI', 'CHARSET', 'UNICODE', 'RESET',
+    'ansi_allowed',
+    'stderr_ansi',
     'colored',
     'translate_rich_to_termcolor',
     'get_console',
@@ -60,6 +62,65 @@ _locks = {
 
 def colored_fallback(*args, **kw):
     return ' '.join(args)
+
+
+def _env_flag(name: str) -> str:
+    """The trimmed, lower-case value of an environment variable (`''` when unset)."""
+    return (os.environ.get(name, None) or '').strip().lower()
+
+
+def ansi_allowed(stream: Optional[Any] = None) -> bool:
+    """
+    Return whether output may carry ANSI styles, before the `formatting:ansi` setting.
+
+    `NO_COLOR` (any non-empty value) turns styles off. Otherwise styles are on when the stream is
+    a terminal, inside a job (its logs keep their colors, `MRSM_DAEMON_ID`), in a Jupyter notebook
+    or when `FORCE_COLOR` is set (any value but `0`, `false` or `no`). Writing to a file or a
+    pipe (`mrsm show pipes > pipes.txt`) therefore prints plain text.
+
+    Parameters
+    ----------
+    stream: Optional[Any], default None
+        The stream the output is written to (`sys.stderr` for warnings). Defaults to `sys.stdout`.
+    """
+    if os.environ.get('NO_COLOR', None):
+        return False
+    force = _env_flag('FORCE_COLOR')
+    if force and force not in ('0', 'false', 'no'):
+        return True
+    from meerschaum._internal.static import STATIC_CONFIG
+    if os.environ.get(STATIC_CONFIG['environment']['daemon_id'], None):
+        return True
+    if _in_notebook():
+        return True
+    try:
+        return bool((sys.stdout if stream is None else stream).isatty())
+    except Exception:
+        return False
+
+
+def stderr_ansi() -> bool:
+    """
+    Whether text written to stderr (warnings) may carry ANSI styles: `formatting:ansi` and
+    `ansi_allowed(sys.stderr)`, so `2> errors.log` gets plain text while stdout is a terminal.
+    """
+    __getattr__('ANSI')  ### Loads `formatting:ansi` into `_attrs`.
+    return bool(_attrs['ANSI']) and ansi_allowed(sys.stderr)
+
+
+def _in_notebook() -> bool:
+    """
+    Whether this is a Jupyter (IPython kernel) process: its outputs render ANSI styles although
+    its stdout is not a terminal. Only an already-imported `ipykernel` is looked at.
+    """
+    if 'ipykernel' not in sys.modules:
+        return False
+    try:
+        from IPython import get_ipython
+        shell = get_ipython()
+    except Exception:
+        return False
+    return shell is not None and getattr(shell, 'kernel', None) is not None
 
 
 def format_bytes(num_bytes: Optional[Union[int, float]], precision: int = 1) -> str:
@@ -128,15 +189,43 @@ def translate_rich_to_termcolor(*colors) -> tuple:
     return tuple(_colors)
 
 
-def rich_text_to_str(text: 'rich.text.Text') -> str:
-    """Convert a `rich.text.Text` object to a string with ANSI in-tact."""
-    _console = get_console()
+def rich_text_to_str(text: 'rich.text.Text', ansi: Optional[bool] = None) -> str:
+    """
+    Convert a `rich.text.Text` object to a string with ANSI in-tact.
+
+    Parameters
+    ----------
+    text: rich.text.Text
+        The text to render.
+
+    ansi: Optional[bool], default None
+        `True` renders the styles whatever `ANSI` says (text for another stream, such as a
+        warning for a terminal stderr while stdout is a file). Defaults to `get_console()`'s.
+    """
+    _console = _styled_console() if ansi else get_console()
     if _console is None:
         return str(text)
-    with console.capture() as cap:
-        console.print(text)
+    with _console.capture() as cap:
+        _console.print(text)
     string = cap.get()
     return string[:-1]
+
+
+_styled = None
+
+
+def _styled_console():
+    """A rich console that always renders styles (see `rich_text_to_str(ansi=True)`)."""
+    global _styled
+    if _styled is not None:
+        return _styled
+    from meerschaum.utils.packages import import_rich, attempt_import
+    import_rich(lazy=False)
+    rich_console = attempt_import('rich.console', lazy=False)
+    if rich_console is None:
+        return None
+    _styled = rich_console.Console(force_terminal=True, color_system='truecolor')
+    return _styled
 
 
 def _init():
@@ -231,6 +320,10 @@ def colored(text: str, *colors, as_rich_text: bool=False, **kw) -> Union[str, 'r
             return text_obj
         return rich_text_to_str(text_obj)
 
+    ### Off a terminal, under `NO_COLOR` or with `formatting:ansi` off, the text stays plain.
+    if not __getattr__('ANSI'):
+        return text
+
     more_termcolor = attempt_import('more_termcolor', lazy=False)
     try:
         colored_text = more_termcolor.colored(text, *colors, **kw)
@@ -253,10 +346,15 @@ def colored(text: str, *colors, as_rich_text: bool=False, **kw) -> Union[str, 'r
     return colored_text
 
 console = None
+_console_ansi = None
 def get_console():
-    """Get the rich console."""
-    global console
-    if console is not None:
+    """
+    Get the rich console: styled (truecolor) when `ANSI` is on, plain text otherwise
+    (see `ansi_allowed()`).
+    """
+    global console, _console_ansi
+    ansi = bool(__getattr__('ANSI'))
+    if console is not None and _console_ansi == ansi:
         return console
     from meerschaum.utils.packages import import_rich, attempt_import
     import_rich(lazy=False)
@@ -265,7 +363,12 @@ def get_console():
         ### `rich` is not a dependency of the base wheel.
         return None
     try:
-        console = rich_console.Console(force_terminal=True, color_system='truecolor')
+        console = (
+            rich_console.Console(force_terminal=True, color_system='truecolor')
+            if ansi
+            else rich_console.Console(force_terminal=False, color_system=None, no_color=True)
+        )
+        _console_ansi = ansi
     except Exception:
         import traceback
         traceback.print_exc()
@@ -536,7 +639,7 @@ def print_options(
     return None
 
 
-def fill_ansi(string: str, style: str = '') -> str:
+def fill_ansi(string: str, style: str = '', ansi: Optional[bool] = None) -> str:
     """
     Fill in non-formatted segments of ANSI text.
 
@@ -547,6 +650,9 @@ def fill_ansi(string: str, style: str = '') -> str:
 
     style: str
         Style arguments to pass to `rich.text.Text`.
+
+    ansi: Optional[bool], default None
+        `True` keeps the styles whatever `ANSI` says (see `rich_text_to_str()`).
 
     Returns
     -------
@@ -585,7 +691,7 @@ def fill_ansi(string: str, style: str = '') -> str:
     else:
         msg = Text(str(msg), style)
 
-    return rich_text_to_str(msg)
+    return rich_text_to_str(msg, ansi=ansi)
 
 
 def __getattr__(name: str) -> str:
@@ -596,13 +702,15 @@ def __getattr__(name: str) -> str:
         raise AttributeError("Cannot import dunders from this module.")
 
     if name in _attrs:
-        if _attrs[name] is not None:
-            return _attrs[name]
-        from meerschaum.config import get_config
-        if name.lower() in get_config('formatting'):
-            _attrs[name] = get_config('formatting', name.lower())
-        elif name == 'CHARSET':
-            _attrs[name] = 'unicode' if __getattr__('UNICODE') else 'ascii'
+        if _attrs[name] is None:
+            from meerschaum.config import get_config
+            if name.lower() in get_config('formatting'):
+                _attrs[name] = get_config('formatting', name.lower())
+            elif name == 'CHARSET':
+                _attrs[name] = 'unicode' if __getattr__('UNICODE') else 'ascii'
+        if name == 'ANSI':
+            ### `formatting:ansi`, and only where styles belong (`ansi_allowed()`).
+            return bool(_attrs[name]) and ansi_allowed()
         return _attrs[name]
     
     if name == '__wrapped__':

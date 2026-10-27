@@ -230,7 +230,7 @@ def test_pipeline_plan_is_a_dry_run(chain):
     assert [n.action for n in plan.nodes][0] == 'root'
     assert plan.edges
     text = str(plan)
-    assert 'node' in text and 'action' in text and 'w8_clean' in text
+    assert 'pipe' in text and 'action' in text and 'w8_clean' in text
     rows = plan.to_dicts()
     assert [r['node'] for r in rows] == [str(pipe) for pipe in (raw, clean, daily)]
     assert plan.to_dataframe()['action'].tolist()[0] == 'root'

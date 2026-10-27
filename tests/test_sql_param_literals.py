@@ -49,8 +49,11 @@ def test_json_filter_quotes_do_not_change_the_predicate(pipe, value):
     assert pipe.get_data(['id'], as_docs=True) == [{'id': 2}]
 
 
-def test_null_marker_identifiers_preserve_v4_sync_behavior(pipe):
-    """PARITY: a literal 'None' ID also gains a SQL NULL row on the second sync in v4.1.4."""
+def test_null_marker_identifiers_are_text(pipe):
+    """
+    rc15 Q18 (v4.1.4 added a SQL NULL row on the second sync): a declared text ID 'None' is the
+    text 'None', so re-syncing it changes nothing, and `params={'id': 'None'}` matches it.
+    """
     marker = mrsm.Pipe(
         'test', 'null_marker', instance=pipe.instance_connector,
         columns={'id': 'id'}, dtypes={'id': 'str', 'value': 'int'},
@@ -58,10 +61,11 @@ def test_null_marker_identifiers_preserve_v4_sync_behavior(pipe):
     rows = [{'id': 'None', 'value': 1}]
     assert marker.sync(rows)[0]
     assert marker.get_data(as_docs=True) == rows
-    repeated = [{'id': None, 'value': 1}, *rows]
     for _ in range(2):
         assert marker.sync(rows)[0]
-        assert marker.get_data(as_docs=True) == repeated
+        assert marker.get_data(as_docs=True) == rows
+    assert marker.get_data(params={'id': 'None'}, as_docs=True) == rows
+    assert marker.get_rowcount(params={'id': None}) == 0
 
 
 @pytest.mark.parametrize('value', ['a;b', 'a -- comment', 'DROP table'])

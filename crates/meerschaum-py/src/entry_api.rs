@@ -329,8 +329,24 @@ fn with_runtime<R>(prepared: Prepared, f: impl FnOnce(&mut Runtime<'_>) -> R) ->
     // Colors and live progress follow Python's streams, not the process's file descriptors:
     // `sys.stdout` may be redirected while fd 1 is a terminal.
     rt.live = py_isatty("stdout");
+    // Styles follow them as `meerschaum.utils.formatting` decides: a Jupyter notebook renders
+    // them although its streams are not terminals.
+    let notebook = py_in_notebook();
+    rt.out_terminal = Some(rt.live || notebook);
+    rt.err_terminal = Some(py_isatty("stderr") || notebook);
     rt.progress = python_progress_sink();
     f(&mut rt)
+}
+
+/// `meerschaum.utils.formatting._in_notebook()`: a Jupyter kernel's process.
+fn py_in_notebook() -> bool {
+    Python::attach(|py| -> PyResult<bool> {
+        py.import("meerschaum.utils.formatting")?
+            .getattr("_in_notebook")?
+            .call0()?
+            .extract()
+    })
+    .unwrap_or(false)
 }
 
 thread_local! {

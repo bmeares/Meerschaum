@@ -727,7 +727,7 @@ def get_distinct_col_count(
         ) AS dist"""
     )
 
-    result = connector.value(_meta_query, debug=debug)
+    result = connector.value(_meta_query, debug=debug, silent=True)
     try:
         return int(result)
     except Exception:
@@ -1347,7 +1347,7 @@ def get_db_version(conn: 'SQLConnector', debug: bool = False) -> Union[str, None
         conn.flavor,
         version_queries['default']
     ).format(version_name=version_name)
-    return conn.value(version_query, debug=debug)
+    return conn.value(version_query, debug=debug, silent=True)
 
 
 ### Non-TimescaleDB flavors that support declarative range partitioning on a datetime column.
@@ -2971,6 +2971,7 @@ def get_reset_autoincrement_queries(
         FROM {table_name}
         """,
         debug=debug,
+        silent=True,
     )
     if max_id is None:
         return []

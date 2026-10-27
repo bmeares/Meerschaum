@@ -957,11 +957,48 @@ impl PySqlConnector {
         {
             extra.insert("new_special_cols".into(), py_to_core(&cached)?);
         }
+        // `replace=True` (and the `params` it honors) replace the rows of `[begin, end)`.
+        let kw_item = |key: &str| -> PyResult<Option<Bound<'py, PyAny>>> {
+            match _kw {
+                Some(kw) => Ok(kw.get_item(key)?.filter(|v| !v.is_none())),
+                None => Ok(None),
+            }
+        };
+        let replace = kw_item("replace")?
+            .map(|v| v.is_truthy())
+            .transpose()?
+            .unwrap_or(false);
+        let params = match kw_item("params")? {
+            Some(p) => py_to_core(&p)?.as_map().cloned(),
+            None => None,
+        };
+        let (mut begin, mut end) = (date_bound(&ctx, begin)?, date_bound(&ctx, end)?);
+        if replace {
+            // A bound that is not given is the rows' own datetime range (`pipe.sync`'s rule):
+            // `replace=True` alone never clears the whole table of a pipe with a datetime column.
+            // `pipe.parameters` (the registered ones when none are set in memory) name the
+            // datetime column.
+            use meerschaum_connector::replace::{WindowBound, resolve_window};
+            let resolved = core_pipe(pipe, ParamsView::Resolved)?;
+            match resolve_window(
+                &resolved,
+                &frame,
+                WindowBound::given_or_from_rows(begin),
+                WindowBound::given_or_from_rows(end),
+            ) {
+                Ok((b, e)) => (begin, end) = (b, e),
+                Err(e) => {
+                    return success_to_py(py, &meerschaum_core::SuccessTuple::fail(e));
+                }
+            }
+        }
         let opts = SyncOptions {
             check_existing,
             chunksize,
-            begin: date_bound(&ctx, begin)?,
-            end: date_bound(&ctx, end)?,
+            begin,
+            end,
+            replace,
+            params,
             extra,
         };
         let c = self.conn();

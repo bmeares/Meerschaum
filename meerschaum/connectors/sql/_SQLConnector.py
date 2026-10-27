@@ -36,6 +36,20 @@ def _flavor_family(flavor: Optional[str]) -> Optional[str]:
     return _FLAVOR_FAMILIES.get(flavor, flavor) if flavor else None
 
 
+def _strip_uri_param(uri: str, key: str) -> str:
+    """`uri` without its `key=...` query parameters (the rest of the query is kept as is)."""
+    from urllib.parse import unquote_plus
+    base, sep, rest = uri.partition('?')
+    if not sep:
+        return uri
+    query, hash_sep, fragment = rest.partition('#')
+    kept = [
+        pair for pair in query.split('&')
+        if pair and unquote_plus(pair.split('=', 1)[0]) != key
+    ]
+    return base + (('?' + '&'.join(kept)) if kept else '') + (hash_sep + fragment)
+
+
 def _remove_memory_directory(directory: str, owner_pid: int) -> None:
     """
     Remove the database directory of an in-memory SQLite connector, in the process that created
@@ -234,6 +248,10 @@ class SQLConnector(InstanceConnector):
             kw.update(from_uri_params)
             if flavor:
                 kw['flavor'] = flavor
+            ### `?protected=true` marks the connector (`Connector.protected`); the driver must
+            ### not see it.
+            if 'protected' in from_uri_params:
+                kw['uri'] = _strip_uri_param(kw['uri'], 'protected')
 
         ### set __dict__ in base class
         super().__init__(
@@ -580,8 +598,14 @@ class SQLConnector(InstanceConnector):
                 raise RuntimeError(self._rust_unavailable())
             attributes = {
                 key: self.__dict__.get(key, None)
-                for key in ('flavor', 'uri', 'host', 'port', 'username', 'password', 'database')
+                for key in (
+                    'flavor', 'uri', 'host', 'port', 'username', 'password', 'database',
+                    'protected',
+                )
             }
+            ### The core reads `protected` as text (`True` / `'true'` both mark it).
+            if attributes['protected'] is not None:
+                attributes['protected'] = str(attributes['protected'])
             if self.flavor == 'duckdb':
                 from ._duckdb_transport import prepare_connector
                 attributes['_duckdb_memory_id'] = prepare_connector(self)
@@ -644,17 +668,69 @@ class SQLConnector(InstanceConnector):
         except Exception:
             debug = False
         if not debug:
-            return method
+            return _with_instance_hint(self, method)
 
         def _debug_call(*args, **kwargs):
             from meerschaum._core import debugging
             with debugging():
                 return method(*args, **kwargs)
 
-        return _debug_call
+        return _with_instance_hint(self, _debug_call)
 
     def __setstate__(self, d):
         self.__dict__.update(d)
 
     def __call__(self):
         return self
+
+
+### The next step when the untouched default `sql:main` cannot be reached (rc15 Q9): the CLI's
+### `DEFAULT_INSTANCE_HINT` (`crates/meerschaum-cli/src/native/connectors.rs`), for Python.
+DEFAULT_INSTANCE_HINT: str = (
+    "Start the database with `mrsm stack up -d db`, or use the built-in SQLite instance "
+    "(`instance='sql:local'`, or set `instance:` with `mrsm edit config`)."
+)
+_instance_hint_shown: bool = False
+
+
+def _with_instance_hint(connector: Any, method: Any) -> Any:
+    """
+    `method`, adding `DEFAULT_INSTANCE_HINT` (once per process) to the error of a failed
+    connection to the untouched default `sql:main`; any other connector gets `method` itself.
+    """
+    if connector.__dict__.get('label', None) != 'main':
+        return method
+
+    def _call(*args, **kwargs):
+        try:
+            return method(*args, **kwargs)
+        except RuntimeError as e:
+            _add_instance_hint(connector, e)
+            raise
+
+    return _call
+
+
+def _add_instance_hint(connector: Any, error: BaseException) -> None:
+    """
+    Append `DEFAULT_INSTANCE_HINT` to `error` when nothing answers at the shipped `sql:main`
+    (refused, unreachable or timed out), nobody configured it (no `MRSM_SQL_MAIN`, the shipped
+    host, port and database) and the hint was not shown yet.
+    """
+    import os
+    global _instance_hint_shown
+    message = str(error.args[0]) if error.args else ''
+    if _instance_hint_shown or not message.startswith('sql:main: cannot connect to '):
+        return
+    reasons = ('(connection refused)', '(network unreachable)', '(no response within')
+    if not any(reason in message for reason in reasons):
+        return
+    if (os.environ.get('MRSM_SQL_MAIN', None) or '').strip():
+        return
+    from meerschaum.config._default import default_config
+    shipped = default_config['meerschaum']['connectors']['sql']['main']
+    for key in ('host', 'port', 'database'):
+        if str(connector.__dict__.get(key, None)) != str(shipped.get(key, None)):
+            return
+    _instance_hint_shown = True
+    error.args = (f"{message}\n{DEFAULT_INSTANCE_HINT}",) + tuple(error.args[1:])

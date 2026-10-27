@@ -484,7 +484,8 @@ def _unwrapped(outcome, root=None):
 def _without_v5_defaults(spec):
     """
     A tagged value in which the JSON text of the stack's `MRSM_CONFIG` default is parsed and
-    stripped of the keys v5 adds to the default config (`system:engine`), which v4.1.4 lacks.
+    stripped of the keys v5 adds to the default config (`system:engine`,
+    `api:dash:callbacks_require_session`), which v4.1.4 lacks.
     """
     if isinstance(spec, list):
         return [_without_v5_defaults(i) for i in spec]
@@ -496,6 +497,8 @@ def _without_v5_defaults(spec):
         except ValueError:
             return spec
         parsed.get('system', {}).pop('engine', None)
+        ### PARITY (rc15, RC15-D-001): console callbacks need a session by default.
+        parsed.get('api', {}).get('dash', {}).pop('callbacks_require_session', None)
         return {'t': 'str', 'json': parsed}
     return {k: _without_v5_defaults(v) for k, v in spec.items()}
 

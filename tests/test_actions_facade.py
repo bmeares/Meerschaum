@@ -641,7 +641,7 @@ def test_concurrent_entries_have_their_own_stop(tmp_path):
         "    pass\n"
         "other.join(30)\n"
         "text = ''.join(t for _, t in out.writes)\n"
-        "print('OTHER', results[0][0] if results else None, 'Ran pipeline 3 times' in text,\n"
+        "print('OTHER', results[0][0] if results else None, 'Ran the action chain 3 times' in text,\n"
         "      file=sys.stderr, flush=True)\n"
     )
     result = _run_python(code, tmp_path)

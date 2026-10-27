@@ -498,7 +498,10 @@ def sync_pipe(
         Verbosity toggle. Defaults to False.
 
     kw: Any
-        Catch-all for keyword arguments.
+        Catch-all for keyword arguments. `replace=True` replaces the pipe's rows of
+        `[begin, end)` (matching `params`) with the rows of `df` in one transaction; a bound
+        that is not given is the rows' own datetime range (`begin` = the earliest, `end` = just
+        after the latest), as for `pipe.sync(df, replace=True)`.
 
     Returns
     -------
@@ -512,6 +515,11 @@ def sync_pipe(
             dtypes=pipe.get_dtypes(debug=debug),
             debug=debug,
         )
+    replace_kw = (
+        {'replace': True, 'params': kw.get('params', None)}
+        if kw.get('replace', False)
+        else {}
+    )
     result = self._rust_method('sync_pipe')(
         pipe,
         df,
@@ -519,6 +527,7 @@ def sync_pipe(
         end=end,
         chunksize=chunksize,
         check_existing=check_existing,
+        **replace_kw
     )
     if hasattr(pipe, '_clear_cache_key'):
         for cache_key in (

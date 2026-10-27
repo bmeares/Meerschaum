@@ -614,6 +614,42 @@ impl Reader {
         }
     }
 
+    /// `Pipe.get_rowcount(estimate=True)` (contract C1): the instance's row estimate from
+    /// catalog statistics, exact where there is none or counting is cheap; bounds, `params` and
+    /// `remote` make it exact ([`Reader::get_rowcount`]).
+    pub async fn get_rowcount_estimate(
+        &self,
+        pipe: &Pipe,
+        begin: Option<DateBound>,
+        end: Option<DateBound>,
+        params: Option<Map>,
+        remote: bool,
+    ) -> Result<i64, String> {
+        if remote
+            || begin.is_some()
+            || end.is_some()
+            || params.as_ref().is_some_and(|p| !p.is_empty())
+        {
+            return self.get_rowcount(pipe, begin, end, params, remote).await;
+        }
+        let query = DataQuery::default();
+        let count = match &self.sql {
+            Some(sql) => {
+                sql.get_pipe_rowcount_estimate(pipe, &query, self.columns_types.clone())
+                    .await
+            }
+            None => self.instance.get_pipe_rowcount_estimate(pipe, &query).await,
+        };
+        match count {
+            Ok(n) => Ok(n.unwrap_or(0)),
+            Err(ConnectorError::NotImplemented(message)) => {
+                tracing::warn!("{message}");
+                Ok(0)
+            }
+            Err(e) => Err(err(e)),
+        }
+    }
+
     /// A PostgreSQL-family instance's documents hold a geometry the way psycopg returns the
     /// column, the hex EWKB text (`result.mappings()`), not a shapely object.
     fn raw_geometries(&self, docs: Vec<Doc>) -> Vec<Doc> {
@@ -663,7 +699,9 @@ impl Reader {
             ..Default::default()
         };
         if args.as_docs {
-            if !self.exists(pipe).await? {
+            // A SQL instance answers a missing table with no documents itself, and an
+            // unreachable database with an error (rc15 Q17), so no `exists` check first.
+            if self.sql.is_none() && !self.exists(pipe).await? {
                 return Ok(Data::Docs(Vec::new()));
             }
             if let Some(sql) = &self.sql {
@@ -961,6 +999,9 @@ impl Reader {
         opts: &FilterOpts,
     ) -> Result<FilterOut, String> {
         let ctx = self.context(pipe, None, true).await?;
+        // Declared text / index columns keep their null-like strings (rc15 Q18).
+        let literal_null_markers =
+            meerschaum_kernel::diff::literal_null_markers(&pipe_ops::columns_map(pipe), &ctx);
         let params = FilterExistingParams {
             columns: pipe_ops::columns_map(pipe),
             configured_dtypes: ctx.explicit_dtypes.clone(),
@@ -972,6 +1013,7 @@ impl Reader {
             date_bound_only: opts.date_bound_only,
             enforce_dtypes: opts.enforce_dtypes,
             filter_params_index_limit: self.filter_limit,
+            literal_null_markers,
         };
         // The kernel's callback is synchronous: capture the `get_data()` request, read it, then
         // diff against the frame it returns.

@@ -344,6 +344,8 @@ pub fn filter_unseen_df<'py>(
     let opts = FilterUnseenOptions {
         dtypes: dtypes_map.clone(),
         coerce_mixed_numerics,
+        // `meerschaum.utils.dataframe.filter_unseen_df` has no pipe: v4's null-like rule.
+        ..Default::default()
     };
     let (old_frame, new_frame) = (&old.frame, &new.frame);
     let mut delta = {
@@ -562,6 +564,8 @@ pub fn query_df<'py>(
         omit_columns: opt_str_list(omit_columns.as_ref())?,
         reset_index,
         coerce_types,
+        // `meerschaum.utils.dataframe.query_df` has no pipe: v4's null-like rule everywhere.
+        literal_null_markers: Vec::new(),
     };
     let frame = &input.frame;
     let result = py

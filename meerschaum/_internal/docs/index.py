@@ -36,6 +36,10 @@ For your convenience, the following classes and functions may be imported from t
 <li><code>meerschaum.Connector</code></li>
 <li><code>meerschaum.InstanceConnector</code></li>
 <li><code>meerschaum.Pipe</code></li>
+<li><code>meerschaum.Pipeline</code></li>
+<li><code>meerschaum.Plan</code></li>
+<li><code>meerschaum.RunResult</code></li>
+<li><code>meerschaum.SyncResult</code></li>
 <li><code>meerschaum.Plugin</code></li>
 <li><code>meerschaum.Job</code></li>
 <li><code>meerschaum.Venv</code></li>
@@ -53,6 +57,8 @@ For your convenience, the following classes and functions may be imported from t
 <li><code>meerschaum.get_config()</code></li>
 <li><code>meerschaum.get_connector()</code></li>
 <li><code>meerschaum.get_pipes()</code></li>
+<li><code>meerschaum.get_pipelines()</code></li>
+<li><code>meerschaum.get_runs()</code></li>
 <li><code>meerschaum.make_connector()</code></li>
 <li><code>meerschaum.pprint()</code></li>
 <li><code>meerschaum.attempt_import()</code></li>
@@ -227,6 +233,27 @@ int_pipes = mrsm.get_pipes(datetime_dtypes=['int'], as_list=True)
 
 ### Exclude pipes without a datetime index:
 datetime_pipes = mrsm.get_pipes(datetime_dtypes=['_None'], as_list=True)
+```
+</details>
+
+<details>
+    <summary><b>Sync Pipes in Dependency Order with a Pipeline</b></summary>
+
+A `meerschaum.Pipeline` syncs a set of pipes in dependency order through the Syncing Engine. Plan it first (a dry run), sync it, and save it under a name to load it again later:
+
+```python
+import meerschaum as mrsm
+
+pipeline = mrsm.Pipeline(pipe, parents=True)   # this pipe and every pipe it reads
+print(pipeline.plan())                         # what would sync, and why
+run = pipeline.sync()
+print(run.success, run.inserted, run.updated)
+
+success, msg = pipeline.save('demo')
+pipeline = mrsm.Pipeline('demo', instance='sql:temp')
+print(mrsm.get_pipelines(instance='sql:temp'))
+# [Pipeline('demo', instance='sql:temp')]
+print(mrsm.get_runs(instance='sql:temp', pipeline='demo', limit=1))
 ```
 </details>
 

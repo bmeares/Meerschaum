@@ -395,6 +395,39 @@ def test_users(conn):
     }
 
 
+def test_user_reads_that_fail_raise(conn):
+    """
+    A user read that fails raises, as the SQL connector's do. v4 answered `None`, which
+    `User.get_scopes()` takes for "no `scopes` attribute", that is every scope.
+    """
+    from meerschaum.core import User
+    name = 'w16s_s1' + uuid.uuid4().hex[:6]
+    user = User(
+        name, 'secret-' + uuid.uuid4().hex[:6], instance=conn,
+        attributes={'scopes': ['pipes:read']},
+    )
+    success, msg = conn.register_user(user)
+    assert success, msg
+    reader = User(name, instance=conn)
+    assert reader.get_scopes(refresh=True) == ['pipes:read']
+    ### The attributes key holds a set: `GET` answers `WRONGTYPE`.
+    key = ValkeyConnector.get_user_key(user.user_id, 'attributes')
+    conn.client.delete(key)
+    conn.client.sadd(key, 'not a string')
+    try:
+        with pytest.raises(ConnectionError, match='WRONGTYPE'):
+            conn.get_user_attributes(reader)
+        with pytest.raises(ConnectionError, match='WRONGTYPE'):
+            reader.get_scopes(refresh=True)
+    finally:
+        conn.client.delete(key)
+        conn.client.set(key, '{}')
+    ### A user who does not exist still has no attributes.
+    assert conn.get_user_attributes(User('w16s_nobody' + uuid.uuid4().hex[:6], instance=conn)) is None
+    success, msg = conn.delete_user(user)
+    assert success, msg
+
+
 def test_plugins(conn):
     from types import SimpleNamespace
     name = 'w16s' + uuid.uuid4().hex[:6]

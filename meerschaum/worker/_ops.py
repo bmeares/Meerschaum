@@ -521,7 +521,9 @@ def op_action(conn, call_id, args, frames) -> Result:
     kw['action'] = remove_leading_action(kw['action'])
     do_action = functools.partial(_do_action_wrapper, action_function, plugin_name, **kw)
 
-    if kw.get('schedule', None):
+    ### The Rust host runs `-s` schedules (and `--loop` laps) itself and calls once per run
+    ### (`host_schedules`); `schedule` stays in `kw`, so each run's result prints as in v4.
+    if kw.get('schedule', None) and not args.get('host_schedules', False):
         import time
         from datetime import timedelta
         from meerschaum.utils.schedule import schedule_function
@@ -611,6 +613,25 @@ def op_build_manifest(conn, call_id, args, frames) -> Result:
     return build_manifest(debug=bool(args.get('debug', False)) or CALL_DEBUG), []
 
 
+### The instance-connector methods that write, and the verb of their refusal.
+_PROTECTED_METHODS: Dict[str, str] = {
+    'register_pipe': 'register',
+    'edit_pipe': 'edit',
+    'delete_pipe': 'delete',
+    'drop_pipe': 'drop',
+    'sync_pipe': 'sync',
+    'sync_pipe_inplace': 'sync',
+    'clear_pipe': 'clear',
+    'deduplicate_pipe': 'deduplicate',
+    'create_pipe_indices': 'create indices for',
+    'drop_pipe_indices': 'drop indices for',
+    'compress_pipe': 'compress',
+    'decompress_pipe': 'decompress',
+    'vacuum_pipe': 'vacuum',
+    'partition_pipe': 'repartition',
+}
+
+
 def op_instance(conn, call_id, args, frames) -> Result:
     """
     Call an instance-connector method on a custom (`IS_INSTANCE = True`) connector:
@@ -637,6 +658,12 @@ def op_instance(conn, call_id, args, frames) -> Result:
         kw[str(frame_arg)] = ipc_to_df(frames[0])
     positional = list(args.get('args', None) or [])
     pipe = _build_pipe(args.get('pipe')) if args.get('pipe', None) else None
+    ### A protected custom instance (`protected: true`) refuses writes unless allowed.
+    if method_name in _PROTECTED_METHODS:
+        from meerschaum.connectors import protected_refusal
+        refusal = protected_refusal(connector, _PROTECTED_METHODS[method_name], pipe)
+        if refusal is not None:
+            return _encode_value((False, refusal))
     if pipe is not None:
         positional.insert(0, pipe)
     with Venv(get_connector_plugin(connector)):

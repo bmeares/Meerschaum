@@ -172,8 +172,14 @@ fn build_ctx(py: Python<'_>, api_attributes: Option<&Bound<'_, PyDict>>) -> PyRe
         launcher,
     )
     .with_remote(resolver);
-    // `<type>:<label>` executors of native plugins.
-    if let Some(executors) = meerschaum_cli::native_executors::from_config(&config) {
+    // `<type>:<label>` executors of native plugins, with host calls over the worker session (and
+    // the config writes Python's own `write_plugin_config()` would make).
+    let allow_writes = crate::native_plugin_api::config_writes_allowed(py);
+    config.with_state(|s| s.set_allow_writes(allow_writes));
+    if let Some(executors) = meerschaum_cli::native_executors::from_config_with_host(
+        &config,
+        crate::facade::worker_session(),
+    ) {
         jobs = jobs.with_executors(executors);
     }
     let ctx = Ctx { jobs };
@@ -474,6 +480,14 @@ impl PyJob {
     fn get_daemon_properties<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         let props = py.detach(|| self.lock().get_daemon_properties());
         map_to_py(py, props)
+    }
+
+    /// The job's health (`job.health`, see `meerschaum_jobs::health`): `{"state",
+    /// "last_success", "last_lap", "consecutive_failures", "expected_interval_seconds",
+    /// "message"}`.
+    fn health<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        let health = py.detach(|| self.lock().health());
+        map_to_py(py, health.to_map())
     }
 
     /// The daemon's properties (a local job's `properties.json` merged with the in-memory ones;

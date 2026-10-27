@@ -979,6 +979,10 @@ pub fn write_plugin_config<'py>(
     config_dict: &Bound<'py, PyAny>,
     kw: Option<&Bound<'py, PyDict>>,
 ) -> PyResult<bool> {
+    // Native plugins' own writes first, so that this write keeps their sections.
+    if meerschaum_cli::native_plugins::has_written_plugin_configs() {
+        crate::native_plugin_api::absorb_plugin_config_writes(py, &live_config(py)?)?;
+    }
     let keys = PyTuple::new(py, ["plugins"])?;
     let plugins = get_config(py, &keys, true, true, true, true, false, false, false)?;
     let plugins: Bound<'py, PyDict> = match plugins.cast_into::<PyDict>() {

@@ -199,6 +199,7 @@ pub fn verify_pipe<'py>(
         params: params_map(params)?,
         check_existing,
         chunksize,
+        replace: false,
         extra: crate::sync_api::kwargs_map(kwargs)?,
     };
     let result: Result<SuccessTuple, String> = py.detach(move || {

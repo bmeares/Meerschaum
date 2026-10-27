@@ -141,9 +141,13 @@ def test_unreachable_server_raises_like_requests_and_warns(capsys):
     assert conn.test_connection() is False
     assert conn.get_chaining_status() is None
     assert conn.get_mrsm_version() is None
-    # `get_pipe_data` warns and returns `None` (v4).
-    assert conn.get_pipe_data(pipe) is None
-    assert 'Failed to get data' in capsys.readouterr().err
+    # rc15 Q17: a read of an unreachable instance raises (v4 warned and returned `None`);
+    # `silent=True` on the pipe keeps v4's results.
+    with pytest.raises(ConnectionError):
+        conn.get_pipe_data(pipe)
+    assert pipe.get_data(silent=True) is None
+    assert pipe.get_rowcount(silent=True) == 0
+    assert pipe.get_sync_time(silent=True) is None
 
 
 def test_the_client_is_rebuilt_after_a_fork():

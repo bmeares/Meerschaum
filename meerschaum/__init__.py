@@ -60,7 +60,8 @@ if not _LAZY:
     from meerschaum.utils.packages import attempt_import
     from meerschaum.core.Pipe import Pipe
     from meerschaum.core.Pipe._sync import SyncResult
-    from meerschaum.core.Pipeline import Pipeline
+    from meerschaum.core.Pipe._status import get_sync_statuses
+    from meerschaum.core.Pipeline import Pipeline, Plan, RunResult, get_pipelines, get_runs
     from meerschaum.plugins import Plugin
     from meerschaum.utils.venv import Venv
     from meerschaum.jobs import Job, make_executor
@@ -84,7 +85,12 @@ else:
         'attempt_import',
         'Pipe',
         'SyncResult',
+        'get_sync_statuses',
         'Pipeline',
+        'Plan',
+        'RunResult',
+        'get_pipelines',
+        'get_runs',
         'Plugin',
         'Venv',
         'Job',
@@ -106,16 +112,21 @@ else:
 __pdoc__ = {'gui': False, 'api': False, 'core': False, '_internal': False}
 __all__ = (
     "get_pipes",
+    "get_pipelines",
+    "get_runs",
+    "get_sync_statuses",
     "get_connector",
     "get_config",
     "Pipe",
     "Pipeline",
+    "Plan",
+    "RunResult",
     "SyncResult",
     "Plugin",
     "SuccessTuple",
     "Venv",
-    "Plugin",
     "Job",
+    "make_executor",
     "pprint",
     "attempt_import",
     "actions",
@@ -124,7 +135,6 @@ __all__ = (
     "jobs",
     "plugins",
     "utils",
-    "SuccessTuple",
     "Connector",
     "InstanceConnector",
     "make_connector",

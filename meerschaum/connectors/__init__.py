@@ -31,6 +31,7 @@ __all__ = (
     "APIConnector",
     "get_connector",
     "is_connected",
+    "allow_protected",
     "poll",
     "api",
     "sql",
@@ -77,6 +78,7 @@ def get_connector(
     refresh: bool = False,
     debug: bool = False,
     _load_plugins: bool = True,
+    _warn_undefined: bool = True,
     **kw: Any
 ) -> Connector:
     """
@@ -216,6 +218,12 @@ def get_connector(
     ### only create an object if refresh is True
     ### (can be manually specified, otherwise determined above)
     if refresh:
+        ### A connector defined nowhere: say where connectors come from (not "Missing flavor").
+        undefined = _undefined_connector_message(type, label, kw)
+        if undefined is not None:
+            if _warn_undefined:
+                warn(undefined, stack=False)
+            return None
         with _locks['connectors']:
             try:
                 ### will raise an error if configuration is incorrect / missing
@@ -240,6 +248,100 @@ def get_connector(
             return None
 
     return connectors[type][label]
+
+
+def _undefined_connector_message(
+    type: Optional[str],
+    label: Optional[str],
+    attributes: Optional[Dict[str, Any]] = None,
+) -> Optional[str]:
+    """
+    The message for a `sql:`, `api:` or `valkey:` connector defined nowhere: no attributes were
+    passed and the config has no section for it (which includes the `MRSM_<TYPE>_<LABEL>`
+    environment connectors). `None` when the connector is defined. The text is the CLI's
+    (`undefined_connector_message` in `crates/meerschaum-cli/src/native/connectors.rs`).
+    """
+    from meerschaum.config import get_config
+    if type not in ('sql', 'api', 'valkey') or not label or attributes:
+        return None
+    if get_config('meerschaum', 'connectors', type, label, warn=False):
+        return None
+    return (
+        f"Connector '{type}:{label}' is not defined. Add it to the config "
+        f"(`mrsm bootstrap connectors`), set `MRSM_{type.upper()}_{label.upper()}`, "
+        "or install the plugin that provides it."
+    )
+
+
+class allow_protected:
+    """
+    Allow writes to protected connectors (`protected: true`) inside a `with` block.
+
+    Every mutation the core makes through a protected connector (sync, clear, drop, delete,
+    register, edit, `verify schema`, `SQLConnector.exec()` / `to_sql()`) is refused unless writes
+    are allowed: by `--allow-protected` on the command line, by `MRSM_ALLOW_PROTECTED=1` in the
+    environment, or inside this context manager. The allowance is process-wide while the block
+    runs (other threads see it too); child processes need `MRSM_ALLOW_PROTECTED=1`.
+
+    Examples
+    --------
+    >>> import meerschaum as mrsm
+    >>> from meerschaum.connectors import allow_protected
+    >>> pipe = mrsm.Pipe('plugin:noaa', 'weather', instance='sql:prod')
+    >>> with allow_protected():
+    ...     success, msg = pipe.sync(df)
+    """
+
+    def __enter__(self) -> 'allow_protected':
+        from meerschaum import _core
+        _core.allow_protected_enter()
+        return self
+
+    def __exit__(self, *exc: Any) -> None:
+        from meerschaum import _core
+        _core.allow_protected_exit()
+
+
+def is_protected_value(value: Any) -> bool:
+    """
+    Whether a connector attribute value marks the connector protected
+    (`True`, a non-zero number, or a string like `'true'`, `'1'`, `'yes'`).
+    """
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    if isinstance(value, str):
+        return value.strip().lower() in ('1', 'true', 'yes', 'on', 'y', 't')
+    return False
+
+
+def uri_marks_protected(uri: Any) -> bool:
+    """
+    Whether a connector URI carries `?protected=true` (any truthy value), which marks the
+    connector protected, e.g. `MRSM_VALKEY_PROD='valkey://host:6379/0?protected=true'`.
+    """
+    if not isinstance(uri, str) or '?' not in uri:
+        return False
+    from meerschaum import _core
+    return _core.uri_marks_protected(uri)
+
+
+def protected_refusal(connector: Any, op: str, pipe: Any = None) -> Optional[str]:
+    """
+    The refusal message for a write `op` through `connector` when it is protected and writes
+    are not allowed, else `None`. Meerschaum's own internal pipes (connector keys `mrsm`) are
+    never refused.
+    """
+    if pipe is not None and str(getattr(pipe, 'connector_keys', '')) == 'mrsm':
+        return None
+    if not is_protected_value(getattr(connector, 'protected', False)):
+        return None
+    from meerschaum import _core
+    if _core.protected_allowed():
+        return None
+    what = f"{op} {pipe}" if pipe is not None else op
+    return _core.protected_refusal_message(what, str(connector))
 
 
 def is_connected(keys: str, **kw) -> bool:

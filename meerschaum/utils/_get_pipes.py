@@ -448,7 +448,7 @@ def fetch_pipes_keys(
         if tags is None:
             tags = []
 
-        return connector.fetch_pipes_keys(
+        keys = connector.fetch_pipes_keys(
             connector_keys = connector_keys,
             metric_keys = metric_keys,
             location_keys = location_keys,
@@ -456,6 +456,17 @@ def fetch_pipes_keys(
             params = params,
             debug = debug
         )
+        ### Meerschaum's internal pipes (saved Pipelines' registry pipes, ...) stay out of
+        ### listings unless `mrsm` is named in `connector_keys` (`-c mrsm`).
+        if 'mrsm' in connector_keys:
+            return keys
+        def _visible(item) -> bool:
+            return not (isinstance(item, (list, tuple)) and item and item[0] == 'mrsm')
+        if isinstance(keys, dict):
+            return {key: val for key, val in keys.items() if _visible(val)}
+        if isinstance(keys, list):
+            return [item for item in keys if _visible(item)]
+        return keys
 
     def _explicit(
         connector_keys: Optional[List[str]] = None,

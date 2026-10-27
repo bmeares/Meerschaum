@@ -400,14 +400,17 @@ impl PluginSync for Inplace {
             SyncBegin::At(b) => metadef_bound(Some(b)),
             SyncBegin::Unbounded => Bound::None,
         };
+        // `replace` (rc15): the window is replaced instead of diffed.
         let result = self
             .0
-            .sync_pipe_inplace(
+            .sync_pipe_inplace_replacing(
                 pipe,
                 args.params.as_ref(),
                 begin,
                 metadef_bound(args.end.as_ref()),
                 args.check_existing,
+                args.replace,
+                None,
             )
             .await;
         meerschaum_engine::sync::result_from_message(result.success, result.message)
@@ -494,6 +497,10 @@ pub fn build_registry(
         .detach(|| session.native_plugins(&config))
         .map_err(|e| e.message)?;
     let registry = meerschaum_cli::native_plugins::NativeRegistry::new(natives, &config, python);
+    // Native plugins' host calls reuse the worker session's connectors, and write their config
+    // as Python's `write_plugin_config()` would (the live snapshot itself is read-only).
+    registry.set_session(session.clone());
+    registry.set_config_writes(crate::native_plugin_api::config_writes_allowed(py));
     Ok(Built {
         registry,
         config: Some(engine_config),
@@ -521,6 +528,8 @@ pub fn suggest_worker_python(py: Python<'_>, session: &Session) {
 /// runtime thread ever calls back into Python for the config.
 pub fn publish_live_config(py: Python<'_>) -> PyResult<Arc<Config>> {
     let config = Arc::new(merged_config(py)?);
+    // What native plugins wrote with `write_plugin_config` since the last call.
+    crate::native_plugin_api::absorb_plugin_config_writes(py, &config)?;
     meerschaum_core::config::set_live_snapshot(config.clone());
     Ok(config)
 }

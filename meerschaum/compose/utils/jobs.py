@@ -32,8 +32,9 @@ def _command_signature(sysargs: List[str]) -> List[str]:
     """Return a job command without the flags that don't identify the workload."""
     from meerschaum._internal.arguments._parse_arguments import compress_pipeline_sysargs
 
-    ### A compound command (`... + ... : --loop`) is stored as the `start pipeline`
-    ### form it was rewritten into, so compare both sides in the condensed form.
+    ### A compound command (`... + ... : --loop`) is stored as the serialized action
+    ### chain it was rewritten into (`chain ...`, or 4.1's `start pipeline ...`),
+    ### so compare both sides in the condensed form.
     ### This is a no-op for a command which isn't a pipeline.
     return [
         arg
