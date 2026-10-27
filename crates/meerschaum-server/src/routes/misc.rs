@@ -20,13 +20,18 @@ pub fn index_routes(app: Router<AppState>, _cfg: &ServerConfig) -> Router<AppSta
     app.route("/", get(index))
 }
 
-/// Register the `misc` route group.
+/// Register the `misc` route group. The public preset keeps only `/healthcheck` and
+/// `/favicon.ico` (unless the allowlist names `misc`).
 pub fn routes(app: Router<AppState>, cfg: &ServerConfig) -> Router<AppState> {
     let app = app
         .route("/favicon.ico", get(get_favicon))
-        .route("/chaining", get(get_chaining_status))
-        .route("/info", get(get_instance_info))
         .route("/healthcheck", get(get_healthcheck));
+    if !cfg.serves_full_misc() {
+        return app;
+    }
+    let app = app
+        .route("/chaining", get(get_chaining_status))
+        .route("/info", get(get_instance_info));
     if cfg.debug {
         app.route("/id", get(get_ids))
     } else {

@@ -135,8 +135,12 @@ const OAUTH2_REDIRECT_HTML: &str = r##"<!doctype html>
 </html>
 "##;
 
-/// Register `/openapi.json` and (when enabled) the docs pages.
+/// Register `/openapi.json` and (when enabled) the docs pages. The public preset serves neither
+/// unless the allowlist names the `docs` group.
 pub fn routes(app: Router<AppState>, cfg: &ServerConfig) -> Router<AppState> {
+    if !cfg.openapi_enabled {
+        return app;
+    }
     let doc = Arc::new(
         crate::openapi::document(cfg)
             .to_json()

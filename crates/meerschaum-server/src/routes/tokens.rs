@@ -165,7 +165,7 @@ async fn register_token(ctx: Ctx, body: Body) -> ApiResult {
     let mut scopes = scopes_of(model.get("scopes"))?;
     // A token carries at most its owner's scopes: no scopes asked for means the owner's own, and
     // anything beyond them is refused, never trimmed.
-    if let Some(cap) = grantable_scopes(&ctx.state, principal.as_ref()).await {
+    if let Some(cap) = grantable_scopes(&ctx.state, principal.as_ref()).await? {
         let asked = model
             .get("scopes")
             .and_then(Json::as_array)
@@ -415,7 +415,7 @@ async fn edit_token(ctx: Ctx, Path(token_id): Path<String>, body: Body) -> ApiRe
         .and_then(Json::as_array)
         .is_some_and(|a| !a.is_empty());
     if asked {
-        if let Some(cap) = grantable_scopes(&ctx.state, principal.as_ref()).await {
+        if let Some(cap) = grantable_scopes(&ctx.state, principal.as_ref()).await? {
             let refused = disallowed_scopes(&scopes, &cap, &existing.scopes);
             if !refused.is_empty() {
                 return Err(scope_cap_error(&refused));

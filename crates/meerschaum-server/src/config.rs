@@ -33,6 +33,8 @@ pub struct ServerFlags {
     pub no_dash: bool,
     /// `--no-webterm`.
     pub no_webterm: bool,
+    /// `--public`: the public preset (`api:permissions:preset: public`).
+    pub public: bool,
 }
 
 /// A rate limit for one route group (`api:permissions:rate_limits:<group>`).
@@ -43,6 +45,38 @@ pub struct RateLimit {
     /// The window.
     pub per: Duration,
 }
+
+/// The name of the public preset (`api:permissions:preset: public`, `start api --public`).
+pub const PUBLIC_PRESET: &str = "public";
+
+/// The core route groups the public preset keeps: `/version` and, of the `misc` group, only
+/// `/healthcheck` and `/favicon.ico` (see [`ServerConfig::serves_full_misc`]). `/login` is served
+/// unless explicitly disabled, as always; plugin routes and pages are not core groups.
+pub const PUBLIC_ROUTE_GROUPS: &[&str] = &["version", "misc"];
+
+/// The route groups a rate limit may name (`api:permissions:rate_limits:<group>`), besides glob
+/// patterns over them and path prefixes (`/my-plugin`): the core groups and the groups of the
+/// routes outside them ([`crate::routes::route_group_of`]).
+pub const RATE_LIMIT_GROUPS: &[&str] = &[
+    "actions",
+    "connectors",
+    "index",
+    "jobs",
+    "misc",
+    "pipes",
+    "pipelines",
+    "plugins",
+    "tokens",
+    "users",
+    "version",
+    "engine",
+    "login",
+    "docs",
+    "mcp",
+    "webterm",
+    "internal",
+    "other",
+];
 
 /// The resolved server configuration.
 #[derive(Debug, Clone)]
@@ -93,9 +127,18 @@ pub struct ServerConfig {
     pub routes_allowlist: Vec<String>,
     /// Explicitly disabled route groups; overrides the allowlist, including login.
     pub routes_disabled: Vec<String>,
+    /// The public preset (`api:permissions:preset: public` or `start api --public`): only
+    /// `/login`, `/healthcheck`, `/version`, plugin routes and plugin pages are served. The
+    /// allowlist's groups other than a bare `*` are served too, and `routes_disabled` still
+    /// removes groups (see [`ServerConfig::route_group_is_allowed`]).
+    pub public: bool,
+    /// Whether `/openapi.json` is served (always, except under the public preset unless the
+    /// `docs` group is allowlisted).
+    pub openapi_enabled: bool,
     /// Automatic execution retention (success output, failure output, summaries), seconds.
     pub execution_retention: [u64; 3],
-    /// `api:permissions:rate_limits` by route-group pattern (new in v5).
+    /// `api:permissions:rate_limits` by route-group pattern or path prefix (keys starting with
+    /// `/`), in config order (new in v5).
     pub rate_limits: IndexMap<String, RateLimit>,
     /// `api:permissions:log_streams:max`: log streams (`GET /logs/{name}/stream`) one server
     /// follows at once (new in v5; default 32). Each follows a job on a thread of its own.
@@ -140,6 +183,10 @@ pub struct ServerConfig {
     pub webterm_tmux_enabled: bool,
     /// `api:webterm:tmux:session_suffix`: appended to the user name to name the tmux session.
     pub webterm_tmux_session_suffix: String,
+    /// `api:webterm:tmux:config`: the tmux configuration file the terminal's tmux server starts
+    /// with. `None` (the default) writes and uses Meerschaum's own file in the webterm resources
+    /// directory (no status bar, mouse on, no plugins).
+    pub webterm_tmux_config: Option<PathBuf>,
     /// `WEBTERM_INTERNAL_RESOURCES_PATH`: where the tmux path keeps the shell's environment file.
     pub webterm_resources_path: PathBuf,
 }
@@ -182,6 +229,138 @@ fn path_of(config: &Config, name: &str) -> Option<PathBuf> {
         PathValue::Path(p) => Some(p),
         PathValue::Name(n) => Some(PathBuf::from(n)),
     }
+}
+
+/// The spellings of a rate limit's two numbers: `requests` / `seconds`, or the
+/// `max` / `window_seconds` some guides used.
+const RATE_LIMIT_KEYS: &[&str] = &["requests", "seconds", "max", "window_seconds"];
+
+/// A rate limit's number, if `v` is one (`10`, `10.0`, `"10"`).
+fn rate_number(v: &Value) -> Option<f64> {
+    match v {
+        Value::Bool(_) => None,
+        Value::Str(s) => s.trim().parse::<f64>().ok(),
+        other => other.as_f64(),
+    }
+    .filter(|n| n.is_finite())
+}
+
+/// Whether a rate-limit key names something requests can be in: a path prefix (`/my-plugin`), a
+/// glob pattern, or one of [`RATE_LIMIT_GROUPS`].
+fn known_rate_limit_key(key: &str) -> bool {
+    key.starts_with('/') || key.contains(['*', '?', '[']) || RATE_LIMIT_GROUPS.contains(&key)
+}
+
+/// `api:permissions:rate_limits`: `{<group pattern or /path>: {requests, seconds}}`, also spelled
+/// `{max, window_seconds}`. Entries that cannot be used are skipped with one notice each that
+/// names the entry, and so are unknown keys inside an entry.
+pub fn parse_rate_limits(
+    limits: Option<&Value>,
+    notices: &mut Vec<String>,
+) -> IndexMap<String, RateLimit> {
+    let mut out = IndexMap::new();
+    let entries = match limits {
+        None | Some(Value::Null) => return out,
+        Some(Value::Map(m)) => m,
+        Some(other) => {
+            notices.push(format!(
+                "Ignoring `api:permissions:rate_limits`: expected a mapping of route groups to \
+                 {{requests, seconds}}, got {}.",
+                other.type_name()
+            ));
+            return out;
+        }
+    };
+    let groups = RATE_LIMIT_GROUPS.join(", ");
+    for (group, spec) in entries {
+        let Value::Map(spec) = spec else {
+            notices.push(format!(
+                "Ignoring the rate limit for '{group}': expected {{requests: N, seconds: S}}, \
+                 got {}.",
+                spec.type_name()
+            ));
+            continue;
+        };
+        let unknown: Vec<&str> = spec
+            .keys()
+            .map(String::as_str)
+            .filter(|k| !RATE_LIMIT_KEYS.contains(k))
+            .collect();
+        if !unknown.is_empty() {
+            notices.push(format!(
+                "Unknown key(s) {} in the rate limit for '{group}' (expected `requests` and \
+                 `seconds`; `max` and `window_seconds` also work).",
+                unknown
+                    .iter()
+                    .map(|k| format!("`{k}`"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
+        }
+        // `requests` / `seconds` win when both spellings are given.
+        let pick = |a: &str, b: &str| spec.get(a).or_else(|| spec.get(b));
+        let requests = pick("requests", "max");
+        let seconds = pick("seconds", "window_seconds");
+        let Some(requests_value) = requests else {
+            notices.push(format!(
+                "Ignoring the rate limit for '{group}': it has no `requests` (or `max`)."
+            ));
+            continue;
+        };
+        let requests = rate_number(requests_value).filter(|n| *n >= 1.0 && n.fract() == 0.0);
+        let Some(requests) = requests else {
+            notices.push(format!(
+                "Ignoring the rate limit for '{group}': `requests` must be a whole number of at \
+                 least 1, got {}.",
+                requests_value.py_str()
+            ));
+            continue;
+        };
+        let seconds = match seconds {
+            // A window of one minute when only the count is given (v5's default).
+            None => 60.0,
+            Some(v) => match rate_number(v).filter(|n| *n > 0.0) {
+                Some(n) => n,
+                None => {
+                    notices.push(format!(
+                        "Ignoring the rate limit for '{group}': `seconds` must be a positive \
+                         number, got {}.",
+                        v.py_str()
+                    ));
+                    continue;
+                }
+            },
+        };
+        if !known_rate_limit_key(group) {
+            notices.push(format!(
+                "The rate limit for '{group}' matches no route group (groups: {groups}; use a \
+                 path such as '/my-plugin' for plugin routes)."
+            ));
+        }
+        out.insert(
+            group.clone(),
+            RateLimit {
+                requests: if requests >= f64::from(u32::MAX) {
+                    u32::MAX
+                } else {
+                    requests as u32
+                },
+                // Bounded so `Duration::from_secs_f64` cannot overflow.
+                per: Duration::from_secs_f64(seconds.min(1e9)),
+            },
+        );
+    }
+    out
+}
+
+/// Expand a leading `~` of a configured path.
+fn expand_home(path: &str) -> PathBuf {
+    if let Some(rest) = path.strip_prefix("~/")
+        && let Some(home) = std::env::var_os("HOME").filter(|h| !h.is_empty())
+    {
+        return PathBuf::from(home).join(rest);
+    }
+    PathBuf::from(path)
 }
 
 /// The v4 defaults of the `api:uvicorn` keys that moved to `api:server`.
@@ -273,29 +452,45 @@ impl ServerConfig {
         let routes_disabled =
             str_list(get(cfg, &["api", "permissions", "routes", "disabled"])).unwrap_or_default();
 
-        let mut rate_limits = IndexMap::new();
-        if let Some(Value::Map(m)) = get(cfg, &["api", "permissions", "rate_limits"]) {
-            for (group, spec) in m {
-                let requests = spec
-                    .get("requests")
-                    .and_then(meerschaum_core::pyfmt::py_int)
-                    .unwrap_or(0);
-                let seconds = spec.get("seconds").and_then(Value::as_f64).unwrap_or(60.0);
-                if requests > 0 && seconds > 0.0 {
-                    rate_limits.insert(
-                        group.clone(),
-                        RateLimit {
-                            requests: u32::try_from(requests).unwrap_or(u32::MAX),
-                            per: Duration::from_secs_f64(seconds),
-                        },
-                    );
+        let rate_limits = parse_rate_limits(
+            get(cfg, &["api", "permissions", "rate_limits"]),
+            &mut notices,
+        );
+
+        // The public preset: `api:permissions:preset: public` or `start api --public`.
+        let public = flags.public
+            || match get(cfg, &["api", "permissions", "preset"]) {
+                None | Some(Value::Null) => false,
+                Some(v) => {
+                    let name = v.py_str();
+                    let name = name.trim();
+                    if name.eq_ignore_ascii_case(PUBLIC_PRESET) {
+                        true
+                    } else {
+                        if !name.is_empty() {
+                            notices.push(format!(
+                                "Ignoring unknown `api:permissions:preset` '{name}' (the only \
+                                 preset is '{PUBLIC_PRESET}')."
+                            ));
+                        }
+                        false
+                    }
                 }
-            }
-        }
+            };
+        // Under the preset, an allowlisted group other than a bare `*` (the default) is
+        // served in addition to the public ones.
+        let preset_allows = |group: &str| {
+            routes_allowlist
+                .iter()
+                .any(|p| p != "*" && fnmatch(group, p))
+                && !routes_disabled.iter().any(|p| fnmatch(group, p))
+        };
 
         let production = flags.production;
-        let docs_enabled =
-            !production || bool_at(cfg, &["api", "endpoints", "docs_in_production"], true);
+        let docs_enabled = (!production
+            || bool_at(cfg, &["api", "endpoints", "docs_in_production"], true))
+            && (!public || preset_allows("docs"));
+        let openapi_enabled = !public || preset_allows("docs");
         let connectors = match get(cfg, &["meerschaum", "connectors"]) {
             Some(Value::Map(m)) => m.clone(),
             _ => Map::new(),
@@ -313,14 +508,13 @@ impl ServerConfig {
             no_auth: flags.no_auth,
             debug: flags.debug,
             no_dash: flags.no_dash,
-            no_webterm: flags.no_webterm || flags.no_auth,
+            // The public preset serves no terminal.
+            no_webterm: flags.no_webterm || flags.no_auth || public,
             version: crate::VERSION.to_string(),
             server_id,
-            registration_users: bool_at(
-                cfg,
-                &["api", "permissions", "registration", "users"],
-                true,
-            ),
+            // The public preset turns user registration off.
+            registration_users: !public
+                && bool_at(cfg, &["api", "permissions", "registration", "users"], true),
             registration_pipes: bool_at(
                 cfg,
                 &["api", "permissions", "registration", "pipes"],
@@ -367,6 +561,8 @@ impl ServerConfig {
             .unwrap_or_else(|| vec!["*".into()]),
             routes_allowlist,
             routes_disabled,
+            public,
+            openapi_enabled,
             execution_retention: [
                 ("success_seconds", 86400),
                 ("failure_seconds", 604800),
@@ -438,6 +634,10 @@ impl ServerConfig {
                 Some(Value::Null) | None => "_mrsm".into(),
                 Some(v) => v.py_str(),
             },
+            webterm_tmux_config: match get(cfg, &["api", "webterm", "tmux", "config"]) {
+                Some(Value::Str(s)) if !s.trim().is_empty() => Some(expand_home(s.trim())),
+                _ => None,
+            },
             webterm_resources_path: PathBuf::from("internal/webterm"),
         }
     }
@@ -497,17 +697,91 @@ impl ServerConfig {
     }
 
     /// Whether a core route group is served (`route_group_is_allowed`).
+    ///
+    /// Under the public preset only [`PUBLIC_ROUTE_GROUPS`] are, plus the groups the allowlist
+    /// names explicitly (any pattern but a bare `*`, the default); `routes_disabled` always wins.
     pub fn route_group_is_allowed(&self, group: &str) -> bool {
-        !self.routes_disabled.iter().any(|p| fnmatch(group, p))
-            && self.routes_allowlist.iter().any(|p| fnmatch(group, p))
+        if self.routes_disabled.iter().any(|p| fnmatch(group, p)) {
+            return false;
+        }
+        if self.public {
+            return PUBLIC_ROUTE_GROUPS.contains(&group) || self.preset_allowlisted(group);
+        }
+        self.routes_allowlist.iter().any(|p| fnmatch(group, p))
+    }
+
+    /// Under the public preset: whether the allowlist names `group` explicitly (a pattern other
+    /// than a bare `*`) and it is not disabled.
+    pub fn preset_allowlisted(&self, group: &str) -> bool {
+        self.routes_allowlist
+            .iter()
+            .any(|p| p != "*" && fnmatch(group, p))
+            && !self.routes_disabled.iter().any(|p| fnmatch(group, p))
+    }
+
+    /// Whether every route of the `misc` group is served: always, except under the public preset,
+    /// which keeps only `/healthcheck` and `/favicon.ico` unless the allowlist names `misc`.
+    pub fn serves_full_misc(&self) -> bool {
+        !self.public || self.preset_allowlisted("misc")
+    }
+
+    /// The startup line of the public preset (what it serves), or `None` without it.
+    pub fn preset_notice(&self) -> Option<String> {
+        if !self.public {
+            return None;
+        }
+        let extra: Vec<&str> = crate::routes::CORE_ROUTE_GROUPS
+            .iter()
+            .chain(["mcp", "docs"].iter())
+            .copied()
+            .filter(|g| !PUBLIC_ROUTE_GROUPS.contains(g) && self.preset_allowlisted(g))
+            .collect();
+        let mut line =
+            "Public preset: serving only /login, /healthcheck, /version, plugin routes and \
+             plugin pages; the web console, web terminal, actions, user registration and API docs \
+             are off."
+                .to_string();
+        if !extra.is_empty() {
+            line.push_str(&format!(
+                " Also serving the allowlisted route groups: {}.",
+                extra.join(", ")
+            ));
+        }
+        Some(line)
     }
 
     /// The rate limit for a route group (the first matching pattern).
     pub fn rate_limit_for(&self, group: &str) -> Option<RateLimit> {
         self.rate_limits
             .iter()
-            .find(|(pattern, _)| fnmatch(group, pattern))
+            .find(|(pattern, _)| !pattern.starts_with('/') && fnmatch(group, pattern))
             .map(|(_, l)| *l)
+    }
+
+    /// The rate limit of a request and the bucket it counts against: the longest path-prefix key
+    /// (`/my-plugin` matches `/my-plugin` and `/my-plugin/...`) wins, else the first route-group
+    /// pattern matching `group`.
+    pub fn rate_limit_for_request(&self, path: &str, group: &str) -> Option<(String, RateLimit)> {
+        let by_path = self
+            .rate_limits
+            .iter()
+            .filter(|(key, _)| key.starts_with('/'))
+            .filter(|(key, _)| {
+                let prefix = key.trim_end_matches('/');
+                prefix.is_empty()
+                    || path == prefix
+                    || path
+                        .strip_prefix(prefix)
+                        .is_some_and(|rest| rest.starts_with('/'))
+            })
+            .max_by_key(|(key, _)| key.trim_end_matches('/').len());
+        if let Some((key, limit)) = by_path {
+            return Some((key.clone(), *limit));
+        }
+        self.rate_limits
+            .iter()
+            .find(|(pattern, _)| !pattern.starts_with('/') && fnmatch(group, pattern))
+            .map(|(_, l)| (group.to_string(), *l))
     }
 }
 
@@ -649,5 +923,144 @@ mod tests {
         let sc = ServerConfig::from_map(&Map::new(), &ServerFlags::default());
         assert!(sc.route_group_is_allowed("pipes"));
         assert!(sc.notices.is_empty());
+    }
+
+    fn map(json: &str) -> Map {
+        let Value::Map(m) = Value::from_json_str(json).unwrap() else {
+            panic!("a map")
+        };
+        m
+    }
+
+    #[test]
+    fn rate_limits_accept_both_spellings_and_warn_on_the_rest() {
+        let sc = ServerConfig::from_map(
+            &map(r#"{"api": {"permissions": {"rate_limits": {
+                    "login": {"requests": 5, "seconds": 60},
+                    "pipes": {"max": 100, "window_seconds": 10},
+                    "jobs": {"requests": 3},
+                    "/my-plugin": {"max": 2, "window_seconds": 1},
+                    "users": {"requests": 4, "seconds": 2, "burst": 9},
+                    "tokens": {"requests": 0, "seconds": 1},
+                    "plugins": {"requests": "x", "seconds": 1},
+                    "engine": {"requests": 2, "seconds": -1},
+                    "connectors": 7,
+                    "logins": {"requests": 1, "seconds": 1}
+                }}}}"#),
+            &ServerFlags::default(),
+        );
+        let login = sc.rate_limit_for("login").unwrap();
+        assert_eq!((login.requests, login.per), (5, Duration::from_secs(60)));
+        let pipes = sc.rate_limit_for("pipes").unwrap();
+        assert_eq!((pipes.requests, pipes.per), (100, Duration::from_secs(10)));
+        // A count without a window: one minute.
+        assert_eq!(
+            sc.rate_limit_for("jobs").unwrap().per,
+            Duration::from_secs(60)
+        );
+        // An unknown key is a notice, the entry still applies.
+        assert_eq!(sc.rate_limit_for("users").unwrap().requests, 4);
+        for bad in ["tokens", "plugins", "engine", "connectors"] {
+            assert!(sc.rate_limit_for(bad).is_none(), "{bad}");
+        }
+        let notices = sc.notices.join("\n");
+        for needle in [
+            "`burst` in the rate limit for 'users'",
+            "'tokens'",
+            "'plugins'",
+            "'engine'",
+            "'connectors'",
+            "The rate limit for 'logins' matches no route group",
+        ] {
+            assert!(notices.contains(needle), "{needle}:\n{notices}");
+        }
+        assert!(!notices.contains("for 'pipes'"), "{notices}");
+        assert!(!notices.contains("for '/my-plugin'"), "{notices}");
+        assert!(!notices.contains("for 'jobs'"), "{notices}");
+        // Path prefixes win over groups and match whole segments only.
+        let (bucket, limit) = sc
+            .rate_limit_for_request("/my-plugin/data", "other")
+            .unwrap();
+        assert_eq!((bucket.as_str(), limit.requests), ("/my-plugin", 2));
+        assert!(sc.rate_limit_for_request("/my-plugins", "other").is_none());
+        let (bucket, _) = sc.rate_limit_for_request("/pipes/a/b/c", "pipes").unwrap();
+        assert_eq!(bucket, "pipes");
+    }
+
+    #[test]
+    fn public_preset_serves_only_public_routes() {
+        let public = |patch: &str, flag: bool| {
+            ServerConfig::from_map(
+                &map(patch),
+                &ServerFlags {
+                    public: flag,
+                    ..Default::default()
+                },
+            )
+        };
+        for sc in [
+            public(r#"{"api": {"permissions": {"preset": "public"}}}"#, false),
+            public("{}", true),
+            // The default allowlist (`['*']`) adds nothing.
+            public(
+                r#"{"api": {"permissions": {"routes": {"allowlist": ["*"]}}}}"#,
+                true,
+            ),
+        ] {
+            assert!(sc.public);
+            for group in ["version", "misc"] {
+                assert!(sc.route_group_is_allowed(group), "{group}");
+            }
+            for group in [
+                "pipes",
+                "actions",
+                "jobs",
+                "users",
+                "tokens",
+                "engine",
+                "pipelines",
+                "mcp",
+                "index",
+                "connectors",
+                "plugins",
+            ] {
+                assert!(!sc.route_group_is_allowed(group), "{group}");
+            }
+            assert!(!sc.serves_full_misc());
+            assert!(sc.no_webterm && !sc.registration_users);
+            assert!(!sc.docs_enabled && !sc.openapi_enabled);
+            assert!(sc.preset_notice().unwrap().contains("/healthcheck"));
+        }
+        // An explicit allowlist adds groups on top; `disabled` still removes them.
+        let sc = public(
+            r#"{"api": {"permissions": {"routes": {"allowlist": ["pipes", "docs", "misc"],
+                "disabled": ["version"]}}}}"#,
+            true,
+        );
+        assert!(sc.route_group_is_allowed("pipes"));
+        assert!(!sc.route_group_is_allowed("version"));
+        assert!(!sc.route_group_is_allowed("jobs"));
+        assert!(sc.serves_full_misc() && sc.docs_enabled && sc.openapi_enabled);
+        assert!(sc.preset_notice().unwrap().contains("pipes"));
+        // An unknown preset is a notice; no preset is the usual server.
+        let sc = public(r#"{"api": {"permissions": {"preset": "kiosk"}}}"#, false);
+        assert!(!sc.public && sc.route_group_is_allowed("pipes"));
+        assert!(sc.notices.iter().any(|n| n.contains("kiosk")));
+        let sc = public("{}", false);
+        assert!(!sc.public && sc.preset_notice().is_none() && sc.openapi_enabled);
+    }
+
+    #[test]
+    fn tmux_config_path_is_optional() {
+        let sc = ServerConfig::from_map(&Map::new(), &ServerFlags::default());
+        assert!(sc.webterm_tmux_config.is_none());
+        let sc = ServerConfig::from_map(
+            &map(r#"{"api": {"webterm": {"tmux": {"config": "/etc/mrsm-tmux.conf"}}}}"#),
+            &ServerFlags::default(),
+        );
+        assert_eq!(
+            sc.webterm_tmux_config.as_deref(),
+            Some(std::path::Path::new("/etc/mrsm-tmux.conf"))
+        );
     }
 }

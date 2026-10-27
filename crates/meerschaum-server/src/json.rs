@@ -69,6 +69,28 @@ pub fn tuple(success: bool, message: impl Into<String>) -> Response {
     })
 }
 
+/// A URL path segment: everything but RFC 3986's unreserved characters is percent-encoded.
+pub fn quote_segment(segment: &str) -> String {
+    let mut out = String::with_capacity(segment.len());
+    for b in segment.bytes() {
+        if b.is_ascii_alphanumeric() || b"-_.~".contains(&b) {
+            out.push(b as char);
+        } else {
+            out.push_str(&format!("%{b:02X}"));
+        }
+    }
+    out
+}
+
+/// A query string of `(key, value)` pairs, each part percent-encoded.
+pub fn query_string(pairs: &[(&str, &str)]) -> String {
+    pairs
+        .iter()
+        .map(|(k, v)| format!("{}={}", quote_segment(k), quote_segment(v)))
+        .collect::<Vec<_>>()
+        .join("&")
+}
+
 /// pydantic v2's JSON rendering of an aware UTC `datetime`: `2026-01-01T00:00:00Z`, with
 /// `.ffffff` only when there are microseconds.
 pub fn pydantic_datetime(dt: &chrono::DateTime<chrono::Utc>) -> String {

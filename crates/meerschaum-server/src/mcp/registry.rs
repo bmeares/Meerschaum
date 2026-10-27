@@ -348,7 +348,28 @@ pub struct Builtin {
 
 const REGISTRY_JSON: &str = include_str!("registry.json");
 
-/// The built-in registry, parsed once.
+/// The built-in tools this server serves: v4's ([`builtin`]) with v5's changes, then the tools
+/// v5 adds ([`super::v5`]), parsed once.
+pub fn tools() -> &'static [Tool] {
+    static CELL: OnceLock<Vec<Tool>> = OnceLock::new();
+    CELL.get_or_init(|| {
+        let mut tools = builtin().tools.clone();
+        for t in &mut tools {
+            super::v5::patch(t);
+        }
+        tools.extend(super::v5::tools());
+        tools
+    })
+}
+
+/// The `initialize` instructions this server sends: v4's primer with v5's addendum.
+pub fn primer() -> &'static str {
+    static CELL: OnceLock<String> = OnceLock::new();
+    CELL.get_or_init(|| format!("{}{}", builtin().primer, super::v5::PRIMER_ADDENDUM))
+}
+
+/// The built-in registry as v4 exported it (`registry.json`), parsed once. The server serves
+/// [`tools`] and [`primer`], which add v5's changes to it.
 pub fn builtin() -> &'static Builtin {
     static CELL: OnceLock<Builtin> = OnceLock::new();
     CELL.get_or_init(|| {

@@ -144,6 +144,114 @@ async fn bridges_websockets() {
     }
 }
 
+/// A fake API host that records the path of every request it gets and answers `200`.
+async fn serve_recording_host(
+    socket: &Path,
+) -> (tokio::task::JoinHandle<()>, Arc<Mutex<Vec<String>>>) {
+    let _ = std::fs::remove_file(socket);
+    let listener = tokio::net::UnixListener::bind(socket).unwrap();
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let recorder = seen.clone();
+    let app = Router::new().fallback(any(move |uri: Uri| {
+        let recorder = recorder.clone();
+        async move {
+            recorder.lock().unwrap().push(uri.path().to_string());
+            format!("host saw {}", uri.path())
+        }
+    }));
+    let server = tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    (server, seen)
+}
+
+fn app_with_config(
+    proxy: HostProxy,
+    configure: impl FnOnce(&mut meerschaum_server::ServerConfig),
+) -> (Router, tempfile::TempDir) {
+    let dir = tempfile::tempdir().unwrap();
+    let mut cfg = common::config(dir.path());
+    configure(&mut cfg);
+    let instance = Arc::new(common::MemoryInstance::new("fixture"));
+    let state = AppState::builder(cfg, instance)
+        .secret(SECRET.to_vec())
+        .host(Arc::new(proxy))
+        .build()
+        .unwrap();
+    (meerschaum_server::app(state), dir)
+}
+
+/// The API host routes on the percent-decoded path (uvicorn decodes `%64ocs` to `docs`), so the
+/// server classifies a request by that path too: an encoded spelling of a route the server keeps
+/// from the host is not forwarded, and it counts against the same rate limit.
+#[tokio::test]
+async fn encoded_paths_are_classified_like_the_path_the_host_routes() {
+    let dir = tempfile::tempdir().unwrap();
+    let socket = dir.path().join("host.sock");
+    let (_host, seen) = serve_recording_host(&socket).await;
+
+    // The public preset serves no API docs, terminal, internal routes or full `misc` group.
+    let (app, _root) = app_with_config(HostProxy::new(&socket), |c| {
+        c.public = true;
+        c.openapi_enabled = false;
+        c.docs_enabled = false;
+        c.no_webterm = true;
+    });
+    let r = send(&app, req("GET", "/my-plugin/data", None, None)).await;
+    assert_eq!(r.text(), "host saw /my-plugin/data");
+    for path in [
+        "/docs",
+        "/%64ocs",
+        "/%64ocs/oauth2-redirect",
+        "/openapi.json",
+        "/openapi%2Ejson",
+        "/openapi%2ejson",
+        "/r%65doc",
+        "/%69nfo",
+        "/%5Fmrsm/host/registry",
+        "/%77ebterm/session",
+        "/%70ipes/keys",
+        "/%61ctions",
+    ] {
+        let r = send(&app, req("GET", path, None, None)).await;
+        assert_eq!(r.status, StatusCode::NOT_FOUND, "{path}: {}", r.text());
+        assert!(r.unmatched, "{path}: {}", r.text());
+    }
+    // An encoded plugin path still reaches the host, unchanged.
+    let r = send(&app, req("GET", "/my%2Dplugin/data", None, None)).await;
+    assert_eq!(r.text(), "host saw /my%2Dplugin/data");
+    assert_eq!(
+        *seen.lock().unwrap(),
+        vec![
+            "/my-plugin/data".to_string(),
+            "/my%2Dplugin/data".to_string()
+        ]
+    );
+
+    // A path-prefix rate limit counts the encoded spellings of its paths in the same bucket.
+    let (app, _root) = app_with_config(HostProxy::new(&socket), |c| {
+        let limits: meerschaum_core::Value =
+            serde_json::from_value(serde_json::json!({"/plugin": {"requests": 2, "seconds": 60}}))
+                .unwrap();
+        let mut notices = Vec::new();
+        c.rate_limits = meerschaum_server::config::parse_rate_limits(Some(&limits), &mut notices);
+        assert!(notices.is_empty(), "{notices:?}");
+    });
+    for path in ["/plugin/echo", "/plug%69n/echo"] {
+        let r = send(&app, req("GET", path, None, None)).await;
+        assert_eq!(r.status, StatusCode::OK, "{path}: {}", r.text());
+    }
+    for path in ["/%70lugin/echo", "/plugin%2Fecho", "/plugin/echo"] {
+        let r = send(&app, req("GET", path, None, None)).await;
+        assert_eq!(
+            r.status,
+            StatusCode::TOO_MANY_REQUESTS,
+            "{path}: {}",
+            r.text()
+        );
+    }
+}
+
 #[tokio::test]
 async fn unavailable_host_is_a_bad_gateway() {
     let dir = tempfile::tempdir().unwrap();

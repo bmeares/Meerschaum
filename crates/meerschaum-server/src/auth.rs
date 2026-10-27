@@ -253,45 +253,62 @@ fn authorization(headers: &HeaderMap) -> Option<String> {
         .map(String::from)
 }
 
-/// The instance's token as a principal (`conn.get_token(id)`).
-async fn get_token(conn: &Arc<dyn InstanceConnector>, id: &Uuid) -> Option<TokenModel> {
-    match conn.get_token_model(id).await {
-        Ok(m) => m,
-        Err(e) => {
-            tracing::warn!("Failed to load a token: {e}");
-            None
-        }
-    }
+/// The `503` of a credential read that failed: the request is refused, never authenticated
+/// (or turned away as a bad credential) on a guess.
+fn credentials_unavailable(error: impl std::fmt::Display) -> ApiError {
+    tracing::warn!("Could not read a principal from the instance: {error}");
+    ApiError::unavailable("Could not read your credentials from the instance; try again.")
+}
+
+/// The instance's token as a principal (`conn.get_token(id)`); a failed read is a `503`.
+async fn get_token(
+    conn: &Arc<dyn InstanceConnector>,
+    id: &Uuid,
+) -> Result<Option<TokenModel>, ApiError> {
+    conn.get_token_model(id)
+        .await
+        .map_err(credentials_unavailable)
 }
 
 /// `load_user_or_token_from_manager(sub)`: a current token when `sub` is a UUID, else a user
-/// that still exists on the instance. Deleted users cannot retain access through an old JWT.
-pub async fn load_from_subject(state: &AppState, sub: &str) -> Option<Principal> {
+/// that still exists on the instance (`Ok(None)` otherwise). Deleted users cannot retain access
+/// through an old JWT. A read that fails is an error (`503`).
+pub async fn load_from_subject(state: &AppState, sub: &str) -> Result<Option<Principal>, ApiError> {
     let conn = state.instance();
     if is_uuid(sub) {
-        let id = Uuid::parse_str(sub.trim()).ok()?;
+        let Ok(id) = Uuid::parse_str(sub.trim()) else {
+            return Ok(None);
+        };
         // A JWT is an access credential for its backing token, not a way to outlive the
         // token's revocation or expiry. API keys enforce these checks on every request too.
-        return get_token(&conn, &id)
-            .await
+        return Ok(get_token(&conn, &id)
+            .await?
             .filter(|token| {
                 token.is_valid
                     && token
                         .expiration
                         .is_none_or(|expiration| expiration > Utc::now())
             })
-            .map(Principal::Token);
+            .map(Principal::Token));
     }
     let mut user = User::new(sub, None);
     user.instance_keys = Some(conn.connector_keys());
     // An indefinitely cached ID would let a deleted user keep the scopes in an existing JWT.
     // Resolve existence on each request, including when another process deleted the account.
-    user.user_id = Some(conn.get_user_id(&user).await.ok().flatten()?);
-    Some(Principal::User(user))
+    let Some(id) = conn
+        .get_user_id(&user)
+        .await
+        .map_err(credentials_unavailable)?
+    else {
+        return Ok(None);
+    };
+    user.user_id = Some(id);
+    Ok(Some(Principal::User(user)))
 }
 
 /// `manager(request)` (`fastapi_login.LoginManager` with `OAuth2PasswordBearer`): a `Bearer`
-/// JWT, decoded and loaded; every failure is `401 Invalid credentials`.
+/// JWT, decoded and loaded; a bad credential is `401 Invalid credentials`, an instance that
+/// cannot be read `503`.
 pub async fn manager(state: &AppState, headers: &HeaderMap) -> Result<Principal, ApiError> {
     let auth = authorization(headers).unwrap_or_default();
     let (scheme, _, token) = partition(&auth, ' ');
@@ -304,7 +321,7 @@ pub async fn manager(state: &AppState, headers: &HeaderMap) -> Result<Principal,
         return Err(ApiError::invalid_credentials());
     };
     load_from_subject(state, sub)
-        .await
+        .await?
         .ok_or_else(ApiError::invalid_credentials)
 }
 
@@ -338,7 +355,7 @@ pub async fn token_from_authorization(
     let id = Uuid::parse_str(id).map_err(|_| bad_format())?;
     let conn = state.instance();
     let invalid = || ApiError::unauthorized("Invalid or revoked token.", Some("Bearer"));
-    let token = get_token(&conn, &id).await.ok_or_else(invalid)?;
+    let token = get_token(&conn, &id).await?.ok_or_else(invalid)?;
     if !token.is_valid {
         return Err(invalid());
     }
@@ -395,19 +412,29 @@ pub async fn load_user_or_token(
         .map(Principal::Token)
 }
 
+/// The `503` of a scope read that failed: authorization fails closed (it never falls back to
+/// "every scope", which is what a user without a `scopes` attribute holds).
+pub fn scopes_unavailable(error: impl std::fmt::Display) -> ApiError {
+    tracing::warn!("Could not read a principal's scopes from the instance: {error}");
+    ApiError::unavailable("Could not read your permissions from the instance; try again.")
+}
+
 /// `user.get_scopes(refresh=True)` / `token.get_scopes(refresh=True)`.
-pub async fn principal_scopes(state: &AppState, principal: &Principal) -> Vec<String> {
+///
+/// A read that fails is an error (`503`), never a guess: a user whose attributes cannot be read
+/// gets no scopes rather than v4's "no `scopes` attribute = every scope".
+pub async fn principal_scopes(
+    state: &AppState,
+    principal: &Principal,
+) -> Result<Vec<String>, ApiError> {
     let conn = state.instance();
     match principal {
         Principal::User(u) => {
-            let attrs = conn.get_user_attributes(u).await.ok().flatten();
-            let mut user = u.clone();
-            user.attributes = attrs;
-            user.get_scopes()
+            User::scopes_from_read(conn.get_user_attributes(u).await).map_err(scopes_unavailable)
         }
         Principal::Token(t) => match t.id {
-            Some(id) => conn.get_token_scopes(&id).await.unwrap_or_default(),
-            None => Vec::new(),
+            Some(id) => conn.get_token_scopes(&id).await.map_err(scopes_unavailable),
+            None => Ok(Vec::new()),
         },
     }
 }
@@ -424,7 +451,7 @@ pub async fn granted_scopes(
     }
     let auth = authorization(headers).unwrap_or_default();
     if auth.contains("mrsm-key:") {
-        return Ok(Scopes::List(principal_scopes(state, principal).await));
+        return Ok(Scopes::List(principal_scopes(state, principal).await?));
     }
     if auth.is_empty() {
         return Err(ApiError::unauthorized("Not authenticated.", None));
@@ -442,25 +469,32 @@ pub async fn granted_scopes(
 }
 
 /// The scopes a principal may hand to a token it registers or edits: `None` when it may grant
-/// anything (an administrator, a holder of `*`, or `--no-auth`), else the scopes it holds.
+/// anything (an administrator, a holder of `*`, or `--no-auth`), else the scopes it holds. A
+/// failed read of the principal's type or scopes is an error, never a wider grant.
 ///
 /// FIX (intentional v4 change): v4 let any user register a token with any scopes, `*` included.
 pub async fn grantable_scopes(
     state: &AppState,
     principal: Option<&Principal>,
-) -> Option<Vec<String>> {
-    let principal = principal?;
+) -> Result<Option<Vec<String>>, ApiError> {
+    let Some(principal) = principal else {
+        return Ok(None);
+    };
     if let Principal::User(user) = principal {
-        let user_type = state.instance().get_user_type(user).await.ok().flatten();
+        let user_type = state
+            .instance()
+            .get_user_type(user)
+            .await
+            .map_err(scopes_unavailable)?;
         if user_type.as_deref() == Some("admin") {
-            return None;
+            return Ok(None);
         }
     }
-    let held = principal_scopes(state, principal).await;
+    let held = principal_scopes(state, principal).await?;
     if held.iter().any(|s| s == "*") {
-        return None;
+        return Ok(None);
     }
-    Some(held)
+    Ok(Some(held))
 }
 
 /// The requested scopes outside `cap` and `already` (scopes a token being edited already holds
@@ -631,7 +665,15 @@ pub async fn is_user_allowed_to_execute_with(
             "The administrator for this server has not allowed users to perform actions.",
         );
     }
-    let scopes = principal_scopes(state, principal).await;
+    // A failed read refuses (fail closed).
+    let scopes = match principal_scopes(state, principal).await {
+        Ok(scopes) => scopes,
+        Err(_) => {
+            return SuccessTuple::fail(
+                "Could not read your permissions from the instance; try again.",
+            );
+        }
+    };
     // FIX (intentional v4 change): a literal `*` grants every scope, so it satisfies the
     // necessary scopes too (v4 compared `scope not in scopes`, which refused a `*` holder).
     if scopes.iter().any(|s| s == "*") {

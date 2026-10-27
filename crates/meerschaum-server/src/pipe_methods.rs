@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use chrono::TimeDelta;
 use indexmap::IndexMap;
+use meerschaum_connector::replace::WindowBound;
 use meerschaum_connector::{DataQuery, DateBound, InstanceConnector, SyncOptions, pipe_ops};
 use meerschaum_core::pipe::PipeDefaults;
 use meerschaum_core::pipe::chunk::{ChunkInterval, ChunkIntervalArg};
@@ -142,7 +143,10 @@ pub async fn get_sync_time(
     coerce_bound(conn, pipe, sync_time, defaults).await
 }
 
-/// `Pipe.get_rowcount(begin, end, params, remote)` (`0` when unknown).
+/// `Pipe.get_rowcount(begin, end, params, remote, estimate)` (`0` when unknown). With
+/// `estimate`, the database's row estimate where it keeps one (catalog statistics, no scan),
+/// else the exact count (`InstanceConnector::get_pipe_rowcount_estimate`). A count that fails
+/// warns and is `0` ([`try_get_rowcount`] reports it).
 pub async fn get_rowcount(
     conn: &Arc<dyn InstanceConnector>,
     pipe: &Pipe,
@@ -150,7 +154,25 @@ pub async fn get_rowcount(
     end: Option<DateBound>,
     params: Option<Map>,
     remote: bool,
+    estimate: bool,
 ) -> i64 {
+    try_get_rowcount(conn, pipe, begin, end, params, remote, estimate)
+        .await
+        .unwrap_or(0)
+}
+
+/// [`get_rowcount`], with a count the instance fails to read as a `500` (rc15 Q17: the
+/// `GET .../rowcount` route, so `api:` clients raise instead of counting an outage as `0`). A
+/// pipe without a table counts `0`.
+pub async fn try_get_rowcount(
+    conn: &Arc<dyn InstanceConnector>,
+    pipe: &Pipe,
+    begin: Option<DateBound>,
+    end: Option<DateBound>,
+    params: Option<Map>,
+    remote: bool,
+    estimate: bool,
+) -> Result<i64, ApiError> {
     let query = DataQuery {
         begin,
         end,
@@ -158,14 +180,14 @@ pub async fn get_rowcount(
         remote,
         ..Default::default()
     };
-    match conn.get_pipe_rowcount(pipe, &query).await {
-        Ok(Some(n)) => n,
-        Ok(None) => 0,
-        Err(e) => {
-            tracing::warn!("Failed to get a rowcount for {pipe}: {e}");
-            0
-        }
-    }
+    let count = if estimate {
+        conn.get_pipe_rowcount_estimate(pipe, &query).await
+    } else {
+        conn.get_pipe_rowcount(pipe, &query).await
+    };
+    count
+        .map(|n| n.unwrap_or(0))
+        .map_err(|e| ApiError::exception(&format!("Failed to get a rowcount for {pipe}"), e))
 }
 
 fn add_interval(b: &DateBound, interval: &ChunkInterval) -> DateBound {
@@ -383,6 +405,16 @@ pub struct SyncKwargs {
     pub force: bool,
     /// `workers`.
     pub workers: Option<i64>,
+    /// `replace` (rc15): the rows replace the pipe's rows of `[begin, end)` matching `params`
+    /// ([`SyncOptions::replace`]).
+    pub replace: bool,
+    /// The replaced window's `begin`: not given (the rows' earliest datetime), unbounded, or a
+    /// bound ([`meerschaum_connector::replace::resolve_window`], the rule `pipe.sync` uses).
+    pub begin: WindowBound,
+    /// The replaced window's `end` (not given: just after the rows' latest datetime).
+    pub end: WindowBound,
+    /// The replaced window's `params`.
+    pub params: Option<Map>,
 }
 
 /// `Pipe.sync(df, ...)` for a received payload: enforce the pipe's dtypes, add the `autotime`
@@ -472,9 +504,28 @@ pub async fn sync(
     if let Some(w) = kw.workers {
         extra.insert("workers".into(), meerschaum_core::Value::Int(w));
     }
+    // A replaced window that was not given is the posted rows' own datetime range, as for
+    // `pipe.sync(df, replace=True)`: a replace never clears the whole table by omission.
+    let (begin, end) = if kw.replace {
+        match meerschaum_connector::replace::resolve_window(
+            pipe,
+            &df,
+            kw.begin.clone(),
+            kw.end.clone(),
+        ) {
+            Ok(window) => window,
+            Err(e) => return SuccessTuple::fail(e),
+        }
+    } else {
+        (None, None)
+    };
     let opts = SyncOptions {
         check_existing,
         extra,
+        replace: kw.replace,
+        begin,
+        end,
+        params: kw.params.clone(),
         ..Default::default()
     };
     let retries = 10;

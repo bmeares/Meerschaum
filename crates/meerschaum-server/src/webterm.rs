@@ -17,7 +17,13 @@
 //! - **tmux.** With `api:webterm:tmux:enabled` (default) and a `tmux` binary, the shell runs in
 //!   `tmux new-session -A -s <user><session_suffix>`, so a reconnect (or a second tab) attaches
 //!   to the same session. Closing the socket kills the PTY and with it the tmux client, never the
-//!   tmux session. Without tmux each connection runs its own shell.
+//!   tmux session. Without tmux each connection runs its own shell. The sessions live on a tmux
+//!   server of their own: its socket is `tmux.sock` in the webterm resources directory (a `0700`
+//!   directory under the root; a short path in the temporary directory when that one is too long
+//!   for a socket), never the user's default tmux server, and it starts with Meerschaum's
+//!   `tmux.conf` written next to it (no status bar, mouse on, a long history, nothing else
+//!   loaded) or the file `api:webterm:tmux:config` names. A server this process started is
+//!   stopped with the API ([`stop_owned_servers`]).
 //! - **The shell** is `<this binary> -i <instance>` (the `mrsm` shell on the server's instance)
 //!   started with the server's environment minus `COLUMNS`/`LINES` (and `TMUX`).
 //!   On the tmux path the environment travels in a `0600` file in the webterm resources
@@ -161,16 +167,21 @@ impl WebtermConfig {
                 state_dir.to_string_lossy().into_owned(),
             ));
         }
-        let tmux =
-            (state.config.webterm_tmux_enabled && tmux_available("tmux", &shell.env)).then(|| {
-                TmuxSettings {
-                    binary: "tmux".into(),
-                    socket: None,
-                    session_suffix: state.config.webterm_tmux_session_suffix.clone(),
-                    env_dir: state.config.webterm_resources_path.clone(),
-                    config_file: None,
+        let tmux = if state.config.webterm_tmux_enabled && tmux_available("tmux", &shell.env) {
+            match dedicated_tmux(&state.config) {
+                Ok(tmux) => Some(tmux),
+                Err(error) => {
+                    // A terminal without tmux still works; one on the user's own tmux server
+                    // must never be started.
+                    tracing::warn!(
+                        "The web terminal runs without tmux: its tmux socket or configuration                          could not be prepared ({error})."
+                    );
+                    None
                 }
-            });
+            }
+        } else {
+            None
+        };
         WebtermConfig {
             sessions,
             page,
@@ -189,6 +200,170 @@ impl WebtermConfig {
     pub fn uses_tmux(&self) -> bool {
         self.tmux.is_some()
     }
+}
+
+/// Meerschaum's tmux configuration for the web terminal's own tmux server.
+pub const TMUX_CONF: &str = "\
+# The web terminal's tmux configuration, written by Meerschaum. This tmux server runs only the
+# web terminal's sessions; set `api:webterm:tmux:config` to the path of your own file instead.
+set -g status off
+set -g mouse on
+set -g history-limit 50000
+set -g default-terminal \"screen-256color\"
+set -ga terminal-overrides \",xterm-256color:Tc\"
+set -sg escape-time 10
+set -g focus-events on
+set -g set-titles off
+set -g allow-rename off
+setw -g aggressive-resize on
+";
+
+/// The longest Unix socket path used as is (`sun_path` holds 104 bytes on macOS, 108 on Linux).
+const MAX_SOCKET_PATH: usize = 100;
+
+/// The web terminal's tmux server socket for this root: `tmux.sock` in the webterm resources
+/// directory, or (a path too long for a socket) `mrsm-webterm-<user>/<hash of the root>.sock`
+/// in the temporary directory. Its directory is created `0700`.
+pub fn tmux_socket_path(cfg: &crate::config::ServerConfig) -> std::io::Result<PathBuf> {
+    let preferred = cfg.webterm_resources_path.join("tmux.sock");
+    if preferred.as_os_str().len() <= MAX_SOCKET_PATH {
+        create_private_dir(&cfg.webterm_resources_path)?;
+        return Ok(preferred);
+    }
+    use sha2::Digest;
+    let digest = sha2::Sha256::digest(cfg.webterm_resources_path.to_string_lossy().as_bytes());
+    let hash: String = digest.iter().take(8).map(|b| format!("{b:02x}")).collect();
+    let user = std::env::var("USER")
+        .or_else(|_| std::env::var("USERNAME"))
+        .unwrap_or_else(|_| "user".into())
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-')
+        .collect::<String>();
+    let dir = std::env::temp_dir().join(format!("mrsm-webterm-{user}"));
+    create_private_dir(&dir)?;
+    Ok(dir.join(format!("{hash}.sock")))
+}
+
+/// The tmux configuration the terminal's tmux server starts with: `api:webterm:tmux:config`, or
+/// Meerschaum's [`TMUX_CONF`] written (`0600`) as `tmux.conf` in the webterm resources directory.
+pub fn tmux_config_path(cfg: &crate::config::ServerConfig) -> std::io::Result<PathBuf> {
+    if let Some(custom) = &cfg.webterm_tmux_config {
+        if !custom.is_file() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!(
+                    "`api:webterm:tmux:config` names '{}', which is not a file",
+                    custom.display()
+                ),
+            ));
+        }
+        return Ok(custom.clone());
+    }
+    create_private_dir(&cfg.webterm_resources_path)?;
+    let path = cfg.webterm_resources_path.join("tmux.conf");
+    if std::fs::read_to_string(&path).ok().as_deref() != Some(TMUX_CONF) {
+        let temporary = cfg
+            .webterm_resources_path
+            .join(format!("tmux.conf.{}.tmp", std::process::id()));
+        write_private_file(&temporary, TMUX_CONF.as_bytes())?;
+        std::fs::rename(&temporary, &path)?;
+    }
+    Ok(path)
+}
+
+/// The tmux settings of a server's terminal: its own tmux server and configuration.
+fn dedicated_tmux(cfg: &crate::config::ServerConfig) -> std::io::Result<TmuxSettings> {
+    Ok(TmuxSettings {
+        binary: "tmux".into(),
+        socket: Some(tmux_socket_path(cfg)?),
+        session_suffix: cfg.webterm_tmux_session_suffix.clone(),
+        env_dir: cfg.webterm_resources_path.clone(),
+        config_file: Some(tmux_config_path(cfg)?.display().to_string()),
+    })
+}
+
+/// The tmux servers (their sockets) this process started for its terminals.
+fn owned_servers() -> &'static std::sync::Mutex<std::collections::BTreeSet<PathBuf>> {
+    static OWNED: std::sync::OnceLock<std::sync::Mutex<std::collections::BTreeSet<PathBuf>>> =
+        std::sync::OnceLock::new();
+    OWNED.get_or_init(Default::default)
+}
+
+/// Whether a tmux server answers on `socket`.
+fn tmux_server_running(tmux: &TmuxSettings, socket: &Path) -> bool {
+    std::process::Command::new(&tmux.binary)
+        .arg("-S")
+        .arg(socket)
+        .arg("list-sessions")
+        .env_remove("TMUX")
+        .env_remove("TMUX_PANE")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|s| s.success())
+}
+
+/// Before a terminal starts on a dedicated socket: remember that this process starts the tmux
+/// server when none answers there yet (so [`stop_owned_servers`] stops it with the API).
+fn claim_tmux_server(tmux: &TmuxSettings) {
+    let Some(socket) = &tmux.socket else {
+        return;
+    };
+    if !tmux_server_running(tmux, socket) {
+        owned_servers()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(socket.clone());
+    }
+}
+
+/// Stop the tmux servers this process started for its web terminals (`tmux -S <socket>
+/// kill-server` on each, never the default server). The API calls it when it stops; a tmux
+/// server it found already running is left alone.
+pub fn stop_owned_servers() {
+    let sockets: Vec<PathBuf> =
+        std::mem::take(&mut *owned_servers().lock().unwrap_or_else(|e| e.into_inner()))
+            .into_iter()
+            .collect();
+    for socket in sockets {
+        kill_tmux_server(&socket);
+    }
+}
+
+/// Stop the one tmux server on `socket` if this process started it; `false` if it did not.
+pub fn stop_owned_server(socket: &Path) -> bool {
+    let owned = owned_servers()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .remove(socket);
+    if owned {
+        kill_tmux_server(socket);
+    }
+    owned
+}
+
+fn kill_tmux_server(socket: &Path) {
+    let _ = std::process::Command::new("tmux")
+        .arg("-S")
+        .arg(socket)
+        .arg("kill-server")
+        .env_remove("TMUX")
+        .env_remove("TMUX_PANE")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status();
+}
+
+/// The sockets of the tmux servers this process started (for tests).
+pub fn owned_server_sockets() -> Vec<PathBuf> {
+    owned_servers()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .iter()
+        .cloned()
+        .collect()
 }
 
 /// Whether `binary` runs (`tmux -V`).
@@ -758,6 +933,7 @@ fn launch(config: &WebtermConfig, term_name: &str) -> std::io::Result<(Pty, Opti
         Some(tmux) => {
             let name = tmux_session_name(term_name, &tmux.session_suffix);
             let wrapped = tmux_shell_argv(tmux, &config.shell)?;
+            claim_tmux_server(tmux);
             builder = CommandBuilder::new(&tmux.binary);
             if let Some(socket) = &tmux.socket {
                 builder.arg("-S");
@@ -1029,6 +1205,51 @@ mod tests {
             .collect();
         assert_eq!(names, ["webterm.env"]);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn terminals_get_their_own_tmux_server_and_config() {
+        let root = tempfile::tempdir().unwrap();
+        let mut cfg = crate::config::ServerConfig::for_root("sql:main", root.path());
+        // A dedicated socket under the root, in a private directory.
+        let socket = tmux_socket_path(&cfg).unwrap();
+        assert_eq!(socket, cfg.webterm_resources_path.join("tmux.sock"));
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(socket.parent().unwrap())
+                .unwrap()
+                .permissions()
+                .mode();
+            assert_eq!(mode & 0o777, 0o700);
+        }
+        // Meerschaum's configuration (no status bar), private, rewritten when it changed.
+        let conf = tmux_config_path(&cfg).unwrap();
+        assert_eq!(std::fs::read_to_string(&conf).unwrap(), TMUX_CONF);
+        assert!(TMUX_CONF.contains("set -g status off"));
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&conf).unwrap().permissions().mode();
+            assert_eq!(mode & 0o777, 0o600);
+        }
+        std::fs::write(&conf, "set -g status on\n").unwrap();
+        assert_eq!(
+            std::fs::read_to_string(tmux_config_path(&cfg).unwrap()).unwrap(),
+            TMUX_CONF
+        );
+        // `api:webterm:tmux:config` names another file, which must exist.
+        let custom = root.path().join("mine.conf");
+        cfg.webterm_tmux_config = Some(custom.clone());
+        assert!(tmux_config_path(&cfg).is_err());
+        std::fs::write(&custom, "set -g status on\n").unwrap();
+        assert_eq!(tmux_config_path(&cfg).unwrap(), custom);
+        // A root too long for a socket path gets a short one in the temporary directory.
+        cfg.webterm_resources_path = root.path().join("x".repeat(120));
+        let short = tmux_socket_path(&cfg).unwrap();
+        assert!(short.as_os_str().len() <= MAX_SOCKET_PATH + 64, "{short:?}");
+        assert!(short.starts_with(std::env::temp_dir()));
+        assert_eq!(short, tmux_socket_path(&cfg).unwrap());
     }
 
     #[test]

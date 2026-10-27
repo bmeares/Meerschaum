@@ -4,6 +4,11 @@
 //! logs. Dashboard Exec instead validates policy at `/execute/validate` and types into its
 //! existing terminal. It never starts a second worker.
 //!
+//! Every route answers in the v5 shape (`{"success": bool, "message": str, ...}` with real
+//! status codes, [`crate::envelope`]). `POST /execute` names its job's log stream
+//! (`/logs/{name}/stream`) only when this server serves it, and otherwise `null` with the
+//! log routes that remain (`logs`: `/logs/{name}`, when the `jobs` route group is served).
+//!
 //! Explicit `mrsm_execution` metadata identifies temporary workers independently of their names.
 //! Creator/administrator visibility applies to metadata and every log transport. Legacy
 //! `execute-*` records retain that visibility rule. Successful output lasts 24 hours, failed
@@ -24,8 +29,8 @@ use crate::auth::{
 };
 use crate::backends::CreateJob;
 use crate::config::ServerConfig;
+use crate::envelope;
 use crate::error::{ApiError, ApiResult};
-use crate::json::{ok_json, tuple_response};
 use crate::routes::pipes::parse_json_body;
 use crate::state::AppState;
 
@@ -79,7 +84,9 @@ pub fn job_visible_to(admin: bool, caller: Option<&str>, name: &str, meta: Optio
 /// ([`crate::execute_policy`]). Not secret; behind the bearer only when the server is `--private`.
 async fn policy(ctx: Ctx) -> ApiResult {
     scoped_auth_if_private(&ctx.state, &ctx.headers, &[]).await?;
-    Ok(ok_json(&crate::execute_policy::policy_json()))
+    let policy = crate::execute_policy::policy_json();
+    let fields = policy.as_object().cloned().unwrap_or_default();
+    Ok(envelope::ok("The console's execute policy.", fields))
 }
 
 /// Authorize terminal Exec without starting another execution worker.
@@ -92,7 +99,7 @@ async fn validate_terminal_command(ctx: Ctx, body: Body) -> ApiResult {
     .await?;
     let allowed = is_user_allowed_to_execute_console(&ctx.state, principal.as_ref()).await;
     if !allowed.success {
-        return Ok(tuple_response(&allowed));
+        return Err(ApiError::new(403, allowed.message));
     }
     let body = parse_json_body(&body_bytes(body).await?)?.unwrap_or(Json::Null);
     let items = body
@@ -111,7 +118,10 @@ async fn validate_terminal_command(ctx: Ctx, body: Body) -> ApiResult {
         crate::execute_policy::check_non_admin(&args)
             .map_err(|message| ApiError::new(403, message))?;
     }
-    Ok(tuple_response(&meerschaum_core::SuccessTuple::success()))
+    Ok(envelope::ok(
+        "You may run this command.",
+        serde_json::Map::new(),
+    ))
 }
 
 /// Retained summaries are owner filtered and redact the same secrets as Job metadata.
@@ -144,7 +154,12 @@ async fn run_summaries(ctx: Ctx) -> ApiResult {
         }
     }
     records.sort_by(|a, b| b["ended"].as_str().cmp(&a["ended"].as_str()));
-    Ok(ok_json(&json!(records)))
+    let message = format!(
+        "Found {} retained execution{}.",
+        records.len(),
+        if records.len() == 1 { "" } else { "s" }
+    );
+    Ok(envelope::ok_with(message, "runs", json!(records)))
 }
 
 async fn retain_run(ctx: Ctx, Path(name): Path<String>) -> ApiResult {
@@ -156,14 +171,17 @@ async fn retain_run(ctx: Ctx, Path(name): Path<String>) -> ApiResult {
         .jobs
         .get(&name)
         .await
-        .ok_or_else(ApiError::not_found)?;
+        .ok_or_else(|| ApiError::new(404, format!("Execution '{name}' was not found.")))?;
     if !job_visible_to(
         admin,
         owner_label(principal.as_ref()).as_deref(),
         &name,
         Some(&meta),
     ) {
-        return Err(ApiError::not_found());
+        return Err(ApiError::new(
+            404,
+            format!("Execution '{name}' was not found."),
+        ));
     }
     if meta["status"] != "stopped" {
         return Err(ApiError::new(
@@ -171,7 +189,7 @@ async fn retain_run(ctx: Ctx, Path(name): Path<String>) -> ApiResult {
             "Wait until the execution finishes before promoting it.",
         ));
     }
-    Ok(tuple_response(&ctx.state.jobs.promote(&name).await))
+    envelope::tuple(&ctx.state.jobs.promote(&name).await, 500)
 }
 
 /// The longest job name accepted from a client.
@@ -320,10 +338,7 @@ async fn execute(ctx: Ctx, body: Body) -> ApiResult {
         ));
     }
     let name = match object.get("name") {
-        None | Some(Json::Null) => {
-            let id = uuid::Uuid::new_v4().simple().to_string();
-            format!("{JOB_PREFIX}{}", &id[..8])
-        }
+        None | Some(Json::Null) => new_execution_name(),
         Some(Json::String(name)) if valid_name(name) => name.clone(),
         Some(other) => {
             return Err(invalid(
@@ -336,7 +351,7 @@ async fn execute(ctx: Ctx, body: Body) -> ApiResult {
     };
     let allowed = is_user_allowed_to_execute_console(&ctx.state, principal.as_ref()).await;
     if !allowed.success {
-        return Ok(tuple_response(&allowed));
+        return Err(ApiError::new(403, allowed.message));
     }
     if !is_admin(&ctx.state, principal.as_ref()).await {
         // A non-administrator runs what the console offers, and only in `execute-*` jobs (the
@@ -353,43 +368,101 @@ async fn execute(ctx: Ctx, body: Body) -> ApiResult {
             ));
         }
     }
-    prune_finished(&ctx.state).await;
+    let execution_id = uuid::Uuid::new_v4().to_string();
+    let metadata = json!({
+        "origin": "api_execute",
+        "pipeline": object.get("pipeline"),
+        "run_id": object.get("run_id").cloned().unwrap_or_else(|| json!(execution_id)),
+        "parent_job": object.get("parent_job"),
+    });
+    let result = start_execution(&ctx.state, principal.as_ref(), &name, &sysargs, metadata).await?;
+    let mut fields = log_routes(&ctx.state, &name);
+    fields.insert("job".into(), json!(name));
+    fields.insert("sysargs".into(), json!(sysargs));
+    if result.success {
+        Ok(envelope::ok(result.message, fields))
+    } else {
+        Err(ApiError::new(500, result.message))
+    }
+}
+
+/// Start `sysargs` as a temporary execution job `name` owned by the caller (the jobs
+/// `POST /execute` and `POST /pipelines/{name}/sync` start): retention as configured, `metadata`
+/// merged into the job's `mrsm_execution` property. `409` when the job exists.
+pub async fn start_execution(
+    state: &AppState,
+    principal: Option<&Principal>,
+    name: &str,
+    sysargs: &[String],
+    metadata: Json,
+) -> Result<meerschaum_core::SuccessTuple, ApiError> {
+    prune_finished(state).await;
     let mut properties = Map::new();
-    let owner = owner_label(principal.as_ref());
+    let owner = owner_label(principal);
     if let Some(owner) = &owner {
         properties.insert(OWNER_KEY.into(), Value::Str(owner.clone()));
     }
-    let execution_id = uuid::Uuid::new_v4().to_string();
-    let metadata = json!({
-        "kind": "temporary_execution", "origin": "api_execute", "owner": owner,
-        "pipeline": object.get("pipeline"), "run_id": object.get("run_id").cloned().unwrap_or_else(|| json!(execution_id)),
-        "parent_job": object.get("parent_job"),
-        "retention": {"success_seconds": ctx.state.config.execution_retention[0],
-            "failure_seconds": ctx.state.config.execution_retention[1],
-            "summary_seconds": ctx.state.config.execution_retention[2]}
+    let mut execution = json!({
+        "kind": "temporary_execution",
+        "origin": "api_execute",
+        "owner": owner,
+        "retention": {"success_seconds": state.config.execution_retention[0],
+            "failure_seconds": state.config.execution_retention[1],
+            "summary_seconds": state.config.execution_retention[2]}
     });
+    if let (Some(out), Json::Object(extra)) = (execution.as_object_mut(), metadata) {
+        for (key, value) in extra {
+            if key != "kind" && key != "owner" && key != "retention" {
+                out.insert(key, value);
+            }
+        }
+    }
     properties.insert(
         "mrsm_execution".into(),
-        Value::from_json_str(&metadata.to_string()).unwrap_or(Value::Null),
+        Value::from_json_str(&execution.to_string()).unwrap_or(Value::Null),
     );
-    match ctx
-        .state
+    match state
         .jobs
-        .create(&name, sysargs.clone(), Some(properties))
+        .create(name, sysargs.to_vec(), Some(properties))
         .await
     {
         CreateJob::Exists => Err(ApiError::new(
             409,
-            format!("{} already exists.", ctx.state.jobs.job_str(&name)),
+            format!("{} already exists.", state.jobs.job_str(name)),
         )),
-        CreateJob::Started(result) => Ok(ok_json(&json!({
-            "success": result.success,
-            "msg": result.message,
-            "job": name,
-            "sysargs": sysargs,
-            "stream": format!("/logs/{name}/stream"),
-        }))),
+        CreateJob::Started(result) => Ok(result),
     }
+}
+
+/// The routes that follow job `name`'s output: `stream` (`/logs/{name}/stream`, Server-Sent
+/// Events) when this server serves it, else `null`; `logs` (`/logs/{name}`) when the `jobs` route
+/// group is served, else `null`.
+pub fn log_routes(state: &AppState, name: &str) -> serde_json::Map<String, Json> {
+    let mut fields = serde_json::Map::new();
+    let quoted = crate::json::quote_segment(name);
+    fields.insert(
+        "stream".into(),
+        if state.log_stream_served() {
+            json!(format!("/logs/{quoted}/stream"))
+        } else {
+            Json::Null
+        },
+    );
+    fields.insert(
+        "logs".into(),
+        if state.config.route_group_is_allowed("jobs") {
+            json!(format!("/logs/{quoted}"))
+        } else {
+            Json::Null
+        },
+    );
+    fields
+}
+
+/// A new temporary execution job's name (`execute-<8 hex>`).
+pub fn new_execution_name() -> String {
+    let id = uuid::Uuid::new_v4().simple().to_string();
+    format!("{JOB_PREFIX}{}", &id[..8])
 }
 
 #[cfg(test)]

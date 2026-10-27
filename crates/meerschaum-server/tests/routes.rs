@@ -616,9 +616,12 @@ async fn engine_routes() {
         ),
     )
     .await;
-    assert_eq!(r.json(), json!([true, "Upserted 1 cursors."]));
+    assert_eq!(
+        r.json(),
+        json!({"success": true, "message": "Upserted 1 cursors."})
+    );
     let r = send(&app, req("POST", "/engine/ledger", Some(&admin), j(r#"[{"pipe_ref": "p", "seq": 1, "created": "2024-01-01T00:00:00Z"}, {"pipe_ref": "p", "seq": 2, "created": "2024-01-01T00:00:00Z", "begin": "2024-01-01"}]"#))).await;
-    assert!(r.json()[0].as_bool().unwrap());
+    assert!(r.json()["success"].as_bool().unwrap());
     let r = send(
         &app,
         req(
@@ -629,7 +632,7 @@ async fn engine_routes() {
         ),
     )
     .await;
-    let entries = r.json();
+    let entries = r.json()["entries"].clone();
     assert_eq!(entries.as_array().unwrap().len(), 1);
     assert_eq!(entries[0]["seq"], 2);
     let r = send(
@@ -637,7 +640,9 @@ async fn engine_routes() {
         req("GET", "/engine/state?pipe_ref=p", Some(&admin), None),
     )
     .await;
-    assert!(r.json().is_null());
+    // No state yet: missing (the v5 routes' `404`).
+    assert_eq!(r.status, StatusCode::NOT_FOUND);
+    assert_eq!(r.json()["success"], json!(false));
     send(
         &app,
         req(
@@ -653,26 +658,27 @@ async fn engine_routes() {
         req("GET", "/engine/state?pipe_ref=p", Some(&admin), None),
     )
     .await;
-    assert_eq!(r.json()["definition_hash"], "h");
+    assert_eq!(r.json()["state"]["definition_hash"], "h");
     let lease = r#"{"pipe_ref": "p", "holder": "a", "ttl_ms": 60000}"#;
     let r = send(&app, req("POST", "/engine/leases", Some(&admin), j(lease))).await;
-    assert_eq!(r.json(), json!({"success": true}));
+    assert_eq!(r.json()["success"], json!(true));
     let other = r#"{"pipe_ref": "p", "holder": "b", "ttl_ms": 60000}"#;
     let r = send(&app, req("POST", "/engine/leases", Some(&admin), j(other))).await;
-    assert_eq!(r.json(), json!({"success": false}));
+    assert_eq!(r.status, StatusCode::CONFLICT);
+    assert_eq!(r.json()["success"], json!(false));
     let r = send(
         &app,
         req("DELETE", "/engine/leases", Some(&admin), j(lease)),
     )
     .await;
-    assert_eq!(r.json(), json!({"success": true}));
+    assert_eq!(r.json()["success"], json!(true));
     send(&app, req("POST", "/engine/runs", Some(&admin), j(r#"[{"run_id": "r1", "started": "2024-01-01T00:00:00Z", "status": "success", "inserted": 3}]"#))).await;
     let r = send(
         &app,
         req("GET", "/engine/runs?run_id=r1", Some(&admin), None),
     )
     .await;
-    assert_eq!(r.json()[0]["inserted"], 3);
+    assert_eq!(r.json()["runs"][0]["inserted"], 3);
     let r = send(
         &app,
         req(
@@ -683,7 +689,7 @@ async fn engine_routes() {
         ),
     )
     .await;
-    assert!(r.json()[0].as_bool().unwrap());
+    assert!(r.json()["success"].as_bool().unwrap());
 }
 
 /// A jobs backend with one job whose logs are scripted.

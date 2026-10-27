@@ -76,15 +76,15 @@ async fn engine_pipe_routes_scopes_and_round_trip() {
 
     // Nothing yet.
     let r = send(&app, req("GET", exists, Some(&reader), None)).await;
-    assert_eq!(r.json(), json!(false));
+    assert_eq!(r.json()["exists"], json!(false));
     let r = send(&app, req("POST", read, Some(&reader), body(json!({})))).await;
-    assert_eq!(r.json(), json!([]));
+    assert_eq!(r.json()["rows"], json!([]));
 
     // Write, read back with params, clear.
     let r = send(&app, req("POST", write, Some(&admin), body(rows))).await;
-    assert_eq!(r.json()[0], json!(true), "{}", r.text());
+    assert_eq!(r.json()["success"], json!(true), "{}", r.text());
     let r = send(&app, req("GET", exists, Some(&reader), None)).await;
-    assert_eq!(r.json(), json!(true));
+    assert_eq!(r.json()["exists"], json!(true));
     let r = send(
         &app,
         req(
@@ -95,7 +95,7 @@ async fn engine_pipe_routes_scopes_and_round_trip() {
         ),
     )
     .await;
-    let got = r.json();
+    let got = r.json()["rows"].clone();
     assert_eq!(got.as_array().unwrap().len(), 1, "{got}");
     assert_eq!(got[0]["seq"], 1);
     assert_eq!(
@@ -112,7 +112,7 @@ async fn engine_pipe_routes_scopes_and_round_trip() {
         ),
     )
     .await;
-    assert_eq!(r.json(), json!([]));
+    assert_eq!(r.json()["rows"], json!([]));
     let r = send(
         &app,
         req(
@@ -123,9 +123,9 @@ async fn engine_pipe_routes_scopes_and_round_trip() {
         ),
     )
     .await;
-    assert_eq!(r.json()[0], json!(true), "{}", r.text());
+    assert_eq!(r.json()["success"], json!(true), "{}", r.text());
     let r = send(&app, req("POST", read, Some(&reader), body(json!({})))).await;
-    assert_eq!(r.json(), json!([]));
+    assert_eq!(r.json()["rows"], json!([]));
 
     // The rows live in the instance's own engine table.
     let check = SqlConnector::from_uri("w17bgchk", &format!("sqlite:///{}", db.display()))
@@ -159,7 +159,10 @@ async fn per_shape_routes_persist_across_servers() {
         ),
     )
     .await;
-    assert_eq!(r.json(), json!([true, "Upserted 1 cursors."]));
+    assert_eq!(
+        r.json(),
+        json!({"success": true, "message": "Upserted 1 cursors."})
+    );
     let r = send(
         &app,
         req(
@@ -173,7 +176,7 @@ async fn per_shape_routes_persist_across_servers() {
         ),
     )
     .await;
-    assert_eq!(r.json()[0], json!(true), "{}", r.text());
+    assert_eq!(r.json()["success"], json!(true), "{}", r.text());
     send(
         &app,
         req(
@@ -197,7 +200,7 @@ async fn per_shape_routes_persist_across_servers() {
         ),
     )
     .await;
-    assert_eq!(r.json()[0], json!(true), "{}", r.text());
+    assert_eq!(r.json()["success"], json!(true), "{}", r.text());
     let r = send(
         &app,
         req(
@@ -211,14 +214,14 @@ async fn per_shape_routes_persist_across_servers() {
         ),
     )
     .await;
-    assert_eq!(r.json()[0], json!(true), "{}", r.text());
+    assert_eq!(r.json()["success"], json!(true), "{}", r.text());
     let lease = json!({"pipe_ref": "api:x|sql:a|b|None", "holder": "a", "ttl_ms": 60000});
     let r = send(
         &app,
         req("POST", "/engine/leases", Some(&admin), body(lease.clone())),
     )
     .await;
-    assert_eq!(r.json(), json!({"success": true}));
+    assert_eq!(r.json()["success"], json!(true), "{}", r.text());
     drop(app);
 
     // A new server on the same instance (a restart) reads everything back.
@@ -234,7 +237,7 @@ async fn per_shape_routes_persist_across_servers() {
         ),
     )
     .await;
-    let entries = r.json();
+    let entries = r.json()["entries"].clone();
     assert_eq!(entries.as_array().unwrap().len(), 1, "{entries}");
     assert_eq!(entries[0]["seq"], 2);
     assert_eq!(entries[0]["begin"], json!("2024-01-01T00:00:00+00:00"));
@@ -244,13 +247,13 @@ async fn per_shape_routes_persist_across_servers() {
         req("GET", "/engine/state?pipe_ref=p", Some(&admin), None),
     )
     .await;
-    assert_eq!(r.json()["definition_hash"], "h");
+    assert_eq!(r.json()["state"]["definition_hash"], "h");
     let r = send(
         &app,
         req("GET", "/engine/runs?run_id=r1", Some(&admin), None),
     )
     .await;
-    let runs = r.json();
+    let runs = r.json()["runs"].clone();
     let runs = runs.as_array().unwrap();
     assert_eq!(runs.len(), 2, "{runs:?}");
     assert_eq!(runs[0]["status"], "success");
@@ -265,13 +268,15 @@ async fn per_shape_routes_persist_across_servers() {
         req("POST", "/engine/leases", Some(&admin), body(other)),
     )
     .await;
-    assert_eq!(r.json(), json!({"success": false}));
+    // A held lease is a conflict.
+    assert_eq!(r.status, StatusCode::CONFLICT);
+    assert_eq!(r.json()["success"], json!(false));
     let r = send(
         &app,
         req("DELETE", "/engine/leases", Some(&admin), body(lease)),
     )
     .await;
-    assert_eq!(r.json(), json!({"success": true}));
+    assert_eq!(r.json()["success"], json!(true));
 }
 
 async fn app_again(dir: &Path, db: &Path) -> axum::Router {
@@ -313,11 +318,11 @@ async fn engine_pipe_routes_refuse_unbounded_clears_extra_columns_and_huge_bodie
         {"created": "2026-01-02T00:00:00+00:00", "pipe_ref": "b", "seq": 1, "evil": "y"}
     ]);
     let r = send(&app, req("POST", write, Some(&admin), body(rows))).await;
-    assert_eq!(r.json()[0], json!(true), "{}", r.text());
+    assert_eq!(r.json()["success"], json!(true), "{}", r.text());
 
     // Undeclared columns are dropped: not returned, not in the table.
     let r = send(&app, req("POST", read, Some(&admin), body(json!({})))).await;
-    let got = r.json();
+    let got = r.json()["rows"].clone();
     assert_eq!(got.as_array().unwrap().len(), 2, "{got}");
     assert!(
         got.as_array()
@@ -350,7 +355,7 @@ async fn engine_pipe_routes_refuse_unbounded_clears_extra_columns_and_huge_bodie
         ),
     )
     .await;
-    assert_eq!(r.json()[0], json!(true), "{}", r.text());
+    assert_eq!(r.json()["success"], json!(true), "{}", r.text());
     let r = send(
         &app,
         req(
@@ -362,7 +367,7 @@ async fn engine_pipe_routes_refuse_unbounded_clears_extra_columns_and_huge_bodie
         ),
     )
     .await;
-    assert_eq!(r.json()[0], json!(true), "{}", r.text());
+    assert_eq!(r.json()["success"], json!(true), "{}", r.text());
     let count = |metric: &'static str| {
         let app = app.clone();
         let admin = admin.clone();
@@ -377,7 +382,7 @@ async fn engine_pipe_routes_refuse_unbounded_clears_extra_columns_and_huge_bodie
                 ),
             )
             .await;
-            r.json().as_array().map(Vec::len).unwrap_or(0)
+            r.json()["rows"].as_array().map(Vec::len).unwrap_or(0)
         }
     };
 
@@ -462,7 +467,7 @@ async fn engine_pipe_routes_refuse_unbounded_clears_extra_columns_and_huge_bodie
         ),
     )
     .await;
-    assert_eq!(r.json()[0], json!(true), "{}", r.text());
+    assert_eq!(r.json()["success"], json!(true), "{}", r.text());
     let r = send(
         &app,
         req(
@@ -473,7 +478,7 @@ async fn engine_pipe_routes_refuse_unbounded_clears_extra_columns_and_huge_bodie
         ),
     )
     .await;
-    assert_eq!(r.json()[0], json!(true), "{}", r.text());
+    assert_eq!(r.json()["success"], json!(true), "{}", r.text());
     assert_eq!(count("engine_ledger").await, 0);
     let r = send(
         &app,
@@ -485,7 +490,7 @@ async fn engine_pipe_routes_refuse_unbounded_clears_extra_columns_and_huge_bodie
         ),
     )
     .await;
-    assert_eq!(r.json()[0], json!(true), "{}", r.text());
+    assert_eq!(r.json()["success"], json!(true), "{}", r.text());
     let r = send(
         &app,
         req(
@@ -496,7 +501,7 @@ async fn engine_pipe_routes_refuse_unbounded_clears_extra_columns_and_huge_bodie
         ),
     )
     .await;
-    assert_eq!(r.json()[0], json!(true), "{}", r.text());
+    assert_eq!(r.json()["success"], json!(true), "{}", r.text());
     assert_eq!(count("engine_runs").await, 0);
     assert_eq!(count("engine_cursors").await, 1);
     assert_eq!(count("engine_state").await, 1);

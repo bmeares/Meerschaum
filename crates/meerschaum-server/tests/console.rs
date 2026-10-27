@@ -799,13 +799,15 @@ async fn execute_starts_an_ephemeral_job() {
     assert_eq!(r.status, StatusCode::OK, "{}", r.text());
     let body = r.json();
     assert_eq!(body["success"], true);
-    assert_eq!(body["msg"], "started");
+    assert_eq!(body["message"], "started");
     let name = body["job"].as_str().unwrap().to_string();
     assert!(
         name.starts_with("execute-") && name.len() == "execute-".len() + 8,
         "{name}"
     );
-    assert_eq!(body["stream"], format!("/logs/{name}/stream"));
+    // This server does not serve the log stream (no `meerschaum-web`): no stream, the log route.
+    assert!(body["stream"].is_null(), "{body}");
+    assert_eq!(body["logs"], format!("/logs/{name}"));
     // The executor flag (`-e api:main`) is cleaned out like `POST /jobs/{name}` does.
     assert_eq!(body["sysargs"], json!(["sync", "pipes", "-i", "sql:main"]));
     let created = jobs.created.lock().unwrap().clone();
@@ -866,7 +868,7 @@ async fn execute_prunes_only_old_finished_execute_jobs() {
     assert_eq!(*jobs.deleted.lock().unwrap(), vec!["execute-old00001"]);
     assert!(root.path().join("runs/execute-old00001.json").exists());
     let summaries = send(&app, req("GET", "/execute/runs", Some(&admin), None)).await;
-    assert_eq!(summaries.json()[0]["name"], "execute-old00001");
+    assert_eq!(summaries.json()["runs"][0]["name"], "execute-old00001");
 }
 
 #[tokio::test]
@@ -911,11 +913,13 @@ async fn execute_validates_and_authorizes() {
         (json!({"sysargs": ["show"], "name": ""}), "empty name"),
         (json!([1, 2]), "a list body"),
     ] {
+        // The v5 routes answer an invalid request with `400` (and the errors).
         let r = send(&app, post_json("/execute", Some(&admin), body)).await;
-        assert_eq!(r.status.as_u16(), 422, "{why}: {}", r.text());
+        assert_eq!(r.status.as_u16(), 400, "{why}: {}", r.text());
+        assert_eq!(r.json()["success"], false, "{why}");
     }
     let r = send(&app, req("POST", "/execute", Some(&admin), None)).await;
-    assert_eq!(r.status.as_u16(), 422);
+    assert_eq!(r.status.as_u16(), 400);
     assert!(
         jobs.created.lock().unwrap().is_empty(),
         "nothing was started"
@@ -1007,7 +1011,7 @@ async fn rc6_terminal_validation_never_starts_a_worker() {
     )
     .await;
     assert_eq!(allowed.status, StatusCode::OK);
-    assert_eq!(allowed.json()[0], true);
+    assert_eq!(allowed.json()["success"], true);
     assert!(jobs.created.lock().unwrap().is_empty());
 }
 

@@ -71,6 +71,9 @@ pub struct NativeRouteRequest {
     pub body: Vec<u8>,
     /// The principal as JSON ([`principal_json`]), `Null` when anonymous.
     pub principal: serde_json::Value,
+    /// The authenticated principal itself, for the handler's own permission checks (never
+    /// passed to plugins); `None` when anonymous or under `--no-auth`.
+    pub caller: Option<Principal>,
     /// The granted scopes (`["*"]` under `--no-auth`).
     pub scopes: Vec<String>,
     /// What [`NativeRouteHandler::admit`] returned for this request (held until it is dropped).
@@ -450,7 +453,9 @@ pub fn path_params(template: &str, path: &str) -> BTreeMap<String, String> {
         .unwrap_or_default()
 }
 
-fn percent_decode(s: &str) -> String {
+/// `s` with every `%XX` escape decoded once and the bytes read as UTF-8 (invalid sequences become
+/// U+FFFD), like Python's `urllib.parse.unquote`. A `%` that starts no escape is kept.
+pub(crate) fn percent_decode(s: &str) -> String {
     let bytes = s.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
     let mut i = 0;
@@ -716,6 +721,7 @@ async fn serve(
         headers,
         body,
         principal: principal_json(principal.as_ref()),
+        caller: principal,
         scopes,
         admission,
     };

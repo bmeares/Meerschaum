@@ -41,6 +41,8 @@ sha2 = { workspace = true }
 tokio = { workspace = true, features = ["test-util"] }
 tempfile = "3"
 indexmap = { workspace = true }
+# The server's shared test helpers (`meerschaum-server/tests/common`) use its models.
+meerschaum-connector-api = { workspace = true }
 bytes = "1"
 meerschaum-connector-sql = { workspace = true }
 tower = { version = "0.5", features = ["util"] }

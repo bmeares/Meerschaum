@@ -9,6 +9,7 @@ use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::IntoResponse;
 use axum::routing::{delete, get, patch, post};
 use chrono::TimeDelta;
+use meerschaum_connector::replace::WindowBound;
 use meerschaum_connector::{DataQuery, DateBound, InstanceConnector, PipesKeys, PipesKeysQuery};
 use meerschaum_core::pipe::chunk::ChunkIntervalArg;
 use meerschaum_core::{Map, Pipe, SuccessTuple, Value};
@@ -640,9 +641,33 @@ async fn sync_pipe(ctx: Ctx, Path((ck, mk, lk)): Keys3, body: Body) -> ApiResult
     let force = q.bool("force", false)?;
     let workers = q.opt_int("workers")?;
     let columns = q.opt_str("columns");
+    // `replace=true` (rc15): the rows replace the window `[begin, end)` matching `params`; with no
+    // rows the window is cleared. A bound that is not sent is the posted rows' own range (as for
+    // `pipe.sync(df, replace=True)`); `None` (or empty) is no bound on that side.
+    let replace = q.bool("replace", false)?;
+    let window_bound = |key: &str| -> Result<WindowBound, ApiError> {
+        match q.opt_str(key) {
+            None => Ok(WindowBound::FromRows),
+            Some(v) if v.is_empty() || v == "None" => Ok(WindowBound::Unbounded),
+            Some(v) => DateBound::parse(&v)
+                .map(WindowBound::At)
+                .ok_or_else(|| ApiError::new(400, format!("Invalid `{key}`: '{v}'."))),
+        }
+    };
+    let (window_begin, window_end) = (window_bound("begin")?, window_bound("end")?);
+    let window_params = match q.opt_str("params").filter(|p| !p.is_empty()) {
+        Some(p) => Some(
+            Value::from_json_str(&p)
+                .map_err(|e| ApiError::exception("json.loads(params)", e))?
+                .to_map(),
+        ),
+        None => None,
+    };
     let body = body_bytes(body).await?;
-    let Some(payload) = parse_sync_body(&body)? else {
-        return Ok(tuple(true, "No data to sync."));
+    let (payload, no_rows) = match parse_sync_body(&body)? {
+        Some(payload) => (payload, false),
+        None if replace => (SyncPayload::Json(Json::Array(Vec::new())), true),
+        None => return Ok(tuple(true, "No data to sync.")),
     };
     let (conn, h) = handle(&ctx, &ck, &mk, &lk, true).await?;
     let t = target(&h.pipe);
@@ -661,16 +686,35 @@ async fn sync_pipe(ctx: Ctx, Path((ck, mk, lk)): Keys3, body: Body) -> ApiResult
         pipe.set_columns(cols)
             .map_err(|e| ApiError::exception("pipe.columns", e))?;
     }
+    // Clearing a window without rows needs the window: `replace=true` alone with an empty body
+    // must not clear the whole table (a pipe without a datetime column has only that window).
+    if no_rows
+        && window_begin == WindowBound::FromRows
+        && window_end == WindowBound::FromRows
+        && pipe.column("datetime").is_some()
+    {
+        return Err(ApiError::new(
+            400,
+            meerschaum_connector::replace::no_rows_window(&pipe),
+        ));
+    }
     let kw = SyncKwargs {
         check_existing,
         force,
         workers,
+        replace,
+        begin: window_begin,
+        end: window_end,
+        params: window_params,
     };
     let defaults = ctx.state.config.pipe_defaults.clone();
+    // The pipe's sync status (rc15 C2) records this sync (`routes::sync_status`).
+    let (started, status_headers) = (std::time::Instant::now(), ctx.headers.clone());
     if !blocking {
         let msg = format!("Spawned asyncronous sync for {pipe}.");
         tokio::spawn(async move {
             let res = pipe_methods::sync(&conn, &pipe, &payload, &kw, &defaults).await;
+            super::sync_status::record_data_post(&status_headers, &conn, &pipe, &res, started);
             if !res.success {
                 tracing::warn!("Asynchronous sync failed for {pipe}:\n{}", res.message);
             }
@@ -680,6 +724,8 @@ async fn sync_pipe(ctx: Ctx, Path((ck, mk, lk)): Keys3, body: Body) -> ApiResult
     }
     let res = pipe_methods::sync(&conn, &pipe, &payload, &kw, &defaults).await;
     h.invalidate();
+    // Queued before the response (a delete that follows forgets it); written in the background.
+    super::sync_status::record_data_post(&status_headers, &conn, &pipe, &res, started);
     Ok(tuple_response(&res))
 }
 
@@ -971,18 +1017,45 @@ async fn get_pipe_csv(ctx: Ctx, Path((ck, mk, lk)): Keys3) -> ApiResult {
     Ok(resp)
 }
 
+/// `GET .../rowcount`: v4's route, plus (new in v5) `estimate=true` for the database's row
+/// estimate (exact where there is none or counting is cheap) and `params` as a JSON query string
+/// for clients that cannot send a body with a `GET` (the body wins when both are given).
 async fn get_pipe_rowcount(ctx: Ctx, Path((ck, mk, lk)): Keys3, body: Body) -> ApiResult {
     let body = parse_json_body(&body_bytes(body).await?)?;
     scoped_auth(&ctx.state, &ctx.headers, PIPES_READ).await?;
-    let params = optional_dict_body(body)?;
+    let params = match optional_dict_body(body)? {
+        Some(params) => Some(params),
+        None => query_params_dict(&ctx)?,
+    };
     let remote = ctx.query.bool("remote", false)?;
+    let estimate = ctx.query.bool("estimate", false)?;
     let (conn, h) = handle(&ctx, &ck, &mk, &lk, false).await?;
     let defaults = &ctx.state.config.pipe_defaults;
     let q = &ctx.query;
     let begin = pipe_methods::parse_date_bound(&conn, &h.pipe, q.get("begin"), defaults).await?;
     let end = pipe_methods::parse_date_bound(&conn, &h.pipe, q.get("end"), defaults).await?;
-    let n = pipe_methods::get_rowcount(&conn, &h.pipe, begin, end, params, remote).await;
+    // A count the instance fails to read is a `500`, not `0` (rc15 Q17).
+    let n = pipe_methods::try_get_rowcount(&conn, &h.pipe, begin, end, params, remote, estimate)
+        .await?;
     Ok(ok_json(&json!(n)))
+}
+
+/// `?params=<JSON object>` (an empty value or `null` means none).
+fn query_params_dict(ctx: &Ctx) -> Result<Option<Map>, ApiError> {
+    let Some(text) = ctx.query.get("params").filter(|t| !t.trim().is_empty()) else {
+        return Ok(None);
+    };
+    match Value::from_json_str(text) {
+        Ok(Value::Map(m)) => Ok(Some(m)),
+        Ok(Value::Null) => Ok(None),
+        _ => Err(ApiError::validation(vec![ApiError::field_error(
+            "dict_type",
+            &["query", "params"],
+            "Input should be a JSON object",
+            Json::String(text.to_string()),
+            None,
+        )])),
+    }
 }
 
 async fn get_pipe_columns_types(ctx: Ctx, Path((ck, mk, lk)): Keys3) -> ApiResult {

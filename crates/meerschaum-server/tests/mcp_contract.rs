@@ -6,6 +6,12 @@
 //! ISO timestamps one canonical form, the version `<version>`), plus: a `text` field holding
 //! JSON (a tool result or a JSON resource) is compared as the parsed document. `shape`
 //! exchanges compare the JSON structure recursively (keys and value types, not values).
+//!
+//! v5 adds to v4's registry (`mcp::v5`: new tools, `sync_pipe`'s `parents` / `children`, bounds
+//! typed as strings or integers, a primer that mentions Pipelines): each served entry is first
+//! checked to be exactly the v5 one and then mapped back to v4's ([`v4_view`]), so every other
+//! byte is still compared with the recording. The one paged listing (`tools_list_cursor`) is
+//! checked against the v5 list instead, since v5's tools move the page.
 
 mod common;
 
@@ -18,7 +24,8 @@ use axum::http::Request;
 use chrono::{DateTime, NaiveDateTime};
 use meerschaum_core::{Map, Pipe, SuccessTuple, Value};
 use meerschaum_server::backends::ActionsBackend;
-use meerschaum_server::mcp::{McpBackend, McpServer, SqlReadError};
+use meerschaum_server::mcp::registry::{Tool, builtin, primer, tools};
+use meerschaum_server::mcp::{McpBackend, McpConfig, McpServer, SqlReadError, docs, v5};
 use meerschaum_server::{AppState, ServerConfig};
 use regex::Regex;
 use serde_json::{Value as Json, json};
@@ -113,6 +120,61 @@ fn same_shape(a: &Json, b: &Json) -> bool {
         (Json::Null, _) | (_, Json::Null) => true,
         (Json::Number(_), Json::Number(_)) => true,
         _ => std::mem::discriminant(a) == std::mem::discriminant(b),
+    }
+}
+
+fn tool_json(t: &Tool) -> Json {
+    serde_json::to_value(t.to_dict()).unwrap()
+}
+
+/// v4's version of a served tool list: v5's new tools dropped, each v5 tool (checked to be
+/// exactly the served one) replaced by v4's.
+fn v4_tools(list: &mut Vec<Json>) {
+    list.retain(|t| !v5::NEW_TOOLS.contains(&t["name"].as_str().unwrap_or("")));
+    for t in list.iter_mut() {
+        let name = t["name"].as_str().unwrap_or("").to_string();
+        let served = tools().iter().find(|e| e.name == name).map(tool_json);
+        if served.as_ref() == Some(t)
+            && let Some(v4) = builtin().tools.iter().find(|e| e.name == name)
+        {
+            *t = tool_json(v4);
+        }
+    }
+}
+
+/// v4's view of a v5 response (see the module docs): tools, the primer and the reference.
+fn v4_view(got: &mut Json, read_only: bool) {
+    if let Some(Json::Array(list)) = got.pointer_mut("/result/tools") {
+        v4_tools(list);
+    }
+    if let Some(Json::Array(list)) = got.get_mut("tools") {
+        v4_tools(list);
+    }
+    for pointer in ["/result/instructions", "/instructions"] {
+        if let Some(text) = got.pointer_mut(pointer)
+            && text.as_str() == Some(primer())
+        {
+            *text = json!(builtin().primer);
+        }
+    }
+    let config = McpConfig {
+        read_only,
+        ..McpConfig::default()
+    };
+    let b = builtin();
+    let v5_reference = docs::render(tools(), &b.resources, &b.prompts, primer(), &config);
+    if let Some(Json::Array(contents)) = got.pointer_mut("/result/contents") {
+        for item in contents {
+            if item["uri"] == "mrsm://docs" && item["text"].as_str() == Some(&v5_reference) {
+                item["text"] = json!(docs::render(
+                    &b.tools,
+                    &b.resources,
+                    &b.prompts,
+                    &b.primer,
+                    &config
+                ));
+            }
+        }
     }
 }
 
@@ -238,7 +300,23 @@ async fn replay_python_mcp_contract() {
         let resp = common::send(app, b.body(body).unwrap()).await;
         let mode = ex["compare"].as_str().unwrap_or("exact");
         *counts.entry(mode.to_string()).or_default() += 1;
-        let rust_json: Option<Json> = serde_json::from_slice(&resp.body).ok();
+        let mut rust_json: Option<Json> = serde_json::from_slice(&resp.body).ok();
+        if step == "tools_list_cursor" {
+            // The page after the first ten of every tool (an administrator sees them all).
+            let mut all: Vec<Json> = tools().iter().map(tool_json).collect();
+            all.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
+            let got = rust_json.as_ref().map(|j| j["result"]["tools"].clone());
+            if got != Some(Json::Array(all[10..].to_vec())) {
+                failures.push(format!(
+                    "#{i} {step}: not the v5 page after ten tools: {got:?}"
+                ));
+            }
+            *counts.entry("v5".to_string()).or_default() += 1;
+            continue;
+        }
+        if let Some(j) = rust_json.as_mut() {
+            v4_view(j, ex["server"].as_str() == Some("read_only"));
+        }
         if let (Some(capture), Some(j)) = (ex["capture"].as_object(), rust_json.as_ref()) {
             for (slot, key) in capture {
                 if let (Some(name), Some(v)) = (

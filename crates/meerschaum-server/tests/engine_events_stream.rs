@@ -131,7 +131,7 @@ async fn write_events(app: &axum::Router, token: &str, rows: &[Json]) {
     )
     .await;
     assert_eq!(r.status, StatusCode::OK, "{}", r.text());
-    assert_eq!(r.json()[0], json!(true), "{}", r.text());
+    assert_eq!(r.json()["success"], json!(true), "{}", r.text());
 }
 
 async fn record_run(app: &axum::Router, token: &str, run_id: &str, finished: bool) {
@@ -237,15 +237,18 @@ async fn persisted_run_streams_in_order_and_resumes() {
     let app = meerschaum_server::app(state);
     let admin = login(&app, "admin", "pass", None).await;
     let reader = login(&app, "admin", "pass", Some("pipes:read")).await;
+    let other = login(&app, "admin", "pass", Some("jobs:read")).await;
     record_run(&app, &admin, "persisted-run", true).await;
     write_events(&app, &admin, &run_rows("persisted-run")).await;
 
     let path = "/engine/runs/persisted-run/events/stream";
-    // Authorization is that of `/engine/runs`.
+    // Authorization is that of `GET /engine/runs`: `pipes:read`.
     let (status, _, _) = open(&app, path, &[]).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
-    let (status, _, _) = open(&app, path, &[("authorization", &reader)]).await;
+    let (status, _, _) = open(&app, path, &[("authorization", &other)]).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, _, _) = open(&app, path, &[("authorization", &reader)]).await;
+    assert_eq!(status, StatusCode::OK);
     // An unknown run (and an invalid run ID).
     let (status, _, _) = open(
         &app,
@@ -254,13 +257,14 @@ async fn persisted_run_streams_in_order_and_resumes() {
     )
     .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
+    // The v5 routes answer an invalid request with `400`.
     let (status, _, _) = open(
         &app,
         "/engine/runs/bad%20id/events/stream",
         &[("authorization", &admin)],
     )
     .await;
-    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(status, StatusCode::BAD_REQUEST);
 
     // The whole run, in `seq` order, then the stream ends.
     let (status, headers, body) = open(&app, path, &[("authorization", &admin)]).await;
@@ -325,7 +329,7 @@ async fn persisted_run_streams_in_order_and_resumes() {
         &[("authorization", &admin), ("last-event-id", "x")],
     )
     .await;
-    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(status, StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

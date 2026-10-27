@@ -847,3 +847,112 @@ async fn tmux_sessions_survive_reconnects_and_carry_the_environment() {
     );
     drop(second);
 }
+
+/// Q15: with tmux enabled, the terminal's sessions live on a tmux server of their own (a socket
+/// under the root, never the user's default server), started with Meerschaum's configuration
+/// (no status bar), named as before; the server this process started stops with the API.
+#[tokio::test]
+async fn terminals_run_on_their_own_tmux_server_with_meerschaums_config() {
+    let probe = std::process::Command::new("tmux")
+        .arg("-V")
+        .env_remove("TMUX")
+        .env_remove("TMUX_PANE")
+        .output();
+    if !probe.is_ok_and(|o| o.status.success()) {
+        eprintln!("SKIP terminals_run_on_their_own_tmux_server_with_meerschaums_config: no tmux");
+        return;
+    }
+    // A short root, so the socket fits under it.
+    let root = short_tmp();
+    let state = state(root.path());
+    let socket = webterm::tmux_socket_path(&state.config).unwrap();
+    assert!(socket.starts_with(root.path()), "{socket:?}");
+    // Kill this test's server by its socket (never the default one) even if an assertion fails.
+    struct KillOnDrop(std::path::PathBuf);
+    impl Drop for KillOnDrop {
+        fn drop(&mut self) {
+            let _ = std::process::Command::new("tmux")
+                .arg("-S")
+                .arg(&self.0)
+                .arg("kill-server")
+                .env_remove("TMUX")
+                .env_remove("TMUX_PANE")
+                .output();
+        }
+    }
+    let _kill = KillOnDrop(socket.clone());
+    let cfg = WebtermConfig::new(
+        &state,
+        sessions(),
+        Arc::new(|id| format!("<html>{id}</html>")),
+        sh(),
+    );
+    let tmux = cfg.tmux.clone().expect("the tmux path");
+    assert_eq!(tmux.socket.as_deref(), Some(socket.as_path()));
+    let conf = tmux.config_file.clone().expect("a configuration file");
+    assert_eq!(
+        std::fs::read_to_string(&conf).unwrap(),
+        webterm::TMUX_CONF,
+        "{conf}"
+    );
+    let tmux_cmd = |args: &[&str]| {
+        std::process::Command::new("tmux")
+            .arg("-S")
+            .arg(&socket)
+            .args(args)
+            .env_remove("TMUX")
+            .env_remove("TMUX_PANE")
+            .output()
+            .unwrap()
+    };
+    let addr = serve(webterm::routes(state.clone(), cfg)).await;
+    let mut tab = connect(addr, ADMIN_SESSION).await;
+    expect_setup(&mut tab).await;
+    send_json(&mut tab, json!(["stdin", "echo ready:$((6*7))\n"])).await;
+    read_until(&mut tab, |out| has_line(out, "ready:42")).await;
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        let listing =
+            String::from_utf8_lossy(&tmux_cmd(&["list-sessions", "-F", "#{session_name}"]).stdout)
+                .into_owned();
+        if listing.lines().any(|l| l == "admin_mrsm") {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "no admin_mrsm session on the terminal's own server: {listing:?}"
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    // Meerschaum's configuration: no status bar, mouse on.
+    let status = String::from_utf8_lossy(&tmux_cmd(&["show-options", "-gv", "status"]).stdout)
+        .trim()
+        .to_string();
+    assert_eq!(status, "off");
+    let mouse = String::from_utf8_lossy(&tmux_cmd(&["show-options", "-gv", "mouse"]).stdout)
+        .trim()
+        .to_string();
+    assert_eq!(mouse, "on");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(socket.parent().unwrap())
+            .unwrap()
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, 0o700, "the socket's directory is private");
+    }
+    // This process started the server, so it stops it with the API.
+    assert!(webterm::owned_server_sockets().contains(&socket));
+    drop(tab);
+    assert!(webterm::stop_owned_server(&socket));
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while tmux_cmd(&["list-sessions"]).status.success() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the terminal's tmux server outlived the API"
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert!(!webterm::stop_owned_server(&socket));
+}

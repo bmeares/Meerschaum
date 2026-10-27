@@ -11,15 +11,15 @@ use super::protocol::{
     INTERNAL_ERROR, INVALID_PARAMS, INVALID_REQUEST, METHOD_NOT_FOUND, error, has_scope, map_of,
     paginate, result, s, tool_error,
 };
-use super::registry::{Prompt, Resource, Source, Tool, builtin};
+use super::registry::{Prompt, Resource, Source, Tool, builtin, primer};
 use super::tools::{self, ToolCx};
 use super::{Caller, McpServer, prompts, resources};
 use crate::state::AppState;
 
-/// Every tool: the built-ins, the native plugins', then the host's (an entry never shadows an
-/// earlier one of the same name).
+/// Every tool: the built-ins (v4's with v5's changes, then v5's), the native plugins', then the
+/// host's (an entry never shadows an earlier one of the same name).
 pub async fn all_tools(server: &McpServer) -> Vec<Tool> {
-    let mut out = builtin().tools.clone();
+    let mut out = super::registry::tools().to_vec();
     if let Some(native) = &server.native {
         for t in native.tools() {
             if !out.iter().any(|b| b.name == t.name) {
@@ -71,15 +71,26 @@ pub async fn all_prompts(server: &McpServer) -> Vec<Prompt> {
     out
 }
 
+/// Whether a tool's HTTP route group is served (always over stdio, and for v4's tools).
+fn tool_group_served(state: &AppState, caller: &Caller, tool: &Tool) -> bool {
+    if !caller.api || tool.source != Source::Builtin {
+        return true;
+    }
+    super::v5::route_group(&tool.name).is_none_or(|g| state.config.route_group_is_allowed(g))
+}
+
 impl McpServer {
     /// `get_visible_tools(current_scopes)`: the tools the caller may call (hidden rather than
-    /// advertised and refused).
-    pub async fn visible_tools(&self, caller: &Caller) -> Vec<Tool> {
+    /// advertised and refused). Over HTTP, a tool v5 adds is also hidden when the server does not
+    /// serve the route group of its HTTP equivalent.
+    pub async fn visible_tools(&self, state: &AppState, caller: &Caller) -> Vec<Tool> {
         all_tools(self)
             .await
             .into_iter()
             .filter(|t| {
-                has_scope(&caller.scopes, &t.scopes) && (t.read_only || !self.config.read_only)
+                has_scope(&caller.scopes, &t.scopes)
+                    && (t.read_only || !self.config.read_only)
+                    && tool_group_served(state, caller, t)
             })
             .collect()
     }
@@ -152,7 +163,7 @@ impl McpServer {
             ("protocolVersion", s(version)),
             ("capabilities", McpServer::capabilities()),
             ("serverInfo", McpServer::server_info(state)),
-            ("instructions", s(b.primer.clone())),
+            ("instructions", s(primer().to_string())),
         ]))
     }
 
@@ -209,7 +220,7 @@ impl McpServer {
             "initialize" => result(id, self.initialize(state, &params)),
             "ping" => result(id, Value::new_map()),
             "tools/list" => {
-                let mut tools = self.visible_tools(caller).await;
+                let mut tools = self.visible_tools(state, caller).await;
                 tools.sort_by(|a, b| a.name.cmp(&b.name));
                 let b = builtin();
                 match paginate(&tools, params.get("cursor"), 100, b.max_cursor_offset) {
@@ -294,6 +305,12 @@ impl McpServer {
                 format!(
                     "'{name}' modifies data, and this MCP server is running in read-only mode."
                 ),
+            );
+        }
+        if !tool_group_served(state, caller, &tool) {
+            return tool_error(
+                id,
+                format!("'{name}' is not available on this server (its routes are not served)."),
             );
         }
         let Value::Map(arguments) = arguments else {

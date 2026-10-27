@@ -130,11 +130,14 @@ async fn login(ctx: Ctx, body: Body) -> ApiResult {
             if !correct {
                 return Err(ApiError::invalid_credentials());
             }
-            let attrs = conn.get_user_attributes(&user).await.ok().flatten();
-            let mut user = user;
-            user.attributes = attrs;
-            let scopes = user.get_scopes();
-            let typ = conn.get_user_type(&user).await.ok().flatten();
+            // Fail closed: a failed read of the user's scopes or type is an error (`503`), never
+            // v4's "no `scopes` attribute = every scope" or "no type = not an administrator".
+            let scopes = User::scopes_from_read(conn.get_user_attributes(&user).await)
+                .map_err(crate::auth::scopes_unavailable)?;
+            let typ = conn
+                .get_user_type(&user)
+                .await
+                .map_err(crate::auth::scopes_unavailable)?;
             (scopes, typ, username)
         } else if grant_type == "client_credentials" {
             let client_id = py_str(&data.client_id);

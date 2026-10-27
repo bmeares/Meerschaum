@@ -38,10 +38,13 @@ async fn metadata_requires_auth_and_obeys_its_own_route_group() {
         .status,
         StatusCode::OK
     );
+    let listing = send(&app, req("GET", "/pipelines", Some(&admin), None))
+        .await
+        .json();
+    assert_eq!(listing["success"], json!(true));
+    assert_eq!(listing["pipelines"][0]["name"], "daily");
     assert_eq!(
-        send(&app, req("GET", "/pipelines", Some(&admin), None))
-            .await
-            .json()["daily"]["targets"],
+        listing["pipelines"][0]["targets"],
         json!(["sql:a|sql:b|raw|None"])
     );
     assert!(
@@ -89,6 +92,10 @@ fn openapi_discovers_pipeline_metadata_and_execution_controls() {
         ("/pipelines/{name}/attributes", "get"),
         ("/pipelines/leases", "post"),
         ("/pipelines/leases", "delete"),
+        ("/pipelines/{name}", "get"),
+        ("/pipelines/{name}/plan", "post"),
+        ("/pipelines/{name}/sync", "post"),
+        ("/engine/runs/{run_id}", "get"),
         ("/execute/validate", "post"),
         ("/execute/runs", "get"),
         ("/execute/runs/{name}/retain", "post"),
@@ -98,12 +105,26 @@ fn openapi_discovers_pipeline_metadata_and_execution_controls() {
             "{method} {path}"
         );
     }
-    assert!(
-        document["paths"]["/engine/runs"]["get"]["parameters"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|parameter| parameter["name"] == "run_id")
+    for name in ["run_id", "pipeline", "pipe", "status", "since", "limit"] {
+        assert!(
+            document["paths"]["/engine/runs"]["get"]["parameters"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|parameter| parameter["name"] == name),
+            "{name}"
+        );
+    }
+    // The v5 routes say what they do and which scopes they need.
+    let sync = &document["paths"]["/pipelines/{name}/sync"]["post"];
+    assert!(sync["description"].as_str().unwrap().contains("run_id"));
+    assert_eq!(
+        sync["security"][0]["OAuth2PasswordBearer"],
+        json!(["pipes:write", "jobs:execute"])
+    );
+    assert_eq!(
+        document["paths"]["/engine/runs"]["get"]["security"][0]["OAuth2PasswordBearer"],
+        json!(["pipes:read"])
     );
     cfg.routes_disabled = vec!["pipelines".into(), "login".into()];
     let document = serde_json::to_value(meerschaum_server::openapi::document(&cfg)).unwrap();

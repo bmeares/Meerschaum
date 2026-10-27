@@ -18,7 +18,7 @@ use meerschaum_core::{Map, Pipe, Value};
 use crate::auth;
 use crate::backends::{
     ActionsBackend, EngineBackend, InstanceResolver, JobsBackend, MemoryEngine, NoActions,
-    NoInstances, NoJobs,
+    NoInstances, NoJobs, NoPipelines, PipelinesBackend,
 };
 use crate::config::{ServerConfig, fnmatch};
 use crate::error::ApiError;
@@ -83,8 +83,12 @@ pub struct Inner {
     pub jobs: Arc<dyn JobsBackend>,
     /// `/engine/*`.
     pub engine: Arc<dyn EngineBackend>,
+    /// Plans of saved Pipelines (`POST /pipelines/{name}/plan`).
+    pub pipelines: Arc<dyn PipelinesBackend>,
     /// The live side of `GET /engine/runs/{run_id}/events/stream`.
     pub engine_streams: crate::engine_stream::EngineStreams,
+    /// Whether `GET /logs/{name}/stream` is served (set by `meerschaum-web` when it mounts it).
+    log_stream: std::sync::atomic::AtomicBool,
     /// Extra instances.
     pub resolver: Arc<dyn InstanceResolver>,
     /// The extension-host proxy for unmatched routes.
@@ -112,6 +116,7 @@ pub struct AppStateBuilder {
     actions: Arc<dyn ActionsBackend>,
     jobs: Arc<dyn JobsBackend>,
     engine: Arc<dyn EngineBackend>,
+    pipelines: Arc<dyn PipelinesBackend>,
     resolver: Arc<dyn InstanceResolver>,
     host: Option<Arc<HostProxy>>,
 }
@@ -135,6 +140,11 @@ impl AppStateBuilder {
     /// The engine-state backend.
     pub fn engine(mut self, engine: Arc<dyn EngineBackend>) -> Self {
         self.engine = engine;
+        self
+    }
+    /// The backend that plans saved Pipelines.
+    pub fn pipelines(mut self, pipelines: Arc<dyn PipelinesBackend>) -> Self {
+        self.pipelines = pipelines;
         self
     }
     /// The resolver for extra instances.
@@ -162,7 +172,9 @@ impl AppStateBuilder {
             actions: self.actions,
             jobs: self.jobs,
             engine: self.engine,
+            pipelines: self.pipelines,
             engine_streams: Default::default(),
+            log_stream: std::sync::atomic::AtomicBool::new(false),
             resolver: self.resolver,
             host: self.host,
             rate_limiter,
@@ -197,6 +209,7 @@ impl AppState {
             actions: Arc::new(NoActions),
             jobs: Arc::new(NoJobs),
             engine: Arc::new(MemoryEngine::default()),
+            pipelines: Arc::new(NoPipelines),
             resolver: Arc::new(NoInstances),
             host: None,
         }
@@ -210,6 +223,18 @@ impl AppState {
     /// The JWT secret.
     pub fn secret(&self) -> &[u8] {
         &self.0.secret
+    }
+
+    /// Record that `GET /logs/{name}/stream` is served (`meerschaum-web` mounts it).
+    pub fn mark_log_stream_served(&self) {
+        self.0
+            .log_stream
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Whether `GET /logs/{name}/stream` is served: `POST /execute` names it only then.
+    pub fn log_stream_served(&self) -> bool {
+        self.0.log_stream.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// `get_api_connector(instance_keys)`.

@@ -2,6 +2,7 @@
 
 #![allow(dead_code)]
 
+pub mod fakes;
 pub mod memory;
 
 use std::sync::Arc;

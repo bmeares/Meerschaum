@@ -62,6 +62,14 @@ pub struct MemoryInstance {
     label: String,
     data: Mutex<Data>,
     raw_docs: Mutex<Option<Vec<Doc>>>,
+    /// When set, the reads of users' attributes and tokens' scopes fail (a transient instance
+    /// error): authorization must fail closed.
+    fail_permission_reads: std::sync::atomic::AtomicBool,
+    /// When set, the reads of users' IDs and of tokens fail (authentication must fail closed).
+    fail_identity_reads: std::sync::atomic::AtomicBool,
+    /// When set, the reads of pipes' data, row counts and sync times fail (rc15 Q17: the routes
+    /// answer `500`, not an empty pipe).
+    fail_data_reads: std::sync::atomic::AtomicBool,
 }
 
 fn keys_of(pipe: &Pipe) -> (String, String, Option<String>) {
@@ -173,12 +181,69 @@ impl MemoryInstance {
         MemoryInstance {
             label: label.to_string(),
             raw_docs: Mutex::new(None),
+            fail_permission_reads: std::sync::atomic::AtomicBool::new(false),
+            fail_identity_reads: std::sync::atomic::AtomicBool::new(false),
+            fail_data_reads: std::sync::atomic::AtomicBool::new(false),
             data: Mutex::new(Data {
                 next_pipe_id: 1,
                 next_user_id: 1,
                 ..Default::default()
             }),
         }
+    }
+
+    /// Make the reads of users' attributes and tokens' scopes fail (or succeed again).
+    pub fn fail_permission_reads(&self, fail: bool) {
+        self.fail_permission_reads
+            .store(fail, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// Make the reads of users' IDs and of tokens fail (or succeed again).
+    pub fn fail_identity_reads(&self, fail: bool) {
+        self.fail_identity_reads
+            .store(fail, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// Make the reads of pipes' data, row counts and sync times fail (or succeed again).
+    pub fn fail_data_reads(&self, fail: bool) {
+        self.fail_data_reads
+            .store(fail, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    fn data_read_error(&self) -> ConnectorResult<()> {
+        if self
+            .fail_data_reads
+            .load(std::sync::atomic::Ordering::SeqCst)
+        {
+            return Err(ConnectorError::Backend(
+                "could not connect to the database (simulated)".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    fn identity_read_error(&self) -> ConnectorResult<()> {
+        if self
+            .fail_identity_reads
+            .load(std::sync::atomic::Ordering::SeqCst)
+        {
+            return Err(ConnectorError::Backend(
+                "connection reset by peer (simulated)".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    fn permission_read_error(&self) -> ConnectorResult<()> {
+        if self
+            .fail_permission_reads
+            .load(std::sync::atomic::Ordering::SeqCst)
+        {
+            return Err(ConnectorError::Backend(
+                "connection reset by peer (simulated)".into(),
+            ));
+        }
+        Ok(())
     }
 
     /// The documents `get_pipe_docs` returns instead of the stored rows (what a SQL instance's
@@ -476,6 +541,7 @@ impl InstanceConnector for MemoryInstance {
         pipe: &Pipe,
         query: &DataQuery,
     ) -> ConnectorResult<Option<Frame>> {
+        self.data_read_error()?;
         let Some(rows) = self.rows(pipe) else {
             return Ok(None);
         };
@@ -520,6 +586,7 @@ impl InstanceConnector for MemoryInstance {
         params: Option<&Map>,
         newest: bool,
     ) -> ConnectorResult<Option<DateBound>> {
+        self.data_read_error()?;
         let Some(dt) = pipe.column("datetime") else {
             return Ok(None);
         };
@@ -558,6 +625,7 @@ impl InstanceConnector for MemoryInstance {
         pipe: &Pipe,
         query: &DataQuery,
     ) -> ConnectorResult<Option<i64>> {
+        self.data_read_error()?;
         let dt = pipe.column("datetime");
         Ok(Some(
             self.rows(pipe)
@@ -630,6 +698,7 @@ impl InstanceConnector for MemoryInstance {
     }
 
     async fn get_user_id(&self, user: &User) -> ConnectorResult<Option<Value>> {
+        self.identity_read_error()?;
         Ok(self.user_row(&user.username).map(|u| Value::Int(u.id)))
     }
 
@@ -703,6 +772,7 @@ impl InstanceConnector for MemoryInstance {
     }
 
     async fn get_user_attributes(&self, user: &User) -> ConnectorResult<Option<Map>> {
+        self.permission_read_error()?;
         Ok(self.user_row(&user.username).map(|u| u.attributes))
     }
 
@@ -889,6 +959,7 @@ impl InstanceConnector for MemoryInstance {
     }
 
     async fn get_token_model(&self, token_id: &Uuid) -> ConnectorResult<Option<TokenModel>> {
+        self.identity_read_error()?;
         Ok(self
             .lock()
             .tokens
@@ -912,6 +983,7 @@ impl InstanceConnector for MemoryInstance {
     }
 
     async fn get_token_scopes(&self, token_id: &Uuid) -> ConnectorResult<Vec<String>> {
+        self.permission_read_error()?;
         Ok(self
             .get_token_model(token_id)
             .await?

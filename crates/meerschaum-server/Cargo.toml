@@ -59,4 +59,6 @@ regex = { workspace = true }
 tokio-tungstenite = "0.30"
 # Real-instance tests: a SQLite / PostgreSQL-family instance behind the router, driven by the client.
 meerschaum-connector-sql = { workspace = true }
+# A Valkey instance (in memory) behind the router: its read errors must fail closed too.
+meerschaum-connector-valkey = { workspace = true }
 meerschaum-connector-api = { workspace = true, features = ["client"] }

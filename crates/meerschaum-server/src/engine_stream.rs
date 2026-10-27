@@ -33,10 +33,11 @@
 //! seconds, default [`IDLE_TIMEOUT`]; the run may still be going). It also carries `finished`
 //! (whether the record closed), `success` and `message` from the run's record.
 //!
-//! Authorization is that of `GET /engine/runs` (`pipes:write`), by bearer token or, for the
+//! Authorization is that of `GET /engine/runs` (`pipes:read`), by bearer token or, for the
 //! console's `EventSource`, by the console session cookie when `meerschaum-web` installs a
 //! [`BrowserAuth`]. Open streams are bounded like the job-log streams
-//! (`api:permissions:log_streams`, a separate count).
+//! (`api:permissions:log_streams`, a separate count). A run the store cannot be read for is an
+//! error (`500`, or `501` without a store), never "not found".
 
 use std::collections::{BTreeMap, HashMap};
 use std::convert::Infallible;
@@ -56,7 +57,7 @@ use tokio::sync::broadcast;
 use tokio::time::Instant;
 
 use crate::auth::scoped_auth;
-use crate::backends::{EngineBackend, EngineStoreError};
+use crate::backends::{EngineBackend, EngineStoreError, RunsFilter};
 use crate::error::ApiError;
 use crate::routes::Ctx;
 use crate::state::AppState;
@@ -91,7 +92,7 @@ pub const HOLDER_GRACE: Duration = Duration::from_secs(120);
 const TS_SLACK: chrono::TimeDelta = chrono::TimeDelta::seconds(60);
 
 /// The scopes of the stream (those of `GET /engine/runs`).
-const SCOPES: &[&str] = &["pipes:write"];
+const SCOPES: &[&str] = &["pipes:read"];
 
 /// Authenticates a browser request that carries no `Authorization` header (the console's
 /// `EventSource` cannot set one) by its console session. `meerschaum-web` installs one with
@@ -298,7 +299,7 @@ pub fn event_from_doc(doc: &Doc) -> Option<EngineRunEvent> {
 
 /// Whether `run_id` can name a run (the engine's run IDs, `--run-id` values). A leading `_`
 /// is refused: the `params` grammar would read it as a negation (`run_id != ...`).
-fn valid_run_id(run_id: &str) -> bool {
+pub fn valid_run_id(run_id: &str) -> bool {
     run_id.len() <= 200
         && run_id
             .as_bytes()
@@ -309,10 +310,15 @@ fn valid_run_id(run_id: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || b"-_.:".contains(&c))
 }
 
-fn api_error(e: EngineStoreError) -> ApiError {
+/// A store error as a response: `501` without a store, else `500` (its message is for
+/// administrators, [`crate::envelope`]).
+pub fn api_error(e: EngineStoreError) -> ApiError {
     match e {
         EngineStoreError::Unavailable => ApiError::new(501, e.to_string()),
-        EngineStoreError::Failed(m) => ApiError::new(500, m),
+        EngineStoreError::Failed(m) => {
+            tracing::warn!("Failed to read the engine state: {m}");
+            ApiError::new(500, "Failed to read the engine state.").with_internal(m)
+        }
     }
 }
 
@@ -333,7 +339,7 @@ fn slot_key(principal: Option<&crate::auth::Principal>, session: Option<&str>) -
 /// The store that keeps the run's history: the server's engine store, or (`instance_keys`
 /// naming another instance the server may use) that instance's state pipes. Also the keys
 /// under which that instance's runs are published live ([`own_instance_names`] for the server's).
-fn store_for(ctx: &Ctx) -> Result<(Arc<dyn EngineBackend>, Vec<String>), ApiError> {
+pub fn store_for(ctx: &Ctx) -> Result<(Arc<dyn EngineBackend>, Vec<String>), ApiError> {
     match ctx.instance_keys() {
         Some(keys)
             if keys != ctx.state.config.instance_keys
@@ -359,9 +365,14 @@ pub fn own_instance_names(state: &AppState) -> Vec<String> {
     names
 }
 
-/// Whether the store knows the run (a run record or any event).
+/// Whether the store knows the run (a run record or any event). A failed read is an error.
 async fn run_known(store: &dyn EngineBackend, run_id: &str) -> Result<bool, ApiError> {
-    if !store.get_runs(Some(run_id), Some(1)).await.is_empty() {
+    let filter = RunsFilter {
+        run_id: Some(run_id.to_string()),
+        limit: Some(1),
+        ..Default::default()
+    };
+    if !store.get_runs(&filter).await.map_err(api_error)?.is_empty() {
         return Ok(true);
     }
     Ok(!store
@@ -658,12 +669,16 @@ impl Tail {
         }
         if self.closed_at.is_none() && now >= self.next_status_check {
             self.next_status_check = now + STATUS_CHECK;
-            self.record = self
-                .store
-                .get_runs(Some(&self.run_id), Some(1))
-                .await
-                .into_iter()
-                .find(|r| r.pipe_ref.is_none());
+            let filter = RunsFilter {
+                run_id: Some(self.run_id.clone()),
+                limit: Some(1),
+                ..Default::default()
+            };
+            // A failed read keeps the last record (the next check tries again).
+            match self.store.get_runs(&filter).await {
+                Ok(runs) => self.record = runs.into_iter().find(|r| r.pipe_ref.is_none()),
+                Err(e) => tracing::debug!("Cannot read the record of run '{}': {e}", self.run_id),
+            }
             if self.record.as_ref().is_some_and(|r| r.finished.is_some()) {
                 self.closed_at = Some(now);
             }

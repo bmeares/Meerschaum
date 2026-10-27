@@ -509,6 +509,12 @@ impl PythonHostLauncher {
             // Whether the Rust server serves `/webterm/<session-id>` (the console shows the
             // terminal page and its iframe only then).
             "webterm": !cfg.no_dash && !cfg.no_webterm,
+            // The public preset (`api:permissions:preset: public`, `--public`): the host serves
+            // the login page and plugin pages, not the console's own pages.
+            "public": cfg.public,
+            // Whether non-administrators may run actions and edit pipes from the console:
+            // `api:permissions:actions:non_admin`, forced off by `--secure`.
+            "actions_non_admin": cfg.actions_non_admin,
         });
         PythonHostLauncher {
             python,
@@ -608,6 +614,8 @@ impl HostLauncher for PythonHostLauncher {
             .args(PythonHostLauncher::endpoint_args(endpoint))
             .envs(PythonHostLauncher::endpoint_env(endpoint))
             .envs(meerschaum_core::python_guard::expect_env())
+            // `start api --allow-protected`: plugin routes may write to protected connectors.
+            .envs(meerschaum_core::protected::child_env())
             .env(meerschaum_core::python_guard::WARN_ENV, "1")
             .env(
                 meerschaum_core::python_guard::RETRY_HINT_ENV,
@@ -1328,6 +1336,10 @@ mod tests {
         assert_eq!(config["no_webterm"], true);
         assert_eq!(config["console"], false);
         assert_eq!(config["webterm"], false);
+        // `--secure` (`actions_non_admin: false`) reaches the console: only administrators act.
+        assert_eq!(config["actions_non_admin"], true);
+        cfg.actions_non_admin = false;
+        assert_eq!(host_config(&cfg)["actions_non_admin"], false);
     }
 
     #[test]

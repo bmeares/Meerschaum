@@ -27,6 +27,7 @@ pub mod misc;
 pub mod pipelines;
 pub mod pipes;
 pub mod plugins;
+pub mod sync_status;
 pub mod tokens;
 pub mod users;
 pub mod version;
@@ -48,8 +49,23 @@ pub const CORE_ROUTE_GROUPS: &[&str] = &[
     "engine",
 ];
 
-/// The route group of a request path (for rate limits and the allowlist).
+/// The path the API host routes a request on: `path` percent-decoded once, as uvicorn decodes it
+/// (`urllib.parse.unquote`; invalid UTF-8 becomes U+FFFD). The server's own routes match the
+/// path as sent, but a request no route matches goes to the host, which serves `/%64ocs` as
+/// `/docs`. So every decision about such a request (its route group, its path-prefix rate
+/// limit, whether it may be forwarded) is made on this path, never on the encoded spelling.
+pub fn decoded_path(path: &str) -> std::borrow::Cow<'_, str> {
+    if path.contains('%') {
+        std::borrow::Cow::Owned(crate::native::percent_decode(path))
+    } else {
+        std::borrow::Cow::Borrowed(path)
+    }
+}
+
+/// The route group of a request path (for rate limits and the allowlist), classified on the
+/// [`decoded_path`].
 pub fn route_group_of(path: &str) -> &'static str {
+    let path = decoded_path(path);
     let first = path.trim_start_matches('/').split('/').next().unwrap_or("");
     match first {
         "" => "index",
@@ -109,7 +125,7 @@ pub struct Unmatched;
 
 async fn fallback(State(state): State<AppState>, req: Request) -> Response {
     // The Dash console is the Python host's (D21): proxied when mounted, else the pointer page.
-    if crate::web::is_console_path(req.uri().path()) {
+    if crate::web::is_console_path(&decoded_path(req.uri().path())) {
         return crate::web::console_entry(state, req).await;
     }
     if let Some(host) = state.host.clone()
@@ -163,12 +179,15 @@ pub fn client_key(state: &AppState, req: &Request) -> String {
 
 /// The rate limiter as a middleware (`api:permissions:rate_limits`): the router applies it to
 /// every route it serves, and the routes `meerschaum-web` merges in (the log stream, the
-/// terminal) must pass through it too.
+/// terminal) must pass through it too. A path-prefix key (`/my-plugin`) limits the paths under
+/// it in one bucket per client; a route-group pattern limits each matching group. Both match the
+/// [`decoded_path`], so an encoded spelling (`/my%2Dplugin`) counts against the same limit.
 pub async fn rate_limit(State(state): State<AppState>, req: Request, next: Next) -> Response {
-    let group = route_group_of(req.uri().path());
-    if let Some(limit) = state.config.rate_limit_for(group) {
+    let path = decoded_path(req.uri().path());
+    let group = route_group_of(&path);
+    if let Some((bucket, limit)) = state.config.rate_limit_for_request(&path, group) {
         let key = client_key(&state, &req);
-        if let Err(retry_after) = state.rate_limiter.check(group, &key, limit) {
+        if let Err(retry_after) = state.rate_limiter.check(&bucket, &key, limit) {
             let mut resp = ApiError::new(429, "Rate limit exceeded.").into_response();
             if let Ok(v) =
                 axum::http::HeaderValue::from_str(&retry_after.as_secs().max(1).to_string())
@@ -184,7 +203,10 @@ pub async fn rate_limit(State(state): State<AppState>, req: Request, next: Next)
 /// Whether an unmatched path may be proxied to the API host (§7.3): never the host's internal
 /// routes (`/_mrsm/`), and never a core route group the allowlist removed, so that
 /// `api:permissions:routes:allowlist` cannot be bypassed by a plugin serving the same path.
+/// Decided on the [`decoded_path`]: the host would serve `/%64ocs` as `/docs`.
 pub fn is_proxyable(cfg: &crate::config::ServerConfig, path: &str) -> bool {
+    let path = decoded_path(path);
+    let path = path.as_ref();
     if path.starts_with(crate::mcp::federation::INTERNAL_PREFIX) {
         return false;
     }
@@ -196,6 +218,11 @@ pub fn is_proxyable(cfg: &crate::config::ServerConfig, path: &str) -> bool {
     // The terminal is served here or not at all (`--no-webterm`, `--no-dash`); the API host
     // no longer mounts it, so forwarding would only ask the host for a route it lacks.
     if group == "webterm" {
+        return false;
+    }
+    // The public preset serves no API docs and only part of `misc`: the host's own routes must
+    // not stand in for the server's.
+    if (group == "docs" && !cfg.openapi_enabled) || (group == "misc" && !cfg.serves_full_misc()) {
         return false;
     }
     if cfg
@@ -231,7 +258,7 @@ pub fn router_with_mcp(state: AppState, mcp: std::sync::Arc<crate::mcp::McpServe
         app = login::routes(app);
     }
     execute::start_cleanup(&state);
-    let groups: [(&str, AddRoutes); 13] = [
+    let groups: [(&str, AddRoutes); 14] = [
         ("actions", actions::routes),
         ("actions", execute::routes),
         ("connectors", connectors::routes),
@@ -245,6 +272,7 @@ pub fn router_with_mcp(state: AppState, mcp: std::sync::Arc<crate::mcp::McpServe
         ("users", users::routes),
         ("version", version::routes),
         ("engine", engine::routes),
+        ("engine", sync_status::routes),
     ];
     for (group, add) in groups {
         if cfg.route_group_is_allowed(group) {
@@ -273,6 +301,11 @@ pub fn router_with_mcp(state: AppState, mcp: std::sync::Arc<crate::mcp::McpServe
     .layer(axum::middleware::from_fn_with_state(
         state.clone(),
         rate_limit,
+    ))
+    // Outermost: the v5-only routes answer every error (the rate limiter's too) in one shape.
+    .layer(axum::middleware::from_fn_with_state(
+        state.clone(),
+        crate::envelope::v5_errors,
     ))
     .with_state(state)
 }
@@ -365,6 +398,54 @@ mod tests {
         assert_eq!(route_group_of("/plugin-route"), "other");
         assert_eq!(route_group_of("/mcp"), "mcp");
         assert_eq!(route_group_of("/_mrsm/host/mcp"), "internal");
+    }
+
+    #[test]
+    fn encoded_paths_are_classified_like_the_decoded_path() {
+        // The API host (uvicorn) routes on the percent-decoded path; so does every classification.
+        assert_eq!(route_group_of("/%64ocs"), "docs");
+        assert_eq!(route_group_of("/openapi%2Ejson"), "docs");
+        assert_eq!(route_group_of("/r%65doc"), "docs");
+        assert_eq!(route_group_of("/%70ipes%2Fa/b"), "pipes");
+        assert_eq!(route_group_of("/%5Fmrsm/host/registry"), "internal");
+        assert_eq!(route_group_of("/%6Aobsx"), "jobs");
+        assert_eq!(decoded_path("/a%2Fb%20c%C3%A9"), "/a/b cé");
+        // Decoded once, like `urllib.parse.unquote`: `%2564` is `%64`, not `d`.
+        assert_eq!(decoded_path("/%2564ocs"), "/%64ocs");
+        // A `%` that starts no escape stays; invalid UTF-8 becomes U+FFFD.
+        assert_eq!(decoded_path("/100%"), "/100%");
+        assert_eq!(decoded_path("/%zz%4"), "/%zz%4");
+        assert_eq!(decoded_path("/%FF"), "/\u{FFFD}");
+        assert!(matches!(
+            decoded_path("/plain"),
+            std::borrow::Cow::Borrowed("/plain")
+        ));
+
+        let root = tempfile::tempdir().unwrap();
+        let mut cfg = crate::config::ServerConfig::for_root("sql:main", root.path());
+        assert!(!is_proxyable(&cfg, "/%5Fmrsm/host/registry"));
+        assert!(!is_proxyable(&cfg, "/%77ebterm/x"));
+        assert!(is_proxyable(&cfg, "/%64ocs"));
+        cfg.routes_disabled = vec!["docs".into()];
+        assert!(!is_proxyable(&cfg, "/%64ocs"));
+        cfg.routes_disabled.clear();
+        cfg.no_dash = true;
+        assert!(!is_proxyable(&cfg, "/%64ash/pipes"));
+        cfg.no_dash = false;
+        cfg.public = true;
+        cfg.openapi_enabled = false;
+        for path in [
+            "/%64ocs",
+            "/openapi%2Ejson",
+            "/r%65doc",
+            "/%69nfo",
+            "/%70ipes/keys",
+        ] {
+            assert!(!is_proxyable(&cfg, path), "{path}");
+        }
+        assert!(is_proxyable(&cfg, "/my%2Dplugin/x"));
+        // The v5 routes' error shape follows the decoded path too.
+        assert!(crate::envelope::is_v5_path("/%65ngine/runs"));
     }
 
     #[test]

@@ -213,10 +213,11 @@ async fn a_non_admin_cannot_run_the_actions_the_console_omits() {
         let r = execute(&f, &bob, &sysargs).await;
         assert_eq!(r.status, StatusCode::FORBIDDEN, "{sysargs:?}: {}", r.text());
         assert!(
-            r.json()["detail"].as_str().is_some_and(|d| !d.is_empty()),
+            r.json()["message"].as_str().is_some_and(|d| !d.is_empty()),
             "{sysargs:?} has a clear message: {}",
             r.text()
         );
+        assert_eq!(r.json()["success"], json!(false));
     }
     assert!(f.jobs.jobs.lock().unwrap().is_empty(), "nothing ran");
 }
@@ -320,11 +321,13 @@ async fn execute_reads_the_api_permissions_actions_non_admin_key() {
         if console_key {
             assert!(started(&r), "{label}: {} {}", r.status, r.text());
         } else {
-            // The v4 message, as a `SuccessTuple`.
-            assert_eq!(r.status, StatusCode::OK, "{label}: {}", r.text());
-            assert_eq!(r.json()[0], json!(false), "{label}: {}", r.text());
+            // v4's message, refused with `403` (the v5 routes' shape).
+            assert_eq!(r.status, StatusCode::FORBIDDEN, "{label}: {}", r.text());
+            assert_eq!(r.json()["success"], json!(false), "{label}: {}", r.text());
             assert!(
-                r.text()
+                r.json()["message"]
+                    .as_str()
+                    .unwrap()
                     .contains("has not allowed users to perform actions")
             );
             assert!(f.jobs.jobs.lock().unwrap().is_empty(), "{label}");
@@ -503,7 +506,7 @@ async fn a_job_name_chosen_by_a_non_admin_keeps_the_execute_prefix() {
         ),
     )
     .await;
-    assert_eq!(r.status.as_u16(), 422, "{}", r.text());
+    assert_eq!(r.status.as_u16(), 400, "{}", r.text());
     let r = send(
         &f.app,
         post_json(

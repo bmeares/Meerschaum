@@ -105,6 +105,8 @@ pub fn router(server: AppState, config: WebConfig) -> Result<Router, String> {
     // The job-log stream follows the `jobs` route group, like `/logs/{name}`.
     if state.server.config.route_group_is_allowed("jobs") {
         router = router.route("/logs/{name}/stream", get(stream::logs));
+        // `POST /execute` names the stream only when it is served.
+        state.server.mark_log_stream_served();
     }
     router = native_pages::routes(router, &config.pages)?;
     let mut router = router.with_state(state);
@@ -166,10 +168,16 @@ pub(crate) async fn api_headers(state: &WebState, data: &Json) -> Result<HeaderM
     }
     let username = data["username"].as_str().unwrap_or("");
     let login = || StatusCode::UNAUTHORIZED;
-    let Some(principal) = auth::load_from_subject(&state.server, username).await else {
-        return Err(login());
+    let principal = match auth::load_from_subject(&state.server, username).await {
+        Ok(Some(principal)) => principal,
+        Ok(None) => return Err(login()),
+        // A failed read refuses (fail closed).
+        Err(_) => return Err(StatusCode::SERVICE_UNAVAILABLE),
     };
-    let mut scopes = auth::principal_scopes(&state.server, &principal).await;
+    // A failed scope read refuses the request (fail closed), it never grants every scope.
+    let mut scopes = auth::principal_scopes(&state.server, &principal)
+        .await
+        .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?;
     if let Some(user) = principal.as_user() {
         if state
             .server

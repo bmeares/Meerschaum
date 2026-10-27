@@ -106,7 +106,7 @@ small{{opacity:.7}}</style></head><body>\
 /// pointer page (`200` for `/dash` and `/dash/`, `404` below them). Everything about the
 /// request reaches the host unchanged, so the Dash app sees the paths it was mounted at.
 pub async fn console_entry(state: AppState, req: Request) -> Response {
-    let path = req.uri().path().to_string();
+    let path = crate::routes::decoded_path(req.uri().path()).into_owned();
     if state.config.no_dash {
         let mut resp = crate::error::ApiError::not_found().into_response();
         resp.extensions_mut().insert(crate::routes::Unmatched);

@@ -35,6 +35,7 @@ pub mod backends;
 pub mod config;
 pub mod engine_store;
 pub mod engine_stream;
+pub mod envelope;
 pub mod error;
 pub mod execute_policy;
 pub mod host;
@@ -73,6 +74,9 @@ pub fn app_with_mcp(state: AppState, mcp: std::sync::Arc<mcp::McpServer>) -> axu
 pub async fn serve(state: AppState) -> std::io::Result<()> {
     for notice in &state.config.notices {
         tracing::warn!("{notice}");
+    }
+    if let Some(line) = state.config.preset_notice() {
+        tracing::info!("{line}");
     }
     let mcp = std::sync::Arc::new(mcp::McpServer::for_state(&state));
     serve_with_mcp(state, mcp).await

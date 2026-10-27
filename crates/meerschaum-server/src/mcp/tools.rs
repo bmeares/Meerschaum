@@ -173,19 +173,30 @@ fn location_of(args: &Map) -> Option<String> {
     }
 }
 
+/// The refusal of the internal `mrsm` connector keys (saved Pipelines' registrations, the
+/// engine's state): the pipe tools never reach them, like the HTTP pipe routes
+/// (`refuse_mrsm_connector`). Pipelines have their own tools.
+fn refuse_internal_keys(connector_keys: &str) -> Result<(), ToolError> {
+    match meerschaum_connector_api::routes::refuse_mrsm_connector(connector_keys) {
+        Some((_, detail)) => Err(ToolError::permission(detail)),
+        None => Ok(()),
+    }
+}
+
 /// `_resolve_pipe(args)`: the addressed pipe with its registered parameters, refusing
-/// protected targets.
+/// protected targets and the internal `mrsm` connector keys.
 pub async fn resolve_pipe(
     cx: &ToolCx<'_>,
     args: &Map,
 ) -> Result<(Arc<dyn InstanceConnector>, Pipe), ToolError> {
     let lk = location_of(args);
     let ik = str_arg(args, "instance_keys");
-    let conn = connector(cx, ik.as_deref())?;
     let ck = args
         .get("connector_keys")
         .map(Value::py_str)
         .unwrap_or_default();
+    refuse_internal_keys(&ck)?;
+    let conn = connector(cx, ik.as_deref())?;
     let mk = args
         .get("metric_key")
         .map(Value::py_str)
@@ -408,11 +419,25 @@ pub async fn call(name: &str, args: &Map, cx: &ToolCx<'_>) -> Result<Value, Tool
         "edit_pipe" => edit_pipe(args, cx).await,
         "sync_pipe" => {
             let (_, pipe) = resolve_pipe(cx, args).await?;
-            let res = cx
-                .server
-                .backend
-                .sync_pipe(&pipe, str_arg(args, "begin"), str_arg(args, "end"))
-                .await;
+            let parents = depth_arg(args, "parents")?;
+            let children = depth_arg(args, "children")?;
+            let res = if parents.is_none() && children.is_none() {
+                cx.server
+                    .backend
+                    .sync_pipe(&pipe, str_arg(args, "begin"), str_arg(args, "end"))
+                    .await
+            } else {
+                cx.server
+                    .backend
+                    .sync_pipe_graph(
+                        &pipe,
+                        str_arg(args, "begin"),
+                        str_arg(args, "end"),
+                        parents,
+                        children,
+                    )
+                    .await
+            };
             Ok(tuple_value(&res))
         }
         "sync_documents" => {
@@ -421,6 +446,7 @@ pub async fn call(name: &str, args: &Map, cx: &ToolCx<'_>) -> Result<Value, Tool
                 Some(v) if v.truthy() => crate::json::from_core(v),
                 _ => serde_json::Value::Array(Vec::new()),
             };
+            let started = std::time::Instant::now();
             let res = pipe_methods::sync(
                 &conn,
                 &pipe,
@@ -429,10 +455,16 @@ pub async fn call(name: &str, args: &Map, cx: &ToolCx<'_>) -> Result<Value, Tool
                     check_existing: true,
                     force: false,
                     workers: None,
+                    replace: false,
+                    begin: Default::default(),
+                    end: Default::default(),
+                    params: None,
                 },
                 &cx.state.config.pipe_defaults,
             )
             .await;
+            // The pipe's sync status (rc15 C2), like a data post.
+            crate::routes::sync_status::record_server_sync(&conn, &pipe, &res, started);
             Ok(tuple_value(&res))
         }
         "verify_pipe" => {
@@ -469,7 +501,30 @@ pub async fn call(name: &str, args: &Map, cx: &ToolCx<'_>) -> Result<Value, Tool
         }
         "read_sql" => read_sql(args, cx).await,
         "execute_action" => execute_action(args, cx).await,
+        "list_pipelines" => super::pipelines::list_pipelines(args, cx).await,
+        "plan_pipeline" => super::pipelines::plan_pipeline(args, cx).await,
+        "sync_pipeline" => super::pipelines::sync_pipeline(args, cx).await,
+        "list_runs" => super::pipelines::list_runs(args, cx).await,
+        "get_run" => super::pipelines::get_run(args, cx).await,
+        "list_jobs" => super::pipelines::list_jobs(args, cx).await,
+        "get_job_logs" => super::pipelines::get_job_logs(args, cx).await,
+        "list_connectors" => super::pipelines::list_connectors(args, cx).await,
         other => Err(ToolError::other(format!("Unknown tool: '{other}'."))),
+    }
+}
+
+/// A `parents` / `children` argument: `true` (every generation) or a positive number of
+/// generations; `false`, `0` and null are no traversal.
+fn depth_arg(args: &Map, key: &str) -> Result<Option<Value>, ToolError> {
+    match args.get(key) {
+        None | Some(Value::Null) | Some(Value::Bool(false)) => Ok(None),
+        Some(Value::Bool(true)) => Ok(Some(Value::Bool(true))),
+        Some(Value::Int(0)) => Ok(None),
+        Some(Value::Int(n)) if *n > 0 => Ok(Some(Value::Int(*n))),
+        Some(other) => Err(ToolError::type_error(format!(
+            "`{key}` must be true or a positive number of generations, got {}.",
+            other.py_str()
+        ))),
     }
 }
 
@@ -486,10 +541,11 @@ async fn list_pipes(args: &Map, cx: &ToolCx<'_>) -> Result<Value, ToolError> {
         tags: list_arg(args, "tags"),
         params: None,
     };
+    // Internal `mrsm` pipes (saved Pipelines' registrations) are never listed.
     let pipes: Vec<Pipe> = get_pipes(cx, &conn, &query)
         .await?
         .into_iter()
-        .filter(|p| !is_protected(&target(p)))
+        .filter(|p| !is_protected(&target(p)) && p.connector_keys() != "mrsm")
         .collect();
     let b = builtin();
     let (page, next) = paginate(
@@ -661,7 +717,7 @@ async fn get_pipe_stats(args: &Map, cx: &ToolCx<'_>) -> Result<Value, ToolError>
     let begin = bound_arg(cx, &conn, &pipe, args, "begin").await?;
     let end = bound_arg(cx, &conn, &pipe, args, "end").await?;
     let rowcount =
-        pipe_methods::get_rowcount(&conn, &pipe, begin, end, params.clone(), false).await;
+        pipe_methods::get_rowcount(&conn, &pipe, begin, end, params.clone(), false, false).await;
     stats.insert("rowcount".into(), Value::Int(rowcount));
     for (key, newest) in [("newest_sync_time", true), ("oldest_sync_time", false)] {
         let st =
@@ -744,11 +800,12 @@ async fn get_pipe_data(args: &Map, cx: &ToolCx<'_>) -> Result<Value, ToolError> 
 async fn register_pipe(args: &Map, cx: &ToolCx<'_>) -> Result<Value, ToolError> {
     let lk = location_of(args);
     let ik = str_arg(args, "instance_keys");
-    let conn = connector(cx, ik.as_deref())?;
     let ck = args
         .get("connector_keys")
         .map(Value::py_str)
         .unwrap_or_default();
+    refuse_internal_keys(&ck)?;
+    let conn = connector(cx, ik.as_deref())?;
     let mk = args
         .get("metric_key")
         .map(Value::py_str)
@@ -842,6 +899,11 @@ async fn read_sql(args: &Map, cx: &ToolCx<'_>) -> Result<Value, ToolError> {
                 "Refusing to query protected table '{word}'."
             )));
         }
+    }
+    // The scan above skips quoted identifiers and string literals (`"mrsm_users"`, a table named
+    // inside `query_to_xml('...')`): an API caller's SQL may not name an internal table at all.
+    if cx.caller.api {
+        security::refuse_internal_tables(&query).map_err(ToolError::permission)?;
     }
     let ck = args
         .get("connector_keys")

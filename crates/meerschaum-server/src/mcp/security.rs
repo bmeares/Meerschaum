@@ -159,6 +159,131 @@ pub fn words(text: &str) -> Vec<&str> {
     out
 }
 
+/// Functions that run the query text they are given, read tables named in text, export whole
+/// tables, schemas or databases, or read the database's files, so they could reach Meerschaum's
+/// internal tables without naming them: PostgreSQL's XML exports, `ts_stat`, `ts_rewrite`,
+/// `pg_read_file` and `pg_read_binary_file` (and the `dblink` and `tablefunc` extensions'
+/// `dblink` and `crosstab`), Oracle's `DBMS_XMLGEN` / `DBMS_XMLQUERY` (`getxml`, `getxmltype`,
+/// `newcontext`) and XQuery (`xmlquery`, `xmltable`, whose `fn:collection` reads tables by name),
+/// and DuckDB's `query` and `query_table`. Each is refused wherever its name appears, except
+/// `query` (a common column name), which is refused when it is called.
+pub const TEXT_QUERY_FUNCTIONS: &[&str] = &[
+    "crosstab",
+    "cursor_to_xml",
+    "cursor_to_xmlschema",
+    "database_to_xml",
+    "database_to_xml_and_xmlschema",
+    "database_to_xmlschema",
+    "dblink",
+    "dblink_exec",
+    "dblink_open",
+    "dblink_send_query",
+    "getxml",
+    "getxmltype",
+    "newcontext",
+    "pg_read_binary_file",
+    "pg_read_file",
+    "query",
+    "query_table",
+    "query_to_xml",
+    "query_to_xml_and_xmlschema",
+    "query_to_xmlschema",
+    "schema_to_xml",
+    "schema_to_xml_and_xmlschema",
+    "schema_to_xmlschema",
+    "table_to_xml",
+    "table_to_xml_and_xmlschema",
+    "table_to_xmlschema",
+    "ts_rewrite",
+    "ts_stat",
+    "xmlquery",
+    "xmltable",
+];
+
+/// Whether `rest`, the text after a name, calls it: `(` after the closing quote of a quoted name,
+/// whitespace and comments (block comments nest, as in PostgreSQL and DuckDB).
+fn opens_call(rest: &str) -> bool {
+    let mut rest = rest.strip_prefix(['"', '`', ']']).unwrap_or(rest);
+    loop {
+        rest = rest.trim_start();
+        if let Some(after) = rest.strip_prefix("--") {
+            rest = after.split_once('\n').map_or("", |(_, next)| next);
+        } else if rest.starts_with("/*") {
+            let bytes = rest.as_bytes();
+            let (mut depth, mut j, mut end) = (0usize, 0usize, rest.len());
+            while j + 1 < bytes.len() {
+                match &bytes[j..j + 2] {
+                    b"/*" => {
+                        depth += 1;
+                        j += 2;
+                    }
+                    b"*/" => {
+                        depth -= 1;
+                        j += 2;
+                        if depth == 0 {
+                            end = j;
+                            break;
+                        }
+                    }
+                    _ => j += 1,
+                }
+            }
+            rest = &rest[end..];
+        } else {
+            return rest.starts_with('(');
+        }
+    }
+}
+
+/// The refusal of an API caller's SQL (MCP's `read_sql` over HTTP, a native plugin's
+/// `read_sql` / `exec_sql` host calls) that could reach Meerschaum's internal tables: a name of
+/// one anywhere in the text, quoted or in a string literal (the protected instance tables,
+/// `mrsm_users`, `mrsm_tokens`, ..., every other `mrsm_*` table, which hold the internal `mrsm`
+/// pipes, and the `_mrsm_internal` schema that holds them on schema flavors), a function of
+/// [`TEXT_QUERY_FUNCTIONS`], SQLite's `sqlite_dbpage`, or a Unicode-escaped name (`U&"..."`).
+/// [`strip_sql_noise`] drops quoted identifiers and string literals before v4's own scan, so
+/// that scan alone misses `"mrsm_users"`. Like it, this is a keyword scan, not a parser: give
+/// untrusted callers a read-only database role.
+pub fn refuse_internal_tables(query: &str) -> Result<(), String> {
+    let text = query.to_ascii_lowercase();
+    if text.contains("u&\"") || text.contains("u&'") {
+        return Err(
+            "Refusing SQL with Unicode-escaped names (`U&\"...\"`) for an API request.".into(),
+        );
+    }
+    let protected = &builtin().protected_tables;
+    let bytes = text.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if !(bytes[i].is_ascii_alphabetic() || bytes[i] == b'_') {
+            i += 1;
+            continue;
+        }
+        let start = i;
+        while i < bytes.len() && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
+            i += 1;
+        }
+        let word = &text[start..i];
+        if word.starts_with("mrsm_")
+            || word.starts_with("_mrsm_")
+            || word == "sqlite_dbpage"
+            || protected.iter().any(|t| t == word)
+        {
+            return Err(format!(
+                "Refusing SQL that names Meerschaum's internal table '{}' for an API request.",
+                &query[start..i]
+            ));
+        }
+        if TEXT_QUERY_FUNCTIONS.contains(&word) && (word != "query" || opens_call(&text[i..])) {
+            return Err(format!(
+                "Refusing SQL that calls `{word}()` for an API request: it reads tables it does \
+                 not name."
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// One identifier part: bare, `"..."`, `` `...` `` or `[...]`.
 fn identifier_part(s: &str) -> Option<&str> {
     let first = s.chars().next()?;
@@ -321,6 +446,40 @@ mod tests {
         assert!(is_read_only_query("SELECT 'abc").is_err());
         assert!(is_read_only_query("SELECT xp_cmdshell").is_err());
         assert!(is_read_only_query("   ").is_err());
+    }
+
+    #[test]
+    fn internal_tables_are_refused_however_a_query_reaches_them() {
+        for query in [
+            "SELECT * FROM \"mrsm_users\"",
+            "SELECT query_to_xml('select * from ' || 'mrsm' || '_users', true, true, '')",
+            // Between a function's name and its arguments: comments (PostgreSQL nests them) and
+            // the closing quote of a quoted name.
+            "SELECT query_to_xml/**/(E'select * from mrsm\\x5fusers', true, true, '')",
+            "SELECT query_to_xml /* a /* nested */ b */ ('select 1', true, true, '')",
+            "SELECT \"query_to_xml\"(E'select * from mrsm\\x5fusers', true, true, '')",
+            "SELECT * FROM query -- c\n ('select * from ' || 'mrsm' || '_users')",
+            "SELECT * FROM \"query\" ('select 1')",
+            // Other functions that run the query text they are given, or read files.
+            "SELECT * FROM ts_stat(E'select to_tsvector(password_hash) from mrsm\\x5fusers')",
+            "SELECT ts_rewrite('a'::tsquery, 'select ' || 'x')",
+            "SELECT * FROM dblink('dbname=x', 'select 1') AS t(a int)",
+            "SELECT * FROM crosstab('select 1')",
+            "SELECT DBMS_XMLGEN.GETXML('SELECT * FROM ' || 'MRSM' || '_USERS') FROM DUAL",
+            "SELECT XMLQUERY('fn:collection(\"oradb:/S/T\")' RETURNING CONTENT) FROM DUAL",
+            "SELECT pg_read_binary_file('base/1/2')",
+        ] {
+            assert!(refuse_internal_tables(query).is_err(), "{query}");
+        }
+        for query in [
+            "SELECT 1",
+            "SELECT 'users' AS name, query FROM t",
+            "SELECT query, count(*) FROM logs GROUP BY query",
+            "SELECT \"query\" FROM t",
+            "SELECT count(query) FROM t WHERE query = 'x'",
+        ] {
+            assert!(refuse_internal_tables(query).is_ok(), "{query}");
+        }
     }
 
     #[test]

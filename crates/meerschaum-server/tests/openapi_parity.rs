@@ -10,6 +10,15 @@ use serde_json::Value as Json;
 
 const FIXTURE: &str = include_str!("fixtures/openapi.json");
 
+/// Query parameters v5 adds to v4 routes, by `(method, path)`: they are compared apart from the
+/// recorded v4 document (which cannot list them) and must be optional.
+const V5_PARAMETERS: &[(&str, &str, &[&str])] = &[(
+    "get",
+    "/pipes/{connector_keys}/{metric_key}/{location_key}/rowcount",
+    // `estimate=true` (the row estimate) and `params` as a query string (5.0.0rc15).
+    &["estimate", "params"],
+)];
+
 fn schema_type(s: &Json) -> String {
     let mut types = BTreeSet::new();
     if let Some(items) = s.get("anyOf").and_then(Json::as_array) {
@@ -73,6 +82,19 @@ fn rust_document_covers_python_document() {
                 })
                 .collect();
             params.sort_by_key(|p| (p["in"].to_string(), p["name"].to_string()));
+            let added: &[&str] = V5_PARAMETERS
+                .iter()
+                .find(|(m, p, _)| *m == method && *p == path)
+                .map(|(_, _, names)| *names)
+                .unwrap_or(&[]);
+            params.retain(|p| {
+                let v5 = added.contains(&p["name"].as_str().unwrap_or(""));
+                if v5 {
+                    assert_eq!(p["in"], "query", "{method} {path}: {p}");
+                    assert_eq!(p["required"], false, "{method} {path}: {p}");
+                }
+                !v5
+            });
             if Json::Array(params.clone()) != py_op["parameters"] {
                 problems.push(format!(
                     "{method} {path}: parameters\n   rust: {}\n python: {}",

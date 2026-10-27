@@ -49,6 +49,19 @@ pub struct Operation {
     pub curr_user: CurrUser,
     /// The summary (FastAPI derives it from the function name).
     pub summary: &'static str,
+    /// What the route does (the v5 routes; v4's have none, as FastAPI derived none).
+    pub description: Option<&'static str>,
+    /// The OAuth2 scopes the route requires (listed as its `security`; the v5 routes).
+    pub scopes: Vec<&'static str>,
+}
+
+impl Operation {
+    /// This operation with a description and the scopes it requires.
+    pub fn described(mut self, description: &'static str, scopes: &[&'static str]) -> Operation {
+        self.description = Some(description);
+        self.scopes = scopes.to_vec();
+        self
+    }
 }
 
 const IK: Param = ("instance_keys", "query", false, "null|string");
@@ -84,6 +97,8 @@ fn op(
         body: body.map(|(c, r)| (c.to_vec(), r)),
         curr_user,
         summary,
+        description: None,
+        scopes: Vec::new(),
     }
 }
 
@@ -158,6 +173,14 @@ pub fn operations() -> Vec<Operation> {
             &[],
             Some((&[JSON_BODY], true)),
             Never,
+        )
+        .described(
+            "Run an action line (`{\"sysargs\": [...]}`) as a temporary background job owned by \
+             the caller. Answers `{\"success\", \"message\", \"job\", \"sysargs\", \"stream\", \
+             \"logs\"}`: `stream` (`/logs/{job}/stream`, Server-Sent Events) is `null` when this \
+             server does not serve it, and `logs` (`/logs/{job}`) when the `jobs` routes are \
+             off. Non-administrators run only what the console offers.",
+            &["actions:execute", "jobs:execute", "jobs:write"],
         ),
         op(
             "get",
@@ -168,6 +191,11 @@ pub fn operations() -> Vec<Operation> {
             &[],
             None,
             UnlessPrivate,
+        )
+        .described(
+            "What the console offers and what non-administrators may run: `{\"success\", \
+             \"message\", \"omit_actions\", \"omit_flags\", ...}`.",
+            &[],
         ),
         op(
             "get",
@@ -538,8 +566,21 @@ pub fn operations() -> Vec<Operation> {
             "/rowcount",
             DATA,
             "Get Pipe Rowcount",
-            &[BEGIN, END, ("remote", "query", false, "boolean")],
+            &[
+                BEGIN,
+                END,
+                ("remote", "query", false, "boolean"),
+                ("estimate", "query", false, "boolean"),
+                PARAMS,
+            ],
             Some((&[JSON_BODY], false)),
+        )
+        .described(
+            "The number of rows (optionally in `[begin, end)` and matching `params`, a JSON \
+             object as the body or the `params` query string). With `estimate=true`, the \
+             database's row estimate (catalog statistics, no table scan) where it keeps one, else \
+             the exact count.",
+            &["pipes:read"],
         ),
         pipe_op(
             "get",
@@ -850,6 +891,11 @@ pub fn operations() -> Vec<Operation> {
             &[],
             Some((&[JSON_BODY], true)),
             Never,
+        )
+        .described(
+            "Whether the caller may run an action line (`{\"sysargs\": [...]}`) in the web \
+             terminal: `200` or `403` with the reason.",
+            &["actions:execute", "jobs:execute", "jobs:write"],
         ),
         op(
             "get",
@@ -860,6 +906,10 @@ pub fn operations() -> Vec<Operation> {
             &[],
             None,
             Never,
+        )
+        .described(
+            "The summaries of finished temporary executions the caller may see (`runs`).",
+            &["jobs:read"],
         ),
         op(
             "post",
@@ -870,16 +920,25 @@ pub fn operations() -> Vec<Operation> {
             &[NAME],
             None,
             Never,
+        )
+        .described(
+            "Keep a finished temporary execution as a persistent job (`409` while it runs).",
+            &["jobs:write"],
         ),
         op(
             "get",
             "/pipelines",
             "pipelines",
-            &["Pipelines: Metadata"],
-            "List Registered Pipeline Definitions",
+            &["Pipelines"],
+            "List Saved Pipelines",
             &[IK],
             None,
             Never,
+        )
+        .described(
+            "The saved Pipelines of the instance: `{\"success\", \"message\", \"pipelines\": \
+             [<definition>, ...]}`.",
+            &["pipes:read"],
         ),
         op(
             "get",
@@ -895,52 +954,163 @@ pub fn operations() -> Vec<Operation> {
             ],
             None,
             Never,
+        )
+        .described(
+            "The registration keys of the saved Pipelines (`keys`).",
+            &["pipes:read"],
+        ),
+        op(
+            "get",
+            "/pipelines/{name}",
+            "pipelines",
+            &["Pipelines"],
+            "Get Pipeline",
+            &[NAME, IK],
+            None,
+            Never,
+        )
+        .described(
+            "One saved Pipeline: `pipeline` (its definition), `members` (each target pipe with \
+             whether it is registered) and `last_run` (its latest run, or `null`). `404` when it \
+             is not registered.",
+            &["pipes:read"],
+        ),
+        op(
+            "post",
+            "/pipelines/{name}/plan",
+            "pipelines",
+            &["Pipelines"],
+            "Plan Pipeline",
+            &[NAME, IK],
+            Some((&[JSON_BODY], false)),
+            Never,
+        )
+        .described(
+            "What a run of the saved Pipeline would do, without moving data or registering \
+             anything: `plan` (each pipe's action, reason and window), `text` (the plan table) \
+             and `warnings`. The optional body bounds the window: `{\"begin\": ..., \"end\": \
+             ...}` (ISO datetimes or integers). `400` when the Pipeline cannot be planned as it \
+             is.",
+            &["pipes:read"],
+        ),
+        op(
+            "post",
+            "/pipelines/{name}/sync",
+            "pipelines",
+            &["Pipelines"],
+            "Sync Pipeline",
+            &[NAME, IK],
+            Some((&[JSON_BODY], false)),
+            Never,
+        )
+        .described(
+            "Start a run of the saved Pipeline as a background job (`sync pipelines NAME`, like \
+             the console): `{\"success\", \"message\", \"run_id\", \"job\", \"stream\", \
+             \"log_stream\", \"logs\"}`, where `stream` follows the run's events \
+             (`/engine/runs/{run_id}/events/stream`). The optional body takes `begin`, `end` and \
+             `run_id`. Non-administrators need the server to let them run actions and access to \
+             every instance the Pipeline touches.",
+            &["pipes:write", "jobs:execute"],
         ),
     ]);
-    for (method, suffix, summary, body) in [
-        ("post", "register", "Register Pipeline Metadata", true),
-        ("patch", "edit", "Edit Raw Pipeline Metadata", true),
-        ("delete", "delete", "Delete Pipeline Metadata", false),
-        ("get", "id", "Get Pipeline Registration Id", false),
+    for (method, suffix, summary, body, description, scopes) in [
+        (
+            "post",
+            "register",
+            "Register Pipeline Metadata",
+            true,
+            "Register a Pipeline definition (`{\"pipeline\": {...}}`, the raw parameters the CLI \
+             and SDK write). `409` when it is registered.",
+            &["pipes:write"][..],
+        ),
+        (
+            "patch",
+            "edit",
+            "Edit Raw Pipeline Metadata",
+            true,
+            "Replace (or with `patch=true` merge) a Pipeline definition. `404` when it is not \
+             registered.",
+            &["pipes:write"][..],
+        ),
+        (
+            "delete",
+            "delete",
+            "Delete Pipeline Metadata",
+            false,
+            "Delete a Pipeline definition (its pipes and their data stay). `409` while scheduled \
+             jobs run it.",
+            &["pipes:delete"][..],
+        ),
+        (
+            "get",
+            "id",
+            "Get Pipeline Registration Id",
+            false,
+            "The registration's ID (`id`). `404` when it is not registered.",
+            &["pipes:read"][..],
+        ),
         (
             "get",
             "attributes",
             "Get Raw Pipeline Registration Attributes",
             false,
+            "The registration's raw attributes (`attributes`), with the scheduled jobs that run \
+             it. `404` when it is not registered.",
+            &["pipes:read"][..],
         ),
     ] {
         let mut params = vec![NAME, IK];
         if suffix == "edit" {
             params.push(("patch", "query", false, "boolean"));
         }
-        ops.push(op(
-            method,
-            &format!("/pipelines/{{name}}/{suffix}"),
-            "pipelines",
-            &["Pipelines: Metadata"],
-            summary,
-            &params,
-            body.then_some((&[JSON_BODY][..], true)),
-            Never,
-        ));
+        ops.push(
+            op(
+                method,
+                &format!("/pipelines/{{name}}/{suffix}"),
+                "pipelines",
+                &["Pipelines: Metadata"],
+                summary,
+                &params,
+                body.then_some((&[JSON_BODY][..], true)),
+                Never,
+            )
+            .described(description, scopes),
+        );
     }
     for (method, summary) in [
         ("post", "Acquire Pipeline Metadata Lease"),
         ("delete", "Release Pipeline Metadata Lease"),
     ] {
-        ops.push(op(
-            method,
-            "/pipelines/leases",
-            "pipelines",
-            &["Pipelines: Metadata"],
-            summary,
-            &[IK],
-            Some((&[JSON_BODY], true)),
-            Never,
-        ));
+        ops.push(
+            op(
+                method,
+                "/pipelines/leases",
+                "pipelines",
+                &["Pipelines: Metadata"],
+                summary,
+                &[IK],
+                Some((&[JSON_BODY], true)),
+                Never,
+            )
+            .described(
+                "Acquire or release the lease of a Pipeline metadata edit. `409` when another \
+                 holder has it.",
+                &["pipes:write"],
+            ),
+        );
     }
+    const READ: &[&str] = &["pipes:read"];
+    const WRITE: &[&str] = &["pipes:write"];
     let engine = [
-        ("post", "/engine/ledger", "Post Engine Ledger", vec![], true),
+        (
+            "post",
+            "/engine/ledger",
+            "Post Engine Ledger",
+            vec![],
+            true,
+            "Append dirty-range ledger entries.",
+            WRITE,
+        ),
         (
             "get",
             "/engine/ledger",
@@ -950,26 +1120,77 @@ pub fn operations() -> Vec<Operation> {
                 ("after_seq", "query", false, "integer|null"),
             ],
             false,
+            "The ledger entries of a child's parents after a sequence number (`entries`).",
+            READ,
         ),
-        ("put", "/engine/cursors", "Put Engine Cursors", vec![], true),
+        (
+            "put",
+            "/engine/cursors",
+            "Put Engine Cursors",
+            vec![],
+            true,
+            "Upsert edge cursors.",
+            WRITE,
+        ),
         (
             "get",
             "/engine/state",
             "Get Engine State",
             vec![("pipe_ref", "query", true, "string")],
             false,
+            "A pipe's engine state (`state`); `404` when it has none.",
+            READ,
         ),
-        ("put", "/engine/state", "Put Engine State", vec![], true),
-        ("post", "/engine/runs", "Post Engine Runs", vec![], true),
+        (
+            "put",
+            "/engine/state",
+            "Put Engine State",
+            vec![],
+            true,
+            "Upsert pipes' engine state.",
+            WRITE,
+        ),
+        (
+            "post",
+            "/engine/runs",
+            "Post Engine Runs",
+            vec![],
+            true,
+            "Record runs and their per-pipe results.",
+            WRITE,
+        ),
         (
             "get",
             "/engine/runs",
             "Get Engine Runs",
             vec![
                 ("run_id", "query", false, "null|string"),
+                ("pipeline", "query", false, "null|string"),
+                ("pipe", "query", false, "null|string"),
+                ("status", "query", false, "null|string"),
+                ("since", "query", false, "null|string"),
                 ("limit", "query", false, "integer|null"),
+                ("instance_keys", "query", false, "null|string"),
             ],
             false,
+            "Runs, newest first (`runs`): filter by `pipeline` (a saved Pipeline's name), `pipe` \
+             (a pipe reference `instance|connector|metric|location`), `status` (`success`, \
+             `failed` or `running`), `since` (an ISO datetime) and `limit` (default 100, at most \
+             1000); with `run_id`, that run and its pipes' rows. `instance_keys` names the \
+             instance that keeps the history.",
+            READ,
+        ),
+        (
+            "get",
+            "/engine/runs/{run_id}",
+            "Get Engine Run",
+            vec![
+                ("run_id", "path", true, "string"),
+                ("instance_keys", "query", false, "null|string"),
+            ],
+            false,
+            "One run (`run`) with each pipe's result (`nodes`); `404` when it is not found.",
+            READ,
         ),
         (
             "get",
@@ -982,14 +1203,26 @@ pub fn operations() -> Vec<Operation> {
                 ("instance_keys", "query", false, "null|string"),
             ],
             false,
+            "Follow a run's events as Server-Sent Events until it finishes.",
+            READ,
         ),
-        ("post", "/engine/events", "Post Engine Events", vec![], true),
+        (
+            "post",
+            "/engine/events",
+            "Post Engine Events",
+            vec![],
+            true,
+            "Append a batch of run events.",
+            WRITE,
+        ),
         (
             "post",
             "/engine/leases",
             "Acquire Engine Lease",
             vec![],
             true,
+            "Acquire or extend a pipe's lease; `409` when another holder has it.",
+            WRITE,
         ),
         (
             "delete",
@@ -997,6 +1230,8 @@ pub fn operations() -> Vec<Operation> {
             "Release Engine Lease",
             vec![],
             true,
+            "Release a pipe's lease; `409` when the holder does not hold it.",
+            WRITE,
         ),
         (
             "post",
@@ -1004,6 +1239,8 @@ pub fn operations() -> Vec<Operation> {
             "Read Engine State Pipe",
             vec![("metric", "path", true, "string")],
             true,
+            "Rows of an engine state pipe (`rows`).",
+            READ,
         ),
         (
             "post",
@@ -1011,6 +1248,8 @@ pub fn operations() -> Vec<Operation> {
             "Write Engine State Pipe",
             vec![("metric", "path", true, "string")],
             true,
+            "Append (or upsert) rows of an engine state pipe.",
+            WRITE,
         ),
         (
             "post",
@@ -1018,6 +1257,8 @@ pub fn operations() -> Vec<Operation> {
             "Clear Engine State Pipe",
             vec![("metric", "path", true, "string")],
             true,
+            "Delete rows of an engine state pipe, selected by `params` (or `end`).",
+            WRITE,
         ),
         (
             "get",
@@ -1025,19 +1266,46 @@ pub fn operations() -> Vec<Operation> {
             "Engine State Pipe Exists",
             vec![("metric", "path", true, "string")],
             false,
+            "Whether an engine state pipe's table exists (`exists`).",
+            READ,
+        ),
+        (
+            "get",
+            "/engine/sync-status",
+            "Get Sync Statuses",
+            vec![
+                ("pipe_ref", "query", false, "null|string"),
+                ("instance_keys", "query", false, "null|string"),
+            ],
+            false,
+            "The latest recorded sync of every pipe on the instance (`statuses`), or of the pipe \
+             `pipe_ref` names.",
+            READ,
+        ),
+        (
+            "post",
+            "/engine/sync-status",
+            "Record Sync Status",
+            vec![("instance_keys", "query", false, "null|string")],
+            true,
+            "Merge a client's sync outcomes of one pipe into its status (`status`).",
+            WRITE,
         ),
     ];
-    for (method, path, summary, params, body) in engine {
-        ops.push(op(
-            method,
-            path,
-            "engine",
-            &["Engine"],
-            summary,
-            &params,
-            body.then_some((&[JSON_BODY][..], true)),
-            Never,
-        ));
+    for (method, path, summary, params, body, description, scopes) in engine {
+        ops.push(
+            op(
+                method,
+                path,
+                "engine",
+                &["Engine"],
+                summary,
+                &params,
+                body.then_some((&[JSON_BODY][..], true)),
+                Never,
+            )
+            .described(description, scopes),
+        );
     }
     ops
 }
@@ -1095,6 +1363,12 @@ pub fn is_served(op: &Operation, cfg: &ServerConfig) -> bool {
             .iter()
             .any(|pattern| crate::config::fnmatch("login", pattern)),
         "docs" => true,
+        // The public preset keeps only `/healthcheck` and `/favicon.ico` of `misc`.
+        "misc" => {
+            cfg.route_group_is_allowed("misc")
+                && (cfg.serves_full_misc()
+                    || matches!(op.path.as_str(), "/healthcheck" | "/favicon.ico"))
+        }
         g => cfg.route_group_is_allowed(g),
     }
 }
@@ -1212,6 +1486,17 @@ pub fn document(cfg: &ServerConfig) -> OpenApi {
             );
         if !op.tags.is_empty() {
             b = b.tags(Some(op.tags.clone()));
+        }
+        if let Some(description) = op.description {
+            b = b.description(Some(description));
+        }
+        if !op.scopes.is_empty() {
+            b = b.securities(Some(["OAuth2PasswordBearer", "APIKey"].map(|scheme| {
+                utoipa::openapi::security::SecurityRequirement::new(
+                    scheme,
+                    op.scopes.iter().copied(),
+                )
+            })));
         }
         for (name, loc, required, ty) in effective_params(op, cfg) {
             b = b.parameter(

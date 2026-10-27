@@ -22,8 +22,42 @@ Server-Sent Events (`event:` = kind, `id:` = `seq`), resumable with `Last-Event-
 (an `api:` engine's `/engine/pipes/engine_events/write` batches, and through
 `EngineStreams::publish_json` the engine runs of the server process, which `mrsm start api` forwards
 with `meerschaum_engine::add_process_event_sink`) arrive live; otherwise the stream tails the
-persisted rows of the run's instance. It requires `pipes:write`; `meerschaum-web` adds
-console-session (cookie) authentication through `EngineStreams::set_browser_auth`.
+persisted rows of the run's instance. It requires `pipes:read`; `meerschaum-web` adds
+console-session (cookie) authentication through `EngineStreams::set_browser_auth`. A run whose
+history cannot be read is an error, never "not found".
+
+The v5-only routes (`/pipelines`, `/pipelines/*`, `/engine/*`, `/execute*`) answer
+`{"success": bool, "message": str, ...}` with real status codes (`envelope`): handlers build their
+bodies with `envelope::ok`, and the `envelope::v5_errors` middleware rewrites every error of those
+paths (a handler's `{"detail": ...}`, validation errors as `400`, the router's `404` / `405`, the
+rate limiter's `429`) into that shape; a `500` names what failed only to administrators. The saved
+Pipelines' routes (`routes::pipelines`) include one Pipeline (`GET /pipelines/{name}`), its plan
+(`POST .../plan`, through `backends::PipelinesBackend`, which the CLI implements with the engine)
+and a background run (`POST .../sync`, a temporary execution job). `GET /engine/runs` takes
+`pipeline`, `pipe`, `status`, `since` and `limit` (`backends::RunsFilter`, pushed into the store's
+reads), and `GET /engine/runs/{run_id}` returns one run with its nodes.
+
+Authorization fails closed: a scope read that fails (`get_user_attributes`, `get_token_scopes`) is
+a `503`, never "every scope" (the instance connectors return the read's error: SQL, Valkey and
+`api:` alike). `api:permissions:rate_limits` takes `{requests, seconds}` and
+`{max, window_seconds}`, route-group globs and path prefixes (`/my-plugin`), and reports unusable
+entries at startup (`config::parse_rate_limits`). `api:permissions:preset: public` (`--public`)
+serves only `/login`, `/healthcheck`, `/version`, plugin routes and plugin pages, plus the groups the
+allowlist names explicitly.
+
+Every decision about a request that may reach the API host (its route group, its path-prefix rate
+limit, `routes::is_proxyable`, the console paths, the v5 error shape) is made on
+`routes::decoded_path`, the path percent-decoded once as uvicorn decodes it: the server's own
+routes match the path as sent, but the host serves `/%64ocs` as `/docs`.
+
+The web terminal's tmux sessions run on a dedicated tmux server (`webterm::tmux_socket_path`, a
+`0700` directory under the root) started with Meerschaum's `tmux.conf` (`webterm::TMUX_CONF`) or
+`api:webterm:tmux:config`; `webterm::stop_owned_servers` stops the servers this process started.
+
+The MCP registry is v4's (`mcp/registry.json`, generated) with v5's additions (`mcp::v5`: the
+Pipelines, runs, jobs and connectors tools, `sync_pipe`'s `parents` / `children`, bounds typed as
+strings or integers, the primer); `docs/zensical/reference/mcp/tools.md` is rendered from it
+(`mcp::docs::render_tool_reference`, checked by `tests/mcp_docs.rs`).
 
 Native (Rust) plugins' routes are mounted by `native::native_router` (credentials, declared
 scopes, Starlette-style path parameters with converters, shadowing refusal including the

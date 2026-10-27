@@ -26,7 +26,8 @@ pub async fn read(name: &str, vars: &Map, cx: &ToolCx<'_>) -> Result<String, Too
             let conn = cx.state.instance();
             let pipes = get_pipes(cx, &conn, &PipesKeysQuery::default()).await?;
             let mut out = Vec::with_capacity(pipes.len());
-            for p in &pipes {
+            // Internal `mrsm` pipes (saved Pipelines' registrations) are never listed.
+            for p in pipes.iter().filter(|p| p.connector_keys() != "mrsm") {
                 out.push(pipe_summary(&conn, p).await);
             }
             Ok(dumps_indent(&Value::List(out)))

@@ -198,8 +198,183 @@ impl JobsBackend for NoJobs {
 }
 
 // ------------------------------------------------------------------------------------------------
+// Saved Pipelines
+// ------------------------------------------------------------------------------------------------
+
+/// The options of a plan (`POST /pipelines/{name}/plan`, MCP `plan_pipeline`): the bounds of the
+/// sync window, as the CLI's `--begin` / `--end` take them.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PlanOptions {
+    /// `--begin`.
+    pub begin: Option<String>,
+    /// `--end`.
+    pub end: Option<String>,
+}
+
+/// Why a plan could not be made.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PlanError {
+    /// This server cannot plan (no Syncing Engine behind it): `501`.
+    Unavailable,
+    /// The Pipeline cannot be planned as it is (a missing member, a cycle, a bad bound): `400`.
+    Invalid(String),
+    /// The planner or an instance failed: `500`.
+    Failed(String),
+}
+
+impl std::fmt::Display for PlanError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PlanError::Unavailable => {
+                f.write_str("This server cannot plan Pipelines (it runs no Syncing Engine).")
+            }
+            PlanError::Invalid(m) | PlanError::Failed(m) => f.write_str(m),
+        }
+    }
+}
+
+/// Plans of saved Pipelines (`mrsm plan pipelines NAME`) for `POST /pipelines/{name}/plan` and
+/// the MCP `plan_pipeline` tool. The CLI implements it with the Syncing Engine; [`NoPipelines`]
+/// is a server without one.
+#[async_trait]
+pub trait PipelinesBackend: Send + Sync {
+    /// Plan the saved Pipeline `name` of the registry instance `registry`, moving no data and
+    /// registering nothing: `{"plan": <Plan>, "text": <plan table>, "warnings": [...]}`.
+    async fn plan(
+        &self,
+        name: &str,
+        registry: &str,
+        options: &PlanOptions,
+    ) -> Result<Json, PlanError>;
+}
+
+/// No Syncing Engine: every plan is [`PlanError::Unavailable`].
+#[derive(Debug, Default, Clone)]
+pub struct NoPipelines;
+
+#[async_trait]
+impl PipelinesBackend for NoPipelines {
+    async fn plan(&self, _: &str, _: &str, _: &PlanOptions) -> Result<Json, PlanError> {
+        Err(PlanError::Unavailable)
+    }
+}
+
+// ------------------------------------------------------------------------------------------------
 // Engine state (§5.8)
 // ------------------------------------------------------------------------------------------------
+
+/// Which runs `GET /engine/runs` (and the MCP `list_runs` tool) return. Every filter is
+/// optional; the stores push them into their reads where they can.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct RunsFilter {
+    /// Exactly this run (its node rows come back too).
+    pub run_id: Option<String>,
+    /// Only runs of the saved Pipeline with this name (the Pipeline definitions a run recorded,
+    /// or, for older runs, a run ID named after it).
+    pub pipeline: Option<String>,
+    /// Only runs that targeted or synced this pipe (`instance|connector|metric|location`).
+    pub pipe_ref: Option<String>,
+    /// Only runs with this status: `success`, `failed` or `running`.
+    pub status: Option<RunStatusFilter>,
+    /// Only runs started at or after this time.
+    pub since: Option<DateTime<Utc>>,
+    /// At most this many runs (newest first).
+    pub limit: Option<usize>,
+}
+
+/// The `status` filter of [`RunsFilter`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RunStatusFilter {
+    /// Finished successfully.
+    Success,
+    /// Finished with a failure.
+    Failed,
+    /// Not finished.
+    Running,
+}
+
+impl RunStatusFilter {
+    /// Parse `success` / `failed` / `running` (and `succeeded`, `failure`).
+    pub fn parse(text: &str) -> Option<RunStatusFilter> {
+        match text.trim().to_lowercase().as_str() {
+            "success" | "succeeded" | "successful" => Some(RunStatusFilter::Success),
+            "failed" | "failure" | "fail" => Some(RunStatusFilter::Failed),
+            "running" => Some(RunStatusFilter::Running),
+            _ => None,
+        }
+    }
+
+    /// The `status` of a run record this filter keeps.
+    pub fn name(&self) -> &'static str {
+        match self {
+            RunStatusFilter::Success => "success",
+            RunStatusFilter::Failed => "failed",
+            RunStatusFilter::Running => "running",
+        }
+    }
+}
+
+impl RunsFilter {
+    /// Whether a run record (`pipe_ref: None`) passes the filters that do not need its nodes.
+    pub fn keeps_run(&self, run: &RunRecord) -> bool {
+        self.run_id.as_ref().is_none_or(|id| *id == run.run_id)
+            && self.since.is_none_or(|since| run.started >= since)
+            && self.status.is_none_or(|s| s.name() == run.status)
+            && self
+                .pipeline
+                .as_ref()
+                .is_none_or(|name| run_belongs_to_pipeline(run, name))
+    }
+}
+
+/// Whether a run record belongs to the saved Pipeline `name`: one of the Pipeline definitions it
+/// recorded (`selection.pipeline_definitions`) is named so, or (runs without definitions) its run
+/// ID was generated from the name (`<name>-<timestamp>-<8 hex>`).
+pub fn run_belongs_to_pipeline(run: &RunRecord, name: &str) -> bool {
+    let definitions = run
+        .extra
+        .get("selection")
+        .and_then(|s| match s {
+            meerschaum_core::Value::Str(text) => serde_json::from_str::<Json>(text).ok(),
+            other => serde_json::to_value(other).ok(),
+        })
+        .and_then(|selection| selection.get("pipeline_definitions").cloned())
+        .and_then(|d| d.as_array().cloned())
+        .unwrap_or_default();
+    if definitions.is_empty() {
+        return run_id_names_pipeline(&run.run_id, name);
+    }
+    definitions
+        .iter()
+        .any(|definition| definition["name"].as_str() == Some(name))
+}
+
+/// The pipe refs a run record targeted (`targets`: a JSON list, or its text).
+pub fn run_targets(run: &RunRecord) -> Vec<String> {
+    match run.extra.get("targets") {
+        Some(meerschaum_core::Value::List(items)) => {
+            items.iter().map(meerschaum_core::Value::py_str).collect()
+        }
+        Some(meerschaum_core::Value::Str(text)) => {
+            serde_json::from_str::<Vec<String>>(text).unwrap_or_default()
+        }
+        _ => Vec::new(),
+    }
+}
+
+/// Whether `run_id` was generated for the Pipeline `name` (`<name>-<%Y-%m-%dT%H-%M-%S%.6fZ>-<8
+/// hex>`, `meerschaum_engine::runs::new_named_run_id`).
+fn run_id_names_pipeline(run_id: &str, name: &str) -> bool {
+    let Some(rest) = run_id.strip_prefix(&format!("{name}-")) else {
+        return false;
+    };
+    let Some((timestamp, suffix)) = rest.rsplit_once('-') else {
+        return false;
+    };
+    suffix.len() == 8
+        && suffix.bytes().all(|b| b.is_ascii_hexdigit())
+        && chrono::NaiveDateTime::parse_from_str(timestamp, "%Y-%m-%dT%H-%M-%S%.6fZ").is_ok()
+}
 
 /// Engine state for the `/engine/*` routes. The shapes are `meerschaum_connector_api::models`.
 #[async_trait]
@@ -216,8 +391,10 @@ pub trait EngineBackend: Send + Sync {
     async fn put_states(&self, states: Vec<EngineState>) -> SuccessTuple;
     /// `POST /engine/runs`.
     async fn record_runs(&self, runs: Vec<RunRecord>) -> SuccessTuple;
-    /// `GET /engine/runs?run_id=&limit=` (newest first).
-    async fn get_runs(&self, run_id: Option<&str>, limit: Option<i64>) -> Vec<RunRecord>;
+    /// `GET /engine/runs` (newest first): the runs passing `filter`, followed by the node rows of
+    /// `filter.run_id` when one is given. A store that cannot be read is an error, never "no
+    /// runs".
+    async fn get_runs(&self, filter: &RunsFilter) -> Result<Vec<RunRecord>, EngineStoreError>;
     /// `POST /engine/events`.
     async fn record_events(&self, events: Vec<EngineEvent>) -> SuccessTuple;
     /// `POST /engine/leases`: acquire or extend.
@@ -373,19 +550,46 @@ impl EngineBackend for MemoryEngine {
         SuccessTuple::ok(format!("Recorded {n} runs."))
     }
 
-    async fn get_runs(&self, run_id: Option<&str>, limit: Option<i64>) -> Vec<RunRecord> {
+    async fn get_runs(&self, filter: &RunsFilter) -> Result<Vec<RunRecord>, EngineStoreError> {
         let data = self.lock();
+        // The runs that targeted or synced the pipe: a node row of it, or a target.
+        let with_pipe: Option<std::collections::HashSet<&str>> =
+            filter.pipe_ref.as_ref().map(|r| {
+                data.runs
+                    .iter()
+                    .filter(|run| {
+                        run.pipe_ref.as_deref() == Some(r.as_str())
+                            || run_targets(run).iter().any(|t| t == r)
+                    })
+                    .map(|run| run.run_id.as_str())
+                    .collect()
+            });
+        // A run's own record, or (older stores recorded only nodes) its rows as one.
         let mut runs: Vec<RunRecord> = data
             .runs
             .iter()
-            .filter(|r| run_id.is_none_or(|id| r.run_id == id))
+            .filter(|r| {
+                (filter.run_id.is_some() || r.pipe_ref.is_none())
+                    && (r.pipe_ref.is_some() || filter.keeps_run(r))
+                    && filter.run_id.as_ref().is_none_or(|id| *id == r.run_id)
+                    && with_pipe
+                        .as_ref()
+                        .is_none_or(|ids| ids.contains(r.run_id.as_str()))
+            })
             .cloned()
             .collect();
         runs.sort_by_key(|r| std::cmp::Reverse(r.started));
-        if let Some(limit) = limit {
-            runs.truncate(usize::try_from(limit.max(0)).unwrap_or(0));
+        if let Some(limit) = filter.limit {
+            let mut kept = 0;
+            runs.retain(|r| {
+                if r.pipe_ref.is_some() {
+                    return true;
+                }
+                kept += 1;
+                kept <= limit
+            });
         }
-        runs
+        Ok(runs)
     }
 
     async fn record_events(&self, events: Vec<EngineEvent>) -> SuccessTuple {

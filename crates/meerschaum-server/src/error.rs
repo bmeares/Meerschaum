@@ -16,7 +16,14 @@ pub struct ApiError {
     pub detail: Option<Json>,
     /// Extra headers (`WWW-Authenticate`).
     pub headers: Vec<(HeaderName, HeaderValue)>,
+    /// What failed, for an unhandled error ([`ApiError::exception`]): never in a v4 body; the
+    /// v5-only routes show it to administrators ([`crate::envelope`]). Boxed: errors stay small.
+    pub internal: Option<Box<String>>,
 }
+
+/// The message of an unhandled error, carried on its response for [`crate::envelope`].
+#[derive(Debug, Clone)]
+pub struct InternalError(pub String);
 
 impl ApiError {
     /// `HTTPException(status_code, detail)`.
@@ -25,6 +32,7 @@ impl ApiError {
             status: StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR),
             detail: Some(Json::String(detail.into())),
             headers: Vec::new(),
+            internal: None,
         }
     }
 
@@ -34,7 +42,14 @@ impl ApiError {
             status: StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR),
             detail: Some(detail),
             headers: Vec::new(),
+            internal: None,
         }
+    }
+
+    /// `503` for a failed read the request depends on (an instance that did not answer):
+    /// authorization fails closed with this rather than granting or refusing on a guess.
+    pub fn unavailable(detail: impl Into<String>) -> ApiError {
+        ApiError::new(503, detail)
     }
 
     /// Add a header (`WWW-Authenticate: Bearer`).
@@ -63,13 +78,23 @@ impl ApiError {
             status: StatusCode::INTERNAL_SERVER_ERROR,
             detail: None,
             headers: Vec::new(),
+            internal: None,
         }
     }
 
     /// An unhandled exception in a handler (logged without request data, then a plain 500).
     pub fn exception(context: &str, err: impl std::fmt::Display) -> ApiError {
         tracing::warn!("{context}: {err}");
-        ApiError::internal()
+        let mut e = ApiError::internal();
+        e.internal = Some(Box::new(format!("{context}: {err}")));
+        e
+    }
+
+    /// This error with what failed (see [`ApiError::internal`](struct@ApiError)), shown to
+    /// administrators on the v5-only routes.
+    pub fn with_internal(mut self, internal: impl Into<String>) -> ApiError {
+        self.internal = Some(Box::new(internal.into()));
+        self
     }
 
     /// `404 {"detail": "Not Found"}` (Starlette's unmatched route).
@@ -132,6 +157,9 @@ impl IntoResponse for ApiError {
         };
         for (k, v) in self.headers {
             resp.headers_mut().insert(k, v);
+        }
+        if let Some(internal) = self.internal {
+            resp.extensions_mut().insert(InternalError(*internal));
         }
         resp
     }

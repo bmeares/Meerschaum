@@ -32,6 +32,7 @@ pub mod docs;
 pub mod federation;
 pub mod http;
 pub mod native;
+pub mod pipelines;
 pub mod prompts;
 pub mod protocol;
 pub mod registry;
@@ -39,6 +40,7 @@ pub mod resources;
 pub mod security;
 pub mod stdio;
 pub mod tools;
+pub mod v5;
 
 use std::sync::Arc;
 
@@ -185,6 +187,26 @@ pub trait McpBackend: Send + Sync {
         begin: Option<String>,
         end: Option<String>,
     ) -> SuccessTuple;
+
+    /// `pipe.sync(begin=..., end=..., parents=..., children=...)`: with `parents` or `children`
+    /// (`true`, or a number of generations), the pipe and its upstream or downstream pipes in
+    /// dependency order (the Syncing Engine). The default syncs the pipe alone when neither is
+    /// given and refuses otherwise (a server without an engine).
+    async fn sync_pipe_graph(
+        &self,
+        pipe: &Pipe,
+        begin: Option<String>,
+        end: Option<String>,
+        parents: Option<Value>,
+        children: Option<Value>,
+    ) -> SuccessTuple {
+        if parents.is_none() && children.is_none() {
+            return self.sync_pipe(pipe, begin, end).await;
+        }
+        SuccessTuple::fail(
+            "Syncing a pipe with its parents or children is not available on this server.",
+        )
+    }
 
     /// `pipe.verify(begin=..., end=...)`.
     async fn verify_pipe(

@@ -82,7 +82,7 @@ async fn get_mcp(
         Err(r) => return *r,
     };
     let tools: Vec<Value> = server
-        .visible_tools(&caller)
+        .visible_tools(&state, &caller)
         .await
         .iter()
         .map(Tool::to_dict)
@@ -107,7 +107,7 @@ async fn get_mcp(
             ("serverInfo", McpServer::server_info(&state)),
             ("capabilities", McpServer::capabilities()),
             ("readOnly", Value::Bool(server.config.read_only)),
-            ("instructions", s(b.primer.clone())),
+            ("instructions", s(super::registry::primer().to_string())),
             ("tools", Value::List(tools)),
             ("resources", Value::List(resources)),
             ("prompts", Value::List(prompts)),

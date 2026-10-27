@@ -27,7 +27,7 @@ use meerschaum_kernel::Frame;
 use meerschaum_kernel::value::{DateTimeValue, Value as KValue};
 use serde_json::Value as Json;
 
-use crate::backends::{EngineBackend, EngineStoreError, MemoryEngine};
+use crate::backends::{EngineBackend, EngineStoreError, MemoryEngine, RunStatusFilter, RunsFilter};
 
 /// Engine state on the server's instance (see the module docs).
 pub struct InstanceEngine {
@@ -479,36 +479,117 @@ impl EngineBackend for InstanceEngine {
         SuccessTuple::ok(format!("Recorded {n} runs."))
     }
 
-    async fn get_runs(&self, run_id: Option<&str>, limit: Option<i64>) -> Vec<RunRecord> {
-        let params = match run_id {
-            Some(id) => str_params(&[("run_id", Value::Str(id.into()))]),
-            None => Map::new(),
+    async fn get_runs(&self, filter: &RunsFilter) -> Result<Vec<RunRecord>, EngineStoreError> {
+        // Every filter the instance can apply is pushed into the read: the run, the runs of a
+        // pipe (from its node rows), whether the run finished, `since` (the datetime axis) and,
+        // when nothing is left to check here, the limit (newest first).
+        let mut params = Map::new();
+        if let Some(id) = &filter.run_id {
+            params.insert("run_id".into(), Value::Str(id.clone()));
+        }
+        if let Some(pipe_ref) = &filter.pipe_ref {
+            let mut ids: Vec<String> = self
+                .read_docs(
+                    "engine_nodes",
+                    str_params(&[("pipe_ref", Value::Str(pipe_ref.clone()))]),
+                )
+                .await?
+                .iter()
+                .filter_map(|d| doc_str(d, "run_id"))
+                .filter(|id| filter.run_id.as_ref().is_none_or(|wanted| wanted == id))
+                .collect();
+            ids.sort();
+            ids.dedup();
+            if ids.is_empty() {
+                return Ok(Vec::new());
+            }
+            params.insert(
+                "run_id".into(),
+                Value::List(ids.into_iter().map(Value::Str).collect()),
+            );
+        }
+        match filter.status {
+            Some(RunStatusFilter::Running) => {
+                params.insert("success".into(), Value::Null);
+            }
+            Some(_) => {
+                params.insert("success".into(), Value::Str("_None".into()));
+            }
+            None => {}
+        }
+        // Checked here: the Pipeline (its definitions are inside `selection`) and which way a
+        // finished run went (booleans differ between flavors).
+        let post_filter = filter.pipeline.is_some()
+            || matches!(
+                filter.status,
+                Some(RunStatusFilter::Success | RunStatusFilter::Failed)
+            );
+        let limit = filter.limit;
+        let page = match (limit, post_filter) {
+            (Some(limit), true) => Some(limit.saturating_mul(4).max(100)),
+            (Some(limit), false) => Some(limit),
+            (None, _) => None,
         };
-        let mut runs: Vec<RunRecord> = self
-            .read_docs("engine_runs", params.clone())
-            .await
-            .unwrap_or_default()
-            .iter()
-            .filter_map(|d| {
-                Some(RunRecord {
-                    run_id: doc_str(d, "run_id")?,
-                    pipe_ref: None,
-                    started: doc_dt(d, "started")?,
-                    finished: doc_dt(d, "finished"),
-                    status: run_status(d.get("success")).to_string(),
-                    extra: record_extra(d, &["run_id", "started", "finished", "success"]),
-                })
-            })
-            .collect();
+        let mut runs: Vec<RunRecord> = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        let mut end: Option<DateTime<Utc>> = None;
+        loop {
+            let query = DataQuery {
+                params: Some(params.clone()),
+                begin: filter.since.map(DateBound::utc),
+                // The next page ends just after the oldest run read so far (runs started at that
+                // instant are read again and skipped).
+                end: end.map(|e| DateBound::utc(e + chrono::TimeDelta::microseconds(1))),
+                limit: page.map(|p| i64::try_from(p).unwrap_or(i64::MAX)),
+                order: Some("desc".into()),
+                ..Default::default()
+            };
+            let docs = self
+                .read("engine_runs", query)
+                .await?
+                .map(|df| frame_to_docs(&df))
+                .unwrap_or_default();
+            let read = docs.len();
+            let mut new = 0;
+            for d in &docs {
+                let Some(run) = (|| {
+                    Some(RunRecord {
+                        run_id: doc_str(d, "run_id")?,
+                        pipe_ref: None,
+                        started: doc_dt(d, "started")?,
+                        finished: doc_dt(d, "finished"),
+                        status: run_status(d.get("success")).to_string(),
+                        extra: record_extra(d, &["run_id", "started", "finished", "success"]),
+                    })
+                })() else {
+                    continue;
+                };
+                end = Some(end.map_or(run.started, |e| e.min(run.started)));
+                if !seen.insert(run.run_id.clone()) {
+                    continue;
+                }
+                new += 1;
+                if filter.keeps_run(&run) {
+                    runs.push(run);
+                }
+            }
+            let enough = limit.is_some_and(|l| runs.len() >= l);
+            let exhausted = page.is_none_or(|p| read < p) || new == 0;
+            if enough || exhausted || !post_filter {
+                break;
+            }
+        }
         runs.sort_by_key(|r| std::cmp::Reverse(r.started));
         if let Some(limit) = limit {
-            runs.truncate(usize::try_from(limit.max(0)).unwrap_or(0));
+            runs.truncate(limit);
         }
-        if run_id.is_some() {
+        if let Some(run_id) = &filter.run_id {
             let nodes = self
-                .read_docs("engine_nodes", params)
-                .await
-                .unwrap_or_default();
+                .read_docs(
+                    "engine_nodes",
+                    str_params(&[("run_id", Value::Str(run_id.clone()))]),
+                )
+                .await?;
             runs.extend(nodes.iter().filter_map(|d| {
                 Some(RunRecord {
                     run_id: doc_str(d, "run_id")?,
@@ -523,7 +604,7 @@ impl EngineBackend for InstanceEngine {
                 })
             }));
         }
-        runs
+        Ok(runs)
     }
 
     async fn record_events(&self, events: Vec<EngineEvent>) -> SuccessTuple {
