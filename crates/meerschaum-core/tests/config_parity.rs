@@ -20,6 +20,10 @@ fn v4_view(value: &Value) -> Value {
                         && v.get("inclusive_cap").is_some()
                         && v.get("flat_ledger").is_some())
                 })
+                // `api.dash.callbacks_require_session` (rc15, PARITY.md RC15-D-001) is v5-only.
+                .filter(|(k, v)| {
+                    !(k.as_str() == "callbacks_require_session" && matches!(v, Value::Bool(_)))
+                })
                 .map(|(k, v)| (k.clone(), v4_view(v)))
                 .collect(),
         ),

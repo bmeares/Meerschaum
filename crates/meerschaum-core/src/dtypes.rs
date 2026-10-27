@@ -664,11 +664,63 @@ pub fn parse_number(s: &str) -> Option<f64> {
 
 /// `value_is_null(value)` for a string (`utils/dtypes/__init__.py:523`): `'None'`, `'nan'`,
 /// `'NA'`, `'NaT'`, `'NaTz'`, `''` and `'<NA>'` in any case.
+///
+/// This is the rule for columns that are not declared as text. A column declared as text, or
+/// an index column, keeps these strings as text: see [`null_marker_text_columns`].
 pub fn value_is_null(value: &str) -> bool {
     matches!(
         value.to_lowercase().as_str(),
         "none" | "nan" | "na" | "nat" | "natz" | "" | "<na>"
     )
+}
+
+/// Whether `dtype` is a text dtype: `str`, `string` (`string[pyarrow]`, `string[python]`),
+/// `large_string`, `string_view` or `text`. `object` is not text (it holds anything).
+pub fn is_text_dtype(dtype: &str) -> bool {
+    let base = dtype.split('[').next().unwrap_or(dtype).trim();
+    matches!(
+        base.to_lowercase().as_str(),
+        "str" | "string" | "large_string" | "string_view" | "text" | "unicode"
+    )
+}
+
+/// The columns whose null-like strings (`'None'`, `'nan'`, `'NA'`, `'NaT'`, `'NaTz'`, `''`,
+/// `'<NA>'`, see [`value_is_null`]) are values, not nulls: a sync writes them as text and a
+/// `params` filter matches them as text. Only real nulls (`None`, `NaN`, `pd.NA`, `NaT`, an
+/// Arrow null) are `NULL` there.
+///
+/// These are the columns declared with a text dtype in `dtypes` (`explicit_dtypes`, the
+/// declared dtypes only) and the index columns (`columns.*`) whose dtype is text or not known
+/// (an undeclared index column holding strings). An index column whose dtype is not text
+/// (`int`, `datetime`, ...) keeps v4's rule, as does every other column.
+///
+/// `effective_dtypes` are the pipe's dtypes including the ones inferred from the table.
+pub fn null_marker_text_columns<'a>(
+    explicit_dtypes: impl IntoIterator<Item = (&'a String, &'a String)>,
+    index_columns: impl IntoIterator<Item = &'a String>,
+    effective_dtypes: impl Fn(&str) -> Option<String>,
+) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let mut declared: Vec<&String> = Vec::new();
+    for (col, dtype) in explicit_dtypes {
+        declared.push(col);
+        if is_text_dtype(dtype) && !out.contains(col) {
+            out.push(col.clone());
+        }
+    }
+    for col in index_columns {
+        if col.is_empty() || out.contains(col) || declared.contains(&col) {
+            continue;
+        }
+        let keep = match effective_dtypes(col) {
+            None => true,
+            Some(t) => is_text_dtype(&t) || t == "object" || t.is_empty(),
+        };
+        if keep {
+            out.push(col.clone());
+        }
+    }
+    out
 }
 
 /// A value of `MRSM_PRECISION_UNITS_SCALARS`. Python mixes `int` and `float` values, which is
@@ -1063,6 +1115,39 @@ mod tests {
             "invalid literal for int() with base 10: '4326.0'"
         );
         assert!(value_is_null("<NA>") && value_is_null("None") && !value_is_null("0"));
+    }
+
+    #[test]
+    fn null_marker_text_columns_cover_declared_text_and_text_index_columns() {
+        assert!(is_text_dtype("string") && is_text_dtype("string[pyarrow]"));
+        assert!(is_text_dtype("str") && is_text_dtype("TEXT"));
+        assert!(!is_text_dtype("object") && !is_text_dtype("int") && !is_text_dtype("json"));
+        let explicit: Vec<(String, String)> = vec![
+            ("name".into(), "string".into()),
+            ("amount".into(), "float".into()),
+            ("station".into(), "int".into()),
+        ];
+        let index: Vec<String> = vec![
+            "ts".into(),
+            "station".into(),
+            "code".into(),
+            "region".into(),
+            "untyped".into(),
+        ];
+        let effective = |c: &str| match c {
+            "ts" => Some("datetime64[ns, UTC]".to_string()),
+            "code" => Some("string[pyarrow]".to_string()),
+            "region" => Some("object".to_string()),
+            _ => None,
+        };
+        let cols = null_marker_text_columns(
+            explicit.iter().map(|(a, b)| (a, b)),
+            index.iter(),
+            effective,
+        );
+        // Declared text, text / object / unknown index columns; never a declared non-text
+        // column (`station: int`) or a datetime index.
+        assert_eq!(cols, vec!["name", "code", "region", "untyped"]);
     }
 
     #[test]

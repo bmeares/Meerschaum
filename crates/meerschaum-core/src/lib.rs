@@ -21,6 +21,8 @@
 //! - [`success`]: `SuccessTuple` and `SyncResult`.
 //! - [`users`]: `User` and `Token` types and passlib-compatible password hashing.
 //! - [`debug`]: the [`dprint!`] macro and the process-wide debug switch.
+//! - [`protected`]: protected connectors (`protected: true`) and the `--allow-protected` /
+//!   `MRSM_ALLOW_PROTECTED` allowance every write path checks.
 //!
 //! Behavior follows the Python implementation (v4.1.4). Deliberately preserved Python quirks
 //! are marked in the source with `// PARITY:` comments.
@@ -28,6 +30,7 @@
 #![deny(unsafe_code)]
 #![warn(missing_docs)]
 
+pub mod chain;
 pub mod config;
 pub mod connect;
 pub mod debug;
@@ -35,6 +38,7 @@ pub mod dtypes;
 pub mod holder;
 pub mod pipe;
 pub mod process_env;
+pub mod protected;
 pub mod pyfmt;
 pub mod python_guard;
 pub mod self_exe;

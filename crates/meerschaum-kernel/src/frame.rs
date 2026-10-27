@@ -425,6 +425,112 @@ impl Frame {
         self.take(&[])
     }
 
+    /// Replace the empty strings of the columns `cols` with nulls, in place (native string
+    /// columns stay native; the columns keep their tags). For a database that stores `''` as
+    /// `NULL` (Oracle), so that rows compare with what it stores.
+    pub fn null_empty_strings(&mut self, cols: &[String]) {
+        for name in cols {
+            let Some(column) = self.column_mut(name) else {
+                continue;
+            };
+            match &mut column.data {
+                ColumnData::Native(s) if matches!(s.dtype(), DataType::String) => {
+                    let Ok(chunked) = s.str() else {
+                        continue;
+                    };
+                    if !chunked.iter().any(|v| v == Some("")) {
+                        continue;
+                    }
+                    let replaced = StringChunked::from_iter_options(
+                        s.name().clone(),
+                        chunked.iter().map(|v| v.filter(|t| !t.is_empty())),
+                    )
+                    .into_series();
+                    *s = replaced;
+                }
+                ColumnData::Native(_) => {}
+                ColumnData::Object(values) => {
+                    for v in values.iter_mut() {
+                        if matches!(v, Value::Str(s) if s.is_empty()) {
+                            *v = Value::Null;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// `pd.concat(frames, ignore_index=True)`: every frame's rows in order, the columns in
+    /// first-seen order. A column missing from a frame is null in its rows. A column stays
+    /// native when every frame holding rows has it native with one dtype; otherwise it becomes
+    /// an object column of the values (enforcing the pipe's dtypes afterwards casts it).
+    pub fn concat(frames: &[Frame]) -> FrameResult<Frame> {
+        let mut names: Vec<&str> = Vec::new();
+        for f in frames {
+            for c in &f.columns {
+                if !names.contains(&c.name.as_str()) {
+                    names.push(&c.name);
+                }
+            }
+        }
+        let height: usize = frames.iter().map(|f| f.height).sum();
+        let mut columns = Vec::with_capacity(names.len());
+        for name in names {
+            let parts: Vec<(Option<&Column>, usize)> =
+                frames.iter().map(|f| (f.column(name), f.height)).collect();
+            let Some(first) = parts.iter().find_map(|(c, _)| *c) else {
+                continue;
+            };
+            let native_dtype = match &first.data {
+                ColumnData::Native(s) => Some(s.dtype().clone()),
+                ColumnData::Object(_) => None,
+            };
+            let stays_native = native_dtype.as_ref().is_some_and(|dtype| {
+                parts.iter().all(|(c, rows)| match c {
+                    Some(c) => matches!(&c.data, ColumnData::Native(s) if s.dtype() == dtype),
+                    None => *rows == 0,
+                })
+            });
+            let data = if stays_native {
+                let mut out: Option<Series> = None;
+                for (c, _) in &parts {
+                    if let Some(Column {
+                        data: ColumnData::Native(s),
+                        ..
+                    }) = c
+                    {
+                        match out.as_mut() {
+                            None => out = Some(s.clone()),
+                            Some(o) => {
+                                o.append(s)?;
+                            }
+                        }
+                    }
+                }
+                match out {
+                    Some(s) => ColumnData::Native(s.with_name(name.into())),
+                    None => ColumnData::Object(Vec::new()),
+                }
+            } else {
+                let mut values = Vec::with_capacity(height);
+                for (c, rows) in &parts {
+                    match c {
+                        Some(c) => values.extend(c.data.values()),
+                        None => values.extend(std::iter::repeat_n(Value::Null, *rows)),
+                    }
+                }
+                ColumnData::Object(values)
+            };
+            columns.push(Column {
+                name: name.to_string(),
+                data,
+                crs: first.crs.clone(),
+                tags: first.tags.clone(),
+            });
+        }
+        Ok(Frame { columns, height })
+    }
+
     /// A row as values (`df.iloc[i]`).
     pub fn row(&self, ix: usize) -> Vec<Value> {
         self.columns.iter().map(|c| c.data.get(ix)).collect()

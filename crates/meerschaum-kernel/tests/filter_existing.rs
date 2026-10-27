@@ -61,6 +61,8 @@ fn filter_existing_parity() {
             date_bound_only: case["kwargs"]["date_bound_only"].as_bool().unwrap_or(false),
             enforce_dtypes: false,
             filter_params_index_limit: case["filter_params_index_limit"].as_u64().unwrap() as usize,
+            // The v4 fixtures: v4's null-like rule everywhere.
+            literal_null_markers: Vec::new(),
         };
         let input = match &case["df"] {
             J::Array(docs) => PipeInput::Docs(

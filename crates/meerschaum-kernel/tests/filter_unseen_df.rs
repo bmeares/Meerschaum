@@ -25,6 +25,7 @@ fn filter_unseen_df_parity() {
             coerce_mixed_numerics: case["kwargs"]["coerce_mixed_numerics"]
                 .as_bool()
                 .unwrap_or(true),
+            ..Default::default()
         };
         let out = filter_unseen_df(old.as_ref(), &new, &opts);
         if let Err(m) = compare_frame(&case["ok"], &out, name) {

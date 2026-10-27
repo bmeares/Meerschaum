@@ -179,6 +179,7 @@
       }
     },
     "dash": {
+      "callbacks_require_session": true,
       "mcp": {
         "enabled": false
       }

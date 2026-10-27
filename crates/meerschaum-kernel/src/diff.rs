@@ -124,7 +124,7 @@ fn normalize_string_series(s: &polars::prelude::Series) -> polars::prelude::Seri
 /// (`kinds`; see [`crate::merge_dtype`]): `object` columns that pandas infers as `int64`,
 /// `float64`, `bool`, `str` or `datetime64` become native, native columns whose merge is
 /// `object` become object columns.
-fn normalize_delta(df: &Frame, kinds: &HashMap<String, Kind>) -> Frame {
+fn normalize_delta(df: &Frame, kinds: &HashMap<String, Kind>, literal: &[String]) -> Frame {
     use polars::prelude::DataType;
     let mut out = df.clone();
     for col in df.columns() {
@@ -132,6 +132,8 @@ fn normalize_delta(df: &Frame, kinds: &HashMap<String, Kind>) -> Frame {
             .get(&col.name)
             .cloned()
             .unwrap_or_else(|| column_kind(&col.data));
+        // A literal column's null-like strings are values (rc15 Q18).
+        let normalize = !literal.contains(&col.name);
         let data = match &col.data {
             ColumnData::Native(s) if matches!(s.dtype(), DataType::String) => {
                 if kind.is_object() {
@@ -140,13 +142,15 @@ fn normalize_delta(df: &Frame, kinds: &HashMap<String, Kind>) -> Frame {
                             .values()
                             .into_iter()
                             .map(|v| match &v {
-                                Value::Str(t) if is_na_string(t) => Value::NA,
+                                Value::Str(t) if normalize && is_na_string(t) => Value::NA,
                                 _ => v,
                             })
                             .collect(),
                     )
-                } else {
+                } else if normalize {
                     ColumnData::Native(normalize_string_series(s))
+                } else {
+                    continue;
                 }
             }
             ColumnData::Native(_) if kind.is_object() => ColumnData::Object(col.data.values()),
@@ -155,7 +159,7 @@ fn normalize_delta(df: &Frame, kinds: &HashMap<String, Kind>) -> Frame {
                 let values: Vec<Value> = values
                     .iter()
                     .map(|v| match v {
-                        Value::Str(s) if is_na_string(s) => Value::NA,
+                        Value::Str(s) if normalize && is_na_string(s) => Value::NA,
                         _ => v.clone(),
                     })
                     .collect();
@@ -258,11 +262,11 @@ impl KeyCol<'_> {
     }
 }
 
-fn values_key(data: &ColumnData) -> KeyCol<'static> {
+fn values_key(data: &ColumnData, normalize: bool) -> KeyCol<'static> {
     let stringish = matches!(data, ColumnData::Object(_))
         || matches!(data.polars_dtype(), Some(polars::prelude::DataType::String));
     let mut values = data.values();
-    if stringish {
+    if stringish && normalize {
         for v in values.iter_mut() {
             if matches!(v, Value::Str(s) if is_na_string(s)) {
                 *v = Value::NA;
@@ -273,7 +277,8 @@ fn values_key(data: &ColumnData) -> KeyCol<'static> {
 }
 
 /// The typed key of a native column, or `None` when the dtype has no typed comparison.
-fn typed_key(s: &polars::prelude::Series) -> Option<KeyCol<'_>> {
+/// `normalize`: null-like strings are nulls (`normalize_nulls`).
+fn typed_key(s: &polars::prelude::Series, normalize: bool) -> Option<KeyCol<'_>> {
     use polars::prelude::DataType as D;
     Some(match s.dtype() {
         D::Int8 | D::Int16 | D::Int32 | D::Int64 | D::UInt8 | D::UInt16 | D::UInt32 => {
@@ -306,7 +311,7 @@ fn typed_key(s: &polars::prelude::Series) -> Option<KeyCol<'_>> {
             s.str()
                 .ok()?
                 .iter()
-                .map(|v| v.filter(|t| !is_na_string(t)))
+                .map(|v| v.filter(|t| !normalize || !is_na_string(t)))
                 .collect(),
         ),
         D::Binary => KeyCol::Bytes(s.binary().ok()?.iter().collect()),
@@ -317,21 +322,22 @@ fn typed_key(s: &polars::prelude::Series) -> Option<KeyCol<'_>> {
 /// The positions of the rows of `new` with no equal row in `old` on `cols`
 /// (`merge(how='left', indicator=True)` / the Polars anti-join), compared after
 /// `normalize_nulls`.
-fn anti_join_rows(new: &Frame, old: &Frame, cols: &[String]) -> Vec<usize> {
+fn anti_join_rows(new: &Frame, old: &Frame, cols: &[String], literal: &[String]) -> Vec<usize> {
     let mut new_keys: Vec<KeyCol<'_>> = Vec::with_capacity(cols.len());
     let mut old_keys: Vec<KeyCol<'_>> = Vec::with_capacity(cols.len());
     for col in cols {
+        let normalize = !literal.contains(col);
         let (Ok(n), Ok(o)) = (new.data(col), old.data(col)) else {
             let empty = ColumnData::Object(vec![]);
             let n = new.data(col).unwrap_or(&empty);
             let o = old.data(col).unwrap_or(&empty);
-            new_keys.push(values_key(n));
-            old_keys.push(values_key(o));
+            new_keys.push(values_key(n, normalize));
+            old_keys.push(values_key(o, normalize));
             continue;
         };
         let typed = match (n, o) {
             (ColumnData::Native(ns), ColumnData::Native(os)) if ns.dtype() == os.dtype() => {
-                typed_key(ns).zip(typed_key(os))
+                typed_key(ns, normalize).zip(typed_key(os, normalize))
             }
             _ => None,
         };
@@ -341,8 +347,8 @@ fn anti_join_rows(new: &Frame, old: &Frame, cols: &[String]) -> Vec<usize> {
                 old_keys.push(ok);
             }
             None => {
-                new_keys.push(values_key(n));
-                old_keys.push(values_key(o));
+                new_keys.push(values_key(n, normalize));
+                old_keys.push(values_key(o, normalize));
             }
         }
     }
@@ -417,6 +423,10 @@ pub struct FilterUnseenOptions {
     pub dtypes: Option<IndexMap<String, String>>,
     /// Cast mixed int/float columns to `numeric` (`Decimal`).
     pub coerce_mixed_numerics: bool,
+    /// Columns whose null-like strings (`'None'`, `'NA'`, ...) are values, not nulls: they are
+    /// compared and returned as text (`normalize_nulls` skips them). A pipe's declared text
+    /// columns and text index columns (`meerschaum_core::dtypes::null_marker_text_columns`).
+    pub literal_null_markers: Vec<String>,
 }
 
 impl Default for FilterUnseenOptions {
@@ -424,6 +434,7 @@ impl Default for FilterUnseenOptions {
         Self {
             dtypes: None,
             coerce_mixed_numerics: true,
+            literal_null_markers: Vec::new(),
         }
     }
 }
@@ -691,7 +702,7 @@ fn filter_unseen_df_against(old: &Frame, new: &Frame, opts: &FilterUnseenOptions
     // `normalize_nulls` is applied per value, so the keys normalize on the fly and only the
     // delta rows of the new frame are normalized (`normalize(new).take(keep)`).
     let all_cols = new.names();
-    let keep = anti_join_rows(&new, &old, &all_cols);
+    let keep = anti_join_rows(&new, &old, &all_cols, &opts.literal_null_markers);
     // The dtype of each result column is the dtype of `merge(new, old)` after `infer_objects()`
     // (PARITY.md rows 17 and 18), decided on the whole columns, not on the delta rows.
     let kinds: HashMap<String, Kind> = new
@@ -705,7 +716,7 @@ fn filter_unseen_df_against(old: &Frame, new: &Frame, opts: &FilterUnseenOptions
             ))
         })
         .collect();
-    let normalized_delta = normalize_delta(&new.take(&keep), &kinds);
+    let normalized_delta = normalize_delta(&new.take(&keep), &kinds, &opts.literal_null_markers);
     let mut delta = normalized_delta
         .select(&new_cols)
         .unwrap_or_else(|_| normalized_delta.clone());
@@ -818,10 +829,27 @@ pub struct FilterExistingParams {
     pub enforce_dtypes: bool,
     /// `pipes:sync:filter_params_index_limit` (default 250).
     pub filter_params_index_limit: usize,
+    /// The pipe's columns whose null-like strings are values (rc15 Q18,
+    /// `meerschaum_core::dtypes::null_marker_text_columns`): the backtrack request matches them
+    /// as text and the diff compares them as text. Empty: v4's rule everywhere.
+    pub literal_null_markers: Vec<String>,
 }
 
 /// `(unseen, update, delta)`.
 pub type FilterExistingResult = (Frame, Frame, Frame);
+
+/// [`FilterExistingParams::literal_null_markers`] of a pipe: its declared text columns and its
+/// text index columns (`columns`: role → column).
+pub fn literal_null_markers(
+    columns: &IndexMap<String, String>,
+    ctx: &PipeDtypesContext,
+) -> Vec<String> {
+    meerschaum_core::dtypes::null_marker_text_columns(
+        ctx.explicit_dtypes.iter(),
+        columns.values(),
+        |c| ctx.dtypes.get(c).cloned(),
+    )
+}
 
 /// Min / max of a column's non-null values (datetimes and ints compare natively).
 fn column_bound(data: &ColumnData, minimum: bool) -> Value {
@@ -1121,7 +1149,15 @@ pub fn filter_existing(
             }
             let uniques = unique_in_order(df.data(&col)?.values());
             if uniques.len() <= params.filter_params_index_limit {
-                req_params.insert(col, uniques.iter().map(none_if_null).collect());
+                let values = if params.literal_null_markers.contains(&col) {
+                    uniques
+                        .iter()
+                        .map(|v| if v.is_na() { Value::Null } else { v.clone() })
+                        .collect()
+                } else {
+                    uniques.iter().map(none_if_null).collect()
+                };
+                req_params.insert(col, values);
             }
         }
     }
@@ -1179,6 +1215,7 @@ pub fn filter_existing(
             &FilterUnseenOptions {
                 dtypes: Some(unseen_dtypes),
                 coerce_mixed_numerics: !params.static_,
+                literal_null_markers: params.literal_null_markers.clone(),
             },
         ),
         &on_cols_dtypes,

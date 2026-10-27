@@ -11,6 +11,9 @@
 //!   of `Pipe.sync()` for internal pipes, and the generic users / plugins / tokens
 //!   implementations over the internal pipes.
 //! - [`models`]: the stored token model (`TokenModel`).
+//! - [`policy`]: protected connectors and the hidden internal `mrsm` pipes.
+//! - [`schema`]: the schema plans of `verify schema`.
+//! - [`sync_status`]: the per-pipe sync status every sync path records (`mrsm:engine_sync_status`).
 //!
 //! Layering: depends on `meerschaum-core` (keys, parameters, users, tokens, `SuccessTuple`) and
 //! `meerschaum-kernel` (`Frame`); every instance connector crate (`meerschaum-connector-sql`,
@@ -19,11 +22,19 @@
 
 pub mod models;
 pub mod pipe_ops;
+pub mod policy;
+pub mod replace;
+pub mod schema;
+pub mod sync_status;
 pub mod template;
 pub mod traits;
 
 pub use async_trait::async_trait;
 pub use models::TokenModel;
+pub use policy::{
+    check_protected, hide_internal_pipes, hides_internal_pipes, is_internal_pipe, protected_refusal,
+};
+pub use schema::{SchemaChange, SchemaChangeKind, SchemaPlan};
 pub use template::{InstanceProvider, SnapshotResolver, resolve_pipe};
 pub use traits::{
     ChunkStream, ChunkedFetch, ColumnIndexInfo, Connector, ConnectorError, ConnectorResult,

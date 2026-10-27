@@ -32,6 +32,7 @@ pub use async_trait::async_trait;
 
 use crate::models::TokenModel;
 use crate::pipe_ops;
+use crate::schema::SchemaPlan;
 
 /// The error type for connector methods that return data.
 #[derive(Debug, thiserror::Error)]
@@ -204,10 +205,19 @@ pub struct SyncOptions {
     /// `chunksize`: `Some(-1)` (default) uses `system:connectors:sql:chunksize`; `None` syncs
     /// everything in one chunk.
     pub chunksize: Option<i64>,
-    /// `begin` / `end` (SQL fetch bounds).
+    /// `begin` / `end` (SQL fetch bounds). With [`SyncOptions::replace`], the window
+    /// `[begin, end)` whose rows the frame replaces (`None`: unbounded on that side).
     pub begin: Option<DateBound>,
     /// See `begin`.
     pub end: Option<DateBound>,
+    /// `replace`: in one transaction (where the instance has transactions), delete the pipe's
+    /// rows in `[begin, end)` that match [`SyncOptions::params`], then write the frame's rows
+    /// of that window. Rows of the frame outside the window are not written. A pipe without a
+    /// datetime column has one window: the whole table. An empty frame clears the window.
+    pub replace: bool,
+    /// `params`: with [`SyncOptions::replace`], only the window's rows matching these filters
+    /// are replaced (the `params` grammar of `build_where`).
+    pub params: Option<Map>,
     /// Any other keyword arguments (the API client forwards them as query parameters).
     pub extra: Map,
 }
@@ -219,6 +229,8 @@ impl Default for SyncOptions {
             chunksize: Some(-1),
             begin: None,
             end: None,
+            replace: false,
+            params: None,
             extra: Map::new(),
         }
     }
@@ -360,6 +372,15 @@ pub trait Connector: Send + Sync {
 
     /// `IS_THREAD_SAFE`: whether concurrent reads may share this connector.
     fn is_thread_safe(&self) -> bool {
+        false
+    }
+
+    /// `connector.protected`: whether the connector's attributes mark it protected
+    /// (`protected: true`). Every mutation the core makes through a protected connector is
+    /// refused unless writes are allowed (`--allow-protected`, `MRSM_ALLOW_PROTECTED=1`; see
+    /// [`meerschaum_core::protected`] and [`crate::policy::protected_refusal`]). Reads are
+    /// never blocked. The default is `false`.
+    fn is_protected(&self) -> bool {
         false
     }
 
@@ -551,6 +572,21 @@ pub trait InstanceConnector: Connector {
     /// `system:connectors:sql:chunksize` (900); `None` syncs all rows in one transaction.
     async fn sync_pipe(&self, pipe: &Pipe, df: Frame, opts: &SyncOptions) -> SuccessTuple;
 
+    /// [`InstanceConnector::sync_pipe`] with the row counts of the write, for the callers that
+    /// keep them (the engine's sync flow: run totals, sync statuses, changed ranges). The
+    /// message is `sync_pipe`'s. The default reads the counts from it
+    /// ([`pipe_ops::sync_result_from_message`]); an instance whose message does not carry them
+    /// (the `api:` client's `It took ... to sync 3 rows across 1 chunk ...`) overrides this.
+    async fn sync_pipe_with_counts(
+        &self,
+        pipe: &Pipe,
+        df: Frame,
+        opts: &SyncOptions,
+    ) -> meerschaum_core::success::SyncResult {
+        let res = self.sync_pipe(pipe, df, opts).await;
+        pipe_ops::sync_result_from_message(res.success, res.message)
+    }
+
     /// Delete rows within `begin`, `end` and `params`.
     ///
     /// `begin`: remove rows `>= begin`; `end`: remove rows `< end`; `params`: only remove rows
@@ -643,6 +679,19 @@ pub trait InstanceConnector: Connector {
         pipe: &Pipe,
         query: &DataQuery,
     ) -> ConnectorResult<Option<i64>>;
+
+    /// `Pipe.get_rowcount(estimate=True)`: the database's estimate of the number of rows in the
+    /// pipe's table (catalog statistics, no table scan), falling back to the exact count where
+    /// no estimate exists or counting is cheap (small tables, file databases). `None` for a
+    /// missing table. With `begin`, `end`, `params` or `remote` the count is exact. The default
+    /// is the exact count ([`Self::get_pipe_rowcount`]).
+    async fn get_pipe_rowcount_estimate(
+        &self,
+        pipe: &Pipe,
+        query: &DataQuery,
+    ) -> ConnectorResult<Option<i64>> {
+        self.get_pipe_rowcount(pipe, query).await
+    }
 
     /// Return the data types for the columns in the target table for data type enforcement.
     async fn get_pipe_columns_types(
@@ -750,6 +799,33 @@ pub trait InstanceConnector: Connector {
         ))
     }
 
+    /// `verify schema` / `Pipe.verify_schema()`: how the pipe's table differs from its declared
+    /// dtypes (`dtypes`, the `columns` roles, geometry notations; `static` pipes included).
+    /// Nothing is written. The default is unsupported.
+    async fn get_pipe_schema_plan(&self, pipe: &Pipe) -> ConnectorResult<SchemaPlan> {
+        let _ = pipe;
+        Err(ConnectorError::NotImplemented(format!(
+            "Verifying table schemas is not supported for instance connectors of type '{}'.",
+            self.connector_type()
+        )))
+    }
+
+    /// Apply a plan made by [`Self::get_pipe_schema_plan`]: every change, or with `safe_only`
+    /// only the safe ones ([`crate::schema::SchemaChange::is_safe`]). The instance plans again
+    /// first and refuses when the table no longer matches `plan`; it never drops a column.
+    async fn apply_pipe_schema(
+        &self,
+        pipe: &Pipe,
+        plan: &SchemaPlan,
+        safe_only: bool,
+    ) -> SuccessTuple {
+        let _ = (pipe, plan, safe_only);
+        SuccessTuple::fail(format!(
+            "Verifying table schemas is not supported for instance connectors of type '{}'.",
+            self.connector_type()
+        ))
+    }
+
     // ----------------------------------------------------------------------------------------
     // Leases (§5.8)
     // ----------------------------------------------------------------------------------------
@@ -792,6 +868,40 @@ pub trait InstanceConnector: Connector {
         metric_key: &str,
     ) -> ConnectorResult<Option<Pipe>> {
         Ok(pipe_ops::engine_state_pipe(instance_keys, metric_key))
+    }
+
+    // ----------------------------------------------------------------------------------------
+    // Per-pipe sync status (rc15 contract C2, [`crate::sync_status`])
+    // ----------------------------------------------------------------------------------------
+
+    /// Merge the outcomes of syncs of `pipe` (oldest first) into its sync status on this
+    /// instance and return the stored status. The default reads the pipe's row of the internal
+    /// pipe `mrsm:engine_sync_status`, applies the outcomes and upserts it (one read, one
+    /// write); the `api:` client sends them to its server instead. Sync paths call
+    /// [`crate::sync_status::record`], which debounces and never fails a sync, not this.
+    async fn record_sync_status(
+        &self,
+        pipe: &Pipe,
+        outcomes: &[crate::sync_status::SyncOutcome],
+    ) -> ConnectorResult<Option<crate::sync_status::SyncStatus>> {
+        crate::sync_status::merge_and_store(self, pipe, outcomes).await
+    }
+
+    /// The sync status of `pipe`: its latest recorded sync (`None` if none was recorded).
+    async fn get_sync_status(
+        &self,
+        pipe: &Pipe,
+    ) -> ConnectorResult<Option<crate::sync_status::SyncStatus>> {
+        crate::sync_status::read_status(self, pipe).await
+    }
+
+    /// The sync statuses of every pipe recorded on this instance, keyed under `instance_keys`
+    /// (one per pipe, ordered by `pipe_ref`).
+    async fn get_sync_statuses(
+        &self,
+        instance_keys: &str,
+    ) -> ConnectorResult<Vec<crate::sync_status::SyncStatus>> {
+        crate::sync_status::read_statuses(self, instance_keys).await
     }
 
     // ----------------------------------------------------------------------------------------

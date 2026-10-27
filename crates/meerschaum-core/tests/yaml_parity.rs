@@ -363,6 +363,14 @@ fn without_v5_defaults(spec: J) -> J {
                 {
                     uvicorn.remove("workers");
                 }
+                // `api.dash.callbacks_require_session` (rc15, PARITY.md RC15-D-001) is v5-only.
+                if let Some(dash) = parsed
+                    .get_mut("api")
+                    .and_then(|a| a.get_mut("dash"))
+                    .and_then(J::as_object_mut)
+                {
+                    dash.remove("callbacks_require_session");
+                }
                 return serde_json::json!({"t": "str", "json": parsed});
             }
             J::Object(

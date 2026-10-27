@@ -9,6 +9,7 @@
 use chrono::{DateTime, Utc};
 use indexmap::IndexMap;
 use meerschaum_core::dtypes::is_dtype_special;
+use meerschaum_core::success::SyncResult;
 use meerschaum_core::users::{Token, User};
 use meerschaum_core::{Map, Pipe, SuccessTuple, Value};
 use meerschaum_kernel::Frame;
@@ -283,6 +284,37 @@ pub async fn sync_docs<C: InstanceConnector + ?Sized>(
     .await
 }
 
+/// The row counts written in a sync message (`"Inserted 1,234, updated 5 rows."`, `"Upserted 3
+/// rows."`, `"Replaced 2 rows with 3 rows."`) as a [`SyncResult`]: the trait's `sync_pipe`
+/// returns a `SuccessTuple`, and the built-in SQL and Valkey instances write these messages
+/// ([`InstanceConnector::sync_pipe_with_counts`]). A failure has no counts.
+pub fn sync_result_from_message(success: bool, message: String) -> SyncResult {
+    fn number_after(text: &str, word: &str) -> Option<u64> {
+        let i = text.find(word)? + word.len();
+        let digits: String = text[i..]
+            .trim_start()
+            .chars()
+            .take_while(|c| c.is_ascii_digit() || *c == ',')
+            .filter(|c| *c != ',')
+            .collect();
+        digits.parse().ok()
+    }
+    let mut r = SyncResult::new(success, message);
+    if success {
+        if let Some(n) = number_after(&r.message, "Upserted ") {
+            r.upserted = n;
+        } else if let Some(n) = number_after(&r.message, "Replaced ") {
+            // A replacing sync: `Replaced {deleted} rows with {inserted} rows.`
+            r.deleted = n;
+            r.inserted = number_after(&r.message, " with ").unwrap_or(0);
+        } else {
+            r.inserted = number_after(&r.message, "Inserted ").unwrap_or(0);
+            r.updated = number_after(&r.message, "updated ").unwrap_or(0);
+        }
+    }
+    r
+}
+
 /// Compare two kernel values for sorting (`sort_values`, nulls last).
 pub fn compare_values(a: &KValue, b: &KValue) -> std::cmp::Ordering {
     use std::cmp::Ordering;
@@ -461,8 +493,8 @@ fn build_internal_pipe(instance_keys: &str, metric: &str, kwargs: Map) -> Pipe {
 }
 
 /// The parameters of the Syncing Engine's internal state pipe `mrsm:<metric_key>` (§5.8):
-/// `engine_state`, `engine_ledger`, `engine_cursors`, `engine_runs`, `engine_nodes` and
-/// `engine_events` (`None` for any other metric). The engine builds its state pipes from these;
+/// `engine_state`, `engine_ledger`, `engine_cursors`, `engine_runs`, `engine_nodes`,
+/// `engine_events` and `engine_sync_status` (`None` for any other metric). The engine builds its state pipes from these;
 /// instance connectors use them to forget a dropped pipe's state ([`forget_engine_state`]).
 pub fn engine_state_parameters(metric_key: &str) -> Option<Map> {
     let json = match metric_key {
@@ -506,6 +538,19 @@ pub fn engine_state_parameters(metric_key: &str) -> Option<Map> {
                     "dtypes": {"ts": "datetime", "run_id": "string", "seq": "int",
                                "pipe_ref": "string", "event": "string", "payload": "json"}}"#
         }
+        // The per-pipe sync status (`crate::sync_status`): one row per pipe.
+        "engine_sync_status" => {
+            r#"{"columns": {"primary": "pipe_ref"},
+                    "dtypes": {"pipe_ref": "string", "connector_keys": "string",
+                               "metric_key": "string", "location_key": "string",
+                               "instance_keys": "string", "last_attempt": "datetime",
+                               "last_success": "datetime", "last_failure": "datetime",
+                               "success": "bool", "message": "string", "rows_inserted": "int",
+                               "rows_updated": "int", "rows_upserted": "int",
+                               "duration_seconds": "float", "consecutive_failures": "int",
+                               "source": "string", "job": "string"},
+                    "upsert": true}"#
+        }
         _ => return None,
     };
     let mut params = Value::from_json_str(json)
@@ -531,7 +576,8 @@ pub fn engine_state_pipe(instance_keys: &str, metric_key: &str) -> Option<Pipe> 
 }
 
 /// Forget the Syncing Engine's state for `pipe` on its instance `conn`: the ledger entries it
-/// produced, the edge cursors in which it is the parent or the child, and its definition hash.
+/// produced, the edge cursors in which it is the parent or the child, its definition hash and
+/// its sync status ([`crate::sync_status`]).
 /// Called when a pipe is dropped, deleted or fully cleared, so a pipe recreated under the same
 /// keys starts fresh, as it does in v4 (which has no engine state). Run history is kept.
 /// Engine tables that do not exist are skipped (an instance the engine never ran on pays only
@@ -544,12 +590,16 @@ pub async fn forget_engine_state<C: InstanceConnector + ?Sized>(
         return SuccessTuple::success();
     }
     let pipe_ref = pipe.pipe_ref();
+    // What this process still holds for the pipe's sync status is dropped, and the guard keeps
+    // its other writes out until the stored status is cleared, so none brings it back.
+    let _status_writes = crate::sync_status::forget(&pipe_ref).await;
     let mut errors = Vec::new();
     for (metric, column) in [
         ("engine_ledger", "pipe_ref"),
         ("engine_cursors", "parent_ref"),
         ("engine_cursors", "child_ref"),
         ("engine_state", "pipe_ref"),
+        ("engine_sync_status", "pipe_ref"),
     ] {
         let Ok(Some(state_pipe)) = conn.engine_state_pipe(pipe.instance_keys(), metric).await
         else {

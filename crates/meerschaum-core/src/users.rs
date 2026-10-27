@@ -340,13 +340,29 @@ impl User {
     }
 
     /// `user.get_scopes(refresh=False)`: `attributes['scopes']` if truthy, else every scope.
+    ///
+    /// This reads the attributes already on the struct, and "no `scopes` attribute" grants every
+    /// scope (v4's rule). Authorization code must not call it on a user whose attributes it could
+    /// not read: use [`User::scopes_from_read`], which takes the read's result and fails closed.
     pub fn get_scopes(&self) -> Vec<String> {
-        match self.attributes.as_ref().and_then(|a| a.get("scopes")) {
-            Some(Value::List(items)) if !items.is_empty() => {
-                items.iter().map(crate::pyfmt::py_str).collect()
-            }
-            _ => static_config().scope_names(),
+        scopes_of(self.attributes.as_ref())
+    }
+
+    /// The scopes granted by an attributes read (`get_user_attributes(user)`): a failed read is
+    /// an error (deny), never "every scope"; a successful read without a `scopes` attribute keeps
+    /// v4's rule and grants every scope.
+    pub fn scopes_from_read<E>(read: Result<Option<Map>, E>) -> Result<Vec<String>, E> {
+        Ok(scopes_of(read?.as_ref()))
+    }
+}
+
+/// `attributes['scopes']` if a non-empty list, else every scope.
+fn scopes_of(attributes: Option<&Map>) -> Vec<String> {
+    match attributes.and_then(|a| a.get("scopes")) {
+        Some(Value::List(items)) if !items.is_empty() => {
+            items.iter().map(crate::pyfmt::py_str).collect()
         }
+        _ => static_config().scope_names(),
     }
 }
 
@@ -582,5 +598,27 @@ mod tests {
         let (_, secret) = t.generate_credentials().unwrap();
         assert!((24..=33).contains(&secret.len()));
         assert!(t.get_api_key().starts_with("mrsm-key:"));
+    }
+
+    #[test]
+    fn scopes_fail_closed_on_a_failed_read() {
+        let all = static_config().scope_names();
+        // A failed read is an error, never every scope.
+        assert_eq!(
+            User::scopes_from_read::<&str>(Err("connection refused")),
+            Err("connection refused")
+        );
+        // A successful read without `scopes` keeps v4's rule.
+        assert_eq!(User::scopes_from_read::<()>(Ok(None)), Ok(all.clone()));
+        assert_eq!(User::scopes_from_read::<()>(Ok(Some(Map::new()))), Ok(all));
+        let mut attrs = Map::new();
+        attrs.insert(
+            "scopes".into(),
+            Value::List(vec![Value::Str("pipes:read".into())]),
+        );
+        assert_eq!(
+            User::scopes_from_read::<()>(Ok(Some(attrs))),
+            Ok(vec!["pipes:read".to_string()])
+        );
     }
 }

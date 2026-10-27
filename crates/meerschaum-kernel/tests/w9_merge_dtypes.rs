@@ -83,6 +83,7 @@ fn merge_dtypes_parity() {
         let opts = FilterUnseenOptions {
             dtypes,
             coerce_mixed_numerics: true,
+            ..Default::default()
         };
         let out = filter_unseen_df(Some(&old), &new, &opts);
         let v = case["ok"]["columns"]
@@ -133,6 +134,7 @@ fn bytes_hint_against_object_bytes_stays_object() {
                 ("v".to_string(), "bytes".to_string()),
             ])),
             coerce_mixed_numerics: true,
+            ..Default::default()
         },
     );
     assert!(matches!(
@@ -161,6 +163,7 @@ fn object_floats_infer_to_float64() {
             &FilterUnseenOptions {
                 dtypes,
                 coerce_mixed_numerics: true,
+                ..Default::default()
             },
         );
         assert_eq!(

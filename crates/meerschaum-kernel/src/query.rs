@@ -5,6 +5,11 @@
 //! prefix for negation (`NOT IN`), mixed lists, `None` / `'None'` (and other null-like strings)
 //! for nulls, and `'_None'`. Any negation switches the whole query to string comparison
 //! (`coerce_types`), as v4 does.
+//!
+//! On the columns of [`QueryOptions::literal_null_markers`] (a pipe's declared text columns and
+//! text index columns, `meerschaum_core::dtypes::null_marker_text_columns`) a null-like string
+//! such as `'None'` or `'NA'` is a value: `{'id': 'NA'}` matches the text `NA`. Python `None`
+//! still matches nulls there.
 
 use indexmap::IndexMap;
 use polars::prelude::DataType;
@@ -55,6 +60,9 @@ pub struct QueryOptions {
     pub omit_columns: Option<Vec<String>>,
     pub reset_index: bool,
     pub coerce_types: bool,
+    /// Columns on which a null-like string param (`'None'`, `'NA'`, `'nan'`, `''`, ...) is
+    /// matched as text instead of as a null (see the module docs). Empty: v4's rule everywhere.
+    pub literal_null_markers: Vec<String>,
 }
 
 /// The filtered frame and the row labels pandas would show (`df.index`).
@@ -191,7 +199,9 @@ pub fn query_df(df: &Frame, opts: &QueryOptions) -> Result<QueryResult, EnforceE
                 }
                 v
             }
-            ParamValue::One(v) => vec![if value_is_null(v) {
+            ParamValue::One(v) => vec![if value_is_null(v)
+                && !(matches!(v, Value::Str(_)) && opts.literal_null_markers.contains(key))
+            {
                 Value::NA
             } else {
                 v.clone()
@@ -383,4 +393,61 @@ pub fn query_df(df: &Frame, opts: &QueryOptions) -> Result<QueryResult, EnforceE
         frame: result,
         index,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::frame::Column;
+
+    fn frame() -> Frame {
+        Frame::new(vec![
+            Column::object(
+                "id",
+                vec![
+                    Value::Str("None".into()),
+                    Value::Str("NA".into()),
+                    Value::Null,
+                    Value::Str("x".into()),
+                ],
+            ),
+            Column::object(
+                "other",
+                vec![
+                    Value::Str("None".into()),
+                    Value::Str("NA".into()),
+                    Value::Null,
+                    Value::Str("x".into()),
+                ],
+            ),
+        ])
+        .expect("frame")
+    }
+
+    fn ids(params: &[(&str, ParamValue)], literal: &[&str]) -> Vec<usize> {
+        let opts = QueryOptions {
+            params: params
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.clone()))
+                .collect(),
+            literal_null_markers: literal.iter().map(|c| c.to_string()).collect(),
+            ..Default::default()
+        };
+        query_df(&frame(), &opts).expect("query").index
+    }
+
+    #[test]
+    fn null_like_strings_are_text_on_literal_columns() {
+        let none = ParamValue::One(Value::Str("None".into()));
+        let na = ParamValue::One(Value::Str("NA".into()));
+        let null = ParamValue::One(Value::Null);
+        // v4's rule: `'None'` is a null.
+        assert_eq!(ids(&[("id", none.clone())], &[]), vec![2]);
+        // A declared text / index column: `'None'` and `'NA'` are values, `None` is a null.
+        assert_eq!(ids(&[("id", none.clone())], &["id"]), vec![0]);
+        assert_eq!(ids(&[("id", na)], &["id"]), vec![1]);
+        assert_eq!(ids(&[("id", null)], &["id"]), vec![2]);
+        // Other columns keep v4's rule.
+        assert_eq!(ids(&[("other", none)], &["id"]), vec![2]);
+    }
 }
