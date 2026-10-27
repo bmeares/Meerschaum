@@ -532,23 +532,24 @@ async fn mysql_latin1_database_keeps_unicode_state() {
     let id = run.run_id().unwrap().to_string();
     let state = chain.engine().state().clone();
 
-    // The planner's own symbols survive the round trip.
+    // The planner's reason survives the round trip (in plain words since rc15, T1).
     let stored = state.load_run(&id).await.unwrap().expect("the run row");
     assert_eq!(stored.nodes.len(), 2, "{:?} {}", stored.nodes, run.message);
     let raw = stored.node(&chain.raw).unwrap();
     assert!(
-        raw.reason.contains("sync time \u{2212} backtrack"),
+        raw.reason.contains("minus the backtrack window"),
         "{}",
         raw.reason
     );
 
-    // A sync message with emoji (v4's success lines) and arrows.
+    // A sync message with emoji (v4's success lines), and the symbols of the windows in words
+    // (`last sync − 1 day → latest data`).
     let extra = PipeRef::new(KEYS, KEYS, &format!("w17bg1_extra_{tag}"), None);
     let mut row = meerschaum_engine::NodeRow::new(
         &id,
         &extra,
         meerschaum_engine::Action::Skip,
-        "watermark advanced 10:00 \u{2192} 11:00; [a, b) \u{222a} [c, d)",
+        "last sync \u{2212} 1 day \u{2192} latest data; [a, b) \u{222a} [c, d)",
     );
     row.message = Some("\u{2705} Synced 3 rows \u{1f389} \u{2014} caf\u{e9}".into());
     let doc = meerschaum_engine::instance_state::node_doc(&row, stored.run.started);

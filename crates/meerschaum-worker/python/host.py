@@ -100,13 +100,28 @@ def parse_plugin_args(conn, call_id, args, frames):
 original_manifest = _ops.HANDLERS['build_manifest']
 
 
+def handles_loop(function):
+    """Whether an action function takes `loop` itself (4.1's `def poll(loop=False, ...)`): it
+    repeats with `--loop` on its own, so the host must not run it in laps."""
+    import inspect
+    try:
+        parameter = inspect.signature(function).parameters.get('loop', None)
+    except (TypeError, ValueError):
+        return False
+    return parameter is not None and parameter.kind not in (
+        inspect.Parameter.VAR_POSITIONAL,
+        inspect.Parameter.VAR_KEYWORD,
+    )
+
+
 def manifest(conn, call_id, args, frames):
     value, result_frames = original_manifest(conn, call_id, args, frames)
-    from meerschaum.actions import get_completer
+    from meerschaum.actions import get_completer, actions
     # The SDK builder owns the manifest version; enrichment must not downgrade it.
     for plugin in value.get('plugins', {}).values():
         for action in plugin.get('actions', []):
             action['has_completer'] = get_completer(action['name']) is not None
+            action['handles_loop'] = handles_loop(actions.get(action['name'], None))
     return value, result_frames
 
 

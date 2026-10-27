@@ -184,8 +184,7 @@ async fn a_second_graph_run_sees_the_first_runs_state() {
     assert!(second.success, "{}", second.message);
     let (action, reason) = planned(&second, &b);
     assert_eq!(action, Action::Skip, "{reason}");
-    assert!(!reason.contains("first engine run"), "{reason}");
-    assert!(!reason.contains("no cursor"), "{reason}");
+    assert!(!reason.contains("first run with"), "{reason}");
     assert_eq!(status(&second, &b), NodeStatus::Skipped);
 
     // New parent rows: the child syncs incrementally from its cursor.

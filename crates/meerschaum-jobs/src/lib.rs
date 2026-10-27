@@ -12,6 +12,7 @@
 //! jobs/<name>/input.stdin        FIFO (0600) feeding the job's stdin; input.stdin.block while waiting
 //! jobs/<name>/.stop.json         {"stop_time": ..., "action": "quit" | "kill" | "pause"}
 //! jobs/<name>/prompt_kwargs.json, .externally-managed, pickle.pkl (Python only)
+//! jobs/<name>/laps.json          lap heartbeats of a looping job (v5, see [`health`])
 //! logs/<name>.log.<n>            rotating log subfiles; logs/.<name>.log.offset is the read cursor
 //! ```
 //!
@@ -25,7 +26,7 @@
 //!   client); [`systemd_job`] is what runs inside a unit;
 //! - [`rotating`], [`stdin`], [`properties`]: the file formats;
 //! - [`schedule`]: the `-s` grammar; [`laps`]: the lap loop; [`scheduler`]: per-root schedule
-//!   and debounce state;
+//!   and debounce state; [`health`]: the lap heartbeats of a job and the health computed from them;
 //! - [`startup`]: the per-root startup admission gate (jitter, load and memory checks, file-lock
 //!   slots) every job passes before its worker starts.
 //!
@@ -37,6 +38,7 @@ pub mod config;
 pub mod daemon;
 pub mod detached;
 pub mod executor;
+pub mod health;
 pub mod job;
 pub mod laps;
 pub mod names;
@@ -58,8 +60,9 @@ pub mod systemd_job;
 pub use config::{JobPaths, JobsConfig, Seconds};
 pub use daemon::{Daemon, JobsContext, Status};
 pub use executor::{JobExecutor, LocalExecutor, get_jobs};
+pub use health::{HealthState, Heartbeat, JobHealth};
 pub use job::{Job, JobOptions, MonitorControl, MonitorOptions};
-pub use laps::{LoopControl, LoopRunner, SleepFrom};
+pub use laps::{LapPacer, LapPause, LoopControl, LoopRunner, SleepFrom};
 pub use remote::{RemoteJobs, RemoteJobsResolver};
 pub use rotating::RotatingFile;
 pub use runner::{FakeSystemctl, ProcessRunner, SystemRunner};

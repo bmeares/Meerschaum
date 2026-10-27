@@ -44,7 +44,7 @@
          {"begin": "2026-10-12T00:00:00Z", "end": "2026-10-12T06:00:00Z"}
        ],
        "provisional": true,
-       "reason_contains": ["Pipe('plugin:shop', 'orders') watermark advanced 2026-10-12 05:00 → 2026-10-12 06:00 since its cursor"]}
+       "reason_contains": ["Pipe('plugin:shop', 'orders') has new data (its latest data moved from 2026-10-12 05:00 to 2026-10-12 06:00)"]}
     ]
   }
 }

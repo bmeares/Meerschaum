@@ -137,8 +137,8 @@
           }
         ],
         "reason_contains": [
-          "definition changed",
-          "confirm or pass --yes"
+          "its definition changed",
+          "approve it, or pass --yes"
         ]
       },
       {
@@ -160,7 +160,7 @@
         ],
         "provisional": true,
         "reason_contains": [
-          "Pipe('sql:main', 'orders_clean') watermark advanced 2026-10-12 08:00 → 2026-10-12 09:00"
+          "Pipe('sql:main', 'orders_clean') has new data (its latest data moved from 2026-10-12 08:00 to 2026-10-12 09:00)"
         ]
       }
     ]

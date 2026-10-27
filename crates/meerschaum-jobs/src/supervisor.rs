@@ -583,7 +583,16 @@ mod imp {
             .stdin(stdin)
             .stdout(Stdio::from(out_w))
             .stderr(Stdio::from(err_w))
-            .env(RESULT_PATH_ENV, &result_path);
+            .env(RESULT_PATH_ENV, &result_path)
+            // The worker's lap heartbeats (job health): see `crate::health`.
+            .env(
+                crate::health::LAPS_PATH_ENV,
+                dpaths.dir.join(crate::health::LAPS_FILE_NAME),
+            )
+            .env(
+                crate::health::LAPS_PARENT_ENV,
+                std::process::id().to_string(),
+            );
         if let Some(a) = &admission {
             cmd.env(crate::startup::RELEASE_ENV, a.release_env());
         }

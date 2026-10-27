@@ -326,6 +326,14 @@ pub trait JobOps {
     fn take_warnings(&mut self) -> Vec<String> {
         Vec::new()
     }
+
+    /// Whether the listed job `name` is a `local` job that starting it again moves to the
+    /// project's `systemd` executor (Meerschaum before rc15 ran the jobs of every root but the
+    /// default one locally). `up` then does not delete it first: the move stops it and keeps its
+    /// logs. The default never moves a job.
+    fn moves_to_systemd(&mut self, _name: &str) -> bool {
+        false
+    }
 }
 
 /// A fixed set of jobs.

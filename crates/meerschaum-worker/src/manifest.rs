@@ -72,6 +72,37 @@ pub struct ActionManifest {
     /// Subactions defined in the plugin module (`<action>_<sub>`).
     #[serde(default)]
     pub subactions: Vec<SubactionManifest>,
+    /// The words that run the action: `@make_action(name='weather wait')` gives
+    /// `["weather", "wait"]` (registered as `weather_wait`), an underscore name splits on `_`.
+    /// Empty in a manifest built before the field existed: split [`ActionManifest::name`] then.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub words: Vec<String>,
+    /// Whether the action function takes a `loop` parameter (4.1's `def poll(loop=False, ...)`):
+    /// it repeats itself with `--loop`, so the host does not run it in laps. Written by the
+    /// host's worker extension for every action; `None` in a manifest cached before rc15, which
+    /// is stale for that reason ([`stale_plugins`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub handles_loop: Option<bool>,
+}
+
+impl ActionManifest {
+    /// The words that run the action ([`ActionManifest::words`], else the name split on `_`).
+    pub fn action_words(&self) -> Vec<String> {
+        if !self.words.is_empty() {
+            return self.words.clone();
+        }
+        let words: Vec<String> = self
+            .name
+            .split('_')
+            .filter(|word| !word.is_empty())
+            .map(str::to_string)
+            .collect();
+        if words.is_empty() {
+            vec![self.name.clone()]
+        } else {
+            words
+        }
+    }
 }
 
 fn default_true() -> bool {
@@ -667,8 +698,16 @@ fn tracked_staleness(manifest: &Manifest, plugins_dirs: &[PathBuf]) -> (bool, Ve
             changed.push(name.clone());
         }
     }
+    // A manifest cached before rc15 has no `handles_loop` on its actions: rebuild it once (the
+    // host's worker extension writes the field for every action), as a schema bump would.
+    let predates_fields = manifest
+        .plugins
+        .values()
+        .flat_map(|p| &p.actions)
+        .any(|a| a.handles_loop.is_none());
     let stale = manifest.schema_version != MANIFEST_SCHEMA_VERSION
-        || manifest.fingerprint.as_deref() != Some(combined.as_str());
+        || manifest.fingerprint.as_deref() != Some(combined.as_str())
+        || predates_fields;
     if stale && changed.is_empty() {
         // Added plugins (listed nowhere yet) and a schema bump have no per-plugin report.
         changed.extend(
@@ -886,6 +925,55 @@ mod tests {
     }
 
     #[test]
+    fn a_manifest_cached_before_handles_loop_is_rebuilt_once() {
+        let plugins = tempfile::tempdir().unwrap();
+        std::fs::create_dir(plugins.path().join("poll")).unwrap();
+        std::fs::write(
+            plugins.path().join("poll").join("__init__.py"),
+            "def poll(loop=False):\n    pass\n",
+        )
+        .unwrap();
+        let dirs = vec![plugins.path().to_path_buf()];
+        let mut manifest = Manifest {
+            schema_version: MANIFEST_SCHEMA_VERSION,
+            ..Default::default()
+        };
+        manifest.plugins.insert(
+            "poll".into(),
+            PluginManifest {
+                name: "poll".into(),
+                actions: vec![ActionManifest {
+                    name: "poll".into(),
+                    ..ActionManifest::default()
+                }],
+                ..PluginManifest::default()
+            },
+        );
+        let (combined, per_plugin) =
+            fingerprint_sources(&tracked_sources(&dirs, &manifest.plugins));
+        manifest.fingerprint = Some(combined);
+        for (name, plugin) in manifest.plugins.iter_mut() {
+            plugin.fingerprint = per_plugin.get(name).cloned();
+        }
+        // Unchanged plugins, but no `handles_loop` (an rc14 cache): stale, so `--loop` knows
+        // whether the action repeats itself.
+        assert!(stale_plugins(&manifest, &dirs).0);
+        // Rebuilt by this version: fresh again.
+        for plugin in manifest.plugins.values_mut() {
+            for action in &mut plugin.actions {
+                action.handles_loop = Some(true);
+            }
+        }
+        assert_eq!(stale_plugins(&manifest, &dirs), (false, vec![]));
+        // Older manifests read as before; the field round-trips.
+        let json = serde_json::to_value(&manifest.plugins["poll"].actions[0]).unwrap();
+        assert_eq!(json["handles_loop"], serde_json::json!(true));
+        let legacy: ActionManifest =
+            serde_json::from_value(serde_json::json!({"name": "poll"})).unwrap();
+        assert_eq!(legacy.handles_loop, None);
+    }
+
+    #[test]
     fn fingerprint_tracks_changes() {
         let dir = tempfile::tempdir().unwrap();
         let dirs = vec![dir.path().to_path_buf()];
@@ -1081,6 +1169,36 @@ mod tests {
         assert_eq!(fingerprint(&dirs), before);
         std::fs::write(package.join("mod.py"), "").unwrap();
         assert_ne!(fingerprint(&dirs), before);
+    }
+
+    #[test]
+    fn action_words_come_from_make_action_names_else_underscores() {
+        // `@make_action(name='weather wait_for')` keeps the `_` of a word; an older manifest has no
+        // `words` and splits the name.
+        let named: ActionManifest = serde_json::from_value(serde_json::json!({
+            "name": "weather_wait_for",
+            "words": ["weather", "wait_for"],
+        }))
+        .unwrap();
+        assert_eq!(named.action_words(), vec!["weather", "wait_for"]);
+        let legacy: ActionManifest =
+            serde_json::from_value(serde_json::json!({"name": "weather_wait"})).unwrap();
+        assert!(legacy.words.is_empty());
+        assert_eq!(legacy.action_words(), vec!["weather", "wait"]);
+        assert_eq!(
+            ActionManifest {
+                name: "_".into(),
+                ..ActionManifest::default()
+            }
+            .action_words(),
+            vec!["_"]
+        );
+        // Written only when known, so manifests without it keep their exact shape.
+        let text = serde_json::to_string(&legacy).unwrap();
+        assert!(!text.contains("words"));
+        assert!(serde_json::to_string(&named).unwrap().contains("\"words\""));
+        let schema: serde_json::Value = serde_json::from_str(MANIFEST_JSON_SCHEMA).unwrap();
+        assert!(schema["$defs"]["action"]["properties"]["words"].is_object());
     }
 
     #[test]

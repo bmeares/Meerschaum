@@ -13,7 +13,13 @@ use crate::project::{get_project_name, py_type_name};
 use crate::shlex;
 
 /// Flags which don't identify a job's workload (`NON_IDENTIFYING_FLAGS`).
-pub const NON_IDENTIFYING_FLAGS: &[&str] = &["-d", "--daemon", "--no-daemon", "--debug"];
+pub const NON_IDENTIFYING_FLAGS: &[&str] = &[
+    "-d",
+    "--daemon",
+    "--no-daemon",
+    "--debug",
+    "--allow-protected",
+];
 
 /// Flags with a value which don't identify a job's workload either: the startup and schedule
 /// jitter (`daemon:` settings) of D23.
@@ -38,32 +44,10 @@ pub fn explicit_job_name(command: &[String]) -> Option<String> {
 }
 
 /// `compress_pipeline_sysargs(sysargs)` from `meerschaum/_internal/arguments/_parse_arguments.py`:
-/// turn a recorded `start pipeline ... -P '{"sub_args_line": ...}'` back into its compound form.
+/// turn a recorded action chain (`chain ... -P '{"sub_args_line": ...}'`, or v4's `start pipeline
+/// ...` form) back into its compound form (see [`meerschaum_core::chain`]).
 pub fn compress_pipeline_sysargs(sysargs: &[String]) -> Vec<String> {
-    if sysargs.len() < 2 || sysargs[0] != "start" || sysargs[1] != "pipeline" {
-        return sysargs.to_vec();
-    }
-    let Some(params_ix) = sysargs.iter().position(|a| a == "-P") else {
-        return sysargs.to_vec();
-    };
-    let pipeline_args = &sysargs[2..params_ix];
-    let params_str = sysargs.last().cloned().unwrap_or_default();
-    let Ok(Value::Map(params)) = Value::from_json_str(&params_str) else {
-        return sysargs.to_vec();
-    };
-    let Some(line) = params
-        .get("sub_args_line")
-        .filter(|v| v.truthy())
-        .map(py_str)
-    else {
-        return sysargs.to_vec();
-    };
-    let Ok(mut out) = shlex::split(&line) else {
-        return sysargs.to_vec();
-    };
-    out.push(":".into());
-    out.extend(pipeline_args.iter().cloned());
-    out
+    meerschaum_core::chain::compress(sysargs)
 }
 
 /// `_command_signature(sysargs)`.
@@ -450,6 +434,33 @@ mod tests {
         assert_eq!(
             get_project_job_names(&cfg, &[], &jobs, &mut Messages::default()).unwrap(),
             s(&["recompute"])
+        );
+    }
+
+    #[test]
+    fn compound_jobs_in_the_current_chain_form_are_adopted() {
+        let cfg = config(
+            r#"{"project_name": "maps", "jobs": {"maps": "sync pipes -c plugin:osm -t maps + sync pipes -c sql:acme -m segments -t maps : --loop --min-seconds 604800 -w 1"}}"#,
+        );
+        let params = r#"{"sub_args_line":"sync pipes -c plugin:osm -t maps + sync pipes -c sql:acme -m segments -t maps","patch_args":null}"#;
+        let running = [
+            "chain",
+            "--loop",
+            "--min-seconds",
+            "604800",
+            "-w",
+            "1",
+            "--name",
+            "maps",
+            "-f",
+            "-P",
+            params,
+        ];
+        let mut jobs = IndexMap::new();
+        jobs.insert("maps".to_string(), job(&running));
+        assert_eq!(
+            get_project_job_names(&cfg, &[], &jobs, &mut Messages::default()).unwrap(),
+            s(&["maps"])
         );
     }
 

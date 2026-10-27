@@ -272,6 +272,8 @@ mod tests {
             stored_definition_hash: None,
             watermark: None,
             warnings: vec![],
+            backtrack: None,
+            bounds_text: String::new(),
         }
     }
 

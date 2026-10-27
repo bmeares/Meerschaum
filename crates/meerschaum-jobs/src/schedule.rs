@@ -742,6 +742,35 @@ pub fn parse_schedule_jittered(
     ))
 }
 
+/// The longest gap between a schedule's next few fire times, in seconds (`every 10 minutes`:
+/// 600; `weekly`: a week). `None` for a schedule that does not parse, fires fewer than twice, or
+/// combines schedules with `and` (finding its fire times can take long). Job health expects a
+/// scheduled job's laps this often.
+pub fn period_seconds(schedule: &str) -> Option<f64> {
+    period_seconds_at(schedule, chrono::Utc::now().fixed_offset())
+}
+
+fn period_seconds_at(schedule: &str, now: Fire) -> Option<f64> {
+    let mut trigger = parse_schedule(schedule, now).ok()?;
+    let combined = |t: &Trigger| match t {
+        Trigger::And(..) => true,
+        Trigger::Jittered(inner, _) => matches!(inner.as_ref(), Trigger::And(..)),
+        _ => false,
+    };
+    if combined(&trigger) {
+        return None;
+    }
+    let mut previous = trigger.next()?;
+    let mut longest: Option<f64> = None;
+    for _ in 0..4 {
+        let Some(next) = trigger.next() else { break };
+        let gap = (next - previous).num_milliseconds() as f64 / 1000.0;
+        longest = Some(longest.map_or(gap, |l: f64| l.max(gap)));
+        previous = next;
+    }
+    longest.filter(|s| *s > 0.0)
+}
+
 fn parse_schedule_unjittered(schedule: &str, now: Fire) -> Result<Trigger, ScheduleError> {
     let schedule = canonicalize_starting_keyword(schedule);
     let starting_ts = parse_start_time(&schedule, Some(now))?;
@@ -1095,6 +1124,19 @@ mod tests {
             isoformat(&t.next().unwrap()),
             "2025-03-17T16:26:53.589793+00:00"
         );
+    }
+
+    #[test]
+    fn periods_are_the_longest_gap_between_fires() {
+        assert_eq!(period_seconds_at("every 10 minutes", now()), Some(600.0));
+        assert_eq!(period_seconds_at("daily", now()), Some(86400.0));
+        assert_eq!(period_seconds_at("hourly", now()), Some(3600.0));
+        assert_eq!(period_seconds_at("weekly", now()), Some(7.0 * 86400.0));
+        assert_eq!(period_seconds_at("not a schedule", now()), None);
+        // Combined schedules are not searched (their fire times can take long to find).
+        let begin = std::time::Instant::now();
+        assert_eq!(period_seconds_at("daily and mon-fri", now()), None);
+        assert!(begin.elapsed() < std::time::Duration::from_secs(1));
     }
 
     #[test]

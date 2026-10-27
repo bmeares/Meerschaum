@@ -373,8 +373,82 @@ fn executors() {
     let stopped = systemd.stop_job("x");
     // The unit was never loaded, so it is already stopped (v4 reports success then).
     assert!(stopped.success);
-    assert_eq!(
-        fake.rendered_calls().first().map(String::as_str),
-        Some("kill -s SIGINT mrsm-x.service")
+    // A scratch root's units are scoped by a hash of the root (`mrsm-<hash>.x.service`).
+    let service = meerschaum_jobs::systemd::SystemdExecutor::new(ctx.clone()).get_service_name("x");
+    assert!(
+        service.starts_with("mrsm-") && service.ends_with(".x.service"),
+        "{service}"
     );
+    assert_eq!(
+        fake.rendered_calls().first().cloned(),
+        Some(format!("kill -s SIGINT {service}"))
+    );
+}
+
+/// The supervisor hands the worker its heartbeat file (`MRSM_JOB_LAPS_PATH`, in the job's
+/// directory), and `Job::health` reads what the worker records there.
+#[test]
+fn a_worker_records_its_laps_and_the_job_reports_its_health() {
+    use meerschaum_jobs::health::{HealthState, Heartbeat, LAPS_FILE_NAME, read_record};
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = common::sh_context(dir.path());
+    // The worker shows where its heartbeats go, then waits to be stopped.
+    let mut job = sh_job(
+        &ctx,
+        "laps",
+        "echo \"laps=$MRSM_JOB_LAPS_PATH\"; sleep 30",
+        JobOptions::default(),
+    );
+    // Not running, nothing recorded.
+    assert_eq!(job.health().state, HealthState::Stopped);
+    assert!(job.start().success);
+    let path = dir.path().join("jobs").join("laps").join(LAPS_FILE_NAME);
+    let expected = format!("laps={}", path.display());
+    assert!(
+        common::wait_for(20.0, || job
+            .get_logs()
+            .is_some_and(|logs| logs.contains(&expected))),
+        "{:?}",
+        job.get_logs()
+    );
+    // Running, without a heartbeat (a job that does not lap): unknown.
+    assert!(common::wait_for(10.0, || job.status() == Status::Running));
+    let unknown = job.health();
+    assert_eq!(unknown.state, HealthState::Unknown);
+    assert_eq!(unknown.message, "no laps recorded");
+
+    // What a looping worker writes (here from the test, at the path the worker was given).
+    {
+        let mut heartbeat = Heartbeat::at(Some(path.clone()), Some(60.0), "sync");
+        heartbeat.lap_started();
+        heartbeat.lap_finished(true, "Synced 3 pipes.");
+    }
+    let healthy = job.health();
+    assert_eq!(healthy.state, HealthState::Healthy, "{healthy:?}");
+    assert_eq!(healthy.message, "last good sync just now");
+    assert_eq!(healthy.expected_interval_seconds, Some(60.0));
+    {
+        let mut heartbeat = Heartbeat::at(Some(path.clone()), Some(60.0), "sync");
+        heartbeat.lap_started();
+        heartbeat.lap_finished(false, "Failed to sync.");
+        heartbeat.lap_started();
+        heartbeat.lap_finished(false, "Failed to sync.");
+    }
+    let failing = job.health();
+    assert_eq!(failing.state, HealthState::Failing);
+    assert_eq!(failing.consecutive_failures, 2);
+    assert!(
+        failing.message.starts_with("last 2 laps failed"),
+        "{failing:?}"
+    );
+    assert_eq!(read_record(&path).unwrap().laps, 3);
+
+    assert!(job.stop(None).success);
+    wait_stopped(&mut job);
+    let stopped = job.health();
+    assert_eq!(stopped.state, HealthState::Stopped);
+    assert_eq!(stopped.consecutive_failures, 2);
+    // Deleting the job deletes its heartbeats with it.
+    assert!(job.delete().success);
+    assert!(!path.exists());
 }

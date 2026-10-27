@@ -378,6 +378,9 @@ pub struct InstanceState {
     home: String,
     pipes: RwLock<HashMap<PipeRef, Pipe>>,
     seq_locks: Mutex<HashMap<(String, PipeRef), SeqLock>>,
+    /// The pipes whose sync statuses this state recorded since the last
+    /// [`InstanceState::flush_sync_statuses`] ([`StateWriter::record_sync_status`]).
+    status_refs: Mutex<std::collections::HashSet<String>>,
 }
 
 impl std::fmt::Debug for InstanceState {
@@ -396,6 +399,19 @@ impl InstanceState {
             home: home_instance.to_string(),
             pipes: RwLock::new(HashMap::new()),
             seq_locks: Mutex::new(HashMap::new()),
+            status_refs: Mutex::new(std::collections::HashSet::new()),
+        }
+    }
+
+    /// Wait (up to `timeout`) until the sync statuses recorded so far
+    /// ([`StateWriter::record_sync_status`]) are written; successes the debounce holds stay held
+    /// (a `--loop` keeps its write rate). A run awaits this before it returns, so its statuses
+    /// are stored when it reports; the process writes the held ones before it exits
+    /// ([`meerschaum_connector::sync_status::flush`]).
+    pub async fn flush_sync_statuses(&self, timeout: std::time::Duration) {
+        let refs = std::mem::take(&mut *self.status_refs.lock().unwrap_or_else(|e| e.into_inner()));
+        if !refs.is_empty() {
+            meerschaum_connector::sync_status::wait_written(&refs, timeout).await;
         }
     }
 
@@ -969,6 +985,25 @@ impl StateWriter for InstanceState {
             .await?;
         }
         Ok(seqs.len())
+    }
+
+    fn record_sync_status(&self, node: &PipeRef, outcome: crate::status::SyncOutcome) {
+        let pipe = self.pipe_for(node);
+        if !meerschaum_connector::sync_status::is_recorded(&pipe) {
+            return;
+        }
+        let conn = match self.registry.instance(node.instance_keys()) {
+            Ok(conn) => conn,
+            Err(e) => {
+                tracing::debug!("Cannot record the sync status of {}: {e}", node.label());
+                return;
+            }
+        };
+        meerschaum_connector::sync_status::record(conn, &pipe, outcome);
+        self.status_refs
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(pipe.pipe_ref());
     }
 
     async fn record_run(&self, run: &RunRecord) -> Result<(), StateError> {

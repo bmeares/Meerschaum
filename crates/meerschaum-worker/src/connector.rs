@@ -819,7 +819,8 @@ impl InstanceConnector for PythonConnector {
         let reply = self
             .call_method("fetch_pipes_keys", None, Vec::new(), kw, None)
             .await?;
-        match &reply.value {
+        // Meerschaum's internal pipes stay out of listings unless the query names `mrsm`.
+        let keys = match &reply.value {
             Wire::Map(m) => {
                 let mut out = IndexMap::new();
                 for (k, v) in m {
@@ -841,7 +842,8 @@ impl InstanceConnector for PythonConnector {
             other => Err(ConnectorError::Invalid(format!(
                 "`fetch_pipes_keys()` returned {other}."
             ))),
-        }
+        }?;
+        Ok(meerschaum_connector::hide_internal_pipes(query, keys))
     }
 
     async fn pipe_exists(&self, pipe: &Pipe) -> ConnectorResult<bool> {

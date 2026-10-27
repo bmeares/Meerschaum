@@ -126,8 +126,8 @@
         "provisional": true,
         "consumes": [],
         "reason_contains": [
-          "definition changed",
-          "descendants run against the stale data"
+          "its definition changed",
+          "pipes downstream use its current data"
         ]
       },
       {
@@ -149,7 +149,7 @@
         ],
         "provisional": false,
         "reason_contains": [
-          "Pipe('sql:main', 'orders_clean') watermark advanced 2026-10-12 08:00 → 2026-10-12 09:00"
+          "Pipe('sql:main', 'orders_clean') has new data (its latest data moved from 2026-10-12 08:00 to 2026-10-12 09:00)"
         ]
       }
     ]

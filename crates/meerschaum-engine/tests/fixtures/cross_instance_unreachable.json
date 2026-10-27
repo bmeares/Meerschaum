@@ -34,9 +34,9 @@
       {"node": "sql:landing|plugin:sensors|readings|None", "action": "root", "bounds": {"begin": "", "end": null}},
       {"node": "sql:warehouse|sql:landing|readings_hourly|None", "action": "upstream_failed", "bounds": null,
        "provisional": true,
-       "reason_contains": ["cannot read the watermark of Pipe('plugin:sensors', 'readings', instance='sql:landing')", "instance 'sql:landing' is unreachable"]},
+       "reason_contains": ["cannot read the latest data of Pipe('plugin:sensors', 'readings', instance='sql:landing')", "instance 'sql:landing' is unreachable"]},
       {"node": "sql:warehouse|sql:warehouse|readings_daily|None", "action": "upstream_failed", "bounds": null,
-       "reason_contains": ["parent Pipe('sql:landing', 'readings_hourly') failed"]}
+       "reason_contains": ["not synced because its parent Pipe('sql:landing', 'readings_hourly') failed"]}
     ]
   }
 }

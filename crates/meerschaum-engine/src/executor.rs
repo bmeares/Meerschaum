@@ -474,6 +474,9 @@ enum TaskOutput {
         result: SyncResult,
         started: chrono::DateTime<Utc>,
         elapsed: Duration,
+        /// The attempt never synced: another holder kept the pipe's lease (another process is
+        /// syncing it, and records that sync itself).
+        contended: bool,
     },
     Retry(PipeRef),
 }
@@ -538,6 +541,15 @@ where
                 self.persisted_rows.insert(row.pipe_ref.clone(), row);
             }
         }
+    }
+
+    /// Record a node's final sync outcome in its pipe's sync status (C2, [`crate::status`]).
+    fn record_status(&self, r: &PipeRef, result: &SyncResult, elapsed: Option<Duration>) {
+        let mut outcome = crate::status::outcome_of(result, !self.flat);
+        if outcome.duration_seconds.is_none() {
+            outcome.duration_seconds = elapsed.map(|d| d.as_secs_f64());
+        }
+        self.ctx.state.record_sync_status(r, outcome);
     }
 
     fn finish(&mut self, r: &PipeRef, status: NodeStatus, message: Option<String>) {
@@ -619,7 +631,7 @@ where
                 row.attempts = row.attempts.max(1);
                 row.action = Action::Incremental;
                 row.reason = format!(
-                    "pre-synced while its parents ran (chunk pipelining); {}",
+                    "pre-synced chunk by chunk while its parents ran; {}",
                     node.reason
                 );
                 row.finished = Some(Utc::now());
@@ -631,6 +643,7 @@ where
                 row.deleted = result.deleted;
             }
             self.on_success(r, &result).await;
+            self.record_status(r, &result, None);
             self.finish(r, NodeStatus::Succeeded, None);
             return false;
         }
@@ -646,7 +659,7 @@ where
             Action::Rebuild => (
                 NodeStatus::RebuildPending,
                 EventKind::NodeRebuildPending {
-                    reason: format!("{}; not confirmed", node.reason),
+                    reason: format!("{}; the rebuild was not approved", node.reason),
                 },
             ),
             Action::RebuildPending => (
@@ -664,7 +677,7 @@ where
             Action::UpstreamFailed => (
                 NodeStatus::UpstreamFailed,
                 EventKind::NodeSkipped {
-                    reason: format!("upstream_failed: {}", node.reason),
+                    reason: node.reason.clone(),
                 },
             ),
             _ => (
@@ -871,6 +884,22 @@ fn try_permits(
     Some(permits)
 }
 
+/// A run's summary in plain words, listing only the counts that are not zero: `2 synced, 1 up
+/// to date` (`Nothing to sync.` for a run of no pipes). The machine-readable counts are the
+/// run's node rows ([`RunRecord::nodes`]).
+pub fn run_summary(counts: &[(usize, &str)]) -> String {
+    let parts: Vec<String> = counts
+        .iter()
+        .filter(|(n, _)| *n > 0)
+        .map(|(n, what)| format!("{n} {what}"))
+        .collect();
+    if parts.is_empty() {
+        "Nothing to sync.".to_string()
+    } else {
+        parts.join(", ")
+    }
+}
+
 /// Combine an early pass's result with the next pass's.
 fn merge_results(first: SyncResult, second: SyncResult) -> SyncResult {
     let mut out = second;
@@ -986,13 +1015,14 @@ fn spawn_sync<E: SyncExecutor, L: LeaseSource>(
             let _permits = permits;
             let started = Utc::now();
             let t0 = tokio::time::Instant::now();
-            let done = |result: SyncResult| TaskOutput::Done {
+            let done = |result: SyncResult, contended: bool| TaskOutput::Done {
                 early,
                 pipe_ref: request.pipe_ref.clone(),
                 attempt,
                 result,
                 started,
                 elapsed: t0.elapsed(),
+                contended,
             };
             let deadline = t0 + wait;
             let mut errored = false;
@@ -1013,19 +1043,22 @@ fn spawn_sync<E: SyncExecutor, L: LeaseSource>(
                         tokio::time::sleep(poll).await;
                     }
                     Ok(false) => {
-                        return done(SyncResult::new(
-                            false,
-                            format!(
-                                "the lease on {} is held by another process",
-                                request.pipe_ref.label()
+                        return done(
+                            SyncResult::new(
+                                false,
+                                format!(
+                                    "another process is syncing {} (it holds the pipe's lease)",
+                                    request.pipe_ref.label()
+                                ),
                             ),
-                        ));
+                            true,
+                        );
                     }
                     Err(e) => {
-                        return done(SyncResult::new(
+                        return done(
+                            SyncResult::new(false, format!("cannot acquire the lease: {e}")),
                             false,
-                            format!("cannot acquire the lease: {e}"),
-                        ));
+                        );
                     }
                 }
             }
@@ -1059,6 +1092,7 @@ fn spawn_sync<E: SyncExecutor, L: LeaseSource>(
                 result,
                 started,
                 elapsed: t0.elapsed(),
+                contended: false,
             }
         });
 }
@@ -1450,6 +1484,7 @@ where
                 result,
                 started,
                 elapsed,
+                contended,
                 ..
             } => {
                 d.progress.finish(&r);
@@ -1489,6 +1524,7 @@ where
                         row.deleted = result.deleted;
                     }
                     d.on_success(&r, &result).await;
+                    d.record_status(&r, &result, Some(elapsed));
                     d.finish(&r, NodeStatus::Succeeded, None);
                 } else {
                     let policy = ctx
@@ -1513,6 +1549,11 @@ where
                             TaskOutput::Retry(r)
                         });
                     } else {
+                        // A lease held by another process: that process is syncing the pipe
+                        // and records its own outcome; this attempt synced nothing.
+                        if !contended {
+                            d.record_status(&r, &result, Some(elapsed));
+                        }
                         d.finish(&r, NodeStatus::Failed, Some(result.message.clone()));
                     }
                 }
@@ -1527,13 +1568,15 @@ where
     let upstream_failed = count(NodeStatus::UpstreamFailed);
     let pending = count(NodeStatus::RebuildPending);
     let success = failed == 0 && upstream_failed == 0 && count(NodeStatus::Pending) == 0;
-    let mut message = format!(
-        "{} succeeded, {} skipped, {} observed, {failed} failed, {upstream_failed} upstream_failed, \
-         {pending} rebuild_pending",
-        count(NodeStatus::Succeeded),
-        count(NodeStatus::Skipped),
-        count(NodeStatus::Observed),
-    );
+    let mut message = run_summary(&[
+        (count(NodeStatus::Succeeded), "synced"),
+        (count(NodeStatus::Skipped), "up to date"),
+        (count(NodeStatus::Observed), "listening for new data"),
+        (failed, "failed"),
+        (upstream_failed, "not synced because a parent failed"),
+        (pending, "waiting for rebuild approval"),
+        (count(NodeStatus::Pending), "not started"),
+    ]);
     for w in &d.state_warnings {
         message.push_str("\nwarning: ");
         message.push_str(w);

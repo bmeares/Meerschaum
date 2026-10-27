@@ -1,7 +1,7 @@
 //! The host registry and callback path use the engine's native sync flow.
 mod common;
 use common::*;
-use meerschaum_connector::DataQuery;
+use meerschaum_connector::{DataQuery, InstanceConnector};
 use meerschaum_core::{Map, Value};
 use meerschaum_engine::{ConnectorRegistry, python::PythonRegistry};
 use meerschaum_kernel::value::Value as KValue;
@@ -246,6 +246,15 @@ import_plugins()
         result.inserted, 1,
         "callback counts belong to the enclosing node"
     );
+    // The plugin's sync (with its `pipe.sync()` callback inside) is one recorded sync (C2).
+    let status = env
+        .conn
+        .get_sync_status(&pipe)
+        .await
+        .unwrap()
+        .expect("the plugin's sync is recorded");
+    assert!(status.success, "{status:?}");
+    assert_eq!((status.rows_inserted, status.consecutive_failures), (1, 0));
     let result = engine.sync_pipe(&pipe, None, &SyncArgs::default()).await;
     assert!(result.success, "{}", result.message);
     let data = env

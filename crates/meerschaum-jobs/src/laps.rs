@@ -241,9 +241,162 @@ impl LoopRunner {
     }
 }
 
+/// What a synchronous loop does between two laps (see [`LapPacer`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum LapPause {
+    /// The lap succeeded: wait this long (`--min-seconds`).
+    Sleep(Duration),
+    /// The lap failed: wait this cooldown before trying again.
+    Cooldown(Duration),
+}
+
+impl LapPause {
+    /// How long to wait.
+    pub fn duration(self) -> Duration {
+        match self {
+            LapPause::Sleep(d) | LapPause::Cooldown(d) => d,
+        }
+    }
+}
+
+/// The longest a [`LapPacer`]'s cooldown grows to: a loop that keeps failing (an outage of a
+/// day) tries again at least hourly, unless its first cooldown is already longer.
+pub const MAX_COOLDOWN_SECONDS: f64 = 3600.0;
+
+/// The pace of a synchronous lap loop (`mrsm <action> --loop`): the same rules as [`LoopRunner`]
+/// and `sync pipes --loop` for callers that run each lap on their own thread. A successful lap
+/// is followed by `min_seconds` (after the lap ends by default, like `sync pipes --loop`); a
+/// failed one by a cooldown of `2 * (min_seconds + 1)` seconds, growing by half on consecutive
+/// failures up to [`MAX_COOLDOWN_SECONDS`] (or the first cooldown, when that is longer).
+#[derive(Debug, Clone)]
+pub struct LapPacer {
+    min_seconds: f64,
+    sleep_from: SleepFrom,
+    cooldown: f64,
+}
+
+impl LapPacer {
+    /// A pacer for `--min-seconds` (negative values count as 0), sleeping after each lap ends.
+    pub fn new(min_seconds: f64) -> LapPacer {
+        let min_seconds = if min_seconds.is_finite() {
+            min_seconds.max(0.0)
+        } else {
+            0.0
+        };
+        LapPacer {
+            min_seconds,
+            sleep_from: SleepFrom::LapEnd,
+            cooldown: LoopRunner::cooldown(min_seconds),
+        }
+    }
+
+    /// Measure the sleep from the lap's begin instead (see [`SleepFrom`]).
+    pub fn sleep_from(mut self, sleep_from: SleepFrom) -> LapPacer {
+        self.sleep_from = sleep_from;
+        self
+    }
+
+    /// `--min-seconds`.
+    pub fn min_seconds(&self) -> f64 {
+        self.min_seconds
+    }
+
+    /// The pause after a lap that began at `lap_began` and ended now.
+    pub fn after_lap(&mut self, lap_began: std::time::Instant, success: bool) -> LapPause {
+        let duration =
+            |seconds: f64| Duration::try_from_secs_f64(seconds.max(0.0)).unwrap_or(Duration::MAX);
+        if !success {
+            let pause = duration(self.cooldown);
+            let cap = MAX_COOLDOWN_SECONDS.max(LoopRunner::cooldown(self.min_seconds));
+            self.cooldown = (self.cooldown * 1.5).trunc().min(cap);
+            return LapPause::Cooldown(pause);
+        }
+        self.cooldown = LoopRunner::cooldown(self.min_seconds);
+        let min = duration(self.min_seconds);
+        LapPause::Sleep(match self.sleep_from {
+            SleepFrom::LapEnd => min,
+            SleepFrom::LapBegin => min.saturating_sub(lap_began.elapsed()),
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_pacer_sleeps_after_successes_and_backs_off_after_failures() {
+        let began = std::time::Instant::now();
+        let mut pacer = LapPacer::new(1.0);
+        assert_eq!(
+            pacer.after_lap(began, true),
+            LapPause::Sleep(Duration::from_secs(1))
+        );
+        // Cooldowns: 2 * (1 + 1) = 4, then int(4 * 1.5) = 6, then 9; a success resets them.
+        for expected in [4, 6, 9] {
+            assert_eq!(
+                pacer.after_lap(began, false),
+                LapPause::Cooldown(Duration::from_secs(expected))
+            );
+        }
+        assert_eq!(
+            pacer.after_lap(began, true).duration(),
+            Duration::from_secs(1)
+        );
+        assert_eq!(
+            pacer.after_lap(began, false),
+            LapPause::Cooldown(Duration::from_secs(4))
+        );
+        // `--min-seconds 0` loops without sleeping; a negative value counts as 0.
+        let mut fast = LapPacer::new(-3.0);
+        assert_eq!(fast.min_seconds(), 0.0);
+        assert_eq!(fast.after_lap(began, true), LapPause::Sleep(Duration::ZERO));
+        // Measured from the lap's begin, a long lap leaves no sleep.
+        let mut from_begin = LapPacer::new(0.001).sleep_from(SleepFrom::LapBegin);
+        std::thread::sleep(Duration::from_millis(5));
+        assert_eq!(
+            from_begin.after_lap(began, true),
+            LapPause::Sleep(Duration::ZERO)
+        );
+    }
+
+    #[test]
+    fn the_cooldown_stops_growing_at_an_hour() {
+        let began = std::time::Instant::now();
+        // A day of failures (`--min-seconds 1`): 4, 6, 9, ... then hourly, never days apart.
+        let mut pacer = LapPacer::new(1.0);
+        let pauses: Vec<f64> = (0..40)
+            .map(|_| pacer.after_lap(began, false).duration().as_secs_f64())
+            .collect();
+        assert_eq!(&pauses[..3], &[4.0, 6.0, 9.0]);
+        assert!(pauses.windows(2).all(|w| w[0] <= w[1]), "{pauses:?}");
+        assert_eq!(pauses.last(), Some(&MAX_COOLDOWN_SECONDS));
+        assert_eq!(
+            pauses
+                .iter()
+                .filter(|p| **p == MAX_COOLDOWN_SECONDS)
+                .count(),
+            pauses.len()
+                - pauses
+                    .iter()
+                    .position(|p| *p == MAX_COOLDOWN_SECONDS)
+                    .unwrap()
+        );
+        // A success resets it.
+        pacer.after_lap(began, true);
+        assert_eq!(
+            pacer.after_lap(began, false),
+            LapPause::Cooldown(Duration::from_secs(4))
+        );
+        // A first cooldown longer than an hour (`--min-seconds 3600`) stays as it is.
+        let mut hourly = LapPacer::new(3600.0);
+        for _ in 0..5 {
+            assert_eq!(
+                hourly.after_lap(began, false),
+                LapPause::Cooldown(Duration::from_secs(7202))
+            );
+        }
+    }
 
     fn secs(v: &[f64]) -> Vec<Duration> {
         v.iter().map(|s| Duration::from_secs_f64(*s)).collect()

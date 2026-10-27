@@ -315,7 +315,13 @@ impl Job {
                 Ok(false) => {
                     let mut props = self.daemon().memory_properties();
                     mark_persistent_job(&mut props);
-                    let created = ex.create_job(&self.name, &self.sysargs.clone(), Some(&props));
+                    // An API server of any version runs a chain in v4's `start pipeline` form.
+                    let sysargs = if self.executor_keys.starts_with("api:") {
+                        meerschaum_core::chain::to_legacy(&self.sysargs)
+                    } else {
+                        self.sysargs.clone()
+                    };
+                    let created = ex.create_job(&self.name, &sysargs, Some(&props));
                     self.warnings.extend(ex.take_warnings());
                     return created;
                 }
@@ -620,6 +626,55 @@ impl Job {
         let started = self.start();
         self.start_kind = previous;
         started
+    }
+
+    /// The job's health (see [`crate::health`]): from the heartbeat file of a local or `systemd`
+    /// job, from the server's job metadata for an `api:` job (`unknown` when the server does not
+    /// report it).
+    pub fn health(&mut self) -> crate::health::JobHealth {
+        let now = crate::pytime::utcnow();
+        let kind = self
+            .executor_keys
+            .split(':')
+            .next()
+            .unwrap_or_default()
+            .to_string();
+        match kind.as_str() {
+            "local" | "systemd" => {
+                let status = self.status();
+                let record = crate::health::read_record(&crate::health::laps_path(
+                    &self.ctx.paths.jobs_dir,
+                    &self.name,
+                ));
+                let began = if kind == "local" {
+                    self.began().map(|b| match b {
+                        PyDateTime::Aware(a) => a.with_timezone(&chrono::Utc),
+                        PyDateTime::Naive(n) => n.and_utc(),
+                    })
+                } else {
+                    None
+                };
+                crate::health::assess(record.as_ref(), status, began, now)
+            }
+            _ => {
+                let Some(ex) = self.executor() else {
+                    return crate::health::JobHealth::unknown("no executor");
+                };
+                let meta = ex.get_job_metadata(&self.name);
+                if let Some(health) = meta
+                    .get("health")
+                    .and_then(crate::health::JobHealth::from_value)
+                {
+                    return health;
+                }
+                match self.status() {
+                    Status::Running => {
+                        crate::health::JobHealth::unknown("the executor does not report job health")
+                    }
+                    status => crate::health::JobHealth::stopped(status == Status::Paused),
+                }
+            }
+        }
     }
 
     /// `label`: the sysargs joined, pipelines compressed, one chained command per line.
@@ -950,35 +1005,11 @@ pub fn success_tuple_from_value(value: &Value) -> Option<SuccessTuple> {
     })
 }
 
-/// `compress_pipeline_sysargs`: `start pipeline <args> -P '{"sub_args_line": ...}'` back to
-/// `<sub args> : <args>`.
+/// `compress_pipeline_sysargs`: a serialized action chain (`chain <args> -P '{"sub_args_line":
+/// ...}'`, or v4's `start pipeline ...`) back to `<sub args> : <args>` (see
+/// [`meerschaum_core::chain`]).
 pub fn compress_pipeline_sysargs(sysargs: &[String]) -> Vec<String> {
-    if sysargs.len() < 2 || sysargs[0] != "start" || sysargs[1] != "pipeline" {
-        return sysargs.to_vec();
-    }
-    let Some(params_ix) = sysargs.iter().position(|a| a == "-P") else {
-        return sysargs.to_vec();
-    };
-    let pipeline_args = &sysargs[2..params_ix];
-    let Some(params_str) = sysargs.last() else {
-        return sysargs.to_vec();
-    };
-    let Ok(Value::Map(params)) = Value::from_json_str(params_str) else {
-        return sysargs.to_vec();
-    };
-    let Some(line) = params
-        .get("sub_args_line")
-        .filter(|v| v.truthy())
-        .map(Value::py_str)
-    else {
-        return sysargs.to_vec();
-    };
-    let Ok(mut out) = crate::shlex::split(&line) else {
-        return sysargs.to_vec();
-    };
-    out.push(":".into());
-    out.extend(pipeline_args.iter().cloned());
-    out
+    meerschaum_core::chain::compress(sysargs)
 }
 
 /// `is_systemd_available()`: `/run/systemd/system` is a directory.
@@ -998,16 +1029,20 @@ pub fn default_root_dir(ctx: &JobsContext) -> Option<std::path::PathBuf> {
 }
 
 /// The rule of `get_executor_keys_from_context()` without its inputs: the configured executor,
-/// else `systemd` when systemd is available and the root is the default root, else `local`.
+/// else `systemd` when systemd is available and this is not a development install, else `local`.
+///
+/// Every root uses `systemd` (v4 and 5.0 before rc15: only the default root), so the jobs of a
+/// Compose project with its own root come back after a reboot; each root's units have their own
+/// names (see [`crate::systemd::SystemdExecutor::get_service_name`]).
 pub fn choose_executor_keys(
     configured: Option<&str>,
     systemd_available: bool,
-    root_is_default: bool,
+    development: bool,
 ) -> String {
     if let Some(configured) = configured {
         return configured.to_string();
     }
-    if systemd_available && root_is_default {
+    if systemd_available && !development {
         "systemd".to_string()
     } else {
         "local".to_string()
@@ -1015,19 +1050,63 @@ pub fn choose_executor_keys(
 }
 
 /// `get_executor_keys_from_context()`: the configured `meerschaum.executor`; else `systemd` on a
-/// systemd host running with the default root; else `local`.
+/// systemd host; else `local`.
 ///
 /// PARITY: v4 also requires `is_installed('meerschaum', venv=None, allow_outside_venv=False)`
-/// (`jobs/__init__.py:430`) so that a source checkout never installs units pointing at itself;
-/// the `mrsm` binary is always "installed", so that condition is true here. Debug builds refuse
-/// the default root, so they never choose `systemd`.
+/// (`jobs/__init__.py:430`) so that a source checkout never installs units pointing at itself.
+/// The counterpart here is [`is_development_install`]: a debug build, a binary under a Cargo
+/// target directory, or (set by the Python extension) a package imported from a source checkout
+/// keeps its jobs `local`, so the test suites never create units on a developer's or a CI host's
+/// systemd. An explicit `-e systemd` (or `meerschaum.executor: systemd`) still works there.
 pub fn get_executor_keys_from_context(ctx: &JobsContext) -> String {
-    let root_is_default = default_root_dir(ctx).is_some_and(|d| d == ctx.paths.root);
     choose_executor_keys(
         ctx.config.executor.as_deref(),
         is_systemd_available(),
-        root_is_default,
+        is_development_install(),
     )
+}
+
+/// 0: not decided yet, 1: an installed copy, 2: a development install.
+static DEVELOPMENT: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+
+/// Whether this process runs Meerschaum from a source checkout: a debug build, a binary under a
+/// Cargo target directory, or a host that said so with [`set_development_install`] (the Python
+/// extension, for a package imported from the repository). Such a process never chooses the
+/// `systemd` executor on its own (see [`get_executor_keys_from_context`]).
+pub fn is_development_install() -> bool {
+    match DEVELOPMENT.load(Ordering::SeqCst) {
+        1 => false,
+        2 => true,
+        _ => {
+            let development = cfg!(debug_assertions)
+                || meerschaum_core::self_exe::self_command()
+                    .first()
+                    .is_some_and(|program| in_cargo_target(std::path::Path::new(program)));
+            DEVELOPMENT.store(if development { 2 } else { 1 }, Ordering::SeqCst);
+            development
+        }
+    }
+}
+
+/// Declare whether this process runs from a source checkout (see [`is_development_install`]).
+pub fn set_development_install(development: bool) {
+    DEVELOPMENT.store(if development { 2 } else { 1 }, Ordering::SeqCst);
+}
+
+/// Whether `path` is under a Cargo target directory (an ancestor holding the `CACHEDIR.TAG` Cargo
+/// writes, or a Cargo profile directory: `.fingerprint/` next to `deps/`), whatever its name or
+/// profile. Cargo writes the tag only when it creates the target directory itself, so a target
+/// directory that already existed (a symlink to another disk, a CI runner's cache) has none.
+pub fn in_cargo_target(path: &std::path::Path) -> bool {
+    let text = path.to_string_lossy();
+    // A binary rebuilt while it runs reads back as `<path> (deleted)` on Linux.
+    let path = std::path::Path::new(text.strip_suffix(" (deleted)").unwrap_or(&text));
+    let resolved = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    resolved.ancestors().any(|a| {
+        std::fs::read_to_string(a.join("CACHEDIR.TAG"))
+            .is_ok_and(|tag| tag.contains("created by cargo"))
+            || (a.join(".fingerprint").is_dir() && a.join("deps").is_dir())
+    })
 }
 
 #[cfg(test)]
@@ -1069,10 +1148,16 @@ mod tests {
 
     #[test]
     fn executor_selection_rule() {
-        assert_eq!(choose_executor_keys(Some("api:x"), true, true), "api:x");
-        assert_eq!(choose_executor_keys(None, true, true), "systemd");
-        assert_eq!(choose_executor_keys(None, true, false), "local");
-        assert_eq!(choose_executor_keys(None, false, true), "local");
+        assert_eq!(choose_executor_keys(Some("api:x"), true, false), "api:x");
+        assert_eq!(
+            choose_executor_keys(Some("systemd"), false, true),
+            "systemd"
+        );
+        // Any root uses systemd on a systemd host...
+        assert_eq!(choose_executor_keys(None, true, false), "systemd");
+        assert_eq!(choose_executor_keys(None, false, false), "local");
+        // ...except from a source checkout (a test run, a development binary).
+        assert_eq!(choose_executor_keys(None, true, true), "local");
         let dir = tempfile::tempdir().unwrap();
         let mut ctx = JobsContext::for_root(dir.path().join("root"));
         ctx.paths.systemd_user_dir = dir.path().join("home/.config/systemd/user");
@@ -1080,17 +1165,30 @@ mod tests {
             default_root_dir(&ctx).unwrap(),
             dir.path().join("home/.config/meerschaum")
         );
-        // A scratch root is never the default root, whatever the host runs.
+        // The tests are a debug build: never systemd by themselves, whatever the host runs.
+        assert!(is_development_install());
         assert_eq!(get_executor_keys_from_context(&ctx), "local");
         ctx.paths.root = dir.path().join("home/.config/meerschaum");
-        let expected = if is_systemd_available() {
-            "systemd"
-        } else {
-            "local"
-        };
-        assert_eq!(get_executor_keys_from_context(&ctx), expected);
+        assert_eq!(get_executor_keys_from_context(&ctx), "local");
         ctx.config.executor = Some("api:other".into());
         assert_eq!(get_executor_keys_from_context(&ctx), "api:other");
+        // A Cargo target directory is a source checkout, whatever the profile is called.
+        let target = dir.path().join("target");
+        std::fs::create_dir_all(target.join("custom/deps")).unwrap();
+        std::fs::write(
+            target.join("CACHEDIR.TAG"),
+            "Signature: 8a477f597d28d172789f06886806bc55\n# This file is a cache directory tag created by cargo.\n",
+        )
+        .unwrap();
+        assert!(in_cargo_target(&target.join("custom/deps/mrsm")));
+        assert!(!in_cargo_target(&dir.path().join("bin/mrsm")));
+        // A target directory that existed before Cargo ran has no tag: its profile layout counts.
+        let untagged = dir.path().join("runner1-target").join("release");
+        std::fs::create_dir_all(untagged.join("deps")).unwrap();
+        std::fs::write(untagged.join("mrsm"), "binary").unwrap();
+        assert!(!in_cargo_target(&untagged.join("mrsm")));
+        std::fs::create_dir_all(untagged.join(".fingerprint")).unwrap();
+        assert!(in_cargo_target(&untagged.join("mrsm")));
     }
 }
 

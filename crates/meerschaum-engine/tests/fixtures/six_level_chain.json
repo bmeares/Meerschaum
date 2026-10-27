@@ -52,16 +52,16 @@
        "bounds": {"begin": null, "end": null}, "ranges": [{"begin": null, "end": null}], "chunks": [],
        "provisional": true,
        "consumes": [{"parent_ref": "sql:main|plugin:gis|parcels_raw|None", "state_instance": "sql:main", "seq": 3}],
-       "reason_contains": ["1 unconsumed ledger entry from Pipe('plugin:gis', 'parcels_raw') (seq 3)", "no datetime column: full re-sync"]},
+       "reason_contains": ["Pipe('plugin:gis', 'parcels_raw') has 1 new change", "no datetime column, so all rows sync again"]},
       {"node": "sql:main|sql:main|parcels_joined|None", "action": "skip", "bounds": null, "provisional": true,
-       "reason_contains": ["Pipe('sql:main', 'parcels_clean') unchanged since its cursor"]},
+       "reason_contains": ["Pipe('sql:main', 'parcels_clean') has no new data"]},
       {"node": "sql:main|sql:main|zoning_overlay|None", "action": "backfill",
        "bounds": {"begin": null, "end": null}, "ranges": [{"begin": null, "end": null}], "provisional": true,
        "consumes": [{"parent_ref": "sql:main|sql:main|parcels_joined|None", "state_instance": "sql:main", "seq": 4}],
-       "reason_contains": ["no cursor on the edge from Pipe('sql:main', 'parcels_joined') (first engine run); 1 unconsumed ledger entry (seq 4)"]},
+       "reason_contains": ["first run with Pipe('sql:main', 'parcels_joined') as a parent; it has 1 new change"]},
       {"node": "sql:main|sql:main|districts|None", "action": "backfill",
        "bounds": {"begin": null, "end": null}, "ranges": [{"begin": null, "end": null}], "provisional": true,
-       "reason_contains": ["1 unconsumed ledger entry from Pipe('sql:main', 'zoning_overlay') (seq 3)"]},
+       "reason_contains": ["Pipe('sql:main', 'zoning_overlay') has 1 new change"]},
       {"node": "sql:main|sql:main|district_summary|None", "action": "skip", "bounds": null, "provisional": true}
     ]
   }

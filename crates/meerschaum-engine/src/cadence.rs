@@ -59,6 +59,28 @@ pub fn schedule_text(parameters: &meerschaum_core::Map) -> Option<String> {
     }
 }
 
+/// Why each scheduled pipe of a graph run that has parents in it does not follow its
+/// `parameters['schedule']`: in a graph run only the pipes without parents in the run follow
+/// their schedule; a pipe with parents syncs when they have new data. (Every pipe of a flat
+/// selection is a root and follows its schedule.) One message per such pipe, in the run's order.
+pub fn ignored_schedules(graph: &crate::Graph, sub: &crate::Subgraph) -> Vec<String> {
+    if sub.flat {
+        return Vec::new();
+    }
+    sub.order
+        .iter()
+        .filter(|r| sub.parent_edges(r).next().is_some())
+        .filter_map(|r| {
+            let text = schedule_text(&graph.node(r)?.record.parameters)?;
+            Some(format!(
+                "{}: its schedule '{text}' is ignored because it has parents in this run; it \
+                 syncs when its parents have new data.",
+                r.label()
+            ))
+        })
+        .collect()
+}
+
 impl PipeSchedules {
     /// Parse the schedules of `nodes` (`(node, parameters)` pairs). A schedule that does not
     /// parse is reported in the returned warnings and the pipe keeps the loop's cadence.

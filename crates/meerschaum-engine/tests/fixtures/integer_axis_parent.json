@@ -57,7 +57,7 @@
          {"parent_ref": "sql:main|plugin:landing|gauge_readings|None", "state_instance": "sql:main", "seq": 4},
          {"parent_ref": "sql:main|plugin:landing|meter_readings|None", "state_instance": "sql:main", "seq": 9}
        ],
-       "reason_contains": ["1 unconsumed ledger entry from Pipe('plugin:landing', 'meter_readings') (seq 9)", "1 unconsumed ledger entry from Pipe('plugin:landing', 'gauge_readings') (seq 4)"]}
+       "reason_contains": ["Pipe('plugin:landing', 'meter_readings') has 1 new change", "Pipe('plugin:landing', 'gauge_readings') has 1 new change"]}
     ]
   }
 }

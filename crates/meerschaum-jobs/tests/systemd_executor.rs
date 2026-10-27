@@ -39,6 +39,10 @@ impl Fixture {
         let fake = Arc::new(FakeSystemctl::new());
         let mut ctx = JobsContext::for_root(Path::new(&tmp).join("root"));
         ctx.paths.systemd_user_dir = Path::new(&tmp).join("userhome/.config/systemd/user");
+        // The reference units come from v4, which had one naming scheme: the one the default
+        // root keeps (`mrsm-<job>.service`). The files stay under `root/`; only the identity of
+        // the root is the default one. Other roots are covered by `units_of_other_roots_*`.
+        ctx.paths.root = Path::new(&tmp).join("userhome/.config/meerschaum");
         ctx.config.timeout_seconds = Seconds::Float(0.3);
         ctx.config.check_timeout_interval_seconds = Seconds::Float(0.05);
         let ctx = ctx
@@ -845,5 +849,225 @@ fn a_python_launcher_writes_v4s_exec_start_and_pins_its_interpreter() {
     assert!(
         !text.contains("Environment=MRSM_PYTHON=/opt/venv"),
         "{text}"
+    );
+}
+
+/// One user's systemd shared by several roots: the default root, a Compose project's root and a
+/// scratch root, with one fake `systemctl`.
+struct Roots {
+    _dir: tempfile::TempDir,
+    tmp: std::path::PathBuf,
+    fake: Arc<FakeSystemctl>,
+}
+
+impl Roots {
+    fn new() -> Roots {
+        let dir = tempfile::tempdir().unwrap();
+        let tmp = dir.path().canonicalize().unwrap();
+        Roots {
+            _dir: dir,
+            tmp,
+            fake: Arc::new(FakeSystemctl::new()),
+        }
+    }
+
+    fn user_dir(&self) -> std::path::PathBuf {
+        self.tmp.join("home/.config/systemd/user")
+    }
+
+    fn root(&self, rel: &str) -> std::path::PathBuf {
+        self.tmp.join(rel)
+    }
+
+    fn ctx(&self, root: &str) -> JobsContext {
+        let root = self.root(root);
+        std::fs::create_dir_all(&root).unwrap();
+        let mut ctx = JobsContext::for_root(&root);
+        ctx.paths.systemd_user_dir = self.user_dir();
+        ctx.with_launcher(Launcher {
+            supervisor: vec!["unused".into()],
+            program: vec!["/usr/bin/mrsm".into()],
+        })
+        .with_process_runner(self.fake.clone())
+    }
+
+    /// The executor of a root, writing units from an environment without `MRSM_ROOT_DIR` (the
+    /// unit must still name its root).
+    fn executor(&self, root: &str) -> SystemdExecutor {
+        SystemdExecutor::new(self.ctx(root)).with_process_env(vec![
+            ("PATH".to_string(), "/usr/bin:/bin".to_string()),
+            (
+                "HOME".to_string(),
+                self.tmp.join("home").to_string_lossy().into(),
+            ),
+        ])
+    }
+}
+
+fn compose_properties(project: &str) -> Map {
+    let mut env = Map::new();
+    env.insert("MRSM__COMPOSE_PROJECT".into(), Value::Str(project.into()));
+    let mut props = Map::new();
+    props.insert("env".into(), Value::Map(env));
+    props
+}
+
+#[test]
+fn units_of_other_roots_are_scoped_listed_and_exported() {
+    let r = Roots::new();
+    let sysargs: Vec<String> = vec!["sync".into(), "pipes".into(), "--loop".into()];
+
+    // The default root keeps v4's unit names.
+    let default_ex = r.executor("home/.config/meerschaum");
+    assert!(default_ex.is_default_root());
+    assert!(default_ex.create_job("sync", &sysargs, None).success);
+    assert!(r.user_dir().join("mrsm-sync.service").exists());
+
+    // A Compose project in its own root: `mrsm-<project>.<job>.service`, with the characters a
+    // unit name cannot hold replaced.
+    let project_ex = r.executor("weather/root");
+    assert!(!project_ex.is_default_root());
+    let job = "weather sync (sql:main)";
+    let created = project_ex.create_job(job, &sysargs, Some(&compose_properties("weather")));
+    assert!(created.success, "{}", created.message);
+    let service = project_ex.get_service_name(job);
+    assert_eq!(service, "mrsm-weather.weather-sync-_sql:main_.service");
+    assert!(r.user_dir().join(&service).exists());
+    // The unit finds its root after a reboot, and only its owner can read it.
+    let unit_path = project_ex.get_service_file_path(job);
+    let text = std::fs::read_to_string(&unit_path).unwrap();
+    let root_line = format!(
+        "Environment=MRSM_ROOT_DIR={}",
+        r.root("weather/root").display()
+    );
+    assert!(text.contains(&root_line), "{text}");
+    assert!(
+        text.contains(&format!("SyslogIdentifier={service}")),
+        "{text}"
+    );
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(&unit_path).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o600, "{mode:o}");
+    }
+    // The default root's unit does not name a root: it is the default one (v4's text).
+    let default_text = std::fs::read_to_string(default_ex.get_service_file_path("sync")).unwrap();
+    assert!(!default_text.contains("MRSM_ROOT_DIR"), "{default_text}");
+
+    // A job started without Compose: a short hash of the root.
+    let scratch_ex = r.executor("scratch/root");
+    assert!(scratch_ex.create_job("sync", &sysargs, None).success);
+    let scope = meerschaum_jobs::systemd::root_scope(&r.root("scratch/root"));
+    assert_eq!(scope.len(), 8);
+    assert_eq!(
+        scratch_ex.get_service_name("sync"),
+        format!("mrsm-{scope}.sync.service")
+    );
+
+    // Each root lists only its own units: the default root never sees the others.
+    assert_eq!(default_ex.get_job_names(), vec!["sync".to_string()]);
+    assert_eq!(project_ex.get_job_names(), vec![job.to_string()]);
+    assert_eq!(scratch_ex.get_job_names(), vec!["sync".to_string()]);
+    assert!(!default_ex.get_job_exists(job));
+    let listing = get_jobs_for(
+        &r.ctx("home/.config/meerschaum"),
+        Some("systemd"),
+        false,
+        false,
+    )
+    .unwrap();
+    assert_eq!(listing.jobs.keys().collect::<Vec<_>>(), ["sync"]);
+
+    // A root's operations address its own unit.
+    r.fake.clear_calls();
+    let _ = scratch_ex.stop_job("sync");
+    assert_eq!(
+        r.fake.rendered_calls().first().cloned(),
+        Some(format!("kill -s SIGINT mrsm-{scope}.sync.service"))
+    );
+
+    // A second copy of the project (another root, the same project name) gets its own unit
+    // and leaves the first one's alone.
+    let copy_ex = r.executor("weather-copy/root");
+    assert!(
+        copy_ex
+            .create_job(job, &sysargs, Some(&compose_properties("weather")))
+            .success
+    );
+    let copy_service = copy_ex.get_service_name(job);
+    let copy_scope = meerschaum_jobs::systemd::root_scope(&r.root("weather-copy/root"));
+    assert_eq!(
+        copy_service,
+        format!("mrsm-weather-{copy_scope}.weather-sync-_sql:main_.service")
+    );
+    assert_eq!(project_ex.get_job_names(), vec![job.to_string()]);
+    assert_eq!(copy_ex.get_job_names(), vec![job.to_string()]);
+    assert_eq!(
+        std::fs::read_link(r.user_dir().join(&service))
+            .unwrap()
+            .canonicalize()
+            .unwrap(),
+        unit_path.canonicalize().unwrap()
+    );
+
+    // Deleting removes this root's unit only.
+    assert!(copy_ex.delete_job(job).success || !copy_ex.get_job_exists(job));
+    assert!(!r.user_dir().join(&copy_service).exists());
+    assert!(r.user_dir().join(&service).exists());
+}
+
+#[test]
+fn a_local_job_moves_to_systemd_and_keeps_its_logs() {
+    let r = Roots::new();
+    let ctx = r.ctx("weather/root");
+    // A local job from before rc15 (its properties and a log; no process).
+    let mut local = Job::new(
+        "weather sync",
+        Some(vec!["sync".into(), "pipes".into(), "--loop".into()]),
+        JobOptions {
+            executor_keys: Some("local".into()),
+            ..Default::default()
+        },
+        &ctx,
+    )
+    .unwrap();
+    assert!(local.daemon().setup(true).success);
+    let logs = ctx.paths.logs_dir.clone();
+    std::fs::create_dir_all(&logs).unwrap();
+    std::fs::write(
+        logs.join("weather sync.log.0"),
+        "2026-01-01 00:00 | earlier lap\n",
+    )
+    .unwrap();
+    assert!(get_jobs(&ctx, false).contains_key("weather sync"));
+
+    let ex = r.executor("weather/root");
+    let created = ex.create_job(
+        "weather sync",
+        &["sync".into(), "pipes".into(), "--loop".into()],
+        Some(&compose_properties("weather")),
+    );
+    assert!(created.success, "{}", created.message);
+    assert!(
+        ex.take_warnings()
+            .iter()
+            .any(|w| w.contains("Moved the local job 'weather sync' to systemd")),
+    );
+    // The directory now belongs to the hidden sister job; the local listing no longer has it.
+    assert!(!get_jobs(&ctx, false).contains_key("weather sync"));
+    assert_eq!(ex.get_job_names(), vec!["weather sync".to_string()]);
+    // The history continues in the unit's log.
+    let moved = std::path::PathBuf::from(format!(
+        "{}.0",
+        ex.get_service_logs_path("weather sync").display()
+    ));
+    assert_eq!(
+        std::fs::read_to_string(&moved).unwrap(),
+        "2026-01-01 00:00 | earlier lap\n"
+    );
+    assert!(!logs.join("weather sync.log.0").exists());
+    assert!(
+        ex.get_logs("weather sync")
+            .is_some_and(|text| text.contains("earlier lap"))
     );
 }

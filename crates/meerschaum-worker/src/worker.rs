@@ -764,6 +764,11 @@ impl Worker {
         // (`meerschaum/worker/_ops.py`), so plugin `dprint()`s print too.
         let debug = meerschaum_core::debug::enabled();
         let started = std::time::Instant::now();
+        // `--allow-protected` (or `allow_protected()`) in the host reaches the call: the plugin
+        // code it runs may write to protected connectors.
+        if meerschaum_core::protected::allowed_by_flag() {
+            msg = msg.set("allow_protected", true);
+        }
         if debug {
             msg = msg.set("debug", true);
             meerschaum_core::dprint!(

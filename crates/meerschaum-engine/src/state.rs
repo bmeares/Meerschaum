@@ -20,6 +20,7 @@ use serde::{Deserialize, Serialize};
 use crate::ledger::{EdgeCursor, LedgerEntry};
 use crate::node::PipeRef;
 use crate::runs::RunRecord;
+use crate::status::{SyncOutcome, SyncStatus};
 
 /// A failure reading or writing engine state.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -134,6 +135,14 @@ pub trait StateWriter: Send + Sync {
 
     /// Upsert a run and the supplied node rows; omitted nodes remain unchanged.
     fn record_run(&self, run: &RunRecord) -> impl Future<Output = Result<(), StateError>> + Send;
+
+    /// Record a node's final sync outcome (after every window and retry) in its pipe's sync
+    /// status (rc15 contract C2, [`crate::status`]). Best effort and immediate: an
+    /// implementation that writes to an instance hands the write to the background (see
+    /// [`crate::InstanceState::flush_sync_statuses`]). The default records nothing.
+    fn record_sync_status(&self, node: &PipeRef, outcome: SyncOutcome) {
+        let _ = (node, outcome);
+    }
 }
 
 /// The serializable contents of a [`MemoryState`] (the `state` block of a golden fixture).
@@ -157,6 +166,9 @@ pub struct MemoryStateData {
     /// Recorded runs.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub runs: Vec<RunRecord>,
+    /// Recorded sync statuses by node ([`StateWriter::record_sync_status`]).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub sync_statuses: BTreeMap<PipeRef, SyncStatus>,
 }
 
 /// An in-memory [`StateSource`] + [`StateWriter`].
@@ -365,6 +377,26 @@ impl StateWriter for MemoryState {
             data.runs.push(run.clone());
         }
         Ok(())
+    }
+
+    fn record_sync_status(&self, node: &PipeRef, outcome: SyncOutcome) {
+        let mut data = self.lock();
+        let status = match data.sync_statuses.remove(node) {
+            Some(status) => status,
+            None => {
+                let parts = node.parts();
+                match meerschaum_core::Pipe::builder(parts.connector_keys, parts.metric_key)
+                    .location(parts.location_key)
+                    .instance(parts.instance_keys)
+                    .build()
+                {
+                    Ok(pipe) => SyncStatus::for_pipe(&pipe),
+                    Err(_) => return,
+                }
+            }
+        };
+        data.sync_statuses
+            .insert(node.clone(), status.apply(&outcome));
     }
 }
 

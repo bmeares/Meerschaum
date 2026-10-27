@@ -43,14 +43,14 @@
         "action": "root",
         "bounds": {"begin": "", "end": null},
         "chunks": [],
-        "reason_contains": ["no parents in the selection"]
+        "reason_contains": ["no parents in this run"]
       },
       {
         "node": "sql:main|sql:main|daily_rollup|None",
         "action": "skip",
         "bounds": null,
         "provisional": true,
-        "reason_contains": ["unchanged since its cursor", "watermark 2026-10-12 09:45", "definition unchanged"]
+        "reason_contains": ["up to date: ", "has no new data (latest 2026-10-12 09:45)"]
       }
     ]
   }

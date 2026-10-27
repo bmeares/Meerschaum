@@ -296,7 +296,11 @@ impl PluginSync for PythonSync {
                             Ok(input) => {
                                 let same_pipe = crate::PipeRef::from_pipe(pipe) == crate::PipeRef::from_pipe(&callback_pipe);
                                 let callback_observer = if same_pipe { observer } else { None };
-                                let result = meerschaum_worker::pool::callback_scope(crate::sync::sync_pipe(env, &callback_pipe, input, &callback_args(&request.kwargs), callback_observer)).await;
+                                // A `pipe.sync()` of this pipe is part of this sync (whose
+                                // outcome is recorded once); other pipes record their own.
+                                let mut cb_args = callback_args(&request.kwargs);
+                                cb_args.status_owner = args.status_owner.clone();
+                                let result = meerschaum_worker::pool::callback_scope(crate::sync::sync_pipe(env, &callback_pipe, input, &cb_args, callback_observer)).await;
                                 if same_pipe {
                                     totals.inserted += result.inserted;
                                     totals.updated += result.updated;

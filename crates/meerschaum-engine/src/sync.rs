@@ -77,11 +77,22 @@ pub struct SyncArgs {
     pub min_seconds: f64,
     /// `workers`.
     pub workers: Option<i64>,
+    /// `replace`: the rows written replace the pipe's rows of the sync's window (`begin` /
+    /// `end`, matching `params`) in one transaction (see [`SyncOptions::replace`]). Also on
+    /// when the pipe sets `fetch: {replace: true}` (a fetched window is authoritative) or the
+    /// CLI passes `--replace` (`extra["replace"]`).
+    pub replace: bool,
     /// The parameters on the pipe are the registered ones (the engine's graph read them in
     /// one batch): skip re-reading them and the registration check.
     pub parameters_loaded: bool,
     /// When the sync began (`sync_timestamp` for hooks).
     pub sync_timestamp: DateTime<Utc>,
+    /// The pipe whose sync status the caller records itself ([`sync_pipe`] records every other
+    /// sync's outcome): an engine node records its final outcome once (after every window and
+    /// retry), and a sync of a pipe made inside that pipe's own sync (a plugin's `pipe.sync()`
+    /// in its `sync()`, a native plugin's host call) is part of it. Nested syncs of other pipes
+    /// still record theirs. `None`: record this sync.
+    pub status_owner: Option<PipeRef>,
 }
 
 impl Default for SyncArgs {
@@ -98,8 +109,10 @@ impl Default for SyncArgs {
             retries: 10,
             min_seconds: 1.0,
             workers: None,
+            replace: false,
             parameters_loaded: false,
             sync_timestamp: Utc::now(),
+            status_owner: None,
         }
     }
 }
@@ -111,6 +124,22 @@ pub trait DeltaObserver: Send + Sync {
     /// Called with the rows about to be inserted, updated or upserted, before the data commit.
     /// An error aborts the sync with nothing committed.
     async fn before_commit(&self, pipe: &Pipe, delta: &Frame) -> Result<(), String>;
+
+    /// A replacing sync ([`SyncArgs::replace`], `fetch: {replace: true}`) is about to delete the
+    /// pipe's rows of `[begin, end)` (`None`: unbounded on that side) and write `delta` in their
+    /// place: called before the data commit instead of [`before_commit`](Self::before_commit).
+    /// Rows of the window may be deleted without a replacement, so a ledger writer marks the
+    /// whole window changed, not only the cells of `delta`. The default hands over `delta` only.
+    async fn before_replace(
+        &self,
+        pipe: &Pipe,
+        delta: &Frame,
+        begin: Option<&DateBound>,
+        end: Option<&DateBound>,
+    ) -> Result<(), String> {
+        let _ = (begin, end);
+        self.before_commit(pipe, delta).await
+    }
 
     /// Called after a successful data commit. An error turns the result into a failure (the
     /// data stays committed).
@@ -376,29 +405,13 @@ pub async fn determine_begin(
 }
 
 /// Parse row counts out of v4's `sync_pipe` messages (`"Inserted 1,234, updated 5 rows."`,
-/// `"Upserted 3 rows."`) into a [`SyncResult`]. The trait's `sync_pipe` returns a
-/// `SuccessTuple`; every built-in instance writes these messages.
+/// `"Upserted 3 rows."`, `"Replaced 2 rows with 3 rows."`) into a [`SyncResult`]
+/// ([`meerschaum_connector::pipe_ops::sync_result_from_message`]). The trait's `sync_pipe`
+/// returns a `SuccessTuple`; the built-in SQL and Valkey instances write these messages, and
+/// the engine's own writes use [`InstanceConnector::sync_pipe_with_counts`] (the `api:` client's
+/// message carries no counts).
 pub fn result_from_message(success: bool, message: String) -> SyncResult {
-    fn number_after(text: &str, word: &str) -> Option<u64> {
-        let i = text.find(word)? + word.len();
-        let digits: String = text[i..]
-            .trim_start()
-            .chars()
-            .take_while(|c| c.is_ascii_digit() || *c == ',')
-            .filter(|c| *c != ',')
-            .collect();
-        digits.parse().ok()
-    }
-    let mut r = SyncResult::new(success, message);
-    if success {
-        if let Some(n) = number_after(&r.message, "Upserted ") {
-            r.upserted = n;
-        } else {
-            r.inserted = number_after(&r.message, "Inserted ").unwrap_or(0);
-            r.updated = number_after(&r.message, "updated ").unwrap_or(0);
-        }
-    }
-    r
+    meerschaum_connector::pipe_ops::sync_result_from_message(success, message)
 }
 
 /// A backtrack request's `params` as `build_where` params (as the SQL instance builds them).
@@ -440,6 +453,11 @@ pub async fn filter_existing_frame(
         date_bound_only: false,
         enforce_dtypes: false,
         filter_params_index_limit: env.filter_params_index_limit,
+        // Declared text / index columns keep their null-like strings (rc15 Q18).
+        literal_null_markers: meerschaum_kernel::diff::literal_null_markers(
+            &columns_map(pipe),
+            ctx,
+        ),
     };
     // The kernel's callback is synchronous: capture the request, read it, then diff.
     let mut request: Option<BacktrackRequest> = None;
@@ -492,6 +510,11 @@ fn current_timestamp(unit_name: &str, as_int: bool) -> KValue {
 }
 
 /// `Pipe.sync(df, **args)`: the native flow (see the module docs). `input = None` fetches.
+///
+/// The outcome is recorded in the pipe's sync status
+/// ([`meerschaum_connector::sync_status::record`]: debounced, time-bounded, never failing the
+/// sync) unless [`SyncArgs::status_owner`] names this pipe; syncs of this pipe made inside this
+/// one are left to it.
 pub async fn sync_pipe(
     env: &SyncEnv<'_>,
     pipe: &Pipe,
@@ -500,8 +523,30 @@ pub async fn sync_pipe(
     observer: Option<&dyn DeltaObserver>,
 ) -> SyncResult {
     let start = Instant::now();
-    let mut result = sync_inner(env, pipe, input, args, observer).await;
+    let pipe_ref = PipeRef::from_pipe(pipe);
+    let records = args.status_owner.as_ref() != Some(&pipe_ref)
+        && meerschaum_connector::sync_status::is_recorded(pipe);
+    let owned;
+    let args = if records {
+        owned = SyncArgs {
+            status_owner: Some(pipe_ref),
+            ..args.clone()
+        };
+        &owned
+    } else {
+        args
+    };
+    let inner = sync_inner(env, pipe, input, args, observer);
+    // Recorded here or by the status owner: an `api:` instance must not record the posts too.
+    let mut result = if meerschaum_connector::sync_status::is_recorded(pipe) {
+        meerschaum_connector::sync_status::recorded_scope(inner).await
+    } else {
+        inner.await
+    };
     result.duration.get_or_insert(start.elapsed());
+    if records {
+        crate::status::record_result(env.registry, pipe, &result, false);
+    }
     result
 }
 
@@ -517,6 +562,22 @@ async fn sync_inner(
         Err(e) => return fail(e),
     };
     let instance = instance.as_ref();
+    // A protected instance refuses the sync before anything is fetched (its write would be
+    // refused after the fetch otherwise).
+    if let Some(refused) = meerschaum_connector::protected_refusal(instance, pipe, "sync") {
+        return refused.into();
+    }
+    // `sync pipes --replace` arrives with the other CLI flags in `extra`.
+    let replace_args;
+    let args = if !args.replace && args.extra.get("replace").is_some_and(|v| v.truthy()) {
+        replace_args = SyncArgs {
+            replace: true,
+            ..args.clone()
+        };
+        &replace_args
+    } else {
+        args
+    };
 
     // `pipe.parameters`: the registered parameters patched with the in-memory ones.
     let mut pipe = pipe.clone();
@@ -577,6 +638,9 @@ async fn sync_inner(
         }
     }
 
+    // With `replace`, the window `[begin, end)` whose rows the written rows replace: the
+    // fetch's own window for a fetch, else the sync's bounds (or the data's datetime range).
+    let mut fetched_window: Option<(Option<DateBound>, Option<DateBound>)> = None;
     let input = match input {
         Some(i) => i,
         None => {
@@ -643,33 +707,65 @@ async fn sync_inner(
                 query.begin,
                 query.end
             );
+            // `fetch: {replace: true}` (or `replace=True`): the fetched window is authoritative,
+            // so every chunk of it is written in one transaction that first clears the window.
+            let replace = args.replace || fetch_replace(&pipe);
+            // A first load (no table yet) has nothing to replace: its chunks stream in like any
+            // other fetch instead of being held in memory for one transaction.
+            let replace = replace && !matches!(instance.pipe_exists(&pipe).await, Ok(false));
+            let merge_args;
+            let args = if !replace && (args.replace || args.extra.contains_key("replace")) {
+                let mut extra = args.extra.clone();
+                extra.shift_remove("replace");
+                merge_args = SyncArgs {
+                    replace: false,
+                    extra,
+                    ..args.clone()
+                };
+                &merge_args
+            } else {
+                args
+            };
             match source.fetch_chunked(&pipe, &query, sync_chunks).await {
+                Ok(Some(chunked)) if replace => match collect_chunks(&pipe, chunked).await {
+                    Ok(all) => {
+                        fetched_window = Some((query.begin.clone(), query.end.clone()));
+                        all
+                    }
+                    Err(result) => return *result,
+                },
                 Ok(Some(chunked)) => {
                     return sync_chunked_source(env, &pipe, chunked, args, observer).await;
                 }
-                Ok(None) => {}
-                Err(e) => {
-                    return fetch_failed(&pipe, &source.connector_keys(), &e);
-                }
-            }
-            match source.fetch(&pipe, &query).await {
-                Ok(Some(df)) if source.connector_type() == "sql" && args.chunksize.is_some() => {
-                    let size = args
-                        .chunksize
-                        .filter(|n| *n > 0)
-                        .map(|n| n as usize)
-                        .unwrap_or_else(|| env.registry.fetch_chunksize(pipe.connector_keys()));
-                    return sync_fetched_chunks(env, &pipe, df, args, observer, size.max(1)).await;
-                }
-                Ok(Some(df)) => {
-                    meerschaum_core::dprint!(
-                        "Fetched {} rows for {pipe} in {:?}.",
-                        df.height(),
-                        fetch_started.elapsed()
-                    );
-                    PipeInput::Frame(df)
-                }
-                Ok(None) => return fail(format!("No data were fetched for {pipe}.")),
+                Ok(None) => match source.fetch(&pipe, &query).await {
+                    Ok(Some(df)) if replace => {
+                        fetched_window = Some((query.begin.clone(), query.end.clone()));
+                        PipeInput::Frame(df)
+                    }
+                    Ok(Some(df))
+                        if source.connector_type() == "sql" && args.chunksize.is_some() =>
+                    {
+                        let size = args
+                            .chunksize
+                            .filter(|n| *n > 0)
+                            .map(|n| n as usize)
+                            .unwrap_or_else(|| env.registry.fetch_chunksize(pipe.connector_keys()));
+                        return sync_fetched_chunks(env, &pipe, df, args, observer, size.max(1))
+                            .await;
+                    }
+                    Ok(Some(df)) => {
+                        meerschaum_core::dprint!(
+                            "Fetched {} rows for {pipe} in {:?}.",
+                            df.height(),
+                            fetch_started.elapsed()
+                        );
+                        PipeInput::Frame(df)
+                    }
+                    Ok(None) => return fail(format!("No data were fetched for {pipe}.")),
+                    Err(e) => {
+                        return fetch_failed(&pipe, &source.connector_keys(), &e);
+                    }
+                },
                 Err(e) => {
                     return fetch_failed(&pipe, &source.connector_keys(), &e);
                 }
@@ -731,9 +827,21 @@ async fn sync_inner(
         extra.insert("workers".into(), Value::Int(w));
     }
 
-    // The ledger hook: compute the delta and hand it over before the data commit.
+    // `replace`: the window the rows replace (a fetch's own window, else the sync's bounds or
+    // the data's datetime range).
+    let replace_window = match fetched_window {
+        Some(window) => Some(window),
+        None if args.replace => match replace_window(env, &pipe, &ctx.dtypes, args, &df) {
+            Ok(window) => Some(window),
+            Err(e) => return fail(e),
+        },
+        None => None,
+    };
+
+    // The ledger hook: compute the delta and hand it over before the data commit. A replacing
+    // sync writes every row of its window, so the delta is the whole frame.
     if let Some(obs) = observer {
-        let delta = if check_existing {
+        let delta = if check_existing && replace_window.is_none() {
             match filter_existing_frame(env, instance, &pipe, &ctx, df).await {
                 Ok((_, _, delta)) => delta,
                 Err(e) => return fail(e),
@@ -742,36 +850,54 @@ async fn sync_inner(
             df
         };
         meerschaum_core::dprint!("Filtered {pipe}: {} new or changed rows.", delta.height());
-        if let Err(e) = obs.before_commit(&pipe, &delta).await {
+        let observed = match &replace_window {
+            // The window's rows may be deleted without a replacement: it changes as a whole.
+            Some((begin, end)) => {
+                obs.before_replace(&pipe, &delta, begin.as_ref(), end.as_ref())
+                    .await
+            }
+            None => obs.before_commit(&pipe, &delta).await,
+        };
+        if let Err(e) = observed {
             return fail(e);
         }
         df = delta;
     }
 
+    let (begin, end) = replace_window.clone().unwrap_or((None, None));
     let opts = SyncOptions {
-        check_existing,
+        check_existing: check_existing && replace_window.is_none(),
         chunksize: args.chunksize,
-        begin: None,
-        end: None,
+        begin,
+        end,
+        replace: replace_window.is_some(),
+        params: args.params.clone(),
         extra,
     };
     // Without a ledger observer the changed intervals are the grid cells of the rows handed to
     // the instance (a superset of the rows that changed; the ledger's exact delta needs the
     // observer's second `filter_existing`, which a bare `Pipe.sync()` does not pay for).
-    let written_cells = if observer.is_none() {
-        change_cells(env, &pipe, &df)
-    } else {
-        None
+    let written_cells = match (observer, &replace_window) {
+        (Some(_), _) => None,
+        (None, None) => change_cells(env, &pipe, &df),
+        // A replacing sync also changes the rows it deletes: the whole window (rows or not).
+        (None, Some(_)) => node_axis(env, &pipe).map(|axis| {
+            let positions = crate::native::frame_positions(&df, &axis);
+            (axis, positions)
+        }),
     };
     let mut attempt = 1;
-    let result = loop {
+    let mut result = loop {
         let write_started = std::time::Instant::now();
         meerschaum_core::dprint!(
             "Writing {} rows to {pipe} (attempt {attempt}, check_existing={}).",
             df.height(),
             opts.check_existing
         );
-        let res = instance.sync_pipe(&pipe, df.clone(), &opts).await;
+        // With the row counts: the `api:` client's message has none.
+        let res = instance
+            .sync_pipe_with_counts(&pipe, df.clone(), &opts)
+            .await;
         meerschaum_core::dprint!(
             "Wrote {pipe} in {:?}: {}",
             write_started.elapsed(),
@@ -790,7 +916,6 @@ async fn sync_inner(
         }
         tokio::time::sleep(Duration::from_secs_f64(args.min_seconds.max(0.0))).await;
     };
-    let mut result = result_from_message(result.success, result.message);
     if result.success
         && let Some(obs) = observer
         && let Err(e) = obs.after_commit(&pipe, &result).await
@@ -805,7 +930,13 @@ async fn sync_inner(
         && result.rows_written() + result.deleted > 0
         && let Some((axis, positions)) = written_cells
     {
-        result.changed_intervals = crate::ledger::ledger_intervals(positions, &axis)
+        let intervals = match &replace_window {
+            Some((begin, end)) => {
+                replaced_intervals(&axis, positions, begin.as_ref(), end.as_ref())
+            }
+            None => crate::ledger::ledger_intervals(positions, &axis),
+        };
+        result.changed_intervals = intervals
             .iter()
             .map(|iv| meerschaum_core::success::ChangedInterval {
                 begin: iv.begin.and_then(|b| axis.bound(b)),
@@ -814,6 +945,111 @@ async fn sync_inner(
             .collect();
     }
     result
+}
+
+/// Whether the pipe sets `fetch: {replace: true}`: each fetched window is authoritative.
+pub fn fetch_replace(pipe: &Pipe) -> bool {
+    pipe.param("fetch")
+        .and_then(|f| f.get("replace"))
+        .is_some_and(|v| v.truthy())
+}
+
+/// The window `[begin, end)` a `replace=True` sync of data replaces: the sync's `begin` /
+/// `end` where given (`begin=None` is unbounded), the data's datetime range otherwise (`begin`
+/// = its earliest datetime, `end` = just after its latest, so every row passed is inside). A pipe
+/// without a datetime column has one window, the whole table (and takes no bounds). The rule is
+/// [`meerschaum_connector::replace::resolve_window`], shared with the API route and the
+/// connectors' own `sync_pipe(..., replace=True)`.
+fn replace_window(
+    env: &SyncEnv<'_>,
+    pipe: &Pipe,
+    dtypes: &IndexMap<String, String>,
+    args: &SyncArgs,
+    df: &Frame,
+) -> Result<(Option<DateBound>, Option<DateBound>), String> {
+    use meerschaum_connector::replace::{WindowBound, resolve_window};
+    let parse = |b: DateBound| parse_date_bound(env, pipe, dtypes, b);
+    let has_dt = pipe.column("datetime").is_some();
+    let begin = match &args.begin {
+        SyncBegin::At(b) if has_dt => WindowBound::At(parse(b.clone())?),
+        SyncBegin::At(b) => WindowBound::At(b.clone()),
+        SyncBegin::Unbounded => WindowBound::Unbounded,
+        SyncBegin::Default => WindowBound::FromRows,
+    };
+    let end = match &args.end {
+        Some(e) if has_dt => WindowBound::At(parse(e.clone())?),
+        Some(e) => WindowBound::At(e.clone()),
+        None => WindowBound::FromRows,
+    };
+    resolve_window(pipe, df, begin, end)
+}
+
+/// Every chunk of a chunked fetch as one input, for a replacing sync (one window, one
+/// transaction). A fetch that returned hook results or synced in parallel has nothing to
+/// replace with: its result is returned as `Err`, as the chunked flow reports it.
+async fn collect_chunks(pipe: &Pipe, chunked: ChunkedFetch) -> Result<PipeInput, Box<SyncResult>> {
+    let mut chunks = chunked.chunks;
+    let failed = |e: ConnectorError| Box::new(fetch_failed(pipe, pipe.connector_keys(), &e));
+    let mut inputs: Vec<PipeInput> = Vec::new();
+    loop {
+        match chunks.next_chunk().await {
+            Ok(Some(chunk)) => inputs.push(chunk),
+            Ok(None) => break,
+            Err(e) => return Err(failed(e)),
+        }
+    }
+    match chunks.finish().await {
+        Err(e) => return Err(failed(e)),
+        Ok(FetchedKind::HookResults(results)) if inputs.is_empty() => {
+            return Err(Box::new(hook_results_summary(&results)));
+        }
+        Ok(FetchedKind::InParallel) if inputs.is_empty() => {
+            return Err(Box::new(SyncResult::new(
+                true,
+                format!("{pipe} is being synced in parallel."),
+            )));
+        }
+        Ok(FetchedKind::Nothing) if inputs.is_empty() => {
+            return Err(Box::new(fail(format!("No data were fetched for {pipe}."))));
+        }
+        Ok(_) => {}
+    }
+    if inputs.len() == 1 {
+        return Ok(inputs.remove(0));
+    }
+    // Frames (SQL fetch chunks) stay columnar: one frame of every chunk's rows.
+    if inputs.iter().all(|i| matches!(i, PipeInput::Frame(_))) {
+        let frames: Vec<Frame> = inputs
+            .into_iter()
+            .filter_map(|i| match i {
+                PipeInput::Frame(f) => Some(f),
+                _ => None,
+            })
+            .collect();
+        return Frame::concat(&frames).map(PipeInput::Frame).map_err(|e| {
+            Box::new(fail(format!(
+                "Failed to combine the chunks of {pipe}:\n{e}"
+            )))
+        });
+    }
+    let mut docs = Vec::new();
+    for input in inputs {
+        match input {
+            PipeInput::Docs(d) => docs.extend(d),
+            PipeInput::Frame(f) => docs.extend(pipe_ops::frame_to_docs(&f)),
+            PipeInput::Columns(c) => {
+                let n = c.values().map(Vec::len).max().unwrap_or(0);
+                for i in 0..n {
+                    docs.push(
+                        c.iter()
+                            .map(|(k, v)| (k.clone(), v.get(i).cloned().unwrap_or(KValue::Null)))
+                            .collect(),
+                    );
+                }
+            }
+        }
+    }
+    Ok(PipeInput::Docs(docs))
 }
 
 /// The datetime-axis positions of a frame about to be synced and the pipe's axis (grid width =
@@ -826,14 +1062,41 @@ fn change_cells(
     if df.height() == 0 {
         return None;
     }
+    let axis = node_axis(env, pipe)?;
+    let positions = crate::native::frame_positions(df, &axis);
+    Some((axis, positions))
+}
+
+/// The pipe's axis (datetime column, chunk grid) as the engine's graph derives it.
+fn node_axis(env: &SyncEnv<'_>, pipe: &Pipe) -> Option<crate::axis::Axis> {
     let options = crate::graph::GraphOptions {
         defaults: env.defaults.clone(),
         implicit_edges: false,
         default_backtrack_minutes: env.default_backtrack_minutes as f64,
     };
-    let axis = crate::graph::node_axis(pipe, &options).ok()?;
-    let positions = crate::native::frame_positions(df, &axis);
-    Some((axis, positions))
+    crate::graph::node_axis(pipe, &options).ok()
+}
+
+/// The intervals a replacing sync changes on `axis`: its window `[begin, end)` widened to the
+/// axis's chunk grid (the window's rows may be deleted without a replacement), with the cells of
+/// the rows it writes (`positions`). A bound of another kind than the axis counts as unbounded.
+pub fn replaced_intervals(
+    axis: &crate::axis::Axis,
+    positions: Vec<i64>,
+    begin: Option<&DateBound>,
+    end: Option<&DateBound>,
+) -> Vec<crate::axis::Interval> {
+    use crate::axis::{AxisKind, Interval, occupied_cells, union};
+    if axis.kind == AxisKind::None {
+        return vec![Interval::full()];
+    }
+    let pos = |b: Option<&DateBound>| b.and_then(date_bound_to_bound).and_then(|b| axis.pos(&b));
+    let window = Interval::new(pos(begin), pos(end)).widen_to_grid(axis.chunk);
+    union(
+        occupied_cells(positions, axis.chunk)
+            .into_iter()
+            .chain(std::iter::once(window)),
+    )
 }
 
 /// The keyword arguments a plugin receives for a sync, exactly as `Pipe.sync(**kw)` passes them

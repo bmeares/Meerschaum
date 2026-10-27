@@ -85,6 +85,8 @@ pub struct RunOptions {
     pub capture_output: bool,
     /// `debug`.
     pub debug: bool,
+    /// `--allow-protected`: forwarded like `--debug` to every command (and job) compose runs.
+    pub allow_protected: bool,
     /// `_subprocess` (`None`: follow `isolation`).
     pub subprocess: Option<bool>,
     /// `_replace`.
@@ -96,6 +98,7 @@ impl Default for RunOptions {
         RunOptions {
             capture_output: false,
             debug: false,
+            allow_protected: false,
             subprocess: None,
             replace: true,
         }
@@ -133,6 +136,9 @@ pub fn build_command_with_env(
     let mut sysargs: Vec<String> = args.to_vec();
     if !args.iter().any(|a| a == "--debug") && opts.debug {
         sysargs.push("--debug".into());
+    }
+    if !args.iter().any(|a| a == "--allow-protected") && opts.allow_protected {
+        sysargs.push("--allow-protected".into());
     }
     if !args.iter().any(|a| a == "--tags" || a == "-t") && !args.join(" ").starts_with("stack ") {
         sysargs.push("--tags".into());

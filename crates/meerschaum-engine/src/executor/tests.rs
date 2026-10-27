@@ -299,10 +299,38 @@ async fn a_held_lease_fails_the_attempt() {
         row.message
             .as_deref()
             .unwrap()
-            .contains("held by another process")
+            .contains("another process is syncing")
     );
     assert!(h.fake.synced().is_empty());
     assert_eq!(h.leases.holder(&r("a")).as_deref(), Some("another-job"));
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_held_lease_is_not_recorded_as_a_failed_sync() {
+    let h = Harness::new(
+        vec![rec("a", "{}"), rec("b", "{}")],
+        MemoryStateData::default(),
+    );
+    h.leases
+        .acquire(&r("a"), "another-job", Duration::from_secs(3600))
+        .await
+        .unwrap();
+    h.fake.script(&r("b"), FakeStep::fail("the source is down"));
+    let options = ExecutorOptions {
+        lease_wait: Duration::from_secs(2),
+        lease_poll: Duration::from_millis(250),
+        ..ExecutorOptions::default()
+    };
+    let (_, record) = h.run(Selection::refs([r("a"), r("b")]), options).await;
+    assert_eq!(record.node(&r("a")).unwrap().status, NodeStatus::Failed);
+    assert_eq!(record.node(&r("b")).unwrap().status, NodeStatus::Failed);
+    let statuses = h.state.snapshot().sync_statuses;
+    // Another process is syncing `a` (and records that sync itself); `b` really failed.
+    assert!(!statuses.contains_key(&r("a")), "{statuses:?}");
+    let b = &statuses[&r("b")];
+    assert!(!b.success);
+    assert_eq!(b.consecutive_failures, 1);
+    assert_eq!(b.message, "the source is down");
 }
 
 #[tokio::test(start_paused = true)]

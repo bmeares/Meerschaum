@@ -136,3 +136,106 @@ async fn all_scheduled_selection_idles_until_due() {
     // No cooldown warnings or empty runs: the pipe ran about twice.
     assert!((1..=3).contains(&ran.len()), "{ran:?}");
 }
+
+/// S4 (rc15): a scheduled pipe with parents in the run does not follow its schedule. The loop
+/// says so once when it starts (naming the pipe and why), and the plan lists it as a warning.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_scheduled_child_is_warned_about_once() {
+    let env = env("sched_child").await;
+    env.exec("CREATE TABLE src (ts TEXT, id INTEGER, v REAL)")
+        .await;
+    env.exec("INSERT INTO src VALUES ('2026-01-01 00:00:00', 1, 1.0)")
+        .await;
+    env.register("parent", &params(None)).await;
+    let mut child = params(Some("every 1 hours"));
+    child["sql"] = serde_json::json!(format!(
+        "SELECT ts, id, v FROM {{{{ Pipe('{INSTANCE}', 'parent', instance='{INSTANCE}') }}}}"
+    ));
+    env.register("child", &child).await;
+    let engine = env.engine().with_cadence(Arc::new(EverySeconds(3600.0)));
+    let selection = Selection::refs([env.pipe_ref("parent")])
+        .with_children(Some(meerschaum_engine::Depth::All));
+
+    // The plan says it.
+    let planned = engine
+        .plan(&RunOptions {
+            selection: Some(selection.clone()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    let expected = "Pipe('sql:eng', 'child'): its schedule 'every 1 hours' is ignored because it has parents in this run; it syncs when its parents have new data.";
+    assert!(
+        planned.plan.warnings.iter().any(|w| w == expected),
+        "{:?}",
+        planned.plan.warnings
+    );
+    assert!(planned.plan.to_string().contains(expected));
+
+    // The loop says it once.
+    let warnings: Arc<Mutex<Vec<String>>> = Arc::default();
+    let sink = warnings.clone();
+    let stop = StopToken::default();
+    let stopper = stop.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(1500)).await;
+        stopper.stop();
+    });
+    engine
+        .run_loop(
+            RunOptions {
+                selection: Some(selection),
+                workers: Some(1),
+                yes: true,
+                ..Default::default()
+            },
+            LoopOptions {
+                run_loop: true,
+                min_seconds: 0.3,
+                stop,
+                ..Default::default()
+            },
+            Arc::new(move |e| {
+                if let LapEvent::Warning { message } = e {
+                    sink.lock().unwrap().push(message);
+                }
+            }),
+        )
+        .await;
+    let warnings = warnings.lock().unwrap().clone();
+    assert_eq!(warnings, vec![expected.to_string()]);
+}
+
+/// Every pipe of a flat selection is a root: a scheduled child with a parent in the selection
+/// follows its schedule (it does not run before it is due), and nothing is warned about.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_flat_selection_follows_a_scheduled_childs_schedule() {
+    let env = env("sched_flat_child").await;
+    env.exec("CREATE TABLE src (ts TEXT, id INTEGER, v REAL)")
+        .await;
+    env.exec("INSERT INTO src VALUES ('2026-01-01 00:00:00', 1, 1.0)")
+        .await;
+    env.register("parent", &params(None)).await;
+    let mut child = params(Some("every 1 hours"));
+    child["sql"] = serde_json::json!(format!(
+        "SELECT ts, id, v FROM {{{{ Pipe('{INSTANCE}', 'parent', instance='{INSTANCE}') }}}}"
+    ));
+    env.register("child", &child).await;
+    let engine = env.engine().with_cadence(Arc::new(EverySeconds(3600.0)));
+    let planned = engine
+        .plan(&RunOptions {
+            selection: Some(Selection::filter(KeyFilter::default())),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert!(planned.plan.flat);
+    assert!(
+        planned.plan.warnings.is_empty(),
+        "{:?}",
+        planned.plan.warnings
+    );
+    let ran = laps(engine, Duration::from_millis(1200)).await;
+    assert!(ran.iter().any(|(n, _)| n == "parent"), "{ran:?}");
+    assert!(!ran.iter().any(|(n, _)| n == "child"), "{ran:?}");
+}

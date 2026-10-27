@@ -226,4 +226,20 @@ async fn callback_syncs_are_flushes_that_write_the_ledger_and_trigger_children()
             .iter()
             .all(|f| f.0.as_ref().is_none_or(|r| !r.as_str().contains("copies")))
     );
+
+    // Every callback sync recorded its pipe's sync status (rc15 C2): the stream's and the
+    // mirror's. (Successes within five seconds are held, so the stored rows may be the first's.)
+    use meerschaum_connector::InstanceConnector;
+    for (ck, mk) in [(CONNECTOR, "readings"), ("legacy:mirror", "copies")] {
+        let pipe = Pipe::builder(ck, mk).instance(INSTANCE).build().unwrap();
+        let status = env
+            .conn
+            .get_sync_status(&pipe)
+            .await
+            .unwrap()
+            .unwrap_or_else(|| panic!("no sync status for {pipe}"));
+        assert!(status.success, "{status:?}");
+        assert_eq!(status.consecutive_failures, 0);
+        assert_eq!(status.rows_inserted, 1, "{status:?}");
+    }
 }

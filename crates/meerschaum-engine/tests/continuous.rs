@@ -88,6 +88,7 @@ async fn loop_laps_match_v4_order_sleep_and_filters() {
             LapEvent::LapFinished(s) => format!("lap {}", s.lap),
             LapEvent::Sleeping { message, .. } => message.clone(),
             LapEvent::Cooldown { message, .. } => message.clone(),
+            LapEvent::Warning { message } => message.clone(),
         })
         .collect();
     assert_eq!(

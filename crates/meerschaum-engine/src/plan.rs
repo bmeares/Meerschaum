@@ -210,6 +210,14 @@ pub struct PlannedNode {
     /// Planning warnings for this node.
     #[serde(default)]
     pub warnings: Vec<String>,
+    /// The node's backtrack window in words (`1 day`), for bounds that start at its last sync.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backtrack: Option<String>,
+    /// The bounds in words, for people (`last sync − 1 day → latest data`,
+    /// `2026-10-12 09:00 → 2026-10-12 12:00`; empty when nothing syncs): what the plan table,
+    /// the console and `Plan` objects show. [`Self::bounds`] stays the machine-readable form.
+    #[serde(default)]
+    pub bounds_text: String,
 }
 
 impl PlannedNode {
@@ -229,14 +237,102 @@ impl PlannedNode {
             stored_definition_hash: None,
             watermark: None,
             warnings: Vec::new(),
+            backtrack: None,
+            bounds_text: String::new(),
         }
     }
 
     fn set(mut self, action: Action, reason: impl Into<String>) -> PlannedNode {
         self.action = action;
         self.reason = reason.into();
+        self.bounds_text = self.describe_bounds();
         self
     }
+
+    /// The bounds in words (see [`Self::bounds_text`]): every dirty range of a `backfill`,
+    /// else the overall bounds.
+    pub fn describe_bounds(&self) -> String {
+        let backtrack = self.backtrack.as_deref();
+        if self.action == Action::Backfill && self.ranges.len() > 1 {
+            return self
+                .ranges
+                .iter()
+                .map(|s| {
+                    bounds_words(
+                        &Bounds {
+                            begin: s.begin.map_or(Begin::Unbounded, Begin::At),
+                            end: s.end,
+                        },
+                        backtrack,
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("; ");
+        }
+        self.bounds
+            .as_ref()
+            .map(|b| bounds_words(b, backtrack))
+            .unwrap_or_default()
+    }
+}
+
+/// Bounds in words: `last sync − 1 day → latest data`, `2026-10-12 09:00 → 2026-10-12 12:00`,
+/// `all data`. `backtrack` is the window a `begin=''` sync subtracts from the last sync.
+pub fn bounds_words(bounds: &Bounds, backtrack: Option<&str>) -> String {
+    let begin = match &bounds.begin {
+        Begin::Default => match backtrack {
+            Some(window) => format!("last sync − {window}"),
+            None => "last sync".to_string(),
+        },
+        Begin::Unbounded if bounds.end.is_none() => return "all data".to_string(),
+        Begin::Unbounded => "the beginning".to_string(),
+        Begin::At(b) => fmt_bound(b),
+    };
+    let end = bounds
+        .end
+        .as_ref()
+        .map_or("latest data".to_string(), fmt_bound);
+    format!("{begin} → {end}")
+}
+
+/// A backtrack window in words (`1 day`, `1 hour 30 minutes`; a bare number on an integer
+/// axis, with its unit when the pipe states its precision). `None` for no window.
+pub fn backtrack_words(axis: &Axis) -> Option<String> {
+    if axis.backtrack <= 0 {
+        return None;
+    }
+    match axis.kind {
+        AxisKind::Datetime => Some(duration_words(axis.backtrack)),
+        AxisKind::Int => Some(match axis.explicit_unit {
+            Some(unit) => format!("{} {}s", axis.backtrack, unit.name()),
+            None => axis.backtrack.to_string(),
+        }),
+        AxisKind::None => None,
+    }
+}
+
+/// Microseconds in words: up to the two largest units (`2 days`, `1 hour 30 minutes`).
+fn duration_words(micros: i64) -> String {
+    const UNITS: [(&str, i64); 5] = [
+        ("day", 86_400_000_000),
+        ("hour", 3_600_000_000),
+        ("minute", 60_000_000),
+        ("second", 1_000_000),
+        ("microsecond", 1),
+    ];
+    let mut rest = micros;
+    let mut parts = Vec::new();
+    for (name, size) in UNITS {
+        let n = rest / size;
+        if n > 0 {
+            parts.push(format!("{n} {name}{}", if n == 1 { "" } else { "s" }));
+            rest -= n * size;
+        }
+        if parts.len() == 2 {
+            break;
+        }
+    }
+    parts.join(" ")
 }
 
 /// Planner options.
@@ -346,11 +442,18 @@ impl Plan {
                 n.bounds = None;
                 n.clear = false;
                 n.consumes.clear();
-                n.reason = format!("{}; declined", n.reason);
+                n.reason = format!(
+                    "{}; the rebuild was not approved",
+                    n.reason.trim_end_matches(CONFIRM).trim_end()
+                );
+                n.bounds_text = n.describe_bounds();
             }
         }
     }
 }
+
+/// The end of a rebuild's reason while it waits for approval in an interactive run.
+const CONFIRM: &str = "(approve it, or pass --yes)";
 
 /// One unit past a watermark for [`PlanOptions::inclusive_cap`]: a minute on a datetime axis
 /// (`get_chunk_bounds`: `end += timedelta(minutes=1)`), 1 on an integer axis.
@@ -382,17 +485,8 @@ fn fmt_opt(b: Option<&Bound>) -> String {
     b.map_or("None".to_string(), fmt_bound)
 }
 
-fn fmt_bounds(b: &Bounds) -> String {
-    let begin = match &b.begin {
-        Begin::Default => "''".to_string(),
-        Begin::Unbounded => "None".to_string(),
-        Begin::At(x) => fmt_bound(x),
-    };
-    format!("[{begin}, {})", fmt_opt(b.end.as_ref()))
-}
-
 impl fmt::Display for Plan {
-    /// The plan table: `node | action | bounds | chunks | reason`.
+    /// The plan table: `pipe | action | bounds | chunks | reason`.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let instances: BTreeSet<&str> = self
             .nodes
@@ -415,19 +509,9 @@ impl fmt::Display for Plan {
                 if n.provisional {
                     action.push('*');
                 }
-                let bounds = if n.action == Action::Backfill && n.ranges.len() > 1 {
-                    n.ranges
-                        .iter()
-                        .map(|s| {
-                            fmt_bounds(&Bounds {
-                                begin: s.begin.map_or(Begin::Unbounded, Begin::At),
-                                end: s.end,
-                            })
-                        })
-                        .collect::<Vec<_>>()
-                        .join(" ∪ ")
-                } else {
-                    n.bounds.as_ref().map_or("-".to_string(), fmt_bounds)
+                let bounds = match n.describe_bounds() {
+                    text if text.is_empty() => "-".to_string(),
+                    text => text,
                 };
                 let chunks = if n.chunks.is_empty() {
                     "-".to_string()
@@ -437,7 +521,7 @@ impl fmt::Display for Plan {
                 [label, action, bounds, chunks, n.reason.clone()]
             })
             .collect();
-        let header = ["node", "action", "bounds", "chunks", "reason"];
+        let header = ["pipe", "action", "bounds", "chunks", "reason"];
         let mut widths = header.map(|h| h.chars().count());
         for row in &rows {
             for (i, cell) in row.iter().enumerate().take(4) {
@@ -460,10 +544,10 @@ impl fmt::Display for Plan {
             line(f, [&row[0], &row[1], &row[2], &row[3], &row[4]])?;
         }
         if self.nodes.iter().any(|n| n.provisional) {
-            writeln!(f, "* re-planned after its parents finish")?;
+            writeln!(f, "* planned again after its parents sync")?;
         }
         if self.needs_confirmation() {
-            writeln!(f, "? rebuild needs confirmation (--yes)")?;
+            writeln!(f, "? the rebuild needs approval (--yes)")?;
         }
         for w in &self.warnings {
             writeln!(f, "warning: {w}")?;
@@ -492,6 +576,9 @@ pub async fn plan<S: StateSource>(
         parents.insert(r.clone(), as_parent);
         nodes.push(n);
     }
+    let mut warnings = sub.warnings.clone();
+    // A scheduled pipe with parents in this selection does not follow its schedule.
+    warnings.extend(crate::cadence::ignored_schedules(graph, sub));
     Plan {
         nodes,
         edges: sub
@@ -500,7 +587,7 @@ pub async fn plan<S: StateSource>(
             .map(|e| (e.parent.clone(), e.child.clone()))
             .collect(),
         flat: sub.flat,
-        warnings: sub.warnings.clone(),
+        warnings,
     }
 }
 
@@ -510,7 +597,7 @@ enum Signal {
     /// No cursor: compare watermarks (the fallback).
     NoHistory { advanced: bool },
     /// Unconsumed entries.
-    Dirty { count: usize, first: i64, last: i64 },
+    Dirty { count: usize },
     /// The parent watermark moved since the cursor, without entries.
     Advanced,
     /// Nothing new.
@@ -535,63 +622,57 @@ impl EdgeEval {
         self.watermark_advanced || matches!(self.signal, Signal::NoHistory { advanced: true })
     }
 
+    /// How the parent's latest data moved since this pipe last read it.
+    fn moved(&self) -> String {
+        let now = fmt_opt(self.parent_watermark.as_ref());
+        match &self.previous_watermark {
+            Some(previous) => format!(
+                "its latest data moved from {} to {now}",
+                fmt_bound(previous)
+            ),
+            None => format!("its latest data is now {now}"),
+        }
+    }
+
     fn describe(&self) -> String {
         let wm = fmt_opt(self.parent_watermark.as_ref());
+        let label = &self.label;
         match &self.signal {
-            Signal::Dirty { count, first, last } => {
-                let seqs = if first == last {
-                    format!("seq {first}")
+            Signal::Dirty { count, .. } => {
+                let changes = if *count == 1 {
+                    "1 new change".to_string()
                 } else {
-                    format!("seq {first}–{last}")
+                    format!("{count} new changes")
                 };
-                let noun = if *count == 1 { "entry" } else { "entries" };
                 let mut text = if self.no_cursor {
-                    format!(
-                        "no cursor on the edge from {} (first engine run); {count} unconsumed \
-                         ledger {noun} ({seqs})",
-                        self.label
-                    )
+                    format!("first run with {label} as a parent; it has {changes}")
                 } else {
-                    format!(
-                        "{count} unconsumed ledger {noun} from {} ({seqs})",
-                        self.label
-                    )
+                    format!("{label} has {changes}")
                 };
                 if self.no_cursor && self.watermark_advanced {
-                    text.push_str(&format!(", its watermark {wm} is ahead"));
+                    text.push_str(&format!(" and newer data (latest {wm})"));
                 } else if self.watermark_advanced {
-                    text.push_str(&format!(
-                        ", watermark advanced {} → {wm}",
-                        fmt_opt(self.previous_watermark.as_ref())
-                    ));
+                    text.push_str(&format!(" ({})", self.moved()));
                 }
                 text
             }
-            Signal::Advanced => format!(
-                "{} watermark advanced {} → {wm} since its cursor",
-                self.label,
-                fmt_opt(self.previous_watermark.as_ref())
-            ),
-            Signal::NoHistory { advanced: true } if self.parent_watermark.is_none() => format!(
-                "no cursor on the edge from {} (first engine run)",
-                self.label
-            ),
-            Signal::NoHistory { advanced: true } => format!(
-                "no cursor on the edge from {} (first engine run); its watermark {wm} is ahead",
-                self.label
-            ),
-            Signal::NoHistory { advanced: false } => format!(
-                "no cursor on the edge from {}; its watermark {wm} is not ahead",
-                self.label
-            ),
-            Signal::Quiet if self.parent_watermark.is_none() => format!(
-                "{} unchanged since its cursor (no unconsumed entries)",
-                self.label
-            ),
-            Signal::Quiet => format!(
-                "{} unchanged since its cursor (watermark {wm}, no unconsumed entries)",
-                self.label
-            ),
+            Signal::Advanced => format!("{label} has new data ({})", self.moved()),
+            Signal::NoHistory { advanced: true } if self.parent_watermark.is_none() => {
+                format!("first run with {label} as a parent")
+            }
+            Signal::NoHistory { advanced: true } => {
+                format!("first run with {label} as a parent; it has newer data (latest {wm})")
+            }
+            Signal::NoHistory { advanced: false } if self.parent_watermark.is_none() => {
+                format!("first run with {label} as a parent; it has no data yet")
+            }
+            Signal::NoHistory { advanced: false } => {
+                format!("first run with {label} as a parent; it has no newer data (latest {wm})")
+            }
+            Signal::Quiet if self.parent_watermark.is_none() => {
+                format!("{label} has no new data")
+            }
+            Signal::Quiet => format!("{label} has no new data (latest {wm})"),
         }
     }
 }
@@ -651,7 +732,7 @@ fn chunks_for(
                     ),
                     Ok(c) => {
                         warnings.push(format!(
-                            "{} chunks exceed the plan limit of {max}; listed as one range",
+                            "{} chunks are more than the plan lists ({max}); shown as one range",
                             c.len()
                         ));
                         out.push(to_span(axis, iv));
@@ -683,10 +764,11 @@ pub async fn plan_node<S: StateSource>(
         .expect("selected nodes come from the graph");
     let axis = &node.axis;
     let mut out = PlannedNode::new(pipe_ref, &node.definition_hash);
+    out.backtrack = backtrack_words(axis);
 
     if options.completed.contains(pipe_ref) {
         let run = options.resumed_from.as_deref().unwrap_or("the resumed run");
-        return out.set(Action::Skip, format!("already succeeded in {run}"));
+        return out.set(Action::Skip, format!("already synced in run {run}"));
     }
     let user_v4 = Bounds {
         begin: options.begin.map_or(Begin::Default, Begin::At),
@@ -696,13 +778,13 @@ pub async fn plan_node<S: StateSource>(
         out.bounds = Some(user_v4);
         return out.set(
             Action::Root,
-            "flat selection: v4 sync semantics (no capping, no ledger planning)",
+            "synced on its own: this run does not follow dependencies (add --parents or --children)",
         );
     }
     if node.is_stream() {
         return out.set(
             Action::Observe,
-            "stream source: never run in a one-shot sync; watermark and ledger are read only",
+            "listens for new data: it only syncs under --listen or --loop",
         );
     }
 
@@ -720,7 +802,7 @@ pub async fn plan_node<S: StateSource>(
     {
         return out.set(
             Action::UpstreamFailed,
-            format!("parent {} failed", label(e)),
+            format!("not synced because its parent {} failed", label(e)),
         );
     }
     out.provisional = in_edges
@@ -731,11 +813,13 @@ pub async fn plan_node<S: StateSource>(
         Ok(h) => out.stored_definition_hash = h,
         Err(e) => out
             .warnings
-            .push(format!("cannot read the definition hash: {e}")),
+            .push(format!("cannot read its stored definition: {e}")),
     }
     match state.watermark(pipe_ref).await {
         Ok(w) => out.watermark = w,
-        Err(e) => out.warnings.push(format!("cannot read the watermark: {e}")),
+        Err(e) => out
+            .warnings
+            .push(format!("cannot read its latest data: {e}")),
     }
     let own_pos = out.watermark.as_ref().and_then(|w| axis.pos(w));
 
@@ -750,13 +834,16 @@ pub async fn plan_node<S: StateSource>(
         let pwm = match state.watermark(&e.parent).await {
             Ok(w) => w,
             Err(err) => {
-                return out.set(Action::UpstreamFailed, unreachable("the watermark", err));
+                return out.set(Action::UpstreamFailed, unreachable("the latest data", err));
             }
         };
         let cursor = match state.cursor(&e.state_instance, &e.parent, pipe_ref).await {
             Ok(c) => c,
             Err(err) => {
-                return out.set(Action::UpstreamFailed, unreachable("the edge cursor", err));
+                return out.set(
+                    Action::UpstreamFailed,
+                    unreachable("what this pipe last read", err),
+                );
             }
         };
         let mapped_wm = pwm
@@ -788,7 +875,7 @@ pub async fn plan_node<S: StateSource>(
                 let entries = match state.ledger_after(&e.state_instance, &e.parent, 0).await {
                     Ok(entries) => entries,
                     Err(err) => {
-                        return out.set(Action::UpstreamFailed, unreachable("the ledger", err));
+                        return out.set(Action::UpstreamFailed, unreachable("the changes", err));
                     }
                 };
                 let advanced = if parent.axis.kind == AxisKind::None || axis.kind == AxisKind::None
@@ -801,12 +888,10 @@ pub async fn plan_node<S: StateSource>(
                         (Some(p), Some(o)) => p > o,
                     }
                 };
-                if let (Some(first), Some(last)) = (entries.first(), entries.last()) {
+                if let Some(last) = entries.last() {
                     eval.watermark_advanced = advanced;
                     eval.signal = Signal::Dirty {
                         count: entries.len(),
-                        first: first.seq,
-                        last: last.seq,
                     };
                     let dirty = dirty_intervals(&entries, &parent.axis);
                     eval.dirty = map_to_child(&dirty, &parent.axis, axis, &e.options);
@@ -829,14 +914,12 @@ pub async fn plan_node<S: StateSource>(
                 {
                     Ok(entries) => entries,
                     Err(err) => {
-                        return out.set(Action::UpstreamFailed, unreachable("the ledger", err));
+                        return out.set(Action::UpstreamFailed, unreachable("the changes", err));
                     }
                 };
-                if let (Some(first), Some(last)) = (entries.first(), entries.last()) {
+                if let Some(last) = entries.last() {
                     eval.signal = Signal::Dirty {
                         count: entries.len(),
-                        first: first.seq,
-                        last: last.seq,
                     };
                     let dirty = dirty_intervals(&entries, &parent.axis);
                     eval.dirty = map_to_child(&dirty, &parent.axis, axis, &e.options);
@@ -870,13 +953,13 @@ pub async fn plan_node<S: StateSource>(
         } else {
             Interval::new(None, cap)
         };
-        let what = "definition changed (sql, fetch, dtypes or columns)";
+        let what = "its definition changed (SQL, fetch, dtypes or columns)";
         if options.yes || options.auto_rebuild {
             out.bounds = Some(to_bounds(axis, &cap_iv));
             out.clear = true;
             return out.set(
                 Action::Rebuild,
-                format!("{what}: clear, then re-sync the full range"),
+                format!("{what}: clears its table and syncs everything again"),
             );
         }
         if options.interactive {
@@ -885,25 +968,27 @@ pub async fn plan_node<S: StateSource>(
             out.requires_confirmation = true;
             return out.set(
                 Action::Rebuild,
-                format!("{what}: clear, then re-sync the full range (confirm or pass --yes)"),
+                format!("{what}: clears its table and syncs everything again {CONFIRM}"),
             );
         }
         out.consumes.clear();
         return out.set(
             Action::RebuildPending,
             format!(
-                "{what}: rebuild needs --yes or system.engine.auto_rebuild; \
-                 descendants run against the stale data"
+                "{what}: not synced until the rebuild is approved (--yes or \
+                 system.engine.auto_rebuild); pipes downstream use its current data"
             ),
         );
     }
 
     if in_edges.is_empty() {
         out.bounds = Some(user_v4);
-        return out.set(
-            Action::Root,
-            "no parents in the selection: v4 sync (begin = sync time − backtrack)",
-        );
+        let what = if options.begin.is_some() || options.end.is_some() {
+            "syncs the requested range"
+        } else {
+            "syncs from its last sync, minus the backtrack window"
+        };
+        return out.set(Action::Root, format!("no parents in this run: {what}"));
     }
 
     let any_entries = evals
@@ -919,7 +1004,7 @@ pub async fn plan_node<S: StateSource>(
             .join("; ")
     };
     let changed = |e: &EdgeEval| matches!(e.signal, Signal::Dirty { .. }) || e.advanced();
-    let quiet_reason = || format!("{}; definition unchanged", describe(&evals, &|_| true));
+    let quiet_reason = || format!("up to date: {}", describe(&evals, &|_| true));
 
     if axis.kind == AxisKind::None {
         if !any_entries && !any_advanced {
@@ -942,7 +1027,7 @@ pub async fn plan_node<S: StateSource>(
         return out.set(
             action,
             format!(
-                "{}; no datetime column: full re-sync (filter_existing removes unchanged rows)",
+                "{}; it has no datetime column, so all rows sync again (unchanged rows are skipped)",
                 describe(&evals, &changed)
             ),
         );
@@ -964,7 +1049,7 @@ pub async fn plan_node<S: StateSource>(
             && axis.pos(b).is_none()
         {
             out.warnings.push(format!(
-                "the requested {name} {} does not match this pipe's axis; ignored",
+                "the requested {name} {} is not the kind of value its datetime column holds; ignored",
                 fmt_bound(b)
             ));
         }
@@ -980,18 +1065,24 @@ pub async fn plan_node<S: StateSource>(
             return out.set(
                 Action::Skip,
                 format!(
-                    "{}; but the window [own watermark − backtrack, min parent watermark) is \
-                     empty or outside the requested bounds",
+                    "{}, but it already has its parents' data or the new rows are outside the \
+                     requested range",
                     describe(&evals, &changed)
                 ),
             );
         }
         out.bounds = Some(to_bounds(axis, &iv));
         out.chunks = chunks_for(axis, &[iv], options.max_chunks, &mut out.warnings);
+        let from = if tail_begin.is_some() {
+            "syncs from its last sync, minus the backtrack window,"
+        } else {
+            // A pipe that has not synced yet has no last sync to start from.
+            "syncs everything"
+        };
         return out.set(
             Action::Incremental,
             format!(
-                "{}; sync from own watermark − backtrack to min parent watermark",
+                "{}; {from} up to its parents' latest data",
                 describe(&evals, &changed)
             ),
         );
@@ -1011,8 +1102,8 @@ pub async fn plan_node<S: StateSource>(
         return out.set(
             Action::Skip,
             format!(
-                "{}; but the dirty ranges lie past min parent watermark or outside the requested \
-                 bounds",
+                "{}, but the changed rows are past its parents' latest data or outside the \
+                 requested range",
                 describe(&evals, &changed)
             ),
         );
@@ -1027,7 +1118,7 @@ pub async fn plan_node<S: StateSource>(
     out.set(
         Action::Backfill,
         format!(
-            "{}; dirty ranges start before the tail ({tail}): backfill them on the chunk grid",
+            "{}; re-syncs the changed ranges, which start before {tail}",
             describe(&evals, &changed)
         ),
     )

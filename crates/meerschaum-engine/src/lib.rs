@@ -16,6 +16,7 @@
 //! | [`axis`] | §5.4 | Datetime/integer axes, half-open intervals, interval union, epoch-aligned grids |
 //! | [`ledger`] | §5.4 | Ledger entries, edge cursors, range mapping across edges, compaction, definition hash |
 //! | [`state`] | §5.3, §5.8 | [`StateSource`] / [`StateWriter`] traits and an in-memory implementation |
+//! | [`status`] | §5.8, C2 | The per-pipe sync status every engine sync records |
 //! | [`mod@plan`] | §5.3 | The planner: one [`Action`] per node with bounds, chunks and a reason |
 //! | [`schedule`] | §5.5 | EWMA durations, HEFT upward rank, CPM earliest/latest/slack |
 //! | [`executor`] | §5.5, D11 | Kahn ready queue on tokio, semaphores, leases, retries, failure propagation |
@@ -56,6 +57,7 @@ pub mod runs;
 pub mod schedule;
 pub mod selection;
 pub mod state;
+pub mod status;
 pub mod stream;
 pub mod sync;
 pub mod viz;
@@ -91,6 +93,7 @@ pub use runs::{NodeRow, NodeStatus, RunRecord, RunRow};
 pub use schedule::{DurationSource, EwmaDurations, Schedule};
 pub use selection::{Depth, KeyFilter, Pipeline, Selection, Subgraph, Targets};
 pub use state::{MemoryState, StateError, StateSource, StateWriter};
+pub use status::{SyncOutcome, SyncSource, SyncStatus};
 pub use stream::StopToken;
 pub use sync::{SyncArgs, SyncBegin};
 

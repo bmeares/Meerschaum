@@ -444,7 +444,8 @@ impl Pipeline {
                 .iter()
                 .filter(|r| {
                     let known = graph.node(r).is_some();
-                    if !known {
+                    // Meerschaum's internal `mrsm` pipes are never graph nodes: no warning.
+                    if !known && r.parts().connector_keys != "mrsm" {
                         warnings.push(format!(
                             "{} is not registered; it is not part of the selection",
                             r.label_with_instance()

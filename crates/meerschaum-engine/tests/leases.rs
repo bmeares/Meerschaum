@@ -97,7 +97,7 @@ async fn leases_exclude_another_process() {
         node.message
             .as_deref()
             .unwrap_or_default()
-            .contains("held by another process"),
+            .contains("another process is syncing"),
         "{node:#?}"
     );
     assert_eq!(env.rowcount("a_raw").await, 0);

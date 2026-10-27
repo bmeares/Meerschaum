@@ -954,3 +954,137 @@ fn init_provisions_plugins_on_the_first_run() {
     let setup = position(["setup", "plugins"]).expect("`setup plugins` ran");
     assert!(installed < required && required < setup, "{ran:?}");
 }
+
+/// rc15 (S4): `up` checks every job it would start before it registers or syncs anything: a
+/// name another project's job has refuses the whole `up`, listing the names.
+#[test]
+fn up_refuses_foreign_collisions_before_registering_or_syncing() {
+    let env = env_from_yaml(
+        "project_name: alpha\nroot_dir: ./root\nsync:\n  min_seconds: 60\n\
+         pipes:\n  - connector: plugin:noaa\n    metric: weather\n    instance: sql:local\n",
+    );
+    // `alpha sync (sql:local)` is the name of the job `up` starts for these pipes; another
+    // project (`beta`) already has a job by that name.
+    let mut jobs = jobs_of(vec![(
+        "alpha sync (sql:local)",
+        job(
+            &["sync", "pipes", "-t", "beta"],
+            Some("beta"),
+            "running",
+            true,
+        ),
+    )]);
+    let mut instance = InMemoryInstance::default();
+    let mut runner = RecordingRunner::default();
+    let out = run_with(
+        &env,
+        &["up"],
+        &mut jobs,
+        &mut instance,
+        &mut runner,
+        &mut NoInput,
+        true,
+        false,
+        |args| args.presync = true,
+    );
+    let result = out.result.unwrap();
+    assert!(!result.success);
+    assert!(
+        result
+            .message
+            .contains("not owned by this Compose project: alpha sync (sql:local)"),
+        "{}",
+        result.message
+    );
+    assert!(
+        result
+            .message
+            .contains("Nothing was registered, synced or started")
+    );
+    let acted: Vec<Vec<String>> = acting(
+        &runner
+            .commands
+            .into_iter()
+            .map(|c| c.sysargs)
+            .collect::<Vec<_>>(),
+    );
+    assert!(
+        !acted.iter().any(|c| matches!(
+            c.first().map(String::as_str),
+            Some("register" | "sync" | "start")
+        )),
+        "{acted:?}"
+    );
+    assert!(instance.events.is_empty(), "{:?}", instance.events);
+}
+
+/// rc15 (Q22/Q30): a project's `local` job that its systemd executor takes over is not deleted
+/// before it starts again (the move stops it and keeps its logs); other owned jobs still are.
+#[test]
+fn up_starts_a_job_moving_to_systemd_without_deleting_it_first() {
+    struct Moving(InMemoryJobs);
+    impl meerschaum_compose::ops::JobOps for Moving {
+        fn get_jobs(&mut self) -> indexmap::IndexMap<String, JobInfo> {
+            self.0.get_jobs()
+        }
+        fn moves_to_systemd(&mut self, name: &str) -> bool {
+            name == "worker"
+        }
+    }
+    let env = env_from_yaml(ALPHA);
+    let mut jobs = Moving(jobs_of(vec![
+        (
+            "worker",
+            job(
+                &["sync", "pipes", "--loop", "-t", "alpha"],
+                Some("alpha"),
+                "running",
+                true,
+            ),
+        ),
+        (
+            "api",
+            job(
+                &["start", "api", "-t", "alpha"],
+                Some("alpha"),
+                "running",
+                false,
+            ),
+        ),
+    ]));
+    let mut runner = RecordingRunner::default();
+    let out = run_with(
+        &env,
+        &["up"],
+        &mut jobs,
+        &mut InMemoryInstance::default(),
+        &mut runner,
+        &mut NoInput,
+        true,
+        false,
+        |_| {},
+    );
+    let result = out.result.unwrap();
+    assert!(result.success, "{}", result.message);
+    let commands: Vec<Vec<String>> = runner.commands.into_iter().map(|c| c.sysargs).collect();
+    let deleted: Vec<&String> = commands
+        .iter()
+        .filter(|c| c.first().map(String::as_str) == Some("delete"))
+        .filter_map(|c| c.get(2))
+        .collect();
+    assert_eq!(deleted, vec!["api"], "{commands:?}");
+    assert!(
+        commands
+            .iter()
+            .any(|c| c.windows(2).any(|w| w[0] == "--name" && w[1] == "worker")),
+        "{commands:?}"
+    );
+    assert!(
+        out.messages
+            .items
+            .iter()
+            .any(|m| format!("{m:?}").contains("Moving job 'worker' to systemd")),
+        "{:?}",
+        out.messages.items
+    );
+}

@@ -96,6 +96,8 @@ pub struct ComposeArgs {
     pub nopretty: bool,
     /// `--debug`.
     pub debug: bool,
+    /// `--allow-protected` (forwarded to the commands and jobs compose runs).
+    pub allow_protected: bool,
     /// The console width for `explain`.
     pub width: Option<usize>,
     /// `--standalone`: ignore the file's `parent:` and run it on its own.
@@ -262,6 +264,7 @@ impl Ctx<'_, '_> {
     ) -> Result<SuccessTuple, ComposeError> {
         let opts = RunOptions {
             debug: self.args.debug,
+            allow_protected: self.args.allow_protected,
             ..opts
         };
         if !self.out.messages.items.is_empty()
@@ -941,6 +944,24 @@ fn compose_up(
     if let Some(message) = refs::blocking_message(&findings) {
         return Ok(SuccessTuple::fail(message));
     }
+    // Every job `up` would start is checked before anything changes: a job of another project
+    // with one of its names refuses the whole `up` (no pipe is registered or synced first).
+    if !mode.dry && !mode.no_jobs {
+        // The messages of this look are shown only with a refusal: the jobs are listed again
+        // (and their warnings shown) when they start.
+        let mark = ctx.out.messages.items.len();
+        let jobs_commands = get_jobs_commands(&project.config, &pipes, &mut Messages::default())?;
+        let existing = match ctx.project_jobs() {
+            Ok(jobs) => jobs,
+            Err(failed) => return Ok(failed),
+        };
+        let owned =
+            get_project_job_names(&project.config, &pipes, &existing, &mut Messages::default())?;
+        if let Some(refusal) = foreign_collisions(&jobs_commands, &existing, &owned) {
+            return Ok(refusal);
+        }
+        ctx.out.messages.items.truncate(mark);
+    }
     let groups = instance_pipes(&pipes);
     let project_name = project.project_name();
     let explicit_jobs = project.config.get("jobs").is_some_and(Value::truthy);
@@ -1139,20 +1160,9 @@ fn compose_up(
     };
     let to_delete =
         get_project_job_names(&project.config, &pipes, &existing, &mut ctx.out.messages)?;
-    let unsafe_collisions: Vec<&String> = jobs_commands
-        .keys()
-        .filter(|n| existing.contains_key(*n) && !to_delete.contains(n))
-        .collect();
-    if !unsafe_collisions.is_empty() {
-        return Ok(SuccessTuple::fail(format!(
-            "Refusing to replace job{} not owned by this Compose project: {}",
-            plural(unsafe_collisions.len()),
-            unsafe_collisions
-                .iter()
-                .map(|s| s.as_str())
-                .collect::<Vec<_>>()
-                .join(", ")
-        )));
+    // Checked again: another project may have started a job while the pipes synced.
+    if let Some(refusal) = foreign_collisions(&jobs_commands, &existing, &to_delete) {
+        return Ok(refusal);
     }
     // Jobs a root compose started are managed from there.
     let skipped = ctx.managed_elsewhere(project, &existing, &to_delete);
@@ -1163,6 +1173,14 @@ fn compose_up(
     jobs_commands.retain(|name, _| !skipped.contains(name));
 
     for job_name in &to_delete {
+        // A local job the project's systemd executor takes over is not deleted: starting it
+        // again moves it to systemd (stopping it first) and keeps its logs.
+        if jobs_commands.contains_key(job_name) && ctx.jobs.moves_to_systemd(job_name) {
+            ctx.out.messages.info(format!(
+                "Moving job '{job_name}' to systemd so it survives a reboot..."
+            ));
+            continue;
+        }
         let r = ctx.run(
             &["delete".into(), "job".into(), job_name.clone(), "-f".into()],
             project,
@@ -1251,6 +1269,32 @@ fn compose_up(
         msg.push_str("\nRun `mrsm compose logs` or pass `-f` to follow logs output.");
     }
     Ok(SuccessTuple::ok(msg))
+}
+
+/// The refusal of `up` when a job it would start has the name of a job this project does not
+/// own (`owned`: the existing jobs that belong to the project).
+fn foreign_collisions(
+    jobs_commands: &IndexMap<String, Vec<String>>,
+    existing: &IndexMap<String, JobInfo>,
+    owned: &[String],
+) -> Option<SuccessTuple> {
+    let collisions: Vec<&str> = jobs_commands
+        .keys()
+        .filter(|n| existing.contains_key(*n) && !owned.contains(n))
+        .map(String::as_str)
+        .collect();
+    if collisions.is_empty() {
+        return None;
+    }
+    Some(SuccessTuple::fail(format!(
+        "Refusing to replace job{} not owned by this Compose project: {}\n\
+         Nothing was registered, synced or started. Rename the job{} in this compose file, or \
+         stop and delete {} first.",
+        plural(collisions.len()),
+        collisions.join(", "),
+        plural(collisions.len()),
+        if collisions.len() == 1 { "it" } else { "them" },
+    )))
 }
 
 /// `run_initial_syncs(pipes, compose_config, sysargs)`: two passes of syncing.

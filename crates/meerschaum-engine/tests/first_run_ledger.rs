@@ -161,7 +161,7 @@ async fn scenario(conn: Arc<SqlConnector>, src: String, tag: &str) {
         "{executed:?}"
     );
     assert!(
-        executed.reason.contains("unconsumed ledger"),
+        executed.reason.contains("new change"),
         "{}",
         executed.reason
     );

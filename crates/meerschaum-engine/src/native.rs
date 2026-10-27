@@ -189,13 +189,10 @@ impl<'a, S: StateWriter> LedgerWriter<'a, S> {
     fn take_written(&self) -> Vec<ChangedInterval> {
         std::mem::take(&mut *self.written.lock().unwrap_or_else(|e| e.into_inner()))
     }
-}
 
-#[async_trait]
-impl<S: StateWriter> DeltaObserver for LedgerWriter<'_, S> {
-    async fn before_commit(&self, _pipe: &Pipe, delta: &Frame) -> Result<(), String> {
-        if delta.height() > 0 {
-            let intervals = ledger_intervals(frame_positions(delta, &self.axis), &self.axis);
+    /// Append ledger entries for `intervals` on every state instance (then crash injection).
+    async fn write_intervals(&self, intervals: Vec<crate::axis::Interval>) -> Result<(), String> {
+        if !intervals.is_empty() {
             let spans: Vec<(Option<Bound>, Option<Bound>)> = intervals
                 .iter()
                 .map(|iv| {
@@ -229,6 +226,35 @@ impl<S: StateWriter> DeltaObserver for LedgerWriter<'_, S> {
             f.after_ledger_write(&self.pipe_ref)?;
         }
         Ok(())
+    }
+}
+
+#[async_trait]
+impl<S: StateWriter> DeltaObserver for LedgerWriter<'_, S> {
+    async fn before_commit(&self, _pipe: &Pipe, delta: &Frame) -> Result<(), String> {
+        let intervals = if delta.height() > 0 {
+            ledger_intervals(frame_positions(delta, &self.axis), &self.axis)
+        } else {
+            Vec::new()
+        };
+        self.write_intervals(intervals).await
+    }
+
+    /// The whole replaced window is dirty: its rows may be deleted without a replacement.
+    async fn before_replace(
+        &self,
+        _pipe: &Pipe,
+        delta: &Frame,
+        begin: Option<&meerschaum_connector::DateBound>,
+        end: Option<&meerschaum_connector::DateBound>,
+    ) -> Result<(), String> {
+        let intervals = crate::sync::replaced_intervals(
+            &self.axis,
+            frame_positions(delta, &self.axis),
+            begin,
+            end,
+        );
+        self.write_intervals(intervals).await
     }
 
     async fn after_commit(&self, _pipe: &Pipe, _result: &SyncResult) -> Result<(), String> {
@@ -270,6 +296,19 @@ impl DeltaObserver for FetchProgress<'_> {
     async fn before_commit(&self, pipe: &Pipe, delta: &Frame) -> Result<(), String> {
         match self.inner {
             Some(o) => o.before_commit(pipe, delta).await,
+            None => Ok(()),
+        }
+    }
+
+    async fn before_replace(
+        &self,
+        pipe: &Pipe,
+        delta: &Frame,
+        begin: Option<&meerschaum_connector::DateBound>,
+        end: Option<&meerschaum_connector::DateBound>,
+    ) -> Result<(), String> {
+        match self.inner {
+            Some(o) => o.before_replace(pipe, delta, begin, end).await,
             None => Ok(()),
         }
     }
@@ -571,10 +610,8 @@ struct Extent<'a> {
     span: Mutex<Option<(i64, i64)>>,
 }
 
-#[async_trait]
-impl DeltaObserver for Extent<'_> {
-    async fn before_commit(&self, pipe: &Pipe, delta: &Frame) -> Result<(), String> {
-        let positions = frame_positions(delta, self.axis);
+impl Extent<'_> {
+    fn widen(&self, positions: &[i64]) {
         if let (Some(lo), Some(hi)) = (positions.iter().min(), positions.iter().max()) {
             let mut span = self.span.lock().unwrap_or_else(|e| e.into_inner());
             *span = Some(match *span {
@@ -582,8 +619,36 @@ impl DeltaObserver for Extent<'_> {
                 None => (*lo, *hi),
             });
         }
+    }
+}
+
+#[async_trait]
+impl DeltaObserver for Extent<'_> {
+    async fn before_commit(&self, pipe: &Pipe, delta: &Frame) -> Result<(), String> {
+        self.widen(&frame_positions(delta, self.axis));
         match self.inner {
             Some(o) => o.before_commit(pipe, delta).await,
+            None => Ok(()),
+        }
+    }
+
+    /// A replaced window changes as a whole: its bounded sides widen the extent too.
+    async fn before_replace(
+        &self,
+        pipe: &Pipe,
+        delta: &Frame,
+        begin: Option<&meerschaum_connector::DateBound>,
+        end: Option<&meerschaum_connector::DateBound>,
+    ) -> Result<(), String> {
+        let mut positions = frame_positions(delta, self.axis);
+        for b in [begin, end].into_iter().flatten() {
+            if let Some(p) = crate::sync::date_bound_to_bound(b).and_then(|b| self.axis.pos(&b)) {
+                positions.push(p);
+            }
+        }
+        self.widen(&positions);
+        match self.inner {
+            Some(o) => o.before_replace(pipe, delta, begin, end).await,
             None => Ok(()),
         }
     }
@@ -658,7 +723,9 @@ impl<S: StateWriter + 'static> SyncExecutor for NativeExecutor<S> {
         };
         let pipe = node.pipe.clone();
         let pipe_ref = &request.pipe_ref;
-        let base = self.base_args();
+        let mut base = self.base_args();
+        // The executor records the node's sync status once, after every window and retry.
+        base.status_owner = Some(pipe_ref.clone());
         let ledger = self.ledger_for(pipe_ref, &node.axis);
         let _ = self.flat;
 

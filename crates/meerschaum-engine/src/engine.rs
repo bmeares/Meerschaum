@@ -492,6 +492,12 @@ pub enum LapEvent {
         /// v4's warning line.
         message: String,
     },
+    /// Something the person running the loop should know, said once when the loop starts (a
+    /// pipe's schedule that is ignored or does not parse).
+    Warning {
+        /// The warning.
+        message: String,
+    },
 }
 
 /// Continuous-mode options.
@@ -507,6 +513,10 @@ pub struct LoopOptions {
     pub max_laps: Option<u64>,
     /// The stop signal (`stop jobs`, CTRL-C).
     pub stop: StopToken,
+    /// Name each lap's run after this (`{name}-{timestamp}-{suffix}`,
+    /// [`crate::runs::new_named_run_id`]): a saved Pipeline's loop. `None`: the default ids. A
+    /// configured [`RunOptions::run_id`] still names the first lap only.
+    pub run_name: Option<String>,
 }
 
 /// The result of [`Engine::run_loop`].
@@ -1275,6 +1285,12 @@ impl Engine {
         if let Some(h) = flusher {
             let _ = h.await;
         }
+        // The nodes' sync statuses (written in the background as each node ended).
+        self.state
+            .flush_sync_statuses(
+                meerschaum_connector::sync_status::RECORD_TIMEOUT + Duration::from_secs(1),
+            )
+            .await;
 
         // Compact consumed ledger entries of the nodes that ran, then retention.
         if !sub.flat || self.config.flat_ledger {
@@ -1382,15 +1398,20 @@ impl Engine {
         if let (true, Some(cadence)) = (loop_opts.run_loop, self.cadence.as_ref())
             && let Ok((graph, sub, _)) = self.resolve(&opts).await
         {
+            // Every pipe of a flat selection is a root (v4 semantics); in a graph run only the
+            // pipes without parents in the run follow their schedule.
             let roots = sub
                 .order
                 .iter()
-                .filter(|r| sub.parent_edges(r).next().is_none())
+                .filter(|r| sub.flat || sub.parent_edges(r).next().is_none())
                 .filter_map(|r| graph.node(r).map(|n| (&n.pipe_ref, &n.record.parameters)));
-            let (parsed, warnings) =
+            let (parsed, mut warnings) =
                 crate::cadence::PipeSchedules::parse(cadence.as_ref(), roots, Utc::now());
-            for w in warnings {
-                tracing::warn!("{w}");
+            // Said once per loop (S4): a scheduled pipe with parents does not follow its schedule.
+            warnings.extend(crate::cadence::ignored_schedules(&graph, &sub));
+            for message in warnings {
+                tracing::warn!("{message}");
+                on_lap(LapEvent::Warning { message });
             }
             schedules = parsed;
             schedules_flat = sub.flat;
@@ -1466,6 +1487,11 @@ impl Engine {
             // A configured first-lap correlation id must not overwrite later laps.
             if lap > 1 {
                 lap_opts.run_id = None;
+            }
+            if lap_opts.run_id.is_none()
+                && let Some(name) = loop_opts.run_name.as_deref()
+            {
+                lap_opts.run_id = Some(crate::runs::new_named_run_id(name));
             }
             let mut result = self.run_inner(lap_opts, Some(on_lap.clone())).await;
             if let Some(t) = triggers.as_mut() {
@@ -1614,6 +1640,7 @@ impl Engine {
                 let pipe_ref = r.clone();
                 let config = StreamConfig::from_parameters(pipe.parameters());
                 let flusher = NativeFlush::new(executor.clone());
+                let registry = self.registry.clone();
                 let stop = stop.clone();
                 let emitter = emitter.clone();
                 set.spawn(async move {
@@ -1622,6 +1649,7 @@ impl Engine {
                     let sub_pipe = pipe.clone();
                     let sub_stop = stop.clone();
                     let sub_emitter = emitter.clone();
+                    let sub_registry = registry.clone();
                     let subscriber = async move {
                         supervise(
                             &PipeRef::from_pipe(&sub_pipe),
@@ -1630,7 +1658,12 @@ impl Engine {
                                 let s = sub_source.clone();
                                 let p = sub_pipe.clone();
                                 let st = sub_stop.clone();
-                                async move { s.subscribe(&p, tx, st).await }
+                                let registry = sub_registry.clone();
+                                async move {
+                                    let result = s.subscribe(&p, tx, st).await;
+                                    record_stream_failure(registry.as_ref(), &p, &result);
+                                    result
+                                }
                             },
                             SuperviseOptions::default(),
                             Some(&sub_emitter),
@@ -1665,6 +1698,7 @@ impl Engine {
                     crate::native::NativeLegacySink::new(executor.clone(), Some(emitter.clone()))
                         .with_outcomes(starts_tx.clone()),
                 );
+                let registry = self.registry.clone();
                 set.spawn(async move {
                     supervise(
                         &PipeRef::from_pipe(&pipe),
@@ -1673,7 +1707,12 @@ impl Engine {
                             let p = pipe.clone();
                             let st = stop.clone();
                             let sink = sink.clone();
-                            async move { l.run(&p, sink, st).await }
+                            let registry = registry.clone();
+                            async move {
+                                let result = l.run(&p, sink, st).await;
+                                record_stream_failure(registry.as_ref(), &p, &result);
+                                result
+                            }
                         },
                         SuperviseOptions::default(),
                         Some(&emitter),
@@ -1684,6 +1723,20 @@ impl Engine {
             }
         }
         (set, owned, emitter, starts)
+    }
+}
+
+/// A stream that stopped with an error (its subscription failed or its connector's `sync()`
+/// failed) is a failed sync of its pipe: record it in the pipe's sync status. Its flushes and
+/// callback syncs record their own outcomes.
+fn record_stream_failure(
+    registry: &dyn ConnectorRegistry,
+    pipe: &Pipe,
+    result: &Result<(), String>,
+) {
+    if let Err(error) = result {
+        let failed = SyncResult::new(false, format!("Listening for new data stopped: {error}"));
+        crate::status::record_result(registry, pipe, &failed, false);
     }
 }
 
@@ -1810,6 +1863,10 @@ impl StateWriter for NoRunHistory {
     }
     async fn record_run(&self, _run: &RunRecord) -> Result<(), crate::state::StateError> {
         Ok(())
+    }
+    fn record_sync_status(&self, node: &PipeRef, outcome: crate::status::SyncOutcome) {
+        // Sync statuses are not run history: they are kept either way.
+        self.0.record_sync_status(node, outcome);
     }
 }
 

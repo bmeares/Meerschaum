@@ -348,6 +348,10 @@ fn systemd_units_match() {
     let tmp = dir.path().to_string_lossy().to_string();
     let mut ctx = JobsContext::for_root(dir.path().join("root"));
     ctx.paths.systemd_user_dir = dir.path().join("userhome/.config/systemd/user");
+    // v4 had one unit naming scheme, the one the default root keeps (the files stay under
+    // `root/`; only the root's identity is the default one). Other roots name their units
+    // `mrsm-<scope>.<job>.service` (`systemd_executor.rs`).
+    ctx.paths.root = dir.path().join("userhome/.config/meerschaum");
     let executor = SystemdExecutor::new(ctx.clone());
     let process_env: Vec<(String, String)> = vec![
         ("PATH".into(), "/usr/bin:/bin".into()),

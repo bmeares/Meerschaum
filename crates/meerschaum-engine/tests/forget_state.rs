@@ -154,7 +154,7 @@ async fn a_reset_chain_starts_fresh() {
     assert!(after.success, "{}", after.message);
     let b_reason = reason(&after, &env, "w9_b");
     assert!(
-        !b_reason.contains("unchanged since its cursor") && !b_reason.contains("unconsumed"),
+        b_reason.contains("first run with"),
         "stale state was reused: {b_reason}"
     );
     let status = after

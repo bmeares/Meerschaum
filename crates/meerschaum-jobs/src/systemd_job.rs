@@ -233,6 +233,17 @@ mod imp {
         if let Some(a) = &admission {
             cmd.env(crate::startup::RELEASE_ENV, a.release_env());
         }
+        // The worker's lap heartbeats go to the hidden sister job's directory (job health).
+        if let Some(ctx) = ctx.as_ref() {
+            cmd.env(
+                crate::health::LAPS_PATH_ENV,
+                crate::health::laps_path(&ctx.paths.jobs_dir, &job.name),
+            )
+            .env(
+                crate::health::LAPS_PARENT_ENV,
+                std::process::id().to_string(),
+            );
+        }
         match job
             .stdin_path
             .as_ref()

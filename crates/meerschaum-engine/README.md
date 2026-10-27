@@ -46,8 +46,12 @@ println!("{}", planned.plan);
 // `--resume <run_id>`: re-plans only nodes that failed or never ran.
 engine.run(RunOptions { resume: Some(run_id), ..Default::default() }).await;
 
-// A bare `pipe.sync()` (R1): v4 behavior, no graph, no capping, no engine state.
+// A bare `pipe.sync()` (R1): v4 behavior, no graph, no capping, no ledger, cursors or history
+// (only the pipe's sync status is recorded).
 engine.sync_pipe(&pipe, None, &Default::default()).await;
+
+// The latest outcome of every recorded sync on an instance (rc15 C2).
+let statuses = registry.instance("sql:main")?.get_sync_statuses("sql:main").await?;
 
 // Continuous mode: `--loop --min-seconds N` (laps), `--listen` (stream sources).
 engine.run_loop(opts, LoopOptions { run_loop: true, min_seconds: 20.0, ..Default::default() },
@@ -78,7 +82,9 @@ engine.state().load_events(&run_id).await?;
   on that crate). With `--loop`, a root node (every node of a flat selection) with a schedule is
   held out of laps until its next fire time (`exclude` for flat selections, `hold` otherwise); a
   lap with nothing due waits for the earliest fire time and the inter-lap sleep is capped by it.
-  Without a `Cadence` the key is ignored.
+  Without a `Cadence` the key is ignored. A scheduled pipe with parents in a graph run does not
+  follow its schedule: the loop reports it once (`LapEvent::Warning`) and the plan lists it in
+  `Plan::warnings` (`cadence::ignored_schedules`).
 - **Chunk pipelining** (R6; `RunOptions::chunk_pipelining`, `EngineConfig::chunk_pipelining`).
   Needs an executor with `supports_chunk_pipelining()` (the native one) and a non-flat run. A
   node that runs as `incremental`/`backfill` with two or more chunks publishes, after each window's
@@ -136,6 +142,27 @@ does the same for every `pipe.drop()` / `delete()` / `clear()` (`meerschaum/core
 The state pipes' parameters live in `pipe_ops::engine_state_parameters` (`EnginePipe::parameters`
 delegates to it). Cursors kept on another instance (cross-instance edges) are not forgotten.
 
+**Sync status** (rc15 C2, `status.rs` over `meerschaum_connector::sync_status`): one row per pipe
+of `mrsm:engine_sync_status` on the pipe's instance (last attempt, success and failure times,
+message, row counts, duration, consecutive failures, source, job). The executor records each
+node's final outcome once, after its windows and retries (`StateWriter::record_sync_status`; a
+run awaits the queued writes of its nodes before it returns); every other sync records through
+`sync::sync_pipe` (bare syncs, worker callbacks, native host calls, stream flushes and
+`--listen` callbacks); a stream that stops with an error records a failure. Every write runs in
+the background (`sync_status::record` returns at once), so no sync waits for its status; reads
+in the same process write what it still holds first, and hosts flush before they exit
+(`sync_status::flush`: the CLI's `run`, `start api`, the Python extension's `atexit`).
+`SyncArgs::status_owner` marks a sync whose outcome its caller records (an engine node, a
+plugin's own `sync()`), so nested syncs of the same pipe are part of it. Skipped, observed,
+blocked and rebuild-pending nodes record nothing, nor does an attempt that never ran because
+another process held the pipe's lease. Successes are debounced (5 s per pipe), writes are
+time-bounded and never fail a sync, and `forget_engine_state` drops what the process still holds
+for a removed pipe (`sync_status::forget`). The row counts come from
+`InstanceConnector::sync_pipe_with_counts` (the `api:` client sums its server's counts). Plans
+carry each node's window in words
+(`PlannedNode::bounds_text`, `backtrack`), and a run's message lists only its non-zero counts
+(`executor::run_summary`).
+
 ## Tests
 
 | Test | What it covers |
@@ -158,6 +185,7 @@ delegates to it). Cursors kept on another instance (cross-instance edges) are no
 | `tests/continuous.rs` | Lap-compatible `--loop --min-seconds`, `-l _negation`, `-w 1` order, v4's error cooldown, a supervised in-memory stream under `--listen`. |
 | `tests/state_cost.rs` | The engine-state write path. |
 | `tests/bare_sync.rs` | A bare `pipe.sync()` (R1). |
+| `tests/sync_status.rs` | The per-pipe sync status on SQLite: bare syncs, flat (`cli`) and graph (`engine`) runs (one record per node, after its retries; skipped nodes record nothing), failures counting until a success, the 5-second debounce and its trailing write, reads that see a held success, the status owner of nested syncs, temporary pipes, forgetting a deleted, dropped or cleared pipe for good (a held success never brings it back). |
 | `tests/python_glue.rs` | Manifest routing, native callbacks, scoped ledger observers, real plugin sync and custom fetch kwargs. |
 | `tests/pipe_schedule.rs` | `parameters['schedule']` in `--loop`: a scheduled root only syncs when due (via a host-supplied `Cadence`), unscheduled pipes keep the lap cadence, an all-scheduled selection idles until due. |
 | `tests/chunk_pipelining.rs` | `--chunk-pipelining`: a child pre-syncs a running parent's committed windows (extra `node_started`), tables identical to a sequential run, cursors advance exactly. |

@@ -3,7 +3,15 @@
 //!
 //! Every `systemctl` call goes through the context's [`crate::runner::ProcessRunner`], so the
 //! executor is testable with [`crate::runner::FakeSystemctl`] and never touches the host's
-//! services. Status, PID and timestamps come from `systemctl is-active` / `show`; the job's
+//! services.
+//!
+//! **Units per root.** Every root may use `systemd` (v4 and 5.0 before rc15: only the default
+//! root). The default root keeps v4's unit names (`mrsm-<job>.service`); any other root names its
+//! units `mrsm-<scope>.<job>.service`, where the scope is the Compose project's name for a job
+//! Compose started, else a short hash of the root's path. A root lists only its own units: the ones
+//! whose files live under its `systemd/services/` directory, so the default root never sees
+//! another root's jobs. Units of other roots export `MRSM_ROOT_DIR` so they come back after a
+//! reboot, and every unit file is private (`0600`: it may carry the project's `MRSM_CONFIG`). Status, PID and timestamps come from `systemctl is-active` / `show`; the job's
 //! properties live in the hidden "sister" local job (`jobs/<name>/`, externally managed); logs
 //! are the service's rotating log file under `<root>/systemd/logs/`.
 //!
@@ -36,6 +44,8 @@ pub struct SystemdExecutor {
     /// Warnings of the operations so far, for the caller to show (see
     /// [`JobExecutor::take_warnings`]).
     warnings: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+    /// The unit names chosen for jobs being created, before their unit files exist.
+    creating: std::sync::Arc<std::sync::Mutex<std::collections::HashMap<String, String>>>,
 }
 
 impl SystemdExecutor {
@@ -45,6 +55,7 @@ impl SystemdExecutor {
             ctx,
             process_env: None,
             warnings: Default::default(),
+            creating: Default::default(),
         }
     }
 
@@ -55,9 +66,109 @@ impl SystemdExecutor {
         self
     }
 
-    /// `get_service_name(name)`: `mrsm-<name with spaces as dashes>.service`.
+    /// `get_service_name(name)`: the name of the job's unit. An existing job keeps the name its
+    /// unit file has; a new one gets [`SystemdExecutor::new_service_name`] (`mrsm-<name with
+    /// spaces as dashes>.service` in the default root, as v4 names it).
     pub fn get_service_name(&self, name: &str) -> String {
-        format!("mrsm-{}.service", name.replace(' ', "-"))
+        if let Some(service) = self.creating.lock().ok().and_then(|c| c.get(name).cloned()) {
+            return service;
+        }
+        self.existing_service_name(name)
+            .unwrap_or_else(|| self.new_service_name(name, None))
+    }
+
+    /// The unit file name in the job's directory under `systemd/services/`, if it has one.
+    pub fn existing_service_name(&self, name: &str) -> Option<String> {
+        if crate::names::invalid_job_name_reason(name).is_some() {
+            return None;
+        }
+        let mut found: Vec<String> = std::fs::read_dir(self.get_service_job_path(name))
+            .ok()?
+            .flatten()
+            .filter(|e| e.file_type().is_ok_and(|t| t.is_file()))
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|n| n.starts_with("mrsm-") && n.ends_with(".service"))
+            .collect();
+        found.sort();
+        let preferred = self.new_service_name(name, None);
+        if found.contains(&preferred) {
+            return Some(preferred);
+        }
+        found.into_iter().next()
+    }
+
+    /// Whether this executor's root is the default root (`<config dir>/meerschaum`).
+    pub fn is_default_root(&self) -> bool {
+        crate::job::default_root_dir(&self.ctx).is_some_and(|d| same_path(&d, &self.ctx.paths.root))
+    }
+
+    /// The scope of this root's unit names: `None` for the default root (v4's names), else the
+    /// Compose `project` that starts the job, or [`root_scope`] of the root.
+    pub fn unit_scope(&self, project: Option<&str>) -> Option<String> {
+        if self.is_default_root() {
+            return None;
+        }
+        Some(
+            project
+                .map(str::trim)
+                .filter(|p| !p.is_empty())
+                .map(str::to_string)
+                .unwrap_or_else(|| root_scope(&self.ctx.paths.root)),
+        )
+    }
+
+    /// The unit name a new job gets: `mrsm-<job>.service` in the default root,
+    /// `mrsm-<scope>.<job>.service` elsewhere (see [`SystemdExecutor::unit_scope`]).
+    pub fn new_service_name(&self, name: &str, project: Option<&str>) -> String {
+        match self.unit_scope(project) {
+            None => format!("mrsm-{}.service", name.replace(' ', "-")),
+            Some(scope) => scoped_service_name(&scope, name),
+        }
+    }
+
+    /// [`SystemdExecutor::new_service_name`], unless another root already installed a unit by
+    /// that name (two copies of one Compose project): then the scope also carries this root's
+    /// hash.
+    fn unique_service_name(&self, name: &str, project: Option<&str>) -> String {
+        let candidate = self.new_service_name(name, project);
+        let link = self.ctx.paths.systemd_user_dir.join(&candidate);
+        if link.symlink_metadata().is_err() || self.link_is_ours(name, &candidate) {
+            return candidate;
+        }
+        match self.unit_scope(project) {
+            None => candidate,
+            Some(scope) => scoped_service_name(
+                &format!("{scope}-{}", root_scope(&self.ctx.paths.root)),
+                name,
+            ),
+        }
+    }
+
+    /// Whether the user unit `service` is this root's unit for the job `name`.
+    fn link_is_ours(&self, name: &str, service: &str) -> bool {
+        let link = self.ctx.paths.systemd_user_dir.join(service);
+        let ours = self.get_service_job_path(name).join(service);
+        match std::fs::read_link(&link) {
+            Ok(target) => {
+                let target = if target.is_absolute() {
+                    target
+                } else {
+                    link.parent().map(|p| p.join(&target)).unwrap_or(target)
+                };
+                same_path(&target, &ours)
+            }
+            // Not a link (a unit file copied into place): it is ours if the job's file exists.
+            Err(_) => link.is_file() && ours.is_file(),
+        }
+    }
+
+    /// Whether the job `name` of this root has an installed unit: a unit file in its directory
+    /// and the user unit linking to it.
+    fn unit_is_installed(&self, name: &str) -> bool {
+        let Some(service) = self.existing_service_name(name) else {
+            return false;
+        };
+        self.ctx.paths.systemd_user_dir.join(&service).exists() && self.link_is_ours(name, &service)
     }
 
     /// `get_service_job_path(name)`: `{root}/systemd/services/<name>`.
@@ -190,6 +301,11 @@ impl SystemdExecutor {
             for (k, v) in job.env() {
                 vars.insert(k, v);
             }
+        }
+        // A unit of another root must find its root after a reboot, whatever started it.
+        if !self.is_default_root() {
+            vars.entry(sc.environment.root.clone())
+                .or_insert_with(|| posix(self.ctx.paths.root.clone()));
         }
         let environment = vars
             .iter()
@@ -493,42 +609,144 @@ pub fn parse_exec_start_sysargs(unit_text: &str) -> Vec<String> {
     Vec::new()
 }
 
+impl SystemdExecutor {
+    /// `create_job` once the unit's name is chosen.
+    fn create_unit(
+        &self,
+        name: &str,
+        sysargs: &[String],
+        properties: Option<&Map>,
+    ) -> SuccessTuple {
+        let service_name = self.get_service_name(name);
+        let service_file_path = self.get_service_file_path(name);
+        let symlink_path = self.get_service_symlink_file_path(name);
+
+        // A local job of the same name hands over its directory (and keeps its logs).
+        match self.migrate_local_job(name) {
+            Ok(true) => {
+                if let Ok(mut warnings) = self.warnings.lock() {
+                    warnings.push(format!(
+                        "Moved the local job '{name}' to systemd (unit '{service_name}'); its logs were kept."
+                    ));
+                }
+            }
+            Ok(false) => {}
+            Err(e) => return SuccessTuple::fail(e),
+        }
+
+        // `socket_stdin.file_handler`: the stdin FIFO exists once the job does.
+        if let Err(e) = std::fs::create_dir_all(self.get_service_job_path(name))
+            .and_then(|()| self.stdin_file(name).ensure_fifo())
+        {
+            return SuccessTuple::fail(e.to_string());
+        }
+
+        // The hidden job stores the properties (`externally_managed`, `env`, ...).
+        let Some(mut job) = self.get_hidden_job(name, Some(sysargs.to_vec()), properties.cloned())
+        else {
+            return SuccessTuple::fail(format!("Invalid job name '{name}'."));
+        };
+        job.set_externally_managed();
+        let written = job.daemon().setup(true);
+        if !written.success {
+            return written;
+        }
+
+        if let Err(e) =
+            std::fs::create_dir_all(service_file_path.parent().unwrap_or(&service_file_path))
+        {
+            return SuccessTuple::fail(e.to_string());
+        }
+        let process_env: Vec<(String, String)> = self.process_env.clone().unwrap_or_else(|| {
+            std::env::vars_os()
+                .filter_map(|(k, v)| Some((k.into_string().ok()?, v.into_string().ok()?)))
+                .collect()
+        });
+        if resolve_python(&process_env).is_none()
+            && let Ok(mut warnings) = self.warnings.lock()
+        {
+            warnings.push(unpinned_python_warning(name));
+        }
+        let text = self.get_service_file_text(name, sysargs, &self.exec_program(), &process_env);
+        if let Err(e) = write_private(&service_file_path, &text) {
+            return SuccessTuple::fail(e.to_string());
+        }
+
+        let linked = make_symlink(&service_file_path, &symlink_path);
+        if !linked.success {
+            return linked;
+        }
+
+        let mut fails = 0;
+        for command in [
+            vec!["daemon-reload"],
+            vec!["enable", service_name.as_str()],
+            vec!["start", service_name.as_str()],
+        ] {
+            if !self.run_command(&command).success {
+                fails += 1;
+            }
+        }
+        if fails > 1 {
+            return SuccessTuple::fail("Failed to reload systemd.");
+        }
+        SuccessTuple::ok(format!("Started job '{name}' via systemd."))
+    }
+
+    /// A `local` job of the same name in this root (Meerschaum before rc15 ran the jobs of
+    /// every root but the default one locally) moves to `systemd`: its process is stopped, its
+    /// logs move to the unit's log, and its directory makes way for the hidden sister job.
+    fn migrate_local_job(&self, name: &str) -> Result<bool, String> {
+        let dpaths = crate::config::DaemonPaths::new(&self.ctx.paths, name);
+        if !dpaths.properties.exists() || dpaths.externally_managed.exists() {
+            return Ok(false);
+        }
+        let Ok(mut local) = Job::open(name, &self.ctx) else {
+            return Ok(false);
+        };
+        if local.status() != crate::daemon::Status::Stopped {
+            let stopped = local.stop(None);
+            if !stopped.success {
+                return Err(format!(
+                    "Could not stop the local job '{name}' to move it to systemd:\n{}",
+                    stopped.message
+                ));
+            }
+        }
+        let old_log = local.daemon().log_path();
+        let new_log = self.get_service_logs_path(name);
+        move_rotating_logs(&old_log, &new_log);
+        let _ = std::fs::remove_file(&dpaths.log_offset);
+        let cleaned = local.daemon().cleanup(true);
+        if !cleaned.success {
+            return Err(cleaned.message);
+        }
+        Ok(true)
+    }
+}
+
 impl JobExecutor for SystemdExecutor {
     fn executor_keys(&self) -> String {
         "systemd".into()
     }
 
     fn get_job_names(&self) -> Vec<String> {
-        let dir = &self.ctx.paths.systemd_user_dir;
-        let Ok(entries) = std::fs::read_dir(dir) else {
+        // This root's jobs: the directories under its `systemd/services/` whose unit is
+        // installed. A root never lists the units another root installed (v4 listed every
+        // `mrsm-*.service` of the user, which was right only while one root used systemd).
+        // PARITY (divergence): the directory keeps the job's real name (`my job`); v4 listed the
+        // normalized unit name (`my-job`), for which the hidden job does not exist.
+        let Ok(entries) = std::fs::read_dir(&self.ctx.paths.systemd_jobs_dir) else {
             return Vec::new();
         };
-        // The job directories under `systemd/services/` keep the job's real name; the unit's
-        // name has spaces replaced by dashes.
-        let originals: Vec<String> = std::fs::read_dir(&self.ctx.paths.systemd_jobs_dir)
-            .map(|d| {
-                d.flatten()
-                    .map(|e| e.file_name().to_string_lossy().to_string())
-                    .collect()
-            })
-            .unwrap_or_default();
-        entries
+        let mut names: Vec<String> = entries
             .flatten()
+            .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
             .map(|e| e.file_name().to_string_lossy().to_string())
-            .filter(|n| n.starts_with("mrsm-") && n.ends_with(".service") && dir.join(n).exists())
-            .map(|n| n["mrsm-".len()..n.len() - ".service".len()].to_string())
-            .map(|normalized| {
-                // PARITY (divergence): v4 lists the normalized name (`my-job`), for which the
-                // hidden job and the unit directory do not exist, so a job named `my job` never
-                // "exists" and cannot be read back. The real name is recovered from the job's
-                // directory (compose names jobs like `project sync (instance)`).
-                originals
-                    .iter()
-                    .find(|o| o.replace(' ', "-") == normalized)
-                    .cloned()
-                    .unwrap_or(normalized)
-            })
-            .collect()
+            .filter(|n| self.unit_is_installed(n))
+            .collect();
+        names.sort();
+        names
     }
 
     fn take_warnings(&self) -> Vec<String> {
@@ -629,67 +847,25 @@ impl JobExecutor for SystemdExecutor {
         if let Some(reason) = crate::names::invalid_job_name_reason(name) {
             return SuccessTuple::fail(format!("Invalid name: {reason}."));
         }
-        let service_name = self.get_service_name(name);
-        let service_file_path = self.get_service_file_path(name);
-        let symlink_path = self.get_service_symlink_file_path(name);
-
-        // `socket_stdin.file_handler`: the stdin FIFO exists once the job does.
-        if let Err(e) = std::fs::create_dir_all(self.get_service_job_path(name))
-            .and_then(|()| self.stdin_file(name).ensure_fifo())
-        {
-            return SuccessTuple::fail(e.to_string());
+        let compose_var = &meerschaum_core::static_config::static_config()
+            .environment
+            .compose_project;
+        let project = properties
+            .and_then(|p| p.get("env"))
+            .and_then(|e| e.get(compose_var))
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let service_name = self
+            .existing_service_name(name)
+            .unwrap_or_else(|| self.unique_service_name(name, project.as_deref()));
+        if let Ok(mut creating) = self.creating.lock() {
+            creating.insert(name.to_string(), service_name);
         }
-
-        // The hidden job stores the properties (`externally_managed`, `env`, ...).
-        let Some(mut job) = self.get_hidden_job(name, Some(sysargs.to_vec()), properties.cloned())
-        else {
-            return SuccessTuple::fail(format!("Invalid job name '{name}'."));
-        };
-        job.set_externally_managed();
-        let written = job.daemon().setup(true);
-        if !written.success {
-            return written;
+        let result = self.create_unit(name, sysargs, properties);
+        if let Ok(mut creating) = self.creating.lock() {
+            creating.remove(name);
         }
-
-        if let Err(e) =
-            std::fs::create_dir_all(service_file_path.parent().unwrap_or(&service_file_path))
-        {
-            return SuccessTuple::fail(e.to_string());
-        }
-        let process_env: Vec<(String, String)> = self.process_env.clone().unwrap_or_else(|| {
-            std::env::vars_os()
-                .filter_map(|(k, v)| Some((k.into_string().ok()?, v.into_string().ok()?)))
-                .collect()
-        });
-        if resolve_python(&process_env).is_none()
-            && let Ok(mut warnings) = self.warnings.lock()
-        {
-            warnings.push(unpinned_python_warning(name));
-        }
-        let text = self.get_service_file_text(name, sysargs, &self.exec_program(), &process_env);
-        if let Err(e) = std::fs::write(&service_file_path, text) {
-            return SuccessTuple::fail(e.to_string());
-        }
-
-        let linked = make_symlink(&service_file_path, &symlink_path);
-        if !linked.success {
-            return linked;
-        }
-
-        let mut fails = 0;
-        for command in [
-            vec!["daemon-reload"],
-            vec!["enable", service_name.as_str()],
-            vec!["start", service_name.as_str()],
-        ] {
-            if !self.run_command(&command).success {
-                fails += 1;
-            }
-        }
-        if fails > 1 {
-            return SuccessTuple::fail("Failed to reload systemd.");
-        }
-        SuccessTuple::ok(format!("Started job '{name}' via systemd."))
+        result
     }
 
     fn start_job(&self, name: &str) -> SuccessTuple {
@@ -833,6 +1009,112 @@ impl JobExecutor for SystemdExecutor {
         self.get_hidden_job(name, None, None)
             .map(|mut j| j.get_prompt_kwargs())
             .unwrap_or_default()
+    }
+}
+
+/// The scope of a non-default root's unit names when no Compose project names them: the first
+/// eight hex digits of the SHA-256 of the root's canonical path (stable across runs).
+pub fn root_scope(root: &std::path::Path) -> String {
+    use sha2::{Digest, Sha256};
+    let canonical = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+    let digest = Sha256::digest(canonical.to_string_lossy().as_bytes());
+    digest[..4].iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// A word of a unit name: spaces become dashes (as v4 does) and anything systemd does not allow
+/// in a unit name (`[A-Za-z0-9:_.-]`) an underscore.
+pub fn unit_word(text: &str) -> String {
+    text.chars()
+        .map(|c| match c {
+            ' ' => '-',
+            c if c.is_ascii_alphanumeric() || matches!(c, ':' | '_' | '.' | '-') => c,
+            _ => '_',
+        })
+        .collect()
+}
+
+/// `mrsm-<scope>.<job>.service`, shortened (with a hash of the full name) to stay within
+/// systemd's 255-byte unit names.
+pub fn scoped_service_name(scope: &str, name: &str) -> String {
+    let scope = unit_word(scope);
+    let job = unit_word(name);
+    let full = format!("mrsm-{scope}.{job}.service");
+    if full.len() <= 255 {
+        return full;
+    }
+    use sha2::{Digest, Sha256};
+    let digest = Sha256::digest(full.as_bytes());
+    let hash: String = digest[..4].iter().map(|b| format!("{b:02x}")).collect();
+    let budget = 255 - "mrsm-..service".len() - hash.len() - 1;
+    let scope: String = scope.chars().take(budget / 3).collect();
+    let job: String = job.chars().take(budget - scope.len()).collect();
+    format!("mrsm-{scope}.{job}-{hash}.service")
+}
+
+/// Whether two paths name the same file (compared canonically when they exist).
+fn same_path(a: &std::path::Path, b: &std::path::Path) -> bool {
+    let canon = |p: &std::path::Path| p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
+    canon(a) == canon(b)
+}
+
+/// Write a file only its owner can read (`0600` on Unix): a unit may carry credentials in its
+/// `Environment=MRSM_CONFIG=...` line.
+fn write_private(path: &std::path::Path, text: &str) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::io::Write;
+        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(path)?;
+        file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+        file.write_all(text.as_bytes())
+    }
+    #[cfg(not(unix))]
+    {
+        std::fs::write(path, text)
+    }
+}
+
+/// Move a rotating log's subfiles (`<old>.<n>`) to `<new>.<n>`, unless `new` already has some:
+/// the history of a local job continues in its unit's log.
+fn move_rotating_logs(old: &std::path::Path, new: &std::path::Path) {
+    let subfiles = |base: &std::path::Path| -> Vec<(u64, PathBuf)> {
+        let (Some(dir), Some(stem)) = (base.parent(), base.file_name()) else {
+            return Vec::new();
+        };
+        let prefix = format!("{}.", stem.to_string_lossy());
+        std::fs::read_dir(dir)
+            .map(|entries| {
+                entries
+                    .flatten()
+                    .filter_map(|e| {
+                        let file = e.file_name().to_string_lossy().into_owned();
+                        let index = file.strip_prefix(&prefix)?.parse::<u64>().ok()?;
+                        Some((index, e.path()))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    if !subfiles(new).is_empty() {
+        return;
+    }
+    let Some(new_dir) = new.parent() else {
+        return;
+    };
+    if std::fs::create_dir_all(new_dir).is_err() {
+        return;
+    }
+    let new_base = new
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    for (index, path) in subfiles(old) {
+        let _ = std::fs::rename(&path, new_dir.join(format!("{new_base}.{index}")));
     }
 }
 
