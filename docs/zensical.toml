@@ -47,6 +47,8 @@ nav = [
     {"🌐 API Instance" = [
       "reference/api-instance/index.md",
       {"Security and Tokens" = "reference/api-instance/tokens.md"},
+      {"Permissions and Rate Limits" = "reference/api-instance/permissions.md"},
+      {"Pipelines, Runs and Actions over HTTP" = "reference/api-instance/routes.md"},
       {"NGINX" = "reference/api-instance/nginx.md"},
       {"Web Console" = "reference/api-instance/web-console.md"},
     ]},
@@ -66,6 +68,9 @@ nav = [
       "reference/plugins/index.md",
       {"✍️ Writing Your Own" = "reference/plugins/writing-plugins.md"},
       {"🤔 Types of Plugins" = "reference/plugins/types-of-plugins.md"},
+      {"🖥️ Web Pages and Routes" = "reference/plugins/web-pages.md"},
+      {"🗃️ Caching" = "reference/plugins/caching.md"},
+      {"🧪 Testing Plugins" = "reference/plugins/testing.md"},
       {"🦀 Rust Plugins" = [
         "reference/plugins/rust-plugins.md",
         {"Advanced" = "reference/plugins/rust-plugins/advanced.md"},

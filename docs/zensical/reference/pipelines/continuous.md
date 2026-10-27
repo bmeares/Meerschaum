@@ -20,11 +20,13 @@ After an error in a lap the loop waits the v4 error cooldown of `2 × (N + 1)` s
 
 Add `--parents` / `--children` and every lap becomes an engine run: children only sync when a parent actually changed (a skipped child costs no query against its source). The engine records each lap in the [run history](/reference/pipelines/state/#run-history).
 
+A saved Pipeline loops the same way: `mrsm sync pipelines daily --loop` (what [`start pipeline daily`](/reference/pipelines/#running-a-pipeline-in-the-background) runs in the background) is a graph run of the Pipeline's members on every lap, each run named after the Pipeline, and an edit of the Pipeline takes effect within half a minute.
+
 Stop a looping job with `mrsm stop jobs` or Ctrl-C.
 
 !!! note "Cadence per root"
 
-    `--min-seconds` sets the lap cadence of the whole selection. A root node (a pipe with no parent in the selection, or any pipe in a flat selection) can have its own cadence in `parameters['schedule']`, using the same grammar as `--schedule` / `-s` (`every 6 hours`, `daily starting 03:00`, ...). With `--loop`, such a pipe only syncs when its schedule is due: the other pipes keep syncing every lap, a lap in which nothing is due waits for the next fire time, and the sleep between laps is shortened to the next fire time when that is sooner than `--min-seconds`. A schedule that does not parse is ignored with a warning. `--schedule` itself keeps its v4 meaning: it runs the whole action on that schedule.
+    `--min-seconds` sets the lap cadence of the whole selection. A root node (a pipe with no parent in the selection, or any pipe in a flat selection) can have its own cadence in `parameters['schedule']`, using the same grammar as `--schedule` / `-s` (`every 6 hours`, `daily starting 03:00`, ...). With `--loop`, such a pipe only syncs when its schedule is due: the other pipes keep syncing every lap, a lap in which nothing is due waits for the next fire time, and the sleep between laps is shortened to the next fire time when that is sooner than `--min-seconds`. A schedule that does not parse is ignored with a warning. In a run with `--parents` or `--children`, a pipe that has parents in the run syncs when its parents have new data and does not follow its own schedule: the loop warns about it once when it starts, naming the pipe, and `plan pipes` lists the same warning under the plan. `--schedule` itself keeps its v4 meaning: it runs the whole action on that schedule.
 
 ## 📡 Streaming Sources
 

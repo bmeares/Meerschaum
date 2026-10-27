@@ -11,37 +11,23 @@ The complete, tested example is
 
 ## 🛣️ Routes
 
-Declare each route under `api_routes` in your plugin's manifest entry and implement
+Declare each route in your plugin's manifest (`api_routes` in its entry) and implement
 `Plugin::api_route`:
 
 ```rust
-use meerschaum_plugin::{
-    Plugin, Result,
-    api::{RouteRequest, RouteResponse, RouteSpec},
-    serde_json::{Value, json},
-};
+use meerschaum_plugin::api::{RouteRequest, RouteResponse, RouteSpec};
+use meerschaum_plugin::prelude::*;
 
 #[derive(Default)]
 struct Items;
 
 impl Plugin for Items {
-    const NAME: &'static str = "items";
-    const VERSION: &'static str = "1.0.0";
-
     fn manifest(&self) -> Value {
-        let routes = [
-            RouteSpec::new("get_item", "GET", "/items/{id}").scopes(["pipes:read"]),
-            RouteSpec::new("upload", "PUT", "/items/files/{*key}").scopes(["pipes:write"]),
-            RouteSpec::new("health", "GET", "/items-health").public(),
-        ];
-        json!({
-            "schema_version": meerschaum_plugin::MANIFEST_SCHEMA_VERSION,
-            "meerschaum_version": "5.0.0", "python_version": "", "fingerprint": null,
-            "plugins": {"items": {
-                "name": "items", "version": "1.0.0",
-                "api_routes": routes.iter().map(RouteSpec::to_json).collect::<Vec<_>>(),
-            }}
-        })
+        Manifest::new()
+            .api_route(RouteSpec::new("get_item", "GET", "/items/{id}").scopes(["pipes:read"]))
+            .api_route(RouteSpec::new("upload", "PUT", "/items/files/{*key}").scopes(["pipes:write"]))
+            .api_route(RouteSpec::new("health", "GET", "/items-health").public())
+            .into()
     }
 
     fn api_route(&self, request: &RouteRequest) -> Result<RouteResponse> {
@@ -152,7 +138,20 @@ An `Err` from `api_route` becomes `500 {"detail": "<message>"}`.
   not serialized with the plugin's other calls, so a slow route holds up neither the plugin's
   other routes nor its MCP entries. These methods must therefore be thread-safe; the SDK builds a
   fresh `P::default()` for every call, so a plugin with no shared state needs nothing more.
-  Host services (`Pipe` calls back into Meerschaum) are not available in these calls.
+- **For the caller.** A handler's [host calls](advanced.md#talking-to-meerschaum)
+  (`host::pipe(...)`, `pipe.get_data(...)`, `host::read_sql(...)`, ...) act for the request's
+  caller, with the scopes the core API requires: `pipes:read` to read pipes, `pipes:write` to
+  sync, clear or register, `sql:read` for read-only `read_sql` queries, and for `exec_sql`
+  `actions:execute` and a caller who may run actions (an administrator, unless the server lets
+  other users run actions). A refused call returns an `Err` naming the reason, so a handler can
+  answer `403` (`RouteResponse::error(403, error.to_string())`). SQL from a route never reaches
+  Meerschaum's internal tables (`mrsm_users`, `mrsm_tokens`, ...). An anonymous caller of a
+  public route has no scopes unless the route declares `host_scopes`
+  (`#[api_route(GET, "/status", public = true, host_scopes = ["pipes:read"])]`,
+  `RouteSpec::new(...).public().host_scopes(["pipes:read"])`): every caller's host calls get them
+  on top of its own. Under `--no-auth` and over MCP stdio every call is allowed. Pipes stay on
+  the instances the server allows, and a Pipe without instance keys is on the server's instance.
+  [Talking to Meerschaum](advanced.md#talking-to-meerschaum) has the full rules.
 - **Bounded.** At most 32 server calls of one plugin run at once (routes and MCP entries are
   counted separately). Up to 16 further requests wait up to 30 seconds for a free slot; any
   beyond those, and any that wait too long, answer
@@ -174,17 +173,17 @@ use meerschaum_plugin::mcp::{
     PromptGet, ResourceContents, ResourceRead, ToolCall, ToolSpec, message,
 };
 
-// In `manifest()`, inside the plugin's entry:
-//   "mcp_tools": [ToolSpec::new("count_items", "Count the items of a kind.")
-//       .input_schema(json!({"type": "object",
-//           "properties": {"kind": {"type": "string"}}, "required": ["kind"]}))
-//       .scopes(["pipes:read"])
-//       .read_only()
-//       .to_json()],
-//   "mcp_resources": [{"name": "item", "description": "One item.",
-//       "uri_template": "items://{id}", "scopes": ["pipes:read"]}],
-//   "mcp_prompts": [{"name": "summarize", "description": "Summarize an item.",
-//       "arguments": [{"name": "id", "required": true}]}],
+// In `manifest()`:
+//   Manifest::new()
+//       .mcp_tool(ToolSpec::new("count_items", "Count the items of a kind.")
+//           .input_schema(json!({"type": "object",
+//               "properties": {"kind": {"type": "string"}}, "required": ["kind"]}))
+//           .scopes(["pipes:read"])
+//           .read_only())
+//       .mcp_resource(serde_json::from_value(json!({"name": "item", "description": "One item.",
+//           "uri_template": "items://{id}", "scopes": ["pipes:read"]}))?)
+//       .mcp_prompt(serde_json::from_value(json!({"name": "summarize",
+//           "description": "Summarize an item.", "arguments": [{"name": "id", "required": true}]}))?)
 
 fn mcp_tool(&self, call: &ToolCall) -> Result<Value> {
     let kind = call.argument("kind").and_then(Value::as_str).unwrap_or_default();

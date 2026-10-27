@@ -85,6 +85,10 @@ success, msg = job.start()
     job.delete()
     ```
 
+### In the Web Console
+
+The console's [Jobs page](/reference/api-instance/web-console/#jobs) (`/dash/jobs`) creates jobs with **New job** (an action, the pipes or the saved Pipeline it works on, and a schedule or a loop; it shows the equivalent `mrsm ... -d` command), starts, pauses, stops, restarts and deletes them, shows their logs, and shows each job's health in its status: **Running · last good sync 2 min ago**, **Stalled**, **Failing**.
+
 ## Automatic Runs
 
 The Web Console separates persistent **Jobs** from automatic **Runs**. Clicking a Pipeline's
@@ -286,6 +290,38 @@ The slot is held until the job's first lap is done (`sync pipes --loop`, a `-s` 
 
 Set `jobs:startup:enabled: false` to turn the gate off everywhere. A job may override the limits with a `startup` entry in its properties (for example `{"jitter_seconds": 5, "max_concurrent": 4}`), or `--startup-jitter 5s` when it is created. Generated systemd units carry `RestartSec=5`; the jitter applies on every restart.
 
+## 🩺 Job Health
+
+A job which repeats its work (`--loop`, a `-s` schedule, a chain with `: --loop`, `--listen`) records each run, or *lap*: when it ended, whether it succeeded, and how many failed in a row. `show jobs` adds a line to a running job's status:
+
+```text
+running
+PID: 41250
+last good sync 2 min ago
+```
+
+| State | Meaning | `show jobs` |
+|---|---|---|
+| `healthy` | The last lap succeeded. | `last good sync 2 min ago` |
+| `failing` | The last lap failed. | `failing: last 3 laps failed; last good sync 4 min ago` |
+| `stalled` | No lap has ended for three times the expected interval (and at least a minute) after the next one was due: the job's process is alive but its work is stuck. A `--listen` job is stalled after an hour without a sync, and a first lap gets at least an hour, since how long a lap takes is not known yet. | `stalled: last good sync 3 h ago` |
+| `stopped` | The job is not running (or is paused). | (its result) |
+| `unknown` | Nothing recorded yet: the first lap is still running (`first sync in progress`), or the job does not repeat in laps (a plugin action that loops by itself, see [Repeating Any Action](/reference/actions/#repeating-any-action)). | (nothing) |
+
+The expected interval is `--min-seconds` for `--loop` (or the last lap's duration when a lap takes longer), the period of a `-s` schedule, and an hour for `--listen`, where each synced flush or callback counts as a lap. A `sync pipes --loop` whose pipes all sync on their own `schedule` expects the shortest of those schedules; so does a Pipeline's job (`start pipeline`) whose starting members (the ones without parents in it) all have one.
+
+The same health is available in Python and on the console's Jobs page, for `local`, `systemd` and `api:` jobs (an API server includes it in its job metadata):
+
+```python
+job = mrsm.Job('syncing-engine')
+job.health
+# {'state': 'healthy', 'last_success': '2026-10-27T14:02:11+00:00',
+#  'last_lap': '2026-10-27T14:02:11+00:00', 'consecutive_failures': 0,
+#  'expected_interval_seconds': 60.0, 'message': 'last good sync 2 min ago'}
+```
+
+The laps are recorded in `$MRSM_ROOT_DIR/jobs/<name>/laps.json`, written at most every few seconds while laps succeed (a failure is written at once).
+
 ## ⚙️ Executors
 
 Executors are to jobs as connectors are to pipes; all jobs run on an executor. There are three built-in kinds of executors:
@@ -313,10 +349,14 @@ show pipes -e api:prod
 
 When `-e` is omitted, Meerschaum picks a default based on your environment:
 
-- If `systemd` is available **and** you are using the default root directory (`~/.config/meerschaum`) **and** Meerschaum is installed (not run from source), the default is `systemd`.
+- If `systemd` is available **and** Meerschaum is installed (not run from a source checkout or a development build), the default is `systemd`, whatever the root directory (a Compose project's own root included), so jobs come back after a reboot.
 - Otherwise, the default is `local`.
 
 You can override the default for all commands by setting `meerschaum:executor` in your configuration (`edit config`), or per-command with `-e`.
+
+!!! note "Jobs from before 5.0.0rc15"
+
+    Earlier versions used `systemd` only for the default root, so jobs in any other root (every Compose project with its own `root_dir`) ran as `local` daemons and did not survive a reboot. On a systemd host such a job moves to `systemd` the next time `compose up` or `restart jobs` starts it: the local process is stopped first, and its log history continues in the unit's log. Set `meerschaum:executor: local` in the root's configuration to keep its jobs local.
 
 !!! tip "Comparison"
     | Executor    | Where it runs                        | Survives reboot                          | Logs                                                  | Requires                              |
@@ -334,11 +374,13 @@ A `local` job runs as a self-managed Unix daemon process. Its state — `pid`, l
 
 ### `systemd` (User Services)
 
-A `systemd` job is registered as a `systemd` *user* service named `mrsm-<name>.service`. The unit file is written to the user service directory and the service is enabled (`WantedBy=default.target`), so the job is restarted automatically on reboot once the user session starts.
+A `systemd` job is registered as a `systemd` *user* service. The unit file is written to the user service directory and the service is enabled (`WantedBy=default.target`), so the job is restarted automatically on reboot once the user session starts.
 
+- **Unit names:** every root shares the user's systemd, so each root names its own units. The default root (`~/.config/meerschaum`) keeps `mrsm-<name>.service`. Any other root uses `mrsm-<project>.<name>.service`, where `<project>` is the Compose project that started the job, or else a short hash of the root's path (`mrsm-3fa2b1c9.<name>.service`). Spaces become dashes and other characters a unit name cannot hold become `_`. `show jobs` (and every other job action) lists only the units of the current root.
+- **Environment:** the unit records the root (`MRSM_ROOT_DIR`), the plugins directory and the Compose project's environment it was started with, so it runs the same way after a reboot. The unit file is readable only by you (`0600`): it may hold the project's configuration.
 - **Availability:** `systemd` is only used when a user `systemd` session is present (and is the default only under the conditions described in [Choosing an Executor](#choosing-an-executor)).
 - **Persistence across reboots:** because the unit is enabled, the job comes back after a reboot. To keep user services running even while you are logged out, enable lingering for your user (`loginctl enable-linger $USER`).
-- **Logs:** output is available through the journal (`journalctl --user -u mrsm-<name>.service`) and is also mirrored to `$MRSM_ROOT_DIR/systemd/logs/`, so `show logs` works the same way as for `local` jobs.
+- **Logs:** output is available through the journal (`journalctl --user -u <unit>`, for example `mrsm-<name>.service`) and is also mirrored to `$MRSM_ROOT_DIR/systemd/logs/`, so `show logs` works the same way as for `local` jobs.
 
 ### `api:{label}` (Remote)
 

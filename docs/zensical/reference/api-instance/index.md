@@ -38,7 +38,15 @@ executor api:main
 
 ### API Documentation
 
-You can visit your API instance's Swagger documentation by navigating to `/docs` or `/redoc`.
+You can visit your API instance's Swagger documentation by navigating to `/docs` or `/redoc`. Every route is listed there with the scopes it needs. Saved Pipelines, their runs and the console's actions have routes of their own, which answer `{"success": ..., "message": ..., ...}` with real status codes: see [Pipelines, Runs and Actions over HTTP](/reference/api-instance/routes/).
+
+### Permissions and Rate Limits
+
+Which routes a server serves, who may run actions and how often a client may call are settings under `api:permissions`: see [Permissions and Rate Limits](/reference/api-instance/permissions/). To publish only plugin routes and plugin pages (a public dashboard), use the [public preset](/reference/api-instance/permissions/#the-public-preset):
+
+```
+mrsm start api --public
+```
 
 ## Deployment
 
@@ -69,7 +77,7 @@ The environment in the `api` service is updated such that [connectors](/referenc
 If you don't want to deploy with Docker, you can run an API instance on your host directly:
 
 !!! note inline end ""
-    The `--production` flag starts the API server with `gunicorn`, allowing for self-healing.
+    The `--production` flag stops serving the interactive API docs (`/docs`, `/redoc`) unless `api:endpoints:docs_in_production` is set.
 
 ```
 mrsm start api --production
@@ -83,13 +91,9 @@ mrsm start api --production --name api-instance -d
 
 ### TLS / SSL / HTTPS
 
-See the [example NGINX configuration](/reference/api-instance/nginx/) for a proxy pass to add HTTPS to your API instance via Let's Encrypt.
+The API server speaks plain HTTP. To serve HTTPS, put a reverse proxy that terminates TLS in front of it, such as Caddy or NGINX. See the [example NGINX configuration](/reference/api-instance/nginx/) for a proxy pass that adds HTTPS to your API instance via Let's Encrypt. Behind a proxy, set `api:server:forwarded_allow_ips` and `api:server:proxy_headers` so that the server sees each client's address (see [Permissions](/reference/api-instance/permissions/)).
 
-Otherwise, if you have a certificate on hand, you can run the API server with `--keyfile` and `--certfile`:
-
-```
-mrsm start api --keyfile /path/to/key --certfile /path/to/cert
-```
+`mrsm start api` stops with an error when given `--keyfile` or `--certfile`, or when `api:server` (or `api:uvicorn`) sets `ssl_keyfile` or `ssl_certfile`, rather than serving plain HTTP to clients that expect HTTPS.
 
 ### Docker
 

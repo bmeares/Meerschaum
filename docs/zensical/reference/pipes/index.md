@@ -32,6 +32,11 @@ show pipes -m weather
 show pipes -l clemson atlanta charleston
 ```
 
+Meerschaum's own internal pipes (connector keys `mrsm`, such as the registrations of saved
+[Pipelines](/reference/pipelines/)) are left out of every listing and bulk action (`show pipes`,
+`sync pipes`, `clear pipes`, the web console, `GET /pipes/keys`, `mrsm.get_pipes()`) unless you
+name them with `-c mrsm`.
+
 ### Tags
 
 In addition to filtering by the above keys, you can also select a custom group of pipes with [tags](tags/):

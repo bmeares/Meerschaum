@@ -17,27 +17,21 @@ An executor manages [background jobs](../../background-jobs.md#executors) by nam
 type under the manifest's top-level `executor_types` and return it from `Plugin::executor`:
 
 ```rust
-use meerschaum_plugin::{
-    Plugin, Request, Result, SuccessTuple,
-    executor::{Executor, mrsm_command},
-    serde_json::{Value, json},
-};
+use meerschaum_plugin::executor::{Executor, mrsm_command};
+use meerschaum_plugin::prelude::*;
 
 #[derive(Default)]
 struct Procs;
 
 impl Plugin for Procs {
-    const NAME: &'static str = "procs_plugin";
-    const VERSION: &'static str = "1.0.0";
-
     fn manifest(&self) -> Value {
-        json!({
-            "schema_version": meerschaum_plugin::MANIFEST_SCHEMA_VERSION,
-            "meerschaum_version": "5.0.0", "python_version": "", "fingerprint": null,
-            "plugins": {"procs_plugin": {"name": "procs_plugin", "version": "1.0.0"}},
-            "executor_types": {"procs": {"type": "procs", "plugin": "procs_plugin",
-                "doc": "Run jobs as local processes."}},
-        })
+        Manifest::new()
+            .executor_type(
+                "procs",
+                ["get_job_names", "get_job_metadata", "create_job"],
+                "Run jobs as local processes.",
+            )
+            .into()
     }
 
     fn executor(&self, request: &Request) -> Option<Box<dyn Executor>> {
@@ -77,7 +71,9 @@ the same way; in Python, `job.executor` is a `NativeExecutor` with the methods o
 `meerschaum.jobs.Executor`. Shell and command-line completion suggest the declared types
 (`procs:main`, or the configured labels). The executor's configuration is the connector
 configuration of `procs:<label>` (`meerschaum:connectors:procs:<label>` in `edit config`, or
-`MRSM_PROCS_<LABEL>`).
+`MRSM_PROCS_<LABEL>`). Every method may make
+[host calls](advanced.md#talking-to-meerschaum) (`host::plugin_config()`, `host::pipe(...)`),
+with the trust of the process that uses the executor.
 
 The API server's `/jobs` routes (and the web console and MCP job tools) manage the server's
 local jobs only, as in v4; plugin executors are reached from the command line, the shell,
@@ -207,8 +203,10 @@ Python `subscribe` stream. A subscription may implement `Subscription` directly 
 
 `next_batch`, `ack` and `close` are not serialized with your plugin's other calls (one blocking
 `next_batch` never holds up a `fetch` or another subscription), so share state between them only
-through synchronized types. `subscribe` itself is an ordinary call with the Pipe helpers
-(`pipe.get_sync_time()`), so a source can resume from the pipe's newest row.
+through synchronized types. `subscribe` and each of these calls may make
+[host calls](advanced.md#talking-to-meerschaum) (`pipe.get_sync_time()`, `host::plugin_config()`,
+...) on their own thread, so a source can resume from the pipe's newest row or keep a cursor in
+its config; a producer thread of a `ChannelSubscription` cannot.
 
 ## 🔌 The wire contract
 

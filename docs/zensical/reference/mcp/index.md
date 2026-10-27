@@ -71,7 +71,7 @@ curl -H "Authorization: Bearer mrsm-key:..." https://your-api-host/mcp
 
 ## What the agent gets
 
-**Tools** — the operations. Discovering and reading pipes (`list_pipes`, `get_pipe_data`, `get_pipe_attributes`, `get_pipe_stats`), writing to them (`sync_pipe`, `sync_documents`, `register_pipe`, `edit_pipe`, `verify_pipe`, `deduplicate_pipe`), removing data (`clear_pipe`, `drop_pipe`, `delete_pipe`), and two escape hatches (`read_sql`, `execute_action`). See the [tool reference](tools.md).
+**Tools** — the operations. Discovering and reading pipes (`list_pipes`, `get_pipe_data`, `get_pipe_attributes`, `get_pipe_stats`), writing to them (`sync_pipe`, `sync_documents`, `register_pipe`, `edit_pipe`, `verify_pipe`, `deduplicate_pipe`), removing data (`clear_pipe`, `drop_pipe`, `delete_pipe`), saved [Pipelines](/reference/pipelines/) (`list_pipelines`, `plan_pipeline` to see what a run would do, `sync_pipeline` to start one in the background), their history (`list_runs`, `get_run`), background jobs (`list_jobs`, `get_job_logs`), the configured connectors (`list_connectors`), and two escape hatches (`read_sql`, `execute_action`). `sync_pipe` with `parents` or `children` also syncs a pipe's upstream or downstream pipes in dependency order, and the datetime bounds (`begin`, `end`) take ISO datetimes or integers. See the [tool reference](tools.md).
 
 **Resources** — documents the agent can fetch once and cache: `mrsm://pipes`, `mrsm://pipes/{ck}/{mk}/{lk}`, `mrsm://actions`, `mrsm://connectors`, and `mrsm://docs` (this reference, served locally, no network needed).
 

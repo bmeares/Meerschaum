@@ -28,13 +28,13 @@ You will be asked for a pipe's three keys: a connector, metric, and location. Fo
 
 ### 🔌 Connector
 
-The first question you will see is *Where are the data coming from?* along with a list of recognized [connectors](/reference/connectors/). A connector defines how Meerschaum interacts with other servers (e.g. username, password, host, etc.).
+The first question you will see is *Where are the data coming from?*, after the list of recognized [connectors](/reference/connectors/) (the ones in your configuration, `MRSM_<TYPE>_<LABEL>` environment variables and `plugin:` connectors). A connector defines how Meerschaum interacts with other servers (e.g. username, password, host, etc.). While you type, a dropdown narrows the list down.
 
 If you know what connector you need, go ahead and type its keys (type and label separated by a colon, like `sql:myserver`), otherwise type 'New' to define a new connector. You can read more about how connectors work on the [Connectors reference page](/reference/connectors/).
 
 ??? tip "New Connector"
 
-    If you chose `New` to define a new connector, you'll be presented with a screen asking you to choose the connector's type. The type determines the protocol over which data will be transferred, so it's important to choose wisely! You can consult this [Connectors Type table](/reference/connectors/#type) for the pros, cons, and use cases for each type of connector. The most common connectors are `sql` and `api` connectors, which correspond to your own SQL databases or Meerschaum instances.
+    If you chose `New` to define a new connector, you'll be presented with a screen asking you to choose the connector's type. The type determines the protocol over which data will be transferred, so it's important to choose wisely! You can consult this [Connectors Type table](/reference/connectors/) for the pros, cons, and use cases for each type of connector. The most common connectors are `sql` and `api` connectors, which correspond to your own SQL databases or Meerschaum instances.
 
     After choosing the connector's type, you assign it a label. These two keys identify your connector and are represented with a colon, e.g. `sql:main` for the default connector or `sql:local` for the SQLite instance.
 
@@ -46,20 +46,23 @@ The metric is a label that describes the contents of a pipe. Pick something desc
 
 The location is an additional label you may assign to differentiate two pipes that share a connector and metric. If you omit the location, the location key will be `None` (`NULL`).
 
+## 📄 SQL Query (`sql` connectors)
+
+For a pipe with a `sql` connector, the query comes next: the rows the pipe syncs. In a terminal your editor opens a `.sql` file for it (the comment lines at the top are dropped); when the input is not a terminal (a script piping answers in), the query is read as one line. Read another pipe's table with `{{ Pipe('connector', 'metric') }}`.
+
+The wizard runs the query right away and prints its first five rows. If the query fails (a typo, a missing table), it shows the database's error and asks whether to edit the query again.
+
+!!! important "SQL definition caveats"
+    The SQL query definition will not be executed directly but rather encased by a larger query via a `WITH` clause. Therefore don't include `ORDER BY` or other keywords which are disallowed in SQL views.
+
 ## 🕓 Datetime and ID columns
-You will be prompted for the names of the datetime column and optionally an ID column. These columns will be used to index the pipe's table and are necessary for efficiently syncing new data. Consult your data source for the column names, and if you make a mistake, you can change the column names later with `edit pipes`.
+
+Next come the datetime column and, optionally, an ID column. These columns index the pipe's table and are necessary for efficiently syncing new data. For a `sql` pipe the choices are the columns of the preview, numbered: the datetime column is guessed from the column types (then from names such as `timestamp` or `created_at`) and an `id` column is the ID's default, so pressing Enter accepts them. For other connectors, type the column names. If you make a mistake, you can change the columns later with `edit pipes`.
 
 !!! info ""
     If the ID is omitted, it is assumed that the pipe contains a single stream of data (i.e. datetimes are unique). The ID is used for partitioning and multiplexing sub-streams into a single pipe.
 
-## 📄 Definition
-
-The last piece of metadata is the pipe's definition, the information needed to extract the data.
-
-For a pipe with a `sql` connector, your editor will open a `.sql` file for a SQL query.
-
-!!! important "SQL definition caveats"
-    The SQL query definition will not be executed directly but rather encased by a larger query via a `WITH` clause. Therefore don't include `ORDER BY` or other keywords which are disallowed in SQL views.
+## 📄 Definition (other connectors)
 
 For a pipe with an `api` connector, you will be prompted for the connector, metric, and location of the remote pipe.
 
@@ -67,7 +70,7 @@ For other types of connectors (like `mqtt` and `plugin`), your editor will open 
 
 ## 📥 The First Sync
 
-If you provided a definition and the correct index column names, you will be asked if you would like to sync new data into the pipe. When bootstrapping a new pipe, the definition will be executed, and the table will be created and indexed. Check out the [syncing reference page](/reference/pipes/syncing) for more information on how the syncing process works.
+Finally, the wizard asks whether to sync the pipe now; the default answer is yes. The query (or the connector's fetch) runs, and the table is created and indexed. A `sql` pipe registered without a query is not synced: set its query with `mrsm edit definition -c <connector> -m <metric>` first. Check out the [syncing reference page](/reference/pipes/syncing) for more information on how the syncing process works.
 
 
 ## ⤵️ Dropping Tables

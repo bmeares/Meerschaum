@@ -57,13 +57,15 @@ Use the native fetch example below as the starting implementation for `acme_data
 and sync that Pipe before opening the page. Moving the fetch implementation does not require
 rewriting the page or changing its session handling.
 
-For a fetch plugin, first list the operations it performs on its Python `pipe` argument.
-Single-file plugins provide `pipe.get_sync_time()` and `pipe.sync(data)` through the host.
-Full SDK plugins can obtain the same typed view with `request.pipe()?` when invoked by
-a host with the optional callback extension. Other operations, such as
-`pipe.instance_connector.read()` or importing helpers from Python plugins, still need
-an explicit replacement. Listing a Python plugin in `required` does not make its
-functions callable from Rust.
+For a fetch plugin, first list the operations it performs on its Python `pipe` argument and
+on other pipes and connectors. Each has a [host call](#talking-to-meerschaum): `pipe.get_data()`,
+`pipe.get_sync_time()`, `pipe.sync()` (`pipe.replace()` for `replace=True`) and `pipe.clear()`
+on the Pipe being synced or on any
+`mrsm.Pipe(...)` (`host::pipe(...)`), `conn.read()` and `conn.exec()` on a SQL connector
+(`host::read_sql`, `host::exec_sql`), and `get_plugin_config()` (`host::plugin_config()`). Cargo
+plugins get the same view with `request.pipe()?`. Importing helpers from Python plugins
+(`from_plugin_import`) has no Rust counterpart: port the helper too. Listing a Python plugin in
+`required` does not make its functions callable from Rust.
 
 Validate a port under a separate plugin name and scratch root before changing existing
 Pipe connector keys. Compare its rows, nulls, dtypes, bound handling, empty responses, and
@@ -102,29 +104,28 @@ panic = "unwind"      # required: the SDK catches panics at the boundary
 Implement the `Plugin` trait and export it once:
 
 ```rust
-use meerschaum_plugin::{
-    Error, Frame, Plugin, Reply, Request, Result,
-    arrow::{array::Int64Array, datatypes::{DataType, Field, Schema}, record_batch::RecordBatch},
-    serde_json::{Value, json},
-};
-use std::sync::Arc;
+use meerschaum_plugin::prelude::*;
 
 #[derive(Default)]
 struct Demo;
 
 impl Plugin for Demo {
-    const NAME: &'static str = "native_demo";
-    const VERSION: &'static str = "1.0.0";
-
-    /// Declares what this plugin provides (actions, arguments, hooks, connectors, pages).
-    fn manifest(&self) -> Value { /* see "The manifest" below */ json!({}) }
+    /// Declares what this plugin provides (see "The manifest" below). The plugin's name and
+    /// version are the package's, from Cargo.toml.
+    fn manifest(&self) -> Value {
+        Manifest::new()
+            .fetch()
+            .action("hello", "Return a synthetic greeting.")
+            .into()
+    }
 
     /// `fetch`: return the new rows as an Arrow-backed `Frame`.
     fn fetch(&self, request: &Request) -> Result<Option<Frame>> {
-        let schema = Arc::new(Schema::new(vec![Field::new("id", DataType::Int64, true)]));
-        let batch = RecordBatch::try_new(schema, vec![Arc::new(Int64Array::from(vec![1, 2, 3]))])
-            .map_err(|e| Error::Message(e.to_string()))?;
-        Ok(Some(Frame::from_record_batch(&batch).map_err(|e| Error::Message(e.to_string()))?))
+        let rows = vec![
+            json!({"ts": "2024-01-01T00:00:00Z", "id": 1, "value": 1.5}),
+            json!({"ts": "2024-01-01T01:00:00Z", "id": 2, "value": 2.5}),
+        ];
+        Frame::from_rows(rows, &[("ts", "datetime"), ("id", "int"), ("value", "float")]).map(Some)
     }
 
     /// Everything else (actions, hooks, routes, pages, instance methods) arrives here.
@@ -142,7 +143,20 @@ impl Plugin for Demo {
 meerschaum_plugin::export_plugin!(Demo);
 ```
 
-The complete, tested version is [`crates/meerschaum-plugin/examples/native_demo.rs`](https://github.com/bmeares/Meerschaum/blob/v5/crates/meerschaum-plugin/examples/native_demo.rs). It is a source connector, an in-memory instance, an action with an argument, sync hooks, two routes and a console page, all on synthetic data.
+`Frame::from_rows(rows, dtypes)` turns JSON objects into a typed Arrow frame with Meerschaum
+dtypes (`datetime`, `date`, `int`, `float`, `string`, `bool`, `json`, `numeric`, `uuid`,
+`bytes`, `geometry[...]`, sized integers such as `int32`, or a pandas dtype): ISO timestamps
+become UTC datetimes, a declared column no row has is added as nulls, and undeclared columns
+are inferred like a Python plugin's documents. `frame.to_rows()` goes back to JSON objects. You
+can still build a `Frame` from Arrow `RecordBatch`es (`Frame::from_record_batch`), and the SDK
+re-exports `arrow`, `chrono` and `serde_json`, so a plugin needs no other Meerschaum crate.
+
+The plugin's name and version come from the package (`CARGO_PKG_NAME`, `CARGO_PKG_VERSION`,
+read by `export_plugin!`); they must match `plugin.toml`. Set `const NAME` or `const VERSION`
+in the `impl` to use others. The host calls (`host::pipe(...)`, `request.pipe()?.get_data(...)`,
+`host::read_sql(...)`) are in [Talking to Meerschaum](#talking-to-meerschaum).
+
+The complete, tested version is [`crates/meerschaum-plugin/examples/native_demo.rs`](https://github.com/bmeares/Meerschaum/blob/v5/crates/meerschaum-plugin/examples/native_demo.rs). It is a source connector, an in-memory instance, an action with an argument, sync hooks, two routes and a console page, all on synthetic data; its manifest is a whole JSON document, which is still accepted. [`native_host.rs`](https://github.com/bmeares/Meerschaum/blob/v5/crates/meerschaum-plugin/examples/native_host.rs) is written the new way (a `Manifest`, the version from Cargo, `Frame::from_rows`) and makes host calls: it reads another pipe, counts its rows with SQL, rewrites a window and keeps its settings in the plugin config.
 
 Things to know:
 
@@ -163,11 +177,31 @@ Bounds (`begin`, `end`) are integers, ISO timestamp strings or `null`. Results a
 
 ## 📜 The manifest
 
-`manifest()` returns the same JSON document the Python plugin manifest uses, as a whole: the top-level keys `schema_version` (use the SDK constant `meerschaum_plugin::MANIFEST_SCHEMA_VERSION`; native plugins and Python workers share manifest schema `5`), `meerschaum_version`, `python_version` (`""`), `fingerprint` (`null`) and `plugins`, plus `connector_types`, `pre_sync_hooks` and `post_sync_hooks` when you provide them (the shipped example is the reference). The host validates it against the bundled JSON schema (`crates/meerschaum-plugin/schema/manifest.schema.json`) at load time, so `--help`, tab completion and the server can learn what your plugin offers **without loading the library**: it is cached by a fingerprint of the plugin directory and rebuilt when a file changes.
+`manifest()` declares what your plugin provides, so `--help`, tab completion and the server learn it **without loading the library** (it is cached by a fingerprint of the plugin directory and rebuilt when a file changes). Build it with `Manifest`:
+
+```rust
+fn manifest(&self) -> Value {
+    Manifest::new()
+        .fetch()                                    // data functions: fetch, sync, register, setup, subscribe
+        .action("hello", "Return a greeting.")      // `mrsm hello`
+        .flag("--loud", "Shout.")                   // or .argument(json!({...})) for any argparse option
+        .pre_sync_hook("before")
+        .post_sync_hook("after")
+        .connector(ConnectorType::new("memory", ["fetch", "register_pipe", "sync_pipe"]).instance())
+        .executor_type("procs", ["get_job_names", "create_job"], "Run jobs as local processes.")
+        .api_route(RouteSpec::new("item", "GET", "/my/items/{id}").scopes(["pipes:read"]))
+        .mcp_tool(ToolSpec::new("add", "Add two integers."))
+        .web_page("my/page", "page", true)          // /dash/my/page, login required
+        .required(["plugin:noaa"])
+        .into()
+}
+```
+
+The SDK completes the document: the plugin's name and version (the package's), `schema_version` (`meerschaum_plugin::MANIFEST_SCHEMA_VERSION`; native plugins and Python workers share manifest schema `5`), `meerschaum_version` (the SDK's), `python_version` (`""`), `fingerprint` (`null`), each connector or executor type's `plugin`, and the top-level `pre_sync_hooks` / `post_sync_hooks`. `Manifest::set(key, value)` sets any other key of the plugin's entry. A whole JSON document (the format of earlier releases) is still accepted: the SDK fills in only what it lacks. The host validates the result against the bundled JSON schema (`crates/meerschaum-plugin/schema/manifest.schema.json`) at load time.
 
 Native libraries built with a 5.0 pre-release SDK (manifest schema `3`) must be rebuilt with the current SDK. Stale manifest caches are regenerated automatically. The native ABI and worker protocol remain at version `1`.
 
-The part for your plugin lives under `plugins.<name>`:
+In the JSON document, the part for your plugin lives under `plugins.<name>`:
 
 ```json
 {
@@ -201,10 +235,11 @@ module, as shown in the [single-file guide](../rust-plugins.md), `#[pre_sync_hoo
 For packaged Cargo plugins, use declarations in `manifest()` and handlers in
 `Plugin::call()`, as described here.
 
-For Python's `@make_action`, add an entry to the plugin's `actions` array:
+For Python's `@make_action`, declare the action (`"actions": [{"name": "hello", "doc": ...}]`
+in the JSON document):
 
-```json
-"actions": [{"name": "hello", "doc": "Return a greeting."}]
+```rust
+Manifest::new().action("hello", "Return a greeting.")
 ```
 
 Then handle the action in `call()`:
@@ -217,24 +252,19 @@ Then handle the action in `call()`:
 
 This registers `mrsm hello`; parsed options arrive in `request.context["kwargs"]`.
 
-For Python's `@make_connector`, list the type in the plugin entry's `connectors`
-array and declare it in the manifest's top-level `connector_types` object:
+For Python's `@make_connector`, declare the connector type and the methods it answers:
 
-```json
-"connector_types": {
-  "my_source": {
-    "type": "my_source", "plugin": "native_demo", "class_name": "Demo",
-    "is_instance": false, "is_thread_safe": false,
-    "methods": ["fetch", "register"]
-  }
-}
+```rust
+Manifest::new().connector_type("my_source", ["fetch", "register"])
 ```
 
-With `"connectors": ["my_source"]` in `plugins.native_demo`, this provides
-`my_source:<label>` connectors. Dispatch by `request.method`; the connector type,
+In the JSON document that is `"connectors": ["my_source"]` in the plugin's entry and
+`"connector_types": {"my_source": {"type": "my_source", "plugin": "native_demo",
+"class_name": "Demo", "is_instance": false, "is_thread_safe": false, "methods": ["fetch",
+"register"]}}` at the top level. This provides `my_source:<label>` connectors. Dispatch by `request.method`; the connector type,
 label and configuration are in `request.connector_type`, `request.label` and
-`request.config`. Set `is_instance` to `true` and implement instance operations
-when the connector should also be usable with `-i`.
+`request.config`. Use `ConnectorType::new(...).instance()` (`is_instance: true`) and implement
+instance operations when the connector should also be usable with `-i`.
 
 The optional source `register` handler returns a JSON object of default Pipe
 parameters (or `null`), with the Pipe in `request.context["pipe"]`. For
@@ -243,10 +273,10 @@ defaults; ordinary registration merges explicitly supplied parameters over them.
 This source hook differs from `register_pipe`, which persists a Pipe on an instance.
 
 Rust plugins cover actions, arguments, hooks, fetch/sync, custom connectors and
-instances, supported HTTP routes, and console page fragments. They do **not** have
-complete Python plugin parity: arbitrary Python helper imports and connector
-access, Dash callbacks, unrestricted FastAPI customization and live library reload are not
-available.
+instances, supported HTTP routes, and console page fragments, and they reach pipes, SQL
+connectors and their config through [host calls](#talking-to-meerschaum). They do **not** have
+complete Python plugin parity: importing Python plugin helpers (`from_plugin_import`), Dash
+callbacks, unrestricted FastAPI customization and live library reload are not available.
 The Pipe helper surface is described in the [single-file reference](#single-file-reference), and HTTP adapter limits are described above; see the
 status note below for further limits.
 
@@ -326,12 +356,11 @@ Point `MRSM_PLUGINS_DIR` at the directory (use a temporary `MRSM_ROOT_DIR` while
 $ mrsm hello
  🎉 Hello from native_demo
 
-$ mrsm --help | grep -A1 '^hello'
-hello
-Return a synthetic greeting.
+$ mrsm --help | grep '^  hello'
+  hello        Return a synthetic greeting.
 ```
 
-The plugin's flags (`--native-demo`) are listed in `--help` after its last action, and `mrsm hello --native-demo` is accepted.
+`mrsm --help` lists the plugin's actions in its **Plugins** group (with the first line of each docstring) and the plugin's flags (`--native-demo`) under `Plugin 'native_demo' options`; `mrsm hello -h` prints the whole docstring, and `mrsm hello --native-demo` is accepted.
 
 Register a pipe that uses it as a source:
 
@@ -356,7 +385,7 @@ export MRSM_PLUGINS_DIR="$(mktemp -d)"      # install your plugin directory here
 mrsm show plugins                           # native plugins are listed as `name (native)`
 mrsm show plugins --nopretty                # bare names, for scripts
 mrsm show actions --nopretty                # your actions appear here
-mrsm --help                                 # ...and here, with their documentation and flags
+mrsm --help                                 # ...and here (the Plugins group), with their flags
 ```
 
 A plugin that is missing from these listings was skipped: look for `Warning: Skipping invalid native plugin at '<dir>': <reason>` on stderr. The reasons are a bad `plugin.toml`, a missing or unloadable library, an incompatible ABI (for example `unsupported native plugin ABI 99; expected 1`), and, for a source crate, a package name that differs from `plugin.toml` or a crate that is not a `cdylib`. A valid source crate that could not be built (no `cargo`, a compile error) is reported as `Warning: Skipping native plugin at '<dir>': <reason>`. The other plugins still load. A panic inside your code does not stop `mrsm`: the call returns a failure (`native plugin panicked`) and the next command works normally. The host caches the manifest under `$MRSM_ROOT_DIR/cache/native_plugins_manifest.json`, keyed by a fingerprint of the plugin directory (the source fingerprint for a source crate), so replacing or removing a plugin takes effect on the next run (do it while `mrsm` is not running).
@@ -380,6 +409,7 @@ cargo test -p meerschaum-cli --test native_plugins    # the `mrsm` binary: actio
 cargo test -p meerschaum-cli --test native_e2e        # hooks, routes, shadowing, rejection, cache
 cargo test -p meerschaum-cli --test native_api_mcp    # routes with parameters, scopes and bytes; MCP over HTTP and stdio
 cargo test -p meerschaum-cli --test native_source_plugin   # a Cargo crate built, cached and rebuilt by mrsm (compiles the SDK: slow the first time)
+cargo test -p meerschaum-cli --test native_host_calls      # host calls: pipes, SQL, plugin config, actions, routes with scopes
 MRSM_TEST_CONSOLE=1 PYTHONPATH=$(pwd) python -m pytest tests/console -k native_page   # a native console page in Chromium
 ```
 
@@ -395,6 +425,7 @@ MRSM_TEST_CONSOLE=1 PYTHONPATH=$(pwd) python -m pytest tests/console -k native_p
 | Corrupt library and wrong ABI skipped, manifest cache follows the directory | `native_e2e.rs`; discovery details in `native.rs` |
 | `plan pipes` / `show graph` with a native source | `native_e2e.rs` |
 | A source crate built by `mrsm`, reused on the next run, rebuilt after an edit; a mismatched crate name and a missing `cargo` skipped | `native_source_plugin.rs` (real `cargo`); stamp, fingerprint and failure handling in `meerschaum-plugin/tests/source.rs` |
+| Host calls through `mrsm` on SQLite: another pipe's data, `read_sql`, clearing and rewriting a window, `replace` in one transaction, plugin config written by an action and read by `register`, `exec_sql`; route host calls refused without the caller's scope, internal tables refused, `exec_sql` only for callers who may run actions, `host_scopes` for anonymous callers | `native_host_calls.rs`; both ABIs against a recording host (stream batches and executor methods too), old hosts, the generated manifest and `Frame::from_rows` in `meerschaum-plugin/tests/host_calls.rs`; config isolation, page viewers' scopes and the SQL checks in `meerschaum-cli`'s `native_plugins` unit tests |
 | A console page rendered in the Dash console's frame, identical to the Python page | `tests/console/test_console.py` |
 
 ## 🔬 The ABI in one page
@@ -422,10 +453,16 @@ JSON rows trade conversion overhead and schema fidelity for small builds; full C
 plugins use the Arrow path described above.
 
 The optional `mrsm_plugin_invoke_host_v1` symbol accepts the original request and Arrow
-streams plus a versioned host callback table. Its context is valid only during the call;
-result bytes are freed by the host that allocated them. Older libraries use the original
-v1 entry point unchanged. New plugins loaded by an older host can still run, but attempting
-a Pipe host operation returns an unavailable-services error.
+streams plus a versioned host callback table (`HostV1`), through which the plugin makes its
+[host calls](#talking-to-meerschaum). Its context is valid only during the call; result bytes
+are freed by the host that allocated them. A call's method bytes are a bare name
+(`get_sync_time`, `sync`: the original calls, on the request's Pipe) or a JSON envelope
+`{"method", "pipe", "args"}` (`pipe` is the addressed Pipe's metadata, `null` for the request's);
+the Arrow stream carries the plugin's rows to the host (`sync`) and, on return, the host's rows
+back (`get_data`, `read_sql`). A host that does not know a method answers "unsupported", which
+the SDK reports as a call this Meerschaum cannot run. The rows extension carries the same
+envelope with `data` rows. Older libraries use the original v1 entry point unchanged; new
+plugins loaded by an older host still run, and only their new host calls fail.
 
 The ABI version is checked at load. A breaking change would ship as a new `mrsm_plugin_v2` symbol, and the host keeps loading v1 for at least one major release. The same interface is also written as WIT (`crates/meerschaum-plugin/wit/plugin.wit`) for the future WebAssembly host.
 
@@ -483,9 +520,11 @@ synchronous, safe, non-generic Rust functions, declared at the file's top level 
 `Request` is an internal dispatch envelope, not an accepted single-file parameter.
 
 `Pipe`, `Connector`, `Bound`, `SuccessTuple`, JSON `Value`, `json!`, `Frame`, `Result`, and `Error`
-are available without imports. `Bound` is either `Bound::Int(i64)` or
-`Bound::Datetime(String)` (an ISO timestamp). Fetch receives the engine's resolved
-bounds; an unspecified default begin in a sync override is `None`.
+are available without imports, and so are `host` and `Query` ([host calls](#talking-to-meerschaum)).
+`Bound` is either `Bound::Int(i64)` or `Bound::Datetime(String)` (an ISO timestamp):
+`bound.as_int()`, `bound.timestamp()` (Unix seconds; a timestamp without an offset is UTC),
+`Bound::from_timestamp(seconds)` and `Bound::from("2024-01-01")` convert them. Fetch receives
+the engine's resolved bounds; an unspecified default begin in a sync override is `None`.
 
 Fetch may return `Vec<Value>` containing JSON objects, `Option<Vec<Value>>`, `Frame`,
 `Option<Frame>`, or any of those wrapped in `Result`. Missing row fields become null cells.
@@ -522,7 +561,7 @@ fn report(pipe: &Pipe, success_tuple: SuccessTuple, sync_duration: f64) -> (bool
 
 | Parameter | Type | Meaning |
 |---|---|---|
-| `pipe` | `&Pipe` | The synced Pipe, with its [operations](#pipe-operations) (`get_sync_time`, `sync`) |
+| `pipe` | `&Pipe` | The synced Pipe, with its [host calls](#talking-to-meerschaum) |
 | `kwargs` | `&Value` | The keyword arguments Python hooks receive (`begin`, `end`, `params`, `sync_timestamp`, and after the sync `success_tuple`, `sync_duration`, `sync_complete_timestamp`, ...) |
 | `success_tuple` (post only) | `SuccessTuple` | The sync's result |
 | `sync_duration` (post only) | `f64` | Seconds the sync took |
@@ -551,6 +590,18 @@ as it was before single-file plugins had a setup.
 ```rust
 fn setup(kwargs: &Value) -> (bool, String) {
     (true, format!("Ready (force = {})", kwargs["force"]))
+}
+```
+
+`setup` may make [host calls](#talking-to-meerschaum), for example to write the plugin's
+default settings once:
+
+```rust
+fn setup() -> Result<SuccessTuple> {
+    if host::plugin_config()?.is_null() {
+        host::write_plugin_config(&json!({"stations": ["north"], "factor": 1.0}))?;
+    }
+    Ok(SuccessTuple::ok("Ready."))
 }
 ```
 
@@ -617,19 +668,141 @@ installed one, as it does for Python plugins. `REQUIRED` lists Python packages a
 plugin's virtual environment, exactly like a Python plugin's `required` list. Rust crates
 belong in the [Cargo block](#dependencies), not in `REQUIRED`.
 
-### Pipe operations
+### Talking to Meerschaum
 
-`pipe.connector_keys()`, `metric_key()`, `location_key()`, `instance_keys()`, `keys()`,
-and `parameters()` expose the current Pipe's metadata. Host operations are fallible:
+A plugin reaches the Meerschaum process that runs it through **host calls**: methods of its
+`Pipe` and the functions of `host`. They are the Rust counterparts of what a Python plugin does
+with its `pipe` argument, `mrsm.Pipe(...)`, a SQL connector and `get_plugin_config()`. Single-file
+plugins have `host` and `Query` without imports; Cargo plugins use
+`meerschaum_plugin::{host, Query}` (both are in `meerschaum_plugin::prelude`).
 
-- `pipe.get_sync_time()?` returns `Option<Bound>`, reading the newest axis value from
-  this Pipe's instance. An empty target returns `None`.
-- `pipe.sync(rows)?` or `pipe.sync(frame)?` writes supplied data through the host's normal
-  sync engine, including dtype enforcement and existing-row checks. It returns a
-  `SuccessTuple` and inherits the surrounding sync options. Empty rows are a successful
-  no-op. Supply data explicitly; a zero-argument sync would recursively invoke the plugin.
+```rust
+/// Rebuild the daily averages of the `readings` pipe.
+fn sync(pipe: &Pipe) -> Result<SuccessTuple> {
+    let readings = host::pipe("plugin:readings", "readings", None, None)?;
+    let daily = host::read_sql(
+        pipe.instance_keys(),
+        &format!(
+            "SELECT date(ts) AS day, station, AVG(temperature) AS temperature FROM {} GROUP BY 1, 2",
+            readings.target()
+        ),
+    )?;
+    // One transaction: readers never see the averages half rewritten.
+    pipe.replace(daily, None, None)
+}
+```
 
-An integer-axis sync plugin can therefore be just:
+| Call | Returns | Python equivalent |
+|---|---|---|
+| `host::pipe(connector, metric, location, instance)` | `Pipe` | `mrsm.Pipe(connector, metric, location, instance=instance)` with its registered parameters |
+| `pipe.get_data(begin, end, params)` | rows | `pipe.get_data(begin=begin, end=end, params=params)` |
+| `pipe.get_data_with(&Query::new()...)` | rows | `pipe.get_data(select_columns=, omit_columns=, begin=, end=, params=, limit=, order=)` |
+| `pipe.get_rowcount(begin, end, params)` | `i64` | `pipe.get_rowcount(...)` (0 without a table) |
+| `pipe.get_sync_time()`, `pipe.get_sync_time_with(params, newest)` | `Option<Bound>` | `pipe.get_sync_time(params=, newest=)` |
+| `pipe.sync(rows)` | `SuccessTuple` | `pipe.sync(docs)` |
+| `pipe.replace(rows, begin, end)` | `SuccessTuple` | `pipe.sync(docs, begin=, end=, replace=True)` |
+| `pipe.clear(begin, end, params)` | `SuccessTuple` | `pipe.clear(begin=, end=, params=)` |
+| `pipe.exists()`, `pipe.get_columns_types()`, `pipe.register()` | `bool`, a map, `SuccessTuple` | `pipe.exists()`, `pipe.get_columns_types()`, `pipe.register()` |
+| `pipe.target()`, `pipe.datetime_column()`, `pipe.parameters()`, `pipe.with_parameters(json!({...}))` | | `pipe.target`, `pipe.columns['datetime']`, `pipe.parameters`, `mrsm.Pipe(..., parameters=...)` |
+| `host::read_sql(connector, query)` | rows | `mrsm.get_connector(connector).read(query)` |
+| `host::exec_sql(connector, statement)` | `SuccessTuple` | `mrsm.get_connector(connector).exec(statement)` |
+| `host::plugin_config()` | `Value` (`null` when unset) | `get_plugin_config()` |
+| `host::write_plugin_config(&json!({...}))` | `SuccessTuple` | `write_plugin_config({...})` |
+| `host::config(&["meerschaum", "instance"])` | `Value` | `get_config('meerschaum', 'instance')` |
+
+"Rows" are `Vec<Value>` JSON objects in a single-file plugin (datetimes as ISO strings) and an
+Arrow-backed `Frame` in a Cargo plugin (`frame.to_rows()` gives the JSON objects). `begin` and
+`end` are `Option<Bound>` (`None` is unbounded; `begin` is inclusive and `end` exclusive), and
+`params` is `Option<&Value>`, the `params` filter of Python's `get_data`
+(`Some(&json!({"station": ["a", "b"]}))`). A Pipe without a table has no rows and a row count of
+0; `exists()` tells the two cases apart.
+
+- **Which instance.** `host::pipe` without an instance uses the instance of the Pipe being
+  synced; in an action, the `-i` instance (else the configured `meerschaum:instance`); in a route,
+  MCP entry or page, the API server's instance.
+- **Writes.** `pipe.sync(rows)` writes through the normal sync (dtype enforcement, existing-row
+  checks, upserts) and registers a Pipe that is not registered yet, with the view's parameters
+  (`with_parameters`). On the Pipe being synced it inherits the surrounding sync's options; on
+  any other Pipe it uses the defaults. It never calls a plugin's `fetch` or `sync` again: supply
+  the rows. `pipe.replace(rows, begin, end)` rewrites a window in one transaction: the rows of
+  `[begin, end)` that are not in `rows` are deleted and the others written, and readers never see
+  the window half rewritten. A `None` bound comes from the rows (`begin` is their earliest
+  datetime, `end` just after their latest), so rows outside their range stay; no rows with both
+  bounds empties the window. Writes to a `protected` instance are refused unless the command has
+  `--allow-protected` (or `MRSM_ALLOW_PROTECTED=1`); the refusal comes back as a failed
+  `SuccessTuple`.
+- **SQL.** `read_sql` and `exec_sql` take any configured `sql:` connector's keys, including
+  `pipe.instance_keys()` for the Pipe's own database. Quote table names for your database.
+- **Plugin config.** `plugin_config()` reads the `plugins:<name>` section of the Meerschaum
+  config (`mrsm edit config plugins`) and `write_plugin_config` replaces it in the config
+  directory's `plugins` file (`plugins.json` unless you keep it as YAML), keeping the other
+  plugins' sections as the file has them; it is the section Python's `get_plugin_config()` reads
+  and `write_plugin_config()` writes. The config is the command's own (a compose project's
+  root, for example), and later reads in the same process see the write: the next command in
+  the shell, the next `--loop` run, and the Python process's next call.
+
+Host calls work while Meerschaum calls the plugin: `fetch`, `sync`, `register`, `setup`, the sync
+hooks, a connector's `subscribe` and each of its batches, an executor's methods, actions,
+routes, MCP tools, resources and prompts, and console pages. In `register` and an executor's
+methods they have the trust of the process, as a Python plugin's do (also when a registration
+comes through the API). They are synchronous and tied to the call and its thread: a `Pipe`
+cannot be sent to background threads, and a call outside a plugin call returns an error. Re-entering
+the same native library through a host call returns an error instead of waiting on its own call
+lock. Importing helpers from Python plugins (`from_plugin_import`) has no Rust counterpart:
+port the helper too.
+
+In **routes, MCP entries and console pages**, host calls act for the caller, with the scopes
+the core API would require:
+
+| Calls | Scope |
+|---|---|
+| `host::pipe`, `get_data`, `get_rowcount`, `get_sync_time`, `get_columns_types`, `exists` | `pipes:read` |
+| `sync`, `replace`, `clear`, `register` | `pipes:write` |
+| `read_sql` (read-only queries only) | `sql:read` |
+| `exec_sql` | `actions:execute`, and a caller who may run actions (below) |
+| `config` | every scope (`*`: an administrator, or `--no-auth`) |
+| `plugin_config`, `write_plugin_config` | none: the plugin's own settings |
+
+- **Pipes** are reached only on the instances the server allows (`api:permissions:instances`),
+  and never Meerschaum's internal `mrsm` pipes.
+- **SQL** reaches any configured `sql:` connector (as MCP's `read_sql` tool does) but never
+  Meerschaum's internal tables: a query or statement that names one (`mrsm_users`,
+  `mrsm_tokens`, any `mrsm_*` table or the `_mrsm_internal` schema, quoted or in a string) or
+  names a function that runs query text or reads tables named in text (`query_to_xml`,
+  `database_to_xml`, `ts_stat`, `dblink`, Oracle's `DBMS_XMLGEN`, DuckDB's `query`, ...) is
+  refused. This is a keyword check, not a parser: give untrusted callers a read-only database
+  role.
+- **`exec_sql`** follows the server's `/actions` rule: administrators may; other users and
+  tokens only when the server lets non-administrators run actions
+  (`system:api:permissions:actions:non_admin: true`, with `jobs:execute` too), never under
+  `start api --secure`; anonymous callers never.
+- **Who has which scopes.** A token or a signed-in API user has the scopes it was granted. A
+  console page's signed-in viewer has what their user would get from `/login` (every scope for
+  an administrator, else the user's scopes). A caller without credentials (a `public = true`
+  route, a guest of a page with `login_required = false`) has none, so these calls are refused
+  for it, unless the route or page declares `host_scopes`: every caller's host calls get these
+  scopes on top of its own, so this public route serves pipe data to anyone:
+
+    ```rust
+    #[api_route(GET, "/status/{metric}", public = true, host_scopes = ["pipes:read"])]
+    fn status(request: &RouteRequest) -> Result<Value> {
+        let pipe = host::pipe("plugin:readings", request.path_param("metric").unwrap_or(""), None, None)?;
+        Ok(json!({"rows": pipe.get_rowcount(None, None, None)?}))
+    }
+    ```
+
+    `#[web_page("status", login_required = false, host_scopes = ["pipes:read"])]` does the same
+    for a page (Cargo plugins: `RouteSpec::host_scopes([...])` and
+    `Manifest::page_host_scopes(path, [...])`). `*` is not accepted, and `exec_sql` and
+    `host::config` still need the caller's own permission.
+- Under `--no-auth` every call is allowed. MCP over stdio (`mrsm start mcp`) has the full trust
+  of the local user.
+
+A host older than these calls answers each new one with an error such as "This Meerschaum
+cannot run `pipe.get_data()` for plugins: upgrade Meerschaum to 5.0.0rc15 or later."; the
+original `pipe.get_sync_time()` and `pipe.sync(data)` still work there.
+
+An integer-axis sync plugin can be just:
 
 ```rust
 fn sync(pipe: &Pipe) -> Result<SuccessTuple> {
@@ -648,12 +821,6 @@ Register an integer axis for this example:
 mrsm register pipe -c plugin:readings -m readings -i sql:local --params '{"columns":{"datetime":"id"},"dtypes":{"id":"int"}}'
 mrsm sync pipes -c plugin:readings -i sql:local
 ```
-
-Host operations are synchronous and scoped to the current invocation. A `Pipe` cannot
-be sent to background threads. Re-entering the same native library through a callback
-returns an error instead of waiting on its own call lock. These operations apply to the
-current Pipe; arbitrary connector access, other Pipe construction and Python helper
-imports are not exposed.
 
 ### API routes
 
@@ -807,7 +974,7 @@ with `show logs --nopretty`, which reads `get_logs`.
 for `sync pipes --listen` and the engine's supervised streams, the counterpart of an
 `IS_STREAMING` connector's `subscribe`. A top-level `fn subscribe` does the same for
 `plugin:<name>`. `subscribe` may take `pipe: &Pipe` (with its
-[operations](#pipe-operations)), `connector: &Connector` and `kwargs: &Value` (the sync's
+[host calls](#talking-to-meerschaum), while the stream opens), `connector: &Connector` and `kwargs: &Value` (the sync's
 keyword arguments, as Python's `subscribe` receives them) and returns, optionally in a
 `Result`, a closure `impl FnMut(Duration) -> Batch` (or `-> Result<Batch>`), an
 `impl Subscription`, a `Box<dyn Subscription>` (the Cargo SDK's type), or a type the file

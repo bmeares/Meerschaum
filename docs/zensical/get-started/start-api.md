@@ -26,12 +26,12 @@ You can use Meerschaum from its web interface. From within a `mrsm` shell, type 
 
     <img src="/assets/screenshots/login-page.png"/>
 
-3. On the left side of the dashboard are the available commands, like in the `mrsm` shell.
+3. The console opens on the **Overview** of your instance (its pipes, Pipelines, jobs and recent runs). The **Terminal** page in the navigation has the available commands on its left side, like in the `mrsm` shell.
 
     <img src="/assets/screenshots/dash-bootstrap.png"/>
 
     !!! tip "Adding custom commands"
-        You can add your own actions with [Meerschaum plugins](/reference/plugins/writing-plugins/#action-plugins).
+        You can add your own actions with [Meerschaum plugins](/reference/plugins/writing-plugins/#the-make_action-decorator).
 
     <img src="/assets/screenshots/dash-pipe-statistics.png"/>
 

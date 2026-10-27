@@ -116,6 +116,64 @@ fn report(pipe: &Pipe, success_tuple: SuccessTuple, sync_duration: f64) -> (bool
 
 `mrsm sync pipes` prints each hook's message. A failing hook never stops the sync.
 
+## Talk to Meerschaum
+
+Your functions can read and write other pipes, query the database, and keep settings.
+`host` and `Query` are available without imports, like `Pipe`. This `sync` rebuilds a
+pipe from another one:
+
+```rust
+fn sync(pipe: &Pipe, begin: Option<Bound>, end: Option<Bound>) -> Result<SuccessTuple> {
+    // Another pipe, by its keys. It is on the same instance as `pipe`.
+    let readings = host::pipe("plugin:readings", "readings", None, None)?;
+
+    // Your plugin's settings: the `plugins: readings:` section of `mrsm edit config`.
+    let factor = host::plugin_config()?["factor"].as_f64().unwrap_or(1.0);
+
+    // Its rows between `begin` and `end`, as JSON objects.
+    let mut rows = readings.get_data(begin.clone(), end.clone(), None)?;
+    for row in &mut rows {
+        row["temperature"] = json!(row["temperature"].as_f64().unwrap_or(0.0) * factor);
+    }
+
+    // Replace this pipe's rows between `begin` and `end` with the new ones, all at once.
+    pipe.replace(rows, begin, end)
+}
+```
+
+Run SQL on a pipe's database with `host::read_sql`, which returns rows:
+
+```rust
+let table = readings.target();
+let counts = host::read_sql(
+    pipe.instance_keys(),
+    &format!("SELECT station, COUNT(*) AS n FROM {table} GROUP BY station"),
+)?;
+```
+
+| Call | What it does |
+|---|---|
+| `host::pipe("connector", "metric", location, instance)` | Any pipe, with its registered parameters. `None` for the location or the instance (the same instance). |
+| `pipe.get_data(begin, end, params)` | The rows in `[begin, end)` matching `params`, like Python's `pipe.get_data()`. |
+| `pipe.get_data_with(&Query::new().order("desc").limit(1))` | The same, with `select`, `omit`, `order` and `limit`: here, the newest row. |
+| `pipe.get_rowcount(begin, end, params)` | How many rows. |
+| `pipe.get_sync_time()` | The newest value of the datetime column (`None` when empty). |
+| `pipe.sync(rows)` | Write rows (a pipe that is not registered yet is registered first). |
+| `pipe.replace(rows, begin, end)` | Replace the rows in `[begin, end)` with `rows` in one step, so nobody sees the window half rewritten. A `None` bound comes from the rows. |
+| `pipe.clear(begin, end, params)` | Delete rows; `None` bounds clear everything. |
+| `pipe.exists()`, `pipe.get_columns_types()`, `pipe.target()` | Whether the table exists, its columns, its name. |
+| `host::read_sql("sql:main", query)` | The rows of a query on a SQL connector. |
+| `host::exec_sql("sql:main", statement)` | Run a statement that returns no rows. |
+| `host::plugin_config()`, `host::write_plugin_config(&json!({...}))` | Read or replace your plugin's settings, as Python's `get_plugin_config()` does. |
+
+These work in the functions Meerschaum calls: `fetch`, `sync`, `register`, `setup`, hooks,
+actions, streams, executors, routes, MCP entries and console pages. In routes, MCP entries and
+pages they act for the caller, who needs the matching scope
+([details](rust-plugins/advanced.md#talking-to-meerschaum)). Bounds are `Bound::Int(5)`, `Bound::from("2024-01-01")` or a value
+you were given; `bound.timestamp()` turns a datetime bound into Unix seconds and
+`Bound::from_timestamp(seconds)` back. Each call returns a `Result`, so end it with `?`.
+Writes to a protected instance are refused unless you pass `--allow-protected`.
+
 ## Add flags, a version, and setup
 
 Give your commands their own flags with `#[add_plugin_argument(...)]`, which takes the
@@ -157,6 +215,9 @@ fn item(request: &RouteRequest) -> Value {
 
 Callers need the API's credentials and every listed scope; add `public = true` (and no
 scopes) for a route anyone may call. Return JSON, text, bytes or a `RouteResponse`.
+A route's [host calls](#talk-to-meerschaum) act for its caller: reading pipes needs the
+`pipes:read` scope, syncing or clearing `pipes:write`. A public route's anonymous callers have
+no scopes; to let it serve pipe data to anyone, add `host_scopes = ["pipes:read"]`.
 
 Mark functions with `#[mcp_tool]`, `#[mcp_resource]` or `#[mcp_prompt]` to offer them
 to AI agents through `/mcp` and `mrsm start mcp`:
@@ -282,6 +343,7 @@ Only run plugins you trust.
 
 See the [single-file reference](rust-plugins/advanced.md#single-file-reference)
 for optional arguments, hooks, flags, setup, routes, MCP entries, executors, streams,
-Pipe operations, sync overrides, and dependency details.
+[host calls](rust-plugins/advanced.md#talking-to-meerschaum), sync overrides, and dependency
+details.
 The [advanced guide](rust-plugins/advanced.md) covers Cargo packaging, the full SDK,
 web extensions, testing, and distribution.

@@ -46,7 +46,7 @@ Dependencies, Recent syncs and Parameters independently.
 Review the proposal, then explicitly **Apply proposed tags**. Stale proposals require analysis and
 approval again. Ordinary saves and syncs do not apply tags.
 
-The canvas's **Plan** describes dependency order, readiness, actions and bounds without a time axis.
+The canvas's **Plan** lists each Pipe in dependency order with its action, the **Reason** in plain words ("up to date: Pipe('sql:main', 'raw') has no new data") and the sync **Window** in words ("last sync − 1 day → latest data"), without a time axis. The toolbar counts the Pipes and the **dependencies** between them; a Pipeline card counts the Pipes it syncs ("3 Pipes", or "1 Pipe + children" before its first run counted them). Run counts read "2 synced, 1 up to date", and a run's output lines say what happened ("Synced Pipe('sql:main', 'daily'): 24 inserted").
 The **Actual execution timeline** uses observed starts and finishes, extends live running bars and
 shows overlap and elapsed time. It omits forecast bars and the image-download control. Engine
 estimates may use prior durations or a 30-second default; these are scheduling hints, not deadlines.
@@ -145,11 +145,12 @@ run                         started (UTC)        status     wall  ok/nodes  targ
 Start the API (`mrsm start api`) and open **`/dash/pipelines`**. The console needs
 `pip install meerschaum[dash]`. The workspace reads [Engine State](/reference/pipelines/state/)
 and writes definitions or shared Pipe facts only through explicitly named controls described above.
-The Pipe cards on the Pipes page retain their Parents / Children tabs.
+A pipe's page (`/dash/pipes/<connector>/<metric>`) shows its parents and children on the
+**Lineage** tab, with **Explore graph** to open its connected graph here.
 
-The engine's *ledger* is its record of changed parent data, used to find updates a child still needs to process, including changes to older rows. It remains part of syncing; it is not a separate lag metric on the page. A *watermark* is the latest value of a pipe's datetime or ordering column. Without a previous dependency-sync record, the engine compares parent and child watermarks. When a parent is ahead, the child reads from its own latest value minus its backtrack window, up to the earliest parent watermark. The canvas calls this **New parent data available**.
+The engine's *ledger* is its record of changed parent data, used to find updates a child still needs to process, including changes to older rows. It remains part of syncing; it is not a separate lag metric on the page. A *watermark* is the latest value of a pipe's datetime or ordering column. Without a previous dependency-sync record, the engine compares parent and child watermarks. When a parent is ahead, the child reads from its own latest value minus its backtrack window, up to the earliest parent watermark. The plan says the parent *has new data*; the canvas labels it **New data to sync**.
 
-A running run is followed live: the page opens the server's [run event stream](#following-a-run-over-http) (`GET /engine/runs/{run_id}/events/stream`, authorized by your console session) and paints each stage's status and chunk progress (for example *running · chunk 3/10 · 4200 rows*) as the events arrive, refreshing the timeline, stages table and **Sync activity** after each node or chunk transition. Canvas syncs (**Sync this Pipe**) are followed the same way. A run that stops without finishing (its process was killed, or a canvas sync's execution ended) is no longer followed, and its stages show their recorded state. A run the server will not stream (the `engine` route group is not allowed, your user lacks the `pipes:write` scope, or the run lives on an instance the server does not serve) falls back to reading its recorded state every 5 seconds. Otherwise sync history refreshes about every 15 seconds. Use the refresh button to update the pipeline canvas. Select a run with the link in the runs table (`/dash/pipelines?run_id=…`) to see its actual execution timeline. State lives in the URL, so a run or filter is shareable.
+A running run is followed live: the page opens the server's [run event stream](#following-a-run-over-http) (`GET /engine/runs/{run_id}/events/stream`, authorized by your console session) and paints each stage's status and chunk progress (for example *running · chunk 3/10 · 4200 rows*) as the events arrive, refreshing the timeline, stages table and **Sync activity** after each node or chunk transition. Canvas syncs (**Sync this Pipe**) are followed the same way. A run that stops without finishing (its process was killed, or a canvas sync's execution ended) is no longer followed, and its stages show their recorded state. A run the server will not stream (the `engine` route group is not allowed, your user lacks the `pipes:read` scope, or the run lives on an instance the server does not serve) falls back to reading its recorded state every 5 seconds. Otherwise sync history refreshes about every 15 seconds. Use the refresh button to update the pipeline canvas. Select a run with the link in the runs table (`/dash/pipelines?run_id=…`) to see its actual execution timeline. State lives in the URL, so a run or filter is shareable.
 
 The console is available through `mrsm start api` and is covered in [Web Console](/reference/api-instance/web-console/).
 
@@ -187,7 +188,7 @@ Every event has the same envelope, and the event's own fields at the top level:
 | `node_started` | `action`, `attempt` |
 | `chunk_started` | `chunk`, `begin`, `end`, `source` (`window` or `fetch`), `rows`, `total` |
 | `chunk_finished` | `chunk`, `success`, `message`, `source`, `rows`, `inserted`, `updated`, `upserted`, `begin`, `end`, `duration_ms` |
-| `node_finished` | `result` (`success`, `message`, `inserted`, `updated`, `upserted`, `deleted`, `changed_intervals`, `duration`, `begin`, `end`) |
+| `node_finished` | `result` (`success`, `message`, `inserted`, `updated`, `upserted`, `deleted`, `changed_intervals`, `duration` (seconds), `begin`, `end`) |
 | `node_failed` | `error`, `traceback`, `attempt`, `will_retry` |
 | `node_skipped` / `node_rebuild_pending` | `reason` |
 | `watermark_advanced` | `from`, `to` |
@@ -202,7 +203,7 @@ A bound (`begin`, `end`, `from`, `to`) is `{"Datetime": "2024-01-01T00:00:00Z"}`
 
 **Errors.** If the callback raises an `Exception`, the run is **not** stopped: the exception is reported once with `warnings.warn` (including its traceback), the callback receives no further events, the run result carries it as `run.callback_error`, and `run.warnings` gets a line about it. A `KeyboardInterrupt` (raised in the callback, or CTRL-C while the run waits) **cancels** the run: in-flight node syncs are dropped as if the process had crashed (the engine's write ordering keeps every table and cursor consistent, and the next run picks up where it stopped), and the `KeyboardInterrupt` propagates.
 
-`run.events()` (and `Pipeline.get_events(run_id)`) still read a run's *persisted* events back from the instance after the fact, at the granularity of `system.engine.events` (every event by default); those rows are shaped `{ts, run_id, seq, pipe_ref, event, payload}`.
+`run.events()` (and `Pipeline.get_events(run_id)`) still read a run's *persisted* events back from the instance after the fact, at the granularity of `system.engine.events` (every event by default). Each row has the same keys as a live event (the envelope plus the event's own fields at the top level, so `event['result']['inserted']` works on both) and also `payload`, the event's own fields as one dict; its `ts` is the ISO 8601 text the instance stored rather than a `datetime`.
 
 ## 📡 Following a run over HTTP
 
@@ -212,7 +213,7 @@ An API server streams any run whose history it can read as [Server-Sent Events](
 GET /engine/runs/{run_id}/events/stream[?instance_keys=sql:main][&after_seq=4][&wait=30][&idle_timeout=900]
 ```
 
-Each engine event is one SSE event: `event:` is its name, `id:` its `seq` and `data:` the same JSON as the `on_event` dicts above (the envelope plus the event's own fields; `ts` is an ISO string). The stream always ends with a terminal event: `run_finished`, or `run_closed` when the run will not send one (see below).
+Each engine event is one SSE event: `event:` is its name, `id:` its `seq` and `data:` the same JSON as the `on_event` dicts above (the envelope plus the event's own fields; `ts` is an ISO string, and a `node_finished` result's `duration` is `{"secs": 0, "nanos": 49133000}`, which Python reads as `0.049133` seconds). The stream always ends with a terminal event: `run_finished`, or `run_closed` when the run will not send one (see below).
 
 ```text
 event: chunk_finished
@@ -231,7 +232,7 @@ data: {"run_id":"pipeline-2026-…","seq":4,"ts":"2026-01-01T00:00:04Z","pipe_re
     | `idle` | The run has sent nothing for `idle_timeout` seconds (default 900, from 10 to 86400). The run may still be going: a single long chunk sends nothing until it finishes. |
 
 - **Waiting for a run.** `wait` (seconds, at most 60) keeps the request open until a run that was just launched appears; without it an unknown run is a `404`.
-- **Authorization** is that of `GET /engine/runs`: the `pipes:write` scope, by bearer token or the console's session cookie. Comments (`: keep-alive`) every 15 seconds keep proxies from closing a quiet stream; with nginx in front, the server already sends `X-Accel-Buffering: no`. Open streams are bounded like log streams (`api:permissions:log_streams`).
+- **Authorization** is that of `GET /engine/runs`: the `pipes:read` scope, by bearer token or the console's session cookie. A run the server cannot read the history of is an error (`500`), not a `404`. Comments (`: keep-alive`) every 15 seconds keep proxies from closing a quiet stream; with nginx in front, the server already sends `X-Accel-Buffering: no`. Open streams are bounded like log streams (`api:permissions:log_streams`).
 - **Order.** Events are delivered once, in `seq` order. With `system.engine.events: nodes` the chunk events of a run in another process are not persisted, so when the stream meets a missing `seq` it waits up to a second, once for every event it has received by then, before moving on: the delay does not add up across gaps.
 - **Limits.** Open streams count against `api:permissions:log_streams` (`max` for the server, `per_user` per user or token). Waiting for a run (`wait`) does not hold a stream. On a `--no-auth` server, streams are counted per console session, and requests without a console cookie count only against `max`.
 

@@ -266,7 +266,7 @@ def fetch(pipe: mrsm.Pipe, begin=None, end=None, **kw):
 
 ### **The `#!python sync()` Function**
 
-The `#!python sync()` function makes `sync pipes` override the built-in syncing process and behaves more like an [action](/reference/plugins/types-of-plugins/#-action-plugins), returning only a `SuccessTuple` (e.g. `#!python True, "Success"`).
+The `#!python sync()` function makes `sync pipes` override the built-in syncing process and behaves more like an [action](/reference/plugins/types-of-plugins/#action-plugins), returning only a `SuccessTuple` (e.g. `#!python True, "Success"`).
 
 Sync plugins allow for much more flexibility than fetch plugins, so what you come up with may differ from the following example. In any case, below is a simple sync plugin.
 
@@ -409,7 +409,7 @@ For example, the following creates a new connector of type `foo`:
 
 You can register new `foo` connectors via `mrsm bootstrap connector`, which would prompt the user for each attribute in `REQUIRED_ATTRIBUTES` (username, password).
 
-You may also define your new `foo` connectors as [environment variables](/reference/connectors/#-environment-connectors), e.g.:
+You may also define your new `foo` connectors as [environment variables](/reference/connectors/#environment-connectors), e.g.:
 
 ```bash
 export MRSM_FOO_BAR='{
@@ -439,7 +439,7 @@ Your plugin may extend Meerschaum by providing additional actions. Actions are r
 
 !!! tip "Sub-Actions"
 
-    Actions with underscores are a good way to add sub-actions (e.g. `foo_bar` is the same as `foo bar`).
+    Actions with underscores are a good way to add sub-actions (e.g. `foo_bar` is the same as `foo bar`). To choose the words yourself, pass `name`: `#!python @make_action(name='sing chorus')` runs as `mrsm sing chorus`, whatever the function is called, and help and completion list `chorus` under `mrsm sing`. Words after the action's own arrive in `action` (`mrsm sing chorus twice` passes `action=['twice']`).
 
 ??? example "Action Plugin Example"
 
@@ -455,6 +455,11 @@ Your plugin may extend Meerschaum by providing additional actions. Actions are r
     @make_action(daemon=False)
     def sing_tune(**kw):
         return True, "The action `sing tune` will not be executed in the CLI daemon context."
+
+    @make_action(name='sing chorus')
+    def repeat_the_chorus(action=None, **kw):
+        times = action[0] if action else 'once'
+        return True, f"This action is called 'sing chorus' (sung {times})."
 
     def sing(**kw):
         """
@@ -489,7 +494,7 @@ Meerschaum plugins may also extend the web API by accessing the [`FastAPI`](http
 
 The only argument for the initalization function should be `app` for the FastAPI application.
 
-For your endpoints, arguments will be used as HTTP parameters, and to require that the user must be logged in, import `manager` from `meerschaum.api` and add the argument `curr_user = fastapi.Depends(manager)`:
+For your endpoints, arguments will be used as HTTP parameters, and to require that the user must be logged in, import `manager` from `meerschaum.api` and add the argument `curr_user = fastapi.Depends(manager)` (a bearer token from `/login`). For routes your console pages call, `fastapi.Depends(session_user)` is the user signed in to the web console, and `mount_static` serves a folder of files: see [Web Pages, Callbacks and Routes](/reference/plugins/web-pages/).
 
 !!! tip "Swagger Endpoint Tester"
     
@@ -535,6 +540,10 @@ Like `#!python @api_plugin`, `#!python @dash_app` designates an initialization f
 
 Functions decorated with `#!python @web_page` return a [Dash layout](https://dash.plotly.com/layout). These don't need to reside within the `#!python @dash_app`-decorated function, but this is recommended to improve lazy-loading performance.
 
+!!! note "Callbacks answer signed-in visitors"
+
+    A callback runs only for a visitor signed in to the console. On a page anyone may open (`#!python login_required=False`), make its callbacks public too, with `#!python @dash_plugin(public=True)` as below or `#!python @web_callback(..., public=True)`: see [who may run a callback](/reference/plugins/web-pages/#who-may-run-a-callback).
+
 ??? example "Dash Plugin Example"
 
     ```python
@@ -542,7 +551,8 @@ Functions decorated with `#!python @web_page` return a [Dash layout](https://das
 
     from meerschaum.plugins import dash_plugin, web_page
 
-    @dash_plugin
+    ### The page is public (`login_required=False`), so its callbacks are too.
+    @dash_plugin(public=True)
     def init_dash(dash_app):
 
         import dash.html as html
@@ -607,6 +617,16 @@ Functions decorated with `#!python @web_page` return a [Dash layout](https://das
             return html.P(f"You're looking at item '{item_id}'.")
     ```
 
+#### The Navigation Bar
+
+Your page keeps its own layout: the console puts a plain bar above it (the Meerschaum logo, which opens the Overview, and **Sign out**). Pass `#!python navbar=True` to give the page the console's top navigation instead (the console's pages, the instance selector and the user menu), or `#!python skip_navbar=True` for no bar at all. Every page is listed in the navigation's **Pages** menu, under its `page_group` (by default, your plugin's name).
+
+```python
+@web_page('/reports/daily', page_group='Reports', navbar=True)
+def daily_report():
+    return dbc.Container([html.H1("Daily report")])
+```
+
 #### Styling Your Page
 
 The Web Console is **dark** by default (the Bootswatch *Darkly* theme plus the `dbc_dark` component overrides), and your page inherits that look automatically — most plugins don't need to do anything.
@@ -624,6 +644,8 @@ While that page is active, the Web Console switches the Bootstrap theme to the l
 ??? note "How the theme switch works"
 
     The dark (Darkly) and light (Flatly) Bootstrap stylesheets are both loaded, and exactly one is enabled at a time. The toggle is per route (it follows the URL as the user navigates), so it is a per-page setting — there is no plugin-wide switch. The dark theme also carries `#!html <body class="dbc_dark">`, under which `dbc_dark.css` scopes its extra component overrides; the light theme runs without that class.
+
+Any other Bootstrap theme works per page too (`#!python @web_page('my-page', theme=dbc.themes.LUX)`), and `head=[...]` adds meta tags, stylesheets and scripts to a page's `<head>`; `add_head(...)` adds them to every page. See [Styling a page](/reference/plugins/web-pages/#styling-a-page).
 
 ### **The `#!python @pre_sync_hook` and `#!python @post_sync_hook` Decorators**
 
@@ -810,7 +832,7 @@ There are a many useful command line arguments provided to plugins as keyword ar
 
 ### Useful Command Line and Keyword Arguments
 
-You can see the available command line options with the command `mrsm show help` or `mrsm --help`. Expand the table below to see more information about usefult builtin arguments.
+You can see the available command line options with the command `mrsm help` (or `mrsm --help`). Expand the table below to see more information about useful built-in arguments.
 
 ??? info "Useful Keyword Arguments"
 
@@ -819,7 +841,7 @@ You can see the available command line options with the command `mrsm show help`
     | `action`                    | Positional arguments                        | `Optional[List[str]]`                | `['foo', 'bar']`                      | The positional action arguments following the action are passed into the `action` list. For example, the command `mrsm example foo bar` will be parsed into the list `['foo', 'bar']` for the action function `example(action : Optional[List[str]] = None)`. |
     | `yes`                       | `-y`, `--yes`                               | `Bool = False`                       | `False` (default), `True`             | When a user provides the `-y` flag, yes/no prompts should default to the `yes` option. You can easily use this functionality with the builtin [`#!python yes_no()` function](https://docs.meerschaum.io/utils/prompt.html). |
     | `force`                     | `-f`, `--force`                             | `Bool = False`                       | `False` (default), `True`             | The `-f` flag implies `-y`. Generally, when `-f` is passed, you may skip asking for confirmation altogether. |
-    | `loop`                      | `--loop`                                    | `Bool = False`                       | `False` (default), `True`             | The `--loop`  flag implies that the action should be continuously executed. The exact looping logic is left up to the action developer and therefore is only used in certain contexts (such as in `sync pipes`). |
+    | `loop`                      | `--loop`                                    | `Bool = False`                       | `False` (default), `True`             | With `--loop`, Meerschaum repeats your action `--min-seconds` apart and calls it once per run with `loop=False`, so it needs no loop of its own (see [Repeating Any Action](/reference/actions/#repeating-any-action)). An action whose function names a `loop` parameter keeps the older contract: it receives `loop=True` and repeats by itself. |
     | `begin`                     | `--begin`                                   | `Optional[datetime.datetime] = None` | `datetime.datetime(2021, 1, 1, 0, 0)` | A user may provide a `begin` datetime. Consult `sync pipes` or `show data` for examples. |
     | `end`                       | `--end`                                     | `Optional[datetime.datetime] = None` | `datetime.datetime(2021, 1, 1, 0, 0)` | A user may provide an `end` datetime. Consult `sync pipes` or `show data` for examples. |
     | `connector_keys`            | `-c`, `-C`, `--connector-keys`              | `Optional[List[str]] = None`         | `['sql:main', 'sql:remote']`          | The list of [connectors](/reference/connectors) is used to filter [pipes](/reference/pipes). This filtering is done with the [`get_pipes()` function](https://docs.meerschaum.io/utils/get_pipes.html). |
@@ -841,7 +863,7 @@ add_plugin_argument('--foo', type=int, help="This is my help text!")
 
 ```
 
-The above code snippet will produce append the following text to the `--help` or `show help` text:
+The above code snippet adds the following group to the `--help` (or `show help`) text, after the built-in options:
 
 ```
 Plugin 'example' options:
@@ -865,7 +887,7 @@ Generally, using built-in or custom arguments mentioned above should cover almos
 
 ## Working With Plugins
 
-Plugins are just Python modules, so you can write custom code and share it amongst other plugins (i.e. a [library plugin](/reference/plugins/types-of-plugins/#-library-plugins)).
+Plugins are just Python modules, so you can write custom code and share it amongst other plugins (i.e. a [library plugin](/reference/plugins/types-of-plugins/#library-plugins)).
 
 At run time, plugins are imported under the global `plugins` namespace, but you'll probably be testing plugins directly when the `plugins` namespace isn't created. That's where [`Plugin` objects](https://docs.meerschaum.io/#meerschaum.Plugin) come in handy: they contain a number of convenience functions so you can cross-pollinate between plugins.
 
@@ -931,3 +953,11 @@ plugin = Plugin('foo')
 with Venv(plugin):
     foo = plugin.module
 ```
+
+### Caching Results
+
+Cache what is slow to compute (a query, a chart, another service's API) with `#!python @cache(ttl=300, pipes=[pipe])` from `meerschaum.utils.cache`: results are shared through Valkey when it is configured and forgotten when a listed pipe syncs. See [Caching](/reference/plugins/caching/).
+
+### Testing Plugins
+
+Add `#!python pytest_plugins = ['meerschaum.testing']` to your `conftest.py` and your tests get a temporary root, a SQLite instance per test, pipes that clean up after themselves, your API routes and your console pages: see [Testing Plugins](/reference/plugins/testing/).

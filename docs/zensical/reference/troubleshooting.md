@@ -435,8 +435,9 @@ is held back and printed when you leave the view (the last 2000 messages). `mrsm
 Debug output goes to **stderr**, never stdout, so `mrsm ... --debug > out.txt` keeps the command's
 real output clean, and job logs (which capture both streams) include it. In v5 Python's
 `meerschaum.utils.debug.dprint()` also prints to stderr (v4 printed to stdout). The header is
-colored with `formatting:debug` (`mrsm edit config`); `formatting:ansi: false` or `NO_COLOR`
-removes the colors and `formatting:unicode: false` replaces the icon with `DEBUG`.
+colored with `formatting:debug` (`mrsm edit config`) when the output is styled (see
+[Colors and Plain Output](/reference/actions/#colors-and-plain-output)); `formatting:ansi: false`
+or `NO_COLOR` removes the colors and `formatting:unicode: false` replaces the icon with `DEBUG`.
 
 From Python, `debug=True` on a pipe or connector method of a SQL instance (`pipe.sync(debug=True)`,
 `pipe.get_data(debug=True)`, `pipe.clear(debug=True)`, `mrsm.get_pipes(debug=True)`, ...) shows

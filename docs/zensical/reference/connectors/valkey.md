@@ -51,7 +51,7 @@ When a `uri` is set it takes precedence over the individual attributes (the clie
 
 ### Environment Connectors
 
-Like other connectors, you may define a Valkey connector entirely from an [environment variable](/reference/connectors/#-environment-connectors) using the `MRSM_<TYPE>_<LABEL>` convention:
+Like other connectors, you may define a Valkey connector entirely from an [environment variable](/reference/connectors/#environment-connectors) using the `MRSM_<TYPE>_<LABEL>` convention:
 
 ```bash
 export MRSM_VALKEY_REMOTE='valkey://default:mrsm@valkey.example.com:6379/0?timeout=300s'

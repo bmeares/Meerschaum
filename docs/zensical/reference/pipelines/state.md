@@ -9,13 +9,14 @@ The engine adds **no database files** to your root directory. Everything it reme
 | `mrsm_engine_cursors` | The [edge cursors](#cursors) | The child's instance |
 | `mrsm_engine_runs`, `mrsm_engine_nodes` | [Run history](#run-history) and per-node results | The home instance |
 | `mrsm_engine_events` | Persisted events | The home instance |
+| `mrsm_engine_sync_status` | The [sync status](#sync-status) of every pipe: how its latest sync went | The pipe's instance |
 | `mrsm_pipe_leases` | [Leases](#leases) (SQL instances) | The pipe's instance |
 
 The first engine run creates them. Graphs, watermarks and duration estimates are never persisted: the graph is rebuilt per run from one batch `fetch_pipes_keys`, and a pipe's watermark is just its `get_sync_time()`.
 
 !!! info "API instances"
 
-    Engine state travels over the dedicated `/engine` route family: the engine reads and writes its state tables through `/engine/pipes/{metric}/read`, `/write`, `/clear` and `/exists` (reads need the `pipes:read` scope, writes `pipes:write`), and leases go through `/engine/leases`; `/engine/ledger`, `/engine/cursors`, `/engine/state`, `/engine/runs` and `/engine/events` expose the same rows by shape (`pipes:write`), and `GET /engine/runs/{run_id}/events/stream` follows a run's events live as Server-Sent Events ([Following a run over HTTP](/reference/pipelines/visualization/#following-a-run-over-http)). The server keeps all of it on its own instance (in `_mrsm_internal` on a PostgreSQL or MSSQL instance), so it survives a server restart. The generic pipe routes refuse the `mrsm` connector keys. On a read-only instance the engine runs degraded: watermarks only, no ledger-driven backfill, no persisted history, with a warning.
+    Engine state travels over the dedicated `/engine` route family: the engine reads and writes its state tables through `/engine/pipes/{metric}/read`, `/write`, `/clear` and `/exists` (reads need the `pipes:read` scope, writes `pipes:write`), and leases go through `/engine/leases`; `/engine/ledger`, `/engine/cursors`, `/engine/state`, `/engine/runs` and `/engine/events` expose the same rows by shape (reading needs `pipes:read`, writing `pipes:write`), `GET /engine/runs` filters runs by Pipeline, pipe, status and start time and `GET /engine/runs/{run_id}` returns one run with its pipes ([over HTTP](/reference/api-instance/routes/#runs)), and `GET /engine/runs/{run_id}/events/stream` follows a run's events live as Server-Sent Events ([Following a run over HTTP](/reference/pipelines/visualization/#following-a-run-over-http)). Every `/engine/*` route answers `{"success": ..., "message": ..., ...}` with real status codes: a store the server cannot read is an error (`500`), never an empty history. The server keeps all of it on its own instance (in `_mrsm_internal` on a PostgreSQL or MSSQL instance), so it survives a server restart. The generic pipe routes refuse the `mrsm` connector keys. On a read-only instance the engine runs degraded: watermarks only, no ledger-driven backfill, no persisted history, with a warning.
 
 ## 📒 The Dirty-Range Ledger
 
@@ -70,15 +71,15 @@ Every engine run is recorded: one row in `mrsm_engine_runs`, one row per node in
 
 ```text
 run_id                      success  message                                                             workers  num_nodes  selection
-01M4VCTF759XD89GSA6046KPHM  1.0      3 succeeded, 0 skipped, 0 observed, 0 failed, 0 upstream_failed, … 4        3          {"targets":{"refs":["sql:local|sql:local|daily|None"]},"parents":"all","children":null}
-01M4VCTFHE91JA00NQ0YHHQDMQ  1.0      1 succeeded, 2 skipped, 0 observed, 0 failed, 0 upstream_failed, …  4        3          …
+01M4VCTF759XD89GSA6046KPHM  1.0      3 synced                  4        3          {"targets":{"refs":["sql:local|sql:local|daily|None"]},"parents":"all","children":null}
+01M4VCTFHE91JA00NQ0YHHQDMQ  1.0      1 synced, 2 up to date    4        3          …
 ```
 
 A node row has its `action`, `status`, the planner's `reason`, the window it synced (`begin`, `end`), `num_chunks`, `attempts`, timings and the counts (`inserted`, `updated`, `upserted`, `deleted`), plus `planned_start_seconds` and `slack_seconds` from the critical-path calculation that [the Gantt chart](/reference/pipelines/visualization/) draws. The planner's duration estimates are an exponentially weighted moving average per `(pipe, action)` over past runs (30 seconds for a pipe that has never run).
 
 New run IDs contain the pipeline name, readable UTC start time, and a collision suffix. Earlier ULID run IDs remain valid. Retention is `clear_pipe(end=now − run_history_days)` on runs, nodes and events (default 30 days); consumed ledger entries are pruned alongside. Unconsumed entries are never pruned by age.
 
-From Python, read it through a `Pipeline` (or `meerschaum.core.Pipeline.get_runs()` for every run on an instance):
+From Python, read it through a `Pipeline` (or `mrsm.get_runs()` for every run on an instance):
 
 ```python
 pipeline = mrsm.Pipeline(pipe)
@@ -86,13 +87,65 @@ pipeline.get_runs(limit=10)            # newest first: the run row, `status`, `d
 pipeline.get_runs(status='failed')     # 'running', 'succeeded' or 'failed'
 pipeline.get_run(run_id)               # one run: node rows plus the planned-vs-actual Gantt bars
 pipeline.get_events(run_id)            # the persisted events, in order (also `run.events()` on a `RunResult`)
+
+mrsm.get_runs(instance='sql:main', limit=5)    # every run on the instance
+mrsm.get_runs(pipeline='daily')                # the runs of the saved Pipeline 'daily'
+mrsm.get_runs(pipe=pipe, status='failed')      # the failed runs that synced this pipe
+mrsm.get_runs(since=timedelta(hours=6))        # runs started in the last 6 hours (or a datetime)
 ```
 
-By default `Pipeline.get_runs()` returns the runs that targeted or contained the pipeline's single target pipe; pass `all_runs=True` for every run on the instance. Events are read after the run from the instance (granularity set by `system.engine.events`). To follow another process's run as it happens, an API server streams its events over HTTP ([Following a run over HTTP](/reference/pipelines/visualization/#following-a-run-over-http)); `on_event` follows your own run from Python.
+By default `Pipeline.get_runs()` returns a named Pipeline's own runs (`mrsm.Pipeline('daily').get_runs()`), and for an unnamed selection the runs that targeted or contained its member pipes; pass `all_runs=True` for every run on the instance. Both take `since=` too: a `datetime` (naive means UTC), a `timedelta` (that long ago) or an ISO 8601 string, like `GET /engine/runs?since=...`. Events are read after the run from the instance (granularity set by `system.engine.events`). To follow another process's run as it happens, an API server streams its events over HTTP ([Following a run over HTTP](/reference/pipelines/visualization/#following-a-run-over-http)); `on_event` follows your own run from Python.
 
 !!! tip "Reading the history"
 
     `mrsm show runs` lists the runs and `mrsm show run <id>` draws one run's Gantt chart. The console's [pipelines page](/reference/pipelines/visualization/) and the Python calls above read the same tables.
+
+A run's `message` lists only the counts that are not zero, in plain words: `synced`, `up to date` (planned `skip`), `listening for new data` (a stream source in a one-time run), `failed`, `not synced because a parent failed`, `waiting for rebuild approval` and `not started`; state warnings follow on `warning:` lines. The node rows keep the machine-readable `status` of each pipe.
+
+## 🩺 Sync Status
+
+Every sync records **how it went** on its pipe's instance, whatever ran it: `mrsm sync pipes`, a background job's laps, a Pipeline run (one record per pipe, after its retries), a `--listen` callback or stream flush, `mrsm copy pipes` (the rows it copies into the new pipe), the API server's `POST /pipes/{connector}/{metric}/{location}/data` and MCP tools, an `api:` client, Python's `pipe.sync()`, and plugins' `pipe.sync()` calls. A pipe's sync status is one row of `mrsm_engine_sync_status`:
+
+| Field | Meaning |
+|---|---|
+| `pipe_ref`, `connector_keys`, `metric_key`, `location_key`, `instance_keys` | The pipe |
+| `last_attempt` | When the latest recorded sync ended (ISO-8601 UTC) |
+| `last_success`, `last_failure` | When the latest successful and failed syncs ended, or `null` |
+| `success`, `message` | The latest sync's result (messages over 1,000 characters keep their start and end) |
+| `rows_inserted`, `rows_updated`, `rows_upserted` | The latest sync's row counts |
+| `duration_seconds` | How long the latest sync took |
+| `consecutive_failures` | Failed syncs since the last success; `0` after a success |
+| `source` | What ran it: `cli`, `job`, `engine` (a Pipeline or `--parents` / `--children` run), `api` (the API server) or `python` |
+| `job` | The job's name when the sync ran in a background job, else `null` |
+
+```python
+import meerschaum as mrsm
+
+pipe = mrsm.Pipe('sql:main', 'weather', instance='sql:local')
+pipe.get_sync_status()
+# {'pipe_ref': 'sql:local|sql:main|weather|None', 'success': True, 'consecutive_failures': 0,
+#  'last_success': '2026-10-27T14:02:11.418237+00:00', 'rows_inserted': 24, 'source': 'job',
+#  'job': 'weather-sync', ...}
+
+statuses = mrsm.get_sync_statuses('sql:local')   # {pipe_ref: status} for every recorded pipe
+failing = [s for s in statuses.values() if s['consecutive_failures'] > 0]
+```
+
+`pipe.get_sync_status()` is `None` for a pipe whose syncs were never recorded. Over HTTP, `GET /engine/sync-status` (scope `pipes:read`) answers `{"success": true, "message": ..., "statuses": [...]}`, or one pipe's with `?pipe_ref=`; an `api:` client posts its own outcomes to `POST /engine/sync-status` (scope `pipes:write`), so a source that fails on the client is recorded on the server too, and the server records the syncs posted to it by older clients itself. The server keys the rows with its own instance (`sql:main|...`); the client reads them under its `api:` keys. The row counts of a sync to an `api:` instance are the server's, summed over the chunks the client posted.
+
+On the command line, `mrsm show pipes` ends with one line for each selected pipe whose latest sync failed, and prints nothing extra while they all succeed:
+
+```
+Pipe('sql:main', 'rollup', 'home') failed its last 3 syncs (latest 2026-10-27 07:39:35 UTC): no such table: raw
+```
+
+**Write rate.** Successes of one pipe are written at most every 5 seconds: a success inside that window is held and written when it ends, so a busy `--listen` job costs one write per pipe every few seconds. Failures, and the first success after a failure, are written at once. Each write reads the pipe's row first and then upserts it (one read, one write), so the failure count stays right when several processes sync the same pipe; outcomes that come in while a write runs go out together in the next one.
+
+**Never in the way.** A sync never waits for its status: the writes run in the background, one at a time per pipe, each bounded to a few seconds, and errors are logged at debug level. A read in the same process (`pipe.get_sync_status()`, `mrsm.get_sync_statuses()`, the API server's `GET /engine/sync-status`) first writes what the process still holds for the pipes it reads, so it always sees the latest sync, held successes included. A process writes what it holds before it exits: the command line and its jobs, the API server when it stops, and Python scripts (with `atexit`); only a process that is killed loses a held success, and the success before it is already stored.
+
+**What is not recorded.** Internal (`mrsm`) and temporary pipes have no status. A Pipeline node that never ran because another process held the pipe's lease (it was syncing the pipe, and records that sync itself) records nothing; its node row still says why it failed.
+
+**Forgetting.** Dropping, deleting or fully clearing a pipe forgets its status, like the rest of its engine state: what the process still held or queued for the pipe is dropped first, and a write in progress finishes before the row is cleared, so the status never comes back on its own. A held success whose pipe another process removed within the 5 seconds is dropped as well.
 
 ## ⚙️ Settings
 
@@ -128,6 +181,6 @@ system:
 
 ## 💸 What it costs
 
-The write path is deliberately small. Per user sync the engine adds **one ledger insert** (before the data commit, parents only) and **one cursor upsert** (after the sync succeeds; a single statement for all of a node's edges). State pipes are written without existence checks or dtype enforcement, and ledger entries and events are batched. Reads and metadata queries are not counted in that budget.
+The write path is deliberately small. Per user sync the engine adds **one ledger insert** (before the data commit, parents only) and **one cursor upsert** (after the sync succeeds; a single statement for all of a node's edges). State pipes are written without existence checks or dtype enforcement, and ledger entries and events are batched. Reads and metadata queries are not counted in that budget. The [sync status](#sync-status) adds one read and one upsert per recorded sync, written in the background after the sync returns (outside the data's transaction), with successes written at most every 5 seconds per pipe.
 
 **Event history.** With the default `events: all`, a node that syncs one chunk writes about 6 event rows (`node_planned`, `node_started`, `chunk_started`, `chunk_finished`, `watermark_advanced`, `node_finished`; about 1.5 KB of payload) instead of 3 with `events: nodes` (about 0.7 KB), and each further chunk adds 2 rows (about 0.6 KB); every run adds `run_started` and `run_finished`. The rows are written in the same batches (one insert per `state_flush_ms`), and retention removes them with the rest of the run's history after `run_history_days`. For scale: a `--loop` job syncing 50 single-chunk pipes every minute keeps about 430,000 event rows a day (roughly 100 MB of payload before indexes) and so about 13 million rows at the default 30 days of retention. For such high-frequency loops, set `events: nodes` (the console and the event stream then show node transitions without chunk progress) or shorten `run_history_days`.

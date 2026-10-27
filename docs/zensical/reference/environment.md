@@ -24,10 +24,13 @@ All Meerschaum environment variables begin with the prefix `MRSM_`. The most com
 | `MRSM_RUNTIME` | Marks a special runtime (e.g. `docker`). | _(unset)_ |
 | `MRSM_NO_AUTO_INSTALL` | Disable every implicit package installation (imports, dependency checks, `uv`/`pip` bootstraps). | _(unset)_ |
 | `MRSM_NOASK` / `MRSM_NONINTERACTIVE` | Disable interactive prompts (assume defaults). | _(unset)_ |
+| `MRSM_ALLOW_PROTECTED` | `1` allows writes to connectors marked `protected: true` for this process and its children (like `--allow-protected`). | _(unset)_ |
 | `MRSM_DUCKDB_LIB` | Path to DuckDB's shared library; explicitly selects the native C API and prevents mixed Python SQLAlchemy access. | _(unset: Python driver when installed; otherwise native library lookup)_ |
 | `MRSM_BIN` | Run a standalone `mrsm` binary instead of the in-process CLI of the Python package. | _(unset)_ |
 | `MRSM_PYTHON` | The Python interpreter the binary runs plugin workers and `upgrade meerschaum` with. | _(auto-detected)_ |
 | `MRSM_WORKER_STARTUP_TIMEOUT` | Seconds a Python worker may take to connect and say hello before it is killed and refused (for 10 s only). | `60` |
+| `NO_COLOR` | Any non-empty value prints plain text, without colors or other styles (see [Colors and Plain Output](/reference/actions/#colors-and-plain-output)). | _(unset)_ |
+| `FORCE_COLOR` | Style the output even when it does not go to a terminal (any value but `0`, `false` or `no`). | _(unset: styles only on a terminal and in jobs)_ |
 
 !!! tip "Inspecting your environment"
     Run `mrsm show environment` to list every currently set `MRSM_` variable. Run `mrsm show config` to inspect the resolved configuration after all patches and connectors have been applied.
@@ -89,7 +92,7 @@ MRSM_VENVS_DIR='venvs/' mrsm show plugins
 
 ## **`MRSM_<TYPE>_<LABEL>`**
 
-You can temporarily register new connectors in a variable in the form `MRSM_<TYPE>_<LABEL>`, where `<TYPE>` is the connector type, and `<LABEL>` is the label for the connector (converted to lower case). Check here for more information about [environment connectors](/reference/connectors/#-environment-connectors), but in a nutshell, set the variable to the [URI](https://en.wikipedia.org/wiki/Uniform_Resource_Identifier) of your connector.
+You can temporarily register new connectors in a variable in the form `MRSM_<TYPE>_<LABEL>`, where `<TYPE>` is the connector type, and `<LABEL>` is the label for the connector (converted to lower case). Check here for more information about [environment connectors](/reference/connectors/#environment-connectors), but in a nutshell, set the variable to the [URI](https://en.wikipedia.org/wiki/Uniform_Resource_Identifier) of your connector.
 
 ```bash
 MRSM_SQL_FOO=sqlite:////tmp/temp.db \
@@ -164,6 +167,19 @@ Set either of these to disable interactive prompts. When set, Meerschaum assumes
 ```bash
 MRSM_NOASK=1 mrsm bootstrap pipes
 ```
+
+## **`MRSM_ALLOW_PROTECTED`**
+
+Connectors marked `protected: true` refuse every change (see
+[Protected Connectors](/reference/connectors/#protected-connectors)). Set
+`MRSM_ALLOW_PROTECTED=1` to allow writes for a process and the processes it starts, for example
+a server whose instance is protected:
+
+```bash
+MRSM_ALLOW_PROTECTED=1 mrsm start api
+```
+
+For one command, `--allow-protected` does the same. `-y` / `--yes` never does.
 
 ## **`MRSM_NO_AUTO_INSTALL`**
 

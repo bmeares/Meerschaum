@@ -173,6 +173,74 @@ You can modify the backtrack interval under the key `fetch:backtrack_minutes`:
     )
     ```
 
+## Replacing a window
+
+A sync normally merges: new rows are inserted, changed rows updated, and rows missing from the
+new data are left alone. When the new data is the whole truth for a time range (a corrected
+day of readings, a rollup recomputed from its source), replace that range instead: the rows of
+`[begin, end)` are deleted and the new rows inserted **in one transaction**, so readers never
+see the window half-written and a failed write leaves the old rows in place.
+
+=== "Python"
+
+    ```python
+    from datetime import datetime
+
+    pipe.sync(
+        df,
+        begin=datetime(2024, 1, 1),
+        end=datetime(2024, 1, 2),
+        replace=True,
+    )
+    #  🎉 Replaced 96 rows with 94 rows.
+    ```
+
+=== "Bash"
+
+    ```bash
+    mrsm sync pipes -c sql:main -m weather \
+      --begin 2024-01-01 --end 2024-01-02 --replace
+    ```
+
+=== "`mrsm edit pipes`"
+
+    ```yaml
+    fetch:
+      replace: true
+    ```
+
+How the window is chosen:
+
+- **With data** (`pipe.sync(df, replace=True)`): `begin` and `end` are the window. A bound you do
+  not pass comes from the data: `begin` is the earliest datetime in `df` and `end` just after the
+  latest, so every row you pass is inside. Rows outside `[begin, end)` are not written (the message
+  says how many were skipped). `params` limits the window to the matching rows.
+- **Without data** (a fetch): the window is the fetch's own `[begin, end)`, by default the sync
+  time minus the [backtrack interval](#backtracking) onward. Set
+  [`fetch: {replace: true}`](/reference/pipes/parameters/#fetchreplace) to replace every fetched
+  window, chunked syncs and [Pipelines](/reference/pipelines/) chunks included (each chunk
+  replaces its own window). Rows the source returns outside the window are not written. The first
+  sync, into a table that does not exist yet, has nothing to replace: its chunks are synced one by
+  one like any fetch.
+- **An empty frame** with `begin` and `end` clears the window. With neither, the sync is refused,
+  so an empty frame never clears a table by accident.
+- **A pipe without a `datetime` column** has one window: the whole table (matching `params`).
+
+The connectors' own `sync_pipe(pipe, df, replace=True, begin=..., end=..., params=...)` (SQL,
+Valkey, `api:`) and the API's `POST /pipes/{connector}/{metric}/{location}/data?replace=true`
+follow the same rules: a bound that is not given comes from the rows (`begin=None` over HTTP is
+no bound on that side), and the API answers `400` for an empty body without `begin` and `end`.
+
+In a [Pipeline](/reference/pipelines/), a replacing sync marks its whole window as changed, so its
+children re-sync the window and drop the rows it deleted. A child's window ends at its parents'
+latest data, so rows newer than a parent's new latest row stay in the child until the child is
+rebuilt or cleared.
+
+!!! note "Instances"
+    SQL instances delete and insert in one transaction. Valkey has no transactions: it clears the
+    window, then writes the rows. `api:` instances pass the window to the server, which replaces it
+    in one transaction on its own instance.
+
 ## Verification Syncs
 
 Occasionally it may be necessary to perform a more expensive verification sync across the pipe's entire interval. To do so, run `verify pipes` or `sync pipes --verify`:

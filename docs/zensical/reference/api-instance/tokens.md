@@ -35,19 +35,19 @@ This will prompt you for the owner of the token and print the Client ID, Client 
 
 ## 🌐 Web UI
 
-The easiest way to can manage tokens is on the [Web Console](/reference/api-instance/web-console). Click the Meerschaum logo and navigate to `Settings` > `Tokens`. From here, you can:
+The easiest way to can manage tokens is on the [Web Console](/reference/api-instance/web-console). Open the user menu (your username, at the top right) and choose **Tokens**. From here, you can:
 
--   Create new tokens using the `+` button.
+-   Create new tokens with **New token**.
 -   Edit, invalidate, or delete existing tokens from the context menu (`⠇`).
 
-When you create a new token, a form prompts you for a label, expiration date, and scopes. The **Grant all scopes (`*`, including custom and future scopes)** switch is on by default for an administrator or a holder of `*` (for anyone else the form starts from your own scopes and the switch is off); turn it off to pick built-in scopes from a checklist and to type custom (plugin) scopes. The edit form of a token that holds `*` shows the switch on, and saving it keeps `*`. After registration, you **must** copy the generated credentials, as the secret will not be shown again.
+When you create a new token, a form prompts you for a label, expiration date, and scopes. The **Grant all scopes, including custom and future ones** switch (the scope `*`) is on by default for an administrator or a holder of `*` (for anyone else the form starts from your own scopes and the switch is off); turn it off to pick built-in scopes from a checklist and to type custom (plugin) scopes. The edit form of a token that holds `*` shows the switch on, and saving it keeps `*`. After registration, you **must** copy the generated credentials, as the secret will not be shown again.
 
 <img src="/assets/screenshots/web-console-tokens.png" alt="Web Console tokens page">
 
 ---
 ## 🐍 Python API
 
-In addition to the CLI and Web UI, you can manage tokens directly on [instance connectors](/reference/connector/instance-connectors).
+In addition to the CLI and Web UI, you can manage tokens directly on [instance connectors](/reference/connectors/instance-connectors/).
 
 ### Creating a Token
 

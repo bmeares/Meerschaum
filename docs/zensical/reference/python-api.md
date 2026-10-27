@@ -99,6 +99,16 @@ df = pipe.get_data(params={'station': '_KGMU'})           # != 'KGMU'
 
 See [`params` Filtering and Negation](/reference/pipes/reading/#params-filtering-and-negation) for the complete table.
 
+`begin` is inclusive and `end` is exclusive (`begin <= datetime < end`). A keyword argument that `get_data()` does not know is ignored, as it always was, but now with a warning that suggests what you probably meant:
+
+```python
+df = pipe.get_data(start='2024-01-01')
+# UserWarning: Pipe('plugin:noaa', 'weather', 'atl').get_data() ignored the unknown
+# keyword argument 'start' (did you mean 'begin'?).
+```
+
+Keywords the instance reads itself never warn: a SQL instance's `begin_add_minutes`, `end_add_minutes`, `replace_nulls` and `skip_existing_cols_check`, and whatever a custom instance connector's `get_pipe_data()` accepts. `pipe.get_backtrack_data()` warns the same way (`minutes=` suggests `backtrack_minutes`); there a custom instance connector's own `get_backtrack_data()` is what reads the extra keywords, if it has one.
+
 ## Finding Pipes
 
 Use [`mrsm.get_pipes()`](https://docs.meerschaum.io/meerschaum.html#get_pipes) to query the pipes registered on an instance. It returns a nested dictionary by default, or a flat list with `as_list=True`.
@@ -135,6 +145,42 @@ conn = mrsm.get_connector('sql:main')
 df = conn.read("SELECT * FROM my_table")
 ```
 
+## Pipelines
+
+A [Pipeline](/reference/pipelines/) is a set of member pipes synced in dependency order. Build one from pipes, save it under a name on its instance, and load it again by name:
+
+```python
+import meerschaum as mrsm
+
+raw = mrsm.Pipe('sql:src', 'raw', instance='sql:main')
+daily = mrsm.Pipe('sql:main', 'daily', instance='sql:main')
+
+pipeline = mrsm.Pipeline([raw, daily])
+print(pipeline.plan())             # a dry run: what would sync, and why (registers nothing)
+run = pipeline.sync()              # registers members that are new, then syncs in order
+print(run.inserted, run.updated, run.duration)
+
+success, msg = pipeline.save('daily-totals')     # a SuccessTuple
+
+pipeline = mrsm.Pipeline('daily-totals')         # load the saved Pipeline
+pipeline.sync(workers=4)
+```
+
+| Call | What it does |
+|---|---|
+| `mrsm.Pipeline('name')` | Load a saved Pipeline (from `instance=`, default the configured instance). |
+| `mrsm.Pipeline([pipe, ...])`, `mrsm.Pipeline(tags=[...])` | A new selection of member pipes. |
+| `mrsm.Pipeline(pipe, parents=True)` | Also include every ancestor (or `children=True` every descendant). |
+| `mrsm.get_pipelines()` | Every saved Pipeline on an instance. |
+| `pipeline.plan()` | The plan: one row per pipe with the action and its reason. |
+| `pipeline.sync()` | Run it; returns a `RunResult` (a `SuccessTuple` with `run_id`, `inserted`, `updated`, `duration`). |
+| `pipeline.save(name)` | Save the members; refuses to replace a different saved Pipeline unless `overwrite=True`. |
+| `pipeline.exists()`, `delete()`, `rename(new)`, `copy(new)` | Manage the saved Pipeline (deleting keeps its member pipes and data). |
+| `pipeline.schedule('every 10 minutes')` | Start a background job that syncs it on a schedule; returns the `Job`. |
+| `pipeline.get_runs()`, `mrsm.get_runs()` | The run history, newest first. |
+
+See [Pipelines](/reference/pipelines/#python) for the details.
+
 ## CLI ↔ Python Mapping
 
 | Command | Python equivalent |
@@ -147,6 +193,14 @@ df = conn.read("SELECT * FROM my_table")
 | `mrsm drop pipe` | `pipe.drop()` |
 | `mrsm delete pipe` | `pipe.delete()` |
 | `mrsm edit pipes` | `pipe.edit()` |
+| `mrsm sync pipes --parents` | `pipe.sync(parents=True)` |
+| `mrsm plan pipes` | `mrsm.Pipeline(pipe).plan(expected=True)` |
+| `mrsm show pipelines` | `mrsm.get_pipelines()` |
+| `mrsm sync pipelines daily` | `mrsm.Pipeline('daily').sync()` |
+| `mrsm analyze pipelines daily` | `mrsm.Pipeline('daily').analyze()` |
+| `mrsm copy pipelines daily daily-copy` | `mrsm.Pipeline('daily').copy('daily-copy')` |
+| `mrsm delete pipelines daily` | `mrsm.Pipeline('daily').delete()` |
+| `mrsm show runs` | `mrsm.get_runs()` |
 
 ## `SuccessTuple` Convention
 

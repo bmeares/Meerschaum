@@ -4,7 +4,9 @@ Use `Pipe.get_data()` and its convenience wrappers to read rows from the instanc
 
 ### `get_data()`
 
-Returns a `pd.DataFrame`. Accepts `begin`, `end`, `params`, `select_columns`, `omit_columns`, `limit`, and `order` to filter and shape the result.
+Returns a `pd.DataFrame`. Accepts `begin`, `end`, `params`, `select_columns`, `omit_columns`, `limit`, and `order` to filter and shape the result. `begin` is inclusive and `end` is exclusive (`begin <= datetime < end`).
+
+A keyword argument `get_data()` does not know (`start=`, `where=`, ...) is ignored with a warning that suggests the one you probably meant (`begin`, `params`, ...). Keywords the instance reads itself, such as a SQL instance's `begin_add_minutes` or a custom instance connector's own, never warn. `get_backtrack_data()` warns the same way.
 
 ```python
 import meerschaum as mrsm
@@ -39,13 +41,49 @@ polars_df = pipe.get_data(as_polars=True)
 ```
 
 Pass `as_polars=True` with `as_chunks=True` to yield Polars DataFrames. It cannot be combined
-with `as_docs=True` or `as_dask=True`.
+with `as_docs=True`. (`as_dask=True` is not supported: it raises a `TypeError`; read large tables
+in chunks instead.)
 
 **Chunked iteration** — pass `as_chunks=True` (alias `as_iterator=True`) to get a generator of DataFrames, each covering a time-bound slice. Useful for large datasets that don't fit in memory:
 
 ```python
 for chunk_df in pipe.get_data(as_chunks=True):
     process(chunk_df)
+```
+
+**Errors** — a pipe whose table does not exist yet (never synced) returns `None`. When the
+instance cannot be read (an unreachable server, a permission error), `get_data()` raises the
+database's error; on an `api:` instance, an API server that cannot be reached or fails the read
+(`500`) raises too. Pass `silent=True` to get `None` instead:
+
+```python
+df = pipe.get_data(silent=True)
+```
+
+`get_rowcount()` and `get_sync_time()` behave the same way (0 and `None` for a never-synced
+pipe, `silent=True` for 0 / `None` on errors).
+
+### `get_rowcount()`
+
+The number of rows, optionally between `begin` (inclusive) and `end` (exclusive) and filtered by
+`params`:
+
+```python
+pipe.get_rowcount()
+# 1250004
+pipe.get_rowcount(begin='2024-01-01', params={'station': 'KGMU'})
+# 8760
+```
+
+On large tables, `estimate=True` asks the database's catalog statistics instead of counting
+(instant; close to the real count, since the statistics trail recent writes): PostgreSQL and
+PostGIS (`pg_class.reltuples`), TimescaleDB (`approximate_row_count()`), MySQL / MariaDB,
+MSSQL and Oracle. Small tables (under 100,000 rows), SQLite and DuckDB are counted exactly, as
+are counts with `begin`, `end`, `params` or `remote`:
+
+```python
+pipe.get_rowcount(estimate=True)
+# 1249870
 ```
 
 ### `get_docs()`

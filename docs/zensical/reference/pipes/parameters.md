@@ -133,7 +133,7 @@ See [`columns`](#columns) for the available index roles and [dtypes](/reference/
 | `mixed_numerics` | Control int→float→numeric coercion | [`mixed_numerics`](#mixed_numerics) |
 | `precision` | Datetime precision unit | [`precision`](#precision) |
 | `indices` | Additional non-unique performance indices | [`indices`](#indices) |
-| `fetch` | Source-specific fetch config (e.g. `backtrack_minutes`) | [`fetch`](#fetch) |
+| `fetch` | Source-specific fetch config (e.g. `backtrack_minutes`, `replace`) | [`fetch`](#fetch) |
 | `sql` / `query` | SQL definition for SQL-connector pipes | [`sql`, `query`](#sql-query) |
 | `reference` / `references` / `parents` / `children` | Inherit or relate other pipes' parameters | [`reference`](#reference), [`parents`](#parents) |
 | `schedule` / `min_seconds` / `retry` / `stream` | Syncing Engine: per-pipe cadence, rate limit, retries and micro-batching | [`schedule`](#schedule), [`min_seconds`](#min_seconds), [`retry`](#retry), [`stream`](#stream) |
@@ -368,6 +368,20 @@ How many minutes of overlap to request when fetching new rows ― see [Backtrack
     
 The base SQL query to be run when fetching new rows. Aliased as `sql` or `query` for convenience. This only applies to pipes with [`SQLConnectors`](/reference/connectors/sql-connectors/) as connectors.
 
+### `fetch.replace`
+
+!!! example inline end ""
+    ```yaml
+    fetch:
+      replace: true
+    ```
+
+Make every fetched window authoritative (default `false`): instead of merging the fetched rows
+into the table, each sync deletes the rows of the window it fetched (`[begin, end)`, by default the
+sync time minus the backtrack interval onward) and inserts the fetched rows, in one transaction.
+Rows that disappeared from the source within the window disappear from the pipe. Use it for
+rollups and sources that restate history. See [Replacing a window](/reference/pipes/syncing/#replacing-a-window).
+
 ---------------
 
 ## `hypertable`
@@ -407,7 +421,7 @@ mrsm partition pipes -i sql:main -m weather --chunk-minutes 10080
 
 TimescaleDB-only. By default (`True`), the [Hypercore columnstore](https://www.tigerdata.com/docs/build/columnar-storage/setup-hypercore) is enabled when the hypertable is created — the `CREATE TABLE` declares `tsdb.segmentby` / `tsdb.orderby` (resolved the same way as [`compress`](#compress)), which causes TimescaleDB to auto-create a columnstore policy that converts old chunks in the background.
 
-Set `hypercore` to `False` for a plain row-store hypertable (no columnstore, no auto-policy). Has no effect unless the pipe is a [`hypertable`](#hypertable).
+Set `hypercore` to `False` for a plain row-store hypertable (no columnstore, no auto-policy). Has no effect unless the pipe is a [`hypertable`](#hypertable). From Python, `mrsm.Pipe(..., hypercore=False)` sets it too.
 
 ---------------
 
@@ -462,6 +476,36 @@ Toggle whether a pipe will coerce mixed integer and float values into the `numer
 ## `null_indices`
 
 Toggle whether a pipe will allow null indices (default `True`). Set this to `False` for a performance improvement in situations where null index values are not expected.
+
+With `null_indices` on, a row whose index columns are `NULL` is matched like any other key: an
+[`upsert`](#upsert) updates it in place instead of inserting it again. The unique key of an
+upsert pipe is the usual one over its index columns, so Meerschaum 4.1 can still upsert into a
+table that 5.0 created.
+
+- **PostgreSQL 15 and later** (TimescaleDB and PostGIS included): new tables declare that unique
+  constraint `UNIQUE NULLS NOT DISTINCT`, so `NULL` keys are equal for every upsert.
+- **SQLite, older PostgreSQL, and tables created before 5.0.0rc15**: the unique key treats
+  `NULL`s as distinct, so the upsert matches the rows that have a `NULL` key itself: it updates
+  the ones that exist and inserts the others. Older tables need no rebuild.
+- **MySQL and MariaDB** match the keys with `<=>`.
+- **MSSQL and Oracle** `MERGE` on a `COALESCE(...)` comparison.
+
+On MySQL, MariaDB and SQLite, a batch that repeats a key keeps its last row (as
+`ON DUPLICATE KEY UPDATE` does). Where the unique key treats `NULL`s as distinct (on MySQL,
+MariaDB and PostgreSQL 14 or older), two processes that upsert the same new `NULL` key at the same
+moment can both insert it.
+
+### Null-like strings
+
+In a column declared with a text dtype (`dtypes: {name: string}`) and in a text index column
+(`columns`), the strings `'None'`, `'NA'`, `'nan'`, `'NaT'`, `'NaTz'`, `''` and `'<NA>'` are
+values: they are written as text, and `params={'code': 'NA'}` matches the text `NA` (Namibia's
+country code, a station named `None`). Only real nulls (`None`, `NaN`, `pd.NA`, `NaT`) are `NULL`.
+Python `None` matches nulls and `'_None'` matches non-nulls on every column. Other columns keep
+the older rule, where those strings mean `NULL`. Oracle stores `''` as `NULL`, so there `''` is a
+null in every column (`params={'code': ''}` matches `NULL`). On Valkey instances a document's key
+is made of the text of its index values, so a `NULL` index value and the text `'None'` (or
+`'nan'`, `'<NA>'`) in the same index column are the same document there.
 
 ---------------
 
@@ -677,7 +721,7 @@ tags:
 
 Setting `upsert` to `true` enables high-performance syncs by combining inserts and updates into a single transaction.
 
-Upserts rely on unique constraints on indices and as such should be used in situations where a table's schema is fixed. See the [upsert SQL source](https://github.com/bmeares/Meerschaum/blob/main/meerschaum/utils/sql.py) for further details.
+Upserts rely on unique constraints on indices and as such should be used in situations where a table's schema is fixed. Rows whose index columns are `NULL` upsert in place too (see [`null_indices`](#null_indices)). To replace a whole window of rows instead of upserting into it, see [Replacing a window](/reference/pipes/syncing/#replacing-a-window).
 
 !!! warning
     Ensure your instance connector supports upserts before enabling `upsert` (e.g. `SQLConnector`).

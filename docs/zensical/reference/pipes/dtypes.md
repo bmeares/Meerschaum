@@ -144,6 +144,20 @@ pipe.edit()           # persist the change
 !!! warning "Changing a dtype is not a backfill"
     Editing a dtype updates the metadata and affects how *future* rows are written; it does not retroactively rewrite existing rows. To rebuild a column's stored values under the new type, re-sync the historical range (e.g. `Pipe.verify()` or `sync pipes --begin ...`).
 
+To change the table's columns to match the edited dtypes (add the declared columns it lacks,
+widen `int` to `bigint` or `float`, retype a `text` column as `json`, ...), run
+[`verify schema`](/reference/actions/#verify-schema): it prints the plan and asks before
+changing anything, and never drops a column. Static pipes are included.
+
+```bash
+mrsm verify schema -c demo -m dtypes
+```
+
+```python
+success, plan = pipe.verify_schema()             # the plan only
+success, msg = pipe.verify_schema(apply=True)    # apply it
+```
+
 ## `json` columns cannot be index columns
 
 A `json` column holds `dict` or `list` values. Syncing sorts and deduplicates on the [index columns](/reference/pipes/parameters/#columns) in Pandas, and containers are unhashable there — so a `json` column in `columns` is refused when the pipe is registered, edited, or synced:

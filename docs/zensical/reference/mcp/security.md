@@ -16,6 +16,8 @@ Each tool declares the scope it needs. Tools your token does not cover are **omi
 
 See the [tool reference](tools.md#scopes) for the generated scope-to-tool matrix.
 
+The tools for saved Pipelines, runs, jobs and connectors follow their HTTP routes further: when the server does not serve a route group (`api:permissions:routes`: `pipelines`, `engine`, `jobs`, `connectors`), the matching tools are hidden and refused too. `sync_pipeline` needs `pipes:write` and `jobs:execute`, and a user who is not an administrator may start a run only when the server lets users run actions (`api:permissions:actions:non_admin`) and every instance the Pipeline touches is one they may use. `list_jobs` and `get_job_logs` show a console execution only to the user who started it and to administrators, like the jobs routes. The pipe tools never reach the internal `mrsm` pipes (saved Pipelines' registrations, the engine's state): use the Pipelines tools.
+
 A token with the `*` scope can call everything. Mint narrow tokens instead:
 
 ```bash
@@ -77,6 +79,7 @@ Do not grant `actions:execute` to a token you would not grant a shell to. If an 
 - mutating or filesystem functions inside an otherwise ordinary `SELECT` (`dblink_exec()`, `lo_export()`, `pg_read_file()`, `xp_cmdshell`)
 - MySQL executable comments (`/*! … */`), which the server runs as SQL
 - any query naming a protected instance table (`mrsm_users`, `mrsm_tokens`, `mrsm_pipes`, `mrsm_plugins`)
+- over HTTP, any query whose text names one of Meerschaum's internal tables anywhere, quoted or inside a string (`"mrsm_users"`, `[mrsm_tokens]`, any `mrsm_*` or `_mrsm_*` name), names a function that runs query text or reads tables named in text (`query_to_xml()`, `database_to_xml()`, `ts_stat()`, `dblink()`, Oracle's `DBMS_XMLGEN.GETXML()` and `XMLQUERY`, DuckDB's `query()`, also with a comment before its arguments), or uses a `U&"..."` escape
 
 Comments, string literals, and quoted identifiers are stripped in a single quote-aware pass, so `WHERE note = 'please delete'` is fine while neither `-- ; DROP TABLE u` nor `SELECT '--' ; DROP TABLE u` is a bypass. Results are read one bounded chunk at a time, so an unqualified `SELECT * FROM big_table` cannot exhaust the server's memory.
 

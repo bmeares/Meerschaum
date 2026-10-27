@@ -1,9 +1,9 @@
 # ⏯️ Actions
 
 !!! note ""
-    To see available actions, run `help` or `show actions`.
+    Run `mrsm help` (or `mrsm -h`) to see every action with a one-line description, then the options.
 
-    Add `-h` to a command or preface with `show help` to learn more.
+    Add `-h` to a command (`mrsm sync pipes -h`) or run `mrsm help sync pipes` to learn more about one action.
 
 !!! tip inline end "Custom actions"
     Use the [`#!python @make_action` decorator](/reference/plugins/writing-plugins/#the-make_action-decorator) to make your scripts into custom actions.
@@ -38,16 +38,61 @@ Or run actions directly from the command line:
 $ mrsm show pipes
 ```
 
+## Getting Help
+
+`mrsm help` (the same as `mrsm -h`, `mrsm show help`, or `help` in the shell) starts with the actions, grouped by what they are for, each with a one-line description. The actions your plugins add follow in a **Plugins** group (with their subcommands), and the options come last, by group (the graph-run flags `--parents`, `--children`, `--resume`, `--run-id` and `--chunk-pipelining` are under **Pipeline options**).
+
+```text
+$ mrsm help
+usage: mrsm [actions] {options}
+
+Create and Build Pipes with Meerschaum.
+
+Create:
+  bootstrap    Create pipes, connectors, jobs, Pipelines or plugins step by step.
+  register     Register pipes, connectors, Pipelines, plugins, tokens or users.
+  copy         Copy connectors, pipes or Pipelines.
+
+Sync:
+  sync         Fetch and sync new data into pipes or Pipelines.
+  plan         Preview what a sync would do, without syncing.
+  verify       Verify pipes' data, schemas and row counts, or packages, plugins and venvs.
+  watch        Watch jobs, logs or runs live, full-screen (`show` prints once).
+
+...
+
+Run `mrsm <action> -h` for an action's details, e.g. `mrsm sync pipes -h`.
+
+Actions options:
+  ...
+```
+
+Add `-h` to any action (`mrsm sync pipes -h`, `mrsm show -h`) or name it after `help` (`mrsm help sync pipes`) for its details. For a plugin's action, `mrsm <action> -h` prints its docstring and lists its subcommands: a plugin that defines `weather_wait` and `weather_status` shows them under `mrsm weather -h` as `wait` and `status`. `mrsm show actions` lists every action name.
+
+Help starts no Python: it lists the plugin actions that the last command which loaded the plugins recorded. When a plugin changed since (or on a new root), help says so on its last line; run `mrsm reload` (or any command that loads plugins) and ask again.
+
+## Colors and Plain Output
+
+Output is styled (colors, bold) only when it goes to a terminal. Redirected to a file or piped into another program (`mrsm show pipes > pipes.txt`, `mrsm show jobs | grep running`), it is plain text without escape sequences. Standard output and standard error decide separately: warnings and `--debug` lines go to stderr, so `mrsm sync pipes --debug 2> debug.log` writes a plain log while the terminal keeps its colors, and the other way around. Jobs keep their colors, so their logs are colored in the web console and in `mrsm show logs`; the steps of an action chain run with `--timeout-seconds` are styled like the rest of the output.
+
+| Setting | Effect |
+|---|---|
+| `NO_COLOR` (any non-empty value) | Plain text everywhere, also in a terminal. The full-screen views still work, without colors. |
+| `FORCE_COLOR` (any value but `0`, `false` or `no`) | Styled output even when it is not going to a terminal. |
+| `formatting:ansi: false` (`mrsm edit config`) | Plain text, like `NO_COLOR`. |
+
+The same rules apply to Python code that prints through `meerschaum.utils.formatting` (`mrsm.pprint`, `info`, `warn`), so plugins and scripts follow them too (a Jupyter notebook counts as a terminal).
+
 ## Chaining Actions
 
-Join actions with `+` to run them in a single process (similar to `&&` in `bash`):
+Join actions with `+` to run them as one **action chain**, in a single process (similar to `&&` in `bash`): each step runs after the previous one succeeds.
 
 ```bash
 sync pipes -i sql:local + \
 sync pipes -i sql:main
 ```
 
-Flags added after `:` apply to the entire pipeline:
+Flags added after `:` apply to the whole chain:
 
 ```bash
 show version + show arguments : --loop
@@ -58,24 +103,39 @@ sync pipes -c sql:main : -s 'daily starting 00:00' -d
 
 > You can escape `:` with `::`, e.g. `mrsm echo ::` will output `:`.
 
-Here are some useful pipeline flags:
+Here are some useful chain flags:
 
 - `--loop`  
-  Run the pipeline commands continuously.
+  Run the chain continuously.
 - `--min-seconds` (default `1`)  
   How many seconds to sleep between laps (if `--loop` or `x3`).
 - `-s`, `--schedule`, `--cron`  
-  Execute the pipeline on a [schedule](/reference/background-jobs/#-schedules).
+  Run the chain on a [schedule](/reference/background-jobs/#schedules).
 - `-d`, `--daemon`  
-  Create a background job to run the pipeline.
+  Create a background job which runs the chain.
 - `x3`, `3`  
-  Execute the pipeline a specific number of times.
+  Run the chain a specific number of times.
 
 Note that you can add `:` to single commands as well:
 
 ```bash
 mrsm show version : x3
 ```
+
+!!! note "Action chains and Pipelines"
+
+    An action chain is a one-off sequence of commands. A [Pipeline](/reference/pipelines/) is a saved selection of pipes the Syncing Engine runs in dependency order: `start pipeline daily` runs the Pipeline `daily` in the background. A chain that runs as a job is stored as the internal action `chain` (Meerschaum 4.1 stored it as `start pipeline ... -P {...}`; those jobs keep working), and `show jobs` prints it as you typed it.
+
+## Repeating Any Action
+
+Add `--loop` to any action to repeat it until it is stopped, `--min-seconds` apart (default 1), like `sync pipes --loop`. A failed run is tried again after a pause that grows while it keeps failing, up to an hour; `stop jobs` (or Ctrl-C) ends the loop after the current run. Actions from plugins repeat the same way, so a plugin action does not need its own `while True` loop: each run calls it once, with `loop=False`.
+
+```bash
+mrsm show pipes --loop --min-seconds 300
+mrsm my_plugin_action --loop --min-seconds 60 -d
+```
+
+Actions that already loop or start jobs (`sync`, `verify` and `deduplicate pipes`, `sync pipelines`, `start job ...`, `-d`, the servers) keep their own behavior. So does a plugin action whose function has a `loop` parameter (`def poll(loop=False, **kwargs)`, the 4.1 way): it receives `loop=True` and repeats by itself. Remove the parameter and the loop to let Meerschaum repeat it, which also records each run for [job health](/reference/background-jobs/#job-health).
 
 ## Daemonize Actions
 
@@ -85,7 +145,7 @@ Add `-d` to any action to run it as a [background job](/reference/background-job
 mrsm sync pipes -s 'every 3 hours' -d
 ```
 
-This works well when [chaining actions](#chaining-actions) to create a pipeline job:
+This works well when [chaining actions](#chaining-actions) to run a chain as a job:
 
 ```bash
 sync pipes -i sql:local + \
@@ -110,7 +170,7 @@ show pipes            show plugins            show jobs
 delete pipes          delete connectors       delete jobs
 ```
 
-Most subactions accept the standard pipe selectors (`-c`/`--connector-keys`, `-m`/`--metric-keys`, `-l`/`--location-keys`, `-t`/`--tags`, `-i`/`--instance`) so you can scope operations to a subset of pipes. Run `mrsm <action> --help` (or `show help <action>`) to see the full list of flags for any action.
+Most subactions accept the standard pipe selectors (`-c`/`--connector-keys`, `-m`/`--metric-keys`, `-l`/`--location-keys`, `-t`/`--tags`, `-i`/`--instance`) so you can scope operations to a subset of pipes. Run `mrsm <action> --help` (or `mrsm help <action>`) to see the full list of flags for any action.
 
 !!! tip ""
     Every action also has a Python equivalent. See the [API reference at docs.meerschaum.io](https://docs.meerschaum.io) for programmatic usage (e.g. `mrsm.Pipe.sync()`, `mrsm.actions.actions['sync']`).
@@ -200,10 +260,60 @@ Move data into pipes and manage what's already stored.
 | Action | Description |
 |---|---|
 | `sync` | Fetch from sources and sync new/changed rows into pipes. |
-| `verify` | Re-sync a historical range in chunks to backfill gaps and reconcile mismatches; also verifies packages. |
+| `verify` | Re-sync a historical range in chunks to backfill gaps and reconcile mismatches; `verify schema` fixes tables whose columns differ from their dtypes; also verifies packages. |
 | `clear` | Remove rows from pipes within a datetime window (or clear the screen). |
 | `flush` | Drop and re-sync pipes or indices from scratch. |
 | `deduplicate` | Remove duplicate rows from pipes' tables, chunking across the datetime axis. |
+
+#### `verify schema`
+
+Compare each selected pipe's table with the pipe's dtypes (its `dtypes`, its `columns`
+roles and geometry notations) and fix the differences. The plan prints as a table per pipe,
+then `verify schema` asks before changing anything:
+
+```bash
+mrsm verify schema -c plugin:noaa -m weather
+#  💬 The table "plugin_noaa_weather" of Pipe('plugin:noaa', 'weather') differs from its dtypes:
+#     Column       Now        New                                Change
+#     -----------  ---------  ---------------------------------  -----------------------
+#     station_id   INTEGER    BIGINT (int)                       widen
+#     temperature  INTEGER    DOUBLE PRECISION (float)           widen
+#     humidity     (missing)  DOUBLE PRECISION (float)           add column
+#     reading_ts   TEXT       TIMESTAMPTZ (datetime64[ns, UTC])  change type (needs confirmation); USING ...
+#
+#  ❓ Apply 4 changes to the table of Pipe('plugin:noaa', 'weather')? [y/N]
+```
+
+- Added columns and safe widenings (`int` to `bigint`, `int` to `float`, `float` to `numeric`,
+  `varchar(n)` to `text`, `text` to `json`) keep every value.
+- Other type changes may fail on existing values (`'abc'` is not a number) or change them, so
+  they need confirmation. On PostgreSQL they run as `ALTER COLUMN ... TYPE ... USING ...` in one
+  statement; SQLite cannot change a column's type in place, so its table is rebuilt (the plan
+  says so).
+- A column is never dropped. Static pipes are included: their syncs never change the table, and
+  this is how their tables catch up with edited `dtypes`.
+
+| Option | Effect |
+|---|---|
+| `-y`, `--yes` | Apply every change without asking. |
+| `--noask` | Apply the safe changes only; the others are refused. |
+| `--dry-run` | Print the SQL only (nothing changes). |
+
+Some changes cannot be made in place, so the plan marks them as blocked, says what to do, and
+the other changes still apply:
+
+- A column the table is partitioned by keeps its type on PostgreSQL, PostGIS and MSSQL (tables
+  of pipes with a `datetime` column are partitioned by it there by default). A TimescaleDB
+  hypertable's time column changes only between timestamp and date types (or between integer
+  types), and a MySQL / MariaDB partitioning column only between `DATE` and `DATETIME` (or
+  between integer types). Keep the column's current type in `dtypes`, or drop the pipe and sync
+  it again to rebuild the table with the new type.
+- A TimescaleDB hypertable with compressed chunks cannot change column types (decompress it first
+  with `mrsm decompress pipes`).
+- MSSQL cannot change the type of an indexed column (drop the pipe's indices first with
+  `mrsm drop indices`, then rebuild them with `mrsm index pipes`).
+
+From Python, the same plan is `pipe.verify_schema()` (`apply=True` applies it).
 
 #### `deduplicate`
 
@@ -299,7 +409,7 @@ Inspect state and drop down to the shell, Python, or SQL.
 | `show` | Display elements: `pipes`, `data`, `columns`, `rowcounts`, `sizes`, `partitions`, `jobs`, `logs`, `config`, `version`, `plugins`, `users`, `packages`, `tags`, `connectors`, … |
 | `os` | Launch a subprocess and stream its output to stdout. |
 | `sh` | Execute system shell commands. |
-| `python` | Open a Python REPL with Meerschaum imported (or run inline Python). |
+| `python` | Open a Python REPL with Meerschaum imported, run inline Python, or run a file (`mrsm python script.py --verbose`: every word after the file name is the script's, as with `python script.py`). |
 | `sql` | Run a SQL query against a connector, or open an interactive SQL CLI. |
 
 #### `sql`
@@ -312,6 +422,10 @@ mrsm sql local table                       # SELECT * FROM table on sql:local
 mrsm sql "SELECT * FROM users WHERE id = 1"  # run a query on sql:main
 mrsm sql local exec "INSERT INTO t (id) VALUES (1)"
 ```
+
+On a [protected connector](/reference/connectors/#protected-connectors), a query runs only if
+it is one read statement (in a transaction that is rolled back), and a statement that writes is
+refused unless you pass `--allow-protected`.
 
 !!! danger "Arbitrary execution"
     `sql`, `os`, `sh`, and `python` run **arbitrary** SQL, shell commands, and Python code with the privileges of the Meerschaum process. They are intended for trusted, interactive use only — never expose them to untrusted input, and be cautious enabling them on shared or networked instances.

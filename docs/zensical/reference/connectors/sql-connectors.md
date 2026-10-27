@@ -8,7 +8,7 @@ Connector | Description | URI
 **`sql:local`** | A SQLite file within the [Meerschaum root directory](/reference/environment/#mrsm_root_dir). Because `sql:local` is contained in the root directory, it is isolated between environments. | `sqlite:///$MRSM_ROOT_DIR/sqlite/mrsm_local.db`
 **`sql:memory`** | An in-memory SQLite database. This is not persistent and is isolated per-process. | `sqlite:///:memory:`
 
-Add new connectors with [`bootstrap connectors`](/reference/connectors/#-creating-a-connector) or by setting [environment variables](/reference/connectors/#-environment-connectors).
+Add new connectors with [`bootstrap connectors`](/reference/connectors/#creating-a-connector) or by setting [environment variables](/reference/connectors/#environment-connectors).
 
 ## Supported Flavors
 
@@ -153,6 +153,8 @@ The partitioned parent is created with flavor-specific DDL when the table is fir
 | **MySQL** / **MariaDB** | `PARTITION BY RANGE COLUMNS (<dt>) (…)` — initial partitions declared inline (MySQL cannot create a zero-partition table), computed from the first sync's dataframe. | `ALTER TABLE … ADD PARTITION (… VALUES LESS THAN (hi))`, appending upward from the highest existing boundary. |
 | **MSSQL** | A `CREATE PARTITION FUNCTION … AS RANGE RIGHT FOR VALUES (…)` plus `CREATE PARTITION SCHEME` are created first; the table's clustered PK is placed on the scheme. | `ALTER PARTITION SCHEME … NEXT USED` + `ALTER PARTITION FUNCTION … SPLIT RANGE (boundary)` per new boundary. The scheme and function are dropped with the table. |
 
+The datetime column a table is partitioned by keeps its type: [`verify schema`](/reference/actions/#verify-schema) leaves a type change of it out of the plan (PostgreSQL, PostGIS and MSSQL cannot change it in place; MySQL and MariaDB only between `DATE` and `DATETIME` or between integer types) and applies the other changes.
+
 For PostgreSQL the highest partition is determined from the requested grid directly; for MySQL/MariaDB and MSSQL the connector reads the highest existing boundary (`information_schema.PARTITIONS` and `sys.partition_range_values`, respectively) and only appends partitions at or beyond it, so re-syncing an existing range adds nothing. Datetime boundary literals carry their offset on PostgreSQL (`TIMESTAMPTZ`) and are normalized to naive UTC on MySQL/MariaDB (which store datetimes timezone-naive).
 
 ### Changing the partition width
@@ -179,6 +181,32 @@ mrsm partition pipes -i sql:main -m weather --chunk-minutes 10080
 If you work closely with relational databases, you may find the `SQLConnector` very useful. See below for several handy functions that Meerschaum provides:
 
 ### [`SQLConnector`](https://docs.meerschaum.io/meerschaum/connectors.html#SQLConnector) Methods
+
+`read()`, `exec()` and `value()` raise the database's error when a query fails (a missing
+table, a syntax error, an unreachable server). Pass `silent=True` to get `None` instead, without
+a warning:
+
+```python
+conn.read('SELECT * FROM missing_table')
+# sqlalchemy.exc.OperationalError: (sqlite3.OperationalError) no such table: missing_table
+
+conn.read('SELECT * FROM missing_table', silent=True)
+# None
+```
+
+On a [protected connector](index.md#protected-connectors), `exec()` and `exec_queries()` raise
+`PermissionError` and `to_sql()` returns a failure unless writes are allowed. `read()` and
+`value()` keep reading: a read statement (`SELECT`, `WITH`, `SHOW`, `EXPLAIN`, a table name)
+runs in a transaction that is rolled back (and read-only on PostgreSQL, MySQL and MariaDB), and
+a statement that writes (`DELETE ... RETURNING`, `CREATE TABLE ... AS SELECT`, several
+statements) raises `PermissionError`:
+
+```python
+prod = mrsm.get_connector('sql:prod')  # protected: true
+prod.read('SELECT * FROM weather LIMIT 10')    # a DataFrame
+prod.value('DELETE FROM weather RETURNING id')
+# PermissionError: Refusing to execute SQL on protected instance 'sql:prod'. Pass --allow-protected (or set MRSM_ALLOW_PROTECTED=1).
+```
 
 #### [`read()`](https://docs.meerschaum.io/meerschaum/connectors.html#SQLConnector.read)
 
