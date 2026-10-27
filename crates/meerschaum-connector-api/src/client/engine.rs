@@ -1,6 +1,7 @@
-//! The `/engine/*` route family (§5.8, new in v5): engine state for API instances. Every route
-//! requires `pipes:write`. Write routes answer with a `SuccessTuple`; the lease routes with a
-//! [`LeaseResponse`].
+//! The `/engine/*` route family (§5.8, new in v5): engine state for API instances. Reads need
+//! `pipes:read`, writes `pipes:write`. Every route answers `{"success": bool, "message": str,
+//! ...}` with real status codes (a held lease is `409`); the reads below also accept the shapes
+//! of servers before 5.0.0rc15 (bare lists, `SuccessTuple` lists, `{"success": bool}` leases).
 
 use meerschaum_core::SuccessTuple;
 use meerschaum_kernel::Frame;
@@ -67,7 +68,7 @@ impl APIConnector {
         let j = self
             .get(routes::ENGINE_LEDGER, opts)
             .await?
-            .json_or_detail()?;
+            .envelope_field("entries")?;
         Ok(serde_json::from_value(j)?)
     }
 
@@ -88,7 +89,7 @@ impl APIConnector {
         if r.status == 404 {
             return Ok(None);
         }
-        let j = r.json_or_detail()?;
+        let j = r.envelope_field("state")?;
         if j.is_null() {
             return Ok(None);
         }
@@ -123,8 +124,30 @@ impl APIConnector {
         let j = self
             .get(routes::ENGINE_RUNS, opts)
             .await?
-            .json_or_detail()?;
+            .envelope_field("runs")?;
         Ok(serde_json::from_value(j)?)
+    }
+
+    /// `GET /engine/runs/{run_id}`: one run and its nodes (`None` when the server does not know
+    /// it).
+    pub async fn get_engine_run(
+        &self,
+        run_id: &str,
+    ) -> ConnectorResult<Option<(RunRecord, Vec<RunRecord>)>> {
+        let path = format!(
+            "{}/{}",
+            routes::ENGINE_RUNS,
+            crate::wire::quote_plus(run_id).replace('+', "%20")
+        );
+        let r = self.get(&path, RequestOptions::default()).await?;
+        if r.status == 404 {
+            return Ok(None);
+        }
+        let j = r.envelope()?;
+        let run: RunRecord = serde_json::from_value(j["run"].clone())?;
+        let nodes: Vec<RunRecord> =
+            serde_json::from_value(j.get("nodes").cloned().unwrap_or(serde_json::json!([])))?;
+        Ok(Some((run, nodes)))
     }
 
     /// `POST /engine/events`: append a batch of run events.
@@ -161,13 +184,12 @@ impl APIConnector {
                 },
             )
             .await?;
-        if !r.ok() {
-            return Err(ConnectorError::Http {
-                status: r.status,
-                body: r.text(),
-            });
+        // A lease another holder has (or one this holder does not hold) is `409`.
+        if r.status == 409 {
+            return Ok(false);
         }
-        let resp: LeaseResponse = serde_json::from_value(r.json()?)?;
+        let j = r.envelope()?;
+        let resp: LeaseResponse = serde_json::from_value(j)?;
         Ok(resp.success)
     }
 
@@ -199,15 +221,12 @@ impl APIConnector {
             )
             .await?;
         if r.status == 501 {
-            return Err(ConnectorError::NotImplemented(r.text()));
+            return Err(ConnectorError::NotImplemented(match r.envelope() {
+                Err(ConnectorError::Http { body, .. }) => body,
+                _ => r.text(),
+            }));
         }
-        if !r.ok() {
-            return Err(ConnectorError::Http {
-                status: r.status,
-                body: r.text(),
-            });
-        }
-        r.json()
+        r.envelope()
     }
 
     /// `POST /engine/pipes/{metric}/read`: rows of an engine state pipe, kept on the server's
@@ -225,6 +244,13 @@ impl APIConnector {
                 Some(serde_json::to_string(query)?),
             )
             .await?;
+        // `{"success": true, "message": ..., "rows": [...]}`, or a bare list (older servers).
+        let j = match j {
+            serde_json::Value::Object(mut o) if o.contains_key("rows") => {
+                o.remove("rows").unwrap_or_default()
+            }
+            other => other,
+        };
         let Some(items) = j.as_array() else {
             return Err(ConnectorError::Invalid(format!(
                 "Unexpected engine state response: {j}"
@@ -274,7 +300,13 @@ impl APIConnector {
         let j = self
             .engine_pipe_request(Method::Get, metric_key, "exists", None)
             .await?;
-        Ok(j.as_bool().unwrap_or(false))
+        Ok(match j {
+            serde_json::Value::Object(o) => o
+                .get("exists")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false),
+            other => other.as_bool().unwrap_or(false),
+        })
     }
 }
 

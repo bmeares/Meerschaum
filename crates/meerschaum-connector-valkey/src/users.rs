@@ -243,20 +243,28 @@ impl ValkeyConnector {
         }
     }
 
-    /// Return the ID for a user (`mrsm_user:username:{username}:user_id`), or `None`.
-    pub async fn valkey_get_user_id(&self, user: &User) -> Option<String> {
-        let key = get_user_key(&user.username, "user_id", true).ok()?;
-        self.get(&key).await.ok().flatten()
+    /// Return the ID for a user (`mrsm_user:username:{username}:user_id`), or `None` when it is
+    /// not registered (a username that cannot be part of a key never is).
+    ///
+    /// 5.0: a read that fails is an error. v4 answered `None`, so a caller deciding who someone
+    /// is could take a failed read for "no such user"; the user reads below do the same.
+    pub async fn valkey_get_user_id(&self, user: &User) -> ConnectorResult<Option<String>> {
+        let Ok(key) = get_user_key(&user.username, "user_id", true) else {
+            return Ok(None);
+        };
+        self.get(&key).await
     }
 
-    async fn resolved_user_id(&self, user: &User) -> String {
-        match &user.user_id {
+    /// The user's ID (`user.user_id`, else its lookup), or `"None"` when it is not registered
+    /// (v4 then reads the keys of the ID `None`, which do not exist).
+    async fn resolved_user_id(&self, user: &User) -> ConnectorResult<String> {
+        Ok(match &user.user_id {
             Some(v) if !v.is_null() => meerschaum_core::pyfmt::py_str(v),
             _ => self
                 .valkey_get_user_id(user)
-                .await
+                .await?
                 .unwrap_or_else(|| "None".into()),
-        }
+        })
     }
 
     /// Set each key, restoring the old values on failure.
@@ -317,19 +325,28 @@ impl ValkeyConnector {
         self.set_or_restore(&keys_vals, &old, "edit user").await
     }
 
-    /// Return the user's attributes (`None` if missing or invalid).
-    pub async fn valkey_get_user_attributes(&self, user: &User) -> Option<Map> {
-        let user_id = self.resolved_user_id(user).await;
-        let key = get_user_key(&user_id, "attributes", false).ok()?;
-        let s = self.get(&key).await.ok().flatten()?;
-        Value::from_json_str(&s)
-            .ok()
-            .and_then(|v| v.as_map().cloned())
+    /// Return the user's attributes (`None` if missing or not a JSON object).
+    ///
+    /// 5.0: a read that fails is an error, never `None`. A user without a `scopes` attribute
+    /// holds every scope (v4's rule), so a failed read answered as `None` granted every scope.
+    pub async fn valkey_get_user_attributes(&self, user: &User) -> ConnectorResult<Option<Map>> {
+        let user_id = self.resolved_user_id(user).await?;
+        let Ok(key) = get_user_key(&user_id, "attributes", false) else {
+            return Ok(None);
+        };
+        Ok(self.get(&key).await?.and_then(|s| {
+            Value::from_json_str(&s)
+                .ok()
+                .and_then(|v| v.as_map().cloned())
+        }))
     }
 
     /// Delete a user's keys and its row in `mrsm_users`.
     pub async fn valkey_delete_user(&self, user: &User) -> SuccessTuple {
-        let user_id = self.resolved_user_id(user).await;
+        let user_id = match self.resolved_user_id(user).await {
+            Ok(user_id) => user_id,
+            Err(e) => return SuccessTuple::fail(format!("Failed to delete user:\n{e}")),
+        };
         let users_pipe = self.valkey_users_pipe();
         let keys_vals = match Self::get_user_keys_vals(user, user.password_hash.clone(), false) {
             Ok(kv) => kv,
@@ -398,19 +415,24 @@ impl ValkeyConnector {
         Ok(users)
     }
 
-    async fn user_field(&self, user: &User, sub_key: &str) -> Option<String> {
-        let user_id = self.resolved_user_id(user).await;
-        let key = get_user_key(&user_id, sub_key, false).ok()?;
-        self.get(&key).await.ok().flatten()
+    async fn user_field(&self, user: &User, sub_key: &str) -> ConnectorResult<Option<String>> {
+        let user_id = self.resolved_user_id(user).await?;
+        let Ok(key) = get_user_key(&user_id, sub_key, false) else {
+            return Ok(None);
+        };
+        self.get(&key).await
     }
 
-    /// Return the user's password hash.
-    pub async fn valkey_get_user_password_hash(&self, user: &User) -> Option<String> {
+    /// Return the user's password hash (`None` if missing; a failed read is an error).
+    pub async fn valkey_get_user_password_hash(
+        &self,
+        user: &User,
+    ) -> ConnectorResult<Option<String>> {
         self.user_field(user, "password_hash").await
     }
 
-    /// Return the user's type.
-    pub async fn valkey_get_user_type(&self, user: &User) -> Option<String> {
+    /// Return the user's type (`None` if missing; a failed read is an error).
+    pub async fn valkey_get_user_type(&self, user: &User) -> ConnectorResult<Option<String>> {
         self.user_field(user, "type").await
     }
 

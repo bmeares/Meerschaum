@@ -23,7 +23,6 @@ use crate::pipe::{ChunkInterval, SqlPipe, str_map};
 use crate::queries::cte::{ColsToSelect, format_cte_subquery, wrap_query_with_cte};
 use crate::queries::metadef::get_pipe_query;
 use crate::queries::table::{IndexDoc, get_create_table_query, get_rename_table_queries};
-use crate::where_clause::build_where;
 
 use super::values::{coerce_bound, date_arg, sync_time_from_sql};
 use super::{SqlConnector, be, reflect};
@@ -333,6 +332,32 @@ impl SqlConnector {
         }
     }
 
+    /// [`pipe_state`](SqlConnector::pipe_state) for the reads `Pipe` methods make
+    /// (`get_data`, `get_rowcount`, `get_sync_time`): a database that cannot be asked whether
+    /// the table exists is an error, not a missing table. A missing table is still `exists:
+    /// false`.
+    pub async fn pipe_state_checked(&self, sp: &SqlPipe) -> ConnectorResult<PipeState> {
+        let schema = self.get_pipe_schema(sp);
+        let exists = self
+            .table_exists_checked(&sp.target, schema.as_deref())
+            .await?;
+        let cols_types = if !exists {
+            IndexMap::new()
+        } else if reflect::uses_reflection(self.flavor) {
+            self.get_reflected_columns_types(&sp.target, schema.as_deref())
+                .await
+        } else {
+            self.get_table_cols_types(&sp.target, schema.as_deref())
+                .await
+        };
+        Ok(PipeState {
+            exists,
+            dtypes: pipe_dtypes(sp, &cols_types, true),
+            explicit_dtypes: pipe_dtypes(sp, &cols_types, false),
+            cols_types,
+        })
+    }
+
     /// The `Pipe.enforce_dtypes()` context for a pipe.
     pub fn dtypes_ctx(&self, sp: &SqlPipe, state: &PipeState) -> PipeDtypesContext {
         PipeDtypesContext {
@@ -596,7 +621,10 @@ impl SqlConnector {
                 let style = crate::where_clause::WhereStyle {
                     sqlite_no_index_on_lists: is_dt_bound,
                 };
-                let w = crate::where_clause::build_where_with(&valid, flavor, true, style);
+                // Declared text / index columns match null-like strings as text (rc15 Q18).
+                let literal = super::sync::null_marker_columns(sp, state);
+                let w =
+                    crate::where_clause::build_where_literal(&valid, flavor, true, style, &literal);
                 let w = meerschaum_core::pyfmt::py_lstrip(&w).replacen(
                     "WHERE",
                     if is_dt_bound { "    AND" } else { "    " },
@@ -661,7 +689,7 @@ impl SqlConnector {
         query: &DataQuery,
     ) -> ConnectorResult<Option<Frame>> {
         let sp = self.sql_pipe(pipe)?;
-        let state = self.pipe_state(&sp).await;
+        let state = self.pipe_state_checked(&sp).await?;
         if !state.exists {
             return Ok(None);
         }
@@ -689,7 +717,7 @@ impl SqlConnector {
         let prepared = self.prepare_pipe(pipe).await;
         let pipe = &prepared;
         let sp = self.sql_pipe(pipe)?;
-        let state = self.pipe_state(&sp).await;
+        let state = self.pipe_state_checked(&sp).await?;
         if !state.exists {
             return Ok(Frame::empty());
         }
@@ -792,7 +820,7 @@ impl SqlConnector {
         chunk_interval: Option<crate::pipe::ChunkIntervalArg>,
     ) -> ConnectorResult<Vec<Frame>> {
         let sp = self.sql_pipe(pipe)?;
-        let state = self.pipe_state(&sp).await;
+        let state = self.pipe_state_checked(&sp).await?;
         if !state.exists {
             return Ok(Vec::new());
         }
@@ -901,7 +929,7 @@ impl SqlConnector {
         query: &DataQuery,
     ) -> ConnectorResult<Option<Frame>> {
         let sp = self.sql_pipe(pipe)?;
-        let state = self.pipe_state(&sp).await;
+        let state = self.pipe_state_checked(&sp).await?;
         if !state.exists {
             return Ok(None);
         }
@@ -945,11 +973,48 @@ impl SqlConnector {
         remote: bool,
     ) -> ConnectorResult<Option<DateBound>> {
         let sp = self.sql_pipe(pipe)?;
-        let state = self.pipe_state(&sp).await;
+        let state = self.pipe_state_checked(&sp).await?;
         if remote {
             return self.remote_sync_time(&sp, &state, params, newest).await;
         }
-        Ok(self.sync_time(&sp, &state, params, newest).await)
+        self.sync_time_checked(&sp, &state, params, newest).await
+    }
+
+    /// [`sync_time`](SqlConnector::sync_time) for `Pipe.get_sync_time()`: database errors are
+    /// returned, not read as "no sync time". A missing table, a table without the datetime
+    /// column and an empty table have no sync time.
+    pub(crate) async fn sync_time_checked(
+        &self,
+        sp: &SqlPipe,
+        state: &PipeState,
+        params: Option<&Map>,
+        newest: bool,
+    ) -> ConnectorResult<Option<DateBound>> {
+        if let Some(dt_col) = sp.column("datetime")
+            && !state.cols_types.is_empty()
+            && !state
+                .cols_types
+                .keys()
+                .any(|c| c == &dt_col || c.eq_ignore_ascii_case(&dt_col))
+        {
+            return Ok(None);
+        }
+        let Some(query) = self.get_sync_time_query(sp, state, params, newest) else {
+            return Ok(None);
+        };
+        let value = if params.is_none_or(|p| p.is_empty()) {
+            self.value_catalog_checked(&query).await?
+        } else {
+            self.value_checked(&query).await?
+        };
+        let Some(bound) = value.as_ref().and_then(sync_time_from_sql) else {
+            return Ok(None);
+        };
+        // PARITY: v4 restores the pipe timezone after parsing SQLite's raw timestamp text.
+        Ok(self
+            .parse_date_bound(sp, &state.dtypes, Some(bound))
+            .ok()
+            .flatten())
     }
 
     pub(crate) async fn sync_time(
@@ -1001,7 +1066,14 @@ impl SqlConnector {
         if !valid.contains_key(&dt_col) {
             valid.insert(dt_col.clone(), Value::Str("_None".into()));
         }
-        let where_ = build_where(&valid, flavor, true);
+        let literal = super::sync::null_marker_columns(sp, state);
+        let where_ = crate::where_clause::build_where_literal(
+            &valid,
+            flavor,
+            true,
+            Default::default(),
+            &literal,
+        );
         let table_name = self.pipe_table_name(sp);
         let src_query = format!(
             "SELECT {}\nFROM {table_name}{where_}",
@@ -1078,8 +1150,8 @@ impl SqlConnector {
             .sync_time_query(sp, &dt_col, &src_query, newest, self.flavor, true)
             .map_err(be)?;
         let bound = self
-            .value(&query)
-            .await
+            .value_checked(&query)
+            .await?
             .and_then(|v| sync_time_from_sql(&v));
         Ok(self
             .parse_date_bound(sp, &state.dtypes, bound)
@@ -1105,11 +1177,11 @@ impl SqlConnector {
                 )));
             }
         }
-        let state = self.pipe_state(&sp).await;
+        let state = self.pipe_state_checked(&sp).await?;
         let Some(sql) = self.get_pipe_rowcount_query(&sp, &state, query)? else {
             return Ok(None);
         };
-        Ok(self.value(&sql).await.and_then(|v| v.as_i64()))
+        Ok(self.value_checked(&sql).await?.and_then(|v| v.as_i64()))
     }
 
     /// The `COUNT(*)` query of `get_pipe_rowcount` (`None` when the table does not exist).
@@ -1234,7 +1306,15 @@ impl SqlConnector {
                 .map(|(k, v)| (k.clone(), v.clone()))
                 .collect();
             if !valid.is_empty() {
-                let w = build_where(&valid, flavor, true).replacen(
+                let literal = super::sync::null_marker_columns(sp, state);
+                let w = crate::where_clause::build_where_literal(
+                    &valid,
+                    flavor,
+                    true,
+                    Default::default(),
+                    &literal,
+                )
+                .replacen(
                     "WHERE",
                     if begin.is_some() || end.is_some() {
                         "AND"
@@ -1251,6 +1331,9 @@ impl SqlConnector {
 
     /// `drop_pipe(pipe)`: drop the target table (keep the registration).
     pub async fn drop_pipe(&self, pipe: &Pipe) -> SuccessTuple {
+        if let Some(refused) = self.protected_refusal(pipe, "drop") {
+            return refused;
+        }
         let sp = match self.sql_pipe(pipe) {
             Ok(sp) => sp,
             Err(e) => return SuccessTuple::fail(e.to_string()),
@@ -1296,6 +1379,9 @@ impl SqlConnector {
     /// `clear_pipe(pipe, begin, end, params)`: delete rows (`>= begin`, `< end`, matching
     /// `params`) without dropping the table.
     pub async fn clear_pipe(&self, pipe: &Pipe, query: &DataQuery) -> SuccessTuple {
+        if let Some(refused) = self.protected_refusal(pipe, "clear") {
+            return refused;
+        }
         match self.clear_pipe_inner(pipe, query).await {
             Ok(t) => t,
             Err(e) => SuccessTuple::fail(e.to_string()),
@@ -1385,7 +1471,14 @@ impl SqlConnector {
         let mut sql = format!("DELETE FROM {pipe_name}\nWHERE 1 = 1\n");
         if !valid.is_empty() {
             sql.push_str("\n    AND ");
-            sql.push_str(&build_where(&valid, flavor, false));
+            let literal = super::sync::null_marker_columns(sp, state);
+            sql.push_str(&crate::where_clause::build_where_literal(
+                &valid,
+                flavor,
+                false,
+                Default::default(),
+                &literal,
+            ));
         }
         if let Some(b) = &begin {
             sql.push_str(&format!(
@@ -1423,6 +1516,9 @@ impl SqlConnector {
     /// deduplicated (`_pipes.py:3995`).
     pub async fn deduplicate_pipe(&self, pipe: &Pipe, query: &DataQuery) -> SuccessTuple {
         let _ = query;
+        if let Some(refused) = self.protected_refusal(pipe, "deduplicate") {
+            return refused;
+        }
         match self.deduplicate_pipe_inner(pipe).await {
             Ok(t) => t,
             Err(e) => SuccessTuple::fail(e.to_string()),

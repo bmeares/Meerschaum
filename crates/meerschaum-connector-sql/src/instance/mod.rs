@@ -23,6 +23,7 @@ pub mod partition;
 pub mod pipes;
 pub mod plugins;
 pub mod reflect;
+pub mod schema;
 pub mod sync;
 pub mod tables;
 mod trait_impl;
@@ -824,6 +825,52 @@ impl SqlConnector {
         self.value_catalog(&query).await.is_some()
     }
 
+    /// [`table_exists`](SqlConnector::table_exists) that reports a failed query (an unreachable
+    /// database, a permission error) as an error instead of "no table": the reads `Pipe`
+    /// methods make (`get_data`, `get_rowcount`, `get_sync_time`) raise database errors.
+    pub async fn table_exists_checked(
+        &self,
+        table: &str,
+        schema: Option<&str>,
+    ) -> ConnectorResult<bool> {
+        let schema = if self.flavor.no_schema() {
+            None
+        } else {
+            schema
+        };
+        let query = get_table_exists_query(table, self.flavor, schema);
+        self.log(&query);
+        Ok(self
+            .driver
+            .value_catalog(&query)
+            .await
+            .map_err(be)?
+            .is_some_and(|v| !v.is_null()))
+    }
+
+    /// [`value`](SqlConnector::value) that returns the database error instead of `None`.
+    pub async fn value_checked(&self, sql: &str) -> ConnectorResult<Option<SqlValue>> {
+        self.log(sql);
+        Ok(self
+            .driver
+            .value(sql)
+            .await
+            .map_err(be)?
+            .filter(|v| !v.is_null()))
+    }
+
+    /// [`value_catalog`](SqlConnector::value_catalog) that returns the database error instead
+    /// of `None`.
+    pub async fn value_catalog_checked(&self, sql: &str) -> ConnectorResult<Option<SqlValue>> {
+        self.log(sql);
+        Ok(self
+            .driver
+            .value_catalog(sql)
+            .await
+            .map_err(be)?
+            .filter(|v| !v.is_null()))
+    }
+
     /// `self.db_version`.
     pub async fn db_version(&self) -> Option<String> {
         if let Some(v) = self.state.lock().expect("state").db_version.clone() {
@@ -1017,13 +1064,14 @@ pub fn engine_state_namespace(flavor: Flavor, schema: Option<&str>) -> Option<St
 mod engine_state_tests {
     use super::*;
 
-    const KINDS: [&str; 6] = [
+    const KINDS: [&str; 7] = [
         "engine_state",
         "engine_ledger",
         "engine_cursors",
         "engine_runs",
         "engine_nodes",
         "engine_events",
+        "engine_sync_status",
     ];
 
     #[test]

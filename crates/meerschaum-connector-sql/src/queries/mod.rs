@@ -7,10 +7,12 @@
 
 pub mod compress;
 pub mod cte;
+pub mod estimate;
 pub mod index;
 pub mod maintenance;
 pub mod metadef;
 pub mod partition;
+pub mod schema;
 pub mod table;
 pub mod templates;
 pub mod update;

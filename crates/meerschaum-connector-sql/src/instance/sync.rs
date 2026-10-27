@@ -63,6 +63,18 @@ fn max_chunks(flavor: Flavor) -> Option<i64> {
     }
 }
 
+/// What a pipe sync adds to `to_sql` ([`SqlConnector::to_sql_inner`]); the default is plain
+/// `to_sql`.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct ToSqlExtras<'a> {
+    /// Wrap the inserts in `SET IDENTITY_INSERT ... ON` / `OFF` (MSSQL).
+    pub identity_insert: bool,
+    /// The columns whose null-like strings are text (`null_marker_text_columns`).
+    pub keep_null_markers: &'a [String],
+    /// Statements run first, in the same transaction (a replacing sync's `DELETE`).
+    pub prelude: Vec<String>,
+}
+
 /// The internal options `sync_pipe` threads through recursive temporary syncs.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct InternalSync {
@@ -123,6 +135,69 @@ fn current_timestamp(unit: meerschaum_core::dtypes::PrecisionUnit, as_int: bool)
             .map(|d| d.naive_utc())
             .unwrap_or_else(|| now.naive_utc()),
     ))
+}
+
+/// The columns of the pipe whose null-like strings (`'None'`, `'NA'`, `''`, ...) are text
+/// (rc15 Q18): declared text columns and text index columns
+/// ([`meerschaum_core::dtypes::null_marker_text_columns`]).
+pub(crate) fn null_marker_columns(sp: &SqlPipe, state: &PipeState) -> Vec<String> {
+    let index: Vec<String> = columns_map(sp).into_values().collect();
+    meerschaum_core::dtypes::null_marker_text_columns(
+        state.explicit_dtypes.iter(),
+        index.iter(),
+        |c| state.dtypes.get(c).cloned(),
+    )
+}
+
+pub(crate) use meerschaum_connector::replace::replace_result;
+
+/// `params` with the empty strings of the columns `literal` (see [`null_marker_columns`]) as
+/// nulls (`''` → `None`, `'_'` → `'_None'`, list items too), for Oracle, which stores `''` as
+/// `NULL`: there `''` keeps v4's meaning (`IS NULL`) on every column. `None` when nothing
+/// changes.
+pub(crate) fn oracle_empty_string_params(params: Option<&Map>, literal: &[String]) -> Option<Map> {
+    let params = params?;
+    let negation = crate::where_clause::negation_prefix();
+    let fix = |v: &Value| -> Option<Value> {
+        match v {
+            Value::Str(s) if s.is_empty() => Some(Value::Null),
+            Value::Str(s) if s == negation => Some(Value::Str(format!("{negation}None"))),
+            _ => None,
+        }
+    };
+    let mut changed = false;
+    let out: Map = params
+        .iter()
+        .map(|(k, v)| {
+            if !literal.contains(k) {
+                return (k.clone(), v.clone());
+            }
+            let fixed = match v {
+                Value::List(items) => {
+                    let items: Vec<Value> = items
+                        .iter()
+                        .map(|i| match fix(i) {
+                            Some(f) => {
+                                changed = true;
+                                f
+                            }
+                            None => i.clone(),
+                        })
+                        .collect();
+                    Value::List(items)
+                }
+                other => match fix(other) {
+                    Some(f) => {
+                        changed = true;
+                        f
+                    }
+                    None => other.clone(),
+                },
+            };
+            (k.clone(), fixed)
+        })
+        .collect();
+    changed.then_some(out)
 }
 
 /// The longest internal key value (characters) MySQL / MariaDB / MSSQL / Oracle can index:
@@ -363,6 +438,10 @@ impl SqlConnector {
         internal: InternalSync,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = SyncResult> + Send + 'a>> {
         Box::pin(async move {
+            // Every sync into this instance converges here (CLI, jobs, engine, API, façade).
+            if let Some(refused) = self.protected_refusal(pipe, "sync") {
+                return SyncResult::new(false, refused.message);
+            }
             let start = Instant::now();
             let mut result = match self.sync_pipe_inner(pipe, df, opts, internal).await {
                 Ok(r) => r,
@@ -486,9 +565,70 @@ impl SqlConnector {
         if upsert {
             check_existing = false;
         }
+        // Declared text columns and text index columns keep their null-like strings.
+        let literal_cols = null_marker_columns(&sp, &state);
+        // Oracle stores `''` as `NULL` (it has no empty strings): there `''` is a null in those
+        // columns too, so that a re-sync matches the row it stored (the other null-like strings
+        // stay text).
+        let mut df = df;
+        let oracle_opts;
+        let opts = if flavor == Flavor::Oracle {
+            df.null_empty_strings(&literal_cols);
+            match oracle_empty_string_params(opts.params.as_ref(), &literal_cols) {
+                Some(params) => {
+                    oracle_opts = SyncOptions {
+                        params: Some(params),
+                        ..opts.clone()
+                    };
+                    &oracle_opts
+                }
+                None => opts,
+            }
+        } else {
+            opts
+        };
+
+        // `replace`: the rows of the window `[begin, end)` (matching `params`) are deleted and
+        // the frame's rows of that window written, in one transaction. Nothing is diffed.
+        let replace = opts.replace;
+        let mut replace_skipped = 0usize;
+        let mut replace_delete: Vec<String> = Vec::new();
+        if replace {
+            check_existing = false;
+            if sp.column("datetime").is_none() && (opts.begin.is_some() || opts.end.is_some()) {
+                return Ok(SyncResult::new(
+                    false,
+                    meerschaum_connector::replace::no_datetime_window(pipe),
+                ));
+            }
+            if exists {
+                let query = meerschaum_connector::DataQuery {
+                    begin: opts.begin.clone(),
+                    end: opts.end.clone(),
+                    params: opts.params.clone(),
+                    ..Default::default()
+                };
+                replace_delete.push(self.replace_delete_query(&sp, &state, &query)?);
+            }
+        }
 
         let filter_start = std::time::Instant::now();
-        let (mut unseen_df, mut update_df, mut delta_df) = if check_existing {
+        let (mut unseen_df, mut update_df, mut delta_df) = if replace {
+            let (inside, skipped) = meerschaum_connector::replace::rows_in_window(
+                sp.column("datetime").as_deref(),
+                &df,
+                opts,
+                &literal_cols,
+            )
+            .map_err(be)?;
+            replace_skipped = skipped;
+            if is_new && inside.height() == 0 {
+                // No table and no rows of the window: nothing to replace (the first sync of a
+                // `fetch: {replace: true}` pipe whose fetch is empty succeeds like a merge).
+                return Ok(replace_result(0, 0, skipped, true));
+            }
+            (inside.clone(), None, inside)
+        } else if check_existing {
             let (u, up, d) = self.filter_existing_frame(&sp, &state, df).await?;
             (u, Some(up), d)
         } else {
@@ -502,7 +642,7 @@ impl SqlConnector {
             unseen_df.height(),
             update_df.as_ref().map_or(0, |u| u.height())
         );
-        if upsert {
+        if upsert && !replace {
             unseen_df = delta_df.clear();
             update_df = Some(delta_df.clone());
         }
@@ -584,25 +724,31 @@ impl SqlConnector {
 
         let mut success = true;
         let mut msg = String::new();
+        let mut replaced_rows = 0u64;
         let write_start = std::time::Instant::now();
-        if unseen_df.height() > 0 {
+        if unseen_df.height() > 0 || !replace_delete.is_empty() {
             let dtype = self.get_to_sql_dtype(&sp, &unseen_df, &state, true);
             let identity_insert = flavor == Flavor::Mssql
                 && autoincrement
                 && primary_key
                     .as_ref()
                     .is_some_and(|pk| unseen_df.contains(pk));
-            let (ok, m) = self
+            let (ok, m, deleted) = self
                 .to_sql_inner(
                     &unseen_df,
                     &sp.target,
                     schema.as_deref(),
                     &dtype,
                     opts.chunksize,
-                    identity_insert,
+                    &ToSqlExtras {
+                        identity_insert,
+                        keep_null_markers: &literal_cols,
+                        prelude: std::mem::take(&mut replace_delete),
+                    },
                 )
                 .await;
             success = ok;
+            replaced_rows = deleted.unwrap_or(0);
             if !ok {
                 msg = m;
             }
@@ -653,6 +799,23 @@ impl SqlConnector {
         }
         let unseen_count = unseen_df.height() as u64;
         let update_count = update_df.as_ref().map_or(0, |u| u.height()) as u64;
+        if replace {
+            if !internal.skip_temporary_tables_check && !cache_internal {
+                let (ok, m) = self.drop_old_temporary_tables(false).await;
+                if !ok {
+                    tracing::warn!("{m}");
+                }
+            }
+            if !is_new && internal.columns_types.is_none() {
+                self.record_synced_columns(&synced_key, &state.cols_types);
+            }
+            return Ok(replace_result(
+                replaced_rows,
+                unseen_count,
+                replace_skipped,
+                true,
+            ));
+        }
         let message = if !upsert {
             format!(
                 "Inserted {}, updated {} rows.",
@@ -698,6 +861,90 @@ impl SqlConnector {
         Ok(result)
     }
 
+    /// The `DELETE` of a replacing sync's window (`[begin, end)` matching `params`): the
+    /// `clear_pipe` query, except on SQLite, whose `datetime(...)` bounds drop fractions of a
+    /// second (a window ending just after `00:00:00.5` would end at `00:00:00`): there the
+    /// datetime bounds are the exact canonical text the rows are stored as.
+    pub(crate) fn replace_delete_query(
+        &self,
+        sp: &SqlPipe,
+        state: &PipeState,
+        query: &meerschaum_connector::DataQuery,
+    ) -> ConnectorResult<String> {
+        Ok(format!(
+            "DELETE FROM {}\n{}",
+            self.pipe_table_name(sp),
+            self.replace_window_where(sp, state, query)?
+        ))
+    }
+
+    /// The `WHERE` clause of a replacing sync's window ([`replace_delete_query`]'s): the
+    /// in-place sync applies it to the staged rows too, so that it inserts exactly the rows of
+    /// the window it deletes. Its column references are unqualified.
+    ///
+    /// [`replace_delete_query`]: Self::replace_delete_query
+    pub(crate) fn replace_window_where(
+        &self,
+        sp: &SqlPipe,
+        state: &PipeState,
+        query: &meerschaum_connector::DataQuery,
+    ) -> ConnectorResult<String> {
+        let delete = self.replace_window_delete(sp, state, query)?;
+        let prefix = format!("DELETE FROM {}\n", self.pipe_table_name(sp));
+        delete
+            .strip_prefix(&prefix)
+            .map(str::to_string)
+            .ok_or_else(|| {
+                be(format!(
+                    "Unexpected clear query for {}:\n{delete}",
+                    sp.pipe()
+                ))
+            })
+    }
+
+    fn replace_window_delete(
+        &self,
+        sp: &SqlPipe,
+        state: &PipeState,
+        query: &meerschaum_connector::DataQuery,
+    ) -> ConnectorResult<String> {
+        let flavor = self.flavor;
+        let dt_col = sp.column("datetime");
+        let text_datetimes = matches!(flavor, Flavor::Sqlite | Flavor::Geopackage)
+            && dt_col.as_ref().is_some_and(|c| {
+                state
+                    .dtypes
+                    .get(c)
+                    .is_none_or(|t| !are_dtypes_equal(t, "int"))
+            })
+            && [&query.begin, &query.end]
+                .iter()
+                .any(|b| matches!(b, Some(meerschaum_connector::DateBound::Datetime(_))));
+        if !text_datetimes {
+            return self.get_clear_pipe_query(sp, state, query);
+        }
+        let without_bounds = meerschaum_connector::DataQuery {
+            begin: None,
+            end: None,
+            ..query.clone()
+        };
+        let mut sql = self.get_clear_pipe_query(sp, state, &without_bounds)?;
+        let dt = sql_item_name(&dt_col.unwrap_or_default(), flavor, None);
+        let literal = |b: &meerschaum_connector::DateBound| match b {
+            meerschaum_connector::DateBound::Datetime(d) => {
+                format!("'{}'", d.utc.format("%Y-%m-%d %H:%M:%S%.6f"))
+            }
+            meerschaum_connector::DateBound::Int(i) => i.to_string(),
+        };
+        if let Some(b) = &query.begin {
+            sql.push_str(&format!("\n    AND {dt} >= {}", literal(b)));
+        }
+        if let Some(e) = &query.end {
+            sql.push_str(&format!("\n    AND {dt} <  {}", literal(e)));
+        }
+        Ok(sql)
+    }
+
     /// `pipe.filter_existing(df)`: split a frame into `(unseen, update, delta)` against the
     /// rows already in the table (the kernel diff with the backtrack read from this instance).
     pub(crate) async fn filter_existing_frame(
@@ -717,6 +964,8 @@ impl SqlConnector {
             date_bound_only: false,
             enforce_dtypes: false,
             filter_params_index_limit: self.settings.filter_params_index_limit,
+            // Declared text / index columns keep their null-like strings (rc15 Q18).
+            literal_null_markers: null_marker_columns(sp, state),
         };
         // The kernel's callback is synchronous: capture the backtrack request first, fetch it,
         // then run the diff with the fetched frame.
@@ -837,6 +1086,7 @@ impl SqlConnector {
         let mut params = Vec::new();
         let mut values = Vec::new();
         let mut selects = Vec::new();
+        let literal_cols = null_marker_columns(sp, state);
         let encoding = |i: usize| ColumnEncoding {
             name: cols[i].clone(),
             numeric: state
@@ -844,6 +1094,7 @@ impl SqlConnector {
                 .get(&cols[i])
                 .and_then(|t| numeric_precision_scale(t))
                 .map(|(p, s)| (Some(p), Some(s))),
+            keep_null_markers: literal_cols.contains(&cols[i]),
         };
         // Oracle's `UNION ALL` branches must agree on every column's datatype, and a bound `NULL`
         // is a typeless `VARCHAR2` (ORA-01790 next to a bound timestamp or number): a `NULL` cell
@@ -984,6 +1235,154 @@ impl SqlConnector {
         Ok(Some((true, String::new())))
     }
 
+    /// The `ON CONFLICT (...)` target of an upsert into the pipe's table (PostgreSQL family,
+    /// SQLite, GeoPackage): the key columns and expressions of the table's unique index over
+    /// `join_cols`, exactly as the database lists them, so the conflict target always matches
+    /// the index (v4's plain unique constraint, one declared `NULLS NOT DISTINCT`, or an older
+    /// table's `COALESCE(...)` index), and whether that key treats NULL keys as equal (else the
+    /// upsert compares NULL keys itself: `UpdateQueriesArgs::null_safe_upsert`). `None` (render
+    /// the join columns, as v4) when no unique index covers exactly `join_cols` or on other
+    /// flavors.
+    pub(crate) async fn upsert_conflict_target(
+        &self,
+        sp: &SqlPipe,
+        join_cols: &[String],
+    ) -> Option<(String, bool)> {
+        if join_cols.is_empty() {
+            return None;
+        }
+        let flavor = self.flavor;
+        let table = truncate_item_name(&sp.target, flavor);
+        // (index name, key expressions in order)
+        let mut indices: Vec<(String, Vec<String>)> = Vec::new();
+        // The indices declared `NULLS NOT DISTINCT` (PostgreSQL 15+).
+        let mut nulls_not_distinct: Vec<String> = Vec::new();
+        match flavor.driver_family() {
+            DriverFamily::Postgres => {
+                let schema = self.get_pipe_schema(sp);
+                let nnd = if self.supports_nulls_not_distinct().await {
+                    "ix.indnullsnotdistinct"
+                } else {
+                    "false"
+                };
+                let sql = format!(
+                    "SELECT i.relname AS \"index\", k.k AS \"position\", \
+                    pg_catalog.pg_get_indexdef(ix.indexrelid, k.k, true) AS \"expr\", \
+                    {nnd} AS \"nnd\" \
+                    FROM pg_catalog.pg_index ix \
+                    JOIN pg_catalog.pg_class t ON t.oid = ix.indrelid \
+                    JOIN pg_catalog.pg_class i ON i.oid = ix.indexrelid \
+                    JOIN pg_catalog.pg_namespace n ON n.oid = t.relnamespace \
+                    CROSS JOIN LATERAL generate_series(1, ix.indnkeyatts::int) AS k(k) \
+                    WHERE ix.indisunique AND ix.indpred IS NULL AND t.relname = $1 \
+                    AND n.nspname = COALESCE($2, current_schema()) \
+                    ORDER BY i.relname, k.k"
+                );
+                let params = [
+                    SqlParam::Text(table.clone()),
+                    match schema {
+                        Some(s) => SqlParam::Text(truncate_item_name(&s, flavor)),
+                        None => SqlParam::Null,
+                    },
+                ];
+                let df = self.driver().read_frame_with(&sql, &params).await.ok()?;
+                for doc in super::frame_docs(&df) {
+                    let (Some(name), Some(expr)) = (
+                        super::kv_str(doc.get("index")),
+                        super::kv_str(doc.get("expr")),
+                    ) else {
+                        continue;
+                    };
+                    if matches!(doc.get("nnd"), Some(KValue::Bool(true)))
+                        && !nulls_not_distinct.contains(&name)
+                    {
+                        nulls_not_distinct.push(name.clone());
+                    }
+                    match indices.iter_mut().find(|(n, _)| *n == name) {
+                        Some((_, exprs)) => exprs.push(expr),
+                        None => indices.push((name, vec![expr])),
+                    }
+                }
+            }
+            DriverFamily::Sqlite => {
+                let sql = "SELECT name, sql FROM sqlite_master WHERE type = 'index' \
+                    AND tbl_name = ? AND sql IS NOT NULL";
+                let df = self
+                    .driver()
+                    .read_frame_with(sql, &[SqlParam::Text(table.clone())])
+                    .await
+                    .ok()?;
+                for doc in super::frame_docs(&df) {
+                    let (Some(name), Some(sql)) = (
+                        super::kv_str(doc.get("name")),
+                        super::kv_str(doc.get("sql")),
+                    ) else {
+                        continue;
+                    };
+                    if !sql
+                        .trim_start()
+                        .to_uppercase()
+                        .starts_with("CREATE UNIQUE INDEX")
+                    {
+                        continue;
+                    }
+                    if let Some(exprs) = sqlite_index_key_list(&sql) {
+                        indices.push((name, exprs));
+                    }
+                }
+            }
+            _ => return None,
+        }
+        let wanted: std::collections::BTreeSet<String> =
+            join_cols.iter().map(|c| c.to_lowercase()).collect();
+        let matching: Vec<&(String, Vec<String>)> = indices
+            .iter()
+            .filter(|(_, exprs)| {
+                let cols: Option<std::collections::BTreeSet<String>> = exprs
+                    .iter()
+                    .map(|e| key_expression_column(e).map(|c| c.to_lowercase()))
+                    .collect();
+                cols.is_some_and(|c| c == wanted && c.len() == exprs.len())
+            })
+            .collect();
+        // Prefer the index that makes NULL keys equal.
+        let null_safe = |(name, exprs): &&(String, Vec<String>)| {
+            nulls_not_distinct.contains(name) || exprs.iter().any(|e| !is_plain_identifier(e))
+        };
+        let chosen = matching
+            .iter()
+            .find(|i| null_safe(i))
+            .or_else(|| matching.first())?;
+        Some((
+            chosen
+                .1
+                .iter()
+                .map(|e| {
+                    if is_plain_identifier(e) || flavor.driver_family() == DriverFamily::Sqlite {
+                        e.clone()
+                    } else {
+                        format!("({e})")
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(", "),
+            null_safe(chosen),
+        ))
+    }
+
+    /// Whether the server accepts `UNIQUE NULLS NOT DISTINCT` (PostgreSQL 15 and later, Citus
+    /// aside): the NULL-safe unique key of an upsert pipe is then v4's own constraint
+    /// ([`crate::queries::index::IndexState::nulls_not_distinct`]).
+    pub(crate) async fn supports_nulls_not_distinct(&self) -> bool {
+        if self.flavor.driver_family() != DriverFamily::Postgres || self.flavor == Flavor::Citus {
+            return false;
+        }
+        self.db_version()
+            .await
+            .and_then(|v| postgres_major_version(&v))
+            .is_some_and(|major| major >= 15)
+    }
+
     /// The update / upsert path of `sync_pipe`: stage the rows in a temporary table, then
     /// `get_update_queries`.
     async fn apply_update(
@@ -1010,6 +1409,77 @@ impl SqlConnector {
                 return Err(be("Internal DuckDB upserts require non-null keys."));
             }
         }
+        let existing_cols = if state.cols_types.is_empty() {
+            self.columns_types(sp).await
+        } else {
+            state.cols_types.clone()
+        };
+        let dt_col = sp.column("datetime");
+        let primary_key = sp.column("primary");
+        // A partitioned table folds the datetime column into its composite primary key, so the
+        // conflict target must include it too.
+        let partition_upsert = dt_col.as_ref().is_some_and(|c| update_df.contains(c))
+            && (flavor.is_timescaledb() || self.should_partition(sp));
+        let join_cols: Vec<String> = match &primary_key {
+            Some(pk) if flavor != Flavor::Oracle => {
+                if partition_upsert {
+                    vec![dt_col.clone().unwrap_or_default(), pk.clone()]
+                } else {
+                    vec![pk.clone()]
+                }
+            }
+            _ => columns_map(sp)
+                .into_iter()
+                .map(|(_, c)| c)
+                .filter(|c| existing_cols.contains_key(c))
+                .collect(),
+        };
+        // NULL keys must be equal (rc15 S3). The conflict target follows the table's own unique
+        // key; when that key treats NULLs as distinct (MySQL / MariaDB, SQLite, PostgreSQL before
+        // 15, a table made before 5.0.0rc15) and the batch has a NULL key, the upsert compares
+        // the keys itself (`UpdateQueriesArgs::null_safe_upsert`).
+        let (conflict_target, key_null_safe) = if upsert {
+            match self.upsert_conflict_target(sp, &join_cols).await {
+                Some((target, null_safe)) => (Some(target), null_safe),
+                None => (None, false),
+            }
+        } else {
+            (None, false)
+        };
+        let null_safe_upsert = upsert
+            && sp.null_indices()
+            && pipe.connector_keys() != "mrsm"
+            && match flavor {
+                Flavor::Mysql | Flavor::Mariadb => true,
+                Flavor::Postgresql
+                | Flavor::Postgis
+                | Flavor::Timescaledb
+                | Flavor::TimescaledbHa
+                | Flavor::Sqlite
+                | Flavor::Geopackage => {
+                    !key_null_safe
+                        && join_cols
+                            .iter()
+                            .filter(|c| Some(*c) != dt_col.as_ref())
+                            .any(|c| {
+                                update_df
+                                    .data(c)
+                                    .map(|d| d.is_null_mask().iter().any(|n| *n))
+                                    .unwrap_or(false)
+                            })
+                }
+                _ => false,
+            };
+        // These statements need one row per key: a batch that repeats a key keeps its last row,
+        // as `INSERT ... ON DUPLICATE KEY UPDATE` / `ON CONFLICT DO UPDATE` resolve it (NULL keys
+        // are equal here).
+        let deduplicated;
+        let update_df = if null_safe_upsert {
+            deduplicated = last_row_per_key(update_df, &join_cols);
+            &deduplicated
+        } else {
+            update_df
+        };
         let temp_target = self.get_temporary_target(
             &sp.target,
             None,
@@ -1111,31 +1581,6 @@ impl SqlConnector {
             return Ok((false, temp_result.message));
         }
 
-        let existing_cols = if state.cols_types.is_empty() {
-            self.columns_types(sp).await
-        } else {
-            state.cols_types.clone()
-        };
-        let dt_col = sp.column("datetime");
-        let primary_key = sp.column("primary");
-        // A partitioned table folds the datetime column into its composite primary key, so the
-        // conflict target must include it too.
-        let partition_upsert = dt_col.as_ref().is_some_and(|c| update_df.contains(c))
-            && (flavor.is_timescaledb() || self.should_partition(sp));
-        let join_cols: Vec<String> = match &primary_key {
-            Some(pk) if flavor != Flavor::Oracle => {
-                if partition_upsert {
-                    vec![dt_col.clone().unwrap_or_default(), pk.clone()]
-                } else {
-                    vec![pk.clone()]
-                }
-            }
-            _ => columns_map(sp)
-                .into_iter()
-                .map(|(_, c)| c)
-                .filter(|c| existing_cols.contains_key(c))
-                .collect(),
-        };
         let schema = self.get_pipe_schema(sp);
         let internal_schema = self.internal_schema().map(str::to_string);
         let db_version = if matches!(flavor, Flavor::Sqlite | Flavor::Geopackage) {
@@ -1158,6 +1603,12 @@ impl SqlConnector {
         args.null_indices = sp.null_indices();
         args.cast_columns = sp.enforce();
         args.db_version = db_version.as_deref();
+        if upsert {
+            // Name the unique key's own columns / expressions; compare NULL keys in the
+            // statements where that key does not.
+            args.conflict_target = conflict_target;
+            args.null_safe_upsert = null_safe_upsert;
+        }
         // SQLite cannot use a plain key index for the COALESCE equality used by v4.
         // Index the small staging table's exact expressions so a scattered update does not
         // scan that table once per row in the (potentially very large) target date range.
@@ -1855,13 +2306,17 @@ impl SqlConnector {
         dtype: &IndexMap<String, String>,
         chunksize: Option<i64>,
     ) -> (bool, String) {
-        self.to_sql_inner(df, name, schema, dtype, chunksize, false)
-            .await
+        let (ok, msg, _) = self
+            .to_sql_inner(df, name, schema, dtype, chunksize, &ToSqlExtras::default())
+            .await;
+        (ok, msg)
     }
 
-    /// [`Self::to_sql`], optionally wrapped in `SET IDENTITY_INSERT ... ON` / `OFF` on the same
-    /// connection and transaction (MSSQL autoincrement pipes given explicit keys,
-    /// `_pipes.py:2201`).
+    /// [`Self::to_sql`] with what a pipe sync adds ([`ToSqlExtras`]): `SET IDENTITY_INSERT ...
+    /// ON` / `OFF` on the same connection and transaction (MSSQL autoincrement pipes given
+    /// explicit keys, `_pipes.py:2201`), the text columns that keep null-like strings, and
+    /// statements run first in the same transaction (a replacing sync's `DELETE`). Returns
+    /// `(success, error message, rows affected by the first prelude statement)`.
     pub(crate) async fn to_sql_inner(
         &self,
         df: &Frame,
@@ -1869,14 +2324,30 @@ impl SqlConnector {
         schema: Option<&str>,
         dtype: &IndexMap<String, String>,
         chunksize: Option<i64>,
-        identity_insert: bool,
-    ) -> (bool, String) {
+        extras: &ToSqlExtras<'_>,
+    ) -> (bool, String, Option<u64>) {
+        let identity_insert = extras.identity_insert;
         let flavor = self.flavor;
         let schema = schema.or(self.schema());
         let truncated = truncate_item_name(name, flavor);
         let cols = df.names();
         if df.height() == 0 || cols.is_empty() {
-            return (true, String::new());
+            if extras.prelude.is_empty() {
+                return (true, String::new(), None);
+            }
+            // A replacing sync with no rows still clears its window.
+            let statements: Vec<(String, Vec<SqlParam>)> = extras
+                .prelude
+                .iter()
+                .map(|q| (q.clone(), Vec::new()))
+                .collect();
+            return match self.driver().exec_many_with(&statements).await {
+                Ok(results) if results.iter().all(Option::is_some) => {
+                    (true, String::new(), results.first().copied().flatten())
+                }
+                Ok(_) => (false, format!("Failed to replace rows of {name}."), None),
+                Err(e) => (false, e.to_string(), None),
+            };
         }
         let numeric_cols = get_numeric_cols(df);
         let encodings: Vec<ColumnEncoding> = cols
@@ -1901,6 +2372,7 @@ impl SqlConnector {
                 ColumnEncoding {
                     name: c.clone(),
                     numeric,
+                    keep_null_markers: extras.keep_null_markers.contains(c),
                 }
             })
             .collect();
@@ -1930,11 +2402,24 @@ impl SqlConnector {
                 csv_row(&fields, &mut buf);
             }
             self.log(&copy_sql);
+            if !extras.prelude.is_empty() {
+                return match self
+                    .driver()
+                    .copy_in_after(&extras.prelude, &copy_sql, buf.into_bytes())
+                    .await
+                {
+                    Ok((counts, _)) => (true, String::new(), counts.first().copied()),
+                    Err(e) => {
+                        tracing::warn!("Failed to insert into {table_name}:\n{e}");
+                        (false, e.to_string(), None)
+                    }
+                };
+            }
             return match self.driver().copy_in(&copy_sql, buf.into_bytes()).await {
-                Ok(_) => (true, String::new()),
+                Ok(_) => (true, String::new(), None),
                 Err(e) => {
                     tracing::warn!("Failed to insert into {table_name}:\n{e}");
-                    (false, e.to_string())
+                    (false, e.to_string(), None)
                 }
             };
         }
@@ -1956,7 +2441,7 @@ impl SqlConnector {
             )
         {
             return self
-                .exec_insert_statements(statements, &table_name, identity_insert)
+                .exec_insert_statements(statements, &table_name, identity_insert, &extras.prelude)
                 .await;
         }
 
@@ -2013,18 +2498,19 @@ impl SqlConnector {
             statements.push((sql, params));
             start = end;
         }
-        self.exec_insert_statements(statements, &table_name, identity_insert)
+        self.exec_insert_statements(statements, &table_name, identity_insert, &extras.prelude)
             .await
     }
 
     /// Run `to_sql`'s insert statements in one transaction, optionally between
-    /// `SET IDENTITY_INSERT ... ON` and `OFF`.
+    /// `SET IDENTITY_INSERT ... ON` and `OFF`, after `prelude` (in the same transaction).
     async fn exec_insert_statements(
         &self,
         mut statements: Vec<(String, Vec<SqlParam>)>,
         table_name: &str,
         identity_insert: bool,
-    ) -> (bool, String) {
+        prelude: &[String],
+    ) -> (bool, String, Option<u64>) {
         if let Some((sql, _)) = statements.first() {
             self.log(sql);
         }
@@ -2035,10 +2521,26 @@ impl SqlConnector {
             );
             statements.push((format!("SET IDENTITY_INSERT {table_name} OFF"), Vec::new()));
         }
+        for (i, q) in prelude.iter().enumerate() {
+            self.log(q);
+            statements.insert(i, (q.clone(), Vec::new()));
+        }
         match self.driver().exec_many_with(&statements).await {
-            Ok(results) if results.iter().all(Option::is_some) => (true, String::new()),
-            Ok(_) => (false, format!("Failed to insert rows into {table_name}.")),
-            Err(e) => (false, e.to_string()),
+            Ok(results) if results.iter().all(Option::is_some) => (
+                true,
+                String::new(),
+                if prelude.is_empty() {
+                    None
+                } else {
+                    results.first().copied().flatten()
+                },
+            ),
+            Ok(_) => (
+                false,
+                format!("Failed to insert rows into {table_name}."),
+                None,
+            ),
+            Err(e) => (false, e.to_string(), None),
         }
     }
 }
@@ -2117,4 +2619,259 @@ fn mssql_insert_json_statements(
         start = end;
     }
     Some(statements)
+}
+
+/// Whether a key expression is a bare (possibly quoted) column name.
+/// The major version in PostgreSQL's `version()` text (`PostgreSQL 17.5 (Debian ...) on ...`),
+/// or in a bare version (`15.4`).
+pub(crate) fn postgres_major_version(version: &str) -> Option<u32> {
+    let v = version.trim();
+    let v = v.strip_prefix("PostgreSQL").unwrap_or(v).trim_start();
+    let digits: String = v.chars().take_while(|c| c.is_ascii_digit()).collect();
+    digits.parse().ok()
+}
+
+/// The rows of `df` left when a key (`keys`, NULL equal to NULL) that repeats keeps only its
+/// last row, in their original order: how `INSERT ... ON DUPLICATE KEY UPDATE` resolves a batch
+/// that repeats a key (the last row wins). `df` itself when no key repeats or a key column is
+/// missing.
+pub(crate) fn last_row_per_key(df: &Frame, keys: &[String]) -> Frame {
+    if df.height() < 2 || keys.is_empty() {
+        return df.clone();
+    }
+    let Ok(columns) = keys
+        .iter()
+        .map(|k| df.data(k).map(|d| d.values()))
+        .collect::<Result<Vec<Vec<KValue>>, _>>()
+    else {
+        return df.clone();
+    };
+    let mut last: std::collections::HashMap<Vec<KValue>, usize> =
+        std::collections::HashMap::with_capacity(df.height());
+    for i in 0..df.height() {
+        last.insert(columns.iter().map(|c| c[i].clone()).collect(), i);
+    }
+    if last.len() == df.height() {
+        return df.clone();
+    }
+    let mut keep: Vec<usize> = last.into_values().collect();
+    keep.sort_unstable();
+    df.take(&keep)
+}
+
+fn is_plain_identifier(expr: &str) -> bool {
+    let e = expr.trim();
+    if let Some(inner) = e.strip_prefix('"').and_then(|r| r.strip_suffix('"')) {
+        return !inner.is_empty() && !inner.replace("\"\"", "").contains('"');
+    }
+    if let Some(inner) = e.strip_prefix('`').and_then(|r| r.strip_suffix('`')) {
+        return !inner.is_empty() && !inner.contains('`');
+    }
+    if let Some(inner) = e.strip_prefix('[').and_then(|r| r.strip_suffix(']')) {
+        return !inner.is_empty() && !inner.contains(']');
+    }
+    !e.is_empty()
+        && e.chars()
+            .next()
+            .is_some_and(|c| c.is_alphabetic() || c == '_')
+        && e.chars()
+            .all(|c| c.is_alphanumeric() || c == '_' || c == '$')
+}
+
+/// A quoted or bare identifier's name.
+fn unquote_identifier(expr: &str) -> String {
+    let e = expr.trim();
+    for (open, close) in [('"', '"'), ('`', '`'), ('[', ']')] {
+        if let Some(inner) = e.strip_prefix(open).and_then(|r| r.strip_suffix(close)) {
+            return inner.replace("\"\"", "\"");
+        }
+    }
+    e.to_string()
+}
+
+/// The column a unique-index key expression is over: the column itself, or the first argument
+/// of `COALESCE(col, ...)` (Meerschaum's NULL-safe key). `None` for any other expression.
+fn key_expression_column(expr: &str) -> Option<String> {
+    let e = expr.trim();
+    if is_plain_identifier(e) {
+        return Some(unquote_identifier(e));
+    }
+    let upper = e.to_uppercase();
+    let rest = upper
+        .strip_prefix("COALESCE")
+        .map(|_| e["COALESCE".len()..].trim_start())?;
+    let inner = rest.strip_prefix('(')?;
+    let args = split_top_level(inner.strip_suffix(')').unwrap_or(inner));
+    let first = args.first()?.trim();
+    // `COALESCE(("id")::text, ...)` or a cast: take the identifier inside.
+    let first = first.trim_start_matches('(');
+    let first = first.split(')').next().unwrap_or(first);
+    let first = first.split("::").next().unwrap_or(first).trim();
+    is_plain_identifier(first).then(|| unquote_identifier(first))
+}
+
+/// Split on the commas outside parentheses and quotes.
+fn split_top_level(s: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut depth = 0i32;
+    let mut quote: Option<char> = None;
+    let mut cur = String::new();
+    for c in s.chars() {
+        match quote {
+            Some(q) => {
+                cur.push(c);
+                if c == q {
+                    quote = None;
+                }
+            }
+            None => match c {
+                '\'' | '"' | '`' => {
+                    quote = Some(c);
+                    cur.push(c);
+                }
+                '(' => {
+                    depth += 1;
+                    cur.push(c);
+                }
+                ')' => {
+                    depth -= 1;
+                    cur.push(c);
+                }
+                ',' if depth == 0 => {
+                    out.push(cur.trim().to_string());
+                    cur.clear();
+                }
+                _ => cur.push(c),
+            },
+        }
+    }
+    if !cur.trim().is_empty() {
+        out.push(cur.trim().to_string());
+    }
+    out
+}
+
+/// The key list of a SQLite `CREATE [UNIQUE] INDEX ... ON table (keys)` statement.
+fn sqlite_index_key_list(sql: &str) -> Option<Vec<String>> {
+    let upper = sql.to_uppercase();
+    let on = upper.find(" ON ")?;
+    let open = on + sql[on..].find('(')?;
+    let mut depth = 0i32;
+    let mut quote: Option<char> = None;
+    for (i, c) in sql[open..].char_indices() {
+        match quote {
+            Some(q) => {
+                if c == q {
+                    quote = None;
+                }
+            }
+            None => match c {
+                '\'' | '"' | '`' => quote = Some(c),
+                '(' => depth += 1,
+                ')' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        let keys = split_top_level(&sql[open + 1..open + i]);
+                        return (!keys.is_empty()).then_some(keys);
+                    }
+                }
+                _ => {}
+            },
+        }
+    }
+    None
+}
+
+#[cfg(test)]
+mod conflict_target_tests {
+    use super::*;
+
+    #[test]
+    fn key_expressions_name_their_columns() {
+        assert_eq!(key_expression_column("ts").as_deref(), Some("ts"));
+        assert_eq!(key_expression_column("\"Ts\"").as_deref(), Some("Ts"));
+        assert_eq!(
+            key_expression_column("COALESCE(id, '-987654321'::integer)").as_deref(),
+            Some("id")
+        );
+        assert_eq!(
+            key_expression_column("COALESCE(\"id\", -987654321) ").as_deref(),
+            Some("id")
+        );
+        assert_eq!(
+            key_expression_column("COALESCE((station)::text, '-987654321'::text)").as_deref(),
+            Some("station")
+        );
+        assert_eq!(key_expression_column("lower(name)"), None);
+        assert!(is_plain_identifier("\"a b\"") && !is_plain_identifier("COALESCE(a, 1)"));
+    }
+
+    #[test]
+    fn repeated_keys_keep_their_last_row() {
+        use meerschaum_kernel::frame::Column;
+        let df = Frame::new(vec![
+            Column::object(
+                "id",
+                vec![
+                    KValue::Int(1),
+                    KValue::Int(2),
+                    KValue::Null,
+                    KValue::Int(1),
+                    KValue::Null,
+                    KValue::Int(3),
+                ],
+            ),
+            Column::object("v", (1..=6).map(KValue::Int).collect::<Vec<_>>()),
+        ])
+        .unwrap();
+        let out = last_row_per_key(&df, &["id".to_string()]);
+        let values = |c: &str| out.data(c).unwrap().values();
+        // Key 1 keeps v=4, NULL keeps v=5 (NULL keys are equal), order kept.
+        assert_eq!(
+            values("v"),
+            vec![
+                KValue::Int(2),
+                KValue::Int(4),
+                KValue::Int(5),
+                KValue::Int(6)
+            ]
+        );
+        // No repeats (or a missing key column): unchanged.
+        let unique = df.take(&[0, 1, 2]);
+        assert_eq!(last_row_per_key(&unique, &["id".to_string()]).height(), 3);
+        assert_eq!(last_row_per_key(&df, &["missing".to_string()]).height(), 6);
+    }
+
+    #[test]
+    fn postgres_versions_parse() {
+        assert_eq!(
+            postgres_major_version(
+                "PostgreSQL 17.5 (Debian 17.5-1.pgdg110+1) on x86_64-pc-linux-gnu, compiled by gcc"
+            ),
+            Some(17)
+        );
+        assert_eq!(
+            postgres_major_version("PostgreSQL 9.6.24 on x86_64"),
+            Some(9)
+        );
+        assert_eq!(postgres_major_version("15.4"), Some(15));
+        assert_eq!(postgres_major_version("CockroachDB CCL v23.1"), None);
+    }
+
+    #[test]
+    fn sqlite_key_lists_parse() {
+        assert_eq!(
+            sqlite_index_key_list(
+                "CREATE UNIQUE INDEX \"IX_t_ts_id\" ON \"t\" (\"ts\", COALESCE(\"id\", -987654321) )"
+            ),
+            Some(vec![
+                "\"ts\"".to_string(),
+                "COALESCE(\"id\", -987654321)".to_string()
+            ])
+        );
+        assert_eq!(
+            sqlite_index_key_list("CREATE UNIQUE INDEX ix ON t (a, b)"),
+            Some(vec!["a".to_string(), "b".to_string()])
+        );
+    }
 }

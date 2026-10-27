@@ -69,6 +69,46 @@ pub fn parse_parameters(v: Option<&KValue>) -> Map {
 }
 
 impl SqlConnector {
+    /// `protected: true` on this connector (an attribute or `?protected=true` on its URI).
+    pub fn is_protected(&self) -> bool {
+        self.spec.protected
+    }
+
+    /// The refusal of a write to `pipe` when this connector is protected and writes are not
+    /// allowed (`--allow-protected`, `MRSM_ALLOW_PROTECTED=1`); internal `mrsm` pipes are never
+    /// refused ([`meerschaum_connector::protected_refusal`]).
+    pub fn protected_refusal(&self, pipe: &Pipe, op: &str) -> Option<SuccessTuple> {
+        meerschaum_connector::protected_refusal(self, pipe, op)
+    }
+
+    /// `Err(message)` when this connector is protected and writes are not allowed: the check
+    /// for writes that do not concern one pipe (raw SQL from plugins or the façade).
+    pub fn check_writable(&self, op: &str) -> Result<(), String> {
+        meerschaum_connector::check_protected(self, op)
+    }
+
+    /// Run a caller's own query (`mrsm sql`, a plugin's `host::read_sql`, MCP `read_sql`) and
+    /// return its rows. On a protected connector without the allowance the query must be one
+    /// read statement ([`crate::readonly::is_read_statement`], else
+    /// [`SqlError::Protected`](crate::SqlError::Protected)), and it runs in a transaction that
+    /// is rolled back, read-only where the database allows it
+    /// ([`crate::driver::SqlDriver::begin_read_only`]), so nothing it does is kept.
+    pub async fn read_raw(&self, sql: &str) -> crate::Result<meerschaum_kernel::Frame> {
+        let Err(refusal) = self.check_writable("execute SQL") else {
+            return self.read(sql).await;
+        };
+        if !crate::readonly::is_read_statement(sql, Some(self.flavor)) {
+            return Err(crate::SqlError::Protected(refusal));
+        }
+        self.log(sql);
+        let mut tx = self.driver.begin_read_only().await?;
+        let frame = tx.read_frame(sql).await;
+        let rolled_back = tx.rollback().await;
+        let frame = frame?;
+        rolled_back?;
+        Ok(frame)
+    }
+
     /// The `parameters` bind for this flavor (`json.dumps(parameters)` unless JSONB).
     pub(crate) fn json_param(&self, map: &Map) -> SqlParam {
         if self.flavor.is_json_flavor() {
@@ -80,6 +120,9 @@ impl SqlConnector {
 
     /// `register_pipe(pipe)`: insert the pipe's keys and parameters into `mrsm_pipes`.
     pub async fn register_pipe(&self, pipe: &Pipe) -> SuccessTuple {
+        if let Some(refused) = self.protected_refusal(pipe, "register") {
+            return refused;
+        }
         let _ = self.ensure_instance_tables(!pipe.temporary).await;
         match self.get_pipe_id(pipe).await {
             Ok(Some(_)) => return SuccessTuple::fail(format!("{pipe} is already registered.")),
@@ -206,6 +249,9 @@ impl SqlConnector {
 
     /// `edit_pipe(pipe, patch)`: persist the pipe's in-memory parameters.
     pub async fn edit_pipe(&self, pipe: &Pipe, patch: bool) -> SuccessTuple {
+        if let Some(refused) = self.protected_refusal(pipe, "edit") {
+            return refused;
+        }
         let id = match self.get_pipe_id(pipe).await {
             Ok(Some(id)) => id,
             Ok(None) => {
@@ -242,6 +288,9 @@ impl SqlConnector {
     /// `delete_pipe(pipe)`: delete the pipe's registration (the table is dropped by
     /// `Pipe.delete()` beforehand).
     pub async fn delete_pipe(&self, pipe: &Pipe) -> SuccessTuple {
+        if let Some(refused) = self.protected_refusal(pipe, "delete") {
+            return refused;
+        }
         let id = match self.get_pipe_id(pipe).await {
             Ok(Some(id)) if id != 0 => id,
             Ok(_) => return SuccessTuple::fail(format!("{pipe} is not registered.")),
@@ -261,7 +310,9 @@ impl SqlConnector {
     /// `fetch_pipes_keys(connector_keys, metric_keys, location_keys, tags, params)`: a mapping
     /// of pipe IDs to `(connector_keys, metric_key, location_key, parameters)`.
     ///
-    /// `_` negates values; tags are `,`-ANDed within a group and ORed across groups.
+    /// `_` negates values; tags are `,`-ANDed within a group and ORed across groups. The internal
+    /// `mrsm` pipes are left out unless `connector_keys` names `mrsm`
+    /// ([`meerschaum_connector::hides_internal_pipes`]).
     pub async fn fetch_pipes_keys(&self, query: &PipesKeysQuery) -> ConnectorResult<PipesKeys> {
         let f = self.flavor;
         let table = self.instance_table_name("mrsm_pipes");
@@ -359,6 +410,18 @@ impl SqlConnector {
                     ps.join(", ")
                 ));
             }
+        }
+        // Meerschaum's internal pipes (saved Pipelines' registry pipes, ...) stay out of
+        // listings and bulk actions unless the query names `mrsm` (`-c mrsm`).
+        if meerschaum_connector::hides_internal_pipes(query) {
+            let none = next(&mut binds, SqlParam::Text("None".into()));
+            let internal = next(
+                &mut binds,
+                SqlParam::Text(meerschaum_connector::policy::INTERNAL_CONNECTOR_KEYS.into()),
+            );
+            wheres.push(format!(
+                "coalesce({table}.connector_keys, {none}) != {internal}"
+            ));
         }
 
         // Finally, parse tags.

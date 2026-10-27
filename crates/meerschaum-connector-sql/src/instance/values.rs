@@ -181,6 +181,10 @@ pub struct ColumnEncoding {
     pub name: String,
     /// `(precision, scale)` to quantize decimals to (numeric columns only).
     pub numeric: Option<(Option<i64>, Option<i64>)>,
+    /// A declared text column or a text index column
+    /// (`meerschaum_core::dtypes::null_marker_text_columns`): its null-like strings (`'None'`,
+    /// `'NA'`, `''`, ...) are written as text, not as `NULL`.
+    pub keep_null_markers: bool,
 }
 
 /// A datetime's wall-clock text in SQLAlchemy's storage format (`%Y-%m-%d %H:%M:%S.%f`).
@@ -322,13 +326,18 @@ pub fn encode_json_cell(v: &KValue, flavor: Flavor, enc: &ColumnEncoding) -> ser
 
 /// Encode one cell for PostgreSQL `COPY ... CSV NULL '\N'` (`psql_insert_copy`): `None` is
 /// `\N`, and so is every cell whose `str()` is null-like (`value_is_null`: `''`, `'None'`,
-/// `'nan'`, `'NA'`, `'NaT'`, `'<NA>'`, any case, and NaN floats), as v4 writes them.
+/// `'nan'`, `'NA'`, `'NaT'`, `'<NA>'`, any case, and NaN floats), as v4 writes them. A column
+/// with [`ColumnEncoding::keep_null_markers`] writes its null-like strings as text (an empty
+/// string as a quoted `""`, which `COPY ... CSV` reads as an empty string, not `NULL`).
 pub fn encode_copy_field(v: &KValue, enc: &ColumnEncoding) -> Option<String> {
     use serde_json::Value as J;
     if v.is_na() {
         return None;
     }
     match v {
+        KValue::Str(s) if enc.keep_null_markers && value_is_null(s) => {
+            return Some(s.replace('\0', ""));
+        }
         KValue::Str(s) if value_is_null(s) => return None,
         KValue::Json(J::String(s)) if value_is_null(s) => return None,
         KValue::Json(J::Null) => return None,
@@ -434,10 +443,30 @@ mod tests {
     }
 
     #[test]
+    fn copy_fields_keep_null_like_strings_of_text_columns() {
+        let enc = ColumnEncoding {
+            name: "a".into(),
+            numeric: None,
+            keep_null_markers: true,
+        };
+        for s in ["", "None", "nan", "NA", "NaT", "<NA>", "natz"] {
+            assert_eq!(
+                encode_copy_field(&KValue::Str(s.into()), &enc).as_deref(),
+                Some(s),
+                "{s:?}"
+            );
+        }
+        // Real nulls stay NULL.
+        assert_eq!(encode_copy_field(&KValue::Null, &enc), None);
+        assert_eq!(encode_copy_field(&KValue::NA, &enc), None);
+    }
+
+    #[test]
     fn copy_fields_write_null_like_values_as_null() {
         let enc = ColumnEncoding {
             name: "a".into(),
             numeric: None,
+            keep_null_markers: false,
         };
         for s in ["", "None", "nan", "NA", "NaT", "<NA>", "natz"] {
             assert_eq!(

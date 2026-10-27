@@ -153,6 +153,60 @@ impl ApiResponse {
         Ok(serde_json::from_slice(&self.bytes)?)
     }
 
+    /// The body of a v5-only route (`/pipelines/*`, `/engine/*`, `/execute*`), which answers
+    /// `{"success": bool, "message": str, ...}` with real status codes: the object when it
+    /// succeeded, else [`ConnectorError::Http`] with the status and the server's message. A body
+    /// in an older shape (a server before 5.0.0rc15) comes back as it is when the status is a
+    /// success, and as an error otherwise.
+    pub fn envelope(&self) -> ConnectorResult<serde_json::Value> {
+        let parsed = serde_json::from_slice::<serde_json::Value>(&self.bytes);
+        if let Ok(serde_json::Value::Object(o)) = &parsed
+            && let Some(success) = o.get("success").and_then(serde_json::Value::as_bool)
+            && let Some(message) = o.get("message").and_then(serde_json::Value::as_str)
+        {
+            if success && self.ok() {
+                return Ok(serde_json::Value::Object(o.clone()));
+            }
+            return Err(ConnectorError::Http {
+                status: self.status,
+                body: message.to_string(),
+            });
+        }
+        if !self.ok() {
+            if let Ok(serde_json::Value::Object(o)) = &parsed
+                && let Some(detail) = o.get("detail")
+            {
+                return Err(ConnectorError::Http {
+                    status: self.status,
+                    body: match detail {
+                        serde_json::Value::String(s) => s.clone(),
+                        other => crate::models::detail_repr(other),
+                    },
+                });
+            }
+            return Err(ConnectorError::Http {
+                status: self.status,
+                body: self.text(),
+            });
+        }
+        Ok(parsed?)
+    }
+
+    /// One field of an [`envelope`](Self::envelope) (`null` when absent); from a server before
+    /// 5.0.0rc15, the whole (older) body.
+    pub fn envelope_field(&self, key: &str) -> ConnectorResult<serde_json::Value> {
+        let j = self.envelope()?;
+        match j {
+            serde_json::Value::Object(mut o)
+                if o.get("success").is_some_and(serde_json::Value::is_boolean)
+                    && o.get("message").is_some_and(serde_json::Value::is_string) =>
+            {
+                Ok(o.remove(key).unwrap_or(serde_json::Value::Null))
+            }
+            other => Ok(other),
+        }
+    }
+
     /// `response.json()` with the body's `{"detail": ...}` turned into an error.
     pub fn json_or_detail(&self) -> ConnectorResult<serde_json::Value> {
         let j = self.json()?;

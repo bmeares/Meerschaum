@@ -547,8 +547,19 @@ pub struct LeaseResponse {
 
 /// Parse a JSON body as a `SuccessTuple` the way the Python client does: a list
 /// `[success, message]`, or `{"detail": ...}` (with the response's truthiness), or the raw text.
+/// The v5-only routes' `{"success": bool, "message": str, ...}` is read as its two fields.
 pub fn parse_success_tuple(ok: bool, text: &str) -> meerschaum_core::SuccessTuple {
     match serde_json::from_str::<serde_json::Value>(text) {
+        // The v5-only routes: `{"success": bool, "message": str, ...}`.
+        Ok(serde_json::Value::Object(o))
+            if o.get("success").is_some_and(serde_json::Value::is_boolean)
+                && o.get("message").is_some_and(serde_json::Value::is_string) =>
+        {
+            meerschaum_core::SuccessTuple {
+                success: ok && o["success"].as_bool().unwrap_or(false),
+                message: o["message"].as_str().unwrap_or_default().to_string(),
+            }
+        }
         Ok(serde_json::Value::Array(items)) if items.len() >= 2 => {
             let success = items[0].as_bool().unwrap_or(false);
             let message = match &items[1] {

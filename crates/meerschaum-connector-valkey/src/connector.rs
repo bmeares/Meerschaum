@@ -208,6 +208,20 @@ impl ValkeyConnector {
         &self.attributes
     }
 
+    /// `protected: true` on this connector (an attribute, or `?protected=true` on its `uri`):
+    /// every write is refused unless writes to protected connectors are allowed
+    /// (`--allow-protected`, `MRSM_ALLOW_PROTECTED=1`). The client library never sees the URI's
+    /// query string ([`ValkeyConnector::connection_url`]).
+    pub fn is_protected(&self) -> bool {
+        self.attributes
+            .get(meerschaum_core::protected::PROTECTED_ATTRIBUTE)
+            .is_some_and(meerschaum_core::protected::is_protected_attribute)
+            || self
+                .attributes
+                .get("uri")
+                .is_some_and(|uri| meerschaum_core::protected::uri_marks_protected(&attr_str(uri)))
+    }
+
     /// The backend.
     pub fn backend(&self) -> &Arc<dyn ValkeyBackend> {
         &self.backend
@@ -499,6 +513,7 @@ impl ValkeyConnector {
                 omit_columns,
                 reset_index: true,
                 coerce_types: false,
+                literal_null_markers: Vec::new(),
             },
         )
         .map_err(|e| ConnectorError::Backend(e.to_string()))?;

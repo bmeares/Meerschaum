@@ -20,6 +20,7 @@ mod misc;
 mod pipes;
 mod plugins;
 mod request;
+mod sync_status;
 mod tokens;
 pub mod uri;
 mod users;
@@ -229,6 +230,20 @@ impl APIConnector {
     /// The attributes.
     pub fn attributes(&self) -> &Map {
         &self.attributes
+    }
+
+    /// `protected: true` on this connector (an attribute, or `?protected=true` on its `uri`,
+    /// whose query parameters become attributes): every write through it is refused unless
+    /// writes to protected connectors are allowed (`--allow-protected`,
+    /// `MRSM_ALLOW_PROTECTED=1`).
+    pub fn is_protected(&self) -> bool {
+        self.attributes
+            .get(meerschaum_core::protected::PROTECTED_ATTRIBUTE)
+            .is_some_and(meerschaum_core::protected::is_protected_attribute)
+            || self
+                .attributes
+                .get("uri")
+                .is_some_and(|uri| meerschaum_core::protected::uri_marks_protected(&attr_str(uri)))
     }
 
     pub(crate) fn attr(&self, key: &str) -> Option<String> {

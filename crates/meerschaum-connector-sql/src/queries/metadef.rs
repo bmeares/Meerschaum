@@ -169,12 +169,49 @@ fn bound_to_int(b: &Bound, unit: &str) -> Bound {
     }
 }
 
+/// The text SQLAlchemy (and so v4 and v5's own inserts) stores a SQLite datetime as:
+/// `YYYY-MM-DD HH:MM:SS.ffffff` (a `T` separator is accepted).
+pub(crate) const SQLITE_CANONICAL_DATETIME_GLOB: &str = "[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9][ T][0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9][0-9][0-9][0-9]";
+
+/// [`SQLITE_CANONICAL_DATETIME_GLOB`] with only the space separator: the exact form stored.
+pub(crate) const SQLITE_STORED_DATETIME_GLOB: &str = "[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9][0-9][0-9][0-9]";
+
+/// A SQLite expression for a datetime value in its canonical text form
+/// (`YYYY-MM-DD HH:MM:SS.ffffff`, what `to_sql` writes): canonical text is kept (a `T`
+/// separator becomes a space), other date / datetime text (`'2024-01-03'` from `date()`,
+/// `'2024-01-03 10:00:00'` from `datetime()`, ISO text with an offset, which becomes UTC) is
+/// rewritten through `strftime` (millisecond precision), and anything else (numbers, text that
+/// is not a date) is left as it is. Canonical text compares chronologically as text, also with
+/// the `datetime(...)` bounds the query builders render.
+pub(crate) fn sqlite_canonical_datetime(col: &str) -> String {
+    format!(
+        "(CASE WHEN typeof({col}) != 'text' THEN {col} \
+         WHEN {col} GLOB '{SQLITE_CANONICAL_DATETIME_GLOB}' THEN substr({col}, 1, 10) || ' ' || substr({col}, 12) \
+         ELSE COALESCE(strftime('%Y-%m-%d %H:%M:%f', {col}) || '000', {col}) END)"
+    )
+}
+
+/// `col {op} bound` for a SQLite datetime column holding text in any ISO-like form: a coarse
+/// date-prefix range (index-friendly, a superset whatever the form or offset) and the exact
+/// comparison of the canonical form.
+fn sqlite_datetime_bound(col: &str, op: &str, bound: &str) -> String {
+    let coarse = if op == ">=" {
+        format!("date({bound}, '-1 day')")
+    } else {
+        format!("date({bound}, '+2 day')")
+    };
+    format!(
+        "\n    {col}\n    {op}\n    {coarse}\n    AND {}\n    {op}\n    {bound}\n",
+        sqlite_canonical_datetime(col)
+    )
+}
+
 /// `get_pipe_metadef(...)`: the fetch query wrapping the pipe's definition in
 /// `WITH "definition" AS (...)` with begin/end/backtrack bounds and `params`.
 ///
 /// Returns `Ok(None)` when the pipe has no definition (Python raises `ValueError`).
 pub fn get_pipe_metadef(flavor: Flavor, args: &MetadefArgs<'_>) -> Result<Option<String>> {
-    metadef_impl(flavor, args, false)
+    metadef_impl(flavor, args, false, false)
 }
 
 /// Runtime query variant for driver-specific, semantically equivalent expressions.
@@ -182,10 +219,26 @@ pub(crate) fn get_pipe_metadef_for_execution(
     flavor: Flavor,
     args: &MetadefArgs<'_>,
 ) -> Result<Option<String>> {
-    metadef_impl(flavor, args, true)
+    metadef_impl(flavor, args, true, false)
 }
 
-fn metadef_impl(flavor: Flavor, args: &MetadefArgs<'_>, execution: bool) -> Result<Option<String>> {
+/// The query a sync runs ([`get_pipe_metadef_for_execution`] plus the rc15 corrections, which
+/// `SQLConnector.get_pipe_metadef()` does not show): SQLite / GeoPackage compare the datetime
+/// column in its canonical text form ([`sqlite_canonical_datetime`]), and `params` on the
+/// pipe's declared text / index columns match null-like strings as text.
+pub(crate) fn get_pipe_metadef_for_sync(
+    flavor: Flavor,
+    args: &MetadefArgs<'_>,
+) -> Result<Option<String>> {
+    metadef_impl(flavor, args, true, true)
+}
+
+fn metadef_impl(
+    flavor: Flavor,
+    args: &MetadefArgs<'_>,
+    execution: bool,
+    sync: bool,
+) -> Result<Option<String>> {
     let dateadd_str = if execution {
         crate::dateadd::dateadd_for_execution
     } else {
@@ -375,14 +428,25 @@ fn metadef_impl(flavor: Flavor, args: &MetadefArgs<'_>, execution: bool) -> Resu
         {
             let pushdown_cte_name = sql_item_name("_mrsm_pushdown", flavor, None);
             let mut pushdown_where = String::new();
+            let parent_text_datetimes = sync
+                && matches!(flavor, Flavor::Sqlite | Flavor::Geopackage)
+                && !parent_dt_typ.to_lowercase().contains("int");
             if let Some(b) = &parent_begin_da {
-                pushdown_where.push_str(&format!("\n    {parent_dt_name} >= {b}"));
+                if parent_text_datetimes {
+                    pushdown_where.push_str(&sqlite_datetime_bound(&parent_dt_name, ">=", b));
+                } else {
+                    pushdown_where.push_str(&format!("\n    {parent_dt_name} >= {b}"));
+                }
             }
             if parent_begin_da.is_some() && parent_end_da.is_some() {
                 pushdown_where.push_str("\n    AND");
             }
             if let Some(e) = &parent_end_da {
-                pushdown_where.push_str(&format!("\n    {parent_dt_name} < {e}"));
+                if parent_text_datetimes {
+                    pushdown_where.push_str(&sqlite_datetime_bound(&parent_dt_name, "<", e));
+                } else {
+                    pushdown_where.push_str(&format!("\n    {parent_dt_name} < {e}"));
+                }
             }
             let pushdown_query =
                 format!("SELECT *\nFROM {parent_item_name_full}\nWHERE {pushdown_where}");
@@ -422,6 +486,12 @@ fn metadef_impl(flavor: Flavor, args: &MetadefArgs<'_>, execution: bool) -> Resu
         .or_else(|| lower.char_indices().last().map(|(i, _)| i))
         .unwrap_or(0);
     let mut has_where = lower[tail_start..].contains("where");
+    // SQLite compares datetimes as text, so a definition's `date(ts)` ('2024-01-03') is
+    // "before" the bound '2024-01-03 00:00:00'. In a sync the datetime column is compared in its
+    // canonical form ([`sqlite_canonical_datetime`]), behind a coarse date-prefix range that
+    // keeps any index on the column usable.
+    let sqlite_text_datetimes =
+        sync && matches!(flavor, Flavor::Sqlite | Flavor::Geopackage) && !is_int_typ;
     if dt_name.is_some() && (begin_da.is_some() || end_da.is_some()) && !handled_bounding {
         let definition_dt_name =
             format!("{definition_name}.{}", dt_name.clone().unwrap_or_default());
@@ -430,18 +500,47 @@ fn metadef_impl(flavor: Flavor, args: &MetadefArgs<'_>, execution: bool) -> Resu
         meta_def.push(' ');
         has_where = true;
         if let Some(b) = &begin_da {
-            meta_def.push_str(&format!("\n    {definition_dt_name}\n    >=\n    {b}\n"));
+            if sqlite_text_datetimes {
+                meta_def.push_str(&sqlite_datetime_bound(&definition_dt_name, ">=", b));
+            } else {
+                meta_def.push_str(&format!("\n    {definition_dt_name}\n    >=\n    {b}\n"));
+            }
         }
         if begin_da.is_some() && end_da.is_some() {
             meta_def.push_str("    AND");
         }
         if let Some(e) = &end_da {
-            meta_def.push_str(&format!("\n    {definition_dt_name}\n    <\n    {e}\n"));
+            if sqlite_text_datetimes {
+                meta_def.push_str(&sqlite_datetime_bound(&definition_dt_name, "<", e));
+            } else {
+                meta_def.push_str(&format!("\n    {definition_dt_name}\n    <\n    {e}\n"));
+            }
         }
     }
 
     if let Some(params) = args.params {
-        let params_where = build_where(params, flavor, false);
+        // In a sync, the pipe's declared text / index columns match null-like strings as text
+        // (rc15 Q18).
+        let params_where = if sync {
+            let explicit = crate::pipe::str_map(&pipe.dtypes());
+            let index: Vec<String> = crate::pipe::str_map(&pipe.columns())
+                .into_values()
+                .collect();
+            let literal = meerschaum_core::dtypes::null_marker_text_columns(
+                explicit.iter(),
+                index.iter(),
+                |c| explicit.get(c).cloned(),
+            );
+            crate::where_clause::build_where_literal(
+                params,
+                flavor,
+                false,
+                Default::default(),
+                &literal,
+            )
+        } else {
+            build_where(params, flavor, false)
+        };
         meta_def.push_str("\n    ");
         meta_def.push_str(if has_where { "AND" } else { "WHERE" });
         meta_def.push_str("    ");

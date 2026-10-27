@@ -64,6 +64,21 @@ pub fn build_where_with(
     with_where: bool,
     style: WhereStyle,
 ) -> String {
+    build_where_literal(params, flavor, with_where, style, &[])
+}
+
+/// [`build_where_with`] where the keys in `literal_null_markers` (a pipe's declared text
+/// columns and text index columns, `meerschaum_core::dtypes::null_marker_text_columns`) match
+/// null-like strings as text: `{'id': 'None'}` is `"id" = 'None'` and `{'id': '_NA'}` is
+/// `"id" != 'NA'`. Python `None` is still `IS NULL` and `'_None'` still `IS NOT NULL` there.
+/// Every other key keeps v4's rule (`'None'`, `'NA'`, `'nan'`, `''`, ... are `IS NULL`).
+pub fn build_where_literal(
+    params: &IndexMap<String, Value>,
+    flavor: Flavor,
+    with_where: bool,
+    style: WhereStyle,
+    literal_null_markers: &[String],
+) -> String {
     let params_json = Value::Map(params.clone()).json_dumps().to_lowercase();
     let negation_prefix = negation_prefix();
     for word in BAD_WORDS {
@@ -78,18 +93,29 @@ pub fn build_where_with(
         }
     }
 
-    let none_if_null = |v: &Value| -> Option<Value> {
-        if value_is_null(&v.py_str()) {
-            None
-        } else {
-            Some(v.clone())
-        }
-    };
-
     let leading_and = "\n    AND ";
     let mut where_ = String::new();
     for (key, value) in params {
         let key_name = sql_item_name(key, flavor, None);
+        let literal = literal_null_markers.contains(key);
+        // Whether a (negation-stripped) string means NULL: v4's null-like strings, or on a
+        // literal key only `None` itself after a negation (`'_None'`: `IS NOT NULL`), and on
+        // Oracle `''` (Oracle stores `''` as `NULL`, so `= ''` would never match).
+        let null_like = |text: &str, negated: bool| -> bool {
+            if literal {
+                (negated && text.eq_ignore_ascii_case("none"))
+                    || (flavor == Flavor::Oracle && text.is_empty())
+            } else {
+                value_is_null(text)
+            }
+        };
+        let none_if_null = |v: &Value, negated: bool| -> Option<Value> {
+            if matches!(v, Value::Null) || null_like(&v.py_str(), negated) {
+                None
+            } else {
+                Some(v.clone())
+            }
+        };
         match value {
             // Search across a list (`IN` syntax).
             Value::List(items) => {
@@ -102,7 +128,7 @@ pub fn build_where_with(
                 let includes: Vec<Option<Value>> = items
                     .iter()
                     .filter(|item| !item.py_str().starts_with(negation_prefix))
-                    .map(none_if_null)
+                    .map(|item| none_if_null(item, false))
                     .collect();
                 let has_null_includes = includes.iter().any(Option::is_none);
                 let not_null_includes: Vec<&Value> = includes.iter().flatten().collect();
@@ -111,7 +137,7 @@ pub fn build_where_with(
                     .filter(|item| item.py_str().starts_with(negation_prefix))
                     .map(|item| {
                         let s = item.py_str();
-                        none_if_null(&Value::Str(s[negation_prefix.len()..].to_string()))
+                        none_if_null(&Value::Str(s[negation_prefix.len()..].to_string()), true)
                     })
                     .collect();
                 let has_null_excludes = excludes.iter().any(Option::is_none);
@@ -182,7 +208,12 @@ pub fn build_where_with(
                 let as_str = value.clone().unwrap_or_else(|| "None".to_string());
                 // PARITY: `str(value).lstrip(negation_prefix)` strips *every* leading underscore
                 // (`utils/sql.py:1198`), so `'__None'` is still treated as `IS NOT NULL`.
-                if value_is_null(as_str.trim_start_matches(negation_prefix)) {
+                if value.is_none()
+                    || null_like(
+                        as_str.trim_start_matches(negation_prefix),
+                        as_str.starts_with(negation_prefix),
+                    )
+                {
                     value = if as_str.starts_with(negation_prefix) {
                         Some(format!("{negation_prefix}None"))
                     } else {
@@ -193,7 +224,7 @@ pub fn build_where_with(
                 if let Some(stripped) = current.strip_prefix(negation_prefix) {
                     let stripped = stripped.to_string();
                     eq_sign = "!=";
-                    if value_is_null(&stripped) {
+                    if null_like(&stripped, true) {
                         value = None;
                         is_null = "IS NOT NULL";
                     } else {
@@ -224,6 +255,57 @@ mod tests {
 
     fn params(json: &str) -> IndexMap<String, Value> {
         serde_json::from_str(json).unwrap()
+    }
+
+    #[test]
+    fn literal_keys_match_null_like_strings_as_text() {
+        let lit = vec!["id".to_string()];
+        let w = |json: &str, literal: &[String]| {
+            build_where_literal(
+                &params(json),
+                Flavor::Postgresql,
+                false,
+                WhereStyle::default(),
+                literal,
+            )
+        };
+        assert_eq!(w(r#"{"id": "None"}"#, &lit), "\"id\" = 'None'");
+        assert_eq!(w(r#"{"id": "NA"}"#, &lit), "\"id\" = 'NA'");
+        assert_eq!(w(r#"{"id": ""}"#, &lit), "\"id\" = ''");
+        assert_eq!(w(r#"{"id": null}"#, &lit), "\"id\" IS NULL");
+        assert_eq!(w(r#"{"id": "_None"}"#, &lit), "\"id\" IS NOT NULL");
+        assert_eq!(w(r#"{"id": "_NA"}"#, &lit), "\"id\" != 'NA'");
+        assert_eq!(
+            w(r#"{"id": ["NA", null, "_None"]}"#, &lit),
+            "(\"id\" IN ('NA')\n    OR \"id\" IS NULL)\n    AND (\"id\" IS NOT NULL)"
+        );
+        // Every other key: v4's rule.
+        assert_eq!(w(r#"{"id": "None"}"#, &[]), "\"id\" IS NULL");
+        assert_eq!(w(r#"{"other": "NA"}"#, &lit), "\"other\" IS NULL");
+        assert_eq!(w(r#"{"other": "_None"}"#, &lit), "\"other\" IS NOT NULL");
+    }
+
+    #[test]
+    fn oracle_empty_strings_stay_null_on_literal_keys() {
+        // Oracle stores '' as NULL: `= ''` would never match, so '' keeps v4's meaning.
+        let lit = vec!["id".to_string()];
+        let w = |json: &str| {
+            build_where_literal(
+                &params(json),
+                Flavor::Oracle,
+                false,
+                WhereStyle::default(),
+                &lit,
+            )
+        };
+        assert_eq!(w(r#"{"id": ""}"#), "id IS NULL");
+        assert_eq!(w(r#"{"id": "_"}"#), "id IS NOT NULL");
+        assert_eq!(
+            w(r#"{"id": ["", "a"]}"#),
+            "(id IN ('a')\n    OR id IS NULL)"
+        );
+        // The other null-like strings stay text there.
+        assert_eq!(w(r#"{"id": "None"}"#), "id = 'None'");
     }
 
     #[test]

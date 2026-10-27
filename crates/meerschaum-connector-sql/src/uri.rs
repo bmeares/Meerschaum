@@ -108,6 +108,10 @@ pub struct ConnectionSpec {
     pub pool_size: u32,
     /// SQLAlchemy `max_overflow`.
     pub max_overflow: u32,
+    /// `protected: true` (an attribute, or `?protected=true` on the URI): every write through
+    /// the connector is refused unless writes to protected connectors are allowed
+    /// ([`meerschaum_core::protected`]). Never passed to the driver.
+    pub protected: bool,
 }
 
 /// A value in the dictionaries returned by [`parse_uri`] / [`from_uri_params`].
@@ -351,9 +355,13 @@ impl ConnectionSpec {
         let mut schema = attrs.schema.clone();
         let mut options = attrs.options.clone();
         let mut params: IndexMap<String, String> = IndexMap::new();
+        let mut protected = false;
         for (k, v) in &attrs.extra {
-            // The interactive-client preference belongs to Meerschaum, not the SQL driver.
-            if k != "cli" {
+            // The interactive-client preference and the `protected` mark belong to Meerschaum,
+            // not the SQL driver.
+            if k == meerschaum_core::protected::PROTECTED_ATTRIBUTE {
+                protected = meerschaum_core::protected::truthy_text(v);
+            } else if k != "cli" {
                 params.insert(k.clone(), v.clone());
             }
         }
@@ -397,6 +405,10 @@ impl ConnectionSpec {
                     "schema" => schema = Some(text),
                     "flavor" => parsed_flavor = Some(text),
                     "options" => options = Some(ConnectionOptions::Str(text)),
+                    // `?protected=true` marks the connector; the driver never sees it.
+                    "protected" => {
+                        protected = protected || meerschaum_core::protected::truthy_text(&text)
+                    }
                     _ => {
                         params.insert(key, text);
                     }
@@ -464,6 +476,10 @@ impl ConnectionSpec {
             }
         }
 
+        // The `protected` mark is Meerschaum's: interactive clients (`mrsm sql`) that receive the
+        // URI must not see it either.
+        let uri =
+            uri.map(|u| strip_query_param(&u, meerschaum_core::protected::PROTECTED_ATTRIBUTE));
         Ok(ConnectionSpec {
             flavor,
             label,
@@ -478,6 +494,7 @@ impl ConnectionSpec {
             params,
             pool_size: attrs.pool_size.unwrap_or(DEFAULT_POOL_SIZE),
             max_overflow: attrs.max_overflow.unwrap_or(DEFAULT_MAX_OVERFLOW),
+            protected,
         })
     }
 
@@ -708,6 +725,39 @@ pub fn parse_qsl(qs: &str) -> Vec<(String, String)> {
     out
 }
 
+/// `uri` without its `key=...` query parameters (the rest of the query is kept verbatim, in
+/// order; the `?` goes when nothing is left). A URI without the parameter is returned as is.
+pub fn strip_query_param(uri: &str, key: &str) -> String {
+    let Some((base, rest)) = uri.split_once('?') else {
+        return uri.to_string();
+    };
+    let (query, fragment) = match rest.split_once('#') {
+        Some((q, f)) => (q, Some(f)),
+        None => (rest, None),
+    };
+    let named = |pair: &str| {
+        let name = pair.split_once('=').map_or(pair, |(n, _)| n);
+        unquote(&name.replace('+', " ")) == key
+    };
+    if !query.split('&').any(named) {
+        return uri.to_string();
+    }
+    let kept: Vec<&str> = query
+        .split('&')
+        .filter(|p| !p.is_empty() && !named(p))
+        .collect();
+    let mut out = base.to_string();
+    if !kept.is_empty() {
+        out.push('?');
+        out.push_str(&kept.join("&"));
+    }
+    if let Some(f) = fragment {
+        out.push('#');
+        out.push_str(f);
+    }
+    out
+}
+
 /// `urllib.parse.parse_qs(qs)`: values grouped by key in first-occurrence order.
 pub fn parse_qs(qs: &str) -> IndexMap<String, Vec<String>> {
     let mut out: IndexMap<String, Vec<String>> = IndexMap::new();
@@ -758,6 +808,58 @@ mod tests {
             Some("require")
         );
         assert!(!spec.engine_str().unwrap().contains("cli="));
+    }
+
+    #[test]
+    fn protected_is_meerschaums_not_the_drivers() {
+        let spec = ConnectionSpec::from_uri(
+            "postgresql://alice:pw@db.example/prod?sslmode=require&protected=true",
+            Some("prod"),
+            None,
+        )
+        .unwrap();
+        assert!(spec.protected);
+        assert!(!spec.params.contains_key("protected"));
+        assert_eq!(
+            spec.params.get("sslmode").map(String::as_str),
+            Some("require")
+        );
+        let engine = spec.engine_str().unwrap();
+        assert!(!engine.contains("protected"), "{engine}");
+        assert!(engine.contains("sslmode=require"), "{engine}");
+
+        let spec = ConnectionSpec::from_attributes(&ConnectorAttributes {
+            flavor: Some(Flavor::Sqlite),
+            database: Some("/tmp/x.db".into()),
+            extra: vec![("protected".into(), "True".into())],
+            ..Default::default()
+        })
+        .unwrap();
+        assert!(spec.protected);
+        assert!(spec.params.is_empty());
+
+        let spec = ConnectionSpec::from_uri("sqlite:////tmp/x.db", None, None).unwrap();
+        assert!(!spec.protected);
+        let spec =
+            ConnectionSpec::from_uri("sqlite:////tmp/x.db?protected=false", None, None).unwrap();
+        assert!(!spec.protected);
+    }
+
+    #[test]
+    fn strip_query_param_keeps_the_rest() {
+        assert_eq!(strip_query_param("a://h/db", "protected"), "a://h/db");
+        assert_eq!(
+            strip_query_param("a://h/db?protected=true", "protected"),
+            "a://h/db"
+        );
+        assert_eq!(
+            strip_query_param("a://h/db?x=1&protected=1&y=2", "protected"),
+            "a://h/db?x=1&y=2"
+        );
+        assert_eq!(
+            strip_query_param("a://h/db?x=1#frag", "protected"),
+            "a://h/db?x=1#frag"
+        );
     }
 
     #[test]

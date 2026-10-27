@@ -56,8 +56,28 @@ impl SqlConnector {
         }
     }
 
+    /// [`pipe_state_cached`](SqlConnector::pipe_state_cached) for the reads `Pipe` methods
+    /// make: without cached columns types, a database that cannot be asked whether the table
+    /// exists is an error ([`pipe_state_checked`](SqlConnector::pipe_state_checked)).
+    pub async fn pipe_state_cached_checked(
+        &self,
+        sp: &SqlPipe,
+        cached: Option<IndexMap<String, String>>,
+    ) -> ConnectorResult<PipeState> {
+        match cached.filter(|c| !c.is_empty()) {
+            Some(c) => Ok(self.pipe_state_cached(sp, Some(c)).await),
+            None => {
+                let start = Instant::now();
+                let state = self.pipe_state_checked(sp).await;
+                trace("sql: pipe_state", start);
+                state
+            }
+        }
+    }
+
     /// [`get_sync_time`](SqlConnector::get_sync_time) with the caller's cached columns types
-    /// (see [`pipe_state_cached`](SqlConnector::pipe_state_cached)).
+    /// (see [`pipe_state_cached`](SqlConnector::pipe_state_cached)). Database errors are
+    /// returned (`Pipe.get_sync_time()` raises them).
     pub async fn get_sync_time_cached(
         &self,
         pipe: &Pipe,
@@ -71,8 +91,8 @@ impl SqlConnector {
         }
         let pipe = &self.prepare_pipe(pipe).await;
         let sp = self.sql_pipe(pipe)?;
-        let state = self.pipe_state_cached(&sp, cached).await;
-        Ok(self.sync_time(&sp, &state, params, newest).await)
+        let state = self.pipe_state_cached_checked(&sp, cached).await?;
+        self.sync_time_checked(&sp, &state, params, newest).await
     }
 
     /// [`get_pipe_rowcount`](SqlConnector::get_pipe_rowcount) with the caller's cached columns
@@ -88,7 +108,7 @@ impl SqlConnector {
         }
         let pipe = &self.prepare_pipe(pipe).await;
         let sp = self.sql_pipe(pipe)?;
-        let state = self.pipe_state_cached(&sp, cached).await;
+        let state = self.pipe_state_cached_checked(&sp, cached).await?;
         let Some(sql) = self.get_pipe_rowcount_query(&sp, &state, query)? else {
             return Ok(None);
         };
@@ -98,9 +118,9 @@ impl SqlConnector {
             && query.end.is_none()
             && query.params.as_ref().is_none_or(|p| p.is_empty());
         let value = if stable {
-            self.value_catalog(&sql).await
+            self.value_catalog_checked(&sql).await?
         } else {
-            self.value(&sql).await
+            self.value_checked(&sql).await?
         };
         Ok(value.and_then(|v| v.as_i64()))
     }
@@ -197,7 +217,7 @@ impl SqlConnector {
     ) -> ConnectorResult<(Option<Frame>, PipeState)> {
         let pipe = &self.prepare_pipe(pipe).await;
         let sp = self.sql_pipe(pipe)?;
-        let state = self.pipe_state_cached(&sp, cached).await;
+        let state = self.pipe_state_cached_checked(&sp, cached).await?;
         if !state.exists {
             return Ok((None, state));
         }

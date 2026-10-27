@@ -972,6 +972,45 @@ impl SqlDriver {
         }
     }
 
+    /// [`copy_in`](SqlDriver::copy_in) after `prelude` statements, all in one transaction (a
+    /// replacing sync deletes its window and copies the new rows atomically). Returns the
+    /// prelude statements' row counts and the number of rows copied; any failure rolls back.
+    pub async fn copy_in_after(
+        &self,
+        prelude: &[String],
+        copy_sql: &str,
+        data: Vec<u8>,
+    ) -> Result<(Vec<u64>, u64)> {
+        prelude.iter().for_each(|q| debug_sql!(q));
+        meerschaum_core::dprint!(
+            "{}\n({} bytes)",
+            meerschaum_core::debug::redact_sql(copy_sql),
+            data.len()
+        );
+        self.ready().await?;
+        match &self.pool {
+            Pool::Postgres(p) => {
+                let mut tx = p.begin().await?;
+                let mut counts = Vec::with_capacity(prelude.len());
+                for sql in prelude {
+                    counts.push(backend::pg_tx::tx_exec(&mut tx, sql).await?);
+                }
+                let mut copy = tx.copy_in_raw(copy_sql).await?;
+                if let Err(e) = copy.send(data).await {
+                    let _ = copy.abort(e.to_string()).await;
+                    return Err(e.into());
+                }
+                let n = copy.finish().await?;
+                tx.commit().await?;
+                Ok((counts, n))
+            }
+            _ => Err(crate::error::SqlError::InvalidArgument(format!(
+                "COPY is only available on PostgreSQL (flavor '{}').",
+                self.flavor.as_str()
+            ))),
+        }
+    }
+
     /// Begin a transaction on a pooled connection.
     pub async fn begin(&self) -> Result<SqlTransaction> {
         self.ready().await?;
@@ -1001,6 +1040,24 @@ impl SqlDriver {
             }
             _ => self.begin().await,
         }
+    }
+
+    /// [`SqlDriver::begin`] for a transaction that must not write: `BEGIN READ ONLY` on the
+    /// PostgreSQL family and `START TRANSACTION READ ONLY` on MySQL / MariaDB refuse its writes.
+    /// SQLite, MSSQL and DuckDB have no read-only transactions, and Oracle's (`SET TRANSACTION
+    /// READ ONLY`) cannot read a table altered in the last few seconds (`ORA-01466`): the caller
+    /// rolls this one back, which undoes their writes (DDL included, except on Oracle, where
+    /// [`crate::readonly::is_read_statement`] keeps DDL out). See [`crate::readonly`].
+    pub async fn begin_read_only(&self) -> Result<SqlTransaction> {
+        self.ready().await?;
+        let inner = match &self.pool {
+            Pool::Postgres(p) => TxInner::Postgres(p.begin_with("BEGIN READ ONLY").await?),
+            Pool::Mysql(p) => TxInner::Mysql(p.begin_with("START TRANSACTION READ ONLY").await?),
+            Pool::Sqlite(p) => TxInner::Sqlite(p.begin().await?),
+            #[cfg(any(feature = "mssql", feature = "duckdb", feature = "oracle"))]
+            Pool::Native(p) => TxInner::Native(p.begin().await?),
+        };
+        Ok(SqlTransaction { inner })
     }
 
     /// Close every pooled connection.

@@ -66,6 +66,10 @@ impl Connector for SqlConnector {
         SqlConnector::is_thread_safe(self)
     }
 
+    fn is_protected(&self) -> bool {
+        SqlConnector::is_protected(self)
+    }
+
     async fn test_connection(&self) -> ConnectorResult<bool> {
         Ok(self.value(self.flavor.test_query()).await.is_some())
     }
@@ -234,6 +238,38 @@ impl InstanceConnector for SqlConnector {
         self.require_schema().await?;
         let pipe = &self.prepare_pipe(pipe).await;
         SqlConnector::get_pipe_rowcount(self, pipe, query).await
+    }
+
+    async fn get_pipe_rowcount_estimate(
+        &self,
+        pipe: &Pipe,
+        query: &DataQuery,
+    ) -> ConnectorResult<Option<i64>> {
+        self.require_schema().await?;
+        let pipe = &self.prepare_pipe(pipe).await;
+        SqlConnector::get_pipe_rowcount_estimate(self, pipe, query, None).await
+    }
+
+    async fn get_pipe_schema_plan(
+        &self,
+        pipe: &Pipe,
+    ) -> ConnectorResult<meerschaum_connector::SchemaPlan> {
+        self.require_schema().await?;
+        let pipe = &self.prepare_pipe(pipe).await;
+        SqlConnector::get_pipe_schema_plan(self, pipe).await
+    }
+
+    async fn apply_pipe_schema(
+        &self,
+        pipe: &Pipe,
+        plan: &meerschaum_connector::SchemaPlan,
+        safe_only: bool,
+    ) -> SuccessTuple {
+        if let Err(e) = self.require_schema().await {
+            return SuccessTuple::fail(e.to_string());
+        }
+        let pipe = &self.prepare_pipe(pipe).await;
+        SqlConnector::apply_pipe_schema(self, pipe, plan, safe_only).await
     }
 
     async fn get_pipe_columns_types(

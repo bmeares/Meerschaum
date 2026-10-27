@@ -4,6 +4,7 @@ use std::time::Instant;
 
 use indexmap::IndexMap;
 use meerschaum_core::pyfmt::{JsonStyle, json_dumps, py_str};
+use meerschaum_core::success::SyncResult;
 use meerschaum_core::{Map, Pipe, SuccessTuple, Value};
 use meerschaum_kernel::Frame;
 use meerschaum_kernel::serialize::GeometryFormat;
@@ -124,9 +125,45 @@ fn thousands(n: usize) -> String {
     out
 }
 
+/// The error of a read the server failed (`5xx`: its instance errored or could not be reached),
+/// rc15 Q17: a failed read is an error, not an empty pipe. `4xx` answers (an unregistered pipe,
+/// a table not created yet) keep v4's empty results.
+fn server_failed(pipe: &Pipe, what: &str, response: &ApiResponse) -> Option<ConnectorError> {
+    (response.status >= 500).then(|| {
+        let body = response.text();
+        let detail = serde_json::from_str::<serde_json::Value>(&body)
+            .ok()
+            .and_then(|j| {
+                j.get("detail")
+                    .or_else(|| j.get("message"))
+                    .and_then(|d| d.as_str().map(str::to_string))
+            })
+            .unwrap_or(body);
+        ConnectorError::Backend(format!(
+            "Failed to get {what} for {pipe}: the API server answered {}{}",
+            response.status,
+            if detail.trim().is_empty() {
+                ".".to_string()
+            } else {
+                format!(":\n{}", detail.trim())
+            }
+        ))
+    })
+}
+
 /// The v4 pattern for maintenance and delete routes: a JSON list is the tuple, a `detail` body
-/// keeps the response's truthiness, anything else returns the raw text.
+/// keeps the response's truthiness, anything else returns the raw text. The v5-only routes'
+/// `{"success": bool, "message": str}` (the saved Pipelines' metadata) is read as its fields.
 fn tuple_from_json(response: &ApiResponse, data: &serde_json::Value) -> SuccessTuple {
+    if let serde_json::Value::Object(o) = data
+        && let Some(success) = o.get("success").and_then(serde_json::Value::as_bool)
+        && let Some(message) = o.get("message").and_then(serde_json::Value::as_str)
+    {
+        return SuccessTuple {
+            success: success && response.ok(),
+            message: message.to_string(),
+        };
+    }
     match data {
         serde_json::Value::Array(items) => SuccessTuple {
             success: items.first().and_then(|b| b.as_bool()).unwrap_or(false),
@@ -184,9 +221,15 @@ impl APIConnector {
         )
     }
 
+    /// Whether `pipe` is a saved Pipeline's registration (`Pipe('mrsm', 'pipeline', name)`),
+    /// whose metadata travels over `/pipelines/{name}/*` (the v5 shape).
+    fn is_pipeline_metadata(pipe: &Pipe) -> bool {
+        pipe.connector_keys() == "mrsm" && pipe.metric_key() == "pipeline"
+    }
+
     /// Metadata transport is narrowly reserved for registered Pipeline definitions.
     fn metadata_r_url(pipe: &Pipe) -> String {
-        if pipe.connector_keys() == "mrsm" && pipe.metric_key() == "pipeline" {
+        if Self::is_pipeline_metadata(pipe) {
             format!(
                 "{}/{}",
                 routes::PIPELINES,
@@ -350,6 +393,9 @@ impl APIConnector {
 
     /// `register_pipe(pipe)`: `POST /pipes/{keys}/register` with the in-memory parameters.
     pub async fn register_pipe(&self, pipe: &Pipe) -> SuccessTuple {
+        if let Some(refused) = meerschaum_connector::protected_refusal(self, pipe, "register") {
+            return refused;
+        }
         let r_url = Self::metadata_r_url(pipe) + "/register";
         let opts = RequestOptions {
             query: vec![self.instance_query(pipe, "instance_keys")],
@@ -361,6 +407,12 @@ impl APIConnector {
             Err(e) => return SuccessTuple::fail(e.to_string()),
         };
         if !response.ok() {
+            // A saved Pipeline's registration answers `{"success": false, "message": ...}`.
+            if Self::is_pipeline_metadata(pipe)
+                && let Ok(data) = response.json()
+            {
+                return tuple_from_json(&response, &data);
+            }
             return SuccessTuple::fail(response.text());
         }
         match response.json() {
@@ -371,6 +423,9 @@ impl APIConnector {
 
     /// `edit_pipe(pipe, patch)`: `PATCH /pipes/{keys}/edit` with `pipe.get_parameters()`.
     pub async fn edit_pipe(&self, pipe: &Pipe, patch: bool) -> SuccessTuple {
+        if let Some(refused) = meerschaum_connector::protected_refusal(self, pipe, "edit") {
+            return refused;
+        }
         let parameters = if patch {
             self.pipe_parameters(pipe).await
         } else {
@@ -417,20 +472,24 @@ impl APIConnector {
             ("instance_keys", QueryValue::opt(self.instance_keys())),
             ("as_dict", QueryValue::bool(true)),
         ]);
-        let base = if query.connector_keys == ["mrsm"] && query.metric_keys == ["pipeline"] {
+        let pipelines = query.connector_keys == ["mrsm"] && query.metric_keys == ["pipeline"];
+        let base = if pipelines {
             routes::PIPELINES
         } else {
             routes::PIPES
         };
-        let j = self
-            .get(&format!("{base}/keys"), opts)
-            .await?
-            .json_or_detail()?;
+        let response = self.get(&format!("{base}/keys"), opts).await?;
+        // The saved Pipelines' keys come as `{"success": true, ..., "keys": [...]}`.
+        let j = if pipelines {
+            response.envelope_field("keys")?
+        } else {
+            response.json_or_detail()?
+        };
         let entry = |v: &serde_json::Value| -> Option<PipeKeysEntry> {
             let items: Vec<Value> = v.as_array()?.iter().map(pipe_ops::json_to_core).collect();
             PipeKeysEntry::from_list(&items)
         };
-        Ok(match j {
+        let keys = match j {
             serde_json::Value::Object(o) => PipesKeys::Dict(
                 o.iter()
                     .filter_map(|(k, v)| Some((PipeId::parse(k), entry(v)?)))
@@ -438,32 +497,78 @@ impl APIConnector {
             ),
             serde_json::Value::Array(a) => PipesKeys::List(a.iter().filter_map(entry).collect()),
             _ => PipesKeys::List(Vec::new()),
-        })
+        };
+        // Meerschaum's internal pipes stay out of listings unless the query names `mrsm` (the
+        // server leaves them out too; an older server may not).
+        Ok(meerschaum_connector::hide_internal_pipes(query, keys))
     }
 
     /// `sync_pipe(pipe, df, chunksize, **kw)`: post the frame in chunks
     /// (`to_json(chunk, orient='columns', geometry_format='wkb_hex')`), forwarding the keyword
     /// arguments as query parameters, then invalidate the server's pipe cache.
     pub async fn sync_pipe(&self, pipe: &Pipe, df: Frame, opts: &SyncOptions) -> SuccessTuple {
+        self.sync_pipe_counted(pipe, df, opts).await.into()
+    }
+
+    /// [`APIConnector::sync_pipe`] with the row counts the server reported for the chunks it
+    /// synced (`Inserted 2, updated 1 rows.`, `Upserted 3 rows.`, `Replaced 1 row with 2
+    /// rows.`), summed. The message is `sync_pipe`'s (v4's `It took ... to sync 3 rows across 2
+    /// chunks ...`), which has none (`InstanceConnector::sync_pipe_with_counts`).
+    pub async fn sync_pipe_counted(
+        &self,
+        pipe: &Pipe,
+        df: Frame,
+        opts: &SyncOptions,
+    ) -> SyncResult {
+        if let Some(refused) = meerschaum_connector::protected_refusal(self, pipe, "sync") {
+            return refused.into();
+        }
         if crate::engine_pipes::is_engine_pipe(pipe) {
-            return self.write_engine_pipe(pipe.metric_key(), &df).await;
+            return self.write_engine_pipe(pipe.metric_key(), &df).await.into();
         }
         let begin = Instant::now();
+        // A replacing sync (rc15): `opts.replace` with the window the engine resolved, or
+        // `replace=True` among the keyword arguments of a direct `APIConnector.sync_pipe(...)`
+        // call, whose `begin` / `end` (when given) go along as they are and whose missing
+        // bounds the server takes from the posted rows (never the whole table).
+        let replace = opts.replace || opts.extra.get("replace").is_some_and(Value::truthy);
         // PARITY: `chunksize=None` posts one row per request (`1 if chunksize is None`).
-        let chunksize = match opts.chunksize {
-            None => 1,
-            Some(-1) => self.sync_chunksize,
-            Some(n) => n,
+        // A replacing sync posts every row in one request: the server replaces the window
+        // once, in one transaction.
+        let chunksize = if replace {
+            df.height()
+        } else {
+            match opts.chunksize {
+                None => 1,
+                Some(-1) => self.sync_chunksize,
+                Some(n) => n,
+            }
+            .max(1) as usize
         }
-        .max(1) as usize;
+        .max(1);
 
         let mut query: Vec<(String, QueryValue)> = opts
             .extra
             .iter()
+            .filter(|(k, _)| {
+                !opts.replace || !matches!(k.as_str(), "replace" | "begin" | "end" | "params")
+            })
             .map(|(k, v)| (k.clone(), query_value(v)))
             .collect();
         if !opts.extra.contains_key("check_existing") && !opts.check_existing {
             query.push(("check_existing".into(), QueryValue::bool(false)));
+        }
+        if opts.replace {
+            // The resolved window: an unbounded side is sent as `None` (not left out, which the
+            // server would read as "the rows' own range").
+            let window_bound = |b: &Option<DateBound>| match b {
+                Some(_) => bound_query(b),
+                None => QueryValue::One("None".into()),
+            };
+            query.push(("replace".into(), QueryValue::bool(true)));
+            query.push(("begin".into(), window_bound(&opts.begin)));
+            query.push(("end".into(), window_bound(&opts.end)));
+            query.push(("params".into(), py_json_opt_map(&opts.params).into()));
         }
         let parameters = self.pipe_resolved_parameters(pipe).await;
         let mut merged = pipe.clone();
@@ -483,7 +588,42 @@ impl APIConnector {
         };
         let mut rowcount = 0usize;
         let mut num_success_chunks = 0usize;
+        // The server's counts for each chunk (`Inserted 2, updated 1 rows.`), summed.
+        let mut counts = SyncResult::new(true, String::new());
         let mut start = 0usize;
+        if replace && n == 0 {
+            // No rows: the window is cleared.
+            let response = match self
+                .post(
+                    &r_url,
+                    RequestOptions {
+                        query: query.clone(),
+                        body: Body::Text(String::new()),
+                        ..Default::default()
+                    },
+                )
+                .await
+            {
+                Ok(r) => r,
+                Err(e) => return SuccessTuple::fail(format!("Failed to sync {pipe}:\n{e}")).into(),
+            };
+            let _ = self.delete_pipe_cache(pipe).await;
+            return match response.json() {
+                Ok(j @ serde_json::Value::Array(_)) => {
+                    let t = tuple_from_json(&response, &j);
+                    pipe_ops::sync_result_from_message(t.success, t.message)
+                }
+                // A refused window (`400`: no rows and no bounds) explains itself.
+                Ok(serde_json::Value::Object(o)) if o.contains_key("detail") => {
+                    SuccessTuple::fail(match &o["detail"] {
+                        serde_json::Value::String(s) => s.clone(),
+                        other => crate::models::detail_repr(other),
+                    })
+                    .into()
+                }
+                _ => SuccessTuple::fail(response.text()).into(),
+            };
+        }
         while start < n {
             let end = (start + chunksize).min(n);
             let indices: Vec<usize> = (start..end).collect();
@@ -499,6 +639,16 @@ impl APIConnector {
                     RequestOptions {
                         query: query.clone(),
                         body: Body::Text(json_str),
+                        // A sync path records this sync's outcome itself, through this client
+                        // (`client/sync_status.rs`): the server must not record the posts.
+                        headers: if meerschaum_connector::sync_status::in_recorded_sync() {
+                            vec![(
+                                meerschaum_connector::sync_status::CLIENT_RECORDS_HEADER.into(),
+                                "client".into(),
+                            )]
+                        } else {
+                            Vec::new()
+                        },
                         ..Default::default()
                     },
                 )
@@ -508,46 +658,60 @@ impl APIConnector {
                 Err(e) => {
                     let msg = format!("Failed to post a chunk to {pipe}:\n{e}");
                     super::warnings::warn_pipe_fmt!(pipe, "{msg}");
-                    return SuccessTuple::fail(msg);
+                    return SuccessTuple::fail(msg).into();
                 }
             };
             if !response.ok() {
-                return SuccessTuple::fail(format!("Failed to sync a chunk:\n{}", response.text()));
+                return SuccessTuple::fail(format!("Failed to sync a chunk:\n{}", response.text()))
+                    .into();
             }
             let j = match response.json() {
                 Ok(j) => j,
                 Err(e) => {
                     return SuccessTuple::fail(format!(
                         "Failed to parse response from syncing {pipe}:\n{e}"
-                    ));
+                    ))
+                    .into();
                 }
             };
             if let Some(d) = j.as_object().and_then(|o| o.get("detail")) {
                 return SuccessTuple::fail(match d {
                     serde_json::Value::String(s) => s.clone(),
                     other => crate::models::detail_repr(other),
-                });
+                })
+                .into();
             }
             let t = match &j {
                 serde_json::Value::Array(_) => tuple_from_json(&response, &j),
-                _ => return SuccessTuple::fail(response.text()),
+                _ => return SuccessTuple::fail(response.text()).into(),
             };
             if !t.success {
-                return t;
+                return t.into();
             }
+            let chunk_counts = pipe_ops::sync_result_from_message(t.success, t.message);
+            if replace {
+                // The server's `Replaced {deleted} rows with {inserted} rows.` (the counts).
+                let _ = self.delete_pipe_cache(pipe).await;
+                return chunk_counts;
+            }
+            counts.inserted += chunk_counts.inserted;
+            counts.updated += chunk_counts.updated;
+            counts.upserted += chunk_counts.upserted;
+            counts.deleted += chunk_counts.deleted;
             rowcount += indices.len();
             num_success_chunks += 1;
         }
         let _ = self.delete_pipe_cache(pipe).await;
         let elapsed = begin.elapsed().as_secs_f64();
-        SuccessTuple::ok(format!(
+        counts.message = format!(
             "It took {} to sync {} row{} across {} chunk{} to {pipe}.",
             format_timespan(elapsed),
             thousands(rowcount),
             if rowcount != 1 { "s" } else { "" },
             thousands(num_success_chunks),
             if num_success_chunks != 1 { "s" } else { "" },
-        ))
+        );
+        counts
     }
 
     /// `delete_pipe_cache(pipe)`: `DELETE /pipes/{keys}/cache`.
@@ -583,6 +747,9 @@ impl APIConnector {
 
     /// `delete_pipe(pipe)`: `DELETE /pipes/{keys}/delete`.
     pub async fn delete_pipe(&self, pipe: &Pipe) -> SuccessTuple {
+        if let Some(refused) = meerschaum_connector::protected_refusal(self, pipe, "delete") {
+            return refused;
+        }
         let r_url = Self::metadata_r_url(pipe) + "/delete";
         let response = match self
             .delete(
@@ -636,23 +803,16 @@ impl APIConnector {
             ),
             ("as_chunks", QueryValue::bool(query.as_chunks)),
         ]);
-        let response = match self.get(&r_url, opts).await {
-            Ok(r) => r,
-            Err(e) => {
-                super::warnings::warn_pipe_fmt!(pipe, "Failed to get data for {pipe}:\n{e}");
-                return Ok(None);
-            }
-        };
+        // Q17: an unreachable server or a failed read (`5xx`) is an error, not an empty pipe;
+        // an unregistered pipe (`409`) or one without a table yet (`400`) has no data.
+        let response = self.get(&r_url, opts).await?;
         if !response.ok() {
+            if let Some(e) = server_failed(pipe, "data", &response) {
+                return Err(e);
+            }
             return Ok(None);
         }
-        let j = match response.json() {
-            Ok(j) => j,
-            Err(e) => {
-                super::warnings::warn_pipe_fmt!(pipe, "Failed to get data for {pipe}:\n{e}");
-                return Ok(None);
-            }
-        };
+        let j = response.json()?;
         if let Some(d) = j.as_object().and_then(|o| o.get("detail")) {
             // PARITY: v4 returns the tuple `(False, detail)` here instead of a DataFrame.
             return Err(ConnectorError::Detail(match d {
@@ -716,14 +876,11 @@ impl APIConnector {
                 QueryValue::opt(self.get_pipe_instance_keys(pipe)),
             ),
         ]);
-        let response = match self.get(&r_url, opts).await {
-            Ok(r) => r,
-            Err(e) => {
-                super::warnings::warn_pipe_fmt!(pipe, "Failed to get docs for {pipe}:\n{e}");
-                return Ok(Vec::new());
-            }
-        };
+        let response = self.get(&r_url, opts).await?;
         if !response.ok() {
+            if let Some(e) = server_failed(pipe, "docs", &response) {
+                return Err(e);
+            }
             super::warnings::warn_pipe_fmt!(
                 pipe,
                 "Failed to get docs for {pipe}:\n{}",
@@ -751,6 +908,17 @@ impl APIConnector {
                 },
             )
             .await?;
+        if Self::is_pipeline_metadata(pipe) {
+            // `{"success": true, "message": ..., "id": ...}`, or `404` when not registered.
+            if response.status == 404 {
+                return Ok(None);
+            }
+            return Ok(match response.envelope_field("id")? {
+                serde_json::Value::Number(n) => n.as_i64().map(PipeId::Int),
+                serde_json::Value::String(s) if !s.is_empty() => Some(PipeId::Str(s)),
+                _ => None,
+            });
+        }
         let text = response.text();
         if meerschaum_core::pyfmt::is_int(&text)
             && let Ok(i) = text.trim().parse::<i64>()
@@ -775,6 +943,20 @@ impl APIConnector {
                 },
             )
             .await?;
+        if Self::is_pipeline_metadata(pipe) {
+            // `{"success": true, ..., "attributes": {...}}`; an unregistered Pipeline (`404`) has
+            // no attributes, like an unregistered pipe.
+            if response.status == 404 {
+                return Ok(Map::new());
+            }
+            return match pipe_ops::json_to_core(&response.envelope_field("attributes")?) {
+                Value::Map(m) => Ok(m),
+                Value::Null => Ok(Map::new()),
+                _ => Err(ConnectorError::Invalid(format!(
+                    "Invalid attributes response for {pipe}."
+                ))),
+            };
+        }
         if !response.ok() {
             return Err(ConnectorError::Http {
                 status: response.status,
@@ -815,6 +997,9 @@ impl APIConnector {
         };
         let response = self.get(&r_url, opts).await?;
         if !response.ok() {
+            if let Some(e) = server_failed(pipe, "the sync time", &response) {
+                return Err(e);
+            }
             super::warnings::warn_pipe_fmt!(
                 pipe,
                 "Failed to get the sync time for {pipe}:\n{}",
@@ -918,6 +1103,57 @@ impl APIConnector {
         };
         let response = self.get(&r_url, opts).await?;
         if !response.ok() {
+            if let Some(e) = server_failed(pipe, "the rowcount", &response) {
+                return Err(e);
+            }
+            super::warnings::warn_pipe_fmt!(
+                pipe,
+                "Failed to get the rowcount for {pipe}:\n{}",
+                response.text()
+            );
+            return Ok(0);
+        }
+        Ok(match response.json() {
+            Ok(serde_json::Value::Number(n)) => n.as_i64().unwrap_or(0),
+            Ok(serde_json::Value::String(s)) => s.trim().parse().unwrap_or(0),
+            _ => 0,
+        })
+    }
+
+    /// `get_pipe_rowcount(pipe, estimate=True)`: `GET /pipes/{keys}/rowcount?estimate=true`
+    /// (the server's catalog estimate, contract C1). Bounds, `params` and `remote` make the
+    /// count exact; a server that refuses the parameter (a `4xx`) is asked for the exact count.
+    pub async fn get_pipe_rowcount_estimate(
+        &self,
+        pipe: &Pipe,
+        query: &DataQuery,
+    ) -> ConnectorResult<i64> {
+        let filtered = query.remote
+            || query.begin.is_some()
+            || query.end.is_some()
+            || query.params.as_ref().is_some_and(|p| !p.is_empty());
+        if filtered {
+            return self.get_pipe_rowcount(pipe, query).await;
+        }
+        let r_url = Self::pipe_r_url(pipe) + "/rowcount";
+        let opts = RequestOptions {
+            query: vec![
+                ("begin".into(), bound_query(&None)),
+                ("end".into(), bound_query(&None)),
+                ("remote".into(), QueryValue::bool(false)),
+                ("estimate".into(), QueryValue::bool(true)),
+                self.instance_query(pipe, "instance"),
+            ],
+            ..Default::default()
+        };
+        let response = self.get(&r_url, opts).await?;
+        if (400..500).contains(&response.status) {
+            return self.get_pipe_rowcount(pipe, query).await;
+        }
+        if !response.ok() {
+            if let Some(e) = server_failed(pipe, "the rowcount", &response) {
+                return Err(e);
+            }
             super::warnings::warn_pipe_fmt!(
                 pipe,
                 "Failed to get the rowcount for {pipe}:\n{}",
@@ -934,6 +1170,9 @@ impl APIConnector {
 
     /// `drop_pipe(pipe)`: `DELETE /pipes/{keys}/drop`.
     pub async fn drop_pipe(&self, pipe: &Pipe) -> SuccessTuple {
+        if let Some(refused) = meerschaum_connector::protected_refusal(self, pipe, "drop") {
+            return refused;
+        }
         let r_url = Self::pipe_r_url(pipe) + "/drop";
         let response = match self
             .delete(
@@ -956,6 +1195,9 @@ impl APIConnector {
 
     /// `clear_pipe(pipe, begin, end, params)`: `DELETE /pipes/{keys}/clear`.
     pub async fn clear_pipe(&self, pipe: &Pipe, query: &DataQuery) -> SuccessTuple {
+        if let Some(refused) = meerschaum_connector::protected_refusal(self, pipe, "clear") {
+            return refused;
+        }
         if crate::engine_pipes::is_engine_pipe(pipe) {
             let q = crate::engine_pipes::EnginePipeQuery::from_data_query(query);
             return self.clear_engine_pipe(pipe.metric_key(), &q).await;
@@ -1104,6 +1346,11 @@ impl APIConnector {
         verb: &str,
         extra: Vec<(String, QueryValue)>,
     ) -> SuccessTuple {
+        if verb != "analyze"
+            && let Some(refused) = meerschaum_connector::protected_refusal(self, pipe, verb)
+        {
+            return refused;
+        }
         let r_url = format!("{}/{route}", Self::pipe_r_url(pipe));
         let mut query = vec![self.instance_query(pipe, "instance_keys")];
         query.extend(extra);

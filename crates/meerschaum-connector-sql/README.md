@@ -99,6 +99,74 @@ tags, so `enforce_dtypes` reads the declared dtypes instead of detecting them.
   is the instance without reading rows into memory.
 - Quirks kept on purpose are marked `// PARITY:`.
 
+### rc15 instance features
+
+- **`verify schema`** (`instance/schema.rs`, pure planner in `queries/schema.rs`):
+  `get_pipe_schema_plan` reads the table's columns from the catalog (`get_schema_columns_query`:
+  full types with lengths, precision, nullability, MySQL `AUTO_INCREMENT`, SQLite keys) and
+  compares them with the declared dtypes through a per-flavor `TypeClass`; `apply_pipe_schema`
+  plans again, refuses a stale plan and runs the statements in one transaction where the
+  database allows it. Never a `DROP COLUMN` of a user column (Oracle's temporary copy column
+  aside); SQLite type changes rebuild the table and replay its indices; GeoPackage tables are not
+  rebuilt; TimescaleDB hypertables with compressed chunks and MSSQL indexed columns block type
+  changes with the command to run first. A partition key keeps its type where the database
+  cannot change it in place (`TableFacts::partitioned_by`, read by `get_partition_keys_queries`:
+  PostgreSQL / PostGIS / MSSQL / Oracle partition keys, TimescaleDB dimensions across kinds,
+  MySQL / MariaDB `RANGE COLUMNS` beyond `DATE` / `DATETIME` / integers): that change is blocked
+  and the rest of the plan applies.
+- **Row estimates** (`queries/estimate.rs`, `get_pipe_rowcount_estimate` in
+  `instance/maintenance.rs`): catalog statistics on PostgreSQL / PostGIS / Citus
+  (`pg_class.reltuples`, partitions summed), TimescaleDB (`approximate_row_count()`), MySQL /
+  MariaDB, MSSQL and Oracle; exact under 100,000 rows, on SQLite / GeoPackage / DuckDB /
+  CockroachDB, and for filtered counts.
+- **Protected connectors**: `ConnectionSpec::protected` (`protected: true`, `?protected=true`,
+  never passed to the driver or kept in the URI) makes every mutation refuse
+  (`SqlConnector::protected_refusal`, `check_writable`) unless
+  `meerschaum_core::protected::allowed()`; internal `mrsm` pipes are exempt. A caller's own SQL
+  read (`mrsm sql`, `host::read_sql`, MCP `read_sql`) goes through `SqlConnector::read_raw`: on
+  a protected connector without the allowance, only one read statement runs
+  (`readonly::is_read_statement`, else `SqlError::Protected`), in a transaction that is rolled
+  back (`SqlDriver::begin_read_only`: read-only on PostgreSQL and MySQL / MariaDB).
+- **Reads report database errors**: `pipe_state_checked`, `table_exists_checked`,
+  `value_checked` back `get_pipe_data`, `get_pipe_rowcount` and `get_sync_time` (and their
+  `_cached` façade variants): a failing database is an error, a missing table is still
+  "no table". Internal paths keep the swallowing `pipe_state` / `sync_time`.
+- **Hidden internal pipes**: `fetch_pipes_keys` leaves out connector keys `mrsm` unless the query
+  names them.
+
+### rc15 sync correctness
+
+- **Replacing syncs** (`SyncOptions::replace`, shared rules in `meerschaum_connector::replace`):
+  `sync_pipe` deletes `[begin, end)` (matching `params`; `replace_delete_query`, exact canonical
+  text bounds on SQLite) as the first statement of the insert transaction (`exec_many_with`,
+  MSSQL JSON bulk, or `SqlDriver::copy_in_after` before PostgreSQL `COPY`); rows outside the window
+  are skipped. `sync_pipe_inplace_replacing` (and `fetch: {replace: true}`) does the same with the
+  staged definition rows, inserting only the staged rows of the deleted window
+  (`replace_window_where`, one predicate for both statements). `InplaceObserver::before_replace`
+  hands an engine ledger the window. A replace with nothing to write into a missing table
+  succeeds.
+- **NULL-safe upserts**: the unique key keeps v4's name and columns (v4.1 can still upsert into
+  it); on PostgreSQL 15+ `queries::index::null_safe_unique_index` declares it
+  `UNIQUE NULLS NOT DISTINCT` (`IndexState::nulls_not_distinct`, from
+  `supports_nulls_not_distinct`). `upsert_conflict_target` reads the arbiter index back from the
+  catalog (`pg_get_indexdef` / `sqlite_master`) with whether it is NULL-safe. Where it is not
+  (SQLite, older PostgreSQL, v4 / rc14 tables) and the batch has a NULL key,
+  `UpdateQueriesArgs::null_safe_upsert` splits the rows: all keys set → v4's `ON CONFLICT`, a NULL
+  key → `UPDATE ... FROM` then `INSERT ... WHERE NOT EXISTS` (`COALESCE` equality, `IS` on
+  SQLite). MySQL / MariaDB always take their `<=>` statements (`INSERT ... ON DUPLICATE KEY
+  UPDATE` kept for concurrent writers). These statement paths first keep a repeated key's last
+  row (`last_row_per_key`).
+- **Oracle** stores `''` as `NULL`: `sync_pipe` nulls the empty strings of the literal columns
+  (`Frame::null_empty_strings`, `oracle_empty_string_params`) and `build_where_literal` renders
+  `''` as `IS NULL` there.
+- **SQLite in-place syncs** stage the definition, store computed datetimes in canonical text
+  (`queries::metadef::sqlite_canonical_datetime`), type untyped computed columns (pipe dtype, else
+  the values' storage class) and compare the fetch window in canonical form
+  (`get_pipe_metadef_for_sync`; the public `get_pipe_metadef` keeps v4's text).
+- **Null-like strings** (`'None'`, `'NA'`, `''`, ...) are text in declared text / index columns
+  (`instance::sync::null_marker_columns`): `COPY` keeps them, `where_clause::build_where_literal`
+  matches them, and the kernel diff compares them as text.
+
 ## Golden fixtures
 
 `tests/fixtures/queries.json` (about 21k cases: every flavor and pipe shape, replayed byte for

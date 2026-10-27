@@ -50,6 +50,28 @@ pub fn get_pipe_index_names(ctx: &ConnectorCtx, pipe: &SqlPipe) -> IndexMap<Stri
         .collect()
 }
 
+/// Whether an upsert pipe's unique key may treat NULL keys as equal (`null_indices`, the
+/// default) on this flavor: PostgreSQL, PostGIS and TimescaleDB (HA) declare v4's own `UQ_`
+/// constraint `UNIQUE NULLS NOT DISTINCT` when the server accepts it (PostgreSQL 15+,
+/// [`IndexState::nulls_not_distinct`]), so every upsert's `ON CONFLICT (<columns>)` matches it,
+/// v4's included.
+///
+/// Elsewhere the unique key stays v4's (it never conflicts on a NULL key), and the upsert
+/// statements match NULL keys themselves (`UpdateQueriesArgs::null_safe_upsert`): SQLite,
+/// older PostgreSQL and tables made before 5.0.0rc15 compare the NULL keys in an update then an
+/// insert, MySQL / MariaDB with `<=>`, MSSQL and Oracle `MERGE` on `COALESCE(...)`. Citus keeps
+/// the plain constraint (a distributed table's unique key must name its distribution column),
+/// and internal (`mrsm`) pipes keep plain keys (theirs are never NULL).
+pub fn null_safe_unique_index(flavor: Flavor, pipe: &SqlPipe) -> bool {
+    pipe.null_indices()
+        && pipe.upsert()
+        && pipe.connector_keys() != "mrsm"
+        && matches!(
+            flavor,
+            Flavor::Postgresql | Flavor::Postgis | Flavor::Timescaledb | Flavor::TimescaledbHa
+        )
+}
+
 /// `_is_non_indexable_col(col, existing_cols_types, flavor)` (`_pipes.py:526`).
 pub fn is_non_indexable_col(
     col: &str,
@@ -84,6 +106,11 @@ pub struct IndexState {
     pub id_distinct_count: Option<i64>,
     /// Override for `pipe.get_chunk_interval()`.
     pub chunk_interval: Option<ChunkInterval>,
+    /// Whether the server accepts `UNIQUE NULLS NOT DISTINCT` (PostgreSQL 15 and later). Then
+    /// the NULL-safe unique key of an upsert pipe ([`null_safe_unique_index`]) is v4's own
+    /// `UQ_` constraint over the plain key columns with `NULLS NOT DISTINCT`, which v4's
+    /// `ON CONFLICT (<columns>)` matches too; otherwise it is v4's plain constraint.
+    pub nulls_not_distinct: bool,
 }
 
 /// Deduplicate preserving first occurrence.
@@ -448,14 +475,32 @@ pub fn get_create_index_queries(
     let add_constraint_query = format!(
         "ALTER TABLE {pipe_name} ADD CONSTRAINT {constraint_name} UNIQUE ({indices_cols_str})"
     );
-    let unique_index_cols_str = if !flavor.coalesce_unique_index() || !null_indices {
-        indices_cols_str.clone()
-    } else {
+    // A `null_indices` upsert pipe's NULL keys must be equal, or a row with a NULL key is
+    // inserted again on every upsert. On PostgreSQL 15+ the unique key is v4's constraint itself,
+    // declared `NULLS NOT DISTINCT`: every upsert's `ON CONFLICT (<columns>)` matches it, v4's
+    // included (a 4.1 process sharing the database, or a rollback), and it stays one index over
+    // plain columns. Elsewhere the key stays v4's and the upsert statements compare NULL keys
+    // themselves (`UpdateQueriesArgs::null_safe_upsert`).
+    // Only a key column that can be NULL counts (not the datetime, not the primary key).
+    let nullable_key = |ix_key: &str| ix_key != "datetime" && ix_key != "primary";
+    let nulls_not_distinct = null_safe_unique_index(flavor, pipe)
+        && state.nulls_not_distinct
+        && flavor.postgres_unique_constraint()
+        && indexed_columns
+            .iter()
+            .any(|(ix_key, _)| nullable_key(ix_key));
+    let unique_index_cols_str = if flavor.coalesce_unique_index() && null_indices {
         coalesce_indices_cols_str
+    } else {
+        indices_cols_str.clone()
     };
     let create_unique_index_query =
         format!("CREATE UNIQUE INDEX {unique_index_name} ON {pipe_name} ({unique_index_cols_str})");
-    let mut constraint_queries = if flavor.postgres_unique_constraint() {
+    let mut constraint_queries = if nulls_not_distinct {
+        vec![format!(
+            "ALTER TABLE {pipe_name} ADD CONSTRAINT {constraint_name} UNIQUE NULLS NOT DISTINCT ({indices_cols_str})"
+        )]
+    } else if flavor.postgres_unique_constraint() {
         vec![add_constraint_query.clone()]
     } else {
         vec![create_unique_index_query]
@@ -625,4 +670,158 @@ pub fn get_drop_index_queries(
         drop_queries.entry(ix_key.clone()).or_default().push(query);
     }
     drop_queries
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::pipe::Pipe;
+
+    fn upsert_pipe(null_indices: bool, columns: &[(&str, &str)]) -> SqlPipe {
+        let mut params = meerschaum_core::Map::new();
+        params.insert(
+            "columns".into(),
+            Value::Map(
+                columns
+                    .iter()
+                    .map(|(k, v)| (k.to_string(), Value::Str(v.to_string())))
+                    .collect(),
+            ),
+        );
+        params.insert("upsert".into(), Value::Bool(true));
+        params.insert("null_indices".into(), Value::Bool(null_indices));
+        let core = Pipe::builder("a", "b")
+            .parameters(params)
+            .build()
+            .expect("pipe");
+        SqlPipe::with_target(core, "t")
+    }
+
+    fn state(cols: &[(&str, &str)]) -> IndexState {
+        IndexState {
+            existing_cols_types: cols
+                .iter()
+                .map(|(c, t)| (c.to_string(), t.to_string()))
+                .collect(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn null_indices_upserts_keep_v4_unique_keys_without_nulls_not_distinct() {
+        // SQLite and PostgreSQL before 15: v4's own unique key (the upsert statements compare
+        // NULL keys themselves), so a 4.1 process can still upsert into the table.
+        let pipe = upsert_pipe(true, &[("datetime", "ts"), ("id", "id")]);
+        let st = state(&[("ts", "TIMESTAMP"), ("id", "BIGINT"), ("v", "TEXT")]);
+        for flavor in [Flavor::Postgresql, Flavor::Timescaledb, Flavor::Postgis] {
+            let queries =
+                get_create_index_queries(&ConnectorCtx::new(flavor), &pipe, &st).expect("queries");
+            let unique: Vec<&String> = queries
+                .values()
+                .flatten()
+                .filter(|q| q.contains("UNIQUE"))
+                .collect();
+            assert_eq!(
+                unique,
+                vec![
+                    "ALTER TABLE \"public\".\"t\" ADD CONSTRAINT \"UQ_t_ts_id\" UNIQUE (\"ts\", \"id\")"
+                ],
+                "{flavor}: {queries:?}"
+            );
+        }
+        let queries = get_create_index_queries(&ConnectorCtx::new(Flavor::Sqlite), &pipe, &st)
+            .expect("queries");
+        let unique: Vec<&String> = queries
+            .values()
+            .flatten()
+            .filter(|q| q.contains("UNIQUE"))
+            .collect();
+        assert_eq!(
+            unique,
+            vec!["CREATE UNIQUE INDEX \"IX_t_ts_id\" ON \"t\" (\"ts\", \"id\")"],
+            "{queries:?}"
+        );
+    }
+
+    #[test]
+    fn postgres_15_upserts_use_v4_constraint_nulls_not_distinct() {
+        let pipe = upsert_pipe(true, &[("datetime", "ts"), ("id", "id")]);
+        let st = IndexState {
+            nulls_not_distinct: true,
+            ..state(&[("ts", "TIMESTAMP"), ("id", "BIGINT"), ("v", "TEXT")])
+        };
+        for flavor in [
+            Flavor::Postgresql,
+            Flavor::Timescaledb,
+            Flavor::TimescaledbHa,
+            Flavor::Postgis,
+        ] {
+            let queries =
+                get_create_index_queries(&ConnectorCtx::new(flavor), &pipe, &st).expect("queries");
+            let unique: Vec<&String> = queries
+                .values()
+                .flatten()
+                .filter(|q| q.contains("UNIQUE"))
+                .collect();
+            assert_eq!(
+                unique,
+                vec![
+                    "ALTER TABLE \"public\".\"t\" ADD CONSTRAINT \"UQ_t_ts_id\" UNIQUE NULLS NOT DISTINCT (\"ts\", \"id\")"
+                ],
+                "{flavor}: {queries:?}"
+            );
+        }
+        // SQLite has no `NULLS NOT DISTINCT`: v4's unique index.
+        let queries = get_create_index_queries(&ConnectorCtx::new(Flavor::Sqlite), &pipe, &st)
+            .expect("queries");
+        assert!(
+            !queries.values().flatten().any(|q| q.contains("NULLS")),
+            "{queries:?}"
+        );
+        // Without `null_indices`, v4's plain constraint.
+        let pipe = upsert_pipe(false, &[("datetime", "ts"), ("id", "id")]);
+        let queries = get_create_index_queries(&ConnectorCtx::new(Flavor::Postgresql), &pipe, &st)
+            .expect("queries");
+        assert!(
+            queries
+                .values()
+                .flatten()
+                .any(|q| q.ends_with("ADD CONSTRAINT \"UQ_t_ts_id\" UNIQUE (\"ts\", \"id\")")),
+            "{queries:?}"
+        );
+    }
+
+    #[test]
+    fn plain_unique_keys_without_null_indices_or_on_other_flavors() {
+        let pipe = upsert_pipe(false, &[("datetime", "ts"), ("id", "id")]);
+        let st = state(&[("ts", "TIMESTAMP"), ("id", "BIGINT"), ("v", "TEXT")]);
+        let queries = get_create_index_queries(&ConnectorCtx::new(Flavor::Postgresql), &pipe, &st)
+            .expect("queries");
+        assert!(
+            queries
+                .values()
+                .flatten()
+                .any(|q| q.contains("ADD CONSTRAINT") && q.contains("UNIQUE (\"ts\", \"id\")")),
+            "{queries:?}"
+        );
+        // Only the datetime column: nothing can be NULL-equal, the v4 constraint stays.
+        let pipe = upsert_pipe(true, &[("datetime", "ts")]);
+        let queries = get_create_index_queries(&ConnectorCtx::new(Flavor::Postgresql), &pipe, &st)
+            .expect("queries");
+        assert!(
+            queries
+                .values()
+                .flatten()
+                .any(|q| q.contains("ADD CONSTRAINT")),
+            "{queries:?}"
+        );
+        // MySQL keeps its plain unique index (its upsert compares keys with `<=>`).
+        let pipe = upsert_pipe(true, &[("datetime", "ts"), ("id", "id")]);
+        let queries = get_create_index_queries(&ConnectorCtx::new(Flavor::Mysql), &pipe, &st)
+            .expect("queries");
+        assert!(
+            !queries.values().flatten().any(|q| q.contains("COALESCE")),
+            "{queries:?}"
+        );
+    }
 }

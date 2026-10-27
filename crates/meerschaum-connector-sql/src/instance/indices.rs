@@ -52,6 +52,9 @@ impl SqlConnector {
             space_partition: false,
             id_distinct_count: None,
             chunk_interval: None,
+            // rc15 S3: NULL-safe upsert keys as v4's constraint on PostgreSQL 15+.
+            nulls_not_distinct: crate::queries::index::null_safe_unique_index(self.flavor, sp)
+                && self.supports_nulls_not_distinct().await,
         };
         let mut queries = get_create_index_queries(&self.ctx(), sp, &state).map_err(be)?;
         // The v4 renderer always emits datetime/id DDL, even for existing indices.
@@ -251,6 +254,9 @@ impl SqlConnector {
         pipe: &Pipe,
         columns: Option<&[String]>,
     ) -> SuccessTuple {
+        if let Some(refused) = self.protected_refusal(pipe, "create indices for") {
+            return refused;
+        }
         if self.create_indices(pipe, columns, None).await {
             SuccessTuple::ok("Success")
         } else {
@@ -260,6 +266,9 @@ impl SqlConnector {
 
     /// `drop_pipe_indices(pipe, columns)`.
     pub async fn drop_pipe_indices(&self, pipe: &Pipe, columns: Option<&[String]>) -> SuccessTuple {
+        if let Some(refused) = self.protected_refusal(pipe, "drop indices for") {
+            return refused;
+        }
         if self.drop_indices(pipe, columns, None).await {
             SuccessTuple::ok("Success")
         } else {

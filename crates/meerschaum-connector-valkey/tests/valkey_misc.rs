@@ -372,8 +372,12 @@ async fn check_concurrent_user_registration(conn: Arc<ValkeyConnector>) {
     }
     assert_eq!(winners.len(), 1);
     let user = User::new(&username, None);
-    assert!(conn.valkey_get_user_id(&user).await.is_some());
-    let hash = conn.valkey_get_user_password_hash(&user).await.unwrap();
+    assert!(conn.valkey_get_user_id(&user).await.unwrap().is_some());
+    let hash = conn
+        .valkey_get_user_password_hash(&user)
+        .await
+        .unwrap()
+        .unwrap();
     assert!(
         meerschaum_core::users::verify_password(&format!("password{}", winners[0]), &hash).unwrap()
     );

@@ -36,6 +36,19 @@ pub fn index_columns(pipe: &Pipe) -> Vec<String> {
         .collect()
 }
 
+/// The columns whose null-like strings (`'None'`, `'NA'`, `''`, ...) are text (rc15 Q18): the
+/// declared text columns and the text index columns
+/// ([`meerschaum_core::dtypes::null_marker_text_columns`]; the stored `valkey.dtypes` are the
+/// inferred ones).
+pub fn null_marker_columns(pipe: &Pipe, parameters: &Map) -> Vec<String> {
+    let explicit = pipe_ops::configured_dtypes(parameters);
+    let stored = valkey_dtypes(parameters);
+    let index = index_columns(pipe);
+    meerschaum_core::dtypes::null_marker_text_columns(explicit.iter(), index.iter(), |c| {
+        explicit.get(c).or_else(|| stored.get(c)).cloned()
+    })
+}
+
 /// `pipe.parameters.get('valkey', {}).get('dtypes', {})`.
 pub fn valkey_dtypes(parameters: &Map) -> IndexMap<String, String> {
     match parameters.get("valkey").and_then(|v| v.get("dtypes")) {
@@ -134,6 +147,9 @@ impl ValkeyConnector {
 
     /// Insert the pipe's attributes into the internal `pipes` table.
     pub async fn register_pipe(&self, pipe: &Pipe) -> SuccessTuple {
+        if let Some(refused) = meerschaum_connector::protected_refusal(self, pipe, "register") {
+            return refused;
+        }
         let pipe_key = get_pipe_key(
             pipe.connector_keys(),
             pipe.metric_key(),
@@ -258,6 +274,9 @@ impl ValkeyConnector {
 
     /// Persist the pipe's in-memory parameters.
     pub async fn edit_pipe(&self, pipe: &Pipe) -> SuccessTuple {
+        if let Some(refused) = meerschaum_connector::protected_refusal(self, pipe, "edit") {
+            return refused;
+        }
         match self.get_pipe_id(pipe).await {
             Ok(Some(_)) => {}
             Ok(None) => return SuccessTuple::fail(format!("{pipe} is not registered.")),
@@ -285,6 +304,9 @@ impl ValkeyConnector {
 
     /// Drop a pipe's documents, its table and the stored dtypes.
     pub async fn drop_pipe(&self, pipe: &Pipe) -> SuccessTuple {
+        if let Some(refused) = meerschaum_connector::protected_refusal(self, pipe, "drop") {
+            return refused;
+        }
         match self.pipe_exists(pipe).await {
             Ok(true) => {}
             Ok(false) => {
@@ -362,6 +384,9 @@ impl ValkeyConnector {
 
     /// Drop the pipe and delete its registration.
     pub async fn delete_pipe(&self, pipe: &Pipe) -> SuccessTuple {
+        if let Some(refused) = meerschaum_connector::protected_refusal(self, pipe, "delete") {
+            return refused;
+        }
         let dropped = self.drop_pipe(pipe).await;
         if !dropped.success {
             return dropped;
@@ -487,6 +512,8 @@ impl ValkeyConnector {
                 omit_columns: query.omit_columns.clone(),
                 reset_index: true,
                 coerce_types: false,
+                // Declared text / index columns match null-like strings as text (rc15 Q18).
+                literal_null_markers: null_marker_columns(pipe, parameters),
             }
         };
         let result = query_df(&df, &opts).map_err(|e| ConnectorError::Backend(e.to_string()))?;
@@ -499,6 +526,9 @@ impl ValkeyConnector {
     /// `filter_existing`; new rows are inserted and changed rows merged into their stored
     /// documents. Returns `Inserted {n}, updated {m} rows.` (`Upserted {m} rows.` for upserts).
     pub async fn sync_pipe(&self, pipe: &Pipe, df: Frame, opts: &SyncOptions) -> SuccessTuple {
+        if let Some(refused) = meerschaum_connector::protected_refusal(self, pipe, "sync") {
+            return refused;
+        }
         match self.sync_pipe_inner(pipe, df, opts).await {
             Ok(t) => t,
             Err(e) => SuccessTuple::fail(e.to_string()),
@@ -580,6 +610,62 @@ impl ValkeyConnector {
             }
         }
 
+        if opts.replace {
+            // Replace the window: clear its rows, then write the frame's rows of the window.
+            // Valkey has no transactions: a failure after the clear leaves the window short of
+            // the rows not yet written (the next replacing sync writes them again).
+            if dt_col.is_none() && (opts.begin.is_some() || opts.end.is_some()) {
+                return Ok(SuccessTuple::fail(
+                    meerschaum_connector::replace::no_datetime_window(&pipe),
+                ));
+            }
+            let literal = null_marker_columns(&pipe, pipe.parameters());
+            let (inside, skipped) = meerschaum_connector::replace::rows_in_window(
+                dt_col.as_deref(),
+                &df,
+                opts,
+                &literal,
+            )
+            .map_err(ConnectorError::Backend)?;
+            let cleared = self
+                .clear_pipe(
+                    &pipe,
+                    &DataQuery {
+                        begin: opts.begin.clone(),
+                        end: opts.end.clone(),
+                        params: opts.params.clone(),
+                        ..Default::default()
+                    },
+                )
+                .await;
+            if !cleared.success {
+                return Ok(cleared);
+            }
+            let deleted: u64 = cleared
+                .message
+                .trim_start_matches("Deleted ")
+                .split(' ')
+                .next()
+                .and_then(|n| n.replace(',', "").parse().ok())
+                .unwrap_or(0);
+            let inserted = inside.height() as u64;
+            if inserted > 0 {
+                let write = SyncOptions {
+                    check_existing: false,
+                    replace: false,
+                    ..opts.clone()
+                };
+                let res = Box::pin(self.sync_pipe_inner(&pipe, inside, &write)).await?;
+                if !res.success {
+                    return Ok(res);
+                }
+            }
+            return Ok(meerschaum_connector::replace::replace_result(
+                deleted, inserted, skipped, true,
+            )
+            .as_success_tuple());
+        }
+
         let (unseen_df, update_df, delta_df) = if opts.check_existing && !upsert {
             let ctx = pipe_ops::dtypes_context(self, &pipe, pipe.parameters()).await?;
             let fe_params = FilterExistingParams {
@@ -593,6 +679,7 @@ impl ValkeyConnector {
                 date_bound_only: false,
                 enforce_dtypes: false,
                 filter_params_index_limit: 250,
+                literal_null_markers: null_marker_columns(&pipe, pipe.parameters()),
             };
             // The kernel's callback is synchronous: capture the backtrack request first, fetch
             // it, then run the diff with the fetched frame.
@@ -760,6 +847,9 @@ impl ValkeyConnector {
     /// sorted set keeps stale entries (`_pipes.py`, `clear_pipe`). Reads skip them; the
     /// unfiltered rowcount still counts them.
     pub async fn clear_pipe(&self, pipe: &Pipe, query: &DataQuery) -> SuccessTuple {
+        if let Some(refused) = meerschaum_connector::protected_refusal(self, pipe, "clear") {
+            return refused;
+        }
         let dt_col = pipe.column("datetime");
         let q = DataQuery {
             begin: query.begin.clone(),
@@ -940,6 +1030,14 @@ impl ValkeyConnector {
                     location_key: Some(s("location_key")),
                     extra: Some(Value::Map(Map::new())),
                 }
+            })
+            .collect();
+        // Meerschaum's internal pipes stay out of listings unless the query names `mrsm`.
+        let hide = meerschaum_connector::hides_internal_pipes(query);
+        let keys: Vec<PipeKeysEntry> = keys
+            .into_iter()
+            .filter(|e| {
+                !hide || e.connector_keys != meerschaum_connector::policy::INTERNAL_CONNECTOR_KEYS
             })
             .collect();
         if query.tags.is_empty() {

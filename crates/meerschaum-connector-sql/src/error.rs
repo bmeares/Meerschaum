@@ -59,6 +59,11 @@ pub enum SqlError {
     /// A value could not be converted to the column's Arrow type.
     #[error("Failed to convert column '{column}': {reason}")]
     Conversion { column: String, reason: String },
+
+    /// A write refused on a protected connector (`protected: true`); the message is the
+    /// refusal (`meerschaum_core::protected::refusal_message`).
+    #[error("{0}")]
+    Protected(String),
 }
 
 /// Convenience alias.

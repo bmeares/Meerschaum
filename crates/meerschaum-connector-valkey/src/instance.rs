@@ -103,6 +103,10 @@ impl Connector for ValkeyConnector {
         &self.label
     }
 
+    fn is_protected(&self) -> bool {
+        ValkeyConnector::is_protected(self)
+    }
+
     async fn test_connection(&self) -> ConnectorResult<bool> {
         self.ping().await
     }
@@ -229,7 +233,7 @@ impl InstanceConnector for ValkeyConnector {
     }
 
     async fn get_user_id(&self, user: &User) -> ConnectorResult<Option<Value>> {
-        Ok(self.valkey_get_user_id(user).await.map(Value::Str))
+        Ok(self.valkey_get_user_id(user).await?.map(Value::Str))
     }
 
     async fn edit_user(&self, user: &User) -> SuccessTuple {
@@ -244,16 +248,18 @@ impl InstanceConnector for ValkeyConnector {
         self.valkey_get_users().await
     }
 
+    // A failed read is an error (the server then refuses the request): never "no attributes",
+    // which grants every scope, or "no such user".
     async fn get_user_password_hash(&self, user: &User) -> ConnectorResult<Option<String>> {
-        Ok(self.valkey_get_user_password_hash(user).await)
+        self.valkey_get_user_password_hash(user).await
     }
 
     async fn get_user_type(&self, user: &User) -> ConnectorResult<Option<String>> {
-        Ok(self.valkey_get_user_type(user).await)
+        self.valkey_get_user_type(user).await
     }
 
     async fn get_user_attributes(&self, user: &User) -> ConnectorResult<Option<Map>> {
-        Ok(self.valkey_get_user_attributes(user).await)
+        self.valkey_get_user_attributes(user).await
     }
 
     fn get_plugins_pipe(&self) -> Pipe {

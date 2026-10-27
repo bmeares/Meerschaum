@@ -376,6 +376,9 @@ impl SqlConnector {
         chunk_minutes: Option<i64>,
     ) -> (SuccessTuple, Map) {
         let mut changed = Map::new();
+        if let Some(refused) = self.protected_refusal(pipe, "repartition") {
+            return (refused, changed);
+        }
         let result = self
             .partition_pipe_inner(pipe, chunk_minutes, &mut changed)
             .await;

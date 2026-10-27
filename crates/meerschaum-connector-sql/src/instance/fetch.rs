@@ -8,6 +8,7 @@ use meerschaum_kernel::Frame;
 
 use crate::queries::metadef::{
     Bound, MetadefArgs, ParentSpec, get_pipe_metadef_for_execution as get_pipe_metadef,
+    get_pipe_metadef_for_sync,
 };
 
 use super::values::py_datetime;
@@ -71,12 +72,31 @@ impl SqlConnector {
         get_pipe_metadef(self.flavor, &m).map_err(be)
     }
 
+    /// The query a sync runs for [`get_pipe_metadef`](SqlConnector::get_pipe_metadef): the same
+    /// definition and bounds, with SQLite datetimes compared in their canonical text form and
+    /// null-like `params` strings matched as text on declared text / index columns (rc15).
+    pub fn get_pipe_metadef_for_sync(
+        &self,
+        pipe: &Pipe,
+        args: &FetchArgs,
+    ) -> ConnectorResult<Option<String>> {
+        let sp = self.sql_pipe(pipe)?;
+        let mut m = MetadefArgs::new(&sp);
+        m.params = args.params.as_ref();
+        m.begin = args.begin.clone();
+        m.end = args.end.clone();
+        m.check_existing = args.check_existing;
+        m.sync_time = metadef_bound(args.sync_time.as_ref());
+        m.parent = args.parent.clone();
+        get_pipe_metadef_for_sync(self.flavor, &m).map_err(be)
+    }
+
     /// `fetch(pipe, begin, end, check_existing)`: execute the pipe's SQL definition on this
     /// (source) connector and return the rows.
     pub async fn fetch(&self, pipe: &Pipe, args: &FetchArgs) -> ConnectorResult<Option<Frame>> {
         // Resolve cross-pipe templates (`{{ Pipe() }}` in the SQL definition) first.
         let pipe = self.prepare_pipe(pipe).await;
-        let Some(meta_def) = self.get_pipe_metadef(&pipe, args)? else {
+        let Some(meta_def) = self.get_pipe_metadef_for_sync(&pipe, args)? else {
             return Err(be(format!(
                 "Could not determine a SQL definition for {pipe}.\n    Set the key `query` in `pipe.parameters` to a valid SQL query."
             )));

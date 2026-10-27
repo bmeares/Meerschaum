@@ -351,6 +351,70 @@ fn stable_dump(mut d: J) -> J {
     d
 }
 
+/// rc15 B1 (deliberate): v5 types the computed columns of an in-place table (`val2` of
+/// `xi_templated_out`), which v4's `CREATE TABLE ... AS SELECT` leaves untyped: on SQLite an
+/// untyped `date(ts)` / `AVG(x)` column is what made re-syncs duplicate rows. Such a column of
+/// `other` is compared as "typed where v4 is untyped" (its declared type and its table's DDL
+/// text). `v4_wrote` is the database v4 synced in place into after v5 created it: v4's ALTER
+/// heuristic then retypes the typed computed column as TEXT (a v4 quirk; the supported direction
+/// is v4 tables synced by v5), so that table is not compared there.
+fn accept_typed_computed_columns(py: &J, other: &mut J, v4_wrote: bool) {
+    let Some(tables) = py["tables"].as_object() else {
+        return;
+    };
+    let computed: Vec<(String, Vec<usize>)> = tables
+        .iter()
+        .filter_map(|(name, t)| {
+            let cols: Vec<usize> = t["info"]
+                .as_array()?
+                .iter()
+                .enumerate()
+                .filter(|(_, c)| c[2].as_str() == Some(""))
+                .map(|(i, _)| i)
+                .collect();
+            (!cols.is_empty()).then(|| (name.clone(), cols))
+        })
+        .collect();
+    for (name, cols) in computed {
+        if v4_wrote {
+            other["tables"][&name] = py["tables"][&name].clone();
+        } else if let Some(info) = other["tables"][&name]["info"].as_array_mut() {
+            for i in &cols {
+                if let Some(col) = info.get_mut(*i).and_then(J::as_array_mut)
+                    && col
+                        .get(2)
+                        .and_then(J::as_str)
+                        .is_some_and(|t| !t.is_empty())
+                {
+                    col[2] = J::String(String::new());
+                }
+            }
+        }
+        let py_objects: Vec<J> = py["objects"]
+            .as_array()
+            .map(|o| {
+                o.iter()
+                    .filter(|o| o[2].as_str() == Some(name.as_str()))
+                    .cloned()
+                    .collect()
+            })
+            .unwrap_or_default();
+        if let Some(objects) = other["objects"].as_array_mut() {
+            if v4_wrote {
+                objects.retain(|o| o[2].as_str() != Some(name.as_str()));
+                objects.extend(py_objects);
+                objects.sort_by_key(|o| o.to_string());
+            } else if let Some(ddl) = py_objects.iter().find(|o| o[0] == "table") {
+                for o in objects.iter_mut() {
+                    if o[0] == "table" && o[1].as_str() == Some(name.as_str()) {
+                        o[3] = ddl[3].clone();
+                    }
+                }
+            }
+        }
+    }
+}
+
 fn diff(label: &str, a: &J, b: &J) -> Vec<String> {
     let mut out = Vec::new();
     fn walk(path: String, a: &J, b: &J, out: &mut Vec<String>) {
@@ -405,7 +469,8 @@ async fn cross_implementation_sqlite() {
         );
     }
     let py_dump = stable_dump(py.run(&["dump", &s(db("py.db"))]));
-    let rs_dump = stable_dump(py.run(&["dump", &s(db("rs.db"))]));
+    let mut rs_dump = stable_dump(py.run(&["dump", &s(db("rs.db"))]));
+    accept_typed_computed_columns(&py_dump, &mut rs_dump, false);
     failures.extend(diff("phase0", &py_dump, &rs_dump));
 
     // Cross-writes: each implementation syncs phase 1 into the other's database.
@@ -434,9 +499,11 @@ async fn cross_implementation_sqlite() {
     }
 
     let py_dump = stable_dump(py.run(&["dump", &s(db("py.db"))]));
-    let rs_dump = stable_dump(py.run(&["dump", &s(db("rs.db"))]));
+    let mut rs_dump = stable_dump(py.run(&["dump", &s(db("rs.db"))]));
     let py_rs_dump = stable_dump(py.run(&["dump", &s(db("py_then_rs.db"))]));
-    let rs_py_dump = stable_dump(py.run(&["dump", &s(db("rs_then_py.db"))]));
+    let mut rs_py_dump = stable_dump(py.run(&["dump", &s(db("rs_then_py.db"))]));
+    accept_typed_computed_columns(&py_dump, &mut rs_dump, false);
+    accept_typed_computed_columns(&py_dump, &mut rs_py_dump, true);
     failures.extend(diff("phase1 py.db vs rs.db", &py_dump, &rs_dump));
     failures.extend(diff("phase1 py.db vs py_then_rs.db", &py_dump, &py_rs_dump));
     failures.extend(diff("phase1 py.db vs rs_then_py.db", &py_dump, &rs_py_dump));
@@ -444,6 +511,24 @@ async fn cross_implementation_sqlite() {
     // Reads: both implementations read both databases.
     let py_read_py = py.run(&["read", &s(db("py.db")), sp]);
     let py_read_rs = py.run(&["read", &s(db("rs.db")), sp]);
+    // rc15 B1 (deliberate): a computed in-place column v4 leaves untyped (`NULL`) is typed by v5.
+    let mut py_read_rs_typed = py_read_rs.clone();
+    if let (Some(reads), Some(rs_reads)) =
+        (py_read_py.as_object(), py_read_rs_typed.as_object_mut())
+    {
+        for (key, read) in reads {
+            let Some(types) = read.as_object().filter(|_| key.ends_with(":columns_types")) else {
+                continue;
+            };
+            for (col, typ) in types {
+                if typ.as_str() == Some("NULL")
+                    && let Some(slot) = rs_reads.get_mut(key).and_then(|t| t.get_mut(col))
+                {
+                    *slot = typ.clone();
+                }
+            }
+        }
+    }
     let rs_read_py = rust_read(&db("py.db")).await;
     let rs_read_rs = rust_read(&db("rs.db")).await;
     failures.extend(diff(
@@ -459,7 +544,7 @@ async fn cross_implementation_sqlite() {
     failures.extend(diff(
         "python reads py.db vs rs.db",
         &py_read_py,
-        &py_read_rs,
+        &py_read_rs_typed,
     ));
 
     let report = failures.join("\n");

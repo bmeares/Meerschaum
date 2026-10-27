@@ -2,6 +2,8 @@
 //! `compress_pipe`, `decompress_pipe`, `apply_compression_policy`, `set_integer_now_func`,
 //! `vacuum_pipe` and `analyze_pipe`.
 
+use indexmap::IndexMap;
+use meerschaum_connector::{ConnectorResult, DataQuery};
 use meerschaum_core::{Pipe, SuccessTuple};
 
 use crate::pipe::SqlPipe;
@@ -68,6 +70,53 @@ fn size_change_message(
 }
 
 impl SqlConnector {
+    /// `Pipe.get_rowcount(estimate=True)` (contract C1): the database's estimate of the rows
+    /// in the pipe's table from catalog statistics ([`crate::queries::estimate`]), or the exact
+    /// count when the flavor has no estimate (SQLite, GeoPackage, DuckDB), the estimate is
+    /// missing, negative or zero, or the table is small (fewer than
+    /// [`EXACT_COUNT_BELOW`](crate::queries::estimate::EXACT_COUNT_BELOW) rows by estimate).
+    /// `begin`, `end`, `params` and `remote` make the count exact. `None` for a missing table.
+    ///
+    /// `cached`: the caller's cached columns types (see
+    /// [`pipe_state_cached`](SqlConnector::pipe_state_cached)). Database errors are returned.
+    pub async fn get_pipe_rowcount_estimate(
+        &self,
+        pipe: &Pipe,
+        query: &DataQuery,
+        cached: Option<IndexMap<String, String>>,
+    ) -> ConnectorResult<Option<i64>> {
+        use crate::queries::estimate::{get_rowcount_estimate_query, use_estimate};
+        let filtered = query.remote
+            || query.begin.is_some()
+            || query.end.is_some()
+            || query.params.as_ref().is_some_and(|p| !p.is_empty());
+        let sp = self.sql_pipe(pipe)?;
+        let schema = self.get_pipe_schema(&sp);
+        let estimate_query = (!filtered)
+            .then(|| get_rowcount_estimate_query(self.flavor, &sp.target, schema.as_deref()))
+            .flatten();
+        if let Some(sql) = estimate_query {
+            if !self
+                .table_exists_checked(&sp.target, schema.as_deref())
+                .await?
+            {
+                return Ok(None);
+            }
+            // A failed estimate (statistics not readable, no TimescaleDB extension) is not the
+            // answer's failure: the exact count below reports a real database error.
+            match self.value_catalog_checked(&sql).await {
+                Ok(v) => {
+                    let estimate = v.and_then(|v| v.as_i64());
+                    if use_estimate(estimate) {
+                        return Ok(estimate);
+                    }
+                }
+                Err(e) => tracing::debug!("No row estimate for {pipe}: {e}"),
+            }
+        }
+        self.get_pipe_rowcount_cached(pipe, query, cached).await
+    }
+
     /// `get_pipe_size(pipe)`: the target table's on-disk size in bytes (`None` if unknown).
     pub async fn get_pipe_size(&self, pipe: &Pipe) -> Option<i64> {
         let sp = self.sql_pipe(pipe).ok()?;
@@ -115,6 +164,9 @@ impl SqlConnector {
         }
         if !pipe.param("compress").is_some_and(|v| v.truthy()) {
             return SuccessTuple::ok("Compression is not enabled for this pipe.");
+        }
+        if let Some(refused) = self.protected_refusal(pipe, "apply a compression policy to") {
+            return refused;
         }
         if pipe.upsert() && self.warn_compress_upsert_once(&pipe.to_string()) {
             tracing::warn!(
@@ -176,6 +228,9 @@ impl SqlConnector {
         compress: bool,
     ) -> SuccessTuple {
         let verb = if compress { "compress" } else { "decompress" };
+        if let Some(refused) = self.protected_refusal(pipe, verb) {
+            return refused;
+        }
         let sp = match self.sql_pipe(pipe) {
             Ok(sp) => sp,
             Err(e) => return SuccessTuple::fail(e.to_string()),
@@ -251,6 +306,9 @@ impl SqlConnector {
 
     /// `vacuum_pipe(pipe, full)`.
     pub async fn vacuum_pipe(&self, pipe: &Pipe, full: bool) -> SuccessTuple {
+        if let Some(refused) = self.protected_refusal(pipe, "vacuum") {
+            return refused;
+        }
         let sp = match self.sql_pipe(pipe) {
             Ok(sp) => sp,
             Err(e) => return SuccessTuple::fail(e.to_string()),

@@ -106,6 +106,25 @@ pub struct UpdateQueriesArgs<'a> {
     pub cast_columns: bool,
     /// The connector's `db_version` (SQLite only: versions `< '3.33.0'` use DELETE + INSERT).
     pub db_version: Option<&'a str>,
+    /// The conflict target of the `ON CONFLICT (...)` upserts (PostgreSQL family, SQLite,
+    /// GeoPackage): the arbiter unique index's own key columns and expressions, e.g.
+    /// `"ts", (COALESCE("id", -987654321))`, so that the database matches the index that makes
+    /// NULL keys equal. `None` renders the join columns, as v4 does.
+    pub conflict_target: Option<String>,
+    /// Upserts that match NULL keys although the table's unique key treats NULLs as distinct
+    /// (`false` keeps v4's single statement). Set for `null_indices` pipes.
+    ///
+    /// - MySQL / MariaDB (always): an `UPDATE ... JOIN` and an `INSERT ... WHERE NOT EXISTS`
+    ///   comparing the keys with `<=>` instead of `INSERT ... ON DUPLICATE KEY UPDATE`, which a
+    ///   NULL key never triggers.
+    /// - PostgreSQL family, SQLite, GeoPackage (when the conflict target's unique key is not
+    ///   NULL-safe: a v4 / rc14 table, SQLite, PostgreSQL before 15): the rows whose keys are all
+    ///   set take the usual `ON CONFLICT`, and the rows with a NULL key (the datetime column
+    ///   aside) are updated where they match (`COALESCE(...)` equality, `IS` on SQLite) and
+    ///   inserted where they do not.
+    ///
+    /// The patch must hold one row per key (the caller keeps a repeated key's last row).
+    pub null_safe_upsert: bool,
 }
 
 impl<'a> UpdateQueriesArgs<'a> {
@@ -126,6 +145,8 @@ impl<'a> UpdateQueriesArgs<'a> {
             null_indices: true,
             cast_columns: true,
             db_version: None,
+            conflict_target: None,
+            null_safe_upsert: false,
         }
     }
 }
@@ -168,12 +189,15 @@ pub fn get_update_queries(args: &UpdateQueriesArgs<'_>) -> Vec<String> {
         .map(|c| format!("p.{}", q(c)))
         .collect::<Vec<_>>()
         .join(", ");
-    let join_cols_str = args
-        .join_cols
-        .iter()
-        .map(|c| q(c))
-        .collect::<Vec<_>>()
-        .join(", ");
+    let join_cols_str = match args.conflict_target.as_deref().filter(|t| !t.is_empty()) {
+        Some(target) => target.to_string(),
+        None => args
+            .join_cols
+            .iter()
+            .map(|c| q(c))
+            .collect::<Vec<_>>()
+            .join(", "),
+    };
 
     let mut value_cols: Vec<(String, String)> = Vec::new();
     let mut join_cols_types: Vec<(String, String)> = Vec::new();
@@ -343,8 +367,117 @@ pub fn get_update_queries(args: &UpdateQueriesArgs<'_>) -> Vec<String> {
     };
     let ignore = if value_cols.is_empty() { "IGNORE " } else { "" };
 
+    if args.upsert
+        && args.null_safe_upsert
+        && matches!(flavor, Some(Flavor::Mysql | Flavor::Mariadb))
+    {
+        // NULL-safe MySQL upsert: update the rows whose keys match (`<=>` treats NULLs as
+        // equal and can use the key index), then insert the rest. The patch holds one row per
+        // key (the caller keeps the last row of a key, as `ON DUPLICATE KEY UPDATE` resolves a
+        // batch), and the insert keeps v4's `ON DUPLICATE KEY UPDATE` (`INSERT IGNORE` without
+        // value columns) so that a non-NULL key another writer inserted in between updates
+        // instead of failing on the unique key.
+        let null_safe_on = join_cols_types
+            .iter()
+            .map(|(c_name, _)| format!("f.{} <=> p.{}", q(c_name), q(c_name)))
+            .collect::<Vec<_>>()
+            .join("\n    AND ");
+        let mut queries = Vec::new();
+        if !value_cols.is_empty() {
+            // Uncast, as `ON DUPLICATE KEY UPDATE col = VALUES(col)` assigns (MySQL cannot
+            // `CAST(... AS BLOB)`).
+            let sets = value_cols
+                .iter()
+                .map(|(c_name, _)| format!("f.{} = p.{}", q(c_name), q(c_name)))
+                .collect::<Vec<_>>()
+                .join(",\n    ");
+            queries.push(format!(
+                "UPDATE {target_table_name} AS f\nJOIN (SELECT {patch_cols_str} FROM {patch_table_name}) AS p\n    ON {null_safe_on}\nSET {sets}"
+            ));
+        }
+        let on_duplicate = if value_cols.is_empty() {
+            String::new()
+        } else {
+            format!("\n{on_duplicate_key_update}\n    {cols_equal_values}")
+        };
+        queries.push(format!(
+            "INSERT {ignore}INTO {target_table_name} ({patch_cols_str})\nSELECT {patch_cols_prefixed_str}\nFROM {patch_table_name} AS p\nWHERE NOT EXISTS (\n    SELECT 1\n    FROM {target_table_name} AS f\n    WHERE {null_safe_on}\n){on_duplicate}"
+        ));
+        return queries;
+    }
+
     let sets_none = sets_subquery("", "p.");
     let sets_excluded = sets_subquery("", "EXCLUDED.");
+
+    let null_safe_family = matches!(
+        flavor,
+        Some(
+            Flavor::Postgresql
+                | Flavor::Postgis
+                | Flavor::Timescaledb
+                | Flavor::TimescaledbHa
+                | Flavor::Sqlite
+                | Flavor::Geopackage
+        )
+    );
+    // The key columns that may be NULL (the datetime column is never wrapped, as in the
+    // NULL-safe unique keys; a NULL datetime keeps v4's behavior).
+    let nullable_keys: Vec<&(String, String)> = join_cols_types
+        .iter()
+        .filter(|(c, _)| Some(c.as_str()) != args.datetime_col)
+        .collect();
+    if args.upsert && args.null_safe_upsert && null_safe_family && !nullable_keys.is_empty() {
+        let sqlite = matches!(flavor, Some(Flavor::Sqlite | Flavor::Geopackage));
+        let any_null = |prefix: &str| {
+            nullable_keys
+                .iter()
+                .map(|(c, _)| format!("{prefix}{} IS NULL", q(c)))
+                .collect::<Vec<_>>()
+                .join(" OR ")
+        };
+        let none_null = nullable_keys
+            .iter()
+            .map(|(c, _)| format!("{} IS NOT NULL", q(c)))
+            .collect::<Vec<_>>()
+            .join(" AND ");
+        // NULL-safe key equality: `IS` on SQLite (it can use the key index), `COALESCE(...)`
+        // equality elsewhere (hashable); the datetime column compares with `=` (indexed).
+        let keys_match = join_cols_types
+            .iter()
+            .map(|(c_name, c_type)| {
+                if Some(c_name.as_str()) == args.datetime_col {
+                    format!("f.{} = p.{}", q(c_name), q(c_name))
+                } else if sqlite {
+                    format!("f.{} IS p.{}", q(c_name), q(c_name))
+                } else {
+                    let null = get_null_replacement(c_type, flavor);
+                    format!(
+                        "COALESCE(f.{}, {null}) = COALESCE(p.{}, {null})",
+                        q(c_name),
+                        q(c_name)
+                    )
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n    AND ");
+        let mut queries = Vec::new();
+        // The rows whose keys are all set: the usual single statement.
+        queries.push(format!(
+            "INSERT INTO {target_table_name} ({patch_cols_str})\nSELECT {patch_cols_str}\nFROM {patch_table_name}\nWHERE {none_null}\nON CONFLICT ({join_cols_str}) DO {update_or_nothing} {sets_excluded}"
+        ).trim_end().to_string());
+        // The rows with a NULL key: update those that exist, then insert the others.
+        if !value_cols.is_empty() {
+            queries.push(format!(
+                "UPDATE {target_table_name} AS f\n{sets_none}\nFROM (SELECT {patch_cols_str} FROM {patch_table_name} WHERE {}) AS p\nWHERE {keys_match}",
+                any_null("")
+            ));
+        }
+        queries.push(format!(
+            "INSERT INTO {target_table_name} ({patch_cols_str})\nSELECT {patch_cols_prefixed_str}\nFROM {patch_table_name} AS p\nWHERE ({})\n    AND NOT EXISTS (\n        SELECT 1\n        FROM {target_table_name} AS f\n        WHERE {keys_match}\n    )",
+            any_null("p.")
+        ));
+        return queries;
+    }
     let sets_f = sets_subquery("f.", "p.");
     let and_f = and_subquery("p.", "f.");
     let and_t = and_subquery("p.", "t.");
@@ -403,6 +536,113 @@ mod tests {
             get_null_replacement("TEXT", Some(Flavor::Oracle)),
             "n'-987654321'"
         );
+    }
+
+    #[test]
+    fn upsert_conflict_target_matches_the_unique_index() {
+        let mut args =
+            UpdateQueriesArgs::new("t", "p", vec!["ts".into(), "id".into()], Flavor::Postgresql);
+        args.upsert = true;
+        args.target_cols_types = [("ts", "TIMESTAMP"), ("id", "BIGINT"), ("v", "TEXT")]
+            .into_iter()
+            .map(|(a, b)| (a.to_string(), b.to_string()))
+            .collect();
+        args.patch_cols_types = args.target_cols_types.clone();
+        args.conflict_target = Some("ts, (COALESCE(id, '-987654321'::integer))".into());
+        let qs = get_update_queries(&args);
+        assert_eq!(qs.len(), 1);
+        assert!(
+            qs[0].contains("ON CONFLICT (ts, (COALESCE(id, '-987654321'::integer))) DO UPDATE"),
+            "{}",
+            qs[0]
+        );
+        // SQLite renders the same way.
+        args.flavor = Flavor::Sqlite;
+        args.conflict_target = Some("\"ts\", COALESCE(\"id\", -987654321)".into());
+        let qs = get_update_queries(&args);
+        assert!(
+            qs[0].contains("ON CONFLICT (\"ts\", COALESCE(\"id\", -987654321)) DO UPDATE"),
+            "{}",
+            qs[0]
+        );
+    }
+
+    #[test]
+    fn mysql_null_safe_upsert_updates_then_inserts() {
+        let mut args = UpdateQueriesArgs::new("t", "p", vec!["id".into()], Flavor::Mysql);
+        args.upsert = true;
+        args.null_safe_upsert = true;
+        args.target_cols_types = [("id", "BIGINT"), ("v", "TEXT")]
+            .into_iter()
+            .map(|(a, b)| (a.to_string(), b.to_string()))
+            .collect();
+        args.patch_cols_types = args.target_cols_types.clone();
+        let qs = get_update_queries(&args);
+        assert_eq!(qs.len(), 2, "{qs:?}");
+        assert!(qs[0].starts_with(
+            "UPDATE `t` AS f\nJOIN (SELECT `id`, `v` FROM `p`) AS p\n    ON f.`id` <=> p.`id`"
+        ));
+        assert!(qs[0].ends_with("SET f.`v` = p.`v`"), "{}", qs[0]);
+        assert!(qs[1].starts_with(
+            "INSERT INTO `t` (`id`, `v`)\nSELECT p.`id`, p.`v`\nFROM `p` AS p\nWHERE NOT EXISTS"
+        ));
+        assert!(qs[1].contains("WHERE f.`id` <=> p.`id`"));
+        // A key another writer inserted in between updates instead of failing.
+        assert!(
+            qs[1].ends_with(")\nON DUPLICATE KEY UPDATE\n    `v` = VALUES(`v`)"),
+            "{}",
+            qs[1]
+        );
+        // Only index columns: insert the missing keys.
+        args.target_cols_types.shift_remove("v");
+        args.patch_cols_types.shift_remove("v");
+        let qs = get_update_queries(&args);
+        assert_eq!(qs.len(), 1);
+        assert!(qs[0].starts_with("INSERT IGNORE INTO `t` (`id`)"), "{qs:?}");
+        assert!(qs[0].ends_with(')'), "{qs:?}");
+        // v4's template without the flag.
+        args.null_safe_upsert = false;
+        let qs = get_update_queries(&args);
+        assert!(qs[0].starts_with("INSERT IGNORE INTO"), "{qs:?}");
+    }
+
+    #[test]
+    fn null_safe_upserts_split_rows_with_null_keys() {
+        let mut args =
+            UpdateQueriesArgs::new("t", "p", vec!["ts".into(), "id".into()], Flavor::Postgresql);
+        args.upsert = true;
+        args.null_safe_upsert = true;
+        args.datetime_col = Some("ts");
+        args.target_cols_types = [("ts", "TIMESTAMP"), ("id", "BIGINT"), ("v", "TEXT")]
+            .into_iter()
+            .map(|(a, b)| (a.to_string(), b.to_string()))
+            .collect();
+        args.patch_cols_types = args.target_cols_types.clone();
+        let qs = get_update_queries(&args);
+        assert_eq!(qs.len(), 3, "{qs:#?}");
+        // Keys all set: v4's statement.
+        assert_eq!(
+            qs[0],
+            "INSERT INTO \"t\" (\"ts\", \"id\", \"v\")\nSELECT \"ts\", \"id\", \"v\"\nFROM \"p\"\nWHERE \"id\" IS NOT NULL\nON CONFLICT (\"ts\", \"id\") DO UPDATE SET \"v\" = CAST(EXCLUDED.\"v\" AS TEXT)"
+        );
+        // NULL keys: update the matches, insert the rest (the datetime compares with `=`).
+        assert!(
+            qs[1].starts_with("UPDATE \"t\" AS f\nSET \"v\" = CAST(p.\"v\" AS TEXT)\nFROM (SELECT \"ts\", \"id\", \"v\" FROM \"p\" WHERE \"id\" IS NULL) AS p\nWHERE f.\"ts\" = p.\"ts\"\n    AND COALESCE(f.\"id\", -987654321) = COALESCE(p.\"id\", -987654321)"),
+            "{}",
+            qs[1]
+        );
+        assert!(
+            qs[2].contains("WHERE (p.\"id\" IS NULL)\n    AND NOT EXISTS ("),
+            "{}",
+            qs[2]
+        );
+        // SQLite compares with `IS` (indexable).
+        args.flavor = Flavor::Sqlite;
+        let qs = get_update_queries(&args);
+        assert!(qs[1].contains("AND f.\"id\" IS p.\"id\""), "{}", qs[1]);
+        // Only the datetime is a key: nothing can be NULL-equal, v4's statement.
+        args.join_cols = vec!["ts".into()];
+        assert_eq!(get_update_queries(&args).len(), 1);
     }
 
     #[test]

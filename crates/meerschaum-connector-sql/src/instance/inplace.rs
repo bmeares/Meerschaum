@@ -3,7 +3,7 @@
 //! and update sets in temporary tables within one transaction (SQLAlchemy `Session`).
 
 use indexmap::IndexMap;
-use meerschaum_core::dtypes::get_pd_type_from_db_type;
+use meerschaum_core::dtypes::{are_dtypes_equal, get_pd_type_from_db_type};
 use meerschaum_core::{Map, Pipe, SuccessTuple, Value};
 
 use crate::dateadd::{DateArg, Number, dateadd_for_execution as dateadd_str};
@@ -11,7 +11,7 @@ use crate::driver::{SqlTransaction, SqlValue};
 use crate::dtypes::get_db_type_from_pd_type;
 use crate::flavor::{DriverFamily, Flavor};
 use crate::ident::sql_item_name;
-use crate::queries::metadef::Bound;
+use crate::queries::metadef::{Bound, SQLITE_STORED_DATETIME_GLOB, sqlite_canonical_datetime};
 use crate::queries::table::{
     ColumnTypeRow, CreateTableOptions, QueryOrDtypes, cols_types_from_rows,
     get_create_schema_if_not_exists_queries, get_create_table_queries, get_table_cols_types_query,
@@ -37,6 +37,20 @@ pub trait InplaceObserver: Send + Sync {
     /// pipe's datetime column (no columns when the pipe has none). `Err` aborts the sync with
     /// nothing merged.
     async fn before_merge(&self, delta: &meerschaum_kernel::Frame) -> Result<(), String>;
+
+    /// A replacing in-place sync is about to delete the rows of `[begin, end)` (`None`:
+    /// unbounded on that side) and insert `delta`'s rows in their place: called instead of
+    /// [`before_merge`](Self::before_merge). The window's rows may be deleted without a
+    /// replacement, so a ledger marks the whole window. The default hands over `delta` only.
+    async fn before_replace(
+        &self,
+        delta: &meerschaum_kernel::Frame,
+        begin: Option<&meerschaum_connector::DateBound>,
+        end: Option<&meerschaum_connector::DateBound>,
+    ) -> Result<(), String> {
+        let _ = (begin, end);
+        self.before_merge(delta).await
+    }
 }
 
 /// `session_execute(session, query, with_results=True)`: run one statement in the transaction,
@@ -144,7 +158,27 @@ impl SqlConnector {
         end: Bound,
         check_existing: bool,
     ) -> SuccessTuple {
-        self.sync_pipe_inplace_with(pipe, params, begin, end, check_existing, None)
+        self.sync_pipe_inplace_with(pipe, params, begin, end, check_existing, false, None)
+            .await
+    }
+
+    /// [`SqlConnector::sync_pipe_inplace`] (or, with `observer`,
+    /// [`SqlConnector::sync_pipe_inplace_observed`]) that may replace the fetched window:
+    /// with `replace` (or the pipe's `fetch: {replace: true}`) the rows of `[begin, end)`
+    /// (matching `params`) are deleted and the definition's rows of that window inserted, in
+    /// one transaction, instead of diffing them. A first sync creates the table as usual.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn sync_pipe_inplace_replacing(
+        &self,
+        pipe: &Pipe,
+        params: Option<&Map>,
+        begin: Bound,
+        end: Bound,
+        check_existing: bool,
+        replace: bool,
+        observer: Option<&dyn InplaceObserver>,
+    ) -> SuccessTuple {
+        self.sync_pipe_inplace_with(pipe, params, begin, end, check_existing, replace, observer)
             .await
     }
 
@@ -160,10 +194,19 @@ impl SqlConnector {
         check_existing: bool,
         observer: &dyn InplaceObserver,
     ) -> SuccessTuple {
-        self.sync_pipe_inplace_with(pipe, params, begin, end, check_existing, Some(observer))
-            .await
+        self.sync_pipe_inplace_with(
+            pipe,
+            params,
+            begin,
+            end,
+            check_existing,
+            false,
+            Some(observer),
+        )
+        .await
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn sync_pipe_inplace_with(
         &self,
         pipe: &Pipe,
@@ -171,8 +214,12 @@ impl SqlConnector {
         begin: Bound,
         end: Bound,
         check_existing: bool,
+        replace: bool,
         observer: Option<&dyn InplaceObserver>,
     ) -> SuccessTuple {
+        if let Some(refused) = self.protected_refusal(pipe, "sync") {
+            return refused;
+        }
         let flavor = self.flavor;
         let pipe = &self.prepare_pipe(pipe).await;
         let sp = match self.sql_pipe(pipe) {
@@ -216,7 +263,7 @@ impl SqlConnector {
         } else {
             None
         };
-        let metadef = match self.get_pipe_metadef(
+        let metadef = match self.get_pipe_metadef_for_sync(
             pipe,
             &FetchArgs {
                 begin: begin.clone(),
@@ -261,6 +308,28 @@ impl SqlConnector {
         let dt_db_type = dt_typ
             .as_ref()
             .map(|t| get_db_type_from_pd_type(t, Some(flavor)));
+        // SQLite has no datetime type: datetimes are text, compared as text. A definition's
+        // computed datetime (`date(ts)` is '2024-01-03') is rewritten in the canonical form the
+        // other syncs write (`YYYY-MM-DD HH:MM:SS.ffffff`), so that bounds, joins and re-syncs
+        // compare like for like (rc15 B1).
+        let sqlite_family = matches!(flavor, Flavor::Sqlite | Flavor::Geopackage);
+        let sqlite_dt_cols: Vec<String> = if sqlite_family {
+            state
+                .dtypes
+                .iter()
+                .filter(|(_, t)| are_dtypes_equal(t, "datetime") && !are_dtypes_equal(t, "int"))
+                .map(|(c, _)| c.clone())
+                .collect()
+        } else {
+            Vec::new()
+        };
+        // `replace` (rc15 Q19): the fetched window is authoritative.
+        let replace = replace || fetch_replace(pipe);
+        if replace && (matches!(begin, Bound::Str(_)) || matches!(end, Bound::Str(_))) {
+            return SuccessTuple::fail(format!(
+                "Cannot replace a window of {pipe} bounded by a SQL expression: pass datetimes or integers as `begin` / `end`."
+            ));
+        }
 
         let clean_up = |ready_to_drop: bool| {
             let tables: Vec<String> = if !upsert {
@@ -281,6 +350,162 @@ impl SqlConnector {
                 }
             }
         };
+
+        if !state.exists && sqlite_family {
+            // Stage the definition's rows, type every column (the pipe's dtypes, the staged
+            // declared types, else the values' storage classes), then create the table typed
+            // and copy the rows: `CREATE TABLE ... AS SELECT` leaves computed columns untyped.
+            let schema = self.get_pipe_schema(&sp);
+            let staged = &temp_tables["new"];
+            let staged_name = &names["new"];
+            let stage = match get_create_table_queries(
+                &QueryOrDtypes::Query(metadef.clone()),
+                staged,
+                flavor,
+                &CreateTableOptions {
+                    schema: internal_schema.clone(),
+                    ..Default::default()
+                },
+            ) {
+                Ok(q) => q,
+                Err(e) => return SuccessTuple::fail(e.to_string()),
+            };
+            if !self.exec_queries_all(&stage, false, true).await {
+                clean_up(false).await;
+                return SuccessTuple::fail(format!(
+                    "Could not stage new data for {pipe} from its SQL query definition."
+                ));
+            }
+            let staged_types = self.get_table_cols_types(staged, isch).await;
+            let canonical: Vec<String> =
+                sqlite_canonical_updates(staged_name, staged_types.keys(), &sqlite_dt_cols, flavor);
+            if !canonical.is_empty() && !self.exec_queries_all(&canonical, true, true).await {
+                clean_up(false).await;
+                return SuccessTuple::fail(format!(
+                    "Could not normalize the datetimes of new data for {pipe}."
+                ));
+            }
+            if let Some(o) = observer {
+                let query = format!("SELECT {observed_col} FROM {staged_name}");
+                let observed = match self.driver().read_frame(&query).await {
+                    Ok(delta) => o.before_merge(&delta).await,
+                    Err(e) => Err(e.to_string()),
+                };
+                if let Err(e) = observed {
+                    clean_up(false).await;
+                    return SuccessTuple::fail(e);
+                }
+            }
+            if !staged_types.values().any(|t| untyped(t)) {
+                // Every column is typed (plain column references): `CREATE TABLE ... AS` from
+                // the staged rows keeps those types, as v4 does.
+                let opts = CreateTableOptions {
+                    schema: schema.clone(),
+                    primary_key: primary_key.clone(),
+                    primary_key_db_type: primary_key_db_type.clone(),
+                    autoincrement,
+                    datetime_column: dt_col.clone(),
+                    ..Default::default()
+                };
+                let queries = match get_create_table_queries(
+                    &QueryOrDtypes::Query(format!("SELECT * FROM {staged_name}")),
+                    &target,
+                    flavor,
+                    &opts,
+                ) {
+                    Ok(q) => q,
+                    Err(e) => return SuccessTuple::fail(e.to_string()),
+                };
+                if !self.exec_queries_all(&queries, false, true).await {
+                    clean_up(false).await;
+                    return SuccessTuple::fail(format!(
+                        "Could not insert new data into {pipe} from its SQL query definition."
+                    ));
+                }
+                if !self.create_indices_sp(&sp, None, None, None).await {
+                    tracing::warn!("Failed to create indices for {pipe}. Continuing...");
+                }
+                let rowcount = self
+                    .get_pipe_rowcount(pipe, &DataQuery::default())
+                    .await
+                    .ok()
+                    .flatten()
+                    .unwrap_or(0);
+                clean_up(true).await;
+                return SuccessTuple::ok(format!(
+                    "Inserted {}, updated 0 rows.",
+                    fmt_thousands(rowcount)
+                ));
+            }
+            let db_types = self
+                .sqlite_typed_columns(staged_name, &staged_types, &state.explicit_dtypes)
+                .await;
+            let create = match get_create_table_queries(
+                &QueryOrDtypes::Dtypes(db_types.clone()),
+                &target,
+                flavor,
+                &CreateTableOptions {
+                    schema: schema.clone(),
+                    primary_key: primary_key.clone(),
+                    primary_key_db_type: primary_key
+                        .as_ref()
+                        .and_then(|pk| db_types.get(pk))
+                        .filter(|t| !t.is_empty())
+                        .cloned()
+                        .or(primary_key_db_type.clone()),
+                    autoincrement,
+                    datetime_column: dt_col.clone(),
+                    parse_dtypes: false,
+                    ..Default::default()
+                },
+            ) {
+                Ok(q) => q,
+                Err(e) => return SuccessTuple::fail(e.to_string()),
+            };
+            let cols = db_types
+                .keys()
+                .map(|c| sql_item_name(c, flavor, None))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let insert =
+                format!("INSERT INTO {pipe_name} ({cols})\nSELECT {cols}\nFROM {staged_name}");
+            let mut tx = match self.driver().begin_write().await {
+                Ok(t) => Some(t),
+                Err(e) => {
+                    clean_up(false).await;
+                    return SuccessTuple::fail(e.to_string());
+                }
+            };
+            for query in &create {
+                self.log(query);
+                if let Err(e) = session_execute(&mut tx, query, flavor).await {
+                    clean_up(false).await;
+                    return SuccessTuple::fail(e);
+                }
+            }
+            self.log(&insert);
+            let inserted = match session_execute(&mut tx, &insert, flavor).await {
+                Ok(n) => n,
+                Err(e) => {
+                    clean_up(false).await;
+                    return SuccessTuple::fail(e);
+                }
+            };
+            if let Some(t) = tx.take()
+                && let Err(e) = t.commit().await
+            {
+                clean_up(false).await;
+                return SuccessTuple::fail(e.to_string());
+            }
+            if !self.create_indices_sp(&sp, None, None, None).await {
+                tracing::warn!("Failed to create indices for {pipe}. Continuing...");
+            }
+            clean_up(true).await;
+            return SuccessTuple::ok(format!(
+                "Inserted {}, updated 0 rows.",
+                fmt_thousands(inserted)
+            ));
+        }
 
         if !state.exists {
             let schema = self.get_pipe_schema(&sp);
@@ -409,10 +634,18 @@ impl SqlConnector {
         // session's write lock, so the staged tables are committed first (v4's `sqlite3`
         // autocommits that DDL anyway), the observer runs outside the session, and a new
         // session performs the merge.
+        // `observe!(query, window)`: a replacing sync hands over its window too.
         macro_rules! observe {
-            ($query:expr) => {{
+            ($query:expr) => {
+                observe!($query, None)
+            };
+            ($query:expr, $window:expr) => {{
                 if let Some(o) = observer {
                     let query: String = $query;
+                    let window: Option<(
+                        Option<&meerschaum_connector::DateBound>,
+                        Option<&meerschaum_connector::DateBound>,
+                    )> = $window;
                     if flavor.driver_family() == DriverFamily::Sqlite {
                         if let Some(t) = tx.take() {
                             if let Err(e) = t.commit().await {
@@ -423,7 +656,11 @@ impl SqlConnector {
                             Ok(delta) => delta,
                             Err(e) => fail!(e.to_string()),
                         };
-                        if let Err(e) = o.before_merge(&delta).await {
+                        let observed = match window {
+                            Some((b, e)) => o.before_replace(&delta, b, e).await,
+                            None => o.before_merge(&delta).await,
+                        };
+                        if let Err(e) = observed {
                             fail!(e);
                         }
                         // The next session takes the write lock when it begins, so it begins only
@@ -440,7 +677,11 @@ impl SqlConnector {
                         };
                         match read {
                             Ok(delta) => {
-                                if let Err(e) = o.before_merge(&delta).await {
+                                let observed = match window {
+                                    Some((b, e)) => o.before_replace(&delta, b, e).await,
+                                    None => o.before_merge(&delta).await,
+                                };
+                                if let Err(e) = observed {
                                     fail!(e);
                                 }
                             }
@@ -461,12 +702,43 @@ impl SqlConnector {
             Ok(n) => n,
             Err(e) => fail!(e),
         };
-        let new_cols_types = if !is_static {
+        let mut new_cols_types = if !is_static {
             self.tx_table_cols_types(&mut tx, &temp_tables[new_root], isch)
                 .await
         } else {
             state.cols_types.clone()
         };
+        if sqlite_family {
+            for query in sqlite_canonical_updates(
+                &names[new_root],
+                new_cols_types.keys(),
+                &sqlite_dt_cols,
+                flavor,
+            ) {
+                self.log(&query);
+                if let Err(e) = session_execute(&mut tx, &query, flavor).await {
+                    fail!(e);
+                }
+            }
+            // Computed columns are untyped on SQLite: type them like a new table would be.
+            if !is_static && new_cols_types.values().any(|t| untyped(t)) {
+                let typed = self
+                    .sqlite_typed_columns_tx(
+                        &mut tx,
+                        &names[new_root],
+                        &new_cols_types,
+                        &state.explicit_dtypes,
+                    )
+                    .await;
+                for (c, t) in typed {
+                    if let Some(slot) = new_cols_types.get_mut(&c)
+                        && untyped(slot)
+                    {
+                        *slot = t;
+                    }
+                }
+            }
+        }
         if new_cols_types.is_empty() {
             if let Some(t) = tx.take() {
                 let _ = t.rollback().await;
@@ -568,6 +840,142 @@ impl SqlConnector {
             };
         }
 
+        // The window a replacing sync deletes (`[begin, end)`, the sync time minus the backtrack
+        // for the default `begin`).
+        let replace_window = if replace {
+            let window_begin = match &begin {
+                // As `build_data_query` resolves the default `begin`.
+                Bound::Default => match self.sync_time(&sp, &state, None, true).await {
+                    Some(b) => match sp.backtrack_interval(check_existing) {
+                        Ok(bt) => self
+                            .parse_date_bound(
+                                &sp,
+                                &state.dtypes,
+                                Some(super::data::subtract_interval(b, bt)),
+                            )
+                            .ok()
+                            .flatten(),
+                        Err(e) => fail!(e.to_string()),
+                    },
+                    None => None,
+                },
+                Bound::DateTime(d) => Some(meerschaum_connector::DateBound::Datetime(
+                    super::values::kernel_datetime(d),
+                )),
+                Bound::Int(i) => Some(meerschaum_connector::DateBound::Int(*i)),
+                Bound::None | Bound::Str(_) => None,
+            };
+            let window_end = match &end {
+                Bound::DateTime(d) => Some(meerschaum_connector::DateBound::Datetime(
+                    super::values::kernel_datetime(d),
+                )),
+                Bound::Int(i) => Some(meerschaum_connector::DateBound::Int(*i)),
+                _ => None,
+            };
+            Some((window_begin, window_end))
+        } else {
+            None
+        };
+
+        // SQLite: rows an older sync stored with non-canonical datetime text inside the window
+        // are rewritten in the canonical form first, so that the comparisons below find them.
+        // `OR IGNORE`: a row whose canonical form already exists under a unique key is left.
+        if sqlite_family && let Some(dt) = dt_col_name.as_deref() {
+            let repair = match &replace_window {
+                Some((b, e)) => sqlite_repair_window_query(
+                    &pipe_name,
+                    dt,
+                    b.as_ref().map(|b| self.sqlite_bound_sql(b)),
+                    e.as_ref().map(|e| self.sqlite_bound_sql(e)),
+                ),
+                None => sqlite_repair_window_query(
+                    &pipe_name,
+                    dt,
+                    Some(format!("(SELECT MIN({dt}) FROM {})", names[new_root])),
+                    Some(format!("(SELECT MAX({dt}) FROM {})", names[new_root])),
+                ),
+            };
+            if sqlite_dt_cols
+                .iter()
+                .any(|c| sql_item_name(c, flavor, None) == dt)
+            {
+                self.log(&repair);
+                if let Err(e) = session_execute(&mut tx, &repair, flavor).await {
+                    fail!(e);
+                }
+            }
+        }
+
+        if let Some((window_begin, window_end)) = replace_window {
+            let query = DataQuery {
+                begin: window_begin,
+                end: window_end,
+                params: params.cloned(),
+                ..Default::default()
+            };
+            // One predicate for both statements: the staged rows inserted are exactly the rows of
+            // the window deleted. The definition's own bounds may be wider (SQLite's
+            // `datetime(...)` drops fractions of a second), and a row outside the window would be
+            // inserted next to its old copy.
+            let window_where = match self.replace_window_where(&sp, &state, &query) {
+                Ok(w) => w,
+                Err(e) => fail!(e.to_string()),
+            };
+            observe!(
+                format!(
+                    "SELECT {observed_col} FROM {}{alias_as} {}\n{window_where}",
+                    names[new_root], aliases["new"]
+                ),
+                Some((query.begin.as_ref(), query.end.as_ref()))
+            );
+            let delete = format!("DELETE FROM {pipe_name}\n{window_where}");
+            self.log(&delete);
+            let deleted = match session_execute(&mut tx, &delete, flavor).await {
+                Ok(n) => n,
+                Err(e) => fail!(e),
+            };
+            let insert = format!(
+                "INSERT INTO {pipe_name} ({new_cols_str})\nSELECT {new_cols_str}\nFROM {}{alias_as} {}\n{window_where}",
+                names[new_root], aliases["new"]
+            );
+            self.log(&insert);
+            let inserted = match session_execute(&mut tx, &insert, flavor).await {
+                Ok(n) => n,
+                Err(e) => fail!(e),
+            };
+            // The staged rows outside the window (`CREATE TABLE ... AS` on SQLite reports no
+            // count: ask).
+            let staged = if new_count >= 0 {
+                Some(new_count)
+            } else {
+                let count = format!("SELECT COUNT(*) AS {} FROM {}", q("n"), names[new_root]);
+                match tx.as_mut() {
+                    Some(t) => t
+                        .read_frame(&count)
+                        .await
+                        .ok()
+                        .and_then(|df| frame_docs(&df).into_iter().next())
+                        .and_then(|d| kv_int(d.get("n"))),
+                    None => None,
+                }
+            };
+            let skipped = staged.map_or(0, |n| (n - inserted.max(0)).max(0) as usize);
+            if let Some(t) = tx.take()
+                && let Err(e) = t.commit().await
+            {
+                clean_up(false).await;
+                return SuccessTuple::fail(e.to_string());
+            }
+            clean_up(true).await;
+            let result = super::sync::replace_result(
+                deleted.max(0) as u64,
+                inserted.max(0) as u64,
+                skipped,
+                true,
+            );
+            return SuccessTuple::ok(result.message);
+        }
+
         if !check_existing && !upsert {
             observe!(format!("SELECT {observed_col} FROM {}", names["new"]));
             let insert_query = format!(
@@ -656,6 +1064,18 @@ impl SqlConnector {
             end_bound = to_bound("max_dt");
         }
 
+        // MSSQL cannot add minutes to a `DATE` (`DATEADD(minute, 1, CAST(... AS DATE))` fails):
+        // a date-only datetime column takes the next day as its exclusive end instead.
+        let date_only_dt = flavor == Flavor::Mssql
+            && dt_col
+                .as_ref()
+                .and_then(|c| state.cols_types.get(c))
+                .is_some_and(|t| t.eq_ignore_ascii_case("date"));
+        if date_only_dt
+            && let Some(meerschaum_connector::DateBound::Datetime(d)) = end_bound.as_mut()
+        {
+            d.utc += chrono::TimeDelta::days(1);
+        }
         let backtrack_query = DataQuery {
             begin: begin_bound,
             end: end_bound,
@@ -668,7 +1088,7 @@ impl SqlConnector {
                 &state,
                 &backtrack_query,
                 &DataQueryOptions {
-                    end_add_minutes: 1,
+                    end_add_minutes: if date_only_dt { 0 } else { 1 },
                     no_order: true,
                     ..Default::default()
                 },
@@ -901,6 +1321,19 @@ impl SqlConnector {
         args.null_indices = sp.null_indices();
         args.cast_columns = sp.enforce();
         args.db_version = db_version.as_deref();
+        if upsert {
+            // The unique key's own columns / expressions; where that key treats NULL keys as
+            // distinct, the statements compare them (rc15 S3).
+            let (target, key_null_safe) =
+                match self.upsert_conflict_target(&sp, &args.join_cols).await {
+                    Some((target, null_safe)) => (Some(target), null_safe),
+                    None => (None, false),
+                };
+            args.conflict_target = target;
+            args.null_safe_upsert = sp.null_indices()
+                && pipe.connector_keys() != "mrsm"
+                && (matches!(flavor, Flavor::Mysql | Flavor::Mariadb) || !key_null_safe);
+        }
         let apply_update_queries = get_update_queries(&args);
 
         observe!(if upsert {
@@ -954,5 +1387,208 @@ impl SqlConnector {
         };
         clean_up(true).await;
         SuccessTuple::ok(msg)
+    }
+}
+
+/// Whether a SQLite column has no declared type (a computed column of `CREATE TABLE ... AS`).
+fn untyped(declared: &str) -> bool {
+    declared.is_empty() || declared.eq_ignore_ascii_case("null")
+}
+
+/// Whether the pipe sets `fetch: {replace: true}` (each fetched window is authoritative).
+fn fetch_replace(pipe: &Pipe) -> bool {
+    pipe.param("fetch")
+        .and_then(|f| f.get("replace"))
+        .is_some_and(|v| v.truthy())
+}
+
+/// SQLite: `UPDATE` statements rewriting the staged table's datetime columns (those of `cols`
+/// in `dt_cols`) in canonical text ([`sqlite_canonical_datetime`]).
+fn sqlite_canonical_updates<'a>(
+    table: &str,
+    cols: impl Iterator<Item = &'a String>,
+    dt_cols: &[String],
+    flavor: Flavor,
+) -> Vec<String> {
+    cols.filter(|c| dt_cols.contains(c))
+        .map(|c| {
+            let q = sql_item_name(c, flavor, None);
+            format!(
+                "UPDATE {table} SET {q} = {} WHERE typeof({q}) = 'text' AND NOT ({q} GLOB '{SQLITE_STORED_DATETIME_GLOB}')",
+                sqlite_canonical_datetime(&q)
+            )
+        })
+        .collect()
+}
+
+/// SQLite: rewrite the target's non-canonical datetime text in a window, a coarse date-prefix
+/// range around `[begin, end]` (SQL expressions; `None`: unbounded) that the datetime index can
+/// drive, so that no row of the window escapes a text comparison.
+fn sqlite_repair_window_query(
+    table: &str,
+    dt: &str,
+    begin: Option<String>,
+    end: Option<String>,
+) -> String {
+    let mut wheres = vec![
+        format!("typeof({dt}) = 'text'"),
+        format!("NOT ({dt} GLOB '{SQLITE_STORED_DATETIME_GLOB}')"),
+    ];
+    if let Some(b) = begin {
+        wheres.insert(0, format!("{dt} >= date({b}, '-1 day')"));
+    }
+    if let Some(e) = end {
+        wheres.insert(1.min(wheres.len()), format!("{dt} < date({e}, '+2 day')"));
+    }
+    format!(
+        "UPDATE OR IGNORE {table} SET {dt} = {}\nWHERE {}",
+        sqlite_canonical_datetime(dt),
+        wheres.join("\n    AND ")
+    )
+}
+
+/// The storage class names (`typeof`) of a column's values as a pandas dtype: `int64`,
+/// `float64`, `string`, `bytes`, or `None` when mixed with text or unknown.
+fn dtype_from_storage_classes(classes: &str) -> Option<&'static str> {
+    let mut set: Vec<&str> = classes
+        .split(',')
+        .map(str::trim)
+        .filter(|c| !c.is_empty() && *c != "null")
+        .collect();
+    set.sort_unstable();
+    set.dedup();
+    match set.as_slice() {
+        ["integer"] => Some("int64"),
+        ["real"] | ["integer", "real"] => Some("float64"),
+        ["text"] => Some("string"),
+        ["blob"] => Some("bytes"),
+        _ => None,
+    }
+}
+
+impl SqlConnector {
+    /// A datetime / integer bound as a SQLite expression (`datetime('...', '0 day')` or the
+    /// integer).
+    fn sqlite_bound_sql(&self, bound: &meerschaum_connector::DateBound) -> String {
+        match bound {
+            meerschaum_connector::DateBound::Int(i) => i.to_string(),
+            meerschaum_connector::DateBound::Datetime(d) => format!(
+                "datetime('{}', '0 day')",
+                d.utc.format("%Y-%m-%d %H:%M:%S%.6f")
+            ),
+        }
+    }
+
+    /// SQLite: the database types for a table created from the staged `table`. A column the
+    /// staged table declares a type for (a plain column reference) keeps it, as v4's
+    /// `CREATE TABLE ... AS` does; an untyped (computed) column takes the pipe's dtype, else the
+    /// storage class of its values; `''` (no type) when none applies.
+    async fn sqlite_typed_columns(
+        &self,
+        table: &str,
+        staged: &IndexMap<String, String>,
+        explicit: &IndexMap<String, String>,
+    ) -> IndexMap<String, String> {
+        let classes = match self
+            .driver()
+            .read_frame(&storage_classes_query(table, staged.keys(), self.flavor))
+            .await
+        {
+            Ok(df) => frame_docs(&df).into_iter().next().unwrap_or_default(),
+            Err(_) => Default::default(),
+        };
+        self.typed_from_classes(staged, explicit, &classes)
+    }
+
+    /// [`Self::sqlite_typed_columns`] inside the sync's transaction.
+    async fn sqlite_typed_columns_tx(
+        &self,
+        tx: &mut Option<SqlTransaction>,
+        table: &str,
+        staged: &IndexMap<String, String>,
+        explicit: &IndexMap<String, String>,
+    ) -> IndexMap<String, String> {
+        let classes = match tx.as_mut() {
+            Some(t) => match t
+                .read_frame(&storage_classes_query(table, staged.keys(), self.flavor))
+                .await
+            {
+                Ok(df) => frame_docs(&df).into_iter().next().unwrap_or_default(),
+                Err(_) => Default::default(),
+            },
+            None => Default::default(),
+        };
+        self.typed_from_classes(staged, explicit, &classes)
+    }
+
+    fn typed_from_classes(
+        &self,
+        staged: &IndexMap<String, String>,
+        explicit: &IndexMap<String, String>,
+        classes: &IndexMap<String, meerschaum_kernel::Value>,
+    ) -> IndexMap<String, String> {
+        staged
+            .iter()
+            .enumerate()
+            .map(|(i, (col, declared))| {
+                let typ = if !untyped(declared) {
+                    declared.clone()
+                } else if let Some(dtype) = explicit.get(col) {
+                    get_db_type_from_pd_type(dtype, Some(self.flavor))
+                } else {
+                    kv_str(classes.get(&format!("c{i}")))
+                        .as_deref()
+                        .and_then(dtype_from_storage_classes)
+                        .map(|t| get_db_type_from_pd_type(t, Some(self.flavor)))
+                        .unwrap_or_default()
+                };
+                (col.clone(), typ)
+            })
+            .collect()
+    }
+}
+
+/// One row: the distinct storage classes of each column's non-null values (`c0`, `c1`, ...).
+fn storage_classes_query<'a>(
+    table: &str,
+    cols: impl Iterator<Item = &'a String>,
+    flavor: Flavor,
+) -> String {
+    let selects = cols
+        .enumerate()
+        .map(|(i, c)| {
+            let q = sql_item_name(c, flavor, None);
+            format!(
+                "group_concat(DISTINCT CASE WHEN {q} IS NOT NULL THEN typeof({q}) END) AS \"c{i}\""
+            )
+        })
+        .collect::<Vec<_>>();
+    format!("SELECT {} FROM {table}", selects.join(", "))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn storage_classes_type_untyped_columns() {
+        assert_eq!(dtype_from_storage_classes("integer"), Some("int64"));
+        assert_eq!(dtype_from_storage_classes("real,integer"), Some("float64"));
+        assert_eq!(dtype_from_storage_classes("text"), Some("string"));
+        assert_eq!(dtype_from_storage_classes("blob"), Some("bytes"));
+        assert_eq!(dtype_from_storage_classes("text,integer"), None);
+        assert_eq!(dtype_from_storage_classes(""), None);
+    }
+
+    #[test]
+    fn repair_queries_bound_the_window() {
+        let q = sqlite_repair_window_query("\"t\"", "\"day\"", Some("b".into()), Some("e".into()));
+        assert!(
+            q.starts_with("UPDATE OR IGNORE \"t\" SET \"day\" = (CASE"),
+            "{q}"
+        );
+        assert!(q.contains("\"day\" >= date(b, '-1 day')"), "{q}");
+        assert!(q.contains("\"day\" < date(e, '+2 day')"), "{q}");
+        assert!(q.contains("typeof(\"day\") = 'text'"), "{q}");
     }
 }

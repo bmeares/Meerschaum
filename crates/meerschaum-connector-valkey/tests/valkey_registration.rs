@@ -140,7 +140,9 @@ async fn a_failed_user_registration_leaves_nothing_and_a_retry_registers_once() 
         assert!(!res.success);
         assert_eq!(snapshot(&backend).await, before, "{}", res.message);
         assert_eq!(
-            conn.valkey_get_user_id(&User::new(&username, None)).await,
+            conn.valkey_get_user_id(&User::new(&username, None))
+                .await
+                .unwrap(),
             None
         );
         assert_eq!(conn.valkey_get_users().await.unwrap(), ["first"]);
@@ -157,6 +159,7 @@ async fn a_failed_user_registration_leaves_nothing_and_a_retry_registers_once() 
     let hash = conn
         .valkey_get_user_password_hash(&User::new(&username, None))
         .await
+        .unwrap()
         .unwrap();
     assert!(meerschaum_core::users::verify_password("password", &hash).unwrap());
 }

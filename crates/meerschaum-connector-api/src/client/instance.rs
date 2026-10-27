@@ -45,6 +45,10 @@ impl Connector for APIConnector {
         &self.label
     }
 
+    fn is_protected(&self) -> bool {
+        APIConnector::is_protected(self)
+    }
+
     async fn test_connection(&self) -> ConnectorResult<bool> {
         self.test_connection_inner().await
     }
@@ -148,6 +152,16 @@ impl InstanceConnector for APIConnector {
         APIConnector::sync_pipe(self, pipe, df, opts).await
     }
 
+    /// The server's counts of each posted chunk, summed (the message carries none).
+    async fn sync_pipe_with_counts(
+        &self,
+        pipe: &Pipe,
+        df: Frame,
+        opts: &SyncOptions,
+    ) -> meerschaum_core::success::SyncResult {
+        APIConnector::sync_pipe_counted(self, pipe, df, opts).await
+    }
+
     async fn clear_pipe(&self, pipe: &Pipe, query: &DataQuery) -> SuccessTuple {
         let res = APIConnector::clear_pipe(self, pipe, query).await;
         if !crate::pipe_ops::is_full_clear(query) {
@@ -184,6 +198,16 @@ impl InstanceConnector for APIConnector {
     ) -> ConnectorResult<Option<i64>> {
         Ok(Some(
             APIConnector::get_pipe_rowcount(self, pipe, query).await?,
+        ))
+    }
+
+    async fn get_pipe_rowcount_estimate(
+        &self,
+        pipe: &Pipe,
+        query: &DataQuery,
+    ) -> ConnectorResult<Option<i64>> {
+        Ok(Some(
+            APIConnector::get_pipe_rowcount_estimate(self, pipe, query).await?,
         ))
     }
 
@@ -256,6 +280,29 @@ impl InstanceConnector for APIConnector {
             ttl_ms: 0,
         })
         .await
+    }
+
+    // The sync status lives on the server's instance (`client/sync_status.rs`).
+    async fn record_sync_status(
+        &self,
+        pipe: &Pipe,
+        outcomes: &[meerschaum_connector::sync_status::SyncOutcome],
+    ) -> ConnectorResult<Option<meerschaum_connector::sync_status::SyncStatus>> {
+        self.post_sync_outcomes(pipe, outcomes).await
+    }
+
+    async fn get_sync_status(
+        &self,
+        pipe: &Pipe,
+    ) -> ConnectorResult<Option<meerschaum_connector::sync_status::SyncStatus>> {
+        self.get_remote_sync_status(pipe).await
+    }
+
+    async fn get_sync_statuses(
+        &self,
+        instance_keys: &str,
+    ) -> ConnectorResult<Vec<meerschaum_connector::sync_status::SyncStatus>> {
+        self.get_remote_sync_statuses(instance_keys).await
     }
 
     async fn register_user(&self, user: &mut User) -> SuccessTuple {
