@@ -64,6 +64,17 @@ struct OptTuple {
     explicit_arg: Option<String>,
 }
 
+/// How many of the words after an option the option takes ([`Parser::option_arity`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OptionArity {
+    /// This many words (none for a switch, or when the value is attached to the option).
+    Values(usize),
+    /// The words up to the next option (`nargs='+'` and `'*'`).
+    Greedy,
+    /// Every word after it (`nargs=argparse.REMAINDER`: `-A` / `--sub-args`).
+    Rest,
+}
+
 /// An `argparse` parser over a static argument table.
 pub struct Parser {
     specs: &'static [ArgSpec],
@@ -104,6 +115,28 @@ impl Parser {
     /// The argument table.
     pub fn specs(&self) -> &'static [ArgSpec] {
         self.specs
+    }
+
+    /// `None` when `arg` is a positional word, else how many of the words after it the option
+    /// takes as `parse_known_args` would read them. An option the table does not know (or an
+    /// ambiguous abbreviation) takes none, and a value attached to the option (`--venv=x`,
+    /// `-isql:x`) leaves none to take.
+    pub fn option_arity(&self, arg: &str) -> Option<OptionArity> {
+        let tuples = self.parse_optional(arg)?;
+        let first = tuples.first()?.action;
+        if first.is_none() || tuples.iter().any(|t| t.action != first) {
+            return Some(OptionArity::Values(0));
+        }
+        let spec = &self.specs[first?];
+        let attached = tuples[0].explicit_arg.is_some();
+        Some(match (spec.action, spec.nargs) {
+            (_, Nargs::Remainder) => OptionArity::Rest,
+            (Action::StoreTrue, _) => OptionArity::Values(0),
+            _ if attached => OptionArity::Values(0),
+            (_, Nargs::Single) => OptionArity::Values(1),
+            (_, Nargs::Exactly(n)) => OptionArity::Values(n),
+            (_, Nargs::ZeroOrMore | Nargs::OneOrMore) => OptionArity::Greedy,
+        })
     }
 
     /// `_parse_optional`: `None` for a positional, else the candidate interpretations.

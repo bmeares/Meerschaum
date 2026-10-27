@@ -351,7 +351,11 @@ fn a_lagging_receiver_notes_the_gap_and_resyncs_from_the_outcomes() {
             node("a", NodeStatus::Succeeded, ""),
             node("b", NodeStatus::Succeeded, ""),
             node("d", NodeStatus::Skipped, "no new rows"),
-            node("e", NodeStatus::UpstreamFailed, "b failed"),
+            node(
+                "e",
+                NodeStatus::UpstreamFailed,
+                "not synced because its parent b failed",
+            ),
             node("f", NodeStatus::RebuildPending, "definition changed"),
             node("g", NodeStatus::Pending, ""),
         ],
@@ -370,7 +374,7 @@ fn a_lagging_receiver_notes_the_gap_and_resyncs_from_the_outcomes() {
             format!("  ✔ {} +7 ins ~0 upd +0 ups", label("b")),
             format!("  ✘ {} no table", label("c")),
             format!("  ○ {} no new rows", label("d")),
-            format!("  ○ {} upstream_failed: b failed", label("e")),
+            format!("  ○ {} not synced because its parent b failed", label("e")),
             format!("  ○ {} rebuild pending: definition changed", label("f")),
         ],
         "a is not printed again; g never ran"

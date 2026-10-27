@@ -19,6 +19,83 @@ use super::ask::{Ask, ask};
 use super::session::{connector_attributes, split_keys};
 use super::{flag, info, pprint, session, warn, words, yes_no};
 
+/// The message for a connector defined nowhere: not in the config, not as an
+/// `MRSM_<TYPE>_<LABEL>` environment variable and not by a plugin.
+pub fn undefined_connector_message(typ: &str, label: &str) -> String {
+    format!(
+        "Connector '{typ}:{label}' is not defined. Add it to the config \
+         (`mrsm bootstrap connectors`), set `MRSM_{}_{}`, or install the plugin that provides it.",
+        typ.to_uppercase(),
+        label.to_uppercase()
+    )
+}
+
+/// The next steps added to the failure of the default instance as shipped (see
+/// [`connect_failure_message`]).
+pub const DEFAULT_INSTANCE_HINT: &str = "Start the database with `mrsm stack up -d db`, or use \
+     the built-in SQLite instance with `-i sql:local` (`instance sql:local` in the shell, or set \
+     `instance:` with `mrsm edit config`).";
+
+/// Whether [`DEFAULT_INSTANCE_HINT`] was shown during this command.
+static DEFAULT_INSTANCE_HINT_SHOWN: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// Show [`DEFAULT_INSTANCE_HINT`] again (the shell calls it before each command).
+pub fn reset_default_instance_hint() {
+    DEFAULT_INSTANCE_HINT_SHOWN.store(false, std::sync::atomic::Ordering::SeqCst);
+}
+
+/// Whether `sql:<label>` is the default `sql:main` nobody configured: no `MRSM_SQL_MAIN`, and the
+/// host, port and database are the shipped defaults.
+pub fn is_untouched_default_main(
+    label: &str,
+    config: &meerschaum_core::config::Config,
+    env: impl Fn(&str) -> Option<String>,
+) -> bool {
+    if label != "main" || env("MRSM_SQL_MAIN").is_some_and(|v| !v.trim().is_empty()) {
+        return false;
+    }
+    let current = connector_attributes(config, "sql", "main");
+    let defaults = config.defaults();
+    let shipped = defaults
+        .get("meerschaum")
+        .and_then(|m| m.get("connectors"))
+        .and_then(|c| c.get("sql"))
+        .and_then(|s| s.get("main"))
+        .map(Value::to_map)
+        .unwrap_or_default();
+    if shipped.is_empty() {
+        return false;
+    }
+    let text = |attrs: &Map, key: &str| attrs.get(key).map(Value::py_str);
+    ["host", "port", "database"]
+        .iter()
+        .all(|key| text(&current, key) == text(&shipped, key))
+}
+
+/// The message of a failed first connection to `sql:<label>`. When the instance is the untouched
+/// default `sql:main` and nothing answers there, the next steps follow, once per command.
+pub fn connect_failure_message(
+    label: &str,
+    config: &meerschaum_core::config::Config,
+    error: &meerschaum_connector_sql::SqlError,
+) -> String {
+    use meerschaum_core::connect::ConnectErrorKind as Kind;
+    let message = error.to_string();
+    let unreachable = matches!(
+        error,
+        meerschaum_connector_sql::SqlError::Connect(e)
+            if matches!(e.kind(), Kind::Refused | Kind::Timeout | Kind::Unreachable)
+    );
+    if !unreachable
+        || !is_untouched_default_main(label, config, |k| std::env::var(k).ok())
+        || DEFAULT_INSTANCE_HINT_SHOWN.swap(true, std::sync::atomic::Ordering::SeqCst)
+    {
+        return message;
+    }
+    format!("{message}\n{DEFAULT_INSTANCE_HINT}")
+}
+
 /// A connector resolved from its keys (`parse_connector_keys`).
 #[derive(Debug, Clone)]
 pub struct Parsed {
@@ -136,13 +213,11 @@ fn parse_connector_keys_inner(rt: &mut Runtime<'_>, keys: &str) -> Option<Parsed
                     );
                 }
             }
-            let failure = if attrs.is_empty() {
-                Some(format!(
-                    "    Missing flavor. Provide flavor as a key for '{full}'."
-                ))
-            } else {
-                sql_spec(&label, &attrs).err()
-            };
+            if attrs.is_empty() {
+                warn(rt, &undefined_connector_message("sql", &label));
+                return None;
+            }
+            let failure = sql_spec(&label, &attrs).err();
             if let Some(message) = failure {
                 warn(
                     rt,
@@ -161,6 +236,10 @@ fn parse_connector_keys_inner(rt: &mut Runtime<'_>, keys: &str) -> Option<Parsed
         }
         "api" | "valkey" => {
             let attrs = connector_attributes(rt.config(), &typ, &label);
+            if attrs.is_empty() {
+                warn(rt, &undefined_connector_message(&typ, &label));
+                return None;
+            }
             if attr_str(&attrs, "host").is_none() && attr_str(&attrs, "uri").is_none() {
                 warn(rt, &format!("Incorrect attributes for connector '{full}'."));
                 print_error(rt, &format!("Missing 'host' for connector '{full}'."));
@@ -724,6 +803,9 @@ fn tcp_refused(host: &str, port: u16) -> Option<String> {
 pub fn validate_attributes(typ: &str, label: &str, attrs: &Map) -> Result<(), String> {
     match typ {
         "sql" => {
+            if attrs.is_empty() {
+                return Err(undefined_connector_message(typ, label));
+            }
             if !attrs.contains_key("flavor") && !attrs.contains_key("uri") {
                 return Err(format!(
                     "    Missing flavor. Provide flavor as a key for 'sql:{label}'."
@@ -732,11 +814,128 @@ pub fn validate_attributes(typ: &str, label: &str, attrs: &Map) -> Result<(), St
             sql_spec(label, attrs).map(|_| ())
         }
         "api" | "valkey" => {
+            if attrs.is_empty() {
+                return Err(undefined_connector_message(typ, label));
+            }
             if attr_str(attrs, "host").is_none() && attr_str(attrs, "uri").is_none() {
                 return Err(format!("Missing 'host' for connector '{typ}:{label}'."));
             }
             Ok(())
         }
         _ => Ok(()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use meerschaum_core::config::{Config, ConfigOptions};
+    use meerschaum_core::connect::{ConnectErrorKind, ConnectTarget, connect_error};
+
+    fn config(root: &std::path::Path, extra: &[(&str, &str)]) -> Config {
+        let mut env = vec![
+            (
+                "MRSM_ROOT_DIR".to_string(),
+                root.to_string_lossy().into_owned(),
+            ),
+            (
+                "MRSM_PLUGINS_DIR".to_string(),
+                root.join("plugins").to_string_lossy().into_owned(),
+            ),
+        ];
+        env.extend(extra.iter().map(|(k, v)| (k.to_string(), v.to_string())));
+        let mut opts = ConfigOptions::with_env(env);
+        opts.allow_writes = false;
+        opts.home = root.to_path_buf();
+        Config::new(opts).unwrap()
+    }
+
+    fn connect_failure(kind: ConnectErrorKind) -> meerschaum_connector_sql::SqlError {
+        let target = ConnectTarget {
+            connector: "sql:main".into(),
+            address: "localhost:5432".into(),
+            user: "mrsm".into(),
+            noun: "database",
+        };
+        meerschaum_connector_sql::SqlError::Connect(connect_error(
+            &target,
+            kind,
+            "",
+            std::time::Duration::from_secs(5),
+        ))
+    }
+
+    #[test]
+    fn an_undefined_connector_says_where_to_define_it() {
+        assert_eq!(
+            undefined_connector_message("sql", "nope"),
+            "Connector 'sql:nope' is not defined. Add it to the config (`mrsm bootstrap connectors`), \
+             set `MRSM_SQL_NOPE`, or install the plugin that provides it."
+        );
+        assert!(
+            validate_attributes("sql", "nope", &Map::new())
+                .unwrap_err()
+                .contains("is not defined")
+        );
+        assert!(
+            validate_attributes("api", "nope", &Map::new())
+                .unwrap_err()
+                .contains("`MRSM_API_NOPE`")
+        );
+        let mut attrs = Map::new();
+        attrs.insert("host".into(), Value::Str("db".into()));
+        assert!(
+            validate_attributes("sql", "nope", &attrs)
+                .unwrap_err()
+                .contains("Missing flavor"),
+            "defined without a flavor"
+        );
+    }
+
+    #[test]
+    fn the_default_instance_hint_needs_the_untouched_default() {
+        let tmp = tempfile::tempdir().unwrap();
+        let shipped = config(tmp.path(), &[]);
+        let no_env = |_: &str| None;
+        assert!(is_untouched_default_main("main", &shipped, no_env));
+        assert!(!is_untouched_default_main("local", &shipped, no_env));
+        assert!(!is_untouched_default_main("main", &shipped, |k: &str| (k
+            == "MRSM_SQL_MAIN")
+            .then(|| "postgresql://u:p@db:5432/x".into())));
+        let moved = config(
+            tmp.path(),
+            &[(
+                "MRSM_CONFIG",
+                r#"{"meerschaum": {"connectors": {"sql": {"main": {"host": "db.example"}}}}}"#,
+            )],
+        );
+        assert!(!is_untouched_default_main("main", &moved, no_env));
+
+        // Once per command: the next one shows it again (the shell resets it per line).
+        reset_default_instance_hint();
+        let refused = connect_failure(ConnectErrorKind::Refused);
+        let first = connect_failure_message("main", &shipped, &refused);
+        assert!(
+            first.ends_with(DEFAULT_INSTANCE_HINT) && first.contains("mrsm stack up -d db"),
+            "{first}"
+        );
+        assert!(first.contains("`-i sql:local`") && first.contains("`instance sql:local`"));
+        let second = connect_failure_message("main", &shipped, &refused);
+        assert_eq!(second, refused.to_string());
+        reset_default_instance_hint();
+        // Rejected credentials mean a database is running: starting the stack would not help.
+        let auth = connect_failure(ConnectErrorKind::Auth);
+        assert_eq!(
+            connect_failure_message("main", &shipped, &auth),
+            auth.to_string()
+        );
+        // A configured `sql:main` gets the plain message.
+        assert_eq!(
+            connect_failure_message("main", &moved, &refused),
+            refused.to_string()
+        );
+        let timeout = connect_failure(ConnectErrorKind::Timeout);
+        assert!(connect_failure_message("main", &shipped, &timeout).contains("stack up"));
+        reset_default_instance_hint();
     }
 }

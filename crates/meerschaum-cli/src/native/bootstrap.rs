@@ -12,7 +12,9 @@ use crate::value::{ArgsMap, PyValue};
 
 use super::ask::{Ask, ask, choose, eof, interrupted, is_interrupt, is_secret_attribute};
 use super::pipes::{Selection, explicit_pipes};
-use super::{flag, info, items_str, pprint, print_tuple, session, string, warn, words, yes_no};
+use super::{
+    check_noask, flag, info, items_str, pprint, print_tuple, session, string, warn, words, yes_no,
+};
 
 /// `config.get('formatting', 'emoji', name)`.
 fn emoji(rt: &mut Runtime<'_>, name: &str) -> String {
@@ -560,10 +562,26 @@ pub fn bootstrap_pipes(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
         let question = format!(
             "Where are the data coming from?\n\n    Please type the keys of a connector or enter '{new_label}'\n    to register a new connector.\n\n {connector_emoji} Connector:"
         );
+        // The choices are listed first (as v4's `choose` did); the dropdown filters them while
+        // typing and any keys are still accepted.
+        let bullets: Vec<String> = choices
+            .iter()
+            .map(|c| format!("  \u{2022} {c}\n"))
+            .collect();
         // The warning is shown on the metric question's screen: the screen is cleared between
         // questions, which would wipe it here.
         let mut unknown_connector: Option<String> = None;
         let mut ck = loop {
+            let listing = rt.with_formatter(|f| {
+                f.print_options(
+                    &bullets,
+                    &OptionsArgs {
+                        header: Some(String::new()),
+                        ..OptionsArgs::default()
+                    },
+                )
+            });
+            rt.print(&listing);
             let Some(typed) =
                 interrupted(ask(rt, &question, &Ask::new().suggestions(choices.clone())))?
             else {
@@ -571,6 +589,12 @@ pub fn bootstrap_pipes(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
             };
             let typed = typed.trim().to_string();
             if typed.is_empty() {
+                if check_noask(rt, noask) {
+                    // Nothing can be asked: the keys must come from `-c` and `-m`.
+                    return Ok(SuccessTuple::fail(
+                        "No pipes were bootstrapped: pass the keys with -c and -m to bootstrap without questions.",
+                    ));
+                }
                 warn(rt, "Please pick a connector.");
                 continue;
             }
@@ -622,6 +646,11 @@ pub fn bootstrap_pipes(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
             if !mk.is_empty() {
                 break mk;
             }
+            if check_noask(rt, noask) {
+                return Ok(SuccessTuple::fail(
+                    "No pipes were bootstrapped: pass the keys with -c and -m to bootstrap without questions.",
+                ));
+            }
             warn(rt, "Please enter a metric.");
         };
         metric_keys = vec![mk.clone()];
@@ -663,7 +692,7 @@ pub fn bootstrap_pipes(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
                 "{} already exists.\n\n    Delete {}?\n    Data will be lost!",
                 sp.pipe, sp.pipe
             );
-            if !yes_no(rt, &q, "n", false, false)? {
+            if !yes_no(rt, &q, "n", false, noask)? {
                 info(rt, &format!("Skipping bootstrapping {}...", sp.pipe));
                 continue;
             }
@@ -725,7 +754,7 @@ fn bootstrap_pipe(
         }
     }
     clear_screen_if_enabled(rt, debug);
-    let parameters = ask_for_parameters(rt, inst, pipe, debug)?;
+    let parameters = ask_for_parameters(rt, inst, pipe, args)?;
     pipe.set_parameters(parameters);
     pprint(
         rt,
@@ -735,7 +764,7 @@ fn bootstrap_pipe(
     if ask(
         rt,
         &format!("\n    Press [Enter] to register {pipe} with the above configuration:"),
-        &Ask::new().no_icon(),
+        &Ask::new().no_icon().noask(noask),
     )
     .is_err()
     {
@@ -746,14 +775,23 @@ fn bootstrap_pipe(
         return Ok(registered);
     }
     clear_screen_if_enabled(rt, debug);
+    // A SQL pipe's query was asked (and previewed) first; without one its sync cannot work yet.
+    let is_sql = pipe.connector_keys().split(':').next() == Some("sql");
+    let has_definition = pipe
+        .raw_parameters()
+        .get("fetch")
+        .and_then(|f| f.get("definition"))
+        .is_some_and(|d| !d.is_null() && !d.py_str().trim().is_empty());
     let attempt = (|| -> Result<Option<SuccessTuple>, ActionError> {
-        if yes_no(
-            rt,
-            &format!("Would you like to edit the definition for {pipe}?"),
-            "n",
-            yes,
-            noask,
-        )? {
+        if !is_sql
+            && yes_no(
+                rt,
+                &format!("Would you like to edit the definition for {pipe}?"),
+                "n",
+                yes,
+                noask,
+            )?
+        {
             let mut edit_args = args.clone();
             edit_args.insert(
                 "connector_keys".into(),
@@ -781,10 +819,24 @@ fn bootstrap_pipe(
                 return Ok(Some(edited));
             }
         }
+        if is_sql && !has_definition {
+            info(
+                rt,
+                &format!(
+                    "{pipe} has no query yet: set it with `mrsm edit definition -c {} -m {}{}`, then sync it with `mrsm sync pipes`.",
+                    pipe.connector_keys(),
+                    pipe.metric_key(),
+                    pipe.location_key()
+                        .map(|l| format!(" -l {l}"))
+                        .unwrap_or_default()
+                ),
+            );
+            return Ok(None);
+        }
         if yes_no(
             rt,
             &format!("Would you like to try syncing {pipe} now?"),
-            "n",
+            "y",
             yes,
             noask,
         )? {
@@ -840,13 +892,15 @@ fn bootstrap_pipe(
     Ok(SuccessTuple::ok("Success"))
 }
 
-/// `_get_parameters(pipe)`.
+/// `_get_parameters(pipe)`. For a `sql:` connector the query comes first: it is previewed and
+/// its columns are offered for the datetime and ID columns.
 fn ask_for_parameters(
     rt: &mut Runtime<'_>,
     inst: &super::Instance,
     pipe: &Pipe,
-    debug: bool,
+    args: &ArgsMap,
 ) -> Result<Map, ActionError> {
+    let debug = flag(args, "debug");
     let get = |rt: &mut Runtime<'_>, keys: &[&str]| rt.config().get(keys).unwrap_or(Value::Null);
     let source_type = pipe
         .connector_keys()
@@ -855,14 +909,22 @@ fn ask_for_parameters(
         .unwrap_or_default()
         .to_string();
     let mut parameters = Map::new();
+    let mut columns_asked = false;
     match source_type.as_str() {
         "sql" => {
+            let query = ask_for_query(rt, inst, pipe, args)?;
             let mut fetch = Map::new();
             fetch.insert(
                 "backtrack_minutes".into(),
                 get(rt, &["pipes", "parameters", "fetch", "backtrack_minutes"]),
             );
-            fetch.insert("definition".into(), Value::Null);
+            fetch.insert(
+                "definition".into(),
+                query
+                    .as_ref()
+                    .map(|(q, _)| Value::Str(q.clone()))
+                    .unwrap_or(Value::Null),
+            );
             parameters.insert("fetch".into(), Value::Map(fetch));
             let mut verify = Map::new();
             verify.insert(
@@ -870,6 +932,13 @@ fn ask_for_parameters(
                 get(rt, &["pipes", "parameters", "verify", "chunk_minutes"]),
             );
             parameters.insert("verify".into(), Value::Map(verify));
+            if let Some((_, Some(preview))) = &query {
+                parameters.insert(
+                    "columns".into(),
+                    Value::Map(columns_from_preview(rt, pipe, preview, args)?),
+                );
+                columns_asked = true;
+            }
         }
         "api" => {
             parameters.insert("fetch".into(), Value::Map(Map::new()));
@@ -895,14 +964,15 @@ fn ask_for_parameters(
         }
         _ => {}
     }
-    let ask_for_cols = parameters
-        .get("columns")
-        .and_then(|c| c.get("datetime"))
-        .is_none_or(Value::is_null);
+    let ask_for_cols = !columns_asked
+        && parameters
+            .get("columns")
+            .and_then(|c| c.get("datetime"))
+            .is_none_or(Value::is_null);
     if ask_for_cols {
         parameters.insert(
             "columns".into(),
-            Value::Map(ask_for_columns(rt, pipe, debug)?),
+            Value::Map(ask_for_columns(rt, pipe, debug, flag(args, "noask"))?),
         );
     }
     clear_screen_if_enabled(rt, debug);
@@ -914,10 +984,11 @@ fn ask_for_parameters(
     );
     let flavor = inst.sql().map(|s| s.flavor().to_string());
     let default_target = pipe.target(flavor.as_deref()).unwrap_or_default();
+    let noask = flag(args, "noask");
     let target = ask(
         rt,
         &format!("Target table name for {pipe}:"),
-        &Ask::new().default(default_target),
+        &Ask::new().default(default_target).noask(noask),
     )?;
     parameters.insert("target".into(), Value::Str(target));
     clear_screen_if_enabled(rt, debug);
@@ -928,7 +999,7 @@ fn ask_for_parameters(
     let tags = ask(
         rt,
         &format!("Tags for {pipe} (empty to omit):"),
-        &Ask::new(),
+        &Ask::new().noask(noask),
     )
     .map(|text| {
         text.split(',')
@@ -939,6 +1010,251 @@ fn ask_for_parameters(
     .unwrap_or_default();
     parameters.insert("tags".into(), Value::List(tags));
     Ok(parameters)
+}
+
+/// How many rows the query preview of `bootstrap pipes` reads.
+const PREVIEW_ROWS: usize = 5;
+
+/// The first lines of the file the query is written in (removed from the answer).
+fn query_template_header(pipe: &Pipe) -> Vec<String> {
+    vec![
+        format!("-- The SQL query for {pipe}: the rows it syncs."),
+        "-- Read another pipe's table with {{ Pipe('connector', 'metric') }}. Save and close to continue.".to_string(),
+    ]
+}
+
+/// The query typed into the editor (`edit definition`'s file, with a header the answer loses).
+fn query_in_editor(
+    rt: &mut Runtime<'_>,
+    pipe: &Pipe,
+    current: &str,
+) -> Result<String, ActionError> {
+    let dir = rt.config().paths().path("PIPES_CACHE_RESOURCES_PATH");
+    let _ = std::fs::create_dir_all(&dir);
+    let path = dir.join(format!("{pipe}.sql"));
+    let header = query_template_header(pipe);
+    let body = if current.is_empty() {
+        format!("{}\n", header.join("\n"))
+    } else {
+        format!("{current}\n")
+    };
+    std::fs::write(&path, body)
+        .map_err(|e| ActionError::new("OSError", format!("{e}: '{}'", path.display())))?;
+    super::editor::edit_file(rt, &path).map_err(|e| ActionError::new("OSError", e))?;
+    let text = std::fs::read_to_string(&path)
+        .map_err(|e| ActionError::new("OSError", format!("{e}: '{}'", path.display())))?;
+    let _ = std::fs::remove_file(&path);
+    Ok(text
+        .lines()
+        .filter(|line| !header.iter().any(|h| h == line.trim_end()))
+        .collect::<Vec<_>>()
+        .join("\n")
+        .trim()
+        .to_string())
+}
+
+/// The first rows of `query` on the pipe's connector (its `{{ Pipe() }}` references resolved
+/// like a sync resolves them), or the error to show.
+fn preview_query(
+    rt: &mut Runtime<'_>,
+    inst: &super::Instance,
+    pipe: &Pipe,
+    query: &str,
+) -> Result<meerschaum_kernel::Frame, String> {
+    use meerschaum_connector_sql::Flavor;
+    let sess = session(rt);
+    let source = match sess.instance(pipe.connector_keys(), rt.config()) {
+        Ok(super::Instance::Sql(conn)) => conn,
+        Ok(_) => {
+            return Err(format!(
+                "'{}' is not a SQL connector.",
+                pipe.connector_keys()
+            ));
+        }
+        Err(e) => return Err(e.message),
+    };
+    let mut with_query = pipe.clone();
+    let mut parameters = pipe.raw_parameters().clone();
+    let mut fetch = Map::new();
+    fetch.insert("definition".into(), Value::Str(query.to_string()));
+    parameters.insert("fetch".into(), Value::Map(fetch));
+    with_query.set_parameters(parameters);
+    let defaults = super::pipes::defaults(rt);
+    let home = inst.conn();
+    let (resolved, warnings) = sess.block_on(meerschaum_connector::template::resolve_pipe(
+        &with_query,
+        home.as_ref(),
+        None,
+        &defaults,
+    ));
+    for warning in warnings {
+        warn(rt, &warning);
+    }
+    let definition = resolved
+        .parameters()
+        .get("fetch")
+        .and_then(|f| f.get("definition"))
+        .map(Value::py_str)
+        .unwrap_or_else(|| query.to_string());
+    let flavor = source.flavor();
+    let name = "_mrsm_preview";
+    let quoted = meerschaum_connector_sql::ident::sql_item_name(name, flavor, None);
+    let parent = match flavor {
+        Flavor::Mssql => format!("SELECT TOP {PREVIEW_ROWS} *\nFROM {quoted}"),
+        Flavor::Oracle => format!("SELECT *\nFROM {quoted}\nWHERE ROWNUM <= {PREVIEW_ROWS}"),
+        _ => format!("SELECT *\nFROM {quoted}\nLIMIT {PREVIEW_ROWS}"),
+    };
+    let sql = meerschaum_connector_sql::queries::cte::wrap_query_with_cte(
+        definition.trim().trim_end_matches(';'),
+        &parent,
+        flavor,
+        name,
+    )
+    .map_err(|e| e.to_string())?;
+    sess.block_on(source.driver().read_frame(&sql))
+        .map_err(|e| e.to_string())
+}
+
+/// Ask for a SQL pipe's query (in the editor on a terminal, else one line), and preview it,
+/// offering to edit it again when the preview fails. `None`: no query (skipped, `--noask`).
+fn ask_for_query(
+    rt: &mut Runtime<'_>,
+    inst: &super::Instance,
+    pipe: &Pipe,
+    args: &ArgsMap,
+) -> Result<Option<(String, Option<meerschaum_kernel::Frame>)>, ActionError> {
+    let (yes, debug) = (flag(args, "yes"), flag(args, "debug"));
+    let noask = check_noask(rt, flag(args, "noask"));
+    let in_editor = rt.live && std::io::IsTerminal::is_terminal(&std::io::stdin()) && !noask;
+    let mut query = String::new();
+    loop {
+        clear_screen_if_enabled(rt, debug);
+        let typed = if in_editor {
+            info(
+                rt,
+                &format!("Write the SQL query for {pipe} in the editor, then save and close it."),
+            );
+            query_in_editor(rt, pipe, &query)?
+        } else {
+            info(
+                rt,
+                &format!(
+                    "Enter the SQL query for {pipe}: the rows it syncs.\n    Read another pipe's table with {{{{ Pipe('connector', 'metric') }}}}."
+                ),
+            );
+            match ask(rt, "SQL query:", &Ask::new().noask(noask)) {
+                Ok(answer) => answer,
+                // Ctrl+C skips the question, as for the wizard's other parameters.
+                Err(e) if is_interrupt(&e) => return Ok(None),
+                Err(e) => return Err(e),
+            }
+        };
+        let typed = typed.trim().to_string();
+        if typed.is_empty() {
+            if noask {
+                return Ok(None);
+            }
+            if !yes_no(rt, "No query was entered. Try again?", "y", false, false)? {
+                return Ok(None);
+            }
+            continue;
+        }
+        query = typed;
+        match preview_query(rt, inst, pipe, &query) {
+            Ok(frame) => {
+                clear_screen_if_enabled(rt, debug);
+                info(rt, &format!("The first rows of the query for {pipe}:"));
+                let table = crate::format::format_dataframe(&super::show::tab_frame(&frame), None);
+                rt.print(&format!("{table}\n\n"));
+                return Ok(Some((query, Some(frame))));
+            }
+            Err(message) => {
+                warn(rt, &format!("The query could not be previewed:\n{message}"));
+                if yes_no(rt, "Edit the query again?", "y", yes, noask)? {
+                    continue;
+                }
+                return Ok(Some((query, None)));
+            }
+        }
+    }
+}
+
+/// Whether a column's name reads like a timestamp (`timestamp`, `ts`, `created_at`, ...).
+fn looks_like_datetime(name: &str) -> bool {
+    let name = name.to_lowercase();
+    matches!(
+        name.as_str(),
+        "datetime" | "timestamp" | "ts" | "time" | "date" | "dt" | "day" | "hour" | "period"
+    ) || [
+        "_at",
+        "_time",
+        "_ts",
+        "_date",
+        "_datetime",
+        "_timestamp",
+        "_day",
+    ]
+    .iter()
+    .any(|suffix| name.ends_with(suffix))
+}
+
+/// The datetime and ID columns, chosen from the preview's columns (the datetime column guessed
+/// from the dtypes, then the names).
+fn columns_from_preview(
+    rt: &mut Runtime<'_>,
+    pipe: &Pipe,
+    preview: &meerschaum_kernel::Frame,
+    args: &ArgsMap,
+) -> Result<Map, ActionError> {
+    let noask = check_noask(rt, flag(args, "noask"));
+    let names = preview.names();
+    let dtypes = preview.dtypes();
+    let none = "(none)".to_string();
+    let guess_datetime = names
+        .iter()
+        .find(|n| dtypes.get(*n).is_some_and(|d| d.contains("datetime")))
+        .or_else(|| names.iter().find(|n| looks_like_datetime(n)))
+        .cloned()
+        .unwrap_or_else(|| none.clone());
+    let pick = |rt: &mut Runtime<'_>, question: &str, choices: Vec<String>, default: String| {
+        if noask {
+            return Ok(Some(default));
+        }
+        choose(rt, question, &choices, Some(&default), true)
+    };
+    let mut cols = Map::new();
+    info(
+        rt,
+        &format!(
+            "The datetime column orders the rows of {pipe}: each sync fetches the rows after the newest one."
+        ),
+    );
+    let mut choices = names.clone();
+    choices.push(none.clone());
+    let datetime = pick(rt, "Datetime column:", choices, guess_datetime)?.unwrap_or_default();
+    if datetime != none && !datetime.is_empty() {
+        cols.insert("datetime".into(), Value::Str(datetime.clone()));
+    }
+    let mut choices: Vec<String> = names.iter().filter(|n| **n != datetime).cloned().collect();
+    if choices.is_empty() {
+        return Ok(cols);
+    }
+    let guess_id = choices
+        .iter()
+        .find(|n| n.eq_ignore_ascii_case("id"))
+        .or_else(|| choices.iter().find(|n| n.to_lowercase().ends_with("_id")))
+        .cloned()
+        .unwrap_or_else(|| none.clone());
+    choices.push(none.clone());
+    info(
+        rt,
+        "The ID column tells apart rows with the same datetime (e.g. a station or a sensor).",
+    );
+    let id = pick(rt, "ID column:", choices, guess_id)?.unwrap_or_default();
+    if id != none && !id.is_empty() {
+        cols.insert("id".into(), Value::Str(id));
+    }
+    Ok(cols)
 }
 
 /// `to_snake_case(text)`.
@@ -961,30 +1277,44 @@ fn to_snake_case(text: &str) -> String {
 }
 
 /// `_ask_for_columns(pipe)`.
-fn ask_for_columns(rt: &mut Runtime<'_>, pipe: &Pipe, debug: bool) -> Result<Map, ActionError> {
+fn ask_for_columns(
+    rt: &mut Runtime<'_>,
+    pipe: &Pipe,
+    debug: bool,
+    noask: bool,
+) -> Result<Map, ActionError> {
     let mut cols = Map::new();
     info(rt, &format!("Please enter index columns for {pipe}:"));
     let datetime_name = ask(
         rt,
         "Datetime column (empty to omit):",
-        &Ask::new().no_icon(),
+        &Ask::new().no_icon().noask(noask),
     )
     .unwrap_or_default();
     if !datetime_name.is_empty() {
         cols.insert("datetime".into(), Value::Str(datetime_name));
     }
-    let id_name = ask(rt, "ID column (empty to omit):", &Ask::new().no_icon()).unwrap_or_default();
+    let id_name = ask(
+        rt,
+        "ID column (empty to omit):",
+        &Ask::new().no_icon().noask(noask),
+    )
+    .unwrap_or_default();
     if !id_name.is_empty() {
         cols.insert("id".into(), Value::Str(id_name));
     }
-    if yes_no(rt, "Add more columns?", "y", false, false)? {
+    if yes_no(rt, "Add more columns?", "y", false, noask)? {
         loop {
             clear_screen_if_enabled(rt, debug);
             info(rt, "Current index columns:");
             let text =
                 rt.with_formatter(|f| super::rich_json::print_json(f, &Value::Map(cols.clone())));
             rt.print(&text);
-            let col_name = ask(rt, "Enter index column (empty to stop):", &Ask::new())?;
+            let col_name = ask(
+                rt,
+                "Enter index column (empty to stop):",
+                &Ask::new().noask(noask),
+            )?;
             if col_name.is_empty() {
                 break;
             }
@@ -1046,7 +1376,7 @@ pub fn bootstrap_jobs(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
         info(
             rt,
             &format!(
-                "Editing arguments for job '{name}'.\n    Press [Esc + Enter] to submit, [CTRL + C] to exit.\n\n    Tip: join multiple actions with `+`, add pipeline arguments with `:`.\n    https://meerschaum.io/reference/actions/#chaining-actions\n"
+                "Editing arguments for job '{name}'.\n    Press [Esc + Enter] to submit, [CTRL + C] to exit.\n\n    Tip: join actions with `+`, add flags for the whole chain after `:`.\n    https://meerschaum.io/reference/actions/#chaining-actions\n"
             ),
         );
         let text = match rt.host.read_multiline("") {
@@ -1054,7 +1384,7 @@ pub fn bootstrap_jobs(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
             None => return Err(eof()),
         };
         let words_in = crate::shlex::split(&text).map_err(|e| ActionError::new("ValueError", e))?;
-        let (new_sysargs, pipeline_args) = crate::sysargs::split_pipeline_sysargs(&words_in);
+        let (new_sysargs, chain_args) = crate::sysargs::split_pipeline_sysargs(&words_in);
         let chained = crate::sysargs::split_chained_sysargs(&new_sysargs)
             .map_err(|e| ActionError::new(&e.class, e.message))?;
         clear_screen_if_enabled(rt, debug);
@@ -1075,11 +1405,11 @@ pub fn bootstrap_jobs(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
                 crate::shlex::join(&new_sysargs)
             ));
         }
-        if !pipeline_args.is_empty() {
-            let header = rt.with_formatter(|f| f.make_header("Pipeline Arguments:"));
+        if !chain_args.is_empty() {
+            let header = rt.with_formatter(|f| f.make_header("Chain Arguments:"));
             rt.print(&format!(
                 "\n{header}\n{}\n\n",
-                crate::shlex::join(&pipeline_args)
+                crate::shlex::join(&chain_args)
             ));
         }
         if !yes_no(

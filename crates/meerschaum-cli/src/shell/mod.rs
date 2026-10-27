@@ -442,7 +442,7 @@ pub fn shell_command(
             state.debug = toggle(state.debug, action, rt);
             // Debug output for the shell's own work too (each command also gets `--debug`).
             if state.debug {
-                rt.with_formatter(crate::debug_log::configure);
+                rt.with_err_formatter(crate::debug_log::configure);
             }
             meerschaum_core::debug::set_enabled(state.debug);
             info(
@@ -488,7 +488,8 @@ pub fn do_help(line: &str, rt: &mut Runtime<'_>) {
         action.remove(0);
     }
     if action.is_empty() {
-        let _ = builtin::show_actions(&args, rt);
+        // The grouped actions (with the shell's commands), then the options.
+        crate::help::print_help(&[], &args, rt);
         return;
     }
     if SHELL_COMMANDS.contains(&action[0].as_str()) {
@@ -498,13 +499,11 @@ pub fn do_help(line: &str, rt: &mut Runtime<'_>) {
         ));
         return;
     }
-    if !CORE_ACTIONS.iter().any(|a| a.name == action[0]) {
-        rt.print(&format!("No help on '{}'.\n", crate::shlex::join(&action)));
-        return;
+    let manifest = crate::python::manifest(rt).ok();
+    match crate::help::action_help(&action, manifest.as_deref(), rt.columns) {
+        Some(text) => rt.print(&text),
+        None => rt.print(&format!("No help on '{}'.\n", crate::shlex::join(&action))),
     }
-    let mut sysargs = action.clone();
-    sysargs.push("--help".into());
-    dispatch::parse_help(&sysargs, rt);
 }
 
 /// The docstrings of the shell's own commands (`Shell.do_*`).
@@ -638,6 +637,8 @@ pub fn run_key_command(line: &str, state: &mut ShellState, rt: &mut Runtime<'_>)
 }
 
 fn run_line_with(line: &str, state: &mut ShellState, rt: &mut Runtime<'_>, clear: bool) -> Control {
+    // Each command may show the default-instance hint once.
+    crate::native::connectors::reset_default_instance_hint();
     let line = line.replace("\\\n", " ");
     if clear {
         clear_screen(rt, state.debug);
@@ -680,7 +681,11 @@ fn run_line_with(line: &str, state: &mut ShellState, rt: &mut Runtime<'_>, clear
             }
         }
     }
-    if sysargs.iter().any(|a| a == "--help" || a == "-h") {
+    // The words after the file of `python file.py ...` are the script's (`-h` is its own).
+    if crate::parse::meerschaum_words(&sysargs)
+        .iter()
+        .any(|a| a == "--help" || a == "-h")
+    {
         dispatch::parse_help(&sysargs, rt);
         return Control::Continue;
     }

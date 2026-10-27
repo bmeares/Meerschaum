@@ -227,3 +227,35 @@ fn plugin_flags_still_reach_actions_through_the_worker() {
     let abbreviated = text(&setup.run(&["flags", "show", "--zz-lev=9"], ""));
     assert!(abbreviated.contains("level=9"), "{abbreviated}");
 }
+
+/// `mrsm help` / `mrsm -h` read the cached manifest and start no Python: when the plugins
+/// changed since it was written (or nothing was cached yet), help says how to refresh it, and
+/// after `reload` it lists the new action without the hint (rc15 review).
+#[test]
+fn help_says_when_the_cached_plugin_actions_are_stale() {
+    const HINT: &str = "The plugins changed since their actions were last loaded";
+    let setup = Setup::new();
+    let fresh = text(&setup.run(&["help"], ""));
+    assert!(
+        fresh.contains(HINT) && fresh.contains("mrsm reload"),
+        "{fresh}"
+    );
+    // A command that loads the plugins caches them: help is current.
+    let _ = setup.run(&["show", "version"], "");
+    let current = text(&setup.run(&["help"], ""));
+    assert!(!current.contains(HINT), "{current}");
+    assert!(current.contains("zz greet"), "{current}");
+    // A new plugin action: `<action> -h` says the list may be stale until the plugins load.
+    std::fs::write(
+        setup.plugins.join("zz2.py"),
+        "from meerschaum.plugins import make_action\n\n\n\
+         @make_action\ndef zz2_wave(**kw):\n    return True, 'waved'\n",
+    )
+    .unwrap();
+    let stale = text(&setup.run(&["zz2", "-h"], ""));
+    assert!(stale.contains(HINT), "{stale}");
+    let _ = setup.run(&["reload"], "");
+    let refreshed = text(&setup.run(&["help"], ""));
+    assert!(refreshed.contains("zz2 wave"), "{refreshed}");
+    assert!(!refreshed.contains(HINT), "{refreshed}");
+}

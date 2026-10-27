@@ -253,6 +253,8 @@ pub fn registry_with(
         config_ref,
         python.clone(),
     );
+    // Native plugins' host calls reuse the session's connectors.
+    registry.set_session(session.clone());
     Ok(EngineRegistry {
         python,
         registry: registry.clone(),
@@ -311,21 +313,42 @@ impl meerschaum_engine::PluginSync for Inplace {
             observer: &'a dyn meerschaum_engine::sync::DeltaObserver,
             dtypes: Option<meerschaum_kernel::enforce::PipeDtypesContext>,
         }
-        #[meerschaum_connector::async_trait]
-        impl meerschaum_connector_sql::instance::inplace::InplaceObserver for Ledger<'_> {
-            async fn before_merge(&self, delta: &meerschaum_kernel::Frame) -> Result<(), String> {
-                // The staged rows come back with the database's types (SQLite returns
-                // timestamps as text): enforce the pipe's dtypes so the ledger sees datetimes
-                // (or integers) on the pipe's axis, as on the frame path.
-                let enforced = self.dtypes.as_ref().and_then(|ctx| {
+        impl Ledger<'_> {
+            /// The staged rows come back with the database's types (SQLite returns
+            /// timestamps as text): enforce the pipe's dtypes so the ledger sees datetimes
+            /// (or integers) on the pipe's axis, as on the frame path.
+            fn enforced(
+                &self,
+                delta: &meerschaum_kernel::Frame,
+            ) -> Option<meerschaum_kernel::Frame> {
+                self.dtypes.as_ref().and_then(|ctx| {
                     meerschaum_kernel::enforce::pipe_enforce_dtypes(
                         meerschaum_kernel::enforce::PipeInput::Frame(delta.clone()),
                         ctx,
                     )
                     .ok()
-                });
+                })
+            }
+        }
+        #[meerschaum_connector::async_trait]
+        impl meerschaum_connector_sql::instance::inplace::InplaceObserver for Ledger<'_> {
+            async fn before_merge(&self, delta: &meerschaum_kernel::Frame) -> Result<(), String> {
+                let enforced = self.enforced(delta);
                 self.observer
                     .before_commit(self.pipe, enforced.as_ref().unwrap_or(delta))
+                    .await
+            }
+
+            // A replacing in-place sync (rc15): the whole window is marked, not only its rows.
+            async fn before_replace(
+                &self,
+                delta: &meerschaum_kernel::Frame,
+                begin: Option<&meerschaum_connector::DateBound>,
+                end: Option<&meerschaum_connector::DateBound>,
+            ) -> Result<(), String> {
+                let enforced = self.enforced(delta);
+                self.observer
+                    .before_replace(self.pipe, enforced.as_ref().unwrap_or(delta), begin, end)
                     .await
             }
         }
@@ -341,19 +364,22 @@ impl meerschaum_engine::PluginSync for Inplace {
             SyncBegin::At(b) => metadef_bound(Some(b)),
             SyncBegin::Unbounded => Bound::None,
         };
+        let ledger = Ledger {
+            pipe,
+            observer,
+            dtypes,
+        };
+        // `replace` (rc15): the window is replaced instead of diffed.
         let result = self
             .0
-            .sync_pipe_inplace_observed(
+            .sync_pipe_inplace_replacing(
                 pipe,
                 args.params.as_ref(),
                 begin,
                 metadef_bound(args.end.as_ref()),
                 args.check_existing,
-                &Ledger {
-                    pipe,
-                    observer,
-                    dtypes,
-                },
+                args.replace,
+                Some(&ledger),
             )
             .await;
         let mut result =
@@ -380,12 +406,14 @@ impl meerschaum_engine::PluginSync for Inplace {
         };
         let result = self
             .0
-            .sync_pipe_inplace(
+            .sync_pipe_inplace_replacing(
                 pipe,
                 args.params.as_ref(),
                 begin,
                 metadef_bound(args.end.as_ref()),
                 args.check_existing,
+                args.replace,
+                None,
             )
             .await;
         meerschaum_engine::sync::result_from_message(result.success, result.message)
@@ -712,6 +740,118 @@ mod tests {
             let _ = sql.delete_pipe(p).await;
         }
         let _ = sql.exec(&format!("DROP TABLE IF EXISTS {src}")).await;
+    }
+
+    /// A replacing in-place sync (`fetch: {replace: true}`, rc15) hands the ledger its whole
+    /// window: a day that left the source leaves the child too, although the parent wrote
+    /// nothing in its cell.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn inplace_replace_marks_the_whole_window() {
+        use meerschaum_engine::{Depth, Engine, EngineConfig, PipeRef, RunOptions, Selection};
+        let root = tempfile::tempdir().unwrap();
+        let uri = format!("sqlite:///{}", root.path().join("rc15inpl.db").display());
+        let keys = "sql:rc15inpl";
+        let sql = Arc::new(
+            meerschaum_connector_sql::SqlConnector::from_uri("rc15inpl", &uri)
+                .await
+                .unwrap(),
+        );
+        let queries = [
+            "CREATE TABLE rc15_src (ts TIMESTAMP, id INTEGER, v INTEGER)".to_string(),
+            "INSERT INTO rc15_src VALUES ('2024-01-01 00:00:00', 1, 1), \
+             ('2024-01-02 00:00:00', 1, 2), ('2024-01-03 00:00:00', 1, 3), \
+             ('2024-01-04 00:00:00', 1, 4)"
+                .to_string(),
+        ];
+        assert!(
+            sql.exec_queries(&queries, true, true)
+                .await
+                .iter()
+                .all(Option::is_some)
+        );
+        let params = |definition: &str, backtrack_minutes: i64| {
+            Value::from_json_str(
+                &serde_json::json!({
+                    "fetch": {
+                        "definition": definition,
+                        "replace": true,
+                        "backtrack_minutes": backtrack_minutes,
+                    },
+                    "columns": {"datetime": "ts", "id": "id"},
+                    "dtypes": {"ts": "datetime"},
+                    "verify": {"chunk_minutes": 1440},
+                })
+                .to_string(),
+            )
+            .unwrap()
+            .to_map()
+        };
+        let raw = Pipe::builder(keys, "rc15_raw")
+            .instance(keys)
+            .parameters(params("SELECT * FROM rc15_src", 14400))
+            .build()
+            .unwrap();
+        let child = Pipe::builder(keys, "rc15_child")
+            .instance(keys)
+            .parameters(params(
+                "SELECT ts, id, v FROM {{ Pipe('sql:rc15inpl', 'rc15_raw', instance='sql:rc15inpl') }}",
+                1,
+            ))
+            .build()
+            .unwrap();
+        for p in [&raw, &child] {
+            assert!(sql.register_pipe(p).await.success);
+        }
+        let table_ref = sql.clone();
+        let registry = Arc::new(
+            StaticRegistry::new()
+                .with_instance(keys, sql.clone())
+                .with_source(keys, sql.clone())
+                .with_plugin_sync(keys, Arc::new(Inplace(sql.clone())))
+                .with_table_reference(move |pipe| {
+                    let sp = table_ref.sql_pipe(pipe).map_err(|e| e.to_string())?;
+                    Ok(table_ref.pipe_table_name(&sp))
+                }),
+        );
+        let engine = Engine::new(
+            registry,
+            EngineConfig {
+                home_instance: keys.into(),
+                lease_dir: root.path().join("leases"),
+                lease_poll: std::time::Duration::from_millis(50),
+                ..EngineConfig::default()
+            },
+        );
+        let run = || {
+            engine.run(RunOptions {
+                selection: Some(
+                    Selection::refs([PipeRef::new(keys, keys, "rc15_child", None)])
+                        .with_parents(Some(Depth::All)),
+                ),
+                ..Default::default()
+            })
+        };
+        let first = run().await;
+        assert!(first.success, "{}", first.message);
+        let rows = |p: &Pipe| {
+            let sql = sql.clone();
+            let p = p.clone();
+            async move {
+                sql.get_pipe_rowcount(&p, &DataQuery::default())
+                    .await
+                    .unwrap()
+            }
+        };
+        assert_eq!(rows(&child).await, Some(4));
+        assert!(
+            sql.exec("DELETE FROM rc15_src WHERE ts = '2024-01-02 00:00:00'")
+                .await
+                .is_some()
+        );
+        let second = run().await;
+        assert!(second.success, "{}", second.message);
+        assert_eq!(rows(&raw).await, Some(3), "{}", second.message);
+        assert_eq!(rows(&child).await, Some(3), "{}", second.message);
     }
 
     /// SQLite returns timestamps as text: the in-place sync's staged rows are dtype-enforced

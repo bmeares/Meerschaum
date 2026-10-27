@@ -242,19 +242,14 @@ pub fn apply_style(
     segments
 }
 
-/// Render segments to a string (`Console._render_buffer`).
+/// Render segments to a string (`Console._render_buffer`). With `no_color` (`NO_COLOR`) the text
+/// is plain: no colors and no other styles, so the output carries no escape sequences.
 pub fn render_segments(segments: &[Segment], no_color: bool) -> String {
     let mut out = String::new();
     for s in segments {
         match s.styled() {
-            Some(style) => {
-                if no_color {
-                    out.push_str(&style.without_color().render(&s.text));
-                } else {
-                    out.push_str(&style.render(&s.text));
-                }
-            }
-            None => out.push_str(&s.text),
+            Some(style) if !no_color => out.push_str(&style.render(&s.text)),
+            _ => out.push_str(&s.text),
         }
     }
     out

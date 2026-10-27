@@ -161,7 +161,7 @@ fn install_driver_validates_its_names() {
 }
 
 #[test]
-fn driver_actions_are_v5_additions_in_help() {
+fn driver_actions_are_in_help() {
     let env = Env::new();
     let help = text(&env.run(&[], &["install", "driver", "--help"]));
     assert!(help.contains("install driver duckdb"), "{help}");

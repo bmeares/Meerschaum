@@ -395,7 +395,8 @@ fn delete_pipeline_selection_skips_missing_names_and_bare_delete_selects_all() {
     env.register_pipeline("second", json!({"targets":[]}));
     let missing = env.run(&["delete", "pipelines", "missing", "--yes"]);
     assert!(!missing.status.success());
-    assert!(String::from_utf8_lossy(&missing.stderr).contains("No valid Pipeline"));
+    // The error is printed once, in the failure block (stdout).
+    assert!(String::from_utf8_lossy(&missing.stdout).contains("No valid Pipeline"));
     assert_eq!(env.definitions().as_array().unwrap().len(), 2);
     let mixed = env.run(&["delete", "pipelines", "missing", "first", "--yes"]);
     assert!(

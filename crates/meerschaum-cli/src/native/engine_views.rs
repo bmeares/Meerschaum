@@ -70,14 +70,14 @@ pub fn plan_pipes(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
         .count();
     let provisional = plan.nodes.iter().filter(|n| n.provisional).count();
     let mut summary = format!(
-        "Planned {} node{} ({runs} would sync",
+        "Planned {} pipe{} ({runs} would sync",
         plan.nodes.len(),
         if plan.nodes.len() == 1 { "" } else { "s" }
     );
     if provisional > 0 {
         let _ = write!(
             summary,
-            ", {provisional} re-planned after their parents finish, shown as if they sync new rows"
+            ", {provisional} planned again after their parents sync, shown as if they sync new rows"
         );
     }
     info(rt, &format!("{summary}). Nothing was synced."));

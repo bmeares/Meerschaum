@@ -114,11 +114,15 @@ pub fn show_version(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     Ok(SuccessTuple::success())
 }
 
-/// `show help`: `print(parser.format_help())`.
-pub fn show_help(_args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
-    let text = format!("{}\n", help::format_help(rt.columns));
-    rt.print(&text);
-    crate::python::print_help(rt);
+/// `show help`: the global help (the same as `mrsm -h`).
+pub fn show_help(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
+    help::print_help(&[], args, rt);
+    Ok(SuccessTuple::success())
+}
+
+/// `help [action ...]`: the global help, or the help of an action (`help sync pipes`).
+pub fn help(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
+    help::print_help(&words(args, "action"), args, rt);
     Ok(SuccessTuple::success())
 }
 
@@ -153,7 +157,8 @@ pub fn show_actions(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
         // (`shell_attrs['_actions']` is that dict), so `show actions` lists them there.
         actions.extend(crate::shell::SHELL_COMMANDS.iter().map(|s| s.to_string()));
     }
-    let text = rt.with_formatter(|f| f.print_options(&actions, &opts));
+    // Columns are sized to the names: an action name is never cut off.
+    let text = rt.with_formatter(|f| f.print_names(&actions, &opts));
     rt.print(&text);
     Ok(SuccessTuple::success())
 }
@@ -717,13 +722,82 @@ fn missing_package_failure(rt: &mut Runtime<'_>) -> Option<SuccessTuple> {
     }
 }
 
-/// `python [code]`: start an interpreter with `meerschaum` imported.
+/// The Python file `mrsm python <word> ...` runs: an existing file (relative to the working
+/// directory), or a `.py` / `.pyw` name that does not exist (`Err`: the message). `None`: the
+/// word is code for the REPL.
+fn python_script(rt: &Runtime<'_>, word: &str) -> Option<Result<PathBuf, String>> {
+    if word.is_empty() || word.contains('\n') {
+        return None;
+    }
+    let path = PathBuf::from(word);
+    let resolved = match (&rt.cwd, path.is_absolute()) {
+        (Some(cwd), false) => cwd.join(&path),
+        _ => path.clone(),
+    };
+    if resolved.is_file() {
+        return Some(Ok(path));
+    }
+    let lower = word.to_lowercase();
+    if (lower.ends_with(".py") || lower.ends_with(".pyw")) && !word.contains(char::is_whitespace) {
+        return Some(Err(format!("No such Python file: '{word}'.")));
+    }
+    None
+}
+
+/// `mrsm python [[flags]] file.py [args ...]`: run the file with the interpreter `mrsm python`
+/// opens (the configured `MRSM_PYTHON`, or a virtual environment's with `--venv`), passing it
+/// every word after the file name unchanged, as `python file.py ...` does (the parser leaves
+/// them alone: `parse::python_script_index`). Sub-arguments given before the file (`[-u]`) are
+/// the interpreter's flags, as for the REPL.
+fn run_python_file(
+    args: &ArgsMap,
+    rt: &mut Runtime<'_>,
+    script: &std::path::Path,
+    script_args: &[String],
+) -> ActionResult {
+    let venv = string(args, "venv");
+    if venv.is_none()
+        && let Some(failure) = missing_package_failure(rt)
+    {
+        return Ok(failure);
+    }
+    let mut argv: Vec<String> = words(args, "sub_args");
+    argv.push(script.to_string_lossy().into_owned());
+    argv.extend(script_args.iter().cloned());
+    let python = python_executable(rt, venv.as_deref());
+    let spec = CommandSpec {
+        program: python.clone(),
+        args: argv,
+        cwd: rt.cwd.clone(),
+        ..CommandSpec::default()
+    };
+    match rt.host.run(&spec) {
+        Ok(0) => Ok(SuccessTuple::success()),
+        Ok(rc) => Ok(SuccessTuple::fail(format!(
+            "Python file '{}' exited with code {rc}.",
+            script.display()
+        ))),
+        Err(e) => Ok(SuccessTuple::fail(format!(
+            "Could not start '{python}' to run '{}': {e}",
+            script.display()
+        ))),
+    }
+}
+
+/// `python [code | file.py [args ...]]`: start an interpreter with `meerschaum` imported, or
+/// run a Python file with it.
 pub fn python(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     let action = words(args, "action");
     let sub_args = words(args, "sub_args");
     let venv = string(args, "venv");
     let noask = flag(args, "noask");
     let mut nopretty = flag(args, "nopretty") || noask;
+    if let Some(script) = action.first().and_then(|word| python_script(rt, word)) {
+        return match script {
+            Ok(script) => run_python_file(args, rt, &script, &action[1..]),
+            Err(message) => Ok(SuccessTuple::fail(message)),
+        };
+    }
     if string(args, "executor_keys").is_some_and(|e| e.starts_with("api:")) {
         let w = rt.with_formatter(|f| {
             f.warn("Cannot open a Python REPL remotely, falling back to local...")

@@ -779,30 +779,20 @@ fn rust_package(scaffold: &Scaffold<'_>) -> Result<Vec<(String, String)>, Action
         sdk_requirement()
     );
 
-    let mut imports = vec!["Error", "Frame", "Plugin", "Reply", "Request", "Result"];
+    let mut imports = vec!["prelude::*"];
     if has("fetch") || has("connector") || has("instance-connector") {
         imports.push("sdk::FetchOutput");
     }
     if has("api") {
         imports.push("api::{RouteRequest, RouteResponse, RouteSpec}");
     }
-    imports.push("serde_json::{Value, json}");
 
-    let mut entry = vec![
-        format!("\"name\": {name:?}"),
-        "\"version\": VERSION".to_string(),
-    ];
-    let mut data_functions = Vec::new();
+    // What the plugin provides, declared with `Manifest`: the SDK writes the manifest document,
+    // with the package's name and version.
+    let mut declarations = Vec::new();
     if has("fetch") {
-        data_functions.extend(["\"fetch\"", "\"register\""]);
+        declarations.extend([".fetch()".to_string(), ".register()".to_string()]);
     }
-    if !data_functions.is_empty() {
-        entry.push(format!(
-            "\"data_functions\": [{}]",
-            data_functions.join(", ")
-        ));
-    }
-    let mut connector_types = String::new();
     let connector = if has("connector") || has("instance-connector") {
         Some(scaffold.connector_type()?)
     } else {
@@ -815,16 +805,16 @@ fn rust_package(scaffold: &Scaffold<'_>) -> Result<Vec<(String, String)>, Action
         } else {
             "\"fetch\""
         };
-        entry.push(format!("\"connectors\": [{connector:?}]"));
-        connector_types = format!(
-            ",\n            \"connector_types\": {{\n                {connector:?}: {{\n                    \"type\": {connector:?},\n                    \"plugin\": {name:?},\n                    \"class_name\": \"{plugin_struct}\",\n                    \"is_instance\": {instance},\n                    \"is_thread_safe\": false,\n                    \"methods\": [{methods}]\n                }}\n            }}"
-        );
+        let kind = if instance { ".instance()" } else { "" };
+        declarations.push(format!(
+            ".connector(ConnectorType::new({connector:?}, [{methods}]){kind})"
+        ));
     }
     let action = if has("action") {
         rust_action_ident(scaffold.action)?;
         let spaces = scaffold.action.replace('_', " ");
-        entry.push(format!(
-            "\"actions\": [{{\"name\": {:?}, \"doc\": \"Run `mrsm {spaces}` to trigger.\"}}]",
+        declarations.push(format!(
+            ".action({:?}, \"Run `mrsm {spaces}` to trigger.\")",
             scaffold.action
         ));
         Some(scaffold.action)
@@ -832,20 +822,17 @@ fn rust_package(scaffold: &Scaffold<'_>) -> Result<Vec<(String, String)>, Action
         None
     };
     if has("api") {
-        entry.push(format!(
-            "\"api_routes\": [RouteSpec::new(\"get_my_endpoint\", \"GET\", \"/{name}\").to_json()]"
+        declarations.push(format!(
+            ".api_route(RouteSpec::new(\"get_my_endpoint\", \"GET\", \"/{name}\"))"
         ));
     }
     if has("web") {
-        entry.push(format!(
-            "\"web_pages\": [{{\n                        \"path\": \"/dash/{name}\",\n                        \"page_group\": {name:?},\n                        \"page_key\": {name:?},\n                        \"login_required\": false,\n                        \"function\": \"page_layout\",\n                        \"mode\": \"html\"\n                    }}]"
-        ));
+        declarations.push(format!(".web_page({name:?}, \"page_layout\", false)"));
     }
-    let entry = entry
+    let declarations = declarations
         .iter()
-        .map(|line| format!("                    {line}"))
-        .collect::<Vec<_>>()
-        .join(",\n");
+        .map(|line| format!("            {line}\n"))
+        .collect::<String>();
 
     let mut arms = Vec::new();
     arms.push(
@@ -939,28 +926,15 @@ use meerschaum_plugin::{{
     {imports},
 }};
 
-const VERSION: &str = "0.0.1";
-
 #[derive(Default)]
 struct {plugin_struct};
 
 impl Plugin for {plugin_struct} {{
-    const NAME: &'static str = {name:?};
-    const VERSION: &'static str = VERSION;
-
-    /// What this plugin provides (read without loading the library).
+    /// What this plugin provides (read without loading the library). Its name and version
+    /// are the package's, from Cargo.toml (keep plugin.toml the same).
     fn manifest(&self) -> Value {{
-        json!({{
-            "schema_version": meerschaum_plugin::MANIFEST_SCHEMA_VERSION,
-            "meerschaum_version": {mrsm_version:?},
-            "python_version": "",
-            "fingerprint": null,
-            "plugins": {{
-                {name:?}: {{
-{entry}
-                }}
-            }}{connector_types}
-        }})
+        Manifest::new()
+{declarations}            .into()
     }}
 {methods}
     fn call(&self, request: &Request, {data_param}: Option<Frame>) -> Result<Reply> {{
@@ -974,7 +948,6 @@ impl Plugin for {plugin_struct} {{
 meerschaum_plugin::export_plugin!({plugin_struct});
 "#,
         imports = imports.join(",\n    "),
-        mrsm_version = env!("CARGO_PKG_VERSION"),
         arms = arms.join("\n"),
     );
     Ok(vec![
@@ -1123,15 +1096,26 @@ mod tests {
             "{lib}"
         );
         for needle in [
-            "\"connector_types\"",
-            "\"is_instance\": true",
-            "\"actions\": [{\"name\": \"sing_song\"",
-            "RouteSpec::new(\"get_my_endpoint\", \"GET\", \"/my-demo\")",
-            "\"web_pages\"",
+            "Manifest::new()",
+            ".fetch()",
+            ".connector(ConnectorType::new(",
+            ".instance())",
+            ".action(\"sing_song\", \"Run `mrsm sing song` to trigger.\")",
+            ".api_route(RouteSpec::new(\"get_my_endpoint\", \"GET\", \"/my-demo\"))",
+            ".web_page(\"my-demo\", \"page_layout\", false)",
             "\"sync_pipe\" =>",
             "\"page\" =>",
         ] {
             assert!(lib.contains(needle), "{needle}\n{lib}");
+        }
+        // No hand-written manifest: the SDK names and versions the plugin from the package.
+        for absent in [
+            "meerschaum_version",
+            "const NAME",
+            "const VERSION",
+            "schema_version",
+        ] {
+            assert!(!lib.contains(absent), "{absent}\n{lib}");
         }
     }
 

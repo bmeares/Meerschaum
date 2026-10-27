@@ -1,9 +1,14 @@
 //! The declarative argument table, ported from `meerschaum/_internal/arguments/_parser.py`.
 //!
 //! Every entry mirrors one `add_argument` call: option strings in their declared order, `dest`,
-//! `action`, `nargs`, `type`, `choices` and the help text verbatim. The table drives the clap
+//! `action`, `nargs`, `type`, `choices` and the help text. The table drives the clap
 //! [`Command`](clap::Command) (`crate::command`), the `argparse`-compatible parser
 //! (`crate::argparse`), the help formatter and the JSON schema (`crate::schema`).
+//!
+//! The option strings, arities and types of every v4 argument are unchanged; the help text is
+//! written for today's behavior. Arguments added since ([`V5_ONLY_DESTS`]) come last in their
+//! groups, and the Python mirror (`meerschaum/_internal/arguments/_parser.py`) declares the same
+//! ones so plugins parse the same command lines.
 
 /// `prog` passed to `ArgumentParser`.
 pub const PROG: &str = "mrsm";
@@ -272,7 +277,7 @@ pub static ARGUMENTS: &[ArgSpec] = &[
     flag(
         "loop",
         &["--loop"],
-        "Loop the specified action forever (only for select actions)",
+        "Repeat the action until it is stopped, waiting `--min-seconds` between laps.",
         G::Actions,
     ),
     flag(
@@ -290,7 +295,7 @@ pub static ARGUMENTS: &[ArgSpec] = &[
     flag(
         "noask",
         &["--noask", "--no-ask"],
-        "Automatically choose the defaults answers to questions. Does not result in data loss.",
+        "Automatically choose the default answers to questions. Does not result in data loss.",
         G::Actions,
     ),
     ArgSpec {
@@ -326,9 +331,10 @@ pub static ARGUMENTS: &[ArgSpec] = &[
         &["-s", "--schedule", "--cron"],
         T::Str,
         concat!(
-            "Continue executing the action according to a schedule (e.g. 'every 1 seconds'). \n",
-            "Often used with `-d`. See this page for scheduling syntax:\n ",
-            "https://red-engine.readthedocs.io/en/stable/condition_syntax/index.html"
+            "Run the action on a schedule, e.g. 'every 10 minutes', 'daily starting 00:00' or a ",
+            "cron expression ('0 * * * *'). Often used with `-d`; check a schedule with ",
+            "`mrsm show schedule '<schedule>'`. Syntax: ",
+            "https://meerschaum.io/reference/background-jobs/#schedules"
         ),
         G::Jobs,
     ),
@@ -375,8 +381,9 @@ pub static ARGUMENTS: &[ArgSpec] = &[
         &["-i", "-I", "--mrsm-instance", "--instance"],
         T::None,
         concat!(
-            "Connector Keys (type:label) to the Meerschaum instance for Pipe objects. ",
-            "If label is omitted, use the configured default interface (usually 'sql:main')"
+            "The instance (connector keys `type:label`) where pipes are registered, e.g. ",
+            "`sql:local` or `api:main`. A bare type uses its `main` label. Defaults to the ",
+            "configured instance (`sql:main` unless changed with `mrsm edit config`)."
         ),
         G::Pipes,
     ),
@@ -435,14 +442,17 @@ pub static ARGUMENTS: &[ArgSpec] = &[
         "min_seconds",
         &["--min-seconds", "--cooldown"],
         T::Float,
-        "The minimum number of seconds between syncing laps. Defaults to 1.",
+        "The minimum number of seconds between laps of `--loop`. Defaults to 1.",
         G::Sync,
     ),
     store(
         "timeout_seconds",
         &["--timeout-seconds", "--timeout"],
         T::Float,
-        "The maximum number of seconds before cancelling a pipe's syncing job. Defaults to 300.",
+        concat!(
+            "How many seconds to wait before giving up: on a job to stop (`stop jobs`, ",
+            "`pause jobs`), or on each step of an action chain (`... : --timeout 60`)."
+        ),
         G::Sync,
     ),
     flag(
@@ -477,7 +487,7 @@ pub static ARGUMENTS: &[ArgSpec] = &[
         "end",
         &["--end"],
         T::ParseDatetime,
-        "The end datetime when syncing, fetching data.",
+        "The end datetime (exclusive) when syncing, fetching data.",
         G::Sync,
     ),
     store(
@@ -508,8 +518,7 @@ pub static ARGUMENTS: &[ArgSpec] = &[
         "chunk_hours",
         &["--chunk-hours"],
         T::Int,
-        // PARITY: the v4 help says "in days" for `--chunk-hours` (`_parser.py`).
-        "Specify the chunk interval in days for verification syncs. See `--chunk-minutes`.",
+        "Specify the chunk interval in hours for verification syncs. See `--chunk-minutes`.",
         G::Sync,
     ),
     store(
@@ -592,7 +601,14 @@ pub static ARGUMENTS: &[ArgSpec] = &[
     flag(
         "cache",
         &["--cache"],
-        "Sync pipes' metadata to disk.",
+        "No effect; accepted so that older commands keep working.",
+        G::Sync,
+    ),
+    // v5 (C4): consumers read the `replace` key (`SyncOptions.replace`).
+    flag(
+        "replace",
+        &["--replace"],
+        "Replace the rows between --begin and --end with the fetched rows in one transaction.",
         G::Sync,
     ),
     // ---------------------------------------------------------------- API options
@@ -614,7 +630,10 @@ pub static ARGUMENTS: &[ArgSpec] = &[
         "webterm_port",
         &["--webterm-port"],
         T::Int,
-        "The port on which to run the webterm server.",
+        concat!(
+            "No effect: the API serves the web terminal on its own port ",
+            "(`start webterm -p` for a standalone one). Accepted so that older commands keep working."
+        ),
         G::Api,
     ),
     store(
@@ -627,7 +646,7 @@ pub static ARGUMENTS: &[ArgSpec] = &[
     flag(
         "no_dash",
         &["--no-dash", "--nodash"],
-        "When starting the API, do not start the Web Console dashboard.",
+        "When starting the API, do not serve the web console.",
         G::Api,
     ),
     flag(
@@ -657,21 +676,38 @@ pub static ARGUMENTS: &[ArgSpec] = &[
     flag(
         "production",
         &["--production", "--gunicorn"],
-        "Start the API with the Gunicorn process manager.",
+        concat!(
+            "Start the API in production mode: the interactive API docs (`/docs`, `/redoc`) ",
+            "are not served unless `api:endpoints:docs_in_production` is set."
+        ),
         G::Api,
     ),
+    // v5: the server does not terminate TLS; `start api` refuses these (`server::tls_refusal`).
     store(
         "keyfile",
         &["--keyfile"],
         T::Str,
-        "Start the API server with this keyfile (requires --certfile).",
+        concat!(
+            "Not supported: the API server does not serve HTTPS itself, and `start api` stops ",
+            "with this flag. Put a reverse proxy that terminates TLS in front of it."
+        ),
         G::Api,
     ),
     store(
         "certfile",
         &["--certfile"],
         T::Str,
-        "Start the API server with this certfile (requires --keyfile).",
+        concat!(
+            "Not supported: the API server does not serve HTTPS itself, and `start api` stops ",
+            "with this flag. Put a reverse proxy that terminates TLS in front of it."
+        ),
+        G::Api,
+    ),
+    // v5 (C4, Q34): consumers read the `public` key (`api:permissions:preset: public`).
+    flag(
+        "public",
+        &["--public"],
+        "Serve only public routes: login, health, version and plugin routes and pages.",
         G::Api,
     ),
     // ---------------------------------------------------------------- Plugins options
@@ -759,7 +795,7 @@ pub static ARGUMENTS: &[ArgSpec] = &[
     flag(
         "trace",
         &["--trace"],
-        "Trace execution and open browser windows to visualize the stack.",
+        "No effect; accepted so that older commands keep working. Use `--debug` instead.",
         G::Debug,
     ),
     // ---------------------------------------------------------------- Miscellaneous options
@@ -796,7 +832,10 @@ pub static ARGUMENTS: &[ArgSpec] = &[
     flag(
         "dry_run",
         &["--dry-run"],
-        "Preview package installation without making changes.",
+        concat!(
+            "Show what the action would change without changing anything ",
+            "(e.g. `install packages`, `verify schema`)."
+        ),
         G::Misc,
     ),
     store(
@@ -807,8 +846,7 @@ pub static ARGUMENTS: &[ArgSpec] = &[
             "Parameters dictionary in JSON format or simple format. ",
             "Simple format is for one-depth dictionaries and does not need braces or quotes.",
             "\nJSON Example:\n",
-            "--params '{\"meerschaum\" : { \"connectors\" : ",
-            "\"main\" : { \"host\" : \"localhost\" } } }'",
+            "--params '{\"columns\": {\"datetime\": \"timestamp\", \"id\": \"station\"}}'",
             "\n\nSimple example:\n",
             "--params key1:value1,key2:value2"
         ),
@@ -826,7 +864,7 @@ pub static ARGUMENTS: &[ArgSpec] = &[
     flag(
         "gui",
         &["--gui"],
-        "Open a DataFrame in an interactive pandasgui or matplotlib window.",
+        "No effect; accepted so that older commands keep working. See `mrsm start gui`.",
         G::Misc,
     ),
     flag(
@@ -835,28 +873,44 @@ pub static ARGUMENTS: &[ArgSpec] = &[
         "Open the Meerschaum shell and execute the provided action.",
         G::Misc,
     ),
+    // v4's `sh` defaulted to `use_bash=True` and its CLI never checked `allow_shell_job`.
     flag(
         "use_bash",
         &["--use-bash"],
-        "Execute non-implemented actions via `bash -c`. Default behavior is to execute directly.",
+        concat!(
+            "No effect (commands that are not actions always run with `bash -c`); ",
+            "accepted so that older commands keep working."
+        ),
         G::Misc,
     ),
     flag(
         "allow_shell_job",
         &["--allow-shell-job"],
         concat!(
-            "Allow shell commands to be run as background jobs. ",
-            "Default behavior is to only allow recognized actions."
+            "No effect (a job may run any command, e.g. `mrsm echo hi -d`); ",
+            "accepted so that older commands keep working."
         ),
         G::Misc,
     ),
     flag(
         "no_daemon",
         &["--no-daemon"],
-        "Do not use the Meerschaum CLI daemon to execute the action.",
+        "No effect (actions always run in this process); accepted so that older commands keep working.",
         G::Misc,
     ),
+    // v5 (C4, Q20): consumers read the `allow_protected` key; the flag is forwarded to jobs and
+    // child processes like `--debug`. Listed with the actions options; kept last in the table so
+    // the v4 arguments keep their order.
+    flag(
+        "allow_protected",
+        &["--allow-protected"],
+        "Allow writes to connectors marked `protected: true`.",
+        G::Actions,
+    ),
 ];
+
+/// The arguments added since v4.1 (absent from the v4 parser fixture `tests/fixtures/parser.json`).
+pub const V5_ONLY_DESTS: &[&str] = &["replace", "public", "allow_protected"];
 
 /// Find an argument by `dest`.
 pub fn by_dest(dest: &str) -> Option<&'static ArgSpec> {

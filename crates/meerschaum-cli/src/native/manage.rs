@@ -75,7 +75,15 @@ pub(crate) fn ask_connector_register(
         if !manifest_may_register(session, config, pipe.connector_keys()) {
             return None;
         }
-        return native_connector_register(&natives, config, pipe);
+        // The hook may make host calls (`host::plugin_config()`, `host::pipe(...)`), with the
+        // trust of this process, as a Python plugin's `register` has.
+        let host = crate::native_plugins::local_host(crate::native_plugins::HostEnv::new(
+            session.clone(),
+            crate::native_plugins::host_config(config),
+            natives.clone(),
+            Some(pipe.instance_keys().to_string()),
+        ));
+        return native_connector_register_with_host(&natives, config, pipe, Some(host));
     }
     if !session.worker_enabled() {
         return None;
@@ -118,6 +126,16 @@ pub fn native_connector_register(
     config: &meerschaum_core::config::Config,
     pipe: &Pipe,
 ) -> Option<Result<meerschaum_worker::connector::RegisterOutcome, String>> {
+    native_connector_register_with_host(natives, config, pipe, None)
+}
+
+/// [`native_connector_register`] whose hook makes its host calls through `host`.
+pub fn native_connector_register_with_host(
+    natives: &NativePlugins,
+    config: &meerschaum_core::config::Config,
+    pipe: &Pipe,
+    host: Option<std::sync::Arc<dyn meerschaum_plugin::HostServices>>,
+) -> Option<Result<meerschaum_worker::connector::RegisterOutcome, String>> {
     if !owns_connector(natives, pipe.connector_keys()) {
         return None;
     }
@@ -135,7 +153,10 @@ pub fn native_connector_register(
         natives.connector(&typ, &label, serde_json::json!(attributes))?
     };
     (|| {
-        let connector = connector.map_err(|e| e.to_string())?;
+        let mut connector = connector.map_err(|e| e.to_string())?;
+        if let Some(host) = host {
+            connector = connector.with_host_services(host);
+        }
         let reply = match connector.call(
             "register",
             serde_json::json!({
@@ -768,7 +789,11 @@ pub fn copy_pipes(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     let overwrite = if force { "overwrite" } else { "skip" };
     let batch_sync = sync_data.clone().unwrap_or_else(|| "nothing".into());
     let defaults = super::pipes::defaults(rt);
-    let mut successes: i64 = 0;
+    // Each pipe's outcome, for the summary: copied, skipped (already on the destination) or
+    // failed (with the reason). Any failure fails the action.
+    let mut copied: Vec<String> = Vec::new();
+    let mut skipped: Vec<String> = Vec::new();
+    let mut failed: Vec<(String, String)> = Vec::new();
     let n = pipes.len();
     for (i, sp) in pipes.iter_mut().enumerate() {
         hydrate(rt, &src_inst, sp);
@@ -792,6 +817,7 @@ pub fn copy_pipes(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
                     rt,
                     &format!("Skipping {new_pipe} — leaving destination pipe unchanged."),
                 );
+                skipped.push(sp.pipe.to_string());
                 continue;
             }
             info(
@@ -807,6 +833,7 @@ pub fn copy_pipes(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
                     rt,
                     &format!("Failed to copy attributes to {new_pipe}:\n{}", res.message),
                 );
+                failed.push((sp.pipe.to_string(), res.message));
                 continue;
             }
         } else {
@@ -816,10 +843,10 @@ pub fn copy_pipes(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
                     rt,
                     &format!("Failed to register new {new_pipe}:\n{}", res.message),
                 );
+                failed.push((sp.pipe.to_string(), res.message));
                 continue;
             }
         }
-        successes += 1;
         print_tuple(
             rt,
             &SuccessTuple::ok(format!("Successfully copied {} to {new_pipe}.", sp.pipe)),
@@ -875,19 +902,61 @@ pub fn copy_pipes(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
                     rt,
                     &format!("Failed to copy data from {} to {new_pipe}.", sp.pipe),
                 );
-                successes -= 1;
+                failed.push((sp.pipe.to_string(), format!("data: {}", res.message)));
+                continue;
             }
         }
+        copied.push(sp.pipe.to_string());
     }
-    let msg = if successes == 0 {
-        "No pipes were copied.".to_string()
-    } else {
-        format!("Copied {successes} pipe{}.", plural(successes as usize))
-    };
-    Ok(SuccessTuple {
-        success: successes > 0,
-        message: msg,
-    })
+    Ok(copy_summary(&dest.keys(), &copied, &skipped, &failed))
+}
+
+/// The result of `copy pipes`: a failure when any pipe failed (or none was selected), with one
+/// line per pipe that was not copied.
+fn copy_summary(
+    dest: &str,
+    copied: &[String],
+    skipped: &[String],
+    failed: &[(String, String)],
+) -> SuccessTuple {
+    let total = copied.len() + skipped.len() + failed.len();
+    if total == 0 {
+        return SuccessTuple::fail("No pipes were copied.");
+    }
+    if failed.is_empty() && skipped.is_empty() {
+        // PARITY: v4's message when every pipe was copied.
+        return SuccessTuple::ok(format!(
+            "Copied {} pipe{}.",
+            copied.len(),
+            plural(copied.len())
+        ));
+    }
+    let mut message = format!(
+        "Copied {} of {total} pipe{} to '{dest}'",
+        copied.len(),
+        plural(total)
+    );
+    let mut parts = Vec::new();
+    if !failed.is_empty() {
+        parts.push(format!("{} failed", failed.len()));
+    }
+    if !skipped.is_empty() {
+        parts.push(format!("{} skipped", skipped.len()));
+    }
+    message.push_str(&format!(" ({}).", parts.join(", ")));
+    for (pipe, reason) in failed {
+        let reason = reason.lines().next().unwrap_or_default();
+        message.push_str(&format!("\n  - {pipe}: failed: {reason}"));
+    }
+    for pipe in skipped {
+        message.push_str(&format!(
+            "\n  - {pipe}: skipped (already on '{dest}'; pass --force to overwrite)"
+        ));
+    }
+    SuccessTuple {
+        success: failed.is_empty(),
+        message,
+    }
 }
 
 /// `register plugins [plugins]`: the checks before the upload, then the archive build and
@@ -918,4 +987,36 @@ pub fn register_plugins(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
         ));
     }
     super::plugin_admin::register_uploads(args, rt, &to_register)
+}
+
+#[cfg(test)]
+mod copy_tests {
+    use super::copy_summary;
+
+    #[test]
+    fn any_failed_pipe_fails_the_copy() {
+        let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+        let ok = copy_summary("sql:dest", &s(&["a", "b"]), &[], &[]);
+        assert!(ok.success);
+        assert_eq!(ok.message, "Copied 2 pipes.");
+        let partial = copy_summary(
+            "sql:dest",
+            &s(&["a"]),
+            &s(&["c"]),
+            &[("b".to_string(), "table is locked\nmore".to_string())],
+        );
+        assert!(!partial.success);
+        assert_eq!(
+            partial.message,
+            "Copied 1 of 3 pipes to 'sql:dest' (1 failed, 1 skipped).\n  - b: failed: table is locked\n  - c: skipped (already on 'sql:dest'; pass --force to overwrite)"
+        );
+        // Pipes already on the destination are not a failure.
+        let skipped = copy_summary("sql:dest", &[], &s(&["a"]), &[]);
+        assert!(skipped.success);
+        assert_eq!(
+            skipped.message,
+            "Copied 0 of 1 pipe to 'sql:dest' (1 skipped).\n  - a: skipped (already on 'sql:dest'; pass --force to overwrite)"
+        );
+        assert!(!copy_summary("sql:dest", &[], &[], &[]).success);
+    }
 }

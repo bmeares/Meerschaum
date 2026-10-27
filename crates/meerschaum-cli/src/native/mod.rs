@@ -26,6 +26,7 @@ pub mod engine_views;
 pub mod extensions;
 pub mod gui;
 pub mod jobs;
+pub mod jobs_laps;
 pub mod lifecycle;
 pub mod login;
 pub mod maintenance;
@@ -35,6 +36,7 @@ pub mod os_sql_stack;
 pub mod packages;
 mod packages_table;
 pub mod pip;
+pub mod pipeline_jobs;
 pub mod pipelines;
 pub mod pipes;
 pub mod plugin_admin;
@@ -54,6 +56,7 @@ pub mod users;
 pub mod venv_admin;
 pub mod venvs;
 pub mod verify;
+pub mod verify_schema;
 
 use meerschaum_core::value::{Map, Value};
 use meerschaum_core::{SuccessTuple, static_config};
@@ -164,6 +167,7 @@ pub fn run(function: &str, args: &ArgsMap, rt: &mut Runtime<'_>) -> Option<Actio
             a.insert("check_rowcounts_only".into(), PyValue::Bool(true));
             sync::sync_pipes_with(&a, rt, sync::LapMethod::Verify)
         }
+        "_verify_schemas" => verify_schema::verify_schemas(args, rt),
         "_deduplicate_pipes" => sync::sync_pipes_with(args, rt, sync::LapMethod::Deduplicate),
         "_vacuum_pipes" => maintenance::vacuum_pipes(args, rt),
         "_analyze_pipes" => maintenance::analyze_pipes(args, rt),
@@ -172,6 +176,8 @@ pub fn run(function: &str, args: &ArgsMap, rt: &mut Runtime<'_>) -> Option<Actio
         "_partition_pipes" => maintenance::partition_pipes(args, rt),
         "_start_jobs" => jobs::start_jobs(args, rt),
         "_stop_jobs" => jobs::stop_jobs(args, rt),
+        "_start_pipelines" => pipeline_jobs::start(args, rt),
+        "_stop_pipelines" => pipeline_jobs::stop(args, rt),
         "_pause_jobs" => jobs::pause_jobs(args, rt),
         "_restart_jobs" => jobs::restart_jobs(args, rt),
         "_attach_jobs" => jobs::attach_jobs(args, rt),
@@ -287,7 +293,8 @@ pub fn info(rt: &mut Runtime<'_>, msg: &str) {
 
 /// `warn(msg, stack=False)` (stderr).
 pub fn warn(rt: &mut Runtime<'_>, msg: &str) {
-    let text = rt.with_formatter(|f| f.warn(msg));
+    // Styled by stderr's own terminal check (`Runtime::err_settings`).
+    let text = rt.with_err_formatter(|f| f.warn(msg));
     rt.eprint(&text);
 }
 

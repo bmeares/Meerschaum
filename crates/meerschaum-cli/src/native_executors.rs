@@ -29,6 +29,8 @@ pub struct NativeExecutors {
     connectors: Map,
     /// The root the jobs belong to (sent as `context.root_dir`).
     root_dir: String,
+    /// What the executors' host calls reach (`host::plugin_config()`, `host::pipe(...)`).
+    host: Option<crate::native_plugins::HostEnv>,
 }
 
 impl std::fmt::Debug for NativeExecutors {
@@ -49,7 +51,24 @@ impl NativeExecutors {
                 .map(|v| v.to_map())
                 .unwrap_or_default(),
             root_dir: config.paths().root_dir.to_string_lossy().into_owned(),
+            host: None,
         }
+    }
+
+    /// Serve the executors' host calls over `session`'s connectors and (a copy of) `config`,
+    /// with the trust of this process.
+    pub fn with_host(
+        mut self,
+        session: crate::native::Session,
+        config: &meerschaum_core::Config,
+    ) -> NativeExecutors {
+        self.host = Some(crate::native_plugins::HostEnv::new(
+            session,
+            crate::native_plugins::host_config(config),
+            self.natives.clone(),
+            None,
+        ));
+        self
     }
 }
 
@@ -63,7 +82,11 @@ impl CustomExecutors for NativeExecutors {
         Some(
             executor
                 .map(|executor| {
-                    let executor = executor.with_root_dir(self.root_dir.clone());
+                    let mut executor = executor.with_root_dir(self.root_dir.clone());
+                    if let Some(env) = &self.host {
+                        executor = executor
+                            .with_host_services(crate::native_plugins::local_host(env.clone()));
+                    }
                     Box::new(NativeJobExecutor::new(executor)) as Box<dyn JobExecutor>
                 })
                 .map_err(|e| format!("Cannot use the executor '{executor_keys}': {e}")),
@@ -83,6 +106,22 @@ pub fn from_config(config: &meerschaum_core::Config) -> Option<Arc<NativeExecuto
     .ok()?;
     (!natives.executor_types().is_empty())
         .then(|| Arc::new(NativeExecutors::new(Arc::new(natives), config)))
+}
+
+/// [`from_config`] whose executors make their host calls over `session`'s connectors.
+pub fn from_config_with_host(
+    config: &meerschaum_core::Config,
+    session: crate::native::Session,
+) -> Option<Arc<NativeExecutors>> {
+    let paths = config.paths();
+    let natives = NativePlugins::open(
+        &paths.plugins_dirs,
+        &crate::native_plugins::cache_path(&paths.root_dir),
+    )
+    .ok()?;
+    (!natives.executor_types().is_empty()).then(|| {
+        Arc::new(NativeExecutors::new(Arc::new(natives), config).with_host(session, config))
+    })
 }
 
 /// Whether `executor_type` is declared by a native plugin of this environment (for

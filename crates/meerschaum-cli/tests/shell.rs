@@ -335,3 +335,45 @@ fn completion_candidates() {
     assert_eq!(texts("compose ex"), vec!["explain"]);
     assert!(texts("instance ").contains(&"sql:main".to_string()));
 }
+
+/// `python file.py ...` in the shell: the shell adds its instance and debug flags to the line it
+/// runs, and they stay Meerschaum's; every word after the file still reaches the script
+/// unchanged (`-h` included).
+#[test]
+fn python_files_get_their_own_words_in_the_shell() {
+    let h = Harness::new();
+    let script = h.root.join("s.py");
+    std::fs::write(&script, "import sys; print(sys.argv)\n").unwrap();
+    let script = script.display().to_string();
+    let mut out = Vec::new();
+    let mut rt = h.runtime(&mut out, no_env);
+    let mut state = ShellState::new(&mut rt, Some("sql:local"));
+    shell::precmd("debug", &mut state, &mut rt);
+    let line = format!("python {script} --x 'a b' -i sql:other -h");
+    shell::precmd(&line, &mut state, &mut rt);
+    drop(rt);
+    let runs: Vec<Vec<String>> = h
+        .commands()
+        .into_iter()
+        .filter(|c| c.args.first() == Some(&script))
+        .map(|c| c.args)
+        .collect();
+    assert_eq!(
+        runs,
+        vec![vec![
+            script.clone(),
+            "--x".into(),
+            "a b".into(),
+            "-i".into(),
+            "sql:other".into(),
+            "-h".into()
+        ]],
+        "{}",
+        String::from_utf8_lossy(&out)
+    );
+    let out = String::from_utf8(out).unwrap();
+    assert!(
+        !out.contains("Open a Python interpreter with Meerschaum imported"),
+        "no help was printed: {out}"
+    );
+}

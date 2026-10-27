@@ -241,7 +241,7 @@ fn native_setup(
     let context = json!({"args": [], "kwargs": serde_json::to_value(kwargs).unwrap_or(Json::Null)});
     Ok(interpret_native_setup(
         name,
-        plugin.call_json("setup", context),
+        crate::native_plugins::call_setup(rt, &natives, &plugin, context),
     ))
 }
 

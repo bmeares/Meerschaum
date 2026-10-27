@@ -161,16 +161,19 @@ fn actions_match_v4_transcripts() {
                     if k.starts_with("MRSM_")
                         || matches!(
                             k.as_str(),
-                            "NO_COLOR" | "TERM" | "COLUMNS" | "LINES" | "RUST_LOG"
+                            "NO_COLOR" | "FORCE_COLOR" | "TERM" | "COLUMNS" | "LINES" | "RUST_LOG"
                         )
                     {
                         cmd.env_remove(k);
                     }
                 }
+                // v4 styled its output even off a terminal (the transcripts carry its escape
+                // sequences); v5 prints plain text there unless `FORCE_COLOR` is set (rc15).
                 cmd.env("MRSM_ROOT_DIR", &root)
                     .env("MRSM_PLUGINS_DIR", &plugins)
                     .env("COLUMNS", &columns)
-                    .env("LINES", "40");
+                    .env("LINES", "40")
+                    .env("FORCE_COLOR", "1");
                 if let Some(env) = step["env"].as_object() {
                     for (k, v) in env {
                         cmd.env(

@@ -35,6 +35,99 @@ pub fn rewrite_python_code_flag(sysargs: &[String]) -> Vec<String> {
     out
 }
 
+/// Whether `word` names a Python file for `mrsm python <word>`: a `.py` / `.pyw` name, or an
+/// existing file (relative to the working directory).
+pub fn is_python_script(word: &str) -> bool {
+    if word.is_empty() || word.starts_with('-') || word.contains('\n') {
+        return false;
+    }
+    let lower = word.to_lowercase();
+    ((lower.ends_with(".py") || lower.ends_with(".pyw")) && !word.contains(char::is_whitespace))
+        || std::path::Path::new(word).is_file()
+}
+
+/// The positional words of `sysargs` with their indices, in order, as `parse_known_args` sees
+/// them: option words, the values options take and `[decorated]` sub-arguments are skipped, and
+/// the walk stops at `--` and `-A` (everything after them is not an action word).
+fn positional_words(sysargs: &[String]) -> impl Iterator<Item = (usize, &str)> {
+    use crate::argparse::OptionArity;
+    let mut i = 0;
+    std::iter::from_fn(move || {
+        while i < sysargs.len() {
+            let word = sysargs[i].as_str();
+            if word == "--" {
+                i = sysargs.len();
+                return None;
+            }
+            if word.starts_with(keys::SUB_BEGIN)
+                && let Some(close) = sysargs[i..].iter().position(|w| w.ends_with(keys::SUB_END))
+            {
+                // A `[decorated]` sub-argument (possibly several words).
+                i += close + 1;
+                continue;
+            }
+            match PARSER.option_arity(word) {
+                None => {
+                    i += 1;
+                    return Some((i - 1, word));
+                }
+                Some(OptionArity::Rest) => {
+                    i = sysargs.len();
+                    return None;
+                }
+                Some(OptionArity::Values(n)) => i += 1 + n,
+                Some(OptionArity::Greedy) => {
+                    i += 1;
+                    while i < sysargs.len() && PARSER.option_arity(&sysargs[i]).is_none() {
+                        i += 1;
+                    }
+                }
+            }
+        }
+        None
+    })
+}
+
+/// `[options] python [options] <file> [args ...]`: the indices of `python` and of `<file>` in
+/// `sysargs` (the first two action words). Meerschaum reads the words up to the file (`mrsm
+/// python --venv x script.py`); every word after it belongs to the script, unchanged and in
+/// order, as with `python script.py ...`: none is read as a Meerschaum flag (`--dry-run`, `-y`,
+/// `-d`, `--loop`, `-h`), sub-argument or chain flag.
+pub fn python_script_index(sysargs: &[String]) -> Option<(usize, usize)> {
+    let mut positionals = positional_words(sysargs);
+    let (python, word) = positionals.next()?;
+    if word != "python" {
+        return None;
+    }
+    let (script, word) = positionals.next()?;
+    is_python_script(word).then_some((python, script))
+}
+
+/// Split `python [options] <file> [args ...]` into the words Meerschaum parses and the script's
+/// words ([`python_script_index`]); any other line is all Meerschaum's. The file follows
+/// `python` in the words to parse: `parse_known_args` keeps only the action words that come
+/// before the first option, so `python --venv x script.py` would lose the file.
+pub fn split_python_script_args(sysargs: &[String]) -> (Vec<String>, Vec<String>) {
+    match python_script_index(sysargs) {
+        Some((python, script)) => {
+            let mut head = sysargs[..=python].to_vec();
+            head.push(sysargs[script].clone());
+            head.extend(sysargs[python + 1..script].iter().cloned());
+            (head, sysargs[script + 1..].to_vec())
+        }
+        None => (sysargs.to_vec(), Vec::new()),
+    }
+}
+
+/// The words of `sysargs` Meerschaum reads its own flags from: all of them, except that the
+/// words after the file of `python <file> ...` are the script's ([`python_script_index`]).
+pub fn meerschaum_words(sysargs: &[String]) -> &[String] {
+    match python_script_index(sysargs) {
+        Some((_, script)) => &sysargs[..=script],
+        None => sysargs,
+    }
+}
+
 /// Pull `[decorated]` sub-arguments out of `sysargs`: returns (sub_arguments, filtered_sysargs).
 ///
 /// PARITY: any word wrapped in brackets is a sub-argument, so `-l [None]` loses its value and
@@ -105,7 +198,10 @@ const COMPOSE_OPTIONS: &[(&str, &[&str])] = &[
 /// action words, as in v4. The `Err` case is an exception escaping `parse_arguments` itself
 /// (e.g. `OverflowError` from `timedelta(days=--chunk-days)`).
 pub fn parse_arguments(sysargs: &[String], ctx: &DateContext) -> Result<ArgsMap, PyException> {
-    let sysargs = rewrite_python_code_flag(sysargs);
+    let full_sysargs = rewrite_python_code_flag(sysargs);
+    // `python file.py [args ...]`: the words after the file are the script's, untouched; they
+    // follow the file in `action` (and the sysargs) and are never parsed as flags.
+    let (sysargs, script_args) = split_python_script_args(&full_sysargs);
     let (sub_arguments, filtered_sysargs) = extract_decorated_sub_args(&sysargs);
     let (filtered_sysargs, engine_args) = engine_arguments(&filtered_sysargs)?;
 
@@ -119,10 +215,11 @@ pub fn parse_arguments(sysargs: &[String], ctx: &DateContext) -> Result<ArgsMap,
                 }
                 action.push(a.clone());
             }
+            action.extend(script_args.iter().cloned());
             let mut m = ArgsMap::new();
             m.insert("action".into(), PyValue::str_list(&action));
-            m.insert("sysargs".into(), PyValue::str_list(&sysargs));
-            m.insert("text".into(), PyValue::str(shlex::join(&sysargs)));
+            m.insert("sysargs".into(), PyValue::str_list(&full_sysargs));
+            m.insert("text".into(), PyValue::str(shlex::join(&full_sysargs)));
             m.insert(
                 keys::FAILURE_KEY.into(),
                 PyValue::Exception(err.into_exception()),
@@ -130,6 +227,12 @@ pub fn parse_arguments(sysargs: &[String], ctx: &DateContext) -> Result<ArgsMap,
             m
         }
     };
+    if !script_args.is_empty()
+        && !args.contains_key(keys::FAILURE_KEY)
+        && let Some(PyValue::List(action)) = args.get_mut("action")
+    {
+        action.extend(script_args.iter().map(PyValue::str));
+    }
 
     args.extend(engine_args);
 
@@ -177,7 +280,9 @@ pub fn parse_arguments(sysargs: &[String], ctx: &DateContext) -> Result<ArgsMap,
     // Drop `False` flags.
     args.retain(|_, v| !matches!(v, PyValue::Bool(false)));
 
-    args.insert("sysargs".into(), PyValue::str_list(&sysargs));
+    args.insert("sysargs".into(), PyValue::str_list(&full_sysargs));
+    let mut filtered_sysargs = filtered_sysargs;
+    filtered_sysargs.extend(script_args);
     args.insert(
         "filtered_sysargs".into(),
         PyValue::str_list(&filtered_sysargs),
@@ -618,5 +723,144 @@ mod engine_argument_tests {
         let bad = ["sync", "pipes", "-s", "daily", "--jitter", "soon"].map(str::to_owned);
         assert!(engine_arguments(&bad).is_err());
         assert!(engine_arguments(&["--startup-jitter".into()]).is_err());
+    }
+}
+
+#[cfg(test)]
+mod python_script_tests {
+    use super::*;
+
+    fn v(items: &[&str]) -> Vec<String> {
+        items.iter().map(|s| s.to_string()).collect()
+    }
+
+    fn list(args: &ArgsMap, key: &str) -> Vec<String> {
+        match args.get(key) {
+            Some(PyValue::List(items)) => items.iter().map(PyValue::py_str).collect(),
+            other => panic!("{key}: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn the_words_after_the_file_are_the_scripts() {
+        let ctx = DateContext::system();
+        let script_words = [
+            "--dry-run",
+            "-y",
+            "-i",
+            "sql:other",
+            "--begin",
+            "2024-01-01",
+            "-d",
+            "[--z]",
+            "-A",
+            "a b",
+        ];
+        // Options may come before `python` and between `python` and the file.
+        let mut words = v(&[
+            "--debug", "python", "--venv", "tools", "-i", "sql:x", "s.py",
+        ]);
+        words.extend(v(&script_words));
+        assert_eq!(python_script_index(&words), Some((1, 6)));
+        let args = parse_arguments(&words, &ctx).unwrap();
+        let mut action = v(&["python", "s.py"]);
+        action.extend(v(&script_words));
+        assert_eq!(list(&args, "action"), action);
+        // Only the words before the file are Meerschaum's.
+        assert_eq!(args["venv"], PyValue::Str("tools".into()));
+        assert_eq!(args["mrsm_instance"], PyValue::Str("sql:x".into()));
+        assert_eq!(args["debug"], PyValue::Bool(true));
+        for key in ["dry_run", "yes", "begin", "daemon"] {
+            assert!(!args.contains_key(key), "{key} was parsed: {args:?}");
+        }
+        assert!(list(&args, "sub_args").is_empty());
+        assert_eq!(list(&args, "sysargs"), words);
+        assert!(list(&args, "filtered_sysargs").ends_with(&v(&script_words)));
+        assert_eq!(meerschaum_words(&words), &words[..=6]);
+    }
+
+    #[test]
+    fn only_a_python_file_splits_the_line() {
+        // Code, `-A`, other actions and a missing file name keep parsing flags.
+        assert_eq!(python_script_index(&v(&["python", "print(1)", "-y"])), None);
+        assert_eq!(
+            python_script_index(&v(&["python", "--venv=tools", "s.py", "-y"])),
+            Some((0, 2))
+        );
+        assert_eq!(
+            python_script_index(&v(&["python", "-isql:x", "[-u]", "s.pyw", "-y"])),
+            Some((0, 3))
+        );
+        assert_eq!(
+            python_script_index(&v(&["python", "-A", "s.py", "-y"])),
+            None
+        );
+        assert_eq!(python_script_index(&v(&["python", "-c", "s.py"])), None);
+        assert_eq!(python_script_index(&v(&["sync", "s.py", "-y"])), None);
+        assert_eq!(python_script_index(&v(&["python"])), None);
+        // `-m` takes words up to the next option.
+        assert_eq!(
+            python_script_index(&v(&["python", "-m", "a", "b", "--debug", "s.py"])),
+            Some((0, 5))
+        );
+        // An existing file without the extension is a script too.
+        let dir = tempfile::tempdir().unwrap();
+        let script = dir.path().join("run_me");
+        std::fs::write(&script, "print(1)\n").unwrap();
+        let path = script.display().to_string();
+        assert_eq!(
+            python_script_index(&v(&["python", &path, "--x"])),
+            Some((0, 1))
+        );
+        assert!(!is_python_script("print(1); x.py"));
+        assert!(!is_python_script("-x.py"));
+        // `-h` after the file is the script's.
+        assert_eq!(
+            meerschaum_words(&v(&["python", "s.py", "-h"])),
+            &v(&["python", "s.py"])[..]
+        );
+    }
+
+    /// The shell and jobs rebuild the line from the dictionary: the script's words come back
+    /// last and unchanged, after Meerschaum's flags (and the interpreter's sub-arguments).
+    #[test]
+    fn the_script_words_survive_the_round_trip() {
+        let ctx = DateContext::system();
+        let first =
+            parse_arguments(&v(&["python", "s.py", "--x", "a b", "-i", "y"]), &ctx).unwrap();
+        let mut kwargs = first.clone();
+        kwargs.shift_remove("sysargs");
+        kwargs.shift_remove("filtered_sysargs");
+        kwargs.insert("mrsm_instance".into(), PyValue::Str("sql:shell".into()));
+        kwargs.insert("debug".into(), PyValue::Bool(true));
+        let rebuilt = crate::sysargs::parse_dict_to_sysargs(&kwargs).unwrap();
+        assert_eq!(rebuilt.first().map(String::as_str), Some("python"));
+        assert_eq!(
+            &rebuilt[rebuilt.len() - 5..],
+            &v(&["s.py", "--x", "a b", "-i", "y"])[..]
+        );
+        let second = parse_arguments(&rebuilt, &ctx).unwrap();
+        assert_eq!(list(&second, "action"), list(&first, "action"));
+        assert_eq!(second["mrsm_instance"], PyValue::Str("sql:shell".into()));
+        assert_eq!(second["debug"], PyValue::Bool(true));
+
+        // The interpreter's sub-arguments (`python [-u] s.py`) stay before the file.
+        let with_sub = parse_arguments(&v(&["python", "[-u]", "s.py", "--x"]), &ctx).unwrap();
+        assert_eq!(list(&with_sub, "sub_args"), v(&["-u"]));
+        assert_eq!(list(&with_sub, "action"), v(&["python", "s.py", "--x"]));
+        let mut kwargs = with_sub.clone();
+        kwargs.shift_remove("sysargs");
+        kwargs.shift_remove("filtered_sysargs");
+        let rebuilt = crate::sysargs::parse_dict_to_sysargs(&kwargs).unwrap();
+        assert_eq!(rebuilt, v(&["python", "[-u]", "s.py", "--x"]));
+        let again = parse_arguments(&rebuilt, &ctx).unwrap();
+        assert_eq!(list(&again, "sub_args"), v(&["-u"]));
+        assert_eq!(list(&again, "action"), list(&with_sub, "action"));
+        // Any other action keeps v4's shape.
+        let other = parse_arguments(&v(&["show", "pipes", "-A", "x"]), &ctx).unwrap();
+        assert_eq!(
+            crate::sysargs::parse_dict_to_sysargs(&other).unwrap()[..2],
+            v(&["show", "pipes"])[..]
+        );
     }
 }

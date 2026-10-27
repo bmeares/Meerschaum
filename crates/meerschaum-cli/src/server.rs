@@ -101,6 +101,7 @@ pub fn flags(args: &ArgsMap) -> Result<ServerFlags, ActionError> {
         debug: native::flag(args, "debug"),
         no_dash: native::flag(args, "no_dash"),
         no_webterm: native::flag(args, "no_webterm"),
+        public: native::flag(args, "public"),
     })
 }
 
@@ -151,7 +152,50 @@ fn console_dependencies(probe: &meerschaum_server::host::ConsoleProbe) -> Vec<St
         .collect()
 }
 
+/// Why `start api` does not start: HTTPS was asked for (`--keyfile` / `--certfile`, or an
+/// `ssl_keyfile` / `ssl_certfile` key under `api:server` or `api:uvicorn`), and the server does
+/// not terminate TLS itself. Serving plain HTTP instead would leave every `https://` client
+/// failing, while the operator believes the traffic is encrypted.
+pub fn tls_refusal(args: &ArgsMap, config: &Config) -> Option<String> {
+    const PROXY: &str = "Put a reverse proxy that terminates TLS (for example Caddy or nginx) in \
+                         front of the API server";
+    let flags: Vec<&str> = [("keyfile", "--keyfile"), ("certfile", "--certfile")]
+        .into_iter()
+        .filter(|(dest, _)| native::string(args, dest).is_some())
+        .map(|(_, option)| option)
+        .collect();
+    if !flags.is_empty() {
+        let (verb, them) = if flags.len() == 1 {
+            ("is", "this flag")
+        } else {
+            ("are", "these flags")
+        };
+        return Some(format!(
+            "The API server does not serve HTTPS itself, so `{}` {verb} not supported. {PROXY}, \
+             and start it without {them}.",
+            flags.join("` and `")
+        ));
+    }
+    for section in ["server", "uvicorn"] {
+        for key in ["ssl_keyfile", "ssl_certfile"] {
+            let set = config
+                .get(&["api", section, key])
+                .is_some_and(|v| !v.is_null() && !v.py_str().trim().is_empty());
+            if set {
+                return Some(format!(
+                    "The API server does not serve HTTPS itself, so `api:{section}:{key}` is not \
+                     supported. {PROXY}, and remove the key (`mrsm edit config api`)."
+                ));
+            }
+        }
+    }
+    None
+}
+
 fn start(args: &ArgsMap, rt: &mut Runtime<'_>, stdio: bool) -> ActionResult {
+    if !stdio && let Some(refusal) = tls_refusal(args, rt.config()) {
+        return Ok(SuccessTuple::fail(refusal));
+    }
     // The server waits on SIGINT / SIGTERM itself (`ShutdownSignal`): the spinner of its startup
     // must not take them.
     crate::native::jobs::own_signals();
@@ -225,6 +269,9 @@ fn start(args: &ArgsMap, rt: &mut Runtime<'_>, stdio: bool) -> ActionResult {
     for notice in &config.notices {
         rt.eprint(&format!("{notice}\n"));
     }
+    if !stdio && let Some(line) = config.preset_notice() {
+        native::info(rt, &line);
+    }
     if !stdio {
         for warning in [
             config.open_terminal_warning(),
@@ -261,6 +308,7 @@ fn start(args: &ArgsMap, rt: &mut Runtime<'_>, stdio: bool) -> ActionResult {
         .actions(backend.clone())
         .jobs(jobs)
         .engine(engine_store)
+        .pipelines(backend.clone())
         .host(Arc::new(meerschaum_server::proxy::HostProxy::supervised(
             supervisor.clone(),
         )))
@@ -273,10 +321,27 @@ fn start(args: &ArgsMap, rt: &mut Runtime<'_>, stdio: bool) -> ActionResult {
     // including an early error) releases the sink and the server state it holds.
     let _live_events =
         meerschaum_engine::add_process_event_sink(Arc::new(LiveRunEvents(state.clone())));
+    // The syncs this server runs (its sync route, actions, MCP tools) record `api` as their
+    // source in the pipes' sync statuses, for as long as it serves.
+    let _sync_source = meerschaum_connector::sync_status::role_scope(
+        meerschaum_connector::sync_status::SyncSource::Api,
+    );
     // Native plugins' MCP tools, resources and prompts are served in-process (both transports).
     let mut mcp_notices = Vec::new();
-    let native_mcp =
-        crate::native_plugins::mcp(&session.native_plugins(rt.config())?, &mut mcp_notices);
+    // Native plugins' host calls (`host::pipe(...)`, `host::read_sql(...)`) run for the caller,
+    // on the server's own config.
+    let plugin_host = crate::native_plugins::HostEnv::new(
+        session.clone(),
+        crate::native_plugins::host_config(rt.config()),
+        session.native_plugins(rt.config())?,
+        Some(instance.keys()),
+    );
+    let native_mcp = crate::native_plugins::mcp(
+        &session.native_plugins(rt.config())?,
+        &mut mcp_notices,
+        &plugin_host,
+        &state,
+    );
     for notice in mcp_notices {
         rt.eprint(&format!("{notice}\n"));
     }
@@ -315,7 +380,8 @@ fn start(args: &ArgsMap, rt: &mut Runtime<'_>, stdio: bool) -> ActionResult {
             }
             // Native plugin routes (no host process) are merged with the console's routes.
             let natives = session.native_plugins(rt.config())?;
-            let (routes, notices) = crate::native_plugins::routes(&state, &natives);
+            let (routes, notices) =
+                crate::native_plugins::routes(&state, &natives, &plugin_host);
             for notice in notices {
                 rt.eprint(&format!("{notice}\n"));
             }
@@ -350,7 +416,15 @@ fn start(args: &ArgsMap, rt: &mut Runtime<'_>, stdio: bool) -> ActionResult {
             }
         };
         watcher.abort();
+        // The sync statuses this server recorded (written in the background) before its
+        // runtime goes away.
+        meerschaum_connector::sync_status::flush(
+            meerschaum_connector::sync_status::RECORD_TIMEOUT,
+        )
+        .await;
         supervisor.shutdown().await;
+        // The web terminal's own tmux server, when this server started it.
+        meerschaum_server::webterm::stop_owned_servers();
         result
     });
     // Tokio stdin uses a blocking reader which may still await input after Ctrl-C.
@@ -383,8 +457,16 @@ pub fn console(
         ));
         web.webterm = Some(meerschaum_web::WebtermSettings::new(shell));
     }
-    let natives = native::session(rt).native_plugins(rt.config())?;
-    web.pages = crate::native_plugins::pages(manifest, &natives);
+    let session = native::session(rt);
+    let natives = session.native_plugins(rt.config())?;
+    // The pages' host calls run for their viewer, on the server's own config.
+    let plugin_host = crate::native_plugins::HostEnv::new(
+        session,
+        crate::native_plugins::host_config(rt.config()),
+        natives.clone(),
+        Some(state.config.instance_keys.clone()),
+    );
+    web.pages = crate::native_plugins::pages(manifest, &natives, &plugin_host, state);
     match meerschaum_web::router(state.clone(), web.clone()) {
         Ok(router) => Ok(Some(router)),
         Err(error) => {
@@ -521,6 +603,73 @@ impl NativeBackend {
         .await
         .unwrap_or_else(|error| SuccessTuple::fail(error.to_string()))
     }
+
+    /// Run a command line (`["plan", "pipelines", ...]`) the way the server runs actions, with
+    /// what it prints captured: the action's result and its output.
+    async fn run_captured(&self, argv: Vec<String>) -> Result<(SuccessTuple, String), String> {
+        let backend = self.clone();
+        tokio::task::spawn_blocking(move || {
+            let mut out: Vec<u8> = Vec::new();
+            let result = {
+                let mut runtime = Runtime::system(&mut out);
+                // A server console is not a terminal session: no spinners, no colored graphs.
+                runtime.progress = crate::format::progress::ProgressSink::Off;
+                runtime.live = false;
+                runtime.native = Some(backend.session.clone());
+                runtime.config = Some(backend.config().map_err(|e| e.message)?);
+                let args =
+                    crate::parse::parse_arguments(&argv, &runtime.dates).map_err(|e| e.message)?;
+                meerschaum_core::debug::without_scopes(|| {
+                    crate::dispatch::entry_with_args(args, &mut runtime, 0)
+                })
+            };
+            Ok((result, String::from_utf8_lossy(&out).into_owned()))
+        })
+        .await
+        .map_err(|e| e.to_string())?
+    }
+}
+
+#[async_trait]
+impl meerschaum_server::backends::PipelinesBackend for NativeBackend {
+    /// `plan pipelines NAME -i REGISTRY --nopretty`: the engine's static plan of the saved
+    /// Pipeline, which moves no data and registers nothing.
+    async fn plan(
+        &self,
+        name: &str,
+        registry: &str,
+        options: &meerschaum_server::backends::PlanOptions,
+    ) -> Result<serde_json::Value, meerschaum_server::backends::PlanError> {
+        use meerschaum_server::backends::PlanError;
+        let mut argv: Vec<String> = ["plan", "pipelines", name, "-i", registry, "--nopretty"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        for (flag, value) in [("--begin", &options.begin), ("--end", &options.end)] {
+            if let Some(value) = value {
+                argv.push(flag.into());
+                argv.push(value.clone());
+            }
+        }
+        let (result, output) = self.run_captured(argv).await.map_err(PlanError::Failed)?;
+        // A plan that cannot be made (a missing member, a cycle, a bad bound) is the
+        // Pipeline's problem, not the server's.
+        if !result.success {
+            return Err(PlanError::Invalid(result.message));
+        }
+        let line = output
+            .lines()
+            .rev()
+            .find(|l| l.trim_start().starts_with('{'))
+            .ok_or_else(|| PlanError::Failed("The planner printed no plan.".into()))?;
+        let plan: meerschaum_engine::Plan = serde_json::from_str(line.trim())
+            .map_err(|e| PlanError::Failed(format!("The planner printed an invalid plan: {e}")))?;
+        Ok(serde_json::json!({
+            "plan": plan,
+            "text": plan.to_string(),
+            "warnings": plan.warnings,
+        }))
+    }
 }
 
 fn argument(value: meerschaum_core::Value) -> PyValue {
@@ -621,6 +770,49 @@ impl McpBackend for NativeBackend {
         self.sync(pipe, begin, end, false).await
     }
 
+    /// `sync pipes -c CK -m MK -l LK -i IK --parents [N] --children [N]`: the pipe with its
+    /// upstream or downstream pipes, in dependency order (the Syncing Engine).
+    async fn sync_pipe_graph(
+        &self,
+        pipe: &Pipe,
+        begin: Option<String>,
+        end: Option<String>,
+        parents: Option<meerschaum_core::Value>,
+        children: Option<meerschaum_core::Value>,
+    ) -> SuccessTuple {
+        if parents.is_none() && children.is_none() {
+            return self.sync(pipe, begin, end, false).await;
+        }
+        let mut argv: Vec<String> = vec![
+            "sync".into(),
+            "pipes".into(),
+            "-c".into(),
+            pipe.connector_keys().into(),
+            "-m".into(),
+            pipe.metric_key().into(),
+            "-l".into(),
+            pipe.location_key().unwrap_or("None").into(),
+            "-i".into(),
+            pipe.instance_keys().into(),
+        ];
+        for (flag, depth) in [("--parents", parents), ("--children", children)] {
+            match depth {
+                Some(meerschaum_core::Value::Int(n)) => argv.push(format!("{flag}={n}")),
+                Some(_) => argv.push(flag.into()),
+                None => {}
+            }
+        }
+        for (flag, bound) in [("--begin", begin), ("--end", end)] {
+            if let Some(bound) = bound {
+                argv.extend([flag.to_string(), bound]);
+            }
+        }
+        match self.run_captured(argv).await {
+            Ok((result, _)) => result,
+            Err(error) => SuccessTuple::fail(error),
+        }
+    }
+
     async fn verify_pipe(
         &self,
         pipe: &Pipe,
@@ -647,7 +839,8 @@ impl McpBackend for NativeBackend {
                 .map_err(|_| SqlReadError::Unsupported)?;
             let sql = instance.sql().ok_or(SqlReadError::Unsupported)?;
             let frame = session
-                .block_on(sql.read(&query))
+                // A protected connector runs only a read statement, read-only.
+                .block_on(sql.read_raw(&query))
                 .map_err(|_| SqlReadError::Failed)?;
             let json = meerschaum_server::serialize::data_to_json(
                 &frame,
@@ -770,6 +963,48 @@ mod tests {
     fn invalid_port_is_rejected() {
         let args = ArgsMap::from_iter([("port".into(), PyValue::Int(65536))]);
         assert!(flags(&args).is_err());
+    }
+
+    /// `--keyfile` / `--certfile` (and the `ssl_*` config keys v4 handed to Uvicorn) stop
+    /// `start api` with the way to get HTTPS, instead of serving plain HTTP silently.
+    #[test]
+    fn https_options_are_refused() {
+        let root = tempfile::tempdir().unwrap();
+        let config_with = |patch: &str| {
+            let mut env = vec![("MRSM_ROOT_DIR".into(), root.path().display().to_string())];
+            if !patch.is_empty() {
+                env.push(("MRSM_CONFIG".into(), patch.to_string()));
+            }
+            Config::new(ConfigOptions::with_env(env)).unwrap()
+        };
+        let plain = config_with("");
+        assert_eq!(tls_refusal(&ArgsMap::new(), &plain), None);
+        let both = ArgsMap::from_iter([
+            ("keyfile".into(), PyValue::Str("key.pem".into())),
+            ("certfile".into(), PyValue::Str("cert.pem".into())),
+        ]);
+        let text = tls_refusal(&both, &plain).unwrap();
+        assert!(
+            text.contains("so `--keyfile` and `--certfile` are not supported")
+                && text.contains("reverse proxy that terminates TLS")
+                && text.ends_with("start it without these flags."),
+            "{text}"
+        );
+        let one = ArgsMap::from_iter([("certfile".into(), PyValue::Str("cert.pem".into()))]);
+        let text = tls_refusal(&one, &plain).unwrap();
+        assert!(text.contains("so `--certfile` is not supported"), "{text}");
+        for section in ["server", "uvicorn"] {
+            let config = config_with(&format!(
+                r#"{{"api": {{"{section}": {{"ssl_keyfile": "/etc/ssl/key.pem"}}}}}}"#
+            ));
+            let text = tls_refusal(&ArgsMap::new(), &config).unwrap();
+            assert!(
+                text.contains(&format!("`api:{section}:ssl_keyfile` is not supported")),
+                "{text}"
+            );
+        }
+        let empty = config_with(r#"{"api": {"uvicorn": {"ssl_certfile": ""}}}"#);
+        assert_eq!(tls_refusal(&ArgsMap::new(), &empty), None);
     }
 
     #[test]

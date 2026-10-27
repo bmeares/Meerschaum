@@ -99,6 +99,8 @@ fn help_starts_no_worker() {
         vec!["-h"],
         vec!["sync", "pipes", "--help"],
         vec!["show", "--help"],
+        vec!["help"],
+        vec!["help", "sync", "pipes"],
     ] {
         let out = run(&f, &args);
         assert!(

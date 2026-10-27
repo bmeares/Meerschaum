@@ -58,21 +58,20 @@ port: Optional[int], default None
     Port to bind the API server to.
     If `None`, use 8000.
 
-host: Optional[str], defailt None
+host: Optional[str], default None
     The address to bind to.
     If `None`, use '0.0.0.0'.
 
 webterm_port: Optional[int], default None
-    Port to bind the webterm server to.
-    If `None`, use 8765.
+    No effect: the API serves the web terminal on its own port.
 
 workers: Optional[int], default None
     How many worker threads to run.
     If `None`, defaults to the number of CPU cores or 1 on Android.
 
 production: bool, default False
-    Start the API server with Gunicorn instead of Uvicorn.
-    Useful for production deployments.
+    Start the API server in production mode: the interactive API docs (`/docs`, `/redoc`)
+    are not served unless `api:endpoints:docs_in_production` is set.
 
 private: bool, default False
     Require authentication for all endpoints.
@@ -81,12 +80,12 @@ secure: bool, default False
     Only allow `admin` users to execute actions.
 
 keyfile: str, default None
-    If provided, serve over HTTPS with this key file.
-    Requires `--certfile`.
+    Not supported: the server does not serve HTTPS itself, and `start api` stops when
+    `--keyfile` or `--certfile` is given. Put a reverse proxy that terminates TLS
+    (Caddy, nginx, Traefik) in front of it.
 
 certfile: str, default None
-    If provided, serve over HTTPS with this certfile.
-    Requires `--keyfile`.
+    Not supported (see `keyfile`).
 "##
         }
         "_attach_jobs" => {
@@ -153,7 +152,9 @@ Decompress the target tables for the selected pipes.
         }
         "_deduplicate_pipes" => {
             r##"
-Deduplicate pipes' tables, chunking across their datetime axes.
+Remove duplicate rows from pipes' tables.
+
+The tables are deduplicated chunk by chunk along their datetime axes.
 "##
         }
         "_delete_cache" => {
@@ -414,12 +415,26 @@ Register a new user to a Meerschaum instance.
         }
         "_restart_daemons" => {
             r##"
-Restart the CLI daemons.
+Accepted so that older commands keep working: Meerschaum has no CLI daemon, so there is nothing
+to restart (actions run in `mrsm` itself). Background jobs are `restart jobs`.
 "##
         }
         "_restart_jobs" => {
             r##"
-Restart stopped jobs which have not been manually stopped.
+Restart stopped jobs: the named ones, or those started with `--restart`.
+
+Without names, the jobs started with `--restart` that stopped on their own are restarted.
+
+Options:
+    - `--no-stagger`
+        - Start the jobs without the startup gate (jitter, busy-host wait and slots,
+          `jobs:startup:*`).
+    - `--startup-jitter 30s`
+        - Bound the random start delay of a new job (stored in its `startup` property).
+
+Examples:
+    - `restart jobs`
+    - `restart jobs my-job`
 "##
         }
         "_setup_plugins" => {
@@ -468,31 +483,38 @@ Examples:
         }
         "_show_daemons" => {
             r##"
-Print information about the running CLI daemons.
+Accepted so that older commands keep working: Meerschaum has no CLI daemon, so none is ever
+running. Background jobs are `show jobs`.
 "##
         }
         "_show_data" => {
             r##"
-Show pipes data as Pandas DataFrames.
+Show pipes' data as tables.
 
 Usage:
-    - Use --gui to open an interactive window.
-
     - `show data all` to grab all data for the chosen Pipes.
       WARNING: This may be dangerous!
 
     - `show data 60` to grab the last 60 (or any number) minutes of data for all pipes.
 
-    - `show data --begin 2020-01-01 --end 2021-01-01` to specify date rangers.
+    - `show data --begin 2020-01-01 --end 2021-01-01` to specify date ranges.
       **NOTE:** You must specify to at least the day, otherwise the date parser will assume
       you mean today's date.
 
     - Regular pipes parameters (-c, -m, -l, etc.)
 
+    - `--all`
+        - Print every row, column and cell. `--nopretty` never truncates.
+
+In the default (pretty) output a long table is truncated like a pandas frame: more than
+`formatting:dataframe:max_rows` (60) rows show `min_rows` (10) of them (the first and the last),
+columns that do not fit the terminal are replaced by a `…` column, and a cell longer than
+`max_colwidth` (50) characters ends in `…`. The footer gives the true row count. Only the rows
+shown are read.
+
 Examples:
-    - show data -m weather --gui
-        Open an interactive pandasgui window for the last 1440 minutes of data
-        for all pipes of metric 'weather'.
+    - show data -m weather
+        Show the last 1440 minutes of data for all pipes of metric 'weather'.
 "##
         }
         "_show_environment" => {
@@ -502,7 +524,7 @@ Show all of the current environment variables with begin with `'MRSM_'`.
         }
         "_show_help" => {
             r##"
-Print the --help menu from `argparse`.
+Print the actions and options of `mrsm` (the same as `mrsm -h` or `mrsm --help`).
 "##
         }
         "_show_jobs" => {
@@ -540,7 +562,7 @@ signal for tuning the width.
         }
         "_show_graph" => {
             r##"
-Print the selected pipes and their dependencies as a DAG (v5).
+Print the selected pipes and their dependencies as a DAG.
 
 The graph is a top-down tree with box-drawing connectors (`├──`, `└──`, `│`), children under
 their parents. A pipe with several parents is drawn once, in full, and as a dimmed
@@ -561,7 +583,7 @@ Examples:
         }
         "_install_drivers" => {
             r##"
-Download a database driver's native library into `<root>/drivers` (v5).
+Download a database driver's native library into `<root>/drivers`.
 
 DuckDB is not compiled into `mrsm`: its official shared library (`libduckdb`, v1.5.6) is
 downloaded from DuckDB's GitHub release, checked against a SHA-256 pinned in Meerschaum and
@@ -580,7 +602,7 @@ Examples:
         }
         "_uninstall_drivers" => {
             r##"
-Remove a downloaded database driver library from `<root>/drivers` (v5).
+Remove a downloaded database driver library from `<root>/drivers`.
 
 Examples:
     - `uninstall driver duckdb`
@@ -589,7 +611,7 @@ Examples:
         }
         "_show_completions" => {
             r##"
-Print the shell completion script for `mrsm` and `meerschaum` (v5).
+Print the shell completion script for `mrsm` and `meerschaum`.
 
 Name a shell (`bash`, `zsh`, `fish` or `powershell`); without one the script is for the shell in
 `$SHELL` (PowerShell on Windows). The script holds no candidates: on every <TAB> it runs the
@@ -608,7 +630,7 @@ Examples:
         }
         "_install_completions" => {
             r##"
-Write the shell completion script where the shell loads it, idempotently (v5).
+Write the shell completion script where the shell loads it, idempotently.
 
 Name a shell (`bash`, `zsh`, `fish` or `powershell`); without one it is the shell in `$SHELL`
 (PowerShell on Windows). What is written, per shell:
@@ -638,7 +660,7 @@ Examples:
         }
         "_uninstall_completions" => {
             r##"
-Remove the shell completion script `install completions` wrote (v5).
+Remove the shell completion script `install completions` wrote.
 
 Only files that carry the marker `mrsm` writes are removed (a file of your own with the same name
 is left alone), and for PowerShell only the marked block in the profile. Name a shell, or it is
@@ -651,7 +673,7 @@ Examples:
         }
         "_show_drivers" => {
             r##"
-Show the native database driver libraries (v5).
+Show the native database driver libraries.
 
 For each driver, its library version, where it was found (`env` for `MRSM_DUCKDB_LIB`, `cache`
 for `<root>/drivers`, `system` for the loader path, `missing`) and its path. DuckDB's library is
@@ -667,7 +689,7 @@ Examples:
         }
         "_upgrade_extensions" => {
             r##"
-Update a PostgreSQL instance's extensions to the versions its server ships (v5).
+Update a PostgreSQL instance's extensions to the versions its server ships.
 
 Docker sets up a database only on an empty volume, so after a new image is pulled the database
 keeps the extension versions it was created with (TimescaleDB, PostGIS, the TimescaleDB
@@ -703,7 +725,9 @@ Examples:
         }
         "backup" => {
             r##"
-Back up a database (v5). Choose a subaction:
+Back up the stack's PostgreSQL database.
+
+Choose a subaction:
 
     - `backup postgres`
         - An online backup of the stack's PostgreSQL database.
@@ -711,7 +735,9 @@ Back up a database (v5). Choose a subaction:
         }
         "restore" => {
             r##"
-Restore a database from a backup (v5). Choose a subaction:
+Restore the stack's PostgreSQL database from a backup.
+
+Choose a subaction:
 
     - `restore postgres`
         - Restore the stack's PostgreSQL database from a backup.
@@ -719,7 +745,7 @@ Restore a database from a backup (v5). Choose a subaction:
         }
         "_backup_postgres" => {
             r##"
-Take an online backup of the stack's PostgreSQL database (v5).
+Take an online backup of the stack's PostgreSQL database.
 
 Nothing is stopped: every database is dumped from one consistent snapshot (`pg_dump -Fc` of a
 snapshot a session exports, zstd-compressed when the server's `pg_dump` supports it), together
@@ -751,7 +777,7 @@ Examples:
         }
         "_restore_postgres" => {
             r##"
-Restore the stack's PostgreSQL database from a backup (v5).
+Restore the stack's PostgreSQL database from a backup.
 
 Without a word, the newest complete backup in `<root>/backups/postgres/`; or name one by its
 timestamp (`20261018T120000Z`) or its directory (an upgrade's backup works too). Every file is
@@ -781,7 +807,7 @@ Examples:
         }
         "_upgrade_postgres" => {
             r##"
-Move the stack's database to another PostgreSQL major version (v5).
+Move the stack's database to another PostgreSQL major version.
 
 A new major cannot read the old data directory, so this takes a full backup of the stack's `db`
 service first (as `backup postgres` does, with exact row counts) and restores it into a NEW
@@ -823,7 +849,7 @@ Examples:
         }
         "_show_runs" => {
             r##"
-List the recorded runs of the Syncing Engine, newest first (v5).
+List the recorded runs of the Syncing Engine, newest first.
 
 Give a run ID (`show run RUN_ID`) to print that run's Gantt chart instead.
 
@@ -835,7 +861,7 @@ Examples:
         }
         "_plan_pipes" => {
             r##"
-Print the Syncing Engine's plan for the selected pipes without syncing (v5).
+Print the Syncing Engine's plan for the selected pipes without syncing.
 
 One row per node: the action (`root`, `skip`, `incremental`, `backfill`, `rebuild`, `observe`),
 the sync bounds, the number of chunks and the reason. Accepts the usual key and tag filters,
@@ -855,7 +881,7 @@ Examples:
         }
         "watch" => {
             r##"
-Watch something change, full-screen (v5): a monitor, where `show` prints once.
+Watch jobs, logs or runs live, full-screen (`show` prints once).
 
 Command:
     `watch {option}`
@@ -873,7 +899,7 @@ prints its line output instead.
         }
         "_watch_runs" => {
             r##"
-Monitor a run of the Syncing Engine (v5): a live Gantt chart, the nodes (state, action, chunk
+Monitor a run of the Syncing Engine: a live Gantt chart, the nodes (state, action, chunk
 progress, rows inserted and updated, rows per second, attempts, duration) and the event log.
 
 Give a run ID (`watch run RUN_ID`); without one, the newest running run is shown, else the
@@ -892,7 +918,7 @@ Examples:
         }
         "_watch_logs" => {
             r##"
-Follow the logs of jobs as they are written: the same as `show logs` (v5 alias).
+Follow the logs of jobs as they are written: the same as `show logs` (an alias).
 
 Give job names to follow only those; without names, every job's log is followed. Ctrl+C stops
 following. With `--nopretty`, the logs are printed once.
@@ -904,7 +930,7 @@ Examples:
         }
         "_watch_jobs" => {
             r##"
-Monitor jobs (v5): the jobs of an executor (status, began, ended, schedule, executor) and the
+Monitor jobs: the jobs of an executor (status, began, ended, schedule, executor) and the
 selected job's log as it is written. `s` starts (or resumes), `x` stops and `p` pauses the
 selected job, each after a confirmation.
 
@@ -919,7 +945,7 @@ Examples:
         }
         "doctor" => {
             r##"
-Check this installation and print what is wrong with it, and how to fix it (v5).
+Check this installation: what is wrong with it, and how to fix it.
 
 Read-only: it never installs, creates, migrates or writes anything, not even on a new root (no
 default config files, no plugin manifest or entry-point cache), and it never imports plugin code: it
@@ -955,7 +981,7 @@ Examples:
         }
         "plan" => {
             r##"
-Print what a sync would do, without syncing (v5).
+Preview what a sync would do, without syncing.
 
 Command:
     `plan {option}`
@@ -997,6 +1023,9 @@ Examples:
         "_show_sizes" => {
             r##"
 Show the on-disk sizes of pipes' target tables, sorted largest first.
+
+Pipes whose `target` is the same table are marked `shared xN`, and the total counts each table
+once.
 "##
         }
         "_show_tags" => {
@@ -1060,6 +1089,13 @@ Options:
     - `-w, --workers {number}`
         How many worker threads to run.
         Defaults to the number of CPU cores or 1 on Android.
+
+    - `--private`, `--secure`, `--no-auth`
+        Require a login for every route, only let `admin` users run actions,
+        or turn authentication off (dangerous).
+
+    - `--public`
+        Serve only public routes: login, health, version and plugin routes and pages.
 "##
         }
         "_start_connectors" => {
@@ -1069,7 +1105,8 @@ Start polling connectors to verify a connection can be made.
         }
         "_start_daemons" => {
             r##"
-Start the Meerschaum CLI daemon processes.
+Accepted so that older commands keep working: Meerschaum has no CLI daemon, so there is nothing
+to start (actions run in `mrsm` itself). Background jobs are `start jobs`.
 "##
         }
         "_start_gui" => {
@@ -1105,6 +1142,16 @@ Examples:
 
       - `start job --name happy_seal`
             Start the job 'happy_seal' but via the `--name` flag.
+
+Options:
+    - `--no-stagger`
+        - Start the jobs without the startup gate (jitter, busy-host wait and slots,
+          `jobs:startup:*`). One explicit `start job x` already skips the jitter.
+    - `--startup-jitter 30s`
+        - Bound the random start delay of a new job (stored in its `startup` property).
+    - `--jitter 30s` (with `-s`)
+        - Move every fire time of the job's schedule by a fixed per-job offset of up to 30 s
+          (`-s 'every 5 minutes jitter 30 seconds'` is the same).
 "##
         }
         "_start_mcp" => {
@@ -1124,19 +1171,56 @@ Example client configuration:
     {"mcpServers": {"meerschaum": {"command": "mrsm", "args": ["start", "mcp"]}}}
 "##
         }
-        "_start_pipeline" => {
+        "_start_pipeline" | "_start_pipelines" => {
             r##"
-Run a series of Meerschaum commands as a single action.
+Run a saved Pipeline in the background.
 
-Add `:` to the end of chained arguments to apply additional flags to the pipeline.
+Starts the Pipeline's background job: the job its schedule runs in (created on the
+Pipelines page), or else a new job named `pipeline-NAME` which runs
+`sync pipelines NAME --loop` on the instance the Pipeline is saved on.
 
-Examples
---------
+Usage:
+    `start pipeline NAME [NAME ...]`
 
-`sync pipes -i sql:local + sync pipes -i sql:main : -s 'daily'`
+Options:
+    - `-i`, `--instance`
+        The instance the Pipeline is saved on (default: the configured instance).
+    - `--min-seconds 300`
+        For a new job: wait 300 seconds between syncs (default 60, or the
+        Pipeline's saved `min_seconds`). Members with a `schedule` of their own
+        sync when it is due.
+    - `-s 'every 10 minutes'`, `--schedule`
+        For a new job: sync on a schedule instead of in a loop.
+    - `--name`
+        The new job's name (default `pipeline-NAME`).
 
-`show version + show arguments : --loop`
+Examples:
+    - `start pipeline daily`
+    - `start pipeline daily -s 'daily starting 00:30'`
+    - `stop pipeline daily`
 
+To run several commands as one (an action chain), join them with `+` and put
+the flags for the whole chain after `:`, e.g.
+`sync pipes -i sql:local + sync pipes -i sql:main : --loop --min-seconds 60`.
+"##
+        }
+        "_stop_pipelines" => {
+            r##"
+Stop a saved Pipeline's background jobs.
+
+Stops the jobs which sync the Pipeline on the instance it is saved on: the job
+`start pipeline` created, and the job its schedule runs in.
+
+Usage:
+    `stop pipeline NAME [NAME ...]`
+
+Options:
+    - `-i`, `--instance`
+        The instance the Pipeline is saved on (default: the configured instance).
+
+Examples:
+    - `stop pipeline daily`
+    - `start pipeline daily` starts it again.
 "##
         }
         "_start_webterm" => {
@@ -1163,7 +1247,8 @@ Start a CLI worker process. This is intended for internal use only.
         }
         "_stop_daemons" => {
             r##"
-Stop the Meerschaum CLI daemon.
+Accepted so that older commands keep working: Meerschaum has no CLI daemon, so there is nothing
+to stop. Background jobs are `stop jobs`.
 "##
         }
         "_stop_jobs" => {
@@ -1185,10 +1270,32 @@ Usage:
           (for subscription-style connectors which sync via callbacks).
     - `--min-seconds 10`
         - Wait 10 seconds between laps.
-    - `--async`, `--unblock``
+    - `--async`, `--unblock`
         - Spin up background threads for each pipe.
+    - `--begin 2024-01-01`, `--end 2024-02-01`
+        - Only sync rows from this window (`--end` is exclusive).
+    - `--replace` (with `--begin` and `--end`)
+        - Replace the rows in the window with the fetched rows, in one transaction.
+    - `--parents [N]`, `--children [N]`
+        - Also sync the ancestors (or descendants) of the selected pipes, in dependency order.
+          `N` limits how many generations (`--parents 1` is the direct parents).
+    - `--run-id RUN_ID`
+        - Record the run under this ID (unique execution identity).
+    - `--resume RUN_ID`
+        - Re-plan only the nodes that failed or never ran in the run `RUN_ID` (see `show runs`).
+    - `--chunk-pipelining`
+        - Let a backfilling child start each chunk as soon as the parent chunks it
+          depends on have finished (`system.engine.chunk_pipelining`).
     - `--debug`
         - Print verbose messages.
+
+A pipe's `schedule` parameter (e.g. `every 6 hours`) makes it sync only when it is due with
+`--loop`, when it has no parents in the selection. `mrsm plan pipes` prints what a sync would do,
+without syncing.
+
+Examples:
+    - `sync pipes -c sql:main -m weather`
+    - `sync pipes -t daily --parents --loop --min-seconds 60`
 "##
         }
         "_tag_pipes" => {
@@ -1276,6 +1383,29 @@ Verify that all of the available plugins are able to be imported as expected.
 Verify the contents of pipes, syncing across their entire datetime intervals.
 "##
         }
+        "_verify_schemas" => {
+            r##"
+Compare each pipe's table with the pipe's dtypes and fix the differences.
+
+Prints the plan for every selected pipe (a table of the columns that change), then asks before
+applying it. Added columns and safe widenings (int to bigint, int to float, float to numeric,
+varchar(n) to text, text to json) keep every value; other type changes may fail on existing
+values or change them, so they need confirmation. Columns are never dropped, and static pipes
+are included.
+
+Usage:
+    `verify schema {options}`
+
+Options:
+    `-y`, `--yes`: apply every change without asking.
+    `--noask`: apply the safe changes only; the others are refused.
+    `--dry-run`: print the SQL only and change nothing.
+
+Examples:
+    - `verify schema -c sql:main -m weather`
+    - `verify schema -t production --dry-run`
+"##
+        }
         "_verify_venvs" => {
             r##"
 Verify your virtual environments.
@@ -1291,7 +1421,7 @@ after large syncs.
         }
         "api" => {
             r##"
-Send commands to a Meerschaum WebAPI instance.
+Run actions on a Meerschaum API instance, e.g. `api main show pipes`.
 
 Usage:
     `api [commands] {options}`
@@ -1312,14 +1442,14 @@ If command is `start`, launch the Meerschaum WebAPI. If command is an api connec
         }
         "attach" => {
             r##"
-Attach to a job, and prompt the user when blocking on input.
+Attach to a running job and answer its prompts, or follow its logs.
 
     Options:
         `attach [jobs, logs]`"##
         }
         "bootstrap" => {
             r##"
-Launch an interactive wizard to bootstrap pipes or connectors.
+Create pipes, connectors, jobs, Pipelines or plugins step by step.
 
 Example:
     `bootstrap pipes`
@@ -1330,7 +1460,7 @@ Example:
         }
         "clear" => {
             r##"
-Clear pipes of their data, or clear the screen.
+Clear pipes' data (keeping their tables), or clear the screen.
 
 Usage:
 - clear
@@ -1342,7 +1472,26 @@ Usage:
     Options:
         `clear [cache, pipes]`"##
         }
-        "compose" => r##"Manage an isolated Meerschaum environment with Meerschaum Compose."##,
+        "help" => {
+            r##"
+Show the actions and options of `mrsm`, or the help of an action.
+
+Examples:
+    - `help`
+    - `help sync pipes`
+    - `mrsm sync pipes -h` (the same)
+"##
+        }
+        "compose" => {
+            r##"Run a project of pipes and jobs from a compose file (`mrsm-compose.yaml`).
+
+Examples:
+    - `compose init`
+    - `compose up -d`
+    - `compose explain`
+    - `compose down`
+"##
+        }
         "compress" => {
             r##"
 Compress pipes' target tables to reduce disk usage.
@@ -1355,10 +1504,10 @@ compression policy so future synced chunks are compressed automatically.
         }
         "copy" => {
             r##"
-Duplicate connectors or pipes.
+Copy connectors, pipes or Pipelines.
 
 Command:
-    `copy {pipes, connectors}`
+    `copy {pipes, connectors, pipelines}`
 
 Example:
     `copy pipes`
@@ -1379,17 +1528,19 @@ chunks back to row-store so future synced chunks stay uncompressed.
         }
         "deduplicate" => {
             r##"
-Deduplicate pipes' tables, chunking across their datetime axes.
+Remove duplicate rows from pipes' tables.
+
+The tables are deduplicated chunk by chunk along their datetime axes.
 
     Options:
         `deduplicate [pipes]`"##
         }
         "delete" => {
             r##"
-Delete an element.
+Delete pipes, Pipelines, jobs, plugins, users, connectors, config or caches.
 
 Command:
-    `delete {config, pipes, plugins, users, connectors, jobs, venvs}`
+    `delete {pipes, pipelines, jobs, plugins, users, connectors, config, cache, venvs}`
 
 
     Options:
@@ -1397,14 +1548,14 @@ Command:
         }
         "drop" => {
             r##"
-Drop pipe data (maintaining registration) or tables.
+Drop pipes' tables (keeping their registrations), or their indices.
 
     Options:
         `drop [indices, pipes]`"##
         }
         "edit" => {
             r##"
-Edit an existing element.
+Edit config, pipes, definitions, Pipelines, jobs, plugins, users or tokens.
 
     Options:
         `edit [config, definition, jobs, pipes, plugins, tokens, users]`"##
@@ -1425,10 +1576,20 @@ Create pipes' indices.
         }
         "install" => {
             r##"
-Install Meerschaum plugins or Python packages.
+Install plugins, Python packages, drivers or shell completions.
+
+Examples:
+    - `install plugins noaa`
+    - `install packages pandas`
+    - `install driver duckdb [--force]`
+        - Download DuckDB's shared library (checked against a pinned SHA-256) into
+          `<root>/drivers`. DuckDB is not compiled into `mrsm`: without this command the library is
+          downloaded on first use, unless `MRSM_NO_AUTO_INSTALL` is set. `MRSM_DUCKDB_LIB` names a
+          library to use instead (air-gapped hosts).
+    - `install completions`
 
     Options:
-        `install [packages, plugins, required]`"##
+        `install [completions, drivers, packages, plugins, required]`"##
         }
         "login" => {
             r##"
@@ -1471,27 +1632,34 @@ Pause running jobs.
         }
         "python" => {
             r##"
-Launch a virtual environment's Python interpreter with Meerschaum imported.
+Open a Python interpreter with Meerschaum imported, or run a Python file.
 You may pass flags to the Python binary by surrounding each flag with `[]`.
 
 Usage:
-    `python {commands}`
+    `python {code | file.py [args ...]}`
 
 Examples:
     mrsm python
+        Open a REPL with `import meerschaum as mrsm` already run.
+    mrsm python script.py arg1 --verbose
+        Run `script.py` with the same interpreter, passing `arg1 --verbose` to it.
+        Every word after the file name is the script's, as with `python script.py ...`;
+        Meerschaum's own flags go before it: `mrsm python --venv myenv script.py`.
     mrsm python -c "print(mrsm.__version__)"
+        Run the code and exit.
     mrsm python [-m pip -V]
+        Run the interpreter with these flags.
 
 Flags:
     `--nopretty`
-    Open a plain Pyhthon REPL rather than ptpython.
+    Open a plain Python REPL rather than ptpython.
 
     `--noask`
     Run the supplied Python code and do not open a REPL.
 
     `--venv`
     Run the Python interpreter from a virtual environment.
-    Will not have Meercshaum imported.
+    Will not have Meerschaum imported.
 
     `--sub-args` (or flags surrounded by `[]`)
     Rather than run Python code, execute the interpreter with the given sub-flags
@@ -1500,7 +1668,7 @@ Flags:
         }
         "register" => {
             r##"
-Register new items (pipes, plugins, users).
+Register pipes, connectors, Pipelines, plugins, tokens or users.
 
 Pipes and users reside on instances (`-i`), and plugins reside on repositories (`-r`).
 
@@ -1509,17 +1677,23 @@ Pipes and users reside on instances (`-i`), and plugins reside on repositories (
         }
         "reload" => {
             r##"
-Reload the running Meerschaum instance.
+Reload plugins and rebuild their cached manifest.
+
+The configuration is read again on every command.
 "##
         }
         "restart" => {
             r##"
-Restart stopped jobs which have not been manually stopped.
-"##
+Restart stopped jobs: the named ones, or those started with `--restart`.
+
+Without names, the jobs started with `--restart` that stopped on their own are restarted.
+
+    Options:
+        `restart [daemons, jobs]`"##
         }
         "setup" => {
             r##"
-Run the `setup()` function for Meerschaum plugins.
+Run plugins' `setup()` functions.
 
 Usage:
     setup plugins noaa
@@ -1533,19 +1707,31 @@ Execute system commands.
 "##
         }
         "show" => {
-            r##"Show elements of a certain type.
+            r##"Show pipes, data, jobs, logs, config, connectors and more.
 
 Command:
     `show {option}`
 
-Example:
-    `show pipes`
+Examples:
+    - `show pipes`
+    - `show data -m weather`
+    - `show graph`
+        - Print the selected pipes and their dependencies as a DAG
+          (accepts `--parents` and `--children`; `--full` lists every child of a
+          wide fan-out instead of collapsing it).
+    - `show runs [--last N]`
+        - List the recorded engine runs, newest first.
+    - `show run RUN_ID`
+        - Print the Gantt chart of a recorded run.
+    - `show drivers`
+        - Print the native driver libraries (DuckDB, Oracle client): version, source, path.
 
     Options:
         `show [actions, arguments, columns, config, connectors, daemons, data, environment, help, jobs, logs, packages, partitions, pipes, plugins, rowcounts, schedules, sizes, tags, targets, tokens, users, venvs, version]`"##
         }
         "sql" => {
-            r##"Execute a SQL query or launch an interactive CLI. All positional arguments are optional.
+            r##"Run a SQL query or open an interactive SQL client.
+All positional arguments are optional.
 
 Usage:
     `sql {label} {method} {query / table}`
@@ -1555,7 +1741,7 @@ Options:
         Launch an interactive CLI. If {label} is omitted, use 'main'.
 
     - `sql {label} read [query / table]`
-        Read a table or query as a pandas DataFrame and print the result.
+        Read a table or query and print the result.
 
     - `sql {label} exec [query]`
         Execute a query and print the success status.
@@ -1580,13 +1766,13 @@ Examples:
     - `sql "SELECT * FROM table WHERE id = 1"`
         Execute the above query on `sql:main` and print the results.
 
-    - `sql local exec "INSERT INTO table (id) VALUES (1)"
+    - `sql local exec "INSERT INTO table (id) VALUES (1)"`
         Execute the above query on `sql:local`.
 "##
         }
         "stack" => {
             r##"
-Control the Meerschaum stack with Docker Compose.
+Run the Meerschaum stack (database, API, Valkey, Grafana) with Docker Compose.
 Usage: `stack {command}`
 
 Command: action[0]: default 'up'
@@ -1595,21 +1781,21 @@ Command: action[0]: default 'up'
         }
         "start" => {
             r##"
-Start subsystems (API server, background job, etc.).
+Start subsystems (API server, background job, saved Pipeline, etc.).
 
     Options:
         `start [api, connectors, daemons, gui, jobs, mcp, pipeline, webterm, worker]`"##
         }
         "stop" => {
             r##"
-Stop running jobs.
+Stop running jobs, or a saved Pipeline's background jobs.
 
     Options:
-        `stop [daemons, jobs]`"##
+        `stop [daemons, jobs, pipeline]`"##
         }
         "sync" => {
             r##"
-Fetch and sync data for pipes.
+Fetch and sync new data into pipes or Pipelines.
 
 Usage:
     - `--loop`
@@ -1619,31 +1805,45 @@ Usage:
           (for subscription-style connectors which sync via callbacks).
     - `--min-seconds 10`
         - Wait 10 seconds between laps.
-    - `--async`, `--unblock``
+    - `--async`, `--unblock`
         - Spin up background threads for each pipe.
+    - `--parents [N]`, `--children [N]`
+        - Also sync the selected pipes' ancestors (or descendants), in dependency order.
     - `--debug`
         - Print verbose messages.
 
+See `mrsm sync pipes -h` for every option.
+
     Options:
-        `sync [pipes]`"##
+        `sync [pipeline, pipelines, pipes]`"##
         }
         "tag" => {
             r##"
-Edit an existing element.
+Add or remove pipes' tags.
+
+Example:
+    `tag pipes production -c sql:main` (prefix a tag with `_` to remove it)
 
     Options:
         `tag [pipes]`"##
         }
         "uninstall" => {
             r##"
-Uninstall Meerschaum plugins or Python packages.
+Uninstall plugins, Python packages, drivers or shell completions.
+
+Examples:
+    - `uninstall plugins noaa`
+    - `uninstall packages pandas`
+    - `uninstall driver duckdb`
+        - Remove the downloaded DuckDB library from `<root>/drivers`.
+    - `uninstall completions`
 
     Options:
-        `uninstall [packages, plugins]`"##
+        `uninstall [completions, drivers, packages, plugins]`"##
         }
         "upgrade" => {
             r##"
-Upgrade Meerschaum, plugins, or packages.
+Upgrade Meerschaum, plugins, packages or the stack's database.
 
 Command:
     `upgrade {option}`
@@ -1656,7 +1856,7 @@ Example:
         }
         "prune" => {
             r##"
-Prune virtual environments of packages no installed plugin needs.
+Remove packages that no installed plugin needs from virtual environments.
 
 Command:
     `prune {option}`
@@ -1669,7 +1869,7 @@ Example:
         }
         "vacuum" => {
             r##"
-Vacuum pipes' target tables to reclaim dead-tuple disk space.
+Reclaim disk space in pipes' tables (`VACUUM`).
 
 For PostgreSQL-family tables this runs `VACUUM` (optionally `VACUUM FULL` with `--full`);
 other flavors fall back to their respective space-reclaiming mechanisms.
@@ -1679,7 +1879,7 @@ other flavors fall back to their respective space-reclaiming mechanisms.
         }
         "verify" => {
             r##"
-Verify the states of pipes, packages, and more.
+Verify pipes' data, schemas and row counts, or packages, plugins and venvs.
 
     Options:
         `verify [packages, pipes, plugins, rowcounts, venvs]`"##

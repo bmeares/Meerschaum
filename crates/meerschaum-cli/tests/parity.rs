@@ -81,6 +81,30 @@ fn diff_maps(expected: &Value, actual: &Value) -> Vec<String> {
     diffs
 }
 
+/// `argparse`'s "ambiguous option: ... could match ..." lists every option string, so the
+/// arguments added since v4 ([`spec::V5_ONLY_DESTS`]) are taken out of the Rust message before it
+/// is compared with the v4 recording.
+fn without_v5_options(mut args: Value) -> Value {
+    let added: Vec<String> = spec::V5_ONLY_DESTS
+        .iter()
+        .filter_map(|dest| spec::by_dest(dest))
+        .flat_map(|a| a.option_strings.iter().map(|s| format!(", {s}")))
+        .collect();
+    if let Some(message) = args
+        .get_mut("_argparse_exception")
+        .and_then(|e| e.get_mut("message"))
+        && let Some(text) = message.as_str()
+        && text.starts_with("ambiguous option:")
+    {
+        let mut text = text.to_string();
+        for option in &added {
+            text = text.replace(option.as_str(), "");
+        }
+        *message = Value::String(text);
+    }
+    args
+}
+
 fn report(name: &str, failures: &[String], total: usize) {
     if !failures.is_empty() {
         let shown: Vec<&String> = failures.iter().take(40).collect();
@@ -123,7 +147,10 @@ fn parse_arguments_matches_python() {
             }
             (None, Err(e)) => failures.push(format!("{sysargs:?}: rust raised {}", exc_json(&e))),
             (None, Ok(args)) => {
-                let diffs = diff_maps(&case["args"], &args_to_fixture_json(&args));
+                let diffs = diff_maps(
+                    &case["args"],
+                    &without_v5_options(args_to_fixture_json(&args)),
+                );
                 if !diffs.is_empty() {
                     failures.push(format!("{sysargs:?}:\n{}", diffs.join("\n")));
                 }
@@ -150,6 +177,32 @@ fn parse_arguments_matches_python() {
         }
     }
     report("parse_arguments", &failures, cases.len());
+}
+
+/// v4's serialized chain (`["start", "pipeline", ...]`) in its rc15 form (`["chain", ...]`).
+fn v4_chain_to_current(value: &Value) -> Value {
+    match value.as_array() {
+        Some(items) if items.len() >= 2 && items[0] == "start" && items[1] == "pipeline" => {
+            let mut out = vec![Value::from("chain")];
+            out.extend(items[2..].iter().cloned());
+            Value::Array(out)
+        }
+        _ => value.clone(),
+    }
+}
+
+/// A v4 entry step of a serialized chain, with its action words in the rc15 form.
+fn v4_chain_step_to_current(step: &Value) -> Value {
+    let mut step = step.clone();
+    if let Some(map) = step.as_object_mut() {
+        for key in ["action", "sysargs", "filtered_sysargs"] {
+            if let Some(value) = map.get(key) {
+                let current = v4_chain_to_current(value);
+                map.insert(key.to_string(), current);
+            }
+        }
+    }
+    step
 }
 
 #[test]
@@ -195,18 +248,35 @@ fn chains_and_pipelines_match_python() {
                 chain["remove_api_executor_keys"]
             ));
         }
+        // rc15 (Q31): chains serialize under the hidden `chain` action instead of v4's
+        // `start pipeline` (which now starts saved Pipelines); the payload is v4's, and v4's
+        // form still compresses (and runs) the same.
         let pipeline = sysargs::get_pipeline_sysargs(&before, &after, None);
-        if chain["pipeline_sysargs"] != Value::from(pipeline.clone()) {
+        let expected_pipeline = v4_chain_to_current(&chain["pipeline_sysargs"]);
+        if expected_pipeline != Value::from(pipeline.clone()) {
             failures.push(format!(
-                "{sysargs:?}: pipeline_sysargs python={} rust={pipeline:?}",
-                chain["pipeline_sysargs"]
+                "{sysargs:?}: pipeline_sysargs python={expected_pipeline} rust={pipeline:?}",
             ));
         }
         let compressed =
             capture_json(sysargs::compress_pipeline_sysargs(&pipeline).map(Value::from));
-        if chain["compressed"] != compressed {
+        // A chain with nothing to compress comes back as it is: in its own (current) form.
+        let expected_compressed = if chain["compressed"]["ok"] == chain["pipeline_sysargs"] {
+            serde_json::json!({ "ok": v4_chain_to_current(&chain["pipeline_sysargs"]) })
+        } else {
+            chain["compressed"].clone()
+        };
+        if expected_compressed != compressed {
             failures.push(format!(
-                "{sysargs:?}: compressed python={} rust={compressed}",
+                "{sysargs:?}: compressed python={expected_compressed} rust={compressed}",
+            ));
+        }
+        let legacy = strings(&chain["pipeline_sysargs"]);
+        let compressed_legacy =
+            capture_json(sysargs::compress_pipeline_sysargs(&legacy).map(Value::from));
+        if chain["compressed"] != compressed_legacy {
+            failures.push(format!(
+                "{sysargs:?}: compressed v4 form python={} rust={compressed_legacy}",
                 chain["compressed"]
             ));
         }
@@ -227,7 +297,8 @@ fn chains_and_pipelines_match_python() {
             ));
         } else {
             for (e, a) in expected_steps.iter().zip(&steps) {
-                let diffs = diff_maps(e, a);
+                let e = v4_chain_step_to_current(e);
+                let diffs = diff_maps(&e, a);
                 if !diffs.is_empty() {
                     failures.push(format!("{sysargs:?}: entry step:\n{}", diffs.join("\n")));
                 }
@@ -243,7 +314,13 @@ fn chains_and_pipelines_match_python() {
                     failures.push(format!(
                         "{sysargs:?}: entry success python={expected} rust={success}"
                     ));
-                } else if !success && expected.get("message") != Some(&Value::from(msg.clone())) {
+                } else if !success
+                    && expected
+                        .get("message")
+                        .and_then(Value::as_str)
+                        .map(|m| m.replace("\nstart pipeline ", "\nchain "))
+                        != Some(msg.clone())
+                {
                     failures.push(format!(
                         "{sysargs:?}: entry message python={} rust={msg:?}",
                         expected["message"]
@@ -396,6 +473,7 @@ fn argument_spec_matches_python_parser() {
         .iter()
         .map(|a| a["dest"].as_str().unwrap())
         .filter(|dest| !["run_id", "resume"].contains(dest))
+        .filter(|dest| !spec::V5_ONLY_DESTS.contains(dest))
         .collect();
     if py_dests != rs_dests {
         failures.push(format!(
@@ -408,6 +486,10 @@ fn argument_spec_matches_python_parser() {
             failures.push(format!("{dest}: missing in Rust"));
             continue;
         };
+        // The help text is written for today's behavior (rc15): only its presence is checked.
+        if rs["help"].as_str().is_none_or(|h| h.trim().is_empty()) {
+            failures.push(format!("{dest}.help: missing"));
+        }
         for field in [
             "option_strings",
             "nargs",
@@ -416,7 +498,6 @@ fn argument_spec_matches_python_parser() {
             "const",
             "choices",
             "required",
-            "help",
             "metavar",
             "group",
         ] {
@@ -524,31 +605,44 @@ fn listed_flags(help_text: &str) -> BTreeSet<String> {
     flags
 }
 
+/// `mrsm --help` lists every v4 option (the actions come first and the help text is today's,
+/// so the page is not v4's byte for byte), every option of the argument table and the flags
+/// parsed ahead of it.
 #[test]
-fn global_help_matches_python() {
+fn global_help_lists_every_v4_option() {
     let python = std::fs::read_to_string(fixtures_dir().join("help").join("_global.txt")).unwrap();
     let rust = help::format_help(80);
     let py_flags = listed_flags(&python);
     let rs_flags = listed_flags(&rust);
-    assert_eq!(py_flags, rs_flags, "the set of flags in --help differs");
-    let expected: BTreeSet<String> = spec::ARGUMENTS
+    let missing: Vec<&String> = py_flags.difference(&rs_flags).collect();
+    assert!(
+        missing.is_empty(),
+        "v4 options missing from --help: {missing:?}"
+    );
+    let mut expected: BTreeSet<String> = spec::ARGUMENTS
         .iter()
         .flat_map(|a| a.option_strings.iter().map(|s| s.to_string()))
         .collect();
+    expected.extend(
+        meerschaum_cli::parse::ENGINE_OPTIONS
+            .iter()
+            .map(|o| o.flag.to_string()),
+    );
     assert_eq!(
         rs_flags, expected,
         "--help does not list every option string"
     );
-    if python != rust {
-        let differing = python
-            .lines()
-            .zip(rust.lines())
-            .filter(|(a, b)| a != b)
-            .count();
-        panic!(
-            "--help formatting differs on {differing} lines:\n--- python\n{python}\n--- rust\n{rust}"
-        );
-    }
+    // The v4 option groups keep their titles and order, with "Pipeline options" after "Sync".
+    let titles = |text: &str| -> Vec<String> {
+        text.lines()
+            .filter(|l| l.ends_with(" options:"))
+            .map(|l| l.trim_end_matches(':').to_string())
+            .collect()
+    };
+    let mut v4_titles = titles(&python);
+    let sync = v4_titles.iter().position(|t| t == "Sync options").unwrap();
+    v4_titles.insert(sync + 1, "Pipeline options".into());
+    assert_eq!(titles(&rust), v4_titles);
 }
 
 /// Flags mentioned in v4 per-action help (`mrsm <action> --help` prints the docstring) that are
@@ -617,15 +711,23 @@ fn test_settings() -> meerschaum_cli::format::FormatSettings {
     }
 }
 
-/// `mrsm <action> [<subaction>] --help` prints exactly the v4 text (the dedented docstring) for
-/// every recorded help page.
+/// Flags a v4 help page mentions that today's page leaves out, and why.
+const REMOVED_FROM_ACTION_HELP: &[(&str, &str, &str)] = &[(
+    "show.data",
+    "--gui",
+    "`--gui` has no effect (there is no pandasgui window)",
+)];
+
+/// `mrsm <action> [<subaction>] --help` prints help for every recorded v4 page, and that help
+/// still mentions every flag the v4 page did ([`REMOVED_FROM_ACTION_HELP`] lists the
+/// exceptions). The text itself is today's (rc15: no byte-for-byte v4 comparison).
 #[test]
-fn per_action_help_matches_python() {
+fn per_action_help_keeps_every_v4_page() {
     let fixture = load("args.json");
     let tmp = tempfile::tempdir().unwrap();
+    let flag_re = Regex::new(r"(--[A-Za-z][A-Za-z0-9-]*[A-Za-z0-9])").unwrap();
     let mut failures = Vec::new();
     let mut checked = 0;
-    let mut matched = 0;
     for entry in std::fs::read_dir(fixtures_dir().join("help")).unwrap() {
         let path = entry.unwrap().path();
         let name = path.file_stem().unwrap().to_string_lossy().to_string();
@@ -643,19 +745,29 @@ fn per_action_help_matches_python() {
             rt.format = Some(test_settings());
             assert_eq!(dispatch::main(&sysargs, &mut rt), 0);
         }
-        // The v5-only flags appended after v4's text are not part of the recorded pages.
-        let actual = meerschaum_cli::help::strip_v5_additions(&String::from_utf8(buf).unwrap());
-        if actual == expected {
-            matched += 1;
-        } else {
-            failures.push(format!(
-                "{name}:\n--- python\n{expected}\n--- rust\n{actual}"
-            ));
+        let actual = String::from_utf8(buf).unwrap();
+        if actual.trim().is_empty() {
+            failures.push(format!("{name}: no help"));
+            continue;
+        }
+        for caps in flag_re.captures_iter(&expected) {
+            let flag = &caps[1];
+            if REMOVED_FROM_ACTION_HELP
+                .iter()
+                .any(|(page, f, _)| *page == name && *f == flag)
+            {
+                continue;
+            }
+            if !actual.contains(flag) {
+                failures.push(format!("{name}: no longer mentions {flag}:\n{actual}"));
+            }
+        }
+        if actual.contains("v5 additions") {
+            failures.push(format!("{name}: has a 'v5 additions' block"));
         }
     }
-    eprintln!("per-action help: {matched}/{checked} pages match exactly");
     assert_eq!(checked, 133, "expected 133 recorded help pages");
-    report("per-action help text", &failures, checked);
+    report("per-action help pages", &failures, checked);
 }
 
 /// `mrsm <unknown> --help` prints the `show actions` table.
@@ -687,19 +799,9 @@ fn unknown_action_help_matches_python() {
             .map(|s| (*s).to_owned()),
     );
     expected_words.sort();
-    // At 80 columns the larger table abbreviates a few labels. Each abbreviation must
-    // identify exactly one expected action; missing or duplicate actions still fail.
+    // The columns are sized to the names: no action is abbreviated at 80 columns.
+    assert!(!actual.contains('…'), "{actual}");
     let mut actual_words = words(&actual);
-    for word in &mut actual_words {
-        if let Some(prefix) = word.strip_suffix('…') {
-            let matches: Vec<_> = expected_words
-                .iter()
-                .filter(|candidate| candidate.starts_with(prefix))
-                .collect();
-            assert_eq!(matches.len(), 1, "ambiguous or unknown action {word}");
-            *word = matches[0].clone();
-        }
-    }
     actual_words.sort();
     assert_eq!(actual_words, expected_words);
     let mut listed = Vec::new();
@@ -793,7 +895,10 @@ fn dispatch_skeleton() {
         ]),
         &mut rt,
     );
-    assert!(!ok && msg.contains("Failed pipeline after 1 step"), "{msg}");
+    assert!(
+        !ok && msg.contains("The action chain failed after 1 step"),
+        "{msg}"
+    );
     let SuccessTuple {
         success: ok,
         message: msg,

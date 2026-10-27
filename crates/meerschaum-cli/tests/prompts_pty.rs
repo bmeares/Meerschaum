@@ -312,9 +312,11 @@ impl Drop for Term {
 }
 
 fn dropdown_rows(term: &Term) -> Vec<String> {
+    // `bootstrap pipes` lists the connectors as bullets (`  • sql:main`) above its question.
     term.screen()
         .lines()
         .filter(|l| l.starts_with("  ") && !l.trim().is_empty() && !l.trim_start().starts_with('-'))
+        .filter(|l| !l.trim_start().starts_with('\u{2022}'))
         .map(|l| l.trim().to_string())
         .collect()
 }
@@ -510,4 +512,172 @@ fn bootstrap_pipelines_without_a_name_and_noask_still_needs_one() {
         String::from_utf8_lossy(&out.stderr)
     );
     assert!(text.contains("Provide a Pipeline name."), "{text}");
+}
+
+/// On a terminal, a SQL connector's query is written in the editor (the template's comment lines
+/// are dropped), previewed, and the preview's columns are the numbered datetime / ID choices
+/// (guessed: `ts` for the datetime, `id` for the ID). "sync now?" defaults to yes.
+#[test]
+fn bootstrap_pipes_asks_for_the_query_in_the_editor_first() {
+    use std::os::unix::fs::PermissionsExt;
+    let mut setup = Setup::new("bootstrap-query");
+    // The "editor" writes the query into the file it is given.
+    let editor = setup.base.join("editor.sh");
+    std::fs::write(
+        &editor,
+        "#!/bin/sh\nprintf \"%s\\n\" \"$(head -n 2 \"$1\")\" \"SELECT 7 AS id, '2024-01-01 00:00:00' AS ts, 1.5 AS val\" > \"$1\"\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&editor, std::fs::Permissions::from_mode(0o755)).unwrap();
+    setup
+        .env
+        .push(("EDITOR".into(), editor.display().to_string()));
+    setup
+        .env
+        .push(("VISUAL".into(), editor.display().to_string()));
+    let mut term = Term::spawn(
+        &setup.env,
+        &setup.base,
+        &["bootstrap", "pipes", "-i", "sql:w18sh"],
+    );
+    term.wait_screen("the connector question", 60, |s| s.contains("Connector:"));
+    // The connector choices are listed above the question.
+    assert!(
+        term.screen().contains("\u{2022} sql:w18sh"),
+        "{}",
+        term.screen()
+    );
+    term.send("sql:w18sh\r");
+    term.wait_screen("the metric question", 30, |s| s.contains("Metric:"));
+    term.send("from_editor\r");
+    term.wait_screen("the location question", 30, |s| s.contains("Location"));
+    term.send("\r");
+    term.wait_screen("the datetime choice", 60, |s| {
+        s.contains("Datetime column:")
+    });
+    let screen = term.raw_text();
+    assert!(screen.contains("The first rows of the query"), "{screen}");
+    assert!(
+        term.screen().contains("(default: 2 [ts])"),
+        "{}",
+        term.screen()
+    );
+    term.send("\r");
+    term.wait_screen("the ID choice", 30, |s| s.contains("ID column:"));
+    assert!(
+        term.screen().contains("(default: 1 [id])"),
+        "{}",
+        term.screen()
+    );
+    term.send("\r");
+    term.wait_screen("the target question", 30, |s| {
+        s.contains("Target table name")
+    });
+    term.send("\r");
+    term.wait_screen("the tags question", 30, |s| s.contains("Tags for"));
+    term.send("\r");
+    term.wait_screen("the register question", 30, |s| {
+        s.contains("Press [Enter] to register")
+    });
+    term.send("\r");
+    term.wait_screen("the sync question", 60, |s| s.contains("now? [Y/n]"));
+    assert!(
+        !term
+            .raw_text()
+            .contains("Would you like to edit the definition"),
+        "the query was asked first"
+    );
+    term.send("\r");
+    let status = term.wait_exit(120);
+    let text = term.raw_text();
+    assert!(status.success(), "{status:?}: {text}");
+    assert!(text.contains("Inserted 1, updated 0 rows."), "{text}");
+    // The definition is the query without the template's comment lines.
+    let mut command = Command::new(BIN);
+    command.env_clear().args([
+        "show",
+        "pipes",
+        "-m",
+        "from_editor",
+        "-i",
+        "sql:w18sh",
+        "--nopretty",
+    ]);
+    for (k, v) in &setup.env {
+        command.env(k, v);
+    }
+    let shown = String::from_utf8_lossy(&command.output().unwrap().stdout).into_owned();
+    assert!(
+        shown.contains(
+            "\"definition\": \"SELECT 7 AS id, '2024-01-01 00:00:00' AS ts, 1.5 AS val\""
+        ),
+        "{shown}"
+    );
+    assert!(shown.contains("\"datetime\": \"ts\""), "{shown}");
+}
+
+/// `bootstrap jobs` calls the flags after `:` the action chain's (rc15 Q31), like `edit jobs`.
+#[test]
+fn bootstrap_jobs_names_the_chain_flags() {
+    let setup = Setup::new("bootstrap-jobs-chain");
+    let mut term = Term::spawn(
+        &setup.env,
+        &setup.base,
+        &["bootstrap", "jobs", "w18chain", "-i", "sql:w18sh"],
+    );
+    term.wait_screen("the arguments editor", 60, |s| {
+        s.contains("Editing arguments for job 'w18chain'")
+    });
+    assert!(
+        term.screen()
+            .contains("add flags for the whole chain after `:`"),
+        "{}",
+        term.screen()
+    );
+    term.send("show version + show arguments : --loop");
+    // [Esc + Enter] submits.
+    term.send("\x1b\r");
+    term.wait_screen("the chain flags", 30, |s| s.contains("Chain Arguments:"));
+    term.wait_screen("the confirmation", 30, |s| {
+        s.contains("Are you sure you want to create job 'w18chain'")
+    });
+    let raw = term.raw_text();
+    assert!(!raw.contains("Pipeline Arguments"), "{raw}");
+    assert!(!raw.contains("pipeline arguments"), "{raw}");
+    term.send("n\r");
+    term.wait_exit(30);
+    term.no_crash_text();
+}
+
+/// Chain steps with `--timeout-seconds` run in a child whose output this process relays through
+/// a pipe: on a terminal they keep the terminal's styles, like the summary (rc15 Q14).
+#[test]
+fn relayed_chain_steps_keep_the_terminal_styles() {
+    let setup = Setup::new("relayed-styles");
+    let mut term = Term::spawn(
+        &setup.env,
+        &setup.base,
+        &[
+            "show",
+            "version",
+            "+",
+            "show",
+            "arguments",
+            ":",
+            "--timeout-seconds",
+            "120",
+        ],
+    );
+    let status = term.wait_exit(120);
+    let raw = term.raw_text();
+    assert!(status.success(), "{status:?}: {raw}");
+    assert!(raw.contains("Successfully completed 2 steps"), "{raw}");
+    let version_line = raw
+        .lines()
+        .find(|line| line.contains("Meerschaum v"))
+        .unwrap_or_else(|| panic!("no version line: {raw:?}"));
+    assert!(
+        version_line.contains("\x1b["),
+        "the step printed plain text: {version_line:?}"
+    );
 }

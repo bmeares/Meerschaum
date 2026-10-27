@@ -32,8 +32,10 @@ use crate::value::{ArgsMap, PyValue};
 ///
 /// Job discovery, ownership, `ps`, `logs`, replacement and `down` all list jobs on the
 /// *project's* executor: `meerschaum:executor` of the project's `config:` block or environment
-/// (an `api:<label>` shared by several projects), else `systemd` on a systemd host running the
-/// default root, else `local` (`get_jobs()` with no executor keys). The commands compose then
+/// (an `api:<label>` shared by several projects), else `systemd` on a systemd host (whatever the
+/// project's root: its units are named after the project, so they come back after a reboot), else
+/// `local` (`get_jobs()` with no executor keys). A project's `local` jobs from before rc15 move to
+/// `systemd` on the next `up`. The commands compose then
 /// runs (`delete job`, `start job`, ...) are child `mrsm` processes under the same project
 /// environment, so they select the same executor.
 #[derive(Default)]
@@ -42,6 +44,8 @@ pub struct ComposeJobs {
     session: Option<crate::native::Session>,
     process: Option<std::sync::Arc<dyn meerschaum_jobs::ProcessRunner>>,
     warnings: Vec<String>,
+    /// The executor of each job of the last listing.
+    executors: indexmap::IndexMap<String, String>,
 }
 
 impl ComposeJobs {
@@ -89,9 +93,10 @@ impl meerschaum_jobs::executor::CustomExecutors for LazyNativeExecutors {
                     .native_plugins(config)
                     .ok()
                     .filter(|n| !n.executor_types().is_empty())?;
-                Some(crate::native_executors::NativeExecutors::new(
-                    natives, config,
-                ))
+                Some(
+                    crate::native_executors::NativeExecutors::new(natives, config)
+                        .with_host(self.session.clone(), config),
+                )
             })
             .as_ref()?
             .resolve(executor_keys)
@@ -147,6 +152,11 @@ impl JobOps for ComposeJobs {
         // `systemd` on a systemd host; hidden jobs excluded.
         let listing = meerschaum_jobs::executor::get_jobs_for(context, None, false, true)?;
         self.warnings.extend(listing.warnings);
+        self.executors = listing
+            .jobs
+            .iter()
+            .map(|(name, job)| (name.clone(), job.executor_keys.clone()))
+            .collect();
         Ok(listing
             .jobs
             .into_iter()
@@ -164,6 +174,15 @@ impl JobOps for ComposeJobs {
 
     fn take_warnings(&mut self) -> Vec<String> {
         std::mem::take(&mut self.warnings)
+    }
+
+    fn moves_to_systemd(&mut self, name: &str) -> bool {
+        let Some(context) = &self.context else {
+            return false;
+        };
+        self.executors.get(name).map(String::as_str) == Some("local")
+            && meerschaum_jobs::job::get_executor_keys_from_context(context) == "systemd"
+            && !meerschaum_jobs::systemd::SystemdExecutor::new(context.clone()).is_default_root()
     }
 }
 
@@ -574,6 +593,7 @@ const FLAGS_WITHOUT_VALUE: &[&str] = &[
     "--debug",
     "--standalone",
     "--no-stagger",
+    "--allow-protected",
 ];
 
 fn is_yaml_path(s: &str) -> bool {
@@ -748,6 +768,7 @@ pub fn compose_action(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
         noask: flag(args, "noask"),
         nopretty: flag(args, "nopretty"),
         debug: flag(args, "debug"),
+        allow_protected: flag(args, "allow_protected"),
         width: Some(settings.width),
         standalone: words.standalone || flag(args, "standalone"),
         project: words.project.clone(),

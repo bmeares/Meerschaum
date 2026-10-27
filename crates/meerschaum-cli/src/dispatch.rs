@@ -14,7 +14,7 @@ use meerschaum_core::config::{Config, ConfigOptions};
 use crate::actions::{self, CORE_ACTIONS, Resolved};
 use crate::builtin::{self, ActionError, ActionResult};
 use crate::env;
-use crate::format::{FormatSettings, Formatter, OptionsArgs, TupleArgs};
+use crate::format::{FormatSettings, Formatter, TupleArgs};
 use crate::help;
 use crate::native;
 use crate::parse::parse_arguments;
@@ -316,6 +316,13 @@ pub struct Runtime<'a> {
     /// Where waiting feedback (spinners, [`crate::format::progress`]) is drawn. Only the process
     /// runtime turns it on (stderr is a terminal); tests and piped output never see it.
     pub progress: crate::format::progress::ProgressSink,
+    /// Whether [`Runtime::out`] is a terminal, for hosts whose `out` is not the process's stdout
+    /// (Python's `sys.stdout`, where a notebook counts as a terminal). `None`: stdout's own check.
+    pub out_terminal: Option<bool>,
+    /// Whether stderr is a terminal (only the process runtime sets it): warnings and debug output
+    /// are styled by stderr's own check, so `2> debug.log` gets no escape sequences. `None`
+    /// (tests, embedded hosts): stderr follows the stdout settings.
+    pub err_terminal: Option<bool>,
     /// Startup owns read-only manifest mode until the first doctor step (or an early return).
     /// The value records whether that startup created the config registry.
     doctor_startup: Option<bool>,
@@ -350,6 +357,8 @@ impl<'a> Runtime<'a> {
             native: None,
             live: std::io::IsTerminal::is_terminal(&std::io::stdout()),
             progress: crate::format::progress::ProgressSink::stderr_if_tty(),
+            out_terminal: None,
+            err_terminal: Some(std::io::IsTerminal::is_terminal(&std::io::stderr())),
             doctor_startup: None,
         }
     }
@@ -378,6 +387,8 @@ impl<'a> Runtime<'a> {
             native: None,
             live: false,
             progress: crate::format::progress::ProgressSink::Off,
+            out_terminal: None,
+            err_terminal: None,
             doctor_startup: None,
         }
     }
@@ -429,7 +440,30 @@ impl<'a> Runtime<'a> {
             return s.clone();
         }
         let env = self.env;
-        FormatSettings::detect(self.config(), env)
+        match self.out_terminal {
+            Some(terminal) => FormatSettings::detect_with(self.config(), env, terminal),
+            None => FormatSettings::detect(self.config(), env),
+        }
+    }
+
+    /// The formatting settings of text written to stderr: the stdout settings, except that the
+    /// process runtime decides styles by stderr's own terminal check ([`Runtime::err_terminal`]).
+    pub fn err_settings(&mut self) -> FormatSettings {
+        match (&self.format, self.err_terminal) {
+            (None, Some(terminal)) => {
+                let env = self.env;
+                FormatSettings::detect_with(self.config(), env, terminal)
+            }
+            _ => self.settings(),
+        }
+    }
+
+    /// Run a closure with a [`Formatter`] for text written to stderr ([`Runtime::err_settings`]).
+    pub fn with_err_formatter<R>(&mut self, f: impl FnOnce(&Formatter<'_>) -> R) -> R {
+        let settings = self.err_settings();
+        let config = self.config();
+        let formatter = Formatter::new(settings, config);
+        f(&formatter)
     }
 
     /// Run a closure with a [`Formatter`].
@@ -451,11 +485,21 @@ impl<'a> Runtime<'a> {
         crate::format::progress::resume(text.is_empty() || text.ends_with('\n'));
     }
 
-    /// Write to stderr.
+    /// Write to stderr (without SGR sequences when stderr takes no styles, see
+    /// [`Runtime::err_settings`]).
     pub fn eprint(&mut self, text: &str) {
         crate::shell::interrupt::check();
         crate::format::progress::suspend();
         crate::native::api_warnings::flush(self);
+        let plain = self.format.is_none()
+            && self.err_terminal.is_some()
+            && text.contains('\x1b')
+            && !self.err_settings().ansi;
+        let text = if plain {
+            std::borrow::Cow::Owned(crate::format::remove_ansi(text))
+        } else {
+            std::borrow::Cow::Borrowed(text)
+        };
         let _ = self.err.write_all(text.as_bytes());
         let _ = self.err.flush();
         crate::format::progress::resume(text.is_empty() || text.ends_with('\n'));
@@ -463,7 +507,8 @@ impl<'a> Runtime<'a> {
 }
 
 fn contains(sysargs: &[String], flag: &str) -> bool {
-    sysargs
+    // The words after the file of `python file.py ...` are the script's (`-h` is its own).
+    crate::parse::meerschaum_words(sysargs)
         .iter()
         .take_while(|a| !matches!(a.as_str(), "--" | "-A" | "--sub-args"))
         .any(|a| a == flag)
@@ -502,7 +547,10 @@ fn main_inner(sysargs: &[String], rt: &mut Runtime<'_>) -> i32 {
         let _ = writeln!(rt.out, "{schema}");
         return 0;
     }
-    if contains(sysargs, "--help") || contains(sysargs, "-h") {
+    if contains(sysargs, "--help")
+        || contains(sysargs, "-h")
+        || sysargs.first().map(String::as_str) == Some("help")
+    {
         let session = native::session(rt);
         let was_cached_only = session.cached_manifest_only();
         session.set_cached_manifest_only(true);
@@ -768,8 +816,10 @@ fn summarize_chain(
     if success {
         msg.push_str("Successfully c");
     } else {
+        // PARITY: v4 says "Failed pipeline after ..."; chains are "action chains" now that a
+        // Pipeline is a saved selection of pipes.
         msg.push_str(&format!(
-            "Failed pipeline after {} step{}.\n\nC",
+            "The action chain failed after {} step{}.\n\nC",
             successes.len(),
             plural(successes.len())
         ));
@@ -932,6 +982,12 @@ fn entry_with_args_inner(mut args: ArgsMap, rt: &mut Runtime<'_>, depth: usize) 
         return SuccessTuple::fail(format!("Invalid arguments:\n    {}", e.message));
     }
     let _debug = debug_scope(rt, args.get("debug").is_some_and(PyValue::is_truthy));
+    // `--allow-protected`: writes to `protected: true` connectors are allowed while this action
+    // runs (the core write paths check `meerschaum_core::protected::allowed()`; Python workers
+    // get the allowance with each call). `-y` never counts.
+    let _allow_protected = meerschaum_core::protected::allow(
+        args.get("allow_protected").is_some_and(PyValue::is_truthy),
+    );
     meerschaum_core::dprint!("Parsed arguments:\n{}", redacted_args(&args));
     let mut skip_schedule = false;
     let executor_keys = args
@@ -952,11 +1008,18 @@ fn entry_with_args_inner(mut args: ArgsMap, rt: &mut Runtime<'_>, depth: usize) 
             skip_schedule = true;
         }
     }
-    if args.get("daemon").is_some_and(PyValue::is_truthy) && action[0] != "stack" {
+    let daemon = args.get("daemon").is_some_and(PyValue::is_truthy);
+    if daemon && action[0] != "stack" {
         action.splice(0..0, ["start".to_string(), "jobs".to_string()]);
     }
-    if let Ok(manifest) = crate::python::manifest(rt)
-        && !args.get("daemon").is_some_and(PyValue::is_truthy)
+    // A serialized action chain (`chain <flags> -P '{"sub_args_line": ...}'`): the internal
+    // action is never a plugin's and never listed (see `meerschaum_core::chain`).
+    let chain_call = !daemon && is_chain_call(&action, &args);
+    // The words that name the action, for messages (`show pipes`).
+    let label = action_label(&action);
+    if !chain_call
+        && !daemon
+        && let Ok(manifest) = crate::python::manifest(rt)
         && let Ok(natives) = native::session(rt).native_plugins(rt.config())
         && let Some((plugin, name)) =
             crate::native_plugins::action_owner(&action, &manifest, &natives)
@@ -965,36 +1028,61 @@ fn entry_with_args_inner(mut args: ArgsMap, rt: &mut Runtime<'_>, depth: usize) 
         meerschaum_core::dprint!("Action {action:?} -> native plugin action '{name}'.");
         env::apply_env_arguments(&mut args, rt.env);
         args.insert("action".into(), PyValue::str_list(&action));
-        return crate::native_plugins::run_action(&plugin, &name, &args, &natives)
-            .unwrap_or_else(|e| SuccessTuple::fail(format!("{}: {}", e.class, e.message)));
+        let noun = native::jobs_laps::lap_noun(&action);
+        return repeat(rt, &args, skip_schedule, true, &label, noun, |args, rt| {
+            crate::native_plugins::run_action_in(rt, &plugin, &name, args, &natives)
+                .unwrap_or_else(|e| SuccessTuple::fail(format!("{}: {}", e.class, e.message)))
+        });
     }
-    if let Ok(manifest) = crate::python::manifest(rt)
+    if !chain_call
+        && !daemon
+        && let Ok(manifest) = crate::python::manifest(rt)
         && crate::python::action_name(&action, &manifest).is_some()
-        && !args.get("daemon").is_some_and(PyValue::is_truthy)
     {
         meerschaum_core::dprint!("Action {action:?} -> Python plugin action.");
         env::apply_env_arguments(&mut args, rt.env);
-        // The terminal gives the worker the Ctrl-C (its call raises `KeyboardInterrupt` and
-        // returns); a second one within two seconds drops the call, which kills the worker.
-        let _waiting = crate::shell::interrupt::ChildScope::enter(None, true);
-        return crate::python::plugin_action(&args, rt)
-            .unwrap_or_else(|e| SuccessTuple::fail(format!("{}: {}", e.class, e.message)));
+        let noun = native::jobs_laps::lap_noun(&action);
+        // An action whose function takes `loop` repeats itself with `--loop`, as in 4.1: the
+        // host does not run it in laps.
+        let loops = !crate::python::action_handles_loop(&action, &manifest);
+        return repeat(rt, &args, skip_schedule, loops, &label, noun, |args, rt| {
+            // The terminal gives the worker the Ctrl-C (its call raises `KeyboardInterrupt`
+            // and returns); a second one within two seconds drops the call, which kills the
+            // worker.
+            let _waiting = crate::shell::interrupt::ChildScope::enter(None, true);
+            crate::python::plugin_action(args, rt)
+                .unwrap_or_else(|e| SuccessTuple::fail(format!("{}: {}", e.class, e.message)))
+        });
     }
-    let resolved: Resolved = match actions::get_action(&action, CORE_ACTIONS) {
-        Some(r) => r,
-        None => {
-            // Unknown actions run as shell commands in v4.
-            action.insert(0, "sh".into());
-            match actions::get_action(&["sh"], CORE_ACTIONS) {
-                Some(r) => r,
-                None => return SuccessTuple::fail("action `sh` is not available"),
+    let resolved: Resolved = if chain_call {
+        Resolved {
+            action: &CHAIN_ACTION_DEF,
+            sub: None,
+        }
+    } else {
+        match actions::get_action(&action, CORE_ACTIONS) {
+            Some(r) => r,
+            None => {
+                // Unknown actions run as shell commands in v4.
+                action.insert(0, "sh".into());
+                match actions::get_action(&["sh"], CORE_ACTIONS) {
+                    Some(r) => r,
+                    None => return SuccessTuple::fail("action `sh` is not available"),
+                }
             }
         }
     };
     if action[0] == "start" && action.get(1).is_some_and(|a| a == "job" || a == "jobs") {
         skip_schedule = true;
     }
-    let remaining = actions::remove_leading_action(&action, CORE_ACTIONS);
+    if schedule_is_the_jobs(resolved.function_name(), &args) {
+        skip_schedule = true;
+    }
+    let remaining = if chain_call {
+        action[1..].to_vec()
+    } else {
+        actions::remove_leading_action(&action, CORE_ACTIONS)
+    };
     meerschaum_core::dprint!(
         "{}",
         meerschaum_core::debug::redact_uris(&format!(
@@ -1006,6 +1094,78 @@ fn entry_with_args_inner(mut args: ArgsMap, rt: &mut Runtime<'_>, depth: usize) 
     args.insert("action".into(), PyValue::str_list(&remaining));
     env::apply_env_arguments(&mut args, rt.env);
 
+    let loops = !native::jobs_laps::handles_own_loop(resolved.function_name());
+    let noun = native::jobs_laps::lap_noun(&action);
+    repeat(rt, &args, skip_schedule, loops, &label, noun, |args, rt| {
+        run_action(&resolved, args, rt, depth)
+    })
+}
+
+/// The hidden action of a serialized chain: `chain` never resolves through the action table,
+/// so it is never listed in help or completion.
+static CHAIN_ACTION_DEF: actions::ActionDef = actions::ActionDef {
+    name: meerschaum_core::chain::CHAIN_ACTION,
+    function: "_chain",
+    accepts_executor_keys: false,
+    subactions: &[],
+};
+
+/// Whether the words and arguments are a serialized chain's (`chain ... -P '{"sub_args_line":
+/// ...}'`): the word alone is not enough (a plugin may have an action named `chain`).
+fn is_chain_call(action: &[String], args: &ArgsMap) -> bool {
+    action.first().map(String::as_str) == Some(meerschaum_core::chain::CHAIN_ACTION)
+        && chain_params(args)
+}
+
+/// Whether `-s` describes the job the action starts or stops rather than the action itself:
+/// `start pipeline NAME -s ...` gives the schedule to the job it creates, and `stop pipeline NAME
+/// -s ...` stops that job once. A chain in v4's `start pipeline ... -P {...}` form keeps its
+/// schedule (it is a scheduled chain).
+fn schedule_is_the_jobs(function: &str, args: &ArgsMap) -> bool {
+    match function {
+        "_start_pipelines" | "_stop_pipelines" => true,
+        "_start_pipeline" => !chain_params(args),
+        _ => false,
+    }
+}
+
+/// Whether `params` carry a chain (`{"sub_args_line": "..."}`).
+fn chain_params(args: &ArgsMap) -> bool {
+    args.get("params")
+        .map(native::py_to_value)
+        .is_some_and(|p| meerschaum_core::chain::params_carry_chain(&p))
+}
+
+/// The action words for messages, shortened.
+fn action_label(action: &[String]) -> String {
+    let label = action.join(" ");
+    if label.chars().count() <= 40 {
+        return label;
+    }
+    let mut short: String = label.chars().take(39).collect();
+    short.push('…');
+    short
+}
+
+/// Run an action once, on its `-s` schedule, or in laps for `--loop` (when it does not loop
+/// by itself: `loops`).
+#[allow(clippy::too_many_arguments)]
+fn repeat(
+    rt: &mut Runtime<'_>,
+    args: &ArgsMap,
+    skip_schedule: bool,
+    loops: bool,
+    label: &str,
+    noun: &str,
+    mut once: impl FnMut(&ArgsMap, &mut Runtime<'_>) -> SuccessTuple,
+) -> SuccessTuple {
+    let scheduled = !skip_schedule && args.get("schedule").is_some_and(PyValue::is_truthy);
+    let looping = loops && native::flag(args, "loop");
+    if (scheduled || looping)
+        && let Some(failed) = invalid_durations(args)
+    {
+        return failed;
+    }
     if let Some(schedule) = args.get("schedule").filter(|v| v.is_truthy())
         && !skip_schedule
     {
@@ -1015,11 +1175,41 @@ fn entry_with_args_inner(mut args: ArgsMap, rt: &mut Runtime<'_>, depth: usize) 
             .get("jitter")
             .map(PyValue::py_str)
             .and_then(|v| meerschaum_jobs::schedule::parse_jitter_seconds(&v));
-        return crate::native::jobs::run_schedule_jittered(rt, &schedule, jitter, |rt| {
-            run_action(&resolved, &args, rt, depth)
+        return crate::native::jobs::run_schedule_jittered(rt, &schedule, jitter, noun, |rt| {
+            once(args, rt)
         });
     }
-    run_action(&resolved, &args, rt, depth)
+    if looping {
+        // The host repeats the action, so each lap runs it once: `loop` is false in a lap's
+        // arguments (a plugin action that reads it, or hands its arguments to another action,
+        // must not loop inside the first lap).
+        let mut lap_args = args.clone();
+        lap_args.insert("loop".into(), PyValue::Bool(false));
+        return native::jobs_laps::run_looping(rt, &lap_args, label, noun, once);
+    }
+    once(args, rt)
+}
+
+/// `--min-seconds` / `--timeout-seconds` that no timer can hold: the failure to return before a
+/// loop or a schedule starts (`run_action` checks each run).
+fn invalid_durations(args: &ArgsMap) -> Option<SuccessTuple> {
+    for key in ["min_seconds", "timeout_seconds"] {
+        let Some(seconds) = native::float(args, key) else {
+            continue;
+        };
+        let valid = seconds.is_finite()
+            && std::time::Duration::try_from_secs_f64(seconds.max(0.0))
+                .ok()
+                .and_then(|duration| Instant::now().checked_add(duration))
+                .is_some();
+        if !valid {
+            return Some(SuccessTuple::fail(format!(
+                "Invalid value for --{}: use a finite number of seconds within the supported timer range.",
+                key.replace('_', "-")
+            )));
+        }
+    }
+    None
 }
 
 fn run_action(
@@ -1051,10 +1241,17 @@ fn run_action(
     }
     native::drivers::register_install_reporter(args, rt);
     let result: ActionResult = match resolved.function_name() {
-        "_start_pipeline" => run_pipeline(args, rt, depth),
+        // A serialized action chain, and v4's form of it (`start pipeline ... -P
+        // '{"sub_args_line": ...}'`, which jobs on disk and older API servers carry).
+        "_chain" => run_pipeline(args, rt, depth),
+        "_start_pipeline" if chain_params(args) => run_pipeline(args, rt, depth),
+        // A saved Pipeline's background job.
+        "_start_pipeline" | "_start_pipelines" => native::pipeline_jobs::start(args, rt),
+        "_stop_pipelines" => native::pipeline_jobs::stop(args, rt),
         "_show_version" => builtin::show_version(args, rt),
         "_show_arguments" => builtin::show_arguments(args, rt),
         "_show_help" => builtin::show_help(args, rt),
+        "help" => builtin::help(args, rt),
         "_show_actions" => builtin::show_actions(args, rt),
         "_show_config" => builtin::show_config(args, rt),
         "_show_environment" => builtin::show_environment(args, rt),
@@ -1097,8 +1294,9 @@ fn run_action(
     }
 }
 
-/// Keep `:` chains in the native dispatcher: core steps must not import the Python core
-/// (and its formatting / scheduling dependencies) simply because they form a pipeline.
+/// Run a serialized action chain (`chain <flags> -P '{"sub_args_line": ...}'`, or v4's `start
+/// pipeline ...` form): its steps once, `xN` times or in laps for `--loop`. Core steps never
+/// start the Python core simply because they form a chain.
 fn run_pipeline(args: &ArgsMap, rt: &mut Runtime<'_>, depth: usize) -> ActionResult {
     let params = match args.get("params") {
         Some(PyValue::Dict(values)) => values,
@@ -1145,15 +1343,29 @@ fn run_pipeline(args: &ArgsMap, rt: &mut Runtime<'_>, depth: usize) -> ActionRes
     let delay = native::float(args, "min_seconds").unwrap_or(1.0);
     let stop = native::jobs::stop_requested_flag();
     native::jobs::install_stop_handler(&native::session(rt));
+    // Job health: each run of a repeated chain is a lap (a single run leaves the record to the
+    // loops of its steps).
+    let mut heartbeat = (looping || count != 1).then(|| {
+        native::jobs_laps::heartbeat(
+            looping.then_some(delay.max(0.0)),
+            native::jobs_laps::lap_noun(&sysargs),
+        )
+    });
     let mut ran = 0;
-    let mut result = SuccessTuple::fail("Did not pipeline.");
+    // PARITY: v4 says "pipeline" for chains ("Did not pipeline.", "Ran pipeline 3 times."); a
+    // Pipeline is now a saved selection of pipes, so the messages say "action chain".
+    let did_not_run = "The action chain did not run.";
+    let mut result = SuccessTuple::fail(did_not_run);
     loop {
         if stop.load(std::sync::atomic::Ordering::SeqCst) {
-            native::warn(rt, "Cancelled pipeline.");
-            if result.message == "Did not pipeline." {
-                result.message = "Pipeline was cancelled.".into();
+            native::warn(rt, "Cancelled the action chain.");
+            if result.message == did_not_run {
+                result.message = "The action chain was cancelled.".into();
             }
             break;
+        }
+        if let Some(heartbeat) = heartbeat.as_mut() {
+            heartbeat.lap_started();
         }
         let dates = rt.dates.clone();
         result = match timeout {
@@ -1177,6 +1389,9 @@ fn run_pipeline(args: &ArgsMap, rt: &mut Runtime<'_>, depth: usize) -> ActionRes
             }
         };
         ran += 1;
+        if let Some(heartbeat) = heartbeat.as_mut() {
+            heartbeat.lap_finished(result.success, &result.message);
+        }
         // A job's startup slot (D23) is held until its first lap is done.
         meerschaum_jobs::startup::signal_first_lap_done();
         // PARITY: v4 sleeps between attempts, including after failures, and `--loop`
@@ -1185,6 +1400,11 @@ fn run_pipeline(args: &ArgsMap, rt: &mut Runtime<'_>, depth: usize) -> ActionRes
             break;
         }
         if delay != 0.0 && ran != count {
+            if let Some(heartbeat) = heartbeat.as_mut() {
+                heartbeat.waiting(
+                    std::time::Duration::try_from_secs_f64(delay.max(0.0)).unwrap_or_default(),
+                );
+            }
             native::info(
                 rt,
                 &format!(
@@ -1204,7 +1424,7 @@ fn run_pipeline(args: &ArgsMap, rt: &mut Runtime<'_>, depth: usize) -> ActionRes
         native::info(
             rt,
             &format!(
-                "Ran pipeline {ran} time{}.",
+                "Ran the action chain {ran} time{}.",
                 if ran == 1 { "" } else { "s" }
             ),
         );
@@ -1212,7 +1432,7 @@ fn run_pipeline(args: &ArgsMap, rt: &mut Runtime<'_>, depth: usize) -> ActionRes
     Ok(result)
 }
 
-/// The first argument of the child `start pipeline --timeout-seconds` runs each step in.
+/// The first argument of the child a chain with `--timeout-seconds` runs each step in.
 pub const PIPELINE_CHILD_ARG: &str = "__mrsm_pipeline_child__";
 const FENCE_BEGIN: &str = "<MRSM_RESULT>";
 const FENCE_END: &str = "</MRSM_RESULT>";
@@ -1258,6 +1478,11 @@ fn timed_pipeline_step(
         }
     }
     for (key, value) in (rt.vars)() {
+        command.env(key, value);
+    }
+    // The step writes to a pipe this process relays: it styles its output when this process
+    // does (a terminal, a job, `FORCE_COLOR`), so the steps look like the summary (rc15 Q14).
+    if let Some((key, value)) = crate::format::relay_env(&rt.settings()) {
         command.env(key, value);
     }
     let mut child = command
@@ -1343,6 +1568,8 @@ pub fn entry_child(args: &[String], rt: &mut Runtime<'_>) -> i32 {
     let Some((path, sysargs)) = args.split_first() else {
         return 1;
     };
+    // A helper of the command that started it: never the job's lap heartbeats.
+    meerschaum_jobs::health::disable();
     let manifest_error = crate::python::manifest(rt).err().map(|e| e.message);
     let result = entry(sysargs, rt);
     if let Some(message) = &manifest_error {
@@ -1375,6 +1602,8 @@ pub fn read_entry_child_result(path: &std::path::Path) -> Option<SuccessTuple> {
 /// The child of `timed_pipeline_step`: run `line` with the patch arguments and print the result
 /// between the fences.
 pub fn pipeline_child(args: &[String], rt: &mut Runtime<'_>) -> i32 {
+    // One step of the parent's chain: its laps are the parent's to record.
+    meerschaum_jobs::health::disable();
     let line = args.first().cloned().unwrap_or_default();
     let patch_json = args.get(1).cloned().unwrap_or_default();
     let sysargs = match shlex::split(&line) {
@@ -1439,7 +1668,7 @@ fn action_failure(
     resolved: &Resolved,
     args: &ArgsMap,
     e: &ActionError,
-    rt: &mut Runtime<'_>,
+    _rt: &mut Runtime<'_>,
 ) -> SuccessTuple {
     let mut name_parts: Vec<String> = resolved
         .function_name()
@@ -1448,16 +1677,8 @@ fn action_failure(
         .collect();
     name_parts.extend(action_words(args));
     let action_name = name_parts.join(" ");
-    // PARITY: `kw.get('debug', True)`: the traceback is logged unless `--debug` was parsed
-    // as False; the Rust CLI prints the exception line instead of a Python traceback.
-    let log_traceback = args.get("debug").is_none_or(PyValue::is_truthy);
-    // A worker error (a refused or unstartable Python interpreter) has no v4 traceback to
-    // mirror: its text is printed once, by the result below (the start-up manifest warning of
-    // the same failure is dropped, see `warn_manifest_error_unless_reported`).
-    let is_worker_error = e.class == "WorkerError";
-    if log_traceback && !is_worker_error {
-        rt.eprint(&format!("{}: {}\n", e.class, e.message));
-    }
+    // v4 logs the traceback (`kw.get('debug', True)`) and then returns the same text in this
+    // message: the error is printed once, in the result's block.
     let mut msg = format!(
         "Failed to execute `{}` with `{}`",
         action_name.trim(),
@@ -1467,9 +1688,6 @@ fn action_failure(
         msg.push('.');
     } else {
         msg.push_str(&format!(":\n\n{}", e.message));
-    }
-    if !log_traceback && !is_worker_error {
-        msg.push_str("\n\nRun again with '--debug' to see a full stacktrace.");
     }
     SuccessTuple::fail(msg)
 }
@@ -1481,7 +1699,7 @@ pub fn debug_scope(rt: &mut Runtime<'_>, on: bool) -> Option<meerschaum_core::de
     if !on {
         return None;
     }
-    rt.with_formatter(crate::debug_log::configure);
+    rt.with_err_formatter(crate::debug_log::configure);
     Some(meerschaum_core::debug::scope(true))
 }
 
@@ -1571,39 +1789,12 @@ pub fn format_args_map(args: &ArgsMap) -> String {
 /// `parse_help(sysargs)`: choose which help message to print.
 pub fn parse_help(sysargs: &[String], rt: &mut Runtime<'_>) {
     let args = parse_arguments(sysargs, &rt.dates).unwrap_or_default();
-    let action = action_words(&args);
-    if let Ok(manifest) = crate::python::manifest(rt)
-        && let Some(name) = crate::python::action_name(&action, &manifest)
-        && let Some(info) = manifest
-            .plugins
-            .values()
-            .flat_map(|p| &p.actions)
-            .find(|a| a.name == name)
-    {
-        rt.print(&format!("{}\n", info.doc.as_deref().unwrap_or_default()));
-        return;
+    let mut action = action_words(&args);
+    // `mrsm help sync pipes` is `mrsm sync pipes --help`.
+    if action.first().map(String::as_str) == Some("help") {
+        action.remove(0);
     }
-    if action.is_empty() {
-        let _ = builtin::show_help(&args, rt);
-        return;
-    }
-    match help::format_action_help(&action) {
-        Some(text) => rt.print(&text),
-        None => {
-            // `actions['show'](['actions'], **_args)`.
-            let mut kw = args.clone();
-            kw.shift_remove("action");
-            let opts = OptionsArgs {
-                name: "actions".into(),
-                sort_options: true,
-                nopretty: kw.get("nopretty").is_some_and(PyValue::is_truthy),
-                ..OptionsArgs::default()
-            };
-            let names = builtin::listed_actions();
-            let text = rt.with_formatter(|f| f.print_options(&names, &opts));
-            rt.print(&text);
-        }
-    }
+    help::print_help(&action, &args, rt);
 }
 
 /// `parse_version(sysargs)`.

@@ -94,6 +94,8 @@ pub struct SyncArgs {
     pub check_existing: bool,
     /// `chunksize` (`-1` → `system:connectors:sql:chunksize`).
     pub chunksize: Option<i64>,
+    /// `--replace`: the synced rows replace the window `[begin, end)` (rc15).
+    pub replace: bool,
     /// Additional plugin arguments passed through to Python.
     pub extra: Map,
 }
@@ -125,48 +127,54 @@ impl SyncArgs {
             params: super::params(args),
             check_existing: !flag(args, "skip_check_existing"),
             chunksize: super::int(args, "chunksize").or(Some(-1)),
+            replace: flag(args, "replace"),
             extra,
         }
     }
 }
 
 /// `_sync(p, df)` with a frame: enforce dtypes and `sync_pipe` (the SQL instance also adds the
-/// autotime column and persists new special columns).
+/// autotime column and persists new special columns), with the row counts of the write.
 async fn sync_frame(
     inst: &Instance,
     sp: &mut SelectedPipe,
     df: Frame,
     args: &SyncArgs,
-) -> SuccessTuple {
+) -> meerschaum_core::success::SyncResult {
     let opts = SyncOptions {
         check_existing: args.check_existing,
         chunksize: args.chunksize,
         begin: args.begin.clone(),
         end: args.end.clone(),
+        replace: args.replace,
+        params: args.params.clone(),
         extra: Map::new(),
     };
     match inst {
         Instance::Sql(sql) => {
-            sql.sync_mut(&mut sp.pipe, PipeInput::Frame(df), &opts)
-                .await
+            let res = sql
+                .sync_mut(&mut sp.pipe, PipeInput::Frame(df), &opts)
+                .await;
+            pipe_ops::sync_result_from_message(res.success, res.message)
         }
         Instance::Other(conn) => {
             let ctx = match pipe_ops::dtypes_context(conn.as_ref(), &sp.pipe, sp.pipe.parameters())
                 .await
             {
                 Ok(c) => c,
-                Err(e) => return SuccessTuple::fail(e.to_string()),
+                Err(e) => return SuccessTuple::fail(e.to_string()).into(),
             };
             let df = match pipe_enforce_dtypes(PipeInput::Frame(df), &ctx) {
                 Ok(df) => df,
-                Err(e) => return SuccessTuple::fail(e.to_string()),
+                Err(e) => return SuccessTuple::fail(e.to_string()).into(),
             };
-            conn.sync_pipe(&sp.pipe, df, &opts).await
+            conn.sync_pipe_with_counts(&sp.pipe, df, &opts).await
         }
     }
 }
 
-/// `pipe.sync(df)` with a frame (blocking).
+/// `pipe.sync(df)` with a frame (blocking; `copy pipes`), recorded in the pipe's sync status
+/// like any other sync.
 pub fn sync_frame_public(
     session: &Session,
     inst: &Instance,
@@ -174,7 +182,20 @@ pub fn sync_frame_public(
     df: Frame,
     args: &SyncArgs,
 ) -> SuccessTuple {
-    session.block_on(sync_frame(inst, sp, df, args))
+    let started = Instant::now();
+    // Recorded here: an `api:` instance's server must not record the posts too.
+    let result = session.block_on(meerschaum_connector::sync_status::recorded_scope(
+        sync_frame(inst, sp, df, args),
+    ));
+    let outcome = meerschaum_connector::sync_status::SyncOutcome::detected(
+        result.success,
+        result.message.clone(),
+        false,
+    )
+    .with_counts(result.inserted, result.updated, result.upserted)
+    .with_duration(Some(started.elapsed()));
+    meerschaum_connector::sync_status::record(inst.conn(), &sp.pipe, outcome);
+    result.into()
 }
 
 /// Run a bare `pipe.sync()` through the same native engine path as worker callbacks.
@@ -589,9 +610,15 @@ pub fn sync_pipes_with(args: &ArgsMap, rt: &mut Runtime<'_>, method: LapMethod) 
     if do_loop || flag(args, "listen") {
         crate::native::jobs::install_stop_handler(&session);
     }
+    // Job health: each lap of `verify` / `deduplicate pipes --loop` (`meerschaum_jobs::health`).
+    let mut heartbeat =
+        do_loop.then(|| super::jobs_laps::heartbeat(Some(min_seconds.max(0.0)), "run"));
     let mut msg;
     let mut success_count;
     loop {
+        if let Some(heartbeat) = heartbeat.as_mut() {
+            heartbeat.lap_started();
+        }
         let lap_begin = Instant::now();
         let mut gantt_text: Option<String> = None;
         let mut pending: Vec<meerschaum_engine::PendingRebuild> = Vec::new();
@@ -751,6 +778,12 @@ pub fn sync_pipes_with(args: &ArgsMap, rt: &mut Runtime<'_>, method: LapMethod) 
                 "\n    {} not synced: rebuild_pending.",
                 pending.len()
             ));
+        }
+        if let Some(heartbeat) = heartbeat.as_mut() {
+            heartbeat.lap_finished(success_count > 0, &msg);
+            heartbeat.waiting(
+                std::time::Duration::try_from_secs_f64(min_seconds.max(0.0)).unwrap_or_default(),
+            );
         }
         // A job's startup slot (D23) is held until its first lap is done.
         meerschaum_jobs::startup::signal_first_lap_done();
@@ -1069,16 +1102,9 @@ fn run_lines(
     })
 }
 
-/// Keep the engine's subscriptions alive and render its lap events on the CLI thread.
-fn listen(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
-    use meerschaum_engine::{LapEvent, LoopOptions, StopToken};
-    use std::sync::{Arc, mpsc};
-    let session = session(rt);
-    super::jobs::install_stop_handler(&session);
-    let signal = super::jobs::stop_requested_flag();
-    let stop = StopToken::default();
-    live::prepare(rt, args);
-    let (inst, pipes) = super::pipes::selected_pipes(rt, args)?;
+/// The keyword arguments a continuous mode gives its stream sources (`sync pipes --loop` /
+/// `--listen`, a saved Pipeline's loop).
+pub(super) fn stream_kwargs(args: &ArgsMap) -> Map {
     let sync_args = SyncArgs::from_args(args);
     let mut stream_kwargs = sync_args.extra.clone();
     stream_kwargs.insert(
@@ -1106,6 +1132,16 @@ fn listen(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     if sync_args.begin.is_none() {
         stream_kwargs.insert("begin".into(), meerschaum_core::Value::Str(String::new()));
     }
+    stream_kwargs
+}
+
+/// Keep the engine's subscriptions alive and render its lap events on the CLI thread.
+fn listen(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
+    let session = session(rt);
+    super::jobs::install_stop_handler(&session);
+    live::prepare(rt, args);
+    let (inst, pipes) = super::pipes::selected_pipes(rt, args)?;
+    let sync_args = SyncArgs::from_args(args);
     let engine = engine::build(
         rt,
         &session,
@@ -1113,22 +1149,84 @@ fn listen(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
         &pipes,
         depth(args, "parents").is_none() && depth(args, "children").is_none(),
         flag(args, "listen"),
-        Some(stream_kwargs),
+        Some(stream_kwargs(args)),
     )?;
     let opts = run_options(args, &inst, &pipes, &sync_args);
+    // Job health (`meerschaum_jobs::health`): each lap, and with `--listen` each stream flush.
+    let mut heartbeat = super::jobs_laps::sync_heartbeat(args, &pipes);
+    let end = run_continuous(
+        args,
+        rt,
+        &session,
+        &inst,
+        engine,
+        opts,
+        &mut heartbeat,
+        LoopExtras::default(),
+    )?;
+    Ok(end.result)
+}
+
+/// What a saved Pipeline's loop adds to [`run_continuous`].
+#[derive(Default)]
+pub(super) struct LoopExtras<'a> {
+    /// Name each lap's run after this (`{name}-{timestamp}-{suffix}`) and print each run's id
+    /// (`Run: ...`), as `sync pipelines NAME` does.
+    pub run_name: Option<String>,
+    /// Asked every [`RELOAD_CHECK`] whether the selection changed (a saved Pipeline was
+    /// edited): `true` stops the loop after its current lap, for the caller to start it again
+    /// ([`LoopEnd::reload`]).
+    #[allow(clippy::type_complexity)]
+    pub reload: Option<&'a mut dyn FnMut(&mut Runtime<'_>) -> bool>,
+}
+
+/// How [`run_continuous`] ended.
+pub(super) struct LoopEnd {
+    /// The last lap's result.
+    pub result: SuccessTuple,
+    /// The loop stopped because [`LoopExtras::reload`] asked for it (not for a stop request).
+    pub reload: bool,
+}
+
+/// How often [`run_continuous`] asks [`LoopExtras::reload`].
+pub(super) const RELOAD_CHECK: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Run `engine`'s continuous mode (`--loop`, `--listen`) and render its lap events on the CLI
+/// thread: each pipe's block as it ends, each lap's summary, the sleeps and cooldowns, and the
+/// job's lap heartbeats (`heartbeat`, which outlives a reload).
+#[allow(clippy::too_many_arguments)]
+pub(super) fn run_continuous(
+    args: &ArgsMap,
+    rt: &mut Runtime<'_>,
+    session: &Session,
+    inst: &Instance,
+    engine: meerschaum_engine::Engine,
+    opts: meerschaum_engine::RunOptions,
+    heartbeat: &mut meerschaum_jobs::Heartbeat,
+    mut extras: LoopExtras<'_>,
+) -> Result<LoopEnd, crate::builtin::ActionError> {
+    use meerschaum_engine::{EventKind, LapEvent, LoopOptions, StopToken};
+    use std::sync::{Arc, mpsc};
+    let signal = super::jobs::stop_requested_flag();
+    let stop = StopToken::default();
     let defaults = super::pipes::defaults(rt);
     let nopretty = flag(args, "nopretty");
+    let announce_runs = extras.run_name.is_some();
     let loop_opts = LoopOptions {
         run_loop: flag(args, "loop"),
         listen: flag(args, "listen"),
         min_seconds: float(args, "min_seconds").unwrap_or(1.0),
         stop: stop.clone(),
+        run_name: extras.run_name.take(),
         ..Default::default()
     };
     // The running rows under the laps' lines, from the engine's events (a terminal only).
     let mut rows = live::possible(rt, args)
         .then(|| engine.subscribe())
-        .map(|events| live::LoopView::start(rt, args, &session, events));
+        .map(|events| live::LoopView::start(rt, args, session, events));
+    // The engine's events: progress for the job's health, and each run's id.
+    let mut events = (heartbeat.is_active() || announce_runs).then(|| engine.subscribe());
+    heartbeat.lap_started();
     let (sender, receiver) = mpsc::channel();
     session.spawn(async move {
         engine
@@ -1143,13 +1241,25 @@ fn listen(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     });
     let mut results = Vec::new();
     let mut result = SuccessTuple::success();
+    let mut last_check = Instant::now();
+    let mut reloading = false;
     loop {
         if signal.load(std::sync::atomic::Ordering::SeqCst) {
             stop.stop();
         }
-        match receiver.recv_timeout(std::time::Duration::from_millis(50)) {
+        let received = receiver.recv_timeout(std::time::Duration::from_millis(50));
+        // A run starts (and says so) before its first pipe finishes.
+        if let Some(events) = events.as_mut() {
+            while let Ok(event) = events.try_recv() {
+                if announce_runs && matches!(event.kind, EventKind::RunStarted { .. }) {
+                    rt.print(&format!("Run: {}\n", event.run_id));
+                }
+                super::jobs_laps::sync_event(heartbeat, &event, !flag(args, "loop"));
+            }
+        }
+        match received {
             Ok(LapEvent::PipeFinished(outcome)) => {
-                print_hook_results(rt, &session);
+                print_hook_results(rt, session);
                 print_chunk_progress(rt, &outcome.result.message);
                 if !nopretty {
                     print_tuple(
@@ -1165,14 +1275,21 @@ fn listen(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
                     );
                 }
                 let parts = outcome.pipe_ref.parts();
-                let pipe = super::pipes::build_pipe(
+                let pipe = match super::pipes::build_pipe(
                     parts.connector_keys,
                     parts.metric_key,
                     parts.location_key,
                     parts.instance_keys,
                     None,
                     &defaults,
-                )?;
+                ) {
+                    Ok(pipe) => pipe,
+                    Err(e) => {
+                        // The loop must not outlive the command that renders it.
+                        stop.stop();
+                        return Err(e);
+                    }
+                };
                 results.push((
                     pipe,
                     SuccessTuple {
@@ -1199,6 +1316,10 @@ fn listen(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
                     success: summary.v4_success(),
                     message: summary.v4_message(&interval_str(summary.duration.as_secs_f64())),
                 };
+                heartbeat.lap_finished(result.success, &result.message);
+                if flag(args, "loop") {
+                    heartbeat.lap_started();
+                }
                 if !flag(args, "loop") {
                     info(
                         rt,
@@ -1207,20 +1328,46 @@ fn listen(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
                 }
             }
             Ok(LapEvent::Sleeping { seconds, message }) => {
+                heartbeat.waiting(
+                    std::time::Duration::try_from_secs_f64(seconds.max(0.0)).unwrap_or_default(),
+                );
                 rt.print("\n");
                 info(rt, &sleeping_message(args, seconds, message));
             }
-            Ok(LapEvent::Cooldown { message, .. }) => warn(rt, &message),
+            Ok(LapEvent::Cooldown { seconds, message }) => {
+                heartbeat.lap_finished(false, &message);
+                heartbeat.waiting(
+                    std::time::Duration::try_from_secs_f64(seconds.max(0.0)).unwrap_or_default(),
+                );
+                heartbeat.lap_started();
+                warn(rt, &message)
+            }
+            // Said once when the loop starts (an ignored or invalid pipe schedule).
+            Ok(LapEvent::Warning { message }) => warn(rt, &message),
             Err(mpsc::RecvTimeoutError::Disconnected) => break,
             Err(mpsc::RecvTimeoutError::Timeout) => {}
         }
-        print_hook_results(rt, &session);
+        print_hook_results(rt, session);
         if let Some(rows) = rows.as_mut() {
-            rows.poll(rt, &inst);
+            rows.poll(rt, inst);
+        }
+        if !reloading
+            && last_check.elapsed() >= RELOAD_CHECK
+            && let Some(reload) = extras.reload.as_mut()
+        {
+            last_check = Instant::now();
+            if reload(rt) {
+                // The lap under way ends first; then the loop stops.
+                reloading = true;
+                stop.stop();
+            }
         }
     }
     drop(rows);
-    Ok(result)
+    Ok(LoopEnd {
+        result,
+        reload: reloading && !signal.load(std::sync::atomic::Ordering::SeqCst),
+    })
 }
 
 /// Resolve native pipe callbacks only when plugin code actually invokes a pipe method.

@@ -69,7 +69,12 @@ pub const EXECUTOR_TYPES: &[&str] = &["local", "systemd", "api"];
 /// The action registry the shell resolves against: the core actions plus the shell commands
 /// (`shell_attrs['_actions']`, whose functions are the `Shell.do_*` methods).
 pub static SHELL_ACTIONS: LazyLock<&'static [ActionDef]> = LazyLock::new(|| {
-    let mut all: Vec<ActionDef> = CORE_ACTIONS.to_vec();
+    // `help` is the shell's own command there (`do_help`, as in v4), not the `mrsm help` action.
+    let mut all: Vec<ActionDef> = CORE_ACTIONS
+        .iter()
+        .filter(|a| a.name != "help")
+        .copied()
+        .collect();
     for name in SHELL_COMMANDS {
         all.push(ActionDef {
             name,
@@ -423,11 +428,15 @@ impl CompletionData {
         let prefix = parsed_text.trim_start_matches('_');
         for name in &self.do_names {
             if name.starts_with(prefix) {
-                out.push(Completion::new(
-                    name.replace('_', " "),
-                    typed_len,
-                    typed_len,
-                ));
+                // A plugin action's words keep an underscore `@make_action(name=...)` gave them
+                // (`weather wait_for`); other names split on every `_`.
+                let words = self
+                    .plugin_actions
+                    .iter()
+                    .find(|a| &a.name == name)
+                    .map(|a| a.action_words().join(" "))
+                    .unwrap_or_else(|| name.replace('_', " "));
+                out.push(Completion::new(words, typed_len, typed_len));
             }
         }
         let yielded = !out.is_empty();
@@ -443,9 +452,9 @@ impl CompletionData {
             .plugin_actions
             .iter()
             .filter(|a| {
-                let parts: Vec<_> = a.name.split('_').collect();
+                let parts = a.action_words();
                 action.len() >= parts.len()
-                    && action.iter().zip(parts).all(|(word, part)| word == part)
+                    && action.iter().zip(&parts).all(|(word, part)| word == part)
             })
             .max_by_key(|a| a.name.len())
         {

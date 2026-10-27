@@ -96,9 +96,55 @@ pub fn cols_lines_width(
         .unwrap_or(100)
 }
 
+/// `FORCE_COLOR` asks for ANSI styles even off a terminal (any value but empty, `0`, `false` or
+/// `no`).
+pub fn force_color(env: impl Fn(&str) -> Option<String>) -> bool {
+    env("FORCE_COLOR").is_some_and(|v| {
+        let v = v.trim().to_lowercase();
+        !v.is_empty() && v != "0" && v != "false" && v != "no"
+    })
+}
+
+/// `NO_COLOR` (any non-empty value): no colors and no other styles.
+pub fn no_color(env: impl Fn(&str) -> Option<String>) -> bool {
+    env("NO_COLOR").is_some_and(|v| !v.is_empty())
+}
+
+/// Whether the process is a job's (`MRSM_DAEMON_ID` names the job): its log keeps the styles,
+/// which the console and `show logs` render.
+pub fn in_job(env: impl Fn(&str) -> Option<String>) -> bool {
+    env(crate::env::DAEMON_ID).is_some_and(|v| !v.is_empty())
+}
+
+/// Whether output may be styled, before `formatting:ansi`: stdout is a terminal, or the process
+/// runs in a job, or `FORCE_COLOR` is set. Off a terminal (`mrsm show pipes > pipes.txt`, a pipe
+/// into another program) there are no escape sequences.
+pub fn ansi_allowed(env: impl Fn(&str) -> Option<String> + Copy, stdout_terminal: bool) -> bool {
+    stdout_terminal || in_job(env) || force_color(env)
+}
+
+/// The variable to give a child process whose output this process relays through a pipe (a
+/// chain step with `--timeout-seconds`): `FORCE_COLOR=1` when this process prints styles, so the
+/// child's output looks like this process's. Otherwise the child, writing to a pipe, prints
+/// plain text by itself (`NO_COLOR` and `formatting:ansi` are inherited).
+pub fn relay_env(settings: &FormatSettings) -> Option<(&'static str, &'static str)> {
+    settings.ansi.then_some(("FORCE_COLOR", "1"))
+}
+
 impl FormatSettings {
-    /// Settings from the config registry and the process environment.
+    /// Settings from the config registry, the process environment and whether stdout is a
+    /// terminal (see [`ansi_allowed`] and [`no_color`]).
     pub fn detect(config: &Config, env: impl Fn(&str) -> Option<String> + Copy) -> FormatSettings {
+        let terminal = std::io::IsTerminal::is_terminal(&std::io::stdout());
+        Self::detect_with(config, env, terminal)
+    }
+
+    /// [`FormatSettings::detect`] with the terminal check given.
+    pub fn detect_with(
+        config: &Config,
+        env: impl Fn(&str) -> Option<String> + Copy,
+        stdout_terminal: bool,
+    ) -> FormatSettings {
         let flag = |key: &str, default: bool| {
             config
                 .get(&["formatting", key])
@@ -106,11 +152,11 @@ impl FormatSettings {
                 .unwrap_or(default)
         };
         FormatSettings {
-            ansi: flag("ansi", true),
+            ansi: flag("ansi", true) && ansi_allowed(env, stdout_terminal),
             unicode: flag("unicode", !cfg!(windows)),
             width: console_width(env, terminal_width),
             cols: cols_lines_width(env, terminal_width),
-            no_color: env("NO_COLOR").is_some_and(|v| !v.is_empty()),
+            no_color: no_color(env),
         }
     }
 }
@@ -637,6 +683,68 @@ impl<'c> Formatter<'c> {
         self.console.print(&table)
     }
 
+    /// [`Formatter::print_options`] for names that must never be cut off (`show actions`): as
+    /// many columns as fit the console, each as wide as its longest name, filled top to bottom
+    /// (fewer than 12 names: one per line). `--nopretty` prints one name per line.
+    pub fn print_names(&self, names: &[String], args: &OptionsArgs) -> String {
+        let mut names: Vec<String> = names.to_vec();
+        if args.sort_options {
+            names.sort();
+        }
+        if args.nopretty {
+            return names.iter().map(|n| format!("{n}\n")).collect();
+        }
+        let header = args
+            .header
+            .clone()
+            .unwrap_or_else(|| format!("\nAvailable {}", args.name));
+        let width = self.settings.width.max(20);
+        let (margin, gap) = (2usize, 3usize);
+        let layout = |cols: usize| -> (usize, Vec<usize>) {
+            let rows = names.len().div_ceil(cols.max(1)).max(1);
+            let widths: Vec<usize> = names
+                .chunks(rows)
+                .map(|column| column.iter().map(|n| string_width(n)).max().unwrap_or(0))
+                .collect();
+            (rows, widths)
+        };
+        let mut cols = if names.len() < 12 { 1 } else { 8 };
+        let (rows, widths) = loop {
+            let (rows, widths) = layout(cols);
+            let total =
+                margin + widths.iter().sum::<usize>() + gap * widths.len().saturating_sub(1);
+            if cols == 1 || total <= width {
+                break (rows, widths);
+            }
+            cols -= 1;
+        };
+        let mut out = String::new();
+        for line in header.split('\n') {
+            let pad = width.saturating_sub(string_width(line)) / 2;
+            let centered = format!("{}{line}", " ".repeat(pad));
+            out.push_str(centered.trim_end());
+            out.push('\n');
+        }
+        out.push('\n');
+        for r in 0..rows {
+            let mut line = " ".repeat(margin);
+            for (c, w) in widths.iter().enumerate() {
+                let Some(name) = names.get(c * rows + r) else {
+                    continue;
+                };
+                if c > 0 {
+                    line.push_str(&" ".repeat(gap));
+                }
+                line.push_str(name);
+                line.push_str(&" ".repeat(w.saturating_sub(string_width(name))));
+            }
+            out.push_str(line.trim_end());
+            out.push('\n');
+        }
+        out.push('\n');
+        out
+    }
+
     /// `print_options` without rich (`nopretty=False, no_rich=True`): the header and a bullet
     /// list.
     pub fn print_options_plain(&self, options: &[String], args: &OptionsArgs) -> String {
@@ -1034,4 +1142,172 @@ pub fn style_is_set(style: &str) -> bool {
 /// The null style (re-exported for callers building texts).
 pub fn null_style() -> Style {
     Style::null()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn config(root: &std::path::Path, patch: Option<&str>) -> Config {
+        let mut env = vec![
+            (
+                "MRSM_ROOT_DIR".to_string(),
+                root.to_string_lossy().into_owned(),
+            ),
+            (
+                "MRSM_PLUGINS_DIR".to_string(),
+                root.join("plugins").to_string_lossy().into_owned(),
+            ),
+        ];
+        if let Some(patch) = patch {
+            env.push(("MRSM_CONFIG".to_string(), patch.to_string()));
+        }
+        let mut opts = meerschaum_core::config::ConfigOptions::with_env(env);
+        opts.allow_writes = false;
+        opts.home = root.to_path_buf();
+        Config::new(opts).unwrap()
+    }
+
+    fn env_of(
+        vars: &'static [(&'static str, &'static str)],
+    ) -> impl Fn(&str) -> Option<String> + Copy {
+        move |key: &str| {
+            vars.iter()
+                .find(|(k, _)| *k == key)
+                .map(|(_, v)| v.to_string())
+        }
+    }
+
+    #[test]
+    fn styles_only_on_a_terminal_in_a_job_or_when_forced() {
+        let tmp = tempfile::tempdir().unwrap();
+        let registry = config(tmp.path(), None);
+        let detect = |vars: &'static [(&'static str, &'static str)], terminal: bool| {
+            FormatSettings::detect_with(&registry, env_of(vars), terminal)
+        };
+        assert!(detect(&[], true).ansi);
+        assert!(!detect(&[], false).ansi, "a pipe or a file gets plain text");
+        assert!(detect(&[("FORCE_COLOR", "1")], false).ansi);
+        assert!(detect(&[("FORCE_COLOR", "true")], false).ansi);
+        for off in ["", "0", "false", "no"] {
+            let vars: &'static [(&'static str, &'static str)] =
+                Box::leak(vec![("FORCE_COLOR", off)].into_boxed_slice());
+            assert!(!detect(vars, false).ansi, "FORCE_COLOR={off:?}");
+        }
+        assert!(
+            detect(&[("MRSM_DAEMON_ID", "my-job")], false).ansi,
+            "a job's log keeps its colors"
+        );
+        assert!(!detect(&[("MRSM_DAEMON_ID", "")], false).ansi);
+        let no_color = detect(&[("NO_COLOR", "1")], true);
+        assert!(no_color.no_color);
+        assert!(
+            !detect(&[("NO_COLOR", "")], true).no_color,
+            "an empty value is unset"
+        );
+        // `formatting:ansi: false` still turns styles off.
+        let plain = config(tmp.path(), Some(r#"{"formatting": {"ansi": false}}"#));
+        assert!(!FormatSettings::detect_with(&plain, env_of(&[("FORCE_COLOR", "1")]), true).ansi);
+    }
+
+    #[test]
+    fn no_color_renders_without_any_style() {
+        let tmp = tempfile::tempdir().unwrap();
+        let config = config(tmp.path(), None);
+        let mut settings = FormatSettings::detect_with(&config, env_of(&[]), true);
+        let styled = Formatter::new(settings.clone(), &config).warn("Careful.");
+        assert!(styled.contains('\x1b'), "{styled:?}");
+        settings.no_color = true;
+        let plain = Formatter::new(settings, &config).warn("Careful.");
+        assert!(!plain.contains('\x1b'), "{plain:?}");
+        assert_eq!(remove_ansi(&styled), plain);
+    }
+
+    #[test]
+    fn names_are_never_cut_off() {
+        let tmp = tempfile::tempdir().unwrap();
+        let config = config(tmp.path(), None);
+        let mut settings = FormatSettings::detect_with(&config, env_of(&[]), false);
+        settings.width = 80;
+        settings.cols = 100;
+        let f = Formatter::new(settings, &config);
+        let names: Vec<String> = [
+            "analyze",
+            "api",
+            "attach",
+            "backup",
+            "bootstrap",
+            "clear",
+            "compose",
+            "compress",
+            "copy",
+            "decompress",
+            "deduplicate",
+            "delete",
+            "doctor",
+            "drop",
+            "edit",
+            "flush",
+            "help",
+            "index",
+            "install",
+            "login",
+            "partition",
+            "pause",
+            "plan",
+            "prune",
+            "python",
+            "register",
+            "reload",
+            "restart",
+            "restore",
+            "setup",
+            "show",
+            "sql",
+            "stack",
+            "start",
+            "stop",
+            "sync",
+            "tag",
+            "uninstall",
+            "upgrade",
+            "vacuum",
+            "verify",
+            "watch",
+            "a_rather_long_plugin_action_name",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+        let opts = OptionsArgs {
+            name: "actions".into(),
+            sort_options: true,
+            ..OptionsArgs::default()
+        };
+        let text = f.print_names(&names, &opts);
+        assert!(!text.contains('…'), "{text}");
+        for name in &names {
+            assert!(
+                text.split_whitespace().any(|w| w == name),
+                "{name} missing:\n{text}"
+            );
+        }
+        assert!(text.lines().all(|l| string_width(l) <= 80), "{text}");
+        assert!(text.contains("Available actions"), "{text}");
+        // Fewer than 12 names: one per line. `--nopretty`: one per line, nothing else.
+        let few = f.print_names(&names[..3], &opts);
+        assert_eq!(
+            few.lines().filter(|l| !l.trim().is_empty()).count(),
+            4,
+            "{few}"
+        );
+        let plain = f.print_names(
+            &names[..3],
+            &OptionsArgs {
+                nopretty: true,
+                ..opts
+            },
+        );
+        assert_eq!(plain, "analyze\napi\nattach\n");
+    }
 }

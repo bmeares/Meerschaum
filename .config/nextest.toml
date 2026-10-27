@@ -10,3 +10,14 @@ final-status-level = "slow"
 slow-timeout = { period = "60s", terminate-after = 10 }
 # Run at most this many tests at once (a CI runner shares its host with other services; the default is one per core).
 test-threads = 16
+
+# The live Valkey tests of `meerschaum-connector-valkey` share one database of the test server
+# (`MRSM_VALKEY_TEST_URL`, default `redis://localhost:6399/12`), and `valkey_replay`'s
+# `replay_live` flushes it and compares every key after each step: run them one at a time.
+# (`cargo test` runs one test binary at a time, so only nextest needs this.)
+[test-groups]
+valkey-live = { max-threads = 1 }
+
+[[profile.default.overrides]]
+filter = 'package(meerschaum-connector-valkey) & test(/_live$/)'
+test-group = 'valkey-live'

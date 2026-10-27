@@ -131,7 +131,7 @@ impl Renderable for Text {
 pub struct Console {
     /// The width in cells.
     pub width: usize,
-    /// `NO_COLOR` is set (colors are removed, attributes kept).
+    /// `NO_COLOR` is set: the text is rendered without styles (no escape sequences).
     pub no_color: bool,
 }
 

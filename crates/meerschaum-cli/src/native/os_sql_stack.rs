@@ -447,7 +447,11 @@ pub fn sql(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
                 )
             )
         };
-        match sess.block_on(conn.driver().read_frame(&text)) {
+        // A protected connector runs only a read statement, read-only (`read_raw`).
+        match sess.block_on(conn.read_raw(&text)) {
+            Err(meerschaum_connector_sql::SqlError::Protected(refusal)) => {
+                return Ok(SuccessTuple::fail(refusal));
+            }
             // PARITY: a statement that returns no result set (`CREATE VIEW ... AS SELECT ...`, which
             // contains `select` and so is routed to `read`) has already run; v4's `read()` then
             // fails with SQLAlchemy's "This result object does not return rows", logs it and
@@ -474,6 +478,9 @@ pub fn sql(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
             }
         }
     } else {
+        if let Err(refusal) = conn.check_writable("execute SQL") {
+            return Ok(SuccessTuple::fail(refusal));
+        }
         match sess.block_on(conn.driver().exec(&query)) {
             Ok(_) => {
                 if !nopretty {

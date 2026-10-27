@@ -20,7 +20,11 @@ use super::{warn, words};
 
 /// Aliases `choose_subaction`'s option tables carry beyond the subaction names: `(action, alias,
 /// function)`.
-const ALIASES: &[(&str, &str, &str)] = &[("upgrade", "mrsm", "_upgrade_meerschaum")];
+const ALIASES: &[(&str, &str, &str)] = &[
+    ("upgrade", "mrsm", "_upgrade_meerschaum"),
+    // `verify schemata` (`verify schema` resolves to `schemas` itself).
+    ("verify", "schemata", "_verify_schemas"),
+];
 
 /// `choose_subaction(action, options)` for the registry's subactions of `parent`: run the chosen
 /// one (a trailing `s` is optional) with the remaining words, or list the choices.

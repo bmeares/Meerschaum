@@ -127,14 +127,26 @@ fn completions_match_v4() {
         let subaction_parent = ((words.len() == 2 && !input.ends_with(char::is_whitespace))
             || (words.len() == 1 && input.ends_with(char::is_whitespace)))
         .then(|| words[0]);
+        // The flags added since v4 (`--allow-protected`, `--public`, `--replace`) are excluded
+        // the same way.
+        let v5_flags: Vec<&str> = meerschaum_cli::spec::V5_ONLY_DESTS
+            .iter()
+            .filter_map(|dest| meerschaum_cli::spec::by_dest(dest))
+            .flat_map(|a| a.option_strings.iter().copied())
+            .collect();
         let got: Vec<(String, i64, String, usize)> = data
             .get_completions(input, &dates)
             .into_iter()
+            .filter(|c| !v5_flags.contains(&c.text.as_str()))
             .filter(|c| {
+                // `help` was already the shell's own command in v4.
                 !((words.is_empty() || (words.len() == 1 && !input.ends_with(char::is_whitespace)))
+                    && c.text != "help"
                     && meerschaum_cli::actions::V5_ONLY_ACTIONS.contains(&c.text.as_str()))
                     && !subaction_parent.is_some_and(|action| {
-                        meerschaum_cli::actions::is_v5_only_subaction(action, &c.text)
+                        // PARITY: `pause` completes `start`'s subactions (`_complete_pause`).
+                        let parent = if action == "pause" { "start" } else { action };
+                        meerschaum_cli::actions::is_v5_only_subaction(parent, &c.text)
                     })
             })
             .map(|c| (c.text, c.start_position, c.display, c.highlight))

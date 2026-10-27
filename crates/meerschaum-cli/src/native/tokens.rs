@@ -53,29 +53,53 @@ fn username(rt: &mut Runtime<'_>, inst: &Instance, model: &TokenModel) -> Option
         .map(|v| v.py_str())
 }
 
-/// The scopes `username` may hand to a token, or `None` when they may grant anything (an
-/// administrator, or a holder of `*`).
+/// The owner of a token, for the scope cap: `Ok(None)` when it has none (or it was deleted), an
+/// error when the owner cannot be read (the cap is never skipped on a read that failed).
+fn owner_username(
+    rt: &mut Runtime<'_>,
+    inst: &Instance,
+    model: &TokenModel,
+) -> Result<Option<String>, String> {
+    let Some(user_id) = model.user_id.clone() else {
+        return Ok(None);
+    };
+    let sess = session(rt);
+    sess.block_on(inst.conn().get_username(&user_id))
+        .map(|name| name.map(|v| v.py_str()))
+        .map_err(|e| e.to_string())
+}
+
+/// The scopes `username` may hand to a token: `Ok(None)` when they may grant anything (an
+/// administrator, or a holder of `*`). A read of the user's type or scopes that fails is the
+/// failure to return (nothing is registered or edited), never a wider cap: a user whose
+/// attributes cannot be read would otherwise hold every scope (v4's rule for no `scopes`).
 ///
 /// FIX (intentional v4 change): a token carries at most its owner's scopes.
-fn grant_cap(rt: &mut Runtime<'_>, inst: &Instance, username: &str) -> Option<Vec<String>> {
+fn grant_cap(
+    rt: &mut Runtime<'_>,
+    inst: &Instance,
+    username: &str,
+) -> Result<Option<Vec<String>>, SuccessTuple> {
     let sess = session(rt);
-    let mut user = User::new(username, None);
+    let user = User::new(username, None);
+    let unreadable = |e: &dyn std::fmt::Display| {
+        SuccessTuple::fail(format!(
+            "Could not read the scopes of user '{username}' on '{}', so the token was not changed:\n{e}",
+            inst.keys()
+        ))
+    };
     let user_type = sess
         .block_on(inst.conn().get_user_type(&user))
-        .ok()
-        .flatten();
+        .map_err(|e| unreadable(&e))?;
     if user_type.as_deref() == Some("admin") {
-        return None;
+        return Ok(None);
     }
-    user.attributes = sess
-        .block_on(inst.conn().get_user_attributes(&user))
-        .ok()
-        .flatten();
-    let held = user.get_scopes();
+    let held = User::scopes_from_read(sess.block_on(inst.conn().get_user_attributes(&user)))
+        .map_err(|e| unreadable(&e))?;
     if held.iter().any(|s| s == "*") {
-        None
+        Ok(None)
     } else {
-        Some(held)
+        Ok(Some(held))
     }
 }
 
@@ -287,9 +311,15 @@ pub fn register_tokens(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     });
     // An `api` instance enforces the cap itself (a refused request comes back as the failure).
     let mut scopes = scopes;
-    if inst.type_name() != "api"
-        && let Some(cap) = grant_cap(rt, &inst, &username)
-    {
+    let cap = if inst.type_name() == "api" {
+        None
+    } else {
+        match grant_cap(rt, &inst, &username) {
+            Ok(cap) => cap,
+            Err(failure) => return Ok(failure),
+        }
+    };
+    if let Some(cap) = cap {
         match &scopes {
             Some(asked) => {
                 if let Some(failure) = cap_failure(&username, asked, &cap, &[]) {
@@ -457,12 +487,27 @@ pub fn edit_tokens(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
         // scope list (`edit tokens`), which left out custom (plugin) scopes and any scope added
         // later; the checks honor a literal `*`.
         let scopes: Vec<String> = scopes_text.split(' ').map(str::to_string).collect();
-        if inst.type_name() != "api"
-            && let Some(owner) = username(rt, &inst, &model)
-            && let Some(cap) = grant_cap(rt, &inst, &owner)
-            && let Some(failure) = cap_failure(&owner, &scopes, &cap, &model.scopes)
-        {
-            return Ok(failure);
+        if inst.type_name() != "api" {
+            let owner = match owner_username(rt, &inst, &model) {
+                Ok(owner) => owner,
+                Err(e) => {
+                    return Ok(SuccessTuple::fail(format!(
+                        "Could not read the owner of token '{label}' on '{}', so the token was not changed:\n{e}",
+                        inst.keys()
+                    )));
+                }
+            };
+            if let Some(owner) = owner {
+                let cap = match grant_cap(rt, &inst, &owner) {
+                    Ok(cap) => cap,
+                    Err(failure) => return Ok(failure),
+                };
+                if let Some(cap) = cap
+                    && let Some(failure) = cap_failure(&owner, &scopes, &cap, &model.scopes)
+                {
+                    return Ok(failure);
+                }
+            }
         }
         let invalidate = if model.is_valid {
             yes_no(

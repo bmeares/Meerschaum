@@ -487,10 +487,12 @@ impl LiveRun {
                 NodeStatus::Skipped | NodeStatus::Observed => {
                     format!("  {} {label} {}", style.paint("2", "\u{25cb}"), node.reason)
                 }
+                // The engine's reason says it in words ("not synced because its parent ...
+                // failed"): no `upstream_failed:` status name in front of it.
                 NodeStatus::UpstreamFailed => format!(
-                    "  {} {label} upstream_failed: {}",
+                    "  {} {label} {}",
                     style.paint("2", "\u{25cb}"),
-                    node.reason
+                    first_line(&node.reason)
                 ),
                 NodeStatus::RebuildPending => format!(
                     "  {} {label} rebuild pending: {}",

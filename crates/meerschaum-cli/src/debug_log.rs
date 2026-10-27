@@ -48,9 +48,7 @@ impl Default for DprintStyle {
         let no_color = std::env::var_os("NO_COLOR").is_some_and(|v| !v.is_empty());
         DprintStyle {
             icon: if cfg!(windows) { "DEBUG" } else { "🐞" }.into(),
-            style: get_style("cyan")
-                .ok()
-                .map(|s| if no_color { s.without_color() } else { s }),
+            style: get_style("cyan").ok().filter(|_| !no_color),
         }
     }
 }
@@ -59,14 +57,10 @@ impl DprintStyle {
     /// The style a formatter's settings and config give.
     pub fn from_formatter(f: &Formatter<'_>) -> DprintStyle {
         let icon = f.formatting_str(&["debug", f.charset(), "icon"]);
-        let style = f.settings.ansi.then(|| {
+        // `NO_COLOR` prints the debug lines without styles, like everything else.
+        let style = (f.settings.ansi && !f.settings.no_color).then(|| {
             let name = f.formatting_str(&["debug", "ansi", "rich", "style"]);
-            let style = get_style(&name).unwrap_or_else(|_| Style::null());
-            if f.settings.no_color {
-                style.without_color()
-            } else {
-                style
-            }
+            get_style(&name).unwrap_or_else(|_| Style::null())
         });
         DprintStyle { icon, style }
     }

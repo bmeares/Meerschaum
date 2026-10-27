@@ -103,7 +103,10 @@ pub fn detect(command: &[String], executable: &Path, docker: bool) -> Installati
 }
 
 /// Whether `path` is under a Cargo target directory, whatever its name or profile (`target/` may be
-/// a symlink, and `current_exe()` resolves it): an ancestor holding the `CACHEDIR.TAG` Cargo writes.
+/// a symlink, and `current_exe()` resolves it): an ancestor holding the `CACHEDIR.TAG` Cargo writes,
+/// or a Cargo profile directory (`.fingerprint/` next to `deps/`). Cargo writes the tag only when
+/// it creates the target directory itself, so a target directory that already existed (a symlink
+/// to another disk, a CI runner's cache) has none.
 fn in_cargo_target(path: &Path) -> bool {
     let text = path.to_string_lossy();
     // A binary rebuilt while it runs reads back as `<path> (deleted)` on Linux.
@@ -111,6 +114,7 @@ fn in_cargo_target(path: &Path) -> bool {
     path.ancestors().any(|a| {
         std::fs::read_to_string(a.join("CACHEDIR.TAG"))
             .is_ok_and(|tag| tag.contains("created by cargo"))
+            || (a.join(".fingerprint").is_dir() && a.join("deps").is_dir())
     })
 }
 
@@ -824,6 +828,36 @@ mod tests {
         )
         .unwrap();
         assert!(!in_cargo_target(&binary));
+    }
+
+    #[test]
+    fn a_binary_in_a_target_directory_without_a_cache_tag_is_a_source_checkout() {
+        // A CI runner whose `target` is a symlink to a directory that existed before Cargo ran:
+        // Cargo never writes `CACHEDIR.TAG` there, and the path has no `/target/debug/`.
+        let dir = tempfile::tempdir().unwrap();
+        let profile = dir.path().join("runner1-target").join("debug");
+        let binary = profile.join("mrsm-cli");
+        std::fs::create_dir_all(&profile).unwrap();
+        std::fs::write(&binary, "binary").unwrap();
+        let command = vec![binary.to_string_lossy().into_owned()];
+        // Without Cargo's profile layout it is a downloaded binary (what `upgrade` replaces).
+        std::fs::create_dir_all(profile.join("deps")).unwrap();
+        assert!(!in_cargo_target(&binary));
+        assert!(matches!(
+            detect(&command, &binary, false),
+            Installation::Binary(_)
+        ));
+        std::fs::create_dir_all(profile.join(".fingerprint")).unwrap();
+        assert!(in_cargo_target(&binary));
+        assert!(matches!(
+            detect(&command, &binary, false),
+            Installation::Managed(m) if m.contains("source checkout")
+        ));
+        // An example or a test binary one level down is in the same checkout.
+        let example = profile.join("examples").join("demo");
+        std::fs::create_dir_all(example.parent().unwrap()).unwrap();
+        std::fs::write(&example, "binary").unwrap();
+        assert!(in_cargo_target(&example));
     }
 
     #[test]

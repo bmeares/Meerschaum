@@ -203,7 +203,11 @@ pub const MAINS: &[(&str, &[(&str, &str)])] = &[
     ),
     (
         "stop",
-        &[("jobs", "_stop_jobs"), ("daemons", "_stop_daemons")],
+        &[
+            ("jobs", "_stop_jobs"),
+            ("daemons", "_stop_daemons"),
+            ("pipelines", "_stop_pipelines"),
+        ],
     ),
     ("sync", &[("pipes", "_sync_pipes")]),
     ("tag", &[("pipes", "_tag_pipes")]),
@@ -353,6 +357,8 @@ pub fn api(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     let sysargs = crate::sysargs::parse_dict_to_sysargs(&kw)
         .map_err(|e| ActionError::new(&e.class, e.message))?;
     let sysargs = crate::sysargs::remove_api_executor_keys(&sysargs);
+    // An API server of any version runs an action chain in v4's `start pipeline` form.
+    let sysargs = meerschaum_core::chain::to_legacy(&sysargs);
     let sess = session(rt);
     let icons = rt.with_formatter(|f| {
         let charset = f.charset();

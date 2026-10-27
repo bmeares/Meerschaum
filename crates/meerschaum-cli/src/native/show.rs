@@ -79,7 +79,68 @@ pub fn pipe_show(
     Ok(SuccessTuple::success())
 }
 
-/// `show pipes`.
+/// One line for each of `pipes` whose latest recorded sync failed (rc15 sync status), e.g.
+/// `Pipe('sql:main', 'weather') failed its last 3 syncs (latest 2026-10-27 12:00:05 UTC): no
+/// such table: raw`. Nothing when every latest sync succeeded or the statuses cannot be read.
+fn failing_pipes_note(rt: &mut Runtime<'_>, inst: &Instance, pipes: &[SelectedPipe]) -> String {
+    let Some(instance_keys) = pipes.first().map(|p| p.pipe.instance_keys().to_string()) else {
+        return String::new();
+    };
+    let conn = inst.conn();
+    let read = session(rt).block_on(async { conn.get_sync_statuses(&instance_keys).await });
+    let statuses = match read {
+        Ok(statuses) => statuses,
+        Err(e) => {
+            tracing::debug!("Cannot read the sync statuses on '{instance_keys}': {e}");
+            return String::new();
+        }
+    };
+    let failing: std::collections::HashMap<&str, _> = statuses
+        .iter()
+        .filter(|s| !s.success && s.last_attempt.is_some())
+        .map(|s| (s.pipe_ref.as_str(), s))
+        .collect();
+    let mut lines = String::new();
+    for sp in pipes {
+        let Some(status) = failing.get(sp.pipe.pipe_ref().as_str()) else {
+            continue;
+        };
+        let syncs = match status.consecutive_failures {
+            0 | 1 => "its last sync".to_string(),
+            n => format!("its last {n} syncs"),
+        };
+        let latest = status
+            .last_failure
+            .or(status.last_attempt)
+            .map(|t| format!(" (latest {})", t.format("%Y-%m-%d %H:%M:%S UTC")))
+            .unwrap_or_default();
+        let mut reason: String = status
+            .message
+            .lines()
+            .find(|l| !l.trim().is_empty())
+            .unwrap_or_default()
+            .trim()
+            .chars()
+            .take(160)
+            .collect();
+        if !reason.is_empty() {
+            reason.insert_str(0, ": ");
+        }
+        lines.push_str(&format!("{} failed {syncs}{latest}{reason}\n", sp.pipe));
+    }
+    if lines.is_empty() {
+        return lines;
+    }
+    rt.with_formatter(|f| {
+        if f.settings.ansi {
+            format!("\n{}", f.fill_ansi(&lines, "yellow"))
+        } else {
+            format!("\n{lines}")
+        }
+    })
+}
+
+/// `show pipes`. The pretty output ends with a line for each pipe whose latest sync failed.
 pub fn show_pipes(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     let nopretty = flag(args, "nopretty");
     let (inst, mut pipes) = selected_pipes(rt, args)?;
@@ -87,12 +148,19 @@ pub fn show_pipes(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
         return Ok(SuccessTuple::ok("No pipes to show."));
     }
     if pipes.len() == 1 {
-        return pipe_show(rt, &inst, &mut pipes[0], nopretty);
+        let shown = pipe_show(rt, &inst, &mut pipes[0], nopretty);
+        if !nopretty && shown.is_ok() {
+            let note = failing_pipes_note(rt, &inst, &pipes);
+            rt.print(&note);
+        }
+        return shown;
     }
     if !nopretty {
         let keys: Vec<_> = pipes.iter().map(|p| pipe_keys(&p.pipe)).collect();
         let text = rt.with_formatter(|f| f.pprint_pipes(&keys));
         rt.print(&text);
+        let note = failing_pipes_note(rt, &inst, &pipes);
+        rt.print(&note);
     } else {
         let mut out = String::new();
         for p in &pipes {

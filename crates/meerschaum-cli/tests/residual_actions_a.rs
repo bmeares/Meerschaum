@@ -394,20 +394,20 @@ fn show_data_prints_the_backtrack_like_v4() {
 }
 
 #[test]
-fn login_of_an_unknown_api_connector_warns_like_v4() {
+fn login_of_an_undefined_api_connector_says_it_is_not_defined() {
     let home = Home::new();
     let out = home.run(&["login", "api:nonexist"]);
     assert_eq!(out.code, 1, "{}", out.text);
-    let incorrect = out
-        .text
-        .find("Incorrect attributes for connector 'api:nonexist'.");
-    let missing = out
-        .text
-        .find("Missing 'host' for connector 'api:nonexist'.");
+    // v4 said "Incorrect attributes" and "Missing 'host'" (rc15, S4: the connector is defined
+    // nowhere, so say where to define it).
+    let undefined = out.text.find(
+        "Connector 'api:nonexist' is not defined. Add it to the config (`mrsm bootstrap connectors`), set `MRSM_API_NONEXIST`, or install the plugin that provides it.",
+    );
     let unable = out
         .text
         .find("Unable to build connector 'api:nonexist'. Is it registered?");
-    assert!(incorrect < missing && missing < unable, "{}", out.text);
+    assert!(undefined.is_some() && undefined < unable, "{}", out.text);
+    assert!(!out.text.contains("Missing 'host'"), "{}", out.text);
     assert!(
         out.text.contains("Logged into 0 connectors."),
         "{}",
@@ -441,6 +441,23 @@ fn an_api_connector_without_credentials_warns_to_login_once() {
     let stdout = String::from_utf8_lossy(&raw.stdout);
     let stderr = String::from_utf8_lossy(&raw.stderr);
     assert!(!stdout.contains("Please login"), "{stdout}");
+    // Off a terminal there are no escape sequences (rc15, Q14).
+    assert!(
+        stderr.contains(" \u{1f514} Please login with the command `login api:nolive`.\n"),
+        "{stderr:?}"
+    );
+    assert!(!stderr.contains('\x1b'), "{stderr:?}");
+    // `FORCE_COLOR` brings v4's warning style back.
+    let mut command = home.command();
+    command
+        .env("MRSM_ROOT_DIR", home.path())
+        .env("FORCE_COLOR", "1");
+    let raw = command
+        .args(["show", "pipes", "-i", "api:nolive"])
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&raw.stderr);
     assert!(
         stderr.contains(
             "\x1b[1;33m \u{1f514} Please login with the command `login api:nolive`.\x1b[0m\n"
@@ -457,8 +474,11 @@ fn stack_prints_the_generated_compose_project() {
     let out = home.run(&["stack", "--help"]);
     assert_eq!(out.code, 0);
     assert!(
+        out.text.contains(
+            "Run the Meerschaum stack (database, API, Valkey, Grafana) with Docker Compose."
+        ),
+        "{}",
         out.text
-            .contains("Control the Meerschaum stack with Docker Compose.")
     );
     // The project files are generated under the root (the compose file itself, then `docker
     // compose`, which is only available on some hosts).
@@ -1173,6 +1193,64 @@ fn a_token_carries_at_most_its_owners_scopes() {
 }
 
 #[test]
+fn a_token_cap_that_cannot_be_read_refuses_instead_of_granting_every_scope() {
+    let home = Home::new();
+    let ron = home.ask(
+        &["register", "users", "ron", "--scopes", "pipes:read"],
+        "password1\npassword1\n\n",
+    );
+    assert_eq!(ron.code, 0, "{}", ron.text);
+    let own = home.ask(
+        &[
+            "register",
+            "tokens",
+            "--name",
+            "own",
+            "--scopes",
+            "pipes:read",
+        ],
+        "1\n",
+    );
+    assert_eq!(own.code, 0, "{}", own.text);
+    // Ron's attributes can no longer be read: the read fails, which must not count as "no
+    // `scopes` attribute" (every scope).
+    let dropped = home.sql("ALTER TABLE mrsm_users DROP COLUMN attributes");
+    assert_eq!(dropped.code, 0, "{}", dropped.text);
+    let refused = home.ask(
+        &[
+            "register",
+            "tokens",
+            "--name",
+            "wide",
+            "--scopes",
+            "pipes:write",
+        ],
+        "1\n",
+    );
+    assert_eq!(refused.code, 1, "{}", refused.text);
+    assert!(
+        one_line(&refused.text).contains("Could not read the scopes of user 'ron'"),
+        "{}",
+        refused.text
+    );
+    // `edit tokens` refuses too, and the token keeps its scopes.
+    let widened = home.ask(&["edit", "tokens", "own"], "\n\n pipes:write\nn\n");
+    assert_eq!(widened.code, 1, "{}", widened.text);
+    assert!(
+        one_line(&widened.text).contains("Could not read the scopes of user 'ron'"),
+        "{}",
+        widened.text
+    );
+    assert_eq!(token_scopes(&home, "own"), r#"["pipes:read"]"#);
+    assert!(
+        !home
+            .run(&["show", "tokens", "--nopretty"])
+            .text
+            .contains("\"wide\""),
+    );
+}
+
+#[test]
 fn bootstrap_connectors_wizard_registers_the_connector() {
     let home = Home::new();
     let database = home.path().join("wizard.db");
@@ -1222,13 +1300,42 @@ fn bootstrap_connectors_wizard_registers_the_connector() {
 #[test]
 fn bootstrap_pipes_registers_the_pipe() {
     let home = Home::new();
+    // A SQL connector: the query comes first (one line off a terminal), its preview's columns
+    // are the datetime and ID choices (`dt` and `id` guessed), then the target, the tags,
+    // [Enter] to register, and "sync now?" defaults to yes.
     let out = home.ask(
         &["bootstrap", "pipes"],
-        "sql:local\nmetric1\nloc1\ndt\nid\nn\n\n\n\nn\nn\n",
+        "sql:local\nmetric1\nloc1\nSELECT 1 AS id, '2024-01-01 00:00:00' AS dt, 2.5 AS val\n\n\n\n\n\n\n",
     );
     assert_eq!(out.code, 0, "{}", out.text);
     assert!(
         out.text.contains("Where are the data coming from?"),
+        "{}",
+        out.text
+    );
+    // The connector choices are listed before the question (as v4 did).
+    let listed = out.text.find("\u{2022} sql:local").expect(&out.text);
+    let asked = out.text.find("Where are the data coming from?").unwrap();
+    assert!(listed < asked, "{}", out.text);
+    assert!(out.text.contains("SQL query:"), "{}", out.text);
+    assert!(
+        out.text.contains("The first rows of the query"),
+        "{}",
+        out.text
+    );
+    assert!(
+        out.text.contains("2.5"),
+        "the preview shows the rows: {}",
+        out.text
+    );
+    assert!(out.text.contains("Datetime column:"), "{}", out.text);
+    assert!(
+        !out.text.contains("Would you like to edit the definition"),
+        "{}",
+        out.text
+    );
+    assert!(
+        out.text.contains("Would you like to try syncing") && out.text.contains("now? [Y/n]"),
         "{}",
         out.text
     );
@@ -1255,6 +1362,41 @@ fn bootstrap_pipes_registers_the_pipe() {
         shown.text
     );
     assert!(shown.text.contains("\"id\": \"id\""), "{}", shown.text);
+    assert!(
+        shown.text.contains("SELECT 1 AS id"),
+        "the query is the definition: {}",
+        shown.text
+    );
+    // "sync now?" was answered with its default: the query's row was synced.
+    assert!(
+        out.text.contains("Inserted 1, updated 0 rows."),
+        "{}",
+        out.text
+    );
+
+    // A query that fails to preview: the error is shown and the query can be edited again.
+    let retry = home.ask(
+        &["bootstrap", "pipes"],
+        "sql:local\nmetric2\n\nSELECT * FROM table_that_is_not_there\ny\nSELECT 2 AS id, '2024-01-02' AS ts\n\n\n\n\n\nn\n",
+    );
+    assert_eq!(retry.code, 0, "{}", retry.text);
+    assert!(
+        retry.text.contains("The query could not be previewed"),
+        "{}",
+        retry.text
+    );
+    assert!(
+        retry.text.contains("Edit the query again?"),
+        "{}",
+        retry.text
+    );
+    let shown = home.run(&["show", "pipes", "-m", "metric2", "--nopretty"]);
+    assert!(
+        shown.text.contains("\"datetime\": \"ts\""),
+        "{}",
+        shown.text
+    );
+    assert!(shown.text.contains("SELECT 2 AS id"), "{}", shown.text);
 
     let eof = home.run(&["bootstrap", "pipes"]);
     assert_eq!(eof.code, 1, "{}", eof.text);

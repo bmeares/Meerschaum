@@ -48,7 +48,9 @@ impl ActionDef {
 
 /// Additive v5 actions, visible in help, action listings and completion. Legacy v4 parity
 /// comparisons exclude these entries; dedicated v5 tests verify their public exposure.
-pub const V5_ONLY_ACTIONS: &[&str] = &["prune", "plan", "doctor", "backup", "restore", "watch"];
+pub const V5_ONLY_ACTIONS: &[&str] = &[
+    "prune", "plan", "doctor", "backup", "restore", "watch", "help",
+];
 
 /// Additive v5 subactions (`(action, subaction)`), visible like every core subaction.
 /// Only legacy parity comparisons exclude this list.
@@ -78,6 +80,9 @@ pub const V5_ONLY_SUBACTIONS: &[(&str, &str)] = &[
     ("watch", "jobs"),
     ("watch", "logs"),
     ("watch", "runs"),
+    ("verify", "schemas"),
+    ("start", "pipelines"),
+    ("stop", "pipelines"),
 ];
 
 /// Whether `(action, subaction)` is v5-only.
@@ -167,6 +172,7 @@ pub static CORE_ACTIONS: &[ActionDef] = &[
             sub("pipes", "_verify_pipes"),
             sub("plugins", "_verify_plugins"),
             sub("rowcounts", "_verify_rowcounts"),
+            sub("schemas", "_verify_schemas"),
             sub("venvs", "_verify_venvs"),
         ],
     ),
@@ -217,7 +223,12 @@ pub static CORE_ACTIONS: &[ActionDef] = &[
     action("stack", &[]),
     action(
         "stop",
-        &[sub("daemons", "_stop_daemons"), sub_e("jobs", "_stop_jobs")],
+        &[
+            sub("daemons", "_stop_daemons"),
+            sub_e("jobs", "_stop_jobs"),
+            // v5: a saved Pipeline's background job (`stop pipeline NAME`).
+            sub_e("pipelines", "_stop_pipelines"),
+        ],
     ),
     action(
         "uninstall",
@@ -239,6 +250,8 @@ pub static CORE_ACTIONS: &[ActionDef] = &[
         ],
     ),
     action("doctor", &[]),
+    // `mrsm help [action ...]`: the grouped action list and options (`crate::help`).
+    action("help", &[]),
     action("backup", &[sub("postgres", "_backup_postgres")]),
     action("restore", &[sub("postgres", "_restore_postgres")]),
     // The full-screen monitors (`crate::tui::VIEWS`).
@@ -308,7 +321,10 @@ pub static CORE_ACTIONS: &[ActionDef] = &[
             sub("gui", "_start_gui"),
             sub_e("jobs", "_start_jobs"),
             sub("mcp", "_start_mcp"),
+            // A saved Pipeline's background job (`start pipeline NAME`); v4's chain form
+            // (`start pipeline ... -P '{"sub_args_line": ...}'`) still runs as a chain.
             sub("pipeline", "_start_pipeline"),
+            sub_e("pipelines", "_start_pipelines"),
             sub("webterm", "_start_webterm"),
             sub("worker", "_start_worker"),
         ],

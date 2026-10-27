@@ -166,7 +166,7 @@ pub fn jobs_context(rt: &mut Runtime<'_>) -> JobsContext {
     // `<type>:<label>` executors of native plugins (none: the context resolves no other types).
     let natives = session.native_plugins(config).ok();
     let resolver = super::remote_jobs::CliRemoteResolver::new(
-        session,
+        session.clone(),
         super::remote_jobs::CliRemoteResolver::section(config),
     );
     let context = JobsContext::new(
@@ -176,8 +176,10 @@ pub fn jobs_context(rt: &mut Runtime<'_>) -> JobsContext {
     )
     .with_remote(Arc::new(resolver));
     match natives.filter(|n| !n.executor_types().is_empty()) {
+        // The executors' host calls (`host::plugin_config()`, ...) use the session's connectors.
         Some(natives) => context.with_executors(Arc::new(
-            crate::native_executors::NativeExecutors::new(natives, config),
+            crate::native_executors::NativeExecutors::new(natives, config)
+                .with_host(session, config),
         )),
         None => context,
     }
@@ -296,6 +298,18 @@ fn pprint_job(rt: &mut Runtime<'_>, job: &mut Job, nopretty: bool) {
     }
 }
 
+/// The `show jobs` status line of a running job's health: `last good sync 2 min ago`,
+/// `stalled: last good sync 3 h ago`, `failing: last 2 laps failed`; nothing while unknown.
+pub fn health_line(health: &meerschaum_jobs::health::JobHealth) -> Option<(String, &'static str)> {
+    use meerschaum_jobs::health::HealthState;
+    match health.state {
+        HealthState::Healthy => Some((health.message.clone(), "")),
+        HealthState::Stalled => Some((format!("stalled: {}", health.message), "yellow")),
+        HealthState::Failing => Some((format!("failing: {}", health.message), "red")),
+        HealthState::Stopped | HealthState::Unknown => None,
+    }
+}
+
 /// `pprint_jobs(jobs, nopretty)`.
 pub fn pprint_jobs(rt: &mut Runtime<'_>, jobs: &mut IndexMap<String, Job>, nopretty: bool) {
     let running = with_status(jobs, Status::Running);
@@ -360,6 +374,10 @@ pub fn pprint_jobs(rt: &mut Runtime<'_>, jobs: &mut IndexMap<String, Job>, nopre
                     }
                     if job.restarts() {
                         status.push(("(restarts)".into(), ""));
+                    }
+                    // Job health: how its laps go (nothing for a job that does not lap).
+                    if let Some(line) = health_line(&job.health()) {
+                        status.push(line);
                     }
                 }
                 1 => {
@@ -493,9 +511,11 @@ pub fn show_jobs(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     Ok(SuccessTuple::ok("Success"))
 }
 
-/// Whether a word names a v4 action (`actions` keys).
+/// Whether a word names a v4 action (`actions` keys), or the internal action of a serialized
+/// chain (a `-d` chain is never taken for a job of that name).
 fn is_action_name(word: &str) -> bool {
-    crate::actions::CORE_ACTIONS.iter().any(|a| a.name == word)
+    word == meerschaum_core::chain::CHAIN_ACTION
+        || crate::actions::CORE_ACTIONS.iter().any(|a| a.name == word)
 }
 
 /// How a `start jobs` is classified for the startup gate (D23): `--no-stagger` bypasses it,
@@ -671,11 +691,7 @@ pub fn start_jobs(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
         }
     }
 
-    let compose_var = static_config().environment.compose_project.clone();
-    let compose_project = (rt.env)(&compose_var).filter(|v| !v.is_empty());
-    // A job started from a root compose file also records the root (`compose_root` label).
-    let root_var = static_config().environment.compose_root.clone();
-    let compose_root = (rt.env)(&root_var).filter(|v| !v.is_empty());
+    let compose_env: Vec<(String, String)> = compose_env(rt).into_iter().flatten().collect();
     let (mut successes, mut failures) = (Vec::new(), Vec::new());
     let start_kind = start_kind_of(args, rt, names.len());
     let startup_jitter = string(args, "startup_jitter")
@@ -690,12 +706,7 @@ pub fn start_jobs(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
                 line.as_deref(),
                 exec_keys.clone(),
                 rm,
-                compose_project
-                    .as_ref()
-                    .map(|p| (compose_var.clone(), p.clone()))
-                    .into_iter()
-                    .chain(compose_root.as_ref().map(|r| (root_var.clone(), r.clone())))
-                    .collect(),
+                compose_env.clone(),
                 (force, yes, noask),
                 (start_kind, startup_jitter),
             )
@@ -822,6 +833,21 @@ fn run_new_job(
     let started = job.start();
     emit_job_warnings(rt, &mut job);
     started
+}
+
+/// The Compose stamps a job started from a Compose project records in its environment (the
+/// project's name, and the root compose file of a tree): `None` outside Compose.
+pub fn compose_env(rt: &mut Runtime<'_>) -> Option<IndexMap<String, String>> {
+    let environment = &static_config().environment;
+    let env: IndexMap<String, String> = [&environment.compose_project, &environment.compose_root]
+        .into_iter()
+        .filter_map(|var| {
+            (rt.env)(var)
+                .filter(|v| !v.is_empty())
+                .map(|value| (var.clone(), value))
+        })
+        .collect();
+    (!env.is_empty()).then_some(env)
 }
 
 /// Show the warnings a job collected (while it was built, and while its executor created it: a
@@ -1025,6 +1051,28 @@ pub fn restart_jobs(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
                 job.set_start_kind(StartKind::None);
             }
         }
+        // Meerschaum before rc15 ran the jobs of every root but the default one locally; on a
+        // systemd host they move to systemd now (stopped first, logs kept), so they come back
+        // after a reboot. An explicit `-e` keeps them where they are.
+        if executor_keys(args).is_none() && moves_local_jobs_to_systemd(&ctx) {
+            let names: Vec<String> = restart_jobs.keys().cloned().collect();
+            for name in names {
+                let Some(mut local) = restart_jobs.shift_remove(&name) else {
+                    continue;
+                };
+                let moved = move_job_to_systemd(rt, &ctx, &mut local);
+                if !moved.success {
+                    warn(
+                        rt,
+                        &format!("Could not move job '{name}' to systemd:\n{}", moved.message),
+                    );
+                    restart_jobs.insert(name, local);
+                }
+            }
+            if restart_jobs.is_empty() && !do_loop {
+                return Ok(SuccessTuple::ok("Moved the jobs to systemd."));
+            }
+        }
         let names: Vec<String> = restart_jobs.keys().cloned().collect();
         info(
             rt,
@@ -1048,6 +1096,49 @@ pub fn restart_jobs(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
             return Ok(res);
         }
     }
+}
+
+/// Whether this context's `local` jobs belong on `systemd` (see [`move_job_to_systemd`]): the
+/// context chooses `systemd` and its root is not the default one, whose local jobs were always
+/// someone's explicit choice.
+pub fn moves_local_jobs_to_systemd(ctx: &JobsContext) -> bool {
+    meerschaum_jobs::job::get_executor_keys_from_context(ctx) == "systemd"
+        && !meerschaum_jobs::systemd::SystemdExecutor::new(ctx.clone()).is_default_root()
+}
+
+/// Recreate a `local` job under `systemd` with the same command and settings: the unit's
+/// creation stops the local process and moves its logs (see
+/// `meerschaum_jobs::systemd::SystemdExecutor`).
+pub fn move_job_to_systemd(
+    rt: &mut Runtime<'_>,
+    ctx: &JobsContext,
+    local: &mut Job,
+) -> SuccessTuple {
+    let sysargs = local.sysargs();
+    if sysargs.is_empty() {
+        return SuccessTuple::fail("The job has no command.");
+    }
+    let mut properties = local.daemon().properties();
+    for key in ["target", "label", "result", "process", "externally_managed"] {
+        properties.shift_remove(key);
+    }
+    let mut job = match Job::new(
+        &local.name,
+        Some(sysargs),
+        JobOptions {
+            executor_keys: Some("systemd".into()),
+            properties: Some(properties),
+            ..Default::default()
+        },
+        ctx,
+    ) {
+        Ok(job) => job,
+        Err(e) => return SuccessTuple::fail(e.to_string()),
+    };
+    job.set_start_kind(StartKind::Single);
+    let started = job.start();
+    emit_job_warnings(rt, &mut job);
+    started
 }
 
 /// `delete jobs`.
@@ -1232,7 +1323,8 @@ pub fn edit_jobs(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
             continue;
         };
         let sysargs = job.sysargs();
-        // `start pipeline ... -P '{"sub_args_line": ...}'` is shown in its `a + b : --loop` form.
+        // A serialized chain (`chain ... -P '{"sub_args_line": ...}'`) is shown in its
+        // `a + b : --loop` form.
         let pipeline_lines = pipeline_lines(&sysargs);
         let sysargs_str = match &pipeline_lines {
             Some((sub, pipeline)) => format!("{sub} : {pipeline}"),
@@ -1242,7 +1334,7 @@ pub fn edit_jobs(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
         info(
             rt,
             &format!(
-                "Editing arguments for job '{name}'.\n    Press [Esc + Enter] to submit, [CTRL + C] to exit.\n\n    Tip: join actions with `+`, manage pipeline with `:`.\n    https://meerschaum.io/reference/actions/#chaining-actions\n"
+                "Editing arguments for job '{name}'.\n    Press [Esc + Enter] to submit, [CTRL + C] to exit.\n\n    Tip: join actions with `+`, add flags for the whole chain after `:`.\n    https://meerschaum.io/reference/actions/#chaining-actions\n"
             ),
         );
         let label = job.label();
@@ -1288,7 +1380,7 @@ pub fn edit_jobs(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
             ));
         }
         if !pipeline_args.is_empty() {
-            let header = rt.with_formatter(|f| f.make_header("Pipeline Arguments:"));
+            let header = rt.with_formatter(|f| f.make_header("Chain Arguments:"));
             rt.print(&format!(
                 "\n{header}\n{}\n\n",
                 crate::shlex::join(&pipeline_args)
@@ -1337,12 +1429,11 @@ pub fn edit_jobs(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     Ok(SuccessTuple::ok(msg))
 }
 
-/// `(sub_args_line, pipeline_args_line)` of a `start pipeline ... -P '{...}'` job.
+/// `(sub_args_line, pipeline_args_line)` of a serialized chain job (`chain ... -P '{...}'`, or
+/// v4's `start pipeline ... -P '{...}'`).
 fn pipeline_lines(sysargs: &[String]) -> Option<(String, String)> {
-    if sysargs.len() < 2 || sysargs[0] != "start" || sysargs[1] != "pipeline" {
-        return None;
-    }
-    let rest = &sysargs[2..];
+    let action_len = meerschaum_core::chain::action_len(sysargs)?;
+    let rest = &sysargs[action_len..];
     let params_index = rest.iter().position(|a| a == "-P")?;
     let params = rest.get(params_index + 1)?;
     let parsed = Value::from_json_str(params).ok()?;
@@ -1377,11 +1468,21 @@ pub fn show_logs(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
         Ok(jobs) => jobs,
         Err(failed) => return Ok(failed),
     };
+    // A job's log keeps its styles; printed off a terminal (or under `NO_COLOR`) it is plain.
+    let plain = {
+        let settings = rt.settings();
+        !settings.ansi || settings.no_color
+    };
     if nopretty {
         for (name, job) in jobs.iter_mut() {
             let logs = match job.try_get_logs() {
                 Ok(logs) => logs.unwrap_or_else(|| "None".into()),
                 Err(e) => return Ok(SuccessTuple::fail(e)),
+            };
+            let logs = if plain {
+                crate::format::remove_ansi(&logs)
+            } else {
+                logs
             };
             rt.print(&format!("\n-*-\nMRSM_JOB: {name}\n-*-\n{logs}\n"));
         }
@@ -1526,6 +1627,11 @@ pub fn show_logs(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
                 .unwrap_or_default()
         );
         let body = rest.strip_suffix('\n').unwrap_or(&rest);
+        let body = if plain {
+            std::borrow::Cow::Owned(crate::format::remove_ansi(body))
+        } else {
+            std::borrow::Cow::Borrowed(body)
+        };
         let text = rt.with_formatter(|f| {
             let mut t = Text::plain_text(&name);
             t.append_str(&format!("{line_prefix}{body}"), "");
@@ -1552,18 +1658,20 @@ pub fn run_schedule(
     schedule: &str,
     action: impl FnMut(&mut Runtime<'_>) -> SuccessTuple,
 ) -> SuccessTuple {
-    run_schedule_jittered(rt, schedule, None, action)
+    run_schedule_jittered(rt, schedule, None, "run", action)
 }
 
 /// [`run_schedule`] with the schedule's jitter (v5, D23): every fire time moves by a FIXED offset
 /// in `[0, jitter]` seconds, seeded by the job's name (the schedule text outside a job), so a
 /// job keeps its offset across fires and restarts and jobs with one cadence spread out. The
 /// bound is the schedule's own `jitter <n> <unit>` suffix, else `jitter` (`--jitter`), else
-/// `jobs.schedule.jitter_seconds` (default 0: no jitter).
+/// `jobs.schedule.jitter_seconds` (default 0: no jitter). Each run is a lap of the job's health
+/// (`noun`: what a run does, `sync` or `run`).
 pub fn run_schedule_jittered(
     rt: &mut Runtime<'_>,
     schedule: &str,
     jitter: Option<f64>,
+    noun: &str,
     mut action: impl FnMut(&mut Runtime<'_>) -> SuccessTuple,
 ) -> SuccessTuple {
     let now = chrono::Utc::now().fixed_offset();
@@ -1601,6 +1709,10 @@ pub fn run_schedule_jittered(
         _ => None,
     };
     let mut finished = false;
+    // Job health: each scheduled run is a lap, expected every period of the schedule (the gap
+    // to the next fire, measured as the schedule runs; see `meerschaum_jobs::health`).
+    let mut heartbeat =
+        super::jobs_laps::heartbeat(meerschaum_jobs::schedule::period_seconds(schedule), noun);
     while !stop.load(Ordering::SeqCst) {
         let Some(next) = pending.take().or_else(|| trigger.next()) else {
             break;
@@ -1611,14 +1723,21 @@ pub fn run_schedule_jittered(
             finished = pending.is_none();
         }
         let wait = (next - now).num_microseconds().unwrap_or(0).max(0) as f64 / 1e6;
+        if heartbeat.record().interval_seconds.is_none_or(|i| i < wait) {
+            heartbeat.set_interval(Some(wait));
+            heartbeat.flush();
+        }
         if wait >= 1.0 {
             // Idle until the first fire: a job's startup slot (D23) is not needed for that.
             meerschaum_jobs::startup::signal_first_lap_done();
         }
+        heartbeat.waiting(Duration::try_from_secs_f64(wait).unwrap_or_default());
         if sleep_unless_stopped(wait) {
             break;
         }
-        let _ = action(rt);
+        heartbeat.lap_started();
+        let result = action(rt);
+        heartbeat.lap_finished(result.success, &result.message);
         meerschaum_jobs::startup::signal_first_lap_done();
         if !finished && pending.is_none() {
             pending = trigger.next();
@@ -1684,5 +1803,84 @@ mod warning_tests {
         );
         assert!(text.contains("🔔"), "{text}");
         assert!(job.warnings.is_empty());
+    }
+
+    /// `restart jobs` (and `compose up`) move a non-default root's `local` job to systemd: the
+    /// unit gets the job's command and settings, the local directory becomes the hidden sister.
+    #[test]
+    fn a_local_job_of_another_root_moves_to_systemd() {
+        use meerschaum_jobs::executor::JobExecutor;
+        let dir = tempfile::tempdir().unwrap();
+        let fake = Arc::new(meerschaum_jobs::FakeSystemctl::new());
+        let mut ctx = JobsContext::for_root(dir.path().join("project/root"))
+            .with_process_runner(fake.clone())
+            .with_launcher(meerschaum_jobs::Launcher {
+                supervisor: vec!["unused".into()],
+                program: vec!["/usr/bin/mrsm".into()],
+            })
+            .with_process_env(vec![("PATH".into(), "/usr/bin".into())]);
+        ctx.paths.systemd_user_dir = dir.path().join("home/.config/systemd/user");
+        // As an installed copy on a systemd host would choose it.
+        ctx.config.executor = Some("systemd".into());
+        assert!(moves_local_jobs_to_systemd(&ctx));
+        let mut env = IndexMap::new();
+        env.insert("MRSM__COMPOSE_PROJECT".to_string(), "weather".to_string());
+        let mut local = Job::new(
+            "weather sync",
+            Some(vec!["sync".into(), "pipes".into(), "--loop".into()]),
+            JobOptions {
+                executor_keys: Some("local".into()),
+                env: Some(env),
+                ..Default::default()
+            },
+            &ctx,
+        )
+        .unwrap();
+        assert!(local.daemon().setup(true).success);
+        let (mut out, err) = (Vec::new(), Sink::default());
+        let moved = {
+            let mut rt = Runtime::new(
+                crate::types::DateContext::system(),
+                80,
+                &mut out,
+                |_: &str| None,
+            );
+            rt.err = Box::new(err.clone());
+            move_job_to_systemd(&mut rt, &ctx, &mut local)
+        };
+        assert!(moved.success, "{}", moved.message);
+        let warned = String::from_utf8(err.0.borrow().clone()).unwrap();
+        assert!(
+            warned.contains("Moved the local job 'weather sync' to systemd"),
+            "{warned}"
+        );
+        let ex = meerschaum_jobs::systemd::SystemdExecutor::new(ctx.clone());
+        assert_eq!(ex.get_job_names(), vec!["weather sync".to_string()]);
+        // Named after the Compose project, with the same command and environment.
+        assert_eq!(
+            ex.get_service_name("weather sync"),
+            "mrsm-weather.weather-sync.service"
+        );
+        assert_eq!(
+            ex.get_job_sysargs("weather sync"),
+            vec!["sync", "pipes", "--loop"]
+        );
+        let props = ex.get_job_properties("weather sync");
+        assert_eq!(
+            props
+                .get("env")
+                .and_then(|e| e.get("MRSM__COMPOSE_PROJECT"))
+                .and_then(Value::as_str),
+            Some("weather")
+        );
+        assert!(
+            fake.rendered_calls()
+                .iter()
+                .any(|c| c.starts_with("start mrsm-weather."))
+        );
+        // The default root's local jobs were someone's choice: they stay.
+        let mut default_ctx = ctx.clone();
+        default_ctx.paths.root = dir.path().join("home/.config/meerschaum");
+        assert!(!moves_local_jobs_to_systemd(&default_ctx));
     }
 }

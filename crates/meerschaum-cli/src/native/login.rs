@@ -34,13 +34,20 @@ pub fn login(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     for k in &keys {
         let (typ, label) = split_keys(k);
         let attrs = connector_attributes(rt.config(), &typ, &label);
+        let undefined = attrs.is_empty();
         // The connector's attributes include what a `uri` carries (`c.__dict__` in v4).
         let connector = match APIConnector::new(Some(&label), attrs) {
             Ok(connector) => connector,
             Err(e) => {
                 // `get_connector` warns about the attributes and prints the error (without a
-                // traceback) before `parse_instance_keys` raises.
-                if e.to_string().contains("Missing required attribute 'host'") {
+                // traceback) before `parse_instance_keys` raises. A connector defined nowhere
+                // says where to define it (rc15).
+                if undefined {
+                    warn(
+                        rt,
+                        &super::connectors::undefined_connector_message(&typ, &label),
+                    );
+                } else if e.to_string().contains("Missing required attribute 'host'") {
                     warn(rt, &format!("Incorrect attributes for connector '{k}'."));
                     let line = rt.with_formatter(|f| {
                         let icon = f.formatting_str(&["errors", f.charset(), "icon"]);

@@ -147,7 +147,7 @@ fn plan_pipes_prints_the_plan_without_syncing() {
         "sql:local",
     ]);
     eprintln!("{out}");
-    assert!(out.starts_with("node"), "{out}");
+    assert!(out.starts_with("pipe"), "{out}");
     for metric in ["raw", "clean", "daily"] {
         assert!(
             out.contains(&format!("Pipe('sql:local', '{metric}')")),
@@ -421,23 +421,23 @@ fn graph_sync_with_nopretty_has_no_gantt() {
 }
 
 #[test]
-fn sync_help_lists_v5_flags_after_the_v4_text() {
+fn sync_help_lists_the_graph_flags_in_its_text() {
     let env = chain();
     let out = env.ok(&["sync", "pipes", "--help"]);
     assert!(
         out.starts_with("\nFetch and sync new data for pipes."),
         "{out}"
     );
-    let at = out.find("v5 additions (not in v4):").expect(&out);
+    assert!(!out.contains("v5 additions"), "{out}");
     for flag in ["--parents", "--children", "--resume", "--chunk-pipelining"] {
-        assert!(out[at..].contains(flag), "{flag} in {out}");
-        assert!(
-            !out[..at].contains(flag),
-            "{flag} leaked into v4 text: {out}"
-        );
+        assert!(out.contains(flag), "{flag} in {out}");
     }
     let plan_help = env.ok(&["plan", "pipes", "--help"]);
     assert!(plan_help.contains("without syncing"), "{plan_help}");
+    // `mrsm -h` lists them in their own group.
+    let global = env.ok(&["-h"]);
+    let group = global.find("\nPipeline options:\n").expect(&global);
+    assert!(global[group..].contains("--parents [N]"), "{global}");
 }
 
 #[test]
@@ -621,7 +621,7 @@ fn plan_pipes_shows_the_window_the_executor_passes() {
     let begin = planned["bounds"]["begin"].to_string();
     assert!(begin.contains("2023-12-19"), "{planned}");
     let table = env.ok(&["plan", "pipes", "-m", "clean", "--parents"]);
-    assert!(table.contains("backfill*  [2023-12-19 00:00"), "{table}");
+    assert!(table.contains("backfill*  2023-12-19 00:00 → "), "{table}");
 
     env.ok(&["sync", "pipes", "-m", "clean", "--parents", "--yes"]);
     let runs = env.ok(&["show", "runs", "--nopretty"]);

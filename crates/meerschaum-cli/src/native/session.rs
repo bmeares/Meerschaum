@@ -604,6 +604,14 @@ impl Session {
                 format!("No connector was registered for '{full}'."),
             ));
         }
+        if matches!(typ.as_str(), "api" | "valkey")
+            && connector_attributes(config, &typ, &label).is_empty()
+        {
+            return Err(ActionError::new(
+                "ValueError",
+                super::connectors::undefined_connector_message(&typ, &label),
+            ));
+        }
         let inst = match typ.as_str() {
             "sql" => Instance::Sql(Arc::new(self.sql_connector(&label, config)?)),
             "api" => {
@@ -647,7 +655,25 @@ impl Session {
                         keys,
                         self.pool(config),
                     ))
-                    .map_err(|e| ActionError::new("WorkerError", e.to_string()))?;
+                    .map_err(|e| {
+                        // A type no plugin declares: say where connectors come from (rc15).
+                        use meerschaum_core::config::connector_types;
+                        let paths = config.paths();
+                        let known = connector_types::is_builtin_connector_type(&typ)
+                            || connector_types::plugin_connector_types(
+                                &paths.root_dir,
+                                &paths.plugins_dirs,
+                            )
+                            .contains(&typ);
+                        if known {
+                            ActionError::new("WorkerError", e.to_string())
+                        } else {
+                            ActionError::new(
+                                "ValueError",
+                                super::connectors::undefined_connector_message(&typ, &label),
+                            )
+                        }
+                    })?;
                 if !connector.info().is_instance {
                     return Err(ActionError::new(
                         "Exception",
@@ -670,7 +696,12 @@ impl Session {
         let settings = InstanceSettings::from_config(spec.flavor, config);
         let conn = self
             .block_on(SqlConnector::connect_with(label, spec, settings))
-            .map_err(|e| ActionError::new("OperationalError", e.to_string()))?;
+            .map_err(|e| {
+                ActionError::new(
+                    "OperationalError",
+                    super::connectors::connect_failure_message(label, config, &e),
+                )
+            })?;
         // Cross-instance `{{ Pipe(..., instance='sql:other') }}` references resolve against the
         // configured connectors, not only `MRSM_SQL_<LABEL>` environment variables.
         conn.set_instance_provider(Arc::new(ConfiguredSqlProvider::new(config)));
@@ -704,10 +735,10 @@ pub fn sql_spec(label: &str, config: &Config) -> Result<ConnectionSpec, ActionEr
         }
     }
     if attrs.is_empty() {
-        // PARITY: `SQLConnector.__init__` raises when neither `flavor` nor `uri` is set.
+        // v4 raised "Missing flavor" here; the connector is defined nowhere (rc15, S4).
         return Err(ActionError::new(
             "ValueError",
-            format!("    Missing flavor. Provide flavor as a key for 'sql:{label}'."),
+            super::connectors::undefined_connector_message("sql", label),
         ));
     }
     let ca = sql_attributes(label, &attrs)?;

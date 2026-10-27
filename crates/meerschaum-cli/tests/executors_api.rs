@@ -345,6 +345,11 @@ fn api_executor_round_trip_against_a_loopback_server() {
         text(&out).contains("MRSM_TEST_MARK")
     });
 
+    // rc15 (C3): the job's metadata carries its health (a job without laps: unknown).
+    let meta = raw_response(server.port, "/jobs/alpha");
+    assert!(meta.contains(r#""health":{"#), "{meta}");
+    assert!(meta.contains(r#""state":"unknown""#), "{meta}");
+
     // Idempotent start: the running job is not touched.
     let pid_before = server.worker_pids();
     assert_eq!(pid_before.len(), 1);
@@ -530,6 +535,23 @@ fn compose_fails_when_the_shared_executor_is_unreachable() {
         "{}",
         text(&down)
     );
+}
+
+/// A raw `GET` of `path`: the whole response (status line, headers and body).
+fn raw_response(port: u16, path: &str) -> String {
+    use std::io::{Read, Write};
+    let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(20)))
+        .unwrap();
+    write!(
+        stream,
+        "GET {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+    )
+    .unwrap();
+    let mut out = String::new();
+    let _ = stream.read_to_string(&mut out);
+    out
 }
 
 /// One raw HTTP/1.1 request (the path is sent as is, so `%2E%2E` stays encoded); the status line.

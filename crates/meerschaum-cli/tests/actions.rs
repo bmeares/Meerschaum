@@ -215,9 +215,17 @@ fn pipelines_dispatch_core_steps_natively() {
         "{out}"
     );
     assert_eq!(out.matches(meerschaum_cli::VERSION).count(), 3, "{out}");
-    assert!(out.contains("Ran pipeline 3 times."), "{out}");
-    let (result, _) = run(tmp.path(), &["start", "pipeline"], no_env, &host);
-    assert_eq!(result, SuccessTuple::fail("Nothing to do."));
+    assert!(out.contains("Ran the action chain 3 times."), "{out}");
+    // The current form of a serialized chain runs the same way.
+    let (result, out) = run(
+        tmp.path(),
+        &["chain", "x2", "--min-seconds", "0", "-P", params],
+        no_env,
+        &host,
+    );
+    assert!(result.success, "{result:?}");
+    assert_eq!(out.matches(meerschaum_cli::VERSION).count(), 2, "{out}");
+    assert!(out.contains("Ran the action chain 2 times."), "{out}");
 }
 
 #[test]

@@ -1,6 +1,6 @@
-//! Sysargs-level helpers: `+` chaining, `:` pipeline flags, API executor keys, the
-//! `start pipeline` rendition, and the arguments-dict → sysargs round trip
-//! (`meerschaum/_internal/arguments/_parse_arguments.py`).
+//! Sysargs-level helpers: `+` chaining, `:` chain flags, API executor keys, the serialized
+//! action chain (`chain ... -P '{"sub_args_line": ...}'`, v4's `start pipeline` form), and the
+//! arguments-dict → sysargs round trip (`meerschaum/_internal/arguments/_parse_arguments.py`).
 
 use crate::shlex;
 use crate::spec::{ARGUMENTS, keys};
@@ -96,7 +96,11 @@ pub fn remove_api_executor_keys(sysargs: &[String]) -> Vec<String> {
         .collect()
 }
 
-/// `get_pipeline_sysargs`: `start pipeline <pipeline flags> -P {"sub_args_line": ..., "patch_args": ...}`.
+/// `get_pipeline_sysargs`: the chain as one command line, `chain <chain flags> -P {"sub_args_line":
+/// ..., "patch_args": ...}` (see [`meerschaum_core::chain`]).
+///
+/// v4 wrote the same payload under `start pipeline`, which now starts saved Pipelines; that form
+/// still runs as a chain (`dispatch::run_action`).
 pub fn get_pipeline_sysargs(
     sysargs: &[String],
     pipeline_args: &[String],
@@ -117,25 +121,26 @@ pub fn get_pipeline_sysargs(
         ),
         (PyValue::str("patch_args"), patch),
     ]);
-    let mut out = vec!["start".to_string(), "pipeline".to_string()];
+    let mut out = vec![meerschaum_core::chain::CHAIN_ACTION.to_string()];
     out.extend(pipeline_args.iter().cloned());
     out.push("-P".into());
     out.push(params.json_dumps_compact().unwrap_or_else(|_| "{}".into()));
     out
 }
 
-/// `compress_pipeline_sysargs`: the condensed `<sysargs> : <pipeline flags>` rendition.
+/// `compress_pipeline_sysargs`: the condensed `<sysargs> : <pipeline flags>` rendition of a
+/// serialized chain, in either form (`chain ...` or v4's `start pipeline ...`).
 pub fn compress_pipeline_sysargs(pipeline_sysargs: &[String]) -> Result<Vec<String>, PyException> {
-    if pipeline_sysargs.len() < 2
-        || pipeline_sysargs[0] != "start"
-        || pipeline_sysargs[1] != "pipeline"
-    {
+    let Some(action_len) = meerschaum_core::chain::action_len(pipeline_sysargs) else {
         return Ok(pipeline_sysargs.to_vec());
-    }
+    };
     let Some(params_ix) = pipeline_sysargs.iter().position(|a| a == "-P") else {
         return Ok(pipeline_sysargs.to_vec());
     };
-    let pipeline_args = &pipeline_sysargs[2..params_ix];
+    if params_ix < action_len {
+        return Ok(pipeline_sysargs.to_vec());
+    }
+    let pipeline_args = &pipeline_sysargs[action_len..params_ix];
     let params_str = pipeline_sysargs.last().cloned().unwrap_or_default();
     let Ok(PyValue::Dict(params)) = crate::pyjson::loads(&params_str) else {
         // PARITY: a JSON value that is not an object makes `.get` raise in v4.
@@ -170,8 +175,22 @@ pub fn compress_pipeline_sysargs(pipeline_sysargs: &[String]) -> Result<Vec<Stri
 /// `parse_dict_to_sysargs`: revert an arguments dictionary back to a command line.
 pub fn parse_dict_to_sysargs(args: &ArgsMap) -> Result<Vec<String>, PyException> {
     let mut sysargs: Vec<String> = Vec::new();
-    if let Some(PyValue::List(action)) = args.get("action") {
-        sysargs.extend(action.iter().map(PyValue::py_str));
+    let action: Vec<String> = match args.get("action") {
+        Some(PyValue::List(action)) => action.iter().map(PyValue::py_str).collect(),
+        _ => Vec::new(),
+    };
+    // `python file.py [args ...]` (v5): the file and the script's words go last, after the flags
+    // and the interpreter's `[sub-arguments]`, so parsing the line again gives the script the
+    // same words (`parse::python_script_index`).
+    let script =
+        action.len() >= 2 && action[0] == "python" && crate::parse::is_python_script(&action[1]);
+    let mut script_words: Vec<String> = Vec::new();
+    let mut interpreter_args: Vec<String> = Vec::new();
+    if script {
+        sysargs.push(action[0].clone());
+        script_words.extend(action[1..].iter().cloned());
+    } else {
+        sysargs.extend(action);
     }
     // v5-only flags (`--parents`, `--resume`, ...) come from the same spec `parse_arguments`
     // reads; they go before any `-A` / `--` sub-arguments, which end engine parsing.
@@ -195,7 +214,13 @@ pub fn parse_dict_to_sysargs(args: &ArgsMap) -> Result<Vec<String>, PyException>
                     continue;
                 }
                 let is_blank = items.len() == 1 && items[0].as_str() == Some("");
-                if a == "sub_args" && !is_blank {
+                if a == "sub_args" && script {
+                    if !is_blank {
+                        interpreter_args.extend(items.iter().map(|item| {
+                            format!("{}{}{}", keys::SUB_BEGIN, item.py_str(), keys::SUB_END)
+                        }));
+                    }
+                } else if a == "sub_args" && !is_blank {
                     let strs: Vec<String> = items.iter().map(PyValue::py_str).collect();
                     sysargs.push("-A".into());
                     sysargs.push(shlex::join(&strs));
@@ -239,6 +264,8 @@ pub fn parse_dict_to_sysargs(args: &ArgsMap) -> Result<Vec<String>, PyException>
             }
         }
     }
+    sysargs.extend(interpreter_args);
+    sysargs.extend(script_words);
     Ok(sysargs)
 }
 

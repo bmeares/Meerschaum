@@ -22,6 +22,10 @@
 //! 5. **Additive v5 actions.** Five menu/help scenarios use explicit row overlays from
 //!    `fixtures/shell_screens_v5_actions.json` for the changed vocabulary and resulting
 //!    geometry. All other cells still compare against the unchanged v4 recording.
+//! 6. **`help`.** The shell's `help` prints the grouped action list and every option (rc15)
+//!    where v4 printed the `show actions` table, so in `long_output` the two snapshots between
+//!    `help` and the next command compare the prompt row only, and the screen must show the end
+//!    of the help (its last option).
 //!
 //! The harness emulates pyte's resize (shrinking deletes lines at the top and keeps the cursor
 //! row) so both shells are measured against the same terminal model.
@@ -476,6 +480,25 @@ fn compare(name: &str, label: &str, v4: &Snapshot, v5: &Snapshot, searching: boo
                 v4.lines[a], v5.lines[b]
             )]
         };
+    }
+    if name == "long_output" && (label == "after help" || label == "typed seq") {
+        // Tolerance 6: the help scrolled the screen; the prompt is the same, at the bottom.
+        let (a, b) = (find_prompt(&v4), find_prompt(&v5));
+        let mut diffs = Vec::new();
+        if v4.lines[a] != v5.lines[b] || v4.styles[a] != v5.styles[b] {
+            diffs.push(format!(
+                "prompt row:\n    v4: {:?}\n    v5: {:?}",
+                v4.lines[a], v5.lines[b]
+            ));
+        }
+        if !v5
+            .lines
+            .iter()
+            .any(|l| l.trim_start().starts_with("--last N"))
+        {
+            diffs.push("the end of the help (`--last N`) is not on screen".to_string());
+        }
+        return diffs;
     }
     if name == "no_ansi" {
         // Tolerance 4: v4's no-ANSI toolbar is one cell too wide (it counts the icon as one

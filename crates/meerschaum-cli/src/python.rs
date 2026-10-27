@@ -79,7 +79,25 @@ pub fn action_name(words: &[String], manifest: &Manifest) -> Option<String> {
     .map(str::to_owned)
 }
 
+/// Whether the plugin action `words` name repeats itself with `--loop`: its function takes a
+/// `loop` parameter (the 4.1 pattern, `def poll(loop=False, ...)`), so the host must not run it
+/// in laps (`ActionManifest::handles_loop`).
+pub fn action_handles_loop(words: &[String], manifest: &Manifest) -> bool {
+    let Some(name) = action_name(words, manifest) else {
+        return false;
+    };
+    manifest
+        .plugins
+        .values()
+        .flat_map(|p| &p.actions)
+        .find(|a| a.name == name)
+        .is_some_and(|a| a.handles_loop == Some(true))
+}
+
 /// Plugin sysargs are parsed by the worker so `add_plugin_argument` retains Python semantics.
+///
+/// The host runs a plugin action's `-s` schedule and its `--loop` laps itself (`dispatch::repeat`),
+/// so the worker runs the action once per call (`host_schedules`).
 pub fn plugin_action(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     let sysargs = native::words(args, "sysargs");
     let kwargs = Wire::Map(
@@ -97,6 +115,7 @@ pub fn plugin_action(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
             )
             .set("patch", kwargs)
     };
+    let message = message.set("host_schedules", Wire::Boolean(true));
     let handler = native::sync::callbacks(rt, args)?;
     call("host_action", message, Some(handler), rt)
 }
@@ -135,6 +154,17 @@ fn call(
     let session = session(rt);
     let pool = session.pool(rt.config());
     message.insert("stream_output", true);
+    // The worker's output is a pipe to this process: it is printed without styles when this
+    // process prints plain text (off a terminal, `NO_COLOR`, `formatting:ansi` off).
+    let plain = {
+        let settings = rt.settings();
+        !settings.ansi || settings.no_color
+    };
+    // Its stderr text follows stderr's own check (`Runtime::err_settings`).
+    let plain_err = {
+        let settings = rt.err_settings();
+        !settings.ansi || settings.no_color
+    };
     let (sender, mut output) = tokio::sync::mpsc::channel(64);
     let reply = session
         .block_on(async {
@@ -152,11 +182,11 @@ fn call(
             let result = loop {
                 tokio::select! {
                     result = &mut call => break result,
-                    Some(chunk) = output.recv() => print_chunk(rt, chunk),
+                    Some(chunk) = output.recv() => print_chunk(rt, chunk, (plain, plain_err)),
                 }
             };
             while let Ok(chunk) = output.try_recv() {
-                print_chunk(rt, chunk);
+                print_chunk(rt, chunk, (plain, plain_err));
             }
             result
         })
@@ -165,8 +195,8 @@ fn call(
         Wire::Map(fields) => Msg(fields),
         _ => return Err(ActionError::new("WorkerError", "Invalid action reply")),
     };
-    rt.print(result.str("stdout").unwrap_or_default());
-    rt.eprint(result.str("stderr").unwrap_or_default());
+    rt.print(&styled(result.str("stdout").unwrap_or_default(), plain));
+    rt.eprint(&styled(result.str("stderr").unwrap_or_default(), plain_err));
     let tuple = result
         .get("result")
         .and_then(Wire::as_array)
@@ -181,42 +211,32 @@ fn call(
     })
 }
 
-fn print_chunk(rt: &mut Runtime<'_>, chunk: meerschaum_worker::FetchChunk) {
+/// `text`, or `text` without its SGR sequences when `plain`.
+fn styled(text: &str, plain: bool) -> std::borrow::Cow<'_, str> {
+    if plain && text.contains('\x1b') {
+        std::borrow::Cow::Owned(crate::format::remove_ansi(text))
+    } else {
+        std::borrow::Cow::Borrowed(text)
+    }
+}
+
+/// Print a chunk of a worker's output; `(plain, plain_err)` say whether stdout and stderr take
+/// no styles.
+fn print_chunk(
+    rt: &mut Runtime<'_>,
+    chunk: meerschaum_worker::FetchChunk,
+    (plain, plain_err): (bool, bool),
+) {
     if let meerschaum_worker::FetchChunk::Text(text) = chunk
         && let Ok(value) = serde_json::from_str::<serde_json::Value>(&text)
     {
         let text = value["text"].as_str().unwrap_or_default();
         if value["stream"] == "stderr" {
-            rt.eprint(text);
+            rt.eprint(&styled(text, plain_err));
         } else {
-            rt.print(text);
+            rt.print(&styled(text, plain));
         }
     }
-}
-
-/// Append plugin help only when plugins contributed actions or flags.
-pub fn print_help(rt: &mut Runtime<'_>) {
-    let Ok(manifest) = manifest(rt) else {
-        return;
-    };
-    let mut text = String::new();
-    for plugin in manifest.plugins.values() {
-        for action in &plugin.actions {
-            text.push_str(&format!(
-                "\n{}\n{}\n",
-                action.name.replace('_', " "),
-                action.doc.as_deref().unwrap_or_default()
-            ));
-        }
-        for arg in &plugin.arguments {
-            text.push_str(&format!(
-                "  {}  {}\n",
-                arg.option_strings.join(", "),
-                arg.help.as_deref().unwrap_or_default()
-            ));
-        }
-    }
-    rt.print(&text);
 }
 
 /// Invoke plugin completers on the process's existing worker pool.

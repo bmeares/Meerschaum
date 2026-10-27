@@ -90,6 +90,8 @@ fn metadata(job: &mut Job) -> Json {
     meta.insert("restart".into(), Json::Bool(job.restarts()));
     meta.insert("status".into(), Json::String(status));
     meta.insert("daemon".into(), Json::Object(daemon));
+    // v5: the job's health (`job.health`), so `api:` executors report it like local ones.
+    meta.insert("health".into(), job.health().to_json());
     Json::Object(meta)
 }
 

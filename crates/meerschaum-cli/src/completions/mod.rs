@@ -984,10 +984,12 @@ mod tests {
         let all = run("mrsm ");
         assert!(texts(&all).contains(&"prune"));
         assert!(texts(&all).contains(&"show"));
-        // `instance`, `exit` and `help` are shell commands, not program actions.
-        for shell_only in ["instance", "exit", "help", "pass", "debug"] {
+        // `instance` and `exit` are shell commands, not program actions; `help` is both (rc15:
+        // `mrsm help`).
+        for shell_only in ["instance", "exit", "pass", "debug"] {
             assert!(!texts(&all).contains(&shell_only), "{shell_only}");
         }
+        assert!(texts(&all).contains(&"help"));
         assert!(run("mrsm zzz").candidates.is_empty());
     }
 
@@ -1097,13 +1099,76 @@ mod tests {
             .extend(["hello".to_string(), "foo_bar".to_string()]);
         d.do_names.sort();
         let dates = DateContext::system();
-        let a = complete(&words("mrsm he"), &d, &dates);
+        let a = complete(&words("mrsm hel"), &d, &dates);
+        assert_eq!(texts(&a), ["hello", "help"]);
+        let a = complete(&words("mrsm hell"), &d, &dates);
         assert_eq!(texts(&a), ["hello"]);
         let a = complete(&words("mrsm hello w"), &d, &dates);
         assert_eq!(texts(&a), ["world"]);
         // The first word keeps its underscore; after the first part a space-separated word works.
         let a = complete(&words("mrsm foo"), &d, &dates);
         assert_eq!(texts(&a), ["foo_bar"]);
+        let a = complete(&words("mrsm foo "), &d, &dates);
+        assert_eq!(texts(&a), ["bar"]);
+    }
+
+    #[test]
+    fn plugin_subcommands_complete_under_their_first_word() {
+        use meerschaum_worker::manifest::ActionManifest;
+        let mut d = data();
+        // `weather_wait` and `weather_status` (no `weather` action of their own) run as
+        // `mrsm weather wait`.
+        d.plugin_actions = ["weather_wait", "weather_status"]
+            .iter()
+            .map(|name| ActionManifest {
+                name: name.to_string(),
+                ..ActionManifest::default()
+            })
+            .collect();
+        d.do_names
+            .extend(["weather_wait".to_string(), "weather_status".to_string()]);
+        d.do_names.sort();
+        let dates = DateContext::system();
+        let mut subcommands = texts(&complete(&words("mrsm weather "), &d, &dates))
+            .into_iter()
+            .map(str::to_string)
+            .collect::<Vec<_>>();
+        subcommands.sort();
+        assert_eq!(subcommands, ["status", "wait"]);
+        assert_eq!(
+            texts(&complete(&words("mrsm weather w"), &d, &dates)),
+            ["wait"]
+        );
+    }
+
+    /// `@make_action(name='weather wait_for')`: the explicit words keep their underscore in
+    /// completion (an underscore name would split into `wait for`).
+    #[test]
+    fn explicit_action_words_keep_their_underscores() {
+        use meerschaum_worker::manifest::ActionManifest;
+        let mut d = data();
+        d.plugin_actions = vec![ActionManifest {
+            name: "weather_wait_for".into(),
+            words: vec!["weather".into(), "wait_for".into()],
+            ..ActionManifest::default()
+        }];
+        d.do_names.push("weather_wait_for".to_string());
+        d.do_names.sort();
+        let dates = DateContext::system();
+        assert_eq!(
+            texts(&complete(&words("mrsm weather "), &d, &dates)),
+            ["wait_for"]
+        );
+        assert_eq!(
+            texts(&complete(&words("mrsm weather wait_"), &d, &dates)),
+            ["wait_for"]
+        );
+        let shell: Vec<String> = d
+            .get_completions("weather wa", &dates)
+            .into_iter()
+            .map(|c| c.text)
+            .collect();
+        assert_eq!(shell, ["weather wait_for"]);
     }
 
     #[test]

@@ -28,6 +28,13 @@ pub fn run(sysargs: &[String]) -> i32 {
     }
     meerschaum_jobs::supervisor::run_if_requested_with(sysargs);
     meerschaum_jobs::systemd_job::run_if_requested_with(sysargs);
+    // The syncs this process records in pipes' sync statuses come from the command line
+    // (`mrsm start api` switches to `api` while it serves). The previous role comes back when
+    // the command line returns: Python's `_native.main()` runs it inside a Python process, whose
+    // later `pipe.sync()` calls are `python` again.
+    let _sync_source = meerschaum_connector::sync_status::role_scope(
+        meerschaum_connector::sync_status::SyncSource::Cli,
+    );
     // Debug output (`--debug`, the shell's `debug` toggle) and `RUST_LOG` diagnostics go to
     // stderr through this subscriber (see `debug_log`).
     crate::debug_log::install();
@@ -46,6 +53,11 @@ pub fn run(sysargs: &[String]) -> i32 {
         dispatch::main(sysargs, &mut rt)
     };
     if let Some(session) = &rt.native {
+        // Sync statuses are written in the background: keep the latest ones, debounced ones
+        // included, before the runtime goes away.
+        session.block_on_uninterruptible(meerschaum_connector::sync_status::flush(
+            meerschaum_connector::sync_status::RECORD_TIMEOUT,
+        ));
         session.shutdown();
     }
     if rt.restart_requested {
