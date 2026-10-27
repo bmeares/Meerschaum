@@ -35,7 +35,8 @@ def test_list_opens_a_read_only_pipeline_then_edit_mode_saves(server, tab):
         tab.goto('/dash/pipelines', '#pipelines-list')
         card = page.locator('.pipeline-list-card').filter(has_text='workspace-test')
         card.wait_for(timeout=60000)
-        assert '1 member · 1 instance' in card.inner_text()
+        ### One member that follows its parents, before any run counted them.
+        assert '1 Pipe + parents · 1 instance' in card.inner_text()
         card.locator('.pipeline-title-link').click()
         page.wait_for_function("location.pathname === '/dash/pipelines/workspace-test'")
         page.wait_for_selector('.pipeline-stage', timeout=60000)
@@ -331,7 +332,8 @@ def test_pipeline_history_deep_link_run_output_and_confirmed_delete(server, tab,
     ### A member's own part of the run.
     page.locator(f'.pipeline-stage[data-ref="{PARENT}"] .pipeline-node-output-icon').click()
     _wait_text(page, '#pipeline-node-run-label', f"Pipeline('{name}')")
-    page.wait_for_function("document.getElementById('pipeline-node-output').textContent.includes('node_finished')", timeout=60000)
+    ### The member's finished line, in plain words (`Synced Pipe(...): 1 inserted`).
+    page.wait_for_function("document.getElementById('pipeline-node-output').textContent.includes('Synced ')", timeout=60000)
     page.locator('#pipeline-output-close').click()
     ### The history link survives hydration and reload.
     tab.goto(f'/dash/pipelines/{name}?' + urlencode({'instance': 'sql:w7console', 'run_id': run_id}), '#pipelines-gantt .gtitle')
@@ -470,8 +472,11 @@ def test_the_global_instance_is_shared_by_the_console_and_pipelines(server, tab)
     cookie = [c for c in page.context.cookies() if c['name'] == 'mrsm-instance'][0]['value']
     from urllib.parse import unquote
     assert unquote(cookie) == other
-    tab.goto('/dash', '#instance-select')
+    tab.goto('/dash/terminal', '#instance-select')
     page.wait_for_function("(value) => document.getElementById('instance-select').value === value", arg=other)
+    ### Every page's selector shows the global instance (the Overview's included).
+    tab.goto('/dash', '#pages-instance-select')
+    assert page.locator('#pages-instance-select').input_value() == other
     page.evaluate("document.cookie = 'mrsm-instance=' + encodeURIComponent('sql:w7console') + '; path=/'")
     tab.goto('/dash/pipelines', '#pipelines-list')
     page.locator('.pipeline-list-card', has_text='instance-test').wait_for(timeout=60000)

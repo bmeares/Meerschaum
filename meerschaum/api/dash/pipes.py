@@ -330,7 +330,8 @@ def accordion_items_from_pipe(
     _build_children_num: int = 10,
 ) -> 'List[dbc.AccordionItem]':
     """
-    Build the accordion items for a given pipe.
+    Build the accordion items for a given pipe (each section's body comes from its builder below,
+    which the pipe page's tabs reuse).
     """
     if active_items is None:
         active_items = []
@@ -358,552 +359,649 @@ def accordion_items_from_pipe(
     for item in skip_items:
         _ = items_titles.pop(item, None)
 
-    pipe_meta_str = json.dumps(pipe.meta, sort_keys=True)
+    builders = {
+        'overview': lambda: build_keys_body(pipe),
+        'stats': lambda: build_stats_body(pipe),
+        'columns': lambda: build_columns_body(pipe),
+        'parameters': lambda: build_parameters_body(
+            pipe,
+            authenticated=authenticated,
+            _build_references_num=_build_references_num,
+            _build_parents_num=_build_parents_num,
+            _build_children_num=_build_children_num,
+        ),
+        'sql': lambda: build_sql_body(pipe),
+        'recent-data': lambda: build_recent_data_body(pipe),
+        'query-data': lambda: build_query_data_body(pipe),
+        'sync-data': lambda: build_sync_documents_body(pipe, authenticated=authenticated),
+        'relations': lambda: build_relations_body(pipe, authenticated=authenticated),
+    }
 
     ### Only generate items if they're in the `active_items` list.
-    items_bodies = {}
-    if 'overview' in active_items:
-        overview_header = [html.Thead(html.Tr([html.Th("Attribute"), html.Th("Value")]))]
-        dt_name, id_name, val_name = pipe.get_columns('datetime', 'id', 'value', error=False)
-        target_str = (
-            pipe.target
-            if pipe.instance_connector.type != 'sql'
-            else sql_item_name(
-                pipe.target,
-                flavor=pipe.instance_connector.flavor,
-                schema=pipe.instance_connector.get_pipe_schema(pipe),
-            )
-        )
-        overview_rows = [
-            html.Tr([html.Td("Connector"), html.Td(html.Pre(f"{pipe.connector_keys}"))]),
-            html.Tr([html.Td("Metric"), html.Td(html.Pre(f"{pipe.metric_key}"))]),
-            html.Tr([html.Td("Location"), html.Td(html.Pre(f"{pipe.location_key}"))]),
-            html.Tr([html.Td("Instance"), html.Td(html.Pre(f"{pipe.instance_keys}"))]),
-            html.Tr([html.Td("Target Table"), html.Td(html.Pre(target_str))]),
-        ]
-
-        indices_header = [
-            html.Thead(
-                html.Tr(
-                    [
-                        html.Th(
-                            html.Span(
-                                "Key",
-                                id={'type': 'key-table-header', 'index': pipe_meta_str},
-                                style={"textDecoration": "underline", "cursor": "pointer"},
-                            ),
-                        ),
-                        html.Th(
-                            html.Span(
-                                "Column",
-                                id={'type': 'column-table-header', 'index': pipe_meta_str},
-                                style={"textDecoration": "underline", "cursor": "pointer"},
-                            ),
-                        ),
-                        html.Th(
-                            html.Span(
-                                "Index",
-                                id={'type': 'index-table-header', 'index': pipe_meta_str},
-                                style={"textDecoration": "underline", "cursor": "pointer"},
-                            ),
-                        ),
-                        html.Th(
-                            html.Span(
-                                "Is Composite",
-                                id={'type': 'is-composite-table-header', 'index': pipe_meta_str},
-                                style={"textDecoration": "underline", "cursor": "pointer"},
-                            ),
-                        ),
-                        dbc.Tooltip(
-                            "Unique reference name for the index "
-                            "(e.g. `datetime` for the range axis)",
-                            target={'type': 'key-table-header', 'index': pipe_meta_str},
-                        ),
-                        dbc.Tooltip(
-                            "The actual column (field name) in the target dataset.",
-                            target={'type': 'column-table-header', 'index': pipe_meta_str},
-                        ),
-                        dbc.Tooltip(
-                            "The name of the index created on the given columns.",
-                            target={'type': 'index-table-header', 'index': pipe_meta_str},
-                        ),
-                        dbc.Tooltip(
-                            "Whether the column is used in the composite primary key "
-                            "to determine updates.",
-                            target={'type': 'is-composite-table-header', 'index': pipe_meta_str},
-                        ),
-                    ]
-                )
-            )
-        ]
-
-        indices = pipe.indices
-        columns = pipe.columns
-        index_column_names = pipe.get_indices()
-        indices_rows = []
-        for ix_key, ix_cols in indices.items():
-            col = columns.get(ix_key, None)
-            ix_name = index_column_names.get(ix_key, None)
-            if not col and not ix_cols:
-                continue
-            if not isinstance(ix_cols, (list, tuple)):
-                ix_cols = [ix_cols]
-            if col:
-                col_item = html.Pre(col)
-            elif len(ix_cols) == 1:
-                col_item = html.Pre(ix_cols[0])
-            else:
-                col_item = html.Pre(html.Ul([html.Li(_c) for _c in ix_cols]))
-            is_composite_item = "✅" if col else ""
-            ix_key_item = html.Pre(
-                INDEX_PREFIX_EMOJI.get(ix_key, '')
-                + (' ' if ix_key in INDEX_PREFIX_EMOJI else '')
-                + ix_key
-            )
-            indices_rows.append(
-                html.Tr([
-                    html.Td(ix_key_item),
-                    html.Td(col_item),
-                    html.Td(html.Pre(ix_name or '')),
-                    html.Td(is_composite_item),
-                ])
-            )
-        indices_table = dbc.Table(
-            indices_header + [html.Tbody(indices_rows)],
-            bordered=True,
-            hover=False,
-            striped=True,
-        )
-        if indices_rows:
-            overview_rows.append(
-                html.Tr([
-                    html.Td("Indices" if len(indices_rows) != 1 else "Index"),
-                    html.Td(html.Div(indices_table, style={'overflowX': 'auto'})),
-                ])
-            )
-
-        tags = pipe.tags
-        if tags:
-            tags_items = html.Ul([
-                html.Li(tag)
-                for tag in tags
-            ])
-            overview_rows.append(
-                html.Tr([
-                    html.Td("Tags"),
-                    html.Td(html.Pre(tags_items)),
-                ])
-            )
-
-        items_bodies['overview'] = html.Div(
-            dbc.Table(
-                overview_header + [html.Tbody(overview_rows)],
-                bordered=False,
-                hover=True,
-                striped=False,
-            ),
-            style={'overflowX': 'auto'},
-        )
-
-    if 'stats' in active_items:
-        stats_header = [html.Thead(html.Tr([html.Th("Statistic"), html.Th("Value")]))]
-        try:
-            oldest_time = pipe.get_sync_time(newest=False, round_down=False, debug=debug)
-            newest_time = pipe.get_sync_time(newest=True, round_down=False, debug=debug)
-            interval = (
-                (newest_time - oldest_time) if newest_time is not None and oldest_time is not None
-                else None
-            )
-        except Exception:
-            oldest_time = None
-            newest_time = None
-            interval = None
-
-        stats_rows = []
-        if interval is not None and not isinstance(interval, int):
-            stats_rows.append(
-                html.Tr([html.Td("Timespan"), html.Td(_format_timespan(
-                    interval.total_seconds() if hasattr(interval, 'total_seconds') else interval
-                ))])
-            )
-        if oldest_time is not None:
-            stats_rows.append(html.Tr([html.Td("Oldest time"), html.Td(str(oldest_time))]))
-        if newest_time is not None:
-            stats_rows.append(html.Tr([html.Td("Newest time"), html.Td(str(newest_time))]))
-
-        precision = pipe.precision
-        if precision:
-            stats_rows.append(
-                html.Tr([
-                    html.Td("Precision"),
-                    html.Td(str(precision.get('interval', 1)) + ' ' + str(precision.get('unit', 'unit')))
-                ])
-            )
-
-        stats_rows.append(
-            html.Tr([
-                html.Td("Row count"),
-                html.Td(
-                    html.Div(
-                        dbc.Button(
-                            "Calculate",
-                            color='link',
-                            size='sm',
-                            style={'text-decoration': 'none'},
-                            id={'type': 'calculate-rowcount-button', 'index': pipe_meta_str},
-                        )
-                        if pipe.exists(debug=debug)
-                        else '0'
-                    ),
-                    id={'type': 'calculate-rowcount-div', 'index': pipe_meta_str},
-                )
-            ])
-        )
-
-        items_bodies['stats'] = html.Div(
-            dbc.Table(stats_header + [html.Tbody(stats_rows)], hover=True),
-            style={'overflowX': 'auto'},
-        )
-
-    if 'columns' in active_items:
-        try:
-            columns_header = [html.Thead(html.Tr([
-                html.Th("Column"), html.Th("DB Type"), html.Th("PD Type")
-            ]))]
-            columns_types = {
-                col: typ.replace('_', ' ')
-                for col, typ in pipe.get_columns_types(debug=debug).items()
-            }
-            columns_rows = [
-                html.Tr([
-                    html.Td(html.Pre(col)),
-                    html.Td(html.Pre(typ)),
-                    html.Td(html.Pre(get_pd_type(typ))),
-                ]) for col, typ in columns_types.items()
-            ]
-            columns_body = [html.Tbody(columns_rows)]
-            columns_table = dbc.Table(columns_header + columns_body, bordered=False, hover=True)
-            items_bodies['columns'] = html.Div(columns_table, style={'overflowX': 'auto'})
-        except Exception as e:
-            items_bodies['columns'] = html.P(f"Could not retrieve columns:\n{e}")
-
-    if 'parameters' in active_items:
-        parameters_editor = dash_ace.DashAceEditor(
-            value=yaml.dump(pipe.get_parameters(apply_symlinks=False, refresh=True, debug=debug)),
-            mode='norm',
-            tabSize=4,
-            theme='twilight',
-            id={'type': 'parameters-editor', 'index': pipe_meta_str},
-            width='100%',
-            height='500px',
-            readOnly=False,
-            showGutter=True,
-            showPrintMargin=True,
-            highlightActiveLine=True,
-            wrapEnabled=True,
-            style={'min-height': '120px'},
-        )
-        update_parameters_button = dbc.Button(
-            "Update",
-            id={'type': 'update-parameters-button', 'index': pipe_meta_str},
-        )
-
-        as_yaml_button = dbc.Button(
-            "YAML",
-            id={'type': 'parameters-as-yaml-button', 'index': pipe_meta_str},
-            color='link',
-            size='sm',
-            style={'text-decoration': 'none'},
-        )
-        as_json_button = dbc.Button(
-            "JSON",
-            id={'type': 'parameters-as-json-button', 'index': pipe_meta_str},
-            color='link',
-            size='sm',
-            style={'text-decoration': 'none', 'margin-left': '10px'},
-        )
-        parameters_div_children = [
-            parameters_editor,
-            html.Br(),
-            dbc.Row(
-                [
-                    dbc.Col(
-                        html.Span(
-                            (
-                                ([update_parameters_button] if authenticated else []) +
-                                [
-                                    as_json_button,
-                                    as_yaml_button,
-                                ]
-                            )
-                        ),
-                        width=4,
-                    ),
-                    dbc.Col(
-                        dbc.Switch(
-                            label="Resolve symlinks",
-                            value=False,
-                            id={'type': 'resolve-symlinks-parameters-switch', 'index': pipe_meta_str},
-                        ),
-                        width='auto',
-                    ),
-                ],
-                justify='between',
-                align='center',
-            ),
-            dbc.Row(
-                dbc.Col(
-                    html.Div(
-                        id={
-                            'type': 'update-parameters-success-div',
-                            'index': pipe_meta_str,
-                        }
-                    ),
-                    width=True,
-                ),
-            ),
-        ]
-
-        if _build_references_num > 0 and pipe.references:
-            references_cards = [
-                build_pipe_card(
-                    reference_pipe,
-                    authenticated=authenticated,
-                    header_only=True,
-                    _build_references_num=(_build_references_num - 1),
-                )
-                for reference_pipe in pipe.references
-            ]
-            references_grid = build_cards_grid(references_cards, num_columns=1)
-            references_div_items = [
-                html.Br(),
-                html.H3('Reference Pipes'),
-                html.Br(),
-                references_grid,
-
-            ]
-            parameters_div_children.extend([html.Br()] + references_div_items)
-
-        if _build_parents_num > 0 and pipe.parents:
-            parents_cards = [
-                build_pipe_card(
-                    parent_pipe,
-                    authenticated=authenticated,
-                    header_only=True,
-                    _build_parents_num=(_build_parents_num - 1),
-                )
-                for parent_pipe in pipe.parents
-            ]
-            parents_grid = build_cards_grid(parents_cards, num_columns=1)
-            parents_div_items = [html.Br(), html.H3('Parent Pipes'), html.Br(), parents_grid]
-            parameters_div_children.extend([html.Br()] + parents_div_items)
-
-        if _build_children_num > 0 and pipe.children:
-            children_cards = [
-                build_pipe_card(
-                    child_pipe,
-                    authenticated=authenticated,
-                    header_only=True,
-                    _build_children_num=(_build_children_num - 1),
-                )
-                for child_pipe in pipe.children
-            ]
-            children_grid = build_cards_grid(children_cards, num_columns=1)
-            children_div_items = [html.Br(), html.H3('Children Pipes'), html.Br(), children_grid]
-            parameters_div_children.extend([html.Br()] + children_div_items)
-
-        items_bodies['parameters'] = html.Div(parameters_div_children)
-
-    if 'sql' in active_items:
-        query = dedent((get_pipe_query(pipe, warn=False) or "")).lstrip().rstrip()
-        sql_editor = dash_ace.DashAceEditor(
-            value=query,
-            mode='sql',
-            tabSize=4,
-            theme='twilight',
-            id={'type': 'sql-editor', 'index': pipe_meta_str},
-            width='100%',
-            height='500px',
-            readOnly=False,
-            showGutter=True,
-            showPrintMargin=False,
-            highlightActiveLine=True,
-            wrapEnabled=True,
-            style={'min-height': '120px'},
-        )
-        update_sql_button = dbc.Button(
-            "Update",
-            id={'type': 'update-sql-button', 'index': pipe_meta_str},
-        )
-        items_bodies['sql'] = html.Div([
-            sql_editor,
-            html.Br(),
-            dbc.Row(
-                [
-                    dbc.Col(update_sql_button, width='auto'),
-                    dbc.Col(
-                        dbc.Switch(
-                            label="Resolve symlinks",
-                            value=True,
-                            id={'type': 'resolve-symlinks-switch', 'index': pipe_meta_str},
-                        ),
-                        width='auto',
-                    ),
-                ],
-                justify='between',
-                align='center',
-            ),
-            dbc.Row(
-                dbc.Col(
-                    html.Div(
-                        id={
-                            'type': 'update-sql-success-div',
-                            'index': pipe_meta_str,
-                        },
-                    ),
-                    width=True,
-                ),
-            ),
-        ])
-
-    if 'recent-data' in active_items:
-        try:
-            df = pipe.get_backtrack_data(backtrack_minutes=10, limit=10, debug=debug)
-            if df is None or len(df) == 0:
-                items_bodies['recent-data'] = html.P("No recent data.", className='text-muted')
-            else:
-                table = dbc.Table.from_dataframe(df.astype(str), bordered=False, hover=True)
-                items_bodies['recent-data'] = html.Div(table, style={'overflowX': 'auto'})
-        except Exception as e:
-            items_bodies['recent-data'] = html.P(f"Could not retrieve recent data:\n{e}")
-
-    if 'query-data' in active_items:
-        query_editor = dash_ace.DashAceEditor(
-            value='{\n    \n}',
-            mode='norm',
-            tabSize=4,
-            theme='twilight',
-            id={'type': 'query-editor', 'index': pipe_meta_str},
-            width='100%',
-            height='200px',
-            readOnly=False,
-            showGutter=True,
-            showPrintMargin=False,
-            highlightActiveLine=True,
-            wrapEnabled=True,
-            style={'min-height': '120px'},
-        )
-        query_data_button = dbc.Button(
-            "Query",
-            id={'type': 'query-data-button', 'index': pipe_meta_str},
-        )
-
-        begin_end_input_group = dbc.InputGroup(
-            [
-                dbc.Input(
-                    id={'type': 'query-data-begin-input', 'index': pipe_meta_str},
-                    placeholder="Begin",
-                ),
-                dbc.Input(
-                    id={'type': 'query-data-end-input', 'index': pipe_meta_str},
-                    placeholder="End",
-                ),
-            ],
-            size="sm",
-        )
-
-        limit_input = dbc.Input(
-            type="number",
-            min=0,
-            max=100,
-            value=10,
-            step=1,
-            placeholder="Limit",
-            id={'type': 'limit-input', 'index': pipe_meta_str},
-        )
-        query_result_div = html.Div(
-            id={'type': 'query-result-div', 'index': pipe_meta_str},
-            style={'overflowX': 'auto'},
-        )
-
-        items_bodies['query-data'] = html.Div([
-            query_editor,
-            html.Br(),
-            dbc.Row(
-                [
-                    dbc.Col([query_data_button], lg=2, md=3, sm=4, xs=6, width=2),
-                    dbc.Col([begin_end_input_group], lg=6, md=6, sm=4, width=6),
-                    dbc.Col(html.Div([limit_input, dbc.FormText("Row Limit")]), lg=2, md=3, sm=4, xs=6, width=2),
-                ],
-                justify="between",
-            ),
-            dbc.Row([
-                dbc.Col([query_result_div], width=True),
-            ]),
-        ])
-
-    if 'sync-data' in active_items:
-        backtrack_text = get_backtrack_text(pipe)
-        sync_editor = dash_ace.DashAceEditor(
-            value = backtrack_text,
-            mode = 'norm',
-            tabSize = 4,
-            theme = 'twilight',
-            id = {'type': 'sync-editor', 'index': pipe_meta_str},
-            width = '100%',
-            height = '500px',
-            readOnly = False,
-            showGutter = True,
-            showPrintMargin = False,
-            highlightActiveLine = True,
-            wrapEnabled = True,
-            style = {'min-height': '120px'},
-        )
-
-        sync_as_json_button = dbc.Button(
-            "JSON",
-            id={'type': 'sync-as-json-button', 'index': pipe_meta_str},
-            color='link',
-            size='sm',
-            style={'text-decoration': 'none', 'margin-left': '10px'},
-        )
-        sync_as_lines_button = dbc.Button(
-            "Lines",
-            id={'type': 'sync-as-lines-button', 'index': pipe_meta_str},
-            color='link',
-            size='sm',
-            style={'text-decoration': 'none', 'margin-left': '10px'},
-        )
-
-        update_sync_button = dbc.Button(
-            "Sync",
-            id = {'type': 'update-sync-button', 'index': pipe_meta_str},
-        )
-        sync_success_div = html.Div(id={'type': 'sync-success-div', 'index': pipe_meta_str})
-        items_bodies['sync-data'] = html.Div([
-            sync_editor,
-            html.Br(),
-            dbc.Row([
-                dbc.Col(html.Span(
-                    (
-                        ([update_sync_button] if authenticated else []) +
-                        [
-                            sync_as_json_button,
-                            sync_as_lines_button,
-                        ]
-                    )
-                ), width=4),
-                dbc.Col([sync_success_div], width=True),
-            ]),
-        ])
-
-    if 'relations' in active_items:
-        items_bodies['relations'] = build_relations_body(pipe, authenticated=authenticated)
+    items_bodies = {
+        item_id: builders[item_id]()
+        for item_id in active_items
+        if item_id in items_titles and item_id in builders
+    }
 
     return [
         dbc.AccordionItem(items_bodies.get(item_id, ''), title=title, item_id=item_id)
         for item_id, title in items_titles.items()
     ]
+
+
+def _pipe_meta_str(pipe: mrsm.Pipe) -> str:
+    """The `index` of a pipe's pattern-matching ids (its sorted `meta`)."""
+    return json.dumps(pipe.meta, sort_keys=True)
+
+
+def get_target_label(pipe: mrsm.Pipe) -> str:
+    """The pipe's target table, quoted and schema-qualified for SQL instances."""
+    try:
+        if pipe.instance_connector.type != 'sql':
+            return str(pipe.target)
+        return sql_item_name(
+            pipe.target,
+            flavor=pipe.instance_connector.flavor,
+            schema=pipe.instance_connector.get_pipe_schema(pipe),
+        )
+    except Exception:
+        return str(pipe.target)
+
+
+def build_indices_table(pipe: mrsm.Pipe) -> Union['dbc.Table', None]:
+    """
+    The pipe's indices (key, column, index name and whether it is part of the composite key),
+    or `None` when it declares none.
+    """
+    pipe_meta_str = _pipe_meta_str(pipe)
+    indices_header = [
+        html.Thead(
+            html.Tr(
+                [
+                    html.Th(
+                        html.Span(
+                            "Key",
+                            id={'type': 'key-table-header', 'index': pipe_meta_str},
+                            style={"textDecoration": "underline", "cursor": "pointer"},
+                        ),
+                    ),
+                    html.Th(
+                        html.Span(
+                            "Column",
+                            id={'type': 'column-table-header', 'index': pipe_meta_str},
+                            style={"textDecoration": "underline", "cursor": "pointer"},
+                        ),
+                    ),
+                    html.Th(
+                        html.Span(
+                            "Index",
+                            id={'type': 'index-table-header', 'index': pipe_meta_str},
+                            style={"textDecoration": "underline", "cursor": "pointer"},
+                        ),
+                    ),
+                    html.Th(
+                        html.Span(
+                            "Is Composite",
+                            id={'type': 'is-composite-table-header', 'index': pipe_meta_str},
+                            style={"textDecoration": "underline", "cursor": "pointer"},
+                        ),
+                    ),
+                    dbc.Tooltip(
+                        "Unique reference name for the index "
+                        "(e.g. `datetime` for the range axis)",
+                        target={'type': 'key-table-header', 'index': pipe_meta_str},
+                    ),
+                    dbc.Tooltip(
+                        "The actual column (field name) in the target dataset.",
+                        target={'type': 'column-table-header', 'index': pipe_meta_str},
+                    ),
+                    dbc.Tooltip(
+                        "The name of the index created on the given columns.",
+                        target={'type': 'index-table-header', 'index': pipe_meta_str},
+                    ),
+                    dbc.Tooltip(
+                        "Whether the column is used in the composite primary key "
+                        "to determine updates.",
+                        target={'type': 'is-composite-table-header', 'index': pipe_meta_str},
+                    ),
+                ]
+            )
+        )
+    ]
+
+    indices = pipe.indices
+    columns = pipe.columns
+    try:
+        index_column_names = pipe.get_indices()
+    except Exception:
+        index_column_names = {}
+    indices_rows = []
+    for ix_key, ix_cols in indices.items():
+        col = columns.get(ix_key, None)
+        ix_name = index_column_names.get(ix_key, None)
+        if not col and not ix_cols:
+            continue
+        if not isinstance(ix_cols, (list, tuple)):
+            ix_cols = [ix_cols]
+        if col:
+            col_item = html.Pre(col)
+        elif len(ix_cols) == 1:
+            col_item = html.Pre(ix_cols[0])
+        else:
+            col_item = html.Pre(html.Ul([html.Li(_c) for _c in ix_cols]))
+        is_composite_item = "✅" if col else ""
+        ix_key_item = html.Pre(
+            INDEX_PREFIX_EMOJI.get(ix_key, '')
+            + (' ' if ix_key in INDEX_PREFIX_EMOJI else '')
+            + ix_key
+        )
+        indices_rows.append(
+            html.Tr([
+                html.Td(ix_key_item),
+                html.Td(col_item),
+                html.Td(html.Pre(ix_name or '')),
+                html.Td(is_composite_item),
+            ])
+        )
+    if not indices_rows:
+        return None
+    return dbc.Table(
+        indices_header + [html.Tbody(indices_rows)],
+        bordered=True,
+        hover=False,
+        striped=True,
+    )
+
+
+def build_keys_body(pipe: mrsm.Pipe) -> Any:
+    """The Keys section: the pipe's keys, target table, indices and tags."""
+    overview_header = [html.Thead(html.Tr([html.Th("Attribute"), html.Th("Value")]))]
+    overview_rows = [
+        html.Tr([html.Td("Connector"), html.Td(html.Pre(f"{pipe.connector_keys}"))]),
+        html.Tr([html.Td("Metric"), html.Td(html.Pre(f"{pipe.metric_key}"))]),
+        html.Tr([html.Td("Location"), html.Td(html.Pre(f"{pipe.location_key}"))]),
+        html.Tr([html.Td("Instance"), html.Td(html.Pre(f"{pipe.instance_keys}"))]),
+        html.Tr([html.Td("Target Table"), html.Td(html.Pre(get_target_label(pipe)))]),
+    ]
+
+    indices_table = build_indices_table(pipe)
+    if indices_table is not None:
+        num_indices = len(indices_table.children[-1].children)
+        overview_rows.append(
+            html.Tr([
+                html.Td("Indices" if num_indices != 1 else "Index"),
+                html.Td(html.Div(indices_table, style={'overflowX': 'auto'})),
+            ])
+        )
+
+    tags = pipe.tags
+    if tags:
+        tags_items = html.Ul([
+            html.Li(tag)
+            for tag in tags
+        ])
+        overview_rows.append(
+            html.Tr([
+                html.Td("Tags"),
+                html.Td(html.Pre(tags_items)),
+            ])
+        )
+
+    return html.Div(
+        dbc.Table(
+            overview_header + [html.Tbody(overview_rows)],
+            bordered=False,
+            hover=True,
+            striped=False,
+        ),
+        style={'overflowX': 'auto'},
+    )
+
+
+def build_rowcount_button(pipe: mrsm.Pipe, label: str = "Calculate") -> Any:
+    """
+    The exact row count on demand: a button replaced by the count when clicked
+    (`calculate_rowcount_button_click`).
+    """
+    pipe_meta_str = _pipe_meta_str(pipe)
+    return html.Div(
+        dbc.Button(
+            label,
+            color='link',
+            size='sm',
+            style={'text-decoration': 'none'},
+            id={'type': 'calculate-rowcount-button', 'index': pipe_meta_str},
+        ),
+        id={'type': 'calculate-rowcount-div', 'index': pipe_meta_str},
+    )
+
+
+def build_stats_body(pipe: mrsm.Pipe) -> Any:
+    """The Statistics section: timespan, oldest and newest times, precision and row count."""
+    stats_header = [html.Thead(html.Tr([html.Th("Statistic"), html.Th("Value")]))]
+    try:
+        oldest_time = pipe.get_sync_time(newest=False, round_down=False, debug=debug)
+        newest_time = pipe.get_sync_time(newest=True, round_down=False, debug=debug)
+        interval = (
+            (newest_time - oldest_time) if newest_time is not None and oldest_time is not None
+            else None
+        )
+    except Exception:
+        oldest_time = None
+        newest_time = None
+        interval = None
+
+    stats_rows = []
+    if interval is not None and not isinstance(interval, int):
+        stats_rows.append(
+            html.Tr([html.Td("Timespan"), html.Td(_format_timespan(
+                interval.total_seconds() if hasattr(interval, 'total_seconds') else interval
+            ))])
+        )
+    if oldest_time is not None:
+        stats_rows.append(html.Tr([html.Td("Oldest time"), html.Td(str(oldest_time))]))
+    if newest_time is not None:
+        stats_rows.append(html.Tr([html.Td("Newest time"), html.Td(str(newest_time))]))
+
+    precision = pipe.precision
+    if precision:
+        stats_rows.append(
+            html.Tr([
+                html.Td("Precision"),
+                html.Td(str(precision.get('interval', 1)) + ' ' + str(precision.get('unit', 'unit')))
+            ])
+        )
+
+    try:
+        exists = pipe.exists(debug=debug)
+    except Exception:
+        exists = False
+    stats_rows.append(
+        html.Tr([
+            html.Td("Row count"),
+            html.Td(
+                build_rowcount_button(pipe)
+                if exists
+                else html.Div('0', id={'type': 'calculate-rowcount-div', 'index': _pipe_meta_str(pipe)})
+            )
+        ])
+    )
+
+    return html.Div(
+        dbc.Table(stats_header + [html.Tbody(stats_rows)], hover=True),
+        style={'overflowX': 'auto'},
+    )
+
+
+def build_columns_body(pipe: mrsm.Pipe) -> Any:
+    """The Columns section: each column's database and pandas types."""
+    try:
+        columns_header = [html.Thead(html.Tr([
+            html.Th("Column"), html.Th("DB Type"), html.Th("PD Type")
+        ]))]
+        columns_types = {
+            col: typ.replace('_', ' ')
+            for col, typ in pipe.get_columns_types(debug=debug).items()
+        }
+        columns_rows = [
+            html.Tr([
+                html.Td(html.Pre(col)),
+                html.Td(html.Pre(typ)),
+                html.Td(html.Pre(get_pd_type(typ))),
+            ]) for col, typ in columns_types.items()
+        ]
+        columns_body = [html.Tbody(columns_rows)]
+        columns_table = dbc.Table(columns_header + columns_body, bordered=False, hover=True)
+        return html.Div(columns_table, style={'overflowX': 'auto'})
+    except Exception as e:
+        return html.P(f"Could not retrieve columns:\n{e}")
+
+
+def build_parameters_body(
+    pipe: mrsm.Pipe,
+    authenticated: bool = False,
+    read_only: bool = False,
+    include_relatives: bool = True,
+    show_resolve: bool = True,
+    _build_references_num: int = 10,
+    _build_parents_num: int = 10,
+    _build_children_num: int = 10,
+) -> Any:
+    """
+    The Parameters section: the parameters editor (YAML or JSON; **Show resolved values** shows
+    them with their references resolved, unless not `show_resolve`), with Update for
+    authenticated sessions unless `read_only`, and
+    the reference, parent and child pipes' headers when `include_relatives`.
+    """
+    pipe_meta_str = _pipe_meta_str(pipe)
+    parameters_editor = dash_ace.DashAceEditor(
+        value=yaml.dump(pipe.get_parameters(apply_symlinks=False, refresh=True, debug=debug)),
+        mode='norm',
+        tabSize=4,
+        theme='twilight',
+        id={'type': 'parameters-editor', 'index': pipe_meta_str},
+        width='100%',
+        height='500px',
+        readOnly=read_only,
+        showGutter=True,
+        showPrintMargin=True,
+        highlightActiveLine=True,
+        wrapEnabled=True,
+        style={'min-height': '120px'},
+    )
+    update_parameters_button = dbc.Button(
+        "Update",
+        id={'type': 'update-parameters-button', 'index': pipe_meta_str},
+    )
+
+    as_yaml_button = dbc.Button(
+        "YAML",
+        id={'type': 'parameters-as-yaml-button', 'index': pipe_meta_str},
+        color='link',
+        size='sm',
+        style={'text-decoration': 'none'},
+    )
+    as_json_button = dbc.Button(
+        "JSON",
+        id={'type': 'parameters-as-json-button', 'index': pipe_meta_str},
+        color='link',
+        size='sm',
+        style={'text-decoration': 'none', 'margin-left': '10px'},
+    )
+    parameters_div_children = [
+        parameters_editor,
+        html.Br(),
+        dbc.Row(
+            [
+                dbc.Col(
+                    html.Span(
+                        (
+                            ([update_parameters_button] if authenticated and not read_only else []) +
+                            [
+                                as_json_button,
+                                as_yaml_button,
+                            ]
+                        )
+                    ),
+                    width='auto',
+                ),
+                dbc.Col(
+                    dbc.Switch(
+                        label="Show resolved values",
+                        value=False,
+                        id={'type': 'resolve-symlinks-parameters-switch', 'index': pipe_meta_str},
+                    ) if show_resolve else [],
+                    width='auto',
+                ),
+            ],
+            justify='between',
+            align='center',
+        ),
+        dbc.Row(
+            dbc.Col(
+                html.Div(
+                    id={
+                        'type': 'update-parameters-success-div',
+                        'index': pipe_meta_str,
+                    }
+                ),
+                width=True,
+            ),
+        ),
+    ]
+    if not include_relatives:
+        return html.Div(parameters_div_children)
+
+    if _build_references_num > 0 and pipe.references:
+        references_cards = [
+            build_pipe_card(
+                reference_pipe,
+                authenticated=authenticated,
+                header_only=True,
+                _build_references_num=(_build_references_num - 1),
+            )
+            for reference_pipe in pipe.references
+        ]
+        references_grid = build_cards_grid(references_cards, num_columns=1)
+        references_div_items = [
+            html.Br(),
+            html.H3('Reference Pipes'),
+            html.Br(),
+            references_grid,
+
+        ]
+        parameters_div_children.extend([html.Br()] + references_div_items)
+
+    if _build_parents_num > 0 and pipe.parents:
+        parents_cards = [
+            build_pipe_card(
+                parent_pipe,
+                authenticated=authenticated,
+                header_only=True,
+                _build_parents_num=(_build_parents_num - 1),
+            )
+            for parent_pipe in pipe.parents
+        ]
+        parents_grid = build_cards_grid(parents_cards, num_columns=1)
+        parents_div_items = [html.Br(), html.H3('Parent Pipes'), html.Br(), parents_grid]
+        parameters_div_children.extend([html.Br()] + parents_div_items)
+
+    if _build_children_num > 0 and pipe.children:
+        children_cards = [
+            build_pipe_card(
+                child_pipe,
+                authenticated=authenticated,
+                header_only=True,
+                _build_children_num=(_build_children_num - 1),
+            )
+            for child_pipe in pipe.children
+        ]
+        children_grid = build_cards_grid(children_cards, num_columns=1)
+        children_div_items = [html.Br(), html.H3('Children Pipes'), html.Br(), children_grid]
+        parameters_div_children.extend([html.Br()] + children_div_items)
+
+    return html.Div(parameters_div_children)
+
+
+def build_sql_body(
+    pipe: mrsm.Pipe,
+    read_only: bool = False,
+    resolve_symlinks: bool = True,
+    show_resolve: bool = True,
+) -> Any:
+    """
+    The SQL Query section: the pipe's SQL definition (with its `{{ Pipe(...) }}` references
+    resolved when `resolve_symlinks`) in an editor with Update (unless `read_only`) and the
+    **Show resolved query** switch (when `show_resolve`).
+    """
+    pipe_meta_str = _pipe_meta_str(pipe)
+    query = dedent((
+        get_pipe_query(pipe, apply_symlinks=resolve_symlinks, warn=False) or ""
+    )).lstrip().rstrip()
+    sql_editor = dash_ace.DashAceEditor(
+        value=query,
+        mode='sql',
+        tabSize=4,
+        theme='twilight',
+        id={'type': 'sql-editor', 'index': pipe_meta_str},
+        width='100%',
+        height='500px',
+        readOnly=read_only,
+        showGutter=True,
+        showPrintMargin=False,
+        highlightActiveLine=True,
+        wrapEnabled=True,
+        style={'min-height': '120px'},
+    )
+    update_sql_button = dbc.Button(
+        "Update",
+        id={'type': 'update-sql-button', 'index': pipe_meta_str},
+    )
+    return html.Div([
+        sql_editor,
+        html.Br(),
+        dbc.Row(
+            [
+                dbc.Col(update_sql_button if not read_only else [], width='auto'),
+                dbc.Col(
+                    dbc.Switch(
+                        label="Show resolved query",
+                        value=resolve_symlinks,
+                        id={'type': 'resolve-symlinks-switch', 'index': pipe_meta_str},
+                    ) if show_resolve else [],
+                    width='auto',
+                ),
+            ],
+            justify='between',
+            align='center',
+        ),
+        dbc.Row(
+            dbc.Col(
+                html.Div(
+                    id={
+                        'type': 'update-sql-success-div',
+                        'index': pipe_meta_str,
+                    },
+                ),
+                width=True,
+            ),
+        ),
+    ])
+
+
+def build_recent_data_body(pipe: mrsm.Pipe, limit: int = 10) -> Any:
+    """The Recent Data section: the newest rows of the backtrack window as a table."""
+    try:
+        df = pipe.get_backtrack_data(backtrack_minutes=10, limit=limit, debug=debug)
+        if df is None or len(df) == 0:
+            return html.P("No recent data.")
+        table = dbc.Table.from_dataframe(df.astype(str), bordered=False, hover=True)
+        return html.Div(table, style={'overflowX': 'auto'})
+    except Exception as e:
+        return html.P(f"Could not retrieve recent data:\n{e}")
+
+
+def build_query_data_body(pipe: mrsm.Pipe) -> Any:
+    """The Query Data section: a `params` editor, begin and end bounds, a row limit and Query."""
+    pipe_meta_str = _pipe_meta_str(pipe)
+    query_editor = dash_ace.DashAceEditor(
+        value='{\n    \n}',
+        mode='norm',
+        tabSize=4,
+        theme='twilight',
+        id={'type': 'query-editor', 'index': pipe_meta_str},
+        width='100%',
+        height='140px',
+        readOnly=False,
+        showGutter=True,
+        showPrintMargin=False,
+        highlightActiveLine=True,
+        wrapEnabled=True,
+        style={'min-height': '120px'},
+    )
+    query_data_button = dbc.Button(
+        "Query",
+        id={'type': 'query-data-button', 'index': pipe_meta_str},
+    )
+
+    begin_id = {'type': 'query-data-begin-input', 'index': pipe_meta_str}
+    end_id = {'type': 'query-data-end-input', 'index': pipe_meta_str}
+    limit_id = {'type': 'limit-input', 'index': pipe_meta_str}
+    labeled = lambda label, component: html.Div(
+        [dbc.Label(label, size='sm'), component],
+        className='pipes-query-field',
+    )
+    limit_input = dbc.Input(
+        type="number",
+        min=0,
+        max=100,
+        value=10,
+        step=1,
+        placeholder="Limit",
+        id=limit_id,
+        size='sm',
+    )
+    query_result_div = html.Div(
+        id={'type': 'query-result-div', 'index': pipe_meta_str},
+        style={'overflowX': 'auto'},
+    )
+
+    return html.Div([
+        dbc.Label('Params', size='sm'),
+        query_editor,
+        html.Div(
+            [
+                labeled('Begin', dbc.Input(id=begin_id, placeholder='2026-01-01', size='sm')),
+                labeled('End', dbc.Input(id=end_id, placeholder='2026-02-01', size='sm')),
+                labeled('Rows', limit_input),
+                html.Div(query_data_button, className='pipes-query-button'),
+            ],
+            className='pipes-query-row',
+        ),
+        query_result_div,
+    ])
+
+
+def build_sync_documents_body(pipe: mrsm.Pipe, authenticated: bool = False) -> Any:
+    """The Sync Documents section: the backtrack rows as JSON or lines, synced back with Sync."""
+    pipe_meta_str = _pipe_meta_str(pipe)
+    try:
+        backtrack_text = get_backtrack_text(pipe)
+    except Exception:
+        backtrack_text = '[]'
+    sync_editor = dash_ace.DashAceEditor(
+        value=backtrack_text,
+        mode='norm',
+        tabSize=4,
+        theme='twilight',
+        id={'type': 'sync-editor', 'index': pipe_meta_str},
+        width='100%',
+        height='500px',
+        readOnly=False,
+        showGutter=True,
+        showPrintMargin=False,
+        highlightActiveLine=True,
+        wrapEnabled=True,
+        style={'min-height': '120px'},
+    )
+
+    sync_as_json_button = dbc.Button(
+        "JSON",
+        id={'type': 'sync-as-json-button', 'index': pipe_meta_str},
+        color='link',
+        size='sm',
+        style={'text-decoration': 'none', 'margin-left': '10px'},
+    )
+    sync_as_lines_button = dbc.Button(
+        "Lines",
+        id={'type': 'sync-as-lines-button', 'index': pipe_meta_str},
+        color='link',
+        size='sm',
+        style={'text-decoration': 'none', 'margin-left': '10px'},
+    )
+
+    update_sync_button = dbc.Button(
+        "Sync",
+        id={'type': 'update-sync-button', 'index': pipe_meta_str},
+    )
+    sync_success_div = html.Div(id={'type': 'sync-success-div', 'index': pipe_meta_str})
+    return html.Div([
+        sync_editor,
+        html.Br(),
+        dbc.Row([
+            dbc.Col(html.Span(
+                (
+                    ([update_sync_button] if authenticated else []) +
+                    [
+                        sync_as_json_button,
+                        sync_as_lines_button,
+                    ]
+                )
+            ), width='auto'),
+            dbc.Col([sync_success_div], width=True),
+        ]),
+    ])
 
 
 RELATION_KEYS: Dict[str, Tuple[str, str]] = {
@@ -1135,6 +1233,7 @@ def build_relations_body(
     authenticated: bool = False,
     active_tab: str = 'parents',
     feedback: Optional[SuccessTuple] = None,
+    new_tab: bool = True,
 ) -> Any:
     """
     Return the Parents and Children tabs of a pipe card: the pipes it depends on and the pipes that
@@ -1176,7 +1275,12 @@ def build_relations_body(
                 ])),
                 html.Tbody([
                     html.Tr([
-                        html.Td(html.A(html.Code(row['label']), href=row['href'], target='_blank', rel='noopener noreferrer', className='pipe-link')),
+                        html.Td(
+                            html.A(html.Code(row['label']), href=row['href'], target='_blank',
+                                   rel='noopener noreferrer', className='pipe-link')
+                            if new_tab
+                            else dcc.Link(html.Code(row['label']), href=row['href'], className='pipe-link')
+                        ),
                         html.Td(_engine.action_indicator(row['action']) if row['action'] else ''),
                         html.Td(html.Details([html.Summary('Show'), html.P(row['reason'])])),
                         html.Td(_remove_button(relation, row), style={'text-align': 'right'}),

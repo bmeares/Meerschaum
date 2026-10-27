@@ -27,6 +27,12 @@ def pipeline_title(name, registry=None, link=False):
     return parts
 
 
+def _refresh_icon():
+    """The refresh icon (an inline SVG, so it renders with any font)."""
+    from meerschaum.api.dash.components import build_icon
+    return build_icon('refresh')
+
+
 def runs_placeholder():
     """A card's Runs before they load: a fixed-height slot, replaced in place."""
     return html.Div(dbc.Spinner(size='sm', color='secondary'), className='pipeline-runs-placeholder',
@@ -36,6 +42,36 @@ def runs_placeholder():
 def count_label(count, noun):
     """`1 member`, `2 members`."""
     return f"{count} {noun}" + ('' if count == 1 else 's')
+
+
+def resolved_count(run):
+    """How many Pipes a run of a Pipeline synced: its members and the Pipes it followed."""
+    import json
+    selection = ((run or {}).get('run') or {}).get('selection')
+    if isinstance(selection, str):
+        try:
+            selection = json.loads(selection)
+        except ValueError:
+            return None
+    resolved = selection.get('resolved_targets') if isinstance(selection, dict) else None
+    return len(resolved) if isinstance(resolved, list) and resolved else None
+
+
+def pipes_label(definition, latest_run=None):
+    """
+    How many Pipes a Pipeline syncs: its members, with the parents or children it follows
+    counted from its latest run when there is one (`3 Pipes`), else named (`1 Pipe + children`).
+    """
+    definition = definition or {}
+    targets = definition.get('targets') or []
+    parents, children = definition.get('parents'), definition.get('children')
+    if not parents and not children:
+        return count_label(len(targets), 'Pipe')
+    resolved = resolved_count(latest_run)
+    if resolved:
+        return count_label(resolved, 'Pipe')
+    follows = 'parents and children' if parents and children else ('parents' if parents else 'children')
+    return f"{count_label(len(targets), 'Pipe')} + {follows}"
 
 
 def build_member_panel(prefix, registry, instance_options):
@@ -100,7 +136,7 @@ def build_detail_header(name, registry):
                 dbc.Button('Discard', id='pipeline-draft-discard', size='sm', color='secondary'),
                 dbc.Button('Save', id='pipeline-draft-save', size='sm', color='primary'),
             ], className='pipeline-edit-actions pipeline-edit-only'),
-            dbc.Button('↻', id='pipelines-refresh-button', size='sm', color='black', title='Refresh'),
+            dbc.Button(_refresh_icon(), id='pipelines-refresh-button', size='sm', color='black', title='Refresh'),
         ], className='pipeline-header-actions'),
         html.Div([
             dbc.Button('Resume draft', id='pipeline-draft-resume', size='sm', color='warning'),

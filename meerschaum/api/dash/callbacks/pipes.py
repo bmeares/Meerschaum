@@ -2,11 +2,12 @@
 # vim:fenc=utf-8
 
 """
-Define callbacks for the `/dash/pipes/` page.
+Callbacks of the Pipes pages: the table (`/dash/pipes`), a pipe's page
+(`/dash/pipes/<connector>/<metric>[/<location>]`) and New pipe (`/dash/pipes/new`).
 """
 
 import json
-from urllib.parse import parse_qs, quote_plus, unquote
+import time
 from typing import List, Optional, Dict, Any
 
 import dash
@@ -16,157 +17,62 @@ import dash_bootstrap_components as dbc
 
 import meerschaum as mrsm
 from meerschaum.api.dash import dash_app
-from meerschaum.api.dash.components import (
-    alert_from_success_tuple,
-    build_cards_grid,
-)
+from meerschaum.api.dash.components import alert_from_success_tuple
 from meerschaum.api.dash.pipes import (
-    build_pipe_card,
-    build_pipes_dropdown_keys_row,
-    build_pipes_tags_dropdown,
-    build_pipes_navbar,
     build_relations_body,
     add_pipe_relation,
     remove_pipe_relation,
 )
-from meerschaum.api import CHECK_UPDATE, get_api_connector
+from meerschaum.api.dash import pipes_table, pipe_detail, new_pipe, pipes_access
+from meerschaum.api import CHECK_UPDATE
 from meerschaum.utils.packages import import_html, import_dcc
-from meerschaum.api.dash.sessions import is_session_authenticated, is_state_authenticated
+from meerschaum.api.dash.sessions import is_state_authenticated
 html, dcc = import_html(check_update=CHECK_UPDATE), import_dcc(check_update=CHECK_UPDATE)
 
+#: The keys filters' dropdowns, in order.
+KEY_FILTERS = (
+    ('connector_keys', 'pipes-connector-keys-dropdown'),
+    ('metric_keys', 'pipes-metric-keys-dropdown'),
+    ('location_keys', 'pipes-location-keys-dropdown'),
+    ('tags', 'pipes-tags-dropdown'),
+)
+
+#: The direction a column sorts in when its header is first clicked.
+DEFAULT_ASCENDING = {'pipe': True, 'rows': False, 'sync_time': False, 'status': True}
+
+
+def _is_table_path(pathname: Optional[str]) -> bool:
+    return str(pathname or '').rstrip('/') == '/dash/pipes'
+
+
+# ------------------------------------------------------------------------------------------------
+# The table
+# ------------------------------------------------------------------------------------------------
 
 @dash_app.callback(
-    Output('pipes-navbar-div', 'children'),
-    Output('pipe-output-div', 'children'),
+    *[Output(dropdown_id, 'options') for _, dropdown_id in KEY_FILTERS],
+    *[Output(dropdown_id, 'value') for _, dropdown_id in KEY_FILTERS],
     Input('pipes-location', 'pathname'),
     State('pipes-location', 'search'),
+    State('pipes-page-meta', 'data'),
     State('session-store', 'data'),
 )
-def render_pipe_page_from_url(
-    pathname: str,
-    pipe_search: str,
-    session_data: Optional[Dict[str, Any]],
-):
-    if not str(pathname).startswith('/dash/pipes'):
+def init_pipes_filters(pathname, search, page_meta, session_data):
+    """Fill the key and tag filters from the URL and the instance's keys."""
+    if not _is_table_path(pathname) or not pipes_access.can_read(session_data):
         raise PreventUpdate
-
-    session_id = (session_data or {}).get('session-id', None)
-    authenticated = is_session_authenticated(str(session_id))
-    query_params = parse_qs(pipe_search.lstrip('?')) if pipe_search else {}
-    instance = query_params.get('instance', [None])[0] or str(get_api_connector())
-    tags = query_params.get('tags', [None])[0] or []
-    if isinstance(tags, str):
-        tags = tags.split(',')
-
-    connector_keys = query_params.get('connector_keys', [None])[0] or []
-    if isinstance(connector_keys, str):
-        connector_keys = connector_keys.split(',')
-
-    metric_keys = query_params.get('metric_keys', [None])[0] or []
-    if isinstance(metric_keys, str):
-        metric_keys = metric_keys.split(',')
-
-    location_keys = query_params.get('location_keys', [None])[0] or []
-    if isinstance(location_keys, str):
-        location_keys = location_keys.split(',')
-
-    keys = [unquote(part) for part in pathname[len('/dash/pipes'):].strip('/').split('/')]
-    instance_connector = mrsm.get_connector(instance)
-    viewing_single_pipe = len(keys) in (2, 3)
-    if instance_connector is None:
-        return (
-            build_pipes_navbar(instance, with_instance_select=(not viewing_single_pipe)),
-            [
-                html.Br(),
-                alert_from_success_tuple((False, f"Invalid instance keys '{instance}'.")),
-                html.Br(),
-            ]
-        )
-
-    if not viewing_single_pipe:
-        try:
-            pipes = mrsm.get_pipes(
-                as_list=True,
-                connector_keys=connector_keys,
-                metric_keys=metric_keys,
-                location_keys=location_keys,
-                tags=tags,
-                instance=instance_connector,
-            )
-        except Exception as e:
-            return (
-                build_pipes_navbar(instance, with_instance_select=False),
-                [
-                    html.Br(),
-                    alert_from_success_tuple(
-                        (False, f"Failed to get pipes for instance '{instance}':\n{e}")
-                    ),
-                    html.Br(),
-                    dbc.Row(
-                        [
-                            dbc.Button(
-                                "Reload",
-                                id='pipes-reload-button',
-                                size='lg',
-                                href=(
-                                    "/dash/pipes"
-                                    if pathname.startswith('/dash/pipes/')
-                                    else "/dash/pipes/" 
-                                )
-                            ),
-                        ],
-                        justify='center',
-                        align='center',
-                        className='h-50',
-                    ),
-                ]
-            )
-
-        cards = [
-            build_pipe_card(pipe, authenticated=authenticated, include_manage=False)
-            for pipe in pipes
-        ]
-        return (
-            build_pipes_navbar(instance, with_instance_select=True),
-            [
-                html.Div([
-                    html.Br(),
-                    build_pipes_dropdown_keys_row(
-                        connector_keys,
-                        metric_keys,
-                        location_keys,
-                        tags,
-                        pipes,
-                        instance_connector,
-                    ),
-                    html.Br(),
-                    build_pipes_tags_dropdown(
-                        connector_keys,
-                        metric_keys,
-                        location_keys,
-                        tags,
-                        instance,
-                    ),
-                ]),
-                html.Br(),
-                build_cards_grid(cards, 1),
-                html.Br(),
-            ]
-        )
-
-    ck = keys[0]
-    mk = keys[1]
-    lk = keys[2] if len(keys) == 3 else None
-
-    pipe = mrsm.Pipe(ck, mk, lk, instance=instance)
-    return (
-        build_pipes_navbar(instance, with_instance_select=False),
-        [
-            html.Br(),
-            build_pipe_card(pipe, authenticated=authenticated, include_manage=False),
-            html.Br(),
-        ]
-    )
+    filters = pipes_table.filters_from_search(search)
+    instance_keys = (page_meta or {}).get('instance') or pipes_table.global_instance_keys()
+    try:
+        options = pipes_table.filter_options(mrsm.get_connector(instance_keys))
+    except Exception:
+        options = {key: [] for key, _ in KEY_FILTERS}
+    out_options, out_values = [], []
+    for key, _ in KEY_FILTERS:
+        selected = [str(value) for value in filters.get(key, [])]
+        out_options.append(sorted(set(options.get(key, [])) | set(selected), key=str.lower))
+        out_values.append(selected)
+    return (*out_options, *out_values)
 
 
 @dash_app.callback(
@@ -175,8 +81,11 @@ def render_pipe_page_from_url(
     Input('pipes-metric-keys-dropdown', 'value', allow_optional=True),
     Input('pipes-location-keys-dropdown', 'value', allow_optional=True),
     Input('pipes-tags-dropdown', 'value', allow_optional=True),
-    Input('pipes-instance-select', 'value'),
+    Input('pipes-status-select', 'value', allow_optional=True),
     Input('pipes-clear-all-button', 'n_clicks', allow_optional=True),
+    State('pipes-location', 'search'),
+    State('pipes-page-meta', 'data'),
+    State('pipes-search', 'value', allow_optional=True),
     prevent_initial_call=True,
 )
 def update_location_on_pipes_filter_change(
@@ -184,62 +93,900 @@ def update_location_on_pipes_filter_change(
     metric_keys: Optional[List[str]],
     location_keys: Optional[List[str]],
     tags: Optional[List[str]],
-    instance_keys: str,
+    status: Optional[str],
     clear_all_button_n_clicks: Optional[int],
+    current_search: Optional[str],
+    page_meta: Optional[Dict[str, Any]],
+    search_text: Optional[str] = None,
 ):
     """
-    Update the URL parameters when clicking the dropdowns.
+    Keep the filters in the URL (`?connector_keys=...&tags=...&status=...&q=...`), so a filtered
+    table can be shared; a deep link's `instance` stays. Typing in the search box updates `q`
+    in place (below), without a history entry per word.
     """
-    ctx = dash.callback_context.triggered
-    if connector_keys is None and metric_keys is None and location_keys is None and tags is None:
+    if dash.callback_context.triggered_id == 'pipes-clear-all-button':
+        if not clear_all_button_n_clicks:
+            raise PreventUpdate
+        connector_keys, metric_keys, location_keys, tags, status = [], [], [], [], 'any'
+        search_text = ''
+    page_meta = page_meta or {}
+    instance = page_meta.get('instance', None)
+    if instance == page_meta.get('global', None):
+        instance = None
+    search = pipes_table.search_from_filters(
+        connector_keys, metric_keys, location_keys, tags, status, instance=instance, q=search_text,
+    )
+    if search == (current_search or ''):
         raise PreventUpdate
-    if len(ctx) != 1:
-        raise PreventUpdate
+    return search
 
-    if not any(
-        (connector_keys or [])
-        + (metric_keys or [])
-        + (location_keys or [])
-        + (tags or [])
-        + ([instance_keys] if instance_keys else [])
+
+### The search is in the URL (`?q=`) so a searched table can be shared. Typing replaces the
+### current history entry (the filters above add one per change). `dcc.Location` compares its
+### props with the address bar and pushes its own `href` back when they differ, so its props are
+### set to the new address too (the rows are not read again: `load_pipes_rows`).
+dash_app.clientside_callback(
+    """
+    function(text) {
+        if (window.location.pathname.replace(/\\/+$/, '') !== '/dash/pipes') {
+            return dash_clientside.no_update;
+        }
+        const q = String(text || '').trim();
+        const parts = window.location.search.replace(/^\\?/, '').split('&')
+            .filter(part => part && part.split('=')[0] !== 'q');
+        if (q) parts.push('q=' + encodeURIComponent(q).replace(/%20/g, '+'));
+        const search = parts.length ? '?' + parts.join('&') : '';
+        if (search === window.location.search) {
+            return dash_clientside.no_update;
+        }
+        window.history.replaceState(
+            window.history.state, '', window.location.pathname + search + window.location.hash,
+        );
+        dash_clientside.set_props(
+            'pipes-location', {search: window.location.search, href: window.location.href},
+        );
+        return dash_clientside.no_update;
+    }
+    """,
+    Output('pipes-search-url', 'children'),
+    Input('pipes-search', 'value'),
+)
+
+
+@dash_app.callback(
+    *[Output(dropdown_id, 'value', allow_duplicate=True) for _, dropdown_id in KEY_FILTERS],
+    Output('pipes-status-select', 'value'),
+    Output('pipes-search', 'value'),
+    Input('pipes-clear-all-button', 'n_clicks'),
+    prevent_initial_call=True,
+)
+def clear_pipes_filters(n_clicks):
+    """Clear all: no keys, tags, status or search."""
+    if not n_clicks:
+        raise PreventUpdate
+    return [], [], [], [], 'any', ''
+
+
+@dash_app.callback(
+    Output('pipes-rows-store', 'data'),
+    Output('pipes-alert', 'children'),
+    Input('pipes-location', 'search'),
+    Input('pipes-refresh-button', 'n_clicks'),
+    State('pipes-location', 'pathname'),
+    State('pipes-page-meta', 'data'),
+    State('session-store', 'data'),
+    State('pipes-rows-store', 'data'),
+)
+def load_pipes_rows(search, refresh_clicks, pathname, page_meta, session_data, rows_store=None):
+    """
+    List the pipes matching the URL's filters (keys, tags and targets only: fast). Refresh starts
+    a new `generation`, which drops the statistics computed so far. A URL that changed only its
+    search or status keeps the rows (those narrow the table without a new read).
+    """
+    if not _is_table_path(pathname) or not pipes_access.can_read(session_data):
+        raise PreventUpdate
+    refreshed = dash.callback_context.triggered_id == 'pipes-refresh-button'
+    if refreshed:
+        if not refresh_clicks:
+            raise PreventUpdate
+        pipes_table.clear_cache()
+    filters = pipes_table.filters_from_search(search)
+    instance_keys = (page_meta or {}).get('instance') or pipes_table.global_instance_keys()
+    rows_key = pipes_table.rows_key(filters, instance_keys)
+    if (
+        not refreshed
+        and isinstance(rows_store, dict)
+        and rows_store.get('rows_key') == rows_key
     ):
-        return ''
+        raise PreventUpdate
+    instance = None
+    try:
+        instance = mrsm.get_connector(instance_keys)
+        rows = pipes_table.list_rows(
+            instance,
+            connector_keys=filters['connector_keys'],
+            metric_keys=filters['metric_keys'],
+            location_keys=filters['location_keys'],
+            tags=filters['tags'],
+        )
+        alert = []
+    except Exception as e:
+        rows = []
+        alert = alert_from_success_tuple((
+            False,
+            f"Failed to get pipes for instance '{instance_keys}':\n{pipes_table.error_text(e, instance)}",
+        ))
+    store = {
+        'instance': instance_keys,
+        'rows': rows,
+        'search': search or '',
+        ### A failed read is tried again on the next change of the URL.
+        'rows_key': (None if alert else rows_key),
+        'loaded': time.time(),
+        'generation': int(refresh_clicks or 0),
+    }
+    return store, alert
 
-    if ctx[0].get('prop_id', None) == 'pipes-clear-all-button.n_clicks':
-        connector_keys = []
-        metric_keys = []
-        location_keys = []
-        tags = []
 
-    include_instance_keys = instance_keys and instance_keys != str(get_api_connector())
-    search_str = ""
-    
-    if connector_keys:
-        search_str += "connector_keys=" + ','.join((quote_plus(ck) for ck in connector_keys))
-        if metric_keys or location_keys or tags or include_instance_keys:
-            search_str += '&'
+def _sort_args(sort: Optional[Dict[str, Any]]):
+    sort = sort or {}
+    column = sort.get('column', 'pipe')
+    if column not in dict(pipes_table.SORT_COLUMNS):
+        column = 'pipe'
+    return column, bool(sort.get('ascending', True))
 
-    if metric_keys:
-        search_str += "metric_keys=" + ','.join((quote_plus(mk) for mk in metric_keys))
-        if location_keys or tags or include_instance_keys:
-            search_str += '&'
 
-    if location_keys:
-        search_str += "location_keys=" + ','.join((quote_plus(str(lk)) for lk in location_keys))
-        if tags or include_instance_keys:
-            search_str += '&'
+### After each render of the table, ask for the statistics it still needs in a new chain of
+### callbacks: chained to the rows, the render would wait for the statistics (Dash holds a callback
+### while another one writing its inputs is pending), and chained through an output of the render,
+### the statistics would not render again (a cycle of callbacks runs once per chain).
+dash_app.clientside_callback(
+    """
+    function(rendered) {
+        if (!rendered) return dash_clientside.no_update;
+        setTimeout(function () {
+            dash_clientside.set_props('pipes-stats-request', {data: rendered});
+        }, 0);
+        return dash_clientside.no_update;
+    }
+    """,
+    Output('pipes-stats-dummy', 'children'),
+    Input('pipes-render-done', 'data'),
+)
 
-    if tags:
-        search_str += "tags=" + ','.join((quote_plus(tag) for tag in tags))
-        if include_instance_keys:
-            search_str += '&'
 
-    if instance_keys:
-        if include_instance_keys:
-            search_str += "instance=" + quote_plus(instance_keys)
+@dash_app.callback(
+    Output('pipes-stats-store', 'data'),
+    Input('pipes-stats-request', 'data'),
+    State('pipes-rows-store', 'data'),
+    State('pipes-sort-store', 'data'),
+    State('pipes-search', 'value'),
+    State('pipes-status-select', 'value'),
+    State('pipes-stats-store', 'data'),
+    State('session-store', 'data'),
+    prevent_initial_call=True,
+)
+def fill_pipes_stats(rendered, rows_store, sort, search, status, stats, session_data):
+    """
+    After the table renders (its keys first), fill the slow columns (rows, sync time, status,
+    jobs) of the rows on screen, or of every matching row when sorting by one of them or
+    filtering by status; the table renders again with them.
+    """
+    if not rows_store or not isinstance(rendered, dict) or not pipes_access.can_read(session_data):
+        raise PreventUpdate
+    generation = rows_store.get('generation', 0)
+    if rendered.get('generation', 0) != generation:
+        raise PreventUpdate
+    current = _stats_of(stats, rows_store)
+    column, ascending = _sort_args(sort)
+    needed = pipes_table.rows_needing_stats(
+        rows_store.get('rows') or [], current, search, status, column, ascending,
+        int(rendered.get('page') or 1),
+    )
+    if not needed:
+        raise PreventUpdate
+    current = dict(current)
+    current.update(pipes_table.compute_stats(rows_store.get('instance'), needed))
+    return {'generation': generation, 'stats': current}
 
-    return ('?' + search_str) if search_str else ''
 
+def _stats_of(stats_store, rows_store) -> Dict[str, Any]:
+    """The statistics of the rows' generation (none after a Refresh)."""
+    if not isinstance(stats_store, dict) or not rows_store:
+        return {}
+    if stats_store.get('generation', 0) != rows_store.get('generation', 0):
+        return {}
+    return stats_store.get('stats', None) or {}
+
+
+@dash_app.callback(
+    Output('pipes-table-markdown', 'children'),
+    Output('pipes-summary', 'children'),
+    Output('pipes-pagination', 'max_value'),
+    Output('pipes-pagination', 'active_page'),
+    Output('pipes-pagination-div', 'hidden'),
+    Output('pipes-render-done', 'data'),
+    Input('pipes-rows-store', 'data'),
+    Input('pipes-stats-store', 'data'),
+    Input('pipes-search', 'value'),
+    Input('pipes-status-select', 'value'),
+    Input('pipes-sort-store', 'data'),
+    Input('pipes-pagination', 'active_page'),
+    State('pipes-page-meta', 'data'),
+)
+def render_pipes_table(rows_store, stats, search, status, sort, page, page_meta):
+    """
+    Search, filter, sort and page the rows (the table's HTML); `pipes-render-done` then asks for
+    the statistics the page still needs (above).
+    """
+    if not rows_store:
+        raise PreventUpdate
+    if dash.callback_context.triggered_id in ('pipes-search', 'pipes-status-select', 'pipes-sort-store'):
+        page = 1
+    rows = rows_store.get('rows') or []
+    stats = _stats_of(stats, rows_store)
+    column, ascending = _sort_args(sort)
+    page_rows, page, num_pages, num_matching = pipes_table.visible_rows(
+        rows, stats, search, status, column, ascending, page or 1,
+    )
+    filtering = status not in (None, '', 'any')
+    table = pipes_table.render_table_html(
+        page_rows, stats, (page_meta or {}).get('global'),
+        sort={'column': column, 'ascending': ascending},
+        empty_text=('No pipes match.' if rows else 'No pipes yet.'),
+        loading=(filtering and any(row['ref'] not in stats for row in pipes_table.search_rows(rows, search))),
+    )
+    summary = pipes_table.summary_text(num_matching, len(rows), page, num_pages)
+    rendered = {'generation': rows_store.get('generation', 0), 'page': page, 'at': time.time()}
+    return table, summary, num_pages, page, num_pages <= 1, rendered
+
+
+@dash_app.callback(
+    Output('pipes-sort-store', 'data'),
+    Output('pipes-sort-select', 'value'),
+    Input('pipes-sort-click', 'data'),
+    Input('pipes-sort-select', 'value'),
+    State('pipes-sort-store', 'data'),
+    prevent_initial_call=True,
+)
+def sort_pipes(click, select_value, sort):
+    """
+    Sort by a header (`pipes-sort-click`, from `assets/pipes.js`; again: the other direction) or
+    by the phone's Sort select.
+    """
+    trigger = dash.callback_context.triggered_id
+    column, ascending = _sort_args(sort)
+    if trigger == 'pipes-sort-select':
+        try:
+            new_column, direction = str(select_value).split(':', 1)
+        except ValueError:
+            raise PreventUpdate
+        if new_column not in dict(pipes_table.SORT_COLUMNS):
+            raise PreventUpdate
+        new_sort = {'column': new_column, 'ascending': direction != 'desc'}
+        if new_sort == {'column': column, 'ascending': ascending}:
+            raise PreventUpdate
+        return new_sort, dash.no_update
+    if trigger != 'pipes-sort-click' or not isinstance(click, dict):
+        raise PreventUpdate
+    new_column = str(click.get('column') or '')
+    if new_column not in dict(pipes_table.SORT_COLUMNS):
+        raise PreventUpdate
+    new_ascending = (not ascending) if new_column == column else DEFAULT_ASCENDING.get(new_column, True)
+    return (
+        {'column': new_column, 'ascending': new_ascending},
+        f"{new_column}:{'asc' if new_ascending else 'desc'}",
+    )
+
+
+# ------------------------------------------------------------------------------------------------
+# A pipe's page
+# ------------------------------------------------------------------------------------------------
+
+def _meta_pipe(meta: Optional[Dict[str, Any]]) -> mrsm.Pipe:
+    if not meta:
+        raise PreventUpdate
+    return pipe_detail.pipe_from_meta(meta)
+
+
+@dash_app.callback(
+    Output('pipe-detail-result', 'data'),
+    Input('pipe-detail-tabs', 'active_tab'),
+    Input('pipe-detail-edit', 'data'),
+    Input('pipe-detail-refresh', 'data'),
+    State('pipe-detail-meta', 'data'),
+    State('session-store', 'data'),
+)
+def render_pipe_detail_tab(active_tab, edit, refresh, meta, session_data):
+    """
+    The active tab (re-read after an action finishes), tagged with the tab and Edit mode it was
+    built for: a slow tab answered after the next one was chosen is not shown (see below). It
+    also carries whether the pipe is registered (`None`: its instance could not be read).
+    """
+    if not pipes_access.can_read(session_data):
+        raise PreventUpdate
+    pipe = _meta_pipe(meta)
+    if dash.callback_context.triggered_id == 'pipe-detail-refresh':
+        pipes_table.clear_cache(pipe_detail.pipe_ref(pipe))
+    allowed = pipes_access.can_act(session_data)
+    tab = active_tab or 'overview'
+    state = pipe_detail.registration(pipe)
+    registered = state[0]
+    can_register = registered is False and pipes_access.can_register(session_data)[0]
+    try:
+        children = pipe_detail.build_tab(
+            tab, pipe, allowed=allowed, edit=bool(edit), state=state, can_register=can_register,
+        )
+    except Exception as e:
+        children = alert_from_success_tuple((False, f"Could not load this tab: {e}"))
+    return {'tab': tab, 'edit': bool(edit), 'children': children, 'registered': registered}
+
+
+### Responses may arrive out of order (the Overview reads the database; Lineage plans a graph):
+### only the answer for the tab and mode on screen replaces the content. Any answer says whether
+### the pipe is registered: Sync, Verify, Edit and Manage show only for a pipe that is.
+dash_app.clientside_callback(
+    """
+    function(result, tab, edit) {
+        if (!result) {
+            return [dash_clientside.no_update, dash_clientside.no_update];
+        }
+        const hidden = result.registered !== true;
+        if (result.tab !== (tab || 'overview') || result.edit !== !!edit) {
+            return [dash_clientside.no_update, hidden];
+        }
+        return [result.children, hidden];
+    }
+    """,
+    Output('pipe-detail-content', 'children'),
+    Output('pipe-detail-actions', 'hidden'),
+    Input('pipe-detail-result', 'data'),
+    State('pipe-detail-tabs', 'active_tab'),
+    State('pipe-detail-edit', 'data'),
+)
+
+
+@dash_app.callback(
+    Output('pipe-detail-tab-runs', 'tab_style'),
+    Input('pipe-detail-meta', 'data'),
+    State('session-store', 'data'),
+)
+def show_runs_tab(meta, session_data):
+    """Runs appears only on instances that keep engine runs."""
+    if not pipes_access.can_read(session_data):
+        raise PreventUpdate
+    pipe = _meta_pipe(meta)
+    return {} if pipe_detail.runs_available(pipe.instance_connector) else {'display': 'none'}
+
+
+dash_app.clientside_callback(
+    """
+    function(tab) {
+        // The active tab is in the URL (`?tab=`), so a reload or a shared link opens it.
+        if (!tab) return dash_clientside.no_update;
+        const url = new URL(window.location.href);
+        if (tab === 'overview') url.searchParams.delete('tab');
+        else url.searchParams.set('tab', tab);
+        if (url.href !== window.location.href) window.history.replaceState(window.history.state, '', url.href);
+        const page = document.getElementById('pipe-detail-page');
+        if (page) page.dataset.tab = tab;
+        return dash_clientside.no_update;
+    }
+    """,
+    Output('pipe-detail-dummy', 'children'),
+    Input('pipe-detail-tabs', 'active_tab'),
+)
+
+
+@dash_app.callback(
+    Output('pipe-detail-edit', 'data'),
+    Output('pipe-edit-toggle', 'children'),
+    Output('pipe-edit-toggle', 'color'),
+    Output('pipe-detail-tabs', 'active_tab'),
+    Output('pipe-detail-page', 'className'),
+    Input('pipe-edit-toggle', 'n_clicks', allow_optional=True),
+    State('pipe-detail-edit', 'data'),
+    State('pipe-detail-tabs', 'active_tab'),
+    State('session-store', 'data'),
+    prevent_initial_call=True,
+)
+def toggle_pipe_edit(n_clicks, edit, active_tab, session_data):
+    """Edit makes the parameters, definition, lineage and rows editable; Done ends it."""
+    if not n_clicks or not pipes_access.can_act(session_data):
+        raise PreventUpdate
+    edit = not bool(edit)
+    tab = active_tab
+    if edit and active_tab not in pipe_detail.EDITABLE_TABS:
+        tab = pipe_detail.EDIT_TAB
+    return (
+        edit,
+        ('Done' if edit else 'Edit'),
+        ('warning' if edit else 'secondary'),
+        (tab if tab != active_tab else dash.no_update),
+        'pipes-page pipes-detail-page' + (' pipes-editing' if edit else ''),
+    )
+
+
+def _start_action(sysargs: List[str], action: str, session_data, ref: str):
+    """Run `sysargs` on the server; return `(store, alert)`."""
+    from meerschaum.api.dash.execute import run_action
+    import shlex
+    try:
+        result = run_action(sysargs, pipes_access.username(session_data))
+    except Exception as e:
+        result = {'success': False, 'msg': str(e), 'job': None, 'stream': None}
+    if not result.get('success'):
+        return dash.no_update, alert_from_success_tuple((False, result.get('msg') or f"Could not {action}."))
+    return {
+        'job': result.get('job'),
+        'stream': result.get('stream'),
+        'command': shlex.join(sysargs),
+        'action': action,
+        'ref': ref,
+        'started': time.time(),
+    }, []
+
+
+@dash_app.callback(
+    Output('pipe-action-store', 'data'),
+    Output('pipe-detail-alert', 'children'),
+    Output('pipe-confirm-modal', 'is_open', allow_duplicate=True),
+    Input('pipe-action-sync', 'n_clicks', allow_optional=True),
+    Input('pipe-action-verify', 'n_clicks', allow_optional=True),
+    Input('pipe-confirm-button', 'n_clicks'),
+    State('pipe-confirm-store', 'data'),
+    State('pipe-confirm-input', 'value'),
+    State('pipe-confirm-begin', 'value'),
+    State('pipe-confirm-end', 'value'),
+    State('pipe-detail-meta', 'data'),
+    State('session-store', 'data'),
+    prevent_initial_call=True,
+)
+def run_pipe_action(sync_clicks, verify_clicks, confirm_clicks, confirm, typed, begin, end, meta, session_data):
+    """Sync, Verify, or the confirmed Clear, Drop or Delete, run on the server with streamed output."""
+    trigger = dash.callback_context.triggered_id
+    clicks = {
+        'pipe-action-sync': sync_clicks,
+        'pipe-action-verify': verify_clicks,
+        'pipe-confirm-button': confirm_clicks,
+    }
+    if not clicks.get(trigger):
+        raise PreventUpdate
+    if not pipes_access.can_act(session_data):
+        return dash.no_update, alert_from_success_tuple((False, "You are not allowed to run actions.")), False
+    pipe = _meta_pipe(meta)
+    ref = pipe_detail.pipe_ref(pipe)
+    if trigger == 'pipe-confirm-button':
+        action = (confirm or {}).get('action')
+        if action not in pipe_detail.DESTRUCTIVE_ACTIONS or (confirm or {}).get('ref') != ref:
+            raise PreventUpdate
+        if str(typed or '').strip() != str(pipe.metric_key):
+            raise PreventUpdate
+    else:
+        action = 'sync' if trigger == 'pipe-action-sync' else 'verify'
+    sysargs, message = pipe_detail.action_sysargs(meta, action, begin=begin, end=end)
+    if sysargs is None:
+        return dash.no_update, alert_from_success_tuple((False, message)), dash.no_update
+    store, alert = _start_action(sysargs, action, session_data, ref)
+    return store, alert, (False if trigger == 'pipe-confirm-button' else dash.no_update)
+
+
+@dash_app.callback(
+    Output('pipe-confirm-modal', 'is_open'),
+    Output('pipe-confirm-store', 'data'),
+    Output('pipe-confirm-title', 'children'),
+    Output('pipe-confirm-consequence', 'children'),
+    Output('pipe-confirm-bounds', 'hidden'),
+    Output('pipe-confirm-input', 'value'),
+    Output('pipe-confirm-button', 'children'),
+    Input('pipe-manage-clear', 'n_clicks', allow_optional=True),
+    Input('pipe-manage-drop', 'n_clicks', allow_optional=True),
+    Input('pipe-manage-delete', 'n_clicks', allow_optional=True),
+    Input('pipe-confirm-cancel', 'n_clicks'),
+    State('pipe-detail-meta', 'data'),
+    State('session-store', 'data'),
+    prevent_initial_call=True,
+)
+def open_pipe_confirm(clear_clicks, drop_clicks, delete_clicks, cancel_clicks, meta, session_data):
+    """Ask before Clear, Drop or Delete: the pipe's keys, what happens, and its metric typed."""
+    trigger = dash.callback_context.triggered_id
+    if trigger == 'pipe-confirm-cancel':
+        if not cancel_clicks:
+            raise PreventUpdate
+        return False, None, dash.no_update, dash.no_update, dash.no_update, '', dash.no_update
+    clicks = {
+        'pipe-manage-clear': clear_clicks,
+        'pipe-manage-drop': drop_clicks,
+        'pipe-manage-delete': delete_clicks,
+    }
+    if not clicks.get(trigger) or not pipes_access.can_act(session_data):
+        raise PreventUpdate
+    pipe = _meta_pipe(meta)
+    action = trigger[len('pipe-manage-'):]
+    title, button, consequence = pipe_detail.DESTRUCTIVE_ACTIONS[action]
+    return (
+        True,
+        {'action': action, 'ref': pipe_detail.pipe_ref(pipe)},
+        title,
+        consequence,
+        action != 'clear',
+        '',
+        button,
+    )
+
+
+dash_app.clientside_callback(
+    """
+    function(typed, meta) {
+        // The destructive button waits for the pipe's metric key.
+        return !(meta && typed !== undefined && typed !== null && typed.trim() === String(meta.metric_key));
+    }
+    """,
+    Output('pipe-confirm-button', 'disabled'),
+    Input('pipe-confirm-input', 'value'),
+    State('pipe-detail-meta', 'data'),
+)
+
+
+@dash_app.callback(
+    Output('pipe-copy-modal', 'is_open'),
+    Output('pipe-copy-alert', 'children'),
+    Input('pipe-manage-copy', 'n_clicks', allow_optional=True),
+    Input('pipe-copy-cancel', 'n_clicks'),
+    State('session-store', 'data'),
+    prevent_initial_call=True,
+)
+def open_pipe_copy(copy_clicks, cancel_clicks, session_data):
+    trigger = dash.callback_context.triggered_id
+    if trigger == 'pipe-copy-cancel':
+        if not cancel_clicks:
+            raise PreventUpdate
+        return False, []
+    if not copy_clicks or not pipes_access.can_act(session_data):
+        raise PreventUpdate
+    return True, []
+
+
+dash_app.clientside_callback(
+    """
+    function(connector, metric, location, instance, meta) {
+        // Rows are copied with the registration to another instance under the same keys.
+        if (!meta) return dash_clientside.no_update;
+        const same = (connector || '').trim() === meta.connector_keys
+            && (metric || '').trim() === meta.metric_key
+            && (((location || '').trim() || null) === (meta.location_key || null)
+                || ((location || '').trim() === 'None' && !meta.location_key));
+        return (same && instance && instance !== meta.instance_keys) ? {} : {display: 'none'};
+    }
+    """,
+    Output('pipe-copy-rows', 'style'),
+    Input('pipe-copy-connector', 'value'),
+    Input('pipe-copy-metric', 'value'),
+    Input('pipe-copy-location', 'value'),
+    Input('pipe-copy-instance', 'value'),
+    State('pipe-detail-meta', 'data'),
+)
+
+
+@dash_app.callback(
+    Output('pipe-copy-alert', 'children', allow_duplicate=True),
+    Output('pipe-copy-modal', 'is_open', allow_duplicate=True),
+    Output('pipe-copy-store', 'data'),
+    Output('pipe-detail-alert', 'children', allow_duplicate=True),
+    Input('pipe-copy-button', 'n_clicks'),
+    State('pipe-copy-connector', 'value'),
+    State('pipe-copy-metric', 'value'),
+    State('pipe-copy-location', 'value'),
+    State('pipe-copy-instance', 'value'),
+    State('pipe-copy-rows', 'value'),
+    State('pipe-detail-meta', 'data'),
+    State('session-store', 'data'),
+    prevent_initial_call=True,
+)
+def copy_pipe_click(n_clicks, connector_keys, metric_key, location_key, instance_keys, copy_rows, meta, session_data):
+    """
+    Copy: to another instance under the same keys, `copy pipes <instance>` (rows too, streamed);
+    under new keys, a new registration with the same parameters.
+    """
+    if not n_clicks:
+        raise PreventUpdate
+    allowed, reason = pipes_access.can_write_pipes(session_data)
+    if not allowed:
+        return alert_from_success_tuple((False, reason)), dash.no_update, dash.no_update, dash.no_update
+    pipe = _meta_pipe(meta)
+    from meerschaum.api.dash import engine
+    try:
+        engine.get_instance(instance_keys, strict=True)
+    except Exception as e:
+        return alert_from_success_tuple((False, str(e))), dash.no_update, dash.no_update, dash.no_update
+    destination, message = pipe_detail.copy_destination(
+        pipe, connector_keys, metric_key, location_key, instance_keys,
+    )
+    if destination is None:
+        return alert_from_success_tuple((False, message)), dash.no_update, dash.no_update, dash.no_update
+    if destination['same_keys']:
+        sysargs = pipe_detail.copy_sysargs(pipe, destination['instance_keys'], copy_rows=bool(copy_rows))
+        store, alert = _start_action(sysargs, 'copy', session_data, pipe_detail.pipe_ref(pipe))
+        if store is dash.no_update:
+            return alert, dash.no_update, dash.no_update, dash.no_update
+        return [], False, store, []
+    (success, message), new_pipe = pipe_detail.copy_pipe(pipe, destination)
+    if not success:
+        return alert_from_success_tuple((False, message)), dash.no_update, dash.no_update, dash.no_update
+    link = dcc.Link(
+        pipes_table.pipe_title(new_pipe.connector_keys, new_pipe.metric_key, new_pipe.location_key),
+        href=pipes_table.pipe_path(new_pipe.connector_keys, new_pipe.metric_key, new_pipe.location_key,
+                                   str(new_pipe.instance_keys)),
+        className='pipes-table-link',
+    )
+    alert = dbc.Alert(['Copied to ', link], color='success', dismissable=True, id='pipe-copy-success')
+    return [], False, dash.no_update, alert
+
+
+### Each action's store has one writer: a store written by two callbacks (`allow_duplicate`)
+### does not trigger the callbacks listening to it under the console's `MultiplexerTransform`.
+dash_app.clientside_callback(
+    """
+    function(store, copy) {
+        const triggered = (dash_clientside.callback_context.triggered || []).map(t => t.prop_id);
+        const latest = triggered.includes('pipe-copy-store.data') ? copy : store;
+        if (window.mrsmPipes) window.mrsmPipes.follow(latest);
+        return dash_clientside.no_update;
+    }
+    """,
+    Output('pipe-action-panel', 'className'),
+    Input('pipe-action-store', 'data'),
+    Input('pipe-copy-store', 'data'),
+)
+
+
+dash_app.clientside_callback(
+    """
+    function(n_clicks) {
+        if (!n_clicks) return dash_clientside.no_update;
+        if (window.mrsmPipes) window.mrsmPipes.close();
+        return true;
+    }
+    """,
+    Output('pipe-action-panel', 'hidden'),
+    Input('pipe-action-close', 'n_clicks'),
+    prevent_initial_call=True,
+)
+
+
+@dash_app.callback(
+    Output('pipes-navigate-store', 'data'),
+    Input('pipe-detail-refresh', 'data'),
+    State('pipe-action-store', 'data'),
+    State('pipe-detail-meta', 'data'),
+    State('session-store', 'data'),
+    prevent_initial_call=True,
+)
+def after_pipe_action(refresh, action_store, meta, session_data):
+    """
+    After Delete finishes, return to the table once the pipe is gone (read as unregistered: a
+    failed read or a failed Delete stays on the page, which says why).
+    """
+    if not refresh or not action_store or action_store.get('action') != 'delete':
+        raise PreventUpdate
+    if not pipes_access.can_read(session_data):
+        raise PreventUpdate
+    pipe = _meta_pipe(meta)
+    registered, _ = pipe_detail.registration(pipe)
+    if registered is not False:
+        raise PreventUpdate
+    pipes_table.clear_cache()
+    return '/dash/pipes'
+
+
+dash_app.clientside_callback(
+    """
+    function(follow, meta) {
+        // Register and sync lands here: follow the sync it started (or say why it did not start).
+        if (!follow || !meta) return dash_clientside.no_update;
+        const ref = [meta.instance_keys, meta.connector_keys, meta.metric_key,
+                     meta.location_key === null || meta.location_key === undefined ? 'None' : meta.location_key].join('|');
+        if (follow.ref !== ref) return dash_clientside.no_update;
+        dash_clientside.set_props('pipes-follow-store', {data: null});
+        if (follow.error) {
+            dash_clientside.set_props('pipe-detail-alert', {children: {
+                namespace: 'dash_bootstrap_components', type: 'Alert',
+                props: {children: follow.error, color: 'danger', dismissable: true, id: 'pipe-follow-alert'},
+            }});
+        } else if (window.mrsmPipes) {
+            window.mrsmPipes.follow(follow);
+        }
+        return dash_clientside.no_update;
+    }
+    """,
+    Output('pipe-detail-dummy', 'title'),
+    Input('pipes-follow-store', 'data'),
+    State('pipe-detail-meta', 'data'),
+)
+
+
+_NAVIGATE = """
+    function(url) {
+        if (url && window.mrsmNavigate) window.mrsmNavigate(url);
+        else if (url) window.location.assign(url);
+        return dash_clientside.no_update;
+    }
+"""
+dash_app.clientside_callback(
+    _NAVIGATE,
+    Output('pipes-navigate-store', 'modified_timestamp'),
+    Input('pipes-navigate-store', 'data'),
+    prevent_initial_call=True,
+)
+dash_app.clientside_callback(
+    _NAVIGATE,
+    Output('new-pipe-navigate-store', 'modified_timestamp'),
+    Input('new-pipe-navigate-store', 'data'),
+    prevent_initial_call=True,
+)
+
+
+@dash_app.callback(
+    Output('pipe-fetch-alert', 'children'),
+    Input('pipe-fetch-update', 'n_clicks'),
+    State('pipe-fetch-editor', 'value'),
+    State('pipe-detail-meta', 'data'),
+    State('session-store', 'data'),
+    prevent_initial_call=True,
+)
+def update_pipe_fetch(n_clicks, text, meta, session_data):
+    """Update a non-SQL pipe's `fetch` parameters (Definition, in Edit mode)."""
+    if not n_clicks:
+        raise PreventUpdate
+    allowed, reason = pipes_access.can_write_pipes(session_data)
+    if not allowed:
+        return alert_from_success_tuple((False, reason))
+    pipe = _meta_pipe(meta)
+    fetch, message = new_pipe.parse_parameters_text(text)
+    if fetch is None:
+        return alert_from_success_tuple((False, message.replace('parameters', '`fetch` parameters')))
+    from copy import deepcopy
+    parameters = deepcopy(pipe.get_parameters(apply_symlinks=False, refresh=True) or {})
+    if fetch:
+        parameters['fetch'] = fetch
+    else:
+        parameters.pop('fetch', None)
+    pipe.parameters = parameters
+    return alert_from_success_tuple(pipe.edit())
+
+
+# ------------------------------------------------------------------------------------------------
+# New pipe
+# ------------------------------------------------------------------------------------------------
+
+dash_app.clientside_callback(
+    """
+    function(connector) {
+        // The query and Preview are for `sql:` connectors.
+        return !String(connector || '').trim().startsWith('sql:');
+    }
+    """,
+    Output('new-pipe-sql', 'hidden'),
+    Input('new-pipe-connector', 'value'),
+)
+
+
+@dash_app.callback(
+    Output('new-pipe-preview-result', 'children'),
+    Output('new-pipe-columns', 'children'),
+    Output('new-pipe-datetime', 'value'),
+    Input('new-pipe-preview', 'n_clicks'),
+    State('new-pipe-connector', 'value'),
+    State('new-pipe-query', 'value'),
+    State('new-pipe-instance', 'value'),
+    State('new-pipe-datetime', 'value'),
+    State('session-store', 'data'),
+    prevent_initial_call=True,
+)
+def preview_new_pipe(n_clicks, connector_keys, query, instance_keys, datetime_column, session_data):
+    """Run the query (first rows only); its columns fill the Datetime and ID pickers."""
+    if not n_clicks:
+        raise PreventUpdate
+    allowed, reason = pipes_access.can_register(session_data)
+    if not allowed:
+        return alert_from_success_tuple((False, reason)), dash.no_update, dash.no_update
+    from meerschaum.api.dash import engine
+    try:
+        instance_keys = str(engine.get_instance(instance_keys, strict=True))
+    except Exception as e:
+        return alert_from_success_tuple((False, str(e))), dash.no_update, dash.no_update
+    df, message = new_pipe.preview_query(connector_keys, query, instance_keys)
+    if df is None:
+        return (
+            dbc.Alert(message, color='danger', id='new-pipe-preview-error', className='new-pipe-preview-error'),
+            dash.no_update,
+            dash.no_update,
+        )
+    options = [html.Option(value=str(col)) for col in df.columns]
+    guess = new_pipe.guess_datetime_column(df)
+    return (
+        new_pipe.preview_table(df),
+        options,
+        (guess if guess and not str(datetime_column or '').strip() else dash.no_update),
+    )
+
+
+@dash_app.callback(
+    Output('new-pipe-alert', 'children'),
+    Output('new-pipe-connector', 'invalid'),
+    Output('new-pipe-metric', 'invalid'),
+    Output('new-pipe-location-key', 'invalid'),
+    Output('new-pipe-navigate-store', 'data'),
+    Output('pipes-follow-store', 'data'),
+    Input('new-pipe-register', 'n_clicks'),
+    Input('new-pipe-register-sync', 'n_clicks'),
+    State('new-pipe-connector', 'value'),
+    State('new-pipe-metric', 'value'),
+    State('new-pipe-location-key', 'value'),
+    State('new-pipe-instance', 'value'),
+    State('new-pipe-query', 'value'),
+    State('new-pipe-parameters', 'value'),
+    State('new-pipe-datetime', 'value'),
+    State('new-pipe-id', 'value'),
+    State('session-store', 'data'),
+    prevent_initial_call=True,
+)
+def register_new_pipe(
+    register_clicks, register_sync_clicks, connector_keys, metric_key, location_key, instance_keys,
+    query, parameters_text, datetime_column, id_column, session_data,
+):
+    """Register the pipe (and with Register and sync, start its first sync), then open its page."""
+    trigger = dash.callback_context.triggered_id
+    clicks = {'new-pipe-register': register_clicks, 'new-pipe-register-sync': register_sync_clicks}
+    if not clicks.get(trigger):
+        raise PreventUpdate
+    no = dash.no_update
+    allowed, reason = pipes_access.can_register(session_data)
+    if not allowed:
+        return alert_from_success_tuple((False, reason)), no, no, no, no, no
+    keys, errors = new_pipe.validate_keys(connector_keys, metric_key, location_key)
+    if keys is None:
+        return (
+            dbc.Alert(' '.join(errors.values()), color='danger', id='new-pipe-error'),
+            'connector' in errors, 'metric' in errors, 'location' in errors, no, no,
+        )
+    connector_keys, metric_key, location_key = keys
+    from meerschaum.api.dash import engine
+    try:
+        instance_keys = str(engine.get_instance(instance_keys, strict=True))
+    except Exception as e:
+        return alert_from_success_tuple((False, str(e))), False, False, False, no, no
+    parameters, message = new_pipe.build_parameters(
+        connector_keys, query, datetime_column, id_column, parameters_text,
+    )
+    if parameters is None:
+        return alert_from_success_tuple((False, message)), False, False, False, no, no
+    (success, message), pipe = new_pipe.register_pipe(
+        connector_keys, metric_key, location_key, instance_keys, parameters,
+    )
+    if not success:
+        return (
+            dbc.Alert(message, color='danger', id='new-pipe-error'),
+            False, ('already registered' in message), False, no, no,
+        )
+    pipes_table.clear_cache()
+    ref = pipes_table.make_ref(instance_keys, connector_keys, metric_key, location_key)
+    follow = None
+    if trigger == 'new-pipe-register-sync':
+        sysargs, _ = pipe_detail.action_sysargs(pipe_detail.meta_of(pipe), 'sync')
+        store, alert = _start_action(sysargs, 'sync', session_data, ref)
+        if store is dash.no_update:
+            error = getattr(alert, 'children', None) or 'The sync did not start.'
+            follow = {'ref': ref, 'error': f"Registered {pipe}, but the sync did not start: {error}"}
+        else:
+            follow = store
+    href = pipes_table.pipe_path(connector_keys, metric_key, location_key, instance_keys)
+    return [], False, False, False, href, follow
+
+
+# ------------------------------------------------------------------------------------------------
+# Parents and children (the pipe card and the Lineage tab)
+# ------------------------------------------------------------------------------------------------
 
 @dash_app.callback(
     Output({'type': 'pipe-relations-div', 'index': MATCH}, 'children'),
@@ -250,6 +997,7 @@ def update_location_on_pipes_filter_change(
     ),
     State({'type': 'pipe-relations-tabs', 'index': MATCH}, 'active_tab'),
     State('session-store', 'data'),
+    State('pipe-detail-meta', 'data', allow_optional=True),
     prevent_initial_call=True,
 )
 def edit_pipe_relations(
@@ -257,9 +1005,11 @@ def edit_pipe_relations(
     remove_n_clicks: List[Optional[int]],
     active_tab: Optional[str],
     session_store_data: Optional[Dict[str, Any]],
+    detail_meta: Optional[Dict[str, Any]] = None,
 ):
     """
-    Add or remove a parent or child from a pipe card's Parents & Children tabs.
+    Add or remove a parent or child from a pipe card's Parents & Children tabs (or a pipe page's
+    Lineage tab, whose links open in place).
     """
     triggered = dash.callback_context.triggered
     triggered_id = dash.callback_context.triggered_id
@@ -291,5 +1041,6 @@ def edit_pipe_relations(
         authenticated=authenticated,
         active_tab=(active_tab or relation),
         feedback=feedback,
+        new_tab=(not detail_meta),
     )
     return getattr(body, 'children', [body])

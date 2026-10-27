@@ -25,10 +25,21 @@ def ids(component):
     walk(component)
     return found
 
+def find(component, cid):
+    if isinstance(component, (list, tuple)):
+        for c in component:
+            found = find(c, cid)
+            if found is not None: return found
+        return None
+    if getattr(component, 'id', None) == cid:
+        return component
+    children = getattr(component, 'children', None)
+    return find(children, cid) if children is not None and not isinstance(children, str) else None
+
 jobs_page = cj.render_job_page_from_url('/dash/jobs', {})
 runs_page = cj.render_job_page_from_url('/dash/runs', {})
-tabs = [c for c in jobs_page if getattr(c, 'id', None) == 'jobs-page-tabs'][0]
-runs_tabs = [c for c in runs_page if getattr(c, 'id', None) == 'jobs-page-tabs'][0]
+tabs = find(jobs_page, 'jobs-page-tabs')
+runs_tabs = find(runs_page, 'jobs-page-tabs')
 
 ### Jobs and runs land in their own tab.
 cj.get_jobs = lambda **kw: {

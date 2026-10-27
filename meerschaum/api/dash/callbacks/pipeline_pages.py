@@ -22,7 +22,9 @@ from meerschaum.api.dash import dash_app
 from meerschaum.api.dash import engine as _engine
 from meerschaum.api.dash.components import alert_from_success_tuple
 from meerschaum.api.dash.sessions import is_session_authenticated
-from meerschaum.api.dash.pipeline_management import pipeline_title, count_label, runs_placeholder
+from meerschaum.api.dash.pipeline_management import (
+    pipeline_title, count_label, pipes_label, runs_placeholder,
+)
 from meerschaum.utils.packages import import_html, import_dcc
 html, dcc = import_html(check_update=CHECK_UPDATE), import_dcc(check_update=CHECK_UPDATE)
 
@@ -85,7 +87,7 @@ def build_list_cards(registry: str) -> List[Any]:
         instances = {ref.split('|', 1)[0] for ref in targets}
         latest = next((run for run in runs if _engine.run_belongs_to_pipeline(run, name, definition)), None)
         schedules = scheduled_jobs(name, registry, jobs)
-        facts = [count_label(len(targets), 'member'), count_label(len(instances), 'instance')]
+        facts = [pipes_label(definition, latest), count_label(len(instances), 'instance')]
         if latest:
             started = str((latest.get('run') or {}).get('started') or '')[:16].replace('T', ' ')
             facts.append(html.Span(f"{latest.get('status', '')} {started}".strip(),

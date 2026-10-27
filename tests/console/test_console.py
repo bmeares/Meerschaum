@@ -24,8 +24,8 @@ FIGURE = {
 }
 
 CORE_PAGES = (
-    '/dash', '/dash/pipes', '/dash/jobs', '/dash/plugins', '/dash/users', '/dash/tokens',
-    '/dash/pipelines', '/dash/password-reset',
+    '/dash', '/dash/terminal', '/dash/connectors', '/dash/pipes', '/dash/jobs', '/dash/plugins',
+    '/dash/users', '/dash/tokens', '/dash/pipelines', '/dash/password-reset',
 )
 
 
@@ -71,7 +71,7 @@ def test_login_round_trip(server, context):
     assert cookies[0]['path'] == '/'
     assert _errors(tab) == []
 
-    page.click('#sign-out-button')
+    tab.sign_out()
     page.wait_for_selector('#username-input')
     assert not [c for c in context.cookies() if c['name'] == 'mrsm-session-id']
     tab.goto('/dash/pipes', '#username-input')
@@ -80,21 +80,37 @@ def test_login_round_trip(server, context):
 def test_every_console_page_renders_without_errors(server, tab):
     tab.login()
     for path in CORE_PAGES:
-        tab.goto(path)
+        tab.goto(path, '#pages-navbar-div')
         tab.page.wait_for_load_state('networkidle')
         assert tab.page.locator('#logo-img').count() == 1, path
+        ### Every console page has the top navigation (not a plugin page's plain bar).
+        assert tab.page.get_attribute('#pages-navbar-div', 'data-mrsm-nav') == 'console', path
         assert tab.page.url.startswith(f"{server.base_url}/dash"), path
     assert _errors(tab) == [], _errors(tab)
 
-    ### The logo opens the page menu: the console's pages and the plugins' (grouped by their group).
-    tab.goto('/dash/pipes')
-    tab.page.click('#logo-img')
-    tab.page.wait_for_selector('#pages-offcanvas.show')
-    menu = tab.page.inner_text('#pages-offcanvas')
-    for label in ('Web Console', 'Pipes', 'Jobs', 'Plugins', 'Users', 'Tokens', 'Pipelines'):
-        assert label in menu, label
-    assert 'W7 Python' in menu or 'W7 Figure' in menu
+    ### The navigation: the console's pages, the plugins' pages (grouped) and the user menu.
+    tab.goto('/dash/pipes', '#pages-navbar-div')
+    nav = tab.page.inner_text('#pages-navbar-div')
+    for label in ('Pipes', 'Pipelines', 'Jobs', 'Connectors', 'Plugins', 'Pages', USERNAME):
+        assert label in nav, label
+    ### `server` runs `--no-webterm`: no Terminal link.
+    assert tab.page.locator('#console-nav-terminal').count() == 0
+    tab.page.click('#console-nav-pages .dropdown-toggle')
+    menu = tab.page.inner_text('#console-nav-pages')
+    assert 'W7 Python' in menu and 'W7 Figure' in menu
     assert 'W7 Dash' in menu
+    tab.page.click('#console-nav-pages .dropdown-item:has-text("W7 Dash")')
+    tab.page.wait_for_selector('#w7-dash-title')
+    ### A plugin's page keeps its own layout under the plain bar.
+    assert tab.page.get_attribute('#pages-navbar-div', 'data-mrsm-nav') == 'plugin'
+    assert _errors(tab) == [], _errors(tab)
+
+    ### No logo menu any more: the logo is the Overview.
+    tab.goto('/dash/jobs', '#pages-navbar-div')
+    assert tab.page.locator('#pages-offcanvas').count() == 0
+    tab.page.click('#logo-img')
+    tab.page.wait_for_selector('#overview-page')
+    assert tab.page.url.rstrip('/') == f"{server.base_url}/dash"
     assert _errors(tab) == [], _errors(tab)
 
 
@@ -119,61 +135,66 @@ def test_dashboard_pipes_button_lists_cards_and_sections(server, tab):
     assert any('w7parent' in t for t in titles) and any('w7child' in t for t in titles)
     assert _errors(tab) == [], _errors(tab)
 
-    ### The sections of a pipe's card, each loaded when it opens.
-    tab.goto('/dash/pipes/sql:w7console/w7parent')
+    ### A pipe's page: each tab loads when it opens (`tests/console/test_pipes_pages.py`).
+    tab.goto('/dash/pipes/sql:w7console/w7parent', '#pipe-detail-tabs')
     for title, expect in (
-        ('Keys', 'w7parent'),
-        ('Statistics', 'Row count'),
-        ('Columns', 'DB Type'),
+        ('Overview', 'DB type'),
+        ('Data', 'val'),
         ('Parameters', 'columns'),
-        ('SQL Query', 'SELECT'),
-        ('Recent Data', 'val'),
-        ('Query Data', 'Row Limit'),
-        ('Sync Documents', 'Sync'),
+        ('Definition', 'SELECT'),
+        ('Lineage', 'Children'),
     ):
-        tab.page.click(f'.accordion-button:has-text("{title}")')
-        _wait_text(tab.page, '.accordion-collapse.show', expect)
+        tab.page.click(f'#pipe-detail-tabs .nav-link:text-is("{title}")')
+        _wait_text(tab.page, '#pipe-detail-content', expect)
     assert _errors(tab) == [], _errors(tab)
 
 
-def test_pipe_card_runs_queries_and_edits(server, tab):
+def _set_editor(page, id_part: str, text: str) -> None:
+    """Set the text of the Ace editor whose id contains `id_part`."""
+    page.evaluate(
+        """([idPart, text]) => {
+            const el = document.querySelector(`[id*='${idPart}']`);
+            (el.classList.contains('ace_editor') ? el : el.querySelector('.ace_editor')).env.editor
+                .setValue(text, -1);
+        }""",
+        [id_part, text],
+    )
+
+
+def test_pipe_page_runs_queries_and_edits(server, tab):
     result = server.python(SETUP_PIPES)
     assert result.returncode == 0, result.stderr[-2000:]
     tab.login()
-    tab.goto('/dash/pipes/sql:w7console/w7parent')
+    tab.goto('/dash/pipes/sql:w7console/w7parent', '#pipe-detail-tabs')
 
-    ### Query: the rows come back as a table.
-    tab.page.click('.accordion-button:has-text("Query Data")')
-    tab.page.wait_for_selector('.accordion-collapse.show button:text-is("Query")')
-    tab.page.click('.accordion-collapse.show button:text-is("Query")')
-    _wait_text(tab.page, '.accordion-collapse.show', '2026-01-02')
+    ### Query (the Data tab): the rows come back as a table.
+    tab.page.click('#pipe-detail-tabs .nav-link:text-is("Data")')
+    tab.page.wait_for_selector('#pipe-detail-content button:text-is("Query")')
+    tab.page.click('#pipe-detail-content button:text-is("Query")')
+    _wait_text(tab.page, '#pipe-detail-content', '2026-01-02')
 
-    ### Sync documents: one new row.
-    tab.page.click('.accordion-button:has-text("Sync Documents")')
-    tab.page.wait_for_selector('.accordion-collapse.show .ace_editor')
-    tab.page.evaluate(
-        """(text) => document.querySelector('.accordion-collapse.show .ace_editor').env.editor
-            .setValue(text, -1)""",
-        json.dumps([{'dt': '2026-02-01 00:00:00', 'id': 3, 'val': 9.5}]),
-    )
-    tab.page.click('.accordion-collapse.show button:text-is("Sync")')
-    _wait_text(tab.page, '.accordion-collapse.show', 'Inserted 1')
+    ### Sync rows (the Data tab in Edit mode): one new row.
+    tab.page.click('#pipe-edit-toggle')
+    tab.page.wait_for_selector('#pipe-detail-content [id*="sync-editor"]')
+    _set_editor(tab.page, 'sync-editor', json.dumps([{'dt': '2026-02-01 00:00:00', 'id': 3, 'val': 9.5}]))
+    tab.page.click('#pipe-detail-content button:text-is("Sync")')
+    _wait_text(tab.page, '#pipe-detail-content', 'Inserted 1')
 
-    ### Parameters: edit and save.
-    tab.page.click('.accordion-button:has-text("Parameters")')
-    tab.page.wait_for_selector('.accordion-collapse.show .ace_editor')
+    ### Parameters (in Edit mode): edit and save.
+    tab.page.click('#pipe-detail-tabs .nav-link:text-is("Parameters")')
+    tab.page.wait_for_selector('#pipe-detail-content button:text-is("Update")')
     parameters = {
         'columns': {'datetime': 'dt', 'id': 'id'},
         'fetch': {'definition': 'SELECT * FROM w7_raw'},
         'tags': ['dash-edit'],
     }
-    tab.page.evaluate(
-        """(text) => document.querySelector('.accordion-collapse.show .ace_editor').env.editor
-            .setValue(text, -1)""",
-        json.dumps(parameters),
-    )
-    tab.page.click('.accordion-collapse.show button:text-is("Update")')
-    _wait_text(tab.page, '.accordion-collapse.show', 'Successfully edited')
+    _set_editor(tab.page, 'parameters-editor', json.dumps(parameters))
+    tab.page.click('#pipe-detail-content button:text-is("Update")')
+    _wait_text(tab.page, '#pipe-detail-content', 'Successfully edited')
+    ### Done leaves Edit mode: nothing is editable.
+    tab.page.click('#pipe-edit-toggle')
+    tab.page.wait_for_function("document.getElementById('pipe-edit-toggle').textContent === 'Edit'")
+    tab.page.wait_for_selector('#pipe-detail-content button:text-is("Update")', state='detached')
     saved = server.python(
         "import meerschaum as mrsm, json\n"
         "pipe = mrsm.Pipe('sql:w7console', 'w7parent', instance='sql:w7console')\n"
@@ -184,28 +205,34 @@ def test_pipe_card_runs_queries_and_edits(server, tab):
     assert _errors(tab) == [], _errors(tab)
 
 
-def test_pipe_card_shows_parents_and_children(server, tab):
+def _open_lineage(tab, path: str) -> None:
+    tab.goto(path, '#pipe-detail-tabs')
+    tab.page.click('#pipe-detail-tabs .nav-link:text-is("Lineage")')
+    tab.page.wait_for_selector('#pipe-detail-content [id*="pipe-relations-tabs"]')
+
+
+def test_pipe_page_shows_parents_and_children(server, tab):
     result = server.python(SETUP_PIPES)
     assert result.returncode == 0, result.stderr[-2000:]
     tab.login()
-    tab.goto('/dash/pipes/sql:w7console/w7child')
-    tab.page.click('.accordion-button:has-text("Parents & Children")')
-    _wait_text(tab.page, '.accordion-collapse.show', 'Parents (1)')
-    body = tab.page.inner_text('.accordion-collapse.show')
+    _open_lineage(tab, '/dash/pipes/sql:w7console/w7child')
+    _wait_text(tab.page, '#pipe-detail-content', 'Parents (1)')
+    body = tab.page.inner_text('#pipe-detail-content')
     assert 'Children (0)' in body and 'w7parent' in body
-    ### The parent links to its own card.
-    href = tab.page.locator('.accordion-collapse.show a:has-text("w7parent")').get_attribute('href')
+    ### The parent links to its own page; the graph opens in the Pipelines explorer.
+    href = tab.page.locator('#pipe-detail-content a:has-text("w7parent")').get_attribute('href')
     assert href.startswith('/dash/pipes/sql%3Aw7console/w7parent')
+    explore = tab.page.locator('#pipe-detail-content a:has-text("Explore graph")').get_attribute('href')
+    assert explore.startswith('/dash/pipelines/explore?pipe=')
 
-    tab.goto('/dash/pipes/sql:w7console/w7parent')
-    tab.page.click('.accordion-button:has-text("Parents & Children")')
-    _wait_text(tab.page, '.accordion-collapse.show', 'Children (1)')
-    tab.page.click('.accordion-collapse.show a.nav-link:has-text("Children")')
-    _wait_text(tab.page, '.accordion-collapse.show .tab-pane.active', 'w7child')
+    _open_lineage(tab, '/dash/pipes/sql:w7console/w7parent')
+    _wait_text(tab.page, '#pipe-detail-content', 'Children (1)')
+    tab.page.click('#pipe-detail-content a.nav-link:has-text("Children")')
+    _wait_text(tab.page, '#pipe-detail-content .tab-pane.active', 'w7child')
     assert _errors(tab) == [], _errors(tab)
 
 
-def test_pipe_card_adds_and_removes_parents_and_children(server, tab):
+def test_pipe_page_adds_and_removes_parents_and_children(server, tab):
     result = server.python(SETUP_PIPES + """
 for mk in ('w7rel_a', 'w7rel_b'):
     pipe = mrsm.Pipe('w7rel', mk, instance='sql:w7console')
@@ -225,27 +252,31 @@ for mk in ('w7rel_a', 'w7rel_b'):
 
     try:
         tab.login()
-        tab.goto('/dash/pipes/w7rel/w7rel_a')
-        tab.page.click('.accordion-button:has-text("Parents & Children")')
-        _wait_text(tab.page, '.accordion-collapse.show', 'Children (0)')
-        tab.page.click('.accordion-collapse.show a.nav-link:has-text("Children")')
-        tab.page.click('.accordion-collapse.show .tab-pane.active .pipe-relation-add-dropdown')
+        _open_lineage(tab, '/dash/pipes/w7rel/w7rel_a')
+        _wait_text(tab.page, '#pipe-detail-content', 'Children (0)')
+        ### Parents and children are edited in Edit mode only.
+        assert tab.page.locator('#pipe-detail-content .pipe-relation-add-dropdown').count() == 0
+        tab.page.click('#pipe-edit-toggle')
+        tab.page.wait_for_selector('#pipe-detail-content .pipe-relation-add-dropdown')
+        tab.page.click('#pipe-detail-content a.nav-link:has-text("Children")')
+        tab.page.click('#pipe-detail-content .tab-pane.active .pipe-relation-add-dropdown')
         tab.page.keyboard.type('w7rel_b')
         tab.page.locator('[role=option]', has_text="Pipe('w7rel', 'w7rel_b')").first.click()
-        _wait_text(tab.page, '.accordion-collapse.show', 'Children (1)')
-        _wait_text(tab.page, '.accordion-collapse.show .tab-pane.active', 'w7rel_b')
+        _wait_text(tab.page, '#pipe-detail-content', 'Children (1)')
+        _wait_text(tab.page, '#pipe-detail-content .tab-pane.active', 'w7rel_b')
         assert saved().get('children') == ["Pipe('w7rel', 'w7rel_b')"]
 
-        tab.page.click('.accordion-collapse.show .tab-pane.active .pipe-relation-remove-button')
-        _wait_text(tab.page, '.accordion-collapse.show', 'Children (0)')
+        tab.page.click('#pipe-detail-content .tab-pane.active .pipe-relation-remove-button')
+        _wait_text(tab.page, '#pipe-detail-content', 'Children (0)')
         assert 'children' not in saved()
 
         ### A `{{ Pipe() }}` template edge has no remove button.
-        tab.goto('/dash/pipes/sql:w7console/w7child')
-        tab.page.click('.accordion-button:has-text("Parents & Children")')
-        _wait_text(tab.page, '.accordion-collapse.show', 'Parents (1)')
+        _open_lineage(tab, '/dash/pipes/sql:w7console/w7child')
+        tab.page.click('#pipe-edit-toggle')
+        tab.page.wait_for_selector('#pipe-detail-content .pipe-relation-add-dropdown')
+        _wait_text(tab.page, '#pipe-detail-content', 'Parents (1)')
         assert tab.page.locator(
-            '.accordion-collapse.show .tab-pane.active .pipe-relation-remove-button'
+            '#pipe-detail-content .tab-pane.active .pipe-relation-remove-button'
         ).count() == 0
         assert _errors(tab) == [], _errors(tab)
     finally:
@@ -265,7 +296,7 @@ def test_exec_runs_once_in_existing_terminal(webterm_server, context):
     result = server.python(SETUP_PIPES)
     assert result.returncode == 0, result.stderr[-2000:]
     tab.login()
-    frame = _open_terminal(page, server.base_url, '/dash')
+    frame = _open_terminal(page, server.base_url, '/dash/terminal')
     frame.wait_for_function('window.terminal.session.idle === true')
     frame_identity = frame.evaluate('window._rc6Identity = Math.random()')
     requests = []
@@ -298,12 +329,14 @@ def test_exec_runs_once_in_existing_terminal(webterm_server, context):
 
 
 def test_exec_preserves_input_typed_while_readiness_is_in_flight(webterm_server, context):
+    import time
     from tests.console.test_webterm import _open_terminal, _rows
     from tests.console.conftest import Tab
+    started = time.time()
     page = context.new_page()
     tab = Tab(page, webterm_server.base_url)
     tab.login()
-    frame = _open_terminal(page, webterm_server.base_url, '/dash')
+    frame = _open_terminal(page, webterm_server.base_url, '/dash/terminal')
     frame.wait_for_function('window.terminal.session.idle && !window.terminal.session.lineDirty')
     frame.evaluate("""() => {
         const socket = terminal.socket, original = socket.onmessage;
@@ -326,7 +359,12 @@ def test_exec_preserves_input_typed_while_readiness_is_in_flight(webterm_server,
     assert 'retained-input' in _rows(frame)
     frame.evaluate("terminal.term.input('\\x15')")
     frame.wait_for_function('terminal.session.idle && !terminal.session.lineDirty')
-    snapshots = list(webterm_server.root.rglob('shell-state/*.json'))
+    ### This test's shell only: the shells earlier tests left in the server's tmux sessions keep
+    ### their own readiness files.
+    snapshots = [
+        path for path in webterm_server.root.rglob('shell-state/*.json')
+        if path.stat().st_mtime >= started
+    ]
     assert snapshots, 'The shell did not publish readiness.'
     frame.evaluate("terminal.term.input('exit\\r')")
     frame.wait_for_function("document.querySelector('.xterm-rows').innerText.includes('[CLOSED]')")
@@ -380,7 +418,7 @@ def test_exec_sends_the_subaction_the_dashboard_shows(server, tab):
 
 
 def test_dashboard_buttons_keep_their_rows_at_every_width(server, tab):
-    """No label wraps or clips, the terminal button stays beside Exec, and More has its own row."""
+    """No label wraps or clips and the terminal button stays beside Exec, at every width."""
     tab.login()
     page = tab.page
     measure = """() => {
@@ -388,14 +426,13 @@ def test_dashboard_buttons_keep_their_rows_at_every_width(server, tab):
         const ids = ['go-button', 'show-webterm-button', 'get-pipes-button', 'get-jobs-button',
                      'get-pipelines-button'];
         const buttons = ids.map(id => document.getElementById(id));
-        const more = box('get-items-menu');
         return {
             clipped: buttons.filter(b => b.scrollWidth > b.clientWidth + 1).map(b => b.id),
             heights: buttons.map(b => Math.round(b.getBoundingClientRect().height)),
             exec_top: Math.round(box('go-button').top),
             term_top: Math.round(box('show-webterm-button').top),
-            lowest: Math.max(...ids.map(id => box(id).bottom)),
-            more_top: more.top,
+            page_width: document.documentElement.scrollWidth,
+            view_width: document.documentElement.clientWidth,
         };
     }"""
     for width in (1600, 1280, 1100, 1000, 900, 700, 480, 360):
@@ -405,10 +442,10 @@ def test_dashboard_buttons_keep_their_rows_at_every_width(server, tab):
         assert layout['clipped'] == [], (width, layout)
         assert len(set(layout['heights'])) == 1, (width, layout)
         assert layout['exec_top'] == layout['term_top'], (width, layout)
-        assert layout['more_top'] >= layout['lowest'] + 4, (width, layout)
-    page.click('#get-items-menu .dropdown-toggle')
-    page.wait_for_selector('#get-runs-button', state='visible')
-    assert 'Graphs' not in page.inner_text('#get-items-menu')
+        assert layout['page_width'] <= layout['view_width'], (width, layout)
+    ### Plugins, Users and Runs are pages of the navigation now, not a "More" menu here.
+    assert page.locator('#get-items-menu').count() == 0
+    assert page.locator('#get-runs-button').count() == 0
     assert _errors(tab) == [], _errors(tab)
 
 
@@ -445,7 +482,7 @@ def test_manage_menu_syncs_a_pipe_and_confirms_destructive_actions(webterm_serve
     result = server.python(SETUP_PIPES)
     assert result.returncode == 0, result.stderr[-2000:]
     tab.login()
-    frame = _open_terminal(tab.page, server.base_url, '/dash')
+    frame = _open_terminal(tab.page, server.base_url, '/dash/terminal')
     frame.wait_for_function('window.terminal.session.idle === true')
     tab.page.click('#get-pipes-button')
     tab.page.wait_for_selector('.card-title:has-text("w7parent")')
@@ -521,6 +558,9 @@ def test_jobs_page_starts_and_deletes_a_job(server, tab):
         except Exception:
             if attempt == 2:
                 raise
+    ### Delete is enabled once the job's name is typed.
+    assert tab.page.locator('.modal.show button:text-is("Delete")').is_disabled()
+    tab.page.fill('.modal.show input', 'w7job')
     ### A job that is still winding down cannot be deleted yet: the modal stays open and says so,
     ### so confirm again (deleting is idempotent) before calling it a failure.
     for attempt in range(3):
@@ -600,14 +640,23 @@ def test_jobs_page_tabs_and_logs_modal_follow_a_running_job(server, tab):
             "(() => { const v = document.querySelector('#job-logs-view');"
             " return v.scrollHeight - v.scrollTop - v.clientHeight < 40; })()"
         )
-        ### Opened at the end, and still there as the running job writes more.
+        ### Opened at the end, and still there as the running job writes more (past the renderer's
+        ### 40 px "at the end" margin, so the top is clearly not the end).
         tab.page.wait_for_function(
             "document.querySelector('#job-logs-view').scrollHeight >"
-            " document.querySelector('#job-logs-view').clientHeight", timeout=60000,
+            " document.querySelector('#job-logs-view').clientHeight + 80", timeout=60000,
         )
         assert tab.page.evaluate(at_bottom)
-        ### Scrolled up, the view stays put while new lines arrive.
-        tab.page.evaluate("document.querySelector('#job-logs-view').scrollTop = 0")
+        ### Scrolled up, the view stays put while new lines arrive. The renderer learns that the
+        ### view left the bottom from its `scroll` event, which comes after `scrollTop` is set (and
+        ### a render landing first scrolls back down): scroll up until it has seen it, as a
+        ### reader's scrolling would.
+        tab.page.wait_for_function(
+            "(() => { const v = document.querySelector('#job-logs-view');"
+            " if (v._mrsmFollow !== false || v.scrollTop !== 0) v.scrollTop = 0;"
+            " return v._mrsmFollow === false && v.scrollTop === 0; })()",
+            timeout=30000,
+        )
         length = tab.page.evaluate("document.querySelector('#job-logs-view').textContent.length")
         tab.page.wait_for_function(
             f"document.querySelector('#job-logs-view').textContent.length > {length}", timeout=60000,
@@ -822,16 +871,22 @@ def test_session_is_shared_by_console_and_api_plugin(server, context):
 
 def test_plugins_page_lists_hosted_plugins(server, tab):
     tab.login()
-    tab.goto('/dash/plugins')
-    tab.page.wait_for_selector('#plugins-content-div')
-    _wait_text(tab.page, '#plugins-content-div', 'plugin')
+    ### The Installed tab: the plugins on the server.
+    tab.goto('/dash/plugins', '#installed-plugins-table')
+    _wait_text(tab.page, '#installed-plugins-table', 'w7_pyfig')
+    _wait_text(tab.page, '#installed-plugins-table', 'w7_dashapp')
+    ### The Repository tab: the plugins published to this API (cards, or the empty state).
+    tab.page.click('#plugins-tabs .nav-link:text-is("Repository")')
+    tab.page.wait_for_selector('#plugins-content-div .plugins-empty-state, #plugins-content-div .plugin-card')
     assert _errors(tab) == [], _errors(tab)
 
 
 def test_users_page_lists_the_users(server, tab):
     tab.login()
-    tab.goto('/dash/users')
-    tab.page.wait_for_selector(f'.card:has-text("{USERNAME}")')
+    tab.goto('/dash/users', '#users-table')
+    tab.page.wait_for_selector(f'#users-table tbody tr:has(a:text-is("{USERNAME}"))')
+    row = tab.page.locator(f'#users-table tbody tr:has(a:text-is("{USERNAME}"))')
+    assert 'admin' in row.inner_text()
     assert _errors(tab) == [], _errors(tab)
 
 
@@ -839,6 +894,7 @@ def test_tokens_page_registers_a_token(server, tab):
     tab.login()
     tab.goto('/dash/tokens')
     tab.page.wait_for_selector('#tokens-create-button')
+    assert tab.page.inner_text('#tokens-create-button') == 'New token'
     tab.page.click('#tokens-create-button')
     tab.page.wait_for_selector('.modal.show')
     tab.page.fill('.modal.show input[type=text]', 'w7-token')
@@ -908,7 +964,9 @@ ROWCOUNT = (
 
 def test_no_auth_console_needs_no_login(noauth_server, context):
     tab = Tab(context.new_page(), noauth_server.base_url)
-    tab.goto('/dash', '#go-button')
+    ### The Overview opens without a login, and so does the Terminal page.
+    tab.goto('/dash', '#overview-page')
+    tab.goto('/dash/terminal', '#go-button')
     tab.wait_for_dashboard()
     ### Everything the login gates is open, including the pages that list and run things.
     tab.page.click('#go-button')
@@ -994,7 +1052,7 @@ def test_pipelines_page_graph_gantt_and_runs(server, tab):
     ### The runs table and the run's events.
     assert tab.page.locator('#pipelines-runs-table tbody tr').count() >= 1
     assert 'succeeded' in tab.page.inner_text('#pipelines-runs-table tbody tr')
-    _wait_text(tab.page, '#pipelines-events-pre', 'run_started', timeout=30000)
+    _wait_text(tab.page, '#pipelines-events-pre', 'Run started', timeout=30000)
     events = tab.page.inner_text('#pipelines-events-pre')
     assert 'w7parent' in events and 'w7child' in events
 
@@ -1018,13 +1076,16 @@ def test_the_console_embeds_the_servers_terminal(webterm_server, context):
     tab = Tab(context.new_page(), base)
     tab.login()
     cookie = [c for c in context.cookies() if c['name'] == 'mrsm-session-id'][0]['value']
-    tab.goto('/dash', '#webterm-iframe')
+    tab.goto('/dash/webterm', '#webterm-iframe')
     assert tab.page.get_attribute('#webterm-iframe', 'src') == f"/webterm/{cookie}"
     response = tab.page.request.get(f"{base}/webterm/{cookie}")
     assert response.status == 200, response.status
     assert 'Meerschaum' in response.text()
-    ### The dashboard embeds the same terminal beside the action form.
-    tab.goto('/dash', '#go-button')
+    ### The Terminal page embeds the same terminal beside the action form, and the navigation
+    ### links to it for a user who may use it.
+    tab.goto('/dash', '#overview-page')
+    tab.page.click('#console-nav-terminal')
+    tab.page.wait_for_selector('#go-button')
     tab.page.wait_for_selector('#webterm-iframe')
     assert tab.page.get_attribute('#webterm-iframe', 'src') == f"/webterm/{cookie}"
     ### The terminal shares the native API listener; no separate terminal service is started.
@@ -1056,7 +1117,7 @@ def test_pipeline_cards_lazy_manage_terminal_and_runs_stay_in_console(webterm_se
     assert metadata.returncode == 0, metadata.stderr[-2000:]
     tab = Tab(context.new_page(), server.base_url)
     tab.login()
-    frame = _open_terminal(tab.page, server.base_url, '/dash')
+    frame = _open_terminal(tab.page, server.base_url, '/dash/terminal')
     frame.wait_for_function('window.terminal.session.idle === true')
     tab.page.click('#get-pipelines-button')
     card = tab.page.locator('.card:has(.card-header code:text-is("Pipeline(\'console-list\')"))').first
@@ -1074,11 +1135,10 @@ def test_pipeline_cards_lazy_manage_terminal_and_runs_stay_in_console(webterm_se
     tab.page.click('#get-pipelines-button')
     card.wait_for(state='visible')
     assert not tab.page.locator('#webterm-div').is_visible()
-    original_url = tab.page.url
-    tab.page.locator('#get-items-menu .dropdown-toggle').click()
-    tab.page.locator('#get-runs-button').click()
-    _wait_text(tab.page, '#content-div-right', 'execute-console-run')
-    assert tab.page.locator('#content-div-right .col-lg-6').count() >= 2
-    assert tab.page.url == original_url
+    ### The console's runs (once under the dashboard's "More" menu) are the Jobs page's Runs tab.
+    assert tab.page.locator('#get-runs-button').count() == 0
+    tab.goto('/dash/runs', '#jobs-page-tabs')
+    _wait_text(tab.page, 'body', 'execute-console-run')
+    assert tab.page.locator('#console-nav-jobs.active').count() == 1
     assert _errors(tab) == [], _errors(tab)
     tab.page.close()

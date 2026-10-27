@@ -1,0 +1,205 @@
+/* The console's top navigation (`components.build_pages_navbar`) and the plain bar above plugin
+   pages (`build_plugin_navbar`), the inline icons (`components.build_icon`) and the Terminal
+   page's toolbar. Dark by default, like the rest of the console. */
+
+/* Icons: an inline SVG used as a mask, painted in the text color, so no font is needed. */
+.mrsm-icon {
+  display: inline-block;
+  width: 1.15em;
+  height: 1.15em;
+  flex: 0 0 auto;
+  vertical-align: -0.2em;
+  background-color: currentColor;
+  -webkit-mask: var(--mrsm-icon) center / contain no-repeat;
+  mask: var(--mrsm-icon) center / contain no-repeat;
+}
+.mrsm-icon-refresh {
+  --mrsm-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 12a8 8 0 1 1-2.35-5.65'/%3E%3Cpath d='M20 4v5h-5'/%3E%3C/svg%3E");
+}
+.mrsm-icon-fullscreen {
+  --mrsm-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5'/%3E%3C/svg%3E");
+}
+.mrsm-icon-fullscreen-exit {
+  --mrsm-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M9 4v5H4M20 9h-5V4M15 20v-5h5M4 15h5v5'/%3E%3C/svg%3E");
+}
+.mrsm-icon-user {
+  --mrsm-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='8' r='4'/%3E%3Cpath d='M4 21c0-4 3.6-6 8-6s8 2 8 6'/%3E%3C/svg%3E");
+}
+.mrsm-icon-plus {
+  --mrsm-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round'%3E%3Cpath d='M12 5v14M5 12h14'/%3E%3C/svg%3E");
+}
+.mrsm-icon-terminal {
+  --mrsm-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 17l6-5-6-5M12 19h8'/%3E%3C/svg%3E");
+}
+.mrsm-icon-check {
+  --mrsm-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12.5l4.5 4.5L19 7.5'/%3E%3C/svg%3E");
+}
+.mrsm-icon-x {
+  --mrsm-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round'%3E%3Cpath d='M6 6l12 12M18 6L6 18'/%3E%3C/svg%3E");
+}
+
+/* The bar. */
+.console-nav-root {
+  z-index: 1030;
+}
+.console-nav.navbar {
+  padding: 0;
+  min-height: 56px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+.console-nav-container.container-fluid {
+  padding-left: 12px;
+  padding-right: 12px;
+  flex-wrap: wrap;
+}
+.console-nav-brand.navbar-brand {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0;
+  margin-right: 12px;
+}
+.console-nav-logo {
+  width: 36px;
+  height: 36px;
+}
+.console-nav .navbar-toggler {
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 8px;
+  border-color: rgba(255, 255, 255, 0.2);
+}
+.console-nav .navbar-collapse {
+  align-items: stretch;
+}
+.console-nav-links.navbar-nav {
+  flex-wrap: nowrap;
+}
+.console-nav .console-nav-link.nav-link,
+.console-nav .console-nav-link.dropdown-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 0 12px;
+  color: rgba(255, 255, 255, 0.72);
+  white-space: nowrap;
+}
+.console-nav .console-nav-link.nav-link:hover,
+.console-nav .console-nav-link.nav-link:focus-visible,
+.console-nav .console-nav-link.dropdown-toggle:hover {
+  color: #fff;
+}
+.console-nav .console-nav-link.nav-link.active,
+.console-nav .console-nav-link.dropdown-toggle.active {
+  color: #fff;
+  box-shadow: inset 0 -3px 0 var(--bs-warning);
+}
+.console-nav-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+.console-nav-instance .instance-select {
+  margin-top: 0;
+  min-width: 10rem;
+  max-width: 16rem;
+  min-height: 36px;
+}
+.console-nav-username {
+  max-width: 12rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.console-nav .dropdown-menu {
+  min-width: 12rem;
+}
+.console-nav .dropdown-item {
+  display: flex;
+  align-items: center;
+  min-height: 40px;
+}
+.console-nav .dropdown-item.active {
+  background-color: rgba(255, 255, 255, 0.12);
+  color: #fff;
+}
+.console-nav-sign-out.btn-link {
+  min-height: 44px;
+  text-decoration: none;
+}
+
+/* Wide screens: one row, kept at the top while the page scrolls. */
+@media (min-width: 992px) {
+  .console-nav-root {
+    position: sticky;
+    top: 0;
+  }
+  .console-nav-container.container-fluid {
+    flex-wrap: nowrap;
+  }
+  .console-nav .navbar-collapse {
+    min-height: 56px;
+  }
+  .console-nav-links.navbar-nav .console-nav-link.nav-link,
+  .console-nav-links.navbar-nav .console-nav-link.dropdown-toggle,
+  .console-nav-user-nav .console-nav-link.nav-link,
+  .console-nav-user-nav .console-nav-link.dropdown-toggle {
+    min-height: 56px;
+  }
+}
+
+/* Narrow screens: the links stack behind the toggler, each a full-width 44px row. */
+@media (max-width: 991.98px) {
+  .console-nav .navbar-collapse {
+    flex-basis: 100%;
+  }
+  .console-nav-links.navbar-nav {
+    padding: 4px 0;
+  }
+  .console-nav .console-nav-link.nav-link.active,
+  .console-nav .console-nav-link.dropdown-toggle.active {
+    box-shadow: inset 3px 0 0 var(--bs-warning);
+  }
+  .console-nav-right {
+    flex-direction: column;
+    align-items: stretch;
+    padding: 8px 0 12px;
+    margin-left: 0;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+  }
+  .console-nav-instance .instance-select {
+    max-width: none;
+    width: 100%;
+    min-height: 44px;
+  }
+  .console-nav-right .navbar-nav,
+  .console-nav-right .nav-item {
+    width: 100%;
+  }
+}
+
+/* The Terminal page's toolbar: icon buttons, the fullscreen icon follows its column. */
+#webterm-controls-div .btn {
+  min-width: 36px;
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+#webterm-fullscreen-button .webterm-icon-exit {
+  display: none;
+}
+#content-col-right[data-fullscreen="1"] #webterm-fullscreen-button .webterm-icon-enter {
+  display: none;
+}
+#content-col-right[data-fullscreen="1"] #webterm-fullscreen-button .webterm-icon-exit {
+  display: inline-block;
+}
+#tokens-refresh-button,
+#pipelines-refresh-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 36px;
+}

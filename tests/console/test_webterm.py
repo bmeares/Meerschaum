@@ -44,6 +44,38 @@ def _vendored_version(asset: str, package: str) -> str:
     return url.split(f'{package}@', 1)[1].split('/', 1)[0]
 
 
+def _webterm_tmux_socket(server: Server) -> str:
+    """
+    The web terminal's own tmux server socket for a server's root (`webterm::tmux_socket_path`):
+    `tmux.sock` in the root's webterm directory, or, when that path is too long for a socket,
+    `mrsm-webterm-<user>/<hash>.sock` in the server's temporary directory.
+    """
+    import hashlib
+    webterm_dir = pathlib.Path(server.root) / '.internal' / 'webterm'
+    preferred = webterm_dir / 'tmux.sock'
+    if len(os.fsencode(str(preferred))) <= 100:
+        return str(preferred)
+    digest = hashlib.sha256(str(webterm_dir).encode()).hexdigest()[:16]
+    user = ''.join(
+        c for c in (server.env.get('USER') or server.env.get('USERNAME') or 'user')
+        if (c.isascii() and c.isalnum()) or c in '_-'
+    )
+    temp = server.env.get('TMPDIR') or '/tmp'
+    return str(pathlib.Path(temp) / f'mrsm-webterm-{user}' / f'{digest}.sock')
+
+
+def _tmux(socket: str, server: Server, *args: str) -> subprocess.CompletedProcess:
+    """
+    Run the real tmux (not the fixture's wrapper on the server's `PATH`) on one socket: always
+    `-S`, never the caller's default server.
+    """
+    return subprocess.run(
+        [shutil.which('tmux') or 'tmux', '-S', socket, *args],
+        env={k: v for k, v in server.env.items() if k not in ('TMUX', 'TMUX_PANE')},
+        capture_output=True, text=True, timeout=20,
+    )
+
+
 @pytest.fixture(scope='module', params=['tmux', 'plain', 'no-tmux-binary'])
 def term_server(request):
     """A server with the terminal on, on the tmux path or the plain path."""
@@ -92,12 +124,10 @@ def term_server(request):
         raise
     yield instance
     if use_tmux:
-        ### Address the private server's socket explicitly, never a bare `kill-server`.
-        subprocess.run(
-            ['tmux', '-S', instance.tmux_socket, 'kill-server'],
-            env={k: v for k, v in instance.env.items() if k not in ('TMUX', 'TMUX_PANE')},
-            capture_output=True, timeout=20,
-        )
+        ### Address the private servers' sockets explicitly, never a bare `kill-server`: the web
+        ### terminal's own (which the API also stops when it exits) and the wrapper's.
+        for socket in (_webterm_tmux_socket(instance), instance.tmux_socket):
+            _tmux(socket, instance, 'kill-server')
     instance.stop()
     shutil.rmtree(tmux_dir, ignore_errors=True)
 
@@ -193,9 +223,10 @@ def test_without_the_flag_there_is_no_terminal(server, context):
     assert page.request.get(f"{server.base_url}/websocket/{cookie}").status == 404
     tab.goto('/dash/webterm', '#go-button')
     assert page.locator('#webterm-iframe').count() == 0
-    ### v4's banner takes the terminal's place on the dashboard.
-    tab.goto('/dash', '#go-button')
+    ### v4's banner takes the terminal's place on the Terminal page, which the navigation leaves out.
+    tab.goto('/dash/terminal', '#go-button')
     assert page.locator('#webterm-iframe').count() == 0
+    assert page.locator('#console-nav-terminal').count() == 0
 
 
 def test_terminal_requires_a_logged_in_administrator(term_server, context):
@@ -284,7 +315,7 @@ def test_the_dashboard_embeds_the_same_terminal(term_server, context):
 def test_exec_accepts_an_idle_terminal_after_reattaching(term_server, context):
     """A visible idle prompt stays executable through tmux and iframe refreshes."""
     page, tab, _ = _login(context, term_server)
-    frame = _open_terminal(page, term_server.base_url, '/dash')
+    frame = _open_terminal(page, term_server.base_url, '/dash/terminal')
     try:
         frame.wait_for_function(
             'window.terminal.session.idle && !window.terminal.session.lineDirty',
@@ -456,9 +487,17 @@ def test_reload_reattaches_to_the_tmux_session(term_server, context):
     ### Do not leave the text on the shared shell's line.
     _focus_terminal(frame)
     page.keyboard.press('Control+u')
-    ### The session is named after the user, with the configured suffix.
-    listing = subprocess.run(
-        ['tmux', '-S', term_server.tmux_socket, 'list-sessions', '-F', '#{session_name}'],
-        env={k: v for k, v in term_server.env.items() if k not in ('TMUX', 'TMUX_PANE')}, capture_output=True, text=True, timeout=20,
-    ).stdout.split()
+    ### The session is named after the user, with the configured suffix, and lives on the web
+    ### terminal's own tmux server (a socket under the root), not on the default socket the
+    ### `tmux` wrapper of this fixture would otherwise give it.
+    socket = _webterm_tmux_socket(term_server)
+    assert os.path.exists(socket), socket
+    listing = _tmux(socket, term_server, 'list-sessions', '-F', '#{session_name}').stdout.split()
     assert f"{USERNAME}_mrsm" in listing, listing
+    elsewhere = _tmux(
+        term_server.tmux_socket, term_server, 'list-sessions', '-F', '#{session_name}',
+    ).stdout.split()
+    assert f"{USERNAME}_mrsm" not in elsewhere, elsewhere
+    ### Meerschaum's tmux configuration: no status bar.
+    status = _tmux(socket, term_server, 'show-options', '-g', 'status').stdout.strip()
+    assert status == 'status off', status

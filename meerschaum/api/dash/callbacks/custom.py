@@ -25,10 +25,30 @@ from meerschaum.api.dash.callbacks.dashboard import (
     _pages,
     _paths_without_dbc_dark,
 )
-from meerschaum.api.dash.components import build_pages_navbar
+from meerschaum.api.dash.components import build_pages_navbar, build_plugin_navbar
 
 #: Page-contract pages by console path: `{'route': ..., 'plugin': ...}`.
 contract_pages: Dict[str, Dict[str, Any]] = {}
+
+
+def page_navbar(page: Dict[str, Any]) -> Any:
+    """
+    The bar above a plugin's page: none with `skip_navbar`, the console's top navigation with
+    `navbar=True`, else the plain bar (the logo and Sign out), so the page keeps its own layout.
+    """
+    if page.get('skip_navbar', False):
+        return None
+    if page.get('navbar', False):
+        return build_pages_navbar()
+    return build_plugin_navbar()
+
+
+def with_navbar(layout: Any, page: Dict[str, Any]) -> Any:
+    """A plugin page's layout under its bar (`page_navbar`)."""
+    navbar = page_navbar(page)
+    if navbar is None:
+        return layout
+    return [navbar] + (list(layout) if isinstance(layout, list) else [layout])
 
 
 def _activate_plugin_venv(function: Any, debug: bool = False) -> None:
@@ -130,11 +150,7 @@ def add_plugin_pages(debug: bool = False):
                 }
                 page_layout = build_contract_layout(route, _page_dict['page_key'])
 
-            if not _page_dict['skip_navbar']:
-                if isinstance(page_layout, list):
-                    page_layout = [build_pages_navbar()] + page_layout
-                else:
-                    page_layout = [build_pages_navbar(), page_layout]
+            page_layout = with_navbar(page_layout, _page_dict)
             _pages[_page_dict['page_key']] = path
             _paths[path] = page_layout
             if _page_dict['login_required']:
@@ -151,9 +167,7 @@ def add_native_pages() -> None:
     from meerschaum.api.host.dash import get_native_pages
     for path, page in get_native_pages().items():
         contract_pages[path] = {**page, 'login_required': bool(page.get('login_required', True))}
-        layout = build_contract_layout(page['route'], page['page_key'])
-        if not page.get('skip_navbar', False):
-            layout = [build_pages_navbar()] + layout
+        layout = with_navbar(build_contract_layout(page['route'], page['page_key']), page)
         _pages[page['page_key']] = path
         _paths[path] = layout
         if page.get('login_required', True):
@@ -166,15 +180,11 @@ def register_layout_pages(pages: Dict[str, Dict[str, Any]]) -> None:
     """
     Register Dash layouts by console path (what `make_dash_app(plugin_name, pages)` of the
     5.0.0 release candidate took): each page is a dict with `layout` and optionally
-    `login_required`, `skip_navbar`, `page_key` and `dark_theme`.
+    `login_required`, `skip_navbar`, `navbar`, `page_key` and `dark_theme`.
     """
     for endpoint, page in pages.items():
-        layout = page['layout']
         path = console_path(endpoint)
-        if not page.get('skip_navbar', False):
-            layout = (
-                [build_pages_navbar()] + (layout if isinstance(layout, list) else [layout])
-            )
+        layout = with_navbar(page['layout'], page)
         _paths[path] = layout
         _pages[page.get('page_key', endpoint)] = path
         if page.get('login_required', True):

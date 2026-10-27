@@ -8,9 +8,10 @@ The Plotly Dash web console (v4's console, restored in v5 on the Python façade;
 The standalone binary serves the API, `/docs`, `/engine/*` and MCP; the console comes with the
 Python package and is served by the API host (`meerschaum.api.host`), which the Rust server
 proxies `/dash/*` to. There is ONE Dash app, mounted at `/dash` (`requests_pathname_prefix`
-`/dash/`): the core pages (dashboard, pipes, jobs, plugins, users, tokens, login, register,
-settings, pipelines, webterm) and the pages and callbacks of plugins (`@dash_plugin`,
-`@web_page`), at their v4 paths.
+`/dash/`): the core pages (the Overview at `/dash`, pipes, pipelines, jobs, connectors, plugins,
+the Terminal (v4's dashboard), users, tokens, login, register, settings), each under the
+console's top navigation, and the pages and callbacks of plugins (`@dash_plugin`, `@web_page`),
+at their v4 paths.
 
 The app is built on first use (`build_dash_app()`, or the first access of `meerschaum.api.dash.dash_app`),
 so importing helpers such as `meerschaum.api.dash.sessions` from a plugin builds nothing.
@@ -144,7 +145,7 @@ def _build(debug: bool = False):
         )
     html, dcc = import_html(check_update=False), import_dcc(check_update=False)
 
-    from meerschaum.api.dash.components import location, pages_offcanvas
+    from meerschaum.api.dash.components import location
 
     stylesheets = [
         '/static/css/dbc_dark.css',
@@ -204,9 +205,7 @@ def _build(debug: bool = False):
         ### Drives the per-route `dbc_dark` body class (see update_page_layout_div).
         dcc.Store(id='dbc-dark-store', data=True),
         html.Div(id='dbc-dark-dummy', style={'display': 'none'}),
-        ### Persistent across navigation so its accordion isn't destroyed/recreated
-        ### (which crashed dbc's accordion). Toggled by the logo in the page navbars.
-        pages_offcanvas,
+        ### Each page, with its navbar (`components.build_pages_navbar`), rendered by the router.
         html.Div([], id='page-layout-div'),
     ])
 

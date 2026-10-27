@@ -74,8 +74,8 @@ out['fragment'] = client.get('/_pages/latepages/fragment').text
 out['framed'] = client.get('/_pages/latepages/fragment?frame=1').text
 out['page_only_fragment'] = client.get('/_pages/pageonly/fragment').text
 out['locked_anonymous'] = client.get('/_pages/latepages/locked').status_code
-sessions.set_session('dynamic-session', {'username': 'example'})
-client.cookies.set('mrsm-session-id', 'dynamic-session')
+sessions.set_session('00000000-0000-4000-8000-0000000d1a01', {'username': 'example'})
+client.cookies.set('mrsm-session-id', '00000000-0000-4000-8000-0000000d1a01')
 out['locked_authenticated'] = client.get('/_pages/latepages/locked').status_code
 out['layout'] = client.get('/dash/_dash-layout').text
 
@@ -90,7 +90,7 @@ def route(pathname):
         'outputs': outputs,
         'inputs': [
             {'id': 'mrsm-location', 'property': 'pathname', 'value': pathname},
-            {'id': 'session-store', 'property': 'data', 'value': {'session-id': 'dynamic-session'}},
+            {'id': 'session-store', 'property': 'data', 'value': {'session-id': '00000000-0000-4000-8000-0000000d1a01'}},
         ],
         'changedPropIds': ['mrsm-location.pathname'],
         'state': [{'id': 'mrsm-location', 'property': 'href', 'value': 'http://localhost' + pathname}],

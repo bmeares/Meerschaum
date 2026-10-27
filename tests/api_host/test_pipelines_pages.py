@@ -205,8 +205,8 @@ pages._engine.get_runs = lambda *args, **kwargs: []
 meerschaum.jobs.get_jobs = lambda **kwargs: {'j': SimpleNamespace(
     sysargs=['sync', 'pipelines', 'two', '-i', 'sql:apihosttest', '--schedule', 'daily'])}
 cards = [str(card) for card in pages.build_list_cards('sql:apihosttest')]
-assert '1 member' in cards[0] and '1 instance' in cards[0] and '1 members' not in cards[0]
-assert '2 members' in cards[1] and '2 instances' in cards[1] and 'daily' in cards[1]
+assert '1 Pipe' in cards[0] and '1 instance' in cards[0] and '1 Pipes' not in cards[0]
+assert '2 Pipes' in cards[1] and '2 instances' in cards[1] and 'daily' in cards[1]
 assert '/dash/pipelines/two' in cards[1] and 'open=plan' in cards[1]
 '''))
 

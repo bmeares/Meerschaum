@@ -208,7 +208,7 @@ print('JSON:' + json.dumps(out))
     assert out['gantt_traces'] == ['Actual']
     assert 1 <= out['gantt_actual'] <= 3
     assert out['unknown_run'] is None
-    assert out['event_lines'][0].startswith('run_started')
+    assert out['event_lines'][0].startswith('Run started')
     assert out['mid_parents'] == ["Pipe('dp', 'src', instance='sql:apihosttest')"] and out['mid_children'] == ["Pipe('dp', 'leaf', 'loc', instance='sql:apihosttest')"]
     assert out['href'] == '/dash/pipes/dp/leaf/loc?instance=sql%3Aapihosttest'
     assert out['unregistered'] == {'parents': [], 'children': []}
@@ -292,28 +292,29 @@ def counting(session_id):
     return real(session_id)
 sessions._get_session_data = counting
 
-sessions.set_session('cached-1', {'username': 'ann'})
+sessions.set_session('00000000-0000-4000-8000-0000000cac01', {'username': 'ann'})
 out = {}
-out['first'] = sessions.get_username_from_session('cached-1')
-out['second'] = sessions.get_username_from_session('cached-1')
-out['third'] = sessions.is_session_active('cached-1')
+out['first'] = sessions.get_username_from_session('00000000-0000-4000-8000-0000000cac01')
+out['second'] = sessions.get_username_from_session('00000000-0000-4000-8000-0000000cac01')
+out['third'] = sessions.is_session_active('00000000-0000-4000-8000-0000000cac01')
 out['store_reads'] = len(calls)
 ### Changing a session drops its cache entry in this process.
-sessions.update_session('cached-1', {'admin': True})
-out['updated'] = sessions.get_session_data('cached-1')
+sessions.update_session('00000000-0000-4000-8000-0000000cac01', {'admin': True})
+out['updated'] = sessions.get_session_data('00000000-0000-4000-8000-0000000cac01')
 ### Logging out is immediate here.
-sessions.delete_session('cached-1')
-out['after_delete'] = sessions.get_username_from_session('cached-1')
-out['active_after_delete'] = sessions.is_session_active('cached-1')
+sessions.delete_session('00000000-0000-4000-8000-0000000cac01')
+out['after_delete'] = sessions.get_username_from_session('00000000-0000-4000-8000-0000000cac01')
+out['active_after_delete'] = sessions.is_session_active('00000000-0000-4000-8000-0000000cac01')
 ### An unknown session is looked up every time (a login is visible at once).
 before = len(calls)
-sessions.get_username_from_session('nope'); sessions.get_username_from_session('nope')
+unknown = '00000000-0000-4000-8000-0000000cacff'
+sessions.get_username_from_session(unknown); sessions.get_username_from_session(unknown)
 out['unknown_reads'] = len(calls) - before
 ### The cache expires.
-sessions.set_session('cached-2', {'username': 'bob'})
+sessions.set_session('00000000-0000-4000-8000-0000000cac02', {'username': 'bob'})
 sessions.SESSION_CACHE_SECONDS = 0.0
-sessions.get_username_from_session('cached-2'); n = len(calls)
-sessions.get_username_from_session('cached-2')
+sessions.get_username_from_session('00000000-0000-4000-8000-0000000cac02'); n = len(calls)
+sessions.get_username_from_session('00000000-0000-4000-8000-0000000cac02')
 out['expired_rereads'] = len(calls) - n
 print('JSON:' + json.dumps(out))
 '''))
@@ -438,20 +439,18 @@ def test_pipe_links_round_trip_each_encoded_key(sandbox):
     out = _json(run_python(root, plugins, '''
 import json
 from urllib.parse import urlsplit
-from unittest.mock import patch
 import meerschaum as mrsm
 from meerschaum.api.dash import engine
-from meerschaum.api.dash.callbacks import pipes
+from meerschaum.api.dash.pages import pipes as pages
 
+### A pipe's page (`pages.pipes.layout`) is built for the keys of its path.
 seen = []
-def card(pipe, **kw):
-    seen.append([pipe.connector_keys, pipe.metric_key, pipe.location_key, pipe.instance_keys])
-    return 'card'
-with patch.object(pipes, 'build_pipe_card', card), patch.object(pipes, 'build_pipes_navbar', lambda *a, **k: []):
-    for metric, location in [('counts', 'bytes'), ('a/b + c', '%3A'), ('café', None)]:
-        ref = '|'.join(map(str, ('sql:apihosttest', 'sql:main', metric, location)))
-        url = urlsplit(engine.pipe_href(ref))
-        pipes.render_pipe_page_from_url(url.path, '?' + url.query, {})
+for metric, location in [('counts', 'bytes'), ('a/b + c', '%3A'), ('café', None)]:
+    ref = '|'.join(map(str, ('sql:apihosttest', 'sql:main', metric, location)))
+    url = urlsplit(engine.pipe_href(ref))
+    layout = pages.layout(url.path, 'http://localhost' + url.path + '?' + url.query)
+    meta = next(node for node in pages._walk(layout) if getattr(node, 'id', None) == 'pipe-detail-meta').data
+    seen.append([meta['connector_keys'], meta['metric_key'], meta['location_key'], meta['instance_keys']])
 print('JSON:' + json.dumps(seen))
 '''))
     assert out == [

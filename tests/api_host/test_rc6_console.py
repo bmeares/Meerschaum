@@ -104,10 +104,10 @@ meerschaum.jobs.get_jobs = lambda **kwargs: {'daily-scheduled': SimpleNamespace(
 cards, alerts = pipeline_cards.get_pipeline_cards({'instance-select.value': 'sql:apihosttest'})
 assert not alerts and len(cards) == 2
 text = str(cards[0])
-for expected in ('Pipeline(', 'sql:apihosttest', '2 members · 2 instances', 'Execution history', 'Manage', 'Sync',
+for expected in ('Pipeline(', 'sql:apihosttest', '2 Pipes · 2 instances', 'Runs', 'Manage', 'Sync',
                  '/dash/pipelines/daily?instance='):
     assert expected in text, text
-assert '1 member · 1 instance' in str(cards[1]), str(cards[1])
+assert '1 Pipe · 1 instance' in str(cards[1]), str(cards[1])
 print('JSON:true')
 ''')
     assert result.returncode == 0, result.stderr

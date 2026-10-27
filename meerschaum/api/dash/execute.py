@@ -229,11 +229,30 @@ def omit_flags() -> frozenset:
     return frozenset(get_policy().get('omit_flags') or [])
 
 
+def _error_message(error: Any) -> str:
+    """
+    The message of an error response: the v5 routes' `{"success": false, "message": ...}`, or
+    FastAPI's `{"detail": ...}`, or the HTTP reason.
+    """
+    import json
+    try:
+        payload = json.loads(error.read().decode('utf-8'))
+    except Exception:
+        return str(getattr(error, 'reason', error))
+    if isinstance(payload, dict):
+        for key in ('message', 'detail'):
+            if payload.get(key):
+                return str(payload[key])
+    return str(getattr(error, 'reason', error))
+
+
 def post_execute(sysargs: List[str], username: Optional[str], metadata=None) -> Tuple[Dict[str, Any], str]:
     """
     `POST /execute` to the server. Return `(response, message)`; `response` is
-    `{'success', 'msg', 'job', 'stream'}`-like. When the server cannot be asked the response is a
-    failure that says why (there is no local fallback).
+    `{'success', 'msg', 'job', 'stream'}`-like (the server answers `{"success", "message", "job",
+    "sysargs", "stream", "logs"}`; `stream` is `None` when it does not serve the log stream). When
+    the server cannot be asked the response is a failure that says why (there is no local
+    fallback).
     """
     import json
     import urllib.error
@@ -270,19 +289,17 @@ def post_execute(sysargs: List[str], username: Optional[str], metadata=None) -> 
                     "`/execute` is not available; check `api:permissions:routes:allowlist`)."
                 ),
             }, ''
-        try:
-            detail = json.loads(e.read().decode('utf-8')).get('detail', e.reason)
-        except Exception:
-            detail = e.reason
-        return {'success': False, 'msg': f"The server refused the action: {detail}"}, ''
+        return {'success': False, 'msg': f"The server refused the action: {_error_message(e)}"}, ''
     except Exception as e:
         return {'success': False, 'msg': f"Could not reach the server: {e}"}, ''
 
-    ### A refusal of the permission rule is a `SuccessTuple`: `[false, "message"]`.
+    ### A server before 5.0.0rc15 refused with a `SuccessTuple` (`[false, "message"]`).
     if isinstance(body, list) and len(body) == 2:
         return {'success': bool(body[0]), 'msg': str(body[1])}, ''
     if not isinstance(body, dict):
         return {'success': False, 'msg': "The server answered with something unexpected."}, ''
+    if 'msg' not in body and 'message' in body:
+        body = {**body, 'msg': body['message']}
     return body, ''
 
 
@@ -298,7 +315,12 @@ def run_action(sysargs: List[str], username: Optional[str], metadata=None) -> Di
     response, _ = post_execute(sysargs, username, metadata=metadata)
     success = bool(response.get('success', False))
     job = response.get('job', None)
-    stream = response.get('stream', None) or (f"/logs/{job}/stream" if job else None)
+    ### The server names the log stream only when it serves it.
+    stream = (
+        response.get('stream', None)
+        if 'stream' in response
+        else (f"/logs/{job}/stream" if job else None)
+    )
     return {
         'success': success and bool(job),
         'msg': response.get('msg', response.get('message', '')),
@@ -307,8 +329,31 @@ def run_action(sysargs: List[str], username: Optional[str], metadata=None) -> Di
     }
 
 
+def _from_envelope(body: Any) -> Any:
+    """
+    Read a v5 route's `{"success", "message", ...}` the way the callers do: its one data field
+    (`/execute/runs` -> the list of runs), or `[success, message]` when it has none
+    (`/execute/validate`, `.../retain`). Other bodies (older servers) are returned as they are.
+    """
+    if (
+        isinstance(body, dict)
+        and isinstance(body.get('success', None), bool)
+        and isinstance(body.get('message', None), str)
+    ):
+        data = {key: value for key, value in body.items() if key not in ('success', 'message')}
+        if len(data) == 1:
+            return next(iter(data.values()))
+        if not data:
+            return [body['success'], body['message']]
+    return body
+
+
 def execution_request(path, username, method='GET', body=None):
-    """Ask the authenticated server for retained summaries or worker promotion."""
+    """
+    Ask the authenticated server for retained summaries, command validation or worker promotion.
+    A refusal of `/execute/validate` is `[False, "The server refused this command: <reason>"]`;
+    any other error raises `ValueError(reason)`.
+    """
     import json
     import urllib.request
     import urllib.error
@@ -325,10 +370,10 @@ def execution_request(path, username, method='GET', body=None):
         data=json.dumps(body).encode('utf-8') if body is not None else None)
     try:
         with urllib.request.urlopen(request, timeout=30) as response:
-            return json.loads(response.read().decode('utf-8'))
+            return _from_envelope(json.loads(response.read().decode('utf-8')))
     except urllib.error.HTTPError as exc:
-        try:
-            detail = json.loads(exc.read().decode('utf-8')).get('detail', str(exc))
-        except Exception:
-            detail = str(exc)
-        raise ValueError(str(detail)) from exc
+        message = _error_message(exc)
+        if path.startswith('/execute/validate') and exc.code in (400, 401, 403):
+            ### The wording the console showed for a refused command before rc15.
+            return [False, f"The server refused this command: {message}"]
+        raise ValueError(message) from exc

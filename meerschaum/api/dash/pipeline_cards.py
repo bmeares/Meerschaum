@@ -3,7 +3,7 @@ from urllib.parse import urlencode, quote
 import json
 from meerschaum.api.dash.components import html, dbc
 from meerschaum.core.Pipeline._saved import list_pipelines
-from meerschaum.api.dash.pipeline_management import count_label, runs_placeholder
+from meerschaum.api.dash.pipeline_management import count_label, pipes_label, runs_placeholder
 
 
 def get_pipeline_cards(state):
@@ -21,13 +21,13 @@ def get_pipeline_cards(state):
         cards.append(dbc.Card([
             dbc.CardHeader(html.A(html.Code(label), href=url)),
             dbc.CardBody([
-                html.P(f"{count_label(len(targets), 'member')} · "
+                html.P(f"{pipes_label(definition)} · "
                        f"{count_label(len({ref.split('|', 1)[0] for ref in targets}), 'instance')}"),
                 html.P(definition.get('description', '')),
                 dbc.Accordion([dbc.AccordionItem(
                     html.Div(runs_placeholder(), id={'type': 'pipeline-card-details', 'index': identity},
                              className='pipeline-card-runs'),
-                    title='Execution history', item_id='history')],
+                    title='Runs', item_id='history')],
                     id={'type': 'pipeline-card-accordion', 'index': identity}, active_item=None),
             ]),
             dbc.CardFooter(dbc.DropdownMenu([

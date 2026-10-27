@@ -35,15 +35,12 @@ import dash
 dbc = attempt_import('dash_bootstrap_components', lazy=False, check_update=CHECK_UPDATE)
 html, dcc = import_html(check_update=CHECK_UPDATE), import_dcc(check_update=CHECK_UPDATE)
 
-#: The buttons that show something else in the dashboard's right column, and so hide the output.
+#: The buttons that show something else in the Terminal page's right column, and so hide the output.
 HIDING_TRIGGERS = (
     'get-pipes-button',
     'get-jobs-button',
     'get-pipelines-button',
-    'get-runs-button',
     'show-webterm-button',
-    'get-plugins-button',
-    'get-users-button',
 )
 
 _VISIBLE = {'display': 'block'}

@@ -7,9 +7,9 @@ Callbacks for the registration page.
 """
 
 import uuid
-from meerschaum.api import get_api_connector, endpoints, CHECK_UPDATE
+from meerschaum.api import get_api_connector, endpoints, CHECK_UPDATE, permissions_config
 from meerschaum.api.dash import dash_app, debug
-from meerschaum.api.dash.sessions import set_session, set_session_cookie
+from meerschaum.api.dash.sessions import set_session, set_session_cookie, public_callback
 from dash.dependencies import Input, Output, State, ALL, MATCH
 from dash.exceptions import PreventUpdate
 from meerschaum.core import User
@@ -18,6 +18,13 @@ from meerschaum.utils.packages import attempt_import
 dash = attempt_import('dash', check_update=CHECK_UPDATE)
 from meerschaum.api.dash._support import authenticate_user
 
+### Visitors without a session may register only when registration is allowed; otherwise these
+### callbacks need a session like the rest of the console (no username lookups for anonymous visitors).
+_registration_public = bool(permissions_config.get('registration', {}).get('users', False))
+register_callback = public_callback if _registration_public else (lambda func: func)
+
+
+@register_callback
 @dash_app.callback(
     [Output("register-username-input", "valid"), Output("register-username-input", "invalid")],
     [Input("register-username-input", "value")],
@@ -34,6 +41,7 @@ def validate_username(username):
     valid = (user_id is None)
     return valid, not valid
 
+@register_callback
 @dash_app.callback(
     [Output("register-password-input", "valid"), Output("register-password-input", "invalid")],
     [Input("register-password-input", "value")],
@@ -44,6 +52,7 @@ def validate_password(password):
     valid = (len(password) >= STATIC_CONFIG['users']['min_password_length'])
     return valid, not valid
 
+@register_callback
 @dash_app.callback(
     [Output("register-email-input", "valid"), Output("register-email-input", "invalid")],
     [Input("register-email-input", "value")],
@@ -55,6 +64,7 @@ def validate_email(email):
     valid = is_valid_email(email) is not None
     return valid, not valid
 
+@register_callback
 @dash_app.callback(
     Output('session-store', 'data'),
     Output('register-username-input', 'className'),

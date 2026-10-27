@@ -87,7 +87,8 @@ __version__ = '1.0.0'
 
 from meerschaum.plugins import dash_plugin, web_page
 
-@dash_plugin
+### The page is public (`login_required=False`), so its callback is too.
+@dash_plugin(public=True)
 def init_dash(dash_app):
     from dash import Output
     from dash_extensions.enrich import Trigger

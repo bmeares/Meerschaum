@@ -52,10 +52,12 @@ def make_env(root: pathlib.Path, plugins: pathlib.Path, host_mode: bool = True) 
 STARLETTE_HTTPX_WARNING_FILTER = 'ignore:Using `httpx` with `starlette.testclient` is deprecated'
 
 
-def run_python(root, plugins, code: str, host_mode: bool = True):
+def run_python(root, plugins, code: str, host_mode: bool = True, extra_env: dict = None):
+    env = make_env(root, plugins, host_mode)
+    env.update(extra_env or {})
     return subprocess.run(
         [sys.executable, '-c', textwrap.dedent(code)],
-        env=make_env(root, plugins, host_mode),
+        env=env,
         cwd=str(root),
         capture_output=True,
         text=True,

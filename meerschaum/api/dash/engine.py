@@ -56,11 +56,68 @@ def ref_label(pipe_ref: str) -> str:
 def action_label(action: str) -> str:
     """Describe the next sync without exposing engine bookkeeping."""
     return {
-        'root': 'Fetch source data', 'incremental': 'Needs sync',
-        'backfill': 'Reprocess changed data', 'skip': 'Up-to-date',
+        'root': 'Fetch source data', 'incremental': 'New data to sync',
+        'backfill': 'Reprocess changed data', 'skip': 'Up to date',
         'rebuild': 'Rebuild required', 'rebuild_pending': 'Rebuild needs approval',
-        'observe': 'Outside this selection',
+        'observe': 'Listens for new data', 'upstream_failed': 'Blocked: a parent failed',
     }.get(action, action.replace('_', ' ').capitalize())
+
+
+#: A run's node counts in plain words (`2 synced, 1 up to date`), by node status.
+STATUS_WORDS: Dict[str, str] = {
+    'succeeded': 'synced',
+    'skipped': 'up to date',
+    'observed': 'listening for new data',
+    'failed': 'failed',
+    'upstream_failed': 'blocked by a failed parent',
+    'rebuild_pending': 'waiting for rebuild approval',
+    'running': 'running',
+    'pending': 'not started',
+}
+
+
+def counts_label(counts: Optional[Dict[str, int]]) -> str:
+    """A run's node counts in plain words, without the zeros (`2 synced, 1 up to date`)."""
+    parts = [
+        f"{value} {STATUS_WORDS.get(key, key.replace('_', ' '))}"
+        for key, value in (counts or {}).items() if value
+    ]
+    return ', '.join(parts) or 'Nothing ran'
+
+
+def bounds_label(bounds: Optional[Dict[str, Any]], backtrack: Optional[str] = None) -> str:
+    """
+    A sync window in words (`last sync − 1 day → latest data`, `2026-10-12 09:00 → latest
+    data`), from a planned node's `bounds` (`begin` is `''` for "from the last sync, minus the
+    backtrack window" and `None` for no lower bound; `end` is `None` for no upper bound).
+    """
+    if not bounds:
+        return '—'
+    begin, end = bounds.get('begin', None), bounds.get('end', None)
+    if begin is None and end is None:
+        return 'all data'
+    if begin == '':
+        begin_text = f"last sync − {backtrack}" if backtrack else 'last sync'
+    elif begin is None:
+        begin_text = 'the beginning'
+    else:
+        begin_text = bound_label(begin)
+    end_text = 'latest data' if end is None else bound_label(end)
+    return f"{begin_text} → {end_text}"
+
+
+def bound_label(bound: Any) -> str:
+    """One bound for people: `2026-10-12 09:00` (seconds only when set), or an integer."""
+    if isinstance(bound, dict):
+        values = list(bound.values())
+        bound = values[0] if len(values) == 1 else bound
+    if isinstance(bound, (int, float)) and not isinstance(bound, bool):
+        return str(bound)
+    parsed = _parse_ts(str(bound))
+    if parsed is None:
+        return str(bound)
+    text = parsed.strftime('%Y-%m-%d %H:%M:%S' if parsed.second or parsed.microsecond else '%Y-%m-%d %H:%M')
+    return text
 
 
 def action_indicator(action: str, failed: bool = False) -> Any:
@@ -171,8 +228,9 @@ def _request(instance: Any, **kwargs: Any) -> Dict[str, Any]:
 
 def _instance_pipes(instance: Any) -> List[mrsm.Pipe]:
     from meerschaum.utils.pipes import flatten_pipes_dict
+    ### `get_pipes()` leaves out Meerschaum's internal `mrsm` pipes (saved Pipelines' registry).
     pipes_dict = mrsm.get_pipes(instance=instance, as_list=False)
-    return [pipe for pipe in flatten_pipes_dict(pipes_dict) if pipe.connector_keys != 'mrsm']
+    return flatten_pipes_dict(pipes_dict)
 
 
 def plan_graph(
@@ -211,6 +269,9 @@ def plan_graph(
             'action': planned.action,
             'reason': planned.reason,
             'bounds': planned.bounds,
+            'bounds_text': (planned.raw.get('bounds_text') or bounds_label(
+                planned.bounds, planned.raw.get('backtrack'))) if planned.bounds else '',
+            'backtrack': planned.raw.get('backtrack'),
             'provisional': planned.provisional,
             'status': node_status(planned.action),
         }
@@ -549,34 +610,76 @@ def gantt_figure(detail: Dict[str, Any]) -> Dict[str, Any]:
 
 def describe_event(row: Dict[str, Any]) -> str:
     """
-    One line of the event log: `<time> <event> <pipe> <details>`.
+    One line of a run's output, in plain words: `<time> <what happened>`
+    (`12:00:01.250 Synced Pipe('sql:main', 'daily'): 3 inserted`).
     """
     payload = row.get('payload') or {}
     event = row.get('event', '')
     ts = str(row.get('ts', ''))[11:23]
     pipe_ref = row.get('pipe_ref')
-    out = f"{ts} {event}" + (f" {ref_label(pipe_ref)}" if pipe_ref else '')
-    if event in ('chunk_started', 'chunk_finished'):
-        out += f" chunk {payload.get('chunk', '')}"
+    pipe = ref_label(pipe_ref) if pipe_ref else ''
+
+    def rows_text(source: Dict[str, Any]) -> str:
+        parts = [f"{source[key]:,} {key}" for key in ('inserted', 'updated', 'upserted')
+                 if source.get(key)]
+        return ', '.join(parts) or 'no new rows'
+
+    def chunk_text() -> str:
+        text = f"chunk {payload.get('chunk', 0) + 1 if isinstance(payload.get('chunk'), int) else ''}"
         if payload.get('total') is not None:
-            out += f"/{payload['total']}"
-        if payload.get('rows') is not None:
-            out += f" rows={payload['rows']}"
-        if event == 'chunk_finished':
-            out += ' FAILED' if payload.get('success') is False else ' ok'
+            text += f" of {payload['total']}"
+        return text
+
+    if event == 'run_started':
+        nodes = payload.get('nodes', 0)
+        text = f"Run started: {nodes} pipe{'s' if nodes != 1 else ''}"
+    elif event == 'run_finished':
+        text = ('Run finished: ' if payload.get('success', True) else 'Run failed: ') + str(
+            payload.get('message', '')).split('\n', 1)[0]
+    elif event == 'node_planned':
+        text = f"{pipe}: {action_label(payload.get('action', '')).lower()}"
     elif event == 'node_started':
-        out += f" {payload.get('action', '')}"
+        attempt = payload.get('attempt', 1) or 1
+        text = f"Syncing {pipe}" + (f" (attempt {attempt})" if attempt > 1 else '')
+    elif event == 'chunk_started':
+        text = f"{pipe}: {chunk_text()} started"
+        if payload.get('rows') is not None:
+            text += f" ({payload['rows']:,} rows)"
+    elif event == 'chunk_finished':
+        done = 'failed' if payload.get('success') is False else 'done'
+        text = f"{pipe}: {chunk_text()} {done}"
+        if payload.get('success') is not False:
+            text += f" ({rows_text(payload)})"
     elif event == 'node_finished':
         result = payload.get('result') or {}
-        out += ' ok' if result.get('success', True) else ' FAILED'
-        for key in ('inserted', 'updated', 'upserted'):
-            if result.get(key):
-                out += f" {key}={result[key]}"
-        if result.get('message'):
-            out += f" {result['message']}"
-    elif event == 'run_started':
-        out += f" nodes={payload.get('nodes', '')}"
-    return out.strip()
+        if result.get('success', True):
+            text = f"Synced {pipe}: {rows_text(result)}"
+        else:
+            text = f"{pipe} failed: {str(result.get('message', '')).split(chr(10), 1)[0]}"
+    elif event == 'node_failed':
+        error = str(payload.get('error', '')).split('\n', 1)[0]
+        text = f"{pipe} failed: {error}" + ('; trying again' if payload.get('will_retry') else '')
+    elif event == 'node_skipped':
+        text = f"{pipe}: {payload.get('reason', '')}"
+    elif event == 'node_rebuild_pending':
+        text = f"{pipe} waits for rebuild approval: {payload.get('reason', '')}"
+    elif event == 'watermark_advanced':
+        to = payload.get('to')
+        text = f"{pipe}: latest data now {bound_label(to)}" if to is not None else f"{pipe}: new data"
+    elif event == 'stream_flushed':
+        rows = payload.get('rows', 0) or 0
+        text = f"{pipe}: wrote {rows:,} new row{'s' if rows != 1 else ''}"
+        if payload.get('success') is False:
+            text = f"{pipe}: could not write {rows:,} new row{'s' if rows != 1 else ''}"
+    elif event == 'stream_restarted':
+        text = f"{pipe}: listening again after an error: {payload.get('error', '')}"
+    elif event == 'children_triggered':
+        nodes = payload.get('nodes') or []
+        count = len(nodes) if isinstance(nodes, list) else nodes
+        text = f"New data: syncing {count} downstream pipe{'s' if count != 1 else ''}"
+    else:
+        text = ' '.join(part for part in (event.replace('_', ' ').capitalize(), pipe) if part)
+    return f"{ts} {text}".strip()
 
 
 def relations_of(pipe: mrsm.Pipe) -> Dict[str, List[Dict[str, Any]]]:

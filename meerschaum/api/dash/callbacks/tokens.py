@@ -59,17 +59,16 @@ def refresh_tokens_button_click(
 
     session_id = (session_data or {}).get('session-id', None)
     tokens_table, alerts = get_tokens_table(session_id)
+    user = get_user_from_session(session_id) if session_id is not None else None
+    register_form = build_tokens_register_input_modal(user)
     if not tokens_table:
         return (
-            [
-                html.H4('No tokens registered.'),
-                html.P('Click the `+` button to register a new token.'),
-            ],
-            build_tokens_register_input_modal(),
+            html.Div(html.H5('No tokens'), className='console-empty'),
+            register_form,
             alerts,
         )
 
-    return tokens_table, build_tokens_register_input_modal(), alerts
+    return tokens_table, register_form, alerts
 
 
 @dash_app.callback(
@@ -79,7 +78,7 @@ def refresh_tokens_button_click(
 )
 def create_tokens_button_click(n_clicks: Optional[int]):
     """
-    Open the tokens registration modal when the plus button is clicked.
+    Open the tokens registration modal when New token is clicked.
     """
     if not n_clicks:
         raise PreventUpdate
@@ -306,15 +305,19 @@ def close_register_output_modal(n_clicks: int) -> bool:
     return False
 
 
+### Each item of a token's menu opens its dialog and closes the menu (a `legacy` popover stays open
+### on a click inside it, above the dialog).
+
 @dash_app.callback(
     Output({'type': 'tokens-edit-modal', 'index': MATCH}, 'is_open'),
+    Output({'type': 'tokens-context-popover', 'index': MATCH}, 'is_open', allow_duplicate=True),
     Input({'type': 'tokens-edit-button', 'index': MATCH}, 'n_clicks'),
     prevent_initial_call=True,
 )
 def edit_token_button_click(n_clicks: int):
     if not n_clicks:
         raise PreventUpdate
-    return True
+    return True, False
 
 
 @dash_app.callback(
@@ -371,24 +374,26 @@ def edit_token_submit_button_click(
 
 @dash_app.callback(
     Output({'type': 'tokens-invalidate-modal', 'index': MATCH}, 'is_open'),
+    Output({'type': 'tokens-context-popover', 'index': MATCH}, 'is_open', allow_duplicate=True),
     Input({'type': 'tokens-invalidate-button', 'index': MATCH}, 'n_clicks'),
     prevent_initial_call=True,
 )
 def invalidate_token_click(n_clicks: int):
     if not n_clicks:
         raise PreventUpdate
-    return True
+    return True, False
 
 
 @dash_app.callback(
     Output({'type': 'tokens-delete-modal', 'index': MATCH}, 'is_open'),
+    Output({'type': 'tokens-context-popover', 'index': MATCH}, 'is_open', allow_duplicate=True),
     Input({'type': 'tokens-delete-button', 'index': MATCH}, 'n_clicks'),
     prevent_initial_call=True,
 )
 def delete_token_click(n_clicks: int):
     if not n_clicks:
         raise PreventUpdate
-    return True
+    return True, False
 
 
 

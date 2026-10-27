@@ -193,120 +193,138 @@ def build_manage_token_popover(token: Token) -> dbc.Popover:
     )
 
 
+#: The label of the token forms' switch that stores the literal scope `*`.
+GRANT_ALL_SCOPES_LABEL: str = "Grant all scopes, including custom and future ones"
+
+
+def build_token_form(
+    label: Optional[str] = None,
+    expiration: Any = None,
+    min_date_allowed: Any = None,
+    grant_all: bool = True,
+    scopes: Optional[List[str]] = None,
+    token_id: Optional[str] = None,
+) -> dbc.Form:
+    """
+    The fields of the New token and Edit token forms: Name and Expiration (side by side, stacked
+    on phones), the "Grant all scopes" switch, and the scopes to grant instead (hidden while the
+    switch is on). With `token_id`, the components' IDs are those of that token's Edit form
+    (`{'type': ..., 'index': token_id}`), else the New token form's.
+    """
+    def cid(kind: str) -> Any:
+        return kind if token_id is None else {'type': kind, 'index': str(token_id)}
+
+    def label_for(text: str, kind: str) -> Any:
+        return dbc.Label(text, html_for=kind) if token_id is None else dbc.Label(text)
+
+    return dbc.Form([
+        dbc.Row(
+            [
+                dbc.Col(
+                    [
+                        label_for('Name', 'tokens-name-input'),
+                        dbc.Input(
+                            placeholder="Enter token's label",
+                            value=label,
+                            autoComplete='off',
+                            id=cid('tokens-name-input'),
+                        ),
+                    ],
+                    xs=12,
+                    md=6,
+                ),
+                dbc.Col(
+                    [
+                        dbc.Label('Expiration'),
+                        dcc.DatePickerSingle(
+                            date=expiration,
+                            clearable=True,
+                            min_date_allowed=min_date_allowed,
+                            display_format="YYYY-MM-DD",
+                            id=cid('tokens-expiration-datepickersingle'),
+                        ),
+                    ],
+                    xs=12,
+                    md=6,
+                    class_name='tokens-expiration',
+                ),
+            ],
+            class_name='g-3 tokens-form-row',
+        ),
+        dbc.Switch(
+            id=cid('tokens-toggle-scopes-switch'),
+            label=GRANT_ALL_SCOPES_LABEL,
+            value=grant_all,
+            class_name='tokens-grant-all',
+        ),
+        html.Div(
+            [
+                html.Div(
+                    [
+                        dbc.Label('Scopes', class_name='mb-0'),
+                        dbc.Button(
+                            "Deselect all",
+                            size='sm',
+                            color='link',
+                            id=cid('tokens-deselect-scopes-button'),
+                            class_name='tokens-deselect-scopes',
+                        ),
+                    ],
+                    className='tokens-scopes-header',
+                ),
+                dbc.Checklist(
+                    options=[
+                        {"label": scope, "value": scope}
+                        for scope in STATIC_CONFIG['tokens']['scopes']
+                    ],
+                    value=list(scopes or []),
+                    id=cid('tokens-scopes-checklist'),
+                    class_name='tokens-scopes-checklist',
+                ),
+            ],
+            id=cid('tokens-scopes-checklist-div'),
+            className='tokens-scopes',
+            style=({'display': 'none'} if grant_all else {}),
+        ),
+    ], class_name='tokens-form')
+
+
 def build_edit_token_modal(token: Token) -> dbc.Modal:
     """
     Return the Modal for editing the token.
     """
     ### A literal `*` grants every scope, so show the switch on and the checklist hidden.
     grants_all_scopes = '*' in (token.scopes or [])
+    form = (
+        build_token_form(
+            label=str(token.label),
+            expiration=(
+                token.expiration.to_pydatetime()
+                if hasattr(token.expiration, 'to_pydatetime')
+                else token.expiration
+            ),
+            min_date_allowed=datetime.today().date(),
+            grant_all=grants_all_scopes,
+            scopes=(
+                list(STATIC_CONFIG['tokens']['scopes'])
+                if grants_all_scopes
+                else list(token.scopes or [])
+            ),
+            token_id=str(token.id),
+        )
+        if token.is_valid
+        else html.Div(id={'type': 'tokens-scopes-checklist-div', 'index': str(token.id)})
+    )
     return dbc.Modal(
         [
-            dbc.ModalHeader([
-                html.H4([
-                    "Edit token ",
-                    html.B(str(token.label))
-                ]),
-            ]),
+            dbc.ModalHeader(dbc.ModalTitle(["Edit token ", html.B(str(token.label))])),
             dbc.ModalBody([
                 html.Div(id={'type': 'tokens-edit-alerts-div', 'index': str(token.id)}),
-
-                dbc.Form([
-                    dbc.Row(
-                        ([
-                            dbc.Label("Name", width='auto'),
-                            dbc.Col(
-                                [
-                                    dbc.Input(
-                                        placeholder="Enter token's label",
-                                        value=str(token.label),
-                                        id={
-                                            'type': 'tokens-name-input',
-                                            'index': str(token.id),
-                                        },
-                                    ),
-                                ],
-                                className="me-3",
-                            ),
-                            dbc.Label("Expiration", width='auto'),
-                            dbc.Col(
-                                dcc.DatePickerSingle(
-                                    date=(
-                                        token.expiration.to_pydatetime()
-                                        if hasattr(token.expiration, 'to_pydatetime')
-                                        else token.expiration
-                                    ),
-                                    clearable=True,
-                                    min_date_allowed=datetime.today().date(),
-                                    display_format="YYYY-MM-DD",
-                                    id={
-                                        'type': 'tokens-expiration-datepickersingle',
-                                        'index': str(token.id),
-                                    },
-                                )
-                            ),
-                            dbc.Col(
-                                dbc.Switch(
-                                    id={
-                                        'type': 'tokens-toggle-scopes-switch',
-                                        'index': str(token.id),
-                                    },
-                                    label="Grant all scopes (`*`, including custom and future scopes)",
-                                    value=grants_all_scopes,
-                                ),
-                                className="me-3",
-                            ),
-                        ] if token.is_valid else []) + [
-                            dbc.Col([
-                            ]),
-                        ],
-                        className='g-2',
-                    ),
-                    html.Br(),
-                    dbc.Row([
-                    ]),
-                    html.Div([
-                        dbc.Button(
-                            "Deselect all",
-                            size='sm',
-                            color='link',
-                            id={
-                                'type': "tokens-deselect-scopes-button",
-                                'index': str(token.id),
-                            },
-                            style={'text-decoration': 'none'},
-                        ),
-                        html.Br(),
-                        dbc.Row([
-                            dbc.Label("Scopes", width='auto'),
-                            dbc.Col([
-                                dbc.Checklist(
-                                    options=[
-                                        {"label": scope, "value": scope}
-                                        for scope in STATIC_CONFIG['tokens']['scopes']
-                                    ],
-                                    value=(
-                                        list(STATIC_CONFIG['tokens']['scopes'])
-                                        if grants_all_scopes
-                                        else token.scopes
-                                    ),
-                                    id={
-                                        'type': "tokens-scopes-checklist",
-                                        'index': str(token.id),
-                                    },
-                                    style={'columnCount': 3},
-                                ),
-                            ]),
-                        ]),
-                    ] if token.is_valid else [], id={
-                        'type': 'tokens-scopes-checklist-div',
-                        'index': str(token.id),
-                    }, style=({'display': 'none'} if grants_all_scopes else {})),
-                ]),
-
+                form,
             ]),
             dbc.ModalFooter(
                 [
-                    html.Small(str(token.id)),
+                    html.Small(str(token.id), className='text-muted tokens-modal-id'),
                     dbc.Button(
                         "Submit",
                         id={'type': 'tokens-edit-submit-button', 'index': str(token.id)},
@@ -316,7 +334,10 @@ def build_edit_token_modal(token: Token) -> dbc.Modal:
             ),
         ],
         size='lg',
+        fullscreen='sm-down',
+        scrollable=True,
         is_open=False,
+        class_name='tokens-modal',
         id={'type': 'tokens-edit-modal', 'index': str(token.id)},
     )
 
@@ -490,10 +511,32 @@ def get_expiration_string(token: mrsm.core.Token) -> str:
     return 'Expires in ' + interval_str(expiration - now, round_unit=True)
 
 
-def build_tokens_register_input_modal() -> dbc.Modal:
+def default_token_scopes(user: Optional[mrsm.core.User] = None) -> Tuple[bool, List[str]]:
     """
-    Return the layout for the tokens register input modal.
+    Return `(grant_all, scopes)`: where the New token form starts. "Grant all scopes" (`*`) is on
+    for an administrator or a holder of `*` (and under `--no-auth`); anyone else starts from
+    their own scopes, since a token carries at most its owner's.
     """
+    all_scopes = list(STATIC_CONFIG['tokens']['scopes'])
+    if user is None:
+        return True, all_scopes
+    conn = get_api_connector()
+    try:
+        if conn.get_user_type(user, debug=debug) == 'admin':
+            return True, all_scopes
+        scopes = list(user.get_scopes(refresh=True, debug=debug) or [])
+    except Exception:
+        return False, all_scopes
+    if '*' in scopes:
+        return True, all_scopes
+    return False, [scope for scope in all_scopes if scope in scopes]
+
+
+def build_tokens_register_input_modal(user: Optional[mrsm.core.User] = None) -> dbc.Modal:
+    """
+    Return the layout for the tokens register input modal (for `user`, the session's user).
+    """
+    grant_all, own_scopes = default_token_scopes(user)
     now = datetime.now(timezone.utc)
     default_expiration_days = mrsm.get_config(
         'api', 'tokens', 'default_expiration_days',
@@ -505,72 +548,16 @@ def build_tokens_register_input_modal() -> dbc.Modal:
     min_date_allowed = round_time(now + timedelta(days=1), timedelta(days=1))
 
     return [
-        dbc.ModalHeader(html.H4("Register Token")),
-        dbc.ModalBody([
-            dbc.Form([
-                dbc.Row(
-                    [
-                        dbc.Label("Name", width='auto'),
-                        dbc.Col(
-                            [
-                                dbc.Input(
-                                    placeholder="Enter token's label",
-                                    value=get_new_daemon_name(),
-                                    id='tokens-name-input'
-                                ),
-                            ],
-                            className="me-3",
-                        ),
-                        dbc.Label("Expiration", width='auto'),
-                        dbc.Col(
-                            dcc.DatePickerSingle(
-                                date=default_expiration,
-                                clearable=True,
-                                min_date_allowed=min_date_allowed,
-                                display_format="YYYY-MM-DD",
-                                id='tokens-expiration-datepickersingle',
-                            )
-                        ),
-                        dbc.Col(
-                            dbc.Switch(
-                                id="tokens-toggle-scopes-switch",
-                                label="Grant all scopes (`*`, including custom and future scopes)",
-                                value=True,
-                            ),
-                            className="me-3",
-                        ),
-                    ],
-                    className='g-2',
-                ),
-                html.Br(),
-                dbc.Row([
-                ]),
-                html.Div([
-                    dbc.Button(
-                        "Deselect all",
-                        size='sm',
-                        color='link',
-                        id="tokens-deselect-scopes-button",
-                        style={'text-decoration': 'none'},
-                    ),
-                    html.Br(),
-                    dbc.Row([
-                        dbc.Label("Scopes", width='auto'),
-                        dbc.Col([
-                            dbc.Checklist(
-                                options=[
-                                    {"label": scope, "value": scope}
-                                    for scope in STATIC_CONFIG['tokens']['scopes']
-                                ],
-                                value=list(STATIC_CONFIG['tokens']['scopes']),
-                                id="tokens-scopes-checklist",
-                                style={'columnCount': 3},
-                            ),
-                        ]),
-                    ]),
-                ], id='tokens-scopes-checklist-div', style={'display': 'none'}),
-            ]),
-        ]),
+        dbc.ModalHeader(dbc.ModalTitle("New token")),
+        dbc.ModalBody(
+            build_token_form(
+                label=get_new_daemon_name(),
+                expiration=default_expiration,
+                min_date_allowed=min_date_allowed,
+                grant_all=grant_all,
+                scopes=own_scopes,
+            ),
+        ),
         dbc.ModalFooter([
             dbc.Button('Register', id='tokens-register-button'),
         ]),

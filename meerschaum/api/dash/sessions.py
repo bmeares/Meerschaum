@@ -7,6 +7,7 @@ Define caching functions for session management.
 
 import json
 import time
+import uuid
 import threading
 
 from meerschaum.utils.typing import Union, Dict, Any, Optional
@@ -20,6 +21,28 @@ SESSION_KEY_TEMPLATE: str = 'mrsm_session_id:{session_id}'
 SESSION_COOKIE_NAME: str = 'mrsm-session-id'
 EXPIRES_SECONDS: int = get_config('api', 'cache', 'session_expires_minutes') * 60
 _active_sessions: Dict[str, Dict[str, Any]] = {}
+
+
+def valid_session_id(session_id: Any) -> Union[str, None]:
+    """
+    Return `session_id` if it is a console session ID (the lowercase hyphenated UUID the login
+    mints, `str(uuid.uuid4())`), else `None`.
+
+    A session ID comes from the browser (the `mrsm-session-id` cookie, or the `session-store`
+    value a callback carries), and the instance store looks it up with a `params` filter, where
+    strings such as `'_None'` (`IS NOT NULL`), `'_x'` (`!= 'x'`) or `'None'` are not literal
+    values: `'_None'` would name the first live session. Every function here therefore treats any
+    other value as no session, like the Rust server's session readers (`meerschaum-web`).
+    """
+    if isinstance(session_id, uuid.UUID):
+        return str(session_id)
+    if not isinstance(session_id, str) or len(session_id) != 36:
+        return None
+    try:
+        canonical = str(uuid.UUID(session_id))
+    except ValueError:
+        return None
+    return session_id if canonical == session_id else None
 
 ### The API host always keeps sessions in the instance, including when Valkey is configured,
 ### where the Rust server's terminal reads them too (`crates/meerschaum-server/src/webterm.rs`): rows
@@ -95,6 +118,10 @@ def get_instance_sessions_pipe():
 
 
 def _instance_get(session_id: str) -> Union[Dict[str, Any], None]:
+    ### `params` is a filter, not a literal match: only a UUID may reach it (`valid_session_id`).
+    session_id = valid_session_id(session_id)
+    if session_id is None:
+        return None
     pipe = get_instance_sessions_pipe()
     if not pipe.exists():
         return None
@@ -114,6 +141,8 @@ def _instance_get(session_id: str) -> Union[Dict[str, Any], None]:
 
 
 def _instance_set(session_id: str, data_str: str) -> None:
+    if valid_session_id(session_id) is None:
+        raise ValueError("A console session ID is a UUID.")
     pipe = get_instance_sessions_pipe()
     doc = {
         'session_id': session_id,
@@ -127,6 +156,10 @@ def _instance_set(session_id: str, data_str: str) -> None:
 
 
 def _instance_delete(session_id: str) -> None:
+    ### `'_None'` here would clear every session (`WHERE session_id IS NOT NULL`).
+    session_id = valid_session_id(session_id)
+    if session_id is None:
+        return
     pipe = get_instance_sessions_pipe()
     if not pipe.exists():
         return
@@ -186,7 +219,8 @@ def clear_session_cookie(response) -> None:
 
 def get_session_id_from_request(request) -> Union[str, None]:
     """
-    Return the session ID stored in a request's session cookie, if any.
+    Return the session ID stored in a request's session cookie, if any (`None` when the cookie
+    is not a session ID, see `valid_session_id()`).
 
     Works with both Flask and Starlette/FastAPI requests (both expose
     a `cookies` mapping). Validate the returned ID with
@@ -195,7 +229,7 @@ def get_session_id_from_request(request) -> Union[str, None]:
     cookies = getattr(request, 'cookies', None)
     if cookies is None:
         return None
-    return cookies.get(SESSION_COOKIE_NAME, None) or None
+    return valid_session_id(cookies.get(SESSION_COOKIE_NAME, None))
 
 
 def get_session_key(session_id: str) -> str:
@@ -205,20 +239,30 @@ def get_session_key(session_id: str) -> str:
     return SESSION_KEY_TEMPLATE.format(session_id=session_id)
 
 
-def set_session(session_id: str, session_data: Dict[str, Any]):
+def set_session(session_id: str, session_data: Dict[str, Any]) -> bool:
     """
     Set a `session_id` to a dictionary.
+
+    Returns
+    -------
+    Whether the session was written: `False` (nothing written) when `session_id` is not a
+    session ID (`valid_session_id()`), since no lookup would ever find it.
     """
+    session_id = valid_session_id(session_id)
+    if session_id is None:
+        if debug:
+            dprint("Not setting a session: its ID is not a UUID.")
+        return False
     _cache_drop(session_id)
     conn = None if _use_instance_store() else get_cache_connector()
     if conn is None and _use_instance_store():
-        _instance_set(str(session_id), json.dumps(session_data, separators=(',', ':')))
-        return
+        _instance_set(session_id, json.dumps(session_data, separators=(',', ':')))
+        return True
     if conn is None:
         _active_sessions[session_id] = session_data
         if debug:
             dprint(f"Setting in-memory data for {session_id}:\n{session_data}")
-        return
+        return True
 
     session_key = get_session_key(session_id)
     session_data_str = json.dumps(session_data, separators=(',', ':'))
@@ -226,15 +270,20 @@ def set_session(session_id: str, session_data: Dict[str, Any]):
         dprint(f"Setting production data for {session_id=}:\n{session_data_str}")
 
     conn.set(session_key, session_data_str, ex=EXPIRES_SECONDS)
+    return True
 
 
-def update_session(session_id: Optional[str], session_data: Dict[str, Any]):
+def update_session(session_id: Optional[str], session_data: Dict[str, Any]) -> bool:
     """
     Update the session's data dictionary.
+    Return whether it was written (`False` for an ID that is not a session ID).
     """
+    session_id = valid_session_id(session_id)
+    if session_id is None:
+        return False
     existing_session_data = get_session_data(session_id, use_cache=False) or {}
     existing_session_data.update(session_data)
-    set_session(str(session_id), existing_session_data)
+    return set_session(session_id, existing_session_data)
 
 
 def get_session_data(
@@ -243,14 +292,16 @@ def get_session_data(
 ) -> Union[Dict[str, Any], None]:
     """
     Return the session data dictionary (looked up at most once per `SESSION_CACHE_SECONDS`
-    per process unless `use_cache` is `False`).
+    per process unless `use_cache` is `False`); `None` for an ID that is not a session ID.
     """
-    key = str(session_id)
+    key = valid_session_id(session_id)
+    if key is None:
+        return None
     if use_cache:
         cached = _cache_get(key)
         if cached is not None:
             return dict(cached) if isinstance(cached, dict) else cached
-    data = _get_session_data(session_id)
+    data = _get_session_data(key)
     if use_cache and data is not None:
         _cache_set(key, dict(data))
     return data
@@ -260,15 +311,18 @@ def _get_session_data(session_id: Optional[str]) -> Union[Dict[str, Any], None]:
     """
     Return the session data dictionary from the store.
     """
+    session_id = valid_session_id(session_id)
+    if session_id is None:
+        return None
     if debug:
         dprint(f"Getting session data for {session_id=}")
     conn = None if _use_instance_store() else get_cache_connector()
     if conn is None and _use_instance_store():
-        return _instance_get(str(session_id))
+        return _instance_get(session_id)
     if conn is None:
-        return _active_sessions.get(str(session_id), None)
+        return _active_sessions.get(session_id, None)
 
-    session_key = get_session_key(str(session_id))
+    session_key = get_session_key(session_id)
     session_data_str = conn.get(session_key)
     if not session_data_str:
         return None
@@ -306,19 +360,25 @@ def is_session_active(session_id: Union[str, None]) -> bool:
     """
     Return whether a given `session_id` has been set.
     """
-    return get_username_from_session(str(session_id)) is not None
+    session_id = valid_session_id(session_id)
+    if session_id is None:
+        return False
+    return get_username_from_session(session_id) is not None
 
 
 def delete_session(session_id: str):
     """
-    Delete a session if it's been set.
+    Delete a session if it's been set (nothing happens for an ID that is not a session ID).
     """
+    session_id = valid_session_id(session_id)
+    if session_id is None:
+        return
     if debug:
         dprint(f"Deleting {session_id=}")
     _cache_drop(session_id)
     conn = None if _use_instance_store() else get_cache_connector()
     if conn is None and _use_instance_store():
-        _instance_delete(str(session_id))
+        _instance_delete(session_id)
         return
     if conn is None:
         _ = _active_sessions.pop(session_id, None)
@@ -348,6 +408,7 @@ def is_session_authenticated(session_id: Optional[str]) -> bool:
     if no_auth:
         return True
 
+    session_id = valid_session_id(session_id)
     if session_id is None:
         return False
 
@@ -363,11 +424,27 @@ def is_session_authenticated(session_id: Optional[str]) -> bool:
         return cached_auth
 
     permissions = get_config('api', 'permissions')
-    allow_non_admin = permissions.get('actions', {}).get('non_admin', False)
+    ### The server passes its own `actions_non_admin` to the host (`start api --secure` turns it
+    ### off as `api:permissions:actions:non_admin: false` does).
+    from meerschaum.api import get_uvicorn_config
+    allow_non_admin = (
+        permissions.get('actions', {}).get('non_admin', False)
+        and get_uvicorn_config().get('actions_non_admin', True) is not False
+    )
 
     is_auth = True if allow_non_admin else session_is_admin(session_id)
     update_session(session_id, {'authenticated': is_auth})
     return is_auth
+
+
+def public_callback(func):
+    """
+    Mark a console callback public: the API host runs it for visitors without a session.
+    Only the login and registration callbacks are; plugins use `@web_callback(..., public=True)`
+    or `@dash_plugin(public=True)`. Place it above `@dash_app.callback(...)`.
+    """
+    from meerschaum.plugins import _mark_public_callback
+    return _mark_public_callback(func)
 
 
 def is_state_authenticated(session_store_data: Optional[Dict[str, Any]]) -> bool:
@@ -375,14 +452,12 @@ def is_state_authenticated(session_store_data: Optional[Dict[str, Any]]) -> bool
     Return whether a callback's `session-store` state belongs to an
     authenticated session.
 
-    Dash callbacks are reachable by anyone who can POST to
-    `/dash/_dash-update-component` — the WSGI-mounted Dash app sits outside
-    FastAPI's auth, and the session ID arrives as callback state (the login
-    callback also mirrors it into the `mrsm-session-id` cookie for plain HTTP
-    routes, but callbacks read the store). So any callback which reads or
-    writes pipes, users, tokens, or job logs must take
-    `State('session-store', 'data')` and check it through this function
-    before doing any work.
+    The API host answers a callback request (`POST /dash/_dash-update-component`) only for a
+    valid console session unless the callback is public (`meerschaum.api.host._callbacks`), but
+    `api:dash:callbacks_require_session: false` turns that off, and a session is not an
+    authorization: any callback which reads or writes pipes, users, tokens, or job logs takes
+    `State('session-store', 'data')` and checks it through this function (which also applies
+    `api:permissions:actions:non_admin`) before doing any work.
 
     Parameters
     ----------

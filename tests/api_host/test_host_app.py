@@ -113,8 +113,9 @@ r = client.get('/_pages/synth/teapot')
 out['teapot'] = [r.status_code, r.text]
 out['locked_anon'] = client.get('/_pages/synth/locked').status_code
 from meerschaum.api.dash import sessions
-sessions.set_session('synth-session', {'username': 'zed'})
-r = client.get('/_pages/synth/locked', cookies={'mrsm-session-id': 'synth-session'})
+SYNTH_SESSION = '00000000-0000-4000-8000-00000005e551'
+sessions.set_session(SYNTH_SESSION, {'username': 'zed'})
+r = client.get('/_pages/synth/locked', cookies={'mrsm-session-id': SYNTH_SESSION})
 out['locked_authed'] = [r.status_code, r.text]
 out['registry'] = {p['path']: p for p in web_page_registry()}
 out['console_layout'] = client.get('/dash/_dash-layout').text
@@ -126,6 +127,10 @@ payload = {
     'state': [{'id': 'session-store', 'property': 'data', 'value': {'session-id': 'abc'}}],
 }
 r = client.post('/dash/_dash-update-component', json=payload)
+out['callback_anonymous'] = [r.status_code, r.json()]
+r = client.post(
+    '/dash/_dash-update-component', json=payload, cookies={'mrsm-session-id': SYNTH_SESSION},
+)
 out['callback'] = [r.status_code, r.text]
 print('JSON:' + json.dumps(out))
 """)
@@ -156,4 +161,7 @@ print('JSON:' + json.dumps(out))
     layout = out['console_layout']
     for component_id in ('session-store', 'mrsm-location', 'dbc-dark-store'):
         assert f'"{component_id}"' in layout
+    ### A plugin's callback needs a console session (the store's 'abc' is none).
+    status, body = out['callback_anonymous']
+    assert status == 401 and body['success'] is False and body['login'] == '/dash/login'
     assert out['callback'][0] == 200 and 'session-id' in out['callback'][1]

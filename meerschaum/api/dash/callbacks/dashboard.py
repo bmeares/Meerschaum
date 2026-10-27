@@ -3,7 +3,9 @@
 # vim:fenc=utf-8
 
 """
-Callbacks for the main dashboard.
+The console's router (`update_page_layout_div` and its routing tables `_paths`, `_required_login`
+and `_pages`), the Terminal page's callbacks (v4's dashboard: the action builder beside the web
+terminal) and the callbacks of the pipe cards it shows.
 """
 
 from __future__ import annotations
@@ -36,15 +38,13 @@ from meerschaum.api.dash.pipes import (
 )
 from meerschaum.api.dash.jobs import get_jobs_cards
 from meerschaum.api.dash.pipeline_cards import get_pipeline_cards
-from meerschaum.api.dash.jobs import get_run_cards
-from meerschaum.api.dash.plugins import get_plugins_cards
-from meerschaum.api.dash.users import get_users_cards
 from meerschaum.api.dash.webterm import get_webterm
 from meerschaum.api.dash.components import (
     alert_from_success_tuple,
     console_div,
     build_cards_grid,
-    build_pages_offcanvas_children,
+    console_nav_context,
+    personalize_navbar,
 )
 from meerschaum.api.dash.keys import build_flags_row, build_flags_options
 from meerschaum.api.dash.execute import omit_actions
@@ -85,15 +85,25 @@ keys_state = (
 
 ### Map endpoints to page layouts.
 ### The console's own pages are gated by the `dash` route group of
-### `api:permissions:routes:allowlist`; unknown paths render the error page.
+### `api:permissions:routes:allowlist`; an unknown path renders the Overview (v4's router
+### rendered its dashboard), or the error page when the console's pages are not served.
 ### The login page is always served so plugin pages requiring a login keep an
 ### auth entrypoint, and plugin pages (`add_plugin_pages`) register regardless
 ### of the allowlist.
+###
+### A layout is a component (or list), or a function `(pathname, href)` building the page per
+### request. A list whose first item is the console's navbar (`build_pages_navbar`) gets that
+### navbar rebuilt for each request (`components.personalize_navbar`).
 _console_pages_allowed = route_group_is_allowed('dash')
 _paths = {
     '/dash/login'   : pages.login.layout,
     **({
-        '/dash'         : pages.dashboard.layout,
+        ### The Overview (`pages.overview.route`): the instance's pipes, Pipelines, jobs and runs.
+        '/dash'          : pages.overview.route,
+        ### v4's dashboard: the action builder beside the web terminal (`/dash/webterm` was its URL).
+        '/dash/terminal' : pages.terminal.layout,
+        '/dash/webterm'  : pages.terminal.layout,
+        '/dash/connectors': pages.connectors.route,
         '/dash/plugins' : pages.plugins.layout,
         '/dash/users'   : pages.users.layout,
         '/dash/tokens'  : pages.tokens.layout,
@@ -107,20 +117,53 @@ _paths = {
 }
 _required_login = {
     '', '/dash', '/dash/', '/dash/tokens', '/dash/jobs', '/dash/pipes',
-    '/dash/pipelines', '/dash/runs',
+    '/dash/pipelines', '/dash/runs', '/dash/terminal', '/dash/webterm', '/dash/connectors',
+    '/dash/users', '/dash/plugins',
 }
 ### Endpoints (plugin pages with `@web_page(dark_theme=False)`) that opt out of the
 ### `dbc_dark` component theme; populated by `add_plugin_pages`.
 _paths_without_dbc_dark = set()
+### The console's pages by name; `add_plugin_pages` adds the plugins' (the navbar's Pages menu).
 _pages = {
-    'Web Console': '/dash/',
+    'Overview': '/dash',
     'Pipes': '/dash/pipes',
     'Pipelines': '/dash/pipelines',
+    'Jobs': '/dash/jobs',
+    'Connectors': '/dash/connectors',
     'Plugins': '/dash/plugins',
+    'Terminal': '/dash/terminal',
     'Users': '/dash/users',
     'Tokens': '/dash/tokens',
-    'Jobs': '/dash/jobs',
 } if _console_pages_allowed else {}
+
+#: The Terminal page's paths.
+TERMINAL_PATHS = frozenset({'/dash/terminal', '/dash/webterm'})
+
+#: Query parameters of a link into v4's dashboard (its action builder): `/dash?...` with any of
+#: them opens the Terminal page with the same query.
+TERMINAL_QUERY_KEYS = frozenset({
+    'action', 'subaction', 'subactions', 'connector_keys', 'metric_keys', 'location_keys',
+    'tags', 'flags',
+})
+
+
+def terminal_redirect(path: str, href: Optional[str]) -> Optional[str]:
+    """
+    Where a link into v4's dashboard goes: `/dash?action=...` (or any of `TERMINAL_QUERY_KEYS`)
+    is the Terminal page with the same query; any other path stays (`None`).
+    """
+    from urllib.parse import urlparse, parse_qs
+    if path != '/dash' or not href:
+        return None
+    url = urlparse(href)
+    if url.path.rstrip('/') != '/dash':
+        return None
+    query = url.query
+    if not query:
+        return None
+    if not set(parse_qs(query, keep_blank_values=True)) & TERMINAL_QUERY_KEYS:
+        return None
+    return '/dash/terminal?' + query
 
 
 @dash_app.callback(
@@ -190,10 +233,25 @@ def update_page_layout_div(
     )
     layout = _paths.get(path, pages.error.layout)
     apply_dbc_dark = path not in _paths_without_dbc_dark
-    if callable(layout):
-        layout = layout(pathname, location_href)
-        ### Each Pipeline (and the list, wizard and explorer) is its own page.
-        path = pathname.rstrip('/')
+    ### A link into v4's dashboard opens the Terminal page (`assets/global_instance.js` follows it).
+    redirect = terminal_redirect(path, location_href)
+    if redirect:
+        marker = html.Div(**{'data-mrsm-redirect': redirect})
+        return html.Div([marker], key='page-content::redirect'), session_store_to_return, True
+
+    ### The navbar names the viewer and marks the current page (`components.build_pages_navbar`).
+    nav_session_id = (
+        session_store_data.get('session-id', None)
+        if isinstance(session_store_data, dict)
+        else None
+    )
+    with console_nav_context(pathname=pathname, session_id=nav_session_id):
+        if callable(layout):
+            layout = layout(pathname, location_href)
+            ### Each Pipeline (and the list, wizard and explorer) is its own page.
+            path = pathname.rstrip('/')
+        else:
+            layout = personalize_navbar(layout)
 
     ### Wrap the page in a path-keyed container so React fully remounts the page on
     ### navigation. React reconciles by type + position (not by Dash id), so without a
@@ -236,10 +294,7 @@ dash_app.clientside_callback(
     Input('get-pipes-button', 'n_clicks'),
     Input('get-jobs-button', 'n_clicks'),
     Input('get-pipelines-button', 'n_clicks'),
-    Input('get-runs-button', 'n_clicks'),
     Input('show-webterm-button', 'n_clicks'),
-    Input('get-plugins-button', 'n_clicks'),
-    Input('get-users-button', 'n_clicks'),
     Input('instance-select', 'value'),
     State('mrsm-location', 'href'),
     State('session-store', 'data'),
@@ -248,9 +303,10 @@ dash_app.clientside_callback(
 )
 def update_content(*args):
     """
-    Determine which trigger is seeking to update the content div,
+    Determine which trigger is seeking to update the content div of the Terminal page,
     and execute the appropriate function.
     """
+    from urllib.parse import urlparse
     ctx = dash.callback_context
     session_id = ctx.states['session-store.data'].get('session-id', None)
     authenticated = is_session_authenticated(str(session_id))
@@ -265,12 +321,9 @@ def update_content(*args):
     trigger = ctx.triggered[0]['prop_id'].split('.')[0] if not trigger else trigger
 
     session_data = args[-1]
-    mrsm_location_href = session_data.get('mrsm-location.href', None)
-    if (
-        initial_load
-        and mrsm_location_href
-        and not mrsm_location_href.rstrip('/').endswith('/dash')
-    ):
+    ### Only the Terminal page (or its old `/dash/webterm` URL) opens the terminal on load.
+    current_path = urlparse(ctx.states.get('mrsm-location.href', None) or '').path.rstrip('/')
+    if initial_load and current_path and current_path not in TERMINAL_PATHS:
         raise PreventUpdate
 
     ### NOTE: functions MUST return a list of content and a list of alerts
@@ -280,22 +333,17 @@ def update_content(*args):
         'get-pipes-button': get_pipes_cards,
         'get-jobs-button': get_jobs_cards,
         'get-pipelines-button': get_pipeline_cards,
-        'get-runs-button': get_run_cards,
-        'get-plugins-button': get_plugins_cards,
-        'get-users-button': get_users_cards,
         'instance-select': lambda x: ([], []),
     }
     ### Defaults to 3 if not in dict.
     trigger_num_cols = {
         'get-pipes-button': 1,
         'get-pipelines-button': 1,
-        'get-runs-button': 2,
         'get-jobs-button': 2,
     }
 
     ### Trigger functions return (content, alerts), but some return extra trailing
-    ### values (e.g. get_plugins_cards returns page/count for pagination) — take the
-    ### first two.
+    ### values — take the first two.
     result = triggers[trigger](
         ctx.states,
         **filter_keywords(triggers[trigger], session_data=session_data)
@@ -659,6 +707,7 @@ dash_app.clientside_callback(
 
         // Track state explicitly and drive width via inline styles so the column's
         // responsive classes (col-md-12 col-lg-6) are preserved, not clobbered.
+        // The button's icon follows `data-fullscreen` (`assets/nav.css`).
         const fullscreen = rightCol.getAttribute('data-fullscreen') === '1';
         if (fullscreen) {
             leftCol.style.display = '';
@@ -666,14 +715,14 @@ dash_app.clientside_callback(
             rightCol.style.maxWidth = '';
             rightCol.style.width = '';
             rightCol.removeAttribute('data-fullscreen');
-            button.innerHTML = "⛶";
+            if (button) { button.title = 'Fullscreen'; }
         } else {
             leftCol.style.display = 'none';
             rightCol.style.flex = '0 0 100%';
             rightCol.style.maxWidth = '100%';
             rightCol.style.width = '100%';
             rightCol.setAttribute('data-fullscreen', '1');
-            button.innerHTML = "🀲";
+            if (button) { button.title = 'Exit fullscreen'; }
         }
 
         // The terminal sizes itself to its width on resize; nudge it to refit now
@@ -1027,14 +1076,18 @@ def query_data_click(
     if limit_value is None:
         limit_value = 100
 
-    df = pipe.get_data(
-        params=params_query,
-        begin=begin,
-        end=end,
-        limit=limit_value,
-        order='desc',
-        debug=debug,
-    )
+    ### Database errors raise (rc15): show them instead of failing the callback.
+    try:
+        df = pipe.get_data(
+            params=params_query,
+            begin=begin,
+            end=end,
+            limit=limit_value,
+            order='desc',
+            debug=debug,
+        )
+    except Exception as e:
+        return alert_from_success_tuple((False, f"Failed to read {pipe}:\n{e}"))
     if df is None:
         return [html.P("No data returned.")]
     df = df.astype(str)
@@ -1104,30 +1157,19 @@ dash_app.clientside_callback(
     State('mrsm-location', 'href'),
 )
 
-@dash_app.callback(
+### Open or close the navbar's links on a narrow screen (the toggler). Clientside: it needs no
+### session, so the menu also opens on public pages for visitors who are not signed in.
+dash_app.clientside_callback(
+    """
+    function(n_clicks, is_open){
+        if (!n_clicks) { return Boolean(is_open); }
+        return !is_open;
+    }
+    """,
     Output("navbar-collapse", "is_open"),
     Input("navbar-toggler", "n_clicks"),
     State("navbar-collapse", "is_open"),
 )
-def toggle_navbar_collapse(n_clicks: Optional[int], is_open: bool) -> bool:
-    """
-    Toggle the Instance selection collapse in the navbar.
-
-    Parameters
-    ----------
-    n_clicks: Optional[int]
-        The number of times the toggler was clicked.
-
-    is_open: bool
-        The current state of the collapse.
-
-    Returns
-    -------
-    The toggled state of the collapse.
-    """
-    if n_clicks:
-        return not is_open
-    return is_open
 
 
 @dash_app.callback(
@@ -1220,45 +1262,6 @@ def sync_as_json_or_lines_click(
         raise PreventUpdate
 
     return get_backtrack_text(pipe, lines=as_lines)
-
-
-@dash_app.callback(
-    Output('pages-offcanvas', 'is_open'),
-    Output('pages-offcanvas', 'children'),
-    Input('logo-img', 'n_clicks'),
-    State('pages-offcanvas', 'is_open'),
-    State('mrsm-location', 'pathname'),
-    prevent_initial_call=True,
-)
-def toggle_pages_offcanvas(
-    n_clicks: Optional[int],
-    is_open: bool = False,
-    pathname: Optional[str] = None,
-):
-    """
-    Toggle the pages sidebar when the logo is clicked.
-    """
-    pages_children = build_pages_offcanvas_children(active_path=pathname)
-    if n_clicks:
-        return not is_open, pages_children
-    ### The logo remounts on navigation (its n_clicks resets), which fires this
-    ### callback with a falsy n_clicks. Leave `is_open` alone then so it doesn't
-    ### fight the close-on-navigation callback and re-open the sidebar.
-    return dash.no_update, pages_children
-
-
-@dash_app.callback(
-    Output('pages-offcanvas', 'is_open'),
-    Input('mrsm-location', 'pathname'),
-    prevent_initial_call=True,
-)
-def close_pages_offcanvas_on_nav(pathname: Optional[str]):
-    """
-    Close the pages sidebar when a page is selected. Kept separate from the toggle
-    callback so navigation never references `logo-img`, which is not in the layout
-    on the initial load (it lives inside the routed page).
-    """
-    return False
 
 
 @dash_app.callback(

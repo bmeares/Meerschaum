@@ -12,7 +12,7 @@ from typing import Optional, Tuple, Any
 import meerschaum as mrsm
 from meerschaum.api import CHECK_UPDATE
 from meerschaum.api.dash.sessions import is_session_authenticated, get_username_from_session
-from meerschaum.api.dash.components import alert_from_success_tuple, console_div
+from meerschaum.api.dash.components import alert_from_success_tuple, console_div, build_icon
 from meerschaum.utils.typing import WebState
 from meerschaum.utils.packages import attempt_import, import_html, import_dcc
 from meerschaum.utils.misc import is_tmux_available
@@ -156,7 +156,7 @@ def get_webterm(state: WebState, fullscreen_button: bool = True) -> Tuple[Any, A
                     html.Div(
                         [
                             dbc.Button(
-                                "⟳",
+                                build_icon('refresh'),
                                 color='black',
                                 size='sm',
                                 id='webterm-refresh-button',
@@ -164,18 +164,22 @@ def get_webterm(state: WebState, fullscreen_button: bool = True) -> Tuple[Any, A
                             ),
                         ] + (
                             [
+                                ### The icon follows the column's `data-fullscreen` (nav.css).
                                 dbc.Button(
-                                    '⛶',
+                                    [
+                                        build_icon('fullscreen', 'webterm-icon-enter'),
+                                        build_icon('fullscreen-exit', 'webterm-icon-exit'),
+                                    ],
                                     color='black',
                                     size='sm',
                                     id='webterm-fullscreen-button',
-                                    title='Toggle fullscreen',
+                                    title='Fullscreen',
                                 ),
                             ] if fullscreen_button else []
                         ) + (
                             [
                                 dbc.Button(
-                                    html.B('+'),
+                                    build_icon('plus'),
                                     color='black',
                                     size='sm',
                                     id='webterm-new-tab-button',

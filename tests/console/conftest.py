@@ -183,7 +183,9 @@ def base_env(root: pathlib.Path, plugins: pathlib.Path, config: dict | None = No
         and key not in ('PYTHONPATH', 'HOME', 'TMUX', 'TMUX_PANE')
     }
     merged_config = {
-        'meerschaum': {'instance': 'sql:w7console', 'api_instance': 'sql:w7console'},
+        ### `executor: local`: jobs a test creates (`-d`, the console's New job) are never
+        ### systemd units of the host running the suite.
+        'meerschaum': {'instance': 'sql:w7console', 'api_instance': 'sql:w7console', 'executor': 'local'},
     }
     for key, val in (config or {}).items():
         merged_config.setdefault(key, {})
@@ -310,7 +312,8 @@ assert success, msg
         while time.time() < deadline:
             if self.proc.poll() is not None:
                 raise RuntimeError(f"The server exited early:\n{self.log()}")
-            if http(f"{self.base_url}/version")[0] == 200:
+            ### 401: a `--private` server answers, asking for credentials.
+            if http(f"{self.base_url}/version")[0] in (200, 401):
                 break
             time.sleep(0.5)
         else:
@@ -386,10 +389,19 @@ def browser(playwright_instance):
     browser.close()
 
 
+#: A synthetic password the Connectors page must never send to the browser.
+CONNECTOR_SECRET = 'W7-s3cret-pw'
+
+
 @pytest.fixture(scope='session')
 def server():
-    """The main console server (every plugin, native one included)."""
+    """
+    The main console server (every plugin, native one included), with an unreachable connector
+    holding `CONNECTOR_SECRET` (`sql:w7secret`) and an empty instance (`sql:w7empty`).
+    """
     instance = Server('main')
+    instance.env['MRSM_SQL_W7SECRET'] = f"postgresql://w7user:{CONNECTOR_SECRET}@127.0.0.1:1/w7"
+    instance.env['MRSM_SQL_W7EMPTY'] = f"sqlite:///{instance.root / 'w7empty.db'}"
     try:
         instance.start()
     except Exception:
@@ -559,21 +571,51 @@ class Tab:
                     raise
         return
 
-    def login(self, username: str = USERNAME, password: str = PASSWORD) -> None:
-        self.goto('/dash', '#username-input')
+    def login(
+        self,
+        username: str = USERNAME,
+        password: str = PASSWORD,
+        path: str = '/dash/terminal',
+    ) -> None:
+        """
+        Sign in on the login page `path` shows, and wait for that page. By default it is the
+        Terminal page (v4's dashboard: the action form beside the terminal), which most tests
+        drive; `path='/dash'` lands on the Overview.
+        """
+        self.goto(path, '#username-input')
         self.page.fill('#username-input', username)
         self.page.fill('#password-input', password)
         self.page.click('#login-button')
-        self.wait_for_dashboard()
+        if path.rstrip('/') in ('/dash/terminal', '/dash/webterm'):
+            self.wait_for_dashboard()
+        elif path.rstrip('/') == '/dash':
+            self.page.wait_for_selector('#overview-page', timeout=30000)
+        else:
+            self.page.wait_for_selector('#pages-navbar-div', timeout=30000)
 
     def wait_for_dashboard(self) -> None:
-        """The dashboard is ready when its action form has its default (`show pipes`)."""
+        """The Terminal page is ready when its action form has its default (`show pipes`)."""
         self.page.wait_for_selector('#go-button', timeout=30000)
         self.page.wait_for_function(
             "document.getElementById('action-dropdown') && "
             "document.getElementById('action-dropdown').value === 'show'",
             timeout=30000,
         )
+
+    def goto_terminal(self) -> None:
+        """Open the Terminal page (`/dash/terminal`) and wait for its action form."""
+        self.goto('/dash/terminal', '#go-button')
+        self.wait_for_dashboard()
+
+    def sign_out(self) -> None:
+        """Sign out: the user menu's Sign out on console pages, the bar's on a plugin's page."""
+        menu = self.page.locator('#console-nav-user .dropdown-toggle')
+        if menu.count():
+            toggler = self.page.locator('#navbar-toggler')
+            if toggler.is_visible() and not menu.is_visible():
+                toggler.click()
+            menu.click()
+        self.page.click('#sign-out-button')
 
 
 @pytest.fixture

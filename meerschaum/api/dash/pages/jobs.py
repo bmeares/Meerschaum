@@ -3,7 +3,8 @@
 
 """
 The Jobs page (`/dash/jobs`): persistent jobs and the console's runs, one tab each
-(`/dash/runs` opens the Runs tab), and one job's card at `/dash/jobs/{name}`.
+(`/dash/runs` opens the Runs tab), and one job's card at `/dash/jobs/{name}`. The listing (its
+tabs, New job form, filter and list) is built per URL by `callbacks/jobs.py`.
 """
 
 from meerschaum.api import CHECK_UPDATE
@@ -23,5 +24,5 @@ layout = [
         download_logs,
         job_logs_modal,
         refresh_jobs_interval,
-    ]),
+    ], class_name='console-page jobs-page'),
 ]

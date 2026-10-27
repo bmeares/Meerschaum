@@ -7,6 +7,8 @@ Define callbacks for pages.
 """
 
 import meerschaum.api.dash.callbacks.dashboard
+import meerschaum.api.dash.callbacks.overview
+import meerschaum.api.dash.callbacks.connectors_page
 import meerschaum.api.dash.callbacks.execute
 import meerschaum.api.dash.callbacks.login
 import meerschaum.api.dash.callbacks.plugins

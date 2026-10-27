@@ -21,7 +21,7 @@ from meerschaum.utils.typing import Any, Dict, List, Optional
 from meerschaum.utils.warnings import warn
 from meerschaum.api import CHECK_UPDATE
 from meerschaum.api.dash import dash_app
-from meerschaum.api.dash.components import alert_from_success_tuple
+from meerschaum.api.dash.components import alert_from_success_tuple, build_icon
 from meerschaum.api.dash.sessions import is_session_authenticated
 from meerschaum.api.dash import engine as _engine
 from meerschaum.utils.packages import import_html, import_dcc
@@ -93,14 +93,19 @@ def classify_nodes(graph: Dict[str, Any], targets: List[str]) -> Dict[str, str]:
 
 
 def build_plan_table(graph: Dict[str, Any]) -> Any:
-    """The plan: dependency order, planned action, readiness and bounds of every Pipe."""
+    """The plan: dependency order, planned action, reason and sync window of every Pipe."""
     positions = _engine.canvas_positions(graph)
-    return html.Div(dbc.Table([html.Thead(html.Tr([html.Th('Pipe'), html.Th('Action'), html.Th('Readiness'), html.Th('Bounds')])),
+    return html.Div(dbc.Table([html.Thead(html.Tr([html.Th('Pipe'), html.Th('Action'), html.Th('Reason'), html.Th('Window')])),
         html.Tbody([html.Tr([html.Td(html.Code(_engine.ref_label(node['pipe_ref']))),
             html.Td(_engine.action_label(node['action'])), html.Td(node.get('reason', '')),
-            html.Td(str(node.get('bounds') or 'Source defaults'))])
+            html.Td(node.get('bounds_text') or _engine.bounds_label(node.get('bounds'), node.get('backtrack')))])
             for node in sorted(graph['nodes'], key=lambda node: positions.get(node['pipe_ref'], (0, 0)))])], size='sm'),
         className='pipeline-table-scroll pipeline-plan-table', tabIndex=0, role='region', **{'aria-label': 'Plan'})
+
+
+def dependency_label(count: int) -> str:
+    """`1 dependency`, `3 dependencies`: the canvas's links between Pipes."""
+    return f"{count} dependenc{'y' if count == 1 else 'ies'}"
 
 
 def build_pipeline_canvas(
@@ -215,7 +220,7 @@ def build_pipeline_canvas(
     return [
         html.Div([
             html.Div([
-                html.Span(f"{count_label(len(real), 'Pipe')} · {count_label(len(graph['edges']), 'connection')}"),
+                html.Span(f"{count_label(len(real), 'Pipe')} · {dependency_label(len(graph['edges']))}"),
                 html.Div([
                     dbc.Input(id='pipeline-canvas-search', placeholder='Find Pipe', type='search', size='sm'),
                     *([] if read_only else [html.Button('Add Pipe', id='pipeline-add-node', className='pipeline-edit-only')]),
@@ -239,7 +244,7 @@ def build_pipeline_canvas(
                             ]], id='pipeline-canvas-status', **{'aria-label': 'Filter Pipe status'}),
                         ], className='pipeline-view-options-body'),
                     ], className='pipeline-view-options'),
-                    html.Button('⛶', id='pipeline-fullscreen', title='Toggle fullscreen',
+                    html.Button(build_icon('fullscreen'), id='pipeline-fullscreen', title='Toggle fullscreen',
                                 **{'aria-label': 'Toggle fullscreen'}),
                 ], className='pipeline-canvas-controls'),
             ], className='pipeline-canvas-toolbar'),
@@ -323,8 +328,8 @@ def inspect_stage(clicks, definition, close_clicks, session_data, edit=False):
                 {'label': 'Include all parents', 'value': 'parents'},
                 {'label': 'Include all children', 'value': 'children'},
             ]),
-            dbc.Input(id='pipeline-node-begin', placeholder='Begin (default: current watermark)', size='sm'),
-            dbc.Input(id='pipeline-node-end', placeholder='End (default: available data)', size='sm'),
+            dbc.Input(id='pipeline-node-begin', placeholder='Begin (default: last sync)', size='sm'),
+            dbc.Input(id='pipeline-node-end', placeholder='End (default: latest data)', size='sm'),
         ], className='pipeline-sync-options'),
         html.Label('Pipe details', htmlFor='pipeline-inspector-section'),
         dbc.Select(id='pipeline-inspector-section', value='query', size='sm', class_name='dbc_dark custom-select custom-select-sm',
@@ -394,7 +399,8 @@ def load_inspector_section(selection, section, resolve, retry, session):
             body = [html.P(['Latest data: ', str(pipe.get_sync_time())]),
                     html.P(_engine.action_label(planned.get('action', ''))),
                     html.P(planned.get('reason', '')),
-                    build_data_range(planned['bounds']) if planned.get('bounds') else None]
+                    build_data_range(planned['bounds'], planned.get('backtrack'))
+                    if planned.get('bounds') else None]
         # Dash serializes component trees in a Store exactly as it does callback children.
         return {'token': selection['token'], 'section': section or 'query',
                 'resolve': True if resolve is None else resolve, 'children': body}
@@ -470,25 +476,31 @@ def sync_selected_pipe(clicks, context, selection, scope, begin, end, pipeline, 
                 'job': result['job'], 'stream': result['stream'],
                 'events_stream': _engine.run_events_stream_path(
                     run_id, instance, wait=NODE_RUN_STREAM_WAIT)}})
-            dash.set_props('pipeline-node-run-label', {'children': f"{_engine.ref_label(ref)} · {scope} · {begin or 'current watermark'} → {end or 'available data'} · {run_id} · {result['job']}"})
+            dash.set_props('pipeline-node-run-label', {'children': f"{_engine.ref_label(ref)} · {scope} · {begin or 'last sync'} → {end or 'latest data'} · {run_id} · {result['job']}"})
             dash.set_props('pipelines-interval', {'interval': FALLBACK_POLL_MS})
         return alert_from_success_tuple((result['success'], result['msg']))
     except Exception as exc:
         return alert_from_success_tuple((False, str(exc)))
 
 
-def build_data_range(bounds):
+def build_data_range(bounds, backtrack=None):
     """Align sync bounds without applying monospace formatting to their labels."""
-    from meerschaum.core.Pipeline import _bound_text
     rows = []
     for label, key, fallback in (('From', 'begin', 'Earliest available data'),
-                                  ('To', 'end', 'No upper limit')):
+                                  ('To', 'end', 'Latest data')):
         value = bounds.get(key)
+        if key == 'begin' and value == '':
+            ### `begin=''`: from the last sync, minus the backtrack window.
+            shown = html.Span(f"Last sync − {backtrack}" if backtrack else 'Last sync')
+        elif value is None:
+            shown = html.Span(fallback)
+        else:
+            shown = html.Pre(_engine.bound_label(value))
         rows.append(html.Tr([
             html.Th(label, scope='row'),
             html.Td('≥' if key == 'begin' else '<',
                     title='Inclusive' if key == 'begin' else 'Exclusive'),
-            html.Td(html.Pre(_bound_text(value)) if value is not None else html.Span(fallback)),
+            html.Td(shown),
         ]))
     return html.Div([html.Div('Data range:'), html.Table(html.Tbody(rows))],
                     className='pipeline-data-range')
@@ -503,7 +515,7 @@ def build_runs_table(runs: List[Dict[str, Any]], table_id='pipelines-runs-table'
     rows = []
     for run in runs:
         record = run['run']
-        counts = ', '.join(f"{key}: {value}" for key, value in (run.get('counts') or {}).items() if value) or 'No stages ran'
+        counts = _engine.counts_label(run.get('counts'))
         rows.append(html.Tr([
             html.Td(
                 html.A(
@@ -522,7 +534,7 @@ def build_runs_table(runs: List[Dict[str, Any]], table_id='pipelines-runs-table'
     return html.Div(dbc.Table(
         [html.Thead(html.Tr([
             html.Th('Run'), html.Th('Status'), html.Th('Started'),
-            html.Th('Duration (s)'), html.Th('Nodes'), html.Th('Message'),
+            html.Th('Duration (s)'), html.Th('Pipes'), html.Th('Message'),
         ]))] + [html.Tbody(rows)],
         hover=True,
         size='sm',
@@ -538,7 +550,7 @@ def build_gantt_children(detail: Optional[Dict[str, Any]]) -> List[Any]:
     if not detail:
         return [html.P("No run selected.")]
     if not detail.get('bars'):
-        return [html.P('This run did not execute any stages.', className='text-muted')]
+        return [html.P('This run synced nothing.', className='text-muted')]
     t = lambda text: (str(text)[11:23] if text else '')
     rows = [
         html.Tr([
@@ -546,10 +558,12 @@ def build_gantt_children(detail: Optional[Dict[str, Any]]) -> List[Any]:
                 html.Code(_engine.ref_label(bar['pipe_ref'])), href=_engine.pipe_href(bar['pipe_ref']),
                 className='pipe-link', target='_blank', rel='noopener noreferrer',
             )),
-            html.Td(bar.get('action', '')),
+            html.Td(_engine.action_label(bar.get('action', ''))),
             html.Td('running' if bar.get('actual_start') and not bar.get('actual_end')
-                    else bar.get('status', '')),
-            html.Td('Started' if bar.get('actual_start') else 'Waiting / skipped'),
+                    else bar.get('status', '').replace('_', ' ')),
+            html.Td('Started' if bar.get('actual_start') else (
+                'Not run' if bar.get('status') in ('skipped', 'observed', 'upstream_failed', 'rebuild_pending')
+                else 'Waiting')),
             html.Td(t(bar.get('actual_start'))),
             html.Td(t(bar.get('actual_end'))),
         ])
@@ -565,7 +579,7 @@ def build_gantt_children(detail: Optional[Dict[str, Any]]) -> List[Any]:
         html.Div(dbc.Table(
             [html.Thead(html.Tr([
                 html.Th('Pipe'), html.Th('Action'), html.Th('Status'),
-                html.Th('Readiness'), html.Th('Actual start'), html.Th('Actual end'),
+                html.Th('Progress'), html.Th('Started at'), html.Th('Ended at'),
             ]))] + [html.Tbody(rows)],
             hover=True,
             size='sm',
@@ -715,7 +729,7 @@ def render_pipelines(pathname, search, definition, live_run, selected_run, node_
         all_runs = runs
     except Exception as e:
         warn(f"Could not read the engine state: {e}", stack=False)
-        message = f"Engine state unavailable: {e}"
+        message = f"Runs are unavailable: {e}"
         return (
             [html.P("No run selected.")], [html.P("No runs match.")],
             alert_from_success_tuple((False, message)),
@@ -807,7 +821,7 @@ def render_pipelines(pathname, search, definition, live_run, selected_run, node_
         counts = summary.get('counts') or {}
         completed = sum(value for key, value in counts.items() if key not in ('pending', 'running'))
         dash.set_props('pipeline-run-status', {'children':
-            f"{summary.get('status', '')} · {completed}/{len(detail.get('bars', []))} stages complete"})
+            f"{summary.get('status', '')} · {completed} of {len(detail.get('bars', []))} pipes done"})
         stage_statuses = {}
         for bar in detail.get('bars', []):
             status = bar.get('status', '')
@@ -906,7 +920,7 @@ dash_app.clientside_callback(
         const triggered = (dash_clientside.callback_context.triggered || []).map(t => t.prop_id);
         if (member && triggered.includes('pipeline-member-output.data')) {
             if (!cache.has(member.key)) {
-                cache.set(member.key, {...member, status: 'running', lines: ['Waiting for attributed Pipe events…']});
+                cache.set(member.key, {...member, status: 'running', lines: ['Waiting for this Pipe’s output…']});
                 dash_clientside.set_props('pipeline-node-runs', {data: runs()});
             }
             dash_clientside.set_props('pipeline-output-tab', {options: options(), value: member.key});
@@ -930,7 +944,7 @@ dash_app.clientside_callback(
                 item.lines.push(event.data.replace(/\n$/, ''));
                 if (item.lines.length > 1000) item.lines.shift(); paint();
             };
-            else item.lines.push('Waiting for attributed Pipe events…');
+            else item.lines.push('Waiting for this Pipe’s output…');
             source.addEventListener('stopped', function() { source.close(); item.status = 'stopped'; item.lines.push('[Execution finished]'); if (window.mrsmUnfollowEngineRun) window.mrsmUnfollowEngineRun(item.run_id, 'node'); if (window.mrsmFinishNodeOutput) window.mrsmFinishNodeOutput(item); paint(); });
             source.onerror = function() { if (source.readyState === 2) { item.lines.push('[Output disconnected]'); paint(); } };
             dash_clientside.set_props('pipeline-output-tab', {options: options(), value:run.job});
@@ -959,7 +973,7 @@ dash_app.clientside_callback(
             const item = cache.get(selected);
             dash_clientside.set_props('pipeline-node-run-label', {children: item.scope === 'pipeline'
                 ? (item.label || item.ref) + " · Pipeline('" + item.pipeline + "') · " + item.run_id
-                : (item.label || item.ref) + ' · ' + item.scope + ' · ' + (item.begin || 'current watermark') + ' → ' + (item.end || 'available data') + ' · ' + item.run_id + ' · ' + item.job});
+                : (item.label || item.ref) + ' · ' + item.scope + ' · ' + (item.begin || 'last sync') + ' → ' + (item.end || 'latest data') + ' · ' + item.run_id + ' · ' + item.job});
             const view = document.getElementById('pipeline-node-output');
             if (view && window.mrsmRenderPipelineOutput) window.mrsmRenderPipelineOutput(view, item.lines.join('\n'));
             if (window.mrsmUpdateOutputCancel) window.mrsmUpdateOutputCancel();
