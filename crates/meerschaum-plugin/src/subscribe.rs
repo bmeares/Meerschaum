@@ -14,9 +14,10 @@
 //! | `ack_batches` | `{handle, tokens: [u64]}` | `null` | none |
 //! | `close_subscription` | `{handle}` | `null` | none |
 //!
-//! `subscribe` is an ordinary serialized call (with the Pipe host services); `next_batch`,
-//! `ack_batches` and `close_subscription` are **not** serialized with the plugin's other calls,
-//! so one blocking `next_batch` never holds up a `fetch` or another subscription. The host calls
+//! `subscribe` is an ordinary serialized call; `next_batch`, `ack_batches` and
+//! `close_subscription` are **not** serialized with the plugin's other calls, so one blocking
+//! `next_batch` never holds up a `fetch` or another subscription. All four get the connector's
+//! host services: each may make host calls on its calling thread. The host calls
 //! `next_batch` again only after it has handed the previous batch to the engine's sink, so a slow
 //! consumer slows the source down. `ack_batches` arrives once the rows of those batches committed.
 //! `close_subscription` is called exactly once per handle (after `end`, on stop, or on error).
@@ -196,6 +197,8 @@ pub struct NativeSubscription {
     request: Request,
     handle: u64,
     closed: std::sync::atomic::AtomicBool,
+    /// The connector's host services: a batch method may make host calls too.
+    host: Option<std::sync::Arc<dyn crate::HostServices>>,
 }
 
 impl std::fmt::Debug for NativeSubscription {
@@ -212,12 +215,14 @@ impl NativeSubscription {
         plugin: std::sync::Arc<crate::LoadedPlugin>,
         base: Request,
         handle: u64,
+        host: Option<std::sync::Arc<dyn crate::HostServices>>,
     ) -> Self {
         Self {
             plugin,
             request: base,
             handle,
             closed: std::sync::atomic::AtomicBool::new(false),
+            host,
         }
     }
 
@@ -233,7 +238,8 @@ impl NativeSubscription {
             context,
             ..self.request.clone()
         };
-        self.plugin.invoke_stream(&request)
+        self.plugin
+            .invoke_stream_with_host(&request, self.host.as_deref())
     }
 
     /// The next batch, waiting at most `timeout` inside the plugin.

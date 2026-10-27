@@ -483,6 +483,34 @@ pub unsafe fn cached_manifest(directories: &[PathBuf], cache: &Path) -> Result<V
     Ok(manifest)
 }
 
+/// The key a native manifest cache is valid for: the discovered plugins' names, in order, with
+/// their fingerprints (the same byte grammar as the Python-worker host manifest fingerprint).
+pub fn manifest_cache_key(candidates: &[Candidate]) -> String {
+    let mut hash = Sha256::new();
+    hash.update(crate::MANIFEST_SCHEMA_VERSION.to_le_bytes());
+    for candidate in candidates {
+        hash.update(candidate.name.as_bytes());
+        hash.update([0]);
+        hash.update(candidate.fingerprint.as_bytes());
+    }
+    hex::encode(hash.finalize())
+}
+
+/// Whether the native manifest cache at `cache` describes the plugins `directories` hold now
+/// (the key the loader checks before it uses the cache). Only scans: nothing is built, loaded
+/// or run, so `mrsm -h` can tell whether the cached plugin actions are current. No plugins and
+/// no cache count as current.
+pub fn manifest_cache_is_current(directories: &[PathBuf], cache: &Path) -> bool {
+    let discovery = discover_report_in(directories, &build_dir_for_cache(cache));
+    match std::fs::read(cache)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+    {
+        Some(cached) => cached["fingerprint"] == manifest_cache_key(&discovery.candidates),
+        None => discovery.candidates.is_empty(),
+    }
+}
+
 /// The directory source plugins are built in for a manifest cache file
 /// (`<root>/cache/native_plugins_manifest.json` -> `<root>/cache/native_build`).
 pub fn build_dir_for_cache(cache: &Path) -> PathBuf {
@@ -520,15 +548,7 @@ pub(crate) unsafe fn manifest_for(
         candidates,
         mut skipped,
     } = discovery;
-    // Same byte grammar as the Python-worker host manifest fingerprint.
-    let mut hash = Sha256::new();
-    hash.update(crate::MANIFEST_SCHEMA_VERSION.to_le_bytes());
-    for candidate in &candidates {
-        hash.update(candidate.name.as_bytes());
-        hash.update([0]);
-        hash.update(candidate.fingerprint.as_bytes());
-    }
-    let key = hex::encode(hash.finalize());
+    let key = manifest_cache_key(&candidates);
     if let Ok(bytes) = std::fs::read(cache)
         && let Ok(v) = serde_json::from_slice::<Value>(&bytes)
         && v["fingerprint"] == key
@@ -604,4 +624,62 @@ pub(crate) unsafe fn manifest_for(
     }
     renamed?;
     Ok((result, skipped))
+}
+
+#[cfg(test)]
+mod cache_key_tests {
+    use super::*;
+
+    /// The scan-only check agrees with the loader's key: no plugins and no cache are current, a
+    /// cache written for other plugins is not, a cache keyed for the plugins found now is, and a
+    /// changed plugin makes it stale again. Nothing is built or loaded.
+    #[test]
+    fn manifest_cache_is_current_compares_the_loaders_key() {
+        let root = tempfile::tempdir().unwrap();
+        let plugins = root.path().join("plugins");
+        std::fs::create_dir(&plugins).unwrap();
+        let cache = root
+            .path()
+            .join("cache")
+            .join("native_plugins_manifest.json");
+        let dirs = vec![plugins.clone()];
+        assert!(manifest_cache_is_current(&dirs, &cache));
+
+        let source = plugins.join("demo.rs");
+        std::fs::write(
+            &source,
+            "//! A demo.\nfn sync() -> SuccessTuple { SuccessTuple::ok(\"\") }\n",
+        )
+        .unwrap();
+        assert!(
+            !manifest_cache_is_current(&dirs, &cache),
+            "a plugin and no cache"
+        );
+        std::fs::create_dir_all(cache.parent().unwrap()).unwrap();
+        std::fs::write(
+            &cache,
+            json!({"fingerprint": manifest_cache_key(&[])}).to_string(),
+        )
+        .unwrap();
+        assert!(
+            !manifest_cache_is_current(&dirs, &cache),
+            "a cache for no plugins"
+        );
+
+        let found = discover_report_in(&dirs, &build_dir_for_cache(&cache));
+        assert_eq!(found.candidates.len(), 1, "{:?}", found.skipped);
+        let key = manifest_cache_key(&found.candidates);
+        std::fs::write(&cache, json!({"fingerprint": key}).to_string()).unwrap();
+        assert!(manifest_cache_is_current(&dirs, &cache));
+
+        std::fs::write(
+            &source,
+            "//! A demo.\nfn sync() -> SuccessTuple { SuccessTuple::ok(\"x\") }\n",
+        )
+        .unwrap();
+        assert!(
+            !manifest_cache_is_current(&dirs, &cache),
+            "the plugin changed"
+        );
+    }
 }

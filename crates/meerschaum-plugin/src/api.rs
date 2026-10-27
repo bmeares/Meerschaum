@@ -47,6 +47,11 @@ pub struct RouteSpec {
     /// A public route may not declare `scopes`.
     #[serde(default)]
     pub public: bool,
+    /// Scopes the route's host calls have for every caller, on top of the caller's own: a
+    /// public route that serves pipe data to anonymous callers declares `["pipes:read"]`. `*` is
+    /// not accepted, and `exec_sql` and `host::config` still need the caller's own permission.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub host_scopes: Vec<String>,
     /// A one-line description, for the plugin's own documentation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
@@ -69,12 +74,19 @@ impl RouteSpec {
             path: path.into(),
             scopes: Vec::new(),
             public: false,
+            host_scopes: Vec::new(),
             description: None,
         }
     }
     /// Require these scopes.
     pub fn scopes<S: Into<String>>(mut self, scopes: impl IntoIterator<Item = S>) -> Self {
         self.scopes = scopes.into_iter().map(Into::into).collect();
+        self
+    }
+    /// Give the route's host calls these scopes for every caller, on top of the caller's own
+    /// (e.g. `["pipes:read"]` on a public route that serves pipe data).
+    pub fn host_scopes<S: Into<String>>(mut self, scopes: impl IntoIterator<Item = S>) -> Self {
+        self.host_scopes = scopes.into_iter().map(Into::into).collect();
         self
     }
     /// Serve without credentials.
@@ -573,8 +585,21 @@ pub fn check_route_path(path: &str) -> std::result::Result<(), String> {
 impl crate::LoadedPlugin {
     /// Serve a request with the plugin's `api_route` call kind.
     pub fn api_route(&self, request: &RouteRequest) -> Result<RouteResponse> {
+        self.api_route_with_host(request, None)
+    }
+    /// [`api_route`](Self::api_route) with host services for the handler's host calls (made on
+    /// behalf of the caller).
+    pub fn api_route_with_host(
+        &self,
+        request: &RouteRequest,
+        host: Option<&dyn crate::HostServices>,
+    ) -> Result<RouteResponse> {
         let context = serde_json::to_value(request).map_err(error)?;
-        RouteResponse::from_reply(&self.call_json_concurrent("api_route", context)?)
+        RouteResponse::from_reply(&self.call_json_concurrent_with_host(
+            "api_route",
+            context,
+            host,
+        )?)
     }
 }
 

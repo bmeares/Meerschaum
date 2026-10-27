@@ -45,6 +45,8 @@
 //! ``(False, "`<method>` is not supported by the '<type>:<label>' executor.")`` for actions and a
 //! neutral value (`stopped`, `None`, `False`) for display getters. `executor.next_logs` and
 //! `executor.close_logs` are not serialized with the plugin's other calls (like `next_batch`).
+//! Every method may make host calls (`host::plugin_config()`, `host::pipe(...)`, ...) when the
+//! host attaches its services ([`NativeExecutor::with_host_services`]; the CLI does).
 use crate::{
     Result, SuccessTuple, error,
     handles::{Handles, handle_of, timeout_of},
@@ -352,6 +354,8 @@ pub struct NativeExecutor {
     config: Value,
     /// The Meerschaum root the jobs belong to (`context.root_dir`).
     root_dir: Option<String>,
+    /// What the executor's host calls reach (`host::plugin_config()`, `host::pipe(...)`).
+    host: Option<std::sync::Arc<dyn crate::HostServices>>,
 }
 
 impl std::fmt::Debug for NativeExecutor {
@@ -375,12 +379,19 @@ impl NativeExecutor {
             label: label.into(),
             config,
             root_dir: None,
+            host: None,
         }
     }
 
     /// Send `root_dir` (the Meerschaum root the jobs belong to) with every call.
     pub fn with_root_dir(mut self, root_dir: impl Into<String>) -> Self {
         self.root_dir = Some(root_dir.into());
+        self
+    }
+
+    /// Serve the executor's host calls (every method and the log follow) with `host`.
+    pub fn with_host_services(mut self, host: std::sync::Arc<dyn crate::HostServices>) -> Self {
+        self.host = Some(host);
         self
     }
 
@@ -412,8 +423,14 @@ impl NativeExecutor {
     /// method is [`crate::Error::Unsupported`].
     pub fn call(&self, method: &str, context: Value) -> Result<Value> {
         self.plugin
-            .invoke(&self.request(method, context), None)
+            .invoke_with_host(&self.request(method, context), None, self.host.as_deref())
             .map(|reply| reply.value)
+    }
+
+    /// A stream method of a log follow (`next_logs`, `close_logs`): not serialized.
+    fn stream_call(&self, request: &Request) -> Result<crate::Reply> {
+        self.plugin
+            .invoke_stream_with_host(request, self.host.as_deref())
     }
 
     /// Follow a job's log.
@@ -447,7 +464,7 @@ impl NativeLogStream {
             "next_logs",
             json!({"handle": self.handle, "timeout_ms": timeout.as_millis() as u64}),
         );
-        let reply = self.executor.plugin.invoke_stream(&request)?.value;
+        let reply = self.executor.stream_call(&request)?.value;
         match reply["status"].as_str() {
             Some("lines") => Ok(LogEvent::Lines(
                 serde_json::from_value(reply["lines"].clone()).map_err(error)?,
@@ -471,7 +488,7 @@ impl NativeLogStream {
         let request = self
             .executor
             .request("close_logs", json!({"handle": self.handle}));
-        self.executor.plugin.invoke_stream(&request).map(|_| ())
+        self.executor.stream_call(&request).map(|_| ())
     }
 }
 

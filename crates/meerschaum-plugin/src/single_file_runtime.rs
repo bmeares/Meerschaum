@@ -2,7 +2,7 @@
 use crate::abi::*;
 use crate::rows_abi::RowsHostV1;
 use serde_json::{Value, json};
-use std::{marker::PhantomData, rc::Rc};
+use std::{borrow::Cow, marker::PhantomData, rc::Rc};
 
 #[derive(Debug)]
 pub enum Error {
@@ -46,6 +46,159 @@ impl<'de> serde::Deserialize<'de> for Bound {
             .map_err(serde::de::Error::custom)?
             .ok_or_else(|| serde::de::Error::custom("null bound"))
     }
+}
+impl Bound {
+    /// The integer of an integer axis bound.
+    pub fn as_int(&self) -> Option<i64> {
+        match self {
+            Bound::Int(i) => Some(*i),
+            Bound::Datetime(_) => None,
+        }
+    }
+    /// The ISO text of a datetime bound.
+    pub fn as_str(&self) -> Option<&str> {
+        match self {
+            Bound::Datetime(s) => Some(s),
+            Bound::Int(_) => None,
+        }
+    }
+    /// Whether this is a datetime bound.
+    pub fn is_datetime(&self) -> bool {
+        matches!(self, Bound::Datetime(_))
+    }
+    /// A datetime bound as Unix seconds (a timestamp without an offset is UTC).
+    pub fn timestamp(&self) -> Result<i64> {
+        self.timestamp_millis().map(|ms| ms.div_euclid(1000))
+    }
+    /// A datetime bound as Unix milliseconds (a timestamp without an offset is UTC).
+    pub fn timestamp_millis(&self) -> Result<i64> {
+        match self {
+            Bound::Datetime(text) => iso_millis(text)
+                .ok_or_else(|| error(format!("'{text}' is not an ISO-8601 timestamp"))),
+            Bound::Int(i) => Err(error(format!("{i} is an integer bound, not a datetime"))),
+        }
+    }
+    /// The UTC datetime bound of Unix seconds (`2024-01-01T00:00:00+00:00`).
+    pub fn from_timestamp(seconds: i64) -> Bound {
+        let (days, secs) = (seconds.div_euclid(86_400), seconds.rem_euclid(86_400));
+        let (year, month, day) = civil_from_days(days);
+        Bound::Datetime(format!(
+            "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}+00:00",
+            secs / 3600,
+            secs % 3600 / 60,
+            secs % 60
+        ))
+    }
+}
+impl std::fmt::Display for Bound {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Bound::Int(i) => write!(f, "{i}"),
+            Bound::Datetime(s) => f.write_str(s),
+        }
+    }
+}
+impl From<i64> for Bound {
+    fn from(value: i64) -> Self {
+        Bound::Int(value)
+    }
+}
+impl From<i32> for Bound {
+    fn from(value: i32) -> Self {
+        Bound::Int(value.into())
+    }
+}
+impl From<&str> for Bound {
+    fn from(value: &str) -> Self {
+        Bound::Datetime(value.into())
+    }
+}
+impl From<String> for Bound {
+    fn from(value: String) -> Self {
+        Bound::Datetime(value)
+    }
+}
+fn bound_json(bound: Option<&Bound>) -> Value {
+    match bound {
+        None => Value::Null,
+        Some(Bound::Int(i)) => json!(i),
+        Some(Bound::Datetime(s)) => json!(s),
+    }
+}
+/// Days since 1970-01-01 of a proleptic Gregorian date.
+fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
+    let year = if month <= 2 { year - 1 } else { year };
+    let era = if year >= 0 { year } else { year - 399 } / 400;
+    let yoe = year - era * 400;
+    let doy = (153 * ((month + 9) % 12) + 2) / 5 + day - 1;
+    era * 146_097 + yoe * 365 + yoe / 4 - yoe / 100 + doy - 719_468
+}
+/// The date of days since 1970-01-01.
+fn civil_from_days(days: i64) -> (i64, i64, i64) {
+    let z = days + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    (yoe + era * 400 + i64::from(month <= 2), month, day)
+}
+/// Unix milliseconds of `YYYY-MM-DD[(T| )HH:MM[:SS[.fff]]][Z|±HH[:]MM]`.
+fn iso_millis(text: &str) -> Option<i64> {
+    let text = text.trim();
+    let number = |s: &str| -> Option<i64> {
+        (!s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()))
+            .then(|| s.parse().ok())
+            .flatten()
+    };
+    let (date, rest) = text.split_at(text.len().min(10));
+    let mut parts = date.splitn(3, '-');
+    let (year, month, day) = (
+        number(parts.next()?)?,
+        number(parts.next()?)?,
+        number(parts.next()?)?,
+    );
+    if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
+        return None;
+    }
+    let mut millis = days_from_civil(year, month, day) * 86_400_000;
+    let rest = rest.strip_prefix(['T', 't', ' ']).unwrap_or(rest);
+    if rest.is_empty() {
+        return Some(millis);
+    }
+    let zone_at = rest
+        .char_indices()
+        .skip(1)
+        .find(|(_, c)| matches!(c, 'Z' | 'z' | '+' | '-'))
+        .map_or(rest.len(), |(i, _)| i);
+    let (time, zone) = rest.split_at(zone_at);
+    let mut fields = time.splitn(3, ':');
+    let hours = number(fields.next()?)?;
+    let minutes = number(fields.next().unwrap_or("0"))?;
+    let seconds = fields.next().unwrap_or("0");
+    let (seconds, fraction) = seconds.split_once('.').unwrap_or((seconds, ""));
+    let seconds = number(seconds)?;
+    let fraction = format!("{fraction:0<3}");
+    millis += ((hours * 60 + minutes) * 60 + seconds) * 1000
+        + if fraction.trim_end_matches('0').is_empty() {
+            0
+        } else {
+            number(&fraction[..3])?
+        };
+    let offset = match zone {
+        "" | "Z" | "z" => 0,
+        zone => {
+            let sign = if zone.starts_with('-') { -1 } else { 1 };
+            let digits: String = zone[1..].chars().filter(|c| *c != ':').collect();
+            if digits.len() != 4 {
+                return None;
+            }
+            sign * (number(&digits[..2])? * 60 + number(&digits[2..])?) * 60_000
+        }
+    };
+    Some(millis - offset)
 }
 fn bound(v: &Value) -> Result<Option<Bound>> {
     match v {
@@ -221,10 +374,153 @@ impl Drop for Scope {
         HOST.with(|h| h.set(self.0));
     }
 }
+/// Why a host call cannot run here.
+const UNAVAILABLE: &str = "Meerschaum host calls are unavailable here: they work only while \
+    Meerschaum is calling this plugin (fetch, sync, hooks, actions, routes, pages and MCP \
+    entries), on the calling thread";
+/// Send one host call (`{"method", "data", "pipe", "args"}`); `generation` is the invocation a
+/// [`Pipe`] view belongs to (`None`: the current one).
+fn host_call(
+    generation: Option<u64>,
+    method: &str,
+    pipe: Option<&Value>,
+    args: Value,
+    data: Option<Frame>,
+    name: &str,
+) -> Result<Value> {
+    let host = HOST
+        .with(|h| h.get())
+        .filter(|h| generation.is_none_or(|g| g == h.generation))
+        .ok_or_else(|| error(UNAVAILABLE))?
+        .table;
+    let bytes = serde_json::to_vec(
+        &json!({"method": method, "data": data.map(Frame::into_rows),
+        "pipe": pipe, "args": args}),
+    )
+    .map_err(error)?;
+    // SAFETY: thread-bound scope pins callback context; borrowed bytes live through the call.
+    let result = unsafe { (host.invoke)(host.context, Bytes::borrowed(&bytes)) };
+    // SAFETY: the host owns and releases this allocation exactly once.
+    unsafe { decode(host.free_bytes, result) }.map_err(|e| match e {
+        Error::Unsupported(_) => Error::Unsupported(format!(
+            "This Meerschaum cannot run `{name}` for plugins: upgrade Meerschaum to 5.0.0rc15 or later."
+        )),
+        other => other,
+    })
+}
+fn host_tuple(value: Value) -> Result<SuccessTuple> {
+    serde_json::from_value(value).map_err(|e| error(format!("invalid host success tuple: {e}")))
+}
+/// Rows from a host call (`null`: none).
+fn host_rows(value: Value) -> Result<Vec<Value>> {
+    match value {
+        Value::Null => Ok(Vec::new()),
+        rows => serde_json::from_value(rows).map_err(error),
+    }
+}
+/// The options of [`Pipe::get_data_with`] (Python's `pipe.get_data(...)` keywords).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Query {
+    /// Rows at or after this bound.
+    pub begin: Option<Bound>,
+    /// Rows before this bound.
+    pub end: Option<Bound>,
+    /// Filters: `{"col": value}` (`=`), `{"col": [a, b]}` (`IN`), `"_value"` negates.
+    pub params: Option<Value>,
+    /// Only these columns.
+    pub select_columns: Option<Vec<String>>,
+    /// Not these columns.
+    pub omit_columns: Option<Vec<String>>,
+    /// At most this many rows.
+    pub limit: Option<i64>,
+    /// `"asc"` (default) or `"desc"`, by the datetime axis then the other index columns.
+    pub order: Option<String>,
+}
+impl Query {
+    pub fn new() -> Query {
+        Query::default()
+    }
+    pub fn begin(mut self, begin: impl Into<Bound>) -> Query {
+        self.begin = Some(begin.into());
+        self
+    }
+    pub fn end(mut self, end: impl Into<Bound>) -> Query {
+        self.end = Some(end.into());
+        self
+    }
+    pub fn params(mut self, params: Value) -> Query {
+        self.params = Some(params);
+        self
+    }
+    pub fn select<S: Into<String>>(mut self, columns: impl IntoIterator<Item = S>) -> Query {
+        self.select_columns = Some(columns.into_iter().map(Into::into).collect());
+        self
+    }
+    pub fn omit<S: Into<String>>(mut self, columns: impl IntoIterator<Item = S>) -> Query {
+        self.omit_columns = Some(columns.into_iter().map(Into::into).collect());
+        self
+    }
+    pub fn limit(mut self, limit: i64) -> Query {
+        self.limit = Some(limit);
+        self
+    }
+    pub fn order(mut self, order: impl Into<String>) -> Query {
+        self.order = Some(order.into());
+        self
+    }
+    fn args(&self) -> Value {
+        json!({
+            "begin": bound_json(self.begin.as_ref()), "end": bound_json(self.end.as_ref()),
+            "params": self.params, "select_columns": self.select_columns,
+            "omit_columns": self.omit_columns, "limit": self.limit, "order": self.order,
+        })
+    }
+}
+fn window(begin: Option<Bound>, end: Option<Bound>, params: Option<&Value>) -> Value {
+    json!({"begin": bound_json(begin.as_ref()), "end": bound_json(end.as_ref()), "params": params})
+}
+/// A Pipe: its keys and parameters, and the operations its host runs on its instance. The
+/// request's Pipe is a function's `pipe: &Pipe`; any other comes from [`host::pipe`]. A view
+/// works only during the plugin call it was made in, on that thread.
 pub struct Pipe<'a> {
-    metadata: &'a Value,
+    metadata: Cow<'a, Value>,
+    /// The request's own Pipe, unchanged (host calls address it as `null`).
+    own: bool,
     generation: Option<u64>,
     _thread: PhantomData<Rc<()>>,
+}
+impl Clone for Pipe<'_> {
+    fn clone(&self) -> Self {
+        Pipe {
+            metadata: self.metadata.clone(),
+            own: self.own,
+            generation: self.generation,
+            _thread: PhantomData,
+        }
+    }
+}
+impl std::fmt::Debug for Pipe<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{self}")
+    }
+}
+impl std::fmt::Display for Pipe<'_> {
+    /// `Pipe('connector', 'metric', 'location', instance='instance')`, like Python's `repr`.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Pipe('{}', '{}'",
+            self.connector_keys(),
+            self.metric_key()
+        )?;
+        if let Some(location) = self.location_key() {
+            write!(f, ", '{location}'")?;
+        }
+        if !self.instance_keys().is_empty() {
+            write!(f, ", instance='{}'", self.instance_keys())?;
+        }
+        f.write_str(")")
+    }
 }
 impl<'a> Pipe<'a> {
     fn from_request(request: &'a Request) -> Result<Self> {
@@ -236,13 +532,14 @@ impl<'a> Pipe<'a> {
             .filter(|v| v.is_object())
             .ok_or_else(|| error("request has no Pipe metadata"))?;
         Ok(Self {
-            metadata,
+            metadata: Cow::Borrowed(metadata),
+            own: true,
             generation: HOST.with(|h| h.get().map(|h| h.generation)),
             _thread: PhantomData,
         })
     }
     pub fn keys(&self) -> &Value {
-        self.metadata.get("keys").unwrap_or(self.metadata)
+        self.metadata.get("keys").unwrap_or(&self.metadata)
     }
     pub fn parameters(&self) -> &Value {
         &self.metadata["parameters"]
@@ -259,38 +556,209 @@ impl<'a> Pipe<'a> {
     pub fn instance_keys(&self) -> &str {
         self.keys()["instance_keys"].as_str().unwrap_or("")
     }
+    /// The datetime axis column (`parameters.columns.datetime`).
+    pub fn datetime_column(&self) -> Option<&str> {
+        self.parameters()["columns"]["datetime"].as_str()
+    }
+    /// The target table's name (`pipe.target`): `parameters.target`, else
+    /// `<connector_keys with ':' as '_'>_<metric_key>[_<location_key>]`. Quote it for your
+    /// database's SQL dialect.
+    pub fn target(&self) -> String {
+        if let Some(target) = self.parameters()["target"].as_str() {
+            return target.to_string();
+        }
+        let mut target = format!(
+            "{}_{}",
+            self.connector_keys().replace(':', "_"),
+            self.metric_key()
+        );
+        if let Some(location) = self.location_key() {
+            target.push('_');
+            target.push_str(location);
+        }
+        target
+    }
+    /// This view with other parameters (`mrsm.Pipe(..., parameters=...)`): what `sync` and
+    /// `register` use for a Pipe that is not registered yet.
+    pub fn with_parameters(mut self, parameters: Value) -> Pipe<'a> {
+        self.metadata.to_mut()["parameters"] = parameters;
+        self.own = false;
+        self
+    }
+    fn call(&self, method: &str, args: Value, data: Option<Frame>) -> Result<Value> {
+        let generation = self.generation.ok_or_else(|| error(UNAVAILABLE))?;
+        let pipe = (!self.own).then_some(self.metadata.as_ref());
+        host_call(
+            Some(generation),
+            method,
+            pipe,
+            args,
+            data,
+            &format!("pipe.{method}()"),
+        )
+    }
+    /// The newest value of this Pipe's datetime (or integer) axis on its instance (`None`: no
+    /// rows yet).
     pub fn get_sync_time(&self) -> Result<Option<Bound>> {
-        bound(&self.call("get_sync_time", None)?)
+        bound(&self.call("get_sync_time", json!({}), None)?)
+    }
+    /// [`get_sync_time`](Pipe::get_sync_time) for the rows matching `params`, newest or oldest.
+    pub fn get_sync_time_with(
+        &self,
+        params: Option<&Value>,
+        newest: bool,
+    ) -> Result<Option<Bound>> {
+        bound(&self.call(
+            "get_sync_time",
+            json!({"params": params, "newest": newest}),
+            None,
+        )?)
     }
     /// Sync rows through the host's engine, like a Python plugin's `pipe.sync(docs)`: an empty
-    /// `Vec` syncs zero rows, `None` (an `Option` input) syncs nothing.
+    /// `Vec` syncs zero rows, `None` (an `Option` input) syncs nothing. An unregistered Pipe is
+    /// registered first.
     pub fn sync(&self, data: impl sdk::FetchOutput) -> Result<SuccessTuple> {
-        let v = self.call("sync", data.into_frame()?)?;
-        Ok(SuccessTuple {
-            success: v[0]
-                .as_bool()
-                .ok_or_else(|| error("invalid host success"))?,
-            message: v[1]
-                .as_str()
-                .ok_or_else(|| error("invalid host message"))?
-                .into(),
+        host_tuple(self.call("sync", json!({}), data.into_frame()?)?)
+    }
+    /// Replace this Pipe's rows in `[begin, end)` with `data`, in one transaction (Python's
+    /// `pipe.sync(df, begin=..., end=..., replace=True)`): rows of the window that are not in
+    /// `data` are deleted, and readers never see the window half rewritten. A `None` bound comes
+    /// from the rows (`begin` is their earliest datetime, `end` just after their latest), so rows
+    /// outside the data's range stay; pass both bounds to empty a window with no rows. A Pipe
+    /// without a datetime column has one window, the whole table (both bounds `None`).
+    pub fn replace(
+        &self,
+        data: impl sdk::FetchOutput,
+        begin: Option<Bound>,
+        end: Option<Bound>,
+    ) -> Result<SuccessTuple> {
+        let args = json!({"replace": true, "begin": bound_json(begin.as_ref()),
+            "end": bound_json(end.as_ref())});
+        host_tuple(self.call("sync", args, data.into_frame()?)?)
+    }
+    /// The rows in `[begin, end)` matching `params` (Python's `pipe.get_data(begin=, end=,
+    /// params=)`), as JSON objects (datetimes are ISO strings). A Pipe without a table has no
+    /// rows (see [`exists`](Pipe::exists)).
+    pub fn get_data(
+        &self,
+        begin: Option<Bound>,
+        end: Option<Bound>,
+        params: Option<&Value>,
+    ) -> Result<Vec<Value>> {
+        self.get_data_with(&Query {
+            begin,
+            end,
+            params: params.cloned(),
+            ..Query::default()
         })
     }
-    fn call(&self, method: &str, data: Option<Frame>) -> Result<Value> {
-        let host = HOST
-            .with(|h| h.get())
-            .filter(|h| Some(h.generation) == self.generation)
-            .ok_or_else(|| {
-                error("Pipe host operations are unavailable outside a host-enabled plugin call")
-            })?
-            .table;
-        let bytes =
-            serde_json::to_vec(&json!({"method": method, "data": data.map(Frame::into_rows)}))
-                .map_err(error)?;
-        // SAFETY: thread-bound scope pins callback context; borrowed bytes live through the call.
-        let result = unsafe { (host.invoke)(host.context, Bytes::borrowed(&bytes)) };
-        // SAFETY: the host owns and releases this allocation exactly once.
-        unsafe { decode(host.free_bytes, result) }
+    /// [`get_data`](Pipe::get_data) with every option of [`Query`] (columns, limit, order).
+    pub fn get_data_with(&self, query: &Query) -> Result<Vec<Value>> {
+        host_rows(self.call("get_data", query.args(), None)?)
+    }
+    /// The number of rows in `[begin, end)` matching `params` (0 without a table).
+    pub fn get_rowcount(
+        &self,
+        begin: Option<Bound>,
+        end: Option<Bound>,
+        params: Option<&Value>,
+    ) -> Result<i64> {
+        Ok(self
+            .call("get_rowcount", window(begin, end, params), None)?
+            .as_i64()
+            .unwrap_or(0))
+    }
+    /// Delete the rows in `[begin, end)` matching `params` (Python's `pipe.clear()`); the Pipe
+    /// stays registered. To rewrite a window, [`replace`](Pipe::replace) it in one transaction.
+    pub fn clear(
+        &self,
+        begin: Option<Bound>,
+        end: Option<Bound>,
+        params: Option<&Value>,
+    ) -> Result<SuccessTuple> {
+        host_tuple(self.call("clear", window(begin, end, params), None)?)
+    }
+    /// The table's columns and their database types (empty without a table).
+    pub fn get_columns_types(&self) -> Result<serde_json::Map<String, Value>> {
+        match self.call("get_columns_types", json!({}), None)? {
+            Value::Object(types) => Ok(types),
+            _ => Ok(serde_json::Map::new()),
+        }
+    }
+    /// Whether the Pipe's table exists on its instance.
+    pub fn exists(&self) -> Result<bool> {
+        Ok(self
+            .call("exists", json!({}), None)?
+            .as_bool()
+            .unwrap_or(false))
+    }
+    /// Register the Pipe on its instance with this view's parameters.
+    pub fn register(&self) -> Result<SuccessTuple> {
+        host_tuple(self.call("register", json!({}), None)?)
+    }
+}
+/// Host calls that are not about one Pipe. Each works during a plugin call (fetch, sync, hooks,
+/// actions, routes, pages, MCP entries), on the calling thread.
+pub mod host {
+    use super::*;
+    fn call(method: &str, args: Value) -> Result<Value> {
+        host_call(None, method, None, args, None, &format!("host::{method}()"))
+    }
+    /// Any Pipe, by its keys, with its registered parameters (`mrsm.Pipe(...)`): `instance_keys`
+    /// `None` is the request's instance (the Pipe being synced, else the default instance). The
+    /// view has every [`Pipe`] operation.
+    pub fn pipe(
+        connector_keys: &str,
+        metric_key: &str,
+        location_key: Option<&str>,
+        instance_keys: Option<&str>,
+    ) -> Result<Pipe<'static>> {
+        let metadata = call(
+            "pipe",
+            json!({"connector_keys": connector_keys, "metric_key": metric_key,
+                "location_key": location_key, "instance_keys": instance_keys}),
+        )?;
+        if !metadata.is_object() {
+            return Err(error("the host returned no Pipe"));
+        }
+        Ok(Pipe {
+            metadata: Cow::Owned(metadata),
+            own: false,
+            generation: HOST.with(|h| h.get().map(|h| h.generation)),
+            _thread: PhantomData,
+        })
+    }
+    /// Run a query on a SQL connector (`"sql:main"`, or `pipe.instance_keys()` for a Pipe's
+    /// instance) and return its rows as JSON objects.
+    pub fn read_sql(connector_keys: &str, query: &str) -> Result<Vec<Value>> {
+        host_rows(call(
+            "read_sql",
+            json!({"connector_keys": connector_keys, "query": query}),
+        )?)
+    }
+    /// Execute a statement on a SQL connector (no rows back).
+    pub fn exec_sql(connector_keys: &str, query: &str) -> Result<SuccessTuple> {
+        host_tuple(call(
+            "exec_sql",
+            json!({"connector_keys": connector_keys, "query": query}),
+        )?)
+    }
+    /// This plugin's configuration (`plugins:<name>` in the Meerschaum config, the section
+    /// Python's `get_plugin_config()` reads), or `null` when it has none.
+    pub fn plugin_config() -> Result<Value> {
+        call("plugin_config", json!({}))
+    }
+    /// Replace this plugin's configuration (Python's `write_plugin_config()`).
+    pub fn write_plugin_config(config: &Value) -> Result<SuccessTuple> {
+        host_tuple(call("write_plugin_config", json!({"config": config}))?)
+    }
+    /// The Meerschaum config value at `keys` (`get_config(*keys)`), or `null`.
+    pub fn config(keys: &[&str]) -> Result<Value> {
+        call("config", json!({"keys": keys}))
+    }
+    /// Whether host calls can run here (inside a plugin call that has a host).
+    pub fn available() -> bool {
+        HOST.with(|h| h.get().is_some())
     }
 }
 pub trait Plugin: Default {
@@ -319,7 +787,9 @@ pub mod sdk {
         pub use super::super::mcp::{PromptGet, ResourceContents, ResourceRead, ToolCall};
         pub use super::super::page::PageRequest;
         pub use super::super::subscribe::{Batch, ChannelSubscription, Subscription};
-        pub use super::super::{Bound, Connector, Error, Frame, Pipe, Result, SuccessTuple};
+        pub use super::super::{
+            Bound, Connector, Error, Frame, Pipe, Query, Result, SuccessTuple, host,
+        };
         pub use serde_json::{Value, json};
         pub use std::time::Duration;
     }
@@ -1549,10 +2019,13 @@ unsafe fn decode(free: unsafe extern "C" fn(OwnedBytes), result: CallResult) -> 
     unsafe {
         free(result.payload);
     }
-    if result.status != 0 {
-        return Err(error(String::from_utf8_lossy(&bytes)));
+    match result.status {
+        0 => serde_json::from_slice(&bytes).map_err(error),
+        3 => Err(Error::Unsupported(
+            String::from_utf8_lossy(&bytes).into_owned(),
+        )),
+        _ => Err(error(String::from_utf8_lossy(&bytes))),
     }
-    serde_json::from_slice(&bytes).map_err(error)
 }
 // The crate's own unit tests compile this runtime without the generated crate's ABI aliases.
 #[cfg(not(test))]

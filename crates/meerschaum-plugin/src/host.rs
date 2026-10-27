@@ -1,4 +1,9 @@
-//! Trusted-library loading and safe connector adapters.
+//! Trusted-library loading and safe connector adapters, and, for plugin authors, the host calls
+//! that are not about one Pipe ([`pipe`], [`read_sql`], [`exec_sql`], [`plugin_config`],
+//! [`write_plugin_config`], [`config`]; see [`crate::callbacks`]).
+pub use crate::callbacks::calls::{
+    available, config, exec_sql, pipe, plugin_config, read_sql, write_plugin_config,
+};
 use crate::{
     Frame, Result,
     abi::*,
@@ -161,15 +166,27 @@ impl LoadedPlugin {
     /// A call of a stream method (`next_batch`, `ack_batches`, `close_subscription`,
     /// `executor.next_logs`, `executor.close_logs`): not serialized with the plugin's other
     /// calls, so a blocking `next_batch` holds up neither `fetch` nor another stream. The plugin
-    /// locks each handle itself (the SDK does). No host services are available.
+    /// locks each handle itself (the SDK does). Without host services; see
+    /// [`invoke_stream_with_host`](Self::invoke_stream_with_host).
     pub fn invoke_stream(&self, request: &Request) -> Result<Reply> {
+        self.invoke_stream_with_host(request, None)
+    }
+
+    /// [`invoke_stream`](Self::invoke_stream) with host services: a stream's batches and an
+    /// executor's log follow make host calls with their connector's or executor's services, and
+    /// the server call kinds (a route, MCP entry or page) on behalf of their caller.
+    pub fn invoke_stream_with_host(
+        &self,
+        request: &Request,
+        host: Option<&dyn crate::HostServices>,
+    ) -> Result<Reply> {
         if ACTIVE.with(|active| active.borrow().contains(&self.name)) {
             return Err(error(format!(
                 "recursive call into native plugin '{}'",
                 self.name
             )));
         }
-        self.invoke_entered(request, None, None)
+        self.invoke_entered(request, None, host)
             .and_then(|(value, data)| {
                 Ok(Reply {
                     value,
@@ -182,16 +199,21 @@ impl LoadedPlugin {
     /// `mcp_prompt`): like [`invoke_stream`](Self::invoke_stream), it is not serialized with the
     /// plugin's other calls, so concurrent HTTP requests and MCP calls run in parallel (as
     /// FastAPI serves `@api_plugin` routes). The plugin must be thread-safe for these call kinds;
-    /// the SDK builds a fresh `P::default()` per call. No host services are available.
+    /// the SDK builds a fresh `P::default()` per call. No host services are available here; see
+    /// [`call_json_concurrent_with_host`](Self::call_json_concurrent_with_host).
     pub fn call_json_concurrent(&self, method: &str, context: Value) -> Result<Value> {
-        self.invoke_stream(&Request {
-            method: method.into(),
-            connector_type: String::new(),
-            label: String::new(),
-            config: Value::Null,
-            context,
-        })
-        .map(|reply| reply.value)
+        self.call_json_concurrent_with_host(method, context, None)
+    }
+
+    /// [`call_json_concurrent`](Self::call_json_concurrent) with host services.
+    pub fn call_json_concurrent_with_host(
+        &self,
+        method: &str,
+        context: Value,
+        host: Option<&dyn crate::HostServices>,
+    ) -> Result<Value> {
+        self.invoke_stream_with_host(&json_request(method, context), host)
+            .map(|reply| reply.value)
     }
 
     fn invoke_entered(
@@ -214,7 +236,11 @@ impl LoadedPlugin {
         // SAFETY: table is validated and pinned; borrowed bytes and exclusive streams live
         // through the call. Remaining streams are released on success and all error paths.
         let result = if let (Some(invoke), Some(services)) = (self.invoke_host, host) {
-            let mut context = crate::callbacks::HostContext { services, request };
+            let mut context = crate::callbacks::HostContext {
+                services,
+                request,
+                plugin: &self.name,
+            };
             let table = HostV1 {
                 abi_version: 1,
                 struct_size: std::mem::size_of::<HostV1>() as u32,
@@ -240,7 +266,11 @@ impl LoadedPlugin {
     ) -> Result<(Value, Option<PipeInput>)> {
         let bytes = serde_json::to_vec(&json!({"request": request, "data": data.map(frame_rows)}))
             .map_err(error)?;
-        let mut context = host.map(|services| crate::callbacks::HostContext { services, request });
+        let mut context = host.map(|services| crate::callbacks::HostContext {
+            services,
+            request,
+            plugin: &self.name,
+        });
         let table = context.as_mut().map(|context| crate::rows_abi::RowsHostV1 {
             abi_version: 1,
             struct_size: std::mem::size_of::<crate::rows_abi::RowsHostV1>() as u32,
@@ -320,28 +350,32 @@ impl LoadedPlugin {
     /// A JSON-only call of an extension method (`routes`, `route`, `pages`, `page`, ...):
     /// `context` goes in, the reply's JSON value comes out.
     pub fn call_json(&self, method: &str, context: Value) -> Result<Value> {
-        self.invoke(
-            &Request {
-                method: method.into(),
-                connector_type: String::new(),
-                label: String::new(),
-                config: Value::Null,
-                context,
-            },
-            None,
-        )
-        .map(|reply| reply.value)
+        self.call_json_with_host(method, context, None)
+    }
+    /// [`call_json`](Self::call_json) with host services (a console page's host calls).
+    pub fn call_json_with_host(
+        &self,
+        method: &str,
+        context: Value,
+        host: Option<&dyn crate::HostServices>,
+    ) -> Result<Value> {
+        self.invoke_with_host(&json_request(method, context), None, host)
+            .map(|reply| reply.value)
     }
     pub fn action(&self, name: &str, kwargs: Value) -> Result<SuccessTuple> {
-        let reply = self.invoke(
-            &Request {
-                method: "action".into(),
-                connector_type: String::new(),
-                label: String::new(),
-                config: Value::Null,
-                context: json!({"name":name,"kwargs":kwargs}),
-            },
+        self.action_with_host(name, kwargs, None)
+    }
+    /// [`action`](Self::action) with host services for the action's host calls.
+    pub fn action_with_host(
+        &self,
+        name: &str,
+        kwargs: Value,
+        host: Option<&dyn crate::HostServices>,
+    ) -> Result<SuccessTuple> {
+        let reply = self.invoke_with_host(
+            &json_request("action", json!({"name":name,"kwargs":kwargs})),
             None,
+            host,
         )?;
         serde_json::from_value(reply.value).map_err(error)
     }
@@ -381,31 +415,17 @@ impl LoadedPlugin {
         serde_json::from_value(reply.value).map_err(error)
     }
 }
-fn frame_rows(frame: &Frame) -> Vec<Value> {
-    (0..frame.height())
-        .map(|i| {
-            Value::Object(
-                frame
-                    .columns()
-                    .iter()
-                    .zip(frame.row(i))
-                    .map(|(column, value)| {
-                        (
-                            column.name.clone(),
-                            match &value {
-                                meerschaum_kernel::Value::Bool(v) => json!(v),
-                                meerschaum_kernel::Value::Int(v) => json!(v),
-                                meerschaum_kernel::Value::Float(v) => json!(v),
-                                meerschaum_kernel::Value::Json(v) => v.clone(),
-                                _ => meerschaum_kernel::serialize::json_serialize_value(&value),
-                            },
-                        )
-                    })
-                    .collect(),
-            )
-        })
-        .collect()
+/// A request with no connector: actions, hooks and the extension call kinds.
+fn json_request(method: &str, context: Value) -> Request {
+    Request {
+        method: method.into(),
+        connector_type: String::new(),
+        label: String::new(),
+        config: Value::Null,
+        context,
+    }
 }
+use crate::rows::frame_rows;
 /// The rows of a rows-ABI payload as documents (`null` is no data, `[]` no rows).
 fn rows_docs(value: Value) -> Result<Option<sdk::Docs>> {
     if value.is_null() {
@@ -435,12 +455,16 @@ unsafe extern "C" fn invoke_rows_host(context: *mut std::ffi::c_void, bytes: Byt
         let context = unsafe { &*context.cast::<crate::callbacks::HostContext<'_>>() };
         let mut call: Value = serde_json::from_slice(unsafe { bytes.as_slice() }).map_err(error)?;
         let docs = rows_docs(call["data"].take())?;
-        let method = call["method"]
-            .as_str()
-            .ok_or_else(|| error("missing host method"))?;
-        context
-            .services
-            .call_input(context.request, method, docs.map(PipeInput::Docs))
+        let call = crate::callbacks::HostCall::from_envelope(context.plugin, call)?;
+        let reply =
+            context
+                .services
+                .host_call(context.request, &call, docs.map(PipeInput::Docs))?;
+        // The rows ABI carries JSON only: a frame comes back as its rows.
+        Ok(match reply.data {
+            Some(frame) => Value::Array(frame_rows(&frame)),
+            None => reply.value,
+        })
     })
 }
 pub fn validate_header(version: u32, size: u32) -> Result<()> {
@@ -558,6 +582,7 @@ impl NativeConnector {
                 context: Value::Null,
             },
             handle,
+            self.host.clone(),
         ))
     }
 

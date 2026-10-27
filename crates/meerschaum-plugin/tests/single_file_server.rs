@@ -35,7 +35,7 @@ fn item(request: &RouteRequest) -> Value {
     })
 }
 
-#[api_route("post", "/sf/echo/{*rest}", public = true, name = "echo")]
+#[api_route("post", "/sf/echo/{*rest}", public = true, name = "echo", host_scopes = ["pipes:read"])]
 fn echo_body(request: &RouteRequest) -> RouteResponse {
     RouteResponse::bytes("application/octet-stream", request.body.clone())
         .with_status(201)
@@ -229,7 +229,8 @@ fn routes_and_mcp_entries_reach_the_manifest_and_their_functions() {
         json!([
             {"name": "item", "method": "GET", "path": "/sf/items/{id}", "scopes": ["pipes:read"],
              "public": false, "description": "One item, with what the request carried."},
-            {"name": "echo", "method": "POST", "path": "/sf/echo/{*rest}", "scopes": [], "public": true},
+            {"name": "echo", "method": "POST", "path": "/sf/echo/{*rest}", "scopes": [], "public": true,
+             "host_scopes": ["pipes:read"]},
             {"name": "any", "method": "*", "path": "/sf/any", "scopes": [], "public": false},
             {"name": "fail", "method": "GET", "path": "/sf/fail", "scopes": [], "public": true},
         ])
@@ -686,6 +687,14 @@ fn server_and_executor_attribute_errors_are_reported_at_their_lines() {
         (
             "#[web_page(\"a\", colour = true)]\nfn p() -> String { String::new() }",
             "unknown #[web_page] option 'colour'",
+        ),
+        (
+            "#[web_page(\"a\", host_scopes = [\"*\"])]\nfn p() -> String { String::new() }",
+            "\"*\" is not accepted",
+        ),
+        (
+            "#[api_route(\"/a\", public = true, host_scopes = [\"*\"])]\nfn r() {}",
+            "\"*\" is not accepted",
         ),
         (
             "#[web_page(login_required = false, \"a\")]\nfn p() -> String { String::new() }",

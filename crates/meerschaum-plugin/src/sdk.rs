@@ -44,10 +44,17 @@ impl Reply {
 /// A new Default value is constructed for each call; shared state may live in a static
 /// mutex or in a database keyed by connector label/config. No runtime is imposed.
 pub trait Plugin: Default + Send + 'static {
-    const NAME: &'static str;
-    const VERSION: &'static str;
-    /// Full worker manifest, including `plugins` and `connector_types`.
-    fn manifest(&self) -> Value;
+    /// The plugin's name. Leave it out to use the Cargo package name (`export_plugin!` reads
+    /// `CARGO_PKG_NAME`), which is also the `plugin.toml` name.
+    const NAME: &'static str = "";
+    /// The plugin's version. Leave it out to use the Cargo package version.
+    const VERSION: &'static str = "";
+    /// What the plugin provides: build it with [`crate::Manifest`] (the SDK fills in the
+    /// envelope, the name and the version), or return the whole manifest document. The default
+    /// declares nothing beyond the name and version.
+    fn manifest(&self) -> Value {
+        crate::Manifest::new().into()
+    }
     /// The executor for `request.connector_type` / `label` / `config` (a manifest
     /// `executor_types` entry), or `None` for a type this plugin does not provide. The SDK
     /// routes every `executor.*` method here (see [`crate::executor`]); they never reach `call`.
@@ -187,9 +194,40 @@ impl<P: Plugin> Export<P> {
         free_bytes,
     };
     unsafe extern "C" fn describe() -> CallResult {
+        Self::describe_package("", "")
+    }
+
+    /// The vtable `export_plugin!` exports, with its `describe` (which passes the package).
+    pub const fn vtable(describe: unsafe extern "C" fn() -> CallResult) -> MrsmPluginV1 {
+        MrsmPluginV1 {
+            abi_version: ABI_VERSION,
+            struct_size: std::mem::size_of::<MrsmPluginV1>() as u32,
+            describe,
+            invoke: Self::invoke,
+            free_bytes,
+        }
+    }
+
+    /// `describe` for the Cargo package `package` at `version`: the plugin's name and version
+    /// are `Plugin::NAME` / `Plugin::VERSION` when set, else the package's, and the manifest is
+    /// completed ([`crate::manifest::complete`]).
+    pub fn describe_package(package: &str, version: &str) -> CallResult {
         boundary(|| {
-            Ok(json!({"name": P::NAME, "version": P::VERSION,
-            "abi_version": ABI_VERSION, "manifest": P::default().manifest()}))
+            let name = if P::NAME.is_empty() { package } else { P::NAME };
+            let version = if P::VERSION.is_empty() {
+                version
+            } else {
+                P::VERSION
+            };
+            if name.is_empty() {
+                return Err(error(
+                    "the plugin has no name: set `Plugin::NAME` or export it with `export_plugin!`",
+                ));
+            }
+            Ok(
+                json!({"name": name, "version": version, "abi_version": ABI_VERSION,
+                "manifest": crate::manifest::complete(P::default().manifest(), name, version)}),
+            )
         })
     }
     /// Optional host-call entry point used by `export_plugin!`.
@@ -342,7 +380,7 @@ mod tests {
 
 /// Types made available to single-file fetch plugins. Explicit user imports may override them.
 pub mod fetch_prelude {
-    pub use crate::{Bound, Error, Frame, Pipe, Result, SuccessTuple};
+    pub use crate::{Bound, Error, Frame, FrameExt, Pipe, Query, Result, SuccessTuple, host};
     pub use serde_json::{Value, json};
 }
 

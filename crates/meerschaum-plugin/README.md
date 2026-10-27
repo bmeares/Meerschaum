@@ -12,7 +12,16 @@ with an action, arguments and sync hooks. No Python process is needed.
 ## Authoring and installation
 
 Implement the safe `Plugin` trait and call `meerschaum_plugin::export_plugin!(MyPlugin)` once
-in a `cdylib` crate. `fetch` returns `Option<Frame>`; `sync` accepts optional data and returns
+in a `cdylib` crate (`use meerschaum_plugin::prelude::*` brings in the common names). The
+plugin's name and version default to the Cargo package's (`export_plugin!` reads
+`CARGO_PKG_NAME` / `CARGO_PKG_VERSION` in the plugin's crate; `Plugin::NAME` / `VERSION`
+override them), and `Plugin::manifest` declares what it provides with `Manifest`
+(`manifest.rs`): the SDK completes the document (`manifest::complete`: envelope, this SDK's
+`meerschaum_version`, the entry's name and version, connector and executor types' `plugin`,
+top-level hook lists) and still accepts a whole hand-written document. `Frame::from_rows(rows,
+dtypes)` / `frame.to_rows()` (`FrameExt`, `rows.rs`) convert JSON rows with Meerschaum dtypes,
+so plugins need no `meerschaum-kernel` dependency; `Bound` converts to and from `chrono`
+(re-exported) and integers. `fetch` returns `Option<Frame>`; `sync` accepts optional data and returns
 JSON (normally a serialized `SuccessTuple`). Override `call` for instance methods, actions,
 register, setup and hooks. `Request` contains the method, connector type, label, config and
 context; every hook kwarg is forwarded unchanged inside `context.kwargs`. Constructors and
@@ -27,10 +36,24 @@ The SDK imposes no async runtime. Native calls are synchronous; async applicatio
 schedule potentially blocking calls on their blocking executor.
 
 `Request` is the low-level dispatch envelope. Its `pipe()` method provides a typed Pipe
-view; the optional host-call ABI extension supports `get_sync_time()` and `sync(data)`
-for the current Pipe during source fetch and sync calls. Host writes use the normal
-sync engine with supplied input, avoiding recursive plugin dispatch. Arbitrary connector
-access, other Pipe construction and Python helper imports are not exposed.
+view. Through the optional host-call ABI extension (`callbacks.rs`), a plugin calls back into
+the process during a call: `Pipe::{get_data, get_data_with, get_rowcount, get_sync_time,
+get_sync_time_with, sync, replace, clear, get_columns_types, exists, register}` on the request's Pipe
+or any Pipe from `host::pipe(keys...)`, and `host::{read_sql, exec_sql, plugin_config,
+write_plugin_config, config}`. The method bytes are a bare name for the original
+`get_sync_time` / `sync` calls and a JSON envelope `{"method", "pipe", "args"}` for the rest
+(no ABI version bump); the call's Arrow stream carries the plugin's frame in and the host's
+frame (`get_data`, `read_sql`) back. A host answers an unknown method "unsupported", which the
+SDK reports as a call that needs a newer Meerschaum. Hosts implement `HostServices::host_call`
+(`HostCall` -> `HostReply`); the default serves only the original calls through `call`. The
+loader fills in `HostCall::plugin` from the loaded library, never from the plugin's bytes. Host
+writes use the normal sync engine with supplied input, avoiding recursive plugin dispatch.
+The CLI host (`meerschaum-cli/src/native_plugins.rs`, `PluginHost`) serves fetch, sync, hooks,
+`subscribe` and a stream's batches (engine runs), `register`, executor methods
+(`NativeExecutor::with_host_services`), actions and `setup` over the command's own config, and
+routes, MCP entries and console pages, where calls run with the caller's scopes and permissions
+(plus a route's or page's `host_scopes`) and never reach Meerschaum's internal tables. Python
+helper imports (`from_plugin_import`) are not exposed.
 
 Build the example with `cargo build -p meerschaum-plugin --example native_demo`. Install the
 result in a configured plugin directory:
@@ -92,8 +115,8 @@ other plugins still load.
 ## ABI v1 and ownership
 
 Native plugins and Python workers share manifest schema 5, separately from ABI v1 and
-worker protocol v1. Return `MANIFEST_SCHEMA_VERSION` from the SDK in your manifest rather
-than a version literal. A prerelease native library exporting schema 3 must be rebuilt
+worker protocol v1. Build the manifest with `Manifest` (the SDK writes the schema version),
+or return `MANIFEST_SCHEMA_VERSION` in a hand-written document rather than a version literal. A prerelease native library exporting schema 3 must be rebuilt
 against the current SDK (and its SDK dependency updated); refreshing the manifest cache
 cannot rewrite the library's exported `describe` metadata. Aggregate caches from an older
 schema are regenerated automatically. Unsupported manifest versions are rejected.
@@ -273,10 +296,14 @@ Sync returns `SuccessTuple` or `(bool, String)` / `(bool, &str)`, optionally wra
 `SuccessTuple`, JSON `Value`, `json!`, `Frame`, `Result` and `Error` are implicitly imported.
 
 `pipe.get_sync_time()` reads the newest axis value; `pipe.sync(rows)` writes supplied rows
-through the host's sync engine and returns `Result<SuccessTuple>`. A zero-argument Pipe sync
-is not provided, to avoid recursively invoking the same plugin. Callback state is scoped
-to the current call; Pipe views cannot move to other threads. Recursive plugin calls fail
-instead of blocking on the library's serialized call lock.
+through the host's sync engine and returns `Result<SuccessTuple>`; every other host call of the
+Cargo SDK exists too (`host::pipe`, `get_data` returning JSON rows, `read_sql`, `plugin_config`,
+...; `host` and `Query` are implicitly imported), over the rows ABI's JSON envelope
+`{"method", "data", "pipe", "args"}`. A zero-argument Pipe sync is not provided, to avoid
+recursively invoking the same plugin. Callback state is scoped to the current call; Pipe views
+cannot move to other threads. Recursive plugin calls fail instead of blocking on the library's
+serialized call lock. `Bound` has chrono-free helpers (`as_int`, `timestamp`,
+`timestamp_millis`, `Bound::from_timestamp`).
 
 Meerschaum generates the crate, manifest and ABI adapter under the root's build cache.
 Cargo is required to compile it; unchanged builds are reused.
@@ -359,7 +386,7 @@ processed by Meerschaum, not exported procedural macros for packaged plugins.
 
 By default, the generated single-file crate embeds a small runtime with only Serde and
 `serde_json` as direct dependencies; inline Cargo blocks may add dependencies. It uses the optional `mrsm_plugin_invoke_rows_v1` C ABI extension: request,
-result and row JSON bytes, plus call-scoped host callbacks for Pipe operations. Host
+result and row JSON bytes, plus call-scoped host callbacks for host calls. Host
 conversion owns the full data kernel. No Polars, Arrow, connector, loader or async runtime
 dependency is compiled into these plugins. The original v1 Arrow ABI is unchanged.
 

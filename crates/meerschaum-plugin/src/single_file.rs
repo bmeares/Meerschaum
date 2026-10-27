@@ -1140,12 +1140,13 @@ fn page_entry(file: &Path, attr: &Attribute, rust_name: &str) -> Result<Value> {
                 entry[&key] = json!(bool_option(file, item, &key)?)
             }
             "page_group" => entry[&key] = json!(text_option(file, item, &key)?),
+            "host_scopes" => entry[&key] = json!(host_scopes_option(file, item)?),
             _ => {
                 return Err(unknown_option(
                     file,
                     item,
                     "web_page",
-                    "a path, login_required, skip_navbar, page_group or dark_theme",
+                    "a path, login_required, skip_navbar, page_group, dark_theme or host_scopes",
                 ));
             }
         }
@@ -1558,6 +1559,20 @@ fn strings_option(file: &Path, item: &ArgumentItem, key: &str) -> Result<Vec<Str
         .collect()
 }
 
+/// `host_scopes = ["pipes:read", ...]`: named scopes only (`*` would give anonymous callers the
+/// whole host).
+fn host_scopes_option(file: &Path, item: &ArgumentItem) -> Result<Vec<String>> {
+    let scopes = strings_option(file, item, "host_scopes")?;
+    if scopes.iter().any(|s| s == "*") {
+        return Err(diagnostic(
+            file,
+            item.value.span(),
+            "host_scopes names scopes such as \"pipes:read\"; \"*\" is not accepted",
+        ));
+    }
+    Ok(scopes)
+}
+
 /// A JSON option written as a string literal (`r#"{...}"#`).
 fn json_option(file: &Path, item: &ArgumentItem, key: &str) -> Result<Value> {
     let text = text_option(file, item, key)?;
@@ -1646,13 +1661,14 @@ fn route_entry(file: &Path, attr: &Attribute, rust_name: &str, doc: &str) -> Res
             "name" => entry["name"] = json!(text_option(file, item, &key)?),
             "scopes" => entry["scopes"] = json!(strings_option(file, item, &key)?),
             "public" => entry["public"] = json!(bool_option(file, item, &key)?),
+            "host_scopes" => entry["host_scopes"] = json!(host_scopes_option(file, item)?),
             "description" => entry["description"] = json!(text_option(file, item, &key)?),
             _ => {
                 return Err(unknown_option(
                     file,
                     item,
                     "api_route",
-                    "name, scopes, public or description",
+                    "name, scopes, public, host_scopes or description",
                 ));
             }
         }
@@ -2782,6 +2798,43 @@ fn hello() {
 mod runtime_tests {
     use super::runtime::{self, executor::ExecutorReply};
     use serde_json::{Value, json};
+
+    #[test]
+    fn bounds_convert_iso_timestamps_without_chrono() {
+        use runtime::Bound;
+        let at = |text: &str| Bound::from(text).timestamp();
+        assert_eq!(at("1970-01-01T00:00:00Z").unwrap(), 0);
+        assert_eq!(at("2024-03-01T12:30:00+02:00").unwrap(), 1_709_289_000);
+        assert_eq!(at("2024-03-01 10:30:00").unwrap(), 1_709_289_000);
+        assert_eq!(
+            at("2024-03-01T10:30:00.250000+00:00").unwrap(),
+            1_709_289_000
+        );
+        assert_eq!(
+            Bound::from("2024-03-01T10:30:00.250Z")
+                .timestamp_millis()
+                .unwrap(),
+            1_709_289_000_250
+        );
+        assert_eq!(at("2024-03-01").unwrap(), 1_709_251_200);
+        assert_eq!(at("1969-12-31T23:59:59-0000").unwrap(), -1);
+        for bad in ["soon", "2024-13-01", "2024-01-01T10:30:00+5", ""] {
+            assert!(at(bad).is_err(), "{bad}");
+        }
+        assert!(Bound::Int(3).timestamp().is_err());
+        assert_eq!(Bound::Int(3).as_int(), Some(3));
+        assert_eq!(
+            Bound::from_timestamp(1_709_289_000),
+            Bound::Datetime("2024-03-01T10:30:00+00:00".into())
+        );
+        assert_eq!(
+            Bound::from_timestamp(-1).to_string(),
+            "1969-12-31T23:59:59+00:00"
+        );
+        for seconds in [0, 951_782_400, 1_709_289_000, 4_102_444_800, -86_400 * 366] {
+            assert_eq!(Bound::from_timestamp(seconds).timestamp().unwrap(), seconds);
+        }
+    }
 
     #[test]
     fn base64_round_trips_every_length() {

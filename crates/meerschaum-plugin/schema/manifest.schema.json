@@ -83,6 +83,8 @@
         "doc": {"$ref": "#/$defs/nullable_string"},
         "daemon": {"type": "boolean"},
         "has_completer": {"type": "boolean"},
+        "words": {"$ref": "#/$defs/names", "description": "The words that run the action (`@make_action(name='weather wait')`, else the name split on `_`)."},
+        "handles_loop": {"type": "boolean", "description": "The action function takes a `loop` parameter: it repeats itself with `--loop`, so the host does not run it in laps (written by the host's worker extension)."},
         "subactions": {
           "type": "array",
           "items": {
@@ -122,7 +124,8 @@
         "dark_theme": {"type": "boolean"},
         "function": {"$ref": "#/$defs/nullable_string"},
         "mode": {"enum": ["html", "dash"]},
-        "route": {"$ref": "#/$defs/nullable_string"}
+        "route": {"$ref": "#/$defs/nullable_string"},
+        "host_scopes": {"$ref": "#/$defs/names", "description": "Scopes the page's host calls have for every viewer, on top of the viewer's own (not `*`)."}
       }
     },
     "mcp_tool": {
@@ -147,6 +150,7 @@
         "path": {"type": "string", "description": "Starlette syntax: one `{name}` (or `{name:int|float|uuid|str}`) parameter per segment with an optional static prefix and suffix, and a final `{*rest}` or `{rest:path}` catch-all."},
         "scopes": {"$ref": "#/$defs/names"},
         "public": {"type": "boolean", "description": "Served without credentials; a public route may not declare `scopes`."},
+        "host_scopes": {"$ref": "#/$defs/names", "description": "Scopes the route's host calls have for every caller, on top of the caller's own (not `*`)."},
         "description": {"$ref": "#/$defs/nullable_string"}
       }
     },

@@ -422,17 +422,46 @@ impl<T: IntoPromptReply> IntoPromptReply for Result<T> {
 impl crate::LoadedPlugin {
     /// Call the tool `call.name` (the arguments must already be validated).
     pub fn mcp_tool(&self, call: &ToolCall) -> Result<Value> {
-        self.call_json_concurrent("mcp_tool", serde_json::to_value(call).map_err(error)?)
+        self.mcp_tool_with_host(call, None)
     }
     /// Read the resource `read.name`.
     pub fn mcp_resource(&self, read: &ResourceRead) -> Result<ResourceContents> {
-        let context = serde_json::to_value(read).map_err(error)?;
-        ResourceContents::from_reply(&self.call_json_concurrent("mcp_resource", context)?)
+        self.mcp_resource_with_host(read, None)
     }
     /// Render the prompt `get.name` as `(description, messages)`.
     pub fn mcp_prompt(&self, get: &PromptGet) -> Result<(Option<String>, Vec<Value>)> {
+        self.mcp_prompt_with_host(get, None)
+    }
+    /// [`mcp_tool`](Self::mcp_tool) with host services for the tool's host calls.
+    pub fn mcp_tool_with_host(
+        &self,
+        call: &ToolCall,
+        host: Option<&dyn crate::HostServices>,
+    ) -> Result<Value> {
+        let context = serde_json::to_value(call).map_err(error)?;
+        self.call_json_concurrent_with_host("mcp_tool", context, host)
+    }
+    /// [`mcp_resource`](Self::mcp_resource) with host services.
+    pub fn mcp_resource_with_host(
+        &self,
+        read: &ResourceRead,
+        host: Option<&dyn crate::HostServices>,
+    ) -> Result<ResourceContents> {
+        let context = serde_json::to_value(read).map_err(error)?;
+        ResourceContents::from_reply(&self.call_json_concurrent_with_host(
+            "mcp_resource",
+            context,
+            host,
+        )?)
+    }
+    /// [`mcp_prompt`](Self::mcp_prompt) with host services.
+    pub fn mcp_prompt_with_host(
+        &self,
+        get: &PromptGet,
+        host: Option<&dyn crate::HostServices>,
+    ) -> Result<(Option<String>, Vec<Value>)> {
         let context = serde_json::to_value(get).map_err(error)?;
-        prompt_reply(&self.call_json_concurrent("mcp_prompt", context)?)
+        prompt_reply(&self.call_json_concurrent_with_host("mcp_prompt", context, host)?)
     }
 }
 
