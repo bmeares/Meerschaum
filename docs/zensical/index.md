@@ -25,7 +25,7 @@ Turn a query or a Python function into a **Pipe**. Sync new data, connect your t
 
 <asciinema-player src="/assets/casts/v5-first-pipe.cast" size="small" preload="true" rows="15" title="Sync a Pipe, inspect the data, then sync again"></asciinema-player>
 
-<p class="mrsm-caption">A real run of the <a href="get-started/bootstrap/">first-Pipe example</a>, recorded with 5.0.0rc15. Play it, then try it yourself.</p>
+<p class="mrsm-caption">A real run of the <a href="get-started/bootstrap/">first-Pipe example</a>, recorded with the 5.0.0rc16 candidate. Play it, then try it yourself.</p>
 
 </div>
 

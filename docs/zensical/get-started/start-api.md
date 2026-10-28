@@ -20,7 +20,10 @@ Open [localhost:8001/dash](http://localhost:8001/dash). On an empty instance, **
 | **Overview** | See Pipes, Pipelines, jobs, and recent runs together. |
 | **Pipes** | Open `temperatures`, preview its rows, and inspect its settings. |
 | **Pipelines** | Open `climate` to explore its graph, preview a plan, and follow runs. |
+| **Performance** | Compare sync duration, failures, and rows affected per second. |
 | **Jobs** | Give a command or Pipeline a schedule and read its logs. |
+| **Connectors** | Inspect masked connection settings and the keys each connector accepts. |
+| **Plugins** | Browse installed and published plugins, and open their source when permitted. |
 | **Users & Teams** | Add people and choose what they may read or change. |
 
 ![The v5 Overview showing the tutorial's Pipes and climate Pipeline](../assets/screenshots/v5-overview.png){ .mrsm-screenshot }
@@ -32,6 +35,8 @@ Open **Pipelines → climate**. The workspace puts the graph beside the selected
 ![The climate Pipeline in the v5 console](../assets/screenshots/v5-pipeline.png){ .mrsm-screenshot }
 
 On a phone, switch between **Graph**, **Pipe details**, and **Output** to focus on one thing at a time.
+
+The **Performance** page follows the same work over time. Filter by `climate` to see its runs and sync measurements. See [Sync metrics](../reference/api-instance/sync-metrics.md) for the chart labels and history limits.
 
 ??? tip "Share with a team"
     An administrator can create users and teams. Give readers access to the data they need, and give editors only the actions they need. The console shows controls that match their permissions.

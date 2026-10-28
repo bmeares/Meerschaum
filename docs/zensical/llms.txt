@@ -42,6 +42,7 @@
 - [Pipelines, Access and Actions over HTTP](https://meerschaum.io/reference/api-instance/routes/): Besides the existing pipe, user, token, plugin and job routes, an API server has routes for saved Pipelines, their runs, teams and pipe access and the console's background actions. Existing route bodi
 - [NGINX](https://meerschaum.io/reference/api-instance/nginx/): Hosting Meerschaum behind NGINX is a great way set up TLS/SSL with Let's Encrypt (certbot), especially when several sites share port 443. (The API server can also serve HTTPS by itself: see TLS / SSL 
 - [Web Console](https://meerschaum.io/reference/api-instance/web-console/): The Meerschaum Web Console provides a graphical interface for managing your Meerschaum instance, served by the API instance. To access it, start the API (mrsm start api) and navigate to your host URL 
+- [Sync Metrics](https://meerschaum.io/reference/api-instance/sync-metrics/): Find slow or failing syncs, and see how much data each Pipe or Pipeline changes.
 - [🤖 MCP Server](https://meerschaum.io/reference/mcp/): Meerschaum ships a Model Context Protocol server, so an AI agent can discover your pipes, read their data, and run actions without you writing any glue code.
 - [Tool Reference](https://meerschaum.io/reference/mcp/tools/): Every tool, resource, and prompt the MCP server exposes, generated
 - [Security](https://meerschaum.io/reference/mcp/security/): The MCP server hands an AI agent the same capabilities a person has at the CLI or web console. Treat a token for it exactly as you would a Meerschaum login.

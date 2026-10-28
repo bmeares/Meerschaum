@@ -3,7 +3,7 @@
 Your first Pipe needs Python and a few local rows. No database server or Docker setup is required.
 
 !!! info "Meerschaum 5 preview"
-    These pages are being prepared for the final 5.0.0 release. The examples and recordings were checked with 5.0.0rc15. Use `--pre` to install the latest published preview; the final release will use `pip install meerschaum`.
+    These pages are being prepared for the final 5.0.0 release. The examples and recordings were checked with the 5.0.0rc16 candidate. Use `--pre` to install the latest published preview; the final release will use `pip install meerschaum`.
 
 ## Install
 

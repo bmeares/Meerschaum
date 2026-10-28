@@ -54,6 +54,7 @@ nav = [
       {"Pipelines, Access and Actions over HTTP" = "reference/api-instance/routes.md"},
       {"NGINX" = "reference/api-instance/nginx.md"},
       {"Web Console" = "reference/api-instance/web-console.md"},
+      {"Sync Metrics" = "reference/api-instance/sync-metrics.md"},
     ]},
     {"🤖 MCP Server" = [
       "reference/mcp/index.md",

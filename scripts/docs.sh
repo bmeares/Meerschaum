@@ -37,6 +37,13 @@ if [ "$site_only" -eq 0 ]; then
   mkdir -p "$docs_scratch/root" "$docs_scratch/plugins"
   while IFS= read -r docs_mrsm_key; do unset "$docs_mrsm_key"; done < <(compgen -v MRSM_ || true)
   export MRSM_ROOT_DIR="$docs_scratch/root" MRSM_PLUGINS_DIR="$docs_scratch/plugins"
+  export MRSM_CONFIG="$("$PYTHON_BIN" - "$docs_scratch/root/docs.db" <<'PY'
+import json, sys
+print(json.dumps({'meerschaum': {'instance': 'sql:local', 'connectors': {'sql': {
+    'main': {'flavor': 'sqlite', 'database': sys.argv[1]},
+}}}}))
+PY
+)"
   export MRSM_NO_AUTO_INSTALL=1 MRSM_NO_UPDATE_CHECK=1
   unset TMUX TMUX_PANE
   "$PYTHON_BIN" scripts/generate_mcp_docs.py

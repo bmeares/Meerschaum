@@ -6,7 +6,7 @@ The Meerschaum Web Console provides a graphical interface for managing your Meer
 
     The Web Console is the Plotly Dash app of the Python package: install it with `pip install meerschaum[dash]` (also part of `meerschaum[full]` and the `full` Docker image). The Python API host serves it and the Rust API server proxies `/dash` to it. A standalone install (`cargo install meerschaum`, the `rust` Docker image) serves the API, `/docs`, `/engine/*`, MCP and the web terminal, and shows a pointer page at `/dash` that names this command. `--no-dash` turns the console off.
 
-<img src="/assets/screenshots/web-console.png" alt="The Web Console's Overview">
+![The v5 console Overview](../../assets/screenshots/v5-overview.png){ .mrsm-screenshot }
 
 ---
 
@@ -15,7 +15,7 @@ The Meerschaum Web Console provides a graphical interface for managing your Meer
 Every page of the console has the same bar at the top:
 
 - the **Meerschaum logo**, which opens the [Overview](#overview);
-- **Pipes**, **Pipelines**, **Jobs**, **Connectors**, **Plugins** and **Terminal**, each shown to the users whose permissions include it (see [Who sees what](#who-sees-what)): **Terminal** needs `webterm:use` (the Operator role and administrators). Under `--secure`, **Connectors** and **Terminal** are for administrators only;
+- **Pipes**, **Pipelines**, **Performance**, **Jobs**, **Connectors**, **Plugins** and **Terminal**, each shown to the users whose permissions include it (see [Who sees what](#who-sees-what)): **Terminal** needs `webterm:use` (the Operator role and administrators). Under `--secure`, **Connectors** and **Terminal** are for administrators only;
 - **Pages**, the pages your plugins add (grouped by their `page_group`), when there are any;
 - the **instance** selector: the instance every page shows (the Pipes, Pipelines and Overview pages, the Terminal's filters). Your choice is remembered in the browser, and a link with `?instance=sql:other` opens a page on another instance;
 - the **user menu** (your username): **Users & Teams**, **Tokens**, **Settings** (change your password) and **Sign out**.
@@ -38,8 +38,15 @@ The console answers only signed-in visitors: a page shows the login form until y
 - **Pipelines**: each saved Pipeline with its last run (failed ones first), opening it on that run;
 - **Jobs**: the jobs running, stalled (no successful sync for three times their interval), failing and stopped, each opening the Jobs page filtered to that state;
 - **Recent runs**: the latest runs of the Syncing Engine, failures first. A job that syncs the same pipes again and again takes one row (`×12`).
+- **Performance**: sync counts, failures, average duration, and rows affected/s over the last 24 hours.
 
 The tiles refresh every 30 seconds. On an instance without pipes, the Pipes tile shows **New pipe** and **Open terminal** instead of its numbers; the other tiles stay.
+
+## Performance
+
+Open **Performance** (`/dash/performance`) to compare duration, write rate, and failures. Choose a time window and filter by Pipe or Pipeline. Charts show the trend; tables show each Pipe or Pipeline and recent syncs.
+
+**Rows affected/s** counts inserted, updated, upserted, and deleted rows. Replacements count both deletion and new rows; an unchanged sync affects zero rows. See [Sync metrics](sync-metrics.md) for Python access, retention, and capture limits.
 
 ## Terminal
 
@@ -76,7 +83,9 @@ api:
 
 ## Connectors
 
-The **Connectors** page (`/dash/connectors`) lists the connectors the server knows, read-only: each connector's keys and type, where it is defined (**Config**, **Default** for a built-in connector left as shipped, **Environment** with the variable's name such as `MRSM_SQL_FOO` or `MRSM_CONFIG`, or **Plugin**), and for administrators its flavor, host, port and database; click a connector's keys to see its other attributes. Users who are not administrators see the keys, type and source only (`connectors:read`). Type in the filter box to narrow the list.
+The **Connectors** page (`/dash/connectors`) lists each connector's keys, type, and source: **Config**, **Default**, **Environment**, or **Plugin**. Type in the filter box to narrow the list. Team restrictions determine which connectors appear.
+
+Administrators also see flavor, host, port, database, and schema. Choose **Inspect** to open masked settings and required / supported keys. Passwords, tokens, nested secrets, and private URI values stay masked. Other readers see keys, type, and source only (`connectors:read`).
 
 Passwords, tokens, keys and secrets never reach the browser. The page shows the values of a connector's connection settings only (such as `flavor`, `host`, `port`, `database`, `username`, `schema`, `driver`, `sslmode` and the timeouts); every other attribute shows `••••••`, whatever its name. A URI keeps its scheme, user, host, port and database (`postgresql://user:••••••@host:5432/db`), and a connection string its settings of those names (`host=h user=u password=•••••• dbname=d`). A connection test's error is masked the same way.
 
@@ -171,6 +180,8 @@ The **Plugins** page has two tabs:
 - **Installed** (`/dash/plugins`): the plugins installed on the server, with their version, their kind (**Python**, or **Rust** as a single `.rs` file or a directory with a `plugin.toml`), what each provides (connectors, a data source, actions, pages, API routes, MCP tools, sync hooks) and whether the packages it requires are installed. A plugin that failed to import says so. Administrators can **Update** a plugin installed from a repository (the latest version from that repository) and **Uninstall** it.
 - **Repository** (`/dash/plugins?tab=repository`): the plugins published to this API as a [repository](/reference/connectors/#instances-and-repositories) (`mrsm register plugin <name> -r api:<label>`), to read and download. A plugin's owner edits its description here. Administrators can **Install** a published plugin on the server (**Reinstall** when it is installed already).
 
+Open a published plugin's page to inspect its **Source**, then choose a file. Administrators can also open an installed plugin's name to read its local source. Source previews are read-only; large, binary, or linked files may not have a preview.
+
 Install, Update and Uninstall run the usual actions (`install plugins`, `uninstall plugins`) as one of the console's runs, listed under Jobs > **Runs**; the page says when the action finished, with **View output**. When the change adds or removes a plugin's pages or API routes, the server restarts its Python host to load it. An install from this server's repository downloads the plugin from the server itself (the job's connector `api:this_server`, also recorded as the plugin's origin for **Update**); on a `--private` server that connector carries a token of the administrator who clicked, which may only read plugins (`plugins:read`) and expires after 30 minutes.
 
 <img src="/assets/screenshots/web-console-plugins.png" alt="Plugins page">
@@ -228,7 +239,7 @@ The instance's only admin cannot be demoted or deleted: make another user an adm
 
 | | Viewer | Editor | Operator | Team manager | Admin |
 |---|---|---|---|---|---|
-| Pipes, Pipelines, Jobs, Plugins, Connectors pages | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Pipes, Pipelines, Performance, Jobs, Plugins, Connectors pages | ✓ | ✓ | ✓ | ✓ | ✓ |
 | Terminal page and Exec | | | ✓ | (by role) | ✓ |
 | Register, edit and sync their pipes | | ✓ | ✓ | ✓ | ✓ |
 | Access… and Locks… | their own pipes | their own pipes | their own pipes | their team's pipes | every pipe |

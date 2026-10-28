@@ -18,7 +18,7 @@ The default stack starts 4 services:
 
 You can edit the stack's Docker Compose file with `mrsm edit config stack`.
 
-The `api` service runs the `full` image of the same release as the `mrsm` that writes the compose file (for example `bmeares/meerschaum:5.0.0-full`) instead of a floating tag, so the API server and the client always speak the same version, and API plugins and the Dash console work without further installs. The image is built for `linux/amd64` and `linux/arm64`.
+The `api` service runs the `full` image of the same release as the `mrsm` that writes the compose file (`bmeares/meerschaum:<version>-full`), so the API server and the client use the same version, and API plugins and the Dash console work without further installs. The image is built for `linux/amd64` and `linux/arm64`.
 
 !!! info "Upgrading an existing stack to 5.x"
     Earlier versions of the stack ran `bmeares/meerschaum:api`. `mrsm stack` regenerates the compose file on every run: a root without `config/stack.yaml` takes the new image the next time you run `mrsm stack up -d`, which recreates only the `api` container (the volumes and the database are kept). After `pip install --upgrade meerschaum` the tag follows the new version in the same way, so run `mrsm stack up -d` after every upgrade (or `mrsm stack pull` first to fetch the image ahead of time).
@@ -134,6 +134,18 @@ mrsm stack up -d db grafana
     Grafana is included in the Meerschaum stack, pre-configured with the Meerschaum TimescaleDB database.
 
     Open a web browser and navigate to [http://localhost:3000](http://localhost:3000) where you can log into Grafana with username `admin`, password `admin`.
+
+### Built-in performance dashboards
+
+The Stack provisions three dashboards in Grafana's **Meerschaum Dashboards** folder:
+
+- **Meerschaum Performance** — the overall duration, failure, and write-rate picture.
+- **Pipe Performance** — focus on one Pipe and its recent syncs.
+- **Pipeline Performance** — compare Pipeline runs and follow their results.
+
+Use them to find slow Pipes, inspect recent failures, and follow P95 duration, retries, chunks, and **rows affected/s**. Replacements count deleted plus new rows; unchanged syncs affect zero rows.
+
+Grafana queries the configured database directly with its data-source credentials. Its visibility follows those database permissions. The web console and HTTP API apply their Pipe and team access rules. See [Sync metrics](api-instance/sync-metrics.md) for capture and history limits.
 
 ## 💾 Backing Up and Upgrading the Database
 

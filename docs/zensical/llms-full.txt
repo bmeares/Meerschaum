@@ -36,7 +36,7 @@ Turn a query or a Python function into a **Pipe**. Sync new data, connect your t
 
 <asciinema-player src="/assets/casts/v5-first-pipe.cast" size="small" preload="true" rows="15" title="Sync a Pipe, inspect the data, then sync again"></asciinema-player>
 
-<p class="mrsm-caption">A real run of the <a href="get-started/bootstrap/">first-Pipe example</a>, recorded with 5.0.0rc15. Play it, then try it yourself.</p>
+<p class="mrsm-caption">A real run of the <a href="get-started/bootstrap/">first-Pipe example</a>, recorded with the 5.0.0rc16 candidate. Play it, then try it yourself.</p>
 
 </div>
 
@@ -98,7 +98,7 @@ Source: https://meerschaum.io/get-started/
 Your first Pipe needs Python and a few local rows. No database server or Docker setup is required.
 
 !!! info "Meerschaum 5 preview"
-    These pages are being prepared for the final 5.0.0 release. The examples and recordings were checked with 5.0.0rc15. Use `--pre` to install the latest published preview; the final release will use `pip install meerschaum`.
+    These pages are being prepared for the final 5.0.0 release. The examples and recordings were checked with the 5.0.0rc16 candidate. Use `--pre` to install the latest published preview; the final release will use `pip install meerschaum`.
 
 ## Install
 
@@ -402,7 +402,10 @@ Open [localhost:8001/dash](http://localhost:8001/dash). On an empty instance, **
 | **Overview** | See Pipes, Pipelines, jobs, and recent runs together. |
 | **Pipes** | Open `temperatures`, preview its rows, and inspect its settings. |
 | **Pipelines** | Open `climate` to explore its graph, preview a plan, and follow runs. |
+| **Performance** | Compare sync duration, failures, and rows affected per second. |
 | **Jobs** | Give a command or Pipeline a schedule and read its logs. |
+| **Connectors** | Inspect masked connection settings and the keys each connector accepts. |
+| **Plugins** | Browse installed and published plugins, and open their source when permitted. |
 | **Users & Teams** | Add people and choose what they may read or change. |
 
 ![The v5 Overview showing the tutorial's Pipes and climate Pipeline](../assets/screenshots/v5-overview.png){ .mrsm-screenshot }
@@ -414,6 +417,8 @@ Open **Pipelines → climate**. The workspace puts the graph beside the selected
 ![The climate Pipeline in the v5 console](../assets/screenshots/v5-pipeline.png){ .mrsm-screenshot }
 
 On a phone, switch between **Graph**, **Pipe details**, and **Output** to focus on one thing at a time.
+
+The **Performance** page follows the same work over time. Filter by `climate` to see its runs and sync measurements. See [Sync metrics](../reference/api-instance/sync-metrics.md) for the chart labels and history limits.
 
 ??? tip "Share with a team"
     An administrator can create users and teams. Give readers access to the data they need, and give editors only the actions they need. The console shows controls that match their permissions.
@@ -6118,7 +6123,7 @@ The default stack starts 4 services:
 
 You can edit the stack's Docker Compose file with `mrsm edit config stack`.
 
-The `api` service runs the `full` image of the same release as the `mrsm` that writes the compose file (for example `bmeares/meerschaum:5.0.0-full`) instead of a floating tag, so the API server and the client always speak the same version, and API plugins and the Dash console work without further installs. The image is built for `linux/amd64` and `linux/arm64`.
+The `api` service runs the `full` image of the same release as the `mrsm` that writes the compose file (`bmeares/meerschaum:<version>-full`), so the API server and the client use the same version, and API plugins and the Dash console work without further installs. The image is built for `linux/amd64` and `linux/arm64`.
 
 !!! info "Upgrading an existing stack to 5.x"
     Earlier versions of the stack ran `bmeares/meerschaum:api`. `mrsm stack` regenerates the compose file on every run: a root without `config/stack.yaml` takes the new image the next time you run `mrsm stack up -d`, which recreates only the `api` container (the volumes and the database are kept). After `pip install --upgrade meerschaum` the tag follows the new version in the same way, so run `mrsm stack up -d` after every upgrade (or `mrsm stack pull` first to fetch the image ahead of time).
@@ -6234,6 +6239,18 @@ mrsm stack up -d db grafana
     Grafana is included in the Meerschaum stack, pre-configured with the Meerschaum TimescaleDB database.
 
     Open a web browser and navigate to [http://localhost:3000](http://localhost:3000) where you can log into Grafana with username `admin`, password `admin`.
+
+### Built-in performance dashboards
+
+The Stack provisions three dashboards in Grafana's **Meerschaum Dashboards** folder:
+
+- **Meerschaum Performance** — the overall duration, failure, and write-rate picture.
+- **Pipe Performance** — focus on one Pipe and its recent syncs.
+- **Pipeline Performance** — compare Pipeline runs and follow their results.
+
+Use them to find slow Pipes, inspect recent failures, and follow P95 duration, retries, chunks, and **rows affected/s**. Replacements count deleted plus new rows; unchanged syncs affect zero rows.
+
+Grafana queries the configured database directly with its data-source credentials. Its visibility follows those database permissions. The web console and HTTP API apply their Pipe and team access rules. See [Sync metrics](api-instance/sync-metrics.md) for capture and history limits.
 
 ## 💾 Backing Up and Upgrading the Database
 
@@ -7434,7 +7451,7 @@ The Meerschaum Web Console provides a graphical interface for managing your Meer
 
     The Web Console is the Plotly Dash app of the Python package: install it with `pip install meerschaum[dash]` (also part of `meerschaum[full]` and the `full` Docker image). The Python API host serves it and the Rust API server proxies `/dash` to it. A standalone install (`cargo install meerschaum`, the `rust` Docker image) serves the API, `/docs`, `/engine/*`, MCP and the web terminal, and shows a pointer page at `/dash` that names this command. `--no-dash` turns the console off.
 
-<img src="/assets/screenshots/web-console.png" alt="The Web Console's Overview">
+![The v5 console Overview](../../assets/screenshots/v5-overview.png){ .mrsm-screenshot }
 
 ---
 
@@ -7443,7 +7460,7 @@ The Meerschaum Web Console provides a graphical interface for managing your Meer
 Every page of the console has the same bar at the top:
 
 - the **Meerschaum logo**, which opens the [Overview](#overview);
-- **Pipes**, **Pipelines**, **Jobs**, **Connectors**, **Plugins** and **Terminal**, each shown to the users whose permissions include it (see [Who sees what](#who-sees-what)): **Terminal** needs `webterm:use` (the Operator role and administrators). Under `--secure`, **Connectors** and **Terminal** are for administrators only;
+- **Pipes**, **Pipelines**, **Performance**, **Jobs**, **Connectors**, **Plugins** and **Terminal**, each shown to the users whose permissions include it (see [Who sees what](#who-sees-what)): **Terminal** needs `webterm:use` (the Operator role and administrators). Under `--secure`, **Connectors** and **Terminal** are for administrators only;
 - **Pages**, the pages your plugins add (grouped by their `page_group`), when there are any;
 - the **instance** selector: the instance every page shows (the Pipes, Pipelines and Overview pages, the Terminal's filters). Your choice is remembered in the browser, and a link with `?instance=sql:other` opens a page on another instance;
 - the **user menu** (your username): **Users & Teams**, **Tokens**, **Settings** (change your password) and **Sign out**.
@@ -7466,8 +7483,15 @@ The console answers only signed-in visitors: a page shows the login form until y
 - **Pipelines**: each saved Pipeline with its last run (failed ones first), opening it on that run;
 - **Jobs**: the jobs running, stalled (no successful sync for three times their interval), failing and stopped, each opening the Jobs page filtered to that state;
 - **Recent runs**: the latest runs of the Syncing Engine, failures first. A job that syncs the same pipes again and again takes one row (`×12`).
+- **Performance**: sync counts, failures, average duration, and rows affected/s over the last 24 hours.
 
 The tiles refresh every 30 seconds. On an instance without pipes, the Pipes tile shows **New pipe** and **Open terminal** instead of its numbers; the other tiles stay.
+
+## Performance
+
+Open **Performance** (`/dash/performance`) to compare duration, write rate, and failures. Choose a time window and filter by Pipe or Pipeline. Charts show the trend; tables show each Pipe or Pipeline and recent syncs.
+
+**Rows affected/s** counts inserted, updated, upserted, and deleted rows. Replacements count both deletion and new rows; an unchanged sync affects zero rows. See [Sync metrics](sync-metrics.md) for Python access, retention, and capture limits.
 
 ## Terminal
 
@@ -7504,7 +7528,9 @@ api:
 
 ## Connectors
 
-The **Connectors** page (`/dash/connectors`) lists the connectors the server knows, read-only: each connector's keys and type, where it is defined (**Config**, **Default** for a built-in connector left as shipped, **Environment** with the variable's name such as `MRSM_SQL_FOO` or `MRSM_CONFIG`, or **Plugin**), and for administrators its flavor, host, port and database; click a connector's keys to see its other attributes. Users who are not administrators see the keys, type and source only (`connectors:read`). Type in the filter box to narrow the list.
+The **Connectors** page (`/dash/connectors`) lists each connector's keys, type, and source: **Config**, **Default**, **Environment**, or **Plugin**. Type in the filter box to narrow the list. Team restrictions determine which connectors appear.
+
+Administrators also see flavor, host, port, database, and schema. Choose **Inspect** to open masked settings and required / supported keys. Passwords, tokens, nested secrets, and private URI values stay masked. Other readers see keys, type, and source only (`connectors:read`).
 
 Passwords, tokens, keys and secrets never reach the browser. The page shows the values of a connector's connection settings only (such as `flavor`, `host`, `port`, `database`, `username`, `schema`, `driver`, `sslmode` and the timeouts); every other attribute shows `••••••`, whatever its name. A URI keeps its scheme, user, host, port and database (`postgresql://user:••••••@host:5432/db`), and a connection string its settings of those names (`host=h user=u password=•••••• dbname=d`). A connection test's error is masked the same way.
 
@@ -7599,6 +7625,8 @@ The **Plugins** page has two tabs:
 - **Installed** (`/dash/plugins`): the plugins installed on the server, with their version, their kind (**Python**, or **Rust** as a single `.rs` file or a directory with a `plugin.toml`), what each provides (connectors, a data source, actions, pages, API routes, MCP tools, sync hooks) and whether the packages it requires are installed. A plugin that failed to import says so. Administrators can **Update** a plugin installed from a repository (the latest version from that repository) and **Uninstall** it.
 - **Repository** (`/dash/plugins?tab=repository`): the plugins published to this API as a [repository](/reference/connectors/#instances-and-repositories) (`mrsm register plugin <name> -r api:<label>`), to read and download. A plugin's owner edits its description here. Administrators can **Install** a published plugin on the server (**Reinstall** when it is installed already).
 
+Open a published plugin's page to inspect its **Source**, then choose a file. Administrators can also open an installed plugin's name to read its local source. Source previews are read-only; large, binary, or linked files may not have a preview.
+
 Install, Update and Uninstall run the usual actions (`install plugins`, `uninstall plugins`) as one of the console's runs, listed under Jobs > **Runs**; the page says when the action finished, with **View output**. When the change adds or removes a plugin's pages or API routes, the server restarts its Python host to load it. An install from this server's repository downloads the plugin from the server itself (the job's connector `api:this_server`, also recorded as the plugin's origin for **Update**); on a `--private` server that connector carries a token of the administrator who clicked, which may only read plugins (`plugins:read`) and expires after 30 minutes.
 
 <img src="/assets/screenshots/web-console-plugins.png" alt="Plugins page">
@@ -7656,7 +7684,7 @@ The instance's only admin cannot be demoted or deleted: make another user an adm
 
 | | Viewer | Editor | Operator | Team manager | Admin |
 |---|---|---|---|---|---|
-| Pipes, Pipelines, Jobs, Plugins, Connectors pages | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Pipes, Pipelines, Performance, Jobs, Plugins, Connectors pages | ✓ | ✓ | ✓ | ✓ | ✓ |
 | Terminal page and Exec | | | ✓ | (by role) | ✓ |
 | Register, edit and sync their pipes | | ✓ | ✓ | ✓ | ✓ |
 | Access… and Locks… | their own pipes | their own pipes | their own pipes | their team's pipes | every pipe |
@@ -7692,6 +7720,62 @@ api:
     ```
 
     Only opt in callbacks that are safe to run unauthenticated. Use Meerschaum's own [`/mcp` endpoint](../mcp/index.md) for anything that touches data.
+
+
+---
+
+# Sync Metrics
+
+Source: https://meerschaum.io/reference/api-instance/sync-metrics/
+
+# Sync metrics
+
+Find slow or failing syncs, and see how much data each Pipe or Pipeline changes.
+
+## In the console
+
+Open **Performance** in the navigation, or choose **View performance** on the Overview card. Pick a time window, then narrow it to a Pipe or Pipeline.
+
+- **Duration** shows the average time per sync.
+- **Write rate** shows **rows affected/s**.
+- **Results** shows successful and failed syncs over time.
+
+The tables below compare Pipes and Pipelines and list recent syncs. Hover over a chart for its values; drag to zoom and double-click to reset. **Refresh** reads the latest measurements.
+
+![The Performance view for the local climate example](../../assets/screenshots/v5-performance.png){ .mrsm-screenshot }
+
+**Rows affected** counts inserted, updated, upserted, and deleted rows. Replacing data counts the deletion and the new rows. An unchanged sync affects zero rows, even when it spends time fetching or checking data.
+
+## From Python
+
+Read measurements from your instance:
+
+```python
+import meerschaum as mrsm
+
+metrics = mrsm.get_engine_metrics(instance='sql:local', pipeline='climate')
+summary = metrics['summary']
+print(summary['syncs'], 'syncs;', summary['failed'], 'failed')
+print(summary['avg_duration_seconds'], 'seconds per sync')
+```
+
+Leave out `pipeline` for every Pipe, or pass a `Pipe` as `pipe=`. Use UTC datetimes for `begin=` and `end=` to choose a window.
+
+??? info "History, limits, and access"
+    - History is retained for **30 days**. The default query covers the last 24 hours.
+    - Native queries aggregate at most **5,000** detailed sync records; the console requests **1,000**. The page says when its result is limited. Choose a shorter window for a closer look.
+    - Capture runs in the background and is best effort. Queue or database pressure can drop a measurement without failing the sync.
+    - The console and HTTP API filter by your current Pipe, Pipeline, and team access before calculating results. An access change starts a new visible history segment.
+    - Clients from before **5.0.0rc16** do not backfill detailed sync history.
+    - The local Python SDK uses the instance's credentials. A hosted interface must supply its own access checks.
+
+## In Grafana
+
+The [Stack](../stack.md) dashboards show the same affected-row, duration, and failure measurements.
+
+Grafana reads directly with the database credentials configured for its data source. Its visibility follows those database permissions; the console and HTTP API apply their Pipe and team access rules.
+
+[Explore the console →](web-console.md)
 
 
 ---
@@ -15753,7 +15837,7 @@ Source: https://meerschaum.io/news/v5/
 **A new foundation for the same small, useful idea: keep your data flowing.**
 
 !!! info "Documentation preview"
-    The final 5.0.0 release is being prepared for review. These examples were checked with 5.0.0rc15.
+    The final 5.0.0 release is being prepared for review. These examples were checked with the 5.0.0rc16 candidate.
 
 ## Start with a Pipe
 
@@ -15886,11 +15970,17 @@ The notes below are written for someone upgrading from 4.1. Everything that beha
 - **Every pipe remembers how its last sync went.**  
   Every sync records its outcome on the pipe's instance, whatever ran it: `mrsm sync pipes`, a job's laps and `--listen` flushes, a Pipeline run, the API server's sync route, `api:` clients, and `pipe.sync()` in Python or in a plugin. The record holds the last attempt, success and failure, the latest message, the row counts and duration, the failures since the last success, what ran it (`cli`, `job`, `engine`, `api`, `python`) and the job's name. Read it with `pipe.get_sync_status()`, `mrsm.get_sync_statuses()` or `GET /engine/sync-status`; `mrsm show pipes` ends with a line for each pipe whose latest sync failed, and the web console's Pipes table and Overview show it. Recording never fails or slows a sync: it is written in the background (successes at most every 5 seconds per pipe, failures at once), and dropping, deleting or fully clearing a pipe forgets it. See [Sync status](/reference/pipelines/state/#sync-status).
 
+- **See sync performance without a plugin.**\
+  Native syncs keep 30 days of numeric history: durations, failures, retries, chunks and affected rows. The console's **Performance** page shows Plotly charts and Pipe and Pipeline summaries; Overview links to it. The Stack adds three dashboards to Grafana's **Meerschaum Dashboards** folder. Console and API metrics follow current Pipe, Pipeline and connector access; passwords, SQL and error text are excluded.
+
 - **Plans and runs in plain words.**  
   `plan pipes`, the console's Plan and the run history explain each pipe in sentences ("up to date: Pipe('sql:main', 'raw') has no new data (latest 2026-10-12 09:45)") instead of ledger, cursor and watermark jargon; sync windows read "last sync − 1 day → latest data", and a run's message lists only what happened ("3 synced, 1 up to date"). A scheduled pipe with parents in a `--parents` / `--children` run syncs when its parents have new data rather than on its `schedule`: the loop warns about it once and `plan pipes` lists the warning. In a flat selection every pipe follows its own schedule.
 
 - **A Pipelines workspace in the web console.**  
   `/dash/pipelines` lists the Pipelines registered on the console's instance as cards (members, instances, last run, schedule) with **New pipeline**, which walks through name, members, traversal and a review of the plan, checks and proposed tags before anything is saved, and **Find Pipe**, which explores any Pipe's connected graph and saves it as a Pipeline. Each Pipeline has its own page with Canvas and Runs tabs: the canvas starts with the explicit members and folds parents and children into expandable upstream and downstream nodes, a node opens its inspector in a side drawer, and the page is read-only until **Edit** (add and remove members, draw dependency edges, undo/redo, drafts kept in the browser, revision checks on save). Run a Pipeline or a single Pipe and follow its output, each member Pipe's output within a run, and a live Gantt timeline. The instance selector is shared across console pages, and an instance the API does not allow is refused with a message. A Pipe's page has a Lineage tab where you add and remove its parents and children.
+
+- **A faster console with useful inspection.**\
+  Pipeline cards share a bounded history read and load saved definitions in bulk. Pipe Lineage opens its graph correctly. Connectors show configuration and supported keys with secrets masked; Plugins offers read-only source inspection with current permissions enforced. Expanding the mobile menu keeps the navbar in place.
 
 - **Watch data move through a pipeline.**  
   On a terminal, graph runs (`sync pipes --parents/--children/--resume`, `sync pipelines`) and `--loop` / `--listen` laps show an inline live region with one row per running pipe: chunk progress, rows inserted, updated and upserted so far, rows/s and the attempt. Plan decisions, retries and finished pipes scroll above it, and the Gantt chart follows at the end. Press `w` to open the full-screen run monitor and leave it to return to the inline view while the run keeps going. `--nopretty`, `--debug` and piped output keep line output. Every pipe's result prints as soon as it finishes, with its duration and position in the run, in job logs and piped output too, and the closing summary adds row totals, the slowest pipes and each failure's reason.
