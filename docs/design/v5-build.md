@@ -15,6 +15,11 @@ Conventions for the crates themselves are in `crates/README.md`.
 | `release.yaml` | No branch/PR build | One manual full candidate; tag pushes only verify an existing successful candidate |
 | `docker-build.yaml` | No automatic build | Explicit manual build/publish; size and offline smoke gates retained |
 
+Build the website locally with `bash scripts/docs.sh --site-only`. It uses a cached, isolated
+tool environment from `docs/requirements.txt`; the caller's Zensical installation is unchanged.
+Without the flag, the script also regenerates API/MCP/llms/changelog output using a scratch
+configuration and empty plugins directory for framework imports.
+
 Prereleases retain Linux x86_64 glibc/musl wheels, one standalone CLI and the sdist. Finals add
 Linux arm64, both macOS architectures and Windows x86_64: seven ABI3 wheels and five binaries.
 The optional Linux cp314t wheel is disabled by default; enable `experimental` to build it. It

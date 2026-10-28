@@ -103,6 +103,7 @@ def environment(state, ports, source=None):
         'MRSM_TEST_FLAVORS': ','.join(spec['flavors']),
         'MRSM_TEST_PORTS': json.dumps(ports), 'MRSM_TEST_API_PORT': str(ports['api']),
         'MRSM_NO_AUTO_INSTALL': '1', 'MRSM_NO_UPDATE_CHECK': '1',
+        'MRSM_PYTHON': env.get('PYTHON_BIN', sys.executable),
         'PYTHONPATH': str(REPO),
     })
     for service, target in TARGET_PORTS.items():

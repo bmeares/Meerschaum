@@ -57,6 +57,7 @@ IGNORED = (
     '.github/actionlint.yaml',
     '.github/dependabot.yml',
     '.github/workflows/docs.yaml',
+    'scripts/docs.sh',
 )
 
 # Rust sources, manifests, toolchain, the CI scripts themselves.

@@ -59,6 +59,7 @@ def test_service_environment_drops_ambient_connectors_roots_and_tmux(tmp_path):
     state = services.claim_root(tmp_path / 'owned', 'postgres')
     env = services.environment(state, {'api': 43101, 'postgresql': 43102}, {
         'MRSM_ROOT_DIR': '/do/not/open', 'MRSM_SQL_PRODUCTION': 'secret',
+        'MRSM_PYTHON': '/wrong/ambient/python',
         'MRSM_TEST_BIN': '/artifacts/mrsm', 'MRSM_TEST_ARTIFACT_MANIFEST': '/artifacts/manifest.json',
         'MRSM_TEST_PORTS': '{"postgis":5449}', 'TMUX': '/user/server', 'TMUX_PANE': '%0',
         'PATH': '/usr/bin', 'PYTHON_BIN': '/venv/bin/python',
@@ -67,6 +68,7 @@ def test_service_environment_drops_ambient_connectors_roots_and_tmux(tmp_path):
     assert not {'MRSM_SQL_PRODUCTION', 'TMUX', 'TMUX_PANE'} & env.keys()
     assert env['MRSM_TEST_BIN'] == '/artifacts/mrsm'
     assert env['PYTHON_BIN'] == '/venv/bin/python'
+    assert env['MRSM_PYTHON'] == '/venv/bin/python'
     assert ':43102/' in env['MRSM_SQL_TEST_POSTGRESQL']
     assert env['MRSM_TEST_POSTGIS_PUBLISH'] == '127.0.0.1::5432'
     assert sum(spec['workers'] for spec in SHARDS.values()) == 16

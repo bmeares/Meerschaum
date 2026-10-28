@@ -15,7 +15,11 @@ on:
         default: false
         description: 'Also try the optional cp314t wheel; only a passing artifact is retained.'
   push:
+    # Register this new entrypoint on the v5 train before it reaches the default
+    # branch. A definition-only push runs metadata checks, never release builds.
+    branches: [main, v5]
     tags: ['v5*']
+    paths: ['.github/workflows/release.yaml']
 
 permissions:
   contents: read
@@ -26,6 +30,16 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  definition:
+    name: release definition metadata
+    if: ${{ github.event_name == 'push' && github.ref_type == 'branch' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false, ref: '${{ github.sha }}'}
+      - run: python scripts/check_packaging.py
+
   wheels:
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.candidate_run_id == '' }}
     uses: ./.github/workflows/wheels.yaml

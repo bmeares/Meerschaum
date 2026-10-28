@@ -28,7 +28,9 @@ import json
 import meerschaum as mrsm
 
 label = {label!r}
-pipe = mrsm.Pipe('test', 'w17b_env_uri', instance=f'sql:{{label}}')
+# Both URI-label cases may run concurrently against the same owned PostgreSQL
+# database. Keep their registrations and cleanup targets independent.
+pipe = mrsm.Pipe('test', 'w17b_env_uri', label, instance=f'sql:{{label}}')
 out = {{}}
 try:
     conn = pipe.instance_connector
