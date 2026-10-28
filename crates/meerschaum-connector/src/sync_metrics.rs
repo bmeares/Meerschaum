@@ -307,10 +307,24 @@ impl SyncMetric {
 
     /// Restore a typed row from any native instance backend.
     pub fn from_doc(doc: &Doc) -> Option<Self> {
+        // MySQL DATETIME(0) may round a completed sync into the following second.
+        // The indexed integer is the captured time, independent of physical datetime precision.
+        let ts = doc_str(doc, "ts_us")
+            .and_then(|value| value.parse::<i64>().ok())
+            .and_then(DateTime::from_timestamp_micros)
+            .or_else(|| doc_dt(doc, "ts"))?;
+        let duration_seconds = doc_f64(doc, "duration_seconds")
+            .filter(|value| {
+                value.is_finite() && *value >= 0.0 && *value <= RETENTION_DAYS as f64 * 86400.0
+            })
+            .unwrap_or(0.0);
+        let started = ts.checked_sub_signed(TimeDelta::microseconds(
+            (duration_seconds * 1_000_000.0) as i64,
+        ))?;
         Some(Self {
             event_id: doc_str(doc, "event_id")?,
-            ts: doc_dt(doc, "ts")?,
-            started: doc_dt(doc, "started")?,
+            ts,
+            started,
             pipe_key: doc_str(doc, "pipe_key")?,
             registration_id: doc_str(doc, "registration_id")?,
             pipe_ref: doc_str(doc, "pipe_ref")?,
@@ -320,7 +334,7 @@ impl SyncMetric {
             location_key: doc_str(doc, "location_key"),
             run_id: doc_str(doc, "run_id"),
             success: doc_bool(doc, "success"),
-            duration_seconds: doc_f64(doc, "duration_seconds").unwrap_or(0.0),
+            duration_seconds,
             inserted: doc_u64(doc, "inserted"),
             updated: doc_u64(doc, "updated"),
             upserted: doc_u64(doc, "upserted"),

@@ -19,6 +19,9 @@ METRICS_FLAVORS = [flavor for flavor in get_flavors() if flavor in conns and fla
 @pytest.mark.parametrize('flavor', METRICS_FLAVORS)
 def test_native_metrics_capture_replacements_on_each_instance_backend(flavor):
     """Best-effort telemetry must not hide a broken backend schema or affected-row decoder."""
+    if flavor != 'sqlite' and os.environ.get('MRSM_TEST_ISOLATED') != '1':
+        from tests._binary import skip_or_fail
+        skip_or_fail('Live metrics backend checks require scripts/ci/services.py isolation.')
     conn = conns[flavor]
     pipe = mrsm.Pipe(str(conn), 'rc16_metrics_' + uuid.uuid4().hex[:12], instance=conn,
                      columns={'id': 'id'}, dtypes={'id': 'int', 'value': 'int'})

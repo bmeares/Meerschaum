@@ -147,6 +147,43 @@ async fn persisted_history_is_shared_with_a_new_connector_and_filtered_before_ag
 }
 
 #[tokio::test]
+async fn rounded_database_datetimes_cannot_move_captured_outcomes_outside_their_time_window() {
+    let env = env("metrics_rounded_time").await;
+    let pipe = env.register("precise", &json!({})).await;
+    let metric = captured(&env, &pipe, 3, true).await;
+    env.conn
+        .record_sync_metrics(std::slice::from_ref(&metric))
+        .await
+        .unwrap();
+    let rounded = (metric.ts + TimeDelta::seconds(1)).to_rfc3339();
+    env.exec(&format!(
+        "UPDATE mrsm_engine_metrics SET ts = '{rounded}', started = '{rounded}'"
+    ))
+    .await;
+    let result = env
+        .conn
+        .get_engine_metrics(&MetricsQuery {
+            begin: Some(metric.ts - TimeDelta::microseconds(1)),
+            end: Some(metric.ts + TimeDelta::microseconds(1)),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        result.summary.syncs, 1,
+        "rounded DATETIME must not hide a completed sync"
+    );
+    assert_eq!(
+        result.history[0].ts.timestamp_micros(),
+        metric.ts.timestamp_micros()
+    );
+    assert_eq!(
+        (result.history[0].ts - result.history[0].started).num_microseconds(),
+        Some(2_000_000)
+    );
+}
+
+#[tokio::test]
 async fn old_private_outcomes_from_another_worker_do_not_join_recreated_public_keys() {
     let env = env("metrics_generation").await;
     let old = env
