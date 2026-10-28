@@ -8,6 +8,7 @@ establish the dependency-free façade contract. Output is JSON for preserving ga
 
 from __future__ import annotations
 
+import argparse
 import importlib.metadata
 import json
 import os
@@ -16,7 +17,32 @@ import subprocess
 import sys
 
 
+def check_cli_data(path: Path) -> int:
+    """Validate the tiny SQLite pipe printed by `mrsm show data --nopretty`."""
+    records = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+    assert len(records) == 2, records
+    pipe, serialized_frame = records
+    identity = ('connector_keys', 'metric_key', 'location_key', 'instance_keys')
+    assert {key: pipe[key] for key in identity} == {
+        'connector_keys': 'sql:smoke', 'metric_key': 'tiny',
+        'location_key': None, 'instance_keys': 'sql:smoke',
+    }, pipe
+    # `--nopretty` prints the frame as a JSON string; native reads preserve integers.
+    assert isinstance(serialized_frame, str), serialized_frame
+    frame = json.loads(serialized_frame)
+    assert frame == {'id': {'0': 1}, 'val': {'0': 2}}, frame
+    assert all(type(value) is int for column in frame.values() for value in column.values())
+    print('SMOKE_CLI_DATA_JSON:' + json.dumps(frame))
+    return 0
+
+
 def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--cli-data', type=Path, help='Validate a tiny pipe CLI output file.')
+    args = parser.parse_args()
+    if args.cli_data is not None:
+        return check_cli_data(args.cli_data)
+
     root = Path(os.environ['MRSM_ROOT_DIR']).resolve()
     plugins = Path(os.environ['MRSM_PLUGINS_DIR']).resolve()
     if not root.is_dir() or not plugins.is_dir():

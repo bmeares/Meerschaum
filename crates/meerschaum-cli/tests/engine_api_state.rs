@@ -20,6 +20,7 @@ use meerschaum_engine::{
     Action, Depth, Engine, EngineConfig, NodeStatus, PipeRef, RunOptions, RunResult, Selection,
     StateSource, StaticRegistry,
 };
+use meerschaum_server::backends::InstanceResolver;
 use meerschaum_server::engine_store::InstanceEngine;
 use meerschaum_server::{AppState, ServerConfig};
 
@@ -32,8 +33,16 @@ struct Server {
     task: tokio::task::JoinHandle<()>,
 }
 
+struct SourceInstance(Arc<SqlConnector>);
+
+impl InstanceResolver for SourceInstance {
+    fn resolve(&self, keys: &str) -> Option<Arc<dyn InstanceConnector>> {
+        (keys == SRC).then(|| self.0.clone() as Arc<dyn InstanceConnector>)
+    }
+}
+
 /// `start api` over the SQLite instance at `db` (no auth), engine state on that instance.
-async fn serve(db: &Path, root: &Path) -> Server {
+async fn serve(db: &Path, root: &Path, source: &Arc<SqlConnector>) -> Server {
     let conn = Arc::new(
         SqlConnector::from_uri("w17bg1srv", &format!("sqlite:///{}", db.display()))
             .await
@@ -43,9 +52,13 @@ async fn serve(db: &Path, root: &Path) -> Server {
     cfg.no_auth = true;
     cfg.no_webterm = true;
     cfg.no_dash = true;
+    // Definitions run on the separately configured source, within the API's instance policy.
+    cfg.allow_multiple_instances = true;
+    cfg.allowed_instance_keys = vec![conn.keys(), SRC.into()];
     let instance: Arc<dyn InstanceConnector> = conn.clone();
     let state = AppState::builder(cfg, instance.clone())
         .secret(SECRET.to_vec())
+        .resolver(Arc::new(SourceInstance(source.clone())))
         .engine(Arc::new(InstanceEngine::new(instance, &conn.keys())))
         .build()
         .unwrap();
@@ -148,7 +161,7 @@ async fn api_instance_engine_state_survives_a_server_restart() {
         .is_some()
     );
 
-    let server = serve(&db, dir.path()).await;
+    let server = serve(&db, dir.path(), &src).await;
     let api = client(server.port);
     let raw = Pipe::builder(SRC, "w17bg1_raw")
         .instance(API)
@@ -201,7 +214,7 @@ async fn api_instance_engine_state_survives_a_server_restart() {
     // Restart the server (a new process would see exactly this database).
     server.task.abort();
     let _ = server.task.await;
-    let server = serve(&db, dir.path()).await;
+    let server = serve(&db, dir.path(), &src).await;
     let api = client(server.port);
     let engine = engine(&api, &src, dir.path());
     let state = engine.state().clone();

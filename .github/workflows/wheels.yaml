@@ -342,7 +342,7 @@ jobs:
             --params '{"columns": {"primary": "id"}, "fetch": {"definition": "SELECT 1 AS id, 2 AS val"}}'
           "$VENV_BIN/mrsm" sync pipes -i sql:smoke -c sql:smoke -m tiny
           "$VENV_BIN/mrsm" show data -i sql:smoke -c sql:smoke -m tiny --nopretty | tee "$RUNNER_TEMP/tiny.txt"
-          grep -Fq '\"0\":\"2\"' "$RUNNER_TEMP/tiny.txt"
+          "$VENV_BIN/python" -I "$GITHUB_WORKSPACE/smoke-src/scripts/docker/smoke_facade.py" --cli-data "$RUNNER_TEMP/tiny.txt"
       # Jobs re-run the CLI as `python -P -m meerschaum`: start one through the installed console
       # script, wait until it has run (its log holds the version line), then stop and delete it and
       # check nothing is left running. Not on Windows: background jobs are refused there

@@ -589,7 +589,9 @@ async fn api_full_edit_removes_last_pipeline_owner_without_resurrecting_raw_para
     use serde_json::json;
     let (served, _db) = sqlite().await;
     let sql = "SELECT * FROM {{ Pipe('sql:remote', 'raw') }}";
-    let mut pipe = Pipe::builder("sql:source", "owned-tags")
+    // This test preserves raw template parameters; its SQL source must still be an
+    // instance this API serves, as required by the definition guard.
+    let mut pipe = Pipe::builder(&served.conn.keys(), "owned-tags")
         .instance("api:w17bs")
         .parameters(
             Value::from_json_str(
@@ -602,7 +604,8 @@ async fn api_full_edit_removes_last_pipeline_owner_without_resurrecting_raw_para
         )
         .build()
         .unwrap();
-    assert!(served.client.register_pipe(&pipe).await.success);
+    let registered = served.client.register_pipe(&pipe).await;
+    assert!(registered.success, "{registered}");
     // Populate the client's metadata cache, then remove the last owner with a full edit.
     let _ = served.client.pipe_parameters(&pipe).await;
     pipe.set_parameters(

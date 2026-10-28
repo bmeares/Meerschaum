@@ -11,6 +11,8 @@ use std::process::{Child, Command, Output, Stdio};
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
+mod python_support;
+
 fn library(name: &str) -> PathBuf {
     static BUILT: OnceLock<()> = OnceLock::new();
     BUILT.get_or_init(|| {
@@ -38,17 +40,10 @@ fn repository() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
 
-/// An interpreter for tests that need the Python worker (`MRSM_TEST_HOOKS_PYTHON`, `.venv`,
-/// then the reference environment); `None` skips them.
+/// The current worker's interpreter (`MRSM_TEST_HOOKS_PYTHON`, `.venv`, then the worker
+/// default). The released-reference environment is only for v4 comparisons.
 fn python() -> Option<PathBuf> {
-    std::env::var_os("MRSM_TEST_HOOKS_PYTHON")
-        .map(PathBuf::from)
-        .into_iter()
-        .chain([
-            repository().join(".venv/bin/python"),
-            repository().join(".venv-ref/bin/python"),
-        ])
-        .find(|path| path.is_file())
+    python_support::current("MRSM_TEST_HOOKS_PYTHON")
 }
 
 struct Home {
@@ -362,7 +357,12 @@ fn a_native_plugin_replaces_a_python_plugin_of_the_same_name() {
     let control = Home::new();
     prepare(&control);
     std::fs::write(control.plugins.path().join("native_demo.py"), source).unwrap();
-    assert!(text(&run(&control, &["hello"])).contains("Hello from PYTHON native_demo"));
+    let hello = run(&control, &["hello"]);
+    assert!(
+        text(&hello).contains("Hello from PYTHON native_demo"),
+        "{}",
+        text(&hello)
+    );
 
     // A directory holding both `plugin.toml` and Python files is the native plugin.
     let home = Home::new();

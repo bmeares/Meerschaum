@@ -2,6 +2,8 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
+mod python_support;
+
 const SOURCE: &str = "from meerschaum.plugins import pre_sync_hook, post_sync_hook\n@pre_sync_hook\ndef first(pipe, **kw):\n    return True, 'HOOK_PRE_FIRST'\n@pre_sync_hook\ndef second(pipe, **kw):\n    return False, 'HOOK_PRE_FAILED'\n@pre_sync_hook\ndef ignored(pipe, **kw):\n    return None\n@post_sync_hook\ndef after(pipe, **kw):\n    assert kw['success_tuple'][0]\n    return True, 'HOOK_POST_FIRST'\n@post_sync_hook\ndef raises(pipe, **kw):\n    raise ValueError('HOOK_RAISED')\n@post_sync_hook\ndef final(pipe, **kw):\n    return True, 'HOOK_POST_FINAL'\n";
 
 struct Sandbox {
@@ -55,7 +57,9 @@ impl Sandbox {
         let output = self.run(args);
         assert!(
             output.status.success(),
-            "{args:?}: {}\n{}",
+            "{args:?} (reference={}, status={}): {}\n{}",
+            self.reference,
+            output.status,
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
         );
@@ -70,13 +74,7 @@ fn hook_success_failure_and_exception_output_matches_reference_order() {
         .canonicalize()
         .unwrap();
     let reference_python = repo.join(".venv-ref/bin/python");
-    let python = std::env::var_os("MRSM_TEST_HOOKS_PYTHON")
-        .map(PathBuf::from)
-        .or_else(|| {
-            [repo.join(".venv/bin/python"), reference_python.clone()]
-                .into_iter()
-                .find(|path| path.is_file())
-        });
+    let python = python_support::current("MRSM_TEST_HOOKS_PYTHON");
     let Some(python) = python.filter(|_| reference_python.is_file()) else {
         eprintln!("skipped: local and released-reference Python environments are required");
         return;

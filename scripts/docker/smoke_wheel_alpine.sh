@@ -35,8 +35,7 @@ mrsm register pipe -i sql:smoke -c sql:smoke -m tiny --noask \
   --params '{"columns": {"primary": "id"}, "fetch": {"definition": "SELECT 1 AS id, 2 AS val"}}'
 mrsm sync pipes -i sql:smoke -c sql:smoke -m tiny
 mrsm show data -i sql:smoke -c sql:smoke -m tiny --nopretty | tee /tmp/tiny.txt
-# `--nopretty` prints the frame as a JSON string, so its quotes are escaped.
-grep -Fq '\"0\":\"2\"' /tmp/tiny.txt
+python3 -I /smoke_facade.py --cli-data /tmp/tiny.txt
 
 export MRSM_ROOT_DIR=/tmp/mrsm-root-api MRSM_PLUGINS_DIR=/tmp/mrsm-plugins-api
 mkdir -p "$MRSM_ROOT_DIR" "$MRSM_PLUGINS_DIR"

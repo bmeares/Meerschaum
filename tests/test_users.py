@@ -69,6 +69,9 @@ def test_login_preserves_custom_user_scopes(flavor: str):
         pytest.skip("The password grant is only served by the API.")
 
     conn = conns[flavor]
+    ### Scope attributes are administrative data. Seed this account on the owned backing
+    ### instance, as the admin-scope test does; self-registration stays closed by default.
+    instance_conn = get_connector('sql', 'test_postgresql')
     username, password = 'test_custom_scopes', 'test1234'
     custom_scope = 'custom:read'
     user = User(
@@ -86,9 +89,9 @@ def test_login_preserves_custom_user_scopes(flavor: str):
     )
 
     ### Clean up a leftover account from a previous run before registering.
-    user_conn.delete_user(user, debug=debug)
+    instance_conn.delete_user(user, debug=debug)
 
-    success, msg = conn.register_user(user, debug=debug)
+    success, msg = instance_conn.register_user(user, debug=debug)
     assert success, msg
     try:
         login_success, login_msg = user_conn.login(debug=debug)
@@ -99,7 +102,7 @@ def test_login_preserves_custom_user_scopes(flavor: str):
         payload = json.loads(
             base64.urlsafe_b64decode(payload_segment + '=' * (-len(payload_segment) % 4))
         )
-        assert custom_scope in payload.get('scopes', [])
+        assert set(payload.get('scopes', [])) == {custom_scope, 'users:delete'}
     finally:
         delete_success, delete_msg = user_conn.delete_user(user, debug=debug)
     assert delete_success, delete_msg

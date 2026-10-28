@@ -5,13 +5,20 @@ use meerschaum_connector_sql::{
     uri::{ConnectionSpec, ConnectorAttributes},
 };
 use meerschaum_core::{Pipe, Value};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Command;
+
+mod python_support;
 
 fn command(root: &Path, plugins: &Path, python: &Path) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_mrsm-cli"));
     for (key, _) in std::env::vars() {
-        if key.starts_with("MRSM_") || matches!(key.as_str(), "RUST_LOG" | "NO_COLOR" | "TERM") {
+        if key.starts_with("MRSM_")
+            || matches!(
+                key.as_str(),
+                "RUST_LOG" | "NO_COLOR" | "TERM" | "TMUX" | "TMUX_PANE"
+            )
+        {
             command.env_remove(key);
         }
     }
@@ -27,12 +34,11 @@ fn command(root: &Path, plugins: &Path, python: &Path) -> Command {
 
 #[test]
 fn plugin_actions_fetch_and_callback_match_v4() {
-    let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let python = repo.join(".venv-ref/bin/python");
-    if !python.is_file() {
-        eprintln!("Reference interpreter unavailable; skipping Python parity.");
+    let python = python_support::current("MRSM_TEST_HOOKS_PYTHON");
+    let Some(python) = python else {
+        eprintln!("Current Python interpreter unavailable; skipping Python plugin parity.");
         return;
-    }
+    };
     let fixture: serde_json::Value =
         serde_json::from_str(include_str!("fixtures/wiring_transcript.json")).unwrap();
     let temporary = tempfile::tempdir().unwrap();
@@ -44,7 +50,7 @@ fn plugin_actions_fetch_and_callback_match_v4() {
     #[cfg(unix)]
     for name in ["mrsm", "wiring", "wiring_sync", "wk_custom"] {
         std::os::unix::fs::symlink(
-            repo.join(".venv-ref").canonicalize().unwrap(),
+            python.parent().unwrap().parent().unwrap(),
             root.join("venvs").join(name),
         )
         .unwrap();

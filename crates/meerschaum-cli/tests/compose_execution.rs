@@ -6,6 +6,8 @@ use std::time::{Duration, Instant};
 use meerschaum_core::Pipe;
 use meerschaum_jobs::{Job, JobsContext, Status};
 
+mod python_support;
+
 struct Sandbox {
     temp: tempfile::TempDir,
 }
@@ -266,18 +268,10 @@ fn temporary_python_plugin_receives_project_environment() {
         .unwrap()
         .parent()
         .unwrap();
-    let python = std::env::var("MRSM_TEST_COMPOSE_PYTHON").ok().or_else(|| {
-        [
-            repo.join(".venv/bin/python"),
-            repo.join(".venv-ref/bin/python"),
-        ]
-        .into_iter()
-        .find(|path| path.is_file())
-        .map(|path| path.display().to_string())
-    });
+    let python = python_support::current("MRSM_TEST_COMPOSE_PYTHON");
     let Some(python) = python else {
         eprintln!(
-            "skipped: no local or reference Python environment; set MRSM_TEST_COMPOSE_PYTHON"
+            "skipped: no Python interpreter; set MRSM_TEST_COMPOSE_PYTHON to this tree's Python"
         );
         return;
     };
