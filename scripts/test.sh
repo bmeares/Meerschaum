@@ -151,19 +151,54 @@ print(','.join(get_flavors()))
 [ -z "$MRSM_TEST_FLAVORS" ] && echo "test.sh: no test flavors resolved." >&2 && exit 1
 export MRSM_TEST_FLAVORS
 
-### Start the test API on port 8989.
-### For whatever reason, GitHub actions only works
-### when the server is started, stopped, and started again.
-[ -z "$MRSM_TEST_FLAVORS" ] || [[ "$MRSM_TEST_FLAVORS" =~ "api" ]] && \
+### The API suite mutates its pipes and jobs. Give only its broad fixture account explicit
+### admin rights on the owned backing instance; registration and the default role stay unchanged.
+if [[ ",$MRSM_TEST_FLAVORS," == *,api,* ]]; then
   cd tests/ && docker compose up -d postgresql && cd .. && \
-  $mrsm delete jobs test_api -y && \
-  $mrsm start connectors sql:test_postgresql && \
+    $mrsm delete jobs test_api -y && \
+    $mrsm start connectors sql:test_postgresql; rc="$?"
+  [ "$rc" != '0' ] && exit "$rc"
+  "$PYTHON_BIN" - <<'API_FIXTURE_SEED'
+from tests.connectors import conns
+from meerschaum import get_connector
+from meerschaum.core import User
+
+api = conns['api']
+backing = get_connector('sql', 'test_postgresql')
+user = User(api.username, api.password, email='none@none.com', type='admin', instance=backing)
+result = (
+    backing.edit_user(user)
+    if backing.get_user_id(user) is not None
+    else backing.register_user(user)
+)
+assert result[0], 'Could not seed the API integration account.'
+assert backing.get_user_type(user) == 'admin', 'The API integration account must be an admin.'
+API_FIXTURE_SEED
+  rc="$?"
+  [ "$rc" != '0' ] && exit "$rc"
+  ### Restart once after the first health check, as the integration harness has always done.
   $mrsm start api \
     -w 1 -p $test_port --name test_api -y -d -i sql:test_postgresql --no-webterm --no-dash && \
-  $mrsm start connectors api:test && \
-  $mrsm stop jobs test_api -y && \
-  $mrsm start jobs test_api -y && \
-  $mrsm start connectors api:test
+    $mrsm start connectors api:test && \
+    $mrsm stop jobs test_api -y && \
+    $mrsm start jobs test_api -y && \
+    $mrsm start connectors api:test; rc="$?"
+  [ "$rc" != '0' ] && exit "$rc"
+  "$PYTHON_BIN" - <<'API_FIXTURE_LOGIN'
+import base64
+import json
+from tests.connectors import conns
+
+api = conns['api']
+assert api.login(debug=False), 'The API integration account could not authenticate.'
+segment = api._token.split('.')[1]
+claims = json.loads(base64.urlsafe_b64decode(segment + '=' * (-len(segment) % 4)))
+assert claims.get('scopes') == ['*'], 'The API integration account must receive wildcard scopes.'
+assert claims.get('type') == 'admin', 'The API integration login must identify its admin account.'
+API_FIXTURE_LOGIN
+  rc="$?"
+  [ "$rc" != '0' ] && exit "$rc"
+fi
 
 true && \
   $mrsm delete cache -y && \
