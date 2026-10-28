@@ -1,7 +1,8 @@
-//! `properties.json` and `.stop.json`: reading, writing (with Python's backup-rename dance) and
+//! `properties.json` and `.stop.json`: reading, writing and
 //! the cascading merge `Daemon.properties` performs on every access.
 
 use std::fs;
+use std::io::Write;
 use std::path::Path;
 
 use meerschaum_core::pyfmt::{JsonStyle, json_dumps};
@@ -37,49 +38,73 @@ pub fn random_alnum(length: usize) -> String {
         .collect()
 }
 
-/// `Daemon.write_properties()`: move the existing file to `<random 8>.json`, write the new one,
-/// then delete the backup (or restore it if writing failed).
+/// `Daemon.write_properties()`: publish a complete JSON document with a same-directory rename.
+/// Unlike v4's backup-then-write, readers never see an existing file missing or partially written.
+/// Failed writes leave the previous file intact and remove only their own staging file.
 pub fn write_properties(path: &Path, props: &Map) -> SuccessTuple {
-    write_properties_with(path, props, true)
+    write_properties_with(path, props, true, |from, to| fs::rename(from, to))
 }
 
 /// [`write_properties`] into a job directory that must still exist: a directory that was deleted
 /// (the job was deleted while its supervisor ran) is never created again, and the write fails.
 pub fn write_existing_properties(path: &Path, props: &Map) -> SuccessTuple {
-    write_properties_with(path, props, false)
+    write_properties_with(path, props, false, |from, to| fs::rename(from, to))
 }
 
-fn write_properties_with(path: &Path, props: &Map, create_dir: bool) -> SuccessTuple {
+/// The publication operation is injectable so tests can pause or fail the atomic replacement.
+fn write_properties_with(
+    path: &Path,
+    props: &Map,
+    create_dir: bool,
+    publish: impl FnOnce(&Path, &Path) -> std::io::Result<()>,
+) -> SuccessTuple {
     let Some(dir) = path.parent() else {
         return SuccessTuple::fail("Invalid properties path.");
     };
     if !create_dir && !dir.is_dir() {
         return SuccessTuple::fail("The job's directory does not exist.");
     }
-    let backup = dir.join(format!("{}.json", random_alnum(8)));
-    let mut result = (|| -> std::io::Result<()> {
+    (|| -> std::io::Result<()> {
         if create_dir {
             fs::create_dir_all(dir)?;
         }
-        if path.exists() {
-            fs::rename(path, &backup)?;
+        let staged = dir.join(format!(
+            ".properties-{}-{}.tmp",
+            std::process::id(),
+            random_alnum(16)
+        ));
+        let permissions = match fs::metadata(path) {
+            Ok(metadata) => Some(metadata.permissions()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+            Err(error) => return Err(error),
+        };
+        // Exclusive creation ensures a failed writer never truncates or removes another
+        // writer's staging file. Nothing below recreates a directory deleted during the write.
+        let mut options = fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        if let Some(permissions) = &permissions {
+            use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+            options.mode(permissions.mode() & 0o7777);
         }
-        fs::write(path, dumps(&Value::Map(props.clone())))?;
-        Ok(())
+        let mut file = options.open(&staged)?;
+        let result = (|| {
+            if let Some(permissions) = permissions {
+                // Restore any bits cleared by umask before writing content. New files retain
+                // OpenOptions' ordinary defaults, as fs::write used before atomic publication.
+                file.set_permissions(permissions)?;
+            }
+            file.write_all(dumps(&Value::Map(props.clone())).as_bytes())?;
+            drop(file);
+            publish(&staged, path)
+        })();
+        if result.is_err() {
+            let _ = fs::remove_file(&staged);
+        }
+        result
     })()
     .map(|_| SuccessTuple::success())
-    .unwrap_or_else(|e| SuccessTuple::fail(e.to_string()));
-    if backup.exists() {
-        let cleanup = if result.success {
-            fs::remove_file(&backup)
-        } else {
-            fs::rename(&backup, path)
-        };
-        if let Err(e) = cleanup {
-            result = SuccessTuple::fail(e.to_string());
-        }
-    }
-    result
+    .unwrap_or_else(|e| SuccessTuple::fail(e.to_string()))
 }
 
 /// The properties whose value on disk always wins over an in-memory copy: who a job belongs to
@@ -172,6 +197,10 @@ pub fn remove_stop_file(path: &Path) -> SuccessTuple {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
+    use std::sync::mpsc::{self, SyncSender};
+    use std::thread::JoinHandle;
+    use std::time::Duration;
 
     fn map(json: &str) -> Map {
         Value::from_json_str(json).unwrap().to_map()
@@ -234,5 +263,162 @@ mod tests {
         fs::create_dir_all(&job_dir).unwrap();
         assert!(write_existing_properties(&path, &props).success);
         assert_eq!(read_properties(&path), Some(props));
+    }
+
+    fn paused_writer(
+        path: PathBuf,
+        props: Map,
+    ) -> (JoinHandle<SuccessTuple>, PathBuf, SyncSender<()>) {
+        let (staged_tx, staged_rx) = mpsc::sync_channel(0);
+        let (resume_tx, resume_rx) = mpsc::sync_channel(0);
+        let writer = std::thread::spawn(move || {
+            write_properties_with(&path, &props, false, |from, to| {
+                staged_tx
+                    .send(from.to_path_buf())
+                    .map_err(std::io::Error::other)?;
+                resume_rx
+                    .recv_timeout(Duration::from_secs(10))
+                    .map_err(std::io::Error::other)?;
+                fs::rename(from, to)
+            })
+        });
+        let staged = staged_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+        (writer, staged, resume_tx)
+    }
+
+    #[test]
+    fn readers_and_job_listings_keep_the_complete_file_until_publication() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = crate::config::JobPaths::for_root(dir.path(), dir.path());
+        let path = paths.jobs_dir.join("x/properties.json");
+        let previous = map(r#"{"owner":"alice","team":"Private","result":null}"#);
+        let next = map(
+            r#"{"owner":"alice","team":"Private","result":[true,"é"],"process":{"ended":"now"}}"#,
+        );
+        assert!(write_properties(&path, &previous).success);
+        let previous_bytes = fs::read(&path).unwrap();
+
+        let (writer, staged, resume) = paused_writer(path.clone(), next.clone());
+        assert_eq!(staged.parent(), path.parent());
+        assert_eq!(read_properties(&staged), Some(next.clone()));
+        for _ in 0..64 {
+            assert!(path.exists());
+            assert_eq!(fs::read(&path).unwrap(), previous_bytes);
+            assert_eq!(read_properties(&path), Some(previous.clone()));
+            assert_eq!(crate::daemon::get_daemon_ids(&paths), ["x"]);
+        }
+        resume.send(()).unwrap();
+        let result = writer.join().unwrap();
+        assert!(result.success, "{result}");
+        assert_eq!(read_properties(&path), Some(next));
+        assert_eq!(crate::daemon::get_daemon_ids(&paths), ["x"]);
+        assert!(!staged.exists());
+        assert_eq!(fs::read_dir(path.parent().unwrap()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn failed_publication_preserves_the_old_file_and_unrelated_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("properties.json");
+        let previous = map(r#"{"owner":"alice","result":[true,"previous"]}"#);
+        assert!(write_properties(&path, &previous).success);
+        let previous_bytes = fs::read(&path).unwrap();
+        let unrelated = dir.path().join(".other-writer.tmp");
+        fs::write(&unrelated, "untouched").unwrap();
+        let mut staged = None;
+        let result = write_properties_with(
+            &path,
+            &map(r#"{"result":[false,"new"]}"#),
+            false,
+            |from, _| {
+                staged = Some(from.to_path_buf());
+                assert_eq!(read_properties(&path), Some(previous.clone()));
+                Err(std::io::Error::other("injected publication failure"))
+            },
+        );
+        assert!(!result.success);
+        assert!(result.message.contains("injected publication failure"));
+        assert_eq!(fs::read(&path).unwrap(), previous_bytes);
+        assert_eq!(read_properties(&path), Some(previous));
+        assert!(!staged.unwrap().exists());
+        assert_eq!(fs::read_to_string(unrelated).unwrap(), "untouched");
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 2);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn staged_and_published_properties_preserve_restrictive_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("properties.json");
+        let previous = map(r#"{"owner":"alice","result":"previous"}"#);
+        let next = map(r#"{"owner":"alice","result":"next"}"#);
+        assert!(write_properties(&path, &previous).success);
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+        let result = write_properties_with(&path, &next, false, |from, to| {
+            assert_eq!(fs::metadata(from)?.permissions().mode() & 0o777, 0o600);
+            assert_eq!(fs::metadata(to)?.permissions().mode() & 0o777, 0o600);
+            fs::rename(from, to)
+        });
+        assert!(result.success, "{result}");
+        assert_eq!(read_properties(&path), Some(next));
+        assert_eq!(
+            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+    }
+
+    #[test]
+    fn concurrent_writers_publish_only_their_own_complete_staging_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("properties.json");
+        let previous = map(r#"{"result":"previous"}"#);
+        let first = map(r#"{"result":"first","env":{"unicode":"é"}}"#);
+        let second = map(r#"{"result":"second","process":{"began":"now"}}"#);
+        assert!(write_properties(&path, &previous).success);
+        let (writer_a, staged_a, resume_a) = paused_writer(path.clone(), first.clone());
+        let (writer_b, staged_b, resume_b) = paused_writer(path.clone(), second.clone());
+        assert_ne!(staged_a, staged_b);
+        assert_eq!(read_properties(&staged_a), Some(first.clone()));
+        assert_eq!(read_properties(&staged_b), Some(second.clone()));
+        assert_eq!(read_properties(&path), Some(previous));
+
+        resume_a.send(()).unwrap();
+        let result = writer_a.join().unwrap();
+        assert!(result.success, "{result}");
+        assert_eq!(read_properties(&path), Some(first));
+        assert_eq!(read_properties(&staged_b), Some(second.clone()));
+        resume_b.send(()).unwrap();
+        let result = writer_b.join().unwrap();
+        assert!(result.success, "{result}");
+        assert_eq!(read_properties(&path), Some(second));
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn a_deleted_job_is_not_recreated_or_replaced_by_a_pending_write() {
+        for recreate in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let job_dir = dir.path().join("jobs/x");
+            let path = job_dir.join("properties.json");
+            assert!(write_properties(&path, &map(r#"{"owner":"old"}"#)).success);
+            let replacement = map(r#"{"owner":"new","result":"new registration"}"#);
+            let (writer, _, resume) =
+                paused_writer(path.clone(), map(r#"{"owner":"old","result":"finished"}"#));
+            fs::remove_dir_all(&job_dir).unwrap();
+            if recreate {
+                assert!(write_properties(&path, &replacement).success);
+            }
+            resume.send(()).unwrap();
+            let result = writer.join().unwrap();
+            assert!(!result.success);
+            if recreate {
+                assert_eq!(read_properties(&path), Some(replacement));
+                assert_eq!(fs::read_dir(&job_dir).unwrap().count(), 1);
+            } else {
+                assert!(!job_dir.exists());
+            }
+        }
     }
 }
