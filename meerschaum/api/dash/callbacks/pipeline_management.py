@@ -64,8 +64,9 @@ def pipeline_path(name):
 def name_from_path(pathname, search=''):
     """The Pipeline of `/dash/pipelines/<name>` (or a legacy `?pipeline=` link)."""
     rest = str(pathname or '')[len('/dash/pipelines'):].strip('/')
-    if rest and rest.split('/', 1)[0] not in ('new', 'explore'):
-        return unquote(rest.split('/', 1)[0])
+    if rest:
+        first = rest.split('/', 1)[0]
+        return None if first in ('new', 'explore') else unquote(first)
     return parse_qs((search or '').lstrip('?')).get('pipeline', [None])[0]
 
 
@@ -97,7 +98,8 @@ def _draft_changes(draft, definition, layout=None):
     State('pipeline-definition', 'data'), State('pipeline-saved-name', 'options'),
 )
 def read_selection(pathname, name, search, refresh, session, current=None, current_options=None):
-    if not str(pathname).startswith('/dash/pipelines'):
+    if (not str(pathname).startswith('/dash/pipelines')
+        or str(pathname).rstrip('/').split('/')[-1] in ('new', 'explore')):
         raise PreventUpdate
     _require_session(session)
     query = parse_qs((search or '').lstrip('?'))

@@ -125,6 +125,7 @@ def build_icon(name: str, class_name: str = '') -> Any:
 CONSOLE_NAV_LINKS: Tuple[Tuple[str, str, str], ...] = (
     ('pipes', 'Pipes', '/dash/pipes'),
     ('pipelines', 'Pipelines', '/dash/pipelines'),
+    ('performance', 'Performance', '/dash/performance'),
     ('jobs', 'Jobs', '/dash/jobs'),
     ('connectors', 'Connectors', '/dash/connectors'),
     ('plugins', 'Plugins', '/dash/plugins'),
@@ -142,6 +143,7 @@ CONSOLE_USER_LINKS: Tuple[Tuple[str, str, str], ...] = (
 NAV_PERMISSIONS: Dict[str, str] = {
     'pipes': 'pipes:read',
     'pipelines': 'pipes:read',
+    'performance': 'pipes:read',
     'jobs': 'jobs:read',
     'connectors': 'connectors:read',
     'plugins': 'plugins:read',
@@ -596,7 +598,7 @@ def build_pages_navbar(
             ),
             dark=True,
             color='dark',
-            expand='lg',
+            expand='xl',
             class_name='console-nav',
         ),
         id='pages-navbar-div',
@@ -633,7 +635,7 @@ def build_plugin_navbar() -> Any:
             ),
             dark=True,
             color='dark',
-            expand='lg',
+            expand='xl',
             class_name='console-nav console-nav-plugin',
         ),
         id='pages-navbar-div',

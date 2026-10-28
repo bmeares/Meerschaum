@@ -116,18 +116,21 @@ _paths = {
         '/dash/runs'    : pages.jobs.layout,
         ### Pipelines pages are built per request (`pages.pipelines.route`).
         '/dash/pipelines': pages.pipelines.route,
+        '/dash/performance': pages.performance.route,
     } if _console_pages_allowed else {}),
 }
 _required_login = {
     '', '/dash', '/dash/', '/dash/tokens', '/dash/jobs', '/dash/pipes',
     '/dash/pipelines', '/dash/runs', '/dash/terminal', '/dash/webterm', '/dash/connectors',
     '/dash/users', '/dash/teams', '/dash/plugins',
+    '/dash/performance',
 }
 ### The permission a console page needs (`access.Viewer.can`): without it the page shows that it
 ### is not available (its link is not in the navigation either: `components.NAV_PERMISSIONS`).
 _required_permission = {
     '/dash/pipes': 'pipes:read',
     '/dash/pipelines': 'pipes:read',
+    '/dash/performance': 'pipes:read',
     '/dash/jobs': 'jobs:read',
     '/dash/runs': 'jobs:read',
     '/dash/terminal': 'webterm:use',
@@ -143,6 +146,7 @@ _pages = {
     'Overview': '/dash',
     'Pipes': '/dash/pipes',
     'Pipelines': '/dash/pipelines',
+    'Performance': '/dash/performance',
     'Jobs': '/dash/jobs',
     'Connectors': '/dash/connectors',
     'Plugins': '/dash/plugins',

@@ -78,11 +78,12 @@ def build_list_cards(registry: str, viewer: Any = None) -> List[Any]:
     from meerschaum.api.dash import access
     viewer = viewer if viewer is not None else access.current_viewer()
     instance = _engine.get_instance(registry)
-    definitions = access.visible_pipelines(instance, viewer=viewer)
+    registry_parameters = dict(access._pipeline_registry(instance))
+    definitions = access.visible_pipelines(instance, viewer=viewer, registry_parameters=registry_parameters)
     if not definitions:
         return [html.P('No Pipelines on this registry yet.', className='pipelines-empty')]
     try:
-        runs = _engine.get_runs(instance, limit=100)
+        runs = _engine.get_runs(instance, limit=100, viewer=viewer)
     except Exception:
         runs = []
     try:
@@ -102,7 +103,7 @@ def build_list_cards(registry: str, viewer: Any = None) -> List[Any]:
             facts.append(html.Span(f"{latest.get('status', '')} {started}".strip(),
                                    className=f"run-status-{latest.get('status', '')}"))
         else:
-            facts.append('never run')
+            facts.append('no recent run')
         if schedules:
             facts.append(', '.join(schedules))
         identity = json.dumps({'name': name, 'instance': registry}, sort_keys=True)
@@ -115,7 +116,7 @@ def build_list_cards(registry: str, viewer: Any = None) -> List[Any]:
             facts_row += [' · ', access.hidden_label(int(definition['hidden_members']))]
         complete = not definition.get('hidden_members')
         may_sync = complete and viewer.can('pipes:write')
-        may_edit = access.can_edit_pipe(viewer, access.pipeline_registry_parameters(name, instance))
+        may_edit = access.can_edit_pipe(viewer, registry_parameters.get(name, {}))
         manage = [
             (action, label) for action, label in (
                 ('analyze', 'Analyze tags'), ('schedule', 'Schedule'), ('copy', 'Copy'),
@@ -256,7 +257,7 @@ def render_explore(pathname, search, session):
         return [html.P('Choose a Pipe with Find Pipe on the Pipelines page.')], 'Pipe', '/dash/pipelines/new'
     try:
         instance = _engine.get_instance(_engine.split_ref(ref)[0], strict=True)
-        graph = _engine.focus_graph(_engine.plan_graph(instance), ref)
+        graph = _engine.focus_graph(_engine.plan_graph(instance, viewer=_viewer(session)), ref)
         if ref not in {node['pipe_ref'] for node in graph['nodes']}:
             raise ValueError(f'{_engine.ref_label(ref)} is not registered.')
         refs = sorted(node['pipe_ref'] for node in graph['nodes'])

@@ -603,7 +603,7 @@ print('JSON:' + json.dumps({
     assert out['durations'] == ['0.4 s', '12 s', '5 min', '2 h 5 min']
     assert out['counts'] == '2 succeeded · 1 upstream failed'
     assert out['query'] == '/dash/pipes?status=failing'
-    assert 'No runs yet' in out['empty_runs']
+    assert 'No recent runs' in out['empty_runs']
 
 
 def test_overview_tiles_render_for_a_session(sandbox):
@@ -710,7 +710,7 @@ print('JSON:' + json.dumps({
     assert out['unchanged'] == ['NoUpdate', 'NoUpdate']
     assert out['jobs']
     ### A new instance: no runs, and New pipeline instead of a list.
-    assert 'No runs yet' in out['runs']
+    assert 'No recent runs' in out['runs']
     assert 'New pipeline' in out['pipelines'] and 'overview-pipelines-list' not in out['pipelines']
 
 

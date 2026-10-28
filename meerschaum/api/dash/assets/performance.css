@@ -1,0 +1,31 @@
+.performance-page { max-width: 1600px; padding: 16px 24px 32px; margin: 0 auto; }
+.performance-page h1 { margin: 0; font-size: 1.75rem; }
+.performance-filters { display: grid; grid-template-columns: minmax(140px, 1fr) repeat(2, minmax(0, 2fr)); gap: 16px; margin: 16px 0 24px; }
+.performance-filters label { margin-bottom: 6px; font-size: 0.875rem; }
+.performance-filters > div { min-width: 0; }
+.performance-filters .form-select, .performance-filters .form-select option { color: #fff; background-color: #303030; }
+.performance-stats { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; margin: 0 0 24px; }
+.performance-stat { padding: 14px; border: 1px solid #ffffff18; border-radius: 6px; min-width: 0; }
+.performance-stat dt { color: #b6bdc5; font-size: 0.8rem; font-weight: 400; }
+.performance-stat dd { font-size: 1.45rem; margin: 4px 0 0; overflow-wrap: anywhere; }
+.performance-stat small { display: block; font-size: 0.75rem; }
+.performance-charts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+.performance-chart { min-width: 0; border: 1px solid #ffffff18; border-radius: 6px; padding: 12px 8px 0; }
+.performance-chart h2, .performance-section h2 { font-size: 1rem; margin: 0 8px 10px; }
+.performance-section { margin: 24px 0; min-width: 0; }
+.performance-section h2 { margin-left: 0; }
+.performance-table td:first-child { max-width: 32rem; overflow-wrap: anywhere; }
+.performance-table td:not(:first-child) { white-space: nowrap; }
+.overview-tile-performance { grid-column: 1 / -1; }
+.performance-overview-stats { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin: 0 0 12px; }
+.performance-overview-stats .performance-stat { padding: 8px 10px; }
+.performance-overview-stats .performance-stat dd { font-size: 1.2rem; }
+@media (max-width: 1100px) { .performance-charts { grid-template-columns: 1fr; } }
+@media (max-width: 767.98px) {
+    .performance-page { padding: 12px 16px 24px; }
+    .performance-filters { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+    .performance-filters .form-select, .performance-filters .dash-dropdown-trigger { min-height: 44px; }
+    .performance-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .performance-stat { padding: 10px; }
+    .performance-stat dd { font-size: 1.2rem; }
+}

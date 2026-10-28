@@ -444,7 +444,7 @@ def mask_attributes(
 
 
 def _parse_connection(typ: str, attributes: Dict[str, Any]) -> Dict[str, Any]:
-    """`flavor`, `host`, `port`, `database` from the attributes, else from their URI."""
+    """Connection settings from attributes or their URI, without opening a connection."""
     parsed: Dict[str, Any] = {}
     uri = attributes.get('uri', None)
     if isinstance(uri, str) and uri:
@@ -470,7 +470,7 @@ def _parse_connection(typ: str, attributes: Dict[str, Any]) -> Dict[str, Any]:
             except ValueError:
                 parsed = {}
     connection = {}
-    for field in ('flavor', 'host', 'port', 'database'):
+    for field in ('flavor', 'host', 'port', 'database', 'schema'):
         value = attributes.get(field, None)
         if (value is None or value == '') and parsed:
             value = parsed.get(field, None)
@@ -481,6 +481,12 @@ def _parse_connection(typ: str, attributes: Dict[str, Any]) -> Dict[str, Any]:
         connection['host'] = connection['host'].rsplit('@', 1)[-1] or None
     if typ == 'api' and not connection.get('flavor'):
         connection['flavor'] = attributes.get('protocol', None) or parsed.get('flavor', None)
+    if typ == 'sql':
+        from meerschaum._internal.static import STATIC_CONFIG
+        defaults = STATIC_CONFIG['sql']['create_engine_flavors'].get(connection.get('flavor'), {}).get('defaults', {})
+        for field in ('host', 'port', 'database', 'schema'):
+            if connection.get(field) in (None, ''):
+                connection[field] = defaults.get(field)
     database = connection.get('database', None)
     if database == '{SQLITE_DB_PATH}':
         try:
@@ -489,6 +495,78 @@ def _parse_connection(typ: str, attributes: Dict[str, Any]) -> Dict[str, Any]:
         except Exception:
             pass
     return connection
+
+
+def connector_fields(typ: str, attributes: Dict[str, Any], flavor: Any = None) -> Dict[str, Any]:
+    """Declared required and common settings. Reading metadata never constructs a connector."""
+    required, supported = set(), {'uri', 'teams'}
+    if typ == 'sql':
+        from meerschaum._internal.static import STATIC_CONFIG
+        config = STATIC_CONFIG['sql']['create_engine_flavors'].get(str(flavor or ''), {})
+        required.update(config.get('requirements') or [])
+        required.add('flavor')
+        supported.update(required)
+        supported.update(config.get('defaults') or {})
+        supported.update(('host', 'port', 'database', 'schema', 'username', 'password',
+                          'flavor', 'connect_timeout', 'pool_size', 'max_overflow',
+                          'pool_timeout', 'pool_recycle', 'sslmode', 'options', 'protected'))
+    elif typ in ('api', 'valkey'):
+        required.add('host')
+        supported.update(('host', 'port', 'username', 'password'))
+        if typ == 'api':
+            supported.update(('protocol', 'verify', 'api_key', 'client_id', 'client_secret'))
+        else:
+            supported.update(('db', 'socket_timeout'))
+    try:
+        from meerschaum.connectors import types
+        cls = types.get(typ)
+        for base in getattr(cls, '__mro__', ()):
+            for key, target in (('REQUIRED_ATTRIBUTES', required), ('OPTIONAL_ATTRIBUTES', supported)):
+                names = vars(base).get(key)
+                if isinstance(names, (list, tuple, set, frozenset)):
+                    target.update(name for name in names if isinstance(name, str))
+    except Exception:
+        pass
+    supported.update(required)
+    return {'required': sorted(required), 'supported': sorted(supported),
+            'uri_alternative': typ in ('sql', 'api', 'valkey')}
+
+
+def connector_visible(attributes: Dict[str, Any], viewer: Any = None) -> bool:
+    """Apply the connector's team allowlist from plain settings, without instantiating it."""
+    if viewer is None or viewer.no_auth or viewer.is_admin:
+        return True
+    if not viewer.signed_in or not viewer.can('connectors:read'):
+        return False
+    return _teams_allow(attributes, viewer)
+
+
+def _teams_allow(attributes: Dict[str, Any], viewer: Any) -> bool:
+    """The API's pure connector-team rule, using only plain settings."""
+    if viewer.no_auth or viewer.is_admin:
+        return True
+    teams = attributes.get('teams')
+    if teams is not None and not isinstance(teams, (str, list, tuple, set, frozenset)):
+        return False
+    from meerschaum.api.dash import access
+    principal = viewer.principal or access._principal(viewer)
+    return access.core().can_use_connector(principal, teams)
+
+
+def connector_team_allows(keys: str, viewer: Any) -> bool:
+    """Check a connector's config/runtime team restriction without constructing it."""
+    if viewer.no_auth or viewer.is_admin:
+        return True
+    from meerschaum.connectors.parse import parse_connector_keys
+    configured = parse_connector_keys(str(keys), construct=False)
+    attributes = dict(configured) if isinstance(configured, dict) else {}
+    typ, _, label = str(keys).partition(':')
+    from meerschaum.connectors import connectors as runtime_connectors
+    conn = (runtime_connectors.get(typ) or {}).get(label)
+    runtime = vars(conn) if conn is not None else {}
+    if not isinstance(configured, dict) and 'teams' in runtime:
+        attributes['teams'] = runtime['teams']
+    return _teams_allow(attributes, viewer)
 
 
 def _env_patches() -> List[Tuple[str, Dict[str, Any]]]:
@@ -581,8 +659,9 @@ def _row(
         'source_detail': source_detail,
         **{
             field: mask_value(field, connection.get(field, None), secrets, typ)
-            for field in ('flavor', 'host', 'port', 'database')
+            for field in ('flavor', 'host', 'port', 'database', 'schema')
         },
+        'fields': connector_fields(typ, attributes, connection.get('flavor')),
         'attributes': mask_attributes(attributes, typ, secrets),
         'testable': _testable(typ),
     }
@@ -594,11 +673,15 @@ def _sort_key(row: Dict[str, Any]) -> Tuple[int, str, str]:
     return rank, typ, row['label']
 
 
-def list_connectors() -> List[Dict[str, Any]]:
+def list_connectors(viewer: Any = None) -> List[Dict[str, Any]]:
     """
     Every connector the server knows, each `{keys, type, label, plugin, source, source_detail,
     flavor, host, port, database, attributes, testable}`, secrets masked.
     """
+    if viewer is not None and not (viewer.no_auth or viewer.is_admin) and (
+        not viewer.signed_in or not viewer.can('connectors:read')
+    ):
+        return []
     from meerschaum.config import get_config
     from meerschaum.config._default import default_meerschaum_config
     configured = copy.deepcopy(get_config('meerschaum', 'connectors', warn=False) or {})
@@ -615,9 +698,13 @@ def list_connectors() -> List[Dict[str, Any]]:
                 continue
             if is_internal_connector(typ, str(label)):
                 continue
-            source, detail = connector_source(typ, label, attributes, defaults, patches)
-            rows.append(_row(typ, str(label), {**inherited, **attributes}, source, detail))
+            # A hidden configured key must not reappear through a cached runtime connector.
             seen.add(f"{typ}:{label}")
+            combined = {**inherited, **attributes}
+            if not connector_visible(combined, viewer):
+                continue
+            source, detail = connector_source(typ, label, attributes, defaults, patches)
+            rows.append(_row(typ, str(label), combined, source, detail))
 
     ### Data plugins are connectors (`plugin:<name>`).
     try:
@@ -647,6 +734,8 @@ def list_connectors() -> List[Dict[str, Any]]:
                     for key, value in getattr(conn, '__dict__', {}).items()
                     if not str(key).startswith('_') and key not in ('type', 'label')
                 }
+                if not connector_visible(attributes, viewer):
+                    continue
                 plugin = _type_plugin(typ)
                 rows.append(_row(typ, str(label), attributes, 'Plugin' if plugin else 'Runtime', plugin))
                 seen.add(keys)

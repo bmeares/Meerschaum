@@ -789,7 +789,8 @@ def lineage_tab(pipe: mrsm.Pipe, allowed: bool = False, edit: bool = False) -> A
     from meerschaum.api.dash.pipes import build_relations_body
     explore = dcc.Link(
         'Explore graph',
-        href='/dash/pipelines/explore?pipe=' + quote(pipe_ref(pipe), safe=''),
+        href=('/dash/pipelines/explore?pipe=' + quote(pipe_ref(pipe), safe='')
+              + '&instance=' + quote(str(pipe.instance_keys), safe='')),
         className='btn btn-sm btn-secondary pipes-explore-link',
     )
     return html.Div([

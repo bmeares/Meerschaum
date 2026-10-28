@@ -75,6 +75,12 @@ def route(pathname, href=None):
     rest = (pathname or '')[len('/dash/pipelines'):].strip('/')
     if not rest:
         legacy = (query.get('pipeline') or query.get('name') or [None])[0]
+        # Old standalone lineage links carried a pipe and sometimes the literal `None` name.
+        # They describe a Pipe graph, not a saved Pipeline.
+        if query.get('pipe') and legacy in (None, '', 'None', 'null'):
+            keep = {key: values[0] for key, values in query.items()
+                    if key in ('pipe', 'instance') and values and values[0]}
+            return [html.Div(**{'data-mrsm-redirect': '/dash/pipelines/explore?' + urlencode(keep)})]
         if legacy:
             keep = {key: values[0] for key, values in query.items()
                     if key in ('instance', 'run_id', 'run') and values and values[0]}
@@ -82,6 +88,10 @@ def route(pathname, href=None):
                 keep['run_id'] = keep.pop('run')
             target = '/dash/pipelines/' + quote(legacy, safe='') + (('?' + urlencode(keep)) if keep else '')
             return [html.Div(**{'data-mrsm-redirect': target})]
+    if rest == 'explore' and not query.get('instance'):
+        ref = (query.get('pipe') or [''])[0]
+        if ref.count('|') == 3:
+            query['instance'] = [ref.split('|', 1)[0]]
     registry = _registry(query)
     if not rest:
         layout = list_layout(registry)

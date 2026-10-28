@@ -25,6 +25,8 @@
 
 /* Filters: search, keys, tags, whose (All / Mine / My teams) and status in one row on wide screens. */
 .pipes-filters { display: grid; grid-template-columns: minmax(220px, 2fr) repeat(4, minmax(120px, 1fr)) auto minmax(130px, 160px) auto; gap: 8px; align-items: center; margin-bottom: 12px; }
+/* Dash's invisible keyboard target otherwise keeps the browser's intrinsic input width. */
+.pipes-filters .dash-dropdown-focus-target { width: 100%; max-width: 100%; box-sizing: border-box; }
 /* Whose pipes: one segmented control (each choice a radio styled as a button). */
 .pipes-scope { display: inline-flex; flex-wrap: nowrap; margin: 0; }
 .pipes-scope .form-check { margin: 0; padding: 0; min-height: 0; }

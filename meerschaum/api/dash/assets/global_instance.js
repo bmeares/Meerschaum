@@ -31,6 +31,11 @@
         else if (target.id === 'pages-instance-select') {
             setInstance(target.value);
             if (location.pathname.indexOf('/dash/pipelines') === 0) window.location.assign('/dash/pipelines');
+            else if (location.pathname.replace(/\/$/, '') === '/dash/performance') {
+                const url = new URL(window.location.href);
+                for (const key of ['instance', 'pipe', 'pipeline']) url.searchParams.delete(key);
+                window.location.assign(url.pathname + url.search);
+            }
             else window.location.reload();
         }
     }, true);

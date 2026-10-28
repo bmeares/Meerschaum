@@ -94,15 +94,27 @@ def _normalize(definition, name, registry):
 
 def list_pipelines(instance=None):
     """Read registered definitions; legacy metadata is normalized without writing it."""
-    pipes = mrsm.get_pipes(connector_keys=['mrsm'], metric_keys=['pipeline'],
-                           instance=instance, as_list=True)
+    from meerschaum.connectors.parse import parse_instance_keys
+    from meerschaum.utils import fetch_pipes_keys
+    conn = parse_instance_keys(instance) if instance is None or isinstance(instance, str) else instance
+    records = fetch_pipes_keys('registered', conn, connector_keys=['mrsm'], metric_keys=['pipeline'])
+    inline_parameters = isinstance(records, dict)
+    records = records.values() if inline_parameters else (records or [])
     definitions = {}
-    for pipe in pipes:
-        definition = pipe.get_parameters(apply_symlinks=False).get('pipeline')
+    for record in records:
+        if len(record) < 3 or record[2] in (None, 'None'):
+            continue
+        name = str(record[2])
+        parameters = record[3] if inline_parameters and len(record) > 3 else None
+        if isinstance(parameters, str):
+            parameters = json.loads(parameters)
+        if not inline_parameters or not isinstance(parameters, dict):
+            # Valkey's public list-shaped keys use an empty fourth placeholder. Read that
+            # backend's current metadata; SQL's dict-shaped snapshot already includes it.
+            parameters = registration(name, conn).get_parameters(apply_symlinks=False, refresh=True)
+        definition = parameters.get('pipeline')
         if isinstance(definition, dict):
-            definitions[pipe.location_key] = _normalize(
-                dict(definition), pipe.location_key, pipe.instance_keys,
-            )
+            definitions[name] = _normalize(definition, name, conn)
     return definitions
 
 

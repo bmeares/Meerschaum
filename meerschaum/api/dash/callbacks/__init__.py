@@ -20,6 +20,7 @@ import meerschaum.api.dash.callbacks.pipes
 import meerschaum.api.dash.callbacks.pipelines
 import meerschaum.api.dash.callbacks.pipeline_management
 import meerschaum.api.dash.callbacks.pipeline_pages
+import meerschaum.api.dash.callbacks.performance
 import meerschaum.api.dash.callbacks.settings
 from meerschaum.api.dash.callbacks.custom import (
     init_dash_plugins,

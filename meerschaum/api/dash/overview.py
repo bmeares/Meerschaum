@@ -119,8 +119,11 @@ def run_pipeline_name(run: Dict[str, Any], definitions: Dict[str, Dict[str, Any]
     try:
         selection = json.loads(selection) if isinstance(selection, str) else (selection or {})
         for snapshot in selection.get('pipeline_definitions', None) or []:
-            if isinstance(snapshot, dict) and snapshot.get('name'):
-                return str(snapshot['name'])
+            if isinstance(snapshot, dict) and str(snapshot.get('name')) in definitions:
+                name = str(snapshot['name'])
+                from meerschaum.api.dash.engine import run_belongs_to_pipeline
+                if run_belongs_to_pipeline(run, name, definitions[name]):
+                    return name
     except (ValueError, TypeError, AttributeError):
         pass
     from meerschaum.api.dash.engine import run_belongs_to_pipeline
@@ -133,7 +136,7 @@ def run_pipeline_name(run: Dict[str, Any], definitions: Dict[str, Dict[str, Any]
 def _list_pipelines(instance: Any, viewer: Any = None) -> Dict[str, Dict[str, Any]]:
     """The saved Pipelines `viewer` (by default the request's) may see."""
     from meerschaum.api.dash.access import visible_pipelines
-    return visible_pipelines(instance, viewer=viewer) or {}
+    return visible_pipelines(instance, viewer=viewer, include_members=False) or {}
 
 
 def _get_runs(instance: Any, limit: int, viewer: Any = None) -> List[Dict[str, Any]]:
@@ -142,15 +145,15 @@ def _get_runs(instance: Any, limit: int, viewer: Any = None) -> List[Dict[str, A
     return get_runs(instance, limit=limit, viewer=viewer) or []
 
 
-def pipelines_summary(instance: Any, viewer: Any = None) -> Dict[str, Any]:
+def pipelines_summary(instance: Any, viewer: Any = None, definitions=None, runs=None) -> Dict[str, Any]:
     """
     `{'count', 'pipelines': [{name, status, started, run_id}, ...]}`: the saved Pipelines
     `viewer` (by default the request's) may see, with their last runs, failed and running ones
     first.
     """
-    definitions = _list_pipelines(instance, viewer=viewer)
+    definitions = _list_pipelines(instance, viewer=viewer) if definitions is None else definitions
     try:
-        runs = _get_runs(instance, 200, viewer=viewer) if definitions else []
+        runs = (_get_runs(instance, 200, viewer=viewer) if definitions else []) if runs is None else runs
     except Exception:
         runs = []
     latest: Dict[str, Dict[str, Any]] = {}
@@ -255,7 +258,7 @@ def jobs_summary(viewer: Any = None) -> Dict[str, Any]:
     return {'total': total, 'counts': counts}
 
 
-def recent_runs(instance: Any, limit: int = MAX_RUNS, viewer: Any = None) -> List[Dict[str, Any]]:
+def recent_runs(instance: Any, limit: int = MAX_RUNS, viewer: Any = None, definitions=None, runs=None) -> List[Dict[str, Any]]:
     """
     The latest run of each Pipeline (or set of pipes) the instance ran recently, failures first,
     then newest first: each `{run_id, status, started, duration_seconds, counts, targets,
@@ -263,9 +266,9 @@ def recent_runs(instance: Any, limit: int = MAX_RUNS, viewer: Any = None) -> Lis
     every minute takes one row). Only runs with a pipe `viewer` (by default the request's) may
     see, the other pipes anonymized.
     """
-    runs = _get_runs(instance, 100, viewer=viewer)
+    runs = _get_runs(instance, 100, viewer=viewer) if runs is None else runs
     try:
-        definitions = _list_pipelines(instance, viewer=viewer)
+        definitions = _list_pipelines(instance, viewer=viewer) if definitions is None else definitions
     except Exception:
         definitions = {}
     latest: Dict[Any, Dict[str, Any]] = {}
@@ -296,6 +299,20 @@ def recent_runs(instance: Any, limit: int = MAX_RUNS, viewer: Any = None) -> Lis
     items.sort(key=lambda item: str(item['started'] or ''), reverse=True)
     items.sort(key=lambda item: 0 if item['status'] in FAILED_STATUSES else 1)
     return items[:limit]
+
+
+def engine_summary(instance: Any, viewer: Any = None) -> Dict[str, Any]:
+    """One fresh registry/history snapshot shared by the two Overview engine tiles.
+
+    This data stays in the request; no viewer-filtered result or credentials are cached.
+    Member access is checked by the run reader, rather than walking a graph for each saved name.
+    """
+    definitions = _list_pipelines(instance, viewer=viewer)
+    runs = _get_runs(instance, 200 if definitions else 100, viewer=viewer)
+    return {
+        'pipelines': pipelines_summary(instance, viewer=viewer, definitions=definitions, runs=runs),
+        'runs': recent_runs(instance, viewer=viewer, definitions=definitions, runs=runs[:100]),
+    }
 
 
 def parse_timestamp(text: Any) -> Optional[datetime]:
@@ -377,7 +394,7 @@ def pipe_label(ref: str) -> Any:
 
 def status_chip(status: Optional[str]) -> Any:
     """A run's status, colored."""
-    label = str(status or 'never run').replace('_', ' ')
+    label = str(status or 'no recent run').replace('_', ' ')
     return html.Span(label, className=f"overview-status overview-status-{status or 'none'}")
 
 
@@ -470,7 +487,7 @@ def build_jobs_body(summary: Dict[str, Any]) -> List[Any]:
 def build_runs_body(runs: List[Dict[str, Any]], instance_query: Optional[str] = None) -> List[Any]:
     """Recent runs: status, what ran (a Pipeline or its Pipes), when, how long and what changed."""
     if not runs:
-        return [html.P('No runs yet', className='overview-none')]
+        return [html.P('No recent runs', className='overview-none')]
     from meerschaum.api.dash.pipeline_management import pipeline_title
     rows = []
     for run in runs:

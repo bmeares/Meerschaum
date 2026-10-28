@@ -85,7 +85,7 @@ def test_overview_of_an_empty_instance_offers_new_pipe(server, tab):
     assert page.locator('#overview-pipes #overview-empty').count() == 1
     assert not page.locator('#overview-pipes-body').is_visible()
     page.wait_for_selector('#overview-jobs-total')
-    _wait_text(page, '#overview-runs-body', 'No runs yet')
+    _wait_text(page, '#overview-runs-body', 'No recent runs')
     for tile in ('#overview-pipelines', '#overview-jobs', '#overview-runs'):
         assert page.locator(tile).is_visible(), tile
     ### No captions: a title and the actions.

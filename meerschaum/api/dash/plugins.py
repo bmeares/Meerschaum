@@ -256,7 +256,9 @@ def build_installed_plugins_table(plugins: List[Dict[str, Any]], admin: bool = F
             provides.append(dbc.Badge('Not loaded', color='warning', text_color='dark', class_name='me-1'))
         cells = [
             html.Td([
-                html.Span(name, className='fw-semibold'),
+                (dcc.Link(name, href='/dash/plugins/installed/' + name,
+                          className='console-name-link fw-semibold')
+                 if admin else html.Span(name, className='fw-semibold')),
                 html.Div(
                     [plugin['version'] or '', ' · ' if plugin['version'] else '', plugin_kind_label(plugin)],
                     className='text-muted small d-sm-none',
@@ -720,6 +722,33 @@ def build_plugin_detail(
         html.Br(),
         _build_plugin_card(plugin_name, session_data, detail=True, admin=admin, installed=installed),
         html.Br(),
+        _source_browser('repository', plugin_name, session_data),
+    ], className='plugin-detail-wrapper')
+
+
+def _source_browser(kind: str, name: str, session: Any):
+    from meerschaum.api.dash.plugin_sources import build_source_browser
+    return build_source_browser(kind, name, session)
+
+
+def build_installed_plugin_detail(name: str, session: Any) -> Any:
+    """Read-only installed plugin metadata and source, restricted to session administrators."""
+    from meerschaum.api.dash.plugin_sources import may_read_source
+    back = dbc.Button('← Installed plugins', href='/dash/plugins', color='link')
+    if not may_read_source('installed', session):
+        return html.Div([back, html.H5('Installed source is available to administrators.')],
+                        className='console-empty')
+    installed = next((plugin for plugin in get_installed_plugins(check_packages=False)
+                      if plugin['name'] == name), None)
+    if not installed:
+        return html.Div([back, html.H5('This plugin is not installed.')], className='console-empty')
+    return html.Div([
+        back,
+        html.H3(name),
+        html.P(' · '.join(value for value in (plugin_kind_label(installed), installed['version']) if value),
+               className='text-muted'),
+        html.Div([dbc.Badge(item, color='secondary', class_name='me-1') for item in installed['provides']]),
+        _source_browser('installed', name, session),
     ], className='plugin-detail-wrapper')
 
 

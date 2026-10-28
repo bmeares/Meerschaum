@@ -18,4 +18,5 @@ import meerschaum.api.dash.pages.register
 import meerschaum.api.dash.pages.pipes
 import meerschaum.api.dash.pages.jobs
 import meerschaum.api.dash.pages.pipelines
+import meerschaum.api.dash.pages.performance
 import meerschaum.api.dash.pages.settings

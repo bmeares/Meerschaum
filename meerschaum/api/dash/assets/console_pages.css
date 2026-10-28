@@ -160,3 +160,22 @@
 }
 .dbc_dark .dash-datepicker { border: 1px solid grey; border-radius: 4px; }
 .dbc_dark .dash-datepicker-content input { color: #fff; background: transparent; }
+
+.plugin-source-browser { margin: 24px 0; min-width: 0; }
+.plugin-source-content {
+    margin-top: 12px;
+    padding: 16px;
+    max-height: 65vh;
+    overflow: auto;
+    white-space: pre;
+    color: #dceaf6;
+    background: #17212b;
+    border: 1px solid #47515c;
+    border-radius: 6px;
+    font-size: 0.85rem;
+}
+.connectors-fields { margin: 12px 0 6px; max-width: 36rem; font-size: 0.8rem; }
+.connectors-fields dd { overflow-wrap: anywhere; }
+@media (max-width: 767.98px) {
+    .plugin-source-browser .dash-dropdown-trigger { min-height: 44px; }
+}

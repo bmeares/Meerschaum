@@ -27,6 +27,7 @@ from meerschaum.api.dash.users import viewer
 from meerschaum.api.dash.plugins import (
     build_plugins_listing,
     build_plugin_detail,
+    build_installed_plugin_detail,
     build_installed_plugins_tab,
     get_installed_plugins,
     is_plugin_owner,
@@ -45,6 +46,8 @@ def _parse_plugin_name_from_pathname(pathname: Optional[str]) -> Optional[str]:
     if not pathname or not str(pathname).startswith('/dash/plugins'):
         return None
     suffix = str(pathname)[len('/dash/plugins'):].strip('/')
+    if suffix.startswith('installed/'):
+        suffix = suffix[len('installed/'):]
     return suffix or None
 
 
@@ -93,10 +96,13 @@ def render_plugins_page(
     Render the active tab (Installed or Repository) or a single published plugin's page.
     """
     who = viewer(session_data)
-    if not who['active']:
+    if not who['active'] or not who['viewer'].can('plugins:read'):
+        message = ('Plugins are not available to your account.' if who['active']
+                   else 'Sign in to see the plugins')
         return (
             html.Div(
-                [html.H5('Sign in to see the plugins'), dbc.Button('Sign in', href='/dash/login', color='primary')],
+                [html.H5(message)] + ([] if who['active'] else [
+                    dbc.Button('Sign in', href='/dash/login', color='primary')]),
                 className='console-empty',
             ),
             HIDDEN, 1, 1, HIDDEN, [], True, False, True, HIDDEN,
@@ -105,7 +111,9 @@ def render_plugins_page(
     plugin_name = _parse_plugin_name_from_pathname(pathname)
     if plugin_name:
         return (
-            build_plugin_detail(plugin_name, session_data, admin=admin),
+            (build_installed_plugin_detail(plugin_name, session_data)
+             if str(pathname).startswith('/dash/plugins/installed/')
+             else build_plugin_detail(plugin_name, session_data, admin=admin)),
             HIDDEN, 1, 1, HIDDEN, [], True, False, True, HIDDEN,
         )
 
@@ -144,6 +152,25 @@ def render_plugins_page(
         False,
         {},
     )
+
+
+@dash_app.callback(
+    Output('plugin-source-content', 'children'),
+    Input('plugin-source-file', 'value'),
+    Input('plugin-source-context', 'data'),
+    State('session-store', 'data'),
+)
+def show_plugin_source(selected, context, session):
+    """Every file selection repeats authentication, membership, and bounded path checks."""
+    if not selected or not isinstance(context, dict):
+        raise PreventUpdate
+    from meerschaum.api.dash.plugin_sources import read_source
+    try:
+        return read_source(context.get('kind'), context.get('name'), selected, session)
+    except PermissionError:
+        return 'Plugin source is not available to your account.'
+    except Exception:
+        return 'This file cannot be previewed. Choose another source file.'
 
 
 def _run_alert(message: str, job_name: Optional[str], success: bool = True, running: bool = False):

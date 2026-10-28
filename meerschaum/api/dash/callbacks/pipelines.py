@@ -694,7 +694,8 @@ def apply_filters(n_clicks, run_submit, pipe_submit, run_id, pipe, status, curre
 )
 def render_pipeline_graph(pathname, definition, draft, refresh, prefs, search, session_data):
     """Only membership, draft, expansion changes and explicit refreshes rebuild the canvas."""
-    if not str(pathname).startswith('/dash/pipelines/'):
+    if (not str(pathname).startswith('/dash/pipelines/')
+        or str(pathname).rstrip('/').split('/')[-1] in ('new', 'explore')):
         raise PreventUpdate
     if not _may_read(session_data):
         raise PreventUpdate
@@ -759,7 +760,8 @@ def render_pipelines(pathname, search, definition, live_run, selected_run, node_
     over its event stream (`pipeline-run-follow`), whose events re-render this (`pipeline-run-tick`);
     without a stream the page polls every `FALLBACK_POLL_MS`.
     """
-    if not str(pathname).startswith('/dash/pipelines'):
+    if (not str(pathname).startswith('/dash/pipelines')
+        or str(pathname).rstrip('/').split('/')[-1] in ('new', 'explore')):
         raise PreventUpdate
 
     session_id = (session_data or {}).get('session-id', None)

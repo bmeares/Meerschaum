@@ -75,12 +75,21 @@ class Anonymizer:
     "a hidden pipe". Administrators (and `--no-auth`) see everything (`active` is `False`).
     """
 
-    def __init__(self, viewer: Any = None, instance: Any = None):
+    def __init__(self, viewer: Any = None, instance: Any = None, refs=None):
         from meerschaum.api.dash import access
         self.viewer = viewer if viewer is not None else access.current_viewer()
         self.instance_keys = str(instance) if instance is not None else str(get_instance())
+        self.reference_visibility = None
+        if refs is not None and not (self.viewer.no_auth or self.viewer.is_admin):
+            requested = {str(ref) for ref in refs}
+            allowed = access.visible_ref_subset(self.viewer, requested)
+            self.reference_visibility = {ref: ref in allowed for ref in requested}
         try:
-            self.visible = access.visible_refs(self.viewer, instance if instance is not None else self.instance_keys)
+            self.visible = (
+                {ref for ref, allowed in self.reference_visibility.items() if allowed}
+                if self.reference_visibility is not None else
+                access.visible_refs(self.viewer, instance if instance is not None else self.instance_keys)
+            )
         except Exception:
             self.visible = set()
         self.active = self.visible is not None
@@ -90,6 +99,11 @@ class Anonymizer:
         ref = str(ref or '')
         if not self.active or ref.count('|') < 3 or is_hidden_ref(ref):
             return True
+        if self.reference_visibility is not None:
+            if ref not in self.reference_visibility:
+                from meerschaum.api.dash import access
+                self.reference_visibility[ref] = ref in access.visible_ref_subset(self.viewer, [ref])
+            return self.reference_visibility[ref]
         if ref.split('|', 1)[0] == self.instance_keys:
             return ref in self.visible
         ### A member on another instance: that instance's pipes decide.
@@ -659,7 +673,8 @@ def get_runs(
         ended = stopped_execution_times(instance)
         for run in runs:
             reconcile_stopped_run(run, ended.get(run['run']['run_id']))
-    anonymizer = Anonymizer(viewer, instance)
+    refs = [ref for summary in runs for ref in (summary.get('run', {}).get('targets') or [])]
+    anonymizer = Anonymizer(viewer, instance, refs=refs)
     if anonymizer.active:
         runs = [visible for visible in (anonymizer.run(run) for run in runs) if visible is not None]
     return runs

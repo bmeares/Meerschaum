@@ -133,7 +133,7 @@
 }
 
 /* Wide screens: one row, kept at the top while the page scrolls. */
-@media (min-width: 992px) {
+@media (min-width: 1200px) {
   .console-nav-root {
     position: sticky;
     top: 0;
@@ -153,8 +153,28 @@
 }
 
 /* Narrow screens: the links stack behind the toggler, each a full-width 44px row. */
-@media (max-width: 991.98px) {
+@media (max-width: 1199.98px) {
+  /* Keep the brand and toggler in a fixed first row while Collapse animates below it. */
+  .console-nav-container.container-fluid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: start;
+  }
+  .console-nav-brand.navbar-brand {
+    min-height: 56px;
+    grid-column: 1;
+    grid-row: 1;
+  }
+  .console-nav .navbar-toggler {
+    grid-column: 2;
+    grid-row: 1;
+    align-self: start;
+    margin: 6px 0;
+  }
   .console-nav .navbar-collapse {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    width: 100%;
     flex-basis: 100%;
   }
   .console-nav-links.navbar-nav {

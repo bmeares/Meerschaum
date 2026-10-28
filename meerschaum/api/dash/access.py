@@ -707,7 +707,8 @@ def registered_pipes(
     from meerschaum.utils import fetch_pipes_keys
     conn = instance if not isinstance(instance, str) else mrsm.get_connector(instance)
     result = fetch_pipes_keys('registered', conn, **filters)
-    items = list(result.values()) if isinstance(result, dict) else list(result or [])
+    hydrated = isinstance(result, dict)
+    items = list(result.values()) if hydrated else list(result or [])
     out = []
     for keys_tuple in items:
         if not isinstance(keys_tuple, (list, tuple)) or len(keys_tuple) < 3:
@@ -720,9 +721,18 @@ def registered_pipes(
                 parameters = json.loads(parameters)
             except ValueError:
                 parameters = None
-        if not isinstance(parameters, dict):
+        # List results (Valkey and custom instances) carry key extras, not an ACL snapshot.
+        # In particular their empty fourth dictionary must never imply public access.
+        if not hydrated or not isinstance(parameters, dict):
             try:
-                parameters = mrsm.Pipe(ck, mk, lk, instance=conn).get_parameters(apply_symlinks=False) or {}
+                pipe = mrsm.Pipe(ck, mk, lk, instance=conn)
+                failures = pipe.__dict__.get('_attributes_load_failures', 0)
+                parameters = pipe.get_parameters(apply_symlinks=False, refresh=True)
+                if (not isinstance(parameters, dict)
+                    or pipe.__dict__.get('_attributes_load_failures', 0) > failures):
+                    raise ValueError('Pipe metadata is unavailable.')
+                if not parameters and not pipe.attributes.get('pipe_id') and pipe.get_id() is None:
+                    raise ValueError('Pipe registration is unavailable.')
             except Exception:
                 ### Unreadable: treated as private to nobody but administrators.
                 parameters = {'access': {'visibility': 'private', 'owner': None}}
@@ -766,6 +776,41 @@ def visible_refs(viewer: Viewer, instance: Any) -> Optional[Set[str]]:
     return refs
 
 
+def visible_ref_subset(viewer: Viewer, refs: Iterable[str]) -> Set[str]:
+    """Fresh, bounded registration reads for referenced pipes; no cached access results."""
+    requested = {str(ref) for ref in refs}
+    if viewer.no_auth or viewer.is_admin:
+        return requested
+    if not viewer.signed_in or not viewer.can('pipes:read'):
+        return set()
+    from meerschaum.api.dash.engine import get_instance
+    groups: Dict[str, List[Tuple[str, str, str]]] = {}
+    for ref in requested:
+        parts = ref.split('|')
+        if len(parts) == 4 and parts[1] != 'mrsm':
+            groups.setdefault(parts[0], []).append(tuple(parts[1:]))
+    visible = set()
+    for keys, members in groups.items():
+        instance_visible = set()
+        try:
+            conn = get_instance(keys, strict=True)
+            for offset in range(0, len(members), 128):
+                chunk = members[offset:offset + 128]
+                wanted = set(chunk)
+                rows = registered_pipes(conn,
+                    connector_keys=sorted({member[0] for member in chunk}),
+                    metric_keys=sorted({member[1] for member in chunk}),
+                )
+                instance_visible.update(
+                    _ref(keys, ck, mk, lk) for ck, mk, lk, parameters in rows
+                    if (str(ck), str(mk), str(lk)) in wanted and can_see_pipe(viewer, parameters)
+                )
+            visible.update(instance_visible)
+        except Exception:
+            continue  # Refused/unreadable instances supply no visible references.
+    return visible
+
+
 def _pipeline_registry(instance: Any) -> List[Tuple[str, Dict[str, Any]]]:
     """`[(name, registry_parameters)]` of the saved Pipelines of `instance` (one read)."""
     out = []
@@ -779,27 +824,34 @@ def visible_pipelines(
     instance: Any,
     viewer: Optional[Viewer] = None,
     definitions: Optional[Dict[str, Dict[str, Any]]] = None,
+    include_members: bool = True,
+    registry_parameters: Optional[Dict[str, Dict[str, Any]]] = None,
 ) -> Dict[str, Dict[str, Any]]:
     """
     The saved Pipelines of `instance` that `viewer` may see (their registry pipe's `access`,
     AC7), as `list_pipelines()` reads them (or the `definitions` a caller already read). A
     Pipeline's members the viewer may not see are left out of its `targets` and counted
-    (`hidden_members`).
+    (`hidden_members`). `include_members=False` omits members entirely for list cards, so
+    listing saved names does not walk their member instances.
     """
     from meerschaum.core.Pipeline import _saved
     viewer = viewer if viewer is not None else current_viewer()
     conn = instance if not isinstance(instance, str) else mrsm.get_connector(instance)
+    if viewer.no_auth or viewer.is_admin:
+        return dict(definitions if definitions is not None else _saved.list_pipelines(conn))
     ### The definitions as every other reader sees them (`list_pipelines`), filtered by their
     ### registry pipes' `access`.
-    definitions = dict((definitions if definitions is not None else _saved.list_pipelines(conn)) or {})
-    if viewer.no_auth or viewer.is_admin:
-        return definitions
-    if not viewer.signed_in or not viewer.can('pipes:read'):
-        return {}
     try:
-        registry = {name: parameters for name, parameters in _pipeline_registry(conn)}
+        registry = dict(registry_parameters) if registry_parameters is not None else dict(_pipeline_registry(conn))
     except Exception:
-        ### Fail closed: without their access, no Pipeline is shown.
+        if viewer.no_auth or viewer.is_admin:
+            raise
+        return {}
+    definitions = dict(definitions) if definitions is not None else {
+        name: _saved._normalize(parameters['pipeline'], name, conn)
+        for name, parameters in registry.items()
+    }
+    if not viewer.signed_in or not viewer.can('pipes:read'):
         return {}
     visible_definitions: Dict[str, Dict[str, Any]] = {}
     for name, definition in definitions.items():
@@ -808,7 +860,7 @@ def visible_pipelines(
             continue
         definition = dict(definition)
         targets = [str(ref) for ref in (definition.get('targets') or [])]
-        visible, hidden = partition_refs(viewer, targets)
+        visible, hidden = partition_refs(viewer, targets) if include_members else ([], 0)
         definition['targets'] = visible
         definition['hidden_members'] = hidden
         visible_definitions[name] = definition

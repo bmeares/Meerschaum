@@ -3,8 +3,9 @@
 # vim:fenc=utf-8
 
 """
-The Overview's tiles (`pages/overview.py`): each loads on its own after the page and again every
-`OVERVIEW_REFRESH_MS`, so a slow one never holds the others, and an unchanged tile is not redrawn.
+The Overview's tiles load after the page and refresh every `OVERVIEW_REFRESH_MS`.
+Pipelines and Recent runs share one registry/history read; Pipes and Jobs load independently.
+An unchanged tile is not redrawn.
 """
 
 from __future__ import annotations
@@ -80,14 +81,6 @@ def render_pipes_tile(n_intervals, store, digest, session_data):
     return children, digest, (not empty), empty
 
 
-@dash_app.callback(
-    Output('overview-pipelines-body', 'children'),
-    Output('overview-pipelines-digest', 'data'),
-    Input('overview-interval', 'n_intervals'),
-    State('overview-store', 'data'),
-    State('overview-pipelines-digest', 'data'),
-    State('session-store', 'data'),
-)
 def render_pipelines_tile(n_intervals, store, digest, session_data):
     """The Pipelines tile: each saved Pipeline's last run."""
     viewer = _viewer(session_data)
@@ -118,14 +111,6 @@ def render_jobs_tile(n_intervals, digest, session_data):
     return _changed(children, digest)
 
 
-@dash_app.callback(
-    Output('overview-runs-body', 'children'),
-    Output('overview-runs-digest', 'data'),
-    Input('overview-interval', 'n_intervals'),
-    State('overview-store', 'data'),
-    State('overview-runs-digest', 'data'),
-    State('session-store', 'data'),
-)
 def render_runs_tile(n_intervals, store, digest, session_data):
     """Recent runs, failures first."""
     viewer = _viewer(session_data)
@@ -137,3 +122,28 @@ def render_runs_tile(n_intervals, store, digest, session_data):
     except Exception as e:
         children = overview.build_error(f"Could not read the runs: {e}")
     return _changed(children, digest)
+
+
+@dash_app.callback(
+    Output('overview-pipelines-body', 'children'),
+    Output('overview-pipelines-digest', 'data'),
+    Output('overview-runs-body', 'children'),
+    Output('overview-runs-digest', 'data'),
+    Input('overview-interval', 'n_intervals'),
+    State('overview-store', 'data'),
+    State('overview-pipelines-digest', 'data'),
+    State('overview-runs-digest', 'data'),
+    State('session-store', 'data'),
+)
+def render_engine_tiles(n_intervals, store, pipelines_digest, runs_digest, session_data):
+    """Read the registry and bounded history once for Pipelines and Recent runs."""
+    viewer = _viewer(session_data)
+    query = (store or {}).get('query')
+    try:
+        summary = overview.engine_summary(_instance(store), viewer=viewer)
+        pipelines = overview.build_pipelines_body(summary['pipelines'], query)
+        runs = overview.build_runs_body(summary['runs'], query)
+    except Exception as error:
+        pipelines = overview.build_error(f"Could not read the Pipelines: {error}")
+        runs = overview.build_error(f"Could not read the runs: {error}")
+    return (*_changed(pipelines, pipelines_digest), *_changed(runs, runs_digest))

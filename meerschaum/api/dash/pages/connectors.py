@@ -37,6 +37,7 @@ COLUMNS = (
     ('host', 'Host'),
     ('port', 'Port'),
     ('database', 'Database'),
+    ('schema', 'Schema'),
 )
 
 
@@ -90,19 +91,26 @@ def _text(value: Any) -> str:
 def _cell(field: str, row: Dict[str, Any]) -> Any:
     if field == 'keys':
         attributes = row.get('attributes', None) or {}
+        fields = row.get('fields') or {}
         code = html.Code(row['keys'], className='connectors-keys')
-        if not attributes:
+        if not attributes and not fields:
             return code
-        return html.Details(
-            [
-                html.Summary(code),
+        metadata = []
+        for key, label in (('required', 'Required keys'), ('supported', 'Supported keys')):
+            names = fields.get(key) or []
+            if names:
+                metadata += [html.Dt(label), html.Dd(', '.join(names))]
+        return html.Div([code, html.Details([
+                html.Summary('Inspect'),
+                html.H6('Connection settings'),
                 html.Pre(
                     json.dumps(attributes, indent=2, sort_keys=True, default=str, ensure_ascii=False),
                     className='connectors-attributes',
                 ),
-            ],
-            className='connectors-details',
-        )
+                html.Dl(metadata, className='connectors-fields') if metadata else None,
+                html.Small('A URI can provide the required settings. Connector plugins may accept additional keys.',
+                           className='text-muted') if fields.get('uri_alternative') else None,
+            ], className='connectors-details')])
     if field == 'type':
         parts = [dbc.Badge(row['type'], color='secondary', className='connectors-type')]
         if row.get('plugin'):
@@ -119,7 +127,7 @@ def _cell(field: str, row: Dict[str, Any]) -> Any:
 def _search_text(row: Dict[str, Any]) -> str:
     return ' '.join(
         _text(row.get(field, None)) for field in (
-            'keys', 'type', 'plugin', 'source', 'source_detail', 'flavor', 'host', 'database',
+            'keys', 'type', 'plugin', 'source', 'source_detail', 'flavor', 'host', 'database', 'schema',
         )
     ).lower()
 
@@ -134,7 +142,8 @@ def build_table(rows: List[Dict[str, Any]], testable: bool, details: bool = True
     columns = COLUMNS if details else tuple(column for column in COLUMNS if column[0] in PUBLIC_FIELDS)
     if not details:
         rows = [
-            {key: value for key, value in row.items() if key not in ('attributes', 'flavor', 'host', 'port', 'database')}
+            {key: value for key, value in row.items()
+             if key in ('keys', 'type', 'source', 'source_detail', 'plugin')}
             for row in rows
         ]
     headers = [html.Th(header, scope='col') for _, header in columns]
@@ -200,7 +209,8 @@ def route(pathname: Optional[str] = None, href: Optional[str] = None) -> List[An
         table = html.Div(html.H5('The connectors are not available to your account'), className='console-empty')
     else:
         try:
-            rows = list_connectors()
+            from meerschaum.api.dash.access import get_viewer
+            rows = list_connectors(viewer=get_viewer(session_id=session_id))
             table = build_table(rows, may_test(session_id), details=may_see_details(session_id))
         except Exception as e:
             table = alert_from_success_tuple((False, f"Could not list the connectors: {mask_text(e)}"))
