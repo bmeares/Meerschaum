@@ -19,7 +19,7 @@ import json
 import os
 import pathlib
 import pty
-import select
+import selectors
 import shutil
 import signal
 import sqlite3
@@ -97,13 +97,14 @@ def _pty(argv, env, cwd, wait_for, signum=None, byte=b'\x03', after=4.0, timeout
         os.execve(argv[0], argv, env)
     out = b''
     reaped = False
+    selector = None
     deadline = time.time() + timeout
 
     def pump(seconds):
         nonlocal out
         end = time.time() + seconds
         while time.time() < end:
-            ready, _, _ = select.select([fd], [], [], 0.1)
+            ready = selector.select(0.1)
             if ready:
                 try:
                     data = os.read(fd, 65536)
@@ -115,6 +116,9 @@ def _pty(argv, env, cwd, wait_for, signum=None, byte=b'\x03', after=4.0, timeout
         return True
 
     try:
+        selector = selectors.DefaultSelector()
+        selector.register(fd, selectors.EVENT_READ)
+
         def ready():
             return wait_for() if callable(wait_for) else wait_for in out
 
@@ -151,11 +155,60 @@ def _pty(argv, env, cwd, wait_for, signum=None, byte=b'\x03', after=4.0, timeout
                 os.waitpid(pid, 0)
             except (OSError, ChildProcessError):
                 pass
+        if selector is not None:
+            selector.close()
         os.close(fd)
 
 
 def _after_last_frame(out: bytes) -> bytes:
     return out[out.rfind(b'Reading data'):]
+
+
+def test_pty_wait_supports_file_descriptors_above_select_limit(monkeypatch, tmp_path):
+    """Busy pytest workers can hand the PTY a descriptor outside select's 1024-bit set."""
+    import fcntl
+    import resource
+    limit = resource.getrlimit(resource.RLIMIT_NOFILE)[0]
+    if limit != resource.RLIM_INFINITY and limit <= 1024:
+        pytest.skip('The process descriptor limit cannot reproduce a descriptor above 1023.')
+    fork = pty.fork
+    descriptors = []
+
+    def high_fd_fork():
+        pid, fd = fork()
+        if pid:
+            try:
+                high_fd = fcntl.fcntl(fd, fcntl.F_DUPFD_CLOEXEC, 1024)
+            except BaseException:
+                os.kill(pid, signal.SIGKILL)
+                os.waitpid(pid, 0)
+                raise
+            finally:
+                os.close(fd)
+            descriptors.append(high_fd)
+            return pid, high_fd
+        return pid, fd
+
+    monkeypatch.setattr(pty, 'fork', high_fd_fork)
+    root, plugins = tmp_path / 'root', tmp_path / 'plugins'
+    root.mkdir()
+    plugins.mkdir()
+    env = {
+        key: value for key, value in os.environ.items()
+        if not key.startswith('MRSM_')
+        and key not in ('PYTHONPATH', 'PYTHONHOME', 'TMUX', 'TMUX_PANE')
+    }
+    env.update(MRSM_ROOT_DIR=str(root), MRSM_PLUGINS_DIR=str(plugins))
+    out, status = _pty(
+        [sys.executable, '-c', "import time; print('READY', flush=True); time.sleep(30)"],
+        env, root, b'READY', signum=signal.SIGTERM, after=5, timeout=10,
+    )
+    assert descriptors and min(descriptors) >= 1024
+    assert b'READY' in out
+    assert status is not None and os.WIFSIGNALED(status), (status, out)
+    assert os.WTERMSIG(status) == signal.SIGTERM, (status, out)
+    with pytest.raises(OSError):
+        os.fstat(descriptors[0])
 
 
 def test_entry_raises_keyboard_interrupt_and_the_interpreter_keeps_running(home):

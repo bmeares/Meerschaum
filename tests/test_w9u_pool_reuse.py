@@ -20,6 +20,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 import meerschaum as mrsm
+from meerschaum import _core
 
 PG_BASE_URI = f"postgresql://test:test1234@localhost:{service_port('postgis')}/testdb"
 SCHEMA = 'w9u'
@@ -71,6 +72,9 @@ def test_repeated_reads_open_no_new_connections():
         assert p.get_columns_types()
 
     try:
+        ### Finish setup's background status/metrics writes and their cold initialization
+        ### before measuring connections opened by reads.
+        _core.flush_sync_statuses(timeout=10.0)
         ### Warm up every pool this connector uses.
         for _ in range(3):
             read_round(pipe)

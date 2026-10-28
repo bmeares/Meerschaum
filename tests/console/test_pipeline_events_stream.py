@@ -23,16 +23,20 @@ def test_canvas_sync_is_followed_over_the_event_stream(server, tab):
     _wait_text(page, '#pipeline-node-run-label', 'canvas-', timeout=30000)
     # The page opens the run's stream (waiting for the job to start the run) and receives its
     # events up to `run_finished`, then closes it instead of reconnecting.
-    page.wait_for_function(
-        "() => Array.from((window._mrsmRunFollows || new Map()).values())"
-        ".some(f => f.run_id.includes('-canvas-') && f.state === 'finished' && f.last !== null)",
+    snapshot = page.wait_for_function(
+        """() => {
+            const f = Array.from((window._mrsmRunFollows || new Map()).values()).find(
+                f => f.run_id.includes('-canvas-') && f.state === 'finished' && f.last !== null);
+            return f ? {path: f.path, closed: f.source.readyState, statuses: {...f.statuses}} : null;
+        }""",
         timeout=90000,
     )
-    follow = page.evaluate(
-        "() => { const f = Array.from(window._mrsmRunFollows.values()).find("
-        "f => f.run_id.includes('-canvas-')); return {path: f.path, closed: f.source.readyState,"
-        " statuses: f.statuses}; }"
-    )
+    # Job completion may legitimately remove the follow before the next browser call. Keep
+    # the values observed with the finished event, rather than looking the entry up again.
+    try:
+        follow = snapshot.json_value()
+    finally:
+        snapshot.dispose()
     assert follow['path'].startswith('/engine/runs/') and '-canvas-' in follow['path'], follow
     assert follow['closed'] == 2, follow
     assert follow['statuses'].get('sql:w7console|sql:w7console|w7parent|None') == 'succeeded', follow
