@@ -173,6 +173,36 @@ def test_wheel_overlay_refuses_different_python_sources(producer):
     assert (producer[0] / 'meerschaum/__init__.py').read_bytes() == original
 
 
+def test_wheel_producer_refuses_a_missing_tracked_python_module(producer):
+    repo = producer[0]
+    (repo / 'meerschaum/new_feature.py').write_text('FEATURE = True\n')
+    git(repo, 'add', '.')
+    git(repo, 'commit', '-qm', 'A public module that must be distributed')
+    with pytest.raises(artifacts.ArtifactError, match='omits tracked Python modules.*new_feature'):
+        wheel_manifest(producer)
+    assert not (producer[2] / 'provenance.json').exists()
+
+
+def test_missing_module_cannot_be_masked_by_a_source_checkout_or_payload_checksum(producer):
+    manifest = wheel_manifest(producer)
+    wheel = next(manifest.parent.glob('*.whl'))
+    with zipfile.ZipFile(wheel) as archive:
+        members = {member.filename: archive.read(member) for member in archive.infolist()
+                   if member.filename != 'meerschaum/__init__.py'}
+    with zipfile.ZipFile(wheel, 'w') as archive:
+        for name, data in members.items():
+            archive.writestr(name, data)
+    # Even a descriptor containing the new complete-payload checksum cannot turn
+    # a packaging omission into a valid artifact of this checkout.
+    record = json.loads(manifest.read_text())
+    record['files'][wheel.name] = {'sha256': artifacts.sha256(wheel), 'bytes': wheel.stat().st_size}
+    manifest.write_text(json.dumps(record))
+    with pytest.raises(artifacts.ArtifactError, match='omits tracked Python modules'):
+        artifacts.overlay_wheel(manifest, profile='release', repo=producer[0])
+    assert not (producer[0] / 'meerschaum/_core/_native.abi3.so').exists()
+    assert not (producer[0] / 'meerschaum.libs').exists()
+
+
 def test_wheel_member_cannot_write_outside_checkout(producer):
     manifest = wheel_manifest(producer, extra='../escaped')
     with pytest.raises(artifacts.ArtifactError, match='Unsafe wheel member'):

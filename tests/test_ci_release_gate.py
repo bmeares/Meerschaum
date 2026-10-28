@@ -52,6 +52,10 @@ def add_artifact(candidate, name, expected):
                              'Name: meerschaum\nVersion: 5.0.0\n')
             archive.writestr('meerschaum-5.0.0.dist-info/WHEEL', f'Wheel-Version: 1.0\nTag: {tag}\n')
             archive.writestr('meerschaum/_core/_native', b'synthetic-extension')
+            for name in gate.artifacts._git(candidate.repo, 'ls-files', '-z', '--',
+                                            'meerschaum', '_meerschaum_mrsm.py').split('\0'):
+                if name.endswith('.py'):
+                    archive.writestr(name, (candidate.repo / name).read_bytes())
     elif expected['kind'] == 'binary':
         (directory / expected['program']).write_bytes(b'synthetic-native-program')
     else:

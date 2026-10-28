@@ -57,9 +57,19 @@ def _relative_file(base: Path, name: str) -> Path:
     return path
 
 
-def _wheel_info(path: Path, cargo_version: str) -> dict[str, Any]:
+def _wheel_info(path: Path, cargo_version: str, *, repo: Path = REPO) -> dict[str, Any]:
     convert = runpy.run_path(str(REPO / 'scripts/check_packaging.py'))['cargo_to_pep440']
     with zipfile.ZipFile(path) as archive:
+        # Source-reading backend tests must not mask modules omitted from the installed
+        # distribution. Check the whole tracked Python package, including the CLI shim,
+        # before either producing provenance or accepting a downloaded wheel.
+        expected = {
+            name for name in _git(repo, 'ls-files', '-z', '--',
+                                  'meerschaum', '_meerschaum_mrsm.py').split('\0')
+            if name.endswith('.py')
+        }
+        if missing := expected - set(archive.namelist()):
+            raise ArtifactError(f'Wheel omits tracked Python modules: {sorted(missing)}')
         metadata_names = [name for name in archive.namelist() if name.endswith('.dist-info/METADATA')]
         if len(metadata_names) != 1:
             raise ArtifactError('Expected exactly one wheel METADATA file.')
@@ -129,7 +139,7 @@ def create_manifest(
         'files': files,
     }
     if wheels:
-        manifest['wheel'] = _wheel_info(wheels[0], version)
+        manifest['wheel'] = _wheel_info(wheels[0], version, repo=repo)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(manifest, indent=2, sort_keys=True) + '\n')
     return manifest
@@ -180,7 +190,7 @@ def verify_manifest(
             raise ArtifactError('Requested program is not a verified payload of this artifact.')
         if build['kind'] == 'wheel':
             wheels = [p for p in verified if p.suffix == '.whl']
-            if len(wheels) != 1 or _wheel_info(wheels[0], build['cargo_version']) != manifest['wheel']:
+            if len(wheels) != 1 or _wheel_info(wheels[0], build['cargo_version'], repo=repo) != manifest['wheel']:
                 raise ArtifactError('Wheel metadata differs from its manifest.')
         return manifest
     except (KeyError, TypeError, OSError, json.JSONDecodeError, zipfile.BadZipFile) as exc:
