@@ -561,9 +561,18 @@ pub trait InstanceConnector: Connector {
                         .build()
                         .map_err(|error| ConnectorError::Invalid(error.to_string()))?;
                     let attributes = self.get_pipe_attributes(&pipe).await?;
-                    if let Some(parameters) = attributes.get("parameters") {
-                        entry.extra = Some(parameters.clone());
-                    }
+                    // A disappeared or malformed registration must not inherit the list's
+                    // placeholder `{}` and become a public handle. An explicit fresh `{}`
+                    // remains a valid custom backend's empty parameter document.
+                    let parameters = match attributes.get("parameters") {
+                        Some(Value::Map(parameters)) => parameters.clone(),
+                        Some(Value::Str(text)) => match Value::from_json_str(text) {
+                            Ok(Value::Map(parameters)) => parameters,
+                            _ => continue,
+                        },
+                        _ => continue,
+                    };
+                    entry.extra = Some(Value::Map(parameters));
                     let identity = attributes.get("pipe_id").and_then(|value| match value {
                         Value::Int(identity) => Some(PipeId::Int(*identity)),
                         Value::Str(identity) => Some(PipeId::parse(identity)),

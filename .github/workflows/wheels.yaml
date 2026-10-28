@@ -130,6 +130,7 @@ jobs:
       run: |
         docker run --rm -v "$GITHUB_WORKSPACE:/io" -w /io \
           -e BUILD_CONSOLE_FIXTURE="${{ matrix.target == 'x86_64-unknown-linux-gnu' && '1' || '0' }}" \
+          -e CONSOLE_FIXTURE_UID="$(id -u)" -e CONSOLE_FIXTURE_GID="$(id -g)" \
           "quay.io/pypa/manylinux_2_28_${{ matrix.container_arch }}:latest" \
           bash -euxc 'curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable \
             && . "$HOME/.cargo/env" \
@@ -138,7 +139,8 @@ jobs:
             && if [ "$BUILD_CONSOLE_FIXTURE" = 1 ]; then \
               /opt/python/cp313-cp313/bin/python scripts/ci/console_fixture.py build \
                 --messages cli-build.jsonl --binary target/release/mrsm \
-                --output console-native-fixture --profile release; fi'
+                --output console-native-fixture --profile release \
+              && chown -R --no-dereference -- "$CONSOLE_FIXTURE_UID:$CONSOLE_FIXTURE_GID" console-native-fixture; fi'
     - name: Build mrsm (macOS)
       if: ${{ runner.os == 'macOS' }}
       env:

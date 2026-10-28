@@ -3,12 +3,13 @@
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
 
 import pytest
-import yaml
+from meerschaum.utils.yaml import yaml
 
 from scripts.ci import console_fixture as fixture
 from scripts.ci.services import clean_environment
@@ -16,6 +17,64 @@ from tests.test_ci_artifacts import producer, binary_manifest, git  # noqa: F401
 from tests.test_workflows_packaging import _evaluate_actions
 
 REPO = Path(__file__).resolve().parents[1]
+
+
+def test_collection_and_workflow_parsing_do_not_require_pyyaml(tmp_path):
+    env = {key: value for key, value in os.environ.items()
+           if not key.startswith('MRSM_') and key not in ('TMUX', 'TMUX_PANE')}
+    for name in ('root', 'plugins'):
+        (tmp_path / name).mkdir()
+    env.update(MRSM_ROOT_DIR=str(tmp_path / 'root'), MRSM_PLUGINS_DIR=str(tmp_path / 'plugins'),
+               PYTHONPATH=str(REPO), MRSM_NO_AUTO_INSTALL='1')
+    code = '''
+import importlib.abc, sys
+class BlockPyYaml(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, *args):
+        if fullname == 'yaml' or fullname.startswith('yaml.'):
+            raise ModuleNotFoundError('PyYAML intentionally unavailable')
+sys.modules.pop('yaml', None)
+sys.meta_path.insert(0, BlockPyYaml())
+from tests import test_ci_console_fixture as checks
+workflow = checks.yaml.safe_load('on:\\n  workflow_call: {}\\n')
+assert 'workflow_call' in workflow.get('on', workflow.get(True))
+checks.test_workflows_produce_separate_fixtures_and_only_console_core_downloads_them()
+assert 'yaml' not in sys.modules
+'''
+    result = subprocess.run([sys.executable, '-c', code], cwd=REPO, env=env,
+                            capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_manylinux_returns_only_fixture_output_to_the_host_owner(tmp_path):
+    workflow = yaml.safe_load((REPO / '.github/workflows/wheels.yaml').read_text())
+    run = next(step['run'] for step in workflow['jobs']['binaries']['steps']
+               if step.get('name') == 'Build mrsm (manylinux_2_28 container)')
+    run = re.sub(r'\$\{\{[^}]+\}\}',
+                 lambda match: 'x86_64' if 'container_arch' in match.group() else '1', run)
+    programs = tmp_path / 'programs'
+    programs.mkdir()
+    capture = tmp_path / 'docker-arguments.json'
+    ownership = tmp_path / 'ownership-arguments.json'
+    for name, destination in [('docker', capture), ('chown', ownership)]:
+        command = programs / name
+        command.write_text(f'#!{sys.executable}\nimport json, pathlib, sys\n'
+                           f'pathlib.Path({str(destination)!r}).write_text(json.dumps(sys.argv[1:]))\n')
+        command.chmod(0o755)
+    env = {key: value for key, value in os.environ.items() if key not in ('TMUX', 'TMUX_PANE')}
+    env.update(PATH=str(programs) + os.pathsep + env.get('PATH', ''),
+               GITHUB_WORKSPACE=str(tmp_path))
+    subprocess.run(['/bin/bash', '-euc', run], env=env, cwd=tmp_path, check=True)
+    arguments = json.loads(capture.read_text())
+    passed = dict(arguments[index + 1].split('=', 1)
+                  for index, argument in enumerate(arguments) if argument == '-e')
+    assert passed['CONSOLE_FIXTURE_UID'] == str(os.getuid())
+    assert passed['CONSOLE_FIXTURE_GID'] == str(os.getgid())
+    command = re.search(r'chown\s+[^;]+', arguments[-1]).group()
+    env.update(passed)
+    subprocess.run(['/bin/bash', '-euc', command], env=env, cwd=tmp_path, check=True)
+    assert json.loads(ownership.read_text()) == [
+        '-R', '--no-dereference', '--', f'{os.getuid()}:{os.getgid()}', 'console-native-fixture',
+    ]
 
 
 def fixture_manifest(producer, profile='release'):
