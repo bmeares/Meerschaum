@@ -285,6 +285,10 @@ class Server:
             self.native_built = result.returncode == 0
             if not self.native_built:
                 (self.root / 'native_build.log').write_text(result.stdout + result.stderr)
+                from tests._binary import in_ci
+                if in_ci():
+                    pytest.fail('Required native console fixture is unavailable: '
+                                + (result.stdout + result.stderr)[-1500:])
         result = run_python(self.env, f"""
 import meerschaum as mrsm
 from meerschaum.core import User

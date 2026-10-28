@@ -39,7 +39,9 @@ nightly/release calls cannot select a partial matrix. `rust / summary`, `pytest 
 
 Console browser tests run once in the core lane on nightly and release candidates. The pinned
 Playwright package and Chromium must launch successfully; unavailable browser dependencies fail
-these required runs. Ordinary PRs retain the faster API-host coverage.
+these required runs. Their native plugin fixture travels as a separate verified artifact from
+the existing CLI producer, tied to that CLI's bytes and current SDK. Consumers need no cached
+SDK or Rust compiler. Ordinary PRs retain the faster API-host coverage and skip fixture builds.
 
 ### Artifact reuse
 

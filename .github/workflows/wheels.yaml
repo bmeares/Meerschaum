@@ -129,11 +129,16 @@ jobs:
       if: ${{ matrix.container_arch }}
       run: |
         docker run --rm -v "$GITHUB_WORKSPACE:/io" -w /io \
+          -e BUILD_CONSOLE_FIXTURE="${{ matrix.target == 'x86_64-unknown-linux-gnu' && '1' || '0' }}" \
           "quay.io/pypa/manylinux_2_28_${{ matrix.container_arch }}:latest" \
           bash -euxc 'curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable \
             && . "$HOME/.cargo/env" \
             && rustc -Vv > binary-toolchain.txt \
-            && cargo build --release --locked -p meerschaum --bin mrsm'
+            && { cargo build --release --locked -p meerschaum --bin mrsm --message-format=json-render-diagnostics > cli-build.jsonl || { cat cli-build.jsonl; exit 1; }; } \
+            && if [ "$BUILD_CONSOLE_FIXTURE" = 1 ]; then \
+              /opt/python/cp313-cp313/bin/python scripts/ci/console_fixture.py build \
+                --messages cli-build.jsonl --binary target/release/mrsm \
+                --output console-native-fixture --profile release; fi'
     - name: Build mrsm (macOS)
       if: ${{ runner.os == 'macOS' }}
       env:
@@ -183,4 +188,13 @@ jobs:
       with:
         name: mrsm-${{ env.VERSION }}-${{ matrix.target }}
         path: out/*
+        if-no-files-found: error
+    - name: Record the matching console fixture provenance
+      if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
+      run: python scripts/ci/console_fixture.py record --output console-native-fixture --profile release --toolchain-file binary-toolchain.txt
+    - uses: actions/upload-artifact@v4
+      if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
+      with:
+        name: console-native-fixture-release
+        path: console-native-fixture/**
         if-no-files-found: error

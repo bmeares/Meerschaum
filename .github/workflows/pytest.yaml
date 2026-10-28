@@ -90,6 +90,7 @@ jobs:
     env:
       CARGO_INCREMENTAL: '0'
       CARGO_BUILD_JOBS: '16'
+      MRSM_TEST_CONSOLE: ${{ (inputs.run_console || github.event_name == 'schedule') && '1' || '0' }}
     steps:
       - uses: actions/checkout@v4
         with: {clean: false, persist-credentials: false, ref: '${{ github.sha }}'}
@@ -105,6 +106,9 @@ jobs:
         with: {name: pytest-wheel, path: '${{ env.CI_ARTIFACT_DIR }}/wheel/*', if-no-files-found: error, retention-days: 7}
       - uses: actions/upload-artifact@v4
         with: {name: pytest-binary, path: '${{ env.CI_ARTIFACT_DIR }}/binary/*', if-no-files-found: error, retention-days: 7}
+      - uses: actions/upload-artifact@v4
+        if: ${{ env.MRSM_TEST_CONSOLE == '1' }}
+        with: {name: console-native-fixture-debug, path: '${{ env.CI_ARTIFACT_DIR }}/console-native-fixture/**', if-no-files-found: error, retention-days: 7}
 
   tests:
     name: tests (${{ matrix.shard }})
@@ -139,6 +143,13 @@ jobs:
         with:
           name: ${{ needs.changes.outputs.binary_artifact }}
           path: ${{ env.PYTEST_ARTIFACT_DIR }}/binary
+          run-id: ${{ inputs.artifacts_run_id || github.run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        if: ${{ matrix.shard == 'core' && env.MRSM_TEST_CONSOLE == '1' }}
+        with:
+          name: ${{ inputs.profile == 'release' && 'console-native-fixture-release' || 'console-native-fixture-debug' }}
+          path: ${{ env.PYTEST_ARTIFACT_DIR }}/console-native-fixture
           run-id: ${{ inputs.artifacts_run_id || github.run_id }}
           github-token: ${{ github.token }}
       - name: Prepare the environment from complete verified artifacts

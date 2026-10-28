@@ -15,6 +15,11 @@ mkdir -p "$scratch/root" "$scratch/plugins"
 export MRSM_ROOT_DIR="$scratch/root" MRSM_PLUGINS_DIR="$scratch/plugins" MRSM_NO_AUTO_INSTALL=1 MRSM_NO_UPDATE_CHECK=1
 "$python_bin" scripts/ci/artifacts.py verify --manifest "$artifact_dir/wheel/provenance.json" --kind wheel --profile "$wheel_profile" --target x86_64-unknown-linux-gnu
 "$python_bin" scripts/ci/artifacts.py verify --manifest "$artifact_dir/binary/provenance.json" --kind binary --profile "$binary_profile" --target x86_64-unknown-linux-gnu
+if [ "${MRSM_TEST_CONSOLE:-0}" = 1 ]; then
+  "$python_bin" scripts/ci/console_fixture.py verify \
+    --manifest "$artifact_dir/console-native-fixture/provenance.json" \
+    --binary-manifest "$artifact_dir/binary/provenance.json" --profile "$binary_profile"
+fi
 wanted="$("$python_bin" -c 'import sys; print(sys.version_info[:2])')"
 deps_hash="$({ cat requirements/full.txt requirements/sql-mssql.txt requirements/sql-oracle.txt requirements/sql-duckdb.txt scripts/ci/requirements-browser.txt; \
   printf '%s\n' "pytest pytest-xdist httpx httpx2 uv $wanted"; } | sha256sum | cut -d' ' -f1)"
@@ -72,6 +77,11 @@ if [ -n "${GITHUB_ENV:-}" ]; then
     echo "MRSM_TEST_ARTIFACT_MANIFEST=$artifact_dir/binary/provenance.json"
     echo "MRSM_TEST_BIN_PROFILE=$binary_profile"
     echo "MRSM_TEST_SKIP_INSTALL=1"
+    if [ "${MRSM_TEST_CONSOLE:-0}" = 1 ]; then
+      echo "MRSM_TEST_CONSOLE_NATIVE_FIXTURE=$artifact_dir/console-native-fixture"
+      echo "MRSM_TEST_CONSOLE_NATIVE_MANIFEST=$artifact_dir/console-native-fixture/provenance.json"
+      echo "MRSM_TEST_CONSOLE_NATIVE_PROFILE=$binary_profile"
+    fi
   } >> "$GITHUB_ENV"
 fi
 printf 'Prepared verified wheel and CLI for backend tests.\n'

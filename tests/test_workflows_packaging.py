@@ -367,7 +367,7 @@ def test_pytest_builds_once_and_consumes_verified_complete_artifacts(pytest_work
     assert "inputs.profile != 'release'" in build['if'], 'release tests reuse shipping artifacts'
     downloads = [step['with'] for step in tests['steps']
                  if str(step.get('uses', '')).startswith('actions/download-artifact')]
-    assert len(downloads) == 2
+    assert len(downloads) == 3
     assert all('inputs.artifacts_run_id || github.run_id' in step['run-id'] for step in downloads)
     prepare = next(i for i, step in enumerate(tests['steps'])
                    if 'scripts/ci/prepare_pytest.sh' in step.get('run', ''))

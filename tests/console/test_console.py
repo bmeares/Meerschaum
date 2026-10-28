@@ -707,7 +707,8 @@ def _rendered_figure(frame, selector: str = '#w7-figure'):
 
 def test_native_page_renders_the_same_figure(server, tab):
     if not server.native_built:
-        pytest.skip(f"The native plugin was not built: {(server.root / 'native_build.log').read_text()[-800:]}")
+        from tests._binary import skip_or_fail
+        skip_or_fail(f"The native plugin was not built: {(server.root / 'native_build.log').read_text()[-800:]}")
     tab.login()
     tab.goto('/dash/w7-figure')
     python_figure = _rendered_figure(_frame(tab.page))

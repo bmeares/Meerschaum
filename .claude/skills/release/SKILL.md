@@ -134,7 +134,9 @@ and strict `docs.yaml`. Its gate verifies every required platform and writes
 and the candidate manifest. A successful verify-only run without that manifest is not a gate.
 
 The console browser suite is required in the core lane for releases and nightly runs; missing
-Playwright or Chromium fails these runs. Ordinary PRs keep the faster API-host coverage.
+Playwright, Chromium or the verified native console fixture fails these runs. The fixture is
+built once with the existing CLI producer and is separate from shipping artifacts. Ordinary
+PRs keep the faster API-host coverage and do not build the fixture.
 Python backend lanes have isolated roots, projects, volumes and ports, a shared 16-worker budget,
 and a disjoint/exhaustive collection proof. Their artifacts retain collection/ownership evidence.
 Artifact consumers check actual commit/tree, target/profile and every payload digest. PRs keep
