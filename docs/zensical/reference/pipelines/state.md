@@ -59,6 +59,8 @@ Cursors are why `skip` works for every shape of pipe. Comparing a child's waterm
 
 Before syncing a pipe the executor acquires a **lease** on it, so two jobs never sync the same pipe at once. Leases are short-lived (60 seconds), renewed every third of that, and released when the node finishes. A node that loses its lease mid-sync is aborted before it commits.
 
+Interrupting a run also drains pending lease requests. A successful claim that arrives after its caller is cancelled is released; cleanup keeps the same bounded shutdown wait.
+
 | Instance | How the lease is taken |
 |---|---|
 | SQL | An `INSERT` into the `mrsm_pipe_leases` table (unique key on the pipe), with conditional `DELETE` for expiry |

@@ -938,7 +938,7 @@ fn merge_results(first: SyncResult, second: SyncResult) -> SyncResult {
     out
 }
 
-/// Leases taken by node attempts of this process and not handed back yet.
+/// Pending acquisitions and held leases of this process not handed back yet.
 static HELD_LEASES: AtomicUsize = AtomicUsize::new(0);
 
 /// Wait (up to `timeout`) until every lease a node attempt of this process took has been handed
@@ -947,8 +947,8 @@ static HELD_LEASES: AtomicUsize = AtomicUsize::new(0);
 /// Dropping a run (Ctrl-C in the CLI, a closed API request, a Python `KeyboardInterrupt`) drops
 /// its node attempts mid-sync; each hands its lease back in a task of its own (see
 /// `LeaseHold`). A process that is about to exit awaits this first, or the leases stay held
-/// until their TTL runs out and the next run waits for them. Counted from the moment a lease is
-/// taken, so an attempt the runtime has not dropped yet is waited for too.
+/// until their TTL runs out and the next run waits for them. Counted before acquisition starts,
+/// so a backend's committed claim whose acknowledgement is still pending is waited for too.
 pub async fn drain_lease_releases(timeout: Duration) {
     let deadline = tokio::time::Instant::now() + timeout;
     while HELD_LEASES.load(Ordering::SeqCst) > 0 && tokio::time::Instant::now() < deadline {
@@ -956,8 +956,8 @@ pub async fn drain_lease_releases(timeout: Duration) {
     }
 }
 
-/// A held lease of a node attempt: released by the attempt itself, or, when the attempt is
-/// dropped before it got there (the run was cancelled), by a task spawned from [`Drop`].
+/// An owned pending claim or held lease: released by the attempt itself, or, when the attempt
+/// is dropped before it got there (the run was cancelled), by a task spawned from [`Drop`].
 pub(crate) struct LeaseHold<L: LeaseSource> {
     leases: Arc<L>,
     pipe_ref: PipeRef,
@@ -966,7 +966,7 @@ pub(crate) struct LeaseHold<L: LeaseSource> {
 }
 
 impl<L: LeaseSource> LeaseHold<L> {
-    /// Count a lease that was just taken.
+    /// Count a held lease or an acquisition that is about to start.
     pub(crate) fn new(leases: Arc<L>, pipe_ref: PipeRef, holder: String) -> Self {
         HELD_LEASES.fetch_add(1, Ordering::SeqCst);
         LeaseHold {
@@ -975,6 +975,41 @@ impl<L: LeaseSource> LeaseHold<L> {
             holder,
             armed: true,
         }
+    }
+
+    /// Finish acquisition on an owned task before handing its guard to the caller.
+    /// Cancelling a database await need not cancel its committed write. If the caller drops
+    /// the receiver, a late successful claim drops its guard and releases only this holder.
+    /// Count before spawning so shutdown also drains the unacknowledged-acquire window.
+    pub(crate) async fn acquire(
+        leases: Arc<L>,
+        pipe_ref: PipeRef,
+        holder: String,
+        ttl: Duration,
+    ) -> Result<Option<Self>, StateError> {
+        let mut hold = Self::new(leases, pipe_ref, holder);
+        let (sender, receiver) = tokio::sync::oneshot::channel();
+        tokio::spawn(async move {
+            let acquired = hold.leases.acquire(&hold.pipe_ref, &hold.holder, ttl).await;
+            let result = match acquired {
+                Ok(true) => Ok(Some(hold)),
+                Ok(false) => {
+                    hold.disarm();
+                    Ok(None)
+                }
+                Err(error) => {
+                    hold.disarm();
+                    Err(error)
+                }
+            };
+            // An abandoned successful handoff drops its guard here, after acquisition settled.
+            let _ = sender.send(result);
+        });
+        receiver.await.map_err(|_| {
+            StateError::Other(
+                "The lease acquisition task ended before returning its result.".into(),
+            )
+        })?
     }
 
     /// The attempt handed the lease back itself.
@@ -1046,10 +1081,10 @@ fn spawn_sync<E: SyncExecutor, L: LeaseSource>(
             };
             let deadline = t0 + wait;
             let mut errored = false;
-            loop {
-                match leases.acquire(&request.pipe_ref, &holder, ttl).await {
-                    Ok(true) => break,
-                    Ok(false) if tokio::time::Instant::now() < deadline => {
+            let mut hold = loop {
+                match LeaseHold::acquire(leases.clone(), request.pipe_ref.clone(), holder.clone(), ttl).await {
+                    Ok(Some(hold)) => break hold,
+                    Ok(None) if tokio::time::Instant::now() < deadline => {
                         errored = false;
                         tokio::time::sleep(poll).await;
                     }
@@ -1062,7 +1097,7 @@ fn spawn_sync<E: SyncExecutor, L: LeaseSource>(
                         errored = true;
                         tokio::time::sleep(poll).await;
                     }
-                    Ok(false) => {
+                    Ok(None) => {
                         return done(
                             SyncResult::new(
                                 false,
@@ -1081,9 +1116,8 @@ fn spawn_sync<E: SyncExecutor, L: LeaseSource>(
                         );
                     }
                 }
-            }
+            };
             let pipe_ref = request.pipe_ref.clone();
-            let mut hold = LeaseHold::new(leases.clone(), pipe_ref.clone(), holder.clone());
             let result = {
                 let sync = executor.sync(request);
                 tokio::pin!(sync);

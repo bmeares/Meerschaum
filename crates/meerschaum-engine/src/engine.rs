@@ -1069,22 +1069,24 @@ impl Engine {
             );
             let holder = crate::runs::new_run_id();
             let ttl = Duration::from_secs(300);
-            match self.leases.acquire(&key, &holder, ttl).await {
-                Ok(true) => {}
-                Ok(false) => {
-                    return RunResult::failed(
-                        format!("Run id '{run_id}' is already in use."),
-                        t0.elapsed(),
-                    );
-                }
-                Err(e) => {
-                    return RunResult::failed(
-                        format!("Cannot reserve run id '{run_id}': {e}"),
-                        t0.elapsed(),
-                    );
-                }
-            }
-            let lease = LeaseHold::new(self.leases.clone(), key.clone(), holder.clone());
+            let lease =
+                match LeaseHold::acquire(self.leases.clone(), key.clone(), holder.clone(), ttl)
+                    .await
+                {
+                    Ok(Some(lease)) => lease,
+                    Ok(None) => {
+                        return RunResult::failed(
+                            format!("Run id '{run_id}' is already in use."),
+                            t0.elapsed(),
+                        );
+                    }
+                    Err(e) => {
+                        return RunResult::failed(
+                            format!("Cannot reserve run id '{run_id}': {e}"),
+                            t0.elapsed(),
+                        );
+                    }
+                };
             match self.state.load_run(run_id).await {
                 Ok(None) => {}
                 Ok(Some(_)) => {

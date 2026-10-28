@@ -56,6 +56,16 @@ impl Harness {
     }
 
     async fn run(&self, selection: Selection, options: ExecutorOptions) -> (Plan, RunRecord) {
+        self.run_with_leases(selection, options, self.leases.clone())
+            .await
+    }
+
+    async fn run_with_leases<L: LeaseSource>(
+        &self,
+        selection: Selection,
+        options: ExecutorOptions,
+        leases: Arc<L>,
+    ) -> (Plan, RunRecord) {
         let sub = Pipeline::new(selection).resolve(&self.graph).unwrap();
         let plan = plan(&self.graph, &sub, &*self.state, &options.plan).await;
         let ctx = ExecuteContext {
@@ -63,13 +73,80 @@ impl Harness {
             subgraph: &sub,
             state: &*self.state,
             executor: self.fake.clone(),
-            leases: self.leases.clone(),
+            leases,
             sink: self.sink.clone(),
             durations: &self.durations,
         };
         let record = execute(ctx, plan.clone(), &options).await;
         (plan, record)
     }
+}
+
+/// The backend committed its claim, but has not acknowledged it to its caller yet.
+struct PausedAcquireLeases {
+    inner: MemoryLeases,
+    committed: tokio::sync::Notify,
+    acknowledge: Semaphore,
+    pause_first: std::sync::atomic::AtomicBool,
+    released: Mutex<Vec<String>>,
+}
+
+impl PausedAcquireLeases {
+    fn new() -> Self {
+        Self {
+            inner: MemoryLeases::default(),
+            committed: tokio::sync::Notify::new(),
+            acknowledge: Semaphore::new(0),
+            pause_first: std::sync::atomic::AtomicBool::new(true),
+            released: Mutex::new(Vec::new()),
+        }
+    }
+}
+
+impl LeaseSource for PausedAcquireLeases {
+    async fn acquire(
+        &self,
+        node: &PipeRef,
+        holder: &str,
+        ttl: Duration,
+    ) -> Result<bool, StateError> {
+        let acquired = self.inner.acquire(node, holder, ttl).await?;
+        if acquired && self.pause_first.swap(false, Ordering::SeqCst) {
+            self.committed.notify_one();
+            self.acknowledge.acquire().await.unwrap().forget();
+        }
+        Ok(acquired)
+    }
+
+    async fn renew(&self, node: &PipeRef, holder: &str, ttl: Duration) -> Result<bool, StateError> {
+        self.inner.renew(node, holder, ttl).await
+    }
+
+    async fn release(&self, node: &PipeRef, holder: &str) -> Result<(), StateError> {
+        self.released.lock().unwrap().push(holder.into());
+        self.inner.release(node, holder).await
+    }
+}
+
+fn run_with_paused_acquire(
+    harness: Arc<Harness>,
+    leases: Arc<PausedAcquireLeases>,
+    holder: &str,
+) -> tokio::task::JoinHandle<RunRecord> {
+    let holder = holder.to_string();
+    tokio::spawn(async move {
+        harness
+            .run_with_leases(
+                Selection::refs([r("a")]),
+                ExecutorOptions {
+                    holder,
+                    ..Default::default()
+                },
+                leases,
+            )
+            .await
+            .1
+    })
 }
 
 fn rollup_records() -> Vec<PipeRecord> {
@@ -471,6 +548,82 @@ async fn a_lost_lease_cancels_sync_before_it_commits() {
 
 /// Dropping a run mid-sync (Ctrl-C, a closed request) hands the held leases back at once
 /// instead of leaving them to their TTL.
+#[tokio::test(start_paused = true)]
+async fn a_cancelled_acquire_is_drained_before_the_next_holder_can_sync() {
+    let harness = Arc::new(Harness::new(
+        vec![rec("a", "{}")],
+        MemoryStateData::default(),
+    ));
+    let leases = Arc::new(PausedAcquireLeases::new());
+    let task = run_with_paused_acquire(harness.clone(), leases.clone(), "cancelled");
+    leases.committed.notified().await;
+    assert_eq!(leases.inner.holder(&r("a")).as_deref(), Some("cancelled"));
+    task.abort();
+    assert!(task.await.unwrap_err().is_cancelled());
+    let mut drain = Box::pin(drain_lease_releases(Duration::from_secs(3)));
+    assert!(
+        std::future::poll_fn(|context| {
+            std::task::Poll::Ready(drain.as_mut().poll(context).is_pending())
+        })
+        .await,
+        "the committed but unacknowledged acquire must be counted during drain"
+    );
+    leases.acknowledge.add_permits(1);
+    drain.await;
+    assert_eq!(leases.inner.holder(&r("a")), None);
+    assert_eq!(*leases.released.lock().unwrap(), ["cancelled"]);
+    let next = run_with_paused_acquire(harness, leases, "next")
+        .await
+        .unwrap();
+    assert_eq!(next.run.success, Some(true), "{next:?}");
+    assert_eq!(next.node(&r("a")).unwrap().status, NodeStatus::Succeeded);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_cancelled_acquire_never_releases_a_successor_holders_lease() {
+    let harness = Arc::new(Harness::new(
+        vec![rec("a", "{}")],
+        MemoryStateData::default(),
+    ));
+    let leases = Arc::new(PausedAcquireLeases::new());
+    let task = run_with_paused_acquire(harness, leases.clone(), "cancelled");
+    leases.committed.notified().await;
+    task.abort();
+    assert!(task.await.unwrap_err().is_cancelled());
+    // Another holder legitimately replaced the claim before the delayed acknowledgement.
+    leases.inner.release(&r("a"), "cancelled").await.unwrap();
+    assert!(
+        leases
+            .inner
+            .acquire(&r("a"), "successor", Duration::from_secs(60))
+            .await
+            .unwrap()
+    );
+    leases.acknowledge.add_permits(1);
+    drain_lease_releases(Duration::from_secs(3)).await;
+    assert_eq!(leases.inner.holder(&r("a")).as_deref(), Some("successor"));
+    assert_eq!(*leases.released.lock().unwrap(), ["cancelled"]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_acknowledged_acquire_releases_exactly_once_after_sync() {
+    let harness = Arc::new(Harness::new(
+        vec![rec("a", "{}")],
+        MemoryStateData::default(),
+    ));
+    let leases = Arc::new(PausedAcquireLeases::new());
+    let task = run_with_paused_acquire(harness, leases.clone(), "normal");
+    leases.committed.notified().await;
+    assert_eq!(leases.inner.holder(&r("a")).as_deref(), Some("normal"));
+    leases.acknowledge.add_permits(1);
+    let result = task.await.unwrap();
+    assert_eq!(result.run.success, Some(true), "{result:?}");
+    drain_lease_releases(Duration::from_secs(3)).await;
+    assert_eq!(leases.inner.holder(&r("a")), None);
+    assert_eq!(*leases.released.lock().unwrap(), ["normal"]);
+}
+
+/// Dropping a run after acquisition also hands its already-held leases back.
 #[tokio::test(start_paused = true)]
 async fn a_cancelled_run_releases_its_leases() {
     let h = Harness::new(
