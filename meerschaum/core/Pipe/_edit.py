@@ -62,6 +62,11 @@ def edit(
         if not indices_success:
             return indices_success, indices_msg
 
+        ### A `parameters` lock allows changing `locks` only (the core checks its own instances).
+        refusal = self._edit_lock_refusal(patch=patch, debug=debug)
+        if refusal:
+            return False, refusal
+
         with Venv(get_connector_plugin(self.instance_connector)):
             return self.instance_connector.edit_pipe(self, patch=patch, debug=debug, **kw)
 
@@ -106,6 +111,10 @@ def edit(
     if debug:
         from meerschaum.utils.formatting import pprint
         pprint(self.parameters)
+
+    refusal = self._edit_lock_refusal(patch=patch, debug=debug)
+    if refusal:
+        return False, refusal
 
     with Venv(get_connector_plugin(self.instance_connector)):
         return self.instance_connector.edit_pipe(self, patch=patch, debug=debug, **kw)

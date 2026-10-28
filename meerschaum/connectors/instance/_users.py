@@ -78,23 +78,97 @@ def register_user(
     return True, "Success"
 
 
+def _literal_param_safe(text: str) -> bool:
+    """
+    Whether the `params` grammar reads `text` as itself: no leading `_` (a negation), no
+    null-like text and nothing the SQL keyword blocklist refuses.
+    """
+    lower = text.strip().lower()
+    return (
+        bool(text)
+        and text.strip() == text
+        and not text.startswith('_')
+        and lower not in ('none', 'na', 'nan', 'nat', 'natz', '<na>', 'null')
+        and '--' not in lower
+        and ';' not in lower
+        and 'drop ' not in lower
+    )
+
+
+def _exact_row(
+    users_pipe: 'mrsm.Pipe',
+    column: str,
+    value: Any,
+    select: List[str],
+    debug: bool = False,
+) -> Optional[Dict[str, Any]]:
+    """
+    The first row of the users pipe whose `column` is exactly `value`.
+
+    A `params` filter is not an exact match: a leading `_` negates it (a username `_alice` once
+    matched every other user's row) and null-like text matches nulls. The filter is only used
+    for values it reads as themselves, and the rows it returns are checked.
+    """
+    if value is None:
+        return None
+    text = str(value)
+    columns = list(select) + ([column] if column not in select else [])
+    params = {column: text} if _literal_param_safe(text) else None
+    df = users_pipe.get_data(columns, params=params, debug=debug)
+    if df is None or len(df) == 0 or column not in df.columns:
+        return None
+    ### A Polars or a pandas frame (the `meerschaum:dataframe` setting).
+    to_dicts = getattr(df, 'to_dicts', None)
+    rows = to_dicts() if callable(to_dicts) else df.to_dict(orient='records')
+    for row in rows:
+        found = row.get(column, None)
+        if not _is_null(found) and str(found) == text:
+            return row
+    return None
+
+
+def _is_null(value: Any) -> bool:
+    """Whether a cell is null (`None`, `NaN`, `NaT`, `pd.NA`)."""
+    if value is None:
+        return True
+    try:
+        return bool(value != value)
+    except Exception:
+        return True
+
+
+def _resolve_user_id(self, user: User, debug: bool = False) -> Any:
+    return user.user_id if user.user_id is not None else self.get_user_id(user, debug=debug)
+
+
 def get_user_id(self, user: User, debug: bool = False) -> Union[uuid.UUID, None]:
     """
-    Return a user's ID from the username.
+    Return a user's ID from the username (matched exactly).
     """
     users_pipe = self.get_users_pipe()
-    result_df = users_pipe.get_data(['user_id'], params={'username': user.username}, limit=1)
-    if result_df is None or len(result_df) == 0:
-        return None
-    return result_df['user_id'][0]
+    row = _exact_row(users_pipe, 'username', user.username, ['user_id'], debug=debug)
+    return row.get('user_id', None) if row else None
 
 
 def get_username(self, user_id: Any, debug: bool = False) -> Any:
     """
-    Return the username from the given ID.
+    Return the username from the given ID (matched exactly).
     """
     users_pipe = self.get_users_pipe()
-    return users_pipe.get_value('username', {'user_id': user_id}, debug=debug)
+    row = _exact_row(users_pipe, 'user_id', user_id, ['username'], debug=debug)
+    return row.get('username', None) if row else None
+
+
+def _user_field(self, user: User, field: str, debug: bool = False) -> Any:
+    """
+    A field of the user's row (`None` for an unknown user, never the row of a null `user_id`).
+    """
+    user_id = _resolve_user_id(self, user, debug=debug)
+    if user_id is None:
+        return None
+    users_pipe = self.get_users_pipe()
+    row = _exact_row(users_pipe, 'user_id', user_id, [field], debug=debug)
+    return row.get(field, None) if row else None
 
 
 def get_users(
@@ -118,7 +192,12 @@ def edit_user(self, user: User, debug: bool = False) -> mrsm.SuccessTuple:
     Edit the attributes for an existing user.
     """
     users_pipe = self.get_users_pipe()
-    user_id = user.user_id if user.user_id is not None else self.get_user_id(user, debug=debug)
+    user_id = _resolve_user_id(self, user, debug=debug)
+    if user_id is None:
+        return False, (
+            f"User '{user.username}' does not exist. "
+            f"Register user '{user.username}' before editing."
+        )
 
     doc = {'user_id': user_id}
     if user.email != '':
@@ -141,11 +220,28 @@ def delete_user(self, user: User, debug: bool = False) -> mrsm.SuccessTuple:
     """
     Delete a user from the users table.
     """
-    user_id = user.user_id if user.user_id is not None else self.get_user_id(user, debug=debug)
+    user_id = _resolve_user_id(self, user, debug=debug)
+    if user_id is None:
+        return False, f"User '{user.username}' is not registered and cannot be deleted."
+    if not _literal_param_safe(str(user_id)):
+        return False, f"Cannot delete user '{user.username}': its ID cannot be matched exactly."
     users_pipe = self.get_users_pipe()
     clear_success, clear_msg = users_pipe.clear(params={'user_id': user_id}, debug=debug)
     if not clear_success:
         return False, f"Failed to delete user '{user}':\n{clear_msg}"
+    ### The user leaves every team; their pipes keep their team, without an owner.
+    try:
+        from meerschaum import _core
+        from meerschaum.connectors.instance._teams import _carrier
+        carrier, context = _carrier(self)
+        forgotten, forgotten_msg = _core.forget_user_access(
+            carrier, context, user.username, debug=debug,
+        )
+    except Exception as e:
+        forgotten, forgotten_msg = False, str(e)
+    if not forgotten:
+        from meerschaum.utils.warnings import warn
+        warn(forgotten_msg, stack=False)
     return True, "Success"
 
 
@@ -153,36 +249,18 @@ def get_user_password_hash(self, user: User, debug: bool = False) -> Union[uuid.
     """
     Get a user's password hash from the users table.
     """
-    user_id = user.user_id if user.user_id is not None else self.get_user_id(user, debug=debug)
-    users_pipe = self.get_users_pipe()
-    result_df = users_pipe.get_data(['password_hash'], params={'user_id': user_id}, debug=debug)
-    if result_df is None or len(result_df) == 0:
-        return None
-
-    return result_df['password_hash'][0]
+    return _user_field(self, user, 'password_hash', debug=debug)
 
 
 def get_user_type(self, user: User, debug: bool = False) -> Union[str, None]:
     """
     Get a user's type from the users table.
     """
-    user_id = user.user_id if user.user_id is not None else self.get_user_id(user, debug=debug)
-    users_pipe = self.get_users_pipe()
-    result_df = users_pipe.get_data(['user_type'], params={'user_id': user_id}, debug=debug)
-    if result_df is None or len(result_df) == 0:
-        return None
-
-    return result_df['user_type'][0]
+    return _user_field(self, user, 'user_type', debug=debug)
 
 
 def get_user_attributes(self, user: User, debug: bool = False) -> Union[Dict[str, Any], None]:
     """
     Get a user's attributes from the users table.
     """
-    user_id = user.user_id if user.user_id is not None else self.get_user_id(user, debug=debug)
-    users_pipe = self.get_users_pipe()
-    result_df = users_pipe.get_data(['attributes'], params={'user_id': user_id}, debug=debug)
-    if result_df is None or len(result_df) == 0:
-        return None
-
-    return result_df['attributes'][0]
+    return _user_field(self, user, 'attributes', debug=debug)

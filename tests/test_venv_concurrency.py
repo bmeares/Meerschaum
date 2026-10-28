@@ -64,7 +64,10 @@ def _verify_shared_venv(root, start, initialize):
 
 @pytest.mark.skipif(sys.platform == 'win32', reason='Exercises POSIX interpreter symlinks.')
 @pytest.mark.parametrize('existing', [False, True])
-def test_processes_share_creation_and_verification_lock(tmp_path, existing):
+def test_processes_share_creation_and_verification_lock(tmp_path, existing, monkeypatch):
+    # Spawn pickles this function by module name. Earlier venv tests may put a dependency's
+    # unrelated `tests` package ahead of this checkout; make the worker target unambiguous.
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parent.parent))
     binary = tmp_path / 'venvs' / 'shared' / 'bin'
     binary.mkdir(parents=True)
     version = f'python{sys.version_info.major}.{sys.version_info.minor}'

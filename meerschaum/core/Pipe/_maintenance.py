@@ -134,6 +134,12 @@ def repartition(
     from meerschaum.utils.venv import Venv
     from meerschaum.connectors import get_connector_plugin
 
+    ### Repartitioning rebuilds the table (`drop`) and records its width (`parameters`).
+    for op in ('schema', 'edit'):
+        refusal = self._lock_refusal(op, debug=debug)
+        if refusal:
+            return False, refusal
+
     try:
         with Venv(get_connector_plugin(self.instance_connector)):
             if hasattr(self.instance_connector, 'partition_pipe'):

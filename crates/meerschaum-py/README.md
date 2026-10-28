@@ -7,7 +7,7 @@ every discrepancy found while the two implementations ran side by side is tracke
 
 | Symbol | What it does |
 |---|---|
-| `__version__` | Cargo version (`5.0.0-rc.14`); `build_info()['version_pep440']` is the wheel form (`5.0.0rc14`) |
+| `__version__` | Cargo version (`5.0.0-rc.15`); `build_info()['version_pep440']` is the wheel form (`5.0.0rc15`) |
 | `build_info()` | rustc version, profile, opt level, target/host, enabled features, Python ABI (`abi3-py311`) |
 | `static_config()` | `crates/meerschaum-core/static.toml` (D15) as a dict, parsed by `meerschaum_core::static_config` (which embeds it at build time). The file's `{ __null__ = true }` and `{ __cpu_count_or__ = N }` markers are resolved the way `STATIC_CONFIG` does, with Python's own `os.cpu_count()` |
 | `roundtrip_arrow(obj)` | Imports anything with `__arrow_c_stream__` / `__arrow_c_array__` into Rust `RecordBatch`es and returns an `ArrowStream`, a pyarrow-free object that exports the data back through `__arrow_c_stream__` / `__arrow_c_schema__` (`ffi_export.rs`, honoring `requested_schema`) |
@@ -52,8 +52,12 @@ Tokio runtime (`src/runtime.rs`) with the GIL released; frames cross as Arrow th
 | Plugins | `register_plugin`, `delete_plugin`, `get_plugin_id`, `get_plugin_version`, `get_plugin_user_id`, `get_plugin_username`, `get_plugin_attributes`, `get_plugins` |
 
 Tokens need no binding: the SQL instance stores them in the tokens pipe through the pipe methods
-above. Per D16, `read`, `exec`, `value`, `to_sql`, `.engine` and `get_tables()` stay SQLAlchemy and
-are not bound; `sync_pipe_inplace` (SQL-to-SQL syncs on the same instance) stays Python for now
+above. Raw SQL (`read`, `exec`, `exec_queries`, `value`, `to_sql`, rc15 Q53) goes through
+`sql_query`, `sql_execute`, `sql_execute_many`, `sql_begin` and `sql_to_sql` (`src/sql_raw_api.rs`:
+`SqlFrame` batches keep what each flavor's DBAPI returns, `SqlFrame.to_pandas()` is the frame
+`pd.read_sql_query()` builds from those values, `SqlTx` is an open transaction) for every flavor
+in `meerschaum/connectors/sql/_native.py::NATIVE_SQL_FLAVORS`; only `.engine` and `get_tables()`
+(SQLAlchemy objects) stay SQLAlchemy (D16); `sync_pipe_inplace` (SQL-to-SQL syncs on the same instance) stays Python for now
 and reaches the routed methods through `self`. `sync_pipe` writes the parameter changes v4's
 `sync_pipe` makes (`autoincrement`, numeric `dtypes`) back into the Python pipe's in-memory
 parameters (`update_parameters(..., persist=False)`, Rust already persisted them) and clears the
@@ -62,7 +66,7 @@ pipe's `_exists` / column-type / index caches.
 All supported SQL flavors route Pipe methods through the Rust instance layer, including
 MSSQL, Oracle, DuckDB, and memory SQLite. In a Python host, DuckDB uses a lazy public Python
 driver transport when `duckdb >= 1.5.6` is installed and `MRSM_DUCKDB_LIB` is unset. A shared
-anchor and duplicate connections make Rust Pipe methods and D16 SQLAlchemy methods see the
+anchor and duplicate connections make Rust Pipe methods and SQLAlchemy (`.engine`) see the
 same database while retaining separate transactions. Standalone / base-only installs use the
 native C API. An explicit override pins native mode and refuses mixed SQLAlchemy access;
 unset it, install `meerschaum[sql-duckdb]`, and restart to use both. Transport selection does
@@ -223,8 +227,8 @@ Façade functions call the bound symbol directly (`_core.filter_unseen_df(...)`,
 `_core.pipe_get_data(...)`, ...) and the `SQLConnector` methods delegate to the
 `_core.SqlConnector` built for the connector (`SQLConnector._core_connector()`, one per process:
 a forked child builds its own). `SQLConnector._rust_method(name)` returns the bound method (an
-`AttributeError` names a method the extension does not define, such as `read`: user SQL stays
-SQLAlchemy, D16) and raises `RuntimeError` when no Rust driver can be built (an unknown flavor, the Oracle client
+`AttributeError` names a method the extension does not define, such as `read`: raw SQL goes
+through `_native` and the `sql_*` bindings) and raises `RuntimeError` when no Rust driver can be built (an unknown flavor, the Oracle client
 library `libclntsh` missing, a failed pool). The extension is loaded lazily, on the first
 attribute read of `meerschaum._core`; a missing file is an `ImportError` (`CoreNotBuiltError`) at
 `import meerschaum`. The results the parity tests compare against are recorded in

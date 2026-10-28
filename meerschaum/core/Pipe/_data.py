@@ -16,6 +16,7 @@ from meerschaum.utils.typing import (
 
 if TYPE_CHECKING:
     pd = mrsm.attempt_import('pandas')
+    pl = mrsm.attempt_import('polars')
 
 
 def _iterate_chunks(chunks: Iterator[Any]) -> Iterator[Any]:
@@ -32,6 +33,24 @@ def _silent_chunks(chunks: Iterator[Any]) -> Iterator[Any]:
         yield from chunks
     except Exception:
         return
+
+
+def _wants_polars(
+    as_docs: bool = False,
+    as_polars: Optional[bool] = None,
+    as_pandas: Optional[bool] = None,
+) -> bool:
+    """
+    Whether a read returns Polars frames (`meerschaum:dataframe`, or the call's `as_polars` /
+    `as_pandas`), after checking the library is installed (`ImportError` naming the extra).
+    Documents (`as_docs`) need neither library.
+    """
+    if as_docs:
+        return False
+    from meerschaum.utils.dataframe import resolve_dataframe_library, ensure_dataframe_library
+    library = resolve_dataframe_library(as_polars=as_polars, as_pandas=as_pandas)
+    ensure_dataframe_library(library)
+    return library == 'polars'
 
 
 def _rust_context(
@@ -73,7 +92,7 @@ def get_data(
     as_iterator: bool = False,
     as_chunks: bool = False,
     as_dask: bool = False,
-    as_polars: bool = False,
+    as_polars: Optional[bool] = None,
     add_missing_columns: bool = False,
     chunk_interval: Union[timedelta, int, None] = None,
     order: Optional[str] = 'asc',
@@ -81,8 +100,9 @@ def get_data(
     fresh: bool = False,
     silent: bool = False,
     debug: bool = False,
+    as_pandas: Optional[bool] = None,
     **kw: Any
-) -> Union['pd.DataFrame', Iterator['pd.DataFrame'], None]:
+) -> Union['pl.DataFrame', 'pd.DataFrame', Iterator[Any], List[Dict[str, Any]], None]:
     """
     Get a pipe's data from the instance connector.
 
@@ -134,12 +154,12 @@ def get_data(
 
     as_dask: bool, default False
         Not supported in Meerschaum 5: `True` raises a `TypeError`.
-        Read the data in chunks with `as_iterator=True` (or as one Polars frame with
-        `as_polars=True`) instead.
+        Read the data in chunks with `as_iterator=True` (or as one Polars frame) instead.
 
-    as_polars: bool, default False
-        If `True`, return a `polars.DataFrame`. When combined with `as_iterator=True`,
-        yield Polars DataFrames. This may not be combined with `as_docs`.
+    as_polars: Optional[bool], default None
+        `True` returns a `polars.DataFrame` and `False` a pandas one, whatever the
+        `meerschaum:dataframe` setting says (see `as_pandas`). Chunks (`as_iterator=True`)
+        follow it too. This may not be combined with `as_docs`.
 
     add_missing_columns: bool, default False
         If `True`, add any missing columns from `Pipe.dtypes` to the dataframe.
@@ -171,6 +191,13 @@ def get_data(
         Verbosity toggle.
         Defaults to `False`.
 
+    as_pandas: Optional[bool], default None
+        `True` returns a pandas DataFrame (a `geopandas.GeoDataFrame` when the pipe has
+        geometry columns) and `False` a Polars one. By default (`None`) the frame is the
+        library of the `meerschaum:dataframe` setting (`MRSM_DATAFRAME` overrides it):
+        Polars for a new root, pandas for a root created before Meerschaum 5.0.0rc15.
+        Polars frames carry geometry as WKB (binary) with the CRS in the field metadata.
+
     kw: Any
         Other keyword arguments are passed on to the instance connector (a SQL instance
         reads `begin_add_minutes`, `end_add_minutes`, `replace_nulls` and
@@ -180,11 +207,12 @@ def get_data(
 
     Returns
     -------
-    A `pd.DataFrame` of the pipe's data (default).
+    A DataFrame of the pipe's data: Polars or pandas, per `meerschaum:dataframe`
+    (or `as_polars` / `as_pandas`).
     A `List[Dict]` if `as_docs=True`.
-    An `Iterator[pd.DataFrame]` if `as_chunks=True` (or `as_iterator=True`).
+    An iterator of DataFrames if `as_chunks=True` (or `as_iterator=True`).
     An `Iterator[List[Dict]]` if both `as_docs=True` and `as_chunks=True`.
-    A `polars.DataFrame` if `as_polars=True`.
+    `None` if the pipe's table does not exist yet.
 
     """
     from meerschaum import _core
@@ -192,11 +220,14 @@ def get_data(
     warn_unknown_get_data_keywords(self, kw, as_docs=as_docs)
     if as_polars and (as_docs or as_dask):
         raise ValueError("`as_polars` may not be combined with `as_docs` or `as_dask`.")
+    if as_pandas and (as_docs or as_dask):
+        raise ValueError("`as_pandas` may not be combined with `as_docs` or `as_dask`.")
     if as_dask:
         raise TypeError(
             "Dask is not supported in Meerschaum 5. Use `as_iterator=True` for chunks "
             "or `as_polars=True`. See the migration guide: reference/migrating-to-v5."
         )
+    polars = _wants_polars(as_docs, as_polars, as_pandas)
     try:
         context = _rust_context(self, debug=debug)
         begin, end = self.parse_date_bounds(begin, end, debug=debug)
@@ -210,7 +241,7 @@ def get_data(
                 end=end,
                 params=params,
                 as_docs=as_docs,
-                as_polars=as_polars,
+                as_polars=polars,
                 chunk_interval=chunk_interval,
                 order=order,
                 limit=limit,
@@ -227,7 +258,7 @@ def get_data(
             end=end,
             params=params,
             as_docs=as_docs,
-            as_polars=as_polars,
+            as_polars=polars,
             add_missing_columns=add_missing_columns,
             order=order,
             limit=limit,
@@ -290,18 +321,24 @@ def get_backtrack_data(
 
     **kw: Any
         Also `end` (exclusive), `select_columns`, `omit_columns`, `order` (default `'desc'`),
-        `as_docs`, `as_polars` and `add_missing_columns`, as in `get_data()`. Other keywords
-        go to the instance connector; a keyword nothing reads is ignored with a warning that
-        suggests the parameter you probably meant.
+        `as_docs`, `as_polars`, `as_pandas` and `add_missing_columns`, as in `get_data()`.
+        Other keywords go to the instance connector; a keyword nothing reads is ignored with a
+        warning that suggests the parameter you probably meant.
 
     Returns
     -------
-    A `pd.DataFrame` for the pipe's data corresponding to the provided parameters. Backtrack data
-    is a convenient way to get a pipe's data "backtracked" from the most recent datetime.
+    A DataFrame (Polars or pandas, per `meerschaum:dataframe`, as `get_data()`) of the pipe's
+    data corresponding to the provided parameters. Backtrack data is a convenient way to get a
+    pipe's data "backtracked" from the most recent datetime.
     """
     from meerschaum import _core
     from meerschaum.core.Pipe._keywords import BACKTRACK_KEYWORDS, warn_unknown_backtrack_keywords
     warn_unknown_backtrack_keywords(self, kw)
+    polars = _wants_polars(
+        kw.get('as_docs', False),
+        kw.get('as_polars', None),
+        kw.get('as_pandas', None),
+    )
     context = _rust_context(self, debug=debug)
     named = BACKTRACK_KEYWORDS
     end = kw.get('end', None)
@@ -317,7 +354,7 @@ def get_backtrack_data(
         omit_columns=kw.get('omit_columns', None),
         end=self.parse_date_bounds(end, debug=debug) if end is not None else None,
         as_docs=kw.get('as_docs', False),
-        as_polars=kw.get('as_polars', False),
+        as_polars=polars,
         add_missing_columns=kw.get('add_missing_columns', False),
         kwargs={key: val for key, val in kw.items() if key not in named},
         debug=debug,

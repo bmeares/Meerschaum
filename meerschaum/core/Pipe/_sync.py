@@ -1035,6 +1035,8 @@ def filter_existing(
     enforce_dtypes: bool = False,
     chunksize: Optional[int] = -1,
     debug: bool = False,
+    as_polars: Optional[bool] = None,
+    as_pandas: Optional[bool] = None,
     **kw
 ) -> Tuple['pd.DataFrame', 'pd.DataFrame', 'pd.DataFrame']:
     """
@@ -1046,6 +1048,8 @@ def filter_existing(
         The dataframe to inspect and filter.
         A `polars.DataFrame` or `LazyFrame` is accepted,
         in which case the returned dataframes are `polars.DataFrame`.
+        Documents, dictionaries and Arrow data come back in the library of the
+        `meerschaum:dataframe` setting.
 
     safe_copy: bool, default True
         If `True`, create a copy before comparing and modifying the dataframes.
@@ -1069,16 +1073,30 @@ def filter_existing(
     debug: bool, default False
         Verbosity toggle.
 
+    as_polars: Optional[bool], default None
+        For input that is not a DataFrame: `True` returns Polars frames, `False` pandas ones.
+
+    as_pandas: Optional[bool], default None
+        For input that is not a DataFrame: `True` returns pandas frames, `False` Polars ones.
+
     Returns
     -------
-    A tuple of three DataFrames: unseen, update, and delta.
-    These are Polars DataFrames if `df` is a Polars DataFrame or LazyFrame, else Pandas.
+    A tuple of three DataFrames: unseen, update, and delta, of the library `df` came in
+    (Polars for a Polars DataFrame or LazyFrame, pandas for a pandas DataFrame).
     """
     from meerschaum import _core
     from meerschaum.core.Pipe._data import _rust_context
+    from meerschaum.utils.dataframe import (
+        output_library_for, ensure_dataframe_library, frame_library_of,
+    )
     context = _rust_context(self, debug=debug)
     if df is not None and not is_accepted_data(df):
         raise unsupported_data_error(df, f"filter the existing rows of {self}")
+    library = (
+        frame_library_of(df)
+        or output_library_for(df, as_polars=as_polars, as_pandas=as_pandas)
+    )
+    ensure_dataframe_library(library)
     return _core.pipe_filter_existing(
         self,
         context,
@@ -1086,6 +1104,7 @@ def filter_existing(
         date_bound_only=date_bound_only,
         include_unchanged_columns=include_unchanged_columns,
         enforce_dtypes=enforce_dtypes,
+        as_polars=(library == 'polars'),
         debug=debug,
     )
 

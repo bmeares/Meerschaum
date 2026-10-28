@@ -242,13 +242,31 @@ class Plan:
         """The plan table as a list of rows."""
         return [node.to_dict() for node in self.nodes]
 
-    def to_dataframe(self) -> 'pd.DataFrame':
-        """The plan table as a DataFrame."""
-        pd = mrsm.attempt_import('pandas')
-        return pd.DataFrame(
-            self.to_dicts(),
-            columns=['node', 'action', 'bounds', 'chunks', 'reason'],
-        )
+    def to_dataframe(
+        self,
+        as_polars: Optional[bool] = None,
+        as_pandas: Optional[bool] = None,
+    ) -> Any:
+        """
+        The plan table (`node`, `action`, `bounds`, `chunks`, `reason`) as a DataFrame of the
+        `meerschaum:dataframe` library (Polars for a new root); `as_polars=True` or
+        `as_pandas=True` asks for one.
+        """
+        from meerschaum.utils.dataframe import resolve_dataframe_library, ensure_dataframe_library
+        columns = ['node', 'action', 'bounds', 'chunks', 'reason']
+        library = resolve_dataframe_library(as_polars=as_polars, as_pandas=as_pandas)
+        module = ensure_dataframe_library(library)
+        if library == 'polars':
+            schema = {
+                'node': module.String,
+                'action': module.String,
+                'bounds': module.String,
+                'chunks': module.Int64,
+                'reason': module.String,
+            }
+            rows = [{col: row.get(col) for col in columns} for row in self.to_dicts()]
+            return module.DataFrame(rows, schema=schema, strict=False)
+        return module.DataFrame(self.to_dicts(), columns=columns)
 
     def execute(self, **kwargs: Any) -> 'RunResult':
         """

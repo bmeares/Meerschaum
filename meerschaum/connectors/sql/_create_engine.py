@@ -21,8 +21,9 @@ flavor_configs = STATIC_CONFIG['sql']['create_engine_flavors']
 
 def import_sqlalchemy(*names: str):
     """
-    Import SQLAlchemy modules (`sqlalchemy` by default) for the methods that stay SQLAlchemy
-    (`read`, `exec`, `value`, `to_sql`, `.engine`, D16).
+    Import SQLAlchemy modules (`sqlalchemy` by default) for what stays SQLAlchemy (`.engine`,
+    `exec(..., with_connection=True)`, connectors with `native_sql: false`; raw SQL otherwise
+    runs on the Rust connector, rc15 Q53).
 
     Raises
     ------
@@ -35,7 +36,7 @@ def import_sqlalchemy(*names: str):
     imported = modules if len(names) > 1 else (modules,)
     if any(module is None for module in imported):
         raise ImportError(
-            "Raw SQL (`read`, `exec`, `value`, `to_sql` and `.engine`) needs SQLAlchemy: "
+            "`.engine` (and raw SQL with `native_sql: false`) needs SQLAlchemy: "
             "install the `sql` extra with `pip install 'meerschaum[sql]'`."
         )
     return modules

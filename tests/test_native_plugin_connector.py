@@ -84,6 +84,8 @@ def _run(
         'MRSM_PLUGINS_DIR': str(tmp_path / 'plugins'),
         'MRSM_NO_UPDATE_CHECK': '1',
         'MRSM_NOASK': 'true',
+        ### The checks read pandas frames (`meerschaum:dataframe`, rc15).
+        'MRSM_DATAFRAME': 'pandas',
         'MRSM_SQL_LOCAL': json.dumps({'flavor': 'sqlite', 'database': str(tmp_path / 'local.db')}),
         'PATH': os.path.dirname(CARGO) + os.pathsep + env.get('PATH', ''),
     })

@@ -1045,6 +1045,17 @@ impl Reader {
     /// The `Pipe.deduplicate()` of an instance without a native implementation, or the
     /// instance's own.
     pub async fn deduplicate(&self, pipe: &Pipe, args: &DedupArgs) -> SuccessTuple {
+        // The chunked implementation clears and re-syncs each chunk: a `sync` lock refuses it
+        // before anything is cleared.
+        if let Some(refused) = meerschaum_connector::lock_refusal(
+            self.instance.as_ref(),
+            pipe,
+            meerschaum_core::access::LockOp::Deduplicate,
+        )
+        .await
+        {
+            return refused;
+        }
         if args.use_instance_method {
             let q = DataQuery {
                 begin: args.begin.clone(),

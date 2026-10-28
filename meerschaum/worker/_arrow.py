@@ -10,9 +10,9 @@ DataFrames across the worker boundary.
   Arrow IPC stream (`kind='arrow'`); lists of dicts travel as typed MessagePack documents
   (`'docs'`), dicts of lists as columns (`'columns'`) and strings as text (`'text'`), so the Rust
   kernel can apply v4's own `parse_df_datetimes` / `enforce_dtypes` rules to them.
-- `ipc_to_df(data)` turns an Arrow IPC stream from the host back into a pandas DataFrame for
-  custom instance connectors (`sync_pipe(pipe, df)`), restoring the special columns from their
-  field tags.
+- `ipc_to_df(data)` turns an Arrow IPC stream from the host back into a DataFrame of the
+  `meerschaum:dataframe` library (Polars or pandas) for custom instance connectors
+  (`sync_pipe(pipe, df)`), restoring the special columns from their field tags.
 
 Special pandas columns are tagged with the field metadata the kernel reads
 (`meerschaum:dtype`, `ARROW:extension:name`, `ARROW:extension:metadata`):
@@ -329,6 +329,19 @@ def table_to_df(table) -> Any:
     return df
 
 
-def ipc_to_df(data: bytes) -> Any:
-    """Read one Arrow IPC stream into a pandas DataFrame."""
-    return table_to_df(ipc_to_table(data))
+def ipc_to_df(data: bytes, library: Optional[str] = None) -> Any:
+    """
+    Read one Arrow IPC stream into a DataFrame (what a custom instance connector's
+    `sync_pipe(pipe, df)` is given) of `library`, the host's `meerschaum:dataframe` sent with the
+    call (else this process's setting): Polars frames are built by the kernel like every other
+    read (`frame_from_arrow`), pandas frames by `table_to_df()`.
+    """
+    from meerschaum.utils.dataframe import (
+        DATAFRAME_LIBRARIES, get_dataframe_library, frame_from_arrow,
+    )
+    if library not in DATAFRAME_LIBRARIES:
+        library = get_dataframe_library()
+    table = ipc_to_table(data)
+    if library == 'polars':
+        return frame_from_arrow(table, as_polars=True)
+    return table_to_df(table)

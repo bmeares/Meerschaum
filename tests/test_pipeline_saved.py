@@ -59,6 +59,56 @@ def test_saved_pipeline_roundtrip_exact_membership(saved_members):
     assert all(pipe.get_id() is not None for pipe in pipes)
 
 
+def test_saved_pipeline_access_is_atomic_and_copy_rename_keep_their_metadata(saved_members, monkeypatch):
+    """A Pipeline starts with access; copying resets access, and renaming preserves it."""
+    from copy import deepcopy
+    from meerschaum.core.Pipeline._saved import copy_pipeline, rename_pipeline, registration
+    conn, name, pipes = saved_members
+    original = mrsm.Pipe.register
+    captured = []
+    def record(pipe, *args, **kw):
+        if pipe.connector_keys == 'mrsm' and pipe.metric_key == 'pipeline':
+            captured.append(deepcopy(dict(pipe.parameters)))
+        return original(pipe, *args, **kw)
+    monkeypatch.setattr(mrsm.Pipe, 'register', record)
+    source_access = {'owner': 'alice', 'team': 'data', 'visibility': 'private', 'edit': 'owner'}
+    copy_access = {'owner': 'bob', 'team': 'ops', 'visibility': 'team', 'edit': 'team'}
+    names = [name + suffix for suffix in ('-copy', '-claimed', '-renamed')]
+    try:
+        save_pipeline(name, pipes[:1], conn, access=source_access, locks=['sync'])
+        assert captured[0]['access'] == source_access
+        assert captured[0]['locks'] == ['sync']
+        copy_pipeline(name, names[0], conn)
+        plain = registration(names[0], conn)
+        assert plain.owner is None and plain.team == 'Everyone' and plain.locks == ['sync']
+        copy_pipeline(name, names[1], conn, access=copy_access)
+        claimed = registration(names[1], conn)
+        assert claimed.access == copy_access and claimed.locks == ['sync']
+        rename_pipeline(name, names[2], conn)
+        renamed = registration(names[2], conn)
+        assert renamed.access == source_access and renamed.locks == ['sync']
+        assert registration(name, conn).get_id() is None
+    finally:
+        for candidate in names:
+            delete_pipeline(candidate, conn)
+
+
+@pytest.mark.parametrize('lock', ['parameters', 'delete', 'drop'])
+def test_rename_locked_pipeline_refuses_before_creating_another_registration(saved_members, lock):
+    from meerschaum.core.Pipeline._saved import rename_pipeline, registration
+    conn, name, pipes = saved_members
+    save_pipeline(name, pipes[:1], conn)
+    source = registration(name, conn)
+    assert source.lock(lock)[0]
+    try:
+        with pytest.raises(ValueError, match='locked'):
+            rename_pipeline(name, name + '-renamed', conn)
+        assert registration(name + '-renamed', conn).get_id() is None
+        assert source.get_id() is not None
+    finally:
+        source.unlock(lock)
+
+
 def test_saved_pipeline_metadata_not_in_engine_graph(saved_members):
     conn, name, pipes = saved_members
     save_pipeline(name, pipes[:2], conn)

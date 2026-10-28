@@ -861,6 +861,11 @@ pub fn get_config<'py>(
         })
         .collect::<PyResult<_>>()?;
     let host = host(py)?;
+    // rc15 (Q54): a root created before rc15 keeps pandas DataFrames: `dataframe: pandas` is added
+    // to its `meerschaum.yaml` once per process, before the first key of the directory is read.
+    if host.allow_writes {
+        crate::dataframe_api::pin_root_for_python(py, &host.config_dir, &dict);
+    }
 
     // When the key path is already loaded, the lookup only reads (and may re-substitute) the
     // first key and the symlinks, so only those are converted.

@@ -40,8 +40,8 @@ PASSTHROUGH_KEYWORDS = frozenset({
 
 #: The `get_data()` options `Pipe.get_backtrack_data()` reads from its `**kw`.
 BACKTRACK_KEYWORDS = frozenset({
-    'select_columns', 'omit_columns', 'end', 'as_docs', 'as_polars', 'add_missing_columns',
-    'order',
+    'select_columns', 'omit_columns', 'end', 'as_docs', 'as_polars', 'as_pandas',
+    'add_missing_columns', 'order',
 })
 
 #: Common names for what `get_data()` (or `get_backtrack_data()`) calls something else.
@@ -79,6 +79,7 @@ ALIASES = {
     'ascending': 'order',
     'descending': 'order',
     'polars': 'as_polars',
+    'pandas': 'as_pandas',
     'docs': 'as_docs',
     'as_dicts': 'as_docs',
     'as_records': 'as_docs',

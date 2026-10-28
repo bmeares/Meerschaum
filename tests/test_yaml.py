@@ -499,8 +499,38 @@ def _without_v5_defaults(spec):
         parsed.get('system', {}).pop('engine', None)
         ### PARITY (rc15, RC15-D-001): console callbacks need a session by default.
         parsed.get('api', {}).get('dash', {}).pop('callbacks_require_session', None)
+        ### PARITY (rc15, RC15-R3-001): a new root returns Polars DataFrames by default.
+        parsed.get('meerschaum', {}).pop('dataframe', None)
+        ### PARITY (rc15, AC1/AC2): registration closes after bootstrap; role permissions
+        ### replace the implicit action grant. The access suites verify the new defaults.
+        permissions = parsed.get('api', {}).get('permissions', {})
+        if 'registration' in permissions and 'actions' not in permissions:
+            permissions['registration']['users'] = True
+            permissions['actions'] = {'non_admin': True}
         return {'t': 'str', 'json': parsed}
     return {k: _without_v5_defaults(v) for k, v in spec.items()}
+
+
+def _without_dataframe_default(value):
+    """
+    `value` without the `dataframe: polars` default a new `meerschaum.yaml` carries since rc15
+    (PARITY.md RC15-R3-001), which v4.1.4's lacks: the YAML line and the tagged mapping entry.
+    """
+    if isinstance(value, str):
+        return value.replace('\ndataframe: polars\n\n', '\n')
+    if isinstance(value, list):
+        return [
+            _without_dataframe_default(item)
+            for item in value
+            if not (
+                isinstance(item, list) and len(item) == 2
+                and item[0] == {'t': 'str', 'v': 'dataframe'}
+                and item[1] == {'t': 'str', 'v': 'polars'}
+            )
+        ]
+    if isinstance(value, dict):
+        return {k: _without_dataframe_default(v) for k, v in value.items()}
+    return value
 
 
 def _v4_stack(value):
@@ -558,6 +588,8 @@ def test_config_cases_match_released_reference(parity, tmp_path):
         expected, got = _without_v5_defaults(expected), _without_v5_defaults(got)
         ### PARITY (wave 17c, W17K1-002..004): the v5 stack defaults.
         got = _v4_stack(got)
+        ### PARITY (rc15, RC15-R3-001): `dataframe: polars` in a new `meerschaum.yaml`.
+        got = _without_dataframe_default(got)
         if got != expected:
             failures.append((case['name'], {
                 key: (expected[key], got[key]) for key in expected if expected[key] != got[key]

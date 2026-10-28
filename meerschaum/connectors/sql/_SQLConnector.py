@@ -3,7 +3,7 @@
 # vim:fenc=utf-8
 
 """
-Interface with SQL servers using sqlalchemy.
+Interface with SQL servers through native drivers, with optional SQLAlchemy engines.
 """
 
 from __future__ import annotations
@@ -92,7 +92,10 @@ def _oracle_client_available() -> bool:
 
 class SQLConnector(InstanceConnector):
     """
-    Connect to SQL databases via `sqlalchemy`.
+    Connect to SQL databases through the Rust connector's connection pool.
+
+    Raw SQL and pipe operations need no SQLAlchemy. The optional `.engine` property
+    provides a SQLAlchemy engine for code that explicitly uses that interface.
     
     SQLConnectors may be used as Meerschaum instance connectors.
     Read more about connectors and instances at
@@ -345,7 +348,15 @@ class SQLConnector(InstanceConnector):
     @property
     def engine(self):
         """
-        Return the SQLAlchemy engine connected to the configured database.
+        Return the SQLAlchemy engine connected to the configured database (the `sql` extra).
+
+        `read()`, `exec()`, `value()`, `exec_queries()` and `to_sql()` do not use it: they run on the
+        connector's Rust connection pool (see `meerschaum.connectors.sql._native`). The engine
+        opens the database through Python's own driver. On SQLite that is Python's `sqlite3`
+        library, a second copy of SQLite in the process: do not write the connector's file through
+        the engine while the process also reads or writes it through `Pipe` methods or `read()` /
+        `exec()` (two SQLite libraries keep separate lock bookkeeping for one file, which can
+        corrupt it; sqlite.org/howtocorrupt.html, 2.2.1).
         """
         import os
         import threading
@@ -558,7 +569,9 @@ class SQLConnector(InstanceConnector):
         mixed SQLAlchemy access; unset it and restart to use both). An in-memory SQLite database (`sql:memory`) is one database file that the Rust
         pool and SQLAlchemy both open (`_shared_memory_database`), so `Pipe` methods and
         `read()` / `exec()` / `.engine` see the same tables.
-        `read`, `exec`, `value`, `to_sql` and `.engine` always stay SQLAlchemy (D16).
+        `read`, `exec`, `exec_queries`, `value` and `to_sql` run on this connector too (raw SQL,
+        rc15 Q53, `_native.NATIVE_SQL_FLAVORS`); only `.engine` (and the calls that hand out or take
+        SQLAlchemy objects) stays SQLAlchemy.
 
         The Rust connector (and its pool) is built once per process: a forked child (a job
         daemon) builds its own, like SQLAlchemy engines must.
@@ -651,9 +664,9 @@ class SQLConnector(InstanceConnector):
     def _rust_method(self, name: str):
         """
         Return the `meerschaum._core.SqlConnector` method `name`. Raises `AttributeError` naming
-        the method when the extension does not define it (`read`, `exec`, ... stay SQLAlchemy:
-        D16) and `RuntimeError` when the connector has no usable Rust driver
-        (see `_core_connector`).
+        the method when the extension does not define it (raw SQL goes through `_native`, which
+        calls the `sql_*` bindings) and `RuntimeError` when the connector has no usable Rust
+        driver (see `_core_connector`).
         """
         rust = self._core_connector()
         try:

@@ -594,6 +594,33 @@ class Job:
         """
         return self._core.health()
 
+    @property
+    def owner(self) -> Union[str, None]:
+        """
+        Return the user who started this job through the API server or the web console
+        (`None` for a job created locally: the CLI, Compose, systemd or Python). A job started
+        by another job has that job's owner. For an `api:` job, the server's record.
+
+        Examples
+        --------
+        >>> Job('nightly', executor_keys='api:main').owner
+        'alice'
+        """
+        return self._core.access().get('owner', None)
+
+    @property
+    def team(self) -> Union[str, None]:
+        """
+        Return the team this job belongs to: the primary team of the user who started it through
+        the API server or the web console (a job started by another job: that job's team).
+        `None` means Everyone (every local job).
+
+        Members of the team (and administrators) see the job and, with the job permissions,
+        control it. Renaming the team renames it here; deleting the team moves the job to
+        Everyone.
+        """
+        return self._core.access().get('team', None)
+
     def get_daemon_properties(self) -> Dict[str, Any]:
         """
         Return the `properties` dictionary for the job's daemon.

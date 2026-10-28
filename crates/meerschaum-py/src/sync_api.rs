@@ -335,7 +335,8 @@ pub fn input_from_py<'py>(py: Python<'py>, df: &Bound<'py, PyAny>) -> PyResult<N
         return Ok(NativeInput::Data(PipeInput::Frame(frame)));
     }
     if name.starts_with("polars.") && (name.ends_with("DataFrame") || name.ends_with("LazyFrame")) {
-        let ctx = PyCtx::new(py)?;
+        // `scalars`: a Polars frame never needs pandas (nor its import, nor an install).
+        let ctx = PyCtx::scalars(py)?;
         let frame = frame_from_py(&ctx, df, ColumnMode::Full)?.frame;
         return Ok(NativeInput::Data(PipeInput::Frame(frame)));
     }

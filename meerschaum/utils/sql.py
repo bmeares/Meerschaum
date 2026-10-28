@@ -7,8 +7,10 @@ Flavor-specific SQL tools.
 
 Only `sql_item_name` and `build_where` are used by the Rust engine (they delegate to it). The rest
 (`get_update_queries`, `get_create_table_queries`, `dateadd_str`, `table_exists`, ...) are SDK helpers
-for plugin and custom-connector authors: they keep their v4 implementations, work on the
-SQLAlchemy side (D16, the `sql` extra) and are not used by `Pipe` syncs.
+for plugin and custom-connector authors: they keep their v4 implementations and are not used by
+`Pipe` syncs. With a `SQLConnector` they run through its Rust connection pool (raw SQL, rc15 Q53:
+`table_exists`, `get_table_cols_types`, `get_table_cols_indices` need no SQLAlchemy); a SQLAlchemy
+session, engine or connection keeps working as in v4 (the `sql` extra).
 """
 
 from __future__ import annotations
@@ -916,10 +918,15 @@ def table_exists(
     A `bool` indicating whether or not the table exists on the database.
     """
     from meerschaum.connectors.sql._create_engine import import_sqlalchemy
-    sqlalchemy = import_sqlalchemy()
+    from meerschaum.connectors.sql._native import table_exists as native_table_exists
     schema = schema or connector.schema
-    insp = sqlalchemy.inspect(connector.engine)
     truncated_table_name = truncate_item_name(str(table), connector.flavor)
+    ### Raw SQL through the Rust connector: no SQLAlchemy (rc15 Q53).
+    exists = native_table_exists(connector, truncated_table_name, schema)
+    if exists is not None:
+        return exists
+    sqlalchemy = import_sqlalchemy()
+    insp = sqlalchemy.inspect(connector.engine)
     return insp.has_table(truncated_table_name, schema=schema)
 
 
@@ -991,6 +998,16 @@ def get_sqlalchemy_table(
     return tables[truncated_table_name]
 
 
+def _read_records(connectable: Any, query: str, debug: bool = False) -> List[Dict[str, Any]]:
+    """The rows of `connectable.read(query)` as dictionaries (a pandas or a Polars result)."""
+    df = connectable.read(query, debug=debug)
+    if df is None:
+        return []
+    if hasattr(df, 'to_dicts'):
+        return df.to_dicts()
+    return df.to_dict(orient='records')
+
+
 def get_table_cols_types(
     table: str,
     connectable: Union[
@@ -1040,13 +1057,13 @@ def get_table_cols_types(
     """
     import textwrap
     from meerschaum.connectors import SQLConnector
-    from meerschaum.connectors.sql._create_engine import import_sqlalchemy
-    sqlalchemy = import_sqlalchemy()
+    from meerschaum.connectors.sql._native import sql_text, uses_native
     flavor = flavor or getattr(connectable, 'flavor', None)
     if not flavor:
         raise ValueError("Please provide a database flavor.")
     if flavor == 'duckdb' and not isinstance(connectable, SQLConnector):
         raise ValueError("You must provide a SQLConnector when using DuckDB.")
+    native = isinstance(connectable, SQLConnector) and uses_native(connectable)
     if flavor in NO_SCHEMA_FLAVORS:
         schema = None
     if schema is None:
@@ -1067,7 +1084,8 @@ def get_table_cols_types(
     def _esc(s: str) -> str:
         return s.replace("'", "''")
 
-    cols_types_query = sqlalchemy.text(
+    cols_types_query = sql_text(
+        connectable,
         textwrap.dedent(columns_types_queries.get(
             flavor,
             columns_types_queries['default']
@@ -1095,10 +1113,10 @@ def get_table_cols_types(
                 row
                 for row in connectable.execute(cols_types_query, **debug_kwargs).fetchall()
             ]
-            if flavor != 'duckdb'
+            if flavor != 'duckdb' or native
             else [
                 tuple([doc[col] for col in cols])
-                for doc in connectable.read(cols_types_query, debug=debug).to_dict(orient='records')
+                for doc in _read_records(connectable, cols_types_query, debug=debug)
             ]
         )
         cols_types_docs = [
@@ -1223,13 +1241,13 @@ def get_table_cols_indices(
     import textwrap
     from collections import defaultdict
     from meerschaum.connectors import SQLConnector
-    from meerschaum.connectors.sql._create_engine import import_sqlalchemy
-    sqlalchemy = import_sqlalchemy()
+    from meerschaum.connectors.sql._native import sql_text, uses_native
     flavor = flavor or getattr(connectable, 'flavor', None)
     if not flavor:
         raise ValueError("Please provide a database flavor.")
     if flavor == 'duckdb' and not isinstance(connectable, SQLConnector):
         raise ValueError("You must provide a SQLConnector when using DuckDB.")
+    native = isinstance(connectable, SQLConnector) and uses_native(connectable)
     if flavor in NO_SCHEMA_FLAVORS:
         schema = None
     if schema is None:
@@ -1250,7 +1268,8 @@ def get_table_cols_indices(
     def _esc(s: str) -> str:
         return s.replace("'", "''")
 
-    cols_indices_query = sqlalchemy.text(
+    cols_indices_query = sql_text(
+        connectable,
         textwrap.dedent(columns_indices_queries.get(
             flavor,
             columns_indices_queries['default']
@@ -1281,10 +1300,10 @@ def get_table_cols_indices(
                 row
                 for row in connectable.execute(cols_indices_query, **debug_kwargs).fetchall()
             ]
-            if flavor != 'duckdb'
+            if flavor != 'duckdb' or native
             else [
                 tuple([doc[col] for col in cols])
-                for doc in connectable.read(cols_indices_query, debug=debug).to_dict(orient='records')
+                for doc in _read_records(connectable, cols_indices_query, debug=debug)
             ]
         )
         cols_types_docs = [
@@ -1699,8 +1718,7 @@ def get_postgis_geo_columns_types(
     A dictionary mapping column names to geometry types.
     """
     from meerschaum.utils.dtypes import get_geometry_type_srid
-    from meerschaum.connectors.sql._create_engine import import_sqlalchemy
-    sqlalchemy = import_sqlalchemy()
+    from meerschaum.connectors.sql._native import sql_text
     default_type, default_srid = get_geometry_type_srid()
     default_type = default_type.upper()
 
@@ -1709,7 +1727,8 @@ def get_postgis_geo_columns_types(
     schema = schema or 'public'
     truncated_schema_name = truncate_item_name(schema, flavor='postgis')
     truncated_table_name = truncate_item_name(table, flavor='postgis')
-    query = sqlalchemy.text(
+    query = sql_text(
+        connectable,
         "SELECT \"f_geometry_column\" AS \"column\", 'GEOMETRY' AS \"func\", \"type\", geom.\"srid\"\n"
         "FROM \"geometry_columns\" AS geom\n"
         f"WHERE \"f_table_schema\" = '{truncated_schema_name}'\n"

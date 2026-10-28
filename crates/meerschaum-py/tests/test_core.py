@@ -571,7 +571,7 @@ def test_sql_connector_routing(tmp_path, monkeypatch):
     assert method is not None
     assert conn.__dict__['_rust_connector'] is core_connector
     assert method.__self__ is core_connector
-    for name in ('read', 'no_such_method'):  # D16: user SQL stays SQLAlchemy
+    for name in ('read', 'no_such_method'):  # raw SQL is `sql_*` (`_native.py`), not `read`
         with pytest.raises(AttributeError, match=f"no method '{name}'"):
             conn._rust_method(name)
     assert '_rust_connector' not in conn.__getstate__()

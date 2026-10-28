@@ -452,15 +452,15 @@ groups['api'].add_argument(
 groups['api'].add_argument(
     '--keyfile', type=str,
     help = (
-        "Not supported: the API server does not serve HTTPS itself, and `start api` stops "
-        "with this flag. Put a reverse proxy that terminates TLS in front of it."
+        "Serve the API over HTTPS with this private key (PEM; requires --certfile). "
+        "Defaults to `api:server:ssl_keyfile`."
     ),
 )
 groups['api'].add_argument(
     '--certfile', type=str,
     help = (
-        "Not supported: the API server does not serve HTTPS itself, and `start api` stops "
-        "with this flag. Put a reverse proxy that terminates TLS in front of it."
+        "Serve the API over HTTPS with this certificate chain (PEM, the server's certificate "
+        "first; requires --keyfile). Defaults to `api:server:ssl_certfile`."
     ),
 )
 groups['api'].add_argument(

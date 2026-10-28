@@ -21,6 +21,7 @@ from meerschaum.core.Pipe import Pipe
 from meerschaum.core.Pipe._sync import SyncResult
 from meerschaum.core.Pipe._status import get_sync_statuses
 from meerschaum.core.Pipeline import Pipeline, Plan, RunResult, get_pipelines, get_runs
+from meerschaum.core.Team import Team, get_teams
 from meerschaum.plugins import Plugin
 from meerschaum.utils.venv import Venv
 from meerschaum.jobs import Job, make_executor

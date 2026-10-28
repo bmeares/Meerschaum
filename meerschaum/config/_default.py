@@ -36,6 +36,9 @@ default_meerschaum_config = {
     'instance': 'sql:main',
     'api_instance': 'MRSM{meerschaum:instance}',
     'repository': 'api:mrsm',
+    ### The DataFrame library Meerschaum returns frames in (`polars` or `pandas`; rc15).
+    ### A root created before 5.0.0rc15 is given `pandas` the first time it is opened.
+    'dataframe': 'polars',
     'connectors': {
         'sql': {
             'default': {},
@@ -228,14 +231,16 @@ default_api_config = {
         'default_expiration_days': 366,
     },
     'permissions':       {
+        ### Self-registration is off: the first account (while there are no users) is an
+        ### administrator, who adds the others (rc15).
         'registration': {
-            'users': True,
+            'users': False,
             'pipes': True,
             'plugins': True,
         },
-        'actions': {
-            'non_admin': True,
-        },
+        ### `default_role` (not set here): the permissions of users without their own
+        ### (`viewer`, `editor` (the default) or `operator`). When it is not set, Meerschaum 4's
+        ### `actions: {non_admin: true}` in your config means `operator`.
         'chaining': {
             'insecure_parent_instance': False,
             'child_apis': False,

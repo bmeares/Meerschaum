@@ -35,7 +35,7 @@ fn context_item<'py>(
 }
 
 /// The instance connector of `pipe` for this call.
-fn instance_of(
+pub(crate) fn instance_of(
     py: Python<'_>,
     pipe: &meerschaum_core::Pipe,
     context: &Bound<'_, PyDict>,

@@ -23,6 +23,7 @@
 
 use pyo3::prelude::*;
 
+pub mod access_api;
 pub mod api_client_api;
 pub mod arrow_bridge;
 pub mod build_info;
@@ -31,6 +32,7 @@ pub mod config_api;
 pub mod convert;
 pub mod core_api;
 pub mod d14_api;
+pub mod dataframe_api;
 mod duckdb_transport;
 pub mod engine_api;
 pub mod entry_api;
@@ -51,6 +53,7 @@ pub mod pipe_methods_api;
 pub mod polars_bridge;
 pub mod runtime;
 pub mod sql_api;
+pub mod sql_raw_api;
 pub mod static_config;
 pub mod status_api;
 pub mod sync_api;
@@ -81,6 +84,9 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(arrow_bridge::roundtrip_arrow, m)?)?;
 
     m.add_function(wrap_pyfunction!(polars_bridge::polars_roundtrip, m)?)?;
+
+    // The DataFrame library setting: `frame_from_arrow`, the root pin (rc15, Q54)
+    dataframe_api::register(m)?;
 
     // meerschaum-kernel
     m.add_function(wrap_pyfunction!(kernel_api::enforce_dtypes, m)?)?;
@@ -169,6 +175,9 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // Per-pipe sync status: `pipe.get_sync_status()`, `mrsm.get_sync_statuses()` (rc15, C2)
     status_api::register(m)?;
 
+    // The access model: permissions, roles, teams, pipe access and locks (rc15, K2)
+    access_api::register(m)?;
+
     // `meerschaum.jobs.Job`, the executors and `utils.daemon.Daemon` over `meerschaum-jobs` (wave 16, S)
     m.add_function(wrap_pyfunction!(main_api::main, m)?)?;
     jobs_api::register(m)?;
@@ -183,6 +192,7 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // meerschaum-connector-sql (instance connector)
     m.add_class::<sql_api::PySqlConnector>()?;
     m.add_function(wrap_pyfunction!(sql_api::pipe_metadata_epoch, m)?)?;
+    sql_raw_api::register(m)?;
 
     Ok(())
 }

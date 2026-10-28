@@ -229,7 +229,8 @@ def get_pipe_data(
     end_add_minutes: int = 0,
     chunksize: Optional[int] = -1,
     as_iterator: bool = False,
-    as_polars: bool = False,
+    as_polars: Optional[bool] = None,
+    as_pandas: Optional[bool] = None,
     debug: bool = False,
     **kw: Any
 ) -> Union[pd.DataFrame, None]:
@@ -277,18 +278,25 @@ def get_pipe_data(
     as_iterator: bool, default False
         If `True`, return the chunks iterator directly.
 
-    as_polars: bool, default False
-        If `True`, use an Arrow-native driver when available and return a Polars DataFrame.
+    as_polars: Optional[bool], default None
+        `True` returns Polars, `False` pandas; `None` follows the `dataframe` setting
+        (`meerschaum.utils.dataframe.get_dataframe_library()`).
+
+    as_pandas: Optional[bool], default None
+        `True` returns pandas, `False` Polars; `None` follows the setting.
 
     debug: bool, default False
         Verbosity toggle.
 
     Returns
     -------
-    A Pandas DataFrame, or a Polars DataFrame when an Arrow-native read is available.
+    A DataFrame of the requested library (an iterator of them with `as_iterator`), or `None`
+    when the table does not exist.
 
     """
-    return self._rust_method('get_pipe_data')(
+    from meerschaum.utils.dataframe import wants_polars
+    polars = wants_polars(as_polars=as_polars, as_pandas=as_pandas)
+    result = self._rust_method('get_pipe_data')(
         pipe,
         select_columns=select_columns,
         omit_columns=omit_columns,
@@ -301,9 +309,14 @@ def get_pipe_data(
         end_add_minutes=end_add_minutes,
         chunksize=chunksize,
         as_iterator=as_iterator,
-        as_polars=as_polars,
+        as_polars=polars,
         **kw
     )
+    if polars and as_iterator and result is not None:
+        ### The binding's chunks are pandas frames: the helper converts each to Polars.
+        from meerschaum.utils.dataframe import frame_from_arrow
+        return (frame_from_arrow(chunk, as_polars=True) for chunk in result)
+    return result
 
 
 def get_pipe_docs(

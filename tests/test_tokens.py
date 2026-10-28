@@ -73,6 +73,25 @@ def test_token_without_scopes_has_an_empty_list_when_edited_to_none():
     assert _scopes_list('*') == ['*']
 
 
+@pytest.mark.parametrize('library', ['polars', 'pandas'])
+def test_token_listing_does_not_depend_on_the_dataframe_library(monkeypatch, library):
+    """The token store reads documents, including on fresh Polars roots."""
+    from tests._worker_sqlite import worker_sqlite
+    monkeypatch.setenv('MRSM_DATAFRAME', library)
+    conn = worker_sqlite('token_frames_' + uuid.uuid4().hex[:8])
+    user, token = _user_and_token(conn, ['pipes:read'])
+    try:
+        listed = conn.get_tokens(user=user, ids=[token.id])
+        assert len(listed) == 1
+        assert str(listed[0].id) == str(token.id)
+        assert listed[0].scopes == ['pipes:read']
+        assert listed[0].creation is not None
+        assert listed[0].expiration is not None
+    finally:
+        token.delete()
+        conn.delete_user(user)
+
+
 # ---------------------------------------------------------------------------------------------
 # HTTP: the server resolves the token on ITS instance, whatever the default instance is.
 
@@ -151,7 +170,7 @@ def test_regular_users_token_logs_in_with_exactly_its_scopes(server, creds):
         json.dumps({}).encode(), {**bearer, 'Content-Type': 'application/json'},
     )
     assert status == 403, text
-    assert 'pipes:write' in text
+    assert 'pipes:register' in text
 
 
 def test_api_key_of_a_regular_users_token_reads_pipes_on_the_servers_instance(server, creds):

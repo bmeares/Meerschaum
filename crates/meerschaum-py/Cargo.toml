@@ -33,6 +33,8 @@ meerschaum-kernel = { workspace = true }
 meerschaum-connector-sql = { workspace = true }
 meerschaum-connector = { workspace = true }
 meerschaum-engine = { workspace = true }
+# The console uses the API server's exact SQL access guard.
+meerschaum-server = { workspace = true }
 # The connectors a one-pipe sync builds from the Python process's attributes (`facade.rs`) and
 # the worker pool it tells about ad hoc connectors.
 meerschaum-connector-api = { workspace = true, features = ["client"] }

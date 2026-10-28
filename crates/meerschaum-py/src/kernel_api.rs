@@ -85,7 +85,12 @@ pub fn enforce_dtypes<'py>(
     if df.is_none() {
         return Ok(df);
     }
-    let ctx = PyCtx::new(py)?;
+    // A Polars result never needs pandas (nor its import, nor an install).
+    let ctx = if as_polars {
+        PyCtx::scalars(py)?
+    } else {
+        PyCtx::new(py)?
+    };
     let dtypes = str_map(Some(&dtypes))?;
     let opts = EnforceOptions {
         explicit_dtypes: str_map(explicit_dtypes.as_ref())?,
@@ -137,8 +142,9 @@ pub fn enforce_dtypes<'py>(
         });
     }
     if input.kind == FrameKind::Polars {
-        // PARITY: v4 returns pandas unless `as_polars` (`to_pandas(df)` first, so untyped columns
-        // are Arrow-backed).
+        // A Polars frame enforced into pandas (`as_polars=False`: the façade passes `True` for a
+        // Polars input unless the caller asks for pandas, rc15 PARITY.md RC15-R3-002): v4's
+        // `to_pandas(df)` first, so untyped columns are Arrow-backed.
         input.kind = FrameKind::Pandas;
         for col in input.dtypes.keys() {
             if !dtypes.contains_key(col) {

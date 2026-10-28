@@ -158,10 +158,16 @@ def get_pipe_data(
     params: Optional[Dict[str, Any]] = None,
     as_chunks: bool = False,
     debug: bool = False,
+    as_polars: Optional[bool] = None,
+    as_pandas: Optional[bool] = None,
     **kw: Any
 ) -> Union['pd.DataFrame', None]:
-    """Fetch data from the API."""
-    return self._rust_client().get_pipe_data(
+    """
+    Fetch data from the API, as a DataFrame of the `meerschaum:dataframe` library
+    (`as_polars=True` / `as_pandas=True` choose one).
+    """
+    from meerschaum.utils.dataframe import frame_from_arrow, frame_library_of
+    df = self._rust_client().get_pipe_data(
         pipe,
         select_columns=select_columns,
         omit_columns=omit_columns,
@@ -170,6 +176,9 @@ def get_pipe_data(
         params=params,
         as_chunks=as_chunks,
     )
+    if frame_library_of(df) is None:
+        return df
+    return frame_from_arrow(df, as_polars=as_polars, as_pandas=as_pandas)
 
 
 def get_pipe_id(

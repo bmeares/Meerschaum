@@ -394,7 +394,7 @@ FEATURE_LINES: Dict[str, str] = {
     def sync_pipe(
         self,
         pipe: mrsm.Pipe,
-        df: 'pd.DataFrame',
+        df: 'pl.DataFrame | pd.DataFrame',
         debug: bool = False,
         **kwargs: Any
     ) -> mrsm.SuccessTuple:
@@ -406,7 +406,7 @@ FEATURE_LINES: Dict[str, str] = {
         pipe: mrsm.Pipe
             The pipe to which the data should be upserted.
 
-        df: pd.DataFrame
+        df: pl.DataFrame | pd.DataFrame
             The data to be synced.
 
         Returns
@@ -462,7 +462,7 @@ FEATURE_LINES: Dict[str, str] = {
         params: dict[str, Any] | None = None,
         debug: bool = False,
         **kwargs: Any
-    ) -> Union['pd.DataFrame', None]:
+    ) -> Union['pl.DataFrame', 'pd.DataFrame', None]:
         \"\"\"
         Query a pipe's target table and return the DataFrame.
 

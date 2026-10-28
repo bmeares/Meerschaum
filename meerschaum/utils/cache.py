@@ -13,7 +13,7 @@ pipe = mrsm.Pipe('sql:main', 'weather', instance='sql:main')
 
 @cache(ttl=300, pipes=[pipe])
 def daily_means(station: str):
-    return pipe.get_data(params={'station': station}).groupby('day').mean()
+    return pipe.get_data(params={'station': station}).group_by('day').mean()
 
 cache.set('greeting', {'text': 'hello'}, ttl=60)
 cache.get('greeting')            # {'text': 'hello'}

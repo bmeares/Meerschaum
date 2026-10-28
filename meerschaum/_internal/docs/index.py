@@ -85,8 +85,14 @@ sql_conn = mrsm.get_connector(
 )
 df = sql_conn.read("SELECT 1 AS foo")
 print(df)
-#    foo
-# 0    1
+# shape: (1, 1)
+# ┌─────┐
+# │ foo │
+# │ --- │
+# │ i64 │
+# ╞═════╡
+# │ 1   │
+# └─────┘
 
 sql_conn.to_sql(df, 'foo')
 print(sql_conn.read('foo'))
@@ -150,11 +156,20 @@ pipe = mrsm.Pipe(
 pipe.sync(begin=datetime(2024, 1, 1))
 df = pipe.get_data()
 print(df)
-#           ts  id  vl
-# 0 2024-01-01   1  97
-# 1 2024-01-01   2  18
-# 2 2024-01-01   3  96
+# shape: (3, 3)
+# ┌─────────────────────┬─────┬─────┐
+# │ ts                  ┆ id  ┆ vl  │
+# │ ---                 ┆ --- ┆ --- │
+# │ datetime[μs]        ┆ i64 ┆ i64 │
+# ╞═════════════════════╪═════╪═════╡
+# │ 2024-01-01 00:00:00 ┆ 1   ┆ 97  │
+# │ 2024-01-01 00:00:00 ┆ 2   ┆ 18  │
+# │ 2024-01-01 00:00:00 ┆ 3   ┆ 96  │
+# └─────────────────────┴─────┴─────┘
 ```
+
+DataFrames are Polars by default (`pip install meerschaum[polars]`); set `dataframe: pandas` in
+`meerschaum.yaml` (a root created before 5.0.0rc15 has it) or pass `as_pandas=True` for pandas.
 
 Add `temporary=True` to skip registering the pipe in the pipes table.
 
@@ -636,6 +651,8 @@ def init_dash(dash_app):
       <li><code>meerschaum.utils.dataframe.df_from_literal()</code></li>
       <li><code>meerschaum.utils.dataframe.df_is_chunk_generator()</code></li>
       <li><code>meerschaum.utils.dataframe.enforce_dtypes()</code></li>
+      <li><code>meerschaum.utils.dataframe.frame_from_arrow()</code></li>
+      <li><code>meerschaum.utils.dataframe.get_dataframe_library()</code></li>
       <li><code>meerschaum.utils.dataframe.filter_unseen_df()</code></li>
       <li><code>meerschaum.utils.dataframe.get_bool_cols()</code></li>
       <li><code>meerschaum.utils.dataframe.get_bytes_cols()</code></li>
@@ -654,7 +671,10 @@ def init_dash(dash_app):
       <li><code>meerschaum.utils.dataframe.get_uuid_cols()</code></li>
       <li><code>meerschaum.utils.dataframe.parse_df_datetimes()</code></li>
       <li><code>meerschaum.utils.dataframe.query_df()</code></li>
+      <li><code>meerschaum.utils.dataframe.resolve_dataframe_library()</code></li>
       <li><code>meerschaum.utils.dataframe.to_json()</code></li>
+      <li><code>meerschaum.utils.dataframe.to_pandas()</code></li>
+      <li><code>meerschaum.utils.dataframe.to_polars()</code></li>
       <li><code>meerschaum.utils.dataframe.to_simple_lines()</code></li>
       <li><code>meerschaum.utils.dataframe.parse_simple_lines()</code></li>
     </ul>

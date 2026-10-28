@@ -1,5 +1,5 @@
 //! `meerschaum-connector-sql` bound into `meerschaum._core`: the `SqlConnector` instance methods behind
-//! the v4 `SQLConnector` façade (design §4.4, D12, D16).
+//! the v4 `SQLConnector` façade (design §4.4, D12), and its raw SQL (`sql_*`, rc15 Q53).
 //!
 //! `_core.SqlConnector(label, attributes)` is built from the same attributes the Python
 //! `SQLConnector` resolved (its `__dict__`: `flavor`, `uri`, `host`, `port`, `username`,
@@ -7,8 +7,8 @@
 //! `MRSM_SQL_<LABEL>` URIs all work unchanged. Each method takes the Python arguments of the v4
 //! method it replaces; pipes, users and plugins are read by attribute (duck typing). Database
 //! I/O runs on the extension's Tokio runtime with the GIL released; frames cross as Arrow
-//! ([`crate::pandas_bridge`]). `read` / `exec` / `value` / `to_sql` / `.engine` stay
-//! SQLAlchemy in the façade (D16) and are not bound here.
+//! ([`crate::pandas_bridge`]). Raw SQL (`read` / `exec` / `exec_queries` / `value` / `to_sql`)
+//! goes through the `sql_*` methods ([`crate::sql_raw_api`]); only `.engine` stays SQLAlchemy.
 
 use std::sync::Arc;
 
@@ -372,6 +372,99 @@ impl PySqlConnector {
 
     fn __repr__(&self) -> String {
         format!("_core.SqlConnector('{}')", self.inner.keys())
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // Raw SQL (`SQLConnector.read` / `exec` / `exec_queries` / `value` / `to_sql`, rc15 Q53;
+    // see `sql_raw_api.rs`)
+
+    /// Run a row-returning statement (`?` / `$n` / `@Pn` / `:n` placeholders bound to `params`):
+    /// an iterator of `_core.SqlFrame` batches of at most `chunksize` rows.
+    #[pyo3(signature = (sql, params=None, chunksize=None))]
+    fn sql_query(
+        &self,
+        py: Python<'_>,
+        sql: String,
+        params: Option<&Bound<'_, PyAny>>,
+        chunksize: Option<usize>,
+    ) -> PyResult<crate::sql_raw_api::SqlChunks> {
+        crate::sql_raw_api::sql_query(py, self.conn(), sql, params, chunksize)
+    }
+
+    /// Execute a statement that returns no rows (any number of statements without `params`):
+    /// the rows affected.
+    #[pyo3(signature = (sql, params=None))]
+    fn sql_execute(
+        &self,
+        py: Python<'_>,
+        sql: String,
+        params: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<u64> {
+        crate::sql_raw_api::sql_execute(py, self.conn(), sql, params)
+    }
+
+    /// Execute one statement once per parameter set, in one transaction (`executemany`).
+    fn sql_execute_many(
+        &self,
+        py: Python<'_>,
+        sql: String,
+        param_sets: &Bound<'_, PyAny>,
+    ) -> PyResult<u64> {
+        crate::sql_raw_api::sql_execute_many(py, self.conn(), sql, param_sets)
+    }
+
+    /// Begin a transaction (`read_only`: refuse writes where the database can; `write`: take
+    /// SQLite's write lock up front).
+    #[pyo3(signature = (read_only=false, write=false))]
+    fn sql_begin(
+        &self,
+        py: Python<'_>,
+        read_only: bool,
+        write: bool,
+    ) -> PyResult<crate::sql_raw_api::SqlTx> {
+        crate::sql_raw_api::sql_begin(py, self.conn(), read_only, write)
+    }
+
+    /// `to_sql` without SQLAlchemy: `(success, error message)`.
+    #[pyo3(signature = (
+        df, name, schema=None, if_exists="replace", column_types=None, index_columns=None,
+        chunksize=None
+    ))]
+    #[allow(clippy::too_many_arguments)]
+    fn sql_to_sql(
+        &self,
+        py: Python<'_>,
+        df: &Bound<'_, PyAny>,
+        name: String,
+        schema: Option<String>,
+        if_exists: &str,
+        column_types: Option<&Bound<'_, PyDict>>,
+        index_columns: Option<Vec<String>>,
+        chunksize: Option<i64>,
+    ) -> PyResult<(bool, String)> {
+        let empty = PyDict::new(py);
+        crate::sql_raw_api::sql_to_sql(
+            py,
+            self.conn(),
+            df,
+            name,
+            schema,
+            if_exists,
+            column_types.unwrap_or(&empty),
+            index_columns.unwrap_or_default(),
+            chunksize,
+        )
+    }
+
+    /// Whether a table (or view) exists (database errors raise).
+    #[pyo3(signature = (table, schema=None))]
+    fn sql_table_exists(
+        &self,
+        py: Python<'_>,
+        table: String,
+        schema: Option<String>,
+    ) -> PyResult<bool> {
+        crate::sql_raw_api::sql_table_exists(py, self.conn(), table, schema)
     }
 
     // -----------------------------------------------------------------------------------------

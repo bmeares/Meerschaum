@@ -10,10 +10,11 @@ from __future__ import annotations
 from datetime import timedelta, datetime
 
 import meerschaum as mrsm
-from meerschaum.utils.typing import Any, Union, Iterator, TYPE_CHECKING
+from meerschaum.utils.typing import Any, Optional, Union, Iterator, TYPE_CHECKING
 
 if TYPE_CHECKING:
     pd = mrsm.attempt_import('pandas')
+    pl = mrsm.attempt_import('polars')
 
 
 def fetch(
@@ -23,8 +24,10 @@ def fetch(
     check_existing: bool = True,
     sync_chunks: bool = False,
     debug: bool = False,
+    as_polars: Optional[bool] = None,
+    as_pandas: Optional[bool] = None,
     **kw: Any
-) -> Union['pd.DataFrame', Iterator['pd.DataFrame'], None]:
+) -> Union['pl.DataFrame', 'pd.DataFrame', Iterator[Any], None]:
     """
     Fetch a Pipe's latest data from its connector.
 
@@ -46,13 +49,24 @@ def fetch(
     debug: bool, default False
         Verbosity toggle.
 
+    as_polars: Optional[bool], default None
+        `True` returns Polars frames and `False` pandas ones, whatever `meerschaum:dataframe`
+        says (see `as_pandas`).
+
+    as_pandas: Optional[bool], default None
+        `True` returns pandas frames and `False` Polars ones. By default (`None`) the frames are
+        the library of the `meerschaum:dataframe` setting, whatever the source returned.
+        A `chunk_hook` is given chunks of the same library.
+
     Returns
     -------
-    A `pd.DataFrame` of the newest unseen data.
+    A DataFrame of the newest unseen data (Polars or pandas, per `meerschaum:dataframe`), or a
+    generator of chunks for a SQL source.
 
     """
     from meerschaum import _core
-    from meerschaum.core.Pipe._data import _rust_context
+    from meerschaum.core.Pipe._data import _rust_context, _wants_polars
+    polars = _wants_polars(False, as_polars, as_pandas)
     try:
         context = _rust_context(self, debug=debug)
     except Exception as e:
@@ -76,6 +90,7 @@ def fetch(
             for key, val in kw.items()
             if key not in ('params', 'chunk_hook')
         },
+        as_polars=polars,
         sync_chunks=sync_chunks,
         chunk_hook=kw.get('chunk_hook', None),
         debug=debug,

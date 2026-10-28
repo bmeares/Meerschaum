@@ -244,14 +244,13 @@ def get_tokens(
     if debug:
         dprint(f"Getting tokens with {user_id=}, {params=}")
 
-    tokens_df = tokens_pipe.get_data(params=params, debug=debug)
-    if tokens_df is None:
+    tokens_docs = tokens_pipe.get_docs(params=params, debug=debug)
+    if not tokens_docs:
         return []
 
     if debug:
-        dprint(f"Retrieved tokens dataframe:\n{tokens_df}")
+        dprint(f"Retrieved token documents:\n{tokens_docs}")
 
-    tokens_docs = tokens_df.to_dict(orient='records')
     return [
         Token(
             instance=self,

@@ -1200,7 +1200,8 @@ pub fn frame_to_polars<'py>(
     for (col, name, meta) in extensions {
         if name == "arrow.uuid" {
             // PARITY: v4's `to_polars()` keeps UUIDs as Python objects (`strict=False`).
-            let ctx = crate::convert::PyCtx::new(py)?;
+            // `scalars`: a Polars result never imports (or installs) pandas.
+            let ctx = crate::convert::PyCtx::scalars(py)?;
             let values = frame.data(&col).map_err(frame_err)?.values();
             let list = cells_to_pylist(&ctx, &values)?;
             let kwargs = PyDict::new(py);

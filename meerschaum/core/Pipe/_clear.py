@@ -60,6 +60,11 @@ def clear(
 
     begin, end = self.parse_date_bounds(begin, end)
 
+    ### A `clear` lock refuses row deletes (the core checks its own instances).
+    refusal = self._lock_refusal('clear', debug=debug)
+    if refusal:
+        return False, refusal
+
     with Venv(get_connector_plugin(self.instance_connector)):
         result = self.instance_connector.clear_pipe(
             self,

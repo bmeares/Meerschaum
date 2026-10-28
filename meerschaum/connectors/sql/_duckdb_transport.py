@@ -429,6 +429,12 @@ def execute(connection, sql, params):
 def query(connection, sql, params):
     """Read without Arrow/pandas; cast complex values inside DuckDB before Python decoding."""
     _check_pid()
+    # DuckDB 2 executes lazily through its DBAPI cursor and refuses a relation while
+    # a preceding cursor is unfinished (even a one-row query read with fetchone()).
+    # Earlier versions completed execution before returning from execute().
+    complete = getattr(connection, 'complete', None)
+    if complete is not None:
+        complete()
     names = None
     if params:
         # Bound relations materialize immediately and deduplicate output names. DESCRIBE
@@ -467,7 +473,24 @@ def query(connection, sql, params):
     if needs_cast:
         # Positional references preserve duplicate names and never execute the input twice.
         relation = relation.project(', '.join(expressions))
-    return relation, columns
+    if callable(getattr(relation, 'fetchmany', None)):
+        # DuckDB 1.x supports stateful relation results. Its sql_query() cannot
+        # re-expose a materialized parameter source as executable SQL.
+        return relation, columns
+    # Fetch through the DBAPI cursor. DuckDB 2 removed the stateful `fetchmany()` on
+    # relations; their `fetchall()` re-executes the plan each time. `sql_query()`
+    # retains bound relation sources (including their materialized parameter values),
+    # so the projected query executes once and the connection consumes that result.
+    projected_sql = relation.sql_query()
+    # A bound relation may still expose its original placeholders, or may refer to
+    # a materialized source with none (e.g. a query with a volatile expression).
+    remaining_params = connection.extract_statements(projected_sql)[0].named_parameters
+    cursor = (
+        connection.execute(projected_sql, params)
+        if params and remaining_params
+        else connection.execute(projected_sql)
+    )
+    return cursor, columns
 
 
 def _after_fork_child():

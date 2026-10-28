@@ -285,10 +285,13 @@ class ValkeyConnector(InstanceConnector):
         datetime_column: Optional[str] = None,
         select_columns: Optional[List[str]] = None,
         omit_columns: Optional[List[str]] = None,
-        debug: bool = False
+        debug: bool = False,
+        as_polars: Optional[bool] = None,
+        as_pandas: Optional[bool] = None,
     ) -> Union['pd.DataFrame', None]:
         """
-        Query the table and return the result dataframe.
+        Query the table and return the result dataframe (of the `meerschaum:dataframe` library;
+        `as_polars=True` / `as_pandas=True` choose one).
 
         Parameters
         ----------
@@ -316,9 +319,10 @@ class ValkeyConnector(InstanceConnector):
 
         Returns
         -------
-        A Pandas DataFrame of the result, or `None`.
+        A DataFrame of the result, or `None`.
         """
-        return self._rust_client().read(
+        from meerschaum.utils.dataframe import frame_from_arrow, frame_library_of
+        df = self._rust_client().read(
             table,
             begin=begin,
             end=end,
@@ -327,6 +331,9 @@ class ValkeyConnector(InstanceConnector):
             select_columns=select_columns,
             omit_columns=omit_columns,
         )
+        if frame_library_of(df) is None:
+            return df
+        return frame_from_arrow(df, as_polars=as_polars, as_pandas=as_pandas)
 
     def read_docs(
         self,

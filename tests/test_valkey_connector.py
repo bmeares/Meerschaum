@@ -792,6 +792,8 @@ def test_pipe_get_data_dtypes_match_the_v4_connector(conn):
         'PYTHONPATH': str(REPO), 'MRSM_ROOT_DIR': root,
         'MRSM_PLUGINS_DIR': str(pathlib.Path(root) / 'plugins'),
         'MRSM_NO_AUTO_INSTALL': '1',
+        # This compares pandas dtype names with v4, independently of new-root defaults.
+        'MRSM_DATAFRAME': 'pandas',
     })
     result = subprocess.run(
         [sys.executable, '-c', code(tag + 'x')], env=env, cwd=root,

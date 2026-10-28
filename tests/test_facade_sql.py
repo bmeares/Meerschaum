@@ -45,7 +45,7 @@ def test_every_method_delegates_to_the_core_connector(conn):
     for name in ('register_pipe', 'get_pipe_data', 'sync_pipe', 'get_users', 'register_plugin'):
         assert conn._rust_method(name).__self__ is core_connector
     with pytest.raises(AttributeError, match="no method 'read'"):
-        conn._rust_method('read')  # D16: user SQL stays SQLAlchemy
+        conn._rust_method('read')  # raw SQL goes through `_native` and the `sql_*` bindings
 
 
 def test_every_delegation_names_a_bound_method():
@@ -231,8 +231,11 @@ def test_a_pipe_on_an_instance_that_cannot_be_built():
         assert pipe.fetch() is None
 
 
-def test_raw_sql_without_the_sql_extra_is_an_import_error(tmp_path):
-    """D16: `read`, `exec`, `value`, `to_sql`, `.engine` name `meerschaum[sql]` when SQLAlchemy is missing."""
+def test_raw_sql_without_the_sql_extra(tmp_path):
+    """
+    rc15 Q53: `read`, `exec`, `value`, `exec_queries` and `to_sql` run on the Rust connector, so
+    they work without SQLAlchemy; only `.engine` names `meerschaum[sql]` (D16).
+    """
     import os
     import subprocess
     import sys
@@ -240,23 +243,13 @@ def test_raw_sql_without_the_sql_extra_is_an_import_error(tmp_path):
 import sys
 sys.modules['sqlalchemy'] = None
 import meerschaum as mrsm
+import pandas as pd
 conn = mrsm.get_connector('sql', 'noextra', flavor='sqlite', database=sys.argv[1])
-calls = {
-    'exec': lambda: conn.exec('SELECT 1'),
-    'read': lambda: conn.read('SELECT 1'),
-    'value': lambda: conn.value('SELECT 1'),
-    'to_sql': lambda: conn.to_sql(None, 't'),
-    'engine': lambda: conn.engine,
-    'exec_queries': lambda: conn.exec_queries(['SELECT 1']),
-}
-calls.pop('engine')
-for name, call in calls.items():
-    try:
-        call()
-    except ImportError as e:
-        assert 'meerschaum[sql]' in str(e), (name, str(e))
-    else:
-        raise AssertionError(name + ' did not raise')
+assert conn.exec('SELECT 1').scalar() == 1
+assert conn.read('SELECT 1 AS one')['one'].tolist() == [1]
+assert conn.value('SELECT 1') == 1
+assert conn.to_sql(pd.DataFrame({'a': [1]}), 't', as_tuple=True)[0]
+assert conn.exec_queries(['SELECT 1'])[0].scalar() == 1
 ### A property raises `AttributeError`, so that `hasattr(conn, 'engine')` is `False`.
 assert hasattr(conn, 'engine') is False
 try:
@@ -272,6 +265,7 @@ print('D16_OK')
         'MRSM_ROOT_DIR': str(tmp_path / 'root'),
         'MRSM_PLUGINS_DIR': str(tmp_path / 'plugins'),
         'MRSM_NO_AUTO_INSTALL': '1',
+        'MRSM_DATAFRAME': 'pandas',
         'PYTHONPATH': os.getcwd(),
     })
     (tmp_path / 'root').mkdir()
@@ -451,8 +445,8 @@ print('ROLE_OK')
 def test_a_sqlite_instance_needs_no_sqlalchemy_for_its_attributes_and_pipes(tmp_path):
     """
     Without the `sql` extra `URI`, `DATABASE_URL` and `IS_THREAD_SAFE` come from the attributes,
-    `get_pipes(as_tags_dict=True)` works, nothing warns about SQLAlchemy and `table_exists` raises
-    an `ImportError` naming the extra.
+    `get_pipes(as_tags_dict=True)` works, nothing warns about SQLAlchemy and `table_exists` asks
+    the Rust connector.
     """
     import os
     import subprocess
@@ -475,12 +469,9 @@ pipe = mrsm.Pipe('noextra', 'tags', instance=conn, columns={'id': 'id'}, tags=['
 assert pipe.sync([{'id': 1}])[0]
 tags = mrsm.get_pipes(mrsm_instance=conn, as_tags_dict=True)
 assert sorted(tags) == ['a', 'b'], tags
-try:
-    table_exists('t', conn)
-except ImportError as e:
-    assert 'meerschaum[sql]' in str(e), str(e)
-else:
-    raise AssertionError('table_exists did not raise')
+### rc15 Q53: asked through the Rust connector.
+assert table_exists('t', conn) is False
+assert table_exists(pipe.target, conn) is True
 print('ATTRS_OK')
 """
     env = {key: value for key, value in os.environ.items() if not key.startswith('MRSM_')}

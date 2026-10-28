@@ -131,6 +131,8 @@ def test_native_plugin_host_calls_from_python(tmp_path):
         'MRSM_PLUGINS_DIR': str(plugins),
         'MRSM_NO_UPDATE_CHECK': '1',
         'MRSM_NOASK': 'true',
+        ### The checks read pandas frames (`meerschaum:dataframe`, rc15).
+        'MRSM_DATAFRAME': 'pandas',
         'MRSM_SQL_LOCAL': json.dumps({'flavor': 'sqlite', 'database': str(tmp_path / 'local.db')}),
         'MRSM_CONFIG': json.dumps({'plugins': {'hosted': {'factor': 100}}}),
         'PATH': os.path.dirname(CARGO) + os.pathsep + env.get('PATH', ''),

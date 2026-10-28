@@ -209,6 +209,15 @@ def test_driver_scalar_and_complex_types(tmp_path):
         assert cursor.fetchall() == [(1, 9)]
         assert [name for name, _ in columns] == ['n', 'value']
         assert db.execute("SELECT currval('query_once')").fetchone() == (1,)
+        # Chunk consumption executes a relation once, even on DuckDB versions where
+        # relations no longer expose a stateful `fetchmany()` method.
+        cursor, _ = transport.query(
+            db, "SELECT nextval('query_once') AS n FROM range(3)", [],
+        )
+        assert cursor.fetchmany(2) == [(2,), (3,)]
+        assert cursor.fetchmany(2) == [(4,)]
+        assert cursor.fetchmany(2) == []
+        assert db.execute("SELECT currval('query_once')").fetchone() == (4,)
         db.execute('CREATE TABLE query_side_effect (id INTEGER)')
         for sql in ('SELECT $1 AS x; INSERT INTO query_side_effect VALUES (1)',
                     'INSERT INTO query_side_effect VALUES ($1) RETURNING id'):

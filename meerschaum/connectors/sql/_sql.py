@@ -161,6 +161,8 @@ def read(
     index_col: Optional[str] = None,
     silent: bool = False,
     debug: bool = False,
+    as_polars: Optional[bool] = None,
+    as_pandas: Optional[bool] = None,
     **kw: Any
 ) -> Union[
     pandas.DataFrame,
@@ -170,22 +172,26 @@ def read(
     None,
 ]:
     """
-    Read a SQL query or table into a pandas dataframe.
+    Read a SQL query or table into a DataFrame (Polars or pandas, see `as_polars`).
+
+    The query runs on the connector's Rust connection pool (the one `Pipe` methods use) for every
+    flavor in `meerschaum.connectors.sql._native.NATIVE_SQL_FLAVORS`, so no SQLAlchemy is needed;
+    the frame is the one Meerschaum 4 built with `pd.read_sql_query()` (same columns, dtypes and
+    values) when the result is pandas.
 
     Parameters
     ----------
     query_or_table: Union[str, sqlalchemy.Query]
-        The SQL query (sqlalchemy Query or string) or name of the table from which to select.
+        The SQL query (text, or a SQLAlchemy construct such as `text()` or `select()`) or the name
+        of the table from which to select.
 
-    params: Optional[Dict[str, Any]], default None
-        `List` or `Dict` of parameters to pass to `pandas.read_sql()`.
-        See the pandas documentation for more information:
-        https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.read_sql.html
+    params: Union[Dict[str, Any], List[Any], None], default None
+        The query's parameters: a dictionary for `:name` placeholders (SQLAlchemy's style, also
+        `%(name)s`), or a list / tuple of values for `?` (or `%s`) placeholders, in order.
 
     dtype: Optional[Dict[str, Any]], default None
-        A dictionary of data types to pass to `pandas.read_sql()`.
-        See the pandas documentation for more information:
-        https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.read_sql_query.html
+        A dictionary of pandas data types to cast columns to (`DataFrame.astype()`).
+        For Polars results, declared `json` and `geometry` columns.
 
     chunksize: Optional[int], default -1
         How many chunks to read at a time. `None` will read everything in one large chunk.
@@ -228,22 +234,132 @@ def read(
         and hooks are not called in this case.
 
     index_col: Optional[str], default None
-        If using Dask, use this column as the index column.
-        If omitted, a Pandas DataFrame will be fetched and converted to a Dask DataFrame.
+        Make this column the index of a pandas result (with Dask, the index column).
 
     silent: bool, default False
         If `True`, return `None` instead of raising when the query fails, without a warning
         (Meerschaum 4's behavior). By default, database errors raise.
 
+    as_polars: Optional[bool], default None
+        `True` returns Polars frames, `False` pandas; `None` follows the `dataframe` setting
+        (`meerschaum.utils.dataframe.get_dataframe_library()`).
+
+    as_pandas: Optional[bool], default None
+        `True` returns pandas frames, `False` Polars; `None` follows the setting.
+
     Returns
     -------
-    A `pd.DataFrame` (default case), or an iterator, or a list of dataframes / iterators.
-    Raises the database error if the query fails (`None` with `silent=True`).
+    A DataFrame (default case), or an iterator, or a list of dataframes / iterators.
+    Raises the database error if the query fails (`None` with `silent=True`): a PEP 249 exception
+    (`meerschaum.connectors.sql.OperationalError`, `ProgrammingError`, `IntegrityError`, ...;
+    also an instance of SQLAlchemy's class of the same name when SQLAlchemy is imported).
     On a protected connector (`protected: true`) without the allowance (`--allow-protected`,
     `MRSM_ALLOW_PROTECTED=1`, `meerschaum.connectors.allow_protected()`), the query must be one
     read statement (else `PermissionError`), and it runs in a transaction that is rolled back
     (read-only on PostgreSQL and MySQL / MariaDB).
 
+    """
+    from meerschaum.connectors.sql import _native
+    if _native.uses_native(self):
+        from meerschaum.utils.packages import pandas_name
+        if 'dask' not in pandas_name():
+            return _native.read(
+                self,
+                query_or_table,
+                params=params,
+                dtype=dtype,
+                coerce_float=coerce_float,
+                chunksize=chunksize,
+                workers=workers,
+                chunk_hook=chunk_hook,
+                as_hook_results=as_hook_results,
+                chunks=chunks,
+                schema=schema,
+                as_chunks=as_chunks,
+                as_iterator=as_iterator,
+                index_col=index_col,
+                silent=silent,
+                debug=debug,
+                as_polars=as_polars,
+                as_pandas=as_pandas,
+                **kw
+            )
+        _native.fallback(self, 'read', 'the configured pandas implementation is Dask', debug)
+    result = _sqlalchemy_read(
+        self,
+        query_or_table,
+        params=params,
+        dtype=dtype,
+        coerce_float=coerce_float,
+        chunksize=chunksize,
+        workers=workers,
+        chunk_hook=chunk_hook,
+        as_hook_results=as_hook_results,
+        chunks=chunks,
+        schema=schema,
+        as_chunks=as_chunks,
+        as_iterator=as_iterator,
+        as_dask=as_dask,
+        index_col=index_col,
+        silent=silent,
+        debug=debug,
+        **kw
+    )
+    return _as_library(result, as_polars, as_pandas)
+
+
+def _as_library(result: Any, as_polars: Optional[bool], as_pandas: Optional[bool]) -> Any:
+    """
+    The SQLAlchemy path's pandas result in the library the call asked for (frames, lists of
+    frames and iterators of frames; anything else unchanged).
+    """
+    if result is None or (as_polars is None and as_pandas is None and _default_is_pandas()):
+        return result
+    from meerschaum.utils.dataframe import frame_from_arrow, frame_library_of
+
+    def convert(item):
+        if frame_library_of(item) is None:
+            return item
+        return frame_from_arrow(item, as_polars=as_polars, as_pandas=as_pandas)
+
+    if isinstance(result, list):
+        return [convert(item) for item in result]
+    if hasattr(result, '__next__'):
+        return (convert(item) for item in result)
+    return convert(result)
+
+
+def _default_is_pandas() -> bool:
+    try:
+        from meerschaum.utils.dataframe import get_dataframe_library
+    except ImportError:
+        return True
+    return get_dataframe_library() == 'pandas'
+
+
+def _sqlalchemy_read(
+    self,
+    query_or_table: Union[str, sqlalchemy.Query],
+    params: Union[Dict[str, Any], List[str], None] = None,
+    dtype: Optional[Dict[str, Any]] = None,
+    coerce_float: bool = True,
+    chunksize: Optional[int] = -1,
+    workers: Optional[int] = None,
+    chunk_hook: Optional[Callable[[pandas.DataFrame], Any]] = None,
+    as_hook_results: bool = False,
+    chunks: Optional[int] = None,
+    schema: Optional[str] = None,
+    as_chunks: bool = False,
+    as_iterator: bool = False,
+    as_dask: bool = False,
+    index_col: Optional[str] = None,
+    silent: bool = False,
+    debug: bool = False,
+    **kw: Any
+) -> Any:
+    """
+    `read()` through SQLAlchemy and `pd.read_sql_query()` (Meerschaum 4's implementation): for
+    flavors outside `NATIVE_SQL_FLAVORS`, connectors with `native_sql: false` and Dask.
     """
     if chunks is not None and chunks <= 0:
         return []
@@ -581,12 +697,17 @@ def value(
 
     Returns
     -------
-    Any value returned from the query (`None` when it returns no rows).
+    Any value returned from the query (`None` when it returns no rows), as the flavor's Python
+    driver returns it (`int`, `float`, `Decimal`, `str`, `datetime`, ...; a NumPy scalar on DuckDB,
+    as in Meerschaum 4, which read it through pandas).
     Raises the database error if the query fails (`None` with `silent=True`).
     On a protected connector without the allowance, the query must be one read statement
     (else `PermissionError`), and it runs read-only, as in `read()`.
 
     """
+    from meerschaum.connectors.sql import _native
+    if _native.uses_native(self):
+        return _native.value(self, query, *args, use_pandas=use_pandas, **kw)
     ### A missing `sql` extra is an `ImportError`, not a swallowed failure.
     import_sqlalchemy()
     silent = kw.get('silent', False)
@@ -687,18 +808,26 @@ def exec(
         None
 ]:
     """
-    Execute SQL code and return the `sqlalchemy` result, e.g. when calling stored procedures.
+    Execute SQL code and return the result, e.g. when calling stored procedures.
+
+    The statement runs on the connector's Rust connection pool for every flavor in
+    `meerschaum.connectors.sql._native.NATIVE_SQL_FLAVORS` (no SQLAlchemy needed), and the result
+    has the parts of SQLAlchemy's `CursorResult` that code written for Meerschaum 4 uses
+    (`fetchall()`, `first()`, `scalar()`, `mappings()`, `keys()`, `rowcount`, iteration, ...).
+    `with_connection=True` (which returns a SQLAlchemy connection) uses SQLAlchemy.
 
     If inserting data, please use bind variables to avoid SQL injection!
 
     Parameters
     ----------
     query: Union[str, List[str], Tuple[str]]
-        The query to execute.
+        The query to execute (text, or a SQLAlchemy construct).
         If `query` is a list or tuple, call `self.exec_queries()` instead.
 
     args: Any
-        Arguments passed to `sqlalchemy.engine.execute`.
+        The statement's parameters: a dictionary for `:name` placeholders, a list / tuple of
+        values for `?` (or `%s`) placeholders, or a list of dictionaries to run the statement
+        once per dictionary (`executemany`). `parameters=` is accepted too.
 
     silent: bool, default False
         If `True`, return `None` instead of raising when the query fails, without a warning
@@ -744,6 +873,24 @@ def exec(
             if silent:
                 return (None, None) if with_connection else None
             raise PermissionError(refusal)
+
+    from meerschaum.connectors.sql import _native
+    if _native.uses_native(self):
+        reason = (
+            '`with_connection=True` returns a SQLAlchemy connection'
+            if with_connection
+            else (
+                'it was given a SQLAlchemy connection or transaction'
+                if (_connection is not None or _transaction is not None)
+                else None
+            )
+        )
+        if reason is None:
+            return _native.exec(
+                self, query, *args,
+                silent=silent, debug=debug, commit=commit, close=close, **kw
+            )
+        _native.fallback(self, 'exec', reason, debug)
 
     from meerschaum.utils.packages import attempt_import
     sqlalchemy = import_sqlalchemy()
@@ -866,6 +1013,16 @@ def exec_queries(
         if silent:
             return []
         raise PermissionError(refusal)
+    from meerschaum.connectors.sql import _native
+    if _native.uses_native(self):
+        return _native.exec_queries(
+            self,
+            queries,
+            break_on_error=break_on_error,
+            rollback=rollback,
+            silent=silent,
+            debug=debug,
+        )
     sqlalchemy, sqlalchemy_orm = import_sqlalchemy('sqlalchemy', 'sqlalchemy.orm')
     session = sqlalchemy_orm.Session(self.engine)
 
@@ -943,10 +1100,15 @@ def to_sql(
     """
     Upload a DataFrame's contents to the SQL server.
 
+    The rows go through the connector's Rust connection pool (no SQLAlchemy) for every flavor in
+    `meerschaum.connectors.sql._native.NATIVE_SQL_FLAVORS`; a new table gets the column types
+    `pandas.DataFrame.to_sql()` would create (or `dtype`).
+
     Parameters
     ----------
-    df: pd.DataFrame
-        The DataFrame to be inserted.
+    df: Union[pd.DataFrame, pl.DataFrame, pyarrow.Table]
+        The DataFrame to be inserted: pandas, Polars, or Arrow data (anything with
+        `__arrow_c_stream__`).
 
     name: str
         The name of the table to be created.
@@ -1011,6 +1173,43 @@ def to_sql(
     ### We're requiring `name` to be positional, and sometimes it's passed in from background jobs.
     kw.pop('name', None)
 
+    ### Arrow data (a pyarrow table, any `__arrow_c_stream__` producer) becomes the configured
+    ### library's frame first.
+    module_name = str(getattr(type(df), '__module__', ''))
+    if (
+        df is not None
+        and not module_name.startswith(('pandas', 'polars', 'geopandas', 'dask'))
+        and (hasattr(df, '__arrow_c_stream__') or hasattr(df, '__arrow_c_array__'))
+    ):
+        from meerschaum.utils.dataframe import frame_from_arrow
+        df = frame_from_arrow(df)
+
+    ### The rows go through the Rust connector unless the call needs SQLAlchemy.
+    from meerschaum.connectors.sql import _native
+    is_dask = 'dask' in str(getattr(type(df), '__module__', ''))
+    is_polars = str(getattr(type(df), '__module__', '')).startswith('polars')
+    native = _native.uses_native(self)
+    if native:
+        reason = (
+            'Dask frames write through `DataFrame.to_sql()`'
+            if is_dask
+            else (
+                'a custom `method` writes through SQLAlchemy'
+                if callable(method)
+                else (
+                    'it was given a SQLAlchemy connection or transaction'
+                    if (_connection is not None or _transaction is not None)
+                    else None
+                )
+            )
+        )
+        if reason is not None:
+            native = False
+            _native.fallback(self, 'to_sql', reason, debug)
+    if is_polars and not native:
+        df = df.to_pandas()
+        is_polars = False
+
     schema = schema or self.schema
 
     from meerschaum.utils.sql import (
@@ -1047,9 +1246,20 @@ def to_sql(
     from meerschaum.utils.misc import interval_str
     from meerschaum.connectors.sql._create_engine import flavor_configs
     from meerschaum.utils.packages import attempt_import, import_pandas
-    sqlalchemy = import_sqlalchemy()
+    sqlalchemy = import_sqlalchemy() if not native else None
+    if native and is_polars:
+        return _native.to_sql_polars(
+            self, df, name,
+            if_exists=if_exists,
+            chunksize=chunksize,
+            schema=schema,
+            silent=silent,
+            debug=debug,
+            as_tuple=as_tuple,
+            as_dict=as_dict,
+            dtype=kw.get('dtype', None),
+        )
     pd = import_pandas_for_sql()
-    is_dask = 'dask' in df.__module__
 
     bytes_cols = get_bytes_cols(df)
     numeric_cols = get_numeric_cols(df)
@@ -1126,6 +1336,12 @@ def to_sql(
         else:
             ### Should resolve to 'multi' or `None`.
             method = flavor_configs.get(self.flavor, {}).get('to_sql', {}).get('method', 'multi')
+    ### The Rust connector bulk-inserts itself (`COPY` / `OPENJSON`) when the flag is on.
+    method_name = (
+        (method.func.__name__ if isinstance(method, functools.partial) else method.__name__)
+        if callable(method)
+        else str(method)
+    )
 
     if bytes_cols and (use_bulk_insert or self.flavor == 'oracle'):
         if safe_copy and not copied:
@@ -1170,7 +1386,7 @@ def to_sql(
                 )
             )
 
-    stats['method'] = method.__name__ if hasattr(method, '__name__') else str(method)
+    stats['method'] = method_name
 
     default_chunksize = self._sys_config.get('chunksize', None)
     chunksize = chunksize if chunksize != -1 else default_chunksize
@@ -1213,12 +1429,15 @@ def to_sql(
     to_sql_kw.update({
         'name': truncated_name,
         'schema': schema,
-        ('con' if not is_dask else 'uri'): (self.engine if not is_dask else self.URI),
         'index': index,
         'if_exists': if_exists,
         'method': method,
         'chunksize': chunksize,
     })
+    if not native:
+        to_sql_kw[('con' if not is_dask else 'uri')] = (
+            self.engine if not is_dask else self.URI
+        )
     if is_dask:
         to_sql_kw.update({
             'parallel': True,
@@ -1227,7 +1446,7 @@ def to_sql(
         to_sql_kw['con'] = _connection
 
     if_exists_str = "IF EXISTS" if self.flavor in DROP_IF_EXISTS_FLAVORS else ""
-    if self.flavor == 'oracle':
+    if self.flavor == 'oracle' and not native:
         ### For some reason 'replace' doesn't work properly in pandas,
         ### so try dropping first.
         if if_exists == 'replace' and table_exists(name, self, schema=schema, debug=debug):
@@ -1250,7 +1469,7 @@ def to_sql(
         dt_cols = [col for col, typ in df.dtypes.items() if are_dtypes_equal(str(typ), 'datetime')]
         for col in dt_cols:
             df[col] = coerce_timezone(df[col], strip_utc=False)
-    elif self.flavor == 'mssql':
+    elif self.flavor == 'mssql' and not native:
         dtype = to_sql_kw.get('dtype', {})
         dt_cols = [col for col, typ in df.dtypes.items() if are_dtypes_equal(str(typ), 'datetime')]
         new_dtype = {}
@@ -1281,15 +1500,34 @@ def to_sql(
         for col in uuid_cols:
             df[col] = df[col].astype(str)
 
-    try:
-        with warnings.catch_warnings():
-            warnings.filterwarnings('ignore')
-            df.to_sql(**to_sql_kw)
-        success = True
-    except Exception:
-        if not silent:
-            warn(traceback.format_exc())
-        success, msg = False, traceback.format_exc()
+    if native:
+        try:
+            success, error_msg = _native.to_sql_write(
+                self,
+                df,
+                truncated_name,
+                schema,
+                if_exists,
+                index,
+                chunksize,
+                dtype=kw.get('dtype', None),
+            )
+        except Exception:
+            success, error_msg = False, traceback.format_exc()
+        if not success:
+            if not silent:
+                warn(error_msg)
+            msg = error_msg
+    else:
+        try:
+            with warnings.catch_warnings():
+                warnings.filterwarnings('ignore')
+                df.to_sql(**to_sql_kw)
+            success = True
+        except Exception:
+            if not silent:
+                warn(traceback.format_exc())
+            success, msg = False, traceback.format_exc()
 
     end = time.perf_counter()
     if success:

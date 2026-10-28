@@ -113,11 +113,19 @@ def _read(name, instance=None):
     return _normalize(dict(pipe.get_parameters(apply_symlinks=False)['pipeline']), name, pipe.instance_keys)
 
 
-def _write(definition, instance=None, create=False):
+def _write(definition, instance=None, create=False, registration_parameters=None):
     for lease in _leases.get().values():
         lease.check()
     pipe = registration(definition['name'], instance or definition['registry'])
-    pipe.parameters = {'pipeline': definition}
+    ### A saved Pipeline's `access` and `locks` (rc15, AC7) stay with its registry pipe.
+    kept = {}
+    if not create:
+        current = pipe.get_parameters(apply_symlinks=False, refresh=True) or {}
+        kept = {key: current[key] for key in ('access', 'locks') if current.get(key) is not None}
+    for key in ('access', 'locks'):
+        if (registration_parameters or {}).get(key) is not None:
+            kept[key] = deepcopy(registration_parameters[key])
+    pipe.parameters = {'pipeline': definition, **kept}
     success, message = pipe.register() if create else pipe.edit(interactive=False)
     if not success:
         raise ValueError(message)
@@ -149,10 +157,13 @@ def _refs(targets, instance):
 
 @_locked_registry
 def save_pipeline(name, targets, instance=None, parents=None, children=None, *,
-                  expected_revision=None, description=None, defaults=None, layout=None, create=False):
+                  expected_revision=None, description=None, defaults=None, layout=None, create=False,
+                  access=None, locks=None):
     """Save exact membership; optional expected_revision rejects a stale editor.
 
-    This does not apply membership tags. Analyze and approve those separately.
+    `access` and `locks`, when given, are part of the registration's first write. Otherwise
+    an existing registration keeps them. This does not apply membership tags; analyze and
+    approve those separately.
     """
     from meerschaum.core.Pipeline._engine import get_depth
     name = validate_name(name)
@@ -171,7 +182,8 @@ def save_pipeline(name, targets, instance=None, parents=None, children=None, *,
                   'defaults': validate_execution_defaults(defaults if defaults is not None else old.get('defaults', {})),
                   'tag_associations': deepcopy(old.get('tag_associations', [])),
                   'layout': deepcopy(layout if layout is not None else old.get('layout', {}))}
-    return _write(definition, instance, create=not exists)
+    return _write(definition, instance, create=not exists,
+                  registration_parameters={'access': access, 'locks': locks})
 
 
 def referencing_jobs(name, instance=None):
@@ -370,6 +382,10 @@ def delete_pipeline(name, instance=None):
     jobs = referencing_jobs(name, instance)
     if jobs:
         return False, 'Remove or reassign scheduled Jobs first: ' + ', '.join(jobs)
+    source = registration(name, instance)
+    refusal = source._lock_refusal('delete_and_drop', always=True)
+    if refusal:
+        return False, refusal
     definition = _read(name, instance)
     errors = _remove_owned_tags(definition)
     if errors:
@@ -387,6 +403,13 @@ def rename_pipeline(name, new_name, instance=None, expected_revision=None):
         return old
     if registration(new_name, instance).get_id() is not None:
         raise ValueError(f"Pipeline '{new_name}' already exists.")
+    source = registration(name, instance)
+    parameters = source.get_parameters(apply_symlinks=False, refresh=True) or {}
+    from meerschaum.core.access import get_locks, lock_refusal
+    for operation in ('edit', 'delete_and_drop'):
+        refusal = lock_refusal(source, get_locks(parameters), operation)
+        if refusal:
+            raise ValueError(refusal)
     jobs = referencing_jobs(name, instance)
     if jobs:
         raise ValueError('Remove or reassign scheduled Jobs first: ' + ', '.join(jobs))
@@ -394,7 +417,7 @@ def rename_pipeline(name, new_name, instance=None, expected_revision=None):
     if errors:
         raise ValueError('Tag cleanup incomplete; original definition retained. ' + '; '.join(errors))
     new = {**old, 'name': new_name, 'revision': old['revision'] + 1, 'tag_associations': []}
-    _write(new, instance, create=True)
+    _write(new, instance, create=True, registration_parameters=parameters)
     success, message = registration(name, instance).delete()
     if not success:
         raise ValueError(f'New definition saved, but old definition could not be removed: {message}')
@@ -402,10 +425,12 @@ def rename_pipeline(name, new_name, instance=None, expected_revision=None):
 
 
 @_locked_registry
-def copy_pipeline(name, new_name, instance=None):
+def copy_pipeline(name, new_name, instance=None, *, access=None):
     old = _read(name, instance)
+    parameters = registration(name, instance).get_parameters(apply_symlinks=False, refresh=True) or {}
     return save_pipeline(new_name, old['targets'], instance, old.get('parents'), old.get('children'),
-                         description=old.get('description'), defaults=old.get('defaults'), layout=old.get('layout'), create=True)
+                         description=old.get('description'), defaults=old.get('defaults'),
+                         layout=old.get('layout'), create=True, access=access, locks=parameters.get('locks'))
 
 
 def load_pipeline(name, instance=None):

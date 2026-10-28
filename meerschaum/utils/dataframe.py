@@ -22,6 +22,271 @@ if TYPE_CHECKING:
     pd, dask = mrsm.attempt_import('pandas', 'dask')
 
 
+#: The DataFrame libraries Meerschaum returns frames in (`meerschaum:dataframe`).
+DATAFRAME_LIBRARIES: Tuple[str, ...] = ('polars', 'pandas')
+
+#: The environment variable that overrides `meerschaum:dataframe` for one process (and the jobs
+#: and workers it starts).
+DATAFRAME_ENV_VAR: str = 'MRSM_DATAFRAME'
+
+#: The library of a root that does not say (a fresh root writes `dataframe: polars`).
+DEFAULT_DATAFRAME_LIBRARY: str = 'polars'
+
+#: The extra that installs each library.
+DATAFRAME_EXTRAS: Dict[str, str] = {'polars': 'polars', 'pandas': 'pandas'}
+
+
+def _normalize_dataframe_library(value: Any, source: str) -> str:
+    """Return `'polars'` or `'pandas'` for a configured value, or raise naming `source`."""
+    if value is None:
+        return DEFAULT_DATAFRAME_LIBRARY
+    text = str(value).strip().lower()
+    if not text:
+        return DEFAULT_DATAFRAME_LIBRARY
+    if text not in DATAFRAME_LIBRARIES:
+        raise ValueError(
+            f"Unknown DataFrame library '{value}' ({source}): use 'polars' or 'pandas'."
+        )
+    return text
+
+
+def get_dataframe_library() -> str:
+    """
+    Return the DataFrame library Meerschaum returns frames in: `'polars'` or `'pandas'`.
+
+    The setting is `dataframe` in `meerschaum.yaml` (config path `meerschaum:dataframe`), and the
+    `MRSM_DATAFRAME` environment variable overrides it for one process (and the jobs it starts).
+    A fresh root writes `dataframe: polars`; a root created by Meerschaum 4 or by an earlier 5.0
+    release candidate is given `dataframe: pandas` the first time 5.0.0rc15 or newer opens it.
+
+    Every API that returns a DataFrame follows it (`Pipe.get_data()`, `SQLConnector.read()`,
+    `Pipe.fetch()`, `Plan.to_dataframe()`, the frames handed to plugin code, ...), and
+    `as_polars=True` / `as_pandas=True` override it for one call.
+
+    Returns
+    -------
+    `'polars'` or `'pandas'`.
+
+    Examples
+    --------
+    >>> import os
+    >>> os.environ['MRSM_DATAFRAME'] = 'pandas'
+    >>> get_dataframe_library()
+    'pandas'
+    """
+    import os
+    value = os.environ.get(DATAFRAME_ENV_VAR, None)
+    if value is not None and value.strip():
+        return _normalize_dataframe_library(value, DATAFRAME_ENV_VAR)
+    from meerschaum.config import get_config
+    return _normalize_dataframe_library(
+        get_config('meerschaum', 'dataframe', warn=False),
+        'meerschaum:dataframe',
+    )
+
+
+def resolve_dataframe_library(
+    as_polars: Optional[bool] = None,
+    as_pandas: Optional[bool] = None,
+) -> str:
+    """
+    Return the library one call returns its frames in: `'polars'` or `'pandas'`.
+
+    Parameters
+    ----------
+    as_polars: Optional[bool], default None
+        `True` asks for Polars and `False` for pandas (Meerschaum 4's meaning of
+        `as_polars=False`). `None` follows `get_dataframe_library()`.
+
+    as_pandas: Optional[bool], default None
+        `True` asks for pandas and `False` for Polars. `None` follows the setting.
+
+    Returns
+    -------
+    `'polars'` or `'pandas'`. Asking for both (or for neither) raises a `ValueError`.
+    """
+    wants_polars = None if as_polars is None else bool(as_polars)
+    wants_pandas = None if as_pandas is None else bool(as_pandas)
+    if wants_polars is not None and wants_pandas is not None and wants_polars == wants_pandas:
+        raise ValueError(
+            "`as_polars` and `as_pandas` contradict each other: pass only one of them."
+        )
+    if wants_polars is not None:
+        return 'polars' if wants_polars else 'pandas'
+    if wants_pandas is not None:
+        return 'pandas' if wants_pandas else 'polars'
+    return get_dataframe_library()
+
+
+def wants_polars(
+    as_polars: Optional[bool] = None,
+    as_pandas: Optional[bool] = None,
+) -> bool:
+    """Return whether one call returns Polars frames (see `resolve_dataframe_library()`)."""
+    return resolve_dataframe_library(as_polars=as_polars, as_pandas=as_pandas) == 'polars'
+
+
+def import_dataframe_library(library: Optional[str] = None) -> Any:
+    """
+    Import the `polars` or `pandas` module (the configured one by default).
+
+    A missing library is installed into the `mrsm` virtual environment when automatic installs are
+    allowed (as for any other optional package); otherwise the `ImportError` names the extra to
+    install (`pip install meerschaum[polars]` or `pip install meerschaum[pandas]`).
+    """
+    library = library or get_dataframe_library()
+    from meerschaum.utils.packages import attempt_import, import_pandas
+    module = None
+    try:
+        if library == 'pandas':
+            module = import_pandas(warn=False)
+        else:
+            module = attempt_import(library, lazy=False, warn=False)
+    except Exception:
+        module = None
+    if module is None:
+        raise missing_dataframe_library_error(library)
+    return module
+
+
+def ensure_dataframe_library(library: Optional[str] = None) -> Any:
+    """
+    Return the `polars` or `pandas` module (the configured one by default), importing it on the
+    first call (`import_dataframe_library()`: installed on first use when automatic installs
+    are allowed, else an `ImportError` naming the extra). Cheap once the module is imported.
+    """
+    import sys
+    library = library or get_dataframe_library()
+    module = sys.modules.get(library, None)
+    if module is not None and not getattr(getattr(module, '__spec__', None), '_initializing', False):
+        if library != 'pandas' or 'pyarrow' in sys.modules:
+            return module
+    return import_dataframe_library(library)
+
+
+def missing_dataframe_library_error(library: str) -> ImportError:
+    """The `ImportError` for a DataFrame library that is not installed (names the extra)."""
+    extra = DATAFRAME_EXTRAS.get(library, library)
+    other = 'pandas' if library == 'polars' else 'polars'
+    return ImportError(
+        f"Meerschaum returns {library} DataFrames here, but {library} is not installed. "
+        f"Install it with `pip install meerschaum[{extra}]`, "
+        f"or set `dataframe: {other}` in meerschaum.yaml (`MRSM_DATAFRAME={other}`)."
+    )
+
+
+def is_polars_frame(df: Any) -> bool:
+    """Whether `df` is a Polars DataFrame or LazyFrame."""
+    return (type(df).__module__ or '').split('.')[0] == 'polars'
+
+
+def is_pandas_frame(df: Any) -> bool:
+    """Whether `df` is a pandas (or GeoPandas) DataFrame."""
+    return (
+        (type(df).__module__ or '').split('.')[0] in ('pandas', 'geopandas')
+        and hasattr(df, 'iloc')
+    )
+
+
+def frame_library_of(df: Any) -> Optional[str]:
+    """`'polars'`, `'pandas'` or `None`: the library of a DataFrame (or `None` for other data)."""
+    if is_polars_frame(df):
+        return 'polars'
+    if is_pandas_frame(df):
+        return 'pandas'
+    return None
+
+
+def output_library_for(
+    df: Any,
+    as_polars: Optional[bool] = None,
+    as_pandas: Optional[bool] = None,
+) -> str:
+    """
+    The library a function that transforms a frame returns: what the call asks for
+    (`as_polars` / `as_pandas`), else the library `df` came in (a Polars frame stays Polars, a
+    pandas frame pandas), else (documents, dictionaries, Arrow data) `get_dataframe_library()`.
+    """
+    if as_polars is not None or as_pandas is not None:
+        return resolve_dataframe_library(as_polars=as_polars, as_pandas=as_pandas)
+    return frame_library_of(df) or get_dataframe_library()
+
+
+def frame_from_arrow(
+    data: Any,
+    *,
+    as_polars: Optional[bool] = None,
+    as_pandas: Optional[bool] = None,
+    dtypes: Optional[Dict[str, str]] = None,
+    debug: bool = False,
+) -> Any:
+    """
+    Build the configured library's DataFrame from Arrow data (the one conversion every
+    frame-returning API uses).
+
+    Parameters
+    ----------
+    data: Any
+        Anything that implements the Arrow PyCapsule interface (`__arrow_c_stream__` or
+        `__arrow_c_array__`): a `meerschaum._core.ArrowStream`, a `pyarrow.Table`,
+        `RecordBatch` or `RecordBatchReader`, ... or a list (or tuple) of record batches with one
+        schema. A pandas or Polars DataFrame is converted to the requested library.
+        `None` returns `None`.
+
+    as_polars: Optional[bool], default None
+        `True` returns Polars, `False` pandas; `None` follows `get_dataframe_library()`.
+
+    as_pandas: Optional[bool], default None
+        `True` returns pandas, `False` Polars; `None` follows the setting.
+
+    dtypes: Optional[Dict[str, str]], default None
+        Per-column dtypes: Meerschaum dtype strings (`'int'`, `'json'`, `'geometry[Point, 4326]'`,
+        ...) or pandas dtype strings (`'Int64'`, `'int64[pyarrow]'`, ...).
+        For pandas they restore the exact pandas dtype within the column's kind, as every read of
+        the façade does (`int64` vs `Int64` vs `int64[pyarrow]`, the datetime unit); a dtype of
+        another kind does not cast the column. For Polars, declared `json` and `geometry`
+        columns become extension columns even when every value is null.
+
+    debug: bool, default False
+        Verbosity toggle.
+
+    Returns
+    -------
+    A `polars.DataFrame` or a `pandas.DataFrame` (a `geopandas.GeoDataFrame` when there are
+    geometry columns): JSON, UUID, numeric and geometry columns are restored from the Arrow
+    field metadata the kernel writes (`ARROW:extension:name`, `meerschaum:dtype`). Polars frames
+    carry geometry as GeoArrow WKB (binary) with the CRS in the field metadata.
+
+    Examples
+    --------
+    >>> import pyarrow as pa
+    >>> frame_from_arrow(pa.table({'a': [1, None]}), as_pandas=True).dtypes
+    a    Int64
+    dtype: object
+    >>> frame_from_arrow(pa.table({'a': [1, None]}), as_polars=True).schema
+    Schema([('a', Int64)])
+    """
+    if data is None:
+        return None
+    library = resolve_dataframe_library(as_polars=as_polars, as_pandas=as_pandas)
+    to_polars_frame = library == 'polars'
+    current = frame_library_of(data)
+    if current is not None:
+        if current == library:
+            return data
+        return to_polars(data) if to_polars_frame else to_pandas(data)
+    ensure_dataframe_library(library)
+    if isinstance(data, (list, tuple)):
+        data = list(data)
+    _rust = _core.frame_from_arrow
+    return _rust(
+        data,
+        as_polars=to_polars_frame,
+        dtypes=({str(col): str(typ) for col, typ in dtypes.items()} if dtypes else None),
+        debug=debug,
+    )
+
+
 def to_pandas(df: Any) -> Any:
     """Convert a Polars DataFrame or LazyFrame to Pandas; otherwise return ``df``."""
     if df.__class__.__module__.split('.')[0] != 'polars':
@@ -797,8 +1062,9 @@ def enforce_dtypes(
     coerce_numeric: bool = False,
     coerce_timezone: bool = True,
     strip_timezone: bool = False,
-    as_polars: bool = False,
+    as_polars: Optional[bool] = None,
     debug: bool = False,
+    as_pandas: Optional[bool] = None,
 ) -> 'pd.DataFrame':
     """
     Enforce the `dtypes` dictionary on a DataFrame.
@@ -830,22 +1096,28 @@ def enforce_dtypes(
         If `coerce_timezone` and `strip_timezone` are `True`,
         remove timezone information from datetimes.
 
-    as_polars: bool, default False
-        If `True`, return a Polars DataFrame. Supported Arrow-native dtypes are enforced
-        with Polars; unsupported schemas use the established Pandas path before conversion.
+    as_polars: Optional[bool], default None
+        `True` returns a Polars DataFrame, `False` a pandas one. By default the result is the
+        library `df` came in (a Polars frame stays Polars, a pandas frame pandas).
 
     debug: bool, default False
         Verbosity toggle.
 
+    as_pandas: Optional[bool], default None
+        `True` returns a pandas DataFrame, `False` a Polars one (see `as_polars`).
+
     Returns
     -------
-    The Pandas DataFrame with the types enforced.
+    The DataFrame with the types enforced, of the library `df` came in (or the one asked for).
     """
+    if df is None:
+        return df
+    library = output_library_for(df, as_polars=as_polars, as_pandas=as_pandas)
     _rust = _core.enforce_dtypes
     return _rust(
         df, dtypes=dtypes, explicit_dtypes=explicit_dtypes, safe_copy=safe_copy,
         coerce_numeric=coerce_numeric, coerce_timezone=coerce_timezone,
-        strip_timezone=strip_timezone, as_polars=as_polars, debug=debug,
+        strip_timezone=strip_timezone, as_polars=(library == 'polars'), debug=debug,
     )
 
 

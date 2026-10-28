@@ -12,6 +12,14 @@ from meerschaum.utils.typing import Dict, Optional, List, SuccessTuple
 from meerschaum.jobs import _native
 from meerschaum.jobs._Job import Job, StopMonitoringLogs
 from meerschaum.jobs._Executor import Executor
+from meerschaum.jobs._access import (
+    filter_visible_jobs,
+    can_see_job,
+    job_access,
+    ownership_properties,
+    get_team_jobs,
+    move_team_jobs,
+)
 
 __all__ = (
     'Job',
@@ -30,6 +38,12 @@ __all__ = (
     'check_restart_jobs',
     'start_check_jobs_thread',
     'stop_check_jobs_thread',
+    'filter_visible_jobs',
+    'can_see_job',
+    'job_access',
+    'ownership_properties',
+    'get_team_jobs',
+    'move_team_jobs',
 )
 
 executor_types: List[str] = ['api', 'local']

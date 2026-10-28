@@ -192,6 +192,19 @@ class Pipe:
     from ._dtypes import enforce_dtypes, infer_dtypes
     from ._copy import copy_to
     from ._status import get_sync_status
+    from ._access import (
+        access,
+        owner,
+        team,
+        visibility,
+        edit_mode,
+        locks,
+        lock,
+        unlock,
+        set_access,
+        _lock_refusal,
+        _edit_lock_refusal,
+    )
 
     def __init__(
         self,

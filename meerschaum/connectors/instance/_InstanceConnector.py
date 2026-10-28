@@ -88,3 +88,21 @@ class InstanceConnector(Connector):
         analyze_pipe,
         partition_pipe,
     )
+
+    ### Teams, pipe locks and pipe access (the access model, `meerschaum.core.access`).
+    from ._teams import (
+        get_teams,
+        get_team,
+        register_team,
+        edit_team,
+        delete_team,
+        rename_team,
+        get_user_teams,
+        get_team_pipes_count,
+        get_user_permissions,
+        get_user_role,
+        set_user_attributes,
+        lock_pipe,
+        unlock_pipe,
+        set_pipe_access,
+    )

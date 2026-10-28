@@ -179,7 +179,7 @@ def test_the_client_is_rebuilt_after_a_fork():
     assert 'FORK-OK' in result.stdout, result.stderr[-3000:]
 
 
-def _run_child(code: str) -> subprocess.CompletedProcess:
+def _run_child(code: str, *, dataframe: str | None = None) -> subprocess.CompletedProcess:
     root = tempfile.mkdtemp(prefix='mrsm-w16s-child-', dir=_scratch())
     env = {
         key: val for key, val in os.environ.items()
@@ -191,6 +191,8 @@ def _run_child(code: str) -> subprocess.CompletedProcess:
         'MRSM_PLUGINS_DIR': str(pathlib.Path(root) / 'plugins'),
         'MRSM_NO_AUTO_INSTALL': '1',
     })
+    if dataframe is not None:
+        env['MRSM_DATAFRAME'] = dataframe
     return subprocess.run(
         [sys.executable, '-c', code], env=env, cwd=root,
         capture_output=True, text=True, timeout=180,
@@ -1242,7 +1244,8 @@ def test_get_data_dtypes_match_the_v4_client(server):
         + f"{PASSWORD!r}, {tag!r})))\n"
     )
     ref = json.loads(_v4(code).split('RESULT')[-1])
-    result = _run_child(code.replace(f"{tag!r}", repr(tag + 'x')))
+    # Compare pandas dtype names with v4, independently of new-root defaults.
+    result = _run_child(code.replace(f"{tag!r}", repr(tag + 'x')), dataframe='pandas')
     assert 'RESULT' in result.stdout, result.stderr[-3000:]
     ours = json.loads(result.stdout.split('RESULT')[-1])
     differences = {

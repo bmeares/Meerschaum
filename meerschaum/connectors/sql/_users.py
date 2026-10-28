@@ -22,6 +22,9 @@ def get_users_pipe(self) -> mrsm.Pipe:
     cache_connector = self.__dict__.get('_cache_connector', None)
     self._users_pipe = mrsm.Pipe(
         'mrsm', 'users',
+        ### FIX (intentional v4 change, rc15 FX1): v4 left out `instance=self`, so the users pipe
+        ### (and `get_username()`, which reads it) was on the default instance.
+        instance=self,
         temporary=True,
         cache=True,
         cache_connector_keys=cache_connector,

@@ -1001,13 +1001,14 @@ fn nan_decimals_to_null(mut frame: Frame) -> Frame {
 }
 
 /// `_core.pipe_filter_existing(pipe, context, df, date_bound_only=False,
-/// include_unchanged_columns=False, enforce_dtypes=False, debug=False)`: the `(unseen, update,
-/// delta)` frames of `Pipe.filter_existing()` (Polars frames in, Polars frames out; the input
-/// is what `Pipe.sync()` takes, anything else is a `TypeError`).
+/// include_unchanged_columns=False, enforce_dtypes=False, as_polars=False, debug=False)`: the
+/// `(unseen, update, delta)` frames of `Pipe.filter_existing()` (Polars frames in, Polars frames
+/// out; the input is what `Pipe.sync()` takes, anything else is a `TypeError`). `as_polars` is
+/// the library of the results of input that is not a frame (documents, dictionaries, `None`).
 #[pyfunction]
 #[pyo3(signature = (
     pipe, context, df, date_bound_only=false, include_unchanged_columns=false,
-    enforce_dtypes=false, debug=false
+    enforce_dtypes=false, as_polars=false, debug=false
 ))]
 #[allow(clippy::too_many_arguments)]
 pub fn pipe_filter_existing<'py>(
@@ -1018,10 +1019,23 @@ pub fn pipe_filter_existing<'py>(
     date_bound_only: bool,
     include_unchanged_columns: bool,
     enforce_dtypes: bool,
+    as_polars: bool,
     debug: bool,
 ) -> PyResult<Bound<'py, PyAny>> {
     let _debug = DebugGuard::new(debug);
-    let ctx = PyCtx::new(py)?;
+    let name = crate::convert::qualname(df)?;
+    let is_frame = name.contains("DataFrame") || name.contains("LazyFrame");
+    let other_kind = if as_polars {
+        FrameKind::Polars
+    } else {
+        FrameKind::Pandas
+    };
+    // Polars results never need pandas (nor its import, nor an install).
+    let ctx = if name.starts_with("polars.") || (!is_frame && as_polars) {
+        PyCtx::scalars(py)?
+    } else {
+        PyCtx::new(py)?
+    };
     let opened = open(py, pipe, context, false)?;
     let core = opened.core.clone();
     let opts = FilterOpts {
@@ -1029,7 +1043,6 @@ pub fn pipe_filter_existing<'py>(
         include_unchanged_columns,
         enforce_dtypes,
     };
-    let name = crate::convert::qualname(df)?;
     if name.starts_with("dask") {
         return Err(pyo3::exceptions::PyTypeError::new_err(
             "Dask DataFrames are not supported in Meerschaum 5. Convert the data to pandas or \
@@ -1041,8 +1054,8 @@ pub fn pipe_filter_existing<'py>(
     // GeoDataFrame geometry, while shapely objects stay `object`.
     let mut text_columns: Vec<String> = Vec::new();
     let (input, kind, input_dtypes) = if df.is_none() {
-        (None, FrameKind::Pandas, IndexMap::new())
-    } else if name.contains("DataFrame") || name.contains("LazyFrame") {
+        (None, other_kind, IndexMap::new())
+    } else if is_frame {
         let py_frame = frame_from_py(&ctx, df, ColumnMode::Full)?;
         let kind = py_frame.kind.clone();
         let dtypes = py_frame.dtypes.clone();
@@ -1059,7 +1072,7 @@ pub fn pipe_filter_existing<'py>(
         (Some(PipeInput::Frame(py_frame.frame)), kind, dtypes)
     } else {
         match input_from_py(py, df)? {
-            NativeInput::Data(input) => (Some(input), FrameKind::Pandas, IndexMap::new()),
+            NativeInput::Data(input) => (Some(input), other_kind, IndexMap::new()),
             NativeInput::Declined(reason) => {
                 return Err(pyo3::exceptions::PyTypeError::new_err(format!(
                     "Cannot filter the existing rows of {core}: {reason}."
@@ -1074,7 +1087,7 @@ pub fn pipe_filter_existing<'py>(
                     )],
                     2,
                 )?;
-                (None, FrameKind::Pandas, IndexMap::new())
+                (None, other_kind, IndexMap::new())
             }
         }
     };
@@ -1178,14 +1191,19 @@ pub fn pipe_deduplicate<'py>(
     crate::pipe_bridge::success_to_py(py, &result)
 }
 
-/// A caller's `chunk_hook` as a [`ChunkHook`]: the hook is given the chunk as a pandas frame and
-/// the keywords it takes (`filter_arguments(hook, chunk, **kwargs)`, as `SQLConnector.read`
-/// does); an exception is the `(False, traceback)` result v4 records.
-fn python_hook(hook: Py<PyAny>, kwargs: Py<PyDict>, debug: bool) -> ChunkHook {
+/// A caller's `chunk_hook` as a [`ChunkHook`]: the hook is given the chunk as a frame of the
+/// call's library (Polars with `as_polars`, else pandas) and the keywords it takes
+/// (`filter_arguments(hook, chunk, **kwargs)`, as `SQLConnector.read` does); an exception is the
+/// `(False, traceback)` result v4 records.
+fn python_hook(hook: Py<PyAny>, kwargs: Py<PyDict>, debug: bool, as_polars: bool) -> ChunkHook {
     Arc::new(move |chunk: Frame| -> Result<HookOutcome, String> {
         Python::attach(|py| -> PyResult<HookOutcome> {
-            let ctx = PyCtx::new(py)?;
-            let df = frame_to_pandas(&ctx, &chunk, &out_spec(IndexMap::new()))?;
+            let df = if as_polars {
+                frame_to_polars(py, &chunk, &IndexMap::new())?
+            } else {
+                let ctx = PyCtx::new(py)?;
+                frame_to_pandas(&ctx, &chunk, &out_spec(IndexMap::new()))?
+            };
             let kw = kwargs.bind(py).copy()?;
             kw.set_item("debug", debug)?;
             let filter = py
@@ -1257,6 +1275,7 @@ pub fn pipe_fetch<'py>(
                 .unwrap_or_else(|| PyDict::new(py))
                 .unbind(),
             debug,
+            as_polars,
         )),
         None if sync_chunks => FetchMode::SyncChunks,
         None => FetchMode::Plain,

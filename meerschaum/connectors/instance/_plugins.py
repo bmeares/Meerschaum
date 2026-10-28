@@ -147,11 +147,10 @@ def get_plugins(
     if user_id:
         params['user_id'] = user_id
 
-    df = plugins_pipe.get_data(['plugin_name'], params=params, debug=debug)
-    if df is None:
+    docs = plugins_pipe.get_docs(select_columns=['plugin_name'], params=params, debug=debug)
+    if not docs:
         return []
 
-    docs = df.to_dict(orient='records')
     return [
         plugin_name
         for doc in docs

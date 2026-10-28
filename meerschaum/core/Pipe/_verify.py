@@ -101,6 +101,11 @@ def verify(
     A SuccessTuple indicating whether the pipe was successfully resynced.
     """
     from meerschaum import _core
+    ### Verifying re-syncs its chunks: a `sync` lock refuses it before any is read.
+    if not check_rowcounts_only:
+        refusal = self._lock_refusal('sync', always=True, debug=debug)
+        if refusal:
+            return False, refusal
     context, reason = _rust_verify_context(self, debug=debug)
     if context is None:
         return False, f"Cannot verify {self}: {reason}."

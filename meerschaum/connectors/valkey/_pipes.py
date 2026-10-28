@@ -199,10 +199,13 @@ def get_pipe_data(
     end: Union[datetime, int, None] = None,
     params: Optional[Dict[str, Any]] = None,
     debug: bool = False,
+    as_polars: Optional[bool] = None,
+    as_pandas: Optional[bool] = None,
     **kwargs: Any
 ) -> Union['pd.DataFrame', None]:
     """
-    Query a pipe's target table and return the DataFrame.
+    Query a pipe's target table and return the DataFrame (of the `meerschaum:dataframe` library;
+    `as_polars=True` / `as_pandas=True` choose one).
 
     Parameters
     ----------
@@ -228,7 +231,8 @@ def get_pipe_data(
     -------
     The target table's data as a DataFrame, or `None` if the table does not exist.
     """
-    return self._rust_client().get_pipe_data(
+    from meerschaum.utils.dataframe import frame_from_arrow, frame_library_of
+    df = self._rust_client().get_pipe_data(
         pipe,
         select_columns=select_columns,
         omit_columns=omit_columns,
@@ -236,6 +240,9 @@ def get_pipe_data(
         end=end,
         params=params,
     )
+    if frame_library_of(df) is None:
+        return df
+    return frame_from_arrow(df, as_polars=as_polars, as_pandas=as_pandas)
 
 
 def sync_pipe(

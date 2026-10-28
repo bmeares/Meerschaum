@@ -655,7 +655,8 @@ def op_instance(conn, call_id, args, frames) -> Result:
     kw = _kwargs(args)
     frame_arg = args.get('frame_arg', None)
     if frame_arg and frames:
-        kw[str(frame_arg)] = ipc_to_df(frames[0])
+        ### The host's DataFrame library (`meerschaum:dataframe`), not this worker's.
+        kw[str(frame_arg)] = ipc_to_df(frames[0], library=args.get('dataframe', None))
     positional = list(args.get('args', None) or [])
     pipe = _build_pipe(args.get('pipe')) if args.get('pipe', None) else None
     ### A protected custom instance (`protected: true`) refuses writes unless allowed.
