@@ -51,12 +51,25 @@ pub const NON_ADMIN_OMIT_ACTIONS: &[&str] = &[
 /// positional words (not flags nor the values of a flag that takes them), since flags may stand
 /// between the action and the subaction.
 pub const DENIED_SUBACTIONS: &[(&str, &[&str])] = &[
-    // Print the configuration (with connector passwords), the environment or another job's output.
-    ("show", &["config", "environment", "log"]),
-    ("edit", &["config", "plugin", "token", "user", "job"]),
-    ("delete", &["config", "connector", "plugin", "user", "venv"]),
+    // Print the configuration (with connector passwords), the environment, another job's output,
+    // or every user's email address (rc15: the server shows emails only to administrators and
+    // the managers of a user's teams).
+    ("show", &["config", "environment", "log", "user"]),
+    (
+        "edit",
+        &["config", "plugin", "token", "user", "job", "team"],
+    ),
+    (
+        "delete",
+        &["config", "connector", "plugin", "user", "venv", "team"],
+    ),
     ("copy", &["connector"]),
-    ("register", &["user", "plugin", "token", "connector"]),
+    // Users and teams are the administrators' (rc15): the server's `/teams` routes let a team's
+    // managers change its members.
+    (
+        "register",
+        &["user", "plugin", "token", "connector", "team"],
+    ),
 ];
 
 /// The flags the console does not offer (long form, without the dashes; `-h` and `-V` are their
@@ -283,6 +296,11 @@ mod tests {
         assert!(check_non_admin(&s(&["show", "-i", "x", "environment"])).is_err());
         assert!(check_non_admin(&s(&["show", "--nopretty", "config"])).is_err());
         assert!(check_non_admin(&s(&["edit", "pipes"])).is_ok());
+        // Users' emails and teams are the administrators' (rc15).
+        assert!(check_non_admin(&s(&["show", "users"])).is_err());
+        assert!(check_non_admin(&s(&["register", "teams", "data"])).is_err());
+        assert!(check_non_admin(&s(&["edit", "team", "data"])).is_err());
+        assert!(check_non_admin(&s(&["show", "teams"])).is_ok());
         // The values of a flag are not subactions.
         assert!(
             check_non_admin(&s(&["show", "pipes", "-m", "config", "logs", "-l", "None"])).is_ok()

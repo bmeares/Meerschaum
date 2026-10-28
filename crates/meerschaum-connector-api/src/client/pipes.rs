@@ -228,7 +228,7 @@ impl APIConnector {
     }
 
     /// Metadata transport is narrowly reserved for registered Pipeline definitions.
-    fn metadata_r_url(pipe: &Pipe) -> String {
+    pub(crate) fn metadata_r_url(pipe: &Pipe) -> String {
         if Self::is_pipeline_metadata(pipe) {
             format!(
                 "{}/{}",

@@ -502,8 +502,9 @@ impl PythonHostLauncher {
             "no_dash": cfg.no_dash,
             // The Dash console is the host's (D21): mount it unless `--no-dash`.
             "console": !cfg.no_dash,
-            // The Rust server on loopback, for calls back into it (execute, native pages).
-            "server_url": format!("http://{}:{}", loopback_host(&cfg.host), cfg.port),
+            // The Rust server on loopback, for calls back into it (execute, native pages): its own
+            // port, or under HTTPS its loopback-only plain listener (`tls::internal_url`).
+            "server_url": crate::tls::internal_url(cfg),
             // The terminal is served by the Rust server, never proxied to the host.
             "no_webterm": true,
             // Whether the Rust server serves `/webterm/<session-id>` (the console shows the
@@ -515,6 +516,12 @@ impl PythonHostLauncher {
             // Whether non-administrators may run actions and edit pipes from the console:
             // `api:permissions:actions:non_admin`, forced off by `--secure`.
             "actions_non_admin": cfg.actions_non_admin,
+            // The role of users without permissions of their own, as the server resolved it
+            // (`api:permissions:default_role`, or `operator` from 4.1's `actions:non_admin`).
+            "default_role": cfg.default_role,
+            // Whether visitors may register accounts (off by default and under the preset; the
+            // first account of an empty user store is always allowed).
+            "registration_users": cfg.registration_users,
         });
         PythonHostLauncher {
             python,
@@ -524,16 +531,6 @@ impl PythonHostLauncher {
                 ("MRSM_API_HOST_CONFIG".into(), host_config.to_string()),
             ],
         }
-    }
-}
-
-/// The address a client on this machine uses for a server bound to `host`.
-fn loopback_host(host: &str) -> String {
-    match host {
-        "" | "0.0.0.0" => "127.0.0.1".to_string(),
-        "::" | "[::]" => "[::1]".to_string(),
-        h if h.contains(':') && !h.starts_with('[') => format!("[{h}]"),
-        h => h.to_string(),
     }
 }
 
@@ -1361,6 +1358,9 @@ mod tests {
         assert_eq!(host_config(&cfg)["server_url"], "http://192.0.2.7:8123");
         cfg.host = "fd00::1".into();
         assert_eq!(host_config(&cfg)["server_url"], "http://[fd00::1]:8123");
+        // HTTPS: the loopback-only plain listener, never the TLS port.
+        cfg.internal_addr = Some("127.0.0.1:40123".parse().unwrap());
+        assert_eq!(host_config(&cfg)["server_url"], "http://127.0.0.1:40123");
     }
 
     #[test]

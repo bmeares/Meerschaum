@@ -32,10 +32,14 @@ type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 const ADMIN_SESSION: &str = "11111111-1111-4111-8111-111111111111";
 const ADMIN_TAB_TWO: &str = "11111111-1111-4111-8111-222222222222";
 const OTHER_ADMIN_SESSION: &str = "22222222-2222-4222-8222-222222222222";
+/// `bob`, an operator (the role with `webterm:use`).
 const USER_SESSION: &str = "33333333-3333-4333-8333-333333333333";
-/// A session of a user name the instance does not have: v4 only asks the session store, so a
-/// session with a user name is enough while `api:permissions:actions:non_admin` is true.
+/// A session of a user name the instance does not have: v4 only asked the session store, so a
+/// session with a user name was enough; since rc15 the user must exist.
 const GHOST_SESSION: &str = "44444444-4444-4444-8444-444444444444";
+/// `ed`, a user without permissions of their own: the default role, `editor`, which has no
+/// terminal.
+const EDITOR_SESSION: &str = "55555555-5555-4555-8555-555555555555";
 const UNKNOWN_SESSION: &str = "88888888-8888-4888-8888-888888888888";
 
 struct Sessions(HashMap<String, String>);
@@ -55,6 +59,7 @@ fn sessions() -> Arc<dyn SessionLookup> {
             (OTHER_ADMIN_SESSION, "root2"),
             (USER_SESSION, "bob"),
             (GHOST_SESSION, "nobody"),
+            (EDITOR_SESSION, "ed"),
         ]
         .into_iter()
         .map(|(id, user)| (id.to_string(), user.to_string()))
@@ -73,8 +78,12 @@ fn server_config(root: &Path, flags: ServerFlags, non_admin: Option<bool>) -> Se
         let Some(CoreValue::Map(permissions)) = api.get_mut("permissions") else {
             panic!("`api:permissions`");
         };
-        let Some(CoreValue::Map(actions)) = permissions.get_mut("actions") else {
-            panic!("`api:permissions:actions`");
+        // rc15 no longer ships `api:permissions:actions`: a config that sets it adds it.
+        let actions = permissions
+            .entry("actions".to_string())
+            .or_insert_with(|| CoreValue::Map(Default::default()));
+        let CoreValue::Map(actions) = actions else {
+            panic!("`api:permissions:actions` is a map");
         };
         actions.insert("non_admin".into(), CoreValue::Bool(value));
     }
@@ -93,7 +102,8 @@ fn server_config(root: &Path, flags: ServerFlags, non_admin: Option<bool>) -> Se
     config
 }
 
-/// A state over the default configuration, with two administrators and an ordinary user (`bob`).
+/// A state over the default configuration, with two administrators, an operator (`bob`) and a
+/// user with the default role (`ed`).
 fn state(root: &Path) -> AppState {
     state_from(server_config(root, ServerFlags::default(), None))
 }
@@ -103,6 +113,13 @@ fn state_from(cfg: ServerConfig) -> AppState {
     instance.seed_user("admin", "pass", Some("admin"));
     instance.seed_user("root2", "pass", Some("admin"));
     instance.seed_user("bob", "pass", None);
+    let operator: Vec<String> = meerschaum_core::access::Role::Operator
+        .permissions()
+        .into_iter()
+        .collect();
+    let operator: Vec<&str> = operator.iter().map(String::as_str).collect();
+    instance.seed_user_scopes("bob", &operator);
+    instance.seed_user("ed", "pass", None);
     AppState::builder(cfg, instance)
         .secret(SECRET.to_vec())
         .build()
@@ -277,13 +294,21 @@ async fn the_page_requires_an_authorized_session() {
     assert!(unknown.text().contains("<h2>Unauthorized</h2>"));
     assert!(unknown.text().contains("href=\"/dash/login\""));
 
-    // v4's default (`api:permissions:actions:non_admin` is true): a logged-in user who is not an
-    // administrator gets a shell too.
+    // A logged-in user who is not an administrator gets a shell with `webterm:use` (the role
+    // `operator`, rc15); v4 gave every logged-in user one.
     let user = send(&app, get(USER_SESSION)).await;
     assert_eq!(user.status, StatusCode::OK);
-    // v4 asks only the session store, not the instance, about the user name.
+    // The default role (`editor`) has no terminal: a page that says so.
+    let editor = send(&app, get(EDITOR_SESSION)).await;
+    assert_eq!(editor.status, StatusCode::FORBIDDEN);
+    assert!(
+        editor.text().contains("No terminal access"),
+        "{}",
+        editor.text()
+    );
+    // A session whose user is not on the instance (v4 asked only the session store).
     let ghost = send(&app, get(GHOST_SESSION)).await;
-    assert_eq!(ghost.status, StatusCode::OK);
+    assert_eq!(ghost.status, StatusCode::UNAUTHORIZED);
 
     // The trailing slash v4's `/webterm/(.+)/?` accepted.
     let slash = send(
@@ -320,10 +345,10 @@ async fn access(app: &Router, addr: std::net::SocketAddr, session: &str) -> (Sta
 
 #[tokio::test]
 async fn non_admin_users_follow_api_permissions_actions_non_admin() {
-    // The terminal's gate is v4's `is_session_authenticated`: `api:permissions:actions:non_admin`
-    // (true in the default config; `start api --secure` and `false` close it) lets every logged-in
-    // user in, otherwise only administrators. The key the actions routes read
-    // (`system:api:permissions:actions:non_admin`, undefined by default, as in v4) is not consulted.
+    // The terminal's gate (rc15): administrators, and users with `webterm:use` (the role
+    // `operator`) while `api:permissions:actions:non_admin` allows non-administrators (its
+    // default; `start api --secure` and `false` close it). v4's other key
+    // (`system:api:permissions:actions:non_admin`, undefined by default) is not consulted.
     let root = tempfile::tempdir().unwrap();
     let cfg = server_config(root.path(), ServerFlags::default(), None);
     assert!(
@@ -344,6 +369,10 @@ async fn non_admin_users_follow_api_permissions_actions_non_admin() {
     assert_eq!(
         access(&app, addr, ADMIN_SESSION).await,
         (StatusCode::OK, true)
+    );
+    assert_eq!(
+        access(&app, addr, EDITOR_SESSION).await,
+        (StatusCode::FORBIDDEN, false)
     );
     assert_eq!(
         access(&app, addr, UNKNOWN_SESSION).await,
@@ -369,7 +398,7 @@ async fn non_admin_users_follow_api_permissions_actions_non_admin() {
         let addr = serve(app.clone()).await;
         assert_eq!(
             access(&app, addr, USER_SESSION).await,
-            (StatusCode::UNAUTHORIZED, false)
+            (StatusCode::FORBIDDEN, false)
         );
         assert_eq!(
             access(&app, addr, ADMIN_SESSION).await,

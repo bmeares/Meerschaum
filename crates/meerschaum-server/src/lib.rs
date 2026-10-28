@@ -14,6 +14,7 @@
 //! |---|---|
 //! | [`config`] | `api:*` config keys, `start api` flags, `api:uvicorn` → `api:server` renames |
 //! | [`auth`] | Secret key file, HS256 JWTs, API keys, `ScopedAuth`, `CurrentScopes` |
+//! | [`access`] | Who may see and do what: effective permissions, teams, pipes' visibility |
 //! | [`state`] | Instance connectors, backends, the shared pipes dictionary (`get_pipe`) |
 //! | [`routes`] | The route groups and the router (allowlist, rate limits, fallback proxy) |
 //! | [`pipe_methods`] | `Pipe.parse_date_bounds`, `get_sync_time`, `get_chunk_bounds`, `sync` |
@@ -25,11 +26,14 @@
 //! | [`proxy`], [`host`] | The Python API host: reverse proxy over a Unix socket, supervision |
 //! | [`webterm`] | `/webterm/{session_id}` and its websocket: the PTY bridge (`portable-pty`, tmux) |
 //! | [`mcp`] | The MCP server (`/mcp`, stdio) and its federation with the API host |
+//! | [`tls`] | Native HTTPS (`--keyfile` / `--certfile`): rustls, HTTP/2, certificate reloads |
+//! | [`sql_guard`] | What non-administrators may put in a pipe's SQL definition through the API |
 //!
 //! All pipe operations go through `Arc<dyn InstanceConnector>`.
 
 #![deny(unsafe_code)]
 
+pub mod access;
 pub mod auth;
 pub mod backends;
 pub mod config;
@@ -37,6 +41,7 @@ pub mod engine_store;
 pub mod engine_stream;
 pub mod envelope;
 pub mod error;
+pub mod execute_access;
 pub mod execute_policy;
 pub mod host;
 pub mod json;
@@ -50,7 +55,9 @@ pub mod ratelimit;
 pub mod redact;
 pub mod routes;
 pub mod serialize;
+pub mod sql_guard;
 pub mod state;
+pub mod tls;
 pub mod web;
 pub mod webterm;
 
@@ -94,10 +101,28 @@ pub async fn serve_with_mcp(
 /// [`serve_with_mcp`] with an optional router of the routes `meerschaum-web` keeps (the web
 /// terminal, the job-log stream, native pages) merged into the application. `meerschaum-web` depends on this crate, so the CLI composes
 /// the two and passes the console in here.
+///
+/// A configuration with a key and certificate ([`ServerConfig::tls`]) is served over HTTPS,
+/// prepared here ([`tls::prepare`]); a caller that runs the Python API host prepares it first
+/// and calls [`serve_with_tls`], so the host's configuration names the internal listener.
 pub async fn serve_with_mcp_and_console(
     state: AppState,
     mcp: std::sync::Arc<mcp::McpServer>,
     console: Option<axum::Router>,
+) -> std::io::Result<()> {
+    let mut config = (*state.config).clone();
+    let https = tls::prepare(&mut config).map_err(std::io::Error::other)?;
+    serve_with_tls(state, mcp, console, https).await
+}
+
+/// [`serve_with_mcp_and_console`] with HTTPS made ready by the caller ([`tls::prepare`]): `Some`
+/// serves HTTPS on `host:port` (and plain HTTP on its loopback-only internal listener), `None`
+/// plain HTTP on `host:port`, exactly as without TLS.
+pub async fn serve_with_tls(
+    state: AppState,
+    mcp: std::sync::Arc<mcp::McpServer>,
+    console: Option<axum::Router>,
+    https: Option<tls::Https>,
 ) -> std::io::Result<()> {
     if let Some(federation) = mcp.federation.clone() {
         tokio::spawn(async move {
@@ -106,12 +131,17 @@ pub async fn serve_with_mcp_and_console(
     }
     let addr = format!("{}:{}", state.config.host, state.config.port);
     let listener = tokio::net::TcpListener::bind(&addr).await?;
-    axum::serve(
-        listener,
-        app_with_mcp_and_console(state, mcp, console)
-            .into_make_service_with_connect_info::<std::net::SocketAddr>(),
-    )
-    .await
+    let app = app_with_mcp_and_console(state, mcp, console);
+    match https {
+        None => {
+            axum::serve(
+                listener,
+                app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+            )
+            .await
+        }
+        Some(https) => tls::serve(listener, app, https).await,
+    }
 }
 
 /// Compose `meerschaum-web`'s exact routes with the API without making server depend on web.

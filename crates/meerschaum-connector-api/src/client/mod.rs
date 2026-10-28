@@ -11,6 +11,7 @@
 //! `pipe.columns` / `pipe.dtypes` inside `sync_pipe` and `get_pipe_data` and those reads issue the
 //! `/attributes`, `/exists` and `/columns/types` requests on a cache miss.
 
+mod access;
 mod actions;
 mod engine;
 mod instance;
@@ -37,6 +38,7 @@ use meerschaum_core::{Map, Value};
 
 use crate::traits::{ConnectorError, ConnectorResult};
 
+pub use access::{PipeAccessInfo, UserAccess, UserTeam};
 pub use engine::{EngineRunEventStream, FollowRunOptions};
 pub use jobs::LogsMonitor;
 pub use login::parse_expires;

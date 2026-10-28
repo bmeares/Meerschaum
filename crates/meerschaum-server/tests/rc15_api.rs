@@ -101,7 +101,11 @@ async fn v5_routes_answer_success_and_message_with_real_status_codes() {
     )
     .await;
     assert_eq!(r.status, StatusCode::FORBIDDEN);
-    assert_eq!(r.json()["message"], "Missing required scope: 'pipes:write'");
+    // Registering needs `pipes:register` (rc15's access model; `pipes:write` stands in for it).
+    assert_eq!(
+        r.json()["message"],
+        "Missing required scope: 'pipes:register'"
+    );
     // Validation (pydantic's 422 is a 400 here, with the errors).
     let r = send(&a.app, req("POST", "/execute", Some(&admin), None)).await;
     assert_eq!(r.status, StatusCode::BAD_REQUEST, "{}", r.text());

@@ -9,6 +9,9 @@
 //!   merged into that pipe's status on the server's instance. `{"success": true, "message":
 //!   "...", "status": {...}}`.
 //!
+//! **Access (rc15).** A caller who is not an administrator reads the statuses of the pipes it can
+//! see, and records outcomes only for pipes it may change.
+//!
 //! Statuses are keyed with the server's instance keys; the client re-keys them with its own
 //! (`meerschaum_connector::sync_status::rekey`). The server also records the syncs posted to
 //! `POST /pipes/{connector}/{metric}/{location}/data` ([`record_data_post`]) unless the client
@@ -33,7 +36,7 @@ use serde::Deserialize;
 use serde_json::Value as Json;
 
 use super::Ctx;
-use crate::auth::scoped_auth;
+use crate::access::{self, RefFilter};
 use crate::config::ServerConfig;
 use crate::error::{ApiError, ApiResult};
 use crate::json::json_response;
@@ -107,7 +110,7 @@ fn plural(n: usize) -> &'static str {
 
 /// `GET /engine/sync-status[?pipe_ref=]`.
 async fn get_statuses(ctx: Ctx) -> ApiResult {
-    scoped_auth(&ctx.state, &ctx.headers, READ_SCOPES).await?;
+    let caller = access::require(&ctx.state, &ctx.headers, READ_SCOPES).await?;
     let ik = ctx.instance_keys();
     let conn = ctx.state.get_api_connector(ik.as_deref())?;
     let instance_keys = conn.connector_keys();
@@ -124,6 +127,18 @@ async fn get_statuses(ctx: Ctx) -> ApiResult {
             .get_sync_statuses(&instance_keys)
             .await
             .map_err(|e| ApiError::exception("get_sync_statuses", e))?,
+    };
+    let statuses = if caller.is_admin() {
+        statuses
+    } else {
+        let mut filter = RefFilter::new(&ctx.state, &caller, &instance_keys);
+        let mut kept = Vec::with_capacity(statuses.len());
+        for status in statuses {
+            if filter.visible(&status.pipe_ref).await {
+                kept.push(status);
+            }
+        }
+        kept
     };
     let n = statuses.len();
     Ok(ok_body(
@@ -145,7 +160,7 @@ struct PostBody {
 
 /// `POST /engine/sync-status`: record an `api:` client's sync outcomes.
 async fn post_outcomes(ctx: Ctx, body: Body) -> ApiResult {
-    scoped_auth(&ctx.state, &ctx.headers, WRITE_SCOPES).await?;
+    let caller = access::require(&ctx.state, &ctx.headers, WRITE_SCOPES).await?;
     let bytes = axum::body::to_bytes(body, BODY_LIMIT)
         .await
         .map_err(|_| ApiError::new(413, "The request body is too large."))?;
@@ -167,6 +182,14 @@ async fn post_outcomes(ctx: Ctx, body: Body) -> ApiResult {
             400,
             format!("{pipe} is an internal pipe and has no sync status."),
         ));
+    }
+    let mut filter = RefFilter::new(&ctx.state, &caller, &conn.connector_keys());
+    match filter.editable(&pipe.pipe_ref()).await {
+        (true, _) => {}
+        _ if !filter.visible(&pipe.pipe_ref()).await => {
+            return Err(ApiError::new(404, format!("{pipe} was not found.")));
+        }
+        _ => return Err(access::not_editable(&pipe)),
     }
     let status = sync_status::record_now(conn.as_ref(), &pipe, &body.outcomes)
         .await

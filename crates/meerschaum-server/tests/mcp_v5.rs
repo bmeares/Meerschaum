@@ -501,7 +501,7 @@ async fn read_sql_refuses_internal_tables_however_they_are_spelled() {
             &f,
             &reader,
             "read_sql",
-            json!({"connector_keys": "sql:main", "query": query}),
+            json!({"connector_keys": "sql:fixture", "query": query}),
         )
         .await;
         let text = refused.unwrap_err();
@@ -512,7 +512,7 @@ async fn read_sql_refuses_internal_tables_however_they_are_spelled() {
         &f,
         &reader,
         "read_sql",
-        json!({"connector_keys": "sql:main", "query": "SELECT * FROM mrsm_users"}),
+        json!({"connector_keys": "sql:fixture", "query": "SELECT * FROM mrsm_users"}),
     )
     .await
     .unwrap_err();
@@ -524,7 +524,7 @@ async fn read_sql_refuses_internal_tables_however_they_are_spelled() {
         &f,
         &reader,
         "read_sql",
-        json!({"connector_keys": "sql:main", "query": "SELECT 'users' AS name, query FROM t"}),
+        json!({"connector_keys": "sql:fixture", "query": "SELECT 'users' AS name, query FROM t"}),
     )
     .await;
     assert!(

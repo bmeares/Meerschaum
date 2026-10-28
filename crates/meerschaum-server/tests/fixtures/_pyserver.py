@@ -74,11 +74,13 @@ def reexec_in_temp_root(script: str) -> None:
         'PATH': os.environ.get('PATH', '/usr/bin:/bin'),
         'HOME': str(home),
         'PYTHONHASHSEED': '0',
+        'PYTHONNOUSERSITE': '1',
+        'PYTHONSAFEPATH': '1',
         ROOT_ENV: root,
         'MRSM_ROOT_DIR': root,
         'MRSM_PLUGINS_DIR': str(pathlib.Path(root) / 'plugins'),
         'MRSM_VENVS_DIR': str(
-            REPO / '.venv-ref' / 'mrsm_root' / 'venvs'
+            os.environ.get('MRSM_VENVS_DIR') or REPO / '.venv-ref' / 'parity_venvs'
             if os.environ.get('MRSM_PARITY_REFERENCE')
             else REPO / 'test_root' / 'venvs'
         ),

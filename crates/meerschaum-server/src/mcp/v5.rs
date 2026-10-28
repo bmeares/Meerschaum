@@ -82,6 +82,9 @@ fn to_value(j: serde_json::Value) -> Value {
 
 /// Apply v5's changes to one of v4's tools.
 pub fn patch(tool: &mut Tool) {
+    if tool.name == "register_pipe" {
+        tool.scopes = vec!["pipes:register".into()];
+    }
     let Value::Map(schema) = &mut tool.input_schema else {
         return;
     };

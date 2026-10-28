@@ -60,6 +60,7 @@ struct Data {
 #[derive(Debug)]
 pub struct MemoryInstance {
     label: String,
+    identifier_byte_limit: Option<usize>,
     data: Mutex<Data>,
     raw_docs: Mutex<Option<Vec<Doc>>>,
     /// When set, the reads of users' attributes and tokens' scopes fail (a transient instance
@@ -70,6 +71,11 @@ pub struct MemoryInstance {
     /// When set, the reads of pipes' data, row counts and sync times fail (rc15 Q17: the routes
     /// answer `500`, not an empty pipe).
     fail_data_reads: std::sync::atomic::AtomicBool,
+    /// How many times the registered pipes were listed (`fetch_pipes_keys`) and one pipe's
+    /// attributes read (`get_pipe_attributes`): what the access model's bulk read costs.
+    pub pipes_listings: std::sync::atomic::AtomicUsize,
+    /// See [`MemoryInstance::pipes_listings`].
+    pub attribute_reads: std::sync::atomic::AtomicUsize,
 }
 
 fn keys_of(pipe: &Pipe) -> (String, String, Option<String>) {
@@ -180,16 +186,25 @@ impl MemoryInstance {
     pub fn new(label: &str) -> MemoryInstance {
         MemoryInstance {
             label: label.to_string(),
+            identifier_byte_limit: None,
             raw_docs: Mutex::new(None),
             fail_permission_reads: std::sync::atomic::AtomicBool::new(false),
             fail_identity_reads: std::sync::atomic::AtomicBool::new(false),
             fail_data_reads: std::sync::atomic::AtomicBool::new(false),
+            pipes_listings: std::sync::atomic::AtomicUsize::new(0),
+            attribute_reads: std::sync::atomic::AtomicUsize::new(0),
             data: Mutex::new(Data {
                 next_pipe_id: 1,
                 next_user_id: 1,
                 ..Default::default()
             }),
         }
+    }
+
+    /// Model a database's implicit SQL identifier clipping without a database connection.
+    pub fn with_identifier_byte_limit(mut self, limit: usize) -> Self {
+        self.identifier_byte_limit = Some(limit);
+        self
     }
 
     /// Make the reads of users' attributes and tokens' scopes fail (or succeed again).
@@ -288,6 +303,33 @@ impl MemoryInstance {
         );
     }
 
+    /// Replace a seeded user's attributes (`{"role": "viewer"}`, `{"primary_team": ...}`).
+    pub fn seed_user_attributes(&self, username: &str, attributes: Map) {
+        let mut d = self.lock();
+        let user = d
+            .users
+            .iter_mut()
+            .find(|u| u.username == username)
+            .expect("a seeded user");
+        user.attributes = attributes;
+    }
+
+    /// Set a seeded user's email address.
+    pub fn seed_user_email(&self, username: &str, email: &str) {
+        let mut d = self.lock();
+        let user = d
+            .users
+            .iter_mut()
+            .find(|u| u.username == username)
+            .expect("a seeded user");
+        user.email = Some(email.to_string());
+    }
+
+    /// The stored attributes of a user (for assertions).
+    pub fn user_attributes(&self, username: &str) -> Option<Map> {
+        self.user_row(username).map(|u| u.attributes)
+    }
+
     fn user_row(&self, username: &str) -> Option<UserRow> {
         self.lock()
             .users
@@ -362,6 +404,10 @@ impl Connector for MemoryInstance {
 
 #[async_trait]
 impl InstanceConnector for MemoryInstance {
+    fn sql_identifier_byte_limit(&self) -> Option<usize> {
+        self.identifier_byte_limit
+    }
+
     async fn register_pipe(&self, pipe: &Pipe) -> SuccessTuple {
         let mut d = self.lock();
         let k = keys_of(pipe);
@@ -375,6 +421,8 @@ impl InstanceConnector for MemoryInstance {
     }
 
     async fn get_pipe_attributes(&self, pipe: &Pipe) -> ConnectorResult<Map> {
+        self.attribute_reads
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let d = self.lock();
         let Some((id, params)) = d.pipes.get(&keys_of(pipe)) else {
             return Ok(Map::new());
@@ -420,6 +468,8 @@ impl InstanceConnector for MemoryInstance {
     }
 
     async fn fetch_pipes_keys(&self, query: &PipesKeysQuery) -> ConnectorResult<PipesKeys> {
+        self.pipes_listings
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let d = self.lock();
         let mut entries: Vec<(&(String, String, Option<String>), &(i64, Map))> =
             d.pipes.iter().collect();
@@ -774,6 +824,21 @@ impl InstanceConnector for MemoryInstance {
     async fn get_user_attributes(&self, user: &User) -> ConnectorResult<Option<Map>> {
         self.permission_read_error()?;
         Ok(self.user_row(&user.username).map(|u| u.attributes))
+    }
+
+    async fn get_user_email(&self, user: &User) -> ConnectorResult<Option<String>> {
+        Ok(self.user_row(&user.username).and_then(|u| u.email))
+    }
+
+    async fn set_user_attributes(&self, user: &User, attributes: &Map) -> SuccessTuple {
+        let mut d = self.lock();
+        match d.users.iter_mut().find(|u| u.username == user.username) {
+            Some(row) => {
+                row.attributes = attributes.clone();
+                SuccessTuple::ok(format!("Updated the attributes of '{}'.", user.username))
+            }
+            None => SuccessTuple::fail(format!("User '{}' does not exist.", user.username)),
+        }
     }
 
     // --- Plugins (`connectors/sql/_plugins.py`) -------------------------------------------

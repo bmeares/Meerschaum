@@ -3,8 +3,9 @@
 //! - A non-administrator runs through `/execute` only what the console would offer: the actions
 //!   the console omits stay refused, and so do the flags it does not offer (`--shell`, ...);
 //!   administrators keep v4's `/actions` latitude. The gate reads
-//!   `api:permissions:actions:non_admin` (`ServerConfig::actions_non_admin`), not the `system:`
-//!   key the `/actions` and `/jobs` routes read.
+//!   `api:permissions:actions:non_admin` (`ServerConfig::actions_non_admin`), not v4's `system:`
+//!   key, and (rc15's access model) the caller's permissions: running an action needs
+//!   `actions:execute` (the role `operator`).
 //! - `GET /jobs` and `GET /jobs/{name}` never return a credential (connector URIs, secret-like
 //!   environment variables), and the `execute-*` jobs of the console are visible to the user who
 //!   started them and to administrators only.
@@ -133,13 +134,17 @@ struct Fixture {
     _dir: tempfile::TempDir,
 }
 
-/// Users: `admin`, `bob` and `eve` (non-administrators with every scope).
+/// Users: `admin`, `bob` and `eve` (non-administrators with every permission, `scopes: ['*']`:
+/// v4 gave a user without a `scopes` attribute every scope; since rc15 such a user has the
+/// default role, `editor`, which runs the console's pipe operations but no other action).
 fn fixture(tweak: impl FnOnce(&mut meerschaum_server::ServerConfig)) -> Fixture {
     let dir = tempfile::tempdir().unwrap();
     let instance = Arc::new(common::MemoryInstance::new("fixture"));
     instance.seed_user("admin", "pass", Some("admin"));
-    instance.seed_user("bob", "pw", None);
-    instance.seed_user("eve", "pw", None);
+    for name in ["bob", "eve"] {
+        instance.seed_user(name, "pw", None);
+        instance.seed_user_scopes(name, &["*"]);
+    }
     let mut cfg = common::config(dir.path());
     tweak(&mut cfg);
     let jobs = Arc::new(FakeJobs::default());
@@ -257,7 +262,7 @@ async fn a_non_admin_runs_what_the_console_offers() {
     let f = fixture(|cfg| cfg.actions_non_admin = true);
     let bob = common::login(&f.app, "bob", "pw", None).await;
     for sysargs in [
-        vec!["show", "pipes", "-i", "sql:main"],
+        vec!["show", "pipes", "-i", "sql:fixture"],
         vec![
             "sync",
             "pipes",
@@ -268,7 +273,7 @@ async fn a_non_admin_runs_what_the_console_offers() {
             "-l",
             "None",
             "-i",
-            "sql:main",
+            "sql:fixture",
             "--debug",
             "--begin",
             "2024-01-01",
@@ -288,6 +293,15 @@ async fn a_non_admin_runs_what_the_console_offers() {
         let r = execute(&f, &bob, &sysargs).await;
         assert!(started(&r), "{sysargs:?}: {} {}", r.status, r.text());
     }
+    // rc15: pipes on an instance this server does not serve cannot be checked against the
+    // caller's rights: refused.
+    let r = execute(&f, &bob, &["show", "pipes", "-i", "sql:main"]).await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN, "{}", r.text());
+    assert!(
+        r.json()["message"].as_str().unwrap().contains("sql:main"),
+        "{}",
+        r.text()
+    );
 }
 
 #[tokio::test]

@@ -99,6 +99,10 @@ pub struct Inner {
     pub(crate) execution_maintenance: tokio::sync::Mutex<()>,
     pipes: tokio::sync::Mutex<HashMap<String, Arc<PipesDict>>>,
     instances: Mutex<HashMap<String, Arc<dyn InstanceConnector>>>,
+    /// Identities behind credentials and pipes' access ([`crate::access`]).
+    access_cache: crate::access::AccessCache,
+    /// Serializes the first account's registration (an empty user store).
+    pub(crate) first_user: tokio::sync::Mutex<()>,
 }
 
 impl Deref for AppState {
@@ -181,6 +185,8 @@ impl AppStateBuilder {
             execution_maintenance: tokio::sync::Mutex::new(()),
             pipes: tokio::sync::Mutex::new(HashMap::new()),
             instances: Mutex::new(HashMap::new()),
+            access_cache: Default::default(),
+            first_user: tokio::sync::Mutex::new(()),
         })))
     }
 }
@@ -223,6 +229,11 @@ impl AppState {
     /// The JWT secret.
     pub fn secret(&self) -> &[u8] {
         &self.0.secret
+    }
+
+    /// The access model's caches (identities, pipes' access).
+    pub fn access_cache(&self) -> &crate::access::AccessCache {
+        &self.0.access_cache
     }
 
     /// Record that `GET /logs/{name}/stream` is served (`meerschaum-web` mounts it).

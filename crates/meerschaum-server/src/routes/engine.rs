@@ -6,6 +6,12 @@
 //! status codes, [`crate::envelope`]). Reads (`GET`, and `POST .../read`) need `pipes:read`,
 //! writes `pipes:write`.
 //!
+//! **Access (rc15).** A caller who is not an administrator sees the runs of the pipes it can see
+//! (a run is visible when one of its pipes is; the nodes of hidden pipes are anonymized,
+//! [`crate::access::runs`]), the ledger and state of pipes it can see, and the raw state rows of
+//! those pipes only; writing engine state (ledger entries, cursors, states, runs, events,
+//! leases, raw rows) for a pipe needs edit rights on it.
+//!
 //! `/engine/pipes/{metric}/{read,write,clear,exists}` expose the engine's six state pipes
 //! (`mrsm:engine_*`) to an `APIConnector`, whose engine keeps its state through them; any other
 //! metric is a `404` (no generic access to `mrsm` keys). Rows travel as `orient='records'` JSON
@@ -30,7 +36,7 @@ use serde::de::DeserializeOwned;
 use serde_json::{Map as JsonMap, Value as Json, json};
 
 use super::Ctx;
-use crate::auth::scoped_auth;
+use crate::access::{self, Access, RefFilter};
 use crate::backends::{EngineStoreError, RunStatusFilter, RunsFilter};
 use crate::config::ServerConfig;
 use crate::envelope;
@@ -72,15 +78,25 @@ pub fn routes(app: Router<AppState>, _cfg: &ServerConfig) -> Router<AppState> {
 }
 
 /// Authorize, then refuse anything but the six engine state pipes.
-async fn engine_metric(ctx: &Ctx, metric: &str, scopes: &[&str]) -> Result<(), ApiError> {
-    scoped_auth(&ctx.state, &ctx.headers, scopes).await?;
+async fn engine_metric(ctx: &Ctx, metric: &str, scopes: &[&str]) -> Result<Access, ApiError> {
+    let caller = access::require(&ctx.state, &ctx.headers, scopes).await?;
     if !engine_pipes::is_engine_metric(metric) {
         return Err(ApiError::new(
             404,
             format!("'{metric}' is not an engine state pipe."),
         ));
     }
-    Ok(())
+    Ok(caller)
+}
+
+/// The filter of refs for `caller` on the server's instance (the engine pipes' and the `api:`
+/// clients' refs name the server's pipes by their last three keys).
+fn filter_for(ctx: &Ctx, caller: &Access) -> RefFilter {
+    RefFilter::new(&ctx.state, caller, &ctx.state.instance().connector_keys()).for_engine()
+}
+
+fn refused(message: String) -> ApiError {
+    ApiError::new(403, message)
 }
 
 fn store_error(e: EngineStoreError) -> ApiError {
@@ -131,8 +147,15 @@ fn count(n: usize, singular: &str, plural: &str) -> String {
 }
 
 async fn read_pipe(ctx: Ctx, Path(metric): Path<String>, body: Body) -> ApiResult {
-    engine_metric(&ctx, &metric, READ_SCOPES).await?;
-    let query = query_from(body_json(body).await?)?;
+    let caller = engine_metric(&ctx, &metric, READ_SCOPES).await?;
+    let mut query = query_from(body_json(body).await?)?;
+    // Keep the access columns until the rows have been filtered. Otherwise selecting only
+    // `message`, for example, removes `pipe_ref` before authorization sees it.
+    let requested_columns = if caller.is_admin() {
+        None
+    } else {
+        query.select_columns.take()
+    };
     let df = ctx
         .state
         .engine
@@ -140,21 +163,50 @@ async fn read_pipe(ctx: Ctx, Path(metric): Path<String>, body: Body) -> ApiResul
         .await
         .map_err(store_error)?;
     Ok(match df {
-        Some(df) => {
+        Some(df) if caller.is_admin() => {
             let message = format!("Read {}.", count(df.height(), "row", "rows"));
             envelope::ok_with_raw(&message, "rows", &engine_pipes::records_json(&df))
+        }
+        Some(df) => {
+            // Only the rows of pipes the caller can see.
+            let rows: Vec<Json> =
+                serde_json::from_str(&engine_pipes::records_json(&df)).unwrap_or_default();
+            let mut rows =
+                access::runs::visible_rows(&mut filter_for(&ctx, &caller), &metric, rows).await;
+            if let Some(columns) = requested_columns {
+                for row in &mut rows {
+                    if let Some(fields) = row.as_object_mut() {
+                        fields.retain(|key, _| columns.contains(key));
+                    }
+                }
+            }
+            let message = format!("Read {}.", count(rows.len(), "row", "rows"));
+            envelope::ok_with(message, "rows", Json::Array(rows))
         }
         None => envelope::ok_with("Read 0 rows.", "rows", json!([])),
     })
 }
 
 async fn write_pipe(ctx: Ctx, Path(metric): Path<String>, body: Body) -> ApiResult {
-    engine_metric(&ctx, &metric, SCOPES).await?;
+    let caller = engine_metric(&ctx, &metric, SCOPES).await?;
     let j = body_json(body).await?;
     let Some(items) = j.as_array() else {
         return Err(ApiError::missing(&["body"]));
     };
     let docs = engine_pipes::docs_from_records(items);
+    access::runs::check_rows_editable(&mut filter_for(&ctx, &caller), &docs)
+        .await
+        .map_err(refused)?;
+    check_run_ids_editable(
+        &ctx,
+        &caller,
+        &items
+            .iter()
+            .filter_map(|r| r.get("run_id").and_then(Json::as_str))
+            .map(str::to_string)
+            .collect::<Vec<_>>(),
+    )
+    .await?;
     // An engine on an `api:` instance flushes its events here: its runs' streams get them live.
     let events = (metric == "engine_events").then(|| docs.clone());
     let res = ctx
@@ -179,9 +231,39 @@ async fn stream_run_events(ctx: Ctx, Path(run_id): Path<String>) -> ApiResult {
 }
 
 async fn clear_pipe(ctx: Ctx, Path(metric): Path<String>, body: Body) -> ApiResult {
-    engine_metric(&ctx, &metric, SCOPES).await?;
+    let caller = engine_metric(&ctx, &metric, SCOPES).await?;
     let query = query_from(body_json(body).await?)?;
     bounded_clear(&metric, &query)?;
+    if !caller.is_admin() {
+        // A caller who is not an administrator clears the rows of pipes it may change (or of
+        // its runs): never the history of every pipe.
+        let params = query.params_map().unwrap_or_default();
+        let refs: Vec<String> = ["pipe_ref", "child_ref"]
+            .iter()
+            .filter_map(|k| params.get(*k))
+            .flat_map(|v| match v {
+                meerschaum_core::Value::List(items) => {
+                    items.iter().map(meerschaum_core::Value::py_str).collect()
+                }
+                other => vec![other.py_str()],
+            })
+            .collect();
+        if refs.is_empty() && !params.contains_key("run_id") {
+            return Err(refused(format!(
+                "Only administrators may clear '{metric}' by time."
+            )));
+        }
+        check_editable(&ctx, &caller, refs).await?;
+        if let Some(run_ids) = params.get("run_id") {
+            let ids: Vec<String> = match run_ids {
+                meerschaum_core::Value::List(items) => {
+                    items.iter().map(meerschaum_core::Value::py_str).collect()
+                }
+                other => vec![other.py_str()],
+            };
+            check_run_ids_editable(&ctx, &caller, &ids).await?;
+        }
+    }
     let res = ctx
         .state
         .engine
@@ -265,13 +347,13 @@ async fn pipe_exists(ctx: Ctx, Path(metric): Path<String>) -> ApiResult {
     Ok(envelope::ok_with(message, "exists", json!(exists)))
 }
 
-async fn body_as<T: DeserializeOwned>(ctx: &Ctx, body: Body) -> Result<T, ApiError> {
-    scoped_auth(&ctx.state, &ctx.headers, SCOPES).await?;
+async fn body_as<T: DeserializeOwned>(ctx: &Ctx, body: Body) -> Result<(Access, T), ApiError> {
+    let caller = access::require(&ctx.state, &ctx.headers, SCOPES).await?;
     let j = body_json(body).await?;
     if j.is_null() {
         return Err(ApiError::missing(&["body"]));
     }
-    serde_json::from_value(j.clone()).map_err(|e| {
+    let value = serde_json::from_value(j.clone()).map_err(|e| {
         ApiError::validation(vec![ApiError::field_error(
             "model_type",
             &["body"],
@@ -279,21 +361,99 @@ async fn body_as<T: DeserializeOwned>(ctx: &Ctx, body: Body) -> Result<T, ApiErr
             j,
             None,
         )])
-    })
+    })?;
+    Ok((caller, value))
+}
+
+/// Refuse writes of engine state naming pipes `caller` may not change.
+async fn check_editable(ctx: &Ctx, caller: &Access, refs: Vec<String>) -> Result<(), ApiError> {
+    access::runs::check_refs_editable(
+        &mut filter_for(ctx, caller),
+        refs.iter().map(String::as_str),
+    )
+    .await
+    .map_err(refused)
+}
+
+/// A run selector must not bypass its pipes' rights. Check every member of an existing run
+/// before replacing its metadata, writing its events or clearing its history by run ID.
+async fn check_run_ids_editable(
+    ctx: &Ctx,
+    caller: &Access,
+    ids: &[String],
+) -> Result<(), ApiError> {
+    if caller.is_admin() {
+        return Ok(());
+    }
+    let mut seen = std::collections::HashSet::new();
+    for id in ids {
+        if !seen.insert(id) {
+            continue;
+        }
+        let rows = ctx
+            .state
+            .engine
+            .get_runs(&RunsFilter {
+                run_id: Some(id.clone()),
+                ..Default::default()
+            })
+            .await
+            .map_err(store_error)?;
+        let refs = rows
+            .iter()
+            .flat_map(|row| {
+                row.pipe_ref
+                    .clone()
+                    .into_iter()
+                    .chain(access::runs::targets_of(row))
+            })
+            .collect::<Vec<_>>();
+        if !rows.is_empty() && refs.is_empty() {
+            return Err(refused(
+                "Only administrators may change history whose pipes cannot be determined.".into(),
+            ));
+        }
+        check_editable(ctx, caller, refs).await?;
+    }
+    Ok(())
+}
+
+/// `404` for the state of a pipe `caller` cannot see.
+async fn check_visible(ctx: &Ctx, caller: &Access, pipe_ref: &str) -> Result<(), ApiError> {
+    if filter_for(ctx, caller).visible(pipe_ref).await {
+        return Ok(());
+    }
+    Err(ApiError::new(
+        404,
+        format!("No engine state for '{pipe_ref}'."),
+    ))
 }
 
 async fn post_ledger(ctx: Ctx, body: Body) -> ApiResult {
-    let entries: Vec<LedgerEntry> = body_as(&ctx, body).await?;
+    let (caller, entries): (Access, Vec<LedgerEntry>) = body_as(&ctx, body).await?;
+    check_editable(
+        &ctx,
+        &caller,
+        entries.iter().map(|e| e.pipe_ref.clone()).collect(),
+    )
+    .await?;
     envelope::tuple(&ctx.state.engine.append_ledger(entries).await, 500)
 }
 
 async fn get_ledger(ctx: Ctx) -> ApiResult {
-    scoped_auth(&ctx.state, &ctx.headers, READ_SCOPES).await?;
+    let caller = access::require(&ctx.state, &ctx.headers, READ_SCOPES).await?;
     let Some(child_ref) = ctx.query.opt_str("child_ref") else {
         return Err(ApiError::missing(&["query", "child_ref"]));
     };
+    check_visible(&ctx, &caller, &child_ref).await?;
     let after_seq = ctx.query.opt_int("after_seq")?;
-    let entries = ctx.state.engine.ledger_after(&child_ref, after_seq).await;
+    let mut entries = Vec::new();
+    let mut filter = filter_for(&ctx, &caller);
+    for entry in ctx.state.engine.ledger_after(&child_ref, after_seq).await {
+        if filter.visible(&entry.pipe_ref).await {
+            entries.push(entry);
+        }
+    }
     Ok(envelope::ok_with(
         format!(
             "Found {}.",
@@ -305,15 +465,22 @@ async fn get_ledger(ctx: Ctx) -> ApiResult {
 }
 
 async fn put_cursors(ctx: Ctx, body: Body) -> ApiResult {
-    let cursors: Vec<EdgeCursor> = body_as(&ctx, body).await?;
+    let (caller, cursors): (Access, Vec<EdgeCursor>) = body_as(&ctx, body).await?;
+    check_editable(
+        &ctx,
+        &caller,
+        cursors.iter().map(|c| c.child_ref.clone()).collect(),
+    )
+    .await?;
     envelope::tuple(&ctx.state.engine.put_cursors(cursors).await, 500)
 }
 
 async fn get_state(ctx: Ctx) -> ApiResult {
-    scoped_auth(&ctx.state, &ctx.headers, READ_SCOPES).await?;
+    let caller = access::require(&ctx.state, &ctx.headers, READ_SCOPES).await?;
     let Some(pipe_ref) = ctx.query.opt_str("pipe_ref") else {
         return Err(ApiError::missing(&["query", "pipe_ref"]));
     };
+    check_visible(&ctx, &caller, &pipe_ref).await?;
     match ctx.state.engine.get_state(&pipe_ref).await {
         Some(state) => Ok(envelope::ok_with(
             format!("Found the engine state of '{pipe_ref}'."),
@@ -328,12 +495,37 @@ async fn get_state(ctx: Ctx) -> ApiResult {
 }
 
 async fn put_state(ctx: Ctx, body: Body) -> ApiResult {
-    let states: Vec<EngineState> = body_as(&ctx, body).await?;
+    let (caller, states): (Access, Vec<EngineState>) = body_as(&ctx, body).await?;
+    check_editable(
+        &ctx,
+        &caller,
+        states.iter().map(|s| s.pipe_ref.clone()).collect(),
+    )
+    .await?;
     envelope::tuple(&ctx.state.engine.put_states(states).await, 500)
 }
 
 async fn post_runs(ctx: Ctx, body: Body) -> ApiResult {
-    let runs: Vec<RunRecord> = body_as(&ctx, body).await?;
+    let (caller, runs): (Access, Vec<RunRecord>) = body_as(&ctx, body).await?;
+    check_editable(
+        &ctx,
+        &caller,
+        runs.iter()
+            .flat_map(|r| {
+                r.pipe_ref
+                    .clone()
+                    .into_iter()
+                    .chain(access::runs::targets_of(r))
+            })
+            .collect(),
+    )
+    .await?;
+    check_run_ids_editable(
+        &ctx,
+        &caller,
+        &runs.iter().map(|r| r.run_id.clone()).collect::<Vec<_>>(),
+    )
+    .await?;
     envelope::tuple(&ctx.state.engine.record_runs(runs).await, 500)
 }
 
@@ -390,10 +582,16 @@ pub fn runs_filter(ctx: &Ctx) -> Result<RunsFilter, ApiError> {
 }
 
 async fn get_runs(ctx: Ctx) -> ApiResult {
-    scoped_auth(&ctx.state, &ctx.headers, READ_SCOPES).await?;
+    let caller = access::require(&ctx.state, &ctx.headers, READ_SCOPES).await?;
     let filter = runs_filter(&ctx)?;
-    let (store, _) = crate::engine_stream::store_for(&ctx)?;
+    let (store, instances) = crate::engine_stream::store_for(&ctx)?;
     let runs = store.get_runs(&filter).await.map_err(store_error)?;
+    let default = instances.first().cloned().unwrap_or_default();
+    let runs = access::runs::visible_runs(
+        &mut RefFilter::new(&ctx.state, &caller, &default).for_engine(),
+        runs,
+    )
+    .await;
     let n = runs.iter().filter(|r| r.pipe_ref.is_none()).count();
     Ok(envelope::ok_with(
         format!("Found {}.", count(n, "run", "runs")),
@@ -418,12 +616,36 @@ pub async fn run_detail(
     Ok(runs.into_iter().next().map(|run| (run, nodes)))
 }
 
+/// [`run_detail`] as `filter`'s caller may read it (`None` for a run it cannot see).
+pub async fn visible_run_detail(
+    store: &dyn crate::backends::EngineBackend,
+    run_id: &str,
+    filter: &mut RefFilter,
+) -> Result<Option<(RunRecord, Vec<RunRecord>)>, EngineStoreError> {
+    let Some((run, nodes)) = run_detail(store, run_id).await? else {
+        return Ok(None);
+    };
+    let mut records = vec![run];
+    records.extend(nodes);
+    let mut records = access::runs::visible_runs(filter, records).await;
+    let Some(position) = records.iter().position(|r| r.pipe_ref.is_none()) else {
+        return Ok(None);
+    };
+    let run = records.remove(position);
+    Ok(Some((run, records)))
+}
+
 async fn get_run(ctx: Ctx, Path(run_id): Path<String>) -> ApiResult {
-    scoped_auth(&ctx.state, &ctx.headers, READ_SCOPES).await?;
-    let (store, _) = crate::engine_stream::store_for(&ctx)?;
-    let Some((run, nodes)) = run_detail(store.as_ref(), &run_id)
-        .await
-        .map_err(store_error)?
+    let caller = access::require(&ctx.state, &ctx.headers, READ_SCOPES).await?;
+    let (store, instances) = crate::engine_stream::store_for(&ctx)?;
+    let default = instances.first().cloned().unwrap_or_default();
+    let Some((run, nodes)) = visible_run_detail(
+        store.as_ref(),
+        &run_id,
+        &mut RefFilter::new(&ctx.state, &caller, &default).for_engine(),
+    )
+    .await
+    .map_err(store_error)?
     else {
         return Err(ApiError::new(404, format!("Run '{run_id}' was not found.")));
     };
@@ -449,7 +671,19 @@ async fn get_run(ctx: Ctx, Path(run_id): Path<String>) -> ApiResult {
 }
 
 async fn post_events(ctx: Ctx, body: Body) -> ApiResult {
-    let events: Vec<EngineEvent> = body_as(&ctx, body).await?;
+    let (caller, events): (Access, Vec<EngineEvent>) = body_as(&ctx, body).await?;
+    check_editable(
+        &ctx,
+        &caller,
+        events.iter().filter_map(|e| e.pipe_ref.clone()).collect(),
+    )
+    .await?;
+    check_run_ids_editable(
+        &ctx,
+        &caller,
+        &events.iter().map(|e| e.run_id.clone()).collect::<Vec<_>>(),
+    )
+    .await?;
     envelope::tuple(&ctx.state.engine.record_events(events).await, 500)
 }
 
@@ -463,7 +697,8 @@ fn lease_response(ok: bool, done: String, refused: String) -> ApiResult {
 }
 
 async fn acquire_lease(ctx: Ctx, body: Body) -> ApiResult {
-    let req: LeaseRequest = body_as(&ctx, body).await?;
+    let (caller, req): (Access, LeaseRequest) = body_as(&ctx, body).await?;
+    check_editable(&ctx, &caller, vec![req.pipe_ref.clone()]).await?;
     let ok = ctx
         .state
         .engine
@@ -484,7 +719,8 @@ async fn acquire_lease(ctx: Ctx, body: Body) -> ApiResult {
 }
 
 async fn release_lease(ctx: Ctx, body: Body) -> ApiResult {
-    let req: LeaseRequest = body_as(&ctx, body).await?;
+    let (caller, req): (Access, LeaseRequest) = body_as(&ctx, body).await?;
+    check_editable(&ctx, &caller, vec![req.pipe_ref.clone()]).await?;
     let ok = ctx
         .state
         .engine

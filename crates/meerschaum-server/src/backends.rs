@@ -146,6 +146,18 @@ pub trait JobsBackend: Send + Sync {
 
     /// Start monitoring a job's logs (`None` when it cannot be monitored).
     async fn monitor_logs(&self, name: &str) -> Option<LogMonitor>;
+
+    /// The jobs whose `team` is `team` (names compare without case; `Everyone`: the jobs without
+    /// a team), e.g. for the confirmation of a team's deletion (decision AC3).
+    async fn team_jobs(&self, _team: &str) -> Vec<String> {
+        Vec::new()
+    }
+
+    /// Rename team `old` to `new` in the jobs that name it, or move them to Everyone (`new` of
+    /// `None`, as deleting the team does). Returns the jobs that changed.
+    async fn retag_team(&self, _old: &str, _new: Option<&str>) -> Vec<String> {
+        Vec::new()
+    }
 }
 
 /// No jobs: nothing exists, and creating or starting one fails.

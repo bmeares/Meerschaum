@@ -339,6 +339,93 @@ impl InstanceConnector for APIConnector {
             .and_then(|v| v.as_map().cloned()))
     }
 
+    // The access model (rc15) lives on the server: teams, users' permissions and emails, a
+    // pipe's access and locks travel over the routes it enforces (`client/access.rs`).
+
+    async fn set_user_attributes(&self, user: &User, attributes: &Map) -> SuccessTuple {
+        APIConnector::set_user_attributes(self, user, attributes).await
+    }
+
+    /// The server's answer (its default role, its view of the user).
+    async fn get_user_permissions(&self, user: &User) -> ConnectorResult<Vec<String>> {
+        Ok(self
+            .get_user_access(&user.username)
+            .await?
+            .map(|u| u.permissions)
+            .unwrap_or_default())
+    }
+
+    async fn get_user_role(&self, user: &User) -> ConnectorResult<meerschaum_core::access::Role> {
+        match self.get_user_access(&user.username).await? {
+            Some(u) => Ok(u.role()),
+            None => Err(ConnectorError::Detail(format!(
+                "User '{}' does not exist.",
+                user.username
+            ))),
+        }
+    }
+
+    /// The address as the server shows it to this caller (AC13: other users' addresses only
+    /// to administrators and the managers of a team they are in).
+    async fn get_user_email(&self, user: &User) -> ConnectorResult<Option<String>> {
+        Ok(self
+            .get_user_access(&user.username)
+            .await?
+            .and_then(|u| u.email)
+            .filter(|e| !e.trim().is_empty()))
+    }
+
+    async fn get_teams(&self) -> ConnectorResult<Vec<meerschaum_core::access::Team>> {
+        APIConnector::get_teams(self).await
+    }
+
+    async fn get_team(&self, name: &str) -> ConnectorResult<Option<meerschaum_core::access::Team>> {
+        APIConnector::get_team(self, name).await
+    }
+
+    async fn register_team(&self, team: &mut meerschaum_core::access::Team) -> SuccessTuple {
+        APIConnector::register_team(self, team).await
+    }
+
+    async fn edit_team(&self, team: &meerschaum_core::access::Team) -> SuccessTuple {
+        APIConnector::edit_team(self, team).await
+    }
+
+    async fn delete_team(&self, name: &str) -> SuccessTuple {
+        APIConnector::delete_team(self, name).await
+    }
+
+    async fn rename_team(&self, old_name: &str, new_name: &str) -> SuccessTuple {
+        APIConnector::rename_team(self, old_name, new_name).await
+    }
+
+    async fn get_user_teams(
+        &self,
+        username: &str,
+    ) -> ConnectorResult<Vec<(String, meerschaum_core::access::TeamRole)>> {
+        APIConnector::get_user_teams(self, username).await
+    }
+
+    async fn lock_pipe(&self, pipe: &Pipe, locks: &meerschaum_core::access::Locks) -> SuccessTuple {
+        APIConnector::lock_pipe(self, pipe, locks).await
+    }
+
+    async fn unlock_pipe(
+        &self,
+        pipe: &Pipe,
+        locks: &meerschaum_core::access::Locks,
+    ) -> SuccessTuple {
+        APIConnector::unlock_pipe(self, pipe, locks).await
+    }
+
+    async fn set_pipe_access(
+        &self,
+        pipe: &Pipe,
+        access: &meerschaum_core::access::PipeAccess,
+    ) -> SuccessTuple {
+        APIConnector::set_pipe_access(self, pipe, access).await
+    }
+
     /// Plugins are registered with their archive through
     /// [`APIConnector::register_plugin`]; without one this fails like v4 without a file.
     async fn register_plugin(&self, plugin: &PluginRecord, _force: bool) -> SuccessTuple {

@@ -6,7 +6,9 @@
 //! answer; jobs started by `POST /execute` run noninteractive); `event: stopped` with the job's
 //! final message, after which the stream ends.
 //!
-//! Authorization is the rule of `POST /execute`; streams are rate limited like the rest of the
+//! Authorization is the rule of `GET /logs/{name}` (`jobs:read` and `logs:read` on a job the
+//! caller can see: its team's, a console run its owner's and its team's managers', every job the
+//! administrators'; `meerschaum_core::job_access`); streams are rate limited like the rest of the
 //! `jobs` route group and bounded in number (`api:permissions:log_streams`).
 use super::*;
 use axum::{
@@ -124,39 +126,31 @@ pub(crate) async fn logs(
             Err(status) => return status.into_response(),
         }
     };
-    let principal =
-        match auth::scoped_auth(&state.server, &auth_headers, &["jobs:read", "logs:read"]).await {
-            Ok(principal) => principal,
-            Err(e) => return e.into_response(),
-        };
-    // The rule of running the action from the console (`POST /execute`, one shared function):
-    // administrators, and other users only when `api:permissions:actions:non_admin` allows them,
-    // so a user who could not have started a job cannot read its output.
-    let allowed = auth::is_user_allowed_to_execute_console(&state.server, principal.as_ref()).await;
-    if !allowed.success {
-        return (StatusCode::FORBIDDEN, allowed.message).into_response();
-    }
+    // The rule of `GET /logs/{name}` (the same log): the permissions to read jobs and their logs,
+    // on a job the caller can see.
+    let access = match meerschaum_server::access::require(
+        &state.server,
+        &auth_headers,
+        &["jobs:read", "logs:read"],
+    )
+    .await
+    {
+        Ok(access) => access,
+        Err(e) => return e.into_response(),
+    };
     if !state.server.jobs.exists(&name).await {
         return StatusCode::NOT_FOUND.into_response();
     }
-    // An `execute-*` job's output is its creator's and the administrators' (the job metadata
-    // routes apply the same rule); anyone else sees it as absent.
-    {
-        let admin = auth::is_admin(&state.server, principal.as_ref()).await;
-        let meta = state.server.jobs.get(&name).await;
-        let caller = meerschaum_server::routes::execute::owner_label(principal.as_ref());
-        if !meerschaum_server::routes::execute::job_visible_to(
-            admin,
-            caller.as_deref(),
-            &name,
-            meta.as_ref(),
-        ) {
-            return StatusCode::NOT_FOUND.into_response();
-        }
+    // A job's output is its team's (a console run: its creator's, its team's managers'), and the
+    // administrators' (the job metadata routes apply the same rule); anyone else sees it as
+    // absent.
+    let meta = state.server.jobs.get(&name).await;
+    if !meerschaum_server::routes::jobs::can_see(&access, &name, meta.as_ref()) {
+        return StatusCode::NOT_FOUND.into_response();
     }
     // Each stream follows its job on a thread: bounded in total and per user.
     let slot = match state.streams.take(
-        &slot_key(principal.as_ref(), session_id.as_deref()),
+        &slot_key(access.auth.as_ref(), session_id.as_deref()),
         state.server.config.log_streams_max,
         state.server.config.log_streams_per_user,
     ) {

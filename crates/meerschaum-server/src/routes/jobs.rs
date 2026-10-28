@@ -1,5 +1,21 @@
 //! `/jobs/*`, `/logs/{name}` and the logs websocket `/logs/{name}/ws` (`api/routes/_jobs.py`),
 //! delegated to a [`JobsBackend`](crate::backends::JobsBackend).
+//!
+//! **Who sees and controls a job** (decision AC9; the rule is
+//! [`meerschaum_core::job_access`]): a job started through the API (this route group, `POST
+//! /execute`, `POST /pipelines/{name}/sync`) or the console records its `owner` (the caller) and
+//! `team` (the caller's primary team). Its team's members and administrators see it (and its
+//! logs); jobs created locally (the CLI, Compose, systemd) are Everyone's; console runs are
+//! private to their owner, their team's managers and administrators. A job the caller cannot see
+//! answers as one that does not exist (`404`).
+//!
+//! Controlling a job needs the job permission of the operation on a job the caller can see:
+//! `jobs:execute` to start (the role `editor` may start existing jobs), `jobs:stop`,
+//! `jobs:pause`, `jobs:delete` (the role `operator`). Creating one runs an action on the server,
+//! so it also follows the rule of `/actions` ([`is_user_allowed_to_execute`]: `actions:execute`,
+//! administrators only under `--secure`), as does answering a job's prompt over the websocket.
+//! Under `--secure` (`api:permissions:actions:non_admin: false`) only administrators control
+//! jobs at all, as in the web console; everyone keeps reading what they may see.
 
 use axum::Router;
 use axum::body::Body;
@@ -8,19 +24,18 @@ use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::http::{HeaderMap, header};
 use axum::response::IntoResponse;
 use axum::routing::{get, post};
+use meerschaum_core::job_access::{self, JobAccess};
 use meerschaum_core::{Map, SuccessTuple};
 use serde_json::{Value as Json, json};
 
 use super::{Ctx, body_bytes};
-use crate::auth::{
-    Principal, is_admin, is_user_allowed_to_execute, scoped_auth, scoped_auth_with_aliases,
-};
+use crate::access::{self, Access};
+use crate::auth::is_user_allowed_to_execute;
 use crate::backends::{CreateJob, LogEvent};
 use crate::config::ServerConfig;
 use crate::error::{ApiError, ApiResult};
 use crate::json::{from_core, ok_json, py_isoformat_utc, to_core, tuple_response};
 use crate::redact::redact_job_meta;
-use crate::routes::execute::{job_visible_to, owner_label};
 use crate::routes::pipes::parse_json_body;
 use crate::state::AppState;
 
@@ -65,16 +80,69 @@ pub fn clean_sysargs(sysargs: &[String]) -> Vec<String> {
     out
 }
 
-/// Whether the caller may see the job `name`: an `execute-*` job (the console's) is its creator's
-/// and the administrators' (see [`job_visible_to`]); every other job is visible as before.
-async fn may_see(state: &AppState, principal: Option<&Principal>, name: &str) -> bool {
-    if is_admin(state, principal).await {
+/// What a non-administrator who tries to control a job hears under `--secure` (the text of
+/// [`is_user_allowed_to_execute`]).
+const SECURE_REFUSAL: &str =
+    "The administrator for this server has not allowed users to perform actions.";
+
+/// Record who starts a job through the API in its `properties`: the caller (`owner`) and the
+/// caller's primary team (`team`). Whatever the request carried is replaced; under `--no-auth`
+/// (and for a token without an owner) nobody is recorded and the job is Everyone's.
+pub fn stamp_caller(properties: &mut Map, access: &Access) {
+    if access.no_auth {
+        JobAccess::stamp(properties, None, None);
+        return;
+    }
+    JobAccess::stamp(properties, access.username(), Some(&access.primary_team));
+}
+
+/// Whether `access` may see the job `name` whose metadata (as the jobs routes serve it) is
+/// `meta` (see [`meerschaum_core::job_access`]).
+pub fn can_see(access: &Access, name: &str, meta: Option<&Json>) -> bool {
+    if access.no_auth {
+        return true;
+    }
+    let job = JobAccess::from_metadata(name, meta);
+    job_access::can_see_job(&access.principal, &job) || token_owns(access, &job)
+}
+
+/// A token without an owner (made locally) records itself as `token:<id>`: it sees its own runs.
+fn token_owns(access: &Access, job: &JobAccess) -> bool {
+    match (&access.auth, job.owner.as_deref()) {
+        (Some(crate::auth::Principal::Token(token)), Some(owner))
+            if access.username().is_none() =>
+        {
+            token.id.is_some_and(|id| owner == format!("token:{id}"))
+        }
+        _ => false,
+    }
+}
+
+/// Who an authenticated principal is for job visibility and ownership (its name, teams and
+/// primary team; `None`, as under `--no-auth`: everything), for the callers that authenticated
+/// it already (MCP's job tools, `POST /execute` and `POST /pipelines/{name}/sync` runs).
+pub async fn access_of_principal(
+    state: &AppState,
+    principal: Option<&crate::auth::Principal>,
+) -> Result<Access, ApiError> {
+    match principal {
+        None => Ok(Access::everything()),
+        Some(principal) => {
+            let granted = crate::auth::Scopes::List(vec!["*".into()]);
+            access::access_of(state, principal.clone(), &granted).await
+        }
+    }
+}
+
+/// Whether the caller may see the job `name`. A job that does not exist is not hidden: the route
+/// answers as it always does.
+pub async fn may_see(state: &AppState, access: &Access, name: &str) -> bool {
+    if access.no_auth || access.is_admin() {
         return true;
     }
     match state.jobs.get(name).await {
-        // A job that does not exist is not hidden: the route answers as it always does.
         None => true,
-        Some(meta) => job_visible_to(false, owner_label(principal).as_deref(), name, Some(&meta)),
+        Some(meta) => can_see(access, name, Some(&meta)),
     }
 }
 
@@ -84,11 +152,9 @@ fn hidden(state: &AppState, name: &str) -> ApiError {
 }
 
 async fn get_jobs(ctx: Ctx) -> ApiResult {
-    let principal = scoped_auth(&ctx.state, &ctx.headers, &["jobs:read"]).await?;
-    let admin = is_admin(&ctx.state, principal.as_ref()).await;
-    let caller = owner_label(principal.as_ref());
+    let access = access::require(&ctx.state, &ctx.headers, &["jobs:read"]).await?;
     let mut jobs = ctx.state.jobs.list().await;
-    jobs.retain(|name, meta| job_visible_to(admin, caller.as_deref(), name, Some(meta)));
+    jobs.retain(|name, meta| can_see(&access, name, Some(meta)));
     // PARITY: v4 returns every job's environment (connector URIs with their passwords and the
     // server's other secrets) to any `jobs:read` caller; v5 masks the credentials.
     for meta in jobs.values_mut() {
@@ -98,17 +164,9 @@ async fn get_jobs(ctx: Ctx) -> ApiResult {
 }
 
 async fn get_job(ctx: Ctx, Path(name): Path<String>) -> ApiResult {
-    let principal = scoped_auth(&ctx.state, &ctx.headers, &["jobs:read"]).await?;
-    let admin = is_admin(&ctx.state, principal.as_ref()).await;
+    let access = access::require(&ctx.state, &ctx.headers, &["jobs:read"]).await?;
     match ctx.state.jobs.get(&name).await {
-        Some(mut meta)
-            if job_visible_to(
-                admin,
-                owner_label(principal.as_ref()).as_deref(),
-                &name,
-                Some(&meta),
-            ) =>
-        {
+        Some(mut meta) if can_see(&access, &name, Some(&meta)) => {
             redact_job_meta(&mut meta);
             Ok(ok_json(&meta))
         }
@@ -121,11 +179,12 @@ async fn get_job(ctx: Ctx, Path(name): Path<String>) -> ApiResult {
 
 async fn create_job(ctx: Ctx, Path(name): Path<String>, body: Body) -> ApiResult {
     let body = parse_json_body(&body_bytes(body).await?)?;
-    let principal = scoped_auth(&ctx.state, &ctx.headers, &["jobs:execute", "jobs:write"]).await?;
+    let access = access::require(&ctx.state, &ctx.headers, &["jobs:execute", "jobs:write"]).await?;
     let Some(metadata) = body else {
         return Err(ApiError::missing(&["body"]));
     };
-    let allowed = is_user_allowed_to_execute(&ctx.state, principal.as_ref()).await;
+    // A new job runs an action on the server: the rule of `/actions`.
+    let allowed = is_user_allowed_to_execute(&ctx.state, access.auth.as_ref()).await;
     if !allowed.success {
         return Ok(tuple_response(&allowed));
     }
@@ -167,10 +226,22 @@ async fn create_job(ctx: Ctx, Path(name): Path<String>, body: Body) -> ApiResult
             )]));
         }
     };
+    // A caller who is not an administrator runs what the console offers, on the pipes it may
+    // change (rc15, P3: the checks of `POST /execute`, `crate::execute_access`).
+    if !access.no_auth && !access.is_admin() {
+        let cleaned = clean_sysargs(&sysargs);
+        if let Err(message) = crate::execute_policy::check_non_admin(&cleaned) {
+            return Ok(tuple_response(&SuccessTuple::fail(message)));
+        }
+        crate::execute_access::check(&ctx.state, &access, &cleaned).await?;
+    }
+    // The job is the caller's, in the caller's primary team (never what the request says).
+    let mut properties = properties.unwrap_or_default();
+    stamp_caller(&mut properties, &access);
     match ctx
         .state
         .jobs
-        .create(&name, clean_sysargs(&sysargs), properties)
+        .create(&name, clean_sysargs(&sysargs), Some(properties))
         .await
     {
         CreateJob::Exists => Err(ApiError::new(
@@ -181,21 +252,9 @@ async fn create_job(ctx: Ctx, Path(name): Path<String>, body: Body) -> ApiResult
     }
 }
 
+/// Run `op` on the job `name` for a caller who holds `scopes` (each also satisfied by its
+/// legacy spelling in `aliases`) and can see the job.
 async fn guarded<F, Fut>(
-    ctx: Ctx,
-    scopes: &[&str],
-    name: String,
-    check_exists: bool,
-    op: F,
-) -> ApiResult
-where
-    F: FnOnce(AppState, String) -> Fut,
-    Fut: std::future::Future<Output = SuccessTuple>,
-{
-    guarded_with_aliases(ctx, scopes, &[], name, check_exists, op).await
-}
-
-async fn guarded_with_aliases<F, Fut>(
     ctx: Ctx,
     scopes: &[&str],
     aliases: &[(&str, &str)],
@@ -207,12 +266,12 @@ where
     F: FnOnce(AppState, String) -> Fut,
     Fut: std::future::Future<Output = SuccessTuple>,
 {
-    let principal = scoped_auth_with_aliases(&ctx.state, &ctx.headers, scopes, aliases).await?;
-    let allowed = is_user_allowed_to_execute(&ctx.state, principal.as_ref()).await;
-    if !allowed.success {
-        return Ok(tuple_response(&allowed));
+    let access = access::require_with_aliases(&ctx.state, &ctx.headers, scopes, aliases).await?;
+    // `--secure`: only administrators act on jobs (v4's shape: `[false, "..."]`).
+    if !ctx.state.config.actions_non_admin && !access.no_auth && !access.is_admin() {
+        return Ok(tuple_response(&SuccessTuple::fail(SECURE_REFUSAL)));
     }
-    if !may_see(&ctx.state, principal.as_ref(), &name).await {
+    if !may_see(&ctx.state, &access, &name).await {
         return Err(hidden(&ctx.state, &name));
     }
     if check_exists && !ctx.state.jobs.exists(&name).await {
@@ -225,7 +284,7 @@ where
 }
 
 async fn delete_job(ctx: Ctx, Path(name): Path<String>) -> ApiResult {
-    guarded(ctx, &["jobs:delete"], name, false, |s, n| async move {
+    guarded(ctx, &["jobs:delete"], &[], name, false, |s, n| async move {
         s.jobs.delete(&n).await
     })
     .await
@@ -234,7 +293,7 @@ async fn delete_job(ctx: Ctx, Path(name): Path<String>) -> ApiResult {
 async fn start_job(ctx: Ctx, Path(name): Path<String>) -> ApiResult {
     let state = ctx.state.clone();
     let _maintenance = state.execution_maintenance.lock().await;
-    guarded(ctx, &["jobs:execute"], name, true, |s, n| async move {
+    guarded(ctx, &["jobs:execute"], &[], name, true, |s, n| async move {
         s.jobs.start(&n).await
     })
     .await
@@ -245,7 +304,7 @@ async fn stop_job(ctx: Ctx, Path(name): Path<String>) -> ApiResult {
     // (`api/routes/_jobs.py:213`), which no token can hold, so only `*` could stop a job over
     // the API. The route requires `jobs:stop`; a token that explicitly holds the legacy
     // `josb:stop` is still accepted in its place.
-    guarded_with_aliases(
+    guarded(
         ctx,
         &["jobs:execute", "jobs:stop"],
         &[("jobs:stop", "josb:stop")],
@@ -260,6 +319,7 @@ async fn pause_job(ctx: Ctx, Path(name): Path<String>) -> ApiResult {
     guarded(
         ctx,
         &["jobs:execute", "jobs:pause"],
+        &[],
         name,
         true,
         |s, n| async move { s.jobs.pause(&n).await },
@@ -268,16 +328,14 @@ async fn pause_job(ctx: Ctx, Path(name): Path<String>) -> ApiResult {
 }
 
 async fn get_job_exists(ctx: Ctx, Path(name): Path<String>) -> ApiResult {
-    let principal = scoped_auth(&ctx.state, &ctx.headers, &["jobs:read"]).await?;
-    let exists =
-        may_see(&ctx.state, principal.as_ref(), &name).await && ctx.state.jobs.exists(&name).await;
+    let access = access::require(&ctx.state, &ctx.headers, &["jobs:read"]).await?;
+    let exists = may_see(&ctx.state, &access, &name).await && ctx.state.jobs.exists(&name).await;
     Ok(ok_json(&json!(exists)))
 }
 
 async fn get_logs(ctx: Ctx, Path(name): Path<String>) -> ApiResult {
-    let principal = scoped_auth(&ctx.state, &ctx.headers, &["jobs:read", "logs:read"]).await?;
-    if !may_see(&ctx.state, principal.as_ref(), &name).await || !ctx.state.jobs.exists(&name).await
-    {
+    let access = access::require(&ctx.state, &ctx.headers, &["jobs:read", "logs:read"]).await?;
+    if !may_see(&ctx.state, &access, &name).await || !ctx.state.jobs.exists(&name).await {
         return Err(ApiError::new(
             404,
             format!("{} does not exist.", ctx.state.jobs.job_str(&name)),
@@ -287,8 +345,8 @@ async fn get_logs(ctx: Ctx, Path(name): Path<String>) -> ApiResult {
 }
 
 async fn get_stop_time(ctx: Ctx, Path(name): Path<String>) -> ApiResult {
-    let principal = scoped_auth(&ctx.state, &ctx.headers, &["jobs:read"]).await?;
-    let t = if may_see(&ctx.state, principal.as_ref(), &name).await {
+    let access = access::require(&ctx.state, &ctx.headers, &["jobs:read"]).await?;
+    let t = if may_see(&ctx.state, &access, &name).await {
         ctx.state.jobs.stop_time(&name).await
     } else {
         None
@@ -297,15 +355,15 @@ async fn get_stop_time(ctx: Ctx, Path(name): Path<String>) -> ApiResult {
 }
 
 async fn get_is_blocking_on_stdin(ctx: Ctx, Path(name): Path<String>) -> ApiResult {
-    let principal = scoped_auth(&ctx.state, &ctx.headers, &["jobs:read"]).await?;
-    let blocking = may_see(&ctx.state, principal.as_ref(), &name).await
+    let access = access::require(&ctx.state, &ctx.headers, &["jobs:read"]).await?;
+    let blocking = may_see(&ctx.state, &access, &name).await
         && ctx.state.jobs.is_blocking_on_stdin(&name).await;
     Ok(ok_json(&json!(blocking)))
 }
 
 async fn get_prompt_kwargs(ctx: Ctx, Path(name): Path<String>) -> ApiResult {
-    let principal = scoped_auth(&ctx.state, &ctx.headers, &["jobs:read"]).await?;
-    let kwargs = if may_see(&ctx.state, principal.as_ref(), &name).await {
+    let access = access::require(&ctx.state, &ctx.headers, &["jobs:read"]).await?;
+    let kwargs = if may_see(&ctx.state, &access, &name).await {
         ctx.state.jobs.prompt_kwargs(&name).await
     } else {
         Map::new()
@@ -336,16 +394,16 @@ async fn monitor_socket(state: AppState, name: String, mut socket: WebSocket) {
         headers.insert(header::AUTHORIZATION, value);
     }
     // The websocket exposes the same logs as GET /logs/{name}, so it must enforce the
-    // same scopes. Reuse the HTTP authenticator to support API keys and JWTs alike.
-    let principal = match scoped_auth(&state, &headers, &["jobs:read", "logs:read"]).await {
-        Ok(principal) => principal,
+    // same permissions. Reuse the HTTP authenticator to support API keys and JWTs alike.
+    let access = match access::require(&state, &headers, &["jobs:read", "logs:read"]).await {
+        Ok(access) => access,
         Err(error) => {
             socket_error(&mut socket, error).await;
             return;
         }
     };
-    // An `execute-*` job's output is its creator's and the administrators'.
-    if !may_see(&state, principal.as_ref(), &name).await {
+    // A job the caller cannot see (another team's, someone's console run) is absent.
+    if !may_see(&state, &access, &name).await {
         let _ = socket.send(Message::Close(None)).await;
         return;
     }
@@ -391,18 +449,22 @@ async fn monitor_socket(state: AppState, name: String, mut socket: WebSocket) {
                     // Reading a job's output must not grant control of its prompts. Check
                     // the submitted credential again, including expiry and current API-key
                     // scopes, before allowing input to change a running job's behavior.
-                    let principal = match scoped_auth(
+                    let access = match access::require(
                         &state, &headers, &["actions:execute", "jobs:execute"],
                     ).await {
-                        Ok(principal) => principal,
+                        Ok(access) => access,
                         Err(error) => {
                             socket_error(&mut socket, error).await;
                             return;
                         }
                     };
-                    let allowed = is_user_allowed_to_execute(&state, principal.as_ref()).await;
+                    let allowed = is_user_allowed_to_execute(&state, access.auth.as_ref()).await;
                     if !allowed.success {
                         socket_error(&mut socket, ApiError::new(403, allowed.message)).await;
+                        return;
+                    }
+                    if !may_see(&state, &access, &name).await {
+                        let _ = socket.send(Message::Close(None)).await;
                         return;
                     }
                     let _ = monitor.input.send(t.to_string()).await;
@@ -439,5 +501,27 @@ mod tests {
             clean_sysargs(&s(&["api", "main", "show", "pipes", "-e", "x", "-y"])),
             s(&["show", "pipes", "-y"])
         );
+    }
+
+    #[test]
+    fn the_caller_is_recorded_whatever_the_request_says() {
+        let mut access = Access::everything();
+        let mut props = Map::new();
+        props.insert("owner".into(), meerschaum_core::Value::Str("admin".into()));
+        stamp_caller(&mut props, &access);
+        assert_eq!(props.get("owner"), Some(&meerschaum_core::Value::Null));
+        access.no_auth = false;
+        access.principal.username = "bob".into();
+        access.principal.is_admin = false;
+        access.primary_team = "Data".into();
+        stamp_caller(&mut props, &access);
+        let meta =
+            json!({"daemon": {"properties": from_core(&meerschaum_core::Value::Map(props))}});
+        let recorded = JobAccess::from_metadata("x", Some(&meta));
+        assert_eq!(recorded.owner.as_deref(), Some("bob"));
+        assert_eq!(recorded.team.as_deref(), Some("Data"));
+        assert!(can_see(&access, "x", Some(&meta)));
+        access.principal.username = "carol".into();
+        assert!(!can_see(&access, "x", Some(&meta)));
     }
 }

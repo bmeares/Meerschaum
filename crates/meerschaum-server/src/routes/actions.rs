@@ -9,7 +9,7 @@ use meerschaum_core::Value;
 use serde_json::{Value as Json, json};
 
 use super::{Ctx, body_bytes};
-use crate::auth::{is_user_allowed_to_execute, scoped_auth, scoped_auth_if_private};
+use crate::auth::{is_user_allowed_to_execute, scoped_auth_if_private};
 use crate::config::ServerConfig;
 use crate::error::{ApiError, ApiResult};
 use crate::json::{ok_json, to_core, tuple, tuple_response};
@@ -27,9 +27,15 @@ async fn get_actions(ctx: Ctx) -> ApiResult {
     Ok(ok_json(&json!(ctx.state.actions.list())))
 }
 
+/// `POST /actions/{action}`: run an action with v4's keyword arguments. Administrators run any
+/// action; another caller (rc15 access model) needs `actions:execute`, runs only what the
+/// console offers ([`crate::execute_policy`]: no shell, no `sql`, no `python`, ...) and only on
+/// pipes it may change ([`crate::execute_access`]), its keywords read as the command line they
+/// stand for ([`crate::execute_access::sysargs_of_keywords`]).
 async fn do_action_legacy(ctx: Ctx, Path(action): Path<String>, body: Body) -> ApiResult {
     let body = parse_json_body(&body_bytes(body).await?)?;
-    let principal = scoped_auth(&ctx.state, &ctx.headers, &["actions:execute"]).await?;
+    let caller = crate::access::require(&ctx.state, &ctx.headers, &["actions:execute"]).await?;
+    let principal = caller.auth.clone();
     let mut keywords = match body {
         None => return Err(ApiError::missing(&["body"])),
         Some(Json::Object(o)) => to_core(&Json::Object(o)).to_map(),
@@ -49,6 +55,15 @@ async fn do_action_legacy(ctx: Ctx, Path(action): Path<String>, body: Body) -> A
     }
     if !ctx.state.actions.list().iter().any(|a| a == &action) {
         return Ok(tuple(false, format!("Invalid action '{action}'.")));
+    }
+    if !caller.no_auth && !caller.is_admin() {
+        let sysargs = crate::execute_access::sysargs_of_keywords(&action, &keywords);
+        if let Err(message) = crate::execute_policy::check_non_admin(&sysargs) {
+            return Ok(tuple(false, message));
+        }
+        if let Err(e) = crate::execute_access::check(&ctx.state, &caller, &sysargs).await {
+            return Ok(tuple(false, e.detail_text()));
+        }
     }
     if !keywords.contains_key("mrsm_instance") {
         keywords.insert(

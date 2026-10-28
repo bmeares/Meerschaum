@@ -50,6 +50,18 @@ limit, `routes::is_proxyable`, the console paths, the v5 error shape) is made on
 `routes::decoded_path`, the path percent-decoded once as uvicorn decodes it: the server's own
 routes match the path as sent, but the host serves `/%64ocs` as `/docs`.
 
+HTTPS is native (`tls`): with a key and a certificate (`start api --keyfile/--certfile`,
+`api:server:ssl_keyfile` / `ssl_certfile`, 4.1's `api:uvicorn:ssl_*`) the listener terminates TLS
+with rustls (aws-lc-rs) and serves HTTP/2 or HTTP/1.1 by ALPN, with upgrades (websockets use
+HTTP/1.1: extended CONNECT is not advertised). `tls::prepare` checks the PEM files (PKCS#8, PKCS#1
+and SEC1 keys, full chains; precise messages for half a pair, unreadable, swapped, encrypted, DER or
+mismatched files) and binds the internal listener: plain HTTP on `127.0.0.1` with a random port,
+which `ServerConfig::internal_addr` hands to the Python API host as its `server_url`. The certificate
+(`tls::ServerCertificate`, a rustls resolver) is reloaded when the files' content changes (polled
+every 30 s) and on `SIGHUP`; a reload that fails keeps the previous certificate. Plain HTTP reaching
+the HTTPS port gets `/healthcheck` and a `308` to `https://`. HTTP/2 requests get a `Host` header from
+their authority, and every request the peer address (`ConnectInfo`), as on the plain listener.
+
 The web terminal's tmux sessions run on a dedicated tmux server (`webterm::tmux_socket_path`, a
 `0700` directory under the root) started with Meerschaum's `tmux.conf` (`webterm::TMUX_CONF`) or
 `api:webterm:tmux:config`; `webterm::stop_owned_servers` stops the servers this process started.

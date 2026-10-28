@@ -56,7 +56,6 @@ use serde_json::Value as Json;
 use tokio::sync::broadcast;
 use tokio::time::Instant;
 
-use crate::auth::scoped_auth;
 use crate::backends::{EngineBackend, EngineStoreError, RunsFilter};
 use crate::error::ApiError;
 use crate::routes::Ctx;
@@ -365,6 +364,16 @@ pub fn own_instance_names(state: &AppState) -> Vec<String> {
     names
 }
 
+/// Whether the run has no record yet (only events).
+async fn run_record_missing(store: &dyn EngineBackend, run_id: &str) -> Result<bool, ApiError> {
+    let filter = RunsFilter {
+        run_id: Some(run_id.to_string()),
+        limit: Some(1),
+        ..Default::default()
+    };
+    Ok(store.get_runs(&filter).await.map_err(api_error)?.is_empty())
+}
+
 /// Whether the store knows the run (a run record or any event). A failed read is an error.
 async fn run_known(store: &dyn EngineBackend, run_id: &str) -> Result<bool, ApiError> {
     let filter = RunsFilter {
@@ -400,7 +409,8 @@ pub async fn serve(ctx: Ctx, run_id: String) -> Result<Response, ApiError> {
         }
         _ => ctx.headers.clone(),
     };
-    let principal = scoped_auth(&state, &auth_headers, SCOPES).await?;
+    let caller = crate::access::require(&state, &auth_headers, SCOPES).await?;
+    let principal = caller.auth.clone();
     if !valid_run_id(&run_id) {
         return Err(ApiError::new(422, "Invalid run ID."));
     }
@@ -446,6 +456,23 @@ pub async fn serve(ctx: Ctx, run_id: String) -> Result<Response, ApiError> {
         }
         tokio::time::sleep(POLL).await;
     }
+    // A caller who is not an administrator follows the runs of pipes it can see (rc15); the
+    // events of hidden pipes reach it anonymized.
+    let filter = if caller.is_admin() {
+        None
+    } else {
+        let default = instances.first().cloned().unwrap_or_default();
+        let mut filter = crate::access::RefFilter::new(&state, &caller, &default).for_engine();
+        let visible =
+            crate::routes::engine::visible_run_detail(store.as_ref(), &run_id, &mut filter)
+                .await
+                .map_err(api_error)?;
+        // A run whose record is not written yet is judged by its events' pipes when they come.
+        if visible.is_none() && !run_record_missing(store.as_ref(), &run_id).await? {
+            return Err(ApiError::new(404, format!("Run '{run_id}' was not found.")));
+        }
+        Some(filter)
+    };
     // Without authentication there is no user: count the console cookie's streams, or else
     // only the server-wide total.
     let (key, per_user) = match (&principal, &session) {
@@ -501,6 +528,7 @@ pub async fn serve(ctx: Ctx, run_id: String) -> Result<Response, ApiError> {
         session,
         next_session_check: Instant::now() + SESSION_CHECK,
         done: false,
+        filter,
         _slot: slot,
     };
     tail.poll
@@ -558,6 +586,8 @@ struct Tail {
     session: Option<(Arc<dyn BrowserAuth>, String)>,
     next_session_check: Instant,
     done: bool,
+    /// For a caller who is not an administrator: anonymizes the events of hidden pipes.
+    filter: Option<crate::access::RefFilter>,
     _slot: Slot,
 }
 
@@ -613,6 +643,10 @@ impl Tail {
             }
             if let Some(event) = self.release() {
                 self.done = event.is_run_finished();
+                let event = match self.filter.as_mut() {
+                    Some(filter) => crate::access::runs::visible_event(filter, event).await,
+                    None => event,
+                };
                 let data = serde_json::to_string(&event).unwrap_or_default();
                 return Some(
                     SseEvent::default()
@@ -625,6 +659,10 @@ impl Tail {
                 && let Some(event) = self.terminal.take()
             {
                 self.done = true;
+                let event = match self.filter.as_mut() {
+                    Some(filter) => crate::access::runs::visible_event(filter, event).await,
+                    None => event,
+                };
                 // No `id:`: a reconnect resumes after the last real event.
                 return Some(
                     SseEvent::default()

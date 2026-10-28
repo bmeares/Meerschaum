@@ -35,8 +35,13 @@ axum = { version = "0.8", features = ["ws", "multipart"] }
 matchit = "0.8"
 tower = { version = "0.5", features = ["util"] }
 tower-http = { version = "0.7", features = ["fs"] }
-hyper = { version = "1", features = ["client", "http1"] }
-hyper-util = { version = "0.1", features = ["tokio"] }
+# `server` + `http2`: the HTTPS listener (`tls`) serves HTTP/1.1 and HTTP/2 itself.
+hyper = { version = "1", features = ["client", "http1", "http2", "server"] }
+hyper-util = { version = "0.1", features = ["tokio", "server-auto", "service"] }
+# Crate-private: native HTTPS (`tls`, `start api --keyfile/--certfile`). aws-lc-rs, as the rest
+# of the tree (the explicit provider: `ServerConfig::builder()` panics when ring is compiled in too).
+rustls = { version = "0.23", default-features = false, features = ["std", "tls12", "aws-lc-rs"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["aws-lc-rs", "tls12"] }
 http-body-util = "0.1"
 bytes = "1"
 futures-util = { version = "0.3", default-features = false, features = ["std", "sink"] }
@@ -52,7 +57,14 @@ portable-pty = { workspace = true }
 [target.'cfg(unix)'.dependencies]
 rustix = { version = "1", features = ["process"] }
 
+# aws-lc-rs (rustls) assembles with NASM on Windows x86_64; the prebuilt objects make the build need
+# no extra tool. Keep this minor equal to the `aws-lc-sys` in Cargo.lock (one aws-lc-sys per tree).
+[target.'cfg(all(windows, target_arch = "x86_64"))'.dependencies]
+aws-lc-sys = { version = "0.46", features = ["prebuilt-nasm"] }
+
 [dev-dependencies]
+# Certificates for the HTTPS tests (`aws_lc_rs`: RSA keys too).
+rcgen = { version = "0.14", features = ["aws_lc_rs"] }
 tokio = { workspace = true, features = ["test-util"] }
 tempfile = "3"
 regex = { workspace = true }

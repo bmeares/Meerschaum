@@ -97,6 +97,15 @@ impl ApiError {
         self
     }
 
+    /// The detail as text (the message of `{"detail": "..."}`).
+    pub fn detail_text(&self) -> String {
+        match &self.detail {
+            Some(Json::String(s)) => s.clone(),
+            Some(other) => other.to_string(),
+            None => "Internal Server Error".into(),
+        }
+    }
+
     /// `404 {"detail": "Not Found"}` (Starlette's unmatched route).
     pub fn not_found() -> ApiError {
         ApiError::new(404, "Not Found")

@@ -117,6 +117,9 @@ async fn validate_terminal_command(ctx: Ctx, body: Body) -> ApiResult {
     if !is_admin(&ctx.state, principal.as_ref()).await {
         crate::execute_policy::check_non_admin(&args)
             .map_err(|message| ApiError::new(403, message))?;
+        // The pipes the command selects (rc15 access model).
+        let caller = crate::access::resolve(&ctx.state, &ctx.headers).await?;
+        crate::execute_access::check(&ctx.state, &caller, &args).await?;
     }
     Ok(envelope::ok(
         "You may run this command.",
@@ -126,9 +129,7 @@ async fn validate_terminal_command(ctx: Ctx, body: Body) -> ApiResult {
 
 /// Retained summaries are owner filtered and redact the same secrets as Job metadata.
 async fn run_summaries(ctx: Ctx) -> ApiResult {
-    let principal = scoped_auth(&ctx.state, &ctx.headers, &["jobs:read"]).await?;
-    let admin = is_admin(&ctx.state, principal.as_ref()).await;
-    let caller = owner_label(principal.as_ref());
+    let access = crate::access::require(&ctx.state, &ctx.headers, &["jobs:read"]).await?;
     let mut records = Vec::new();
     if let Ok(files) = std::fs::read_dir(ctx.state.config.root_dir.join("runs")) {
         for file in files.flatten() {
@@ -144,7 +145,7 @@ async fn run_summaries(ctx: Ctx) -> ApiResult {
             let Some(name) = record["name"].as_str() else {
                 continue;
             };
-            if !job_visible_to(admin, caller.as_deref(), name, record.get("metadata")) {
+            if !super::jobs::can_see(&access, name, record.get("metadata")) {
                 continue;
             }
             if let Some(meta) = record.get_mut("metadata") {
@@ -164,20 +165,14 @@ async fn run_summaries(ctx: Ctx) -> ApiResult {
 
 async fn retain_run(ctx: Ctx, Path(name): Path<String>) -> ApiResult {
     let _maintenance = ctx.state.execution_maintenance.lock().await;
-    let principal = scoped_auth(&ctx.state, &ctx.headers, &["jobs:write"]).await?;
-    let admin = is_admin(&ctx.state, principal.as_ref()).await;
+    let access = crate::access::require(&ctx.state, &ctx.headers, &["jobs:write"]).await?;
     let meta = ctx
         .state
         .jobs
         .get(&name)
         .await
         .ok_or_else(|| ApiError::new(404, format!("Execution '{name}' was not found.")))?;
-    if !job_visible_to(
-        admin,
-        owner_label(principal.as_ref()).as_deref(),
-        &name,
-        Some(&meta),
-    ) {
+    if !super::jobs::can_see(&access, &name, Some(&meta)) {
         return Err(ApiError::new(
             404,
             format!("Execution '{name}' was not found."),
@@ -293,14 +288,14 @@ pub fn start_cleanup(state: &AppState) {
     }
 }
 
+/// `POST /execute`. The console's pipe operations (Sync, Verify, Clear, Drop, Delete of pipes
+/// and Pipelines) need `jobs:execute`, the operation's permission and edit rights on the pipes
+/// they select; any other action also needs `actions:execute` and `jobs:write` (rc15,
+/// [`crate::execute_access`]).
 async fn execute(ctx: Ctx, body: Body) -> ApiResult {
     let body = parse_json_body(&body_bytes(body).await?)?;
-    let principal = scoped_auth(
-        &ctx.state,
-        &ctx.headers,
-        &["actions:execute", "jobs:execute", "jobs:write"],
-    )
-    .await?;
+    let caller = crate::access::require(&ctx.state, &ctx.headers, &["jobs:execute"]).await?;
+    let principal = caller.auth.clone();
     let object = match body {
         None => return Err(ApiError::missing(&["body"])),
         Some(Json::Object(object)) => object,
@@ -349,9 +344,18 @@ async fn execute(ctx: Ctx, body: Body) -> ApiResult {
             ));
         }
     };
-    let allowed = is_user_allowed_to_execute_console(&ctx.state, principal.as_ref()).await;
-    if !allowed.success {
-        return Err(ApiError::new(403, allowed.message));
+    let plan = crate::execute_access::check(&ctx.state, &caller, &sysargs).await?;
+    if plan.needs_actions {
+        caller.require(&["actions:execute", "jobs:write"], &[])?;
+        let allowed = is_user_allowed_to_execute_console(&ctx.state, principal.as_ref()).await;
+        if !allowed.success {
+            return Err(ApiError::new(403, allowed.message));
+        }
+    } else if !caller.no_auth && !caller.is_admin() && !ctx.state.config.actions_non_admin {
+        return Err(ApiError::new(
+            403,
+            "The administrator for this server has not allowed users to perform actions.",
+        ));
     }
     if !is_admin(&ctx.state, principal.as_ref()).await {
         // A non-administrator runs what the console offers, and only in `execute-*` jobs (the
@@ -399,7 +403,11 @@ pub async fn start_execution(
     prune_finished(state).await;
     let mut properties = Map::new();
     let owner = owner_label(principal);
-    if let Some(owner) = &owner {
+    // The run is the caller's (`owner`, `mrsm_owner`), in the caller's primary team (`team`).
+    let access = super::jobs::access_of_principal(state, principal).await?;
+    super::jobs::stamp_caller(&mut properties, &access);
+    if let Some(owner) = owner.as_ref().filter(|_| access.username().is_none()) {
+        // A token without an owner keeps its `token:<id>` label.
         properties.insert(OWNER_KEY.into(), Value::Str(owner.clone()));
     }
     let mut execution = json!({

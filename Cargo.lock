@@ -538,6 +538,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "faac5829c2b74c28f830747e7818ccfb684261b5f48a1118b1e2a13d36dfab13"
 dependencies = [
  "aws-lc-sys",
+ "untrusted 0.7.1",
  "zeroize",
 ]
 
@@ -2871,7 +2872,7 @@ dependencies = [
 
 [[package]]
 name = "meerschaum"
-version = "5.0.0-rc.14"
+version = "5.0.0-rc.15"
 dependencies = [
  "meerschaum-cli",
  "meerschaum-connector",
@@ -2887,7 +2888,7 @@ dependencies = [
 
 [[package]]
 name = "meerschaum-cli"
-version = "5.0.0-rc.14"
+version = "5.0.0-rc.15"
 dependencies = [
  "async-trait",
  "axum",
@@ -2915,6 +2916,7 @@ dependencies = [
  "nu-ansi-term",
  "portable-pty",
  "ratatui",
+ "rcgen",
  "reedline",
  "regex",
  "reqwest 0.13.5",
@@ -2941,7 +2943,7 @@ dependencies = [
 
 [[package]]
 name = "meerschaum-compose"
-version = "5.0.0-rc.14"
+version = "5.0.0-rc.15"
 dependencies = [
  "glob",
  "indexmap",
@@ -2957,7 +2959,7 @@ dependencies = [
 
 [[package]]
 name = "meerschaum-connector"
-version = "5.0.0-rc.14"
+version = "5.0.0-rc.15"
 dependencies = [
  "async-trait",
  "chrono",
@@ -2974,7 +2976,7 @@ dependencies = [
 
 [[package]]
 name = "meerschaum-connector-api"
-version = "5.0.0-rc.14"
+version = "5.0.0-rc.15"
 dependencies = [
  "aws-lc-sys",
  "base64 0.23.1",
@@ -3000,7 +3002,7 @@ dependencies = [
 
 [[package]]
 name = "meerschaum-connector-sql"
-version = "5.0.0-rc.14"
+version = "5.0.0-rc.15"
 dependencies = [
  "arrow",
  "async-trait",
@@ -3037,7 +3039,7 @@ dependencies = [
 
 [[package]]
 name = "meerschaum-connector-valkey"
-version = "5.0.0-rc.14"
+version = "5.0.0-rc.15"
 dependencies = [
  "chrono",
  "fred",
@@ -3055,7 +3057,7 @@ dependencies = [
 
 [[package]]
 name = "meerschaum-core"
-version = "5.0.0-rc.14"
+version = "5.0.0-rc.15"
 dependencies = [
  "blake2",
  "chrono",
@@ -3085,7 +3087,7 @@ dependencies = [
 
 [[package]]
 name = "meerschaum-engine"
-version = "5.0.0-rc.14"
+version = "5.0.0-rc.15"
 dependencies = [
  "chrono",
  "fs4",
@@ -3108,7 +3110,7 @@ dependencies = [
 
 [[package]]
 name = "meerschaum-jobs"
-version = "5.0.0-rc.14"
+version = "5.0.0-rc.15"
 dependencies = [
  "chrono",
  "getrandom 0.4.3",
@@ -3126,7 +3128,7 @@ dependencies = [
 
 [[package]]
 name = "meerschaum-kernel"
-version = "5.0.0-rc.14"
+version = "5.0.0-rc.15"
 dependencies = [
  "arrow",
  "base64 0.23.1",
@@ -3146,7 +3148,7 @@ dependencies = [
 
 [[package]]
 name = "meerschaum-plugin"
-version = "5.0.0-rc.14"
+version = "5.0.0-rc.15"
 dependencies = [
  "arrow",
  "base64 0.23.1",
@@ -3172,7 +3174,7 @@ dependencies = [
 
 [[package]]
 name = "meerschaum-py"
-version = "5.0.0-rc.14"
+version = "5.0.0-rc.15"
 dependencies = [
  "arrow",
  "async-trait",
@@ -3190,6 +3192,7 @@ dependencies = [
  "meerschaum-jobs",
  "meerschaum-kernel",
  "meerschaum-plugin",
+ "meerschaum-server",
  "meerschaum-worker",
  "num-bigint 0.5.1",
  "polars",
@@ -3208,9 +3211,10 @@ dependencies = [
 
 [[package]]
 name = "meerschaum-server"
-version = "5.0.0-rc.14"
+version = "5.0.0-rc.15"
 dependencies = [
  "async-trait",
+ "aws-lc-sys",
  "axum",
  "base64 0.23.1",
  "bytes",
@@ -3229,14 +3233,17 @@ dependencies = [
  "meerschaum-core",
  "meerschaum-kernel",
  "portable-pty",
+ "rcgen",
  "regex",
  "rustix 1.1.5",
+ "rustls",
  "serde",
  "serde_json",
  "sha2 0.11.1",
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
+ "tokio-rustls",
  "tokio-tungstenite 0.30.0",
  "tower",
  "tower-http 0.7.1",
@@ -3247,7 +3254,7 @@ dependencies = [
 
 [[package]]
 name = "meerschaum-web"
-version = "5.0.0-rc.14"
+version = "5.0.0-rc.15"
 dependencies = [
  "async-trait",
  "axum",
@@ -3275,7 +3282,7 @@ dependencies = [
 
 [[package]]
 name = "meerschaum-worker"
-version = "5.0.0-rc.14"
+version = "5.0.0-rc.15"
 dependencies = [
  "arrow",
  "chrono",
@@ -5107,6 +5114,7 @@ version = "0.14.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8774e05a7d0de114588e6a28fe7e71694b82614ed569d86d8b389dfbc98b8ad8"
 dependencies = [
+ "aws-lc-rs",
  "pem",
  "ring",
  "rustls-pki-types",
@@ -5334,7 +5342,7 @@ dependencies = [
  "cfg-if",
  "getrandom 0.2.17",
  "libc",
- "untrusted",
+ "untrusted 0.9.0",
  "windows-sys 0.52.0",
 ]
 
@@ -5516,7 +5524,7 @@ dependencies = [
  "aws-lc-rs",
  "ring",
  "rustls-pki-types",
- "untrusted",
+ "untrusted 0.9.0",
 ]
 
 [[package]]
@@ -7050,6 +7058,12 @@ checksum = "e9df2af067a7953e9c3831320f35c1cc0600c30d44d9f7a12b01db1cd88d6b47"
 
 [[package]]
 name = "untrusted"
+version = "0.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a156c684c91ea7d62626509bce3cb4e1d9ed5c4d978f7b4352658f96a4c26b4a"
+
+[[package]]
+name = "untrusted"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8ecb6da28b8a351d773b68d5825ac39017e680750f980f3a1a85cd8dd28a47c1"
@@ -7745,6 +7759,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d43b0f71ce057da06bc0851b23ee24f3f86190b07203dd8f567d0b706a185202"
 dependencies = [
  "asn1-rs",
+ "aws-lc-rs",
  "data-encoding",
  "der-parser",
  "lazy_static",

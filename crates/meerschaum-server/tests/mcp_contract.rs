@@ -144,6 +144,13 @@ fn v4_tools(list: &mut Vec<Json>) {
 
 /// v4's view of a v5 response (see the module docs): tools, the primer and the reference.
 fn v4_view(got: &mut Json, read_only: bool) {
+    // RC15-P3-003: registration has its own permission. The recorded missing-scope
+    // exchange still checks the same refusal, whose message now names that permission.
+    if let Some(text) = got.pointer_mut("/result/content/0/text")
+        && text.as_str() == Some("Missing required scope for 'register_pipe': pipes:register.")
+    {
+        *text = json!("Missing required scope for 'register_pipe': pipes:write.");
+    }
     if let Some(Json::Array(list)) = got.pointer_mut("/result/tools") {
         v4_tools(list);
     }
@@ -175,6 +182,27 @@ fn v4_view(got: &mut Json, read_only: bool) {
                 ));
             }
         }
+    }
+}
+
+/// rc15's access model (PARITY.md RC15-P3-002): a pipe registered through the API is its
+/// creator's, so its parameters gain `access` with the caller as owner (Everyone's team, the
+/// default visibility and edit mode), which v4 never stored. Read as v4's answer.
+fn without_stamped_access(v: Json, owner: &str) -> Json {
+    let stamped = json!({"owner": owner, "team": null, "visibility": "team", "edit": "team"});
+    match v {
+        Json::Object(o) => Json::Object(
+            o.into_iter()
+                .filter(|(k, v)| !(k == "access" && *v == stamped))
+                .map(|(k, v)| (k, without_stamped_access(v, owner)))
+                .collect(),
+        ),
+        Json::Array(a) => Json::Array(
+            a.into_iter()
+                .map(|v| without_stamped_access(v, owner))
+                .collect(),
+        ),
+        other => other,
     }
 }
 
@@ -338,7 +366,8 @@ async fn replay_python_mcp_contract() {
         match (expected, rust_json.as_ref()) {
             (Some(Json::Null), _) if resp.body.is_empty() => {}
             (Some(exp), Some(got)) => {
-                let got = normalize(got, None, &version);
+                let owner = fixture["username"].as_str().unwrap_or_default();
+                let got = without_stamped_access(normalize(got, None, &version), owner);
                 let ok = match mode {
                     "exact" => got == exp,
                     "shape" => same_shape(&got, &exp),

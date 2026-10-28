@@ -17,7 +17,7 @@ use meerschaum_kernel::serialize::GeometryFormat;
 use serde_json::{Value as Json, json};
 
 use super::{Ctx, body_bytes};
-use crate::auth::scoped_auth;
+use crate::access::{self, Access, rules::LockOp};
 use crate::config::ServerConfig;
 use crate::error::{ApiError, ApiResult};
 use crate::json::{from_core, ok_json, python_json, raw_json, to_core, tuple, tuple_response};
@@ -30,16 +30,13 @@ const PIPES_WRITE: &[&str] = &["pipes:write"];
 const PIPES_DELETE: &[&str] = &["pipes:delete"];
 const PIPES_DROP: &[&str] = &["pipes:drop"];
 
-/// Targets that may not be synced into or read from (`mrsm_tokens` is missing from the
-/// `GET .../data` list).
-const PROTECTED_DATA_READ: &[&str] = &["mrsm_users", "mrsm_plugins", "mrsm_pipes"];
-
 type Keys3 = Path<(String, String, String)>;
 
 /// Register the `pipes` route group.
 pub fn routes(app: Router<AppState>, _cfg: &ServerConfig) -> Router<AppState> {
     let p = "/pipes/{connector_keys}/{metric_key}/{location_key}";
-    app.route("/pipes", get(get_pipes))
+    let app = app
+        .route("/pipes", get(get_pipes))
         .route("/pipes/keys", get(fetch_pipes_keys))
         .route("/pipes/{connector_keys}", get(get_pipes_by_connector))
         .route(
@@ -77,7 +74,9 @@ pub fn routes(app: Router<AppState>, _cfg: &ServerConfig) -> Router<AppState> {
         .route(
             meerschaum_connector_api::routes::METADATA,
             post(create_metadata),
-        )
+        );
+    // A pipe's access and locks (rc15, the v5 shape).
+    super::pipe_access::routes(app)
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -177,6 +176,77 @@ async fn handle(
     Ok((conn, h))
 }
 
+/// Authorize `scopes` (the caller's effective permissions, rc15) and return its access.
+async fn authorize(ctx: &Ctx, scopes: &[&str]) -> Result<Access, ApiError> {
+    access::require(&ctx.state, &ctx.headers, scopes).await
+}
+
+/// Whether `access` may see the registered pipe `ck|mk|lk` of the request's instance (an
+/// unregistered pipe has the default access): decided on the instance's pipes as of at most
+/// [`access::INDEX_TTL`] ago.
+async fn sees(
+    ctx: &Ctx,
+    access: &Access,
+    ck: &str,
+    mk: &str,
+    lk: Option<&str>,
+) -> Result<bool, ApiError> {
+    if access.is_admin() {
+        return Ok(true);
+    }
+    let index = access::pipe_index(&ctx.state, ctx.instance_keys().as_deref()).await?;
+    Ok(index
+        .get(ck, mk, lk)
+        .is_none_or(|p| access.can_see_indexed(p)))
+}
+
+/// [`handle`] for a pipe `access` can see (else the `404` of a pipe that does not exist).
+async fn visible(
+    ctx: &Ctx,
+    access: &Access,
+    ck: &str,
+    mk: &str,
+    lk: &str,
+    refresh: bool,
+) -> Result<(Arc<dyn InstanceConnector>, Arc<PipeHandle>), ApiError> {
+    let location = normalize_location(Some(lk));
+    let visible = sees(ctx, access, ck, mk, location.as_deref()).await?;
+    let (conn, h) = handle(ctx, ck, mk, lk, refresh).await?;
+    if !visible || !access.can_see_pipe(&h.pipe) {
+        return Err(access::hidden_pipe(&h.pipe));
+    }
+    if !access.is_admin() {
+        let index = access::pipe_index(&ctx.state, ctx.instance_keys().as_deref()).await?;
+        if access::guard::check_pipe_target(conn.as_ref(), &h.pipe, &index.hidden_targets(access))
+            .is_err()
+        {
+            return Err(access::hidden_pipe(&h.pipe));
+        }
+    }
+    Ok((conn, h))
+}
+
+/// [`visible`] for a pipe `access` may also change (else `403`).
+async fn editable(
+    ctx: &Ctx,
+    access: &Access,
+    ck: &str,
+    mk: &str,
+    lk: &str,
+    refresh: bool,
+) -> Result<(Arc<dyn InstanceConnector>, Arc<PipeHandle>), ApiError> {
+    let (conn, h) = visible(ctx, access, ck, mk, lk, refresh).await?;
+    if !access.can_edit(h.pipe.raw_parameters()) {
+        return Err(access::not_editable(&h.pipe));
+    }
+    Ok((conn, h))
+}
+
+/// After a change of a pipe's parameters through this server: the pipes' access is read again.
+fn forget_access(ctx: &Ctx) {
+    ctx.state.access_cache().forget_pipes();
+}
+
 fn target(pipe: &Pipe) -> String {
     pipe.target(None).unwrap_or_else(|_| pipe.target_legacy())
 }
@@ -215,10 +285,16 @@ where
 // Registration and attributes
 // ------------------------------------------------------------------------------------------------
 
+/// `POST .../register`. Registering needs `pipes:register` (rc15; `pipes:write` still works for
+/// credentials made before it). The new pipe's owner is the caller (an administrator may name
+/// another) and its team defaults to the caller's primary team; its SQL definition passes the
+/// SQL guard ([`crate::sql_guard`]); a connector reserved for other teams is refused.
 async fn register_pipe(ctx: Ctx, Path((ck, mk, lk)): Keys3, body: Body) -> ApiResult {
     let ik = ctx.instance_keys();
     let body = parse_json_body(&body_bytes(body).await?)?;
-    scoped_auth(&ctx.state, &ctx.headers, PIPES_WRITE).await?;
+    // Genuine legacy credentials are expanded during access resolution. Rechecking a raw
+    // `pipes:write` alias here would restore registration that a modern role removed.
+    let access = access::require(&ctx.state, &ctx.headers, &["pipes:register"]).await?;
     let parameters = optional_dict_body(body)?;
     if !ctx.state.config.registration_pipes {
         return Ok(tuple(
@@ -237,19 +313,29 @@ async fn register_pipe(ctx: Ctx, Path((ck, mk, lk)): Keys3, body: Body) -> ApiRe
             format!("{} already registered.", h.pipe),
         ));
     }
+    access::guard::check_connector_teams(&ctx.state, &access, &ck)?;
     let mut pipe = h.pipe.clone();
-    if let Some(params) = parameters.filter(|p| !p.is_empty()) {
-        pipe.set_parameters(params);
+    let requested = parameters
+        .filter(|p| !p.is_empty())
+        .unwrap_or_else(|| pipe.raw_parameters().clone());
+    let stamped = access::guard::stamp_new_pipe(&access, &requested)?;
+    access::guard::check_parameters(&ctx.state, &access, &conn, &pipe, None, &stamped).await?;
+    if !stamped.is_empty() {
+        pipe.set_parameters(stamped);
     }
     let res = conn.register_pipe(&pipe).await;
     ctx.state.pipes(ik.as_deref(), true).await?;
+    forget_access(&ctx);
     Ok(tuple_response(&res))
 }
 
+/// `PATCH .../edit`: a pipe the caller may change. `access` and `locks` the body leaves out keep
+/// their stored values; changing them needs the rights to (the owner, the team's managers,
+/// administrators); a SQL definition passes the SQL guard.
 async fn edit_pipe(ctx: Ctx, Path((ck, mk, lk)): Keys3, body: Body) -> ApiResult {
     let ik = ctx.instance_keys();
     let body = parse_json_body(&body_bytes(body).await?)?;
-    scoped_auth(&ctx.state, &ctx.headers, PIPES_WRITE).await?;
+    let access = authorize(&ctx, PIPES_WRITE).await?;
     let parameters = match body {
         None => return Err(ApiError::missing(&["body"])),
         Some(Json::Object(o)) => to_core(&Json::Object(o)).to_map(),
@@ -274,26 +360,42 @@ async fn edit_pipe(ctx: Ctx, Path((ck, mk, lk)): Keys3, body: Body) -> ApiResult
              you can toggle non-admin actions.",
         ));
     }
-    let (conn, h) = handle(&ctx, &ck, &mk, &lk, false).await?;
+    let (conn, h) = editable(&ctx, &access, &ck, &mk, &lk, true).await?;
     if !ctx.state.is_registered(&h.pipe, ik.as_deref()).await? {
         return Err(ApiError::new(409, format!("{} is not registered.", h.pipe)));
     }
+    let old = h.pipe.raw_parameters().clone();
+    let requested = if patch {
+        meerschaum_core::value::apply_patch_maps(&old, &parameters)
+    } else {
+        parameters
+    };
+    let new = access::guard::merge_edit(&access, &old, requested)?;
+    access::guard::check_parameters(&ctx.state, &access, &conn, &h.pipe, Some(&old), &new).await?;
+    if let Some(e) = access::guard::parameters_lock_conflict(&h.pipe, &old, &new) {
+        return Ok(tuple(false, e.detail_text()));
+    }
     let mut pipe = h.pipe.clone();
-    pipe.set_parameters(parameters);
-    let res = conn.edit_pipe(&pipe, patch).await;
+    pipe.set_parameters(new);
+    let res = conn.edit_pipe(&pipe, false).await;
     ctx.state.pipes(ik.as_deref(), true).await?;
+    forget_access(&ctx);
     Ok(tuple_response(&res))
 }
 
 async fn delete_pipe(ctx: Ctx, Path((ck, mk, lk)): Keys3) -> ApiResult {
     let ik = ctx.instance_keys();
-    scoped_auth(&ctx.state, &ctx.headers, PIPES_DELETE).await?;
-    let (conn, h) = handle(&ctx, &ck, &mk, &lk, false).await?;
+    let access = authorize(&ctx, PIPES_DELETE).await?;
+    let (conn, h) = editable(&ctx, &access, &ck, &mk, &lk, true).await?;
     if !ctx.state.is_registered(&h.pipe, ik.as_deref()).await? {
         return Err(ApiError::new(409, format!("{} is not registered.", h.pipe)));
     }
+    if let Some(e) = access::guard::lock_conflict(&h.pipe, LockOp::Delete) {
+        return Ok(tuple(false, e.detail_text()));
+    }
     let res = conn.delete_pipe(&h.pipe).await;
     ctx.state.pipes(ik.as_deref(), true).await?;
+    forget_access(&ctx);
     Ok(tuple_response(&res))
 }
 
@@ -306,8 +408,29 @@ fn json_str_list(raw: &str, key: &str) -> Result<Vec<Value>, ApiError> {
     }
 }
 
+/// `keys` without the pipes `access` cannot see.
+async fn visible_keys(ctx: &Ctx, access: &Access, keys: PipesKeys) -> Result<PipesKeys, ApiError> {
+    if access.is_admin() {
+        return Ok(keys);
+    }
+    let index = access::pipe_index(&ctx.state, ctx.instance_keys().as_deref()).await?;
+    let visible = |e: &meerschaum_connector::PipeKeysEntry| {
+        if e.connector_keys == "mrsm" {
+            return false;
+        }
+        let lk = normalize_location(e.location_key.as_deref());
+        index
+            .get(&e.connector_keys, &e.metric_key, lk.as_deref())
+            .is_none_or(|p| access.can_see_indexed(p))
+    };
+    Ok(match keys {
+        PipesKeys::List(v) => PipesKeys::List(v.into_iter().filter(|e| visible(e)).collect()),
+        PipesKeys::Dict(m) => PipesKeys::Dict(m.into_iter().filter(|(_, e)| visible(e)).collect()),
+    })
+}
+
 async fn fetch_pipes_keys(ctx: Ctx) -> ApiResult {
-    scoped_auth(&ctx.state, &ctx.headers, PIPES_READ).await?;
+    let access = authorize(&ctx, PIPES_READ).await?;
     let q = &ctx.query;
     let as_dict = q.bool("as_dict", false)?;
     let conn = ctx
@@ -341,6 +464,7 @@ async fn fetch_pipes_keys(ctx: Ctx) -> ApiResult {
         .fetch_pipes_keys(&query)
         .await
         .map_err(|e| ApiError::exception("fetch_pipes_keys", e))?;
+    let keys = visible_keys(&ctx, &access, keys).await?;
     let out = match keys {
         PipesKeys::Dict(m) => {
             if as_dict {
@@ -378,7 +502,7 @@ async fn fetch_pipes_keys(ctx: Ctx) -> ApiResult {
 }
 
 async fn get_pipes(ctx: Ctx) -> ApiResult {
-    scoped_auth(&ctx.state, &ctx.headers, PIPES_READ).await?;
+    let access = authorize(&ctx, PIPES_READ).await?;
     let q = &ctx.query;
     let ik = q.opt_str("instance_keys").filter(|s| !s.is_empty());
     let conn = ctx.state.get_api_connector(ik.as_deref())?;
@@ -427,6 +551,14 @@ async fn get_pipes(ctx: Ctx) -> ApiResult {
                 Value::Map(h.pipe.raw_parameters().clone())
             }
         };
+        let listed_pipe = Pipe::builder(&entry.connector_keys, &entry.metric_key)
+            .location(lk.as_deref())
+            .parameters(params.to_map())
+            .build()
+            .map_err(|e| ApiError::exception("Pipe", e))?;
+        if !access.can_see_pipe(&listed_pipe) {
+            continue;
+        }
         let attrs = json!({
             "connector_keys": entry.connector_keys,
             "metric_key": entry.metric_key,
@@ -450,19 +582,30 @@ async fn get_pipes(ctx: Ctx) -> ApiResult {
 }
 
 async fn get_pipes_by_connector(ctx: Ctx, Path(ck): Path<String>) -> ApiResult {
-    scoped_auth(&ctx.state, &ctx.headers, PIPES_READ).await?;
+    let access = authorize(&ctx, PIPES_READ).await?;
     let ik = ctx.instance_keys();
     let dict = ctx.state.pipes(ik.as_deref(), true).await?;
+    let not_found = || ApiError::new(404, format!("Connector '{ck}' not found."));
     let Some(metrics) = dict.get(&ck) else {
-        return Err(ApiError::new(404, format!("Connector '{ck}' not found.")));
+        return Err(not_found());
     };
     let conn = ctx.state.get_api_connector(ik.as_deref())?;
     let mut out = serde_json::Map::new();
     for (mk, locations) in metrics {
+        let seen: Vec<_> = locations
+            .iter()
+            .filter(|(_, h)| access.can_see_pipe(&h.pipe))
+            .collect();
+        if seen.is_empty() {
+            continue;
+        }
         out.insert(
             mk.clone(),
-            Json::Object(attributes_tree(&conn, locations).await?),
+            Json::Object(attributes_tree(&conn, seen).await?),
         );
+    }
+    if out.is_empty() && !metrics.is_empty() {
+        return Err(not_found());
     }
     Ok(ok_json(&Json::Object(out)))
 }
@@ -471,33 +614,41 @@ async fn get_pipes_by_connector_and_metric(
     ctx: Ctx,
     Path((ck, mk)): Path<(String, String)>,
 ) -> ApiResult {
-    scoped_auth(&ctx.state, &ctx.headers, PIPES_READ).await?;
+    let access = authorize(&ctx, PIPES_READ).await?;
     let ik = ctx.instance_keys();
     let dict = ctx.state.pipes(ik.as_deref(), true).await?;
-    let Some(metrics) = dict.get(&ck) else {
+    let visible = |locations: &indexmap::IndexMap<Option<String>, Arc<PipeHandle>>| {
+        locations.values().any(|h| access.can_see_pipe(&h.pipe))
+    };
+    let Some(metrics) = dict.get(&ck).filter(|m| m.values().any(visible)) else {
         return Err(ApiError::new(404, format!("Connector '{ck}' not found.")));
     };
-    let Some(locations) = metrics.get(&mk) else {
+    let Some(locations) = metrics.get(&mk).filter(|l| visible(l)) else {
         return Err(ApiError::new(404, format!("Metric '{mk}' not found.")));
     };
     let conn = ctx.state.get_api_connector(ik.as_deref())?;
-    Ok(ok_json(&Json::Object(
-        attributes_tree(&conn, locations).await?,
-    )))
+    let seen: Vec<_> = locations
+        .iter()
+        .filter(|(_, h)| access.can_see_pipe(&h.pipe))
+        .collect();
+    Ok(ok_json(&Json::Object(attributes_tree(&conn, seen).await?)))
 }
 
 async fn get_pipe_by_keys(ctx: Ctx, Path((ck, mk, lk)): Keys3) -> ApiResult {
-    scoped_auth(&ctx.state, &ctx.headers, PIPES_READ).await?;
+    let access = authorize(&ctx, PIPES_READ).await?;
     let ik = ctx.instance_keys();
     let dict = ctx.state.pipes(ik.as_deref(), true).await?;
-    let Some(metrics) = dict.get(&ck) else {
+    let visible = |locations: &indexmap::IndexMap<Option<String>, Arc<PipeHandle>>| {
+        locations.values().any(|h| access.can_see_pipe(&h.pipe))
+    };
+    let Some(metrics) = dict.get(&ck).filter(|m| m.values().any(visible)) else {
         return Err(ApiError::new(404, format!("Connector '{ck}' not found.")));
     };
-    let Some(locations) = metrics.get(&mk) else {
+    let Some(locations) = metrics.get(&mk).filter(|l| visible(l)) else {
         return Err(ApiError::new(404, format!("Metric '{mk}' not found.")));
     };
     let loc = normalize_location(Some(&lk));
-    let Some(h) = locations.get(&loc) else {
+    let Some(h) = locations.get(&loc).filter(|h| access.can_see_pipe(&h.pipe)) else {
         return Err(ApiError::new(
             404,
             format!(
@@ -512,8 +663,8 @@ async fn get_pipe_by_keys(ctx: Ctx, Path((ck, mk, lk)): Keys3) -> ApiResult {
 }
 
 async fn get_pipe_id(ctx: Ctx, Path((ck, mk, lk)): Keys3) -> ApiResult {
-    scoped_auth(&ctx.state, &ctx.headers, PIPES_READ).await?;
-    let (conn, h) = handle(&ctx, &ck, &mk, &lk, false).await?;
+    let access = authorize(&ctx, PIPES_READ).await?;
+    let (conn, h) = visible(&ctx, &access, &ck, &mk, &lk, false).await?;
     let id = conn
         .get_pipe_id(&h.pipe)
         .await
@@ -525,15 +676,15 @@ async fn get_pipe_id(ctx: Ctx, Path((ck, mk, lk)): Keys3) -> ApiResult {
 }
 
 async fn get_pipe_attributes(ctx: Ctx, Path((ck, mk, lk)): Keys3) -> ApiResult {
-    scoped_auth(&ctx.state, &ctx.headers, PIPES_READ).await?;
-    let (conn, h) = handle(&ctx, &ck, &mk, &lk, true).await?;
+    let access = authorize(&ctx, PIPES_READ).await?;
+    let (conn, h) = visible(&ctx, &access, &ck, &mk, &lk, true).await?;
     let attrs = pipe_attributes(&conn, &h.pipe).await?;
     Ok(ok_json(&from_core(&Value::Map(attrs))))
 }
 
 async fn get_pipe_exists(ctx: Ctx, Path((ck, mk, lk)): Keys3) -> ApiResult {
-    scoped_auth(&ctx.state, &ctx.headers, PIPES_READ).await?;
-    let (conn, h) = handle(&ctx, &ck, &mk, &lk, false).await?;
+    let access = authorize(&ctx, PIPES_READ).await?;
+    let (conn, h) = visible(&ctx, &access, &ck, &mk, &lk, false).await?;
     let exists = conn
         .pipe_exists(&h.pipe)
         .await
@@ -542,7 +693,7 @@ async fn get_pipe_exists(ctx: Ctx, Path((ck, mk, lk)): Keys3) -> ApiResult {
 }
 
 async fn create_metadata(ctx: Ctx) -> ApiResult {
-    scoped_auth(&ctx.state, &ctx.headers, &["actions:execute"]).await?;
+    authorize(&ctx, &["actions:execute"]).await?;
     let conn = ctx
         .state
         .get_api_connector(ctx.instance_keys().as_deref())?;
@@ -567,12 +718,12 @@ async fn create_metadata(ctx: Ctx) -> ApiResult {
 
 async fn get_sync_time(ctx: Ctx, Path((ck, mk, lk)): Keys3, body: Body) -> ApiResult {
     let body = parse_json_body(&body_bytes(body).await?)?;
-    scoped_auth(&ctx.state, &ctx.headers, PIPES_READ).await?;
+    let access = authorize(&ctx, PIPES_READ).await?;
     let params = optional_dict_body(body)?;
     let newest = ctx.query.bool("newest", true)?;
     let _remote = ctx.query.bool("remote", false)?;
     let round_down = ctx.query.bool("round_down", true)?;
-    let (conn, h) = handle(&ctx, &ck, &mk, &lk, false).await?;
+    let (conn, h) = visible(&ctx, &access, &ck, &mk, &lk, false).await?;
     let st = pipe_methods::get_sync_time(
         &conn,
         &h.pipe,
@@ -634,7 +785,7 @@ fn parse_sync_body(body: &[u8]) -> Result<Option<SyncPayload>, ApiError> {
 struct SyncText(String);
 
 async fn sync_pipe(ctx: Ctx, Path((ck, mk, lk)): Keys3, body: Body) -> ApiResult {
-    scoped_auth(&ctx.state, &ctx.headers, PIPES_WRITE).await?;
+    let access = authorize(&ctx, PIPES_WRITE).await?;
     let q = &ctx.query;
     let check_existing = q.bool("check_existing", true)?;
     let blocking = q.bool("blocking", true)?;
@@ -669,7 +820,17 @@ async fn sync_pipe(ctx: Ctx, Path((ck, mk, lk)): Keys3, body: Body) -> ApiResult
         None if replace => (SyncPayload::Json(Json::Array(Vec::new())), true),
         None => return Ok(tuple(true, "No data to sync.")),
     };
-    let (conn, h) = handle(&ctx, &ck, &mk, &lk, true).await?;
+    let (conn, h) = editable(&ctx, &access, &ck, &mk, &lk, true).await?;
+    if let Some(e) = access::guard::lock_conflict(
+        &h.pipe,
+        if replace {
+            LockOp::Replace
+        } else {
+            LockOp::Sync
+        },
+    ) {
+        return Ok(tuple(false, e.detail_text()));
+    }
     let t = target(&h.pipe);
     if meerschaum_connector_api::routes::PROTECTED_TARGETS.contains(&t.as_str()) {
         return Err(ApiError::new(
@@ -758,7 +919,7 @@ fn data_args(ctx: &Ctx) -> Result<DataArgs, ApiError> {
 }
 
 async fn get_pipe_data(ctx: Ctx, Path((ck, mk, lk)): Keys3) -> ApiResult {
-    scoped_auth(&ctx.state, &ctx.headers, PIPES_READ).await?;
+    let access = authorize(&ctx, PIPES_READ).await?;
     let q = &ctx.query;
     let date_format = q.str_or("date_format", "iso");
     let date_unit = q.str_or("date_unit", "us");
@@ -766,7 +927,7 @@ async fn get_pipe_data(ctx: Ctx, Path((ck, mk, lk)): Keys3) -> ApiResult {
     let geometry_format = q.str_or("geometry_format", "wkb_hex");
     let args = data_args(&ctx)?;
     let ik = ctx.instance_keys();
-    let (conn, h) = handle(&ctx, &ck, &mk, &lk, false).await?;
+    let (conn, h) = visible(&ctx, &access, &ck, &mk, &lk, false).await?;
     let defaults = &ctx.state.config.pipe_defaults;
     let begin = pipe_methods::parse_date_bound(&conn, &h.pipe, q.get("begin"), defaults).await?;
     let end = pipe_methods::parse_date_bound(&conn, &h.pipe, q.get("end"), defaults).await?;
@@ -776,13 +937,7 @@ async fn get_pipe_data(ctx: Ctx, Path((ck, mk, lk)): Keys3) -> ApiResult {
             "Pipe must be registered with the datetime column specified.",
         ));
     }
-    let t = target(&h.pipe);
-    if PROTECTED_DATA_READ.contains(&t.as_str()) {
-        return Err(ApiError::new(
-            409,
-            format!("Cannot retrieve data from protected table '{t}'."),
-        ));
-    }
+    refuse_protected_read(&h.pipe)?;
     let query = DataQuery {
         select_columns: nonempty(args.select_columns),
         omit_columns: nonempty(args.omit_columns),
@@ -818,10 +973,10 @@ async fn get_pipe_data(ctx: Ctx, Path((ck, mk, lk)): Keys3) -> ApiResult {
 }
 
 async fn get_pipe_docs(ctx: Ctx, Path((ck, mk, lk)): Keys3) -> ApiResult {
-    scoped_auth(&ctx.state, &ctx.headers, PIPES_READ).await?;
+    let access = authorize(&ctx, PIPES_READ).await?;
     let args = data_args(&ctx)?;
     let q = &ctx.query;
-    let (conn, h) = handle(&ctx, &ck, &mk, &lk, false).await?;
+    let (conn, h) = visible(&ctx, &access, &ck, &mk, &lk, false).await?;
     let defaults = &ctx.state.config.pipe_defaults;
     let begin = pipe_methods::parse_date_bound(&conn, &h.pipe, q.get("begin"), defaults).await?;
     let end = pipe_methods::parse_date_bound(&conn, &h.pipe, q.get("end"), defaults).await?;
@@ -875,11 +1030,11 @@ fn refuse_protected_read(pipe: &Pipe) -> Result<(), ApiError> {
 }
 
 async fn get_pipe_chunk_bounds(ctx: Ctx, Path((ck, mk, lk)): Keys3) -> ApiResult {
-    scoped_auth(&ctx.state, &ctx.headers, PIPES_READ).await?;
+    let access = authorize(&ctx, PIPES_READ).await?;
     let q = &ctx.query;
     let bounded = q.bool("bounded", true)?;
     let chunk_interval_minutes = q.opt_int("chunk_interval_minutes")?;
-    let (conn, h) = handle(&ctx, &ck, &mk, &lk, false).await?;
+    let (conn, h) = visible(&ctx, &access, &ck, &mk, &lk, false).await?;
     let defaults = &ctx.state.config.pipe_defaults;
     let begin = pipe_methods::parse_date_bound(&conn, &h.pipe, q.get("begin"), defaults).await?;
     let end = pipe_methods::parse_date_bound(&conn, &h.pipe, q.get("end"), defaults).await?;
@@ -911,9 +1066,12 @@ async fn get_pipe_chunk_bounds(ctx: Ctx, Path((ck, mk, lk)): Keys3) -> ApiResult
 }
 
 async fn drop_pipe(ctx: Ctx, Path((ck, mk, lk)): Keys3) -> ApiResult {
-    scoped_auth(&ctx.state, &ctx.headers, PIPES_DROP).await?;
+    let access = authorize(&ctx, PIPES_DROP).await?;
     let ik = ctx.instance_keys();
-    let (conn, h) = handle(&ctx, &ck, &mk, &lk, false).await?;
+    let (conn, h) = editable(&ctx, &access, &ck, &mk, &lk, true).await?;
+    if let Some(e) = access::guard::lock_conflict(&h.pipe, LockOp::Drop) {
+        return Ok(tuple(false, e.detail_text()));
+    }
     let res = conn.drop_pipe(&h.pipe).await;
     h.invalidate();
     ctx.state.pipes(ik.as_deref(), true).await?;
@@ -921,11 +1079,14 @@ async fn drop_pipe(ctx: Ctx, Path((ck, mk, lk)): Keys3) -> ApiResult {
 }
 
 async fn clear_pipe(ctx: Ctx, Path((ck, mk, lk)): Keys3) -> ApiResult {
-    scoped_auth(&ctx.state, &ctx.headers, PIPES_DELETE).await?;
+    let access = authorize(&ctx, PIPES_DELETE).await?;
     let q = &ctx.query;
     let params = parse_params(q.get("params"))?;
     let ik = ctx.instance_keys();
-    let (conn, h) = handle(&ctx, &ck, &mk, &lk, false).await?;
+    let (conn, h) = editable(&ctx, &access, &ck, &mk, &lk, true).await?;
+    if let Some(e) = access::guard::lock_conflict(&h.pipe, LockOp::Clear) {
+        return Ok(tuple(false, e.detail_text()));
+    }
     let defaults = &ctx.state.config.pipe_defaults;
     let begin = pipe_methods::parse_date_bound(&conn, &h.pipe, q.get("begin"), defaults).await?;
     let end = pipe_methods::parse_date_bound(&conn, &h.pipe, q.get("end"), defaults).await?;
@@ -945,19 +1106,20 @@ async fn clear_pipe(ctx: Ctx, Path((ck, mk, lk)): Keys3) -> ApiResult {
 }
 
 async fn delete_pipe_cache(ctx: Ctx, Path((ck, mk, lk)): Keys3) -> ApiResult {
-    scoped_auth(&ctx.state, &ctx.headers, PIPES_READ).await?;
-    let (_, h) = handle(&ctx, &ck, &mk, &lk, false).await?;
+    let access = authorize(&ctx, PIPES_READ).await?;
+    let (_, h) = visible(&ctx, &access, &ck, &mk, &lk, false).await?;
     // `pipe._invalidate_cache(hard=True)` on the shared object.
     h.invalidate();
     Ok(tuple_response(&SuccessTuple::success()))
 }
 
 async fn get_pipe_csv(ctx: Ctx, Path((ck, mk, lk)): Keys3) -> ApiResult {
-    scoped_auth(&ctx.state, &ctx.headers, PIPES_READ).await?;
+    let access = authorize(&ctx, PIPES_READ).await?;
     let q = &ctx.query;
     let params = parse_params(q.get("params"))?;
     let ik = ctx.instance_keys();
-    let (conn, h) = handle(&ctx, &ck, &mk, &lk, false).await?;
+    let (conn, h) = visible(&ctx, &access, &ck, &mk, &lk, false).await?;
+    refuse_protected_read(&h.pipe)?;
     if !ctx.state.is_registered(&h.pipe, ik.as_deref()).await? {
         return Err(ApiError::new(409, "Pipe must be registered."));
     }
@@ -1022,14 +1184,14 @@ async fn get_pipe_csv(ctx: Ctx, Path((ck, mk, lk)): Keys3) -> ApiResult {
 /// for clients that cannot send a body with a `GET` (the body wins when both are given).
 async fn get_pipe_rowcount(ctx: Ctx, Path((ck, mk, lk)): Keys3, body: Body) -> ApiResult {
     let body = parse_json_body(&body_bytes(body).await?)?;
-    scoped_auth(&ctx.state, &ctx.headers, PIPES_READ).await?;
+    let access = authorize(&ctx, PIPES_READ).await?;
     let params = match optional_dict_body(body)? {
         Some(params) => Some(params),
         None => query_params_dict(&ctx)?,
     };
     let remote = ctx.query.bool("remote", false)?;
     let estimate = ctx.query.bool("estimate", false)?;
-    let (conn, h) = handle(&ctx, &ck, &mk, &lk, false).await?;
+    let (conn, h) = visible(&ctx, &access, &ck, &mk, &lk, false).await?;
     let defaults = &ctx.state.config.pipe_defaults;
     let q = &ctx.query;
     let begin = pipe_methods::parse_date_bound(&conn, &h.pipe, q.get("begin"), defaults).await?;
@@ -1059,8 +1221,8 @@ fn query_params_dict(ctx: &Ctx) -> Result<Option<Map>, ApiError> {
 }
 
 async fn get_pipe_columns_types(ctx: Ctx, Path((ck, mk, lk)): Keys3) -> ApiResult {
-    scoped_auth(&ctx.state, &ctx.headers, PIPES_READ).await?;
-    let (conn, h) = handle(&ctx, &ck, &mk, &lk, false).await?;
+    let access = authorize(&ctx, PIPES_READ).await?;
+    let (conn, h) = visible(&ctx, &access, &ck, &mk, &lk, false).await?;
     let max_age = ctx.state.config.columns_types_cache_seconds;
     let types = match h.cached_columns_types(max_age) {
         Some(t) => t,
@@ -1089,8 +1251,8 @@ async fn get_pipe_columns_types(ctx: Ctx, Path((ck, mk, lk)): Keys3) -> ApiResul
 }
 
 async fn get_pipe_columns_indices(ctx: Ctx, Path((ck, mk, lk)): Keys3) -> ApiResult {
-    scoped_auth(&ctx.state, &ctx.headers, PIPES_READ).await?;
-    let (conn, h) = handle(&ctx, &ck, &mk, &lk, false).await?;
+    let access = authorize(&ctx, PIPES_READ).await?;
+    let (conn, h) = visible(&ctx, &access, &ck, &mk, &lk, false).await?;
     let indices = conn
         .get_pipe_columns_indices(&h.pipe)
         .await
@@ -1101,8 +1263,8 @@ async fn get_pipe_columns_indices(ctx: Ctx, Path((ck, mk, lk)): Keys3) -> ApiRes
 }
 
 async fn get_pipe_index_names(ctx: Ctx, Path((ck, mk, lk)): Keys3) -> ApiResult {
-    scoped_auth(&ctx.state, &ctx.headers, PIPES_READ).await?;
-    let (conn, h) = handle(&ctx, &ck, &mk, &lk, false).await?;
+    let access = authorize(&ctx, PIPES_READ).await?;
+    let (conn, h) = visible(&ctx, &access, &ck, &mk, &lk, false).await?;
     let names = match conn.get_pipe_index_names(&h.pipe).await {
         Ok(m) => m,
         // `hasattr(instance_connector, 'get_pipe_index_names')` is false: `{}`.
@@ -1113,8 +1275,8 @@ async fn get_pipe_index_names(ctx: Ctx, Path((ck, mk, lk)): Keys3) -> ApiResult 
 }
 
 async fn get_pipe_size(ctx: Ctx, Path((ck, mk, lk)): Keys3) -> ApiResult {
-    scoped_auth(&ctx.state, &ctx.headers, PIPES_READ).await?;
-    let (conn, h) = handle(&ctx, &ck, &mk, &lk, false).await?;
+    let access = authorize(&ctx, PIPES_READ).await?;
+    let (conn, h) = visible(&ctx, &access, &ck, &mk, &lk, false).await?;
     let size = match conn.get_pipe_size(&h.pipe).await {
         Ok(s) => s,
         Err(meerschaum_connector::ConnectorError::NotImplemented(_)) => None,
@@ -1125,6 +1287,7 @@ async fn get_pipe_size(ctx: Ctx, Path((ck, mk, lk)): Keys3) -> ApiResult {
 
 async fn maintenance<F, Fut>(
     ctx: Ctx,
+    access: Access,
     keys: (String, String, String),
     verb: &str,
     op: F,
@@ -1134,51 +1297,57 @@ where
     Fut: std::future::Future<Output = SuccessTuple>,
 {
     let ik = ctx.instance_keys();
-    let (conn, h) = handle(&ctx, &keys.0, &keys.1, &keys.2, false).await?;
+    let (conn, h) = editable(&ctx, &access, &keys.0, &keys.1, &keys.2, false).await?;
     refuse_protected(&h.pipe, verb)?;
+    // Repartitioning changes the table (the `drop` lock).
+    if verb == "repartition"
+        && let Some(e) = access::guard::lock_conflict(&h.pipe, LockOp::Schema)
+    {
+        return Ok(tuple(false, e.detail_text()));
+    }
     let res = op(conn, h.pipe.clone()).await;
     ctx.state.pipes(ik.as_deref(), true).await?;
     Ok(tuple_response(&res))
 }
 
 async fn compress_pipe(ctx: Ctx, Path(keys): Keys3) -> ApiResult {
-    scoped_auth(&ctx.state, &ctx.headers, PIPES_WRITE).await?;
-    maintenance(ctx, keys, "compress", |c, p| async move {
+    let access = authorize(&ctx, PIPES_WRITE).await?;
+    maintenance(ctx, access, keys, "compress", |c, p| async move {
         c.compress_pipe(&p).await
     })
     .await
 }
 
 async fn decompress_pipe(ctx: Ctx, Path(keys): Keys3) -> ApiResult {
-    scoped_auth(&ctx.state, &ctx.headers, PIPES_WRITE).await?;
+    let access = authorize(&ctx, PIPES_WRITE).await?;
     let no_policy = ctx.query.bool("no_policy", false)?;
-    maintenance(ctx, keys, "decompress", move |c, p| async move {
+    maintenance(ctx, access, keys, "decompress", move |c, p| async move {
         c.decompress_pipe(&p, no_policy).await
     })
     .await
 }
 
 async fn vacuum_pipe(ctx: Ctx, Path(keys): Keys3) -> ApiResult {
-    scoped_auth(&ctx.state, &ctx.headers, PIPES_WRITE).await?;
+    let access = authorize(&ctx, PIPES_WRITE).await?;
     let full = ctx.query.bool("full", false)?;
-    maintenance(ctx, keys, "vacuum", move |c, p| async move {
+    maintenance(ctx, access, keys, "vacuum", move |c, p| async move {
         c.vacuum_pipe(&p, full).await
     })
     .await
 }
 
 async fn analyze_pipe(ctx: Ctx, Path(keys): Keys3) -> ApiResult {
-    scoped_auth(&ctx.state, &ctx.headers, PIPES_WRITE).await?;
-    maintenance(ctx, keys, "analyze", |c, p| async move {
+    let access = authorize(&ctx, PIPES_WRITE).await?;
+    maintenance(ctx, access, keys, "analyze", |c, p| async move {
         c.analyze_pipe(&p).await
     })
     .await
 }
 
 async fn partition_pipe(ctx: Ctx, Path(keys): Keys3) -> ApiResult {
-    scoped_auth(&ctx.state, &ctx.headers, PIPES_WRITE).await?;
+    let access = authorize(&ctx, PIPES_WRITE).await?;
     let chunk_minutes = ctx.query.opt_int("chunk_minutes")?;
-    maintenance(ctx, keys, "repartition", move |c, p| async move {
+    maintenance(ctx, access, keys, "repartition", move |c, p| async move {
         c.partition_pipe(&p, chunk_minutes).await
     })
     .await

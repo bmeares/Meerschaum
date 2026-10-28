@@ -35,6 +35,11 @@ pub struct ServerFlags {
     pub no_webterm: bool,
     /// `--public`: the public preset (`api:permissions:preset: public`).
     pub public: bool,
+    /// `--keyfile`: serve HTTPS with this private key (with `--certfile`; [`crate::tls`]). An
+    /// empty value turns off a key set in the config.
+    pub keyfile: Option<String>,
+    /// `--certfile`: serve HTTPS with this certificate chain (with `--keyfile`).
+    pub certfile: Option<String>,
 }
 
 /// A rate limit for one route group (`api:permissions:rate_limits:<group>`).
@@ -103,8 +108,15 @@ pub struct ServerConfig {
     pub version: String,
     /// `MRSM_SERVER_ID`.
     pub server_id: String,
-    /// `api:permissions:registration:users`.
+    /// `api:permissions:registration:users` (default `false` since rc15: self-registration is
+    /// off). While the user store has no users, registration is open anyway and the first
+    /// account is an administrator (`POST /users/register`).
     pub registration_users: bool,
+    /// The role of users without permissions of their own (`api:permissions:default_role`:
+    /// `viewer`, `editor` or `operator`; default `editor`). Meerschaum 4's
+    /// `api:permissions:actions:non_admin: true`, set in the config, makes it `operator` unless
+    /// `default_role` names another role.
+    pub default_role: String,
     /// `api:permissions:registration:pipes`.
     pub registration_pipes: bool,
     /// `api:permissions:registration:plugins`.
@@ -189,6 +201,12 @@ pub struct ServerConfig {
     pub webterm_tmux_config: Option<PathBuf>,
     /// `WEBTERM_INTERNAL_RESOURCES_PATH`: where the tmux path keeps the shell's environment file.
     pub webterm_resources_path: PathBuf,
+    /// The private key and certificate of HTTPS (`--keyfile` / `--certfile`,
+    /// `api:server:ssl_keyfile` / `ssl_certfile`, 4.1's `api:uvicorn:ssl_*`); none: plain HTTP.
+    pub tls: crate::tls::TlsSettings,
+    /// Where the loopback-only plain listener of an HTTPS server listens, once
+    /// [`crate::tls::prepare`] bound it: the Python API host calls the server back there.
+    pub internal_addr: Option<std::net::SocketAddr>,
 }
 
 fn get<'a>(map: &'a Map, keys: &[&str]) -> Option<&'a Value> {
@@ -353,6 +371,36 @@ pub fn parse_rate_limits(
     out
 }
 
+/// `api:permissions:default_role` resolved by the access model's rule
+/// ([`meerschaum_core::access::resolve_default_role`]): a role named there (`viewer`, `editor`,
+/// `operator`); when it is not set, Meerschaum 4's `api:permissions:actions:non_admin: true` set
+/// in the config means `operator` (non-administrators ran actions and opened the web terminal in
+/// 4.1); else `editor`. A value that names no role is `viewer` (the fewest permissions), with a
+/// notice.
+pub fn resolve_default_role(cfg: &Map, notices: &mut Vec<String>) -> String {
+    let configured = get(cfg, &["api", "permissions", "default_role"])
+        .filter(|v| !v.is_null())
+        .map(Value::py_str);
+    let legacy = get(cfg, &["api", "permissions", "actions", "non_admin"])
+        .filter(|v| !v.is_null())
+        .map(Value::truthy);
+    let role = meerschaum_core::access::resolve_default_role(configured.as_deref(), legacy);
+    if let Some(text) = configured
+        .as_deref()
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+        && meerschaum_core::access::Role::parse(text)
+            .is_none_or(|r| !meerschaum_core::access::Role::DEFAULTABLE.contains(&r))
+    {
+        notices.push(format!(
+            "Unknown `api:permissions:default_role` '{text}' (use `viewer`, `editor` or \
+             `operator`): users without permissions of their own get the role '{}'.",
+            role.name()
+        ));
+    }
+    role.name().to_string()
+}
+
 /// Expand a leading `~` of a configured path.
 fn expand_home(path: &str) -> PathBuf {
     if let Some(rest) = path.strip_prefix("~/")
@@ -457,6 +505,14 @@ impl ServerConfig {
             &mut notices,
         );
 
+        // HTTPS: the flags, `api:server:ssl_*`, then 4.1's `api:uvicorn:ssl_*` (with a notice).
+        let tls = crate::tls::TlsSettings::resolve(
+            flags.keyfile.as_deref(),
+            flags.certfile.as_deref(),
+            cfg,
+            &mut notices,
+        );
+
         // The public preset: `api:permissions:preset: public` or `start api --public`.
         let public = flags.public
             || match get(cfg, &["api", "permissions", "preset"]) {
@@ -512,9 +568,11 @@ impl ServerConfig {
             no_webterm: flags.no_webterm || flags.no_auth || public,
             version: crate::VERSION.to_string(),
             server_id,
-            // The public preset turns user registration off.
+            // The public preset turns user registration off. Off by default since rc15 (the
+            // first account of an empty user store is still created: `POST /users/register`).
             registration_users: !public
-                && bool_at(cfg, &["api", "permissions", "registration", "users"], true),
+                && bool_at(cfg, &["api", "permissions", "registration", "users"], false),
+            default_role: resolve_default_role(cfg, &mut notices),
             registration_pipes: bool_at(
                 cfg,
                 &["api", "permissions", "registration", "pipes"],
@@ -639,6 +697,8 @@ impl ServerConfig {
                 _ => None,
             },
             webterm_resources_path: PathBuf::from("internal/webterm"),
+            tls,
+            internal_addr: None,
         }
     }
 
@@ -662,20 +722,27 @@ impl ServerConfig {
 
     /// The startup warning for an API that gives a shell to anyone who can reach it, or `None`.
     ///
-    /// With `api:permissions:registration:users` on (the default) anyone can register an account,
-    /// and with `api:permissions:actions:non_admin` on (the default) every logged-in user may open
-    /// the web terminal (v4's behavior, kept). On an address other than loopback that is a shell
-    /// for whoever can connect. `--secure` and `--private` close it, as do the two settings; with
-    /// no console (`--no-dash`), `--no-webterm` or `--no-auth` there is no terminal at all.
+    /// Self-registration is off by default and the default role (`editor`) has no web terminal
+    /// (`webterm:use`), so the defaults are quiet. With `api:permissions:registration:users` on,
+    /// a self-registered account gets the default role: when that is `operator` (set, or implied
+    /// by Meerschaum 4's `api:permissions:actions:non_admin: true`), anyone who can connect to an
+    /// address other than loopback can register and open a shell. `--secure` and `--private`
+    /// close it, as does either setting; with no console (`--no-dash`), `--no-webterm` or
+    /// `--no-auth` there is no terminal at all.
     pub fn open_terminal_warning(&self) -> Option<String> {
         let terminal = !self.no_dash && !self.no_webterm && !self.no_auth;
-        if !(terminal && self.registration_users && self.actions_non_admin && !self.private)
+        let shell_role = self.default_role == "operator";
+        if !(terminal
+            && self.registration_users
+            && shell_role
+            && self.actions_non_admin
+            && !self.private)
             || self.is_loopback()
         {
             return None;
         }
         Some(format!(
-            "Anyone who can reach {}:{} can register an account and open a shell: user registration (`api:permissions:registration:users`) and terminals for non-admins (`api:permissions:actions:non_admin`) are both on. Start with `--secure` or `--private`, or set `api:permissions:registration:users` or `api:permissions:actions:non_admin` to false.",
+            "Anyone who can reach {}:{} can register an account and open a shell: user registration (`api:permissions:registration:users`) is on and new users get the role 'operator' (`api:permissions:default_role`, or Meerschaum 4's `api:permissions:actions:non_admin: true`), which includes the web terminal. Start with `--secure` or `--private`, turn registration off, or set `api:permissions:default_role` to 'editor'.",
             self.host, self.port
         ))
     }
@@ -837,7 +904,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn open_registration_with_non_admin_terminals_warns_off_loopback() {
+    fn open_registration_with_terminal_roles_warns_off_loopback() {
         let warn = |host: &str, secure: bool, private: bool, patch: &str| {
             let Value::Map(map) = Value::from_json_str(patch).unwrap() else {
                 panic!("a map")
@@ -853,21 +920,64 @@ mod tests {
             )
             .open_terminal_warning()
         };
-        // The defaults: open registration, terminals for everyone.
-        for host in ["0.0.0.0", "::", "192.168.1.10", "example.test"] {
-            let text = warn(host, false, false, "{}").unwrap_or_else(|| panic!("{host}"));
-            assert!(text.contains(host) && text.contains("--secure"), "{text}");
+        // The defaults are quiet: registration is off and editors have no terminal.
+        assert!(warn("0.0.0.0", false, false, "{}").is_none());
+        let open = r#"{"api": {"permissions": {"registration": {"users": true}}}}"#;
+        assert!(warn("0.0.0.0", false, false, open).is_none());
+        // Open registration with operators by default (or Meerschaum 4's key) warns.
+        for patch in [
+            r#"{"api": {"permissions": {"registration": {"users": true}, "default_role": "operator"}}}"#,
+            r#"{"api": {"permissions": {"registration": {"users": true}, "actions": {"non_admin": true}}}}"#,
+        ] {
+            for host in ["0.0.0.0", "::", "192.168.1.10", "example.test"] {
+                let text = warn(host, false, false, patch).unwrap_or_else(|| panic!("{host}"));
+                assert!(text.contains(host) && text.contains("--secure"), "{text}");
+            }
+            // Loopback binds, `--secure` and `--private` are quiet.
+            for host in ["127.0.0.1", "127.0.1.1", "localhost", "::1"] {
+                assert!(warn(host, false, false, patch).is_none(), "{host}");
+            }
+            assert!(warn("0.0.0.0", true, false, patch).is_none());
+            assert!(warn("0.0.0.0", false, true, patch).is_none());
         }
-        // Loopback binds, `--secure`, `--private` and either setting turned off are quiet.
-        for host in ["127.0.0.1", "127.0.1.1", "localhost", "::1"] {
-            assert!(warn(host, false, false, "{}").is_none(), "{host}");
-        }
-        assert!(warn("0.0.0.0", true, false, "{}").is_none());
-        assert!(warn("0.0.0.0", false, true, "{}").is_none());
-        let registration = r#"{"api": {"permissions": {"registration": {"users": false}}}}"#;
-        assert!(warn("0.0.0.0", false, false, registration).is_none());
-        let terminals = r#"{"api": {"permissions": {"actions": {"non_admin": false}}}}"#;
+        let terminals = r#"{"api": {"permissions": {"registration": {"users": true}, "default_role": "operator", "actions": {"non_admin": false}}}}"#;
         assert!(warn("0.0.0.0", false, false, terminals).is_none());
+    }
+
+    #[test]
+    fn default_role_and_the_meerschaum_4_key() {
+        let role = |patch: &str| {
+            let sc = ServerConfig::from_map(&map(patch), &ServerFlags::default());
+            (sc.default_role.clone(), sc.notices.clone())
+        };
+        assert_eq!(role("{}").0, "editor");
+        assert_eq!(
+            role(r#"{"api": {"permissions": {"default_role": "Viewer"}}}"#).0,
+            "viewer"
+        );
+        // `actions:non_admin: true` set in the config (4.1's default, written to its config files)
+        // keeps non-administrators' actions and terminal: `operator`.
+        let legacy = r#"{"api": {"permissions": {"actions": {"non_admin": true}}}}"#;
+        assert_eq!(role(legacy).0, "operator");
+        // A role named there wins over the 4.1 key.
+        let named = r#"{"api": {"permissions": {"default_role": "editor", "actions": {"non_admin": true}}}}"#;
+        assert_eq!(role(named).0, "editor");
+        let explicit = r#"{"api": {"permissions": {"default_role": "viewer", "actions": {"non_admin": true}}}}"#;
+        assert_eq!(role(explicit).0, "viewer");
+        let off = r#"{"api": {"permissions": {"actions": {"non_admin": false}}}}"#;
+        assert_eq!(role(off).0, "editor");
+        // A typo gives the fewest permissions, with a notice.
+        let (unknown, notices) = role(r#"{"api": {"permissions": {"default_role": "root"}}}"#);
+        assert_eq!(unknown, "viewer");
+        assert!(notices.iter().any(|n| n.contains("'root'")), "{notices:?}");
+        // Registration is off unless set.
+        let sc = ServerConfig::from_map(&Map::new(), &ServerFlags::default());
+        assert!(!sc.registration_users);
+        let sc = ServerConfig::from_map(
+            &map(r#"{"api": {"permissions": {"registration": {"users": true}}}}"#),
+            &ServerFlags::default(),
+        );
+        assert!(sc.registration_users);
     }
 
     #[test]

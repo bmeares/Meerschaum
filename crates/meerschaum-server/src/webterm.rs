@@ -8,12 +8,10 @@
 //! - **Authentication** is the console session store. The session id is the path segment
 //!   (`is_session_authenticated(session_id)`); the user name behind it names the terminal.
 //!   An unknown session gets v4's `401` "Unauthorized / Please log in" page (and a websocket
-//!   that is accepted and closed straight away). The gate is v4's `is_session_authenticated`
-//!   (`api/dash/sessions.py`): when `api:permissions:actions:non_admin` is true (its default;
-//!   `start api --secure` sets it to false) any logged-in user gets a shell, otherwise only an
-//!   administrator does. No scopes are consulted. This is **not** the gate of `POST /actions`
-//!   (`is_user_allowed_to_execute`), which reads `system:api:permissions:actions:non_admin`, a key
-//!   v4's default config does not define (so it refuses non-admins unless it is set).
+//!   that is accepted and closed straight away). The terminal needs the permission
+//!   `webterm:use` (rc15's access model, [`crate::access`]): administrators, the role
+//!   `operator`, and users given it. Under `start api --secure`
+//!   (`api:permissions:actions:non_admin: false`) only administrators get a shell.
 //! - **tmux.** With `api:webterm:tmux:enabled` (default) and a `tmux` binary, the shell runs in
 //!   `tmux new-session -A -s <user><session_suffix>`, so a reconnect (or a second tab) attaches
 //!   to the same session. Closing the socket kills the PTY and with it the tmux client, never the
@@ -400,7 +398,10 @@ pub fn routes(state: AppState, config: WebtermConfig) -> Router {
 /// The user a session may open a terminal as, or why not.
 enum Access {
     Granted(String),
+    /// No session (log in).
     Denied,
+    /// A session whose user may not use the terminal (`webterm:use`).
+    Forbidden,
     Unavailable,
 }
 
@@ -418,21 +419,32 @@ async fn authorize(inner: &Inner, session_id: &str) -> Access {
             return Access::Unavailable;
         }
     };
-    // PARITY: v4's `is_session_authenticated`: `api:permissions:actions:non_admin` (default true,
-    // false under `--secure`) lets every logged-in user in, else only administrators
-    // (`session_is_admin`).
-    if !inner.state.config.actions_non_admin {
-        let user = meerschaum_core::users::User::new(&username, None);
-        let user_type = inner
-            .state
-            .instance()
-            .get_user_type(&user)
-            .await
-            .ok()
-            .flatten();
-        if user_type.as_deref() != Some("admin") {
-            return Access::Denied;
+    // FIX (intentional v4 change, rc15 access model): v4 gave every logged-in user a shell
+    // unless `--secure`; the terminal now needs `webterm:use` (administrators, the role
+    // `operator`, or the permission given), and `--secure` keeps it for administrators. v4 also
+    // asked only the session store: the session's user must still be a user of the instance.
+    let user = meerschaum_core::users::User::new(&username, None);
+    match inner.state.instance().get_user_id(&user).await {
+        Ok(Some(id)) if !id.is_null() => {}
+        Ok(_) => return Access::Denied,
+        Err(error) => {
+            tracing::warn!("Could not read the user of a terminal session: {error}");
+            return Access::Unavailable;
         }
+    }
+    let access = match crate::access::access_of(
+        &inner.state,
+        crate::auth::Principal::User(user),
+        &crate::auth::Scopes::List(vec!["*".into()]),
+    )
+    .await
+    {
+        Ok(access) => access,
+        Err(e) if e.status.as_u16() == 503 => return Access::Unavailable,
+        Err(_) => return Access::Denied,
+    };
+    if !access.is_admin() && (!inner.state.config.actions_non_admin || !access.has("webterm:use")) {
+        return Access::Forbidden;
     }
     Access::Granted(username)
 }
@@ -456,10 +468,30 @@ const UNAUTHORIZED_PAGE: &str = r#"<html>
 </html>
 "#;
 
+/// The page of a signed-in user without the permission `webterm:use`.
+const FORBIDDEN_PAGE: &str = r#"<html>
+    <head>
+        <style>
+        body { background-color: #222222; }
+        #message-div { padding: 15px; font-size: x-large; font-family: sans-serif; }
+        h2 { color: #FFFFFF; }
+        p { color: #FFFFFF; }
+        </style>
+    </head>
+    <body>
+        <div id="message-div">
+            <h2>No terminal access</h2>
+            <p>Ask an administrator for the permission to use the terminal.</p>
+        </div>
+    </body>
+</html>
+"#;
+
 async fn page(State(inner): State<Inner>, UrlPath(session_id): UrlPath<String>) -> Response {
     let mut response = match authorize(&inner, &session_id).await {
         Access::Granted(_) => Html((inner.config.page)(&session_id)).into_response(),
         Access::Denied => (StatusCode::UNAUTHORIZED, Html(UNAUTHORIZED_PAGE)).into_response(),
+        Access::Forbidden => (StatusCode::FORBIDDEN, Html(FORBIDDEN_PAGE)).into_response(),
         Access::Unavailable => (
             StatusCode::SERVICE_UNAVAILABLE,
             "The session store is unavailable.",
@@ -515,7 +547,9 @@ async fn socket(
             // PARITY: v4 accepts the websocket, then closes it when the session is not authorized.
             match authorize(&inner, &session_id).await {
                 Access::Granted(name) => run(inner.config, name, socket).await,
-                Access::Denied | Access::Unavailable => close(socket, 1000).await,
+                Access::Denied | Access::Forbidden | Access::Unavailable => {
+                    close(socket, 1000).await
+                }
             }
         })
 }

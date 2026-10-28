@@ -112,68 +112,84 @@ async fn login(ctx: Ctx, body: Body) -> ApiResult {
     let conn = state.instance();
     let no_auth = state.config.no_auth;
     let py_str = |s: &Option<String>| s.clone().unwrap_or_else(|| "None".into());
-    let (allowed_scopes, user_type, sub): (Vec<String>, Option<String>, String) =
-        if grant_type == "password" {
-            let username = py_str(&data.username);
-            let password = py_str(&data.password);
-            let user = User::new(&username, Some(&password));
-            let correct = no_auth || {
-                let hash = conn
-                    .get_user_password_hash(&user)
-                    .await
-                    .map_err(|e| ApiError::exception("get_user_password_hash", e))?;
-                match hash {
-                    Some(h) => verify_password(&password, &h).unwrap_or(false),
-                    None => false,
-                }
-            };
-            if !correct {
-                return Err(ApiError::invalid_credentials());
-            }
-            // Fail closed: a failed read of the user's scopes or type is an error (`503`), never
-            // v4's "no `scopes` attribute = every scope" or "no type = not an administrator".
-            let scopes = User::scopes_from_read(conn.get_user_attributes(&user).await)
-                .map_err(crate::auth::scopes_unavailable)?;
-            let typ = conn
-                .get_user_type(&user)
+    let (allowed_scopes, user_type, sub): (Vec<String>, Option<String>, String) = if grant_type
+        == "password"
+    {
+        let username = py_str(&data.username);
+        let password = py_str(&data.password);
+        let user = User::new(&username, Some(&password));
+        let correct = no_auth || {
+            let hash = conn
+                .get_user_password_hash(&user)
                 .await
-                .map_err(crate::auth::scopes_unavailable)?;
-            (scopes, typ, username)
-        } else if grant_type == "client_credentials" {
-            let client_id = py_str(&data.client_id);
-            if !is_uuid(&client_id) {
-                return Err(ApiError::invalid_credentials());
+                .map_err(|e| ApiError::exception("get_user_password_hash", e))?;
+            match hash {
+                Some(h) => verify_password(&password, &h).unwrap_or(false),
+                None => false,
             }
-            let token_id =
-                Uuid::parse_str(client_id.trim()).map_err(|_| ApiError::invalid_credentials())?;
-            let correct = no_auth || {
-                let token = conn
-                    .get_token_model(&token_id)
-                    .await
-                    .map_err(|e| ApiError::exception("get_token_model", e))?;
-                // Client-credentials login must enforce the same lifecycle as direct API
-                // keys; otherwise an invalidated or expired key could mint fresh JWTs.
-                token.is_some_and(|token| {
-                    token.is_valid
-                        && token
-                            .expiration
-                            .is_none_or(|expiration| expiration > Utc::now())
-                        && token.secret_hash.is_some_and(|hash| {
-                            verify_password(&py_str(&data.client_secret), &hash).unwrap_or(false)
-                        })
-                })
-            };
-            if !correct {
-                return Err(ApiError::invalid_credentials());
+        };
+        if !correct {
+            return Err(ApiError::invalid_credentials());
+        }
+        // Fail closed: a failed read of the user's permissions or type is an error (`503`),
+        // never v4's "no `scopes` attribute = every scope" or "no type = not an
+        // administrator". The token carries the user's effective permissions (rc15): its own,
+        // else its role, else the server's default role; `*` for an administrator.
+        let typ = conn
+            .get_user_type(&user)
+            .await
+            .map_err(crate::auth::scopes_unavailable)?;
+        let scopes = crate::auth::principal_scopes(
+            state,
+            &crate::auth::Principal::User(User::new(&username, None)),
+        )
+        .await?;
+        (scopes, typ, username)
+    } else if grant_type == "client_credentials" {
+        let client_id = py_str(&data.client_id);
+        if !is_uuid(&client_id) {
+            return Err(ApiError::invalid_credentials());
+        }
+        let token_id =
+            Uuid::parse_str(client_id.trim()).map_err(|_| ApiError::invalid_credentials())?;
+        let correct = no_auth || {
+            let token = conn
+                .get_token_model(&token_id)
+                .await
+                .map_err(|e| ApiError::exception("get_token_model", e))?;
+            // Client-credentials login must enforce the same lifecycle as direct API
+            // keys; otherwise an invalidated or expired key could mint fresh JWTs.
+            token.is_some_and(|token| {
+                token.is_valid
+                    && token
+                        .expiration
+                        .is_none_or(|expiration| expiration > Utc::now())
+                    && token.secret_hash.is_some_and(|hash| {
+                        verify_password(&py_str(&data.client_secret), &hash).unwrap_or(false)
+                    })
+            })
+        };
+        if !correct {
+            return Err(ApiError::invalid_credentials());
+        }
+        // The token's scopes, capped by its owner's permissions (rc15).
+        let scopes = match conn
+            .get_token_model(&token_id)
+            .await
+            .map_err(|e| ApiError::exception("get_token_model", e))?
+        {
+            Some(token) if !no_auth => {
+                crate::auth::principal_scopes(state, &crate::auth::Principal::Token(token)).await?
             }
-            let scopes = conn
+            _ => conn
                 .get_token_scopes(&token_id)
                 .await
-                .map_err(|e| ApiError::exception("get_token_scopes", e))?;
-            (scopes, None, client_id)
-        } else {
-            return Err(ApiError::invalid_credentials());
+                .map_err(|e| ApiError::exception("get_token_scopes", e))?,
         };
+        (scopes, None, client_id)
+    } else {
+        return Err(ApiError::invalid_credentials());
+    };
 
     let requested: Vec<String> = data.scope.split_whitespace().map(String::from).collect();
     // Admins implicitly hold every scope, so their stored scope list must not filter the grant.

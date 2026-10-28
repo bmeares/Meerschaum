@@ -8,7 +8,9 @@
 #   - the full image also has `git` (plugins may require `git+https://...` packages) and `ssh`;
 #   - the full image runs that healthcheck for real: `mrsm start api --production` on a scratch SQLite
 #     instance (with the web console, no terminal, a random port) and `curl --fail` against it in the same
-#     container, which must answer within 90 seconds.
+#     container, which must answer within 90 seconds; once more with HTTPS (`--keyfile` / `--certfile`, a
+#     self-signed certificate made with `openssl`), where the unchanged plain-HTTP healthcheck must still
+#     answer and the console must load over `https://` (its Python host calls the server back).
 #
 #   --full-image IMAGE   checked as a full image (curl, git, ssh, mrsm, the API healthcheck).
 #   --slim-image IMAGE   checked as a slim image (curl, mrsm).
@@ -76,11 +78,21 @@ if [ "${1:-}" = blocked ]; then
 fi
 export MRSM_ROOT_DIR="$root/root" MRSM_PLUGINS_DIR="$root/plugins" MRSM_NO_AUTO_INSTALL=1
 export MRSM_SQL_SMOKE="sqlite:///$root/smoke.db"
-mrsm start api --production --port "$port" -i sql:smoke --no-webterm >"$root/api.log" 2>&1 &
+tls_args=()
+console="http://localhost:$port"
+if [ "${1:-}" = https ]; then
+  # HTTPS with a self-signed certificate: the healthcheck below stays plain HTTP, as the stack runs it.
+  openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 1 \
+    -subj /CN=localhost -addext subjectAltName=DNS:localhost \
+    -keyout "$root/key.pem" -out "$root/cert.pem" >/dev/null 2>&1 || { echo "openssl failed"; exit 1; }
+  tls_args=(--keyfile "$root/key.pem" --certfile "$root/cert.pem")
+  console="https://localhost:$port"
+fi
+mrsm start api --production --port "$port" -i sql:smoke --no-webterm "${tls_args[@]}" >"$root/api.log" 2>&1 &
 api=$!
 for _ in $(seq 1 90); do
   if curl --fail --silent "http://localhost:$port/healthcheck" 2>/dev/null; then
-    if ! curl --fail --silent "http://localhost:$port/dash/_dash-layout" >"$root/layout.json" 2>/dev/null; then
+    if ! curl --fail --silent --insecure "$console/dash/_dash-layout" >"$root/layout.json" 2>/dev/null; then
       sleep 1
       continue
     fi
@@ -88,7 +100,7 @@ for _ in $(seq 1 90); do
       break
     fi
     echo
-    echo "API healthcheck and Dash layout answered without network access"
+    echo "API healthcheck and Dash layout ($console) answered without network access"
     kill "$api" 2>/dev/null; wait "$api" 2>/dev/null
     exit 0
   fi
@@ -208,6 +220,7 @@ for image in "${full_images[@]}"; do
   '
   check "API healthcheck and Dash" "$image" bash -c "$api_healthcheck_script"
   check "Dash with blocked root socket directory" "$image" bash -c "$api_healthcheck_script" -- blocked
+  check "API healthcheck and Dash over HTTPS" "$image" bash -c "$api_healthcheck_script" -- https
 done
 
 if [ "$failures" -gt 0 ]; then

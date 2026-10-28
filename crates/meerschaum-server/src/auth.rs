@@ -419,28 +419,42 @@ pub fn scopes_unavailable(error: impl std::fmt::Display) -> ApiError {
     ApiError::unavailable("Could not read your permissions from the instance; try again.")
 }
 
-/// `user.get_scopes(refresh=True)` / `token.get_scopes(refresh=True)`.
-///
-/// A read that fails is an error (`503`), never a guess: a user whose attributes cannot be read
-/// gets no scopes rather than v4's "no `scopes` attribute = every scope".
-pub async fn principal_scopes(
-    state: &AppState,
-    principal: &Principal,
-) -> Result<Vec<String>, ApiError> {
-    let conn = state.instance();
+/// The scopes stored with a credential: a token's scopes (`token.get_scopes(refresh=True)`), or
+/// `['*']` for a user (whose permissions are [`principal_scopes`]).
+async fn stored_scopes(state: &AppState, principal: &Principal) -> Result<Vec<String>, ApiError> {
     match principal {
-        Principal::User(u) => {
-            User::scopes_from_read(conn.get_user_attributes(u).await).map_err(scopes_unavailable)
-        }
+        Principal::User(_) => Ok(vec!["*".into()]),
         Principal::Token(t) => match t.id {
-            Some(id) => conn.get_token_scopes(&id).await.map_err(scopes_unavailable),
+            Some(id) => state
+                .instance()
+                .get_token_scopes(&id)
+                .await
+                .map_err(scopes_unavailable),
             None => Ok(Vec::new()),
         },
     }
 }
 
-/// `get_granted_scopes(request, user_or_token)`: API keys are resolved against the instance on
-/// every request; JWTs carry their own scopes.
+/// What a principal may do (rc15's access model, [`crate::access`]): a user's effective
+/// permissions (every permission for an administrator, else its own, else the default role), a
+/// token's scopes capped by its owner's. An administrator's is `['*']`.
+///
+/// A read that fails is an error (`503`), never a guess: a user whose attributes cannot be read
+/// gets no permissions rather than v4's "no `scopes` attribute = every scope".
+pub async fn principal_scopes(
+    state: &AppState,
+    principal: &Principal,
+) -> Result<Vec<String>, ApiError> {
+    let granted = Scopes::List(stored_scopes(state, principal).await?);
+    // Read now, never from the identity cache: a login, a new credential and running actions
+    // are decided on the instance's current answer (and refused when it cannot be read).
+    let access = crate::access::access_of_fresh(state, principal.clone(), &granted).await?;
+    Ok(access.scopes().to_list())
+}
+
+/// `get_granted_scopes(request, user_or_token)`: what the credential itself grants. API keys
+/// are resolved against the instance on every request; JWTs carry their own scopes. The access
+/// model caps them with the owner's permissions ([`crate::access::resolve`]).
 pub async fn granted_scopes(
     state: &AppState,
     headers: &HeaderMap,
@@ -451,7 +465,7 @@ pub async fn granted_scopes(
     }
     let auth = authorization(headers).unwrap_or_default();
     if auth.contains("mrsm-key:") {
-        return Ok(Scopes::List(principal_scopes(state, principal).await?));
+        return Ok(Scopes::List(stored_scopes(state, principal).await?));
     }
     if auth.is_empty() {
         return Err(ApiError::unauthorized("Not authenticated.", None));
@@ -532,8 +546,11 @@ pub async fn scoped_auth(
 }
 
 /// [`scoped_auth`] where a required scope may also be satisfied by a legacy spelling: each
-/// `(scope, legacy)` pair of `aliases` accepts a token that explicitly holds `legacy` in place
-/// of `scope`. The 403 still names the current scope.
+/// `(scope, legacy)` pair of `aliases` accepts a caller who holds `legacy` in place of `scope`.
+/// The 403 still names the current scope.
+///
+/// The scopes are checked against the caller's effective permissions (rc15,
+/// [`crate::access`]): the credential's scopes capped by its owner's current permissions.
 pub async fn scoped_auth_with_aliases(
     state: &AppState,
     headers: &HeaderMap,
@@ -543,25 +560,10 @@ pub async fn scoped_auth_with_aliases(
     if state.config.no_auth {
         return Ok(None);
     }
-    let principal = load_user_or_token(state, headers).await?;
-    let granted = granted_scopes(state, headers, &principal).await?;
-    if granted.has("*") {
-        return Ok(Some(principal));
-    }
-    let auth = meerschaum_connector_api::models::ScopedAuth::new(scopes);
-    for scope in &auth.scopes {
-        let legacy = aliases
-            .iter()
-            .find(|(current, _)| current == scope)
-            .map(|(_, legacy)| *legacy);
-        if !granted.has(scope) && !legacy.is_some_and(|l| granted.has(l)) {
-            return Err(ApiError::new(
-                403,
-                format!("Missing required scope: '{scope}'"),
-            ));
-        }
-    }
-    Ok(Some(principal))
+    let required = meerschaum_connector_api::models::ScopedAuth::new(scopes);
+    let required: Vec<&str> = required.scopes.iter().map(String::as_str).collect();
+    let access = crate::access::require_with_aliases(state, headers, &required, aliases).await?;
+    Ok(access.auth)
 }
 
 /// `ScopedAuth(scopes)` only when the server runs with `--private` (`... if private else None`).
@@ -577,7 +579,8 @@ pub async fn scoped_auth_if_private(
     }
 }
 
-/// `CurrentScopes`: the caller's granted scopes without requiring any.
+/// `CurrentScopes`: the caller's permissions without requiring any (`['*']` for an
+/// administrator with every permission; see [`crate::access`]).
 pub async fn current_scopes(
     state: &AppState,
     headers: &HeaderMap,
@@ -585,9 +588,9 @@ pub async fn current_scopes(
     if state.config.no_auth {
         return Ok((None, Scopes::List(vec!["*".into()])));
     }
-    let principal = load_user_or_token(state, headers).await?;
-    let scopes = granted_scopes(state, headers, &principal).await?;
-    Ok((Some(principal), scopes))
+    let access = crate::access::resolve(state, headers).await?;
+    let scopes = access.scopes();
+    Ok((access.auth, scopes))
 }
 
 /// `fastapi.Depends(manager) if not no_auth else None`.
@@ -621,22 +624,23 @@ pub async fn is_admin(state: &AppState, principal: Option<&Principal>) -> bool {
     }
 }
 
-/// `is_user_allowed_to_execute(user)`: the `/actions` and job routes, which read
-/// `system:api:permissions:actions:non_admin` (see [`is_user_allowed_to_execute_with`]).
+/// `is_user_allowed_to_execute(user)`: who may run arbitrary actions (`/actions`, the job
+/// routes, MCP's `execute_action`, `POST /execute`): administrators, and other users who hold
+/// `actions:execute` and `jobs:execute` (the role `operator`, or permissions of their own) unless
+/// the server runs with `--secure` (`api:permissions:actions:non_admin: false`).
+///
+/// FIX (intentional v4 change, rc15 access model): v4 gated `/actions` and the job routes on
+/// `system:api:permissions:actions:non_admin`, a key its default config does not define, and the
+/// console on `api:permissions:actions:non_admin`; both now follow the caller's permissions.
 pub async fn is_user_allowed_to_execute(
     state: &AppState,
     principal: Option<&Principal>,
 ) -> SuccessTuple {
-    is_user_allowed_to_execute_with(state, principal, state.config.system_actions_non_admin).await
+    is_user_allowed_to_execute_with(state, principal, state.config.actions_non_admin).await
 }
 
-/// Who may run actions through the web console: `POST /execute` and the job-log stream
-/// (`GET /logs/{name}/stream`) both ask this one function, so they cannot disagree. It is the rule
-/// of v4's console (`api/dash/sessions.py`): administrators, and other users only when
-/// `api:permissions:actions:non_admin` is true (its default; `start api --secure` sets it false),
-/// plus the scopes `is_user_allowed_to_execute` asks of non-administrators. v4's other key,
-/// `system:api:permissions:actions:non_admin` (unset by default), gates `/actions` and the job
-/// routes and does not apply here.
+/// The web console's `POST /execute` and job-log stream: the same rule as
+/// [`is_user_allowed_to_execute`] (kept as its own name for the callers that ask it).
 pub async fn is_user_allowed_to_execute_console(
     state: &AppState,
     principal: Option<&Principal>,
@@ -645,10 +649,8 @@ pub async fn is_user_allowed_to_execute_console(
 }
 
 /// `is_user_allowed_to_execute(user)` with the "non-administrators may run actions" switch given
-/// by the caller: `/actions` and the job routes pass `system:api:permissions:actions:non_admin`
-/// (v4's key, unset by default), the console's `POST /execute` passes
-/// `api:permissions:actions:non_admin` (`ServerConfig::actions_non_admin`, true by default,
-/// false under `--secure`).
+/// by the caller (`api:permissions:actions:non_admin`, false under `--secure`): a
+/// non-administrator also needs the permissions [`NECESSARY_SCOPES`].
 pub async fn is_user_allowed_to_execute_with(
     state: &AppState,
     principal: Option<&Principal>,
@@ -668,6 +670,9 @@ pub async fn is_user_allowed_to_execute_with(
     // A failed read refuses (fail closed).
     let scopes = match principal_scopes(state, principal).await {
         Ok(scopes) => scopes,
+        Err(e) if e.status.as_u16() == 401 => {
+            return SuccessTuple::fail("Invalid or revoked token.");
+        }
         Err(_) => {
             return SuccessTuple::fail(
                 "Could not read your permissions from the instance; try again.",
@@ -681,7 +686,10 @@ pub async fn is_user_allowed_to_execute_with(
     }
     for scope in NECESSARY_SCOPES {
         if !scopes.iter().any(|s| s == scope) {
-            return SuccessTuple::fail(format!("Missing scope '{scope}'."));
+            return SuccessTuple::fail(format!(
+                "Missing permission '{scope}': running actions needs the role 'operator' (or \
+                 '{scope}' among your own permissions)."
+            ));
         }
     }
     SuccessTuple::success()

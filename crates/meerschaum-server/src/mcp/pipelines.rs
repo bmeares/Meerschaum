@@ -10,7 +10,8 @@ use meerschaum_core::{Map, Value};
 use serde_json::{Value as Json, json};
 
 use super::protocol::map_of;
-use super::tools::{ToolCx, ToolError, connector};
+use super::tools::{ToolCx, ToolError, caller_access, connector};
+use crate::access::RefFilter;
 use crate::backends::{PlanOptions, RunStatusFilter, RunsFilter};
 use crate::error::ApiError;
 use crate::routes::pipelines as http;
@@ -101,17 +102,28 @@ fn principal<'a>(cx: &'a ToolCx<'_>) -> Option<&'a crate::auth::Principal> {
 /// `list_pipelines`.
 pub async fn list_pipelines(args: &Map, cx: &ToolCx<'_>) -> Result<Value, ToolError> {
     let conn = registry(cx, args)?;
-    let definitions = http::list_definitions(cx.state, &conn).await.map_err(api)?;
+    let caller = caller_access(cx).await?;
+    let mut filter = RefFilter::new(cx.state, &caller, &conn.connector_keys());
+    let mut definitions = Vec::new();
+    for (definition, parameters) in http::list_registrations(cx.state, &conn)
+        .await
+        .map_err(api)?
+    {
+        if caller.can_see(&parameters) {
+            definitions.push(http::visible_definition(&mut filter, definition).await);
+        }
+    }
     let mut pipelines = Vec::with_capacity(definitions.len());
     for definition in definitions {
         let name = definition["name"].as_str().unwrap_or_default().to_string();
         let members = http::targets_of(&definition);
-        let last_run = http::last_run(cx.state, &conn, &name).await;
+        let last_run = http::last_run(cx.state, &caller, &conn, &name).await;
         pipelines.push(json!({
             "name": name,
             "registry": conn.connector_keys(),
             "description": definition.get("description").cloned().unwrap_or(Json::Null),
             "members": members,
+            "hidden_members": definition.get("hidden_members").cloned().unwrap_or(json!(0)),
             "parents": definition.get("parents").cloned().unwrap_or(Json::Null),
             "children": definition.get("children").cloned().unwrap_or(Json::Null),
             "last_run": last_run,
@@ -129,7 +141,8 @@ pub async fn plan_pipeline(args: &Map, cx: &ToolCx<'_>) -> Result<Value, ToolErr
     let name = required_str(args, "name")?;
     let options = bounds(args)?;
     let conn = registry(cx, args)?;
-    http::require_definition_on(cx.state, &conn, &name)
+    let caller = caller_access(cx).await?;
+    http::visible_registration(cx.state, &caller, &conn, &name)
         .await
         .map_err(api)?;
     let planned = cx
@@ -138,7 +151,11 @@ pub async fn plan_pipeline(args: &Map, cx: &ToolCx<'_>) -> Result<Value, ToolErr
         .plan(&name, &conn.connector_keys(), &options)
         .await
         .map_err(|e| api(http::plan_error(e)))?;
-    let mut planned = planned;
+    let mut planned = http::visible_plan(
+        &mut RefFilter::new(cx.state, &caller, &conn.connector_keys()),
+        planned,
+    )
+    .await;
     if let Some(o) = planned.as_object_mut() {
         o.entry("warnings").or_insert(json!([]));
     }
@@ -150,7 +167,8 @@ pub async fn sync_pipeline(args: &Map, cx: &ToolCx<'_>) -> Result<Value, ToolErr
     let name = required_str(args, "name")?;
     let options = bounds(args)?;
     let conn = registry(cx, args)?;
-    let definition = http::require_definition_on(cx.state, &conn, &name)
+    let caller = caller_access(cx).await?;
+    let (definition, _) = http::visible_registration(cx.state, &caller, &conn, &name)
         .await
         .map_err(api)?;
     let started = http::start_sync(
@@ -224,6 +242,13 @@ pub async fn list_runs(args: &Map, cx: &ToolCx<'_>) -> Result<Value, ToolError> 
         .get_runs(&filter)
         .await
         .map_err(|e| api(crate::engine_stream::api_error(e)))?;
+    let caller = caller_access(cx).await?;
+    let instance = registry(cx, args)?.connector_keys();
+    let runs = crate::access::runs::visible_runs(
+        &mut RefFilter::new(cx.state, &caller, &instance).for_engine(),
+        runs,
+    )
+    .await;
     let count = runs.len();
     Ok(Value::Map(map_of([
         (
@@ -238,9 +263,15 @@ pub async fn list_runs(args: &Map, cx: &ToolCx<'_>) -> Result<Value, ToolError> 
 pub async fn get_run(args: &Map, cx: &ToolCx<'_>) -> Result<Value, ToolError> {
     let run_id = required_str(args, "run_id")?;
     let store = store(cx, args)?;
-    let Some((run, nodes)) = crate::routes::engine::run_detail(store.as_ref(), &run_id)
-        .await
-        .map_err(|e| api(crate::engine_stream::api_error(e)))?
+    let caller = caller_access(cx).await?;
+    let instance = registry(cx, args)?.connector_keys();
+    let Some((run, nodes)) = crate::routes::engine::visible_run_detail(
+        store.as_ref(),
+        &run_id,
+        &mut RefFilter::new(cx.state, &caller, &instance).for_engine(),
+    )
+    .await
+    .map_err(|e| api(crate::engine_stream::api_error(e)))?
     else {
         return Err(ToolError::value(format!("Run '{run_id}' was not found.")));
     };
@@ -256,28 +287,31 @@ pub async fn get_run(args: &Map, cx: &ToolCx<'_>) -> Result<Value, ToolError> {
     ])))
 }
 
-/// Whether the caller may see job `name` (`meta`): over HTTP the jobs routes' rule (an
-/// execution job is its creator's and the administrators'); over stdio every job.
-async fn may_see(cx: &ToolCx<'_>, name: &str, meta: Option<&Json>) -> bool {
+/// Who asks about jobs, read once per call: over HTTP the caller (the jobs routes' rule: a job is
+/// its team's, a console run its creator's, every job the administrators'; see
+/// [`crate::routes::jobs::can_see`]); over stdio the server's own user, who sees every job.
+/// `None` for a caller whose identity cannot be read: it sees no job.
+async fn job_viewer(cx: &ToolCx<'_>) -> Option<crate::access::Access> {
     if !cx.caller.api {
-        return true;
+        return Some(crate::access::Access::everything());
     }
-    let principal = cx.caller.principal.as_ref();
-    let admin = crate::auth::is_admin(cx.state, principal).await;
-    crate::routes::execute::job_visible_to(
-        admin,
-        crate::routes::execute::owner_label(principal).as_deref(),
-        name,
-        meta,
-    )
+    crate::routes::jobs::access_of_principal(cx.state, cx.caller.principal.as_ref())
+        .await
+        .ok()
+}
+
+/// Whether `viewer` (see [`job_viewer`]) may see job `name` (`meta`).
+fn may_see(viewer: Option<&crate::access::Access>, name: &str, meta: Option<&Json>) -> bool {
+    viewer.is_some_and(|access| crate::routes::jobs::can_see(access, name, meta))
 }
 
 /// `list_jobs`.
 pub async fn list_jobs(args: &Map, cx: &ToolCx<'_>) -> Result<Value, ToolError> {
     let status = str_arg(args, "status").map(|s| s.to_lowercase());
+    let viewer = job_viewer(cx).await;
     let mut jobs = Vec::new();
     for (name, mut meta) in cx.state.jobs.list().await {
-        if !may_see(cx, &name, Some(&meta)).await {
+        if !may_see(viewer.as_ref(), &name, Some(&meta)) {
             continue;
         }
         if status
@@ -321,7 +355,7 @@ pub async fn get_job_logs(args: &Map, cx: &ToolCx<'_>) -> Result<Value, ToolErro
     let lines = limit_arg(args, "lines", DEFAULT_LOG_LINES, MAX_LOG_LINES)?;
     let missing = || ToolError::value(format!("Job '{name}' does not exist."));
     let meta = cx.state.jobs.get(&name).await.ok_or_else(missing)?;
-    if !may_see(cx, &name, Some(&meta)).await {
+    if !may_see(job_viewer(cx).await.as_ref(), &name, Some(&meta)) {
         return Err(missing());
     }
     let logs = cx.state.jobs.logs(&name).await.unwrap_or_default();
@@ -339,6 +373,8 @@ pub async fn get_job_logs(args: &Map, cx: &ToolCx<'_>) -> Result<Value, ToolErro
 /// `list_connectors`.
 pub async fn list_connectors(args: &Map, cx: &ToolCx<'_>) -> Result<Value, ToolError> {
     let wanted = str_arg(args, "type");
+    // A connector reserved for other teams is not listed (rc15).
+    let caller = caller_access(cx).await?;
     let mut connectors = Vec::new();
     for (typ, labels) in &cx.state.config.connectors {
         if wanted.as_ref().is_some_and(|w| w != typ) {
@@ -348,7 +384,13 @@ pub async fn list_connectors(args: &Map, cx: &ToolCx<'_>) -> Result<Value, ToolE
             continue;
         };
         for label in labels.keys() {
-            if label == "default" {
+            if label == "default"
+                || !crate::access::guard::may_use_connector(
+                    cx.state,
+                    &caller,
+                    &format!("{typ}:{label}"),
+                )
+            {
                 continue;
             }
             connectors.push(json!({

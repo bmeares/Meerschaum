@@ -18,6 +18,7 @@ use super::protocol::{decode_cursor, encode_cursor, map_of, paginate, s};
 use super::registry::builtin;
 use super::security;
 use super::{Caller, McpServer, SqlReadError};
+use crate::access::{self, Access, rules::LockOp};
 use crate::error::ApiError;
 use crate::pipe_methods::{self, SyncKwargs, SyncPayload};
 use crate::serialize::{DataJsonOptions, DateUnit, data_to_json};
@@ -79,6 +80,24 @@ fn api_error_str(e: &ApiError) -> String {
     } else {
         format!("{}: {detail}", e.status.as_u16())
     }
+}
+
+/// The caller's access (rc15): over HTTP its effective permissions, teams and visibility;
+/// over stdio (and under `--no-auth`) everything (local trust).
+pub async fn caller_access(cx: &ToolCx<'_>) -> Result<Access, ToolError> {
+    match (&cx.caller.principal, cx.caller.api) {
+        (Some(principal), true) => {
+            access::access_of(cx.state, principal.clone(), &cx.caller.scopes)
+                .await
+                .map_err(|e| ToolError::permission(api_error_str(&e)))
+        }
+        _ => Ok(Access::everything()),
+    }
+}
+
+/// A pipe the caller cannot see, as the tools report it (a pipe that does not exist).
+fn hidden(pipe: &Pipe) -> ToolError {
+    ToolError::value(format!("{pipe} was not found."))
 }
 
 /// The context of a tool call.
@@ -206,6 +225,43 @@ pub async fn resolve_pipe(
         .await
         .map_err(|e| ToolError::other(api_error_str(&e)))?;
     check_protected_target(&pipe)?;
+    // Over HTTP: only the pipes the caller can see (rc15).
+    if cx.caller.api {
+        let caller = caller_access(cx).await?;
+        if !caller.can_see_pipe(&pipe) {
+            return Err(hidden(&pipe));
+        }
+        if !caller.is_admin() {
+            let index = access::pipe_index(cx.state, ik.as_deref())
+                .await
+                .map_err(|e| ToolError::other(api_error_str(&e)))?;
+            access::guard::check_pipe_target(conn.as_ref(), &pipe, &index.hidden_targets(&caller))
+                .map_err(|_| hidden(&pipe))?;
+        }
+    }
+    Ok((conn, pipe))
+}
+
+/// [`resolve_pipe`] for a pipe the caller may change (refusing `op` under the pipe's locks).
+pub async fn resolve_editable(
+    cx: &ToolCx<'_>,
+    args: &Map,
+    op: Option<LockOp>,
+) -> Result<(Arc<dyn InstanceConnector>, Pipe), ToolError> {
+    let (conn, pipe) = resolve_pipe(cx, args).await?;
+    if cx.caller.api {
+        let caller = caller_access(cx).await?;
+        if !caller.can_edit(pipe.raw_parameters()) {
+            return Err(ToolError::permission(
+                access::not_editable(&pipe).detail_text(),
+            ));
+        }
+    }
+    if let Some(op) = op
+        && let Some(e) = access::guard::lock_conflict(&pipe, op)
+    {
+        return Err(ToolError::permission(e.detail_text()));
+    }
     Ok((conn, pipe))
 }
 
@@ -281,6 +337,12 @@ pub async fn get_pipes(
         .map_err(|e| ToolError::other(e.to_string()))?;
     type Grouped = IndexMap<String, IndexMap<String, Vec<Pipe>>>;
     let mut grouped: Grouped = IndexMap::new();
+    // Over HTTP: only the pipes the caller can see (rc15).
+    let caller = if cx.caller.api {
+        Some(caller_access(cx).await?)
+    } else {
+        None
+    };
     for entry in keys.entries() {
         let lk = normalize_location(entry.location_key.as_deref());
         let params = match &entry.extra {
@@ -304,6 +366,9 @@ pub async fn get_pipes(
             hydrate(conn, &mut pipe)
                 .await
                 .map_err(|e| ToolError::other(api_error_str(&e)))?;
+        }
+        if caller.as_ref().is_some_and(|c| !c.can_see_pipe(&pipe)) {
+            continue;
         }
         grouped
             .entry(entry.connector_keys.clone())
@@ -418,9 +483,30 @@ pub async fn call(name: &str, args: &Map, cx: &ToolCx<'_>) -> Result<Value, Tool
         "register_pipe" => register_pipe(args, cx).await,
         "edit_pipe" => edit_pipe(args, cx).await,
         "sync_pipe" => {
-            let (_, pipe) = resolve_pipe(cx, args).await?;
+            let (conn, pipe) = resolve_editable(cx, args, Some(LockOp::Sync)).await?;
             let parents = depth_arg(args, "parents")?;
             let children = depth_arg(args, "children")?;
+            if (parents.is_some() || children.is_some()) && cx.caller.api {
+                // The traversal may reach pipes the caller may not change.
+                let caller = caller_access(cx).await?;
+                if !caller.is_admin() {
+                    let index = access::pipe_index(cx.state, Some(&conn.connector_keys()))
+                        .await
+                        .map_err(|e| ToolError::other(api_error_str(&e)))?;
+                    let blocked = index.pipes.iter().any(|p| {
+                        !caller.can_edit(&p.parameters)
+                            && !access::Locks::from_parameters(&p.parameters)
+                                .contains(access::Lock::Sync)
+                    });
+                    if blocked {
+                        return Err(ToolError::permission(
+                            "Syncing a pipe with its parents or children is not available \
+                             while this instance has pipes you may not change: sync the pipes \
+                             one by one, or run a saved Pipeline.",
+                        ));
+                    }
+                }
+            }
             let res = if parents.is_none() && children.is_none() {
                 cx.server
                     .backend
@@ -441,7 +527,7 @@ pub async fn call(name: &str, args: &Map, cx: &ToolCx<'_>) -> Result<Value, Tool
             Ok(tuple_value(&res))
         }
         "sync_documents" => {
-            let (conn, pipe) = resolve_pipe(cx, args).await?;
+            let (conn, pipe) = resolve_editable(cx, args, Some(LockOp::Sync)).await?;
             let docs = match args.get("documents") {
                 Some(v) if v.truthy() => crate::json::from_core(v),
                 _ => serde_json::Value::Array(Vec::new()),
@@ -468,7 +554,7 @@ pub async fn call(name: &str, args: &Map, cx: &ToolCx<'_>) -> Result<Value, Tool
             Ok(tuple_value(&res))
         }
         "verify_pipe" => {
-            let (_, pipe) = resolve_pipe(cx, args).await?;
+            let (_, pipe) = resolve_editable(cx, args, Some(LockOp::Sync)).await?;
             let res = cx
                 .server
                 .backend
@@ -477,7 +563,12 @@ pub async fn call(name: &str, args: &Map, cx: &ToolCx<'_>) -> Result<Value, Tool
             Ok(tuple_value(&res))
         }
         "deduplicate_pipe" | "clear_pipe" => {
-            let (conn, pipe) = resolve_pipe(cx, args).await?;
+            let op = if name == "clear_pipe" {
+                LockOp::Clear
+            } else {
+                LockOp::Deduplicate
+            };
+            let (conn, pipe) = resolve_editable(cx, args, Some(op)).await?;
             let query = DataQuery {
                 begin: bound_arg(cx, &conn, &pipe, args, "begin").await?,
                 end: bound_arg(cx, &conn, &pipe, args, "end").await?,
@@ -492,12 +583,14 @@ pub async fn call(name: &str, args: &Map, cx: &ToolCx<'_>) -> Result<Value, Tool
             Ok(tuple_value(&res))
         }
         "drop_pipe" => {
-            let (conn, pipe) = resolve_pipe(cx, args).await?;
+            let (conn, pipe) = resolve_editable(cx, args, Some(LockOp::Drop)).await?;
             Ok(tuple_value(&conn.drop_pipe(&pipe).await))
         }
         "delete_pipe" => {
-            let (conn, pipe) = resolve_pipe(cx, args).await?;
-            Ok(tuple_value(&conn.delete_pipe(&pipe).await))
+            let (conn, pipe) = resolve_editable(cx, args, Some(LockOp::Delete)).await?;
+            let res = conn.delete_pipe(&pipe).await;
+            cx.state.access_cache().forget_pipes();
+            Ok(tuple_value(&res))
         }
         "read_sql" => read_sql(args, cx).await,
         "execute_action" => execute_action(args, cx).await,
@@ -822,6 +915,14 @@ async fn register_pipe(args: &Map, cx: &ToolCx<'_>) -> Result<Value, ToolError> 
     if let Some(dtypes) = truthy_arg(args, "dtypes") {
         parameters.insert("dtypes".into(), dtypes.clone());
     }
+    let caller = caller_access(cx).await?;
+    if cx.caller.api {
+        caller
+            .require(&["pipes:register"], &[])
+            .map_err(|e| ToolError::permission(e.detail_text()))?;
+        access::guard::check_connector_teams(cx.state, &caller, &ck)
+            .map_err(|e| ToolError::permission(e.detail_text()))?;
+    }
     let mut pipe = build_pipe(cx, &conn, &ck, &mk, lk.as_deref(), Some(parameters))?;
     // Checked after construction because `target` may be set in `parameters`.
     check_protected_target(&pipe)?;
@@ -849,9 +950,19 @@ async fn register_pipe(args: &Map, cx: &ToolCx<'_>) -> Result<Value, ToolError> 
         };
         pipe.set_parameters(map_of([("columns", Value::Map(cols))]));
     }
+    if cx.caller.api {
+        // The new pipe is the caller's (rc15), and its SQL passes the SQL guard.
+        let stamped = access::guard::stamp_new_pipe(&caller, pipe.raw_parameters())
+            .map_err(|e| ToolError::permission(e.detail_text()))?;
+        access::guard::check_parameters(cx.state, &caller, &conn, &pipe, None, &stamped)
+            .await
+            .map_err(|e| ToolError::permission(e.detail_text()))?;
+        pipe.set_parameters(stamped);
+    }
     let res = conn.register_pipe(&pipe).await;
     if cx.caller.api {
         let _ = cx.state.pipes(ik.as_deref(), true).await;
+        cx.state.access_cache().forget_pipes();
     }
     Ok(tuple_value(&res))
 }
@@ -867,18 +978,32 @@ async fn edit_pipe(args: &Map, cx: &ToolCx<'_>) -> Result<Value, ToolError> {
             )));
         }
     }
-    let (conn, mut pipe) = resolve_pipe(cx, args).await?;
-    if args.get("replace").is_some_and(Value::truthy) {
-        pipe.set_parameters(parameters);
+    let (conn, mut pipe) = resolve_editable(cx, args, None).await?;
+    let old = pipe.raw_parameters().clone();
+    let mut new = if args.get("replace").is_some_and(Value::truthy) {
+        parameters
     } else {
         // `pipe.update_parameters(parameters, persist=True)`: deep-merge, then `edit()`.
-        let merged = meerschaum_core::value::apply_patch_maps(pipe.raw_parameters(), &parameters);
-        pipe.set_parameters(merged);
+        meerschaum_core::value::apply_patch_maps(&old, &parameters)
+    };
+    if cx.caller.api {
+        // `access` and `locks` need the rights to change them; SQL passes the SQL guard (rc15).
+        let caller = caller_access(cx).await?;
+        new = access::guard::merge_edit(&caller, &old, new)
+            .map_err(|e| ToolError::permission(e.detail_text()))?;
+        access::guard::check_parameters(cx.state, &caller, &conn, &pipe, Some(&old), &new)
+            .await
+            .map_err(|e| ToolError::permission(e.detail_text()))?;
     }
+    if let Some(e) = access::guard::parameters_lock_conflict(&pipe, &old, &new) {
+        return Err(ToolError::permission(e.detail_text()));
+    }
+    pipe.set_parameters(new);
     let res = conn.edit_pipe(&pipe, false).await;
     if cx.caller.api {
         let ik = str_arg(args, "instance_keys");
         let _ = cx.state.pipes(ik.as_deref(), true).await;
+        cx.state.access_cache().forget_pipes();
     }
     Ok(tuple_value(&res))
 }
@@ -902,13 +1027,28 @@ async fn read_sql(args: &Map, cx: &ToolCx<'_>) -> Result<Value, ToolError> {
     }
     // The scan above skips quoted identifiers and string literals (`"mrsm_users"`, a table named
     // inside `query_to_xml('...')`): an API caller's SQL may not name an internal table at all.
-    if cx.caller.api {
-        security::refuse_internal_tables(&query).map_err(ToolError::permission)?;
-    }
     let ck = args
         .get("connector_keys")
         .map(Value::py_str)
         .unwrap_or_default();
+    if cx.caller.api {
+        security::refuse_internal_tables(&query).map_err(ToolError::permission)?;
+        // Never the tables of pipes the caller cannot see, nor a connector for other teams
+        // (rc15; best effort: true isolation needs a database user per team).
+        let caller = caller_access(cx).await?;
+        // A named SQL backend must be one of the instances this API serves, even for an
+        // administrator. Its own registrations determine the hidden tables, not the default's.
+        connector(cx, Some(&ck))?;
+        access::guard::check_connector_teams(cx.state, &caller, &ck)
+            .map_err(|e| ToolError::permission(e.detail_text()))?;
+        if !caller.is_admin() {
+            let index = access::pipe_index(cx.state, Some(&ck))
+                .await
+                .map_err(|e| ToolError::other(api_error_str(&e)))?;
+            crate::sql_guard::check_definition(&query, &index.hidden_targets(&caller))
+                .map_err(|e| ToolError::permission(e.replace("a SQL definition", "a query")))?;
+        }
+    }
     let limit = usize::try_from(clamp_limit(args.get("limit"))).unwrap_or(1);
     let offset =
         decode_cursor(args.get("cursor"), builtin().max_cursor_offset).map_err(ToolError::value)?;
@@ -969,6 +1109,20 @@ async fn execute_action(args: &Map, cx: &ToolCx<'_>) -> Result<Value, ToolError>
     }
     if let Err(m) = security::check_action_chain(&cx.server.config, &chain) {
         return fail(m);
+    }
+    // A caller who is not an administrator (rc15): what the console offers, on the pipes it may
+    // change, as for `POST /execute` and `POST /actions/{action}`.
+    if cx.caller.api {
+        let caller = caller_access(cx).await?;
+        if !caller.is_admin() {
+            let words = crate::execute_access::sysargs_of_keywords(&action_name, &kwargs);
+            if let Err(m) = crate::execute_policy::check_non_admin(&words) {
+                return fail(m);
+            }
+            if let Err(e) = crate::execute_access::check(cx.state, &caller, &words).await {
+                return fail(e.detail_text());
+            }
+        }
     }
     // Pin the action to the API's own instance, as the REST route does.
     if cx.caller.api {

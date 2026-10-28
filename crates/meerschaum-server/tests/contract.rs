@@ -120,6 +120,48 @@ fn normalize(v: &Json, key: Option<&str>, slots: &Slots, version: &str) -> Json 
     }
 }
 
+/// The rc15 access model's intended changes read as v4's (PARITY.md RC15-P3-002, -003): a pipe
+/// registered through the API is its creator's (`parameters.access` with the caller as owner,
+/// Everyone's team, the default visibility and edit mode), and registering needs
+/// `pipes:register` (`pipes:write` still works).
+fn v4_view(v: Json, owner: &str) -> Json {
+    let stamped = json!({"owner": owner, "team": null, "visibility": "team", "edit": "team"});
+    let text = format!(
+        ", \"access\": {{\"owner\": \"{owner}\", \"team\": null, \"visibility\": \"team\", \"edit\": \"team\"}}"
+    );
+    match v {
+        Json::Object(o) => Json::Object(
+            o.into_iter()
+                .filter(|(k, v)| !(k == "access" && *v == stamped))
+                .map(|(k, v)| (k, v4_view(v, owner)))
+                .collect(),
+        ),
+        Json::Array(a) => Json::Array(a.into_iter().map(|v| v4_view(v, owner)).collect()),
+        Json::String(s) => Json::String(s.replace(&text, "").replace(
+            "Missing required scope: 'pipes:register'",
+            "Missing required scope: 'pipes:write'",
+        )),
+        other => other,
+    }
+}
+
+/// Exchanges whose v4 answer the access model changes on purpose (PARITY.md RC15-P3-001): the
+/// recording's user had every scope (v4: no `scopes` attribute), while an rc15 user without
+/// permissions of their own has the default role (`editor`), which creates no jobs and deletes no
+/// accounts. `(step, status, detail)`.
+const RC15_EXPECTED: &[(&str, u16, &str)] = &[
+    (
+        "user_create_job_denied",
+        403,
+        "Missing required scope: 'jobs:write'",
+    ),
+    (
+        "user_delete_other",
+        403,
+        "Missing required scope: 'users:delete'",
+    ),
+];
+
 fn same_shape(a: &Json, b: &Json) -> bool {
     std::mem::discriminant(a) == std::mem::discriminant(b)
 }
@@ -136,6 +178,8 @@ fn seeded_state(fixture: &Json, root: &std::path::Path) -> (AppState, Arc<common
     }
     cfg.connectors = connectors;
     cfg.no_dash = true;
+    // The recording ran with v4's defaults: open self-registration (off by default since rc15).
+    cfg.registration_users = true;
     let instance = Arc::new(common::MemoryInstance::new("fixture"));
     instance.seed_user(
         fixture["username"].as_str().unwrap(),
@@ -217,6 +261,16 @@ async fn replay_python_contract() {
         if mode == "skip" {
             continue;
         }
+        if let Some((_, status, detail)) = RC15_EXPECTED.iter().find(|(s, _, _)| *s == step) {
+            let got = rust_json.clone().unwrap_or(Json::Null);
+            if resp.status.as_u16() != *status || got["detail"] != *detail {
+                failures.push(format!(
+                    "#{i} {step}: {method} {uri}\n  rc15: {} {got} != {status} {detail}",
+                    resp.status.as_u16()
+                ));
+            }
+            continue;
+        }
         let status = ex["status"].as_u64().unwrap() as u16;
         let mut problems = Vec::new();
         if resp.status.as_u16() != status {
@@ -224,9 +278,10 @@ async fn replay_python_contract() {
         }
         if mode == "exact" || mode == "shape" {
             if let Some(exp) = expected.get("json") {
+                let owner = fixture["username"].as_str().unwrap_or_default();
                 let got = rust_json
                     .as_ref()
-                    .map(|j| normalize(j, None, &slots, &version))
+                    .map(|j| v4_view(normalize(j, None, &slots, &version), owner))
                     .unwrap_or(Json::String(resp.text()));
                 let ok = if mode == "exact" {
                     &got == exp

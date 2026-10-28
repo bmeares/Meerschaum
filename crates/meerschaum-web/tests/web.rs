@@ -356,11 +356,22 @@ struct ScriptedJobs {
     scripts: Mutex<Vec<(String, Vec<LogEvent>)>>,
     /// The senders of silent jobs (`execute-held*`), kept so their streams stay open.
     held: Mutex<Vec<tokio::sync::mpsc::Sender<LogEvent>>>,
+    /// Properties of particular jobs (the others were started by `bob`).
+    properties: Mutex<Vec<(String, Json)>>,
 }
 
 impl ScriptedJobs {
     fn add(&self, name: &str, events: Vec<LogEvent>) {
         self.scripts.lock().unwrap().push((name.into(), events));
+    }
+
+    /// A job whose properties are `properties` (who started it, its team).
+    fn add_with(&self, name: &str, events: Vec<LogEvent>, properties: Json) {
+        self.add(name, events);
+        self.properties
+            .lock()
+            .unwrap()
+            .push((name.into(), properties));
     }
 }
 
@@ -369,11 +380,20 @@ impl JobsBackend for ScriptedJobs {
     async fn list(&self) -> indexmap::IndexMap<String, Json> {
         Default::default()
     }
-    // Every scripted job was started by `bob` (`POST /execute` records the creator).
+    // Every scripted job was started by `bob` (`POST /execute` records the creator), unless
+    // given properties of its own.
     async fn get(&self, name: &str) -> Option<Json> {
-        self.exists(name)
-            .await
-            .then(|| json!({"daemon": {"properties": {"mrsm_owner": "bob"}}}))
+        if !self.exists(name).await {
+            return None;
+        }
+        let own = self
+            .properties
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|(n, _)| n == name)
+            .map(|(_, p)| p.clone());
+        Some(json!({"daemon": {"properties": own.unwrap_or_else(|| json!({"mrsm_owner": "bob"}))}}))
     }
     async fn exists(&self, name: &str) -> bool {
         self.scripts.lock().unwrap().iter().any(|(n, _)| n == name)
@@ -566,11 +586,10 @@ async fn the_job_log_stream_accepts_the_console_session_cookie() {
 }
 
 #[tokio::test]
-async fn the_job_log_stream_follows_the_consoles_execute_rule() {
-    // PARITY: the rule of the console's Exec box (v4 `api/dash/sessions.py`), which `POST /execute`
-    // applies too (one function, `is_user_allowed_to_execute_console`):
-    // `api:permissions:actions:non_admin` (default true, false under `--secure`). v4's other key,
-    // `system:api:permissions:actions:non_admin` (`/actions`, the job routes), is not consulted.
+async fn the_job_log_stream_follows_the_log_permissions() {
+    // rc15 (AC9): the stream is the log `GET /logs/{name}` serves, under the same rule: the
+    // permissions to read jobs and logs, on a job the caller can see. Running actions (the
+    // console key, `--secure`) is not asked of a reader.
     let root = tempfile::tempdir().unwrap();
     let stream = |auth: &str| common::req("GET", "/logs/execute-rule/stream", Some(auth), None);
     let session_stream = |id: &str| {
@@ -579,18 +598,12 @@ async fn the_job_log_stream_follows_the_consoles_execute_rule() {
             .body(Body::empty())
             .unwrap()
     };
-    for (console_key, system_key, user_allowed) in [
-        (true, false, true),
-        (true, true, true),
-        (false, true, false),
-        (false, false, false),
-    ] {
+    for console_key in [true, false] {
         let mut cfg = config(root.path());
         cfg.actions_non_admin = console_key;
-        cfg.system_actions_non_admin = system_key;
         let (app, web, jobs) = stream_app(cfg);
         jobs.add("execute-rule", script());
-        let label = format!("console key {console_key}, system key {system_key}");
+        let label = format!("console key {console_key}");
 
         // An administrator always may.
         let admin = common::login(&app, "admin", "pass", None).await;
@@ -599,18 +612,15 @@ async fn the_job_log_stream_follows_the_consoles_execute_rule() {
             StatusCode::OK,
             "{label}"
         );
-        // A user (the job's creator) may exactly when the console key allows it.
+        // The job's creator (the default role reads jobs and logs) may.
         let bob = common::login(&app, "bob", "pw", None).await;
         let r = send(&app, stream(&bob)).await;
-        let expected = if user_allowed {
-            StatusCode::OK
-        } else {
-            StatusCode::FORBIDDEN
-        };
-        assert_eq!(r.status, expected, "{label}: {}", r.text());
-        if !user_allowed {
-            assert!(r.text().contains("administrator"), "{label}: {}", r.text());
-        }
+        assert_eq!(r.status, StatusCode::OK, "{label}: {}", r.text());
+        // A credential without `logs:read` may not.
+        let narrow = common::login(&app, "bob", "pw", Some("jobs:read")).await;
+        let r = send(&app, stream(&narrow)).await;
+        assert_eq!(r.status, StatusCode::FORBIDDEN, "{label}: {}", r.text());
+        assert!(r.text().contains("logs:read"), "{label}: {}", r.text());
         // The same for a console session.
         let id = uuid::Uuid::new_v4().to_string();
         web.sessions
@@ -618,7 +628,7 @@ async fn the_job_log_stream_follows_the_consoles_execute_rule() {
             .await
             .unwrap();
         let r = send(&app, session_stream(&id)).await;
-        assert_eq!(r.status, expected, "{label} (session): {}", r.text());
+        assert_eq!(r.status, StatusCode::OK, "{label} (session): {}", r.text());
     }
 }
 
@@ -653,6 +663,51 @@ async fn the_job_log_stream_is_the_creators_and_the_administrators() {
         send(&app, get(&eve, "plain-job")).await.status,
         StatusCode::OK
     );
+}
+
+#[tokio::test]
+async fn the_job_log_stream_is_its_team_s() {
+    // rc15 (AC9): a job started through the API is its owner's team's.
+    use meerschaum_connector::InstanceConnector;
+    let root = tempfile::tempdir().unwrap();
+    let instance = Arc::new(common::MemoryInstance::new("fixture"));
+    instance.seed_user("admin", "pass", Some("admin"));
+    for user in ["alice", "bob", "dave"] {
+        instance.seed_user(user, "pw", None);
+    }
+    for (team, member) in [("Data", "bob"), ("Ops", "dave")] {
+        let mut t = meerschaum_core::access::Team::new(team);
+        t.add_member(member, meerschaum_core::access::TeamRole::Member);
+        assert!(instance.register_team(&mut t).await.success);
+    }
+    let jobs = Arc::new(ScriptedJobs::default());
+    jobs.add_with(
+        "nightly",
+        script(),
+        json!({"owner": "alice", "team": "Data"}),
+    );
+    let state = AppState::builder(config(root.path()), instance)
+        .secret(common::SECRET.to_vec())
+        .jobs(jobs.clone())
+        .build()
+        .unwrap();
+    let web = WebConfig::for_state(&state);
+    let app = meerschaum_web::app(state, web).unwrap();
+    let get = |auth: &str| common::req("GET", "/logs/nightly/stream", Some(auth), None);
+    for (user, status) in [
+        ("bob", StatusCode::OK),
+        ("alice", StatusCode::OK),
+        ("dave", StatusCode::NOT_FOUND),
+    ] {
+        let auth = common::login(&app, user, "pw", None).await;
+        let r = send(&app, get(&auth)).await;
+        assert_eq!(r.status, status, "{user}: {}", r.text());
+        if status == StatusCode::NOT_FOUND {
+            assert!(!r.text().contains("first line"), "{user}: {}", r.text());
+        }
+    }
+    let admin = common::login(&app, "admin", "pass", None).await;
+    assert_eq!(send(&app, get(&admin)).await.status, StatusCode::OK);
 }
 
 /// Open a stream and keep the response (and so the stream) alive.

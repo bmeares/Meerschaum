@@ -24,10 +24,12 @@ pub mod execute;
 pub mod jobs;
 pub mod login;
 pub mod misc;
+pub mod pipe_access;
 pub mod pipelines;
 pub mod pipes;
 pub mod plugins;
 pub mod sync_status;
+pub mod teams;
 pub mod tokens;
 pub mod users;
 pub mod version;
@@ -74,7 +76,7 @@ pub fn route_group_of(path: &str) -> &'static str {
         "actions" | "execute" => "actions",
         "connectors" => "connectors",
         "jobs" | "logs" => "jobs",
-        "users" => "users",
+        "users" | "teams" => "users",
         "tokens" => "tokens",
         "plugins" => "plugins",
         "version" => "version",
@@ -258,7 +260,7 @@ pub fn router_with_mcp(state: AppState, mcp: std::sync::Arc<crate::mcp::McpServe
         app = login::routes(app);
     }
     execute::start_cleanup(&state);
-    let groups: [(&str, AddRoutes); 14] = [
+    let groups: [(&str, AddRoutes); 15] = [
         ("actions", actions::routes),
         ("actions", execute::routes),
         ("connectors", connectors::routes),
@@ -270,6 +272,7 @@ pub fn router_with_mcp(state: AppState, mcp: std::sync::Arc<crate::mcp::McpServe
         ("plugins", plugins::routes),
         ("tokens", tokens::routes),
         ("users", users::routes),
+        ("users", teams::routes),
         ("version", version::routes),
         ("engine", engine::routes),
         ("engine", sync_status::routes),

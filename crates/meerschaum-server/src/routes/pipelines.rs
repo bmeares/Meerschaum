@@ -13,13 +13,23 @@
 //! | `DELETE /pipelines/{name}/delete` | `pipes:delete` | Delete a definition (`409` while scheduled jobs use it) |
 //! | `GET /pipelines/{name}/id`, `/attributes` | `pipes:read` | The registration's ID and raw attributes |
 //! | `POST`/`DELETE /pipelines/leases` | `pipes:write` | The metadata leases of Pipeline edits |
+//! | `GET`/`PATCH /pipelines/{name}/access`, `POST .../lock`, `.../unlock` | `pipes:read` / `pipes:write` | The Pipeline's access and locks (as for pipes, [`super::pipe_access`]) |
+//!
+//! **Access (rc15).** A saved Pipeline carries `access` and `locks` like a pipe (its registration
+//! pipe's parameters): the routes answer `404` for a Pipeline the caller cannot see, its new
+//! registration is the caller's (in the caller's primary team), and changing it needs edit rights
+//! on it. Members the caller cannot see are left out of every answer and counted
+//! (`hidden_members`); a plan's hidden nodes are anonymized; an edit keeps them. Syncing needs
+//! edit rights on every pipe the run would sync (a member locked against syncs is skipped by the
+//! engine and needs none).
 //!
 //! The metadata routes transport only the `mrsm/pipeline/<name>` registration's raw parameters;
 //! the CLI and SDK own lifecycle validation, tag approval and schedule checks. Generic `mrsm`
 //! pipe data stays private.
 use super::{Ctx, body_bytes};
 use crate::{
-    auth::{Principal, is_admin, scoped_auth},
+    access::{self, Access, RefFilter},
+    auth::{Principal, is_admin},
     backends::{PlanError, PlanOptions, RunsFilter},
     config::ServerConfig,
     envelope,
@@ -58,6 +68,12 @@ pub fn routes(app: Router<AppState>, _cfg: &ServerConfig) -> Router<AppState> {
         .route("/pipelines/{name}/delete", axum::routing::delete(delete))
         .route("/pipelines/{name}/id", get(id))
         .route("/pipelines/{name}/attributes", get(attributes))
+        .route(
+            "/pipelines/{name}/access",
+            get(get_access).patch(patch_access),
+        )
+        .route("/pipelines/{name}/lock", post(lock))
+        .route("/pipelines/{name}/unlock", post(unlock))
 }
 
 /// The SDK's name rule (ASCII, 1 to 128 bytes, starting with a letter or digit).
@@ -193,12 +209,122 @@ fn plural(n: usize, singular: &str, plural: &str) -> String {
     format!("{n} {}", if n == 1 { singular } else { plural })
 }
 
-async fn require_definition(
-    ctx: &Ctx,
+/// The saved Pipelines of the registry `conn` with their registrations' parameters (`access`
+/// and `locks` live there), by name (each definition carries its `name`).
+pub async fn list_registrations(
+    state: &AppState,
+    conn: &Arc<dyn InstanceConnector>,
+) -> Result<Vec<(Json, Map)>, ApiError> {
+    let listing = conn
+        .fetch_pipes_keys(&PipesKeysQuery {
+            connector_keys: vec!["mrsm".into()],
+            metric_keys: vec!["pipeline".into()],
+            ..Default::default()
+        })
+        .await
+        .map_err(|e| failed("fetch_pipes_keys", e))?;
+    let mut pipelines: Vec<(String, Json, Map)> = Vec::new();
+    for row in listing.entries() {
+        if let Some(name) = &row.location_key {
+            let pipe = registration_pipe(state, conn, name)?;
+            let attrs = conn
+                .get_pipe_attributes(&pipe)
+                .await
+                .map_err(|e| failed("get_pipe_attributes", e))?;
+            let parameters = crate::state::parameters_of(&attrs).unwrap_or_default();
+            if let Some(definition) = parameters.get("pipeline").cloned() {
+                pipelines.push((name.clone(), from_core(&definition), parameters));
+            }
+        }
+    }
+    pipelines.sort_by(|a, b| a.0.cmp(&b.0));
+    Ok(pipelines
+        .into_iter()
+        .map(|(name, mut definition, parameters)| {
+            if let Some(o) = definition.as_object_mut() {
+                o.entry("name").or_insert(json!(name));
+            }
+            (definition, parameters)
+        })
+        .collect())
+}
+
+/// The registration parameters of the Pipeline `name` (`None` when it is not registered).
+pub async fn registration_parameters(
+    state: &AppState,
     conn: &Arc<dyn InstanceConnector>,
     name: &str,
-) -> Result<Json, ApiError> {
-    require_definition_on(&ctx.state, conn, name).await
+) -> Result<Option<Map>, ApiError> {
+    let pipe = registration_pipe(state, conn, name)?;
+    if conn
+        .get_pipe_id(&pipe)
+        .await
+        .map_err(|e| failed("get_pipe_id", e))?
+        .is_none()
+    {
+        return Ok(None);
+    }
+    let attrs = conn
+        .get_pipe_attributes(&pipe)
+        .await
+        .map_err(|e| failed("get_pipe_attributes", e))?;
+    Ok(Some(
+        crate::state::parameters_of(&attrs).unwrap_or_default(),
+    ))
+}
+
+/// `definition` as `caller` may read it: the members (`targets`) it cannot see left out and
+/// counted (`hidden_members`).
+pub async fn visible_definition(filter: &mut RefFilter, mut definition: Json) -> Json {
+    let targets = targets_of(&definition);
+    let mut kept = Vec::with_capacity(targets.len());
+    let mut hidden = 0usize;
+    for target in targets {
+        if filter.visible(&target).await {
+            kept.push(Json::String(target));
+        } else {
+            hidden += 1;
+        }
+    }
+    if let Some(o) = definition.as_object_mut() {
+        if o.contains_key("targets") {
+            o.insert("targets".into(), Json::Array(kept));
+        }
+        if hidden > 0 {
+            o.insert("hidden_members".into(), json!(hidden));
+        }
+    }
+    definition
+}
+
+/// The registered Pipeline `name` that `caller` may see: its definition and registration
+/// parameters (`404` otherwise, as for one that does not exist).
+pub async fn visible_registration(
+    state: &AppState,
+    caller: &Access,
+    conn: &Arc<dyn InstanceConnector>,
+    name: &str,
+) -> Result<(Json, Map), ApiError> {
+    let missing = || {
+        ApiError::new(
+            404,
+            format!(
+                "Pipeline '{name}' is not registered on '{}'.",
+                conn.connector_keys()
+            ),
+        )
+    };
+    let parameters = registration_parameters(state, conn, name)
+        .await?
+        .ok_or_else(missing)?;
+    if !caller.can_see(&parameters) {
+        return Err(missing());
+    }
+    let definition = parameters
+        .get("pipeline")
+        .map(from_core)
+        .ok_or_else(missing)?;
+    Ok((definition, parameters))
 }
 
 /// The saved Pipelines of the registry `conn`, by name (each definition carries its `name`).
@@ -242,9 +368,16 @@ pub async fn list_definitions(
 }
 
 async fn list(ctx: Ctx) -> ApiResult {
-    scoped_auth(&ctx.state, &ctx.headers, &["pipes:read"]).await?;
+    let caller = access::require(&ctx.state, &ctx.headers, &["pipes:read"]).await?;
     let conn = connector(&ctx)?;
-    let pipelines = list_definitions(&ctx.state, &conn).await?;
+    let registry = conn.connector_keys();
+    let mut filter = RefFilter::new(&ctx.state, &caller, &registry);
+    let mut pipelines = Vec::new();
+    for (definition, parameters) in list_registrations(&ctx.state, &conn).await? {
+        if caller.can_see(&parameters) {
+            pipelines.push(visible_definition(&mut filter, definition).await);
+        }
+    }
     let message = format!(
         "Found {} on '{}'.",
         plural(pipelines.len(), "Pipeline", "Pipelines"),
@@ -254,7 +387,7 @@ async fn list(ctx: Ctx) -> ApiResult {
 }
 
 async fn keys(ctx: Ctx) -> ApiResult {
-    scoped_auth(&ctx.state, &ctx.headers, &["pipes:read"]).await?;
+    let caller = access::require(&ctx.state, &ctx.headers, &["pipes:read"]).await?;
     let conn = connector(&ctx)?;
     let decode = |key: &str| -> Result<Vec<Value>, ApiError> {
         match Value::from_json_str(&ctx.query.str_or(key, "[]")) {
@@ -289,11 +422,18 @@ async fn keys(ctx: Ctx) -> ApiResult {
         .fetch_pipes_keys(&query)
         .await
         .map_err(|e| failed("fetch_pipes_keys", e))?;
-    let rows: Vec<Json> = keys
-        .entries()
-        .iter()
-        .map(|row| from_core(&Value::List(row.to_list())))
-        .collect();
+    let mut rows: Vec<Json> = Vec::new();
+    for row in keys.entries() {
+        if let Some(name) = &row.location_key
+            && !caller.is_admin()
+            && !registration_parameters(&ctx.state, &conn, name)
+                .await?
+                .is_none_or(|p| caller.can_see(&p))
+        {
+            continue;
+        }
+        rows.push(from_core(&Value::List(row.to_list())));
+    }
     Ok(envelope::ok_with(
         format!("Found {}.", plural(rows.len(), "Pipeline", "Pipelines")),
         "keys",
@@ -366,7 +506,12 @@ pub fn store_of(
 
 /// The latest run of the Pipeline `name` on its registry `conn` (`null` if none, or if the
 /// history cannot be read: it is informational here).
-pub async fn last_run(state: &AppState, conn: &Arc<dyn InstanceConnector>, name: &str) -> Json {
+pub async fn last_run(
+    state: &AppState,
+    caller: &Access,
+    conn: &Arc<dyn InstanceConnector>,
+    name: &str,
+) -> Json {
     let store = store_of(state, conn);
     match store
         .get_runs(&RunsFilter {
@@ -376,11 +521,15 @@ pub async fn last_run(state: &AppState, conn: &Arc<dyn InstanceConnector>, name:
         })
         .await
     {
-        Ok(runs) => runs
-            .into_iter()
-            .find(|r| r.pipe_ref.is_none())
-            .map(|r| serde_json::to_value(r).unwrap_or(Json::Null))
-            .unwrap_or(Json::Null),
+        Ok(runs) => access::runs::visible_runs(
+            &mut RefFilter::new(state, caller, &conn.connector_keys()).for_engine(),
+            runs,
+        )
+        .await
+        .into_iter()
+        .find(|r| r.pipe_ref.is_none())
+        .map(|r| serde_json::to_value(r).unwrap_or(Json::Null))
+        .unwrap_or(Json::Null),
         Err(e) => {
             tracing::debug!("Cannot read the runs of Pipeline '{name}': {e}");
             Json::Null
@@ -390,24 +539,136 @@ pub async fn last_run(state: &AppState, conn: &Arc<dyn InstanceConnector>, name:
 
 /// `GET /pipelines/{name}`: the definition, its members and the latest run.
 async fn detail(ctx: Ctx, Path(name): Path<String>) -> ApiResult {
-    scoped_auth(&ctx.state, &ctx.headers, &["pipes:read"]).await?;
+    let caller = access::require(&ctx.state, &ctx.headers, &["pipes:read"]).await?;
     let conn = connector(&ctx)?;
-    let definition = require_definition(&ctx, &conn, &name).await?;
+    let (definition, _) = visible_registration(&ctx.state, &caller, &conn, &name).await?;
+    let registry = conn.connector_keys();
+    let mut filter = RefFilter::new(&ctx.state, &caller, &registry);
     let mut members = Vec::new();
+    let mut hidden = 0usize;
     for reference in targets_of(&definition) {
-        members.push(member(&ctx.state, &reference).await);
+        if filter.visible(&reference).await {
+            members.push(member(&ctx.state, &reference).await);
+        } else {
+            hidden += 1;
+        }
     }
-    let last_run = last_run(&ctx.state, &conn, &name).await;
+    let definition = visible_definition(&mut filter, definition).await;
+    let last_run = last_run(&ctx.state, &caller, &conn, &name).await;
     let mut fields = JsonMap::new();
     let message = format!(
-        "Pipeline '{name}' on '{}' has {}.",
+        "Pipeline '{name}' on '{}' has {}{}.",
         conn.connector_keys(),
-        plural(members.len(), "member", "members")
+        plural(members.len() + hidden, "member", "members"),
+        if hidden > 0 {
+            format!(" ({})", plural(hidden, "hidden pipe", "hidden pipes"))
+        } else {
+            String::new()
+        }
     );
     fields.insert("pipeline".into(), definition);
     fields.insert("members".into(), json!(members));
+    fields.insert("hidden_members".into(), json!(hidden));
     fields.insert("last_run".into(), last_run);
     Ok(envelope::ok(message, fields))
+}
+
+/// A plan as `caller` may read it: the nodes of pipes it cannot see anonymized (`pipe_ref` and
+/// details dropped, `hidden: true`), the edges to them dropped, `hidden_nodes` counted, and the
+/// rendered `text` (which names every node) left out when any node is hidden.
+pub async fn visible_plan(filter: &mut RefFilter, mut planned: Json) -> Json {
+    let mut hidden: Vec<String> = Vec::new();
+    if let Some(nodes) = planned
+        .get_mut("plan")
+        .and_then(|p| p.get_mut("nodes"))
+        .and_then(Json::as_array_mut)
+    {
+        for node in nodes.iter_mut() {
+            let Some(pipe_ref) = node
+                .get("pipe_ref")
+                .and_then(Json::as_str)
+                .map(str::to_string)
+            else {
+                continue;
+            };
+            if filter.visible(&pipe_ref).await {
+                continue;
+            }
+            hidden.push(pipe_ref);
+            *node = json!({
+                "pipe_ref": null,
+                "hidden": true,
+                "action": node.get("action").cloned().unwrap_or(Json::Null),
+            });
+        }
+        for node in nodes.iter_mut() {
+            if let Some(consumes) = node.get_mut("consumes").and_then(Json::as_array_mut) {
+                consumes.retain(|c| {
+                    !c.get("parent")
+                        .and_then(Json::as_str)
+                        .is_some_and(|p| hidden.iter().any(|h| h == p))
+                });
+            }
+        }
+    }
+    if hidden.is_empty() {
+        return planned;
+    }
+    if let Some(edges) = planned
+        .get_mut("plan")
+        .and_then(|p| p.get_mut("edges"))
+        .and_then(Json::as_array_mut)
+    {
+        edges.retain(|edge| {
+            !edge.as_array().is_some_and(|pair| {
+                pair.iter()
+                    .filter_map(Json::as_str)
+                    .any(|r| hidden.iter().any(|h| h == r))
+            })
+        });
+    }
+    // Warnings that name a hidden pipe go too (they name it by its keys).
+    let names_hidden = |w: &Json| {
+        w.as_str().is_some_and(|text| {
+            hidden.iter().any(|h| {
+                access::split_ref(h)
+                    .is_some_and(|(ck, mk, _)| text.contains(ck) && text.contains(mk))
+            })
+        })
+    };
+    if let Some(nodes) = planned
+        .get_mut("plan")
+        .and_then(|p| p.get_mut("nodes"))
+        .and_then(Json::as_array_mut)
+    {
+        for node in nodes {
+            if node.get("reason").is_some_and(names_hidden)
+                && let Some(fields) = node.as_object_mut()
+            {
+                fields.remove("reason");
+            }
+            if let Some(warnings) = node.get_mut("warnings").and_then(Json::as_array_mut) {
+                warnings.retain(|warning| !names_hidden(warning));
+            }
+        }
+    }
+    for warnings in [planned.get_mut("warnings")].into_iter().flatten() {
+        if let Some(list) = warnings.as_array_mut() {
+            list.retain(|w| !names_hidden(w));
+        }
+    }
+    if let Some(list) = planned
+        .get_mut("plan")
+        .and_then(|p| p.get_mut("warnings"))
+        .and_then(Json::as_array_mut)
+    {
+        list.retain(|w| !names_hidden(w));
+    }
+    if let Some(o) = planned.as_object_mut() {
+        o.remove("text");
+        o.insert("hidden_nodes".into(), json!(hidden.len()));
+    }
+    planned
 }
 
 /// The `begin` / `end` of a plan or sync body (strings or integers), `400` otherwise.
@@ -443,17 +704,19 @@ async fn optional_body(body: Body) -> Result<Json, ApiError> {
 
 /// `POST /pipelines/{name}/plan`: what a run would do, read-only.
 async fn plan(ctx: Ctx, Path(name): Path<String>, body: Body) -> ApiResult {
-    scoped_auth(&ctx.state, &ctx.headers, &["pipes:read"]).await?;
+    let caller = access::require(&ctx.state, &ctx.headers, &["pipes:read"]).await?;
     let body = optional_body(body).await?;
     let options = bounds_of(&body)?;
     let conn = connector(&ctx)?;
-    require_definition(&ctx, &conn, &name).await?;
+    visible_registration(&ctx.state, &caller, &conn, &name).await?;
     let planned = ctx
         .state
         .pipelines
         .plan(&name, &conn.connector_keys(), &options)
         .await
         .map_err(plan_error)?;
+    let registry = conn.connector_keys();
+    let planned = visible_plan(&mut RefFilter::new(&ctx.state, &caller, &registry), planned).await;
     let mut fields = planned.as_object().cloned().unwrap_or_default();
     let nodes = fields
         .get("plan")
@@ -524,6 +787,58 @@ async fn may_run(
     Ok(())
 }
 
+/// Refuse a run of the Pipeline `name` that would sync a pipe `caller` may not change (a pipe
+/// locked against syncs is skipped by the engine and needs no rights): the plan's nodes, or the
+/// members when this server cannot plan.
+pub async fn check_members_editable(
+    state: &AppState,
+    caller: &Access,
+    conn: &Arc<dyn InstanceConnector>,
+    name: &str,
+    definition: &Json,
+    options: &PlanOptions,
+) -> Result<(), ApiError> {
+    if caller.no_auth || caller.is_admin() {
+        return Ok(());
+    }
+    let registry = conn.connector_keys();
+    let refs: Vec<String> = match state.pipelines.plan(name, &registry, options).await {
+        Ok(planned) => planned
+            .get("plan")
+            .and_then(|p| p.get("nodes"))
+            .and_then(Json::as_array)
+            .map(|nodes| {
+                nodes
+                    .iter()
+                    .filter_map(|n| n.get("pipe_ref").and_then(Json::as_str))
+                    .map(str::to_string)
+                    .collect()
+            })
+            .unwrap_or_default(),
+        // Without a plan (this server cannot plan, or the plan fails, as the run then will):
+        // the members.
+        Err(_) => targets_of(definition),
+    };
+    let mut filter = RefFilter::new(state, caller, &registry);
+    let mut refused = 0usize;
+    for pipe_ref in &refs {
+        let (editable, sync_locked) = filter.editable(pipe_ref).await;
+        if !editable && !sync_locked {
+            refused += 1;
+        }
+    }
+    if refused > 0 {
+        return Err(ApiError::new(
+            403,
+            format!(
+                "You cannot run Pipeline '{name}': you may not change {} it would sync.",
+                plural(refused, "pipe", "of the pipes")
+            ),
+        ));
+    }
+    Ok(())
+}
+
 /// What [`start_sync`] started.
 #[derive(Debug, Clone)]
 pub struct StartedSync {
@@ -560,6 +875,8 @@ pub async fn start_sync(
         }
     }
     may_run(state, principal, &instances).await?;
+    let caller = super::jobs::access_of_principal(state, principal).await?;
+    check_members_editable(state, &caller, conn, name, definition, options).await?;
     let run_id = match run_id {
         Some(id) if crate::engine_stream::valid_run_id(&id) => id,
         Some(_) => {
@@ -643,7 +960,9 @@ pub async fn start_sync(
 
 /// `POST /pipelines/{name}/sync`: start a run in the background.
 async fn sync(ctx: Ctx, Path(name): Path<String>, body: Body) -> ApiResult {
-    let principal = scoped_auth(&ctx.state, &ctx.headers, &["pipes:write", "jobs:execute"]).await?;
+    let caller =
+        access::require(&ctx.state, &ctx.headers, &["pipes:write", "jobs:execute"]).await?;
+    let principal = caller.auth.clone();
     let body = optional_body(body).await?;
     let options = bounds_of(&body)?;
     let run_id = match body.get("run_id") {
@@ -652,7 +971,7 @@ async fn sync(ctx: Ctx, Path(name): Path<String>, body: Body) -> ApiResult {
         Some(_) => return Err(ApiError::new(400, "`run_id` must be a string.")),
     };
     let conn = connector(&ctx)?;
-    let definition = require_definition(&ctx, &conn, &name).await?;
+    let (definition, _) = visible_registration(&ctx.state, &caller, &conn, &name).await?;
     let started = start_sync(
         &ctx.state,
         principal.as_ref(),
@@ -672,14 +991,42 @@ async fn sync(ctx: Ctx, Path(name): Path<String>, body: Body) -> ApiResult {
     ))
 }
 
+/// Refuse members of `definition` that `caller` cannot see (other than those in `allowed`).
+async fn check_new_members(
+    filter: &mut RefFilter,
+    definition: Option<&Value>,
+    allowed: &[String],
+) -> Result<(), ApiError> {
+    let targets = definition
+        .map(|d| targets_of(&from_core(d)))
+        .unwrap_or_default();
+    for target in targets {
+        if !allowed.contains(&target) && !filter.visible(&target).await {
+            return Err(ApiError::new(
+                403,
+                format!("Refusing a Pipeline member you cannot see ('{target}')."),
+            ));
+        }
+    }
+    Ok(())
+}
+
 async fn register(ctx: Ctx, Path(name): Path<String>, body: Body) -> ApiResult {
-    scoped_auth(&ctx.state, &ctx.headers, &["pipes:write"]).await?;
+    let caller = access::require(&ctx.state, &ctx.headers, &["pipes:register"]).await?;
     if !ctx.state.config.registration_pipes {
         return Err(ApiError::new(403, "Pipe registration is disabled."));
     }
     let conn = connector(&ctx)?;
     let mut pipe = metadata(&ctx, &conn, &name)?;
-    pipe.set_parameters(parameters(body, &name).await?);
+    let requested = parameters(body, &name).await?;
+    let registry = conn.connector_keys();
+    check_new_members(
+        &mut RefFilter::new(&ctx.state, &caller, &registry),
+        requested.get("pipeline"),
+        &[],
+    )
+    .await?;
+    pipe.set_parameters(access::guard::stamp_new_pipe(&caller, &requested)?);
     if conn
         .get_pipe_id(&pipe)
         .await
@@ -691,33 +1038,88 @@ async fn register(ctx: Ctx, Path(name): Path<String>, body: Body) -> ApiResult {
             format!("Pipeline '{name}' is already registered."),
         ));
     }
-    envelope::tuple(&conn.register_pipe(&pipe).await, 500)
+    let res = conn.register_pipe(&pipe).await;
+    ctx.state.access_cache().forget_pipes();
+    envelope::tuple(&res, 500)
 }
 
 async fn edit(ctx: Ctx, Path(name): Path<String>, body: Body) -> ApiResult {
-    scoped_auth(&ctx.state, &ctx.headers, &["pipes:write"]).await?;
+    let caller = access::require(&ctx.state, &ctx.headers, &["pipes:write"]).await?;
     let conn = connector(&ctx)?;
     let mut pipe = metadata(&ctx, &conn, &name)?;
-    if conn
-        .get_pipe_id(&pipe)
-        .await
-        .map_err(|e| failed("get_pipe_id", e))?
-        .is_none()
-    {
+    let Some(old) = registration_parameters(&ctx.state, &conn, &name).await? else {
+        return Err(ApiError::new(
+            404,
+            format!("Pipeline '{name}' is not registered."),
+        ));
+    };
+    if !caller.can_see(&old) {
         return Err(ApiError::new(
             404,
             format!("Pipeline '{name}' is not registered."),
         ));
     }
-    pipe.set_parameters(parameters(body, &name).await?);
-    envelope::tuple(
-        &conn.edit_pipe(&pipe, ctx.query.bool("patch", false)?).await,
-        500,
-    )
+    if !caller.can_edit(&old) {
+        return Err(ApiError::new(
+            403,
+            format!(
+                "You cannot change Pipeline '{name}': only its owner, its team's managers and administrators may."
+            ),
+        ));
+    }
+    let patch = ctx.query.bool("patch", false)?;
+    let requested = parameters(body, &name).await?;
+    let requested = if patch {
+        meerschaum_core::value::apply_patch_maps(&old, &requested)
+    } else {
+        requested
+    };
+    let mut new = access::guard::merge_edit(&caller, &old, requested)?;
+    // Members the caller cannot see stay (it could not have meant to drop them); a new member
+    // must be one it can see.
+    let registry = conn.connector_keys();
+    let mut filter = RefFilter::new(&ctx.state, &caller, &registry);
+    let old_targets = old
+        .get("pipeline")
+        .map(|d| targets_of(&from_core(d)))
+        .unwrap_or_default();
+    let mut hidden_old = Vec::new();
+    for target in &old_targets {
+        if !filter.visible(target).await {
+            hidden_old.push(target.clone());
+        }
+    }
+    check_new_members(&mut filter, new.get("pipeline"), &old_targets).await?;
+    if !hidden_old.is_empty()
+        && let Some(Value::Map(definition)) = new.get_mut("pipeline")
+    {
+        let mut targets: Vec<Value> = match definition.get("targets") {
+            Some(Value::List(items)) => items.clone(),
+            _ => Vec::new(),
+        };
+        for target in hidden_old {
+            if !targets.iter().any(|t| t.py_str() == target) {
+                targets.push(Value::Str(target));
+            }
+        }
+        definition.insert("targets".into(), Value::List(targets));
+    }
+    pipe.set_parameters(new);
+    let res = conn.edit_pipe(&pipe, false).await;
+    ctx.state.access_cache().forget_pipes();
+    envelope::tuple(&res, 500)
 }
 
-async fn referencing_jobs(ctx: &Ctx, conn: &Arc<dyn InstanceConnector>, name: &str) -> Vec<String> {
+/// The scheduled jobs that run Pipeline `name`: the ones `caller` may see (sorted), and how many
+/// others there are (a job of another team is only counted, rc15 AC9).
+async fn referencing_jobs(
+    ctx: &Ctx,
+    conn: &Arc<dyn InstanceConnector>,
+    name: &str,
+    caller: &Access,
+) -> (Vec<String>, usize) {
     let mut found = Vec::new();
+    let mut hidden = 0;
     for (job_name, meta) in ctx.state.jobs.list().await {
         let Some(args) = meta.get("sysargs").and_then(Json::as_array) else {
             continue;
@@ -742,38 +1144,59 @@ async fn referencing_jobs(ctx: &Ctx, conn: &Arc<dyn InstanceConnector>, name: &s
             if targets.into_iter().any(|target| *target == name)
                 && registry.unwrap_or(&ctx.state.config.instance_keys) == conn.connector_keys()
             {
-                found.push(job_name.clone());
+                if super::jobs::can_see(caller, &job_name, Some(&meta)) {
+                    found.push(job_name.clone());
+                } else {
+                    hidden += 1;
+                }
                 break;
             }
         }
     }
     found.sort();
     found.dedup();
-    found
+    (found, hidden)
+}
+
+/// `a, b and 2 hidden jobs` (the jobs the caller may not see are only counted).
+fn jobs_label(visible: &[String], hidden: usize) -> String {
+    let mut parts: Vec<String> = visible.to_vec();
+    if hidden > 0 {
+        parts.push(format!(
+            "{hidden} hidden job{}",
+            if hidden == 1 { "" } else { "s" }
+        ));
+    }
+    match parts.split_last() {
+        Some((last, rest)) if !rest.is_empty() => format!("{} and {last}", rest.join(", ")),
+        Some((last, _)) => last.clone(),
+        None => String::new(),
+    }
 }
 
 async fn delete(ctx: Ctx, Path(name): Path<String>) -> ApiResult {
-    scoped_auth(&ctx.state, &ctx.headers, &["pipes:delete"]).await?;
+    let caller = access::require(&ctx.state, &ctx.headers, &["pipes:delete"]).await?;
     let conn = connector(&ctx)?;
     let pipe = metadata(&ctx, &conn, &name)?;
-    if conn
-        .get_pipe_id(&pipe)
-        .await
-        .map_err(|e| failed("get_pipe_id", e))?
-        .is_none()
-    {
+    let parameters = registration_parameters(&ctx.state, &conn, &name)
+        .await?
+        .filter(|p| caller.can_see(p))
+        .ok_or_else(|| ApiError::new(404, format!("Pipeline '{name}' is not registered.")))?;
+    if !caller.can_edit(&parameters) {
         return Err(ApiError::new(
-            404,
-            format!("Pipeline '{name}' is not registered."),
+            403,
+            format!(
+                "You cannot delete Pipeline '{name}': only its owner, its team's managers and administrators may."
+            ),
         ));
     }
-    let jobs = referencing_jobs(&ctx, &conn, &name).await;
-    if !jobs.is_empty() {
+    let (jobs, hidden_jobs) = referencing_jobs(&ctx, &conn, &name, &caller).await;
+    if !jobs.is_empty() || hidden_jobs > 0 {
         return Err(ApiError::new(
             409,
             format!(
                 "Remove or reassign the scheduled jobs that run this Pipeline first: {}.",
-                jobs.join(", ")
+                jobs_label(&jobs, hidden_jobs)
             ),
         ));
     }
@@ -781,9 +1204,10 @@ async fn delete(ctx: Ctx, Path(name): Path<String>) -> ApiResult {
 }
 
 async fn id(ctx: Ctx, Path(name): Path<String>) -> ApiResult {
-    scoped_auth(&ctx.state, &ctx.headers, &["pipes:read"]).await?;
+    let caller = access::require(&ctx.state, &ctx.headers, &["pipes:read"]).await?;
     let conn = connector(&ctx)?;
     let pipe = metadata(&ctx, &conn, &name)?;
+    visible_registration(&ctx.state, &caller, &conn, &name).await?;
     let id = conn
         .get_pipe_id(&pipe)
         .await
@@ -797,30 +1221,37 @@ async fn id(ctx: Ctx, Path(name): Path<String>) -> ApiResult {
 }
 
 async fn attributes(ctx: Ctx, Path(name): Path<String>) -> ApiResult {
-    scoped_auth(&ctx.state, &ctx.headers, &["pipes:read"]).await?;
+    let caller = access::require(&ctx.state, &ctx.headers, &["pipes:read"]).await?;
     let conn = connector(&ctx)?;
     let pipe = metadata(&ctx, &conn, &name)?;
-    if conn
-        .get_pipe_id(&pipe)
-        .await
-        .map_err(|e| failed("get_pipe_id", e))?
-        .is_none()
-    {
-        return Err(ApiError::new(
-            404,
-            format!("Pipeline '{name}' is not registered."),
-        ));
-    }
+    let (definition, _) = visible_registration(&ctx.state, &caller, &conn, &name).await?;
     let mut attrs = crate::state::pipe_attributes(&conn, &pipe).await?;
+    if !caller.is_admin() {
+        // Members the caller cannot see are left out (and counted).
+        let registry = conn.connector_keys();
+        let visible = visible_definition(
+            &mut RefFilter::new(&ctx.state, &caller, &registry),
+            definition,
+        )
+        .await;
+        if let Some(Value::Map(parameters)) = attrs.get_mut("parameters") {
+            parameters.insert("pipeline".into(), crate::json::to_core(&visible));
+        }
+    }
+    // The jobs the caller may see by name; the others only counted, as one last entry (so a
+    // client that refuses to rename a Pipeline some job runs still refuses) and in
+    // `pipeline_hidden_referencing_jobs`.
+    let (mut jobs, hidden_jobs) = referencing_jobs(&ctx, &conn, &name, &caller).await;
+    if hidden_jobs > 0 {
+        jobs.push(jobs_label(&[], hidden_jobs));
+    }
     attrs.insert(
         "pipeline_referencing_jobs".into(),
-        Value::List(
-            referencing_jobs(&ctx, &conn, &name)
-                .await
-                .into_iter()
-                .map(Value::Str)
-                .collect(),
-        ),
+        Value::List(jobs.into_iter().map(Value::Str).collect()),
+    );
+    attrs.insert(
+        "pipeline_hidden_referencing_jobs".into(),
+        Value::Int(hidden_jobs as i64),
     );
     Ok(envelope::ok_with(
         format!("The attributes of Pipeline '{name}'."),
@@ -830,7 +1261,7 @@ async fn attributes(ctx: Ctx, Path(name): Path<String>) -> ApiResult {
 }
 
 async fn lease(ctx: Ctx, body: Body, release: bool) -> ApiResult {
-    scoped_auth(&ctx.state, &ctx.headers, &["pipes:write"]).await?;
+    let caller = access::require(&ctx.state, &ctx.headers, &["pipes:write"]).await?;
     let request: meerschaum_connector_api::models::LeaseRequest =
         serde_json::from_slice(&body_bytes(body).await?)
             .map_err(|e| ApiError::new(400, format!("Invalid lease request: {e}")))?;
@@ -852,6 +1283,20 @@ async fn lease(ctx: Ctx, body: Body, release: bool) -> ApiResult {
     };
     if let Some(name) = location {
         validate_name(name)?;
+        // The lease of a Pipeline's edit: a Pipeline the caller may change.
+        if parts[2] == "pipeline"
+            && let Some(parameters) = registration_parameters(&ctx.state, &conn, name).await?
+            && !caller.can_edit(&parameters)
+        {
+            return Err(ApiError::new(
+                if caller.can_see(&parameters) {
+                    403
+                } else {
+                    404
+                },
+                format!("You cannot change Pipeline '{name}'."),
+            ));
+        }
     }
     let pipe = Pipe::builder("mrsm", parts[2])
         .location(location)
@@ -899,4 +1344,74 @@ async fn acquire_lease(ctx: Ctx, body: Body) -> ApiResult {
 }
 async fn release_lease(ctx: Ctx, body: Body) -> ApiResult {
     lease(ctx, body, true).await
+}
+
+/// The registration pipe of the Pipeline `name` that `caller` may see, with its parameters.
+async fn visible_pipeline_pipe(
+    ctx: &Ctx,
+    caller: &Access,
+    name: &str,
+) -> Result<(Arc<dyn InstanceConnector>, Pipe, Map), ApiError> {
+    let conn = connector(ctx)?;
+    let (_, parameters) = visible_registration(&ctx.state, caller, &conn, name).await?;
+    let mut pipe = registration_pipe(&ctx.state, &conn, name)?;
+    pipe.set_parameters(parameters.clone());
+    Ok((conn, pipe, parameters))
+}
+
+async fn get_access(ctx: Ctx, Path(name): Path<String>) -> ApiResult {
+    let caller = access::require(&ctx.state, &ctx.headers, &["pipes:read"]).await?;
+    let (_, _, parameters) = visible_pipeline_pipe(&ctx, &caller, &name).await?;
+    Ok(envelope::ok(
+        format!("The access of Pipeline '{name}'."),
+        super::pipe_access::access_fields(&caller, &parameters),
+    ))
+}
+
+async fn patch_access(ctx: Ctx, Path(name): Path<String>, body: Body) -> ApiResult {
+    let caller = access::require(&ctx.state, &ctx.headers, &["pipes:write"]).await?;
+    let body = optional_body(body).await?;
+    let body = if body.is_null() { json!({}) } else { body };
+    let (conn, pipe, parameters) = visible_pipeline_pipe(&ctx, &caller, &name).await?;
+    let new = super::pipe_access::changed_access(&caller, &parameters, &body)?;
+    let res = conn.set_pipe_access(&pipe, &new).await;
+    super::pipe_access::forget(&ctx.state, &conn).await;
+    if !res.success {
+        return Err(super::pipe_access::change_failed(&res));
+    }
+    let parameters = super::pipe_access::registered(&conn, &pipe).await?;
+    Ok(envelope::ok(
+        res.message,
+        super::pipe_access::access_fields(&caller, &parameters),
+    ))
+}
+
+async fn lock_or_unlock(ctx: Ctx, name: String, body: Body, lock: bool) -> ApiResult {
+    let caller = access::require(&ctx.state, &ctx.headers, &["pipes:write"]).await?;
+    let body = optional_body(body).await?;
+    let requested = super::pipe_access::requested_locks(&body)?;
+    let (conn, pipe, parameters) = visible_pipeline_pipe(&ctx, &caller, &name).await?;
+    super::pipe_access::check_may_lock(&caller, &pipe, &parameters, lock)?;
+    let res = if lock {
+        conn.lock_pipe(&pipe, &requested).await
+    } else {
+        conn.unlock_pipe(&pipe, &requested).await
+    };
+    super::pipe_access::forget(&ctx.state, &conn).await;
+    if !res.success {
+        return Err(super::pipe_access::change_failed(&res));
+    }
+    let parameters = super::pipe_access::registered(&conn, &pipe).await?;
+    Ok(envelope::ok(
+        res.message,
+        super::pipe_access::access_fields(&caller, &parameters),
+    ))
+}
+
+async fn lock(ctx: Ctx, Path(name): Path<String>, body: Body) -> ApiResult {
+    lock_or_unlock(ctx, name, body, true).await
+}
+
+async fn unlock(ctx: Ctx, Path(name): Path<String>, body: Body) -> ApiResult {
+    lock_or_unlock(ctx, name, body, false).await
 }

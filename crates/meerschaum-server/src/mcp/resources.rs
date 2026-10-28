@@ -72,16 +72,21 @@ pub async fn read(name: &str, vars: &Map, cx: &ToolCx<'_>) -> Result<String, Too
             )]))))
         }
         "meerschaum_connectors" => {
+            // A connector reserved for other teams is not listed (rc15).
+            let caller = super::tools::caller_access(cx).await?;
             let mut keys = Vec::new();
             for (typ, labels) in &cx.state.config.connectors {
                 let Some(labels) = labels.as_map() else {
                     continue;
                 };
                 for label in labels.keys() {
-                    if label == "default" {
+                    let ck = format!("{typ}:{label}");
+                    if label == "default"
+                        || !crate::access::guard::may_use_connector(cx.state, &caller, &ck)
+                    {
                         continue;
                     }
-                    keys.push(format!("{typ}:{label}"));
+                    keys.push(ck);
                 }
             }
             keys.sort();

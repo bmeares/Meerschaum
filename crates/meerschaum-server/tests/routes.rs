@@ -110,7 +110,12 @@ async fn scopes_and_api_keys() {
     assert_eq!(r.status, StatusCode::OK);
     let r = send(&app, req("POST", "/pipes/a/b/c/register", Some(&key), None)).await;
     assert_eq!(r.status, StatusCode::FORBIDDEN);
-    assert_eq!(r.json()["detail"], "Missing required scope: 'pipes:write'");
+    // rc15: registering a pipe needs `pipes:register` (`pipes:write` still does for credentials
+    // made before it existed).
+    assert_eq!(
+        r.json()["detail"],
+        "Missing required scope: 'pipes:register'"
+    );
     let r = send(&app, req("POST", "/tokens/validate", Some(&key), None)).await;
     assert_eq!(r.json(), json!([true, "Success"]));
 
@@ -1101,7 +1106,10 @@ async fn a_star_scope_is_stored_literally_and_grants_every_scope() {
     assert_ne!(r.status, StatusCode::FORBIDDEN, "{}", r.text());
     let r = send(&app, register(&custom_key)).await;
     assert_eq!(r.status, StatusCode::FORBIDDEN);
-    assert_eq!(r.json()["detail"], "Missing required scope: 'pipes:write'");
+    assert_eq!(
+        r.json()["detail"],
+        "Missing required scope: 'pipes:register'"
+    );
 
     // Client credentials: the JWT carries `*`, or exactly the scopes asked for (a custom one
     // included) when the token holds `*`; a token without `*` is filtered to what it holds.
