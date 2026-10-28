@@ -21,6 +21,8 @@ throwaway SQLite instances (and Valkey when the `valkey` flavor is selected):
 
 from __future__ import annotations
 
+from tests._ports import service_port
+
 import os
 import uuid
 
@@ -595,7 +597,7 @@ def test_locks_on_a_custom_instance(custom_instance):
 
 @pytest.mark.skipif(not VALKEY_SELECTED, reason="the `valkey` flavor is not selected")
 def test_valkey_teams_locks_and_users():
-    conn = mrsm.get_connector('valkey', _label('p1vk'), uri='redis://localhost:6399/12')
+    conn = mrsm.get_connector('valkey', _label('p1vk'), uri=f"redis://localhost:{service_port('valkey')}/12")
     prefix = uuid.uuid4().hex[:6]
     usernames = [f'p1{prefix}a', f'_p1{prefix}a']
     team_name = f'p1-{prefix}'

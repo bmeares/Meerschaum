@@ -14,6 +14,8 @@ Rows are compared as documents: no scenario needs pandas, and pandas, Polars and
 GeoPandas frames are covered separately when those packages are installed.
 """
 
+from tests._ports import service_port
+
 import copy
 import os
 import pickle
@@ -80,7 +82,7 @@ def postgis_instance():
         username='test',
         password='test1234',
         database='testdb',
-        port=5449,
+        port=service_port('postgis'),
         host='localhost',
         schema=SCHEMA,
     )
@@ -1004,13 +1006,13 @@ def _server_instance(flavor, tmp_path=None):
         return mrsm.get_connector(
             'sql', 'w15l_mssql',
             flavor='mssql', username='sa', password='supersecureSECRETPASSWORD123!',
-            database='master', port=1439, host='localhost', schema='dbo',
+            database='master', port=service_port('mssql'), host='localhost', schema='dbo',
         )
     if flavor == 'oracle':
         return mrsm.get_connector(
             'sql', 'w15l_oracle',
             flavor='oracle', host='localhost', database='xe', username='system',
-            password='oracle', port=1529,
+            password='oracle', port=service_port('oracle'),
         )
     raise ValueError(flavor)
 
@@ -1067,7 +1069,7 @@ def test_a_custom_instance_connector_syncs_through_the_worker(native_calls):
     assert actual == expected
 
 
-def _resp_keys(pattern, port=6399):
+def _resp_keys(pattern, port=service_port('valkey')):
     """`KEYS pattern` over a raw RESP socket (no valkey package needed)."""
     import socket
     command = f'*2\r\n$4\r\nKEYS\r\n${len(pattern)}\r\n{pattern}\r\n'.encode()
@@ -1089,7 +1091,7 @@ def _resp_keys(pattern, port=6399):
     return [line.decode() for line in lines[1:] if line and not line.startswith(b'$')]
 
 
-def _resp_delete(patterns, port=6399):
+def _resp_delete(patterns, port=service_port('valkey')):
     import socket
     for pattern in patterns:
         keys = _resp_keys(pattern, port=port)
@@ -1108,7 +1110,7 @@ def test_a_valkey_instance_syncs_natively(native_calls):
     """The Rust `ValkeyConnector` is the instance: rows land under the pipe's index keys."""
     if 'valkey' not in os.environ.get('MRSM_TEST_FLAVORS', 'sqlite').split(','):
         pytest.skip("set MRSM_TEST_FLAVORS to include valkey")
-    instance = mrsm.get_connector('valkey', 'w15l_valkey', host='localhost', port=6399)
+    instance = mrsm.get_connector('valkey', 'w15l_valkey', host='localhost', port=service_port('valkey'))
     pipe = mrsm.Pipe(
         'w13h', 'w15l_valkey_' + uuid.uuid4().hex[:6], instance=instance, columns=COLUMNS,
     )
@@ -1235,19 +1237,19 @@ def _numeric_instance(flavor, tmp_path):
         return mrsm.get_connector(
             'sql', 'w15l_num_postgis',
             flavor='postgis', username='test', password='test1234', database='testdb',
-            port=5449, host='localhost', schema='w15l_num',
+            port=service_port('postgis'), host='localhost', schema='w15l_num',
         )
     if flavor == 'mariadb':
         return mrsm.get_connector(
             'sql', 'w15l_num_mariadb',
             flavor='mariadb', username='test', password='test1234', database='testdb',
-            port=3309, host='localhost',
+            port=service_port('mariadb'), host='localhost',
         )
     if flavor == 'mysql':
         return mrsm.get_connector(
             'sql', 'w15l_num_mysql',
             flavor='mysql', username='root', password='my-secret-pw', database='mysql',
-            port=3310, host='localhost',
+            port=service_port('mysql'), host='localhost',
         )
     raise ValueError(flavor)
 

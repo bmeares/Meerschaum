@@ -7,6 +7,8 @@ no SQLAlchemy; and a process uses one SQLite library.
 
 from __future__ import annotations
 
+from tests._ports import service_port
+
 import datetime
 import decimal
 import math
@@ -26,31 +28,31 @@ from tests.connectors import get_flavors
 SERVERS = {
     'timescaledb': dict(
         flavor='timescaledb', username='test', password='test1234', database='testdb',
-        host='localhost', port=5439,
+        host='localhost', port=service_port('timescaledb'),
     ),
     'timescaledb_ha': dict(
         flavor='timescaledb-ha', username='test', password='test1234', database='testdb',
-        host='localhost', port=5459,
+        host='localhost', port=service_port('timescaledb_ha'),
     ),
     'postgis': dict(
         flavor='postgis', username='test', password='test1234', database='testdb',
-        host='localhost', port=5449,
+        host='localhost', port=service_port('postgis'),
     ),
     'mariadb': dict(
         flavor='mariadb', username='test', password='test1234', database='testdb',
-        host='localhost', port=3309,
+        host='localhost', port=service_port('mariadb'),
     ),
     'mysql': dict(
         flavor='mysql', username='root', password='my-secret-pw', database='mysql',
-        host='localhost', port=3310,
+        host='localhost', port=service_port('mysql'),
     ),
     'mssql': dict(
         flavor='mssql', username='sa', password='supersecureSECRETPASSWORD123!',
-        database='master', host='localhost', port=1439,
+        database='master', host='localhost', port=service_port('mssql'),
     ),
     'oracle': dict(
         flavor='oracle', username='system', password='oracle', database='xe',
-        host='localhost', port=1529,
+        host='localhost', port=service_port('oracle'),
     ),
 }
 

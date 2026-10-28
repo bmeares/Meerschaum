@@ -11,6 +11,8 @@ The connectors are built ad hoc from Python (`mrsm.get_connector(...)` with attr
 in no config file): the Rust session must use them instead of reading the config registry.
 """
 
+from tests._ports import service_port
+
 import os
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -50,7 +52,7 @@ def _connector(flavor: str, label: str, tmp_path):
             username='test',
             password='test1234',
             database='testdb',
-            port=5449,
+            port=service_port('postgis'),
             host='localhost',
             schema=SCHEMA,
         )

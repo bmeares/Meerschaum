@@ -1,45 +1,25 @@
+# Release artifacts only: no tag-triggered rebuild and no registry publication.
+# A caller and its nested platform jobs share one run_id; every checkout stays on github.sha.
+# Standard platforms are required; cp314t is opt-in and staged only after its smoke passes.
 name: wheels
-
-# Builds the Meerschaum 5 wheel (docs/design/v5.0.0.md D8, D9, §12) on GitHub-hosted runners and
-# smoke-tests it in a fresh virtual environment: `meerschaum`, the maturin mixed project at the
-# repository root (pyproject.toml): the Python package plus the `meerschaum._core` extension, one
-# `cp311-abi3` wheel per platform. It is the only PyPI package: its `mrsm` console script runs the
-# CLI in-process from the extension (D8, revised); the standalone binary is `cargo install
-# meerschaum`.
-# Plus one EXPERIMENTAL free-threaded wheel (R8, §12): `cp314t` on Linux, built from the same
-# source as a version-specific (non-abi3) wheel with `continue-on-error`, and smoke-tested by a
-# non-blocking job. It never gates a release: pyo3 0.30 ignores the `abi3` feature on a
-# free-threaded interpreter, and `_core` declares `gil_used = false`.
-# Platforms (docs/design/v5-build.md): Linux x86_64 and Linux arm64 (`ubuntu-24.04-arm`, a native
-# manylinux_2_28 build in the maturin-action container, no QEMU), the same two for musl libc
-# (`musllinux_1_2`, Alpine: both cross-compiled on `ubuntu-latest` in the `rust-musl-cross` container,
-# the aarch64 wheel is smoke-tested natively on `ubuntu-24.04-arm`), macOS arm64 (`macos-latest`),
-# macOS x86_64 (`macos-15-intel`, the last Intel runner image) and Windows x86_64. Not built: Windows arm64.
-# Also one standalone `mrsm` binary per platform (job `binaries`: the same glibc/macOS/Windows targets,
-# manylinux_2_28 glibc floor on Linux, plus macOS x86_64) for the GitHub release assets.
-# Release builds only: a manual dispatch or a `v5*` tag, never a push or a pull request (ordinary development
-# is covered by rust.yaml / pytest.yaml, which build with the quick `ci` profile; the wheels, the binaries
-# and the Docker images are `--release`). Swatinem/rust-cache restores the dependencies' build between
-# dispatches (saved from `v5`; GitHub's cache storage is capped at 10 GB per repository, least recently
-# used evicted first, so check `gh cache list` if release builds turn cold).
-# Prereleases build Linux x86_64 only (glibc, musl and experimental cp314t); finals use every
-# platform above. scripts/ci/release_matrix.py selects matching build and smoke matrices from Cargo's
-# version, including on manual dispatches. The platform-independent sdist is always built.
-# Nothing here publishes anything: the wheels and binaries are artifacts on GitHub-hosted runners.
-
-on:
+'on':
+  workflow_call:
+    inputs:
+      experimental:
+        type: boolean
+        default: false
+        description: Build and test the optional Linux cp314t wheel.
   workflow_dispatch:
-  push:
-    tags:
-      - 'v5*'
-
+    inputs:
+      experimental:
+        type: boolean
+        default: false
+        description: Build and test the optional Linux cp314t wheel.
 permissions:
   contents: read
-
 concurrency:
   group: wheels-${{ github.ref }}
   cancel-in-progress: true
-
 jobs:
   metadata:
     name: packaging metadata
@@ -48,151 +28,75 @@ jobs:
       binaries: ${{ steps.matrix.outputs.binaries }}
       smoke: ${{ steps.matrix.outputs.smoke }}
       smoke_musl: ${{ steps.matrix.outputs.smoke_musl }}
+      experimental_wheels: ${{ steps.matrix.outputs.experimental_wheels }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-        with: { persist-credentials: false }
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.13'
-      - name: Cargo version, pyproject pins and extras agree
-        run: python scripts/check_packaging.py
-      - name: Select release platforms
-        id: matrix
-        run: python scripts/ci/release_matrix.py --github-output "$GITHUB_OUTPUT"
-
+    - uses: actions/checkout@v4
+      with:
+        persist-credentials: false
+        ref: ${{ github.sha }}
+    - uses: actions/setup-python@v5
+      with:
+        python-version: '3.13'
+    - name: Cargo version, pyproject pins and extras agree
+      run: python scripts/check_packaging.py
+    - name: Select release platforms
+      id: matrix
+      run: python scripts/ci/release_matrix.py --github-output "$GITHUB_OUTPUT"
   build:
-    name: build (${{ matrix.os }}${{ matrix.musl && format(', musllinux {0}', matrix.wheel_arch) || '' }}${{ matrix.freethreaded && ', cp314t, experimental' || '' }})
+    name: wheel (${{ matrix.target }})
     needs: metadata
-    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.metadata.outputs.wheels) }}
-    # A failed experimental entry must not fail the workflow (or the jobs that need `build`).
-    continue-on-error: ${{ matrix.freethreaded == true }}
-    steps:
-      - uses: actions/checkout@v4
-        with: { persist-credentials: false }
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.13'
-
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        with:
-          shared-key: wheel-${{ matrix.os }}-${{ matrix.target || matrix.manylinux }}${{ matrix.freethreaded && '-cp314t' || '' }}
-          save-if: ${{ github.ref == 'refs/heads/v5' }}
-
-      - name: Build the meerschaum wheel
-        uses: PyO3/maturin-action@v1
-        with:
-          command: build
-          manylinux: ${{ matrix.manylinux }}
-          # Only the musllinux entries name a target (empty = the runner's own).
-          target: ${{ matrix.target }}
-          # Free-threaded: an explicit interpreter, so maturin builds `cp314-cp314t` (the
-          # manylinux container ships /opt/python/cp314-cp314t). The default entries build the
-          # `cp311-abi3` wheel.
-          args: --release --locked --out dist ${{ matrix.freethreaded && '--interpreter python3.14t' || '' }}
-
-      # Wheel metadata, `_version.py` inside the wheel and the console scripts agree with Cargo; no
-      # `mrsm` binary and no second wheel.
-      - name: Check the wheel agrees on the version
-        if: ${{ !matrix.freethreaded }}
-        shell: bash
-        run: python scripts/check_packaging.py --wheels dist
-
-      # What PyPI will accept: a platform tag that is not a bare `linux_*` (Linux wheels must be
-      # manylinux_2_28 or older), the architecture of the runner, and a file under PyPI's 100 MiB limit
-      # (this fails above 95 MiB, so a growing wheel is noticed before the upload is refused).
-      - name: Check the wheel tag and size
-        shell: bash
-        env:
-          RUNNER_OS_NAME: ${{ runner.os }}
-          RUNNER_ARCH_NAME: ${{ runner.arch }}
-          # The musllinux aarch64 wheel is built on an x86_64 runner: the matrix says which it is.
-          WHEEL_ARCH: ${{ matrix.wheel_arch }}
-          EXPECT_MUSL: ${{ matrix.musl && '1' || '' }}
-          MAX_WHEEL_BYTES: '99614720'
-        run: |
-          python - <<'PY'
-          import os, pathlib, re, sys, zipfile
-          wheels = sorted(pathlib.Path('dist').glob('*.whl'))
-          if len(wheels) != 1:
-              sys.exit(f'expected one wheel in dist/, found {[w.name for w in wheels]}')
-          wheel = wheels[0]
-          size = wheel.stat().st_size
-          with zipfile.ZipFile(wheel) as zf:
-              name = next(n for n in zf.namelist() if n.endswith('.dist-info/WHEEL'))
-              tags = [l.split(': ', 1)[1] for l in zf.read(name).decode().splitlines() if l.startswith('Tag: ')]
-          print(f'{wheel.name}: {size / 1048576:.1f} MiB, tags {tags}')
-          os_name = os.environ['RUNNER_OS_NAME']
-          arch = os.environ['WHEEL_ARCH'] or {'X64': 'x86_64', 'ARM64': 'aarch64'}[os.environ['RUNNER_ARCH_NAME']]
-          musl = bool(os.environ['EXPECT_MUSL'])
-          problems = []
-          if size > int(os.environ['MAX_WHEEL_BYTES']):
-              problems.append(f'{size} bytes is over the 95 MiB guard (PyPI refuses 100 MiB)')
-          platforms = {t.rsplit('-', 1)[-1] for t in tags}
-          if os_name == 'Linux' and musl:
-              # Alpine and other musl distributions: `musllinux_1_2_<arch>` (musl 1.2), nothing newer.
-              for plat in platforms:
-                  m = re.fullmatch(r'musllinux_1_(\d+)_(\w+)', plat)
-                  if not m:
-                      problems.append(f'platform tag {plat!r} is not musllinux (PyPI rejects it)')
-                  elif m.group(2) != arch:
-                      problems.append(f'platform tag {plat!r} is not {arch}')
-                  elif int(m.group(1)) > 2:
-                      problems.append(f'platform tag {plat!r} needs a newer musl than musllinux_1_2')
-          elif os_name == 'Linux':
-              for plat in platforms:
-                  m = re.fullmatch(r'manylinux_2_(\d+)_(\w+)|manylinux2014_(\w+)', plat)
-                  if not m:
-                      problems.append(f'platform tag {plat!r} is not manylinux (PyPI rejects it)')
-                  elif (m.group(2) or m.group(3)) != arch:
-                      problems.append(f'platform tag {plat!r} is not {arch}')
-                  elif m.group(1) and int(m.group(1)) > 28:
-                      problems.append(f'platform tag {plat!r} needs a newer glibc than manylinux_2_28')
-          elif os_name == 'macOS':
-              if not all(re.fullmatch(r'macosx_\d+_\d+_(arm64|x86_64|universal2)', p) for p in platforms):
-                  problems.append(f'unexpected macOS platform tags {platforms}')
-          elif not all(p in ('win_amd64', 'win_arm64') for p in platforms):
-              problems.append(f'unexpected Windows platform tags {platforms}')
-          if problems:
-              sys.exit('\n'.join(problems))
-          PY
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.artifact || format('wheels-{0}{1}', matrix.os, matrix.freethreaded && '-cp314t' || '') }}
-          path: dist/*.whl
-          if-no-files-found: error
-
+    uses: ./.github/workflows/wheel-platform.yaml
+    with:
+      os: ${{ matrix.os }}
+      manylinux: ${{ matrix.manylinux }}
+      target: ${{ matrix.target }}
+      artifact: ${{ matrix.artifact || format('wheels-{0}', matrix.os) }}
+      smoke-os: ${{ matrix.smoke_os || matrix.os }}
+      wheel-arch: ${{ matrix.wheel_arch || '' }}
+      musl: ${{ matrix.musl == true }}
+      experimental: false
+  experimental:
+    name: experimental wheel (${{ matrix.target }})
+    needs: metadata
+    if: ${{ inputs.experimental }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.metadata.outputs.experimental_wheels) }}
+    uses: ./.github/workflows/wheel-platform.yaml
+    with:
+      os: ${{ matrix.os }}
+      manylinux: ${{ matrix.manylinux }}
+      target: ${{ matrix.target }}
+      artifact: ${{ matrix.artifact || format('wheels-{0}', matrix.os) }}
+      smoke-os: ${{ matrix.smoke_os || matrix.os }}
+      wheel-arch: ${{ matrix.wheel_arch || '' }}
+      musl: ${{ matrix.musl == true }}
+      experimental: true
   sdist:
     name: build (sdist)
     needs: metadata
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-        with: { persist-credentials: false }
-      - name: Build the meerschaum sdist
-        uses: PyO3/maturin-action@v1
-        with:
-          command: sdist
-          args: --out dist
-      - uses: actions/upload-artifact@v4
-        with:
-          name: sdist
-          path: dist/*.tar.gz
-          if-no-files-found: error
-
-  # The standalone `mrsm` binary (what `cargo install meerschaum` builds: `cargo build --release -p
-  # meerschaum --bin mrsm`, the front crate's default `cli` feature), one per platform, for the GitHub
-  # pre-release / release assets. Linux binaries are built in the same `manylinux_2_28` containers as the
-  # wheels (glibc 2.28 floor, checked below), natively on x86_64 and arm64. macOS targets 11.0 (arm64),
-  # Windows links the C runtime statically (no Visual C++ redistributable needed). Each binary is smoke-run
-  # (`--version`, `show version`) and uploaded as an artifact `mrsm-<version>-<target>[.exe]` with its
-  # SHA-256 (the artifact zip drops the executable bit: `chmod +x` after downloading). Nothing is
-  # published from CI: the maintainer attaches them to the GitHub release (.agents/skills/release).
+    - uses: actions/checkout@v4
+      with:
+        persist-credentials: false
+        ref: ${{ github.sha }}
+    - name: Build the meerschaum sdist
+      uses: PyO3/maturin-action@v1
+      with:
+        command: sdist
+        args: --out dist
+    - name: Record exact-commit source provenance
+      run: python scripts/ci/artifacts.py create --kind sdist --profile release --target source --artifact-dir dist --output dist/provenance.json
+    - uses: actions/upload-artifact@v4
+      with:
+        name: sdist
+        path: dist/*
+        if-no-files-found: error
   binaries:
     name: binary (${{ matrix.target }})
     needs: metadata
@@ -206,290 +110,77 @@ jobs:
     env:
       EXT: ${{ matrix.ext }}
     steps:
-      - uses: actions/checkout@v4
-        with: { persist-credentials: false }
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.13'
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        with:
-          shared-key: binary-${{ matrix.target }}
-          save-if: ${{ github.ref == 'refs/heads/v5' }}
-
-      - name: Versions (PEP 440 for the file name, Cargo for `mrsm --version`)
-        run: |
-          echo "VERSION=$(python scripts/check_packaging.py --version)" >> "$GITHUB_ENV"
-          echo "CARGO_VERSION=$(python -c "import tomllib; print(tomllib.load(open('Cargo.toml', 'rb'))['workspace']['package']['version'])")" >> "$GITHUB_ENV"
-
-      - name: Build mrsm (manylinux_2_28 container)
-        if: ${{ matrix.container_arch }}
-        run: |
-          docker run --rm -v "$GITHUB_WORKSPACE:/io" -w /io \
-            "quay.io/pypa/manylinux_2_28_${{ matrix.container_arch }}:latest" \
-            bash -euxc 'curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable \
-              && . "$HOME/.cargo/env" \
-              && cargo build --release --locked -p meerschaum --bin mrsm'
-      - name: Build mrsm (macOS)
-        if: ${{ runner.os == 'macOS' }}
-        env:
-          MACOSX_DEPLOYMENT_TARGET: '11.0'
-        run: cargo build --release --locked -p meerschaum --bin mrsm
-      - name: Build mrsm (Windows)
-        if: ${{ runner.os == 'Windows' }}
-        env:
-          RUSTFLAGS: -C target-feature=+crt-static
-        run: cargo build --release --locked -p meerschaum --bin mrsm
-
-      # The glibc symbol versions the binary needs must not exceed the container's (2.28).
-      - name: Check the glibc floor (Linux)
-        if: ${{ runner.os == 'Linux' }}
-        run: |
-          max=$(objdump -T target/release/mrsm | grep -o 'GLIBC_[0-9]\+\.[0-9]\+' | sed 's/GLIBC_//' | sort -V | tail -1)
-          echo "highest GLIBC symbol version needed: ${max:-none}"
-          if [ -n "$max" ] && [ "$(printf '%s\n2.28\n' "$max" | sort -V | tail -1)" != 2.28 ]; then
-            echo "needs glibc $max, newer than manylinux_2_28" >&2; exit 1
-          fi
-          file target/release/mrsm || true
-
-      - name: Stage the binary and its SHA-256
-        run: |
-          mkdir out
-          name="mrsm-$VERSION-${{ matrix.target }}$EXT"
-          cp "target/release/mrsm$EXT" "out/$name"
-          cd out
-          if command -v sha256sum >/dev/null; then sha256sum "$name" > "$name.sha256"; else shasum -a 256 "$name" > "$name.sha256"; fi
-          ls -l .; cat "$name.sha256"
-
-      - name: Smoke the binary (version, show version)
-        run: |
-          export MRSM_ROOT_DIR="$RUNNER_TEMP/mrsm-root" MRSM_PLUGINS_DIR="$RUNNER_TEMP/mrsm-plugins" MRSM_NO_AUTO_INSTALL=1
-          mkdir -p "$MRSM_ROOT_DIR" "$MRSM_PLUGINS_DIR"
-          cd "$RUNNER_TEMP"
-          bin="$GITHUB_WORKSPACE/out/mrsm-$VERSION-${{ matrix.target }}$EXT"
-          chmod +x "$bin"
-          "$bin" --version | tee version.txt
-          grep -Fq "$CARGO_VERSION" version.txt
-          "$bin" show version | tee show-version.txt
-          grep -Fq "$CARGO_VERSION" show-version.txt
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: mrsm-${{ env.VERSION }}-${{ matrix.target }}
-          path: out/*
-          if-no-files-found: error
-
-  smoke:
-    name: smoke (${{ matrix.os }}, py${{ matrix.python }})
-    needs: [metadata, build]
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJSON(needs.metadata.outputs.smoke) }}
-    defaults:
-      run:
-        shell: bash
-    steps:
-      # The wheels are tested in isolation, not against the source tree: the only file taken from the
-      # repository is the façade smoke script (also used for the Docker images), and it is run from
-      # outside the checkout with `python -I`.
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-          path: smoke-src
-          sparse-checkout: scripts/docker/smoke_facade.py
-          sparse-checkout-cone-mode: false
-      - uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python }}
-      - uses: actions/download-artifact@v4
-        with:
-          name: wheels-${{ matrix.os }}
-          path: dist
-      - name: Install the wheel into a fresh venv
-        run: |
-          ls -l dist
-          python -m venv "$RUNNER_TEMP/venv"
-          if [ -d "$RUNNER_TEMP/venv/Scripts" ]; then bindir=Scripts; else bindir=bin; fi
-          echo "VENV_BIN=$RUNNER_TEMP/venv/$bindir" >> "$GITHUB_ENV"
-          "$RUNNER_TEMP/venv/$bindir/python" -m pip install --no-index --find-links dist meerschaum
-          "$RUNNER_TEMP/venv/$bindir/python" -m pip list
-      - name: Import the package and the extension
-        run: |
-          export MRSM_ROOT_DIR="$RUNNER_TEMP/mrsm-root" MRSM_PLUGINS_DIR="$RUNNER_TEMP/mrsm-plugins"
-          mkdir -p "$MRSM_ROOT_DIR" "$MRSM_PLUGINS_DIR"
-          cd "$RUNNER_TEMP"
-          "$VENV_BIN/python" -c "
-          import meerschaum, meerschaum._core as core
-          assert core.AVAILABLE, core.LOAD_ERROR
-          print('meerschaum', meerschaum.__version__, 'core', core.__version__, core.EXTENSION_PATH)
-          "
-      # The console script runs the CLI in-process from the extension (no binary in the wheel).
-      - name: mrsm console script
-        run: |
-          export MRSM_ROOT_DIR="$RUNNER_TEMP/mrsm-root" MRSM_PLUGINS_DIR="$RUNNER_TEMP/mrsm-plugins"
-          cd "$RUNNER_TEMP"
-          "$VENV_BIN/mrsm" --version
-          "$VENV_BIN/mrsm" show version
-          "$VENV_BIN/mrsm" show connectors
-          "$VENV_BIN/python" -m meerschaum --version
-          "$VENV_BIN/meerschaum" --version
-      - name: Sync a tiny pipe on SQLite
-        run: |
-          export MRSM_ROOT_DIR="$RUNNER_TEMP/mrsm-root" MRSM_PLUGINS_DIR="$RUNNER_TEMP/mrsm-plugins"
-          export MRSM_SQL_SMOKE="sqlite:///$RUNNER_TEMP/smoke.db"
-          cd "$RUNNER_TEMP"
-          "$VENV_BIN/mrsm" register pipe -i sql:smoke -c sql:smoke -m tiny --noask \
-            --params '{"columns": {"primary": "id"}, "fetch": {"definition": "SELECT 1 AS id, 2 AS val"}}'
-          "$VENV_BIN/mrsm" sync pipes -i sql:smoke -c sql:smoke -m tiny
-          "$VENV_BIN/mrsm" show data -i sql:smoke -c sql:smoke -m tiny --nopretty | tee "$RUNNER_TEMP/tiny.txt"
-          "$VENV_BIN/python" -I "$GITHUB_WORKSPACE/smoke-src/scripts/docker/smoke_facade.py" --cli-data "$RUNNER_TEMP/tiny.txt"
-      # Jobs re-run the CLI as `python -P -m meerschaum`: start one through the installed console
-      # script, wait until it has run (its log holds the version line), then stop and delete it and
-      # check nothing is left running. Not on Windows: background jobs are refused there
-      # (`crates/meerschaum-jobs/src/supervisor.rs`).
-      - name: Job round trip through the console script
-        if: runner.os != 'Windows'
-        run: |
-          export MRSM_ROOT_DIR="$RUNNER_TEMP/mrsm-root" MRSM_PLUGINS_DIR="$RUNNER_TEMP/mrsm-plugins"
-          cd "$RUNNER_TEMP"
-          "$VENV_BIN/mrsm" show version : --loop --min-seconds 1 --name smoke-job -d --noask
-          # The job's log holds the version line once a lap ran (poll, do not guess a sleep).
-          ok=""
-          for _ in $(seq 1 30); do
-            if "$VENV_BIN/mrsm" show logs smoke-job --nopretty > "$RUNNER_TEMP/job.log" 2>&1 \
-               && grep -q 'Meerschaum v' "$RUNNER_TEMP/job.log"; then
-              ok=1; break
-            fi
-            sleep 1
-          done
-          cat "$RUNNER_TEMP/job.log"
-          if [ -z "$ok" ]; then echo "smoke-job never logged the version line" >&2; exit 1; fi
-          if grep -q 'Create a new job' "$RUNNER_TEMP/job.log"; then
-            echo "smoke-job is not running the command (it logged the job-creation hint)" >&2; exit 1
-          fi
-          "$VENV_BIN/mrsm" show jobs | tee "$RUNNER_TEMP/jobs.txt"
-          grep -q 'smoke-job' "$RUNNER_TEMP/jobs.txt"
-          grep -q 'running' "$RUNNER_TEMP/jobs.txt"
-          "$VENV_BIN/mrsm" stop job smoke-job -y
-          sleep 1
-          "$VENV_BIN/mrsm" delete job smoke-job -y
-          "$VENV_BIN/mrsm" show jobs > "$RUNNER_TEMP/jobs-after.txt"
-          ! grep -q 'smoke-job' "$RUNNER_TEMP/jobs-after.txt"
-          # No supervisor or worker of the job is left.
-          if command -v pgrep >/dev/null && pgrep -f '[d]aemon_id=.smoke-job|[-]-name smoke-job' >/dev/null; then
-            echo "a process of smoke-job is still running" >&2; exit 1
-          fi
-      # The Python API of the wheel alone (no extras, no network, no implicit install): config write and
-      # read, password hashing, and a `Pipe` synced from a list of dicts and read back with
-      # `get_data(as_docs=True)` on a scratch SQLite instance (`sql:smoke`, always explicit: never the
-      # default instance). pip and uv shims first on PATH fail the step if anything tries to install
-      # (POSIX only: a Windows shim cannot intercept a spawned `uv.exe`); the installed packages must be
-      # identical before and after.
-      - name: Python API smoke (the wheel only, no installs)
-        run: |
-          export MRSM_ROOT_DIR="$RUNNER_TEMP/mrsm-root-api" MRSM_PLUGINS_DIR="$RUNNER_TEMP/mrsm-plugins-api"
-          mkdir -p "$MRSM_ROOT_DIR" "$MRSM_PLUGINS_DIR"
-          export MRSM_NO_AUTO_INSTALL=1 PIP_NO_INDEX=1 UV_OFFLINE=1
-          export MRSM_SQL_SMOKE="sqlite:///$RUNNER_TEMP/api-smoke.db"
-          export MRSM_CONFIG='{"meerschaum": {"instance": "sql:smoke"}}'
-          export MRSM_SHIM_LOG="$RUNNER_TEMP/install-attempts.log"
-          : > "$MRSM_SHIM_LOG"
-          shims="$RUNNER_TEMP/shims"
-          mkdir -p "$shims"
-          vb="$VENV_BIN"
-          if [ "$RUNNER_OS" != Windows ]; then
-            for tool in pip pip3 uv uvx; do
-              printf '#!/bin/sh\necho "$0 $*" >> "$MRSM_SHIM_LOG"\necho "unexpected install tool: $0 $*" >&2\nexit 97\n' > "$shims/$tool"
-              chmod +x "$shims/$tool"
-            done
-            export PATH="$shims:$vb:$PATH"
-          else
-            export PATH="$(cygpath -u "$vb"):$PATH"
-          fi
-          cd "$RUNNER_TEMP"
-          "$VENV_BIN/python" -m pip list --format=freeze > "$RUNNER_TEMP/pip-before.txt"
-          "$VENV_BIN/python" -I "$GITHUB_WORKSPACE/smoke-src/scripts/docker/smoke_facade.py" | tee "$RUNNER_TEMP/api-smoke.txt"
-          "$VENV_BIN/python" -m pip list --format=freeze > "$RUNNER_TEMP/pip-after.txt"
-          diff "$RUNNER_TEMP/pip-before.txt" "$RUNNER_TEMP/pip-after.txt"
-          if [ -s "$MRSM_SHIM_LOG" ]; then cat "$MRSM_SHIM_LOG" >&2; echo "an install tool was invoked" >&2; exit 1; fi
-          grep -q '"install_requests": \[\]' "$RUNNER_TEMP/api-smoke.txt"
-      - name: Base wheel has no Python dependencies
-        run: |
-          "$VENV_BIN/python" -m pip list --format=freeze | sed 's/==.*//' | sort > "$RUNNER_TEMP/installed.txt"
-          cat "$RUNNER_TEMP/installed.txt"
-          # pip/setuptools/wheel (ensurepip) are not Meerschaum's; anything else is a leak.
-          extra="$(grep -viE '^(pip|setuptools|wheel|meerschaum)$' "$RUNNER_TEMP/installed.txt" || true)"
-          if [ -n "$extra" ]; then echo "unexpected dependencies: $extra" >&2; exit 1; fi
-
-  # The musllinux wheels, installed with the system Python of an Alpine container (musl libc), each on a
-  # runner of its own architecture (the aarch64 wheel is cross-compiled on x86_64 and first runs here,
-  # natively on `ubuntu-24.04-arm`). The wheel alone: no extras, no network access to PyPI
-  # (`--no-index`), `MRSM_NO_AUTO_INSTALL=1`. Not covered here: jobs (they need a real init) and the
-  # extras' compiled dependencies, which come from PyPI's own musllinux wheels.
-  smoke-musl:
-    name: smoke (musllinux ${{ matrix.arch }}, Alpine)
-    needs: [metadata, build]
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJSON(needs.metadata.outputs.smoke_musl) }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-          path: smoke-src
-          sparse-checkout: |
-            scripts/docker/smoke_facade.py
-            scripts/docker/smoke_wheel_alpine.sh
-          sparse-checkout-cone-mode: false
-      - uses: actions/download-artifact@v4
-        with:
-          name: wheels-musllinux-${{ matrix.arch }}
-          path: dist
-      - name: Install the wheel in Alpine and run it
-        run: |
-          ls -l dist
-          docker run --rm \
-            -v "$PWD/dist:/dist:ro" \
-            -v "$PWD/smoke-src/scripts/docker/smoke_wheel_alpine.sh:/smoke.sh:ro" \
-            -v "$PWD/smoke-src/scripts/docker/smoke_facade.py:/smoke_facade.py:ro" \
-            alpine:3.22 sh /smoke.sh
-
-  # EXPERIMENTAL (R8): install the free-threaded wheel on a free-threaded interpreter and check
-  # that importing `_core` keeps the GIL disabled.
-  smoke-freethreaded:
-    name: smoke (free-threaded, py3.14t)
-    needs: [metadata, build]
-    if: ${{ !cancelled() }}
-    runs-on: ubuntu-latest
-    continue-on-error: true
-    steps:
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.14t'
-      - uses: actions/download-artifact@v4
-        with:
-          name: wheels-ubuntu-latest
-          path: dist
-      - uses: actions/download-artifact@v4
-        with:
-          name: wheels-ubuntu-latest-cp314t
-          path: dist-ft
-      - name: Install the free-threaded wheel (cp314t)
-        run: |
-          ls -l dist dist-ft
-          python -m venv "$RUNNER_TEMP/venv"
-          # The abi3 `meerschaum` wheel is deliberately not on the path: it would shadow cp314t.
-          rm -f dist/meerschaum-*.whl
-          "$RUNNER_TEMP/venv/bin/python" -m pip install --no-index --find-links dist --find-links dist-ft meerschaum
-      - name: _core imports without re-enabling the GIL
-        run: |
-          export MRSM_ROOT_DIR="$RUNNER_TEMP/mrsm-root" MRSM_PLUGINS_DIR="$RUNNER_TEMP/mrsm-plugins"
-          mkdir -p "$MRSM_ROOT_DIR" "$MRSM_PLUGINS_DIR"
-          cd "$RUNNER_TEMP"
-          "$RUNNER_TEMP/venv/bin/python" -X gil=0 -c "
-          import sys, meerschaum._core as core
-          assert core.AVAILABLE, core.LOAD_ERROR
-          assert not sys._is_gil_enabled(), 'importing _core re-enabled the GIL'
-          print('free-threaded OK', core.__version__, core.EXTENSION_PATH)
-          "
+    - uses: actions/checkout@v4
+      with:
+        persist-credentials: false
+        ref: ${{ github.sha }}
+    - uses: actions/setup-python@v5
+      with:
+        python-version: '3.13'
+    - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+      with:
+        shared-key: binary-${{ matrix.target }}-release
+        save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/v5' }}
+    - name: Versions (PEP 440 for the file name, Cargo for `mrsm --version`)
+      run: |
+        echo "VERSION=$(python scripts/check_packaging.py --version)" >> "$GITHUB_ENV"
+        echo "CARGO_VERSION=$(python -c "import tomllib; print(tomllib.load(open('Cargo.toml', 'rb'))['workspace']['package']['version'])")" >> "$GITHUB_ENV"
+    - name: Build mrsm (manylinux_2_28 container)
+      if: ${{ matrix.container_arch }}
+      run: |
+        docker run --rm -v "$GITHUB_WORKSPACE:/io" -w /io \
+          "quay.io/pypa/manylinux_2_28_${{ matrix.container_arch }}:latest" \
+          bash -euxc 'curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable \
+            && . "$HOME/.cargo/env" \
+            && rustc -Vv > binary-toolchain.txt \
+            && cargo build --release --locked -p meerschaum --bin mrsm'
+    - name: Build mrsm (macOS)
+      if: ${{ runner.os == 'macOS' }}
+      env:
+        MACOSX_DEPLOYMENT_TARGET: '11.0'
+      run: |-
+        rustc -Vv > binary-toolchain.txt
+        cargo build --release --locked -p meerschaum --bin mrsm
+    - name: Build mrsm (Windows)
+      if: ${{ runner.os == 'Windows' }}
+      env:
+        RUSTFLAGS: -C target-feature=+crt-static
+      run: |-
+        rustc -Vv > binary-toolchain.txt
+        cargo build --release --locked -p meerschaum --bin mrsm
+    - name: Check the glibc floor (Linux)
+      if: ${{ runner.os == 'Linux' }}
+      run: |
+        max=$(objdump -T target/release/mrsm | grep -o 'GLIBC_[0-9]\+\.[0-9]\+' | sed 's/GLIBC_//' | sort -V | tail -1)
+        echo "highest GLIBC symbol version needed: ${max:-none}"
+        if [ -n "$max" ] && [ "$(printf '%s\n2.28\n' "$max" | sort -V | tail -1)" != 2.28 ]; then
+          echo "needs glibc $max, newer than manylinux_2_28" >&2; exit 1
+        fi
+        file target/release/mrsm || true
+    - name: Stage the binary and its SHA-256
+      run: |
+        mkdir out
+        name="mrsm-$VERSION-${{ matrix.target }}$EXT"
+        cp "target/release/mrsm$EXT" "out/$name"
+        cd out
+        if command -v sha256sum >/dev/null; then sha256sum "$name" > "$name.sha256"; else shasum -a 256 "$name" > "$name.sha256"; fi
+        ls -l .; cat "$name.sha256"
+    - name: Smoke the binary (version, show version)
+      run: |
+        export MRSM_ROOT_DIR="$RUNNER_TEMP/mrsm-root" MRSM_PLUGINS_DIR="$RUNNER_TEMP/mrsm-plugins" MRSM_NO_AUTO_INSTALL=1
+        mkdir -p "$MRSM_ROOT_DIR" "$MRSM_PLUGINS_DIR"
+        cd "$RUNNER_TEMP"
+        bin="$GITHUB_WORKSPACE/out/mrsm-$VERSION-${{ matrix.target }}$EXT"
+        chmod +x "$bin"
+        "$bin" --version | tee version.txt
+        grep -Fq "$CARGO_VERSION" version.txt
+        "$bin" show version | tee show-version.txt
+        grep -Fq "$CARGO_VERSION" show-version.txt
+    - name: Record exact-commit binary provenance
+      run: |
+        python scripts/ci/artifacts.py create --kind binary --profile release --target "${{ matrix.target }}" --artifact-dir out --output out/provenance.json --toolchain-file binary-toolchain.txt
+    - uses: actions/upload-artifact@v4
+      with:
+        name: mrsm-${{ env.VERSION }}-${{ matrix.target }}
+        path: out/*
+        if-no-files-found: error

@@ -11,6 +11,8 @@ Runs against PostgreSQL (the `postgis` test container) when `postgis` is in `MRS
 Schema `w9u`.
 """
 
+from tests._ports import service_port
+
 import os
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -19,7 +21,7 @@ import pytest
 
 import meerschaum as mrsm
 
-PG_BASE_URI = 'postgresql://test:test1234@localhost:5449/testdb'
+PG_BASE_URI = f"postgresql://test:test1234@localhost:{service_port('postgis')}/testdb"
 SCHEMA = 'w9u'
 
 pytestmark = pytest.mark.skipif(

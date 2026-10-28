@@ -1,205 +1,175 @@
-# The Python suite against the extension built from this checkout (docs/design/v5-build.md).
-#
-# What runs: the `changes` job (scripts/ci/changes.py) switches the suite on for any Python, test, harness or
-# Rust change (the extension is built from the crates) and off for a docs-only push. A push to `v5` runs
-# the quick flavors (sqlite and timescaledb); a dispatch (the release gate) and pull requests run `all`
-# (every database flavor, the test API on port 8989), as before. The extension is built with the `ci`
-# Cargo profile (no LTO, opt-level 1: ~2-4 minutes instead of ~10 for the release profile); nothing that
-# ships uses it. The last job, `summary`, always runs: make `pytest / summary` the required check.
-#
-# The suite owns this host's test containers (`tests-*`, tests/docker-compose.yaml), port 8989 and its
-# own `test_root`: the job-level concurrency group below lets only one run of it go at a time, on whichever
-# self-hosted runner picks it up (the build and the other workflows still run in parallel on the others).
 name: pytest
 
 on:
+  workflow_call:
+    inputs:
+      profile:
+        type: string
+        default: ci
+      artifacts_run_id:
+        type: string
+        default: ''
+      full:
+        type: boolean
+        default: true
   workflow_dispatch:
     inputs:
-      flavors:
-        description: 'MRSM_TEST_FLAVORS: `all`, or a comma list such as sqlite,timescaledb.'
-        required: false
-        default: all
       profile:
-        description: 'Cargo profile of the extension under test: `ci` (quick, no LTO) or `release` (what ships; the release gate).'
+        description: 'ci builds test artifacts; release consumes an existing wheels run.'
         type: choice
-        options: [ ci, release ]
+        options: [ci, release]
         default: ci
+      artifacts_run_id:
+        description: 'For release: run containing the exact-commit validated wheel and CLI.'
+        type: string
+        default: ''
+      shards:
+        description: 'all, or comma-separated core,postgres,mysql,mssql-valkey,oracle'
+        type: string
+        default: all
   push:
-    branches: [ main, staging, v5 ]
+    branches: [main, staging, v5]
   pull_request:
-    branches:
-      - dev
-      - main
-      - staging
+    branches: [dev, main, staging]
+  schedule:
+    - cron: '17 5 * * *'
 
 permissions:
   contents: read
+  actions: read
 
-# Pushes and pull requests of the same branch share a group: a newer one supersedes the running one
-# (a release push and its pull request are the same commit). A dispatch (the release gate) has its
-# own group and is never cancelled; the `tests` job is serialized per host (`mrsm-test-services`).
 concurrency:
   group: pytest-${{ (github.event_name == 'push' || github.event_name == 'pull_request') && 'auto' || github.event_name }}-${{ github.head_ref || github.ref_name }}
   cancel-in-progress: ${{ github.event_name == 'push' || github.event_name == 'pull_request' }}
 
 jobs:
   changes:
-    name: changes
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
-      pytest: ${{ steps.changes.outputs.pytest }}
+      pytest: ${{ steps.plan.outputs.pytest }}
+      full: ${{ steps.plan.outputs.full }}
+      matrix: ${{ steps.plan.outputs.matrix }}
+      wheel_artifact: ${{ steps.plan.outputs.wheel_artifact }}
+      binary_artifact: ${{ steps.plan.outputs.binary_artifact }}
+      binary_profile: ${{ steps.plan.outputs.binary_profile }}
     steps:
       - uses: actions/checkout@v4
-        with: { fetch-depth: 1 }
-      - id: changes
-        name: Does this change need the Python suite?
+        with: {fetch-depth: 1, persist-credentials: false, ref: '${{ github.sha }}'}
+      - id: plan
+        name: Select test lanes from the tested revision
         env:
           BEFORE: ${{ github.event.before }}
           BASE: ${{ github.event.pull_request.base.sha }}
-        run: python3 scripts/ci/changes.py --event "$GITHUB_EVENT_NAME" --ref "$GITHUB_REF" --before "$BEFORE" --after "$GITHUB_SHA" --base "$BASE"
+          PROFILE: ${{ inputs.profile || 'ci' }}
+          FULL: ${{ inputs.full }}
+          SHARDS: ${{ inputs.shards }}
+          ARTIFACTS_RUN: ${{ inputs.artifacts_run_id }}
+        run: |
+          if [ "$PROFILE" = release ] && [ -z "$ARTIFACTS_RUN" ]; then
+            echo 'Release tests require verified artifacts: dispatch release.yaml, or supply artifacts_run_id.' >&2
+            exit 1
+          fi
+          args=()
+          if [ "$FULL" = true ]; then args+=(--full); fi
+          python scripts/ci/test_plan.py --event "$GITHUB_EVENT_NAME" --before "$BEFORE" --after "$GITHUB_SHA" --base "$BASE" --profile "$PROFILE" --shards "$SHARDS" "${args[@]}"
 
-  tests:
+  artifacts:
+    name: build test artifacts once
     needs: changes
-    # Self-hosted: never for a pull request from a fork (untrusted code on the maintainer's host).
-    if: ${{ needs.changes.outputs.pytest == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    if: ${{ needs.changes.outputs.pytest == 'true' && inputs.profile != 'release' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
     runs-on: self-hosted
-    timeout-minutes: 90
-    # One run of the suite at a time per host: the test containers and port 8989 are shared.
-    concurrency:
-      group: mrsm-test-services
-      cancel-in-progress: false
+    timeout-minutes: 30
     env:
       CARGO_INCREMENTAL: '0'
-      PYTHONPATH: ${{ github.workspace }}
+      CARGO_BUILD_JOBS: '16'
     steps:
-
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-        with: { clean: false, persist-credentials: false }
-
-      - name: Clean the workspace (keep shared Cargo target, reference and test environments)
+      - uses: actions/checkout@v4
+        with: {clean: false, persist-credentials: false, ref: '${{ github.sha }}'}
+      - name: Clean the runner checkout, preserving build and dependency caches
         run: git clean -ffdx -e /target -e /.venv-ref -e /.venv-test
-
       - name: Rust toolchain
         run: scripts/rust/ci.sh setup
+      - name: Disk guard
+        run: scripts/rust/ci.sh disk-guard
+      - name: Build wheel and CLI before starting any test services
+        run: bash scripts/ci/build_pytest.sh
+      - uses: actions/upload-artifact@v4
+        with: {name: pytest-wheel, path: '${{ env.CI_ARTIFACT_DIR }}/wheel/*', if-no-files-found: error, retention-days: 7}
+      - uses: actions/upload-artifact@v4
+        with: {name: pytest-binary, path: '${{ env.CI_ARTIFACT_DIR }}/binary/*', if-no-files-found: error, retention-days: 7}
 
-      - name: Build the native Python extension (ci profile; release on request)
-        ### `--profile ci`: no LTO, opt-level 1 (Cargo.toml `[profile.ci]`). Behaviorally the release build
-        ### (no debug assertions); the shipped wheels, binaries and images are all `--release`. A dispatch with
-        ### `profile: release` (the release gate) tests the optimized extension itself.
-        env:
-          EXT_PROFILE: ${{ inputs.profile || 'ci' }}
-        run: |
-          PYTHON="$(command -v "${PYTHON_BIN:-python}")"
-          export PYTHON
-          eval "$(scripts/rust/ci.sh env)"
-          build_scratch="$(mktemp -d "$RUNNER_TEMP/mrsm-pytest-build.XXXXXX")"
-          trap 'rm -rf "$build_scratch"' EXIT
-          export MRSM_ROOT_DIR="$build_scratch/root" MRSM_PLUGINS_DIR="$build_scratch/plugins"
-          export PYTHONPATH="$GITHUB_WORKSPACE"
-          mkdir -p "$MRSM_ROOT_DIR" "$MRSM_PLUGINS_DIR"
-          "$PYTHON" -m venv "$build_scratch/tools"
-          "$build_scratch/tools/bin/python" -m pip install 'maturin>=1.9,<2.0'
-          export MATURIN_BIN="$build_scratch/tools/bin/maturin"
-          if [ "$EXT_PROFILE" = release ]; then
-            scripts/rust/build_py.sh --release
-          else
-            scripts/rust/build_py.sh --profile ci
-          fi
+  tests:
+    name: tests (${{ matrix.shard }})
+    needs: [changes, artifacts]
+    if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.pytest == 'true' && (needs.artifacts.result == 'success' || (needs.artifacts.result == 'skipped' && inputs.profile == 'release')) && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    runs-on: self-hosted
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      max-parallel: 5
+      matrix: ${{ fromJSON(needs.changes.outputs.matrix) }}
+    env:
+      PYTEST_ARTIFACT_DIR: ${{ github.workspace }}/.ci-artifacts
+      PYTEST_WHEEL_PROFILE: ${{ inputs.profile || 'ci' }}
+      PYTEST_BINARY_PROFILE: ${{ needs.changes.outputs.binary_profile }}
+      MRSM_NO_AUTO_INSTALL: '1'
+      MRSM_NO_UPDATE_CHECK: '1'
+      PYTHONPATH: ${{ github.workspace }}
+    steps:
+      - uses: actions/checkout@v4
+        with: {clean: false, persist-credentials: false, ref: '${{ github.sha }}'}
+      - name: Clean the runner checkout, preserving build and dependency caches
+        run: git clean -ffdx -e /target -e /.venv-ref -e /.venv-test
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.changes.outputs.wheel_artifact }}
+          path: ${{ env.PYTEST_ARTIFACT_DIR }}/wheel
+          run-id: ${{ inputs.artifacts_run_id || github.run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.changes.outputs.binary_artifact }}
+          path: ${{ env.PYTEST_ARTIFACT_DIR }}/binary
+          run-id: ${{ inputs.artifacts_run_id || github.run_id }}
+          github-token: ${{ github.token }}
+      - name: Prepare the environment from complete verified artifacts
+        run: bash scripts/ci/prepare_pytest.sh
+      - name: Prove collection is disjoint and complete
+        if: ${{ matrix.shard == 'core' }}
+        run: python scripts/ci/services.py validate --root "$RUNNER_TEMP/mrsm-collection-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+      - name: Run this shard with its own roots, ports, databases and cleanup
+        run: python scripts/ci/services.py run --shard "${{ matrix.shard }}" --root "$RUNNER_TEMP/mrsm-tests-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-${{ matrix.shard }}" --workers "${{ matrix.workers }}" --
+      - name: Clean up only this shard's owned services after failure or cancellation
+        if: ${{ always() }}
+        run: python scripts/ci/services.py cleanup --root "$RUNNER_TEMP/mrsm-tests-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-${{ matrix.shard }}"
+      - name: Preserve shard ownership and collection evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-evidence-${{ matrix.shard }}
+          path: |
+            ${{ runner.temp }}/mrsm-tests-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.shard }}/.ci-services.json
+            ${{ runner.temp }}/mrsm-tests-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.shard }}/collection.json
+            ${{ runner.temp }}/mrsm-tests-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.shard }}/users-collection.json
+            ${{ runner.temp }}/mrsm-collection-${{ github.run_id }}-${{ github.run_attempt }}/*.json
+            ${{ runner.temp }}/mrsm-collection-${{ github.run_id }}-${{ github.run_attempt }}/*.log
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 14
 
-      - name: Build the standalone mrsm (only for the tests that run the binary itself)
-        ### The CLI runs from the extension built above (`python -m meerschaum`, what `scripts/mrsm.sh`
-        ### and the tests use). A few tests (the loopback API servers) need a standalone `mrsm`: it is
-        ### built here, from this checkout, and passed explicitly. `target/` is shared with earlier runs,
-        ### so nothing may pick a binary up from there (`tests/_binary.py` ignores it in CI and checks
-        ### the version and age of the one it is given).
-        run: scripts/rust/ci.sh bin-debug
-
-      - name: Test environment
-        ### A dedicated venv (kept across runs like `.venv-ref`): the tests never install anything
-        ### themselves and the runner's own interpreter is never modified. It uses the Python the
-        ### extension was built with, and is recreated when that Python changes.
-        run: |
-          PYTHON="$(command -v "${PYTHON_BIN:-python}")"
-          VENV="$GITHUB_WORKSPACE/.venv-test"
-          ### The venv is rebuilt when the Python changes or when the requirements do (the hash of
-          ### the requirement files, `pyproject.toml` and the extras installed is stored in it).
-          wanted="$("$PYTHON" -c 'import sys; print(sys.version_info[:2])')"
-          deps_hash="$({ cat requirements/*.txt pyproject.toml; \
-            echo "$MRSM_INSTALL_PACKAGES pytest pytest-xdist httpx httpx2 uv $wanted"; } | sha256sum | cut -d' ' -f1)"
-          if [ ! -x "$VENV/bin/python" ] || \
-             [ "$("$VENV/bin/python" -c 'import sys; print(sys.version_info[:2])')" != "$wanted" ] || \
-             [ "$(cat "$VENV/.deps-hash" 2>/dev/null)" != "$deps_hash" ]; then
-            "$PYTHON" -m venv --clear "$VENV"
-            rm -f "$VENV/.deps-hash"
-          fi
-          ### Nothing to install while the hash matches (the venv persists between runs).
-          if [ "$(cat "$VENV/.deps-hash" 2>/dev/null)" != "$deps_hash" ]; then
-            requirement_args=""
-            for extra in $MRSM_INSTALL_PACKAGES; do
-              requirement_args="$requirement_args -r requirements/$extra.txt"
-            done
-            "$VENV/bin/python" -m pip install --quiet --upgrade pip
-            "$VENV/bin/python" -m pip install --quiet $requirement_args pytest pytest-xdist httpx httpx2 uv
-            echo "$deps_hash" > "$VENV/.deps-hash"
-          fi
-        env:
-          MRSM_INSTALL_PACKAGES: "full sql-mssql sql-oracle sql-duckdb"
-
-      - name: Reference interpreter (v4.1.4, for the parity comparisons)
-        ### Tests that compare against the released v4.1.4 (`tests/test_valkey_connector.py`,
-        ### `tests/test_api_connector.py`, ...) fail, never skip, when `.venv-ref` is missing or lacks a
-        ### pinned library. Idempotent: it only rebuilds when `scripts/parity/requirements.txt` (or the
-        ### version) changes, finds or installs `uv` itself, and runs from its own path (no working
-        ### directory or `PYTHONPATH` dependence: the reference interpreter runs with `-I`).
-        run: scripts/parity/setup_reference.sh
-
-      - name: Integration Tests
-        run: |
-          export MRSM_ROOT_DIR="$GITHUB_WORKSPACE/test_root" MRSM_PLUGINS_DIR="$GITHUB_WORKSPACE/tests/plugins"
-          mkdir -p "$MRSM_ROOT_DIR" "$MRSM_PLUGINS_DIR"
-          unset TMUX TMUX_PANE
-          "$PYTHON_BIN" - <<'PYTEST_MAIN_CHECK'
-          import os
-          import meerschaum as mrsm
-          connector = mrsm.get_connector('sql:main')
-          if connector.flavor != 'sqlite' or connector.URI != os.environ['MRSM_SQL_MAIN']:
-              raise RuntimeError('CI sql:main must resolve to the owned SQLite URI.')
-          print('CI sql:main resolves to owned SQLite.')
-          PYTEST_MAIN_CHECK
-          ./scripts/test.sh db
-        env:
-          # Keep the default key for config oracles, but never let metadata reads dial port5432.
-          MRSM_SQL_MAIN: sqlite:///${{ runner.temp }}/mrsm-pytest-main-${{ github.run_id }}-${{ github.run_attempt }}.db
-          MRSM_NO_AUTO_INSTALL: "1"
-          COMPOSE_INTERACTIVE_NO_CLI: 1
-          ### A dispatch and a pull request: every flavor. A push to v5: the quick ones (the release gate,
-          ### a dispatch, runs them all).
-          MRSM_TEST_FLAVORS: ${{ inputs.flavors || ((github.event_name == 'push' && github.ref == 'refs/heads/v5') && 'sqlite,timescaledb' || 'all') }}
-          MRSM_DEBUG: "false"
-          PYTHON_BIN: ${{ github.workspace }}/.venv-test/bin/python
-          ### Used only by tests/_binary.py (never `MRSM_BIN`, which would also change what the
-          ### product itself runs: jobs and `scripts/mrsm.sh` use the extension).
-          MRSM_TEST_BIN: ${{ github.workspace }}/target/debug/mrsm
-          ### The venv above already holds the extras; `test.sh` must not install again.
-          MRSM_TEST_SKIP_INSTALL: "1"
-          # Bound per-process SQL pools across the shared test databases on large runners.
-          PYTEST_XDIST_AUTO_NUM_WORKERS: "16"
-
-  # The required status check: always runs, fails only when the suite ran and failed or was cancelled.
   summary:
     name: summary
     if: ${{ always() }}
-    needs: [ changes, tests ]
+    needs: [changes, artifacts, tests]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: The suite did not fail
+      - name: No selected job failed
         env:
           NEEDS: ${{ toJSON(needs) }}
         run: |
-          python3 - <<'PY'
+          python - <<'PY'
           import json, os, sys
           needs = json.loads(os.environ['NEEDS'])
           for name, job in needs.items():

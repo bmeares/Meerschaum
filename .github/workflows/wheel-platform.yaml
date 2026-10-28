@@ -1,0 +1,396 @@
+# Each invocation owns one wheel and its smoke dependency chain. Other platforms and
+# the optional cp314t invocation cannot delay its tests or validated artifact. Candidate
+# artifacts use a separate prefix; consumers select only validated wheels-* artifacts.
+name: wheel platform
+'on':
+  workflow_call:
+    inputs:
+      os:
+        type: string
+        required: true
+      manylinux:
+        type: string
+        required: true
+      target:
+        type: string
+        required: true
+      artifact:
+        type: string
+        required: true
+      smoke-os:
+        type: string
+        required: true
+      wheel-arch:
+        type: string
+        default: ''
+      musl:
+        type: boolean
+        default: false
+      experimental:
+        type: boolean
+        default: false
+permissions:
+  contents: read
+defaults:
+  run:
+    shell: bash
+jobs:
+  build:
+    name: build (${{ inputs.target }}${{ inputs.experimental && ', cp314t, experimental' || '' }})
+    runs-on: ${{ inputs.os }}
+    continue-on-error: ${{ inputs.experimental }}
+    outputs:
+      candidate: ${{ steps.candidate.outcome == 'success' }}
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        persist-credentials: false
+        ref: ${{ github.sha }}
+    - uses: actions/setup-python@v5
+      with:
+        python-version: '3.13'
+    - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+      with:
+        shared-key: wheel-${{ inputs.target }}-release${{ inputs.experimental && '-cp314t' || '' }}
+        save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/v5' }}
+    - name: Record the host build compiler
+      if: ${{ runner.os != 'Linux' }}
+      run: |
+        rustc -Vv > wheel-toolchain.txt
+    - name: Build the meerschaum wheel
+      uses: PyO3/maturin-action@v1
+      with:
+        command: build
+        manylinux: ${{ inputs.manylinux }}
+        target: ${{ inputs.target }}
+        args: --release --locked --out dist ${{ inputs.experimental && '--interpreter python3.14t' || '' }}
+        before-script-linux: rustc -Vv > wheel-toolchain.txt
+    - name: Check the wheel agrees on the version
+      if: ${{ !inputs.experimental }}
+      shell: bash
+      run: python scripts/check_packaging.py --wheels dist
+    - name: Check the wheel tag and size
+      shell: bash
+      env:
+        RUNNER_OS_NAME: ${{ runner.os }}
+        RUNNER_ARCH_NAME: ${{ runner.arch }}
+        WHEEL_ARCH: ${{ inputs.wheel-arch }}
+        EXPECT_MUSL: ${{ inputs.musl && '1' || '' }}
+        MAX_WHEEL_BYTES: '99614720'
+      run: |
+        python - <<'PY'
+        import os, pathlib, re, sys, zipfile
+        wheels = sorted(pathlib.Path('dist').glob('*.whl'))
+        if len(wheels) != 1:
+            sys.exit(f'expected one wheel in dist/, found {[w.name for w in wheels]}')
+        wheel = wheels[0]
+        size = wheel.stat().st_size
+        with zipfile.ZipFile(wheel) as zf:
+            name = next(n for n in zf.namelist() if n.endswith('.dist-info/WHEEL'))
+            tags = [l.split(': ', 1)[1] for l in zf.read(name).decode().splitlines() if l.startswith('Tag: ')]
+        print(f'{wheel.name}: {size / 1048576:.1f} MiB, tags {tags}')
+        os_name = os.environ['RUNNER_OS_NAME']
+        arch = os.environ['WHEEL_ARCH'] or {'X64': 'x86_64', 'ARM64': 'aarch64'}[os.environ['RUNNER_ARCH_NAME']]
+        musl = bool(os.environ['EXPECT_MUSL'])
+        problems = []
+        if size > int(os.environ['MAX_WHEEL_BYTES']):
+            problems.append(f'{size} bytes is over the 95 MiB guard (PyPI refuses 100 MiB)')
+        platforms = {t.rsplit('-', 1)[-1] for t in tags}
+        if os_name == 'Linux' and musl:
+            # Alpine and other musl distributions: `musllinux_1_2_<arch>` (musl 1.2), nothing newer.
+            for plat in platforms:
+                m = re.fullmatch(r'musllinux_1_(\d+)_(\w+)', plat)
+                if not m:
+                    problems.append(f'platform tag {plat!r} is not musllinux (PyPI rejects it)')
+                elif m.group(2) != arch:
+                    problems.append(f'platform tag {plat!r} is not {arch}')
+                elif int(m.group(1)) > 2:
+                    problems.append(f'platform tag {plat!r} needs a newer musl than musllinux_1_2')
+        elif os_name == 'Linux':
+            for plat in platforms:
+                m = re.fullmatch(r'manylinux_2_(\d+)_(\w+)|manylinux2014_(\w+)', plat)
+                if not m:
+                    problems.append(f'platform tag {plat!r} is not manylinux (PyPI rejects it)')
+                elif (m.group(2) or m.group(3)) != arch:
+                    problems.append(f'platform tag {plat!r} is not {arch}')
+                elif m.group(1) and int(m.group(1)) > 28:
+                    problems.append(f'platform tag {plat!r} needs a newer glibc than manylinux_2_28')
+        elif os_name == 'macOS':
+            if not all(re.fullmatch(r'macosx_\d+_\d+_(arm64|x86_64|universal2)', p) for p in platforms):
+                problems.append(f'unexpected macOS platform tags {platforms}')
+        elif not all(p in ('win_amd64', 'win_arm64') for p in platforms):
+            problems.append(f'unexpected Windows platform tags {platforms}')
+        if problems:
+            sys.exit('\n'.join(problems))
+        PY
+    - name: Record exact-commit wheel provenance
+      run: |
+        python scripts/ci/artifacts.py create --kind wheel --profile release --target "${{ inputs.target }}" --artifact-dir dist --output dist/provenance.json --toolchain-file wheel-toolchain.txt
+    - uses: actions/upload-artifact@v4
+      with:
+        name: wheel-candidate-${{ inputs.artifact }}
+        path: dist/*
+        if-no-files-found: error
+        retention-days: 7
+      id: candidate
+      name: Upload the candidate for this platform only
+  smoke:
+    name: smoke (py${{ matrix.python }})
+    needs: build
+    if: ${{ !cancelled() && !inputs.musl && !inputs.experimental && needs.build.outputs.candidate == 'true' }}
+    runs-on: ${{ inputs.smoke-os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        python:
+        - '3.11'
+        - '3.14'
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        persist-credentials: false
+        path: smoke-src
+        sparse-checkout: |-
+          scripts/docker/smoke_facade.py
+          scripts/ci/artifacts.py
+          scripts/check_packaging.py
+          Cargo.toml
+          Cargo.lock
+          rust-toolchain.toml
+        sparse-checkout-cone-mode: false
+        ref: ${{ github.sha }}
+    - uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python }}
+    - uses: actions/download-artifact@v4
+      with:
+        name: wheel-candidate-${{ inputs.artifact }}
+        path: dist
+    - name: Verify exact-commit wheel provenance
+      run: |
+        python scripts/ci/artifacts.py verify --manifest "${{ github.workspace }}/dist/provenance.json" --profile release --kind wheel --target "${{ inputs.target }}"
+      working-directory: smoke-src
+    - name: Install the wheel into a fresh venv
+      run: |
+        ls -l dist
+        python -m venv "$RUNNER_TEMP/venv"
+        if [ -d "$RUNNER_TEMP/venv/Scripts" ]; then bindir=Scripts; else bindir=bin; fi
+        echo "VENV_BIN=$RUNNER_TEMP/venv/$bindir" >> "$GITHUB_ENV"
+        "$RUNNER_TEMP/venv/$bindir/python" -m pip install --no-index --find-links dist meerschaum
+        "$RUNNER_TEMP/venv/$bindir/python" -m pip list
+    - name: Import the package and the extension
+      run: |
+        export MRSM_ROOT_DIR="$RUNNER_TEMP/mrsm-root" MRSM_PLUGINS_DIR="$RUNNER_TEMP/mrsm-plugins"
+        mkdir -p "$MRSM_ROOT_DIR" "$MRSM_PLUGINS_DIR"
+        cd "$RUNNER_TEMP"
+        "$VENV_BIN/python" -c "
+        import meerschaum, meerschaum._core as core
+        assert core.AVAILABLE, core.LOAD_ERROR
+        print('meerschaum', meerschaum.__version__, 'core', core.__version__, core.EXTENSION_PATH)
+        "
+    - name: mrsm console script
+      run: |
+        export MRSM_ROOT_DIR="$RUNNER_TEMP/mrsm-root" MRSM_PLUGINS_DIR="$RUNNER_TEMP/mrsm-plugins"
+        cd "$RUNNER_TEMP"
+        "$VENV_BIN/mrsm" --version
+        "$VENV_BIN/mrsm" show version
+        "$VENV_BIN/mrsm" show connectors
+        "$VENV_BIN/python" -m meerschaum --version
+        "$VENV_BIN/meerschaum" --version
+    - name: Sync a tiny pipe on SQLite
+      run: |
+        export MRSM_ROOT_DIR="$RUNNER_TEMP/mrsm-root" MRSM_PLUGINS_DIR="$RUNNER_TEMP/mrsm-plugins"
+        export MRSM_SQL_SMOKE="sqlite:///$RUNNER_TEMP/smoke.db"
+        cd "$RUNNER_TEMP"
+        "$VENV_BIN/mrsm" register pipe -i sql:smoke -c sql:smoke -m tiny --noask \
+          --params '{"columns": {"primary": "id"}, "fetch": {"definition": "SELECT 1 AS id, 2 AS val"}}'
+        "$VENV_BIN/mrsm" sync pipes -i sql:smoke -c sql:smoke -m tiny
+        "$VENV_BIN/mrsm" show data -i sql:smoke -c sql:smoke -m tiny --nopretty | tee "$RUNNER_TEMP/tiny.txt"
+        "$VENV_BIN/python" -I "$GITHUB_WORKSPACE/smoke-src/scripts/docker/smoke_facade.py" --cli-data "$RUNNER_TEMP/tiny.txt"
+    - name: Job round trip through the console script
+      if: runner.os != 'Windows'
+      run: |
+        export MRSM_ROOT_DIR="$RUNNER_TEMP/mrsm-root" MRSM_PLUGINS_DIR="$RUNNER_TEMP/mrsm-plugins"
+        cd "$RUNNER_TEMP"
+        "$VENV_BIN/mrsm" show version : --loop --min-seconds 1 --name smoke-job -d --noask
+        # The job's log holds the version line once a lap ran (poll, do not guess a sleep).
+        ok=""
+        for _ in $(seq 1 30); do
+          if "$VENV_BIN/mrsm" show logs smoke-job --nopretty > "$RUNNER_TEMP/job.log" 2>&1 \
+             && grep -q 'Meerschaum v' "$RUNNER_TEMP/job.log"; then
+            ok=1; break
+          fi
+          sleep 1
+        done
+        cat "$RUNNER_TEMP/job.log"
+        if [ -z "$ok" ]; then echo "smoke-job never logged the version line" >&2; exit 1; fi
+        if grep -q 'Create a new job' "$RUNNER_TEMP/job.log"; then
+          echo "smoke-job is not running the command (it logged the job-creation hint)" >&2; exit 1
+        fi
+        "$VENV_BIN/mrsm" show jobs | tee "$RUNNER_TEMP/jobs.txt"
+        grep -q 'smoke-job' "$RUNNER_TEMP/jobs.txt"
+        grep -q 'running' "$RUNNER_TEMP/jobs.txt"
+        "$VENV_BIN/mrsm" stop job smoke-job -y
+        sleep 1
+        "$VENV_BIN/mrsm" delete job smoke-job -y
+        "$VENV_BIN/mrsm" show jobs > "$RUNNER_TEMP/jobs-after.txt"
+        ! grep -q 'smoke-job' "$RUNNER_TEMP/jobs-after.txt"
+        # No supervisor or worker of the job is left.
+        if command -v pgrep >/dev/null && pgrep -f '[d]aemon_id=.smoke-job|[-]-name smoke-job' >/dev/null; then
+          echo "a process of smoke-job is still running" >&2; exit 1
+        fi
+    - name: Python API smoke (the wheel only, no installs)
+      run: |
+        export MRSM_ROOT_DIR="$RUNNER_TEMP/mrsm-root-api" MRSM_PLUGINS_DIR="$RUNNER_TEMP/mrsm-plugins-api"
+        mkdir -p "$MRSM_ROOT_DIR" "$MRSM_PLUGINS_DIR"
+        export MRSM_NO_AUTO_INSTALL=1 PIP_NO_INDEX=1 UV_OFFLINE=1
+        export MRSM_SQL_SMOKE="sqlite:///$RUNNER_TEMP/api-smoke.db"
+        export MRSM_CONFIG='{"meerschaum": {"instance": "sql:smoke"}}'
+        export MRSM_SHIM_LOG="$RUNNER_TEMP/install-attempts.log"
+        : > "$MRSM_SHIM_LOG"
+        shims="$RUNNER_TEMP/shims"
+        mkdir -p "$shims"
+        vb="$VENV_BIN"
+        if [ "$RUNNER_OS" != Windows ]; then
+          for tool in pip pip3 uv uvx; do
+            printf '#!/bin/sh\necho "$0 $*" >> "$MRSM_SHIM_LOG"\necho "unexpected install tool: $0 $*" >&2\nexit 97\n' > "$shims/$tool"
+            chmod +x "$shims/$tool"
+          done
+          export PATH="$shims:$vb:$PATH"
+        else
+          export PATH="$(cygpath -u "$vb"):$PATH"
+        fi
+        cd "$RUNNER_TEMP"
+        "$VENV_BIN/python" -m pip list --format=freeze > "$RUNNER_TEMP/pip-before.txt"
+        "$VENV_BIN/python" -I "$GITHUB_WORKSPACE/smoke-src/scripts/docker/smoke_facade.py" | tee "$RUNNER_TEMP/api-smoke.txt"
+        "$VENV_BIN/python" -m pip list --format=freeze > "$RUNNER_TEMP/pip-after.txt"
+        diff "$RUNNER_TEMP/pip-before.txt" "$RUNNER_TEMP/pip-after.txt"
+        if [ -s "$MRSM_SHIM_LOG" ]; then cat "$MRSM_SHIM_LOG" >&2; echo "an install tool was invoked" >&2; exit 1; fi
+        grep -q '"install_requests": \[\]' "$RUNNER_TEMP/api-smoke.txt"
+    - name: Base wheel has no Python dependencies
+      run: |
+        "$VENV_BIN/python" -m pip list --format=freeze | sed 's/==.*//' | sort > "$RUNNER_TEMP/installed.txt"
+        cat "$RUNNER_TEMP/installed.txt"
+        # pip/setuptools/wheel (ensurepip) are not Meerschaum's; anything else is a leak.
+        extra="$(grep -viE '^(pip|setuptools|wheel|meerschaum)$' "$RUNNER_TEMP/installed.txt" || true)"
+        if [ -n "$extra" ]; then echo "unexpected dependencies: $extra" >&2; exit 1; fi
+  smoke-musl:
+    name: smoke (musllinux ${{ inputs.wheel-arch }}, Alpine)
+    needs: build
+    if: ${{ !cancelled() && inputs.musl && needs.build.outputs.candidate == 'true' }}
+    runs-on: ${{ inputs.smoke-os }}
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        persist-credentials: false
+        path: smoke-src
+        sparse-checkout: |-
+          scripts/docker/smoke_facade.py
+          scripts/docker/smoke_wheel_alpine.sh
+          scripts/ci/artifacts.py
+          scripts/check_packaging.py
+          Cargo.toml
+          Cargo.lock
+          rust-toolchain.toml
+        sparse-checkout-cone-mode: false
+        ref: ${{ github.sha }}
+    - uses: actions/setup-python@v5
+      with:
+        python-version: '3.13'
+    - uses: actions/download-artifact@v4
+      with:
+        name: wheel-candidate-${{ inputs.artifact }}
+        path: dist
+    - name: Verify exact-commit wheel provenance
+      run: |
+        python scripts/ci/artifacts.py verify --manifest "${{ github.workspace }}/dist/provenance.json" --profile release --kind wheel --target "${{ inputs.target }}"
+      working-directory: smoke-src
+    - name: Install the wheel in Alpine and run it
+      run: |
+        ls -l dist
+        docker run --rm \
+          -v "$PWD/dist:/dist:ro" \
+          -v "$PWD/smoke-src/scripts/docker/smoke_wheel_alpine.sh:/smoke.sh:ro" \
+          -v "$PWD/smoke-src/scripts/docker/smoke_facade.py:/smoke_facade.py:ro" \
+          alpine:3.22 sh /smoke.sh
+  smoke-freethreaded:
+    name: smoke (free-threaded, py3.14t)
+    needs: build
+    if: ${{ !cancelled() && inputs.experimental && needs.build.outputs.candidate == 'true' }}
+    runs-on: ${{ inputs.smoke-os }}
+    continue-on-error: true
+    outputs:
+      verified: ${{ steps.smoke.outcome == 'success' }}
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        persist-credentials: false
+        ref: ${{ github.sha }}
+        path: smoke-src
+        sparse-checkout: |-
+          scripts/ci/artifacts.py
+          scripts/check_packaging.py
+          Cargo.toml
+          Cargo.lock
+          rust-toolchain.toml
+        sparse-checkout-cone-mode: false
+    - uses: actions/setup-python@v5
+      with:
+        python-version: 3.14t
+    - uses: actions/download-artifact@v4
+      with:
+        name: wheel-candidate-${{ inputs.artifact }}
+        path: dist
+    - name: Verify exact-commit wheel provenance
+      run: |
+        python scripts/ci/artifacts.py verify --manifest "${{ github.workspace }}/dist/provenance.json" --profile release --kind wheel --target "${{ inputs.target }}"
+      working-directory: smoke-src
+    - name: Install the free-threaded wheel (cp314t)
+      run: |
+        python -m venv "$RUNNER_TEMP/venv"
+        "$RUNNER_TEMP/venv/bin/python" -m pip install --no-index --find-links dist meerschaum
+    - name: _core imports without re-enabling the GIL
+      run: |
+        export MRSM_ROOT_DIR="$RUNNER_TEMP/mrsm-root" MRSM_PLUGINS_DIR="$RUNNER_TEMP/mrsm-plugins"
+        mkdir -p "$MRSM_ROOT_DIR" "$MRSM_PLUGINS_DIR"
+        cd "$RUNNER_TEMP"
+        "$RUNNER_TEMP/venv/bin/python" -X gil=0 -c "
+        import sys, meerschaum._core as core
+        assert core.AVAILABLE, core.LOAD_ERROR
+        assert not sys._is_gil_enabled(), 'importing _core re-enabled the GIL'
+        print('free-threaded OK', core.__version__, core.EXTENSION_PATH)
+        "
+      id: smoke
+  stage:
+    name: stage validated wheel
+    continue-on-error: ${{ inputs.experimental }}
+    needs:
+    - build
+    - smoke
+    - smoke-musl
+    - smoke-freethreaded
+    if: ${{ !cancelled() && needs.build.result == 'success' && needs.build.outputs.candidate == 'true' && ((inputs.experimental
+      && needs.smoke-freethreaded.outputs.verified == 'true') || (!inputs.experimental && inputs.musl && needs.smoke-musl.result
+      == 'success') || (!inputs.experimental && !inputs.musl && needs.smoke.result == 'success')) }}
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        persist-credentials: false
+        ref: ${{ github.sha }}
+    - uses: actions/setup-python@v5
+      with:
+        python-version: '3.13'
+    - uses: actions/download-artifact@v4
+      with:
+        name: wheel-candidate-${{ inputs.artifact }}
+        path: dist
+    - name: Verify exact-commit wheel provenance
+      run: |
+        python scripts/ci/artifacts.py verify --manifest "dist/provenance.json" --profile release --kind wheel --target "${{ inputs.target }}"
+    - name: Upload only after matching platform smoke passes
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ inputs.artifact }}
+        path: dist/*
+        if-no-files-found: error

@@ -5,14 +5,14 @@ The product runs the CLI from the extension (`pip install meerschaum`), so only 
 compare the two programs, or exercise the binary's own behavior (`tests/console`, the loopback API
 server fixtures), need one.
 
-- `MRSM_TEST_BIN` (else `MRSM_BIN`) names it explicitly. CI sets it after building the binary in the
-  same job. Neither changes what the product runs: `MRSM_BIN` does, which is why the workflows pass
+- `MRSM_TEST_BIN` (else `MRSM_BIN`) names it explicitly. CI downloads it with a provenance manifest.
+  Neither changes what the product runs: `MRSM_BIN` does, which is why the workflows pass
   `MRSM_TEST_BIN`.
 - Outside CI the newest `target/{release,debug}/mrsm` of this checkout is used when nothing is set.
   CI never looks in `target/`: the shared runner checkout keeps binaries from earlier runs.
-- A binary is **checked** before it is used: its `--version` must equal the extension's
-  `__version__` and it must be newer than every Rust source of this checkout. A stale binary fails
-  the test run loudly in CI (`StaleBinaryError`) and is skipped with the reason elsewhere.
+- A binary is **checked** before it is used: its version must equal the extension's, and downloaded
+  artifacts must match the actual checkout commit/tree, build profile and payload checksums.
+  Local builds without manifests retain the source-age check. A mismatch fails loudly in CI.
 """
 
 from __future__ import annotations
@@ -27,6 +27,7 @@ from typing import Optional
 REPO = pathlib.Path(__file__).resolve().parent.parent
 NAME = 'mrsm.exe' if os.name == 'nt' else 'mrsm'
 ENV = 'MRSM_TEST_BIN'
+MANIFEST_ENV = 'MRSM_TEST_ARTIFACT_MANIFEST'
 SOURCE_SUFFIXES = ('.rs', '.toml', '.lock')
 
 
@@ -81,11 +82,13 @@ def newest_source_mtime() -> float:
 @functools.lru_cache(maxsize=None)
 def _binary_version(path: str) -> str:
     with tempfile.TemporaryDirectory(prefix='mrsm-binary-check-') as scratch:
-        env = {k: v for k, v in os.environ.items() if not k.startswith('MRSM_')}
+        env = {
+            k: v for k, v in os.environ.items()
+            if not k.startswith('MRSM_') and k not in ('TMUX', 'TMUX_PANE')
+        }
         env.update({
             'MRSM_ROOT_DIR': scratch,
             'MRSM_PLUGINS_DIR': scratch,
-            'HOME': scratch,
         })
         result = subprocess.run(
             [path, 'show', 'version', '--nopretty'],
@@ -95,7 +98,23 @@ def _binary_version(path: str) -> str:
 
 
 def check_binary(path: str) -> None:
-    """Raise `StaleBinaryError` unless `path` is this checkout's build (version and age)."""
+    """Require this checkout's version and verified artifact provenance (or local source age)."""
+    manifest = os.environ.get(MANIFEST_ENV)
+    if manifest:
+        from scripts.ci.artifacts import ArtifactError, verify_manifest
+
+        try:
+            verify_manifest(
+                pathlib.Path(manifest), kind='binary',
+                profile=os.environ.get('MRSM_TEST_BIN_PROFILE', 'release'),
+                artifact=pathlib.Path(path), repo=REPO,
+            )
+        except ArtifactError as exc:
+            raise StaleBinaryError(f'{path}: {exc}') from exc
+    elif in_ci():
+        raise StaleBinaryError(
+            f'CI requires {MANIFEST_ENV} for {path}; download its verified manifest with the binary.'
+        )
     from meerschaum import _core
 
     extension = _core.__version__
@@ -105,6 +124,8 @@ def check_binary(path: str) -> None:
             f"{path} reports version {reported!r}, the extension is {extension!r}: it is not a "
             "build of this tree. Rebuild it with `cargo build -p meerschaum --bin mrsm`."
         )
+    if manifest:
+        return
     built = pathlib.Path(path).stat().st_mtime
     newest = newest_source_mtime()
     if built < newest:

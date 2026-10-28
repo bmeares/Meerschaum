@@ -5,89 +5,96 @@ Conventions for the crates themselves are in `crates/README.md`.
 
 ## Build matrix
 
-| Workflow / job | Runner | Command (`scripts/rust/ci.sh <step>`) | Runs when | Blocks? |
-|---|---|---|---|---|
-| `rust` / `changes` | GitHub-hosted | `scripts/ci/changes.py`: which jobs this diff needs | always | n/a |
-| `rust` / `fmt` | GitHub-hosted | `cargo fmt --all --check` | Rust inputs | yes |
-| `rust` / `clippy` | self-hosted | `cargo clippy --all-targets -- -D warnings`, then `cargo doc --workspace --no-deps --all-features` with `-D warnings` | Rust inputs | yes |
-| `rust` / `test` | self-hosted | debug `_core` extension, `cargo nextest run --workspace` (all tests, one process each), `cargo test --workspace --doc` | Rust inputs, or the Python the cargo tests read / import | yes |
-| `rust` / `frontcrate` | self-hosted | the `meerschaum` front crate's feature matrix | front crate / manifests, dispatch, tag | yes |
-| `rust` / `package` | self-hosted | `check_packaging.py`, `cargo package --workspace --no-verify` + checks | manifests / packaging files, dispatch, tag | yes |
-| `rust` / `build` | self-hosted | `cargo build --release -p meerschaum --bin mrsm` (the standalone `mrsm` that `cargo install meerschaum` builds; uploads it) | dispatch / tag only | yes |
-| `rust` / `parity` | self-hosted | regenerate `crates/*/tests/fixtures/gen_*.py` with v4.1.4, diff | generators, fixtures, `scripts/parity/`, dispatch, tag | yes (optional job) |
-| `rust` / `check (ubuntu-latest)` | GitHub-hosted | `cargo check --workspace` | Rust inputs | yes |
-| `rust` / `check (windows-latest, macos-latest)` | GitHub-hosted | `cargo check --workspace` | Rust inputs | no (`continue-on-error`, §15) |
-| `rust` / `duckdb (...)` | GitHub-hosted (Linux arm64, macOS, Windows x64 and arm64) | `ci.sh duckdb-platform` | the DuckDB loader, dispatch, tag | yes (`windows-11-arm`: no) |
-| `rust` / `summary` | GitHub-hosted | fails if a job that ran failed or was cancelled | always | **the required check** |
-| `wheels` (`wheels.yaml`) | GitHub-hosted, manual dispatch / `v5*` tag only | Prereleases: Linux x86_64 only; finals: maturin-action builds one `cp311-abi3` wheel on Linux x86_64 and Linux arm64 (`ubuntu-24.04-arm`, native `manylinux_2_28`), the same two as `musllinux_1_2` (cross-built in the `rust-musl-cross` containers on `ubuntu-latest`, smoke-tested in Alpine, the aarch64 one natively on the arm runner), macOS arm64 and x86_64 (`macos-15-intel`) and Windows x86_64, the sdist, an experimental `cp314t` Linux wheel, and the standalone `mrsm` release binary of five targets (Linux ones in `manylinux_2_28`, glibc floor 2.28; macOS arm64 and x86_64; Windows x86_64); a wheel tag/size guard and a smoke test per OS (see below) | dispatch / `v5*` tag | yes (`cp314t` is `continue-on-error`) |
-| `buildx` (`docker-build.yaml`) | Self-hosted Linux x86_64 (AMD64 native; ARM64 under QEMU for finals), manual | `scripts/docker/buildx.sh` per architecture, then `size_gate.sh`; a publish pushes `<version>-<tag>-<arch>` images and the `publish` job joins them (`buildx.sh --merge`) | dispatch only | size gate enforces by default |
-| `pytest` / `changes`, `tests`, `summary` | GitHub-hosted, self-hosted, GitHub-hosted | `scripts/rust/build_py.sh --profile ci` (the quick `ci` Cargo profile), then `scripts/test.sh db` | Python, tests, harness or Rust inputs; a push to `v5` runs the `sqlite,timescaledb` flavors, a dispatch and a PR run `all` | `pytest / summary` is the required check |
+| Workflow | Ordinary pushes and PRs | Full validation |
+|---|---|---|
+| `rust.yaml` | Linux fmt, Clippy, rustdoc and broad Rust tests; affected feature/package/driver checks | Nightly and reusable full call: every platform, reference regeneration, all feature/package checks |
+| `pytest.yaml` | One CI-profile wheel and debug CLI, then core/Postgres and affected backend lanes | Nightly: every lane; release call: install the already-built shipping wheel and CLI |
+| `wheels.yaml` | No automatic build | Manual/reusable: selected release wheel matrix, standalone binaries and sdist |
+| `wheel-platform.yaml` | Called by the wheel matrix | Each platform builds, immediately runs its own compatible smokes, then stages a validated artifact |
+| `docs.yaml` | Strict build when docs inputs change; hosted runners only | Included in the release gate; uploads a website preview |
+| `release.yaml` | No branch/PR build | One manual full candidate; tag pushes only verify an existing successful candidate |
+| `docker-build.yaml` | No automatic build | Explicit manual build/publish; size and offline smoke gates retained |
 
-`rust.yaml` runs on pushes to `v5`, on `v5*` tags, on pull requests and on manual dispatch; `pytest.yaml` on pushes to
-`v5` (and `main`/`staging`), pull requests and dispatch; `wheels.yaml` only on dispatch and `v5*` tags; `docker-build.yaml`
-only on dispatch. What a push actually runs is decided by the `changes` job ("CI: what runs when" below), not by
-`paths:` filters. `clippy`, `test`, `frontcrate`, `package` and `build` wait for `fmt` (a few seconds on a hosted runner) so a
-formatting slip costs no self-hosted time. Self-hosted jobs are skipped for pull requests from forks, so untrusted code never runs on
-the maintainer's host. Those PRs still get the hosted `fmt` and `check` legs.
+Prereleases retain Linux x86_64 glibc/musl wheels, one standalone CLI and the sdist. Finals add
+Linux arm64, both macOS architectures and Windows x86_64: seven ABI3 wheels and five binaries.
+The optional Linux cp314t wheel is disabled by default; enable `experimental` to build it. It
+receives a publishable artifact name only after its own free-threaded smoke succeeds.
 
 ## CI: what runs when
 
-Goal: a push never waits on CI between commits (about 8 to 12 minutes on warm caches, jobs running side by side on
-the host's runners) while a release is as rigorous as before. Four mechanisms:
+`scripts/ci/changes.py` classifies the actual checkout diff. PRs retain their synthetic merge
+revision; artifacts never substitute the branch head. Unknown diffs choose full validation.
+Non-Rust fixtures run tests/reference regeneration without unnecessary formatting and lint jobs.
+Documentation changes build the docs without compiling the runtime.
 
-1. **Change detection** (`scripts/ci/changes.py`, the `changes` job of `rust.yaml` and `pytest.yaml`; pinned by
-   `tests/test_ci_changes.py`). It diffs the push (`before..after`) or the pull request (`base..HEAD`) and turns jobs on from the
-   changed paths. A dispatch, a tag, a schedule or a diff it cannot compute (new branch, error) turns **everything** on.
+Python PRs keep core/SQLite/API-host checks and PostgreSQL-family coverage, adding affected driver
+lanes. Changes to the harness, manifests, dependency lock or workflows select every lane. Full
+nightly/release calls cannot select a partial matrix. `rust / summary`, `pytest / summary` and
+`docs / summary` cover failures and cancellations; self-hosted jobs refuse fork PR code.
 
-   | Change | Jobs that run |
-   |---|---|
-   | docs only (`docs/**`, root `*.md`, `.claude/**`, `.agents/**`, `scripts/bench/**`, licenses) | none (`changes` and `summary` only) |
-   | Python only (`meerschaum/**`, `tests/**`, harness scripts) | `pytest` (sqlite + timescaledb flavors) |
-   | Python the cargo tests read or import (`meerschaum/worker/**`, `_core`, `_internal`, `utils/packages`, `api/dash/execute.py`, `pyproject.toml`, `requirements/**`) | `pytest`, `test` |
-   | Rust (`crates/**`, `Cargo.*`, toolchain, `.cargo/**`, `scripts/rust/**`, `scripts/ci/**`) | `fmt`, `clippy`, `test`, `check` x3, `pytest` |
-   | generators, fixtures, plugins a generator loads, `scripts/parity/**` | also `parity` (v4.1.4 produces the fixtures; no Rust source can change the result, so Rust changes alone skip it) |
-   | `crates/meerschaum/**` or any `crates/*/Cargo.toml` | also `frontcrate` |
-   | manifests, crate READMEs/licenses, `check_packaging.py`, extras | also `package` |
-   | `crates/meerschaum-connector-sql/**`, `duckdb_lib.sh` | also `duckdb` (4-OS matrix) |
-   | dispatch, `v5*` tag, schedule, unknown diff | everything, including `build` (release binary) and `parity` |
-   | a file no rule claims | `rust`, `test`, `pytest` (the safe default) |
+### Artifact reuse
 
-   The rule tables are the lists at the top of `scripts/ci/changes.py`: widen one there (for example parity on kernel / core /
-   connector changes) and add the case to `tests/test_ci_changes.py`.
-2. **Required status**: each workflow ends in an always-running `summary` job that fails only when a job that ran failed or was
-   cancelled. Skipped jobs do not block it. Make `rust / summary` and `pytest / summary` the required checks, never the
-   individual jobs.
-3. **A quick profile for development builds.** Cargo's `ci` profile (`Cargo.toml`: inherits `release`, no LTO, opt-level 1,
-   256 codegen units, line tables only) builds the pytest job's `_core` extension (`scripts/rust/build_py.sh --profile ci`;
-   a profile is the only addition, `--release` stays the default of the script). Measured on this host (40 cores): cold
-   3 min 24 s, after touching `meerschaum-core` (everything rebuilds) 1 min 50 s, against 9 min 54 s for the release profile in CI;
-   `target/ci` is 2.2 GB. The suite passes identically (1602 passed, 170 skipped on the sqlite flavor with the `ci` extension). Nothing that ships uses it:
-   the wheels, the Docker images and the release binaries are `--release`, and `tests/test_workflows_packaging.py` fails if a
-   release path names the `ci` profile. `build_info()['profile']` still says `release` (it reports Cargo's `PROFILE`).
-4. **Release builds only on dispatch / tag.** `wheels.yaml` (no pull-request trigger any more) and `docker-build.yaml` run on
-   dispatch (wheels also on `v5*` tags); the `rust` dispatch / tag also runs `build`, `parity`, `frontcrate`, `package` and the DuckDB matrix.
-   `pytest` on a dispatch runs every flavor.
+The development producer runs before any database service starts. It builds one complete wheel
+with Cargo's `ci` profile and one debug CLI. Release tests instead consume `wheels-ubuntu-latest`
+and the Linux standalone binary from the release workflow, eliminating a second optimized build.
+Shipping artifacts always use `release`; the CI profile never passes the publication gate.
 
-Build accelerators (self-hosted Linux runners; GitHub-hosted legs use `Swatinem/rust-cache`, pinned by commit, restored on every
-run and saved from `v5` only, in the wheels, `check` and `duckdb` jobs):
+`scripts/ci/artifacts.py` records the actual commit/tree, profile, target, features, compiler,
+lock/toolchain hashes and every payload checksum. Consumers reject unlisted files, symlinks,
+wrong profiles and stale revisions before using a binary. Downloaded mtimes are irrelevant.
+Tests install the complete wheel into their venv. Source-reading tests also receive its complete
+native payload, including bundled libraries, while tracked Python files must match the wheel.
+Dependency-free installed-wheel smokes remain separate from backend/extras tests.
 
-- **warm `target/`**: self-hosted checkouts use `clean: false` and `git clean -ffdx -e /target -e /.venv-ref -e /.venv-test`
-  (no trailing slash: it also protects a `target` that is a symlink to another disk). `pytest.yaml` and `rust.yaml` both keep it;
-  neither wipes `target/` any more. The disk guard drops the `release` and `ci` layers before a full `cargo clean`.
-- **sccache** (`RUSTC_WRAPPER`): a local on-disk cache shared by every runner of the host, 20 GB cap
-  (`SCCACHE_CACHE_SIZE`), in `${MRSM_CI_CACHE:-$HOME/.cache/mrsm-ci}/sccache`. It makes a second runner's cold `target/`, a
-  `cargo clean`, or a re-run of a job fast: dependencies compile once per host, not once per workspace.
-- **cargo-nextest**: the `test` step runs `cargo nextest run --workspace --no-fail-fast` and then `cargo test --workspace --doc`
-  (nextest does not run doc tests). Settings in `.config/nextest.toml`. Measured on this host: 2939 tests in 84 s of test time
-  (2 m 44 s including the compile), all passing, against 10 m 20 s for `cargo test --workspace` in the last CI run.
-  Without nextest installed `ci.sh test` falls back to `cargo test --workspace` (`MRSM_CI_NEXTEST=0` forces it).
-- **mold** is opt-in (`MRSM_CI_MOLD=1`): since Rust 1.90 rustc links with lld on x86_64 Linux, and linking the 280 MB debug `mrsm`
-  takes 1.3 s with lld, 0.45 s with mold and 12 s with GNU ld. A saving of under a second per binary does not pay for the cold rebuild that
-  a `RUSTFLAGS` change forces, so it is off. Enabling it needs nothing but the variable (the pinned binary is downloaded).
-- The tools are installed by `scripts/rust/ci_tools.sh` into `${MRSM_CI_CACHE:-$HOME/.cache/mrsm-ci}/bin` (user level, pinned versions
-  and SHA-256, no sudo), once, by `ci.sh` itself the first time a self-hosted job runs. `ci.sh` enables them only when
-  `RUNNER_ENVIRONMENT=self-hosted` (set by the runner) or `MRSM_CI_ACCEL=1`; locally and on hosted runners nothing changes.
-  `ci.sh env` prints the `export` lines for workflow steps that run cargo or maturin themselves.
+### Isolated backend lanes
+
+Each lane owns a scratch root, Compose project, volumes, loopback-mapped database ports and API
+port. `scripts/ci/services.py` records ownership before startup and cleans only that project,
+including after cancellation. Existing shared test services and production services are unrelated.
+All unparameterized tests run once; parameterized cases are assigned by backend. A collection
+proof rejects missing, repeated, unknown or conflicting cases before the full run.
+
+| Lane | Workers |
+|---|---:|
+| Core / SQLite / API-host | 4 |
+| PostgreSQL family and API | 2 |
+| MySQL / MariaDB | 1 |
+| MSSQL / Valkey | 1 |
+| Oracle | 8 |
+
+The combined budget is 16 workers. Oracle gets more slots because it dominated recorded call
+time; MySQL and Valkey retain smaller budgets. `scripts/ci/shards.py` is the shared source of
+truth. Test evidence artifacts retain per-lane collection reports, the union proof and ownership.
+Rust tests retain their own shared-fixture lock and a bounded nextest budget.
+
+### Release candidate workflow
+
+```bash
+gh workflow run release.yaml --ref v5
+gh run list --workflow release.yaml --limit 3 --json databaseId,headSha,status,conclusion
+```
+
+One run builds shipping artifacts and runs Rust, all Python lanes and the strict docs build.
+The final gate verifies required platforms and seals every artifact digest in
+`release-candidate-manifest`. It never publishes. To verify the candidate again without building:
+
+```bash
+gh workflow run release.yaml --ref v5 -f candidate_run_id=RUN_ID
+```
+
+A future `v5*` tag must match the source version and point to an exact commit with a successful,
+unexpired sealed candidate. Tag validation downloads those same bytes; it does not rebuild or
+publish. Registry uploads, GitHub releases and Docker publication remain separately authorized
+release steps.
+
+### Build caches
+
+Each runner keeps its own physical Cargo target; no targets or build locks are merged. Hosted
+caches remain keyed by target/profile and save on `main` and `v5`. Self-hosted runners preserve
+`target`, `.venv-ref` and `.venv-test`; sccache adds a bounded shared dependency cache. The disk
+guard measures the resolved target filesystem and its actual size, including symlinked targets.
+`cargo-nextest` still runs all selected Rust tests, followed by doctests. Tool downloads remain
+version/checksum pinned; mold remains opt-in.
 
 ### Parallel self-hosted runners
 
@@ -193,7 +200,7 @@ target directory. Self-hosted checkouts use `clean: false` followed by
 `git clean -ffdx -e /target -e /.venv-ref -e /.venv-test`; **neither `rust.yaml` nor `pytest.yaml` wipes `target/`**. Expect a
 runner's `target/` to hold debug, clippy, `ci` and release artifacts for the whole graph (tens of GB once Polars and Arrow are in the
 graph; the `ci` layer is about 2 GB, the dispatch-only release layer the largest), in addition to the development checkout's own
-`target/`. `disk-guard` runs before the clippy, test, frontcrate and build jobs: below 10 GB free it first drops the `release` and `ci`
+`target/`. `disk-guard` runs before the clippy, test, frontcrate and test-artifact jobs: below 10 GB free it first drops the `release` and `ci`
 layers (`cargo clean --release`, `cargo clean --profile ci`) and only then runs a full `cargo clean`. `pytest.yaml` preserves the same
 `target/`, `.venv-ref/` and `.venv-test/` caches and builds the native extension with the interpreter used by its test script (the
 test venv is only reinstalled when its dependency hash changes). Maturin runs from an isolated tool environment under `RUNNER_TEMP`.
@@ -238,7 +245,7 @@ There is no `setup.py`, `setup.cfg` or `MANIFEST.in` any more. One distribution 
 |---|---|---|
 | `meerschaum` | root `pyproject.toml` (maturin mixed project, `abi3-py311`, module `meerschaum._core._native`) | The Python SDK and façade plus the Rust extension, which holds the whole core and the CLI. The `mrsm` and `meerschaum` console scripts (`_meerschaum_mrsm:main`, a top-level module shipped in the wheel) call `_native.main(argv)`, so there is no `mrsm` binary in the wheel. `dependencies` is empty; every heavier package is an extra (`pandas`, `polars`, `geo`, `sql`, `sql-mssql`, `sql-oracle`, `sql-duckdb`, `sql-cockroachdb`, `api`, `dash`, `shell`, `cli-tools`, `gui`, `full`). |
 
-`scripts/check_packaging.py` verifies that the Cargo workspace version, the console scripts and the extras in `pyproject.toml` agree with `meerschaum/utils/packages/_packages.py`, and (`--wheels dist`) that the wheel has no dependencies and no `mrsm` binary. `.github/workflows/wheels.yaml` builds wheels on GitHub-hosted runners. Prereleases select Linux x86_64 only (glibc, musl and experimental cp314t), plus one Linux x86_64 CLI binary and the source distribution. Final releases use the complete matrix (Linux x86_64 and arm64 for glibc and musl, macOS arm64 and x86_64, Windows x86_64; Windows arm64 is not built) and smoke-tests it in a fresh venv (`mrsm --version`, `mrsm show connectors`, `python -m meerschaum --version`, a `sync` of a tiny pipe on SQLite, a job round trip, and the Python API through `scripts/docker/smoke_facade.py` with `MRSM_NO_AUTO_INSTALL=1`, a scratch SQLite instance and pip/uv shims that fail the step if anything tries to install). A build-job step checks the platform tag (Linux wheels must be `manylinux_2_28` or older, or `musllinux_1_2` or older for the musl ones, and carry the expected architecture, or PyPI rejects them) and fails a wheel over 95 MiB (PyPI refuses 100 MiB). The standalone binary is `cargo install meerschaum` (the front crate's default `cli` feature; library users use `default-features = false`). `scripts/rust/build_py.sh` still builds the in-tree extension for development. The Docker `slim` image installs the base wheel only; the default image installs `meerschaum[full]`. Current size and functional gates are recorded below, rather than inferred from the scaffold measurements.
+`scripts/check_packaging.py` verifies that the Cargo workspace version, the console scripts and the extras in `pyproject.toml` agree with `meerschaum/utils/packages/_packages.py`, and (`--wheels dist`) that the wheel has no dependencies and no `mrsm` binary. `.github/workflows/wheels.yaml` builds wheels on GitHub-hosted runners. Prereleases select Linux x86_64 only (glibc and musl, plus opt-in experimental cp314t), plus one Linux x86_64 CLI binary and the source distribution. Final releases use the complete matrix (Linux x86_64 and arm64 for glibc and musl, macOS arm64 and x86_64, Windows x86_64; Windows arm64 is not built) and smoke-tests it in a fresh venv (`mrsm --version`, `mrsm show connectors`, `python -m meerschaum --version`, a `sync` of a tiny pipe on SQLite, a job round trip, and the Python API through `scripts/docker/smoke_facade.py` with `MRSM_NO_AUTO_INSTALL=1`, a scratch SQLite instance and pip/uv shims that fail the step if anything tries to install). A build-job step checks the platform tag (Linux wheels must be `manylinux_2_28` or older, or `musllinux_1_2` or older for the musl ones, and carry the expected architecture, or PyPI rejects them) and fails a wheel over 95 MiB (PyPI refuses 100 MiB). The standalone binary is `cargo install meerschaum` (the front crate's default `cli` feature; library users use `default-features = false`). `scripts/rust/build_py.sh` still builds the in-tree extension for development. The Docker `slim` image installs the base wheel only; the default image installs `meerschaum[full]`. Current size and functional gates are recorded below, rather than inferred from the scaffold measurements.
 
 ## Docker targets and the size gate (§12.1)
 
@@ -268,7 +275,7 @@ Dockerfile still installs the v5 wheels.
 Docker release builds run on the existing **self-hosted Linux x86_64 runners**. Prereleases
 select only `linux/amd64`; final releases also select `linux/arm64`.
 `scripts/ci/release_matrix.py` reads the Cargo version and selects the Docker, wheel, binary and
-matching smoke matrices, on both dispatches and tags. Source distributions and crates.io packages
+matching smoke matrices on release candidate dispatches. Source distributions and crates.io packages
 remain platform independent. The complete wheel and binary matrix is retained for final releases.
 
 Each Docker architecture uses its own named BuildKit cache (`meerschaum-release-<arch>`), preserved
@@ -339,8 +346,7 @@ procedure and the order of the 15 crates are in `.agents/skills/release/SKILL.md
 
 `.agents/skills/release/SKILL.md`, section "Meerschaum 5.x", is the ordered runbook: bump the version (Cargo
 `[workspace.package]` and the lockstep `=` pins, `Cargo.lock`, `meerschaum/config/_version.py`, literals),
-`scripts/check_packaging.py`, `scripts/rust/ci.sh package` and `publish-dry-run`, dispatch `wheels`, `rust` and
-`pytest` on the release commit, download that run's wheels and sdist (`gh run download`), `twine check`, then the
+`scripts/check_packaging.py`, `scripts/rust/ci.sh package` and `publish-dry-run`, dispatch `release.yaml` on the exact release commit, wait for its complete sealed candidate, download that run's verified wheels and sdist (`gh run download`), `twine check`, then the
 steps that need explicit authorization: PyPI `twine upload`, `cargo publish --workspace --exclude meerschaum-py`,
 the annotated tag (`v5.0.0rc1`) and a GitHub pre-release, and (separately) Docker. Release candidates are cut from the
 `v5` branch (no PR to `main`); `main` is merged at 5.0.0 final. The PyPI classifier is `Development Status ::

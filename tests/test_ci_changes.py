@@ -73,6 +73,14 @@ def test_parity_follows_the_generators_and_fixtures_only(changes):
         assert 'parity' in _on(changes, path), path
 
 
+def test_fixture_data_skips_lint_but_keeps_test_and_reference_validation(changes):
+    on = _on(changes, 'crates/meerschaum-core/tests/fixtures/dtypes.json')
+    assert {'rust_test', 'pytest', 'parity'} <= on
+    assert 'rust' not in on
+    # Embedded source assets remain compile inputs, even without an .rs suffix.
+    assert 'rust' in _on(changes, 'crates/meerschaum-cli/src/native/bootstrap_templates.json')
+
+
 def test_frontcrate_package_and_duckdb_follow_their_inputs(changes):
     assert 'frontcrate' in _on(changes, 'crates/meerschaum/src/lib.rs')
     assert 'frontcrate' in _on(changes, 'crates/meerschaum-server/Cargo.toml')

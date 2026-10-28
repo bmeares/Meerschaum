@@ -4,16 +4,39 @@ DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 . "$DIR"/config.sh
 
 cd "$PARENT"
-test_root="$PARENT/test_root"
-test_plugins="$PARENT/tests/plugins"
+test_root="${MRSM_ROOT_DIR:-$PARENT/test_root}"
+test_plugins="${MRSM_PLUGINS_DIR:-$PARENT/tests/plugins}"
 mrsm="$PARENT/scripts/mrsm.sh"
+[ -z "$PYTHON_BIN" ] && export PYTHON_BIN=python
 mkdir -p "$test_root"
 test_port="${MRSM_TEST_API_PORT:-8989}"
 export MRSM_TEST_API_PORT="$test_port"
 export MRSM_ROOT_DIR=$test_root
 export MRSM_PLUGINS_DIR=$test_plugins
 export MRSM_API_TEST=http://user:pass@localhost:$test_port
-export MRSM_SQL_TEST_POSTGRESQL='postgresql://test:test1234@localhost:5559/testdb'
+export MRSM_SQL_TEST_POSTGRESQL="${MRSM_SQL_TEST_POSTGRESQL:-postgresql://test:test1234@localhost:5559/testdb}"
+unset TMUX TMUX_PANE
+compose=(docker compose --file "$PARENT/tests/docker-compose.yaml")
+pytest_shard_args=()
+pytest_main_args=()
+pytest_users_args=()
+if [ "$MRSM_TEST_ISOLATED" = '1' ]; then
+  if [ -z "$MRSM_TEST_COMPOSE_PROJECT" ] || [ -z "$MRSM_TEST_SHARD" ] || [ -z "$MRSM_TEST_PORTS" ]; then
+    echo 'test.sh: isolated runs require scripts/ci/services.py ownership and port settings.' >&2
+    exit 2
+  fi
+  "$PYTHON_BIN" "$PARENT/scripts/ci/services.py" check --root "$test_root" \
+    --project "$MRSM_TEST_COMPOSE_PROJECT" --shard "$MRSM_TEST_SHARD" || exit $?
+  compose+=(--project-name "$MRSM_TEST_COMPOSE_PROJECT")
+  pytest_shard_args=(-p scripts.ci.pytest_shard --mrsm-shard "$MRSM_TEST_SHARD")
+  pytest_main_args=(--ignore=target/ --ignore=tests/test_users.py --mrsm-collection-report "$test_root/collection.json")
+  pytest_users_args=(--mrsm-collection-report "$test_root/users-collection.json")
+  cleanup_isolated() {
+    "$mrsm" delete jobs test_api -f -y >/dev/null 2>&1 || true
+    "$mrsm" stop daemon >/dev/null 2>&1 || true
+  }
+  trap cleanup_isolated EXIT
+fi
 [ -z "$PYTHON_BIN" ] && export PYTHON_BIN=python
 [ -z "$MRSM_TEST_FLAVORS" ] && export MRSM_TEST_FLAVORS='api,timescaledb'
 if [ "$MRSM_TEST_FLAVORS" = "all" ]; then
@@ -40,9 +63,7 @@ done
 
 ### Start the test databases.
 if [ -n "$start_db" ]; then
-  cd tests/
-  docker compose up --quiet-pull -d $services
-  cd ../
+  "${compose[@]}" up --quiet-pull -d $services || exit $?
 fi
 
 ### The tests never download packages mid-run (`MRSM_NO_AUTO_INSTALL`): install the extras they
@@ -154,8 +175,10 @@ export MRSM_TEST_FLAVORS
 ### The API suite mutates its pipes and jobs. Give only its broad fixture account explicit
 ### admin rights on the owned backing instance; registration and the default role stay unchanged.
 if [[ ",$MRSM_TEST_FLAVORS," == *,api,* ]]; then
-  cd tests/ && docker compose up -d postgresql && cd .. && \
-    $mrsm delete jobs test_api -y && \
+  if [ "$MRSM_TEST_ISOLATED" != '1' ]; then
+    "${compose[@]}" up -d postgresql || exit $?
+  fi
+  $mrsm delete jobs test_api -y && \
     $mrsm start connectors sql:test_postgresql; rc="$?"
   [ "$rc" != '0' ] && exit "$rc"
   "$PYTHON_BIN" - <<'API_FIXTURE_SEED'
@@ -207,7 +230,7 @@ true && \
 [ "$rc" != '0' ] && exit "$rc"
 
 $PYTHON_BIN -m pytest \
-  tests/test_users.py; rc="$?"
+  "${pytest_shard_args[@]}" "${pytest_users_args[@]}" tests/test_users.py; rc="$?"
 [ "$rc" != '0' ] && exit "$rc"
 
 $PYTHON_BIN -m pytest \
@@ -217,15 +240,15 @@ $PYTHON_BIN -m pytest \
   --ignore=tests/data/ \
   --ignore=docs/ \
   --ff \
-  -n=auto \
+  -n="${MRSM_TEST_WORKERS:-auto}" \
   -v \
+  "${pytest_shard_args[@]}" \
+  "${pytest_main_args[@]}" \
   "$@"; rc="$?"
 
 ### Cleanup
 if [ "$cleanup_on_exit" == "rm" ]; then
-  cd tests/
-  docker compose down -v
-  cd ../
+  "${compose[@]}" down -v
   $mrsm delete job test_api -f -y
 fi
 

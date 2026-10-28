@@ -9,6 +9,8 @@ bounded memory store, invalidation by a listed pipe's recorded syncs, Valkey whe
 connector answers (and a one-time warning in the API host when it does not).
 """
 
+from tests._ports import service_port
+
 import json
 import time
 import uuid
@@ -259,7 +261,7 @@ def test_unreachable_valkey_falls_back_to_memory_and_warns_in_the_host_once(monk
 
 
 def test_valkey_backend_is_shared(monkeypatch):
-    conn = mrsm.get_connector('valkey', 'test_valkey_cache', host='localhost', port=6399)
+    conn = mrsm.get_connector('valkey', 'test_valkey_cache', host='localhost', port=service_port('valkey'))
     try:
         reachable = conn.test_connection()
     except Exception:

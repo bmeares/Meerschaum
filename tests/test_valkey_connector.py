@@ -13,6 +13,8 @@ package for them). The commands run against the disposable container on port 639
 
 from __future__ import annotations
 
+from tests._ports import service_port
+
 import os
 import sys
 import json
@@ -31,7 +33,7 @@ from tests._binary import skip_or_fail
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
 REF_PYTHON = REPO / '.venv-ref' / 'bin' / 'python'
-PORT = 6399
+PORT = service_port('valkey')
 FLAVOR_SELECTED = 'valkey' in os.environ.get('MRSM_TEST_FLAVORS', 'sqlite').split(',')
 
 pytestmark = pytest.mark.skipif(

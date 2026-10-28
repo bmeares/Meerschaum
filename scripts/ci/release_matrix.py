@@ -14,8 +14,8 @@ import tomllib
 
 FULL_MATRICES = {
     'wheels': [
-        {'os': 'ubuntu-latest', 'manylinux': '2_28'},
-        {'os': 'ubuntu-24.04-arm', 'manylinux': '2_28'},
+        {'os': 'ubuntu-latest', 'manylinux': '2_28', 'target': 'x86_64-unknown-linux-gnu'},
+        {'os': 'ubuntu-24.04-arm', 'manylinux': '2_28', 'target': 'aarch64-unknown-linux-gnu'},
         *[{
             'os': 'ubuntu-latest',
             'manylinux': 'musllinux_1_2',
@@ -23,11 +23,15 @@ FULL_MATRICES = {
             'musl': True,
             'wheel_arch': arch,
             'artifact': f'wheels-musllinux-{arch}',
+            'smoke_os': 'ubuntu-latest' if arch == 'x86_64' else 'ubuntu-24.04-arm',
         } for arch in ('x86_64', 'aarch64')],
-        {'os': 'macos-latest', 'manylinux': 'off'},
-        {'os': 'macos-15-intel', 'manylinux': 'off'},
-        {'os': 'windows-latest', 'manylinux': 'off'},
-        {'os': 'ubuntu-latest', 'manylinux': '2_28', 'freethreaded': True},
+        {'os': 'macos-latest', 'manylinux': 'off', 'target': 'aarch64-apple-darwin'},
+        {'os': 'macos-15-intel', 'manylinux': 'off', 'target': 'x86_64-apple-darwin'},
+        {'os': 'windows-latest', 'manylinux': 'off', 'target': 'x86_64-pc-windows-msvc'},
+    ],
+    'experimental_wheels': [
+        {'os': 'ubuntu-latest', 'manylinux': '2_28', 'target': 'x86_64-unknown-linux-gnu',
+         'freethreaded': True, 'artifact': 'wheels-ubuntu-latest-cp314t'},
     ],
     'binaries': [
         {'os': 'ubuntu-latest', 'target': 'x86_64-unknown-linux-gnu', 'container_arch': 'x86_64'},

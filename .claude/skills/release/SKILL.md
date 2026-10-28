@@ -118,44 +118,49 @@ NEW_CARGO=5.0.0-rc.1 NEW_PEP=5.0.0rc1      # final: 5.0.0 and 5.0.0
 
 ## 5.2 CI on the release commit
 
-Dispatch the workflows on the branch and wait for the commit's runs. `wheels.yaml` and `docker-build.yaml` run only on
-dispatch (`wheels.yaml` also on a `v5*` tag push), never on a push or pull request. `rust.yaml` and `pytest.yaml` also run on
-pushes to `v5`, but a push runs only the jobs its diff needs (`scripts/ci/changes.py`; pytest runs just the sqlite and timescaledb
-flavors); a **dispatch or a tag runs every job** (release-profile `build`, `parity`, `frontcrate`, `package`, the 4-OS DuckDB matrix;
-pytest: all flavors), so the dispatched runs below are the release gate and the push runs are not a substitute for them.
-The push run and the pull request run of `v5` share a concurrency group (the newer supersedes the older), and the
-self-hosted jobs that share host state (`rust` `test` and `parity`, `pytest` `tests`) are serialized per host, so a
-dispatch waits for them instead of racing them; do not cancel them by hand (a job killed mid-run can leave host state
-behind). Check `gh run list` before dispatching a duplicate:
+Dispatch the single release candidate workflow on the exact branch commit:
 
 ```bash
 SHA=$(git rev-parse HEAD)
-gh workflow run wheels.yaml --ref v5         # builds wheels + sdist, smoke-tests them (see 5.3)
-gh workflow run rust.yaml --ref v5           # everything: fmt, clippy, test (nextest), build (release), parity, frontcrate, package, check, duckdb matrix
-gh workflow run pytest.yaml --ref v5 -f profile=release   # self-hosted: builds the release _core (the default `ci` profile is quick and nothing ships from it), all flavors (check no local test.sh is running)
-gh run list --branch v5 --limit 6 --json databaseId,workflowName,status,conclusion,headSha
+gh workflow run release.yaml --ref v5
+# Optional: add -f experimental=true for the separately gated Linux cp314t wheel.
+gh run list --workflow release.yaml --limit 3 --json databaseId,status,conclusion,headSha
 ```
 
-Every run must have `headSha == $SHA` and `conclusion == success`. The self-hosted jobs share this host's
-containers, ports and `target/`: never run a local `scripts/test.sh` or `cargo` build at the same time.
-`wheels.yaml` selects the prerelease subset or the full final-release matrix. Full matrix jobs: `packaging metadata`; `build (ubuntu-latest | ubuntu-24.04-arm | ubuntu-latest, musllinux x86_64 | ubuntu-latest, musllinux aarch64 | macos-latest | macos-15-intel |
-windows-latest)`, which run `check_packaging.py --wheels dist` and a tag/size guard (Linux wheels must be
-`manylinux_2_28` or older (musl: `musllinux_1_2` or older) and the right architecture, a wheel over 95 MiB fails, PyPI refuses 100 MiB);
-`build (sdist)`; `binary (<target>)` x5 (a release `mrsm` per platform, glibc floor check, `--version` and
-`show version` smoke, uploaded as `mrsm-<version>-<target>[.exe]` plus a `.sha256`); `smoke (...)` on all five runner images (Linux x86_64 and arm64, macOS arm64 and Intel, Windows) and Python 3.11 and 3.14, and `smoke (musllinux <arch>, Alpine)` (install into a fresh venv,
-`mrsm` console scripts, a SQLite sync, a job round trip, the Python API smoke with no install allowed,
-no leaked dependencies); the experimental `build (... cp314t ...)` and `smoke (free-threaded, py3.14t)`.
-`docker-build.yaml` (buildx with the size gate) is separate, see 5.7.
+For a final release use `--ref main` after its reviewed PR merge. The candidate runs reusable
+`wheels.yaml`, full `rust.yaml`, full `pytest.yaml` against the already-built release wheel/CLI,
+and strict `docs.yaml`. Its gate verifies every required platform and writes
+`release-candidate-manifest`; no publishing occurs. Require exact `headSha == $SHA`, success,
+and the candidate manifest. A successful verify-only run without that manifest is not a gate.
+
+Python backend lanes have isolated roots, projects, volumes and ports, a shared 16-worker budget,
+and a disjoint/exhaustive collection proof. Their artifacts retain collection/ownership evidence.
+Artifact consumers check actual commit/tree, target/profile and every payload digest. PRs keep
+synthetic merge validation. The release tests do not compile another optimized extension/CLI.
+No local Cargo or shared-service tests while self-hosted CI is active.
+
+Ordinary pushes/PRs run the fast policy; nightly runs and this release call retain full coverage.
+Individual workflow dispatches are useful for diagnosis but do not replace the sealed full gate.
+
+To rehearse artifact verification without building or tagging:
+
+```bash
+gh workflow run release.yaml --ref v5 -f candidate_run_id=RUN_ID
+```
+
+A pushed `v5*` tag only verifies the successful unexpired candidate for that exact commit and
+matching version. `wheels.yaml` and `rust.yaml` no longer rebuild on a tag. No workflow publishes
+PyPI/crates.io/GitHub releases; Docker still requires its explicit publish input and authorization.
 
 ## 5.3 Collect the artifacts of that exact commit
 
 Use a fresh directory (never the repository's `dist/`, which can hold older files):
 
 ```bash
-RUN=<the wheels run id>   # gh run list --workflow wheels.yaml --branch v5 --limit 3
+RUN=<the full release candidate run id>   # gh run list --workflow release.yaml --limit 3
 gh run view "$RUN" --json headSha,conclusion          # headSha must equal $SHA, conclusion success
 REL=$(mktemp -d "$HOME/.cache/mrsm-release-5.0.0rc1.XXXX"); mkdir "$REL/dl" "$REL/dist"
-gh run download "$RUN" --dir "$REL/dl"                # one subdirectory per artifact
+gh run download "$RUN" --pattern 'wheels-*' --pattern 'mrsm-*' --pattern sdist --pattern release-candidate-manifest --dir "$REL/dl"
 find "$REL/dl" -name '*.whl' -o -name '*.tar.gz' | grep -v cp314t | xargs -I{} cp {} "$REL/dist/"
 ls -l "$REL/dist"
 ```
@@ -256,17 +261,17 @@ for all crates (lockstep `=` pins). (3) `cargo install meerschaum --version 5.0.
 
 ## 5.6 Tag and GitHub pre-release **[needs explicit user authorization]**
 
-After PyPI and crates.io succeeded, on the exact release commit:
+After PyPI and crates.io succeeded, on the exact successfully sealed release commit:
 
 ```bash
 git tag -m "v5.0.0rc1" v5.0.0rc1 "$SHA"      # -m required: git config forces annotated tags
-git push origin v5.0.0rc1                     # triggers wheels.yaml on the tag (builds only)
+git push origin v5.0.0rc1                     # verifies the sealed exact-commit artifacts; no rebuild
 mapfile -t release_assets < <(find "$REL/bin" -maxdepth 1 -type f ! -name '*.sha256' -print)
 gh release create v5.0.0rc1 --prerelease --verify-tag --title "v5.0.0rc1" --notes-file <notes> \
   "${release_assets[@]}"
 ```
 
-The selected binaries (one for a prerelease, five for a final; built on the release commit by `wheels.yaml`) and `SHA256SUMS` are attached as the release
+The selected binaries (one for a prerelease, five for a final; built once on the release commit by the `release.yaml` candidate's wheel workflow) and `SHA256SUMS` are attached as the release
 assets. Say in the notes that the macOS binary is not signed or notarized (Gatekeeper asks once:
 `xattr -d com.apple.quarantine mrsm-...`, documented under Setup in the docs), that `cargo install meerschaum --locked` (Rust 1.95 or newer) and
 `pip install meerschaum` are the supported installs, and that the Linux binaries need glibc 2.28 or newer.
@@ -356,7 +361,7 @@ in the release commit (5.1), not after the tag.
 
 - [ ] Versions bumped (Cargo, lockstep pins, Cargo.lock, `_version.py`, literals), classifier right for rc/final
 - [ ] `check_packaging.py`, `ci.sh package`, `publish-dry-run`, fixture hygiene pass
-- [ ] `wheels`, `rust`, `pytest` runs green on the release commit (`headSha` checked)
+- [ ] Complete `release.yaml` gate (wheels, Rust, Python, docs) green, exact SHA and candidate manifest verified
 - [ ] `dist/`: rc: 2 Linux x86_64 abi3 wheels; final: 7 platform wheels (+ `cp314t` only if build and smoke passed) + sdist from that run, `twine check` ok
 - [ ] **PyPI** uploaded (authorized), verified in a clean venv with `--pre`
 - [ ] **crates.io** `cargo publish --workspace --exclude meerschaum-py` done (authorized), `cargo install meerschaum --locked --version ...` verified

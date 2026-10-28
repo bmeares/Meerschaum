@@ -15,6 +15,8 @@ has `valkey`). The Python `valkey` package is not installed for v4, so a Valkey 
 with the same data on SQLite (recorded on SQLite).
 """
 
+from tests._ports import service_port
+
 import copy
 import json
 import os
@@ -72,7 +74,7 @@ def postgis_instance():
     conn = mrsm.get_connector(
         'sql', 'w15l2_postgis',
         flavor='postgis', username='test', password='test1234', database='testdb',
-        port=5449, host='localhost', schema=SCHEMA,
+        port=service_port('postgis'), host='localhost', schema=SCHEMA,
     )
     ### A failed CREATE owns nothing; never drop an existing schema on collision.
     assert conn.exec(f'CREATE SCHEMA "{SCHEMA}"') is not None
@@ -84,7 +86,7 @@ def postgis_instance():
         assert conn.exec(f'DROP SCHEMA IF EXISTS "{SCHEMA}" CASCADE') is not None
 
 
-def _resp(command, port=6399):
+def _resp(command, port=service_port('valkey')):
     import socket
     parts = [part.encode() for part in command]
     payload = f'*{len(parts)}\r\n'.encode() + b''.join(
@@ -142,7 +144,7 @@ def instance(request, tmp_path):
         ### The cleanup test clears this module's namespace; it must not run while another
         ### xdist worker is using one of those pipes.
         with InterProcessLock(Path.home() / '.cache' / 'mrsm-w15l2-valkey.lock'):
-            yield mrsm.get_connector('valkey', 'w15l2_valkey', host='localhost', port=6399)
+            yield mrsm.get_connector('valkey', 'w15l2_valkey', host='localhost', port=service_port('valkey'))
 
 
 @pytest.fixture
@@ -946,7 +948,7 @@ def test_remote_reads_of_a_source_that_cannot_answer(
 def test_remote_sync_time_of_a_valkey_source(reference_instance, native_calls):
     if 'valkey' not in os.environ.get('MRSM_TEST_FLAVORS', 'sqlite').split(','):
         pytest.skip("set MRSM_TEST_FLAVORS to include valkey")
-    valkey = mrsm.get_connector('valkey', 'w15l2_valkey', host='localhost', port=6399)
+    valkey = mrsm.get_connector('valkey', 'w15l2_valkey', host='localhost', port=service_port('valkey'))
     label = 'rv' + uuid.uuid4().hex[:6]
     remote = mrsm.Pipe(str(valkey), label, instance=valkey, columns=COLUMNS, dtypes=DTYPES)
     assert remote.sync(_rows(5))[0]

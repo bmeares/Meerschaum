@@ -56,6 +56,7 @@ IGNORED = (
     '.github/FUNDING.yml',
     '.github/actionlint.yaml',
     '.github/dependabot.yml',
+    '.github/workflows/docs.yaml',
 )
 
 # Rust sources, manifests, toolchain, the CI scripts themselves.
@@ -76,6 +77,8 @@ RUST = (
 # extension they build, `doctor` and `execute_policy` read two Python files as text, and the generated
 # tables come from the extras. Other Python (the facade, the SDK, the actions) never reaches a cargo test.
 RUST_TEST_EXTRA = (
+    'crates/**/tests/**',
+    'crates/**/src/*.json',
     'meerschaum/worker/**',
     'meerschaum/api/dash/execute.py',
     'meerschaum/utils/packages/**',
@@ -202,7 +205,14 @@ def _matcher(patterns: Iterable[str]):
 
 
 _is_ignored = _matcher(IGNORED)
-_is_rust = _matcher(RUST)
+_rust_input = _matcher(RUST)
+
+
+def _is_rust(path: str) -> bool:
+    # Non-Rust test data/generators are consumed by the test/parity jobs. Keep
+    # unknown crate inputs and embedded src/ assets conservative.
+    fixture_data = path.startswith('crates/') and '/tests/' in path and not path.endswith(('.rs', '/Cargo.toml'))
+    return _rust_input(path) and not fixture_data
 _is_rust_test = _matcher(RUST + RUST_TEST_EXTRA)
 _is_pytest = _matcher(PYTEST)
 _is_parity = _matcher(PARITY)
@@ -224,6 +234,10 @@ def classify(files: Sequence[str]) -> Dict[str, bool]:
             continue
         # `*.md` is the repository root's Markdown only: a crate's README is a packaging input.
         if _is_ignored(path):
+            continue
+        # Crate prose and data are packaging/parity inputs, not Rust compilation inputs.
+        if path.startswith('crates/') and path.endswith(('.md', '/LICENSE', '/NOTICE')):
+            result['package'] = True
             continue
         claimed = False
         for name, test in (

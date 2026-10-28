@@ -3,6 +3,8 @@ The `SQLConnector` façade: pipe, user and plugin methods route through
 `meerschaum._core.SqlConnector`. These tests run against a throwaway SQLite instance.
 """
 
+from tests._ports import service_port
+
 import uuid
 import pickle
 from datetime import datetime, timezone
@@ -280,9 +282,10 @@ print('D16_OK')
 @pytest.mark.parametrize(
     'flavor, port, username, password, database, expected_schema',
     [
-        ('postgis', 5449, 'test', 'test1234', 'testdb', 'public'),
-        ('mssql', 1439, 'sa', 'supersecureSECRETPASSWORD123!', 'master', 'dbo'),
+        ('postgis', service_port('postgis'), 'test', 'test1234', 'testdb', 'public'),
+        ('mssql', service_port('mssql'), 'sa', 'supersecureSECRETPASSWORD123!', 'master', 'dbo'),
     ],
+    ids=['postgis', 'mssql'],
 )
 def test_default_schema_is_discovered_natively_without_sqlalchemy(
     tmp_path, flavor, port, username, password, database, expected_schema,
@@ -371,11 +374,11 @@ def test_a_roles_search_path_is_the_default_schema_without_sqlalchemy(tmp_path):
     import uuid
     pytest.importorskip('sqlalchemy')  # the admin connection uses `exec()`
     try:
-        socket.create_connection(('localhost', 5449), timeout=2).close()
+        socket.create_connection(('localhost', service_port('postgis')), timeout=2).close()
     except OSError:
         pytest.skip("No postgis test database on port 5449.")
     admin = mrsm.get_connector(
-        'sql', 'w16_schema_admin', flavor='postgis', host='localhost', port=5449,
+        'sql', 'w16_schema_admin', flavor='postgis', host='localhost', port=service_port('postgis'),
         username='test', password='test1234', database='testdb',
     )
     tag = uuid.uuid4().hex[:8]
@@ -392,7 +395,7 @@ import os, sys
 sys.modules['sqlalchemy'] = None
 import meerschaum as mrsm
 conn = mrsm.get_connector(
-    'sql', 'w16_schema_role', flavor='postgis', host='localhost', port=5449,
+    'sql', 'w16_schema_role', flavor='postgis', host='localhost', port=int(os.environ['PORT']),
     username=os.environ['ROLE'], password='w16pass', database='testdb',
 )
 assert 'schema' not in conn.__dict__
@@ -410,6 +413,7 @@ print('ROLE_OK')
         'MRSM_NO_AUTO_INSTALL': '1',
         'PYTHONPATH': os.getcwd(),
         'ROLE': role,
+        'PORT': str(service_port('postgis')),
     })
     (tmp_path / 'root').mkdir()
     (tmp_path / 'plugins').mkdir()

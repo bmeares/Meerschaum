@@ -153,15 +153,22 @@ step_setup() {
   rustc --version
 }
 
+target_directory() {
+  # Runners may keep target/ on a different filesystem behind a symlink.
+  mkdir -p "$REPO/target"
+  (cd "$REPO/target" && pwd -P)
+}
+
 free_gb() {
-  # Free space (GiB, rounded down) on the filesystem holding the repository.
-  df -Pk "$REPO" | awk 'NR==2 { printf "%d", $4 / 1048576 }'
+  # Measure the filesystem Cargo writes to, not the checkout's filesystem.
+  df -Pk "$(target_directory)" | awk 'NR==2 { printf "%d", $4 / 1048576 }'
 }
 
 step_disk_guard() {
-  local min="${MRSM_CI_MIN_FREE_GB:-10}" free
+  local min="${MRSM_CI_MIN_FREE_GB:-10}" free target
+  target="$(target_directory)"
   free="$(free_gb)"
-  log "Free space: ${free} GiB (threshold ${min} GiB); target/ is $(du -sh target 2>/dev/null | cut -f1 || echo 0)"
+  log "Free space: ${free} GiB (threshold ${min} GiB); $target is $(du -sh "$target" 2>/dev/null | cut -f1 || echo 0)"
   if [ "$free" -lt "$min" ]; then
     # Drop the cheapest-to-rebuild layers first: the optimized profiles (`release` is only built by the
     # dispatch/tag jobs, `ci` by pytest), then everything.
