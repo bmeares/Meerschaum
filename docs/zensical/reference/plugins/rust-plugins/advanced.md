@@ -757,16 +757,22 @@ the core API would require:
 | Calls | Scope |
 |---|---|
 | `host::pipe`, `get_data`, `get_rowcount`, `get_sync_time`, `get_columns_types`, `exists` | `pipes:read` |
-| `sync`, `replace`, `clear`, `register` | `pipes:write` |
+| `sync`, `replace` | `pipes:write` (also `pipes:register` when creating a pipe) |
+| `clear` | `pipes:delete` |
+| `register` | `pipes:register` |
 | `read_sql` (read-only queries only) | `sql:read` |
 | `exec_sql` | `actions:execute`, and a caller who may run actions (below) |
 | `config` | every scope (`*`: an administrator, or `--no-auth`) |
 | `plugin_config`, `write_plugin_config` | none: the plugin's own settings |
 
 - **Pipes** are reached only on the instances the server allows (`api:permissions:instances`),
-  and never Meerschaum's internal `mrsm` pipes.
-- **SQL** reaches any configured `sql:` connector (as MCP's `read_sql` tool does) but never
-  Meerschaum's internal tables: a query or statement that names one (`mrsm_users`,
+  and never Meerschaum's internal `mrsm` pipes. The caller must be able to see the pipe, and
+  writes require its edit rights. Registered parameters and locks come from the instance;
+  changing a plugin's local Pipe metadata cannot override them. New pipes receive the caller's
+  owner and pass the same registration, connector-team and SQL-definition checks as HTTP.
+- **SQL** reaches only served `sql:` instances whose connector teams allow the caller. It
+  refuses targets of hidden pipes and Meerschaum's internal tables: a query or statement that
+  names one (`mrsm_users`,
   `mrsm_tokens`, any `mrsm_*` table or the `_mrsm_internal` schema, quoted or in a string) or
   names a function that runs query text or reads tables named in text (`query_to_xml`,
   `database_to_xml`, `ts_stat`, `dblink`, Oracle's `DBMS_XMLGEN`, DuckDB's `query`, ...) is
@@ -776,12 +782,15 @@ the core API would require:
   tokens only when the server lets non-administrators run actions
   (`system:api:permissions:actions:non_admin: true`, with `jobs:execute` too), never under
   `start api --secure`; anonymous callers never.
-- **Who has which scopes.** A token or a signed-in API user has the scopes it was granted. A
+- **Who has which scopes.** A token or a signed-in API user has its current permissions within
+  the scopes the request was granted. Host calls recheck credential validity, permissions and
+  team membership; a revoked token or deleted user cannot continue making them. A
   console page's signed-in viewer has what their user would get from `/login` (every scope for
   an administrator, else the user's scopes). A caller without credentials (a `public = true`
   route, a guest of a page with `login_required = false`) has none, so these calls are refused
   for it, unless the route or page declares `host_scopes`: every caller's host calls get these
-  scopes on top of its own, so this public route serves pipe data to anyone:
+  named scopes on top of its own, preserving visibility and edit rules. This public route
+  serves Everyone's pipe data:
 
     ```rust
     #[api_route(GET, "/status/{metric}", public = true, host_scopes = ["pipes:read"])]

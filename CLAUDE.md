@@ -19,8 +19,10 @@ and layering are in `crates/README.md`; the user-facing story is `docs/zensical/
   + the Python worker (`python -m meerschaum.worker`, which runs Python plugins for the Rust host).
 - **Public surfaces do not change** (§11): pipe keys and every `parameters` key, config YAML layout,
   `MRSM_SQL_<LABEL>` env connectors, instance tables, the job directory layout, compose files, every HTTP
-  route, and the Python public API. `SQLConnector.read/exec/value/to_sql/.engine/get_tables()` stay
-  SQLAlchemy (D16, extra `meerschaum[sql]`). The base wheel has **no runtime dependencies** (D20).
+  route, and the Python public API. `SQLConnector.read/exec/exec_queries/value/to_sql()` and catalog
+  helpers use Rust on every flavor (D16). Explicit `.engine`, caller-provided SQLAlchemy connections
+  and helpers returning SQLAlchemy `Table` objects (`get_tables`) need `meerschaum[sql]`.
+  The base wheel has **no runtime dependencies** (D20).
 - **`meerschaum._core` is required.** An unbuilt tree raises `CoreNotBuiltError` naming
   `scripts/rust/build_py.sh`. A deleted v4 module raises a `ModuleNotFoundError` naming its replacement
   (`meerschaum/_internal/_removed.py`: add an entry when you delete a module).

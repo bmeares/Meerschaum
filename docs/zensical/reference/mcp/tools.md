@@ -37,7 +37,7 @@ transport grants everything, because it runs as the user who launched it.
 | `list_runs` | `pipes:read` | ✅ |  | List the runs of Pipelines and dependency syncs, newest first, with their status and timing. |
 | `plan_pipeline` | `pipes:read` | ✅ |  | Show what a run of a saved Pipeline would do, without moving any data: each pipe's action (sync, skip, backfill, rebuild, ...), why, and its window. |
 | `read_sql` | `sql:read` | ✅ |  | Run a read-only SQL query (or read a whole table by name) through a SQL connector and return the rows. |
-| `register_pipe` | `pipes:write` |  |  | Create and register a new pipe (the programmatic equivalent of 'bootstrap pipe'). |
+| `register_pipe` | `pipes:register` |  |  | Create and register a new pipe (the programmatic equivalent of 'bootstrap pipe'). |
 | `sync_documents` | `pipes:write` |  |  | Insert or update rows in a pipe from a list of records you supply. |
 | `sync_pipe` | `pipes:write` |  |  | Sync a pipe: fetch new data from its source connector and store it on its instance. |
 | `sync_pipeline` | `pipes:write`, `jobs:execute` |  |  | Start a run of a saved Pipeline in the background: its pipes sync in dependency order. |
@@ -73,7 +73,8 @@ transport grants everything, because it runs as the user who launched it.
 | `pipes:delete` | `clear_pipe`, `deduplicate_pipe`, `delete_pipe` | Delete pipes' parameters and drop target tables. |
 | `pipes:drop` | `drop_pipe` | Drop target tables. |
 | `pipes:read` | `get_pipe_attributes`, `get_pipe_data`, `get_pipe_stats`, `get_run`, `list_pipelines`, `list_pipes`, `list_runs`, `plan_pipeline` | Read pipes' parameters and the contents of target tables. |
-| `pipes:write` | `deduplicate_pipe`, `edit_pipe`, `register_pipe`, `sync_documents`, `sync_pipe`, `sync_pipeline`, `verify_pipe` | Update pipes' parameters and sync to target tables. |
+| `pipes:register` | `register_pipe` | Register new pipes. |
+| `pipes:write` | `deduplicate_pipe`, `edit_pipe`, `sync_documents`, `sync_pipe`, `sync_pipeline`, `verify_pipe` | Update pipes' parameters and sync to target tables. |
 | `sql:read` | `read_sql` | Execute read-only SQL queries against SQL connectors. |
 
 ## Tool details
@@ -361,7 +362,7 @@ Run a read-only SQL query (or read a whole table by name) through a SQL connecto
 
 Create and register a new pipe (the programmatic equivalent of 'bootstrap pipe'). Declare its index columns (`datetime` drives incremental sync, `id`/`primary` give uniqueness) and optional dtypes and tags. For a SQL-fetch pipe, set `parameters.fetch.definition` to the source query.
 
-**Scope:** `pipes:write`
+**Scope:** `pipes:register`
 
 **Annotations:** idempotent
 

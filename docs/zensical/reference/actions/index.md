@@ -40,7 +40,7 @@ $ mrsm show pipes
 
 ## Getting Help
 
-`mrsm help` (the same as `mrsm -h`, `mrsm show help`, or `help` in the shell) starts with the actions, grouped by what they are for, each with a one-line description. The actions your plugins add follow in a **Plugins** group (with their subcommands), and the options come last, by group (the graph-run flags `--parents`, `--children`, `--resume`, `--run-id` and `--chunk-pipelining` are under **Pipeline options**).
+`mrsm help` (the same as `mrsm -h`, `mrsm show help`, or `help` in the shell) starts with the actions, grouped by what they are for, each with a one-line description. The actions your plugins add follow in a **Plugins** group (with their subcommands), and the options come last, by group (the graph-run flags `--parents`, `--children`, `--resume`, `--run-id` and `--chunk-pipelining` are under **Pipeline options**; the flags of `edit pipes access`, `lock pipes` / `unlock pipes` and `register teams` / `edit teams` are under **Access options**).
 
 ```text
 $ mrsm help
@@ -229,25 +229,27 @@ Create, edit, duplicate, and remove pipes (and their registrations).
 
 | Action | Description |
 |---|---|
-| `register` | Register new pipes, plugins, or users on an instance / repository. |
+| `register` | Register new pipes, plugins, users or teams on an instance / repository. |
 | `bootstrap` | Launch an interactive wizard to create pipes or connectors. |
 | `edit` | Edit an existing element (pipe parameters, config, users, etc.). |
 | `copy` | Duplicate pipes or connectors. |
 | `tag` | Add or remove tags on existing pipes. |
-| `delete` | Delete an element's registration (`pipes`, `plugins`, `users`, `connectors`, `jobs`, `venvs`, `config`). |
+| `delete` | Delete an element's registration (`pipes`, `plugins`, `users`, `teams`, `connectors`, `jobs`, `venvs`, `config`). |
 | `drop` | Drop a pipe's data / target table while keeping its registration. |
+| `lock` / `unlock` | Lock pipes against parameter edits, syncs, clears, drops or deletion, and remove the locks. See [Teams, Access and Locks](teams-and-access.md). |
 
 #### `edit`
 
-Edit the parameters of an existing element. `edit pipes` opens the selected pipes' parameters in your `$EDITOR` as YAML; saving persists the changes. `edit config` opens the configuration registry, and `edit users` edits user attributes.
+Edit the parameters of an existing element. `edit pipes` opens the selected pipes' parameters in your `$EDITOR` as YAML; saving persists the changes. `edit config` opens the configuration registry, `edit users` changes a user's password, type, role, primary team and email, and `edit teams` a team's members, managers and name. `edit pipes access` sets the selected pipes' owner, team and visibility ([Teams, Access and Locks](teams-and-access.md)).
 
 ```bash
 mrsm edit pipes -c plugin:noaa -m weather
+mrsm edit pipes access -c plugin:noaa -m weather --team analytics --visibility private
 ```
 
 #### `copy`
 
-Duplicate pipes or connectors. `copy pipes` clones the registration (and optionally the data) of the selected pipes into new keys, which is handy for branching a stream onto a new instance.
+Duplicate pipes or connectors. `copy pipes` clones the registration (and optionally the data) of the selected pipes into new keys, which is handy for branching a stream onto a new instance. A copy keeps the source's locks and never its access (owner, team, visibility).
 
 ```bash
 mrsm copy pipes -c plugin:noaa -m weather -i sql:local
@@ -406,7 +408,7 @@ Inspect state and drop down to the shell, Python, or SQL.
 
 | Action | Description |
 |---|---|
-| `show` | Display elements: `pipes`, `data`, `columns`, `rowcounts`, `sizes`, `partitions`, `jobs`, `logs`, `config`, `version`, `plugins`, `users`, `packages`, `tags`, `connectors`, … |
+| `show` | Display elements: `pipes`, `data`, `columns`, `rowcounts`, `sizes`, `partitions`, `jobs`, `logs`, `config`, `version`, `plugins`, `users` (a table with roles and teams), `teams`, `packages`, `tags`, `connectors` (secrets masked), … |
 | `os` | Launch a subprocess and stream its output to stdout. |
 | `sh` | Execute system shell commands. |
 | `python` | Open a Python REPL with Meerschaum imported, run inline Python, or run a file (`mrsm python script.py --verbose`: every word after the file name is the script's, as with `python script.py`). |

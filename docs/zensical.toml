@@ -27,6 +27,7 @@ nav = [
       {"🧩 Parameters" = "reference/pipes/parameters.md"},
       {"🔤 Data Types" = "reference/pipes/dtypes.md"},
       {"🧹 Maintenance" = "reference/pipes/maintenance.md"},
+      {"🔒 Access and Locks" = "reference/pipes/access-and-locks.md"},
     ]},
     {"🕸️ Pipelines" = [
       "reference/pipelines/index.md",
@@ -48,7 +49,7 @@ nav = [
       "reference/api-instance/index.md",
       {"Security and Tokens" = "reference/api-instance/tokens.md"},
       {"Permissions and Rate Limits" = "reference/api-instance/permissions.md"},
-      {"Pipelines, Runs and Actions over HTTP" = "reference/api-instance/routes.md"},
+      {"Pipelines, Access and Actions over HTTP" = "reference/api-instance/routes.md"},
       {"NGINX" = "reference/api-instance/nginx.md"},
       {"Web Console" = "reference/api-instance/web-console.md"},
     ]},
@@ -61,6 +62,7 @@ nav = [
     {"⏯️ Actions" = [
       "reference/actions/index.md",
       {"📺 Watch and Shell Shortcuts" = "reference/actions/watch.md"},
+      {"👥 Teams, Access and Locks" = "reference/actions/teams-and-access.md"},
     ]},
     {"👷 Background Jobs" = "reference/background-jobs.md"},
     {"🔧 Data Analysis Tools" = "reference/data-analysis-tools.md"},

@@ -48,9 +48,9 @@ Key constructor arguments:
 [`pipe.sync()`](/reference/pipes/syncing/) is the main entry point. Pass a DataFrame (or dict of lists) directly, or omit it to fetch from the pipe's connector.
 
 ```python
-# Sync a DataFrame you built yourself:
-import pandas as pd
-df = pd.read_csv('weather.csv')
+# Sync a DataFrame you built yourself (Polars, pandas, Arrow, dicts and lists all work):
+import polars as pl
+df = pl.read_csv('weather.csv')
 success, msg = pipe.sync(df)
 
 # Fetch from the pipe's connector (e.g. a plugin or SQL definition):
@@ -70,13 +70,13 @@ if not success:
 
 ## Reading
 
-See [Reading Data](/reference/pipes/reading/) for the full set of options.
+See [Reading Data](/reference/pipes/reading/) for the full set of options. Frames are Polars by default, or pandas when `meerschaum.yaml` says `dataframe: pandas` (a root created before 5.0.0rc15 does): see [DataFrame library](/reference/pipes/reading/#dataframe-library).
 
 ```python
-# DataFrame of rows:
+# DataFrame of rows (Polars by default; `as_pandas=True` for pandas):
 df = pipe.get_data(begin='2024-01-01', end='2024-02-01')
 
-# Rows as a list of dicts (no pandas needed):
+# Rows as a list of dicts (no DataFrame library needed):
 docs = pipe.get_docs(limit=10)
 
 # A single scalar from one column:
@@ -181,6 +181,27 @@ pipeline.sync(workers=4)
 
 See [Pipelines](/reference/pipelines/#python) for the details.
 
+## Teams, Access and Locks
+
+Locks refuse operations on a pipe everywhere; access (owner, team, visibility) decides what the
+users of an API server see and change. Teams group users on an instance:
+
+```python
+pipe.lock('drop', 'delete')          # pipe.drop() is now refused, whoever asks
+pipe.unlock()                        # every lock
+pipe.set_access(team='analytics', visibility='private')
+pipe.owner, pipe.team, pipe.visibility, pipe.locks
+
+team = mrsm.Team('analytics', instance='sql:main', members=['alice'], managers=['carol'])
+team.register()
+mrsm.get_teams('sql:main')           # [Team('Everyone'), Team('analytics')]
+
+from meerschaum.core import User
+User('alice', instance='sql:main').role       # 'editor' (the default role)
+```
+
+See [Access and Locks](/reference/pipes/access-and-locks/) for the rules.
+
 ## CLI ↔ Python Mapping
 
 | Command | Python equivalent |
@@ -201,6 +222,12 @@ See [Pipelines](/reference/pipelines/#python) for the details.
 | `mrsm copy pipelines daily daily-copy` | `mrsm.Pipeline('daily').copy('daily-copy')` |
 | `mrsm delete pipelines daily` | `mrsm.Pipeline('daily').delete()` |
 | `mrsm show runs` | `mrsm.get_runs()` |
+| `mrsm lock pipes --locks drop` | `pipe.lock('drop')` |
+| `mrsm unlock pipes` | `pipe.unlock()` |
+| `mrsm edit pipes access --team analytics` | `pipe.set_access(team='analytics')` |
+| `mrsm show teams` | `mrsm.get_teams()` |
+| `mrsm register teams analytics --members alice` | `mrsm.Team('analytics', members=['alice']).register()` |
+| `mrsm delete teams analytics` | `mrsm.Team('analytics').delete()` |
 
 ## `SuccessTuple` Convention
 
@@ -220,5 +247,6 @@ This convention is what lets actions chain reliably without try/except scaffoldi
 - [Parameters](/reference/pipes/parameters/) — the full `parameters` dictionary
 - [Reading Data](/reference/pipes/reading/) — `get_data`, `get_docs`, `params` filters
 - [Syncing](/reference/pipes/syncing/) — the fetch / filter / upsert flow
+- [Access and Locks](/reference/pipes/access-and-locks/) — teams, pipe access, locks, roles
 - [Connectors](/reference/connectors/) — sources and instances
 - [docs.meerschaum.io](https://docs.meerschaum.io) — the complete auto-generated API reference

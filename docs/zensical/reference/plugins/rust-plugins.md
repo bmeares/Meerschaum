@@ -216,8 +216,10 @@ fn item(request: &RouteRequest) -> Value {
 Callers need the API's credentials and every listed scope; add `public = true` (and no
 scopes) for a route anyone may call. Return JSON, text, bytes or a `RouteResponse`.
 A route's [host calls](#talk-to-meerschaum) act for its caller: reading pipes needs the
-`pipes:read` scope, syncing or clearing `pipes:write`. A public route's anonymous callers have
-no scopes; to let it serve pipe data to anyone, add `host_scopes = ["pipes:read"]`.
+`pipes:read` scope, syncing `pipes:write`, clearing `pipes:delete`, and registering
+`pipes:register`. Pipe visibility, edit rights and connector teams apply too. A public route's
+anonymous callers have no scopes; to serve Everyone's pipe data, add
+`host_scopes = ["pipes:read"]`.
 
 Mark functions with `#[mcp_tool]`, `#[mcp_resource]` or `#[mcp_prompt]` to offer them
 to AI agents through `/mcp` and `mrsm start mcp`:

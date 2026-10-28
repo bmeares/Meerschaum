@@ -114,6 +114,56 @@ api:
       summary_seconds: 2592000
 ```
 
+## 🔐 Who Sees a Job
+
+A job started through the API server records who started it: the console's **New job**, a pipe's **Sync**, **Verify** and **Manage** actions, a Pipeline's **Run**, `POST /jobs/{name}` (which `-e api:{label}` uses) and MCP's `sync_pipeline`. It keeps two properties:
+
+- `owner`: the user who started it;
+- `team`: that user's [primary team](/reference/actions/teams-and-access/#users) (`None`, Everyone, when they are in no other team).
+
+A job started from inside another job belongs to that job's owner and team: `start pipeline NAME` run from the console's Execute box, or a plugin action that starts a job, starts a job of yours, not one of Everyone's. Jobs created on the server's host (the CLI, Compose, `systemd`, Python) record neither and belong to **Everyone**. On a server where nobody uses teams, every user sees every job, as before.
+
+| Job | Who sees it and its logs |
+|---|---|
+| A team's job | the team's members and managers, its owner and administrators |
+| An Everyone job (every local job) | every user who may read jobs |
+| A console run (an action, a Pipeline run or a plugin action started from the console) | its owner, the managers of its team and administrators |
+
+Anyone else gets `404`, as if the job did not exist, from every route: the job listing, the job's metadata and logs, the log stream (`/logs/{name}/stream`), the logs websocket and MCP's `list_jobs` and `get_job_logs`.
+
+Doing something to a job needs the permission for it, on a job you can see:
+
+| To | Permission | Roles |
+|---|---|---|
+| See jobs and their logs | `jobs:read`, `logs:read` | Viewer and up |
+| Start a job | `jobs:execute` | Editor and up |
+| Stop or pause a job | `jobs:stop`, `jobs:pause` | Operator and up |
+| Delete a job | `jobs:delete` | Operator and up |
+| Create a job | `jobs:write`, `jobs:execute` and the permission to run actions (`actions:execute`) | Operator and up |
+| Answer a job's prompt (the logs websocket) | `jobs:execute` and the permission to run actions | Operator and up |
+
+On a server started with `--secure` (or with `api:permissions:actions:non_admin: false`), only administrators start, stop, pause, delete or create jobs; everyone else keeps reading the jobs they may see.
+
+The server records the owner and team itself: a request cannot name another owner or team. A scheduled job of another team that runs a Pipeline you can see is counted, never named ("Remove or reassign the scheduled jobs that run this Pipeline first: nightly and 1 hidden job.").
+
+**Teams.** Renaming a team renames it in the jobs that name it, and deleting a team moves its jobs to Everyone (`delete teams` counts them before it asks). Jobs live on the host that runs them, so this happens in the root where the team changes: the API server's for the console and the `/teams` routes, `MRSM_ROOT_DIR` for the CLI and Python. A job that still names a deleted team is visible to its owner and administrators.
+
+In Python:
+
+```python
+import meerschaum as mrsm
+from meerschaum.jobs import filter_visible_jobs, get_jobs
+
+job = mrsm.Job('nightly', executor_keys='api:main')
+job.owner  # 'alice'
+job.team   # 'Data' (None: Everyone)
+
+### The jobs a user may see (a console page asks the same).
+visible = filter_visible_jobs(mrsm.User('bob'), get_jobs())
+```
+
+Locally (the CLI and Python on the server's host) nothing is filtered: access to the host's files is the trust boundary.
+
 ## ⏲️ Schedules
 
 Meerschaum includes its own small schedule engine, so scheduled jobs do not require a separate

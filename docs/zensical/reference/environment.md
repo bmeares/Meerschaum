@@ -25,6 +25,7 @@ All Meerschaum environment variables begin with the prefix `MRSM_`. The most com
 | `MRSM_NO_AUTO_INSTALL` | Disable every implicit package installation (imports, dependency checks, `uv`/`pip` bootstraps). | _(unset)_ |
 | `MRSM_NOASK` / `MRSM_NONINTERACTIVE` | Disable interactive prompts (assume defaults). | _(unset)_ |
 | `MRSM_ALLOW_PROTECTED` | `1` allows writes to connectors marked `protected: true` for this process and its children (like `--allow-protected`). | _(unset)_ |
+| `MRSM_DATAFRAME` | `polars` or `pandas`: the DataFrame library Python APIs return, for this process and the jobs and workers it starts (overrides `meerschaum:dataframe`). | _(unset: `dataframe` in `meerschaum.yaml`)_ |
 | `MRSM_DUCKDB_LIB` | Path to DuckDB's shared library; explicitly selects the native C API and prevents mixed Python SQLAlchemy access. | _(unset: Python driver when installed; otherwise native library lookup)_ |
 | `MRSM_BIN` | Run a standalone `mrsm` binary instead of the in-process CLI of the Python package. | _(unset)_ |
 | `MRSM_PYTHON` | The Python interpreter the binary runs plugin workers and `upgrade meerschaum` with. | _(auto-detected)_ |
@@ -180,6 +181,21 @@ MRSM_ALLOW_PROTECTED=1 mrsm start api
 ```
 
 For one command, `--allow-protected` does the same. `-y` / `--yes` never does.
+
+## **`MRSM_DATAFRAME`**
+
+Every Python API that returns a DataFrame (`pipe.get_data()`, `conn.read()`, `pipe.fetch()`,
+`Plan.to_dataframe()`, the frames handed to plugin code) returns the library of `dataframe` in
+`meerschaum.yaml`: `polars` for a new root, `pandas` for a root created before 5.0.0rc15 (see
+[DataFrame library](/reference/pipes/reading/#dataframe-library)). `MRSM_DATAFRAME` overrides it
+for a process, the jobs it starts and the Python workers it runs plugins in:
+
+```bash
+MRSM_DATAFRAME=pandas python my_report.py
+```
+
+`as_polars=True` / `as_pandas=True` on a call override both. Any other value is an error that names
+the variable.
 
 ## **`MRSM_NO_AUTO_INSTALL`**
 

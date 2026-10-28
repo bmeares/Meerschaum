@@ -116,22 +116,24 @@ And paste the following into `fred.py`:
 
     CSV_BASE_URL: str = 'https://fred.stlouisfed.org/graph/fredgraph.csv'
 
-    required = ['pandas']
+    required = ['polars']
 
-    def fetch(pipe: mrsm.Pipe, **kwargs) -> 'pd.DataFrame':
-        import pandas as pd
+    def fetch(pipe: mrsm.Pipe, **kwargs) -> 'pl.DataFrame':
+        import polars as pl
         series_id = pipe.parameters.get('fred', {}).get('series_id', None)
         url = f"{CSV_BASE_URL}?id={series_id}"
-        df = pd.read_csv(url)
+        df = pl.read_csv(url)
         if series_id in df.columns:
-            df['PRICE'] = pd.to_numeric(df[series_id], errors='coerce')
-            del df[series_id]
+            ### Missing observations are '.': they become nulls.
+            df = df.with_columns(
+                pl.col(series_id).cast(pl.Float64, strict=False).alias('PRICE')
+            ).drop(series_id)
         return df
     ```
 
 The plugin provides one function `fetch()` that takes a pipe, pulls an ID from `pipe.parameters`, and returns the appropriate DataFrame.
 
-Now that we've got our YAML file and project plugin, initialize the built-in <a href="/reference/compose">Compose</a> environment. This installs our dependency (`pandas`) into the project's virtual environment for `plugin:fred`:
+Now that we've got our YAML file and project plugin, initialize the built-in <a href="/reference/compose">Compose</a> environment. This installs our dependency (`polars`) into the project's virtual environment for `plugin:fred`:
 
 ```bash
 cd ../

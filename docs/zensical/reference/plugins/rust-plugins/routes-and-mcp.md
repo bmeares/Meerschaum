@@ -141,7 +141,8 @@ An `Err` from `api_route` becomes `500 {"detail": "<message>"}`.
 - **For the caller.** A handler's [host calls](advanced.md#talking-to-meerschaum)
   (`host::pipe(...)`, `pipe.get_data(...)`, `host::read_sql(...)`, ...) act for the request's
   caller, with the scopes the core API requires: `pipes:read` to read pipes, `pipes:write` to
-  sync, clear or register, `sql:read` for read-only `read_sql` queries, and for `exec_sql`
+  sync, `pipes:delete` to clear, `pipes:register` to register, `sql:read` for read-only `read_sql`
+  queries, and for `exec_sql`
   `actions:execute` and a caller who may run actions (an administrator, unless the server lets
   other users run actions). A refused call returns an `Err` naming the reason, so a handler can
   answer `403` (`RouteResponse::error(403, error.to_string())`). SQL from a route never reaches
@@ -149,8 +150,10 @@ An `Err` from `api_route` becomes `500 {"detail": "<message>"}`.
   public route has no scopes unless the route declares `host_scopes`
   (`#[api_route(GET, "/status", public = true, host_scopes = ["pipes:read"])]`,
   `RouteSpec::new(...).public().host_scopes(["pipes:read"])`): every caller's host calls get them
-  on top of its own. Under `--no-auth` and over MCP stdio every call is allowed. Pipes stay on
-  the instances the server allows, and a Pipe without instance keys is on the server's instance.
+  on top of its own. These grants preserve pipe visibility, edit rights and connector teams;
+  anonymous callers can reach Everyone's pipes. Under `--no-auth` and over MCP stdio every call
+  is allowed. Pipes and named SQL stay on the instances the server allows, and a Pipe without
+  instance keys is on the server's instance. SQL also refuses targets of hidden pipes.
   [Talking to Meerschaum](advanced.md#talking-to-meerschaum) has the full rules.
 - **Bounded.** At most 32 server calls of one plugin run at once (routes and MCP entries are
   counted separately). Up to 16 further requests wait up to 30 seconds for a free slot; any

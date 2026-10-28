@@ -11,12 +11,14 @@ Meerschaum comes with a [pre-configured data visualization stack](/reference/sta
 
 <img src="/assets/screenshots/grafana-dashboard.png" alt="Example Grafana Dashboard" width="85%" style="display: block; margin-left: auto; margin-right: auto;">
 
-## 🐼 Pandas Integration
+## 🐻‍❄️ Polars Integration
 
-If you use [pandas](https://pandas.pydata.org/), Meerschaum lets you tap into your datastreams as DataFrames.
+Meerschaum returns [Polars](https://pola.rs) DataFrames, so you can tap into your datastreams with
+Polars' fast, expressive API. Install it with `pip install 'meerschaum[polars]'`.
 
 ```python
 >>> import meerschaum as mrsm
+>>> import polars as pl
 >>>
 >>> weather_pipe = mrsm.Pipe('plugin:noaa', 'weather')
 >>>
@@ -26,14 +28,15 @@ If you use [pandas](https://pandas.pydata.org/), Meerschaum lets you tap into yo
 ...   end = '2021-01-01',
 ...   params = {'station': ['KATL', 'KCEU']},
 ... )
->>>
+>>> df.group_by('station').agg(pl.col('temperature').mean())
 ```
 
 You can create new pipes on any [instance](/reference/connectors/#instances-and-repositories) from a DataFrame and index column names.
+Polars DataFrames and LazyFrames (collected at the sync boundary) sync directly:
 
 ```python
->>> import meerschaum as mrsm, pandas as pd
->>> df = pd.read_csv('data.csv')
+>>> import meerschaum as mrsm, polars as pl
+>>> df = pl.read_csv('data.csv')
 >>> csv_pipe = mrsm.Pipe(
 ...   'csv', 'weather',
 ...   instance='sql:local',
@@ -47,53 +50,50 @@ You can create new pipes on any [instance](/reference/connectors/#instances-and-
 
     The instance `sql:local` defaults to a built-in SQLite database.
 
-You can also forego pipes and access tables directly.
+`Pipe.filter_existing()` accepts Polars frames and returns Polars frames.
+Rows are compared natively — the existing rows are read as Polars,
+and the anti-join is performed by Polars without a pandas round-trip.
+Columns which Polars cannot compare (`uuid`, `object`, and geometry)
+fall back to pandas internally and are converted back on return.
+
+```python
+unseen_df, update_df, delta_df = csv_pipe.filter_existing(pl.DataFrame(docs))
+```
+
+You can also forego pipes and read a table or query directly with `conn.read()`:
+
+```python
+>>> import meerschaum as mrsm
+>>> mrsm.get_connector('sql:local').read('weather')
+shape: (1, 2)
+┌─────┬─────────────────────┐
+│ id  ┆ datetime            │
+│ --- ┆ ---                 │
+│ i64 ┆ datetime[μs]        │
+╞═════╪═════════════════════╡
+│ 1   ┆ 2021-06-06 12:00:00 │
+└─────┴─────────────────────┘
+```
+
+## 🐼 Pandas Integration
+
+Prefer [pandas](https://pandas.pydata.org/)? Set `dataframe: pandas` in `meerschaum.yaml`
+(`mrsm edit config`), or pass `as_pandas=True` to one call, and install
+`pip install 'meerschaum[pandas]'`. A root created by Meerschaum 4 or an earlier 5.0 release
+candidate keeps pandas on its own (see [DataFrame library](/reference/pipes/reading/#dataframe-library)).
 
 ```python
 >>> import meerschaum as mrsm, pandas as pd
 >>>
->>> conn = mrsm.get_connector()
->>> df = pd.read_csv('data.csv')
+>>> df = weather_pipe.get_data(as_pandas=True)
 >>>
->>> ### Wrapper around `df.to_sql()`.
->>> conn.to_sql(df, chunksize=1000)
+>>> ### pandas DataFrames sync as they always have.
+>>> csv_pipe.sync(pd.read_csv('data.csv'))
+>>>
+>>> ### A wrapper around `df.to_sql()`.
+>>> conn = mrsm.get_connector()
+>>> conn.to_sql(pd.read_csv('data.csv'), chunksize=1000)
 ```
-
-Read a table or query into a Pandas DataFrame with `conn.read()`:
-
-```python
->>> import meerschaum as mrsm
->>> mrsm.get_connector().read('table')
-   id            datetime
-0   1 2021-06-06 12:00:00
-```
-
-## 🐻‍❄️ Polars Integration
-
-Pandas remains Meerschaum's default DataFrame API, so existing plugins keep working unchanged.
-Polars DataFrames and LazyFrames may be synced directly, and reads may opt into Polars:
-
-```python
-import meerschaum as mrsm
-import polars as pl
-
-pipe = mrsm.Pipe('demo', 'polars', columns=['dt', 'id'])
-pipe.sync(pl.DataFrame({'dt': ['2026-01-01'], 'id': [1]}))
-df = pipe.get_data(as_polars=True)
-```
-
-`Pipe.filter_existing()` also accepts Polars frames and returns Polars frames.
-Rows are compared natively — the existing rows are read as Polars,
-and the anti-join is performed by Polars without a Pandas round-trip.
-Columns which Polars cannot compare (`uuid`, `object`, and geometry)
-fall back to Pandas internally and are converted back on return.
-
-```python
-unseen_df, update_df, delta_df = pipe.filter_existing(pl.DataFrame(docs))
-```
-
-LazyFrames are collected at the sync boundary. Install support with
-`pip install 'meerschaum[polars]'`.
 
 
 ## 🧙‍♂️ SQLAlchemy Integration

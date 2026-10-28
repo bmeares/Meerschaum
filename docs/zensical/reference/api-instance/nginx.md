@@ -1,6 +1,6 @@
 # 🚦 NGINX Configuration
 
-Hosting Meerschaum behind NGINX is a great way set up TLS/SSL with Let's Encrypt (`certbot`). There are several important goals when setting up forwarding:
+Hosting Meerschaum behind NGINX is a great way set up TLS/SSL with Let's Encrypt (`certbot`), especially when several sites share port 443. (The API server can also serve HTTPS by itself: see [TLS / SSL / HTTPS](/reference/api-instance/#tls-ssl-https).) There are several important goals when setting up forwarding:
 
 1. Proxy pass requests to your internal Meerschaum API instance (e.g. [http://localhost:8000](http://localhost:8000)).
 2. Set upgrade headers for requests to locations ending in `/ws` or `/websocket`.

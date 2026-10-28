@@ -138,10 +138,29 @@ See [`columns`](#columns) for the available index roles and [dtypes](/reference/
 | `reference` / `references` / `parents` / `children` | Inherit or relate other pipes' parameters | [`reference`](#reference), [`parents`](#parents) |
 | `schedule` / `min_seconds` / `retry` / `stream` | Syncing Engine: per-pipe cadence, rate limit, retries and micro-batching | [`schedule`](#schedule), [`min_seconds`](#min_seconds), [`retry`](#retry), [`stream`](#stream) |
 | `verify` | Verification-sync config (e.g. `chunk_minutes`) | [`verify`](#verify) |
+| `access` | Owner, team and visibility (who may see and change the pipe through the API and the console) | [`access`](#access) |
+| `locks` | Operations the pipe refuses everywhere (`sync`, `clear`, `drop`, ...) | [`locks`](#locks) |
 
 For more, see the full reference below or [docs.meerschaum.io](https://docs.meerschaum.io).
 
 ---------------
+
+## `access`
+
+Who owns the pipe and who may see and change it through the API server, the MCP server and the web
+console (local access with the instance's credentials sees everything). See
+[Access and Locks](/reference/pipes/access-and-locks/#access).
+
+```yaml
+access:
+  owner: carol          # a username, or null
+  team: analytics       # a team; null is Everyone
+  visibility: private   # team (default), private or everyone
+  edit: owner           # team (default) or owner
+```
+
+A pipe without `access` belongs to Everyone: every user sees and changes it. Set it with
+`pipe.set_access(...)` or `mrsm edit pipes access`.
 
 ## `autoincrement`
 
@@ -456,6 +475,31 @@ The keys specified in `columns` are included in `indices` by default, as well as
             ((1.8 * temperature_c) + 32) as temperature_f
         FROM weather
     ```
+---------------
+
+## `locks`
+
+The operations the pipe refuses, whoever asks and however (command line, Python, jobs, the
+Syncing Engine, the API, the web console); `-y`, `--force` and `--allow-protected` never get past
+a lock. A list of `parameters`, `sync`, `clear`, `drop`, `delete` or `all`:
+
+```yaml
+locks: [drop, delete]   # syncs and clears still run; dropping and deleting are refused
+```
+
+| Lock | Refuses |
+|---|---|
+| `parameters` | Parameter edits (changing `locks` stays allowed; syncs still write). |
+| `sync` | Syncs, replaced windows, deduplication and verification syncs. |
+| `clear` | Row deletes (clears, replaced windows, rebuilds). |
+| `drop` | Drops, rebuilds and table schema changes (`verify schema`, repartitioning). |
+| `delete` | Deleting the pipe. |
+| `all` | All of the above. |
+
+Set them with `pipe.lock(...)` / `pipe.unlock(...)` or `mrsm lock pipes` / `mrsm unlock pipes`. In
+a Pipeline run, a pipe locked against syncs is skipped as **locked** (not a failure). See
+[Access and Locks](/reference/pipes/access-and-locks/#locks).
+
 ---------------
 
 ## `min_seconds`

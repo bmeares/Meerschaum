@@ -182,13 +182,34 @@ If you work closely with relational databases, you may find the `SQLConnector` v
 
 ### [`SQLConnector`](https://docs.meerschaum.io/meerschaum/connectors.html#SQLConnector) Methods
 
+`read()`, `exec()`, `value()`, `exec_queries()` and `to_sql()` run your SQL on the connector's own
+connection pool, the one its pipes use, for every flavor. They need no extra package (no
+SQLAlchemy); `read()` returns a DataFrame of the [configured library](/reference/pipes/) (Polars,
+or pandas with `as_pandas=True` or `dataframe: pandas`).
+
+Pass parameters instead of formatting values into the text:
+
+| Style | Example |
+|---|---|
+| `:name` with a dictionary (SQLAlchemy's `text()` style) | `conn.read("SELECT * FROM t WHERE id = :id", params={'id': 1})` |
+| `%(name)s` with a dictionary | `conn.exec("DELETE FROM t WHERE id = %(id)s", {'id': 1})` |
+| `?` or `%s` with a list or tuple, in order | `conn.value("SELECT COUNT(*) FROM t WHERE ts > ?", ['2024-01-01'])` |
+| A list of dictionaries runs the statement once per dictionary | `conn.exec("INSERT INTO t VALUES (:a)", [{'a': 1}, {'a': 2}])` |
+
+SQLAlchemy constructs work too (`text()`, `select()`, `insert()`, ...): they are compiled for the
+connector's flavor and run the same way.
+
 `read()`, `exec()` and `value()` raise the database's error when a query fails (a missing
-table, a syntax error, an unreachable server). Pass `silent=True` to get `None` instead, without
-a warning:
+table, a syntax error, an unreachable server). The errors are the standard Python database
+exceptions (`OperationalError`, `ProgrammingError`, `IntegrityError`, `DataError`, ...,
+importable from `meerschaum.connectors.sql`); when SQLAlchemy is imported they are also
+instances of SQLAlchemy's exceptions of the same name, so existing `except` clauses keep
+working. Pass `silent=True` to get `None` instead, without a warning:
 
 ```python
 conn.read('SELECT * FROM missing_table')
-# sqlalchemy.exc.OperationalError: (sqlite3.OperationalError) no such table: missing_table
+# OperationalError: no such table: missing_table
+# [SQL: SELECT * FROM missing_table]
 
 conn.read('SELECT * FROM missing_table', silent=True)
 # None
@@ -210,24 +231,32 @@ prod.value('DELETE FROM weather RETURNING id')
 
 #### [`read()`](https://docs.meerschaum.io/meerschaum/connectors.html#SQLConnector.read)
 
-Pass the name of a table or a SQL query into `SQLConnector.read()` to fetch a Pandas DataFrame.
+Pass the name of a table or a SQL query into `SQLConnector.read()` to fetch a DataFrame.
 
 ```python
 import meerschaum as mrsm
 conn = mrsm.get_connector("sql:main")
 df = conn.read('SELECT 1 AS foo')
 df
-#    foo
-# 0    1
-
+# shape: (1, 1)
+# ┌─────┐
+# │ foo │
+# │ --- │
+# │ i32 │
+# ╞═════╡
+# │ 1   │
+# └─────┘
 ```
 
-`read()` also supports [server-side cursors](https://www.psycopg.org/docs/usage.html#server-side-cursors), allowing you to efficiently stream chunks from the result set:
+With `as_pandas=True` (or `dataframe: pandas`), the frame is the one `pandas.read_sql_query()`
+builds: the same columns, dtypes and values Meerschaum 4 returned (`coerce_float`, `dtype` and
+`index_col` apply as there).
+
+`read()` streams large results in chunks: `as_iterator=True` returns a generator of DataFrames
+of `chunksize` rows (only one chunk is in memory at a time), `as_chunks=True` a list of them,
+and `chunk_hook` calls a function on each chunk:
 
 ```python
-
-### Set `as_iterator=True` to return a dataframe generator.
-### 
 table = 'sql_main_weather_avg_atl'
 chunks = conn.read(table, chunksize=25, as_iterator=True)
 for chunk in chunks:
@@ -240,20 +269,24 @@ for chunk in chunks:
 
 #### [`to_sql()`](https://docs.meerschaum.io/meerschaum/connectors.html#SQLConnector.to_sql)
 
-Wrapper around [`pandas.DataFrame.to_sql()`](https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.DataFrame.to_sql.html). Persist your dataframes directly to tables.
+Persist a DataFrame (pandas or Polars) to a table. `if_exists` decides what happens when the
+table exists: `'replace'` (the default) drops and creates it, `'append'` inserts into it, and
+`'fail'` refuses. A new table gets the column types `pandas.DataFrame.to_sql()` would create
+(override them with `dtype={'col': 'TEXT'}`), and the rows are inserted in one transaction
+(PostgreSQL `COPY` and MSSQL `OPENJSON` when `system:connectors:sql:bulk_insert` is on).
 
 ```python
 import meerschaum as mrsm
-import pandas as pd
+import polars as pl
 
 conn = mrsm.get_connector('sql:main')
-df = pd.DataFrame([{'a': 1, 'b': 2}, {'a': 3, 'b': 4}])
+df = pl.DataFrame([{'a': 1, 'b': 2}, {'a': 3, 'b': 4}])
 results = conn.to_sql(df, 'foo', as_dict=True)
 
 mrsm.pprint(results)
 # {
 #     'target': 'foo',
-#     'method': "functools.partial(<function psql_insert_copy at 0x7f821594d800>, schema='public')",
+#     'method': 'multi',
 #     'chunksize': 100000,
 #     'num_rows': 2,
 #     'start': 203452.165351391,
@@ -266,7 +299,8 @@ mrsm.pprint(results)
 
 #### [`exec()`](https://docs.meerschaum.io/meerschaum/connectors.html#SQLConnector.exec)
 
-Execute SQL queries directly and return the SQLAlchemy result. This is useful for queries without result sets, like `DROP`, `ALTER`, `CREATE`, `UPDATE`, `INSERT`, etc., as well as executing stored procedures.
+Execute SQL directly. This is useful for statements without result sets, like `DROP`, `ALTER`,
+`CREATE`, `UPDATE`, `INSERT`, etc., as well as executing stored procedures.
 
 ```python
 import meerschaum as mrsm
@@ -277,11 +311,24 @@ _ = conn.exec("CREATE TABLE foo (bar INT)")
 result = conn.exec("INSERT INTO foo (bar) VALUES (1), (2)")
 print(f"Inserted {result.rowcount} rows.")
 # Inserted 2 rows.
+
+for row in conn.exec("SELECT bar FROM foo ORDER BY bar"):
+    print(row.bar, row[0], row._mapping['bar'])
+# 1 1 1
+# 2 2 2
 ```
+
+The result works like SQLAlchemy's: `fetchall()`, `fetchone()`, `fetchmany()`, `first()`,
+`one()`, `scalar()`, `scalars()`, `mappings()`, `keys()`, `rowcount` and iteration. Rows are
+tuples whose values are what the database's Python driver returns (`int`, `float`, `Decimal`,
+`str`, `bytes`, `datetime`, `date`, `dict` for PostgreSQL JSON, `UUID`, ...), also readable by
+column name.
 
 #### [`exec_queries()`](https://docs.meerschaum.io/meerschaum/connectors.html#SQLConnector.exec_queries)
 
-A safer option to execute multiple queries is passing a list to `SQLConnector.exec_queries()`. The flag `break_on_error` will roll back the transaction if any of the provided queries fail.
+A safer option to execute multiple queries is passing a list to `SQLConnector.exec_queries()`:
+they run in one transaction. The flag `break_on_error` will roll back the transaction if any of
+the provided queries fail.
 
 ```python
 import meerschaum as mrsm
@@ -295,12 +342,29 @@ queries = [
     'CREATE TABLE foo (a INT, b INT)',
 ]
 results = conn.exec_queries(queries, break_on_error=True, silent=True)
-success = len(results) == len(queries)
+success = len(results) == len(queries) and all(results)
 assert not success
 
 from meerschaum.utils.sql import table_exists
 assert not table_exists('foo', conn)
 ```
+
+#### `engine` (SQLAlchemy)
+
+`conn.engine` is a SQLAlchemy engine for code that needs one (an ORM, `pandas.read_sql()` on
+your own terms). It needs the `sql` extra (`pip install 'meerschaum[sql]'`) and opens the
+database through Python's own driver, separately from the connector's pool.
+
+!!! warning "SQLite: one SQLite library per file"
+    On SQLite, `conn.engine` uses Python's `sqlite3` module, a second copy of SQLite in the
+    process. Two copies keep separate lock bookkeeping for one file, and closing the file in one
+    drops the other's locks ([How To Corrupt An SQLite Database File](https://www.sqlite.org/howtocorrupt.html),
+    2.2.1). Do not write a SQLite file through `conn.engine` while the same process reads or
+    writes it through pipes, `read()` or `exec()`; use `read()` and `exec()` instead.
+
+`exec(..., with_connection=True)` (which returns a SQLAlchemy connection), a custom
+`to_sql(method=...)` and Dask DataFrames use the engine too. A connector with
+`native_sql: false` runs all of its raw SQL through SQLAlchemy, as Meerschaum 4 did.
 
 ### [`meerschaum.utils.sql`](https://docs.meerschaum.io/meerschaum/utils/sql.html) Functions
 

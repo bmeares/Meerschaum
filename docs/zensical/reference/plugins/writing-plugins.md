@@ -52,7 +52,7 @@ To create your plugin, follow these steps:
         Dependencies that start with `plugin:` are Meerschaum plugins. To require a plugin from another repository, add add the repository's keys after the plugin name (e.g. `plugin:foo@api:bar`).
 
     ```python
-    required = ['rich>=9.8.0', 'pandas', 'plugin:foo']
+    required = ['rich>=9.8.0', 'polars', 'plugin:foo']
     ```
 
 5. **Write your functions.**  
@@ -68,15 +68,15 @@ To create your plugin, follow these steps:
     For optimal performance, keep module-level code to a minimum ― especially heavy imports.
     ```python hl_lines="2"
     ### BAD - DON'T DO THIS
-    import pandas as pd
+    import polars as pl
     def fetch(pipe, **kw):
-        return pd.read_csv('data.csv')
+        return pl.read_csv('data.csv')
     ```
     ```python hl_lines="3"
     ### GOOD - DO THIS INSTEAD
     def fetch(pipe, **kw):
-        import pandas as pd
-        return pd.read_csv('data.csv')
+        import polars as pl
+        return pl.read_csv('data.csv')
     ```
 
 
@@ -87,7 +87,7 @@ Plugins are just modules with functions. This section explains the roles of the 
 - **`#!python register(pipe: mrsm.Pipe, **kwargs)`**  
   Return a pipe's initial parameters dictionary.
 - **`#!python fetch(pipe: mrsm.Pipe, **kwargs)`**  
-  Return a DataFrame, list of dictionaries, or generator of DataFrame-like chunks.
+  Return a DataFrame (Polars, pandas or Arrow), list of dictionaries, or generator of DataFrame-like chunks.
 - **`#!python sync(pipe: mrsm.Pipe, **kwargs)`**  
   Override a pipe's `sync` process for finer-grained control.
 - **`#!python @make_connector`**  
@@ -178,16 +178,16 @@ def fetch(pipe, **kw) -> Generator[List[Dict[str, Any]]]:
 Chunking handles any iterable, so you may return a simple generator or `#!python yield` the chunks yourself.
 
 ```python
-def fetch(pipe: mrsm.Pipe, **kw) -> Iterator['pd.DataFrame']:
-    import pandas as pd
-    return pd.read_csv('very-large.csv', chunksize=10_000)
+def fetch(pipe: mrsm.Pipe, **kw) -> Iterator['pl.DataFrame']:
+    import polars as pl
+    return pl.scan_csv('very-large.csv').collect_batches(chunk_size=10_000)
 ```
 
 ```python
-def fetch(pipe: mrsm.Pipe, **kw) -> Iterator['pd.DataFrame']:
-    import pandas as pd
+def fetch(pipe: mrsm.Pipe, **kw) -> Iterator['pl.DataFrame']:
+    import polars as pl
     for file_name in ['a.csv', 'b.csv', 'c.csv']:
-        yield pd.read_csv(file_name)
+        yield pl.read_csv(file_name)
 ```
 
 #### Robust Fetch Patterns
@@ -283,7 +283,7 @@ Sync plugins allow for much more flexibility than fetch plugins, so what you com
 
     __version__ = '0.0.1'
 
-    required = ['requests', 'pandas']
+    required = ['requests', 'polars']
 
     def sync(
             pipe: meerschaum.Pipe,
@@ -315,7 +315,7 @@ Sync plugins allow for much more flexibility than fetch plugins, so what you com
         """
 
         ### Get data from somewhere. You decide how!
-        import pandas as pd
+        import polars as pl
         import requests
         import meerschaum as mrsm
 
@@ -327,7 +327,7 @@ Sync plugins allow for much more flexibility than fetch plugins, so what you com
             params['end'] = end.isoformat()
 
         try:
-            df = pd.read_json(requests.get(url, params=params).text)
+            df = pl.DataFrame(requests.get(url, params=params).json())
         except Exception as e:
             df = None
 

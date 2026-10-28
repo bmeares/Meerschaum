@@ -4,6 +4,7 @@ Some things are slow to compute: a query over a big table, a chart, a call to so
 
 ```python
 import meerschaum as mrsm
+import polars as pl
 from meerschaum.utils.cache import cache
 
 weather = mrsm.Pipe('plugin:noaa', 'weather', instance='sql:main')
@@ -11,7 +12,11 @@ weather = mrsm.Pipe('plugin:noaa', 'weather', instance='sql:main')
 @cache(ttl=300, pipes=[weather])
 def daily_means(station: str):
     df = weather.get_data(params={'station': station})
-    return df.groupby(df['timestamp'].dt.date)['temperature'].mean().reset_index()
+    return (
+        df.group_by(pl.col('timestamp').dt.date().alias('day'))
+        .agg(pl.col('temperature').mean())
+        .sort('day')
+    )
 ```
 
 The first call computes; later calls with the same arguments return the cached result until five minutes have passed or `weather` syncs, whichever comes first.

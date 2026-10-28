@@ -102,7 +102,7 @@ Register a pipe on a `valkey:` instance and sync some data:
 
 ```python
 import meerschaum as mrsm
-import pandas as pd
+import polars as pl
 
 pipe = mrsm.Pipe(
     'demo', 'temperature', 'home',
@@ -111,7 +111,7 @@ pipe = mrsm.Pipe(
 )
 pipe.register()
 
-pipe.sync(pd.DataFrame([
+pipe.sync(pl.DataFrame([
     {'timestamp': '2025-01-01 00:00:00', 'sensor': 'a', 'value': 20.5},
     {'timestamp': '2025-01-01 01:00:00', 'sensor': 'a', 'value': 21.0},
 ]))

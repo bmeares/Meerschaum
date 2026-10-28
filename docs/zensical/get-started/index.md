@@ -18,6 +18,14 @@ python -m pip install --upgrade meerschaum
 
 The wheel contains the native core and has no required Python dependencies. Wheels are published for Linux (x86_64 and arm64, for glibc distributions and for musl ones such as Alpine), macOS (arm64 and x86_64) and Windows (x86_64), for Python 3.11 or newer.
 
+To work with your data in Python, add [Polars](https://pola.rs) (the DataFrame library Meerschaum returns by default):
+
+```bash
+python -m pip install --upgrade 'meerschaum[polars]'
+```
+
+Prefer pandas? Install `meerschaum[pandas]` and set `dataframe: pandas` in `meerschaum.yaml` (`mrsm edit config`); a root created by an earlier version keeps pandas on its own. See [DataFrame library](/reference/pipes/reading/#dataframe-library).
+
 ??? info "Standalone binary (`cargo install meerschaum`)"
     `pip install meerschaum` is the whole product: the `mrsm` command it installs runs the native command line from inside the package. If you would rather have a standalone binary (it starts in about 10 ms and needs no Python until you use a Python plugin or connector), build the same command line with Cargo:
 

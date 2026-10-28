@@ -52,10 +52,9 @@ mrsm start api --public
 
 It's common in production deployments to stand up a public-facing API instance. See below for deployment tips:
 
-!!! danger "⚠️ Open registration plus terminals for non-admins is a shell for anyone"
+On a new instance, the first account becomes an administrator. Create that account before opening the instance to visitors. Self-registration then closes unless you set `api:permissions:registration:users: true`. New users are Editors by default: they may work with pipes, but actions and the web terminal need the Operator role (`actions:execute` and `webterm:use`). Administrators manage users, roles and teams in the console's **Users & Teams** page.
 
-    With the defaults, anyone who can reach the API can register an account (`api:permissions:registration:users`) and, as a logged-in user, open the web terminal (`api:permissions:actions:non_admin`): **a shell on the server for anyone who can reach the port**. Meerschaum 4 behaves the same, and v5 keeps it. Before exposing an API, start it with `--secure` (terminals and actions for administrators only) or `--private` (authentication on every endpoint), or set `api:permissions:registration:users: false` (no self-registration) or `api:permissions:actions:non_admin: false` (administrators only). `mrsm start api` prints a warning at startup when it binds a non-loopback address with both settings on; it cannot see a reverse proxy, so a loopback bind behind a proxy exposes the same terminal **without** the warning. (`--no-auth` on a non-loopback address also prints a warning: every route, `/actions` included, is then open to anyone who can connect.)
-
+`mrsm start api --secure` restricts actions and terminals to administrators; `--private` requires authentication on every endpoint. Enabling registration with Operator as the default role lets any visitor register and open a shell on this server. See [roles, teams and permissions](/reference/api-instance/permissions/#roles-and-teams) and [HTTPS](#tls-ssl-https).
 
 ### Meerschaum Stack (easiest)
 
@@ -91,9 +90,47 @@ mrsm start api --production --name api-instance -d
 
 ### TLS / SSL / HTTPS
 
-The API server speaks plain HTTP. To serve HTTPS, put a reverse proxy that terminates TLS in front of it, such as Caddy or NGINX. See the [example NGINX configuration](/reference/api-instance/nginx/) for a proxy pass that adds HTTPS to your API instance via Let's Encrypt. Behind a proxy, set `api:server:forwarded_allow_ips` and `api:server:proxy_headers` so that the server sees each client's address (see [Permissions](/reference/api-instance/permissions/)).
+Give `start api` a private key and its certificate, and the API server speaks HTTPS itself (HTTP/2 and HTTP/1.1):
 
-`mrsm start api` stops with an error when given `--keyfile` or `--certfile`, or when `api:server` (or `api:uvicorn`) sets `ssl_keyfile` or `ssl_certfile`, rather than serving plain HTTP to clients that expect HTTPS.
+```bash
+mrsm start api --production \
+  --keyfile /etc/meerschaum/tls/privkey.pem \
+  --certfile /etc/meerschaum/tls/fullchain.pem
+```
+
+Or set the files in the config (`mrsm edit config api`), so every `start api` (and the background job of `start api -d`) uses them:
+
+```yaml
+api:
+  server:
+    ssl_keyfile: /etc/meerschaum/tls/privkey.pem
+    ssl_certfile: /etc/meerschaum/tls/fullchain.pem
+```
+
+The server prints where it serves, for example `Serving HTTPS on https://mrsm.example.com:8000 (certificate for mrsm.example.com, valid until 2027-01-25).` Without a key and a certificate it speaks plain HTTP, as always.
+
+- **The files** are PEM. The key may be unencrypted PKCS#8, PKCS#1 (RSA) or SEC1 (EC). The certificate file holds the server's certificate first, then its intermediates, as Let's Encrypt's `fullchain.pem` does. `start api` checks both before it starts and stops with the reason when something is off: a key without a certificate (or the reverse), a file it cannot read, swapped files, a key that does not belong to the certificate.
+- **Renewals need no restart.** The server reads both files again every 30 seconds and on `SIGHUP` (`kill -HUP <pid>`), and new connections get the renewed certificate. When the new files do not load yet (a renewal caught between writing the key and the certificate), it keeps serving the previous certificate and says why if the problem persists. (So with HTTPS, `SIGHUP` reloads instead of stopping the server: stop it with Ctrl-C, `SIGTERM` or `mrsm stop jobs`.)
+- **Plain HTTP on the HTTPS port** gets `/healthcheck` answered, so container healthchecks such as `curl --fail http://localhost:8000/healthcheck` keep working, and a redirect to `https://` for everything else.
+- **Clients.** Point `api` connectors at the server with `https`, e.g. `MRSM_API_MAIN='https://user:pass@mrsm.example.com:8000'` or `protocol: https`. For a self-signed certificate, add its CA to the client's trust store, or set `verify: false` on the connector (no certificate check: for testing only).
+- **The web console, the web terminal and MCP** work over HTTPS unchanged. The server's own callers on the same machine (the console's Python host, jobs that install plugins from this server) reach it through a separate plain-HTTP listener on `127.0.0.1` with a random port, which is never exposed.
+
+!!! tip "Let's Encrypt"
+    Let's Encrypt's private keys are readable only by root. Rather than running the API as root, copy the files where the server's user can read them whenever they are renewed, with a deploy hook (here for the user `meerschaum`):
+
+    ```bash
+    sudo mkdir -p /etc/meerschaum/tls
+    sudo certbot certonly --standalone -d mrsm.example.com --deploy-hook \
+      'install -m 640 -g meerschaum "$RENEWED_LINEAGE/privkey.pem" "$RENEWED_LINEAGE/fullchain.pem" /etc/meerschaum/tls/'
+    ```
+
+    The server picks up each renewal by itself. Ports below 1024 (such as 443) need privileges on Linux: serve on a higher port (`-p 8443`) or forward 443 to it.
+
+In the [stack](/reference/stack/), mount the certificate directory into the `api` service (`mrsm edit config stack`, under `docker-compose.yaml`) and set `api:server:ssl_keyfile` / `ssl_certfile` to the paths inside the container; its healthcheck needs no change.
+
+The 4.1 keys `api:uvicorn:ssl_keyfile` and `api:uvicorn:ssl_certfile` still work (with a notice to move them to `api:server`). `--keyfile '' --certfile ''` serves plain HTTP even when the config sets a key and a certificate.
+
+A reverse proxy that terminates TLS, such as Caddy or NGINX, remains a fine choice, for example to serve several sites on port 443: see the [example NGINX configuration](/reference/api-instance/nginx/). Behind a proxy, set `api:server:forwarded_allow_ips` and `api:server:proxy_headers` so that the server sees each client's address (see [Permissions](/reference/api-instance/permissions/)).
 
 ### Docker
 

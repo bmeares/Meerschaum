@@ -14,7 +14,7 @@ Every route belongs to a group, and a group that is not served answers `404` (it
 | `actions` | `/actions/*` and `/execute*` (running actions) |
 | `jobs` | `/jobs/*` and `/logs/*` |
 | `connectors` | `/connectors` |
-| `users`, `tokens`, `plugins` | `/users/*`, `/tokens/*`, `/plugins/*` |
+| `users`, `tokens`, `plugins` | `/users/*` and `/teams/*`, `/tokens/*`, `/plugins/*` |
 | `version` | `/version`, `/version/mrsm` |
 | `misc` | `/healthcheck`, `/info`, `/chaining`, `/favicon.ico` (and `/id` with `--debug`) |
 | `index` | `/` (a redirect to the console or the docs) |
@@ -66,13 +66,36 @@ api:
       disabled: ['version']
 ```
 
+## Roles and teams
+
+The first account on an empty instance is an administrator, even when user registration is off. After that, only administrators create accounts unless you turn on `api:permissions:registration:users` (default `false`). A self-registered account joins **Everyone** and receives the default role, set with `api:permissions:default_role` (`editor` by default).
+
+| Role | Permissions |
+|---|---|
+| **Viewer** | Read visible pipes, Pipelines, runs, jobs, logs, plugins and the connectors list; manage their own account and tokens. |
+| **Editor** | Viewer, plus register, define, edit and sync pipes, read SQL, and start existing jobs. |
+| **Operator** | Editor, plus execute actions, open the web terminal and create, stop, pause or delete jobs. |
+| **Admin** | Every permission, user and team administration, and connector details (user type `admin`). |
+
+An administrator may set a role or an explicit permission list for a user. Explicit permissions replace the role; an empty list grants no permissions. A token's scopes are intersected with its owner's current permissions, so reducing the user's rights also reduces existing tokens. Lists made before the new scopes existed keep their earlier meanings: `pipes:write` also registers and defines pipes, and `actions:execute` also opens the terminal. New lists can use `pipes:register`, `pipes:define_sql` and `webterm:use` independently. See [token scopes](/reference/api-instance/tokens/#scopes).
+
+Every user belongs to the built-in team **Everyone**, which cannot be left, renamed or deleted. Administrators create additional teams, appoint managers and choose memberships. Managers add and remove members of their own teams and manage those teams' pipe access. A user's primary team supplies the team for the pipes and jobs they create. Renaming a team updates its pipes and jobs; deleting it moves them to Everyone.
+
+Pipes without access settings belong to Everyone and remain shared. A pipe's `access` parameters choose its owner, team, visibility (**team**, **private**, or **everyone**) and who may edit it (**team** or **owner**). Only its owner, team managers and administrators may change its access or locks. The server stamps new pipes with the caller as owner; a caller cannot impersonate another owner when registering. [Pipe access and locks](/reference/pipes/access-and-locks/) describes the settings and Python API.
+
+The HTTP API, MCP and console enforce these rights and filter hidden members from Pipelines, runs, events, lineage and searches. Jobs started through them belong to their creator and primary team; local jobs belong to Everyone. Email addresses are visible to their owners, administrators, and managers of a team the user belongs to. Local SQL / Valkey credentials are the trust boundary: direct CLI and Python access with them sees everything. Pipe locks apply everywhere, including local access, and no force flag bypasses them.
+
+A connector's `teams: [Data, Operations]` attribute restricts who may use it through the API. Setting SQL definitions requires `pipes:define_sql`; the server refuses internal tables and the tables of pipes the caller cannot see, before and after templates resolve. These SQL checks are best effort. True isolation needs separate connectors and database users with appropriate database permissions.
+
 ## Who may run actions
 
-`api:permissions:actions:non_admin` (default `true`; `start api --secure` turns it off) decides whether users who are not administrators may run actions from the console (`POST /execute`), open the web terminal and start Pipeline runs (`POST /pipelines/{name}/sync`). A non-administrator also needs the scopes of the route, and runs only the actions the console offers. A Pipeline run by a non-administrator must touch only instances they may use (`api:permissions:instances`).
+Actions need `actions:execute` and the terminal needs `webterm:use` (Operator and administrators by default). Pipe Sync and Verify controls need `pipes:write` and edit rights on each selected pipe; they do not require arbitrary action execution. Pipeline sync checks every member it would change; a sync-locked member is skipped using its existing data. Remote action selections may not include pipes the caller cannot see or change.
+
+`api:permissions:actions:non_admin: false` (`start api --secure`) further restricts actions, terminals and console mutations to administrators. Meerschaum 4's explicit `actions:non_admin: true` maps the default role to Operator for compatibility, unless `default_role` is set explicitly. The shipped configuration leaves that compatibility key unset and uses Editor.
 
 ## Permissions fail closed
 
-A user's scopes come from their `scopes` attribute (no attribute means every scope, as in v4), and an API key's from its token. When the server cannot read them (the instance is down or answers with an error), it refuses the request with `503` and asks to try again: it never falls back to granting every scope. A password login fails the same way. This holds for every kind of instance (SQL, Valkey, `api:`), and `register tokens` / `edit tokens` on the command line refuse (and change nothing) when they cannot read the owner's scopes.
+When the server cannot read a user's permissions, teams or credentials, it refuses the request with `503` and asks to try again. It never treats a failed read as a default permission grant. Password login fails the same way. Identities are cached for at most five seconds and pipe access for three seconds; changes through this server clear those caches immediately. This holds for every instance type (SQL, Valkey, `api:` and custom instance connectors). Local `register tokens` and `edit tokens` refuse without changing anything when they cannot read the owner's permissions.
 
 ## Rate limits
 

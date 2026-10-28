@@ -1,10 +1,10 @@
-# 🛣️ Pipelines, Runs and Actions over HTTP
+# 🛣️ Pipelines, Access and Actions over HTTP
 
-Besides the pipe, user, token, plugin and job routes of Meerschaum 4 (unchanged), an API server has routes for saved [Pipelines](/reference/pipelines/), their runs and the console's background actions. Your server lists them all, with their scopes, at `/docs`.
+Besides the existing pipe, user, token, plugin and job routes, an API server has routes for saved [Pipelines](/reference/pipelines/), their runs, [teams and pipe access](/reference/pipes/access-and-locks/) and the console's background actions. Existing route bodies remain compatible; the access model also filters and authorizes those routes. Your server lists them all, with their scopes, at `/docs`.
 
 ## One response shape
 
-These routes (`/pipelines`, `/pipelines/*`, `/engine/*`, `/execute`, `/execute/*`) always answer with a JSON object that says whether the request succeeded and what happened, plus the data:
+The routes under `/pipelines`, `/engine`, `/execute` and `/teams`, and the new user-permission and pipe-access routes below, answer with a JSON object that says whether the request succeeded and what happened, plus the data:
 
 ```json
 {"success": true, "message": "Found 2 runs.", "runs": [...]}
@@ -43,7 +43,7 @@ curl -X POST -H "Authorization: Bearer $TOKEN" https://mrsm.example.com/pipeline
 }
 ```
 
-The run is a background job, as when you press Sync on the console's Pipelines page: `stream` follows its events ([Following a run over HTTP](/reference/pipelines/visualization/#following-a-run-over-http)) and `GET /engine/runs/{run_id}` reads it when it is done. A user who is not an administrator may start a run when the server lets them run actions (`api:permissions:actions:non_admin`) and every instance the Pipeline touches is one they may use.
+The run is a background job, as when you press Sync on the console's Pipelines page: `stream` follows its events ([Following a run over HTTP](/reference/pipelines/visualization/#following-a-run-over-http)) and `GET /engine/runs/{run_id}` reads it when it is done. The caller needs the listed permissions and edit rights on every member the run will change; a sync-locked member is skipped using its existing data. Each instance the Pipeline touches must be allowed. `--secure` further restricts remote mutations to administrators.
 
 The registration routes the CLI and Python SDK use to save definitions are also here: `GET /pipelines/keys`, `POST /pipelines/{name}/register` (`409` if it exists), `PATCH /pipelines/{name}/edit`, `DELETE /pipelines/{name}/delete` (`409` while a scheduled job runs it), `GET /pipelines/{name}/id` and `/attributes` (`404` if it is not registered), and the leases of `/pipelines/leases`. A Pipeline named `keys` or `leases` is reachable through those routes but not through `GET /pipelines/{name}`.
 
@@ -75,6 +75,26 @@ The other `/engine/*` routes carry the engine's own state for `api:` instances (
 ## Console actions
 
 `POST /execute` runs an action line (`{"sysargs": ["sync", "pipes", "-c", "sql:main"]}`) as a temporary background job owned by the caller and answers with `job`, `sysargs`, `stream` (`/logs/{job}/stream`) and `logs` (`/logs/{job}`). `stream` is `null` when the server does not serve the log stream (`--no-dash`, or the `jobs` route group is off), and `logs` too without the `jobs` group. It needs `actions:execute`, `jobs:execute` and `jobs:write`; a user who is not an administrator runs only what the console offers (`GET /execute/policy`). `POST /execute/validate` answers whether the caller may run a line in the web terminal, `GET /execute/runs` lists the retained summaries of finished runs, and `POST /execute/runs/{name}/retain` keeps one as a persistent job.
+
+## Jobs
+
+Every job the server starts (`POST /jobs/{name}`, `POST /execute`, `POST /pipelines/{name}/sync`) records its caller as `owner` and the caller's primary team as `team`, whatever the request says. `/jobs/*`, `/logs/*` and the log stream show a job only to the people who may see it: its team, its owner and administrators (a console run: its owner, its team's managers and administrators; a job created on the server's host: everyone); to anyone else it does not exist (`404`). See [Who Sees a Job](/reference/background-jobs/#who-sees-a-job) for the permissions each operation needs.
+
+## Teams, permissions and pipe access
+
+| Route | What it does |
+|---|---|
+| `GET /teams`, `GET /teams/{name}` | List teams or read a team's members and managers; `?counts=true` includes affected pipe/job counts. |
+| `POST /teams/{name}/register` | Create a team (admin). |
+| `PATCH /teams/{name}/edit` | Edit members; admins also edit managers and attributes. A team manager may edit their own team's members. |
+| `POST /teams/{name}/rename`, `DELETE /teams/{name}/delete` | Rename or delete a team and update its pipes and jobs (admin). |
+| `GET /users/permissions`, `GET /users/{username}/permissions` | Read role, effective permissions, teams and primary team; email visibility follows the caller. |
+| `PATCH /users/{username}/permissions` | Update role or explicit permissions (admin), or permitted own attributes. |
+| `GET /pipes/{connector}/{metric}/{location}/access` | Read a visible pipe's access, locks and the caller's allowed operations. |
+| `PATCH /pipes/{connector}/{metric}/{location}/access` | Update owner, team, visibility or edit mode. |
+| `POST /pipes/{connector}/{metric}/{location}/lock`, `POST .../unlock` | Set or remove the named locks, e.g. `{"locks": ["sync", "drop"]}`. |
+
+Pipe access and lock changes require the owner, a manager of the pipe's team, or an admin, together with the relevant permissions. Only an admin may assign another owner. Hidden objects answer `404`; an operation refused by a lock answers `409`. Team and permission routes belong to the `users` route group; pipe access belongs to `pipes`. See [Roles and teams](permissions.md#roles-and-teams) for the permission rules.
 
 ## Row counts
 
