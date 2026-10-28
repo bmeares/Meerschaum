@@ -23,6 +23,18 @@ from meerschaum.api import CHECK_UPDATE
 from meerschaum.api.dash import dash_app
 from meerschaum.api.dash.components import alert_from_success_tuple, build_icon
 from meerschaum.api.dash.sessions import is_session_authenticated
+
+
+def _may_read(session) -> bool:
+    """The Pipelines pages are for viewers who may read pipes (`pipes:read`)."""
+    from meerschaum.api.dash import pipes_access
+    return pipes_access.can_read(session)
+
+
+def _visible_ref(ref, session) -> bool:
+    """Whether the viewer may see the pipe of a `pipe_ref` the browser sent."""
+    from meerschaum.api.dash import access, pipes_access
+    return bool(ref) and access.ref_is_visible(pipes_access.viewer(session), str(ref))
 from meerschaum.api.dash import engine as _engine
 from meerschaum.utils.packages import import_html, import_dcc
 html, dcc = import_html(check_update=CHECK_UPDATE), import_dcc(check_update=CHECK_UPDATE)
@@ -141,6 +153,12 @@ def build_pipeline_canvas(
             elif role == 'downstream' and edge['child'] in hidden and roles[edge['child']] == role and edge['parent'] not in hidden:
                 linked.add((edge['parent'], key))
         edges.extend({'parent': parent, 'child': child} for parent, child in sorted(linked))
+    ### The members the viewer may not see: one card with their count (`engine.plan_graph`).
+    hidden_count = int(graph.get('hidden', 0) or 0)
+    if hidden_count:
+        from meerschaum.api.dash.access import hidden_label
+        placeholders['__hidden__'] = 'hidden'
+        nodes.append({'pipe_ref': '__hidden__', 'label': hidden_label(hidden_count)})
     real = [node for node in nodes if node['pipe_ref'] not in placeholders]
     if len(real) > GROUP_THRESHOLD:
         by_connector = {}
@@ -169,6 +187,15 @@ def build_pipeline_canvas(
             x, y = positions[ref]
             key = json.dumps([name, ref])
             style = {'left': f'{32 + x * 380}px', 'top': f'{top + y * 190}px'}
+            if ref in placeholders and placeholders[ref] == 'hidden':
+                cards.append(html.Div(
+                    html.Strong(node['label']),
+                    className='pipeline-stage pipeline-placeholder pipeline-hidden-members',
+                    title=node['label'],
+                    style={**style, '--stage-color': '#5a6773'},
+                    **{'data-ref': ref, 'data-node': key, 'aria-label': node['label']},
+                ))
+                continue
             if ref in placeholders:
                 role = placeholders[ref]
                 cards.append(html.Button(html.Strong(node['label']),
@@ -292,7 +319,7 @@ def toggle_traversal(clicks, prefs, definition):
 )
 def inspect_stage(clicks, definition, close_clicks, session_data, edit=False):
     """Read a selected stage without starting a sync."""
-    if not is_session_authenticated((session_data or {}).get('session-id')):
+    if not _may_read(session_data):
         raise PreventUpdate
     triggered = dash.ctx.triggered_id
     if triggered in ('pipeline-inspector-close', 'pipeline-definition'):
@@ -305,6 +332,13 @@ def inspect_stage(clicks, definition, close_clicks, session_data, edit=False):
         _, ref = json.loads(triggered['index'])
     else:
         raise PreventUpdate
+    if not _visible_ref(ref, session_data):
+        raise PreventUpdate
+    from meerschaum.api.dash import access, pipes_access
+    viewer = pipes_access.viewer(session_data)
+    instance_keys, connector_keys, metric_key, location_key = _engine.split_ref(ref)
+    visible = access.visible_pipe(connector_keys, metric_key, location_key, instance_keys, viewer=viewer)
+    may_sync = visible is not None and access.can_edit_pipe(viewer, visible)
     dash.set_props('pipeline-inspector', {'hidden': False})
     import uuid
     selection = {'ref': ref, 'token': uuid.uuid4().hex}
@@ -318,7 +352,8 @@ def inspect_stage(clicks, definition, close_clicks, session_data, edit=False):
                href=_engine.pipe_href(ref), target='_blank', rel='noopener noreferrer',
                className='pipeline-open-pipe'),
         html.Div([
-            dbc.Button('Sync this Pipe', id='pipeline-node-sync', size='sm'),
+            dbc.Button('Sync this Pipe', id='pipeline-node-sync', size='sm',
+                       style=(None if may_sync else {'display': 'none'})),
             dbc.Button('View output', id='pipeline-node-view-output', size='sm', color='secondary'),
         ], className='pipeline-node-actions'),
         html.Details([
@@ -337,7 +372,8 @@ def inspect_stage(clicks, definition, close_clicks, session_data, edit=False):
                        ('query', 'Query'), ('plan', 'Data / Plan'), ('relations', 'Dependencies'),
                        ('runs', 'Recent syncs'), ('parameters', 'Parameters')]
                        + ([('edit', 'Edit dependencies and query')] if edit else [])]),
-        dbc.Switch(id='pipeline-resolve-symlinks', label='Resolve symlinks', value=True),
+        ### The same words as a pipe's Definition tab (`pipes.build_sql_body`).
+        dbc.Switch(id='pipeline-resolve-symlinks', label='Show resolved query', value=True),
         dbc.Button('Reload', id='pipeline-inspector-retry', size='sm', color='link'),
         html.Div('Loading Pipe details…', id='pipeline-inspector-body', role='status'),
     ]
@@ -353,9 +389,12 @@ def inspect_stage(clicks, definition, close_clicks, session_data, edit=False):
 )
 def load_inspector_section(selection, section, resolve, retry, session):
     """Only fetch the selected section. Token checks on the client reject stale responses."""
-    if not selection or not is_session_authenticated((session or {}).get('session-id')):
+    if not selection or not _may_read(session):
         raise PreventUpdate
     ref = selection['ref']
+    ### The selection is the browser's: its pipe must be one the viewer may see.
+    if not _visible_ref(ref, session):
+        raise PreventUpdate
     instance, connector, metric, location = _engine.split_ref(ref)
     pipe = mrsm.Pipe(connector, metric, location, instance=instance)
     try:
@@ -440,7 +479,7 @@ dash_app.clientside_callback(
     prevent_initial_call=True,
 )
 def sync_selected_pipe(clicks, context, selection, scope, begin, end, pipeline, definition, session):
-    if not is_session_authenticated((session or {}).get('session-id')):
+    if not _may_read(session):
         raise PreventUpdate
     if dash.ctx.triggered_id == 'pipeline-context':
         if not context or context.get('action') != 'sync':
@@ -454,8 +493,22 @@ def sync_selected_pipe(clicks, context, selection, scope, begin, end, pipeline, 
         raise PreventUpdate
     from meerschaum.api.dash.execute import run_action
     from meerschaum.api.dash.sessions import get_username_from_session
+    from meerschaum.api.dash import access, pipes_access
     try:
         instance, connector, metric, location = _engine.split_ref(ref)
+        viewer = pipes_access.viewer(session)
+        pipe = access.visible_pipe(connector, metric, location, instance, viewer=viewer)
+        if pipe is None:
+            raise PermissionError('This Pipe is not available.')
+        allowed, reason = access.may_run_pipe_action(viewer, pipe, 'sync')
+        if not allowed:
+            raise PermissionError(reason)
+        if scope in ('parents', 'children') and not (viewer.is_admin or viewer.no_auth):
+            ### Its parents or children run too: each must be the viewer's to sync.
+            graph = _engine.plan_graph(pipe.instance_connector, [pipe],
+                                       parents=(scope == 'parents'), children=(scope == 'children'))
+            if graph.get('hidden'):
+                raise PermissionError(f"Some of its {scope} are pipes you cannot see.")
         args = ['sync', 'pipes', '-i', instance, '-c', connector, '-m', metric,
                 '-l', location if location is not None else 'None']
         if scope in ('parents', 'children'):
@@ -643,7 +696,7 @@ def render_pipeline_graph(pathname, definition, draft, refresh, prefs, search, s
     """Only membership, draft, expansion changes and explicit refreshes rebuild the canvas."""
     if not str(pathname).startswith('/dash/pipelines/'):
         raise PreventUpdate
-    if not is_session_authenticated(str((session_data or {}).get('session-id'))):
+    if not _may_read(session_data):
         raise PreventUpdate
     if not definition:
         return []
@@ -710,7 +763,7 @@ def render_pipelines(pathname, search, definition, live_run, selected_run, node_
         raise PreventUpdate
 
     session_id = (session_data or {}).get('session-id', None)
-    if not is_session_authenticated(str(session_id)):
+    if not _may_read(session_data):
         raise PreventUpdate
 
     filters = _filters_from_search(search)
@@ -869,7 +922,7 @@ def render_events(store, n_intervals, stage, search, session_data, run_tick=None
     """
     run_id = (store or {}).get('run_id', None)
     session_id = (session_data or {}).get('session-id', None)
-    if not run_id or not is_session_authenticated(str(session_id)):
+    if not run_id or not _may_read(session_data):
         return ''
     try:
         rows = _engine.get_run_events(_engine.get_instance(
@@ -1026,7 +1079,7 @@ dash_app.clientside_callback(
 )
 def node_events(runs, ticks, session, run_tick=None):
     """Poll every retained execution by its exact identity, including older active tabs."""
-    if not runs or not is_session_authenticated((session or {}).get('session-id')):
+    if not runs or not _may_read(session):
         raise PreventUpdate
     events, statuses = [], {}
     for run in runs:
@@ -1098,7 +1151,7 @@ def node_events(runs, ticks, session, run_tick=None):
 )
 def cancel_node_execution(clicks, pipeline_clicks, live_run, runs, selected, session):
     session_id = (session or {}).get('session-id')
-    if not is_session_authenticated(session_id):
+    if not _may_read(session):
         raise PreventUpdate
     run = next((run for run in (runs or []) if (run.get('key') or run.get('job')) == selected
                 and run.get('scope') != 'pipeline'), None)
@@ -1119,6 +1172,11 @@ def cancel_node_execution(clicks, pipeline_clicks, live_run, runs, selected, ses
         if (not metadata or not job_visible_to_session(job, session_id)
                 or metadata.get('run_id') != run.get('run_id')):
             raise ValueError('This execution is unavailable or belongs to another session.')
+        ### One's own run, or anyone's with `jobs:stop`.
+        from meerschaum.api.dash import pipes_access
+        viewer = pipes_access.viewer(session)
+        if not (viewer.can('jobs:stop') or (viewer.username and getattr(job, 'owner', None) == viewer.username)):
+            raise PermissionError('Your account may not stop this execution.')
         result = job.stop()
         if result[0]:
             dash.set_props('pipelines-interval', {'n_intervals': __import__('time').time_ns()})

@@ -9,7 +9,7 @@ and `parameters['children']`, keeping the shapes the Syncing Engine reads.
 
 import json
 
-from tests.api_host._helpers import run_python, sandbox  # noqa: F401
+from tests.api_host._helpers import AS_VIEWER, run_python, sandbox  # noqa: F401
 
 
 def _json(result) -> dict:
@@ -112,10 +112,10 @@ print('JSON:' + json.dumps(out))
 
 def test_relations_callback_adds_and_refuses_anonymous_sessions(sandbox):
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, '''
+    out = _json(run_python(root, plugins, AS_VIEWER + '''
 import json
-from unittest import mock
 import meerschaum as mrsm
+from dash.exceptions import PreventUpdate
 from dash._callback_context import context_value
 from dash._utils import AttributeDict
 from meerschaum.api import get_api_connector
@@ -133,16 +133,31 @@ def call(authenticated, triggered_id, value_in, n_clicks):
     context_value.set(AttributeDict(**{
         'triggered_inputs': [{'prop_id': prop + ('.value' if value_in else '.n_clicks'), 'value': value_in or n_clicks}],
     }))
-    with mock.patch.object(callbacks, 'is_state_authenticated', return_value=authenticated):
+    ### An administrator, an Editor who may not change the pipe (its edit mode is `owner`), or
+    ### an anonymous visitor (who sees no pipe at all).
+    if authenticated == 'editor':
+        as_viewer('relations-editor', admin=False, role='editor')
+    elif authenticated:
+        as_viewer('relations-admin')
+    else:
+        as_viewer(None)
+    try:
         children = callbacks.edit_pipe_relations(
             [value_in], [n_clicks] if n_clicks else [], 'children', {'session-id': 'x'},
         )
+    except PreventUpdate:
+        return 'prevented'
     return str(children)
 
 out = {}
 add_id = {'type': 'pipe-relation-add-dropdown', 'index': index, 'relation': 'children'}
-out['anon'] = 'not authenticated' in call(False, add_id, value, None)
+out['anon'] = call(False, add_id, value, None)
 out['anon_params'] = mrsm.Pipe('cb', 'a', instance=instance).get_parameters(apply_symlinks=False, refresh=True)
+locked_out = mrsm.Pipe('cb', 'owned', instance=instance, parameters={'access': {'owner': 'someone', 'edit': 'owner'}})
+assert locked_out.register()[0]
+owned_id = {'type': 'pipe-relation-add-dropdown', 'index': json.dumps(locked_out.meta, sort_keys=True), 'relation': 'children'}
+out['not_editor'] = 'You may not change this pipe.' in call('editor', owned_id, value, None)
+out['owned_params'] = mrsm.Pipe('cb', 'owned', instance=instance).get_parameters(apply_symlinks=False, refresh=True)
 out['added'] = 'Added' in call(True, add_id, value, None)
 out['params'] = mrsm.Pipe('cb', 'a', instance=instance).get_parameters(apply_symlinks=False, refresh=True)
 remove_id = {'type': 'pipe-relation-remove-button', 'index': index, 'relation': 'children', 'other': value}
@@ -150,6 +165,9 @@ out['removed'] = 'Removed' in call(True, remove_id, None, 1)
 out['params_after'] = mrsm.Pipe('cb', 'a', instance=instance).get_parameters(apply_symlinks=False, refresh=True)
 print('JSON:' + json.dumps(out))
 '''))
-    assert out['anon'] is True and 'children' not in out['anon_params']
+    ### An anonymous visitor sees no pipe: nothing happens (not even a message naming it).
+    assert out['anon'] == 'prevented' and 'children' not in out['anon_params']
+    ### An Editor sees a pipe whose edit mode is `owner` but may not change it.
+    assert out['not_editor'] is True and 'children' not in out['owned_params']
     assert out['added'] is True and out['params']['children'] == ["Pipe('cb', 'b')"]
     assert out['removed'] is True and 'children' not in out['params_after']

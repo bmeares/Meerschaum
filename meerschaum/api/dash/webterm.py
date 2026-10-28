@@ -132,7 +132,9 @@ def get_webterm(state: WebState, fullscreen_button: bool = True) -> Tuple[Any, A
 
     session_id = state['session-store.data'].get('session-id', None)
     username = get_username_from_session(session_id)
-    if not is_session_authenticated(session_id):
+    from meerschaum.api.dash.access import get_viewer
+    viewer = get_viewer(session_id=(str(session_id) if session_id else None))
+    if not (viewer.no_auth or (viewer.signed_in and viewer.can('webterm:use'))):
         msg = f"User '{username}' is not authorized to access the webterm."
         return (
             html.Div(
@@ -141,7 +143,7 @@ def get_webterm(state: WebState, fullscreen_button: bool = True) -> Tuple[Any, A
             ),
             [alert_from_success_tuple((
                 False,
-                "This Meerschaum instance only allows administrators to access the Webterm."
+                "Your account may not use the terminal."
             ))]
         )
 

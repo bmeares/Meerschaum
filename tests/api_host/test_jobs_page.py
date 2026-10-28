@@ -1,6 +1,6 @@
 """The Jobs page: Jobs and Runs tabs, and a job's logs viewed in a modal."""
 import json
-from tests.api_host._helpers import run_python, sandbox  # noqa: F401
+from tests.api_host._helpers import AS_VIEWER, run_python, sandbox  # noqa: F401
 
 
 def test_runs_is_a_tab_of_the_jobs_page(sandbox):
@@ -98,7 +98,7 @@ print('JSON:' + json.dumps(items))
 
 def test_logs_modal_follows_a_running_job_and_sends_only_changes(sandbox):
     root, plugins = sandbox
-    result = run_python(root, plugins, '''
+    result = run_python(root, plugins, AS_VIEWER + '''
 import json
 from dash import no_update
 from dash.exceptions import PreventUpdate
@@ -106,7 +106,7 @@ from meerschaum.api.dash import dash_app
 import meerschaum.api.dash.callbacks.jobs as cj
 
 state = {'text': '\\x1b[32mline 1\\x1b[0m\\n', 'status': 'running'}
-cj.is_state_authenticated = lambda data: True
+as_viewer()
 cj._read_job_logs = lambda name, session: {'job': name, **state, 'digest': cj._digest(state['text'])}
 session = {'session-id': 'abc'}
 out = {}

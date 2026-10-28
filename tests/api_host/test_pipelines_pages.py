@@ -1,5 +1,5 @@
 """The Pipelines pages: routes, the shared instance, the canvas, the stepper and Edit-mode edges."""
-from tests.api_host._helpers import run_python, sandbox  # noqa: F401
+from tests.api_host._helpers import AS_VIEWER, run_python, sandbox  # noqa: F401
 
 
 def check(result):
@@ -143,7 +143,7 @@ assert 'cycle' in str(alert).lower(), alert
 
 def test_stepper_reviews_then_creates_with_tags(sandbox):
     root, plugins = sandbox
-    check(run_python(root, plugins, '''
+    check(run_python(root, plugins, AS_VIEWER + '''
 from types import SimpleNamespace
 import dash
 import meerschaum as mrsm
@@ -152,7 +152,7 @@ build_dash_app()
 from meerschaum.api.dash.callbacks import pipeline_pages as pages
 from meerschaum.core.Pipeline._saved import list_pipelines
 instance = 'sql:apihosttest'
-pages._authenticated = lambda session: True
+as_viewer()
 existing = mrsm.Pipe('stepper', 'existing', instance=instance)
 assert existing.register()[0]
 members = [instance + '|stepper|existing|None', instance + '|stepper|new|None']

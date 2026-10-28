@@ -133,16 +133,27 @@ CONSOLE_NAV_LINKS: Tuple[Tuple[str, str, str], ...] = (
 
 #: The pages of the user menu (above Sign out): `(section, label, path)`.
 CONSOLE_USER_LINKS: Tuple[Tuple[str, str, str], ...] = (
-    ('users', 'Users', '/dash/users'),
+    ('users', 'Users & Teams', '/dash/users'),
     ('tokens', 'Tokens', '/dash/tokens'),
     ('settings', 'Settings', '/dash/password-reset'),
 )
+
+#: The permission each section of the navigation needs (hidden without it).
+NAV_PERMISSIONS: Dict[str, str] = {
+    'pipes': 'pipes:read',
+    'pipelines': 'pipes:read',
+    'jobs': 'jobs:read',
+    'connectors': 'connectors:read',
+    'plugins': 'plugins:read',
+    'terminal': 'webterm:use',
+}
 
 #: Console paths of a section that do not start with its path.
 SECTION_ALIASES: Dict[str, str] = {
     '/dash': 'overview',
     '/dash/runs': 'jobs',
     '/dash/webterm': 'terminal',
+    '/dash/teams': 'users',
 }
 
 #: The console's own pages: never listed under Pages.
@@ -210,9 +221,9 @@ def _is_served(path: str, paths: Optional[Dict[str, Any]]) -> bool:
 def get_nav_state(pathname: Optional[str] = None, session_id: Optional[str] = None) -> Dict[str, Any]:
     """
     Who is looking at which page, for the navbar: `pathname`, `session_id`, `username`,
-    `signed_in`, `may_act` (the user may run actions: every user, or only an administrator under
-    `--secure`) and `terminal` (whether this user may use the web terminal: it is enabled and the
-    user may run actions).
+    `signed_in`, `may_act` (the user may run actions: `actions:execute`), `terminal` (whether
+    this user may use the web terminal: it is enabled and the user holds `webterm:use`), `admin`
+    and `viewer` (`meerschaum.api.dash.access.Viewer`).
     """
     from meerschaum.api import no_auth
     context = _nav_context.get() or {}
@@ -227,21 +238,18 @@ def get_nav_state(pathname: Optional[str] = None, session_id: Optional[str] = No
             from urllib.parse import urlparse
             pathname = urlparse(request.referrer).path
 
-    username, signed_in, may_act = None, bool(no_auth), bool(no_auth)
-    if session_id and not no_auth:
+    from meerschaum.api.dash.access import ANONYMOUS, get_viewer
+    viewer = ANONYMOUS
+    if no_auth or session_id:
         try:
-            from meerschaum.api.dash.sessions import (
-                get_username_from_session,
-                is_session_authenticated,
-            )
-            username = get_username_from_session(str(session_id))
-            signed_in = username is not None
-            may_act = signed_in and is_session_authenticated(str(session_id))
+            viewer = get_viewer(session_id=(str(session_id) if session_id else None))
         except Exception:
-            username, signed_in, may_act = None, False, False
+            viewer = ANONYMOUS
+    username, signed_in = viewer.username, bool(no_auth or viewer.signed_in)
+    may_act = bool(signed_in and viewer.can('actions:execute'))
 
     terminal = False
-    if may_act:
+    if signed_in and viewer.can('webterm:use'):
         try:
             from meerschaum.api.dash.webterm import webterm_enabled
             terminal = webterm_enabled()
@@ -255,7 +263,30 @@ def get_nav_state(pathname: Optional[str] = None, session_id: Optional[str] = No
         'signed_in': signed_in,
         'may_act': may_act,
         'terminal': terminal,
+        'admin': bool(signed_in and viewer.is_admin),
+        'viewer': viewer,
     }
+
+
+def nav_section_allowed(section: str, state: Dict[str, Any]) -> bool:
+    """
+    Whether the navigation shows `section` to this viewer: its permission (`NAV_PERMISSIONS`),
+    the terminal only when it is enabled, and Connectors only for administrators under
+    `--secure`. Visitors who are not signed in see the links (the pages ask them to sign in).
+    """
+    if not state.get('signed_in'):
+        return section != 'terminal'
+    viewer = state.get('viewer', None)
+    permission = NAV_PERMISSIONS.get(section, None)
+    if section == 'terminal':
+        return bool(state.get('terminal'))
+    if permission and viewer is not None and not viewer.can(permission):
+        return False
+    if section == 'connectors':
+        from meerschaum.api.dash.access import _secure
+        if _secure() and not state.get('admin'):
+            return False
+    return True
 
 
 def _group_label(group: Optional[str]) -> str:
@@ -485,10 +516,10 @@ def build_pages_navbar(
     """
     Return a fresh top navigation for a console page: the logo (the Overview), Pipes, Pipelines,
     Jobs, Connectors, Plugins, Terminal and the plugins' Pages, then the global instance selector
-    and the user menu (Users, Tokens, Settings, Sign out). Links to pages the server does not
-    serve (`api:permissions:routes`) are left out, Terminal is shown only to a user who may use
-    the web terminal, and Connectors is left out for a user who may not run actions (a
-    non-administrator under `--secure`).
+    and the user menu (Users & Teams, Tokens, Settings, Sign out). Links to pages the server does
+    not serve (`api:permissions:routes`) are left out, and so is every page the viewer lacks the
+    permission for (`NAV_PERMISSIONS`: Terminal needs `webterm:use`, Jobs `jobs:read`, ...;
+    Connectors is for administrators under `--secure`).
 
     Parameters
     ----------
@@ -518,10 +549,8 @@ def build_pages_navbar(
     for section, label, href in CONSOLE_NAV_LINKS:
         if not _is_served(href, paths):
             continue
-        if section == 'terminal' and not state['terminal']:
-            continue
-        ### Under `--secure` the connectors (hosts, users, databases) are for administrators.
-        if section == 'connectors' and state['signed_in'] and not state['may_act']:
+        ### A page the viewer may not use is not in the bar (not disabled: absent).
+        if not nav_section_allowed(section, state):
             continue
         links.append(dbc.NavItem(dbc.NavLink(
             label,

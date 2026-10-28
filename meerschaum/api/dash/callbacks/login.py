@@ -51,17 +51,42 @@ def safe_next_path(location_href: Optional[str]) -> Optional[str]:
 
 @public_callback
 @dash_app.callback(
-    Output('user-registration-disabled-collapse', 'is_open'),
-    Input('show-user-registration-disabled-button', 'n_clicks'),
-    State('user-registration-disabled-collapse', 'is_open'),
+    Output('session-store', 'data', allow_duplicate=True),
+    Output('first-admin-alert', 'children'),
+    Output('location-login', 'href', allow_duplicate=True),
+    Input('first-admin-button', 'n_clicks'),
+    Input('first-admin-confirm', 'n_submit'),
+    State('first-admin-username', 'value'),
+    State('first-admin-password', 'value'),
+    State('first-admin-confirm', 'value'),
+    State('first-admin-email', 'value'),
+    State('mrsm-location', 'href'),
+    prevent_initial_call=True,
 )
-def show_registration_disabled_collapse(n_clicks, is_open):
+def create_first_admin_click(n_clicks, n_submit, username, password, confirm, email, location_href):
     """
-    Toggle the registration info div.
+    Create admin account (the login page of an instance without users): register the first
+    account as an administrator, sign it in and open the console (or the `next` page). The
+    callback checks again that the instance has no users: the page may be stale.
     """
-    if n_clicks:
-        return not is_open
-    return is_open
+    if not n_clicks and not n_submit:
+        raise PreventUpdate
+    from meerschaum.api.dash.registration import create_first_admin, sign_in
+    success, message = create_first_admin(username, password, confirm, email)
+    if not success:
+        return dash.no_update, alert_from_success_tuple((False, message)), dash.no_update
+    if not authenticate_user(str(username).strip(), password):
+        return dash.no_update, alert_from_success_tuple((False, "Sign in with the new account.")), (
+            endpoints['dash'].rstrip('/') + '/login'
+        )
+    from flask import request as flask_request
+    session_data = sign_in(
+        str(username).strip(),
+        response=dash.callback_context.response,
+        secure=flask_request.is_secure,
+    )
+    session_data['mrsm-location.href'] = location_href
+    return session_data, [], (safe_next_path(location_href) or endpoints['dash'].rstrip('/'))
 
 
 @public_callback

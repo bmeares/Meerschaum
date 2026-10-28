@@ -7,12 +7,15 @@ from meerschaum.api.dash.pipeline_management import count_label, pipes_label, ru
 
 
 def get_pipeline_cards(state):
-    from meerschaum.api.dash import engine
+    """The saved Pipelines of the instance the session's viewer may see (`access.visible_pipelines`)."""
+    from meerschaum.api.dash import engine, access
     instance = state.get('instance-select.value')
     connector = engine.get_instance(instance)
     registry = str(connector)
+    viewer = access.get_viewer((state or {}).get('session-store.data', None) or {})
+    definitions = access.visible_pipelines(connector, viewer=viewer, definitions=list_pipelines(connector))
     cards = []
-    for name, definition in sorted(list_pipelines(connector).items()):
+    for name, definition in sorted(definitions.items()):
         targets = definition.get('targets', [])
         identity = json.dumps({'name': name, 'instance': registry}, sort_keys=True)
         url = '/dash/pipelines/' + quote(name, safe='') + '?' + urlencode({'instance': registry})

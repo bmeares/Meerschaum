@@ -134,8 +134,45 @@ def start_exec(
     if trigger_id == 'manage-confirm-button' and not confirm_clicks:
         raise PreventUpdate
 
-    ### Starting an action or following a job requires a session that may run actions.
-    if not is_state_authenticated(session_store_data):
+    ### Following a job needs `logs:read` on a job the viewer sees; a pipe card's Manage action
+    ### its pipe permission and edit rights; Exec runs any action (`actions:execute`).
+    from meerschaum.api.dash.access import get_viewer
+    viewer = get_viewer(session_store_data)
+    if is_follow:
+        from meerschaum.api.dash._support import get_job
+        from meerschaum.api.dash.jobs import job_visible_to_session
+        try:
+            job = get_job(trigger_id['index'])
+        except Exception:
+            job = None
+        if (
+            not viewer.can('logs:read') or job is None
+            or not job_visible_to_session(job, (session_store_data or {}).get('session-id'))
+        ):
+            return _failure("You may not read this job's logs.")
+    elif is_manage or trigger_id == 'manage-confirm-button':
+        from meerschaum.api.dash.access import visible_pipe_from_meta, may_run_pipe_action
+        try:
+            meta = (
+                (confirm_data or {}).get('meta') if trigger_id == 'manage-confirm-button'
+                else json.loads(trigger_id['index'])
+            )
+            action_name = (
+                (confirm_data or {}).get('action') if trigger_id == 'manage-confirm-button'
+                else trigger_id.get('action')
+            )
+        except (ValueError, TypeError):
+            raise PreventUpdate
+        ### "Open in Python" types into the terminal (its own permission, on the server).
+        if action_name == 'python':
+            raise PreventUpdate
+        pipe = visible_pipe_from_meta(meta, viewer=viewer)
+        if pipe is None:
+            raise PreventUpdate
+        allowed, reason = may_run_pipe_action(viewer, pipe, action_name)
+        if not allowed:
+            return _failure(reason)
+    elif not is_state_authenticated(session_store_data):
         return _failure("You are not authorized to run actions.")
 
     session_id = (session_store_data or {}).get('session-id', None)

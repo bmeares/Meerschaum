@@ -96,8 +96,17 @@ def validate_edits(edits, roots):
     return edges
 
 
-def apply_edits(edits, roots):
-    """All validation precedes writes; each cross-instance result remains explicit."""
+def apply_edits(edits, roots, viewer=None):
+    """
+    All validation precedes writes; each cross-instance result remains explicit. Each edit is
+    the console's checked write (`pipe_writes.save_parameters`: the viewer's edit rights on the
+    pipe, its locks, SQL definitions).
+    """
+    from meerschaum.api.dash import access, pipe_writes
+    viewer = viewer if viewer is not None else access.current_viewer()
+    for ref in edits:
+        if not access.ref_is_visible(viewer, ref):
+            raise ValueError(f'Pipe is missing: {ref}')
     validate_edits(edits, roots)
     results = []
     for ref, edit in edits.items():
@@ -107,8 +116,9 @@ def apply_edits(edits, roots):
             with _mutation_lock(pipe.instance_connector, pipe):
                 if fingerprint(dict(pipe.get_parameters(apply_symlinks=False))) != edit['baseline']:
                     raise ValueError('Parameters changed since validation.')
-                pipe.parameters = deepcopy(edit['parameters'])
-                success, message = pipe.edit(interactive=False)
+                success, message = pipe_writes.save_parameters(
+                    pipe, deepcopy(edit['parameters']), viewer=viewer,
+                )
             results.append((ref, bool(success), str(message)))
         except Exception as exc:
             results.append((ref, False, str(exc)))

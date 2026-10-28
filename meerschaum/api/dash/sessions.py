@@ -390,8 +390,12 @@ def delete_session(session_id: str):
 
 def is_session_authenticated(session_id: Optional[str]) -> bool:
     """
-    Check is a session ID is active.
-    If running in secure mode, check whether a session ID corresponds to an admin.
+    Return whether a session's user may run actions: the `actions:execute` permission of their
+    effective permissions (administrators; users whose role or permissions include it, such as
+    the Operator role; nobody but administrators under `--secure`). `--no-auth` allows everyone.
+
+    Reading pages needs only a session (`is_session_active`); what a page shows and which of
+    its buttons appear follow the viewer's permissions (`meerschaum.api.dash.access`).
 
     Parameters
     ----------
@@ -412,29 +416,12 @@ def is_session_authenticated(session_id: Optional[str]) -> bool:
     if session_id is None:
         return False
 
-    session_data = get_session_data(session_id)
-    if session_data is None:
+    from meerschaum.api.dash.access import get_viewer
+    try:
+        viewer = get_viewer(session_id=session_id)
+    except Exception:
         return False
-    username = session_data.get('username', None)
-    if username is None:
-        return False
-
-    cached_auth = session_data.get('authenticated', None)
-    if cached_auth is not None:
-        return cached_auth
-
-    permissions = get_config('api', 'permissions')
-    ### The server passes its own `actions_non_admin` to the host (`start api --secure` turns it
-    ### off as `api:permissions:actions:non_admin: false` does).
-    from meerschaum.api import get_uvicorn_config
-    allow_non_admin = (
-        permissions.get('actions', {}).get('non_admin', False)
-        and get_uvicorn_config().get('actions_non_admin', True) is not False
-    )
-
-    is_auth = True if allow_non_admin else session_is_admin(session_id)
-    update_session(session_id, {'authenticated': is_auth})
-    return is_auth
+    return bool(viewer.signed_in and viewer.can('actions:execute'))
 
 
 def public_callback(func):
@@ -455,9 +442,10 @@ def is_state_authenticated(session_store_data: Optional[Dict[str, Any]]) -> bool
     The API host answers a callback request (`POST /dash/_dash-update-component`) only for a
     valid console session unless the callback is public (`meerschaum.api.host._callbacks`), but
     `api:dash:callbacks_require_session: false` turns that off, and a session is not an
-    authorization: any callback which reads or writes pipes, users, tokens, or job logs takes
-    `State('session-store', 'data')` and checks it through this function (which also applies
-    `api:permissions:actions:non_admin`) before doing any work.
+    authorization: a callback that runs actions takes `State('session-store', 'data')` and checks
+    it through this function (the `actions:execute` permission) before doing any work. A callback
+    that reads or writes pipes, users or jobs checks the viewer's permissions and the pipe's
+    access instead (`meerschaum.api.dash.access.get_viewer(session_store_data)`).
 
     Parameters
     ----------
@@ -480,25 +468,19 @@ def is_state_authenticated(session_store_data: Optional[Dict[str, Any]]) -> bool
 
 def session_is_admin(session_id: str) -> bool:
     """
-    Check whether a session ID corresponds to an admin user.
+    Check whether a session ID corresponds to an admin user (read again every few seconds, so a
+    demotion applies at once: `meerschaum.api.dash.access.get_viewer`).
     """
     if debug:
         dprint(f"Check admin for {session_id=}")
-    session_data = get_session_data(session_id)
-    if session_data is None:
+    if no_auth:
+        return True
+    session_id = valid_session_id(session_id)
+    if session_id is None:
         return False
-
-    username = session_data.get('username', None)
-    if username is None:
+    from meerschaum.api.dash.access import get_viewer
+    try:
+        viewer = get_viewer(session_id=session_id)
+    except Exception:
         return False
-
-    cached_admin = session_data.get('admin', None)
-    if cached_admin is not None:
-        return cached_admin
-
-    conn = get_api_connector()
-    user = User(username, instance=conn)
-    user_type = conn.get_user_type(user, debug=debug)
-    is_admin = user_type == 'admin'
-    update_session(session_id, {'admin': is_admin})
-    return is_admin
+    return bool(viewer.signed_in and viewer.is_admin)

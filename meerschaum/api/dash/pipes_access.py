@@ -3,15 +3,15 @@
 # vim:fenc=utf-8
 
 """
-Who may do what on the Pipes pages (`/dash/pipes`, a pipe's page and New pipe).
+Who may do what on the Pipes pages (`/dash/pipes`, a pipe's page and New pipe), over the
+console's access model (`meerschaum.api.dash.access`):
 
-- Reading (the table, a pipe's tabs) needs a console session (or `--no-auth`).
-- Running actions (Sync, Verify, Clear, Drop, Delete) and editing need an authenticated session:
-  `is_session_authenticated()` (an administrator when `api:permissions:actions:non_admin` is off,
-  as `start api --secure` sets it), as the rest of the console. The server authorizes the actions
-  again when they run (`POST /execute`).
-- Writing a pipe's registration directly (New pipe, Copy, editing parameters) also needs the
-  `pipes:write` scope; registering needs `api:permissions:registration:pipes`, as
+- Reading (the table, a pipe's tabs) needs a console session (or `--no-auth`) and `pipes:read`;
+  a pipe the viewer may not see (its team's, a private one) is never listed or shown.
+- Each action needs its permission (Sync and Verify `pipes:write`, Clear and Delete
+  `pipes:delete`, Drop `pipes:drop`, Copy `pipes:register`), edit rights on the pipe, and no
+  lock against it. The server authorizes the actions again when they run (`POST /execute`).
+- Registering needs `api:permissions:registration:pipes` and `pipes:register`, as
   `POST /pipes/{connector}/{metric}/{location}/register` does.
 """
 
@@ -55,60 +55,44 @@ def session_id(session_data: Optional[Dict[str, Any]]) -> Optional[str]:
     return str(value) if value else None
 
 
+def viewer(session_data: Optional[Dict[str, Any]] = None):
+    """The viewer of the session (`meerschaum.api.dash.access.Viewer`)."""
+    from meerschaum.api.dash.access import get_viewer
+    return get_viewer(session_data_from_context(session_data))
+
+
 def can_read(session_data: Optional[Dict[str, Any]]) -> bool:
-    """Whether the session may view pipes (any signed-in user, or `--no-auth`)."""
-    from meerschaum.api import no_auth
-    if no_auth:
-        return True
-    from meerschaum.api.dash.sessions import is_session_active
-    sid = session_id(session_data)
-    return bool(sid) and is_session_active(sid)
+    """Whether the session may view pipes (a signed-in user with `pipes:read`, or `--no-auth`)."""
+    who = viewer(session_data)
+    return bool(who.no_auth or (who.signed_in and who.can('pipes:read')))
 
 
 def can_act(session_data: Optional[Dict[str, Any]]) -> bool:
-    """Whether the session may run actions and edit pipes."""
-    from meerschaum.api.dash.sessions import is_state_authenticated
-    return is_state_authenticated(session_data)
+    """Whether the session may run actions (`actions:execute`)."""
+    who = viewer(session_data)
+    return bool(who.no_auth or (who.signed_in and who.can('actions:execute')))
 
 
 def username(session_data: Optional[Dict[str, Any]]) -> Optional[str]:
     """The session's username (`None` with `--no-auth`)."""
     from meerschaum.api.dash.sessions import get_username_from_session
-    sid = session_id(session_data)
+    sid = session_id(session_data_from_context(session_data))
     return get_username_from_session(sid) if sid else None
 
 
 def has_scope(session_data: Optional[Dict[str, Any]], scope: str) -> bool:
-    """
-    Whether the session's user holds `scope` (administrators and `--no-auth` hold every scope;
-    a user without a `scopes` attribute holds every scope, as on the API).
-    """
-    from meerschaum.api import no_auth, get_api_connector
-    if no_auth:
-        return True
-    from meerschaum.api.dash.sessions import session_is_admin
-    sid = session_id(session_data)
-    if not sid:
-        return False
-    if session_is_admin(sid):
-        return True
-    name = username(session_data)
-    if not name:
-        return False
-    from meerschaum.core import User
-    try:
-        scopes = User(name, instance=get_api_connector()).get_scopes(refresh=True) or []
-    except Exception:
-        return False
-    return '*' in scopes or scope in scopes
+    """Whether the session's user holds `scope` (administrators and `--no-auth` hold every one)."""
+    who = viewer(session_data)
+    return bool(who.no_auth or (who.signed_in and who.can(scope)))
 
 
 def can_write_pipes(session_data: Optional[Dict[str, Any]]) -> Tuple[bool, str]:
-    """`(allowed, reason)`: whether the session may edit or copy pipes' registrations."""
-    if not can_act(session_data):
-        return False, "You are not allowed to edit pipes."
-    if not has_scope(session_data, 'pipes:write'):
-        return False, "Your account does not have the `pipes:write` scope."
+    """`(allowed, reason)`: whether the session may edit pipes' registrations (`pipes:write`)."""
+    who = viewer(session_data)
+    if not (who.no_auth or who.signed_in):
+        return False, "Sign in to edit pipes."
+    if not who.can('pipes:write'):
+        return False, "Your account may not edit pipes."
     return True, ''
 
 
@@ -120,4 +104,17 @@ def can_register(session_data: Optional[Dict[str, Any]]) -> Tuple[bool, str]:
             "This server does not allow registering pipes "
             "(`api:permissions:registration:pipes`)."
         )
-    return can_write_pipes(session_data)
+    who = viewer(session_data)
+    if not (who.no_auth or who.signed_in):
+        return False, "Sign in to register pipes."
+    if not who.can('pipes:register'):
+        return False, "Your account may not register pipes."
+    return True, ''
+
+
+def can_define_sql(session_data: Optional[Dict[str, Any]]) -> Tuple[bool, str]:
+    """`(allowed, reason)`: whether the session may set or change SQL definitions."""
+    who = viewer(session_data)
+    if not who.can('pipes:define_sql'):
+        return False, "Your account may not set SQL definitions."
+    return True, ''

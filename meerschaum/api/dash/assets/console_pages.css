@@ -52,10 +52,29 @@
 .new-job-preview { white-space: pre-wrap; overflow-wrap: anywhere; background: #17212b; color: #dceaf6; padding: 10px 12px; border-radius: 6px; margin: 0; min-height: 2.6em; }
 .new-job-preview-invalid { color: #f5c26b; font-family: inherit; }
 
-/* Users. */
+/* The login page of an instance without users: Create admin account. */
+.first-admin { max-width: 520px; margin: 0 auto; }
+.first-admin #first-admin-title { margin-bottom: 16px; }
+.first-admin #first-admin-button { width: 100%; }
+
+/* Users & Teams. */
+.users-tabs { margin-bottom: 12px; }
 .user-type-badge { font-weight: 500; }
 .users-table .user-email { overflow-wrap: anywhere; }
 .users-row-menu-cell { width: 1%; text-align: right; }
+.user-role-default { font-weight: 500; vertical-align: 1px; }
+.user-team { display: inline-block; margin-right: 10px; white-space: nowrap; }
+.user-team-role { color: #a8becf; font-size: 0.85em; }
+/* The Edit dialog's permissions: one box per group. */
+.users-permissions-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px 14px; margin: 4px 0 14px; }
+.users-permissions-group { border: 1px solid #47515c; border-radius: 6px; padding: 8px 10px 4px; margin: 0; min-width: 0; }
+.users-permissions-legend { float: none; width: auto; font-size: 0.85rem; font-weight: 700; color: #a8becf; margin: 0 0 4px; padding: 0; }
+.users-permissions-checklist .form-check { margin-bottom: 2px; }
+/* Teams: the members dialog's Add row. */
+.teams-table .team-name { font-weight: 600; }
+.team-members-table { margin-bottom: 10px; }
+.team-members-table .custom-select { max-width: 160px; }
+.team-add-row { display: grid; grid-template-columns: minmax(0, 1fr) 150px auto; gap: 8px; align-items: center; }
 
 /* Plugins. */
 .plugins-tabs { margin-bottom: 16px; }
@@ -80,6 +99,7 @@
 }
 
 @media (max-width: 767px) {
+    #first-admin-container .form-control, #login-container .form-control { min-height: 44px; }
     .console-page { padding-left: 16px; padding-right: 16px; }
     .jobs-page .btn, .users-page .btn, .plugins-page .btn, .tokens-page .btn,
     .jobs-page .dropdown-toggle, .users-page .dropdown-toggle, .plugins-page .dropdown-toggle,
@@ -89,6 +109,10 @@
     .jobs-page .form-control, .users-page .form-control, .plugins-page .form-control,
     #new-job-modal .form-control, .users-modal .form-control, .tokens-modal .form-control { min-height: 44px; }
     .tokens-scopes-checklist .form-check { min-height: 44px; display: flex; align-items: center; gap: 0.5em; }
+    .users-permissions-checklist .form-check, .users-modal .form-check { min-height: 44px; display: flex; align-items: center; gap: 0.5em; }
+    .users-permissions-checklist .form-check .form-check-input, .users-modal .form-check .form-check-input { margin-top: 0; }
+    .users-modal .custom-select, .users-modal .dash-dropdown, .users-tabs .nav-link { min-height: 44px; }
+    .team-add-row { grid-template-columns: minmax(0, 1fr); }
     .tokens-scopes-checklist .form-check .form-check-input { margin-top: 0; }
     .tokens-modal .dash-datepicker-input-wrapper { min-height: 42px; }
     .tokens-modal .dash-datepicker-clear {

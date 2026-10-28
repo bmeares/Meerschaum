@@ -49,7 +49,8 @@ INDEX_PREFIX_EMOJI: Dict[str, str] = {
 def pipe_from_ctx(ctx, trigger_property: str = 'n_clicks') -> Union[mrsm.Pipe, None]:
     """
     Return a `meerschaum.Pipe` object from a dynamic object with an
-    index of a pipe's meta dictionary.
+    index of a pipe's meta dictionary, or `None` when the request's viewer may not see that pipe
+    (the id comes from the browser: `meerschaum.api.dash.access.visible_pipe_from_meta`).
     """
     try:
         ### I know this looks confusing and feels like a hack.
@@ -60,7 +61,8 @@ def pipe_from_ctx(ctx, trigger_property: str = 'n_clicks') -> Union[mrsm.Pipe, N
         meta = None
     if meta is None:
         return None
-    return mrsm.Pipe(**meta)
+    from meerschaum.api.dash.access import visible_pipe_from_meta
+    return visible_pipe_from_meta(meta)
 
 
 def keys_from_state(
@@ -293,6 +295,8 @@ def get_pipes_cards(*keys, session_data: Optional[Dict[str, Any]] = None):
     alerts = [alert_from_success_tuple(pipes)]
     if not isinstance(pipes, list):
         pipes = []
+    from meerschaum.api.dash.access import get_viewer, visible_pipes
+    pipes = visible_pipes(get_viewer(session_data), pipes)
 
     max_num_pipes_cards = get_config('dash', 'max_num_pipes_cards')
     overflow_pipes = pipes[max_num_pipes_cards:]
@@ -753,7 +757,21 @@ def build_parameters_body(
     if not include_relatives:
         return html.Div(parameters_div_children)
 
-    if _build_references_num > 0 and pipe.references:
+    ### Only the relatives the viewer may see have cards (`access.visible_pipes`).
+    from meerschaum.api.dash.access import current_viewer, visible_pipes
+    viewer = current_viewer()
+
+    def _relatives(pipes):
+        try:
+            return visible_pipes(viewer, list(pipes or []))
+        except Exception:
+            return []
+
+    references = _relatives(pipe.references) if _build_references_num > 0 else []
+    parents = _relatives(pipe.parents) if _build_parents_num > 0 else []
+    children = _relatives(pipe.children) if _build_children_num > 0 else []
+
+    if _build_references_num > 0 and references:
         references_cards = [
             build_pipe_card(
                 reference_pipe,
@@ -761,7 +779,7 @@ def build_parameters_body(
                 header_only=True,
                 _build_references_num=(_build_references_num - 1),
             )
-            for reference_pipe in pipe.references
+            for reference_pipe in references
         ]
         references_grid = build_cards_grid(references_cards, num_columns=1)
         references_div_items = [
@@ -773,7 +791,7 @@ def build_parameters_body(
         ]
         parameters_div_children.extend([html.Br()] + references_div_items)
 
-    if _build_parents_num > 0 and pipe.parents:
+    if _build_parents_num > 0 and parents:
         parents_cards = [
             build_pipe_card(
                 parent_pipe,
@@ -781,13 +799,13 @@ def build_parameters_body(
                 header_only=True,
                 _build_parents_num=(_build_parents_num - 1),
             )
-            for parent_pipe in pipe.parents
+            for parent_pipe in parents
         ]
         parents_grid = build_cards_grid(parents_cards, num_columns=1)
         parents_div_items = [html.Br(), html.H3('Parent Pipes'), html.Br(), parents_grid]
         parameters_div_children.extend([html.Br()] + parents_div_items)
 
-    if _build_children_num > 0 and pipe.children:
+    if _build_children_num > 0 and children:
         children_cards = [
             build_pipe_card(
                 child_pipe,
@@ -795,7 +813,7 @@ def build_parameters_body(
                 header_only=True,
                 _build_children_num=(_build_children_num - 1),
             )
-            for child_pipe in pipe.children
+            for child_pipe in children
         ]
         children_grid = build_cards_grid(children_cards, num_columns=1)
         children_div_items = [html.Br(), html.H3('Children Pipes'), html.Br(), children_grid]
@@ -873,7 +891,9 @@ def build_sql_body(
 def build_recent_data_body(pipe: mrsm.Pipe, limit: int = 10) -> Any:
     """The Recent Data section: the newest rows of the backtrack window as a table."""
     try:
-        df = pipe.get_backtrack_data(backtrack_minutes=10, limit=limit, debug=debug)
+        df = pipe.get_backtrack_data(
+            backtrack_minutes=10, limit=limit, as_pandas=True, debug=debug,
+        )
         if df is None or len(df) == 0:
             return html.P("No recent data.")
         table = dbc.Table.from_dataframe(df.astype(str), bordered=False, hover=True)
@@ -1147,10 +1167,16 @@ def add_pipe_relation(pipe: mrsm.Pipe, relation: str, other: mrsm.Pipe) -> Succe
     return True, f"Added {other} as a {noun} of {pipe}."
 
 
-def remove_pipe_relation(pipe: mrsm.Pipe, relation: str, other: mrsm.Pipe) -> SuccessTuple:
+def remove_pipe_relation(
+    pipe: mrsm.Pipe,
+    relation: str,
+    other: mrsm.Pipe,
+    edit_other: bool = True,
+) -> SuccessTuple:
     """
     Remove the edge between `pipe` and its parent or child `other`, wherever it is declared:
-    in `pipe`'s `parents` / `children` or in `other`'s inverse key.
+    in `pipe`'s `parents` / `children` or (with `edit_other`: the viewer may change `other`) in
+    `other`'s inverse key.
     """
     if relation not in RELATION_KEYS:
         return False, f"Invalid relation '{relation}'."
@@ -1161,10 +1187,12 @@ def remove_pipe_relation(pipe: mrsm.Pipe, relation: str, other: mrsm.Pipe) -> Su
         return False, msg
 
     removed_there = False
-    if other.get_id() is not None:
+    if edit_other and other.get_id() is not None:
         removed_there, (success, msg) = _remove_declared(other, INVERSE_RELATIONS[relation], pipe)
         if not success:
             return False, msg
+    elif not removed_here and other.get_id() is not None:
+        return False, f"{other} declares this edge, and you may not change {other}."
 
     if not removed_here and not removed_there:
         return False, (
@@ -1175,21 +1203,25 @@ def remove_pipe_relation(pipe: mrsm.Pipe, relation: str, other: mrsm.Pipe) -> Su
     return True, f"Removed {other} as a {noun} of {pipe}."
 
 
-def _relation_rows(pipe: mrsm.Pipe) -> Dict[str, List[Dict[str, Any]]]:
+def _relation_rows(pipe: mrsm.Pipe, viewer: Any = None) -> Dict[str, List[Dict[str, Any]]]:
     """
     Merge the engine's view of a pipe's edges with the declared (possibly unregistered) parents
-    and children. Each row is `{pipe, label, href, action, reason, removable}`.
+    and children. Each row is `{pipe, label, href, action, reason, removable}`. A registered
+    neighbour `viewer` may not see is left out; `hidden_<relation>` counts them.
     """
     from meerschaum.api.dash import engine as _engine
+    from meerschaum.api.dash import access
+    viewer = viewer if viewer is not None else access.current_viewer()
     relations = _engine.relations_of(pipe)
+    anonymizer = _engine.Anonymizer(viewer, pipe.instance_keys)
     this_identity = _pipe_identity(pipe)
-    out: Dict[str, List[Dict[str, Any]]] = {}
+    out: Dict[str, Any] = {}
     for relation in RELATION_KEYS:
         declared = {
             _pipe_identity(other): other
             for other in declared_relations(pipe, relation)
         }
-        rows, seen = [], set()
+        rows, seen, hidden = [], set(), 0
         for row in relations[relation]:
             instance_keys, connector_keys, metric_key, location_key = _engine.split_ref(row['pipe_ref'])
             other = mrsm.Pipe(connector_keys, metric_key, location_key, instance=instance_keys)
@@ -1197,6 +1229,10 @@ def _relation_rows(pipe: mrsm.Pipe) -> Dict[str, List[Dict[str, Any]]]:
             if identity in seen:
                 continue
             seen.add(identity)
+            if not access.ref_is_visible(viewer, row['pipe_ref']):
+                hidden += 1
+                continue
+            row = {**row, 'reason': anonymizer.text(row.get('reason'))}
             removable = identity in declared
             if not removable:
                 try:
@@ -1212,6 +1248,10 @@ def _relation_rows(pipe: mrsm.Pipe) -> Dict[str, List[Dict[str, Any]]]:
             if identity in seen:
                 continue
             seen.add(identity)
+            registered = other.get_id() is not None
+            if registered and not access.ref_is_visible(viewer, '|'.join(str(part) for part in identity)):
+                hidden += 1
+                continue
             rows.append({
                 'pipe': other,
                 'label': str(other),
@@ -1219,12 +1259,13 @@ def _relation_rows(pipe: mrsm.Pipe) -> Dict[str, List[Dict[str, Any]]]:
                 'action': '',
                 'reason': (
                     f"{other} is not registered."
-                    if other.get_id() is None
+                    if not registered
                     else "The Syncing Engine ignores this entry; check its edge options."
                 ),
                 'removable': True,
             })
         out[relation] = rows
+        out['hidden_' + relation] = hidden
     return out
 
 
@@ -1241,9 +1282,11 @@ def build_relations_body(
     Authenticated sessions may add and remove parents and children.
     """
     from meerschaum.api.dash import engine as _engine
+    from meerschaum.api.dash import access
+    viewer = access.current_viewer()
     pipe_meta_str = json.dumps(pipe.meta, sort_keys=True)
     try:
-        rows_by_relation = _relation_rows(pipe)
+        rows_by_relation = _relation_rows(pipe, viewer=viewer)
     except Exception as e:
         return html.P(f"The dependency graph is unavailable: {e}")
 
@@ -1266,9 +1309,18 @@ def build_relations_body(
         )
 
     def _table(relation: str, rows: List[Dict[str, Any]], empty: str):
+        hidden = int(rows_by_relation.get('hidden_' + relation, 0) or 0)
+        hidden_note = (
+            html.P(access.hidden_label(hidden), className='text-muted pipe-relations-hidden',
+                   id={'type': 'pipe-relations-hidden', 'index': pipe_meta_str, 'relation': relation})
+            if hidden else None
+        )
         if not rows:
-            return html.P(empty, className='text-muted', style={'margin-top': '1em'})
-        return dbc.Table(
+            return html.Div([
+                html.P(empty, className='text-muted', style={'margin-top': '1em'}) if not hidden else None,
+                hidden_note,
+            ], style={'margin-top': '1em'} if hidden else None)
+        return html.Div([dbc.Table(
             [
                 html.Thead(html.Tr([
                     html.Th('Pipe'), html.Th('Next sync'), html.Th('Details'), html.Th(''),
@@ -1291,7 +1343,7 @@ def build_relations_body(
             hover=True,
             size='sm',
             style={'margin-top': '1em'},
-        )
+        ), hidden_note])
 
     def _add_dropdown(relation: str, rows: List[Dict[str, Any]]):
         if not authenticated:
@@ -1299,11 +1351,13 @@ def build_relations_body(
         excluded = {_pipe_identity(pipe)} | {_pipe_identity(row['pipe']) for row in rows}
         instance_keys = str(pipe.instance_keys)
         try:
-            all_keys = fetch_pipes_keys('registered', pipe.instance_connector)
+            ### Only the pipes the viewer may see are offered.
+            all_keys = [
+                (ck, mk, lk) for ck, mk, lk, parameters in access.registered_pipes(pipe.instance_connector)
+                if access.can_see_pipe(viewer, parameters)
+            ]
         except Exception:
             all_keys = []
-        if isinstance(all_keys, dict):
-            all_keys = list(all_keys.values())
         options = []
         for keys in all_keys:
             connector_keys, metric_key, location_key = keys[0], keys[1], keys[2]
@@ -1336,7 +1390,7 @@ def build_relations_body(
                         _table('parents', parents, "This pipe has no parents."),
                         _add_dropdown('parents', parents),
                     ]),
-                    label=f"Parents ({len(parents)})",
+                    label=f"Parents ({len(parents) + int(rows_by_relation.get('hidden_parents', 0) or 0)})",
                     tab_id='parents',
                 ),
                 dbc.Tab(
@@ -1344,7 +1398,7 @@ def build_relations_body(
                         _table('children', children, "This pipe has no children."),
                         _add_dropdown('children', children),
                     ]),
-                    label=f"Children ({len(children)})",
+                    label=f"Children ({len(children) + int(rows_by_relation.get('hidden_children', 0) or 0)})",
                     tab_id='children',
                 ),
             ],
@@ -1362,7 +1416,7 @@ def get_backtrack_text(
     """
     Return the backtrack documents as text for the sync editor.
     """
-    backtrack_df = pipe.get_backtrack_data(debug=debug, limit=limit)
+    backtrack_df = pipe.get_backtrack_data(debug=debug, limit=limit, as_pandas=True)
     if lines:
         return to_simple_lines(backtrack_df)
     try:
@@ -1395,9 +1449,13 @@ def build_pipes_dropdown_keys_row(
     ck_alone = connector_keys and not any([str(x) for x in (tags + metric_keys + location_keys)])
     mk_alone = metric_keys and not any([str(x) for x in (connector_keys + tags + location_keys)])
     lk_alone = location_keys and not any([str(x) for x in (connector_keys + metric_keys + tags)])
-    all_keys = fetch_pipes_keys('registered', instance_connector)
-    if isinstance(all_keys, dict):
-        all_keys = list(all_keys.values())
+    from meerschaum.api.dash import access
+    viewer = access.current_viewer()
+    all_keys = [
+        (ck, mk, lk) for ck, mk, lk, parameters in access.registered_pipes(instance_connector)
+        if access.can_see_pipe(viewer, parameters)
+    ]
+    pipes = access.visible_pipes(viewer, pipes)
 
     ck_options_source = (
         {keys_tuple[0] for keys_tuple in all_keys}
@@ -1487,22 +1545,22 @@ def build_pipes_tags_dropdown(
     """
     Build the tags dropdown for the dedicated pipes page.
     """
+    from meerschaum.api.dash import access
+    viewer = access.current_viewer()
+
+    def _visible_tags(**keys) -> List[str]:
+        pipes = access.visible_pipes(viewer, mrsm.get_pipes(instance=instance, as_list=True, **keys))
+        return sorted({str(tag) for pipe in pipes for tag in (pipe.tags or [])})
+
     _tags_alone = tags and not any([str(x) for x in (connector_keys + metric_keys + location_keys)])
-    _tags_pipes = mrsm.get_pipes(
+    _tags_pipes = _visible_tags(
         connector_keys=connector_keys,
         metric_keys=metric_keys,
         location_keys=location_keys,
         tags=tags,
-        instance=instance,
-        as_tags_dict=True,
     )
 
-    _all_tags = list(
-        mrsm.get_pipes(
-            instance=instance,
-            as_tags_dict=True,
-        )
-    ) if _tags_alone else []
+    _all_tags = _visible_tags() if _tags_alone else []
 
     tags_options = [
         str(tag)

@@ -11,7 +11,7 @@ registration rules). In process, on the sandbox's SQLite instance; no server.
 
 import json
 
-from tests.api_host._helpers import run_python, sandbox  # noqa: F401
+from tests.api_host._helpers import AS_VIEWER, run_python, sandbox  # noqa: F401
 
 
 def _json(result) -> dict:
@@ -36,7 +36,7 @@ def make(ck, mk, lk=None, **params):
 def test_routes_build_each_pipes_page_with_its_keys(sandbox):
     """`/dash/pipes`, `/dash/pipes/new` and a pipe's page (each encoded key round-trips)."""
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, '''
+    out = _json(run_python(root, plugins, AS_VIEWER + '''
 import json
 from urllib.parse import urlsplit
 from meerschaum.api.dash import build_dash_app
@@ -54,9 +54,11 @@ out = {}
 base = 'http://localhost'
 out['table'] = sorted({'pipes-table-markdown', 'pipes-search', 'pipes-connector-keys-dropdown',
     'pipes-tags-dropdown', 'pipes-status-select', 'pipes-pagination'} - ids(pages.layout('/dash/pipes', base + '/dash/pipes')))
-out['new'] = sorted({'new-pipe-connector', 'new-pipe-metric', 'new-pipe-location-key', 'new-pipe-instance',
-    'new-pipe-query', 'new-pipe-preview', 'new-pipe-datetime', 'new-pipe-id', 'new-pipe-register',
-    'new-pipe-register-sync'} - ids(pages.layout('/dash/pipes/new', base + '/dash/pipes/new')))
+NEW_IDS = {'new-pipe-connector', 'new-pipe-metric', 'new-pipe-location-key', 'new-pipe-instance',
+    'new-pipe-query', 'new-pipe-preview', 'new-pipe-datetime', 'new-pipe-id', 'new-pipe-team',
+    'new-pipe-visibility', 'new-pipe-register', 'new-pipe-register-sync'}
+### Without a session the form has no buttons (a button the viewer may not use is not shown).
+out['new_anonymous'] = sorted(NEW_IDS - ids(pages.layout('/dash/pipes/new', base + '/dash/pipes/new')))
 metas = []
 for metric, location in [('counts', 'bytes'), ('a/b + c', '%3A'), ('café', None)]:
     ref = '|'.join(map(str, ('sql:apihosttest', 'sql:main', metric, location)))
@@ -68,7 +70,8 @@ detail = pages.layout('/dash/pipes/sql:main/counts', base + '/dash/pipes/sql:mai
 out['tab'] = next(node for node in pages._walk(detail) if getattr(node, 'id', None) == 'pipe-detail-tabs').active_tab
 ### Without a session (or one that may not run actions), the page has no actions.
 out['anonymous_actions'] = sorted(ids(detail) & {'pipe-action-sync', 'pipe-action-verify', 'pipe-edit-toggle', 'pipe-manage-menu'})
-pipes_access.can_act = lambda session_data: True
+as_viewer()
+out['new'] = sorted(NEW_IDS - ids(pages.layout('/dash/pipes/new', base + '/dash/pipes/new')))
 detail = pages.layout('/dash/pipes/sql:main/counts', base + '/dash/pipes/sql:main/counts')
 out['admin_actions'] = sorted(ids(detail) & {'pipe-action-sync', 'pipe-action-verify', 'pipe-edit-toggle', 'pipe-manage-menu',
     'pipe-manage-clear', 'pipe-manage-drop', 'pipe-manage-delete', 'pipe-manage-copy'})
@@ -77,6 +80,7 @@ out['captions'] = 'text-muted' in str(detail) or 'text-muted' in str(pages.layou
 print('JSON:' + json.dumps(out))
 '''))
     assert out['table'] == [] and out['new'] == []
+    assert out['new_anonymous'] == ['new-pipe-register', 'new-pipe-register-sync']
     assert out['metas'] == [
         {'connector_keys': 'sql:main', 'metric_key': 'counts', 'location_key': 'bytes', 'instance_keys': 'sql:apihosttest'},
         {'connector_keys': 'sql:main', 'metric_key': 'a/b + c', 'location_key': '%3A', 'instance_keys': 'sql:apihosttest'},
@@ -417,7 +421,7 @@ print('JSON:' + json.dumps(out, default=str))
 
 def test_callbacks_refuse_sessions_that_may_not_act_and_need_the_metric_typed(sandbox):
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, SEED + '''
+    out = _json(run_python(root, plugins, AS_VIEWER + SEED + '''
 from unittest import mock
 from dash._callback_context import context_value
 from dash._utils import AttributeDict
@@ -440,11 +444,13 @@ def fake_run(sysargs, username, metadata=None):
 
 out = {}
 with mock.patch('meerschaum.api.dash.execute.run_action', fake_run):
-    with mock.patch.object(pipes_access, 'can_act', return_value=False):
-        trigger('pipe-action-sync.n_clicks')
-        store, alert, _ = callbacks.run_pipe_action(1, None, None, None, None, None, None, meta, {'session-id': 'x'})
-        out['refused'] = [store is callbacks.dash.no_update, 'not allowed' in str(alert)]
-    with mock.patch.object(pipes_access, 'can_act', return_value=True):
+    ### A Viewer may not sync (`pipes:write`): the callback refuses whatever the browser sends.
+    as_viewer('cb-viewer', admin=False, role='viewer')
+    trigger('pipe-action-sync.n_clicks')
+    store, alert, _ = callbacks.run_pipe_action(1, None, None, None, None, None, None, meta, {'session-id': 'x'})
+    out['refused'] = [store is callbacks.dash.no_update, 'may not sync' in str(alert)]
+    as_viewer('cb-admin')
+    if True:
         trigger('pipe-action-sync.n_clicks')
         store, alert, _ = callbacks.run_pipe_action(1, None, None, None, None, None, None, meta, {'session-id': 'x'})
         out['sync'] = [store['job'], store['stream'], store['action'], store['command']]
@@ -474,13 +480,15 @@ trigger('pipes-sort-select.value', 'sync_time:asc')
 out['sort_select'] = callbacks.sort_pipes(None, 'sync_time:asc', {'column': 'pipe', 'ascending': True})[0]
 ### Filters become the URL; an unchanged URL does not update.
 trigger('pipes-tags-dropdown.value', ['a'])
-out['search'] = callbacks.update_location_on_pipes_filter_change(['sql:main'], [], [], ['a'], 'any', None, '', {'instance': 'x', 'global': 'x'})
+out['search'] = callbacks.update_location_on_pipes_filter_change(['sql:main'], [], [], ['a'], 'any', None, None, '', {'instance': 'x', 'global': 'x'})
 try:
-    callbacks.update_location_on_pipes_filter_change(['sql:main'], [], [], ['a'], 'any', None, out['search'], {'instance': 'x', 'global': 'x'})
+    callbacks.update_location_on_pipes_filter_change(['sql:main'], [], [], ['a'], 'any', None, None, out['search'], {'instance': 'x', 'global': 'x'})
     out['unchanged'] = 'updated'
 except PreventUpdate:
     out['unchanged'] = 'prevented'
-out['deep_link'] = callbacks.update_location_on_pipes_filter_change([], [], [], [], 'failing', None, '', {'instance': 'sql:b', 'global': 'sql:a'})
+out['deep_link'] = callbacks.update_location_on_pipes_filter_change([], [], [], [], 'failing', None, None, '', {'instance': 'sql:b', 'global': 'sql:a'})
+### The owner filter is in the URL too.
+out['scope_link'] = callbacks.update_location_on_pipes_filter_change([], [], [], [], 'any', None, 'mine', '', {'instance': 'x', 'global': 'x'})
 ### Preview runs the query with the connector's credentials: only for those who may register pipes.
 previewed = []
 with mock.patch.object(pipes_access, 'can_register', return_value=(False, 'Registering is off here.')), \
@@ -505,6 +513,7 @@ print('JSON:' + json.dumps(out))
     assert out['search'] == '?connector_keys=sql%3Amain&tags=a'
     assert out['unchanged'] == 'prevented'
     assert out['deep_link'] == '?status=failing&instance=sql%3Ab'
+    assert out['scope_link'] == '?scope=mine'
     assert out['preview_refused'] == [True, True]
 
 
@@ -551,7 +560,7 @@ def test_a_pipe_whose_instance_cannot_be_read_is_not_called_unregistered(sandbox
     root, plugins = sandbox
     out = _json(run_python(root, plugins, extra_env={
         'MRSM_SQL_W7DOWN': 'postgresql://w7user:W7-down-s3cret@127.0.0.1:1/w7',
-    }, code=SEED + '''
+    }, code=AS_VIEWER + SEED + '''
 from unittest import mock
 from dash._callback_context import context_value
 from dash._utils import AttributeDict
@@ -586,6 +595,12 @@ out['register_href'] = button.href
 ### The callback tags each answer with the pipe's registration (the page hides the actions).
 session = {'session-id': '00000000-0000-4000-8000-0000000b5f01'}
 results = {}
+### A viewer who is not an administrator: their pipe's access is read first, so an outage still
+### reads as an error (not as a pipe they may not see, which reads as not registered).
+as_viewer('down-editor', admin=False, role='editor')
+trigger('pipe-detail-tabs.active_tab', 'overview')
+results['down_editor'] = callbacks.render_pipe_detail_tab('overview', False, 0, pipe_detail.meta_of(down), session)['registered']
+as_viewer()
 with mock.patch.object(pipes_access, 'can_read', return_value=True), \\
         mock.patch.object(pipes_access, 'can_act', return_value=True), \\
         mock.patch.object(pipes_access, 'can_register', return_value=(True, '')):
@@ -622,6 +637,7 @@ print('JSON:' + json.dumps(out, default=str))
     assert out['results']['registered'] == [True, 'overview', False]
     assert out['results']['missing'] == [False, 'overview', True]
     assert out['results']['down'] == [None, 'overview', False]
+    assert out['results']['down_editor'] is None
     assert out['results']['after_delete_missing'] == '/dash/pipes'
     assert out['results']['after_delete_registered'] == 'stayed'
     assert out['results']['after_delete_down'] == 'stayed'
@@ -667,7 +683,7 @@ print('JSON:' + json.dumps({
 
 def test_the_search_is_in_the_url_and_only_key_filters_reload_the_rows(sandbox):
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, SEED + '''
+    out = _json(run_python(root, plugins, AS_VIEWER + SEED + '''
 from dash._callback_context import context_value
 from dash._utils import AttributeDict
 from dash.exceptions import PreventUpdate
@@ -689,14 +705,14 @@ out['search'] = search
 out['q'] = pt.filters_from_search(search)['q']
 ### The filters keep the search box's text in the URL; Clear all drops it.
 trigger('pipes-tags-dropdown.value', ['retail'])
-out['with_text'] = callbacks.update_location_on_pipes_filter_change(['srch'], [], [], ['retail'], 'any', None, '', meta, 'store_1')
+out['with_text'] = callbacks.update_location_on_pipes_filter_change(['srch'], [], [], ['retail'], 'any', None, None, '', meta, 'store_1')
 trigger('pipes-clear-all-button.n_clicks', 1)
-out['cleared'] = callbacks.update_location_on_pipes_filter_change(['srch'], [], [], ['retail'], 'any', 1, out['with_text'], meta, 'store_1')
+out['cleared'] = callbacks.update_location_on_pipes_filter_change(['srch'], [], [], ['retail'], 'any', 1, 'mine', out['with_text'], meta, 'store_1')
 ### A shared link fills the search box.
 layout = pages.layout('/dash/pipes', 'http://localhost/dash/pipes?q=store_1')
 out['box'] = next(node for node in pages._walk(layout) if getattr(node, 'id', None) == 'pipes-search').value
 ### The rows are read again only when the keys, tags or instance change (or on Refresh).
-pipes_access.can_read = lambda session_data: True
+as_viewer()
 trigger('pipes-location.search', '?connector_keys=srch')
 store, _ = callbacks.load_pipes_rows('?connector_keys=srch', 0, '/dash/pipes', meta, {}, None)
 out['loaded'] = [row['mk'] for row in store['rows']]
@@ -752,7 +768,7 @@ def test_the_table_is_escaped_html_and_its_statistics_follow_each_render(sandbox
     sorted header says so (`aria-sort`); each render asks for the statistics the page still needs.
     """
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, SEED + '''
+    out = _json(run_python(root, plugins, AS_VIEWER + SEED + '''
 from html.parser import HTMLParser
 from unittest import mock
 from dash._callback_context import context_value
@@ -809,11 +825,12 @@ meta = {'instance': str(instance), 'global': str(instance)}
 store = {'instance': str(instance), 'rows': rows, 'generation': 0}
 context_value.set(AttributeDict(**{'triggered_inputs': [{'prop_id': 'pipes-rows-store.data', 'value': store}]}))
 table, summary, num_pages, page, hidden, rendered = callbacks.render_pipes_table(
-    store, None, '', 'any', {'column': 'pipe', 'ascending': True}, 1, meta,
+    store, None, '', 'any', {'column': 'pipe', 'ascending': True}, 1, None, meta,
 )
 out['first_render'] = [table.count('>…<'), summary, num_pages, page, hidden, rendered['generation'], rendered['page']]
 pipes_table_session = {'session-id': '00000000-0000-4000-8000-0000000b5f02'}
-with mock.patch.object(pipes_access, 'can_read', return_value=True):
+as_viewer()
+if True:
     filled = callbacks.fill_pipes_stats(rendered, store, None, '', 'any', None, pipes_table_session)
     out['filled'] = sorted(filled['stats']) == sorted(row['ref'] for row in rows)
     try:
@@ -828,7 +845,7 @@ with mock.patch.object(pipes_access, 'can_read', return_value=True):
         out['stale'] = 'prevented'
 context_value.set(AttributeDict(**{'triggered_inputs': [{'prop_id': 'pipes-stats-store.data', 'value': filled}]}))
 out['second_render'] = callbacks.render_pipes_table(
-    store, filled, '', 'any', {'column': 'pipe', 'ascending': True}, 1, meta,
+    store, filled, '', 'any', {'column': 'pipe', 'ascending': True}, 1, None, meta,
 )[0].count('>…<')
 print('JSON:' + json.dumps(out))
 '''))
@@ -838,11 +855,11 @@ print('JSON:' + json.dumps(out))
     assert out['tags'] == [True, True]
     assert out['headers'] == {
         'pipes-header-pipe': 'none', 'pipes-header-rows': 'descending',
-        'pipes-header-sync_time': 'none', 'pipes-header-status': 'none',
+        'pipes-header-sync_time': 'none', 'pipes-header-status': 'none', 'pipes-header-team': 'none',
     }
     assert out['buttons'] == {
         'pipes-sort-pipe': 'pipe', 'pipes-sort-rows': 'rows',
-        'pipes-sort-sync_time': 'sync_time', 'pipes-sort-status': 'status',
+        'pipes-sort-sync_time': 'sync_time', 'pipes-sort-status': 'status', 'pipes-sort-team': 'team',
     }
     assert out['instance_badge'] is True and out['empty'] is True and out['loading'] is True
     ### Two rows, three slow cells each, before the statistics.

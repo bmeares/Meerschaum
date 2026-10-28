@@ -312,7 +312,9 @@ print('JSON:' + json.dumps(out))
     assert 'session-store' in out['login_in_place']['body']['response']
     bad = out['login_bad']['body']['response']
     assert 'session-store' not in bad and 'is-invalid' in json.dumps(bad)
-    assert out['validate_username']['status'] == 200
+    ### Self-registration is off by default (and this instance has users): the username check
+    ### answers nothing at all, so it cannot tell which usernames exist.
+    assert out['validate_username']['status'] == 204
 
     assert out['next_paths'] == {
         '/dash/jobs': '/dash/jobs',

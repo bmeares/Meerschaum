@@ -215,7 +215,7 @@ def test_actions_are_absent_for_a_user_who_may_not_run_them(secure_server, conte
     ### Without a session the page is the login form.
     tab.goto(PARENT, '#username-input')
     assert tab.page.locator('#pipe-action-sync').count() == 0
-    tab.login('w7user', 'correct-horse-3')
+    tab.login('w7user', 'correct-horse-3', path=PARENT)
     tab.goto(PARENT, '#pipe-detail-content .pipes-tiles')
     for button in ('#pipe-action-sync', '#pipe-action-verify', '#pipe-edit-toggle', '#pipe-manage-menu',
                    '#pipe-manage-delete'):

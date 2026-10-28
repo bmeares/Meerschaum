@@ -56,9 +56,10 @@ def check_token_access(
     import uuid
     from meerschaum.utils.misc import is_uuid
     from meerschaum.api import no_auth
-    from meerschaum.api.dash.sessions import is_state_authenticated
+    from meerschaum.api.dash.access import get_viewer
 
-    if not is_state_authenticated(session_store_data):
+    viewer = get_viewer(session_store_data)
+    if not (viewer.signed_in or viewer.no_auth):
         return False, "You are not authenticated."
 
     if not is_uuid(token_id):
@@ -520,16 +521,15 @@ def default_token_scopes(user: Optional[mrsm.core.User] = None) -> Tuple[bool, L
     all_scopes = list(STATIC_CONFIG['tokens']['scopes'])
     if user is None:
         return True, all_scopes
-    conn = get_api_connector()
+    ### Their effective permissions (their role's, or their own list): a token holds no more.
+    from meerschaum.api.dash.access import viewer_for
     try:
-        if conn.get_user_type(user, debug=debug) == 'admin':
-            return True, all_scopes
-        scopes = list(user.get_scopes(refresh=True, debug=debug) or [])
+        viewer = viewer_for(str(user.username))
     except Exception:
-        return False, all_scopes
-    if '*' in scopes:
+        return False, []
+    if viewer.is_admin or viewer.no_auth or '*' in viewer.permissions:
         return True, all_scopes
-    return False, [scope for scope in all_scopes if scope in scopes]
+    return False, [scope for scope in all_scopes if scope in viewer.permissions]
 
 
 def build_tokens_register_input_modal(user: Optional[mrsm.core.User] = None) -> dbc.Modal:

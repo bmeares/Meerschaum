@@ -14,8 +14,46 @@ from meerschaum.core.Pipeline._saved import (
 
 
 def _require_session(data):
-    if not is_state_authenticated(data):
+    """A Pipeline's page is for viewers who may read pipes (`pipes:read`)."""
+    from meerschaum.api.dash import pipes_access
+    if not pipes_access.can_read(data):
         raise PreventUpdate
+
+
+def _viewer(session):
+    from meerschaum.api.dash import pipes_access
+    return pipes_access.viewer(session)
+
+
+def _require_pipeline_rights(session, name, instance, permission='pipes:write'):
+    """
+    Raise `PermissionError` unless the viewer may change the saved Pipeline `name` (its
+    registry pipe's access, AC7) within `permission`.
+    """
+    from meerschaum.api.dash import access
+    viewer = _viewer(session)
+    if viewer.no_auth or viewer.is_admin:
+        return viewer
+    parameters = access.pipeline_registry_parameters(name, instance)
+    if not parameters or not access.can_see_pipe(viewer, parameters):
+        raise PermissionError(f"Pipeline '{name}' is not available.")
+    if not access.can_edit_pipe(viewer, parameters, permission):
+        raise PermissionError(f"You may not change Pipeline('{name}').")
+    return viewer
+
+
+def _require_members_rights(session, name, instance, permission):
+    """Raise `PermissionError` unless the viewer may `permission` every member of a Pipeline."""
+    from meerschaum.api.dash import access
+    viewer = _viewer(session)
+    if viewer.no_auth or viewer.is_admin:
+        return viewer
+    if not viewer.can(permission):
+        raise PermissionError(f"Your account may not do this (`{permission}`).")
+    allowed, reason = access.may_sync_pipeline(viewer, name, instance)
+    if not allowed:
+        raise PermissionError(reason)
+    return viewer
 
 
 def pipeline_path(name):
@@ -69,7 +107,11 @@ def read_selection(pathname, name, search, refresh, session, current=None, curre
         name = requested
     elif not name and requested:
         name = requested
-    definitions = list_pipelines(instance)
+    ### Only the Pipelines the viewer may see, without their hidden members (AC7).
+    from meerschaum.api.dash import access
+    definitions = access.visible_pipelines(
+        instance, viewer=_viewer(session), definitions=list_pipelines(instance),
+    )
     dash.set_props('pipeline-definitions', {'data': definitions})
     definition = definitions.get(name)
     dash.set_props('pipelines-alert-div', {'children': [] if definition or not name else
@@ -136,6 +178,7 @@ def manage_selection(delete_clicks, draft_save, name, selected, draft, current, 
             if dash.ctx.triggered_id == 'pipeline-delete-confirm':
                 if not selected:
                     raise ValueError('Select a saved pipeline to delete.')
+                _require_pipeline_rights(session, selected, instance, 'pipes:delete')
                 saved = list_pipelines(instance).get(selected) or {}
                 expected = {key: saved.get(key) for key in ('name', 'registry', 'id', 'revision')}
                 if not delete_target or delete_target != expected:
@@ -156,10 +199,25 @@ def manage_selection(delete_clicks, draft_save, name, selected, draft, current, 
                     if value is not ... and bool(value) != bool(draft.get(key)):
                         draft[key] = value or None
                 from meerschaum.api.dash.pipeline_editing import apply_edits
+                from meerschaum.api.dash import access
                 edits = draft.get('pipe_edits') or {}
                 definitions = list_pipelines(instance)
                 if not selected and name in definitions:
                     raise ValueError('That Pipeline name is already registered. Choose another name.')
+                viewer = _viewer(session)
+                if selected:
+                    _require_pipeline_rights(session, selected, instance, 'pipes:write')
+                elif not viewer.can('pipes:register'):
+                    raise PermissionError('Your account may not register Pipelines.')
+                ### Members the viewer may not see stay (they cannot remove what they cannot see),
+                ### and they may add only pipes they can see.
+                kept_hidden = access.hidden_members(selected, instance, viewer=viewer) if selected else []
+                for ref in draft.get('targets', []):
+                    if ref not in (draft.get('new_pipes') or {}) and not access.ref_is_visible(viewer, ref):
+                        raise PermissionError(f'{engine.ref_label(ref)} is not available.')
+                draft['targets'] = list(draft.get('targets', [])) + [
+                    ref for ref in kept_hidden if ref not in draft.get('targets', [])
+                ]
                 previous = definitions.get(selected) if selected else None
                 if selected and (previous or {}).get('revision') != (current or {}).get('revision'):
                     raise ValueError('Pipeline revision changed; reload before saving.')
@@ -167,13 +225,16 @@ def manage_selection(delete_clicks, draft_save, name, selected, draft, current, 
                     if ref not in draft.get('targets', []):
                         continue
                     from meerschaum.api.dash.pipeline_editing import make_pipe
+                    from meerschaum.api.dash import pipe_writes
                     pipe = make_pipe(ref, parameters)
                     if pipe.get_id() is None:
-                        registered, message = pipe.register()
+                        registered, message = pipe_writes.register_pipe(
+                            pipe, dict(pipe.parameters or {}), viewer=viewer,
+                        )
                         if not registered:
                             raise ValueError(f'Could not register {pipe}: {message}')
                         completed.append(f'Registered {pipe}')
-                results = apply_edits(edits, draft.get('targets', [])) if edits else []
+                results = apply_edits(edits, draft.get('targets', []), viewer=viewer) if edits else []
                 completed.extend(f'Saved shared Pipe {ref}' for ref, success, message in results if success)
                 if results:
                     remaining = {ref: edit for ref, edit in edits.items()
@@ -186,7 +247,8 @@ def manage_selection(delete_clicks, draft_save, name, selected, draft, current, 
                 definition = save_pipeline(name, draft.get('targets', []), instance,
                     parents=draft.get('parents'), children=draft.get('children'),
                     expected_revision=(current or {}).get('revision'), create=not bool(selected),
-                    layout=_clean_layout(layout) if layout else None)
+                    layout=_clean_layout(layout) if layout else None,
+                    access=(access.new_pipe_access(viewer) if not selected else None))
                 result = True, f"Saved Pipeline('{name}')."
                 dash.set_props('pipeline-definition', {'data': definition})
                 dash.set_props('pipeline-layout-draft', {'data': None})
@@ -236,7 +298,16 @@ def manage_jobs(pipeline, ticks, create, starts, stops, name, schedule, workers,
                     and args[args.index('-i') + 1] == str(instance))
         related = {key: job for key, job in jobs.items() if belongs(job)}
         trigger = dash.ctx.triggered_id
+        from meerschaum.api.dash import access
+        viewer = _viewer(session)
+        if not access.visible_pipeline(pipeline, instance, viewer=viewer):
+            raise PermissionError(f"Pipeline '{pipeline}' is not available.")
+        ### The jobs of this Pipeline the viewer may see (AC9).
+        related = access.filter_jobs(viewer, related)
         if trigger == 'pipeline-job-create' and create:
+            if not viewer.can('jobs:write'):
+                raise PermissionError('Your account may not create jobs.')
+            _require_members_rights(session, pipeline, instance, 'pipes:write')
             if pipeline not in list_pipelines(instance):
                 raise ValueError('Save the pipeline before scheduling it.')
             from meerschaum.core.Pipeline._saved import validate_name
@@ -246,26 +317,37 @@ def manage_jobs(pipeline, ticks, create, starts, stops, name, schedule, workers,
             from meerschaum.utils.schedule import parse_schedule
             parse_schedule(schedule or '')
             args = job_arguments(pipeline, instance, schedule, workers, retries or 0, force)
-            job = Job(name, args)
+            ### The job is the session user's, in their primary team (AC9).
+            from meerschaum.jobs import ownership_properties
+            from meerschaum.api.dash.access import get_viewer
+            viewer = get_viewer(session_data=session)
+            job = Job(name, args, _properties=ownership_properties(
+                None if viewer.no_auth else viewer.username,
+                None if viewer.no_auth else viewer.primary_team,
+            ))
             message = alert_from_success_tuple(job.start())
             related[name] = job
         elif isinstance(trigger, dict) and any((starts or []) + (stops or [])):
             job = related.get(trigger['index'])
             if job is None:
                 raise ValueError('This Job does not belong to the selected pipeline.')
-            result = job.start() if trigger['type'] == 'pipeline-job-start' else job.stop()
+            starting = trigger['type'] == 'pipeline-job-start'
+            permission = 'jobs:execute' if starting else 'jobs:stop'
+            if not viewer.can(permission):
+                raise PermissionError(f"Your account may not {'start' if starting else 'stop'} jobs.")
+            result = job.start() if starting else job.stop()
             message = alert_from_success_tuple(result)
         rows = [html.Tr([
             html.Td(html.A(key, href='/dash/jobs', target='_blank')),
             html.Td(job.status), html.Td(html.Code(job.label)),
-            html.Td([
-                dbc.Button('Start', id={'type': 'pipeline-job-start', 'index': key},
-                           size='sm', class_name='me-2'),
-                dbc.Button('Use settings', id={'type': 'pipeline-job-copy', 'index': key},
-                           size='sm', color='secondary', class_name='me-2'),
-                dbc.Button('Stop', id={'type': 'pipeline-job-stop', 'index': key},
-                           size='sm', color='secondary'),
-            ]),
+            html.Td(
+                ([dbc.Button('Start', id={'type': 'pipeline-job-start', 'index': key},
+                             size='sm', class_name='me-2')] if viewer.can('jobs:execute') else [])
+                + ([dbc.Button('Use settings', id={'type': 'pipeline-job-copy', 'index': key},
+                               size='sm', color='secondary', class_name='me-2')] if viewer.can('jobs:write') else [])
+                + ([dbc.Button('Stop', id={'type': 'pipeline-job-stop', 'index': key},
+                               size='sm', color='secondary')] if viewer.can('jobs:stop') else [])
+            ),
         ]) for key, job in sorted(related.items())]
         return [message, dbc.Table([html.Tbody(rows)], size='sm') if rows else html.P('No scheduled Jobs.')]
     except Exception as exc:
@@ -321,6 +403,8 @@ def select_or_run_pipeline(run_clicks, name, search, session):
     try:
         validate_name(name)
         instance = engine.get_instance(parse_qs((search or '').lstrip('?')).get('instance', [None])[0])
+        ### Every member it would sync must be the viewer's to change (AC7).
+        _require_members_rights(session, name, instance, 'pipes:write')
         definition = list_pipelines(instance).get(name)
         if not definition:
             raise ValueError('Pipeline registration is missing.')
@@ -343,6 +427,15 @@ def select_or_run_pipeline(run_clicks, name, search, session):
                 'session_id': (session or {}).get('session-id'),
                 'status': 'running',
             }})
+            ### The new run's members, at once: a member's output can be opened before the run
+            ### history lists the run (`render_pipelines` writes the same store from then on).
+            targets = [str(ref) for ref in (definition.get('targets') or [])]
+            if targets:
+                dash.set_props('pipeline-current-run', {'data': {
+                    'run_id': run_id, 'instance': str(instance), 'pipeline': name,
+                    'job': result['job'],
+                    'labels': {ref: engine.ref_label(ref) for ref in sorted(targets)},
+                }})
             dash.set_props('pipelines-interval', {'interval': 2000})
         return [] if result['success'] else alert_from_success_tuple((False, result['msg']))
     except Exception as exc:
@@ -450,6 +543,9 @@ def analyze_selection(analyze, apply, name, proposal, search, session):
         return [], None, alert_from_success_tuple((False, 'Select a registered Pipeline first.'))
     try:
         instance = engine.get_instance(parse_qs((search or '').lstrip('?')).get('instance', [None])[0])
+        ### Analyze lists every pipe the Pipeline reaches, and Apply edits their tags: both are for
+        ### a viewer who may change each of them.
+        _require_members_rights(session, name, instance, 'pipes:write')
         if dash.ctx.triggered_id == 'pipeline-apply-tags':
             if not proposal or proposal.get('definition', {}).get('name') != name:
                 raise ValueError('Analyze this Pipeline before approving tags.')
@@ -558,10 +654,12 @@ def edit_draft(definition, members, parents, children, discard, undo, redo, cont
             (f"{changes} unsaved change" + ('' if changes == 1 else 's')) if dirty else '')
 
 
-def find_or_add_pipe(trigger, instance, connector, metric, location, parameters, existing, prefix):
+def find_or_add_pipe(trigger, instance, connector, metric, location, parameters, existing, prefix,
+                     viewer=None):
     """
-    The member panel: `Find Pipes` lists an instance's Pipes; `Add new Pipe` proposes a new
-    Pipe, registered only when the draft is saved (Edit mode) or created (New pipeline).
+    The member panel: `Find Pipes` lists an instance's Pipes (those `viewer` may see); `Add new
+    Pipe` proposes a new Pipe, registered only when the draft is saved (Edit mode) or created
+    (New pipeline), with the viewer's access.
     """
     import json
     import meerschaum as mrsm
@@ -580,7 +678,7 @@ def find_or_add_pipe(trigger, instance, connector, metric, location, parameters,
             ref = '|'.join((str(pipe.instance_keys), connector, metric, location or 'None'))
             options[ref] = {'label': engine.ref_label(ref) + ' (new)', 'value': ref}
             return {'options': list(options.values()), 'add': ref, 'new': {ref: values}}, []
-        for pipe in engine._instance_pipes(engine.get_instance(instance, strict=True)):
+        for pipe in engine._instance_pipes(engine.get_instance(instance, strict=True), viewer=viewer):
             ref = '|'.join((str(pipe.instance_keys), pipe.connector_keys,
                             pipe.metric_key, pipe.location_key or 'None'))
             options[ref] = {'label': engine.ref_label(ref), 'value': ref}
@@ -603,7 +701,7 @@ def _register_member_panel(prefix):
                        existing, session):
         _require_session(session)
         return find_or_add_pipe(dash.ctx.triggered_id, instance, connector, metric, location,
-                                parameters, existing, prefix)
+                                parameters, existing, prefix, viewer=_viewer(session))
     return add_draft_pipe
 
 
@@ -687,6 +785,11 @@ def toggle_edit_mode(edit, discard, definition, session):
     _require_session(session)
     if dash.ctx.triggered_id == 'pipeline-edit-toggle':
         if not edit or not definition:
+            raise PreventUpdate
+        try:
+            _require_pipeline_rights(session, definition['name'], definition.get('registry'), 'pipes:write')
+        except PermissionError as exc:
+            dash.set_props('pipeline-edit-alert', {'children': alert_from_success_tuple((False, str(exc)))})
             raise PreventUpdate
         return True
     if not discard:
@@ -826,7 +929,14 @@ def copy_selection(clicks, new_name, definition, search, session):
     from meerschaum.core.Pipeline._saved import copy_pipeline, validate_name
     try:
         validate_name(new_name or '')
-        copy_pipeline(definition['name'], new_name, _instance(search))
+        viewer = _viewer(session)
+        if not viewer.can('pipes:register'):
+            raise PermissionError('Your account may not register Pipelines.')
+        _require_members_rights(session, definition['name'], _instance(search), 'pipes:read')
+        ### The copy belongs to the viewer from its first registration (AC4).
+        from meerschaum.api.dash import pipe_writes
+        copy_pipeline(definition['name'], new_name, _instance(search),
+                      access=pipe_writes.new_access(viewer))
         dash.set_props('pipeline-copy-modal', {'is_open': False})
         dash.set_props('pipelines-navigate', {'data': pipeline_path(new_name)})
         return []
@@ -847,6 +957,7 @@ def rename_selection(clicks, new_name, definition, search, session):
     from meerschaum.core.Pipeline._saved import rename_pipeline, validate_name
     try:
         validate_name(new_name or '')
+        _require_pipeline_rights(session, definition['name'], _instance(search), 'pipes:write')
         rename_pipeline(definition['name'], new_name, _instance(search),
                         expected_revision=definition.get('revision'))
         dash.set_props('pipeline-rename-modal', {'is_open': False})
@@ -896,6 +1007,13 @@ def run_destructive_or_propose_edge(submit, proposal, target, definition, draft,
     try:
         if target.get('revision') != definition.get('revision') or target.get('name') != definition.get('name'):
             raise ValueError('The Pipeline changed; review again.')
+        ### Clear and Drop touch every member: the viewer must see and may change each one.
+        if target.get('action') not in ('clear', 'drop'):
+            raise ValueError('Choose Clear or Drop.')
+        _require_members_rights(
+            session, target['name'], target['registry'],
+            'pipes:delete' if target['action'] == 'clear' else 'pipes:drop',
+        )
         result = run_action([target['action'], 'pipelines', target['name'], '-i', target['registry'], '--yes'],
                             get_username_from_session((session or {}).get('session-id')))
         if not result['success']:

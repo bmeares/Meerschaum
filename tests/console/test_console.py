@@ -450,12 +450,15 @@ def test_dashboard_buttons_keep_their_rows_at_every_width(server, tab):
 
 
 def test_a_non_admin_runs_what_the_console_offers_and_is_refused_the_rest(server, tab):
-    """`POST /execute` limits a non-administrator to the console's actions, with a clear message."""
+    """
+    `POST /execute` limits a non-administrator who may run actions (an Operator) to the console's
+    actions, with a clear message.
+    """
     result = server.python("""
 import meerschaum as mrsm
 from meerschaum.core import User
 conn = mrsm.get_connector('sql:w7console')
-success, msg = conn.register_user(User('bobby', 'correct-horse-2', instance=conn))
+success, msg = conn.register_user(User('bobby', 'correct-horse-2', instance=conn, attributes={'role': 'operator'}))
 assert success, msg
 """)
     assert result.returncode == 0, result.stderr[-2000:]
@@ -467,8 +470,8 @@ assert success, msg
     ### The dashboard's own omit list comes from the server (`GET /execute/policy`).
     options = tab.page.locator('#action-dropdown option').all_inner_texts()
     assert 'show' in options and 'sh' not in options and 'stack' not in options
-    ### The default selection (`show pipes`) is allowed for any user: the server reads
-    ### `api:permissions:actions:non_admin` (true by default) for `/execute`, as the console does.
+    ### The default selection (`show pipes`) is allowed for an Operator (`actions:execute`), as the
+    ### console says.
     tab.page.select_option('#action-dropdown', 'show')
     tab.page.click('#go-button')
     _wait_text(tab.page, '#terminal-exec-status', 'Terminal is unavailable', timeout=60000)

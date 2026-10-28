@@ -48,6 +48,7 @@ from meerschaum.api.dash.jobs import (
     JOB_FILTER_STATES,
     job_filter_state,
     actions_class_name,
+    job_rights,
 )
 from meerschaum.api.dash._support import get_job as _get_job
 from meerschaum.api.dash.sessions import is_session_authenticated, is_state_authenticated
@@ -75,8 +76,9 @@ def download_job_logs(n_clicks, session_store_data):
     if not n_clicks:
         raise PreventUpdate
 
-    ### Job logs may contain connector URIs and query text.
-    if not is_state_authenticated(session_store_data):
+    ### Job logs may contain connector URIs and query text: `logs:read`, on a job the viewer sees.
+    from meerschaum.api.dash.access import get_viewer
+    if not get_viewer(session_store_data).can('logs:read'):
         raise PreventUpdate
 
     ctx = dash.callback_context.triggered
@@ -162,19 +164,20 @@ def manage_job_button_click(
         raise PreventUpdate
 
     session_id = (session_data or {}).get('session-id', None)
-    if not may_manage_jobs(session_id):
+    component_dict = json.loads(ctx[0]['prop_id'].split('.' + 'n_clicks')[0])
+    job_name = component_dict['index']
+    manage_job_action = component_dict['action']
+    from meerschaum.api.dash.access import get_viewer
+    from meerschaum.api.dash.jobs import job_rights
+    if not job_rights(get_viewer(session_data)).get(manage_job_action, False):
         username = get_username_from_session(session_id)
         return (
-            alert_from_success_tuple((False, f"User '{username}' may not manage jobs.")),
+            alert_from_success_tuple((False, f"User '{username}' may not {manage_job_action} jobs.")),
             no_update,
             no_update,
             no_update,
             no_update,
         )
-
-    component_dict = json.loads(ctx[0]['prop_id'].split('.' + 'n_clicks')[0])
-    job_name = component_dict['index']
-    manage_job_action = component_dict['action']
     try:
         job = _get_job(job_name, job_label.replace('\n', ' ') if job_label else None)
     except Exception:
@@ -266,12 +269,14 @@ def job_delete_modal(
     if 'job-delete-cancel-button' in prop_id:
         return False, [], ''
 
-    ### Confirm button: actually delete the job.
+    ### Confirm button: actually delete the job (`jobs:delete`).
     session_id = (session_data or {}).get('session-id', None)
-    if not may_manage_jobs(session_id):
+    from meerschaum.api.dash.access import get_viewer
+    from meerschaum.api.dash.jobs import job_rights
+    if not job_rights(get_viewer(session_data)).get('delete', False):
         username = get_username_from_session(session_id)
         return True, alert_from_success_tuple(
-            (False, f"User '{username}' may not manage jobs.")
+            (False, f"User '{username}' may not delete jobs.")
         ), no_update
 
     component_dict = json.loads(prop_id.split('.' + 'n_clicks')[0])
@@ -320,7 +325,7 @@ def refresh_jobs_on_interval(
     actions and timestamps only when its status changed (a button being replaced loses a click).
     """
     session_id = (session_data or {}).get('session-id', None)
-    may_manage = may_manage_jobs(session_id)
+    may_manage = _signed_in(session_id)
 
     job_names = [
         component_dict['id']['index']
@@ -386,7 +391,7 @@ def render_job_page_from_url(
         return no_update
 
     session_id = (session_data or {}).get('session-id', None)
-    authenticated = may_manage_jobs(str(session_id) if session_id else None)
+    authenticated = _signed_in(session_id)
 
     job_name = pathname.replace('/dash/runs' if is_runs else '/dash/jobs', '').lstrip('/').rstrip('/')
     if not job_name:
@@ -404,7 +409,7 @@ def render_job_page_from_url(
                     html.Div(
                         dbc.Button('New job', id='jobs-new-button', color='primary'),
                         id='jobs-new-button-div',
-                        hidden=(is_runs or not authenticated),
+                        hidden=(is_runs or not job_rights().get('create', False)),
                         className='jobs-toolbar-actions',
                     ),
                 ],
@@ -455,6 +460,17 @@ def render_job_page_from_url(
         build_job_card(job, authenticated=authenticated, include_follow=False),
         html.Br(),
     ]
+
+
+def _viewer_of(session_id: Optional[str]):
+    from meerschaum.api.dash.access import get_viewer
+    return get_viewer(session_id=(str(session_id) if session_id else None))
+
+
+def _signed_in(session_id: Optional[str]) -> bool:
+    """Whether the session is a signed-in viewer (or `--no-auth`)."""
+    viewer = _viewer_of(session_id)
+    return bool(viewer.no_auth or viewer.signed_in)
 
 
 def _listed_jobs(is_runs: bool, session_id: Optional[str]) -> Dict[str, Any]:
@@ -517,7 +533,7 @@ def render_jobs_page_tab(
         content,
         {'tab': active_tab, 'names': names, 'filter': filter_text or '', 'status': status},
         total <= COMPACT_JOBS_THRESHOLD and not filter_text and not status,
-        is_runs or not may_manage_jobs(session_id),
+        is_runs or not job_rights(_viewer_of(session_id)).get('create', False),
     )
 
 
@@ -546,14 +562,16 @@ def build_jobs_tab(
     the summaries retained after their output expired). With `with_total`, return
     `(content, names, total)`: the names shown and how many jobs the tab has before filtering.
     """
-    authenticated = may_manage_jobs(str(session_id) if session_id else None)
+    ### Each control follows the viewer's job permissions (`job_rights`).
+    authenticated = _signed_in(session_id)
+    rights = job_rights(_viewer_of(session_id))
     listed = _listed_jobs(is_runs, session_id)
     total = len(listed)
     shown = [job for job in listed.values() if _matches(job, filter_text, status)]
     names = [job.name for job in shown]
 
     archived = []
-    if is_runs and is_session_authenticated(str(session_id) if session_id else None):
+    if is_runs and _viewer_of(session_id).can('jobs:read'):
         from meerschaum.api.dash.execute import execution_request
         try:
             records = execution_request('/execute/runs', get_username_from_session(session_id)) or []
@@ -572,7 +590,7 @@ def build_jobs_tab(
             content = html.Div(
                 [html.H5('No jobs')] + (
                     [dbc.Button('New job', id='jobs-empty-new-button', color='primary')]
-                    if authenticated else []
+                    if rights.get('create') else []
                 ),
                 className='jobs-empty',
             )
@@ -633,27 +651,27 @@ def _pipes_keys_options(instance) -> Tuple[Dict[str, List[str]], Optional[str]]:
     The connectors, metrics, locations and tags of the instance's pipes (internal ones aside),
     from one `fetch_pipes_keys()`, and why they could not be read (`None` when they could).
     """
-    from meerschaum.utils import fetch_pipes_keys
+    from meerschaum.api.dash import access
     try:
-        options, with_parameters = pipes_keys_options(fetch_pipes_keys('registered', instance))
+        ### Only the pipes the viewer may see name their keys and tags here.
+        viewer = access.current_viewer()
+        visible = [
+            (ck, mk, lk, parameters)
+            for ck, mk, lk, parameters in access.registered_pipes(instance)
+            if access.can_see_pipe(viewer, parameters)
+        ]
+        options, _ = pipes_keys_options(visible)
     except Exception as e:
         empty = {'connector_keys': [], 'metric_keys': [], 'location_keys': [], 'tags': []}
         return empty, f"Failed to read the pipes of '{instance}': {e}"
-    if options['connector_keys'] and not with_parameters:
-        ### An instance whose keys come without parameters: the tags are read from the pipes.
-        try:
-            tags = mrsm.get_pipes(instance=instance, as_tags_dict=True) or {}
-            options['tags'] = sorted((str(tag) for tag in tags), key=lambda tag: tag.lower())
-        except Exception as e:
-            return options, f"Failed to read the tags of the pipes of '{instance}': {e}"
     return options, None
 
 
 def _pipeline_options(instance) -> List[str]:
-    """The saved Pipelines of the instance (its registry)."""
+    """The saved Pipelines of the instance (its registry) the viewer may see."""
     try:
-        from meerschaum.core.Pipeline._saved import list_pipelines
-        return sorted(list_pipelines(instance))
+        from meerschaum.api.dash.access import visible_pipelines
+        return sorted(visible_pipelines(instance))
     except Exception:
         return []
 
@@ -701,7 +719,7 @@ def toggle_new_job_modal(new_clicks, empty_new_clicks, cancel_clicks, session_da
     if not (new_clicks or empty_new_clicks):
         raise PreventUpdate
     session_id = (session_data or {}).get('session-id', None)
-    if not may_manage_jobs(session_id):
+    if not job_rights(_viewer_of(session_id)).get('create', False):
         raise PreventUpdate
 
     from meerschaum.utils.daemon import get_new_daemon_name
@@ -787,7 +805,7 @@ def _form_sysargs(action, connector_keys, metric_keys, location_keys, tags, pipe
 def preview_new_job(action, connector_keys, metric_keys, location_keys, tags, pipeline, arguments,
                     repeat, schedule, min_seconds, restart, name, session_data):
     """Show the command the form describes (or what is missing) and the fields it needs."""
-    if not is_state_authenticated(session_data):
+    if not job_rights(_viewer_of((session_data or {}).get('session-id'))).get('create', False):
         raise PreventUpdate
     sysargs, message = _form_sysargs(
         action, connector_keys, metric_keys, location_keys, tags, pipeline, arguments,
@@ -841,8 +859,9 @@ def create_job_from_form(
     """
     from meerschaum.jobs import Job
     from meerschaum.api import no_auth
-    from meerschaum.api.dash.sessions import session_is_admin
-    if not is_session_authenticated(session_id):
+    ### New job runs an action as a job: `jobs:write` and `actions:execute`.
+    creator = _viewer_of(session_id)
+    if not job_rights(creator).get('create', False):
         return False, "You are not allowed to create jobs."
     if not jobs_route_group_allowed():
         return False, "This server does not manage jobs (the 'jobs' route group is disabled)."
@@ -850,12 +869,24 @@ def create_job_from_form(
     valid, message = validate_new_job_name(name, existing=existing)
     if not valid:
         return False, message
-    if not no_auth and not session_is_admin(session_id):
-        allowed, message = _policy_allows(sysargs, get_username_from_session(session_id))
+    if not no_auth and not creator.is_admin:
+        allowed, message = _policy_allows(sysargs, creator.username)
         if not allowed:
             return False, message or "You may not run this command as a job."
     try:
-        job = Job(name.strip(), sysargs, executor_keys=CONSOLE_EXECUTOR_KEYS)
+        ### The job is the session user's, in their primary team (AC9).
+        from meerschaum.jobs import ownership_properties
+        from meerschaum.api.dash.access import get_viewer
+        viewer = get_viewer(session_id=session_id)
+        job = Job(
+            name.strip(),
+            sysargs,
+            executor_keys=CONSOLE_EXECUTOR_KEYS,
+            _properties=ownership_properties(
+                None if viewer.no_auth else viewer.username,
+                None if viewer.no_auth else viewer.primary_team,
+            ),
+        )
     except Exception as e:
         return False, str(e)
     if job.exists():
@@ -955,8 +986,9 @@ def job_logs_outputs(trigger_id, triggered_value, is_open, meta, session_store_d
             raise PreventUpdate
         return no_update, no_update, None, None, True
 
-    ### Job logs may contain connector URIs and query text.
-    if not is_state_authenticated(session_store_data):
+    ### Job logs may contain connector URIs and query text: `logs:read`, on a job the viewer sees.
+    from meerschaum.api.dash.access import get_viewer
+    if not get_viewer(session_store_data).can('logs:read'):
         raise PreventUpdate
     session_id = (session_store_data or {}).get('session-id')
 
@@ -1036,7 +1068,7 @@ dash_app.clientside_callback(
     State('session-store', 'data'), prevent_initial_call=True,
 )
 def retain_automatic_run(clicks, session):
-    if not clicks or not is_state_authenticated(session):
+    if not clicks or not job_rights(_viewer_of((session or {}).get('session-id'))).get('retain', False):
         raise PreventUpdate
     from meerschaum.api.dash.execute import execution_request
     from urllib.parse import quote

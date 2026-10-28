@@ -6,13 +6,13 @@ The console's shell (design §8.1): the top navigation, the Overview at `/dash`,
 
 import json
 
-from tests.api_host._helpers import run_python, write_plugin, sandbox  # noqa: F401
+from tests.api_host._helpers import SIGN_IN, run_python, write_plugin, sandbox  # noqa: F401
 
 #: Synthetic secrets: none of them may reach the browser.
 SECRETS = ('Sup3rS3cretPw', 'An0therS3cret', 'patch-client-s3cret', 'tok3n-in-query')
 
 #: Fire the console's router callback for a path (the payload Dash sends).
-ROUTE = '''
+ROUTE = SIGN_IN + '''
 def route(client, dash_app, pathname, session_id='00000000-0000-4000-8000-0000005e1101', query=''):
     callback = next(key for key in dash_app.callback_map if 'page-layout-div.children' in key)
     outputs = []
@@ -182,7 +182,7 @@ from meerschaum.api.dash import connector_listing as cl
 app = build_app()
 client = TestClient(app)
 client.get('/dash/_dash-layout')
-sessions.set_session('00000000-0000-4000-8000-0000005e1101', {'username': 'shelluser'})
+sign_in('shelluser', user_type='admin', session_id='00000000-0000-4000-8000-0000005e1101')
 client.cookies.set('mrsm-session-id', '00000000-0000-4000-8000-0000005e1101')
 page = route(client, dash_app, '/dash/connectors')
 text = json.dumps(page, ensure_ascii=False)
@@ -302,7 +302,7 @@ print('JSON:' + json.dumps({
     'admin': ['connectors-table' in admin['ids'], 'console-nav-connectors' in admin['ids']],
     ### (The instance selector names instances; the list's sources and databases are not sent.)
     'user': ['connectors-table' in user['ids'], 'console-nav-connectors' in user['ids'],
-             'Only administrators can see the connectors.' in user['text'],
+             'The connectors are not available to your account' in user['text'],
              'MRSM_SQL_APIHOSTTEST' in user['text'] or 'instance.db' in user['text']],
     'admin_sees': 'MRSM_SQL_APIHOSTTEST' in admin['text'],
     'refused': str(refused),
@@ -352,7 +352,7 @@ from meerschaum.api.dash.callbacks.dashboard import _paths, _pages, terminal_red
 app = build_app()
 client = TestClient(app)
 client.get('/dash/_dash-layout')
-sessions.set_session('00000000-0000-4000-8000-0000005e1101', {'username': 'shelluser'})
+sign_in('shelluser', user_type='admin', session_id='00000000-0000-4000-8000-0000005e1101')
 client.cookies.set('mrsm-session-id', '00000000-0000-4000-8000-0000005e1101')
 layout = client.get('/dash/_dash-layout').text
 
@@ -437,7 +437,7 @@ from meerschaum.api.dash.callbacks.dashboard import _paths
 app = build_app()
 client = TestClient(app)
 client.get('/dash/_dash-layout')
-sessions.set_session('00000000-0000-4000-8000-0000005e1101', {'username': 'shelluser'})
+sign_in('shelluser', user_type='admin', session_id='00000000-0000-4000-8000-0000005e1101')
 client.cookies.set('mrsm-session-id', '00000000-0000-4000-8000-0000005e1101')
 
 def nav_kind(path):
@@ -452,10 +452,14 @@ import meerschaum.api.dash.webterm as webterm
 with mock.patch.object(webterm, 'webterm_enabled', lambda: True):
     with components.console_nav_context('/dash/terminal', '00000000-0000-4000-8000-0000005e1101'):
         admin_nav = components.build_pages_navbar()
-    with mock.patch.object(sessions, 'is_session_authenticated', lambda session_id: False):
-        sessions._cache_drop('00000000-0000-4000-8000-0000005e1101')
-        with components.console_nav_context('/dash/terminal', '00000000-0000-4000-8000-0000005e1101'):
-            secure_nav = components.build_pages_navbar()
+    ### The terminal needs `webterm:use` (the Operator role and administrators): an Editor's bar
+    ### has no Terminal; an Operator's has.
+    editor = sign_in('shelleditor', role='editor')['session-id']
+    operator = sign_in('shelloperator', role='operator')['session-id']
+    with components.console_nav_context('/dash/terminal', editor):
+        secure_nav = components.build_pages_navbar()
+    with components.console_nav_context('/dash/terminal', operator):
+        operator_nav = components.build_pages_navbar()
 with components.console_nav_context('/dash/plugins', None):
     anonymous_nav = components.build_pages_navbar()
 
@@ -471,6 +475,7 @@ print('JSON:' + json.dumps({
     'groups': groups,
     'admin': ids(plain(admin_nav)),
     'secure': ids(plain(secure_nav)),
+    'operator': ids(plain(operator_nav)),
     'anonymous': ids(plain(anonymous_nav)),
     'sections': [components.section_of_path(p) for p in (
         '/dash', '/dash/', '/dash/pipes/sql:main/x', '/dash/pipelines/daily', '/dash/runs',
@@ -493,6 +498,7 @@ print('JSON:' + json.dumps({
     }
     assert 'console-nav-terminal' in out['admin']
     assert 'console-nav-terminal' not in out['secure']
+    assert 'console-nav-terminal' in out['operator']
     assert 'sign-out-button' in out['admin']
     ### Not signed in: Sign in instead of the user menu.
     assert 'console-nav-sign-in' in out['anonymous'] and 'sign-out-button' not in out['anonymous']
@@ -555,8 +561,8 @@ runs = [
         {'pipeline_definitions': [{'name': 'daily', 'id': 'x'}]}),
     run('pipeline-c', 'succeeded', 3, ['i|shell|alpha|None', 'i|shell|beta|None']),
 ]
-overview._get_runs = lambda instance, limit: list(runs)
-overview._list_pipelines = lambda instance: {'daily': {'name': 'daily', 'targets': []}}
+overview._get_runs = lambda instance, limit, **kwargs: list(runs)
+overview._list_pipelines = lambda instance, **kwargs: {'daily': {'name': 'daily', 'targets': []}}
 from meerschaum.jobs import Job
 real_state = overview.job_state(Job('shell-overview-job', 'show version', executor_keys='local'))
 recent = overview.recent_runs(instance)
@@ -602,7 +608,7 @@ print('JSON:' + json.dumps({
 
 def test_overview_tiles_render_for_a_session(sandbox):
     root, plugins = sandbox
-    out = _out(run_python(root, plugins, '''
+    out = _out(run_python(root, plugins, SIGN_IN + '''
 import os, json, pathlib
 ### A fresh instance of its own: the other tests of this module register pipes.
 os.environ['MRSM_SQL_TILESDB'] = 'sqlite:///' + str(pathlib.Path.cwd() / 'tiles.db')
@@ -614,7 +620,7 @@ import meerschaum as mrsm
 from meerschaum.api.dash import dash_app, sessions
 import meerschaum.api.dash.callbacks.overview as co
 
-sessions.set_session('00000000-0000-4000-8000-00000071e001', {'username': 'tileuser'})
+sign_in('tileuser', session_id='00000000-0000-4000-8000-00000071e001')
 store = {'instance': 'sql:tilesdb', 'query': None}
 session = {'session-id': '00000000-0000-4000-8000-00000071e001'}
 try:

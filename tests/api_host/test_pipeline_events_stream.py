@@ -14,7 +14,7 @@ import textwrap
 
 import pytest
 
-from tests.api_host._helpers import REPO, run_python, sandbox  # noqa: F401
+from tests.api_host._helpers import AS_VIEWER, REPO, run_python, sandbox  # noqa: F401
 
 
 def check(result):
@@ -75,13 +75,13 @@ assert nodes and 'pipeline-run-tick.data' in inputs[nodes[0]]
 
 def test_live_selected_run_is_followed_and_finished_runs_are_not(sandbox):
     root, plugins = sandbox
-    check(run_python(root, plugins, '''
+    check(run_python(root, plugins, AS_VIEWER + '''
 from types import SimpleNamespace
 import dash
 from meerschaum.api.dash import build_dash_app
 build_dash_app()
 from meerschaum.api.dash.callbacks import pipelines as page
-page.is_session_authenticated = lambda _: True
+as_viewer('alice')
 page._engine.get_instance = lambda *a, **k: 'sql:apihosttest'
 status = {'value': 'running'}
 def summary():
@@ -117,14 +117,14 @@ assert updates['pipelines-interval']['interval'] == page.STREAM_POLL_MS
 
 def test_canvas_sync_streams_its_run(sandbox):
     root, plugins = sandbox
-    check(run_python(root, plugins, '''
+    check(run_python(root, plugins, AS_VIEWER + '''
 from types import SimpleNamespace
 import dash
 from meerschaum.api.dash import build_dash_app
 build_dash_app()
 from meerschaum.api.dash.callbacks import pipelines as page
 from meerschaum.api.dash import execute, sessions
-page.is_session_authenticated = lambda _: True
+as_viewer('alice')
 sessions.get_username_from_session = lambda _: 'alice'
 updates = {}
 dash.set_props = lambda key, value: updates.setdefault(key, {}).update(value)

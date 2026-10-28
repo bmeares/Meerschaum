@@ -17,7 +17,7 @@ import socket
 import subprocess
 import http.client
 
-from tests.api_host._helpers import make_env, run_python, write_plugin, sandbox  # noqa: F401
+from tests.api_host._helpers import AS_VIEWER, make_env, run_python, write_plugin, sandbox  # noqa: F401
 
 
 def _json(result) -> dict:
@@ -516,7 +516,7 @@ print('JSON:' + json.dumps({'groups': len(groups), 'stages': len(stages)}))
 
 def test_pipeline_live_selection_keeps_history_and_rejects_other_pipeline_runs(sandbox):
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, '''
+    out = _json(run_python(root, plugins, AS_VIEWER + '''
 import json
 from types import SimpleNamespace
 import dash
@@ -529,7 +529,7 @@ from dash.exceptions import PreventUpdate
 updates = {}
 dash.ctx = SimpleNamespace(triggered_id='pipelines-interval')
 dash.set_props = lambda id, props: updates.setdefault(str(id), {}).update(props)
-page.is_session_authenticated = lambda session: True
+as_viewer('testuser')
 page._engine.get_instance = lambda *args, **kwargs: 'sql:apihosttest'
 ids = ['daily-2026-10-21T10-00-00.123456Z-abcdef01', 'daily-2026-10-20T10-00-00.123456Z-abcdef01']
 runs = [{'run': {'run_id': id}, 'status': 'succeeded', 'counts': {}} for id in ids]
@@ -553,7 +553,7 @@ assert result[-1].get('run_id') is None
 assert updates['pipeline-run-status']['children'] == ''
 assert updates['pipeline-log-stage']['value'] is None
 # Mutations always require an authorized session, then delegate to the server policy.
-management.is_state_authenticated = lambda data: False
+as_viewer(None)
 calls = []
 execute.run_action = lambda *args, **kwargs: calls.append((args, kwargs)) or {'success': True, 'job': 'job', 'stream': '/logs/job/stream', 'msg': 'started'}
 dash.ctx = SimpleNamespace(triggered_id='pipeline-run-now')
@@ -563,7 +563,7 @@ try:
 except PreventUpdate:
     pass
 assert calls == []
-management.is_state_authenticated = lambda data: True
+as_viewer('testuser')
 sessions.get_username_from_session = lambda session: 'testuser'
 management.list_pipelines = lambda *args: {'daily': {'name':'daily','revision':1,'id':'definition'}}
 management.select_or_run_pipeline(1, 'daily', '', {'session-id': 'test'})

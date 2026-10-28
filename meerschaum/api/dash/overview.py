@@ -88,18 +88,18 @@ def is_failing(status: Optional[Dict[str, Any]]) -> bool:
     return failures > 0 or status.get('success', None) is False
 
 
-def pipes_summary(instance: Any) -> Dict[str, Any]:
+def pipes_summary(instance: Any, viewer: Any = None) -> Dict[str, Any]:
     """
-    `{'total', 'failing', 'statuses'}`: the registered pipes (without the internal `mrsm` ones),
-    how many are failing (`None` without sync statuses) and whether statuses were available.
+    `{'total', 'failing', 'statuses'}`: the registered pipes `viewer` (by default the request's)
+    may see (without the internal `mrsm` ones), how many are failing (`None` without sync
+    statuses) and whether statuses were available.
     """
-    keys = instance.fetch_pipes_keys(debug=False) or []
-    ### SQL and API instances answer `{pipe_id: (ck, mk, lk, parameters)}`, others a list.
-    keys_tuples = list(keys.values()) if isinstance(keys, dict) else list(keys)
+    from meerschaum.api.dash import access
+    viewer = viewer if viewer is not None else access.current_viewer()
     refs = {
-        pipe_ref(str(instance), keys_tuple[0], keys_tuple[1], keys_tuple[2])
-        for keys_tuple in keys_tuples
-        if len(keys_tuple) >= 3 and str(keys_tuple[0]) != 'mrsm'
+        pipe_ref(str(instance), ck, mk, lk)
+        for ck, mk, lk, parameters in access.registered_pipes(instance)
+        if str(ck) != 'mrsm' and access.can_see_pipe(viewer, parameters)
     }
     has_statuses = hasattr(mrsm, 'get_sync_statuses')
     statuses = get_sync_statuses(instance) if has_statuses and refs else {}
@@ -130,24 +130,27 @@ def run_pipeline_name(run: Dict[str, Any], definitions: Dict[str, Dict[str, Any]
     return None
 
 
-def _list_pipelines(instance: Any) -> Dict[str, Dict[str, Any]]:
-    from meerschaum.core.Pipeline._saved import list_pipelines
-    return list_pipelines(instance) or {}
+def _list_pipelines(instance: Any, viewer: Any = None) -> Dict[str, Dict[str, Any]]:
+    """The saved Pipelines `viewer` (by default the request's) may see."""
+    from meerschaum.api.dash.access import visible_pipelines
+    return visible_pipelines(instance, viewer=viewer) or {}
 
 
-def _get_runs(instance: Any, limit: int) -> List[Dict[str, Any]]:
+def _get_runs(instance: Any, limit: int, viewer: Any = None) -> List[Dict[str, Any]]:
+    """The runs with a pipe `viewer` may see (the others anonymized: `engine.get_runs`)."""
     from meerschaum.api.dash.engine import get_runs
-    return get_runs(instance, limit=limit) or []
+    return get_runs(instance, limit=limit, viewer=viewer) or []
 
 
-def pipelines_summary(instance: Any) -> Dict[str, Any]:
+def pipelines_summary(instance: Any, viewer: Any = None) -> Dict[str, Any]:
     """
-    `{'count', 'pipelines': [{name, status, started, run_id}, ...]}`: the saved Pipelines with
-    their last runs, failed and running ones first.
+    `{'count', 'pipelines': [{name, status, started, run_id}, ...]}`: the saved Pipelines
+    `viewer` (by default the request's) may see, with their last runs, failed and running ones
+    first.
     """
-    definitions = _list_pipelines(instance)
+    definitions = _list_pipelines(instance, viewer=viewer)
     try:
-        runs = _get_runs(instance, 200) if definitions else []
+        runs = _get_runs(instance, 200, viewer=viewer) if definitions else []
     except Exception:
         runs = []
     latest: Dict[str, Dict[str, Any]] = {}
@@ -235,10 +238,12 @@ def _executor_keys() -> Optional[str]:
         return None
 
 
-def jobs_summary() -> Dict[str, Any]:
-    """`{'total', 'counts': {state: n}}` over the jobs the Jobs page lists."""
+def jobs_summary(viewer: Any = None) -> Dict[str, Any]:
+    """`{'total', 'counts': {state: n}}` over the jobs the Jobs page lists for the viewer."""
     from meerschaum.jobs import get_jobs
-    jobs = get_jobs(executor_keys=_executor_keys(), include_hidden=False) or {}
+    from meerschaum.api.dash import access
+    viewer = viewer if viewer is not None else access.current_viewer()
+    jobs = access.filter_jobs(viewer, get_jobs(executor_keys=_executor_keys(), include_hidden=False) or {})
     counts = {state: 0 for state, _ in JOB_STATES}
     total = 0
     for job in jobs.values():
@@ -250,16 +255,17 @@ def jobs_summary() -> Dict[str, Any]:
     return {'total': total, 'counts': counts}
 
 
-def recent_runs(instance: Any, limit: int = MAX_RUNS) -> List[Dict[str, Any]]:
+def recent_runs(instance: Any, limit: int = MAX_RUNS, viewer: Any = None) -> List[Dict[str, Any]]:
     """
     The latest run of each Pipeline (or set of pipes) the instance ran recently, failures first,
     then newest first: each `{run_id, status, started, duration_seconds, counts, targets,
     pipeline, runs}` (`runs`: how many of the recent runs synced the same thing, so a job syncing
-    every minute takes one row).
+    every minute takes one row). Only runs with a pipe `viewer` (by default the request's) may
+    see, the other pipes anonymized.
     """
-    runs = _get_runs(instance, 100)
+    runs = _get_runs(instance, 100, viewer=viewer)
     try:
-        definitions = _list_pipelines(instance)
+        definitions = _list_pipelines(instance, viewer=viewer)
     except Exception:
         definitions = {}
     latest: Dict[Any, Dict[str, Any]] = {}
@@ -359,8 +365,10 @@ def with_query(path: str, **query: Any) -> str:
 
 
 def pipe_label(ref: str) -> Any:
-    """`Pipe('ck', 'mk', 'lk')` in monospace, linked to the pipe's page."""
-    from meerschaum.api.dash.engine import ref_label, pipe_href
+    """`Pipe('ck', 'mk', 'lk')` in monospace, linked to the pipe's page (a hidden pipe: no link)."""
+    from meerschaum.api.dash.engine import ref_label, pipe_href, is_hidden_ref
+    if is_hidden_ref(ref):
+        return html.Span(ref_label(ref), className='overview-hidden-pipe')
     try:
         return dcc.Link(html.Code(ref_label(ref)), href=pipe_href(ref), className='overview-pipe-link')
     except Exception:

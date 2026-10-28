@@ -63,10 +63,11 @@ def get_pipe_query(
     return textwrap.dedent(definition.lstrip().rstrip())
 
 
-def set_pipe_query(pipe: mrsm.Pipe, query: str) -> mrsm.SuccessTuple:
+def set_pipe_query(pipe: mrsm.Pipe, query: str, save=None) -> mrsm.SuccessTuple:
     """
     Set a pipe's SQL definition under the first of `fetch:definition`, `definition`, `query`
-    and `sql` that the pipe already uses.
+    and `sql` that the pipe already uses. `save` (given the patch) writes it instead of
+    `pipe.update_parameters` (the console's checked write: `pipe_writes.update_parameters`).
     """
     parameters = pipe.get_parameters()
     ### v4 wrote `fetch: {defintion: ...}` here (a typo that lost the edit): the key is `definition`.
@@ -79,6 +80,8 @@ def set_pipe_query(pipe: mrsm.Pipe, query: str) -> mrsm.SuccessTuple:
     else:
         patch_dict = {'sql': query}
 
+    if save is not None:
+        return save(patch_dict)
     return pipe.update_parameters(patch_dict)
 
 

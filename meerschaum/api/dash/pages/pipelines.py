@@ -106,6 +106,15 @@ def _with_instance_alert(layout, query):
     return layout
 
 
+def _may_register() -> bool:
+    """Whether the viewer may create Pipelines (`pipes:register`)."""
+    from meerschaum.api.dash import access
+    try:
+        return access.current_viewer().can('pipes:register')
+    except Exception:
+        return False
+
+
 def list_layout(registry):
     """One-column cards of the registry's Pipelines, with New pipeline and Find Pipe above."""
     return [
@@ -114,7 +123,8 @@ def list_layout(registry):
         html.Main([
             html.Div([
                 html.H3('Pipelines'),
-                dbc.Button('New pipeline', href='/dash/pipelines/new', size='sm', id='pipelines-new-button'),
+                (dbc.Button('New pipeline', href='/dash/pipelines/new', size='sm', id='pipelines-new-button')
+                 if _may_register() else html.Span()),
                 dcc.Dropdown(id='pipelines-find-pipe', options=[], placeholder='Find Pipe',
                              className='pipelines-find-pipe', clearable=True),
             ], className='pipelines-list-header'),
@@ -123,6 +133,29 @@ def list_layout(registry):
             dcc.Loading(html.Div(id='pipelines-list', className='pipelines-list'), type='dot',
                         target_components={'pipelines-list': 'children'}),
         ], id='pipelines-list-page', className='pipeline-page', **{'data-registry': registry}),
+    ]
+
+
+def _access_fields():
+    """The New pipeline stepper's Team and Visibility, prefilled with the viewer's primary team."""
+    from meerschaum.api.dash import access
+    from meerschaum.api.dash.new_pipe import team_options
+    try:
+        teams, team = team_options(access.current_viewer())
+    except Exception:
+        teams, team = [{'label': access.EVERYONE, 'value': access.EVERYONE}], access.EVERYONE
+    return [
+        html.Div([
+            dbc.Label('Team', html_for='pipeline-new-team', size='sm'),
+            dbc.Select(id='pipeline-new-team', options=teams, value=team, size='sm',
+                       class_name='dbc_dark custom-select custom-select-sm'),
+        ], className='pipeline-new-field'),
+        html.Div([
+            dbc.Label('Visibility', html_for='pipeline-new-visibility', size='sm'),
+            dbc.Select(id='pipeline-new-visibility', size='sm', value='team',
+                       options=[{'label': label, 'value': value} for value, label in access.VISIBILITIES],
+                       class_name='dbc_dark custom-select custom-select-sm'),
+        ], className='pipeline-new-field'),
     ]
 
 
@@ -153,6 +186,8 @@ def new_layout(registry, query):
             ], className='pipeline-stepper', id='pipeline-new-stepper'),
             html.Section([
                 dbc.Input(id='pipeline-new-name', placeholder='Pipeline name', size='sm', debounce=False),
+                ### Who the new Pipeline belongs to: the viewer's primary team, visible to it.
+                html.Div(_access_fields(), className='pipeline-new-access'),
             ], className='pipeline-new-step', **{'data-step': 'name'}),
             html.Section([
                 build_member_panel('pipeline-new', registry, _instance_options()),
@@ -194,13 +229,23 @@ def explore_layout(registry, query):
         html.Main([
             html.Div([
                 html.H3(id='pipeline-explore-title'),
-                dbc.Button('Save as Pipeline', id='pipeline-explore-save', size='sm', href='/dash/pipelines/new'),
+                dbc.Button('Save as Pipeline', id='pipeline-explore-save', size='sm', href='/dash/pipelines/new',
+                           style=(None if _may_register() else {'display': 'none'})),
             ], className='pipelines-list-header'),
             dcc.Loading(html.Div(id='pipeline-explore-graph', className='pipeline-workspace pipeline-explore'),
                         target_components={'pipeline-explore-graph': 'children'},
                         type='dot'),
         ], id='pipeline-explore-page', className='pipeline-page', **{'data-registry': registry}),
     ]
+
+
+def _pipeline_rights(name, registry):
+    from meerschaum.api.dash import access
+    from meerschaum.api.dash.pipeline_management import pipeline_rights
+    try:
+        return pipeline_rights(access.current_viewer(), name, registry)
+    except Exception:
+        return {}
 
 
 def detail_layout(name, registry):
@@ -212,7 +257,7 @@ def detail_layout(name, registry):
         dcc.Interval(id='pipelines-interval', interval=(15 * 1000), n_intervals=0),
         html.Main(
             [
-                build_detail_header(name, registry),
+                build_detail_header(name, registry, rights=_pipeline_rights(name, registry)),
                 html.Div(id='pipelines-alert-div'),
                 html.Div(id='pipeline-run-alert'),
                 html.Div(id='pipeline-manage-alert'),

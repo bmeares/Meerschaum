@@ -21,14 +21,16 @@ from meerschaum.api.dash import dash_app
 from meerschaum.api.dash import overview
 
 
-def _signed_in(session_data: Optional[Dict[str, Any]]) -> bool:
-    """Whether the session may read the Overview (any signed-in user, or `--no-auth`)."""
-    from meerschaum.api import no_auth
-    if no_auth:
-        return True
-    from meerschaum.api.dash.sessions import is_session_active
-    session_id = (session_data or {}).get('session-id', None) if isinstance(session_data, dict) else None
-    return bool(session_id) and is_session_active(str(session_id))
+def _viewer(session_data: Optional[Dict[str, Any]]):
+    """
+    Who is looking at the Overview (`meerschaum.api.dash.access.Viewer`), if they may: a
+    signed-in user (or `--no-auth`); else no update. Every tile counts only what they may see.
+    """
+    from meerschaum.api.dash.access import get_viewer
+    viewer = get_viewer(session_data if isinstance(session_data, dict) else {})
+    if not (viewer.no_auth or viewer.signed_in):
+        raise PreventUpdate
+    return viewer
 
 
 def _instance(store: Optional[Dict[str, Any]]):
@@ -67,10 +69,9 @@ def render_pipes_tile(n_intervals, store, digest, session_data):
     terminal) in place of its numbers; the other tiles stay, since the jobs and runs they list
     may be the server's or the instance's other work.
     """
-    if not _signed_in(session_data):
-        raise PreventUpdate
+    viewer = _viewer(session_data)
     try:
-        summary = overview.pipes_summary(_instance(store))
+        summary = overview.pipes_summary(_instance(store), viewer=viewer)
     except Exception as e:
         children, digest = _changed(overview.build_error(f"Could not read the pipes: {e}"), digest)
         return children, digest, True, False
@@ -89,11 +90,10 @@ def render_pipes_tile(n_intervals, store, digest, session_data):
 )
 def render_pipelines_tile(n_intervals, store, digest, session_data):
     """The Pipelines tile: each saved Pipeline's last run."""
-    if not _signed_in(session_data):
-        raise PreventUpdate
+    viewer = _viewer(session_data)
     try:
         children = overview.build_pipelines_body(
-            overview.pipelines_summary(_instance(store)),
+            overview.pipelines_summary(_instance(store), viewer=viewer),
             (store or {}).get('query'),
         )
     except Exception as e:
@@ -110,10 +110,9 @@ def render_pipelines_tile(n_intervals, store, digest, session_data):
 )
 def render_jobs_tile(n_intervals, digest, session_data):
     """The Jobs tile: the jobs by state."""
-    if not _signed_in(session_data):
-        raise PreventUpdate
+    viewer = _viewer(session_data)
     try:
-        children = overview.build_jobs_body(overview.jobs_summary())
+        children = overview.build_jobs_body(overview.jobs_summary(viewer=viewer))
     except Exception as e:
         children = overview.build_error(f"Could not read the jobs: {e}")
     return _changed(children, digest)
@@ -129,11 +128,10 @@ def render_jobs_tile(n_intervals, digest, session_data):
 )
 def render_runs_tile(n_intervals, store, digest, session_data):
     """Recent runs, failures first."""
-    if not _signed_in(session_data):
-        raise PreventUpdate
+    viewer = _viewer(session_data)
     try:
         children = overview.build_runs_body(
-            overview.recent_runs(_instance(store)),
+            overview.recent_runs(_instance(store), viewer=viewer),
             (store or {}).get('query'),
         )
     except Exception as e:

@@ -50,7 +50,11 @@ def refresh_tokens_button_click(
     ### Like the other token callbacks, this is reachable directly via
     ### `/dash/_dash-update-component`, so it must not list tokens for
     ### unauthenticated sessions.
-    if not is_state_authenticated(session_data):
+    ### Every signed-in user manages their own tokens (a token holds at most its user's
+    ### permissions, intersected when it is used).
+    from meerschaum.api.dash.access import get_viewer
+    viewer = get_viewer(session_data)
+    if not (viewer.signed_in or viewer.no_auth):
         return (
             html.P("You are not authenticated."),
             dash.no_update,
@@ -182,6 +186,12 @@ def register_token_click(
     Register the token.
     """
     if not n_clicks:
+        raise PreventUpdate
+    ### A token is its user's: only a signed-in user registers one (whatever the browser sends;
+    ### the server intersects its scopes with the user's permissions whenever it is used).
+    from meerschaum.api.dash.access import get_viewer
+    viewer = get_viewer(session_data)
+    if not viewer.signed_in or not viewer.username:
         raise PreventUpdate
 
     ### NOTE: `*` is stored literally so that it also grants custom (plugin) scopes

@@ -42,6 +42,7 @@ SORT_COLUMNS: Tuple[Tuple[str, str], ...] = (
     ('rows', 'Rows'),
     ('sync_time', 'Sync time'),
     ('status', 'Status'),
+    ('team', 'Team'),
 )
 
 #: The values of the `status` filter (`?status=` in the URL).
@@ -50,6 +51,14 @@ STATUS_FILTERS: Tuple[Tuple[str, str], ...] = (
     ('failing', 'Failing'),
     ('ok', 'Synced'),
     ('never', 'Never synced'),
+)
+
+#: The values of the owner filter (`?scope=` in the URL): the viewer's own pipes, their teams'
+#: pipes, or every pipe they may see.
+SCOPE_FILTERS: Tuple[Tuple[str, str], ...] = (
+    ('all', 'All'),
+    ('mine', 'Mine'),
+    ('teams', 'My teams'),
 )
 
 #: Instance flavors whose row estimate is always the exact count (C1).
@@ -223,12 +232,16 @@ def filters_from_search(search: Optional[str]) -> Dict[str, Any]:
     status = (query.get('status', [''])[0] or '').lower()
     if status == 'any':
         status = ''
+    scope = (query.get('scope', [''])[0] or '').lower()
+    if scope == 'all':
+        scope = ''
     return {
         'connector_keys': _query_list(query, 'connector_keys'),
         'metric_keys': _query_list(query, 'metric_keys'),
         'location_keys': _query_list(query, 'location_keys'),
         'tags': _query_list(query, 'tags'),
         'status': status if status in {key for key, _ in STATUS_FILTERS} else '',
+        'scope': scope if scope in {key for key, _ in SCOPE_FILTERS} else '',
         'q': (query.get('q', [''])[0] or '').strip(),
         'instance': query.get('instance', [None])[0] or None,
     }
@@ -254,6 +267,7 @@ def search_from_filters(
     status: Optional[str] = None,
     instance: Optional[str] = None,
     q: Optional[str] = None,
+    scope: Optional[str] = None,
 ) -> str:
     """The URL query of the Pipes page's filters (the inverse of `filters_from_search`)."""
     parts = []
@@ -268,6 +282,8 @@ def search_from_filters(
             parts.append(key + '=' + ','.join(quote_plus(value) for value in values))
     if status and status != 'any':
         parts.append('status=' + quote_plus(status))
+    if scope and scope != 'all':
+        parts.append('scope=' + quote_plus(scope))
     q = str(q or '').strip()
     if q:
         parts.append('q=' + quote_plus(q))
@@ -280,12 +296,23 @@ def search_from_filters(
 # Rows
 # ------------------------------------------------------------------------------------------------
 
-def _keys_items(result: Any) -> List[Tuple[Any, Tuple]]:
-    if result is None:
-        return []
-    if isinstance(result, dict):
-        return list(result.items())
-    return [(None, keys_tuple) for keys_tuple in result]
+def _access_fields(parameters: Dict[str, Any]) -> Dict[str, Any]:
+    """A row's `owner`, `team` (`None` for Everyone), `visibility` and `locks`."""
+    from meerschaum.api.dash import access
+    try:
+        fields = access.access_fields(parameters)
+    except Exception:
+        fields = {'owner': None, 'team': None, 'visibility': 'team', 'edit': 'team'}
+    try:
+        locks = access.pipe_locks(parameters)
+    except Exception:
+        locks = []
+    return {
+        'owner': fields.get('owner'),
+        'team': fields.get('team'),
+        'visibility': fields.get('visibility') or 'team',
+        'locks': locks,
+    }
 
 
 def _row_from_pipe(pipe: mrsm.Pipe) -> Dict[str, Any]:
@@ -300,7 +327,13 @@ def _row_from_pipe(pipe: mrsm.Pipe) -> Dict[str, Any]:
         target = str(pipe.target)
     except Exception:
         target = ''
+    try:
+        parameters = dict(pipe.parameters or {})
+    except Exception:
+        parameters = {}
     ref = make_ref(instance_keys, ck, mk, lk)
+    access_fields = _access_fields(parameters)
+    from meerschaum.api.dash.access import EVERYONE
     return {
         'ref': ref,
         'ck': ck,
@@ -311,7 +344,10 @@ def _row_from_pipe(pipe: mrsm.Pipe) -> Dict[str, Any]:
         'target': target,
         'label': pipe_label(ck, mk, lk),
         'href': pipe_path(ck, mk, lk, instance_keys),
-        'search': ' '.join([ck, mk, str(lk or ''), target] + tags).lower(),
+        **access_fields,
+        'search': ' '.join(
+            [ck, mk, str(lk or ''), target, str(access_fields['team'] or EVERYONE)] + tags
+        ).lower(),
     }
 
 
@@ -321,12 +357,16 @@ def list_rows(
     metric_keys: Optional[List[str]] = None,
     location_keys: Optional[List[str]] = None,
     tags: Optional[List[str]] = None,
+    viewer: Any = None,
 ) -> List[Dict[str, Any]]:
     """
-    The table's rows for the pipes registered on `instance` matching the keys and tags: one
-    `fetch_pipes_keys()` (keys with their parameters). Internal `mrsm` pipes (saved Pipelines'
-    registry) are left out unless `mrsm` is asked for.
+    The table's rows for the pipes registered on `instance` matching the keys and tags that
+    `viewer` may see: one `fetch_pipes_keys()` (keys with their parameters, whose `access` says
+    who may see each pipe). Internal `mrsm` pipes (saved Pipelines' registry) are left out unless
+    `mrsm` is asked for.
     """
+    from meerschaum.api.dash import access
+    viewer = viewer if viewer is not None else access.current_viewer()
     connector_keys = [str(ck) for ck in (connector_keys or [])]
     pipes = mrsm.get_pipes(
         connector_keys=connector_keys,
@@ -341,6 +381,12 @@ def list_rows(
     for pipe in pipes:
         if str(pipe.connector_keys) == 'mrsm' and not include_internal:
             continue
+        try:
+            parameters = dict(pipe.parameters or {})
+        except Exception:
+            parameters = {}
+        if not access.can_see_pipe(viewer, parameters):
+            continue
         row = _row_from_pipe(pipe)
         _remember_pipe(row['ref'], pipe)
         rows.append(row)
@@ -348,30 +394,21 @@ def list_rows(
     return rows
 
 
-def filter_options(instance: Any) -> Dict[str, List[str]]:
-    """The options of the key and tag filters: every registered pipe's keys and tags."""
-    from meerschaum.utils import fetch_pipes_keys
-    result = fetch_pipes_keys('registered', instance)
+def filter_options(instance: Any, viewer: Any = None) -> Dict[str, List[str]]:
+    """
+    The options of the key and tag filters: the keys and tags of every registered pipe `viewer`
+    may see (another team's pipe never names its keys here).
+    """
+    from meerschaum.api.dash import access
+    viewer = viewer if viewer is not None else access.current_viewer()
     connectors, metrics, locations, tags = set(), set(), set(), set()
-    for _, keys_tuple in _keys_items(result):
-        ck, mk, lk = keys_tuple[0], keys_tuple[1], keys_tuple[2]
-        if str(ck) == 'mrsm':
+    for ck, mk, lk, parameters in access.registered_pipes(instance):
+        if str(ck) == 'mrsm' or not access.can_see_pipe(viewer, parameters):
             continue
         connectors.add(str(ck))
         metrics.add(str(mk))
         locations.add(str(lk))
-        extra = keys_tuple[3] if len(keys_tuple) > 3 else None
-        if isinstance(extra, str):
-            import json
-            try:
-                extra = json.loads(extra)
-            except Exception:
-                extra = None
-        pipe_tags = (
-            extra if isinstance(extra, list)
-            else ((extra or {}).get('tags', None) if isinstance(extra, dict) else None)
-        ) or []
-        tags.update(str(tag) for tag in pipe_tags)
+        tags.update(str(tag) for tag in (parameters.get('tags', None) or []))
     key = lambda value: value.lower()
     return {
         'connector_keys': sorted(connectors, key=key),
@@ -736,23 +773,50 @@ def _jobs_selections(instance_keys: str) -> Tuple[List[Tuple[Dict[str, Any], Dic
     return selections, pipelines_jobs
 
 
+def allowed_rows(
+    instance_keys: str,
+    rows: List[Dict[str, Any]],
+    viewer: Any = None,
+) -> List[Dict[str, Any]]:
+    """
+    The rows (as a page's store sent them back) of pipes on `instance_keys` that `viewer` may
+    see: a store is the browser's, so its refs are checked again before anything is read.
+    """
+    from meerschaum.api.dash import access
+    viewer = viewer if viewer is not None else access.current_viewer()
+    prefix = str(instance_keys) + '|'
+    rows = [
+        row for row in (rows or [])
+        if isinstance(row, dict) and str(row.get('ref', '')).startswith(prefix)
+    ]
+    refs = access.visible_refs(viewer, instance_keys)
+    if refs is None:
+        return rows
+    return [row for row in rows if row['ref'] in refs]
+
+
 def compute_stats(
     instance_keys: str,
     rows: List[Dict[str, Any]],
     workers: int = 8,
+    viewer: Any = None,
 ) -> Dict[str, Dict[str, Any]]:
     """
     The slow columns of `rows`: `{pipe_ref: {rows, estimated, sync_time, sync_time_sort, error,
-    status, jobs}}`, computed concurrently when the instance connector is thread-safe.
+    status, jobs}}`, computed concurrently when the instance connector is thread-safe. Only rows
+    of pipes `viewer` may see on that instance are computed (`allowed_rows`).
     """
+    from meerschaum.api.dash.engine import get_instance
+    try:
+        instance = get_instance(instance_keys, strict=True)
+    except Exception:
+        return {}
+    instance_keys = str(instance)
+    rows = allowed_rows(instance_keys, rows, viewer=viewer)
     if not rows:
         return {}
     refs = [row['ref'] for row in rows]
-    try:
-        instance = mrsm.get_connector(instance_keys)
-        thread_safe = bool(getattr(instance, 'IS_THREAD_SAFE', False))
-    except Exception:
-        instance, thread_safe = None, False
+    thread_safe = bool(getattr(instance, 'IS_THREAD_SAFE', False))
     if thread_safe and len(refs) > 1:
         from concurrent.futures import ThreadPoolExecutor
         with ThreadPoolExecutor(max_workers=min(workers, len(refs))) as pool:
@@ -814,6 +878,37 @@ def filter_status(
     return [row for row in rows if status_kind(stats.get(row['ref'])) == status]
 
 
+def viewer_summary(viewer: Any) -> Dict[str, Any]:
+    """What the owner filter needs to know about the viewer: `{username, teams}`."""
+    return {
+        'username': getattr(viewer, 'username', None),
+        'teams': list(getattr(viewer, 'own_teams', []) or []),
+    }
+
+
+def filter_scope(
+    rows: List[Dict[str, Any]],
+    scope: Optional[str],
+    me: Optional[Dict[str, Any]] = None,
+) -> List[Dict[str, Any]]:
+    """
+    The owner filter: `mine` (the viewer owns the pipe), `teams` (the pipe is one of the viewer's
+    teams'; for a viewer in no team but Everyone, Everyone's pipes), else every row.
+    """
+    if not scope or scope == 'all':
+        return list(rows)
+    me = me or {}
+    if scope == 'mine':
+        username = me.get('username', None)
+        return [row for row in rows if username and row.get('owner') == username]
+    if scope == 'teams':
+        teams = set(me.get('teams', None) or [])
+        if not teams:
+            return [row for row in rows if not row.get('team')]
+        return [row for row in rows if row.get('team') in teams]
+    return list(rows)
+
+
 def sort_rows(
     rows: List[Dict[str, Any]],
     stats: Dict[str, Dict[str, Any]],
@@ -830,6 +925,9 @@ def sort_rows(
     ordered = sorted(rows, key=keys_order)
     if column == 'pipe':
         return ordered if ascending else list(reversed(ordered))
+    if column == 'team':
+        ### Everyone's pipes (no team) sort first going up, last going down.
+        return sorted(ordered, key=lambda row: str(row.get('team') or '').lower(), reverse=not ascending)
 
     def value(row):
         entry = stats.get(row['ref'])
@@ -859,11 +957,13 @@ def visible_rows(
     ascending: bool = True,
     page: int = 1,
     page_size: int = PAGE_SIZE,
+    scope: Optional[str] = None,
+    me: Optional[Dict[str, Any]] = None,
 ) -> Tuple[List[Dict[str, Any]], int, int, int]:
     """
     Search, filter, sort and page the rows: `(page_rows, page, num_pages, num_matching)`.
     """
-    matching = filter_status(search_rows(rows, search), stats, status)
+    matching = filter_status(filter_scope(search_rows(rows, search), scope, me), stats, status)
     ordered = sort_rows(matching, stats, column, ascending)
     num_pages = max(1, -(-len(ordered) // page_size))
     page = min(max(1, int(page or 1)), num_pages)
@@ -879,15 +979,19 @@ def rows_needing_stats(
     column: str = 'pipe',
     ascending: bool = True,
     page: int = 1,
+    scope: Optional[str] = None,
+    me: Optional[Dict[str, Any]] = None,
 ) -> List[Dict[str, Any]]:
     """
     The rows whose statistics are missing and needed now: every searched row when sorting by a
     slow column or filtering by status (at most `MAX_STATS_ROWS`), else the page on screen.
     """
     if column in SLOW_COLUMNS or (status and status != 'any'):
-        candidates = search_rows(rows, search)[:MAX_STATS_ROWS]
+        candidates = filter_scope(search_rows(rows, search), scope, me)[:MAX_STATS_ROWS]
     else:
-        candidates, _, _, _ = visible_rows(rows, stats, search, None, column, ascending, page)
+        candidates, _, _, _ = visible_rows(
+            rows, stats, search, None, column, ascending, page, scope=scope, me=me,
+        )
     return [row for row in candidates if row['ref'] not in stats]
 
 
@@ -1079,10 +1183,41 @@ def job_badges_html(jobs: List[Dict[str, Any]]) -> str:
     )
 
 
+def locks_title(locks: List[str]) -> str:
+    """`Locked: sync, drop` (the lock column's and the pipe page's lock icon's title)."""
+    return 'Locked: ' + ', '.join(locks) if locks else ''
+
+
+def lock_html(locks: List[str]) -> str:
+    """The lock column: a lock icon titled with the locks (empty for an unlocked pipe)."""
+    if not locks:
+        return ''
+    title = locks_title(locks)
+    return _tag(
+        'span',
+        [
+            _tag('span', '', class_name='mrsm-icon mrsm-icon-lock', aria_hidden='true'),
+            _tag('span', _esc(title), class_name='visually-hidden'),
+        ],
+        class_name='pipes-lock', title=title,
+    )
+
+
+def team_html(row: Dict[str, Any]) -> str:
+    """The Team cell: the team (Everyone when none), and `private` or `everyone` visibility."""
+    from meerschaum.api.dash.access import EVERYONE
+    html_text = _esc(row.get('team') or EVERYONE)
+    visibility = row.get('visibility') or 'team'
+    if visibility != 'team':
+        html_text += _tag('span', _esc(visibility), class_name=f'pipes-visibility pipes-visibility-{visibility}')
+    return html_text
+
+
 def render_rows_html(
     rows: List[Dict[str, Any]],
     stats: Dict[str, Dict[str, Any]],
     global_instance: Optional[str] = None,
+    show_team: bool = True,
 ) -> str:
     """The table body's rows (each opens its pipe's page)."""
     out = []
@@ -1097,14 +1232,19 @@ def render_rows_html(
         if show_instance:
             pipe_cell += _tag('span', _esc(row['instance']),
                               class_name='badge bg-secondary pipes-instance-badge')
+        locks = list(row.get('locks') or [])
         cells = [
             _tag('td', pipe_cell, class_name='pipes-col-pipe'),
+            _tag('td', lock_html(locks), class_name='pipes-col-locks',
+                 data_label=('Locks' if locks else None)),
             _tag('td', _esc(rows_text(entry)), class_name='pipes-col-rows',
                  title=str((entry or {}).get('error') or ''), data_label='Rows'),
             _tag('td', _esc(sync_time_text(entry)), class_name='pipes-col-sync-time',
                  title=str((entry or {}).get('sync_time') or ''), data_label='Sync time'),
             _tag('td', _tag('span', _esc(status_text), class_name=f'pipes-status pipes-status-{kind}'),
                  class_name='pipes-col-status', title=status_title, data_label='Status'),
+            (_tag('td', team_html(row), class_name='pipes-col-team', data_label='Team')
+             if show_team else ''),
             _tag('td', [_tag('span', _esc(tag), class_name='pipes-tag') for tag in row['tags']],
                  class_name='pipes-col-tags', data_label='Tags'),
             _tag('td', job_badges_html((entry or {}).get('jobs') or []) if entry else '',
@@ -1121,11 +1261,16 @@ def sort_header_class(column: str, sort: Optional[Dict[str, Any]]) -> str:
     return 'pipes-sort-button ' + ('pipes-sort-asc' if sort.get('ascending', True) else 'pipes-sort-desc')
 
 
-def table_header_html(sort: Optional[Dict[str, Any]] = None) -> str:
-    """The header row: a sort button per sortable column (`aria-sort` on the sorted one)."""
+def table_header_html(sort: Optional[Dict[str, Any]] = None, show_team: bool = True) -> str:
+    """
+    The header row: a sort button per sortable column (`aria-sort` on the sorted one). The Team
+    column is left out (`show_team`) on an instance whose pipes are all Everyone's.
+    """
     sort = sort or {'column': 'pipe', 'ascending': True}
     cells = []
     for column, label in SORT_COLUMNS:
+        if column == 'team' and not show_team:
+            continue
         if sort.get('column', 'pipe') == column:
             aria_sort = 'ascending' if sort.get('ascending', True) else 'descending'
         else:
@@ -1137,6 +1282,11 @@ def table_header_html(sort: Optional[Dict[str, Any]] = None) -> str:
             id=f'pipes-header-{column}', scope='col', aria_sort=aria_sort,
             class_name=f'pipes-col-{column.replace("_", "-")}',
         ))
+        if column == 'pipe':
+            cells.append(_tag(
+                'th', _tag('span', 'Locks', class_name='visually-hidden'),
+                scope='col', class_name='pipes-col-locks',
+            ))
     cells += [
         _tag('th', 'Tags', scope='col', class_name='pipes-col-tags'),
         _tag('th', 'Jobs', scope='col', class_name='pipes-col-jobs'),
@@ -1144,8 +1294,9 @@ def table_header_html(sort: Optional[Dict[str, Any]] = None) -> str:
     return _tag('thead', _tag('tr', cells))
 
 
-def _note_row(content: str) -> str:
-    return _tag('tr', _tag('td', content, col_span=len(SORT_COLUMNS) + 2, class_name='pipes-empty-row'))
+def _note_row(content: str, show_team: bool = True) -> str:
+    columns = len(SORT_COLUMNS) + 3 - (0 if show_team else 1)
+    return _tag('tr', _tag('td', content, col_span=columns, class_name='pipes-empty-row'))
 
 
 #: A row's spinner while the table loads (Bootstrap's, as `dbc.Spinner(size='sm')`).
@@ -1159,17 +1310,18 @@ def render_table_html(
     sort: Optional[Dict[str, Any]] = None,
     empty_text: str = 'No pipes match.',
     loading: bool = False,
+    show_team: bool = True,
 ) -> str:
     """The whole table: the header and the rows, a spinner (`loading`) or `empty_text`."""
     if loading:
-        body = _note_row(SPINNER_HTML)
+        body = _note_row(SPINNER_HTML, show_team)
     elif not rows:
-        body = _note_row(_esc(empty_text))
+        body = _note_row(_esc(empty_text), show_team)
     else:
-        body = render_rows_html(rows, stats, global_instance)
+        body = render_rows_html(rows, stats, global_instance, show_team=show_team)
     return _tag(
         'table',
-        [table_header_html(sort), _tag('tbody', body, id='pipes-table-body')],
+        [table_header_html(sort, show_team), _tag('tbody', body, id='pipes-table-body')],
         id='pipes-table', class_name='table table-hover pipes-table',
     )
 

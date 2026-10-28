@@ -85,16 +85,28 @@ def test_rust_written_session_is_readable_in_python(sandbox):
     finally:
         conn.close()
     result = run_python(root, plugins, PRELUDE + """
+from meerschaum.core import User
+from meerschaum.api import get_api_connector
+conn = get_api_connector()
+conn.register_user(User('bob', 'bob-password-1', type='admin', instance=conn))
+conn.register_user(User('rust-claims', 'claims-password-1', instance=conn))
+s.set_session('00000000-0000-4000-8000-00000000a005', {'username': 'rust-claims', 'admin': True})
 print(json.dumps({
     'bob': s.get_username_from_session('00000000-0000-4000-8000-00000000a003'),
     'bob_admin': s.session_is_admin('00000000-0000-4000-8000-00000000a003'),
     'expired': s.get_username_from_session('00000000-0000-4000-8000-00000000a004'),
     'expired_active': s.is_session_active('00000000-0000-4000-8000-00000000a004'),
+    'claims_admin': s.session_is_admin('00000000-0000-4000-8000-00000000a005'),
 }))
 """)
     assert result.returncode == 0, result.stderr[-3000:]
     out = json.loads(result.stdout.strip().splitlines()[-1])
-    assert out == {'bob': 'bob', 'bob_admin': True, 'expired': None, 'expired_active': False}
+    ### Whether a session is an administrator's is read from its user (their type now), never
+    ### from a flag the session's data carries.
+    assert out == {
+        'bob': 'bob', 'bob_admin': True, 'expired': None, 'expired_active': False,
+        'claims_admin': False,
+    }
 
 
 def test_update_overwrites_and_delete_removes(sandbox):

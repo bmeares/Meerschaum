@@ -1,6 +1,6 @@
 """rc6 console contracts: dynamic Inputs, worker classification, and custom login."""
 import json
-from tests.api_host._helpers import run_python, sandbox, write_plugin  # noqa: F401
+from tests.api_host._helpers import FAKE_VIEWERS, run_python, sandbox, write_plugin  # noqa: F401
 
 
 def test_worker_kind_overrides_legacy_prefix(sandbox):
@@ -70,12 +70,11 @@ print('JSON:true')
 
 def test_runs_hide_other_users_workers_even_with_custom_names(sandbox):
     root, plugins = sandbox
-    result = run_python(root, plugins, '''
+    result = run_python(root, plugins, FAKE_VIEWERS + '''
 from types import SimpleNamespace
 from meerschaum.api.dash.jobs import job_visible_to_session
-from meerschaum.api.dash import sessions
-sessions.session_is_admin = lambda session: session == 'admin'
-sessions.get_username_from_session = lambda session: session
+### Each session is the user of its name (Editors), `admin` an administrator.
+fake_viewers({'alice': {}, 'bob': {}, 'admin': {'admin': True}})
 worker = SimpleNamespace(name='custom-name', daemon=SimpleNamespace(properties={
     'mrsm_owner': 'alice', 'mrsm_execution': {'kind': 'temporary_execution'}}))
 assert job_visible_to_session(worker, 'alice')
@@ -89,10 +88,11 @@ print('JSON:true')
 
 def test_pipeline_cards_load_definitions_without_history_or_discovery(sandbox):
     root, plugins = sandbox
-    result = run_python(root, plugins, '''
+    result = run_python(root, plugins, FAKE_VIEWERS + '''
 from types import SimpleNamespace
 from meerschaum.api.dash import pipeline_cards, engine
 import meerschaum.jobs
+fake_viewers(default={'username': 'alice', 'admin': True})
 pipeline_cards.list_pipelines = lambda instance: {'daily': {'name': 'daily', 'id': 'pipeline-1',
     'revision': 2, 'targets': ['sql:source|sql:source|raw|None', 'sql:dest|sql:source|clean|None']},
     'single': {'name': 'single', 'id': 'pipeline-2', 'revision': 1, 'targets': ['sql:source|sql:source|raw|None']}}

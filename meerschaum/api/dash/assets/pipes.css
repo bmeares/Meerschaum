@@ -23,8 +23,18 @@
 .pipes-header-actions[hidden] { display: none; }
 .pipes-instance-badge { font-weight: 400; vertical-align: middle; }
 
-/* Filters: search, keys, tags and status in one row on wide screens. */
-.pipes-filters { display: grid; grid-template-columns: minmax(220px, 2fr) repeat(4, minmax(130px, 1fr)) minmax(130px, 160px) auto; gap: 8px; align-items: center; margin-bottom: 12px; }
+/* Filters: search, keys, tags, whose (All / Mine / My teams) and status in one row on wide screens. */
+.pipes-filters { display: grid; grid-template-columns: minmax(220px, 2fr) repeat(4, minmax(120px, 1fr)) auto minmax(130px, 160px) auto; gap: 8px; align-items: center; margin-bottom: 12px; }
+/* Whose pipes: one segmented control (each choice a radio styled as a button). */
+.pipes-scope { display: inline-flex; flex-wrap: nowrap; margin: 0; }
+.pipes-scope .form-check { margin: 0; padding: 0; min-height: 0; }
+.pipes-scope .btn { border-radius: 0; white-space: nowrap; color: #d4dde6; border-color: #53677a; background: transparent; }
+.pipes-scope .form-check + .form-check .btn { margin-left: -1px; }
+.pipes-scope .form-check:first-child .btn { border-top-left-radius: 6px; border-bottom-left-radius: 6px; }
+.pipes-scope .form-check:last-child .btn { border-top-right-radius: 6px; border-bottom-right-radius: 6px; }
+.pipes-scope .btn:hover { background: #2f3a45; color: #fff; }
+.pipes-scope .btn.active, .pipes-scope .btn-check:checked + .btn { background: #3a6a96; border-color: #3a6a96; color: #fff; }
+.pipes-scope .btn-check:focus-visible + .btn { outline: 2px solid #85caff; outline-offset: 1px; }
 .pipes-search { background-color: #303030; color: #fff; border-color: #444; }
 .pipes-search::placeholder { color: #a8b1ba; }
 .pipes-sort-select { display: none; }
@@ -49,6 +59,13 @@ th.pipes-col-rows { text-align: right; }
 .pipes-col-sync-time { white-space: nowrap; font-variant-numeric: tabular-nums; }
 .pipes-col-status { white-space: nowrap; }
 .pipes-col-pipe .pipes-instance-badge { margin-left: 8px; }
+/* Locks (a lock icon titled with them) and the team, with a visibility other than its team's. */
+.pipes-table th.pipes-col-locks, .pipes-table td.pipes-col-locks { width: 1%; padding-left: 0; padding-right: 0; white-space: nowrap; }
+.pipes-lock { display: inline-flex; align-items: center; color: #f0c674; }
+.pipes-col-team { white-space: nowrap; }
+.pipes-visibility { display: inline-block; margin-left: 6px; padding: 0 7px; border: 1px solid #53677a; border-radius: 9px; font-size: 11px; line-height: 17px; vertical-align: 1px; color: #d4dde6; }
+.pipes-visibility-private { border-color: #b98a2b; color: #f0c674; }
+.pipes-visibility-everyone { border-color: #3a7fbf; color: #9fd0ff; }
 .pipes-sort-button { background: none; border: 0; padding: 0; color: inherit; font-weight: 700; white-space: nowrap; }
 .pipes-sort-button::after { content: ''; display: inline-block; width: 1em; color: #85caff; }
 .pipes-sort-button.pipes-sort-asc::after { content: ' ↑'; }
@@ -67,6 +84,17 @@ th.pipes-col-rows { text-align: right; }
 .pipes-detail-header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px; margin: 4px 0 12px; }
 .pipes-identity { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; }
 .pipes-identity h3 { margin: 0; font-size: 1.4rem; }
+/* Its owner, team and visibility, and its locks (`pipe_detail.build_badges`). */
+.pipes-access-badges { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.pipes-access-badges:empty { display: none; }
+.pipes-access-badge { font-weight: 400; vertical-align: middle; }
+.pipes-badge-key { color: #c6d2dc; font-weight: 400; }
+.pipes-lock-badge { font-size: 1.05rem; }
+/* The Access and Locks dialogs. */
+.pipes-access-radios { margin-bottom: 12px; }
+.pipes-access-radios .form-check, .pipes-locks-switches .form-check { margin-bottom: 4px; }
+.pipes-dialog .form-label { margin-top: 6px; color: #c6d2dc; }
+.new-pipe-access { margin-top: -4px; }
 .pipes-detail-tabs { flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; }
 .pipes-detail-tabs .nav-item { flex: 0 0 auto; }
 .pipes-detail-tabs .nav-link { white-space: nowrap; }
@@ -142,7 +170,13 @@ th.pipes-col-rows { text-align: right; }
 @media (max-width: 760px) {
     .pipes-page { padding: 12px 16px 24px; }
     .pipes-filters { grid-template-columns: 1fr 1fr; }
-    .pipes-filters .pipes-search, .pipes-filters .pipes-clear-all { grid-column: 1 / -1; }
+    .pipes-filters .pipes-search, .pipes-filters .pipes-clear-all, .pipes-filters .pipes-scope { grid-column: 1 / -1; }
+    .pipes-scope { display: flex; }
+    .pipes-scope .form-check { flex: 1 1 0; }
+    .pipes-scope .btn { width: 100%; }
+    .pipes-table td.pipes-col-locks:empty { display: none; }
+    .pipes-table td.pipes-col-locks, .pipes-table td.pipes-col-team { width: 100%; white-space: normal; }
+    .pipes-dialog .form-check { display: flex; align-items: center; gap: 8px; min-height: 44px; }
     .pipes-sort-select { display: block; }
     .pipes-page .btn, .pipes-page input, .pipes-page select, .pipes-page .nav-link, .pipes-sort-button,
     .pipes-page .dash-dropdown, .pipes-breadcrumb, .pipes-page .dropdown-toggle { min-height: 44px; }

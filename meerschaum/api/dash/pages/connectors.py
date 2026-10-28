@@ -8,8 +8,10 @@ each is defined (the configuration, an environment variable or a plugin), its fl
 and database, and its other attributes. Secrets never reach the browser
 (`meerschaum.api.dash.connector_listing`). Administrators can test a connection.
 
-Who sees it: every signed-in user who may run actions (everyone, or only administrators when the
-server runs `--secure` / `api:permissions:actions:non_admin: false`), like the Terminal.
+Who sees it: every signed-in user with `connectors:read` (only administrators when the server
+runs `--secure`). The connectors' details (flavor, host, port, database and their other
+attributes, secrets masked) and Test connection are for administrators; everyone else sees each
+connector's keys, type and source.
 
 The page is built per request (`route`); its callbacks are in `callbacks/connectors_page.py`.
 """
@@ -38,21 +40,33 @@ COLUMNS = (
 )
 
 
+#: The columns everyone who may see the connectors sees (the others are administrators').
+PUBLIC_FIELDS = ('keys', 'type', 'source')
+
+
 def may_view(session_id: Optional[str]) -> bool:
     """
-    Whether the viewer may see the connectors: a signed-in user who may run actions (every user,
-    or only an administrator under `--secure`), or anyone with `--no-auth`.
+    Whether the viewer may see the connectors: a signed-in user with `connectors:read` (only an
+    administrator under `--secure`), or anyone with `--no-auth`.
     """
     from meerschaum.api import no_auth
     if no_auth:
         return True
     if not session_id:
         return False
-    from meerschaum.api.dash.sessions import is_session_authenticated
+    from meerschaum.api.dash.access import get_viewer, _secure
     try:
-        return bool(is_session_authenticated(str(session_id)))
+        viewer = get_viewer(session_id=str(session_id))
     except Exception:
         return False
+    if not viewer.signed_in or not viewer.can('connectors:read'):
+        return False
+    return viewer.is_admin or not _secure()
+
+
+def may_see_details(session_id: Optional[str]) -> bool:
+    """Whether the viewer sees the connectors' details (administrators, or `--no-auth`)."""
+    return may_test(session_id)
 
 
 def may_test(session_id: Optional[str]) -> bool:
@@ -110,17 +124,26 @@ def _search_text(row: Dict[str, Any]) -> str:
     ).lower()
 
 
-def build_table(rows: List[Dict[str, Any]], testable: bool) -> Any:
-    """The connectors table; with `testable`, a Test connection button per testable connector."""
+def build_table(rows: List[Dict[str, Any]], testable: bool, details: bool = True) -> Any:
+    """
+    The connectors table; with `testable`, a Test connection button per testable connector;
+    without `details`, only each connector's keys, type and source (no attributes at all).
+    """
     if not rows:
         return html.P('No connectors', className='connectors-none')
-    headers = [html.Th(header, scope='col') for _, header in COLUMNS]
+    columns = COLUMNS if details else tuple(column for column in COLUMNS if column[0] in PUBLIC_FIELDS)
+    if not details:
+        rows = [
+            {key: value for key, value in row.items() if key not in ('attributes', 'flavor', 'host', 'port', 'database')}
+            for row in rows
+        ]
+    headers = [html.Th(header, scope='col') for _, header in columns]
     if testable:
         headers.append(html.Th(html.Span('Test', className='visually-hidden'), scope='col'))
     body = []
     for row in rows:
         cells = []
-        for field, header in COLUMNS:
+        for field, header in columns:
             content = _cell(field, row)
             cells.append(html.Td(
                 ### One box per cell, so on a phone (a card per connector) its parts wrap beside
@@ -174,11 +197,11 @@ def route(pathname: Optional[str] = None, href: Optional[str] = None) -> List[An
     session_id = state.get('session_id', None)
     allowed = may_view(session_id)
     if not allowed:
-        table = alert_from_success_tuple((False, "Only administrators can see the connectors."))
+        table = html.Div(html.H5('The connectors are not available to your account'), className='console-empty')
     else:
         try:
             rows = list_connectors()
-            table = build_table(rows, may_test(session_id))
+            table = build_table(rows, may_test(session_id), details=may_see_details(session_id))
         except Exception as e:
             table = alert_from_success_tuple((False, f"Could not list the connectors: {mask_text(e)}"))
     header = [html.H1('Connectors', className='connectors-title')]

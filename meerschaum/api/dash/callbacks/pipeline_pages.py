@@ -33,7 +33,14 @@ STEPS = ('name', 'members', 'traversal', 'review')
 
 
 def _authenticated(session) -> bool:
-    return is_session_authenticated(str((session or {}).get('session-id')))
+    """The Pipelines pages are for viewers who may read pipes (`pipes:read`)."""
+    from meerschaum.api.dash import pipes_access
+    return pipes_access.can_read(session)
+
+
+def _viewer(session):
+    from meerschaum.api.dash import pipes_access
+    return pipes_access.viewer(session)
 
 
 def _instance(search):
@@ -62,14 +69,16 @@ def scheduled_jobs(name, registry, jobs) -> List[str]:
     return schedules
 
 
-def build_list_cards(registry: str) -> List[Any]:
+def build_list_cards(registry: str, viewer: Any = None) -> List[Any]:
     """
-    One card per registered Pipeline: identity, member and instance counts, last run and
-    schedule, with Open, Sync, Plan and Manage. History loads when the card is expanded.
+    One card per registered Pipeline the viewer may see: identity, member and instance counts,
+    last run and schedule, with Open, Sync, Plan and Manage (Sync and Manage for viewers who may
+    use them). History loads when the card is expanded.
     """
-    from meerschaum.core.Pipeline._saved import list_pipelines
+    from meerschaum.api.dash import access
+    viewer = viewer if viewer is not None else access.current_viewer()
     instance = _engine.get_instance(registry)
-    definitions = list_pipelines(instance)
+    definitions = access.visible_pipelines(instance, viewer=viewer)
     if not definitions:
         return [html.P('No Pipelines on this registry yet.', className='pipelines-empty')]
     try:
@@ -102,6 +111,18 @@ def build_list_cards(registry: str) -> List[Any]:
             if facts_row:
                 facts_row.append(' · ')
             facts_row.append(fact)
+        if definition.get('hidden_members'):
+            facts_row += [' · ', access.hidden_label(int(definition['hidden_members']))]
+        complete = not definition.get('hidden_members')
+        may_sync = complete and viewer.can('pipes:write')
+        may_edit = access.can_edit_pipe(viewer, access.pipeline_registry_parameters(name, instance))
+        manage = [
+            (action, label) for action, label in (
+                ('analyze', 'Analyze tags'), ('schedule', 'Schedule'), ('copy', 'Copy'),
+                ('rename', 'Rename'), ('clear', 'Clear'), ('drop', 'Drop'), ('delete', 'Delete'),
+            )
+            if may_edit and (complete or action in ('rename', 'delete'))
+        ]
         cards.append(html.Div(dbc.Card([
             dbc.CardHeader(html.H5(pipeline_title(name, link=True))),
             dbc.CardBody([
@@ -113,18 +134,18 @@ def build_list_cards(registry: str) -> List[Any]:
                     id={'type': 'pipeline-card-accordion', 'index': identity}, active_item=None,
                     start_collapsed=True),
             ]),
-            dbc.CardFooter([
-                dbc.Button('Open', href=pipeline_path(name), size='sm'),
-                dbc.Button('Sync', id={'type': 'pipelines-list-sync', 'index': name}, n_clicks=0,
-                           size='sm', color='secondary'),
-                dbc.Button('Plan', href=pipeline_path(name, open='plan'), size='sm', color='secondary'),
-                dbc.DropdownMenu([
+            dbc.CardFooter(
+                [dbc.Button('Open', href=pipeline_path(name), size='sm')]
+                + ([dbc.Button('Sync', id={'type': 'pipelines-list-sync', 'index': name}, n_clicks=0,
+                               size='sm', color='secondary')] if may_sync else [])
+                + [dbc.Button('Plan', href=pipeline_path(name, open='plan'), size='sm', color='secondary')]
+                + ([dbc.DropdownMenu([
                     dbc.DropdownMenuItem(label, href=pipeline_path(name, open=action))
-                    for action, label in (('analyze', 'Analyze tags'), ('schedule', 'Schedule'),
-                                          ('copy', 'Copy'), ('rename', 'Rename'), ('clear', 'Clear'),
-                                          ('drop', 'Drop'), ('delete', 'Delete'))
-                ], label='Manage', direction='up', size='sm', color='secondary', menu_variant='dark'),
-            ], className='pipeline-card-actions'),
+                    for action, label in manage
+                ], label='Manage', direction='up', size='sm', color='secondary', menu_variant='dark')]
+                   if manage else []),
+                className='pipeline-card-actions',
+            ),
         ]), className='pipeline-list-card', **{'data-pipeline': name}))
     return cards
 
@@ -142,14 +163,14 @@ def render_list(pathname, search, session):
         raise PreventUpdate
     instance = _instance(search)
     try:
-        cards = build_list_cards(str(instance))
+        cards = build_list_cards(str(instance), viewer=_viewer(session))
     except Exception as exc:
         cards = [alert_from_success_tuple((False, f'Could not read the Pipelines on {instance}: {exc}'))]
     try:
         options = [{'label': _engine.ref_label(ref), 'value': ref} for ref in sorted(
             '|'.join((str(pipe.instance_keys), pipe.connector_keys, pipe.metric_key,
                       pipe.location_key or 'None'))
-            for pipe in _engine._instance_pipes(instance))]
+            for pipe in _engine._instance_pipes(instance, viewer=_viewer(session)))]
     except Exception:
         options = []
     return cards, options
@@ -195,6 +216,10 @@ def sync_from_list(clicks, search, session):
     name = trigger['index']
     try:
         instance = _instance(search)
+        from meerschaum.api.dash import access
+        allowed, reason = access.may_sync_pipeline(_viewer(session), name, instance)
+        if not allowed:
+            raise PermissionError(reason)
         definition = list_pipelines(instance).get(name)
         if not definition:
             raise ValueError(f"Pipeline '{name}' is not registered on {instance}.")
@@ -405,11 +430,17 @@ def review(draft, registry) -> Dict[str, Any]:
     """
     from meerschaum.api.dash.pipeline_editing import make_pipe, validate_edits
     from meerschaum.api.dash.callbacks.pipelines import classify_nodes
+    from meerschaum.api.dash import access
+    viewer = access.current_viewer()
     new_pipes = draft.get('new_pipes') or {}
     members = list(draft.get('members') or [])
     existing = [ref for ref in members if ref not in new_pipes]
     problems = []
-    missing = [ref for ref in existing if make_pipe(ref).get_id() is None]
+    ### A member the viewer may not see reads as missing (its keys came from the browser).
+    missing = [
+        ref for ref in existing
+        if not access.ref_is_visible(viewer, ref) or make_pipe(ref).get_id() is None
+    ]
     if missing:
         problems.append('Missing Pipes: ' + ', '.join(_engine.ref_label(ref) for ref in missing))
     try:
@@ -470,22 +501,34 @@ def render_review(draft, prefill, session):
     Input('pipeline-new-create', 'n_clicks'),
     State('pipeline-new-draft', 'data'), State('pipeline-new-apply-tags', 'value'),
     State('pipeline-new-prefill', 'data'), State('pipeline-new-drafts', 'data'),
-    State('session-store', 'data'), prevent_initial_call=True,
+    State('session-store', 'data'),
+    State('pipeline-new-team', 'value', allow_optional=True),
+    State('pipeline-new-visibility', 'value', allow_optional=True),
+    prevent_initial_call=True,
 )
-def create_pipeline(clicks, draft, apply_tags, prefill, drafts, session):
-    """Create: register new Pipes, save the definition and (when ticked) apply its tags."""
+def create_pipeline(clicks, draft, apply_tags, prefill, drafts, session, team=None, visibility=None):
+    """
+    Create: register new Pipes, save the definition (the viewer's, in `team`, visible as
+    `visibility`) and (when ticked) apply its tags.
+    """
     if not clicks or not draft or not _authenticated(session):
         raise PreventUpdate
     from meerschaum.core.Pipeline._saved import (
         save_pipeline, analyze_pipeline, apply_pipeline_analysis,
     )
     from meerschaum.api.dash.pipeline_editing import make_pipe
+    from meerschaum.api.dash import pipe_writes
     registry = (prefill or {}).get('registry') or str(_engine.get_instance())
+    viewer = _viewer(session)
     try:
+        if not viewer.can('pipes:register'):
+            raise PermissionError('Your account may not register Pipelines.')
+        pipeline_access = pipe_writes.new_access(viewer, team=team, visibility=visibility)
         for step in STEPS[:-1]:
             problem = _validate_step(step, draft, registry)
             if problem:
                 raise ValueError(problem)
+        ### (A member the viewer may not see is one of the review's missing Pipes.)
         if review(draft, registry)['problems']:
             raise ValueError('Resolve the checks before creating this Pipeline.')
         instance = _engine.get_instance(registry)
@@ -494,14 +537,20 @@ def create_pipeline(clicks, draft, apply_tags, prefill, drafts, session):
                 continue
             pipe = make_pipe(ref, parameters)
             if pipe.get_id() is None:
-                registered, message = pipe.register()
+                registered, message = pipe_writes.register_pipe(
+                    pipe, dict(parameters or {}), viewer=viewer, team=team, visibility=visibility,
+                )
                 if not registered:
                     raise ValueError(f'Could not register {pipe}: {message}')
         save_pipeline(draft['name'], draft['members'], instance,
                       parents=_depth(draft.get('parents'), draft.get('parents_depth')),
-                      children=_depth(draft.get('children'), draft.get('children_depth')), create=True)
+                      children=_depth(draft.get('children'), draft.get('children_depth')),
+                      create=True, access=pipeline_access)
         remaining = {key: value for key, value in (drafts or {}).items() if key != registry}
         dash.set_props('pipeline-new-drafts', {'data': remaining})
+        from meerschaum.api.dash import access
+        if apply_tags and not access.may_sync_pipeline(viewer, draft['name'], instance)[0]:
+            apply_tags = False
         if apply_tags:
             proposal = analyze_pipeline(draft['name'], instance)
             if proposal.get('changes'):

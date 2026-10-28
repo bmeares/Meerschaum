@@ -55,6 +55,23 @@
         setPane('output');
         requestAnimationFrame(() => dock.scrollIntoView({block: 'nearest'}));
     };
+    // The Pipeline run a member's output belongs to, resolved when it is clicked: the selected run
+    // once the server has listed its members (`pipeline-current-run`), else this page's own live
+    // run (`pipeline-live-run`), whose explicit members are on the canvas as soon as it starts.
+    // Reading only the server's answer lost a click made before that answer arrived.
+    function memberRun(ref) {
+        const current = window._mrsmCurrentPipelineRun;
+        if (current && current.labels && current.labels[ref]) return {...current, label: current.labels[ref]};
+        const live = window._mrsmPipelineRun;
+        if (!live || !live.run_id || !live.pipeline) return null;
+        const world = document.getElementById('pipeline-canvas-world');
+        if (world && world.dataset.pipeline && world.dataset.pipeline !== live.pipeline) return null;
+        const card = Array.from(document.querySelectorAll('.pipeline-stage[data-ref]'))
+            .find(node => node.dataset.ref === ref);
+        if (!card || card.dataset.role !== 'explicit') return null;
+        const label = (card.querySelector('code') || {}).textContent || ref;
+        return {run_id: live.run_id, instance: live.registry, job: live.job, pipeline: live.pipeline, label};
+    }
     function showOutput(ref) {
         const dock = document.getElementById('pipeline-output-dock');
         if (!dock) return;
@@ -63,12 +80,12 @@
         window._mrsmOutputDismissed = false;
         dock.classList.remove('pipeline-output-empty');
         setPane('output');
-        // A member of this Pipeline's selected run shows its part of that run.
-        const current = window._mrsmCurrentPipelineRun;
+        // A member of this Pipeline's selected (or running) run shows its part of that run.
+        const run = memberRun(ref);
         const rows = Array.from((window._mrsmNodeOutput || new Map()).values()).filter(item => item.ref === ref);
-        if (current && current.labels && current.labels[ref]) window.dash_clientside.set_props('pipeline-member-output', {data: {
-            key: 'run:' + current.run_id + '|' + ref, ref, label: current.labels[ref], run_id: current.run_id,
-            instance: current.instance, job: current.job, pipeline: current.pipeline, scope: 'pipeline', token: Date.now()}});
+        if (run) window.dash_clientside.set_props('pipeline-member-output', {data: {
+            key: 'run:' + run.run_id + '|' + ref, ref, label: run.label, run_id: run.run_id,
+            instance: run.instance, job: run.job, pipeline: run.pipeline, scope: 'pipeline', token: Date.now()}});
         else if (rows.length) window.dash_clientside.set_props('pipeline-output-tab', {value: rows.at(-1).key || rows.at(-1).job});
         else window.dash_clientside.set_props('pipeline-node-alert', {children: 'No output for this Pipe yet.'});
         dock.scrollIntoView({block: 'nearest'});

@@ -53,11 +53,20 @@ def split_path(pathname):
     return [unquote(part) for part in rest.split('/')] if rest else []
 
 
-def table_layout(instance_keys, global_instance, filters, allowed_new=False, problem=None):
+def table_layout(instance_keys, global_instance, filters, allowed_new=False, problem=None, viewer=None):
     """The Pipes table: the header with New pipe, the filters, the table and its pages."""
     from meerschaum.api.dash.pipes_table import (
-        build_table_layout, SORT_COLUMNS, STATUS_FILTERS,
+        build_table_layout, SORT_COLUMNS, STATUS_FILTERS, SCOPE_FILTERS,
     )
+    ### My teams is offered to a viewer in a team other than Everyone.
+    scope_options = [
+        {'label': label, 'value': value}
+        for value, label in SCOPE_FILTERS
+        if value != 'teams' or (viewer is not None and getattr(viewer, 'own_teams', None))
+    ]
+    scope = filters.get('scope', '') or 'all'
+    if scope not in {option['value'] for option in scope_options}:
+        scope = 'all'
     dropdown = lambda id, placeholder: html.Div(
         dcc.Dropdown(id=id, options=[], value=[], placeholder=placeholder, multi=True, searchable=True),
         className='dbc_dark pipes-filter',
@@ -118,6 +127,16 @@ def table_layout(instance_keys, global_instance, filters, allowed_new=False, pro
                         dropdown('pipes-metric-keys-dropdown', 'Metrics'),
                         dropdown('pipes-location-keys-dropdown', 'Locations'),
                         dropdown('pipes-tags-dropdown', 'Tags'),
+                        dbc.RadioItems(
+                            id='pipes-scope-select',
+                            options=scope_options,
+                            value=scope,
+                            inline=True,
+                            class_name='pipes-scope btn-group',
+                            input_class_name='btn-check',
+                            label_class_name='btn btn-sm btn-outline-secondary',
+                            label_checked_class_name='active',
+                        ),
                         dbc.Select(
                             id='pipes-status-select',
                             options=[{'label': label, 'value': value} for value, label in STATUS_FILTERS],
@@ -166,6 +185,7 @@ def layout(pathname=None, href=None):
     session_data = pipes_access.session_data_from_context()
     parts = split_path(pathname)
 
+    viewer = pipes_access.viewer(session_data)
     if parts == ['new']:
         from meerschaum.api.dash import new_pipe
         allowed, reason = pipes_access.can_register(session_data)
@@ -175,6 +195,7 @@ def layout(pathname=None, href=None):
             connector_keys=(keys.get('connector_keys', [None])[0] or None),
             metric_key=(keys.get('metric_key', [None])[0] or None),
             location_key=(keys.get('location_key', [None])[0] or None),
+            viewer=viewer,
         )
     elif len(parts) in (2, 3):
         from meerschaum.api.dash import pipe_detail
@@ -183,15 +204,15 @@ def layout(pathname=None, href=None):
             parts[0], parts[1], (parts[2] if len(parts) == 3 else None),
             instance_keys,
             global_instance,
-            allowed=pipes_access.can_act(session_data),
             tab=tab,
             problem=problem,
+            viewer=viewer,
         )
         problem = None
     else:
         allowed_new, _ = pipes_access.can_register(session_data)
         page = table_layout(instance_keys, global_instance, filters, allowed_new=allowed_new,
-                            problem=problem)
+                            problem=problem, viewer=viewer)
         problem = None
 
     if problem:

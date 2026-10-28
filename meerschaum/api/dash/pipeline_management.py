@@ -103,8 +103,62 @@ def build_member_panel(prefix, registry, instance_options):
     ], className='pipeline-member-panel')
 
 
-def build_detail_header(name, registry):
-    """The detail page's header: identity, then Sync, Plan, Edit and Manage."""
+#: What a Pipeline's page may offer: `(right, label)` of its header's Manage menu.
+MANAGE_ITEMS = (
+    ('analyze', 'Analyze tags', 'pipeline-analyze'),
+    ('schedule', 'Schedule', 'pipeline-manage-schedule'),
+    ('copy', 'Copy', 'pipeline-manage-copy'),
+    ('rename', 'Rename', 'pipeline-manage-rename'),
+    ('clear', 'Clear', 'pipeline-manage-clear'),
+    ('drop', 'Drop', 'pipeline-manage-drop'),
+    ('delete', 'Delete', 'pipeline-delete'),
+)
+
+
+def pipeline_rights(viewer, name, registry):
+    """
+    What the viewer may do on a Pipeline's page: `sync`, `edit`, and each Manage item (every
+    member visible and theirs to change for the ones that touch members; AC7).
+    """
+    from meerschaum.api.dash import access
+    rights = {key: False for key in ('sync', 'edit') + tuple(item for item, _, _ in MANAGE_ITEMS)}
+    if viewer is None:
+        return {key: True for key in rights}
+    try:
+        parameters = access.pipeline_registry_parameters(name, registry)
+        if parameters and not access.can_see_pipe(viewer, parameters):
+            return rights
+        members_ok = access.may_sync_pipeline(viewer, name, registry)[0] if parameters else True
+        editable = access.can_edit_pipe(viewer, parameters or {}, 'pipes:write')
+    except Exception:
+        return rights
+    rights.update({
+        'sync': members_ok and viewer.can('pipes:write'),
+        'edit': editable,
+        'analyze': members_ok and editable,
+        'schedule': members_ok and viewer.can('jobs:write'),
+        'copy': members_ok and viewer.can('pipes:register'),
+        'rename': editable,
+        'clear': members_ok and viewer.can('pipes:delete'),
+        'drop': members_ok and viewer.can('pipes:drop'),
+        'delete': access.can_edit_pipe(viewer, parameters or {}, 'pipes:delete'),
+    })
+    return rights
+
+
+def build_detail_header(name, registry, rights=None):
+    """
+    The detail page's header: identity, then Sync, Plan, Edit and Manage (each only for a viewer
+    who may use it: `rights`, from `pipeline_rights`).
+    """
+    rights = rights if rights is not None else {}
+    shown = lambda key: (None if rights.get(key, True) else {'display': 'none'})
+    items = [
+        dbc.DropdownMenuItem(label, id=item_id, n_clicks=0, style=shown(key))
+        for key, label, item_id in MANAGE_ITEMS
+    ]
+    items.insert(4, dbc.DropdownMenuItem(divider=True))
+    any_item = any(rights.get(key, True) for key, _, _ in MANAGE_ITEMS)
     return html.Div([
         html.Div([
             html.H3(pipeline_title(name), id='pipeline-title'),
@@ -113,23 +167,16 @@ def build_detail_header(name, registry):
             html.Span(id='pipeline-draft-notice', className='pipeline-unsaved-count'),
         ], className='pipeline-identity'),
         html.Div([
-            dbc.Button('Sync', id='pipeline-run-now', n_clicks=0, size='sm'),
+            dbc.Button('Sync', id='pipeline-run-now', n_clicks=0, size='sm', style=shown('sync')),
             dbc.Button('Cancel run', id='pipeline-cancel-current', n_clicks=0, size='sm', color='danger',
                        outline=True, style={'display': 'none'}),
             dbc.Button('Plan', id='pipeline-plan-open', n_clicks=0, size='sm', color='secondary'),
             dbc.Button('Edit', id='pipeline-edit-toggle', n_clicks=0, size='sm', color='secondary',
-                       className='pipeline-read-only'),
-            dbc.DropdownMenu([
-                dbc.DropdownMenuItem('Analyze tags', id='pipeline-analyze', n_clicks=0),
-                dbc.DropdownMenuItem('Schedule', id='pipeline-manage-schedule', n_clicks=0),
-                dbc.DropdownMenuItem('Copy', id='pipeline-manage-copy', n_clicks=0),
-                dbc.DropdownMenuItem('Rename', id='pipeline-manage-rename', n_clicks=0),
-                dbc.DropdownMenuItem(divider=True),
-                dbc.DropdownMenuItem('Clear', id='pipeline-manage-clear', n_clicks=0),
-                dbc.DropdownMenuItem('Drop', id='pipeline-manage-drop', n_clicks=0),
-                dbc.DropdownMenuItem('Delete', id='pipeline-delete', n_clicks=0),
-            ], label='Manage', direction='up', size='sm', color='secondary', menu_variant='dark',
-                id='pipeline-manage-menu', className='pipeline-read-only'),
+                       className='pipeline-read-only', style=shown('edit')),
+            dbc.DropdownMenu(items, label='Manage', direction='up', size='sm', color='secondary',
+                             menu_variant='dark', id='pipeline-manage-menu',
+                             className='pipeline-read-only',
+                             style=(None if any_item else {'display': 'none'})),
             html.Div([
                 dbc.Button('Undo', id='pipeline-draft-undo', size='sm', color='secondary'),
                 dbc.Button('Redo', id='pipeline-draft-redo', size='sm', color='secondary'),

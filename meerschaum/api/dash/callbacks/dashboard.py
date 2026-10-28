@@ -105,7 +105,10 @@ _paths = {
         '/dash/webterm'  : pages.terminal.layout,
         '/dash/connectors': pages.connectors.route,
         '/dash/plugins' : pages.plugins.layout,
+        ### Users & Teams: the Users tab (`/dash/users`, a user's page `/dash/users/<name>`) and
+        ### the Teams tab (`/dash/teams`).
         '/dash/users'   : pages.users.layout,
+        '/dash/teams'   : pages.users.layout,
         '/dash/tokens'  : pages.tokens.layout,
         '/dash/register': pages.register.layout,
         '/dash/pipes'   : pages.pipes.layout,
@@ -118,7 +121,19 @@ _paths = {
 _required_login = {
     '', '/dash', '/dash/', '/dash/tokens', '/dash/jobs', '/dash/pipes',
     '/dash/pipelines', '/dash/runs', '/dash/terminal', '/dash/webterm', '/dash/connectors',
-    '/dash/users', '/dash/plugins',
+    '/dash/users', '/dash/teams', '/dash/plugins',
+}
+### The permission a console page needs (`access.Viewer.can`): without it the page shows that it
+### is not available (its link is not in the navigation either: `components.NAV_PERMISSIONS`).
+_required_permission = {
+    '/dash/pipes': 'pipes:read',
+    '/dash/pipelines': 'pipes:read',
+    '/dash/jobs': 'jobs:read',
+    '/dash/runs': 'jobs:read',
+    '/dash/terminal': 'webterm:use',
+    '/dash/webterm': 'webterm:use',
+    '/dash/connectors': 'connectors:read',
+    '/dash/plugins': 'plugins:read',
 }
 ### Endpoints (plugin pages with `@web_page(dark_theme=False)`) that opt out of the
 ### `dbc_dark` component theme; populated by `add_plugin_pages`.
@@ -232,6 +247,15 @@ def update_page_layout_div(
         )
     )
     layout = _paths.get(path, pages.error.layout)
+    permission = _required_permission.get(path, None)
+    if permission and not no_auth and path != '/dash/login':
+        from meerschaum.api.dash.access import get_viewer
+        try:
+            allowed = get_viewer(session_store_data).can(permission)
+        except Exception:
+            allowed = False
+        if not allowed:
+            layout = pages.error.not_available
     apply_dbc_dark = path not in _paths_without_dbc_dark
     ### A link into v4's dashboard opens the Terminal page (`assets/global_instance.js` follows it).
     redirect = terminal_redirect(path, location_href)
@@ -525,37 +549,37 @@ def update_keys_options(
     _lk_alone = (location_keys and num_filter == 1) or instance_click
     _tags_alone = (tags and num_filter == 1) or instance_click
 
-    from meerschaum.utils import fetch_pipes_keys
+    from meerschaum.api.dash import access
 
     try:
-        _all_keys = fetch_pipes_keys('registered', get_web_connector(ctx.states))
-        if isinstance(_all_keys, dict):
-            _all_keys = list(_all_keys.values())
-        _keys = fetch_pipes_keys(
-            'registered',
-            get_web_connector(ctx.states),
+        ### Only the pipes the viewer may see name their keys and tags here.
+        viewer = access.get_viewer(ctx.states.get('session-store.data', None))
+        instance_connector = get_web_connector(ctx.states)
+        _all_visible = [
+            (ck, mk, lk, parameters)
+            for ck, mk, lk, parameters in access.registered_pipes(instance_connector)
+            if access.can_see_pipe(viewer, parameters)
+        ]
+        _all_keys = [(ck, mk, lk) for ck, mk, lk, _ in _all_visible]
+        _selected = access.visible_pipes(viewer, mrsm.get_pipes(
             connector_keys=connector_keys,
             metric_keys=metric_keys,
             location_keys=location_keys,
             tags=tags,
-        )
-        if isinstance(_keys, dict):
-            _keys = list(_keys.values())
-        _tags_pipes = mrsm.get_pipes(
-            connector_keys=connector_keys,
-            metric_keys=metric_keys,
-            location_keys=location_keys,
-            tags=tags,
-            instance=get_web_connector(ctx.states),
-            as_tags_dict=True,
-        )
+            instance=instance_connector,
+            as_list=True,
+        ))
+        _keys = [
+            (str(pipe.connector_keys), str(pipe.metric_key), pipe.location_key)
+            for pipe in _selected
+        ]
+        _tags_pipes = {str(tag) for pipe in _selected for tag in (pipe.tags or [])}
         _all_tags = list(
-            set(
-                mrsm.get_pipes(
-                    instance=get_web_connector(ctx.states),
-                    as_tags_dict=True,
-                )
-            ).union(tags or [])
+            {
+                str(tag)
+                for _, _, _, parameters in _all_visible
+                for tag in (parameters.get('tags', None) or [])
+            }.union(tags or [])
         ) if _tags_alone else []
     except Exception as e:
         import traceback
@@ -859,7 +883,8 @@ def download_pipe_csv(n_clicks, session_store_data):
     """
     if not n_clicks:
         raise PreventUpdate
-    if not is_state_authenticated(session_store_data):
+    from meerschaum.api.dash import pipes_access
+    if not pipes_access.can_read(session_store_data):
         raise PreventUpdate
     ctx = dash.callback_context.triggered
     if ctx[0]['value'] is None:
@@ -871,7 +896,7 @@ def download_pipe_csv(n_clicks, session_store_data):
     begin, end = bounds[-1]
     filename = str(pipe.target) + f" {begin} - {end}.csv"
     try:
-        df = pipe.get_data(begin=begin, end=end, debug=debug)
+        df = pipe.get_data(begin=begin, end=end, as_pandas=True, debug=debug)
     except Exception as e:
         warn(f"Failed to fetch data for CSV download of {pipe}:\n{e}", stack=False)
         df = None
@@ -900,8 +925,9 @@ def update_pipe_accordion(item, session_store_data):
     if pipe is None:
         raise PreventUpdate
 
-    session_id = session_store_data.get('session-id', None)
-    authenticated = is_session_authenticated(str(session_id))
+    ### Its editors (parameters, rows, parents and children) are for those who may change it.
+    from meerschaum.api.dash import access
+    authenticated = access.can_edit_pipe(access.get_viewer(session_store_data), pipe)
     return accordion_items_from_pipe(pipe, active_items=[item], authenticated=authenticated)
 
 
@@ -913,10 +939,13 @@ def update_pipe_accordion(item, session_store_data):
     prevent_initial_call=True,
 )
 def update_pipe_parameters_click(n_clicks, parameters_editor_text, session_store_data):
+    """Save the parameters editor (edit rights, access, locks and SQL checks: `pipe_writes`)."""
     if not n_clicks:
         raise PreventUpdate
-    if not is_state_authenticated(session_store_data):
-        return alert_from_success_tuple((False, "You are not authenticated."))
+    from meerschaum.api.dash import pipes_access, pipe_writes
+    allowed, reason = pipes_access.can_write_pipes(session_store_data)
+    if not allowed:
+        return alert_from_success_tuple((False, reason))
     triggered = dash.callback_context.triggered
     if triggered[0]['value'] is None:
         raise PreventUpdate
@@ -927,17 +956,23 @@ def update_pipe_parameters_click(n_clicks, parameters_editor_text, session_store
     if parameters_editor_text is None:
         success, msg = False, f"Unable to update parameters for {pipe}."
     else:
+        text_format = 'JSON' if parameters_editor_text.lstrip().startswith('{') else 'YAML'
         try:
-            text_format = 'JSON' if parameters_editor_text.lstrip().startswith('{') else 'YAML'
             params = (
                 json.loads(parameters_editor_text)
                 if text_format == 'JSON'
                 else yaml.load(parameters_editor_text)
             )
-            pipe.parameters = params
-            success, msg = pipe.edit(debug=debug)
         except Exception as e:
+            params = None
             success, msg = False, f"Invalid {text_format}:\n{e}"
+        if params is not None:
+            try:
+                success, msg = pipe_writes.save_parameters(
+                    pipe, params, viewer=pipes_access.viewer(session_store_data),
+                )
+            except Exception as e:
+                success, msg = False, str(e)
 
     return alert_from_success_tuple((success, msg))
 
@@ -950,10 +985,13 @@ def update_pipe_parameters_click(n_clicks, parameters_editor_text, session_store
     prevent_initial_call=True,
 )
 def update_pipe_sql_click(n_clicks, sql_editor_text, session_store_data):
+    """Save a pipe's SQL definition (`pipes:define_sql` and the SQL guard: `pipe_writes`)."""
     if not n_clicks:
         raise PreventUpdate
-    if not is_state_authenticated(session_store_data):
-        return alert_from_success_tuple((False, "You are not authenticated."))
+    from meerschaum.api.dash import pipes_access, pipe_writes
+    allowed, reason = pipes_access.can_write_pipes(session_store_data)
+    if not allowed:
+        return alert_from_success_tuple((False, reason))
     triggered = dash.callback_context.triggered
     if triggered[0]['value'] is None:
         raise PreventUpdate
@@ -965,7 +1003,12 @@ def update_pipe_sql_click(n_clicks, sql_editor_text, session_store_data):
         success, msg = False, f"Unable to update SQL definition for {pipe}."
     else:
         try:
-            success, msg = set_pipe_query(pipe, sql_editor_text)
+            success, msg = set_pipe_query(
+                pipe, sql_editor_text,
+                save=lambda patch: pipe_writes.update_parameters(
+                    pipe, patch, viewer=pipes_access.viewer(session_store_data),
+                ),
+            )
         except Exception as e:
             success, msg = False, f"Invalid SQL query:\n{e}"
 
@@ -984,7 +1027,8 @@ def toggle_sql_symlinks(value, session_store_data):
         raise PreventUpdate
 
     ### The pipe's SQL definition is not public.
-    if not is_state_authenticated(session_store_data):
+    from meerschaum.api.dash import pipes_access
+    if not pipes_access.can_read(session_store_data):
         raise PreventUpdate
 
     pipe = pipe_from_ctx(triggered, 'value')
@@ -1003,9 +1047,12 @@ def toggle_sql_symlinks(value, session_store_data):
     prevent_initial_call=True,
 )
 def sync_documents_click(n_clicks, sync_editor_text, session_store_data):
+    """Sync rows into the pipe: `pipes:write`, edit rights and no `sync` lock."""
     if not n_clicks:
         raise PreventUpdate
-    if not is_state_authenticated(session_store_data):
+    from meerschaum.api.dash import pipes_access, access
+    viewer = pipes_access.viewer(session_store_data)
+    if not viewer.signed_in and not viewer.no_auth:
         return alert_from_success_tuple((False, "You are not authenticated."))
     triggered = dash.callback_context.triggered
     if triggered[0]['value'] is None:
@@ -1013,6 +1060,9 @@ def sync_documents_click(n_clicks, sync_editor_text, session_store_data):
     pipe = pipe_from_ctx(triggered, 'n_clicks')
     if pipe is None:
         raise PreventUpdate
+    allowed, reason = access.may_run_pipe_action(viewer, pipe, 'sync')
+    if not allowed:
+        return alert_from_success_tuple((False, reason))
 
     try:
         msg = '... '
@@ -1062,7 +1112,8 @@ def query_data_click(
     triggered = dash.callback_context.triggered
     if triggered[0]['value'] is None:
         raise PreventUpdate
-    if not is_state_authenticated(session_store_data):
+    from meerschaum.api.dash import pipes_access
+    if not pipes_access.can_read(session_store_data):
         return alert_from_success_tuple((False, "You are not authenticated."))
     pipe = pipe_from_ctx(triggered, 'n_clicks')
     if pipe is None:
@@ -1084,6 +1135,7 @@ def query_data_click(
             end=end,
             limit=limit_value,
             order='desc',
+            as_pandas=True,
             debug=debug,
         )
     except Exception as e:
@@ -1277,7 +1329,8 @@ def calculate_rowcount_button_click(n_clicks: int, session_store_data):
     if not n_clicks:
         raise PreventUpdate
 
-    if not is_state_authenticated(session_store_data):
+    from meerschaum.api.dash import pipes_access
+    if not pipes_access.can_read(session_store_data):
         raise PreventUpdate
 
     triggered = dash.callback_context.triggered

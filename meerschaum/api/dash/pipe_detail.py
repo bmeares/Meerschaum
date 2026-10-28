@@ -120,8 +120,93 @@ def register_href(pipe: mrsm.Pipe) -> str:
 # Layout
 # ------------------------------------------------------------------------------------------------
 
-def build_header(pipe: mrsm.Pipe, global_instance: str, allowed: bool) -> Any:
-    """`Pipe(...)` with its instance badge, and the actions for sessions that may run them."""
+def pipe_rights(viewer: Any, pipe: mrsm.Pipe, parameters: Optional[Dict[str, Any]] = None) -> Dict[str, bool]:
+    """
+    What the viewer may do with this pipe on its page: `sync`, `verify`, `edit`, `copy`,
+    `clear`, `drop`, `delete`, `access`, `locks` (permissions and edit rights; locks are not
+    rights: a locked action shows and says why it cannot run).
+    """
+    from meerschaum.api.dash import access
+    if parameters is None:
+        try:
+            parameters = pipe.get_parameters(apply_symlinks=False) or {}
+        except Exception:
+            parameters = {}
+    rights = {}
+    for action in ('sync', 'verify', 'edit', 'clear', 'drop', 'delete'):
+        permission = access.PIPE_ACTION_PERMISSIONS[action]
+        rights[action] = access.can_edit_pipe(viewer, parameters, permission)
+    from meerschaum.config import get_config
+    rights['copy'] = bool(
+        viewer.can('pipes:register')
+        and get_config('api', 'permissions', 'registration', 'pipes', warn=False)
+        and access.can_see_pipe(viewer, parameters)
+    )
+    rights['access'] = access.can_manage_access(viewer, parameters)
+    rights['locks'] = access.can_lock(viewer, parameters)
+    return rights
+
+
+def build_badges(parameters: Optional[Dict[str, Any]]) -> List[Any]:
+    """
+    The pipe's owner, team and visibility badges and a lock icon, for a pipe that has them (a
+    pipe without an `access` key is Everyone's, visible to its team: no badges).
+    """
+    from meerschaum.api.dash import access
+    parameters = parameters or {}
+    try:
+        fields = access.access_fields(parameters)
+        locks = access.pipe_locks(parameters)
+    except Exception:
+        return []
+    badges = []
+    if fields.get('owner'):
+        badges.append(dbc.Badge(
+            [html.Span('Owner ', className='pipes-badge-key'), fields['owner']],
+            color='secondary', className='pipes-access-badge', id='pipe-detail-owner',
+        ))
+    if fields.get('team'):
+        badges.append(dbc.Badge(
+            [html.Span('Team ', className='pipes-badge-key'), fields['team']],
+            color='secondary', className='pipes-access-badge', id='pipe-detail-team',
+        ))
+    visibility = fields.get('visibility') or 'team'
+    if visibility != 'team':
+        badges.append(dbc.Badge(
+            dict(access.VISIBILITIES).get(visibility, visibility),
+            color=('warning' if visibility == 'private' else 'info'),
+            text_color=('dark' if visibility == 'private' else None),
+            className='pipes-access-badge pipes-visibility-badge', id='pipe-detail-visibility',
+        ))
+    if locks:
+        title = pipes_table.locks_title(locks)
+        badges.append(html.Span(
+            [
+                html.Span(className='mrsm-icon mrsm-icon-lock', **{'aria-hidden': 'true'}),
+                html.Span(title, className='visually-hidden'),
+            ],
+            className='pipes-lock pipes-lock-badge', title=title, id='pipe-detail-locks',
+        ))
+    return badges
+
+
+def build_header(
+    pipe: mrsm.Pipe,
+    global_instance: str,
+    allowed: Any,
+    parameters: Optional[Dict[str, Any]] = None,
+) -> Any:
+    """
+    `Pipe(...)` with its instance badge, its access badges and lock icon, and the actions the
+    viewer may run (`allowed`: `pipe_rights()`, or a bool for every action or none). An action
+    the viewer lacks the permission for is not shown.
+    """
+    if isinstance(allowed, dict):
+        rights = dict(allowed)
+    else:
+        rights = {key: bool(allowed) for key in (
+            'sync', 'verify', 'edit', 'copy', 'clear', 'drop', 'delete', 'access', 'locks',
+        )}
     identity = [
         html.H3(
             pipes_table.pipe_title(pipe.connector_keys, pipe.metric_key, pipe.location_key),
@@ -131,28 +216,40 @@ def build_header(pipe: mrsm.Pipe, global_instance: str, allowed: bool) -> Any:
     if str(pipe.instance_keys) != str(global_instance):
         identity.append(dbc.Badge(str(pipe.instance_keys), color='secondary',
                                   className='pipes-instance-badge', id='pipe-detail-instance'))
+    identity.append(html.Span(build_badges(parameters), id='pipe-detail-badges',
+                              className='pipes-access-badges'))
     actions = []
-    if allowed:
-        actions = [
-            dbc.Button('Sync', id='pipe-action-sync', n_clicks=0, size='sm', color='primary'),
-            dbc.Button('Verify', id='pipe-action-verify', n_clicks=0, size='sm', color='secondary'),
-            dbc.Button('Edit', id='pipe-edit-toggle', n_clicks=0, size='sm', color='secondary'),
-            dbc.DropdownMenu(
-                [
-                    dbc.DropdownMenuItem('Copy', id='pipe-manage-copy', n_clicks=0),
-                    dbc.DropdownMenuItem(divider=True),
-                    dbc.DropdownMenuItem('Clear', id='pipe-manage-clear', n_clicks=0),
-                    dbc.DropdownMenuItem('Drop', id='pipe-manage-drop', n_clicks=0),
-                    dbc.DropdownMenuItem('Delete', id='pipe-manage-delete', n_clicks=0),
-                ],
-                label='Manage',
-                size='sm',
-                color='secondary',
-                menu_variant='dark',
-                align_end=True,
-                id='pipe-manage-menu',
-            ),
-        ]
+    if rights.get('sync'):
+        actions.append(dbc.Button('Sync', id='pipe-action-sync', n_clicks=0, size='sm', color='primary'))
+    if rights.get('verify'):
+        actions.append(dbc.Button('Verify', id='pipe-action-verify', n_clicks=0, size='sm', color='secondary'))
+    if rights.get('edit'):
+        actions.append(dbc.Button('Edit', id='pipe-edit-toggle', n_clicks=0, size='sm', color='secondary'))
+    items = []
+    if rights.get('copy'):
+        items.append(dbc.DropdownMenuItem('Copy', id='pipe-manage-copy', n_clicks=0))
+    if rights.get('access'):
+        items.append(dbc.DropdownMenuItem('Access…', id='pipe-manage-access', n_clicks=0))
+    if rights.get('locks'):
+        items.append(dbc.DropdownMenuItem('Locks…', id='pipe-manage-locks', n_clicks=0))
+    destructive = [
+        dbc.DropdownMenuItem(label, id=f'pipe-manage-{action}', n_clicks=0)
+        for action, label in (('clear', 'Clear'), ('drop', 'Drop'), ('delete', 'Delete'))
+        if rights.get(action)
+    ]
+    if items and destructive:
+        items.append(dbc.DropdownMenuItem(divider=True))
+    items += destructive
+    if items:
+        actions.append(dbc.DropdownMenu(
+            items,
+            label='Manage',
+            size='sm',
+            color='secondary',
+            menu_variant='dark',
+            align_end=True,
+            id='pipe-manage-menu',
+        ))
     return html.Div(
         [
             dcc.Link('Pipes', href='/dash/pipes', className='pipes-breadcrumb'),
@@ -257,7 +354,76 @@ def build_dialogs(pipe: mrsm.Pipe) -> Any:
         is_open=False,
         className='pipes-dialog',
     )
-    return html.Div([confirm, copy])
+    from meerschaum.api.dash import access as _access
+    access_dialog = dbc.Modal(
+        [
+            dbc.ModalHeader(dbc.ModalTitle('Access')),
+            dbc.ModalBody([
+                html.P(pipes_table.pipe_title(pipe.connector_keys, pipe.metric_key, pipe.location_key),
+                       className='pipes-confirm-pipe'),
+                dbc.Label('Owner', html_for='pipe-access-owner', size='sm'),
+                dbc.Select(id='pipe-access-owner', options=[], value=None, size='sm',
+                           class_name='dbc_dark custom-select custom-select-sm'),
+                dbc.Label('Team', html_for='pipe-access-team', size='sm'),
+                dbc.Select(id='pipe-access-team', options=[], value=_access.EVERYONE, size='sm',
+                           class_name='dbc_dark custom-select custom-select-sm'),
+                dbc.Label('Who can see it', size='sm'),
+                dbc.RadioItems(
+                    id='pipe-access-visibility',
+                    options=[
+                        {'label': 'Its team', 'value': 'team'},
+                        {'label': 'Its owner and team managers', 'value': 'private'},
+                        {'label': 'Everyone', 'value': 'everyone'},
+                    ],
+                    value='team',
+                    class_name='pipes-access-radios',
+                ),
+                dbc.Label('Who can change it', size='sm'),
+                dbc.RadioItems(
+                    id='pipe-access-edit',
+                    options=[{'label': label, 'value': value} for value, label in _access.EDIT_MODES],
+                    value='team',
+                    class_name='pipes-access-radios',
+                ),
+                html.Div(id='pipe-access-alert'),
+            ]),
+            dbc.ModalFooter([
+                dbc.Button('Cancel', id='pipe-access-cancel', color='secondary', n_clicks=0),
+                dbc.Button('Save', id='pipe-access-save', color='primary', n_clicks=0),
+            ]),
+        ],
+        id='pipe-access-modal',
+        is_open=False,
+        className='pipes-dialog',
+    )
+    locks_dialog = dbc.Modal(
+        [
+            dbc.ModalHeader(dbc.ModalTitle('Locks')),
+            dbc.ModalBody([
+                html.P(pipes_table.pipe_title(pipe.connector_keys, pipe.metric_key, pipe.location_key),
+                       className='pipes-confirm-pipe'),
+                dbc.Checklist(
+                    id='pipe-locks-value',
+                    options=[
+                        {'label': label, 'value': lock}
+                        for lock, label in _access.LOCKS
+                    ],
+                    value=[],
+                    switch=True,
+                    class_name='pipes-locks-switches',
+                ),
+                html.Div(id='pipe-locks-alert'),
+            ]),
+            dbc.ModalFooter([
+                dbc.Button('Cancel', id='pipe-locks-cancel', color='secondary', n_clicks=0),
+                dbc.Button('Save', id='pipe-locks-save', color='primary', n_clicks=0),
+            ]),
+        ],
+        id='pipe-locks-modal',
+        is_open=False,
+        className='pipes-dialog',
+    )
+    return html.Div([confirm, copy, access_dialog, locks_dialog])
 
 
 def layout(
@@ -266,12 +432,29 @@ def layout(
     location_key: Optional[str],
     instance_keys: str,
     global_instance: str,
-    allowed: bool = False,
+    allowed: Any = False,
     tab: Optional[str] = None,
     problem: Optional[str] = None,
+    viewer: Any = None,
 ) -> List[Any]:
-    """The page's skeleton: the header and tabs; the active tab fills in by callback."""
+    """
+    The page's skeleton: the header and tabs; the active tab fills in by callback. With a
+    `viewer`, the actions are the ones they may run on this pipe (`pipe_rights`), and a pipe they
+    may not see shows no actions (its tabs say it is not registered).
+    """
     pipe = mrsm.Pipe(connector_keys, metric_key, location_key, instance=instance_keys)
+    parameters = None
+    if viewer is not None:
+        from meerschaum.api.dash import access
+        visible = access.visible_pipe(connector_keys, metric_key, location_key, instance_keys, viewer=viewer)
+        if visible is None:
+            allowed = False
+        else:
+            try:
+                parameters = visible.get_parameters(apply_symlinks=False) or {}
+            except Exception:
+                parameters = {}
+            allowed = pipe_rights(viewer, visible, parameters)
     tab = tab if tab in TAB_IDS else 'overview'
     tabs = dbc.Tabs(
         [
@@ -296,7 +479,7 @@ def layout(
         html.Div(id='pipe-detail-dummy', hidden=True),
         html.Main(
             alerts + [
-                build_header(pipe, global_instance, allowed),
+                build_header(pipe, global_instance, allowed, parameters=parameters),
                 html.Div(id='pipe-detail-alert'),
                 tabs,
                 dcc.Loading(
@@ -518,11 +701,20 @@ def overview_tab(pipe: mrsm.Pipe, allowed: bool = False) -> Any:
     return html.Div(sections)
 
 
-def data_tab(pipe: mrsm.Pipe, allowed: bool = False, edit: bool = False) -> Any:
-    """Recent rows (with Download CSV), a query by begin, end and `params`, and Sync rows."""
+def data_tab(
+    pipe: mrsm.Pipe,
+    allowed: bool = False,
+    edit: bool = False,
+    can_sync: Optional[bool] = None,
+) -> Any:
+    """
+    Recent rows (with Download CSV), a query by begin, end and `params`, and (in Edit mode, for
+    a viewer who may write to the pipe: `can_sync`) Sync rows.
+    """
     from meerschaum.api.dash.pipes import (
         build_recent_data_body, build_query_data_body, build_sync_documents_body,
     )
+    can_sync = allowed if can_sync is None else can_sync
     meta_str = json.dumps(pipe.meta)
     download = dbc.Button(
         'Download CSV', id={'type': 'pipe-download-csv-button', 'index': meta_str},
@@ -531,7 +723,7 @@ def data_tab(pipe: mrsm.Pipe, allowed: bool = False, edit: bool = False) -> Any:
     sections = [_section('Recent rows', build_recent_data_body(pipe), actions=download)]
     if allowed:
         sections.append(_section('Query', build_query_data_body(pipe)))
-    if allowed and edit:
+    if can_sync and edit:
         sections.append(_section('Sync rows', build_sync_documents_body(pipe, authenticated=True)))
     return html.Div(sections)
 
@@ -713,10 +905,12 @@ def build_tab(
     edit: bool = False,
     state: Optional[Tuple[Optional[bool], str]] = None,
     can_register: bool = False,
+    rights: Optional[Dict[str, bool]] = None,
 ) -> Any:
     """
     The content of one tab (`state`: the pipe's `registration()` when already read). A pipe whose
     instance cannot be read says why; an unregistered pipe offers Register when `can_register`.
+    `rights` (`pipe_rights()`) decide what may be changed; without them `allowed` decides all.
     """
     registered, problem = state if state is not None else registration(pipe)
     if registered is None:
@@ -724,12 +918,19 @@ def build_tab(
                          className='pipes-read-error')
     if not registered:
         return unregistered_state(pipe, can_register=can_register)
+    if rights is None:
+        rights = {key: bool(allowed) for key in ('edit', 'sync', 'define_sql', 'read')}
+    read = rights.get('read', True)
+    write = bool(rights.get('edit'))
+    sql = str(pipe.connector_keys).startswith('sql:')
     builders = {
-        'overview': lambda: overview_tab(pipe, allowed=allowed),
-        'data': lambda: data_tab(pipe, allowed=allowed, edit=edit),
-        'parameters': lambda: parameters_tab(pipe, allowed=allowed, edit=edit),
-        'definition': lambda: definition_tab(pipe, allowed=allowed, edit=edit),
-        'lineage': lambda: lineage_tab(pipe, allowed=allowed, edit=edit),
+        'overview': lambda: overview_tab(pipe, allowed=read),
+        'data': lambda: data_tab(pipe, allowed=read, edit=edit, can_sync=bool(rights.get('sync'))),
+        'parameters': lambda: parameters_tab(pipe, allowed=write, edit=edit),
+        'definition': lambda: definition_tab(
+            pipe, allowed=(write and (not sql or bool(rights.get('define_sql')))), edit=edit,
+        ),
+        'lineage': lambda: lineage_tab(pipe, allowed=write, edit=edit),
         'runs': lambda: runs_tab(pipe),
     }
     return builders.get(tab, builders['overview'])()
@@ -802,24 +1003,31 @@ def copy_destination(
     }, ''
 
 
-def copy_pipe(pipe: mrsm.Pipe, destination: Dict[str, Any]) -> Tuple[mrsm.SuccessTuple, mrsm.Pipe]:
+def copy_pipe(
+    pipe: mrsm.Pipe,
+    destination: Dict[str, Any],
+    viewer: Any = None,
+) -> Tuple[mrsm.SuccessTuple, mrsm.Pipe]:
     """
     Register a copy of `pipe` with the same parameters under `destination`'s keys. An explicit
-    `target` is left out when the keys change, so the copy gets its own table.
+    `target` is left out when the keys change, so the copy gets its own table. The copy keeps the
+    pipe's locks; its access is the viewer's (`pipe_writes.register_pipe`: they own it, in their
+    primary team), as `copy pipes` resets it.
     """
     from copy import deepcopy
+    from meerschaum.api.dash import pipe_writes
     parameters = deepcopy(pipe.get_parameters(apply_symlinks=False, refresh=True) or {})
     if not destination.get('same_keys'):
         for key in ('target', 'target_name', 'target_table', 'target_table_name'):
             parameters.pop(key, None)
+    parameters.pop('access', None)
     new_pipe = mrsm.Pipe(
         destination['connector_keys'],
         destination['metric_key'],
         destination['location_key'],
         instance=destination['instance_keys'],
-        parameters=parameters,
     )
-    success, message = new_pipe.register()
+    success, message = pipe_writes.register_pipe(new_pipe, parameters, viewer=viewer)
     if not success:
         return (False, message), new_pipe
     return (True, f"Copied {pipe} to {new_pipe}."), new_pipe

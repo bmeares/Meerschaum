@@ -17,7 +17,7 @@ import tempfile
 
 import pytest
 
-from tests.api_host._helpers import run_python, sandbox  # noqa: F401
+from tests.api_host._helpers import FAKE_VIEWERS, AS_VIEWER, run_python, sandbox  # noqa: F401
 
 
 def _json(result):
@@ -91,7 +91,7 @@ def test_new_job_form_lists_the_instances_pipes(sandbox):
     the pipes is shown in the form rather than leaving it empty.
     """
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, '''
+    out = _json(run_python(root, plugins, AS_VIEWER + '''
 import json, shlex
 from types import SimpleNamespace
 import meerschaum as mrsm
@@ -111,8 +111,7 @@ for keys, tags in (
 ### A saved Pipeline (its registry pipe is an internal `mrsm` pipe, never an option).
 save_pipeline('c-line', ['sql:apihosttest|c-demo:sales|store_00|None'], 'sql:apihosttest')
 
-cj.may_manage_jobs = lambda session_id: True
-cj.is_state_authenticated = lambda data: True
+as_viewer()
 cj._new_job_instance = lambda: conn
 cj.dash = SimpleNamespace(callback_context=SimpleNamespace(triggered_id='jobs-new-button'))
 session = {'session-id': 'sid'}
@@ -149,7 +148,6 @@ class Plain:
 cj._new_job_instance = lambda: Down()
 failed = cj.toggle_new_job_modal(1, None, None, session)
 cj._new_job_instance = lambda: Plain()
-cj.mrsm = SimpleNamespace(get_pipes=lambda **kw: {'from-the-pipes': []})
 plain = cj.toggle_new_job_modal(1, None, None, session)
 
 print('JSON:' + json.dumps({
@@ -188,8 +186,9 @@ print('JSON:' + json.dumps({
     assert out['previews'][2] == 'mrsm sync pipelines c-line -i sql:apihosttest --name c-job -d'
     assert 'database is down' in out['failed_alert'] and 'sql:down' in out['failed_alert']
     assert out['failed_connectors'] == []
-    ### Without parameters in the keys, the tags come from the pipes.
-    assert out['plain'] == [['a', 'c'], ['from-the-pipes'], []]
+    ### Without parameters in the keys, each pipe's parameters are read (its access decides
+    ### who sees its keys; its tags come along): these pipes cannot be read, so they have none.
+    assert out['plain'] == [['a', 'c'], [], []]
     assert out['raw'][0] == [
         {'connector_keys': ['a'], 'metric_keys': ['b'], 'location_keys': ['None'], 'tags': []}, False,
     ]
@@ -290,7 +289,7 @@ print('JSON:' + json.dumps({
 
 def test_new_job_creates_starts_and_restarts_a_job(sandbox):
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, '''
+    out = _json(run_python(root, plugins, FAKE_VIEWERS + '''
 import json, time
 import meerschaum.api.dash.callbacks.jobs as cj
 from meerschaum.api.dash import sessions
@@ -298,9 +297,14 @@ from meerschaum.jobs import Job
 
 ### Never a real systemd unit from a test: the console's executor is pinned to `local`.
 cj.CONSOLE_EXECUTOR_KEYS = 'local'
-cj.is_session_authenticated = lambda session_id: True
 cj.jobs_route_group_allowed = lambda: True
-sessions.session_is_admin = lambda session_id: session_id == 'admin'
+### `admin` is an administrator, `bob` an Operator (who may create jobs, within the server's
+### policy), `ed` an Editor (who may not create jobs); `nobody` is not signed in.
+fake_viewers({
+    'admin': {'admin': True},
+    'bob': {'role': 'operator'},
+    'ed': {'role': 'editor'},
+})
 out = {}
 out['created'] = cj.create_job_from_form(['show', 'version'], 'c-console-job', 'admin')
 job = Job('c-console-job', executor_keys='local')
@@ -314,7 +318,7 @@ out['invalid_name'] = cj.create_job_from_form(['show', 'version'], 'bad name', '
 ### A non-administrator's command is checked by the server, which this test has none of.
 out['non_admin'] = cj.create_job_from_form(['show', 'version'], 'c-other', 'bob')
 out['other_exists'] = Job('c-other', executor_keys='local').exists()
-cj.is_session_authenticated = lambda session_id: False
+out['editor'] = cj.create_job_from_form(['show', 'version'], 'c-editor', 'ed')
 out['refused'] = cj.create_job_from_form(['show', 'version'], 'c-third', 'nobody')
 out['restart'] = cj.restart_job(job)
 time.sleep(2)
@@ -328,6 +332,7 @@ print('JSON:' + json.dumps(out))
     assert not out['invalid_name'][0]
     assert not out['non_admin'][0] and 'server' in out['non_admin'][1]
     assert not out['other_exists']
+    assert not out['editor'][0] and 'not allowed' in out['editor'][1]
     assert not out['refused'][0]
     assert out['restart'][0], out['restart']
     assert out['deleted'] and out['gone']
@@ -335,7 +340,7 @@ print('JSON:' + json.dumps(out))
 
 def test_jobs_tab_is_a_table_past_eight_jobs_with_a_filter(sandbox):
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, '''
+    out = _json(run_python(root, plugins, AS_VIEWER + '''
 import json
 from types import SimpleNamespace
 from meerschaum.api.dash import dash_app
@@ -360,7 +365,7 @@ def fake(name):
 
 jobs = {}
 cj._listed_jobs = lambda is_runs, session_id: dict(jobs)
-cj.may_manage_jobs = lambda session_id: True
+as_viewer()
 import meerschaum.api.dash.jobs as jm
 jm.is_automatic_job = lambda job: False
 
@@ -426,7 +431,10 @@ out['validate'] = [
     users.validate_new_user('ok', 'correct-horse-1', 'correct-horse-1', 'ok@example.com')[0],
 ]
 rows = users.get_user_rows(conn)
-out['rows'] = [r for r in rows if r['username'].startswith('c-')]
+out['rows'] = [
+    {key: r[key] for key in ('username', 'type', 'email', 'role', 'explicit', 'teams')}
+    for r in rows if r['username'].startswith('c-')
+]
 out['guard'] = [
     users.check_last_admin(rows, 'c-admin', new_type='user')[0],
     users.check_last_admin(rows, 'c-admin', deleting=True)[0],
@@ -437,19 +445,23 @@ out['guard'] = [
 ### The callbacks: only administrators change users; the only admin is never demoted or deleted.
 cu.viewer = lambda data: {'username': 'c-admin', 'active': True, 'admin': True, 'sees_all': True}
 target = lambda name, action: {'username': name, 'action': action}
-out['demote_last'] = str(cu.submit_change_type(1, target('c-admin', 'type'), 'user', 0, {})[1])
+### The Edit dialog's Save: the type, a role (here the default), no explicit permissions, no teams.
+edit = lambda name, user_type, role='default': cu.submit_edit_user(
+    1, target(name, 'edit'), user_type, role, [], [], [], 'Everyone', 0, {},
+)
+out['demote_last'] = str(edit('c-admin', 'user')[1])
 out['delete_last'] = str(cu.submit_delete_user(1, target('c-admin', 'delete'), 'c-admin', 0, {})[1])
 out['delete_untyped'] = str(cu.submit_delete_user(1, target('c-user', 'delete'), 'wrong', 0, {})[1])
 
 ### Sessions of a promoted user keep going with their rights read again; a demoted, reset or
 ### deleted user's sessions end.
 sessions.set_session('00000000-0000-4000-8000-0000000c5e01', {'username': 'c-user', 'admin': False, 'authenticated': False})
-promoted = cu.submit_change_type(1, target('c-user', 'type'), 'admin', 0, {})
+promoted = edit('c-user', 'admin')
 out['promoted'] = [promoted[0], users.normalize_user_type(conn.get_user_type(User('c-user', instance=conn)))]
 out['promoted_session'] = sessions.get_session_data('00000000-0000-4000-8000-0000000c5e01', use_cache=False)
-out['demote_now_allowed'] = cu.submit_change_type(1, target('c-admin', 'type'), 'user', 0, {})[0]
+out['demote_now_allowed'] = edit('c-admin', 'user')[0]
 sessions.set_session('00000000-0000-4000-8000-0000000c5ea1', {'username': 'c-admin', 'admin': True})
-cu.submit_change_type(1, target('c-admin', 'type'), 'admin', 0, {})
+edit('c-admin', 'admin')
 cu.viewer = lambda data: {'username': 'c-user', 'active': True, 'admin': True, 'sees_all': True}
 sessions.set_session('00000000-0000-4000-8000-0000000c5e02', {'username': 'c-user', 'admin': True})
 reset = cu.submit_reset_password(1, target('c-user', 'password'), 'brand-new-pass-1', 'brand-new-pass-1', 0,
@@ -465,16 +477,19 @@ out['deleted'] = [deleted[0], 'c-user' in (conn.get_users() or [])]
 out['deleted_session'] = sessions.get_session_data('00000000-0000-4000-8000-0000000c5e03', use_cache=False)
 
 cu.viewer = lambda data: {'username': 'bob', 'active': True, 'admin': False, 'sees_all': True}
-out['non_admin'] = str(cu.submit_change_type(1, target('c-admin', 'type'), 'user', 0, {})[1])
+out['non_admin'] = str(edit('c-admin', 'user')[1])
 print('JSON:' + json.dumps(out, default=str))
 '''))
     assert out['add_admin'][0], out['add_admin']
     assert out['add_user'][0], out['add_user']
     assert out['add_dupe'] is False
     assert out['validate'] == [False, False, False, False, True]
+    ### A new user has no role of their own: the default role (Editor) applies.
     assert out['rows'] == [
-        {'username': 'c-admin', 'type': 'admin', 'email': 'admin@example.com'},
-        {'username': 'c-user', 'type': 'user', 'email': None},
+        {'username': 'c-admin', 'type': 'admin', 'email': 'admin@example.com', 'role': 'admin',
+         'explicit': True, 'teams': {}},
+        {'username': 'c-user', 'type': 'user', 'email': None, 'role': 'editor', 'explicit': False,
+         'teams': {}},
     ]
     assert out['guard'] == [False, False, True, True]
     assert 'only admin' in out['demote_last']
@@ -657,7 +672,7 @@ print('JSON:' + json.dumps([conn.login_scheme, conn.host, conn.port, bool(conn.a
 
 def test_tokens_page_has_a_new_token_button_and_no_caption(sandbox):
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, '''
+    out = _json(run_python(root, plugins, AS_VIEWER + '''
 import json
 from meerschaum.api.dash import dash_app, pages
 import meerschaum.api.dash.callbacks.tokens as ct
@@ -676,7 +691,7 @@ def find(component, cid):
     return find(getattr(component, 'children', None) or [], cid)
 
 button = find(pages.tokens.layout, 'tokens-create-button')
-ct.is_state_authenticated = lambda data: True
+as_viewer()
 ct.get_tokens_table = lambda session_id: ([], [])
 ct.get_user_from_session = lambda session_id: None
 empty = ct.refresh_tokens_button_click(None, {'session-id': 'x'})

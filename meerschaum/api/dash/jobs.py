@@ -71,16 +71,27 @@ def is_automatic_job(job):
 
 
 def job_visible_to_session(job, session_id):
-    """Automatic workers belong to their creator and administrators, including local reads."""
-    if not is_automatic_job(job):
-        return True
-    from meerschaum.api.dash.sessions import session_is_admin, get_username_from_session
+    """
+    Whether the session's viewer may see a job (AC9, `meerschaum.jobs.can_see_job`): a job
+    started through the API or the console is its team's (a console run is private to its owner,
+    the team's managers and administrators); a local job is Everyone's.
+    """
     from meerschaum.api import no_auth
-    if no_auth or session_is_admin(session_id):
+    from meerschaum.api.dash.access import get_viewer
+    if no_auth:
         return True
-    properties = job.daemon.properties
-    owner = properties.get('mrsm_owner')
-    return bool(owner and owner == get_username_from_session(session_id))
+    viewer = get_viewer(session_id=(str(session_id) if session_id else None))
+    if not viewer.signed_in:
+        return False
+    if viewer.is_admin:
+        return True
+    if not viewer.can('jobs:read'):
+        return False
+    from meerschaum.jobs import can_see_job
+    try:
+        return bool(can_see_job(viewer, job))
+    except Exception:
+        return False
 
 
 def jobs_route_group_allowed() -> bool:
@@ -89,26 +100,61 @@ def jobs_route_group_allowed() -> bool:
     return route_group_is_allowed('jobs')
 
 
+#: The permission each job control needs.
+JOB_ACTION_PERMISSIONS: Dict[str, Tuple[str, ...]] = {
+    'start': ('jobs:execute',),
+    'pause': ('jobs:pause',),
+    'stop': ('jobs:stop',),
+    'restart': ('jobs:stop', 'jobs:execute'),
+    'delete': ('jobs:delete',),
+    'retain': ('jobs:write',),
+    'logs': ('logs:read',),
+    'create': ('jobs:write', 'actions:execute'),
+}
+
+
+def job_rights(viewer: Any = None) -> Dict[str, bool]:
+    """
+    What the viewer may do with the jobs they see: `start`, `pause`, `stop`, `restart`,
+    `delete`, `retain` (Keep as Job), `logs` and `create` (New job), from their permissions,
+    on a server that serves the `jobs` routes.
+    """
+    from meerschaum.api.dash.access import current_viewer
+    viewer = viewer if viewer is not None else current_viewer()
+    allowed = jobs_route_group_allowed()
+    return {
+        action: bool(
+            (viewer.no_auth or viewer.signed_in)
+            and all(viewer.can(permission) for permission in permissions)
+            and (allowed or action == 'logs')
+        )
+        for action, permissions in JOB_ACTION_PERMISSIONS.items()
+    }
+
+
 def may_manage_jobs(session_id: Optional[str]) -> bool:
     """
-    Whether a session may start, stop, create or delete jobs from the console: a session that may
-    run actions (administrators only under `--secure`) on a server that serves the `jobs` routes.
+    Whether a session may control jobs from the console at all (start, stop, pause, delete or
+    create one: the job permissions) on a server that serves the `jobs` routes.
     """
-    return is_session_authenticated(session_id) and jobs_route_group_allowed()
+    from meerschaum.api.dash.access import get_viewer
+    rights = job_rights(get_viewer(session_id=(str(session_id) if session_id else None)))
+    return any(value for key, value in rights.items() if key != 'logs')
 
 
 def get_jobs_cards(state: WebState):
     """
-    Build cards and alerts lists for jobs (the web terminal page's Jobs button).
+    Build cards and alerts lists for jobs (the web terminal page's Jobs button): the jobs the
+    session's viewer may see.
     """
     jobs = get_jobs(executor_keys=EXECUTOR_KEYS, include_hidden=False)
     session_id = state['session-store.data'].get('session-id', None)
-    is_authenticated = may_manage_jobs(session_id)
+    is_authenticated = may_manage_jobs(session_id) or job_rights().get('logs', False)
 
     cards = []
 
     for name, job in jobs.items():
-        if is_automatic_job(job):
+        if is_automatic_job(job) or not job_visible_to_session(job, session_id):
             continue
         cards.append(build_job_card(job, authenticated=is_authenticated))
 
@@ -345,10 +391,13 @@ def build_job_card(
     job: Job,
     authenticated: bool = False,
     include_follow: bool = True,
+    rights: Optional[Dict[str, bool]] = None,
 ):
     """
-    Return a card for a given job.
+    Return a card for a given job: its logs menu and controls for an authenticated session,
+    each one the viewer's permissions allow (`rights`, by default the request's: `job_rights`).
     """
+    rights = (rights if rights is not None else job_rights()) if authenticated else {}
     footer_children = html.Div(
         build_process_timestamps_children(job),
         id={'type': 'process-timestamps-div', 'index': job.name},
@@ -367,7 +416,7 @@ def build_job_card(
     )
     logs_menu_children = (
         [view_logs_button] + ([follow_logs_button] if include_follow else []) + [download_logs_button]
-        if authenticated
+        if rights.get('logs')
         else []
     )
     header_children = [
@@ -388,7 +437,7 @@ def build_job_card(
                 class_name='job-logs-menu',
             ),
         ),
-    ] if authenticated else [])
+    ] if logs_menu_children else [])
 
     body_children = [
         _job_title(job),
@@ -402,7 +451,7 @@ def build_job_card(
         ),
         html.Div(
             (
-                build_manage_job_buttons_div_children(job)
+                build_manage_job_buttons_div_children(job, rights=rights)
                 if authenticated
                 else []
             ),
@@ -424,11 +473,12 @@ def build_job_card(
     )
 
 
-def build_job_row(job: Job, authenticated: bool = False) -> Any:
+def build_job_row(job: Job, authenticated: bool = False, rights: Optional[Dict[str, bool]] = None) -> Any:
     """
     Return a row of the compact jobs table: the job, its status line, its command and a menu
     with the same actions as a card.
     """
+    rights = (rights if rights is not None else job_rights()) if authenticated else {}
     command = _job_command(job)
     return html.Tr(
         [
@@ -453,7 +503,7 @@ def build_job_row(job: Job, authenticated: bool = False) -> Any:
             html.Td(html.Code(command, title=command), className='job-row-command d-none d-md-table-cell'),
             html.Td(
                 html.Div(
-                    build_job_row_menu(job) if authenticated else [],
+                    build_job_row_menu(job, rights=rights) if authenticated else [],
                     id={'type': 'manage-job-buttons-div', 'index': job.name},
                     className=actions_class_name(job, 'row'),
                 ),
@@ -466,6 +516,7 @@ def build_job_row(job: Job, authenticated: bool = False) -> Any:
 
 def build_jobs_table(jobs: List[Job], authenticated: bool = False) -> Any:
     """The compact jobs table (more than `COMPACT_JOBS_THRESHOLD` jobs)."""
+    rights = job_rights() if authenticated else {}
     return dbc.Table(
         [
             html.Thead(html.Tr([
@@ -474,7 +525,7 @@ def build_jobs_table(jobs: List[Job], authenticated: bool = False) -> Any:
                 html.Th('Command', className='d-none d-md-table-cell'),
                 html.Th(html.Span('Actions', className='visually-hidden')),
             ])),
-            html.Tbody([build_job_row(job, authenticated=authenticated) for job in jobs]),
+            html.Tbody([build_job_row(job, authenticated=authenticated, rights=rights) for job in jobs]),
         ],
         class_name='jobs-table',
         hover=True,
@@ -483,8 +534,18 @@ def build_jobs_table(jobs: List[Job], authenticated: bool = False) -> Any:
     )
 
 
-def _job_action_specs(job: Job) -> List[Tuple[str, str, str]]:
-    """The `(action, label, color)` of the actions a job's current status allows (not Delete)."""
+def _job_action_specs(job: Job, rights: Optional[Dict[str, bool]] = None) -> List[Tuple[str, str, str]]:
+    """
+    The `(action, label, color)` of the actions a job's current status allows (not Delete) and
+    the viewer may run (`rights`; every one without).
+    """
+    specs = _status_action_specs(job)
+    if rights is None:
+        return specs
+    return [spec for spec in specs if rights.get(spec[0])]
+
+
+def _status_action_specs(job: Job) -> List[Tuple[str, str, str]]:
     status = job.status
     specs = []
     if is_automatic_job(job) and status == 'stopped':
@@ -501,39 +562,43 @@ def _job_action_specs(job: Job) -> List[Tuple[str, str, str]]:
     return specs
 
 
-def build_manage_job_buttons_div_children(job: Job):
+def build_manage_job_buttons_div_children(job: Job, rights: Optional[Dict[str, bool]] = None):
     """
-    Return the children for the manage job buttons div of a card.
+    Return the children for the manage job buttons div of a card (the controls the viewer may
+    use: `rights`, by default the request's).
     """
     if job is None:
         return []
-    buttons = build_manage_job_buttons(job)
-    buttons.append(
-        dbc.Button(
-            'Delete',
-            size='sm',
-            color='danger',
-            outline=True,
-            id={'type': 'job-delete-button', 'index': job.name},
-            class_name='job-action-button',
+    rights = rights if rights is not None else job_rights()
+    buttons = build_manage_job_buttons(job, rights=rights)
+    if rights.get('delete'):
+        buttons.append(
+            dbc.Button(
+                'Delete',
+                size='sm',
+                color='danger',
+                outline=True,
+                id={'type': 'job-delete-button', 'index': job.name},
+                class_name='job-action-button',
+            )
         )
-    )
     return html.Div(buttons, className='job-actions')
 
 
-def build_manage_job_buttons(job: Job):
+def build_manage_job_buttons(job: Job, rights: Optional[Dict[str, bool]] = None):
     """
     Return the currently available job management buttons for a given Job (besides Delete, see
-    `build_manage_job_buttons_div_children`).
+    `build_manage_job_buttons_div_children`) that the viewer may use.
     """
     if job is None:
         return []
+    rights = rights if rights is not None else job_rights()
 
     buttons = []
-    if is_automatic_job(job) and job.status == 'stopped':
+    if is_automatic_job(job) and job.status == 'stopped' and rights.get('retain'):
         buttons.append(dbc.Button('Keep as Job', size='sm', color='info',
             id={'type': 'retain-run-button', 'index': job.name}, class_name='job-action-button'))
-    for action, label, color in _job_action_specs(job):
+    for action, label, color in _job_action_specs(job, rights=rights):
         buttons.append(
             dbc.Button(
                 label,
@@ -546,32 +611,40 @@ def build_manage_job_buttons(job: Job):
     return buttons
 
 
-def build_job_row_menu(job: Job) -> Any:
-    """The `⋮` menu of a row of the jobs table."""
+def build_job_row_menu(job: Job, rights: Optional[Dict[str, bool]] = None) -> Any:
+    """The `⋮` menu of a row of the jobs table (the actions the viewer may use)."""
     if job is None:
         return []
+    rights = rights if rights is not None else job_rights()
     items = [
         dbc.DropdownMenuItem(
             label,
             id={'type': 'manage-job-button', 'action': action, 'index': job.name},
         )
-        for action, label, _ in _job_action_specs(job)
+        for action, label, _ in _job_action_specs(job, rights=rights)
     ]
-    if is_automatic_job(job) and job.status == 'stopped':
+    if is_automatic_job(job) and job.status == 'stopped' and rights.get('retain'):
         items.append(dbc.DropdownMenuItem(
             'Keep as Job', id={'type': 'retain-run-button', 'index': job.name},
         ))
-    items += [
-        dbc.DropdownMenuItem(divider=True),
-        dbc.DropdownMenuItem('View logs', id={'type': 'job-view-logs-button', 'index': job.name}),
-        dbc.DropdownMenuItem('Download logs', id={'type': 'job-download-logs-button', 'index': job.name}),
-        dbc.DropdownMenuItem(divider=True),
-        dbc.DropdownMenuItem(
-            'Delete',
-            id={'type': 'job-delete-button', 'index': job.name},
-            class_name='text-danger',
-        ),
-    ]
+    if rights.get('logs'):
+        items += [
+            dbc.DropdownMenuItem(divider=True),
+            dbc.DropdownMenuItem('View logs', id={'type': 'job-view-logs-button', 'index': job.name}),
+            dbc.DropdownMenuItem('Download logs', id={'type': 'job-download-logs-button', 'index': job.name}),
+        ]
+    if rights.get('delete'):
+        items += [
+            dbc.DropdownMenuItem(divider=True),
+            dbc.DropdownMenuItem(
+                'Delete',
+                id={'type': 'job-delete-button', 'index': job.name},
+                class_name='text-danger',
+            ),
+        ]
+    items = items[1:] if items and getattr(items[0], 'divider', False) else items
+    if not items:
+        return []
     return dbc.DropdownMenu(
         items,
         label='⋮',
@@ -668,7 +741,7 @@ def build_process_timestamps_children(job: Job) -> List[dbc.Row]:
 def get_run_cards(state):
     """Automatic execution workers and retained summaries in the Web Console."""
     session_id = (state.get('session-store.data') or {}).get('session-id')
-    authenticated = is_session_authenticated(session_id)
+    authenticated = may_manage_jobs(session_id) or job_rights().get('logs', False)
     jobs = get_jobs(executor_keys='local', combine_local_and_systemd=True)
     cards = [build_job_card(job, authenticated=authenticated, include_follow=False)
              for job in jobs.values()

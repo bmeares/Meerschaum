@@ -1,6 +1,6 @@
 """Pipeline workspace selection, draft, and approval contracts without browser timing."""
 import json
-from tests.api_host._helpers import run_python, sandbox  # noqa: F401
+from tests.api_host._helpers import run_python, sandbox, FAKE_VIEWERS  # noqa: F401
 
 
 def check(result):
@@ -9,14 +9,14 @@ def check(result):
 
 def test_selection_shell_is_lazy_and_query_resolution_is_display_only(sandbox):
     root, plugins = sandbox
-    check(run_python(root, plugins, '''
+    check(run_python(root, plugins, FAKE_VIEWERS + '''
 import json
 from types import SimpleNamespace
 import dash
 from meerschaum.api.dash import build_dash_app
 build_dash_app()
 from meerschaum.api.dash.callbacks import pipelines as page
-page.is_session_authenticated = lambda _: True
+fake_viewers(default={'username': 'alice', 'admin': True})
 updates = {}
 dash.set_props = lambda key, value: updates.update({key: value})
 ref = 'sql:apihosttest|sql:source|selected|None'
@@ -44,13 +44,14 @@ assert len(calls) == 2
 
 def test_membership_draft_undo_redo_and_discard_preserve_saved_state(sandbox):
     root, plugins = sandbox
-    check(run_python(root, plugins, '''
+    check(run_python(root, plugins, FAKE_VIEWERS + '''
 from types import SimpleNamespace
 import dash
 from meerschaum.api.dash import build_dash_app
 build_dash_app()
 from meerschaum.api.dash.callbacks import pipeline_management as page
 page._require_session = lambda _: None
+fake_viewers(default={'username': 'alice', 'admin': True})
 saved = {'name':'daily', 'revision':3, 'targets':['sql:a|x|a|None'], 'parents':None, 'children':None}
 def call(trigger, draft=None, members=None):
     dash.ctx = SimpleNamespace(triggered_id=trigger)
@@ -95,13 +96,14 @@ except PreventUpdate:
 
 def test_page_selection_never_initializes_discovered_components(sandbox):
     root, plugins = sandbox
-    check(run_python(root, plugins, '''
+    check(run_python(root, plugins, FAKE_VIEWERS + '''
 from types import SimpleNamespace
 import dash
 from meerschaum.api.dash import build_dash_app
 build_dash_app()
 from meerschaum.api.dash.callbacks import pipeline_management as page
 page._require_session = lambda _: None
+fake_viewers(default={'username': 'alice', 'admin': True})
 page.engine.get_instance = lambda *args, **kwargs: 'sql:apihosttest'
 page.engine.plan_graph = lambda *a: (_ for _ in ()).throw(AssertionError('discovery on load'))
 page.initialize_pipelines = lambda *a: (_ for _ in ()).throw(AssertionError('initialization on load'))
@@ -138,7 +140,7 @@ assert page.name_from_path('/dash/pipelines/new') is None
 
 def test_draft_cycle_validation_is_read_only_and_ignores_incremental_self_templates(sandbox):
     root, plugins = sandbox
-    check(run_python(root, plugins, '''
+    check(run_python(root, plugins, FAKE_VIEWERS + '''
 from copy import deepcopy
 import meerschaum as mrsm
 from meerschaum.api.dash.pipeline_editing import dependencies, validate_edits, fingerprint
@@ -173,7 +175,7 @@ except ValueError as exc:
 
 def test_query_helper_keeps_raw_aliases_and_uses_selected_instance_context(sandbox):
     root, plugins = sandbox
-    check(run_python(root, plugins, '''
+    check(run_python(root, plugins, FAKE_VIEWERS + '''
 from meerschaum.api.dash._support import get_pipe_query
 from meerschaum.utils import pipes
 class Source:
@@ -194,20 +196,23 @@ assert calls == [source]
 
 def test_context_sync_does_not_reuse_another_inspectors_bounds(sandbox):
     root, plugins = sandbox
-    check(run_python(root, plugins, '''
+    check(run_python(root, plugins, FAKE_VIEWERS + '''
 from types import SimpleNamespace
 import dash
 from meerschaum.api.dash import build_dash_app
 build_dash_app()
 from meerschaum.api.dash.callbacks import pipelines as page
 from meerschaum.api.dash import execute, sessions
-page.is_session_authenticated = lambda _: True
+fake_viewers(default={'username': 'alice', 'admin': True})
 sessions.get_username_from_session = lambda _: 'alice'
 dash.set_props = lambda *a: None
 dash.ctx = SimpleNamespace(triggered_id='pipeline-context')
 calls = []
 execute.run_action = lambda args, user, **kw: calls.append((args,user,kw)) or {'success':True,'job':'execute-test','stream':'/logs/test/stream','msg':'started'}
 a, b = 'sql:a|source|a|None', 'sql:b|source|b|None'
+page._engine.get_instance = lambda instance, **kwargs: instance
+from meerschaum.api.dash import access
+access.visible_pipe = lambda *args, **kwargs: SimpleNamespace(parameters={})
 page.sync_selected_pipe(0, {'action':'sync','ref':b,'scope':'parents'}, {'ref':a}, 'this', '2020-01-01', '2021-01-01', None, None, {'session-id':'current'})
 assert '-i' in calls[0][0] and calls[0][0][3] == 'sql:b'
 assert '--parents' in calls[0][0] and '--begin' not in calls[0][0] and '--end' not in calls[0][0]
@@ -219,13 +224,13 @@ assert '--begin' in calls[1][0] and '--end' in calls[1][0]
 
 def test_every_open_expanded_run_continues_polling_and_filters_exact_pipe(sandbox):
     root, plugins = sandbox
-    check(run_python(root, plugins, '''
+    check(run_python(root, plugins, FAKE_VIEWERS + '''
 from types import SimpleNamespace
 from meerschaum.api.dash import build_dash_app
 build_dash_app()
 from meerschaum.api.dash.callbacks import pipelines as page
 from meerschaum.api.dash import _support, jobs
-page.is_session_authenticated = lambda _: True
+fake_viewers(default={'username': 'alice', 'admin': True})
 jobs.is_automatic_job = lambda _: True
 jobs.job_visible_to_session = lambda *a: True
 runs = [{'job':'job-a','run_id':'run-a','ref':'sql:a|x|a|None','instance':'sql:a','scope':'parents'},
@@ -249,7 +254,7 @@ assert statuses[runs[0]['ref']] == statuses[runs[1]['ref']] == 'running'
 
 def test_analysis_requires_separate_tag_approval_and_partial_edits_remain_retryable(sandbox):
     root, plugins = sandbox
-    check(run_python(root, plugins, '''
+    check(run_python(root, plugins, FAKE_VIEWERS + '''
 from contextlib import nullcontext
 from types import SimpleNamespace
 import dash
@@ -259,6 +264,7 @@ from meerschaum.api.dash.callbacks import pipeline_management as page
 from meerschaum.core.Pipeline import _saved
 from meerschaum.api.dash import pipeline_editing
 page._require_session = lambda _: None
+fake_viewers(default={'username': 'alice', 'admin': True})
 page.engine.get_instance = lambda *a, **k: 'sql:apihosttest'
 updates = {}
 dash.set_props = lambda key, value: updates.update({key:value})
@@ -277,7 +283,7 @@ assert len(calls) == 1 and calls[0][0] is proposal
 _saved._mutation_lock = lambda *a: nullcontext()
 page.list_pipelines = lambda *a: {'daily': {'name':'daily','revision':1}}
 page.save_pipeline = lambda *a, **k: (_ for _ in ()).throw(AssertionError('definition saved despite partial Pipe failure'))
-pipeline_editing.apply_edits = lambda *a: [('good',True,'saved'),('failed',False,'offline')]
+pipeline_editing.apply_edits = lambda *a, **k: [('good',True,'saved'),('failed',False,'offline')]
 dash.ctx = SimpleNamespace(triggered_id='pipeline-draft-save')
 draft = {'targets':['good','failed'],'pipe_edits':{'good':{'baseline':'a'},'failed':{'baseline':'b'}},'undo':[{}],'redo':[]}
 page.manage_selection(0, 1, 'daily', 'daily', draft, {'revision':1}, '', {})
@@ -288,11 +294,11 @@ assert updates['pipeline-draft']['data']['undo'] == []
 
 def test_stopped_canvas_worker_overrides_unfinished_running_events(sandbox):
     root, plugins = sandbox
-    result = run_python(root, plugins, '''
+    result = run_python(root, plugins, FAKE_VIEWERS + '''
 from types import SimpleNamespace
 from meerschaum.api.dash.callbacks import pipelines as cb
 from meerschaum.api.dash import _support, jobs
-cb.is_session_authenticated = lambda session: True
+fake_viewers(default={'username': 'alice', 'admin': True})
 jobs.job_visible_to_session = lambda job, session: True
 job = SimpleNamespace(status='stopped', ended=None, daemon=SimpleNamespace(properties={'mrsm_execution':{'run_id':'cancelled-run'}}))
 _support.get_job = lambda name: job
@@ -312,7 +318,7 @@ print('JSON:true')
 
 def test_deletion_requires_confirmed_identity_and_preserves_members(sandbox):
     root, plugins = sandbox
-    check(run_python(root, plugins, '''
+    check(run_python(root, plugins, FAKE_VIEWERS + '''
 from types import SimpleNamespace
 import dash
 import meerschaum as mrsm
@@ -321,6 +327,7 @@ build_dash_app()
 from meerschaum.api.dash.callbacks import pipeline_management as page
 from meerschaum.core.Pipeline._saved import save_pipeline, list_pipelines
 page._require_session = lambda _: None
+fake_viewers(default={'username': 'alice', 'admin': True})
 instance = 'sql:apihosttest'
 pipe = mrsm.Pipe('rc7', 'member', instance=instance)
 assert pipe.register()[0]
@@ -339,14 +346,14 @@ assert pipe.get_id() is not None
 
 def test_newer_stopped_worker_does_not_modify_selected_historical_run(sandbox):
     root, plugins = sandbox
-    check(run_python(root, plugins, '''
+    check(run_python(root, plugins, FAKE_VIEWERS + '''
 from types import SimpleNamespace
 import dash
 from meerschaum.api.dash import build_dash_app
 build_dash_app()
 from meerschaum.api.dash.callbacks import pipelines as page
 from meerschaum.api.dash import _support
-page.is_session_authenticated = lambda _: True
+fake_viewers(default={'username': 'alice', 'admin': True})
 page._engine.get_instance = lambda *a, **k: 'sql:apihosttest'
 summary = {'status':'running', 'counts':{}, 'run':{'run_id':'old-run'}}
 detail = {'summary':summary, 'bars':[{'pipe_ref':'sql:a|c|m|None','status':'running','actual_start':'2026-10-22T00:00:00Z'}]}

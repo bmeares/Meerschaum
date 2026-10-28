@@ -84,6 +84,29 @@ def is_sql_connector(connector_keys: Optional[str]) -> bool:
     return str(connector_keys or '').strip().startswith('sql:')
 
 
+def team_options(viewer: Any) -> Tuple[List[Dict[str, str]], str]:
+    """`(options, value)` of the Team field: the teams the viewer may give a pipe, theirs first."""
+    from meerschaum.api.dash import access
+    if viewer is None:
+        return [{'label': access.EVERYONE, 'value': access.EVERYONE}], access.EVERYONE
+    teams = access.assignable_teams(viewer)
+    value = viewer.primary_team if viewer.primary_team in teams else access.EVERYONE
+    return [{'label': name, 'value': name} for name in teams], value
+
+
+def usable_connectors(connectors: List[str], viewer: Any) -> List[str]:
+    """The connectors a pipe of one of the viewer's teams may use (their `teams` attribute)."""
+    if viewer is None or viewer.no_auth or viewer.is_admin:
+        return list(connectors)
+    from meerschaum.api.dash import access, pipe_writes
+    teams = access.assignable_teams(viewer)
+    return [
+        label for label in connectors
+        if any(pipe_writes.connector_allows(viewer, label, None if team == access.EVERYONE else team)[0]
+               for team in teams)
+    ]
+
+
 def layout(
     instance_keys: str,
     allowed: bool = True,
@@ -91,13 +114,19 @@ def layout(
     connector_keys: Optional[str] = None,
     metric_key: Optional[str] = None,
     location_key: Optional[str] = None,
+    viewer: Any = None,
 ) -> List[Any]:
     """
     The form; Register stays disabled for sessions that may not register pipes. The keys may be
     filled in (`/dash/pipes/new?connector_keys=...&metric_key=...&location_key=...`, the Register
-    button of an unregistered pipe's page).
+    button of an unregistered pipe's page). Team starts at the viewer's primary team and
+    Visibility at Team; Register and sync is for viewers who may sync.
     """
-    connectors = connector_options()
+    from meerschaum.api.dash import access
+    connectors = usable_connectors(connector_options(), viewer)
+    teams, team = team_options(viewer)
+    may_sync = viewer is None or viewer.can('pipes:write')
+    may_define_sql = viewer is None or viewer.can('pipes:define_sql')
     sql_editor = dash_ace.DashAceEditor(
         id='new-pipe-query',
         value='',
@@ -187,6 +216,7 @@ def layout(
                                 ),
                             ],
                             id='new-pipe-sql',
+                            style=(None if may_define_sql else {'display': 'none'}),
                         ),
                         html.Details(
                             [html.Summary('Parameters'), parameters_editor],
@@ -207,14 +237,38 @@ def layout(
                     ],
                     className='new-pipe-columns',
                 ),
-                html.Div(id='new-pipe-alert'),
                 html.Div(
                     [
-                        dbc.Button('Register', id='new-pipe-register', n_clicks=0, color='secondary',
-                                   disabled=not allowed),
-                        dbc.Button('Register and sync', id='new-pipe-register-sync', n_clicks=0,
-                                   color='primary', disabled=not allowed),
+                        field(
+                            'Team',
+                            dbc.Select(id='new-pipe-team', options=teams, value=team,
+                                       class_name='dbc_dark custom-select custom-select-sm'),
+                            'new-pipe-team',
+                        ),
+                        field(
+                            'Visibility',
+                            dbc.Select(
+                                id='new-pipe-visibility',
+                                options=[{'label': label, 'value': value}
+                                         for value, label in access.VISIBILITIES],
+                                value='team',
+                                class_name='dbc_dark custom-select custom-select-sm',
+                            ),
+                            'new-pipe-visibility',
+                        ),
                     ],
+                    className='new-pipe-columns new-pipe-access',
+                ),
+                html.Div(id='new-pipe-alert'),
+                ### Buttons the viewer may not use are left out (the alert above says why).
+                html.Div(
+                    ([
+                        dbc.Button('Register', id='new-pipe-register', n_clicks=0,
+                                   color=('secondary' if may_sync else 'primary')),
+                    ] if allowed else []) + ([
+                        dbc.Button('Register and sync', id='new-pipe-register-sync', n_clicks=0,
+                                   color='primary'),
+                    ] if (allowed and may_sync) else []),
                     className='new-pipe-actions',
                 ),
             ],
@@ -295,7 +349,7 @@ def preview_query(
         parameters={'fetch': {'definition': limit_query(query, flavor, limit)}},
     )
     try:
-        df = pipe.fetch(begin=None, end=None, check_existing=False)
+        df = pipe.fetch(begin=None, end=None, check_existing=False, as_pandas=True)
     except Exception as e:
         return None, str(e)
     if df is None or isinstance(df, bool):
@@ -455,14 +509,48 @@ def validate_keys(
     return (connector_keys, metric_key, location_key), {}
 
 
+def preview_refusal(viewer: Any, connector_keys: str, query: str, instance_keys: str) -> Optional[str]:
+    """
+    Why Preview may not run `query` for the viewer (or `None`): it runs with the connector's
+    credentials, so it needs `pipes:define_sql`, a connector the viewer's teams may use, and a
+    query the SQL guard allows (`meerschaum.api.dash.sql_guard`).
+    """
+    if viewer is None:
+        return None
+    from meerschaum.api.dash import access, pipe_writes, sql_guard
+    if not viewer.can('pipes:define_sql'):
+        return "Your account may not run SQL queries."
+    teams = access.assignable_teams(viewer)
+    if not any(
+        pipe_writes.connector_allows(viewer, str(connector_keys), None if team == access.EVERYONE else team)[0]
+        for team in teams
+    ):
+        return f"The connector '{connector_keys}' is not available to your teams."
+    pipe = mrsm.Pipe(str(connector_keys).strip(), PREVIEW_METRIC, instance=instance_keys, temporary=True)
+    ### A `{{ Pipe(...) }}` of a pipe the viewer may not see (its table, or an attribute of it).
+    allowed, message = pipe_writes._check_references(
+        viewer, pipe, {}, {'fetch': {'definition': str(query or '')}},
+    )
+    if not allowed:
+        return message
+    return sql_guard.check_query(viewer, query, pipe)
+
+
 def register_pipe(
     connector_keys: str,
     metric_key: str,
     location_key: Optional[str],
     instance_keys: str,
     parameters: Dict[str, Any],
+    viewer: Any = None,
+    team: Optional[str] = None,
+    visibility: Optional[str] = None,
 ) -> Tuple[mrsm.SuccessTuple, mrsm.Pipe]:
-    """Register the new pipe (refused when it is already registered)."""
+    """
+    Register the new pipe (refused when it is already registered) through the console's checks
+    (`pipe_writes.register_pipe`: the viewer owns it, in `team`, visible as `visibility`).
+    """
+    from meerschaum.api.dash import pipe_writes
     pipe = mrsm.Pipe(connector_keys, metric_key, location_key, instance=instance_keys)
     try:
         registered = pipe.get_id() is not None
@@ -470,10 +558,11 @@ def register_pipe(
         return (False, f"Could not read {instance_keys}: {e}"), pipe
     if registered:
         return (False, f"{pipe} is already registered."), pipe
-    pipe = mrsm.Pipe(connector_keys, metric_key, location_key, instance=instance_keys,
-                     parameters=parameters)
     try:
-        success, message = pipe.register()
+        success, message = pipe_writes.register_pipe(
+            pipe, parameters, viewer=viewer, team=team, visibility=visibility,
+        )
     except Exception as e:
         return (False, f"Failed to register {pipe}: {e}"), pipe
+    pipe = mrsm.Pipe(connector_keys, metric_key, location_key, instance=instance_keys)
     return (success, message), pipe

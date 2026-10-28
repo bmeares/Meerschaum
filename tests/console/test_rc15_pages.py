@@ -321,21 +321,21 @@ def test_users_admin_flows_and_the_last_admin(pages_server, context):
     page.wait_for_selector('#users-table a:text-is("w7-dave")', timeout=15000)
 
     ### The only admin is neither demoted nor deleted.
-    _menu(page, USERNAME, 'Change type')
+    _menu(page, USERNAME, 'Edit')
     page.click('.modal.show label:text-is("User")')
-    page.click('#users-type-submit')
-    _wait_text(page, '#users-type-alert', 'only admin')
-    _close_modal(page, 'users-type-cancel')
+    page.click('#users-edit-submit')
+    _wait_text(page, '#users-edit-alert', 'only admin')
+    _close_modal(page, 'users-edit-cancel')
     _menu(page, USERNAME, 'Delete')
     page.fill('#users-delete-input', USERNAME)
     page.click('#users-delete-submit')
     _wait_text(page, '#users-delete-alert', 'only admin')
     _close_modal(page, 'users-delete-cancel')
 
-    ### Change type, Reset password, Delete (confirmed by typing the username).
-    _menu(page, 'w7-dave', 'Change type')
+    ### Edit (the type), Reset password, Delete (confirmed by typing the username).
+    _menu(page, 'w7-dave', 'Edit')
     page.click('.modal.show label:text-is("Admin")')
-    page.click('#users-type-submit')
+    page.click('#users-edit-submit')
     page.wait_for_selector('.modal.show', state='detached', timeout=15000)
     _wait_text(page, '#users-alert-div', "'w7-dave' is now an admin.")
     page.wait_for_selector('#users-table tbody tr:has(a:text-is("w7-dave")) .badge:text-is("admin")', timeout=15000)

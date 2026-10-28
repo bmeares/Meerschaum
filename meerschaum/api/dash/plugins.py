@@ -420,7 +420,10 @@ def start_plugin_run(
     }
     properties = {'mrsm_execution': execution}
     if username:
-        properties['mrsm_owner'] = username
+        ### The run is the user's, in their primary team (AC9).
+        from meerschaum.jobs import ownership_properties
+        from meerschaum.api.dash.access import viewer_for
+        properties.update(ownership_properties(username, viewer_for(username).primary_team))
     try:
         job = Job(name, sysargs, env=(env or None), executor_keys='local', _properties=properties)
         return job.start(), name

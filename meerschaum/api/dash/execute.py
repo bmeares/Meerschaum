@@ -150,17 +150,19 @@ def mint_bearer(username: Optional[str], minutes: int = 5) -> Optional[str]:
     if not username:
         return None
     from datetime import timedelta
-    from meerschaum.api import get_api_connector, no_auth
+    from meerschaum.api import no_auth
     from meerschaum.api._oauth2 import manager
-    from meerschaum.core import User
+    from meerschaum.api.dash.access import viewer_for
     if no_auth:
         return None
-    instance = get_api_connector()
-    user = User(username, instance=instance)
-    user_type = instance.get_user_type(user)
-    scopes = ['*'] if user_type == 'admin' else (user.get_scopes(refresh=True) or [])
+    ### The user's effective permissions now (the server intersects a token's scopes with them
+    ### again when it is used).
+    viewer = viewer_for(username)
+    if not viewer.signed_in:
+        return None
+    scopes = ['*'] if viewer.is_admin else sorted(viewer.permissions)
     return manager.create_access_token(
-        data={'sub': username, 'type': user_type},
+        data={'sub': username, 'type': ('admin' if viewer.is_admin else None)},
         expires=timedelta(minutes=minutes),
         scopes=scopes,
     )

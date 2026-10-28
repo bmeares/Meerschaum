@@ -44,13 +44,166 @@ def split_ref(pipe_ref: str) -> Tuple[str, str, str, Optional[str]]:
     return instance_keys, connector_keys, metric_key, (None if location_key == 'None' else location_key)
 
 
+#: The prefix of a pipe a viewer may not see, as runs, events and graphs name it
+#: (`__hidden__:1`, `__hidden__:2`, ...): its keys never reach the page.
+HIDDEN_PREFIX: str = '__hidden__'
+
+
+def is_hidden_ref(pipe_ref: Any) -> bool:
+    """Whether a `pipe_ref` stands for a pipe the viewer may not see."""
+    return str(pipe_ref or '').startswith(HIDDEN_PREFIX)
+
+
 def ref_label(pipe_ref: str) -> str:
     """The official Pipe representation, including a non-default instance."""
+    if is_hidden_ref(pipe_ref):
+        from meerschaum.api.dash.access import HIDDEN_LABEL
+        number = str(pipe_ref)[len(HIDDEN_PREFIX):].lstrip(':')
+        return HIDDEN_LABEL + (f" {number}" if number else '')
     if pipe_ref.count('|') < 3:
         ### A canvas placeholder (`__upstream__`), not a Pipe.
         return pipe_ref
     instance, connector, metric, location = split_ref(pipe_ref)
     return str(mrsm.Pipe(connector, metric, location, instance=instance))
+
+
+class Anonymizer:
+    """
+    What a viewer sees of the engine's records on an instance: the `pipe_ref`s of pipes they may
+    see stay; every other one becomes `__hidden__:<n>` (numbered per record), and a
+    `Pipe('...')` naming it in a text (a plan's reason, a run's message, an error) becomes
+    "a hidden pipe". Administrators (and `--no-auth`) see everything (`active` is `False`).
+    """
+
+    def __init__(self, viewer: Any = None, instance: Any = None):
+        from meerschaum.api.dash import access
+        self.viewer = viewer if viewer is not None else access.current_viewer()
+        self.instance_keys = str(instance) if instance is not None else str(get_instance())
+        try:
+            self.visible = access.visible_refs(self.viewer, instance if instance is not None else self.instance_keys)
+        except Exception:
+            self.visible = set()
+        self.active = self.visible is not None
+        self.hidden: Dict[str, str] = {}
+
+    def is_visible(self, ref: Any) -> bool:
+        ref = str(ref or '')
+        if not self.active or ref.count('|') < 3 or is_hidden_ref(ref):
+            return True
+        if ref.split('|', 1)[0] == self.instance_keys:
+            return ref in self.visible
+        ### A member on another instance: that instance's pipes decide.
+        from meerschaum.api.dash import access
+        return access.ref_is_visible(self.viewer, ref)
+
+    def ref(self, ref: Any) -> Any:
+        """The ref as the viewer may see it."""
+        if ref is None or self.is_visible(ref):
+            return ref
+        ref = str(ref)
+        if ref not in self.hidden:
+            self.hidden[ref] = f"{HIDDEN_PREFIX}:{len(self.hidden) + 1}"
+        return self.hidden[ref]
+
+    def refs(self, refs: Any) -> List[Any]:
+        return [self.ref(ref) for ref in (refs or [])]
+
+    def text(self, text: Any) -> Any:
+        """`Pipe('...')` mentions of pipes the viewer may not see, as "a hidden pipe"."""
+        if not self.active or not isinstance(text, str) or 'Pipe(' not in text:
+            return text
+        import re
+        import ast
+
+        def _replace(match):
+            try:
+                node = ast.parse('f(' + match.group(1) + ')', mode='eval').body
+                args = [ast.literal_eval(arg) for arg in node.args]
+                kwargs = {kw.arg: ast.literal_eval(kw.value) for kw in node.keywords}
+            except Exception:
+                return match.group(0)
+            if len(args) < 2:
+                return match.group(0)
+            instance_keys = kwargs.get('instance', kwargs.get('mrsm_instance', self.instance_keys))
+            location = args[2] if len(args) > 2 else None
+            ref = '|'.join((str(instance_keys), str(args[0]), str(args[1]), str(location)))
+            return match.group(0) if self.is_visible(ref) else 'a hidden pipe'
+
+        return re.sub(r"Pipe\(((?:'(?:\\.|[^'\\])*'|\"(?:\\.|[^\"\\])*\"|[^()'\"])*)\)", _replace, text)
+
+    def value(self, value: Any) -> Any:
+        """A nested record with its refs and texts anonymized."""
+        if not self.active:
+            return value
+        if isinstance(value, dict):
+            out = {}
+            for key, item in value.items():
+                safe_key = self.ref(key) if isinstance(key, str) and key.count('|') >= 3 else key
+                if key in ('pipe_ref', 'parent', 'child', 'ref') and isinstance(item, str):
+                    out[safe_key] = self.ref(item)
+                elif key in ('targets', 'refs', 'resolved_targets', 'nodes') and isinstance(item, list):
+                    out[safe_key] = [
+                        self.ref(entry) if isinstance(entry, str) and entry.count('|') >= 3 else self.value(entry)
+                        for entry in item
+                    ]
+                else:
+                    out[safe_key] = self.value(item)
+            return out
+        if isinstance(value, list):
+            return [self.value(item) for item in value]
+        if isinstance(value, str):
+            if value.count('|') >= 3 and not self.is_visible(value):
+                return self.ref(value)
+            return self.text(value)
+        return value
+
+    def run(self, run: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """A run summary as the viewer sees it, or `None` when none of its pipes is visible."""
+        if not self.active:
+            return run
+        import json
+        record = dict(run.get('run') or {})
+        refs = list(record.get('targets') or [])
+        selection = record.get('selection', None)
+        parsed = None
+        if isinstance(selection, str):
+            try:
+                parsed = json.loads(selection)
+            except ValueError:
+                parsed = None
+        elif isinstance(selection, dict):
+            parsed = selection
+        if isinstance(parsed, dict):
+            refs += list(((parsed.get('targets') or {}) if isinstance(parsed.get('targets'), dict) else {}).get('refs') or [])
+            refs += list(parsed.get('resolved_targets') or [])
+        if not refs or not any(self.is_visible(ref) for ref in refs):
+            return None
+        self.hidden = {}
+        out = self.value(dict(run))
+        if isinstance(parsed, dict):
+            out.setdefault('run', {})['selection'] = json.dumps(self.value(parsed))
+        return out
+
+    def detail(self, detail: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        """A run's detail (summary, nodes, bars) as the viewer sees it, or `None`."""
+        if not self.active or not detail:
+            return detail
+        summary = self.run(detail.get('summary') or {}) if detail.get('summary') else None
+        refs = [bar.get('pipe_ref') for bar in (detail.get('bars') or [])]
+        if detail.get('summary') and summary is None:
+            return None
+        if refs and not any(self.is_visible(ref) for ref in refs) and summary is None:
+            return None
+        out = self.value({key: value for key, value in detail.items() if key != 'summary'})
+        if summary is not None:
+            out['summary'] = summary
+        return out
+
+    def events(self, events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """A run's events as the viewer sees them."""
+        if not self.active:
+            return events
+        return [self.value(event) for event in (events or [])]
 
 
 def action_label(action: str) -> str:
@@ -226,11 +379,13 @@ def _request(instance: Any, **kwargs: Any) -> Dict[str, Any]:
     return build_request(instance, **kwargs)
 
 
-def _instance_pipes(instance: Any) -> List[mrsm.Pipe]:
+def _instance_pipes(instance: Any, viewer: Any = None) -> List[mrsm.Pipe]:
     from meerschaum.utils.pipes import flatten_pipes_dict
+    from meerschaum.api.dash import access
     ### `get_pipes()` leaves out Meerschaum's internal `mrsm` pipes (saved Pipelines' registry).
     pipes_dict = mrsm.get_pipes(instance=instance, as_list=False)
-    return flatten_pipes_dict(pipes_dict)
+    viewer = viewer if viewer is not None else access.current_viewer()
+    return access.visible_pipes(viewer, flatten_pipes_dict(pipes_dict))
 
 
 def plan_graph(
@@ -238,19 +393,22 @@ def plan_graph(
     pipes: Optional[List[mrsm.Pipe]] = None,
     parents: Any = None,
     children: Any = None,
+    viewer: Any = None,
 ) -> Dict[str, Any]:
     """
-    Plan a selection and return its graph: `{nodes, edges, warnings}`.
+    Plan a selection and return its graph: `{nodes, edges, warnings, hidden}`.
 
     Each node is `{pipe_ref, label, action, reason, provisional, status}` and each edge
-    `{parent, child, label, lagging}`. With no `pipes`, every registered pipe of the instance is
-    selected. `parents` / `children` extend a selection as `Pipeline(...)` does.
+    `{parent, child, label, lagging}`. With no `pipes`, every registered pipe of the instance
+    `viewer` may see is selected. `parents` / `children` extend a selection as `Pipeline(...)`
+    does. The pipes `viewer` (by default the request's) may not see are left out of the nodes
+    and edges and only counted (`hidden`); a reason naming one says "a hidden pipe".
     """
     from meerschaum.core.Pipeline import Plan
     instance = instance if instance is not None else get_instance()
-    selected = pipes if pipes is not None else _instance_pipes(instance)
+    selected = pipes if pipes is not None else _instance_pipes(instance, viewer=viewer)
     if not selected:
-        return {'nodes': [], 'edges': [], 'warnings': []}
+        return {'nodes': [], 'edges': [], 'warnings': [], 'hidden': 0}
     request = _request(
         instance,
         targets=selected,
@@ -289,7 +447,24 @@ def plan_graph(
             ),
             'lagging': lagging,
         })
-    return {'nodes': nodes, 'edges': edges, 'warnings': list(plan.warnings)}
+    anonymizer = Anonymizer(viewer, instance)
+    hidden = 0
+    if anonymizer.active:
+        hidden = sum(1 for node in nodes if not anonymizer.is_visible(node['pipe_ref']))
+        nodes = [node for node in nodes if anonymizer.is_visible(node['pipe_ref'])]
+        for node in nodes:
+            node['reason'] = anonymizer.text(node.get('reason'))
+            node['bounds_text'] = anonymizer.text(node.get('bounds_text'))
+        edges = [
+            edge for edge in edges
+            if anonymizer.is_visible(edge['parent']) and anonymizer.is_visible(edge['child'])
+        ]
+    return {
+        'nodes': nodes,
+        'edges': edges,
+        'warnings': [anonymizer.text(warning) for warning in plan.warnings],
+        'hidden': hidden,
+    }
 
 
 def node_status(action: str) -> str:
@@ -460,10 +635,13 @@ def get_runs(
     status: Optional[str] = None,
     limit: int = 100,
     run_name: Optional[str] = None,
+    viewer: Any = None,
 ) -> List[Dict[str, Any]]:
     """
     Recent runs, newest first (`{run, status, duration_seconds, counts}` each). `run_id` selects
-    one run; `pipe` matches a Pipe label or reference in the targets or executed stages.
+    one run; `pipe` matches a Pipe label or reference in the targets or executed stages. Only the
+    runs of a pipe `viewer` (by default the request's) may see are listed, with the other pipes
+    anonymized (`Anonymizer`).
     """
     instance = instance if instance is not None else get_instance()
     request = _request(instance)
@@ -481,12 +659,16 @@ def get_runs(
         ended = stopped_execution_times(instance)
         for run in runs:
             reconcile_stopped_run(run, ended.get(run['run']['run_id']))
+    anonymizer = Anonymizer(viewer, instance)
+    if anonymizer.active:
+        runs = [visible for visible in (anonymizer.run(run) for run in runs) if visible is not None]
     return runs
 
 
-def get_run_detail(instance: Any, run_id: str) -> Optional[Dict[str, Any]]:
+def get_run_detail(instance: Any, run_id: str, viewer: Any = None) -> Optional[Dict[str, Any]]:
     """
-    One run with its nodes and the planned-versus-actual bars (`None` for an unknown run).
+    One run with its nodes and the planned-versus-actual bars (`None` for an unknown run, or one
+    without a pipe `viewer` may see; the pipes they may not see are anonymized).
     """
     instance = instance if instance is not None else get_instance()
     request = _request(instance)
@@ -500,20 +682,35 @@ def get_run_detail(instance: Any, run_id: str) -> Optional[Dict[str, Any]]:
                     bar['status'] = 'stopped'
                     if bar.get('actual_start') and not bar.get('actual_end'):
                         bar['actual_end'] = ended
-    return detail
+    return Anonymizer(viewer, instance).detail(detail)
 
 
-def get_run_events(instance: Any, run_id: str, after_seq: Optional[int] = None) -> List[Dict[str, Any]]:
+def get_run_events(
+    instance: Any,
+    run_id: str,
+    after_seq: Optional[int] = None,
+    viewer: Any = None,
+) -> List[Dict[str, Any]]:
     """
-    The persisted events of a run, in order.
+    The persisted events of a run, in order (none for a run without a pipe `viewer` may see;
+    the pipes they may not see are anonymized).
     """
     from meerschaum.core.Pipeline import _decode_events
     instance = instance if instance is not None else get_instance()
+    anonymizer = Anonymizer(viewer, instance)
+    if anonymizer.active:
+        ### The run's targets number its hidden pipes, as in its detail (`Anonymizer.run`).
+        request = _request(instance)
+        request['run_id'] = run_id
+        request['limit'] = 1
+        summaries = _call('engine_runs', request) or []
+        if not summaries or anonymizer.run(summaries[0]) is None:
+            return []
     request = _request(instance)
     request['run_id'] = run_id
     if after_seq is not None:
         request['after_seq'] = after_seq
-    return _decode_events(_call('engine_run_events', request))
+    return anonymizer.events(_decode_events(_call('engine_run_events', request)))
 
 
 def run_events_stream_path(
@@ -690,7 +887,9 @@ def relations_of(pipe: mrsm.Pipe) -> Dict[str, List[Dict[str, Any]]]:
     """
     if pipe.get_id() is None:
         return {'parents': [], 'children': []}
-    graph = plan_graph(pipe.instance_connector, [pipe], parents=1, children=1)
+    ### Every neighbour: the caller decides what the viewer sees (`pipes._relation_rows`).
+    from meerschaum.api.dash.access import SYSTEM
+    graph = plan_graph(pipe.instance_connector, [pipe], parents=1, children=1, viewer=SYSTEM)
     this_ref = '|'.join((
         str(pipe.instance_keys), str(pipe.connector_keys), str(pipe.metric_key),
         str(pipe.location_key),
