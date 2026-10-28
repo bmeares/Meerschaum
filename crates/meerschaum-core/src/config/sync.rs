@@ -149,7 +149,8 @@ impl ConfigState {
                     continue;
                 }
             }
-            super::write_file_atomically(&path, source.as_bytes()).map_err(|error| error.to_string())?;
+            super::write_file_atomically(&path, source.as_bytes())
+                .map_err(|error| error.to_string())?;
         }
         Ok(())
     }
