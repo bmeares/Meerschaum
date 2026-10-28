@@ -507,6 +507,19 @@ async fn pipeline_metadata_transport_is_narrow_and_preserves_exact_references() 
         "metadata registration must not create a data table"
     );
     let attrs = served.client.get_pipe_attributes(&pipeline).await.unwrap();
+    let identity = attrs["parameters"]
+        .get("pipeline")
+        .unwrap()
+        .get("id")
+        .unwrap()
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert_ne!(identity, "stable-identity");
+    assert_eq!(
+        uuid::Uuid::parse_str(&identity).unwrap().get_version_num(),
+        4
+    );
     assert_eq!(
         attrs["parameters"]
             .get("pipeline")
@@ -526,7 +539,9 @@ async fn pipeline_metadata_transport_is_narrow_and_preserves_exact_references() 
         .unwrap();
     assert_eq!(keys.entries().len(), 1);
     assert_eq!(keys.entries()[0].location_key.as_deref(), Some("api-daily"));
-    let mut params = pipeline.raw_parameters().clone();
+    // Registration assigns the server identity. Subsequent writes use its authoritative
+    // readback, as the SDK does, rather than reintroducing the caller's original ID.
+    let mut params = attrs["parameters"].to_map();
     params
         .get_mut("pipeline")
         .unwrap()
@@ -537,8 +552,18 @@ async fn pipeline_metadata_transport_is_narrow_and_preserves_exact_references() 
             Value::Str("Changed {{ Pipe('sql:x','y') }}".into()),
         );
     pipeline.set_parameters(params);
-    assert!(served.client.edit_pipe(&pipeline, false).await.success);
+    let edited = served.client.edit_pipe(&pipeline, false).await;
+    assert!(edited.success, "{}", edited.message);
     let attrs = served.client.get_pipe_attributes(&pipeline).await.unwrap();
+    assert_eq!(
+        attrs["parameters"]
+            .get("pipeline")
+            .unwrap()
+            .get("id")
+            .unwrap()
+            .as_str(),
+        Some(identity.as_str())
+    );
     assert_eq!(
         attrs["parameters"]
             .get("pipeline")

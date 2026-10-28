@@ -56,7 +56,7 @@ impl Plugin for Demo {
                 Ok(Reply::json(json!([true, r.context["kwargs"].to_string()])))
             }
             "register_pipe" | "drop_pipe" => Ok(Reply::json(json!([true, "Success"]))),
-            "get_pipe_attributes" => Ok(Reply::json(json!({}))),
+            "get_pipe_attributes" => Ok(Reply::json(json!({"pipe_id": 1, "parameters": {}}))),
             "get_pipe_id" => Ok(Reply::json(json!(1))),
             "get_sync_time" => Ok(Reply::json(json!(3))),
             "get_pipe_columns_types" => Ok(Reply::json(json!({"id":"BIGINT"}))),

@@ -15,6 +15,8 @@ __version__ = '0.3.0'
 import json
 import os
 import pathlib
+import tempfile
+from functools import wraps
 from datetime import datetime, timezone, timedelta
 
 import meerschaum as mrsm
@@ -50,10 +52,28 @@ def _load(label: str) -> dict:
 
 def _save(label: str, store: dict) -> None:
     path = _store_path(label)
-    tmp = path.with_suffix('.tmp')
-    with open(tmp, 'w', encoding='utf-8') as f:
-        json.dump(store, f, default=str)
-    os.replace(tmp, path)
+    tmp = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode='w', encoding='utf-8', dir=path.parent,
+            prefix=path.name + '.', suffix='.tmp', delete=False,
+        ) as f:
+            tmp = pathlib.Path(f.name)
+            json.dump(store, f, default=str)
+        os.replace(tmp, path)
+    finally:
+        if tmp is not None:
+            tmp.unlink(missing_ok=True)
+
+
+def _serialized(method):
+    """Primary operations and background telemetry share one process-safe store lock."""
+    @wraps(method)
+    def wrapped(self, *args, **kwargs):
+        from meerschaum.utils.locks import InterProcessLock
+        with InterProcessLock(_store_path(self.label).with_suffix('.lock')):
+            return method(self, *args, **kwargs)
+    return wrapped
 
 
 def _key(pipe) -> str:
@@ -67,6 +87,7 @@ class W15lmemConnector(InstanceConnector):
     IS_INSTANCE = True
     REQUIRED_ATTRIBUTES = []
 
+    @_serialized
     def register_pipe(self, pipe, debug=False, **kwargs):
         store = _load(self.label)
         key = _key(pipe)
@@ -94,6 +115,7 @@ class W15lmemConnector(InstanceConnector):
         doc = _load(self.label)['pipes'].get(_key(pipe), None)
         return doc['pipe_id'] if doc else None
 
+    @_serialized
     def edit_pipe(self, pipe, debug=False, **kwargs):
         store = _load(self.label)
         doc = store['pipes'].get(_key(pipe), None)
@@ -103,6 +125,7 @@ class W15lmemConnector(InstanceConnector):
         _save(self.label, store)
         return True, "Success"
 
+    @_serialized
     def delete_pipe(self, pipe, debug=False, **kwargs):
         store = _load(self.label)
         store['pipes'].pop(_key(pipe), None)
@@ -124,6 +147,7 @@ class W15lmemConnector(InstanceConnector):
         doc = _load(self.label)['pipes'].get(_key(pipe), None)
         return bool(doc and doc['rows'])
 
+    @_serialized
     def drop_pipe(self, pipe, debug=False, **kwargs):
         store = _load(self.label)
         doc = store['pipes'].get(_key(pipe), None)
@@ -132,6 +156,7 @@ class W15lmemConnector(InstanceConnector):
             _save(self.label, store)
         return True, "Success"
 
+    @_serialized
     def sync_pipe(self, pipe, df=None, check_existing=True, debug=False, **kwargs):
         store = _load(self.label)
         doc = store['pipes'].setdefault(_key(pipe), {
@@ -147,6 +172,7 @@ class W15lmemConnector(InstanceConnector):
         _save(self.label, store)
         return True, f"Inserted {len(records)} rows (check_existing={check_existing})."
 
+    @_serialized
     def clear_pipe(self, pipe, begin=None, end=None, params=None, debug=False, **kwargs):
         store = _load(self.label)
         doc = store['pipes'].get(_key(pipe), None)
