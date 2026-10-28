@@ -106,6 +106,7 @@ def main() -> int:
             'sql:smoke', 'probe', instance='sql:smoke',
             columns={'id': 'id'}, dtypes={'id': 'int', 'value': 'string'},
         )
+        mrsm.initialize_engine_metrics(instance=pipe.instance_connector)
         result = pipe.sync([{'id': 1, 'value': 'ok'}])
         if not result[0]:
             raise RuntimeError(result[1])
@@ -113,7 +114,6 @@ def main() -> int:
         assert result.success is success and result.message == message
         assert result.inserted == 1, result.inserted
         assert pipe.get_data(as_docs=True) == [{'id': 1, 'value': 'ok'}]
-        mrsm.initialize_engine_metrics(instance=pipe.instance_connector)
         metrics = mrsm.get_engine_metrics(instance=pipe.instance_connector, pipe=pipe)
         assert metrics['retention_days'] == 30
         assert isinstance(metrics['summary']['syncs'], int)

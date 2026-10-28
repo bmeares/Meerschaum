@@ -92,6 +92,25 @@ impl SqlConnector {
                 }
             }
         }
+        // Independent SQLite writers can plan the same missing internal index before
+        // either creates it. Let SQLite arbitrate that catalog race atomically, including
+        // UNIQUE indexes; every other DDL error (e.g. duplicate rows) still propagates.
+        // Ordinary pipes and the pure v4 query builders retain their existing SQL.
+        if sp.pipe().temporary
+            && sp.pipe().connector_keys() == "mrsm"
+            && matches!(self.flavor, Flavor::Sqlite | Flavor::Geopackage)
+        {
+            for query in queries.values_mut().flatten() {
+                for prefix in ["CREATE INDEX ", "CREATE UNIQUE INDEX "] {
+                    if let Some(rest) = query.strip_prefix(prefix)
+                        && !rest.starts_with("IF NOT EXISTS ")
+                    {
+                        *query = format!("{prefix}IF NOT EXISTS {rest}");
+                        break;
+                    }
+                }
+            }
+        }
         Ok(queries)
     }
 

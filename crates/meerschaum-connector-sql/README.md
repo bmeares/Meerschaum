@@ -313,9 +313,16 @@ skip existing ordinary indices, and never cache readiness after an index failure
 creating the same absent schema take a schema lock only during its DDL transaction; existing
 schemas need no schema lock. Warm writes still use one DML statement, alongside existing native
 partition maintenance where configured.
+Explicit metrics initialization uses the same cold writer path for metrics, runs and nodes,
+including tables whose index creation is still in progress. On SQLite and GeoPackage,
+temporary `mrsm` tables create missing indexes with `IF NOT EXISTS` so independent writers may
+execute plans from the same stale catalog snapshot. The database still rejects invalid index
+definitions or duplicate rows in a new unique index; failures never mark a table ready.
 `tests/internal_initialization.rs` exercises independent one-connection pools and an existing table
 missing its upsert key on PostgreSQL and PostGIS. CockroachDB skips advisory locks, which it does
 not support; cross-process cold initialization there is still a gap.
+`tests/metrics_initialization.rs` covers stale SQLite index plans, explicit initialization racing
+the first metrics batch, independent writer processes, and unique-key failure recovery.
 
 `facade::sync_pipe_mut_cached` accepts the caller's cached column types, derives the pipe's
 dtypes, and refreshes metadata after schema changes. The existing `sync_pipe_mut` remains

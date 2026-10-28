@@ -538,19 +538,14 @@ pub async fn initialize<C: InstanceConnector + ?Sized>(conn: &C) -> ConnectorRes
         else {
             continue;
         };
-        if !conn.pipe_exists(&pipe).await? {
-            let frame = pipe_enforce_dtypes(PipeInput::Docs(Vec::new()), &static_context(&pipe))
-                .map_err(|error| ConnectorError::Invalid(error.to_string()))?;
-            let result = conn.sync_pipe(&pipe, frame, &write_options()).await;
-            if !result.success {
-                return Err(ConnectorError::Backend(result.message));
-            }
-        }
-        if conn.connector_type() == "sql" {
-            let result = conn.create_pipe_indices(&pipe).await;
-            if !result.success {
-                return Err(ConnectorError::Backend(result.message));
-            }
+        // Use the writer's cold-readiness path even when the table already exists:
+        // existence alone does not prove that a concurrent writer finished its indexes.
+        // In particular, this keeps PostgreSQL's initialization lock around all DDL.
+        let frame = pipe_enforce_dtypes(PipeInput::Docs(Vec::new()), &static_context(&pipe))
+            .map_err(|error| ConnectorError::Invalid(error.to_string()))?;
+        let result = conn.sync_pipe(&pipe, frame, &write_options()).await;
+        if !result.success {
+            return Err(ConnectorError::Backend(result.message));
         }
     }
     Ok(())
