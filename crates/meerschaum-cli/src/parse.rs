@@ -452,7 +452,87 @@ pub const ENGINE_OPTIONS: &[EngineOption] = &[
         dest: "run_id",
         flag: "--run-id",
     },
+    // rc15 wave 2 (AC10): the access commands' flags, parsed only for their own commands
+    // (`AccessCommand`) so that plugin flags of the same names keep working everywhere else.
+    EngineOption {
+        dest: "owner",
+        flag: "--owner",
+    },
+    EngineOption {
+        dest: "team",
+        flag: "--team",
+    },
+    EngineOption {
+        dest: "visibility",
+        flag: "--visibility",
+    },
+    EngineOption {
+        dest: "edit_mode",
+        flag: "--edit",
+    },
+    EngineOption {
+        dest: "locks",
+        flag: "--locks",
+    },
+    EngineOption {
+        dest: "members",
+        flag: "--members",
+    },
+    EngineOption {
+        dest: "managers",
+        flag: "--managers",
+    },
 ];
+
+/// The visibilities `--visibility` accepts (`access.visibility`).
+pub const VISIBILITY_CHOICES: &[&str] = &["team", "private", "everyone"];
+
+/// The edit modes `--edit` accepts (`access.edit`).
+pub const EDIT_MODE_CHOICES: &[&str] = &["team", "owner"];
+
+/// The commands that take the access flags.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AccessCommand {
+    /// `edit pipes access`: `--owner`, `--team`, `--visibility`, `--edit`.
+    PipesAccess,
+    /// `lock pipes` / `unlock pipes`: `--locks`.
+    Locks,
+    /// `register teams` / `edit teams`: `--members`, `--managers`.
+    Teams,
+}
+
+/// Which access command the words name, if any. The words may follow global options
+/// (`-i sql:local edit pipes access`), so the first action-like pair is looked for among the
+/// words before `--`, `-A` or a chain's `+`.
+pub fn access_command(sysargs: &[String]) -> Option<AccessCommand> {
+    let words: Vec<&str> = sysargs
+        .iter()
+        .map(String::as_str)
+        .take_while(|s| !matches!(*s, "--" | "-A" | "+" | ":"))
+        .filter(|s| !s.starts_with('-'))
+        .collect();
+    for (i, pair) in words.windows(2).enumerate() {
+        match (pair[0], pair[1]) {
+            ("edit", "pipe" | "pipes") if words.get(i + 2) == Some(&"access") => {
+                return Some(AccessCommand::PipesAccess);
+            }
+            ("lock" | "unlock", "pipe" | "pipes") => return Some(AccessCommand::Locks),
+            ("register" | "edit", "team" | "teams") => return Some(AccessCommand::Teams),
+            _ => {}
+        }
+    }
+    None
+}
+
+/// The access command an access flag (by `dest`) belongs to.
+pub fn access_flag_command(dest: &str) -> Option<AccessCommand> {
+    match dest {
+        "owner" | "team" | "visibility" | "edit_mode" => Some(AccessCommand::PipesAccess),
+        "locks" => Some(AccessCommand::Locks),
+        "members" | "managers" => Some(AccessCommand::Teams),
+        _ => None,
+    }
+}
 
 /// The command-line words for the [`ENGINE_OPTIONS`] present in `args` (the reverse of
 /// `engine_arguments`). Values are attached (`--children=2`) so they never read as positionals.
@@ -472,6 +552,7 @@ pub fn engine_options_to_sysargs(args: &ArgsMap) -> Vec<String> {
 fn engine_arguments(sysargs: &[String]) -> Result<(Vec<String>, ArgsMap), PyException> {
     let mut rest = Vec::new();
     let mut args = ArgsMap::new();
+    let access = access_command(sysargs);
     let mut i = 0;
     while i < sysargs.len() {
         let token = &sysargs[i];
@@ -582,6 +663,52 @@ fn engine_arguments(sysargs: &[String]) -> Result<(Vec<String>, ArgsMap), PyExce
                     i += 1;
                 }
                 Some(PyValue::Str(value.to_owned()))
+            }
+            // The access flags of their own commands (`AccessCommand`). A value may be empty
+            // (`--owner ''` clears the owner, `--team ''` means Everyone).
+            dest if access.is_some() && access_flag_command(dest) == access => {
+                let value = attached
+                    .or_else(|| {
+                        sysargs
+                            .get(i + 1)
+                            .map(String::as_str)
+                            .filter(|s| s.is_empty() || !s.starts_with('-'))
+                    })
+                    .ok_or_else(|| {
+                        PyException::new(
+                            "InvalidArgumentException",
+                            format!("{flag} requires a value"),
+                        )
+                    })?;
+                let choices = match dest {
+                    "visibility" => Some(VISIBILITY_CHOICES),
+                    "edit_mode" => Some(EDIT_MODE_CHOICES),
+                    _ => None,
+                };
+                if let Some(choices) = choices
+                    && !choices.contains(&value.trim().to_lowercase().as_str())
+                {
+                    return Err(PyException::new(
+                        "InvalidArgumentException",
+                        format!(
+                            "argument {flag}: invalid choice: '{value}' (choose from {})",
+                            choices
+                                .iter()
+                                .map(|c| format!("'{c}'"))
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        ),
+                    ));
+                }
+                if attached.is_none() {
+                    i += 1;
+                }
+                let value = if choices.is_some() {
+                    value.trim().to_lowercase()
+                } else {
+                    value.to_owned()
+                };
+                Some(PyValue::Str(value))
             }
             // Out of scope (e.g. a plugin's own `--all`): leave it for the v4 parser.
             _ => None,

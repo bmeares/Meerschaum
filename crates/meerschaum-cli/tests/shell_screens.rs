@@ -552,6 +552,11 @@ fn with_v5_actions(name: &str, label: &str, mut expected: Snapshot) -> Snapshot 
     if let Some(cursor) = overlay.get("cursor") {
         expected.cursor = serde_json::from_value(cursor.clone()).unwrap();
     }
+    // AC10 adds `show teams` before tokens. The immutable v4 tab sequence consequently
+    // reaches teams at the bottom of this viewport; full wrap coverage is exercised below.
+    if name == "menu_scroll" && matches!(label, "tab wraps to original" | "shift-tab to last") {
+        expected.lines[22] = expected.lines[22].replace("tokens", "teams");
+    }
     expected
 }
 

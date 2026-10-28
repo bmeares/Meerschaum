@@ -345,6 +345,11 @@ fn a_password_prompt_echoes_a_star_per_character() {
         &setup.base,
         &["register", "users", "bob", "-i", "sql:w18sh"],
     );
+    // rc15: the first user of an instance is first offered the admin type.
+    term.wait_screen("the admin question", 60, |s| {
+        s.contains("Make 'bob' an admin?")
+    });
+    term.send("n\r");
     term.wait_screen("the password question", 60, |s| {
         s.contains("Password for user 'bob'")
     });

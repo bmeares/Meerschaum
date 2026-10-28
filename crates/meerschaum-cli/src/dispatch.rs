@@ -518,7 +518,18 @@ fn contains(sysargs: &[String], flag: &str) -> bool {
 pub fn main(sysargs: &[String], rt: &mut Runtime<'_>) -> i32 {
     // `doctor` is read-only: from the first config read on, nothing is written and the plugin
     // manifest is the cached one (never validated or rebuilt, which imports plugin code).
-    if starts_with_doctor(sysargs, &rt.dates, None).unwrap_or(true) {
+    let doctor = starts_with_doctor(sysargs, &rt.dates, None).unwrap_or(true);
+    if !doctor && rt.config.is_none() {
+        // rc15 (Q54): a root created before rc15 keeps pandas DataFrames: `dataframe: pandas` is
+        // added to its `meerschaum.yaml` before anything reads its config.
+        use meerschaum_core::config::dataframe::{PinOutcome, pin_process_root};
+        if let Some(PinOutcome::Pinned { notice } | PinOutcome::Failed { notice }) =
+            pin_process_root()
+        {
+            eprintln!("{notice}");
+        }
+    }
+    if doctor {
         let config_created = rt.config.is_none();
         rt.config_read_only();
         let session = native::session(rt);

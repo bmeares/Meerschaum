@@ -120,6 +120,8 @@ pub fn start_gui(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
         .args(leading)
         .args(["start", "api", "--no-auth", "--host", host, "--port"])
         .arg(port.to_string())
+        // The window loads `http://127.0.0.1`: HTTPS configured for the API stays off here.
+        .args(["--keyfile", "", "--certfile", ""])
         .args(["-i", &instance])
         .stdin(Stdio::null());
     if !debug {

@@ -494,6 +494,12 @@ impl LiveRun {
                     style.paint("2", "\u{25cb}"),
                     first_line(&node.reason)
                 ),
+                // The reason names the lock and how to unlock it.
+                NodeStatus::Locked => format!(
+                    "  {} {label} {}",
+                    style.paint("33", "\u{25cb}"),
+                    first_line(&node.reason)
+                ),
                 NodeStatus::RebuildPending => format!(
                     "  {} {label} rebuild pending: {}",
                     style.paint("33", "\u{25cb}"),

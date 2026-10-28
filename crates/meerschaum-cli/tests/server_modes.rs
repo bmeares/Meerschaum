@@ -423,6 +423,10 @@ def wiring_echo(**kw):
 /// Start `mrsm start api` with `extra` flags and return what it wrote to stderr once it serves.
 /// A port another test grabbed between choosing it and binding it is retried.
 fn startup_stderr(extra: &[&str]) -> String {
+    startup_stderr_config(extra, "{}")
+}
+
+fn startup_stderr_config(extra: &[&str], config: &str) -> String {
     let mut last = String::new();
     for _attempt in 0..3 {
         let sandbox = Sandbox::new();
@@ -434,6 +438,7 @@ fn startup_stderr(extra: &[&str]) -> String {
         let mut child = ChildGuard(
             sandbox
                 .command()
+                .env("MRSM_CONFIG", config)
                 .args([
                     "start",
                     "api",
@@ -475,8 +480,11 @@ fn startup_stderr(extra: &[&str]) -> String {
 #[test]
 fn start_api_warns_once_when_anyone_who_can_connect_could_get_a_shell() {
     const WARNING: &str = "can register an account and open a shell";
-    // The defaults (open registration, terminals for non-admins) on a non-loopback address.
-    let text = startup_stderr(&["--host", "0.0.0.0"]);
+    // Fresh defaults close registration and give Editors no terminal.
+    assert!(!startup_stderr(&["--host", "0.0.0.0"]).contains(WARNING));
+    let config =
+        r#"{"api":{"permissions":{"registration":{"users":true},"default_role":"operator"}}}"#;
+    let text = startup_stderr_config(&["--host", "0.0.0.0"], config);
     assert_eq!(text.matches(WARNING).count(), 1, "{text}");
     assert!(
         text.contains("--secure") && text.contains("--private"),
@@ -489,7 +497,7 @@ fn start_api_warns_once_when_anyone_who_can_connect_could_get_a_shell() {
         vec!["--host", "0.0.0.0", "--private"],
         vec!["--host", "0.0.0.0", "--no-webterm"],
     ] {
-        let text = startup_stderr(&extra);
+        let text = startup_stderr_config(&extra, config);
         assert!(!text.contains(WARNING), "{extra:?}: {text}");
     }
 }

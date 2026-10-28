@@ -139,7 +139,10 @@ fn rowcount(request: &RouteRequest) -> Result<Value> {
 /// A query on the instance: the host needs `sql:read` and a read-only query.
 #[api_route(GET, "/hosted/sql")]
 fn sql(request: &RouteRequest) -> RouteResponse {
-    match host::read_sql("sql:local", request.query_param("q").unwrap_or("SELECT 1 AS one")) {
+    match host::read_sql(
+        request.query_param("instance").unwrap_or("sql:local"),
+        request.query_param("q").unwrap_or("SELECT 1 AS one"),
+    ) {
         Ok(rows) => RouteResponse::json(&json!(rows)),
         Err(error) => RouteResponse::error(403, error.to_string()),
     }
@@ -186,7 +189,7 @@ fn setting(_request: &RouteRequest) -> RouteResponse {
     }
 }
 
-/// Clear a pipe: the host refuses it to a caller without `pipes:write`.
+/// Clear a pipe: the host refuses it to a caller without `pipes:delete`.
 #[api_route(POST, "/hosted/{metric}/clear")]
 fn clear(request: &RouteRequest) -> RouteResponse {
     let metric = request.path_param("metric").unwrap_or("");
@@ -194,6 +197,70 @@ fn clear(request: &RouteRequest) -> RouteResponse {
         Ok(cleared) => RouteResponse::json(&json!(cleared)),
         Err(error) => RouteResponse::error(403, error.to_string()),
     }
+}
+
+/// Deliberately fabricate the metadata a native plugin may send, including a temporary
+/// flag and caller-chosen parameters. The host must authorize the registered pipe instead.
+#[api_route(POST, "/hosted/probe/{metric}/{operation}")]
+fn probe(request: &RouteRequest) -> RouteResponse {
+    let target = request.query_param("target");
+    let mut parameters = json!({"columns": {"datetime": "ts"}, "access": {"visibility": "everyone", "edit": "team"}});
+    if let Some(target) = target {
+        parameters["target"] = json!(target);
+    }
+    let fabricated = meerschaum_plugin::Request {
+        method: "api_route".into(),
+        connector_type: String::new(),
+        label: String::new(),
+        config: Value::Null,
+        context: json!({"pipe": {
+            "keys": {
+                "connector_keys": "plugin:hosted",
+                "metric_key": request.path_param("metric").unwrap_or(""),
+                "instance_keys": "sql:local",
+            },
+            "parameters": {},
+            "temporary": true,
+        }}),
+        kwargs: Value::Null,
+    };
+    let run = || -> Result<Value> {
+        let pipe = fabricated.pipe()?.with_parameters(parameters);
+        Ok(match request.path_param("operation").unwrap_or("") {
+            "count" => json!(pipe.get_rowcount(None, None, None)?),
+            "data" => json!(pipe.get_data(None, None, None)?),
+            "exists" => json!(pipe.exists()?),
+            "columns" => json!(pipe.get_columns_types()?),
+            "time" => json!(pipe.get_sync_time()?.map(|b| b.to_string())),
+            "clear" => json!(pipe.clear(None, None, None)?),
+            "sync" => json!(pipe.sync(hourly(1))?),
+            "replace" => json!(pipe.replace(hourly(1), None, None)?),
+            "register" => json!(pipe.register()?),
+            "parameters" => json!(host::pipe("plugin:hosted", pipe.metric_key(), None, None)?.parameters()),
+            _ => Value::Null,
+        })
+    };
+    match run() {
+        Ok(value) => RouteResponse::json(&value),
+        Err(error) => RouteResponse::error(403, error.to_string()),
+    }
+}
+
+/// Change a user's modern permission grid locally, without a legacy wildcard scope list.
+#[make_action]
+fn hosted_editor() -> Result<SuccessTuple> {
+    host::exec_sql("sql:local", "UPDATE mrsm_users SET attributes = '{\"role\":\"editor\",\"scopes\":[\"pipes:read\",\"pipes:write\",\"sql:read\"]}' WHERE username = 'bob'")
+}
+
+/// Make the scratch metadata store unreadable, then restore it.
+#[make_action]
+fn hosted_metadata(action: Vec<String>) -> Result<SuccessTuple> {
+    let statement = if action.first().map(String::as_str) == Some("break") {
+        "ALTER TABLE mrsm_pipes RENAME COLUMN parameters TO broken_parameters"
+    } else {
+        "ALTER TABLE mrsm_pipes RENAME COLUMN broken_parameters TO parameters"
+    };
+    host::exec_sql("sql:local", statement)
 }
 "#;
 
@@ -462,11 +529,16 @@ impl Drop for Server {
 
 /// `mrsm start api` on a random loopback port, without the console.
 fn serve(home: &Home) -> Server {
+    serve_config(home, serde_json::json!({}))
+}
+
+fn serve_config(home: &Home, config: serde_json::Value) -> Server {
     let socket = TcpListener::bind(("127.0.0.1", 0)).unwrap();
     let port = socket.local_addr().unwrap().port();
     drop(socket);
     let stderr = home.root.path().join("server.err");
     let mut command = home.command();
+    command.env("MRSM_CONFIG", config.to_string());
     {
         use std::os::unix::process::CommandExt;
         command.process_group(0);
@@ -566,6 +638,8 @@ fn register_user(home: &Home, username: &str) {
             "-i",
             "sql:local",
             "--nopretty",
+            "--scopes",
+            "*",
         ])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -576,7 +650,13 @@ fn register_user(home: &Home, username: &str) {
         .stdin
         .take()
         .unwrap()
-        .write_all(b"synthetic-pass-1\nsynthetic-pass-1\n\n")
+        // The first account is offered admin; keep ada a regular wildcard user so each
+        // token below can exercise its own narrow scope. Root is promoted explicitly later.
+        .write_all(if username == "ada" {
+            b"n\nsynthetic-pass-1\nsynthetic-pass-1\n\n"
+        } else {
+            b"synthetic-pass-1\nsynthetic-pass-1\n\n"
+        })
         .unwrap();
     let output = registering.wait_with_output().unwrap();
     assert!(output.status.success(), "{}", text(&output));
@@ -629,7 +709,7 @@ fn route_host_calls_run_with_the_callers_scopes() {
         b"",
     );
     assert_eq!(status, 403, "{body}");
-    assert!(body.contains("`pipes:write`"), "{body}");
+    assert!(body.contains("`pipes:delete`"), "{body}");
     let (_, body) = http(
         port,
         "GET",
@@ -639,7 +719,7 @@ fn route_host_calls_run_with_the_callers_scopes() {
     );
     assert!(body.contains(r#""rowcount":3"#), "{body}");
 
-    let writer = login(port, "ada", "pipes:read+pipes:write");
+    let writer = login(port, "ada", "pipes:read+pipes:delete");
     let (status, body) = http(
         port,
         "POST",
@@ -706,6 +786,29 @@ fn route_host_calls_run_with_the_callers_scopes() {
     assert_eq!(status, 403, "{body}");
     assert!(body.contains("internal table"), "{body}");
 
+    // An administrator-owned narrow token cannot reach internal tables through a
+    // registered alias either, even though that owner may see every team's pipes.
+    home.ok(&[
+        "register",
+        "pipe",
+        "-c",
+        "plugin:hosted",
+        "-m",
+        "internals",
+        "--params",
+        r#"{"target": "mrsm_users"}"#,
+    ]);
+    let admin_pipe = login(
+        port,
+        "root",
+        "pipes:read+pipes:write+pipes:delete+pipes:register",
+    );
+    for operation in ["count", "data", "sync", "clear", "register"] {
+        let (status, body) = post(&format!("/hosted/probe/internals/{operation}"), &admin_pipe);
+        assert_eq!(status, 403, "{operation}: {body}");
+        assert!(body.contains("internal table"), "{body}");
+    }
+
     // A public route's `host_scopes` let anonymous callers read; without them, nothing.
     let (status, body) = http(port, "GET", "/hosted/public/parent/rowcount", &[], b"");
     assert_eq!(status, 200, "{body}");
@@ -715,6 +818,199 @@ fn route_host_calls_run_with_the_callers_scopes() {
     assert!(body.contains("`pipes:read`"), "{body}");
     drop(server);
     assert!(Path::new(&home.root.path().join("server.err")).exists());
+}
+
+#[test]
+fn api_host_calls_enforce_pipe_access_and_connector_teams() {
+    let home = Home::new();
+    for metric in ["parent", "secret", "team", "shared"] {
+        home.register(metric);
+        home.sync(metric, &[]);
+    }
+    register_user(&home, "ada");
+    register_user(&home, "bob");
+    home.ok(&["register", "teams", "ops", "--members", "ada"]);
+    for (metric, visibility) in [
+        ("secret", "private"),
+        ("team", "team"),
+        ("shared", "everyone"),
+    ] {
+        home.ok(&[
+            "edit",
+            "pipes",
+            "access",
+            "-c",
+            "plugin:hosted",
+            "-m",
+            metric,
+            "--owner",
+            "ada",
+            "--team",
+            "ops",
+            "--visibility",
+            visibility,
+            "--edit",
+            "owner",
+        ]);
+    }
+    let server = serve_config(
+        &home,
+        serde_json::json!({"api": {"permissions": {"instances": {
+            "allow_multiple_instances": true, "allowed_instance_keys": ["sql:local"]
+        }}}}),
+    );
+    let port = server.port;
+    let ada = login(port, "ada", "*");
+    let bob = login(port, "bob", "*");
+    let probe = |metric: &str, operation: &str, auth: &str| {
+        http(
+            port,
+            "POST",
+            &format!("/hosted/probe/{metric}/{operation}"),
+            &[("Authorization", auth)],
+            b"",
+        )
+    };
+    // The fabricated metadata omits the registered ACL and sets temporary=true. Every
+    // method must still see the stored private/team ACL, including direct calls without PIPE.
+    for metric in ["secret", "team"] {
+        for operation in [
+            "count", "data", "exists", "columns", "time", "clear", "sync", "replace", "register",
+        ] {
+            let (status, body) = probe(metric, operation, &bob);
+            assert_eq!(status, 403, "{metric}/{operation}: {body}");
+        }
+        let (status, body) = probe(metric, "count", &ada);
+        assert_eq!(status, 200, "{body}");
+        assert_eq!(body, "3");
+        // An explicit public host scope grants a permission, never private visibility.
+        let (status, body) = http(
+            port,
+            "GET",
+            &format!("/hosted/public/{metric}/rowcount"),
+            &[],
+            b"",
+        );
+        assert_eq!(status, 403, "{body}");
+    }
+    let (status, body) = probe("shared", "count", &bob);
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body, "3");
+    for operation in ["clear", "sync", "replace", "register"] {
+        let (status, body) = probe("shared", operation, &bob);
+        assert_eq!(status, 403, "{operation}: {body}");
+    }
+    home.ok(&[
+        "lock",
+        "pipes",
+        "-c",
+        "plugin:hosted",
+        "-m",
+        "parent",
+        "--locks",
+        "clear",
+    ]);
+    let (status, body) = probe("parent", "clear", &ada);
+    assert_eq!(status, 403, "{body}");
+    assert!(body.contains("locked"), "{body}");
+    home.ok(&[
+        "unlock",
+        "pipes",
+        "-c",
+        "plugin:hosted",
+        "-m",
+        "parent",
+        "--locks",
+        "clear",
+    ]);
+    // A forged target on an existing public pipe is discarded, and a new pipe may not
+    // alias a hidden table. SQL reads use the same bulk hidden-target index.
+    let (status, body) = http(
+        port,
+        "POST",
+        "/hosted/probe/parent/count?target=plugin_hosted_secret",
+        &[("Authorization", &bob)],
+        b"",
+    );
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body, "3");
+    let (status, body) = http(
+        port,
+        "POST",
+        "/hosted/probe/alias/register?target=plugin_hosted_secret",
+        &[("Authorization", &bob)],
+        b"",
+    );
+    assert_eq!(status, 403, "{body}");
+    for path in [
+        "/hosted/sql?q=SELECT%20*%20FROM%20plugin_hosted_secret",
+        "/hosted/sql?q=SELECT%20*%20FROM%20%22plugin_hosted_secret%22",
+    ] {
+        let (status, body) = http(port, "GET", path, &[("Authorization", &bob)], b"");
+        assert_eq!(status, 403, "{path}: {body}");
+    }
+    let (status, body) = http(
+        port,
+        "GET",
+        "/hosted/sql?instance=sql:other",
+        &[("Authorization", &bob)],
+        b"",
+    );
+    assert_eq!(status, 403, "{body}");
+    assert!(body.contains("allowed instances"), "{body}");
+    // A modern write-only grid removes creation and row-deletion from an existing token.
+    home.ok(&["hosted", "editor"]);
+    for (metric, operation, permission) in [
+        ("parent", "clear", "pipes:delete"),
+        ("new", "register", "pipes:register"),
+        ("new", "sync", "pipes:register"),
+    ] {
+        let (status, body) = probe(metric, operation, &bob);
+        assert_eq!(status, 403, "{metric}/{operation}: {body}");
+        assert!(body.contains(permission), "{body}");
+    }
+    // New registrations carry the caller's owner, even when plugin metadata omits it.
+    let (status, body) = probe("owned", "register", &ada);
+    assert_eq!(status, 200, "{body}");
+    assert!(body.starts_with("[true"), "{body}");
+    let (status, body) = probe("owned", "parameters", &ada);
+    assert_eq!(status, 200, "{body}");
+    let parameters: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(parameters["access"]["owner"], "ada");
+    // Failure to load canonical metadata must not fall back to default shared access.
+    home.ok(&["hosted", "metadata", "break"]);
+    let (status, body) = http(port, "GET", "/hosted/public/parent/rowcount", &[], b"");
+    assert_eq!(status, 403, "{body}");
+    let (status, body) = probe("parent", "count", &ada);
+    assert_eq!(status, 403, "{body}");
+    home.ok(&["hosted", "metadata", "restore"]);
+    drop(server);
+    // A served SQL instance still respects its connector's team restriction.
+    let server = serve_config(
+        &home,
+        serde_json::json!({
+            "api": {"permissions": {"instances": {
+                "allow_multiple_instances": true, "allowed_instance_keys": ["sql:*"]
+            }}},
+            "meerschaum": {"connectors": {"sql": {"other": {
+                "flavor": "sqlite",
+                "database": home.root.path().join("other.db").display().to_string(),
+                "teams": ["ops"]
+            }}}}
+        }),
+    );
+    let port = server.port;
+    for (user, expected) in [("ada", 200), ("bob", 403)] {
+        let auth = login(port, user, "sql:read");
+        let (status, body) = http(
+            port,
+            "GET",
+            "/hosted/sql?instance=sql:other",
+            &[("Authorization", &auth)],
+            b"",
+        );
+        assert_eq!(status, expected, "{user}: {body}");
+    }
 }
 
 /// A hook in an engine run syncs a pipe on an instance the run itself does not use: the host

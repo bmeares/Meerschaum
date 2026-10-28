@@ -290,6 +290,8 @@ impl Home {
                 "-i",
                 "sql:local",
                 "--nopretty",
+                "--scopes",
+                "*",
             ])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -300,7 +302,7 @@ impl Home {
             .stdin
             .take()
             .unwrap()
-            .write_all(b"synthetic-pass-1\nsynthetic-pass-1\n\n")
+            .write_all(b"n\nsynthetic-pass-1\nsynthetic-pass-1\n\n")
             .unwrap();
         let output = registering.wait_with_output().unwrap();
         assert!(output.status.success(), "{output:?}");

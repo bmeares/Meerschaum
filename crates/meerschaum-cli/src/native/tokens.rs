@@ -94,7 +94,16 @@ fn grant_cap(
     if user_type.as_deref() == Some("admin") {
         return Ok(None);
     }
-    let held = User::scopes_from_read(sess.block_on(inst.conn().get_user_attributes(&user)))
+    let attributes = sess
+        .block_on(inst.conn().get_user_attributes(&user))
+        .map_err(|e| unreadable(&e))?;
+    if meerschaum_core::access::explicit_scopes(attributes.as_ref())
+        .is_some_and(|scopes| scopes.iter().any(|scope| scope == "*"))
+    {
+        return Ok(None);
+    }
+    let held = sess
+        .block_on(inst.conn().get_user_permissions(&user))
         .map_err(|e| unreadable(&e))?;
     if held.iter().any(|s| s == "*") {
         Ok(None)

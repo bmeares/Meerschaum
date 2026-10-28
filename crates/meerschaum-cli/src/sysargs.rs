@@ -315,6 +315,22 @@ mod tests {
             ("last", &["show", "runs", "--last", "3"]),
             ("resume", &["sync", "pipes", "--resume", "run-1"]),
             ("run_id", &["sync", "pipes", "--run-id", "abc:1.2_3"]),
+            (
+                "owner",
+                &["edit", "pipes", "access", "-m", "x", "--owner", "alice"],
+            ),
+            ("team", &["edit", "pipes", "access", "--team", "Data Team"]),
+            (
+                "visibility",
+                &["edit", "pipe", "access", "--visibility=PRIVATE"],
+            ),
+            ("edit_mode", &["edit", "pipes", "access", "--edit", "owner"]),
+            (
+                "locks",
+                &["lock", "pipes", "-m", "x", "--locks", "drop,sync"],
+            ),
+            ("members", &["register", "teams", "a", "--members", "x,y"]),
+            ("managers", &["edit", "team", "a", "--managers=z"]),
         ];
         for opt in ENGINE_OPTIONS {
             assert!(

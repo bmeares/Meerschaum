@@ -626,6 +626,55 @@ fn flag_table(data: &CompletionData) -> IndexMap<String, Flag> {
     table
 }
 
+/// The table with the access flags of the command being typed (`edit pipes access`, `lock
+/// pipes`, `register teams`, ...): only their own commands parse them
+/// ([`crate::parse::access_command`]), so other commands never offer them.
+fn with_access_flags(
+    mut table: IndexMap<String, Flag>,
+    words: &[String],
+) -> IndexMap<String, Flag> {
+    let Some(command) = crate::parse::access_command(words) else {
+        return table;
+    };
+    for option in crate::parse::ENGINE_OPTIONS
+        .iter()
+        .filter(|o| crate::parse::access_flag_command(o.dest) == Some(command))
+    {
+        let help = crate::help::EXTRA_OPTIONS
+            .iter()
+            .find(|e| e.dest == option.dest)
+            .map(|e| e.help)
+            .unwrap_or_default();
+        let choices: Vec<String> = match option.dest {
+            "visibility" => crate::parse::VISIBILITY_CHOICES
+                .iter()
+                .map(|c| c.to_string())
+                .collect(),
+            "edit_mode" => crate::parse::EDIT_MODE_CHOICES
+                .iter()
+                .map(|c| c.to_string())
+                .collect(),
+            "locks" => meerschaum_core::access::Lock::KINDS
+                .iter()
+                .map(|l| l.name().to_string())
+                .chain(std::iter::once("all".to_string()))
+                .collect(),
+            _ => Vec::new(),
+        };
+        table.insert(
+            option.flag.to_string(),
+            Flag {
+                dest: option.dest.to_string(),
+                arity: Arity::One,
+                choices,
+                path: false,
+                help: help.to_string(),
+            },
+        );
+    }
+    table
+}
+
 /// A one-line description of a flag: the first sentence of its help, shortened.
 fn describe(help: &str) -> Option<String> {
     let one_line = help.split_whitespace().collect::<Vec<_>>().join(" ");
@@ -721,7 +770,7 @@ fn complete_words(line: &CommandLine, data: &CompletionData, dates: &DateContext
     if line.words.is_empty() {
         return Answer::default();
     }
-    let flags = flag_table(data);
+    let flags = with_access_flags(flag_table(data), args);
     let walked = walk(args, &flags);
     if walked.rest {
         return Answer::default();
@@ -1050,6 +1099,27 @@ mod tests {
             texts(&run("mrsm show pipes --instance=sql:l")),
             ["--instance=sql:local"]
         );
+    }
+
+    #[test]
+    fn access_flags_complete_only_for_their_commands() {
+        assert_eq!(
+            texts(&run("mrsm edit pipes access --vis")),
+            ["--visibility"]
+        );
+        assert_eq!(
+            texts(&run("mrsm edit pipes access -m x --visibility ")),
+            ["team", "private", "everyone"]
+        );
+        assert_eq!(texts(&run("mrsm edit pipes access --edit o")), ["owner"]);
+        assert_eq!(texts(&run("mrsm lock pipes --locks d")), ["drop", "delete"]);
+        assert_eq!(texts(&run("mrsm register teams a --mem")), ["--members"]);
+        // A flag value is not an action word: `--team x` leaves the selection flags to complete.
+        assert!(texts(&run("mrsm edit pipes access --team x -")).contains(&"--owner"));
+        // Other commands never offer them.
+        assert!(run("mrsm sync pipes --vis").candidates.is_empty());
+        assert!(run("mrsm edit pipes --own").candidates.is_empty());
+        assert!(run("mrsm show teams --mem").candidates.is_empty());
     }
 
     #[test]

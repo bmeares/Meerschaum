@@ -682,14 +682,14 @@ pub static ARGUMENTS: &[ArgSpec] = &[
         ),
         G::Api,
     ),
-    // v5: the server does not terminate TLS; `start api` refuses these (`server::tls_refusal`).
+    // `start api` serves HTTPS with both (`meerschaum_server::tls`).
     store(
         "keyfile",
         &["--keyfile"],
         T::Str,
         concat!(
-            "Not supported: the API server does not serve HTTPS itself, and `start api` stops ",
-            "with this flag. Put a reverse proxy that terminates TLS in front of it."
+            "Serve the API over HTTPS with this private key (PEM; requires --certfile). ",
+            "Defaults to `api:server:ssl_keyfile`."
         ),
         G::Api,
     ),
@@ -698,8 +698,8 @@ pub static ARGUMENTS: &[ArgSpec] = &[
         &["--certfile"],
         T::Str,
         concat!(
-            "Not supported: the API server does not serve HTTPS itself, and `start api` stops ",
-            "with this flag. Put a reverse proxy that terminates TLS in front of it."
+            "Serve the API over HTTPS with this certificate chain (PEM, the server's certificate ",
+            "first; requires --keyfile). Defaults to `api:server:ssl_certfile`."
         ),
         G::Api,
     ),

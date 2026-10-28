@@ -80,12 +80,17 @@ secure: bool, default False
     Only allow `admin` users to execute actions.
 
 keyfile: str, default None
-    Not supported: the server does not serve HTTPS itself, and `start api` stops when
-    `--keyfile` or `--certfile` is given. Put a reverse proxy that terminates TLS
-    (Caddy, nginx, Traefik) in front of it.
+    If provided, serve over HTTPS with this private key (PEM: PKCS#8, RSA or EC).
+    Requires `--certfile`. If `None`, use `api:server:ssl_keyfile`.
+    An empty value serves plain HTTP even when the config sets a key.
 
 certfile: str, default None
-    Not supported (see `keyfile`).
+    If provided, serve over HTTPS with this certificate chain (PEM: the server's
+    certificate first, then its intermediates, like Let's Encrypt's `fullchain.pem`).
+    Requires `--keyfile`. If `None`, use `api:server:ssl_certfile`.
+    The server reads both files again when they change (and on SIGHUP), so a renewed
+    certificate is served without a restart. Plain HTTP on the same port gets
+    `/healthcheck` and a redirect to `https://`.
 "##
         }
         "_attach_jobs" => {
@@ -143,6 +148,10 @@ Create a new connector from an existing one.
         "_copy_pipes" => {
             r##"
 Copy pipes' attributes and make new pipes.
+
+A copy keeps the source's locks (added to those of an existing destination pipe) and never
+takes its access: a new pipe has no owner and belongs to Everyone, and an existing destination
+keeps its own owner, team and visibility.
 "##
         }
         "_decompress_pipes" => {
@@ -261,6 +270,10 @@ Open and edit pipes' configuration files.
 
 If `fetch:definition` is specified, open a definition file (e.g. `.sql` for `sql` pipes).
 
+`edit pipes access` sets who owns the selected pipes, their team, who sees them and who may
+change them (`--owner`, `--team`, `--visibility team|private|everyone`, `--edit team|owner`;
+it asks for whatever the flags leave out, and keeps it with `--noask`).
+
 Usage:
     ```
     ### Edit all pipes.
@@ -268,6 +281,9 @@ Usage:
 
     ### Edit a SQL definition for the pipe `sql_main_mymetric`.
     edit pipes definition -c sql:main -m mymetric
+
+    ### Give the weather pipes to the team 'analytics', visible to that team only.
+    edit pipes access -m weather --team analytics --visibility team
     ```
 "##
         }
@@ -283,7 +299,19 @@ Edit tokens registered to an instance.
         }
         "_edit_users" => {
             r##"
-Edit users' registration information.
+Edit users: their password, type (admin or regular), role, primary team and email.
+
+A role is a preset of permissions: Viewer (reads pipes, jobs, logs, plugins and connectors),
+Editor (Viewer, plus registering, editing and syncing pipes, starting jobs and reading SQL) and
+Operator (Editor, plus running actions, the web terminal and managing jobs). Admins hold every
+permission. "Custom permissions" lists permissions one by one (`*` grants every permission);
+a user without a role of their own follows the instance's default role
+(`api:permissions:default_role`, `editor` unless changed).
+
+Each change is asked for first (`-y` answers yes to every question).
+
+Usage:
+    `edit users alice`
 "##
         }
         "_flush_indices" => {
@@ -410,7 +438,15 @@ mrsm register token --name weather-sensor
         }
         "_register_users" => {
             r##"
-Register a new user to a Meerschaum instance.
+Register new users to a Meerschaum instance.
+
+New users follow the instance's default role (`api:permissions:default_role`, `editor` unless
+changed); `--scopes` gives them these permissions instead. On an instance without users, the
+first user may become its admin (asked; the default is yes).
+
+Usage:
+    `register users alice bob`
+    `register user carol --scopes pipes:read jobs:read`
 "##
         }
         "_restart_daemons" => {
@@ -472,6 +508,10 @@ Example:
         "_show_connectors" => {
             r##"
 Show connectors configuration and, if requested, specific connector attributes.
+
+Secrets are masked as on the web console's Connectors page: only connection settings (flavor,
+host, port, database, username, driver, timeouts, ...) are shown, a URI keeps its address
+without its password or token, and every other value is masked (`mrsm edit config` shows them).
 
 Examples:
     `show connectors`
@@ -1045,8 +1085,114 @@ Print a table of the registered tokens on the instance.
         }
         "_show_users" => {
             r##"
-Show the registered users in a Meerschaum instance (default is the current instance).
+Show the registered users of a Meerschaum instance: their type, role, teams and email.
+
+`--nopretty` prints one JSON object per user. On an `api:` instance the server shows other
+users' emails only to admins and to the managers of a team the user is in.
 "##
+        }
+        "_show_teams" => {
+            r##"
+Show the teams of a Meerschaum instance with their managers and members.
+
+Every user is a member of the team 'Everyone'. `--nopretty` prints one JSON object per team.
+
+Usage:
+    `show teams`
+    `show teams analytics`
+"##
+        }
+        "_register_teams" => {
+            r##"
+Register new teams to a Meerschaum instance.
+
+Team names follow the username rules (letters, digits and `_ - . @`) and are unique without
+case. `--members` and `--managers` take comma-separated usernames (managers add and remove
+members and manage the access of the team's pipes).
+
+Usage:
+    `register teams analytics --members alice,bob --managers carol`
+"##
+        }
+        "_edit_teams" => {
+            r##"
+Edit teams: their members and managers, and their name.
+
+Opens each team in your editor (`$EDITOR`): change `members` and `managers`, or `name` to rename
+the team (the pipes and jobs that name it are renamed too). With `--members` or `--managers`,
+sets those lists without opening the editor. Every user is a member of 'Everyone'; only its
+managers can change.
+
+Usage:
+    `edit teams analytics`
+    `edit team analytics --managers carol,dave`
+"##
+        }
+        "_delete_teams" => {
+            r##"
+Delete teams from a Meerschaum instance.
+
+The pipes and jobs of a deleted team move to 'Everyone' (the confirmation counts them), and
+'Everyone' itself cannot be deleted.
+
+Usage:
+    `delete teams analytics`
+"##
+        }
+        "_lock_pipes" => {
+            r##"
+Lock pipes against changes.
+
+A lock refuses an operation everywhere (the command line, Python, jobs, the API and the web
+console) until it is unlocked; `-y`, `--force` and `--allow-protected` never get past one.
+`--locks` takes comma-separated locks (default `all`):
+    - `parameters`: no parameter edits (changing the locks stays allowed);
+    - `sync`: no writes (syncs, replaced windows, deduplication, verification, rebuilds);
+    - `clear`: no row deletes (`clear pipes`, replaced windows, rebuilds);
+    - `drop`: no drops, rebuilds, table schema changes (`verify schema`, repartitioning) or
+      deleting the pipe (which drops its table);
+    - `delete`: no deleting the pipe;
+    - `all`: all of them.
+
+Usage:
+    `lock pipes -m weather`
+    `lock pipes -c sql:main -m weather --locks drop,delete`
+"##
+        }
+        "_unlock_pipes" => {
+            r##"
+Remove pipes' locks (`--locks` names which; default `all`).
+
+Usage:
+    `unlock pipes -m weather`
+    `unlock pipes -m weather --locks sync`
+"##
+        }
+        "lock" => {
+            r##"
+Lock pipes against parameter edits, syncs, clears, drops or deletion.
+
+Command:
+    `lock pipes {options}`
+
+Example:
+    `lock pipes -m weather --locks drop,delete`
+
+    Options:
+        `lock [pipes]`"##
+        }
+        "unlock" => {
+            r##"
+Remove the locks of pipes.
+
+Command:
+    `unlock pipes {options}`
+
+Example:
+    `unlock pipes -m weather`
+
+    Options:
+        `unlock [pipes]`"##
         }
         "_show_venvs" => {
             r##"
@@ -1537,10 +1683,10 @@ The tables are deduplicated chunk by chunk along their datetime axes.
         }
         "delete" => {
             r##"
-Delete pipes, Pipelines, jobs, plugins, users, connectors, config or caches.
+Delete pipes, Pipelines, jobs, plugins, users, teams, connectors, config or caches.
 
 Command:
-    `delete {pipes, pipelines, jobs, plugins, users, connectors, config, cache, venvs}`
+    `delete {pipes, pipelines, jobs, plugins, users, teams, connectors, config, cache, venvs}`
 
 
     Options:
@@ -1555,7 +1701,7 @@ Drop pipes' tables (keeping their registrations), or their indices.
         }
         "edit" => {
             r##"
-Edit config, pipes, definitions, Pipelines, jobs, plugins, users or tokens.
+Edit config, pipes, definitions, Pipelines, jobs, plugins, users, teams or tokens.
 
     Options:
         `edit [config, definition, jobs, pipes, plugins, tokens, users]`"##
@@ -1668,9 +1814,9 @@ Flags:
         }
         "register" => {
             r##"
-Register pipes, connectors, Pipelines, plugins, tokens or users.
+Register pipes, connectors, Pipelines, plugins, tokens, users or teams.
 
-Pipes and users reside on instances (`-i`), and plugins reside on repositories (`-r`).
+Pipes, users and teams reside on instances (`-i`), and plugins reside on repositories (`-r`).
 
     Options:
         `register [connectors, pipes, plugins, tokens, users]`"##

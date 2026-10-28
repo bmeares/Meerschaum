@@ -284,6 +284,33 @@ fn flag_choices(flag: &str) -> Option<&'static [&'static str]> {
         .filter(|c| !c.is_empty())
 }
 
+/// The values an access flag takes, when the words name its command (`--visibility`, `--edit`
+/// and `--locks` of `edit pipes access` / `lock pipes`).
+fn access_flag_choices(flag: &str, words: &[&str]) -> Option<Vec<String>> {
+    let words: Vec<String> = words.iter().map(|w| w.to_string()).collect();
+    let command = crate::parse::access_command(&words)?;
+    let option = crate::parse::ENGINE_OPTIONS
+        .iter()
+        .find(|o| o.flag == flag && crate::parse::access_flag_command(o.dest) == Some(command))?;
+    let names: Vec<String> = match option.dest {
+        "visibility" => crate::parse::VISIBILITY_CHOICES
+            .iter()
+            .map(|c| c.to_string())
+            .collect(),
+        "edit_mode" => crate::parse::EDIT_MODE_CHOICES
+            .iter()
+            .map(|c| c.to_string())
+            .collect(),
+        "locks" => meerschaum_core::access::Lock::KINDS
+            .iter()
+            .map(|l| l.name().to_string())
+            .chain(std::iter::once("all".to_string()))
+            .collect(),
+        _ => return None,
+    };
+    Some(names)
+}
+
 /// The `_check_complete_keys` trigger flags, in v4's dict order.
 const TRIGGER_ARGS: &[&str] = &[
     "-c",
@@ -396,6 +423,14 @@ impl CompletionData {
                 flag_token = Some(tokens[tokens.len() - 2]);
                 partial = last;
             }
+        }
+        // The access flags' values, for their own commands (`parse::AccessCommand`).
+        if let Some(choices) = flag_token.and_then(|flag| access_flag_choices(flag, &tokens)) {
+            return choices
+                .into_iter()
+                .filter(|c| c.starts_with(partial))
+                .map(|c| Completion::new(c, chars(partial), chars(partial)))
+                .collect();
         }
         if let Some(choices) = flag_token.and_then(flag_choices) {
             return choices
@@ -687,6 +722,20 @@ impl CompletionData {
                     if trigger.starts_with(last_word) && (trigger != last_word || !ends_with_space)
                     {
                         possibilities.push(trigger.clone());
+                    }
+                }
+            }
+            // The access flags, for their own commands only (`parse::AccessCommand`).
+            let words: Vec<String> = line.split_whitespace().map(str::to_string).collect();
+            if let Some(command) = crate::parse::access_command(&words) {
+                for option in crate::parse::ENGINE_OPTIONS
+                    .iter()
+                    .filter(|o| crate::parse::access_flag_command(o.dest) == Some(command))
+                {
+                    if option.flag.starts_with(last_word)
+                        && (option.flag != last_word || !ends_with_space)
+                    {
+                        possibilities.push(option.flag.to_string());
                     }
                 }
             }
@@ -1194,6 +1243,31 @@ mod tests {
 
     fn texts(c: &[Completion]) -> Vec<&str> {
         c.iter().map(|c| c.text.as_str()).collect()
+    }
+
+    #[test]
+    fn access_flags_complete_in_their_commands() {
+        let d = data();
+        let dates = DateContext::system();
+        assert_eq!(
+            texts(&d.get_completions("edit pipes access --vis", &dates)),
+            vec!["--visibility"]
+        );
+        assert_eq!(
+            texts(&d.get_completions("edit pipes access --visibility ", &dates)),
+            vec!["team", "private", "everyone"]
+        );
+        assert_eq!(
+            texts(&d.get_completions("lock pipes -m x --locks d", &dates)),
+            vec!["drop", "delete"]
+        );
+        assert_eq!(
+            texts(&d.get_completions("register teams a --man", &dates)),
+            vec!["--managers"]
+        );
+        // Other commands never offer them.
+        assert!(!texts(&d.get_completions("sync pipes --vis", &dates)).contains(&"--visibility"));
+        assert!(!texts(&d.get_completions("edit pipes --o", &dates)).contains(&"--owner"));
     }
 
     #[test]

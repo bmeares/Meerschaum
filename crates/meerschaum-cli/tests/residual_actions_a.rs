@@ -884,8 +884,9 @@ fn tokens_register_show_and_edit() {
         none.text
     );
 
-    // v4 asks for the password twice and the email.
-    let user = home.ask(&["register", "users", "bob"], "password1\npassword1\n\n");
+    // v4 asks for the password twice and the email (rc15: the first user of an instance is first
+    // offered the admin type; `n` keeps v4's regular user).
+    let user = home.ask(&["register", "users", "bob"], "n\npassword1\npassword1\n\n");
     assert_eq!(user.code, 0, "{}", user.text);
 
     let registered = home.ask(
@@ -1004,10 +1005,11 @@ fn token_scopes(home: &Home, label: &str) -> String {
 #[test]
 fn a_star_scope_is_stored_literally_for_tokens_and_users() {
     let home = Home::new();
-    // The owner holds `*`: a token carries at most its owner's scopes.
+    // The owner holds `*`: a token carries at most its owner's scopes. (rc15: the first user is
+    // first offered the admin type; `n` keeps a regular user.)
     let user = home.ask(
         &["register", "users", "bob", "--scopes", "*"],
-        "password1\npassword1\n\n",
+        "n\npassword1\npassword1\n\n",
     );
     assert_eq!(user.code, 0, "{}", user.text);
 
@@ -1068,11 +1070,13 @@ fn a_star_scope_is_stored_literally_for_tokens_and_users() {
         "password1\npassword1\n\n",
     );
     assert_eq!(scoped.code, 0, "{}", scoped.text);
-    let edited = home.ask(&["edit", "users", "bob"], "n\nn\nn\n*\n");
+    // rc15 (AC2): `edit users` asks for a role; "Custom permissions" (4) prefills the stored
+    // list, so an empty answer keeps `*`. Password, type and email stay (`n`).
+    let edited = home.ask(&["edit", "users", "bob"], "n\nn\ny\n4\n\nn\n");
     assert_eq!(edited.code, 0, "{}", edited.text);
     assert!(
         one_line(&edited.text)
-            .contains("`*` grants all scopes, including custom and future scopes"),
+            .contains("`*` grants every permission, also plugins' and future ones"),
         "{}",
         edited.text
     );
@@ -1105,7 +1109,8 @@ fn a_token_carries_at_most_its_owners_scopes() {
             "jobs:read",
             "myplugin:read",
         ],
-        "password1\npassword1\n\n",
+        // rc15: the first user is first offered the admin type (`n`: a regular user).
+        "n\npassword1\npassword1\n\n",
     );
     assert_eq!(ron.code, 0, "{}", ron.text);
     let ada = home.ask(&["register", "users", "ada"], "password1\npassword1\n\n");
@@ -1197,7 +1202,8 @@ fn a_token_cap_that_cannot_be_read_refuses_instead_of_granting_every_scope() {
     let home = Home::new();
     let ron = home.ask(
         &["register", "users", "ron", "--scopes", "pipes:read"],
-        "password1\npassword1\n\n",
+        // rc15: the first user is first offered the admin type (`n`: a regular user).
+        "n\npassword1\npassword1\n\n",
     );
     assert_eq!(ron.code, 0, "{}", ron.text);
     let own = home.ask(
@@ -1556,9 +1562,11 @@ fn config_file(root: &Path) -> PathBuf {
 #[test]
 fn login_prompts_for_credentials_and_saves_them() {
     let server = Server::start(&["start", "api"]);
-    let registered = server
-        .home
-        .ask(&["register", "users", "alice"], "password1\npassword1\n\n");
+    // rc15: the first user of an instance is first offered the admin type (`n`: a regular user).
+    let registered = server.home.ask(
+        &["register", "users", "alice"],
+        "n\npassword1\npassword1\n\n",
+    );
     assert_eq!(registered.code, 0, "{}", registered.text);
 
     let client = Home::new().with_endpoint("srv", server.port);

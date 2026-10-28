@@ -103,3 +103,5 @@ tempfile = "3"
 # The pty harness of tests/shell_screens.rs: drive `mrsm` in a pseudo-terminal and render it.
 portable-pty = "0.9"
 vt100 = "0.16"
+# Self-signed certificates for `start api --keyfile/--certfile` (`server.rs`, tests/https_api.rs).
+rcgen = "0.14"

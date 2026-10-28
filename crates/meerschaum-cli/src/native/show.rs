@@ -21,7 +21,7 @@ use crate::format::{Cell, Frame as TabFrame, OptionsArgs, TupleArgs, format_data
 use crate::value::{ArgsMap, PyValue};
 
 use super::pipes::{SelectedPipe, hydrate, pipe_keys, pipe_meta, pipe_state, selected_pipes};
-use super::{Instance, flag, info, pprint, print_tuple, session, string, thousands, warn, words};
+use super::{Instance, flag, info, pprint, print_tuple, session, thousands, warn, words};
 
 /// `json.dumps(value)`.
 pub fn dumps(v: &Value) -> String {
@@ -195,6 +195,8 @@ pub fn show_connectors(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
             keys.push(t.as_str());
         }
         let cfg = f.config().get(&keys).unwrap_or(Value::Null);
+        // FX2: every secret masked by the console's Connectors page rules.
+        let cfg = super::connector_mask::mask_connectors_config(&cfg, conn_type.as_deref());
         out.push_str(&f.pprint(&PyObj::from_value(&cfg), nopretty));
         if !nopretty && conn_type.is_none() {
             out.push_str(&f.make_header("\nActive connectors:"));
@@ -225,6 +227,7 @@ pub fn show_connectors(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
         {
             let (typ, label) = super::session::split_keys(first);
             let attrs = super::session::connector_attributes(f.config(), &typ, &label);
+            let attrs = super::connector_mask::mask_attributes(&attrs, Some(&typ), None);
             if !attrs.is_empty() {
                 if !nopretty {
                     out.push_str(
@@ -887,27 +890,7 @@ pub fn show_columns(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     Ok(SuccessTuple::success())
 }
 
-/// `show users`.
-pub fn show_users(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
-    let inst = super::get_instance(args, rt)?;
-    let session = session(rt);
-    let users = match session.block_on(inst.conn().get_users()) {
-        Ok(u) => u,
-        Err(_) => {
-            return Ok(SuccessTuple::fail(format!(
-                "Failed to get users from instance '{}'",
-                string(args, "mrsm_instance").unwrap_or_else(|| "None".into())
-            )));
-        }
-    };
-    let opts = OptionsArgs {
-        header: Some(format!("Registered users for instance '{}':", inst.keys())),
-        ..OptionsArgs::default()
-    };
-    let text = rt.with_formatter(|f| f.print_options(&users, &opts));
-    rt.print(&text);
-    Ok(SuccessTuple::success())
-}
+// `show users` is `super::users::show_users` (a table of users, roles and teams).
 
 /// `format_bytes(num_bytes)`.
 pub fn format_bytes(n: Option<i64>) -> String {

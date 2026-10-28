@@ -49,7 +49,7 @@ impl ActionDef {
 /// Additive v5 actions, visible in help, action listings and completion. Legacy v4 parity
 /// comparisons exclude these entries; dedicated v5 tests verify their public exposure.
 pub const V5_ONLY_ACTIONS: &[&str] = &[
-    "prune", "plan", "doctor", "backup", "restore", "watch", "help",
+    "prune", "plan", "doctor", "backup", "restore", "watch", "help", "lock", "unlock",
 ];
 
 /// Additive v5 subactions (`(action, subaction)`), visible like every core subaction.
@@ -83,6 +83,13 @@ pub const V5_ONLY_SUBACTIONS: &[(&str, &str)] = &[
     ("verify", "schemas"),
     ("start", "pipelines"),
     ("stop", "pipelines"),
+    // rc15 wave 2 (AC10): teams and pipe locks.
+    ("show", "teams"),
+    ("register", "teams"),
+    ("edit", "teams"),
+    ("delete", "teams"),
+    ("lock", "pipes"),
+    ("unlock", "pipes"),
 ];
 
 /// Whether `(action, subaction)` is v5-only.
@@ -150,6 +157,7 @@ pub static CORE_ACTIONS: &[ActionDef] = &[
             sub("pipes", "_register_pipes"),
             sub("pipelines", "_register_pipelines"),
             sub("plugins", "_register_plugins"),
+            sub("teams", "_register_teams"),
             sub("tokens", "_register_tokens"),
             sub("users", "_register_users"),
         ],
@@ -263,6 +271,9 @@ pub static CORE_ACTIONS: &[ActionDef] = &[
             sub("runs", "_watch_runs"),
         ],
     ),
+    // Pipe locks (rc15 wave 2, AC5 / AC10).
+    action("lock", &[sub("pipes", "_lock_pipes")]),
+    action("unlock", &[sub("pipes", "_unlock_pipes")]),
     action(
         "show",
         &[
@@ -291,6 +302,7 @@ pub static CORE_ACTIONS: &[ActionDef] = &[
             sub("sizes", "_show_sizes"),
             sub("tags", "_show_tags"),
             sub("targets", "_show_targets"),
+            sub("teams", "_show_teams"),
             sub("tokens", "_show_tokens"),
             sub("users", "_show_users"),
             sub("venvs", "_show_venvs"),
@@ -307,6 +319,7 @@ pub static CORE_ACTIONS: &[ActionDef] = &[
             sub("pipes", "_delete_pipes"),
             sub("pipelines", "_delete_pipelines"),
             sub("plugins", "_delete_plugins"),
+            sub("teams", "_delete_teams"),
             sub("users", "_delete_users"),
             sub("venvs", "_delete_venvs"),
         ],
@@ -355,6 +368,7 @@ pub static CORE_ACTIONS: &[ActionDef] = &[
             sub("pipes", "_edit_pipes"),
             sub("pipelines", "_edit_pipelines"),
             sub("plugins", "_edit_plugins"),
+            sub("teams", "_edit_teams"),
             sub("tokens", "_edit_tokens"),
             sub("users", "_edit_users"),
         ],

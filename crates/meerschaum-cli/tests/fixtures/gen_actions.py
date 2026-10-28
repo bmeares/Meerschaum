@@ -207,6 +207,16 @@ def normalize(text: str, root: str) -> str:
     text = text.replace(root, '<ROOT>')
     ### Python tracebacks (stderr) name the reference interpreter's paths.
     text = text.replace(REPO, '<REPO>')
+    # A reference package may be reached through lib64 or the pinned mrsm-venv symlink.
+    # Keep the recorded path spellings independent of which alias Python imported through.
+    text = re.sub(
+        r'(<REPO>/\.venv-ref/)(?:parity_venvs/mrsm/)?lib(?:64)?/',
+        r'\1lib/', text,
+    )
+    text = re.sub(
+        r'(<REPO>/\.venv-ref/)lib/(python[^/]+/site-packages/meerschaum/)',
+        r'\1lib64/\2', text,
+    )
     if HOME and HOME != '/':
         text = text.replace(HOME, '<HOME>')
     text = re.sub(r'It took .+? to sync', 'It took <DURATION> to sync', text)
@@ -344,10 +354,22 @@ assert p.instance_connector.register_pipe(p)[0]
         try:
             subprocess.run([sys.executable, '-s', '-E', '-c', seed], env=env, cwd=temporary, check=True,
                            capture_output=True, timeout=120)
+            # v4's lazy dependency imports can race the plugin fetch thread on first use.
+            # Load these pinned libraries before starting the CLI, without importing or
+            # initializing Meerschaum before the scratch environment is in place.
+            command = [sys.executable, '-s', '-E', '-c',
+                       'import runpy; import sqlalchemy.orm; import requests; '
+                       'runpy.run_module("meerschaum", run_name="__main__", alter_sys=True)']
             steps = []
             for args in WIRING_CASES:
-                process = subprocess.run([sys.executable, '-s', '-E', '-m', 'meerschaum', *args],
+                process = subprocess.run([*command, *args],
                                          env=env, cwd=temporary, capture_output=True, timeout=120)
+                if process.returncode or b'"success": false' in process.stdout:
+                    raise RuntimeError(
+                        f'The released reference failed a wiring command: {args!r}\n'
+                        + process.stdout.decode(errors='replace')
+                        + process.stderr.decode(errors='replace')
+                    )
                 step = {'args': args, 'rc': process.returncode,
                         'stdout': normalize(process.stdout.decode(), str(root)),
                         'stderr': normalize(process.stderr.decode(), str(root))}

@@ -102,6 +102,8 @@ pub fn flags(args: &ArgsMap) -> Result<ServerFlags, ActionError> {
         no_dash: native::flag(args, "no_dash"),
         no_webterm: native::flag(args, "no_webterm"),
         public: native::flag(args, "public"),
+        keyfile: native::string(args, "keyfile"),
+        certfile: native::string(args, "certfile"),
     })
 }
 
@@ -152,56 +154,66 @@ fn console_dependencies(probe: &meerschaum_server::host::ConsoleProbe) -> Vec<St
         .collect()
 }
 
-/// Why `start api` does not start: HTTPS was asked for (`--keyfile` / `--certfile`, or an
-/// `ssl_keyfile` / `ssl_certfile` key under `api:server` or `api:uvicorn`), and the server does
-/// not terminate TLS itself. Serving plain HTTP instead would leave every `https://` client
-/// failing, while the operator believes the traffic is encrypted.
-pub fn tls_refusal(args: &ArgsMap, config: &Config) -> Option<String> {
-    const PROXY: &str = "Put a reverse proxy that terminates TLS (for example Caddy or nginx) in \
-                         front of the API server";
-    let flags: Vec<&str> = [("keyfile", "--keyfile"), ("certfile", "--certfile")]
-        .into_iter()
-        .filter(|(dest, _)| native::string(args, dest).is_some())
-        .map(|(_, option)| option)
-        .collect();
-    if !flags.is_empty() {
-        let (verb, them) = if flags.len() == 1 {
-            ("is", "this flag")
-        } else {
-            ("are", "these flags")
+/// HTTPS for `start api` (`--keyfile` / `--certfile`, or `ssl_keyfile` / `ssl_certfile` under
+/// `api:server`, or 4.1's `api:uvicorn`): the key and certificate are checked before anything
+/// else starts, so a missing half, an unreadable file or a bad PEM stops `start api` with the
+/// reason instead of a server that cannot answer `https://` clients. `Ok(None)`: plain HTTP.
+/// The address of the internal listener goes into `config` for the API host.
+pub fn prepare_https(
+    config: &mut ServerConfig,
+) -> Result<Option<meerschaum_server::tls::Https>, String> {
+    meerschaum_server::tls::prepare(config).map_err(|e| e.to_string())
+}
+
+/// Print the server's certificate messages (a reload, a failed reload) the way the CLI prints its
+/// own: information on stdout, warnings on stderr, styled for each stream (`config` gives the
+/// styles; without one the text is plain).
+fn tls_events(rt: &mut Runtime<'_>, config: Option<Config>) -> meerschaum_server::tls::TlsEvents {
+    let (out, err) = (rt.settings(), rt.err_settings());
+    Arc::new(move |event| {
+        use meerschaum_server::tls::TlsEvent;
+        use std::io::Write as _;
+        let render = |settings: &crate::format::FormatSettings| match (&config, &event) {
+            (Some(config), TlsEvent::Info(m)) => {
+                crate::format::Formatter::new(settings.clone(), config).info(m, true)
+            }
+            (Some(config), TlsEvent::Warning(m)) => {
+                crate::format::Formatter::new(settings.clone(), config).warn(m)
+            }
+            (None, event) => format!("{}\n", event.message()),
         };
-        return Some(format!(
-            "The API server does not serve HTTPS itself, so `{}` {verb} not supported. {PROXY}, \
-             and start it without {them}.",
-            flags.join("` and `")
-        ));
-    }
-    for section in ["server", "uvicorn"] {
-        for key in ["ssl_keyfile", "ssl_certfile"] {
-            let set = config
-                .get(&["api", section, key])
-                .is_some_and(|v| !v.is_null() && !v.py_str().trim().is_empty());
-            if set {
-                return Some(format!(
-                    "The API server does not serve HTTPS itself, so `api:{section}:{key}` is not \
-                     supported. {PROXY}, and remove the key (`mrsm edit config api`)."
-                ));
+        match &event {
+            TlsEvent::Info(_) => {
+                let mut stdout = std::io::stdout().lock();
+                let _ = stdout.write_all(render(&out).as_bytes());
+                let _ = stdout.flush();
+            }
+            TlsEvent::Warning(_) => {
+                let mut stderr = std::io::stderr().lock();
+                let _ = stderr.write_all(render(&err).as_bytes());
+                let _ = stderr.flush();
             }
         }
-    }
-    None
+    })
 }
 
 fn start(args: &ArgsMap, rt: &mut Runtime<'_>, stdio: bool) -> ActionResult {
-    if !stdio && let Some(refusal) = tls_refusal(args, rt.config()) {
-        return Ok(SuccessTuple::fail(refusal));
-    }
     // The server waits on SIGINT / SIGTERM itself (`ShutdownSignal`): the spinner of its startup
     // must not take them.
     crate::native::jobs::own_signals();
     // A server prints nothing between requests: the API client's warnings go to `tracing`.
     crate::native::api_warnings::uninstall();
-    let config = ServerConfig::from_config(rt.config(), &flags(args)?);
+    let mut config = ServerConfig::from_config(rt.config(), &flags(args)?);
+    // Before anything else starts (the console probe, the API host): MCP over stdio has no
+    // listener, so it never serves HTTPS.
+    let https = if stdio {
+        None
+    } else {
+        match prepare_https(&mut config) {
+            Ok(https) => https,
+            Err(refusal) => return Ok(SuccessTuple::fail(refusal)),
+        }
+    };
     let session = native::session(rt);
     let plugin_manifest = session.manifest(rt.config())?;
     let instance = session.instance(&config.instance_keys, rt.config())?;
@@ -221,6 +233,7 @@ fn start(args: &ArgsMap, rt: &mut Runtime<'_>, stdio: bool) -> ActionResult {
             .flat_map(|plugin| plugin.actions.iter().map(|action| action.name.clone()))
             .collect(),
     });
+    let https = https.map(|https| https.with_events(tls_events(rt, backend.config().ok())));
     let manifest_path = config.root_dir.join("cache/plugins_manifest.json");
     let python = PythonHostLauncher::python_from_env();
     // The Dash console is the Python host's (D21): the host runs for it when its modules import.
@@ -272,6 +285,15 @@ fn start(args: &ArgsMap, rt: &mut Runtime<'_>, stdio: bool) -> ActionResult {
     if !stdio && let Some(line) = config.preset_notice() {
         native::info(rt, &line);
     }
+    // Where HTTPS is served and with which certificate (a warning when clients will refuse it).
+    if let Some(https) = &https {
+        for message in https.startup_messages(&config) {
+            match message {
+                meerschaum_server::tls::TlsEvent::Info(line) => native::info(rt, &line),
+                meerschaum_server::tls::TlsEvent::Warning(line) => native::warn(rt, &line),
+            }
+        }
+    }
     if !stdio {
         for warning in [
             config.open_terminal_warning(),
@@ -304,7 +326,16 @@ fn start(args: &ArgsMap, rt: &mut Runtime<'_>, stdio: bool) -> ActionResult {
         instance.conn(),
         &instance.keys(),
     ));
+    // Resolve extra allowed instances through the process's configured connectors. Native
+    // host calls and ordinary HTTP routes then use the same instance boundary.
+    let plugin_host = crate::native_plugins::HostEnv::new(
+        session.clone(),
+        crate::native_plugins::host_config(rt.config()),
+        session.native_plugins(rt.config())?,
+        Some(instance.keys()),
+    );
     let state = AppState::builder(config, instance.conn())
+        .resolver(Arc::new(plugin_host.clone()))
         .actions(backend.clone())
         .jobs(jobs)
         .engine(engine_store)
@@ -328,14 +359,6 @@ fn start(args: &ArgsMap, rt: &mut Runtime<'_>, stdio: bool) -> ActionResult {
     );
     // Native plugins' MCP tools, resources and prompts are served in-process (both transports).
     let mut mcp_notices = Vec::new();
-    // Native plugins' host calls (`host::pipe(...)`, `host::read_sql(...)`) run for the caller,
-    // on the server's own config.
-    let plugin_host = crate::native_plugins::HostEnv::new(
-        session.clone(),
-        crate::native_plugins::host_config(rt.config()),
-        session.native_plugins(rt.config())?,
-        Some(instance.keys()),
-    );
     let native_mcp = crate::native_plugins::mcp(
         &session.native_plugins(rt.config())?,
         &mut mcp_notices,
@@ -411,7 +434,7 @@ fn start(args: &ArgsMap, rt: &mut Runtime<'_>, stdio: bool) -> ActionResult {
             }
         } else {
             tokio::select! {
-                result = meerschaum_server::serve_with_mcp_and_console(state, mcp, console) => result.map(|()| SuccessTuple::success()).map_err(io_error),
+                result = meerschaum_server::serve_with_tls(state, mcp, console, https) => result.map(|()| SuccessTuple::success()).map_err(io_error),
                 result = shutdown.wait() => result.map(|()| SuccessTuple::success()).map_err(io_error),
             }
         };
@@ -965,10 +988,10 @@ mod tests {
         assert!(flags(&args).is_err());
     }
 
-    /// `--keyfile` / `--certfile` (and the `ssl_*` config keys v4 handed to Uvicorn) stop
-    /// `start api` with the way to get HTTPS, instead of serving plain HTTP silently.
+    /// `--keyfile` / `--certfile` (and the `ssl_*` keys under `api:server`, or 4.1's
+    /// `api:uvicorn`) serve HTTPS; half a pair or a bad file stops `start api` with the reason.
     #[test]
-    fn https_options_are_refused() {
+    fn https_options_prepare_or_refuse() {
         let root = tempfile::tempdir().unwrap();
         let config_with = |patch: &str| {
             let mut env = vec![("MRSM_ROOT_DIR".into(), root.path().display().to_string())];
@@ -977,34 +1000,96 @@ mod tests {
             }
             Config::new(ConfigOptions::with_env(env)).unwrap()
         };
+        let server = |args: &ArgsMap, config: &Config| {
+            ServerConfig::from_config(config, &flags(args).unwrap())
+        };
         let plain = config_with("");
-        assert_eq!(tls_refusal(&ArgsMap::new(), &plain), None);
+        let mut cfg = server(&ArgsMap::new(), &plain);
+        assert!(prepare_https(&mut cfg).unwrap().is_none());
+        assert!(cfg.internal_addr.is_none());
+
+        let certified = rcgen::generate_simple_self_signed(vec!["localhost".to_string()]).unwrap();
+        let key = root.path().join("key.pem");
+        let cert = root.path().join("cert.pem");
+        std::fs::write(&key, certified.signing_key.serialize_pem()).unwrap();
+        std::fs::write(&cert, certified.cert.pem()).unwrap();
+        let path = |p: &std::path::Path| PyValue::Str(p.display().to_string());
         let both = ArgsMap::from_iter([
-            ("keyfile".into(), PyValue::Str("key.pem".into())),
-            ("certfile".into(), PyValue::Str("cert.pem".into())),
+            ("keyfile".into(), path(&key)),
+            ("certfile".into(), path(&cert)),
         ]);
-        let text = tls_refusal(&both, &plain).unwrap();
+        let mut cfg = server(&both, &plain);
+        let https = prepare_https(&mut cfg).unwrap().expect("HTTPS");
+        // The API host calls back on the loopback-only plain listener.
+        let internal = cfg.internal_addr.expect("the internal listener");
+        assert!(internal.ip().is_loopback());
+        assert_eq!(https.internal_addr(), Some(internal));
+        assert_eq!(
+            meerschaum_server::tls::internal_url(&cfg),
+            format!("http://{internal}")
+        );
+
+        let one = ArgsMap::from_iter([("certfile".into(), path(&cert))]);
+        let text = prepare_https(&mut server(&one, &plain)).unwrap_err();
         assert!(
-            text.contains("so `--keyfile` and `--certfile` are not supported")
-                && text.contains("reverse proxy that terminates TLS")
-                && text.ends_with("start it without these flags."),
+            text.contains("only the certificate is set") && text.contains("`--certfile`"),
             "{text}"
         );
-        let one = ArgsMap::from_iter([("certfile".into(), PyValue::Str("cert.pem".into()))]);
-        let text = tls_refusal(&one, &plain).unwrap();
-        assert!(text.contains("so `--certfile` is not supported"), "{text}");
+        // The certificate as the key: the files are swapped.
+        let swapped = ArgsMap::from_iter([
+            ("keyfile".into(), path(&cert)),
+            ("certfile".into(), path(&key)),
+        ]);
+        let text = prepare_https(&mut server(&swapped, &plain)).unwrap_err();
+        assert!(text.contains("swapped"), "{text}");
+
         for section in ["server", "uvicorn"] {
             let config = config_with(&format!(
                 r#"{{"api": {{"{section}": {{"ssl_keyfile": "/etc/ssl/key.pem"}}}}}}"#
             ));
-            let text = tls_refusal(&ArgsMap::new(), &config).unwrap();
+            let mut cfg = server(&ArgsMap::new(), &config);
+            let text = prepare_https(&mut cfg).unwrap_err();
             assert!(
-                text.contains(&format!("`api:{section}:ssl_keyfile` is not supported")),
+                text.contains(&format!("`api:{section}:ssl_keyfile`")),
                 "{text}"
+            );
+            assert_eq!(
+                cfg.notices
+                    .iter()
+                    .any(|n| n.contains("'api:uvicorn:ssl_keyfile' is deprecated")),
+                section == "uvicorn",
+                "{:?}",
+                cfg.notices
             );
         }
         let empty = config_with(r#"{"api": {"uvicorn": {"ssl_certfile": ""}}}"#);
-        assert_eq!(tls_refusal(&ArgsMap::new(), &empty), None);
+        assert!(
+            prepare_https(&mut server(&ArgsMap::new(), &empty))
+                .unwrap()
+                .is_none()
+        );
+        // Empty flags turn off the configured pair (`start gui` serves plain HTTP on loopback).
+        let configured = config_with(
+            &serde_json::json!({"api": {"server": {
+                "ssl_keyfile": key.display().to_string(),
+                "ssl_certfile": cert.display().to_string(),
+            }}})
+            .to_string(),
+        );
+        assert!(
+            prepare_https(&mut server(&ArgsMap::new(), &configured))
+                .unwrap()
+                .is_some()
+        );
+        let off = ArgsMap::from_iter([
+            ("keyfile".into(), PyValue::Str(String::new())),
+            ("certfile".into(), PyValue::Str(String::new())),
+        ]);
+        assert!(
+            prepare_https(&mut server(&off, &configured))
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]

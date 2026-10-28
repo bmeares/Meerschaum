@@ -492,7 +492,7 @@ fn native_routes_are_served_with_the_core_apis_credentials() {
         .stdin
         .take()
         .unwrap()
-        .write_all(b"synthetic-pass-1\nsynthetic-pass-1\n\n")
+        .write_all(b"n\nsynthetic-pass-1\nsynthetic-pass-1\n\n")
         .unwrap();
     let registered = registering.wait_with_output().unwrap();
     assert!(

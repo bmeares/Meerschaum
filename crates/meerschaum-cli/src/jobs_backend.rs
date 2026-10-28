@@ -330,6 +330,26 @@ impl JobsBackend for LocalJobsBackend {
             input: input_tx,
         })
     }
+
+    async fn team_jobs(&self, team: &str) -> Vec<String> {
+        let (ctx, team) = (self.ctx.clone(), team.to_string());
+        blocking(move || meerschaum_jobs::ownership::team_jobs(&ctx, &team))
+            .await
+            .unwrap_or_default()
+    }
+
+    async fn retag_team(&self, old: &str, new: Option<&str>) -> Vec<String> {
+        let (ctx, old, new) = (self.ctx.clone(), old.to_string(), new.map(str::to_string));
+        blocking(move || {
+            let retagged = meerschaum_jobs::ownership::retag_team(&ctx, &old, new.as_deref());
+            for (job, why) in &retagged.failed {
+                tracing::warn!("Could not move job '{job}' off team '{old}': {why}");
+            }
+            retagged.jobs
+        })
+        .await
+        .unwrap_or_default()
+    }
 }
 
 impl LocalJobsBackend {
@@ -388,5 +408,69 @@ mod rc6_tests {
             "execute-retained",
             &meta
         ));
+    }
+
+    /// A job the server creates keeps who started it (the job routes stamp `owner` / `team`).
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_created_job_keeps_who_started_it() {
+        let root = tempfile::tempdir().unwrap();
+        // A supervisor that does nothing: the properties are written before it would start.
+        let ctx = JobsContext::for_root(root.path()).with_launcher(meerschaum_jobs::Launcher {
+            supervisor: vec!["true".into()],
+            program: vec!["true".into()],
+        });
+        let backend = LocalJobsBackend::new(ctx);
+        let mut props = Map::new();
+        meerschaum_core::job_access::JobAccess::stamp(&mut props, Some("alice"), Some("Data"));
+        let sysargs = vec!["show".to_string(), "version".to_string()];
+        match backend.create("nightly", sysargs, Some(props)).await {
+            CreateJob::Started(started) => assert!(started.success, "{started}"),
+            CreateJob::Exists => panic!("the job existed"),
+        }
+        let meta = backend.get("nightly").await.unwrap();
+        assert_eq!(meta["daemon"]["properties"]["owner"], "alice");
+        assert_eq!(meta["daemon"]["properties"]["team"], "Data");
+        assert_eq!(backend.team_jobs("Data").await, ["nightly"]);
+        assert_eq!(backend.team_jobs("Everyone").await, Vec::<String>::new());
+    }
+
+    /// The jobs of a team, and a team rename or deletion through the server (`/teams` routes).
+    #[tokio::test]
+    async fn a_team_rename_or_deletion_moves_the_server_s_jobs() {
+        let root = tempfile::tempdir().unwrap();
+        let ctx = JobsContext::for_root(root.path());
+        for (name, props) in [
+            ("nightly", r#"{"owner": "alice", "team": "Data"}"#),
+            ("hourly", r#"{"owner": "bob", "team": "Ops"}"#),
+            ("local", r#"{}"#),
+        ] {
+            let mut job = Job::new(
+                name,
+                Some(vec!["show".into(), "version".into()]),
+                JobOptions {
+                    executor_keys: Some("local".into()),
+                    properties: Value::from_json_str(props).unwrap().as_map().cloned(),
+                    ..Default::default()
+                },
+                &ctx,
+            )
+            .unwrap();
+            assert!(job.daemon().write_properties().success);
+        }
+        let backend = LocalJobsBackend::new(ctx);
+        assert_eq!(backend.team_jobs("data").await, ["nightly"]);
+        assert_eq!(backend.team_jobs("Everyone").await, ["local"]);
+        assert_eq!(
+            backend.retag_team("Data", Some("Analytics")).await,
+            ["nightly"]
+        );
+        let meta = backend.get("nightly").await.unwrap();
+        assert_eq!(meta["daemon"]["properties"]["team"], "Analytics");
+        assert_eq!(meta["daemon"]["properties"]["owner"], "alice");
+        assert_eq!(backend.retag_team("Analytics", None).await, ["nightly"]);
+        let meta = backend.get("nightly").await.unwrap();
+        assert!(meta["daemon"]["properties"]["team"].is_null());
+        assert_eq!(backend.team_jobs("Ops").await, ["hourly"]);
     }
 }

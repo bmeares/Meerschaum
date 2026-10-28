@@ -57,6 +57,8 @@ pub enum Phase {
     RebuildPending,
     /// A stream source.
     Observed,
+    /// Not synced: the pipe is locked (`parameters['locks']`).
+    Locked,
 }
 
 impl Phase {
@@ -73,6 +75,7 @@ impl Phase {
             Phase::UpstreamFailed => "upstream_failed",
             Phase::RebuildPending => "rebuild_pending",
             Phase::Observed => "observed",
+            Phase::Locked => "locked",
         }
     }
 
@@ -81,7 +84,7 @@ impl Phase {
         match self {
             Phase::Pending | Phase::Planned => Tone::Dim,
             Phase::Running | Phase::Observed => Tone::Active,
-            Phase::Retrying | Phase::RebuildPending | Phase::Skipped => Tone::Warn,
+            Phase::Retrying | Phase::RebuildPending | Phase::Skipped | Phase::Locked => Tone::Warn,
             Phase::Succeeded => Tone::Good,
             Phase::Failed | Phase::UpstreamFailed => Tone::Bad,
         }
@@ -104,6 +107,7 @@ impl Phase {
             NodeStatus::UpstreamFailed => Phase::UpstreamFailed,
             NodeStatus::RebuildPending => Phase::RebuildPending,
             NodeStatus::Observed => Phase::Observed,
+            NodeStatus::Locked => Phase::Locked,
         }
     }
 }
@@ -685,6 +689,10 @@ impl RunState {
                     EventKind::NodeSkipped { reason } => {
                         node.phase = if reason.contains("upstream") {
                             Phase::UpstreamFailed
+                        } else if meerschaum_core::access::is_lock_refusal(reason)
+                            || reason.contains(meerschaum_core::access::LOCK_REFUSAL_MARKER)
+                        {
+                            Phase::Locked
                         } else {
                             Phase::Skipped
                         };
@@ -811,7 +819,7 @@ impl RunState {
                 Phase::Running | Phase::Retrying | Phase::Observed => t.0 += 1,
                 Phase::Succeeded => t.1 += 1,
                 Phase::Failed | Phase::UpstreamFailed => t.2 += 1,
-                Phase::Skipped | Phase::RebuildPending => t.3 += 1,
+                Phase::Skipped | Phase::RebuildPending | Phase::Locked => t.3 += 1,
                 Phase::Pending | Phase::Planned => t.4 += 1,
             }
         }

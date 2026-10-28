@@ -16,6 +16,8 @@ fn command(root: &Path, plugins: &Path, python: &Path) -> Command {
         }
     }
     command.env("MRSM_ROOT_DIR", root).env("MRSM_PLUGINS_DIR", plugins)
+        // `wk_custom.sync_pipe()` is v4's (pandas); a fresh root hands it Polars (rc15).
+        .env("MRSM_DATAFRAME", "pandas")
         .env("MRSM_PYTHON", python)
         .env("PYTHONPATH", Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."))
         .env("MRSM_NOASK", "true")

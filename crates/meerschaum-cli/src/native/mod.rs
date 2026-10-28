@@ -8,15 +8,19 @@
 //! - [`pipes`]: `get_pipes` and the pipe helpers the actions share.
 //! - [`sync`]: the sync seam (`Pipe.sync` for `sql:` source pipes; the engine replaces it).
 //! - [`show`], [`manage`], [`users`], [`maintenance`], [`jobs`]: the actions.
+//! - [`teams`], [`access`]: teams, pipe access and locks (rc15 wave 2); [`connector_mask`]: the
+//!   secrets `show connectors` masks.
 //! - [`lifecycle`], [`pip`], [`plugin_files`]: `setup plugins`, `install plugins|required|packages`.
 //! - [`rich_json`]: `rich.json.JSON` (pipe attributes in `show pipes`).
 
+pub mod access;
 pub mod api_warnings;
 pub mod ask;
 pub mod bootstrap;
 pub mod bootstrap_plugins;
 pub mod cache;
 pub mod compose_instance;
+pub mod connector_mask;
 pub mod connectors;
 pub mod definition;
 pub mod doctor;
@@ -49,6 +53,7 @@ pub mod session;
 pub mod show;
 pub mod subactions;
 pub mod sync;
+pub mod teams;
 pub mod terminal;
 pub mod tokens;
 pub mod upgrade_postgres;
@@ -104,7 +109,8 @@ pub fn run(function: &str, args: &ArgsMap, rt: &mut Runtime<'_>) -> Option<Actio
         "_show_columns" => show::show_columns(args, rt),
         "_show_rowcounts" => show::show_rowcounts(args, rt),
         "_show_data" => show::show_data(args, rt),
-        "_show_users" => show::show_users(args, rt),
+        "_show_users" => users::show_users(args, rt),
+        "_show_teams" => teams::show_teams(args, rt),
         "_show_sizes" => show::show_sizes(args, rt),
         "_show_partitions" => show::show_partitions(args, rt),
         "_show_tags" => show::show_tags(args, rt),
@@ -145,15 +151,20 @@ pub fn run(function: &str, args: &ArgsMap, rt: &mut Runtime<'_>) -> Option<Actio
         "_show_logs" | "_attach_logs" => jobs::show_logs(args, rt),
         "_register_pipes" => manage::register_pipes(args, rt),
         "_register_users" => users::register_users(args, rt),
+        "_register_teams" => teams::register_teams(args, rt),
         "_register_plugins" => manage::register_plugins(args, rt),
         "_edit_pipes" => manage::edit_pipes(args, rt),
         "_edit_users" => users::edit_users(args, rt),
+        "_edit_teams" => teams::edit_teams(args, rt),
         "_delete_pipes" => manage::delete_pipes(args, rt),
         "_delete_users" => users::delete_users(args, rt),
+        "_delete_teams" => teams::delete_teams(args, rt),
         "_delete_jobs" => jobs::delete_jobs(args, rt),
         "_drop_pipes" => manage::drop_pipes(args, rt),
         "_clear_pipes" => manage::clear_pipes(args, rt),
         "_tag_pipes" => manage::tag_pipes(args, rt),
+        "_lock_pipes" => access::lock_pipes(args, rt),
+        "_unlock_pipes" => access::unlock_pipes(args, rt),
         "_index_pipes" => manage::index_pipes(args, rt),
         "_copy_pipes" => manage::copy_pipes(args, rt),
         "_sync_pipes" => sync::sync_pipes(args, rt),

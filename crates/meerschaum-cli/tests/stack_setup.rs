@@ -136,6 +136,15 @@ fn stack_keeps_the_compose_section_of_a_v4_stack_yaml() {
         for file in before.keys() {
             let want = after[file].as_str().unwrap().replace("{ROOT}", &root_text);
             let got = std::fs::read_to_string(config_dir.join(file)).unwrap();
+            // Q54 pins upgraded roots to pandas once; every pre-existing byte is preserved.
+            let want = if file == "meerschaum.yaml" {
+                format!(
+                    "{want}{}dataframe: pandas\n",
+                    if want.ends_with('\n') { "" } else { "\n" }
+                )
+            } else {
+                want
+            };
             assert_eq!(got, want, "case {name}: {file}\n{text}");
         }
         let compose = std::fs::read_to_string(&compose_path).unwrap();
@@ -189,6 +198,14 @@ fn typical_commands_leave_an_upgraded_v4_root_as_v4_does() {
         for (file, text) in case["after_commands"]["config_files"].as_object().unwrap() {
             let want = text.as_str().unwrap().replace("{ROOT}", &root_text);
             let got = std::fs::read_to_string(config_dir.join(file)).unwrap();
+            let want = if file == "meerschaum.yaml" {
+                format!(
+                    "{want}{}dataframe: pandas\n",
+                    if want.ends_with('\n') { "" } else { "\n" }
+                )
+            } else {
+                want
+            };
             assert_eq!(got, want, "case {name}: {file}\n{log}");
         }
     }

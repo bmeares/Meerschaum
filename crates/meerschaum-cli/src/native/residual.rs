@@ -91,6 +91,7 @@ pub const MAINS: &[(&str, &[(&str, &str)])] = &[
             ("pipes", "_delete_pipes"),
             ("plugins", "_delete_plugins"),
             ("users", "_delete_users"),
+            ("teams", "_delete_teams"),
             ("connectors", "_delete_connectors"),
             ("jobs", "_delete_jobs"),
             ("venvs", "_delete_venvs"),
@@ -113,6 +114,7 @@ pub const MAINS: &[(&str, &[(&str, &str)])] = &[
             ("pipes", "_edit_pipes"),
             ("definition", "_edit_definition"),
             ("users", "_edit_users"),
+            ("teams", "_edit_teams"),
             ("plugins", "_edit_plugins"),
             ("jobs", "_edit_jobs"),
             ("tokens", "_edit_tokens"),
@@ -128,6 +130,7 @@ pub const MAINS: &[(&str, &[(&str, &str)])] = &[
         ],
     ),
     ("index", &[("pipes", "_index_pipes")]),
+    ("lock", &[("pipes", "_lock_pipes")]),
     (
         "install",
         &[
@@ -147,6 +150,7 @@ pub const MAINS: &[(&str, &[(&str, &str)])] = &[
             ("pipes", "_register_pipes"),
             ("plugins", "_register_plugins"),
             ("users", "_register_users"),
+            ("teams", "_register_teams"),
             ("connectors", "_register_connectors"),
             ("tokens", "_register_tokens"),
         ],
@@ -175,6 +179,7 @@ pub const MAINS: &[(&str, &[(&str, &str)])] = &[
             ("packages", "_show_packages"),
             ("help", "_show_help"),
             ("users", "_show_users"),
+            ("teams", "_show_teams"),
             ("jobs", "_show_jobs"),
             ("logs", "_show_logs"),
             ("tags", "_show_tags"),
@@ -211,6 +216,7 @@ pub const MAINS: &[(&str, &[(&str, &str)])] = &[
     ),
     ("sync", &[("pipes", "_sync_pipes")]),
     ("tag", &[("pipes", "_tag_pipes")]),
+    ("unlock", &[("pipes", "_unlock_pipes")]),
     ("vacuum", &[("pipes", "_vacuum_pipes")]),
 ];
 

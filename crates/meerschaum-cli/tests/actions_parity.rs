@@ -194,10 +194,32 @@ fn actions_match_v4_transcripts() {
                 let rc = out.status.code().unwrap_or(-1) as i64;
                 let compare = strings(&step["compare"]);
                 let mut diffs = Vec::new();
-                if compare.iter().any(|c| c == "stdout") && stdout != step["stdout"] {
+                // Intended rc15 differences (wave 2, PARITY RC15-P2-1 and RC15-P2-2): `show
+                // connectors` masks secrets by the web console's rules (a fixed-width mask, and the
+                // shipped `sql:main` username is masked because it equals its password); `show
+                // users` is a table that says when there are no users, and `--nopretty` prints one
+                // JSON object per user (none here). The overlay names each affected step.
+                let v4_stdout = step["stdout"].as_str().unwrap_or_default().to_string();
+                let expected_stdout = match args.join(" ").as_str() {
+                    "show connectors sql:other" => v4_stdout
+                        .replace(
+                            "\x1b[32m'username'\x1b[0m: \x1b[32m'mrsm'\x1b[0m,",
+                            "\x1b[32m'username'\x1b[0m: \x1b[32m'******'\x1b[0m,",
+                        )
+                        .replace(
+                            "\x1b[32m'password'\x1b[0m: \x1b[32m'****'\x1b[0m,",
+                            "\x1b[32m'password'\x1b[0m: \x1b[32m'******'\x1b[0m,",
+                        ),
+                    "show users -i sql:local" => {
+                        "\x1b[95m \u{1f4ac} No users are registered on instance 'sql:local'.\x1b[0m\n"
+                            .to_string()
+                    }
+                    "show users -i sql:local --nopretty" => String::new(),
+                    _ => v4_stdout,
+                };
+                if compare.iter().any(|c| c == "stdout") && stdout != expected_stdout {
                     diffs.push(format!(
-                        "  stdout:\n--- v4\n{}\n--- rust\n{stdout}",
-                        step["stdout"].as_str().unwrap()
+                        "  stdout:\n--- v4 (with the rc15 overlay)\n{expected_stdout}\n--- rust\n{stdout}"
                     ));
                 }
                 if compare.iter().any(|c| c == "stderr") && stderr != step["stderr"] {

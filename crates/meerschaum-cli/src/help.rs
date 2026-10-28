@@ -325,6 +325,8 @@ pub const ACTION_GROUPS: &[(&str, &[&str])] = &[
         &[
             "edit",
             "tag",
+            "lock",
+            "unlock",
             "setup",
             "install",
             "uninstall",
@@ -483,7 +485,56 @@ pub const EXTRA_OPTIONS: &[ExtraOption] = &[
         help: "With `show runs`, list only the N most recent runs.",
         group: "Miscellaneous options",
     },
+    ExtraOption {
+        dest: "owner",
+        invocation: "--owner USER",
+        help: "With `edit pipes access`, the pipes' owner (`--owner none` for no owner).",
+        group: ACCESS_OPTIONS,
+    },
+    ExtraOption {
+        dest: "team",
+        invocation: "--team TEAM",
+        help: "With `edit pipes access`, the team the pipes belong to (`--team Everyone` for \
+               everyone's).",
+        group: ACCESS_OPTIONS,
+    },
+    ExtraOption {
+        dest: "visibility",
+        invocation: "--visibility {team,private,everyone}",
+        help: "With `edit pipes access`, who sees the pipes: their team, only the owner and the \
+               team's managers (`private`), or every user.",
+        group: ACCESS_OPTIONS,
+    },
+    ExtraOption {
+        dest: "edit_mode",
+        invocation: "--edit {team,owner}",
+        help: "With `edit pipes access`, who may change the pipes: anyone who sees them, or only \
+               the owner and the team's managers.",
+        group: ACCESS_OPTIONS,
+    },
+    ExtraOption {
+        dest: "locks",
+        invocation: "--locks LOCKS",
+        help: "With `lock pipes` / `unlock pipes`, which locks, comma-separated: parameters, \
+               sync, clear, drop, delete or all (the default).",
+        group: ACCESS_OPTIONS,
+    },
+    ExtraOption {
+        dest: "members",
+        invocation: "--members USERS",
+        help: "With `register teams` / `edit teams`, the team's members, comma-separated.",
+        group: ACCESS_OPTIONS,
+    },
+    ExtraOption {
+        dest: "managers",
+        invocation: "--managers USERS",
+        help: "With `register teams` / `edit teams`, the team's managers, comma-separated.",
+        group: ACCESS_OPTIONS,
+    },
 ];
+
+/// The title of the group of the teams, access and lock flags.
+pub const ACCESS_OPTIONS: &str = "Access options";
 
 /// One argument as the help formatter sees it, read back from the clap command.
 struct HelpArg {
@@ -631,6 +682,12 @@ pub fn option_groups(manifest: Option<&Manifest>) -> Vec<HelpGroup> {
             title: title.to_string(),
             rows,
         });
+        if group == Group::Pipes {
+            groups.push(HelpGroup {
+                title: ACCESS_OPTIONS.to_string(),
+                rows: extra_rows(ACCESS_OPTIONS),
+            });
+        }
         if group == Group::Sync {
             groups.push(HelpGroup {
                 title: PIPELINE_OPTIONS.to_string(),

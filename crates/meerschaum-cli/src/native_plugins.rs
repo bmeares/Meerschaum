@@ -1165,6 +1165,12 @@ impl ConnectorRegistry for SessionRegistry {
     }
 }
 
+impl meerschaum_server::backends::InstanceResolver for HostEnv {
+    fn resolve(&self, keys: &str) -> Option<Arc<dyn InstanceConnector>> {
+        self.connector(keys).ok().map(|instance| instance.conn())
+    }
+}
+
 /// A host call made for an API caller (a route, MCP entry or console page): it may do what the
 /// caller's scopes allow, on the instances the server allows.
 #[derive(Clone)]
@@ -1325,30 +1331,162 @@ impl PluginHost {
         }
     }
 
-    /// Refuse a call the API caller's scopes (and the route's or page's `host_scopes`) do not
-    /// allow.
-    fn require(&self, scope: &str, what: &str) -> HostResult<()> {
-        match &self.api {
-            Some(api)
-                if !api.scopes.iter().any(|s| s == "*" || s == scope)
-                    && !api.host_scopes.iter().any(|s| s == scope) =>
-            {
-                Err(host_error(format!(
-                    "The caller may not {what}: that needs the `{scope}` scope."
-                )))
-            }
-            _ => Ok(()),
+    /// Refuse what only a caller with every scope (an administrator, `--no-auth`) may do.
+    async fn require_all(&self, what: &str) -> HostResult<()> {
+        if let Some(access) = self.api_access("*", what).await?
+            && !access.full_admin()
+        {
+            return Err(host_error(format!(
+                "The caller may not {what} from an API request."
+            )));
         }
+        Ok(())
     }
 
-    /// Refuse what only a caller with every scope (an administrator, `--no-auth`) may do.
-    fn require_all(&self, what: &str) -> HostResult<()> {
-        match &self.api {
-            Some(api) if !api.scopes.iter().any(|s| s == "*") => Err(host_error(format!(
-                "The caller may not {what} from an API request."
-            ))),
-            _ => Ok(()),
+    /// Resolve the caller again for each API host call. A named plugin grant adds a
+    /// permission, never an identity, administrator status, or team membership.
+    async fn api_access(
+        &self,
+        scope: &str,
+        what: &str,
+    ) -> HostResult<Option<meerschaum_server::access::Access>> {
+        let Some(api) = &self.api else {
+            return Ok(None);
+        };
+        use meerschaum_server::access::{Access, EVERYONE, TeamRole, rules};
+        let mut access = if api.state.config.no_auth {
+            Access::everything()
+        } else if let Some(principal) = &api.principal {
+            // A host call may follow a long-running plugin operation: reload credential
+            // validity and scope narrowing as well as its owner's current access.
+            use meerschaum_server::auth::{Principal, Scopes};
+            let subject = match principal {
+                Principal::User(user) => user.username.clone(),
+                Principal::Token(token) => token.id.map(|id| id.to_string()).unwrap_or_default(),
+            };
+            let principal = meerschaum_server::auth::load_from_subject(&api.state, &subject)
+                .await
+                .map_err(|e| host_error(e.detail_text()))?
+                .ok_or_else(|| host_error("Invalid or revoked credentials."))?;
+            let mut access = meerschaum_server::access::access_of_fresh(
+                &api.state,
+                principal.clone(),
+                &Scopes::List(api.scopes.clone()),
+            )
+            .await
+            .map_err(|e| host_error(e.detail_text()))?;
+            if let Principal::Token(token) = &principal {
+                access.principal.permissions = meerschaum_server::access::intersect(
+                    &access.principal.permissions,
+                    &Scopes::List(token.scopes.clone()),
+                );
+            }
+            // The request already resolved legacy scope spellings. Keep that exact
+            // ceiling even if the user's permissions broaden while the plugin runs.
+            if !api.scopes.iter().any(|scope| scope == "*") {
+                access
+                    .principal
+                    .permissions
+                    .retain(|permission| api.scopes.contains(permission));
+            }
+            access
+        } else {
+            Access {
+                auth: None,
+                principal: rules::Principal::new(
+                    "",
+                    false,
+                    Default::default(),
+                    vec![(EVERYONE.into(), TeamRole::Member)],
+                ),
+                primary_team: EVERYONE.into(),
+                attributes: None,
+                no_auth: false,
+            }
+        };
+        // Reading the process config requires the caller's own full administrator rights;
+        // a plugin may not assemble them from named host grants.
+        if scope != "*" {
+            access
+                .principal
+                .permissions
+                .extend(api.host_scopes.iter().cloned());
         }
+        if !access.has(scope) {
+            return Err(host_error(format!(
+                "The caller may not {what}: that needs the `{scope}` scope."
+            )));
+        }
+        Ok(Some(access))
+    }
+
+    /// API pipe handles are descriptions from untrusted plugin memory. Always authorize
+    /// the instance's registered parameters, and use supplied parameters only for a new
+    /// pipe after the same registration and definition guards as the HTTP routes.
+    async fn api_pipe(
+        &self,
+        mut pipe: Pipe,
+        instance: &Arc<dyn InstanceConnector>,
+        access: Option<&meerschaum_server::access::Access>,
+        method: &str,
+    ) -> HostResult<Pipe> {
+        let (Some(api), Some(access)) = (&self.api, access) else {
+            return Ok(pipe);
+        };
+        use meerschaum_plugin::callbacks::method as m;
+        use meerschaum_server::access::{self, guard};
+        for keys in [pipe.instance_keys(), pipe.connector_keys()] {
+            guard::check_connector_teams(&api.state, access, keys)
+                .map_err(|e| host_error(e.detail_text()))?;
+        }
+        let stored = api
+            .state
+            .get_pipe(
+                pipe.connector_keys(),
+                pipe.metric_key(),
+                pipe.location_key(),
+                Some(pipe.instance_keys()),
+                true,
+            )
+            .await
+            .map_err(|e| host_error(e.detail_text()))?;
+        let registered = api
+            .state
+            .is_registered(&stored.pipe, Some(pipe.instance_keys()))
+            .await
+            .map_err(|e| host_error(e.detail_text()))?;
+        let writes = matches!(method, m::SYNC | m::CLEAR | m::REGISTER);
+        if registered || !matches!(method, m::SYNC | m::REGISTER) {
+            pipe = stored.pipe.clone();
+        } else {
+            access
+                .require(&["pipes:register"], &[])
+                .map_err(|e| host_error(e.detail_text()))?;
+            if !api.state.config.registration_pipes {
+                return Err(host_error("The server has not allowed pipe registration."));
+            }
+            let parameters = guard::stamp_new_pipe(access, pipe.raw_parameters())
+                .map_err(|e| host_error(e.detail_text()))?;
+            guard::check_parameters(&api.state, access, instance, &pipe, None, &parameters)
+                .await
+                .map_err(|e| host_error(e.detail_text()))?;
+            pipe.set_parameters(parameters);
+            pipe.temporary = false;
+        }
+        if !access.can_see_pipe(&pipe) {
+            return Err(host_error(access::hidden_pipe(&pipe).detail_text()));
+        }
+        if writes && !access.can_edit(pipe.raw_parameters()) {
+            return Err(host_error(access::not_editable(&pipe).detail_text()));
+        }
+        let index = access::pipe_index(&api.state, Some(pipe.instance_keys()))
+            .await
+            .map_err(|e| host_error(e.detail_text()))?;
+        // Internal tables stay unavailable even to administrator-owned narrow tokens, as
+        // with API data routes and raw SQL. Administrators have no other hidden targets.
+        guard::check_pipe_target(instance.as_ref(), &pipe, &index.hidden_targets(access))
+            .map_err(|e| host_error(e.detail_text()))?;
+        Ok(pipe)
     }
 
     /// Refuse `exec_sql` to an API caller who may not run actions, by the rule of the server's
@@ -1363,7 +1501,10 @@ impl PluginHost {
         if api.state.config.no_auth {
             return Ok(());
         }
-        let Some(principal) = &api.principal else {
+        let access = self
+            .api_access("actions:execute", "execute SQL statements")
+            .await?;
+        let Some(principal) = access.as_ref().and_then(|access| access.auth.as_ref()) else {
             return Err(host_error(
                 "An anonymous caller may not execute SQL statements.",
             ));
@@ -1495,7 +1636,7 @@ impl PluginHost {
                 Ok(json(tuple_json(&written)))
             }
             m::CONFIG => {
-                self.require_all("read the Meerschaum config")?;
+                self.require_all("read the Meerschaum config").await?;
                 let keys: Vec<String> = serde_json::from_value(call.arg("keys").clone())
                     .map_err(|e| host_error(format!("invalid `keys`: {e}")))?;
                 let keys: Vec<&str> = keys.iter().map(String::as_str).collect();
@@ -1513,18 +1654,38 @@ impl PluginHost {
                     .ok_or_else(|| host_error("`connector_keys` names no connector"))?;
                 let query = call.str_arg("query").unwrap_or_default();
                 // Permissions first: an API caller learns nothing about connectors it may not use.
-                if call.method == m::READ_SQL {
-                    self.require("sql:read", "run SQL queries")?;
+                let access = if call.method == m::READ_SQL {
+                    let access = self.api_access("sql:read", "run SQL queries").await?;
                     if self.api.is_some() {
                         meerschaum_server::mcp::security::is_read_only_query(query)
                             .map_err(host_error)?;
                     }
+                    access
                 } else {
-                    self.require("actions:execute", "execute SQL statements")?;
+                    let access = self
+                        .api_access("actions:execute", "execute SQL statements")
+                        .await?;
                     self.may_execute().await?;
-                }
+                    access
+                };
                 if self.api.is_some() {
                     refuse_internal_tables(query)?;
+                }
+                if let (Some(api), Some(access)) = (&self.api, &access) {
+                    // Named SQL must use a served instance, within its connector's teams.
+                    self.instance(keys)?;
+                    meerschaum_server::access::guard::check_connector_teams(
+                        &api.state, access, keys,
+                    )
+                    .map_err(|e| host_error(e.detail_text()))?;
+                    let index = meerschaum_server::access::pipe_index(&api.state, Some(keys))
+                        .await
+                        .map_err(|e| host_error(e.detail_text()))?;
+                    meerschaum_server::sql_guard::check_definition(
+                        query,
+                        &index.hidden_targets(access),
+                    )
+                    .map_err(host_error)?;
                 }
                 let sql = self.env()?.sql(keys).map_err(host_error)?;
                 if call.method == m::READ_SQL {
@@ -1546,7 +1707,7 @@ impl PluginHost {
                 })))
             }
             m::PIPE => {
-                self.require("pipes:read", "read pipes")?;
+                let access = self.api_access("pipes:read", "read pipes").await?;
                 let connector_keys = call
                     .str_arg("connector_keys")
                     .ok_or_else(|| host_error("`host::pipe()` needs connector keys"))?;
@@ -1576,7 +1737,11 @@ impl PluginHost {
                     .build()
                     .map_err(|e| host_error(e.to_string()))?;
                 let instance = self.instance(&instance_keys)?;
-                if let Ok(attributes) = instance.get_pipe_attributes(&pipe).await
+                if self.api.is_some() {
+                    pipe = self
+                        .api_pipe(pipe, &instance, access.as_ref(), m::PIPE)
+                        .await?;
+                } else if let Ok(attributes) = instance.get_pipe_attributes(&pipe).await
                     && let Some(Value::Map(parameters)) = attributes.get("parameters")
                 {
                     pipe.set_parameters(parameters.clone());
@@ -1586,8 +1751,10 @@ impl PluginHost {
             method => {
                 let (scope, what) = match method {
                     m::SYNC => ("pipes:write", "sync pipes"),
-                    m::CLEAR => ("pipes:write", "clear pipes"),
-                    m::REGISTER => ("pipes:write", "register pipes"),
+                    // PARITY: wave 2's permission grid supersedes the original host-call
+                    // write alias: deleting rows and registering each need their own scope.
+                    m::CLEAR => ("pipes:delete", "clear pipes"),
+                    m::REGISTER => ("pipes:register", "register pipes"),
                     m::GET_SYNC_TIME
                     | m::GET_DATA
                     | m::GET_ROWCOUNT
@@ -1599,9 +1766,12 @@ impl PluginHost {
                         )));
                     }
                 };
-                self.require(scope, what)?;
+                let access = self.api_access(scope, what).await?;
                 let pipe = self.pipe_for(request, call)?;
                 let instance = self.instance(pipe.instance_keys())?;
+                let pipe = self
+                    .api_pipe(pipe, &instance, access.as_ref(), method)
+                    .await?;
                 match method {
                     m::GET_SYNC_TIME => {
                         let newest = call.arg("newest").as_bool().unwrap_or(true);
@@ -1650,6 +1820,11 @@ impl PluginHost {
                             .engine_for_sync(&pipe)?
                             .sync_pipe(&pipe, Some(data), &args)
                             .await;
+                        if result.success
+                            && let Some(api) = &self.api
+                        {
+                            api.state.access_cache().forget_pipes();
+                        }
                         Ok(json(serde_json::json!([result.success, result.message])))
                     }
                     m::GET_DATA => {
@@ -1672,6 +1847,14 @@ impl PluginHost {
                     m::CLEAR => {
                         if let Some(refused) = Self::protected(&*instance, &pipe, "clear") {
                             return Ok(refused);
+                        }
+                        if self.api.is_some()
+                            && let Some(error) = meerschaum_server::access::guard::lock_conflict(
+                                &pipe,
+                                meerschaum_core::access::LockOp::Clear,
+                            )
+                        {
+                            return Err(host_error(error.detail_text()));
                         }
                         let cleared = instance.clear_pipe(&pipe, &data_query(call)?).await;
                         Ok(json(tuple_json(&cleared)))
@@ -1697,7 +1880,13 @@ impl PluginHost {
                         if let Some(refused) = Self::protected(&*instance, &pipe, "register") {
                             return Ok(refused);
                         }
-                        Ok(json(tuple_json(&instance.register_pipe(&pipe).await)))
+                        let result = instance.register_pipe(&pipe).await;
+                        if result.success
+                            && let Some(api) = &self.api
+                        {
+                            api.state.access_cache().forget_pipes();
+                        }
+                        Ok(json(tuple_json(&result)))
                     }
                     other => Err(meerschaum_plugin::Error::Unsupported(format!(
                         "unsupported host call: {other}"
@@ -2585,21 +2774,15 @@ async fn page_caller(
         Ok(Some(id)) => user.user_id = Some(id),
         _ => return (Vec::new(), None),
     }
-    let Ok(scopes) =
-        meerschaum_core::users::User::scopes_from_read(conn.get_user_attributes(&user).await)
-    else {
-        return (Vec::new(), None);
-    };
     let Ok(user_type) = conn.get_user_type(&user).await else {
         return (Vec::new(), None);
     };
-    let scopes = if user_type.as_deref() == Some("admin") || scopes.iter().any(|s| s == "*") {
-        vec!["*".into()]
-    } else {
-        scopes
-    };
     user.user_type = user_type;
-    (scopes, Some(meerschaum_server::auth::Principal::User(user)))
+    let principal = meerschaum_server::auth::Principal::User(user);
+    let Ok(scopes) = meerschaum_server::auth::principal_scopes(state, &principal).await else {
+        return (Vec::new(), None);
+    };
+    (scopes, Some(principal))
 }
 
 #[async_trait]
@@ -2988,9 +3171,35 @@ mod host_access_tests {
         let (ada_scopes, ada) = page_caller(&state, "ada").await;
         assert_eq!(
             ada_scopes,
-            ["pipes:read", "actions:execute", "jobs:execute"]
+            [
+                "pipes:read",
+                "actions:execute",
+                "jobs:execute",
+                "webterm:use"
+            ]
         );
         assert!(ada.is_some());
+
+        // A page uses the server's current role policy, not v4's all-scopes fallback.
+        let mut viewer = User::new("viewer", Some("synthetic-pass-1"));
+        assert!(state.instance().register_user(&mut viewer).await.success);
+        let limited = server_state(root.path(), |config| {
+            config.default_role = "viewer".into();
+        })
+        .await;
+        let (scopes, _) = page_caller(&limited, "viewer").await;
+        assert!(scopes.iter().any(|scope| scope == "pipes:read"));
+        assert!(!scopes.iter().any(|scope| scope == "actions:execute"));
+        let attrs = meerschaum_core::access::attributes_with_permissions::<&str>(&Map::new(), &[]);
+        assert!(
+            state
+                .instance()
+                .set_user_attributes(&viewer, &attrs)
+                .await
+                .success
+        );
+        limited.access_cache().forget_identities();
+        assert!(page_caller(&limited, "viewer").await.0.is_empty());
 
         let config =
             meerschaum_core::config::Config::new(meerschaum_core::config::ConfigOptions::with_env(
@@ -3052,13 +3261,138 @@ mod host_access_tests {
 
         // `host_scopes` add named scopes for every caller, never `*`.
         let guest = api(&state, &[], &None).with_host_scopes(&["pipes:read".into(), "*".into()]);
-        assert!(guest.require("pipes:read", "read pipes").is_ok());
-        assert!(guest.require("pipes:write", "sync pipes").is_err());
-        assert!(guest.require_all("read the Meerschaum config").is_err());
+        assert!(guest.api_access("pipes:read", "read pipes").await.is_ok());
+        assert!(guest.api_access("pipes:write", "sync pipes").await.is_err());
+        assert!(
+            guest
+                .require_all("read the Meerschaum config")
+                .await
+                .is_err()
+        );
+        let writer = api(&state, &[], &None).with_host_scopes(&["pipes:write".into()]);
+        assert!(writer.api_access("pipes:write", "sync pipes").await.is_ok());
+        assert!(
+            writer
+                .api_access("pipes:register", "register pipes")
+                .await
+                .is_err()
+        );
         // Without them a guest may do nothing.
         assert!(
             api(&state, &[], &None)
-                .require("pipes:read", "read pipes")
+                .api_access("pipes:read", "read pipes")
+                .await
+                .is_err()
+        );
+
+        // A request's effective scope ceiling stays exact when the owner gains rights.
+        let ada_user = ada.as_ref().unwrap().as_user().unwrap();
+        let expanded = meerschaum_core::access::attributes_with_permissions(
+            &Map::new(),
+            &["pipes:read", "pipes:write", "pipes:register"],
+        );
+        assert!(
+            state
+                .instance()
+                .set_user_attributes(ada_user, &expanded)
+                .await
+                .success
+        );
+        let capped = api(&state, &["pipes:write".into()], &ada);
+        assert!(capped.api_access("pipes:write", "sync pipes").await.is_ok());
+        assert!(
+            capped
+                .api_access("pipes:register", "register pipes")
+                .await
+                .is_err()
+        );
+
+        // Credentials are reloaded within the same plugin invocation, including narrowed
+        // or revoked tokens and a user deleted after the request was authenticated.
+        use meerschaum_core::users::{Expiration, Token};
+        let mut token = Token::new(
+            Some("host-caller"),
+            Expiration::Never,
+            Some(vec!["pipes:read".into(), "pipes:write".into()]),
+            366,
+            chrono::Utc::now(),
+        );
+        token.user_id = state
+            .instance()
+            .get_user_id(&User::new("root", None))
+            .await
+            .unwrap();
+        token.user = Some(User::new("root", None));
+        let registered = state.instance().register_token(&mut token).await;
+        assert!(registered.success, "{registered}");
+        let credential =
+            meerschaum_server::auth::load_from_subject(&state, &token.id.unwrap().to_string())
+                .await
+                .unwrap();
+        let token_host = api(
+            &state,
+            &["pipes:read".into(), "pipes:write".into()],
+            &credential,
+        );
+        assert!(
+            token_host
+                .api_access("pipes:write", "sync pipes")
+                .await
+                .is_ok()
+        );
+        let grants: Vec<String> = meerschaum_core::access::ALL_PERMISSIONS
+            .iter()
+            .map(|p| p.to_string())
+            .collect();
+        assert!(
+            token_host
+                .clone()
+                .with_host_scopes(&grants)
+                .require_all("read config")
+                .await
+                .is_err()
+        );
+        token.scopes = vec!["pipes:read".into()];
+        assert!(state.instance().edit_token(&token).await.success);
+        assert!(
+            token_host
+                .api_access("pipes:write", "sync pipes")
+                .await
+                .is_err()
+        );
+        assert!(
+            token_host
+                .api_access("pipes:read", "read pipes")
+                .await
+                .is_ok()
+        );
+        assert!(state.instance().invalidate_token(&token).await.success);
+        assert!(
+            token_host
+                .api_access("pipes:read", "read pipes")
+                .await
+                .is_err()
+        );
+        let read =
+            meerschaum_core::access::attributes_with_permissions(&Map::new(), &["pipes:read"]);
+        assert!(
+            state
+                .instance()
+                .set_user_attributes(&viewer, &read)
+                .await
+                .success
+        );
+        let deleted = api(
+            &state,
+            &["pipes:read".into()],
+            &Some(meerschaum_server::auth::Principal::User(viewer.clone())),
+        );
+        assert!(deleted.api_access("pipes:read", "read pipes").await.is_ok());
+        assert!(state.instance().delete_user(&viewer).await.success);
+        assert!(
+            deleted
+                .api_access("pipes:read", "read pipes")
+                .await
                 .is_err()
         );
     }

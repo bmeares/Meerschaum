@@ -632,7 +632,9 @@ fn global_help_lists_every_v4_option() {
         rs_flags, expected,
         "--help does not list every option string"
     );
-    // The v4 option groups keep their titles and order, with "Pipeline options" after "Sync".
+    // The v4 option groups keep their titles and order, with "Access options" (rc15: the flags
+    // of `edit pipes access`, `lock pipes` and `register teams`) after "Pipes" and "Pipeline
+    // options" after "Sync".
     let titles = |text: &str| -> Vec<String> {
         text.lines()
             .filter(|l| l.ends_with(" options:"))
@@ -640,6 +642,8 @@ fn global_help_lists_every_v4_option() {
             .collect()
     };
     let mut v4_titles = titles(&python);
+    let pipes = v4_titles.iter().position(|t| t == "Pipes options").unwrap();
+    v4_titles.insert(pipes + 1, "Access options".into());
     let sync = v4_titles.iter().position(|t| t == "Sync options").unwrap();
     v4_titles.insert(sync + 1, "Pipeline options".into());
     assert_eq!(titles(&rust), v4_titles);

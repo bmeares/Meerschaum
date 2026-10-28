@@ -615,6 +615,9 @@ pub fn sync_pipes_with(args: &ArgsMap, rt: &mut Runtime<'_>, method: LapMethod) 
         do_loop.then(|| super::jobs_laps::heartbeat(Some(min_seconds.max(0.0)), "run"));
     let mut msg;
     let mut success_count;
+    // Whether the last lap succeeded: a pipe synced, or nothing failed and the pipes not synced
+    // are locked (a lock is not a failure).
+    let mut lap_success;
     loop {
         if let Some(heartbeat) = heartbeat.as_mut() {
             heartbeat.lap_started();
@@ -622,6 +625,7 @@ pub fn sync_pipes_with(args: &ArgsMap, rt: &mut Runtime<'_>, method: LapMethod) 
         let lap_begin = Instant::now();
         let mut gantt_text: Option<String> = None;
         let mut pending: Vec<meerschaum_engine::PendingRebuild> = Vec::new();
+        let mut locked: Vec<meerschaum_engine::PipeRef> = Vec::new();
         let mut report = PipeReport::new(super::pipes::defaults(rt));
         let mut summary_extra = String::new();
         let (inst, pipes) = super::pipes::selected_pipes(rt, args)?;
@@ -662,6 +666,7 @@ pub fn sync_pipes_with(args: &ArgsMap, rt: &mut Runtime<'_>, method: LapMethod) 
                 warn(rt, warning);
             }
             pending = result.rebuild_pending();
+            locked = result.locked();
             if !result.success && result.outcomes.is_empty() {
                 return Ok(SuccessTuple::fail(result.message));
             }
@@ -779,8 +784,12 @@ pub fn sync_pipes_with(args: &ArgsMap, rt: &mut Runtime<'_>, method: LapMethod) 
                 pending.len()
             ));
         }
+        if !locked.is_empty() {
+            msg.push_str(&format!("\n    {} not synced: locked.", locked.len()));
+        }
+        lap_success = success_count > 0 || (failure_count == 0 && !locked.is_empty());
         if let Some(heartbeat) = heartbeat.as_mut() {
-            heartbeat.lap_finished(success_count > 0, &msg);
+            heartbeat.lap_finished(lap_success, &msg);
             heartbeat.waiting(
                 std::time::Duration::try_from_secs_f64(min_seconds.max(0.0)).unwrap_or_default(),
             );
@@ -813,7 +822,7 @@ pub fn sync_pipes_with(args: &ArgsMap, rt: &mut Runtime<'_>, method: LapMethod) 
         }
     }
     Ok(SuccessTuple {
-        success: success_count > 0,
+        success: lap_success,
         message: msg,
     })
 }

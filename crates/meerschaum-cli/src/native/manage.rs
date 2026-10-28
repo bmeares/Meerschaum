@@ -5,6 +5,7 @@
 //! the `copy pipes <instance>` path).
 
 use meerschaum_connector::DataQuery;
+use meerschaum_core::access::Locks;
 use meerschaum_core::value::{Map, Value, apply_patch_maps};
 use meerschaum_core::{Pipe, SuccessTuple};
 use meerschaum_plugin::NativePlugins;
@@ -317,6 +318,10 @@ pub fn edit_pipes(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     let force = flag(args, "force");
     let noask = flag(args, "noask");
     let params = super::params(args);
+    // `edit pipes access` (rc15 wave 2, AC10): owner, team, visibility and edit mode.
+    if action.first().is_some_and(|a| a == "access") {
+        return super::access::edit_pipes_access(args, rt);
+    }
     // The editor paths (`edit pipes`, `edit pipes definition`, `edit definition`).
     if action.first().is_some_and(|a| a == "definition") {
         return super::definition::edit_pipes(args, rt, true);
@@ -466,6 +471,25 @@ pub fn delete_pipes(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     let (inst, pipes) = selected_pipes(rt, args)?;
     if pipes.is_empty() {
         return Ok(SuccessTuple::fail("No pipes to delete."));
+    }
+    // Locks (rc15 AC5): deleting drops the tables first, so a `drop` or a `delete` lock refuses
+    // it before anything changes (one locked pipe stops the command; `-y` and `--force` never
+    // get past a lock).
+    let checks = session(rt);
+    let conn = inst.conn();
+    let refusals: Vec<String> = pipes
+        .iter()
+        .filter_map(|sp| {
+            checks.block_on(meerschaum_connector::lock_refusal(
+                conn.as_ref(),
+                &sp.pipe,
+                meerschaum_core::access::LockOp::DeleteAndDrop,
+            ))
+        })
+        .map(|refused| refused.message)
+        .collect();
+    if !refusals.is_empty() {
+        return Ok(SuccessTuple::fail(refusals.join("\n")));
     }
     // `actions['drop'](['pipes'], ...)`: its result is discarded.
     let mut drop_args = args.clone();
@@ -798,12 +822,17 @@ pub fn copy_pipes(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     for (i, sp) in pipes.iter_mut().enumerate() {
         hydrate(rt, &src_inst, sp);
         info(rt, &format!("Copying {} ({} / {n})...", sp.pipe, i + 1));
+        // AC4: a copy keeps the source's locks and never takes its access (owner, team,
+        // visibility, edit): a new pipe gets the default access and an existing destination
+        // keeps its own. The locks are set last, so a `sync` lock does not refuse the copy's own
+        // data sync.
+        let (params, source_locks) = super::access::copy_parameters(sp.pipe.raw_parameters());
         let mut new_pipe = build_pipe(
             sp.pipe.connector_keys(),
             sp.pipe.metric_key(),
             sp.pipe.location_key(),
             &dest.keys(),
-            Some(sp.pipe.raw_parameters().clone()),
+            Some(params),
             &defaults,
         )?;
         let exists = session
@@ -811,6 +840,27 @@ pub fn copy_pipes(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
             .ok()
             .flatten()
             .is_some();
+        let mut dest_locks = Locks::new();
+        if exists {
+            let mut existing = SelectedPipe {
+                pipe: new_pipe.clone(),
+                id: None,
+                hydrated: false,
+            };
+            // `hydrate` patches the pipe's own (copied) parameters over the stored ones: start
+            // from the stored ones alone to read the destination's access and locks.
+            existing.pipe.set_parameters(Map::new());
+            hydrate(rt, &dest, &mut existing);
+            let stored = existing.pipe.raw_parameters();
+            dest_locks = Locks::from_parameters(stored);
+            let mut params = new_pipe.raw_parameters().clone();
+            for key in ["access", "locks"] {
+                if let Some(value) = stored.get(key) {
+                    params.insert(key.to_string(), value.clone());
+                }
+            }
+            new_pipe.set_parameters(params);
+        }
         if exists {
             if overwrite == "skip" {
                 info(
@@ -903,6 +953,19 @@ pub fn copy_pipes(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
                     &format!("Failed to copy data from {} to {new_pipe}.", sp.pipe),
                 );
                 failed.push((sp.pipe.to_string(), format!("data: {}", res.message)));
+                continue;
+            }
+        }
+        // The source's locks, added to the destination's own (a copy never unlocks), with the
+        // destination's `lock_pipe` (an `api:` destination asks its server).
+        if dest_locks.with(&source_locks).kinds() != dest_locks.kinds() {
+            let res = session.block_on(dest.conn().lock_pipe(&new_pipe, &source_locks));
+            if !res.success {
+                warn(
+                    rt,
+                    &format!("Failed to copy the locks of {} to {new_pipe}.", sp.pipe),
+                );
+                failed.push((sp.pipe.to_string(), format!("locks: {}", res.message)));
                 continue;
             }
         }
