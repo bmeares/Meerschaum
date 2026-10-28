@@ -15,6 +15,7 @@ The CLI progress spinner and the process's signals (wave 17b, PARITY W17T-003), 
 
 from __future__ import annotations
 
+import json
 import os
 import pathlib
 import pty
@@ -67,6 +68,7 @@ def home():
         'MRSM_PLUGINS_DIR': str(plugins),
         'MRSM_NO_AUTO_INSTALL': '1',
         'MRSM_NO_UPDATE_CHECK': '1',
+        'MRSM_PYTHON': sys.executable,
         'MRSM_SQL_W17BP': f"sqlite:///{db}",
     })
     result = subprocess.run(
@@ -206,6 +208,7 @@ def test_start_api_keeps_its_graceful_shutdown_on_signal(home, readiness, signum
     from tests.console.conftest import free_port
     binary = binary_or_skip()
     env, root = home
+    env = {**env, 'MRSM_SERVER_ID': root.parent.name}
     port = free_port()
 
     def listening():
@@ -221,15 +224,26 @@ def test_start_api_keeps_its_graceful_shutdown_on_signal(home, readiness, signum
             connection.request('GET', '/healthcheck')
             response = connection.getresponse()
             response.read()
-            return response.status == 200
-        except (OSError, http.client.HTTPException):
+            if response.status != 200:
+                return False
+            # A released free-port probe can be claimed by another parallel test's server.
+            # Only our server's identity proves that its signal handlers precede readiness.
+            connection.request('GET', '/id')
+            response = connection.getresponse()
+            identity = json.loads(response.read())
+            return (
+                response.status == 200
+                and isinstance(identity, dict)
+                and identity.get('server') == env['MRSM_SERVER_ID']
+            )
+        except (OSError, ValueError, http.client.HTTPException):
             return False
         finally:
             connection.close()
 
     out, status = _pty(
         [str(binary), 'start', 'api', '-i', 'sql:w17bp', '--host', '127.0.0.1', '--port',
-         str(port), '--no-webterm'],
+         str(port), '--no-webterm', '--debug'],
         env, root, listening if readiness == 'tcp' else healthy, signum=signum, after=30,
     )
     text = out.decode('utf-8', 'replace')[-1500:]

@@ -184,6 +184,8 @@ jobs:
           MRSM_TEST_BIN: ${{ github.workspace }}/target/debug/mrsm
           ### The venv above already holds the extras; `test.sh` must not install again.
           MRSM_TEST_SKIP_INSTALL: "1"
+          # Bound per-process SQL pools across the shared test databases on large runners.
+          PYTEST_XDIST_AUTO_NUM_WORKERS: "16"
 
   # The required status check: always runs, fails only when the suite ran and failed or was cancelled.
   summary:

@@ -12,7 +12,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use chrono::Duration;
+use chrono::{Datelike, Duration};
 use indexmap::IndexMap;
 use once_cell::sync::Lazy;
 use regex::Regex;
@@ -930,6 +930,9 @@ pub fn get_delta_bounds(
             b.utc = rounded
                 .utc
                 .checked_sub_signed(Duration::minutes(1))
+                // PARITY: Python catches OverflowError at years 1..9999; chrono accepts
+                // year zero, which would send an invalid PostgreSQL backtrack bound.
+                .filter(|bound| (1..=9999).contains(&bound.year()))
                 .unwrap_or(rounded.utc);
             Value::Datetime(b)
         }
@@ -1336,4 +1339,41 @@ pub fn filter_existing(
     }
 
     Ok((unseen, update, delta))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::get_delta_bounds;
+    use crate::value::{DateTimeValue, Value};
+    use chrono::{Duration, NaiveDate};
+
+    #[test]
+    fn delta_bounds_keep_the_python_minimum_and_backtrack_other_datetimes() {
+        let datetime = |year, month, day, hour, minute| {
+            NaiveDate::from_ymd_opt(year, month, day)
+                .unwrap()
+                .and_hms_opt(hour, minute, 0)
+                .unwrap()
+        };
+        for (minimum, expected_begin) in [
+            (datetime(1, 1, 1, 0, 0), datetime(1, 1, 1, 0, 0)),
+            (datetime(1, 1, 1, 0, 1), datetime(1, 1, 1, 0, 0)),
+            (datetime(2024, 1, 1, 0, 0), datetime(2023, 12, 31, 23, 59)),
+            (
+                datetime(9999, 12, 31, 23, 58),
+                datetime(9999, 12, 31, 23, 57),
+            ),
+        ] {
+            let axis = Value::Datetime(DateTimeValue::utc(minimum));
+            let (begin, end) = get_delta_bounds(&axis, &axis, Some("datetime64[ms]"), Some("ts"));
+            let Value::Datetime(begin) = begin else {
+                panic!("expected a datetime lower bound");
+            };
+            let Value::Datetime(end) = end else {
+                panic!("expected a datetime upper bound");
+            };
+            assert_eq!(begin.utc, expected_begin);
+            assert_eq!(end.utc, minimum + Duration::minutes(1));
+        }
+    }
 }

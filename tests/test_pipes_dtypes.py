@@ -1013,7 +1013,7 @@ def test_parse_date_bounds(flavor: str):
 @pytest.mark.parametrize("flavor", get_flavors())
 def test_distant_datetimes(flavor: str):
     """
-    Test that extremely distant datetimes may be synced.
+    Test that extremely distant datetimes may be synced and compared with existing rows.
     """
     conn = conns[flavor]
     pipe = mrsm.Pipe('test', 'datetimes', 'distant', instance=conn)
@@ -1037,6 +1037,10 @@ def test_distant_datetimes(flavor: str):
 
     df = pipe.get_data(debug=debug)
     assert df['ts'][0].year == 1
+    ### The existing-table comparison must not subtract past Python's minimum into year zero.
+    success, msg = pipe.sync(docs, debug=debug)
+    assert success, msg
+    assert pipe.get_rowcount() == 1
 
 
 @pytest.mark.parametrize("flavor", get_flavors())

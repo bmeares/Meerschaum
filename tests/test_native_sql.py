@@ -89,9 +89,17 @@ def pair(request, tmp_path):
         if not _reachable(attrs['port']):
             pytest.skip(f"No {flavor} test database on port {attrs['port']}.")
     tag = uuid.uuid4().hex[:8]
-    native = mrsm.get_connector('sql', f'r1n_{flavor}_{tag}', **attrs)
-    reference = mrsm.get_connector('sql', f'r1s_{flavor}_{tag}', native_sql=False, **attrs)
-    return flavor, native, reference
+    from meerschaum.connectors import SQLConnector
+    # Fixture-local connectors release their pools instead of remaining in the global cache.
+    native = SQLConnector(label=f'r1n_{flavor}_{tag}', **attrs)
+    reference = SQLConnector(label=f'r1s_{flavor}_{tag}', native_sql=False, **attrs)
+    try:
+        yield flavor, native, reference
+    finally:
+        for connector in (native, reference):
+            engine = connector.__dict__.get('_engine')
+            if engine is not None:
+                engine.dispose()
 
 
 def _table(flavor: str) -> str:

@@ -193,10 +193,16 @@ def _diff(left, right, path=''):
 
 
 ### Keys v5 adds to the v4 table (an overlay: the recorded v4 dictionary is never edited), as
-### `(table, key)`. W18-FX4-001: `environment.compose_root`, the `MRSM__COMPOSE_ROOT` label of jobs
-### started from a root compose file. Mirrors `static_toml_matches_python` in
+### paths. Includes the compose-root label, DataFrame selector and rc15 permission names.
+### Mirrors `static_toml_matches_python` in
 ### `crates/meerschaum-core/tests/static_config.rs`.
-V5_ONLY_STATIC_KEYS = (('environment', 'compose_root'),)
+V5_ONLY_STATIC_KEYS = (
+    ('environment', 'compose_root'),
+    ('environment', 'dataframe'),
+    ('tokens', 'scopes', 'pipes:register'),
+    ('tokens', 'scopes', 'pipes:define_sql'),
+    ('tokens', 'scopes', 'webterm:use'),
+)
 
 
 def test_static_config_matches_v4():
@@ -209,9 +215,12 @@ def test_static_config_matches_v4():
     rust = core.static_config()
     assert isinstance(rust, dict)
     rust = _normalize(rust)
-    for table, key in V5_ONLY_STATIC_KEYS:
-        assert key in rust[table], f"v5-only key {table}.{key} is not in static.toml"
-        del rust[table][key]
+    for path in V5_ONLY_STATIC_KEYS:
+        table = rust
+        for key in path[:-1]:
+            table = table[key]
+        assert path[-1] in table, f"v5-only key {'.'.join(path)} is not in static.toml"
+        del table[path[-1]]
     differences = list(_diff(rust, expected))
     assert not differences, '\n'.join(differences)
 
