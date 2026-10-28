@@ -8,7 +8,6 @@
 # (no Cargo workspace change or new target directory).
 set -euo pipefail
 unset TMUX TMUX_PANE
-export PATH="$HOME/.cargo/bin:$PATH"
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 dest="${1:?usage: build_native.sh <plugins-dir>}/w7_native_fig"
 if [ -n "${MRSM_TEST_CONSOLE_NATIVE_FIXTURE:-}" ]; then
@@ -27,6 +26,7 @@ if [ -n "${CI:-}${GITHUB_ACTIONS:-}" ]; then
   echo 'CI requires the verified console-native fixture artifact; local SDK fallback is disabled.' >&2
   exit 2
 fi
+export PATH="$HOME/.cargo/bin:$PATH"
 deps="$repo/target/debug/deps"
 rlib="$(ls -t "$deps"/libmeerschaum_plugin-*.rlib 2>/dev/null | head -1 || true)"
 [ -n "$rlib" ] && [ -f "$rlib" ] || { echo "build the meerschaum-plugin rlib first (cargo build -p meerschaum-plugin)" >&2; exit 2; }

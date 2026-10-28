@@ -46,15 +46,18 @@ def test_cold_consumer_verifies_and_copies_without_any_sdk_or_rustc(producer, tm
     _, cli_manifest, manifest = fixture_manifest(producer, 'debug')
     env = {key: value for key, value in os.environ.items()
            if not key.startswith('MRSM_') and key not in ('TMUX', 'TMUX_PANE')}
-    home = tmp_path / 'empty-home'
-    home.mkdir()
-    env.update(CI='true', HOME=str(home), PATH='/usr/bin:/bin', PYTHON_BIN=sys.executable,
+    programs = tmp_path / 'consumer-programs'
+    programs.mkdir()
+    for name in ('dirname', 'git'):
+        (programs / name).symlink_to(shutil.which(name))
+    env.update(CI='true', PATH=str(programs), PYTHON_BIN=sys.executable,
                PYTHONPATH=str(repo), MRSM_TEST_CONSOLE_NATIVE_FIXTURE=str(manifest.parent),
                MRSM_TEST_CONSOLE_NATIVE_MANIFEST=str(manifest),
                MRSM_TEST_CONSOLE_NATIVE_PROFILE='debug',
                MRSM_TEST_ARTIFACT_MANIFEST=str(cli_manifest))
     plugins = tmp_path / 'plugins'
-    result = subprocess.run(['bash', str(repo / 'tests/console/build_native.sh'), str(plugins)],
+    assert shutil.which('rustc', path=env['PATH']) is None
+    result = subprocess.run(['/bin/bash', str(repo / 'tests/console/build_native.sh'), str(plugins)],
                             env=env, cwd=tmp_path, capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
     assert not (repo / 'target').exists()
