@@ -16,6 +16,12 @@ import pytest
 HEADER = re.compile(r'\d\d:\d\d:\d\d\.\d{3} \| (?P<module>[\w.:]+):(?P<line>\d+)')
 
 
+def _finish_sync_output():
+    """Drain background telemetry before changing debug or stderr capture windows."""
+    from meerschaum._core import flush_sync_statuses
+    flush_sync_statuses(timeout=10.0)
+
+
 def test_dprint_writes_to_stderr(capfd):
     from meerschaum.utils.debug import dprint
     dprint("hello from dprint")
@@ -51,11 +57,13 @@ def test_rust_debug_events_reach_dprint(sqlite_conn, capfd):
 
     success, msg = pipe.sync(docs)
     assert success, msg
+    _finish_sync_output()
     out, err = capfd.readouterr()
     assert 'meerschaum_connector_sql' not in out + err
 
     success, msg = pipe.sync([{'dt': '2024-01-02', 'v': 2}], debug=True)
     assert success, msg
+    _finish_sync_output()
     out, err = capfd.readouterr()
     assert 'meerschaum_connector_sql' not in out, out
     modules = {m.group('module') for m in HEADER.finditer(err)}
@@ -74,6 +82,7 @@ def test_debugging_context_manager(sqlite_conn, capfd):
     pipe = mrsm.Pipe('a', 'c', instance=sqlite_conn, columns={'datetime': 'dt'})
     success, msg = pipe.sync([{'dt': '2024-01-01', 'v': 1}])
     assert success, msg
+    _finish_sync_output()
     capfd.readouterr()
 
     with debugging():
@@ -102,6 +111,7 @@ def test_facade_methods_show_rust_debug_output(sqlite_conn, capfd, method, kwarg
     pipe = mrsm.Pipe('a', 'f_' + method, instance=sqlite_conn, columns={'datetime': 'dt'})
     success, msg = pipe.sync([{'dt': '2024-01-01', 'v': 1}])
     assert success, msg
+    _finish_sync_output()
     capfd.readouterr()
 
     getattr(pipe, method)(**kwargs)
@@ -136,6 +146,7 @@ def test_overlapping_debug_actions_leave_debug_off(sqlite_conn, capfd):
     pipe = mrsm.Pipe('a', 'overlap', instance=sqlite_conn, columns={'datetime': 'dt'})
     success, msg = pipe.sync([{'dt': '2024-01-01', 'v': 1}])
     assert success, msg
+    _finish_sync_output()
 
     first = threading.Thread(target=mrsm.entry, args=(['sh', 'sleep', '0.6', '--debug'],))
     second = threading.Thread(target=mrsm.entry, args=(['sh', 'sleep', '1.2', '--debug'],))
@@ -160,6 +171,7 @@ def test_debug_sql_hides_secret_filters(sqlite_conn, capfd):
     pipe = mrsm.Pipe('a', 'secret', instance=sqlite_conn, columns={'datetime': 'dt'})
     success, msg = pipe.sync([{'dt': '2024-01-01', 'password': 'other', 'token': 'x'}])
     assert success, msg
+    _finish_sync_output()
     capfd.readouterr()
 
     df = pipe.get_data(params={'password': 'hunter2', 'token': ['s3cr3t-a']}, debug=True)
