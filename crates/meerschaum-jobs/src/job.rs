@@ -182,6 +182,14 @@ impl Job {
         // existing legacy record; automatic API workers provide their explicit kind.
         if executor_keys == "local" && daemon.is_none() {
             mark_persistent_job(&mut patch);
+            // A job started from inside another job (a console run's `start pipeline NAME`) is
+            // that job's owner's (see `crate::ownership`). The `systemd` executor's jobs pass
+            // here too: their properties are a local job of the same name.
+            crate::ownership::inherit_parent_access(
+                &mut patch,
+                &crate::config::DaemonPaths::new(&ctx.paths, name).dir,
+                crate::ownership::current_job_dir(&ctx.paths).as_deref(),
+            );
         }
         if opts.externally_managed {
             patch.insert("externally_managed".into(), Value::Bool(true));
@@ -722,6 +730,18 @@ impl Job {
             .entry("label".to_string())
             .or_insert_with(|| Value::Str(crate::shlex::join(&self.sysargs)));
         props
+    }
+
+    /// Who the job belongs to (`owner`, `team`; see [`meerschaum_core::job_access`]): a job
+    /// started through the API server or the console records them, a local job belongs to
+    /// Everyone. A `systemd` or `api:` job reports what its executor recorded (an `api:`
+    /// server records the caller, whatever this job's own properties say).
+    pub fn access(&mut self) -> meerschaum_core::job_access::JobAccess {
+        let props = match self.executor() {
+            Some(ex) => ex.get_job_properties(&self.name),
+            None => self.daemon().properties(),
+        };
+        meerschaum_core::job_access::JobAccess::from_properties(&self.name, &props)
     }
 
     /// `delete_after_completion`.

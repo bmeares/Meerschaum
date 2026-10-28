@@ -508,6 +508,20 @@ impl NativeTx {
         collect_batches(self.conn.conn().as_mut(), sql, &[]).await
     }
 
+    /// Execute one statement with bound parameters (`driver::raw`).
+    pub(crate) async fn exec_with(&mut self, sql: &str, params: &[SqlParam]) -> Result<u64> {
+        self.conn.conn().execute(sql, params).await
+    }
+
+    /// Run a query with bound parameters and collect its rows (`driver::raw`).
+    pub(crate) async fn read_with(
+        &mut self,
+        sql: &str,
+        params: &[SqlParam],
+    ) -> Result<Vec<RecordBatch>> {
+        collect_batches(self.conn.conn().as_mut(), sql, params).await
+    }
+
     pub(crate) async fn commit(mut self) -> Result<()> {
         self.conn.conn().commit().await?;
         self.conn.in_tx = false;

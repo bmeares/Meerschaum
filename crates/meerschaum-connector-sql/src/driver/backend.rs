@@ -598,6 +598,53 @@ macro_rules! tx_ops {
                 Ok(vec![make_batch::<B>(&rows, &mut state)?])
             }
 
+            /// Execute one statement with bound parameters inside an open transaction
+            /// (`driver::raw`; SQLite has its own there).
+            #[allow(dead_code)]
+            pub(crate) async fn tx_exec_with(
+                tx: &mut sqlx::Transaction<'static, Db>,
+                sql: &str,
+                params: &[SqlParam],
+            ) -> Result<u64> {
+                let r = sqlx::Executor::execute(&mut **tx, bound::<B>(sql, params)).await?;
+                Ok(B::rows_affected(&r))
+            }
+
+            /// Run a query with bound parameters inside an open transaction and collect its rows
+            /// (`driver::raw`; SQLite has its own there).
+            #[allow(dead_code)]
+            pub(crate) async fn tx_read_with(
+                tx: &mut sqlx::Transaction<'static, Db>,
+                sql: &str,
+                params: &[SqlParam],
+            ) -> Result<Vec<RecordBatch>> {
+                if params.is_empty() {
+                    return tx_read(tx, sql).await;
+                }
+                let rows = sqlx::Executor::fetch_all(&mut **tx, bound::<B>(sql, params)).await?;
+                if rows.is_empty() {
+                    let marked = format!("{sql}{}", super::DESCRIBE_MARKER);
+                    let schema = match sqlx::Executor::prepare(
+                        &mut **tx,
+                        AssertSqlSafe(marked.as_str()).into_sql_str(),
+                    )
+                    .await
+                    {
+                        Ok(desc) => {
+                            let mut plans = B::plan(desc.columns());
+                            let empty = vec![Vec::new(); plans.len()];
+                            B::refine(&mut plans, &empty);
+                            batch::resolve_decimal_scales(&mut plans, &[]);
+                            batch::schema_for(&plans)
+                        }
+                        Err(_) => SchemaRef::new(Schema::empty()),
+                    };
+                    return Ok(vec![RecordBatch::new_empty(schema)]);
+                }
+                let mut state = None;
+                Ok(vec![make_batch::<B>(&rows, &mut state)?])
+            }
+
             /// Bound statements in one transaction, stopping (and rolling back) at the first
             /// failure.
             pub(crate) async fn exec_many_with(

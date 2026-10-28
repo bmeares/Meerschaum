@@ -11,6 +11,31 @@ use meerschaum_core::{Map, Value};
 
 // v5-only engine defaults are intentionally absent from the released v4 fixture.
 fn v4_view(value: &Value) -> Value {
+    // AC1/AC2 deliberately close registration and remove the implicit action grant. Compare
+    // these shipped defaults as v4 saw them; the access tests verify the new behavior itself.
+    if let Some(m) = value.as_map()
+        && m.contains_key("registration")
+        && m.contains_key("chaining")
+        && !m.contains_key("actions")
+    {
+        let mut out = Map::new();
+        for (key, value) in m {
+            let mut value = v4_view(value);
+            if key == "registration" {
+                if let Value::Map(ref mut registration) = value {
+                    registration.insert("users".into(), Value::Bool(true));
+                }
+                out.insert(key.clone(), value);
+                out.insert(
+                    "actions".into(),
+                    Value::from_json_str(r#"{"non_admin": true}"#).unwrap(),
+                );
+            } else {
+                out.insert(key.clone(), value);
+            }
+        }
+        return Value::Map(out);
+    }
     match value {
         Value::Map(m) => Value::Map(
             m.iter()
@@ -23,6 +48,11 @@ fn v4_view(value: &Value) -> Value {
                 // `api.dash.callbacks_require_session` (rc15, PARITY.md RC15-D-001) is v5-only.
                 .filter(|(k, v)| {
                     !(k.as_str() == "callbacks_require_session" && matches!(v, Value::Bool(_)))
+                })
+                // `meerschaum.dataframe` (rc15, PARITY.md RC15-R3-001) is v5-only.
+                .filter(|(k, v)| {
+                    !(k.as_str() == "dataframe"
+                        && matches!(v, Value::Str(s) if s == "polars" || s == "pandas"))
                 })
                 .map(|(k, v)| (k.clone(), v4_view(v)))
                 .collect(),

@@ -39,5 +39,6 @@ fred = { version = "10", default-features = false, features = [
 ] }
 
 [dev-dependencies]
+meerschaum-connector = { workspace = true, features = ["testing"] }
 tokio = { workspace = true }
 serde_json = { workspace = true }

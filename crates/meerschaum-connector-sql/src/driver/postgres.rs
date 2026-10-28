@@ -79,7 +79,10 @@ pub(crate) fn kind_for(type_name: &str) -> ColumnKind {
         "FLOAT4" => ColumnKind::Float32,
         "FLOAT8" => ColumnKind::Float64,
         "NUMERIC" => ColumnKind::NumericText,
-        "TEXT" | "VARCHAR" | "BPCHAR" | "NAME" | "CITEXT" | "UNKNOWN" => ColumnKind::Utf8,
+        // `CHAR` is sqlx's name of `bpchar` (`char(n)`), `"CHAR"` the one-byte `char`; their
+        // binary format, and `xml`'s, is the text itself.
+        "TEXT" | "VARCHAR" | "BPCHAR" | "CHAR" | "\"CHAR\"" | "NAME" | "CITEXT" | "XML"
+        | "UNKNOWN" => ColumnKind::Utf8,
         "JSON" | "JSONB" => ColumnKind::Json,
         "BYTEA" => ColumnKind::Bytes,
         "UUID" => ColumnKind::Uuid,
@@ -377,5 +380,8 @@ mod tests {
             ColumnKind::Geometry(GeometryEncoding::Ewkb)
         );
         assert_eq!(kind_for("INTERVAL"), ColumnKind::Raw);
+        // sqlx names `char(n)` (bpchar) `CHAR`.
+        assert_eq!(kind_for("CHAR"), ColumnKind::Utf8);
+        assert_eq!(kind_for("\"CHAR\""), ColumnKind::Utf8);
     }
 }

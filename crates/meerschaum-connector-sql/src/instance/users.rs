@@ -214,6 +214,16 @@ impl SqlConnector {
             .map(|v| v.to_string()))
     }
 
+    /// The user's email address (`None` when unset or empty).
+    pub async fn get_user_email(&self, user: &User) -> ConnectorResult<Option<String>> {
+        Ok(self
+            .user_column(user, "email")
+            .await?
+            .filter(|v| !matches!(v, SqlValue::Null))
+            .map(|v| v.to_string())
+            .filter(|e| !e.trim().is_empty()))
+    }
+
     /// `get_username(user_id)` (the `InstanceConnector` method, over `mrsm_users`).
     pub async fn get_username(&self, user_id: &Value) -> ConnectorResult<Option<Value>> {
         let table = self.instance_table_name("mrsm_users");
@@ -259,7 +269,37 @@ impl SqlConnector {
                 user.username
             ));
         }
+        // The user leaves every team and their pipes keep their team, without an owner (every
+        // surface reaches this method: the trait, the Python façade, the API server).
+        let forgotten = meerschaum_connector::teams::forget_user(self, &user.username).await;
+        if !forgotten.success {
+            tracing::warn!("{}", forgotten.message);
+        }
         SuccessTuple::ok(format!("Successfully deleted user '{}'", user.username))
+    }
+
+    /// `set_user_attributes(user, attributes)`: replace the user's attributes and nothing else
+    /// (their type, email and password stay).
+    pub async fn set_user_attributes(&self, user: &User, attributes: &Map) -> SuccessTuple {
+        let user_id = match self.resolve_user_id(user).await {
+            Ok(Some(id)) => id,
+            Ok(None) => {
+                return SuccessTuple::fail(format!("User '{}' does not exist.", user.username));
+            }
+            Err(e) => return SuccessTuple::fail(e.to_string()),
+        };
+        let table = self.instance_table_name("mrsm_users");
+        let f = self.flavor;
+        let query = format!(
+            "UPDATE {table} SET attributes={} WHERE {table}.user_id = {}",
+            placeholder(f, 1),
+            placeholder(f, 2)
+        );
+        let params = vec![self.json_param(attributes), id_param(&user_id)];
+        match self.exec_params(&query, &params).await {
+            Some(_) => SuccessTuple::ok(format!("Successfully edited user '{}'.", user.username)),
+            None => SuccessTuple::fail(format!("Failed to edit user '{}'.", user.username)),
+        }
     }
 
     /// `get_users()`: the registered usernames.

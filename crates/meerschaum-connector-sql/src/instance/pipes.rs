@@ -81,6 +81,17 @@ impl SqlConnector {
         meerschaum_connector::protected_refusal(self, pipe, op)
     }
 
+    /// The refusal of `op` on `pipe` when its locks refuse it (`parameters['locks']`, read from
+    /// the registration: [`meerschaum_connector::locks::lock_refusal`]); `None` when allowed.
+    /// Every write method checks it after [`Self::protected_refusal`].
+    pub async fn lock_refusal(
+        &self,
+        pipe: &Pipe,
+        op: meerschaum_core::access::LockOp,
+    ) -> Option<SuccessTuple> {
+        meerschaum_connector::locks::lock_refusal(self, pipe, op).await
+    }
+
     /// `Err(message)` when this connector is protected and writes are not allowed: the check
     /// for writes that do not concern one pipe (raw SQL from plugins or the façade).
     pub fn check_writable(&self, op: &str) -> Result<(), String> {
@@ -252,6 +263,10 @@ impl SqlConnector {
         if let Some(refused) = self.protected_refusal(pipe, "edit") {
             return refused;
         }
+        // A `parameters` lock allows editing `locks` only.
+        if let Some(refused) = meerschaum_connector::locks::edit_refusal(self, pipe, patch).await {
+            return refused;
+        }
         let id = match self.get_pipe_id(pipe).await {
             Ok(Some(id)) => id,
             Ok(None) => {
@@ -289,6 +304,12 @@ impl SqlConnector {
     /// `Pipe.delete()` beforehand).
     pub async fn delete_pipe(&self, pipe: &Pipe) -> SuccessTuple {
         if let Some(refused) = self.protected_refusal(pipe, "delete") {
+            return refused;
+        }
+        if let Some(refused) = self
+            .lock_refusal(pipe, meerschaum_core::access::LockOp::Delete)
+            .await
+        {
             return refused;
         }
         let id = match self.get_pipe_id(pipe).await {

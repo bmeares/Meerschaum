@@ -40,12 +40,27 @@ pub fn random_alnum(length: usize) -> String {
 /// `Daemon.write_properties()`: move the existing file to `<random 8>.json`, write the new one,
 /// then delete the backup (or restore it if writing failed).
 pub fn write_properties(path: &Path, props: &Map) -> SuccessTuple {
+    write_properties_with(path, props, true)
+}
+
+/// [`write_properties`] into a job directory that must still exist: a directory that was deleted
+/// (the job was deleted while its supervisor ran) is never created again, and the write fails.
+pub fn write_existing_properties(path: &Path, props: &Map) -> SuccessTuple {
+    write_properties_with(path, props, false)
+}
+
+fn write_properties_with(path: &Path, props: &Map, create_dir: bool) -> SuccessTuple {
     let Some(dir) = path.parent() else {
         return SuccessTuple::fail("Invalid properties path.");
     };
+    if !create_dir && !dir.is_dir() {
+        return SuccessTuple::fail("The job's directory does not exist.");
+    }
     let backup = dir.join(format!("{}.json", random_alnum(8)));
     let mut result = (|| -> std::io::Result<()> {
-        fs::create_dir_all(dir)?;
+        if create_dir {
+            fs::create_dir_all(dir)?;
+        }
         if path.exists() {
             fs::rename(path, &backup)?;
         }
@@ -67,11 +82,21 @@ pub fn write_properties(path: &Path, props: &Map) -> SuccessTuple {
     result
 }
 
+/// The properties whose value on disk always wins over an in-memory copy: who a job belongs to
+/// (see [`meerschaum_core::job_access`]). Only the API server, the console and a team rename or
+/// deletion write them, so a supervisor (or any `Daemon`) holding older properties never puts a
+/// renamed or deleted team back.
+pub const FILE_OWNED_KEYS: [&str; 2] = [
+    meerschaum_core::job_access::OWNER_KEY,
+    meerschaum_core::job_access::TEAM_KEY,
+];
+
 /// The getter `Daemon.properties`: merge the file's properties into the in-memory ones.
 ///
 /// - an empty in-memory dict takes the file's properties;
 /// - an in-memory `result` of `None` yields to a non-`None` result on disk;
-/// - then the file's properties are patched with the in-memory ones (in-memory wins).
+/// - then the file's properties are patched with the in-memory ones (in-memory wins), except
+///   for [`FILE_OWNED_KEYS`], whose value in the file wins (v5).
 pub fn merge_properties(memory: &Map, file: Option<&Map>) -> Map {
     let file_props = file.cloned().unwrap_or_default();
     let mut mem = if memory.is_empty() {
@@ -84,7 +109,13 @@ pub fn merge_properties(memory: &Map, file: Option<&Map>) -> Map {
     if mem_result_none && file_result_some {
         mem.shift_remove("result");
     }
-    apply_patch_maps(&file_props, &mem)
+    let mut merged = apply_patch_maps(&file_props, &mem);
+    for key in FILE_OWNED_KEYS {
+        if let Some(value) = file_props.get(key) {
+            merged.insert(key.to_string(), value.clone());
+        }
+    }
+    merged
 }
 
 /// `.stop.json`: when and how a job was manually stopped.
@@ -160,6 +191,24 @@ mod tests {
     }
 
     #[test]
+    fn the_file_owns_who_a_job_belongs_to() {
+        // A team renamed on disk while a supervisor held the old one in memory.
+        let file = map(r#"{"label": "x", "owner": "alice", "team": "Analytics"}"#);
+        let mem = map(r#"{"label": "y", "owner": "alice", "team": "Data"}"#);
+        let merged = merge_properties(&mem, Some(&file));
+        assert_eq!(
+            dumps(&Value::Map(merged)),
+            r#"{"label": "y", "owner": "alice", "team": "Analytics"}"#
+        );
+        // Moved to Everyone (`null`), and a new job's record before its first write.
+        let file = map(r#"{"team": null}"#);
+        let merged = merge_properties(&mem, Some(&file));
+        assert_eq!(merged.get("team"), Some(&Value::Null));
+        let merged = merge_properties(&mem, None);
+        assert_eq!(merged.get("team").and_then(Value::as_str), Some("Data"));
+    }
+
+    #[test]
     fn write_and_read() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("jobs").join("x").join("properties.json");
@@ -171,6 +220,19 @@ mod tests {
             "{\"label\": \"\\u00e9\", \"result\": null}"
         );
         assert_eq!(fs::read_dir(path.parent().unwrap()).unwrap().count(), 1);
+        assert_eq!(read_properties(&path), Some(props));
+    }
+
+    #[test]
+    fn existing_writes_never_create_the_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let job_dir = dir.path().join("jobs").join("gone");
+        let path = job_dir.join("properties.json");
+        let props = map(r#"{"label": "x"}"#);
+        assert!(!write_existing_properties(&path, &props).success);
+        assert!(!job_dir.exists());
+        fs::create_dir_all(&job_dir).unwrap();
+        assert!(write_existing_properties(&path, &props).success);
         assert_eq!(read_properties(&path), Some(props));
     }
 }

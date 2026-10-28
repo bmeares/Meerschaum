@@ -752,10 +752,23 @@ impl Connector for NativeConnector {
 }
 #[async_trait]
 impl InstanceConnector for NativeConnector {
+    // Locks (`parameters['locks']`) apply to native plugin instances too.
     async fn delete_pipe(&self, p: &Pipe) -> SuccessTuple {
+        if let Some(refused) =
+            meerschaum_connector::lock_refusal(self, p, meerschaum_core::access::LockOp::Delete)
+                .await
+        {
+            return refused;
+        }
         self.success("delete_pipe", pipe_context(p), None)
     }
     async fn drop_pipe_indices(&self, p: &Pipe) -> SuccessTuple {
+        if let Some(refused) =
+            meerschaum_connector::lock_refusal(self, p, meerschaum_core::access::LockOp::Schema)
+                .await
+        {
+            return refused;
+        }
         self.success("drop_pipe_indices", pipe_context(p), None)
     }
     async fn create_pipe_indices(&self, p: &Pipe) -> SuccessTuple {
@@ -768,6 +781,9 @@ impl InstanceConnector for NativeConnector {
         self.success("analyze_pipe", pipe_context(p), None)
     }
     async fn edit_pipe(&self, p: &Pipe, patch: bool) -> SuccessTuple {
+        if let Some(refused) = meerschaum_connector::edit_refusal(self, p, patch).await {
+            return refused;
+        }
         let mut c = pipe_context(p);
         c["patch"] = json!(patch);
         self.success("edit_pipe", c, None)
@@ -783,14 +799,37 @@ impl InstanceConnector for NativeConnector {
         self.success("vacuum_pipe", c, None)
     }
     async fn partition_pipe(&self, p: &Pipe, chunk_minutes: Option<i64>) -> SuccessTuple {
+        for op in [
+            meerschaum_core::access::LockOp::Schema,
+            meerschaum_core::access::LockOp::EditParameters,
+        ] {
+            if let Some(refused) = meerschaum_connector::lock_refusal(self, p, op).await {
+                return refused;
+            }
+        }
         let mut c = pipe_context(p);
         c["chunk_minutes"] = json!(chunk_minutes);
         self.success("partition_pipe", c, None)
     }
     async fn clear_pipe(&self, p: &Pipe, q: &DataQuery) -> SuccessTuple {
+        if let Some(refused) =
+            meerschaum_connector::lock_refusal(self, p, meerschaum_core::access::LockOp::Clear)
+                .await
+        {
+            return refused;
+        }
         self.success("clear_pipe", query_context(p, q), None)
     }
     async fn deduplicate_pipe(&self, p: &Pipe, q: &DataQuery) -> SuccessTuple {
+        if let Some(refused) = meerschaum_connector::lock_refusal(
+            self,
+            p,
+            meerschaum_core::access::LockOp::Deduplicate,
+        )
+        .await
+        {
+            return refused;
+        }
         self.success("deduplicate_pipe", query_context(p, q), None)
     }
     async fn get_pipe_size(&self, p: &Pipe) -> ConnectorResult<Option<i64>> {
@@ -835,6 +874,11 @@ impl InstanceConnector for NativeConnector {
         self.value("pipe_exists", pipe_context(p))
     }
     async fn drop_pipe(&self, p: &Pipe) -> SuccessTuple {
+        if let Some(refused) =
+            meerschaum_connector::lock_refusal(self, p, meerschaum_core::access::LockOp::Drop).await
+        {
+            return refused;
+        }
         self.success("drop_pipe", pipe_context(p), None)
     }
     async fn get_pipe_data(&self, p: &Pipe, q: &DataQuery) -> ConnectorResult<Option<Frame>> {
@@ -847,6 +891,15 @@ impl InstanceConnector for NativeConnector {
         self.value("get_pipe_columns_types", pipe_context(p))
     }
     async fn sync_pipe(&self, p: &Pipe, data: Frame, opts: &SyncOptions) -> SuccessTuple {
+        if let Some(refused) = meerschaum_connector::lock_refusal(
+            self,
+            p,
+            meerschaum_connector::locks::sync_op(opts.replace),
+        )
+        .await
+        {
+            return refused;
+        }
         let mut ctx = pipe_context(p);
         ctx["options"] = json!({"check_existing":opts.check_existing,"chunksize":opts.chunksize,"begin":bound(opts.begin.as_ref()),"end":bound(opts.end.as_ref()),"extra":opts.extra});
         self.success("sync_pipe", ctx, Some(&data))

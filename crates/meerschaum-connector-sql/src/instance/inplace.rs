@@ -220,6 +220,12 @@ impl SqlConnector {
         if let Some(refused) = self.protected_refusal(pipe, "sync") {
             return refused;
         }
+        if let Some(refused) = self
+            .lock_refusal(pipe, meerschaum_connector::locks::sync_op(replace))
+            .await
+        {
+            return refused;
+        }
         let flavor = self.flavor;
         let pipe = &self.prepare_pipe(pipe).await;
         let sp = match self.sql_pipe(pipe) {

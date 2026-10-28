@@ -341,7 +341,18 @@ fn load_error_outcome(error: &LoadError) -> J {
 /// (PARITY.md, G5).
 fn without_v5_defaults(spec: J) -> J {
     match spec {
-        J::Array(items) => J::Array(items.into_iter().map(without_v5_defaults).collect()),
+        J::Array(items) => J::Array(
+            items
+                .into_iter()
+                .filter(|item| {
+                    // The new meerschaum.yaml default, in the recorded tagged mapping form.
+                    item != &serde_json::json!([
+                        {"t": "str", "v": "dataframe"}, {"t": "str", "v": "polars"}
+                    ])
+                })
+                .map(without_v5_defaults)
+                .collect(),
+        ),
         J::Object(map) => {
             if map.get("t").and_then(J::as_str) == Some("str")
                 && let Some(text) = map.get("v").and_then(J::as_str)
@@ -371,6 +382,21 @@ fn without_v5_defaults(spec: J) -> J {
                 {
                     dash.remove("callbacks_require_session");
                 }
+                // Intentional defaults: Polars output and closed registration after the
+                // first administrator, with role-based actions (RC15-R3-001, AC1/AC2).
+                if let Some(meerschaum) = parsed.get_mut("meerschaum").and_then(J::as_object_mut) {
+                    meerschaum.remove("dataframe");
+                }
+                if let Some(permissions) = parsed
+                    .get_mut("api")
+                    .and_then(|api| api.get_mut("permissions"))
+                    .and_then(J::as_object_mut)
+                    && permissions.contains_key("registration")
+                    && !permissions.contains_key("actions")
+                {
+                    permissions["registration"]["users"] = J::Bool(true);
+                    permissions.insert("actions".into(), serde_json::json!({"non_admin": true}));
+                }
                 return serde_json::json!({"t": "str", "json": parsed});
             }
             J::Object(
@@ -379,6 +405,7 @@ fn without_v5_defaults(spec: J) -> J {
                     .collect(),
             )
         }
+        J::String(text) => J::String(text.replace("\ndataframe: polars\n\n", "\n")),
         other => other,
     }
 }
@@ -546,7 +573,11 @@ fn registry_config_cases_match_python() {
                     .replace(&meerschaum_core::config::paths::posix(&root), "{ROOT}"),
             );
             let want = text.as_str().unwrap();
-            assert_eq!(actual, want, "case {name} file {file}");
+            assert_eq!(
+                actual.replace("\ndataframe: polars\n\n", "\n"),
+                want,
+                "case {name} file {file}"
+            );
         }
         // What v4 printed and warned.
         let scrub =

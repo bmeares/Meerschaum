@@ -307,6 +307,12 @@ impl ValkeyConnector {
         if let Some(refused) = meerschaum_connector::protected_refusal(self, pipe, "drop") {
             return refused;
         }
+        if let Some(refused) =
+            meerschaum_connector::lock_refusal(self, pipe, meerschaum_core::access::LockOp::Drop)
+                .await
+        {
+            return refused;
+        }
         match self.pipe_exists(pipe).await {
             Ok(true) => {}
             Ok(false) => {
@@ -385,6 +391,17 @@ impl ValkeyConnector {
     /// Drop the pipe and delete its registration.
     pub async fn delete_pipe(&self, pipe: &Pipe) -> SuccessTuple {
         if let Some(refused) = meerschaum_connector::protected_refusal(self, pipe, "delete") {
+            return refused;
+        }
+        // Deleting drops the pipe's documents first: a `drop` or `delete` lock refuses it
+        // before anything changes.
+        if let Some(refused) = meerschaum_connector::lock_refusal(
+            self,
+            pipe,
+            meerschaum_core::access::LockOp::DeleteAndDrop,
+        )
+        .await
+        {
             return refused;
         }
         let dropped = self.drop_pipe(pipe).await;
@@ -527,6 +544,15 @@ impl ValkeyConnector {
     /// documents. Returns `Inserted {n}, updated {m} rows.` (`Upserted {m} rows.` for upserts).
     pub async fn sync_pipe(&self, pipe: &Pipe, df: Frame, opts: &SyncOptions) -> SuccessTuple {
         if let Some(refused) = meerschaum_connector::protected_refusal(self, pipe, "sync") {
+            return refused;
+        }
+        if let Some(refused) = meerschaum_connector::lock_refusal(
+            self,
+            pipe,
+            meerschaum_connector::locks::sync_op(opts.replace),
+        )
+        .await
+        {
             return refused;
         }
         match self.sync_pipe_inner(pipe, df, opts).await {
@@ -848,6 +874,12 @@ impl ValkeyConnector {
     /// unfiltered rowcount still counts them.
     pub async fn clear_pipe(&self, pipe: &Pipe, query: &DataQuery) -> SuccessTuple {
         if let Some(refused) = meerschaum_connector::protected_refusal(self, pipe, "clear") {
+            return refused;
+        }
+        if let Some(refused) =
+            meerschaum_connector::lock_refusal(self, pipe, meerschaum_core::access::LockOp::Clear)
+                .await
+        {
             return refused;
         }
         let dt_col = pipe.column("datetime");

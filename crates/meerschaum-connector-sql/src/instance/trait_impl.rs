@@ -140,6 +140,41 @@ impl InstanceConnector for SqlConnector {
         Some(self.pipe_table_name(&sp))
     }
 
+    fn pipe_target_aliases(&self, pipe: &Pipe) -> Vec<String> {
+        let Ok(sp) = self.sql_pipe(pipe) else {
+            return Vec::new();
+        };
+        // `sql_item_name` also truncates explicit targets, which `Pipe::target` leaves
+        // intact. Keep its plain name as well as its qualified/quoted reference.
+        let physical = crate::ident::truncate_item_name(&sp.target, self.flavor);
+        let mut aliases = vec![physical.clone(), self.pipe_table_name(&sp)];
+        if let Some(limit) = self.sql_identifier_byte_limit() {
+            // PostgreSQL clips identifiers on a UTF-8 boundary, after the compatibility
+            // naming algorithm has applied its character limit.
+            let mut end = physical.len().min(limit);
+            while !physical.is_char_boundary(end) {
+                end -= 1;
+            }
+            let clipped = physical[..end].to_string();
+            if !aliases.contains(&clipped) {
+                aliases.push(clipped);
+            }
+        }
+        aliases
+    }
+
+    fn sql_identifier_byte_limit(&self) -> Option<usize> {
+        matches!(
+            self.flavor,
+            crate::Flavor::Postgresql
+                | crate::Flavor::Postgis
+                | crate::Flavor::Timescaledb
+                | crate::Flavor::TimescaledbHa
+                | crate::Flavor::Citus
+        )
+        .then_some(63)
+    }
+
     async fn pipe_exists(&self, pipe: &Pipe) -> ConnectorResult<bool> {
         self.require_schema().await?;
         let pipe = &self.prepare_pipe(pipe).await;
@@ -448,7 +483,15 @@ impl InstanceConnector for SqlConnector {
         if let Err(e) = self.require_schema().await {
             return SuccessTuple::fail(e.to_string());
         }
+        // It also removes the user from every team and clears their ownership of pipes.
         SqlConnector::delete_user(self, user).await
+    }
+
+    async fn set_user_attributes(&self, user: &User, attributes: &Map) -> SuccessTuple {
+        if let Err(e) = self.require_schema().await {
+            return SuccessTuple::fail(e.to_string());
+        }
+        SqlConnector::set_user_attributes(self, user, attributes).await
     }
 
     async fn get_user_password_hash(&self, user: &User) -> ConnectorResult<Option<String>> {
@@ -464,6 +507,11 @@ impl InstanceConnector for SqlConnector {
     async fn get_user_attributes(&self, user: &User) -> ConnectorResult<Option<Map>> {
         self.require_schema().await?;
         SqlConnector::get_user_attributes(self, user).await
+    }
+
+    async fn get_user_email(&self, user: &User) -> ConnectorResult<Option<String>> {
+        self.require_schema().await?;
+        SqlConnector::get_user_email(self, user).await
     }
 
     // Plugins (`_plugins.py`): the `mrsm_plugins` table.

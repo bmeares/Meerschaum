@@ -1334,6 +1334,12 @@ impl SqlConnector {
         if let Some(refused) = self.protected_refusal(pipe, "drop") {
             return refused;
         }
+        if let Some(refused) = self
+            .lock_refusal(pipe, meerschaum_core::access::LockOp::Drop)
+            .await
+        {
+            return refused;
+        }
         let sp = match self.sql_pipe(pipe) {
             Ok(sp) => sp,
             Err(e) => return SuccessTuple::fail(e.to_string()),
@@ -1380,6 +1386,12 @@ impl SqlConnector {
     /// `params`) without dropping the table.
     pub async fn clear_pipe(&self, pipe: &Pipe, query: &DataQuery) -> SuccessTuple {
         if let Some(refused) = self.protected_refusal(pipe, "clear") {
+            return refused;
+        }
+        if let Some(refused) = self
+            .lock_refusal(pipe, meerschaum_core::access::LockOp::Clear)
+            .await
+        {
             return refused;
         }
         match self.clear_pipe_inner(pipe, query).await {
@@ -1517,6 +1529,12 @@ impl SqlConnector {
     pub async fn deduplicate_pipe(&self, pipe: &Pipe, query: &DataQuery) -> SuccessTuple {
         let _ = query;
         if let Some(refused) = self.protected_refusal(pipe, "deduplicate") {
+            return refused;
+        }
+        if let Some(refused) = self
+            .lock_refusal(pipe, meerschaum_core::access::LockOp::Deduplicate)
+            .await
+        {
             return refused;
         }
         match self.deduplicate_pipe_inner(pipe).await {

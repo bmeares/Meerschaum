@@ -322,6 +322,13 @@ impl SqlConnector {
         if let Some(refused) = self.protected_refusal(pipe, "change the table of") {
             return refused;
         }
+        // A table schema change is `drop`-class: a `drop` lock refuses it.
+        if let Some(refused) = self
+            .lock_refusal(pipe, meerschaum_core::access::LockOp::Schema)
+            .await
+        {
+            return refused;
+        }
         let fresh = match self.get_pipe_schema_plan(pipe).await {
             Ok(p) => p,
             Err(e) => return SuccessTuple::fail(e.to_string()),

@@ -341,6 +341,28 @@ impl ValkeyConnector {
         }))
     }
 
+    /// Replace a user's attributes (the `attributes` key) and nothing else.
+    pub async fn valkey_set_user_attributes(&self, user: &User, attributes: &Map) -> SuccessTuple {
+        let user_id = match &user.user_id {
+            Some(v) if !v.is_null() => meerschaum_core::pyfmt::py_str(v),
+            _ => match self.valkey_get_user_id(user).await {
+                Ok(Some(id)) => id,
+                Ok(None) => {
+                    return SuccessTuple::fail(format!("User '{}' does not exist.", user.username));
+                }
+                Err(e) => return SuccessTuple::fail(format!("Failed to edit user:\n{e}")),
+            },
+        };
+        let key = match get_user_key(&user_id, "attributes", false) {
+            Ok(k) => k,
+            Err(e) => return SuccessTuple::fail(format!("Failed to edit user:\n{e}")),
+        };
+        match self.set(&key, &compact_json(attributes)).await {
+            Ok(_) => SuccessTuple::success(),
+            Err(e) => SuccessTuple::fail(format!("Failed to edit user:\n{e}")),
+        }
+    }
+
     /// Delete a user's keys and its row in `mrsm_users`.
     pub async fn valkey_delete_user(&self, user: &User) -> SuccessTuple {
         let user_id = match self.resolved_user_id(user).await {
@@ -388,6 +410,12 @@ impl ValkeyConnector {
                 }
             }
             return SuccessTuple::fail(format!("Failed to delete user:\n{e}"));
+        }
+        // The user leaves every team and their pipes keep their team, without an owner (every
+        // surface reaches this method: the trait, the Python façade, the API server).
+        let forgotten = meerschaum_connector::teams::forget_user(self, &user.username).await;
+        if !forgotten.success {
+            tracing::warn!("{}", forgotten.message);
         }
         SuccessTuple::success()
     }

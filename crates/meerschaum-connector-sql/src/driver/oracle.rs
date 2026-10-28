@@ -126,14 +126,36 @@ impl ToSql for Varchar2Text {
     }
 }
 
+/// A float bound as `BINARY_DOUBLE`: a `NUMBER` bind holds magnitudes up to about 1e126 and no
+/// infinities (`DPI-1019: buffer size of 22 is too small` beyond), which `BINARY_DOUBLE`
+/// columns (and python-oracledb's float binds) accept.
+struct BinaryDouble(f64);
+
+impl ToSql for BinaryDouble {
+    fn oratype(&self, _conn: &Connection) -> oracle::Result<OracleType> {
+        Ok(OracleType::BinaryDouble)
+    }
+
+    fn to_sql(&self, val: &mut OraValue) -> oracle::Result<()> {
+        self.0.to_sql(val)
+    }
+}
+
+/// Whether a float fits a `NUMBER` bind (finite, magnitude below 1e126).
+fn fits_number(f: f64) -> bool {
+    f.is_finite() && f.abs() < 1e126
+}
+
 /// A bound parameter. Booleans bind as `0` / `1` (`NUMBER(1)`, as v4 stores them; `BOOLEAN`
-/// columns exist only on 23ai) and `NULL` as a typeless `VARCHAR2`.
+/// columns exist only on 23ai) and `NULL` as a typeless `VARCHAR2`. Floats bind as `NUMBER`
+/// (exact decimal digits), and as `BINARY_DOUBLE` when `NUMBER` cannot hold them.
 pub(crate) fn to_sql_param(p: &SqlParam) -> Box<dyn ToSql + Send> {
     match p {
         SqlParam::Null => Box::new(OracleType::Varchar2(1)),
         SqlParam::Bool(b) => Box::new(*b as i64),
         SqlParam::Int(i) => Box::new(*i),
-        SqlParam::Float(f) => Box::new(*f),
+        SqlParam::Float(f) if fits_number(*f) => Box::new(*f),
+        SqlParam::Float(f) => Box::new(BinaryDouble(*f)),
         SqlParam::Text(s) => Box::new(Varchar2Text(s.clone())),
         SqlParam::Bytes(b) => Box::new(b.clone()),
         SqlParam::Json(j) => Box::new(Varchar2Text(j.to_string())),

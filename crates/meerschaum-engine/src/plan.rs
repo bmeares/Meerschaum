@@ -23,6 +23,7 @@
 use std::collections::{BTreeSet, HashMap};
 use std::fmt;
 
+use meerschaum_core::access::LockOp;
 use meerschaum_core::success::Bound;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
@@ -53,6 +54,9 @@ pub enum Action {
     Root,
     /// A parent failed or cannot be reached.
     UpstreamFailed,
+    /// The pipe is locked against this sync (`parameters['locks']`: `sync`, or `drop` /
+    /// `clear` for a rebuild): it is not synced, and pipes downstream use its current data.
+    Locked,
 }
 
 impl Action {
@@ -67,6 +71,7 @@ impl Action {
             Action::Observe => "observe",
             Action::Root => "root",
             Action::UpstreamFailed => "upstream_failed",
+            Action::Locked => "locked",
         }
     }
 
@@ -455,6 +460,34 @@ impl Plan {
 /// The end of a rebuild's reason while it waits for approval in an interactive run.
 const CONFIRM: &str = "(approve it, or pass --yes)";
 
+/// The reason a node is planned [`Action::Locked`] (`None` when its locks allow `op`):
+/// `{prefix}it is locked (sync): not synced, and pipes downstream use its current data. Unlock
+/// it with `mrsm unlock pipes ... --locks sync`.`
+fn locked_reason(
+    pipe: &meerschaum_core::Pipe,
+    locks: &meerschaum_core::access::Locks,
+    op: LockOp,
+    prefix: &str,
+) -> Option<String> {
+    let held = locks.blocking(op);
+    if held.is_empty() {
+        return None;
+    }
+    let to_unlock: Vec<meerschaum_core::access::Lock> = op
+        .locks()
+        .iter()
+        .copied()
+        .filter(|l| locks.contains(*l))
+        .collect();
+    let names: Vec<&str> = held.iter().map(|l| l.name()).collect();
+    Some(format!(
+        "{prefix}it is locked ({}): not synced, and pipes downstream use its current data. \
+         Unlock it with `{}`",
+        names.join(", "),
+        meerschaum_core::access::unlock_command(pipe, &to_unlock)
+    ))
+}
+
 /// One unit past a watermark for [`PlanOptions::inclusive_cap`]: a minute on a datetime axis
 /// (`get_chunk_bounds`: `end += timedelta(minutes=1)`), 1 on an integer axis.
 fn cap_unit(axis: &Axis) -> i64 {
@@ -770,6 +803,11 @@ pub async fn plan_node<S: StateSource>(
         let run = options.resumed_from.as_deref().unwrap_or("the resumed run");
         return out.set(Action::Skip, format!("already synced in run {run}"));
     }
+    // Locks (`parameters['locks']`): a pipe locked against syncs is not synced in any run.
+    let locks = meerschaum_core::access::Locks::of_pipe(&node.pipe);
+    if let Some(reason) = locked_reason(&node.pipe, &locks, LockOp::Sync, "") {
+        return out.set(Action::Locked, reason);
+    }
     let user_v4 = Bounds {
         begin: options.begin.map_or(Begin::Default, Begin::At),
         end: options.end,
@@ -954,6 +992,17 @@ pub async fn plan_node<S: StateSource>(
             Interval::new(None, cap)
         };
         let what = "its definition changed (SQL, fetch, dtypes or columns)";
+        // A rebuild clears the table and syncs it again: a `drop` or `clear` lock refuses it
+        // (`--yes` never bypasses a lock).
+        if let Some(reason) = locked_reason(
+            &node.pipe,
+            &locks,
+            LockOp::Rebuild,
+            &format!("{what}, but "),
+        ) {
+            out.consumes.clear();
+            return out.set(Action::Locked, reason);
+        }
         if options.yes || options.auto_rebuild {
             out.bounds = Some(to_bounds(axis, &cap_iv));
             out.clear = true;

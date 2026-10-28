@@ -581,13 +581,28 @@ async fn sync_inner(
 
     // `pipe.parameters`: the registered parameters patched with the in-memory ones.
     let mut pipe = pipe.clone();
+    let mut registered_parameters: Option<meerschaum_core::Map> = None;
     if !args.parameters_loaded
         && !pipe.temporary
         && let Ok(attrs) = instance.get_pipe_attributes(&pipe).await
         && let Some(Value::Map(registered)) = attrs.get("parameters")
     {
         let merged = apply_patch_maps(registered, pipe.raw_parameters());
+        registered_parameters = Some(registered.clone());
         pipe.set_parameters(merged);
+    }
+    // Locks (`parameters['locks']`, the registered ones): a locked pipe refuses the sync before
+    // anything is fetched. A graph run's pipes carry their registered parameters already.
+    if args.parameters_loaded {
+        registered_parameters = Some(pipe.raw_parameters().clone());
+    }
+    let replacing = args.replace || (input.is_none() && fetch_replace(&pipe));
+    if let Some(refused) = meerschaum_connector::locks::refusal_of(
+        &pipe,
+        registered_parameters.as_ref(),
+        meerschaum_connector::locks::sync_op(replacing),
+    ) {
+        return refused.into();
     }
     let (mut pipe, warnings) = if env.known.is_none()
         && meerschaum_connector::template::needs_instance_resolution(&pipe)

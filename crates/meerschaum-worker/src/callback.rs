@@ -153,7 +153,8 @@ pub async fn sync_chunk_native(
         pipe.update_parameters(patch);
         if registered && !pipe.temporary {
             let res = instance.edit_pipe(&pipe, false).await;
-            if !res.success {
+            // A `parameters` lock keeps the parameters as they are; the sync goes on.
+            if !res.success && !meerschaum_connector::locks::refused_by_lock(&res) {
                 tracing::warn!(
                     "Failed to capture new special columns for {pipe}:\n{}",
                     res.message

@@ -160,6 +160,9 @@ impl TestEnv {
             ),
             ("MRSM_WORKER_ALLOW_CRASH".to_string(), "1".to_string()),
             ("PYTHONDONTWRITEBYTECODE".to_string(), "1".to_string()),
+            // The test plugins are v4's (pandas): a fresh root would hand them Polars frames
+            // (`meerschaum:dataframe`, rc15).
+            ("MRSM_DATAFRAME".to_string(), "pandas".to_string()),
         ];
         env.extend(self.extra_env.iter().cloned());
         env

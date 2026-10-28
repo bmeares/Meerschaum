@@ -12,10 +12,62 @@ use meerschaum_connector::{ConnectorResult, DataQuery, DateBound, SyncOptions};
 use meerschaum_core::{Map, Pipe, SyncResult};
 use meerschaum_kernel::Frame;
 
+use crate::ident::{sql_item_name, truncate_item_name};
 use crate::instance::SqlConnector;
 use crate::instance::data::{DataQueryOptions, PipeState, pipe_dtypes};
-use crate::instance::sync::InternalSync;
+use crate::instance::sync::{InternalSync, ToSqlExtras};
 use crate::pipe::SqlPipe;
+
+/// How `SQLConnector.to_sql()` treats a table that already exists (`if_exists`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IfExists {
+    /// Refuse (`Table '...' already exists.`).
+    Fail,
+    /// Drop it and create it again from the frame.
+    Replace,
+    /// Insert into it as it is.
+    Append,
+}
+
+impl std::str::FromStr for IfExists {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "fail" => Ok(IfExists::Fail),
+            "replace" => Ok(IfExists::Replace),
+            "append" => Ok(IfExists::Append),
+            other => Err(format!("'{other}' is not valid for if_exists")),
+        }
+    }
+}
+
+/// The `CREATE TABLE` of a `to_sql` table: one column per frame column, typed from
+/// `column_types` (`TEXT` for a column without a type), in the frame's order.
+pub fn to_sql_create_table_query(
+    table: &str,
+    flavor: crate::Flavor,
+    schema: Option<&str>,
+    columns: &[String],
+    column_types: &IndexMap<String, String>,
+) -> String {
+    let cols: Vec<String> = columns
+        .iter()
+        .map(|c| {
+            let typ = column_types
+                .get(c)
+                .map(String::as_str)
+                .filter(|t| !t.trim().is_empty())
+                .unwrap_or("TEXT");
+            format!("{} {typ}", sql_item_name(c, flavor, None))
+        })
+        .collect();
+    format!(
+        "CREATE TABLE {} (\n    {}\n)",
+        sql_item_name(table, flavor, schema),
+        cols.join(",\n    ")
+    )
+}
 
 /// `MRSM_CORE_TRACE=1`: per-stage timings on stderr (same format as the bindings' tracer).
 pub(crate) fn trace(stage: &str, start: Instant) {
@@ -225,5 +277,117 @@ impl SqlConnector {
             .get_pipe_data_with_state(&sp, &state, query, opts)
             .await?;
         Ok((df, state))
+    }
+
+    /// `SQLConnector.to_sql(df, name, if_exists=...)` without SQLAlchemy (rc15 Q53): the table is
+    /// created from `column_types` (the database type of each column, as pandas' `to_sql` would
+    /// create it) when it does not exist or when `if_exists` is [`IfExists::Replace`] (dropped
+    /// first), [`IfExists::Fail`] refuses an existing table, and the rows are inserted with
+    /// [`to_sql`](SqlConnector::to_sql)'s encodings (PostgreSQL `COPY` / MSSQL `OPENJSON` when
+    /// bulk inserts are enabled). Creating, dropping and inserting run in one transaction where
+    /// the database allows DDL in transactions. `index_columns` get an index each
+    /// (`ix_<table>_<column>`, pandas' `index=True`). Returns `(success, error message)`.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn frame_to_sql(
+        &self,
+        df: &Frame,
+        name: &str,
+        schema: Option<&str>,
+        if_exists: IfExists,
+        column_types: &IndexMap<String, String>,
+        index_columns: &[String],
+        chunksize: Option<i64>,
+    ) -> (bool, String) {
+        let flavor = self.flavor();
+        let schema = schema.or(self.schema()).map(str::to_string);
+        let schema = if flavor.no_schema() { None } else { schema };
+        let truncated = truncate_item_name(name, flavor);
+        let exists = match self
+            .table_exists_checked(&truncated, schema.as_deref())
+            .await
+        {
+            Ok(exists) => exists,
+            Err(e) => return (false, e.to_string()),
+        };
+        let mut prelude = Vec::new();
+        if exists {
+            match if_exists {
+                IfExists::Fail => return (false, format!("Table '{name}' already exists.")),
+                IfExists::Append => {}
+                IfExists::Replace => prelude.push(
+                    crate::queries::table::get_drop_table_queries(
+                        &truncated,
+                        flavor,
+                        schema.as_deref(),
+                    )
+                    .remove(0),
+                ),
+            }
+        }
+        if !exists || if_exists == IfExists::Replace {
+            prelude.push(to_sql_create_table_query(
+                &truncated,
+                flavor,
+                schema.as_deref(),
+                &df.names(),
+                column_types,
+            ));
+            for col in index_columns {
+                let index_name = truncate_item_name(&format!("ix_{truncated}_{col}"), flavor);
+                prelude.push(format!(
+                    "CREATE INDEX {} ON {} ({})",
+                    sql_item_name(&index_name, flavor, None),
+                    sql_item_name(&truncated, flavor, schema.as_deref()),
+                    sql_item_name(col, flavor, None),
+                ));
+            }
+        }
+        let extras = ToSqlExtras {
+            prelude,
+            ..Default::default()
+        };
+        let (ok, msg, _) = self
+            .to_sql_inner(
+                df,
+                &truncated,
+                schema.as_deref(),
+                column_types,
+                chunksize,
+                &extras,
+            )
+            .await;
+        (ok, msg)
+    }
+}
+
+#[cfg(test)]
+mod to_sql_tests {
+    use super::*;
+
+    #[test]
+    fn if_exists_parses_pandas_values() {
+        assert_eq!("replace".parse::<IfExists>(), Ok(IfExists::Replace));
+        assert_eq!("append".parse::<IfExists>(), Ok(IfExists::Append));
+        assert_eq!("fail".parse::<IfExists>(), Ok(IfExists::Fail));
+        assert!("truncate".parse::<IfExists>().is_err());
+    }
+
+    #[test]
+    fn create_table_types_each_column() {
+        let types: IndexMap<String, String> = [("a", "BIGINT"), ("b", "TEXT")]
+            .into_iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
+        let q = to_sql_create_table_query(
+            "t",
+            crate::Flavor::Postgresql,
+            Some("public"),
+            &["a".to_string(), "b".to_string(), "c".to_string()],
+            &types,
+        );
+        assert_eq!(
+            q,
+            "CREATE TABLE \"public\".\"t\" (\n    \"a\" BIGINT,\n    \"b\" TEXT,\n    \"c\" TEXT\n)"
+        );
     }
 }

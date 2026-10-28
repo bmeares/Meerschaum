@@ -3,6 +3,7 @@
     "instance": "sql:main",
     "api_instance": "MRSM{meerschaum:instance}",
     "repository": "api:mrsm",
+    "dataframe": "polars",
     "connectors": {
       "sql": {
         "default": {},
@@ -190,12 +191,9 @@
     },
     "permissions": {
       "registration": {
-        "users": true,
+        "users": false,
         "pipes": true,
         "plugins": true
-      },
-      "actions": {
-        "non_admin": true
       },
       "chaining": {
         "insecure_parent_instance": false,

@@ -541,6 +541,19 @@ pub trait InstanceConnector: Connector {
         None
     }
 
+    /// Physical target aliases used to authorize a pipe before accessing its data. SQL
+    /// instances include identifier truncation and any database byte limit; this must not
+    /// require a connection or change the pipe's parameters.
+    fn pipe_target_aliases(&self, pipe: &Pipe) -> Vec<String> {
+        self.pipe_table_reference(pipe).into_iter().collect()
+    }
+
+    /// The database's byte limit for SQL identifiers, when it silently clips longer
+    /// identifiers supplied in queries (`None`: no such normalization).
+    fn sql_identifier_byte_limit(&self) -> Option<usize> {
+        None
+    }
+
     /// Check whether a pipe's target table exists.
     async fn pipe_exists(&self, pipe: &Pipe) -> ConnectorResult<bool>;
 
@@ -919,19 +932,16 @@ pub trait InstanceConnector: Connector {
     }
 
     /// Return a user's ID from the username.
+    ///
+    /// The username is matched exactly ([`pipe_ops::user_id_of_username`]): a `params` filter
+    /// would read a leading `_` as a negation and match another user's row.
     async fn get_user_id(&self, user: &User) -> ConnectorResult<Option<Value>> {
-        let pipe = self.get_users_pipe();
-        let mut params = Map::new();
-        params.insert("username".into(), Value::Str(user.username.clone()));
-        pipe_ops::get_value(self, &pipe, "user_id", &params).await
+        pipe_ops::user_id_of_username(self, &user.username).await
     }
 
-    /// Return the username from the given ID.
+    /// Return the username from the given ID (matched exactly).
     async fn get_username(&self, user_id: &Value) -> ConnectorResult<Option<Value>> {
-        let pipe = self.get_users_pipe();
-        let mut params = Map::new();
-        params.insert("user_id".into(), user_id.clone());
-        pipe_ops::get_value(self, &pipe, "username", &params).await
+        pipe_ops::username_of_user_id(self, user_id).await
     }
 
     /// Get the registered usernames.
@@ -950,15 +960,29 @@ pub trait InstanceConnector: Connector {
         pipe_ops::default_edit_user(self, user).await
     }
 
-    /// Delete a user from the users table.
+    /// Delete a user from the users table, then remove them from every team and clear their
+    /// ownership of pipes ([`crate::teams::forget_user`]; the pipes stay with their team).
     async fn delete_user(&self, user: &User) -> SuccessTuple {
         let user_id = match pipe_ops::resolve_user_id(self, user).await {
-            Ok(id) => id,
+            Ok(Some(id)) if !id.is_null() => id,
+            // FX1: an unknown user is not deleted (a `user_id IS NULL` filter is nobody's).
+            Ok(_) => {
+                return SuccessTuple::fail(format!(
+                    "User '{}' is not registered and cannot be deleted.",
+                    user.username
+                ));
+            }
             Err(e) => return SuccessTuple::fail(e.to_string()),
         };
+        if !pipe_ops::literal_param_safe(&meerschaum_core::pyfmt::py_str(&user_id)) {
+            return SuccessTuple::fail(format!(
+                "Cannot delete user '{}': its ID cannot be matched exactly.",
+                user.username
+            ));
+        }
         let pipe = self.get_users_pipe();
         let mut params = Map::new();
-        params.insert("user_id".into(), user_id.unwrap_or(Value::Null));
+        params.insert("user_id".into(), user_id);
         let res = self
             .clear_pipe(
                 &pipe,
@@ -974,7 +998,48 @@ pub trait InstanceConnector: Connector {
                 user.username, res.message
             ));
         }
+        let forgotten = crate::teams::forget_user(self, &user.username).await;
+        if !forgotten.success {
+            tracing::warn!("{}", forgotten.message);
+        }
         SuccessTuple::success()
+    }
+
+    /// Replace a user's attributes and nothing else (their type, email and password stay). The
+    /// default writes the users pipe's `attributes` for the user's exact `user_id`.
+    async fn set_user_attributes(&self, user: &User, attributes: &Map) -> SuccessTuple {
+        crate::teams::default_set_user_attributes(self, user, attributes).await
+    }
+
+    /// A user's effective permissions ([`meerschaum_core::access::user_permissions`]): from
+    /// their type and attributes on this instance, with this host's default role
+    /// (`api:permissions:default_role`). An `api:` instance answers with its server's.
+    async fn get_user_permissions(&self, user: &User) -> ConnectorResult<Vec<String>> {
+        let (user_type, attributes) = pipe_ops::user_type_and_attributes(self, user).await?;
+        let role = meerschaum_core::config::Config::current()
+            .map(|c| meerschaum_core::access::default_role_from_config(&c))
+            .unwrap_or(meerschaum_core::access::DEFAULT_ROLE);
+        Ok(meerschaum_core::access::ordered_permissions(
+            &meerschaum_core::access::user_permissions(
+                user_type.as_deref(),
+                attributes.as_ref(),
+                role,
+            ),
+        ))
+    }
+
+    /// A user's role ([`meerschaum_core::access::user_role`]): `admin` for administrators, the
+    /// preset their permissions equal, else `custom`.
+    async fn get_user_role(&self, user: &User) -> ConnectorResult<meerschaum_core::access::Role> {
+        let (user_type, attributes) = pipe_ops::user_type_and_attributes(self, user).await?;
+        let role = meerschaum_core::config::Config::current()
+            .map(|c| meerschaum_core::access::default_role_from_config(&c))
+            .unwrap_or(meerschaum_core::access::DEFAULT_ROLE);
+        Ok(meerschaum_core::access::user_role(
+            user_type.as_deref(),
+            attributes.as_ref(),
+            role,
+        ))
     }
 
     /// Get a user's password hash from the users table.
@@ -996,6 +1061,97 @@ pub trait InstanceConnector: Connector {
         pipe_ops::user_field(self, user, "attributes")
             .await
             .map(|v| v.and_then(|v| v.as_map().cloned()))
+    }
+
+    /// Get a user's email address from the users table (`None` when unset). An `api:` instance
+    /// answers per the server's privacy rules (AC13): other users' addresses only for
+    /// administrators and the managers of a team they are in.
+    async fn get_user_email(&self, user: &User) -> ConnectorResult<Option<String>> {
+        pipe_ops::user_field(self, user, "email").await.map(|v| {
+            v.filter(|v| !v.is_null())
+                .map(|v| meerschaum_core::pyfmt::py_str(&v))
+                .filter(|e| !e.trim().is_empty())
+        })
+    }
+
+    // ----------------------------------------------------------------------------------------
+    // Teams ([`crate::teams`], [`meerschaum_core::access`])
+    // ----------------------------------------------------------------------------------------
+
+    /// Return the internal pipe teams are stored in (`mrsm:teams`, target `mrsm_teams`).
+    fn get_teams_pipe(&self) -> Pipe {
+        crate::teams::teams_pipe(&self.connector_keys())
+    }
+
+    /// Every team: the built-in team Everyone first, then the others by name.
+    async fn get_teams(&self) -> ConnectorResult<Vec<meerschaum_core::access::Team>> {
+        crate::teams::default_get_teams(self).await
+    }
+
+    /// The team named `name` (names compare without case; `Everyone` always exists).
+    async fn get_team(&self, name: &str) -> ConnectorResult<Option<meerschaum_core::access::Team>> {
+        crate::teams::default_get_team(self, name).await
+    }
+
+    /// Register a new team (assigns its id to `team.id`). Its name must be valid and unused and
+    /// its members registered users.
+    async fn register_team(&self, team: &mut meerschaum_core::access::Team) -> SuccessTuple {
+        crate::teams::default_register_team(self, team).await
+    }
+
+    /// Store a team's members and attributes (Everyone's managers and attributes too).
+    async fn edit_team(&self, team: &meerschaum_core::access::Team) -> SuccessTuple {
+        crate::teams::default_edit_team(self, team).await
+    }
+
+    /// Delete a team: its pipes and saved Pipelines move to Everyone. Everyone cannot be
+    /// deleted.
+    async fn delete_team(&self, name: &str) -> SuccessTuple {
+        crate::teams::default_delete_team(self, name).await
+    }
+
+    /// Rename a team, in the pipes, saved Pipelines and primary teams that name it too.
+    async fn rename_team(&self, old_name: &str, new_name: &str) -> SuccessTuple {
+        crate::teams::default_rename_team(self, old_name, new_name).await
+    }
+
+    /// A user's teams with their roles (Everyone first: every user is a member).
+    async fn get_user_teams(
+        &self,
+        username: &str,
+    ) -> ConnectorResult<Vec<(String, meerschaum_core::access::TeamRole)>> {
+        crate::teams::default_get_user_teams(self, username).await
+    }
+
+    // ----------------------------------------------------------------------------------------
+    // Pipe access and locks ([`crate::locks`], [`meerschaum_core::access`])
+    // ----------------------------------------------------------------------------------------
+
+    /// Add `locks` to a registered pipe's locks (`parameters['locks']`). Changing `locks` is
+    /// the one edit a `parameters` lock allows. The `api:` client asks its server, which checks
+    /// who may lock the pipe.
+    async fn lock_pipe(&self, pipe: &Pipe, locks: &meerschaum_core::access::Locks) -> SuccessTuple {
+        crate::locks::default_lock_pipe(self, pipe, locks).await
+    }
+
+    /// Remove `locks` from a registered pipe's locks (removing `all` removes every lock).
+    async fn unlock_pipe(
+        &self,
+        pipe: &Pipe,
+        locks: &meerschaum_core::access::Locks,
+    ) -> SuccessTuple {
+        crate::locks::default_unlock_pipe(self, pipe, locks).await
+    }
+
+    /// Store a registered pipe's access (`parameters['access']`: owner, team, visibility,
+    /// edit). A parameter edit: a `parameters` lock refuses it. The `api:` client asks its
+    /// server, which checks who may change the pipe's access.
+    async fn set_pipe_access(
+        &self,
+        pipe: &Pipe,
+        access: &meerschaum_core::access::PipeAccess,
+    ) -> SuccessTuple {
+        crate::locks::default_set_pipe_access(self, pipe, access).await
     }
 
     // ----------------------------------------------------------------------------------------

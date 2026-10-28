@@ -137,6 +137,11 @@ impl InstanceConnector for ValkeyConnector {
     }
 
     async fn edit_pipe(&self, pipe: &Pipe, _patch: bool) -> SuccessTuple {
+        // Valkey stores the in-memory parameters as they are: a `parameters` lock allows
+        // changing `locks` only.
+        if let Some(refused) = meerschaum_connector::edit_refusal(self, pipe, false).await {
+            return refused;
+        }
         ValkeyConnector::edit_pipe(self, pipe).await
     }
 
@@ -241,7 +246,12 @@ impl InstanceConnector for ValkeyConnector {
     }
 
     async fn delete_user(&self, user: &User) -> SuccessTuple {
+        // It also removes the user from every team and clears their ownership of pipes.
         self.valkey_delete_user(user).await
+    }
+
+    async fn set_user_attributes(&self, user: &User, attributes: &Map) -> SuccessTuple {
+        self.valkey_set_user_attributes(user, attributes).await
     }
 
     async fn get_users(&self) -> ConnectorResult<Vec<String>> {

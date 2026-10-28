@@ -75,6 +75,23 @@ engine.state().load_events(&run_id).await?;
 | `ConnectorRegistry` | How the engine reaches connectors. Hosts (CLI, `meerschaum-py`, server) implement it; `StaticRegistry` is a fixed map. |
 | `EngineConfig::from_config` | `system.engine.*` (`workers`, `limits.connectors`, `limits.instances`, `python_workers`, `auto_rebuild`, `implicit_edges`, `state_flush_ms`, `run_history_days`, `events`, `inclusive_cap`, `flat_ledger`, `persist_runs`, `chunk_pipelining`). |
 
+## Locks
+
+A pipe's `parameters['locks']` (`meerschaum_core::access`) decide what a run may do to it:
+
+- A pipe locked against syncs (`sync`, or `all`) is planned `Action::Locked` and ends
+  `NodeStatus::Locked`: it is not synced, it is not a failure (the run succeeds), and its children
+  plan against its current data. A rebuild (definition changed) of a pipe with a `drop` or
+  `clear` lock is `Locked` too, `--yes` and `auto_rebuild` included. The reason names the lock and
+  the `mrsm unlock pipes ...` command; `RunResult::locked()` lists them, the run's warnings say
+  so, and `LapSummary::v4_message` adds "N not synced: locked." (`v4_success` holds when nothing
+  failed and the rest is locked).
+- A lock set after planning is met by the instance's write: a sync refused by a lock
+  (`access::is_lock_refusal`) finishes the node `Locked`, never retried. A rebuild reads the
+  locks again before it clears the table.
+- A bare `Engine::sync_pipe` checks the registered locks before it fetches (`sync`, or `sync` and
+  `clear` for a replacing sync), as the instance connectors do on every write.
+
 ## Per-pipe schedules and chunk pipelining
 
 - **`parameters['schedule']`** (§5.5). `Engine::with_cadence(Arc<dyn Cadence>)` gives continuous

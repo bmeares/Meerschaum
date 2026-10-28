@@ -13,8 +13,9 @@
 //! Without its cargo feature a flavor is refused with [`SqlError::DriverUnavailable`](crate::SqlError::DriverUnavailable).
 //! The non-`sqlx` drivers share the pool and operation layer in `native.rs`.
 //!
-//! Per D16 the Python SDK keeps SQLAlchemy for user SQL; these methods serve the Rust core and
-//! Rust plugins.
+//! These methods serve the Rust core, Rust plugins and the Python façade's raw SQL
+//! (`SQLConnector.read` / `exec` / `value` / `to_sql`, rc15 Q53, through [`raw`]: statements with
+//! bound parameters whose rows keep what each flavor's Python driver returns).
 
 mod backend;
 pub mod batch;
@@ -31,6 +32,7 @@ mod native;
 mod oracle;
 pub mod params;
 mod postgres;
+pub mod raw;
 mod sqlite;
 mod unsupported;
 

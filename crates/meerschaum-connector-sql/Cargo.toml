@@ -71,6 +71,7 @@ oracle = { version = "0.6", features = ["chrono"], optional = true }
 aws-lc-sys = { version = "0.46", features = ["prebuilt-nasm"], optional = true }
 
 [dev-dependencies]
+meerschaum-connector = { workspace = true, features = ["testing"] }
 tempfile = "3"
 filetime = "0.2"
 tokio = { workspace = true }

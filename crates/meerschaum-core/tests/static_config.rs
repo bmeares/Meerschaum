@@ -19,6 +19,20 @@ fn static_toml_matches_python() {
         .and_then(|e| e.as_map_mut())
         .expect("environment table");
     assert!(environment.shift_remove("compose_root").is_some());
+    // rc15 (Q54, PARITY.md RC15-R3-001): `environment.dataframe`, `MRSM_DATAFRAME`.
+    assert!(environment.shift_remove("dataframe").is_some());
+    // 5.0's permissions (the access model): `pipes:register`, `pipes:define_sql` and
+    // `webterm:use` follow v4's scopes.
+    let scopes = actual
+        .as_map_mut()
+        .and_then(|m| m.get_mut("tokens"))
+        .and_then(|t| t.as_map_mut())
+        .and_then(|t| t.get_mut("scopes"))
+        .and_then(|s| s.as_map_mut())
+        .expect("tokens.scopes table");
+    for scope in meerschaum_core::access::NEW_PERMISSIONS {
+        assert!(scopes.shift_remove(scope).is_some(), "{scope}");
+    }
     common::assert_same(&actual, expected, "static.toml");
 }
 
@@ -31,7 +45,15 @@ fn typed_static_config_parses() {
     );
     assert_eq!(cfg.environment.root, "MRSM_ROOT_DIR");
     assert_eq!(cfg.config.symlinks_key, "_symlinks");
-    assert_eq!(cfg.tokens.scopes.len(), 23);
+    // v4's 23 scopes and 5.0's three permissions.
+    assert_eq!(cfg.tokens.scopes.len(), 26);
+    assert_eq!(
+        cfg.scope_names(),
+        meerschaum_core::access::ALL_PERMISSIONS
+            .iter()
+            .map(|p| p.to_string())
+            .collect::<Vec<_>>()
+    );
     assert_eq!(
         cfg.sql.create_engine_flavors["mssql"].to_sql.get("method"),
         Some(&meerschaum_core::Value::Null)

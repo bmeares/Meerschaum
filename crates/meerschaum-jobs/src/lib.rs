@@ -7,7 +7,8 @@
 //! Rust and vice versa:
 //!
 //! ```text
-//! jobs/<name>/properties.json    label, target, result, process.{began,paused,ended}, env, restart, ...
+//! jobs/<name>/properties.json    label, target, result, process.{launched,launch_id,began,paused,ended},
+//!                                env, restart, owner, team (see [`ownership`]), ...
 //! jobs/<name>/process.pid        the PID of the process doing the work (flock'ed while it runs)
 //! jobs/<name>/input.stdin        FIFO (0600) feeding the job's stdin; input.stdin.block while waiting
 //! jobs/<name>/.stop.json         {"stop_time": ..., "action": "quit" | "kill" | "pause"}
@@ -28,7 +29,10 @@
 //! - [`schedule`]: the `-s` grammar; [`laps`]: the lap loop; [`scheduler`]: per-root schedule
 //!   and debounce state; [`health`]: the lap heartbeats of a job and the health computed from them;
 //! - [`startup`]: the per-root startup admission gate (jitter, load and memory checks, file-lock
-//!   slots) every job passes before its worker starts.
+//!   slots) every job passes before its worker starts;
+//! - [`ownership`]: who a job belongs to (`owner`, `team`: see
+//!   [`meerschaum_core::job_access`]) and the update of a team's jobs when it is renamed or
+//!   deleted.
 //!
 //! Behavior follows the Python implementation (v4.1.4); preserved quirks are marked `// PARITY:`.
 
@@ -42,6 +46,7 @@ pub mod health;
 pub mod job;
 pub mod laps;
 pub mod names;
+pub mod ownership;
 pub mod process;
 pub mod properties;
 pub mod pytime;

@@ -86,7 +86,8 @@ fn completed_job_layout_and_logs() {
         .keys()
         .map(String::as_str)
         .collect();
-    assert_eq!(process, ["launched", "began", "ended"]);
+    // `launch_id` names the launch its supervisor runs (a deleted job is never brought back).
+    assert_eq!(process, ["launched", "launch_id", "began", "ended"]);
     assert!(job.began().is_some() && job.ended().is_some() && job.paused().is_none());
 
     // Both streams pass through their own interceptor: each starts with a newline.
@@ -451,4 +452,108 @@ fn a_worker_records_its_laps_and_the_job_reports_its_health() {
     // Deleting the job deletes its heartbeats with it.
     assert!(job.delete().success);
     assert!(!path.exists());
+}
+
+/// A context whose supervisor starts `delay` late (a shell sleeps, then runs it): what a job
+/// looks like between `start()` returning and its supervisor's first step.
+fn delayed_supervisor(ctx: &mut meerschaum_jobs::JobsContext, delay: &str) {
+    let supervisor = ctx.launcher.supervisor[0].clone();
+    ctx.launcher.supervisor = vec![
+        "/bin/sh".into(),
+        "-c".into(),
+        format!("sleep {delay}; exec \"$0\" \"$@\""),
+        supervisor,
+    ];
+}
+
+/// The log subfiles of job `name` under `root`.
+fn log_files(root: &std::path::Path, name: &str) -> Vec<String> {
+    fs::read_dir(root.join("logs"))
+        .map(|d| {
+            d.flatten()
+                .map(|e| e.file_name().to_string_lossy().to_string())
+                .filter(|n| n.contains(name))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// A job deleted before its supervisor got going is never brought back: the supervisor used to
+/// create the job's directory again, run the worker and record its result (wave-1 gate).
+#[test]
+fn a_job_deleted_before_its_supervisor_starts_stays_deleted() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut ctx = common::sh_context(dir.path());
+    delayed_supervisor(&mut ctx, "0.6");
+    let marker = dir.path().join("ran");
+    let mut job = sh_job(
+        &ctx,
+        "ghost",
+        &format!("touch '{}'", marker.display()),
+        JobOptions::default(),
+    );
+    assert!(job.start().success);
+    // What a delete that did not see the starting supervisor leaves behind.
+    assert!(job.daemon().cleanup(false).success);
+    std::thread::sleep(std::time::Duration::from_millis(2500));
+    assert!(!dir.path().join("jobs/ghost").exists(), "the job came back");
+    assert!(!marker.exists(), "the deleted job ran");
+    assert_eq!(log_files(dir.path(), "ghost"), Vec::<String>::new());
+}
+
+/// A launch that a newer one replaced before its supervisor started yields: no worker, and the
+/// job's files are the newer launch's.
+#[test]
+fn a_superseded_launch_does_not_run() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut ctx = common::sh_context(dir.path());
+    delayed_supervisor(&mut ctx, "0.6");
+    let marker = dir.path().join("ran");
+    let mut job = sh_job(
+        &ctx,
+        "twice",
+        &format!("touch '{}'", marker.display()),
+        JobOptions::default(),
+    );
+    assert!(job.start().success);
+    let props_path = dir.path().join("jobs/twice/properties.json");
+    let mut props = Value::from_json_str(&fs::read_to_string(&props_path).unwrap())
+        .unwrap()
+        .to_map();
+    let process = props
+        .get_mut("process")
+        .and_then(Value::as_map_mut)
+        .unwrap();
+    assert!(process.get("launch_id").and_then(Value::as_str).is_some());
+    process.insert("launch_id".into(), Value::Str("newer".into()));
+    assert!(meerschaum_jobs::properties::write_properties(&props_path, &props).success);
+    std::thread::sleep(std::time::Duration::from_millis(2500));
+    assert!(!marker.exists(), "the superseded launch ran");
+    assert!(dir.path().join("jobs/twice").exists());
+    assert!(!dir.path().join("jobs/twice/process.pid").exists());
+    let props = Value::from_json_str(&fs::read_to_string(&props_path).unwrap()).unwrap();
+    assert!(props.get("result").is_none(), "{props:?}");
+}
+
+/// Deleting a job the moment it was created, again and again: it never comes back.
+#[test]
+fn deleting_a_job_right_after_creating_it_sticks() {
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = common::sh_context(dir.path());
+    for i in 0..5 {
+        let name = format!("quick-{i}");
+        let mut job = sh_job(&ctx, &name, "sleep 0.2", JobOptions::default());
+        assert!(job.start().success);
+        let mut again = Job::open(&name, &ctx).unwrap();
+        let deleted = again.delete();
+        assert!(deleted.success, "{deleted}");
+    }
+    std::thread::sleep(std::time::Duration::from_millis(1500));
+    for i in 0..5 {
+        let name = format!("quick-{i}");
+        assert!(
+            !dir.path().join("jobs").join(&name).exists(),
+            "{name} came back"
+        );
+    }
 }

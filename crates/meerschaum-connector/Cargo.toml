@@ -29,3 +29,7 @@ tokio = { workspace = true }
 # Object-safe async traits (`Arc<dyn InstanceConnector>`); re-exported as
 # `meerschaum_connector::async_trait` so implementors need no direct dependency.
 async-trait = "0.1"
+
+[features]
+# `meerschaum_connector::testing`: the access-model checks every instance crate's tests run.
+testing = []

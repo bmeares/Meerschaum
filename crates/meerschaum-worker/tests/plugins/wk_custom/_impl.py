@@ -124,6 +124,10 @@ class WkmemConnector(InstanceConnector):
         return True, "Success"
 
     def sync_pipe(self, pipe, df=None, check_existing=True, debug=False, **kwargs):
+        # Native hosts send the configured library, which may differ from this worker's
+        # own pandas parity setting. This fixture serializes through pandas in both cases.
+        if type(df).__module__.split('.')[0] == 'polars':
+            df = df.to_pandas()
         store = _load(self.label)
         doc = store['pipes'].setdefault(_key(pipe), {
             'pipe_id': store['next_id'],

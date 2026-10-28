@@ -734,6 +734,17 @@ impl<S: StateWriter + 'static> SyncExecutor for NativeExecutor<S> {
                 Ok(i) => i,
                 Err(e) => return SyncResult::new(false, e),
             };
+            // A rebuild is a drop: the pipe's current locks are read again before anything is
+            // cleared (a lock set after the plan was made still refuses it).
+            if let Some(refused) = meerschaum_connector::lock_refusal(
+                instance.as_ref(),
+                &pipe,
+                meerschaum_core::access::LockOp::Rebuild,
+            )
+            .await
+            {
+                return refused.into();
+            }
             let res = instance.clear_pipe(&pipe, &DataQuery::default()).await;
             if !res.success {
                 return SyncResult::new(false, format!("Failed to clear {pipe}:\n{}", res.message));

@@ -467,11 +467,20 @@ impl Daemon {
         meerschaum_core::pyfmt::parse_py_int(text.trim_end()).map(|p| p as i32)
     }
 
-    /// Write `process.launched` into the properties file. It goes to the file only: the
+    /// Write `process.launched` and a new `process.launch_id` into the properties file, and
+    /// return the id (`None` when the file could not be written). It goes to the file only: the
     /// in-memory properties must not keep a copy of `began` / `ended`, which would then shadow
-    /// what the supervisor records later.
-    fn record_launch(&self) {
+    /// what the supervisor records later. An in-memory `process` (read from an earlier run)
+    /// learns the new launch, so a later write from this daemon never puts an old id back.
+    ///
+    /// The supervisor compares the id with the file (see [`crate::supervisor::launch_state`]):
+    /// a job deleted, or started again, before its supervisor got going is never brought back.
+    /// The job's directory is not created again here: when a delete removed it while this start
+    /// ran, nothing is written (and [`Daemon::run`] launches nothing).
+    fn record_launch(&mut self) -> Option<String> {
         let mut props = self.read_properties().unwrap_or_default();
+        let launched = Value::Str(crate::pytime::naive_isoformat(crate::pytime::utcnow()));
+        let launch_id = Value::Str(properties::random_alnum(16));
         let process = props
             .entry("process".to_string())
             .or_insert_with(Value::new_map);
@@ -479,12 +488,22 @@ impl Daemon {
             *process = Value::new_map();
         }
         if let Some(m) = process.as_map_mut() {
+            m.insert("launched".to_string(), launched.clone());
             m.insert(
-                "launched".to_string(),
-                Value::Str(crate::pytime::naive_isoformat(crate::pytime::utcnow())),
+                crate::supervisor::LAUNCH_ID_KEY.to_string(),
+                launch_id.clone(),
             );
         }
-        let _ = properties::write_properties(&self.paths.properties, &props);
+        if let Some(m) = self.mem.get_mut("process").and_then(Value::as_map_mut) {
+            m.insert("launched".to_string(), launched);
+            m.insert(
+                crate::supervisor::LAUNCH_ID_KEY.to_string(),
+                launch_id.clone(),
+            );
+        }
+        properties::write_existing_properties(&self.paths.properties, &props)
+            .success
+            .then(|| launch_id.py_str())
     }
 
     /// Wait (up to the timeout) until no supervisor of this job is left, by fresh scans. A worker
@@ -526,7 +545,10 @@ impl Daemon {
         let removed = props
             .get_mut("process")
             .and_then(Value::as_map_mut)
-            .is_some_and(|m| m.shift_remove("launched").is_some());
+            .is_some_and(|m| {
+                let launch_id = m.shift_remove(crate::supervisor::LAUNCH_ID_KEY).is_some();
+                m.shift_remove("launched").is_some() || launch_id
+            });
         if removed {
             let _ = properties::write_properties(&self.paths.properties, &props);
         }
@@ -748,8 +770,15 @@ impl Daemon {
         // job which completed earlier is not taken for a finished one (and launched twice) in the
         // meantime. (v4.1.5 records the same `process.launched`.)
         self.forget_detached();
-        self.record_launch();
-        let launched = self.launch(keep_daemon_output);
+        let launch_id = self.record_launch();
+        if launch_id.is_none() && !self.paths.dir.is_dir() {
+            // Deleted while it was being started: a deleted job stays deleted.
+            return SuccessTuple::fail(format!(
+                "Daemon '{}' was deleted while it was starting.",
+                self.daemon_id
+            ));
+        }
+        let launched = self.launch(keep_daemon_output, launch_id);
         if launched.is_err() {
             // Nothing is starting: do not leave the job looking like it is for 30 s and then
             // searched for once a minute.
@@ -805,6 +834,7 @@ impl Daemon {
             cwd,
             command,
             startup: self.startup_policy(self.start_kind),
+            launch_id: None,
         }
     }
 
@@ -832,8 +862,9 @@ impl Daemon {
         env
     }
 
-    fn launch(&mut self, keep_output: bool) -> std::io::Result<()> {
-        let opts = self.supervisor_options(keep_output);
+    fn launch(&mut self, keep_output: bool, launch_id: Option<String>) -> std::io::Result<()> {
+        let mut opts = self.supervisor_options(keep_output);
+        opts.launch_id = launch_id;
         let launcher = &self.ctx.launcher;
         let Some((program, leading)) = launcher.supervisor.split_first() else {
             return Err(std::io::Error::other("No supervisor command."));

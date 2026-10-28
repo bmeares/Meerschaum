@@ -379,6 +379,16 @@ impl SqlConnector {
         if let Some(refused) = self.protected_refusal(pipe, "repartition") {
             return (refused, changed);
         }
+        // Repartitioning rebuilds the table (`drop`) and records the new width in the
+        // parameters (`parameters`): both must be unlocked before anything changes.
+        for op in [
+            meerschaum_core::access::LockOp::Schema,
+            meerschaum_core::access::LockOp::EditParameters,
+        ] {
+            if let Some(refused) = self.lock_refusal(pipe, op).await {
+                return (refused, changed);
+            }
+        }
         let result = self
             .partition_pipe_inner(pipe, chunk_minutes, &mut changed)
             .await;

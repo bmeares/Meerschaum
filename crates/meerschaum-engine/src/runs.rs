@@ -33,6 +33,9 @@ pub enum NodeStatus {
     RebuildPending,
     /// A stream source (read only).
     Observed,
+    /// Not synced because the pipe is locked (`parameters['locks']`: `sync`, or `drop` /
+    /// `clear` for a rebuild). Not a failure: pipes downstream use its current data.
+    Locked,
 }
 
 impl NodeStatus {
@@ -217,7 +220,10 @@ impl RunRecord {
     pub fn unfinished_nodes(&self) -> BTreeSet<PipeRef> {
         self.nodes
             .iter()
-            .filter(|n| !n.status.is_complete() && n.status != NodeStatus::RebuildPending)
+            .filter(|n| {
+                !n.status.is_complete()
+                    && !matches!(n.status, NodeStatus::RebuildPending | NodeStatus::Locked)
+            })
             .map(|n| n.pipe_ref.clone())
             .collect()
     }

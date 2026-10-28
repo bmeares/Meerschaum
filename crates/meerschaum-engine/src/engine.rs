@@ -403,7 +403,23 @@ impl RunResult {
             duration: self.duration,
             aborted: self.record.is_none(),
             rebuild_pending: self.rebuild_pending(),
+            locked: self.locked(),
         }
+    }
+
+    /// The pipes this run did not sync because they are locked (`parameters['locks']`: `sync`,
+    /// or `drop` / `clear` for a rebuild): their node status is `locked`, not a failure.
+    pub fn locked(&self) -> Vec<PipeRef> {
+        self.record
+            .as_ref()
+            .map(|r| {
+                r.nodes
+                    .iter()
+                    .filter(|n| n.status == NodeStatus::Locked)
+                    .map(|n| n.pipe_ref.clone())
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 }
 
@@ -437,6 +453,8 @@ pub struct LapSummary {
     pub aborted: bool,
     /// Pipes the lap did not sync, waiting for a rebuild nobody approved (v5 only).
     pub rebuild_pending: Vec<PendingRebuild>,
+    /// Pipes the lap did not sync because they are locked (v5 only): not failures.
+    pub locked: Vec<PipeRef>,
 }
 
 impl LapSummary {
@@ -458,14 +476,20 @@ impl LapSummary {
                 self.rebuild_pending.len()
             ));
         }
+        if !self.locked.is_empty() {
+            message.push_str(&format!("\n    {} not synced: locked.", self.locked.len()));
+        }
         message
     }
 
-    /// v4's action result: success when any pipe succeeded.
+    /// v4's action result: success when any pipe succeeded, or (v5) when nothing failed and
+    /// the pipes not synced are locked (a lock is not a failure).
     // PARITY: `_sync_pipes` returns `len(success_pipes) > 0` (meerschaum/actions/sync.py:455),
     // so a lap with one success and many failures is a success.
     pub fn v4_success(&self) -> bool {
-        !self.aborted && !self.success_pipes.is_empty()
+        !self.aborted
+            && (!self.success_pipes.is_empty()
+                || (self.failure_pipes.is_empty() && !self.locked.is_empty()))
     }
 }
 
@@ -1306,6 +1330,15 @@ impl Engine {
         }
         self.retention().await;
 
+        // A locked pipe was not synced: say so where every caller shows warnings (a locked node
+        // has no outcome of its own).
+        warnings.extend(
+            record
+                .nodes
+                .iter()
+                .filter(|n| n.status == NodeStatus::Locked)
+                .map(|n| format!("{}: {}", n.pipe_ref.label(), n.reason)),
+        );
         warnings.extend(self.leases.warnings());
         let outcomes =
             std::mem::take(&mut *sink.outcomes.lock().unwrap_or_else(|e| e.into_inner()));

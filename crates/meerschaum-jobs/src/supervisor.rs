@@ -23,9 +23,18 @@
 //!
 //! The worker may report its `SuccessTuple` by writing `[success, message]` as JSON to the path
 //! in `MRSM_JOB_RESULT_PATH`; otherwise the result is derived from its exit status.
+//!
+//! **A deleted job stays deleted.** The launcher records a random `process.launch_id` in the
+//! job's properties and passes it as `--launch-id`. The supervisor never creates the job's
+//! directory: when it starts, after the startup gate, and right after the worker started, it
+//! checks [`launch_state`]. A job whose directory is gone (deleted between `start()` returning
+//! and the supervisor starting) exits without writing anything (an already started worker is
+//! stopped), and a launch superseded by a newer one (`process.launch_id` changed) yields to it.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
+
+use meerschaum_core::value::Value;
 
 use crate::config::Seconds;
 use crate::startup::StartupPolicy;
@@ -45,6 +54,56 @@ pub const PROGRAM_ENV: &str = "MRSM_JOB_PROGRAM";
 
 /// The result file a worker may write (`jobs/<id>/.result.json`).
 pub const RESULT_FILE_NAME: &str = ".result.json";
+
+/// The key under `properties['process']` that names the current launch (see [`launch_state`]).
+pub const LAUNCH_ID_KEY: &str = "launch_id";
+
+/// Whether a supervisor's launch is still the job's (see [`launch_state`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LaunchState {
+    /// The job exists and this is its current launch (or the launch carries no id).
+    Current,
+    /// The job was started again after this launch (`process.launch_id` differs).
+    Superseded,
+    /// The job's directory is gone: it was deleted.
+    Deleted,
+}
+
+/// Whether the launch `launch_id` of the job whose files are `dir` / `properties` is still
+/// current. A properties file that is being rewritten (missing or unparseable while the
+/// directory exists) is read again for up to a second; one that stays unreadable, or a launch
+/// without an id (an older launcher), counts as current, so a job is never refused on a
+/// transient read.
+pub fn launch_state(dir: &Path, properties: &Path, launch_id: Option<&str>) -> LaunchState {
+    for _ in 0..20 {
+        if !dir.is_dir() {
+            return LaunchState::Deleted;
+        }
+        let Some(id) = launch_id else {
+            return LaunchState::Current;
+        };
+        let parsed = std::fs::read_to_string(properties)
+            .ok()
+            .and_then(|text| Value::from_json_str(&text).ok())
+            .and_then(|value| value.as_map().cloned());
+        if let Some(props) = parsed {
+            let recorded = props
+                .get("process")
+                .and_then(|p| p.get(LAUNCH_ID_KEY))
+                .and_then(Value::as_str);
+            return match recorded {
+                Some(recorded) if recorded != id => LaunchState::Superseded,
+                _ => LaunchState::Current,
+            };
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    if dir.is_dir() {
+        LaunchState::Current
+    } else {
+        LaunchState::Deleted
+    }
+}
 
 /// How jobs are launched: the supervisor command and the program which receives the sysargs.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -112,6 +171,9 @@ pub struct SupervisorOptions {
     pub command: Vec<String>,
     /// The startup gate the supervisor passes before it starts the worker (`None`: none).
     pub startup: Option<StartupPolicy>,
+    /// The launch this supervisor runs (`properties['process']['launch_id']`, see
+    /// [`launch_state`]; `None`: an older launcher, nothing to compare).
+    pub launch_id: Option<String>,
 }
 
 impl SupervisorOptions {
@@ -151,6 +213,10 @@ impl SupervisorOptions {
             args.push("--startup".into());
             args.push(policy.to_arg());
         }
+        if let Some(launch_id) = &self.launch_id {
+            args.push("--launch-id".into());
+            args.push(launch_id.clone());
+        }
         args.push("--".into());
         args.extend(self.command.iter().cloned());
         args
@@ -175,6 +241,7 @@ impl SupervisorOptions {
             cwd: PathBuf::from("."),
             command: Vec::new(),
             startup: None,
+            launch_id: None,
         };
         while let Some(arg) = it.next() {
             if arg == SUPERVISOR_ARG || arg.starts_with("daemon_id=") {
@@ -209,6 +276,7 @@ impl SupervisorOptions {
                 "--stdin" => opts.capture_stdin = value == "1",
                 "--cwd" => opts.cwd = value.into(),
                 "--startup" => opts.startup = Some(StartupPolicy::from_arg(&value)?),
+                "--launch-id" => opts.launch_id = Some(value),
                 other => return Err(format!("Unknown supervisor argument '{other}'.")),
             }
         }
@@ -309,9 +377,9 @@ mod imp {
     use nix::sys::signal::{SigSet, Signal};
     use nix::unistd::Pid;
 
-    use super::{RESULT_FILE_NAME, RESULT_PATH_ENV, SupervisorOptions};
+    use super::{LaunchState, RESULT_FILE_NAME, RESULT_PATH_ENV, SupervisorOptions, launch_state};
     use crate::config::{DaemonPaths, JobPaths};
-    use crate::properties::{merge_properties, read_properties, write_properties};
+    use crate::properties::{merge_properties, read_properties, write_existing_properties};
     use crate::rotating::{Interceptor, RotatingFile, RotatingFileOptions};
 
     fn log_error(opts: &SupervisorOptions, msg: &str) {
@@ -361,10 +429,58 @@ mod imp {
             self.write();
         }
 
+        /// Write the properties into the job's directory, which is never created again (a job
+        /// deleted while it ran stays deleted).
         fn write(&mut self) {
             let p = self.get();
-            let _ = write_properties(&self.path, &p);
+            let _ = write_existing_properties(&self.path, &p);
         }
+    }
+
+    /// Give up a launch that is no longer the job's: a deleted job's log files (created again
+    /// by this supervisor) are removed; a superseded launch leaves the shared files to the newer
+    /// one. The PID file is removed when it still names `pids`.
+    fn abandon(
+        opts: &SupervisorOptions,
+        dpaths: &DaemonPaths,
+        log: &Arc<Mutex<RotatingFile>>,
+        state: LaunchState,
+        pids: &[i32],
+    ) {
+        if state == LaunchState::Deleted {
+            if let Ok(mut l) = log.lock() {
+                l.delete(false);
+            }
+            let _ = fs::remove_file(&opts.log_offset_path);
+        }
+        remove_pid_file_naming(dpaths, pids);
+    }
+
+    /// Remove `process.pid` if it names one of `pids` (never another launch's process).
+    fn remove_pid_file_naming(dpaths: &DaemonPaths, pids: &[i32]) {
+        if fs::read_to_string(&dpaths.pid)
+            .ok()
+            .as_deref()
+            .map(str::trim)
+            .is_some_and(|p| pids.iter().any(|pid| p == pid.to_string()))
+        {
+            let _ = fs::remove_file(&dpaths.pid);
+        }
+    }
+
+    /// Stop a worker started for a launch that turned out not to be the job's any more.
+    fn stop_worker(child: &mut std::process::Child) {
+        let pid = Pid::from_raw(child.id() as i32);
+        let _ = nix::sys::signal::kill(pid, Signal::SIGTERM);
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while std::time::Instant::now() < deadline {
+            if matches!(child.try_wait(), Ok(Some(_))) {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let _ = child.kill();
+        let _ = child.wait();
     }
 
     fn set_cloexec(fd: &OwnedFd) {
@@ -445,6 +561,12 @@ mod imp {
             ..JobPaths::for_root(opts.jobs_dir.parent().unwrap_or(&opts.jobs_dir), "/")
         };
         let dpaths = DaemonPaths::new(&paths, &opts.daemon_id);
+        let launch_id = opts.launch_id.as_deref();
+        // A job deleted before this supervisor got here, or started again since, is left alone:
+        // nothing is created, written or run.
+        if launch_state(&dpaths.dir, &dpaths.properties, launch_id) != LaunchState::Current {
+            return 0;
+        }
         let mut props = Props {
             path: dpaths.properties.clone(),
             mem: Map::new(),
@@ -501,16 +623,23 @@ mod imp {
 
         // `process.pid`: under an exclusive `flock` for the job's lifetime. It names this
         // supervisor while the startup gate holds the worker back (a stop signals it), then the
-        // worker.
-        let _ = fs::create_dir_all(&dpaths.dir);
-        let pid_lock = OpenOptions::new()
+        // worker. The job's directory is never created here: when it is gone, the job was
+        // deleted while this supervisor started.
+        let own_pid = std::process::id() as i32;
+        let pid_lock = match OpenOptions::new()
             .create(true)
             .truncate(true)
             .write(true)
             .open(&dpaths.pid)
-            .ok()
-            .and_then(|f| Flock::lock(f, FlockArg::LockExclusiveNonblock).ok());
-        let _ = fs::write(&dpaths.pid, std::process::id().to_string());
+        {
+            Ok(file) => Flock::lock(file, FlockArg::LockExclusiveNonblock).ok(),
+            Err(_) if !dpaths.dir.is_dir() => {
+                abandon(&opts, &dpaths, &log, LaunchState::Deleted, &[]);
+                return 0;
+            }
+            Err(_) => None,
+        };
+        let _ = fs::write(&dpaths.pid, own_pid.to_string());
 
         // Termination signals: before the worker exists they stop the wait at the startup gate;
         // afterwards they are forwarded to the worker. `signals.0` is the worker's PID (0 until
@@ -574,6 +703,15 @@ mod imp {
             }
         };
         let release_file = admission.as_ref().map(|a| a.release_file().to_path_buf());
+
+        // The job may have been deleted (or started again) while this supervisor waited.
+        let state = launch_state(&dpaths.dir, &dpaths.properties, launch_id);
+        if state != LaunchState::Current {
+            drop(admission);
+            abandon(&opts, &dpaths, &log, state, &[own_pid]);
+            drop(pid_lock);
+            return 0;
+        }
 
         let result_path = dpaths.dir.join(RESULT_FILE_NAME);
         let _ = fs::remove_file(&result_path);
@@ -648,6 +786,20 @@ mod imp {
 
         // `process.pid`: now the worker's PID (the `flock` taken above stays).
         let _ = fs::write(&dpaths.pid, pid.to_string());
+
+        // Deleted (or started again) in the moment the worker took to start: stop it, record
+        // nothing.
+        let state = launch_state(&dpaths.dir, &dpaths.properties, launch_id);
+        if state != LaunchState::Current {
+            stop_worker(&mut child);
+            drop(admission);
+            if let Some(file) = &release_file {
+                let _ = fs::remove_file(file);
+            }
+            abandon(&opts, &dpaths, &log, state, &[pid, own_pid]);
+            drop(pid_lock);
+            return 0;
+        }
 
         props.set("result", Value::Null);
         props.capture("began");
@@ -774,14 +926,7 @@ mod imp {
         // The PID file outlives a Python daemon until the next status check; remove it now if it
         // still names our worker (so a recycled PID is never mistaken for the job), or this
         // supervisor (a status read which found the job without its PID file wrote it back).
-        if fs::read_to_string(&dpaths.pid)
-            .ok()
-            .as_deref()
-            .map(str::trim)
-            .is_some_and(|p| p == pid.to_string() || p == std::process::id().to_string())
-        {
-            let _ = fs::remove_file(&dpaths.pid);
-        }
+        remove_pid_file_naming(&dpaths, &[pid, own_pid]);
         drop(pid_lock);
         let _ = fs::remove_file(&dpaths.stdin_block);
         0
@@ -819,10 +964,33 @@ mod tests {
                 settle_seconds: 15.0,
                 dir: "/r/jobs/.startup".into(),
             }),
+            launch_id: Some("aB3".into()),
         };
         let mut args = vec![SUPERVISOR_ARG.to_string()];
         args.extend(opts.to_args());
         assert!(args.iter().any(|a| a == "daemon_id='my job'"));
         assert_eq!(SupervisorOptions::from_args(args).unwrap(), opts);
+    }
+
+    #[test]
+    fn launch_states() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().join("jobs").join("x");
+        let props = dir.join("properties.json");
+        assert_eq!(launch_state(&dir, &props, Some("a")), LaunchState::Deleted);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(&props, r#"{"process": {"launch_id": "a"}}"#).unwrap();
+        assert_eq!(launch_state(&dir, &props, Some("a")), LaunchState::Current);
+        assert_eq!(
+            launch_state(&dir, &props, Some("b")),
+            LaunchState::Superseded
+        );
+        // A launcher without ids, or properties without one, cannot be compared.
+        assert_eq!(launch_state(&dir, &props, None), LaunchState::Current);
+        std::fs::write(&props, r#"{"label": "x"}"#).unwrap();
+        assert_eq!(launch_state(&dir, &props, Some("b")), LaunchState::Current);
+        // A file that stays unreadable is not taken for a deleted job.
+        std::fs::write(&props, "{").unwrap();
+        assert_eq!(launch_state(&dir, &props, Some("b")), LaunchState::Current);
     }
 }

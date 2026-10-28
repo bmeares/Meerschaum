@@ -466,6 +466,11 @@ impl PythonConnector {
         let mut frames = Vec::new();
         if let Some((name, df)) = frame {
             msg.insert("frame_arg", name);
+            // The library the method is handed the frame in is the host's (`meerschaum:dataframe`
+            // / `MRSM_DATAFRAME`, rc15), not the one the worker read when it started.
+            if let Some(library) = meerschaum_core::config::dataframe::process_library() {
+                msg.insert("dataframe", library);
+            }
             frames.push(frame_to_ipc(df)?);
         }
         self.call("instance", msg, frames).await
@@ -767,6 +772,11 @@ fn entry_from_wire(v: &Wire) -> Option<PipeKeysEntry> {
 #[async_trait]
 impl InstanceConnector for PythonConnector {
     async fn register_pipe(&self, pipe: &Pipe) -> SuccessTuple {
+        // A custom instance may overwrite an existing registration: its `parameters` lock still
+        // allows changing `locks` only (a pipe that is not registered has no lock to check).
+        if let Some(refused) = meerschaum_connector::edit_refusal(self, pipe, false).await {
+            return refused;
+        }
         self.method_success("register_pipe", pipe, Msg::new()).await
     }
 
@@ -789,11 +799,22 @@ impl InstanceConnector for PythonConnector {
     }
 
     async fn edit_pipe(&self, pipe: &Pipe, patch: bool) -> SuccessTuple {
+        // Locks (`parameters['locks']`) apply to custom instances too: a `parameters` lock
+        // allows changing `locks` only.
+        if let Some(refused) = meerschaum_connector::edit_refusal(self, pipe, patch).await {
+            return refused;
+        }
         self.method_success("edit_pipe", pipe, Msg::new().set("patch", patch))
             .await
     }
 
     async fn delete_pipe(&self, pipe: &Pipe) -> SuccessTuple {
+        if let Some(refused) =
+            meerschaum_connector::lock_refusal(self, pipe, meerschaum_core::access::LockOp::Delete)
+                .await
+        {
+            return refused;
+        }
         self.method_success("delete_pipe", pipe, Msg::new()).await
     }
 
@@ -852,6 +873,12 @@ impl InstanceConnector for PythonConnector {
     }
 
     async fn drop_pipe(&self, pipe: &Pipe) -> SuccessTuple {
+        if let Some(refused) =
+            meerschaum_connector::lock_refusal(self, pipe, meerschaum_core::access::LockOp::Drop)
+                .await
+        {
+            return refused;
+        }
         self.method_success("drop_pipe", pipe, Msg::new()).await
     }
 
@@ -861,6 +888,12 @@ impl InstanceConnector for PythonConnector {
                 "Cannot drop indices for instance connectors of type '{}'.",
                 self.connector_type
             ));
+        }
+        if let Some(refused) =
+            meerschaum_connector::lock_refusal(self, pipe, meerschaum_core::access::LockOp::Schema)
+                .await
+        {
+            return refused;
         }
         self.method_success("drop_pipe_indices", pipe, Msg::new())
             .await
@@ -878,6 +911,15 @@ impl InstanceConnector for PythonConnector {
     }
 
     async fn sync_pipe(&self, pipe: &Pipe, df: Frame, opts: &SyncOptions) -> SuccessTuple {
+        if let Some(refused) = meerschaum_connector::lock_refusal(
+            self,
+            pipe,
+            meerschaum_connector::locks::sync_op(opts.replace),
+        )
+        .await
+        {
+            return refused;
+        }
         let mut kw = Msg::new()
             .set("check_existing", opts.check_existing)
             .set(
@@ -907,6 +949,12 @@ impl InstanceConnector for PythonConnector {
                 "`clear_pipe()` is not implemented for instance connectors of type '{}'.",
                 self.connector_type
             ));
+        }
+        if let Some(refused) =
+            meerschaum_connector::lock_refusal(self, pipe, meerschaum_core::access::LockOp::Clear)
+                .await
+        {
+            return refused;
         }
         self.method_success("clear_pipe", pipe, data_query_kwargs(query))
             .await
@@ -1045,6 +1093,15 @@ impl InstanceConnector for PythonConnector {
                 self.connector_type
             ));
         }
+        if let Some(refused) = meerschaum_connector::lock_refusal(
+            self,
+            pipe,
+            meerschaum_core::access::LockOp::Deduplicate,
+        )
+        .await
+        {
+            return refused;
+        }
         self.method_success("deduplicate_pipe", pipe, data_query_kwargs(query))
             .await
     }
@@ -1114,6 +1171,14 @@ impl InstanceConnector for PythonConnector {
                 "Repartitioning is not supported for instance connectors of type '{}'.",
                 self.connector_type
             ));
+        }
+        for op in [
+            meerschaum_core::access::LockOp::Schema,
+            meerschaum_core::access::LockOp::EditParameters,
+        ] {
+            if let Some(refused) = meerschaum_connector::lock_refusal(self, pipe, op).await {
+                return refused;
+            }
         }
         self.method_success(
             "partition_pipe",

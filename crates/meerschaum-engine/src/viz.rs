@@ -156,6 +156,7 @@ pub fn render_gantt(run: &RunRecord, critical_path: &[PipeRef], width: usize) ->
                     NodeStatus::UpstreamFailed => "upstream_failed",
                     NodeStatus::RebuildPending => "rebuild_pending",
                     NodeStatus::Observed => "observe",
+                    NodeStatus::Locked => "locked",
                     NodeStatus::Pending => "never ran",
                     _ => "?",
                 };

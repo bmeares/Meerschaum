@@ -238,7 +238,8 @@ pub async fn persist_new_special_columns<C: InstanceConnector + ?Sized>(
     pipe.update_parameters(patch);
     if registered && !pipe.temporary {
         let res = conn.edit_pipe(pipe, false).await;
-        if !res.success {
+        // A `parameters` lock keeps the parameters as they are; the sync goes on.
+        if !res.success && !crate::locks::refused_by_lock(&res) {
             tracing::warn!(
                 "Failed to capture new special columns for {pipe}:\n{}",
                 res.message
@@ -884,7 +885,7 @@ pub fn utc_value(dt: DateTime<Utc>) -> KValue {
 }
 
 /// A UUID-or-string user ID as a kernel value.
-fn user_id_value(v: &Value) -> KValue {
+pub fn user_id_value(v: &Value) -> KValue {
     match v {
         Value::Str(s) => match Uuid::parse_str(s) {
             Ok(u) => KValue::Uuid(u),
@@ -905,17 +906,125 @@ pub async fn resolve_user_id<C: InstanceConnector + ?Sized>(
     }
 }
 
+/// Whether the `params` grammar reads `text` as itself: no leading `_` (negation), no null-like
+/// text (`None`, `NA`, `nan`, `''`, ...), nothing the SQL keyword blocklist refuses (`--`, `;`,
+/// `drop `).
+pub fn literal_param_safe(text: &str) -> bool {
+    let lower = text.trim().to_lowercase();
+    !text.is_empty()
+        && text.trim() == text
+        && !text.starts_with('_')
+        && !matches!(
+            lower.as_str(),
+            "none" | "na" | "nan" | "nat" | "natz" | "<na>" | "null"
+        )
+        && !lower.contains("--")
+        && !lower.contains(';')
+        && !lower.contains("drop ")
+}
+
+/// The first row of `pipe` whose `column` is exactly `value` (FX1).
+///
+/// A `params` filter is not an exact match: a leading `_` negates it (a username `_alice`
+/// matched every other user's row), null-like text matches nulls, and the SQL keyword blocklist
+/// turns some values into `1 = 0`. The filter is used only for values it reads as themselves
+/// ([`literal_param_safe`]), and the rows it returns are checked; any other value is looked up
+/// by reading the column and comparing in memory.
+pub async fn exact_row<C: InstanceConnector + ?Sized>(
+    conn: &C,
+    pipe: &Pipe,
+    column: &str,
+    value: &str,
+    select: &[&str],
+) -> ConnectorResult<Option<Doc>> {
+    let mut columns: Vec<String> = select.iter().map(|c| c.to_string()).collect();
+    if !columns.iter().any(|c| c == column) {
+        columns.push(column.to_string());
+    }
+    let params = literal_param_safe(value).then(|| {
+        let mut p = Map::new();
+        p.insert(column.to_string(), Value::Str(value.to_string()));
+        p
+    });
+    let docs = get_docs(
+        conn,
+        pipe,
+        &DataQuery {
+            select_columns: Some(columns),
+            params,
+            ..Default::default()
+        },
+    )
+    .await?;
+    Ok(docs.into_iter().find(|d| {
+        d.get(column)
+            .is_some_and(|v| !v.is_na() && v.py_str() == value)
+    }))
+}
+
+/// The users pipe's `user_id` for an exact `username` (FX1: never the `params` grammar).
+pub async fn user_id_of_username<C: InstanceConnector + ?Sized>(
+    conn: &C,
+    username: &str,
+) -> ConnectorResult<Option<Value>> {
+    let pipe = conn.get_users_pipe();
+    Ok(exact_row(conn, &pipe, "username", username, &["user_id"])
+        .await?
+        .and_then(|d| d.get("user_id").filter(|v| !v.is_na()).map(kernel_to_core)))
+}
+
+/// The users pipe's `username` for an exact `user_id`.
+pub async fn username_of_user_id<C: InstanceConnector + ?Sized>(
+    conn: &C,
+    user_id: &Value,
+) -> ConnectorResult<Option<Value>> {
+    if user_id.is_null() {
+        return Ok(None);
+    }
+    let pipe = conn.get_users_pipe();
+    let id = meerschaum_core::pyfmt::py_str(user_id);
+    Ok(exact_row(conn, &pipe, "user_id", &id, &["username"])
+        .await?
+        .and_then(|d| d.get("username").filter(|v| !v.is_na()).map(kernel_to_core)))
+}
+
 /// `get_data([field], params={'user_id': user_id})[field][0]`.
+///
+/// FX1: an unknown user has no fields (`None`), never the row of `user_id IS NULL`, and the
+/// row is matched on its exact `user_id`.
 pub async fn user_field<C: InstanceConnector + ?Sized>(
     conn: &C,
     user: &User,
     field: &str,
 ) -> ConnectorResult<Option<Value>> {
-    let user_id = resolve_user_id(conn, user).await?;
+    let Some(user_id) = resolve_user_id(conn, user).await? else {
+        return Ok(None);
+    };
+    if user_id.is_null() {
+        return Ok(None);
+    }
     let pipe = conn.get_users_pipe();
-    let mut params = Map::new();
-    params.insert("user_id".into(), user_id.unwrap_or(Value::Null));
-    get_value(conn, &pipe, field, &params).await
+    let id = meerschaum_core::pyfmt::py_str(&user_id);
+    Ok(exact_row(conn, &pipe, "user_id", &id, &[field])
+        .await?
+        .and_then(|d| d.get(field).filter(|v| !v.is_na()).map(kernel_to_core)))
+}
+
+/// A user's type and attributes (`get_user_type`, `get_user_attributes`), using the ones the
+/// `User` already carries.
+pub async fn user_type_and_attributes<C: InstanceConnector + ?Sized>(
+    conn: &C,
+    user: &User,
+) -> ConnectorResult<(Option<String>, Option<Map>)> {
+    let user_type = match user.user_type.as_ref().filter(|t| !t.is_empty()) {
+        Some(t) => Some(t.clone()),
+        None => conn.get_user_type(user).await?,
+    };
+    let attributes = match user.attributes.as_ref().filter(|a| !a.is_empty()) {
+        Some(a) => Some(a.clone()),
+        None => conn.get_user_attributes(user).await?,
+    };
+    Ok((user_type, attributes))
 }
 
 /// `InstanceConnector.register_user()`.
@@ -967,7 +1076,14 @@ pub async fn default_edit_user<C: InstanceConnector + ?Sized>(
 ) -> SuccessTuple {
     let pipe = conn.get_users_pipe();
     let user_id = match resolve_user_id(conn, user).await {
-        Ok(id) => id.unwrap_or(Value::Null),
+        Ok(Some(id)) if !id.is_null() => id,
+        // FX1: an unknown user is not edited (a row with a null `user_id` is nobody's).
+        Ok(_) => {
+            return SuccessTuple::fail(format!(
+                "User '{0}' does not exist. Register user '{0}' before editing.",
+                user.username
+            ));
+        }
         Err(e) => return SuccessTuple::fail(e.to_string()),
     };
     let mut doc: Doc = Doc::new();
@@ -1009,9 +1125,12 @@ pub async fn plugin_field<C: InstanceConnector + ?Sized>(
     field: &str,
 ) -> ConnectorResult<Option<Value>> {
     let pipe = conn.get_plugins_pipe();
-    let mut params = Map::new();
-    params.insert("plugin_name".into(), Value::Str(plugin.name.clone()));
-    get_value(conn, &pipe, field, &params).await
+    // Matched exactly, as users are (a name with a leading `_` would negate a `params` filter).
+    Ok(
+        exact_row(conn, &pipe, "plugin_name", &plugin.name, &[field])
+            .await?
+            .and_then(|d| d.get(field).filter(|v| !v.is_na()).map(kernel_to_core)),
+    )
 }
 
 /// The refusal of [`InstanceConnector::register_plugin_as_owner`] (and of a lost insert race on

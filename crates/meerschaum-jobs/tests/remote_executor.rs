@@ -504,3 +504,44 @@ fn project_style_ownership_survives_the_round_trip() {
     // The job defaults are layered underneath, as for a local job.
     assert_eq!(env.get("PYTHONUNBUFFERED").map(String::as_str), Some("1"));
 }
+
+#[test]
+fn an_api_job_belongs_to_whoever_its_server_recorded() {
+    // rc15 (AC9): the server records the caller as the job's owner, whatever the request says;
+    // `Job::access()` reports the server's record, not this client's own properties.
+    let dir = tempfile::tempdir().unwrap();
+    let remote = Arc::new(FakeRemote::default());
+    let ctx = context(dir.path(), &remote);
+    let claim: Map = Value::from_json_str(r#"{"owner": "admin", "team": "Ops"}"#)
+        .unwrap()
+        .to_map();
+    let mut job = Job::new(
+        "owned",
+        Some(vec!["sync".into(), "pipes".into()]),
+        JobOptions {
+            executor_keys: Some("api:fake".into()),
+            properties: Some(claim),
+            ..Default::default()
+        },
+        &ctx,
+    )
+    .unwrap();
+    // Not created yet: nobody's (Everyone's).
+    assert_eq!(
+        job.access(),
+        meerschaum_core::job_access::JobAccess::default()
+    );
+    assert!(job.start().success);
+    // What the server records (here: the caller `alice` in her primary team).
+    {
+        let mut server = remote.server.lock().unwrap();
+        let props = &mut server.jobs.get_mut("owned").unwrap().properties;
+        props.insert("owner".into(), Value::Str("alice".into()));
+        props.insert("team".into(), Value::Str("Data".into()));
+    }
+    let access = job.access();
+    assert_eq!(access.owner.as_deref(), Some("alice"));
+    assert_eq!(access.team.as_deref(), Some("Data"));
+    let mut reopened = remote_job(&ctx, "owned", &[]);
+    assert_eq!(reopened.access(), access);
+}

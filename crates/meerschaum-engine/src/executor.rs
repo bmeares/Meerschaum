@@ -680,6 +680,13 @@ where
                     reason: node.reason.clone(),
                 },
             ),
+            // Locked (`parameters['locks']`): not a failure; children use its current data.
+            Action::Locked => (
+                NodeStatus::Locked,
+                EventKind::NodeSkipped {
+                    reason: node.reason.clone(),
+                },
+            ),
             _ => (
                 NodeStatus::Skipped,
                 EventKind::NodeSkipped {
@@ -1526,6 +1533,20 @@ where
                     d.on_success(&r, &result).await;
                     d.record_status(&r, &result, Some(elapsed));
                     d.finish(&r, NodeStatus::Succeeded, None);
+                } else if meerschaum_core::access::is_lock_refusal(&result.message) {
+                    // Locked after the plan was made (`parameters['locks']`): not a failure
+                    // and never retried; children use its current data.
+                    if let Some(row) = d.rows.get_mut(&r) {
+                        row.action = Action::Locked;
+                        row.reason = result.message.clone();
+                    }
+                    emitter.emit(
+                        Some(&r),
+                        EventKind::NodeSkipped {
+                            reason: result.message.clone(),
+                        },
+                    );
+                    d.finish(&r, NodeStatus::Locked, Some(result.message.clone()));
                 } else {
                     let policy = ctx
                         .graph
@@ -1572,6 +1593,7 @@ where
         (count(NodeStatus::Succeeded), "synced"),
         (count(NodeStatus::Skipped), "up to date"),
         (count(NodeStatus::Observed), "listening for new data"),
+        (count(NodeStatus::Locked), "locked"),
         (failed, "failed"),
         (upstream_failed, "not synced because a parent failed"),
         (pending, "waiting for rebuild approval"),

@@ -70,6 +70,9 @@ impl Py {
             .env("PYTHONPATH", repo_root())
             .env("MRSM_ROOT_DIR", &self.root_dir)
             .env("MRSM_PLUGINS_DIR", &self.plugins_dir)
+            // The shared comparison script inspects pandas dtype names, including when
+            // MRSM_TEST_PYTHON explicitly selects the current SDK instead of v4.
+            .env("MRSM_DATAFRAME", "pandas")
             .env("PYTHONHASHSEED", "0");
         // Database drivers (pyodbc, ...) live in the reference interpreter's own venv.
         if let Some(venvs) = self

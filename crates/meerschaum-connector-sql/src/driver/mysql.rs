@@ -92,6 +92,38 @@ pub(crate) fn kind_for(type_name: &str) -> ColumnKind {
     }
 }
 
+/// The text type of a column sqlx names `BINARY` / `VARBINARY` / `*BLOB` that holds text.
+///
+/// sqlx names a column from its `BINARY` flag, which `_bin` collations also set on text columns
+/// (`VARCHAR(...) COLLATE utf8mb4_bin`, MariaDB's `JSON`, a `utf8mb4_bin` `LONGTEXT`). Bytes are
+/// only the binary character set (collation 63): PARITY: PyMySQL returns the others as `str`.
+/// sqlx keeps the collation private, so it is read from the type's `Debug` output
+/// (`collation: Collation(45)`); `None` (bytes) when it cannot be read.
+pub(crate) fn text_type_of_binary_flagged(
+    type_name: &str,
+    type_info: &sqlx::mysql::MySqlTypeInfo,
+) -> Option<String> {
+    let text = match type_name.to_ascii_uppercase().as_str() {
+        "BINARY" => "CHAR",
+        "VARBINARY" => "VARCHAR",
+        "TINYBLOB" => "TINYTEXT",
+        "BLOB" => "TEXT",
+        "MEDIUMBLOB" => "MEDIUMTEXT",
+        "LONGBLOB" => "LONGTEXT",
+        _ => return None,
+    };
+    let debug = format!("{type_info:?}");
+    let collation: u16 = debug
+        .split("collation: Collation(")
+        .nth(1)?
+        .split(')')
+        .next()?
+        .trim()
+        .parse()
+        .ok()?;
+    (collation != 63).then(|| text.to_string())
+}
+
 fn decode_err(plan: &ColumnPlan, e: sqlx::Error) -> SqlError {
     SqlError::Conversion {
         column: plan.name.clone(),
@@ -108,7 +140,10 @@ impl Backend for MySqlBackend {
             .iter()
             .map(|c| {
                 let ty = c.type_info().name().to_string();
-                ColumnPlan::new(c.name(), kind_for(&ty), ty)
+                match text_type_of_binary_flagged(&ty, c.type_info()) {
+                    Some(text) => ColumnPlan::new(c.name(), ColumnKind::Utf8, text),
+                    None => ColumnPlan::new(c.name(), kind_for(&ty), ty),
+                }
             })
             .collect()
     }

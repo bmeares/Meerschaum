@@ -269,6 +269,12 @@ impl SqlConnector {
         if let Some(refused) = self.protected_refusal(pipe, "drop indices for") {
             return refused;
         }
+        if let Some(refused) = self
+            .lock_refusal(pipe, meerschaum_core::access::LockOp::Schema)
+            .await
+        {
+            return refused;
+        }
         if self.drop_indices(pipe, columns, None).await {
             SuccessTuple::ok("Success")
         } else {

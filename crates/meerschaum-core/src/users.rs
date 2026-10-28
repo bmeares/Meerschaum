@@ -339,31 +339,38 @@ impl User {
         Ok(h)
     }
 
-    /// `user.get_scopes(refresh=False)`: `attributes['scopes']` if truthy, else every scope.
-    ///
-    /// This reads the attributes already on the struct, and "no `scopes` attribute" grants every
-    /// scope (v4's rule). Authorization code must not call it on a user whose attributes it could
-    /// not read: use [`User::scopes_from_read`], which takes the read's result and fails closed.
+    /// The effective permissions of the stored type and attributes, using the configured
+    /// default role. Authorization code must first read the user's current record successfully.
     pub fn get_scopes(&self) -> Vec<String> {
-        scopes_of(self.attributes.as_ref())
+        crate::access::ordered_permissions(&crate::access::user_permissions(
+            self.user_type.as_deref(),
+            self.attributes.as_ref(),
+            default_role(),
+        ))
     }
 
     /// The scopes granted by an attributes read (`get_user_attributes(user)`): a failed read is
-    /// an error (deny), never "every scope"; a successful read without a `scopes` attribute keeps
-    /// v4's rule and grants every scope.
+    /// an error (deny). A successful read without explicit scopes uses the stored or default
+    /// role. Use the instance's `get_user_permissions` when its user type is also available.
     pub fn scopes_from_read<E>(read: Result<Option<Map>, E>) -> Result<Vec<String>, E> {
         Ok(scopes_of(read?.as_ref()))
     }
 }
 
-/// `attributes['scopes']` if a non-empty list, else every scope.
+/// The configured default role for local permission queries.
+fn default_role() -> crate::access::Role {
+    crate::config::Config::current()
+        .map(|c| crate::access::default_role_from_config(&c))
+        .unwrap_or(crate::access::DEFAULT_ROLE)
+}
+
+/// Effective permissions from successfully read attributes.
 fn scopes_of(attributes: Option<&Map>) -> Vec<String> {
-    match attributes.and_then(|a| a.get("scopes")) {
-        Some(Value::List(items)) if !items.is_empty() => {
-            items.iter().map(crate::pyfmt::py_str).collect()
-        }
-        _ => static_config().scope_names(),
-    }
+    crate::access::ordered_permissions(&crate::access::user_permissions(
+        None,
+        attributes,
+        default_role(),
+    ))
 }
 
 impl std::fmt::Display for User {
@@ -594,7 +601,7 @@ mod tests {
             t.expiration,
             Some(Utc.with_ymd_and_hms(2027, 1, 2, 0, 0, 0).unwrap())
         );
-        assert_eq!(t.scopes.len(), 23);
+        assert_eq!(t.scopes.len(), crate::access::ALL_PERMISSIONS.len());
         let (_, secret) = t.generate_credentials().unwrap();
         assert!((24..=33).contains(&secret.len()));
         assert!(t.get_api_key().starts_with("mrsm-key:"));
@@ -602,15 +609,18 @@ mod tests {
 
     #[test]
     fn scopes_fail_closed_on_a_failed_read() {
-        let all = static_config().scope_names();
+        let defaults = crate::access::ordered_permissions(&default_role().permissions());
         // A failed read is an error, never every scope.
         assert_eq!(
             User::scopes_from_read::<&str>(Err("connection refused")),
             Err("connection refused")
         );
-        // A successful read without `scopes` keeps v4's rule.
-        assert_eq!(User::scopes_from_read::<()>(Ok(None)), Ok(all.clone()));
-        assert_eq!(User::scopes_from_read::<()>(Ok(Some(Map::new()))), Ok(all));
+        // A successful read without `scopes` follows the default role.
+        assert_eq!(User::scopes_from_read::<()>(Ok(None)), Ok(defaults.clone()));
+        assert_eq!(
+            User::scopes_from_read::<()>(Ok(Some(Map::new()))),
+            Ok(defaults)
+        );
         let mut attrs = Map::new();
         attrs.insert(
             "scopes".into(),

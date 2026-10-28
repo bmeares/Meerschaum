@@ -382,7 +382,8 @@ impl SqlConnector {
             pipe.update_parameters(patch);
             if !pipe.temporary && self.get_pipe_id(pipe).await?.is_some() {
                 let res = self.edit_pipe(pipe, false).await;
-                if !res.success {
+                // A `parameters` lock keeps the parameters as they are; the sync goes on.
+                if !res.success && !meerschaum_connector::locks::refused_by_lock(&res) {
                     tracing::warn!(
                         "Failed to capture new special columns for {pipe}:\n{}",
                         res.message
@@ -440,6 +441,13 @@ impl SqlConnector {
         Box::pin(async move {
             // Every sync into this instance converges here (CLI, jobs, engine, API, façade).
             if let Some(refused) = self.protected_refusal(pipe, "sync") {
+                return SyncResult::new(false, refused.message);
+            }
+            // Locks too: `sync` refuses every write, and a replacing sync deletes rows (`clear`).
+            if let Some(refused) = self
+                .lock_refusal(pipe, meerschaum_connector::locks::sync_op(opts.replace))
+                .await
+            {
                 return SyncResult::new(false, refused.message);
             }
             let start = Instant::now();
@@ -662,7 +670,8 @@ impl SqlConnector {
             pipe.update_parameters(patch);
             if !pipe.temporary {
                 let res = self.edit_pipe(pipe, false).await;
-                if !res.success {
+                // Under a `parameters` lock the sync goes on without recording it.
+                if !res.success && !meerschaum_connector::locks::refused_by_lock(&res) {
                     return Ok(res.into());
                 }
             }
@@ -2014,7 +2023,8 @@ impl SqlConnector {
             );
             if !pipe.temporary {
                 let res = self.edit_pipe(pipe, false).await;
-                if !res.success {
+                // A `parameters` lock keeps the parameters as they are; the sync goes on.
+                if !res.success && !meerschaum_connector::locks::refused_by_lock(&res) {
                     tracing::warn!(
                         "Failed to update dtypes for numeric columns {}:\n{}",
                         super::values::items_str(&input.numeric_cols),

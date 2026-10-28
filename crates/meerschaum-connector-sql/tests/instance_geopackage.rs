@@ -329,6 +329,8 @@ fn run_py(exe: &Path, work: &Path, args: &[&str]) -> J {
         .args(args)
         .current_dir(repo_root())
         .env("PYTHONPATH", repo_root())
+        // This is the pandas/GeoPandas parity contract, independent of the fresh-root default.
+        .env("MRSM_DATAFRAME", "pandas")
         .env("MRSM_ROOT_DIR", &root)
         .env("MRSM_PLUGINS_DIR", &plugins);
     // The geometry stack (shapely, geopandas) lives in the reference interpreter's own venv.
