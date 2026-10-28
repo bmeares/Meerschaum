@@ -59,6 +59,7 @@ jobs:
       profile: release
       artifacts_run_id: ${{ format('{0}', github.run_id) }}
       full: true
+      run_console: true
 
   docs:
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.candidate_run_id == '' }}

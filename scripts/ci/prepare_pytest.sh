@@ -16,7 +16,7 @@ export MRSM_ROOT_DIR="$scratch/root" MRSM_PLUGINS_DIR="$scratch/plugins" MRSM_NO
 "$python_bin" scripts/ci/artifacts.py verify --manifest "$artifact_dir/wheel/provenance.json" --kind wheel --profile "$wheel_profile" --target x86_64-unknown-linux-gnu
 "$python_bin" scripts/ci/artifacts.py verify --manifest "$artifact_dir/binary/provenance.json" --kind binary --profile "$binary_profile" --target x86_64-unknown-linux-gnu
 wanted="$("$python_bin" -c 'import sys; print(sys.version_info[:2])')"
-deps_hash="$({ cat requirements/full.txt requirements/sql-mssql.txt requirements/sql-oracle.txt requirements/sql-duckdb.txt; \
+deps_hash="$({ cat requirements/full.txt requirements/sql-mssql.txt requirements/sql-oracle.txt requirements/sql-duckdb.txt scripts/ci/requirements-browser.txt; \
   printf '%s\n' "pytest pytest-xdist httpx httpx2 uv $wanted"; } | sha256sum | cut -d' ' -f1)"
 if [ ! -x "$venv/bin/python" ] || \
    [ "$("$venv/bin/python" -c 'import sys; print(sys.version_info[:2])')" != "$wanted" ] || \
@@ -24,8 +24,18 @@ if [ ! -x "$venv/bin/python" ] || \
   "$python_bin" -m venv --clear "$venv"
   "$venv/bin/python" -m pip install --quiet --upgrade pip
   "$venv/bin/python" -m pip install --quiet -r requirements/full.txt -r requirements/sql-mssql.txt \
-    -r requirements/sql-oracle.txt -r requirements/sql-duckdb.txt pytest pytest-xdist httpx httpx2 uv
+    -r requirements/sql-oracle.txt -r requirements/sql-duckdb.txt -r scripts/ci/requirements-browser.txt pytest pytest-xdist httpx httpx2 uv
   echo "$deps_hash" > "$venv/.deps-hash"
+fi
+if [ "${MRSM_TEST_CONSOLE:-0}" = 1 ]; then
+  "$venv/bin/python" -m playwright install chromium
+  "$venv/bin/python" - <<'PY'
+from playwright.sync_api import sync_playwright
+with sync_playwright() as instance:
+    browser = instance.chromium.launch(headless=True)
+    browser.close()
+print('Required console browser is ready.')
+PY
 fi
 "$venv/bin/python" -m pip install --quiet --no-deps --force-reinstall "$artifact_dir/wheel/"*.whl
 (

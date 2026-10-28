@@ -12,6 +12,9 @@ on:
       full:
         type: boolean
         default: true
+      run_console:
+        type: boolean
+        default: false
   workflow_dispatch:
     inputs:
       profile:
@@ -27,6 +30,10 @@ on:
         description: 'all, or comma-separated core,postgres,mysql,mssql-valkey,oracle'
         type: string
         default: all
+      run_console:
+        description: 'Run the required console browser suite in the core lane.'
+        type: boolean
+        default: false
   push:
     branches: [main, staging, v5]
   pull_request:
@@ -115,6 +122,7 @@ jobs:
       PYTEST_BINARY_PROFILE: ${{ needs.changes.outputs.binary_profile }}
       MRSM_NO_AUTO_INSTALL: '1'
       MRSM_NO_UPDATE_CHECK: '1'
+      MRSM_TEST_CONSOLE: ${{ matrix.shard == 'core' && (inputs.run_console || github.event_name == 'schedule') && '1' || '0' }}
       PYTHONPATH: ${{ github.workspace }}
     steps:
       - uses: actions/checkout@v4

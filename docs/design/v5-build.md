@@ -8,11 +8,11 @@ Conventions for the crates themselves are in `crates/README.md`.
 | Workflow | Ordinary pushes and PRs | Full validation |
 |---|---|---|
 | `rust.yaml` | Linux fmt, Clippy, rustdoc and broad Rust tests; affected feature/package/driver checks | Nightly and reusable full call: every platform, reference regeneration, all feature/package checks |
-| `pytest.yaml` | One CI-profile wheel and debug CLI, then core/Postgres and affected backend lanes | Nightly: every lane; release call: install the already-built shipping wheel and CLI |
+| `pytest.yaml` | One CI-profile wheel and debug CLI, then core/Postgres and affected backend lanes | Nightly: every lane and console browser tests; release call: test the shipping wheel and CLI with browsers required |
 | `wheels.yaml` | No automatic build | Manual/reusable: selected release wheel matrix, standalone binaries and sdist |
 | `wheel-platform.yaml` | Called by the wheel matrix | Each platform builds, immediately runs its own compatible smokes, then stages a validated artifact |
 | `docs.yaml` | Strict build when docs inputs change; hosted runners only | Included in the release gate; uploads a website preview |
-| `release.yaml` | No branch/PR build | One manual full candidate; tag pushes only verify an existing successful candidate |
+| `release.yaml` | Definition changes run a metadata check | One manual full candidate; tag pushes only verify an existing successful candidate |
 | `docker-build.yaml` | No automatic build | Explicit manual build/publish; size and offline smoke gates retained |
 
 Build the website locally with `bash scripts/docs.sh --site-only`. It uses a cached, isolated
@@ -36,6 +36,10 @@ Python PRs keep core/SQLite/API-host checks and PostgreSQL-family coverage, addi
 lanes. Changes to the harness, manifests, dependency lock or workflows select every lane. Full
 nightly/release calls cannot select a partial matrix. `rust / summary`, `pytest / summary` and
 `docs / summary` cover failures and cancellations; self-hosted jobs refuse fork PR code.
+
+Console browser tests run once in the core lane on nightly and release candidates. The pinned
+Playwright package and Chromium must launch successfully; unavailable browser dependencies fail
+these required runs. Ordinary PRs retain the faster API-host coverage.
 
 ### Artifact reuse
 
@@ -169,7 +173,7 @@ Isolation between concurrent jobs:
 
 | Shared resource | Handling |
 |---|---|
-| `tests-*` containers (`tests/docker-compose.yaml`), the test API on port 8989, the `mrsm` Docker stack, port 8000, the production processes | only `pytest.yaml`'s `tests` job touches the test containers and 8989, and it carries `concurrency: {group: mrsm-test-services, cancel-in-progress: false}`: one at a time per repository, whichever runner takes it (a queued second run waits; a newer one replaces a waiting one). The Docker release workflow also uses the daemon, with its own builders and isolated smoke containers; it never uses 8989, 8000 or the deployed stack. |
+| Backend containers and API processes | Each Python lane owns a unique Compose project, volumes, random loopback database ports, API port and scratch configuration. Ownership checks protect cleanup. The deployed Stack and fixed service ports are untouched. |
 | `target/`, `.venv-ref`, `.venv-test`, `test_root`, the build lock `target/.build-py.lock` | per workspace (per runner): no sharing, no locking between runners |
 | the compile work of dependencies | shared through sccache (one server per user, same `SCCACHE_DIR`): a second runner's cold build is mostly cache hits |
 | `~/.cargo` (registry, git checkouts), the `rustup` toolchain | cargo and rustup take their own locks; safe |
@@ -177,8 +181,6 @@ Isolation between concurrent jobs:
 | ports of the Rust tests | tests bind random free ports; the optional `MRSM_TEST_*_URI` services are not set in CI |
 | disk | each runner's `disk-guard` measures its own filesystem; sccache is capped at 20 GB; GitHub-hosted legs use no local disk |
 
-A label-based alternative for the same isolation is to give one runner the label `mrsm-pytest` and set the `tests` job to
-`runs-on: [self-hosted, mrsm-pytest]`; the concurrency group needs no runner changes and is what the workflow uses.
 A new runner starts with a cold `target/` (the first job there compiles everything once; sccache serves the dependencies).
 
 ## Running CI locally

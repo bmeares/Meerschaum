@@ -1,0 +1,2 @@
+# Version used by the maintained console fixtures and documentation browser checks.
+playwright==1.60.0

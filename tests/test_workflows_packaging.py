@@ -447,6 +447,27 @@ def _evaluate_actions(expression, values):
     return eval(compile(tree, '<workflow guard>', 'eval'), {'__builtins__': {}, 'fromJSON': json.loads})
 
 
+@pytest.mark.parametrize('shard', ['core', 'postgres'])
+@pytest.mark.parametrize('event,requested,enabled', [
+    ('pull_request', False, False),
+    ('workflow_dispatch', True, True),
+    ('workflow_dispatch', False, False),
+    ('schedule', False, True),
+])
+def test_console_is_required_for_full_release_and_nightly_only(
+    pytest_workflow, shard, event, requested, enabled,
+):
+    release_python = _load('release.yaml')['jobs']['python']
+    assert release_python['with']['profile'] == 'release'
+    assert release_python['with']['full'] is True
+    assert release_python['with']['run_console'] is True
+    expression = pytest_workflow['jobs']['tests']['env']['MRSM_TEST_CONSOLE']
+    actual = _evaluate_actions(expression, {
+        'matrix.shard': shard, 'github.event_name': event, 'inputs.run_console': requested,
+    })
+    assert actual == ('1' if enabled and shard == 'core' else '0')
+
+
 def test_fork_prs_cannot_run_any_self_hosted_job(rust, pytest_workflow):
     for workflow in (rust, pytest_workflow):
         assert 'pull_request_target' not in _triggers(workflow)

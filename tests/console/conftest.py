@@ -8,7 +8,7 @@ Fixtures for the console browser tests (v5 design §14 "Console tests", D21).
 The console is the Plotly Dash app of v4 (`meerschaum.api.dash`), served by the Python API host
 behind the Rust server. The suite starts real `mrsm start api` servers (the standalone binary:
 `MRSM_TEST_BIN`, or `target/{release,debug}/mrsm` outside CI; its version and age are checked, see
-`tests/_binary.py`) on free high ports, each with a temporary `MRSM_ROOT_DIR`, an
+`tests/_binary.py`, including artifact provenance in CI) on free high ports, each with a temporary `MRSM_ROOT_DIR`, an
 empty-but-for-the-test plugins directory, a SQLite instance inside that root and a synthetic user,
 and drives them with Python Playwright's Chromium. It never touches the real configuration,
 port 8989, 8000, 8998, 3000 or any container.
@@ -374,7 +374,11 @@ assert success, msg
 
 @pytest.fixture(scope='session')
 def playwright_instance():
-    sync_api = pytest.importorskip('playwright.sync_api')
+    from tests._binary import skip_or_fail
+    try:
+        import playwright.sync_api as sync_api
+    except ImportError:
+        skip_or_fail('The required console browser suite needs the pinned Playwright package.')
     with sync_api.sync_playwright() as p:
         yield p
 
@@ -384,7 +388,8 @@ def browser(playwright_instance):
     try:
         browser = playwright_instance.chromium.launch(headless=True)
     except Exception as e:
-        pytest.skip(f"Chromium is not available to Playwright: {e}")
+        from tests._binary import skip_or_fail
+        skip_or_fail(f"Chromium is not available to the required console suite: {e}")
     yield browser
     browser.close()
 

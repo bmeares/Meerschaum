@@ -28,10 +28,10 @@ maintainer to add a missing one.
 | `MRSM_RUNNER_DIR` | v4 §4 | the directory of the self-hosted GitHub Actions runner |
 
 State at the end of an rc: one commit on `v5` (no PR to `main`; `main` is merged only for 5.0.0 final)
-carrying the bumped versions; that commit's CI green; `dist/` holding the wheels built by CI for that
+carrying the bumped versions; that commit's CI green; a fresh artifact directory holding the wheels built by CI for that
 commit plus the sdist; the packages on PyPI and crates.io; the annotated tag `v5.0.0rc1` and a GitHub
 pre-release. Tag spelling: `v<PEP 440 version>`, i.e. `v5.0.0rc1`, `v5.0.0` (the `v5*` tag trigger of
-`wheels.yaml` matches it, and a tag push only builds wheels, it never publishes).
+`release.yaml` verifies the sealed candidate without rebuilding or publishing).
 
 Versions have two spellings that must agree (`scripts/check_packaging.py` enforces it): Cargo
 `5.0.0-rc.1` (use the dot form; Cargo sorts `rc.10` after `rc.2` but `rc10` before `rc2`) and PEP 440
@@ -133,6 +133,8 @@ and strict `docs.yaml`. Its gate verifies every required platform and writes
 `release-candidate-manifest`; no publishing occurs. Require exact `headSha == $SHA`, success,
 and the candidate manifest. A successful verify-only run without that manifest is not a gate.
 
+The console browser suite is required in the core lane for releases and nightly runs; missing
+Playwright or Chromium fails these runs. Ordinary PRs keep the faster API-host coverage.
 Python backend lanes have isolated roots, projects, volumes and ports, a shared 16-worker budget,
 and a disjoint/exhaustive collection proof. Their artifacts retain collection/ownership evidence.
 Artifact consumers check actual commit/tree, target/profile and every payload digest. PRs keep
