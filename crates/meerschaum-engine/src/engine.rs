@@ -20,7 +20,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use chrono::Utc;
-use meerschaum_connector::{PipeKeysEntry, PipesKeys, PipesKeysQuery};
+use meerschaum_connector::{PipeKeysEntry, PipesKeysQuery};
 use meerschaum_core::pipe::PipeDefaults;
 use meerschaum_core::success::{Bound, SyncResult};
 use meerschaum_core::{Config, Map, Pipe, Value};
@@ -734,7 +734,8 @@ fn record_from_entry(
 }
 
 /// Read every registered pipe of `instance` as graph records (batch `fetch_pipes_keys`; the
-/// list form reads each pipe's parameters). `registry` must resolve `instance`.
+/// list form reads each pipe's parameters and identity together). `registry` must resolve
+/// `instance`. Preserve that pre-work registration snapshot for status and history privacy.
 pub async fn fetch_records(
     registry: &dyn ConnectorRegistry,
     defaults: &PipeDefaults,
@@ -743,23 +744,23 @@ pub async fn fetch_records(
 ) -> Result<Vec<PipeRecord>, String> {
     let conn = registry.instance(instance)?;
     let keys = conn
-        .fetch_pipes_keys(query)
+        .registered_pipes(query)
         .await
         .map_err(|e| format!("Failed to read pipes from '{instance}': {e}"))?;
-    let entries: Vec<&PipeKeysEntry> = match &keys {
-        PipesKeys::List(v) => v.iter().collect(),
-        PipesKeys::Dict(m) => m.values().collect(),
-    };
-    let mut out = Vec::with_capacity(entries.len());
-    for e in entries {
-        let mut rec = record_from_entry(instance, e, registry);
-        if !matches!(e.extra, Some(Value::Map(_))) {
-            // The list form carries no parameters: read them per pipe.
+    let mut out = Vec::with_capacity(keys.len());
+    for (identity, entry) in keys {
+        let mut rec = record_from_entry(instance, &entry, registry);
+        rec.pipe_id = identity.map(|identity| identity.to_value());
+        if !matches!(entry.extra, Some(Value::Map(_))) {
+            // Custom dictionary backends may return only tags. Keep their metadata
+            // fallback, and only attach identity to the parameters read atomically with it.
+            rec.pipe_id = None;
             if let Ok(pipe) = rec.to_pipe(defaults)
-                && let Ok(attrs) = conn.get_pipe_attributes(&pipe).await
-                && let Some(Value::Map(p)) = attrs.get("parameters")
+                && let Ok(attributes) = conn.get_pipe_attributes(&pipe).await
+                && let Some(Value::Map(parameters)) = attributes.get("parameters")
             {
-                rec.parameters = p.clone();
+                rec.parameters = parameters.clone();
+                rec.pipe_id = attributes.get("pipe_id").cloned();
             }
         }
         out.push(rec);

@@ -65,7 +65,7 @@ pub async fn registrations<C: InstanceConnector + ?Sized>(
 
 async fn registration_snapshot<C: InstanceConnector + ?Sized>(
     conn: &C,
-) -> ConnectorResult<(HashMap<String, String>, HashMap<String, String>)> {
+) -> ConnectorResult<(HashMap<String, String>, HashMap<String, (String, String)>)> {
     let keys = conn
         .registered_pipes(&crate::PipesKeysQuery::default())
         .await?;
@@ -91,7 +91,7 @@ async fn registration_snapshot<C: InstanceConnector + ?Sized>(
                             .and_then(Value::as_str),
                     )
                 {
-                    pipelines.insert(name, identity.to_string());
+                    pipelines.insert(name, (identity.to_string(), conn.connector_keys()));
                 }
                 continue;
             }
@@ -128,7 +128,7 @@ async fn registration_snapshot<C: InstanceConnector + ?Sized>(
                 .and_then(|definition| definition.get("id"))
                 .and_then(Value::as_str),
         ) {
-            pipelines.insert(name.clone(), identity.to_string());
+            pipelines.insert(name.clone(), (identity.to_string(), conn.connector_keys()));
         }
     }
     Ok((current, pipelines))
@@ -152,6 +152,28 @@ pub fn reference_keys(reference: &str) -> Option<(&str, &str, Option<&str>)> {
         metric,
         location.filter(|value| !matches!(*value, "None" | "")),
     ))
+}
+
+/// Whether immutable history belongs to a current registration on this exact instance.
+/// Missing legacy evidence and foreign API aliases never establish continuity.
+pub fn registration_matches(
+    reference: &str,
+    captured: Option<&str>,
+    instance: &str,
+    current: &HashMap<String, String>,
+) -> bool {
+    if reference.split('|').count() != 4 || reference.split('|').next() != Some(instance) {
+        return false;
+    }
+    let Some(captured) = captured.filter(|value| !value.is_empty()) else {
+        return false;
+    };
+    reference_keys(reference).is_some_and(|(connector, metric, location)| {
+        current
+            .get(&pipe_key(connector, metric, location))
+            .map(String::as_str)
+            == Some(captured)
+    })
 }
 
 /// Numeric metadata of one completed sync. Errors, SQL, parameters and job labels are excluded.
@@ -212,13 +234,21 @@ impl SyncMetric {
         Self {
             event_id: uuid::Uuid::new_v4().to_string(),
             ts: outcome.finished,
-            started: outcome.finished - TimeDelta::milliseconds((duration * 1000.0) as i64),
+            started: outcome
+                .finished
+                .checked_sub_signed(TimeDelta::microseconds((duration * 1_000_000.0) as i64))
+                .unwrap_or(DateTime::<Utc>::MIN_UTC),
             pipe_key: pipe_key(
                 pipe.connector_keys(),
                 pipe.metric_key(),
                 pipe.location_key(),
             ),
-            registration_id: observed_registration(pipe).unwrap_or_default(),
+            registration_id: if outcome.registration_captured {
+                outcome.registration_id.clone()
+            } else {
+                observed_registration(pipe)
+            }
+            .unwrap_or_default(),
             pipe_ref: pipe.pipe_ref(),
             instance_keys: pipe.instance_keys().into(),
             connector_keys: pipe.connector_keys().into(),
@@ -265,7 +295,8 @@ impl SyncMetric {
         self.connector_keys = pipe.connector_keys().into();
         self.metric_key = pipe.metric_key().into();
         self.location_key = pipe.location_key().map(str::to_string);
-        self.started = self.ts - TimeDelta::milliseconds((self.duration_seconds * 1000.0) as i64);
+        self.started =
+            self.ts - TimeDelta::microseconds((self.duration_seconds * 1_000_000.0) as i64);
         self.attempts = self.attempts.clamp(1, 1_000_000);
         self.chunks = self.chunks.min(i64::MAX as u64);
         self.inserted = self.inserted.min(i64::MAX as u64);
@@ -532,12 +563,17 @@ pub async fn metrics_pipe<C: InstanceConnector + ?Sized>(conn: &C) -> ConnectorR
 /// Create an empty metrics table and its indexes. Readers never create state as a side effect.
 pub async fn initialize<C: InstanceConnector + ?Sized>(conn: &C) -> ConnectorResult<()> {
     for metric in [METRIC, "engine_runs", "engine_nodes"] {
-        let Some(pipe) = conn
+        let Some(mut pipe) = conn
             .engine_state_pipe(&conn.connector_keys(), metric)
             .await?
         else {
             continue;
         };
+        if metric == "engine_nodes" {
+            // Match InstanceState's node writes: old installations need the newly
+            // declared registration columns, without assigning identity to legacy rows.
+            pipe.update_parameters([("static".into(), Value::Bool(false))].into());
+        }
         // Use the writer's cold-readiness path even when the table already exists:
         // existence alone does not prove that a concurrent writer finished its indexes.
         // In particular, this keeps PostgreSQL's initialization lock around all DDL.
@@ -624,6 +660,32 @@ struct Pending {
     metric: SyncMetric,
 }
 
+/// Own a drained group until its write is acknowledged. Runtime cancellation may happen
+/// after the database committed; retrying the same event IDs is idempotent on every backend.
+struct PendingGroup {
+    conn: Arc<dyn InstanceConnector>,
+    metrics: Vec<SyncMetric>,
+}
+
+impl Drop for PendingGroup {
+    fn drop(&mut self) {
+        if self.metrics.is_empty() {
+            return;
+        }
+        let mut state = recorder();
+        for metric in self.metrics.drain(..).rev() {
+            if state.pending.len() == MAX_PENDING {
+                // The queue's normal overload policy prefers newer outcomes.
+                break;
+            }
+            state.pending.push_front(Pending {
+                conn: self.conn.clone(),
+                metric,
+            });
+        }
+    }
+}
+
 #[derive(Default)]
 struct Recorder {
     pid: u32,
@@ -654,7 +716,13 @@ fn changed() -> &'static tokio::sync::Notify {
 
 /// Queue metadata without blocking the original sync or retaining unbounded history in memory.
 pub fn record(conn: Arc<dyn InstanceConnector>, pipe: &Pipe, outcome: &SyncOutcome) {
-    if !crate::sync_status::is_recorded(pipe) || observed_registration(pipe).is_none() {
+    if !crate::sync_status::is_recorded(pipe)
+        || (if outcome.registration_captured {
+            outcome.registration_id.is_none()
+        } else {
+            observed_registration(pipe).is_none()
+        })
+    {
         return;
     }
     {
@@ -708,23 +776,32 @@ fn start_writer() {
                 }
                 state.pending.drain(..count).collect()
             };
-            let mut groups: HashMap<usize, (Arc<dyn InstanceConnector>, Vec<SyncMetric>)> =
-                HashMap::new();
+            let mut groups: HashMap<usize, PendingGroup> = HashMap::new();
             for pending in batch {
                 let identity = Arc::as_ptr(&pending.conn) as *const () as usize;
                 groups
                     .entry(identity)
-                    .or_insert_with(|| (pending.conn.clone(), Vec::new()))
-                    .1
+                    .or_insert_with(|| PendingGroup {
+                        conn: pending.conn.clone(),
+                        metrics: Vec::new(),
+                    })
+                    .metrics
                     .push(pending.metric);
             }
-            for (_, (conn, metrics)) in groups {
-                match tokio::time::timeout(WRITE_TIMEOUT, conn.record_sync_metrics(&metrics)).await
+            for (_, mut group) in groups {
+                match tokio::time::timeout(
+                    WRITE_TIMEOUT,
+                    group.conn.record_sync_metrics(&group.metrics),
+                )
+                .await
                 {
                     Ok(Ok(())) => {}
                     Ok(Err(error)) => tracing::debug!("Cannot record sync metrics: {error}"),
                     Err(_) => tracing::debug!("Sync metrics write exceeded its time budget."),
                 }
+                // Completed errors keep telemetry best-effort; cancellation, in contrast,
+                // drops the still-owned group and returns it to the bounded queue.
+                group.metrics.clear();
             }
             changed().notify_waiters();
             tokio::task::yield_now().await;
@@ -743,6 +820,8 @@ pub async fn flush(timeout: Duration) {
     let deadline = tokio::time::Instant::now() + timeout;
     loop {
         let notified = changed().notified();
+        tokio::pin!(notified);
+        notified.as_mut().enable();
         start_writer();
         if !has_unwritten() {
             return;
@@ -755,7 +834,10 @@ pub async fn flush(timeout: Duration) {
 
 fn query_bounds(query: &MetricsQuery) -> ConnectorResult<(DateTime<Utc>, DateTime<Utc>, usize)> {
     let end = query.end.unwrap_or_else(Utc::now);
-    let begin = query.begin.unwrap_or(end - TimeDelta::days(1));
+    let begin = query
+        .begin
+        .or_else(|| end.checked_sub_signed(TimeDelta::days(1)))
+        .ok_or_else(|| ConnectorError::Invalid("Metrics bounds are out of range.".into()))?;
     if begin >= end
         || end - begin > TimeDelta::days(RETENTION_DAYS)
         || end > Utc::now() + TimeDelta::minutes(5)
@@ -785,27 +867,76 @@ fn json_field(doc: &Doc, key: &str) -> serde_json::Value {
     }
 }
 
-fn names_of(run: &Doc, query: &MetricsQuery, current: &HashMap<String, String>) -> Vec<String> {
+/// The original registry, or an exact API-local registry proven by the receiving server.
+/// Network writers must strip and independently validate `registration_registry` before storing it.
+pub fn snapshot_registry(definition: &serde_json::Value) -> Option<&str> {
+    definition
+        .get("registration_registry")
+        .or_else(|| definition.get("registry"))
+        .and_then(serde_json::Value::as_str)
+        .filter(|registry| !registry.is_empty())
+}
+
+/// Remove transport-only registration evidence after authorization, preserving original registries.
+pub fn strip_snapshot_proofs(selection: &mut serde_json::Value) -> bool {
+    let mut changed = false;
+    if let Some(snapshots) = selection
+        .get_mut("pipeline_definitions")
+        .and_then(serde_json::Value::as_array_mut)
+    {
+        for snapshot in snapshots {
+            if let Some(snapshot) = snapshot.as_object_mut() {
+                changed |= snapshot.remove("registration_registry").is_some();
+            }
+        }
+    }
+    changed
+}
+
+fn names_of(
+    run: &Doc,
+    query: &MetricsQuery,
+    current: &HashMap<String, (String, String)>,
+) -> Vec<String> {
     let selection = json_field(run, "selection");
-    let mut names: Vec<String> = selection
+    let snapshots = selection
         .get("pipeline_definitions")
-        .and_then(serde_json::Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter(|definition| {
-            definition
-                .get("name")
-                .and_then(serde_json::Value::as_str)
-                .is_some_and(|name| {
-                    definition.get("id").and_then(serde_json::Value::as_str)
-                        == current.get(name).map(String::as_str)
-                })
-        })
-        .filter_map(|definition| definition.get("name").and_then(serde_json::Value::as_str))
-        .map(str::to_string)
-        .collect();
+        .and_then(serde_json::Value::as_array);
+    let mut names = Vec::new();
+    for definition in snapshots.into_iter().flatten() {
+        if definition
+            .get("name")
+            .and_then(serde_json::Value::as_str)
+            .is_none_or(str::is_empty)
+        {
+            continue;
+        }
+        let Some(identity) = definition
+            .get("id")
+            .and_then(serde_json::Value::as_str)
+            .filter(|identity| !identity.is_empty() && !identity.starts_with("legacy:"))
+        else {
+            continue;
+        };
+        let Some(registry) = snapshot_registry(definition) else {
+            continue;
+        };
+        // A rename retains the live identity on its exact registry, while the stored
+        // snapshot keeps its historical name. An ambiguous duplicate grants no attribution.
+        let mut matching = current
+            .iter()
+            .filter(|(_, (current_id, current_registry))| {
+                current_id.as_str() == identity && current_registry.as_str() == registry
+            });
+        if let Some((name, _)) = matching.next()
+            && matching.next().is_none()
+        {
+            names.push(name.clone());
+        }
+    }
     // Older run rows only identify a saved Pipeline through the generated run name.
     if names.is_empty()
+        && snapshots.is_none_or(Vec::is_empty)
         && query.visible_pipelines.is_none()
         && let (Some(name), Some(run_id)) = (&query.pipeline, doc_str(run, "run_id"))
         && let Some(rest) = run_id.strip_prefix(&format!("{name}-"))
@@ -908,7 +1039,10 @@ pub async fn read<C: InstanceConnector + ?Sized>(
         conn,
         "engine_runs",
         &DataQuery {
-            begin: Some(DateBound::utc(end - TimeDelta::days(RETENTION_DAYS))),
+            begin: Some(DateBound::utc(
+                end.checked_sub_signed(TimeDelta::days(RETENTION_DAYS))
+                    .unwrap_or(DateTime::<Utc>::MIN_UTC),
+            )),
             end: None,
             limit: Some(MAX_RUNS as i64),
             order: Some("desc".into()),
@@ -1024,12 +1158,17 @@ pub async fn read<C: InstanceConnector + ?Sized>(
             let Some(reference) = node_reference(node) else {
                 return true;
             };
-            let Some(key) = reference_key(&reference) else {
-                return true;
-            };
+            // This snapshot contains registrations only on the selected instance.
+            // A foreign numeric ID and ACL hash can coincide with a local registration;
+            // an exact visible foreign ref does not prove its current generation.
             // A legacy node lacks the persisted registration segment, so it cannot prove
             // continuity after the Pipe was deleted or its privacy changed.
-            doc_str(node, "registration_id").as_ref() != current.get(&key)
+            !registration_matches(
+                &reference,
+                doc_str(node, "registration_id").as_deref(),
+                &conn.connector_keys(),
+                &current,
+            )
         }) {
             continue;
         }
@@ -1207,4 +1346,60 @@ pub async fn read<C: InstanceConnector + ?Sized>(
     response.pipelines = pipelines.into_values().collect();
     response.history = history;
     Ok(response)
+}
+
+#[cfg(test)]
+mod bounds_tests {
+    use super::*;
+
+    #[test]
+    fn extreme_typed_bounds_return_validation_errors_instead_of_panicking() {
+        assert!(
+            MetricsQuery {
+                end: Some(DateTime::<Utc>::MIN_UTC),
+                ..Default::default()
+            }
+            .validate()
+            .is_err()
+        );
+        assert!(
+            MetricsQuery {
+                end: Some(DateTime::<Utc>::MAX_UTC),
+                ..Default::default()
+            }
+            .validate()
+            .is_err()
+        );
+        let end = DateTime::<Utc>::MIN_UTC + TimeDelta::hours(1);
+        assert!(
+            MetricsQuery {
+                begin: Some(end - TimeDelta::minutes(1)),
+                end: Some(end),
+                ..Default::default()
+            }
+            .validate()
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn captured_start_preserves_submillisecond_duration_and_cannot_underflow() {
+        let pipe = Pipe::builder("synthetic", "timing").build().unwrap();
+        let mut outcome = SyncOutcome::new(true, "", crate::sync_status::SyncSource::Python, None)
+            .with_duration(Some(Duration::from_micros(250)));
+        let metric = SyncMetric::from_outcome(&pipe, &outcome);
+        assert_eq!(metric.ts - metric.started, TimeDelta::microseconds(250));
+        assert_eq!(
+            SyncMetric::from_doc(&metric.to_doc())
+                .unwrap()
+                .started
+                .timestamp_micros(),
+            metric.started.timestamp_micros()
+        );
+        outcome.finished = DateTime::<Utc>::MIN_UTC;
+        assert_eq!(
+            SyncMetric::from_outcome(&pipe, &outcome).started,
+            outcome.finished
+        );
+    }
 }

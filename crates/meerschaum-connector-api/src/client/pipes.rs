@@ -212,6 +212,19 @@ fn now_secs() -> Instant {
 }
 
 impl APIConnector {
+    fn rebind_pipeline_parameters(&self, parameters: &mut Map) {
+        if let Some(Value::Map(definition)) = parameters.get_mut("pipeline")
+            && let Some(Value::Str(registry)) = definition.get("registry")
+        {
+            let registry = registry.clone();
+            crate::engine_pipes::rebind_pipeline_definition(
+                definition,
+                &registry,
+                &self.to_string(),
+            );
+        }
+    }
+
     /// `pipe_r_url(pipe)`.
     pub fn pipe_r_url(pipe: &Pipe) -> String {
         routes::pipe_r_url(
@@ -254,6 +267,17 @@ impl APIConnector {
         (
             key.to_string(),
             QueryValue::opt(self.get_pipe_instance_keys(pipe)),
+        )
+    }
+
+    fn metadata_instance_query(&self, pipe: &Pipe) -> (String, QueryValue) {
+        self.instance_query(
+            pipe,
+            if Self::is_pipeline_metadata(pipe) {
+                "instance_keys"
+            } else {
+                "instance"
+            },
         )
     }
 
@@ -400,6 +424,14 @@ impl APIConnector {
         let opts = RequestOptions {
             query: vec![self.instance_query(pipe, "instance_keys")],
             body: Body::Json(py_json(&Value::Map(pipe.raw_parameters().clone()))),
+            headers: if Self::is_pipeline_metadata(pipe) {
+                vec![(
+                    crate::engine_pipes::CLIENT_INSTANCE_HEADER.into(),
+                    self.to_string(),
+                )]
+            } else {
+                Vec::new()
+            },
             ..Default::default()
         };
         let response = match self.post(&r_url, opts).await {
@@ -438,6 +470,14 @@ impl APIConnector {
                 self.instance_query(pipe, "instance_keys"),
             ],
             body: Body::Json(py_json(&Value::Map(parameters))),
+            headers: if Self::is_pipeline_metadata(pipe) {
+                vec![(
+                    crate::engine_pipes::CLIENT_INSTANCE_HEADER.into(),
+                    self.to_string(),
+                )]
+            } else {
+                Vec::new()
+            },
             ..Default::default()
         };
         let response = match self.patch(&r_url, opts).await {
@@ -448,6 +488,43 @@ impl APIConnector {
             Ok(data) => tuple_from_json(&response, &data),
             Err(e) => SuccessTuple::fail(e.to_string()),
         }
+    }
+
+    /// Move a live saved Pipeline through the authenticated server operation. IDs and access
+    /// come from the source registration, never from a caller-selected replacement.
+    pub async fn rename_pipeline(
+        &self,
+        source: &Pipe,
+        new_name: &str,
+        expected_revision: Option<i64>,
+        expected_id: Option<&str>,
+    ) -> ConnectorResult<Map> {
+        if !Self::is_pipeline_metadata(source) || source.location_key().is_none() {
+            return Err(ConnectorError::Invalid(
+                "Only named Pipeline metadata may be moved.".into(),
+            ));
+        }
+        let response = self.post(&(Self::metadata_r_url(source) + "/rename"), RequestOptions {
+            query: vec![self.instance_query(source, "instance_keys")],
+            body: Body::Json(serde_json::json!({"new_name":new_name,"expected_revision":expected_revision,"expected_id":expected_id}).to_string()),
+            ..Default::default()
+        }).await?;
+        let Value::Map(mut definition) =
+            pipe_ops::json_to_core(&response.envelope_field("pipeline")?)
+        else {
+            return Err(ConnectorError::Invalid(
+                "Invalid renamed Pipeline definition.".into(),
+            ));
+        };
+        if let Some(Value::Str(registry)) = definition.get("registry") {
+            let registry = registry.clone();
+            crate::engine_pipes::rebind_pipeline_definition(
+                &mut definition,
+                &registry,
+                &self.to_string(),
+            );
+        }
+        Ok(definition)
     }
 
     /// `fetch_pipes_keys(...)`: `GET /pipes/keys` with JSON-encoded filters and `as_dict=True`.
@@ -487,7 +564,11 @@ impl APIConnector {
         };
         let entry = |v: &serde_json::Value| -> Option<PipeKeysEntry> {
             let items: Vec<Value> = v.as_array()?.iter().map(pipe_ops::json_to_core).collect();
-            PipeKeysEntry::from_list(&items)
+            let mut entry = PipeKeysEntry::from_list(&items)?;
+            if pipelines && let Some(Value::Map(parameters)) = entry.extra.as_mut() {
+                self.rebind_pipeline_parameters(parameters);
+            }
+            Some(entry)
         };
         let keys = match j {
             serde_json::Value::Object(o) => PipesKeys::Dict(
@@ -911,7 +992,7 @@ impl APIConnector {
             .get(
                 &r_url,
                 RequestOptions {
-                    query: vec![self.instance_query(pipe, "instance")],
+                    query: vec![self.metadata_instance_query(pipe)],
                     ..Default::default()
                 },
             )
@@ -939,6 +1020,45 @@ impl APIConnector {
         Ok(None)
     }
 
+    /// Read exact server identity before the normal public metadata aliases are rebound.
+    pub(crate) async fn remote_saved_pipeline_identity(
+        &self,
+        name: &str,
+    ) -> ConnectorResult<Option<(String, String)>> {
+        let pipe = Pipe::builder("mrsm", "pipeline")
+            .location(Some(name))
+            .instance(&self.to_string())
+            .build()
+            .map_err(|error| ConnectorError::Invalid(error.to_string()))?;
+        let response = self
+            .get(
+                &(Self::metadata_r_url(&pipe) + "/attributes"),
+                RequestOptions {
+                    query: vec![self.metadata_instance_query(&pipe)],
+                    ..Default::default()
+                },
+            )
+            .await?;
+        if response.status == 404 {
+            return Ok(None);
+        }
+        let attributes = response.envelope_field("attributes")?;
+        let definition = attributes
+            .get("parameters")
+            .and_then(|parameters| parameters.get("pipeline"));
+        let identity = definition
+            .and_then(|definition| definition.get("id"))
+            .and_then(serde_json::Value::as_str)
+            .filter(|identity| !identity.is_empty() && !identity.starts_with("legacy:"));
+        let registry = definition
+            .and_then(|definition| definition.get("registry"))
+            .and_then(serde_json::Value::as_str)
+            .filter(|registry| !registry.is_empty());
+        Ok(identity
+            .zip(registry)
+            .map(|(identity, registry)| (identity.to_string(), registry.to_string())))
+    }
+
     /// `get_pipe_attributes(pipe)`: `GET /pipes/{keys}/attributes` (errors raise).
     pub async fn get_pipe_attributes(&self, pipe: &Pipe) -> ConnectorResult<Map> {
         let r_url = Self::metadata_r_url(pipe) + "/attributes";
@@ -946,7 +1066,7 @@ impl APIConnector {
             .get(
                 &r_url,
                 RequestOptions {
-                    query: vec![self.instance_query(pipe, "instance")],
+                    query: vec![self.metadata_instance_query(pipe)],
                     ..Default::default()
                 },
             )
@@ -958,7 +1078,12 @@ impl APIConnector {
                 return Ok(Map::new());
             }
             return match pipe_ops::json_to_core(&response.envelope_field("attributes")?) {
-                Value::Map(m) => Ok(m),
+                Value::Map(mut m) => {
+                    if let Some(Value::Map(parameters)) = m.get_mut("parameters") {
+                        self.rebind_pipeline_parameters(parameters);
+                    }
+                    Ok(m)
+                }
                 Value::Null => Ok(Map::new()),
                 _ => Err(ConnectorError::Invalid(format!(
                     "Invalid attributes response for {pipe}."

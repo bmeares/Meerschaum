@@ -14,6 +14,8 @@ MAX_ARCHIVE_BYTES = 16 * 1024 * 1024
 MAX_SCAN_BYTES = 32 * 1024 * 1024
 MAX_FILES = 100
 MAX_ENTRIES = 1000
+MAX_PATH_BYTES = 1024
+MAX_PATH_PARTS = 32
 TEXT_SUFFIXES = frozenset({'.py', '.rs', '.toml', '.md', '.txt', '.json', '.yaml', '.yml', '.sql'})
 SKIP_PARTS = frozenset({'__pycache__', 'target', 'node_modules', '.git', '.venv', 'venv'})
 
@@ -42,8 +44,11 @@ def may_read_source(kind: str, session: Any) -> bool:
 
 def _relative(value: Any) -> pathlib.PurePosixPath:
     text = str(value or '')
+    if len(text.encode('utf-8')) > MAX_PATH_BYTES:
+        raise ValueError('This source path is too long to preview.')
     path = pathlib.PurePosixPath(text)
     if (not text or '\\' in text or '\0' in text or path.is_absolute()
+        or len(path.parts) > MAX_PATH_PARTS
         or any(part in ('', '.', '..') for part in text.split('/'))
         or any(part.startswith('.') or part in SKIP_PARTS for part in path.parts)):
         raise ValueError('Invalid source file.')

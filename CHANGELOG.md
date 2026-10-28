@@ -68,6 +68,12 @@ The notes below are written for someone upgrading from 4.1. Everything that beha
 - **User lookup and SQL guards fail closed.**  
   Custom instance connectors match usernames exactly, including a leading `_`, and unknown user IDs no longer read another user's fields. SQL definitions through the API require `pipes:define_sql`; definitions and MCP reads reject internal tables and targets of hidden pipes, including resolved pipe references. Connector `teams` lists restrict which teams can use them. Connector listings mask credentials in attributes and connection strings. An empty custom permission list revokes all permissions.
 
+- **Pipeline access follows its history.**\
+  A saved Pipeline's current access and registration identity govern its run names, snapshots, nodes, events and history edits, even when its member Pipes are public. Retained Pipe history also requires matching registration and access settings before it is shown to nonadministrators. API registrations receive fresh Pipeline IDs; edits and atomic renames preserve them and their history. API, MCP and console readers apply the same checks; live streams recheck credentials and access within five seconds. API-origin runs retain their original registry while the server validates their registration privately.
+
+- **Remote actions keep their permission limits.**\
+  Restricted API keys follow the same command checks as other limited callers. Action chains validate the commands and selections they actually run; nonadministrators cannot redirect an action to another executor or use it to list server connector details. Pipe registration and sensitive parameter edits use the scoped API or console.
+
 #### DataFrames and SQL
 
 - **Polars for new roots, pandas preserved on upgrades.**  
@@ -99,6 +105,12 @@ The notes below are written for someone upgrading from 4.1. Everything that beha
 - **See sync performance without a plugin.**\
   Native syncs keep 30 days of numeric history: durations, failures, retries, chunks and affected rows. The console's **Performance** page shows Plotly charts and Pipe and Pipeline summaries; Overview links to it. The Stack adds three dashboards to Grafana's **Meerschaum Dashboards** folder. Console and API metrics follow current Pipe, Pipeline and connector access; passwords, SQL and error text are excluded.
 
+- **Internal history initializes and upgrades safely.**\
+  Concurrent first writes on SQLite no longer race to create internal indexes. Existing history tables gain missing fields, and new MySQL and MariaDB runs and steps retain microsecond timestamps, including staged batches. Older whole-second timestamps keep their original resolution. Queued sync status stays with its connector and is shown only for its matching registration and access settings. A cancelled metrics writer retains its unacknowledged batch for a later bounded flush.
+
+- **Performance drilldown and history pages.**\
+  Pipe and Pipeline links update the selected group without leaving the page, and Back restores the previous selection. Recent syncs shows 50 rows per page within the existing bounded sample; each page rereads current access. Changed filters reset the page. Loading or refused reads preserve the selected filter while clearing previous results and fetched labels.
+
 - **Plans and runs in plain words.**  
   `plan pipes`, the console's Plan and the run history explain each pipe in sentences ("up to date: Pipe('sql:main', 'raw') has no new data (latest 2026-10-12 09:45)") instead of ledger, cursor and watermark jargon; sync windows read "last sync − 1 day → latest data", and a run's message lists only what happened ("3 synced, 1 up to date"). A scheduled pipe with parents in a `--parents` / `--children` run syncs when its parents have new data rather than on its `schedule`: the loop warns about it once and `plan pipes` lists the warning. In a flat selection every pipe follows its own schedule.
 
@@ -106,7 +118,7 @@ The notes below are written for someone upgrading from 4.1. Everything that beha
   `/dash/pipelines` lists the Pipelines registered on the console's instance as cards (members, instances, last run, schedule) with **New pipeline**, which walks through name, members, traversal and a review of the plan, checks and proposed tags before anything is saved, and **Find Pipe**, which explores any Pipe's connected graph and saves it as a Pipeline. Each Pipeline has its own page with Canvas and Runs tabs: the canvas starts with the explicit members and folds parents and children into expandable upstream and downstream nodes, a node opens its inspector in a side drawer, and the page is read-only until **Edit** (add and remove members, draw dependency edges, undo/redo, drafts kept in the browser, revision checks on save). Run a Pipeline or a single Pipe and follow its output, each member Pipe's output within a run, and a live Gantt timeline. The instance selector is shared across console pages, and an instance the API does not allow is refused with a message. A Pipe's page has a Lineage tab where you add and remove its parents and children.
 
 - **A faster console with useful inspection.**\
-  Pipeline cards share a bounded history read and load saved definitions in bulk. Pipe Lineage opens its graph correctly. Connectors show configuration and supported keys with secrets masked; Plugins offers read-only source inspection with current permissions enforced. Expanding the mobile menu keeps the navbar in place.
+  Pipeline cards share a bounded history read and load saved definitions in bulk. Pipe Lineage opens its graph correctly. Connectors show configuration and supported keys with encoded and escaped credential copies masked; Plugins offers bounded, read-only source inspection with current permissions enforced. Grafana updates preserve custom files, unreadable collisions and symlinks. Expanding the mobile menu keeps the navbar in place.
 
 - **Watch data move through a pipeline.**  
   On a terminal, graph runs (`sync pipes --parents/--children/--resume`, `sync pipelines`) and `--loop` / `--listen` laps show an inline live region with one row per running pipe: chunk progress, rows inserted, updated and upserted so far, rows/s and the attempt. Plan decisions, retries and finished pipes scroll above it, and the Gantt chart follows at the end. Press `w` to open the full-screen run monitor and leave it to return to the inline view while the run keeps going. `--nopretty`, `--debug` and piped output keep line output. Every pipe's result prints as soon as it finishes, with its duration and position in the run, in job logs and piped output too, and the closing summary adds row totals, the slowest pipes and each failure's reason.

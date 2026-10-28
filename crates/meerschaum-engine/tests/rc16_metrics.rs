@@ -147,6 +147,56 @@ async fn persisted_history_is_shared_with_a_new_connector_and_filtered_before_ag
 }
 
 #[tokio::test]
+async fn identical_instance_aliases_keep_status_and_metrics_on_their_physical_databases() {
+    let first = env("metrics_same_alias_a").await;
+    let second = env("metrics_same_alias_b").await;
+    let params = json!({"columns":{"id":"id"}});
+    let pipe_a = first.register("shared", &params).await;
+    let pipe_b = second.register("shared", &params).await;
+    assert_eq!(pipe_a.pipe_ref(), pipe_b.pipe_ref());
+    let input = |rows: i64| {
+        PipeInput::Docs(
+            (0..rows)
+                .map(|id| [("id".into(), KValue::Int(id))].into())
+                .collect(),
+        )
+    };
+    let result = first
+        .engine()
+        .sync_pipe(&pipe_a, Some(input(1)), &SyncArgs::default())
+        .await;
+    assert!(result.success, "{}", result.message);
+    meerschaum_connector::sync_status::settle_pipe(&pipe_a.pipe_ref()).await;
+    let result = first
+        .engine()
+        .sync_pipe(&pipe_a, Some(input(4)), &SyncArgs::default())
+        .await;
+    assert!(result.success, "{}", result.message);
+    let result = second
+        .engine()
+        .sync_pipe(&pipe_b, Some(input(7)), &SyncArgs::default())
+        .await;
+    assert!(result.success, "{}", result.message);
+    meerschaum_connector::sync_status::flush(Duration::from_secs(4)).await;
+    let status_a = first.conn.get_sync_status(&pipe_a).await.unwrap().unwrap();
+    let status_b = second.conn.get_sync_status(&pipe_b).await.unwrap().unwrap();
+    assert_eq!(status_a.rows_inserted, 3);
+    assert_eq!(status_b.rows_inserted, 7);
+    let metrics_a = first
+        .conn
+        .get_engine_metrics(&MetricsQuery::default())
+        .await
+        .unwrap();
+    let metrics_b = second
+        .conn
+        .get_engine_metrics(&MetricsQuery::default())
+        .await
+        .unwrap();
+    assert_eq!((metrics_a.summary.syncs, metrics_a.summary.rows), (2, 4));
+    assert_eq!((metrics_b.summary.syncs, metrics_b.summary.rows), (1, 7));
+}
+
+#[tokio::test]
 async fn rounded_database_datetimes_cannot_move_captured_outcomes_outside_their_time_window() {
     let env = env("metrics_rounded_time").await;
     let pipe = env.register("precise", &json!({})).await;
@@ -316,7 +366,7 @@ async fn run(env: &Env, id: &str, reference: &str, registration: &str, rows: u64
             resumed_from: None,
             holder: "private-host-label".into(),
             selection: Some(
-                json!({"pipeline_definitions":[{"name":"daily", "id":"fixture-pipeline"}]})
+                json!({"pipeline_definitions":[{"name":"daily", "id":"fixture-pipeline", "registry":INSTANCE}]})
                     .to_string(),
             ),
         },
@@ -392,6 +442,19 @@ async fn pipeline_metrics_reject_foreign_api_collisions_and_hidden_registration_
         .await
         .unwrap();
     assert!(hidden.pipelines.is_empty());
+    // A ceiling proves visibility of a foreign ref, not that a local registration
+    // with the same numeric ID and ACL represents that foreign Pipe's generation.
+    let foreign_visible = env
+        .conn
+        .get_engine_metrics(&MetricsQuery {
+            visible_refs: Some(vec![pipe.pipe_ref(), foreign]),
+            visible_pipelines: Some(vec!["daily".into()]),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(foreign_visible.pipelines[0].summary.syncs, 1);
+    assert_eq!(foreign_visible.pipelines[0].summary.rows, 12);
 
     // A member may finish inside a window before its long Pipeline run finishes.
     let state = InstanceState::new(env.registry.clone(), INSTANCE);
@@ -417,6 +480,95 @@ async fn pipeline_metrics_reject_foreign_api_collisions_and_hidden_registration_
         during_run.pipelines.is_empty(),
         "whole-run timing is outside the window"
     );
+}
+
+#[tokio::test]
+async fn renamed_pipeline_metrics_follow_the_live_identity_without_reusing_the_old_name() {
+    let env = env("metrics_renamed_pipeline").await;
+    let pipe = env.register("member", &json!({})).await;
+    let mut metric = captured(&env, &pipe, 5, true).await;
+    metric.run_id = Some("renamed-metrics-run".into());
+    run(
+        &env,
+        "renamed-metrics-run",
+        &pipe.pipe_ref(),
+        &metric.registration_id,
+        12,
+    )
+    .await;
+    env.conn.record_sync_metrics(&[metric]).await.unwrap();
+    let metadata = |name: &str, identity: &str| {
+        Pipe::builder("mrsm", "pipeline")
+            .location(Some(name))
+            .instance(INSTANCE)
+            .parameters(json_map(&json!({"pipeline":{"name":name,"id":identity}})))
+            .build()
+            .unwrap()
+    };
+    // Trusted local rename preserves the immutable ID, as the authorized API move does.
+    let renamed = metadata("evening", "fixture-pipeline");
+    assert!(env.conn.register_pipe(&renamed).await.success);
+    assert!(
+        env.conn
+            .delete_pipe(&metadata("daily", "fixture-pipeline"))
+            .await
+            .success
+    );
+    assert!(
+        env.conn
+            .register_pipe(&metadata("daily", "replacement-pipeline"))
+            .await
+            .success
+    );
+    let query = |name: &str| MetricsQuery {
+        pipeline: Some(name.into()),
+        visible_refs: Some(vec![pipe.pipe_ref()]),
+        visible_pipelines: Some(vec!["daily".into(), "evening".into()]),
+        ..Default::default()
+    };
+    let state = InstanceState::new(env.registry.clone(), INSTANCE);
+    let mut foreign = state
+        .load_run("renamed-metrics-run")
+        .await
+        .unwrap()
+        .unwrap();
+    foreign.run.run_id = "foreign-renamed-metrics".into();
+    foreign.run.selection = Some(
+        json!({"pipeline_definitions":[{"name":"daily","id":"fixture-pipeline","registry":"api:foreign"}]}).to_string(),
+    );
+    for node in &mut foreign.nodes {
+        node.run_id = foreign.run.run_id.clone();
+    }
+    state.record_run(&foreign).await.unwrap();
+    let current = env
+        .conn
+        .get_engine_metrics(&query("evening"))
+        .await
+        .unwrap();
+    assert_eq!(current.summary.syncs, 1);
+    assert_eq!(current.summary.rows, 5);
+    assert_eq!(current.pipelines.len(), 1);
+    assert_eq!(current.pipelines[0].name, "evening");
+    assert_eq!(current.pipelines[0].summary.syncs, 1);
+    assert_eq!(current.pipelines[0].summary.rows, 12);
+    assert_eq!(
+        current.history[0].run_id.as_deref(),
+        Some("renamed-metrics-run")
+    );
+    let replacement = env.conn.get_engine_metrics(&query("daily")).await.unwrap();
+    assert_eq!(replacement.summary.syncs, 0);
+    assert!(replacement.pipelines.is_empty());
+    let hidden = env
+        .conn
+        .get_engine_metrics(&MetricsQuery {
+            visible_refs: Some(vec![pipe.pipe_ref()]),
+            visible_pipelines: Some(vec!["daily".into()]),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert!(hidden.pipelines.is_empty());
+    assert!(hidden.history[0].run_id.is_none());
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -467,7 +619,9 @@ async fn a_real_pipeline_run_records_each_node_once_with_its_registration_and_ru
         .engine()
         .run(RunOptions {
             selection: Some(Selection::refs([PipeRef::from_pipe(&pipe)]).with_graph(true)),
-            pipeline_definitions: vec![json!({"id":"real-pipeline","name":"daily"})],
+            pipeline_definitions: vec![
+                json!({"id":"real-pipeline","name":"daily","registry":INSTANCE}),
+            ],
             ..Default::default()
         })
         .await;

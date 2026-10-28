@@ -955,6 +955,42 @@ pub trait InstanceConnector: Connector {
         Ok(pipe_ops::engine_state_pipe(instance_keys, metric_key))
     }
 
+    /// Authoritative remote history-generation checks, without transporting private stamps.
+    /// Local instances return `None` so their reader validates persisted node evidence.
+    async fn engine_run_generations(
+        &self,
+        run_ids: &[String],
+    ) -> ConnectorResult<Option<std::collections::HashMap<String, bool>>> {
+        let _ = run_ids;
+        Ok(None)
+    }
+
+    /// A fresh remote saved-Pipeline UUID and canonical registry, before client alias rebinding.
+    /// Local instances return `None` so readers resolve their ordinary registry metadata.
+    /// This lookup is not authorization; caller visibility and generation checks still apply.
+    async fn saved_pipeline_identity(
+        &self,
+        name: &str,
+    ) -> ConnectorResult<Option<(String, String)>> {
+        let _ = name;
+        Ok(None)
+    }
+
+    /// Atomically move a live saved-Pipeline registration, preserving its persisted identity.
+    /// Refuse a changed/missing source or existing destination; never create a missing source.
+    async fn move_pipeline_registration(
+        &self,
+        source: &Pipe,
+        new_name: &str,
+        expected: &Map,
+        parameters: &Map,
+    ) -> ConnectorResult<bool> {
+        let _ = (source, new_name, expected, parameters);
+        Err(ConnectorError::NotImplemented(
+            "Atomic Pipeline metadata moves are unsupported by this instance.".into(),
+        ))
+    }
+
     // ----------------------------------------------------------------------------------------
     // Per-pipe sync status (rc15 contract C2, [`crate::sync_status`])
     // ----------------------------------------------------------------------------------------

@@ -20,6 +20,7 @@
 .performance-overview-stats { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin: 0 0 12px; }
 .performance-overview-stats .performance-stat { padding: 8px 10px; }
 .performance-overview-stats .performance-stat dd { font-size: 1.2rem; }
+#performance-history-controls .pagination { flex-wrap: wrap; gap: 4px; }
 @media (max-width: 1100px) { .performance-charts { grid-template-columns: 1fr; } }
 @media (max-width: 767.98px) {
     .performance-page { padding: 12px 16px 24px; }
@@ -28,4 +29,5 @@
     .performance-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .performance-stat { padding: 10px; }
     .performance-stat dd { font-size: 1.2rem; }
+    #performance-history-controls .page-link { min-width: 44px; min-height: 44px; display: flex; align-items: center; justify-content: center; }
 }

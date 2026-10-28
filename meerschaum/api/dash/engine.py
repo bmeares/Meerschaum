@@ -67,6 +67,107 @@ def ref_label(pipe_ref: str) -> str:
     return str(mrsm.Pipe(connector, metric, location, instance=instance))
 
 
+class _HistoryRun(dict):
+    """A request-local result whose provenance is never part of its JSON representation."""
+
+
+def _public_history_value(value: Any) -> Any:
+    """Remove storage-only snapshot proofs after access decisions, retaining original refs."""
+    if isinstance(value, dict):
+        out = _HistoryRun() if isinstance(value, _HistoryRun) else {}
+        for key, item in value.items():
+            if key == 'selection' and isinstance(item, str) and 'registration_registry' in item:
+                import json
+                try:
+                    item = json.dumps(_public_history_value(json.loads(item)))
+                except ValueError:
+                    pass
+            elif key == 'pipeline_definitions' and isinstance(item, list):
+                item = [
+                    {name: field for name, field in snapshot.items() if name != 'registration_registry'}
+                    if isinstance(snapshot, dict) else snapshot
+                    for snapshot in item
+                ]
+            out[key] = _public_history_value(item)
+        if isinstance(out, _HistoryRun):
+            out._snapshot_registries = getattr(value, '_snapshot_registries', frozenset())
+        return out
+    if isinstance(value, list):
+        return [_public_history_value(item) for item in value]
+    return value
+
+
+def _public_history_run(run: Dict[str, Any]) -> Dict[str, Any]:
+    """Keep already-validated registry provenance only for immediate host-side attribution."""
+    import json
+    selection = (run.get('run') or {}).get('selection')
+    if isinstance(selection, str):
+        try:
+            selection = json.loads(selection)
+        except ValueError:
+            selection = None
+    registries = set()
+    if isinstance(selection, dict):
+        snapshots = selection.get('pipeline_definitions')
+        for snapshot in snapshots if isinstance(snapshots, list) else []:
+            if not isinstance(snapshot, dict):
+                continue
+            values = tuple(snapshot.get(key) for key in ('name', 'id', 'registration_registry'))
+            if all(isinstance(value, str) and value for value in values):
+                registries.add(values)
+    public = _public_history_value(run)
+    if not registries:
+        return dict(public)
+    out = _HistoryRun(public)
+    out._snapshot_registries = frozenset(registries)
+    return out
+
+
+def _run_generations(instance: Any, run_ids: List[str]) -> Dict[str, bool]:
+    """Fresh private native evidence, requested in bulk and never returned to the browser."""
+    ids = sorted({str(run_id) for run_id in run_ids if run_id})
+    if not ids:
+        return {}
+    request = _request(instance)
+    request['run_ids'] = ids
+    try:
+        current = _call('engine_run_generations', request)
+    except Exception:
+        return {}
+    return {run_id: current.get(run_id) is True for run_id in ids} if isinstance(current, dict) else {}
+
+
+def _api_pipeline_registry(instance: Any) -> Dict[str, Dict[str, Any]]:
+    """One fresh canonical metadata snapshot, before the API client's public rebinding."""
+    import json
+    conn = mrsm.get_connector(instance) if isinstance(instance, str) else instance
+    query = {'as_dict': True}
+    if conn.instance_keys:
+        query['instance_keys'] = conn.instance_keys
+    response = conn.get('/pipelines/keys', params=query)
+    body = response.json()
+    if not response.ok or not isinstance(body, dict) or body.get('success') is not True:
+        return {}
+    records = body.get('keys')
+    records = records.values() if isinstance(records, dict) else records
+    if not isinstance(records, (list, tuple)):
+        records = list(records) if records is not None else []
+    out = {}
+    for record in records:
+        if not isinstance(record, (list, tuple)) or len(record) < 4 or list(record[:2]) != ['mrsm', 'pipeline']:
+            continue
+        parameters = record[3]
+        if isinstance(parameters, str):
+            try:
+                parameters = json.loads(parameters)
+            except ValueError:
+                continue
+        if (record[2] and isinstance(parameters, dict)
+            and isinstance(parameters.get('pipeline'), dict)):
+            out[str(record[2])] = parameters
+    return out
+
+
 class Anonymizer:
     """
     What a viewer sees of the engine's records on an instance: the `pipe_ref`s of pipes they may
@@ -78,25 +179,87 @@ class Anonymizer:
     def __init__(self, viewer: Any = None, instance: Any = None, refs=None):
         from meerschaum.api.dash import access
         self.viewer = viewer if viewer is not None else access.current_viewer()
-        self.instance_keys = str(instance) if instance is not None else str(get_instance())
+        self.instance = instance if instance is not None else get_instance()
+        self.instance_keys = str(self.instance)
+        self.pipeline_definitions = None
+        self.pipeline_registries: Dict[str, str] = {}
+        self.canonical_registries = set()
+        self.run_generations: Dict[str, bool] = {}
         self.reference_visibility = None
         if refs is not None and not (self.viewer.no_auth or self.viewer.is_admin):
-            requested = {str(ref) for ref in refs}
+            if self.instance_keys.startswith('api:'):
+                self.load_pipeline_definitions()
+            requested = {self.visibility_ref(str(ref)) for ref in refs}
             allowed = access.visible_ref_subset(self.viewer, requested)
             self.reference_visibility = {ref: ref in allowed for ref in requested}
         try:
             self.visible = (
                 {ref for ref, allowed in self.reference_visibility.items() if allowed}
                 if self.reference_visibility is not None else
-                access.visible_refs(self.viewer, instance if instance is not None else self.instance_keys)
+                access.visible_refs(self.viewer, self.instance)
             )
         except Exception:
             self.visible = set()
         self.active = self.visible is not None
         self.hidden: Dict[str, str] = {}
 
+    def load_pipeline_definitions(self) -> None:
+        """Current UUID, ACL and canonical registry, shared by every run in this request."""
+        if self.pipeline_definitions is not None:
+            return
+        from meerschaum.api.dash import access
+        api = self.instance_keys.startswith('api:')
+        try:
+            registry = (
+                _api_pipeline_registry(self.instance) if api
+                else dict(access._pipeline_registry(self.instance))
+            )
+            self.pipeline_definitions = access.visible_pipelines(
+                self.instance, viewer=self.viewer, include_members=False,
+                registry_parameters=registry,
+            )
+            identities = {}
+            for parameters in registry.values():
+                definition = parameters.get('pipeline') or {}
+                identity = definition.get('id')
+                if isinstance(identity, str) and identity:
+                    identities[identity] = identities.get(identity, 0) + 1
+                    canonical = definition.get('registry')
+                    if api and isinstance(canonical, str) and canonical:
+                        self.pipeline_registries[identity] = canonical
+                        self.canonical_registries.add(canonical)
+            self.pipeline_definitions = {
+                name: definition for name, definition in self.pipeline_definitions.items()
+                if isinstance((registry.get(name, {}).get('pipeline') or {}).get('id'), str)
+                and registry[name]['pipeline']['id']
+                and not registry[name]['pipeline']['id'].startswith('legacy:')
+                and identities[registry[name]['pipeline']['id']] == 1
+                and (not api or definition['id'] in self.pipeline_registries)
+            }
+        except Exception:
+            self.pipeline_definitions = {}
+            self.pipeline_registries = {}
+            self.canonical_registries = set()
+
+    def visibility_ref(self, ref: str) -> str:
+        """Use only the selected server's declared canonical registry for local ACL reads."""
+        parts = ref.split('|', 1)
+        if (self.instance_keys.startswith('api:') and len(parts) == 2
+            and len(self.canonical_registries) == 1 and parts[0] in self.canonical_registries):
+            return self.instance_keys + '|' + parts[1]
+        return ref
+
+    def check_generations(self, run_ids: List[str]) -> None:
+        """One bounded native lookup per request batch, including unavailable proofs."""
+        if not self.active:
+            return
+        missing = [str(run_id) for run_id in run_ids if run_id and str(run_id) not in self.run_generations]
+        if missing:
+            self.run_generations.update({run_id: False for run_id in missing})
+            self.run_generations.update(_run_generations(self.instance, missing))
+
     def is_visible(self, ref: Any) -> bool:
-        ref = str(ref or '')
+        ref = self.visibility_ref(str(ref or ''))
         if not self.active or ref.count('|') < 3 or is_hidden_ref(ref):
             return True
         if self.reference_visibility is not None:
@@ -150,6 +313,17 @@ class Anonymizer:
         if not self.active:
             return value
         if isinstance(value, dict):
+            if value.get('pipe_ref') and not self.is_visible(value['pipe_ref']):
+                # Keep the position and status of a hidden member, never its payload.
+                value = {
+                    key: item for key, item in value.items()
+                    if key in (
+                        'pipe_ref', 'run_id', 'event', 'seq', 'ts', 'action', 'status',
+                        'started', 'actual_started', 'finished', 'duration_seconds',
+                        'planned_start', 'planned_end', 'actual_start', 'actual_end',
+                    )
+                }
+                value['hidden'] = True
             out = {}
             for key, item in value.items():
                 safe_key = self.ref(key) if isinstance(key, str) and key.count('|') >= 3 else key
@@ -174,12 +348,13 @@ class Anonymizer:
     def run(self, run: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """A run summary as the viewer sees it, or `None` when none of its pipes is visible."""
         if not self.active:
-            return run
+            return _public_history_run(run)
         import json
         record = dict(run.get('run') or {})
         refs = list(record.get('targets') or [])
         selection = record.get('selection', None)
         parsed = None
+        attributions = set()
         if isinstance(selection, str):
             try:
                 parsed = json.loads(selection)
@@ -188,20 +363,71 @@ class Anonymizer:
         elif isinstance(selection, dict):
             parsed = selection
         if isinstance(parsed, dict):
+            snapshots = parsed.get('pipeline_definitions')
+            if snapshots:
+                if not isinstance(snapshots, list):
+                    return None
+                if self.pipeline_definitions is None:
+                    self.load_pipeline_definitions()
+                # A run ID may itself contain the saved name. Withhold the whole record if
+                # any saved identity is hidden, missing or replaced; Pipe metrics are separate.
+                for snapshot in snapshots:
+                    if not isinstance(snapshot, dict):
+                        return None
+                    registry = snapshot.get('registration_registry', snapshot.get('registry'))
+                    # A remote home is explicit, not an equivalence between API aliases.
+                    # The mandatory fresh remote generation RPC below validates its stored
+                    # canonical snapshot even when transport credentials are administrative.
+                    matches = [
+                        definition for definition in self.pipeline_definitions.values()
+                        if snapshot.get('id') == definition.get('id')
+                        and (
+                            registry == self.pipeline_registries.get(definition['id'], definition.get('registry'))
+                            or (
+                                self.instance_keys.startswith('api:')
+                                and 'registration_registry' not in snapshot
+                                and snapshot.get('registry') == self.instance_keys
+                                and definition.get('registry') == self.instance_keys
+                            )
+                        )
+                    ]
+                    if (len(matches) != 1
+                        or not snapshot.get('name')
+                        or str(snapshot.get('id') or '').startswith('legacy:')):
+                        return None
+                    if self.instance_keys.startswith('api:'):
+                        attributions.add((snapshot['name'], snapshot['id'], self.instance_keys))
             refs += list(((parsed.get('targets') or {}) if isinstance(parsed.get('targets'), dict) else {}).get('refs') or [])
             refs += list(parsed.get('resolved_targets') or [])
         if not refs or not any(self.is_visible(ref) for ref in refs):
             return None
+        run_id = record.get('run_id')
+        self.check_generations([run_id])
+        if self.run_generations.get(run_id) is not True:
+            return None
         self.hidden = {}
         out = self.value(dict(run))
+        if any(not self.is_visible(ref) for ref in refs):
+            out.setdefault('run', {}).pop('message', None)
+            out['run'].pop('error', None)
         if isinstance(parsed, dict):
             out.setdefault('run', {})['selection'] = json.dumps(self.value(parsed))
-        return out
+        public = _public_history_run(out)
+        if attributions:
+            registries = getattr(public, '_snapshot_registries', frozenset())
+            public = _HistoryRun(public)
+            public._snapshot_registries = frozenset(attributions) | registries
+        return public
 
     def detail(self, detail: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
         """A run's detail (summary, nodes, bars) as the viewer sees it, or `None`."""
-        if not self.active or not detail:
+        if not detail:
             return detail
+        if not self.active:
+            out = _public_history_value(detail)
+            if detail.get('summary'):
+                out['summary'] = self.run(detail['summary'])
+            return out
         summary = self.run(detail.get('summary') or {}) if detail.get('summary') else None
         refs = [bar.get('pipe_ref') for bar in (detail.get('bars') or [])]
         if detail.get('summary') and summary is None:
@@ -211,13 +437,22 @@ class Anonymizer:
         out = self.value({key: value for key, value in detail.items() if key != 'summary'})
         if summary is not None:
             out['summary'] = summary
-        return out
+        return _public_history_value(out)
 
     def events(self, events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """A run's events as the viewer sees them."""
         if not self.active:
-            return events
-        return [self.value(event) for event in (events or [])]
+            return _public_history_value(events)
+        out = []
+        for event in events or []:
+            event = self.value(event)
+            if self.hidden and not event.get('pipe_ref'):
+                for key in ('message', 'error', 'selection'):
+                    event.pop(key, None)
+                    if isinstance(event.get('payload'), dict):
+                        event['payload'].pop(key, None)
+            out.append(_public_history_value(event))
+        return out
 
 
 def action_label(action: str) -> str:
@@ -594,11 +829,13 @@ def run_belongs_to_pipeline(run: Dict[str, Any], name: str, definition=None) -> 
             selection = json.loads(selection) if isinstance(selection, str) else selection
             definitions = selection.get('pipeline_definitions') or []
             if definitions:
-                return any(snapshot.get('name') == name
-                           and (not definition or not definition.get('id')
-                                or snapshot.get('id') == definition['id'])
+                registries = getattr(run, '_snapshot_registries', frozenset())
+                return any((snapshot.get('id') == definition['id']
+                            if definition and definition.get('id')
+                            else snapshot.get('name') == name)
                            and (not definition or not definition.get('registry')
-                                or snapshot.get('registry') == definition['registry'])
+                                or snapshot.get('registry') == definition['registry']
+                                or (snapshot.get('name'), snapshot.get('id'), definition['registry']) in registries)
                            for snapshot in definitions)
         except (ValueError, TypeError, AttributeError):
             pass
@@ -676,7 +913,10 @@ def get_runs(
     refs = [ref for summary in runs for ref in (summary.get('run', {}).get('targets') or [])]
     anonymizer = Anonymizer(viewer, instance, refs=refs)
     if anonymizer.active:
+        anonymizer.check_generations([run.get('run', {}).get('run_id') for run in runs])
         runs = [visible for visible in (anonymizer.run(run) for run in runs) if visible is not None]
+    else:
+        runs = [anonymizer.run(run) for run in runs]
     return runs
 
 

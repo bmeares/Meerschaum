@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from urllib.parse import urlencode
+from urllib.parse import urlencode, parse_qs, urlparse
 
 from meerschaum.utils.typing import Any, Dict, Optional
 
@@ -12,7 +12,28 @@ WINDOWS = (('1h', 'Last hour'), ('24h', 'Last 24 hours'), ('7d', 'Last 7 days'),
 WINDOW_HOURS = {'1h': 1, '24h': 24, '7d': 168, '30d': 720, 'all': 720}
 METRICS_LIMIT = 1000
 METRICS_BUCKETS = 48
+HISTORY_PAGE_SIZE = 50
 LIMITED_NOTE = 'This view is limited. Choose a shorter window or filter by Pipe or Pipeline for more detail.'
+
+
+def selection(href: Optional[str]) -> Dict[str, Any]:
+    """The same selection for an initial page and a query-only drilldown / Back navigation."""
+    query = parse_qs(urlparse(href or '').query)
+    window = (query.get('window') or ['24h'])[0]
+    return {
+        'instance': (query.get('instance') or [None])[0],
+        'window': window if window in WINDOW_HOURS else '24h',
+        'pipe': (query.get('pipe') or [None])[0],
+        'pipeline': (query.get('pipeline') or [None])[0],
+    }
+
+
+def filter_options(options=None, value=None, kind='Pipe'):
+    """Keep a chosen value while loading or refusing it, without retaining fetched labels."""
+    choices = list(options or [])
+    if isinstance(value, str) and value and not any(item.get('value') == value for item in choices):
+        choices.append({'label': f'Selected {kind}', 'value': value})
+    return choices
 
 
 def fresh_viewer(session: Any):
@@ -63,7 +84,7 @@ def metrics(instance_keys: Optional[str], session: Any, window='24h', pipe=None,
         visible_refs=(sorted(refs) if refs is not None else None),
         visible_pipelines=(sorted(names) if names is not None else None),
     )
-    return {**result,
+    return {**result, '_instance': str(instance),
             '_pipe_options': ([{'label': engine.ref_label(ref), 'value': ref}
                                for ref in sorted(available_refs)] if with_options else []),
             '_pipeline_options': ([{'label': name, 'value': name}
@@ -207,10 +228,22 @@ def build_groups(data: Dict[str, Any], instance: str, window: str):
     return sections
 
 
-def build_history(data: Dict[str, Any]):
+def history_window(data: Dict[str, Any], page=1):
+    """A bounded page of the freshly authorized sample; never an offset into unfiltered data."""
+    history = (data.get('history') or [])[:METRICS_LIMIT]
+    pages = max(1, (len(history) + HISTORY_PAGE_SIZE - 1) // HISTORY_PAGE_SIZE)
+    try:
+        page = max(1, min(pages, int(page or 1)))
+    except (TypeError, ValueError, OverflowError):
+        page = 1
+    start = (page - 1) * HISTORY_PAGE_SIZE
+    return history[start:start + HISTORY_PAGE_SIZE], page, pages, len(history)
+
+
+def build_history(data: Dict[str, Any], page=1):
     from dash import html
     from meerschaum.api.dash.engine import ref_label
-    history = (data.get('history') or [])[:50]
+    history, page, pages, total = history_window(data, page)
     if not history:
         return None
     rows = []
@@ -223,11 +256,16 @@ def build_history(data: Dict[str, Any]):
             html.Td(duration(item.get('duration_seconds'))),
             html.Td(number(item.get('rows', 0))),
         ]))
-    return html.Section([html.H2('Recent syncs'), _table(['Started', 'Pipe', 'Result', 'Duration', 'Rows affected'], rows)],
-                        className='performance-section')
+    start = (page - 1) * HISTORY_PAGE_SIZE + 1
+    return html.Section([
+        html.H2('Recent syncs'),
+        html.P(f'{start}–{start + len(history) - 1} of {number(total)} syncs in this sample',
+               className='text-muted small', id='performance-history-range'),
+        _table(['Started', 'Pipe', 'Result', 'Duration', 'Rows affected'], rows),
+    ], className='performance-section', id='performance-history')
 
 
-def build_body(data: Dict[str, Any], instance: str, window: str):
+def build_body(data: Dict[str, Any], instance: str, window: str, history_page=1):
     from dash import html
     summary = data.get('summary') or {}
     if not summary.get('syncs') and not data.get('pipelines'):
@@ -245,7 +283,8 @@ def build_body(data: Dict[str, Any], instance: str, window: str):
                    'Replacing data counts both deleted and new rows; an unchanged sync affects zero rows.',
                    className='text-muted small performance-note'),
             build_charts(data, f'{instance}|{window}'), *build_groups(data, instance, window),
-            build_history(data), html.P(' '.join(notes), className='text-muted small') if notes else None]
+            build_history(data, history_page),
+            html.P(' '.join(notes), className='text-muted small') if notes else None]
 
 
 def build_overview_card():

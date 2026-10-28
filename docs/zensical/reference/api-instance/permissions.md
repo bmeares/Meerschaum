@@ -91,6 +91,8 @@ A connector's `teams: [Data, Operations]` attribute restricts who may use it thr
 
 Actions need `actions:execute` and the terminal needs `webterm:use` (Operator and administrators by default). Pipe Sync and Verify controls need `pipes:write` and edit rights on each selected pipe; they do not require arbitrary action execution. Pipeline sync checks every member it would change; a sync-locked member is skipped using its existing data. Remote action selections may not include pipes the caller cannot see or change.
 
+Remote actions run on this server. Nonadministrators cannot redirect them to another executor or inspect server configuration with `show connectors`; use the console's Connectors page for the details your account may see. For Pipe registration and sensitive parameter edits, use the console or dedicated Pipe endpoints. Restricted API keys keep these limits even when their owner is an administrator.
+
 `api:permissions:actions:non_admin: false` (`start api --secure`) further restricts actions, terminals and console mutations to administrators. Meerschaum 4's explicit `actions:non_admin: true` maps the default role to Operator for compatibility, unless `default_role` is set explicitly. The shipped configuration leaves that compatibility key unset and uses Editor.
 
 ## Permissions fail closed

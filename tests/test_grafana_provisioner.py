@@ -101,13 +101,14 @@ def test_native_emitter_gets_only_its_scratch_root_and_installed_import_path(tmp
     monkeypatch.setenv('MRSM_SQL_PRIVATE', 'not inherited')
     monkeypatch.setenv('PYTHONPATH', '/source/tree')
     monkeypatch.setenv('PYTHONHOME', '/unrelated/python')
+    monkeypatch.setenv('PYTHONNOUSERSITE', '1')
     monkeypatch.setenv('TMUX', '/user/tmux')
     monkeypatch.setattr(provision.subprocess, 'run', emit)
     resources = provision.installed_resources('/installed/python', '5.0.0rc16', tmp_path)
     assert set(resources) == set(provision.MANAGED)
     env = captured['env']
     assert Path(env['MRSM_ROOT_DIR']).parent == tmp_path
-    assert not {'MRSM_SQL_PRIVATE', 'PYTHONPATH', 'PYTHONHOME', 'TMUX', 'TMUX_PANE'} & env.keys()
+    assert not {'MRSM_SQL_PRIVATE', 'PYTHONPATH', 'PYTHONHOME', 'PYTHONNOUSERSITE', 'TMUX', 'TMUX_PANE'} & env.keys()
     assert not Path(captured['cwd']).exists()  # Only the emitter's temporary root was removed.
 
 

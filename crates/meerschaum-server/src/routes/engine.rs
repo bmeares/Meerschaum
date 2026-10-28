@@ -63,6 +63,7 @@ pub fn routes(app: Router<AppState>, _cfg: &ServerConfig) -> Router<AppState> {
         .route("/engine/state", get(get_state).put(put_state))
         .route("/engine/runs", post(post_runs).get(get_runs))
         .route("/engine/runs/{run_id}", get(get_run))
+        .route("/engine/run-generations", post(run_generations))
         .route(
             "/engine/runs/{run_id}/events/stream",
             get(stream_run_events),
@@ -79,7 +80,7 @@ pub fn routes(app: Router<AppState>, _cfg: &ServerConfig) -> Router<AppState> {
 
 /// Authorize, then refuse anything but the six engine state pipes.
 async fn engine_metric(ctx: &Ctx, metric: &str, scopes: &[&str]) -> Result<Access, ApiError> {
-    let caller = access::require(&ctx.state, &ctx.headers, scopes).await?;
+    let caller = engine_access(ctx, scopes).await?;
     if !engine_pipes::is_engine_metric(metric) {
         return Err(ApiError::new(
             404,
@@ -87,6 +88,91 @@ async fn engine_metric(ctx: &Ctx, metric: &str, scopes: &[&str]) -> Result<Acces
         ));
     }
     Ok(caller)
+}
+
+async fn engine_access(ctx: &Ctx, scopes: &[&str]) -> Result<Access, ApiError> {
+    let caller = access::require_fresh(&ctx.state, &ctx.headers, scopes).await?;
+    access::guard::check_connector_teams(
+        &ctx.state,
+        &caller,
+        &ctx.state.instance().connector_keys(),
+    )?;
+    Ok(caller)
+}
+
+/// Private native-host authorization evidence, without transferring stable registration IDs.
+async fn run_generations(ctx: Ctx, body: Body) -> ApiResult {
+    let caller = access::require_fresh(&ctx.state, &ctx.headers, READ_SCOPES).await?;
+    let value = body_json(body).await?;
+    let ids: Vec<String> =
+        serde_json::from_value(value.get("run_ids").cloned().unwrap_or(Json::Null))
+            .map_err(|_| ApiError::new(400, "run_ids must be an array of strings."))?;
+    if ids.len() > 256
+        || ids
+            .iter()
+            .any(|id| id.is_empty() || id.len() > 512 || id.chars().any(char::is_control))
+    {
+        return Err(ApiError::new(400, "Supply at most 256 valid run IDs."));
+    }
+    let ik = ctx.instance_keys();
+    let conn = ctx.state.get_api_connector(ik.as_deref())?;
+    access::guard::check_connector_teams(&ctx.state, &caller, &conn.connector_keys())?;
+    let mut result: std::collections::HashMap<String, bool> =
+        ids.iter().cloned().map(|id| (id, false)).collect();
+    if !ids.is_empty() {
+        let params = [(
+            "run_id".into(),
+            meerschaum_core::Value::List(
+                ids.into_iter().map(meerschaum_core::Value::Str).collect(),
+            ),
+        )]
+        .into_iter()
+        .collect();
+        if let Some(pipe) = conn
+            .engine_state_pipe(&conn.connector_keys(), "engine_runs")
+            .await
+            .map_err(|_| ApiError::new(503, "Cannot validate run history."))?
+            && let Some(frame) = conn
+                .get_pipe_data(
+                    &pipe,
+                    &meerschaum_connector::DataQuery {
+                        params: Some(params),
+                        limit: Some(256),
+                        ..Default::default()
+                    },
+                )
+                .await
+                .map_err(|_| ApiError::new(503, "Cannot validate run history."))?
+        {
+            let rows: Vec<Json> =
+                serde_json::from_str(&engine_pipes::records_json(&frame)).unwrap_or_default();
+            let records = access::runs::headers_from_rows(&rows);
+            let mut filter = RefFilter::new(&ctx.state, &caller, &conn.connector_keys())
+                .for_engine()
+                .requiring_generations();
+            filter.prime_run_generations(&records).await;
+            // Validate raw stored snapshot proof before public projection strips it. A host's
+            // admin transport must not authorize a recreated or name-only legacy Pipeline.
+            let mut current_snapshots = std::collections::HashSet::new();
+            for record in &records {
+                if access::runs::record_pipelines_visible(&mut filter, record).await {
+                    current_snapshots.insert(record.run_id.clone());
+                }
+            }
+            let visible = access::runs::visible_runs(&mut filter, records).await;
+            for record in visible {
+                if let Some(proven) = result.get_mut(&record.run_id) {
+                    *proven = filter.run_generation_current(&record.run_id)
+                        && current_snapshots.contains(&record.run_id);
+                }
+            }
+        }
+    }
+    Ok(envelope::ok_with(
+        "Checked requested run histories.",
+        "generations",
+        serde_json::to_value(result).unwrap_or(Json::Null),
+    ))
 }
 
 /// The filter of refs for `caller` on the server's instance (the engine pipes' and the `api:`
@@ -130,7 +216,7 @@ fn query_from(j: Json) -> Result<EnginePipeQuery, ApiError> {
     if j.is_null() {
         return Ok(EnginePipeQuery::default());
     }
-    serde_json::from_value(j.clone()).map_err(|e| {
+    let query: EnginePipeQuery = serde_json::from_value(j.clone()).map_err(|e| {
         ApiError::validation(vec![ApiError::field_error(
             "model_type",
             &["body"],
@@ -138,7 +224,18 @@ fn query_from(j: Json) -> Result<EnginePipeQuery, ApiError> {
             j,
             None,
         )])
-    })
+    })?;
+    if query.limit.is_some_and(|limit| limit <= 0)
+        || query.order.as_ref().is_some_and(|order| {
+            !order.eq_ignore_ascii_case("asc") && !order.eq_ignore_ascii_case("desc")
+        })
+    {
+        return Err(ApiError::new(
+            400,
+            "Engine read limit must be positive and order must be 'asc' or 'desc'.",
+        ));
+    }
+    Ok(query)
 }
 
 /// `"1 row"` / `"2 rows"`.
@@ -155,6 +252,13 @@ async fn read_pipe(ctx: Ctx, Path(metric): Path<String>, body: Body) -> ApiResul
         None
     } else {
         query.select_columns.take()
+    };
+    // A filtered short page must mean the visible history is exhausted. Keep the
+    // existing server-side ACL scan for restricted readers; limit its visible prefix.
+    let requested_limit = if caller.is_admin() {
+        None
+    } else {
+        query.limit.take()
     };
     let df = ctx
         .state
@@ -180,6 +284,9 @@ async fn read_pipe(ctx: Ctx, Path(metric): Path<String>, body: Body) -> ApiResul
                     }
                 }
             }
+            if let Some(limit) = requested_limit {
+                rows.truncate(usize::try_from(limit).unwrap_or(usize::MAX));
+            }
             let message = format!("Read {}.", count(rows.len(), "row", "rows"));
             envelope::ok_with(message, "rows", Json::Array(rows))
         }
@@ -196,6 +303,27 @@ async fn write_pipe(ctx: Ctx, Path(metric): Path<String>, body: Body) -> ApiResu
     let mut docs = engine_pipes::docs_from_records(items);
     if metric == "engine_nodes" {
         canonicalize_node_registrations(&ctx, &mut docs).await?;
+    }
+    if metric == "engine_runs" {
+        let mut selections: Vec<Json> = docs
+            .iter()
+            .map(|doc| match doc.get("selection") {
+                Some(meerschaum_kernel::value::Value::Json(value)) => value.clone(),
+                Some(meerschaum_kernel::value::Value::Str(text)) => {
+                    serde_json::from_str(text).unwrap_or(Json::Null)
+                }
+                _ => Json::Null,
+            })
+            .collect();
+        canonicalize_pipeline_registries(&ctx, &mut selections).await?;
+        for (doc, selection) in docs.iter_mut().zip(selections) {
+            if !selection.is_null() {
+                doc.insert(
+                    "selection".into(),
+                    meerschaum_kernel::value::Value::Str(selection.to_string()),
+                );
+            }
+        }
     }
     access::runs::check_rows_editable(&mut filter_for(&ctx, &caller), &docs)
         .await
@@ -239,15 +367,12 @@ async fn canonicalize_node_registrations(
         // A submitted canonical override is never authoritative.
         doc.shift_remove("registration_ref");
     }
-    let Some(alias) = ctx.headers.get(engine_pipes::CLIENT_INSTANCE_HEADER) else {
+    if docs.is_empty() {
+        return Ok(());
+    }
+    let Some(alias) = client_instance_alias(ctx)? else {
         return Ok(());
     };
-    let alias = alias
-        .to_str()
-        .map_err(|_| ApiError::new(400, "Invalid engine client instance."))?;
-    if !alias.starts_with("api:") || alias.len() <= 4 || alias.contains('|') {
-        return Err(ApiError::new(400, "Invalid engine client instance."));
-    }
     let fresh = if ctx.state.config.no_auth {
         Access::everything()
     } else {
@@ -298,6 +423,122 @@ async fn canonicalize_node_registrations(
             "registration_ref".into(),
             KValue::Str(handle.pipe.pipe_ref()),
         );
+    }
+    Ok(())
+}
+
+fn client_instance_alias(ctx: &Ctx) -> Result<Option<&str>, ApiError> {
+    let Some(alias) = ctx.headers.get(engine_pipes::CLIENT_INSTANCE_HEADER) else {
+        return Ok(None);
+    };
+    let alias = alias
+        .to_str()
+        .map_err(|_| ApiError::new(400, "Invalid engine client instance."))?;
+    if !alias.starts_with("api:") || alias.len() <= 4 || alias.contains('|') {
+        return Err(ApiError::new(400, "Invalid engine client instance."));
+    }
+    Ok(Some(alias))
+}
+
+/// Preserve the original snapshot registry while proving an exact API-local alias.
+/// A client cannot relabel a foreign or stale Pipeline by submitting its own proof field.
+async fn canonicalize_pipeline_registries(
+    ctx: &Ctx,
+    selections: &mut [Json],
+) -> Result<(), ApiError> {
+    for selection in selections.iter_mut() {
+        if let Some(snapshots) = selection
+            .get_mut("pipeline_definitions")
+            .and_then(Json::as_array_mut)
+        {
+            for snapshot in snapshots {
+                if let Some(snapshot) = snapshot.as_object_mut() {
+                    snapshot.remove("registration_registry");
+                }
+            }
+        }
+    }
+    let Some(alias) = client_instance_alias(ctx)? else {
+        return Ok(());
+    };
+    let has_local = selections.iter().any(|selection| {
+        selection
+            .get("pipeline_definitions")
+            .and_then(Json::as_array)
+            .is_some_and(|snapshots| {
+                snapshots
+                    .iter()
+                    .any(|snapshot| snapshot.get("registry").and_then(Json::as_str) == Some(alias))
+            })
+    });
+    if !has_local {
+        return Ok(());
+    }
+    let caller = access::require_fresh(&ctx.state, &ctx.headers, SCOPES).await?;
+    let conn = ctx.state.instance();
+    access::guard::check_connector_teams(&ctx.state, &caller, &conn.connector_keys())?;
+    let saved = conn
+        .registered_pipes(&meerschaum_connector::PipesKeysQuery {
+            connector_keys: vec!["mrsm".into()],
+            metric_keys: vec!["pipeline".into()],
+            ..Default::default()
+        })
+        .await
+        .map_err(|_| ApiError::new(503, "Cannot read saved Pipeline access."))?;
+    let mut current = std::collections::HashMap::new();
+    for (_, entry) in saved {
+        let parameters = match entry.extra {
+            Some(meerschaum_core::Value::Map(parameters)) => parameters,
+            Some(meerschaum_core::Value::Str(text)) => {
+                match meerschaum_core::Value::from_json_str(&text) {
+                    Ok(meerschaum_core::Value::Map(parameters)) => parameters,
+                    _ => continue,
+                }
+            }
+            _ => continue,
+        };
+        if caller.can_see(&parameters)
+            && let Some(name) = entry.location_key
+            && let Some(identity) = parameters
+                .get("pipeline")
+                .and_then(|definition| definition.get("id"))
+                .and_then(meerschaum_core::Value::as_str)
+        {
+            current.insert(name, identity.to_string());
+        }
+    }
+    for selection in selections {
+        let Some(snapshots) = selection
+            .get_mut("pipeline_definitions")
+            .and_then(Json::as_array_mut)
+        else {
+            continue;
+        };
+        for snapshot in snapshots {
+            if snapshot.get("registry").and_then(Json::as_str) != Some(alias) {
+                continue;
+            }
+            let name = snapshot
+                .get("name")
+                .and_then(Json::as_str)
+                .ok_or_else(|| ApiError::new(400, "Invalid saved Pipeline snapshot."))?;
+            let Some(identity) = current.get(name) else {
+                return Err(ApiError::new(404, "Saved Pipeline was not found."));
+            };
+            if snapshot.get("id").and_then(Json::as_str) != Some(identity.as_str()) {
+                return Err(ApiError::new(
+                    409,
+                    "The saved Pipeline changed since capture.",
+                ));
+            }
+            snapshot
+                .as_object_mut()
+                .expect("snapshot has string fields")
+                .insert(
+                    "registration_registry".into(),
+                    Json::String(conn.connector_keys()),
+                );
+        }
     }
     Ok(())
 }
@@ -375,6 +616,12 @@ fn positive_selector(v: &meerschaum_core::Value) -> bool {
 /// connector and the `WHERE` would match everything), or, for the retention metrics only,
 /// bound them with `end`.
 fn bounded_clear(metric: &str, query: &EnginePipeQuery) -> Result<(), ApiError> {
+    if query.limit.is_some() || query.order.is_some() {
+        return Err(ApiError::new(
+            400,
+            "limit and order apply to engine reads only.",
+        ));
+    }
     let refuse = |why: &str| {
         Err(ApiError::new(
             400,
@@ -425,7 +672,7 @@ async fn pipe_exists(ctx: Ctx, Path(metric): Path<String>) -> ApiResult {
 }
 
 async fn body_as<T: DeserializeOwned>(ctx: &Ctx, body: Body) -> Result<(Access, T), ApiError> {
-    let caller = access::require(&ctx.state, &ctx.headers, SCOPES).await?;
+    let caller = engine_access(ctx, SCOPES).await?;
     let j = body_json(body).await?;
     if j.is_null() {
         return Err(ApiError::missing(&["body"]));
@@ -463,6 +710,7 @@ async fn check_run_ids_editable(
         return Ok(());
     }
     let mut seen = std::collections::HashSet::new();
+    let mut filter = filter_for(ctx, caller);
     for id in ids {
         if !seen.insert(id) {
             continue;
@@ -476,6 +724,17 @@ async fn check_run_ids_editable(
             })
             .await
             .map_err(store_error)?;
+        if !rows.is_empty() {
+            filter.prime_run_generations(&rows).await;
+            if !filter.run_generation_current(id) {
+                return Err(ApiError::new(404, "Run was not found."));
+            }
+        }
+        for row in rows.iter().filter(|row| row.pipe_ref.is_none()) {
+            if !access::runs::record_pipelines_visible(&mut filter, row).await {
+                return Err(ApiError::new(404, "Run was not found."));
+            }
+        }
         let refs = rows
             .iter()
             .flat_map(|row| {
@@ -518,7 +777,7 @@ async fn post_ledger(ctx: Ctx, body: Body) -> ApiResult {
 }
 
 async fn get_ledger(ctx: Ctx) -> ApiResult {
-    let caller = access::require(&ctx.state, &ctx.headers, READ_SCOPES).await?;
+    let caller = engine_access(&ctx, READ_SCOPES).await?;
     let Some(child_ref) = ctx.query.opt_str("child_ref") else {
         return Err(ApiError::missing(&["query", "child_ref"]));
     };
@@ -553,7 +812,7 @@ async fn put_cursors(ctx: Ctx, body: Body) -> ApiResult {
 }
 
 async fn get_state(ctx: Ctx) -> ApiResult {
-    let caller = access::require(&ctx.state, &ctx.headers, READ_SCOPES).await?;
+    let caller = engine_access(&ctx, READ_SCOPES).await?;
     let Some(pipe_ref) = ctx.query.opt_str("pipe_ref") else {
         return Err(ApiError::missing(&["query", "pipe_ref"]));
     };
@@ -583,7 +842,68 @@ async fn put_state(ctx: Ctx, body: Body) -> ApiResult {
 }
 
 async fn post_runs(ctx: Ctx, body: Body) -> ApiResult {
-    let (caller, runs): (Access, Vec<RunRecord>) = body_as(&ctx, body).await?;
+    let (caller, mut runs): (Access, Vec<RunRecord>) = body_as(&ctx, body).await?;
+    let mut nodes: Vec<meerschaum_connector::pipe_ops::Doc> = runs
+        .iter()
+        .filter_map(|run| {
+            let reference = run.pipe_ref.as_ref()?;
+            let mut doc = meerschaum_connector::pipe_ops::Doc::new();
+            doc.insert(
+                "pipe_ref".into(),
+                meerschaum_kernel::value::Value::Str(reference.clone()),
+            );
+            if let Some(identity) = run
+                .extra
+                .get("registration_id")
+                .and_then(meerschaum_core::Value::as_str)
+            {
+                doc.insert(
+                    "registration_id".into(),
+                    meerschaum_kernel::value::Value::Str(identity.into()),
+                );
+            }
+            Some(doc)
+        })
+        .collect();
+    canonicalize_node_registrations(&ctx, &mut nodes).await?;
+    for (run, node) in runs
+        .iter_mut()
+        .filter(|run| run.pipe_ref.is_some())
+        .zip(nodes)
+    {
+        run.extra.shift_remove("registration_ref");
+        if let Some(meerschaum_kernel::value::Value::Str(reference)) = node.get("registration_ref")
+        {
+            run.extra.insert(
+                "registration_ref".into(),
+                meerschaum_core::Value::Str(reference.clone()),
+            );
+        }
+    }
+    let mut selections: Vec<Json> = runs
+        .iter()
+        .map(|run| match run.extra.get("selection") {
+            Some(meerschaum_core::Value::Str(text)) => {
+                serde_json::from_str(text).unwrap_or(Json::Null)
+            }
+            Some(value) => serde_json::to_value(value).unwrap_or(Json::Null),
+            None => Json::Null,
+        })
+        .collect();
+    canonicalize_pipeline_registries(&ctx, &mut selections).await?;
+    for (run, selection) in runs.iter_mut().zip(selections) {
+        if !selection.is_null() {
+            let value = if matches!(
+                run.extra.get("selection"),
+                Some(meerschaum_core::Value::Str(_))
+            ) {
+                meerschaum_core::Value::Str(selection.to_string())
+            } else {
+                serde_json::from_value(selection).expect("valid core JSON value")
+            };
+            run.extra.insert("selection".into(), value);
+        }
+    }
     check_editable(
         &ctx,
         &caller,
@@ -659,9 +979,9 @@ pub fn runs_filter(ctx: &Ctx) -> Result<RunsFilter, ApiError> {
 }
 
 async fn get_runs(ctx: Ctx) -> ApiResult {
-    let caller = access::require(&ctx.state, &ctx.headers, READ_SCOPES).await?;
+    let caller = access::require_fresh(&ctx.state, &ctx.headers, READ_SCOPES).await?;
     let filter = runs_filter(&ctx)?;
-    let (store, instances) = crate::engine_stream::store_for(&ctx)?;
+    let (store, instances) = crate::engine_stream::store_for(&ctx, &caller)?;
     let runs = store.get_runs(&filter).await.map_err(store_error)?;
     let default = instances.first().cloned().unwrap_or_default();
     let runs = access::runs::visible_runs(
@@ -713,8 +1033,8 @@ pub async fn visible_run_detail(
 }
 
 async fn get_run(ctx: Ctx, Path(run_id): Path<String>) -> ApiResult {
-    let caller = access::require(&ctx.state, &ctx.headers, READ_SCOPES).await?;
-    let (store, instances) = crate::engine_stream::store_for(&ctx)?;
+    let caller = access::require_fresh(&ctx.state, &ctx.headers, READ_SCOPES).await?;
+    let (store, instances) = crate::engine_stream::store_for(&ctx, &caller)?;
     let default = instances.first().cloned().unwrap_or_default();
     let Some((run, nodes)) = visible_run_detail(
         store.as_ref(),

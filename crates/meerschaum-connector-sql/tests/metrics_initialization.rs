@@ -197,6 +197,119 @@ async fn initialization_does_not_swallow_unique_constraint_failures_or_cache_the
     );
 }
 
+#[tokio::test]
+async fn initialization_adds_declared_node_columns_and_preserves_legacy_history() {
+    let dir = directory();
+    let conn = connector(&dir.path().join("legacy_nodes.db")).await;
+    let pipe = empty_table(&conn, "engine_nodes").await;
+    let table = conn.pipe_table_name(&conn.sql_pipe(&pipe).unwrap());
+    // These fields were introduced after existing installations had already stored nodes.
+    for column in ["actual_started", "registration_id", "registration_ref"] {
+        conn.driver()
+            .exec(&format!("ALTER TABLE {table} DROP COLUMN \"{column}\""))
+            .await
+            .unwrap();
+    }
+    conn.driver().exec(&format!(
+        "INSERT INTO {table} (started, run_id, pipe_ref, status) VALUES ('2026-01-01 00:00:00.125000', 'legacy-run', 'sql:metrics_init|fixture|legacy|None', 'succeeded')"
+    )).await.unwrap();
+
+    conn.initialize_engine_metrics().await.unwrap();
+    let columns = conn.get_pipe_columns_types(&pipe).await.unwrap();
+    for column in ["actual_started", "registration_id", "registration_ref"] {
+        assert!(
+            columns.contains_key(column),
+            "{column} absent from {columns:?}"
+        );
+    }
+    let frame = conn
+        .get_pipe_data(&pipe, &Default::default())
+        .await
+        .unwrap()
+        .unwrap();
+    let rows = meerschaum_connector::pipe_ops::frame_to_docs(&frame);
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["run_id"].py_str(), "legacy-run");
+    assert_eq!(rows[0]["status"].py_str(), "succeeded");
+    // Unknown legacy registration identity remains unknown; initialization must not grant
+    // old private history to a newly registered Pipe with the same keys.
+    assert!(rows[0]["registration_id"].is_na());
+    assert!(rows[0]["registration_ref"].is_na());
+    conn.initialize_engine_metrics().await.unwrap();
+}
+
+#[tokio::test]
+async fn initialization_adds_optional_run_selection_without_fabricating_snapshots() {
+    let dir = directory();
+    let conn = connector(&dir.path().join("legacy_runs.db")).await;
+    let pipe = empty_table(&conn, "engine_runs").await;
+    let table = conn.pipe_table_name(&conn.sql_pipe(&pipe).unwrap());
+    conn.driver()
+        .exec(&format!("ALTER TABLE {table} DROP COLUMN selection"))
+        .await
+        .unwrap();
+    conn.driver().exec(&format!(
+        "INSERT INTO {table} (started, run_id) VALUES ('2026-01-01 00:00:00.125000', 'legacy-run')"
+    )).await.unwrap();
+    conn.initialize_engine_metrics().await.unwrap();
+    let columns = conn.get_pipe_columns_types(&pipe).await.unwrap();
+    assert!(columns.contains_key("selection"), "{columns:?}");
+    let frame = conn
+        .get_pipe_data(&pipe, &Default::default())
+        .await
+        .unwrap()
+        .unwrap();
+    let rows = meerschaum_connector::pipe_ops::frame_to_docs(&frame);
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["run_id"].py_str(), "legacy-run");
+    assert!(rows[0]["selection"].is_na());
+}
+
+#[tokio::test]
+async fn readiness_adds_private_status_stamp_without_inventing_legacy_identity() {
+    use meerschaum_connector::SyncOptions;
+    use meerschaum_kernel::enforce::{PipeDtypesContext, PipeInput, pipe_enforce_dtypes};
+    let dir = directory();
+    let conn = connector(&dir.path().join("legacy_status.db")).await;
+    let pipe = empty_table(&conn, "engine_sync_status").await;
+    let table = conn.pipe_table_name(&conn.sql_pipe(&pipe).unwrap());
+    conn.driver()
+        .exec(&format!("ALTER TABLE {table} DROP COLUMN registration_id"))
+        .await
+        .unwrap();
+    conn.driver().exec(&format!(
+        "INSERT INTO {table} (pipe_ref, message) VALUES ('sql:metrics_init|fixture|legacy|None', 'legacy private failure')"
+    )).await.unwrap();
+    let dtypes: indexmap::IndexMap<String, String> = pipe.parameters()["dtypes"]
+        .as_map()
+        .unwrap()
+        .iter()
+        .map(|(name, dtype)| (name.clone(), dtype.py_str()))
+        .collect();
+    let frame = pipe_enforce_dtypes(
+        PipeInput::Docs(Vec::new()),
+        &PipeDtypesContext {
+            explicit_dtypes: dtypes.clone(),
+            dtypes,
+            enforce: true,
+            tz_aware: true,
+            mixed_numerics: true,
+        },
+    )
+    .unwrap();
+    let result = InstanceConnector::sync_pipe(&conn, &pipe, frame, &SyncOptions::default()).await;
+    assert!(result.success, "{}", result.message);
+    let frame = conn
+        .get_pipe_data(&pipe, &Default::default())
+        .await
+        .unwrap()
+        .unwrap();
+    let rows = meerschaum_connector::pipe_ops::frame_to_docs(&frame);
+    assert_eq!(rows.len(), 1);
+    assert!(rows[0]["registration_id"].is_na());
+    assert_eq!(rows[0]["message"].py_str(), "legacy private failure");
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn independent_processes_retain_every_cold_first_metrics_batch() {
     let dir = directory();

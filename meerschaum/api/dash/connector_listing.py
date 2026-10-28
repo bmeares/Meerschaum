@@ -27,7 +27,7 @@ import re
 import json
 import copy
 import time
-from urllib.parse import urlparse, unquote
+from urllib.parse import urlparse, unquote, unquote_plus
 
 import meerschaum as mrsm
 from meerschaum.utils.typing import Any, Dict, List, Optional, Tuple
@@ -83,7 +83,7 @@ SECRET_WORDS: Tuple[str, ...] = (
 #: Schemes whose bare user information (`https://<token>@host`) is usually a token.
 TOKEN_USERINFO_SCHEMES = frozenset({'http', 'https', 'ws', 'wss', 'git+https'})
 
-#: Values too common to scrub from the text around them (`verify: 'true'` would mask every "true").
+#: Common values are scrubbed as complete tokens, so a password `true` leaves `truehost` intact.
 COMMON_VALUES = frozenset({'true', 'false', 'none', 'null', 'yes', 'off'})
 
 ### `scheme://user:password@` (the password runs to the last `@` of the address, so one holding an
@@ -287,17 +287,32 @@ def mask_connection_string(text: Any, typ: Optional[str] = None) -> str:
 def _uri_secrets(text: str) -> List[str]:
     """The passwords and tokens of the URIs in `text`, and its secret-looking settings' values."""
     secrets = []
-    for match in _URI_CREDENTIALS.finditer(text):
-        password = match.group('password')
-        if password:
-            secrets.append(password)
-        elif match.group('user') and match.group('scheme').lower() in TOKEN_USERINFO_SCHEMES:
-            secrets.append(match.group('user'))
-    for match in _TEXT_SECRETS.finditer(text):
-        value = match.group('value').strip('\'"{}')
-        if value:
-            secrets.append(value)
+    for view in _decoded_views(text):
+        for match in _URI_CREDENTIALS.finditer(view):
+            password = match.group('password')
+            if password:
+                secrets.append(password)
+            elif match.group('user') and match.group('scheme').lower() in TOKEN_USERINFO_SCHEMES:
+                secrets.append(match.group('user'))
+        for match in _TEXT_SECRETS.finditer(view):
+            value = match.group('value').strip('\'"{}')
+            if value:
+                secrets.append(value)
     return secrets
+
+
+def _decoded_views(text: str):
+    """Bounded views of URL / form encodings, including encoded names and mixed-case escapes."""
+    views = {text}
+    for decode in (unquote, unquote_plus):
+        view = text
+        for _ in range(4):
+            decoded = decode(view)
+            if decoded == view:
+                break
+            views.add(decoded)
+            view = decoded
+    return views
 
 
 def collect_secrets(attributes: Any, name: str = '') -> List[str]:
@@ -340,22 +355,45 @@ def hidden_values(attributes: Any, name: str = '', typ: Optional[str] = None) ->
 
 def scrub(text: Any, secrets: List[str]) -> str:
     """`text` with what looks like a secret (`mask_text`) and every known secret value masked."""
-    text = mask_text(str(text))
+    text = str(text)
     candidates = set()
+    short = set()
     for secret in secrets or []:
         secret = str(secret).strip()
         ### Also the decoded form of a percent-encoded password and the parts of one holding an
         ### `@` (a URI parser may split it there): an error may quote any of them.
-        forms = {secret, unquote(secret)}
+        forms = _decoded_views(secret)
         for candidate in forms | {part for form in forms for part in form.split('@')}:
             candidate = candidate.strip()
-            if len(candidate) >= 3 and candidate.lower() not in COMMON_VALUES and candidate != MASK:
+            if not candidate or candidate == MASK:
+                continue
+            if len(candidate) >= 3 and candidate.lower() not in COMMON_VALUES:
                 candidates.add(candidate)
+            else:
+                short.add(candidate)
+            # Driver errors may quote a Python representation or JSON-escaped credential.
+            candidates.update((repr(candidate), json.dumps(candidate, ensure_ascii=True)))
+            candidates.update(escaped for escaped in (
+                repr(candidate)[1:-1], json.dumps(candidate, ensure_ascii=True)[1:-1]
+            ) if escaped != candidate)
     ### Longest first, so a secret containing another is masked whole. Very short values (a
     ### one-character password) would mask ordinary letters and are covered by the name rules.
     for secret in sorted(candidates, key=len, reverse=True):
-        text = text.replace(secret, MASK)
-    return text
+        if len(secret) >= 3:
+            text = text.replace(secret, MASK)
+    for secret in short:
+        text = re.sub(r'(?<!\w)' + re.escape(secret) + r'(?!\w)', lambda _: MASK, text)
+    # Decoding only for comparison avoids ever rendering a decoded credential. When escapes
+    # obscure its original span, hide the entire value rather than guessing where it ends.
+    views = _decoded_views(text)
+    # A valid escape after the comparison budget may conceal further layers. Fail closed.
+    if (candidates or short) and re.search(r'%[0-9a-fA-F]{2}', min(views, key=len)):
+        return MASK
+    if any(any(secret in view for secret in candidates if len(secret) >= 3)
+           or any(re.search(r'(?<!\w)' + re.escape(secret) + r'(?!\w)', view) for secret in short)
+           for view in views):
+        return MASK
+    return mask_text(text)
 
 
 def _mask_tree(
@@ -392,7 +430,7 @@ def _mask_tree(
     if isinstance(value, (list, tuple, set)):
         return [_mask_tree(name, item, typ, secrets, hidden) for item in value]
     if isinstance(value, (int, float)):
-        return value
+        return (value if secrets is None or scrub(str(value), secrets) == str(value) else MASK)
     if isinstance(value, str):
         return scrub(value, secrets) if secrets is not None else value
     ### Objects (an engine, a client): their type only, never their representation.
@@ -435,7 +473,7 @@ def mask_attributes(
     secrets: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """A connector's attributes with every value the page does not show masked."""
-    secrets = collect_secrets(attributes) if secrets is None else secrets
+    secrets = hidden_values(attributes, typ=typ) if secrets is None else secrets
     return {
         str(key): mask_value(str(key), value, secrets, typ)
         for key, value in attributes.items()
@@ -648,7 +686,7 @@ def _row(
     source: str,
     source_detail: Optional[str] = None,
 ) -> Dict[str, Any]:
-    secrets = collect_secrets(attributes)
+    secrets = hidden_values(attributes, typ=typ)
     connection = _parse_connection(typ, attributes)
     return {
         'keys': f"{typ}:{label}",

@@ -87,6 +87,8 @@ pub(crate) struct InternalSync {
     pub new_special_cols: Option<IndexMap<String, String>>,
     /// `_check_temporary_tables`.
     pub skip_temporary_tables_check: bool,
+    /// An engine-history staging table must retain the target's subsecond timestamps too.
+    pub history_datetime_precision: bool,
 }
 
 /// A backtrack request's `params` as `build_where` params (values via `str()`).
@@ -150,6 +152,28 @@ pub(crate) fn null_marker_columns(sp: &SqlPipe, state: &PipeState) -> Vec<String
 }
 
 pub(crate) use meerschaum_connector::replace::replace_result;
+
+fn engine_history(sp: &SqlPipe) -> bool {
+    sp.pipe().temporary
+        && sp.pipe().connector_keys() == "mrsm"
+        && matches!(
+            sp.pipe().metric_key(),
+            "engine_runs" | "engine_nodes" | "engine_sync_status"
+        )
+}
+
+fn mysql_engine_history(sp: &SqlPipe, flavor: Flavor) -> bool {
+    matches!(flavor, Flavor::Mysql | Flavor::Mariadb) && engine_history(sp)
+}
+
+fn history_db_type(sp: &SqlPipe, flavor: Flavor, dtype: &str) -> String {
+    let db_type = get_db_type_from_pd_type(dtype, Some(flavor));
+    if mysql_engine_history(sp, flavor) && db_type == "DATETIME" {
+        "DATETIME(6)".into()
+    } else {
+        db_type
+    }
+}
 
 /// `params` with the empty strings of the columns `literal` (see [`null_marker_columns`]) as
 /// nulls (`''` → `None`, `'_'` → `'_None'`, list items too), for Oracle, which stores `''` as
@@ -495,6 +519,16 @@ impl SqlConnector {
         let internal_table = pipe.temporary && pipe.connector_keys() == "mrsm";
         let cache_internal = internal_table && sp0.is_static();
         let cache_key = self.pipe_table_name(&sp0);
+        let precise_history = mysql_engine_history(&sp0, flavor);
+        // Non-static node writers still refresh their schema, but successful readiness also
+        // marks their timestamp precision so warm progress updates need no extra catalog read.
+        let precision_ready = precise_history
+            && self
+                .state
+                .lock()
+                .expect("state")
+                .internal_pipe_states
+                .contains_key(&cache_key);
         // A sync that does not finish leaves no columns types behind.
         let synced_key = synced_columns_key(pipe);
         self.forget_synced_columns(&synced_key);
@@ -527,23 +561,34 @@ impl SqlConnector {
             Some(state) => state,
             None => self.pipe_state(&sp0).await,
         };
+        if precise_history && state.exists && !precision_ready {
+            self.upgrade_history_datetime_precision(&sp0).await?;
+        }
         let exists = state.exists;
         let is_new = !exists;
         if is_new {
             check_existing = false;
         } else {
-            let add_cols_queries = self.add_columns_queries_for(
-                &sp0,
-                &Self::df_cols_types_refined(&df),
-                &state.cols_types,
-            );
-            if !add_cols_queries.is_empty()
-                && !self.exec_queries_all(&add_cols_queries, false, true).await
-            {
-                tracing::warn!("Failed to add new columns to {pipe}.");
-            }
+            let incoming_types = Self::df_cols_types_refined(&df);
+            let add_cols_queries =
+                self.add_columns_queries_for(&sp0, &incoming_types, &state.cols_types);
             if !add_cols_queries.is_empty() {
+                let added = self.exec_queries_all(&add_cols_queries, false, true).await;
                 state = self.pipe_state(&sp0).await;
+                if !added {
+                    // A concurrent upgrader may have added the same declared columns. Ignore
+                    // that race only after fresh metadata proves every planned addition exists.
+                    if internal_table
+                        && !self
+                            .add_columns_queries_for(&sp0, &incoming_types, &state.cols_types)
+                            .is_empty()
+                    {
+                        return Err(be(format!("Failed to extend internal schema for {pipe}.")));
+                    }
+                    if !internal_table {
+                        tracing::warn!("Failed to add new columns to {pipe}.");
+                    }
+                }
             }
             let alter_cols_queries = self
                 .alter_columns_with_state(pipe, &df, internal.new_special_cols.as_ref(), &state)
@@ -712,7 +757,12 @@ impl SqlConnector {
 
         if is_new {
             let res = self
-                .create_pipe_table_from_df(&sp, &unseen_df, &state)
+                .create_pipe_table_from_df(
+                    &sp,
+                    &unseen_df,
+                    &state,
+                    internal.history_datetime_precision,
+                )
                 .await;
             if !res.success {
                 return Ok(res.into());
@@ -766,7 +816,7 @@ impl SqlConnector {
         if (is_new || initializing_internal) && !internal.skip_check_indices {
             let cols_types = internal.columns_types.clone();
             if !self.create_indices_sp(&sp, None, None, cols_types).await {
-                if cache_internal {
+                if internal_table {
                     return Ok(SyncResult::new(
                         false,
                         format!("Failed to initialize indices for {pipe}."),
@@ -856,7 +906,7 @@ impl SqlConnector {
             // `ALTER COLUMN` it ran; inserts and updates do not change it).
             self.record_synced_columns(&synced_key, &state.cols_types);
         }
-        if cache_internal {
+        if cache_internal || precise_history {
             if is_new {
                 state = self.pipe_state(&sp).await;
             }
@@ -868,6 +918,58 @@ impl SqlConnector {
         }
         let _ = dt_col;
         Ok(result)
+    }
+
+    /// Old internal MySQL/MariaDB history used DATETIME(0), rounding subsecond runs and
+    /// moving them across time filters. Upgrade only these managed columns; existing whole-
+    /// second values stay unchanged, and the public v4 dtype mapping remains DATETIME.
+    async fn upgrade_history_datetime_precision(&self, sp: &SqlPipe) -> ConnectorResult<()> {
+        let schema = self.get_pipe_schema(sp);
+        let query = "SELECT COLUMN_NAME AS `column`, IS_NULLABLE AS `nullable` \
+            FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = COALESCE(?, DATABASE()) \
+            AND TABLE_NAME = ? AND DATA_TYPE = 'datetime' AND DATETIME_PRECISION < 6";
+        let frame = self
+            .read_params_catalog(
+                query,
+                &[
+                    schema.map(SqlParam::Text).unwrap_or(SqlParam::Null),
+                    SqlParam::Text(sp.target.clone()),
+                ],
+            )
+            .await
+            .map_err(be)?;
+        let configured = super::data::configured_dtypes(sp);
+        let mut changes = Vec::new();
+        for row in meerschaum_connector::pipe_ops::frame_to_docs(&frame) {
+            let Some(column) = row.get("column").map(KValue::py_str) else {
+                continue;
+            };
+            if !configured
+                .get(&column)
+                .is_some_and(|dtype| history_db_type(sp, self.flavor, dtype) == "DATETIME(6)")
+            {
+                continue;
+            }
+            let nullable = if row.get("nullable").map(KValue::py_str).as_deref() == Some("YES") {
+                "NULL"
+            } else {
+                "NOT NULL"
+            };
+            changes.push(format!(
+                "MODIFY COLUMN {} DATETIME(6) {nullable}",
+                sql_item_name(&column, self.flavor, None)
+            ));
+        }
+        if !changes.is_empty() {
+            let query = format!(
+                "ALTER TABLE {} {}",
+                self.pipe_table_name(sp),
+                changes.join(", ")
+            );
+            self.log(&query);
+            self.driver.exec(&query).await.map_err(be)?;
+        }
+        Ok(())
     }
 
     /// The `DELETE` of a replacing sync's window (`[begin, end)` matching `params`): the
@@ -1566,7 +1668,7 @@ impl SqlConnector {
         let mut temp_pipe = builder.build().map_err(be)?;
         let temp_columns_types: IndexMap<String, String> = update_dtypes
             .iter()
-            .map(|(c, t)| (c.clone(), get_db_type_from_pd_type(t, Some(flavor))))
+            .map(|(c, t)| (c.clone(), history_db_type(sp, flavor, t)))
             .collect();
         let temp_opts = SyncOptions {
             check_existing: false,
@@ -1583,6 +1685,7 @@ impl SqlConnector {
                     skip_check_indices: true,
                     new_special_cols: None,
                     skip_temporary_tables_check: false,
+                    history_datetime_precision: mysql_engine_history(sp, flavor),
                 },
             )
             .await;
@@ -1668,6 +1771,7 @@ impl SqlConnector {
         sp: &SqlPipe,
         df: &Frame,
         state: &PipeState,
+        history_datetime_precision: bool,
     ) -> SuccessTuple {
         let flavor = self.flavor;
         let pipe_dtypes = &state.dtypes;
@@ -1712,15 +1816,22 @@ impl SqlConnector {
                 flavor,
                 Flavor::Mysql | Flavor::Mariadb | Flavor::Mssql | Flavor::Oracle
             );
-        if internal_key_types {
+        let precise_history = matches!(flavor, Flavor::Mysql | Flavor::Mariadb)
+            && (mysql_engine_history(sp, flavor) || history_datetime_precision);
+        let physical_types = internal_key_types || precise_history;
+        if physical_types {
             let keys = columns_map(sp);
             for (column, dtype) in &mut new_dtypes {
-                let db_type = get_db_type_from_pd_type(dtype, Some(flavor));
-                *dtype = if keys.values().any(|key| key == column)
+                let db_type = history_db_type(sp, flavor, dtype);
+                *dtype = if precise_history && db_type == "DATETIME" {
+                    "DATETIME(6)".into()
+                } else if internal_key_types
+                    && keys.values().any(|key| key == column)
                     && matches!(
                         db_type.as_str(),
                         "TEXT" | "NVARCHAR(MAX)" | "VARCHAR(MAX)" | "NVARCHAR2(2000)"
-                    ) {
+                    )
+                {
                     match flavor {
                         Flavor::Mssql => "NVARCHAR(255)",
                         Flavor::Oracle => "NVARCHAR2(255)",
@@ -1822,7 +1933,7 @@ impl SqlConnector {
                 partition_by_column: partition_by_column.clone(),
                 partition_bounds: partition_bounds.clone(),
                 partition_scheme_name: partition_scheme_name.clone(),
-                parse_dtypes: !internal_key_types,
+                parse_dtypes: !physical_types,
             };
             let mut queries = get_create_table_queries(
                 &QueryOrDtypes::Dtypes(new_dtypes.clone()),
@@ -1923,7 +2034,9 @@ impl SqlConnector {
     /// PARITY: Python iterates a `set` of new columns (hash order); Rust keeps frame order.
     pub async fn get_add_columns_queries(&self, sp: &SqlPipe, df: &Frame) -> Vec<String> {
         let schema = self.get_pipe_schema(sp);
-        if !self.table_exists(&sp.target, schema.as_deref()).await || sp.is_static() {
+        if !self.table_exists(&sp.target, schema.as_deref()).await
+            || (sp.is_static() && !engine_history(sp))
+        {
             return Vec::new();
         }
         let df_cols_types = Self::df_cols_types_refined(df);
@@ -1941,14 +2054,31 @@ impl SqlConnector {
         df_cols_types: &IndexMap<String, String>,
         db_cols_types: &IndexMap<String, String>,
     ) -> Vec<String> {
-        if sp.is_static() {
+        if sp.is_static() && !engine_history(sp) {
             return Vec::new();
         }
         let flavor = self.flavor;
-        let new_cols: Vec<(String, String)> = df_cols_types
+        let declared = sp.dtypes();
+        let declared_history;
+        let incoming = if engine_history(sp) {
+            // An empty initializer has no incoming Arrow columns. Its declared schema still
+            // has to be made ready, without fabricating values for existing legacy rows.
+            let mut types = df_cols_types.clone();
+            for (column, dtype) in &declared {
+                types.insert(column.clone(), dtype.py_str());
+            }
+            declared_history = types;
+            &declared_history
+        } else {
+            df_cols_types
+        };
+        let new_cols: Vec<(String, String)> = incoming
             .iter()
             .filter(|(c, t)| !db_cols_types.contains_key(*c) && !c.is_empty() && !t.is_empty())
-            .map(|(c, t)| (c.clone(), get_db_type_from_pd_type(t, Some(flavor))))
+            // Managed static history may gain new declared fields, such as selection or
+            // registration provenance. Unrecognized incoming fields retain static semantics.
+            .filter(|(column, _)| !sp.is_static() || declared.contains_key(*column))
+            .map(|(c, t)| (c.clone(), history_db_type(sp, flavor, t)))
             .collect();
         if new_cols.is_empty() {
             return Vec::new();
@@ -2288,7 +2418,6 @@ impl SqlConnector {
         state: &PipeState,
         update_dtypes: bool,
     ) -> IndexMap<String, String> {
-        let _ = sp;
         let mut df_dtypes = df.dtypes();
         for (c, t) in get_special_cols(df) {
             df_dtypes.insert(c, t);
@@ -2301,7 +2430,7 @@ impl SqlConnector {
         df_dtypes
             .into_iter()
             .filter(|(c, t)| !c.is_empty() && !t.is_empty())
-            .map(|(c, t)| (c, get_db_type_from_pd_type(&t, Some(self.flavor))))
+            .map(|(c, t)| (c, history_db_type(sp, self.flavor, &t)))
             .collect()
     }
 

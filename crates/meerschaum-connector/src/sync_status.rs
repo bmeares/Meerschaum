@@ -229,6 +229,12 @@ pub fn detect_source(graph_run: bool) -> (SyncSource, Option<String>) {
 /// The outcome of one sync, merged into the pipe's [`SyncStatus`].
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SyncOutcome {
+    /// Registration/ACL segment captured before primary work; internal transport evidence.
+    #[serde(default, skip_serializing)]
+    pub registration_id: Option<String>,
+    /// Distinguish an intentionally unproven capture from a trusted local snapshot fallback.
+    #[serde(skip)]
+    pub registration_captured: bool,
     /// Whether the sync succeeded.
     pub success: bool,
     /// Its message (or error).
@@ -276,6 +282,8 @@ impl SyncOutcome {
         job: Option<String>,
     ) -> SyncOutcome {
         SyncOutcome {
+            registration_id: None,
+            registration_captured: false,
             success,
             message: message.into(),
             inserted: 0,
@@ -290,6 +298,13 @@ impl SyncOutcome {
             source,
             job,
         }
+    }
+
+    /// Attach the immutable registration segment used by this operation (including no proof).
+    pub fn with_registration(mut self, registration_id: Option<String>) -> Self {
+        self.registration_id = registration_id;
+        self.registration_captured = true;
+        self
     }
 
     /// An outcome that ended now, with the source and job of this process
@@ -337,6 +352,9 @@ pub fn message_counts(message: &str) -> (u64, u64, u64) {
 /// One pipe's sync status (the C2 record).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SyncStatus {
+    /// Storage-only generation; never expose internal registration evidence in public JSON.
+    #[serde(default, skip_serializing)]
+    pub registration_id: Option<String>,
     /// `"{instance_keys}|{connector_keys}|{metric_key}|{location_key}"`.
     pub pipe_ref: String,
     /// The connector keys.
@@ -388,6 +406,7 @@ impl SyncStatus {
     /// An empty status for `pipe` (nothing recorded yet).
     pub fn for_pipe(pipe: &Pipe) -> SyncStatus {
         SyncStatus {
+            registration_id: crate::sync_metrics::observed_registration(pipe),
             pipe_ref: pipe.pipe_ref(),
             connector_keys: pipe.connector_keys().to_string(),
             metric_key: pipe.metric_key().to_string(),
@@ -532,6 +551,63 @@ tokio::task_local! {
     static RECORDED_BY_SYNC_PATH: ();
 }
 
+struct RegistrationCapture {
+    reference: String,
+    identity: Option<String>,
+}
+
+tokio::task_local! {
+    static CAPTURED_REGISTRATION: Arc<Mutex<RegistrationCapture>>;
+}
+
+/// Capture the actual immutable registry metadata loaded by a bare sync, before primary work.
+pub async fn registration_scope<F: std::future::Future>(
+    pipe: &Pipe,
+    future: F,
+) -> (F::Output, Option<String>) {
+    let capture = Arc::new(Mutex::new(RegistrationCapture {
+        reference: pipe.pipe_ref(),
+        identity: None,
+    }));
+    let result = CAPTURED_REGISTRATION.scope(capture.clone(), future).await;
+    let identity = capture
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .identity
+        .clone();
+    (result, identity)
+}
+
+/// Supply a pre-work registry snapshot. The first proven segment cannot be retagged later.
+pub fn capture_registration(pipe: &Pipe, identity: Option<String>) {
+    let _ = CAPTURED_REGISTRATION.try_with(|capture| {
+        let mut capture = capture.lock().unwrap_or_else(|error| error.into_inner());
+        if capture.reference == pipe.pipe_ref() && capture.identity.is_none() {
+            capture.identity = identity;
+        }
+    });
+}
+
+/// A single atomic registration row's segment; malformed/ID-less metadata is unproven.
+pub fn registration_from_attributes(attributes: &Map) -> Option<String> {
+    let identity = attributes.get("pipe_id")?;
+    if !matches!(identity, Value::Int(_) | Value::Str(_)) {
+        return None;
+    }
+    let parameters = match attributes.get("parameters")? {
+        Value::Map(parameters) => parameters.clone(),
+        Value::Str(text) => match Value::from_json_str(text).ok()? {
+            Value::Map(parameters) => parameters,
+            _ => return None,
+        },
+        _ => return None,
+    };
+    Some(crate::sync_metrics::registration_stamp(
+        &identity.py_str(),
+        &parameters,
+    ))
+}
+
 /// Run `fut` (a sync) as one whose outcome the caller records: an `api:` client then marks the
 /// data it posts with [`CLIENT_RECORDS_HEADER`], so its server does not record the posts too.
 /// A sync without this scope (a direct `sync_pipe` of a copy) is recorded by the server.
@@ -579,6 +655,7 @@ fn kv_int(n: u64) -> KValue {
 /// A status as a row of the status pipe.
 pub fn status_doc(s: &SyncStatus) -> Doc {
     [
+        ("registration_id", kv_opt_str(s.registration_id.as_deref())),
         ("pipe_ref", kv_str(&s.pipe_ref)),
         ("connector_keys", kv_str(&s.connector_keys)),
         ("metric_key", kv_str(&s.metric_key)),
@@ -668,6 +745,7 @@ pub fn status_from_doc(doc: &Doc) -> Option<SyncStatus> {
         )
     });
     Some(SyncStatus {
+        registration_id: doc_str(doc, "registration_id"),
         pipe_ref,
         connector_keys,
         metric_key,
@@ -758,8 +836,18 @@ pub async fn stored_status<C: InstanceConnector + ?Sized>(
     );
     params.insert("metric_key".into(), Value::Str(pipe.metric_key().into()));
     let rows = read_rows(conn, pipe.instance_keys(), Some(params)).await?;
+    if rows.is_empty() {
+        return Ok(None);
+    }
+    let attributes = conn.get_pipe_attributes(pipe).await?;
+    let current = registration_from_attributes(&attributes);
     Ok(latest(rows.into_iter().filter(|s| {
         s.location_key.as_deref() == pipe.location_key()
+            && if attributes.is_empty() {
+                s.registration_id.is_none()
+            } else {
+                current.is_some() && s.registration_id == current
+            }
     })))
 }
 
@@ -771,8 +859,51 @@ pub async fn read_statuses<C: InstanceConnector + ?Sized>(
     instance_keys: &str,
 ) -> ConnectorResult<Vec<SyncStatus>> {
     settle_instance(instance_keys).await;
+    let rows = read_rows(conn, instance_keys, None).await?;
+    if rows.is_empty() {
+        return Ok(Vec::new());
+    }
+    let registrations = conn
+        .registered_pipes(&crate::PipesKeysQuery::default())
+        .await?;
+    let mut current: HashMap<String, Option<String>> = HashMap::new();
+    for (identity, entry) in registrations {
+        let key = crate::sync_metrics::pipe_key(
+            &entry.connector_keys,
+            &entry.metric_key,
+            entry.location_key.as_deref(),
+        );
+        let stamp = identity.and_then(|identity| match entry.extra {
+            Some(Value::Map(parameters)) => Some(crate::sync_metrics::registration_stamp(
+                &identity.to_string(),
+                &parameters,
+            )),
+            Some(Value::Str(text)) => match Value::from_json_str(&text).ok()? {
+                Value::Map(parameters) => Some(crate::sync_metrics::registration_stamp(
+                    &identity.to_string(),
+                    &parameters,
+                )),
+                _ => None,
+            },
+            _ => None,
+        });
+        current.insert(key, stamp);
+    }
     let mut by_ref: IndexMap<String, SyncStatus> = IndexMap::new();
-    for status in read_rows(conn, instance_keys, None).await? {
+    for status in rows {
+        let key = crate::sync_metrics::pipe_key(
+            &status.connector_keys,
+            &status.metric_key,
+            status.location_key.as_deref(),
+        );
+        let visible = match current.get(&key) {
+            Some(Some(stamp)) => status.registration_id.as_ref() == Some(stamp),
+            Some(None) => false,
+            None => status.registration_id.is_none(),
+        };
+        if !visible {
+            continue;
+        }
         match by_ref.get(&status.pipe_ref) {
             Some(existing) if existing.last_attempt >= status.last_attempt => {}
             _ => {
@@ -836,9 +967,38 @@ pub async fn merge_and_store<C: InstanceConnector + ?Sized>(
         Some(s) => rekey(s, pipe.instance_keys()),
         None => SyncStatus::for_pipe(pipe),
     };
-    let status = outcomes.iter().fold(base, SyncStatus::apply);
+    let mut status = base;
+    for outcome in outcomes {
+        let captured = if outcome.registration_captured {
+            outcome.registration_id.clone()
+        } else {
+            crate::sync_metrics::observed_registration(pipe)
+        };
+        if status.registration_id != captured {
+            status = SyncStatus::for_pipe(pipe);
+        }
+        status.registration_id = captured;
+        status = status.apply(outcome);
+    }
+    let current = conn.get_pipe_attributes(pipe).await?;
+    let matches = if current.is_empty() {
+        status.registration_id.is_none()
+    } else {
+        registration_from_attributes(&current)
+            .is_some_and(|identity| status.registration_id.as_ref() == Some(&identity))
+    };
+    if !matches {
+        return Ok(None);
+    }
     write_status(conn, &status).await?;
-    Ok(Some(status))
+    let attributes = conn.get_pipe_attributes(pipe).await?;
+    let proven = if attributes.is_empty() {
+        status.registration_id.is_none()
+    } else {
+        registration_from_attributes(&attributes)
+            .is_some_and(|current| status.registration_id.as_ref() == Some(&current))
+    };
+    Ok(proven.then_some(status))
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -847,6 +1007,8 @@ pub async fn merge_and_store<C: InstanceConnector + ?Sized>(
 /// The recording state of one pipe in this process.
 #[derive(Default)]
 struct Track {
+    /// A privacy/registration change starts a fresh debounce segment too.
+    registration_id: Option<String>,
     /// When its status was last written (or a write was decided).
     last_write: Option<Instant>,
     /// Whether the last written outcome was a success.
@@ -874,13 +1036,29 @@ enum Decision {
     Hold { schedule: Option<Instant> },
 }
 
-/// This process's recording state, by `pipe_ref`. A forked child (v4-style job daemons fork)
+/// One connector owns its own queue even when another connector uses the same visible alias.
+#[derive(Clone, PartialEq, Eq, Hash)]
+struct TrackKey {
+    pipe_ref: String,
+    owner: usize,
+}
+
+impl TrackKey {
+    fn new<C: InstanceConnector + ?Sized>(conn: &C, pipe_ref: &str) -> Self {
+        Self {
+            pipe_ref: pipe_ref.into(),
+            owner: conn as *const C as *const () as usize,
+        }
+    }
+}
+
+/// This process's recording state, by connector and `pipe_ref`. A forked child (v4-style job daemons fork)
 /// starts afresh: its parent's held successes, queued outcomes, writers and locks are not its
 /// own.
 #[derive(Default)]
 struct State {
     pid: u32,
-    tracks: HashMap<String, Track>,
+    tracks: HashMap<TrackKey, Track>,
     locks: HashMap<String, Arc<tokio::sync::Mutex<()>>>,
 }
 
@@ -944,7 +1122,10 @@ fn claim_writer(track: &mut Track) -> bool {
 /// Forget this process's debounce state of one pipe (tests: the next success writes at once).
 #[doc(hidden)]
 pub fn reset_debounce(pipe_ref: &str) {
-    if let Some(track) = state().tracks.get_mut(pipe_ref) {
+    for (key, track) in &mut state().tracks {
+        if key.pipe_ref != pipe_ref {
+            continue;
+        }
         track.last_write = None;
         track.last_success = false;
     }
@@ -961,17 +1142,26 @@ pub fn record(conn: Arc<dyn InstanceConnector>, pipe: &Pipe, outcome: SyncOutcom
 fn record_in(
     conn: Arc<dyn InstanceConnector>,
     pipe: &Pipe,
-    outcome: SyncOutcome,
+    mut outcome: SyncOutcome,
     window: Duration,
 ) {
     if !is_recorded(pipe) {
         return;
     }
+    if !outcome.registration_captured {
+        outcome = outcome.with_registration(crate::sync_metrics::observed_registration(pipe));
+    }
     crate::sync_metrics::record(conn.clone(), pipe, &outcome);
-    let key = pipe.pipe_ref();
+    let key = TrackKey::new(conn.as_ref(), &pipe.pipe_ref());
     let (start, timer, _replaced) = {
         let mut state = state();
         let track = state.tracks.entry(key.clone()).or_default();
+        if track.registration_id != outcome.registration_id {
+            track.registration_id = outcome.registration_id.clone();
+            track.last_write = None;
+            track.last_success = false;
+            track.pending = None;
+        }
         // The previous target is dropped after the lock (it may hold the last connector).
         let replaced = track.target.replace((conn, pipe.clone()));
         match decide(track, outcome, Instant::now(), window) {
@@ -996,7 +1186,7 @@ fn record_in(
 /// Clears a pipe's `writing` mark when its writer ends without doing so itself (its runtime
 /// shut down, or it never ran), so the next record or read starts another.
 struct WriterGuard {
-    key: String,
+    key: TrackKey,
     armed: bool,
 }
 
@@ -1013,7 +1203,7 @@ impl Drop for WriterGuard {
 
 /// Start the writer of the pipe `key` (claimed with [`claim_writer`]) on the current runtime.
 /// Without a runtime, the writer is returned for the caller to await (or drop).
-fn start_writer(key: String) -> Option<impl std::future::Future<Output = ()> + Send + 'static> {
+fn start_writer(key: TrackKey) -> Option<impl std::future::Future<Output = ()> + Send + 'static> {
     let guard = WriterGuard {
         key: key.clone(),
         armed: true,
@@ -1028,7 +1218,7 @@ fn start_writer(key: String) -> Option<impl std::future::Future<Output = ()> + S
 }
 
 /// Write the queued outcomes of the pipe `key` until none are left.
-async fn write_queue(key: String, mut guard: WriterGuard) {
+async fn write_queue(key: TrackKey, mut guard: WriterGuard) {
     loop {
         let batch = {
             let mut state = state();
@@ -1060,13 +1250,13 @@ async fn write_queue(key: String, mut guard: WriterGuard) {
 /// forgotten since they were queued (`epoch`): bounded by [`RECORD_TIMEOUT`], errors logged at
 /// debug level.
 async fn write_batch(
-    key: &str,
+    key: &TrackKey,
     conn: &dyn InstanceConnector,
     pipe: &Pipe,
     outcomes: &[SyncOutcome],
     epoch: u64,
 ) {
-    let lock = write_lock(key);
+    let lock = write_lock(&key.pipe_ref);
     let write = async {
         let _guard = lock.lock().await;
         if state().tracks.get(key).map(|t| t.epoch) != Some(epoch) {
@@ -1087,7 +1277,7 @@ async fn write_batch(
 /// Clears a pipe's `flush_scheduled` mark when its timer ends without doing so itself (its
 /// runtime shut down), so the next held success schedules another.
 struct TimerGuard {
-    key: String,
+    key: TrackKey,
     epoch: u64,
     armed: bool,
 }
@@ -1105,7 +1295,7 @@ impl Drop for TimerGuard {
 
 /// Queue the held success of the pipe `key` when its window ends (`due`). Without a runtime the
 /// held success goes out with the next record or read.
-fn start_timer(key: String, due: Instant, epoch: u64) {
+fn start_timer(key: TrackKey, due: Instant, epoch: u64) {
     let guard = TimerGuard {
         key: key.clone(),
         epoch,
@@ -1119,7 +1309,7 @@ fn start_timer(key: String, due: Instant, epoch: u64) {
 /// The end of a debounce window: queue the held success, unless the pipe was forgotten since
 /// (`guard.epoch`) or no longer exists on its instance (another process dropped or deleted it
 /// within the window).
-async fn write_held(key: String, due: Instant, mut guard: TimerGuard) {
+async fn write_held(key: TrackKey, due: Instant, mut guard: TimerGuard) {
     tokio::time::sleep_until(due.into()).await;
     let held = {
         let mut state = state();
@@ -1174,7 +1364,7 @@ async fn settle_where(which: impl Fn(&str) -> bool, held: bool, timeout: Duratio
             let mut busy = false;
             let mut start = Vec::new();
             for (key, track) in state.tracks.iter_mut() {
-                if !which(key) {
+                if !which(&key.pipe_ref) {
                     continue;
                 }
                 if held && let Some(outcome) = track.pending.take() {
@@ -1237,10 +1427,12 @@ pub fn has_unwritten() -> bool {
 /// Write everything this process holds, held successes included, and wait until it is written
 /// (up to `timeout`): what a process runs before it exits, so its latest syncs are kept.
 pub async fn flush(timeout: Duration) {
-    if has_unwritten() {
-        settle_where(|_| true, true, timeout).await;
-    }
-    crate::sync_metrics::flush(timeout).await;
+    // Both independent writers get the same shutdown budget. Waiting for them in
+    // sequence could consume twice the caller's timeout and starve a restarted metrics task.
+    tokio::join!(
+        settle_where(|_| true, true, timeout),
+        crate::sync_metrics::flush(timeout),
+    );
 }
 
 /// Forget what this process holds for the status of `pipe_ref` before its stored status is
@@ -1249,7 +1441,25 @@ pub async fn flush(timeout: Duration) {
 /// for (up to [`RECORD_TIMEOUT`]). Keep the returned guard until the stored status is cleared, so
 /// that no write of this process lands after it.
 pub async fn forget(pipe_ref: &str) -> Option<tokio::sync::OwnedMutexGuard<()>> {
-    if let Some(track) = state().tracks.get_mut(pipe_ref) {
+    forget_tracks(pipe_ref, None).await
+}
+
+/// Forget only the status queue owned by `conn`; another physical instance may use the same alias.
+pub async fn forget_on<C: InstanceConnector + ?Sized>(
+    conn: &C,
+    pipe_ref: &str,
+) -> Option<tokio::sync::OwnedMutexGuard<()>> {
+    forget_tracks(pipe_ref, Some(TrackKey::new(conn, pipe_ref).owner)).await
+}
+
+async fn forget_tracks(
+    pipe_ref: &str,
+    owner: Option<usize>,
+) -> Option<tokio::sync::OwnedMutexGuard<()>> {
+    for (key, track) in &mut state().tracks {
+        if key.pipe_ref != pipe_ref || owner.is_some_and(|owner| key.owner != owner) {
+            continue;
+        }
         track.epoch = track.epoch.wrapping_add(1);
         track.pending = None;
         track.queue.clear();
@@ -1530,6 +1740,11 @@ mod tests {
         writes: AtomicUsize,
         write_delay: Duration,
         gone: AtomicBool,
+        metrics: Mutex<HashMap<String, crate::sync_metrics::SyncMetric>>,
+        metric_writes: AtomicUsize,
+        hold_metric_ack: AtomicBool,
+        metric_committed: tokio::sync::Notify,
+        metric_ack: tokio::sync::Notify,
     }
 
     impl Fake {
@@ -1641,6 +1856,24 @@ mod tests {
             self.writes.fetch_add(1, Ordering::SeqCst);
             Ok(Some(status))
         }
+
+        async fn record_sync_metrics(
+            &self,
+            metrics: &[crate::sync_metrics::SyncMetric],
+        ) -> ConnectorResult<()> {
+            self.metric_writes.fetch_add(1, Ordering::SeqCst);
+            for metric in metrics {
+                self.metrics
+                    .lock()
+                    .unwrap()
+                    .insert(metric.event_id.clone(), metric.clone());
+            }
+            self.metric_committed.notify_one();
+            if self.hold_metric_ack.load(Ordering::SeqCst) {
+                self.metric_ack.notified().await;
+            }
+            Ok(())
+        }
     }
 
     fn unique_pipe(tag: &str) -> Pipe {
@@ -1687,6 +1920,79 @@ mod tests {
         let s = fake.stored(&pipe).unwrap();
         assert_eq!(s.consecutive_failures, 3);
         assert_eq!(s.message, "o2");
+    }
+
+    #[test]
+    fn identical_aliases_keep_their_queued_outcomes_on_their_own_connector() {
+        let first = Fake::new();
+        let second = Fake::new();
+        let pipe = unique_pipe("same_alias_queued");
+        // No runtime may consume either queue before both targets have been recorded.
+        record(first.clone(), &pipe, outcome(false, 1));
+        record(second.clone(), &pipe, outcome(false, 2));
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            settle_pipe(&pipe.pipe_ref()).await;
+        });
+        let first_status = first.stored(&pipe).unwrap();
+        let second_status = second.stored(&pipe).unwrap();
+        assert_eq!(first_status.message, "o1");
+        assert_eq!(second_status.message, "o2");
+        assert_eq!(first_status.consecutive_failures, 1);
+        assert_eq!(second_status.consecutive_failures, 1);
+    }
+
+    #[tokio::test]
+    async fn identical_aliases_do_not_share_debounce_or_deletion_state() {
+        let _serial = HELD.lock().await;
+        let first = Fake::new();
+        let second = Fake::new();
+        let pipe = unique_pipe("same_alias_held");
+        let window = Duration::from_secs(60);
+        record_in(first.clone(), &pipe, outcome(true, 1), window);
+        written(&pipe.pipe_ref()).await;
+        record_in(first.clone(), &pipe, outcome(true, 2), window);
+        record_in(second.clone(), &pipe, outcome(true, 3), window);
+        written(&pipe.pipe_ref()).await;
+        assert_eq!(first.stored(&pipe).unwrap().message, "o1");
+        assert_eq!(second.stored(&pipe).unwrap().message, "o3");
+        record_in(second.clone(), &pipe, outcome(true, 4), window);
+        let guard = forget_on(first.as_ref(), &pipe.pipe_ref()).await;
+        first.clear();
+        drop(guard);
+        settle_pipe(&pipe.pipe_ref()).await;
+        assert!(
+            first.stored(&pipe).is_none(),
+            "the deleted instance stays clear"
+        );
+        assert_eq!(second.stored(&pipe).unwrap().message, "o4");
+    }
+
+    #[test]
+    fn cancelled_metrics_acknowledgement_is_retried_without_changing_event_identity() {
+        let _serial = HELD.blocking_lock();
+        let fake = Fake::new();
+        fake.hold_metric_ack.store(true, Ordering::SeqCst);
+        let pipe = unique_pipe("cancelled_metrics");
+        pipe.set_registration_id(Some("synthetic-registration".into()));
+        let first = tokio::runtime::Runtime::new().unwrap();
+        first.block_on(async {
+            crate::sync_metrics::record(fake.clone(), &pipe, &outcome(true, 1));
+            tokio::time::timeout(Duration::from_secs(1), fake.metric_committed.notified())
+                .await
+                .unwrap();
+        });
+        let event_id = fake.metrics.lock().unwrap().keys().next().unwrap().clone();
+        drop(first);
+        assert!(crate::sync_metrics::has_unwritten());
+        fake.hold_metric_ack.store(false, Ordering::SeqCst);
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            crate::sync_metrics::flush(Duration::from_secs(1)).await;
+        });
+        assert!(!crate::sync_metrics::has_unwritten());
+        assert_eq!(fake.metric_writes.load(Ordering::SeqCst), 2);
+        let rows = fake.metrics.lock().unwrap();
+        assert_eq!(rows.len(), 1);
+        assert!(rows.contains_key(&event_id));
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1786,7 +2092,7 @@ mod tests {
         flush(Duration::from_secs(2)).await;
         assert_eq!(fake.stored(&exiting).unwrap().message, "o1");
         let state = state();
-        let track = &state.tracks[&exiting.pipe_ref()];
+        let track = &state.tracks[&TrackKey::new(fake.as_ref(), &exiting.pipe_ref())];
         assert!(track.pending.is_none() && track.queue.is_empty() && !track.writing);
     }
 
@@ -1809,7 +2115,10 @@ mod tests {
         });
         // The runtime goes away in the middle of the write: the write is lost with it.
         drop(first);
-        assert!(!state().tracks[&key].writing, "the lost writer let go");
+        assert!(
+            !state().tracks[&TrackKey::new(fake.as_ref(), &key)].writing,
+            "the lost writer let go"
+        );
         runtime().block_on(async {
             record(fake.clone(), &pipe, outcome(false, 1));
             settle_pipe(&key).await;

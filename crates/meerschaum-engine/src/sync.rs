@@ -538,14 +538,29 @@ pub async fn sync_pipe(
     };
     let inner = sync_inner(env, pipe, input, args, observer);
     // Recorded here or by the status owner: an `api:` instance must not record the posts too.
-    let mut result = if meerschaum_connector::sync_status::is_recorded(pipe) {
-        meerschaum_connector::sync_status::recorded_scope(inner).await
+    let (mut result, registration) = if records {
+        meerschaum_connector::sync_status::registration_scope(
+            pipe,
+            meerschaum_connector::sync_status::recorded_scope(inner),
+        )
+        .await
+    } else if meerschaum_connector::sync_status::is_recorded(pipe) {
+        (
+            meerschaum_connector::sync_status::recorded_scope(inner).await,
+            None,
+        )
     } else {
-        inner.await
+        (inner.await, None)
     };
     result.duration.get_or_insert(start.elapsed());
     if records {
-        crate::status::record_result(env.registry, pipe, &result, false);
+        crate::status::record_result_with_registration(
+            env.registry,
+            pipe,
+            &result,
+            false,
+            registration,
+        );
     }
     result
 }
@@ -587,6 +602,10 @@ async fn sync_inner(
         && let Ok(attrs) = instance.get_pipe_attributes(&pipe).await
         && let Some(Value::Map(registered)) = attrs.get("parameters")
     {
+        meerschaum_connector::sync_status::capture_registration(
+            &pipe,
+            meerschaum_connector::sync_status::registration_from_attributes(&attrs),
+        );
         let merged = apply_patch_maps(registered, pipe.raw_parameters());
         registered_parameters = Some(registered.clone());
         pipe.set_parameters(merged);
@@ -595,6 +614,10 @@ async fn sync_inner(
     // anything is fetched. A graph run's pipes carry their registered parameters already.
     if args.parameters_loaded {
         registered_parameters = Some(pipe.raw_parameters().clone());
+        meerschaum_connector::sync_status::capture_registration(
+            &pipe,
+            meerschaum_connector::sync_metrics::observed_registration(&pipe),
+        );
     }
     let replacing = args.replace || (input.is_none() && fetch_replace(&pipe));
     if let Some(refused) = meerschaum_connector::locks::refusal_of(
@@ -647,6 +670,16 @@ async fn sync_inner(
                 let reg = instance.register_pipe(&pipe).await;
                 if !reg.success && !reg.message.contains("already") {
                     return reg.into();
+                }
+                // Registration may stamp an API caller's owner/team. Capture its actual
+                // row before fetching or writing, rather than assuming requested ACLs.
+                if let Ok(attributes) = instance.get_pipe_attributes(&pipe).await {
+                    meerschaum_connector::sync_status::capture_registration(
+                        &pipe,
+                        meerschaum_connector::sync_status::registration_from_attributes(
+                            &attributes,
+                        ),
+                    );
                 }
             }
             Err(e) => return fail(e.to_string()),

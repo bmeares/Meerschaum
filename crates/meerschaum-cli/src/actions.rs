@@ -557,6 +557,79 @@ mod tests {
     use super::*;
 
     #[test]
+    fn connector_inspection_aliases_are_explicit() {
+        for alias in ["connector", "connectors"] {
+            assert_eq!(
+                get_action(&["show", alias], CORE_ACTIONS)
+                    .unwrap()
+                    .function_name(),
+                "_show_connectors"
+            );
+        }
+        // These words do not alias either sensitive renderer. If the registry adds an alias,
+        // the remote execute policy must recognize it before it becomes available to callers.
+        for word in [
+            "conn",
+            "connection",
+            "connections",
+            "configuration",
+            "configurations",
+            "configs",
+        ] {
+            let function = get_action(&["show", word], CORE_ACTIONS)
+                .unwrap()
+                .function_name();
+            assert!(
+                !matches!(function, "_show_connectors" | "_show_config"),
+                "{word}"
+            );
+        }
+        assert_eq!(
+            get_action(&["show", "config"], CORE_ACTIONS)
+                .unwrap()
+                .function_name(),
+            "_show_config"
+        );
+    }
+
+    #[test]
+    fn remote_executor_cluster_guard_matches_native_boolean_short_options() {
+        let mut shorts = crate::spec::ARGUMENTS
+            .iter()
+            .filter(|argument| argument.nargs == crate::spec::Nargs::Exactly(0))
+            .flat_map(|argument| argument.option_strings.iter())
+            .filter(|option| option.len() == 2 && option.starts_with('-'))
+            .map(|option| option.chars().nth(1).unwrap())
+            .collect::<Vec<_>>();
+        shorts.sort_unstable();
+        assert_eq!(shorts, vec!['V', 'd', 'f', 'h', 'v', 'y']);
+    }
+
+    #[test]
+    fn pipe_registration_and_definition_aliases_match_remote_policy() {
+        for alias in ["pipe", "pipes"] {
+            assert_eq!(
+                get_action(&["register", alias], CORE_ACTIONS)
+                    .unwrap()
+                    .function_name(),
+                "_register_pipes"
+            );
+            assert_eq!(
+                get_action(&["edit", alias, "definition"], CORE_ACTIONS)
+                    .unwrap()
+                    .function_name(),
+                "_edit_pipes"
+            );
+        }
+        assert_eq!(
+            get_action(&["edit", "definition"], CORE_ACTIONS)
+                .unwrap()
+                .function_name(),
+            "_edit_definition"
+        );
+    }
+
+    #[test]
     fn resolution() {
         let r = get_action(&["show", "pipe"], CORE_ACTIONS).unwrap();
         assert_eq!(r.function_name(), "_show_pipes");

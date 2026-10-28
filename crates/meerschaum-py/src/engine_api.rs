@@ -649,6 +649,28 @@ pub fn engine_runs(py: Python<'_>, request: &str) -> PyResult<String> {
     to_json_string(&runs)
 }
 
+/// Private host authorization evidence; stored node identities never leave this call.
+#[pyfunction]
+pub fn engine_run_generations(py: Python<'_>, request: &str) -> PyResult<String> {
+    let request = parse_request(request)?;
+    let ids = request
+        .get("run_ids")
+        .and_then(Json::as_array)
+        .ok_or_else(|| value_err("`run_ids` must be an array of strings."))?
+        .iter()
+        .map(|id| {
+            id.as_str()
+                .map(str::to_owned)
+                .ok_or_else(|| value_err("`run_ids` must be an array of strings."))
+        })
+        .collect::<PyResult<Vec<_>>>()?;
+    let (session, reader) = reader(py, &request)?;
+    let current = py
+        .detach(|| session.block_on(reader.run_generations(&ids)))
+        .map_err(|error| runtime_err(error.to_string()))?;
+    to_json_string(&current)
+}
+
 /// `engine_run_detail(request) -> json`: one run with node rows and Gantt bars (`null` when
 /// the run is unknown).
 #[pyfunction]

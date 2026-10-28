@@ -475,7 +475,7 @@ impl EngineBackend for InstanceEngine {
                 node_docs.push(doc);
             }
         }
-        for (metric, docs) in [("engine_runs", run_docs), ("engine_nodes", node_docs)] {
+        for (metric, docs) in [("engine_nodes", node_docs), ("engine_runs", run_docs)] {
             let res = self.write(metric, docs).await;
             if !res.success {
                 return res;
@@ -485,6 +485,36 @@ impl EngineBackend for InstanceEngine {
     }
 
     async fn get_runs(&self, filter: &RunsFilter) -> Result<Vec<RunRecord>, EngineStoreError> {
+        // A saved Pipeline's current name selects its live UUID, including history captured
+        // before an authorized rename. A later definition reusing the old name is distinct.
+        let live_identity = if let Some(name) = &filter.pipeline {
+            let metadata = Pipe::builder("mrsm", "pipeline")
+                .location(Some(name))
+                .instance(&self.keys)
+                .build()
+                .map_err(|_| EngineStoreError::Failed("Invalid Pipeline registry.".into()))?;
+            let attributes = self
+                .conn
+                .get_pipe_attributes(&metadata)
+                .await
+                .map_err(|_| {
+                    EngineStoreError::Failed("Cannot read saved Pipeline identity.".into())
+                })?;
+            attributes
+                .get("parameters")
+                .and_then(Value::as_map)
+                .and_then(|parameters| parameters.get("pipeline"))
+                .and_then(|pipeline| pipeline.get("id"))
+                .and_then(Value::as_str)
+                .filter(|id| !id.is_empty() && !id.starts_with("legacy:"))
+                .map(str::to_string)
+        } else {
+            None
+        };
+        let mut scalar_filter = filter.clone();
+        if live_identity.is_some() {
+            scalar_filter.pipeline = None;
+        }
         // Every filter the instance can apply is pushed into the read: the run, the runs of a
         // pipe (from its node rows), whether the run finished, `since` (the datetime axis) and,
         // when nothing is left to check here, the limit (newest first).
@@ -574,7 +604,28 @@ impl EngineBackend for InstanceEngine {
                     continue;
                 }
                 new += 1;
-                if filter.keeps_run(&run) {
+                let matches_identity = live_identity.as_ref().is_none_or(|identity| {
+                    let selection = match run.extra.get("selection") {
+                        Some(Value::Str(text)) => {
+                            serde_json::from_str::<Json>(text).unwrap_or(Json::Null)
+                        }
+                        Some(value) => serde_json::to_value(value).unwrap_or(Json::Null),
+                        None => Json::Null,
+                    };
+                    selection
+                        .get("pipeline_definitions")
+                        .and_then(Json::as_array)
+                        .is_some_and(|definitions| {
+                            definitions.iter().any(|definition| {
+                                definition.get("id").and_then(Json::as_str)
+                                    == Some(identity.as_str())
+                                    && meerschaum_connector::sync_metrics::snapshot_registry(
+                                        definition,
+                                    ) == Some(self.conn.connector_keys().as_str())
+                            })
+                        })
+                });
+                if scalar_filter.keeps_run(&run) && matches_identity {
                     runs.push(run);
                 }
             }
@@ -730,6 +781,8 @@ impl EngineBackend for InstanceEngine {
                 select_columns: query.select_columns.clone(),
                 begin: bound_query(query.begin.as_deref()),
                 end: bound_query(query.end.as_deref()),
+                limit: query.limit,
+                order: query.order.clone(),
                 ..Default::default()
             },
         )

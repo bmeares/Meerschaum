@@ -44,3 +44,39 @@ def test_dashboards_keep_filters_units_and_empty_history_safe(resource):
             assert not re.search(r'\b(?:INSERT|UPDATE|DELETE|CREATE|DROP|ALTER)\b', sql)
             assert not re.search(r'https?://|password|credentials|message', sql, re.I)
     assert any(panel['fieldConfig']['defaults'].get('unit') == 's' for panel in dashboard['panels'])
+
+
+def test_native_stack_sync_preserves_undecodable_and_linked_dashboard_collisions(tmp_path):
+    import os
+    import subprocess
+    import sys
+
+    root = tmp_path / 'root'
+    plugins = root / 'plugins'
+    plugins.mkdir(parents=True)
+    env = {key: value for key, value in os.environ.items()
+           if not key.startswith('MRSM_') and key not in ('TMUX', 'TMUX_PANE', 'PYTHONPATH')}
+    env.update(MRSM_ROOT_DIR=str(root), MRSM_PLUGINS_DIR=str(plugins),
+               PYTHONPATH=str(RESOURCES.parents[4]), MRSM_NO_AUTO_INSTALL='1')
+    result = subprocess.run([sys.executable, '-c', '''
+import os
+from pathlib import Path
+from meerschaum import _core
+from meerschaum.config import paths
+directory = paths.GRAFANA_DASHBOARD_PATH.parent
+directory.mkdir(parents=True, exist_ok=True)
+collision = directory / 'meerschaum-performance.json'
+collision.write_bytes(b'\\xffcustom')
+linked = directory / 'meerschaum-pipes.json'
+if os.name == 'posix':
+    linked.unlink(missing_ok=True)
+    target = Path.cwd() / 'custom-dashboard.json'
+    target.write_text('{"uid":"mrsm-pipe-performance"}')
+    linked.symlink_to(target)
+_core.sync_files(['stack'])
+assert collision.read_bytes() == b'\\xffcustom', 'An unreadable UID collision was overwritten'
+if os.name == 'posix':
+    assert linked.is_symlink(), 'A user-managed dashboard link was replaced'
+assert (directory / 'meerschaum-pipelines.json').exists()
+'''], cwd=root, env=env, capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, result.stderr[-4000:]

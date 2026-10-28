@@ -59,11 +59,29 @@ impl APIConnector {
         pipe: &Pipe,
         outcomes: &[SyncOutcome],
     ) -> ConnectorResult<Option<SyncStatus>> {
+        let mut captured = serde_json::to_value(outcomes)?;
+        for (item, outcome) in captured
+            .as_array_mut()
+            .expect("outcomes are an array")
+            .iter_mut()
+            .zip(outcomes)
+        {
+            let identity = if outcome.registration_captured {
+                outcome.registration_id.clone()
+            } else {
+                meerschaum_connector::sync_metrics::observed_registration(pipe)
+            };
+            if let Some(identity) = identity {
+                item.as_object_mut()
+                    .expect("outcomes are objects")
+                    .insert("registration_id".into(), Json::String(identity));
+            }
+        }
         let body = json!({
             "connector_keys": pipe.connector_keys(),
             "metric_key": pipe.metric_key(),
             "location_key": pipe.location_key(),
-            "outcomes": outcomes,
+            "outcomes": captured,
         });
         let r = self
             .post(

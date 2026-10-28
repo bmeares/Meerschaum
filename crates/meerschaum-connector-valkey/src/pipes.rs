@@ -128,6 +128,147 @@ fn backtrack_query(req: &BacktrackRequest) -> DataQuery {
 }
 
 impl ValkeyConnector {
+    /// Conditionally move only a live saved-Pipeline registration and its metadata row.
+    pub async fn move_pipeline_registration(
+        &self,
+        source: &Pipe,
+        new_name: &str,
+        expected: &Map,
+        parameters: &Map,
+    ) -> ConnectorResult<bool> {
+        if source.connector_keys() != "mrsm"
+            || source.metric_key() != "pipeline"
+            || source.location_key().is_none()
+            || new_name.is_empty()
+        {
+            return Err(ConnectorError::Invalid(
+                "Only named Pipeline metadata may be moved.".into(),
+            ));
+        }
+        if source.location_key() == Some(new_name) {
+            return Ok(false);
+        }
+        if let Some(refused) = meerschaum_connector::protected_refusal(self, source, "rename") {
+            return Err(ConnectorError::Invalid(refused.message));
+        }
+        let Some(identity) = expected.get("pipe_id").and_then(Value::as_i64) else {
+            return Ok(false);
+        };
+        let Some(old_parameters) = expected.get("parameters").and_then(Value::as_map) else {
+            return Ok(false);
+        };
+        for operation in [
+            meerschaum_core::access::LockOp::EditParameters,
+            meerschaum_core::access::LockOp::DeleteAndDrop,
+        ] {
+            if let Some(refused) =
+                meerschaum_connector::locks::refusal_of(source, Some(old_parameters), operation)
+            {
+                return Err(ConnectorError::Invalid(refused.message));
+            }
+        }
+        if ["access", "locks"]
+            .iter()
+            .any(|key| old_parameters.get(*key) != parameters.get(*key))
+        {
+            return Err(ConnectorError::Invalid(
+                "A metadata move must preserve access and locks.".into(),
+            ));
+        }
+        let old_identity = old_parameters
+            .get("pipeline")
+            .and_then(|pipeline| pipeline.get("id"))
+            .and_then(Value::as_str)
+            .filter(|identity| !identity.is_empty() && !identity.starts_with("legacy:"));
+        let new_identity = parameters
+            .get("pipeline")
+            .and_then(|pipeline| pipeline.get("id"))
+            .and_then(Value::as_str);
+        let identity_valid = match old_identity {
+            Some(old) => new_identity == Some(old),
+            None => new_identity
+                .and_then(|identity| uuid::Uuid::parse_str(identity).ok())
+                .is_some_and(|identity| identity.get_version_num() == 4),
+        };
+        if !identity_valid {
+            return Err(ConnectorError::Invalid(
+                "A move must preserve an established UUID or upgrade an unproven legacy identity."
+                    .into(),
+            ));
+        }
+        let source_key = get_pipe_key("mrsm", "pipeline", source.location_key());
+        let source_parameters = get_pipe_parameters_key("mrsm", "pipeline", source.location_key());
+        let Some(raw) = self.get(&source_parameters).await? else {
+            return Ok(false);
+        };
+        if Value::from_json_str(&raw)
+            .ok()
+            .and_then(|value| value.as_map().cloned())
+            .as_ref()
+            != Some(old_parameters)
+        {
+            return Ok(false);
+        }
+        let row = |name: &str| -> Doc {
+            [
+                ("pipe_id".into(), KValue::Int(identity)),
+                ("connector_keys".into(), KValue::Str("mrsm".into())),
+                ("metric_key".into(), KValue::Str("pipeline".into())),
+                ("location_key".into(), KValue::Str(name.into())),
+            ]
+            .into_iter()
+            .collect()
+        };
+        let operation = crate::backend::RegistrationMove {
+            source: source_key,
+            source_parameters,
+            destination: get_pipe_key("mrsm", "pipeline", Some(new_name)),
+            destination_parameters: get_pipe_parameters_key("mrsm", "pipeline", Some(new_name)),
+            rows: quote_table(PIPES_TABLE),
+            identity: identity.to_string(),
+            expected_parameters: raw,
+            parameters: dumps_parameters(parameters),
+            old_member: dumps_doc(&row(source.location_key().expect("checked")), true),
+            new_member: dumps_doc(&row(new_name), true),
+            score: identity as f64,
+        };
+        match self.backend.move_registration(&operation).await {
+            Ok(moved) => Ok(moved),
+            Err(error) => {
+                // A lost acknowledgment may follow a committed atomic move. Observe it;
+                // never recreate either registration as a recovery step.
+                if self
+                    .backend
+                    .get(&operation.source)
+                    .await
+                    .ok()
+                    .flatten()
+                    .is_none()
+                    && self
+                        .backend
+                        .get(&operation.destination)
+                        .await
+                        .ok()
+                        .flatten()
+                        .as_deref()
+                        == Some(operation.identity.as_str())
+                    && self
+                        .backend
+                        .get(&operation.destination_parameters)
+                        .await
+                        .ok()
+                        .flatten()
+                        .as_deref()
+                        == Some(operation.parameters.as_str())
+                {
+                    Ok(true)
+                } else {
+                    Err(be(error))
+                }
+            }
+        }
+    }
+
     /// The persisted parameters of a pipe (`None` if it is not registered).
     pub async fn get_pipe_parameters(&self, pipe: &Pipe) -> ConnectorResult<Option<Map>> {
         if self.get_pipe_id(pipe).await?.is_none() {

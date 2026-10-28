@@ -48,7 +48,9 @@ def installed_resources(python, expected_version, scratch_parent):
         (root / 'plugins').mkdir()
         env = {
             key: value for key, value in os.environ.items()
-            if not key.startswith('MRSM_') and key not in ('PYTHONPATH', 'PYTHONHOME', 'TMUX', 'TMUX_PANE')
+            if not key.startswith('MRSM_') and key not in (
+                'PYTHONPATH', 'PYTHONHOME', 'PYTHONNOUSERSITE', 'TMUX', 'TMUX_PANE',
+            )
         }
         env.update(MRSM_ROOT_DIR=str(root), MRSM_PLUGINS_DIR=str(root / 'plugins'),
                    MRSM_NO_AUTO_INSTALL='1', MRSM_NO_UPDATE_CHECK='1')

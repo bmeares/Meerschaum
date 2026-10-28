@@ -10,7 +10,9 @@ use std::time::{Duration, Instant};
 use indexmap::IndexMap;
 use meerschaum_connector::traits::async_trait;
 
-use crate::backend::{BackendError, BackendResult, ScoreBound, ValkeyBackend, WriteOp};
+use crate::backend::{
+    BackendError, BackendResult, RegistrationMove, ScoreBound, ValkeyBackend, WriteOp,
+};
 
 #[derive(Debug, Clone)]
 enum Entry {
@@ -205,6 +207,56 @@ fn zcmp(a: &(String, f64), b: &(String, f64)) -> std::cmp::Ordering {
 
 #[async_trait]
 impl ValkeyBackend for MemoryBackend {
+    async fn move_registration(&self, op: &RegistrationMove) -> BackendResult<bool> {
+        for (command, key) in [
+            ("GET", &op.source),
+            ("GET", &op.source_parameters),
+            ("SET", &op.destination),
+            ("SET", &op.destination_parameters),
+            ("ZADD", &op.rows),
+            ("ZREM", &op.rows),
+            ("DEL", &op.source),
+            ("DEL", &op.source_parameters),
+        ] {
+            self.fault(command, key)?;
+        }
+        self.with(|memory| {
+            let matches = |key: &String, expected: &str| match memory.get(key) {
+                Some((Entry::Str(value), _)) => Ok(value == expected),
+                None => Ok(false),
+                _ => wrongtype(),
+            };
+            if !matches(&op.source, &op.identity)?
+                || !matches(&op.source_parameters, &op.expected_parameters)?
+                || memory.contains_key(&op.destination)
+                || memory.contains_key(&op.destination_parameters)
+            {
+                return Ok(false);
+            }
+            let rows = match memory.get_mut(&op.rows) {
+                Some((Entry::ZSet(rows), _)) => rows,
+                None => return Ok(false),
+                _ => return wrongtype(),
+            };
+            if !rows.iter().any(|(member, _)| member == &op.old_member) {
+                return Ok(false);
+            }
+            rows.retain(|(member, _)| member != &op.old_member && member != &op.new_member);
+            rows.push((op.new_member.clone(), op.score));
+            rows.sort_by(zcmp);
+            memory.insert(
+                op.destination.clone(),
+                (Entry::Str(op.identity.clone()), None),
+            );
+            memory.insert(
+                op.destination_parameters.clone(),
+                (Entry::Str(op.parameters.clone()), None),
+            );
+            memory.remove(&op.source);
+            memory.remove(&op.source_parameters);
+            Ok(true)
+        })
+    }
     async fn ping(&self) -> BackendResult<bool> {
         Ok(true)
     }

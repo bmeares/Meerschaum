@@ -128,7 +128,7 @@ pub struct PipeRecord {
     /// The registered parameters (the ordered core value).
     #[serde(default)]
     pub parameters: Map,
-    /// The instance-local pipe ID, when the instance returned one. Informational only.
+    /// The instance-local pipe ID returned with this immutable metadata snapshot.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pipe_id: Option<Value>,
     /// Whether the pipe's connector is a stream source (`IS_STREAMING`, §5.6). The caller
@@ -179,12 +179,18 @@ impl PipeRecord {
 
     /// Construct the core [`Pipe`] (no I/O).
     pub fn to_pipe(&self, defaults: &PipeDefaults) -> Result<Pipe, PipeError> {
-        Pipe::builder(&self.connector_keys, &self.metric_key)
+        let pipe = Pipe::builder(&self.connector_keys, &self.metric_key)
             .location(self.location_key.as_deref())
             .instance(&self.instance_keys)
             .parameters(self.parameters.clone())
             .defaults(defaults.clone())
-            .build()
+            .build()?;
+        pipe.set_registration_id(self.pipe_id.as_ref().and_then(|id| match id {
+            Value::Int(id) => Some(id.to_string()),
+            Value::Str(id) => Some(id.clone()),
+            _ => None,
+        }));
+        Ok(pipe)
     }
 
     /// Parse the return value of `fetch_pipes_keys` from one instance.

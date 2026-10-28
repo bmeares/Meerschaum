@@ -122,6 +122,13 @@ def _read(name, instance=None):
     pipe = registration(name, instance)
     if pipe.get_id() is None:
         raise ValueError(f"Pipeline '{name}' does not exist on '{pipe.instance_keys}'.")
+    if pipe.instance_connector.type == 'api':
+        attributes = pipe.instance_connector.get_pipe_attributes(pipe)
+        parameters = attributes.get('parameters', {}) if isinstance(attributes, dict) else {}
+        definition = parameters.get('pipeline') if isinstance(parameters, dict) else None
+        if not isinstance(definition, dict):
+            raise ValueError(f"Pipeline '{name}' does not exist on '{pipe.instance_keys}'.")
+        return _normalize(definition, name, pipe.instance_keys)
     return _normalize(dict(pipe.get_parameters(apply_symlinks=False)['pipeline']), name, pipe.instance_keys)
 
 
@@ -141,6 +148,19 @@ def _write(definition, instance=None, create=False, registration_parameters=None
     success, message = pipe.register() if create else pipe.edit(interactive=False)
     if not success:
         raise ValueError(message)
+    if pipe.instance_connector.type == 'api':
+        try:
+            attributes = pipe.instance_connector.get_pipe_attributes(pipe)
+            parameters = attributes.get('parameters', {}) if isinstance(attributes, dict) else {}
+            authoritative = parameters.get('pipeline') if isinstance(parameters, dict) else None
+        except Exception:
+            authoritative = None
+        identity = authoritative.get('id') if isinstance(authoritative, dict) else None
+        if not isinstance(identity, str) or not identity or identity.startswith('legacy:'):
+            unproven = deepcopy(definition)
+            unproven.pop('id', None)
+            return _normalize(unproven, definition['name'], pipe.instance_keys)
+        return _normalize(authoritative, definition['name'], pipe.instance_keys)
     return definition
 
 
@@ -345,11 +365,25 @@ def apply_pipeline_analysis(proposal, instance=None):
     if current['errors']:
         return {'success': False, 'stale': False, 'message': 'Resolve analysis errors before applying tags.', 'results': []}
     definition = current['definition']
+    if (definition['id'].startswith('legacy:')
+        and registration(definition['name'], instance).instance_connector.type == 'api'):
+        # Finish cleanup while the old identity and recovery list are still persisted.
+        # The API edit upgrades the identity; additions then belong to its returned UUID.
+        errors = _remove_owned_tags(definition)
+        if errors:
+            return {'success': False, 'stale': False,
+                    'message': 'Tag cleanup incomplete; identity retained. ' + '; '.join(errors),
+                    'results': []}
+        definition['tag_associations'] = []
+        current['changes'] = [
+            {'pipe_ref': row['pipe_ref'], 'tag': f"pipeline-{definition['name']}", 'action': 'add'}
+            for row in current['resolved']
+        ]
     # Persist recovery bookkeeping before writes so interruption cannot orphan ownership.
     associations = {(a['pipe_ref'], a['tag']) for a in definition['tag_associations']}
     associations.update((row['pipe_ref'], row['tag']) for row in current['changes'])
     definition['tag_associations'] = [{'pipe_ref': ref, 'tag': tag} for ref, tag in sorted(associations)]
-    _write(definition, instance)
+    definition = _write(definition, instance)
     results = []
     for row in current['changes']:
         try:
@@ -364,7 +398,7 @@ def apply_pipeline_analysis(proposal, instance=None):
     if latest['revision'] != definition['revision']:
         return {'success': False, 'stale': True, 'message': 'Definition changed while applying tags; analyze again.', 'results': results}
     latest['tag_associations'] = [{'pipe_ref': ref, 'tag': tag} for ref, tag in sorted(associations)]
-    _write(latest, instance)
+    latest = _write(latest, instance)
     success = all(row['success'] for row in results)
     return {'success': success, 'stale': False, 'message': 'Membership tags updated.' if success else 'Some tag writes failed; analyze again to retry.', 'results': results}
 
@@ -413,9 +447,9 @@ def rename_pipeline(name, new_name, instance=None, expected_revision=None):
         raise ValueError('Pipeline revision changed; reload before renaming.')
     if name == new_name:
         return old
+    source = registration(name, instance)
     if registration(new_name, instance).get_id() is not None:
         raise ValueError(f"Pipeline '{new_name}' already exists.")
-    source = registration(name, instance)
     parameters = source.get_parameters(apply_symlinks=False, refresh=True) or {}
     from meerschaum.core.access import get_locks, lock_refusal
     for operation in ('edit', 'delete_and_drop'):
@@ -428,8 +462,25 @@ def rename_pipeline(name, new_name, instance=None, expected_revision=None):
     errors = _remove_owned_tags(old)
     if errors:
         raise ValueError('Tag cleanup incomplete; original definition retained. ' + '; '.join(errors))
+    if source.instance_connector.type == 'api':
+        conn = source.instance_connector
+        old = _write({**old, 'tag_associations': []}, conn)
+        expected_id = old.get('id')
+        response = conn.post(
+            f'/pipelines/{name}/rename',
+            json={
+                'new_name': new_name,
+                'expected_revision': old['revision'],
+                'expected_id': expected_id if expected_id and not expected_id.startswith('legacy:') else None,
+            },
+            params={'instance_keys': conn.instance_keys} if conn.instance_keys else {},
+        )
+        body = response.json()
+        if not response.ok or not isinstance(body, dict) or body.get('success') is not True:
+            raise ValueError(body.get('message', response.text) if isinstance(body, dict) else response.text)
+        return _read(new_name, conn)
     new = {**old, 'name': new_name, 'revision': old['revision'] + 1, 'tag_associations': []}
-    _write(new, instance, create=True, registration_parameters=parameters)
+    new = _write(new, instance, create=True, registration_parameters=parameters)
     success, message = registration(name, instance).delete()
     if not success:
         raise ValueError(f'New definition saved, but old definition could not be removed: {message}')

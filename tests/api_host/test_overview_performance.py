@@ -62,7 +62,14 @@ private = mrsm.Pipe('fixture', 'other-team', instance=conn,
                     parameters={'access': {'visibility': 'team', 'team': 'red', 'owner': 'bob'}})
 assert public.register()[0] and private.register()[0]
 refs = [f'{conn}|fixture|visible|None', f'{conn}|fixture|other-team|None']
-engine._call = lambda *a: [{'run': {'run_id': 'fixture-run', 'targets': refs}, 'status': 'succeeded'}]
+# This policy fixture supplies already-captured evidence through the private native RPC.
+# The retained-history lifecycle regression exercises real persisted generation checks.
+captured_generations = {'fixture-run': True}
+engine._call = lambda name, request: (
+    {run_id: captured_generations.get(run_id, False) for run_id in request['run_ids']}
+    if name == 'engine_run_generations'
+    else [{'run': {'run_id': 'fixture-run', 'targets': refs}, 'status': 'succeeded'}]
+)
 def no_full_scan(*a, **kw):
     raise AssertionError('Run summary walked every registered pipe')
 access.visible_refs = no_full_scan
@@ -77,12 +84,12 @@ alice = access.make_viewer('alice', role='viewer')
 first = engine.get_runs(conn, viewer=alice)
 assert len(first) == 1 and 'other-team' not in json.dumps(first), first
 assert len(filters) == 1, filters
+bob = access.make_viewer('bob', role='viewer', teams={'red': 'member'})
+assert 'other-team' in json.dumps(engine.get_runs(conn, viewer=bob))
 public.parameters['access'] = {'visibility': 'private', 'owner': 'bob'}
 assert public.edit(interactive=False)[0]
 # The same viewer immediately loses the run; no filtered result is reused from a TTL cache.
 assert engine.get_runs(conn, viewer=alice) == []
-bob = access.make_viewer('bob', role='viewer', teams={'red': 'member'})
-assert 'other-team' in json.dumps(engine.get_runs(conn, viewer=bob))
 assert engine.get_runs(conn, viewer=access.make_viewer('nobody', permissions=[])) == []
 '''))
 

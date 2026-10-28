@@ -551,6 +551,7 @@ where
         }
         outcome.run_id = Some(self.emitter.run_id().to_string());
         if let Some(row) = self.rows.get(r) {
+            outcome = outcome.with_registration(row.registration_id.clone());
             outcome.attempts = row.attempts.max(1);
             outcome.chunks = row.num_chunks as u64;
             if let (Some(started), Some(finished)) = (row.started, row.finished) {
@@ -575,9 +576,6 @@ where
         );
         if let Some(row) = self.rows.get_mut(r) {
             row.status = status;
-            row.registration_id = self.ctx.graph.node(r).and_then(|node| {
-                meerschaum_connector::sync_metrics::observed_registration(&node.pipe)
-            });
             if message.is_some() {
                 row.message = message;
             }

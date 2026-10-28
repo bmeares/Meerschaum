@@ -303,6 +303,193 @@ impl SqlConnector {
         })
     }
 
+    /// Move one live Pipeline registration with a single conditional UPDATE. The unique
+    /// location key serializes competing destinations; the original ID and raw parameters
+    /// prevent a stale read from moving a changed or recreated source.
+    pub async fn move_pipeline_registration(
+        &self,
+        source: &Pipe,
+        new_name: &str,
+        expected: &Map,
+        parameters: &Map,
+    ) -> ConnectorResult<bool> {
+        let Some(old_name) = source.location_key() else {
+            return Ok(false);
+        };
+        if source.temporary
+            || source.connector_keys() != "mrsm"
+            || source.metric_key() != "pipeline"
+            || new_name.is_empty()
+            || new_name == old_name
+        {
+            return Ok(false);
+        }
+        if let Some(refused) = self.protected_refusal(source, "rename") {
+            return Err(be(refused.message));
+        }
+        let (Some(identity), Some(Value::Map(original))) = (
+            expected.get("pipe_id").and_then(Value::as_i64),
+            expected.get("parameters"),
+        ) else {
+            return Ok(false);
+        };
+        let old_identity = original.get("pipeline").and_then(|value| value.get("id"));
+        let new_identity = parameters.get("pipeline").and_then(|value| value.get("id"));
+        let upgrading_legacy = old_identity
+            .and_then(Value::as_str)
+            .is_none_or(|id| id.is_empty() || id.starts_with("legacy:"))
+            && new_identity
+                .and_then(Value::as_str)
+                .and_then(|id| uuid::Uuid::parse_str(id).ok())
+                .is_some_and(|id| id.get_version_num() == 4);
+        if expected.get("connector_keys").and_then(Value::as_str) != Some("mrsm")
+            || expected.get("metric_key").and_then(Value::as_str) != Some("pipeline")
+            || expected.get("location_key").and_then(Value::as_str) != Some(old_name)
+            || parameters.get("access") != original.get("access")
+            || parameters.get("locks") != original.get("locks")
+            || (new_identity != old_identity && !upgrading_legacy)
+            || parameters
+                .get("pipeline")
+                .and_then(|value| value.get("name"))
+                .and_then(Value::as_str)
+                != Some(new_name)
+        {
+            return Ok(false);
+        }
+        let locks = meerschaum_core::access::Locks::from_parameters(original);
+        for operation in [
+            meerschaum_core::access::LockOp::EditParameters,
+            meerschaum_core::access::LockOp::Delete,
+        ] {
+            if let Some(refusal) = meerschaum_core::access::lock_refusal(source, &locks, operation)
+            {
+                return Err(be(refusal));
+            }
+        }
+        if !self.ensure_instance_tables(false).await {
+            return Ok(false);
+        }
+        // Pipelines always have a non-NULL location, covered by the registry's unique key
+        // on every flavor. Never fall back to a check-then-register implementation.
+        if !self
+            .unique_key_exists(&super::unique_keys::PIPES_KEY)
+            .await?
+        {
+            return Err(be(
+                "Atomic Pipeline rename requires the unique registration key.",
+            ));
+        }
+        let destination = Pipe::builder("mrsm", "pipeline")
+            .location(Some(new_name))
+            .instance(source.instance_keys())
+            .build()
+            .map_err(be)?;
+        if self
+            .get_pipe_id(&destination)
+            .await?
+            .is_some_and(|id| id != identity)
+        {
+            return Ok(false);
+        }
+        let table = self.instance_table_name("mrsm_pipes");
+        let flavor = self.flavor;
+        let p = |n| placeholder(flavor, n);
+        let stored_parameters = match flavor {
+            Flavor::Mysql | Flavor::Mariadb => "CAST(parameters AS CHAR)",
+            Flavor::Duckdb => "CAST(parameters AS VARCHAR)",
+            _ => "parameters",
+        };
+        let read = format!(
+            "SELECT pipe_id, {stored_parameters} AS parameters FROM {table} WHERE pipe_id={} \
+             AND connector_keys={} AND metric_key={} AND location_key={}",
+            p(1),
+            p(2),
+            p(3),
+            p(4)
+        );
+        let frame = self
+            .read_params_catalog(
+                &read,
+                &[
+                    SqlParam::Int(identity),
+                    SqlParam::Text("mrsm".into()),
+                    SqlParam::Text("pipeline".into()),
+                    SqlParam::Text(old_name.into()),
+                ],
+            )
+            .await
+            .map_err(be)?;
+        let docs = frame_docs(&frame);
+        let Some(row) = docs.first() else {
+            return Ok(false);
+        };
+        if kv_int(row.get("pipe_id")) != Some(identity)
+            || parse_parameters(row.get("parameters")) != *original
+        {
+            return Ok(false);
+        }
+        // Keep the exact text read from legacy writers (whitespace/Unicode formatting may
+        // differ). Binary comparisons prevent a database's text collation hiding ACL changes.
+        let (old_parameters, unchanged) = if flavor.is_json_flavor() {
+            (self.json_param(original), format!("parameters={}", p(7)))
+        } else {
+            let Some(KValue::Str(raw)) = row.get("parameters") else {
+                return Ok(false);
+            };
+            let equality = match flavor {
+                Flavor::Mysql | Flavor::Mariadb => {
+                    format!("CAST(parameters AS BINARY)=CAST({} AS BINARY)", p(7))
+                }
+                Flavor::Mssql => format!(
+                    "CONVERT(VARBINARY(MAX), CONVERT(NVARCHAR(MAX), parameters))=\
+                     CONVERT(VARBINARY(MAX), CONVERT(NVARCHAR(MAX), {}))",
+                    p(7)
+                ),
+                Flavor::Oracle => format!("DBMS_LOB.COMPARE(parameters, TO_CLOB({}))=0", p(7)),
+                Flavor::Duckdb => format!("encode(parameters)=encode({})", p(7)),
+                _ => format!("CAST(parameters AS BLOB)=CAST({} AS BLOB)", p(7)),
+            };
+            (SqlParam::Text(raw.clone()), equality)
+        };
+        let update = format!(
+            "UPDATE {table} SET location_key={}, parameters={} WHERE pipe_id={} \
+             AND connector_keys={} AND metric_key={} AND location_key={} AND {unchanged}",
+            p(1),
+            p(2),
+            p(3),
+            p(4),
+            p(5),
+            p(6)
+        );
+        let values = [
+            SqlParam::Text(new_name.into()),
+            self.json_param(parameters),
+            SqlParam::Int(identity),
+            SqlParam::Text("mrsm".into()),
+            SqlParam::Text("pipeline".into()),
+            SqlParam::Text(old_name.into()),
+            old_parameters,
+        ];
+        self.log(&update);
+        match self.driver.exec_with(&update, &values).await {
+            Ok(1) => {
+                METADATA_WRITES.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+                source.set_registration_id(None);
+                Ok(true)
+            }
+            Ok(_) => Ok(false),
+            Err(error) => {
+                // A concurrent destination won the unique key. Other database failures
+                // remain errors, never a successful move or an implicit new registration.
+                if self.get_pipe_id(&destination).await?.is_some() {
+                    Ok(false)
+                } else {
+                    Err(be(error))
+                }
+            }
+        }
+    }
+
     /// `delete_pipe(pipe)`: delete the pipe's registration (the table is dropped by
     /// `Pipe.delete()` beforehand).
     pub async fn delete_pipe(&self, pipe: &Pipe) -> SuccessTuple {

@@ -184,9 +184,11 @@ async fn create_job(ctx: Ctx, Path(name): Path<String>, body: Body) -> ApiResult
         return Err(ApiError::missing(&["body"]));
     };
     // A new job runs an action on the server: the rule of `/actions`.
-    let allowed = is_user_allowed_to_execute(&ctx.state, access.auth.as_ref()).await;
-    if !allowed.success {
-        return Ok(tuple_response(&allowed));
+    if !access.no_auth && !access.full_admin() {
+        let allowed = is_user_allowed_to_execute(&ctx.state, access.auth.as_ref()).await;
+        if !allowed.success {
+            return Ok(tuple_response(&allowed));
+        }
     }
     let strs = |v: &Json| -> Option<Vec<String>> {
         v.as_array().map(|a| {
@@ -228,7 +230,7 @@ async fn create_job(ctx: Ctx, Path(name): Path<String>, body: Body) -> ApiResult
     };
     // A caller who is not an administrator runs what the console offers, on the pipes it may
     // change (rc15, P3: the checks of `POST /execute`, `crate::execute_access`).
-    if !access.no_auth && !access.is_admin() {
+    if !access.no_auth && !access.full_admin() {
         let cleaned = clean_sysargs(&sysargs);
         if let Err(message) = crate::execute_policy::check_non_admin(&cleaned) {
             return Ok(tuple_response(&SuccessTuple::fail(message)));

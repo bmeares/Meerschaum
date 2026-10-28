@@ -137,15 +137,32 @@ impl ConfigState {
         std::fs::create_dir_all(directory).map_err(|error| error.to_string())?;
         for (name, source) in GRAFANA_DASHBOARDS {
             let path = directory.join(name);
-            if let Ok(existing) = std::fs::read_to_string(&path) {
-                if existing == *source {
-                    continue;
+            if path.is_symlink() {
+                self.warn(format!(
+                    "Keeping customized Grafana dashboard '{}': it is a symlink.",
+                    path.display()
+                ));
+                continue;
+            }
+            match std::fs::read_to_string(&path) {
+                Ok(existing) => {
+                    if existing == *source {
+                        continue;
+                    }
+                    let old = serde_json::from_str::<serde_json::Value>(&existing);
+                    let new: serde_json::Value =
+                        serde_json::from_str(source).map_err(|error| error.to_string())?;
+                    if old.as_ref().ok().and_then(|value| value.get("uid")) != new.get("uid") {
+                        self.warn(format!("Keeping customized Grafana dashboard '{}': its UID differs from the built-in.", path.display()));
+                        continue;
+                    }
                 }
-                let old = serde_json::from_str::<serde_json::Value>(&existing);
-                let new: serde_json::Value =
-                    serde_json::from_str(source).map_err(|error| error.to_string())?;
-                if old.as_ref().ok().and_then(|value| value.get("uid")) != new.get("uid") {
-                    self.warn(format!("Keeping customized Grafana dashboard '{}': its UID differs from the built-in.", path.display()));
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => {
+                    self.warn(format!(
+                        "Keeping unreadable Grafana dashboard '{}': {error}.",
+                        path.display()
+                    ));
                     continue;
                 }
             }

@@ -122,6 +122,16 @@ impl Connector for ValkeyConnector {
 
 #[async_trait]
 impl InstanceConnector for ValkeyConnector {
+    async fn move_pipeline_registration(
+        &self,
+        source: &Pipe,
+        new_name: &str,
+        expected: &Map,
+        parameters: &Map,
+    ) -> ConnectorResult<bool> {
+        ValkeyConnector::move_pipeline_registration(self, source, new_name, expected, parameters)
+            .await
+    }
     async fn register_pipe(&self, pipe: &Pipe) -> SuccessTuple {
         ValkeyConnector::register_pipe(self, pipe).await
     }

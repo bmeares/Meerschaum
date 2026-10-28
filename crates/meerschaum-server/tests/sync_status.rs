@@ -260,6 +260,12 @@ async fn a_client_records_its_own_outcomes_once() {
     let metric = unique("client");
     let (client_pipe, server_pipe) = pipes(&served, &metric);
     assert!(served.client.register_pipe(&client_pipe).await.success);
+    // Native syncs capture this atomic registration snapshot before touching their source.
+    let attributes = InstanceConnector::get_pipe_attributes(&served.client, &client_pipe)
+        .await
+        .unwrap();
+    let registration = meerschaum_connector::sync_status::registration_from_attributes(&attributes);
+    assert!(registration.is_some());
 
     // A client-side failure (a source the server never hears about) reaches the server.
     let failed = SyncOutcome::new(
@@ -267,7 +273,8 @@ async fn a_client_records_its_own_outcomes_once() {
         "The source is down.",
         SyncSource::Job,
         Some("weather".into()),
-    );
+    )
+    .with_registration(registration.clone());
     let stored = served
         .client
         .record_sync_status(&client_pipe, std::slice::from_ref(&failed))
@@ -312,7 +319,8 @@ async fn a_client_records_its_own_outcomes_once() {
 
     // The client's own success resets the count on the server.
     let ok = SyncOutcome::new(true, "Inserted 2, updated 0 rows.", SyncSource::Cli, None)
-        .with_counts(2, 0, 0);
+        .with_counts(2, 0, 0)
+        .with_registration(registration);
     let stored = served
         .client
         .record_sync_status(&client_pipe, &[ok])

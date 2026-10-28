@@ -65,6 +65,7 @@ pub fn routes(app: Router<AppState>, _cfg: &ServerConfig) -> Router<AppState> {
         .route("/pipelines/{name}/sync", post(sync))
         .route("/pipelines/{name}/register", post(register))
         .route("/pipelines/{name}/edit", axum::routing::patch(edit))
+        .route("/pipelines/{name}/rename", post(rename))
         .route("/pipelines/{name}/delete", axum::routing::delete(delete))
         .route("/pipelines/{name}/id", get(id))
         .route("/pipelines/{name}/attributes", get(attributes))
@@ -162,6 +163,23 @@ async fn parameters(body: Body, name: &str) -> Result<Map, ApiError> {
         ));
     }
     Ok(to_core(&body).to_map())
+}
+
+fn canonicalize_client_members(ctx: &Ctx, registry: &str, parameters: &mut Map) {
+    if let Some(Value::Map(definition)) = parameters.get_mut("pipeline") {
+        let alias = ctx
+            .headers
+            .get(meerschaum_connector_api::engine_pipes::CLIENT_INSTANCE_HEADER)
+            .and_then(|value| value.to_str().ok())
+            .filter(|alias| alias.starts_with("api:") && !alias.contains('|'));
+        if let Some(alias) = alias {
+            meerschaum_connector_api::engine_pipes::rebind_pipeline_definition(
+                definition, alias, registry,
+            );
+        } else {
+            definition.insert("registry".into(), Value::Str(registry.to_string()));
+        }
+    }
 }
 
 /// The saved definition of `name` (`parameters.pipeline`), `None` when it is not registered.
@@ -287,6 +305,8 @@ pub async fn visible_definition(filter: &mut RefFilter, mut definition: Json) ->
         }
     }
     if let Some(o) = definition.as_object_mut() {
+        // The response declares its actual served registry, never a user-supplied alias.
+        o.insert("registry".into(), json!(filter.default_instance()));
         if o.contains_key("targets") {
             o.insert("targets".into(), Json::Array(kept));
         }
@@ -419,25 +439,46 @@ async fn keys(ctx: Ctx) -> ApiResult {
             .and_then(|value| value.as_map().cloned()),
     };
     let keys = conn
-        .fetch_pipes_keys(&query)
+        .registered_pipes(&query)
         .await
         .map_err(|e| failed("fetch_pipes_keys", e))?;
     let mut rows: Vec<Json> = Vec::new();
-    for row in keys.entries() {
-        if let Some(name) = &row.location_key
-            && !caller.is_admin()
-            && !registration_parameters(&ctx.state, &conn, name)
-                .await?
-                .is_none_or(|p| caller.can_see(&p))
-        {
+    let mut dictionary = serde_json::Map::new();
+    let mut as_dict = ctx.query.bool("as_dict", false)?;
+    let mut filter = RefFilter::new(&ctx.state, &caller, &conn.connector_keys());
+    for (identity, mut row) in keys {
+        let mut parameters = match row.extra {
+            Some(Value::Map(parameters)) => parameters,
+            Some(Value::Str(text)) => match Value::from_json_str(&text) {
+                Ok(Value::Map(parameters)) => parameters,
+                _ => continue,
+            },
+            _ => continue,
+        };
+        if !caller.can_see(&parameters) {
             continue;
         }
-        rows.push(from_core(&Value::List(row.to_list())));
+        if let Some(definition) = parameters.get("pipeline") {
+            let visible = visible_definition(&mut filter, from_core(definition)).await;
+            parameters.insert("pipeline".into(), to_core(&visible));
+        }
+        row.extra = Some(Value::Map(parameters));
+        let value = from_core(&Value::List(row.to_list()));
+        rows.push(value.clone());
+        if let Some(identity) = identity {
+            dictionary.insert(identity.to_string(), value);
+        } else {
+            as_dict = false;
+        }
     }
     Ok(envelope::ok_with(
         format!("Found {}.", plural(rows.len(), "Pipeline", "Pipelines")),
         "keys",
-        json!(rows),
+        if as_dict {
+            Json::Object(dictionary)
+        } else {
+            json!(rows)
+        },
     ))
 }
 
@@ -852,6 +893,56 @@ pub struct StartedSync {
     pub message: String,
 }
 
+async fn launch_reserved_run(
+    state: AppState,
+    principal: Option<Principal>,
+    conn: Arc<dyn InstanceConnector>,
+    run_id: String,
+    job: String,
+    sysargs: Vec<String>,
+    metadata: Json,
+) -> Result<meerschaum_core::SuccessTuple, ApiError> {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
+    let unavailable = || ApiError::new(503, "Timed out reserving the Pipeline run.");
+    let store = store_of(&state, &conn);
+    let resource = format!("{}|mrsm|pipeline_launch|{run_id}", conn.connector_keys());
+    let holder = uuid::Uuid::new_v4().to_string();
+    if !tokio::time::timeout_at(
+        deadline,
+        store.acquire_lease(&resource, &holder, Duration::from_secs(65)),
+    )
+    .await
+    .map_err(|_| unavailable())?
+    {
+        return Err(ApiError::new(
+            409,
+            "The Pipeline run ID is already reserved.",
+        ));
+    }
+    let result = tokio::time::timeout_at(deadline, async {
+        let existing = store
+            .get_runs(&crate::backends::RunsFilter {
+                run_id: Some(run_id),
+                limit: Some(1),
+                ..Default::default()
+            })
+            .await
+            .map_err(crate::engine_stream::api_error)?;
+        if !existing.is_empty() || state.jobs.exists(&job).await {
+            return Err(ApiError::new(409, "The Pipeline run ID already exists."));
+        }
+        super::execute::start_execution(&state, principal.as_ref(), &job, &sysargs, metadata).await
+    })
+    .await
+    .map_err(|_| unavailable());
+    let _ = tokio::time::timeout(
+        Duration::from_secs(3),
+        store.release_lease(&resource, &holder),
+    )
+    .await;
+    result?
+}
+
 /// Start a run of the saved Pipeline `name` (on the registry `conn`) as a background job, the
 /// way the console does (`sync pipelines NAME -i REGISTRY --run-id RUN_ID`, a temporary
 /// execution owned by the caller). `POST /pipelines/{name}/sync` and the MCP `sync_pipeline`
@@ -905,7 +996,16 @@ pub async fn start_sync(
             sysargs.push(value.clone());
         }
     }
-    let job = super::execute::new_execution_name();
+    // Job metadata is the durable pre-header reservation. Its deterministic name plus
+    // the launch lease keeps two requests/workers from accepting the same run ID.
+    use sha2::Digest;
+    let digest = sha2::Sha256::digest(format!("{registry}|{run_id}"));
+    let suffix: String = digest
+        .iter()
+        .take(12)
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    let job = format!("execute-{suffix}");
     let metadata = json!({
         "origin": "api_pipeline_sync",
         "run_id": run_id,
@@ -916,8 +1016,19 @@ pub async fn start_sync(
             "revision": definition.get("revision"),
         },
     });
-    let started =
-        super::execute::start_execution(state, principal, &job, &sysargs, metadata).await?;
+    // Once accepted, finish the bounded launch even if its HTTP request is cancelled.
+    // No provisional running history is written: SSE waits for the runner's trusted header.
+    let started = tokio::spawn(launch_reserved_run(
+        state.clone(),
+        principal.cloned(),
+        conn.clone(),
+        run_id.clone(),
+        job.clone(),
+        sysargs,
+        metadata,
+    ))
+    .await
+    .map_err(|_| ApiError::new(503, "The Pipeline launch was interrupted."))??;
     if !started.success {
         return Err(ApiError::new(500, started.message));
     }
@@ -1012,14 +1123,20 @@ async fn check_new_members(
 }
 
 async fn register(ctx: Ctx, Path(name): Path<String>, body: Body) -> ApiResult {
-    let caller = access::require(&ctx.state, &ctx.headers, &["pipes:register"]).await?;
+    let caller = access::require_fresh(&ctx.state, &ctx.headers, &["pipes:register"]).await?;
     if !ctx.state.config.registration_pipes {
         return Err(ApiError::new(403, "Pipe registration is disabled."));
     }
     let conn = connector(&ctx)?;
+    access::guard::check_connector_teams(&ctx.state, &caller, &conn.connector_keys())?;
     let mut pipe = metadata(&ctx, &conn, &name)?;
-    let requested = parameters(body, &name).await?;
+    let mut requested = parameters(body, &name).await?;
     let registry = conn.connector_keys();
+    canonicalize_client_members(&ctx, &registry, &mut requested);
+    if let Some(Value::Map(definition)) = requested.get_mut("pipeline") {
+        definition.insert("id".into(), Value::Str(uuid::Uuid::new_v4().to_string()));
+        definition.insert("name".into(), Value::Str(name.clone()));
+    }
     check_new_members(
         &mut RefFilter::new(&ctx.state, &caller, &registry),
         requested.get("pipeline"),
@@ -1044,8 +1161,9 @@ async fn register(ctx: Ctx, Path(name): Path<String>, body: Body) -> ApiResult {
 }
 
 async fn edit(ctx: Ctx, Path(name): Path<String>, body: Body) -> ApiResult {
-    let caller = access::require(&ctx.state, &ctx.headers, &["pipes:write"]).await?;
+    let caller = access::require_fresh(&ctx.state, &ctx.headers, &["pipes:write"]).await?;
     let conn = connector(&ctx)?;
+    access::guard::check_connector_teams(&ctx.state, &caller, &conn.connector_keys())?;
     let mut pipe = metadata(&ctx, &conn, &name)?;
     let Some(old) = registration_parameters(&ctx.state, &conn, &name).await? else {
         return Err(ApiError::new(
@@ -1068,13 +1186,35 @@ async fn edit(ctx: Ctx, Path(name): Path<String>, body: Body) -> ApiResult {
         ));
     }
     let patch = ctx.query.bool("patch", false)?;
-    let requested = parameters(body, &name).await?;
+    let mut requested = parameters(body, &name).await?;
+    canonicalize_client_members(&ctx, &conn.connector_keys(), &mut requested);
     let requested = if patch {
         meerschaum_core::value::apply_patch_maps(&old, &requested)
     } else {
         requested
     };
     let mut new = access::guard::merge_edit(&caller, &old, requested)?;
+    if let Some(Value::Map(definition)) = new.get_mut("pipeline") {
+        let identity = old
+            .get("pipeline")
+            .and_then(|pipeline| pipeline.get("id"))
+            .and_then(Value::as_str)
+            .filter(|identity| !identity.is_empty() && !identity.starts_with("legacy:"));
+        if let Some(identity) = identity {
+            if definition
+                .get("id")
+                .is_some_and(|requested| requested.as_str() != Some(identity))
+            {
+                return Err(ApiError::new(
+                    409,
+                    "A saved Pipeline identity cannot be replaced.",
+                ));
+            }
+            definition.insert("id".into(), Value::Str(identity.to_string()));
+        } else {
+            definition.insert("id".into(), Value::Str(uuid::Uuid::new_v4().to_string()));
+        }
+    }
     // Members the caller cannot see stay (it could not have meant to drop them); a new member
     // must be one it can see.
     let registry = conn.connector_keys();
@@ -1108,6 +1248,154 @@ async fn edit(ctx: Ctx, Path(name): Path<String>, body: Body) -> ApiResult {
     let res = conn.edit_pipe(&pipe, false).await;
     ctx.state.access_cache().forget_pipes();
     envelope::tuple(&res, 500)
+}
+
+#[derive(serde::Deserialize)]
+struct RenameBody {
+    new_name: String,
+    #[serde(default)]
+    expected_revision: Option<i64>,
+    #[serde(default)]
+    expected_id: Option<String>,
+}
+
+/// Transfer only a live authorized registration; old UUIDs cannot be supplied for creation.
+async fn rename(ctx: Ctx, Path(name): Path<String>, body: Body) -> ApiResult {
+    let caller = access::require_fresh(
+        &ctx.state,
+        &ctx.headers,
+        &[
+            "pipes:read",
+            "pipes:write",
+            "pipes:register",
+            "pipes:delete",
+        ],
+    )
+    .await?;
+    validate_name(&name)?;
+    if !ctx.state.config.registration_pipes {
+        return Err(ApiError::new(403, "Pipe registration is disabled."));
+    }
+    let request: RenameBody = serde_json::from_slice(&body_bytes(body).await?).map_err(|_| {
+        ApiError::new(
+            400,
+            "Expected a destination name and optional source identity/revision.",
+        )
+    })?;
+    validate_name(&request.new_name)?;
+    let conn = connector(&ctx)?;
+    access::guard::check_connector_teams(&ctx.state, &caller, &conn.connector_keys())?;
+    let source = metadata(&ctx, &conn, &name)?;
+    let expected = conn
+        .get_pipe_attributes(&source)
+        .await
+        .map_err(|_| ApiError::new(503, "Cannot read Pipeline registration."))?;
+    let parameters = crate::state::parameters_of(&expected)
+        .filter(|parameters| caller.can_see(parameters))
+        .ok_or_else(|| ApiError::new(404, "Pipeline was not found."))?;
+    if !caller.can_edit(&parameters) {
+        return Err(ApiError::new(403, "You cannot rename this Pipeline."));
+    }
+    for operation in [
+        meerschaum_core::access::LockOp::EditParameters,
+        meerschaum_core::access::LockOp::DeleteAndDrop,
+    ] {
+        if let Some(refusal) =
+            meerschaum_connector::locks::refusal_of(&source, Some(&parameters), operation)
+        {
+            return Err(ApiError::new(403, refusal.message));
+        }
+    }
+    let Some(Value::Map(current)) = parameters.get("pipeline") else {
+        return Err(ApiError::new(409, "Pipeline definition is unavailable."));
+    };
+    let old_id = current.get("id").and_then(Value::as_str);
+    let established =
+        old_id.filter(|identity| !identity.is_empty() && !identity.starts_with("legacy:"));
+    if request.expected_id.as_deref().is_some_and(|identity| {
+        established.is_some_and(|current| identity != current)
+            || (established.is_none()
+                && !identity.starts_with("legacy:")
+                && old_id != Some(identity))
+    }) {
+        return Err(ApiError::new(
+            409,
+            "Pipeline identity changed; reload before renaming.",
+        ));
+    }
+    let revision = current.get("revision").and_then(Value::as_i64).unwrap_or(0);
+    if request
+        .expected_revision
+        .is_some_and(|expected| expected != revision)
+    {
+        return Err(ApiError::new(
+            409,
+            "Pipeline revision changed; reload before renaming.",
+        ));
+    }
+    let (jobs, hidden) = referencing_jobs(&ctx, &conn, &name, &caller).await;
+    if !jobs.is_empty() || hidden > 0 {
+        return Err(ApiError::new(
+            409,
+            "Remove or reassign referencing scheduled Jobs before renaming.",
+        ));
+    }
+    if request.new_name == name {
+        let visible = visible_definition(
+            &mut RefFilter::new(&ctx.state, &caller, &conn.connector_keys()),
+            from_core(&Value::Map(current.clone())),
+        )
+        .await;
+        return Ok(envelope::ok_with(
+            "Pipeline name is unchanged.",
+            "pipeline",
+            visible,
+        ));
+    }
+    let mut updated = parameters.clone();
+    let Some(Value::Map(definition)) = updated.get_mut("pipeline") else {
+        unreachable!("checked");
+    };
+    definition.insert("name".into(), Value::Str(request.new_name.clone()));
+    definition.insert("registry".into(), Value::Str(conn.connector_keys()));
+    definition.insert(
+        "revision".into(),
+        Value::Int(
+            revision
+                .checked_add(1)
+                .ok_or_else(|| ApiError::new(409, "Pipeline revision is out of range."))?,
+        ),
+    );
+    definition.insert(
+        "id".into(),
+        Value::Str(
+            established
+                .map(str::to_string)
+                .unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
+        ),
+    );
+    if !conn
+        .move_pipeline_registration(&source, &request.new_name, &expected, &updated)
+        .await
+        .map_err(|_| ApiError::new(503, "Cannot atomically rename this Pipeline."))?
+    {
+        return Err(ApiError::new(
+            409,
+            "Pipeline source changed or destination already exists.",
+        ));
+    }
+    ctx.state.access_cache().forget_pipes();
+    let definition = updated.get("pipeline").map(from_core).unwrap_or(Json::Null);
+    let visible = visible_definition(
+        &mut RefFilter::new(&ctx.state, &caller, &conn.connector_keys()),
+        definition,
+    )
+    .await;
+    Ok(envelope::ok_with(
+        "Renamed the live Pipeline registration.",
+        "pipeline",
+        visible,
+    ))
 }
 
 /// The scheduled jobs that run Pipeline `name`: the ones `caller` may see (sorted), and how many
@@ -1226,17 +1514,16 @@ async fn attributes(ctx: Ctx, Path(name): Path<String>) -> ApiResult {
     let pipe = metadata(&ctx, &conn, &name)?;
     let (definition, _) = visible_registration(&ctx.state, &caller, &conn, &name).await?;
     let mut attrs = crate::state::pipe_attributes(&conn, &pipe).await?;
-    if !caller.is_admin() {
-        // Members the caller cannot see are left out (and counted).
-        let registry = conn.connector_keys();
-        let visible = visible_definition(
-            &mut RefFilter::new(&ctx.state, &caller, &registry),
-            definition,
-        )
-        .await;
-        if let Some(Value::Map(parameters)) = attrs.get_mut("parameters") {
-            parameters.insert("pipeline".into(), crate::json::to_core(&visible));
-        }
+    // Members follow the caller's access; the declared registry is authoritative for admin
+    // transport too, so legacy user-supplied aliases never rebind a foreign member.
+    let registry = conn.connector_keys();
+    let visible = visible_definition(
+        &mut RefFilter::new(&ctx.state, &caller, &registry),
+        definition,
+    )
+    .await;
+    if let Some(Value::Map(parameters)) = attrs.get_mut("parameters") {
+        parameters.insert("pipeline".into(), crate::json::to_core(&visible));
     }
     // The jobs the caller may see by name; the others only counted, as one last entry (so a
     // client that refuses to rename a Pipeline some job runs still refuses) and in

@@ -29,6 +29,7 @@
 //! boundary); locks apply everywhere and are enforced by the core.
 
 pub mod guard;
+mod history;
 pub mod rules;
 pub mod runs;
 
@@ -507,6 +508,23 @@ pub async fn require(
     require_with_aliases(state, headers, scopes, &[]).await
 }
 
+/// Resolve a request's current identity without the identity cache, then require its scopes.
+pub async fn require_fresh(
+    state: &AppState,
+    headers: &HeaderMap,
+    scopes: &[&str],
+) -> Result<Access, ApiError> {
+    let caller = if state.config.no_auth {
+        Access::everything()
+    } else {
+        let principal = auth::load_user_or_token(state, headers).await?;
+        let granted = auth::granted_scopes(state, headers, &principal).await?;
+        access_of_fresh(state, principal, &granted).await?
+    };
+    caller.require(scopes, &[])?;
+    Ok(caller)
+}
+
 /// [`require`] with legacy spellings.
 pub async fn require_with_aliases(
     state: &AppState,
@@ -731,6 +749,10 @@ pub struct RefFilter {
     access: Access,
     default_instance: String,
     indexes: HashMap<String, Option<Arc<PipeIndex>>>,
+    pipelines: Option<HashMap<String, String>>,
+    registrations: HashMap<String, Option<HashMap<String, String>>>,
+    run_generations: HashMap<String, bool>,
+    strict_generations: bool,
     hidden_seen: bool,
     client_refs: bool,
 }
@@ -743,6 +765,10 @@ impl RefFilter {
             access: access.clone(),
             default_instance: default_instance.to_string(),
             indexes: HashMap::new(),
+            pipelines: None,
+            registrations: HashMap::new(),
+            run_generations: HashMap::new(),
+            strict_generations: false,
             hidden_seen: false,
             client_refs: false,
         }
@@ -751,6 +777,11 @@ impl RefFilter {
     /// The caller's access.
     pub fn access(&self) -> &Access {
         &self.access
+    }
+
+    /// The exact selected registry used to interpret local metadata references.
+    pub fn default_instance(&self) -> &str {
+        &self.default_instance
     }
 
     /// Engine clients record refs with their own `api:<label>` for this server. Interpret
@@ -763,6 +794,97 @@ impl RefFilter {
     /// Whether this request has encountered an inaccessible member of its run or plan.
     pub fn has_hidden(&self) -> bool {
         self.hidden_seen
+    }
+
+    /// Whole-run metadata may name saved Pipelines whose member Pipes are public.
+    /// Match every snapshot to a fresh, visible registration on this exact registry.
+    /// Missing snapshots retain the legacy per-Pipe history policy.
+    pub async fn pipeline_snapshots_visible(&mut self, selection: &serde_json::Value) -> bool {
+        if self.access.is_admin() && !self.strict_generations {
+            return true;
+        }
+        let snapshots = match selection.get("pipeline_definitions") {
+            None | Some(serde_json::Value::Null) => return true,
+            Some(serde_json::Value::Array(snapshots)) if snapshots.is_empty() => return true,
+            Some(serde_json::Value::Array(snapshots)) => snapshots,
+            _ => return false,
+        };
+        let Ok(conn) = self.state.get_api_connector(Some(&self.default_instance)) else {
+            return false;
+        };
+        if guard::check_connector_teams(&self.state, &self.access, &conn.connector_keys()).is_err()
+        {
+            return false;
+        }
+        if self.pipelines.is_none() {
+            let mut identities: HashMap<String, Option<String>> = HashMap::new();
+            let listing = conn
+                .registered_pipes(&meerschaum_connector::PipesKeysQuery {
+                    connector_keys: vec!["mrsm".into()],
+                    metric_keys: vec!["pipeline".into()],
+                    ..Default::default()
+                })
+                .await;
+            if let Ok(listing) = listing {
+                for (_, entry) in listing {
+                    let parameters = match entry.extra {
+                        Some(Value::Map(parameters)) => parameters,
+                        Some(Value::Str(text)) => match Value::from_json_str(&text) {
+                            Ok(Value::Map(parameters)) => parameters,
+                            _ => continue,
+                        },
+                        _ => continue,
+                    };
+                    let (Some(name), Some(Value::Map(definition))) =
+                        (entry.location_key, parameters.get("pipeline"))
+                    else {
+                        continue;
+                    };
+                    let identity = match definition.get("id") {
+                        // A name-only legacy identity cannot prove continuity after recreation.
+                        None => continue,
+                        Some(Value::Str(identity))
+                            if !identity.is_empty() && !identity.starts_with("legacy:") =>
+                        {
+                            identity.clone()
+                        }
+                        _ => continue,
+                    };
+                    let visible_name = self.access.can_see(&parameters).then_some(name);
+                    // A duplicate UUID is ambiguous even when its other registration is hidden.
+                    identities
+                        .entry(identity)
+                        .and_modify(|name| *name = None)
+                        .or_insert(visible_name);
+                }
+            }
+            // A failed metadata read withholds the run, never assumes public access.
+            self.pipelines = Some(
+                identities
+                    .into_iter()
+                    .filter_map(|(identity, name)| name.map(|name| (identity, name)))
+                    .collect(),
+            );
+        }
+        let visible = self.pipelines.as_ref().expect("initialized");
+        snapshots.iter().all(|snapshot| {
+            if snapshot
+                .get("id")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|identity| identity.starts_with("legacy:"))
+            {
+                return false;
+            }
+            let Some(_) = snapshot.get("name").and_then(serde_json::Value::as_str) else {
+                return false;
+            };
+            let Some(identity) = snapshot.get("id").and_then(serde_json::Value::as_str) else {
+                return false;
+            };
+            visible.contains_key(identity)
+                && meerschaum_connector::sync_metrics::snapshot_registry(snapshot)
+                    == Some(conn.connector_keys().as_str())
+        })
     }
 
     /// Whether any member of a stored engine run is visible. Raw event-table reads use this

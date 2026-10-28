@@ -10,7 +10,8 @@ use std::sync::Arc;
 use axum::http::StatusCode;
 use common::fakes::{BrokenStore, FakePlans, RecordingJobs};
 use common::{MemoryInstance, SECRET, config, login, req, send};
-use meerschaum_core::Value;
+use meerschaum_connector::InstanceConnector;
+use meerschaum_core::{Pipe, Value};
 use meerschaum_server::backends::{EngineBackend, MemoryEngine};
 use meerschaum_server::{AppState, ServerConfig};
 use serde_json::{Value as Json, json};
@@ -74,6 +75,382 @@ async fn register_pipeline(app: &axum::Router, auth: &str, name: &str, targets: 
     .await;
     assert_eq!(r.status, StatusCode::OK, "{}", r.text());
     assert!(is_envelope(&r.json(), true), "{}", r.text());
+}
+
+/// Capture a registered member before the fixture produces its run history.
+async fn captured_member(a: &App, connector: &str, metric: &str) -> (String, String) {
+    let pipe = Pipe::builder(connector, metric)
+        .instance("sql:fixture")
+        .build()
+        .unwrap();
+    assert!(a.instance.register_pipe(&pipe).await.success);
+    let attributes = a.instance.get_pipe_attributes(&pipe).await.unwrap();
+    let identity =
+        meerschaum_connector::sync_status::registration_from_attributes(&attributes).unwrap();
+    (pipe.pipe_ref(), identity)
+}
+
+#[tokio::test]
+async fn an_api_started_run_waits_for_its_trusted_header_and_rejects_run_id_collisions() {
+    let a = build(|_| {}, None);
+    let admin = login(&a.app, "admin", "pass", None).await;
+    let wes = login(&a.app, "wes", "pass", None).await;
+    let (member, registration) = captured_member(&a, "sql:b", "raw").await;
+    register_pipeline(
+        &a.app,
+        &admin,
+        "early",
+        json!(["sql:fixture|sql:b|raw|None"]),
+    )
+    .await;
+    let saved = Pipe::builder("mrsm", "pipeline")
+        .location(Some("early"))
+        .instance("sql:fixture")
+        .build()
+        .unwrap();
+    let attributes = a.instance.get_pipe_attributes(&saved).await.unwrap();
+    let pipeline_identity = attributes
+        .get("parameters")
+        .and_then(|parameters| parameters.get("pipeline"))
+        .and_then(|definition| definition.get("id"))
+        .and_then(Value::as_str)
+        .unwrap()
+        .to_string();
+    let response = send(
+        &a.app,
+        req(
+            "POST",
+            "/pipelines/early/sync",
+            Some(&wes),
+            body(json!({"run_id":"early-open"})),
+        ),
+    )
+    .await;
+    assert_eq!(response.status, StatusCode::OK, "{}", response.text());
+    let stream_url = response.json()["stream"].as_str().unwrap().to_string();
+    // Job metadata reserves the accepted ID even before the runner has persisted history.
+    assert!(
+        a.state
+            .engine
+            .get_runs(&meerschaum_server::backends::RunsFilter {
+                run_id: Some("early-open".into()),
+                ..Default::default()
+            })
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    let duplicate = send(
+        &a.app,
+        req(
+            "POST",
+            "/pipelines/early/sync",
+            Some(&wes),
+            body(json!({"run_id":"early-open"})),
+        ),
+    )
+    .await;
+    assert_eq!(
+        duplicate.status,
+        StatusCode::CONFLICT,
+        "{}",
+        duplicate.text()
+    );
+    let now = chrono::Utc::now();
+    assert!(
+        a.state
+            .engine
+            .record_events(
+                serde_json::from_value(json!([
+                    {"run_id":"early-open","created":now,"event":"run_started","payload":{}}
+                ]))
+                .unwrap()
+            )
+            .await
+            .success
+    );
+    let no_header = send(
+        &a.app,
+        req(
+            "GET",
+            "/engine/runs/early-open/events/stream",
+            Some(&wes),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(no_header.status, StatusCode::NOT_FOUND);
+    let engine = a.state.engine.clone();
+    let producer = tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        // As in the native writer, persist the immutable node snapshot before its header.
+        assert!(
+            engine
+                .record_runs(
+                    serde_json::from_value(json!([
+                        {"run_id":"early-open","pipe_ref":member,"registration_id":registration,
+                         "started":now,"finished":now,"status":"succeeded"}
+                    ]))
+                    .unwrap()
+                )
+                .await
+                .success
+        );
+        assert!(engine.record_runs(serde_json::from_value(json!([
+            {"run_id":"early-open","started":now,"status":"success","finished":now,"num_nodes":1,"targets":[member],
+             "selection":{"pipeline_definitions":[{"id":pipeline_identity,"name":"early","registry":"sql:fixture"}]}}
+        ])).unwrap()).await.success);
+        assert!(engine.record_events(serde_json::from_value(json!([
+            {"run_id":"early-open","created":now,"event":"run_finished","payload":{"success":true}}
+        ])).unwrap()).await.success);
+    });
+    let stream = send(&a.app, req("GET", &stream_url, Some(&wes), None)).await;
+    assert_eq!(stream.status, StatusCode::OK, "{}", stream.text());
+    assert!(stream.text().contains("run_started") && stream.text().contains("run_finished"));
+    producer.await.unwrap();
+
+    let launch = || {
+        send(
+            &a.app,
+            req(
+                "POST",
+                "/pipelines/early/sync",
+                Some(&wes),
+                body(json!({"run_id":"simultaneous"})),
+            ),
+        )
+    };
+    let (first, second) = tokio::join!(launch(), launch());
+    let mut statuses = [first.status, second.status];
+    statuses.sort();
+    assert_eq!(statuses, [StatusCode::OK, StatusCode::CONFLICT]);
+    assert_eq!(
+        a.jobs
+            .created
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(_, args, _)| args.iter().any(|arg| arg == "simultaneous"))
+            .count(),
+        1
+    );
+
+    // An existing hidden run cannot be overwritten by launching a public Pipeline.
+    assert!(a.state.engine.record_runs(serde_json::from_value(json!([
+        {"run_id":"hidden-existing","started":now,"status":"running",
+         "selection":{"pipeline_definitions":[{"name":"not-visible","id":"private-id","registry":"sql:fixture"}]}}
+    ])).unwrap()).await.success);
+    let before = a.jobs.created.lock().unwrap().len();
+    let conflict = send(
+        &a.app,
+        req(
+            "POST",
+            "/pipelines/early/sync",
+            Some(&wes),
+            body(json!({"run_id":"hidden-existing"})),
+        ),
+    )
+    .await;
+    assert_eq!(conflict.status, StatusCode::CONFLICT, "{}", conflict.text());
+    assert_eq!(a.jobs.created.lock().unwrap().len(), before);
+}
+
+#[derive(Default)]
+struct DelayedRunRead {
+    inner: MemoryEngine,
+    block: std::sync::atomic::AtomicBool,
+    entered: tokio::sync::Notify,
+    release: tokio::sync::Notify,
+}
+
+#[async_trait::async_trait]
+impl EngineBackend for DelayedRunRead {
+    async fn append_ledger(
+        &self,
+        v: Vec<meerschaum_connector_api::models::LedgerEntry>,
+    ) -> meerschaum_core::SuccessTuple {
+        self.inner.append_ledger(v).await
+    }
+    async fn ledger_after(
+        &self,
+        r: &str,
+        s: Option<i64>,
+    ) -> Vec<meerschaum_connector_api::models::LedgerEntry> {
+        self.inner.ledger_after(r, s).await
+    }
+    async fn put_cursors(
+        &self,
+        v: Vec<meerschaum_connector_api::models::EdgeCursor>,
+    ) -> meerschaum_core::SuccessTuple {
+        self.inner.put_cursors(v).await
+    }
+    async fn get_state(&self, r: &str) -> Option<meerschaum_connector_api::models::EngineState> {
+        self.inner.get_state(r).await
+    }
+    async fn put_states(
+        &self,
+        v: Vec<meerschaum_connector_api::models::EngineState>,
+    ) -> meerschaum_core::SuccessTuple {
+        self.inner.put_states(v).await
+    }
+    async fn record_runs(
+        &self,
+        v: Vec<meerschaum_connector_api::models::RunRecord>,
+    ) -> meerschaum_core::SuccessTuple {
+        self.inner.record_runs(v).await
+    }
+    async fn get_runs(
+        &self,
+        f: &meerschaum_server::backends::RunsFilter,
+    ) -> Result<
+        Vec<meerschaum_connector_api::models::RunRecord>,
+        meerschaum_server::backends::EngineStoreError,
+    > {
+        if self.block.swap(false, std::sync::atomic::Ordering::SeqCst) {
+            self.entered.notify_one();
+            self.release.notified().await;
+        }
+        self.inner.get_runs(f).await
+    }
+    async fn record_events(
+        &self,
+        v: Vec<meerschaum_connector_api::models::EngineEvent>,
+    ) -> meerschaum_core::SuccessTuple {
+        self.inner.record_events(v).await
+    }
+    async fn acquire_lease(&self, r: &str, h: &str, t: std::time::Duration) -> bool {
+        self.inner.acquire_lease(r, h, t).await
+    }
+    async fn release_lease(&self, r: &str, h: &str) -> bool {
+        self.inner.release_lease(r, h).await
+    }
+}
+
+#[tokio::test]
+async fn cancelling_a_launch_request_leaves_one_job_reservation_and_no_running_placeholder() {
+    let engine = Arc::new(DelayedRunRead::default());
+    engine
+        .block
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    let a = build(|_| {}, Some(engine.clone()));
+    let admin = login(&a.app, "admin", "pass", None).await;
+    register_pipeline(&a.app, &admin, "cancelled", json!([])).await;
+    let app = a.app.clone();
+    let auth = admin.clone();
+    let request = tokio::spawn(async move {
+        send(
+            &app,
+            req(
+                "POST",
+                "/pipelines/cancelled/sync",
+                Some(&auth),
+                body(json!({"run_id":"cancelled-request"})),
+            ),
+        )
+        .await
+    });
+    tokio::time::timeout(std::time::Duration::from_secs(1), engine.entered.notified())
+        .await
+        .unwrap();
+    request.abort();
+    assert!(matches!(request.await,Err(error) if error.is_cancelled()));
+    let blocked = send(
+        &a.app,
+        req(
+            "POST",
+            "/pipelines/cancelled/sync",
+            Some(&admin),
+            body(json!({"run_id":"cancelled-request"})),
+        ),
+    )
+    .await;
+    assert_eq!(blocked.status, StatusCode::CONFLICT, "{}", blocked.text());
+    engine.release.notify_one();
+    tokio::time::timeout(std::time::Duration::from_secs(1), async {
+        loop {
+            if a.jobs.created.lock().unwrap().len() == 1 {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .unwrap();
+    assert!(
+        engine
+            .inner
+            .get_runs(&Default::default())
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    let second = send(
+        &a.app,
+        req(
+            "POST",
+            "/pipelines/cancelled/sync",
+            Some(&admin),
+            body(json!({"run_id":"cancelled-request"})),
+        ),
+    )
+    .await;
+    assert_eq!(second.status, StatusCode::CONFLICT, "{}", second.text());
+    assert_eq!(a.jobs.created.lock().unwrap().len(), 1);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_timed_out_launch_releases_its_reservation_without_fabricating_history() {
+    let engine = Arc::new(DelayedRunRead::default());
+    engine
+        .block
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    let a = build(|_| {}, Some(engine.clone()));
+    let admin = login(&a.app, "admin", "pass", None).await;
+    register_pipeline(&a.app, &admin, "timeout", json!([])).await;
+    let app = a.app.clone();
+    let auth = admin.clone();
+    let request = tokio::spawn(async move {
+        send(
+            &app,
+            req(
+                "POST",
+                "/pipelines/timeout/sync",
+                Some(&auth),
+                body(json!({"run_id":"timed-out"})),
+            ),
+        )
+        .await
+    });
+    engine.entered.notified().await;
+    tokio::time::advance(std::time::Duration::from_secs(61)).await;
+    let response = request.await.unwrap();
+    assert_eq!(
+        response.status,
+        StatusCode::SERVICE_UNAVAILABLE,
+        "{}",
+        response.text()
+    );
+    assert!(a.jobs.created.lock().unwrap().is_empty());
+    assert!(
+        engine
+            .inner
+            .get_runs(&Default::default())
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    let retry = send(
+        &a.app,
+        req(
+            "POST",
+            "/pipelines/timeout/sync",
+            Some(&admin),
+            body(json!({"run_id":"timed-out"})),
+        ),
+    )
+    .await;
+    assert_eq!(retry.status, StatusCode::OK, "{}", retry.text());
+    assert_eq!(a.jobs.created.lock().unwrap().len(), 1);
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -222,8 +599,9 @@ async fn engine_reads_need_only_pipes_read_and_failed_reads_are_errors() {
     let a = build(|_| {}, None);
     let admin = login(&a.app, "admin", "pass", None).await;
     let ron = login(&a.app, "ron", "pass", None).await;
+    let (member, registration) = captured_member(&a, "sql:x", "m").await;
     let record = |id: &str, started: &str, status: &str| {
-        json!({"run_id": id, "started": started, "status": status,
+        json!({"run_id": id, "started": started, "status": status, "num_nodes": 1, "targets": [member],
             "finished": if status == "running" { Json::Null } else { json!(started) }})
     };
     let r = send(
@@ -232,7 +610,11 @@ async fn engine_reads_need_only_pipes_read_and_failed_reads_are_errors() {
             "POST",
             "/engine/runs",
             Some(&admin),
-            body(json!([record("r1", "2026-01-01T00:00:00Z", "success")])),
+            body(json!([
+                {"run_id": "r1", "pipe_ref": member, "registration_id": registration,
+                 "started": "2026-01-01T00:00:00Z", "status": "success"},
+                record("r1", "2026-01-01T00:00:00Z", "success")
+            ])),
         ),
     )
     .await;

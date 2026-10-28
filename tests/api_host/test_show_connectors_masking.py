@@ -56,6 +56,22 @@ CASES = {
     'percent': {'uri': 'postgresql://u:p%40ss%21word@h:5432/db'},
     'opaque': {'uri': 'just-some-text', 'connection_string': 'a=1&key=2&sslmode=disable'},
     'bad_port': {'uri': 'postgresql://u@h:notaport/db'},
+    'encoded_copy': {
+        'password': 'inspect secret+/=value', 'database': 'inspect%20secret%2b%2f%3dvalue',
+    },
+    'form_copy': {
+        'password': 'inspect secret+/=value', 'database': 'inspect+secret%2B%2F%3Dvalue',
+    },
+    'deep_copy': {'password': 'inspect-secret', 'database': '%252525252569nspect-secret'},
+    'repr_copy': {
+        'password': 'part"one\\two\nlast', 'host': json.dumps('part"one\\two\nlast'),
+    },
+    'encoded_key': {
+        'uri': 'postgresql://reader:password-value@db.invalid/readings?%70aSsWoRd=query-private',
+        'database': 'query-private',
+    },
+    'numeric_copy': {'api_key': 4321, 'port': 4321},
+    'short_copy': {'password': 'xy', 'host': 'xy'},
 }
 
 #: Type `sql` (its URI path is the database).
@@ -72,6 +88,9 @@ SECRETS = (
     'hunter2pw', 'p@ss@w0rd', 'p@ssw0rd!', 'a secret', 'tok3nvalue', 'k3y-abc-123', 'cl1ent',
     'p4ss', 'pw-value', 'open sesame', 'c00kie', 'zzz999', 's3cretpw', 'abc123', 'abcdef123456',
     'Sup3r!', '/keys/client.key',
+    'inspect secret+/=value', 'inspect%20secret%2b%2f%3dvalue',
+    'inspect+secret%2B%2F%3Dvalue', '%252525252569nspect-secret',
+    'part"one\\two\nlast', 'query-private',
 )
 
 

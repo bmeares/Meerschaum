@@ -556,7 +556,7 @@ pub fn engine_state_parameters(metric_key: &str) -> Option<Map> {
         }
         "engine_sync_status" => {
             r#"{"columns": {"primary": "pipe_ref"},
-                    "dtypes": {"pipe_ref": "string", "connector_keys": "string",
+                    "dtypes": {"pipe_ref": "string", "registration_id":"string", "connector_keys": "string",
                                "metric_key": "string", "location_key": "string",
                                "instance_keys": "string", "last_attempt": "datetime",
                                "last_success": "datetime", "last_failure": "datetime",
@@ -607,7 +607,7 @@ pub async fn forget_engine_state<C: InstanceConnector + ?Sized>(
     let pipe_ref = pipe.pipe_ref();
     // What this process still holds for the pipe's sync status is dropped, and the guard keeps
     // its other writes out until the stored status is cleared, so none brings it back.
-    let _status_writes = crate::sync_status::forget(&pipe_ref).await;
+    let _status_writes = crate::sync_status::forget_on(conn, &pipe_ref).await;
     let mut errors = Vec::new();
     for (metric, column) in [
         ("engine_ledger", "pipe_ref"),

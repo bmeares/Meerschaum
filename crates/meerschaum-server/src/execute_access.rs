@@ -79,23 +79,30 @@ fn normalize(word: &str) -> String {
 }
 
 /// The values of a flag in a step's words (`-c a b`, `-ca`, `--connector-keys=a`).
+fn matched_flag_value(word: &str, flags: &[&str]) -> Option<Option<String>> {
+    flags.iter().find_map(|flag| {
+        if word == *flag {
+            Some(None)
+        } else if let Some(rest) = word.strip_prefix(&format!("{flag}=")) {
+            Some(Some(rest.to_string()))
+        } else if flag.len() == 2
+            && !flag.starts_with("--")
+            && word.starts_with(flag)
+            && word.len() > 2
+        {
+            Some(Some(word[2..].to_string()))
+        } else {
+            None
+        }
+    })
+}
+
 fn flag_values(words: &[String], flags: &[&str]) -> Option<Vec<String>> {
     let mut out: Option<Vec<String>> = None;
     let mut i = 0;
     while i < words.len() {
         let word = &words[i];
-        let matched = flags.iter().find_map(|f| {
-            if word == f {
-                Some(None)
-            } else if let Some(rest) = word.strip_prefix(&format!("{f}=")) {
-                Some(Some(rest.to_string()))
-            } else if f.len() == 2 && !f.starts_with("--") && word.starts_with(f) && word.len() > 2
-            {
-                Some(Some(word[2..].to_string()))
-            } else {
-                None
-            }
-        });
+        let matched = matched_flag_value(word, flags);
         match matched {
             Some(Some(value)) => {
                 out.get_or_insert_with(Vec::new).push(value);
@@ -113,6 +120,67 @@ fn flag_values(words: &[String], flags: &[&str]) -> Option<Vec<String>> {
         }
     }
     out
+}
+
+/// One-value option spellings accepted by the CLI, including abbreviations and short clusters.
+pub(crate) fn option_values(
+    words: &[String],
+    short_flag: char,
+    long_flag: &str,
+) -> Option<Vec<String>> {
+    let mut out = None;
+    for (index, word) in words.iter().enumerate() {
+        let mut canonical = word.to_string();
+        if let Some(long) = word.strip_prefix("--") {
+            let name = long.split('=').next().unwrap_or_default();
+            if !name.is_empty() && long_flag.starts_with(name) {
+                canonical = format!("--{long_flag}{}", &long[name.len()..]);
+            }
+        } else if let Some(short) = word.strip_prefix('-') {
+            // The native parser accepts attached values inside clusters of boolean shorts.
+            // Stop at a value-taking option, so `-mweather` remains an ordinary metric.
+            for (offset, character) in short.char_indices() {
+                if character == short_flag {
+                    canonical = format!("-{short_flag}{}", &short[offset + 1..]);
+                    break;
+                }
+                if !matches!(character, 'y' | 'f' | 'd' | 'v' | 'h' | 'V') {
+                    break;
+                }
+            }
+        }
+        if let Some(value) = matched_flag_value(
+            &canonical,
+            &[&format!("-{short_flag}"), &format!("--{long_flag}")],
+        ) {
+            let values = out.get_or_insert_with(Vec::new);
+            if let Some(value) = value.or_else(|| words.get(index + 1).cloned()) {
+                values.push(value);
+            }
+        }
+    }
+    out
+}
+
+/// The executor spellings accepted by the real CLI, including attached / equals values.
+pub(crate) fn executor_values(words: &[String]) -> Option<Vec<String>> {
+    option_values(words, 'e', "executor-keys")
+}
+
+fn selected_values(
+    words: &[String],
+    flags: &[&str],
+    patch: &meerschaum_core::Map,
+    key: &str,
+) -> Option<Vec<String>> {
+    match patch.get(key) {
+        Some(meerschaum_core::Value::List(values)) => {
+            Some(values.iter().map(meerschaum_core::Value::py_str).collect())
+        }
+        Some(meerschaum_core::Value::Null) => None,
+        Some(value) => Some(vec![value.py_str()]),
+        None => flag_values(words, flags),
+    }
 }
 
 /// Flags that take every following word up to the next flag.
@@ -221,8 +289,17 @@ pub async fn check(
     caller: &Access,
     sysargs: &[String],
 ) -> Result<ExecutePlan, ApiError> {
+    if caller.no_auth || caller.full_admin() {
+        return Ok(ExecutePlan {
+            needs_actions: true,
+        });
+    }
     let mut plan = ExecutePlan::default();
-    for raw_step in sysargs.split(|a| a == "+") {
+    let steps = crate::execute_policy::command_steps(sysargs)
+        .map_err(|message| ApiError::new(403, message))?;
+    for command in steps {
+        let raw_step = command.words.as_slice();
+        let patch = &command.patch;
         let (words, job_flags) = match raw_step.iter().position(|a| a == ":") {
             Some(ix) => (&raw_step[..ix], &raw_step[ix + 1..]),
             None => (raw_step, &raw_step[..0]),
@@ -232,6 +309,12 @@ pub async fn check(
         };
         let rest = &words[1..];
         let repeats = !job_flags.is_empty()
+            || patch
+                .get("loop")
+                .is_some_and(meerschaum_core::Value::truthy)
+            || patch
+                .get("schedule")
+                .is_some_and(meerschaum_core::Value::truthy)
             || rest.iter().any(|w| {
                 REPEAT_FLAGS
                     .iter()
@@ -254,19 +337,19 @@ pub async fn check(
         if matches!(step, Step::Pipelines(_)) && !caller.has("pipes:write") {
             return Err(ApiError::new(403, "Missing required scope: 'pipes:write'"));
         }
-        if caller.no_auth || caller.is_admin() {
-            continue;
-        }
-        let instance = flag_values(rest, INSTANCE_FLAGS).and_then(|v| v.into_iter().next());
+        let instance = selected_values(rest, INSTANCE_FLAGS, patch, "mrsm_instance")
+            .and_then(|v| v.into_iter().next())
+            .filter(|key| !key.is_empty());
         match step {
             Step::Pipelines(names) => {
                 check_pipelines(state, caller, instance.as_deref(), &names).await?;
             }
             Step::PipeOperation(_) => {
-                check_selection(state, caller, instance.as_deref(), rest, Use::Write).await?;
+                check_selection(state, caller, instance.as_deref(), rest, Use::Write, patch)
+                    .await?;
             }
             Step::Action(Some(usage)) => {
-                check_selection(state, caller, instance.as_deref(), rest, usage).await?;
+                check_selection(state, caller, instance.as_deref(), rest, usage, patch).await?;
             }
             Step::Action(None) => {}
         }
@@ -314,12 +397,23 @@ pub fn sysargs_of_keywords(action: &str, keywords: &meerschaum_core::Map) -> Vec
         words.extend(given);
     }
     for (key, value) in keywords {
-        if key == "action" || SELECTION.iter().any(|(k, _)| k == key) {
+        if key == "action"
+            || key == "params"
+            || key == "executor_keys"
+            || SELECTION.iter().any(|(k, _)| k == key)
+        {
             continue;
         }
         if matches!(value, Value::Bool(true)) {
             words.push(format!("--{}", key.replace('_', "-")));
         }
+    }
+    if let Some(value) = keywords.get("executor_keys").filter(|value| value.truthy()) {
+        words.extend(["--executor-keys".into(), value.py_str()]);
+    }
+    // Keep the canonical chain payload last, as core::chain::parse and both API clients do.
+    if let Some(value) = keywords.get("params").filter(|value| !value.is_null()) {
+        words.extend(["-P".into(), value.to_json_string()]);
     }
     words
 }
@@ -348,19 +442,21 @@ async fn check_selection(
     instance: Option<&str>,
     words: &[String],
     usage: Use,
+    patch: &meerschaum_core::Map,
 ) -> Result<(), ApiError> {
     let conn = served_instance(state, instance)?;
-    let connector_keys = flag_values(words, CONNECTOR_FLAGS).unwrap_or_default();
+    let connector_keys =
+        selected_values(words, CONNECTOR_FLAGS, patch, "connector_keys").unwrap_or_default();
     let explicit_mrsm = connector_keys.iter().any(|c| c == "mrsm");
     let query = PipesKeysQuery {
         connector_keys,
-        metric_keys: flag_values(words, METRIC_FLAGS).unwrap_or_default(),
-        location_keys: flag_values(words, LOCATION_FLAGS)
+        metric_keys: selected_values(words, METRIC_FLAGS, patch, "metric_keys").unwrap_or_default(),
+        location_keys: selected_values(words, LOCATION_FLAGS, patch, "location_keys")
             .unwrap_or_default()
             .iter()
             .map(|l| normalize_location(Some(l)))
             .collect(),
-        tags: flag_values(words, TAG_FLAGS).unwrap_or_default(),
+        tags: selected_values(words, TAG_FLAGS, patch, "tags").unwrap_or_default(),
         params: None,
     };
     let keys = conn

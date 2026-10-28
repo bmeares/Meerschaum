@@ -533,6 +533,7 @@ pub async fn call(name: &str, args: &Map, cx: &ToolCx<'_>) -> Result<Value, Tool
                 _ => serde_json::Value::Array(Vec::new()),
             };
             let started = std::time::Instant::now();
+            let registration = meerschaum_connector::sync_metrics::observed_registration(&pipe);
             let res = pipe_methods::sync(
                 &conn,
                 &pipe,
@@ -550,7 +551,13 @@ pub async fn call(name: &str, args: &Map, cx: &ToolCx<'_>) -> Result<Value, Tool
             )
             .await;
             // The pipe's sync status (rc15 C2), like a data post.
-            crate::routes::sync_status::record_server_sync(&conn, &pipe, &res, started);
+            crate::routes::sync_status::record_server_sync(
+                &conn,
+                &pipe,
+                &res,
+                started,
+                registration,
+            );
             Ok(tuple_value(&res))
         }
         "verify_pipe" => {
@@ -1086,7 +1093,15 @@ async fn execute_action(args: &Map, cx: &ToolCx<'_>) -> Result<Value, ToolError>
         return fail(m);
     }
     // Same check as the REST `/actions` route.
-    if cx.caller.api {
+    let remote_caller = if cx.caller.api {
+        Some(caller_access(cx).await?)
+    } else {
+        None
+    };
+    if remote_caller
+        .as_ref()
+        .is_some_and(|caller| !caller.no_auth && !caller.full_admin())
+    {
         let allowed =
             crate::auth::is_user_allowed_to_execute(cx.state, cx.caller.principal.as_ref()).await;
         if !allowed.success {
@@ -1112,16 +1127,16 @@ async fn execute_action(args: &Map, cx: &ToolCx<'_>) -> Result<Value, ToolError>
     }
     // A caller who is not an administrator (rc15): what the console offers, on the pipes it may
     // change, as for `POST /execute` and `POST /actions/{action}`.
-    if cx.caller.api {
-        let caller = caller_access(cx).await?;
-        if !caller.is_admin() {
-            let words = crate::execute_access::sysargs_of_keywords(&action_name, &kwargs);
-            if let Err(m) = crate::execute_policy::check_non_admin(&words) {
-                return fail(m);
-            }
-            if let Err(e) = crate::execute_access::check(cx.state, &caller, &words).await {
-                return fail(e.detail_text());
-            }
+    if let Some(caller) = remote_caller.as_ref()
+        && !caller.no_auth
+        && !caller.full_admin()
+    {
+        let words = crate::execute_access::sysargs_of_keywords(&action_name, &kwargs);
+        if let Err(m) = crate::execute_policy::check_non_admin(&words) {
+            return fail(m);
+        }
+        if let Err(e) = crate::execute_access::check(cx.state, caller, &words).await {
+            return fail(e.detail_text());
         }
     }
     // Pin the action to the API's own instance, as the REST route does.

@@ -871,11 +871,19 @@ async fn sync_pipe(ctx: Ctx, Path((ck, mk, lk)): Keys3, body: Body) -> ApiResult
     let defaults = ctx.state.config.pipe_defaults.clone();
     // The pipe's sync status (rc15 C2) records this sync (`routes::sync_status`).
     let (started, status_headers) = (std::time::Instant::now(), ctx.headers.clone());
+    let registration = meerschaum_connector::sync_metrics::observed_registration(&pipe);
     if !blocking {
         let msg = format!("Spawned asyncronous sync for {pipe}.");
         tokio::spawn(async move {
             let res = pipe_methods::sync(&conn, &pipe, &payload, &kw, &defaults).await;
-            super::sync_status::record_data_post(&status_headers, &conn, &pipe, &res, started);
+            super::sync_status::record_data_post(
+                &status_headers,
+                &conn,
+                &pipe,
+                &res,
+                started,
+                registration,
+            );
             if !res.success {
                 tracing::warn!("Asynchronous sync failed for {pipe}:\n{}", res.message);
             }
@@ -886,7 +894,14 @@ async fn sync_pipe(ctx: Ctx, Path((ck, mk, lk)): Keys3, body: Body) -> ApiResult
     let res = pipe_methods::sync(&conn, &pipe, &payload, &kw, &defaults).await;
     h.invalidate();
     // Queued before the response (a delete that follows forgets it); written in the background.
-    super::sync_status::record_data_post(&status_headers, &conn, &pipe, &res, started);
+    super::sync_status::record_data_post(
+        &status_headers,
+        &conn,
+        &pipe,
+        &res,
+        started,
+        registration,
+    );
     Ok(tuple_response(&res))
 }
 

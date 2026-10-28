@@ -117,6 +117,17 @@ impl InstanceConnector for SqlConnector {
         SqlConnector::edit_pipe(self, pipe, patch).await
     }
 
+    async fn move_pipeline_registration(
+        &self,
+        source: &Pipe,
+        new_name: &str,
+        expected: &Map,
+        parameters: &Map,
+    ) -> ConnectorResult<bool> {
+        self.require_schema().await?;
+        SqlConnector::move_pipeline_registration(self, source, new_name, expected, parameters).await
+    }
+
     async fn delete_pipe(&self, pipe: &Pipe) -> SuccessTuple {
         if let Err(e) = self.require_schema().await {
             return SuccessTuple::fail(e.to_string());

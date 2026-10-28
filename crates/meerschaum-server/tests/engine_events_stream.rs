@@ -230,6 +230,85 @@ fn names(frames: &[Frame]) -> Vec<&str> {
     frames.iter().map(|f| f.0.as_str()).collect()
 }
 
+#[tokio::test(start_paused = true)]
+async fn a_live_stream_rechecks_pipeline_privacy_and_revoked_permissions() {
+    use common::MemoryInstance;
+    use meerschaum_core::Pipe;
+    use meerschaum_server::backends::{EngineBackend, MemoryEngine};
+    for revoke in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let instance = Arc::new(MemoryInstance::new("fixture"));
+        instance.seed_user("alice", "pass", Some("user"));
+        let member = Pipe::builder("plugin:public", "member")
+            .instance("sql:fixture")
+            .build()
+            .unwrap();
+        assert!(instance.register_pipe(&member).await.success);
+        let registration = meerschaum_connector::sync_status::registration_from_attributes(
+            &instance.get_pipe_attributes(&member).await.unwrap(),
+        );
+        assert!(registration.is_some());
+        let mut pipeline = Pipe::builder("mrsm", "pipeline")
+            .location(Some("daily"))
+            .instance("sql:fixture")
+            .parameters(
+                serde_json::from_value::<Value>(
+                    json!({"pipeline":{"id":"daily-id","name":"daily"}}),
+                )
+                .unwrap()
+                .to_map(),
+            )
+            .build()
+            .unwrap();
+        assert!(instance.register_pipe(&pipeline).await.success);
+        let engine = Arc::new(MemoryEngine::default());
+        assert!(engine.record_runs(serde_json::from_value(json!([
+            {"run_id":"daily-running","started":chrono::Utc::now(),"status":"running","targets":[member.pipe_ref()],"num_nodes":1,
+             "selection":{"pipeline_definitions":[{"id":"daily-id","name":"daily","registry":"sql:fixture"}]}},
+            {"run_id":"daily-running","pipe_ref":member.pipe_ref(),"registration_id":registration,"started":chrono::Utc::now(),"status":"running"}
+        ])).unwrap()).await.success);
+        assert!(engine.record_events(serde_json::from_value(json!([
+            {"run_id":"daily-running","created":chrono::Utc::now(),"event":"run_started","payload":{}}
+        ])).unwrap()).await.success);
+        let state = AppState::builder(common::config(dir.path()), instance.clone())
+            .secret(SECRET.to_vec())
+            .engine(engine)
+            .build()
+            .unwrap();
+        let app = meerschaum_server::app(state);
+        let alice = login(&app, "alice", "pass", None).await;
+        let (status, _, body) = open(
+            &app,
+            "/engine/runs/daily-running/events/stream",
+            &[("authorization", &alice)],
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let mut stream = body.into_data_stream();
+        let first = stream.next().await.unwrap().unwrap();
+        assert!(String::from_utf8_lossy(&first).contains("run_started"));
+        if revoke {
+            instance.seed_user_scopes("alice", &[]);
+        } else {
+            pipeline.update_parameters(
+                serde_json::from_value::<Value>(
+                    json!({"access":{"owner":"bob","visibility":"private"}}),
+                )
+                .unwrap()
+                .to_map(),
+            );
+            assert!(instance.edit_pipe(&pipeline, false).await.success);
+        }
+        tokio::time::advance(Duration::from_secs(6)).await;
+        assert!(
+            tokio::time::timeout(Duration::from_secs(1), stream.next())
+                .await
+                .expect("revocation must close the stream at the next authorization check")
+                .is_none()
+        );
+    }
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn persisted_run_streams_in_order_and_resumes() {
     let dir = tempfile::tempdir().unwrap();

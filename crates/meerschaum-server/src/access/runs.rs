@@ -15,6 +15,22 @@ use super::RefFilter;
 /// The `pipe_ref` a hidden node or event is reported with.
 pub const HIDDEN_REF: &str = "hidden";
 
+/// Raw run headers used only for authorization; no private storage fields are exposed.
+pub(crate) fn headers_from_rows(rows: &[Json]) -> Vec<RunRecord> {
+    rows.iter()
+        .filter_map(|row| {
+            Some(RunRecord {
+                run_id: row.get("run_id")?.as_str()?.to_string(),
+                pipe_ref: None,
+                started: chrono::Utc::now(),
+                finished: None,
+                status: String::new(),
+                extra: serde_json::from_value(row.clone()).unwrap_or_default(),
+            })
+        })
+        .collect()
+}
+
 pub(crate) fn targets_of(record: &RunRecord) -> Vec<String> {
     match record.extra.get("targets") {
         Some(Value::List(items)) => items.iter().map(Value::py_str).collect(),
@@ -26,10 +42,74 @@ pub(crate) fn targets_of(record: &RunRecord) -> Vec<String> {
     }
 }
 
+fn selection(value: Option<&Value>) -> Json {
+    match value {
+        Some(Value::Str(text)) => serde_json::from_str(text).unwrap_or(Json::Null),
+        Some(value) => serde_json::to_value(value).unwrap_or(Json::Null),
+        None => Json::Null,
+    }
+}
+
+fn row_selection(row: &Json) -> Json {
+    match row.get("selection") {
+        Some(Json::String(text)) => serde_json::from_str(text).unwrap_or(Json::Null),
+        Some(value) => value.clone(),
+        None => Json::Null,
+    }
+}
+
+pub(crate) async fn record_pipelines_visible(filter: &mut RefFilter, record: &RunRecord) -> bool {
+    filter
+        .pipeline_snapshots_visible(&selection(record.extra.get("selection")))
+        .await
+}
+
+fn strip_json_selection(value: &mut Json) {
+    if let Json::String(text) = value {
+        if let Ok(mut selection) = serde_json::from_str::<Json>(text)
+            && meerschaum_connector::sync_metrics::strip_snapshot_proofs(&mut selection)
+        {
+            *text = selection.to_string();
+        }
+    } else {
+        meerschaum_connector::sync_metrics::strip_snapshot_proofs(value);
+    }
+}
+
+fn strip_record_proofs(record: &mut RunRecord) {
+    record.extra.shift_remove("registration_ref");
+    record.extra.shift_remove("registration_id");
+    if let Some(value) = record.extra.get_mut("selection") {
+        let mut selection = selection(Some(value));
+        if meerschaum_connector::sync_metrics::strip_snapshot_proofs(&mut selection) {
+            *value = if matches!(value, Value::Str(_)) {
+                Value::Str(selection.to_string())
+            } else {
+                serde_json::from_value(selection).unwrap_or(Value::Null)
+            };
+        }
+    }
+}
+
 /// The run and node records `filter`'s caller may read (see the module documentation).
-pub async fn visible_runs(filter: &mut RefFilter, records: Vec<RunRecord>) -> Vec<RunRecord> {
+pub async fn visible_runs(filter: &mut RefFilter, mut records: Vec<RunRecord>) -> Vec<RunRecord> {
     if filter.access().is_admin() {
+        for record in &mut records {
+            strip_record_proofs(record);
+        }
         return records;
+    }
+    filter.prime_run_generations(&records).await;
+    let headers: HashSet<_> = records
+        .iter()
+        .filter(|record| record.pipe_ref.is_none())
+        .map(|record| record.run_id.clone())
+        .collect();
+    let mut hidden_pipelines = HashSet::new();
+    for record in records.iter().filter(|record| record.pipe_ref.is_none()) {
+        if !record_pipelines_visible(filter, record).await {
+            hidden_pipelines.insert(record.run_id.clone());
+        }
     }
     // Which pipes of which runs the caller can see.
     let mut seen: HashMap<String, bool> = HashMap::new();
@@ -63,7 +143,11 @@ pub async fn visible_runs(filter: &mut RefFilter, records: Vec<RunRecord>) -> Ve
     records
         .into_iter()
         .filter(|r| {
-            run_visible.get(&r.run_id).copied().unwrap_or(false) || !has_pipes.contains(&r.run_id)
+            headers.contains(&r.run_id)
+                && filter.run_generation_current(&r.run_id)
+                && !hidden_pipelines.contains(&r.run_id)
+                && (run_visible.get(&r.run_id).copied().unwrap_or(false)
+                    || !has_pipes.contains(&r.run_id))
         })
         .map(|mut record| {
             match &record.pipe_ref {
@@ -92,13 +176,22 @@ pub async fn visible_runs(filter: &mut RefFilter, records: Vec<RunRecord>) -> Ve
                     }
                 }
             }
+            strip_record_proofs(&mut record);
             record
         })
         .collect()
 }
 
+/// Remove storage-only evidence from a public event after its run has been authorized.
+pub(crate) fn strip_event_proofs(event: &mut EngineRunEvent) {
+    if let Some(selection) = event.fields.get_mut("selection") {
+        strip_json_selection(selection);
+    }
+}
+
 /// `event` as the caller may read it (a hidden pipe's event keeps only its type and order).
 pub async fn visible_event(filter: &mut RefFilter, mut event: EngineRunEvent) -> EngineRunEvent {
+    strip_event_proofs(&mut event);
     if filter.access().is_admin() {
         return event;
     }
@@ -148,6 +241,10 @@ pub async fn visible_rows(filter: &mut RefFilter, metric: &str, rows: Vec<Json>)
     if filter.access().is_admin() {
         return rows;
     }
+    if metric == "engine_runs" {
+        let headers = headers_from_rows(&rows);
+        filter.prime_run_generations(&headers).await;
+    }
     let mut out = Vec::with_capacity(rows.len());
     let mut visible_event_runs: HashMap<String, bool> = HashMap::new();
     'rows: for mut row in rows {
@@ -158,7 +255,18 @@ pub async fn visible_rows(filter: &mut RefFilter, metric: &str, rows: Vec<Json>)
                 continue 'rows;
             }
         }
-        if metric == "engine_events" {
+        if metric == "engine_runs"
+            && (!filter
+                .pipeline_snapshots_visible(&row_selection(&row))
+                .await
+                || !row
+                    .get("run_id")
+                    .and_then(Json::as_str)
+                    .is_some_and(|id| filter.run_generation_current(id)))
+        {
+            continue;
+        }
+        if matches!(metric, "engine_events" | "engine_nodes") {
             let Some(run_id) = row.get("run_id").and_then(Json::as_str).map(str::to_string) else {
                 continue;
             };
@@ -173,13 +281,18 @@ pub async fn visible_rows(filter: &mut RefFilter, metric: &str, rows: Vec<Json>)
             if !visible {
                 continue;
             }
+        }
+        if metric == "engine_events" {
+            let Some(run_id) = row.get("run_id").and_then(Json::as_str) else {
+                continue;
+            };
             let payload = match row.get("payload") {
                 Some(Json::String(text)) => serde_json::from_str(text).unwrap_or(Json::Null),
                 Some(payload) => payload.clone(),
                 None => Json::Null,
             };
             let event = EngineRunEvent::from_row(
-                &run_id,
+                run_id,
                 0,
                 chrono::Utc::now(),
                 row.get("pipe_ref")
@@ -223,6 +336,13 @@ pub async fn visible_rows(filter: &mut RefFilter, metric: &str, rows: Vec<Json>)
                 o.insert("targets".into(), Json::Array(kept));
                 o.insert("selection".into(), Json::Null);
                 o.insert("message".into(), Json::Null);
+            }
+        }
+        if let Some(fields) = row.as_object_mut() {
+            fields.remove("registration_ref");
+            fields.remove("registration_id");
+            if let Some(selection) = fields.get_mut("selection") {
+                strip_json_selection(selection);
             }
         }
         out.push(row);

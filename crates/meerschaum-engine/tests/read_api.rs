@@ -84,6 +84,20 @@ async fn history_reads_nodes_in_bulk_and_preserves_timestamp_boundary_matches() 
         .unwrap();
     assert_eq!(named.len(), 1);
     assert_eq!(named[0].run.run_id, format!("fixture-{missing:04}"));
+    let fractional = reader
+        .runs(&RunFilter {
+            since: Some(base + chrono::TimeDelta::microseconds(70)),
+            limit: Some(1000),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(fractional.len(), 90);
+    assert!(
+        fractional
+            .iter()
+            .all(|run| { run.run.started >= base + chrono::TimeDelta::microseconds(70) })
+    );
     assert!(
         reader
             .runs(&RunFilter {
@@ -93,6 +107,291 @@ async fn history_reads_nodes_in_bulk_and_preserves_timestamp_boundary_matches() 
             .await
             .unwrap()
             .is_empty()
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn filtered_history_pages_across_seconds_without_missing_or_repeating_ties() {
+    use chrono::{Timelike, Utc};
+    use meerschaum_engine::instance_state::{InstanceState, run_doc};
+    use meerschaum_engine::runs::{EnginePipe, RunRow};
+    let env = env("history_pages").await;
+    let state = InstanceState::new(env.registry.clone(), &env.config().home_instance);
+    let base = Utc::now().with_nanosecond(0).unwrap();
+    let mut runs = Vec::new();
+    for index in 0..1500 {
+        let started = base
+            + chrono::TimeDelta::seconds(index / 500)
+            + chrono::TimeDelta::microseconds(index % 500 / 3);
+        let selected = index % 500 == 5;
+        let run: RunRow = serde_json::from_value(serde_json::json!({
+            "run_id": format!("page-{index:04}"), "started": started,
+            "finished": started, "success": !selected,
+            "targets": [env.pipe_ref(if selected { "raw" } else { "other" })],
+            "workers": 1, "num_nodes": 0, "holder": "fixture",
+        }))
+        .unwrap();
+        runs.push(run_doc(&run));
+    }
+    state
+        .write_rows(&env.config().home_instance, EnginePipe::Runs, runs)
+        .await
+        .unwrap();
+    let reader = EngineReader::new(env.registry.clone(), env.config());
+    let history = reader
+        .runs(&RunFilter {
+            limit: Some(1200),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(history.len(), 1200);
+    let ids: std::collections::HashSet<_> = history.iter().map(|row| &row.run.run_id).collect();
+    assert_eq!(ids.len(), 1200);
+    assert!(history.windows(2).all(|pair| {
+        let (left, right) = (&pair[0].run, &pair[1].run);
+        left.started > right.started
+            || (left.started == right.started && left.run_id > right.run_id)
+    }));
+    let selected = reader
+        .runs(&RunFilter {
+            status: Some(RunStatus::Failed),
+            pipe: Some("raw".into()),
+            since: Some(base + chrono::TimeDelta::seconds(1) + chrono::TimeDelta::microseconds(1)),
+            limit: Some(10),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        selected
+            .iter()
+            .map(|row| row.run.run_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["page-1005", "page-0505"]
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn named_history_follows_live_uuid_across_rename_and_rejects_replaced_identity() {
+    use chrono::Utc;
+    use meerschaum_connector::sync_metrics::{pipe_key, registrations};
+    use meerschaum_core::Pipe;
+    use meerschaum_engine::instance_state::{InstanceState, node_doc, run_doc};
+    use meerschaum_engine::runs::{EnginePipe, NodeRow, RunRow};
+    let env = env("history_rename").await;
+    env.register("raw", &serde_json::json!({})).await;
+    let stamp = registrations(env.conn.as_ref())
+        .await
+        .unwrap()
+        .remove(&pipe_key(INSTANCE, "raw", None))
+        .unwrap();
+    let current = |id: &str| {
+        Pipe::builder("mrsm", "pipeline")
+            .location(Some("renamed"))
+            .instance(INSTANCE)
+            .parameters(json_map(&serde_json::json!({
+                "pipeline": {"id": id, "name": "renamed", "registry": INSTANCE}
+            })))
+            .build()
+            .unwrap()
+    };
+    assert!(env.conn.register_pipe(&current("stable-id")).await.success);
+    let state = InstanceState::new(env.registry.clone(), INSTANCE);
+    let mut runs = Vec::new();
+    let mut nodes = Vec::new();
+    for (id, registry, proof) in [
+        ("before-rename", INSTANCE, None),
+        ("foreign", "sql:elsewhere", None),
+        ("api-client", "api:client", None),
+        ("other-api-client", "api:other", None),
+        ("contradictory-proof", "api:client", Some("sql:elsewhere")),
+    ] {
+        let started = Utc::now();
+        let mut snapshot = serde_json::json!({
+            "name":"original", "id":"stable-id", "registry":registry
+        });
+        if let Some(proof) = proof {
+            snapshot["registration_registry"] = proof.into();
+        }
+        let run: RunRow = serde_json::from_value(serde_json::json!({
+            "run_id": id, "started": started, "finished": started, "success": true,
+            "targets": [env.pipe_ref("raw")], "workers": 1, "num_nodes": 1, "holder": "fixture",
+            "selection": serde_json::json!({"pipeline_definitions":[snapshot]}).to_string()
+        }))
+        .unwrap();
+        let mut node = NodeRow::new(
+            id,
+            &env.pipe_ref("raw"),
+            meerschaum_engine::Action::Root,
+            "fixture",
+        );
+        node.registration_id = Some(stamp.clone());
+        runs.push(run_doc(&run));
+        nodes.push(node_doc(&node, started));
+    }
+    state
+        .write_rows(INSTANCE, EnginePipe::Nodes, nodes)
+        .await
+        .unwrap();
+    state
+        .write_rows(INSTANCE, EnginePipe::Runs, runs)
+        .await
+        .unwrap();
+    let reader = EngineReader::new(env.registry.clone(), env.config());
+    let filter = RunFilter {
+        run_name: Some("renamed".into()),
+        ..Default::default()
+    };
+    let history = reader.runs(&filter).await.unwrap();
+    assert_eq!(history.len(), 1);
+    assert_eq!(history[0].run.run_id, "before-rename");
+    // A separately configured exact home alias can read both server- and client-origin
+    // snapshots, while a foreign alias or contradictory explicit proof stays foreign.
+    let registry = std::sync::Arc::new(
+        meerschaum_engine::StaticRegistry::new().with_instance("api:client", env.conn.clone()),
+    );
+    let mut config = env.config();
+    config.home_instance = "api:client".into();
+    let api_reader = EngineReader::new(registry, config);
+    let api_history = api_reader.runs(&filter).await.unwrap();
+    assert_eq!(
+        api_history
+            .iter()
+            .map(|run| run.run.run_id.as_str())
+            .collect::<std::collections::BTreeSet<_>>(),
+        ["api-client", "before-rename"].into_iter().collect(),
+    );
+    assert!(env.conn.edit_pipe(&current("new-id"), false).await.success);
+    assert!(reader.runs(&filter).await.unwrap().is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn history_generation_evidence_is_fresh_complete_batched_and_never_serialized() {
+    use chrono::Utc;
+    use meerschaum_connector::sync_metrics::{pipe_key, registrations};
+    use meerschaum_engine::instance_state::{InstanceState, node_doc, run_doc};
+    use meerschaum_engine::runs::{EnginePipe, NodeRow, RunRow};
+    let env = env("history_generations").await;
+    let private = env
+        .register(
+            "raw",
+            &serde_json::json!({
+                "access": {"owner": "bob", "visibility": "private"}
+            }),
+        )
+        .await;
+    // Capture before constructing work records; never regenerate evidence from current
+    // metadata while reading an older run after an access/registration change.
+    let stamp = registrations(env.conn.as_ref())
+        .await
+        .unwrap()
+        .remove(&pipe_key(INSTANCE, "raw", None))
+        .unwrap();
+    let state = InstanceState::new(env.registry.clone(), INSTANCE);
+    let mut runs = Vec::new();
+    let mut nodes = Vec::new();
+    for (id, count, captured, canonical) in [
+        ("current", 1, true, 0),
+        ("legacy", 1, false, 0),
+        ("incomplete", 2, true, 0),
+        ("empty", 0, true, 0),
+        ("api-proven", 1, true, 1),
+        ("api-unproven", 1, true, 2),
+        ("foreign", 1, true, 3),
+    ] {
+        let reference = if matches!(canonical, 1 | 2) {
+            meerschaum_engine::PipeRef::new("api:client", INSTANCE, "raw", None)
+        } else {
+            env.pipe_ref("raw")
+        };
+        let run: RunRow = serde_json::from_value(serde_json::json!({
+            "run_id": id, "started": Utc::now(), "finished": Utc::now(), "success": false,
+            "targets": [reference], "workers": 1, "num_nodes": count, "holder": "fixture",
+            "message": "private retained run failure",
+        }))
+        .unwrap();
+        let mut node = NodeRow::new(
+            id,
+            &reference,
+            meerschaum_engine::Action::Incremental,
+            "fixture",
+        );
+        node.registration_id = captured.then(|| stamp.clone());
+        node.registration_ref = match canonical {
+            1 => Some(env.pipe_ref("raw")),
+            3 => Some(meerschaum_engine::PipeRef::new(
+                "sql:unavailable",
+                INSTANCE,
+                "raw",
+                None,
+            )),
+            _ => None,
+        };
+        runs.push(run_doc(&run));
+        nodes.push(node_doc(&node, run.started));
+    }
+    state
+        .write_rows(INSTANCE, EnginePipe::Runs, runs)
+        .await
+        .unwrap();
+    state
+        .write_rows(INSTANCE, EnginePipe::Nodes, nodes)
+        .await
+        .unwrap();
+    let ids: Vec<String> = [
+        "current",
+        "legacy",
+        "incomplete",
+        "empty",
+        "api-proven",
+        "api-unproven",
+        "foreign",
+        "missing",
+    ]
+    .into_iter()
+    .map(str::to_owned)
+    .collect();
+    let reader = EngineReader::new(env.registry.clone(), env.config());
+    env.conn.enable_query_log();
+    let current = reader.run_generations(&ids).await.unwrap();
+    let log = env.conn.take_query_log();
+    for id in ["current", "api-proven"] {
+        assert!(current[id], "{current:?}");
+    }
+    for id in [
+        "legacy",
+        "incomplete",
+        "empty",
+        "api-unproven",
+        "foreign",
+        "missing",
+    ] {
+        assert!(!current[id], "{current:?}");
+    }
+    let reads = |table: &str| {
+        log.iter()
+            .filter(|query| query.replace('"', "").contains(&format!("FROM {table}")))
+            .count()
+    };
+    assert_eq!(reads("mrsm_engine_runs"), 1, "{log:#?}");
+    assert_eq!(reads("mrsm_engine_nodes"), 1, "{log:#?}");
+    assert!(
+        reads("mrsm_pipes") <= 2,
+        "registration scans repeated per run: {log:#?}"
+    );
+    let detail = reader.run_detail("api-proven").await.unwrap().unwrap();
+    let json = serde_json::to_string(&detail).unwrap();
+    assert!(
+        !json.contains("registration_id") && !json.contains("registration_ref"),
+        "{json}"
+    );
+    assert!(env.conn.delete_pipe(&private).await.success);
+    env.register("raw", &serde_json::json!({})).await;
+    let after = reader.run_generations(&ids).await.unwrap();
+    assert!(
+        after.values().all(|valid| !valid),
+        "stale private run was reassigned: {after:?}"
     );
 }
 

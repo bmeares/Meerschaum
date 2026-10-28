@@ -114,6 +114,20 @@ impl Connector for APIConnector {
 
 #[async_trait]
 impl InstanceConnector for APIConnector {
+    async fn engine_run_generations(
+        &self,
+        run_ids: &[String],
+    ) -> ConnectorResult<Option<std::collections::HashMap<String, bool>>> {
+        self.get_remote_run_generations(run_ids).await.map(Some)
+    }
+
+    async fn saved_pipeline_identity(
+        &self,
+        name: &str,
+    ) -> ConnectorResult<Option<(String, String)>> {
+        self.remote_saved_pipeline_identity(name).await
+    }
+
     async fn register_pipe(&self, pipe: &Pipe) -> SuccessTuple {
         APIConnector::register_pipe(self, pipe).await
     }

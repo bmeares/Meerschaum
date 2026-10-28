@@ -90,11 +90,13 @@ visible = 'sql:apihosttest|source:local|public|None'
 hidden = 'sql:apihosttest|source:local|secret|None'
 with mock.patch.object(access, 'visible_refs', return_value={visible}):
     redactor = engine.Anonymizer(viewer, 'sql:apihosttest')
+    # This fixture isolates projection; persisted-generation lifecycle is tested separately.
+    redactor.run_generations = {'redaction-fixture': True}
     payload = redactor.value({hidden: {'pipe_ref': hidden}, 'visible': visible})
     label = redactor.text('Failed Pipe(' + repr('source:local') + ', ' + repr("secret's (details)") + ')')
     empty = redactor.run({'run': {'targets': []}})
     only_hidden = redactor.run({'run': {'targets': [hidden]}})
-    mixed = redactor.run({'run': {'targets': [visible, hidden]}})
+    mixed = redactor.run({'run': {'run_id': 'redaction-fixture', 'targets': [visible, hidden]}})
 print('JSON:' + json.dumps({'payload': payload, 'label': label, 'empty': empty,
                           'only_hidden': only_hidden, 'mixed': mixed}))
 '''))

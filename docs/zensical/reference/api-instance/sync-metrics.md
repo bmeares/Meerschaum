@@ -10,7 +10,9 @@ Open **Performance** in the navigation, or choose **View performance** on the Ov
 - **Write rate** shows **rows affected/s**.
 - **Results** shows successful and failed syncs over time.
 
-The tables below compare Pipes and Pipelines and list recent syncs. Hover over a chart for its values; drag to zoom and double-click to reset. **Refresh** reads the latest measurements.
+The tables below compare Pipes and Pipelines. Choose a name to narrow the view; use your browser's **Back** button to return. **Recent syncs** shows 50 outcomes per page. Changing a filter starts at the first page; **Refresh** keeps your place and reads the latest measurements.
+
+Hover over a chart for its values; drag to zoom and double-click to reset.
 
 ![The Performance view for the local climate example](../../assets/screenshots/v5-performance.png){ .mrsm-screenshot }
 

@@ -24,6 +24,7 @@ The status code tells the kind of failure: `400` (the request is invalid; a list
 | `GET /pipelines/{name}` | `pipes:read` | One Pipeline: `pipeline` (its definition), `members` (each target pipe, and whether it is registered) and `last_run` |
 | `POST /pipelines/{name}/plan` | `pipes:read` | What a run would do: `plan`, `text` (the plan table) and `warnings`. Nothing moves and nothing is registered |
 | `POST /pipelines/{name}/sync` | `pipes:write`, `jobs:execute` | Start a run in the background: `run_id`, `job`, `stream`, `log_stream`, `logs` |
+| `POST /pipelines/{name}/rename` | `pipes:read`, `pipes:write`, `pipes:register`, `pipes:delete` | Rename a live registration, keeping its identity and access |
 
 Each takes `?instance_keys=` for a Pipeline saved on another instance. `plan` and `sync` take an optional body with the window (`{"begin": "2026-01-01", "end": "2026-02-01"}`, ISO datetimes or integers); `sync` also takes a `run_id` of your own.
 
@@ -47,6 +48,11 @@ The run is a background job, as when you press Sync on the console's Pipelines p
 
 The registration routes the CLI and Python SDK use to save definitions are also here: `GET /pipelines/keys`, `POST /pipelines/{name}/register` (`409` if it exists), `PATCH /pipelines/{name}/edit`, `DELETE /pipelines/{name}/delete` (`409` while a scheduled job runs it), `GET /pipelines/{name}/id` and `/attributes` (`404` if it is not registered), and the leases of `/pipelines/leases`. A Pipeline named `keys` or `leases` is reachable through those routes but not through `GET /pipelines/{name}`.
 
+The server assigns each new Pipeline registration a fresh ID. Edits and authorized renames keep a current ID; unproven legacy identities are upgraded. The SDK uses the authoritative saved definition.
+
+??? example "Rename a Pipeline"
+    Send `{"new_name": "evening"}` to `POST /pipelines/daily/rename`. Add `expected_revision` or `expected_id` to reject a stale request. The response includes the saved `pipeline`. An occupied destination, changed source, lock or referencing job refuses the move.
+
 ## Runs
 
 | Route | Scopes | What it does |
@@ -54,6 +60,7 @@ The registration routes the CLI and Python SDK use to save definitions are also 
 | `GET /engine/runs` | `pipes:read` | Runs, newest first (`runs`) |
 | `GET /engine/runs/{run_id}` | `pipes:read` | One run (`run`) and each pipe's result (`nodes`) |
 | `GET /engine/runs/{run_id}/events/stream` | `pipes:read` | A run's events as Server-Sent Events |
+| `POST /engine/run-generations` | `pipes:read` | Check whether retained runs match current registrations and access |
 
 `GET /engine/runs` filters with:
 
@@ -71,6 +78,15 @@ curl -H "Authorization: Bearer $TOKEN" \
 ```
 
 The other `/engine/*` routes carry the engine's own state for `api:` instances ([Engine State](/reference/pipelines/state/)): reads need `pipes:read`, writes `pipes:write`.
+
+??? info "Registration checks for API-backed tools"
+    Send at most 256 run IDs to `POST /engine/run-generations`:
+
+    ```json
+    {"run_ids": ["daily-2026-10-27T05-00-00Z-1a2b3c4d"]}
+    ```
+
+    The response's `generations` maps each requested ID to `true` or `false`. Hidden, missing, stale or unproven history returns `false`. Registration checks also apply to administrator credentials; stored registration evidence is never returned. Checks use the API credential's access; a hosted tool must also enforce its visitor's access.
 
 ## Console actions
 

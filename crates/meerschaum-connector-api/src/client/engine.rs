@@ -19,6 +19,53 @@ use crate::wire::QueryValue;
 use super::{APIConnector, Body, Method, RequestOptions};
 
 impl APIConnector {
+    /// Fresh, caller-filtered history-generation authority. Older servers prove nothing.
+    pub async fn get_remote_run_generations(
+        &self,
+        run_ids: &[String],
+    ) -> ConnectorResult<std::collections::HashMap<String, bool>> {
+        let mut result: std::collections::HashMap<_, _> =
+            run_ids.iter().cloned().map(|id| (id, false)).collect();
+        for chunk in run_ids.chunks(256) {
+            let response = self
+                .post(
+                    routes::ENGINE_RUN_GENERATIONS,
+                    RequestOptions {
+                        query: vec![(
+                            "instance_keys".into(),
+                            QueryValue::opt(self.instance_keys()),
+                        )],
+                        body: Body::Json(serde_json::json!({"run_ids":chunk}).to_string()),
+                        ..Default::default()
+                    },
+                )
+                .await?;
+            if matches!(response.status, 404 | 405) {
+                continue;
+            }
+            let body = response.json_or_detail()?;
+            if !response.ok()
+                || body.get("success").and_then(serde_json::Value::as_bool) != Some(true)
+            {
+                return Err(ConnectorError::Detail(
+                    "Cannot validate remote run history.".into(),
+                ));
+            }
+            if let Some(proven) = body
+                .get("generations")
+                .and_then(serde_json::Value::as_object)
+            {
+                for id in chunk {
+                    result.insert(
+                        id.clone(),
+                        proven.get(id).and_then(serde_json::Value::as_bool) == Some(true),
+                    );
+                }
+            }
+        }
+        Ok(result)
+    }
+
     async fn engine_write<T: Serialize + ?Sized>(
         &self,
         method: Method,
@@ -35,6 +82,14 @@ impl APIConnector {
                 path,
                 RequestOptions {
                     body: Body::Json(body),
+                    headers: if path == routes::ENGINE_RUNS {
+                        vec![(
+                            engine_pipes::CLIENT_INSTANCE_HEADER.into(),
+                            self.to_string(),
+                        )]
+                    } else {
+                        Vec::new()
+                    },
                     ..Default::default()
                 },
             )
@@ -216,7 +271,9 @@ impl APIConnector {
                 &routes::engine_pipe_path(metric_key, op),
                 RequestOptions {
                     body: body.map(Body::Json).unwrap_or_default(),
-                    headers: if metric_key == "engine_nodes" && op == "write" {
+                    headers: if matches!(metric_key, "engine_nodes" | "engine_runs")
+                        && op == "write"
+                    {
                         vec![(
                             engine_pipes::CLIENT_INSTANCE_HEADER.into(),
                             self.to_string(),

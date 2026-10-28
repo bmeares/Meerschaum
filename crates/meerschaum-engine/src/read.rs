@@ -4,24 +4,25 @@
 //! Everything here reads the instance-backed engine state (the `mrsm:engine_*` pipes), so a
 //! console in a different process from the run sees the same data. Nothing here writes.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use meerschaum_connector::PipesKeysQuery;
 use meerschaum_core::success::Bound;
+use meerschaum_core::{Map, Value};
 use serde::{Deserialize, Serialize};
 
 use crate::axis::Interval;
 use crate::engine::{EngineConfig, fetch_records};
 use crate::events::EventRow;
 use crate::graph::{Graph, GraphOptions, GraphWarning};
-use crate::instance_state::InstanceState;
+use crate::instance_state::{InstanceState, run_from_doc};
 use crate::ledger::{dirty_intervals, map_to_child};
 use crate::node::PipeRef;
 use crate::plan::Action;
 use crate::registry::ConnectorRegistry;
-use crate::runs::{NodeRow, NodeStatus, RunRecord, RunRow};
+use crate::runs::{EnginePipe, NodeRow, NodeStatus, RunRecord, RunRow};
 use crate::schedule::DurationSource;
 use crate::state::{StateError, StateSource};
 
@@ -61,7 +62,7 @@ impl RunStatus {
 pub struct RunFilter {
     /// Exactly this run.
     pub run_id: Option<String>,
-    /// Only runs with this exact pipeline name.
+    /// Runs of the live saved Pipeline UUID, or this exact name for unsaved selections.
     pub run_name: Option<String>,
     /// Only runs with this status.
     pub status: Option<RunStatus>,
@@ -247,6 +248,106 @@ impl EngineReader {
         }
     }
 
+    /// Whether every persisted node still belongs to its captured registration and ACL.
+    /// Unknown/legacy/incomplete runs are false. This is private authorization evidence;
+    /// callers must not mint new stamps for old rows or expose stored proofs in public JSON.
+    pub async fn run_generations(
+        &self,
+        run_ids: &[String],
+    ) -> Result<BTreeMap<String, bool>, StateError> {
+        use meerschaum_connector::sync_metrics::{registration_matches, registrations};
+        let mut out: BTreeMap<String, bool> =
+            run_ids.iter().cloned().map(|id| (id, false)).collect();
+        let ids: Vec<String> = out.keys().cloned().collect();
+        if ids.is_empty() {
+            return Ok(out);
+        }
+        let home = self
+            .registry
+            .instance(&self.config.home_instance)
+            .map_err(|message| StateError::Unreachable {
+                instance: self.config.home_instance.clone(),
+                message,
+            })?;
+        if let Some(remote) =
+            home.engine_run_generations(&ids)
+                .await
+                .map_err(|error| StateError::Unreachable {
+                    instance: self.config.home_instance.clone(),
+                    message: error.to_string(),
+                })?
+        {
+            for (id, valid) in remote {
+                if let Some(current) = out.get_mut(&id) {
+                    *current = valid;
+                }
+            }
+            return Ok(out);
+        }
+        let mut nodes = self.state.load_nodes_for_runs(&ids).await?;
+        type InstanceRegistrations = (String, HashMap<String, String>);
+        let mut current: HashMap<String, Option<InstanceRegistrations>> = HashMap::new();
+        let mut seen = std::collections::HashSet::new();
+        for batch in ids.chunks(128) {
+            let params: Map = [(
+                "run_id".into(),
+                Value::List(batch.iter().cloned().map(Value::Str).collect()),
+            )]
+            .into_iter()
+            .collect();
+            for doc in self
+                .state
+                .read_rows(&self.config.home_instance, EnginePipe::Runs, params, None)
+                .await?
+            {
+                let Some(run) = run_from_doc(&doc) else {
+                    continue;
+                };
+                if !out.contains_key(&run.run_id) {
+                    continue;
+                }
+                if !seen.insert(run.run_id.clone()) {
+                    out.insert(run.run_id, false);
+                    continue;
+                }
+                let rows = nodes.remove(&run.run_id).unwrap_or_default();
+                if run.num_nodes == 0 || rows.len() < run.num_nodes {
+                    continue;
+                }
+                let mut valid = true;
+                for node in rows {
+                    let reference = node.registration_ref.as_ref().unwrap_or(&node.pipe_ref);
+                    let instance = reference.instance_keys();
+                    if !current.contains_key(instance) {
+                        let snapshot = match self.registry.instance(instance) {
+                            Ok(conn) => registrations(conn.as_ref())
+                                .await
+                                .ok()
+                                .map(|rows| (conn.connector_keys(), rows)),
+                            Err(_) => None,
+                        };
+                        current.insert(instance.to_owned(), snapshot);
+                    }
+                    if !current.get(instance).and_then(Option::as_ref).is_some_and(
+                        |(keys, rows)| {
+                            registration_matches(
+                                reference.as_str(),
+                                node.registration_id.as_deref(),
+                                keys,
+                                rows,
+                            )
+                        },
+                    ) {
+                        valid = false;
+                        break;
+                    }
+                }
+                out.insert(run.run_id, valid);
+            }
+        }
+        Ok(out)
+    }
+
     /// Run history, newest first, using indexed pages and bulk node reads.
     pub async fn runs(&self, filter: &RunFilter) -> Result<Vec<RunSummary>, StateError> {
         let limit = filter.limit.unwrap_or(100);
@@ -254,6 +355,10 @@ impl EngineReader {
             return Ok(Vec::new());
         }
         let page_size = limit.clamp(128, 512);
+        let pipeline = match filter.run_name.as_deref() {
+            Some(name) => self.pipeline_identity(name).await,
+            None => None,
+        };
         let mut before = None;
         let mut out = Vec::new();
         loop {
@@ -267,7 +372,8 @@ impl EngineReader {
             let complete = page.len() < page_size;
             let seen: std::collections::HashSet<String> =
                 page.iter().map(|run| run.run_id.clone()).collect();
-            self.append_summaries(page, filter, limit, &mut out).await?;
+            self.append_summaries(page, filter, pipeline.as_ref(), limit, &mut out)
+                .await?;
             if out.len() >= limit || complete {
                 break;
             }
@@ -280,7 +386,8 @@ impl EngineReader {
                 .into_iter()
                 .filter(|run| !seen.contains(&run.run_id))
                 .collect();
-            self.append_summaries(ties, filter, limit, &mut out).await?;
+            self.append_summaries(ties, filter, pipeline.as_ref(), limit, &mut out)
+                .await?;
             if out.len() >= limit {
                 break;
             }
@@ -289,10 +396,35 @@ impl EngineReader {
         Ok(out)
     }
 
+    /// One fresh saved identity per named history request, independent of page/run count.
+    async fn pipeline_identity(&self, name: &str) -> Option<(String, String)> {
+        let conn = self.registry.instance(&self.config.home_instance).ok()?;
+        let remote = conn.saved_pipeline_identity(name).await.ok().flatten();
+        if remote.is_some() || conn.connector_type() == "api" {
+            return remote.filter(|(id, registry)| {
+                !id.is_empty() && !id.starts_with("legacy:") && !registry.is_empty()
+            });
+        }
+        let pipe = meerschaum_core::Pipe::builder("mrsm", "pipeline")
+            .location(Some(name))
+            .instance(&self.config.home_instance)
+            .build()
+            .ok()?;
+        let attributes = conn.get_pipe_attributes(&pipe).await.ok()?;
+        let parameters = attributes.get("parameters")?.as_map()?;
+        let definition = parameters.get("pipeline")?.as_map()?;
+        let id = definition.get("id")?.as_str()?;
+        if id.is_empty() || id.starts_with("legacy:") {
+            return None;
+        }
+        Some((id.to_owned(), conn.connector_keys()))
+    }
+
     async fn append_summaries(
         &self,
         runs: Vec<RunRow>,
         filter: &RunFilter,
+        pipeline: Option<&(String, String)>,
         limit: usize,
         out: &mut Vec<RunSummary>,
     ) -> Result<(), StateError> {
@@ -304,7 +436,24 @@ impl EngineReader {
                     && !filter
                         .run_name
                         .as_ref()
-                        .is_some_and(|name| !run.belongs_to_pipeline(name))
+                        .is_some_and(|name| !match pipeline {
+                            Some((id, registry)) => {
+                                run.pipeline_definitions().iter().any(|snapshot| {
+                                    snapshot.get("id").and_then(serde_json::Value::as_str)
+                                        == Some(id.as_str())
+                                        && (meerschaum_connector::sync_metrics::snapshot_registry(
+                                            snapshot,
+                                        ) == Some(registry.as_str())
+                                            || (self.config.home_instance.starts_with("api:")
+                                                && snapshot.get("registration_registry").is_none()
+                                                && snapshot
+                                                    .get("registry")
+                                                    .and_then(serde_json::Value::as_str)
+                                                    == Some(self.config.home_instance.as_str())))
+                                })
+                            }
+                            None => run.belongs_to_pipeline(name),
+                        })
                     && !filter.since.is_some_and(|since| run.started < since)
                     && !filter
                         .status

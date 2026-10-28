@@ -12,6 +12,32 @@ pub struct BackendError(pub String);
 /// The result type of backend commands.
 pub type BackendResult<T> = Result<T, BackendError>;
 
+/// One conditional, atomic saved-registration move; only a live source can supply its ID.
+pub struct RegistrationMove {
+    /// Source registration key.
+    pub source: String,
+    /// Source parameters key.
+    pub source_parameters: String,
+    /// Destination registration key.
+    pub destination: String,
+    /// Destination parameters key.
+    pub destination_parameters: String,
+    /// Internal registration sorted set.
+    pub rows: String,
+    /// Expected persisted ID (also the destination ID).
+    pub identity: String,
+    /// Exact source parameters read before this atomic operation.
+    pub expected_parameters: String,
+    /// New parameters, retaining the source's UUID and access.
+    pub parameters: String,
+    /// Source sorted-set row.
+    pub old_member: String,
+    /// Destination sorted-set row.
+    pub new_member: String,
+    /// Unchanged registration row score.
+    pub score: f64,
+}
+
 /// A `ZRANGEBYSCORE` bound: a number, or `-inf` / `+inf`.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ScoreBound {
@@ -118,6 +144,13 @@ impl WriteOp {
 /// decodes everything as UTF-8).
 #[async_trait]
 pub trait ValkeyBackend: Send + Sync {
+    /// Compare the live source and atomically move all registration keys and its row.
+    async fn move_registration(&self, operation: &RegistrationMove) -> BackendResult<bool> {
+        let _ = operation;
+        Err(BackendError(
+            "Atomic registration moves are unsupported by this backend.".into(),
+        ))
+    }
     /// `PING`.
     async fn ping(&self) -> BackendResult<bool>;
     /// `GET key`.

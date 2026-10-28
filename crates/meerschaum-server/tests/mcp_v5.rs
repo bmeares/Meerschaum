@@ -289,11 +289,32 @@ async fn pipeline_tools_list_plan_and_sync() {
 #[tokio::test]
 async fn run_tools_filter_and_show_one_run() {
     let f = fixture(|_| {});
+    let succeeded = Pipe::builder("sql:x", "succeeded")
+        .instance("sql:fixture")
+        .build()
+        .unwrap();
+    let failed = Pipe::builder("sql:x", "m")
+        .instance("sql:fixture")
+        .build()
+        .unwrap();
+    // These synthetic completed runs carry snapshots captured before their work.
+    let mut identities = Vec::new();
+    for pipe in [&succeeded, &failed] {
+        assert!(f.instance.register_pipe(pipe).await.success);
+        let attributes = f.instance.get_pipe_attributes(pipe).await.unwrap();
+        identities.push(
+            meerschaum_connector::sync_status::registration_from_attributes(&attributes).unwrap(),
+        );
+    }
     let records: Vec<RunRecord> = serde_json::from_value(json!([
-        {"run_id": "a", "started": "2026-01-01T00:00:00Z", "finished": "2026-01-01T00:01:00Z", "status": "success"},
-        {"run_id": "b", "started": "2026-01-02T00:00:00Z", "finished": "2026-01-02T00:01:00Z", "status": "failed"},
+        {"run_id": "a", "started": "2026-01-01T00:00:00Z", "finished": "2026-01-01T00:01:00Z",
+         "status": "success", "num_nodes": 1, "targets": [succeeded.pipe_ref()]},
+        {"run_id": "a", "pipe_ref": succeeded.pipe_ref(), "started": "2026-01-01T00:00:00Z",
+         "status": "success", "registration_id": identities[0]},
+        {"run_id": "b", "started": "2026-01-02T00:00:00Z", "finished": "2026-01-02T00:01:00Z",
+         "status": "failed", "num_nodes": 1, "targets": [failed.pipe_ref()]},
         {"run_id": "b", "pipe_ref": "sql:fixture|sql:x|m|None", "started": "2026-01-02T00:00:00Z",
-         "status": "failed", "message": "boom"},
+         "status": "failed", "message": "boom", "registration_id": identities[1]},
     ]))
     .unwrap();
     assert!(f.engine.record_runs(records).await.success);

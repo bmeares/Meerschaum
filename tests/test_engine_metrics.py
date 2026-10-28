@@ -97,3 +97,30 @@ def test_sdk_metrics_initialization_and_invalid_bounds(tmp_path):
         mrsm.get_engine_metrics(instance=conn, begin=datetime.now(timezone.utc),
                                 end=datetime.now(timezone.utc) - timedelta(hours=1))
 
+
+def test_equal_connector_aliases_keep_their_status_and_metric_queues_on_their_own_database(tmp_path):
+    from meerschaum.connectors.sql import SQLConnector
+    label = 'metrics_owners_' + uuid.uuid4().hex[:10]
+    first = SQLConnector(label=label, flavor='sqlite', database=str(tmp_path / 'first.db'))
+    second = SQLConnector(label=label, flavor='sqlite', database=str(tmp_path / 'second.db'))
+    assert str(first) == str(second)
+    pipe_a = mrsm.Pipe('plugin:synthetic', 'shared', instance=first, columns={'id': 'id'})
+    pipe_b = mrsm.Pipe('plugin:synthetic', 'shared', instance=second, columns={'id': 'id'})
+    try:
+        mrsm.initialize_engine_metrics(instance=first)
+        mrsm.initialize_engine_metrics(instance=second)
+        assert pipe_a.sync([{'id': 0}]).success
+        assert pipe_a.get_sync_status()['rows_inserted'] == 1
+        assert pipe_a.sync([{'id': i} for i in range(4)]).success
+        assert pipe_b.sync([{'id': i} for i in range(7)]).success
+        _core.flush_sync_statuses(timeout=5.0)
+        assert pipe_a.get_sync_status()['rows_inserted'] == 3
+        assert pipe_b.get_sync_status()['rows_inserted'] == 7
+        metrics_a = mrsm.get_engine_metrics(instance=first, pipe=pipe_a)['summary']
+        metrics_b = mrsm.get_engine_metrics(instance=second, pipe=pipe_b)['summary']
+        assert (metrics_a['syncs'], metrics_a['rows']) == (2, 4)
+        assert (metrics_b['syncs'], metrics_b['rows']) == (1, 7)
+    finally:
+        pipe_a.delete()
+        pipe_b.delete()
+

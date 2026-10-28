@@ -110,9 +110,10 @@ fn plural(n: usize) -> &'static str {
 
 /// `GET /engine/sync-status[?pipe_ref=]`.
 async fn get_statuses(ctx: Ctx) -> ApiResult {
-    let caller = access::require(&ctx.state, &ctx.headers, READ_SCOPES).await?;
+    let caller = access::require_fresh(&ctx.state, &ctx.headers, READ_SCOPES).await?;
     let ik = ctx.instance_keys();
     let conn = ctx.state.get_api_connector(ik.as_deref())?;
+    access::guard::check_connector_teams(&ctx.state, &caller, &conn.connector_keys())?;
     let instance_keys = conn.connector_keys();
     let statuses: Vec<SyncStatus> = match ctx.query.opt_str("pipe_ref") {
         Some(pipe_ref) => {
@@ -134,7 +135,9 @@ async fn get_statuses(ctx: Ctx) -> ApiResult {
         let mut filter = RefFilter::new(&ctx.state, &caller, &instance_keys);
         let mut kept = Vec::with_capacity(statuses.len());
         for status in statuses {
-            if filter.visible(&status.pipe_ref).await {
+            if access::guard::may_use_connector(&ctx.state, &caller, &status.connector_keys)
+                && filter.visible(&status.pipe_ref).await
+            {
                 kept.push(status);
             }
         }
@@ -160,17 +163,18 @@ struct PostBody {
 
 /// `POST /engine/sync-status`: record an `api:` client's sync outcomes.
 async fn post_outcomes(ctx: Ctx, body: Body) -> ApiResult {
-    let caller = access::require(&ctx.state, &ctx.headers, WRITE_SCOPES).await?;
+    let caller = access::require_fresh(&ctx.state, &ctx.headers, WRITE_SCOPES).await?;
     let bytes = axum::body::to_bytes(body, BODY_LIMIT)
         .await
         .map_err(|_| ApiError::new(413, "The request body is too large."))?;
-    let body: PostBody = serde_json::from_slice(&bytes)
+    let mut body: PostBody = serde_json::from_slice(&bytes)
         .map_err(|e| ApiError::new(400, format!("Invalid sync status body: {e}")))?;
     if body.outcomes.is_empty() {
         return Err(ApiError::new(400, "No sync outcomes were given."));
     }
     let ik = ctx.instance_keys();
     let conn = ctx.state.get_api_connector(ik.as_deref())?;
+    access::guard::check_connector_teams(&ctx.state, &caller, &conn.connector_keys())?;
     let pipe = keys_pipe(
         &body.connector_keys,
         &body.metric_key,
@@ -183,6 +187,7 @@ async fn post_outcomes(ctx: Ctx, body: Body) -> ApiResult {
             format!("{pipe} is an internal pipe and has no sync status."),
         ));
     }
+    access::guard::check_connector_teams(&ctx.state, &caller, pipe.connector_keys())?;
     let mut filter = RefFilter::new(&ctx.state, &caller, &conn.connector_keys());
     match filter.editable(&pipe.pipe_ref()).await {
         (true, _) => {}
@@ -191,15 +196,34 @@ async fn post_outcomes(ctx: Ctx, body: Body) -> ApiResult {
         }
         _ => return Err(access::not_editable(&pipe)),
     }
+    let attributes = conn
+        .get_pipe_attributes(&pipe)
+        .await
+        .map_err(|_| ApiError::new(503, "Cannot read Pipe registration."))?;
+    let current = sync_status::registration_from_attributes(&attributes);
+    for outcome in &mut body.outcomes {
+        // An old wire shape remains accepted, but never receives freshly minted proof.
+        outcome.registration_captured = true;
+        if outcome.registration_id.is_some() && outcome.registration_id != current {
+            return Err(ApiError::new(
+                409,
+                "The Pipe registration or privacy segment changed since capture.",
+            ));
+        }
+    }
     let status = sync_status::record_now(conn.as_ref(), &pipe, &body.outcomes)
         .await
         .map_err(|e| ApiError::exception("record_sync_status", e))?;
     let n = body.outcomes.len();
     Ok(ok_body(
-        format!(
-            "Recorded {n} sync{} of {pipe}.",
-            if n == 1 { "" } else { "s" }
-        ),
+        if status.is_none() {
+            format!("Accepted {n} sync outcomes of {pipe}; no proven status was recorded.")
+        } else {
+            format!(
+                "Recorded {n} sync{} of {pipe}.",
+                if n == 1 { "" } else { "s" }
+            )
+        },
         "status",
         status.as_ref().map_or(Json::Null, SyncStatus::to_json),
     ))
@@ -215,11 +239,12 @@ pub fn record_data_post(
     pipe: &Pipe,
     result: &SuccessTuple,
     started: Instant,
+    registration: Option<String>,
 ) {
     if headers.contains_key(CLIENT_RECORDS_HEADER) {
         return;
     }
-    record_server_sync(conn, pipe, result, started);
+    record_server_sync(conn, pipe, result, started, registration);
 }
 
 /// Record a sync the server ran itself on `conn` (a data post, the MCP tool `sync_documents`)
@@ -229,6 +254,7 @@ pub fn record_server_sync(
     pipe: &Pipe,
     result: &SuccessTuple,
     started: Instant,
+    registration: Option<String>,
 ) {
     let outcome = SyncOutcome::new(
         result.success,
@@ -237,7 +263,8 @@ pub fn record_server_sync(
         None,
     )
     .with_message_counts()
-    .with_duration(Some(started.elapsed()));
+    .with_duration(Some(started.elapsed()))
+    .with_registration(registration);
     sync_status::record(conn.clone(), pipe, outcome);
 }
 

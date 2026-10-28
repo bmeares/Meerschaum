@@ -45,6 +45,182 @@ async fn stored(env: &Env, pipe: &Pipe) -> Option<SyncStatus> {
         .expect("read the stored sync status")
 }
 
+#[tokio::test]
+async fn a_late_private_worker_status_is_not_exposed_by_recreated_public_keys() {
+    use meerschaum_connector::sync_status::{SyncOutcome, SyncSource};
+    let env = env("status_generation").await;
+    let old = env
+        .register(
+            "recreated",
+            &json!({"access":{"owner":"old-owner","visibility":"private"}}),
+        )
+        .await;
+    let old_id = env.conn.get_pipe_id(&old).await.unwrap().unwrap();
+    let second = connect(&env.db).await;
+    assert!(
+        InstanceConnector::delete_pipe(second.as_ref(), &old)
+            .await
+            .success
+    );
+    let public = env.pipe("recreated", &json!({}));
+    assert!(second.register_pipe(&public).await.success);
+    assert_eq!(second.get_pipe_id(&public).await.unwrap().unwrap(), old_id);
+    let late = SyncStatus::for_pipe(&old).apply(&SyncOutcome::new(
+        false,
+        "PRIVATE SQL PASSWORD",
+        SyncSource::Python,
+        None,
+    ));
+    // Simulate a write already validated before recreation, then committed afterward.
+    meerschaum_connector::sync_status::write_status(env.conn.as_ref(), &late)
+        .await
+        .unwrap();
+    assert!(
+        second.get_sync_status(&public).await.unwrap().is_none(),
+        "old registration error text must not become public"
+    );
+    second
+        .record_sync_status(
+            &public,
+            &[SyncOutcome::new(
+                true,
+                "public result",
+                SyncSource::Python,
+                None,
+            )],
+        )
+        .await
+        .unwrap();
+    let status = second.get_sync_status(&public).await.unwrap().unwrap();
+    assert!(status.success);
+    assert!(!status.message.contains("PRIVATE"));
+}
+
+struct PrivateFetch {
+    entered: tokio::sync::Notify,
+    release: tokio::sync::Notify,
+}
+
+#[meerschaum_connector::async_trait]
+impl meerschaum_connector::Connector for PrivateFetch {
+    fn connector_type(&self) -> &str {
+        "gate"
+    }
+    fn label(&self) -> &str {
+        "source"
+    }
+    async fn test_connection(&self) -> meerschaum_connector::ConnectorResult<bool> {
+        Ok(true)
+    }
+    async fn fetch(
+        &self,
+        _: &Pipe,
+        _: &meerschaum_connector::DataQuery,
+    ) -> meerschaum_connector::ConnectorResult<Option<meerschaum_kernel::Frame>> {
+        self.entered.notify_one();
+        self.release.notified().await;
+        Err(meerschaum_connector::ConnectorError::Backend(
+            "PRIVATE SQL PASSWORD".into(),
+        ))
+    }
+}
+
+#[tokio::test]
+async fn a_bare_keys_only_sync_captures_registered_privacy_before_fetching() {
+    assert_registered_privacy_before_fetching(false).await;
+}
+
+#[tokio::test]
+async fn a_graph_sync_captures_registered_privacy_before_fetching() {
+    assert_registered_privacy_before_fetching(true).await;
+}
+
+async fn assert_registered_privacy_before_fetching(graph: bool) {
+    let env = env("status_capture").await;
+    let source = Arc::new(PrivateFetch {
+        entered: Default::default(),
+        release: Default::default(),
+    });
+    let old = Pipe::builder("gate:source", "recreated")
+        .instance(INSTANCE)
+        .parameters(json_map(
+            &json!({"access":{"owner":"old-owner","visibility":"private"}}),
+        ))
+        .build()
+        .unwrap();
+    assert!(env.conn.register_pipe(&old).await.success);
+    let old_id = env.conn.get_pipe_id(&old).await.unwrap().unwrap();
+    let bare = Pipe::builder("gate:source", "recreated")
+        .instance(INSTANCE)
+        .build()
+        .unwrap();
+    let engine = Engine::new(
+        Arc::new(
+            StaticRegistry::new()
+                .with_instance(INSTANCE, env.conn.clone())
+                .with_source("gate:source", source.clone()),
+        ),
+        env.config(),
+    );
+    let task = tokio::spawn(async move {
+        if graph {
+            let result = engine
+                .run(RunOptions {
+                    selection: Some(Selection::refs([PipeRef::from_pipe(&bare)]).with_graph(true)),
+                    ..Default::default()
+                })
+                .await;
+            assert!(
+                result
+                    .record
+                    .as_ref()
+                    .expect("graph run record")
+                    .nodes
+                    .iter()
+                    .all(|node| node.registration_id.is_some()),
+                "the original graph snapshot must contain its pre-work registration proof"
+            );
+            result.success
+        } else {
+            engine
+                .sync_pipe(&bare, None, &SyncArgs::default())
+                .await
+                .success
+        }
+    });
+    tokio::time::timeout(Duration::from_secs(2), source.entered.notified())
+        .await
+        .expect("source fetch started");
+    let worker = connect(&env.db).await;
+    assert!(
+        InstanceConnector::delete_pipe(worker.as_ref(), &old)
+            .await
+            .success
+    );
+    let public = Pipe::builder("gate:source", "recreated")
+        .instance(INSTANCE)
+        .build()
+        .unwrap();
+    assert!(worker.register_pipe(&public).await.success);
+    assert_eq!(worker.get_pipe_id(&public).await.unwrap().unwrap(), old_id);
+    source.release.notify_one();
+    assert!(!task.await.unwrap());
+    meerschaum_connector::sync_status::flush(Duration::from_secs(4)).await;
+    assert!(worker.get_sync_status(&public).await.unwrap().is_none());
+    assert!(worker.get_sync_statuses(INSTANCE).await.unwrap().is_empty());
+    let metrics = worker
+        .get_engine_metrics(&meerschaum_connector::sync_metrics::MetricsQuery {
+            visible_refs: Some(vec![public.pipe_ref()]),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        metrics.summary.syncs, 0,
+        "original private work must not acquire the new public stamp"
+    );
+}
+
 /// An engine over `env`'s database under instance keys of its own, so that no other test's read
 /// of `sql:eng`'s statuses writes this test's held successes.
 fn engine_on(env: &Env, instance: &str) -> Engine {

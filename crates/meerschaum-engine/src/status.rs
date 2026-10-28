@@ -45,6 +45,25 @@ pub fn record_result(
     result: &SyncResult,
     graph_run: bool,
 ) {
+    record_outcome_for_result(registry, pipe, outcome_of(result, graph_run));
+}
+
+/// Record with the registry segment captured by the sync before its primary work.
+pub fn record_result_with_registration(
+    registry: &dyn ConnectorRegistry,
+    pipe: &Pipe,
+    result: &SyncResult,
+    graph_run: bool,
+    registration: Option<String>,
+) {
+    record_outcome_for_result(
+        registry,
+        pipe,
+        outcome_of(result, graph_run).with_registration(registration),
+    );
+}
+
+fn record_outcome_for_result(registry: &dyn ConnectorRegistry, pipe: &Pipe, outcome: SyncOutcome) {
     if !meerschaum_connector::sync_status::is_recorded(pipe) {
         return;
     }
@@ -55,7 +74,7 @@ pub fn record_result(
             return;
         }
     };
-    record_outcome(conn, pipe, outcome_of(result, graph_run));
+    record_outcome(conn, pipe, outcome);
 }
 
 /// Record `outcome` for `pipe` on `conn` (best effort, written in the background).

@@ -105,9 +105,9 @@ assert performance.timestamp('invalid') == '—'
 layout = str(pages.route('/dash/performance','http://localhost/dash/performance?window=7d'))
 assert 'performance-window' in layout and "value='7d'" in layout and 'Loading performance' in layout
 with patch.object(performance,'metrics',side_effect=RuntimeError('PRIVATE SQL PASSWORD')):
-    result = callbacks.render_performance('/dash/performance','24h',None,None,0,0,'sql:apihosttest',{})
+    result = callbacks.render_performance('/dash/performance',None,'24h',None,None,0,0,1,'sql:apihosttest',{})
     assert 'could not be loaded' in str(result) and 'PRIVATE SQL PASSWORD' not in str(result)
 with patch.object(performance,'metrics',side_effect=PermissionError('private object')):
-    result = callbacks.render_performance('/dash/performance','24h',None,None,0,0,'sql:apihosttest',{})
+    result = callbacks.render_performance('/dash/performance',None,'24h',None,None,0,0,1,'sql:apihosttest',{})
     assert 'not available' in str(result) and 'private object' not in str(result)
 '''))

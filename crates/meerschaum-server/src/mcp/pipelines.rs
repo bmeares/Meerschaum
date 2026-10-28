@@ -56,6 +56,17 @@ fn str_arg(args: &Map, key: &str) -> Option<String> {
     }
 }
 
+async fn history_access(cx: &ToolCx<'_>) -> Result<crate::access::Access, ToolError> {
+    match (&cx.caller.principal, cx.caller.api) {
+        (Some(principal), true) => {
+            crate::access::access_of_fresh(cx.state, principal.clone(), &cx.caller.scopes)
+                .await
+                .map_err(api)
+        }
+        _ => Ok(crate::access::Access::everything()),
+    }
+}
+
 fn required_str(args: &Map, key: &str) -> Result<String, ToolError> {
     str_arg(args, key).ok_or_else(|| ToolError::value(format!("`{key}` is required.")))
 }
@@ -198,15 +209,6 @@ pub async fn sync_pipeline(args: &Map, cx: &ToolCx<'_>) -> Result<Value, ToolErr
     Ok(Value::Map(out))
 }
 
-/// The engine store that keeps the runs of `instance_keys` (the server's by default).
-fn store(
-    cx: &ToolCx<'_>,
-    args: &Map,
-) -> Result<Arc<dyn crate::backends::EngineBackend>, ToolError> {
-    let conn = registry(cx, args)?;
-    Ok(http::store_of(cx.state, &conn))
-}
-
 /// `list_runs`.
 pub async fn list_runs(args: &Map, cx: &ToolCx<'_>) -> Result<Value, ToolError> {
     let status = match str_arg(args, "status") {
@@ -238,12 +240,15 @@ pub async fn list_runs(args: &Map, cx: &ToolCx<'_>) -> Result<Value, ToolError> 
         since,
         limit: Some(limit_arg(args, "limit", DEFAULT_RUNS, MAX_RUNS)?),
     };
-    let runs = store(cx, args)?
+    let caller = history_access(cx).await?;
+    let conn = registry(cx, args)?;
+    crate::access::guard::check_connector_teams(cx.state, &caller, &conn.connector_keys())
+        .map_err(api)?;
+    let runs = http::store_of(cx.state, &conn)
         .get_runs(&filter)
         .await
         .map_err(|e| api(crate::engine_stream::api_error(e)))?;
-    let caller = caller_access(cx).await?;
-    let instance = registry(cx, args)?.connector_keys();
+    let instance = conn.connector_keys();
     let runs = crate::access::runs::visible_runs(
         &mut RefFilter::new(cx.state, &caller, &instance).for_engine(),
         runs,
@@ -262,9 +267,12 @@ pub async fn list_runs(args: &Map, cx: &ToolCx<'_>) -> Result<Value, ToolError> 
 /// `get_run`.
 pub async fn get_run(args: &Map, cx: &ToolCx<'_>) -> Result<Value, ToolError> {
     let run_id = required_str(args, "run_id")?;
-    let store = store(cx, args)?;
-    let caller = caller_access(cx).await?;
-    let instance = registry(cx, args)?.connector_keys();
+    let caller = history_access(cx).await?;
+    let conn = registry(cx, args)?;
+    crate::access::guard::check_connector_teams(cx.state, &caller, &conn.connector_keys())
+        .map_err(api)?;
+    let store = http::store_of(cx.state, &conn);
+    let instance = conn.connector_keys();
     let Some((run, nodes)) = crate::routes::engine::visible_run_detail(
         store.as_ref(),
         &run_id,

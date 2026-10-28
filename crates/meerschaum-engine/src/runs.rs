@@ -113,6 +113,9 @@ pub struct NodeRow {
     /// Persisted Pipe registration and ACL segment observed at execution.
     #[serde(default, skip_serializing)]
     pub registration_id: Option<String>,
+    /// Exact canonical reference proven at capture; retained only inside native history reads.
+    #[serde(default, skip_serializing)]
+    pub registration_ref: Option<PipeRef>,
     /// The executed (re-planned) action.
     pub action: Action,
     /// The final status.
@@ -163,6 +166,7 @@ impl NodeRow {
             run_id: run_id.to_string(),
             pipe_ref: pipe_ref.clone(),
             registration_id: None,
+            registration_ref: None,
             action,
             status: NodeStatus::Pending,
             reason: reason.to_string(),

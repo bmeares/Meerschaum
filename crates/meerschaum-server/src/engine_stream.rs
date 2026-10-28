@@ -338,7 +338,14 @@ fn slot_key(principal: Option<&crate::auth::Principal>, session: Option<&str>) -
 /// The store that keeps the run's history: the server's engine store, or (`instance_keys`
 /// naming another instance the server may use) that instance's state pipes. Also the keys
 /// under which that instance's runs are published live ([`own_instance_names`] for the server's).
-pub fn store_for(ctx: &Ctx) -> Result<(Arc<dyn EngineBackend>, Vec<String>), ApiError> {
+pub fn store_for(
+    ctx: &Ctx,
+    caller: &crate::access::Access,
+) -> Result<(Arc<dyn EngineBackend>, Vec<String>), ApiError> {
+    let conn = ctx
+        .state
+        .get_api_connector(ctx.instance_keys().as_deref())?;
+    crate::access::guard::check_connector_teams(&ctx.state, caller, &conn.connector_keys())?;
     match ctx.instance_keys() {
         Some(keys)
             if keys != ctx.state.config.instance_keys
@@ -364,14 +371,18 @@ pub fn own_instance_names(state: &AppState) -> Vec<String> {
     names
 }
 
-/// Whether the run has no record yet (only events).
-async fn run_record_missing(store: &dyn EngineBackend, run_id: &str) -> Result<bool, ApiError> {
+async fn run_header_exists(store: &dyn EngineBackend, run_id: &str) -> Result<bool, ApiError> {
     let filter = RunsFilter {
-        run_id: Some(run_id.to_string()),
+        run_id: Some(run_id.into()),
         limit: Some(1),
         ..Default::default()
     };
-    Ok(store.get_runs(&filter).await.map_err(api_error)?.is_empty())
+    Ok(store
+        .get_runs(&filter)
+        .await
+        .map_err(api_error)?
+        .iter()
+        .any(|row| row.pipe_ref.is_none()))
 }
 
 /// Whether the store knows the run (a run record or any event). A failed read is an error.
@@ -409,7 +420,7 @@ pub async fn serve(ctx: Ctx, run_id: String) -> Result<Response, ApiError> {
         }
         _ => ctx.headers.clone(),
     };
-    let caller = crate::access::require(&state, &auth_headers, SCOPES).await?;
+    let caller = crate::access::require_fresh(&state, &auth_headers, SCOPES).await?;
     let principal = caller.auth.clone();
     if !valid_run_id(&run_id) {
         return Err(ApiError::new(422, "Invalid run ID."));
@@ -445,7 +456,7 @@ pub async fn serve(ctx: Ctx, run_id: String) -> Result<Response, ApiError> {
             Duration::from_secs_f64(w.min(MAX_IDLE_TIMEOUT.as_secs_f64()))
                 .clamp(MIN_IDLE_TIMEOUT, MAX_IDLE_TIMEOUT)
         });
-    let (store, instances) = store_for(&ctx)?;
+    let (store, instances) = store_for(&ctx, &caller)?;
     // Subscribe before the first read, so no event falls between the two.
     let hub = state.engine_streams.subscribe();
     // Waiting for a run to appear holds no stream slot (it is bounded by `MAX_WAIT`).
@@ -458,20 +469,28 @@ pub async fn serve(ctx: Ctx, run_id: String) -> Result<Response, ApiError> {
     }
     // A caller who is not an administrator follows the runs of pipes it can see (rc15); the
     // events of hidden pipes reach it anonymized.
+    let caller = crate::access::require_fresh(&state, &auth_headers, SCOPES).await?;
     let filter = if caller.is_admin() {
         None
     } else {
         let default = instances.first().cloned().unwrap_or_default();
-        let mut filter = crate::access::RefFilter::new(&state, &caller, &default).for_engine();
-        let visible =
-            crate::routes::engine::visible_run_detail(store.as_ref(), &run_id, &mut filter)
-                .await
-                .map_err(api_error)?;
-        // A run whose record is not written yet is judged by its events' pipes when they come.
-        if visible.is_none() && !run_record_missing(store.as_ref(), &run_id).await? {
-            return Err(ApiError::new(404, format!("Run '{run_id}' was not found.")));
+        loop {
+            let fresh = crate::access::require_fresh(&state, &auth_headers, SCOPES).await?;
+            let mut filter = crate::access::RefFilter::new(&state, &fresh, &default).for_engine();
+            let visible =
+                crate::routes::engine::visible_run_detail(store.as_ref(), &run_id, &mut filter)
+                    .await
+                    .map_err(api_error)?;
+            if visible.is_some() {
+                break Some(filter);
+            }
+            // An event alone cannot prove Pipeline visibility. Honor an early-run wait,
+            // but a known inaccessible header is refused immediately.
+            if Instant::now() >= deadline || run_header_exists(store.as_ref(), &run_id).await? {
+                return Err(ApiError::new(404, format!("Run '{run_id}' was not found.")));
+            }
+            tokio::time::sleep(POLL).await;
         }
-        Some(filter)
     };
     // Without authentication there is no user: count the console cookie's streams, or else
     // only the server-wide total.
@@ -529,6 +548,8 @@ pub async fn serve(ctx: Ctx, run_id: String) -> Result<Response, ApiError> {
         next_session_check: Instant::now() + SESSION_CHECK,
         done: false,
         filter,
+        auth_headers,
+        next_access_check: Instant::now() + STATUS_CHECK,
         _slot: slot,
     };
     tail.poll
@@ -588,6 +609,8 @@ struct Tail {
     done: bool,
     /// For a caller who is not an administrator: anonymizes the events of hidden pipes.
     filter: Option<crate::access::RefFilter>,
+    auth_headers: axum::http::HeaderMap,
+    next_access_check: Instant,
     _slot: Slot,
 }
 
@@ -641,8 +664,13 @@ impl Tail {
             if self.done {
                 return None;
             }
-            if let Some(event) = self.release() {
+            if Instant::now() >= self.next_access_check {
+                self.next_access_check = Instant::now() + STATUS_CHECK;
+                self.refresh_access().await?;
+            }
+            if let Some(mut event) = self.release() {
                 self.done = event.is_run_finished();
+                crate::access::runs::strip_event_proofs(&mut event);
                 let event = match self.filter.as_mut() {
                     Some(filter) => crate::access::runs::visible_event(filter, event).await,
                     None => event,
@@ -656,9 +684,10 @@ impl Tail {
                 );
             }
             if self.pending.is_empty()
-                && let Some(event) = self.terminal.take()
+                && let Some(mut event) = self.terminal.take()
             {
                 self.done = true;
+                crate::access::runs::strip_event_proofs(&mut event);
                 let event = match self.filter.as_mut() {
                     Some(filter) => crate::access::runs::visible_event(filter, event).await,
                     None => event,
@@ -690,6 +719,27 @@ impl Tail {
                 _ = self.poll.tick() => self.tick().await?,
             }
         }
+    }
+
+    /// A long-lived stream must stop when its credential or saved Pipeline access changes.
+    async fn refresh_access(&mut self) -> Option<()> {
+        let caller = crate::access::require_fresh(&self.state, &self.auth_headers, SCOPES)
+            .await
+            .ok()?;
+        let default = self.instances.first().cloned().unwrap_or_default();
+        let conn = self.state.get_api_connector(Some(&default)).ok()?;
+        crate::access::guard::check_connector_teams(&self.state, &caller, &conn.connector_keys())
+            .ok()?;
+        if caller.is_admin() {
+            self.filter = None;
+            return Some(());
+        }
+        let mut filter = crate::access::RefFilter::new(&self.state, &caller, &default).for_engine();
+        crate::routes::engine::visible_run_detail(self.store.as_ref(), &self.run_id, &mut filter)
+            .await
+            .ok()??;
+        self.filter = Some(filter);
+        Some(())
     }
 
     /// A poll: read the persisted events, check the run's record and the session. `None` ends

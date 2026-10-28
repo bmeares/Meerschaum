@@ -63,6 +63,8 @@ pub const ENGINE_CURSORS: &str = "/engine/cursors";
 pub const ENGINE_STATE: &str = "/engine/state";
 /// `/engine/runs`
 pub const ENGINE_RUNS: &str = "/engine/runs";
+/// Current history evidence as a bounded, caller-filtered boolean map.
+pub const ENGINE_RUN_GENERATIONS: &str = "/engine/run-generations";
 /// `/engine/events`
 pub const ENGINE_EVENTS: &str = "/engine/events";
 /// `/engine/sync-status`: the per-pipe sync status (rc15 contract C2).

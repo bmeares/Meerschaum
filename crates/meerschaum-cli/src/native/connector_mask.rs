@@ -148,6 +148,8 @@ static NORMED_PUBLIC: LazyLock<BTreeSet<String>> =
     LazyLock::new(|| PUBLIC_ATTRIBUTES.iter().map(|n| norm(n)).collect());
 static NORMED_URI_NAMES: LazyLock<BTreeSet<String>> =
     LazyLock::new(|| URI_NAMES.iter().map(|n| norm(n)).collect());
+static PERCENT_ESCAPE: LazyLock<regex::Regex> =
+    LazyLock::new(|| regex::Regex::new(r"%[0-9a-fA-F]{2}").expect("valid regex"));
 
 /// `scheme://user:password@` (the password runs to the last `@` of the address, so one holding an
 /// unencoded `@`, `/` or `#` is masked whole) and `https://<token>@`.
@@ -403,28 +405,30 @@ pub fn mask_connection_string(text: &str, typ: Option<&str>) -> String {
 /// The passwords and tokens of the URIs in `text`, and its secret-looking settings' values.
 fn uri_secrets(text: &str) -> Vec<String> {
     let mut secrets = Vec::new();
-    for caps in URI_CREDENTIALS.captures_iter(text) {
-        let password = caps
-            .name("password")
-            .map(|m| m.as_str())
-            .unwrap_or_default();
-        let user = &caps["user"];
-        if !password.is_empty() {
-            secrets.push(password.to_string());
-        } else if !user.is_empty()
-            && TOKEN_USERINFO_SCHEMES.contains(&caps["scheme"].to_lowercase().as_str())
-        {
-            secrets.push(user.to_string());
+    for view in decoded_views(text) {
+        for caps in URI_CREDENTIALS.captures_iter(&view) {
+            let password = caps
+                .name("password")
+                .map(|m| m.as_str())
+                .unwrap_or_default();
+            let user = &caps["user"];
+            if !password.is_empty() {
+                secrets.push(password.to_string());
+            } else if !user.is_empty()
+                && TOKEN_USERINFO_SCHEMES.contains(&caps["scheme"].to_lowercase().as_str())
+            {
+                secrets.push(user.to_string());
+            }
         }
-    }
-    for caps in TEXT_SECRETS.captures_iter(text).flatten() {
-        let value = caps
-            .name("value")
-            .map(|m| m.as_str())
-            .unwrap_or_default()
-            .trim_matches(|c| "'\"{}".contains(c));
-        if !value.is_empty() {
-            secrets.push(value.to_string());
+        for caps in TEXT_SECRETS.captures_iter(&view).flatten() {
+            let value = caps
+                .name("value")
+                .map(|m| m.as_str())
+                .unwrap_or_default()
+                .trim_matches(|c| "'\"{}".contains(c));
+            if !value.is_empty() {
+                secrets.push(value.to_string());
+            }
         }
     }
     secrets
@@ -504,36 +508,106 @@ fn unquote(text: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
+/// Bounded URL / form decoding, including encoded names and mixed-case percent escapes.
+fn decoded_views(text: &str) -> BTreeSet<String> {
+    let mut views = BTreeSet::from([text.to_string()]);
+    for form in [false, true] {
+        let mut view = text.to_string();
+        for _ in 0..4 {
+            let decoded = unquote(&if form {
+                view.replace('+', " ")
+            } else {
+                view.clone()
+            });
+            if decoded == view {
+                break;
+            }
+            views.insert(decoded.clone());
+            view = decoded;
+        }
+    }
+    views
+}
+
 /// `text` with what looks like a secret ([`mask_text`]) and every known secret value masked.
 pub fn scrub(text: &str, secrets: &[String]) -> String {
-    let mut text = mask_text(text);
+    let mut text = text.to_string();
     let mut candidates: BTreeSet<String> = BTreeSet::new();
+    let mut short: BTreeSet<String> = BTreeSet::new();
     for secret in secrets {
         let secret = secret.trim().to_string();
         // Also the decoded form of a percent-encoded password and the parts of one holding an
         // `@` (a URI parser may split it there): an error may quote any of them.
-        let forms: BTreeSet<String> = [secret.clone(), unquote(&secret)].into_iter().collect();
+        let forms = decoded_views(&secret);
         let mut all: BTreeSet<String> = forms.clone();
         for form in &forms {
             all.extend(form.split('@').map(str::to_string));
         }
         for candidate in all {
             let candidate = candidate.trim().to_string();
+            if candidate.is_empty() || candidate == MASK {
+                continue;
+            }
             if candidate.chars().count() >= 3
                 && !COMMON_VALUES.contains(&candidate.to_lowercase().as_str())
-                && candidate != MASK
             {
-                candidates.insert(candidate);
+                candidates.insert(candidate.clone());
+            } else {
+                short.insert(candidate.clone());
+            }
+            // Mask known representations before heuristic masking can split their escapes.
+            for quoted in [
+                pyfmt::str_repr(&candidate),
+                pyfmt::json_dumps_str(&candidate, true),
+            ] {
+                let inner = &quoted[1..quoted.len() - 1];
+                if inner != candidate.as_str() {
+                    candidates.insert(inner.to_string());
+                }
+                candidates.insert(quoted);
             }
         }
     }
     // Longest first, so a secret containing another is masked whole.
-    let mut ordered: Vec<String> = candidates.into_iter().collect();
+    let mut ordered: Vec<&String> = candidates.iter().collect();
     ordered.sort_by_key(|c| std::cmp::Reverse(c.chars().count()));
     for secret in ordered {
-        text = text.replace(&secret, MASK);
+        if secret.chars().count() >= 3 {
+            text = text.replace(secret.as_str(), MASK);
+        }
     }
-    text
+    let short_patterns: Vec<fancy_regex::Regex> = short
+        .iter()
+        .map(|secret| {
+            fancy_regex::Regex::new(&format!(r"(?<!\w){}(?!\w)", regex::escape(secret)))
+                .expect("escaped credential pattern")
+        })
+        .collect();
+    for pattern in &short_patterns {
+        text = pattern.replace_all(&text, MASK).into_owned();
+    }
+    // Decode only for comparison. Conceal the whole value when its original span is obscured.
+    let views = decoded_views(&text);
+    // A valid escape after the comparison budget may conceal further layers. Fail closed.
+    if (!candidates.is_empty() || !short.is_empty())
+        && views
+            .iter()
+            .min_by_key(|view| view.chars().count())
+            .is_some_and(|view| PERCENT_ESCAPE.is_match(view))
+    {
+        return MASK.to_string();
+    }
+    if views.iter().any(|view| {
+        candidates
+            .iter()
+            .any(|secret| secret.chars().count() >= 3 && view.contains(secret.as_str()))
+            || short_patterns
+                .iter()
+                .any(|pattern| pattern.is_match(view).unwrap_or(true))
+    }) {
+        return MASK.to_string();
+    }
+    mask_text(&text)
 }
 
 /// `value` (of attribute `name`) as it is shown; each value masked is added to `hidden`. Shown
@@ -581,7 +655,14 @@ fn mask_tree(
                 .map(|item| mask_tree(name, item, typ, secrets, hidden))
                 .collect(),
         ),
-        Value::Int(_) | Value::Float(_) => value.clone(),
+        Value::Int(_) | Value::Float(_) => {
+            let text = text_of(value);
+            if secrets.is_some_and(|secrets| scrub(&text, secrets) != text) {
+                Value::Str(MASK.into())
+            } else {
+                value.clone()
+            }
+        }
         Value::Str(s) => Value::Str(match secrets {
             Some(secrets) => scrub(s, secrets),
             None => s.clone(),
@@ -598,13 +679,13 @@ pub fn mask_value(name: &str, value: &Value, secrets: &[String], typ: Option<&st
 }
 
 /// A connector's attributes with every value that is not shown masked (keys starting with `_`
-/// are left out). `secrets` defaults to [`collect_secrets`] of the attributes.
+/// are left out). `secrets` defaults to [`hidden_values`] of the attributes.
 pub fn mask_attributes(attributes: &Map, typ: Option<&str>, secrets: Option<&[String]>) -> Map {
     let collected;
     let secrets = match secrets {
         Some(s) => s,
         None => {
-            collected = collect_secrets(&Value::Map(attributes.clone()), "");
+            collected = hidden_values(&Value::Map(attributes.clone()), "", typ);
             &collected
         }
     };
@@ -667,7 +748,7 @@ fn mask_labels(labels: &Value, typ: &str) -> Value {
                     merged.extend(attributes.iter().map(|(k, v)| (k.clone(), v.clone())));
                     merged
                 };
-                let secrets = collect_secrets(&Value::Map(merged), "");
+                let secrets = hidden_values(&Value::Map(merged), "", Some(typ));
                 (
                     label.clone(),
                     Value::Map(mask_attributes(attributes, Some(typ), Some(&secrets))),
@@ -793,9 +874,12 @@ mod tests {
         let shown = mask_attributes(&attrs, Some("sql"), None);
         assert_eq!(shown["host"], s("******.example.com"));
         assert_eq!(shown["uri"], s("postgresql://u:******@h/db"));
-        // Common words and very short values are never scrubbed.
+        // Common words and very short values are scrubbed as tokens, not inside other words.
         let secrets = vec!["true".to_string(), "ab".to_string()];
-        assert_eq!(scrub("true ab", &secrets), "true ab");
+        assert_eq!(
+            scrub("true ab truehost table", &secrets),
+            "****** ****** truehost table"
+        );
         // Percent-encoded passwords are scrubbed in both forms.
         let secrets = collect_secrets(&s("postgresql://u:p%40ss%21@h/db"), "uri");
         assert_eq!(scrub("p@ss! p%40ss%21", &secrets), "****** ******");
@@ -882,5 +966,100 @@ mod tests {
         assert_eq!(unquote("100%"), "100%");
         assert_eq!(unquote("%zz%4"), "%zz%4");
         assert_eq!(unquote("%E2%80%A2"), "•");
+    }
+
+    #[test]
+    fn encoded_credentials_cannot_reappear_in_public_fields_or_errors() {
+        let secret = "review secret+/=encoded";
+        let forms = [
+            secret,
+            "review%20secret%2B%2F%3Dencoded",
+            "review+secret%2B%2F%3Dencoded",
+            "review%2520secret%252B%252F%253Dencoded",
+            "review%20secret%2b%2f%3dencoded",
+            "%72%65%76%69%65%77%20%73%65%63%72%65%74%2b%2f%3d%65%6e%63%6f%64%65%64",
+        ];
+        for form in forms {
+            let attrs = map(&[
+                ("password", s(secret)),
+                ("database", s(form)),
+                ("host", s("db.invalid")),
+            ]);
+            let shown = mask_attributes(&attrs, Some("sql"), None);
+            assert_eq!(shown["database"], s(MASK), "{form}");
+            assert_eq!(shown["host"], s("db.invalid"));
+            let hidden = hidden_values(&Value::Map(attrs), "", Some("sql"));
+            let error = scrub(&format!("Driver echoed {form}"), &hidden);
+            assert!(!error.contains(secret) && !error.contains(form), "{error}");
+        }
+        assert_eq!(
+            scrub(
+                "Driver echoed p%C3%A1ssword%2F%CE%BA",
+                &["pássword/κ".into()]
+            ),
+            MASK
+        );
+        assert_eq!(
+            scrub("A harmless host db.invalid", &[secret.into()]),
+            "A harmless host db.invalid"
+        );
+        // Decoding is bounded; a still-encoded value beyond the budget is concealed whole.
+        let deep = "%2525252541";
+        assert!(!decoded_views(deep).contains("A"));
+        assert!(decoded_views(deep).len() <= 9);
+        assert_eq!(scrub(deep, &["A".into()]), MASK);
+    }
+
+    #[test]
+    fn encoded_query_keys_repr_and_numeric_copies_are_scrubbed() {
+        let attrs = map(&[
+            (
+                "uri",
+                s(
+                    "postgresql://reader:password-value@db.invalid/readings?%70aSsWoRd=query-private",
+                ),
+            ),
+            ("database", s("query-private")),
+        ]);
+        assert_eq!(
+            mask_attributes(&attrs, Some("sql"), None)["database"],
+            s(MASK)
+        );
+        for name in ["password", "PASSWORD", "pass%77ord", "%70aSsWoRd"] {
+            assert!(
+                !mask_connection_string(
+                    &format!("https://db.invalid/?{name}=query-private"),
+                    Some("api")
+                )
+                .contains("query-private")
+            );
+        }
+        let secret = "part\"one\\two\nlast";
+        for quoted in [pyfmt::str_repr(secret), pyfmt::json_dumps_str(secret, true)] {
+            let shown = scrub(&format!("Driver echoed {quoted}"), &[secret.into()]);
+            assert!(
+                !shown.contains("part") && !shown.contains("last"),
+                "{shown}"
+            );
+        }
+        let attrs = map(&[("api_key", Value::Int(4321)), ("port", Value::Int(4321))]);
+        assert_eq!(mask_attributes(&attrs, Some("sql"), None)["port"], s(MASK));
+        let attrs = map(&[("password", s("xy")), ("host", s("xy"))]);
+        assert_eq!(mask_attributes(&attrs, Some("sql"), None)["host"], s(MASK));
+        // Inherited opaque settings also remain private if repeated as a public value.
+        let config = Value::Map(map(&[
+            (
+                "default",
+                Value::Map(map(&[("opaque", s("private-opaque-value"))])),
+            ),
+            (
+                "review",
+                Value::Map(map(&[("host", s("private-opaque-value"))])),
+            ),
+        ]));
+        assert_eq!(
+            mask_connectors_config(&config, Some("sql")).get_path(&["review", "host"]),
+            Some(&s(MASK))
+        );
     }
 }

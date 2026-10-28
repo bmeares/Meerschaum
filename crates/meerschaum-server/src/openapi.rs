@@ -1020,7 +1020,7 @@ pub fn operations() -> Vec<Operation> {
             "Register Pipeline Metadata",
             true,
             "Register a Pipeline definition (`{\"pipeline\": {...}}`, the raw parameters the CLI \
-             and SDK write). `409` when it is registered.",
+             and SDK write). The server assigns a fresh identity. `409` when it is registered.",
             &["pipes:write"][..],
         ),
         (
@@ -1028,9 +1028,26 @@ pub fn operations() -> Vec<Operation> {
             "edit",
             "Edit Raw Pipeline Metadata",
             true,
-            "Replace (or with `patch=true` merge) a Pipeline definition. `404` when it is not \
-             registered.",
+            "Replace (or with `patch=true` merge) a Pipeline definition, preserving its current \
+             identity. Unproven legacy identities are upgraded. `404` when it is not registered.",
             &["pipes:write"][..],
+        ),
+        (
+            "post",
+            "rename",
+            "Rename Saved Pipeline",
+            true,
+            "Atomically move a live registration to `new_name`, preserving its identity and \
+             access settings. Optional `expected_revision` and `expected_id` reject stale \
+             requests. Returns the saved `pipeline`; `409` for an occupied destination or a \
+             changed source. Locks and referencing jobs also refuse the move. A missing source \
+             is never registered.",
+            &[
+                "pipes:read",
+                "pipes:write",
+                "pipes:register",
+                "pipes:delete",
+            ][..],
         ),
         (
             "delete",
@@ -1178,6 +1195,18 @@ pub fn operations() -> Vec<Operation> {
              `failed` or `running`), `since` (an ISO datetime) and `limit` (default 100, at most \
              1000); with `run_id`, that run and its pipes' rows. `instance_keys` names the \
              instance that keeps the history.",
+            READ,
+        ),
+        (
+            "post",
+            "/engine/run-generations",
+            "Check Run History Registrations",
+            vec![IK],
+            true,
+            "Check up to 256 run IDs (`{\"run_ids\": [...]}`) against current Pipe and \
+             Pipeline registrations and caller access. Returns `generations`, a map of requested \
+             IDs to booleans; hidden, missing, stale or unproven history is false. Checks \
+             registration continuity even for administrators, without returning stored evidence.",
             READ,
         ),
         (

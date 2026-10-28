@@ -19,9 +19,10 @@ use axum::Router;
 use axum::http::StatusCode;
 use common::{SECRET, req, send};
 use indexmap::IndexMap;
+use meerschaum_connector::InstanceConnector;
 use meerschaum_core::{Map, SuccessTuple, Value};
 use meerschaum_server::AppState;
-use meerschaum_server::backends::{CreateJob, JobsBackend};
+use meerschaum_server::backends::{ActionsBackend, CreateJob, JobsBackend};
 use serde_json::{Value as Json, json};
 
 /// A job as the fake backend keeps it: the sysargs and the properties `create` was given.
@@ -32,6 +33,29 @@ type Stored = (Vec<String>, Option<Map>);
 #[derive(Default)]
 struct FakeJobs {
     jobs: Mutex<IndexMap<String, Stored>>,
+}
+
+#[derive(Default)]
+struct FakeActions {
+    calls: Mutex<Vec<String>>,
+}
+
+#[async_trait]
+impl ActionsBackend for FakeActions {
+    fn list(&self) -> Vec<String> {
+        vec![
+            "show".into(),
+            "chain".into(),
+            "start".into(),
+            "edit".into(),
+            "register".into(),
+        ]
+    }
+
+    async fn execute(&self, action: &str, _keywords: Map) -> SuccessTuple {
+        self.calls.lock().unwrap().push(action.into());
+        SuccessTuple::ok("synthetic action executed")
+    }
 }
 
 impl FakeJobs {
@@ -131,6 +155,8 @@ impl JobsBackend for FakeJobs {
 struct Fixture {
     app: Router,
     jobs: Arc<FakeJobs>,
+    actions: Arc<FakeActions>,
+    instance: Arc<common::MemoryInstance>,
     _dir: tempfile::TempDir,
 }
 
@@ -148,14 +174,18 @@ fn fixture(tweak: impl FnOnce(&mut meerschaum_server::ServerConfig)) -> Fixture 
     let mut cfg = common::config(dir.path());
     tweak(&mut cfg);
     let jobs = Arc::new(FakeJobs::default());
-    let state = AppState::builder(cfg, instance)
+    let actions = Arc::new(FakeActions::default());
+    let state = AppState::builder(cfg, instance.clone())
         .secret(SECRET.to_vec())
         .jobs(jobs.clone())
+        .actions(actions.clone())
         .build()
         .unwrap();
     Fixture {
         app: meerschaum_server::app(state),
         jobs,
+        actions,
+        instance,
         _dir: dir,
     }
 }
@@ -284,11 +314,11 @@ async fn a_non_admin_runs_what_the_console_offers() {
         ],
         vec!["verify", "pipes", "-t", "daily", "--bounded"],
         vec!["delete", "pipes", "-c", "a", "-m", "b", "--yes"],
-        vec!["edit", "pipes", "definition"],
-        vec!["register", "pipes"],
+        vec!["edit", "pipes", "-P", r#"{"description":"safe metadata"}"#],
         vec!["show", "jobs"],
         // Another pipe's metric may be called anything, including an omitted action's name.
         vec!["show", "pipes", "-m", "python", "-c", "sh"],
+        vec!["show", "pipes", "-m", "connectors"],
     ] {
         let r = execute(&f, &bob, &sysargs).await;
         assert!(started(&r), "{sysargs:?}: {} {}", r.status, r.text());
@@ -311,12 +341,442 @@ async fn an_administrator_keeps_the_latitude_of_actions() {
     for sysargs in [
         vec!["python", "-c", "print(1)"],
         vec!["show", "config"],
+        vec!["show", "connector"],
+        vec!["show", "connectors", "sql:private"],
+        vec!["chain", "-P", r#"{"sub_args_line":"show connectors"}"#],
         vec!["stack", "ps"],
         vec!["show", "pipes", "--shell"],
     ] {
         let r = execute(&f, &admin, &sysargs).await;
         assert!(started(&r), "{sysargs:?}: {} {}", r.status, r.text());
     }
+}
+
+#[tokio::test]
+async fn connector_inventory_and_serialized_wrappers_are_denied_at_every_common_route() {
+    let f = fixture(|cfg| cfg.actions_non_admin = true);
+    let bob = common::login(&f.app, "bob", "pw", None).await;
+    for (index, sysargs) in [
+        vec!["show", "connector"],
+        vec!["show", "connectors", "sql:private"],
+        vec!["show", "--nopretty", "connectors"],
+        vec!["show", "version", "+", "show", "connectors"],
+        vec!["chain", "-P", r#"{"sub_args_line":"show connectors"}"#],
+    ]
+    .iter()
+    .enumerate()
+    {
+        for uri in ["/execute", "/execute/validate"] {
+            let response = send(&f.app, post_json(uri, &bob, json!({"sysargs":sysargs}))).await;
+            assert_eq!(
+                response.status,
+                StatusCode::FORBIDDEN,
+                "{uri} {sysargs:?}: {}",
+                response.text()
+            );
+            assert!(
+                response.text().contains("non-administrators"),
+                "{}",
+                response.text()
+            );
+        }
+        // The v4 job API keeps its success tuple/status contract while refusing the action.
+        let response = send(
+            &f.app,
+            post_json(&format!("/jobs/review-{index}"), &bob, json!(sysargs)),
+        )
+        .await;
+        assert_eq!(response.status, StatusCode::OK, "{}", response.text());
+        assert_eq!(response.json()[0], false, "{}", response.text());
+    }
+    for (action, keywords) in [
+        ("show", json!({"action":["connectors","sql:private"]})),
+        ("show", json!({"action":["connector"]})),
+        (
+            "chain",
+            json!({"params":{"sub_args_line":"show connectors"}}),
+        ),
+    ] {
+        let response = send(
+            &f.app,
+            post_json(&format!("/actions/{action}"), &bob, keywords),
+        )
+        .await;
+        assert_eq!(response.status, StatusCode::OK, "{}", response.text());
+        assert_eq!(response.json()[0], false, "{}", response.text());
+    }
+    assert!(f.jobs.jobs.lock().unwrap().is_empty(), "no job started");
+    assert!(
+        f.actions.calls.lock().unwrap().is_empty(),
+        "no action executed"
+    );
+    let policy = send(&f.app, req("GET", "/execute/policy", Some(&bob), None))
+        .await
+        .json();
+    assert!(
+        policy["denied_subactions"]["show"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("connector"))
+    );
+}
+
+async fn api_key(f: &Fixture, admin: &str, label: &str, scopes: Json) -> String {
+    let response = send(
+        &f.app,
+        post_json(
+            "/tokens/register",
+            admin,
+            json!({"label":label,"scopes":scopes}),
+        ),
+    )
+    .await;
+    assert_eq!(response.status, StatusCode::OK, "{}", response.text());
+    format!("Bearer {}", response.json()["api_key"].as_str().unwrap())
+}
+
+#[tokio::test]
+async fn narrowed_admin_keys_follow_policy_while_full_admin_keys_keep_admin_actions() {
+    let f = fixture(|cfg| cfg.actions_non_admin = true);
+    let admin = common::login(&f.app, "admin", "pass", None).await;
+    let narrow = api_key(
+        &f,
+        &admin,
+        "bounded-actions",
+        json!(["actions:execute", "jobs:execute", "jobs:write"]),
+    )
+    .await;
+    for sub in ["connector", "connectors", "config"] {
+        for uri in ["/execute", "/execute/validate"] {
+            let response = send(
+                &f.app,
+                post_json(uri, &narrow, json!({"sysargs":["show",sub]})),
+            )
+            .await;
+            assert_eq!(
+                response.status,
+                StatusCode::FORBIDDEN,
+                "{uri}: {}",
+                response.text()
+            );
+        }
+        for (uri, body) in [
+            (format!("/jobs/scoped-{sub}"), json!(["show", sub])),
+            ("/actions/show".into(), json!({"action":[sub]})),
+        ] {
+            let response = send(&f.app, post_json(&uri, &narrow, body)).await;
+            assert_eq!(response.status, StatusCode::OK, "{}", response.text());
+            assert_eq!(response.json()[0], false, "{}", response.text());
+        }
+    }
+    assert!(f.jobs.jobs.lock().unwrap().is_empty());
+    assert!(f.actions.calls.lock().unwrap().is_empty());
+    // Full admin keys remain admin even when ordinary users cannot execute actions.
+    let secured = fixture(|cfg| cfg.actions_non_admin = false);
+    let admin = common::login(&secured.app, "admin", "pass", None).await;
+    let full = api_key(&secured, &admin, "admin-all", json!(["*"])).await;
+    assert!(started(
+        &execute(&secured, &full, &["show", "connectors"]).await
+    ));
+    let validation = send(
+        &secured.app,
+        post_json(
+            "/execute/validate",
+            &full,
+            json!({"sysargs":["show","config"]}),
+        ),
+    )
+    .await;
+    assert_eq!(validation.status, StatusCode::OK, "{}", validation.text());
+    for (uri, body) in [
+        ("/actions/show", json!({"action":["config"]})),
+        ("/jobs/admin-inventory", json!(["show", "connectors"])),
+    ] {
+        let response = send(&secured.app, post_json(uri, &full, body)).await;
+        assert_eq!(response.status, StatusCode::OK, "{}", response.text());
+        assert_eq!(response.json()[0], true, "{}", response.text());
+    }
+}
+
+#[tokio::test]
+async fn legacy_chains_preserve_safe_commands_and_check_effective_selection_patches() {
+    let f = fixture(|cfg| cfg.actions_non_admin = true);
+    let bob = common::login(&f.app, "bob", "pw", None).await;
+    for (connector, metric, owner, visibility) in [
+        ("plugin:public", "public", "bob", "public"),
+        ("plugin:private", "private", "eve", "private"),
+    ] {
+        let mut pipe = meerschaum_core::Pipe::builder(connector, metric)
+            .instance("sql:fixture")
+            .build()
+            .unwrap();
+        pipe.set_parameters(
+            Value::from_json_str(
+                &json!({"access":{"owner":owner,"visibility":visibility}}).to_string(),
+            )
+            .unwrap()
+            .to_map(),
+        );
+        assert!(f.instance.register_pipe(&pipe).await.success);
+    }
+    let line = "show pipes -i sql:fixture -c plugin:public -m public";
+    let safe = json!({"mrsm_instance":"sql:fixture","connector_keys":["plugin:public"],"metric_keys":["public"],
+                    "debug":true,"nopretty":true,"executor_keys":null,"action":null});
+    for prefix in [vec!["chain"], vec!["start", "pipeline"]] {
+        for patch in [Json::Null, json!({}), safe.clone()] {
+            let payload =
+                json!({"sub_args_line":format!("{line} + show version"),"patch_args":patch})
+                    .to_string();
+            let mut args = prefix.clone();
+            args.extend(["-P", payload.as_str()]);
+            let response = execute(&f, &bob, &args).await;
+            assert!(started(&response), "{args:?}: {}", response.text());
+        }
+    }
+    for patch in [
+        json!({"connector_keys":["plugin:private"],"metric_keys":["private"]}),
+        json!({"connector_keys":null,"metric_keys":null}),
+        json!({"mrsm_instance":"sql:unserved"}),
+        json!({"action":["show","connectors"]}),
+        json!({"executor_keys":"api:private"}),
+    ] {
+        let payload = json!({"sub_args_line":line,"patch_args":patch}).to_string();
+        let response = execute(&f, &bob, &["start", "pipeline", "-P", &payload]).await;
+        assert_eq!(
+            response.status,
+            StatusCode::FORBIDDEN,
+            "{patch}: {}",
+            response.text()
+        );
+    }
+    // Default None fields are not automatically rejected as dangerous changes.
+    let payload=json!({"sub_args_line":"show version","patch_args":{"action":null,"executor_keys":null,"params":null}}).to_string();
+    assert!(started(
+        &execute(&f, &bob, &["start", "pipeline", "-P", &payload]).await
+    ));
+    // The legacy keyword API carries the same params dictionary, not an unrelated action.
+    let response = send(
+        &f.app,
+        post_json(
+            "/actions/chain",
+            &bob,
+            json!({"params":{"sub_args_line":line}}),
+        ),
+    )
+    .await;
+    assert_eq!(response.json()[0], true, "{}", response.text());
+    let response = send(
+        &f.app,
+        post_json(
+            "/actions/start",
+            &bob,
+            json!({"action":["pipeline"],"params":{"sub_args_line":line}}),
+        ),
+    )
+    .await;
+    assert_eq!(response.json()[0], true, "{}", response.text());
+}
+
+#[tokio::test]
+async fn non_admin_executors_cannot_retarget_checked_commands_to_private_credentials() {
+    let f = fixture(|cfg| cfg.actions_non_admin = true);
+    let bob = common::login(&f.app, "bob", "pw", None).await;
+    for flag in [
+        "--executor-keys=api:private",
+        "--exec=api:private",
+        "-eapi:private",
+        "-yeapi:private",
+        "-vyeapi:private",
+    ] {
+        for uri in ["/execute", "/execute/validate"] {
+            let response = send(
+                &f.app,
+                post_json(uri, &bob, json!({"sysargs":["show","version",flag]})),
+            )
+            .await;
+            assert_eq!(
+                response.status,
+                StatusCode::FORBIDDEN,
+                "{uri} {flag}: {}",
+                response.text()
+            );
+        }
+    }
+    let response = send(
+        &f.app,
+        post_json(
+            "/actions/show",
+            &bob,
+            json!({"action":["version"],"executor_keys":"api:private"}),
+        ),
+    )
+    .await;
+    assert_eq!(response.json()[0], false, "{}", response.text());
+    assert!(f.actions.calls.lock().unwrap().is_empty());
+    assert!(f.jobs.jobs.lock().unwrap().is_empty());
+    for executor in [Json::Null, json!("local")] {
+        let response = send(
+            &f.app,
+            post_json(
+                "/actions/show",
+                &bob,
+                json!({"action":["version"],"executor_keys":executor}),
+            ),
+        )
+        .await;
+        assert_eq!(response.json()[0], true, "{}", response.text());
+    }
+    assert!(started(
+        &execute(&f, &bob, &["show", "-e", "local", "version"]).await
+    ));
+    // The normal job/execute cleaner already strips the separate remote flag before running.
+    let response = execute(&f, &bob, &["show", "version", "-e", "api:private"]).await;
+    assert!(started(&response), "{}", response.text());
+    let jobs = f.jobs.jobs.lock().unwrap();
+    assert!(
+        jobs.values()
+            .all(|(words, _)| !words.iter().any(|word| word.contains("api:private")))
+    );
+}
+
+#[tokio::test]
+async fn no_auth_connector_inspection_keeps_existing_local_privileges() {
+    let f = fixture(|cfg| cfg.no_auth = true);
+    let response = send(
+        &f.app,
+        req(
+            "POST",
+            "/execute",
+            None,
+            Some((
+                "application/json",
+                json!({"sysargs":["show","connectors"]})
+                    .to_string()
+                    .into_bytes(),
+            )),
+        ),
+    )
+    .await;
+    assert!(started(&response), "{}", response.text());
+}
+
+#[tokio::test]
+async fn sensitive_pipe_mutations_cannot_bypass_dedicated_authorization_via_actions() {
+    let f = fixture(|cfg| cfg.actions_non_admin = true);
+    let bob = common::login(&f.app, "bob", "pw", None).await;
+    let narrow_admin = common::login(&f.app, "admin", "pass", None).await;
+    let narrow = api_key(
+        &f,
+        &narrow_admin,
+        "sensitive-pipe-writes",
+        json!([
+            "actions:execute",
+            "jobs:execute",
+            "jobs:write",
+            "pipes:read",
+            "pipes:write"
+        ]),
+    )
+    .await;
+    for auth in [&bob, &narrow] {
+        for (index, args) in [
+            json!(["register", "pipes"]),
+            json!(["edit", "definition"]),
+            json!(["edit", "pipes", "definition"]),
+            json!([
+                "edit",
+                "pipes",
+                "-P",
+                r#"{"fetch":{"definition":"SELECT 42"}}"#
+            ]),
+            json!(["edit", "pipes", "--params={\"access\":null}"]),
+            json!(["edit", "pipes", "-vyP{\"locks\":[]}"]),
+            json!([
+                "start",
+                "pipeline",
+                "-P",
+                r#"{"sub_args_line":"edit pipes","patch_args":{"params":{"sql":"SELECT 42"}}}"#
+            ]),
+        ]
+        .iter()
+        .enumerate()
+        {
+            for uri in ["/execute", "/execute/validate"] {
+                let response = send(&f.app, post_json(uri, auth, json!({"sysargs":args}))).await;
+                assert_eq!(
+                    response.status,
+                    StatusCode::FORBIDDEN,
+                    "{uri} {args}: {}",
+                    response.text()
+                );
+            }
+            let response = send(
+                &f.app,
+                post_json(&format!("/jobs/mutation-{index}"), auth, args.clone()),
+            )
+            .await;
+            assert_eq!(response.json()[0], false, "{args}: {}", response.text());
+        }
+        for (action, keywords) in [
+            (
+                "register",
+                json!({"action":["pipes"],"params":{"access":{"owner":"alice"}}}),
+            ),
+            (
+                "edit",
+                json!({"action":["pipes"],"params":{"fetch":{"definition":"SELECT 42"}}}),
+            ),
+            ("edit", json!({"action":["pipes"],"params":{"locks":[]}})),
+            (
+                "chain",
+                json!({"params":{"sub_args_line":"edit pipes","patch_args":{"params":{"access":null}}}}),
+            ),
+        ] {
+            let response = send(
+                &f.app,
+                post_json(&format!("/actions/{action}"), auth, keywords),
+            )
+            .await;
+            assert_eq!(response.json()[0], false, "{action}: {}", response.text());
+        }
+    }
+    assert!(f.actions.calls.lock().unwrap().is_empty());
+    assert!(f.jobs.jobs.lock().unwrap().is_empty());
+    let safe = send(
+        &f.app,
+        post_json(
+            "/actions/edit",
+            &bob,
+            json!({"action":["pipes"],"params":{"tags":["daily"],"description":"notes"}}),
+        ),
+    )
+    .await;
+    assert_eq!(safe.json()[0], true, "{}", safe.text());
+    // The full administrator still has the trusted local CLI path.
+    let full = api_key(&f, &narrow_admin, "sensitive-pipe-admin", json!(["*"])).await;
+    for args in [
+        vec!["register", "pipes"],
+        vec!["edit", "pipes", "definition"],
+    ] {
+        assert!(started(&execute(&f, &full, &args).await));
+    }
+    let open = fixture(|cfg| cfg.no_auth = true);
+    let response = send(
+        &open.app,
+        req(
+            "POST",
+            "/execute",
+            None,
+            Some((
+                "application/json",
+                json!({"sysargs":["register","pipes"]})
+                    .to_string()
+                    .into_bytes(),
+            )),
+        ),
+    )
+    .await;
+    assert!(started(&response), "{}", response.text());
 }
 
 #[tokio::test]

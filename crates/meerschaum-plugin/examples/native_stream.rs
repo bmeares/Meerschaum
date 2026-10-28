@@ -33,7 +33,7 @@ impl Plugin for Stream {
     const VERSION: &'static str = "1.0.0";
     fn manifest(&self) -> Value {
         json!({"schema_version": meerschaum_plugin::MANIFEST_SCHEMA_VERSION,
-            "meerschaum_version": "5.0.0-rc.16", "python_version": "", "fingerprint": null,
+            "meerschaum_version": "5.0.0-rc.17", "python_version": "", "fingerprint": null,
             "plugins": {"native_stream": {"name": "native_stream", "version": "1.0.0",
                 "data_functions": ["subscribe"], "connectors": ["ticker"]}},
             "connector_types": {"ticker": {"type": "ticker", "plugin": "native_stream",

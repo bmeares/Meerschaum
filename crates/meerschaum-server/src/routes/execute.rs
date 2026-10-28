@@ -24,9 +24,7 @@ use serde_json::{Value as Json, json};
 
 use super::jobs::clean_sysargs;
 use super::{Ctx, body_bytes};
-use crate::auth::{
-    Principal, is_admin, is_user_allowed_to_execute_console, scoped_auth, scoped_auth_if_private,
-};
+use crate::auth::{Principal, is_user_allowed_to_execute_console, scoped_auth_if_private};
 use crate::backends::CreateJob;
 use crate::config::ServerConfig;
 use crate::envelope;
@@ -91,15 +89,18 @@ async fn policy(ctx: Ctx) -> ApiResult {
 
 /// Authorize terminal Exec without starting another execution worker.
 async fn validate_terminal_command(ctx: Ctx, body: Body) -> ApiResult {
-    let principal = scoped_auth(
+    let caller = crate::access::require(
         &ctx.state,
         &ctx.headers,
         &["actions:execute", "jobs:execute", "jobs:write"],
     )
     .await?;
-    let allowed = is_user_allowed_to_execute_console(&ctx.state, principal.as_ref()).await;
-    if !allowed.success {
-        return Err(ApiError::new(403, allowed.message));
+    let principal = caller.auth.clone();
+    if !caller.no_auth && !caller.full_admin() {
+        let allowed = is_user_allowed_to_execute_console(&ctx.state, principal.as_ref()).await;
+        if !allowed.success {
+            return Err(ApiError::new(403, allowed.message));
+        }
     }
     let body = parse_json_body(&body_bytes(body).await?)?.unwrap_or(Json::Null);
     let items = body
@@ -114,11 +115,10 @@ async fn validate_terminal_command(ctx: Ctx, body: Body) -> ApiResult {
     if args.is_empty() {
         return Err(ApiError::new(422, "sysargs is empty"));
     }
-    if !is_admin(&ctx.state, principal.as_ref()).await {
+    if !caller.no_auth && !caller.full_admin() {
         crate::execute_policy::check_non_admin(&args)
             .map_err(|message| ApiError::new(403, message))?;
         // The pipes the command selects (rc15 access model).
-        let caller = crate::access::resolve(&ctx.state, &ctx.headers).await?;
         crate::execute_access::check(&ctx.state, &caller, &args).await?;
     }
     Ok(envelope::ok(
@@ -347,9 +347,11 @@ async fn execute(ctx: Ctx, body: Body) -> ApiResult {
     let plan = crate::execute_access::check(&ctx.state, &caller, &sysargs).await?;
     if plan.needs_actions {
         caller.require(&["actions:execute", "jobs:write"], &[])?;
-        let allowed = is_user_allowed_to_execute_console(&ctx.state, principal.as_ref()).await;
-        if !allowed.success {
-            return Err(ApiError::new(403, allowed.message));
+        if !caller.no_auth && !caller.full_admin() {
+            let allowed = is_user_allowed_to_execute_console(&ctx.state, principal.as_ref()).await;
+            if !allowed.success {
+                return Err(ApiError::new(403, allowed.message));
+            }
         }
     } else if !caller.no_auth && !caller.is_admin() && !ctx.state.config.actions_non_admin {
         return Err(ApiError::new(
@@ -357,7 +359,7 @@ async fn execute(ctx: Ctx, body: Body) -> ApiResult {
             "The administrator for this server has not allowed users to perform actions.",
         ));
     }
-    if !is_admin(&ctx.state, principal.as_ref()).await {
+    if !caller.no_auth && !caller.full_admin() {
         // A non-administrator runs what the console offers, and only in `execute-*` jobs (the
         // family whose visibility is the creator's).
         if let Err(message) = crate::execute_policy::check_non_admin(&sysargs) {

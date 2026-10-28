@@ -239,7 +239,15 @@ pub fn node_doc(row: &NodeRow, run_started: DateTime<Utc>) -> Doc {
     [
         ("run_id", kv_str(&row.run_id)),
         ("pipe_ref", kv_str(row.pipe_ref.as_str())),
-        ("registration_ref", kv_str(row.pipe_ref.as_str())),
+        (
+            "registration_ref",
+            kv_str(
+                row.registration_ref
+                    .as_ref()
+                    .unwrap_or(&row.pipe_ref)
+                    .as_str(),
+            ),
+        ),
         (
             "registration_id",
             kv_opt_str(row.registration_id.as_deref()),
@@ -288,6 +296,9 @@ pub fn node_from_doc(doc: &Doc) -> Option<NodeRow> {
     );
     row.status = parse_enum(doc_str(doc, "status")).unwrap_or(NodeStatus::Pending);
     row.registration_id = doc_str(doc, "registration_id");
+    row.registration_ref = doc_str(doc, "registration_ref")
+        .filter(|reference| reference != row.pipe_ref.as_str())
+        .map(PipeRef::from_string);
     row.begin = doc_bound(doc, "begin");
     row.end = doc_bound(doc, "end");
     row.num_chunks = doc_int(doc, "num_chunks").unwrap_or(0).max(0) as usize;
@@ -1101,8 +1112,8 @@ impl StateWriter for InstanceState {
     }
 
     async fn record_run(&self, run: &RunRecord) -> Result<(), StateError> {
-        self.write_rows(&self.home, EnginePipe::Runs, vec![run_doc(&run.run)])
-            .await?;
+        // Restricted API readers need the original queued node identities before a header
+        // can expose whole-run metadata. Never publish a header before its first snapshots.
         self.write_rows(
             &self.home,
             EnginePipe::Nodes,
@@ -1111,7 +1122,9 @@ impl StateWriter for InstanceState {
                 .map(|n| node_doc(n, run.run.started))
                 .collect(),
         )
-        .await
+        .await?;
+        self.write_rows(&self.home, EnginePipe::Runs, vec![run_doc(&run.run)])
+            .await
     }
 }
 

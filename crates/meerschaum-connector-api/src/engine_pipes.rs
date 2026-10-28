@@ -18,10 +18,27 @@ use crate::wire::{ToJsonOptions, to_json};
 /// The server validates registration identity before assigning a canonical metrics ref.
 pub const CLIENT_INSTANCE_HEADER: &str = "x-mrsm-engine-client-instance";
 
+/// Rebind exact local saved-Pipeline members at an explicit transport boundary.
+/// The server supplies the canonical registry; every foreign reference stays unchanged.
+pub fn rebind_pipeline_definition(definition: &mut Map, from: &str, to: &str) {
+    if let Some(Value::List(targets)) = definition.get_mut("targets") {
+        for target in targets {
+            if let Value::Str(reference) = target
+                && reference.split('|').count() == 4
+                && reference.split('|').next() == Some(from)
+                && let Some((_, keys)) = reference.split_once('|')
+            {
+                *reference = format!("{to}|{keys}");
+            }
+        }
+    }
+    definition.insert("registry".into(), Value::Str(to.to_string()));
+}
+
 /// Whether `metric_key` names one of the engine's state pipes (`engine_state`, `engine_ledger`,
 /// `engine_cursors`, `engine_runs`, `engine_nodes`, `engine_events`).
 pub fn is_engine_metric(metric_key: &str) -> bool {
-    metric_key != meerschaum_connector::sync_metrics::METRIC
+    !matches!(metric_key, "engine_metrics" | "engine_sync_status")
         && engine_state_parameters(metric_key).is_some()
 }
 
@@ -46,6 +63,12 @@ pub struct EnginePipeQuery {
     /// The upper datetime bound (ISO), exclusive.
     #[serde(default)]
     pub end: Option<String>,
+    /// Maximum visible rows (read only); omitted for older clients' wire compatibility.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<i64>,
+    /// Datetime ordering, `asc` or `desc` (read only).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub order: Option<String>,
 }
 
 impl EnginePipeQuery {
@@ -70,6 +93,8 @@ impl EnginePipeQuery {
                 .end
                 .as_ref()
                 .map(meerschaum_connector::DateBound::isoformat),
+            limit: query.limit,
+            order: query.order.clone(),
         }
     }
 
@@ -142,6 +167,31 @@ pub fn docs_from_records(items: &[serde_json::Value]) -> Vec<Doc> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn explicit_pipeline_transport_rebinds_only_the_exact_local_instance() {
+        let mut definition = Value::from_json_str(r#"{"registry":"api:client","targets":["api:client|sql:source|member|None","api:foreign|sql:source|member|None","sql:other|sql:source|member|None"]}"#).unwrap().to_map();
+        rebind_pipeline_definition(&mut definition, "api:client", "sql:served");
+        assert_eq!(definition["registry"], Value::Str("sql:served".into()));
+        assert_eq!(
+            definition["targets"].as_list().unwrap()[0],
+            Value::Str("sql:served|sql:source|member|None".into())
+        );
+        rebind_pipeline_definition(&mut definition, "sql:served", "api:client");
+        let targets = definition["targets"].as_list().unwrap();
+        assert_eq!(
+            targets[0],
+            Value::Str("api:client|sql:source|member|None".into())
+        );
+        assert_eq!(
+            targets[1],
+            Value::Str("api:foreign|sql:source|member|None".into())
+        );
+        assert_eq!(
+            targets[2],
+            Value::Str("sql:other|sql:source|member|None".into())
+        );
+    }
     use meerschaum_kernel::value::{DateTimeValue, Value as KValue};
 
     #[test]
@@ -172,6 +222,8 @@ mod tests {
             meerschaum_connector::pipe_ops::frame_to_docs(&df)
         );
         assert!(is_engine_metric("engine_runs"));
+        assert!(!is_engine_metric("engine_metrics"));
+        assert!(!is_engine_metric("engine_sync_status"));
         assert!(!is_engine_metric("users"));
     }
 
@@ -201,5 +253,23 @@ mod tests {
         let j = serde_json::to_string(&q).unwrap();
         let back: EnginePipeQuery = serde_json::from_str(&j).unwrap();
         assert_eq!(back.params_map(), Some(params));
+    }
+
+    #[test]
+    fn a_native_history_page_retains_its_bound_and_order_on_the_wire() {
+        let request = EnginePipeQuery::from_data_query(&meerschaum_connector::DataQuery {
+            limit: Some(128),
+            order: Some("desc".into()),
+            ..Default::default()
+        });
+        let wire = serde_json::to_value(&request).unwrap();
+        assert_eq!(wire["limit"], 128);
+        assert_eq!(wire["order"], "desc");
+        assert_eq!(
+            serde_json::from_value::<EnginePipeQuery>(wire).unwrap(),
+            request
+        );
+        let legacy = serde_json::to_value(EnginePipeQuery::default()).unwrap();
+        assert!(legacy.get("limit").is_none() && legacy.get("order").is_none());
     }
 }

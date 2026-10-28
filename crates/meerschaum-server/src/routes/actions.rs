@@ -49,14 +49,16 @@ async fn do_action_legacy(ctx: Ctx, Path(action): Path<String>, body: Body) -> A
             )]));
         }
     };
-    let allowed = is_user_allowed_to_execute(&ctx.state, principal.as_ref()).await;
-    if !allowed.success {
-        return Ok(tuple_response(&allowed));
+    if !caller.no_auth && !caller.full_admin() {
+        let allowed = is_user_allowed_to_execute(&ctx.state, principal.as_ref()).await;
+        if !allowed.success {
+            return Ok(tuple_response(&allowed));
+        }
     }
     if !ctx.state.actions.list().iter().any(|a| a == &action) {
         return Ok(tuple(false, format!("Invalid action '{action}'.")));
     }
-    if !caller.no_auth && !caller.is_admin() {
+    if !caller.no_auth && !caller.full_admin() {
         let sysargs = crate::execute_access::sysargs_of_keywords(&action, &keywords);
         if let Err(message) = crate::execute_policy::check_non_admin(&sysargs) {
             return Ok(tuple(false, message));

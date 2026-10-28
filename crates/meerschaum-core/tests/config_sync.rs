@@ -62,6 +62,35 @@ fn built_in_grafana_dashboards_upgrade_in_the_existing_folder_and_keep_user_file
 }
 
 #[test]
+fn unreadable_and_symlink_dashboard_collisions_are_preserved() {
+    let root = tempfile::tempdir().unwrap();
+    let config = registry(root.path(), true);
+    let provider = config.paths().path("GRAFANA_DASHBOARD_PATH");
+    let directory = provider.parent().unwrap();
+    std::fs::create_dir_all(directory).unwrap();
+    let undecodable = directory.join(GRAFANA_DASHBOARDS[0].0);
+    std::fs::write(&undecodable, b"\xffcustom").unwrap();
+    #[cfg(unix)]
+    let linked = {
+        let target = root.path().join("custom-dashboard.json");
+        std::fs::write(&target, GRAFANA_DASHBOARDS[1].1).unwrap();
+        let linked = directory.join(GRAFANA_DASHBOARDS[1].0);
+        std::os::unix::fs::symlink(&target, &linked).unwrap();
+        linked
+    };
+    config
+        .with_state(|state| state.write_grafana_dashboards())
+        .unwrap();
+    assert_eq!(std::fs::read(undecodable).unwrap(), b"\xffcustom");
+    #[cfg(unix)]
+    assert!(linked.is_symlink());
+    assert_eq!(
+        std::fs::read_to_string(directory.join(GRAFANA_DASHBOARDS[2].0)).unwrap(),
+        GRAFANA_DASHBOARDS[2].1
+    );
+}
+
+#[test]
 fn read_only_paths_keep_a_missing_configured_venv_directory_without_creating_it() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path().join("root");

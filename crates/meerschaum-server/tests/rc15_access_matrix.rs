@@ -132,6 +132,12 @@ async fn register(instance: &MemoryInstance, keys: (&str, &str), parameters: Jso
     assert!(res.success, "{res}");
 }
 
+/// Capture a fixture's immutable registration before constructing its completed history.
+async fn captured_registration(instance: &MemoryInstance, keys: (&str, &str)) -> String {
+    let attributes = instance.get_pipe_attributes(&pipe(keys)).await.unwrap();
+    meerschaum_connector::sync_status::registration_from_attributes(&attributes).unwrap()
+}
+
 async fn team(instance: &MemoryInstance, name: &str, members: &[(&str, TeamRole)]) {
     let mut t = Team::new(name);
     for (member, role) in members {
@@ -2008,15 +2014,17 @@ async fn runs_and_sync_statuses_show_only_what_the_caller_can_see() {
     let f = fixture().await;
     let (ed, admin) = (token(&f, "ed").await, token(&f, "admin").await);
     let started = "2026-10-27T00:00:00Z";
+    let temperature = captured_registration(&f.instance, TEMPERATURE).await;
+    let pressure = captured_registration(&f.instance, PRESSURE).await;
     let runs = json!([
-        {"run_id": "both", "pipe_ref": null, "started": started, "status": "success",
+        {"run_id": "both", "pipe_ref": null, "started": started, "status": "success", "num_nodes": 2,
          "targets": [pipe_ref(TEMPERATURE), pipe_ref(PRESSURE)]},
-        {"run_id": "both", "pipe_ref": pipe_ref(TEMPERATURE), "started": started, "status": "success"},
+        {"run_id": "both", "pipe_ref": pipe_ref(TEMPERATURE), "registration_id": temperature, "started": started, "status": "success"},
         {"run_id": "both", "pipe_ref": pipe_ref(PRESSURE), "started": started, "status": "success",
-         "message": "synced plugin:ops pressure"},
-        {"run_id": "ops", "pipe_ref": null, "started": started, "status": "success",
+         "registration_id": pressure, "message": "synced plugin:ops pressure"},
+        {"run_id": "ops", "pipe_ref": null, "started": started, "status": "success", "num_nodes": 1,
          "targets": [pipe_ref(PRESSURE)]},
-        {"run_id": "ops", "pipe_ref": pipe_ref(PRESSURE), "started": started, "status": "success"},
+        {"run_id": "ops", "pipe_ref": pipe_ref(PRESSURE), "registration_id": pressure, "started": started, "status": "success"},
     ]);
     let r = call(&f, "POST", &admin, "/engine/runs", Some(runs)).await;
     assert_eq!(r.status, StatusCode::OK, "{}", r.text());
@@ -2077,12 +2085,14 @@ async fn projected_engine_rows_events_and_run_selectors_keep_the_access_boundary
     f.app = meerschaum_server::app(f.state.clone());
     let (ed, admin) = (token(&f, "ed").await, token(&f, "admin").await);
     let started = "2026-10-27T00:00:00Z";
+    let temperature = captured_registration(&f.instance, TEMPERATURE).await;
+    let pressure = captured_registration(&f.instance, PRESSURE).await;
     let records = json!([
-        {"run_id": "review-both", "started": started, "status": "success", "targets": [pipe_ref(TEMPERATURE), pipe_ref(PRESSURE)], "message": "hidden pressure details"},
-        {"run_id": "review-both", "pipe_ref": pipe_ref(TEMPERATURE), "started": started, "status": "success", "message": "visible result"},
-        {"run_id": "review-both", "pipe_ref": pipe_ref(PRESSURE), "started": started, "status": "success", "message": "hidden pressure result"},
-        {"run_id": "review-ops", "started": started, "status": "success", "targets": [pipe_ref(PRESSURE)]},
-        {"run_id": "review-ops", "pipe_ref": pipe_ref(PRESSURE), "started": started, "status": "success", "message": "hidden pressure run"},
+        {"run_id": "review-both", "started": started, "status": "success", "num_nodes": 2, "targets": [pipe_ref(TEMPERATURE), pipe_ref(PRESSURE)], "message": "hidden pressure details"},
+        {"run_id": "review-both", "pipe_ref": pipe_ref(TEMPERATURE), "registration_id": temperature, "started": started, "status": "success", "message": "visible result"},
+        {"run_id": "review-both", "pipe_ref": pipe_ref(PRESSURE), "registration_id": pressure, "started": started, "status": "success", "message": "hidden pressure result"},
+        {"run_id": "review-ops", "started": started, "status": "success", "num_nodes": 1, "targets": [pipe_ref(PRESSURE)]},
+        {"run_id": "review-ops", "pipe_ref": pipe_ref(PRESSURE), "registration_id": pressure, "started": started, "status": "success", "message": "hidden pressure run"},
     ]);
     let r = call(&f, "POST", &admin, "/engine/runs", Some(records)).await;
     assert_eq!(r.status, StatusCode::OK, "{}", r.text());

@@ -6,7 +6,9 @@ use fred::prelude::*;
 use fred::types::Value as FValue;
 use meerschaum_connector::traits::async_trait;
 
-use crate::backend::{BackendError, BackendResult, ScoreBound, ValkeyBackend, WriteOp};
+use crate::backend::{
+    BackendError, BackendResult, RegistrationMove, ScoreBound, ValkeyBackend, WriteOp,
+};
 
 fn bounded_score_command(
     key: &str,
@@ -164,6 +166,35 @@ impl FredBackend {
 
 #[async_trait]
 impl ValkeyBackend for FredBackend {
+    async fn move_registration(&self, op: &RegistrationMove) -> BackendResult<bool> {
+        const SCRIPT: &str = r#"
+if redis.call('GET',KEYS[1]) ~= ARGV[1] or redis.call('GET',KEYS[2]) ~= ARGV[2] then return 0 end
+if redis.call('EXISTS',KEYS[3]) ~= 0 or redis.call('EXISTS',KEYS[4]) ~= 0 then return 0 end
+if not redis.call('ZSCORE',KEYS[5],ARGV[4]) then return 0 end
+redis.call('ZADD',KEYS[5],ARGV[6],ARGV[5])
+redis.call('SET',KEYS[3],ARGV[1])
+redis.call('SET',KEYS[4],ARGV[3])
+redis.call('ZREM',KEYS[5],ARGV[4])
+redis.call('DEL',KEYS[1],KEYS[2])
+return 1
+"#;
+        let args = vec![
+            SCRIPT.into(),
+            "5".into(),
+            op.source.clone(),
+            op.source_parameters.clone(),
+            op.destination.clone(),
+            op.destination_parameters.clone(),
+            op.rows.clone(),
+            op.identity.clone(),
+            op.expected_parameters.clone(),
+            op.parameters.clone(),
+            op.old_member.clone(),
+            op.new_member.clone(),
+            ScoreBound::Value(op.score).to_arg(),
+        ];
+        Ok(to_i64(&self.call("EVAL", args).await?) == 1)
+    }
     async fn ping(&self) -> BackendResult<bool> {
         let v = self.call("PING", vec![]).await?;
         Ok(to_string(v).is_some_and(|s| s == "PONG"))
