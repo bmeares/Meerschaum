@@ -8,7 +8,7 @@ semver-stable surface and keeps the implementation crates (`meerschaum-core`, `-
 
 ```toml
 [dependencies]
-# Use the exact pre-release version (e.g. "5.0.0-rc.14") until 5.0.0 is out: a bare "5" does not match one.
+# Use the exact pre-release version (e.g. "5.0.0-rc.15") until 5.0.0 is out: a bare "5" does not match one.
 meerschaum = { version = "5", default-features = false, features = ["sql", "engine"] }
 ```
 

@@ -41,22 +41,29 @@ ref_py="$VENV/bin/python"
 [ -x "$ref_py" ] || ref_py="$VENV/Scripts/python.exe"
 
 installed_version() {
-  # -I: isolated mode (no cwd, no PYTHON* env vars, no user site) so the repo and ~/.local cannot shadow.
-  (cd / && "$ref_py" -I -c 'import meerschaum; print(meerschaum.__version__)' 2>/dev/null) || true
+  # Read distribution metadata without importing Meerschaum: an inherited root may not exist,
+  # and checking the reference must neither initialize that root nor prompt about it.
+  (cd / && "$ref_py" -I -c 'from importlib.metadata import version; print(version("meerschaum"))' 2>/dev/null) || true
 }
 
 stamp="$VENV/.mrsm-ref-stamp"
 SORTED_GLOB="$REPO/scripts/parity/_mrsm_parity_sorted_glob.py"
-want_stamp="$VERSION|$PY_SPEC|$EXTRAS|$(cksum < "$REQUIREMENTS")|$(cksum < "$SORTED_GLOB")"
+REFERENCE_GUARD="$REPO/scripts/parity/_mrsm_parity_reference.py"
+want_stamp="$VERSION|$PY_SPEC|$EXTRAS|$(cksum < "$REQUIREMENTS")|$(cksum < "$SORTED_GLOB")|$(cksum < "$REFERENCE_GUARD")"
 if [ -z "$force" ] && [ -x "$ref_py" ] && [ "$(installed_version)" = "$VERSION" ] \
   && [ "$(cat "$stamp" 2>/dev/null)" = "$want_stamp" ]; then
   echo "Reference venv ready: $VENV (meerschaum $VERSION)"
   exit 0
 fi
 
-rm -rf "$VENV"
-# --seed: v4 bootstraps its own venvs with `python -m pip`, which a bare uv venv lacks.
-uv venv --seed --python "$PY_SPEC" "$VENV"
+old_environment="$(cut -d '|' -f 1-4 "$stamp" 2>/dev/null || true)"
+want_environment="$VERSION|$PY_SPEC|$EXTRAS|$(cksum < "$REQUIREMENTS")"
+if [ -n "$force" ] || [ ! -x "$ref_py" ] || [ "$(installed_version)" != "$VERSION" ] \
+  || { [ -n "$old_environment" ] && [ "$old_environment" != "$want_environment" ]; }; then
+  rm -rf "$VENV"
+  # --seed: v4 bootstraps its own venvs with `python -m pip`, which a bare uv venv lacks.
+  uv venv --seed --python "$PY_SPEC" "$VENV"
+fi
 ref_py="$VENV/bin/python"
 [ -x "$ref_py" ] || ref_py="$VENV/Scripts/python.exe"
 
@@ -68,6 +75,8 @@ uv pip install --python "$ref_py" "$spec" -r "$REQUIREMENTS"
 site_dir="$(cd / && "$ref_py" -I -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')"
 cp "$SORTED_GLOB" "$site_dir/_mrsm_parity_sorted_glob.py"
 echo "import _mrsm_parity_sorted_glob" > "$site_dir/_mrsm_parity_sorted_glob.pth"
+cp "$REFERENCE_GUARD" "$site_dir/_mrsm_parity_reference.py"
+echo "import _mrsm_parity_reference" > "$site_dir/_mrsm_parity_reference.pth"
 
 got="$(installed_version)"
 if [ "$got" != "$VERSION" ]; then
@@ -75,4 +84,4 @@ if [ "$got" != "$VERSION" ]; then
   exit 1
 fi
 echo "$want_stamp" > "$stamp"
-(cd / && "$ref_py" -I -c 'import meerschaum, sys; print("Reference venv ready:", sys.prefix, "meerschaum", meerschaum.__version__, meerschaum.__file__)')
+(cd / && "$ref_py" -I -c 'import importlib.util, sys; from importlib.metadata import version; print("Reference venv ready:", sys.prefix, "meerschaum", version("meerschaum"), importlib.util.find_spec("meerschaum").origin)')

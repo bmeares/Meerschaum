@@ -8,21 +8,18 @@
 # Guarantees, independent of the ambient interpreter (see the ~/.local gotcha in CLAUDE.md):
 #   - the interpreter is .venv-ref's python, started with -s -E (no user site-packages, no
 #     PYTHONPATH/PYTHONHOME), so neither ~/.local nor PYTHONPATH=$(pwd) can leak in;
-#   - `meerschaum` is imported from .venv-ref and its version is asserted *before* the generator
-#     runs; because it is then cached in sys.modules, a generator that inserts the repo root into
-#     sys.path still gets the reference package;
+#   - the reference package's location and version are checked without importing it, so the
+#     generator sets its scratch configuration before the first import; import finders pin
+#     this process and every reference child to the released package even from the repo root;
 #   - the generator runs as __main__ from the repository root (so repo-relative output paths work)
 #     with its own directory as sys.path[0], exactly like `python GENERATOR.py`.
 #
-# Environment (defaults keep the reference's v4 venvs apart from the working tree's test_root):
-#   MRSM_ROOT_DIR     default: a fresh temporary root per run, removed afterwards (a persistent
-#                     root leaks v4 caches between runs, e.g. the instance-metadata pickle that
-#                     makes `get_tables()` skip building `conn.metadata`)
-#   MRSM_VENVS_DIR    default .venv-ref/mrsm_root/venvs when the root is temporary, so the
-#                     reference's own v4 venvs are built once and stay apart from test_root
-# Every other inherited MRSM_* variable is removed (v4 would read most as connectors), except
+# Every generator gets a fresh root and empty plugins directory, removed afterwards. Ambient
+# MRSM_ROOT_DIR / MRSM_VENVS_DIR belong to the caller's current build and are never reused.
+# Reference dependencies come from .venv-ref, whose versions are pinned by setup_reference.sh;
+# the reference's "mrsm" venv links to it instead of installing a second unpinned dependency set.
+# Every inherited MRSM_* variable is removed (v4 would read most as connectors), except
 # MRSM_VALKEY_FIXTURE_* for gen_valkey.py.
-#   MRSM_PLUGINS_DIR  default tests/plugins
 #   MRSM_REF_VERSION  version to assert (default 4.1.4)
 #   UV_PYTHON         forced to the reference interpreter (v4's `uv venv` calls omit --python)
 # Exported to the generator: MRSM_PARITY_REFERENCE=<version> (lets a generator's own
@@ -54,19 +51,23 @@ fi
 # inherited MRSM_* variable except the harness's own.
 for var in $(compgen -e | grep '^MRSM_' || true); do
   case "$var" in
-    MRSM_ROOT_DIR|MRSM_PLUGINS_DIR|MRSM_VENVS_DIR|MRSM_REF_VERSION|MRSM_VALKEY_FIXTURE_*) ;;
+    MRSM_REF_VERSION|MRSM_VALKEY_FIXTURE_*) ;;
     *) unset "$var" ;;
   esac
 done
 
-if [ -z "${MRSM_ROOT_DIR:-}" ]; then
-  tmp_root="$(mktemp -d "${TMPDIR:-/tmp}/mrsm-parity-root.XXXXXX")"
-  trap 'rm -rf "$tmp_root"' EXIT
-  export MRSM_ROOT_DIR="$tmp_root"
-  export MRSM_VENVS_DIR="${MRSM_VENVS_DIR:-$VENV/mrsm_root/venvs}"
-  mkdir -p "$MRSM_VENVS_DIR"
+unset TMUX TMUX_PANE PYTHONPATH PYTHONHOME VIRTUAL_ENV NO_COLOR FORCE_COLOR
+export PYTHONNOUSERSITE=1 PYTHONSAFEPATH=1
+tmp_root="$(mktemp -d "${TMPDIR:-/tmp}/mrsm-parity-root.XXXXXX")"
+trap 'rm -rf "$tmp_root"' EXIT
+export MRSM_ROOT_DIR="$tmp_root"
+export MRSM_PLUGINS_DIR="$tmp_root/plugins"
+export MRSM_VENVS_DIR="$VENV/parity_venvs"
+mkdir -p "$MRSM_PLUGINS_DIR" "$MRSM_VENVS_DIR"
+if [ ! -e "$MRSM_VENVS_DIR/mrsm" ]; then
+  ln -s "$VENV" "$MRSM_VENVS_DIR/mrsm"
 fi
-export MRSM_PLUGINS_DIR="${MRSM_PLUGINS_DIR:-$REPO/tests/plugins}"
+export PATH="$(dirname "$ref_py"):$PATH"
 # Generators that guard against a stale import (e.g. asserting meerschaum comes from the repo)
 # should accept the reference when this is set; its value is the reference version.
 export MRSM_PARITY_REFERENCE="$VERSION"
